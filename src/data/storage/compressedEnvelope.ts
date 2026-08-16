@@ -141,10 +141,20 @@ export class CompressedReadError extends Error {
   }
 }
 
-/** Result of the bounded head probe — the only thing the CAS path needs. */
+/**
+ * Result of the bounded head probe — the only thing the CAS path needs.
+ *
+ * `corrupt` is a file whose head line self-identifies as this format but which
+ * is too short to hold even the start of a gzip member: the torn-write shape
+ * (see {@link classifyHeadWindow}). Its head is still returned, because the head
+ * line is intact text and revision bookkeeping legitimately reads it; what must
+ * never happen is the file being treated as a *plain* file, whose "payload"
+ * would then be the head metadata object itself.
+ */
 export type FormatProbe =
   | { kind: "missing" }
   | { kind: "compressed"; head: CompressedHead; bodyStart: number; size: number }
+  | { kind: "corrupt"; head: CompressedHead; bodyStart: number; size: number }
   | { kind: "plain"; size: number };
 
 /** Dual-read metadata result. `plain` is a legacy uncompressed workspace file. */
@@ -225,6 +235,13 @@ function createChunkEncoder(): {
 type BinaryWritableFileStream = {
   write: (data: Uint8Array<ArrayBufferLike>) => Promise<void>;
   close: () => Promise<void>;
+  /**
+   * Optional exactly like `createWritable` itself: the real
+   * `FileSystemWritableFileStream` has it, this repo's `WritableFileStreamLike`
+   * does not declare it, and hand-written test doubles rarely implement it.
+   * Always guarded before use.
+   */
+  abort?: (reason?: unknown) => Promise<void>;
 };
 
 /**
@@ -326,10 +343,17 @@ export async function writeCompressedFile(
     }
     await writable.close();
   } catch (error) {
+    // `close()` COMMITS whatever landed — on the error path that is precisely
+    // how a head-only file gets published. `abort()` discards the swap file
+    // instead, so a write that dies between the head and the body leaves the
+    // previous contents (or nothing) rather than a torn frame. It is optional on
+    // the writable, so fall back to closing when it is absent: the reader now
+    // classifies the resulting shape as corrupt either way.
     try {
-      await writable.close();
+      if (typeof writable.abort === "function") await writable.abort(error);
+      else await writable.close();
     } catch {
-      // Best-effort: never mask the original failure with a close error.
+      // Best-effort: never mask the original failure with a teardown error.
     }
     throw error;
   }
@@ -347,7 +371,21 @@ export async function writeCompressedFile(
 
 type HeadClassification =
   | { kind: "compressed"; head: CompressedHead; bodyStart: number }
+  | { kind: "corrupt"; head: CompressedHead; bodyStart: number }
   | { kind: "plain" };
+
+/** The head line as a parsed object carrying this format's marker, or null. */
+function parseHeadLine(window: Uint8Array, newlineAt: number): CompressedHead | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder("utf-8").decode(window.subarray(0, newlineAt)));
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  if ((parsed as { format?: unknown }).format !== COMPRESSED_FORMAT_ID) return null;
+  return parsed as CompressedHead;
+}
 
 /**
  * Decides whether a file is in this format from its first {@link HEAD_PROBE_BYTES}
@@ -380,6 +418,24 @@ type HeadClassification =
  * The converse (a compressed file read as plain) needs its head line or its
  * first three body bytes to be damaged; the file is then reported as
  * plain-and-corrupt rather than silently yielding a partial body.
+ *
+ * ── The one case that is NOT "plain" ────────────────────────────────────────
+ *
+ * A file too short to hold the three magic bytes cannot fail gate 3 honestly —
+ * there is nothing there to compare. If its head line nonetheless parses AND
+ * carries this format's marker, the file is a torn write, not a plain file:
+ * {@link writeCompressedFile} emits the head as its own `write()` before the
+ * first body byte exists, so a failure in between leaves exactly this shape.
+ * Calling it plain made a head-only file read back as a *successful* payload —
+ * the head metadata object itself, `.bak` ladder skipped — so it is classified
+ * `corrupt` instead. (Bodies of 1–2 bytes reach the same verdict here rather
+ * than dying later in `JSON.parse`; a 3-byte body has always failed at inflate.)
+ *
+ * A genuine plain file cannot be caught by this: it would have to consist of a
+ * first line that parses as a JSON object carrying `"format":"xqapz-gzip-1"`
+ * and then end within two bytes. No writer in this repo emits that key at all —
+ * `wrap()` produces `metadata`/`data`, and a pretty-printed envelope's first
+ * line is the single character `{`, which does not parse.
  */
 export function classifyHeadWindow(
   window: Uint8Array,
@@ -389,23 +445,16 @@ export function classifyHeadWindow(
   const newlineAt = window.indexOf(NEWLINE);
   if (newlineAt < 0) return { kind: "plain" };
   const bodyStart = newlineAt + 1;
-  if (fileSize < bodyStart + GZIP_MAGIC.length) return { kind: "plain" };
+  if (fileSize < bodyStart + GZIP_MAGIC.length) {
+    const head = parseHeadLine(window, newlineAt);
+    return head === null ? { kind: "plain" } : { kind: "corrupt", head, bodyStart };
+  }
   for (let i = 0; i < GZIP_MAGIC.length; i += 1) {
     if (window[bodyStart + i] !== GZIP_MAGIC[i]) return { kind: "plain" };
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(new TextDecoder("utf-8").decode(window.subarray(0, newlineAt)));
-  } catch {
-    return { kind: "plain" };
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return { kind: "plain" };
-  }
-  if ((parsed as { format?: unknown }).format !== COMPRESSED_FORMAT_ID) {
-    return { kind: "plain" };
-  }
-  return { kind: "compressed", head: parsed as CompressedHead, bodyStart };
+  const head = parseHeadLine(window, newlineAt);
+  if (head === null) return { kind: "plain" };
+  return { kind: "compressed", head, bodyStart };
 }
 
 // ── Read ────────────────────────────────────────────────────────────────────
@@ -445,21 +494,26 @@ export async function probeFileFormat(
   if (file === null) return { kind: "missing" };
   const window = await readWindow(file, 0, HEAD_PROBE_BYTES);
   const classified = classifyHeadWindow(window, file.size);
-  return classified.kind === "compressed"
-    ? { ...classified, size: file.size }
-    : { kind: "plain", size: file.size };
+  return classified.kind === "plain"
+    ? { kind: "plain", size: file.size }
+    : { ...classified, size: file.size };
 }
 
 /**
  * Head line of a compressed file, or null when the file is missing or plain.
  * The CAS path's `revision` / `contentHash` / `_writeToken` read.
+ *
+ * A torn (`corrupt`) file still has an intact head line, and this is a metadata
+ * read, so it is returned — exactly as it already is for a file whose gzip
+ * member is truncated further in. Deciding whether the BODY is usable is
+ * `isRecoverableCompressedFile`'s job, never this one's.
  */
 export async function readCompressedHead(
   dir: DirectoryHandleLike,
   fileName: string
 ): Promise<CompressedHead | null> {
   const probe = await probeFileFormat(dir, fileName);
-  return probe.kind === "compressed" ? probe.head : null;
+  return probe.kind === "compressed" || probe.kind === "corrupt" ? probe.head : null;
 }
 
 function extractBalancedObject(text: string, start: number): string | null {
@@ -526,7 +580,10 @@ export async function readEnvelopeMetadata(
   if (file === null) return { kind: "missing" };
   const head = await readWindow(file, 0, HEAD_PROBE_BYTES);
   const classified = classifyHeadWindow(head, file.size);
-  if (classified.kind === "compressed") {
+  if (classified.kind !== "plain") {
+    // Includes the torn (`corrupt`) shape: its head line is intact and this is a
+    // metadata read, so revision bookkeeping stays continuous. A caller that
+    // needs to know the BODY is intact must ask separately.
     return { kind: "compressed", metadata: classified.head };
   }
   const headWide =
@@ -620,6 +677,13 @@ export async function streamFileText(
   if (file === null) return { kind: "missing" };
   const window = await readWindow(file, 0, HEAD_PROBE_BYTES);
   const classified = classifyHeadWindow(window, file.size);
+  if (classified.kind === "corrupt") {
+    // Self-identified as this format but with no body to inflate. Same verdict
+    // as a truncated member, reached without handing back a single chunk.
+    throw new CompressedReadError(
+      `Compressed workspace file ${fileName} ends at its head line: the gzip body is missing.`
+    );
+  }
   if (classified.kind === "compressed") {
     await streamCompressedBody(file, classified.bodyStart, onChunk);
     return { kind: "compressed", head: classified.head };

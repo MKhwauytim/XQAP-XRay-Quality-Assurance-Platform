@@ -282,6 +282,147 @@ describe("safety ladder", () => {
     expect(await exists(base, "population.final.json.tmp")).toBe(false);
   });
 
+  /**
+   * Regression (P1). `writeCompressedFile` writes the head line in its own
+   * `write()` call before any body byte exists, so a write that dies in between
+   * leaves a file that is exactly its head line. That file must never be served
+   * as a successful read — the head is a JSON object, and treating it as "plain"
+   * hands the METADATA to the caller as if it were the payload, silently
+   * bypassing the `.bak` ladder. Bodies of 1–3 bytes pin the boundary.
+   */
+  it("treats a compressed file truncated to its head line as corrupt, at every body length 0–3", async () => {
+    for (const bodyBytes of [0, 1, 2, 3]) {
+      const dir = createMemoryDirectory();
+      await safeWriteJson(dir, "population.final.json", population(4000));
+      const whole = await fileBytes(dir, "population.final.json");
+      // Strip the recovery rungs so the LIVE read alone is what is observed.
+      await dir.removeEntry?.("population.final.json.bak").catch(() => {});
+      await dir.removeEntry?.("population.final.json.tmp").catch(() => {});
+      const headEnd = whole.indexOf(0x0a) + 1;
+      await clobber(dir, "population.final.json", whole.subarray(0, headEnd + bodyBytes));
+
+      const read = await safeReadJson(dir, "population.final.json");
+      expect(read, `body=${bodyBytes}`).toEqual({ ok: false, reason: "corrupt" });
+    }
+  });
+
+  it("recovers a head-only compressed file from its .bak instead of serving the head metadata", async () => {
+    const dir = createMemoryDirectory();
+    const first = population(4000);
+    await safeWriteJson(dir, "population.final.json", first);
+    await safeWriteJson(dir, "population.final.json", population(2500));
+
+    const whole = await fileBytes(dir, "population.final.json");
+    await clobber(dir, "population.final.json", whole.subarray(0, whole.indexOf(0x0a) + 1));
+
+    const read = await safeReadJson<typeof first>(dir, "population.final.json");
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect(read.recoveredFromBak).toBe(true);
+    expect(JSON.stringify(read.value)).toBe(JSON.stringify(first));
+  });
+
+  /**
+   * Regression (P3a). The `.bak` snapshot is the last recoverable revision. The
+   * compressed write path decided whether one was worth taking from the head
+   * line's FRAMING alone, so a live file whose gzip body was damaged still
+   * counted as "current" and was byte-copied over a perfectly good `.bak`. The
+   * plain path has always refused (it parses the whole file first).
+   */
+  it.each([
+    // The next save is itself compressed (writeCompressedJson's own snapshot) …
+    ["compressed", 4000],
+    // … or has dropped below the size gate and goes out as plain JSON, whose
+    // snapshot decision recognized the compressed live file the same
+    // framing-only way.
+    ["plain", COMPRESS_MIN_ROWS - 200],
+  ] as const)(
+    "does not overwrite a good .bak with a damaged compressed live file (next save: %s)",
+    async (_label, nextRows) => {
+      const dir = createMemoryDirectory();
+      const first = population(4000);
+      await safeWriteJson(dir, "population.final.json", first);
+      await safeWriteJson(dir, "population.final.json", population(2500)); // .bak = revision 1
+
+      // Flip one byte well past the 3-byte gzip magic: the framing still reads
+      // as compressed, but the member no longer inflates.
+      const live = await fileBytes(dir, "population.final.json");
+      const damaged = live.slice();
+      const headEnd = damaged.indexOf(0x0a) + 1;
+      damaged[headEnd + 12] ^= 0xff;
+      await clobber(dir, "population.final.json", damaged);
+      expect(await safeReadJson(dir, "population.final.json")).toMatchObject({
+        recoveredFromBak: true, // the .bak is the ONLY readable copy right now
+      });
+
+      await safeWriteJson(dir, "population.final.json", population(nextRows));
+
+      // The last good revision must still be recoverable from the snapshot.
+      const bak = await safeReadJson<typeof first>(dir, "population.final.json.bak");
+      expect(bak.ok).toBe(true);
+      expect(bak.ok && JSON.stringify(bak.value)).toBe(JSON.stringify(first));
+    }
+  );
+
+  /**
+   * Regression (P3b). A bare, un-enveloped JSON file is a shape the reader
+   * explicitly tolerates (`unwrap` passes it through). `readEnvelopeMetadata`
+   * finds no metadata in it, which the compressed path read as "nothing to back
+   * up" — so the first compressed save over such a file took no `.bak` at all,
+   * and a failed commit destroyed the only copy.
+   */
+  it("snapshots a bare legacy un-enveloped file before the first compressed save over it", async () => {
+    const base = createMemoryDirectory();
+    const legacy = { ...population(4000), tag: "legacy" };
+    await clobber(
+      base,
+      "population.final.json",
+      new TextEncoder().encode(JSON.stringify(legacy))
+    );
+
+    // Every write to the live name after staging lands corrupted, so the commit
+    // and the promotion retry both fail and only a `.bak` can save the payload.
+    let stagedOnce = false;
+    const flaky: DirectoryHandleLike = {
+      ...base,
+      getFileHandle: async (name, options) => {
+        const handle = await base.getFileHandle(name, options);
+        if (name !== "population.final.json" || !handle.createWritable) return handle;
+        if (!stagedOnce) {
+          stagedOnce = true;
+          return handle;
+        }
+        return {
+          ...handle,
+          createWritable: async () => {
+            const writable = await handle.createWritable!();
+            const wide = writable as unknown as { write: (d: Uint8Array) => Promise<void> };
+            let first = true;
+            return {
+              write: async (data: Uint8Array) => {
+                const bytes = first ? data.slice(0, Math.max(0, data.byteLength - 1)) : data;
+                first = false;
+                await wide.write(bytes);
+              },
+              close: () => writable.close(),
+            } as unknown as Awaited<ReturnType<NonNullable<typeof handle.createWritable>>>;
+          },
+        };
+      },
+    };
+
+    await expect(
+      safeWriteJson(flaky, "population.final.json", population(2500))
+    ).rejects.toThrow();
+
+    // The legacy payload survives: rolled back into place, or at worst still
+    // readable through the snapshot ladder.
+    const read = await safeReadJson<typeof legacy>(base, "population.final.json");
+    expect(read.ok).toBe(true);
+    expect(read.ok && read.value.tag).toBe("legacy");
+    expect(read.ok && JSON.stringify(read.value)).toBe(JSON.stringify(legacy));
+  });
+
   it("copies a compressed file byte for byte", async () => {
     const dir = createMemoryDirectory();
     await safeWriteJson(dir, "population.final.json", population(4000));

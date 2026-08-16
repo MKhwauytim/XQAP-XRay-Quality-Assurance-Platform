@@ -231,6 +231,13 @@ async function readContent(
         await file.slice(0, Math.min(HEAD_PROBE_BYTES, file.size)).arrayBuffer()
       );
       const classified = classifyHeadWindow(window, file.size);
+      if (classified.kind === "corrupt") {
+        // A file that is exactly its own head line (a write torn between the
+        // head and the body). Reading it as plain would parse the head METADATA
+        // and serve it as the payload — a successful-looking read that skips the
+        // `.bak` ladder entirely.
+        return { kind: "damaged" };
+      }
       if (classified.kind === "compressed") {
         const parts: string[] = [];
         try {
@@ -283,9 +290,13 @@ async function classifyFile(
         await file.slice(0, Math.min(HEAD_PROBE_BYTES, file.size)).arrayBuffer()
       );
       const classified = classifyHeadWindow(window, file.size);
-      return classified.kind === "compressed"
-        ? { kind: "compressed", head: classified.head }
-        : { kind: "plain" };
+      // A torn (`corrupt`) file is still framed as compressed — it must be
+      // copied as bytes and have its revision read from the head line, never be
+      // handled as text. Whether its body is usable is a separate question,
+      // answered by `isRecoverableCompressedFile` at the two places that care.
+      return classified.kind === "plain"
+        ? { kind: "plain" }
+        : { kind: "compressed", head: classified.head };
     } catch (error) {
       if (isNotReadableError(error) && unreadableAttempts < NOT_READABLE_RETRY_DELAYS_MS.length) {
         await wait(NOT_READABLE_RETRY_DELAYS_MS[unreadableAttempts]!);
@@ -1237,6 +1248,51 @@ async function readEnvelopeMetadataTolerant(
 }
 
 /**
+ * Is there a live file worth snapshotting to `.bak` before this write?
+ *
+ * The plain path has always answered by PARSING the whole current file
+ * (`parseValidJson`), so it refuses to snapshot something it could not read
+ * back. The compressed path used to answer from the head line's framing alone,
+ * which was wrong in both directions:
+ *
+ *  - a live compressed file whose gzip member is damaged looked "current" and
+ *    was byte-copied over a perfectly good `.bak`, destroying the last
+ *    recoverable revision (the very thing a rollback would have used);
+ *  - a bare, un-enveloped legacy JSON file — a shape the reader deliberately
+ *    tolerates — carries no `"metadata"` block, so it looked like "nothing to
+ *    back up" and a failed commit destroyed the only copy.
+ *
+ * Both are answered here by asking whether the current file is actually
+ * RECOVERABLE. The costs are real and deliberate: one full inflate per save of a
+ * compressed file (no allocation — the body is discarded chunk by chunk), and,
+ * for the bare-legacy branch only, one full read of the plain file on the FIRST
+ * compressed save over it — the same read the plain path performs on every save,
+ * paid here once per file as it migrates format.
+ */
+async function hasRecoverableCurrentFile(
+  dir: DirectoryHandleLike,
+  fileName: string,
+  existing: Awaited<ReturnType<typeof readEnvelopeMetadata>>
+): Promise<boolean> {
+  if (existing.kind === "missing") return false;
+  if (existing.kind === "compressed") {
+    // Framing said compressed; only a body that inflates end to end (gzip's
+    // CRC32 and ISIZE included) makes this file a usable rollback source.
+    return isRecoverableCompressedFile(dir, fileName);
+  }
+  if (existing.metadata !== null) return true;
+  // A plain file with no metadata block in either bounded window. It still
+  // exists, so before concluding "nothing to back up" fall through to exactly
+  // what the plain path checks: does the whole file parse as valid JSON.
+  const currentRead = await readTextTolerant(dir, fileName);
+  if (currentRead.kind === "text") return parseValidJson(currentRead.text) !== null;
+  if (currentRead.kind === "oversized") {
+    return (await readOversizedEnvelopeMetadata(dir, fileName)) !== null;
+  }
+  return false;
+}
+
+/**
  * The write half of the compressed path. Same ladder as the streamed plain path
  * — `.bak` snapshot → stage `.tmp` → verify byte-exact → commit → re-verify →
  * rollback, else promote the verified `.tmp` — with two differences:
@@ -1265,9 +1321,12 @@ async function writeCompressedJson<T>(
       : existing.kind === "plain"
         ? existing.metadata
         : null;
-  const hasCurrent = existingMetadata !== null;
   const previousRevision =
     typeof existingMetadata?.revision === "number" ? existingMetadata.revision : 0;
+  // Whether the live file is worth snapshotting is a question about its
+  // PAYLOAD, not about its framing — the `.bak` is the last recoverable
+  // revision, and copying an unrecoverable file over it destroys that.
+  const hasCurrent = await hasRecoverableCurrentFile(dir, fileName, existing);
 
   const data = isEnvelope(value) ? value.data : value;
   const head: CompressedHeadInput = isEnvelope(value)
@@ -1423,8 +1482,15 @@ export async function safeWriteJson<T>(
       parsedCurrent === null && oversizedMetadata === null
         ? compressedHeadFromText(current)
         : null;
+    // Recognizing the head line proves the FORMAT, not that the file is worth
+    // keeping. The `.bak` is the last recoverable revision, so a compressed live
+    // file only earns a snapshot once its body inflates end to end — the same
+    // standard `parseValidJson` applies to a plain one.
     const hasCurrent =
-      parsedCurrent !== null || oversizedMetadata !== null || currentCompressedHead !== null;
+      parsedCurrent !== null ||
+      oversizedMetadata !== null ||
+      (currentCompressedHead !== null &&
+        (await isRecoverableCompressedFile(dir, fileName)));
     const previousRevision =
       parsedCurrent &&
       isEnvelope(parsedCurrent) &&
@@ -1644,7 +1710,10 @@ export async function safeWriteJsonText(
     const currentCompressedHead = compressedHeadFromText(current);
     const hasCurrent =
       parseValidJson(current) !== null ||
-      currentCompressedHead !== null ||
+      // Same standard as everywhere else: a compressed live file is a rollback
+      // source only if its body actually inflates (see safeWriteJson above).
+      (currentCompressedHead !== null &&
+        (await isRecoverableCompressedFile(dir, fileName))) ||
       (currentRead.kind === "oversized" &&
         (await readOversizedEnvelopeMetadata(dir, fileName)) !== null);
     if (hasCurrent) {

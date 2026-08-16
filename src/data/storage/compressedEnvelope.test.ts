@@ -350,13 +350,16 @@ describe("format detection", () => {
     const good = withMagic(JSON.stringify({ ...META, format: COMPRESSED_FORMAT_ID }));
     expect(classifyHeadWindow(good, good.length).kind).toBe("compressed");
 
-    // Empty file, no leading brace, no newline, truncated body, bad JSON,
-    // JSON array, wrong format value.
+    // Empty file, no leading brace, no newline, bad JSON, JSON array, wrong
+    // format value.
     expect(classifyHeadWindow(new Uint8Array(0), 0).kind).toBe("plain");
     expect(classifyHeadWindow(enc('[1,2]\n'), 8).kind).toBe("plain");
     expect(classifyHeadWindow(enc("{no newline here"), 16).kind).toBe("plain");
+    // A body too short to hold the magic, under a head line that still carries
+    // the marker: a torn write, NOT a plain file. Classifying it plain is what
+    // made a head-only file read back as its own metadata object.
     expect(classifyHeadWindow(good.subarray(0, good.length - 1), good.length - 1).kind).toBe(
-      "plain"
+      "corrupt"
     );
     expect(classifyHeadWindow(withMagic("{not json"), 64).kind).toBe("plain");
     expect(classifyHeadWindow(withMagic(JSON.stringify({ format: "other" })), 64).kind).toBe(
@@ -375,6 +378,8 @@ describe("format detection", () => {
 /* ── corruption ──────────────────────────────────────────────────────────── */
 
 describe("corruption detection", () => {
+  /** RFC 1952 magic + CM — the three bytes gate 3 compares. */
+  const GZIP_MAGIC_BYTES = 3;
   const body = JSON.stringify({
     rows: Array.from({ length: 4000 }, (_, i) => ({ i, name: `منفذ ${i}` })),
   });
@@ -436,6 +441,46 @@ describe("corruption detection", () => {
     await expect(readFileText(dir, "truncated2.json")).rejects.toBeInstanceOf(
       CompressedReadError
     );
+  });
+
+  /**
+   * Regression: the torn-write shape. `writeCompressedFile` writes the head line
+   * as its own `write()` call before the first body byte exists, so a failure
+   * between the two leaves a file that is *exactly* its head line. Such a file
+   * must be corrupt at every entry point — never "plain", which would hand the
+   * head metadata object to `JSON.parse` and serve it as the payload.
+   *
+   * Bodies of 1–3 bytes are the same tear caught a moment later; they are pinned
+   * here alongside 0 so the boundary cannot silently move.
+   */
+  it("classifies a file truncated to its own head line as corrupt, not plain", async () => {
+    const written = await writeCompressedFile(dir, "headonly.json", META, [body]);
+    const file = path.join(root, "headonly.json");
+    const whole = fs.readFileSync(file);
+
+    for (const bodyBytes of [0, 1, 2, 3]) {
+      fs.writeFileSync(file, whole.subarray(0, written.headBytes + bodyBytes));
+      const probe = await probeFileFormat(dir, "headonly.json");
+      // 0–2 bytes cannot even be compared against the magic, so the head line's
+      // own marker is what identifies them: `corrupt`. At 3 the magic is intact
+      // and the file classifies `compressed` — its emptiness is then caught by
+      // the inflate. Neither may EVER be `plain`, which is what served the head
+      // metadata as a payload.
+      expect(probe.kind, `body=${bodyBytes} must not classify as plain`).toBe(
+        bodyBytes < GZIP_MAGIC_BYTES ? "corrupt" : "compressed"
+      );
+      await expect(
+        readFileText(dir, "headonly.json"),
+        `body=${bodyBytes} must not yield text`
+      ).rejects.toBeInstanceOf(CompressedReadError);
+    }
+
+    // The healthy file is unaffected — the boundary is "shorter than head + the
+    // three gzip magic bytes", nothing wider.
+    fs.writeFileSync(file, whole);
+    expect((await probeFileFormat(dir, "headonly.json")).kind).toBe("compressed");
+    const healthy = await readFileText(dir, "headonly.json");
+    expect(healthy.kind === "compressed" && healthy.bodyText).toBe(body);
   });
 });
 
