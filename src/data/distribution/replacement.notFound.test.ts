@@ -167,8 +167,14 @@ describe("executeReplacement on a flaky network share", () => {
     // catch-all, which is what got reported from the field). It now classifies
     // the throw, so this NotFoundError arrives as its own Arabic sentence and
     // its own code. Asserting the specific pair is the stronger check.
-    expect(result.error).toContain(getLabels().err_io_027_not_found);
-    expect(result.error).toContain("XQ-IO-027");
+    // Narrower still than XQ-IO-027: after the retry ladder is exhausted the
+    // directory is PROBED, and here it is reachable and writable — so this is a
+    // share that lost sight of one entry, and "retry shortly" is correct advice.
+    // Had the probe found the directory itself gone, the user would instead be
+    // told to re-pick the workspace folder (XQ-IO-030), because retrying could
+    // never work. Same DOMException, opposite remedies.
+    expect(result.error).toContain(getLabels().err_io_031_share_lost_entry);
+    expect(result.error).toContain("XQ-IO-031");
     expect(result.error).not.toContain("XQ-IO-028");
     // The whole point, unchanged: no untranslated Chromium/internal wording
     // reaches the UI. Adding the code must not smuggle the raw detail in with it.

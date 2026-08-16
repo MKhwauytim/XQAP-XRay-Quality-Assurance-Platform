@@ -1,5 +1,8 @@
 import type { DirectoryHandleLike } from "./fileSystemAccess";
 import { logError } from "./errorLogger";
+// Safe direction: errorCodes.ts imports only labelsStore + errorLogger, so it
+// cannot import back into this module and no cycle is possible.
+import { tagError, type ErrorCode } from "./errorCodes";
 
 /**
  * Transient File System Access failures, and the one distinction that matters
@@ -110,9 +113,36 @@ export async function classifyNotFound(dir: DirectoryHandleLike): Promise<NotFou
   }
 }
 
+/** The user-facing code implied by each probed cause. */
+const CAUSE_CODE: Readonly<Record<NotFoundCause, ErrorCode | null>> = {
+  // Retrying is futile — nothing on this handle will ever resolve again.
+  "directory-unreachable": "XQ-IO-030",
+  // The share lost sight of one entry; the action is worth repeating.
+  "directory-writable": "XQ-IO-031",
+  "permission-denied": "XQ-IO-017",
+  // No verdict: leave it untagged so `classifyFileSystemError` supplies the
+  // plain XQ-IO-027 rather than asserting a cause we did not establish.
+  unknown: null,
+};
+
 /**
  * Records an exhausted-retry NotFoundError with enough context to tell a
- * share flake from a stale workspace handle on the next report.
+ * share flake from a stale workspace handle on the next report — AND tags the
+ * error with the code that verdict implies, so the user is told which one it
+ * was instead of a bare "file not found".
+ *
+ * The classification already existed and was already correct; it just never
+ * left the log. That mattered because the two causes need opposite responses:
+ * `directory-writable` means "try again", `directory-unreachable` means "trying
+ * again cannot work — re-pick the workspace folder". Showing the same sentence
+ * for both makes the advice useless in one case and wrong in the other.
+ *
+ * Tagging (rather than wrapping or rethrowing) is deliberate and required here:
+ * callers all over the data layer branch on `error.name === "NotFoundError"`
+ * and on `isNotFoundError`, and every one of those verdicts must survive
+ * untouched. `tagError` mutates in place and returns the same object, so
+ * identity, name, message, stack and cause are all preserved — see its own
+ * doc comment. This adds a channel; it changes no existing one.
  */
 export async function logExhaustedNotFound(
   context: string,
@@ -120,9 +150,11 @@ export async function logExhaustedNotFound(
   fileName: string,
   attempts: number,
   error: unknown
-): Promise<void> {
+): Promise<NotFoundCause> {
   const cause = await classifyNotFound(dir);
   const detail = error instanceof Error ? error.message : String(error);
+  const code = CAUSE_CODE[cause];
+  if (code) tagError(error, code);
   logError(
     context,
     new Error(
@@ -130,6 +162,7 @@ export async function logExhaustedNotFound(
         `(cause=${cause}): ${detail}`
     )
   );
+  return cause;
 }
 
 /**

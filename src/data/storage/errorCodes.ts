@@ -296,6 +296,21 @@ export const ERROR_CODES = {
     meaning: "readOptionalJson: the file exists but could not be read, so no empty default was substituted",
     labelKey: "err_io_029_unreadable_not_absent",
   },
+  // 030/031 split what XQ-IO-027 could not: a NotFoundError that survived the
+  // whole retry ladder has two causes with OPPOSITE remedies, and
+  // `classifyNotFound` already tells them apart by probing the directory. Until
+  // now that verdict went only to the log, so the user was told "file not found"
+  // either way — useless advice in one case and actively wrong in the other.
+  "XQ-IO-030": {
+    meaning:
+      "NotFound persisted after every retry AND the containing directory no longer resolves — the workspace folder was moved, renamed or re-created since the handle was restored; retrying cannot help, the user must re-select the workspace",
+    labelKey: "err_io_030_workspace_unreachable",
+  },
+  "XQ-IO-031": {
+    meaning:
+      "NotFound persisted after every retry but the containing directory is reachable and writable — a genuine transient share flake, so retrying the action is the right advice",
+    labelKey: "err_io_031_share_lost_entry",
+  },
 
   // ── AUTH: login / session / permissions ──────────────────────────────────
   "XQ-AUTH-001": {
