@@ -126,6 +126,35 @@ describe("user-management permission sections", () => {
     expect(screen.getByRole("button", { name: "ضيف: ew/xray-referrals - عرض فقط" })).toBeEnabled();
   });
 
+  it("cascade-blocks a feature toggle when the parent page is granted only 'view', not just 'none'", () => {
+    // getMutationCapability requires the parent page's access to be exactly "edit"
+    // (view-only pages can never authorize a mutation), so a feature toggle left
+    // enabled for a "view" page is just as inert as one left enabled for "none".
+    // Grant every non-admin role "edit" on population except employee, who gets
+    // "view" -- the one case the old `=== "none"` comparison missed.
+    const permissions = createDefaultPermissions().map((permission) => {
+      if (permission.tabId !== "population") return permission;
+      if (permission.role === "employee") return { ...permission, access: "view" as const };
+      if (permission.role === "admin") return permission;
+      return { ...permission, access: "edit" as const };
+    });
+    render(
+      <FeaturePermissionsSection
+        permissions={permissions}
+        featurePermissions={createDefaultFeaturePermissions()}
+        featureGroup="population"
+        canEdit
+        onGroupChange={vi.fn()}
+        onUpdate={vi.fn()}
+      />
+    );
+
+    const cascadeToggles = screen.getAllByTitle("يتطلب تفعيل صلاحية الصفحة أولاً");
+    expect(cascadeToggles.length).toBeGreaterThan(0);
+    const checkbox = cascadeToggles[0].querySelector("input");
+    expect(checkbox).toBeDisabled();
+  });
+
   it("marks settings-backed features as system-restricted for roles the settings page excludes", () => {
     render(
       <FeaturePermissionsSection
@@ -138,13 +167,13 @@ describe("user-management permission sections", () => {
       />
     );
 
-    // view-error-log, edit-interface-labels and settings.syncInterval live on `settings`
-    // (guest + admin only),
-    // so employee/supervisor/manager get the permanent notice -- not the recoverable
-    // "enable the page first" hint they used to get.
+    // view-error-log, edit-interface-labels, settings.syncInterval, and
+    // settings.adminAccount (audit finding 13) all live on `settings` (guest + admin
+    // only), so employee/supervisor/manager get the permanent notice -- not the
+    // recoverable "enable the page first" hint they used to get.
     const notices = screen.getAllByText(SYSTEM_RESTRICTED_LABEL);
-    // 3 admin-only user-management features x 4 roles + 3 settings features x 3 roles.
-    expect(notices).toHaveLength(21);
+    // 3 admin-only user-management features x 4 roles + 4 settings features x 3 roles.
+    expect(notices).toHaveLength(24);
     // guest keeps a real toggle for the settings features -- the ceiling allows it.
     expect(screen.getAllByRole("checkbox").length).toBeGreaterThan(0);
   });

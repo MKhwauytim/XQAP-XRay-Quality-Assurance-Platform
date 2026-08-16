@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Check, MessageCircle, X } from "lucide-react";
 import { readSession } from "../../auth/authSession";
 import type { AuthRole } from "../../auth/authTypes";
@@ -13,13 +13,22 @@ import { useWorkspace } from "../../data/workspace/useWorkspace";
 import Pagination from "../Pagination/Pagination";
 import { clampPage, pageSlice } from "../../utils/paginationUtils";
 import { getLabels } from "../../data/labels/labelsStore";
+import { useLabels, type Labels } from "../../data/labels/useLabels";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import "./FeedbackWidget.css";
 
-const CATEGORY_LABELS: Record<FeedbackCategory, string> = {
-  suggestion: getLabels().fb_category_suggestion,
-  issue: getLabels().fb_category_issue,
-  inquiry: getLabels().fb_category_inquiry,
-};
+// Finding 16: this used to be a module-scope constant, evaluated once via
+// `getLabels()` at import time and then frozen for the lifetime of the tab —
+// an admin's Settings-tab label override could never reach it, unlike every
+// other string in this file (all read fresh via `getLabels()` inside render).
+// Recomputed per-render from `useLabels()` (below, in both FeedbackWidget and
+// MessageCard) so an override is picked up immediately, same as the rest of
+// this file's strings.
+function categoryLabel(labels: Labels, category: FeedbackCategory): string {
+  if (category === "issue") return labels.fb_category_issue;
+  if (category === "inquiry") return labels.fb_category_inquiry;
+  return labels.fb_category_suggestion;
+}
 
 const CAN_MANAGE: AuthRole[] = ["manager", "admin"];
 
@@ -35,6 +44,7 @@ function formatTime(iso: string): string {
 export function FeedbackWidget() {
   const { directoryHandle } = useWorkspace();
   const session = readSession();
+  const labels = useLabels();
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<FeedbackMessage[]>([]);
   const [loading, setLoading] = useState(false);
@@ -55,7 +65,13 @@ export function FeedbackWidget() {
   const [replyTexts, setReplyTexts] = useState<Record<string, string>>({});
   const [replying, setReplying] = useState<string | null>(null);
 
-  const panelRef = useRef<HTMLDivElement>(null);
+  // Finding 11: the floating feedback panel was the only overlay surface (of
+  // ~20 in the app) with no focus trap and no Escape-to-close — mirrors
+  // GlobalMonthSelector's popoverFocusTrapRef call site exactly.
+  const panelRef = useFocusTrap<HTMLDivElement>({
+    onEscape: () => setOpen(false),
+    enabled: open,
+  });
   const isManager = session ? CAN_MANAGE.includes(session.role) : false;
 
   const refresh = useCallback(async () => {
@@ -90,7 +106,7 @@ export function FeedbackWidget() {
     }
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
+  }, [open, panelRef]);
 
   async function handleSubmit() {
     if (!directoryHandle || !session || !text.trim()) return;
@@ -180,11 +196,17 @@ export function FeedbackWidget() {
 
       {/* Panel */}
       {open && (
-        <div className="fb-panel" ref={panelRef}>
+        <div
+          className="fb-panel"
+          ref={panelRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="fbPanelTitle"
+        >
           {/* Header */}
           <div className="fb-header">
             <div className="fb-header-text">
-              <h3>{getLabels().toolbar_feedback_label}</h3>
+              <h3 id="fbPanelTitle">{getLabels().toolbar_feedback_label}</h3>
               <p>{isManager ? getLabels().fb_subtitle_manager : getLabels().fb_subtitle_user}</p>
             </div>
             <button className="fb-close" onClick={() => setOpen(false)} aria-label={getLabels().fb_close_aria}><X size={16} /></button>
@@ -251,7 +273,7 @@ export function FeedbackWidget() {
                             className={`fb-cat-btn${category === c ? " active" : ""}`}
                             onClick={() => setCategory(c)}
                           >
-                            {CATEGORY_LABELS[c]}
+                            {categoryLabel(labels, c)}
                           </button>
                         ))}
                       </div>
@@ -364,6 +386,7 @@ function MessageCard({
   onResolve?: () => void;
   isSending?: boolean;
 }) {
+  const labels = useLabels();
   const badgeClass =
     msg.category === "issue" ? "issue" : msg.category === "inquiry" ? "inquiry" : "";
 
@@ -372,7 +395,7 @@ function MessageCard({
       <div className="fb-msg-head">
         {isAdmin && <span className="fb-msg-author">{msg.from}</span>}
         <span className={`fb-msg-badge ${badgeClass}`}>
-          {CATEGORY_LABELS[msg.category]}
+          {categoryLabel(labels, msg.category)}
         </span>
         {msg.status === "resolved" && (
           <span className="fb-msg-badge resolved-badge">{getLabels().fb_resolved_badge}</span>

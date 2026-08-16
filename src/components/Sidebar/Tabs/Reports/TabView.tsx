@@ -11,6 +11,7 @@ import type { SourceRevisions } from "../../../../data/reporting/sourceRevisions
 import { formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
 import type { PreparedPopulationRow } from "../../../../data/population/populationTypes";
 import { useLabels } from "../../../../data/labels/useLabels";
+import { getLabels } from "../../../../data/labels/labelsStore";
 import { buildReportModel } from "../../../../data/reporting/executive/model/reportModel";
 import type { ReportModel } from "../../../../data/reporting/executive/model/reportModel";
 import { rankedBar, gauge, donut, heatmap } from "../../../../data/reporting/executive/ui/charts";
@@ -19,6 +20,7 @@ import { DEFAULT_EXEC_CONFIG } from "../../../../data/reporting/executiveReportT
 import type { ExecutiveReportInput } from "../../../../data/reporting/executiveReportTypes";
 import { getManagedLoginUsers } from "../../../../auth/userManagement";
 import { usePermissions } from "../../../../auth/usePermissions";
+import type { MutationCapability } from "../../../../auth/mutationCapability";
 import { TabGuard } from "../../../PermissionGuard";
 import { LoadingState } from "../../../StateViews/StateViews";
 import { loadSampleMaster, loadSampleMasterRevision } from "../../../../data/sampling/sampleStorage";
@@ -101,6 +103,26 @@ function fmtCount(value: number | null | undefined): string {
   return value != null && Number.isFinite(value) ? value.toLocaleString("ar-SA-u-nu-latn") : "—";
 }
 
+/**
+ * Maps a rejected export MutationCapability to the message shown to the user.
+ *
+ * The distinction matters and used to be lost. The demo/viewer account is role
+ * "admin" (full feature access, so `can` and the render-time `canExportReports`
+ * gate both read true) but `session.mode === "demo"`, which
+ * `getMutationCapability` rejects with reason "read-only-mode" — a completely
+ * different cause from "feature-disabled"/"page-not-editable". Showing the
+ * generic no-permission message there is actively misleading: the viewer *does*
+ * have export permission, the session is just read-only.
+ *
+ * Reads through `getLabels()` rather than `useLabels()` because this is a module
+ * function called from event handlers, not a component — `getLabels()` still
+ * picks up an admin's Settings-tab override, it simply does not re-render on it.
+ */
+function exportBlockedMessage(reason: MutationCapability["reason"]): string {
+  const L = getLabels();
+  return reason === "read-only-mode" ? L.msg_export_read_only_demo : L.msg_export_not_permitted;
+}
+
 /** username → display name map for reviewers, from managed users. */
 function buildDisplayNameMap(): Record<string, string> {
   const map: Record<string, string> = {};
@@ -124,7 +146,7 @@ function collectRevisions(pairs: Array<[string, number | null]>): SourceRevision
 // Inner component that holds all the existing Reports state and logic.
 function ReportsContent() {
   const { directoryHandle } = useWorkspace();
-  const { can, canMutate } = usePermissions();
+  const { can, canMutate, getMutationCapability } = usePermissions();
   const labels = useLabels();
 
   const { selection: globalMonth } = useGlobalMonth();
@@ -134,9 +156,15 @@ function ReportsContent() {
   // user who could reach this tab could trigger real exports (including the PowerBI
   // disk write in handlePbiExport) with no check against the "export-reports" feature.
   // canExportReports drives render-time disable/hide (mirrors Population/index.tsx:183);
-  // the mutating handlers (handleExport, handlePbiExport, generate) additionally
-  // re-check canMutate() as the authoritative, defense-in-depth gate right before doing
-  // real work, so a control that is (incorrectly) left enabled can never still mutate.
+  // the mutating handlers (handleExport, handlePbiExport, generate, handleOpenCustomizer)
+  // additionally re-check getMutationCapability("export-reports") as the authoritative,
+  // defense-in-depth gate right before doing real work, so a control that is
+  // (incorrectly) left enabled can never still mutate. Reading the reason (not just the
+  // `.allowed` boolean `canMutate` collapses it to) matters here specifically: the
+  // built-in demo/viewer account is role "admin" (so `can`/canExportReports read true,
+  // leaving the buttons enabled) but session.mode === "demo", which is rejected with
+  // reason "read-only-mode" -- a distinct case from "you don't have this permission"
+  // that deserves its own message (exportBlockedMessage below).
   const canExportReports = can("export-reports");
   const isAdmin = readSession()?.role === "admin";
   const [customizerOpen, setCustomizerOpen] = useState(false);
@@ -313,8 +341,9 @@ function ReportsContent() {
   // Dashboard export actions — reuse the assembled exec input for all three.
   async function handleExport(kind: "document" | "deck" | "xlsx"): Promise<void> {
     if (!directoryHandle || !selectedMonth || exporting) return;
-    if (!canMutate("export-reports")) {
-      showToast("error", "لا تملك صلاحية تصدير التقارير.");
+    const capability = getMutationCapability("export-reports");
+    if (!capability.allowed) {
+      showToast("error", exportBlockedMessage(capability.reason));
       return;
     }
     setExporting(kind);
@@ -353,8 +382,9 @@ function ReportsContent() {
   // action (see that component).
   function handleOpenCustomizer(): void {
     if (!directoryHandle || !selectedMonth) return;
-    if (!canMutate("export-reports")) {
-      showToast("error", "لا تملك صلاحية تصدير التقارير.");
+    const capability = getMutationCapability("export-reports");
+    if (!capability.allowed) {
+      showToast("error", exportBlockedMessage(capability.reason));
       return;
     }
     setCustomizerOpen(true);
@@ -362,8 +392,9 @@ function ReportsContent() {
 
   async function handlePbiExport() {
     if (!directoryHandle || !selectedMonth) return;
-    if (!canMutate("export-reports")) {
-      setPbiError("لا تملك صلاحية تصدير التقارير.");
+    const capability = getMutationCapability("export-reports");
+    if (!capability.allowed) {
+      setPbiError(exportBlockedMessage(capability.reason));
       return;
     }
     setPbiExporting(true);
@@ -382,8 +413,9 @@ function ReportsContent() {
 
   async function generate(type: ReportType): Promise<void> {
     if (!directoryHandle || !selectedMonth || generating) return;
-    if (!canMutate("export-reports")) {
-      showToast("error", "لا تملك صلاحية تصدير التقارير.");
+    const capability = getMutationCapability("export-reports");
+    if (!capability.allowed) {
+      showToast("error", exportBlockedMessage(capability.reason));
       return;
     }
     setGenerating(type);

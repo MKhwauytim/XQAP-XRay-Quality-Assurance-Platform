@@ -34,15 +34,25 @@ const globalMonthMock = vi.hoisted(() => {
 // handlePbiExport / generate (see index.tsx's exportDisabledTitle + the three
 // handlers). Both default to "fully permitted" so the pre-existing I-1 test below
 // (which never touches this mock) keeps exercising a fully-enabled UI, matching its
-// original, gate-free assumptions.
+// original, gate-free assumptions. `reason` backs getMutationCapability, mirroring
+// the real hook's shape closely enough for the handlers' reason-aware messaging
+// (audit finding 5 / reports/TabView.tsx conflict resolution) to be exercised.
+type MockMutationReason = "page-not-editable" | "feature-disabled" | "read-only-mode" | "workspace-unavailable";
+type PermissionsMockState = { can: boolean; canMutate: boolean; reason?: MockMutationReason };
 const permissionsMock = vi.hoisted(() => ({
-  state: { can: true, canMutate: true },
+  state: { can: true, canMutate: true } as PermissionsMockState,
 }));
 
 vi.mock("../../../../auth/usePermissions", () => ({
   usePermissions: () => ({
     can: (featureId: string) => (featureId === "export-reports" ? permissionsMock.state.can : true),
     canMutate: (featureId: string) => (featureId === "export-reports" ? permissionsMock.state.canMutate : true),
+    getMutationCapability: (featureId: string) =>
+      featureId === "export-reports"
+        ? (permissionsMock.state.canMutate
+          ? { allowed: true, reason: null }
+          : { allowed: false, reason: permissionsMock.state.reason ?? "page-not-editable" })
+        : { allowed: true, reason: null },
     // TabGuard (wraps the "kpi" sub-tab's dashboard) calls canAccessTab — none of the
     // pre-existing tests ever navigate to that sub-tab, but the admin-customizer-gate
     // tests below do, so this must exist and stay permissive (that gate isn't what
@@ -563,6 +573,31 @@ describe("Reports export permission gating (B5)", () => {
     await waitFor(() => {
       expect(screen.getByText("لا تملك صلاحية تصدير التقارير.")).toBeInTheDocument();
     });
+    expect(pbiExportMock.impl).not.toHaveBeenCalled();
+  });
+
+  it("shows a read-only-mode message, not the generic permission-denied one, for the demo/viewer account (audit finding 5)", async () => {
+    // The built-in demo/viewer account is role "admin" (can/canExportReports read
+    // true -- render-time gate stays open, matching the real hook), but its session
+    // is read-only, so getMutationCapability rejects with reason "read-only-mode".
+    // Reusing the generic "لا تملك صلاحية..." wording there is misleading: the
+    // account does have export permission, the session is just a read-only preview.
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+    permissionsMock.state = { can: true, canMutate: false, reason: "read-only-mode" };
+
+    render(<ReportsTab />);
+
+    const pbiButton = await screen.findByRole("button", { name: "تصدير" });
+    expect(pbiButton).not.toBeDisabled();
+    fireEvent.click(pbiButton);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("وضع العرض التجريبي للقراءة فقط — لا يمكن تصدير التقارير من هذه الجلسة.")
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText("لا تملك صلاحية تصدير التقارير.")).toBeNull();
     expect(pbiExportMock.impl).not.toHaveBeenCalled();
   });
 

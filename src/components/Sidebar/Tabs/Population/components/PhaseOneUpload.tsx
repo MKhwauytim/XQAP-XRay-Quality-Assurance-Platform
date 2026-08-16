@@ -18,9 +18,11 @@ type PhaseOneUploadProps = {
   /**
    * B13: render-time gate for the file-picker cards — combines upload-data permission with
    * the closed-month and month-loading flags (index.tsx's canUploadNow), matching Phase 4's
-   * canDistribute pattern. FileUploadCard has no `disabled` prop of its own (owned by a
-   * different bucket), so the cards are visually + interactively disabled via a wrapper here
-   * rather than by threading a new prop into FileUploadCard itself.
+   * canDistribute pattern. Threaded into FileUploadCard's real `disabled` prop (audit finding
+   * 12 -- the previous wrapper-only `aria-disabled`/`pointer-events:none` styling blocked a
+   * mouse click but left the buttons keyboard-focusable and activatable, and announced
+   * nothing to assistive tech). The wrapper's `aria-disabled`/dimming stay as a visual/
+   * semantic group-level cue; the buttons themselves now carry the real HTML `disabled`.
    */
   canUpload: boolean;
   riskAgencyInputRef: RefObject<HTMLInputElement | null>;
@@ -144,7 +146,7 @@ export default function PhaseOneUpload({
         className="upload-grid"
         aria-disabled={!canUpload}
         title={!canUpload ? "لا تملك صلاحية رفع ملفات البيانات، أو أن الشهر مغلق حالياً، أو أن بيانات الشهر قيد التحميل." : undefined}
-        style={!canUpload ? { opacity: 0.55, pointerEvents: "none", cursor: "not-allowed" } : undefined}
+        style={!canUpload ? { opacity: 0.55, cursor: "not-allowed" } : undefined}
       >
         <FileUploadCard
           title="بيانات وكالة المخاطر"
@@ -155,6 +157,7 @@ export default function PhaseOneUpload({
           infoTitle="آلية معالجة بيانات وكالة المخاطر"
           infoContent={RISK_AGENCY_INFO_ITEMS}
           isRequired
+          disabled={!canUpload}
         />
 
         <FileUploadCard
@@ -165,6 +168,7 @@ export default function PhaseOneUpload({
           onClearFile={() => onClearFile("businessIntelligenceData")}
           infoTitle="آلية معالجة بيانات ذكاء الأعمال"
           infoContent={BI_INFO_ITEMS}
+          disabled={!canUpload}
         />
       </div>
 

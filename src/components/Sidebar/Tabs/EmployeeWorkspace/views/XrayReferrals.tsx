@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { CalendarOff, X } from "lucide-react";
 import { readSession } from "../../../../../auth/authSession";
 import { usePermissions } from "../../../../../auth/usePermissions";
 import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
+import { EmptyState } from "../../../../../components/StateViews/StateViews";
 import { logError, logRejection } from "../../../../../data/storage/errorLogger";
 import { thrownErrorText, userFacingErrorText } from "../../../../../data/storage/writeErrorText";
 import {
@@ -507,6 +508,26 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       registerBootSources(bootSources);
       bootSources.forEach((source) => markBootSourceLoading(source.key));
     }
+    // DEFECT 8: boot reporting must reach a TERMINAL state on every exit path of
+    // this pass -- including the superseded ones. `bootReportedRef` is consumed by
+    // the first pass, so a newer pass that supersedes this one registers and
+    // reports nothing; leaving these keys in "loading" strands the whole checklist
+    // until BootSplashOverlay's 8 s timeout. Reproducible whenever a permission
+    // broadcast lands mid-first-load, i.e. right after login.
+    //
+    // Idempotent and first-writer-wins: once a pass has resolved its own keys
+    // (loaded on the mirror fast path, say) a later throw in the SAME pass must
+    // not rewrite them to "error". The keys are per-pass by construction --
+    // only the initial pass owns any.
+    let bootFinalized = false;
+    const finalizeBootSources = (error?: string): void => {
+      if (!isInitialLoad || bootFinalized) return;
+      bootFinalized = true;
+      for (const source of bootSources) {
+        if (error === undefined) markBootSourceLoaded(source.key);
+        else markBootSourceError(source.key, error);
+      }
+    };
     if (!silent) {
       setLoadState("loading");
       setSelEntryId(null);
@@ -553,8 +574,13 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           canSeeAll ? null : loadEmployeeAnswers(directoryHandle, selMonth, username),
         ]);
 
-      const pendingReferralIds = canSeeAll ? new Set<string>() : getPendingReferralIds(referralLog, username);
-      const pendingReplacementIds = canSeeAll ? new Set<string>() : getPendingReplacementIds(replacementLog, username);
+      // Both helpers already scope to `username` (fromEmployee / employeeUsername),
+      // so the previous `canSeeAll ? new Set() : …` short-circuit bought nothing
+      // and cost an oversight user the pending colour on their OWN rows -- the
+      // one place in the app where a supervisor's outstanding referral or
+      // replacement request rendered as an ordinary row.
+      const pendingReferralIds = getPendingReferralIds(referralLog, username);
+      const pendingReplacementIds = getPendingReplacementIds(replacementLog, username);
 
       /** Commits one pass's results. Called twice when a stale mirror is
        *  painted first and the real derivation lands after it. Never touches
@@ -602,11 +628,17 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               sampleCount: personalMirror.quota.sampleCount,
             }
           : null;
-        if (token !== loadTokenRef.current) return;
+        // Boot reporting is resolved BEFORE the staleness check (DEFECT 8): this
+        // pass has finished every read it registered keys for, so the checklist
+        // is accurate either way -- only `commit()` below is gated on the token.
+        if (mirrorSelfSufficient) finalizeBootSources();
+        if (token !== loadTokenRef.current) {
+          finalizeBootSources();
+          return;
+        }
         painted = true;
         if (mirrorSelfSufficient) {
           // The whole read. Nothing else is loaded.
-          if (isInitialLoad) bootSources.forEach((source) => markBootSourceLoaded(source.key));
           // `sampleMaster` is deliberately left null: it was not read, and a
           // stale one from a previously selected month would be worse than
           // none. `openReplacementDialog` loads it (and the workspace-wide
@@ -645,25 +677,25 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           ).flatMap((f) => f.items)
         : ownAnswerFile!.items;
 
-      // Staleness check FIRST: a superseded load must not touch the shared
-      // boot-progress store at all -- marking its keys "loaded" would show
-      // the checklist ticking off sources the newer, still-pending load is
-      // about to re-read from scratch.
+      // Boot reporting FIRST, then the staleness check (DEFECT 8). The previous
+      // order -- bail on a stale token before touching bootProgress -- assumed a
+      // newer load would re-register and re-report these keys. It never does:
+      // `bootReportedRef` was already consumed by THIS pass, so the newer one
+      // runs with isInitialLoad === false and the six keys stayed "loading"
+      // forever. Only `commit()` may be gated on the token.
+      finalizeBootSources();
       if (token !== loadTokenRef.current) return; // superseded by a newer month selection
-
-      if (isInitialLoad) bootSources.forEach((source) => markBootSourceLoaded(source.key));
 
       commit(all, quota, sample, answerItems);
     } catch (err) {
-      // Staleness check FIRST, mirroring the success path above: a
-      // superseded load's rejection must not touch the shared boot-progress
-      // store either -- it would show a false failure on keys the newer,
-      // still-pending load has already re-registered and is midway through
-      // re-loading fresh.
-      if (isInitialLoad && token === loadTokenRef.current) {
-        const message = err instanceof Error ? err.message : String(err);
-        bootSources.forEach((source) => markBootSourceError(source.key, message));
-      }
+      // Boot reporting FIRST, mirroring the success path above (DEFECT 8) and
+      // regardless of the token: the newer pass never re-registers these keys,
+      // so a superseded rejection that skipped this left them "loading". A
+      // source in "error" is terminal and deliberately does not block
+      // `allLoaded` (see bootProgress.ts), so this can only unblock boot.
+      // `finalizeBootSources` is first-writer-wins, so a throw AFTER the mirror
+      // fast path already marked these loaded does not downgrade them.
+      finalizeBootSources(err instanceof Error ? err.message : String(err));
       if (token !== loadTokenRef.current) return;
       // A silent background refresh must not force-close an open inspection form on
       // a transient read hiccup — log it for observability and leave the current
@@ -1302,7 +1334,23 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       {loadState === "loading" && <p className="ew-empty">جاري التحميل...</p>}
       {loadState === "error"   && <p className="ew-empty">تعذر تحميل البيانات.</p>}
 
-      {(loadState === "ready" || loadState === "idle") && (() => {
+      {/* Zero assignments: the shared EmptyState the sibling Employee Workspace
+          views already use (XrayInspectionResults, ReferralApproval), instead of
+          a table with a header row and nothing under it. Only in "ready" —
+          "idle" is the pre-first-load tick and must not flash an empty state. */}
+      {loadState === "ready" && entries.length === 0 && (
+        <EmptyState
+          icon={<CalendarOff />}
+          title={
+            canSeeAll
+              ? "لا توجد عينات موزّعة في هذا الشهر"
+              : "لا توجد عينات مسندة إليك في هذا الشهر"
+          }
+          description="ستظهر العينات هنا فور توزيعها من تبويب معالجة المجتمع."
+        />
+      )}
+
+      {(loadState === "idle" || (loadState === "ready" && entries.length > 0)) && (() => {
         // True whenever the `columns` memo actually prepended the select-checkbox
         // column (personal-scope users always; oversight users only when permitted
         // to bulk-reassign — see the `columns` memo above).
@@ -1410,7 +1458,14 @@ export default function XrayReferrals({ directoryHandle }: Props) {
 
         return (
           <div className="ew-ref-workspace">
-            <ReferralStatsStrip stats={personalStats} quota={myQuota} username={username} />
+            <ReferralStatsStrip
+              stats={personalStats}
+              quota={myQuota}
+              username={username}
+              // Exactly the branch `personalStats` itself takes: in the "الكل"
+              // view an oversight user's figures are the whole workspace's.
+              scope={canSeeAll && !showMyOnly ? "all" : "own"}
+            />
             <div className={`ew-split ew-split--right${selEntry ? "" : " ew-split--empty"}`}>
               {tableEl}
               {selEntry ? (

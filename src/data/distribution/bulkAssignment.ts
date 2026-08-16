@@ -11,6 +11,25 @@ export function isAssignableSampleRole(user: ManagedLoginUser): boolean {
 }
 
 /**
+ * Resolves `username` against the live managed-user roster and requires it to
+ * be an active, sample-assignable account (employee/supervisor). Used at
+ * assignment-handler time (not just at render time, where the picker's option
+ * list already excludes anything else) so a stale dropdown snapshot, a
+ * hand-crafted call, or a race with a user being deactivated mid-session can
+ * never durably assign a sample to an account that cannot log in and work it
+ * -- the exact failure mode audit finding 6 documents (adhoc-import's
+ * `useMemo(...,[])` roster and PhaseFourDistribution's manual-assign dropdown).
+ */
+export function findAssignableEmployee(
+  username: string,
+  employees: ManagedLoginUser[]
+): ManagedLoginUser | null {
+  const user = employees.find((e) => e.username === username);
+  if (!user || !user.isActive || !isAssignableSampleRole(user)) return null;
+  return user;
+}
+
+/**
  * Smart CertScan-first distribution:
  *
  * 1. Apportion total quota (cert+normal) among active employees.

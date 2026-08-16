@@ -20,6 +20,22 @@ vi.mock("../../../../data/workspace/useWorkspace", () => ({
   useWorkspace: () => ({ directoryHandle: mocks.directoryHandle, status: "ready" }),
 }));
 
+// Audit finding 13: AdminAccountSection now gates on canMutate("settings.adminAccount")
+// (the EFFECTIVE/previewed role) in addition to the pre-existing isRealAdmin visibility
+// check. `usePermissions` itself resolves through `readSession()`, whose internal call to
+// `readRealSession()` is a same-module reference that a `vi.spyOn(authSession,
+// "readRealSession")` from outside the module does NOT intercept (a standard ESM
+// self-reference gotcha) -- so mocking usePermissions directly here, independent of the
+// authSession spies below, is what lets "editing" behave as a real admin while the new
+// "role preview" describe block exercises canMutate=false in isolation.
+const permissionsMock = vi.hoisted(() => ({ state: { canMutate: true } }));
+vi.mock("../../../../auth/usePermissions", () => ({
+  usePermissions: () => ({
+    canMutate: (featureId: string) =>
+      featureId === "settings.adminAccount" ? permissionsMock.state.canMutate : true,
+  }),
+}));
+
 function session(overrides: Partial<AuthSession>): AuthSession {
   return {
     role: "admin",
@@ -34,6 +50,7 @@ beforeEach(() => {
   mocks.syncUserManagementToDisk.mockReset();
   mocks.syncUserManagementToDisk.mockResolvedValue(undefined);
   mocks.directoryHandle = { name: "workspace" };
+  permissionsMock.state = { canMutate: true };
   userManagement.writeUserManagementState(
     userManagement.createEmptyUserManagementState(),
     false,
@@ -160,6 +177,52 @@ describe("AdminAccountSection — editing", () => {
     await waitFor(() => {
       expect(screen.getByText(/لا توجد مساحة عمل متصلة لحفظه/)).toBeInTheDocument();
     });
+    expect(mocks.syncUserManagementToDisk).not.toHaveBeenCalled();
+  });
+});
+
+// Audit finding 13: the section is visible during a role preview (isRealAdmin only
+// checks the REAL session, which is unaffected by previewing another role -- by design,
+// so a non-admin real user still never sees it). Before this fix, every control here
+// stayed fully interactive too, contradicting the module's own doc comment and unlike
+// the sibling SyncIntervalSection, which already went inert via canMutate. These tests
+// pin canMutate("settings.adminAccount")=false (what canMutate resolves to for any
+// non-admin previewed role, since the feature defaults to admin-only) and assert both
+// the render-boundary disabling AND the handler-boundary rejection.
+describe("AdminAccountSection — inert during a role preview (audit finding 13)", () => {
+  beforeEach(() => {
+    vi.spyOn(authSession, "readRealSession").mockReturnValue(session({}));
+    permissionsMock.state = { canMutate: false };
+  });
+
+  it("still renders (visible to the real admin) but disables every control", () => {
+    render(<AdminAccountSection />);
+
+    expect(screen.getByText("حساب المدير")).toBeInTheDocument();
+    expect(
+      screen.getByRole("checkbox", { name: /السماح بتسجيل الدخول باسم المستخدم/ }),
+    ).toBeDisabled();
+    expect(screen.getByLabelText("كلمة المرور الجديدة")).toBeDisabled();
+    expect(screen.getByLabelText("تأكيد كلمة المرور")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "تحديث كلمة المرور" })).toBeDisabled();
+  });
+
+  it("rejects handleChangePassword at the handler boundary even if a stale render left the button enabled", async () => {
+    // Render permissive, fill the form, THEN flip canMutate false (simulating a
+    // preview toggled mid-interaction) before the click -- proves the handler
+    // itself re-checks rather than trusting the render-time disabled state.
+    permissionsMock.state = { canMutate: true };
+    render(<AdminAccountSection />);
+    fireEvent.change(screen.getByLabelText("كلمة المرور الجديدة"), { target: { value: "new-pass" } });
+    fireEvent.change(screen.getByLabelText("تأكيد كلمة المرور"), { target: { value: "new-pass" } });
+
+    permissionsMock.state = { canMutate: false };
+    fireEvent.click(screen.getByRole("button", { name: "تحديث كلمة المرور" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("لا يمكن تعديل حساب المدير أثناء معاينة دور آخر.")).toBeInTheDocument();
+    });
+    expect(userManagement.readAdminAccount().passwordHash).toBeNull();
     expect(mocks.syncUserManagementToDisk).not.toHaveBeenCalled();
   });
 });

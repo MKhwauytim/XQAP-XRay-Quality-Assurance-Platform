@@ -1,13 +1,13 @@
-import { getManagedLoginUsers } from "../../../../../auth/userManagement";
+import { getManagedLoginUsers, subscribeToUserManagementChanges } from "../../../../../auth/userManagement";
 import { AlertTriangle, CheckCircle2, Settings2, XCircle, FilePen, Search } from "lucide-react";
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
 import type { DistributionCurrentData, DistributionEvent } from "../../../../../data/distribution/distributionTypes";
 import type { PopulationConfig, EmployeeStageAllocation } from "../../../../../data/population/populationConfig";
 import SummaryCard from "./SummaryCard";
 import DistributionRow from "./DistributionRow";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { getStageKey, formatNumber } from "./helpers";
-import { calculateBulkAssignment } from "../../../../../data/distribution/bulkAssignment";
+import { calculateBulkAssignment, isAssignableSampleRole } from "../../../../../data/distribution/bulkAssignment";
 
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
 
@@ -82,16 +82,29 @@ export default function PhaseFourDistribution({
   const [manualCertFilter, setManualCertFilter] = useState("all");
   const [manualEmployeeFilter, setManualEmployeeFilter] = useState("all");
 
-  const employees = useMemo(
+  // Audit finding 6: this was a mount-time-only snapshot (`useMemo(...,[])`), so a
+  // user added/deactivated after this phase mounted never showed up (or never
+  // disappeared) from the bulk-allocation table or the manual-assign dropdown
+  // (DistributionRow) until a full remount. Now it re-derives whenever the
+  // managed-user roster actually changes -- same pattern as AdhocImportTab's fix
+  // for the identical bug. The handler-side check in useDistributionActions
+  // (findAssignableEmployee) is the real authorization boundary; this only keeps
+  // the pickers from offering a stale option.
+  const computeAssignableEmployees = useCallback(
     () =>
       getManagedLoginUsers()
-        .filter((u) => u.isActive && (u.role === "employee" || u.role === "supervisor"))
+        .filter((u) => u.isActive && isAssignableSampleRole(u))
         .map((u) => ({
           username: u.username,
           displayName: u.displayName,
           hasCertScanLicense: u.hasCertScanLicense
         })),
     []
+  );
+  const [employees, setEmployees] = useState(computeAssignableEmployees);
+  useEffect(
+    () => subscribeToUserManagementChanges(() => setEmployees(computeAssignableEmployees())),
+    [computeAssignableEmployees]
   );
 
   const sampleRows = useMemo(() => sampleDrawResult?.rows ?? [], [sampleDrawResult]);
@@ -499,7 +512,7 @@ export default function PhaseFourDistribution({
               </div>
               <div className="distribution-save-progress-label">
                 <span>{distributionProgress.message}</span>
-                <strong>{distributionProgress.percent.toLocaleString("ar-SA")}٪</strong>
+                <strong>{distributionProgress.percent.toLocaleString("ar-SA-u-nu-latn")}٪</strong>
               </div>
               <p>يمكن أن يستغرق الحفظ وقتاً أطول عند توزيع عدد كبير من العينات. لا تغلق الصفحة أو مجلد مساحة العمل.</p>
             </div>

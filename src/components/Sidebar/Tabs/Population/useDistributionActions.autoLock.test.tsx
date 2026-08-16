@@ -107,14 +107,14 @@ describe("useDistributionActions auto-lock", () => {
     const { result } = renderActions(dir);
 
     await act(async () => {
-      await result.current.handleAssign("A001", "employee-1");
+      await result.current.handleAssign("A001", "jalgahamdi");
     });
     expect(await isMonthClosed(dir, MONTH_FOLDER)).toBe(false);
 
     // Every sample row now carries a distribution entry, but both are `pending`.
     // The old (pinned) behaviour closed the month here; it must stay open.
     await act(async () => {
-      await result.current.handleAssign("A002", "employee-2");
+      await result.current.handleAssign("A002", "hihaloraini");
     });
     expect(await isMonthClosed(dir, MONTH_FOLDER)).toBe(false);
     expect((await loadMonthManifest(dir, MONTH_FOLDER))?.status).not.toBe("closed");
@@ -125,8 +125,8 @@ describe("useDistributionActions auto-lock", () => {
     const { result } = renderActions(dir);
 
     await act(async () => {
-      await result.current.handleAssign("A001", "employee-1");
-      await result.current.handleAssign("A002", "employee-2");
+      await result.current.handleAssign("A001", "jalgahamdi");
+      await result.current.handleAssign("A002", "hihaloraini");
     });
 
     // One row completed, one still pending -- must NOT lock yet.

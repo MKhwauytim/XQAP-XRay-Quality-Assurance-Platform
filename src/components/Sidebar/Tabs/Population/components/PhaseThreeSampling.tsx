@@ -537,7 +537,7 @@ function UnmappedStageWarning({ data }: { data: SampleMasterData }) {
         {L.sampling_unmapped_stage_warning_title}
       </div>
       <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--p-muted)" }}>
-        {fillTemplate(L.sampling_unmapped_stage_warning_intro, { count: String(count) })}
+        {fillTemplate(L.sampling_unmapped_stage_warning_intro, { count: formatNumber(count) })}
       </p>
       {(data.unmappedStageRawValues ?? []).length > 0 && (
         <p style={{ margin: "6px 0 0", fontSize: 12 }}>

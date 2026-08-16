@@ -117,13 +117,13 @@ function PChartView(props: {
         <caption>{title}</caption>
         <thead>
           <tr>
-            <th>المجموعة</th>
-            <th>النسبة</th>
-            <th>عدد الحالات</th>
+            <th>{labels.rk_pchart_sr_col_group}</th>
+            <th>{labels.rk_pchart_sr_col_proportion}</th>
+            <th>{labels.rk_pchart_sr_col_cases}</th>
             <th>{labels.rk_tooltip_center}</th>
             <th>{labels.rk_tooltip_ucl}</th>
             <th>{labels.rk_tooltip_lcl}</th>
-            <th>الحالة</th>
+            <th>{labels.rk_pchart_sr_col_status}</th>
           </tr>
         </thead>
         <tbody>

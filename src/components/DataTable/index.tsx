@@ -16,6 +16,8 @@ import * as XLSX from "xlsx";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useLabels } from "../../data/labels/useLabels";
 import { registerPendingSaveFlush } from "../../data/storage/pendingSaveFlush";
+import { logError } from "../../data/storage/errorLogger";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import Pagination from "../Pagination/Pagination";
 import { DATA_PAGE_SIZE, clampPage, pageSlice } from "../../utils/paginationUtils";
 import "./DataTable.css";
@@ -221,6 +223,7 @@ function compareFilterOptions(first: string, second: string): number {
 // Same yieldToMain idiom used by populationProcessor.ts / riskDataWorkbook.ts —
 // defined locally per-file rather than shared across tab boundaries.
 
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function DataTable<TRow>({
@@ -274,6 +277,10 @@ export default function DataTable<TRow>({
   const [filterAnchorRect, setFilterAnchorRect] = useState<DOMRect | null>(null);
   const [filters, setFilters]                   = useState<FiltersMap>({});
   const [isExporting, setIsExporting]            = useState(false);
+  // Finding 10 — surfaces a thrown export failure as an in-page role="alert"
+  // banner (mirrors BrowseDataView's own bv-export-error pattern) instead of
+  // an unhandled rejection with no visible feedback.
+  const [exportError, setExportError]            = useState<string | null>(null);
   const detectedDates = useMemo<Set<string>>(() => {
     const sample = rows.length > 200 ? rows.slice(0, 200) : rows;
     const detected = new Set<string>();
@@ -603,6 +610,7 @@ export default function DataTable<TRow>({
 
   async function handleExport(): Promise<void> {
     if (!exportFileName || isExporting) return;
+    setExportError(null);
     setIsExporting(true);
     try {
       const header = visibleCols.map((c) => c.label);
@@ -620,6 +628,14 @@ export default function DataTable<TRow>({
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "البيانات");
       XLSX.writeFile(wb, exportFileName);
+    } catch (err) {
+      // Finding 10 (shared pattern flagged alongside BrowseDataView's own
+      // export): this was a bare try/finally with no error state at all — a
+      // thrown error surfaced as an unhandled rejection while `finally`
+      // cleared `isExporting` as if the export had succeeded, with no
+      // indication to the user that nothing was actually written.
+      logError("datatable:export", err);
+      setExportError("تعذّر تصدير البيانات بسبب خطأ غير متوقع — حاول مرة أخرى.");
     } finally {
       setIsExporting(false);
     }
@@ -794,10 +810,10 @@ export default function DataTable<TRow>({
             type="button"
             className="dt-autofit-btn"
             onClick={handleAutoFitVisibleColumns}
-            title="ملاءمة عرض الأعمدة المرئية حسب المحتوى"
+            title={L.dt_autofit_title}
           >
             <Maximize2 size={14} />
-            ملاءمة الأعمدة
+            {L.dt_autofit_button}
           </button>
           {exportFileName && (
             <button
@@ -809,6 +825,11 @@ export default function DataTable<TRow>({
             >
               {isExporting ? L.dt_exporting : L.dt_export_xlsx}
             </button>
+          )}
+          {exportError && (
+            <span className="dt-export-error" role="alert">
+              {exportError}
+            </span>
           )}
           {canConfigureColumns && (
             <div>
@@ -881,7 +902,7 @@ export default function DataTable<TRow>({
                         e.stopPropagation();
                         handleAutoFitColumn(colIdx);
                       }}
-                      title="اسحب لتغيير العرض، أو انقر مرتين للملاءمة التلقائية"
+                      title={L.dt_resize_handle_title}
                     />
                     <div className="dt-th-inner">
                       <span className="dt-th-grip" aria-hidden="true">⋮⋮</span>
@@ -889,8 +910,8 @@ export default function DataTable<TRow>({
                       <button
                         type="button"
                         className={`dt-filter-btn${hasFilter ? " active" : ""}`}
-                        title={`تصفية: ${col.label}`}
-                        aria-label={`تصفية: ${col.label}`}
+                        title={`${L.dt_filter_button_prefix}: ${col.label}`}
+                        aria-label={`${L.dt_filter_button_prefix}: ${col.label}`}
                         onClick={(e) => {
                           e.stopPropagation();
                           const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -938,7 +959,7 @@ export default function DataTable<TRow>({
                   className="dt-empty-td"
                   style={{ textAlign: "center", padding: "28px 12px", color: "var(--c-ink-4)", fontSize: 13 }}
                 >
-                  لا توجد نتائج مطابقة
+                  {L.dt_no_results}
                 </td>
               </tr>
             )}
@@ -1030,7 +1051,11 @@ function ColPickerPanel({
   columns, cfg, isAdmin, detectedDates, defaultVisible, anchorRect, onChange, onClose,
 }: ColPickerPanelProps) {
   const L = useLabels();
-  const ref = useRef<HTMLDivElement>(null);
+  // Finding 11: was a plain outside-click-only ref with no Escape handling and
+  // no focus trap — the only such gap among DataTable's own overlay surfaces.
+  // useFocusTrap's ref replaces the plain one; the outside-click listener below
+  // still reads the SAME container node, unchanged.
+  const ref = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
 
   useEffect(() => {
     function h(e: MouseEvent): void {
@@ -1038,7 +1063,7 @@ function ColPickerPanel({
     }
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
-  }, [onClose]);
+  }, [onClose, ref]);
 
   const cols = columns.filter((c) => !c.adminOnly || isAdmin);
   // B11: how many of the picker's own candidate columns are currently shown.
@@ -1079,7 +1104,7 @@ function ColPickerPanel({
   }
 
   return (
-    <div ref={ref} className="dt-col-picker" style={style}>
+    <div ref={ref} className="dt-col-picker" style={style} role="dialog" aria-label={L.dt_columns_title}>
       <div className="dt-col-picker-header">
         <strong>{L.dt_columns_title}</strong>
         <span className="dt-col-picker-count">
@@ -1143,7 +1168,7 @@ function ColPickerPanel({
                   hidden
                     ? L.dt_show_column
                     : isLastVisible
-                      ? "يجب أن يبقى عمود واحد ظاهرًا على الأقل"
+                      ? L.dt_last_visible_column_hint
                       : L.dt_hide_column
                 }
                 onClick={(e) => { e.stopPropagation(); toggle(col.id); }}
@@ -1187,7 +1212,8 @@ type ColFilterMenuProps = {
 
 function ColFilterMenu({ col, filter, isDateCol, anchorRect, options, onSet, onClear, onClose }: ColFilterMenuProps) {
   const L = useLabels();
-  const ref = useRef<HTMLDivElement>(null);
+  // Finding 11 — see ColPickerPanel's identical note above.
+  const ref = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
 
   useEffect(() => {
     function h(e: MouseEvent): void {
@@ -1195,7 +1221,7 @@ function ColFilterMenu({ col, filter, isDateCol, anchorRect, options, onSet, onC
     }
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
-  }, [onClose]);
+  }, [onClose, ref]);
 
   // Position fixed below the filter button, right-aligned to the button in RTL
   const style: CSSProperties = {
@@ -1216,7 +1242,7 @@ function ColFilterMenu({ col, filter, isDateCol, anchorRect, options, onSet, onC
       onSet({ kind: "multiselect", values: Array.from(next) });
     }
     return (
-      <div ref={ref} className="dt-filter-menu dt-filter-multiselect" style={style} dir="rtl">
+      <div ref={ref} className="dt-filter-menu dt-filter-multiselect" style={style} dir="rtl" role="dialog" aria-label={col.label}>
         <div className="dt-filter-head">
           <strong>{col.label}</strong>
           <button type="button" onClick={onClear} disabled={selected.size === 0}>{L.dt_filter_clear}</button>
@@ -1250,7 +1276,7 @@ function ColFilterMenu({ col, filter, isDateCol, anchorRect, options, onSet, onC
     const opts = col.statusOptions ?? [{ value: "all", label: "الكل" }];
     const cur  = filter?.kind === "status" ? filter.value : "all";
     return (
-      <div ref={ref} className="dt-filter-menu" style={style} dir="rtl">
+      <div ref={ref} className="dt-filter-menu" style={style} dir="rtl" role="dialog" aria-label={col.label}>
         <div className="dt-filter-head">
           <strong>{col.label}</strong>
           <button type="button" onClick={onClear}>{L.dt_filter_clear}</button>
@@ -1339,7 +1365,7 @@ const DateFilterMenu = forwardRef(function DateFilterMenu(
   const [to,     setTo]     = useState(filter.to);
 
   return (
-    <div ref={ref} className="dt-filter-menu dt-filter-date" style={style} dir="rtl">
+    <div ref={ref} className="dt-filter-menu dt-filter-date" style={style} dir="rtl" role="dialog" aria-label={label}>
       <div className="dt-filter-head">
         <strong>{label}</strong>
         <button type="button" onClick={onClear}>{L.dt_filter_clear}</button>

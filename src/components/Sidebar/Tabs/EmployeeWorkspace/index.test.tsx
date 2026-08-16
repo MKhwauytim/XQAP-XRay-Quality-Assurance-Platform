@@ -4,11 +4,22 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
 import { createMemoryDirectory } from "../../../../data/storage/memoryDirectory";
 
+// Audit finding 14: canViewXrayReferrals/canViewReferralApproval now read
+// hasRequiredSubTabFeature(subTabId, role, featurePermissions) instead of
+// `can()`, so this mock must supply `role` and `featurePermissions` (all
+// features enabled for every role -- this suite grants full access, matching
+// the pre-existing `can: () => true`).
 vi.mock("../../../../auth/usePermissions", () => ({
   usePermissions: () => ({
     can: () => true,
     canAccessTab: () => true,
+    role: "admin",
+    featurePermissions: [] as { role: string; featureId: string; enabled: boolean }[],
   }),
+}));
+
+vi.mock("../../../../auth/subTabFeatureGate", () => ({
+  hasRequiredSubTabFeature: () => true,
 }));
 
 const workspaceMock = vi.hoisted(() => ({

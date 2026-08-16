@@ -1390,15 +1390,15 @@ function makeAdhocRecord(importId: string, rows: AdhocImportRow[]): AdhocImportR
 
 describe("XrayReferrals — ad-hoc import visibility (THE GAP fix)", () => {
   it("shows an ad-hoc-imported assignment alongside the month's real samples, visually tagged as ad-hoc", async () => {
-    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeSession({ role: "employee", username: "jalgahamdi", loginAt: new Date().toISOString() });
     writeUserManagementState(createEmptyUserManagementState(), false);
 
     const root = createMemoryDirectory("root");
-    await seedAssignedSample(root, "emp-1", "IMG-1");
+    await seedAssignedSample(root, "jalgahamdi", "IMG-1");
 
     const record = makeAdhocRecord("adh-1", [adhocImportRow("XR-1")]);
     await ensureAdhocSampleMaster(root, record);
-    const assigned = await assignAdhocRowsToEmployee(root, record, ["s1:2"], "emp-1", "admin");
+    const assigned = await assignAdhocRowsToEmployee(root, record, ["s1:2"], "jalgahamdi", "admin");
     expect(assigned.ok).toBe(true);
 
     render(<XrayReferrals directoryHandle={root} />);
@@ -1412,16 +1412,16 @@ describe("XrayReferrals — ad-hoc import visibility (THE GAP fix)", () => {
   });
 
   it("does not show an ad-hoc row from an import with no assignment for the current user", async () => {
-    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeSession({ role: "employee", username: "jalgahamdi", loginAt: new Date().toISOString() });
     writeUserManagementState(createEmptyUserManagementState(), false);
 
     const root = createMemoryDirectory("root");
-    await seedAssignedSample(root, "emp-1", "IMG-1");
+    await seedAssignedSample(root, "jalgahamdi", "IMG-1");
 
     const record = makeAdhocRecord("adh-2", [adhocImportRow("XR-9")]);
     await ensureAdhocSampleMaster(root, record);
     // Assigned to someone else entirely.
-    await assignAdhocRowsToEmployee(root, record, ["s1:2"], "emp-2", "admin");
+    await assignAdhocRowsToEmployee(root, record, ["s1:2"], "hihaloraini", "admin");
 
     render(<XrayReferrals directoryHandle={root} />);
 
@@ -1430,15 +1430,15 @@ describe("XrayReferrals — ad-hoc import visibility (THE GAP fix)", () => {
   });
 
   it("still renders the month's real assignments when an ad-hoc store is corrupt (degrades, never blanks the page)", async () => {
-    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeSession({ role: "employee", username: "jalgahamdi", loginAt: new Date().toISOString() });
     writeUserManagementState(createEmptyUserManagementState(), false);
 
     const root = createMemoryDirectory("root");
-    await seedAssignedSample(root, "emp-1", "IMG-1");
+    await seedAssignedSample(root, "jalgahamdi", "IMG-1");
 
     const record = makeAdhocRecord("adh-3", [adhocImportRow("XR-1")]);
     await ensureAdhocSampleMaster(root, record);
-    const assigned = await assignAdhocRowsToEmployee(root, record, ["s1:2"], "emp-1", "admin");
+    const assigned = await assignAdhocRowsToEmployee(root, record, ["s1:2"], "jalgahamdi", "admin");
     expect(assigned.ok).toBe(true);
 
     // Corrupt the ad-hoc import's sample.master.json with no valid .bak to recover from.

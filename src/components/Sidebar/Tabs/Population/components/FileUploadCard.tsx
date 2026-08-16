@@ -15,6 +15,18 @@ type FileUploadCardProps = {
   infoTitle?: string;
   infoContent?: string[];
   isRequired?: boolean;
+  /**
+   * Audit finding 12: the card used to have no `disabled` concept of its own --
+   * the caller (PhaseOneUpload) faked it with a wrapper div's `aria-disabled` +
+   * `pointer-events: none`, which blocks a mouse click but does nothing for a
+   * keyboard user (Tab still lands on these buttons, Enter/Space still
+   * activates them) and announces nothing to a screen reader (`aria-disabled`
+   * on an ancestor is not inherited by its interactive descendants). A real
+   * `disabled` attribute here fixes both, and the handlers this fires into
+   * (index.tsx's pickExcelFile/clearSelectedFile) are re-gated on `canUploadNow`
+   * as defense-in-depth, matching every other mutating handler in this tab.
+   */
+  disabled?: boolean;
 };
 
 export default function FileUploadCard({
@@ -25,7 +37,8 @@ export default function FileUploadCard({
   onClearFile,
   infoTitle,
   infoContent,
-  isRequired = false
+  isRequired = false,
+  disabled = false
 }: FileUploadCardProps) {
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const file = uploadState.file;
@@ -85,7 +98,7 @@ export default function FileUploadCard({
             <span>{formatFileSize(file.size)}</span>
           </div>
 
-          <button type="button" onClick={onClearFile}>
+          <button type="button" onClick={onClearFile} disabled={disabled}>
             إزالة
           </button>
         </div>
@@ -99,7 +112,7 @@ export default function FileUploadCard({
         </div>
       )}
 
-      <button type="button" className="upload-button" onClick={onPickFile}>
+      <button type="button" className="upload-button" onClick={onPickFile} disabled={disabled}>
         {file ? "تغيير الملف" : "اختيار ملف Excel"}
       </button>
     </article>

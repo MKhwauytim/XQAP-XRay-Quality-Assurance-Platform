@@ -30,6 +30,10 @@ vi.mock("../../../../../auth/userManagement", () => ({
       updatedAt: "2026-01-01T00:00:00.000Z",
     },
   ],
+  // Audit finding 6: the live-roster fix subscribes to roster-change events;
+  // this component-level test never mutates the roster, so a no-op unsubscribe
+  // is all it needs.
+  subscribeToUserManagementChanges: () => () => {},
 }));
 
 function makeRow(xrayImageId: string): PreparedPopulationRow {

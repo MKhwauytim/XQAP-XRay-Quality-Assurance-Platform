@@ -11,8 +11,10 @@ import {
   readUserManagementState,
   roleCeilingFor,
   subscribeToUserManagementChanges,
+  type FeaturePermission,
   type RolePermission
 } from "./auth/userManagement";
+import { hasRequiredSubTabFeature } from "./auth/subTabFeatureGate";
 import Sidebar from "./components/Sidebar/Sidebar";
 import { BootSplashOverlay } from "./components/Sidebar/BootSplashOverlay";
 import { SIDEBAR_TABS } from "./components/Sidebar/Tabs/tabRegistry";
@@ -51,6 +53,13 @@ export function AppContent({ session }: AppContentProps) {
   const [permissions, setPermissions] = useState<RolePermission[]>(
     () => readUserManagementState().permissions
   );
+  // Audit finding 14: needed so the sidebar filter can also check
+  // SUB_TAB_FEATURE_MAP (shared with EmployeeWorkspaceTab's own gate) --
+  // page-level "view" access on `permissions` alone is not sufficient to
+  // predict whether a sub-tab's content will actually render anything.
+  const [featurePermissions, setFeaturePermissions] = useState<FeaturePermission[]>(
+    () => readUserManagementState().featurePermissions
+  );
   const [bakWarning, setBakWarning] = useState<string | null>(null);
   const [autoBackupNotice, setAutoBackupNotice] = useState<string | null>(null);
   const [autoBackupRunning, setAutoBackupRunning] = useState(false);
@@ -84,6 +93,7 @@ export function AppContent({ session }: AppContentProps) {
   useEffect(() => {
     return subscribeToUserManagementChanges(() => {
       setPermissions(readUserManagementState().permissions);
+      setFeaturePermissions(readUserManagementState().featurePermissions);
     });
   }, []);
 
@@ -107,12 +117,19 @@ export function AppContent({ session }: AppContentProps) {
             const subTabId = `${prefix}${sub.id}`;
             const ceiling = roleCeilingFor(subTabId);
             if (ceiling && !ceiling.includes(session.role)) return false;
-            return hasRolePermission(permissions, session.role, subTabId, "view");
+            if (!hasRolePermission(permissions, session.role, subTabId, "view")) return false;
+            // Audit finding 14: page-level "view" access is not the whole
+            // story for some sub-tabs (e.g. ew/xray-referrals) -- their
+            // content additionally requires one of several specific
+            // features. Without this check the link would render but its
+            // content would be AccessDenied for a role granted "view" here
+            // without any of the required features.
+            return hasRequiredSubTabFeature(subTabId, session.role, featurePermissions);
           });
           return { ...tab, subTabs: allowedSubTabs };
         });
     },
-    [permissions, session.role]
+    [permissions, featurePermissions, session.role]
   );
 
   useEffect(() => {

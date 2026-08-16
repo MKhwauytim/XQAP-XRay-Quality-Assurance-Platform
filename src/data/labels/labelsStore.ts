@@ -74,6 +74,16 @@ export const DEFAULT_LABELS = {
   dt_export_xlsx:            "تصدير XLSX",
   dt_exporting:              "جارٍ التصدير...",
   msg_export_not_permitted:  "لا تملك صلاحية تصدير التقارير.",
+  // The demo/viewer session is read-only (getMutationCapability reason
+  // "read-only-mode") — distinct from msg_export_not_permitted, which covers
+  // an actual missing-permission rejection.
+  msg_export_read_only_demo: "وضع العرض التجريبي للقراءة فقط — لا يمكن تصدير التقارير من هذه الجلسة.",
+  dt_autofit_title:          "ملاءمة عرض الأعمدة المرئية حسب المحتوى",
+  dt_autofit_button:         "ملاءمة الأعمدة",
+  dt_resize_handle_title:    "اسحب لتغيير العرض، أو انقر مرتين للملاءمة التلقائية",
+  dt_no_results:             "لا توجد نتائج مطابقة",
+  dt_filter_button_prefix:   "تصفية",
+  dt_last_visible_column_hint: "يجب أن يبقى عمود واحد ظاهرًا على الأقل",
   dt_columns_button:         "الأعمدة",
   dt_columns_title:          "الأعمدة",
   dt_columns_hint:           "اسحب للترتيب · انقر لإخفاء/إظهار",
@@ -541,6 +551,10 @@ export const DEFAULT_LABELS = {
   rk_empty_title:              "لا توجد إجابات مراجعة بعد لهذا الشهر",
   rk_empty_desc:               "تظهر مؤشرات المراجعين ولوحات الضبط بمجرد تسجيل أول مراجعة مكتملة.",
   rk_table_caption:            "مؤشرات الأداء لكل مراجع",
+  rk_pchart_sr_col_group:      "المجموعة",
+  rk_pchart_sr_col_proportion: "النسبة",
+  rk_pchart_sr_col_cases:      "عدد الحالات",
+  rk_pchart_sr_col_status:     "الحالة",
   rk_col_reviewer:             "المراجع",
   rk_col_assigned:             "المُسندة",
   rk_col_completed:            "المكتملة",
@@ -871,8 +885,23 @@ export function isCustomized(key: LabelKey): boolean {
   return key in customLabels;
 }
 
+/** Hard cap on a custom label override's length — generously above the longest
+ * built-in default (~210 chars) but bounded so a pasted wall of text (or a
+ * corrupted/malicious snapshot import) can't blow up layout or storage. */
+const MAX_LABEL_LENGTH = 500;
+
+/** Unicode bidirectional control characters (explicit marks, embeddings,
+ * overrides, isolates). Stripped from every label override so a pasted or
+ * imported value can't spoof reading direction/order (Trojan-Source-style)
+ * in RTL UI text. */
+const BIDI_CONTROL_CHARS = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
+
+function stripBidiControls(value: string): string {
+  return value.replace(BIDI_CONTROL_CHARS, "");
+}
+
 export function setLabel(key: LabelKey, value: string): void {
-  const trimmed = value.trim();
+  const trimmed = stripBidiControls(value.trim()).trim().slice(0, MAX_LABEL_LENGTH);
   if (!trimmed || trimmed === DEFAULT_LABELS[key]) {
     delete customLabels[key];
   } else {

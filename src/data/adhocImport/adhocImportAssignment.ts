@@ -4,6 +4,8 @@ import type { SampleMasterData } from "../sampling/sampleTypes";
 import { loadSampleMaster, saveSampleMaster } from "../sampling/sampleStorage";
 import { buildAssignEvent } from "../distribution/distributionLog";
 import { appendDistributionEvents, loadOrDeriveDistributionCurrent, refreshDistributionCacheAfterWrite } from "../distribution/distributionStorage";
+import { findAssignableEmployee } from "../distribution/bulkAssignment";
+import { getManagedLoginUsers } from "../../auth/userManagement";
 import type { NormalizedRiskRow } from "../../components/Sidebar/Tabs/Population/riskData/riskDataTypes";
 import { adhocMonthFolderName, type AdhocImportRecord, type AdhocImportRow } from "./adhocImportTypes";
 import { saveAdhocImportRecord } from "./adhocImportStorage";
@@ -155,6 +157,13 @@ export type AssignAdhocRowsResult =
  * `loadOrDeriveDistributionCurrent`, the actual source of truth — not just
  * this record's own `assigned` bookkeeping) are skipped rather than
  * double-assigned, mirroring `calculateBulkAssignment`'s ownedIds guard.
+ *
+ * Audit finding 6: `assignedTo` used to be trusted as-is (any string). The
+ * caller's dropdown was a mount-time snapshot of the managed-user roster, so
+ * an account deactivated (or never valid) after the page loaded could still
+ * be durably assigned a review — one that account could never log in and
+ * complete. Re-validated here against the live roster with the same
+ * active+assignable-role rule `calculateBulkAssignment` already enforces.
  */
 export async function assignAdhocRowsToEmployee(
   directoryHandle: DirectoryHandleLike,
@@ -165,6 +174,10 @@ export async function assignAdhocRowsToEmployee(
 ): Promise<AssignAdhocRowsResult> {
   if (record.status === "closed") {
     return { ok: false, error: "هذا الاستيراد مُغلق — لا يمكن تعيين المزيد من الصفوف منه." };
+  }
+
+  if (!findAssignableEmployee(assignedTo, getManagedLoginUsers())) {
+    return { ok: false, error: "الموظف المحدد غير موجود، أو غير نشط، أو لا يملك صلاحية استلام العينات." };
   }
 
   const monthFolderName = adhocMonthFolderName(record.importId);

@@ -57,13 +57,13 @@ describe("adhocImportEmployeeView", () => {
     await createWorkspaceStructure(root, "admin");
     const record = makeRecord("adh-1", [importRow("XR-1")]);
     await ensureAdhocSampleMaster(root, record);
-    const assignResult = await assignAdhocRowsToEmployee(root, record, ["s1:2"], "emp1", "admin");
+    const assignResult = await assignAdhocRowsToEmployee(root, record, ["s1:2"], "jalgahamdi", "admin");
     expect(assignResult.ok).toBe(true);
 
-    const entries = await loadAdhocEntriesForEmployeeView(root, "emp1", false);
+    const entries = await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false);
     expect(entries).toHaveLength(1);
     expect(entries[0].xrayImageId).toBe("ADHOC-adh-1-XR-1");
-    expect(entries[0].assignedTo).toBe("emp1");
+    expect(entries[0].assignedTo).toBe("jalgahamdi");
     expect(entries[0].adhocImportId).toBe("adh-1");
     expect(entries[0].adhocFileName).toBe("adh-1.xlsx");
   });
@@ -73,9 +73,9 @@ describe("adhocImportEmployeeView", () => {
     await createWorkspaceStructure(root, "admin");
     const record = makeRecord("adh-2", [importRow("XR-1")]);
     await ensureAdhocSampleMaster(root, record);
-    await assignAdhocRowsToEmployee(root, record, ["s1:2"], "emp2", "admin");
+    await assignAdhocRowsToEmployee(root, record, ["s1:2"], "hihaloraini", "admin");
 
-    const entries = await loadAdhocEntriesForEmployeeView(root, "emp1", false);
+    const entries = await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false);
     expect(entries).toEqual([]);
   });
 
@@ -84,13 +84,13 @@ describe("adhocImportEmployeeView", () => {
     await createWorkspaceStructure(root, "admin");
     const record = makeRecord("adh-3", [importRow("XR-1"), importRow("XR-2", 3)]);
     await ensureAdhocSampleMaster(root, record);
-    const first = await assignAdhocRowsToEmployee(root, record, ["s1:2"], "emp1", "admin");
+    const first = await assignAdhocRowsToEmployee(root, record, ["s1:2"], "jalgahamdi", "admin");
     expect(first.ok).toBe(true);
     if (!first.ok) return;
-    await assignAdhocRowsToEmployee(root, first.record, ["s1:3"], "emp2", "admin");
+    await assignAdhocRowsToEmployee(root, first.record, ["s1:3"], "hihaloraini", "admin");
 
     const entries = await loadAdhocEntriesForEmployeeView(root, "supervisor-1", true);
-    expect(entries.map((e) => e.assignedTo).sort()).toEqual(["emp1", "emp2"]);
+    expect(entries.map((e) => e.assignedTo).sort()).toEqual(["hihaloraini", "jalgahamdi"]);
   });
 
   it("skips an ad-hoc import that has no assignments at all (cost bound: never loads its sample/distribution store)", async () => {
@@ -104,14 +104,14 @@ describe("adhocImportEmployeeView", () => {
     const { saveAdhocImportRecord } = await import("./adhocImportStorage");
     await saveAdhocImportRecord(root, record);
 
-    const entries = await loadAdhocEntriesForEmployeeView(root, "emp1", false);
+    const entries = await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false);
     expect(entries).toEqual([]);
   });
 
   it("degrades to [] (never throws) when the ad-hoc index is entirely missing — a fresh workspace with no ad-hoc imports", async () => {
     const root = createMemoryDirectory();
     await createWorkspaceStructure(root, "admin");
-    await expect(loadAdhocEntriesForEmployeeView(root, "emp1", false)).resolves.toEqual([]);
+    await expect(loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false)).resolves.toEqual([]);
   });
 
   it("skips a corrupt/unreadable per-import sample store instead of throwing, without affecting other healthy imports", async () => {
@@ -121,13 +121,13 @@ describe("adhocImportEmployeeView", () => {
     // Healthy import.
     const good = makeRecord("adh-good", [importRow("XR-1")]);
     await ensureAdhocSampleMaster(root, good);
-    await assignAdhocRowsToEmployee(root, good, ["s1:2"], "emp1", "admin");
+    await assignAdhocRowsToEmployee(root, good, ["s1:2"], "jalgahamdi", "admin");
 
     // Corrupt import: its index entry claims an assignment exists, but its
     // sample.master.json on disk is garbage with no valid .bak to recover from.
     const bad = makeRecord("adh-bad", [importRow("XR-9")]);
     await ensureAdhocSampleMaster(root, bad);
-    const assignedBad = await assignAdhocRowsToEmployee(root, bad, ["s1:2"], "emp1", "admin");
+    const assignedBad = await assignAdhocRowsToEmployee(root, bad, ["s1:2"], "jalgahamdi", "admin");
     expect(assignedBad.ok).toBe(true);
     const badDir = await getSampleMainDir(root, adhocMonthFolderName("adh-bad"), true);
     const handle = await badDir.getFileHandle("sample.master.json", { create: true });
@@ -135,7 +135,7 @@ describe("adhocImportEmployeeView", () => {
     await writable.write("{not valid json");
     await writable.close();
 
-    const entries = await loadAdhocEntriesForEmployeeView(root, "emp1", false);
+    const entries = await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false);
     expect(entries.map((e) => e.xrayImageId)).toEqual(["ADHOC-adh-good-XR-1"]);
   });
 });

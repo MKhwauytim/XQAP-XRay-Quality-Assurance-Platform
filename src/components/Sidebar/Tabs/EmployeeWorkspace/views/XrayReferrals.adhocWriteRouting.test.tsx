@@ -288,12 +288,12 @@ afterEach(() => {
 
 describe("XrayReferrals — ad-hoc rows never write into the selected real month", () => {
   it("replaces an ad-hoc row inside the ad-hoc store, leaving the real month's event log untouched", async () => {
-    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeSession({ role: "employee", username: "jalgahamdi", loginAt: new Date().toISOString() });
     writeUserManagementState(createEmptyUserManagementState(), false);
 
     const root = createMemoryDirectory("root");
     await seedRealMonth(root);
-    await seedAdhocAssignment(root, "emp-1");
+    await seedAdhocAssignment(root, "jalgahamdi");
 
     lookupMock.mockResolvedValue({
       recommended: [
@@ -343,12 +343,12 @@ describe("XrayReferrals — ad-hoc rows never write into the selected real month
   });
 
   it("files an employee reopen REQUEST for an ad-hoc row against the ad-hoc store", async () => {
-    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeSession({ role: "employee", username: "jalgahamdi", loginAt: new Date().toISOString() });
     writeUserManagementState(createEmptyUserManagementState(), false);
 
     const root = createMemoryDirectory("root");
     await seedRealMonth(root);
-    await seedAdhocAssignment(root, "emp-1");
+    await seedAdhocAssignment(root, "jalgahamdi");
     await seedTemplate(root);
 
     render(<XrayReferrals directoryHandle={root} />);
@@ -361,9 +361,9 @@ describe("XrayReferrals — ad-hoc rows never write into the selected real month
     fireEvent.click(screen.getByRole("button", { name: "تقديم" }));
     await waitFor(() => expect(screen.getByText("تم التقديم.")).toBeInTheDocument());
 
-    const adhocAnswers = await loadEmployeeAnswers(root, ADHOC_FOLDER, "emp-1");
+    const adhocAnswers = await loadEmployeeAnswers(root, ADHOC_FOLDER, "jalgahamdi");
     expect(adhocAnswers.items.find((i) => i.xrayImageId === ADHOC_ID)?.status).toBe("submitted");
-    const realMonthAnswers = await loadEmployeeAnswers(root, MONTH, "emp-1");
+    const realMonthAnswers = await loadEmployeeAnswers(root, MONTH, "jalgahamdi");
     expect(realMonthAnswers.items.some((i) => i.xrayImageId === ADHOC_ID)).toBe(false);
 
     fireEvent.click(
@@ -391,12 +391,12 @@ describe("XrayReferrals — ad-hoc rows never write into the selected real month
   it("applies a supervisor's DIRECT reopen of an ad-hoc row against the ad-hoc store", async () => {
     // A supervisor holds ew.reopenAnswer, so InspectionPanel renders the direct
     // reopen button (handleReopenAnswer) rather than the request button.
-    writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+    writeSession({ role: "supervisor", username: "malrogi", loginAt: new Date().toISOString() });
     writeUserManagementState(createEmptyUserManagementState(), false);
 
     const root = createMemoryDirectory("root");
     await seedRealMonth(root);
-    await seedAdhocAssignment(root, "sup-1");
+    await seedAdhocAssignment(root, "malrogi");
     await seedTemplate(root);
 
     render(<XrayReferrals directoryHandle={root} />);
@@ -424,7 +424,7 @@ describe("XrayReferrals — ad-hoc rows never write into the selected real month
       expect(screen.getByText("تمت إعادة فتح الإجابة للتصحيح.")).toBeInTheDocument()
     );
 
-    const adhocAnswers = await loadEmployeeAnswers(root, ADHOC_FOLDER, "sup-1");
+    const adhocAnswers = await loadEmployeeAnswers(root, ADHOC_FOLDER, "malrogi");
     expect(adhocAnswers.items.find((i) => i.xrayImageId === ADHOC_ID)?.status).toBe("draft");
 
     const realLog = await loadDistributionLog(root, MONTH);
