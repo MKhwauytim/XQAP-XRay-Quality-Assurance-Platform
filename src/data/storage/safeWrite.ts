@@ -1952,3 +1952,114 @@ export async function safeReadJson<T>(
   }
   return { ok: false, reason: "corrupt" };
 }
+
+// ── "I could not read it" is not "it is not there" ──────────────────────────
+//
+// `safeReadJson` above already separates the three outcomes a read can have: a
+// file that is genuinely absent (`missing`), a file that exists but cannot be
+// trusted (`corrupt`, after the `.bak`/`.tmp` ladder has been exhausted), and a
+// read that failed outright — an exhausted `NotReadableError`, a revoked grant,
+// a payload past the engine's string ceiling — which THROWS.
+//
+// Callers that collapse all three into "return the empty default" convert an I/O
+// hiccup into data loss. An empty default handed to a read-modify-write is not a
+// harmless placeholder: it is written back as the entire file. One transient
+// NotReadableError has, in this codebase's history, been enough to rewrite an
+// employee's twenty answers as one, to make a month's distribution log read as
+// zero events, and to truncate the audit trail — every one of them reporting
+// success.
+//
+// So there is exactly one rule, and it is the same one this module applies to
+// itself:
+//
+//     ONLY a genuine NotFound maps to the empty default.
+//     Everything else propagates.
+//
+// `readOptionalJson` below is where that rule is enforced for every optional
+// workspace file, including the ones that live in a legacy location as well as a
+// current one. It follows `eventFileName`'s reject-don't-sanitize philosophy:
+// refusing to answer is recoverable, inventing an answer is not.
+
+/** A read that either produced a value or proved the file is not there. */
+export type OptionalReadOutcome<T> =
+  | { kind: "found"; value: T }
+  | { kind: "absent" };
+
+/** One place a file may live — the current layout, or a legacy fallback. */
+export type OptionalReadLocation = {
+  /**
+   * Opens the directory holding the file. A `NotFoundError` raised here means
+   * this location does not exist at all (a legacy folder a modern workspace
+   * never had), which is a legitimate absence. Any OTHER failure is not: it
+   * means we could not look, and "I could not look" never proves "not there".
+   */
+  directory: () => Promise<DirectoryHandleLike>;
+  fileName: string;
+};
+
+export type OptionalReadOptions = {
+  /**
+   * Whether a location whose directory EXISTS but does not hold the file falls
+   * through to the next location. Defaults to `true` (the shape most legacy
+   * fallbacks in this repo already have).
+   *
+   * `false` makes the first location whose directory resolves answer
+   * definitively — for readers whose primary directory is opened with
+   * `{ create: true }`, where a miss is already conclusive and probing the
+   * legacy layout would add round trips per call on a UNC/SMB share for an
+   * answer that cannot change.
+   */
+  fallThroughOnMissingFile?: boolean;
+};
+
+/**
+ * Read an optional JSON file from the first location that has it.
+ *
+ * Returns `absent` ONLY when every location was examined and none held the
+ * file. If any location could not be examined — its directory failed to open
+ * for a reason other than absence, the read threw, or the file was there but
+ * unreadable — and no later location supplied a value, the failure is thrown
+ * rather than reported as absence.
+ *
+ * That last clause is the whole point: a caller that turns the result into an
+ * empty default gets the empty default only when emptiness is a fact.
+ */
+export async function readOptionalJson<T>(
+  context: string,
+  locations: readonly OptionalReadLocation[],
+  options?: OptionalReadOptions
+): Promise<OptionalReadOutcome<T>> {
+  const fallThrough = options?.fallThroughOnMissingFile ?? true;
+  // The first inconclusive outcome, held back in case a LATER location supplies
+  // a real value — a legacy file is still a perfectly good answer when the
+  // current location is the one that is unreadable.
+  let inconclusive: unknown = null;
+  for (const location of locations) {
+    let dir: DirectoryHandleLike;
+    try {
+      dir = await location.directory();
+    } catch (error) {
+      if (!isNotFoundError(error)) inconclusive ??= error;
+      continue;
+    }
+    let result: SafeReadResult<T>;
+    try {
+      result = await safeReadJson<T>(dir, location.fileName);
+    } catch (error) {
+      inconclusive ??= error;
+      continue;
+    }
+    if (result.ok) return { kind: "found", value: result.value };
+    if (result.reason === "corrupt") {
+      inconclusive ??= taggedError(
+        "XQ-IO-029",
+        `${context}: ${location.fileName} exists but could not be read (invalid envelope, and no usable .bak or .tmp).`
+      );
+      continue;
+    }
+    // Genuinely missing here.
+    if (!fallThrough) break;
+  }
+  if (inconclusive !== null) throw inconclusive;
+  return { kind: "absent" };
+}

@@ -2,7 +2,7 @@ import type { PreparedPopulationRow } from "../population/populationTypes";
 import { getStageKey } from "../population/stageHelpers";
 import type { StageAliasMappings } from "../population/stageHelpers";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { readEnvelopeRevision, safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { readEnvelopeRevision, readOptionalJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { codedMessage, logCodedError } from "../storage/errorCodes";
 import { ensureMonthWritable } from "../population/monthLock";
@@ -63,25 +63,35 @@ export async function loadSampleMasterRevision(
   }
 }
 
+/**
+ * The drawn sample for this month, or `null` when no sample exists.
+ *
+ * **`null` means "no sample was ever drawn" and nothing else.** It THROWS when
+ * `sample.master.json` is there but could not be read. Two callers turn this
+ * value into a safety verdict — `saveMonthRunLocked`'s TOCTOU overwrite guard
+ * and the Population tab's pre-save check — and both read `null` as "safe to
+ * overwrite the population". Answering `null` for a file we merely failed to
+ * read told them a sample they would orphan does not exist. Every other caller
+ * folds `null` into an empty row set, which is equally wrong to invent.
+ */
 export async function loadSampleMaster(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
 ): Promise<SampleMasterData | null> {
-  try {
-    const sampleDir = await getSampleDir(directoryHandle, monthFolderName, false);
-    const result = await safeReadJson<SampleMasterData>(sampleDir, SAMPLE_FILE);
-    if (result.ok) return result.value;
-  } catch {
-    // Fallback below.
-  }
-
-  try {
-    const legacyDir = await getLegacySampleDir(directoryHandle, monthFolderName);
-    const result = await safeReadJson<SampleMasterData>(legacyDir, SAMPLE_FILE);
-    return result.ok ? result.value : null;
-  } catch {
-    return null;
-  }
+  const read = await readOptionalJson<SampleMasterData>(
+    `sampling:${monthFolderName}/${SAMPLE_FILE}`,
+    [
+      {
+        directory: () => getSampleDir(directoryHandle, monthFolderName, false),
+        fileName: SAMPLE_FILE,
+      },
+      {
+        directory: () => getLegacySampleDir(directoryHandle, monthFolderName),
+        fileName: SAMPLE_FILE,
+      },
+    ]
+  );
+  return read.kind === "found" ? read.value : null;
 }
 
 function isCertScanRow(row: PreparedPopulationRow): boolean {

@@ -422,22 +422,89 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     [entries, canSeeAll, showMyOnly, username]
   );
 
-  // Auto-select first entry whenever the list changes and nothing is currently selected
-  useEffect(() => {
-    if (displayEntries.length === 0) return;
-    const valid = selEntryId != null && displayEntries.some((e) => e.xrayImageId === selEntryId);
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- auto-corrects selection when the display list changes; useMemo cannot accumulate user navigation state
-    if (!valid) setSelEntryId(displayEntries[0].xrayImageId);
-  }, [displayEntries, selEntryId]);
-
   const selEntry = useMemo(
     () => selEntryId ? (displayEntries.find((e) => e.xrayImageId === selEntryId) ?? null) : null,
     [selEntryId, displayEntries]
   );
 
+  // ── Unsaved-draft protection (P0) ──────────────────────────────────────────
+  // InspectionPanel seeds its answers at mount and SampleDetailPanel keys it on
+  // xrayImageId, so ANY re-pointing — or one-commit unmount — of the panel
+  // destroys whatever the employee has typed but not saved. The auto-select
+  // effect below used to do exactly that on an ordinary background event: a
+  // supervisor reassigns the open row, the 45s sync tick re-reads the queue, the
+  // row is gone from it, `selEntry` becomes null and the selection jumped to
+  // displayEntries[0] — a DIFFERENT x-ray — with no warning and no message.
+  // That contradicts this file's own silent-refresh contract ("a refresh must
+  // never clobber unsaved local draft state").
+  //
+  // Two pieces, neither of them touching the load path:
+  //   • dirtyEntryId      — which entry the panel has been typed into, reported
+  //                         by InspectionPanel from an event handler (never an
+  //                         effect), so it is known in the same commit.
+  //   • lastPanelEntry    — the last entry object actually handed to the panel.
+  //                         Once the row leaves `displayEntries` it exists
+  //                         nowhere else, and the panel still needs it to render.
+  //
+  // The retention itself is DERIVED DURING RENDER, deliberately never committed
+  // from an effect: an effect lands one render too late, and in that single
+  // intervening commit `panelEntry` would be null, the panel would unmount, and
+  // its local answer state — the very thing being protected — would already be
+  // gone before the retention arrived. (Measured, not assumed: an effect-based
+  // first attempt failed the regression test below with an empty input.)
+  // Everything else, including every no-draft case, behaves exactly as before.
+  const [dirtyEntryId, setDirtyEntryId] = useState<string | null>(null);
+  // "The entry as last rendered into the panel." A ref would be the obvious
+  // home for it, but every value derived from a ref read during render is a
+  // lint error (react-hooks/refs) and the taint spreads through `panelEntry`
+  // into the whole JSX block. This is React's documented "adjusting state
+  // during render" pattern instead: the update is discarded-and-re-rendered
+  // immediately, before anything commits, so — unlike an effect — it opens no
+  // window in which the panel is unmounted.
+  const [lastPanelEntry, setLastPanelEntry] = useState<DistributionEntry | null>(null);
+  if (selEntry !== null && selEntry !== lastPanelEntry) {
+    // Guarded by the identity check above, so it runs once per entry change and
+    // cannot loop.
+    setLastPanelEntry(selEntry);
+  }
+
+  /** The vanished-but-dirty entry the panel must keep showing, or null. */
+  const retainedEntry: DistributionEntry | null =
+    selEntry === null &&
+    selEntryId !== null &&
+    dirtyEntryId === selEntryId &&
+    lastPanelEntry?.xrayImageId === selEntryId
+      ? lastPanelEntry
+      : null;
+
+  /** The entry the inspection panel renders: the live one, or the retained one. */
+  const panelEntry = selEntry ?? retainedEntry;
+  /** True while the panel is showing a row that has left the queue. */
+  const showingRetainedDraft = selEntry === null && retainedEntry !== null;
+
+  // Auto-select first entry whenever the list changes and nothing is currently selected
+  useEffect(() => {
+    if (displayEntries.length === 0) return;
+    const valid = selEntryId != null && displayEntries.some((e) => e.xrayImageId === selEntryId);
+    if (valid) return;
+    // Draft protection: the selected row is gone from the refreshed list AND the
+    // panel holds unsaved input for it. Leave the selection alone — the render
+    // above keeps the panel (and the draft) up, with a banner explaining why.
+    // The employee stays in control: any explicit navigation still moves on.
+    if (selEntryId != null && dirtyEntryId === selEntryId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- auto-corrects selection when the display list changes; useMemo cannot accumulate user navigation state
+    setSelEntryId(displayEntries[0].xrayImageId);
+  }, [displayEntries, selEntryId, dirtyEntryId]);
+
+  /** Explicit user navigation — the one case where dropping a draft is intended. */
+  const selectEntry = useCallback((xrayImageId: string | null): void => {
+    setSelEntryId(xrayImageId);
+    setDirtyEntryId(null);
+  }, []);
+
   const selAnswer = useMemo(
-    () => selEntry ? (answersMap.get(`${selEntry.xrayImageId}::${selEntry.assignedTo}`) ?? null) : null,
-    [selEntry, answersMap]
+    () => panelEntry ? (answersMap.get(`${panelEntry.xrayImageId}::${panelEntry.assignedTo}`) ?? null) : null,
+    [panelEntry, answersMap]
   );
 
   const personalStats = useMemo<PersonalStats>(() => {
@@ -481,6 +548,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       setSampleMaster(null);
       setMyQuota(null);
       setSelEntryId(null);
+      // The month itself changed away — there is no row left to retain a draft
+      // against, so the protection state resets with the selection.
+      setDirtyEntryId(null);
       setSelectedIds(new Set());
       setLoadState("ready");
     }
@@ -531,6 +601,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     if (!silent) {
       setLoadState("loading");
       setSelEntryId(null);
+      // Non-silent means a real month/user change (or a post-action reload that
+      // already closed the panel): the selection is being dropped on purpose, so
+      // the draft-protection state goes with it. Silent refreshes never get here
+      // — that is the whole point of the branch.
+      setDirtyEntryId(null);
       setSelectedIds(new Set());
     }
     // True once the mirror has been painted (Design B, step 3). A failure of
@@ -827,7 +902,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         instant: canReopenInstant,
       });
       if (result.ok) {
-        setSelEntryId(null);
+        selectEntry(null);
         setStatusMsg({
           type: "ok",
           text: result.mode === "instant" ? getLabels().msg_reopen_done : getLabels().msg_reopen_request_sent,
@@ -1014,7 +1089,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         // if it weren't passed { silent: true } either (see loadData's own
         // docblock further up).
         await loadData({ silent: true });
-        setSelEntryId(replacement.xrayImageId);
+        // Deliberate navigation to the replacement row — the old row's panel is
+        // being closed on purpose, so any draft protection for it is dropped too.
+        selectEntry(replacement.xrayImageId);
       } else {
         // Non-recommended — requires supervisor approval.
         // Store only the id (not the full row) to avoid stale copies.
@@ -1338,7 +1415,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           views already use (XrayInspectionResults, ReferralApproval), instead of
           a table with a header row and nothing under it. Only in "ready" —
           "idle" is the pre-first-load tick and must not flash an empty state. */}
-      {loadState === "ready" && entries.length === 0 && (
+      {/* `!showingRetainedDraft`: when the employee's last row was reassigned
+          away mid-edit, the empty state must not replace the panel that is
+          still holding their unsaved answers. */}
+      {loadState === "ready" && entries.length === 0 && !showingRetainedDraft && (
         <EmptyState
           icon={<CalendarOff />}
           title={
@@ -1350,7 +1430,8 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         />
       )}
 
-      {(loadState === "idle" || (loadState === "ready" && entries.length > 0)) && (() => {
+      {(loadState === "idle" ||
+        (loadState === "ready" && (entries.length > 0 || showingRetainedDraft))) && (() => {
         // True whenever the `columns` memo actually prepended the select-checkbox
         // column (personal-scope users always; oversight users only when permitted
         // to bulk-reassign — see the `columns` memo above).
@@ -1426,7 +1507,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               onFilteredRowsChange={setFilteredTableEntries}
               exportFileName={`صور الأشعة المحالة - ${selMonth || "كل الأشهر"}.xlsx`}
               expandedKey={selEntryId}
-              onRowClick={(e) => setSelEntryId(e.xrayImageId)}
+              onRowClick={(e) => selectEntry(e.xrayImageId)}
               getRowClassName={(entry) =>
                 isStudyCompleted(entry, answersMap)
                   ? "dt-tr--completed"
@@ -1466,40 +1547,48 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               // view an oversight user's figures are the whole workspace's.
               scope={canSeeAll && !showMyOnly ? "all" : "own"}
             />
-            <div className={`ew-split ew-split--right${selEntry ? "" : " ew-split--empty"}`}>
+            {showingRetainedDraft && (
+              <p className="ew-msg-warn" role="status">{L.ew_draft_retained_notice}</p>
+            )}
+            <div className={`ew-split ew-split--right${panelEntry ? "" : " ew-split--empty"}`}>
               {tableEl}
-              {selEntry ? (
+              {panelEntry ? (
                 <SampleDetailPanel
-                  entry={selEntry}
+                  entry={panelEntry}
                   template={activeTpl}
                   savedAnswer={selAnswer}
-                  readonly={!canSubmitAnswers || (canSeeAll && selEntry.assignedTo !== username)}
-                  onClose={() => setSelEntryId(null)}
+                  readonly={!canSubmitAnswers || (canSeeAll && panelEntry.assignedTo !== username)}
+                  onClose={() => selectEntry(null)}
+                  // Draft protection (P0): the panel tells us it now holds
+                  // unsaved input, so a background refresh that removes this
+                  // row keeps it on screen instead of swapping the employee to
+                  // a different x-ray. See the retention block further up.
+                  onDraftDirty={() => setDirtyEntryId(panelEntry.xrayImageId)}
                   onSave={(ans) =>
-                    handleSave(selEntry.xrayImageId, ans, selEntry.assignedTo)
+                    handleSave(panelEntry.xrayImageId, ans, panelEntry.assignedTo)
                   }
                   onReplace={
-                    canRequestReplacement && selEntry.assignedTo === username && selEntry.status === "pending"
+                    canRequestReplacement && panelEntry.assignedTo === username && panelEntry.status === "pending"
                       ? openReplacementDialog
                       : undefined
                   }
                   onReassign={
                     // Same authority as the selection bar (see canReassignSamples):
                     // the panel is just a third way to build the id list.
-                    canReassignSamples && selEntry.assignedTo === username && selEntry.status === "pending"
+                    canReassignSamples && panelEntry.assignedTo === username && panelEntry.status === "pending"
                       ? (entry) => openReassignModal([entry.xrayImageId], "single")
                       : undefined
                   }
                   onReopen={
                     canReopenAnswer
                       // eslint-disable-next-line react-hooks/refs -- handleReopenAnswer's post-write loadData() bumps loadTokenRef.current inside an event-handler call chain, never during render
-                      ? (reason) => { void handleReopenAnswer(selEntry, reason); }
+                      ? (reason) => { void handleReopenAnswer(panelEntry, reason); }
                       : undefined
                   }
                   onRequestReopen={
-                    canSubmitAnswers && selEntry.assignedTo === username
+                    canSubmitAnswers && panelEntry.assignedTo === username
                       // eslint-disable-next-line react-hooks/refs -- see onReopen above; handleRequestReopen's loadData() call is the same pattern
-                      ? (reason) => { void handleRequestReopen(selEntry, reason); }
+                      ? (reason) => { void handleRequestReopen(panelEntry, reason); }
                       : undefined
                   }
                 />

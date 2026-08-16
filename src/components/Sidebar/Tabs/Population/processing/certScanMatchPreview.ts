@@ -25,6 +25,34 @@ import { normalizeText } from "./textNormalization";
  * the real run will actually do.
  */
 
+/**
+ * Below this match rate, the paste almost certainly failed to line up with the
+ * population (the original ~30-vs-~30,000 report).
+ */
+export const SUSPICIOUSLY_LOW_MATCH_PERCENTAGE = 5;
+
+/**
+ * Above this match rate, the paste is matching *too much* — the mirror image of
+ * the low-match failure, and at least as dangerous because an over-matching
+ * paste silently fabricates the CertScan/NonCertScan stratification the draw
+ * depends on rather than visibly under-filling it.
+ *
+ * Calibrated against the owner's real month (117,337 candidate rows across 11
+ * ports): the most generous *legitimate* CertScan paste that month's X-ray IDs
+ * can support — every device code that actually appears in an ID, on every port
+ * — matches 17.31% of the population. Individual small ports do legitimately
+ * reach 100% (e.g. جديدة عرعر, 66/66), which is why this is a *population-wide*
+ * threshold and deliberately not a per-port one. 90% leaves roughly a 5x margin
+ * over the observed legitimate ceiling while still catching the substring
+ * over-match defect, which took the same month to 99.94%.
+ *
+ * A "matched rows per pasted serial" ratio was evaluated as an additional
+ * signal and rejected: a single legitimate serial in that month (`851530`)
+ * legitimately backs 19,952 rows, so no ratio threshold separates it from the
+ * defect without false-firing on real data.
+ */
+export const IMPLAUSIBLY_HIGH_MATCH_PERCENTAGE = 90;
+
 export type CertScanPortBreakdownRow = {
   /** Port name as it appears in the population (risk upload). */
   populationPortName: string;
@@ -48,6 +76,17 @@ export type CertScanMatchPreview = {
   /** Rows expected to match a CertScan device. */
   totalMatchedRows: number;
   totalMatchPercentage: number;
+  /**
+   * True when the match rate is implausibly *low* — the paste barely lines up
+   * with the population at all.
+   */
+  isSuspiciouslyLowMatch: boolean;
+  /**
+   * True when the match rate is implausibly *high* — the paste matches so much
+   * of the population that the CertScan/NonCertScan split it produces cannot be
+   * a real stratification. See `IMPLAUSIBLY_HIGH_MATCH_PERCENTAGE`.
+   */
+  isImplausiblyHighMatch: boolean;
   /** One row per population port with at least one candidate row, sorted by row count desc. */
   portBreakdown: CertScanPortBreakdownRow[];
   /** Port names named in the CertScan paste but absent from the population entirely. */
@@ -69,6 +108,8 @@ function emptyPreview(certScanEntryCount: number): CertScanMatchPreview {
     totalPopulationRows: 0,
     totalMatchedRows: 0,
     totalMatchPercentage: 0,
+    isSuspiciouslyLowMatch: false,
+    isImplausiblyHighMatch: false,
     portBreakdown: [],
     pasteOnlyPorts: [],
     populationOnlyPorts: [],
@@ -157,15 +198,23 @@ export function computeCertScanMatchPreview(
       tier: a.tier
     }));
 
+  const totalMatchPercentage =
+    totalPopulationRows === 0
+      ? 0
+      : Number(((totalMatchedRows / totalPopulationRows) * 100).toFixed(2));
+
   return {
     hasPasteData: true,
     totalCertScanEntries: certScanEntries.length,
     totalPopulationRows,
     totalMatchedRows,
-    totalMatchPercentage:
-      totalPopulationRows === 0
-        ? 0
-        : Number(((totalMatchedRows / totalPopulationRows) * 100).toFixed(2)),
+    totalMatchPercentage,
+    // Both flags require a non-empty population: with zero candidate rows the
+    // percentage is a meaningless 0 and must not read as "suspiciously low".
+    isSuspiciouslyLowMatch:
+      totalPopulationRows > 0 && totalMatchPercentage < SUSPICIOUSLY_LOW_MATCH_PERCENTAGE,
+    isImplausiblyHighMatch:
+      totalPopulationRows > 0 && totalMatchPercentage >= IMPLAUSIBLY_HIGH_MATCH_PERCENTAGE,
     portBreakdown,
     pasteOnlyPorts: alignment.unmatchedPastePorts,
     populationOnlyPorts: alignment.unmatchedPopulationPorts,

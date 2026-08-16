@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createInitialWorkerState, handleWorkerMessage } from "./populationQueryWorker";
 import type { PopulationQueryParams } from "../data/population/populationQuery";
 import type { PopulationQueryWorkerRequest } from "./populationQueryWorkerTypes";
+import type { StageAliasMappings } from "../data/population/populationConfig";
 
 // This worker cannot be exercised through a real postMessage round-trip — Vitest's
 // node/jsdom environment cannot run a real DedicatedWorker (same limitation noted in
@@ -307,5 +308,92 @@ describe("populationQueryWorker — handleWorkerMessage", () => {
 
     // The good load's own state was never touched by the unrelated bad query.
     expect(goodLoad.state.cachedRows).toEqual(goodRows);
+  });
+});
+
+// ── Alias-index memoization: the worker mirror of stageHelpers.ts's cache ────
+// formatStageLabelForWorker memoizes the normalized alias table per mapping
+// object. The table is workspace config an admin can edit and re-send on a new
+// "load", so a stale index would make Browse filter/sort on the OLD labels.
+describe("populationQueryWorker stage-alias memoization", () => {
+  function loadWith(
+    stageMappings: StageAliasMappings,
+    rows: Array<Record<string, unknown>>
+  ) {
+    return handleWorkerMessage(createInitialWorkerState(), {
+      type: "load",
+      requestId: 1,
+      rawJsonText: rawPopulationJson(rows),
+      stageMappings
+    }).state;
+  }
+
+  function filterByStageLabel(state: ReturnType<typeof loadWith>, label: string) {
+    const outcome = handleWorkerMessage(state, {
+      type: "query",
+      requestId: 2,
+      params: baseQueryParams({ columnFilters: { stage: [label] } })
+    });
+    if (outcome.response.type !== "result") throw new Error("expected a result response");
+    return outcome.response.result.totalRows;
+  }
+
+  const rows = [
+    { xrayImageId: "a", stage: "L3" },
+    { xrayImageId: "b", stage: "THIRD_STAGE" },
+    { xrayImageId: "c", stage: "FIRST_STAGE" }
+  ];
+
+  it("classifies repeated rows consistently under one mapping table", () => {
+    const mappings: StageAliasMappings = {
+      first: ["FIRST_STAGE"],
+      second: ["SECOND_STAGE"],
+      third: ["THIRD_STAGE"],
+      fourth: ["FOURTH_STAGE"]
+    };
+    const state = loadWith(mappings, rows);
+    expect(filterByStageLabel(state, "المستوى الثالث")).toBe(1); // only THIRD_STAGE
+    expect(filterByStageLabel(state, "L3")).toBe(1); // unmapped -> raw passthrough
+    expect(filterByStageLabel(state, "المستوى الأول")).toBe(1);
+  });
+
+  it("picks up an edited alias table rather than serving the cached one", () => {
+    const mappings: StageAliasMappings = {
+      first: ["FIRST_STAGE"],
+      second: ["SECOND_STAGE"],
+      third: ["THIRD_STAGE"],
+      fourth: ["FOURTH_STAGE"]
+    };
+    const before = loadWith(mappings, rows);
+    expect(filterByStageLabel(before, "المستوى الثالث")).toBe(1);
+
+    // (a) admin edits the mapping and the config object is rebuilt immutably
+    const edited: StageAliasMappings = { ...mappings, third: [...mappings.third, "L3"] };
+    const after = loadWith(edited, rows);
+    expect(filterByStageLabel(after, "المستوى الثالث")).toBe(2); // L3 now folds in
+
+    // (b) same object identity, array replaced in place
+    mappings.third = ["THIRD_STAGE", "L3"];
+    expect(filterByStageLabel(loadWith(mappings, rows), "المستوى الثالث")).toBe(2);
+
+    // (c) same object AND same array identity, mutated by push alone — nothing
+    // but the captured length can catch this one.
+    mappings.first.push("L3");
+    const mutated = loadWith(mappings, rows);
+    // "L3" is now listed under both first and third; first wins, as the original
+    // early-returning loop did, so row a joins FIRST_STAGE's row c.
+    expect(filterByStageLabel(mutated, "المستوى الأول")).toBe(2);
+    expect(filterByStageLabel(mutated, "المستوى الثالث")).toBe(1);
+  });
+
+  it("keeps two different mapping tables from bleeding into each other", () => {
+    const a: StageAliasMappings = { first: ["L3"], second: [], third: [], fourth: [] };
+    const b: StageAliasMappings = { first: [], second: [], third: ["L3"], fourth: [] };
+    const stateA = loadWith(a, rows);
+    const stateB = loadWith(b, rows);
+    expect(filterByStageLabel(stateA, "المستوى الأول")).toBe(1);
+    expect(filterByStageLabel(stateB, "المستوى الثالث")).toBe(1);
+    expect(filterByStageLabel(stateA, "المستوى الأول")).toBe(1);
+    expect(filterByStageLabel(stateB, "المستوى الثالث")).toBe(1);
   });
 });

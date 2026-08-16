@@ -30,6 +30,24 @@ type Props = {
    *  this creates a request (or applies instantly, per the caller) rather than a
    *  supervisor directly reopening any answer. */
   onRequestReopen?: (reason: string) => void;
+  /**
+   * Fired the moment this panel holds answer input the employee has not saved.
+   *
+   * The panel seeds `ans` once, at mount, and callers key it on `xrayImageId` —
+   * so anything that re-points the panel at a different entry throws the typed
+   * draft away with no warning. The caller cannot see that state from outside,
+   * and it is the caller (not this panel) that decides what happens when the
+   * open entry disappears from a refreshed list. This is the one signal it
+   * needs to make that decision safely; see XrayReferrals' draft retention.
+   *
+   * Deliberately one-way and never un-set — not even after a successful save.
+   * "This panel has been typed into" is a conservative over-approximation of
+   * "there is work to lose", and the failure mode of over-reporting (a panel
+   * kept open a little too eagerly) is harmless next to the failure mode of
+   * under-reporting (an employee's answers silently destroyed). A save that
+   * FAILED must still count as dirty, and that is indistinguishable from here.
+   */
+  onDraftDirty?: () => void;
 };
 
 export default function InspectionPanel({
@@ -43,6 +61,7 @@ export default function InspectionPanel({
   onReassign,
   onReopen,
   onRequestReopen,
+  onDraftDirty,
 }: Props) {
   const [ans, setAns] = useState<Record<string, string | number | boolean>>(() => {
     if (!savedAnswer) return {};
@@ -223,6 +242,10 @@ export default function InspectionPanel({
             onChange={(fieldId, value) => {
               setValidationMsg(null);
               setAns((prev) => ({ ...prev, [fieldId]: value }));
+              // Event handler, not an effect: the caller learns about the draft
+              // in the same commit the draft is created, with no ordering
+              // subtlety and nothing to clean up on unmount.
+              onDraftDirty?.();
             }}
           />
         )}

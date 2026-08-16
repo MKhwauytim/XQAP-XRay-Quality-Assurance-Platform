@@ -31,6 +31,7 @@ import {
   sortDistributionEventsForFold,
 } from "./distributionEventStore";
 import { dedupeInFlight, workspaceScopeId, bumpWorkspaceEpoch, workspaceEpoch } from "../storage/inFlightReads";
+import { isNotFoundError } from "../storage/transientFileErrors";
 
 const LOG_FILE = "distribution.log.json";
 const CURRENT_FILE = "distribution.current.json";
@@ -144,24 +145,31 @@ async function readCurrentDistributionSource(
     return { currentLog, immutableEvents: [], segmentOffsets: {}, legacyEventFileNames: [] };
   }
   let eventsDir: DirectoryHandleLike;
-  let legacyValues: DistributionEvent[];
-  let legacyEventFileNames: string[];
   try {
     eventsDir = await directory.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: false });
-    const { values } = await readAppendOnlyDirectory<DistributionEvent>(eventsDir, {
-      suffix: ".json",
-      onUnreadable: "throw",
-      unreadableError: (name) => `Cannot read immutable distribution event: ${name}`,
-      scope: { root: directoryHandle, path: `${monthFolderName}/1-main/${DISTRIBUTION_EVENTS_DIR}` },
-    });
-    legacyValues = values;
-    legacyEventFileNames = (await listDirectoryEntries(eventsDir))
-      .filter((entry) => entry.kind === "file" && entry.name.endsWith(".json"))
-      .map((entry) => entry.name)
-      .sort((a, b) => a.localeCompare(b));
-  } catch {
+  } catch (error) {
+    // ONLY a genuine absence means "this month has no immutable events". The
+    // catch that used to sit around the reads below swallowed every other
+    // failure too, so one unreadable legacy event file — or one transient
+    // NotReadableError — made loadDistributionLog report ZERO events for a
+    // month with a full assignment history. The re-draw hard block reads that
+    // as "nothing distributed yet" and overwrites sample.master.json, orphaning
+    // every assignment and answer in the month.
+    if (!isNotFoundError(error)) throw error;
     return { currentLog, immutableEvents: [], segmentOffsets: {}, legacyEventFileNames: [] };
   }
+  // Deliberately unguarded: `onUnreadable: "throw"` above is the whole point,
+  // and a listing failure is equally inconclusive. Both propagate.
+  const { values: legacyValues } = await readAppendOnlyDirectory<DistributionEvent>(eventsDir, {
+    suffix: ".json",
+    onUnreadable: "throw",
+    unreadableError: (name) => `Cannot read immutable distribution event: ${name}`,
+    scope: { root: directoryHandle, path: `${monthFolderName}/1-main/${DISTRIBUTION_EVENTS_DIR}` },
+  });
+  const legacyEventFileNames = (await listDirectoryEntries(eventsDir))
+    .filter((entry) => entry.kind === "file" && entry.name.endsWith(".json"))
+    .map((entry) => entry.name)
+    .sort((a, b) => a.localeCompare(b));
   // Legacy one-file-per-event immutable files are still read and merged in —
   // never rewritten or deleted, since another machine on an older build may
   // still be writing them (see distributionEventStore.ts). New writes go to
@@ -656,8 +664,16 @@ async function readNewEventsSinceCheckpoint(
 
   let legacyEventFileNames = checkpoint.legacyEventFileNames;
   let newLegacyImmutable: DistributionEvent[] = [];
+  let eventsDir: DirectoryHandleLike | null = null;
   try {
-    const eventsDir = await directory.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: false });
+    eventsDir = await directory.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: false });
+  } catch (error) {
+    // No events directory yet — nothing legacy to read. Anything other than a
+    // genuine absence propagates: this delta feeds a checkpoint that ADVANCES,
+    // so an event silently missed here is missed permanently.
+    if (!isNotFoundError(error)) throw error;
+  }
+  if (eventsDir) {
     const listing = await listDirectoryEntries(eventsDir);
     legacyEventFileNames = listing
       .filter((entry) => entry.kind === "file" && entry.name.endsWith(".json"))
@@ -672,8 +688,6 @@ async function readNewEventsSinceCheckpoint(
       });
       newLegacyImmutable = values;
     }
-  } catch {
-    // No events directory yet — nothing legacy to read.
   }
 
   const segmentDelta = await readDistributionEventSegmentDelta(directory, checkpoint.segmentOffsets);

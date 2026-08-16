@@ -534,6 +534,7 @@ export function SampleDetailPanel({
   onReassign,
   onReopen,
   onRequestReopen,
+  onDraftDirty,
 }: {
   entry: DistributionEntry;
   template: TemplateSchema | null;
@@ -545,6 +546,8 @@ export function SampleDetailPanel({
   onReassign?: (entry: DistributionEntry) => void;
   onReopen?: (reason: string) => void;
   onRequestReopen?: (reason: string) => void;
+  /** Forwarded straight through — see InspectionPanel's own docblock. */
+  onDraftDirty?: () => void;
 }) {
   return (
     <InspectionPanel
@@ -559,6 +562,7 @@ export function SampleDetailPanel({
       onReassign={onReassign}
       onReopen={onReopen}
       onRequestReopen={onRequestReopen}
+      onDraftDirty={onDraftDirty}
     />
   );
 }

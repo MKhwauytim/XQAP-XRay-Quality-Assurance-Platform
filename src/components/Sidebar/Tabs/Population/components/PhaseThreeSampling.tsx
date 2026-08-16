@@ -4,7 +4,7 @@ import type { SamplingPlanPriorMonthAdvisory } from "../../../../../data/samplin
 import type { PopulationConfig, StageSamplingRule } from "../../../../../data/population/populationConfig";
 import { formatNumber, getStageKey } from "./helpers";
 import SummaryCard from "./SummaryCard";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { AlertTriangle, Info, Lock, Unlock } from "lucide-react";
 import { usePermissions } from "../../../../../auth/usePermissions";
 import { getLabels } from "../../../../../data/labels/labelsStore";
@@ -118,21 +118,24 @@ export default function PhaseThreeSampling({
   const canUnlock = canMutate("unlock-sampling-stage");
   const [isAdminUnlocked, setIsAdminUnlocked] = useState(false);
 
-  const stageCounts = {
-    first:  populationRows.filter((r) => getStageKey(r.stage, config.stageMappings) === "first").length,
-    second: populationRows.filter((r) => getStageKey(r.stage, config.stageMappings) === "second").length,
-    third:  populationRows.filter((r) => getStageKey(r.stage, config.stageMappings) === "third").length,
-    fourth: populationRows.filter((r) => getStageKey(r.stage, config.stageMappings) === "fourth").length
-  };
-
-  // CertScan pool available per stage — used only for the pre-draw shortfall
-  // estimate below, never to change what the draw itself does.
-  const certScanAvailableByStage = {
-    first:  populationRows.filter((r) => getStageKey(r.stage, config.stageMappings) === "first" && r.certScanStatus === "Certscan").length,
-    second: populationRows.filter((r) => getStageKey(r.stage, config.stageMappings) === "second" && r.certScanStatus === "Certscan").length,
-    third:  populationRows.filter((r) => getStageKey(r.stage, config.stageMappings) === "third" && r.certScanStatus === "Certscan").length,
-    fourth: populationRows.filter((r) => getStageKey(r.stage, config.stageMappings) === "fourth" && r.certScanStatus === "Certscan").length
-  };
+  // One pass over the population classifies every row once and tallies both the
+  // stage totals and the per-stage CertScan pool. This used to be eight separate
+  // `.filter()` passes recomputed on EVERY render, which on a real 117k-row month
+  // cost ~10 s of blocked main thread on mount alone.
+  //
+  // `certScanAvailableByStage` is used only for the pre-draw shortfall estimate
+  // below, never to change what the draw itself does.
+  const { stageCounts, certScanAvailableByStage } = useMemo(() => {
+    const counts = { first: 0, second: 0, third: 0, fourth: 0 };
+    const certCounts = { first: 0, second: 0, third: 0, fourth: 0 };
+    for (const row of populationRows) {
+      const stageKey = getStageKey(row.stage, config.stageMappings);
+      if (stageKey === "unknown") continue;
+      counts[stageKey] += 1;
+      if (row.certScanStatus === "Certscan") certCounts[stageKey] += 1;
+    }
+    return { stageCounts: counts, certScanAvailableByStage: certCounts };
+  }, [populationRows, config.stageMappings]);
 
   const L = getLabels();
 
