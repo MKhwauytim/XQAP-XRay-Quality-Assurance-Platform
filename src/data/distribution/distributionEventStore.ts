@@ -6,6 +6,7 @@ import { withResourceLock } from "../storage/webLocks";
 import { logCodedError, tagError, taggedError } from "../storage/errorCodes";
 import {
   TRANSIENT_WRITE_RETRY_DELAYS_MS,
+  VERIFY_READBACK_RETRY_DELAYS_MS,
   isNotFoundError,
   isNotReadableError,
   isTransientWriteError,
@@ -459,8 +460,17 @@ async function readExistingSegment(
       const transient = knownWritten
         ? isTransientWriteError(error)
         : isNotReadableError(error);
-      if (transient && attempt < TRANSIENT_WRITE_RETRY_DELAYS_MS.length) {
-        await waitFor(TRANSIENT_WRITE_RETRY_DELAYS_MS[attempt]!);
+      // Patient ladder only when this session KNOWS it wrote the segment, so
+      // absence is provably a stale view. That case also has teeth: exhausting
+      // it falls back to "" and this append then rewrites the file without
+      // lines still on the share, so more patience here directly reduces the
+      // data-loss window. A fresh writer session keeps the short ladder —
+      // absence there is the expected answer and must resolve promptly.
+      const ladder = knownWritten
+        ? VERIFY_READBACK_RETRY_DELAYS_MS
+        : TRANSIENT_WRITE_RETRY_DELAYS_MS;
+      if (transient && attempt < ladder.length) {
+        await waitFor(ladder[attempt]!);
         continue;
       }
       if (knownWritten && isNotFoundError(error)) {
@@ -532,8 +542,11 @@ async function verifySegmentSize(
   /** Whether the pre-append re-read observed the file rather than falling back. */
   baselineReliable: boolean
 ): Promise<SegmentVerification> {
+  // The patient ladder: this reads back a segment whose `close()` already
+  // resolved, so it provably exists and only the share's view is stale. Giving
+  // up in ~630 ms was turning completed Phase 4 writes into reported failures.
   for (let attempt = 0; ; attempt += 1) {
-    const retriesLeft = attempt < TRANSIENT_WRITE_RETRY_DELAYS_MS.length;
+    const retriesLeft = attempt < VERIFY_READBACK_RETRY_DELAYS_MS.length;
     let observedSize: number;
     try {
       const verifyHandle = await eventsDir.getFileHandle(fileName, { create: false });
@@ -568,7 +581,7 @@ async function verifySegmentSize(
         logCodedError("distribution:segment-verify", "XQ-DIST-007", error);
         return "unverified";
       }
-      await waitFor(TRANSIENT_WRITE_RETRY_DELAYS_MS[attempt]!);
+      await waitFor(VERIFY_READBACK_RETRY_DELAYS_MS[attempt]!);
       continue;
     }
     if (!retriesLeft) {
@@ -582,7 +595,7 @@ async function verifySegmentSize(
         "XQ-DIST-008"
       );
     }
-    await waitFor(TRANSIENT_WRITE_RETRY_DELAYS_MS[attempt]!);
+    await waitFor(VERIFY_READBACK_RETRY_DELAYS_MS[attempt]!);
   }
 }
 

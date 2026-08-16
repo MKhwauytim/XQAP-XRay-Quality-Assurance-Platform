@@ -773,6 +773,13 @@ async function tryResumeFromCheckpoint(
     sampleRows
   );
   if (incremental.requiresFullRefold) return null;
+  // Absorbed an event whose row is not in OUR sampleRows — almost certainly a
+  // stale snapshot rather than a real orphan. Fall back to the full path rather
+  // than writing a checkpoint that has advanced past it: a checkpoint written
+  // here is accepted forever after, so the event would never be re-read and the
+  // assignment would vanish permanently and silently. See
+  // DistributionIncrementalResult.absorbedAbsentRows.
+  if (incremental.absorbedAbsentRows) return null;
 
   const knownEventIds = [...new Set([...checkpoint.knownEventIds, ...delta.newEvents.map((event) => event.eventId)])].sort();
   const stamp = await readDistributionLogStamp(directoryHandle, monthFolderName);

@@ -73,7 +73,10 @@ describe("appendDistributionEventSegment under transient NotFoundError", () => {
     expect(events.map((event) => event.xrayImageId)).toEqual(["IMG-1", "IMG-2"]);
   });
 
-  it("still fails when the file stays invisible on every attempt", async () => {
+  // 40 s: the post-write read-back ladder is deliberately patient (~11 s), and
+  // this test drives BOTH the re-read and the verify to exhaustion. The wait is
+  // the behaviour under test, not incidental slowness.
+  it("still fails when the file stays invisible on every attempt", { timeout: 40_000 }, async () => {
     const root = createMemoryDirectory("root");
     const session = "s-permanent";
     const segment = distributionEventSegmentFileName(DEVICE, session);

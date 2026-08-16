@@ -271,6 +271,25 @@ export type DistributionIncrementalResult = {
    * in place is never safe here.
    */
   requiresFullRefold: boolean;
+  /**
+   * True when the fold ABSORBED at least one event because its `xrayImageId`
+   * was absent from the `sampleRows` it was handed.
+   *
+   * The caller MUST NOT persist a fold checkpoint for such a call. Absorption
+   * is almost always a stale snapshot, not a real orphan: another machine
+   * commits a replacement (new row in `sample.master.json` + its `assigned`
+   * event) while this one still holds a `sample.master` loaded seconds or hours
+   * earlier. A checkpoint written past an absorbed event advances
+   * `segmentOffsets` and `knownEventIds` beyond it, so the event is never read
+   * from disk again — and the assignment disappears permanently and silently
+   * from the derived state, every employee mirror, the KPI counts, and the
+   * footprint check that decides whether a user is safe to delete. There is no
+   * self-heal: a full refold only runs on a DERIVE_VERSION bump, a missing
+   * sidecar, or a late-event hit.
+   *
+   * Declining to checkpoint costs one re-read next time and loses nothing.
+   */
+  absorbedAbsentRows: boolean;
 };
 
 /**
@@ -289,11 +308,21 @@ export function deriveCurrentDistributionIncremental(
   sampleRows: PreparedPopulationRow[]
 ): DistributionIncrementalResult {
   if (newEvents.length === 0) {
-    return { current: previous, quotaFacts: previousQuotaFacts, requiresFullRefold: false };
+    return {
+      current: previous,
+      quotaFacts: previousQuotaFacts,
+      requiresFullRefold: false,
+      absorbedAbsentRows: false,
+    };
   }
 
   if (findLateEvent(previous.entries, newEvents)) {
-    return { current: previous, quotaFacts: previousQuotaFacts, requiresFullRefold: true };
+    return {
+      current: previous,
+      quotaFacts: previousQuotaFacts,
+      requiresFullRefold: true,
+      absorbedAbsentRows: false,
+    };
   }
 
   const resumeEntries = new Map(previous.entries.map((entry) => [entry.xrayImageId, entry]));
@@ -335,5 +364,10 @@ export function deriveCurrentDistributionIncremental(
     quotas,
   };
 
-  return { current, quotaFacts: facts, requiresFullRefold: false };
+  return {
+    current,
+    quotaFacts: facts,
+    requiresFullRefold: false,
+    absorbedAbsentRows: absentRowEventIds.size > 0,
+  };
 }
