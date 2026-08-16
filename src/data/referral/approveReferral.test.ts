@@ -4,14 +4,15 @@ import { createMemoryDirectory } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { MonthManifestData } from "../population/monthTypes";
-import { getPopulationMonthDir } from "../workspace/workspacePaths";
+import { getPopulationMonthDir, POPULATION_SUBFOLDERS } from "../workspace/workspacePaths";
 import { safeWriteJson } from "../storage/safeWrite";
 import {
   MonthClosedError,
   closeMonth,
   invalidateMonthLockCache,
 } from "../population/monthLock";
-import { saveSampleMaster } from "../sampling/sampleStorage";
+import { loadSampleMaster, saveSampleMaster } from "../sampling/sampleStorage";
+import { executeReplacement } from "../distribution/replacement";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import {
   appendDistributionEvents,
@@ -24,9 +25,19 @@ import {
   buildReassignEvent,
   deriveCurrentDistribution,
 } from "../distribution/distributionLog";
-import { appendReferralRequest, loadReferralLog } from "./referralStorage";
-import type { ReferralRequest } from "./referralTypes";
-import { approveReferral, denyReferral } from "./approveReferral";
+import {
+  appendReferralRequest,
+  appendReplacementRequest,
+  loadReferralLog,
+  loadReplacementLog,
+} from "./referralStorage";
+import type { ReferralRequest, ReplacementRequest } from "./referralTypes";
+import {
+  approveReferral,
+  approveReplacement,
+  denyReferral,
+  denyReplacement,
+} from "./approveReferral";
 
 const MONTH = "5-May-2026";
 const REQ_ID = "req-1";
@@ -358,6 +369,202 @@ describe("approveReferral", () => {
 
     const second = await denyReferral({
       directoryHandle: root, monthFolderName: MONTH, requestId: REQ_ID, reviewedBy: "sup2",
+    });
+    expect(second).toEqual({ ok: false, code: "already-reviewed" });
+  });
+});
+
+describe("approveReplacement", () => {
+  const REPL_ROW = "C1";
+
+  beforeEach(() => {
+    invalidateMonthLockCache();
+  });
+
+  function makeReplacementRequest(overrides: Partial<ReplacementRequest> = {}): ReplacementRequest {
+    return {
+      requestId: "rep-1",
+      monthFolderName: MONTH,
+      employeeUsername: "emp1",
+      originalXrayImageId: "A1",
+      replacementXrayImageId: REPL_ROW,
+      reason: "الصورة غير صالحة",
+      requestedAt: new Date().toISOString(),
+      requestedBy: "emp1",
+      status: "pending",
+      ...overrides,
+    };
+  }
+
+  /**
+   * A1 owned by emp1, A2 owned by emp2, and one spare population row (C1) that
+   * is NOT in the sample — the only legitimate replacement candidate.
+   */
+  async function seedReplacement(root: DirectoryHandleLike): Promise<void> {
+    const sampled = [makeRow("A1"), makeRow("A2")];
+    await saveSampleMaster(root, MONTH, makeSample(sampled));
+    await appendDistributionEvents(root, MONTH, [
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "admin" }),
+      buildAssignEvent({ xrayImageId: "A2", assignedTo: "emp2", eventBy: "admin" }),
+    ]);
+    const monthDir = await getPopulationMonthDir(root, MONTH, true);
+    const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, {
+      create: true,
+    });
+    await safeWriteJson(processedDir, "population.final.json", {
+      sourceMonthFolder: MONTH,
+      processedAt: new Date().toISOString(),
+      processedBy: "admin",
+      totalRows: 3,
+      certScanRows: 0,
+      nonCertScanRows: 3,
+      rows: [...sampled, makeRow(REPL_ROW)],
+    });
+  }
+
+  it("happy path: retires the original, assigns the replacement, records the decision", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    await seedReplacement(root);
+    await appendReplacementRequest(root, MONTH, makeReplacementRequest());
+
+    const result = await approveReplacement({
+      directoryHandle: root, monthFolderName: MONTH, requestId: "rep-1", reviewedBy: "sup1",
+    });
+    expect(result).toEqual({ ok: true, alreadyApplied: false });
+
+    const sample = await loadSampleMaster(root, MONTH);
+    const current = deriveCurrentDistribution(
+      await loadDistributionLog(root, MONTH),
+      (sample?.rows ?? []) as PreparedPopulationRow[]
+    );
+    expect(current.entries.find((e) => e.xrayImageId === "A1")?.status).toBe("replaced");
+    const replacement = current.entries.find((e) => e.xrayImageId === REPL_ROW);
+    expect(replacement?.assignedTo).toBe("emp1");
+    expect(replacement?.status).toBe("pending");
+    expect((await loadReplacementLog(root, MONTH)).requests[0]!.status).toBe("approved");
+  });
+
+  it("replay after a decision-write failure emits zero new events", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    await seedReplacement(root);
+    await appendReplacementRequest(root, MONTH, makeReplacementRequest());
+
+    // The crash state: the replacement already landed (events stamped with the
+    // request id) but the decision was never recorded, so the request is still
+    // pending and the reviewer retries.
+    const sample = await loadSampleMaster(root, MONTH);
+    const current = deriveCurrentDistribution(
+      await loadDistributionLog(root, MONTH),
+      (sample?.rows ?? []) as PreparedPopulationRow[]
+    );
+    const applied = await executeReplacement({
+      directoryHandle: root,
+      monthFolderName: MONTH,
+      deadEntry: current.entries.find((e) => e.xrayImageId === "A1")!,
+      replacementRow: makeRow(REPL_ROW),
+      reason: "استبدال معتمد",
+      eventBy: "sup1",
+      sourceRequestId: "rep-1",
+    });
+    expect(applied.ok).toBe(true);
+    const after = (await loadDistributionLog(root, MONTH)).events.length;
+
+    const replay = await approveReplacement({
+      directoryHandle: root, monthFolderName: MONTH, requestId: "rep-1", reviewedBy: "sup1",
+    });
+    expect(replay).toEqual({ ok: true, alreadyApplied: true });
+    expect((await loadDistributionLog(root, MONTH)).events).toHaveLength(after);
+    expect((await loadReplacementLog(root, MONTH)).requests[0]!.status).toBe("approved");
+  });
+
+  it("rejects a request whose original row is no longer owned by the requester", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    await seedReplacement(root);
+    await appendReplacementRequest(
+      root, MONTH, makeReplacementRequest({ employeeUsername: "emp-ghost" })
+    );
+
+    const result = await approveReplacement({
+      directoryHandle: root, monthFolderName: MONTH, requestId: "rep-1", reviewedBy: "sup1",
+    });
+    expect(result).toEqual({ ok: false, code: "stale-ownership", staleIds: ["A1"] });
+    expect((await loadReplacementLog(root, MONTH)).requests[0]!.status).toBe("pending");
+  });
+
+  it("refuses to hand a second requester a replacement row the first approval already took", async () => {
+    // Two employees independently pick the SAME spare row as their replacement.
+    // The first approval consumes it; the second must not silently flip its
+    // ownership to the second employee — that transfer emits no `reassigned`
+    // event and no notification, so the first employee's queue changes under
+    // them with nothing in the audit trail explaining it.
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    await seedReplacement(root);
+    await appendReplacementRequest(root, MONTH, makeReplacementRequest());
+    await appendReplacementRequest(
+      root,
+      MONTH,
+      makeReplacementRequest({
+        requestId: "rep-2",
+        employeeUsername: "emp2",
+        requestedBy: "emp2",
+        originalXrayImageId: "A2",
+      })
+    );
+
+    const first = await approveReplacement({
+      directoryHandle: root, monthFolderName: MONTH, requestId: "rep-1", reviewedBy: "sup1",
+    });
+    expect(first).toEqual({ ok: true, alreadyApplied: false });
+
+    const second = await approveReplacement({
+      directoryHandle: root, monthFolderName: MONTH, requestId: "rep-2", reviewedBy: "sup1",
+    });
+    expect(second).toEqual({ ok: false, code: "stale-ownership", staleIds: [REPL_ROW] });
+
+    // emp1 keeps the row the first approval granted them, and A2 is untouched.
+    const sample = await loadSampleMaster(root, MONTH);
+    const current = deriveCurrentDistribution(
+      await loadDistributionLog(root, MONTH),
+      (sample?.rows ?? []) as PreparedPopulationRow[]
+    );
+    expect(current.entries.find((e) => e.xrayImageId === REPL_ROW)?.assignedTo).toBe("emp1");
+    expect(current.entries.find((e) => e.xrayImageId === "A2")?.status).toBe("pending");
+    expect(current.entries.find((e) => e.xrayImageId === "A2")?.assignedTo).toBe("emp2");
+
+    // The losing request stays pending for a human to resolve, never auto-denied.
+    const log = await loadReplacementLog(root, MONTH);
+    expect(log.requests.find((r) => r.requestId === "rep-2")!.status).toBe("pending");
+  });
+
+  it("refuses a replacement row that is already part of the drawn sample", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    await seedReplacement(root);
+    // emp1 names emp2's already-sampled row as their replacement.
+    await appendReplacementRequest(
+      root, MONTH, makeReplacementRequest({ replacementXrayImageId: "A2" })
+    );
+
+    const result = await approveReplacement({
+      directoryHandle: root, monthFolderName: MONTH, requestId: "rep-1", reviewedBy: "sup1",
+    });
+    expect(result).toEqual({ ok: false, code: "stale-ownership", staleIds: ["A2"] });
+    expect((await loadDistributionLog(root, MONTH)).events.filter(
+      (e) => e.eventType === "replaced"
+    )).toHaveLength(0);
+  });
+
+  it("denyReplacement guards against non-pending requests", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    await seedReplacement(root);
+    await appendReplacementRequest(root, MONTH, makeReplacementRequest());
+
+    const first = await denyReplacement({
+      directoryHandle: root, monthFolderName: MONTH, requestId: "rep-1", reviewedBy: "sup1",
+    });
+    expect(first.ok).toBe(true);
+
+    const second = await denyReplacement({
+      directoryHandle: root, monthFolderName: MONTH, requestId: "rep-1", reviewedBy: "sup2",
     });
     expect(second).toEqual({ ok: false, code: "already-reviewed" });
   });

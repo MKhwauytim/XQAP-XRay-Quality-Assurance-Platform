@@ -296,6 +296,27 @@ export async function approveReplacement(params: {
       return { ok: false, code: "stale-ownership", staleIds: [fresh.originalXrayImageId] };
     }
 
+    // 3b. Ownership check on the REPLACEMENT row. Requests are independent
+    // records: two employees can each file one naming the same spare row, and
+    // nothing before this point noticed. Approving the second one appends that
+    // row to the sample again and emits a fresh `assigned` event for it — and
+    // the fold's `assigned` handler overwrites `assignedTo` unconditionally, so
+    // the row silently changes hands with no `reassigned` event and no
+    // notification. This mirrors the guard the employee-immediate replacement
+    // path in XrayReferrals.handleReplace already applies before committing.
+    //
+    // Sample membership counts as taken on its own, exactly as that path treats
+    // it: a drawn row is already accounted for in the month's allocations, so
+    // re-drawing it as a replacement double-counts it whether or not anyone
+    // currently owns it.
+    const replacementTaken =
+      sample.rows.some((row) => row.xrayImageId === fresh.replacementXrayImageId) ||
+      (current?.entries.some((entry) => entry.xrayImageId === fresh.replacementXrayImageId) ??
+        false);
+    if (replacementTaken) {
+      return { ok: false, code: "stale-ownership", staleIds: [fresh.replacementXrayImageId] };
+    }
+
     // Stage aliases the month was drawn under — without them appendSampleRow
     // classifies a custom-alias stage as "unknown" and drops it from
     // stageAllocations. Best-effort: on config-load failure fall back to the

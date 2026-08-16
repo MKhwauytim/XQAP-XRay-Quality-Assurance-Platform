@@ -742,7 +742,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     try {
       const result = await reopenSubmittedAnswer({
         directoryHandle,
-        monthFolderName: selMonth,
+        // Routed on the ROW, not the selected month — see folderForRow. The
+        // answer being reopened was written by handleSave to the row's own
+        // store, so an ad-hoc row's reopen must read and rewrite it there.
+        monthFolderName: folderForRow(entry.xrayImageId),
         employeeUsername: entry.assignedTo,
         xrayImageId: entry.xrayImageId,
         reopenedBy: username,
@@ -779,7 +782,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     try {
       const result = await submitReopenRequest({
         directoryHandle,
-        monthFolderName: selMonth,
+        // Routed on the ROW (see folderForRow): the request has to land in the
+        // same store as the answer its approver will reopen, or approval fails
+        // with "no saved answer" while polluting an unrelated month's queue.
+        monthFolderName: folderForRow(entry.xrayImageId),
         employeeUsername: entry.assignedTo,
         xrayImageId: entry.xrayImageId,
         assignedTo: entry.assignedTo,
@@ -833,7 +839,15 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       setSampleMaster(sample);
       // Ad-hoc entries live outside this month's derivation, so carry the ones
       // already loaded rather than dropping them from the exclusion set.
-      return { sample, entries: [...(dist?.entries ?? []), ...allEntries.filter(isAdhocEntry)] };
+      const merged = [...(dist?.entries ?? []), ...allEntries.filter(isAdhocEntry)];
+      // BOTH halves must be committed, not just the sample. The short-circuit at
+      // the top of this function pairs a cached `sampleMaster` with component
+      // state `allEntries`; committing only the sample meant every subsequent
+      // open re-paired the fresh sample with the mirror-only entry list, so the
+      // exclusion set silently lost every other employee's rows and the dialog
+      // offered rows they already owned.
+      setAllEntries(merged);
+      return { sample, entries: merged };
     } catch (error) {
       logError("xrayReferrals:ensureReplacementContext", error);
       return null;
@@ -941,7 +955,12 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         // Immediate replacement — no approval needed.
         const result = await executeReplacement({
           directoryHandle,
-          monthFolderName: selMonth,
+          // The same store the freshness re-check above read from. Routed on
+          // `selMonth` this appended a `replaced` event for an ADHOC-* id into a
+          // real month's immutable log (which its fold can never interpret),
+          // appended a real population row to an already-drawn sample master,
+          // and left the ad-hoc row live — the employee owned both.
+          monthFolderName: rowFolder,
           deadEntry: entry,
           replacementRow: fullReplacementRow,
           reason,
@@ -969,7 +988,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         // Store only the id (not the full row) to avoid stale copies.
         const request: ReplacementRequest = {
           requestId: `rep-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          monthFolderName: selMonth,
+          // Must match the folder the request is appended to (below): every
+          // distribution read/write approveReplacement performs is keyed off
+          // this field, so a record stored in the ad-hoc store while naming the
+          // selected month would apply the replacement to the wrong population.
+          monthFolderName: folderForRow(entry.xrayImageId),
           employeeUsername: entry.assignedTo,
           originalXrayImageId: entry.xrayImageId,
           replacementXrayImageId: replacement.xrayImageId,
