@@ -294,6 +294,17 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
         description: "تغيير عدد الثواني بين عمليات المزامنة التلقائية لكل الأجهزة",
       },
       {
+        id: "settings.adminAccount",
+        label: "تعديل حساب المدير",
+        description: "تغيير طريقة تسجيل دخول المدير أو كلمة مرور حساب المدير الأساسي",
+        // Unlike settings.syncInterval, this can legitimately apply with no
+        // workspace connected — AdminAccountSection's own persist() falls back
+        // to a session-only change (with its own explicit message) rather than
+        // hard-failing, so the mutation must not be blocked purely on
+        // workspaceReady the way workspace-backed features are.
+        mutationStorage: "browser",
+      },
+      {
         id: "edit-interface-labels",
         label: "تعديل تسميات الواجهة",
         description: "تعديل نصوص الواجهة واستعادة قيمها الافتراضية من صفحة الإعدادات",
@@ -337,7 +348,7 @@ export const TAB_FEATURE_MAP: Readonly<Record<string, readonly string[]>> = {
   "user-management":    ["manage-users", "reset-passwords", "edit-permissions"],
   "reports":            ["export-reports", "report-designer.edit"],
   "archive":            ["archive.closeMonth", "archive.createBackup", "archive.restoreBackup"],
-  "settings":           ["view-error-log", "edit-interface-labels", "settings.syncInterval"],
+  "settings":           ["view-error-log", "edit-interface-labels", "settings.syncInterval", "settings.adminAccount"],
   "adhoc-import":       ["adhoc-import.ingest", "adhoc-import.assign"],
 };
 
@@ -396,6 +407,10 @@ const FEATURE_DEFAULTS: Record<string, Partial<Record<AuthRole, boolean>>> = {
   // Admin-only by default: the cadence is workspace-wide, so a single careless
   // change affects every client on the shared folder.
   "settings.syncInterval": { guest: false, employee: false, supervisor: false, manager: false },
+  // Admin-only by default: this gates the bootstrap admin passcode/login method
+  // itself (audit finding 13) — no non-admin role should ever be able to grant
+  // this to itself even hypothetically.
+  "settings.adminAccount": { guest: false, employee: false, supervisor: false, manager: false },
   // Admin-only feature by design (the tab itself is admin-only — see tabCatalog.ts);
   // no non-admin role gets it by default, matching manage-users/reset-passwords above.
   "adhoc-import.ingest":  { guest: false, employee: false, supervisor: false, manager: false },

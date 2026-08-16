@@ -607,8 +607,14 @@ export default function PopulationTab() {
   );
 
   async function pickExcelFile(uploadKey: UploadKey): Promise<void> {
-    if (!canUploadData) {
-      setUploadError("لا تملك صلاحية رفع ملفات البيانات.");
+    // Audit finding 12: this used to check only canUploadData, so a keyboard
+    // user (whose Tab/Enter bypasses the wrapper's now-removed pointer-events
+    // CSS trick) or any caller could still open the file picker during a
+    // closed month or while month data was still loading -- exactly the
+    // window canUploadNow (canUploadData && !selectedMonthClosed &&
+    // !isLoadingMonthData) exists to block.
+    if (!canUploadNow) {
+      setUploadError("لا تملك صلاحية رفع ملفات البيانات، أو أن الشهر مغلق حالياً، أو أن بيانات الشهر قيد التحميل.");
       return;
     }
     setUploadError("");
@@ -675,8 +681,12 @@ export default function PopulationTab() {
       return;
     }
 
-    if (!canUploadData) {
-      setUploadError("لا تملك صلاحية رفع ملفات البيانات.");
+    // Audit finding 12: same canUploadNow re-check as pickExcelFile above --
+    // this is the fallback <input type=file> change handler, a second entry
+    // point into the same mutation that must not skip the closed-month/
+    // loading gate.
+    if (!canUploadNow) {
+      setUploadError("لا تملك صلاحية رفع ملفات البيانات، أو أن الشهر مغلق حالياً، أو أن بيانات الشهر قيد التحميل.");
       event.target.value = "";
       return;
     }
@@ -710,6 +720,15 @@ export default function PopulationTab() {
   }
 
   function clearSelectedFile(uploadKey: UploadKey): void {
+    // Audit finding 12: this checked nothing at all -- a keyboard user could
+    // wipe their own already-parsed in-memory workbook result during a window
+    // the UI means to block (closed month, no upload permission, or month
+    // data still loading), losing work with no way to recover it short of
+    // re-uploading and re-parsing.
+    if (!canUploadNow) {
+      setUploadError("لا تملك صلاحية رفع ملفات البيانات، أو أن الشهر مغلق حالياً، أو أن بيانات الشهر قيد التحميل.");
+      return;
+    }
     setUploads((currentUploads) => ({
       ...currentUploads,
       [uploadKey]: { file: null, source: null }
@@ -1222,8 +1241,19 @@ export default function PopulationTab() {
         </div>
       )}
 
-      {/* ── Process sub-tab ── */}
-      {activeSubTab !== "process" ? null : (<>
+      {/* ── Process sub-tab (DEFECT 7: hidden, not unmounted — the same
+          treatment Browse already has, including the `visitedSubTabs` gate that
+          keeps it from mounting at all until the user actually goes there, so a
+          browse-landing session still pays nothing for it (A1). Unmounting on
+          every switch destroyed Phase 4's manual-assignment filters and every
+          unsaved draft inside MappingSettingsModal, while the modal's OPEN
+          state (settingsModalMode, owned by this component) survived — so the
+          modal reopened blank. The two dialogs below are deliberately OUTSIDE
+          this wrapper: both render through ModalPortal, so `hidden` here cannot
+          hide them; they stay mounted (keeping their draft state) and are
+          closed by sub-tab scope instead. ── */}
+      {visitedSubTabs.has("process") && (<>
+      <div hidden={activeSubTab !== "process"}>
 
       <PopulationHeader
         canConfigure={canConfigureSample}
@@ -1355,9 +1385,19 @@ export default function PopulationTab() {
         onPrevious={moveToPreviousPhase}
         onNext={() => { void moveToNextPhase(); }}
       />
+      </div>
 
+      {/* ── Portalled dialogs — always mounted, scope-gated ──
+          Kept outside the `hidden` wrapper above (a ModalPortal renders to
+          document.body, so the wrapper's `hidden` would not hide them) but
+          inside the same visited gate, so MappingSettingsModal's controller
+          stays mounted and keeps its unsaved draft fields while the user is on
+          Browse — the whole point of DEFECT 7's fix. The
+          `activeSubTab === "process"` clause is what actually closes them on the
+          way out; `settingsModalMode` / `pendingReprocessSave` are untouched, so
+          both reopen exactly as they were on the way back. */}
       <MappingSettingsModal
-        isOpen={settingsModalMode !== null}
+        isOpen={settingsModalMode !== null && activeSubTab === "process"}
         onClose={() => setSettingsModalMode(null)}
         mode={settingsModalMode ?? "mapping"}
         config={config}
@@ -1387,7 +1427,7 @@ export default function PopulationTab() {
       />
 
       <ConfirmDialog
-        open={pendingReprocessSave !== null}
+        open={pendingReprocessSave !== null && activeSubTab === "process"}
         danger
         title={getLabels().population_reprocess_confirm_title}
         message={getLabels().population_reprocess_confirm_message}

@@ -20,11 +20,14 @@ import {
   loadAdminBrowsePreset,
   loadUserBrowsePreset,
   saveAdminBrowseDatasetPreset,
+  saveUserBrowseDatasetPreset,
   type BrowseDatasetPreset,
   type UserBrowsePresetFile
 } from "../../../../data/preferences/browsePresetStorage";
 import { useGlobalMonth } from "../../../../data/month/useGlobalMonth";
 import { useLabels } from "../../../../data/labels/useLabels";
+import { useFocusTrap } from "../../../../hooks/useFocusTrap";
+import { logError } from "../../../../data/storage/errorLogger";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
 import { EmptyState, ErrorState, LoadingState } from "../../../../components/StateViews/StateViews";
 import Pagination from "../../../../components/Pagination/Pagination";
@@ -549,6 +552,24 @@ export default function BrowseDataView({
   const [queryResult, setQueryResult] = useState<PopulationQueryResult<BrowseRow>>(EMPTY_QUERY_RESULT);
   const [workerFilterPreview, setWorkerFilterPreview] = useState(EMPTY_FILTER_PREVIEW);
 
+  // Finding 11: these two floating panels (column picker, per-column filter
+  // menu) had no focus trap and no Escape handling — the only overlay
+  // surfaces in the app missing it. Unlike DataTable's ColPickerPanel/
+  // ColFilterMenu (separate components that mount fresh each time they
+  // open), these panels are plain conditional JSX inside BrowseDataView's own
+  // persistently-mounted render — the hook itself never remounts, so it needs
+  // an explicit `enabled` tied to the open state (mirrors GlobalMonthSelector's
+  // `enabled: pickerOpen`) or its mount-time effect never re-fires once the
+  // div actually appears in the DOM.
+  const colPickerFocusTrapRef = useFocusTrap<HTMLDivElement>({
+    onEscape: () => setColPickerOpen(false),
+    enabled: colPickerOpen
+  });
+  const filterMenuFocusTrapRef = useFocusTrap<HTMLDivElement>({
+    onEscape: () => setOpenFilterColumn(null),
+    enabled: openFilterColumn !== null
+  });
+
   useEffect(() => {
     if (!directoryHandle) {
       browsePresetRef.current = null;
@@ -748,6 +769,20 @@ export default function BrowseDataView({
   // rows, so it never has a worker error to show.
   const browseError = useWorkerPath ? worker.error : null;
 
+  // Finding 10(b): the worker's "error" response carries the raw
+  // `err.message` from a failed `JSON.parse` (e.g. "Unexpected token < in
+  // JSON at position 0") — plain V8 English text with no Arabic translation.
+  // Rendering it directly inside the Arabic error banner below used to leak
+  // that raw string to the user. Log the raw detail (for diagnostics) instead
+  // of rendering it, and show a fixed Arabic description at the render site.
+  const loggedBrowseErrorRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (browseError && loggedBrowseErrorRef.current !== browseError) {
+      loggedBrowseErrorRef.current = browseError;
+      logError("browse:worker-query", browseError);
+    }
+  }, [browseError]);
+
   const browseColumns = useMemo(
     () => buildBrowseColumns(queryResult.pageRows),
     [queryResult.pageRows]
@@ -899,6 +934,18 @@ export default function BrowseDataView({
       }
     };
 
+    // Finding 9: every user persists their OWN personal layout (isolated) —
+    // mirrors XrayReferrals.tsx's onColConfigChange call site. Before this,
+    // only an admin's column choices were ever written to disk; a non-admin's
+    // reorder/show-hide updated the in-memory ref above (so it looked saved
+    // for the rest of the session) but vanished on the next reload/relogin.
+    void saveUserBrowseDatasetPreset(
+      directoryHandle as Parameters<typeof saveUserBrowseDatasetPreset>[0],
+      username,
+      dataset,
+      datasetPreset
+    );
+
     if (readSession()?.role === "admin") {
       void saveAdminBrowseDatasetPreset(
         directoryHandle as Parameters<typeof saveAdminBrowseDatasetPreset>[0],
@@ -1041,6 +1088,14 @@ export default function BrowseDataView({
       );
 
       XLSX.writeFile(workbook, fileName);
+    } catch (err) {
+      // Finding 10(a): this was a bare try/finally — a thrown error (a
+      // rejected collectMatchingRows call, an XLSX build failure) surfaced as
+      // an unhandled rejection while the finally block cleared `isExporting`
+      // as if the export had actually succeeded, and the already-wired
+      // `exportError` banner never appeared.
+      logError("browse:export", err);
+      setExportError("تعذّر تصدير البيانات بسبب خطأ غير متوقع — حاول مرة أخرى.");
     } finally {
       setIsExporting(false);
     }
@@ -1092,7 +1147,7 @@ export default function BrowseDataView({
       {browseError && (
         <ErrorState
           title="تعذّر تحميل بيانات هذا الشهر"
-          description={`تعذّرت قراءة ملف المجتمع النهائي أو الاستعلام عنه. ${browseError}`}
+          description="تعذّرت قراءة ملف المجتمع النهائي أو الاستعلام عنه. تم تسجيل تفاصيل الخطأ لمراجعة الدعم الفني."
         />
       )}
 
@@ -1186,6 +1241,9 @@ export default function BrowseDataView({
               {colPickerOpen && (
                 <div
                   className="bv-col-picker-dropdown"
+                  ref={colPickerFocusTrapRef}
+                  role="dialog"
+                  aria-label="اختيار الأعمدة"
                   onClick={(event) => event.stopPropagation()}
                   onMouseDown={(event) => event.stopPropagation()}
                 >
@@ -1276,6 +1334,9 @@ export default function BrowseDataView({
                       {openFilterColumn === c.key && (
                         <div
                           className="bv-column-filter-menu"
+                          ref={filterMenuFocusTrapRef}
+                          role="dialog"
+                          aria-label={`تصفية ${c.label}`}
                           onClick={(event) => event.stopPropagation()}
                           onMouseDown={(event) => event.stopPropagation()}
                         >

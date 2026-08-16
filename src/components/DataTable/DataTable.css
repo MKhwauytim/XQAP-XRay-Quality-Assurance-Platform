@@ -130,6 +130,19 @@
   color: var(--c-sky);
 }
 
+/* Inline export failure notice (finding 10) — mirrors BrowseDataView's own
+   .bv-export-error: an RTL, token-styled, non-blocking notice instead of an
+   unhandled rejection with no visible feedback. */
+.dt-export-error {
+  padding: 4px 10px;
+  border: 1px solid var(--c-danger-border);
+  border-radius: 6px;
+  background: var(--c-danger-bg);
+  color: var(--c-danger);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 /* ── Table wrap ────────────────────────────────────────────── */
 
 .dt-table-wrap {

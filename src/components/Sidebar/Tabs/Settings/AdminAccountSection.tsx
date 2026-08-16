@@ -8,12 +8,14 @@ import {
   readAdminAccount,
   updateAdminAccount,
 } from "../../../../auth/userManagement";
+import { usePermissions } from "../../../../auth/usePermissions";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import { syncUserManagementToDisk } from "../../../../data/workspace/userSync";
 import { logError } from "../../../../data/storage/errorLogger";
 import "./AdminAccountSection.css";
 
 const MIN_ADMIN_PASSWORD_LENGTH = 3;
+const ADMIN_ACCOUNT_FEATURE = "settings.adminAccount";
 
 type Feedback = { type: "ok" | "error"; text: string } | null;
 
@@ -21,11 +23,19 @@ type Feedback = { type: "ok" | "error"; text: string } | null;
  * Admin-account controls: the sign-in method for the bootstrap admin, and its
  * passcode.
  *
- * Gated on the REAL session (`readRealSession`), not the effective one — an
- * admin previewing another role must not be able to change the admin passcode
- * from inside that preview, and no non-admin role may ever see this section.
- * The client-only trust model still applies (see docs/architecture/SECURITY_MODEL.md):
- * this is a role-routing guard, not a trust boundary.
+ * Gated on the REAL session (`readRealSession`) for VISIBILITY, not the
+ * effective one — no non-admin role may ever see this section. That alone is
+ * not enough to keep it inert during a role preview, though: an admin
+ * previewing another role keeps the same real session (still "admin"), so a
+ * visibility-only gate would leave every control here fully live while
+ * impersonating e.g. "employee" (audit finding 13 — this contradicted the
+ * comment above until this fix). `canMutate(ADMIN_ACCOUNT_FEATURE)` is the
+ * second gate, exactly like `SyncIntervalSection`: it reads through
+ * `usePermissions`, which resolves the EFFECTIVE (previewed) role, so it goes
+ * false the moment the admin previews anything else. Checked at both the
+ * render boundary (disables the controls) and the handler boundary (rejects
+ * the write even if a stale render left a control enabled) — the same
+ * two-tier pattern used everywhere else in this codebase.
  */
 export function AdminAccountSection() {
   const realSession = readRealSession();
@@ -33,6 +43,7 @@ export function AdminAccountSection() {
     realSession?.role === "admin" && realSession.mode !== "demo";
 
   const { directoryHandle } = useWorkspace();
+  const { canMutate } = usePermissions();
   // Expanded on arrival (owner request): the admin-username switch and the
   // passcode editor are the point of this section, so an admin opening Settings
   // sees their current state without hunting for a collapsed header.
@@ -46,6 +57,8 @@ export function AdminAccountSection() {
   if (!isRealAdmin) return null;
 
   const actor = realSession.username;
+  const canEdit = canMutate(ADMIN_ACCOUNT_FEATURE);
+  const noPermissionText = "لا يمكن تعديل حساب المدير أثناء معاينة دور آخر.";
 
   async function persist(state: ReturnType<typeof updateAdminAccount>): Promise<void> {
     if (!directoryHandle) {
@@ -62,6 +75,12 @@ export function AdminAccountSection() {
 
   async function handleToggleUsernameLogin(enabled: boolean): Promise<void> {
     if (isSaving) return;
+    // Handler-boundary capability check (the render-boundary one only disables
+    // the controls) — see the module doc comment above.
+    if (!canMutate(ADMIN_ACCOUNT_FEATURE)) {
+      setFeedback({ type: "error", text: noPermissionText });
+      return;
+    }
     setIsSaving(true);
     setFeedback(null);
     try {
@@ -86,6 +105,12 @@ export function AdminAccountSection() {
 
   async function handleChangePassword(): Promise<void> {
     if (isSaving) return;
+    // Handler-boundary capability check (the render-boundary one only disables
+    // the controls) — see the module doc comment above.
+    if (!canMutate(ADMIN_ACCOUNT_FEATURE)) {
+      setFeedback({ type: "error", text: noPermissionText });
+      return;
+    }
     setFeedback(null);
 
     if (newPassword.trim().length < MIN_ADMIN_PASSWORD_LENGTH) {
@@ -145,11 +170,11 @@ export function AdminAccountSection() {
             على كل الأجهزة التي تفتح المجلد نفسه.
           </p>
 
-          <label className="admin-account-toggle">
+          <label className="admin-account-toggle" title={!canEdit ? noPermissionText : undefined}>
             <input
               type="checkbox"
               checked={account.allowUsernameLogin}
-              disabled={isSaving}
+              disabled={isSaving || !canEdit}
               onChange={(event) => void handleToggleUsernameLogin(event.target.checked)}
             />
             <span>
@@ -171,7 +196,7 @@ export function AdminAccountSection() {
                   type="password"
                   value={newPassword}
                   autoComplete="new-password"
-                  disabled={isSaving}
+                  disabled={isSaving || !canEdit}
                   onChange={(event) => setNewPassword(event.target.value)}
                 />
               </label>
@@ -181,7 +206,7 @@ export function AdminAccountSection() {
                   type="password"
                   value={confirmPassword}
                   autoComplete="new-password"
-                  disabled={isSaving}
+                  disabled={isSaving || !canEdit}
                   onChange={(event) => setConfirmPassword(event.target.value)}
                 />
               </label>
@@ -190,7 +215,8 @@ export function AdminAccountSection() {
               type="button"
               className="admin-account-save-btn"
               onClick={() => void handleChangePassword()}
-              disabled={isSaving}
+              disabled={isSaving || !canEdit}
+              title={!canEdit ? noPermissionText : undefined}
             >
               {isSaving ? "جارٍ الحفظ…" : "تحديث كلمة المرور"}
             </button>

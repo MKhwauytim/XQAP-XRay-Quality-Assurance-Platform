@@ -203,7 +203,11 @@ export function FeaturePermissionsSection(props: {
                   // "enable the page first" hint to employee/supervisor/manager even though
                   // settings is code-gated to guest + admin and can never be granted to them.
                   const restricted = parentTabId != null && isCeilingLocked(role.id, parentTabId);
-                  const pageBlocked = !restricted && parentTabId != null && getTabAccess(props.permissions, role.id, parentTabId) === "none";
+                  // Mutations require the parent page's access to be exactly "edit"
+                  // (getMutationCapability enforces hasRolePermission(..., "edit")), so a
+                  // feature toggle is just as inert when the page is "view" as when it is
+                  // "none" -- comparing against "none" alone under-reported the blocked set.
+                  const pageBlocked = !restricted && parentTabId != null && getTabAccess(props.permissions, role.id, parentTabId) !== "edit";
                   const enabled = role.id === "admin" || (props.featurePermissions.find((item) => item.role === role.id && item.featureId === feature.id)?.enabled ?? false);
                   if (restricted) {
                     return <td key={role.id} className="um-feat-cell"><span className="um-perm-restricted" title={`${SYSTEM_RESTRICTED_LABEL}${parentTabLabel ? ` (${parentTabLabel})` : ""}`}>{SYSTEM_RESTRICTED_LABEL}</span></td>;

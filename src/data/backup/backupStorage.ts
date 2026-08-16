@@ -318,8 +318,8 @@ function collectHeaders(rows: Array<Record<string, unknown>>): string[] {
 export function assertXlsxDatasetWithinLimit(dataset: string, rowCount: number): void {
   if (rowCount <= XLSX_MAX_ROWS_PER_DATASET) return;
   throw new Error(
-    `تعذر إنشاء ملفات XLSX الاختيارية: مجموعة ${dataset} تحتوي ${rowCount.toLocaleString("ar-SA")} صفاً، `
-    + `والحد الآمن هو ${XLSX_MAX_ROWS_PER_DATASET.toLocaleString("ar-SA")}. اكتملت نسخة JSON القابلة للاستعادة.`
+    `تعذر إنشاء ملفات XLSX الاختيارية: مجموعة ${dataset} تحتوي ${rowCount.toLocaleString("ar-SA-u-nu-latn")} صفاً، `
+    + `والحد الآمن هو ${XLSX_MAX_ROWS_PER_DATASET.toLocaleString("ar-SA-u-nu-latn")}. اكتملت نسخة JSON القابلة للاستعادة.`
   );
 }
 

@@ -5,6 +5,7 @@ import type { SidebarTabModule } from "../tabTypes";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import { usePermissions } from "../../../../auth/usePermissions";
 import { tabAllowedRoles } from "../../../../auth/tabCatalog";
+import { hasRequiredSubTabFeature } from "../../../../auth/subTabFeatureGate";
 import { AccessDenied } from "../../../PermissionGuard";
 import { touchVisitedTabs } from "../../../../app/visitedTabs";
 import { useLabels } from "../../../../data/labels/useLabels";
@@ -55,7 +56,7 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
 
 export default function EmployeeWorkspaceTab() {
   const { directoryHandle } = useWorkspace();
-  const { can, canAccessTab } = usePermissions();
+  const { canAccessTab, role, featurePermissions } = usePermissions();
   const labels = useLabels();
   const [activeSubTab, setActiveSubTab] = useState<WorkspaceSubTab>(SUB_TAB_XRAY_REFERRALS);
   // Once a sub-tab has been the active tab, keep it mounted (hidden, not
@@ -115,15 +116,17 @@ export default function EmployeeWorkspaceTab() {
     );
   }
 
+  // Audit finding 14: these two now read SUB_TAB_FEATURE_MAP (shared with
+  // App.tsx's sidebar filter) instead of an inline OR-list of `can()` calls,
+  // so the sidebar link and this content gate structurally cannot drift --
+  // previously a role with page "view" access but none of these features
+  // still got a clickable sidebar link that only ever rendered AccessDenied.
   const canViewXrayReferrals =
     canAccessTab("ew/xray-referrals") &&
-    (can("submit-answers") ||
-      can("submit-referrals") ||
-      can("request-replacement") ||
-      can("view-all-entries"));
+    hasRequiredSubTabFeature("ew/xray-referrals", role, featurePermissions);
   const canViewReferralApproval =
     canAccessTab("ew/referral-approval") &&
-    (can("approve-referrals") || can("approve-replacements") || can("ew.reopenAnswer"));
+    hasRequiredSubTabFeature("ew/referral-approval", role, featurePermissions);
   const canViewXrayResults = canAccessTab("ew/xray-results");
   const canViewInspectionForm = canAccessTab("ew/inspection-form");
 

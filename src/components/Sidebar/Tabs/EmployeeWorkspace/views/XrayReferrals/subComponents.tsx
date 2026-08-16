@@ -623,13 +623,30 @@ export function ReferralStatsStrip({
   stats,
   quota,
   username,
+  scope = "own",
 }: {
   stats: PersonalStats;
   quota: PersonalQuota;
   username: string;
+  /**
+   * Whose numbers `stats` actually describes. An oversight user switched to the
+   * "الكل" view feeds this strip the WHOLE workspace's entries (see
+   * `personalStats` in XrayReferrals.tsx), so labelling it "إحصائياتي" there
+   * misattributed every figure to the current user. Defaults to "own", which is
+   * what a personal-scope user always sees.
+   */
+  scope?: "own" | "all";
 }) {
+  const isAllScope = scope === "all";
   const statsItems = [
-    { label: "حصة اليوم", value: quota ? quota.dailyQuota.toLocaleString("ar-SA-u-nu-latn") : "—", tone: "quota" },
+    // The daily quota is always the CURRENT user's own frozen quota, never a
+    // workspace aggregate, so it is disambiguated rather than relabelled when
+    // the surrounding figures switch to workspace scope.
+    {
+      label: isAllScope ? "حصة اليوم (لي)" : "حصة اليوم",
+      value: quota ? quota.dailyQuota.toLocaleString("ar-SA-u-nu-latn") : "—",
+      tone: "quota",
+    },
     { label: "الإجمالي", value: stats.assigned.toLocaleString("ar-SA-u-nu-latn"), tone: "total" },
     { label: "مكتملة", value: stats.submitted.toLocaleString("ar-SA-u-nu-latn"), tone: "done" },
     { label: "لم تبدأ", value: stats.notStarted.toLocaleString("ar-SA-u-nu-latn"), tone: "pending" },
@@ -641,9 +658,12 @@ export function ReferralStatsStrip({
     : "لا توجد حصة محفوظة لهذا الشهر";
 
   return (
-    <section className="ew-ref-stats" aria-label="إحصائياتي">
+    <section
+      className="ew-ref-stats"
+      aria-label={isAllScope ? "إحصائيات جميع الموظفين" : "إحصائياتي"}
+    >
       <div className="ew-ref-stats-title" title={quotaTitle}>
-        <strong>متابعة العمل</strong>
+        <strong>{isAllScope ? "متابعة العمل — جميع الموظفين" : "متابعة العمل"}</strong>
       </div>
 
       <div className="ew-ref-stats-inline">
@@ -655,7 +675,10 @@ export function ReferralStatsStrip({
         ))}
       </div>
 
-      <div className="ew-ref-progress" title={`المستخدم: ${username}`}>
+      <div
+        className="ew-ref-progress"
+        title={isAllScope ? "نطاق العرض: جميع الموظفين" : `المستخدم: ${username}`}
+      >
         <div className="ew-ref-progress-track" aria-hidden="true">
           <div
             className="ew-ref-progress-fill"

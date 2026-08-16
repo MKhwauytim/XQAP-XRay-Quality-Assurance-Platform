@@ -105,7 +105,7 @@ describe("adhocImportAssignment", () => {
     const record = makeRecord("adh-2", [importRow("XR-1"), importRow("XR-2", 3)]);
     await ensureAdhocSampleMaster(root, record);
 
-    const result = await assignAdhocRowsToEmployee(root, record, ["s1:2"], "emp1", "admin");
+    const result = await assignAdhocRowsToEmployee(root, record, ["s1:2"], "jalgahamdi", "admin");
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.assignedCount).toBe(1);
@@ -118,7 +118,7 @@ describe("adhocImportAssignment", () => {
     const current = await loadOrDeriveDistributionCurrent(root, monthFolderName, master?.rows ?? []);
     expect(current?.entries).toHaveLength(1);
     expect(current?.entries[0].xrayImageId).toBe("ADHOC-adh-2-XR-1");
-    expect(current?.entries[0].assignedTo).toBe("emp1");
+    expect(current?.entries[0].assignedTo).toBe("jalgahamdi");
   });
 
   it("is idempotent: re-running assignment on an already-assigned row skips it instead of double-assigning", async () => {
@@ -127,11 +127,11 @@ describe("adhocImportAssignment", () => {
     const record = makeRecord("adh-3", [importRow("XR-1")]);
     await ensureAdhocSampleMaster(root, record);
 
-    const first = await assignAdhocRowsToEmployee(root, record, ["s1:2"], "emp1", "admin");
+    const first = await assignAdhocRowsToEmployee(root, record, ["s1:2"], "jalgahamdi", "admin");
     expect(first.ok).toBe(true);
     if (!first.ok) return;
 
-    const second = await assignAdhocRowsToEmployee(root, first.record, ["s1:2"], "emp2", "admin");
+    const second = await assignAdhocRowsToEmployee(root, first.record, ["s1:2"], "hihaloraini", "admin");
     // The row's own bookkeeping already marks it assigned, so it is filtered out
     // before an event is even built — this surfaces as the "no assignable rows" error,
     // exactly like requesting to assign zero eligible rows.
@@ -144,7 +144,7 @@ describe("adhocImportAssignment", () => {
     const record = { ...makeRecord("adh-4", [importRow("XR-1")]), status: "closed" as const };
     await ensureAdhocSampleMaster(root, record);
 
-    const result = await assignAdhocRowsToEmployee(root, record, ["s1:2"], "emp1", "admin");
+    const result = await assignAdhocRowsToEmployee(root, record, ["s1:2"], "jalgahamdi", "admin");
     expect(result.ok).toBe(false);
   });
 
@@ -171,7 +171,42 @@ describe("adhocImportAssignment", () => {
     await closeMonth(root, monthFolderName, "admin");
 
     await expect(
-      assignAdhocRowsToEmployee(root, record, ["s1:2"], "emp1", "admin")
+      assignAdhocRowsToEmployee(root, record, ["s1:2"], "jalgahamdi", "admin")
     ).rejects.toThrow(MonthClosedError);
+  });
+
+  // Audit finding 6: assignAdhocRowsToEmployee used to accept ANY string as
+  // `assignedTo` -- including a username that does not exist, belongs to a
+  // deactivated account, or belongs to a manager/admin/guest who cannot log
+  // in to work a review. That silently stalled the review with no one able
+  // to act on it.
+  it("refuses to assign to a username that does not exist in the managed roster", async () => {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    const record = makeRecord("adh-6", [importRow("XR-1")]);
+    await ensureAdhocSampleMaster(root, record);
+
+    const result = await assignAdhocRowsToEmployee(root, record, ["s1:2"], "no-such-user", "admin");
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/غير موجود|غير نشط/);
+
+    // No event should have been durably written for the rejected assignee.
+    const monthFolderName = adhocMonthFolderName("adh-6");
+    const master = await loadSampleMaster(root, monthFolderName);
+    const current = await loadOrDeriveDistributionCurrent(root, monthFolderName, master?.rows ?? []);
+    expect(current?.entries ?? []).toHaveLength(0);
+  });
+
+  it("refuses to assign to a manager username (not an employee/supervisor role, so it can never work the review)", async () => {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    const record = makeRecord("adh-7", [importRow("XR-1")]);
+    await ensureAdhocSampleMaster(root, record);
+
+    // "amonem" is a default manager account -- present in the roster, but not
+    // an assignable sample role.
+    const result = await assignAdhocRowsToEmployee(root, record, ["s1:2"], "amonem", "admin");
+    expect(result.ok).toBe(false);
   });
 });

@@ -1,10 +1,16 @@
 /* @vitest-environment jsdom */
 // B13 (bucket B13-population-wizard-gating): regression coverage for task 3's Phase-1 half —
 // the file-picker cards had no permission-aware disabled state at all before this fix.
-// FileUploadCard (a sibling component owned by a different bucket) exposes no `disabled`
-// prop of its own, so PhaseOneUpload gates it via a wrapping container (visual + pointer-events
-// disabling) instead. The underlying pickExcelFile/handleFallbackFileChange handler-side
-// checks in index.tsx are unchanged and remain the authoritative reject path.
+//
+// Audit finding 12 (follow-up): the original fix gated the cards ONLY via a wrapping
+// container's `aria-disabled` + `pointer-events: none` styling, because FileUploadCard
+// exposed no `disabled` prop of its own. That blocked a mouse click but left every button
+// inside fully keyboard-focusable and Enter/Space-activatable (`pointer-events: none` does
+// not affect keyboard interaction), and `aria-disabled` on an ancestor announces nothing
+// about its interactive descendants to a screen reader. FileUploadCard now takes a real
+// `disabled` prop wired to a real HTML `disabled` attribute on its buttons, and index.tsx's
+// pickExcelFile/handleFallbackFileChange/clearSelectedFile all re-check canUploadNow
+// (not just canUploadData) as the authoritative handler-side gate.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
@@ -42,10 +48,9 @@ describe("PhaseOneUpload — render-time permission gate for the file-picker (B1
     expect(grid).not.toBeNull();
     expect(grid.getAttribute("aria-disabled")).toBe("false");
     expect(grid.getAttribute("title")).toBeNull();
-    expect(grid.style.pointerEvents).not.toBe("none");
   });
 
-  it("failure: the upload grid is visually + interactively disabled with a denial title when canUpload is false", () => {
+  it("failure: the upload grid is visually dimmed with a denial title when canUpload is false", () => {
     const { container } = render(<PhaseOneUpload {...baseProps({ canUpload: false })} />);
     const grid = container.querySelector(".upload-grid") as HTMLElement;
     expect(grid).not.toBeNull();
@@ -53,8 +58,49 @@ describe("PhaseOneUpload — render-time permission gate for the file-picker (B1
     expect(grid.getAttribute("title")).toBe(
       "لا تملك صلاحية رفع ملفات البيانات، أو أن الشهر مغلق حالياً، أو أن بيانات الشهر قيد التحميل."
     );
-    expect(grid.style.pointerEvents).toBe("none");
     expect(grid.style.opacity).toBe("0.55");
+  });
+});
+
+// Audit finding 12: the disabling must be a REAL `disabled` attribute on the buttons
+// themselves, not just CSS on an ancestor -- that's what makes it unreachable by a
+// keyboard user (Tab still lands on the button, but a native `disabled` control cannot
+// receive focus or fire onClick from Enter/Space).
+describe("PhaseOneUpload — real `disabled` attribute on the file-picker buttons (audit finding 12)", () => {
+  it("happy: pick/remove buttons are enabled when canUpload is true", () => {
+    render(
+      <PhaseOneUpload
+        {...baseProps({
+          canUpload: true,
+          uploads: {
+            riskAgencyData: { file: new File(["x"], "risk.xlsx"), source: "input-fallback" },
+            businessIntelligenceData: { file: null, source: null },
+          },
+        })}
+      />
+    );
+    for (const btn of screen.getAllByRole("button", { name: /تغيير الملف|اختيار ملف Excel/ })) {
+      expect(btn).not.toBeDisabled();
+    }
+    expect(screen.getByRole("button", { name: "إزالة" })).not.toBeDisabled();
+  });
+
+  it("failure: pick/remove buttons carry the real HTML disabled attribute when canUpload is false", () => {
+    render(
+      <PhaseOneUpload
+        {...baseProps({
+          canUpload: false,
+          uploads: {
+            riskAgencyData: { file: new File(["x"], "risk.xlsx"), source: "input-fallback" },
+            businessIntelligenceData: { file: null, source: null },
+          },
+        })}
+      />
+    );
+    for (const btn of screen.getAllByRole("button", { name: /تغيير الملف|اختيار ملف Excel/ })) {
+      expect(btn).toBeDisabled();
+    }
+    expect(screen.getByRole("button", { name: "إزالة" })).toBeDisabled();
   });
 });
 

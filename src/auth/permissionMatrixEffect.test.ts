@@ -182,8 +182,9 @@ describe("feature permission matrix — every settable toggle takes effect", () 
         }
       }
     }
-    // user-management (3 features) + adhoc-import (2) x 4 roles, plus the three
-    // settings features for employee/supervisor/manager. Nothing else.
+    // user-management (3 features) + adhoc-import (2) x 4 roles, plus the four
+    // settings features (including settings.adminAccount, audit finding 13) for
+    // employee/supervisor/manager. Nothing else.
     const featureIds = new Set([...restricted].map((entry) => entry.split(":")[0]));
     expect([...featureIds].sort()).toEqual(
       [
@@ -193,6 +194,7 @@ describe("feature permission matrix — every settable toggle takes effect", () 
         "edit-permissions",
         "manage-users",
         "reset-passwords",
+        "settings.adminAccount",
         "settings.syncInterval",
         "view-error-log",
       ].sort(),

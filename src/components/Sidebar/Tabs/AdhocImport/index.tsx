@@ -5,7 +5,7 @@ import { FileSpreadsheet } from "lucide-react";
 import { tabAllowedRoles } from "../../../../auth/tabCatalog";
 import { usePermissions } from "../../../../auth/usePermissions";
 import { readSession } from "../../../../auth/authSession";
-import { readUserManagementState, type ManagedLoginUser } from "../../../../auth/userManagement";
+import { readUserManagementState, subscribeToUserManagementChanges, type ManagedLoginUser } from "../../../../auth/userManagement";
 import { isAssignableSampleRole } from "../../../../data/distribution/bulkAssignment";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
 import DataTable, { type DataTableCol } from "../../../../components/DataTable";
@@ -65,9 +65,21 @@ export default function AdhocImportTab() {
   const canIngest = canMutate("adhoc-import.ingest");
   const canAssign = canMutate("adhoc-import.assign");
 
-  const employees: ManagedLoginUser[] = useMemo(
-    () => readUserManagementState().users.filter((u) => u.isActive && isAssignableSampleRole(u)),
+  // Audit finding 6: this used to be a mount-time-only snapshot (`useMemo(...,[])`),
+  // so a user added/deactivated after the tab mounted never showed up (or never
+  // disappeared) in the assignment dropdown until a full remount. Now it re-derives
+  // whenever the managed-user roster actually changes, matching the pattern used
+  // elsewhere (e.g. NotificationManager's computeAudienceUsers). The handler-side
+  // check (assignAdhocRowsToEmployee -> findAssignableEmployee) is the real
+  // authorization boundary; this only keeps the picker from offering a stale option.
+  const computeAssignableEmployees = useCallback(
+    (): ManagedLoginUser[] => readUserManagementState().users.filter((u) => u.isActive && isAssignableSampleRole(u)),
     []
+  );
+  const [employees, setEmployees] = useState<ManagedLoginUser[]>(computeAssignableEmployees);
+  useEffect(
+    () => subscribeToUserManagementChanges(() => setEmployees(computeAssignableEmployees())),
+    [computeAssignableEmployees]
   );
 
   const refreshIndex = useCallback(async () => {

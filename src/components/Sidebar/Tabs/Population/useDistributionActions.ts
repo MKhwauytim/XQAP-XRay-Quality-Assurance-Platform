@@ -31,6 +31,8 @@ import { logError, logRejection } from "../../../../data/storage/errorLogger";
 import { userFacingErrorText } from "../../../../data/storage/writeErrorText";
 import { appendWorkspaceAction } from "../../../../data/audit/actionLog";
 import { buildAssignedEntryMap, distributionErrorText } from "./populationWorkflowHelpers";
+import { findAssignableEmployee } from "../../../../data/distribution/bulkAssignment";
+import { getManagedLoginUsers } from "../../../../auth/userManagement";
 
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
 type DistributionProgressState = { percent: number; message: string } | null;
@@ -40,7 +42,7 @@ function distributionProgressFromWrite(progress: DistributionWriteProgress): Exc
     const ratio = progress.total === 0 ? 1 : progress.completed / progress.total;
     return {
       percent: 5 + Math.round(ratio * 65),
-      message: `جارٍ حفظ التعيينات (${progress.completed.toLocaleString("ar-SA")} من ${progress.total.toLocaleString("ar-SA")})...`,
+      message: `جارٍ حفظ التعيينات (${progress.completed.toLocaleString("ar-SA-u-nu-latn")} من ${progress.total.toLocaleString("ar-SA-u-nu-latn")})...`,
     };
   }
   if (progress.phase === "projection") {
@@ -205,6 +207,17 @@ export function useDistributionActions(params: {
       setDistributionMessage({ type: "error", text: "لا تملك صلاحية توزيع العينات." });
       return;
     }
+    // Audit finding 6: the manual-assign dropdown (DistributionRow, fed by
+    // PhaseFourDistribution's `employees`) is now live, but a stale render, a
+    // race with the account being deactivated mid-session, or any other caller
+    // of this handler could still hand in a username that is no longer valid.
+    // Re-validate against the live roster right before the durable write --
+    // the same active+assignable-role rule `calculateBulkAssignment` already
+    // enforces for the bulk path.
+    if (!findAssignableEmployee(assignedTo, getManagedLoginUsers())) {
+      setDistributionMessage({ type: "error", text: "الموظف المحدد غير موجود، أو غير نشط، أو لا يملك صلاحية استلام العينات." });
+      return;
+    }
     if (!directoryHandle || !sampleDrawResult) return;
     setIsDistributing(true);
     setDistributionMessage(null);
@@ -236,6 +249,11 @@ export function useDistributionActions(params: {
   ): Promise<void> {
     if (!canDistributeSamples) {
       setDistributionMessage({ type: "error", text: "لا تملك صلاحية إعادة توزيع العينات." });
+      return;
+    }
+    // Audit finding 6: same live-roster re-validation as handleAssign above.
+    if (!findAssignableEmployee(reassignedTo, getManagedLoginUsers())) {
+      setDistributionMessage({ type: "error", text: "الموظف المحدد غير موجود، أو غير نشط، أو لا يملك صلاحية استلام العينات." });
       return;
     }
     if (!directoryHandle || !sampleDrawResult) return;

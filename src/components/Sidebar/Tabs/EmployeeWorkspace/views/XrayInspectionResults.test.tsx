@@ -323,13 +323,13 @@ describe("XrayInspectionResults background data-refresh vs. an open quality-note
 // (see src/data/adhocImport/adhocImportEmployeeView.ts).
 describe("XrayInspectionResults — ad-hoc import visibility (THE GAP fix)", () => {
   it("shows an ad-hoc-imported assignment tagged with the ad-hoc badge, alongside the month's real results", async () => {
-    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeSession({ role: "employee", username: "jalgahamdi", loginAt: new Date().toISOString() });
     writeUserManagementState(createEmptyUserManagementState(), false);
 
     const root = createMemoryDirectory("root");
     await saveSampleMaster(root, MONTH, makeSample([makeRow("IMG-ACTIVE")]));
     const assignResult = await appendDistributionEvents(root, MONTH, [
-      buildAssignEvent({ xrayImageId: "IMG-ACTIVE", assignedTo: "emp-1", eventBy: "admin" }),
+      buildAssignEvent({ xrayImageId: "IMG-ACTIVE", assignedTo: "jalgahamdi", eventBy: "admin" }),
     ]);
     if (!assignResult.ok) throw new Error(`seed assign failed: ${assignResult.error}`);
 
@@ -370,7 +370,7 @@ describe("XrayInspectionResults — ad-hoc import visibility (THE GAP fix)", () 
       ],
     };
     await ensureAdhocSampleMaster(root, record);
-    const assigned = await assignAdhocRowsToEmployee(root, record, ["s1:2"], "emp-1", "admin");
+    const assigned = await assignAdhocRowsToEmployee(root, record, ["s1:2"], "jalgahamdi", "admin");
     expect(assigned.ok).toBe(true);
 
     render(<XrayInspectionResults directoryHandle={root} />);
