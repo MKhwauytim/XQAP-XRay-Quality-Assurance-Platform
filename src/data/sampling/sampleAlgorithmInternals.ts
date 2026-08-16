@@ -13,6 +13,9 @@ import type {
   StageAllocation
 } from "./sampleTypes";
 
+/** Cap on how many distinct unmapped raw stage strings are pinned to a draw result (P4). */
+const UNMAPPED_STAGE_RAW_VALUES_CAP = 20;
+
 type Rng = ReturnType<typeof createRng>;
 type StageKey = "first" | "second" | "third" | "fourth";
 type StageConfig = {
@@ -37,6 +40,10 @@ type StagePlan = {
   effectiveTargets: Map<StageKey, number>;
   availableCounts: Map<StageKey, number>;
   configuredValues: Map<StageKey, number>;
+  /** Rows whose raw `stage` value mapped to "unknown" (P4) — excluded from every stage's draw. */
+  unmappedStageRowCount: number;
+  /** Distinct raw values behind the count above, capped to {@link UNMAPPED_STAGE_RAW_VALUES_CAP}. */
+  unmappedStageRawValues: string[];
 };
 type StageDraw = {
   rows: PreparedPopulationRow[];
@@ -277,7 +284,22 @@ export function certScanConfiguredTarget(rule: StageSamplingRule, effectiveTarge
 
 function buildStagePlan(rows: PreparedPopulationRow[], config: StageConfig): StagePlan {
   const rowStageKeys = new Map<string, ReturnType<typeof getStageKey>>();
-  for (const row of rows) rowStageKeys.set(row.xrayImageId, getStageKey(row.stage, config.stageMappings));
+  const unmappedStageRawValuesSeen = new Set<string>();
+  let unmappedStageRowCount = 0;
+  for (const row of rows) {
+    const stageKey = getStageKey(row.stage, config.stageMappings);
+    rowStageKeys.set(row.xrayImageId, stageKey);
+    if (stageKey === "unknown") {
+      unmappedStageRowCount += 1;
+      // Detection only (P4, 2026-08): a raw stage value with no matching alias
+      // resolves to "unknown" and is excluded from every stage's draw below —
+      // previously with zero record of that exclusion on the success path.
+      // Capped so a workspace with many distinct typos doesn't bloat the file.
+      if (unmappedStageRawValuesSeen.size < UNMAPPED_STAGE_RAW_VALUES_CAP) {
+        unmappedStageRawValuesSeen.add(String(row.stage ?? "").trim());
+      }
+    }
+  }
   const rulesByStage = new Map(config.samplingRules.map((rule) => [rule.stageKey, rule]));
   const effectiveTargets = new Map<StageKey, number>();
   const availableCounts = new Map<StageKey, number>();
@@ -292,7 +314,15 @@ function buildStagePlan(rows: PreparedPopulationRow[], config: StageConfig): Sta
     // against `available` (a row count) and weights absorbers by it.
     configuredValues.set(stageKey, rule ? configuredRowCount(rule, available) : 0);
   }
-  return { rowStageKeys, rulesByStage, effectiveTargets, availableCounts, configuredValues };
+  return {
+    rowStageKeys,
+    rulesByStage,
+    effectiveTargets,
+    availableCounts,
+    configuredValues,
+    unmappedStageRowCount,
+    unmappedStageRawValues: Array.from(unmappedStageRawValuesSeen)
+  };
 }
 
 function redistributeStageShortfall(plan: StagePlan): void {
@@ -500,7 +530,8 @@ function successfulResult(
   portAllocations: PortAllocation[],
   stageAllocations: StageAllocation[],
   counters: DrawCounters,
-  certScanShortfalls: CertScanShortfall[]
+  certScanShortfalls: CertScanShortfall[],
+  unmappedStage?: { rowCount: number; rawValues: string[] }
 ): SampleDrawResult {
   const data: SampleMasterData = {
     rngSeed,
@@ -514,6 +545,12 @@ function successfulResult(
     portAllocations,
     stageAllocations,
     certScanShortfalls,
+    ...(unmappedStage
+      ? {
+          unmappedStageRowCount: unmappedStage.rowCount,
+          unmappedStageRawValues: unmappedStage.rawValues
+        }
+      : {}),
     drawnAt: new Date().toISOString(),
     drawnBy: username,
     // B5 (disk-bloat fix): `handleDrawSample` can run this draw on the
@@ -565,5 +602,6 @@ export function drawStageSample(
     certScanShortfalls.push(...draw.shortfalls);
   }
   return successfulResult(config.rngSeed, username, algorithmVersion, totalRequested,
-    allRows, Array.from(portAllocations.values()), stageAllocations, counters, certScanShortfalls);
+    allRows, Array.from(portAllocations.values()), stageAllocations, counters, certScanShortfalls,
+    { rowCount: plan.unmappedStageRowCount, rawValues: plan.unmappedStageRawValues });
 }

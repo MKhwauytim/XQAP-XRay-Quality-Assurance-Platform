@@ -309,4 +309,55 @@ describe("getUserWorkspaceFootprint", () => {
     expect(footprint.activeAssignments).toHaveLength(0);
     expect(footprint.answerFileMonths).toHaveLength(0);
   });
+
+  // -------------------------------------------------------------------------
+  // P6 (2026-08): a mirror reverted to older bytes than the live event log —
+  // exactly what a naive restore of a derived per-employee mirror produces —
+  // must not be trusted blindly. The dangerous direction: an assignment made
+  // AFTER the mirror was frozen reads as "no pending work" and a deletion
+  // that should be blocked silently proceeds.
+  // -------------------------------------------------------------------------
+  it("REGRESSION (P6): a mirror older than the live event log is not trusted — the real (newer) pending assignment is still counted", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    invalidateMonthLockCache();
+    await ensurePopulationMonthFolder(root, MONTH_A);
+    await saveSampleMaster(root, MONTH_A, makeSample([makeRow("A1"), makeRow("A2")]));
+
+    // Revision 1: A1 assigned + mirror synced (pending).
+    await appendDistributionEvents(root, MONTH_A, [
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: EMP, eventBy: "admin" }),
+    ]);
+    let log = await loadDistributionLog(root, MONTH_A);
+    await saveDistributionCurrent(root, MONTH_A, deriveCurrentDistribution(log, [makeRow("A1"), makeRow("A2")]));
+
+    // Revision 2: A1 completed + mirror re-synced — mirror now correctly shows 0 pending.
+    await appendDistributionEvents(root, MONTH_A, [
+      buildCompletedEvent({ xrayImageId: "A1", assignedTo: EMP, eventBy: EMP }),
+    ]);
+    log = await loadDistributionLog(root, MONTH_A);
+    await saveDistributionCurrent(root, MONTH_A, deriveCurrentDistribution(log, [makeRow("A1"), makeRow("A2")]));
+
+    const mirrorBeforeStaleness = await loadEmployeeSampleMirror(root, MONTH_A, EMP);
+    expect(mirrorBeforeStaleness?.entries.every((e) => e.status === "completed")).toBe(true);
+
+    // Revision 3: A2 assigned — the live event log moves on, but the mirror is
+    // deliberately left un-synced (simulating a restore that put back the
+    // revision-2 mirror bytes while distribution.events/ — restored via
+    // merge-events — carries the newer assignment).
+    await appendDistributionEvents(root, MONTH_A, [
+      buildAssignEvent({ xrayImageId: "A2", assignedTo: EMP, eventBy: "admin" }),
+    ]);
+
+    // Sanity: the mirror on disk is indeed stale relative to the live log.
+    const staleMirror = await loadEmployeeSampleMirror(root, MONTH_A, EMP);
+    expect(staleMirror?.entries.some((e) => e.xrayImageId === "A2")).toBe(false);
+
+    const footprint = await getUserWorkspaceFootprint(root, EMP);
+
+    // Before the fix: the stale mirror shows 0 pending (A1 completed, A2
+    // absent) so MONTH_A is silently dropped from activeAssignments — a
+    // deletion would proceed despite the real, newer A2 assignment.
+    expect(footprint.activeAssignments).toHaveLength(1);
+    expect(footprint.activeAssignments[0]).toEqual({ monthFolderName: MONTH_A, pendingCount: 1 });
+  });
 });

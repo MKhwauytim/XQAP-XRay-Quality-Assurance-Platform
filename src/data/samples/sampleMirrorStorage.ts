@@ -8,6 +8,12 @@ import { logError } from "../storage/errorLogger";
 import { listMonthFolders } from "../population/populationStorage";
 import { isMonthClosed } from "../population/monthLock";
 import { loadEmployeeAnswers } from "../answers/answerStorage";
+import { loadSampleMaster } from "../sampling/sampleStorage";
+// distributionStorage.ts imports syncSampleMirrors FROM this module, so this
+// is a deliberate circular import: safe here because both sides only use the
+// other's exports inside function bodies, never at module-eval time (P6,
+// 2026-08 — see getUserWorkspaceFootprint's revision cross-check below).
+import { loadOrDeriveDistributionCurrent, readDistributionLogStamp } from "../distribution/distributionStorage";
 
 /**
  * Frozen quota snapshot carried inside the per-employee mirror so an employee
@@ -35,7 +41,9 @@ export type EmployeeSamplesFile = {
   entries: DistributionEntry[];
 };
 
-const EMPLOYEE_MIRROR_SUFFIX = ".samples.json";
+/** Exported (P6) so backupStorage.ts's restore classification can match on the
+ *  same suffix rather than re-declaring a copy that could drift. */
+export const EMPLOYEE_MIRROR_SUFFIX = ".samples.json";
 
 /**
  * Derived side-index over the mirrors in `2-samples/{month}/2-employees/`
@@ -52,8 +60,11 @@ const EMPLOYEE_MIRROR_SUFFIX = ".samples.json";
  * The name deliberately does not end in `.samples.json` (nor `.answers.json`,
  * which `answerStorage.ts` writes into this same folder), so no existing
  * suffix-filtered listing picks it up as a mirror.
+ *
+ * Exported (P6) so backupStorage.ts's restore classification can match on the
+ * same literal rather than re-declaring a copy that could drift.
  */
-const EMPLOYEE_MIRROR_INDEX_FILE = "_index.json";
+export const EMPLOYEE_MIRROR_INDEX_FILE = "_index.json";
 
 /**
  * Keyed by FILE NAME, exactly like `readExistingMirrors` — two usernames can
@@ -349,6 +360,37 @@ export async function loadEmployeeSampleMirror(
   }
 }
 
+/**
+ * Authoritative fallback for a mirror found stale by
+ * {@link getUserWorkspaceFootprint}'s revision cross-check: fold the real
+ * event log (via the same derivation the rest of the app trusts) rather than
+ * serve the mirror's out-of-date `entries`. Best-effort — a month whose
+ * sample rows cannot be loaded (or that has no rows at all) has nothing
+ * authoritative to fold against, so it falls back to 0 pending rather than
+ * throwing and aborting the whole footprint scan; any read failure is logged
+ * rather than silently swallowed with no trace.
+ */
+async function staleMirrorPendingCount(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  username: string
+): Promise<number> {
+  try {
+    const sample = await loadSampleMaster(directoryHandle, monthFolderName);
+    if (!sample || sample.rows.length === 0) return 0;
+    const current = await loadOrDeriveDistributionCurrent(directoryHandle, monthFolderName, sample.rows);
+    if (!current) return 0;
+    return current.entries.filter(
+      (e) =>
+        e.assignedTo === username &&
+        (e.status === "pending" || e.status === "replacement-requested")
+    ).length;
+  } catch (error) {
+    logError("sampleMirror:stale-mirror-fallback", error);
+    return 0;
+  }
+}
+
 export type UserWorkspaceFootprint = {
   /** Months (open only) where this user still owns pending/replacement-requested samples. */
   activeAssignments: Array<{ monthFolderName: string; pendingCount: number }>;
@@ -372,6 +414,21 @@ export type UserWorkspaceFootprint = {
  * in another tab/machine — acceptable for a pre-deletion advisory check;
  * deriving from the full event log per month would be O(months × log size)
  * and is not worth the cost here.
+ *
+ * Revision cross-check (P6, 2026-08): a mirror is a rewritten-whole
+ * projection stamped with the compat-log `revision` it was derived from
+ * (`sourceLogRevision`). A restore can put back an OLDER mirror byte-for-byte
+ * while the event log it was derived from moves on (see backupStorage.ts's
+ * `RestoreAction` classification) — trusting `mirror.entries` unconditionally
+ * would then silently serve stale assignment data, which for THIS function
+ * specifically risks the dangerous direction: an assignment made after the
+ * mirror was frozen would read as "no pending work", letting a delete proceed
+ * and orphan it. `readDistributionLogStamp` is the same cheap (no
+ * event-directory scan) revision probe the sync tick already uses, so the
+ * common case (mirror already current) pays only one extra small file read.
+ * Only when the mirror is found stale does this pay for a full authoritative
+ * fold via `loadOrDeriveDistributionCurrent` — correctness over performance in
+ * the exceptional case, not the common one.
  */
 export async function getUserWorkspaceFootprint(
   directoryHandle: DirectoryHandleLike,
@@ -387,9 +444,17 @@ export async function getUserWorkspaceFootprint(
     const closed = await isMonthClosed(directoryHandle, monthFolderName);
     if (!closed) {
       const mirror = await loadEmployeeSampleMirror(directoryHandle, monthFolderName, username);
-      const pendingCount = (mirror?.entries ?? []).filter(
-        (e) => e.status === "pending" || e.status === "replacement-requested"
-      ).length;
+      const stamp = await readDistributionLogStamp(directoryHandle, monthFolderName);
+      const mirrorIsStale = mirror !== null && mirror.sourceLogRevision < stamp.revision;
+
+      let pendingCount: number;
+      if (mirrorIsStale) {
+        pendingCount = await staleMirrorPendingCount(directoryHandle, monthFolderName, username);
+      } else {
+        pendingCount = (mirror?.entries ?? []).filter(
+          (e) => e.status === "pending" || e.status === "replacement-requested"
+        ).length;
+      }
       if (pendingCount > 0) {
         activeAssignments.push({ monthFolderName, pendingCount });
       }

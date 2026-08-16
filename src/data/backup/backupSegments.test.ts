@@ -6,10 +6,11 @@ import {
   setSimulatedFaults,
 } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { safeWriteJson } from "../storage/safeWrite";
-import { getSampleMainDir } from "../workspace/workspacePaths";
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { getSampleEmployeeDir, getSampleMainDir } from "../workspace/workspacePaths";
 import { DISTRIBUTION_EVENTS_DIR } from "../distribution/distributionEventStore";
 import type { DistributionEvent } from "../distribution/distributionTypes";
+import { EMPLOYEE_MIRROR_INDEX_FILE } from "../samples/sampleMirrorStorage";
 import { createBackup, loadArchiveStatus, restoreBackupSnapshot } from "./backupStorage";
 
 const month = { folderName: "5-may-2026", month: 5, year: 2026 };
@@ -388,6 +389,97 @@ describe("restore — derived distribution files never outrun their events", () 
     expect(await listNames(mainDir)).not.toContain("distribution.checkpoint.json");
     // …and it is not reported as a restored file either.
     expect(restored.ok && restored.restoredFiles.some((path) => path.includes("distribution.checkpoint.json")))
+      .toBe(false);
+  });
+
+  // ---------------------------------------------------------------------
+  // P6 (2026-08): a per-employee sample mirror (`{username}.samples.json`)
+  // and its `_index.json` accelerator are DERIVED projections rewritten
+  // whole by syncSampleMirrors from the event log, and stamped with the log
+  // revision they were derived from — exactly the same shape as
+  // distribution.current.json / distribution.checkpoint.json above.
+  // Restoring the backup's copy could put back a mirror OLDER than the live
+  // event log the restore just merged forward, which the pre-fix
+  // getUserWorkspaceFootprint trusted with no revision cross-check at all —
+  // silently serving stale per-employee assignment data.
+  // ---------------------------------------------------------------------
+
+  it("REGRESSION (P6): never restores a backed-up per-employee sample mirror over the live workspace", async () => {
+    const root = makeRoot();
+    const eventsDir = await getEventsDir(root);
+    const employeesDir = await getSampleEmployeeDir(root, month.folderName, true);
+    await writeRaw(eventsDir, "devA-s1.ndjson", toNdjson([event("e01")]));
+    // The mirror as it existed AT BACKUP TIME: stale ("pending").
+    await safeWriteJson(employeesDir, "employee01.samples.json", {
+      monthFolderName: month.folderName,
+      username: "employee01",
+      updatedAt: "2026-05-01T00:00:00.000Z",
+      sourceLogRevision: 1,
+      entries: [{ xrayImageId: "XR-e01", assignedTo: "employee01", status: "pending", replacedById: null, lastEventAt: "" }],
+    });
+
+    const backup = await createBackup(root, [month], "admin", "manual");
+    expect(backup.ok).toBe(true);
+    if (!backup.ok) return;
+
+    // The live workspace has since moved on: the mirror was regenerated at a
+    // newer revision showing the row completed, not pending.
+    await safeWriteJson(employeesDir, "employee01.samples.json", {
+      monthFolderName: month.folderName,
+      username: "employee01",
+      updatedAt: "2026-05-02T00:00:00.000Z",
+      sourceLogRevision: 2,
+      entries: [{ xrayImageId: "XR-e01", assignedTo: "employee01", status: "completed", replacedById: null, lastEventAt: "" }],
+    });
+
+    const restored = await restoreBackupSnapshot({
+      directoryHandle: root,
+      months: [month],
+      backupFolderName: backup.folderName,
+      username: "admin",
+    });
+    expect(restored.ok).toBe(true);
+
+    const result = await safeReadJson<{ sourceLogRevision: number; entries: Array<{ status: string }> }>(
+      employeesDir,
+      "employee01.samples.json"
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The live (newer) mirror must survive untouched — the backup's stale
+    // "pending" copy must never overwrite it.
+    expect(result.value.sourceLogRevision).toBe(2);
+    expect(result.value.entries[0]?.status).toBe("completed");
+    expect(restored.ok && restored.restoredFiles.some((path) => path.includes("employee01.samples.json")))
+      .toBe(false);
+  });
+
+  it("REGRESSION (P6): never restores a backed-up 2-employees/_index.json accelerator over the live workspace", async () => {
+    const root = makeRoot();
+    const eventsDir = await getEventsDir(root);
+    const employeesDir = await getSampleEmployeeDir(root, month.folderName, true);
+    await writeRaw(eventsDir, "devA-s1.ndjson", toNdjson([event("e01")]));
+    await safeWriteJson(employeesDir, EMPLOYEE_MIRROR_INDEX_FILE, {
+      monthFolderName: month.folderName,
+      pendingRevision: 1,
+      mirrors: {},
+    });
+
+    const backup = await createBackup(root, [month], "admin", "manual");
+    expect(backup.ok).toBe(true);
+    if (!backup.ok) return;
+
+    await employeesDir.removeEntry!(EMPLOYEE_MIRROR_INDEX_FILE);
+
+    const restored = await restoreBackupSnapshot({
+      directoryHandle: root,
+      months: [month],
+      backupFolderName: backup.folderName,
+      username: "admin",
+    });
+    expect(restored.ok).toBe(true);
+    expect(await listNames(employeesDir)).not.toContain(EMPLOYEE_MIRROR_INDEX_FILE);
+    expect(restored.ok && restored.restoredFiles.some((path) => path.includes(EMPLOYEE_MIRROR_INDEX_FILE)))
       .toBe(false);
   });
 

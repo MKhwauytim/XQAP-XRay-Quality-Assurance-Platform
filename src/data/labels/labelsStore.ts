@@ -742,6 +742,14 @@ export const DEFAULT_LABELS = {
   sampling_certscan_shortfall_result_row_port:  "{stage} — ميناء {port}: المطلوب {requested}، المسحوب فعلياً {actual}، المتاح {available}.",
   sampling_certscan_shortfall_result_row_stage: "{stage} (على مستوى المرحلة كاملة): المطلوب {requested}، المسحوب فعلياً {actual}، المتاح {available}.",
 
+  // Unmapped-stage exclusion warning (P4, 2026-08): rows whose raw "stage" value
+  // matched none of the four configured stage aliases are excluded from the draw
+  // entirely. This makes that exclusion visible on the post-draw success path
+  // instead of silently vanishing with no trace.
+  sampling_unmapped_stage_warning_title: "تنبيه: تم استبعاد سجلات من السحب بسبب عدم تطابق قيمة \"المستوى\"",
+  sampling_unmapped_stage_warning_intro: "تم استبعاد {count} سجل من مجتمع البيانات من عملية السحب لأن قيمة عمود \"المستوى\" فيها لم تُطابق أياً من المستويات الأربعة المُهيأة في إعداد \"تعيين المستويات\" (Stage Mapping). هذه السجلات لم تُدخل في السحب الإحصائي إطلاقاً.",
+  sampling_unmapped_stage_warning_values_label: "أمثلة على القيم غير المتطابقة:",
+
   // Ad-hoc import tab (owner requirement, 2026-08) — a separate admin-only page for
   // uploading a one-off Excel file (not the regular monthly Population pipeline) and
   // assigning its rows to employees. See src/data/adhocImport/.

@@ -12,6 +12,7 @@ import type { DistributionCurrentData, DistributionEvent } from "../distribution
 import type { MonthFolderInfo } from "../population/monthFolder";
 import type { MonthManifestData, MonthRawData, PopulationFinalData } from "../population/monthTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
+import { EMPLOYEE_MIRROR_INDEX_FILE, EMPLOYEE_MIRROR_SUFFIX } from "../samples/sampleMirrorStorage";
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
 import {
   copyFileBytes,
@@ -616,12 +617,33 @@ async function copyAllJsonFiles(directoryHandle: DirectoryHandleLike, backupDir:
  *    checkpoint is a map of per-segment BYTE OFFSETS meaning "already folded up
  *    to here", and a merge above may have rewritten those very segments. See
  *    invalidateDistributionCaches.
+ *
+ *    Also `skip-derived` (P6, 2026-08): every per-employee sample mirror
+ *    (`{username}.samples.json`, `EMPLOYEE_MIRROR_SUFFIX`) and its side-index
+ *    (`_index.json`, `EMPLOYEE_MIRROR_INDEX_FILE`) — both under
+ *    `2-samples/{month}/2-employees/`. These are the same kind of rewritten-
+ *    whole projection as `distribution.current.json`, derived from the event
+ *    log by `syncSampleMirrors`, and carry their own revision guard
+ *    (`sourceLogRevision`) that a raw file-copy restore does not respect: a
+ *    restore could put back a mirror that is now OLDER than the live event
+ *    log (which restores via `merge-events` above and can therefore end up
+ *    newer than any mirror snapshot taken before it), silently serving stale
+ *    per-employee assignment data until the next `saveDistributionCurrent`
+ *    regenerates it. Leaving them alone costs nothing recoverable — every
+ *    mirror is a pure projection of `distribution.current.json`, itself
+ *    always rebuilt from the (correctly merged) event log.
  */
 type RestoreAction = "replace" | "merge-events" | "restore-if-absent" | "skip-derived";
 
 function restoreActionFor(fileName: string): RestoreAction {
   if (fileName.endsWith(DISTRIBUTION_EVENT_SEGMENT_SUFFIX)) return "merge-events";
   if (fileName === DISTRIBUTION_CURRENT_FILE || fileName === DISTRIBUTION_CHECKPOINT_FILE) return "skip-derived";
+  // Suffix/exact match, not substring: EMPLOYEE_MIRROR_SUFFIX (".samples.json")
+  // only ever appears as a filename's own tail (the per-user prefix is
+  // dynamic), and EMPLOYEE_MIRROR_INDEX_FILE ("_index.json") is compared for
+  // exact equality — deliberately narrow so this can never accidentally sweep
+  // in an unrelated "*index*.json" file elsewhere in the tree.
+  if (fileName.endsWith(EMPLOYEE_MIRROR_SUFFIX) || fileName === EMPLOYEE_MIRROR_INDEX_FILE) return "skip-derived";
   if (fileName === DISTRIBUTION_LOG_FILE) return "restore-if-absent";
   return "replace";
 }

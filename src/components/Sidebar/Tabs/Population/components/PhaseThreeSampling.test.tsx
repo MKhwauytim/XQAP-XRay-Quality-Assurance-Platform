@@ -16,6 +16,7 @@ import PhaseThreeSampling from "./PhaseThreeSampling";
 import type { PopulationConfig, StageSamplingRule } from "../../../../../data/population/populationConfig";
 import { DEFAULT_POPULATION_CONFIG } from "../../../../../data/population/populationConfig";
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
+import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
 
 // PhaseThreeSampling reads usePermissions() locally only for "unlock-sampling-stage" (the
 // admin unlock toggle, out of this bucket's scope) — grant it so the lock-toggle button
@@ -245,5 +246,56 @@ describe("PhaseThreeSampling — running total shown before the draw (B task 1)"
 
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByText((_, node) => node?.textContent === "إجمالي العينة المتوقع (كل المستويات): 60")).toBeInTheDocument();
+  });
+});
+
+describe("PhaseThreeSampling — unmapped-stage exclusion warning (P4)", () => {
+  function baseResult(overrides: Partial<SampleMasterData> = {}): SampleMasterData {
+    return {
+      rngSeed: "seed",
+      samplingAlgorithmVersion: "1.1",
+      totalRequested: 5,
+      totalActual: 5,
+      certScanRequested: 0,
+      nonCertScanRequested: 5,
+      certScanActual: 0,
+      nonCertScanActual: 5,
+      portAllocations: [],
+      stageAllocations: [],
+      certScanShortfalls: [],
+      drawnAt: new Date().toISOString(),
+      drawnBy: "tester",
+      rows: [],
+      ...overrides,
+    };
+  }
+
+  it("shows the warning with the exclusion count and sample raw values when rows were excluded", () => {
+    render(
+      <PhaseThreeSampling
+        {...baseProps({
+          sampleDrawResult: baseResult({
+            unmappedStageRowCount: 3,
+            unmappedStageRawValues: ["SOME_BAD_VALUE", "ANOTHER_BAD_VALUE"],
+          }),
+        })}
+      />
+    );
+    const alerts = screen.getAllByRole("alert");
+    const warning = alerts.find((el) => el.textContent?.includes("تم استبعاد"));
+    expect(warning).toBeDefined();
+    expect(warning?.textContent).toContain("3");
+    expect(warning?.textContent).toContain("SOME_BAD_VALUE");
+    expect(warning?.textContent).toContain("ANOTHER_BAD_VALUE");
+  });
+
+  it("shows nothing when unmappedStageRowCount is 0", () => {
+    render(<PhaseThreeSampling {...baseProps({ sampleDrawResult: baseResult({ unmappedStageRowCount: 0 }) })} />);
+    expect(screen.queryByText((_, node) => node?.textContent?.includes("تم استبعاد") ?? false)).not.toBeInTheDocument();
+  });
+
+  it("shows nothing when unmappedStageRowCount is absent (legacy draw / legacy sample master)", () => {
+    render(<PhaseThreeSampling {...baseProps({ sampleDrawResult: baseResult() })} />);
+    expect(screen.queryByText((_, node) => node?.textContent?.includes("تم استبعاد") ?? false)).not.toBeInTheDocument();
   });
 });
