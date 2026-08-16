@@ -1,3 +1,4 @@
+import { liveSampleRows } from "../sampling/sampleStorage";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { FieldAnswer } from "../answers/answerTypes";
 import type { TemplateSchema } from "../templates/templateTypes";
@@ -87,7 +88,11 @@ export function buildExecutiveReportRows(input: ExecutiveReportInput): Executive
   const fieldIdsByLabel = createFieldResolver(input.template);
   const fieldMap = config.fieldMappings;
 
-  const sampleIds = new Set(sample?.rows.map((r) => r.xrayImageId) ?? []);
+  // liveSampleRows, not `sample.rows`: a replaced row stays in the array as the
+  // audit trail, and counting it as `selectedInSample` inflated the numerator
+  // while `totalSample` used `totalActual` — which could push the reported
+  // completion rate above 100 % on a heavily-replaced month.
+  const sampleIds = new Set(liveSampleRows(sample).map((r) => r.xrayImageId));
 
   const distMap = new Map(
     (distribution?.entries ?? []).map((e) => [e.xrayImageId, e])
