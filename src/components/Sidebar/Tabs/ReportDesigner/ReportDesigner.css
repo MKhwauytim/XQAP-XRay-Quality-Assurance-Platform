@@ -393,7 +393,7 @@
   border-color: var(--c-navy-2);
 }
 .rd-btn-secondary {
-  background: var(--c-surface-2, #F6F8FA);
+  background: var(--c-surface-2);
   color: #24292f;
   border-color: #d0d7de;
 }
@@ -421,7 +421,7 @@
   flex-wrap: wrap;
   margin-bottom: 20px;
   padding: 12px 16px;
-  background: var(--c-surface-2, #F6F8FA);
+  background: var(--c-surface-2);
   border: 1px solid #d0d7de;
   border-radius: 8px;
 }
@@ -584,7 +584,7 @@
   color: #57606a;
   font-size: 16px;
   font-weight: 500;
-  background: var(--c-surface-2, #F6F8FA);
+  background: var(--c-surface-2);
 }
 
 /* ── Canvas ── */
@@ -614,7 +614,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--c-surface-2, #F6F8FA);
+  background: var(--c-surface-2);
   border: 1px dashed #d0d7de;
   color: #57606a;
   font-size: 12px;
@@ -630,7 +630,7 @@
   gap: 8px;
   flex-wrap: wrap;
   padding: 8px 12px;
-  background: var(--c-surface-2, #F6F8FA);
+  background: var(--c-surface-2);
   border: 1px solid #d0d7de;
   border-radius: 8px;
   margin-bottom: 12px;

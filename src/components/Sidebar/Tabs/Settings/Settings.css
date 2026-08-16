@@ -5,8 +5,8 @@
 .settings-root {
   padding: 28px 32px;
   direction: rtl;
-  font-family: var(--font-sans, "Somar Sans", "Segoe UI", sans-serif);
-  color: var(--c-ink, #0D1F32);
+  font-family: var(--font-sans);
+  color: var(--c-ink);
   max-width: 1100px;
 }
 
@@ -15,30 +15,30 @@
   align-items: center;
   gap: var(--sp-2, 8px);
   padding: 8px 16px;
-  background: var(--c-danger-bg, #FEE2E2);
-  border: 1px solid var(--c-danger-border, #FCA5A5);
-  border-radius: var(--r-sm, 6px);
-  color: var(--c-danger, #991B1B);
+  background: var(--c-danger-bg);
+  border: 1px solid var(--c-danger-border);
+  border-radius: var(--r-sm);
+  color: var(--c-danger);
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
   font-family: inherit;
-  transition: background-color var(--t-base, 220ms) var(--ease-smooth, ease),
-              border-color var(--t-base, 220ms) var(--ease-smooth, ease),
-              color var(--t-base, 220ms) var(--ease-smooth, ease);
+  transition: background-color var(--t-base) var(--ease-smooth),
+              border-color var(--t-base) var(--ease-smooth),
+              color var(--t-base) var(--ease-smooth);
   white-space: nowrap;
 }
 
 .settings-reset-all-btn:hover {
-  background: var(--c-danger, #991B1B);
-  border-color: var(--c-danger, #991B1B);
+  background: var(--c-danger);
+  border-color: var(--c-danger);
   color: #FFFFFF;
 }
 
 .settings-section {
-  background: var(--c-surface, #FFFFFF);
-  border: 1px solid var(--c-border, #D6E2EF);
-  border-radius: var(--r-md, 12px);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
   margin-bottom: 20px;
   overflow: hidden;
   box-shadow: var(--sh-xs, 0 1px 3px rgba(13, 31, 50, 0.06));
@@ -47,9 +47,9 @@
 /* ── Top-level category ───────────────────────────────────────────────────── */
 
 .settings-category {
-  background: var(--c-surface, #FFFFFF);
-  border: 1px solid var(--c-border, #D6E2EF);
-  border-radius: var(--r-md, 14px);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
   margin-bottom: 24px;
   overflow: hidden;
   box-shadow: var(--sh-xs, 0 1px 3px rgba(13, 31, 50, 0.06));
@@ -61,7 +61,7 @@
   gap: 12px;
   padding: 16px 22px;
   background: linear-gradient(135deg, #f0f5fc 0%, #e8f0fb 100%);
-  border-bottom: 1px solid var(--c-border, #D6E2EF);
+  border-bottom: 1px solid var(--c-border);
 }
 
 .settings-category-icon {
@@ -72,14 +72,14 @@
 .settings-category-title {
   font-size: 16px;
   font-weight: 800;
-  color: var(--c-navy, #0F2744);
+  color: var(--c-navy);
   margin: 0 0 2px;
   letter-spacing: -0.01em;
 }
 
 .settings-category-desc {
   font-size: 12px;
-  color: var(--c-ink-3, #5E7A96);
+  color: var(--c-ink-3);
   margin: 0;
 }
 
@@ -105,7 +105,7 @@
 /* Override section styles inside a category body */
 .settings-category-body .settings-section {
   margin-bottom: 0;
-  border-radius: var(--r-sm, 8px);
+  border-radius: var(--r-sm);
 }
 
 /* ── About card (D7 version stamp) ────────────────────────────────────────── */
@@ -114,14 +114,14 @@
   margin: 0;
   padding: 4px 10px;
   font-size: 13px;
-  color: var(--c-ink-2, #33475b);
+  color: var(--c-ink-2);
 }
 
 .settings-about-version {
   font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
-  color: var(--c-navy, #0F2744);
+  color: var(--c-navy);
 }
 
 /* ── Accordion section header ─────────────────────────────────────────────── */
@@ -131,7 +131,7 @@
   align-items: center;
   gap: 10px;
   padding: 14px 20px;
-  background: var(--c-surface-2, #F4F7FB);
+  background: var(--c-surface-2);
   border: none;
   border-bottom: none;
   width: 100%;
@@ -142,7 +142,7 @@
 }
 
 .settings-section.is-open .settings-section-header {
-  border-bottom: 1px solid var(--c-border, #D6E2EF);
+  border-bottom: 1px solid var(--c-border);
 }
 
 .settings-section-header:hover { background: #eaf0f9; }
@@ -152,7 +152,7 @@
 .settings-section-title {
   font-size: 14px;
   font-weight: 800;
-  color: var(--c-navy, #0F2744);
+  color: var(--c-navy);
   margin: 0;
   letter-spacing: -0.005em;
   flex: 1;
@@ -167,14 +167,14 @@
 
 .settings-section-count-items {
   font-size: 11px;
-  color: var(--c-ink-4, #9DB3C9);
+  color: var(--c-ink-4);
   font-weight: 500;
 }
 
 .settings-section-count {
   font-size: 11px;
-  color: var(--c-ink-3, #5E7A96);
-  background: var(--c-border, #D6E2EF);
+  color: var(--c-ink-3);
+  background: var(--c-border);
   border-radius: 999px;
   padding: 2px 8px;
   font-weight: 600;
@@ -182,7 +182,7 @@
 
 .settings-section-chevron {
   font-size: 18px;
-  color: var(--c-ink-4, #9DB3C9);
+  color: var(--c-ink-4);
   line-height: 1;
   transform: rotate(90deg);
   display: inline-block;
@@ -206,12 +206,12 @@
   align-items: center;
   gap: 16px;
   padding: 11px 20px;
-  border-bottom: 1px solid var(--c-surface-3, #EEF2F7);
+  border-bottom: 1px solid var(--c-surface-3);
   transition: background 120ms ease;
 }
 
 .settings-label-row:last-child { border-bottom: none; }
-.settings-label-row:hover { background: var(--c-surface-2, #F4F7FB); }
+.settings-label-row:hover { background: var(--c-surface-2); }
 
 .settings-label-row.is-custom { background: #FFFBEB; }
 .settings-label-row.is-custom:hover { background: #FEF9E7; }
@@ -220,20 +220,20 @@
 
 .settings-label-desc {
   font-size: 13px;
-  color: var(--c-ink-2, #2C4260);
+  color: var(--c-ink-2);
 }
 
 .settings-label-key {
   display: block;
   font-size: 10px;
-  color: var(--c-ink-4, #9DB3C9);
-  font-family: var(--font-mono, monospace);
+  color: var(--c-ink-4);
+  font-family: var(--font-mono);
 }
 
 .settings-label-default {
   display: block;
   font-size: 11px;
-  color: var(--c-ink-4, #9DB3C9);
+  color: var(--c-ink-4);
 }
 
 /* Column 2: input + saved badge + reset — flex row */
@@ -247,20 +247,20 @@
   flex: 1;
   min-width: 0;
   padding: 7px 10px;
-  border: 1.5px solid var(--c-border, #D6E2EF);
-  border-radius: var(--r-sm, 8px);
+  border: 1.5px solid var(--c-border);
+  border-radius: var(--r-sm);
   font-size: 13px;
   font-family: inherit;
   direction: rtl;
-  color: var(--c-ink, #0D1F32);
-  background: var(--c-surface, #FFFFFF);
+  color: var(--c-ink);
+  background: var(--c-surface);
   outline: none;
   box-sizing: border-box;
   transition: border-color 160ms ease, box-shadow 160ms ease;
 }
 
 .settings-label-input:focus {
-  border-color: var(--c-navy, #0F2744);
+  border-color: var(--c-navy);
   box-shadow: 0 0 0 3px rgba(15, 39, 68, 0.09);
 }
 
@@ -275,10 +275,10 @@
   justify-content: center;
   width: 32px;
   height: 32px;
-  border: 1.5px solid var(--c-border, #D6E2EF);
-  border-radius: var(--r-sm, 8px);
-  background: var(--c-surface, #FFFFFF);
-  color: var(--c-ink-4, #9DB3C9);
+  border: 1.5px solid var(--c-border);
+  border-radius: var(--r-sm);
+  background: var(--c-surface);
+  color: var(--c-ink-4);
   cursor: pointer;
   font-size: 14px;
   flex-shrink: 0;
@@ -286,9 +286,9 @@
 }
 
 .settings-reset-btn:hover {
-  border-color: var(--c-danger-border, #FCA5A5);
-  color: var(--c-danger, #991B1B);
-  background: var(--c-danger-bg, #FEE2E2);
+  border-color: var(--c-danger-border);
+  color: var(--c-danger);
+  background: var(--c-danger-bg);
 }
 
 .settings-reset-btn:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
@@ -298,8 +298,8 @@
   align-items: center;
   gap: 4px;
   font-size: 11px;
-  color: var(--c-success, #065F46);
-  background: var(--c-success-bg, #D1FAE5);
+  color: var(--c-success);
+  background: var(--c-success-bg);
   padding: 3px 8px;
   border-radius: 999px;
   margin-inline-start: 8px;
@@ -324,9 +324,9 @@
   align-items: flex-start;
   gap: 10px;
   padding: 18px 22px;
-  background: var(--c-warning-bg, #FFFBEB);
-  border: 1px solid var(--c-warning-border, #FDE68A);
-  border-radius: var(--r-md, 12px);
+  background: var(--c-warning-bg);
+  border: 1px solid var(--c-warning-border);
+  border-radius: var(--r-md);
   box-shadow: var(--sh-xs, 0 1px 3px rgba(13, 31, 50, 0.06));
 }
 
@@ -334,29 +334,29 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  color: var(--c-warning, #92400E);
+  color: var(--c-warning);
 }
 
 .settings-restore-notice-header h2 {
   margin: 0;
   font-size: 15px;
   font-weight: 800;
-  color: var(--c-navy, #0F2744);
+  color: var(--c-navy);
 }
 
 .settings-restore-notice-body {
   margin: 0;
   font-size: 13px;
-  color: var(--c-ink-2, #33475B);
+  color: var(--c-ink-2);
   line-height: 1.65;
 }
 
 .settings-restore-notice-error {
   margin: 0;
   padding: 8px 12px;
-  border-radius: var(--r-sm, 6px);
-  background: var(--c-danger-bg, #FEE2E2);
-  color: var(--c-danger, #991B1B);
+  border-radius: var(--r-sm);
+  background: var(--c-danger-bg);
+  color: var(--c-danger);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -365,9 +365,9 @@
   align-self: flex-start;
   padding: 8px 18px;
   border: none;
-  border-radius: var(--r-sm, 8px);
-  background: var(--c-navy, #0F2744);
-  color: var(--c-surface, #FFFFFF);
+  border-radius: var(--r-sm);
+  background: var(--c-navy);
+  color: var(--c-surface);
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
@@ -376,7 +376,7 @@
 }
 
 .settings-restore-btn:hover {
-  background: var(--c-navy-2, #162F56);
+  background: var(--c-navy-2);
 }
 
 .settings-restore-btn:disabled {

@@ -61,7 +61,7 @@
   position: absolute;
   top: calc(100% + 6px);
   inset-inline-start: 0;
-  z-index: 60;
+  z-index: var(--z-popover);
   /* Clamped: the toolbar wraps to full width at <=640px, so this popover's
      anchor can sit anywhere across it and an unclamped 280px would overflow a
      narrow phone. */

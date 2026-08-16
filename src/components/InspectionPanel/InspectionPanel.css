@@ -3,9 +3,9 @@
 .ip-panel {
   display: flex;
   flex-direction: column;
-  background: var(--c-surface, #fff);
-  border: 1px solid var(--c-border, #D6E2EF);
-  border-radius: var(--r-xl, 14px);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-xl);
   box-shadow: var(--sh-xs, 0 1px 2px rgba(13, 31, 50, 0.05));
   overflow: hidden;
   min-height: 0;
@@ -23,8 +23,8 @@
 
 .ip-header {
   padding: 14px 16px 10px;
-  border-bottom: 1px solid var(--c-border, #D6E2EF);
-  background: var(--c-bg, #F5F9FD);
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-bg);
   flex-shrink: 0;
 }
 
@@ -47,7 +47,7 @@
   font-family: monospace;
   font-size: 14px;
   font-weight: 800;
-  color: var(--c-ink-1, #17365D);
+  color: var(--c-ink-2);
   letter-spacing: 0.04em;
   word-break: break-all;
 }
@@ -62,10 +62,10 @@
   width: 28px;
   height: 28px;
   flex: 0 0 28px;
-  border: 1px solid var(--c-border, #D6E2EF);
+  border: 1px solid var(--c-border);
   border-radius: 6px;
-  background: var(--c-surface, #fff);
-  color: var(--c-ink-2, #3D5A80);
+  background: var(--c-surface);
+  color: var(--c-ink-2);
   font-size: 14px;
   cursor: pointer;
   display: flex;
@@ -76,8 +76,8 @@
 }
 
 .ip-ctrl-btn:hover {
-  background: var(--c-bg-2, #EBF3FB);
-  border-color: var(--c-border-2, #BFD0E2);
+  background: var(--c-bg-2);
+  border-color: var(--c-border-2);
 }
 
 /* ── Metadata chips ─────────────────────────────────────────────────────── */
@@ -92,8 +92,8 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  background: var(--c-surface, #fff);
-  border: 1px solid var(--c-border, #D6E2EF);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
   border-radius: 20px;
   padding: 2px 10px 2px 8px;
   font-size: 11.5px;
@@ -101,7 +101,7 @@
 }
 
 .ip-chip-label {
-  color: var(--c-ink-3, #5E7A96);
+  color: var(--c-ink-3);
   white-space: nowrap;
 }
 
@@ -111,7 +111,7 @@
 }
 
 .ip-chip-value {
-  color: var(--c-ink-1, #17365D);
+  color: var(--c-ink-2);
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -127,8 +127,8 @@
   justify-content: flex-end; /* RTL: phases flow right to left */
   gap: 0;
   padding: 0;
-  border-bottom: 1px solid var(--c-border, #D6E2EF);
-  background: var(--c-bg, #F5F9FD);
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-bg);
   flex-shrink: 0;
   overflow-x: auto;
 }
@@ -157,20 +157,20 @@
   top: 20%;
   height: 60%;
   width: 1px;
-  background: var(--c-border, #D6E2EF);
+  background: var(--c-border);
 }
 
 .ip-step:hover {
-  background: var(--c-bg-2, #EBF3FB);
+  background: var(--c-bg-2);
 }
 
 .ip-step--active {
-  border-bottom-color: var(--c-primary, #17365D);
-  background: var(--c-bg-2, #EBF3FB);
+  border-bottom-color: var(--c-primary);
+  background: var(--c-bg-2);
 }
 
 .ip-step--done {
-  border-bottom-color: var(--c-success, #10B981);
+  border-bottom-color: var(--c-success);
 }
 
 .ip-step--locked {
@@ -187,9 +187,9 @@
   height: 28px;
   flex: 0 0 28px;
   border-radius: 50%;
-  border: 2px solid var(--c-border-2, #BFD0E2);
-  background: var(--c-surface, #fff);
-  color: var(--c-ink-2, #3D5A80);
+  border: 2px solid var(--c-border-2);
+  background: var(--c-surface);
+  color: var(--c-ink-2);
   font-size: 12px;
   font-weight: 800;
   display: flex;
@@ -200,14 +200,14 @@
 }
 
 .ip-step--active .ip-step-num {
-  background: var(--c-primary, #17365D);
-  border-color: var(--c-primary, #17365D);
+  background: var(--c-primary);
+  border-color: var(--c-primary);
   color: #fff;
 }
 
 .ip-step--done .ip-step-num {
-  background: var(--c-success, #10B981);
-  border-color: var(--c-success, #10B981);
+  background: var(--c-success);
+  border-color: var(--c-success);
   color: #fff;
 }
 
@@ -221,22 +221,22 @@
 
 .ip-step-label {
   font-size: 10px;
-  color: var(--c-ink-3, #5E7A96);
+  color: var(--c-ink-3);
   font-weight: 500;
 }
 
 .ip-step-title {
   font-size: 12.5px;
   font-weight: 700;
-  color: var(--c-ink-1, #17365D);
+  color: var(--c-ink-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 160px;
 }
 
-.ip-step--active .ip-step-title { color: var(--c-primary, #17365D); }
-.ip-step--done .ip-step-title   { color: var(--c-success-dark, #059669); }
+.ip-step--active .ip-step-title { color: var(--c-primary); }
+.ip-step--done .ip-step-title   { color: var(--c-success-dark); }
 
 /* ── Form body ──────────────────────────────────────────────────────────── */
 
@@ -251,7 +251,7 @@
 }
 
 .ip-no-template {
-  color: var(--c-ink-3, #5E7A96);
+  color: var(--c-ink-3);
   font-size: 13px;
   text-align: center;
   padding: 32px 0;
@@ -269,20 +269,20 @@
 .ip-field-label {
   font-size: 13px;
   font-weight: 700;
-  color: var(--c-ink-1, #17365D);
+  color: var(--c-ink-2);
 }
 
-.ip-required { color: var(--c-error, #DC2626); margin-inline-start: 2px; }
+.ip-required { color: var(--c-error); margin-inline-start: 2px; }
 
 .ip-field--invalid .ip-input,
 .ip-field--invalid .ip-select {
-  border-color: var(--c-error, #DC2626);
+  border-color: var(--c-error);
   box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.08);
 }
 
 .ip-field-error,
 .ip-validation-msg {
-  color: var(--c-error, #DC2626);
+  color: var(--c-error);
   font-size: 12px;
   font-weight: 700;
   line-height: 1.6;
@@ -292,12 +292,12 @@
 .ip-select {
   width: 100%;
   padding: 9px 12px;
-  border: 1.5px solid var(--c-border, #D6E2EF);
+  border: 1.5px solid var(--c-border);
   border-radius: 8px;
   font-size: 14px;
   font-family: inherit;
-  color: var(--c-ink-1, #17365D);
-  background: var(--c-surface, #fff);
+  color: var(--c-ink-2);
+  background: var(--c-surface);
   transition: border-color 0.15s;
   box-sizing: border-box;
   direction: rtl;
@@ -306,7 +306,7 @@
 .ip-input:focus,
 .ip-select:focus {
   outline: none;
-  border-color: var(--c-primary, #17365D);
+  border-color: var(--c-primary);
 }
 
 .ip-textarea {
@@ -326,10 +326,10 @@
 .ip-readonly-phase h4 {
   font-size: 13px;
   font-weight: 800;
-  color: var(--c-ink-2, #3D5A80);
+  color: var(--c-ink-2);
   margin: 0 0 10px;
   padding-bottom: 6px;
-  border-bottom: 1px solid var(--c-border, #D6E2EF);
+  border-bottom: 1px solid var(--c-border);
 }
 
 .ip-answer-row {
@@ -338,20 +338,20 @@
   align-items: flex-start;
   gap: 12px;
   padding: 7px 0;
-  border-bottom: 1px dashed var(--c-border, #D6E2EF);
+  border-bottom: 1px dashed var(--c-border);
   font-size: 13px;
 }
 
 .ip-answer-row:last-child { border-bottom: none; }
 
 .ip-answer-label {
-  color: var(--c-ink-3, #5E7A96);
+  color: var(--c-ink-3);
   flex-shrink: 0;
   max-width: 45%;
 }
 
 .ip-answer-value {
-  color: var(--c-ink-1, #17365D);
+  color: var(--c-ink-2);
   font-weight: 600;
   text-align: start;
 }
@@ -364,8 +364,8 @@
   justify-content: space-between;
   gap: 10px;
   padding: 12px 16px;
-  border-top: 1px solid var(--c-border, #D6E2EF);
-  background: var(--c-bg, #F5F9FD);
+  border-top: 1px solid var(--c-border);
+  background: var(--c-bg);
   flex-shrink: 0;
   flex-wrap: wrap;
   direction: ltr;
@@ -408,22 +408,22 @@
 .ip-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .ip-btn--primary {
-  background: var(--c-primary, #17365D);
+  background: var(--c-primary);
   color: #fff;
 }
-.ip-btn--primary:hover:not(:disabled) { background: var(--c-primary-dark, #122A4A); }
+.ip-btn--primary:hover:not(:disabled) { background: var(--c-primary-dark); }
 
 .ip-btn--secondary {
-  background: var(--c-surface, #fff);
-  color: var(--c-ink-1, #17365D);
-  border: 1.5px solid var(--c-border-2, #BFD0E2);
+  background: var(--c-surface);
+  color: var(--c-ink-2);
+  border: 1.5px solid var(--c-border-2);
 }
-.ip-btn--secondary:hover:not(:disabled) { background: var(--c-bg-2, #EBF3FB); }
+.ip-btn--secondary:hover:not(:disabled) { background: var(--c-bg-2); }
 
 .ip-btn--warning {
-  background: var(--c-warning-bg, #FFF7ED);
-  color: var(--c-warning, #C2410C);
-  border: 1.5px solid var(--c-warning-border, #FED7AA);
+  background: var(--c-warning-bg);
+  color: var(--c-warning);
+  border: 1.5px solid var(--c-warning-border);
 }
 .ip-btn--warning:hover:not(:disabled) { background: #FEE2C8; }
 

@@ -189,6 +189,12 @@ export const DEFAULT_LABELS = {
   // supervisor reassigned or replaced it) while unsaved answers were typed in.
   // The panel is deliberately kept open instead of being swapped to another
   // x-ray — losing typed work to a background refresh is never acceptable.
+  // Deleting an inspection template removes it from disk irreversibly. Until the
+  // overlay audit this fired with no confirmation at all -- the only unconfirmed
+  // destructive action in the app.
+  tb_delete_confirm_title:         "حذف النموذج",
+  tb_delete_confirm_message:       "سيتم حذف هذا النموذج نهائياً من مساحة العمل، ولا يمكن التراجع عن هذا الإجراء. النماذج المحذوفة لا تؤثر على عمليات التفتيش المحفوظة مسبقاً.",
+  tb_delete_confirm_ok:            "حذف نهائي",
   ew_draft_retained_notice:        "تم نقل هذه العينة من قائمتك (إحالة أو استبدال أثناء العمل عليها). إجاباتك غير المحفوظة لا تزال معروضة هنا — انسخها قبل الانتقال إلى عينة أخرى.",
 
   // Population — sampling & processing guards

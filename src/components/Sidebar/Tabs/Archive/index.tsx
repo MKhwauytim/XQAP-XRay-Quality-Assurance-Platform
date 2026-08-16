@@ -1,13 +1,12 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Archive, X } from "lucide-react";
+import { Archive } from "lucide-react";
 
 import { readSession } from "../../../../auth/authSession";
 import { tabAllowedRoles } from "../../../../auth/tabCatalog";
 import { usePermissions } from "../../../../auth/usePermissions";
-import { useFocusTrap } from "../../../../hooks/useFocusTrap";
-import { ModalPortal } from "../../../../components/ModalPortal/ModalPortal";
+import { ModalShell } from "../../../../components/ModalShell/ModalShell";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
 import { formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
 import {
@@ -691,63 +690,53 @@ function MonthLockDialog({
   const isClose = mode === "close";
   // Close note is optional; reopen reason is mandatory.
   const canConfirm = !busy && (isClose || note.trim().length > 0);
-  const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
 
   return (
-    <ModalPortal>
-    <div ref={dialogRef} className="arc-modal-backdrop" role="dialog" aria-modal="true">
-      <div className="arc-restore-modal">
-        <div className="arc-restore-header">
-          <div>
-            <span className="arc-panel-kicker">{L.archive_month_action_kicker}</span>
-            <h2>{isClose ? L.archive_close_month_btn : L.archive_reopen_month_btn}</h2>
-          </div>
-          <button type="button" className="arc-modal-close" onClick={onClose} aria-label="إغلاق">
-            <X size={16} />
-          </button>
-        </div>
-
+    <ModalShell
+      variant="arc"
+      eyebrow={L.archive_month_action_kicker}
+      title={isClose ? L.archive_close_month_btn : L.archive_reopen_month_btn}
+      onClose={onClose}
+    >
         {error ? (
-          <div className="arc-modal-error" role="alert">
-            {error}
-          </div>
+        <div className="arc-modal-error" role="alert">
+          {error}
+        </div>
+      ) : null}
+
+      <div className={`arc-restore-warning${isClose ? " is-danger" : ""}`}>
+        <strong>{folderName}</strong>
+        <p>{isClose ? L.archive_close_month_confirm : L.archive_reopen_month_confirm}</p>
+        {isClose && pendingCount > 0 ? (
+          <p>{fillTemplate(L.archive_close_month_confirm_pending, { pending: formatNumber(pendingCount) })}</p>
         ) : null}
-
-        <div className={`arc-restore-warning${isClose ? " is-danger" : ""}`}>
-          <strong>{folderName}</strong>
-          <p>{isClose ? L.archive_close_month_confirm : L.archive_reopen_month_confirm}</p>
-          {isClose && pendingCount > 0 ? (
-            <p>{fillTemplate(L.archive_close_month_confirm_pending, { pending: formatNumber(pendingCount) })}</p>
-          ) : null}
-        </div>
-
-        <input
-          className="arc-restore-input"
-          value={note}
-          onChange={(event) => setNote(event.target.value)}
-          placeholder={isClose ? L.archive_close_note_placeholder : L.archive_reopen_reason_placeholder}
-        />
-
-        <div className="arc-restore-actions">
-          <button type="button" className="arc-btn-secondary" onClick={onClose} disabled={busy}>
-            إلغاء
-          </button>
-          <button
-            type="button"
-            className={`arc-btn-primary${isClose ? " arc-btn-danger" : ""}`}
-            disabled={!canConfirm}
-            onClick={() => onConfirm(note)}
-          >
-            {busy
-              ? "جاري التنفيذ..."
-              : isClose
-                ? L.archive_close_month_btn
-                : L.archive_reopen_month_btn}
-          </button>
-        </div>
       </div>
-    </div>
-    </ModalPortal>
+
+      <input
+        className="arc-restore-input"
+        value={note}
+        onChange={(event) => setNote(event.target.value)}
+        placeholder={isClose ? L.archive_close_note_placeholder : L.archive_reopen_reason_placeholder}
+      />
+
+      <div className="arc-restore-actions">
+        <button type="button" className="arc-btn-secondary" onClick={onClose} disabled={busy}>
+          إلغاء
+        </button>
+        <button
+          type="button"
+          className={`arc-btn-primary${isClose ? " arc-btn-danger" : ""}`}
+          disabled={!canConfirm}
+          onClick={() => onConfirm(note)}
+        >
+          {busy
+            ? "جاري التنفيذ..."
+            : isClose
+              ? L.archive_close_month_btn
+              : L.archive_reopen_month_btn}
+        </button>
+      </div>
+    </ModalShell>
   );
 }
 
@@ -778,89 +767,79 @@ function RestoreDialog({
   const [checked, setChecked] = useState(false);
   const canContinue = checked;
   const canRestore = typedName.trim() === target.folderName && !busy;
-  const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
 
   return (
-    <ModalPortal>
-    <div ref={dialogRef} className="arc-modal-backdrop" role="dialog" aria-modal="true">
-      <div className="arc-restore-modal">
-        <div className="arc-restore-header">
-          <div>
-            <span className="arc-panel-kicker">استعادة النسخة</span>
-            <h2>استعادة نسخة احتياطية</h2>
-          </div>
-          <button type="button" className="arc-modal-close" onClick={onClose} aria-label="إغلاق">
-            <X size={16} />
-          </button>
+    <ModalShell
+      variant="arc"
+      eyebrow="استعادة النسخة"
+      title="استعادة نسخة احتياطية"
+      onClose={onClose}
+    >
+      {error ? (
+        <div className="arc-modal-error" role="alert">
+          {error}
         </div>
+      ) : null}
 
-        {error ? (
-          <div className="arc-modal-error" role="alert">
-            {error}
+      {step === 1 ? (
+        <>
+          <div className="arc-restore-warning">
+            <strong>{target.folderName}</strong>
+            <p>
+              سيتم إنشاء نسخة رجوع من النظام الحالي أولاً، ثم استعادة ملفات JSON من النسخة المحددة.
+              يمكنك الرجوع لاحقاً من نسخة الرجوع التي ستظهر في السجل باسم قبل الاستعادة.
+            </p>
+            <p>{getLabels().backup_restore_merge_notice}</p>
           </div>
-        ) : null}
-
-        {step === 1 ? (
-          <>
-            <div className="arc-restore-warning">
-              <strong>{target.folderName}</strong>
-              <p>
-                سيتم إنشاء نسخة رجوع من النظام الحالي أولاً، ثم استعادة ملفات JSON من النسخة المحددة.
-                يمكنك الرجوع لاحقاً من نسخة الرجوع التي ستظهر في السجل باسم قبل الاستعادة.
-              </p>
-              <p>{getLabels().backup_restore_merge_notice}</p>
-            </div>
-            <label className="arc-restore-check">
-              <input
-                type="checkbox"
-                checked={checked}
-                onChange={(event) => setChecked(event.target.checked)}
-              />
-              <span>أفهم أن الاستعادة ستستبدل ملفات النظام الحالية بالقيم الموجودة في هذه النسخة.</span>
-            </label>
-            <div className="arc-restore-actions">
-              <button type="button" className="arc-btn-secondary" onClick={onClose}>إلغاء</button>
-              <button
-                type="button"
-                className="arc-btn-primary"
-                disabled={!canContinue}
-                onClick={() => setStep(2)}
-              >
-                متابعة التحقق
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="arc-restore-warning is-danger">
-              <p>للتأكيد النهائي، اكتب اسم مجلد النسخة كما هو:</p>
-              <code>{target.folderName}</code>
-            </div>
+          <label className="arc-restore-check">
             <input
-              className="arc-restore-input"
-              value={typedName}
-              onChange={(event) => setTypedName(event.target.value)}
-              placeholder={target.folderName}
-              dir="ltr"
-              autoFocus
+              type="checkbox"
+              checked={checked}
+              onChange={(event) => setChecked(event.target.checked)}
             />
-            <div className="arc-restore-actions">
-              <button type="button" className="arc-btn-secondary" onClick={() => setStep(1)} disabled={busy}>
-                رجوع
-              </button>
-              <button
-                type="button"
-                className="arc-btn-primary arc-btn-danger"
-                disabled={!canRestore}
-                onClick={onConfirm}
-              >
-                {busy ? "جاري الاستعادة..." : "استعادة الآن"}
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-    </ModalPortal>
+            <span>أفهم أن الاستعادة ستستبدل ملفات النظام الحالية بالقيم الموجودة في هذه النسخة.</span>
+          </label>
+          <div className="arc-restore-actions">
+            <button type="button" className="arc-btn-secondary" onClick={onClose}>إلغاء</button>
+            <button
+              type="button"
+              className="arc-btn-primary"
+              disabled={!canContinue}
+              onClick={() => setStep(2)}
+            >
+              متابعة التحقق
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="arc-restore-warning is-danger">
+            <p>للتأكيد النهائي، اكتب اسم مجلد النسخة كما هو:</p>
+            <code>{target.folderName}</code>
+          </div>
+          <input
+            className="arc-restore-input"
+            value={typedName}
+            onChange={(event) => setTypedName(event.target.value)}
+            placeholder={target.folderName}
+            dir="ltr"
+            autoFocus
+          />
+          <div className="arc-restore-actions">
+            <button type="button" className="arc-btn-secondary" onClick={() => setStep(1)} disabled={busy}>
+              رجوع
+            </button>
+            <button
+              type="button"
+              className="arc-btn-primary arc-btn-danger"
+              disabled={!canRestore}
+              onClick={onConfirm}
+            >
+              {busy ? "جاري الاستعادة..." : "استعادة الآن"}
+            </button>
+          </div>
+        </>
+      )}
+    </ModalShell>
   );
 }

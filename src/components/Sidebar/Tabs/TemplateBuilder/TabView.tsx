@@ -26,6 +26,8 @@ import { logRejection } from "../../../../data/storage/errorLogger";
 import "./TemplateBuilder.css";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
 import { EmptyState } from "../../../../components/StateViews/StateViews";
+import { ConfirmDialog } from "../../../../components/ConfirmDialog/ConfirmDialog";
+import { useLabels } from "../../../../data/labels/useLabels";
 
 const FIELD_TYPE_LABELS: Record<TemplateFieldType, string> = {
   text: "نص",
@@ -177,6 +179,9 @@ export default function TemplateBuilderTab() {
   const [activeSchema, setActiveSchema] = useState<TemplateSchema | null>(null);
   const [statusMessage, setStatusMessage] = useState<StatusMessage>(null);
   const [isLoading, setIsLoading] = useState(false);
+  /** Template awaiting delete confirmation; null when no dialog is open. */
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const labels = useLabels();
 
   useEffect(() => {
     if (!directoryHandle) return;
@@ -366,8 +371,28 @@ export default function TemplateBuilderTab() {
 
       {isLoading ? <div className="tb-loading">جاري التحميل...</div> : null}
 
+      {/*
+        Deleting a template is irreversible and removes it from disk, so it is
+        confirmed like every other destructive action in the app. It previously
+        fired straight from the card's "حذف" button with no dialog at all —
+        the only unconfirmed destructive path found in the overlay audit.
+      */}
+      <ConfirmDialog
+        open={pendingDeleteId !== null}
+        danger
+        title={labels.tb_delete_confirm_title}
+        message={labels.tb_delete_confirm_message}
+        confirmLabel={labels.tb_delete_confirm_ok}
+        onCancel={() => setPendingDeleteId(null)}
+        onConfirm={() => {
+          const id = pendingDeleteId;
+          setPendingDeleteId(null);
+          if (id) void handleDelete(id);
+        }}
+      />
+
       {mode === "list" ? (
-        <TemplateList index={index} onEdit={handleEdit} onDelete={handleDelete} canEdit={canManageTemplates} />
+        <TemplateList index={index} onEdit={handleEdit} onDelete={setPendingDeleteId} canEdit={canManageTemplates} />
       ) : activeSchema ? (
         <TemplateEditor
           schema={activeSchema}
