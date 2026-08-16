@@ -14,7 +14,7 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { readEnvelopeRevision, safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { logError, logRejection } from "../storage/errorLogger";
 import { casLoop } from "../storage/casLoop";
-import { codedMessage, logCodedError } from "../storage/errorCodes";
+import { codedMessage, logCodedError, resolveErrorCode } from "../storage/errorCodes";
 import { listDirectoryEntries, readAppendOnlyDirectory, readNamedJsonFiles } from "../storage/directoryScan";
 import { ensureMonthWritable } from "../population/monthLock";
 import { syncSampleMirrors } from "../samples/sampleMirrorStorage";
@@ -462,10 +462,30 @@ export async function appendDistributionEvents(
       options?.onProgress
     );
   } catch (error) {
-    logCodedError("distribution:append-events", "XQ-DIST-003", error);
+    // The raw `.message` used to be returned here, which meant the identifying
+    // code was logged and then thrown away: the string reaching the UI was
+    // English, `userFacingErrorText` had no error object left to classify, and
+    // the user was shown the catch-all XQ-IO-028 for a failure we had already
+    // named. Resolve the code once and put it in BOTH places.
+    //
+    // `resolveErrorCode` first, so a specifically classified failure keeps its
+    // own code — XQ-IO-017 revoked permission, XQ-IO-020 disk full, XQ-IO-027
+    // a vanished path, XQ-DIST-006 a handle with no createWritable — and only a
+    // genuinely unrecognized throw falls back to the generic XQ-DIST-003.
+    const code = resolveErrorCode(error) ?? "XQ-DIST-003";
+    logCodedError("distribution:append-events", code, error);
     return {
+      // `codedMessage`, NOT `formatUserError`: the latter appends the raw
+      // exception detail, which is untranslated Chromium wording, and putting
+      // that on an Arabic screen is the exact bug replacement.notFound.test.ts
+      // was written to prevent. The detail is already in the error log above —
+      // the screen gets the Arabic sentence and the quotable code, nothing else.
+      //
+      // The Arabic also matters mechanically: `userFacingErrorText` passes an
+      // Arabic string through verbatim, so this survives to the user instead of
+      // being swapped for the generic message.
       ok: false,
-      error: error instanceof Error ? error.message : String(error)
+      error: codedMessage(code)
     };
   }
 

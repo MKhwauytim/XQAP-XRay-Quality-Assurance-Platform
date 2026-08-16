@@ -160,8 +160,18 @@ describe("executeReplacement on a flaky network share", () => {
 
     expect(result.partialSampleWrite).toBe(true);
     expect(result.error).toContain("تمت إضافة البديل للعينة لكن فشل تسجيل الحدث");
-    expect(result.error).toContain(getLabels().msg_unexpected_write_error);
-    // The whole point: no untranslated Chromium/internal wording reaches the UI.
+    // Was `msg_unexpected_write_error` — the generic "something failed while
+    // saving". `appendDistributionEvents` used to return the raw `.message`
+    // here, so the identifying code it had already computed was discarded and
+    // the UI fell back to that generic sentence (and to the XQ-IO-028
+    // catch-all, which is what got reported from the field). It now classifies
+    // the throw, so this NotFoundError arrives as its own Arabic sentence and
+    // its own code. Asserting the specific pair is the stronger check.
+    expect(result.error).toContain(getLabels().err_io_027_not_found);
+    expect(result.error).toContain("XQ-IO-027");
+    expect(result.error).not.toContain("XQ-IO-028");
+    // The whole point, unchanged: no untranslated Chromium/internal wording
+    // reaches the UI. Adding the code must not smuggle the raw detail in with it.
     expect(result.error).not.toMatch(/NotFoundError|Simulated|could not be found/);
 
     // Reported once, and the partially-written sample row is not duplicated.
