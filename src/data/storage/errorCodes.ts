@@ -368,6 +368,11 @@ export const ERROR_CODES = {
     meaning: "saving the processed population to disk returned a failure result",
     labelKey: "err_pop_005_save_returned_error",
   },
+  "XQ-POP-007": {
+    meaning:
+      "a population Web Worker died without sending a reply (error/messageerror) — most likely out of memory on a very large month; without this the caller waits forever",
+    labelKey: "err_pop_007_worker_died",
+  },
   "XQ-POP-006": {
     meaning: "saving the processed population to disk threw",
     labelKey: "err_pop_006_save_threw",

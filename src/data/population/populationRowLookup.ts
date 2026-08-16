@@ -1,3 +1,4 @@
+import { codedMessage } from "../storage/errorCodes";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import type { PreparedPopulationRow } from "./populationTypes";
 import type {
@@ -44,6 +45,10 @@ export type PopulationQueryWorkerLike = {
   postMessage: (message: PopulationQueryWorkerRequest) => void;
   terminate: () => void;
   onmessage: ((ev: MessageEvent<PopulationQueryWorkerResponse>) => void) | null;
+  // Optional so a test double can omit them; a real Worker always has both.
+  // Without these a dead worker leaves the caller's promise unsettled forever.
+  onerror?: ((ev: unknown) => void) | null;
+  onmessageerror?: ((ev: unknown) => void) | null;
 };
 
 export type FindPopulationRowByIdOptions = {
@@ -90,6 +95,25 @@ export async function findPopulationRowById(
       // on; the "loaded" reply is ignored on purpose.
       const LOAD_REQUEST_ID = 1;
       const LOOKUP_REQUEST_ID = 2;
+
+      // A worker that DIES never sends a message, so without these the promise
+      // below never settles: the `finally` that terminates the worker never
+      // runs (leaking it), and the caller — the replacement confirm dialog —
+      // spins forever with no error. This function exists precisely because
+      // population.final.json is big enough to freeze the main thread, i.e. big
+      // enough to OOM the worker parsing it, so the failure it guards against
+      // is the one most likely to kill it.
+      //
+      // `resolve`, not `reject`: every caller already handles `{ ok: false }`,
+      // and the outer `finally` still terminates the worker either way.
+      worker.onerror = () => {
+        resolve({ ok: false, error: codedMessage("XQ-POP-007") });
+      };
+      // Delivery failure of a message that WAS sent — a payload that could not
+      // be deserialized. Distinct event from `error`, and just as silent.
+      worker.onmessageerror = () => {
+        resolve({ ok: false, error: codedMessage("XQ-POP-007") });
+      };
 
       worker.onmessage = (ev: MessageEvent<PopulationQueryWorkerResponse>) => {
         const response = ev.data;

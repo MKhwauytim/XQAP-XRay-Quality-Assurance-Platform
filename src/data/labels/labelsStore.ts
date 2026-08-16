@@ -941,6 +941,7 @@ export const DEFAULT_LABELS = {
   err_pop_003_workbook_parse_failed:   "تعذر قراءة ملف بيانات وكالة المخاطر. تأكد من أن الملف بصيغة Excel وأن الصف الأول يحتوي على العناوين.",
   err_pop_004_processing_failed:       "تعذر تنفيذ معالجة المجتمع. تحقق من بيانات CertScan أو من بنية البيانات المقروءة.",
   err_pop_005_save_returned_error:     "فشل الحفظ: {detail}",
+  err_pop_007_worker_died:                 "توقف معالج البيانات أثناء العمل، غالبًا بسبب حجم البيانات الكبير. أعد المحاولة، وإن تكرر الخطأ فقسّم البيانات على شهور أصغر.",
   err_pop_006_save_threw:              "حدث خطأ غير متوقع أثناء الحفظ.",
 
   err_dist_002_duplicate_event_id:     "معرّف حدث مكرر: {eventId}",

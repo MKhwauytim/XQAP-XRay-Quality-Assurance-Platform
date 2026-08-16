@@ -1,3 +1,4 @@
+import { codedMessage } from "../../../../data/storage/errorCodes";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type {
@@ -145,6 +146,32 @@ export function usePopulationBrowseWorker(): UsePopulationBrowseWorkerResult {
       inFlightLanesRef.current.delete(lane);
       setIsQuerying(inFlightLanesRef.current.size > 0);
     };
+
+    // A worker that DIES sends no message at all, so nothing below ever runs:
+    // `isLoaded` stays false, every `runQuery` promise stays unsettled, and
+    // `inFlightLanesRef` never drains so `isQuerying` stays true — Browse spins
+    // forever. The XLSX export is worse: `await collectMatchingRows(...)` never
+    // resolves, so its own `finally { setIsExporting(false) }` never runs and
+    // the export button is dead until a reload.
+    //
+    // The realistic trigger is an OOM parsing a very large population.final.json,
+    // which is exactly what this worker exists to handle.
+    const failAllPending = (): void => {
+      setError(codedMessage("XQ-POP-007"));
+      setIsLoaded(false);
+      // Settle every waiter with `null` — the same value a cancelled/superseded
+      // query resolves with, which every call site already handles.
+      for (const [, pending] of pendingQueriesRef.current) {
+        pending.resolve(null);
+      }
+      pendingQueriesRef.current.clear();
+      inFlightLanesRef.current.clear();
+      setIsQuerying(false);
+    };
+
+    worker.onerror = failAllPending;
+    // Distinct event: a message that WAS sent but could not be deserialized.
+    worker.onmessageerror = failAllPending;
 
     worker.onmessage = (ev: MessageEvent<PopulationQueryWorkerResponse>) => {
       const response = ev.data;
