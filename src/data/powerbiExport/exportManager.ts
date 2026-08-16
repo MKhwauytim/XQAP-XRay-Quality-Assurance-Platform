@@ -1,3 +1,4 @@
+import { liveSampleRows } from "../sampling/sampleStorage";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { loadMonthPopulationFinal } from "../population/populationStorage";
 import { loadSampleMaster } from "../sampling/sampleStorage";
@@ -25,7 +26,9 @@ export async function runPowerBiExport(
 ): Promise<ExportManifest> {
   const populationData = await loadMonthPopulationFinal(root, month);
   const sample = await loadSampleMaster(root, month);
-  const sampleRows = sample?.rows ?? [];
+  // Retired-by-replacement rows are excluded here for the same reason as in the
+  // executive report: they are audit trail, not live sample.
+  const sampleRows = liveSampleRows(sample);
   // A6a: export is a pure read — never persist the derived cache from here.
   const distribution = await loadOrDeriveDistributionCurrent(root, month, sampleRows, {
     persistCache: false,
