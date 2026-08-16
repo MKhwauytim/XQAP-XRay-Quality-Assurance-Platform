@@ -24,6 +24,7 @@ import {
 } from "./WorkspaceContext";
 import { createDemoWorkspace } from "./demoWorkspace";
 import { getLabels } from "../labels/labelsStore";
+import { logError } from "../storage/errorLogger";
 import { setReadOnlyMode } from "../storage/readOnlyMode";
 import { WORKSPACE_PERMISSION_LOST_EVENT } from "../storage/workspaceWriteAccess";
 
@@ -221,8 +222,20 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         return;
       }
 
+      // This catch used to swallow the failure entirely: no log, and a generic
+      // message that named neither the step nor the exception. When workspace
+      // selection failed in a real browser there was literally nothing to go on
+      // -- and the error log is unreachable, because it lives behind Settings,
+      // which needs a mounted workspace. So the one place a user could look is
+      // the one place they cannot reach.
+      //
+      // The detail is now both logged (for the error-log panel, once a workspace
+      // IS open) and appended to the on-screen message, which is the only
+      // surface visible in this state.
+      logError("workspace:select", error);
+      const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
       setStatus("error");
-      setMessage("حدث خطأ أثناء اختيار أو فحص مجلد مساحة العمل.");
+      setMessage(`حدث خطأ أثناء اختيار أو فحص مجلد مساحة العمل. (${detail})`);
     }
   }, [applyWorkspaceHandle]);
 
@@ -302,9 +315,16 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         } else {
           setLoadedFiles(emptyLoadedFiles);
         }
-      } catch {
+      } catch (error) {
+        // This catch spans THREE steps -- createWorkspaceStructure,
+        // checkWorkspaceStructure and loadWorkspaceFiles -- but blamed write
+        // permissions unconditionally, so any failure in any of them sent the
+        // user to check folder permissions that were often fine. It also logged
+        // nothing, leaving no way to tell which step failed or why.
+        logError("workspace:create-structure", error);
+        const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
         setStatus("error");
-        setMessage("تعذر إنشاء بنية مساحة العمل. تحقق من صلاحيات الكتابة.");
+        setMessage(`تعذر إنشاء بنية مساحة العمل. (${detail})`);
       }
     },
     [directoryHandle]
