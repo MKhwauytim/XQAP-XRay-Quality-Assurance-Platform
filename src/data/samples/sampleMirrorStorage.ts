@@ -14,6 +14,10 @@ import { loadSampleMaster } from "../sampling/sampleStorage";
 // other's exports inside function bodies, never at module-eval time (P6,
 // 2026-08 — see getUserWorkspaceFootprint's revision cross-check below).
 import { loadOrDeriveDistributionCurrent, readDistributionLogStamp } from "../distribution/distributionStorage";
+// Same deliberate cycle, same rule: DERIVE_VERSION is a plain number constant
+// read inside function bodies only. distributionLog.ts imports nothing from
+// this module, so this edge is acyclic on its own.
+import { DERIVE_VERSION } from "../distribution/distributionLog";
 
 /**
  * Frozen quota snapshot carried inside the per-employee mirror so an employee
@@ -36,6 +40,23 @@ export type EmployeeSamplesFile = {
   username: string;
   updatedAt: string;
   sourceLogRevision: number;
+  /**
+   * `deriveVersion` of the `DistributionCurrentData` this mirror was projected
+   * from — i.e. WHICH derivation produced these entries and this quota, not
+   * which log revision they came from.
+   *
+   * Needed because a DERIVE_VERSION bump (v88: employee quota derivation) fixes
+   * the DERIVED values while leaving `sourceLogRevision` untouched: the log has
+   * not moved, only our reading of it. Without this field the monotonic guard
+   * in `syncSampleMirrors` sees `existing === incoming` and skips forever, so
+   * the corrected quota never reaches the employee on a month with no further
+   * events.
+   *
+   * OPTIONAL by contract, like `quota`: mirrors written before this field
+   * existed have none, and readers MUST treat its absence as version 0 (a
+   * pre-versioned derivation, therefore rewritable exactly once).
+   */
+  deriveVersion?: number;
   /** Absent on mirrors written before the quota field existed — see EmployeeMirrorQuota. */
   quota?: EmployeeMirrorQuota;
   entries: DistributionEntry[];
@@ -91,7 +112,28 @@ export type EmployeeMirrorIndexFile = {
    * under-stating it would let an older derivation clobber a newer mirror.
    */
   pendingRevision: number | null;
-  mirrors: Record<string, { username: string; sourceLogRevision: number | null }>;
+  /**
+   * The `deriveVersion` half of `pendingRevision` — the derivation version the
+   * in-flight run is writing. Read together with it (see `maxStamp`), so an
+   * interrupted run is over-stated in the same safe direction on BOTH axes.
+   *
+   * Optional: an index written before this field existed has none, read as 0.
+   */
+  pendingDeriveVersion?: number | null;
+  /**
+   * `deriveVersion` per mirror, mirroring `EmployeeSamplesFile.deriveVersion`.
+   *
+   * The index exists precisely so the monotonic guard does not have to open N
+   * mirrors; a guard that now compares derive versions cannot evaluate its rule
+   * from an index that does not carry them, so the fast path would silently
+   * defeat the fix. Optional for the same dual-read reason as everywhere else:
+   * an index written by an older client has no `deriveVersion` on its entries
+   * and is read as 0.
+   */
+  mirrors: Record<
+    string,
+    { username: string; sourceLogRevision: number | null; deriveVersion?: number }
+  >;
 };
 
 function isMirrorIndex(value: unknown): value is EmployeeMirrorIndexFile {
@@ -99,13 +141,24 @@ function isMirrorIndex(value: unknown): value is EmployeeMirrorIndexFile {
   const candidate = value as Partial<EmployeeMirrorIndexFile>;
   if (typeof candidate.mirrors !== "object" || candidate.mirrors === null) return false;
   if (candidate.pendingRevision !== null && typeof candidate.pendingRevision !== "number") return false;
+  if (
+    candidate.pendingDeriveVersion !== undefined &&
+    candidate.pendingDeriveVersion !== null &&
+    typeof candidate.pendingDeriveVersion !== "number"
+  ) {
+    return false;
+  }
   return Object.values(candidate.mirrors).every(
     (entry) =>
       typeof entry === "object" &&
       entry !== null &&
       typeof (entry as { username?: unknown }).username === "string" &&
       (typeof (entry as { sourceLogRevision?: unknown }).sourceLogRevision === "number" ||
-        (entry as { sourceLogRevision?: unknown }).sourceLogRevision === null)
+        (entry as { sourceLogRevision?: unknown }).sourceLogRevision === null) &&
+      // Absent is legal (legacy index, read as 0); present-but-not-a-number is
+      // not — a malformed index is rejected whole and the mirrors are read.
+      ((entry as { deriveVersion?: unknown }).deriveVersion === undefined ||
+        typeof (entry as { deriveVersion?: unknown }).deriveVersion === "number")
   );
 }
 
@@ -138,7 +191,16 @@ function employeeSamplesFileName(username: string): string {
   return `${safeWorkspaceFilePart(username)}${EMPLOYEE_MIRROR_SUFFIX}`;
 }
 
-type ExistingMirror = { username: string; sourceLogRevision: number | null };
+/**
+ * What is (believed to be) on disk for one mirror file. `deriveVersion` is a
+ * plain number, never null: a mirror or index entry that does not carry one was
+ * written by a pre-versioned client and is read as 0.
+ */
+type ExistingMirror = {
+  username: string;
+  sourceLogRevision: number | null;
+  deriveVersion: number;
+};
 
 /** Same read as `readEmployeeMirrorIndex`, against an already-resolved dir. */
 async function readMirrorIndexIn(
@@ -161,10 +223,26 @@ function indexCoversListing(index: EmployeeMirrorIndexFile, fileNames: string[])
   return fileNames.every((name) => index.mirrors[name] !== undefined);
 }
 
-function maxRevision(a: number | null, b: number | null): number | null {
-  if (a === null) return b;
-  if (b === null) return a;
-  return Math.max(a, b);
+type MirrorStamp = { sourceLogRevision: number | null; deriveVersion: number };
+
+/**
+ * The later of two mirror stamps, ordered as (revision, deriveVersion) —
+ * revision first, derive version only as the tie-break, exactly the ordering
+ * the monotonic guard itself uses. A null revision is "unknown", which loses to
+ * any known one.
+ *
+ * Used only to fold `pendingRevision` into a recorded entry, where over-stating
+ * is the documented safe direction (it can only make the guard SKIP a write).
+ */
+function maxStamp(a: MirrorStamp, b: MirrorStamp): MirrorStamp {
+  if (a.sourceLogRevision === null) return b;
+  if (b.sourceLogRevision === null) return a;
+  if (a.sourceLogRevision > b.sourceLogRevision) return a;
+  if (b.sourceLogRevision > a.sourceLogRevision) return b;
+  return {
+    sourceLogRevision: a.sourceLogRevision,
+    deriveVersion: Math.max(a.deriveVersion, b.deriveVersion),
+  };
 }
 
 /**
@@ -202,13 +280,21 @@ async function readExistingMirrors(
   if (index && indexCoversListing(index, names)) {
     for (const fileName of names) {
       const entry = index.mirrors[fileName];
-      byFileName.set(fileName, {
-        username: entry.username,
-        // See EmployeeMirrorIndexFile.pendingRevision: while a projection is
-        // in flight the recorded revision is a LOWER bound on what may already
-        // be on disk, so raise it to the pending revision.
-        sourceLogRevision: maxRevision(entry.sourceLogRevision, index.pendingRevision),
-      });
+      // See EmployeeMirrorIndexFile.pendingRevision: while a projection is in
+      // flight the recorded stamp is a LOWER bound on what may already be on
+      // disk, so raise it to the pending stamp. A legacy index carries no
+      // deriveVersion on either side; 0 makes such a mirror rewritable exactly
+      // once (the rewrite is by definition from the newest derivation, so it
+      // can only improve the file — and the revision comparison, which is what
+      // protects against resurrecting stale entries, is untouched).
+      const stamp = maxStamp(
+        { sourceLogRevision: entry.sourceLogRevision, deriveVersion: entry.deriveVersion ?? 0 },
+        {
+          sourceLogRevision: index.pendingRevision,
+          deriveVersion: index.pendingDeriveVersion ?? 0,
+        }
+      );
+      byFileName.set(fileName, { username: entry.username, ...stamp });
     }
     return byFileName;
   }
@@ -225,10 +311,19 @@ async function readExistingMirrors(
       username: result.value.username,
       sourceLogRevision:
         typeof result.value.sourceLogRevision === "number" ? result.value.sourceLogRevision : null,
+      // Absent on a mirror written before the field existed → 0.
+      deriveVersion:
+        typeof result.value.deriveVersion === "number" ? result.value.deriveVersion : 0,
     };
   });
   for (const entry of read) {
-    if (entry) byFileName.set(entry.fileName, { username: entry.username, sourceLogRevision: entry.sourceLogRevision });
+    if (entry) {
+      byFileName.set(entry.fileName, {
+        username: entry.username,
+        sourceLogRevision: entry.sourceLogRevision,
+        deriveVersion: entry.deriveVersion,
+      });
+    }
   }
   return byFileName;
 }
@@ -252,6 +347,14 @@ export async function syncSampleMirrors(
 ): Promise<void> {
   const updatedAt = new Date().toISOString();
   const sourceLogRevision = current.logRevision ?? 0;
+  // The mirror's derivation quality is the quality of the snapshot it projects,
+  // so a stamped snapshot is trusted verbatim — a `current` folded by an older
+  // build must not be able to masquerade as this build's derivation and lock
+  // out the corrected one. An UNSTAMPED snapshot is one nothing on the storage
+  // path can produce (`loadOrDeriveDistributionCurrent` refolds anything whose
+  // deriveVersion !== DERIVE_VERSION), i.e. a hand-built one from this build,
+  // so it carries this build's semantics.
+  const deriveVersion = current.deriveVersion ?? DERIVE_VERSION;
   const employeesDir = await getSampleEmployeeDir(directoryHandle, monthFolderName, true);
 
   const entriesByEmployee = new Map<string, DistributionEntry[]>();
@@ -273,7 +376,13 @@ export async function syncSampleMirrors(
   // for why that direction is the safe one. Best-effort: a failure here must
   // not stop the mirrors themselves being written, and only costs the next
   // reader its fast path.
-  await writeMirrorIndex(employeesDir, monthFolderName, existingMirrors, sourceLogRevision);
+  await writeMirrorIndex(
+    employeesDir,
+    monthFolderName,
+    existingMirrors,
+    sourceLogRevision,
+    deriveVersion
+  );
 
   /** File name -> the revision that will be on disk when this run finishes. */
   const finalRevisions = new Map<string, ExistingMirror>(existingMirrors);
@@ -283,13 +392,27 @@ export async function syncSampleMirrors(
     MIRROR_WRITE_CONCURRENCY,
     async ([username, entries]) => {
       const fileName = employeeSamplesFileName(username);
-      // Monotonic guard: never let an older derivation (lower
-      // sourceLogRevision) clobber a mirror already written from a newer log
-      // revision. Two machines can derive concurrently; without this an
-      // out-of-order write would resurrect stale entries for readers.
-      const existingRevision = existingMirrors.get(fileName)?.sourceLogRevision ?? null;
-      if (existingRevision !== null && existingRevision >= sourceLogRevision) {
-        return; // a newer (or equal) derivation already wrote this mirror
+      // Monotonic guard, ordered (revision, deriveVersion) — the two axes are
+      // NOT interchangeable and must be tested in this order:
+      //
+      //   existing.revision >  ours  → never overwrite, whatever the versions.
+      //       They hold newer DATA (two machines can derive concurrently);
+      //       overwriting resurrects stale entries for the employee, which is
+      //       strictly worse than serving a slightly-old derivation. A version
+      //       difference must never defeat this case.
+      //   existing.revision === ours → overwrite only if OUR derivation is
+      //       newer. Same log, better reading of it — this is what lets a
+      //       DERIVE_VERSION bump (v88's employee quota fix) actually reach the
+      //       employee on a month with no further events, where the revision
+      //       alone never changes again.
+      //   existing.revision <  ours  → overwrite; we hold newer data.
+      const existing = existingMirrors.get(fileName);
+      const existingRevision = existing?.sourceLogRevision ?? null;
+      if (existingRevision !== null) {
+        if (existingRevision > sourceLogRevision) return;
+        if (existingRevision === sourceLogRevision && (existing?.deriveVersion ?? 0) >= deriveVersion) {
+          return; // same data, and their derivation is no older than ours
+        }
       }
       const quota = current.quotas?.[username];
       await safeWriteJson<EmployeeSamplesFile>(employeesDir, fileName, {
@@ -297,6 +420,7 @@ export async function syncSampleMirrors(
         username,
         updatedAt,
         sourceLogRevision,
+        deriveVersion,
         ...(quota
           ? {
               quota: {
@@ -308,14 +432,14 @@ export async function syncSampleMirrors(
           : {}),
         entries,
       });
-      finalRevisions.set(fileName, { username, sourceLogRevision });
+      finalRevisions.set(fileName, { username, sourceLogRevision, deriveVersion });
     }
   );
 
   // Phase 2: commit the index. `pendingRevision` back to null, revisions now
   // describing what this run actually left on disk (skipped files keep their
   // higher existing revision, written files carry this run's).
-  await writeMirrorIndex(employeesDir, monthFolderName, finalRevisions, null);
+  await writeMirrorIndex(employeesDir, monthFolderName, finalRevisions, null, null);
 }
 
 /**
@@ -327,17 +451,23 @@ async function writeMirrorIndex(
   employeesDir: DirectoryHandleLike,
   monthFolderName: string,
   mirrors: Map<string, ExistingMirror>,
-  pendingRevision: number | null
+  pendingRevision: number | null,
+  pendingDeriveVersion: number | null
 ): Promise<void> {
   try {
     await safeWriteJson<EmployeeMirrorIndexFile>(employeesDir, EMPLOYEE_MIRROR_INDEX_FILE, {
       monthFolderName,
       updatedAt: new Date().toISOString(),
       pendingRevision,
+      pendingDeriveVersion,
       mirrors: Object.fromEntries(
         [...mirrors.entries()].map(([fileName, mirror]) => [
           fileName,
-          { username: mirror.username, sourceLogRevision: mirror.sourceLogRevision },
+          {
+            username: mirror.username,
+            sourceLogRevision: mirror.sourceLogRevision,
+            deriveVersion: mirror.deriveVersion,
+          },
         ])
       ),
     });

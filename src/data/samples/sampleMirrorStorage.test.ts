@@ -22,7 +22,12 @@ import type { ItemAnswer } from "../answers/answerTypes";
 import type { MonthManifestData } from "../population/monthTypes";
 import { getPopulationMonthDir, getSampleEmployeeDir } from "../workspace/workspacePaths";
 import type { DistributionCurrentData, DistributionEntry } from "../distribution/distributionTypes";
-import { getUserWorkspaceFootprint, loadEmployeeSampleMirror, syncSampleMirrors } from "./sampleMirrorStorage";
+import {
+  getUserWorkspaceFootprint,
+  loadEmployeeSampleMirror,
+  readEmployeeMirrorIndex,
+  syncSampleMirrors,
+} from "./sampleMirrorStorage";
 
 const MONTH_A = "5-may-2026";
 const MONTH_B = "6-june-2026";
@@ -189,6 +194,113 @@ describe("syncSampleMirrors monotonic guard", () => {
     const mirror = await loadEmployeeSampleMirror(root, MONTH_A, EMP);
     expect(mirror?.sourceLogRevision).toBe(5);
     expect(mirror?.entries[0]?.status).toBe("completed");
+  });
+});
+
+describe("syncSampleMirrors derive-version guard (v88 quota refold)", () => {
+  /** `makeCurrent` with the derive version and quotas under test. */
+  function makeCurrentAt(
+    logRevision: number,
+    deriveVersion: number,
+    entries: DistributionEntry[],
+    dailyQuota?: number
+  ): DistributionCurrentData {
+    return {
+      ...makeCurrent(MONTH_A, logRevision, entries),
+      deriveVersion,
+      ...(dailyQuota === undefined
+        ? {}
+        : {
+            quotas: {
+              [EMP]: {
+                username: EMP,
+                sampleCount: 12,
+                dailyQuota,
+                daysRemainingAtAssignment: 3,
+                assignedAt: "2026-05-02T00:00:00.000Z",
+              },
+            },
+          }),
+    };
+  }
+
+  it("REGRESSION: a mirror at the SAME revision but an OLDER deriveVersion is rewritten with the corrected quota", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    invalidateMonthLockCache();
+    await ensurePopulationMonthFolder(root, MONTH_A);
+
+    // The pre-v88 derivation: same log revision, wrong (inflated) daily quota.
+    await syncSampleMirrors(root, MONTH_A, makeCurrentAt(5, 2, [makeMirrorEntry("A1", "pending")], 9));
+    expect((await loadEmployeeSampleMirror(root, MONTH_A, EMP))?.quota?.dailyQuota).toBe(9);
+
+    // v88 bumped DERIVE_VERSION, which refolds `distribution.current.json` —
+    // but the LOG has not moved, so the revision is still 5. Before the guard
+    // considered the derive version this write was skipped and the employee
+    // kept reading the wrong quota forever.
+    await syncSampleMirrors(root, MONTH_A, makeCurrentAt(5, 3, [makeMirrorEntry("A1", "pending")], 4));
+
+    const mirror = await loadEmployeeSampleMirror(root, MONTH_A, EMP);
+    expect(mirror?.quota?.dailyQuota).toBe(4);
+    expect(mirror?.deriveVersion).toBe(3);
+    expect(mirror?.sourceLogRevision).toBe(5);
+  });
+
+  it("the index carries deriveVersion, so the fast path can evaluate the rule at all", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    invalidateMonthLockCache();
+    await ensurePopulationMonthFolder(root, MONTH_A);
+
+    await syncSampleMirrors(root, MONTH_A, makeCurrentAt(5, 2, [makeMirrorEntry("A1", "pending")], 9));
+    const index = await readEmployeeMirrorIndex(root, MONTH_A);
+    expect(index?.mirrors["emp1.samples.json"]?.deriveVersion).toBe(2);
+    expect(index?.pendingDeriveVersion).toBeNull();
+  });
+
+  it("DANGEROUS DIRECTION: a HIGHER existing revision is never overwritten, even by a newer deriveVersion", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    invalidateMonthLockCache();
+    await ensurePopulationMonthFolder(root, MONTH_A);
+
+    // Another machine derived revision 7 (A1 completed) on an older build.
+    await syncSampleMirrors(root, MONTH_A, makeCurrentAt(7, 2, [makeMirrorEntry("A1", "completed")], 9));
+
+    // We hold only revision 5 — older DATA — but a newer derivation. Writing it
+    // would resurrect a pending entry the employee has already finished.
+    await syncSampleMirrors(root, MONTH_A, makeCurrentAt(5, 3, [makeMirrorEntry("A1", "pending")], 4));
+
+    const mirror = await loadEmployeeSampleMirror(root, MONTH_A, EMP);
+    expect(mirror?.sourceLogRevision).toBe(7);
+    expect(mirror?.entries[0]?.status).toBe("completed");
+    expect(mirror?.quota?.dailyQuota).toBe(9);
+  });
+
+  it("a legacy mirror with NO deriveVersion is rewritten exactly once", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    invalidateMonthLockCache();
+    await ensurePopulationMonthFolder(root, MONTH_A);
+
+    // Hand-write the pre-field shape: no `deriveVersion`, and no index at all
+    // (both predate this change), so the guard reads the mirror itself.
+    const dir = await getSampleEmployeeDir(root, MONTH_A, true);
+    await safeWriteJson(dir, "emp1.samples.json", {
+      monthFolderName: MONTH_A,
+      username: EMP,
+      updatedAt: "2026-05-06T00:00:00.000Z",
+      sourceLogRevision: 5,
+      quota: { dailyQuota: 9, daysRemainingAtAssignment: 3, sampleCount: 12 },
+      entries: [makeMirrorEntry("A1", "pending")],
+    });
+
+    // Absent deriveVersion reads as 0 < 3 → rewritten once.
+    await syncSampleMirrors(root, MONTH_A, makeCurrentAt(5, 3, [makeMirrorEntry("A1", "pending")], 4));
+    expect((await loadEmployeeSampleMirror(root, MONTH_A, EMP))?.quota?.dailyQuota).toBe(4);
+
+    // …and NOT again: same revision, same version now on disk. A third payload
+    // that differs would land only if the guard had stopped holding.
+    await syncSampleMirrors(root, MONTH_A, makeCurrentAt(5, 3, [makeMirrorEntry("A1", "completed")], 1));
+    const mirror = await loadEmployeeSampleMirror(root, MONTH_A, EMP);
+    expect(mirror?.quota?.dailyQuota).toBe(4);
+    expect(mirror?.entries[0]?.status).toBe("pending");
   });
 });
 

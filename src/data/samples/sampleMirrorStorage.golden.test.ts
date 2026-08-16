@@ -179,10 +179,16 @@ describe("syncSampleMirrors — golden master projection", () => {
       monthFolderName: MONTH,
       username: "emp-a",
       sourceLogRevision: 7,
+      // RE-RECORDED (v88 refold fix): the mirror now also stamps WHICH
+      // derivation produced it, so the monotonic guard can rewrite a mirror
+      // that is at the same log revision but an older derive version. `2` is
+      // the `deriveVersion` this suite's `current()` helper stamps.
+      deriveVersion: 2,
       entries: [entries[0], entries[2], entries[4]],
     });
     // No `quota` key at all when the derived state carries no quotas.
     expect(Object.keys(empA).sort()).toEqual([
+      "deriveVersion",
       "entries",
       "monthFolderName",
       "sourceLogRevision",
@@ -194,6 +200,7 @@ describe("syncSampleMirrors — golden master projection", () => {
       monthFolderName: MONTH,
       username: "emp-b",
       sourceLogRevision: 7,
+      deriveVersion: 2,
       entries: [entries[1], entries[3]],
     });
   });
@@ -257,7 +264,9 @@ describe("syncSampleMirrors — golden master projection", () => {
     // Same revision, different content.
     await syncSampleMirrors(root, MONTH, current([entry("img-1", "emp-a", "completed")], 5));
 
-    // `existing >= incoming` → skipped.
+    // `existing >= incoming` on (revision, deriveVersion) → skipped. Both runs
+    // carry deriveVersion 2, so the v88 tie-break does not fire here; the
+    // same-revision/newer-version case is pinned in sampleMirrorStorage.test.ts.
     expect((await readEmployee(root, "emp-a.samples.json"))!.entries[0].status).toBe("pending");
   });
 
@@ -332,10 +341,14 @@ describe("syncSampleMirrors — golden master projection", () => {
     expect(index.monthFolderName).toBe(MONTH);
     // Committed, not mid-flight: the phase-2 write cleared the marker.
     expect(index.pendingRevision).toBeNull();
+    expect(index.pendingDeriveVersion).toBeNull();
     // Keyed by FILE NAME (not username), same as readExistingMirrors.
+    // RE-RECORDED (v88 refold fix): each entry now also carries the mirror's
+    // `deriveVersion`. Without it the index fast path could not evaluate the
+    // guard's new tie-break and would silently defeat the fix.
     expect(index.mirrors).toEqual({
-      "emp-a.samples.json": { username: "emp-a", sourceLogRevision: 7 },
-      "emp-b.samples.json": { username: "emp-b", sourceLogRevision: 7 },
+      "emp-a.samples.json": { username: "emp-a", sourceLogRevision: 7, deriveVersion: 2 },
+      "emp-b.samples.json": { username: "emp-b", sourceLogRevision: 7, deriveVersion: 2 },
     });
     // The index is NOT a mirror — no listing that filters on the mirror suffix
     // can pick it up (this is what keeps answerStorage's own `.answers.json`
@@ -388,7 +401,7 @@ describe("syncSampleMirrors — golden master projection", () => {
     expect((await readEmployee(root, "emp-a.samples.json"))!.entries[0].status).toBe("completed");
     // …and the index is rewritten to agree with the directory again.
     expect((await readEmployeeMirrorIndex(root, MONTH))!.mirrors).toEqual({
-      "emp-a.samples.json": { username: "emp-a", sourceLogRevision: 6 },
+      "emp-a.samples.json": { username: "emp-a", sourceLogRevision: 6, deriveVersion: 2 },
     });
   });
 
