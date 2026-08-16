@@ -287,13 +287,24 @@ export default function PhaseThreeSampling({
                       <button
                         type="button"
                         className={`lock-toggle-btn${isAutoLocked ? " auto" : ""}`}
-                        title={isAutoLocked ? "مقفل تلقائياً — يتطلب صلاحية إلغاء القفل" : ""}
+                        // Render-time gate matching the handler check below: previously this
+                        // button always rendered enabled regardless of canUnlock and only
+                        // rejected via alert() on click (audit: cluster A, filed twice — once
+                        // as a permission finding, once as a raw-alert() UX finding). Both are
+                        // fixed together: disabled state now reflects canUnlock, and the denial
+                        // is explained via `title` like every other gated control in this file
+                        // instead of a blocking native alert().
+                        disabled={!canUnlock}
+                        title={
+                          !canUnlock
+                            ? "لا تملك صلاحية إلغاء قفل مراحل العينة."
+                            : isAutoLocked
+                            ? "مقفل تلقائياً — يتطلب صلاحية إلغاء القفل"
+                            : ""
+                        }
                         onClick={() => {
-                          if (canUnlock) {
-                            setIsAdminUnlocked(!isAdminUnlocked);
-                          } else {
-                            alert("لا تملك صلاحية إلغاء قفل مراحل العينة.");
-                          }
+                          if (!canUnlock) return;
+                          setIsAdminUnlocked(!isAdminUnlocked);
                         }}
                       >
                         {isAdminUnlocked
@@ -312,7 +323,7 @@ export default function PhaseThreeSampling({
                     <select
                       className="save-disk-input"
                       value={rule.method}
-                      disabled={isLockedState}
+                      disabled={isLockedState || !canConfigureSample}
                       onChange={(e) =>
                         handleRuleChange(rule.stageKey, "method", e.target.value as StageSamplingRule[keyof StageSamplingRule])
                       }
@@ -329,7 +340,7 @@ export default function PhaseThreeSampling({
                       className="save-disk-input"
                       value={rule.value}
                       min={0}
-                      disabled={isLockedState}
+                      disabled={isLockedState || !canConfigureSample}
                       onChange={(e) =>
                         handleRuleChange(
                           rule.stageKey,

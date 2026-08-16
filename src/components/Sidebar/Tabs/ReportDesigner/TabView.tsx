@@ -496,7 +496,7 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
         </div>
 
         {/* Pages bar (Task A.3) */}
-        <PagesBar doc={doc} currentPageIndex={currentPageIndex} onSelectPage={setCurrentPageIndex} onAddPage={addPage} onDeletePage={handleDeletePage} />
+        <PagesBar doc={doc} currentPageIndex={currentPageIndex} onSelectPage={setCurrentPageIndex} onAddPage={addPage} onDeletePage={handleDeletePage} canEdit={canEdit} />
       </div>
       {fieldDrop && (
         <FieldDropDialog

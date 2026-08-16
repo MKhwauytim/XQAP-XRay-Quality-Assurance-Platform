@@ -73,6 +73,7 @@ export const DEFAULT_LABELS = {
   dt_clear_filters:          "مسح التصفية",
   dt_export_xlsx:            "تصدير XLSX",
   dt_exporting:              "جارٍ التصدير...",
+  msg_export_not_permitted:  "لا تملك صلاحية تصدير التقارير.",
   dt_columns_button:         "الأعمدة",
   dt_columns_title:          "الأعمدة",
   dt_columns_hint:           "اسحب للترتيب · انقر لإخفاء/إظهار",
@@ -220,7 +221,8 @@ export const DEFAULT_LABELS = {
   archive_reopen_reason_placeholder: "سبب إعادة الفتح (إلزامي)",
   msg_month_closed_write_blocked:   "هذا الشهر مُقفل — لا يمكن حفظ أي تعديل. تواصل مع مدير النظام لإعادة فتحه.",
   msg_month_closed_banner:          "هذا الشهر مُقفل. البيانات للعرض فقط.",
-  msg_month_closed_note_auto_lock:  "— أُقفل تلقائياً بعد اكتمال توزيع العينة.",
+  msg_month_closed_note_auto_lock:  "— أُقفل تلقائياً بعد اكتمال دراسة كل عناصر العينة.",
+  msg_month_auto_lock_reason:       "إقفال تلقائي بعد اكتمال دراسة كل عناصر العينة.",
   msg_month_closed_note_closed_by:  "— أُقفل بواسطة {user}.",
   archive_reopen_month_in_progress: "جاري إعادة الفتح...",
 

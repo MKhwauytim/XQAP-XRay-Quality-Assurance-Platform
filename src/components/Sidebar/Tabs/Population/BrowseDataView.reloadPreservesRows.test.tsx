@@ -67,7 +67,7 @@ describe("BrowseDataView — keeps prior rows during reload (A10, F24)", () => {
     });
 
     const { rerender } = render(
-      <BrowseDataView directoryHandle={dir} refreshKey={0} username="tester" config={DEFAULT_POPULATION_CONFIG} />
+      <BrowseDataView directoryHandle={dir} refreshKey={0} username="tester" config={DEFAULT_POPULATION_CONFIG} canExportReports />
     );
     await screen.findByText("X-1");
 
@@ -77,7 +77,7 @@ describe("BrowseDataView — keeps prior rows during reload (A10, F24)", () => {
     // Bump refreshKey -- mirrors what onDistributionChanged/a wizard mutation
     // does in the real app (Population/index.tsx's setMonthRefreshKey).
     rerender(
-      <BrowseDataView directoryHandle={dir} refreshKey={1} username="tester" config={DEFAULT_POPULATION_CONFIG} />
+      <BrowseDataView directoryHandle={dir} refreshKey={1} username="tester" config={DEFAULT_POPULATION_CONFIG} canExportReports />
     );
 
     // Immediately after the bump -- synchronously, before the worker stub's
@@ -113,7 +113,7 @@ describe("BrowseDataView — keeps prior rows during reload (A10, F24)", () => {
     const dir = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
 
     render(
-      <BrowseDataView directoryHandle={dir} refreshKey={0} username="tester" config={DEFAULT_POPULATION_CONFIG} />
+      <BrowseDataView directoryHandle={dir} refreshKey={0} username="tester" config={DEFAULT_POPULATION_CONFIG} canExportReports />
     );
 
     expect(screen.getByText("لا توجد بيانات محفوظة لهذا المصدر بعد")).toBeInTheDocument();

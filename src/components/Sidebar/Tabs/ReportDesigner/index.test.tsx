@@ -118,6 +118,15 @@ describe("ReportDesigner — B6 view vs edit gating", () => {
     expect(screen.getByTitle("طباعة")).not.toBeDisabled();
     // Save stays blocked for a view-only user.
     expect(screen.getByText("حفظ").closest("button")).toBeDisabled();
+
+    // Cluster A: PagesBar's "+ صفحة" (add page) affordance previously rendered
+    // enabled unconditionally regardless of canEdit, even though addPage() itself
+    // already silently no-ops without edit access (TabView.tsx's `if (!canEdit)
+    // return`). A view-only user must see it disabled, not clickable-and-inert.
+    expect(screen.getByText("+ صفحة").closest("button")).toBeDisabled();
+    // The per-page delete "×" affordance is not even rendered for a view-only user
+    // (it previously rendered unconditionally and silently no-op'd on click).
+    expect(screen.queryByLabelText("حذف صفحة 1")).not.toBeInTheDocument();
   });
 
   it("edit access (canEdit=true): create, delete, and save are all enabled", async () => {
@@ -140,6 +149,11 @@ describe("ReportDesigner — B6 view vs edit gating", () => {
     await waitFor(() => {
       expect(screen.getByText("حفظ").closest("button")).not.toBeDisabled();
     });
+
+    // Cluster A counterpart: with edit access, PagesBar's add-page control is enabled
+    // and the per-page delete affordance is rendered.
+    expect(screen.getByText("+ صفحة").closest("button")).not.toBeDisabled();
+    expect(screen.getByLabelText("حذف صفحة 1")).toBeInTheDocument();
   });
 
   it("formats the 'آخر تعديل' design-list date with Latin digits, not Arabic-Indic", async () => {

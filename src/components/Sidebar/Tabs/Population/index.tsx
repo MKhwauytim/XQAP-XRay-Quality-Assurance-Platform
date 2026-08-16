@@ -307,9 +307,10 @@ export default function PopulationTab() {
         refreshKey={appliedBrowseRefreshKey}
         username={sessionRef.current?.username ?? "unknown"}
         config={config}
+        canExportReports={canExportReports}
       />
     ),
-    [directoryHandle, appliedBrowseRefreshKey, config]
+    [directoryHandle, appliedBrowseRefreshKey, config, canExportReports]
   );
 
   // Load cumulative CertScan data from workspace on mount
@@ -878,7 +879,12 @@ export default function PopulationTab() {
       setProcessingMessage("جارٍ تحميل بيانات الشهر — انتظر حتى يكتمل التحميل قبل التصدير.");
       return;
     }
-    if (!canExportReports) {
+    // Render-time gate (canExportReports = can(), matches computeWizardCapabilities'
+    // canExportNow above) plus this handler-time canMutate() re-check -- the same
+    // defense-in-depth split already established and tested for Reports/TabView.tsx's
+    // export handlers (B5), so a control left enabled by the looser render-time check
+    // can never actually export.
+    if (!canExportReports || !canMutate("export-reports")) {
       setProcessingMessage("لا تملك صلاحية تصدير التقارير.");
       return;
     }

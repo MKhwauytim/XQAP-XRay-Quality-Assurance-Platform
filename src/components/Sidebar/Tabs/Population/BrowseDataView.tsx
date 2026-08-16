@@ -480,12 +480,24 @@ export default function BrowseDataView({
   directoryHandle,
   refreshKey,
   username,
-  config
+  config,
+  canExportReports
 }: {
   directoryHandle: unknown;
   refreshKey: number;
   username: string;
   config: PopulationConfig;
+  /**
+   * DEFECT 4: `view-browse` defaults true for guest/employee while
+   * `export-reports` defaults false, so this screen's XLSX export used to hand
+   * the entire month (population, sample, raw risk and BI rows) to a role that
+   * the identical Phase 2 export correctly denies. Threaded down from the tab's
+   * already-computed capability (`computeWizardCapabilities` in index.tsx)
+   * rather than re-derived here, and enforced at BOTH the render boundary (the
+   * button's `disabled`) and the handler boundary (`exportFilteredRowsToXlsx`),
+   * per CLAUDE.md.
+   */
+  canExportReports: boolean;
 }) {
   const { selection: globalMonth } = useGlobalMonth();
   const labels = useLabels();
@@ -968,6 +980,12 @@ export default function BrowseDataView({
   }
 
   async function exportFilteredRowsToXlsx(): Promise<void> {
+    // Handler boundary (DEFECT 4) — the button is also disabled without this
+    // capability, but a stale render must never be able to egress the month.
+    if (!canExportReports) {
+      setExportError(labels.msg_export_not_permitted);
+      return;
+    }
     if (isExporting) return;
     setExportError(null);
     setIsExporting(true);
@@ -1137,8 +1155,9 @@ export default function BrowseDataView({
               type="button"
               className="bv-export-btn"
               onClick={exportFilteredRowsToXlsx}
-              disabled={activeCols.length === 0 || isExporting}
+              disabled={!canExportReports || activeCols.length === 0 || isExporting}
               aria-busy={isExporting}
+              title={canExportReports ? undefined : labels.msg_export_not_permitted}
             >
               {isExporting ? labels.dt_exporting : "تصدير XLSX"}
             </button>

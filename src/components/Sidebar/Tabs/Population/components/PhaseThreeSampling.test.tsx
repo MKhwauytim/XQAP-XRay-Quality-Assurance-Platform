@@ -18,11 +18,13 @@ import { DEFAULT_POPULATION_CONFIG } from "../../../../../data/population/popula
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
 
-// PhaseThreeSampling reads usePermissions() locally only for "unlock-sampling-stage" (the
-// admin unlock toggle, out of this bucket's scope) — grant it so the lock-toggle button
-// doesn't alert() during unrelated assertions.
+// PhaseThreeSampling reads usePermissions() locally for "unlock-sampling-stage" (the admin
+// unlock toggle). Mutable so the lock-toggle describe block below can flip canUnlock per
+// test; defaults to granted so pre-existing tests (which never touch the toggle) keep their
+// original assumptions.
+const permissionsMock = vi.hoisted(() => ({ state: { canUnlock: true } }));
 vi.mock("../../../../../auth/usePermissions", () => ({
-  usePermissions: () => ({ canMutate: () => true }),
+  usePermissions: () => ({ canMutate: (featureId: string) => featureId !== "unlock-sampling-stage" || permissionsMock.state.canUnlock }),
 }));
 
 function makeRow(xrayImageId: string, stage: string): PreparedPopulationRow {
@@ -103,7 +105,10 @@ function baseProps(overrides: Partial<Props> = {}): Props {
   };
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  permissionsMock.state.canUnlock = true;
+});
 
 describe("PhaseThreeSampling — CertScan quota fields lock+permission (B13 task 2)", () => {
   it("happy: unlocked stage with configure-sample permission leaves the CertScan fields editable", () => {
@@ -118,10 +123,16 @@ describe("PhaseThreeSampling — CertScan quota fields lock+permission (B13 task
     render(<PhaseThreeSampling {...baseProps({ config: configWithRule(makeRule({ isLocked: false })), canConfigureSample: false })} />);
     const certScanValue = screen.getByLabelText("القيمة") as HTMLInputElement;
     expect(certScanValue).toBeDisabled();
-    // The sibling "القيمة المطلوبة" field is lock-only (out of this bucket's scope) and
-    // stays enabled here — demonstrating the fix is scoped to the CertScan fields only.
+    // Cluster A fix: the sibling "القيمة المطلوبة" / "طريقة السحب" fields previously
+    // ignored canConfigureSample entirely (lock-only gating) even though this component's
+    // own doc comment already promised "gates the stage-rule and CertScan-quota fields" --
+    // a role with view-but-not-edit population access saw them rendered enabled while
+    // handleConfigChange (index.tsx) silently rejected the edit. Now gated the same as the
+    // CertScan fields.
     const siblingValue = screen.getByLabelText("القيمة المطلوبة") as HTMLInputElement;
-    expect(siblingValue).not.toBeDisabled();
+    expect(siblingValue).toBeDisabled();
+    const siblingMethod = screen.getByLabelText("طريقة السحب") as HTMLSelectElement;
+    expect(siblingMethod).toBeDisabled();
   });
 
   it("failure: a locked stage disables the CertScan fields regardless of permission (matches sibling fields' lock gating)", () => {
@@ -139,6 +150,34 @@ describe("PhaseThreeSampling — CertScan quota fields lock+permission (B13 task
     const messageEl = screen.getByText("لا تملك صلاحية تعديل إعدادات المعالجة أو العينة.");
     expect(messageEl).toBeInTheDocument();
     expect(messageEl.getAttribute("role")).toBe("status");
+  });
+});
+
+// Cluster A (filed twice: as a permission finding "renders enabled" and as a UX finding
+// "uses alert()") -- the lock-toggle button previously always rendered enabled regardless
+// of canUnlock and only rejected via a blocking native alert() on click.
+describe("PhaseThreeSampling — lock-toggle render-time permission gate, no alert() (cluster A)", () => {
+  it("renders the lock-toggle disabled when the role cannot unlock sampling stages", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    permissionsMock.state.canUnlock = false;
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+    render(<PhaseThreeSampling {...baseProps({ config: configWithRule(makeRule({ isLocked: true })) })} />);
+
+    const lockButton = screen.getByRole("button", { name: /مغلق/ });
+    expect(lockButton).toBeDisabled();
+    expect(lockButton).toHaveAttribute("title", "لا تملك صلاحية إلغاء قفل مراحل العينة.");
+
+    fireEvent.click(lockButton);
+    expect(alertSpy).not.toHaveBeenCalled();
+    alertSpy.mockRestore();
+  });
+
+  it("renders the lock-toggle enabled and toggleable when the role can unlock sampling stages", () => {
+    permissionsMock.state.canUnlock = true;
+    render(<PhaseThreeSampling {...baseProps({ config: configWithRule(makeRule({ isLocked: true })) })} />);
+
+    const lockButton = screen.getByRole("button", { name: /مغلق/ });
+    expect(lockButton).not.toBeDisabled();
   });
 });
 
