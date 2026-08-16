@@ -271,6 +271,36 @@ export async function approveSampleMaster(
  * The dead row stays in `rows`: it is the audit trail and the dedup set that
  * stops a known-dead image being re-drawn as somebody else's replacement.
  */
+/**
+ * The sample rows that are actually LIVE — `rows` minus everything retired by a
+ * replacement.
+ *
+ * `sample.rows` is deliberately append-only: a replaced row stays in the array
+ * as the audit trail and as the dedup set that stops the same row being drawn
+ * again. `replacedRowIds` records which of them are retired, and `totalActual`
+ * is already computed as `rows.length - replacedRowIds.length`.
+ *
+ * The gap this closes: `replacedRowIds` had exactly ONE reader — `appendSampleRow`
+ * itself. Every other consumer read `sample.rows` whole, so after N replacements
+ * they each carried N rows too many while `totalActual` did not. In the
+ * executive deck that lands on both sides of a ratio: `selectedInSample` was
+ * true for retired rows, inflating the numerator, while `totalSample` used
+ * `totalActual` — so a heavily-replaced month could report a completion rate
+ * ABOVE 100 % and understate the remaining backlog. That is the phantom-backlog
+ * symptom the totalActual fix was meant to kill, just moved into the ratio.
+ *
+ * Nothing on disk changes; this is the read-side counterpart.
+ */
+export function liveSampleRows(
+  sample: Pick<SampleMasterData, "rows" | "replacedRowIds"> | null | undefined
+): PreparedPopulationRow[] {
+  if (!sample) return [];
+  const retired = sample.replacedRowIds;
+  if (!retired || retired.length === 0) return sample.rows;
+  const retiredIds = new Set(retired);
+  return sample.rows.filter((row) => !retiredIds.has(row.xrayImageId));
+}
+
 export async function appendSampleRow(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
