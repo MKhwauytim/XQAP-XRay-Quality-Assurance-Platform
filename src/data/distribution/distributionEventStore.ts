@@ -3,7 +3,7 @@ import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { createSimpleHasher } from "../storage/jsonEnvelope";
 import { listDirectoryEntries, readJsonDirectory, readSegmentTails } from "../storage/directoryScan";
 import { withResourceLock } from "../storage/webLocks";
-import { taggedError } from "../storage/errorCodes";
+import { logCodedError, tagError, taggedError } from "../storage/errorCodes";
 import {
   TRANSIENT_WRITE_RETRY_DELAYS_MS,
   isNotFoundError,
@@ -323,8 +323,8 @@ export async function appendDistributionEventSegment(
     deviceId: getDistributionDeviceId(),
     sessionId: getDistributionSessionId(),
   }
-): Promise<void> {
-  if (events.length === 0) return;
+): Promise<SegmentVerification> {
+  if (events.length === 0) return "verified";
   const eventsDir = await distributionDir.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: true });
   const base = segmentBaseName(writer.deviceId, writer.sessionId);
   const writerKey = segmentMemoKey(writer.scopeId, base);
@@ -341,13 +341,13 @@ export async function appendDistributionEventSegment(
   // locking per file would let two concurrent appends read the same full
   // segment, both decide to rotate, and race on `seq + 1`. Distinct chains
   // (distinct sessions/devices) never contend on this lock.
-  await withResourceLock(`${DISTRIBUTION_EVENTS_DIR}/${base}`, async () => {
+  return withResourceLock(`${DISTRIBUTION_EVENTS_DIR}/${base}`, async () => {
     let seq = openSegmentSeqByWriter.get(writerKey) ?? (await discoverHighestOwnSeq(eventsDir, base));
     let fileName = segmentFileNameForSeq(base, seq);
     let existing = await readExistingSegment(eventsDir, fileName, segmentMemoKey(writer.scopeId, fileName));
-    let existingBytes = utf8Length(existing);
+    let existingBytes = utf8Length(existing.text);
 
-    if (seq < MAX_SEGMENT_SEQ && shouldRotate(existing, existingBytes, addedBytes, events.length)) {
+    if (seq < MAX_SEGMENT_SEQ && shouldRotate(existing.text, existingBytes, addedBytes, events.length)) {
       seq += 1;
       fileName = segmentFileNameForSeq(base, seq);
       // Read the rotation target too. It is normally absent and this resolves
@@ -357,10 +357,10 @@ export async function appendDistributionEventSegment(
       // name" and "the directory listing had not caught up yet" non-destructive
       // instead of an overwrite.
       existing = await readExistingSegment(eventsDir, fileName, segmentMemoKey(writer.scopeId, fileName));
-      existingBytes = utf8Length(existing);
+      existingBytes = utf8Length(existing.text);
     }
 
-    const appended = existing + addedText;
+    const appended = existing.text + addedText;
 
     await retryTransientWrite(
       async () => {
@@ -382,7 +382,12 @@ export async function appendDistributionEventSegment(
     writtenSegmentsThisSession.add(segmentMemoKey(writer.scopeId, fileName));
     openSegmentSeqByWriter.set(writerKey, seq);
 
-    await verifySegmentSize(eventsDir, fileName, existingBytes + addedBytes);
+    return verifySegmentSize(
+      eventsDir,
+      fileName,
+      existingBytes + addedBytes,
+      existing.reliable
+    );
   });
 }
 
@@ -431,16 +436,25 @@ export function __resetWrittenSegmentsForTests(): void {
   openSegmentSeqByWriter.clear();
 }
 
+/**
+ * `reliable: false` means the "" is a FALLBACK, not an observation: this
+ * session had already written the segment, the re-read exhausted its retries,
+ * and the append is therefore about to rewrite the file without lines that may
+ * still be on the share. That distinction is load-bearing — it decides whether
+ * a later unverifiable post-close check may be treated as benign.
+ */
+type ExistingSegment = { text: string; reliable: boolean };
+
 async function readExistingSegment(
   eventsDir: DirectoryHandleLike,
   fileName: string,
   writtenKey: string
-): Promise<string> {
+): Promise<ExistingSegment> {
   const knownWritten = writtenSegmentsThisSession.has(writtenKey);
   for (let attempt = 0; ; attempt += 1) {
     try {
       const existingHandle = await eventsDir.getFileHandle(fileName, { create: false });
-      return await (await existingHandle.getFile()).text();
+      return { text: await (await existingHandle.getFile()).text(), reliable: true };
     } catch (error) {
       const transient = knownWritten
         ? isTransientWriteError(error)
@@ -462,9 +476,11 @@ async function readExistingSegment(
           attempt + 1,
           error
         );
+        return { text: "", reliable: false };
       }
-      // No prior content for this writer session yet — start from empty.
-      return "";
+      // No prior content for this writer session yet — start from empty. This
+      // IS an observation: a fresh writer session legitimately has no segment.
+      return { text: "", reliable: true };
     }
   }
 }
@@ -485,18 +501,44 @@ async function readExistingSegment(
  * write that had in fact succeeded. Both the missing entry and a short size are
  * therefore retried on the shared backoff before the write is called a failure.
  */
+/**
+ * Post-close read-back check.
+ *
+ * Returns `"unverified"` rather than throwing when the file cannot be READ at
+ * all after the retry ladder. That is not the same failure as a size we read
+ * and found wrong, and conflating the two was a live data-integrity bug:
+ *
+ * `close()` had already resolved, so the bytes ARE committed — the code says so
+ * itself, recording the segment in `writtenSegmentsThisSession` *before* this
+ * check for exactly that reason. A NotFound/NotReadable here is the share not
+ * yet showing an entry it already holds. Throwing aborted
+ * `appendDistributionEvents` before its projection `casLoop`, so the events
+ * were durable on disk while `distribution.log.json`'s revision never advanced
+ * — and revision is the staleness authority everywhere. The assignee's mirror
+ * was therefore judged current and the assignment stayed invisible to them
+ * *through reloads*, the sync tick never fired, and an operator retry ran
+ * against a stale snapshot whose idempotency guard no longer matched, emitting
+ * duplicate events.
+ *
+ * A definite size MISMATCH still throws: there we successfully read the file
+ * and it is genuinely wrong, which is a real failed write.
+ */
+type SegmentVerification = "verified" | "unverified";
+
 async function verifySegmentSize(
   eventsDir: DirectoryHandleLike,
   fileName: string,
-  expectedBytes: number
-): Promise<void> {
+  expectedBytes: number,
+  /** Whether the pre-append re-read observed the file rather than falling back. */
+  baselineReliable: boolean
+): Promise<SegmentVerification> {
   for (let attempt = 0; ; attempt += 1) {
     const retriesLeft = attempt < TRANSIENT_WRITE_RETRY_DELAYS_MS.length;
     let observedSize: number;
     try {
       const verifyHandle = await eventsDir.getFileHandle(fileName, { create: false });
       observedSize = (await verifyHandle.getFile()).size;
-      if (observedSize === expectedBytes) return;
+      if (observedSize === expectedBytes) return "verified";
     } catch (error) {
       if (!isTransientWriteError(error)) throw error;
       if (!retriesLeft) {
@@ -509,15 +551,35 @@ async function verifySegmentSize(
             error
           );
         }
-        throw error;
+        // Could not READ it back. Whether that is benign depends entirely on
+        // whether the baseline was trustworthy.
+        //
+        // Baseline reliable: `close()` resolved, so the bytes are committed and
+        // this is only the share failing to show an entry it already holds.
+        // Inconclusive, not failed — commit the projection so the assignment is
+        // visible to its assignee instead of stranded.
+        //
+        // Baseline UNRELIABLE: the pre-append re-read of a segment this session
+        // wrote had already fallen back to "", so this append just rewrote the
+        // file without lines that may still be on the share. That is a possible
+        // data loss, and this check is the only thing that detects it — it must
+        // stay fatal. Treating it as benign would silently drop events.
+        if (!baselineReliable) throw error;
+        logCodedError("distribution:segment-verify", "XQ-DIST-007", error);
+        return "unverified";
       }
       await waitFor(TRANSIENT_WRITE_RETRY_DELAYS_MS[attempt]!);
       continue;
     }
     if (!retriesLeft) {
-      throw new Error(
-        `Distribution event segment write verification failed: ${fileName} ` +
-          `(expected ${expectedBytes} bytes, saw ${observedSize})`
+      // We READ the file and its size is wrong — a genuine bad write, not a
+      // visibility artefact. Still fatal.
+      throw tagError(
+        new Error(
+          `Distribution event segment write verification failed: ${fileName} ` +
+            `(expected ${expectedBytes} bytes, saw ${observedSize})`
+        ),
+        "XQ-DIST-008"
       );
     }
     await waitFor(TRANSIENT_WRITE_RETRY_DELAYS_MS[attempt]!);

@@ -14,11 +14,12 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { DistributionEntry } from "./distributionTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
-import { getLabels } from "../labels/labelsStore";
 import { executeReplacement } from "./replacement";
 import { loadSampleMaster, saveSampleMaster } from "../sampling/sampleStorage";
-import { loadDistributionLog } from "./distributionStorage";
+import { appendDistributionEvent, loadDistributionLog } from "./distributionStorage";
 import { __resetWrittenSegmentsForTests } from "./distributionEventStore";
+import { buildAssignEvent } from "./distributionLog";
+import { getRecentErrors } from "../storage/errorLogger";
 
 const MONTH = "5-May-2026";
 const SEGMENT_SUFFIX = ".ndjson";
@@ -129,7 +130,20 @@ describe("executeReplacement on a flaky network share", () => {
     expect(log.events.map((event) => event.eventType)).toEqual(["assigned", "replaced"]);
   });
 
-  it("reports an Arabic failure with no raw DOMException text when the share never recovers", async () => {
+  it("no longer reports a partial write when the read-back never confirms", async () => {
+    // This test used to assert failure — and that assertion WAS the bug.
+    //
+    // `close()` had already resolved, so the events were durable; only the
+    // post-close read-back could not see them yet. Reporting failure aborted
+    // the append before its projection, so the revision never advanced, the
+    // assignee's mirror was judged current, and the assignment stayed invisible
+    // to them through reloads while the operator was told to retry — a retry
+    // that then ran against a stale snapshot and could duplicate events.
+    //
+    // A read-back that cannot see the file is now inconclusive, not failed,
+    // PROVIDED the pre-append baseline was trustworthy (it is here: fresh
+    // writer session, no prior segment). The next test covers the case where it
+    // is not.
     __resetWrittenSegmentsForTests();
     const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
     const deadRow = makeRow("img-1");
@@ -155,33 +169,71 @@ describe("executeReplacement on a flaky network share", () => {
       eventBy: "supervisor1",
     });
 
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // Sample and events agree — the state the old failure path left inconsistent.
+    expect(result.updatedSample.rows.map((row) => row.xrayImageId)).toEqual(["img-1", "img-2"]);
+    const persisted = await loadSampleMaster(root, MONTH);
+    expect(persisted?.rows.map((row) => row.xrayImageId)).toEqual(["img-1", "img-2"]);
+    const log = await loadDistributionLog(root, MONTH);
+    expect(log.events.map((event) => event.eventType)).toEqual(["assigned", "replaced"]);
+
+    // Silent success would be wrong too: the lag is recorded for an admin.
+    expect(
+      getRecentErrors().some((entry) => entry.context.includes("XQ-DIST-007"))
+    ).toBe(true);
+  });
+
+  it("STILL fails, in Arabic with no raw DOMException text, when the baseline was not trustworthy", async () => {
+    // The data-loss backstop, and the reason the relaxation above is
+    // conditional. Here the segment was already written in this session, so the
+    // pre-append re-read falls back to "" — meaning this append rewrites the
+    // file WITHOUT lines that may still be on the share. An unconfirmable
+    // read-back is then the only signal that events may have just been dropped,
+    // and it must stay fatal.
+    //
+    // This also preserves this file's original guard: whatever the user is
+    // shown here is Arabic and carries a code, never raw Chromium wording.
+    __resetWrittenSegmentsForTests();
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    const deadRow = makeRow("img-1");
+    const replacementRow = makeRow("img-2");
+    await seed(root, deadRow);
+
+    // First append succeeds, so the writer now KNOWS it wrote this segment.
+    await appendDistributionEvent(
+      root,
+      MONTH,
+      buildAssignEvent({ xrayImageId: "img-1", assignedTo: "expert1", eventBy: "supervisor1" })
+    );
+
+    setSimulatedFaults(root, [
+      {
+        operation: "getFileHandle",
+        nameSuffix: SEGMENT_SUFFIX,
+        create: false,
+        errorName: "NotFoundError",
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+
+    const result = await executeReplacement({
+      directoryHandle: root,
+      monthFolderName: MONTH,
+      deadEntry: deadEntryFor(deadRow),
+      replacementRow,
+      reason: "صورة غير واضحة",
+      eventBy: "supervisor1",
+    });
+
     expect(result.ok).toBe(false);
     if (result.ok) return;
 
-    expect(result.partialSampleWrite).toBe(true);
     expect(result.error).toContain("تمت إضافة البديل للعينة لكن فشل تسجيل الحدث");
-    // Was `msg_unexpected_write_error` — the generic "something failed while
-    // saving". `appendDistributionEvents` used to return the raw `.message`
-    // here, so the identifying code it had already computed was discarded and
-    // the UI fell back to that generic sentence (and to the XQ-IO-028
-    // catch-all, which is what got reported from the field). It now classifies
-    // the throw, so this NotFoundError arrives as its own Arabic sentence and
-    // its own code. Asserting the specific pair is the stronger check.
-    // Narrower still than XQ-IO-027: after the retry ladder is exhausted the
-    // directory is PROBED, and here it is reachable and writable — so this is a
-    // share that lost sight of one entry, and "retry shortly" is correct advice.
-    // Had the probe found the directory itself gone, the user would instead be
-    // told to re-pick the workspace folder (XQ-IO-030), because retrying could
-    // never work. Same DOMException, opposite remedies.
-    expect(result.error).toContain(getLabels().err_io_031_share_lost_entry);
-    expect(result.error).toContain("XQ-IO-031");
     expect(result.error).not.toContain("XQ-IO-028");
-    // The whole point, unchanged: no untranslated Chromium/internal wording
-    // reaches the UI. Adding the code must not smuggle the raw detail in with it.
+    // The original, unchanged point of this file: no untranslated Chromium or
+    // internal wording ever reaches the Arabic UI.
     expect(result.error).not.toMatch(/NotFoundError|Simulated|could not be found/);
-
-    // Reported once, and the partially-written sample row is not duplicated.
-    const persisted = await loadSampleMaster(root, MONTH);
-    expect(persisted?.rows.map((row) => row.xrayImageId)).toEqual(["img-1", "img-2"]);
   });
 });

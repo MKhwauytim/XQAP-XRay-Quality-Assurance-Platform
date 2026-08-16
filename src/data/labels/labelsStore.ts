@@ -947,6 +947,8 @@ export const DEFAULT_LABELS = {
   err_dist_003_append_threw:           "تعذر تسجيل أحداث التوزيع.",
   err_dist_004_replacement_bad_state:  "لا يمكن استبدال هذه العينة — الحالة الحالية: {status}.",
   err_dist_005_replacement_partial:    "تمت إضافة البديل للعينة لكن فشل تسجيل الحدث — يُرجى المحاولة مرة أخرى: {detail}",
+  err_dist_007_write_unconfirmed:          "تم تسجيل الأحداث لكن تعذّر تأكيدها فورًا بسبب بطء الشبكة. لا حاجة لإعادة المحاولة.",
+  err_dist_008_segment_size_mismatch:      "فشل التحقق من ملف أحداث التوزيع بعد الكتابة: الحجم غير مطابق. لم يكتمل الحفظ بشكل سليم.",
   err_dist_006_no_createwritable:      "المتصفح الحالي لا يسمح بالكتابة على هذا الملف.",
 
   err_smp_001_no_population_rows:      "لا توجد صفوف مجتمع للسحب منها.",

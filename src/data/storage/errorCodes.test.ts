@@ -204,6 +204,10 @@ const PINNED_MEANINGS: Record<string, string> = {
     "replacement rejected: the row is already replaced or completed",
   "XQ-DIST-005":
     "replacement row was added to the sample but writing the distribution events failed",
+  "XQ-DIST-007":
+    "distribution events were durably written but the post-close read-back could not confirm the segment (share visibility lag); the projection was committed anyway because the bytes are on disk",
+  "XQ-DIST-008":
+    "distribution event segment read back at the WRONG size after retries — a genuine bad write, not a visibility artefact",
   "XQ-DIST-006":
     "distribution event file write: file handle exposes no createWritable",
   "XQ-SMP-001":

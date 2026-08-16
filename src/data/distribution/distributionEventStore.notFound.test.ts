@@ -66,7 +66,7 @@ describe("appendDistributionEventSegment under transient NotFoundError", () => {
     // though the bytes had already landed.
     await expect(
       appendDistributionEventSegment(root, [assignEvent("IMG-2")], writer(session))
-    ).resolves.toBeUndefined();
+    ).resolves.toBe("verified");   // was void; the call now reports its verification outcome
 
     clearSimulatedFaults(root);
     const events = await loadDistributionEventSegments(root);
@@ -136,7 +136,7 @@ describe("appendDistributionEventSegment under transient NotFoundError", () => {
 
     await expect(
       appendDistributionEventSegment(root, [assignEvent("IMG-1")], writer(session))
-    ).resolves.toBeUndefined();
+    ).resolves.toBe("verified");   // was void; the call now reports its verification outcome
 
     clearSimulatedFaults(root);
     const events = await loadDistributionEventSegments(root);

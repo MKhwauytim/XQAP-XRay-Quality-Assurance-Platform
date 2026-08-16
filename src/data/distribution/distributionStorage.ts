@@ -66,17 +66,18 @@ async function writeDistributionEventBatch(
   events: DistributionEvent[],
   scopeId: string,
   onProgress?: AppendDistributionEventsOptions["onProgress"]
-): Promise<void> {
+): Promise<"verified" | "unverified"> {
   onProgress?.({ phase: "events", completed: 0, total: events.length });
   // `scopeId` gives the "have I already written this segment" memo stable
   // workspace+month identity — without it a workspace switch mid-session leaves
   // a stale name-keyed hit that costs the whole retry ladder on the next append.
-  await appendDistributionEventSegment(directory, events, {
+  const verification = await appendDistributionEventSegment(directory, events, {
     deviceId: getDistributionDeviceId(),
     sessionId: getDistributionSessionId(),
     scopeId,
   });
   onProgress?.({ phase: "events", completed: events.length, total: events.length });
+  return verification;
 }
 
 async function getDistributionDir(
@@ -455,6 +456,10 @@ export async function appendDistributionEvents(
   // projection is updated. Distinct writers therefore do not share a target.
   const eventDir = await getDistributionDir(directoryHandle, monthFolderName);
   try {
+    // "unverified" means the bytes are committed but the share could not show
+    // them back yet. That must NOT abort: the projection below is what makes
+    // the assignment visible to its assignee, and skipping it while the events
+    // sit durably on disk is the worst of both worlds.
     await writeDistributionEventBatch(
       eventDir,
       events,
