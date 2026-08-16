@@ -1,4 +1,5 @@
 import { unwrap } from "../data/storage/jsonEnvelope";
+import { decodePayloadColumns } from "../data/storage/columnarPayload";
 import type { PopulationFinalData } from "../data/population/monthTypes";
 import { runPopulationQuery } from "../data/population/populationQuery";
 import { formatMonthFolderShortLabel, parseMonthFolderName } from "../data/population/monthFolder";
@@ -138,8 +139,16 @@ export function handleWorkerMessage(
       const parsed: unknown = JSON.parse(request.rawJsonText);
       // population.final.json is written as a JsonEnvelope (`{ metadata, data }`) by
       // safeWriteJson; `unwrap` also tolerates legacy bare (un-enveloped) JSON, same
-      // as safeReadJson does on the main thread.
-      const data = unwrap<PopulationFinalData>(parsed);
+      // as safeReadJson does on the main thread — which is also the shape a
+      // COMPRESSED file arrives in, since its metadata lives in the head line the
+      // main thread already consumed and only the body text is posted here.
+      //
+      // `decodePayloadColumns` then undoes the columnar row encoding when the file
+      // carries one. It is shape-driven and an identity for everything else, so a
+      // plain, legacy or hand-written payload passes through untouched. Doing it
+      // HERE rather than on the main thread is the whole point of this worker: the
+      // decode is O(rows) and belongs off the UI thread with the parse.
+      const data = decodePayloadColumns<PopulationFinalData>(unwrap<unknown>(parsed));
       const baseRows = Array.isArray(data?.rows) ? data.rows : [];
       const rows = request.monthFolder
         ? baseRows.map((row) => attachMonthFolderInfo(row, request.monthFolder!))
@@ -169,8 +178,26 @@ export function handleWorkerMessage(
       };
     }
 
-    // Exhaustive per PopulationQueryWorkerRequest's discriminated union (only "load"
-    // and "query" exist); kept as a defensive fallback rather than relying on
+    if (request.type === "rowById") {
+      if (!state.cachedRows) {
+        throw new Error("لا توجد بيانات محمّلة بعد — يجب إرسال طلب تحميل قبل الاستعلام.");
+      }
+      // Exact match on the raw stored field, NOT on a display value: this resolves a
+      // row identity, and `xrayImageId` is stored as-is (no alias/label mapping like
+      // "stage" or "_monthFolder" has), so getWorkerDisplayValue would only add a
+      // String() round-trip and a chance of matching the wrong row.
+      const found = state.cachedRows.find((row) => row["xrayImageId"] === request.xrayImageId);
+      return {
+        state,
+        // `?? null` normalizes `find`'s undefined miss into the explicit null the
+        // response type documents — undefined would survive structuredClone as a
+        // present-but-undefined key and read as "absent" rather than "not found".
+        response: { type: "row", requestId: request.requestId, row: found ?? null }
+      };
+    }
+
+    // Exhaustive per PopulationQueryWorkerRequest's discriminated union (only "load",
+    // "query" and "rowById" exist); kept as a defensive fallback rather than relying on
     // unreachable-code inference alone.
     const unhandled: never = request;
     throw new Error(`Unknown population-query worker request: ${JSON.stringify(unhandled)}`);

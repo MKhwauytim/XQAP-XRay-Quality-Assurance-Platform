@@ -24,7 +24,7 @@ type GlobalMonthSelectorProps = {
 
 export function GlobalMonthSelector({ allowCreate }: GlobalMonthSelectorProps) {
   const { months, selection, isSelectedMonthClosed, setSelectedMonth, startNewMonth } = useGlobalMonth();
-  const { can } = usePermissions();
+  const { can, canMutate } = usePermissions();
   const labels = useLabels();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [newMonth, setNewMonth] = useState(() => new Date().getMonth() + 1);
@@ -146,6 +146,13 @@ export function GlobalMonthSelector({ allowCreate }: GlobalMonthSelectorProps) {
                       setPickerOpen(false);
                       return;
                     }
+                    // Handler-time re-check: canCreate (render gate above) only requires
+                    // `can("process-population")` -- view-level tab access -- so a role with
+                    // view-but-not-edit access on the population tab could otherwise still
+                    // reach this button and call startNewMonth with zero mutation guard.
+                    // Matches the canMutate defense-in-depth pattern established for the
+                    // Reports export handlers.
+                    if (!canMutate("process-population")) return;
                     const applied = startNewMonth(newMonth, parsedYear);
                     if (applied) setPickerOpen(false);
                   }}

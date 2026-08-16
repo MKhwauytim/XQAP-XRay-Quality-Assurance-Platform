@@ -216,8 +216,12 @@ describe("A6d/H3 — entry gate on empty sampleRows", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const dir = await getSampleMainDir(root, month, true);
-    const beforeRaw = await (await dir.getFileHandle("distribution.current.json")).getFile();
-    const beforeText = await beforeRaw.text();
+    const readText = async (name: string) => (await (await dir.getFileHandle(name)).getFile()).text();
+    const beforeText = await readText("distribution.current.json");
+    // v85: the checkpoint (knownEventIds/segmentOffsets) lives in its own
+    // sidecar now, so the gate has to be proven against THAT file as well —
+    // the cache alone no longer contains the state this test is about.
+    const beforeCheckpoint = await readText("distribution.checkpoint.json");
 
     const counter = { writes: 0 };
     const tracked = withWriteCounter(root, counter);
@@ -226,11 +230,9 @@ describe("A6d/H3 — entry gate on empty sampleRows", () => {
     expect(result).toBeNull();
     expect(counter.writes).toBe(0);
 
-    const afterRaw = await (await dir.getFileHandle("distribution.current.json")).getFile();
-    const afterText = await afterRaw.text();
-    // The on-disk checkpoint (knownEventIds/segmentOffsets embedded in the
-    // cache file) must be byte-identical -- nothing advanced past the gate.
-    expect(afterText).toBe(beforeText);
+    // Both on-disk files must be byte-identical -- nothing advanced past the gate.
+    expect(await readText("distribution.current.json")).toBe(beforeText);
+    expect(await readText("distribution.checkpoint.json")).toBe(beforeCheckpoint);
   });
 
   it("sampleRows: [] on a month with NO events (revision 0) still returns normally, not an error state", async () => {

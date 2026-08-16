@@ -15,6 +15,7 @@ import { readSession } from "../../../../auth/authSession";
 import { tabAllowedRoles } from "../../../../auth/tabCatalog";
 import { usePermissions } from "../../../../auth/usePermissions";
 import type { UsePermissionsResult } from "../../../../auth/usePermissions";
+import { useDeferredWhileHidden } from "../../../../hooks/useDeferredWhileHidden";
 import { logError, logRejection } from "../../../../data/storage/errorLogger";
 import type { SafeWriteProgressPhase } from "../../../../data/storage/safeWrite";
 import { currentMonthFolderInfo, formatMonthFolderName, formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
@@ -279,16 +280,37 @@ export default function PopulationTab() {
   // re-invoke BrowseDataView's own render while it's hidden; React bails out
   // of re-rendering a child subtree when the exact same element reference is
   // passed again. Mirrors EmployeeWorkspaceTab's identical fix.
+  // Phase 1.2: hold Browse's refreshKey while it is hidden.
+  //
+  // Browse stays mounted after its first visit (see the `hidden` render below),
+  // and BrowseDataView's load effect depends on `refreshKey`. Every distribution
+  // mutation bumps `monthRefreshKey`, so a Manual Review session — which is a
+  // long run of mutations, all performed on the *process* sub-tab — re-read the
+  // entire month roughly once per click while Browse was not even on screen.
+  // The worker absorbs the parse, but the main thread still reads and
+  // structured-clones a multi-hundred-MB payload each time, for data nobody is
+  // looking at.
+  //
+  // Deferring rather than unmounting keeps the reason Browse is kept mounted at
+  // all: switching away and back does not re-load. The applied key catches up
+  // the moment Browse becomes visible, so it never renders stale data — the
+  // reload is moved to the point of view, not skipped.
+  const appliedBrowseRefreshKey = useDeferredWhileHidden(
+    monthRefreshKey,
+    activeSubTab === "browse"
+  );
+
   const browseElement = useMemo(
     () => (
       <BrowseDataView
         directoryHandle={directoryHandle}
-        refreshKey={monthRefreshKey}
+        refreshKey={appliedBrowseRefreshKey}
         username={sessionRef.current?.username ?? "unknown"}
         config={config}
+        canExportReports={canExportReports}
       />
     ),
-    [directoryHandle, monthRefreshKey, config]
+    [directoryHandle, appliedBrowseRefreshKey, config, canExportReports]
   );
 
   // Load cumulative CertScan data from workspace on mount
@@ -857,7 +879,12 @@ export default function PopulationTab() {
       setProcessingMessage("جارٍ تحميل بيانات الشهر — انتظر حتى يكتمل التحميل قبل التصدير.");
       return;
     }
-    if (!canExportReports) {
+    // Render-time gate (canExportReports = can(), matches computeWizardCapabilities'
+    // canExportNow above) plus this handler-time canMutate() re-check -- the same
+    // defense-in-depth split already established and tested for Reports/TabView.tsx's
+    // export handlers (B5), so a control left enabled by the looser render-time check
+    // can never actually export.
+    if (!canExportReports || !canMutate("export-reports")) {
       setProcessingMessage("لا تملك صلاحية تصدير التقارير.");
       return;
     }

@@ -390,3 +390,115 @@ test("drawSample rejects a population whose stage values match none of the four 
   expect(result.ok).toBe(false);
 });
 
+// ---------------------------------------------------------------------------
+// P4 regression: a PARTIAL population of unmapped-stage rows must not be
+// silently excluded from the draw with zero diagnostic on the success path.
+// ---------------------------------------------------------------------------
+
+test("REGRESSION (P4): a partial mix of unmapped-stage rows is counted, not silently dropped with no trace", () => {
+  const knownRows = makeRows("بري", 2, 2).map((r) => ({ ...r, stage: "THIRD_STAGE" }));
+  // Two distinct unmapped raw values, so the raw-values list must capture both.
+  const unmappedRows = [
+    { ...makeRow("garbage-1", "بري", "NonCertscan"), stage: "SOME_UNRECOGNIZED_STAGE_VALUE" },
+    { ...makeRow("garbage-2", "بري", "NonCertscan"), stage: "ANOTHER_BAD_VALUE" },
+    { ...makeRow("garbage-3", "بري", "NonCertscan"), stage: "SOME_UNRECOGNIZED_STAGE_VALUE" }
+  ];
+  const rows = [...knownRows, ...unmappedRows];
+
+  const samplingRules: StageSamplingRule[] = [
+    {
+      stageKey: "third",
+      method: "percentage",
+      value: 100,
+      isLocked: true,
+      minRequiredCount: 0,
+      certScanPercentage: 0,
+      certScanExactCount: 0,
+      certScanMethod: "percentage",
+      certScanStrategy: "preferred"
+    }
+  ];
+
+  const result = drawSample(rows, { rngSeed: "p4-partial-unmapped", samplingRules }, "user");
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+
+  // The 4 known-stage rows are drawn; the 3 unmapped ones never appear...
+  const drawnIds = result.data.rows.map((r) => r.xrayImageId).sort();
+  expect(drawnIds).not.toContain("garbage-1");
+  expect(drawnIds).not.toContain("garbage-2");
+  expect(drawnIds).not.toContain("garbage-3");
+
+  // ...but unlike before the fix, that exclusion is now recorded on the result.
+  expect(result.data.unmappedStageRowCount).toBe(3);
+  expect(result.data.unmappedStageRawValues).toEqual(
+    expect.arrayContaining(["SOME_UNRECOGNIZED_STAGE_VALUE", "ANOTHER_BAD_VALUE"])
+  );
+  expect(result.data.unmappedStageRawValues).toHaveLength(2); // distinct values only
+});
+
+test("P4: unmappedStageRowCount is 0 (not absent) when every row's stage mapped cleanly", () => {
+  const rows = makeRows("بري", 5, 5).map((r) => ({ ...r, stage: "THIRD_STAGE" }));
+  const samplingRules: StageSamplingRule[] = [
+    {
+      stageKey: "third",
+      method: "percentage",
+      value: 100,
+      isLocked: true,
+      minRequiredCount: 0,
+      certScanPercentage: 0,
+      certScanExactCount: 0,
+      certScanMethod: "percentage",
+      certScanStrategy: "preferred"
+    }
+  ];
+  const result = drawSample(rows, { rngSeed: "p4-all-mapped", samplingRules }, "user");
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+  expect(result.data.unmappedStageRowCount).toBe(0);
+  expect(result.data.unmappedStageRawValues).toEqual([]);
+});
+
+test("P4: unmappedStageRawValues is capped so a workspace with many distinct typos doesn't bloat the file", () => {
+  const knownRows = makeRows("بري", 1, 1).map((r) => ({ ...r, stage: "THIRD_STAGE" }));
+  const manyUnmappedRows = Array.from({ length: 30 }, (_, i) => ({
+    ...makeRow(`garbage-${i}`, "بري", "NonCertscan"),
+    stage: `DISTINCT_BAD_VALUE_${i}`
+  }));
+  const rows = [...knownRows, ...manyUnmappedRows];
+  const samplingRules: StageSamplingRule[] = [
+    {
+      stageKey: "third",
+      method: "percentage",
+      value: 100,
+      isLocked: true,
+      minRequiredCount: 0,
+      certScanPercentage: 0,
+      certScanExactCount: 0,
+      certScanMethod: "percentage",
+      certScanStrategy: "preferred"
+    }
+  ];
+  const result = drawSample(rows, { rngSeed: "p4-many-unmapped", samplingRules }, "user");
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+  // The full count is still accurate even though the raw-values sample is capped.
+  expect(result.data.unmappedStageRowCount).toBe(30);
+  expect(result.data.unmappedStageRawValues!.length).toBeLessThanOrEqual(20);
+  expect(result.data.unmappedStageRawValues!.length).toBeGreaterThan(0);
+});
+
+test("P4: the legacy totalSampleSize path leaves unmappedStageRowCount undefined (it never classifies rows by stage)", () => {
+  const rows = makeRows("بري", 5, 5).map((r) => ({ ...r, stage: "GARBAGE_NOT_A_REAL_STAGE" }));
+  const result = drawSample(rows, { totalSampleSize: 5, rngSeed: "p4-legacy" }, "user");
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+  expect(result.data.unmappedStageRowCount).toBeUndefined();
+  expect(result.data.unmappedStageRawValues).toBeUndefined();
+});
+
+test("P4: SAMPLING_ALGORITHM_VERSION is unchanged by the unmapped-stage diagnostic (additive, not semantic)", async () => {
+  const { SAMPLING_ALGORITHM_VERSION } = await import("./sampleAlgorithm");
+  expect(SAMPLING_ALGORITHM_VERSION).toBe("1.1");
+});
+

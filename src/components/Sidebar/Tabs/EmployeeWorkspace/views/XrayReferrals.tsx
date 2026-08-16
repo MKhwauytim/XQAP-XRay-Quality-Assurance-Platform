@@ -16,6 +16,7 @@ import type { FieldAnswer, ItemAnswer } from "../../../../../data/answers/answer
 import {
   loadOrDeriveDistributionCurrent,
   loadOrDeriveDistributionCurrentForRead,
+  readDistributionLogStamp,
 } from "../../../../../data/distribution/distributionStorage";
 import { subscribeToDataRefresh } from "../../../../../data/workspace/dataRefreshSignal";
 import {
@@ -32,7 +33,7 @@ import { submitReassignmentRequests } from "../../../../../data/referral/submitR
 import { isReassignEligible } from "../../../../../data/referral/planReassignment";
 import { appendWorkspaceAction } from "../../../../../data/audit/actionLog";
 import { getReplacementCandidatesIndexed } from "../../../../../data/distribution/replacementCandidateLookup";
-import { loadMonthPopulationFinal } from "../../../../../data/population/populationStorage";
+import { findPopulationRowById } from "../../../../../data/population/populationRowLookup";
 import type { ReplacementIndexRow } from "../../../../../data/population/replacementIndexTypes";
 import { loadPopulationConfig, type StageAliasMappings } from "../../../../../data/population/populationConfig";
 import { useGlobalMonth } from "../../../../../data/month/useGlobalMonth";
@@ -182,6 +183,16 @@ type BootSourceDescriptor = { key: string; labelEn: string; labelAr: string };
  * `referrals_sample_mirror` is only included for personal-scope users
  * (`!canSeeAll`) -- oversight users never call `loadEmployeeSampleMirror`
  * (see loadData below), matching that same branch exactly.
+ *
+ * KNOWN IMPRECISION since the Design B step-3 inversion: this list is
+ * registered BEFORE loadData knows which path it will take, and a personal
+ * scope user whose mirror is current now reads neither `sample.master.json`
+ * nor `distribution.current.json`. Those two keys are still reported as
+ * loaded on that path. Deliberate: the checklist's contract is "the data
+ * behind this source is available", which the mirror satisfies for both, and
+ * the alternative -- registering sources only once the path is known --
+ * would mean registering them AFTER the first await, which is exactly the
+ * effect-ordering shape this area has regressed on before (v59.190-197).
  */
 function referralsBootSources(username: string, canSeeAll: boolean): BootSourceDescriptor[] {
   return [
@@ -501,41 +512,119 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       setSelEntryId(null);
       setSelectedIds(new Set());
     }
+    // True once the mirror has been painted (Design B, step 3). A failure of
+    // the background re-derive AFTER that point must not replace a rendered,
+    // correct-as-of-its-revision queue with the error state — same reasoning as
+    // the `silent` branch in the catch below.
+    let painted = false;
     try {
-      // Load sample.master first — its rows are the only ones needed for the
-      // distribution derivation. population.final.json is NOT loaded here;
-      // it is loaded lazily only when the replacement dialog opens.
-      const [sample, referralLog, replacementLog, adhocEntries] = await Promise.all([
-        loadSampleMaster(directoryHandle, selMonth),
-        loadReferralLog(directoryHandle, selMonth),
-        loadReplacementLog(directoryHandle, selMonth),
-        // THE GAP fix: ad-hoc-imported assignments live in a synthetic
-        // `2-samples/adhoc-{importId}/` folder, never the selected month's own
-        // sample.master.json — merged in here so an employee can see them
-        // alongside their real assignments. Degrades to [] on any failure; see
-        // adhocImportEmployeeView.ts's docblock for the cost bound.
-        loadAdhocEntriesForEmployeeView(directoryHandle, username, canSeeAll).catch((err) => {
-          logError("xrayReferrals:loadAdhocEntries", err);
-          return [];
-        }),
-      ]);
-      const sampleRows = (sample?.rows ?? []) as PreparedPopulationRow[];
-      const dist = await loadOrDeriveDistributionCurrentForRead(directoryHandle, selMonth, sampleRows);
-      const personalMirror = canSeeAll
-        ? null
-        : await loadEmployeeSampleMirror(directoryHandle, selMonth, username);
-      const all = [...(dist?.entries ?? personalMirror?.entries ?? []), ...adhocEntries];
+      // ── Phase 1: the small, per-user reads ────────────────────────────────
+      // For a personal-scope user these are, together with the mirror and the
+      // distribution log's revision stamp, the WHOLE load when the mirror is
+      // current (Design B, step 3). `sample.master.json` (every drawn row for
+      // the month) and the workspace-wide derivation are deliberately not in
+      // here. population.final.json is not loaded here either; it is loaded
+      // lazily only when the replacement dialog opens.
+      const [referralLog, replacementLog, adhocEntries, personalMirror, logStamp, ownAnswerFile] =
+        await Promise.all([
+          loadReferralLog(directoryHandle, selMonth),
+          loadReplacementLog(directoryHandle, selMonth),
+          // THE GAP fix: ad-hoc-imported assignments live in a synthetic
+          // `2-samples/adhoc-{importId}/` folder, never the selected month's own
+          // sample.master.json — merged in here so an employee can see them
+          // alongside their real assignments. Degrades to [] on any failure; see
+          // adhocImportEmployeeView.ts's docblock for the cost bound.
+          loadAdhocEntriesForEmployeeView(directoryHandle, username, canSeeAll).catch((err) => {
+            logError("xrayReferrals:loadAdhocEntries", err);
+            return [];
+          }),
+          // Oversight (canSeeAll) is UNCHANGED and never reads a mirror:
+          // reading N mirrors would be N round trips for data the single
+          // derived `distribution.current.json` already holds.
+          canSeeAll ? null : loadEmployeeSampleMirror(directoryHandle, selMonth, username),
+          canSeeAll
+            ? null
+            : readDistributionLogStamp(directoryHandle, selMonth).catch((err) => {
+                // Unknown revision ⇒ we cannot prove the mirror is current ⇒
+                // take the slow path. Never the other way round.
+                logError("xrayReferrals:readDistributionLogStamp", err);
+                return null;
+              }),
+          canSeeAll ? null : loadEmployeeAnswers(directoryHandle, selMonth, username),
+        ]);
 
       const pendingReferralIds = canSeeAll ? new Set<string>() : getPendingReferralIds(referralLog, username);
       const pendingReplacementIds = canSeeAll ? new Set<string>() : getPendingReplacementIds(replacementLog, username);
 
-      // No longer excludes pending/replaced rows — they're shown with a
-      // distinct color instead (see rowStatusClass below, wired into
-      // getRowClassName in the render). Only the assignedTo/canSeeAll scoping
-      // remains a real filter.
-      const visible = canSeeAll
-        ? all
-        : all.filter((e) => e.assignedTo === username);
+      /** Commits one pass's results. Called twice when a stale mirror is
+       *  painted first and the real derivation lands after it. Never touches
+       *  selection or panel state — see the `silent` note in this function's
+       *  docblock; the same reasoning applies to the intermediate paint. */
+      const commit = (
+        all: DistributionEntry[],
+        quota: PersonalQuota,
+        sample: SampleMasterData | null,
+        answerItems: ItemAnswer[]
+      ): void => {
+        // No longer excludes pending/replaced rows — they're shown with a
+        // distinct color instead (see rowStatusClass below, wired into
+        // getRowClassName in the render). Only the assignedTo/canSeeAll scoping
+        // remains a real filter.
+        setAllEntries(all);
+        setEntries(canSeeAll ? all : all.filter((e) => e.assignedTo === username));
+        setPendingReferralIds(pendingReferralIds);
+        setPendingReplacementIds(pendingReplacementIds);
+        setSampleMaster(sample);
+        setMyQuota(quota);
+        setAnswers(answerItems);
+        setLoadState("ready");
+      };
+
+      // ── Phase 2 (personal scope only): can the mirror answer on its own? ──
+      // The mirror is a projection of the distribution log stamped with the
+      // revision it was derived from. Equal revision ⇒ it IS the derivation,
+      // for this employee, and nothing further needs reading. `>=` rather than
+      // `===` because a mirror can only ever be ahead of a stamp we read a
+      // moment earlier, never legitimately behind-but-correct.
+      const mirrorCurrent =
+        !canSeeAll && !!personalMirror && !!logStamp && personalMirror.sourceLogRevision >= logStamp.revision;
+      // `quota` is OPTIONAL on the mirror by contract (see EmployeeMirrorQuota):
+      // a mirror written before that field existed has none, and the reader
+      // must fall back to the derived file rather than render "0 per day".
+      const mirrorSelfSufficient = mirrorCurrent && personalMirror!.quota !== undefined;
+
+      if (!canSeeAll && personalMirror) {
+        const mirrorAll = [...personalMirror.entries, ...adhocEntries];
+        const mirrorQuota: PersonalQuota = personalMirror.quota
+          ? {
+              dailyQuota: personalMirror.quota.dailyQuota,
+              daysRemaining: personalMirror.quota.daysRemainingAtAssignment,
+              sampleCount: personalMirror.quota.sampleCount,
+            }
+          : null;
+        if (token !== loadTokenRef.current) return;
+        painted = true;
+        if (mirrorSelfSufficient) {
+          // The whole read. Nothing else is loaded.
+          if (isInitialLoad) bootSources.forEach((source) => markBootSourceLoaded(source.key));
+          // `sampleMaster` is deliberately left null: it was not read, and a
+          // stale one from a previously selected month would be worse than
+          // none. `openReplacementDialog` loads it (and the workspace-wide
+          // entry set it needs for its exclusion sets) on demand instead.
+          commit(mirrorAll, mirrorQuota, null, ownAnswerFile!.items);
+          return;
+        }
+        // Stale (or quota-less) mirror: paint it NOW so the employee sees their
+        // queue immediately, then keep going and re-derive underneath.
+        commit(mirrorAll, mirrorQuota, null, ownAnswerFile!.items);
+      }
+
+      // ── Phase 3: the full read (oversight always; personal scope only when
+      // the mirror could not answer) ───────────────────────────────────────
+      const sample = await loadSampleMaster(directoryHandle, selMonth);
+      const sampleRows = (sample?.rows ?? []) as PreparedPopulationRow[];
+      const dist = await loadOrDeriveDistributionCurrentForRead(directoryHandle, selMonth, sampleRows);
+      const all = [...(dist?.entries ?? personalMirror?.entries ?? []), ...adhocEntries];
 
       // Extract frozen daily quota for the current employee.
       const quota: PersonalQuota = dist?.quotas?.[username]
@@ -546,11 +635,15 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           }
         : null;
 
-      const users = canSeeAll ? [...new Set(all.map((e) => e.assignedTo))] : [username];
-      const files = await Promise.all(
-        users.map((u) => loadEmployeeAnswers(directoryHandle, selMonth, u))
-      );
-      const answerItems = files.flatMap((f) => f.items);
+      const answerItems = canSeeAll
+        ? (
+            await Promise.all(
+              [...new Set(all.map((e) => e.assignedTo))].map((u) =>
+                loadEmployeeAnswers(directoryHandle, selMonth, u)
+              )
+            )
+          ).flatMap((f) => f.items)
+        : ownAnswerFile!.items;
 
       // Staleness check FIRST: a superseded load must not touch the shared
       // boot-progress store at all -- marking its keys "loaded" would show
@@ -560,14 +653,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
 
       if (isInitialLoad) bootSources.forEach((source) => markBootSourceLoaded(source.key));
 
-      setAllEntries(all);
-      setEntries(visible);
-      setPendingReferralIds(pendingReferralIds);
-      setPendingReplacementIds(pendingReplacementIds);
-      setSampleMaster(sample);
-      setMyQuota(quota);
-      setAnswers(answerItems);
-      setLoadState("ready");
+      commit(all, quota, sample, answerItems);
     } catch (err) {
       // Staleness check FIRST, mirroring the success path above: a
       // superseded load's rejection must not touch the shared boot-progress
@@ -583,7 +669,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       // a transient read hiccup — log it for observability and leave the current
       // selection/panel exactly as it was; the next successful refresh (or manual
       // navigation) will recover the data.
-      if (silent) {
+      if (silent || painted) {
         logError("xrayReferrals:loadData:silentRefresh", err);
         return;
       }
@@ -656,7 +742,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     try {
       const result = await reopenSubmittedAnswer({
         directoryHandle,
-        monthFolderName: selMonth,
+        // Routed on the ROW, not the selected month — see folderForRow. The
+        // answer being reopened was written by handleSave to the row's own
+        // store, so an ad-hoc row's reopen must read and rewrite it there.
+        monthFolderName: folderForRow(entry.xrayImageId),
         employeeUsername: entry.assignedTo,
         xrayImageId: entry.xrayImageId,
         reopenedBy: username,
@@ -693,7 +782,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     try {
       const result = await submitReopenRequest({
         directoryHandle,
-        monthFolderName: selMonth,
+        // Routed on the ROW (see folderForRow): the request has to land in the
+        // same store as the answer its approver will reopen, or approval fails
+        // with "no saved answer" while polluting an unrelated month's queue.
+        monthFolderName: folderForRow(entry.xrayImageId),
         employeeUsername: entry.assignedTo,
         xrayImageId: entry.xrayImageId,
         assignedTo: entry.assignedTo,
@@ -725,12 +817,58 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     }
   }
 
+  /**
+   * The sample master + every-employee entry set the replacement dialog needs.
+   * Returns what `loadData` already put in state when the full read ran, and
+   * pays for it on demand when the mirror fast path skipped it (a null
+   * `sampleMaster` is precisely that signal — the fast path clears it, and the
+   * full path only leaves it null when the month genuinely has no sample, in
+   * which case this correctly returns null and the caller bails as before).
+   */
+  async function ensureReplacementContext(): Promise<
+    { sample: SampleMasterData; entries: DistributionEntry[] } | null
+  > {
+    if (sampleMaster) return { sample: sampleMaster, entries: allEntries };
+    if (!selMonth) return null;
+    try {
+      const sample = await loadSampleMaster(directoryHandle, selMonth);
+      if (!sample) return null;
+      const dist = await loadOrDeriveDistributionCurrentForRead(
+        directoryHandle, selMonth, (sample.rows ?? []) as PreparedPopulationRow[]
+      );
+      setSampleMaster(sample);
+      // Ad-hoc entries live outside this month's derivation, so carry the ones
+      // already loaded rather than dropping them from the exclusion set.
+      const merged = [...(dist?.entries ?? []), ...allEntries.filter(isAdhocEntry)];
+      // BOTH halves must be committed, not just the sample. The short-circuit at
+      // the top of this function pairs a cached `sampleMaster` with component
+      // state `allEntries`; committing only the sample meant every subsequent
+      // open re-paired the fresh sample with the mirror-only entry list, so the
+      // exclusion set silently lost every other employee's rows and the dialog
+      // offered rows they already owned.
+      setAllEntries(merged);
+      return { sample, entries: merged };
+    } catch (error) {
+      logError("xrayReferrals:ensureReplacementContext", error);
+      return null;
+    }
+  }
+
   async function openReplacementDialog(entry: DistributionEntry): Promise<void> {
     if (!canRequestReplacement) {
       setStatusMsg({ type: "error", text: "لا تملك صلاحية طلب الاستبدال، أو أن مساحة العمل للقراءة فقط." });
       return;
     }
-    if (!sampleMaster || !selMonth) return;
+    if (!selMonth) return;
+    // Design B step 3: on the mirror fast path `loadData` reads neither
+    // `sample.master.json` nor the workspace-wide derivation, so both are
+    // resolved HERE, on demand. They are genuinely needed and cannot be
+    // approximated from the mirror: `sampleMaster` is the drawn-row set the
+    // candidate pool is filtered against, and `allEntries` must be EVERY
+    // employee's entries — an exclusion set built from this employee's mirror
+    // alone would offer rows another employee already owns.
+    const context = await ensureReplacementContext();
+    if (!context) return;
     // Reads only the matching replacement-index bucket when one exists for
     // this month, instead of the full population.final.json — falls back to
     // a full read (and rebuilds the index in the background) for months
@@ -738,7 +876,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     let candidates: Awaited<ReturnType<typeof getReplacementCandidatesIndexed>>;
     try {
       candidates = await getReplacementCandidatesIndexed(
-        directoryHandle, selMonth, entry, sampleMaster, allEntries, stageMappings, username
+        directoryHandle, selMonth, entry, context.sample, context.entries, stageMappings, username
       );
     } catch (error) {
       logError("xrayReferrals:getReplacementCandidatesIndexed", error);
@@ -799,10 +937,14 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         // the FULL population row, so resolve it here by id. This is the one
         // full-population read on the immediate-replace path, and it's paid
         // for exactly one row (the chosen candidate), never the whole pool.
-        const population = await loadMonthPopulationFinal(directoryHandle, selMonth);
-        const fullReplacementRow = (population?.rows ?? []).find(
-          (r) => (r as PreparedPopulationRow).xrayImageId === replacement.xrayImageId
-        ) as PreparedPopulationRow | undefined;
+        //
+        // The read still happens; the PARSE of it does not happen here (1.12).
+        // Parsing a large month on the main thread is the freeze users report on
+        // this exact click, so the file text goes to the query worker instead and
+        // only the one matching row comes back. A miss and a failure are both
+        // treated as "stale", exactly as the previous inline `.find()` was.
+        const lookup = await findPopulationRowById(directoryHandle, selMonth, replacement.xrayImageId);
+        const fullReplacementRow = lookup.ok ? lookup.row ?? undefined : undefined;
         if (!fullReplacementRow) {
           setReplacementError(STALE_MSG);
           setStatusMsg({ type: "error", text: STALE_MSG });
@@ -813,7 +955,12 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         // Immediate replacement — no approval needed.
         const result = await executeReplacement({
           directoryHandle,
-          monthFolderName: selMonth,
+          // The same store the freshness re-check above read from. Routed on
+          // `selMonth` this appended a `replaced` event for an ADHOC-* id into a
+          // real month's immutable log (which its fold can never interpret),
+          // appended a real population row to an already-drawn sample master,
+          // and left the ad-hoc row live — the employee owned both.
+          monthFolderName: rowFolder,
           deadEntry: entry,
           replacementRow: fullReplacementRow,
           reason,
@@ -841,7 +988,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         // Store only the id (not the full row) to avoid stale copies.
         const request: ReplacementRequest = {
           requestId: `rep-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          monthFolderName: selMonth,
+          // Must match the folder the request is appended to (below): every
+          // distribution read/write approveReplacement performs is keyed off
+          // this field, so a record stored in the ad-hoc store while naming the
+          // selected month would apply the replacement to the wrong population.
+          monthFolderName: folderForRow(entry.xrayImageId),
           employeeUsername: entry.assignedTo,
           originalXrayImageId: entry.xrayImageId,
           replacementXrayImageId: replacement.xrayImageId,

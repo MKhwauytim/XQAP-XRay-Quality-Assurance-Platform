@@ -15,6 +15,7 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import { listMonthFolders, loadMonthPopulationFinal } from "../population/populationStorage";
+import { loadPopulationAggregate } from "../population/populationAggregate";
 import { parseMonthFolderName } from "../population/monthFolder";
 import {
   computeSuspicionRate,
@@ -52,6 +53,23 @@ export async function findPriorMonthFolder(
 }
 
 /**
+ * The prior month's stored suspicion rate, or `null` when this month has no
+ * aggregate or predates the field. `null` means "not known from the cheap
+ * source" and sends the caller to the full-population fallback — it is
+ * deliberately not conflated with a genuine rate of zero, which is a real
+ * signal and is returned as `0`.
+ */
+async function loadPriorMonthSuspicionRate(
+  directoryHandle: DirectoryHandleLike,
+  priorMonthFolderName: string
+): Promise<number | null> {
+  const result = await loadPopulationAggregate(directoryHandle, priorMonthFolderName);
+  if (result.status !== "ok") return null;
+  const rate = result.aggregate.suspicionRate;
+  return typeof rate === "number" ? rate : null;
+}
+
+/**
  * Compute the B4 prior-month advisory for the month about to be drawn. Best-effort:
  * any load failure yields the all-null advisory (never blocks a draw). The result is
  * safe to fold into a {@link SamplingPlan} and to surface in the Phase 3 UI.
@@ -69,9 +87,19 @@ export async function loadPriorMonthAdvisory(
     const priorMonthFolderName = await findPriorMonthFolder(directoryHandle, currentMonthFolderName);
     if (!priorMonthFolderName) return none;
 
-    const priorPopulation = await loadMonthPopulationFinal(directoryHandle, priorMonthFolderName);
-    const rows = (priorPopulation?.rows ?? []) as unknown as PreparedPopulationRow[];
-    const rate = computeSuspicionRate(rows);
+    // Phase 1.8: the advisory needs one ratio, but computing it used to load the
+    // whole prior month's population — one of the largest files in the workspace,
+    // read on the path to drawing a sample. `population.aggregate.json` persists
+    // the scalar at processing time, so the common case is now a small read.
+    const rate =
+      (await loadPriorMonthSuspicionRate(directoryHandle, priorMonthFolderName)) ??
+      // Months processed before the aggregate carried this field have no stored
+      // rate. Fall back to the full computation rather than reporting a wrong
+      // advisory — correctness first, and it is the pre-1.8 cost, not worse.
+      computeSuspicionRate(
+        ((await loadMonthPopulationFinal(directoryHandle, priorMonthFolderName))
+          ?.rows ?? []) as unknown as PreparedPopulationRow[]
+      );
     if (rate === null) {
       // Prior month folder exists but has no population rows — no signal to report.
       return none;

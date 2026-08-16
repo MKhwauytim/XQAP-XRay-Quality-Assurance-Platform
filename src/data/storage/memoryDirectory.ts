@@ -2,6 +2,7 @@ import type {
   DirectoryHandleLike,
   FileHandleLike
 } from "./fileSystemAccess";
+import { registerDirectoryPath } from "./webLocks";
 
 function notFound(name: string): Error {
   const error = new Error(`Not found: ${name}`);
@@ -216,10 +217,65 @@ function applyFaults(
   }
 }
 
+/**
+ * File content is held as BYTES, not as a JS string.
+ *
+ * The double used to store a string, which made it structurally incapable of
+ * representing a gzip body: `String.fromCharCode`-ing arbitrary bytes through a
+ * UTF-8 round trip is lossy, so every compressed-file test would have been
+ * testing a corrupted fixture. Bytes are also what a real
+ * `FileSystemWritableFileStream` accepts and what a real `File` hands back.
+ *
+ * The string-shaped API is unchanged: `write("…")` UTF-8-encodes, and `getFile()`
+ * builds a real `File` over the stored bytes, so `file.text()` decodes exactly as
+ * before. Every pre-existing test that writes and reads text is unaffected.
+ */
 type MemoryNode = {
-  files: Map<string, { content: string }>;
+  files: Map<string, { content: Uint8Array<ArrayBuffer>; lastModified: number }>;
   dirs: Map<string, MemoryNode>;
 };
+
+const EMPTY_CONTENT: Uint8Array<ArrayBuffer> = new Uint8Array(0);
+
+/** Accepts what a real writable stream accepts: text or any BufferSource. */
+function toBytes(data: string | BufferSource): Uint8Array<ArrayBuffer> {
+  if (typeof data === "string") return new TextEncoder().encode(data);
+  if (ArrayBuffer.isView(data)) {
+    return new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
+  }
+  return new Uint8Array(data.slice(0));
+}
+
+function concatBytes(chunks: Uint8Array<ArrayBuffer>[]): Uint8Array<ArrayBuffer> {
+  let total = 0;
+  for (const chunk of chunks) total += chunk.byteLength;
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
+}
+
+/**
+ * Per-file mtime for the double. A real file's `lastModified` is a property of
+ * the FILE (stamped when it was written) and is stable across reads; before
+ * this existed, every `getFile()` built a fresh `File` and therefore reported
+ * `Date.now()`, so any caller comparing mtimes across two reads of an untouched
+ * file saw them differ — the opposite of real behaviour. `listDirectoryEntries-
+ * WithSize` compares exactly that.
+ *
+ * Monotonic rather than a bare `Date.now()`: two writes inside one millisecond
+ * are routine in a test (and merely rare on disk), and a double that reported
+ * them as the same mtime would make a same-length rewrite undetectable in tests
+ * for reasons that have nothing to do with the code under test.
+ */
+let memoryMtimeClock = 0;
+function nextMemoryMtime(): number {
+  memoryMtimeClock = Math.max(Date.now(), memoryMtimeClock + 1);
+  return memoryMtimeClock;
+}
 
 function createNode(): MemoryNode {
   return { files: new Map(), dirs: new Map() };
@@ -241,8 +297,13 @@ function makeFileHandle(
       applyFaults(faultState, operationLog, { operation: "getFile", name });
       readLog?.entries.push(path);
       const entry = node.files.get(name);
-      const content = entry ? entry.content : "";
-      return new File([content], name, { type: "application/json" });
+      const content = entry ? entry.content : EMPTY_CONTENT;
+      // `new File([...])` snapshots the bytes it is given (Blob semantics), so a
+      // later write to this node cannot mutate a File a test is still reading.
+      return new File([content], name, {
+        type: "application/json",
+        lastModified: entry ? entry.lastModified : 0,
+      });
     },
     createWritable: async () => {
       applyFaults(faultState, operationLog, { operation: "createWritable", name });
@@ -255,13 +316,13 @@ function makeFileHandle(
       if (permission.state !== "granted") {
         throw writePermissionDenied(name);
       }
-      let buffer = "";
+      const chunks: Uint8Array<ArrayBuffer>[] = [];
       return {
-        write: async (data: string) => {
-          buffer += data;
+        write: async (data: string | BufferSource) => {
+          chunks.push(toBytes(data));
         },
         close: async () => {
-          node.files.set(name, { content: buffer });
+          node.files.set(name, { content: concatBytes(chunks), lastModified: nextMemoryMtime() });
         }
       };
     }
@@ -301,7 +362,7 @@ function makeDirectoryHandle(
         throw writePermissionDenied(fileName);
       }
       if (!exists) {
-        node.files.set(fileName, { content: "" });
+        node.files.set(fileName, { content: EMPTY_CONTENT, lastModified: nextMemoryMtime() });
       }
       return makeFileHandle(
         fileName,
@@ -400,6 +461,11 @@ function makeDirectoryHandle(
     }
   };
   const typedHandle = handle as DirectoryHandleLike;
+  // Item 1.11: give every handle in a test tree the same full-path lock key a
+  // real workspace handle gets from `workspacePaths.ts`, so lock-contention
+  // behaviour is observable in tests. The root itself has an empty relative
+  // path, so it registers under its own name (the pre-registry fallback).
+  registerDirectoryPath(typedHandle, path || name);
   permissionRegistry.set(typedHandle, permission);
   if (readLog) readLogRegistry.set(typedHandle, readLog);
   if (faultState) faultRegistry.set(typedHandle, faultState);

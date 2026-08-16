@@ -10,8 +10,15 @@ import { drawLegacySample, drawStageSample } from "./sampleAlgorithmInternals";
  * RULE: bump this constant on ANY semantic change to `drawSample` (apportionment,
  * split, draw order, spillover, stage redistribution). A pure refactor that
  * provably preserves the exact drawn set for every seed does NOT bump it.
+ *
+ * "1.1" (2026-08-15): stage-shortfall redistribution now resolves a
+ * `percentage`-method stage rule to a row count before comparing it against
+ * the stage's available rows. Under "1.0" the raw percentage (e.g. 25) was
+ * compared against the row count, inventing a phantom shortfall that inflated
+ * every redistributable stage's target — so a "1.0" stage draw that used any
+ * percentage-method rule is NOT replayable under this version.
  */
-export const SAMPLING_ALGORITHM_VERSION = "1.0";
+export const SAMPLING_ALGORITHM_VERSION = "1.1";
 
 type StageConfig = {
   rngSeed: string;

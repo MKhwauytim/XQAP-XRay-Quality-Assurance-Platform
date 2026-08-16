@@ -102,6 +102,45 @@ global selection.
 | `distribution.log.json` | `2-samples/{month}/1-main/` | Backward-compatible event-log projection. |
 | `distribution.current.json` | `2-samples/{month}/1-main/` | Derived current distribution snapshot. |
 
+### On-disk format: plain JSON, or head line + gzip
+
+Every file above is a `JsonEnvelope` (`{ metadata, data }`) written by
+`safeWriteJson`. A short, explicit list of them is additionally stored **compressed** once their
+payload is large enough — the file NAME never changes, only its framing:
+
+```
+line 1: {"schemaVersion":1,"revision":N,"contentHash":"","writtenAt":"…","format":"xqapz-gzip-1"}\n   ← plain UTF-8
+rest  : gzip member whose inflated text is JSON.stringify(data)                                       ← compressed
+```
+
+| File | Framing | Row encoding |
+| --- | --- | --- |
+| `risk.raw.json`, `bi.raw.json`, `population.final.json` | gzip | columnar (`columnar-v1`) |
+| `sample.master.json`, `distribution.current.json`, `processing.summary.json`, large replacement-index buckets | gzip | as-is |
+| everything else (manifests, permissions, notifications, action log, per-employee mirrors, `_index.json`, event segments) | plain JSON | as-is |
+
+- **The table lives in `src/data/storage/storagePolicy.ts`** and is an explicit
+  opt-in; a file not listed there is never compressed. A listed file is still
+  written as plain JSON until a top-level array reaches `COMPRESS_MIN_ROWS`
+  (2,000), so small months and fresh workspaces stay hand-inspectable.
+- **Reading is format-agnostic and permanent.** `safeReadJson` classifies each
+  file from its own first bytes, so plain files written before this existed keep
+  working forever, in both directions, with no migration. Columnar payloads are
+  decoded from their own `encoding` discriminator, independently of framing.
+- **`contentHash` is empty (`""`) on a compressed file.** The head line is
+  written before the body, so it cannot carry a hash of it without serializing
+  the payload twice. Integrity comes from the write path's byte-exact read-back
+  (`bodyHash` + `bodyLength` + exact head bytes + exact file size) and from
+  gzip's CRC32/ISIZE, which `DecompressionStream` checks on every read.
+- **Measured on a real 117,336-row month:** the workspace went from ~996 MB to
+  ~44 MB (of which 28 MB is the untouched source-`.xlsx` copies);
+  `bi.raw.json` 573 MB → 5.2 MB, `risk.raw.json` 211 MB → 2.3 MB,
+  `population.final.json` 139 MB → 1.1 MB. The full month save got *faster*
+  (145 s → 64 s), because far fewer bytes are written and no giant string is
+  materialized.
+- `.bak` / `.tmp` siblings, backups and restores copy compressed files as raw
+  bytes, so a snapshot is byte-identical to its source.
+
 ### Cross-writer limitation (verified 2026-08-13)
 
 `risk.raw.json`, `bi.raw.json`, `population.final.json`, `processing.summary.json` and the **initial**
@@ -306,7 +345,7 @@ Both files use `safeWriteJson` / `safeReadJson` and the `JsonEnvelope` schema-ve
 
 ## Data Protection Notes
 
-- JSON writes use the safe write layer where available: temporary write, commit, backup `.bak`, and content-hash validation.
+- JSON writes use the safe write layer where available: temporary write, commit, backup `.bak`, and content-hash validation. Compressed files verify the exact written bytes on read-back instead of carrying a content hash (see "On-disk format" above).
 - Concurrent writes use Web Locks or compare-and-swap loops in high-conflict areas such as distribution and answer files.
 - The activity log is best-effort workspace audit data. It records app-observed time, including heartbeat and close events when the browser delivers them; it is not a centralized attendance system.
 

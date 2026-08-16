@@ -37,6 +37,11 @@ export type DistributionEvent = {
 /** Per-employee quota derived from the distribution log. */
 export type EmployeeQuota = {
   username: string;
+  /**
+   * Rows the employee currently owns: live (non-`replaced`) folded entries
+   * assigned to them, NOT the number of `assigned` events they received (v3 /
+   * P2 — see deriveEmployeeQuotasWithFacts).
+   */
   sampleCount: number;
   dailyQuota: number;
   daysRemainingAtAssignment: number;
@@ -52,9 +57,26 @@ export type DistributionLog = {
   /**
    * Deterministic identity of the merged event-id set. Unlike `revision`, this
    * changes when immutable event files written by another machine are found,
-   * even when a compatibility-log writer lost a last-writer-wins race.
+   * even when a compatibility-log writer lost a last-writer-wins race. Since
+   * v85 this is a fixed-size commutative digest rather than a concatenation of
+   * every id — see distributionEventSetIdFromIds.
    */
   eventSetId?: string;
+  /**
+   * IN MEMORY: every merged event (compatibility projection + immutable event
+   * files/segments), which is what every consumer of a loaded `DistributionLog`
+   * still gets.
+   *
+   * ON DISK (`distribution.log.json`): since v85 this is normally EMPTY. That
+   * file is kept for its CAS stamp (`revision` + `_writeToken`, the
+   * cross-machine commit protocol) and as the mirror-staleness authority read
+   * by `readDistributionLogStamp` — but its event BODY was a duplicate of the
+   * immutable `distribution.events/` segments, re-read and re-written on every
+   * append. Appends now write a body-less stamp and keep only the residual
+   * events that are NOT durable in the event store (i.e. those a pre-immutable
+   * client wrote into the projection and nowhere else). Readers stay dual-read:
+   * a legacy full-body log is still parsed and its events still folded.
+   */
   events: DistributionEvent[];
 };
 
@@ -100,6 +122,13 @@ export type DistributionEntry = {
 
 /** Per-employee quota bookkeeping used to resume deriveEmployeeQuotas incrementally (perf: fold-checkpoint). */
 export type QuotaFacts = {
+  /**
+   * Raw non-excluded `assigned` event count per employee. Bookkeeping only
+   * since v3 (P2): `EmployeeQuota.sampleCount` is derived from the folded
+   * entries an employee actually still owns, because this counter cannot see a
+   * reassignment or a replacement. Kept because it is part of the persisted
+   * checkpoint shape and is a useful record of assignment volume.
+   */
   assignmentCounts: Record<string, number>;
   firstAssignments: Record<string, DistributionEvent>;
   latestStoredQuotas: Record<string, DistributionEvent>;
@@ -113,6 +142,14 @@ export type QuotaFacts = {
  * and distributionDerivation.ts's findLateEvent for the correctness guard that
  * forces a full refold instead of trusting this checkpoint when an
  * out-of-order event is detected.
+ *
+ * STORAGE (v85): this is persisted in its OWN sidecar file,
+ * `distribution.checkpoint.json`, next to `distribution.current.json` in the
+ * month's `2-samples/{month}/1-main` folder — it used to be embedded in the
+ * cache file itself, which made that (already multi-MB) file bigger for every
+ * consumer that only ever wanted the entries. `eventSetId` below is what binds
+ * the two files back together now that they can be written, restored, or
+ * deleted independently.
  */
 export type DistributionFoldCheckpoint = {
   /** Byte size already folded, per distribution.events/*.ndjson segment file name. */
@@ -125,6 +162,22 @@ export type DistributionFoldCheckpoint = {
   quotaFacts: QuotaFacts;
   /** Fold/derive algorithm version this checkpoint was built with; a mismatch forces a full refold. */
   deriveVersion: number;
+  /**
+   * Event-set digest of `knownEventIds` — identical to the `eventSetId` of the
+   * `distribution.current.json` this checkpoint was written with.
+   *
+   * LOAD-BEARING for the sidecar split. While the checkpoint lived inside the
+   * cache file the two could not disagree; as separate files they can (a
+   * concurrent writer on an older build rewriting only the cache, a restore
+   * that removed one and failed to remove the other, a half-landed write).
+   * Resuming against a checkpoint whose `segmentOffsets` claim MORE has been
+   * folded than the cache's entries actually reflect silently drops every event
+   * in between, so the resume path refuses any sidecar whose digest does not
+   * match the cache it is about to extend. Optional only so a legacy inline
+   * checkpoint (read back out of an old `distribution.current.json`, where
+   * consistency is structural) still type-checks.
+   */
+  eventSetId?: string;
 };
 
 export type DistributionCurrentData = {
@@ -143,6 +196,15 @@ export type DistributionCurrentData = {
   entries: DistributionEntry[];
   /** Daily quotas per employee, derived from assignment date through the monthly deadline. */
   quotas?: Record<string, EmployeeQuota>;
-  /** Fold-checkpoint acceleration state (perf). Absent means the next load does a full refold. */
+  /**
+   * Fold-checkpoint acceleration state (perf). Absent means the next load does
+   * a full refold.
+   *
+   * IN MEMORY ONLY on the way out (v85): `saveDistributionCurrent` strips this
+   * field before writing `distribution.current.json` and persists it to the
+   * `distribution.checkpoint.json` sidecar instead. It is still POPULATED on
+   * read — from the sidecar when one exists, otherwise from a legacy cache file
+   * that still carries it inline — so in-memory consumers are unchanged.
+   */
   foldCheckpoint?: DistributionFoldCheckpoint;
 };

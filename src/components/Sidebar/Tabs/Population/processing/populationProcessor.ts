@@ -1,4 +1,5 @@
 import type { NormalizedBiRow } from "../biData/biDataTypes";
+import { yieldToMain } from "../../../../../data/storage/yieldToMain";
 import type { NormalizedRiskRow } from "../riskData/riskDataTypes";
 import {
   buildCertScanPortIndex,
@@ -743,7 +744,6 @@ function finalizeBiFieldFillSummary(
   }));
 }
 
-const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 export async function processPopulation(
   input: PopulationProcessingInput,

@@ -17,6 +17,17 @@ export type PopulationQueryParams = {
   columnFilters: Record<string, string[]>;
   sort: PopulationQuerySort;
   page: number;
+  /**
+   * Rows per page. Defaults to `DATA_PAGE_SIZE` — omit it and this function
+   * behaves exactly as it did before the option existed.
+   *
+   * Exists for callers that need the whole matching set rather than a screenful
+   * (Phase 1.6: the Browse XLSX export). Collecting the set by walking pages
+   * meant re-running the entire search → filter → **sort** pipeline once per
+   * page, because this function is stateless; on a 400k-row month that is
+   * thousands of full sorts to produce one file.
+   */
+  pageSize?: number;
 };
 
 export type PopulationQueryResult<T> = {
@@ -137,10 +148,15 @@ export function runPopulationQuery<T extends Record<string, unknown>>(
 
   const sortedRows = sortRows(filteredRows, params.sort, displayValueGetter);
 
+  const pageSize =
+    params.pageSize !== undefined && params.pageSize > 0
+      ? params.pageSize
+      : DATA_PAGE_SIZE;
+
   const totalRows = sortedRows.length;
-  const totalPages = Math.max(1, Math.ceil(totalRows / DATA_PAGE_SIZE));
-  const page = clampPage(params.page, totalRows, DATA_PAGE_SIZE);
-  const pageRows = pageSlice(sortedRows, page, DATA_PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  const page = clampPage(params.page, totalRows, pageSize);
+  const pageRows = pageSlice(sortedRows, page, pageSize);
 
   return { pageRows, totalRows, totalPages };
 }

@@ -13,6 +13,9 @@ import type {
   StageAllocation
 } from "./sampleTypes";
 
+/** Cap on how many distinct unmapped raw stage strings are pinned to a draw result (P4). */
+const UNMAPPED_STAGE_RAW_VALUES_CAP = 20;
+
 type Rng = ReturnType<typeof createRng>;
 type StageKey = "first" | "second" | "third" | "fourth";
 type StageConfig = {
@@ -37,6 +40,10 @@ type StagePlan = {
   effectiveTargets: Map<StageKey, number>;
   availableCounts: Map<StageKey, number>;
   configuredValues: Map<StageKey, number>;
+  /** Rows whose raw `stage` value mapped to "unknown" (P4) — excluded from every stage's draw. */
+  unmappedStageRowCount: number;
+  /** Distinct raw values behind the count above, capped to {@link UNMAPPED_STAGE_RAW_VALUES_CAP}. */
+  unmappedStageRawValues: string[];
 };
 type StageDraw = {
   rows: PreparedPopulationRow[];
@@ -224,6 +231,25 @@ export function drawLegacySample(
 }
 
 /**
+ * A stage rule's configured target expressed in ROWS, before any availability
+ * cap or `minRequiredCount` floor is applied.
+ *
+ * `StageSamplingRule.value` is method-dependent: a percentage (0-100) when
+ * `method === "percentage"`, an absolute row count when `method === "exact"`
+ * (see populationConfig.ts). The percentage denominator is the stage's own
+ * available row count — the same denominator {@link configuredTarget} has
+ * always used — so "25% of level 2" means 25% of the level-2 rows that exist,
+ * not 25% of the whole population.
+ *
+ * Everything that compares a rule against a row count (the availability cap
+ * here, and `redistributeStageShortfall`'s shortfall/weight arithmetic) must go
+ * through this, otherwise a raw percentage gets compared against a row count.
+ */
+function configuredRowCount(rule: StageSamplingRule, available: number): number {
+  return rule.method === "percentage" ? Math.round((rule.value / 100) * available) : rule.value;
+}
+
+/**
  * The per-stage target after applying `minRequiredCount` as a floor and capping
  * at `available` (never draw more than exists). Exported so UI code (Phase 3's
  * running-total display, B-owner config panel) can show the *effective* target
@@ -231,7 +257,7 @@ export function drawLegacySample(
  * copy of the floor logic and risking drift from the real draw.
  */
 export function configuredTarget(rule: StageSamplingRule, available: number): number {
-  let target = rule.method === "percentage" ? Math.round((rule.value / 100) * available) : rule.value;
+  let target = configuredRowCount(rule, available);
   if (rule.minRequiredCount > 0) {
     target = available < rule.minRequiredCount ? available : Math.max(target, rule.minRequiredCount);
   }
@@ -258,7 +284,22 @@ export function certScanConfiguredTarget(rule: StageSamplingRule, effectiveTarge
 
 function buildStagePlan(rows: PreparedPopulationRow[], config: StageConfig): StagePlan {
   const rowStageKeys = new Map<string, ReturnType<typeof getStageKey>>();
-  for (const row of rows) rowStageKeys.set(row.xrayImageId, getStageKey(row.stage, config.stageMappings));
+  const unmappedStageRawValuesSeen = new Set<string>();
+  let unmappedStageRowCount = 0;
+  for (const row of rows) {
+    const stageKey = getStageKey(row.stage, config.stageMappings);
+    rowStageKeys.set(row.xrayImageId, stageKey);
+    if (stageKey === "unknown") {
+      unmappedStageRowCount += 1;
+      // Detection only (P4, 2026-08): a raw stage value with no matching alias
+      // resolves to "unknown" and is excluded from every stage's draw below —
+      // previously with zero record of that exclusion on the success path.
+      // Capped so a workspace with many distinct typos doesn't bloat the file.
+      if (unmappedStageRawValuesSeen.size < UNMAPPED_STAGE_RAW_VALUES_CAP) {
+        unmappedStageRawValuesSeen.add(String(row.stage ?? "").trim());
+      }
+    }
+  }
   const rulesByStage = new Map(config.samplingRules.map((rule) => [rule.stageKey, rule]));
   const effectiveTargets = new Map<StageKey, number>();
   const availableCounts = new Map<StageKey, number>();
@@ -268,9 +309,20 @@ function buildStagePlan(rows: PreparedPopulationRow[], config: StageConfig): Sta
     const rule = rulesByStage.get(stageKey);
     availableCounts.set(stageKey, available);
     effectiveTargets.set(stageKey, rule ? configuredTarget(rule, available) : 0);
-    configuredValues.set(stageKey, rule?.value ?? 0);
+    // Row count, never the raw `rule.value`: for a `percentage` rule the raw
+    // value is a percentage, and redistributeStageShortfall compares this
+    // against `available` (a row count) and weights absorbers by it.
+    configuredValues.set(stageKey, rule ? configuredRowCount(rule, available) : 0);
   }
-  return { rowStageKeys, rulesByStage, effectiveTargets, availableCounts, configuredValues };
+  return {
+    rowStageKeys,
+    rulesByStage,
+    effectiveTargets,
+    availableCounts,
+    configuredValues,
+    unmappedStageRowCount,
+    unmappedStageRawValues: Array.from(unmappedStageRawValuesSeen)
+  };
 }
 
 function redistributeStageShortfall(plan: StagePlan): void {
@@ -478,7 +530,8 @@ function successfulResult(
   portAllocations: PortAllocation[],
   stageAllocations: StageAllocation[],
   counters: DrawCounters,
-  certScanShortfalls: CertScanShortfall[]
+  certScanShortfalls: CertScanShortfall[],
+  unmappedStage?: { rowCount: number; rawValues: string[] }
 ): SampleDrawResult {
   const data: SampleMasterData = {
     rngSeed,
@@ -492,6 +545,12 @@ function successfulResult(
     portAllocations,
     stageAllocations,
     certScanShortfalls,
+    ...(unmappedStage
+      ? {
+          unmappedStageRowCount: unmappedStage.rowCount,
+          unmappedStageRawValues: unmappedStage.rawValues
+        }
+      : {}),
     drawnAt: new Date().toISOString(),
     drawnBy: username,
     // B5 (disk-bloat fix): `handleDrawSample` can run this draw on the
@@ -543,5 +602,6 @@ export function drawStageSample(
     certScanShortfalls.push(...draw.shortfalls);
   }
   return successfulResult(config.rngSeed, username, algorithmVersion, totalRequested,
-    allRows, Array.from(portAllocations.values()), stageAllocations, counters, certScanShortfalls);
+    allRows, Array.from(portAllocations.values()), stageAllocations, counters, certScanShortfalls,
+    { rowCount: plan.unmappedStageRowCount, rawValues: plan.unmappedStageRawValues });
 }

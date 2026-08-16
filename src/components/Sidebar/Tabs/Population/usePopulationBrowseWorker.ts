@@ -160,6 +160,15 @@ export function usePopulationBrowseWorker(): UsePopulationBrowseWorkerResult {
         return;
       }
 
+      if (response.type === "row") {
+        // Browse never posts "rowById" — that single-row lookup owns its own
+        // short-lived worker (see data/population/populationRowLookup.ts), so this
+        // reply cannot reach this handler. Handled explicitly all the same, because
+        // everything below narrows the union to "error" by elimination and would
+        // silently start treating a "row" reply as a failure if this were omitted.
+        return;
+      }
+
       const pending = pendingQueriesRef.current.get(response.requestId);
       if (pending) {
         pendingQueriesRef.current.delete(response.requestId);

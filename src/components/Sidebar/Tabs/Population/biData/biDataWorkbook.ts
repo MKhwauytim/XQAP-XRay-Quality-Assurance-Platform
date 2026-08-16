@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { yieldToMain } from "../../../../../data/storage/yieldToMain";
 import { normalizeBiRow } from "./biDataNormalizer";
 import { BI_COLUMN_ALIASES } from "./biDataColumns";
 import type {
@@ -97,7 +98,6 @@ function buildZeroXrayIdDiagnostic(
   };
 }
 
-const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 export async function processBiWorkbook(
   file: File,

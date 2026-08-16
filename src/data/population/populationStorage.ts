@@ -4,7 +4,9 @@ import {
   safeWriteJsonText,
   safeReadJson,
   readEnvelopeRevision,
-  readFileTextWithRetry,
+  readDecodedFileText,
+  copyFileBytes,
+  isCompressedFile,
   type SafeWriteProgressPhase,
 } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
@@ -238,10 +240,19 @@ async function archiveExistingRaw(
 ): Promise<string | null> {
   const liveName = `${base}.raw.json`;
   try {
-    const existing = await safeReadJson<MonthRawData>(rawDir, liveName);
-    if (!existing.ok) return null;
     const stamp = new Date().toISOString().replace(/:/g, "");
     const archiveName = `${base}.raw.${stamp}.superseded.json`;
+    // A compressed raw file is archived as a BYTE copy: it is already the
+    // original record, decoding its gzip member as text would not round-trip,
+    // and the copy costs a few MB instead of decompressing and re-serializing
+    // hundreds. The archive keeps the same self-describing format, so it reads
+    // back through the same dual-read path as any other file.
+    if (await isCompressedFile(rawDir, liveName)) {
+      await copyFileBytes(rawDir, liveName, rawDir, archiveName);
+      return archiveName;
+    }
+    const existing = await safeReadJson<MonthRawData>(rawDir, liveName);
+    if (!existing.ok) return null;
     // Preserve the prior file's exact bytes (including its own `supersedes`
     // chain) rather than re-wrapping — the archive is the original record.
     await safeWriteJsonText(rawDir, archiveName, existing.rawText);
@@ -693,7 +704,9 @@ export async function loadMonthPopulationFinal(
  * Deliberately does NOT reuse `safeReadJson` here: `safeReadJson` also returns
  * `rawText`, but it gets there by calling `unwrap(JSON.parse(...))` first -- i.e. it
  * already pays the exact main-thread parse cost this accessor exists to avoid. This
- * calls the lower-level `readFileTextWithRetry` (text-only, no parse) instead.
+ * calls the lower-level `readDecodedFileText` (text-only, no parse) instead — which
+ * also transparently decompresses a compressed file, handing the worker the body
+ * text rather than gzip bytes.
  *
  * Returns null when the file doesn't exist yet (e.g. an unprocessed/pending month),
  * matching `loadMonthPopulationFinal`'s null-on-missing contract.
@@ -724,7 +737,11 @@ export async function loadMonthPopulationFinalRawText(
       "population.final.json.tmp"
     ]) {
       try {
-        const text = await readFileTextWithRetry(processedDir, candidate);
+        // Dual read, not the raw one: a compressed file must be handed to the
+        // worker as its DECOMPRESSED body (which the worker's `unwrap` tolerates
+        // exactly like a legacy bare payload), while a plain file is still
+        // passed through verbatim with no parse on this thread.
+        const text = await readDecodedFileText(processedDir, candidate);
         // A zero-byte torn write (a live file caught mid-safeWriteJson) reads back
         // as "" rather than null -- treat it the same as a missing rung so the
         // ladder still falls through to .bak/.tmp instead of handing the worker an

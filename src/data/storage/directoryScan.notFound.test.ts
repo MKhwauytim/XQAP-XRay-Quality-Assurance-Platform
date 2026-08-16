@@ -63,9 +63,9 @@ describe("listDirectoryEntriesWithSize when an entry vanishes between listing an
 
     const sized = await listDirectoryEntriesWithSize(dir, ".answers.json");
 
-    expect(sized).toEqual([
-      { name: "a.answers.json", size: 2 },
-      { name: "z.answers.json", size: 3 },
+    expect(sized.map((entry) => [entry.name, entry.size])).toEqual([
+      ["a.answers.json", 2],
+      ["z.answers.json", 3],
     ]);
     clearSimulatedFaults(dir);
   });

@@ -185,7 +185,11 @@ test("a stray late event cannot resurrect a replaced row", () => {
   // Quota pass must skip the dropped assignment: emp2 was never legally
   // assigned anything, and emp1's count is unaffected by the stray events.
   expect(result.quotas?.emp2).toBeUndefined();
-  expect(result.quotas?.emp1?.sampleCount).toBe(2);
+  // CHANGED (P2): 1, not 2. emp1 was assigned both A1 and B2, but A1 is now
+  // `replaced` — dead work it no longer owns. sampleCount comes from the live
+  // entries the employee actually holds, so it matches totalAssigned (1) above
+  // instead of the raw assign-event count.
+  expect(result.quotas?.emp1?.sampleCount).toBe(1);
 
   // Illegal-event logging is aggregated: two dropped events, one ring-buffer entry.
   const deriveErrors = getRecentErrors().filter((e) => e.context === "distribution:derive");

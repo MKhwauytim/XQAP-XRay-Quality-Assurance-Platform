@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { createMemoryDirectory, getReadLog } from "../storage/memoryDirectory";
 import {
+  DISTRIBUTION_CHECKPOINT_FILE,
+  __clearDeriveMemoForTests,
   appendDistributionEvent,
   appendDistributionEvents,
   loadDistributionLog,
@@ -8,7 +10,13 @@ import {
   loadOrDeriveDistributionCurrentForRead,
   saveDistributionCurrent,
 } from "./distributionStorage";
-import { DERIVE_VERSION, buildAssignEvent, buildCompletedEvent, deriveCurrentDistribution } from "./distributionLog";
+import {
+  DERIVE_VERSION,
+  buildAssignEvent,
+  buildCompletedEvent,
+  buildReassignEvent,
+  deriveCurrentDistribution,
+} from "./distributionLog";
 import {
   appendDistributionEventSegment,
   distributionEventSetId,
@@ -19,6 +27,7 @@ import type { DistributionCurrentData } from "./distributionTypes";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { getSampleMainDir } from "../workspace/workspacePaths";
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 
 function makeRow(id: string): PreparedPopulationRow {
   return {
@@ -134,7 +143,7 @@ describe("distributionStorage", () => {
     expect(results.map((r) => r.ok)).toEqual([true, true]);
     const log = await loadDistributionLog(root, month);
     expect(log.events.map((event) => event.eventId).sort()).toEqual([first.eventId, second.eventId].sort());
-    expect(log.eventSetId).toMatch(/^2:/);
+    expect(log.eventSetId).toMatch(/^d1:2:/);
   });
 
   it("returns a log whose eventSetId reflects the just-appended events, not the pre-append state (finding 3)", async () => {
@@ -148,7 +157,8 @@ describe("distributionStorage", () => {
     // Freshly appended into a log that started empty -- must NOT still read
     // as the pre-append (empty) eventSetId.
     expect(firstResult.log.eventSetId).toBe(distributionEventSetId(firstResult.log.events));
-    expect(firstResult.log.eventSetId).toMatch(/^1:/);
+    // v85 digest shape: `d1:{count}:{xor}:{sum}`.
+    expect(firstResult.log.eventSetId).toMatch(/^d1:1:/);
 
     const second = buildAssignEvent({ xrayImageId: "img-201", assignedTo: "bob", eventBy: "admin" });
     const secondResult = await appendDistributionEvent(root, month, second);
@@ -156,7 +166,7 @@ describe("distributionStorage", () => {
     if (!secondResult.ok) return;
     // Must reflect BOTH events, not just the pre-append single-event state.
     expect(secondResult.log.eventSetId).toBe(distributionEventSetId(secondResult.log.events));
-    expect(secondResult.log.eventSetId).toMatch(/^2:/);
+    expect(secondResult.log.eventSetId).toMatch(/^d1:2:/);
   });
 
   it("ignores a cached snapshot without deriveVersion and re-derives", async () => {
@@ -542,4 +552,59 @@ describe("fold-checkpoint persistence (perf: O(new events) instead of O(all even
     expect(second?.totalPending).toBe(groundTruth.totalPending);
     expect(second?.entries.find((e) => e.xrayImageId === "A1")?.status).toBe("completed");
   });
+
+  it("cannot survive a DERIVE_VERSION bump: a v2-stamped cache AND its checkpoint both refold", async () => {
+    // Guards the v3 bump (P2 quota-from-entries + P5 unknown-event drop). Both
+    // change persisted derived output, so no v2 artifact may be reused: not the
+    // cache, and not the checkpoint sidecar that would let the fast path patch
+    // a v2 result forward forever without ever revisiting it.
+    const root = await makeRoot();
+    const month = "5-May-2026";
+    const rows = [makeRow("A1"), makeRow("B2"), makeRow("C3")];
+    __clearDeriveMemoForTests();
+    await appendDistributionEvents(root, month, [
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: "alice", eventBy: "admin" }),
+      buildAssignEvent({ xrayImageId: "B2", assignedTo: "alice", eventBy: "admin" }),
+      buildAssignEvent({ xrayImageId: "C3", assignedTo: "bob", eventBy: "admin" }),
+      buildReassignEvent({
+        xrayImageId: "B2",
+        assignedTo: "alice",
+        reassignedTo: "bob",
+        eventBy: "admin",
+      }),
+    ]);
+
+    // A real derive, which also writes the cache and the checkpoint sidecar
+    // (awaited, so both files are on disk before they are tampered with).
+    const fresh = await loadOrDeriveDistributionCurrent(root, month, rows, {
+      awaitCachePersist: true,
+    });
+    expect(fresh?.deriveVersion).toBe(DERIVE_VERSION);
+    expect(fresh?.quotas?.alice?.sampleCount).toBe(1);
+    expect(fresh?.quotas?.bob?.sampleCount).toBe(2);
+
+    // Rewrite both artifacts as a v2 client would have left them: same
+    // revision/eventSetId (so only the version check can reject them) and the
+    // old, assign-event-counted quotas.
+    const dir = await getSampleMainDir(root, month, true);
+    const cache = ((await safeReadJson<DistributionCurrentData>(dir, "distribution.current.json")) as { value: DistributionCurrentData }).value;
+    await safeWriteJson(dir, "distribution.current.json", {
+      ...cache,
+      deriveVersion: 2,
+      quotas: {
+        alice: { ...cache.quotas!.alice, sampleCount: 2, dailyQuota: 2 },
+        bob: { ...cache.quotas!.bob, sampleCount: 1, dailyQuota: 1 },
+      },
+    });
+    const sidecar = ((await safeReadJson<Record<string, unknown>>(dir, DISTRIBUTION_CHECKPOINT_FILE)) as { value: Record<string, unknown> }).value;
+    await safeWriteJson(dir, DISTRIBUTION_CHECKPOINT_FILE, { ...sidecar, deriveVersion: 2 });
+    __clearDeriveMemoForTests();
+
+    const reloaded = await loadOrDeriveDistributionCurrent(root, month, rows);
+    expect(reloaded?.deriveVersion).toBe(DERIVE_VERSION);
+    // Refolded from the events, not patched forward from the v2 numbers.
+    expect(reloaded?.quotas?.alice?.sampleCount).toBe(1);
+    expect(reloaded?.quotas?.bob?.sampleCount).toBe(2);
+  });
 });
+

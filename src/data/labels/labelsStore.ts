@@ -73,6 +73,7 @@ export const DEFAULT_LABELS = {
   dt_clear_filters:          "مسح التصفية",
   dt_export_xlsx:            "تصدير XLSX",
   dt_exporting:              "جارٍ التصدير...",
+  msg_export_not_permitted:  "لا تملك صلاحية تصدير التقارير.",
   dt_columns_button:         "الأعمدة",
   dt_columns_title:          "الأعمدة",
   dt_columns_hint:           "اسحب للترتيب · انقر لإخفاء/إظهار",
@@ -220,7 +221,8 @@ export const DEFAULT_LABELS = {
   archive_reopen_reason_placeholder: "سبب إعادة الفتح (إلزامي)",
   msg_month_closed_write_blocked:   "هذا الشهر مُقفل — لا يمكن حفظ أي تعديل. تواصل مع مدير النظام لإعادة فتحه.",
   msg_month_closed_banner:          "هذا الشهر مُقفل. البيانات للعرض فقط.",
-  msg_month_closed_note_auto_lock:  "— أُقفل تلقائياً بعد اكتمال توزيع العينة.",
+  msg_month_closed_note_auto_lock:  "— أُقفل تلقائياً بعد اكتمال دراسة كل عناصر العينة.",
+  msg_month_auto_lock_reason:       "إقفال تلقائي بعد اكتمال دراسة كل عناصر العينة.",
   msg_month_closed_note_closed_by:  "— أُقفل بواسطة {user}.",
   archive_reopen_month_in_progress: "جاري إعادة الفتح...",
 
@@ -741,6 +743,14 @@ export const DEFAULT_LABELS = {
   sampling_certscan_shortfall_result_intro:   "الأعداد التالية أقل من المطلوب لأن عدد سجلات CertScan المتاحة كان غير كافٍ. لم يتم سحب سجلات عادية بدلاً منها للحفاظ على دقة تكوين العينة.",
   sampling_certscan_shortfall_result_row_port:  "{stage} — ميناء {port}: المطلوب {requested}، المسحوب فعلياً {actual}، المتاح {available}.",
   sampling_certscan_shortfall_result_row_stage: "{stage} (على مستوى المرحلة كاملة): المطلوب {requested}، المسحوب فعلياً {actual}، المتاح {available}.",
+
+  // Unmapped-stage exclusion warning (P4, 2026-08): rows whose raw "stage" value
+  // matched none of the four configured stage aliases are excluded from the draw
+  // entirely. This makes that exclusion visible on the post-draw success path
+  // instead of silently vanishing with no trace.
+  sampling_unmapped_stage_warning_title: "تنبيه: تم استبعاد سجلات من السحب بسبب عدم تطابق قيمة \"المستوى\"",
+  sampling_unmapped_stage_warning_intro: "تم استبعاد {count} سجل من مجتمع البيانات من عملية السحب لأن قيمة عمود \"المستوى\" فيها لم تُطابق أياً من المستويات الأربعة المُهيأة في إعداد \"تعيين المستويات\" (Stage Mapping). هذه السجلات لم تُدخل في السحب الإحصائي إطلاقاً.",
+  sampling_unmapped_stage_warning_values_label: "أمثلة على القيم غير المتطابقة:",
 
   // Ad-hoc import tab (owner requirement, 2026-08) — a separate admin-only page for
   // uploading a one-off Excel file (not the regular monthly Population pipeline) and

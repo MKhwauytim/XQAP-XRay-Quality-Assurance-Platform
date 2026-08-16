@@ -342,10 +342,12 @@ describe("listDirectoryEntriesWithSize (A7, F21's sized-listing helper)", () => 
 
     const sized = await listDirectoryEntriesWithSize(dir, ".answers.json");
 
-    expect(sized).toEqual([
-      { name: "a.answers.json", size: 2 },
-      { name: "b.answers.json", size: 10 },
+    expect(sized.map((entry) => [entry.name, entry.size])).toEqual([
+      ["a.answers.json", 2],
+      ["b.answers.json", 10],
     ]);
+    // mtime rides along free with the getFile() the size already costs.
+    expect(sized.every((entry) => typeof entry.lastModified === "number")).toBe(true);
   });
 
   it("detects a request appended into an EXISTING file via a larger size -- the case a name-only diff misses (F21)", async () => {
@@ -353,7 +355,9 @@ describe("listDirectoryEntriesWithSize (A7, F21's sized-listing helper)", () => 
     await writeRawFile(dir, "alice.answers.json", "short");
 
     const before = await listDirectoryEntriesWithSize(dir, ".answers.json");
-    expect(before).toEqual([{ name: "alice.answers.json", size: "short".length }]);
+    expect(before.map((entry) => [entry.name, entry.size])).toEqual([
+      ["alice.answers.json", "short".length],
+    ]);
 
     // Same file NAME, more content appended -- a name-diff (listDirectoryEntries)
     // would report this tick as "nothing new".
@@ -383,5 +387,106 @@ describe("listDirectoryEntriesWithSize (A7, F21's sized-listing helper)", () => 
     // one call per matched file, and the unmatched file is never touched.
     expect(getReadLog(root)).toHaveLength(2);
     expect(getReadLog(root).every((path) => path.endsWith(".answers.json"))).toBe(true);
+  });
+});
+
+describe("listDirectoryEntriesWithSize — same-length edits and concurrency", () => {
+  it("reports a SAME-LENGTH rewrite as a different entry — the case a size-only signature misses", async () => {
+    const dir = createMemoryDirectory();
+    // Stand-in for the real shape: an envelope whose `revision` goes 9 -> 10
+    // (and whose contentHash/writtenAt move) without the file changing length.
+    await writeRawFile(dir, "alice.answers.json", '{"revision":09,"v":"aaa"}');
+    const before = await listDirectoryEntriesWithSize(dir, ".answers.json");
+
+    await writeRawFile(dir, "alice.answers.json", '{"revision":10,"v":"bbb"}');
+    const after = await listDirectoryEntriesWithSize(dir, ".answers.json");
+
+    expect(after[0]!.size).toBe(before[0]!.size); // byte length genuinely unchanged
+    expect(JSON.stringify(after)).not.toBe(JSON.stringify(before));
+  });
+
+  it("reports an untouched file identically across two listings (no spurious change)", async () => {
+    const dir = createMemoryDirectory();
+    await writeRawFile(dir, "alice.answers.json", "unchanged");
+
+    const first = await listDirectoryEntriesWithSize(dir, ".answers.json");
+    const second = await listDirectoryEntriesWithSize(dir, ".answers.json");
+
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+  });
+
+  it("issues the per-file opens CONCURRENTLY, not one round trip after another", async () => {
+    const dir = createMemoryDirectory();
+    const fileCount = DIRECTORY_READ_CONCURRENCY * 2;
+    for (let index = 0; index < fileCount; index += 1) {
+      await writeRawFile(dir, `f${index}.answers.json`, "x");
+    }
+
+    // Wrap every enumerated handle's getFile so the listing can observe how
+    // many opens are in flight at once. A serial loop can never exceed 1.
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const values = (dir as unknown as { values: () => AsyncIterable<FileHandleLike> }).values.bind(dir);
+    (dir as unknown as { values: () => AsyncIterable<unknown> }).values = async function* () {
+      for await (const entry of values()) {
+        if (entry.kind !== "file") {
+          yield entry;
+          continue;
+        }
+        const getFile = entry.getFile.bind(entry);
+        yield {
+          ...entry,
+          getFile: async () => {
+            inFlight += 1;
+            maxInFlight = Math.max(maxInFlight, inFlight);
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            inFlight -= 1;
+            return getFile();
+          },
+        };
+      }
+    };
+
+    const sized = await listDirectoryEntriesWithSize(dir, ".answers.json");
+
+    expect(sized).toHaveLength(fileCount);
+    expect(maxInFlight).toBeGreaterThan(1);
+    // Bounded, not unbounded: a 500-employee workspace must not open 500
+    // handles against the share at once.
+    expect(maxInFlight).toBeLessThanOrEqual(DIRECTORY_READ_CONCURRENCY);
+  });
+
+  it("keeps listing order regardless of which concurrent open settles first", async () => {
+    const dir = createMemoryDirectory();
+    await writeRawFile(dir, "c.answers.json", "c");
+    await writeRawFile(dir, "a.answers.json", "a");
+    await writeRawFile(dir, "b.answers.json", "b");
+
+    // Settle in reverse-alphabetical order: `a` waits longest.
+    const values = (dir as unknown as { values: () => AsyncIterable<FileHandleLike> }).values.bind(dir);
+    (dir as unknown as { values: () => AsyncIterable<unknown> }).values = async function* () {
+      for await (const entry of values()) {
+        if (entry.kind !== "file") {
+          yield entry;
+          continue;
+        }
+        const getFile = entry.getFile.bind(entry);
+        const delay = entry.name.startsWith("a") ? 8 : entry.name.startsWith("b") ? 4 : 0;
+        yield {
+          ...entry,
+          getFile: async () => {
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            return getFile();
+          },
+        };
+      }
+    };
+
+    const sized = await listDirectoryEntriesWithSize(dir, ".answers.json");
+    expect(sized.map((entry) => entry.name)).toEqual([
+      "a.answers.json",
+      "b.answers.json",
+      "c.answers.json",
+    ]);
   });
 });

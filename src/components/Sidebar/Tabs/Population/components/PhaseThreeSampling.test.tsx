@@ -16,12 +16,15 @@ import PhaseThreeSampling from "./PhaseThreeSampling";
 import type { PopulationConfig, StageSamplingRule } from "../../../../../data/population/populationConfig";
 import { DEFAULT_POPULATION_CONFIG } from "../../../../../data/population/populationConfig";
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
+import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
 
-// PhaseThreeSampling reads usePermissions() locally only for "unlock-sampling-stage" (the
-// admin unlock toggle, out of this bucket's scope) — grant it so the lock-toggle button
-// doesn't alert() during unrelated assertions.
+// PhaseThreeSampling reads usePermissions() locally for "unlock-sampling-stage" (the admin
+// unlock toggle). Mutable so the lock-toggle describe block below can flip canUnlock per
+// test; defaults to granted so pre-existing tests (which never touch the toggle) keep their
+// original assumptions.
+const permissionsMock = vi.hoisted(() => ({ state: { canUnlock: true } }));
 vi.mock("../../../../../auth/usePermissions", () => ({
-  usePermissions: () => ({ canMutate: () => true }),
+  usePermissions: () => ({ canMutate: (featureId: string) => featureId !== "unlock-sampling-stage" || permissionsMock.state.canUnlock }),
 }));
 
 function makeRow(xrayImageId: string, stage: string): PreparedPopulationRow {
@@ -102,7 +105,10 @@ function baseProps(overrides: Partial<Props> = {}): Props {
   };
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  permissionsMock.state.canUnlock = true;
+});
 
 describe("PhaseThreeSampling — CertScan quota fields lock+permission (B13 task 2)", () => {
   it("happy: unlocked stage with configure-sample permission leaves the CertScan fields editable", () => {
@@ -117,10 +123,16 @@ describe("PhaseThreeSampling — CertScan quota fields lock+permission (B13 task
     render(<PhaseThreeSampling {...baseProps({ config: configWithRule(makeRule({ isLocked: false })), canConfigureSample: false })} />);
     const certScanValue = screen.getByLabelText("القيمة") as HTMLInputElement;
     expect(certScanValue).toBeDisabled();
-    // The sibling "القيمة المطلوبة" field is lock-only (out of this bucket's scope) and
-    // stays enabled here — demonstrating the fix is scoped to the CertScan fields only.
+    // Cluster A fix: the sibling "القيمة المطلوبة" / "طريقة السحب" fields previously
+    // ignored canConfigureSample entirely (lock-only gating) even though this component's
+    // own doc comment already promised "gates the stage-rule and CertScan-quota fields" --
+    // a role with view-but-not-edit population access saw them rendered enabled while
+    // handleConfigChange (index.tsx) silently rejected the edit. Now gated the same as the
+    // CertScan fields.
     const siblingValue = screen.getByLabelText("القيمة المطلوبة") as HTMLInputElement;
-    expect(siblingValue).not.toBeDisabled();
+    expect(siblingValue).toBeDisabled();
+    const siblingMethod = screen.getByLabelText("طريقة السحب") as HTMLSelectElement;
+    expect(siblingMethod).toBeDisabled();
   });
 
   it("failure: a locked stage disables the CertScan fields regardless of permission (matches sibling fields' lock gating)", () => {
@@ -138,6 +150,34 @@ describe("PhaseThreeSampling — CertScan quota fields lock+permission (B13 task
     const messageEl = screen.getByText("لا تملك صلاحية تعديل إعدادات المعالجة أو العينة.");
     expect(messageEl).toBeInTheDocument();
     expect(messageEl.getAttribute("role")).toBe("status");
+  });
+});
+
+// Cluster A (filed twice: as a permission finding "renders enabled" and as a UX finding
+// "uses alert()") -- the lock-toggle button previously always rendered enabled regardless
+// of canUnlock and only rejected via a blocking native alert() on click.
+describe("PhaseThreeSampling — lock-toggle render-time permission gate, no alert() (cluster A)", () => {
+  it("renders the lock-toggle disabled when the role cannot unlock sampling stages", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    permissionsMock.state.canUnlock = false;
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+    render(<PhaseThreeSampling {...baseProps({ config: configWithRule(makeRule({ isLocked: true })) })} />);
+
+    const lockButton = screen.getByRole("button", { name: /مغلق/ });
+    expect(lockButton).toBeDisabled();
+    expect(lockButton).toHaveAttribute("title", "لا تملك صلاحية إلغاء قفل مراحل العينة.");
+
+    fireEvent.click(lockButton);
+    expect(alertSpy).not.toHaveBeenCalled();
+    alertSpy.mockRestore();
+  });
+
+  it("renders the lock-toggle enabled and toggleable when the role can unlock sampling stages", () => {
+    permissionsMock.state.canUnlock = true;
+    render(<PhaseThreeSampling {...baseProps({ config: configWithRule(makeRule({ isLocked: true })) })} />);
+
+    const lockButton = screen.getByRole("button", { name: /مغلق/ });
+    expect(lockButton).not.toBeDisabled();
   });
 });
 
@@ -245,5 +285,56 @@ describe("PhaseThreeSampling — running total shown before the draw (B task 1)"
 
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByText((_, node) => node?.textContent === "إجمالي العينة المتوقع (كل المستويات): 60")).toBeInTheDocument();
+  });
+});
+
+describe("PhaseThreeSampling — unmapped-stage exclusion warning (P4)", () => {
+  function baseResult(overrides: Partial<SampleMasterData> = {}): SampleMasterData {
+    return {
+      rngSeed: "seed",
+      samplingAlgorithmVersion: "1.1",
+      totalRequested: 5,
+      totalActual: 5,
+      certScanRequested: 0,
+      nonCertScanRequested: 5,
+      certScanActual: 0,
+      nonCertScanActual: 5,
+      portAllocations: [],
+      stageAllocations: [],
+      certScanShortfalls: [],
+      drawnAt: new Date().toISOString(),
+      drawnBy: "tester",
+      rows: [],
+      ...overrides,
+    };
+  }
+
+  it("shows the warning with the exclusion count and sample raw values when rows were excluded", () => {
+    render(
+      <PhaseThreeSampling
+        {...baseProps({
+          sampleDrawResult: baseResult({
+            unmappedStageRowCount: 3,
+            unmappedStageRawValues: ["SOME_BAD_VALUE", "ANOTHER_BAD_VALUE"],
+          }),
+        })}
+      />
+    );
+    const alerts = screen.getAllByRole("alert");
+    const warning = alerts.find((el) => el.textContent?.includes("تم استبعاد"));
+    expect(warning).toBeDefined();
+    expect(warning?.textContent).toContain("3");
+    expect(warning?.textContent).toContain("SOME_BAD_VALUE");
+    expect(warning?.textContent).toContain("ANOTHER_BAD_VALUE");
+  });
+
+  it("shows nothing when unmappedStageRowCount is 0", () => {
+    render(<PhaseThreeSampling {...baseProps({ sampleDrawResult: baseResult({ unmappedStageRowCount: 0 }) })} />);
+    expect(screen.queryByText((_, node) => node?.textContent?.includes("تم استبعاد") ?? false)).not.toBeInTheDocument();
+  });
+
+  it("shows nothing when unmappedStageRowCount is absent (legacy draw / legacy sample master)", () => {
+    render(<PhaseThreeSampling {...baseProps({ sampleDrawResult: baseResult() })} />);
+    expect(screen.queryByText((_, node) => node?.textContent?.includes("تم استبعاد") ?? false)).not.toBeInTheDocument();
   });
 });

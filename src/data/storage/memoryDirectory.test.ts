@@ -165,3 +165,66 @@ test("getReadLog/clearReadLog are no-ops on a handle that isn't a memory directo
   expect(getReadLog({} as never)).toEqual([]);
   expect(() => clearReadLog({} as never)).not.toThrow();
 });
+
+/**
+ * Byte fidelity. The double used to hold file content as a JS string, which
+ * cannot represent a gzip member at all — a compressed fixture would have been
+ * silently mangled by the UTF-8 round trip, so no test of the compressed storage
+ * path could have been trusted. These pin the byte behaviour the string version
+ * could not offer, alongside the text behaviour every other test still relies on.
+ */
+test("round-trips arbitrary bytes, including sequences that are not valid UTF-8", async () => {
+  const dir = createMemoryDirectory();
+  const bytes = new Uint8Array([0x1f, 0x8b, 0x08, 0x00, 0xff, 0xfe, 0x00, 0x80, 0xc0, 0x41]);
+
+  const handle = await dir.getFileHandle("body.gz", { create: true });
+  const writable = await handle.createWritable!();
+  await (writable as unknown as { write: (d: Uint8Array) => Promise<void> }).write(bytes);
+  await writable.close();
+
+  const file = await handle.getFile();
+  expect(file.size).toBe(bytes.byteLength);
+  expect(new Uint8Array(await file.arrayBuffer())).toEqual(bytes);
+});
+
+test("mixes text and byte writes in one stream, concatenating them exactly", async () => {
+  const dir = createMemoryDirectory();
+  const handle = await dir.getFileHandle("mixed.bin", { create: true });
+  const writable = await handle.createWritable!();
+  const wide = writable as unknown as { write: (d: string | Uint8Array) => Promise<void> };
+  await wide.write('{"format":"x"}\n');
+  await wide.write(new Uint8Array([0x1f, 0x8b, 0x08]));
+  await writable.close();
+
+  const file = await handle.getFile();
+  const actual = new Uint8Array(await file.arrayBuffer());
+  expect(Array.from(actual.subarray(0, 15))).toEqual(
+    Array.from(new TextEncoder().encode('{"format":"x"}\n'))
+  );
+  expect(Array.from(actual.subarray(15))).toEqual([0x1f, 0x8b, 0x08]);
+});
+
+test("text written as a string still decodes through file.text(), Arabic included", async () => {
+  const dir = createMemoryDirectory();
+  const handle = await dir.getFileHandle("ar.json", { create: true });
+  const writable = await handle.createWritable!();
+  await writable.write('{"note":"مراجعة الأشعة"}');
+  await writable.close();
+
+  expect(await (await handle.getFile()).text()).toBe('{"note":"مراجعة الأشعة"}');
+});
+
+test("a byte slice of a file with multi-byte characters is exact", async () => {
+  const dir = createMemoryDirectory();
+  const handle = await dir.getFileHandle("ar.json", { create: true });
+  const writable = await handle.createWritable!();
+  await writable.write("مراجعة");
+  await writable.close();
+
+  const file = await handle.getFile();
+  // 6 Arabic characters, 2 bytes each — a byte-addressed slice must see 12.
+  expect(file.size).toBe(12);
+  expect(new Uint8Array(await file.slice(0, 2).arrayBuffer())).toEqual(
+    new TextEncoder().encode("م")
+  );
+});

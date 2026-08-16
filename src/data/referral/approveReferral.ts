@@ -248,6 +248,16 @@ export async function approveReplacement(params: {
   if (!alreadyApplied) {
     // Resolve the replacement row from the population (reference, not copy);
     // legacy requests fall back to the stored row data.
+    //
+    // This one is DELIBERATELY still a main-thread read, unlike the employee-facing
+    // replacement confirm, which now resolves the row through the query worker
+    // (findPopulationRowById, item 1.12). Routing this call through a worker too
+    // would push Vite's `?worker&inline` import into the data layer's dependency
+    // graph, forcing a worker mock into every suite that merely imports this module
+    // — a lot of test churn for a supervisor-only approval path that is far colder
+    // than the employee's confirm click. The read disappears entirely once
+    // sample.master stores row stubs and the replacement index can answer this
+    // directly; until then it stays as-is on purpose.
     let replacementRow: PreparedPopulationRow | null = null;
     try {
       const population = await loadMonthPopulationFinal(directoryHandle, fresh.monthFolderName);
@@ -284,6 +294,27 @@ export async function approveReplacement(params: {
     );
     if (!deadEntry) {
       return { ok: false, code: "stale-ownership", staleIds: [fresh.originalXrayImageId] };
+    }
+
+    // 3b. Ownership check on the REPLACEMENT row. Requests are independent
+    // records: two employees can each file one naming the same spare row, and
+    // nothing before this point noticed. Approving the second one appends that
+    // row to the sample again and emits a fresh `assigned` event for it — and
+    // the fold's `assigned` handler overwrites `assignedTo` unconditionally, so
+    // the row silently changes hands with no `reassigned` event and no
+    // notification. This mirrors the guard the employee-immediate replacement
+    // path in XrayReferrals.handleReplace already applies before committing.
+    //
+    // Sample membership counts as taken on its own, exactly as that path treats
+    // it: a drawn row is already accounted for in the month's allocations, so
+    // re-drawing it as a replacement double-counts it whether or not anyone
+    // currently owns it.
+    const replacementTaken =
+      sample.rows.some((row) => row.xrayImageId === fresh.replacementXrayImageId) ||
+      (current?.entries.some((entry) => entry.xrayImageId === fresh.replacementXrayImageId) ??
+        false);
+    if (replacementTaken) {
+      return { ok: false, code: "stale-ownership", staleIds: [fresh.replacementXrayImageId] };
     }
 
     // Stage aliases the month was drawn under — without them appendSampleRow

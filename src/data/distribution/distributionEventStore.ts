@@ -1,5 +1,6 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { createSimpleHasher } from "../storage/jsonEnvelope";
 import { listDirectoryEntries, readJsonDirectory, readSegmentTails } from "../storage/directoryScan";
 import { withResourceLock } from "../storage/webLocks";
 import {
@@ -652,19 +653,92 @@ export async function loadImmutableDistributionEvents(
 }
 
 /**
+ * Prefix of the commutative event-set digest below. Present so a digest can
+ * never be confused with the pre-v85 format, which was the literal
+ * length-prefixed CONCATENATION of every event id (`"{count}:{len}:{id}…"`).
+ * An old id and a new digest are therefore never `===`, which is exactly the
+ * behaviour a cache validity check wants across the format change: it reads as
+ * "stale", costs one full refold, and self-heals.
+ */
+const EVENT_SET_DIGEST_PREFIX = "d1";
+
+function hashEventId(id: string): number {
+  const hasher = createSimpleHasher();
+  hasher.update(id);
+  return Number.parseInt(hasher.digest(), 16) >>> 0;
+}
+
+/**
  * Same identity as distributionEventSetId, computed directly from ids so a
  * checkpoint holding `knownEventIds` (already-folded ids, small in-memory
  * array manipulation) can extend it without re-reading every event file.
+ *
+ * COMMUTATIVE DIGEST, not a concatenation. The previous format spelled out
+ * every id in full: ~43 bytes per event, i.e. ~350 KB on a large month, stored
+ * TWICE (in `distribution.log.json` and in `distribution.current.json`) and
+ * re-read and re-written on essentially every load and every append. On the
+ * UNC/SMB share this app is deployed to, that string cost more than the fold it
+ * was guarding. It is now a fixed ~24-byte digest: each id is hashed on its own
+ * with the codebase's existing {@link createSimpleHasher} (djb2 variant — no
+ * new dependency), and the per-id hashes are combined with two commutative
+ * operations, XOR and 32-bit modular addition, plus the element COUNT.
+ *
+ * Commutative on purpose: this is a SET identity, not a sequence identity. Two
+ * clients that discovered the same events in different orders (a segment tail
+ * read vs. a cold full read) must agree, and the caller-side `sort()` the old
+ * format needed to get that agreement is now unnecessary.
+ *
+ * The count is what stops the cheap cancellation attack on XOR alone (a set and
+ * that same set plus a pair of equal-hash ids collide under XOR but not under
+ * count, and the additive term differs as well). This is a non-cryptographic
+ * digest, so a collision is no longer impossible the way an exact concatenation
+ * made it: a collision means a rebuildable CACHE (`distribution.current.json`)
+ * is trusted when its event set has changed. Every mutation also bumps the
+ * compat-log `revision`, which is compared alongside this value at the one call
+ * site that gates the cache (`loadOrDeriveDistributionCurrent`), so a stale
+ * cache needs BOTH a revision match and a digest collision to be accepted.
  */
 export function distributionEventSetIdFromIds(ids: Iterable<string>): string {
-  const sorted = [...new Set(ids)].sort();
-  // Exact length-prefixed identity, not a short non-cryptographic hash: cache
-  // correctness must not depend on accepting a collision probability.
-  return `${sorted.length}:${sorted.map((id) => `${id.length}:${id}`).join("")}`;
+  const seen = new Set<string>();
+  let xor = 0;
+  let sum = 0;
+  for (const id of ids) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const hash = hashEventId(id);
+    xor ^= hash;
+    sum = (sum + hash) >>> 0;
+  }
+  return `${EVENT_SET_DIGEST_PREFIX}:${seen.size}:${(xor >>> 0).toString(16)}:${sum.toString(16)}`;
 }
 
 export function distributionEventSetId(events: DistributionEvent[]): string {
   return distributionEventSetIdFromIds(events.map((event) => event.eventId));
+}
+
+/**
+ * The fold's canonical event order: ascending `eventAt`, ties left in the order
+ * they were supplied.
+ *
+ * Ties are the whole point. A bulk distribution builds its entire batch with
+ * ONE shared timestamp (see buildAssignEvent's `eventAt` override), so hundreds
+ * of events can share an `eventAt` and no timestamp comparison can order them.
+ * Until v85 the tie was broken by `eventId` here, and the resulting scramble was
+ * invisible because `distribution.log.json` carried a full copy of every event
+ * and its stored array order won: the batch's own order survived through that
+ * projection. With the projection now body-less (item 2.6), this ordering is the
+ * only one left — so it must reproduce what the projection used to give, or the
+ * default order of an employee's queue silently becomes "sorted by random
+ * UUID".
+ *
+ * `Array#sort` is specified as stable, and every input this is handed is
+ * already in a deterministic order: legacy per-event files and segment files
+ * are both name-sorted by `directoryScan`, and lines within a segment are in
+ * append order. So ties resolve to append order — the real causal order — and
+ * two clients reading the same directory still agree.
+ */
+export function sortDistributionEventsForFold<T extends DistributionEvent>(events: T[]): T[] {
+  return events.sort((a, b) => a.eventAt.localeCompare(b.eventAt));
 }
 
 export function mergeDistributionEvents(
@@ -693,12 +767,12 @@ export function mergeDistributionEvents(
   // concurrent/new immutable writes and get a deterministic timestamp/id order.
   const compatibilityIds = new Set(compatibilityEvents.map((event) => event.eventId));
   const additionIds = new Set<string>();
-  const additions = immutableEvents
-    .filter((event) => {
+  const additions = sortDistributionEventsForFold(
+    immutableEvents.filter((event) => {
       if (compatibilityIds.has(event.eventId) || additionIds.has(event.eventId)) return false;
       additionIds.add(event.eventId);
       return true;
     })
-    .sort((a, b) => a.eventAt.localeCompare(b.eventAt) || a.eventId.localeCompare(b.eventId));
+  );
   return [...orderedBase, ...additions];
 }

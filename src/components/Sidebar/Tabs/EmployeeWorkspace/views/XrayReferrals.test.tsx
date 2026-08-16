@@ -10,8 +10,24 @@
 // the real component against a memory workspace and assert the control is simply
 // absent, not merely "would fail if clicked".
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// The replacement-confirm path resolves the chosen candidate's full population row
+// through the query worker instead of parsing population.final.json on the main
+// thread (item 1.12), so this suite has to stand a worker up. Same WORKER BOUNDARY
+// limitation the Browse suites document: Vitest cannot run a real DedicatedWorker.
+// The shared stub is used rather than a bespoke fake because it runs the REAL
+// `handleWorkerMessage` on a macrotask, one message per tick — so the "load" then
+// "rowById" pair this path posts is exercised for behavior AND ordering, not just
+// stubbed out to a canned row.
+vi.mock("../../../../../workers/populationQueryWorker?worker&inline", async () => {
+  const { createPopulationQueryWorkerStubClass } = await import(
+    "../../Population/populationQueryWorkerTestStub"
+  );
+  return { default: createPopulationQueryWorkerStubClass() };
+});
+
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
-import { createMemoryDirectory } from "../../../../../data/storage/memoryDirectory";
+import { clearReadLog, createMemoryDirectory, getReadLog } from "../../../../../data/storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../../../../../data/storage/fileSystemAccess";
 import { clearSession, writeSession } from "../../../../../auth/authSession";
 import {
@@ -23,8 +39,8 @@ import { saveSampleMaster } from "../../../../../data/sampling/sampleStorage";
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
 import { safeWriteJson } from "../../../../../data/storage/safeWrite";
 import { getPopulationMonthDir, POPULATION_SUBFOLDERS } from "../../../../../data/workspace/workspacePaths";
-import { appendDistributionEvents, loadDistributionLog } from "../../../../../data/distribution/distributionStorage";
-import { buildAssignEvent, buildCompletedEvent, buildReassignEvent, buildReplacedEvent } from "../../../../../data/distribution/distributionLog";
+import { appendDistributionEvents, loadDistributionLog, saveDistributionCurrent } from "../../../../../data/distribution/distributionStorage";
+import { buildAssignEvent, buildCompletedEvent, buildReassignEvent, buildReplacedEvent, deriveCurrentDistribution } from "../../../../../data/distribution/distributionLog";
 import { closeMonth, invalidateMonthLockCache } from "../../../../../data/population/monthLock";
 import type { MonthManifestData } from "../../../../../data/population/monthTypes";
 import { upsertItemAnswer } from "../../../../../data/answers/answerStorage";
@@ -1440,5 +1456,171 @@ describe("XrayReferrals — ad-hoc import visibility (THE GAP fix)", () => {
     expect(screen.queryByText("تعذر تحميل البيانات.")).not.toBeInTheDocument();
     // The corrupt ad-hoc row itself is simply absent, not crashing the page.
     expect(screen.queryByText("ADHOC-adh-3-XR-1")).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * DESIGN B, STEP 3 — the employee read path is inverted onto the per-employee
+ * mirror.
+ *
+ * `2-samples/{month}/2-employees/{username}.samples.json` is a projection of
+ * the distribution log stamped with the `sourceLogRevision` it was derived
+ * from. When that stamp matches the log's own revision, the mirror IS the
+ * derivation for this employee, and loading `sample.master.json` (every drawn
+ * row for the whole month) plus the workspace-wide
+ * `distribution.current.json` on top of it is pure waste.
+ *
+ * What is pinned here:
+ *   1. the fast path really is the WHOLE read — neither of those two files is
+ *      opened at all;
+ *   2. a stale mirror still renders, then the real derivation lands on top;
+ *   3. a missing mirror falls back to the old path unchanged;
+ *   4. oversight (`canSeeAll`) is untouched — it never reads a mirror and
+ *      always reads the derived file.
+ */
+describe("XrayReferrals employee read path (Design B step 3)", () => {
+  /** Assign + persist the derived distribution, which is what writes the mirror. */
+  async function seedWithMirror(
+    root: DirectoryHandleLike,
+    username: string,
+    ids: string[]
+  ): Promise<void> {
+    await saveSampleMaster(root, MONTH, makeSample(ids.map(makeRow)));
+    const appended = await appendDistributionEvents(
+      root,
+      MONTH,
+      ids.map((id) => buildAssignEvent({ xrayImageId: id, assignedTo: username, eventBy: "admin" }))
+    );
+    if (!appended.ok) throw new Error(`seed failed: ${appended.error}`);
+    const log = await loadDistributionLog(root, MONTH);
+    await saveDistributionCurrent(root, MONTH, {
+      ...deriveCurrentDistribution(log, ids.map(makeRow)),
+      logRevision: log.revision,
+    });
+  }
+
+  it("reads ONLY the mirror when its revision matches the log — no sample.master, no distribution.current", async () => {
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root", { trackReads: true });
+    await seedWithMirror(root, "emp-1", ["IMG-1", "IMG-2"]);
+
+    clearReadLog(root);
+    render(<XrayReferrals directoryHandle={root} />);
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+    expect(screen.getAllByText("IMG-2").length).toBeGreaterThan(0);
+
+    const reads = getReadLog(root);
+    // The mirror was read...
+    expect(reads.some((p) => p.endsWith("emp-1.samples.json"))).toBe(true);
+    // ...and the two whole-month files were not. This is the entire point of
+    // the change; if either of these ever flips back, the inversion is gone
+    // even though every rendering assertion above would still pass.
+    expect(reads.filter((p) => p.endsWith("sample.master.json"))).toEqual([]);
+    expect(reads.filter((p) => p.endsWith("distribution.current.json"))).toEqual([]);
+  });
+
+  it("paints a STALE mirror immediately and then re-derives on top of it", async () => {
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedWithMirror(root, "emp-1", ["IMG-1"]);
+    // A second assignment lands WITHOUT refreshing the mirror (another machine
+    // appended the event; this client has not synced yet). The mirror is now
+    // one revision behind and knows nothing about IMG-2.
+    await saveSampleMaster(root, MONTH, makeSample([makeRow("IMG-1"), makeRow("IMG-2")]));
+    const appended = await appendDistributionEvents(root, MONTH, [
+      buildAssignEvent({ xrayImageId: "IMG-2", assignedTo: "emp-1", eventBy: "admin" }),
+    ]);
+    expect(appended.ok).toBe(true);
+
+    render(<XrayReferrals directoryHandle={root} />);
+
+    // The stale mirror's row renders...
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+    // ...and the background re-derivation brings in the row it did not know about.
+    await waitFor(() => expect(screen.getAllByText("IMG-2").length).toBeGreaterThan(0));
+    expect(screen.queryByText("تعذر تحميل البيانات.")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the workspace-wide derivation when no mirror exists at all", async () => {
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root", { trackReads: true });
+    // seedAssignedSample appends events but never persists the derived state,
+    // so no mirror is written — the pre-Design-B shape.
+    await seedAssignedSample(root, "emp-1", "IMG-1");
+
+    clearReadLog(root);
+    render(<XrayReferrals directoryHandle={root} />);
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+
+    expect(getReadLog(root).some((p) => p.endsWith("sample.master.json"))).toBe(true);
+  });
+
+  it("leaves oversight (canSeeAll) on the derived file — it never reads a mirror", async () => {
+    // Default supervisor permissions include view-all-entries.
+    writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root", { trackReads: true });
+    // A mirror DOES exist for sup-1 here, and is perfectly current — an
+    // oversight user must still ignore it, because N mirrors are N round trips
+    // for what one derived file already holds.
+    await seedWithMirror(root, "sup-1", ["IMG-1"]);
+
+    clearReadLog(root);
+    render(<XrayReferrals directoryHandle={root} />);
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+
+    const reads = getReadLog(root);
+    expect(reads.filter((p) => p.endsWith("sup-1.samples.json"))).toEqual([]);
+    expect(reads.some((p) => p.endsWith("sample.master.json"))).toBe(true);
+  });
+});
+
+/**
+ * The one thing the mirror genuinely cannot answer. The replacement dialog
+ * filters candidates against the whole month's drawn rows AND against every
+ * employee's current entries — an exclusion set built from this employee's own
+ * mirror would happily offer a row somebody else already owns. So the fast
+ * path clears `sampleMaster`, and the dialog pays for both on demand.
+ */
+describe("XrayReferrals replacement dialog after the mirror fast path", () => {
+  it("resolves the sample master and EVERY employee's entries on demand, not from the mirror", async () => {
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    // Two rows, two owners. emp-1's mirror knows only about IMG-1.
+    await saveSampleMaster(root, MONTH, makeSample([makeRow("IMG-1"), makeRow("IMG-2")]));
+    const appended = await appendDistributionEvents(root, MONTH, [
+      buildAssignEvent({ xrayImageId: "IMG-1", assignedTo: "emp-1", eventBy: "admin" }),
+      buildAssignEvent({ xrayImageId: "IMG-2", assignedTo: "emp-2", eventBy: "admin" }),
+    ]);
+    expect(appended.ok).toBe(true);
+    const log = await loadDistributionLog(root, MONTH);
+    await saveDistributionCurrent(root, MONTH, {
+      ...deriveCurrentDistribution(log, [makeRow("IMG-1"), makeRow("IMG-2")]),
+      logRevision: log.revision,
+    });
+
+    render(<XrayReferrals directoryHandle={root} />);
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+    // Fast path really was taken: emp-2's row is nowhere in this employee's view.
+    expect(screen.queryByText("IMG-2")).not.toBeInTheDocument();
+
+    fireEvent.click(await waitFor(() => screen.getByRole("button", { name: "استبدال العينة" })));
+
+    await waitFor(() => expect(getReplacementCandidatesIndexedMock).toHaveBeenCalled());
+    const [, , , sampleArg, entriesArg] = getReplacementCandidatesIndexedMock.mock.calls[0];
+    // The full drawn-row set, not the mirror's single row...
+    expect(sampleArg.rows.map((r) => r.xrayImageId).sort()).toEqual(["IMG-1", "IMG-2"]);
+    // ...and the exclusion set covers the OTHER employee's assignment too.
+    expect(entriesArg.map((e) => e.xrayImageId).sort()).toEqual(["IMG-1", "IMG-2"]);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });

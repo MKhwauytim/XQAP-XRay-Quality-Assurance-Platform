@@ -287,13 +287,24 @@ export default function PhaseThreeSampling({
                       <button
                         type="button"
                         className={`lock-toggle-btn${isAutoLocked ? " auto" : ""}`}
-                        title={isAutoLocked ? "مقفل تلقائياً — يتطلب صلاحية إلغاء القفل" : ""}
+                        // Render-time gate matching the handler check below: previously this
+                        // button always rendered enabled regardless of canUnlock and only
+                        // rejected via alert() on click (audit: cluster A, filed twice — once
+                        // as a permission finding, once as a raw-alert() UX finding). Both are
+                        // fixed together: disabled state now reflects canUnlock, and the denial
+                        // is explained via `title` like every other gated control in this file
+                        // instead of a blocking native alert().
+                        disabled={!canUnlock}
+                        title={
+                          !canUnlock
+                            ? "لا تملك صلاحية إلغاء قفل مراحل العينة."
+                            : isAutoLocked
+                            ? "مقفل تلقائياً — يتطلب صلاحية إلغاء القفل"
+                            : ""
+                        }
                         onClick={() => {
-                          if (canUnlock) {
-                            setIsAdminUnlocked(!isAdminUnlocked);
-                          } else {
-                            alert("لا تملك صلاحية إلغاء قفل مراحل العينة.");
-                          }
+                          if (!canUnlock) return;
+                          setIsAdminUnlocked(!isAdminUnlocked);
                         }}
                       >
                         {isAdminUnlocked
@@ -312,7 +323,7 @@ export default function PhaseThreeSampling({
                     <select
                       className="save-disk-input"
                       value={rule.method}
-                      disabled={isLockedState}
+                      disabled={isLockedState || !canConfigureSample}
                       onChange={(e) =>
                         handleRuleChange(rule.stageKey, "method", e.target.value as StageSamplingRule[keyof StageSamplingRule])
                       }
@@ -329,7 +340,7 @@ export default function PhaseThreeSampling({
                       className="save-disk-input"
                       value={rule.value}
                       min={0}
-                      disabled={isLockedState}
+                      disabled={isLockedState || !canConfigureSample}
                       onChange={(e) =>
                         handleRuleChange(
                           rule.stageKey,
@@ -497,11 +508,53 @@ function CertScanShortfallReport({ shortfalls }: { shortfalls: CertScanShortfall
   );
 }
 
+/**
+ * Prominent post-draw exclusion banner (P4, 2026-08). Rows whose raw `stage`
+ * value matched none of the four configured aliases never enter the draw at
+ * all — they used to vanish with zero diagnostic on the success path. This
+ * surfaces the count (and a sample of the offending raw values) so a
+ * misconfigured/typo'd stage mapping can never again silently shrink the
+ * population a sample is actually drawn from.
+ */
+function UnmappedStageWarning({ data }: { data: SampleMasterData }) {
+  const count = data.unmappedStageRowCount ?? 0;
+  if (count <= 0) return null;
+  const L = getLabels();
+  return (
+    <div
+      className="sampling-unmapped-stage-warning"
+      role="alert"
+      style={{
+        margin: "0 0 16px",
+        padding: "12px 16px",
+        borderRadius: 10,
+        border: "1px solid #d97706",
+        background: "rgba(217,119,6,.08)",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, fontSize: 16 }}>
+        <AlertTriangle size={16} aria-hidden />
+        {L.sampling_unmapped_stage_warning_title}
+      </div>
+      <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--p-muted)" }}>
+        {fillTemplate(L.sampling_unmapped_stage_warning_intro, { count: String(count) })}
+      </p>
+      {(data.unmappedStageRawValues ?? []).length > 0 && (
+        <p style={{ margin: "6px 0 0", fontSize: 12 }}>
+          {L.sampling_unmapped_stage_warning_values_label}{" "}
+          {(data.unmappedStageRawValues ?? []).join("، ")}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function SampleResultReport({ data }: { data: SampleMasterData }) {
   return (
     <section className="sample-result-section" aria-label="نتائج العينة">
       <h3>نتائج سحب عينة المستويات المشتركة</h3>
 
+      <UnmappedStageWarning data={data} />
       <CertScanShortfallReport shortfalls={data.certScanShortfalls ?? []} />
 
       <div className="sample-kpi-grid">

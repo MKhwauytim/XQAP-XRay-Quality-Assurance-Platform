@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createMemoryDirectory } from "../storage/memoryDirectory";
+import { clearReadLog, createMemoryDirectory, getReadLog } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeWriteJson } from "../storage/safeWrite";
 import { saveSampleMaster } from "../sampling/sampleStorage";
@@ -20,9 +20,14 @@ import { closeMonth, invalidateMonthLockCache } from "../population/monthLock";
 import { upsertItemAnswer } from "../answers/answerStorage";
 import type { ItemAnswer } from "../answers/answerTypes";
 import type { MonthManifestData } from "../population/monthTypes";
-import { getPopulationMonthDir } from "../workspace/workspacePaths";
+import { getPopulationMonthDir, getSampleEmployeeDir } from "../workspace/workspacePaths";
 import type { DistributionCurrentData, DistributionEntry } from "../distribution/distributionTypes";
-import { getUserWorkspaceFootprint, loadEmployeeSampleMirror, syncSampleMirrors } from "./sampleMirrorStorage";
+import {
+  getUserWorkspaceFootprint,
+  loadEmployeeSampleMirror,
+  readEmployeeMirrorIndex,
+  syncSampleMirrors,
+} from "./sampleMirrorStorage";
 
 const MONTH_A = "5-may-2026";
 const MONTH_B = "6-june-2026";
@@ -192,6 +197,170 @@ describe("syncSampleMirrors monotonic guard", () => {
   });
 });
 
+describe("syncSampleMirrors derive-version guard (v88 quota refold)", () => {
+  /** `makeCurrent` with the derive version and quotas under test. */
+  function makeCurrentAt(
+    logRevision: number,
+    deriveVersion: number,
+    entries: DistributionEntry[],
+    dailyQuota?: number
+  ): DistributionCurrentData {
+    return {
+      ...makeCurrent(MONTH_A, logRevision, entries),
+      deriveVersion,
+      ...(dailyQuota === undefined
+        ? {}
+        : {
+            quotas: {
+              [EMP]: {
+                username: EMP,
+                sampleCount: 12,
+                dailyQuota,
+                daysRemainingAtAssignment: 3,
+                assignedAt: "2026-05-02T00:00:00.000Z",
+              },
+            },
+          }),
+    };
+  }
+
+  it("REGRESSION: a mirror at the SAME revision but an OLDER deriveVersion is rewritten with the corrected quota", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    invalidateMonthLockCache();
+    await ensurePopulationMonthFolder(root, MONTH_A);
+
+    // The pre-v88 derivation: same log revision, wrong (inflated) daily quota.
+    await syncSampleMirrors(root, MONTH_A, makeCurrentAt(5, 2, [makeMirrorEntry("A1", "pending")], 9));
+    expect((await loadEmployeeSampleMirror(root, MONTH_A, EMP))?.quota?.dailyQuota).toBe(9);
+
+    // v88 bumped DERIVE_VERSION, which refolds `distribution.current.json` —
+    // but the LOG has not moved, so the revision is still 5. Before the guard
+    // considered the derive version this write was skipped and the employee
+    // kept reading the wrong quota forever.
+    await syncSampleMirrors(root, MONTH_A, makeCurrentAt(5, 3, [makeMirrorEntry("A1", "pending")], 4));
+
+    const mirror = await loadEmployeeSampleMirror(root, MONTH_A, EMP);
+    expect(mirror?.quota?.dailyQuota).toBe(4);
+    expect(mirror?.deriveVersion).toBe(3);
+    expect(mirror?.sourceLogRevision).toBe(5);
+  });
+
+  it("the index carries deriveVersion, so the fast path can evaluate the rule at all", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    invalidateMonthLockCache();
+    await ensurePopulationMonthFolder(root, MONTH_A);
+
+    await syncSampleMirrors(root, MONTH_A, makeCurrentAt(5, 2, [makeMirrorEntry("A1", "pending")], 9));
+    const index = await readEmployeeMirrorIndex(root, MONTH_A);
+    expect(index?.mirrors["emp1.samples.json"]?.deriveVersion).toBe(2);
+    expect(index?.pendingDeriveVersion).toBeNull();
+  });
+
+  it("DANGEROUS DIRECTION: a HIGHER existing revision is never overwritten, even by a newer deriveVersion", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    invalidateMonthLockCache();
+    await ensurePopulationMonthFolder(root, MONTH_A);
+
+    // Another machine derived revision 7 (A1 completed) on an older build.
+    await syncSampleMirrors(root, MONTH_A, makeCurrentAt(7, 2, [makeMirrorEntry("A1", "completed")], 9));
+
+    // We hold only revision 5 — older DATA — but a newer derivation. Writing it
+    // would resurrect a pending entry the employee has already finished.
+    await syncSampleMirrors(root, MONTH_A, makeCurrentAt(5, 3, [makeMirrorEntry("A1", "pending")], 4));
+
+    const mirror = await loadEmployeeSampleMirror(root, MONTH_A, EMP);
+    expect(mirror?.sourceLogRevision).toBe(7);
+    expect(mirror?.entries[0]?.status).toBe("completed");
+    expect(mirror?.quota?.dailyQuota).toBe(9);
+  });
+
+  it("a legacy mirror with NO deriveVersion is rewritten exactly once", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    invalidateMonthLockCache();
+    await ensurePopulationMonthFolder(root, MONTH_A);
+
+    // Hand-write the pre-field shape: no `deriveVersion`, and no index at all
+    // (both predate this change), so the guard reads the mirror itself.
+    const dir = await getSampleEmployeeDir(root, MONTH_A, true);
+    await safeWriteJson(dir, "emp1.samples.json", {
+      monthFolderName: MONTH_A,
+      username: EMP,
+      updatedAt: "2026-05-06T00:00:00.000Z",
+      sourceLogRevision: 5,
+      quota: { dailyQuota: 9, daysRemainingAtAssignment: 3, sampleCount: 12 },
+      entries: [makeMirrorEntry("A1", "pending")],
+    });
+
+    // Absent deriveVersion reads as 0 < 3 → rewritten once.
+    await syncSampleMirrors(root, MONTH_A, makeCurrentAt(5, 3, [makeMirrorEntry("A1", "pending")], 4));
+    expect((await loadEmployeeSampleMirror(root, MONTH_A, EMP))?.quota?.dailyQuota).toBe(4);
+
+    // …and NOT again: same revision, same version now on disk. A third payload
+    // that differs would land only if the guard had stopped holding.
+    await syncSampleMirrors(root, MONTH_A, makeCurrentAt(5, 3, [makeMirrorEntry("A1", "completed")], 1));
+    const mirror = await loadEmployeeSampleMirror(root, MONTH_A, EMP);
+    expect(mirror?.quota?.dailyQuota).toBe(4);
+    expect(mirror?.entries[0]?.status).toBe("pending");
+  });
+});
+
+describe("2-employees/_index.json accelerator (Design B step 2)", () => {
+  /** All entries assigned to distinct employees, so the fan-out is N files. */
+  function manyEmployees(revision: number, count: number): DistributionCurrentData {
+    const entries = Array.from({ length: count }, (_, i) => ({
+      ...makeMirrorEntry(`A${i}`, "pending" as const),
+      assignedTo: `emp-${i}`,
+    }));
+    return makeCurrent(MONTH_A, revision, entries);
+  }
+
+  it("replaces the N mirror parses with ONE index read on the guard's read path", async () => {
+    const root = createMemoryDirectory("root", { trackReads: true }) as DirectoryHandleLike;
+    invalidateMonthLockCache();
+    await ensurePopulationMonthFolder(root, MONTH_A);
+
+    // First run: no index exists yet, so the mirrors are read (there are none).
+    await syncSampleMirrors(root, MONTH_A, manyEmployees(1, 6));
+
+    clearReadLog(root);
+    // Second run at the SAME revision: six mirrors are now on disk and the
+    // guard skips every one of them, so no mirror is written either. Every
+    // `{username}.samples.json` read left in the log would therefore be the
+    // guard's own — safeWriteJson's stage/commit read-backs cannot muddy it.
+    await syncSampleMirrors(root, MONTH_A, manyEmployees(1, 6));
+
+    const readsInEmployeesDir = getReadLog(root).filter((path) => path.includes("2-employees"));
+    expect(readsInEmployeesDir.filter((path) => path.endsWith("_index.json")).length).toBeGreaterThan(0);
+    // The load-bearing assertion: not one of the six mirrors was opened to
+    // decide the guard — one index read answered for all of them.
+    expect(readsInEmployeesDir.filter((path) => path.endsWith(".samples.json"))).toEqual([]);
+  });
+
+  it("falls back to reading the mirrors when the index is missing, and still guards correctly", async () => {
+    const root = createMemoryDirectory("root", { trackReads: true }) as DirectoryHandleLike;
+    invalidateMonthLockCache();
+    await ensurePopulationMonthFolder(root, MONTH_A);
+
+    await syncSampleMirrors(root, MONTH_A, makeCurrent(MONTH_A, 5, [makeMirrorEntry("A1", "pending")]));
+
+    // Simulate a workspace written before the index existed: blank it out so it
+    // no longer parses as an index at all.
+    const dir = await getSampleEmployeeDir(root, MONTH_A, false);
+    await safeWriteJson(dir, "_index.json", { nonsense: true });
+
+    clearReadLog(root);
+    // An OLDER derivation must still be rejected — via the mirror itself.
+    await syncSampleMirrors(root, MONTH_A, makeCurrent(MONTH_A, 3, [makeMirrorEntry("A1", "completed")]));
+
+    expect(
+      getReadLog(root).some((path) => path.includes("2-employees") && path.endsWith(".samples.json"))
+    ).toBe(true);
+    const mirror = await loadEmployeeSampleMirror(root, MONTH_A, EMP);
+    expect(mirror?.sourceLogRevision).toBe(5);
+    expect(mirror?.entries[0]?.status).toBe("pending");
+  });
+});
+
 describe("getUserWorkspaceFootprint", () => {
   it("lists only months with pending mirror entries; completed-only months are excluded", async () => {
     const root = createMemoryDirectory("root") as DirectoryHandleLike;
@@ -251,5 +420,56 @@ describe("getUserWorkspaceFootprint", () => {
     const footprint = await getUserWorkspaceFootprint(root, "ghost-user");
     expect(footprint.activeAssignments).toHaveLength(0);
     expect(footprint.answerFileMonths).toHaveLength(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // P6 (2026-08): a mirror reverted to older bytes than the live event log —
+  // exactly what a naive restore of a derived per-employee mirror produces —
+  // must not be trusted blindly. The dangerous direction: an assignment made
+  // AFTER the mirror was frozen reads as "no pending work" and a deletion
+  // that should be blocked silently proceeds.
+  // -------------------------------------------------------------------------
+  it("REGRESSION (P6): a mirror older than the live event log is not trusted — the real (newer) pending assignment is still counted", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    invalidateMonthLockCache();
+    await ensurePopulationMonthFolder(root, MONTH_A);
+    await saveSampleMaster(root, MONTH_A, makeSample([makeRow("A1"), makeRow("A2")]));
+
+    // Revision 1: A1 assigned + mirror synced (pending).
+    await appendDistributionEvents(root, MONTH_A, [
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: EMP, eventBy: "admin" }),
+    ]);
+    let log = await loadDistributionLog(root, MONTH_A);
+    await saveDistributionCurrent(root, MONTH_A, deriveCurrentDistribution(log, [makeRow("A1"), makeRow("A2")]));
+
+    // Revision 2: A1 completed + mirror re-synced — mirror now correctly shows 0 pending.
+    await appendDistributionEvents(root, MONTH_A, [
+      buildCompletedEvent({ xrayImageId: "A1", assignedTo: EMP, eventBy: EMP }),
+    ]);
+    log = await loadDistributionLog(root, MONTH_A);
+    await saveDistributionCurrent(root, MONTH_A, deriveCurrentDistribution(log, [makeRow("A1"), makeRow("A2")]));
+
+    const mirrorBeforeStaleness = await loadEmployeeSampleMirror(root, MONTH_A, EMP);
+    expect(mirrorBeforeStaleness?.entries.every((e) => e.status === "completed")).toBe(true);
+
+    // Revision 3: A2 assigned — the live event log moves on, but the mirror is
+    // deliberately left un-synced (simulating a restore that put back the
+    // revision-2 mirror bytes while distribution.events/ — restored via
+    // merge-events — carries the newer assignment).
+    await appendDistributionEvents(root, MONTH_A, [
+      buildAssignEvent({ xrayImageId: "A2", assignedTo: EMP, eventBy: "admin" }),
+    ]);
+
+    // Sanity: the mirror on disk is indeed stale relative to the live log.
+    const staleMirror = await loadEmployeeSampleMirror(root, MONTH_A, EMP);
+    expect(staleMirror?.entries.some((e) => e.xrayImageId === "A2")).toBe(false);
+
+    const footprint = await getUserWorkspaceFootprint(root, EMP);
+
+    // Before the fix: the stale mirror shows 0 pending (A1 completed, A2
+    // absent) so MONTH_A is silently dropped from activeAssignments — a
+    // deletion would proceed despite the real, newer A2 assignment.
+    expect(footprint.activeAssignments).toHaveLength(1);
+    expect(footprint.activeAssignments[0]).toEqual({ monthFolderName: MONTH_A, pendingCount: 1 });
   });
 });

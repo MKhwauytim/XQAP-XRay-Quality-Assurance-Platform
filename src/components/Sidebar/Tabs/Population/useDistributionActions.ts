@@ -145,14 +145,29 @@ export function useDistributionActions(params: {
   /**
    * Owner requirement (2026-08-07): "once for a month i finish uploading and
    * distributing sample ... it get locked same as phase 3 in which it auto
-   * lock". Every sample row now carrying a distribution entry (assigned,
-   * regardless of completion status) is "distribution finished" in the
-   * owner's sense — mirrors Phase 3's own auto-advance-to-sampled pattern.
-   * Best-effort and idempotent: `closeMonth` no-ops on an already-closed
-   * month, so calling this on every refresh once fully distributed is safe.
-   * Stamps `SYSTEM_AUTO_LOCK_ACTOR` as `closedBy` so the UI can distinguish
-   * this from a person manually closing the month (Archive tab / this tab's
-   * own admin unlock affordance).
+   * lock".
+   *
+   * SEMANTICS CHANGE (2026-08-16, needs owner confirmation — see
+   * useDistributionActions.autoLock.test.tsx): this used to fire the moment
+   * every sample row carried a distribution entry *regardless of status*, i.e.
+   * on ASSIGNMENT. That conflated "the work has been handed out" with "the work
+   * is done" and broke the workflow outright: the bulk-assign click that
+   * distributes the month also closed it, and `ensureMonthWritable` is the one
+   * choke point for every employee-facing write, so the first answer / referral
+   * / replacement request afterwards failed with MonthClosedError ("الشهر
+   * مُقفل"). `archive.closeMonth` is false for every managed role, so the
+   * manager who triggered it could not even see the unlock affordance.
+   *
+   * The trigger is now "every sample row is covered AND every entry has reached
+   * a TERMINAL state" — `completed` or `replaced`. `pending` and
+   * `replacement-requested` are explicitly in-flight (the latter still needs an
+   * approval decision), so they hold the month open.
+   *
+   * Best-effort and idempotent: `closeMonth` no-ops on an already-closed month,
+   * so calling this on every refresh once finished is safe. Stamps
+   * `SYSTEM_AUTO_LOCK_ACTOR` as `closedBy` so the UI can distinguish this from a
+   * person manually closing the month (Archive tab / this tab's own admin
+   * unlock affordance).
    */
   async function autoLockWhenFullyDistributed(
     monthFolderName: string,
@@ -161,13 +176,16 @@ export function useDistributionActions(params: {
   ): Promise<void> {
     if (!directoryHandle) return;
     if (sampleRows.length === 0 || current.entries.length < sampleRows.length) return;
+    if (!current.entries.every((entry) => entry.status === "completed" || entry.status === "replaced")) {
+      return;
+    }
     try {
       if (await isMonthClosed(directoryHandle, monthFolderName)) return;
       const result = await closeMonth(
         directoryHandle,
         monthFolderName,
         SYSTEM_AUTO_LOCK_ACTOR,
-        "إقفال تلقائي بعد اكتمال توزيع كل عناصر العينة."
+        getLabels().msg_month_auto_lock_reason
       );
       if (result.ok) {
         void refreshGlobalMonths?.();

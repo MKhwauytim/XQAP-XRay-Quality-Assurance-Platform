@@ -169,7 +169,18 @@ export function unwrap<T>(value: unknown): T {
   return value as T;
 }
 
-export function validateEnvelope(value: unknown): boolean {
+/**
+ * Structural half of {@link validateEnvelope}: schema version, revision shape,
+ * and the *presence* of the metadata fields — everything that can be checked by
+ * looking at the envelope's own header, without walking `data`.
+ *
+ * This is deliberately separate from {@link verifyContentHash} because the hash
+ * check re-serializes the entire payload (see `hashJsonValue`) and therefore
+ * costs O(payload), while every check here is O(1). On a 500k-row population
+ * that difference is ~35s of blocked main thread versus microseconds, so the
+ * read path validates structure always and hashes only where it is affordable.
+ */
+export function validateEnvelopeStructure(value: unknown): boolean {
   if (!isEnvelope(value)) {
     return true;
   }
@@ -183,16 +194,42 @@ export function validateEnvelope(value: unknown): boolean {
     return true;
   }
 
-  if (
+  return !(
     envelope.metadata.schemaVersion !== ENVELOPE_SCHEMA_VERSION ||
     typeof envelope.metadata.revision !== "number" ||
     !Number.isInteger(envelope.metadata.revision) ||
     envelope.metadata.revision < 1 ||
     typeof envelope.metadata.contentHash !== "string" ||
     typeof envelope.metadata.writtenAt !== "string"
-  ) {
+  );
+}
+
+/**
+ * Content half of {@link validateEnvelope}: does the payload still hash to what
+ * the header claims. O(payload) — call it deliberately, never as a side effect
+ * of parsing. Non-envelopes and the string-schemaVersion compatibility shape
+ * carry no hash of ours to check, so they pass.
+ */
+export function verifyContentHash(value: unknown): boolean {
+  if (!isEnvelope(value)) {
+    return true;
+  }
+  const envelope = value as JsonEnvelope<unknown>;
+  if (typeof envelope.metadata.schemaVersion === "string") {
+    return true;
+  }
+  if (typeof envelope.metadata.contentHash !== "string") {
     return false;
   }
-
   return envelope.metadata.contentHash === hashJsonValue(envelope.data);
+}
+
+/**
+ * Full validation: structure **and** content hash. Retained as the strict check
+ * for integrity scanning and for callers that have decided the payload is small
+ * enough to afford it. The read path uses {@link validateEnvelopeStructure}
+ * plus a size-gated {@link verifyContentHash} instead.
+ */
+export function validateEnvelope(value: unknown): boolean {
+  return validateEnvelopeStructure(value) && verifyContentHash(value);
 }

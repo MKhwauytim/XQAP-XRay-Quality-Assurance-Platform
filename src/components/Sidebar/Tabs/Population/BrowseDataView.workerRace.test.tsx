@@ -86,6 +86,7 @@ function renderBrowse(dir: DirectoryHandleLike) {
       refreshKey={0}
       username="tester"
       config={DEFAULT_POPULATION_CONFIG}
+      canExportReports
     />
   );
 }

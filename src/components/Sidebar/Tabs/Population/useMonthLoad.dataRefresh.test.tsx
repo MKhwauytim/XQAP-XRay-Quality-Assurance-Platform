@@ -15,7 +15,10 @@ import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAcc
 import type { GlobalMonthSelection } from "../../../../data/month/globalMonthLogic";
 import type { MonthEditData } from "../../../../data/population/populationStorage";
 import type { DistributionCurrentData } from "../../../../data/distribution/distributionTypes";
-import { broadcastDataRefresh } from "../../../../data/workspace/dataRefreshSignal";
+import {
+  broadcastDataRefresh,
+  type DataRefreshFamily,
+} from "../../../../data/workspace/dataRefreshSignal";
 import { resetBootProgress, useBootProgress } from "../../../../data/workspace/bootProgress";
 
 const MONTH_FOLDER = "5-May-2026";
@@ -245,5 +248,87 @@ describe("useMonthLoad — periodic/manual background refresh (Sync extension, T
     });
     expect(bootResult.current.entries.map((entry) => entry.key)).toEqual(keysBefore);
     expect(bootResult.current.entries.every((entry) => entry.status === "loaded")).toBe(true);
+  });
+});
+
+describe("useMonthLoad — per-family change set (§4.2): only reload what this month load actually reads", () => {
+  afterEach(() => {
+    cleanup();
+    loadMock.fn.mockReset();
+    resetBootProgress();
+  });
+
+  async function settled(workspace: DirectoryHandleLike) {
+    loadMock.fn.mockResolvedValue(emptyMonthEditData);
+    const rendered = renderMonthLoad(workspace);
+    await waitFor(() => expect(loadMock.fn).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(rendered.result.current.isLoadingMonthData).toBe(false));
+    return rendered;
+  }
+
+  async function quietTick() {
+    // Give any (incorrect) reload a chance to fire before asserting it didn't.
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+
+  it("does NOT reload when only notifications/answers/requests changed — none of them feed loadMonthForEditing", async () => {
+    await settled(makeDirectoryHandle("ws-unrelated"));
+
+    act(() => {
+      broadcastDataRefresh({
+        source: "periodic",
+        changed: new Set(["notifications", "answers", "requests"] as const),
+      });
+    });
+    await quietTick();
+
+    // The whole point: an employee submitting an answer or an admin posting a
+    // notification used to re-read month.manifest / processing.summary /
+    // sample.master AND re-derive the distribution, on every client, for
+    // nothing.
+    expect(loadMock.fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("reloads when the distribution family changed", async () => {
+    await settled(makeDirectoryHandle("ws-dist"));
+
+    act(() => {
+      broadcastDataRefresh({ source: "periodic", changed: new Set(["distribution"] as const) });
+    });
+
+    await waitFor(() => expect(loadMock.fn).toHaveBeenCalledTimes(2));
+  });
+
+  it("reloads when the manifest family changed", async () => {
+    await settled(makeDirectoryHandle("ws-manifest"));
+
+    act(() => {
+      broadcastDataRefresh({ source: "periodic", changed: new Set(["manifest"] as const) });
+    });
+
+    await waitFor(() => expect(loadMock.fn).toHaveBeenCalledTimes(2));
+  });
+
+  it("still reloads on a manual refresh whatever the change set — the discard-everything valve is untouched", async () => {
+    await settled(makeDirectoryHandle("ws-manual-valve"));
+
+    act(() => {
+      broadcastDataRefresh({ source: "manual" });
+    });
+
+    await waitFor(() => expect(loadMock.fn).toHaveBeenCalledTimes(2));
+  });
+
+  it("an empty periodic change set reloads nothing at all", async () => {
+    await settled(makeDirectoryHandle("ws-empty"));
+
+    act(() => {
+      broadcastDataRefresh({ source: "periodic", changed: new Set<DataRefreshFamily>() });
+    });
+    await quietTick();
+
+    expect(loadMock.fn).toHaveBeenCalledTimes(1);
   });
 });

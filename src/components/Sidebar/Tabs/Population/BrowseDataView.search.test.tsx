@@ -74,6 +74,7 @@ async function renderPopulationBrowse(rows: Array<Record<string, unknown>>) {
       refreshKey={0}
       username="tester"
       config={DEFAULT_POPULATION_CONFIG}
+      canExportReports
     />
   );
 

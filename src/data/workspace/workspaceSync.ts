@@ -43,7 +43,10 @@
 import { broadcastDataRefresh, type DataRefreshFamily } from "./dataRefreshSignal";
 import { bumpWorkspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
 import { readDistributionLogStamp } from "../distribution/distributionStorage";
-import { listDirectoryEntriesWithSize } from "../storage/directoryScan";
+import {
+  listDirectoryEntriesWithSize,
+  type SizedDirectoryEntry,
+} from "../storage/directoryScan";
 import { readEnvelopeRevision } from "../storage/safeWrite";
 import { logError } from "../storage/errorLogger";
 import {
@@ -76,13 +79,23 @@ type Probe = {
   distributionRevision: number | null;
   distributionWriteToken: string | undefined;
   notificationsRevision: number | null;
-  /** Serialized, sorted name->size map covering BOTH the employee-answers
-   *  dir and the approvals (supervisor decisions) dir. A single combined
-   *  string because a size-diff alone cannot cheaply distinguish "an answer
-   *  changed" from "a request was appended" -- both live in the same
-   *  per-employee/per-supervisor JSON files (F21/F22). See `diffFamilies`
-   *  for how that ambiguity is resolved into the "requests" vs "answers"
-   *  family split. */
+  /** Serialized, sorted name->(size, mtime) map covering BOTH the
+   *  employee-answers dir and the approvals (supervisor decisions) dir. A
+   *  single combined string because a per-file diff alone cannot cheaply
+   *  distinguish "an answer changed" from "a request was appended" -- both
+   *  live in the same per-employee/per-supervisor JSON files (F21/F22). See
+   *  `diffFamilies` for how that ambiguity is resolved into the "requests" vs
+   *  "answers" family split.
+   *
+   *  SIZE IS NOT ENOUGH ON ITS OWN. These files are `JsonEnvelope`s, and an
+   *  envelope edit routinely preserves byte length -- `metadata.revision`
+   *  going 9 -> 10, a same-width `writtenAt`, a same-width `contentHash`, an
+   *  equal-length answer value. A size-only signature reports such a tick as
+   *  "unchanged" and the edit stays invisible until a manual refresh. The
+   *  mtime comes free with the `getFile()` the size already costs (see
+   *  `listDirectoryEntriesWithSize` for why the envelope revision itself is
+   *  deliberately NOT read here, and why it is still the signal for the
+   *  single-file manifest/notifications probes). */
   answersSignature: string;
   approvalsSignature: string;
   manifestRevision: number | null;
@@ -248,8 +261,8 @@ async function safeRevision(
   }
 }
 
-function signature(entries: { name: string; size: number }[]): string {
-  return JSON.stringify(entries.map((entry) => [entry.name, entry.size]));
+function signature(entries: SizedDirectoryEntry[]): string {
+  return JSON.stringify(entries.map((entry) => [entry.name, entry.size, entry.lastModified]));
 }
 
 async function safeSignature(dir: DirectoryHandleLike | null, suffix: string): Promise<string> {

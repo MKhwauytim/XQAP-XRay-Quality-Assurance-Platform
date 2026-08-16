@@ -98,6 +98,23 @@ export type SampleMasterData = {
   revision?: number;
   /** Per-write UUID embedded by casLoop for cross-machine race detection. */
   _writeToken?: string;
+  /**
+   * Count of population rows whose raw `stage` value did not match any
+   * configured stage alias (`getStageKey` returned `"unknown"`) and were
+   * therefore excluded from this draw entirely (P4, 2026-08). Only meaningful
+   * for the stage-rule draw path (`drawStageSample`) — the legacy
+   * `totalSampleSize` path never classifies rows by stage, so this is
+   * `undefined` there. `undefined`/absent also covers legacy sample masters
+   * written before this field existed; treat those the same as "0 known" —
+   * i.e. don't warn — rather than as a hidden shortfall.
+   */
+  unmappedStageRowCount?: number;
+  /**
+   * Distinct raw `stage` strings that triggered the count above, capped to a
+   * small sample so a workspace with many distinct typos doesn't bloat the
+   * file — enough to diagnose the mapping gap without being a full audit log.
+   */
+  unmappedStageRawValues?: string[];
   rows: PreparedPopulationRow[];
 };
 

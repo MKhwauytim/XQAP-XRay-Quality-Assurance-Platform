@@ -677,6 +677,125 @@ test("streamed total failure keeps the .tmp and safeReadJson recovers it", async
   }
 });
 
+// ── Phase 1.4: the commit copies the verified .tmp, it does not re-serialize ──
+//
+// The streamed path used to call streamEnvelopeToFile twice — once to stage the
+// .tmp and once again to commit the live file — walking the whole object graph
+// a second time to produce bytes that were, by construction, identical to the
+// .tmp it had just proved correct. `toJSON` on an instrumented leaf counts each
+// serialization pass; sampling the counter at each progress phase shows exactly
+// where the passes happen.
+function instrumentedPayload(): {
+  payload: { rows: { v: number }[]; marker: unknown };
+  serializations: () => number;
+} {
+  let count = 0;
+  const marker = {
+    toJSON() {
+      count += 1;
+      return { instrumented: true };
+    },
+  };
+  return {
+    payload: { rows: [{ v: 1 }, { v: 2 }, { v: 3 }], marker },
+    serializations: () => count,
+  };
+}
+
+test("1.4: a streamed write serializes the payload once — the commit copies the verified .tmp", async () => {
+  const dir = createMemoryDirectory();
+  __setStreamingForcedSizeLimitForTests(0);
+
+  const { payload, serializations } = instrumentedPayload();
+  const at: Record<string, number> = {};
+  await safeWriteJson(dir, "s.json", payload, (phase) => {
+    at[phase] = serializations();
+  });
+  const atEnd = serializations();
+
+  // Staging serializes the payload (streamEnvelopeToFile) — exactly one pass.
+  expect(at["verifying-staged"]! - at["staging"]!).toBe(1);
+  // The commit performs no serialization pass at all: it writes back the bytes
+  // verified in the staging step.
+  expect(at["verifying-committed"]! - at["committing"]!).toBe(0);
+  // Verification and cleanup add none either.
+  expect(atEnd).toBe(at["verifying-committed"]);
+
+  // …and the committed file is still byte-identical to the staged envelope.
+  const live = JSON.parse(await readRaw(dir, "s.json")) as {
+    metadata: { contentHash: string; revision: number };
+    data: { rows: { v: number }[]; marker: { instrumented: boolean } };
+  };
+  expect(live.data.rows.map((r) => r.v)).toEqual([1, 2, 3]);
+  expect(live.data.marker.instrumented).toBe(true);
+  expect(live.metadata.revision).toBe(1);
+  const result = await safeReadJson<{ rows: { v: number }[] }>(dir, "s.json");
+  expect(result.ok).toBe(true);
+  if (result.ok) expect(result.recoveredFromBak).toBe(false);
+});
+
+test("1.4: the streamed commit writes exactly the bytes that were staged and verified", async () => {
+  const base = createMemoryDirectory();
+  __setStreamingForcedSizeLimitForTests(0);
+
+  // Record what each file received, so the committed bytes can be compared with
+  // the staged bytes even after the .tmp is cleaned up. Arabic content is in the
+  // payload on purpose: a byte-range copy would corrupt multi-byte characters.
+  const written = new Map<string, string>();
+  const dir: DirectoryHandleLike = {
+    ...base,
+    getFileHandle: async (name, options) => {
+      const handle = await base.getFileHandle(name, options);
+      if (!handle.createWritable) return handle;
+      return {
+        ...handle,
+        createWritable: async () => {
+          const writable = await handle.createWritable!();
+          let buffer = "";
+          return {
+            write: async (data: string) => {
+              buffer += data;
+              await writable.write(data);
+            },
+            close: async () => {
+              written.set(name, buffer);
+              await writable.close();
+            },
+          };
+        },
+      } satisfies FileHandleLike;
+    },
+  };
+
+  await safeWriteJson(dir, "s.json", {
+    rows: Array.from({ length: 50 }, (_, i) => ({ i, note: `قياس-${i}` })),
+  });
+
+  expect(written.get("s.json.tmp")).toBeTruthy();
+  expect(written.get("s.json")).toBe(written.get("s.json.tmp"));
+  expect(await readRaw(base, "s.json")).toBe(written.get("s.json.tmp"));
+});
+
+test("1.4: safeWriteJsonText's streamed restore commits the normalized staged bytes", async () => {
+  const dir = createMemoryDirectory();
+  await safeWriteJson(dir, "a.json", { rows: [{ v: 1 }, { v: 2 }], note: "قياس" });
+  const text = await readRaw(dir, "a.json");
+
+  __setStreamingForcedSizeLimitForTests(0);
+  await safeWriteJsonText(dir, "b.json", text);
+
+  // The streamed restore path writes the compact re-normalization plus a
+  // trailing newline; the commit must reproduce it byte for byte.
+  expect(await readRaw(dir, "b.json")).toBe(`${JSON.stringify(JSON.parse(text))}\n`);
+
+  const result = await safeReadJson<{ rows: { v: number }[]; note: string }>(dir, "b.json");
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.value.rows.map((r) => r.v)).toEqual([1, 2]);
+    expect(result.value.note).toBe("قياس");
+  }
+});
+
 test("successful writes still clean up the staged .tmp", async () => {
   const base = createMemoryDirectory();
   const removed: string[] = [];
@@ -704,5 +823,65 @@ test("safeWriteJsonText streams large restore payloads and round-trips", async (
   expect(result.ok).toBe(true);
   if (result.ok) {
     expect(result.value.rows.map((r) => r.v)).toEqual([1, 2]);
+  }
+});
+
+// --- Phase 1.1: content hash is size-gated on the read path -----------------
+// `hashJsonValue` re-serializes the whole payload, so verifying it on every
+// parse cost O(payload) and dominated large reads (~35s of a ~43s read on a
+// 500k-row month). These two tests pin the resulting contract: small payloads
+// still get the full check, large payloads are structurally validated only.
+
+async function writeTamperedEnvelope(
+  dir: ReturnType<typeof createMemoryDirectory>,
+  name: string,
+  data: unknown
+): Promise<void> {
+  // A structurally valid envelope whose contentHash does not match `data` —
+  // i.e. exactly what silent corruption or a hand-edit would produce.
+  const envelope = {
+    metadata: {
+      schemaVersion: 1,
+      revision: 1,
+      contentHash: "deadbeef",
+      writtenAt: new Date().toISOString(),
+    },
+    data,
+  };
+  const handle = await dir.getFileHandle(name, { create: true });
+  const writable = await handle.createWritable!();
+  await writable.write(JSON.stringify(envelope));
+  await writable.close();
+}
+
+test("1.1: a small payload with a mismatched content hash is still rejected", async () => {
+  const dir = createMemoryDirectory();
+  await writeTamperedEnvelope(dir, "small.json", { val: 1 });
+
+  const result = await safeReadJson<{ val: number }>(dir, "small.json");
+
+  // No valid live file and no .bak to recover from -> the read reports missing
+  // rather than handing back data whose hash does not match its header.
+  expect(result.ok).toBe(false);
+});
+
+test("1.1: a large payload is accepted without recomputing its content hash", async () => {
+  const dir = createMemoryDirectory();
+  // Comfortably over HASH_VERIFY_SIZE_LIMIT (512 KB) once serialized.
+  const rows = Array.from({ length: 20000 }, (_, i) => ({
+    xrayImageId: `XR-${i}`,
+    portName: "ميناء جدة الإسلامي",
+    stage: "stage-1",
+  }));
+  await writeTamperedEnvelope(dir, "large.json", { rows });
+
+  const result = await safeReadJson<{ rows: unknown[] }>(dir, "large.json");
+
+  // The hash is deliberately wrong; the read succeeds anyway because the
+  // payload is past the size gate. This is the behaviour change — asserted
+  // explicitly so it can never regress silently back to hashing every read.
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.value.rows).toHaveLength(20000);
   }
 });

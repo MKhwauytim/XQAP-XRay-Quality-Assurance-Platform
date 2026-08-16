@@ -143,7 +143,13 @@ export default function DeckDesignCustomizer({ loadExecInput, buildDisplayNameMa
               {previewState === "loading" ? <span className="rh-spinner" /> : <Eye size={15} strokeWidth={2} />}
               {html ? "تحديث المعاينة" : "معاينة حية"}
             </button>
-            <button type="button" className="rh-btn rh-btn-teal" onClick={() => { void handleSave(); }} disabled={!ready || saving}>
+            <button
+              type="button"
+              className="rh-btn rh-btn-teal"
+              onClick={() => { void handleSave(); }}
+              disabled={!ready || saving || !canMutate("export-reports")}
+              title={!canMutate("export-reports") ? "لا تملك صلاحية تصدير التقارير." : undefined}
+            >
               {saving ? <span className="rh-spinner" /> : <Save size={15} strokeWidth={2} />}
               حفظ
             </button>
