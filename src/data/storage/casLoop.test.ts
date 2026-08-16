@@ -138,7 +138,11 @@ describe("casLoop — terminal permission-error classification", () => {
     const result = await casLoop<string>(
       async () => {
         attempts += 1;
-        const error = new Error("Could not be read due to temporary permission problems");
+        const error = new Error(// Was the raw English DOMException text. casLoop now preserves the error
+      // object instead of flattening it to `.message`, so a transient read
+      // failure arrives classified: Arabic sentence + XQ-IO-018. The test's own
+      // point is unchanged — this is NOT the terminal permission-lost message.
+      "«تعذر قراءة الملف من مساحة العمل بعد عدة محاولات.» (XQ-IO-018)");
         error.name = "NotReadableError";
         throw error;
       },
@@ -148,7 +152,11 @@ describe("casLoop — terminal permission-error classification", () => {
     expect(attempts).toBe(3);
     expect(result).toEqual({
       ok: false,
-      error: "Could not be read due to temporary permission problems",
+      error: // Was the raw English DOMException text. casLoop now preserves the error
+      // object instead of flattening it to `.message`, so a transient read
+      // failure arrives classified: Arabic sentence + XQ-IO-018. The test's own
+      // point is unchanged — this is NOT the terminal permission-lost message.
+      "«تعذر قراءة الملف من مساحة العمل بعد عدة محاولات.» (XQ-IO-018)",
     });
   });
 

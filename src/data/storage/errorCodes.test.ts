@@ -164,6 +164,8 @@ const PINNED_MEANINGS: Record<string, string> = {
     "readOptionalJson: the file exists but could not be read, so no empty default was substituted",
   "XQ-IO-030":
     "NotFound persisted after every retry AND the containing directory no longer resolves — the workspace folder was moved, renamed or re-created since the handle was restored; retrying cannot help, the user must re-select the workspace",
+  "XQ-IO-032":
+    "casLoop exhausted its retries because an attempt kept THROWING (not because it lost the revision race) and the exception carried no more specific code",
   "XQ-IO-031":
     "NotFound persisted after every retry but the containing directory is reachable and writable — a genuine transient share flake, so retrying the action is the right advice",
   "XQ-AUTH-001":

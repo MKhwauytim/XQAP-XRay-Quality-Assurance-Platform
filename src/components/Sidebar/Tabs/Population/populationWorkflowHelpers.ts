@@ -2,10 +2,10 @@ import type { DistributionEntry, DistributionEvent } from "../../../../data/dist
 import type { MonthEditData, MonthLoadScope } from "../../../../data/population/populationStorage";
 import { MonthClosedError } from "../../../../data/population/monthLock";
 import {
+  codedMessage,
   logCodedError,
   resolveErrorCode
 } from "../../../../data/storage/errorCodes";
-import { getLabels } from "../../../../data/labels/labelsStore";
 import type { BiWorkbookResult, NormalizedBiRow } from "./biData/biDataTypes";
 import type { NormalizedRiskRow, RiskWorkbookResult } from "./riskData/riskDataTypes";
 import type {
@@ -233,7 +233,14 @@ export function distributionErrorText(error: unknown, monthClosedText: string): 
   // Those exception messages are internal English (safeWrite validation text,
   // "Browser cannot write ..."), which has no place in an Arabic UI; the raw
   // detail goes to the admin error log instead of the user's screen.
+  // The code's OWN label, not a fixed generic sentence. This function is wired
+  // into all five Phase 4 actions (assign, reassign, complete, request
+  // replacement, bulk distribute), so it was the widest remaining instance of
+  // the "resolve the code, then ignore it" bug: it printed
+  // `msg_unexpected_write_error` — which ends "أعد المحاولة" — for XQ-IO-030,
+  // the one cause where retrying can never succeed, and for XQ-IO-020, where
+  // the disk is full. Correct code, actively wrong advice.
   const code = resolveErrorCode(error) ?? "XQ-DIST-001";
   logCodedError("distribution:action-failed", code, error);
-  return `${getLabels().msg_unexpected_write_error} (${code})`;
+  return codedMessage(code);
 }

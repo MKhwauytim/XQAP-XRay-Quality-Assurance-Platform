@@ -42,7 +42,7 @@ describe("distributionErrorText", () => {
     const text = distributionErrorText(internal, MONTH_CLOSED_TEXT);
 
     // Untagged plain Error → the catch-all distribution code.
-    expect(text).toBe(`${DEFAULT_LABELS.msg_unexpected_write_error} (XQ-DIST-001)`);
+    expect(text).toBe(`«${DEFAULT_LABELS.msg_unexpected_write_error}» (XQ-DIST-001)`);
     expect(text).not.toContain("Safe-write");
     // The code is the only Latin text allowed through, and it is deliberately
     // short-token shaped so it cannot be mistaken for a leaked English message.
@@ -57,7 +57,11 @@ describe("distributionErrorText", () => {
 
     const text = distributionErrorText(tagged, MONTH_CLOSED_TEXT);
 
-    expect(text).toBe(`${DEFAULT_LABELS.msg_unexpected_write_error} (XQ-IO-009)`);
+    // The code's OWN label now, not the generic sentence: XQ-IO-009 means the
+    // commit was rolled back to the .bak snapshot, which is what the user needs
+    // to know. Printing "unexpected error, please retry" for it was the whole
+    // defect. Still Arabic, still no raw English (asserted below).
+    expect(text).toBe(`«${DEFAULT_LABELS.err_io_009_commit_rolled_back}» (XQ-IO-009)`);
     expect(getRecentErrors()[0]?.context).toContain("XQ-IO-009");
   });
 
@@ -76,7 +80,7 @@ describe("distributionErrorText", () => {
   it("handles a non-Error throw without leaking its shape", () => {
     const text = distributionErrorText({ weird: "object" }, MONTH_CLOSED_TEXT);
 
-    expect(text).toBe(`${DEFAULT_LABELS.msg_unexpected_write_error} (XQ-DIST-001)`);
+    expect(text).toBe(`«${DEFAULT_LABELS.msg_unexpected_write_error}» (XQ-DIST-001)`);
     expect(getRecentErrors()).toHaveLength(1);
   });
 });
