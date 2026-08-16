@@ -781,9 +781,40 @@ export default function PopulationTab() {
     }
 
     await new Promise<void>((resolve) => {
+      // A renderer/OS OOM kill fires NEITHER "message" NOR "error": the worker
+      // simply stops. Without a watchdog this promise never settles, so
+      // `isProcessingWorkbooks` stays true forever — spinner up, "التالي"
+      // disabled, the wizard pinned busy — with no error and no log entry. That
+      // is the worst failure shape in the import path, and a 20 MB two-workbook
+      // import is exactly the size that provokes it.
+      //
+      // The timer is reset by every `progress` message, so it measures SILENCE,
+      // not total duration: a legitimately slow parse (the BI workbook has been
+      // measured at ~73 s) keeps the watchdog at bay as long as it reports in.
+      const SILENCE_LIMIT_MS = 180_000;
+      let watchdog: number | undefined;
+      const armWatchdog = () => {
+        if (watchdog !== undefined) window.clearTimeout(watchdog);
+        watchdog = window.setTimeout(() => {
+          logCodedError(
+            "population:workbook-worker-silent",
+            "XQ-POP-007",
+            new Error(`No worker progress for ${SILENCE_LIMIT_MS} ms — assuming it died.`)
+          );
+          setProcessingMessage(codedMessage("XQ-POP-007"));
+          // The worker is presumed dead; terminating makes that definite and
+          // frees its memory, and the mount effect recreates one on demand.
+          worker.terminate();
+          workerRef.current = null;
+          cleanup();
+        }, SILENCE_LIMIT_MS);
+      };
+
       const cleanup = () => {
+        if (watchdog !== undefined) window.clearTimeout(watchdog);
         worker.removeEventListener("message", onMessage);
         worker.removeEventListener("error", onError);
+        worker.removeEventListener("messageerror", onError);
         setIsProcessingWorkbooks(false);
         resolve();
       };
@@ -791,6 +822,7 @@ export default function PopulationTab() {
       const onMessage = (ev: MessageEvent) => {
         const msg = ev.data as WorkbookWorkerResponse;
         if (msg.type === "progress") {
+          armWatchdog();
           setProcessingMessage(msg.message);
         } else if (msg.type === "done") {
           setRiskWorkbookResult(msg.riskResult);
@@ -801,7 +833,15 @@ export default function PopulationTab() {
           // comment. Stays on Phase 1 so the raw-file summary renders.
           cleanup();
         } else {
-          logCodedError("population:workbook-parse", "XQ-POP-003", msg);
+          // `msg` is a response OBJECT; passing it straight to the logger
+          // stringified to "[object Object]", so the worker's own reason — a
+          // corrupt archive, an unsupported format, an allocation failure —
+          // was recorded as nothing at all. Log the reason it actually sent.
+          logCodedError(
+            "population:workbook-parse",
+            "XQ-POP-003",
+            new Error(typeof msg.error === "string" ? msg.error : JSON.stringify(msg))
+          );
           setProcessingMessage(codedMessage("XQ-POP-003"));
           cleanup();
         }
@@ -815,6 +855,10 @@ export default function PopulationTab() {
 
       worker.addEventListener("message", onMessage);
       worker.addEventListener("error", onError);
+      // A message that WAS sent but could not be deserialized — a distinct
+      // event from "error", and just as silent when unhandled.
+      worker.addEventListener("messageerror", onError);
+      armWatchdog();
       worker.postMessage({
         riskFile,
         biFile,

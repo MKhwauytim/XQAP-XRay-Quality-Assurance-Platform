@@ -192,6 +192,8 @@ const PINNED_MEANINGS: Record<string, string> = {
     "processPopulation threw while building the processed population",
   "XQ-POP-005":
     "saving the processed population to disk returned a failure result",
+  "XQ-POP-007":
+    "a population Web Worker died without sending a reply (error/messageerror) — most likely out of memory on a very large month; without this the caller waits forever",
   "XQ-POP-006":
     "saving the processed population to disk threw",
   "XQ-DIST-001":
