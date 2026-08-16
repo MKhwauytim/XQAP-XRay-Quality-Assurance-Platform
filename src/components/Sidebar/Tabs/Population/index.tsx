@@ -17,6 +17,10 @@ import { usePermissions } from "../../../../auth/usePermissions";
 import type { UsePermissionsResult } from "../../../../auth/usePermissions";
 import { useDeferredWhileHidden } from "../../../../hooks/useDeferredWhileHidden";
 import { logError, logRejection } from "../../../../data/storage/errorLogger";
+import {
+  codedMessage,
+  logCodedError
+} from "../../../../data/storage/errorCodes";
 import type { SafeWriteProgressPhase } from "../../../../data/storage/safeWrite";
 import { currentMonthFolderInfo, formatMonthFolderName, formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
 import { stripRawRow } from "../../../../data/population/populationTypes";
@@ -656,9 +660,8 @@ export default function PopulationTab() {
         return;
       }
 
-      setUploadError(
-        "تعذر فتح نافذة اختيار الملف. سيتم استخدام طريقة الرفع البديلة."
-      );
+      logCodedError("population:file-picker", "XQ-POP-001", error);
+      setUploadError(codedMessage("XQ-POP-001"));
       openFallbackInput(uploadKey);
     }
   }
@@ -771,7 +774,8 @@ export default function PopulationTab() {
     const activeTemplate = config.mappingTemplates[0];
     const worker = workerRef.current;
     if (!worker) {
-      setProcessingMessage("تعذر تهيئة معالج البيانات.");
+      logCodedError("population:workbook-worker", "XQ-POP-002");
+      setProcessingMessage(codedMessage("XQ-POP-002"));
       setIsProcessingWorkbooks(false);
       return;
     }
@@ -797,17 +801,15 @@ export default function PopulationTab() {
           // comment. Stays on Phase 1 so the raw-file summary renders.
           cleanup();
         } else {
-          setProcessingMessage(
-            "تعذر قراءة ملف بيانات وكالة المخاطر. تأكد من أن الملف بصيغة Excel وأن الصف الأول يحتوي على العناوين."
-          );
+          logCodedError("population:workbook-parse", "XQ-POP-003", msg);
+          setProcessingMessage(codedMessage("XQ-POP-003"));
           cleanup();
         }
       };
 
-      const onError = () => {
-        setProcessingMessage(
-          "تعذر قراءة ملف بيانات وكالة المخاطر. تأكد من أن الملف بصيغة Excel وأن الصف الأول يحتوي على العناوين."
-        );
+      const onError = (workerError: unknown) => {
+        logCodedError("population:workbook-worker-error", "XQ-POP-003", workerError);
+        setProcessingMessage(codedMessage("XQ-POP-003"));
         cleanup();
       };
 
@@ -870,11 +872,10 @@ export default function PopulationTab() {
       if (directoryHandle && riskWorkbookResult) {
         await performSaveToDisk(result, riskWorkbookResult);
       }
-    } catch {
+    } catch (error) {
+      logCodedError("population:process", "XQ-POP-004", error);
       setPopulationProcessingResult(null);
-      setProcessingMessage(
-        "تعذر تنفيذ معالجة المجتمع. تحقق من بيانات CertScan أو من بنية البيانات المقروءة."
-      );
+      setProcessingMessage(codedMessage("XQ-POP-004"));
     } finally {
       setIsProcessingPopulation(false);
     }
@@ -1018,14 +1019,18 @@ export default function PopulationTab() {
         // prompt for explicit overwrite confirmation instead of silently failing.
         setPendingReprocessSave({ processingResult, riskResult });
       } else {
-        setSaveToDiskMessage({ type: "error", text: `فشل الحفظ: ${result.error}` });
+        logCodedError("population:save-to-disk", "XQ-POP-005", new Error(result.error));
+        setSaveToDiskMessage({
+          type: "error",
+          text: codedMessage("XQ-POP-005", { detail: result.error })
+        });
       }
     } catch (error) {
       setSaveToDiskMessage({
         type: "error",
         text: error instanceof MonthClosedError
           ? getLabels().msg_month_closed_write_blocked
-          : "حدث خطأ غير متوقع أثناء الحفظ.",
+          : codedMessage("XQ-POP-006"),
       });
     } finally {
       setIsSavingToDisk(false);
@@ -1129,9 +1134,14 @@ export default function PopulationTab() {
           });
           setMonthRefreshKey((k) => k + 1);
         } else {
+          logCodedError(
+            "population:save-sample",
+            "XQ-SMP-004",
+            new Error(saveResult.error)
+          );
           setSampleSaveMessage({
             type: "error",
-            text: `تم سحب العينة ولكن فشل الحفظ: ${saveResult.error}`
+            text: codedMessage("XQ-SMP-004", { detail: saveResult.error })
           });
         }
 
@@ -1156,8 +1166,8 @@ export default function PopulationTab() {
       if (error instanceof MonthClosedError) {
         setSampleSaveMessage({ type: "error", text: getLabels().msg_month_closed_write_blocked });
       } else {
-        logError("population:draw-sample", error);
-        setSampleSaveMessage({ type: "error", text: "حدث خطأ غير متوقع أثناء سحب العينة." });
+        logCodedError("population:draw-sample", "XQ-SMP-005", error);
+        setSampleSaveMessage({ type: "error", text: codedMessage("XQ-SMP-005") });
       }
     } finally {
       setIsDrawingSample(false);

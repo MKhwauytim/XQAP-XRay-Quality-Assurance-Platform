@@ -32,6 +32,8 @@ export function drawSample(
   username: string
 ): SampleDrawResult {
   if (rows.length === 0) {
+    // XQ-SMP-001. Left uncoded on purpose: this exact string is pinned by
+    // sampleAlgorithm.golden.test.ts ("pins the two rejection paths").
     return { ok: false, reason: "لا توجد صفوف مجتمع للسحب منها." };
   }
   return "totalSampleSize" in config

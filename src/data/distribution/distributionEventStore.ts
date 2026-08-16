@@ -3,6 +3,7 @@ import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { createSimpleHasher } from "../storage/jsonEnvelope";
 import { listDirectoryEntries, readJsonDirectory, readSegmentTails } from "../storage/directoryScan";
 import { withResourceLock } from "../storage/webLocks";
+import { taggedError } from "../storage/errorCodes";
 import {
   TRANSIENT_WRITE_RETRY_DELAYS_MS,
   isNotFoundError,
@@ -365,7 +366,7 @@ export async function appendDistributionEventSegment(
       async () => {
         const handle = await eventsDir.getFileHandle(fileName, { create: true });
         if (!handle.createWritable) {
-          throw new Error(`Browser cannot write ${fileName}.`);
+          throw taggedError("XQ-DIST-006", `Browser cannot write ${fileName}.`);
         }
         const writable = await handle.createWritable();
         await writable.write(appended);

@@ -5,6 +5,8 @@
 // assertWritableMode() (or the UI-level mutation capability helper) rather than
 // reporting success for a write that was intentionally blocked.
 
+import { tagError } from "./errorCodes";
+
 let readOnly = false;
 
 export function setReadOnlyMode(enabled: boolean): void {
@@ -21,6 +23,9 @@ export class ReadOnlyModeError extends Error {
   constructor() {
     super("لا يمكن حفظ التغييرات في وضع العرض للقراءة فقط.");
     this.name = "ReadOnlyModeError";
+    // XQ-IO-016 — carried on the instance so the code reaches whichever UI
+    // surface reports it, without changing the message or the class.
+    tagError(this, "XQ-IO-016");
   }
 }
 

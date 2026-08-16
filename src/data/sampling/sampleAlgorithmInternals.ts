@@ -199,6 +199,8 @@ export function drawLegacySample(
   username: string,
   algorithmVersion: string
 ): SampleDrawResult {
+  // XQ-SMP-002 / XQ-SMP-003 below: both strings are pinned by
+  // sampleAlgorithm.golden.test.ts, so they stay byte-identical and uncoded.
   if (config.totalSampleSize <= 0) return { ok: false, reason: "حجم العينة يجب أن يكون أكبر من صفر." };
   const rng = createRng(hashSeedString(config.rngSeed));
   const groups = groupByPort(rows);

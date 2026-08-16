@@ -4,6 +4,7 @@ import type { StageAliasMappings } from "../population/stageHelpers";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { readEnvelopeRevision, safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
+import { codedMessage, logCodedError } from "../storage/errorCodes";
 import { ensureMonthWritable } from "../population/monthLock";
 import { getPopulationMonthDir, getSampleMainDir } from "../workspace/workspacePaths";
 import type { PortAllocation, SampleApproval, SampleMasterData, StageAllocation } from "./sampleTypes";
@@ -38,6 +39,7 @@ export async function saveSampleMaster(
     await safeWriteJson(sampleDir, SAMPLE_FILE, data);
     return { ok: true };
   } catch (err) {
+    logCodedError("sampling:save-sample-master", "XQ-SMP-007", err);
     const msg = err instanceof Error ? err.message : "Unknown error";
     return { ok: false, error: msg };
   }
@@ -185,7 +187,7 @@ export async function approveSampleMaster(
     async (writeToken) => {
       const current = await loadSampleMaster(directoryHandle, monthFolderName);
       if (!current) {
-        return { done: true, result: { ok: false as const, error: "لا توجد بيانات عينة للشهر المحدد." } };
+        return { done: true, result: { ok: false as const, error: codedMessage("XQ-SMP-006") } };
       }
       // First approval wins — never overwrite an existing release record.
       if (current.approval) {
@@ -237,7 +239,7 @@ export async function appendSampleRow(
     async (writeToken) => {
       const current = await loadSampleMaster(directoryHandle, monthFolderName);
       if (!current) {
-        return { done: true, result: { ok: false as const, error: "لا توجد بيانات عينة للشهر المحدد." } };
+        return { done: true, result: { ok: false as const, error: codedMessage("XQ-SMP-006") } };
       }
       if (current.rows.some((r) => r.xrayImageId === newRow.xrayImageId)) {
         return { done: true, result: { ok: true as const, data: current } };

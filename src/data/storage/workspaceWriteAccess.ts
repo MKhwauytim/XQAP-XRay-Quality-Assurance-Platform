@@ -1,4 +1,5 @@
 import type { DirectoryHandleLike } from "./fileSystemAccess";
+import { tagError } from "./errorCodes";
 
 export const WORKSPACE_PERMISSION_LOST_EVENT = "workspace:permission-lost";
 
@@ -8,6 +9,8 @@ export class WorkspacePermissionError extends Error {
   constructor() {
     super("يلزم السماح بالكتابة على مساحة العمل لإكمال هذا الإجراء.");
     this.name = "WorkspacePermissionError";
+    // XQ-IO-017 — see readOnlyMode.ts: a label on the instance, nothing else.
+    tagError(this, "XQ-IO-017");
   }
 }
 

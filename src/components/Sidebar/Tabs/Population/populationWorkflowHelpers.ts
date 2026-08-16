@@ -1,7 +1,10 @@
 import type { DistributionEntry, DistributionEvent } from "../../../../data/distribution/distributionTypes";
 import type { MonthEditData, MonthLoadScope } from "../../../../data/population/populationStorage";
 import { MonthClosedError } from "../../../../data/population/monthLock";
-import { logError } from "../../../../data/storage/errorLogger";
+import {
+  logCodedError,
+  resolveErrorCode
+} from "../../../../data/storage/errorCodes";
 import { getLabels } from "../../../../data/labels/labelsStore";
 import type { BiWorkbookResult, NormalizedBiRow } from "./biData/biDataTypes";
 import type { NormalizedRiskRow, RiskWorkbookResult } from "./riskData/riskDataTypes";
@@ -230,6 +233,7 @@ export function distributionErrorText(error: unknown, monthClosedText: string): 
   // Those exception messages are internal English (safeWrite validation text,
   // "Browser cannot write ..."), which has no place in an Arabic UI; the raw
   // detail goes to the admin error log instead of the user's screen.
-  logError("distribution:action-failed", error);
-  return getLabels().msg_unexpected_write_error;
+  const code = resolveErrorCode(error) ?? "XQ-DIST-001";
+  logCodedError("distribution:action-failed", code, error);
+  return `${getLabels().msg_unexpected_write_error} (${code})`;
 }

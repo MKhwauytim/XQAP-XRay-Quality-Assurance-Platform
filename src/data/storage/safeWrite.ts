@@ -36,6 +36,7 @@
  */
 import type { DirectoryHandleLike } from "./fileSystemAccess";
 import { assertWritableMode } from "./readOnlyMode";
+import { logCodedError, taggedError } from "./errorCodes";
 import {
   COMPRESSED_FORMAT_ID,
   HEAD_PROBE_BYTES,
@@ -514,7 +515,7 @@ async function writeText(
     async () => {
       const handle = await dir.getFileHandle(name, { create: true });
       if (!handle.createWritable) {
-        throw new Error(`Browser cannot write ${name}.`);
+        throw taggedError("XQ-IO-001", `Browser cannot write ${name}.`);
       }
       const writable = await handle.createWritable();
       await writable.write(content);
@@ -638,7 +639,7 @@ async function streamToFile(
 ): Promise<StreamedFileInfo> {
   const handle = await dir.getFileHandle(fileName, { create: true });
   if (!handle.createWritable) {
-    throw new Error(`Browser cannot write ${fileName}.`);
+    throw taggedError("XQ-IO-002", `Browser cannot write ${fileName}.`);
   }
   const writable = await handle.createWritable();
 
@@ -769,7 +770,10 @@ function copyFileStreamed(
   return streamToFile(dir, targetName, async (emit) => {
     const found = await streamFileChunks(dir, sourceName, emit, { retryMissing: true });
     if (!found) {
-      throw new Error(`Safe-write cannot copy missing file ${sourceName}.`);
+      throw taggedError(
+        "XQ-IO-004",
+        `Safe-write cannot copy missing file ${sourceName}.`
+      );
     }
   });
 }
@@ -797,6 +801,7 @@ async function readTextTolerant(
     return text === null ? { kind: "missing" } : { kind: "text", text };
   } catch (error) {
     if (!isStringLengthError(error)) throw error;
+    logCodedError("safeWrite:oversized-existing-file", "XQ-IO-019", error);
     return { kind: "oversized" };
   }
 }
@@ -1052,7 +1057,7 @@ async function openBinaryWritable(
   // `createWritable` is optional on FileHandleLike (read-only handle, or a
   // browser without the write half of the API) — guarded, never assumed.
   if (!handle.createWritable) {
-    throw new Error(`Browser cannot write ${name}.`);
+    throw taggedError("XQ-IO-003", `Browser cannot write ${name}.`);
   }
   return (await handle.createWritable()) as unknown as BinaryWritable;
 }
@@ -1080,7 +1085,10 @@ export async function copyFileBytes(
     async () => {
       const file = await openFile(sourceDir, sourceName, { retryMissing: true });
       if (file === null) {
-        throw new Error(`Safe-write cannot copy missing file ${sourceName}.`);
+        throw taggedError(
+          "XQ-IO-005",
+          `Safe-write cannot copy missing file ${sourceName}.`
+        );
       }
       const writable = await openBinaryWritable(targetDir, targetName);
       try {
@@ -1363,7 +1371,7 @@ async function writeCompressedJson<T>(
   reportProgress(onProgress, "verifying-staged");
   if (!(await verifyCompressedFile(dir, tmpName, staged))) {
     await removeQuietly(dir, tmpName);
-    throw new Error(`Safe-write staging failed for ${fileName}.`);
+    throw taggedError("XQ-IO-008", `Safe-write staging failed for ${fileName}.`);
   }
 
   // 3. Commit the verified bytes, then re-verify what actually landed live.
@@ -1373,7 +1381,8 @@ async function writeCompressedJson<T>(
   if (!(await verifyCompressedFile(dir, fileName, staged))) {
     if (await rollbackFromBak(dir, fileName)) {
       await removeQuietly(dir, tmpName);
-      throw new Error(
+      throw taggedError(
+        "XQ-IO-011",
         `Safe-write validation failed for ${fileName}; rolled back to previous version.`
       );
     }
@@ -1391,7 +1400,8 @@ async function writeCompressedJson<T>(
         // still end in the "staged copy kept as .tmp" outcome below.
       }
     }
-    throw new Error(
+    throw taggedError(
+      "XQ-IO-012",
       `Safe-write validation failed for ${fileName}; staged copy kept as ${tmpName}.`
     );
   }
@@ -1508,6 +1518,7 @@ export async function safeWriteJson<T>(
       compact = JSON.stringify(nextValue);
     } catch (error) {
       if (!isStringLengthError(error)) throw error;
+      logCodedError("safeWrite:streamed-fallback", "XQ-IO-019", error);
     }
 
     // Streamed path: the serialized envelope is too large to hold as one string
@@ -1550,7 +1561,7 @@ export async function safeWriteJson<T>(
       reportProgress(onProgress, "verifying-staged");
       if (!(await verifyStreamedFile(dir, tmpName, stagedInfo))) {
         await removeQuietly(dir, tmpName);
-        throw new Error(`Safe-write staging failed for ${fileName}.`);
+        throw taggedError("XQ-IO-007", `Safe-write staging failed for ${fileName}.`);
       }
 
       // 3. Commit to the live file by copying the bytes we just verified —
@@ -1568,7 +1579,8 @@ export async function safeWriteJson<T>(
       ) {
         if (await rollbackFromBak(dir, fileName)) {
           await removeQuietly(dir, tmpName);
-          throw new Error(
+          throw taggedError(
+            "XQ-IO-009",
             `Safe-write validation failed for ${fileName}; rolled back to previous version.`
           );
         }
@@ -1590,7 +1602,8 @@ export async function safeWriteJson<T>(
           }
         }
         // Promotion failed too: keep .tmp on disk as the survivor for recovery.
-        throw new Error(
+        throw taggedError(
+          "XQ-IO-010",
           `Safe-write validation failed for ${fileName}; staged copy kept as ${tmpName}.`
         );
       }
@@ -1629,7 +1642,7 @@ export async function safeWriteJson<T>(
     const stagedOk = staged === serialized;
     if (!stagedOk) {
       await removeQuietly(dir, tmpName);
-      throw new Error(`Safe-write staging failed for ${fileName}.`);
+      throw taggedError("XQ-IO-006", `Safe-write staging failed for ${fileName}.`);
     }
 
     // 3. Commit the verified content to the live file, then re-verify.
@@ -1641,7 +1654,8 @@ export async function safeWriteJson<T>(
     if (!verifyOk) {
       if (await rollbackFromBak(dir, fileName)) {
         await removeQuietly(dir, tmpName);
-        throw new Error(
+        throw taggedError(
+          "XQ-IO-009",
           `Safe-write validation failed for ${fileName}; rolled back to previous version.`
         );
       }
@@ -1659,7 +1673,8 @@ export async function safeWriteJson<T>(
         }
       }
       // Promotion failed too: keep .tmp on disk as the survivor for recovery.
-      throw new Error(
+      throw taggedError(
+        "XQ-IO-010",
         `Safe-write validation failed for ${fileName}; staged copy kept as ${tmpName}.`
       );
     }
@@ -1679,7 +1694,7 @@ export async function safeWriteJsonText(
 
   const parsed = parseValidJson(jsonText);
   if (!parsed) {
-    throw new Error(`Cannot restore invalid JSON file ${fileName}.`);
+    throw taggedError("XQ-IO-013", `Cannot restore invalid JSON file ${fileName}.`);
   }
 
   // Same large-payload guard as safeWriteJson: avoid pretty-printing huge files
@@ -1690,6 +1705,7 @@ export async function safeWriteJsonText(
     compact = JSON.stringify(parsed);
   } catch (error) {
     if (!isStringLengthError(error)) throw error;
+    logCodedError("safeWriteJsonText:streamed-fallback", "XQ-IO-019", error);
   }
   let normalized: string | null = null;
   if (compact !== null && compact.length <= streamingForcedSizeLimit) {
@@ -1732,7 +1748,7 @@ export async function safeWriteJsonText(
       }
       if (!(await verifyStreamedFile(dir, tmpName, stagedInfo))) {
         await removeQuietly(dir, tmpName);
-        throw new Error(`Safe-write staging failed for ${fileName}.`);
+        throw taggedError("XQ-IO-014", `Safe-write staging failed for ${fileName}.`);
       }
 
       // Phase 1.4: commit the verified staged bytes instead of serializing the
@@ -1745,7 +1761,7 @@ export async function safeWriteJsonText(
       ) {
         await rollbackFromBak(dir, fileName);
         await removeQuietly(dir, tmpName);
-        throw new Error(`Safe-write validation failed for ${fileName}.`);
+        throw taggedError("XQ-IO-015", `Safe-write validation failed for ${fileName}.`);
       }
 
       await removeQuietly(dir, tmpName);
@@ -1757,7 +1773,7 @@ export async function safeWriteJsonText(
     const stagedOk = staged === normalized;
     if (!stagedOk) {
       await removeQuietly(dir, tmpName);
-      throw new Error(`Safe-write staging failed for ${fileName}.`);
+      throw taggedError("XQ-IO-014", `Safe-write staging failed for ${fileName}.`);
     }
 
     await writeText(dir, fileName, normalized);
@@ -1766,7 +1782,7 @@ export async function safeWriteJsonText(
     if (!verifyOk) {
       await rollbackFromBak(dir, fileName);
       await removeQuietly(dir, tmpName);
-      throw new Error(`Safe-write validation failed for ${fileName}.`);
+      throw taggedError("XQ-IO-015", `Safe-write validation failed for ${fileName}.`);
     }
 
     await removeQuietly(dir, tmpName);
