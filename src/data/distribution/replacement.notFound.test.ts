@@ -185,7 +185,9 @@ describe("executeReplacement on a flaky network share", () => {
     ).toBe(true);
   });
 
-  it("STILL fails, in Arabic with no raw DOMException text, when the baseline was not trustworthy", async () => {
+  // 40 s for the same reason as the sibling suite: the patient read-back ladder
+  // is exhausted twice here by design.
+  it("STILL fails, in Arabic with no raw DOMException text, when the baseline was not trustworthy", { timeout: 40_000 }, async () => {
     // The data-loss backstop, and the reason the relaxation above is
     // conditional. Here the segment was already written in this session, so the
     // pre-append re-read falls back to "" — meaning this append rewrites the

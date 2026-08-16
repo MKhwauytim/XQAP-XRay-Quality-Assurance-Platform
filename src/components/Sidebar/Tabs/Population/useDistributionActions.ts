@@ -114,15 +114,30 @@ export function useDistributionActions(params: {
     preloadedLog?: DistributionLog
   ): Promise<void> {
     if (!directoryHandle) return;
-    let sampleRows = sampleDrawResult?.rows ?? [];
     const log = preloadedLog ?? await loadDistributionLog(directoryHandle, monthFolderName);
+
+    // ALWAYS read the sample master, not just when the in-memory rows are empty.
+    //
+    // `sampleDrawResult` is React state from whenever this tab last loaded the
+    // month — potentially hours ago. Every row another machine has added since
+    // (i.e. every replacement) is missing from it, and the derived snapshot
+    // written below is the sole input to `syncSampleMirrors`. So a supervisor
+    // doing anything at all here ERASED those rows from the assignee's mirror,
+    // and the monotonic guard could not prevent it: this write carries a higher
+    // logRevision, so it wins. The assignee watched replacement rows disappear
+    // from their queue until some later derive happened to have fresh rows.
+    //
+    // The old guard only fired when the array was EMPTY, which is the rare
+    // case; stale-but-non-empty is the normal one on a shared folder. This is
+    // one small read on a path that has already done a full log read.
+    const master = await loadSampleMaster(directoryHandle, monthFolderName);
+    let sampleRows = master?.rows ?? sampleDrawResult?.rows ?? [];
 
     // Guard: never derive against an empty row set while events exist — a
     // zeroed derive would PERSIST an empty snapshot + zeroed employee mirrors
-    // (visible data loss). Fall back to the on-disk sample master.
+    // (visible data loss).
     if (sampleRows.length === 0 && log.events.length > 0) {
-      const master = await loadSampleMaster(directoryHandle, monthFolderName);
-      sampleRows = master?.rows ?? [];
+      sampleRows = sampleDrawResult?.rows ?? [];
       if (sampleRows.length === 0) {
         logError(
           "population:refresh-distribution",

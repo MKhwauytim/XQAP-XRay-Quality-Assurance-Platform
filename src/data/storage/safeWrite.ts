@@ -58,7 +58,7 @@ import {
 import { directoryResourceKey, withResourceLock } from "./webLocks";
 import { withWorkspaceWriteAccess } from "./workspaceWriteAccess";
 import {
-  TRANSIENT_WRITE_RETRY_DELAYS_MS,
+  VERIFY_READBACK_RETRY_DELAYS_MS,
   isNotFoundError,
   isNotReadableError,
   logExhaustedNotFound,
@@ -153,7 +153,7 @@ async function readText(
   name: string,
   options?: ReadTextOptions
 ): Promise<string | null> {
-  const missingRetries = options?.retryMissing ? TRANSIENT_WRITE_RETRY_DELAYS_MS.length : 0;
+  const missingRetries = options?.retryMissing ? VERIFY_READBACK_RETRY_DELAYS_MS.length : 0;
   let missingAttempts = 0;
   let unreadableAttempts = 0;
   let lastMissingError: unknown = null;
@@ -169,7 +169,7 @@ async function readText(
       if (isNotFoundError(error)) {
         if (missingAttempts < missingRetries) {
           lastMissingError = error;
-          await wait(TRANSIENT_WRITE_RETRY_DELAYS_MS[missingAttempts]!);
+          await wait(VERIFY_READBACK_RETRY_DELAYS_MS[missingAttempts]!);
           missingAttempts += 1;
           continue;
         }
@@ -398,7 +398,7 @@ async function openFile(
   name: string,
   options?: ReadTextOptions
 ): Promise<File | null> {
-  const missingRetries = options?.retryMissing ? TRANSIENT_WRITE_RETRY_DELAYS_MS.length : 0;
+  const missingRetries = options?.retryMissing ? VERIFY_READBACK_RETRY_DELAYS_MS.length : 0;
   let missingAttempts = 0;
   let unreadableAttempts = 0;
   let lastMissingError: unknown = null;
@@ -410,7 +410,7 @@ async function openFile(
       if (isNotFoundError(error)) {
         if (missingAttempts < missingRetries) {
           lastMissingError = error;
-          await wait(TRANSIENT_WRITE_RETRY_DELAYS_MS[missingAttempts]!);
+          await wait(VERIFY_READBACK_RETRY_DELAYS_MS[missingAttempts]!);
           missingAttempts += 1;
           continue;
         }

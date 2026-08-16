@@ -62,6 +62,33 @@ export function isTransientWriteError(error: unknown): boolean {
  */
 export const TRANSIENT_WRITE_RETRY_DELAYS_MS = [20, 60, 150, 400] as const;
 
+/**
+ * Backoff ladder for reading back a file we JUST WROTE — `retryMissing: true`.
+ * 8 attempts, ~11 s of waiting worst case, against the ladder above's ~630 ms.
+ *
+ * The two cases are not comparable, and sharing one ladder was the mistake.
+ * Everywhere else, "not found" is a question: the file might genuinely not be
+ * there, so giving up in under a second and reporting it is right. On a
+ * post-write verification read it is not a question — `close()` has already
+ * resolved, so the file provably exists and its absence can ONLY be the share
+ * not yet showing an entry it already holds. There is nothing to "surface
+ * quickly": the sole outcome of giving up early is failing an operation that
+ * actually succeeded.
+ *
+ * The old shared ladder ran out in ~630 ms and users on a real SMB share hit
+ * XQ-IO-031 — `cause=directory-writable`, i.e. the probe found the directory
+ * healthy and only one entry temporarily invisible, which is precisely the case
+ * that more patience fixes. A cloud-synced or contended share can take several
+ * seconds to publish a new entry; 630 ms was never going to be enough.
+ *
+ * 11 s is a long time to wait, but it is paid ONLY on the failure path, and the
+ * alternative it replaces is aborting a whole month save. A genuinely broken
+ * share still fails — just after trying properly first.
+ */
+export const VERIFY_READBACK_RETRY_DELAYS_MS = [
+  20, 60, 150, 400, 800, 1600, 3000, 5000,
+] as const;
+
 export function waitFor(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
