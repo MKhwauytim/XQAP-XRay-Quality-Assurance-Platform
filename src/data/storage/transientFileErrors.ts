@@ -111,9 +111,50 @@ export type NotFoundCause =
   | "directory-writable"
   | "directory-unreachable"
   | "permission-denied"
+  | "extension-blocked"
   | "unknown";
 
 const PROBE_FILE_NAME = ".fs-reachability-probe.tmp";
+
+/** The extension of `fileName`, including the dot, or "" if it has none. */
+function extensionOf(fileName: string): string {
+  const dot = fileName.lastIndexOf(".");
+  return dot > 0 ? fileName.slice(dot) : "";
+}
+
+/**
+ * Write a throwaway file, then immediately try to READ IT BACK, then clean up.
+ *
+ * The read-back is the point. A plain create-succeeds check only proves the
+ * directory accepts writes; it does not prove a file written there stays
+ * visible, which is the actual failure being diagnosed.
+ */
+async function probeRoundTrip(
+  dir: DirectoryHandleLike,
+  name: string
+): Promise<boolean> {
+  try {
+    const handle = await dir.getFileHandle(name, { create: true });
+    if (handle.createWritable) {
+      const writable = await handle.createWritable();
+      await writable.write("probe");
+      await writable.close();
+      // Re-open by name: this is what fails when something removes the file
+      // between the write and the next directory lookup.
+      const check = await dir.getFileHandle(name, { create: false });
+      await check.getFile();
+    }
+    return true;
+  } catch {
+    return false;
+  } finally {
+    try {
+      await dir.removeEntry?.(name);
+    } catch {
+      // A leftover probe file is harmless and reused by the next probe.
+    }
+  }
+}
 
 /**
  * Probes the containing directory by creating (then best-effort removing) a
@@ -122,7 +163,11 @@ const PROBE_FILE_NAME = ".fs-reachability-probe.tmp";
  * rejects it with the very same `NotFoundError`. Runs only after all retries
  * are exhausted, so its cost and its temp file are confined to the failure path.
  */
-export async function classifyNotFound(dir: DirectoryHandleLike): Promise<NotFoundCause> {
+export async function classifyNotFound(
+  dir: DirectoryHandleLike,
+  /** The file that could not be found, so the probe can match its extension. */
+  fileName?: string
+): Promise<NotFoundCause> {
   try {
     await dir.getFileHandle(PROBE_FILE_NAME, { create: true });
     try {
@@ -130,7 +175,6 @@ export async function classifyNotFound(dir: DirectoryHandleLike): Promise<NotFou
     } catch {
       // A leftover probe file is harmless and reused by the next probe.
     }
-    return "directory-writable";
   } catch (error) {
     if (isNotFoundError(error)) return "directory-unreachable";
     if (errorName(error) === "NotAllowedError" || errorName(error) === "SecurityError") {
@@ -138,6 +182,29 @@ export async function classifyNotFound(dir: DirectoryHandleLike): Promise<NotFou
     }
     return "unknown";
   }
+
+  // The directory accepts a `.tmp` file. That used to end the diagnosis at
+  // "directory-writable" — advice to retry, which is useless when the same
+  // failure repeats indefinitely.
+  //
+  // It leaves one hypothesis untested, and it is the one that fits a file
+  // written successfully and then never visible again while the folder itself
+  // is healthy: something outside the browser is REMOVING the file. Antivirus,
+  // DLP and sync clients routinely quarantine unfamiliar extensions, and this
+  // app writes `.ndjson` — which almost nothing allowlists — while the probe
+  // above uses `.tmp`, which nearly everything does.
+  //
+  // So probe again with the failing file's OWN extension and do a full
+  // write-then-read-back round trip. If `.tmp` survives and `.ndjson` does not,
+  // the cause is the extension, not the share, and no amount of retrying will
+  // help: the fix is an exclusion rule on the folder.
+  const extension = fileName ? extensionOf(fileName) : "";
+  if (extension && extension !== ".tmp") {
+    const survived = await probeRoundTrip(dir, `.fs-extension-probe${extension}`);
+    if (!survived) return "extension-blocked";
+  }
+
+  return "directory-writable";
 }
 
 /** The user-facing code implied by each probed cause. */
@@ -146,6 +213,9 @@ const CAUSE_CODE: Readonly<Record<NotFoundCause, ErrorCode | null>> = {
   "directory-unreachable": "XQ-IO-030",
   // The share lost sight of one entry; the action is worth repeating.
   "directory-writable": "XQ-IO-031",
+  // Retrying is futile in a different way: the folder is fine, this file TYPE
+  // is being removed from it.
+  "extension-blocked": "XQ-IO-033",
   "permission-denied": "XQ-IO-017",
   // No verdict: leave it untagged so `classifyFileSystemError` supplies the
   // plain XQ-IO-027 rather than asserting a cause we did not establish.
@@ -178,7 +248,7 @@ export async function logExhaustedNotFound(
   attempts: number,
   error: unknown
 ): Promise<NotFoundCause> {
-  const cause = await classifyNotFound(dir);
+  const cause = await classifyNotFound(dir, fileName);
   const detail = error instanceof Error ? error.message : String(error);
   const code = CAUSE_CODE[cause];
   if (code) tagError(error, code);

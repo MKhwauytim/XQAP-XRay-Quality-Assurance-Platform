@@ -306,6 +306,11 @@ export const ERROR_CODES = {
       "NotFound persisted after every retry AND the containing directory no longer resolves — the workspace folder was moved, renamed or re-created since the handle was restored; retrying cannot help, the user must re-select the workspace",
     labelKey: "err_io_030_workspace_unreachable",
   },
+  "XQ-IO-033": {
+    meaning:
+      "the folder accepts a .tmp file but a file with the FAILING file's own extension does not survive a write-then-read-back round trip — something outside the browser (antivirus, DLP, a sync client) is removing that file type, and no amount of retrying will help",
+    labelKey: "err_io_033_extension_blocked",
+  },
   "XQ-IO-032": {
     meaning:
       "casLoop exhausted its retries because an attempt kept THROWING (not because it lost the revision race) and the exception carried no more specific code",
