@@ -221,6 +221,23 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
               : labels.wsgate_picker_select_msg}
           </p>
 
+          {/*
+            The provider computes a coded diagnostic for nine of these states
+            (XQ-WS-001/002/008/009/010/014/015 and friends) and stores it in
+            `message` — and this card rendered fixed labels only, so every one
+            of them was computed and then thrown away. That is the same "the app
+            knows and doesn't say" shape as the error-code work, and it bites
+            hardest exactly here: the error log lives behind Settings, which
+            needs a mounted workspace, so when workspace selection fails this
+            screen is the ONLY surface the user can read anything from.
+
+            Shown only when the message carries a code, so the ordinary
+            "no workspace picked yet" text is not duplicated under itself.
+          */}
+          {message.includes("XQ-") && (
+            <p className="workspace-gate-detail">{message}</p>
+          )}
+
           {pendingReconnect && (
             <button
               type="button"
@@ -285,7 +302,32 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
     );
   }
 
-  // Directory picked and check done (ready / missing / error / etc.) — render
+  // A failed folder pick (XQ-WS-003) sets status "error", which used to fall
+  // straight through to `children` — dropping the user on the LOGIN screen with
+  // no indication that anything had gone wrong. The message only appeared once
+  // they authenticated and WorkspaceGate's own error card rendered, which is
+  // both too late and unreachable if the failure is why they cannot proceed.
+  if (status === "error") {
+    return (
+      <div className="workspace-gate" dir="rtl">
+        <div className="workspace-gate-card">
+          <div className="workspace-gate-icon"><AlertTriangle size={40} /></div>
+          <h2>{labels.wsgate_error_title}</h2>
+          <p className="workspace-gate-detail">{message}</p>
+          <button
+            type="button"
+            onClick={() => {
+              void selectWorkspace();
+            }}
+          >
+            {labels.wsgate_pick_folder_btn}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Directory picked and check done (ready / missing / etc.) — render
   // children so AuthGate appears next
   return <>{children}</>;
 }
