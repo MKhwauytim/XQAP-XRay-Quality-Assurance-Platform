@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { DistributionEntry, DistributionEvent, QuotaFacts } from "./distributionTypes";
 import {
+  countLiveEntriesByEmployee,
   deriveEmployeeQuotas,
   deriveEmployeeQuotasWithFacts,
   findLateEvent,
@@ -320,10 +321,15 @@ describe("foldDistributionEvents — golden master", () => {
     expect([...result.droppedImageIds]).toEqual(["img-1"]);
   });
 
-  it("SURPRISE: an unknown event type with an existing entry is reported dropped AND still rewrites the entry", () => {
-    // transitionForEvent falls through to the "preserve existing" branch, the
-    // event is recorded as dropped, and then entries.set() runs anyway — so
-    // lastEventAt/lastEventId advance to an event the fold claims it dropped.
+  it("CHANGED (P5): an unknown event type with an existing entry is dropped and leaves the entry untouched", () => {
+    // DELIBERATE CONTRACT FLIP (was pinned as a SURPRISE, deferred 2026-08-15).
+    // Previously transitionForEvent fell through to a "preserve existing"
+    // branch, the event was recorded as dropped, and entries.set() then ran
+    // anyway — so lastEventAt/lastEventId advanced to an event the fold claims
+    // it discarded. That silently rewrote the distribution-date column shown in
+    // employee views and reports, and a FUTURE-dated unknown event poisoned the
+    // fold checkpoint permanently (every later read looked "late" and paid a
+    // full refold). A discarded event now leaves no trace at all.
     const unknown = {
       ...evt("e2", "assigned", "img-1", "emp-a", "2026-05-05T08:00:00.000Z"),
       eventType: "invented-type",
@@ -336,8 +342,9 @@ describe("foldDistributionEvents — golden master", () => {
     expect([...result.droppedEventIds]).toEqual(["e2"]);
     expect(result.entries[0]).toMatchObject({
       status: "pending",
-      lastEventAt: "2026-05-05T08:00:00.000Z",
-      lastEventId: "e2",
+      // Still e1 — the entry is exactly what the last ACCEPTED event left.
+      lastEventAt: "2026-05-04T08:00:00.000Z",
+      lastEventId: "e1",
     });
   });
 
@@ -530,7 +537,22 @@ describe("findLateEvent — golden master", () => {
 // deriveEmployeeQuotasWithFacts
 // ---------------------------------------------------------------------------
 
+/**
+ * CHANGED (P2): `sampleCount` is now derived from the folded entries an
+ * employee actually still owns (live, i.e. non-`replaced`), not from the raw
+ * `assigned` event count — so `deriveEmployeeQuotas[WithFacts]` takes the
+ * entry set as its second argument. Every case below therefore folds its own
+ * events against real rows and passes the result, which is exactly what
+ * production does. `facts.assignmentCounts` is unchanged and still pinned: it
+ * is bookkeeping for the assignment WINDOW, no longer the count.
+ */
 describe("deriveEmployeeQuotasWithFacts — golden master", () => {
+  /** Fold `events` against one row per distinct image — the production shape. */
+  function entriesFor(events: DistributionEvent[]): DistributionEntry[] {
+    const ids = [...new Set(events.map((event) => event.xrayImageId))];
+    return foldDistributionEvents(events, ids.map((id) => makeRow(id)), 1).entries;
+  }
+
   it("pins the full quota+facts output for a fixed assignment set", () => {
     const events = [
       evt("a1", "assigned", "img-1", "emp-a", "2026-05-01T00:00:00.000Z", {
@@ -542,7 +564,8 @@ describe("deriveEmployeeQuotasWithFacts — golden master", () => {
       // Non-assigned events never contribute.
       evt("c1", "completed", "img-1", "emp-a", "2026-05-03T00:00:00.000Z"),
     ];
-    const { quotas, facts } = deriveEmployeeQuotasWithFacts(events, new Set(), MONTH);
+    const entries = entriesFor(events);
+    const { quotas, facts } = deriveEmployeeQuotasWithFacts(events, entries, new Set(), MONTH);
 
     // Deadline for May 2026 = 28 May 23:59:59 (3 days before month end).
     // emp-a first assigned 1 May 00:00Z → ceil(27d 23:59:59) = 28 days.
@@ -574,14 +597,14 @@ describe("deriveEmployeeQuotasWithFacts — golden master", () => {
     expect(facts.latestStoredQuotas["emp-a"].eventId).toBe("a1");
 
     // deriveEmployeeQuotas is the same computation, quotas only.
-    expect(deriveEmployeeQuotas(events, new Set(), MONTH)).toEqual(quotas);
+    expect(deriveEmployeeQuotas(events, entries, new Set(), MONTH)).toEqual(quotas);
   });
 
   it("pins the ceil-based dailyQuota arithmetic", () => {
     const events = Array.from({ length: 57 }, (_, i) =>
       evt(`a${i}`, "assigned", `img-${i}`, "emp-a", "2026-05-01T00:00:00.000Z")
     );
-    const { quotas } = deriveEmployeeQuotasWithFacts(events, new Set(), MONTH);
+    const { quotas } = deriveEmployeeQuotasWithFacts(events, entriesFor(events), new Set(), MONTH);
     // ceil(57 / 28) === 3
     expect(quotas?.["emp-a"]).toMatchObject({ sampleCount: 57, dailyQuota: 3 });
   });
@@ -591,7 +614,7 @@ describe("deriveEmployeeQuotasWithFacts — golden master", () => {
       evt("a2", "assigned", "img-2", "emp-a", "2026-05-20T00:00:00.000Z"),
       evt("a1", "assigned", "img-1", "emp-a", "2026-05-01T00:00:00.000Z"),
     ];
-    const { quotas } = deriveEmployeeQuotasWithFacts(events, new Set(), MONTH);
+    const { quotas } = deriveEmployeeQuotasWithFacts(events, entriesFor(events), new Set(), MONTH);
     // The 20 May event wins purely because it appears first in the array, so
     // the employee's whole quota is computed off the SHORTER window: 9 days
     // rather than 28. ceil(2/9) === 1 here, but the effect scales.
@@ -601,14 +624,18 @@ describe("deriveEmployeeQuotasWithFacts — golden master", () => {
     });
   });
 
-  it("SURPRISE: duplicate `assigned` events for the SAME image inflate sampleCount", () => {
+  it("CHANGED (P2): duplicate `assigned` events for the SAME image no longer inflate sampleCount", () => {
     const events = [
       evt("a1", "assigned", "img-1", "emp-a", "2026-05-01T00:00:00.000Z"),
       evt("a2", "assigned", "img-1", "emp-a", "2026-05-02T00:00:00.000Z"),
     ];
-    const { quotas } = deriveEmployeeQuotasWithFacts(events, new Set(), MONTH);
-    // One image, two events → sampleCount 2. Counting is per-event, not per-image.
-    expect(quotas?.["emp-a"].sampleCount).toBe(2);
+    const { quotas, facts } = deriveEmployeeQuotasWithFacts(
+      events, entriesFor(events), new Set(), MONTH
+    );
+    // One image, two events → sampleCount 1. Counting is now per-owned-entry,
+    // not per-event (it used to pin 2). The raw event count is still in facts.
+    expect(quotas?.["emp-a"].sampleCount).toBe(1);
+    expect(facts.assignmentCounts).toEqual({ "emp-a": 2 });
   });
 
   it("excludes assignments for images absent from the sample when the fold result is passed", () => {
@@ -621,12 +648,16 @@ describe("deriveEmployeeQuotasWithFacts — golden master", () => {
     const fold = foldDistributionEvents(events, [makeRow("img-1")], 1);
     expect(fold.entries).toEqual([]);
     expect([...fold.absentRowEventIds]).toEqual(["a1"]);
-    expect(deriveEmployeeQuotasWithFacts(events, fold, MONTH).quotas).toBeUndefined();
+    expect(deriveEmployeeQuotasWithFacts(events, fold.entries, fold, MONTH).quotas).toBeUndefined();
 
-    // A bare Set is still accepted (callers holding only an explicit drop
-    // list), and then only that list is excluded — this is the pre-fix shape.
-    const legacy = deriveEmployeeQuotasWithFacts(events, fold.droppedEventIds, MONTH);
-    expect(legacy.quotas?.["emp-a"].sampleCount).toBe(1);
+    // CHANGED (P2): a bare Set is still accepted (callers holding only an
+    // explicit drop list), but the exclusion set no longer decides the count —
+    // the empty entry set does. This used to pin sampleCount 1 here, i.e. the
+    // phantom leaked back in through the legacy exclusion shape; now the count
+    // is honest whichever shape is passed, and the exclusion only governs the
+    // assignment window.
+    const legacy = deriveEmployeeQuotasWithFacts(events, fold.entries, fold.droppedEventIds, MONTH);
+    expect(legacy.quotas).toBeUndefined();
   });
 
   it("counts a real assignment while excluding a phantom one from the same employee", () => {
@@ -635,18 +666,30 @@ describe("deriveEmployeeQuotasWithFacts — golden master", () => {
       evt("a2", "assigned", "ghost", "emp-a", "2026-05-01T00:00:00.000Z"),
     ];
     const fold = foldDistributionEvents(events, [makeRow("img-1")], 1);
-    const { quotas } = deriveEmployeeQuotasWithFacts(events, fold, MONTH);
+    const { quotas } = deriveEmployeeQuotasWithFacts(events, fold.entries, fold, MONTH);
     // sampleCount 1, not 2 — and dailyQuota follows from the honest count.
     expect(quotas?.["emp-a"]).toMatchObject({ sampleCount: 1, dailyQuota: 1 });
   });
 
-  it("pins that dropped assignment events are excluded", () => {
+  it("pins that a dropped assignment event contributes nothing", () => {
+    // A genuinely dropped assignment: img-2 is already completed, so the
+    // completed-terminal guard rejects a2 — it neither creates an entry nor
+    // counts. (This case used to be expressed with a hand-made exclusion set
+    // over two live images; that shape is no longer meaningful now the count
+    // comes from entries, so it is written as a real drop instead.)
     const events = [
       evt("a1", "assigned", "img-1", "emp-a", "2026-05-01T00:00:00.000Z"),
+      evt("c1", "completed", "img-2", "emp-b", "2026-05-01T12:00:00.000Z"),
       evt("a2", "assigned", "img-2", "emp-a", "2026-05-02T00:00:00.000Z"),
     ];
-    const { quotas } = deriveEmployeeQuotasWithFacts(events, new Set(["a2"]), MONTH);
+    const rows = [makeRow("img-1"), makeRow("img-2")];
+    const fold = foldDistributionEvents(events, rows, 1);
+    expect([...fold.droppedEventIds]).toEqual(["a2"]);
+    const { quotas } = deriveEmployeeQuotasWithFacts(events, fold.entries, fold, MONTH);
     expect(quotas?.["emp-a"].sampleCount).toBe(1);
+    // emp-b owns img-2 but never received an `assigned` event → no quota row
+    // (the pre-existing reassignment-style gap, pinned here too).
+    expect(quotas?.["emp-b"]).toBeUndefined();
   });
 
   it("SURPRISE: dropping ONLY the first assignment leaves the employee out entirely", () => {
@@ -657,7 +700,9 @@ describe("deriveEmployeeQuotasWithFacts — golden master", () => {
       evt("a1", "assigned", "img-1", "emp-a", "2026-05-01T00:00:00.000Z"),
       evt("a2", "assigned", "img-2", "emp-a", "2026-05-20T00:00:00.000Z"),
     ];
-    const { quotas } = deriveEmployeeQuotasWithFacts(events, new Set(["a1"]), MONTH);
+    // a1 is excluded, so it also produced no entry — fold only what survived.
+    const entries = foldDistributionEvents([events[1]], [makeRow("img-2")], 1).entries;
+    const { quotas } = deriveEmployeeQuotasWithFacts(events, entries, new Set(["a1"]), MONTH);
     expect(quotas?.["emp-a"]).toMatchObject({
       sampleCount: 1,
       assignedAt: "2026-05-20T00:00:00.000Z",
@@ -670,7 +715,7 @@ describe("deriveEmployeeQuotasWithFacts — golden master", () => {
       evt("a1", "assigned", "img-1", "emp-a", "2026-05-30T00:00:00.000Z"),
       evt("a2", "assigned", "img-2", "emp-a", "2026-05-30T00:00:00.000Z"),
     ];
-    const { quotas } = deriveEmployeeQuotasWithFacts(events, new Set(), MONTH);
+    const { quotas } = deriveEmployeeQuotasWithFacts(events, entriesFor(events), new Set(), MONTH);
     expect(quotas?.["emp-a"]).toMatchObject({
       daysRemainingAtAssignment: 0,
       // Math.max(1, 0) === 1 → ceil(2/1) === 2
@@ -686,7 +731,7 @@ describe("deriveEmployeeQuotasWithFacts — golden master", () => {
         daysRemainingAtAssignment: 4,
       }),
     ];
-    const { quotas } = deriveEmployeeQuotasWithFacts(events, new Set(), "not-a-month");
+    const { quotas } = deriveEmployeeQuotasWithFacts(events, entriesFor(events), new Set(), "not-a-month");
     expect(quotas?.["emp-a"]).toEqual({
       username: "emp-a",
       sampleCount: 2,
@@ -701,7 +746,7 @@ describe("deriveEmployeeQuotasWithFacts — golden master", () => {
 
   it("pins that an unparseable month with no stored quota yields undefined quotas", () => {
     const events = [evt("a1", "assigned", "img-1", "emp-a", "2026-05-01T00:00:00.000Z")];
-    const { quotas, facts } = deriveEmployeeQuotasWithFacts(events, new Set(), "not-a-month");
+    const { quotas, facts } = deriveEmployeeQuotasWithFacts(events, entriesFor(events), new Set(), "not-a-month");
     // Empty result is normalized to undefined, but the facts are still returned.
     expect(quotas).toBeUndefined();
     expect(facts.assignmentCounts).toEqual({ "emp-a": 1 });
@@ -714,12 +759,85 @@ describe("deriveEmployeeQuotasWithFacts — golden master", () => {
         daysRemainingAtAssignment: 6,
       }),
     ];
-    const { quotas } = deriveEmployeeQuotasWithFacts(events, new Set(), MONTH);
+    const { quotas } = deriveEmployeeQuotasWithFacts(events, entriesFor(events), new Set(), MONTH);
     expect(quotas?.["emp-a"]).toMatchObject({
       daysRemainingAtAssignment: 6,
       assignedAt: "not-a-date",
       dailyQuota: 1,
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // Quota vs. ACTUAL ownership. These two cases had no coverage at all before
+  // (no test folded a reassignment/replacement and then asked what the quota
+  // said), which is why the defect below survived.
+  // -------------------------------------------------------------------------
+
+  it("REASSIGN: quota follows final ownership, not the raw `assigned` events", () => {
+    const rows = [makeRow("img-1"), makeRow("img-2"), makeRow("img-3")];
+    const events = [
+      evt("a1", "assigned", "img-1", "emp-a", "2026-05-01T00:00:00.000Z"),
+      evt("a2", "assigned", "img-2", "emp-a", "2026-05-01T00:00:00.000Z"),
+      evt("a3", "assigned", "img-3", "emp-b", "2026-05-01T00:00:00.000Z"),
+      // emp-a hands img-1 over to emp-b.
+      evt("r1", "reassigned", "img-1", "emp-a", "2026-05-02T00:00:00.000Z", {
+        reassignedTo: "emp-b",
+      }),
+    ];
+    const fold = foldDistributionEvents(events, rows, 1);
+    const owned = countLiveEntriesByEmployee(fold.entries);
+    expect(owned).toEqual({ "emp-a": 1, "emp-b": 2 });
+
+    const { quotas } = deriveEmployeeQuotasWithFacts(events, fold.entries, fold, MONTH);
+    // The quota now matches what each employee actually owns. Before this fix
+    // it counted raw `assigned` events instead (emp-a 2, emp-b 1), so a single
+    // reassignment permanently over-stated the giver and under-stated the
+    // receiver — and referral approval emits reassign events on the normal
+    // daily path.
+    expect(quotas?.["emp-a"].sampleCount).toBe(1);
+    expect(quotas?.["emp-b"].sampleCount).toBe(2);
+    // Facts still record the raw assignment counts — they drive the
+    // first-assignment window, not the count.
+    expect(deriveEmployeeQuotasWithFacts(events, fold.entries, fold, MONTH).facts.assignmentCounts)
+      .toEqual({ "emp-a": 2, "emp-b": 1 });
+  });
+
+  it("REPLACE: a replaced row leaves the count; its replacement takes the slot", () => {
+    const rows = [makeRow("img-1"), makeRow("img-2"), makeRow("img-3")];
+    const events = [
+      evt("a1", "assigned", "img-1", "emp-a", "2026-05-01T00:00:00.000Z"),
+      evt("a2", "assigned", "img-2", "emp-a", "2026-05-01T00:00:00.000Z"),
+      evt("q1", "replacement-requested", "img-1", "emp-a", "2026-05-02T00:00:00.000Z"),
+      evt("p1", "replaced", "img-1", "emp-a", "2026-05-03T00:00:00.000Z", {
+        replacedById: "img-3",
+      }),
+      // The replacement row is assigned to the same employee.
+      evt("a3", "assigned", "img-3", "emp-a", "2026-05-03T00:00:00.000Z"),
+    ];
+    const fold = foldDistributionEvents(events, rows, 1);
+    expect(countLiveEntriesByEmployee(fold.entries)).toEqual({ "emp-a": 2 });
+
+    const { quotas } = deriveEmployeeQuotasWithFacts(events, fold.entries, fold, MONTH);
+    // 2, not 3: the replaced row is no longer part of the workload. Before this
+    // fix every replacement inflated the employee's quota by one, forever.
+    expect(quotas?.["emp-a"].sampleCount).toBe(2);
+  });
+
+  it("an employee who reassigns EVERYTHING away drops out of quotas entirely", () => {
+    const rows = [makeRow("img-1")];
+    const events = [
+      evt("a1", "assigned", "img-1", "emp-a", "2026-05-01T00:00:00.000Z"),
+      evt("r1", "reassigned", "img-1", "emp-a", "2026-05-02T00:00:00.000Z", {
+        reassignedTo: "emp-b",
+      }),
+    ];
+    const fold = foldDistributionEvents(events, rows, 1);
+    const { quotas } = deriveEmployeeQuotasWithFacts(events, fold.entries, fold, MONTH);
+    // emp-a owns nothing → no quota row (sampleCount <= 0 is skipped).
+    // emp-b owns the row but never received an `assigned` event, so it has no
+    // assignment window to compute a quota from — a known, pre-existing gap
+    // that this change does not close (see the module docblock).
+    expect(quotas).toBeUndefined();
   });
 
   it("pins the resume path: prior facts are extended, first assignment is preserved", () => {
@@ -729,8 +847,18 @@ describe("deriveEmployeeQuotasWithFacts — golden master", () => {
       firstAssignments: { "emp-a": priorEvent },
       latestStoredQuotas: {},
     };
+    const newEvent = evt("a2", "assigned", "img-2", "emp-a", "2026-05-20T00:00:00.000Z");
+    // Only the NEW event extends the facts, but `entries` is the COMPLETE
+    // folded set — which is exactly what the incremental caller passes, since
+    // the fold re-emits every resumed entry alongside the new ones.
+    const entries = foldDistributionEvents(
+      [priorEvent, newEvent],
+      [makeRow("img-1"), makeRow("img-2")],
+      1
+    ).entries;
     const { quotas, facts } = deriveEmployeeQuotasWithFacts(
-      [evt("a2", "assigned", "img-2", "emp-a", "2026-05-20T00:00:00.000Z")],
+      [newEvent],
+      entries,
       new Set(),
       MONTH,
       resumeFacts

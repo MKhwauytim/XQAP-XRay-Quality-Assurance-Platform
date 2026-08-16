@@ -602,8 +602,17 @@ function hasQuotaForAssignedEmployees(
       .map((event) => event.assignedTo)
   );
   if (assignedEmployees.size === 0) return true;
+  // v3 (P2): a quota row exists only for an employee who still OWNS live rows,
+  // because sampleCount is live ownership now. Someone who reassigned every row
+  // away — or whose rows were all replaced — legitimately has no quota row, and
+  // demanding one would reject a perfectly good cache on every single load.
+  const owners = new Set(
+    current.entries.filter((entry) => entry.status !== "replaced").map((entry) => entry.assignedTo)
+  );
+  const expected = [...assignedEmployees].filter((username) => owners.has(username));
+  if (expected.length === 0) return true;
   if (!current.quotas) return false;
-  return [...assignedEmployees].every((username) => current.quotas?.[username]);
+  return expected.every((username) => current.quotas?.[username]);
 }
 
 /**

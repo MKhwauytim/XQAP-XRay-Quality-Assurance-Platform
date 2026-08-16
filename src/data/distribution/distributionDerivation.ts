@@ -22,7 +22,10 @@ export type FoldResult = {
    * — but absorbed VISIBLY: they used to vanish from both `droppedEventIds`
    * and `droppedImageIds`, so nothing downstream could tell they existed, and
    * an `assigned` event for a phantom image still inflated the employee's
-   * `sampleCount`/`dailyQuota` in `deriveEmployeeQuotasWithFacts`.
+   * `sampleCount`/`dailyQuota` in `deriveEmployeeQuotasWithFacts`. (Since P2
+   * the count comes from folded entries, so a phantom cannot reach it that way
+   * any more; the exclusion still matters because such an event must not set
+   * the employee's assignment window either.)
    *
    * Kept SEPARATE from `droppedEventIds` on purpose: that set means "a real
    * sample row exists but this event was illegal/uninterpretable", it is what
@@ -128,14 +131,8 @@ const TRANSITION_HANDLERS: Record<DistributionEventType, TransitionHandler> = {
   }
 };
 
-function transitionForEvent(event: DistributionEvent, existing: DistributionEntry | undefined): EventTransition | null {
-  const priorAssignee = existing?.assignedTo ?? event.assignedTo;
-  const handler = TRANSITION_HANDLERS[event.eventType];
-  return handler
-    ? handler(event, existing)
-    : existing
-      ? { status: existing.status, assignedTo: priorAssignee, replacedById: existing.replacedById }
-      : null;
+function isKnownEventType(eventType: string): boolean {
+  return Object.prototype.hasOwnProperty.call(TRANSITION_HANDLERS, eventType);
 }
 
 function recordDroppedEvent(result: FoldResult, event: DistributionEvent): void {
@@ -205,19 +202,19 @@ export function foldDistributionEvents(
       continue;
     }
 
-    const transition = transitionForEvent(event, existing);
-    if (!transition) {
+    // P5: an unrecognized eventType is dropped OUTRIGHT. It used to be recorded
+    // as dropped and then still rewrite the entry — preserving status/assignee
+    // but advancing `lastEventAt`/`lastEventId` to the very event the fold
+    // claims it discarded. That silently rewrote the user-facing distribution
+    // date, and a future-dated unknown event permanently defeated the fold
+    // checkpoint (every subsequent read looked "late" and paid a full refold).
+    // A discarded event must leave no trace on the entry.
+    if (!isKnownEventType(event.eventType)) {
       recordDroppedEvent(result, event);
       continue;
     }
 
-    // Unknown event types preserve an existing entry but are still reported as dropped.
-    if (!(event.eventType === "assigned" || event.eventType === "reassigned" ||
-      event.eventType === "completed" || event.eventType === "replacement-requested" ||
-      event.eventType === "replaced" || event.eventType === "reopen-requested" ||
-      event.eventType === "reopened")) {
-      recordDroppedEvent(result, event);
-    }
+    const transition = TRANSITION_HANDLERS[event.eventType](event, existing);
 
     entries.set(event.xrayImageId, {
       xrayImageId: event.xrayImageId,
@@ -286,12 +283,29 @@ function isEventEarlierThanEntry(event: DistributionEvent, entry: DistributionEn
   return event.eventId.localeCompare(entry.lastEventId) < 0;
 }
 
+/**
+ * Live (non-`replaced`) entries owned by each employee, i.e. the workload the
+ * employee actually has right now. This — not the raw `assigned` event count —
+ * is what a quota must be derived from.
+ */
+export function countLiveEntriesByEmployee(
+  entries: readonly DistributionEntry[]
+): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const entry of entries) {
+    if (entry.status === "replaced") continue;
+    counts[entry.assignedTo] = (counts[entry.assignedTo] ?? 0) + 1;
+  }
+  return counts;
+}
+
 export function deriveEmployeeQuotas(
   events: DistributionEvent[],
+  entries: readonly DistributionEntry[],
   excluded: QuotaExcludedEvents,
   monthFolderName: string
 ): Record<string, EmployeeQuota> | undefined {
-  return deriveEmployeeQuotasWithFacts(events, excluded, monthFolderName).quotas;
+  return deriveEmployeeQuotasWithFacts(events, entries, excluded, monthFolderName).quotas;
 }
 
 /**
@@ -299,18 +313,37 @@ export function deriveEmployeeQuotas(
  * checkpoint) and returning the accumulator facts alongside the result so a
  * caller can persist them and extend with only NEW assigned events next time,
  * instead of re-scanning the full event history on every load.
+ *
+ * `entries` must be the COMPLETE folded entry set (the fold always re-emits
+ * every resumed entry, so the incremental caller can pass its fold output
+ * directly). `sampleCount` comes from it, never from `facts.assignmentCounts`:
+ *
+ * P2 — counting raw `assigned` events corrupted the quota on both sides of a
+ * reassignment (the giver kept the row it no longer owns, the receiver never
+ * gained it, permanently) and inflated it by one on every replacement.
+ * Referral approval emits reassign events, so normal daily use hit this. The
+ * facts are still collected and still resumable — they source the assignment
+ * WINDOW (`assignedAt` / `daysRemainingAtAssignment`), which is genuinely a
+ * property of the first assignment event, not of current ownership.
+ *
+ * Known, pre-existing gap left unchanged: an employee who only ever received
+ * rows by reassignment has no `assigned` event, hence no assignment window,
+ * hence no quota row — they own entries but appear in neither `firstAssignments`
+ * nor `quotas`.
  */
 export function deriveEmployeeQuotasWithFacts(
   events: DistributionEvent[],
+  entries: readonly DistributionEntry[],
   excluded: QuotaExcludedEvents,
   monthFolderName: string,
   resumeFacts?: QuotaFacts
 ): { quotas: Record<string, EmployeeQuota> | undefined; facts: QuotaFacts } {
   const facts = collectAssignmentFacts(events, excluded, resumeFacts);
+  const liveCounts = countLiveEntriesByEmployee(entries);
   const quotas: Record<string, EmployeeQuota> = {};
   const monthInfo = parseMonthFolderName(monthFolderName);
   for (const [username, firstAssignment] of Object.entries(facts.firstAssignments)) {
-    const sampleCount = facts.assignmentCounts[username] ?? 0;
+    const sampleCount = liveCounts[username] ?? 0;
     if (sampleCount <= 0) continue;
     const daysRemaining = assignmentDaysRemaining(firstAssignment, facts.latestStoredQuotas[username], monthInfo);
     if (daysRemaining === undefined) continue;

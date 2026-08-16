@@ -37,6 +37,11 @@ export type DistributionEvent = {
 /** Per-employee quota derived from the distribution log. */
 export type EmployeeQuota = {
   username: string;
+  /**
+   * Rows the employee currently owns: live (non-`replaced`) folded entries
+   * assigned to them, NOT the number of `assigned` events they received (v3 /
+   * P2 — see deriveEmployeeQuotasWithFacts).
+   */
   sampleCount: number;
   dailyQuota: number;
   daysRemainingAtAssignment: number;
@@ -117,6 +122,13 @@ export type DistributionEntry = {
 
 /** Per-employee quota bookkeeping used to resume deriveEmployeeQuotas incrementally (perf: fold-checkpoint). */
 export type QuotaFacts = {
+  /**
+   * Raw non-excluded `assigned` event count per employee. Bookkeeping only
+   * since v3 (P2): `EmployeeQuota.sampleCount` is derived from the folded
+   * entries an employee actually still owns, because this counter cannot see a
+   * reassignment or a replacement. Kept because it is part of the persisted
+   * checkpoint shape and is a useful record of assignment volume.
+   */
   assignmentCounts: Record<string, number>;
   firstAssignments: Record<string, DistributionEvent>;
   latestStoredQuotas: Record<string, DistributionEvent>;

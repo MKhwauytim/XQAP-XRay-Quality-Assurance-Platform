@@ -17,11 +17,19 @@ export { computeDaysRemainingForDeadline } from "./distributionDerivation";
 
 /**
  * Version of the derivation algorithm in deriveCurrentDistribution. Bump when
- * fold semantics change (v2: totalAssigned excludes replaced rows; "replaced"
- * is terminal). loadOrDeriveDistributionCurrent treats cached snapshots with a
- * missing or older deriveVersion as stale and re-derives them.
+ * fold semantics change. loadOrDeriveDistributionCurrent treats cached
+ * snapshots with a missing or older deriveVersion as stale and re-derives
+ * them, and refuses to resume a fold checkpoint stamped with another version.
+ *
+ * - v2: totalAssigned excludes replaced rows; "replaced" is terminal.
+ * - v3: (a) P2 — `quotas[].sampleCount` counts LIVE entries owned by the
+ *   employee instead of raw `assigned` events, so reassignment and replacement
+ *   no longer corrupt it; (b) P5 — an unknown `eventType` is dropped outright
+ *   instead of being recorded as dropped and still advancing the entry's
+ *   `lastEventAt`/`lastEventId`. Both change persisted derived output, so every
+ *   `distribution.current.json` and every fold checkpoint from v2 must refold.
  */
-export const DERIVE_VERSION = 2;
+export const DERIVE_VERSION = 3;
 
 /**
  * Current distribution-event schema version (A7). Stamped on every newly built
@@ -222,10 +230,12 @@ export function deriveCurrentDistributionWithFacts(
     );
   }
 
-  // Both exclusion sets: absent-row events were never folded into an entry, so
-  // counting them would inflate the employee's sampleCount/dailyQuota.
+  // `entries` drives sampleCount (P2 — live ownership, not raw assign events).
+  // Both exclusion sets are still passed: they keep a dropped/absent-row event
+  // from setting the employee's assignment WINDOW.
   const { quotas, facts } = deriveEmployeeQuotasWithFacts(
     log.events,
+    entries,
     { droppedEventIds, absentRowEventIds },
     log.monthFolderName
   );
@@ -303,8 +313,12 @@ export function deriveCurrentDistributionIncremental(
     );
   }
 
+  // `entries` here is the COMPLETE folded set (the fold re-emits every resumed
+  // entry), so the live-ownership count is whole even though only `newEvents`
+  // extend the resumable facts.
   const { quotas, facts } = deriveEmployeeQuotasWithFacts(
     newEvents,
+    entries,
     { droppedEventIds, absentRowEventIds },
     previous.monthFolderName,
     previousQuotaFacts
