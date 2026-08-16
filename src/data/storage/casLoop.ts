@@ -3,6 +3,8 @@
 // written JSON and verifies it on read-back. If another machine wrote concurrently it
 // will have stored a different token, making the false-positive revision match detectable.
 
+import { codedMessage, logCodedError, resolveErrorCode } from "./errorCodes";
+
 const DEFAULT_MAX_RETRIES = 10;
 const DEFAULT_BASE_DELAY_MS = 200;
 
@@ -93,8 +95,12 @@ export async function casLoop<T>(
 ): Promise<T | { ok: false; error: string }> {
   const max = options?.maxRetries ?? DEFAULT_MAX_RETRIES;
   const baseDelay = options?.baseDelayMs ?? DEFAULT_BASE_DELAY_MS;
-  let lastError: string =
+  const lastError: string =
     options?.conflictError ?? "تعارض في الكتابة: فشلت جميع المحاولات.";
+  // The last EXCEPTION, if any attempt threw. Distinct from `lastError`, which
+  // is the "every attempt lost the revision race" conflict sentence — those are
+  // different failures and used to be collapsed into one string.
+  let lastCause: unknown;
 
   for (let attempt = 0; attempt < max; attempt++) {
     const writeToken = crypto.randomUUID();
@@ -115,12 +121,36 @@ export async function casLoop<T>(
       if (isPermissionLostError(err)) {
         return { ok: false, error: PERMISSION_LOST_ERROR };
       }
-      lastError = err instanceof Error ? err.message : "Unknown error";
+      // Keep the ERROR, not just its text.
+      //
+      // This loop is the funnel for nearly every CAS-protected write in the app
+      // — answers, notifications, the month manifest and lock, the replacement
+      // index, sync settings, the distribution projection. Reducing the caught
+      // exception to `.message` here destroyed the classification for all of
+      // them at once: `resolveErrorCode` never ran, so a full disk, a revoked
+      // grant and a moved workspace folder all arrived at the UI as the same
+      // raw English string, which `userFacingErrorText` then had to report as
+      // the XQ-IO-028 catch-all. Fixing individual callers could not work —
+      // they were each handed an already-destroyed error.
+      //
+      // It also silently overwrote the caller's Arabic `conflictError` with
+      // English the moment any attempt threw, so a genuine write conflict and
+      // an I/O fault were indistinguishable.
+      lastCause = err;
     }
     if (attempt < max - 1) {
       await sleep(withJitter(baseDelay * (attempt + 1)));
     }
   }
 
+  if (lastCause !== undefined) {
+    // An exception beat us, so this is NOT a write conflict — report what it
+    // actually was, with a quotable code, and put the raw detail in the log.
+    const code = resolveErrorCode(lastCause) ?? "XQ-IO-032";
+    logCodedError("casLoop:exhausted", code, lastCause);
+    return { ok: false, error: codedMessage(code) };
+  }
+  // No exception: every attempt lost the revision race. The caller's Arabic
+  // conflict sentence is the right answer here and now survives intact.
   return { ok: false, error: lastError };
 }

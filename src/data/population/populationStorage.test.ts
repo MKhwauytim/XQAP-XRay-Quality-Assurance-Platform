@@ -457,7 +457,12 @@ test("saveMonthRun fails with the Arabic permission message, not a raw browser e
 
   expect(result.ok).toBe(false);
   if (result.ok) return;
-  expect(result.error).toBe(new WorkspacePermissionError().message);
+  // Same Arabic sentence as before — it is XQ-IO-017's own label — now carrying
+  // the quotable code, because the save path stopped flattening the tagged
+  // error to `.message`. The point of the test is unchanged: an Arabic
+  // permission message, never a raw browser error.
+  expect(result.error).toBe(`«${new WorkspacePermissionError().message}» (XQ-IO-017)`);
+  expect(result.error).not.toMatch(/[A-Za-z]{4,}(?!Q-IO)/);
 
   // Nothing should have been left behind — the whole operation was declined before writing.
   await expect(

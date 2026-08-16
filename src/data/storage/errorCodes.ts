@@ -296,6 +296,26 @@ export const ERROR_CODES = {
     meaning: "readOptionalJson: the file exists but could not be read, so no empty default was substituted",
     labelKey: "err_io_029_unreadable_not_absent",
   },
+  // 030/031 split what XQ-IO-027 could not: a NotFoundError that survived the
+  // whole retry ladder has two causes with OPPOSITE remedies, and
+  // `classifyNotFound` already tells them apart by probing the directory. Until
+  // now that verdict went only to the log, so the user was told "file not found"
+  // either way — useless advice in one case and actively wrong in the other.
+  "XQ-IO-030": {
+    meaning:
+      "NotFound persisted after every retry AND the containing directory no longer resolves — the workspace folder was moved, renamed or re-created since the handle was restored; retrying cannot help, the user must re-select the workspace",
+    labelKey: "err_io_030_workspace_unreachable",
+  },
+  "XQ-IO-032": {
+    meaning:
+      "casLoop exhausted its retries because an attempt kept THROWING (not because it lost the revision race) and the exception carried no more specific code",
+    labelKey: "err_io_032_cas_write_failed",
+  },
+  "XQ-IO-031": {
+    meaning:
+      "NotFound persisted after every retry but the containing directory is reachable and writable — a genuine transient share flake, so retrying the action is the right advice",
+    labelKey: "err_io_031_share_lost_entry",
+  },
 
   // ── AUTH: login / session / permissions ──────────────────────────────────
   "XQ-AUTH-001": {
@@ -495,6 +515,26 @@ type CodeCarrier = { [CODE_PROPERTY]?: ErrorCode };
  * those verdicts — this is instrumentation, so identity, name, message, stack
  * and cause must all survive untouched.
  */
+/**
+ * Tag `error` ONLY if it does not already carry a code — first writer wins.
+ *
+ * Use this at every layered/step boundary. `tagError` overwrites (the property
+ * is `writable: true`), and tagging runs innermost-first as an exception
+ * unwinds, so a plain `tagError` in an outer wrapper erases the more specific
+ * code the inner layer just attached. That is not hypothetical: the workspace
+ * create path stamped `XQ-FS-006`…`XQ-FS-010` to say WHICH phase failed, and an
+ * outer `taggedStep("XQ-WS-005", …)` overwrote every one of them, so all six
+ * were unreachable at the UI and the user always saw the same generic sentence.
+ * It also erased `XQ-IO-030`/`XQ-IO-031` — re-burying the "retry" vs "re-pick
+ * the folder" verdict one frame above where that distinction was just made.
+ *
+ * The innermost code is the specific one, so keeping the first is keeping the
+ * most informative.
+ */
+export function tagErrorOnce<T>(error: T, code: ErrorCode): T {
+  return errorCodeOf(error) ? error : tagError(error, code);
+}
+
 export function tagError<T>(error: T, code: ErrorCode): T {
   if (error && (typeof error === "object" || typeof error === "function")) {
     try {

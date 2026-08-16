@@ -22,6 +22,8 @@
  *   let an automated status-advance silently un-close a frozen month.
  */
 
+import { tagError } from "../storage/errorCodes";
+import { isNotFoundError } from "../storage/transientFileErrors";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
@@ -89,9 +91,23 @@ async function readManifest(
   try {
     const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
     const result = await safeReadJson<MonthManifestData>(monthDir, MANIFEST_FILE);
-    return result.ok ? result.value : null;
-  } catch {
-    // Missing month folder / unreadable manifest — fail-open by design.
+    if (result.ok) return result.value;
+    if (result.reason !== "missing") {
+      throw tagError(
+        new Error(`Month manifest unreadable: ${monthFolderName} (${result.reason})`),
+        "XQ-IO-029"
+      );
+    }
+    return null;
+  } catch (error) {
+    // Fail-open is correct for a month folder that does not exist — an
+    // un-imported month is not a closed one. It is NOT correct for a manifest
+    // we could not read: this is the single write gate for every employee-facing
+    // write and for saveMonthRun, so laundering NotReadableError into null
+    // silently UNLOCKS a closed month and lets answers, referrals and
+    // distribution events land in an already-reported period. The verdict was
+    // then TTL-cached, so one bad read kept the month open.
+    if (!isNotFoundError(error)) throw error;
     return null;
   }
 }

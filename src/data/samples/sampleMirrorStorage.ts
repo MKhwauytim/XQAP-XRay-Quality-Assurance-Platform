@@ -1,3 +1,5 @@
+import { tagError } from "../storage/errorCodes";
+import { isNotFoundError } from "../storage/transientFileErrors";
 import type { DistributionCurrentData, DistributionEntry } from "../distribution/distributionTypes";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
@@ -484,8 +486,26 @@ export async function loadEmployeeSampleMirror(
   try {
     const dir = await getSampleEmployeeDir(directoryHandle, monthFolderName, false);
     const result = await safeReadJson<EmployeeSamplesFile>(dir, employeeSamplesFileName(username));
-    return result.ok ? result.value : null;
-  } catch {
+    if (result.ok) return result.value;
+    // A read that FAILED is not a mirror that is absent. `corrupt`/unreadable
+    // must propagate for the same reason as the catch below.
+    if (result.reason !== "missing") {
+      throw tagError(
+        new Error(`Employee mirror unreadable: ${employeeSamplesFileName(username)} (${result.reason})`),
+        "XQ-IO-029"
+      );
+    }
+    return null;
+  } catch (error) {
+    // ONLY a genuine absence is null. The bare `catch { return null }` this
+    // replaces was the documented month-overwriting shape in the one place with
+    // an IRREVERSIBLE consequence: `getUserWorkspaceFootprint` treats a null
+    // mirror as "not stale", skips the authoritative fold, and reports
+    // pendingCount 0 — which UserManagement reads as "this employee has no
+    // active assignments, safe to delete". One transient NotReadableError on
+    // the share was enough to turn "I could not look" into "there is nothing
+    // there" and orphan a live workload.
+    if (!isNotFoundError(error)) throw error;
     return null;
   }
 }

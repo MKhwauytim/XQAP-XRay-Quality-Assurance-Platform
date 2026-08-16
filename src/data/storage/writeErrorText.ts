@@ -1,5 +1,4 @@
-import { getLabels } from "../labels/labelsStore";
-import { logCodedError, resolveErrorCode } from "./errorCodes";
+import { codedMessage, logCodedError, resolveErrorCode } from "./errorCodes";
 
 /**
  * The UI is Arabic and RTL (see CLAUDE.md). Domain-level failures returned as
@@ -43,7 +42,10 @@ export function userFacingErrorText(error: string, context: string): string {
   // XQ-IO-028 is the honest code here: "something failed and we could not tell
   // what". It still gives the user something quotable and pins the log entry.
   logCodedError(context, "XQ-IO-028", new Error(error));
-  return `${getLabels().msg_unexpected_write_error} (XQ-IO-028)`;
+  // Same wording as before — XQ-IO-028's label IS `msg_unexpected_write_error`
+  // — routed through `codedMessage` so both exits of this module format
+  // identically.
+  return codedMessage("XQ-IO-028");
 }
 
 /**
@@ -65,6 +67,17 @@ export function thrownErrorText(error: unknown, context = "ui:thrown-error"): st
   // Internal English (a DOMException, safeWrite's own validation text) still
   // never reaches the screen — but the code that identifies it does, so the
   // user can quote it and we can find the exact throw site.
-  logCodedError(context, code ?? "XQ-IO-028", error);
-  return `${getLabels().msg_unexpected_write_error} (${code ?? "XQ-IO-028"})`;
+  //
+  // The message is the CODE'S OWN label, not a hard-coded generic sentence.
+  // Previously every classified failure still rendered "خطأ غير متوقع أثناء
+  // الحفظ" with a correct code bolted on, which threw away the one thing the
+  // code was for: XQ-IO-030 means "your workspace folder moved — re-pick it"
+  // and XQ-IO-020 means "the disk is full". Neither is "unexpected", and
+  // neither is fixed by the retry the generic sentence advises.
+  //
+  // XQ-IO-028's own label IS `msg_unexpected_write_error`, so the unclassified
+  // path lands on exactly the same wording as before via the `??`.
+  const resolved = code ?? "XQ-IO-028";
+  logCodedError(context, resolved, error);
+  return codedMessage(resolved);
 }

@@ -4,7 +4,7 @@ import type { StageAliasMappings } from "../population/stageHelpers";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { readEnvelopeRevision, readOptionalJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
-import { codedMessage, logCodedError } from "../storage/errorCodes";
+import { codedMessage, logCodedError, resolveErrorCode } from "../storage/errorCodes";
 import { ensureMonthWritable } from "../population/monthLock";
 import { getPopulationMonthDir, getSampleMainDir } from "../workspace/workspacePaths";
 import type { PortAllocation, SampleApproval, SampleMasterData, StageAllocation } from "./sampleTypes";
@@ -39,9 +39,13 @@ export async function saveSampleMaster(
     await safeWriteJson(sampleDir, SAMPLE_FILE, data);
     return { ok: true };
   } catch (err) {
-    logCodedError("sampling:save-sample-master", "XQ-SMP-007", err);
-    const msg = err instanceof Error ? err.message : "Unknown error";
-    return { ok: false, error: msg };
+    // Was: hard-coded XQ-SMP-007 with no `resolveErrorCode`, then the raw
+    // English `.message` returned — so the specific cause was never even
+    // computed, and the UI embedded untranslated Chromium text in an Arabic
+    // sentence.
+    const code = resolveErrorCode(err) ?? "XQ-SMP-007";
+    logCodedError("sampling:save-sample-master", code, err);
+    return { ok: false, error: codedMessage(code) };
   }
 }
 

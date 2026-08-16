@@ -27,7 +27,7 @@ import {
   errorCodeOf,
   formatUserError,
   logCodedError,
-  tagError,
+  tagErrorOnce,
   type ErrorCode
 } from "../storage/errorCodes";
 import { setReadOnlyMode } from "../storage/readOnlyMode";
@@ -225,6 +225,21 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       setMessage("جار اختيار وفحص مجلد مساحة العمل.");
 
       const handle = await selectWorkspaceDirectory("readwrite");
+      // Picking a REAL folder always leaves read-only (viewer/demo) mode.
+      //
+      // `enterDemoWorkspace` sets the flag and only `enterDemoWorkspace` itself
+      // and `clearWorkspace` ever cleared it — but the demo entry point sits on
+      // the same picker screen as "choose a folder", so demo → pick a real
+      // folder left the flag ON against a live workspace. Every folder was then
+      // created normally (raw `getDirectoryHandle(create:true)` is not mode-
+      // guarded) and the first `safeWriteJson` threw `ReadOnlyModeError`, which
+      // surfaced as the bare "تعذر فتح مساحة عمل" on a brand-new empty folder
+      // with permission already granted — and left a half-built structure
+      // behind, so the retry then failed differently.
+      //
+      // Cleared here rather than inside `applyWorkspaceHandle` because that is
+      // also the demo path's own entry point.
+      setReadOnlyMode(false);
       await applyWorkspaceHandle(handle);
     } catch (error) {
       if (isAbortError(error)) {
@@ -471,7 +486,12 @@ async function taggedStep<T>(code: ErrorCode, run: () => Promise<T>): Promise<T>
   try {
     return await run();
   } catch (error) {
-    throw tagError(error, code);
+    // `tagErrorOnce`, not `tagError`: this code is the OUTER, coarser label, and
+    // tagging runs innermost-first as the exception unwinds. Overwriting here
+    // erased whatever more specific code the layer below had already attached —
+    // which phase of the create failed, or the XQ-IO-030/031 "re-pick the
+    // folder" vs "retry" verdict. First writer wins keeps the specific one.
+    throw tagErrorOnce(error, code);
   }
 }
 

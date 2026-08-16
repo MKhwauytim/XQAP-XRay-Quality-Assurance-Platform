@@ -1,3 +1,4 @@
+import { codedMessage, logCodedError, resolveErrorCode } from "../storage/errorCodes";
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
 import {
   safeWriteJson,
@@ -472,9 +473,14 @@ async function saveMonthRunLocked(
       return { ok: true, monthFolderName };
     });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unknown error during save";
-    return { ok: false, error: message };
+    // Was `error.message` — which destroyed the code every layer below had
+    // attached. This catch wraps the WHOLE month write (five files), so a full
+    // disk (XQ-IO-020), a revoked grant (XQ-IO-017) and a moved workspace
+    // folder (XQ-IO-030, where retrying can never work) all collapsed into one
+    // raw English string that the UI then rendered inside an Arabic sentence.
+    const code = resolveErrorCode(error) ?? "XQ-POP-006";
+    logCodedError("population:save-month-run", code, error);
+    return { ok: false, error: codedMessage(code) };
   }
 }
 

@@ -2,7 +2,7 @@ import { safeWriteJson } from "./safeWrite";
 import {
   codedMessage,
   logCodedError,
-  tagError,
+  tagErrorOnce,
   taggedError,
   type ErrorCode
 } from "./errorCodes";
@@ -393,7 +393,12 @@ async function taggedStep<T>(code: ErrorCode, run: () => Promise<T>): Promise<T>
   try {
     return await run();
   } catch (error) {
-    throw tagError(error, code);
+    // `tagErrorOnce`, not `tagError`: this code is the OUTER, coarser label, and
+    // tagging runs innermost-first as the exception unwinds. Overwriting here
+    // erased whatever more specific code the layer below had already attached —
+    // which phase of the create failed, or the XQ-IO-030/031 "re-pick the
+    // folder" vs "retry" verdict. First writer wins keeps the specific one.
+    throw tagErrorOnce(error, code);
   }
 }
 
