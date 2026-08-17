@@ -70,6 +70,29 @@ describe("rawRow is readable but never serialized", () => {
     expect(Object.prototype.hasOwnProperty.call(row, "rawRow")).toBe(true);
   });
 
+  it("the EMPTY-extras branch is just as invisible — the common risk-only shape", () => {
+    // The branch the original suite missed: with no BI extras (no BI file, a
+    // BI-unmatched row, a match with no extra keys) `attachLazyRawRow` used a
+    // plain assignment — and the processor's row literal declares
+    // `rawRow: undefined` as an enumerable own property, so the assignment
+    // stayed enumerable and the full raw Excel row was serialized into
+    // population.final.json for every such row. Model that literal exactly.
+    const row = {
+      xrayImageId: "XR-0003",
+      portName: "PortB",
+      rawRow: undefined,
+    } as unknown as PreparedPopulationRow;
+    attachLazyRawRow(row, { "رقم الصورة": "XR-0003", Extra: "from-risk-only" }, null);
+
+    expect(row.rawRow?.Extra).toBe("from-risk-only");
+    expect(Object.keys(row)).not.toContain("rawRow");
+    expect(JSON.stringify(row)).not.toContain("from-risk-only");
+    const streamed = [...streamJsonStringify({ rows: [row] })].join("");
+    expect(streamed).toContain("XR-0003");
+    expect(streamed).not.toContain("rawRow");
+    expect(streamed).not.toContain("from-risk-only");
+  });
+
   it("stripRawRow still removes an ENUMERABLE rawRow, for rows built elsewhere", () => {
     // Kept as a real function, not a no-op: rows that carry a plain data
     // `rawRow` (draft rows, fixtures, legacy callers) still need stripping, and

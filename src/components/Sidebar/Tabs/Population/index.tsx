@@ -19,7 +19,8 @@ import { useDeferredWhileHidden } from "../../../../hooks/useDeferredWhileHidden
 import { logError, logRejection } from "../../../../data/storage/errorLogger";
 import {
   codedMessage,
-  logCodedError
+  logCodedError,
+  resolveErrorCode
 } from "../../../../data/storage/errorCodes";
 import type { SafeWriteProgressPhase } from "../../../../data/storage/safeWrite";
 import { currentMonthFolderInfo, formatMonthFolderName, formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
@@ -483,9 +484,15 @@ export default function PopulationTab() {
   // SafeWriteProgressPhase.
   const [saveProgressPhase, setSaveProgressPhase] = useState<SafeWriteProgressPhase | null>(null);
   // Pending re-process save awaiting user confirmation (month already has a drawn sample).
+  // `monthFolderName` stamps the month the dialog was opened FOR: commitSaveToDisk
+  // recomputes its target from the current render's saveMonth/saveYear, so a
+  // dialog that survived a global-month switch would otherwise write month A's
+  // population into month B — with `confirmedOverwrite: true` bypassing the
+  // TOCTOU sample re-check, orphaning B's sample and distribution.
   const [pendingReprocessSave, setPendingReprocessSave] = useState<{
     processingResult: PopulationProcessingResult;
     riskResult: RiskWorkbookResult;
+    monthFolderName: string;
   } | null>(null);
 
   // Phase 3 — sampling
@@ -977,9 +984,23 @@ export default function PopulationTab() {
     // Guard: re-processing a month that already has a drawn sample would make
     // that sample no longer match the new population — confirm before overwriting.
     const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
-    const existingSample = await loadSampleMaster(directoryHandle, monthFolderName);
+    let existingSample: Awaited<ReturnType<typeof loadSampleMaster>>;
+    try {
+      existingSample = await loadSampleMaster(directoryHandle, monthFolderName);
+    } catch (error) {
+      // loadSampleMaster THROWS when the file exists but could not be read
+      // (v93 contract). Letting that propagate landed in
+      // handleProcessPopulation's catch, which discarded the just-computed
+      // processing result and reported XQ-POP-004 — "processing failed" — for
+      // what was a post-processing disk hiccup. It is a SAVE-step failure:
+      // keep the result, name the real cause, let the user retry the save.
+      const code = resolveErrorCode(error) ?? "XQ-POP-006";
+      logCodedError("population:save-precheck", code, error);
+      setSaveToDiskMessage({ type: "error", text: codedMessage(code) });
+      return;
+    }
     if (existingSample) {
-      setPendingReprocessSave({ processingResult, riskResult });
+      setPendingReprocessSave({ processingResult, riskResult, monthFolderName });
       return;
     }
 
@@ -1065,7 +1086,11 @@ export default function PopulationTab() {
       } else if (result.sampleExists) {
         // A sample was drawn between the pre-check and the locked write (TOCTOU):
         // prompt for explicit overwrite confirmation instead of silently failing.
-        setPendingReprocessSave({ processingResult, riskResult });
+        setPendingReprocessSave({
+          processingResult,
+          riskResult,
+          monthFolderName: formatMonthFolderName(saveMonth, saveYear),
+        });
       } else {
         logCodedError("population:save-to-disk", "XQ-POP-005", new Error(result.error));
         setSaveToDiskMessage({
@@ -1074,12 +1099,17 @@ export default function PopulationTab() {
         });
       }
     } catch (error) {
-      setSaveToDiskMessage({
-        type: "error",
-        text: error instanceof MonthClosedError
-          ? getLabels().msg_month_closed_write_blocked
-          : codedMessage("XQ-POP-006"),
-      });
+      if (error instanceof MonthClosedError) {
+        setSaveToDiskMessage({ type: "error", text: getLabels().msg_month_closed_write_blocked });
+      } else {
+        // Classify + log instead of flattening to the generic XQ-POP-006: a
+        // tagged XQ-IO-029 from ensureMonthWritable (thrown outside
+        // saveMonthRunLocked's classifying catch) was being destroyed between
+        // the throw site and the screen — v97.0's disease, at one more site.
+        const code = resolveErrorCode(error) ?? "XQ-POP-006";
+        logCodedError("population:commit-save", code, error);
+        setSaveToDiskMessage({ type: "error", text: codedMessage(code) });
+      }
     } finally {
       setIsSavingToDisk(false);
       setSaveProgressPhase(null);
@@ -1138,16 +1168,45 @@ export default function PopulationTab() {
         return;
       }
 
-      setSampleDrawResult(drawResult.data);
+      // Recorded audit finding: a config whose stage targets all resolve to 0
+      // "succeeds" with an EMPTY sample (pinned by the golden test as a caller
+      // trap — sampleAlgorithm.golden.test.ts). Persisting it writes an empty
+      // sample.master.json and irreversibly advances the month to `sampled`
+      // (updateMonthStatus is monotonic), landing every later load on Phase 4
+      // with nothing to distribute. Refuse HERE — the draw algorithm itself is
+      // deterministic-by-contract and stays untouched.
+      if (drawResult.data.rows.length === 0) {
+        setSampleSaveMessage({ type: "error", text: getLabels().msg_sample_draw_empty_refused });
+        return;
+      }
 
       if (directoryHandle) {
         const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
+        // Re-check the redraw hard block right before the overwrite: the check
+        // at the top of this function ran BEFORE the draw itself — seconds on
+        // a large month — and a first assignment committed by another machine
+        // inside that window would be orphaned by this save (saveSampleMaster
+        // is a plain overwrite, not CAS). Same fresh-re-read pattern as the
+        // v98.4 assignment guards; the residual SMB-lag window is unclosable
+        // without a backend.
+        const preSaveLog = await loadDistributionLog(directoryHandle, monthFolderName);
+        if (preSaveLog.events.length > 0) {
+          setSampleSaveMessage({ type: "error", text: getLabels().sample_redraw_blocked });
+          return;
+        }
         const saveResult = await saveSampleMaster(
           directoryHandle,
           monthFolderName,
           drawResult.data
         );
         if (saveResult.ok) {
+          // Only a SAVED sample may feed Phase 4. Setting this before the save
+          // let a failed save keep the drawn sample in React state, and the
+          // 3→4 gate (`!sampleDrawResult`) then allowed bulk-assigning rows
+          // that exist in no on-disk sample.master.json — durable events every
+          // other machine's fold absorbs as absent-row phantoms, and a month
+          // the redraw hard block then wedges (events exist, sample does not).
+          setSampleDrawResult(drawResult.data);
           await updateMonthStatus(directoryHandle, monthFolderName, "sampled");
           // A1: persist the documented sampling plan next to the sample master.
           // Best-effort — a plan-write failure must not fail the draw itself.
@@ -1181,6 +1240,25 @@ export default function PopulationTab() {
             text: `تم حفظ العينة في ${monthFolderName}/sample/sample.master.json`
           });
           setMonthRefreshKey((k) => k + 1);
+
+          // Save sampling proof document — INSIDE the ok-branch: a failed
+          // master save used to still write a proof describing a draw that is
+          // not in sample.master.json, an on-disk audit contradiction.
+          await saveSamplingProof(directoryHandle, monthFolderName, {
+            month: saveMonth,
+            year: saveYear,
+            monthFolderName,
+            drawnAt: drawResult.data.drawnAt,
+            drawnBy: sessionRef.current?.username ?? "unknown",
+            rngSeed: sampleSeed,
+            samplingRules: config.samplingRules,
+            portAllocations: drawResult.data.portAllocations ?? [],
+            totalRequested: drawResult.data.totalRequested,
+            totalActual: drawResult.data.totalActual,
+            certScanActual: drawResult.data.certScanActual,
+            nonCertScanActual: drawResult.data.nonCertScanActual,
+            certScanShortfalls: drawResult.data.certScanShortfalls ?? [],
+          });
         } else {
           logCodedError(
             "population:save-sample",
@@ -1192,23 +1270,10 @@ export default function PopulationTab() {
             text: codedMessage("XQ-SMP-004", { detail: saveResult.error })
           });
         }
-
-        // Save sampling proof document
-        await saveSamplingProof(directoryHandle, monthFolderName, {
-          month: saveMonth,
-          year: saveYear,
-          monthFolderName,
-          drawnAt: drawResult.data.drawnAt,
-          drawnBy: sessionRef.current?.username ?? "unknown",
-          rngSeed: sampleSeed,
-          samplingRules: config.samplingRules,
-          portAllocations: drawResult.data.portAllocations ?? [],
-          totalRequested: drawResult.data.totalRequested,
-          totalActual: drawResult.data.totalActual,
-          certScanActual: drawResult.data.certScanActual,
-          nonCertScanActual: drawResult.data.nonCertScanActual,
-          certScanShortfalls: drawResult.data.certScanShortfalls ?? [],
-        });
+      } else {
+        // No workspace mounted (demo/preview): the in-memory sample is the
+        // only sample there is, so it may feed the next phase directly.
+        setSampleDrawResult(drawResult.data);
       }
     } catch (error) {
       if (error instanceof MonthClosedError) {
@@ -1492,9 +1557,14 @@ export default function PopulationTab() {
         onConfirm={() => {
           const pending = pendingReprocessSave;
           setPendingReprocessSave(null);
-          if (pending) {
-            void commitSaveToDisk(pending.processingResult, pending.riskResult, true);
+          if (!pending) return;
+          // The month changed under the open dialog — confirming now would
+          // write the OLD month's population into the newly selected month.
+          if (pending.monthFolderName !== formatMonthFolderName(saveMonth, saveYear)) {
+            setSaveToDiskMessage({ type: "error", text: getLabels().population_reprocess_cancelled });
+            return;
           }
+          void commitSaveToDisk(pending.processingResult, pending.riskResult, true);
         }}
         onCancel={() => {
           setPendingReprocessSave(null);

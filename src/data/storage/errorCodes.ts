@@ -178,6 +178,11 @@ export const ERROR_CODES = {
     meaning: "readJsonFile: read failed for an unclassified reason",
     labelKey: "err_fs_014_read_failed",
   },
+  "XQ-FS-015": {
+    meaning:
+      "the workspace could not be READ (transient share/permission fault) — it was NOT judged missing; retry instead of creating, and the create/mount path refuses to overwrite files it could not verify",
+    labelKey: "err_fs_015_workspace_unreachable",
+  },
 
   // ── IO: safeWrite / compressed envelope ──────────────────────────────────
   "XQ-IO-001": {

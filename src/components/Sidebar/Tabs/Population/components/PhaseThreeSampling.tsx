@@ -345,10 +345,12 @@ export default function PhaseThreeSampling({
                       min={0}
                       disabled={isLockedState || !canConfigureSample}
                       onChange={(e) =>
+                        // min={0} is a spinner hint, not enforcement — a typed
+                        // negative reaches the config unclamped otherwise.
                         handleRuleChange(
                           rule.stageKey,
                           "value",
-                          parseInt(e.target.value, 10) || 0
+                          Math.max(0, parseInt(e.target.value, 10) || 0)
                         )
                       }
                     />
@@ -391,7 +393,14 @@ export default function PhaseThreeSampling({
                         min={0}
                         disabled={isLockedState || !canConfigureSample}
                         onChange={(e) => {
-                          const v = parseInt(e.target.value, 10) || 0;
+                          // Clamp: a typed negative percentage reached
+                          // stagePortDraw as a negative cert target, and
+                          // drawWithoutReplacement's `slice(0, negative)` then
+                          // drew ALL BUT the last N cert rows — a massive
+                          // silent overdraw with no shortfall recorded. Pure
+                          // input sanitation: every config valid today draws
+                          // byte-identically, so no algorithm-version bump.
+                          const v = Math.max(0, parseInt(e.target.value, 10) || 0);
                           if (rule.certScanMethod === "percentage") {
                             handleRuleChange(rule.stageKey, "certScanPercentage", v);
                           } else {

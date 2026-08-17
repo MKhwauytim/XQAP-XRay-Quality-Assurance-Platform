@@ -3,6 +3,8 @@ import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
 import { getPopulationRoot } from "../workspace/workspacePaths";
+import { isNotFoundError } from "../storage/transientFileErrors";
+import { logError } from "../storage/errorLogger";
 
 export type SystemField = {
   key: string;
@@ -412,13 +414,26 @@ export async function loadPopulationConfig(
         employeeAllocations: loaded.employeeAllocations || []
       };
     }
-  } catch {
-    // Fail silently, write default config
-    try {
-      const populationDir = await getPopulationRoot(directoryHandle, true);
-      await safeWriteJson(populationDir, CONFIG_FILE, DEFAULT_POPULATION_CONFIG);
-    } catch {
-      // directory write failed
+  } catch (error) {
+    // Seed the default config ONLY when the population root genuinely does not
+    // exist yet (a fresh workspace) — a named NotFoundError. Any other throw
+    // here is "I could not look": a transient share fault, an exhausted
+    // NotReadable retry budget, a revoked grant. Writing the defaults for
+    // those DESTROYED the workspace's real config.json — custom mapping
+    // templates, stage aliases, sampling rules and employee allocations —
+    // from a code path that runs on every wizard mount, silently, with the
+    // CAS revision reset so the next admin save propagated the loss to every
+    // machine. A read failure returns the in-memory defaults for THIS call
+    // only and leaves the file alone.
+    if (isNotFoundError(error)) {
+      try {
+        const populationDir = await getPopulationRoot(directoryHandle, true);
+        await safeWriteJson(populationDir, CONFIG_FILE, DEFAULT_POPULATION_CONFIG);
+      } catch {
+        // directory write failed
+      }
+    } else {
+      logError("population:load-config", error);
     }
   }
 

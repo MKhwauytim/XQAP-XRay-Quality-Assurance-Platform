@@ -105,10 +105,23 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     );
 
     if (result.status === "ready") {
-      const files = await loadWorkspaceFiles(handle);
-      setLoadedFiles(files);
-      applyDiskUsers(files);
-      setUsersHydrated(true);
+      try {
+        const files = await loadWorkspaceFiles(handle);
+        setLoadedFiles(files);
+        applyDiskUsers(files);
+        setUsersHydrated(true);
+      } catch (error) {
+        // loadWorkspaceFiles now THROWS when users.permissions.json exists but
+        // could not be read (XQ-FS-015). Proceeding here used to hydrate the
+        // shipped default users instead — and the next admin edit persisted
+        // that default set to disk, wiping the real accounts. Fail the mount
+        // loudly; the error card offers retry.
+        logCodedError("workspace:load-files", "XQ-FS-015", error);
+        setStatus("error");
+        setMessage(formatUserError("XQ-FS-015", error));
+        setLoadedFiles(emptyLoadedFiles);
+        return;
+      }
     } else {
       setLoadedFiles(emptyLoadedFiles);
     }
@@ -199,6 +212,11 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         setMessage(formatUserError("XQ-WS-009"));
         return;
       }
+      // Same hardening as selectWorkspace (v97.0): reconnecting to a REAL
+      // workspace must leave demo read-only mode. The asymmetry was latent
+      // (demo state hides the reconnect affordance today) but it is exactly
+      // the shape that bit v97.0, so close it while it is one line.
+      setReadOnlyMode(false);
       await applyWorkspaceHandle(persisted.directoryHandle, {
         persist: false,
         restored: true
