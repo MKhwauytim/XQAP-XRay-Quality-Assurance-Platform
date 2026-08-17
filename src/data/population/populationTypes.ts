@@ -213,7 +213,19 @@ export function attachLazyRawRow(
   extras: Record<string, unknown> | null
 ): void {
   if (!extras || Object.keys(extras).length === 0) {
-    row.rawRow = base;
+    // Same non-enumerable contract as the extras branch below — this branch is
+    // the COMMON one (risk-only imports, BI-unmatched rows, matches with no
+    // extra keys), and a plain `row.rawRow = base` assignment here re-created
+    // an enumerable own property (the row literal declares `rawRow: undefined`),
+    // silently reversing the v98.1 guarantee: `streamJsonStringify` enumerates
+    // with Object.keys, so the full original Excel row was serialized into
+    // population.final.json for every such row.
+    Object.defineProperty(row, "rawRow", {
+      enumerable: false,
+      configurable: true,
+      writable: true,
+      value: base,
+    });
     return;
   }
   Object.defineProperty(row, "rawRow", {

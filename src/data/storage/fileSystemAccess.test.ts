@@ -135,3 +135,92 @@ test("createWorkspaceStructure creates numbered workspace folders", async () => 
   const templates = await dir.getDirectoryHandle("6-templates", { create: false });
   expect(templates.name).toBe("6-templates");
 });
+
+// ── The create-workspace field report: "fails once, works after re-pick + re-grant" ──
+// Four-link chain (2026-08-17 workflow audit): the structure check read every
+// probe failure as absence, the missing_structure card then offered CREATE over
+// a live-but-unreachable workspace, and the create path itself overwrote the
+// manifest + users file with defaults unconditionally. These pin the closures.
+
+test("checkWorkspaceStructure returns error (XQ-FS-015), never missing_structure, when a probe fails with a non-NotFound error", async () => {
+  const { setSimulatedFaults, clearSimulatedFaults } = await import("./memoryDirectory");
+  const dir = createMemoryDirectory();
+  await createWorkspaceStructure(dir, "admin");
+
+  // An idle-disconnected SMB session: the folder EXISTS, the probe just fails.
+  setSimulatedFaults(dir, [
+    {
+      operation: "getDirectoryHandle",
+      name: "1-population",
+      create: false,
+      errorName: "NotReadableError",
+      times: Number.POSITIVE_INFINITY,
+    },
+  ]);
+  const result = await checkWorkspaceStructure(dir);
+  expect(result.status).toBe("error");
+  expect(result.missingItems).toEqual([]);
+  expect(result.message).toContain("XQ-FS-015");
+
+  // The share recovers — the same workspace is ready, nothing was created.
+  clearSimulatedFaults(dir);
+  expect((await checkWorkspaceStructure(dir)).status).toBe("ready");
+});
+
+test("a genuinely missing folder still reports missing_structure (absence is still absence)", async () => {
+  const dir = createMemoryDirectory();
+  await createWorkspaceStructure(dir, "admin");
+  await dir.removeEntry!("6-templates", { recursive: true });
+
+  const result = await checkWorkspaceStructure(dir);
+  expect(result.status).toBe("missing_structure");
+  expect(result.missingItems).toContain("6-templates");
+});
+
+test("createWorkspaceStructure never rewrites a healthy manifest or users file", async () => {
+  const dir = createMemoryDirectory();
+  await createWorkspaceStructure(dir, "first-admin");
+  const userData = await dir.getDirectoryHandle("3-user-data", { create: false });
+  const system = await dir.getDirectoryHandle("5-system", { create: false });
+  const usersBefore = await readJsonFile<Record<string, unknown>>(userData, "users.permissions.json");
+  const manifestBefore = await readJsonFile<Record<string, unknown>>(system, "workspace.manifest.json");
+  expect(usersBefore.ok && manifestBefore.ok).toBe(true);
+
+  // A second create (misdiagnosed missing_structure, or the repair path) must
+  // be a no-op for both files — byte-identical, not merely similar.
+  await createWorkspaceStructure(dir, "second-admin");
+  const usersAfter = await readJsonFile<Record<string, unknown>>(userData, "users.permissions.json");
+  const manifestAfter = await readJsonFile<Record<string, unknown>>(system, "workspace.manifest.json");
+  expect(usersAfter.ok && usersBefore.ok && usersAfter.rawText === usersBefore.rawText).toBe(true);
+  expect(manifestAfter.ok && manifestBefore.ok && manifestAfter.rawText === manifestBefore.rawText).toBe(true);
+});
+
+test("loadWorkspaceFiles throws XQ-FS-015 for an unreadable users file instead of returning null (default-users wipe guard)", async () => {
+  const { setSimulatedFaults, clearSimulatedFaults } = await import("./memoryDirectory");
+  const { errorCodeOf } = await import("./errorCodes");
+  const { loadWorkspaceFiles } = await import("./fileSystemAccess");
+  const dir = createMemoryDirectory();
+  await createWorkspaceStructure(dir, "admin");
+
+  setSimulatedFaults(dir, [
+    {
+      operation: "getFile",
+      name: "users.permissions.json",
+      errorName: "NotReadableError",
+      times: Number.POSITIVE_INFINITY,
+    },
+  ]);
+  let thrown: unknown = null;
+  try {
+    await loadWorkspaceFiles(dir);
+  } catch (error) {
+    thrown = error;
+  }
+  clearSimulatedFaults(dir);
+  expect(thrown).not.toBeNull();
+  expect(errorCodeOf(thrown)).toBe("XQ-FS-015");
+
+  // With the share healthy the same call returns the real users file.
+  const files = await loadWorkspaceFiles(dir);
+  expect(files.usersPermissions).not.toBeNull();
+});

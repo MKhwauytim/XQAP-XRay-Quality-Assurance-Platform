@@ -28,6 +28,7 @@ import {
   type WorkspaceStructureCheckResult
 } from "../workspace/workspaceTypes";
 import { detectWorkspaceSchema, initializeWorkspaceSchemaMetadata } from "../workspace/workspaceSchema";
+import { retryTransientWrite } from "./transientFileErrors";
 
 type FileSystemPermissionMode = "read" | "readwrite";
 type FileSystemPermissionState = "granted" | "denied" | "prompt";
@@ -176,6 +177,18 @@ export async function checkWorkspaceStructure(
 
   const missingItems: string[] = [];
   const invalidItems: string[] = [];
+  // "I could not look" is not "it is not there" — the same contract every
+  // storage read in this repo enforces (v97.0), finally applied to the
+  // workspace ENTRY check. A probe that rejects with anything other than a
+  // named NotFoundError (a NotReadableError on an idle-disconnected SMB
+  // session, a revoked grant, a share blip) used to be counted as a missing
+  // folder, so a fully-populated live workspace that was merely unreachable
+  // for an instant was reported `missing_structure` — whose card offers
+  // «إنشاء بنية مساحة العمل», i.e. an invitation to overwrite the live
+  // workspace's manifest and users file with defaults. Any unreachable item
+  // now short-circuits to an error verdict (XQ-FS-015) that renders the
+  // retry card and never the create button.
+  const unreachableItems: string[] = [];
 
   // Every check below is independent -- none depends on another's result,
   // only on accumulating into missingItems/invalidItems -- so they run
@@ -194,8 +207,23 @@ export async function checkWorkspaceStructure(
     )
   );
   topFolderResults.forEach((result, index) => {
-    if (result.status === "rejected") missingItems.push(allTopFolders[index]);
+    if (result.status !== "rejected") return;
+    if (isNotFoundError(result.reason)) missingItems.push(allTopFolders[index]);
+    else unreachableItems.push(allTopFolders[index]);
   });
+  if (unreachableItems.length > 0) {
+    logCodedError(
+      "fileSystemAccess:check-structure",
+      "XQ-FS-015",
+      new Error(`Unreachable during structure check: ${unreachableItems.join(", ")}`)
+    );
+    return {
+      status: "error",
+      missingItems: [],
+      invalidItems: [],
+      message: codedMessage("XQ-FS-015"),
+    };
+  }
 
   // If the .system folder itself is missing, it's already recorded above
   // (it's one of allTopFolders) -- this only needs to run when it exists.
@@ -210,19 +238,29 @@ export async function checkWorkspaceStructure(
       )
     );
     systemSubfolderResults.forEach((result, index) => {
-      if (result.status === "rejected") {
-        missingItems.push(`${WORKSPACE_FILE_NAMES.systemFolder}/${SYSTEM_SUBFOLDERS[index]}`);
-      }
+      if (result.status !== "rejected") return;
+      const path = `${WORKSPACE_FILE_NAMES.systemFolder}/${SYSTEM_SUBFOLDERS[index]}`;
+      if (isNotFoundError(result.reason)) missingItems.push(path);
+      else unreachableItems.push(path);
     });
   }
 
+  // Same discrimination for the directory resolutions: only a named NotFound
+  // means "this root does not exist"; any other failure is inconclusive.
+  const locateDir = async (
+    resolve: () => Promise<DirectoryHandleLike>,
+    fileName: string
+  ): Promise<{ dir: DirectoryHandleLike | null; fileName: string }> => {
+    try {
+      return { dir: await resolve(), fileName };
+    } catch (error) {
+      if (!isNotFoundError(error)) unreachableItems.push(fileName);
+      return { dir: null, fileName };
+    }
+  };
   const requiredFileLocations = await Promise.all([
-    getSystemRoot(directoryHandle, false)
-      .then((dir) => ({ dir, fileName: WORKSPACE_FILE_NAMES.manifest }))
-      .catch(() => ({ dir: null as DirectoryHandleLike | null, fileName: WORKSPACE_FILE_NAMES.manifest })),
-    getUserDataRoot(directoryHandle, false)
-      .then((dir) => ({ dir, fileName: WORKSPACE_FILE_NAMES.usersPermissions }))
-      .catch(() => ({ dir: null as DirectoryHandleLike | null, fileName: WORKSPACE_FILE_NAMES.usersPermissions })),
+    locateDir(() => getSystemRoot(directoryHandle, false), WORKSPACE_FILE_NAMES.manifest),
+    locateDir(() => getUserDataRoot(directoryHandle, false), WORKSPACE_FILE_NAMES.usersPermissions),
   ]);
 
   const fileCheckResults = await Promise.all(
@@ -230,6 +268,13 @@ export async function checkWorkspaceStructure(
       if (!item.dir) return { fileName: item.fileName, outcome: "missing" as const };
       const result = await readJsonFile<JsonEnvelope<unknown>>(item.dir, item.fileName);
       if (!result.ok) {
+        // "missing" is absence; "invalid_json" is a real file we could read and
+        // could not parse. A permission/read failure is NEITHER — it must not
+        // count as invalid (whose admin card offers a defaults-overwriting
+        // repair) any more than as missing.
+        if (result.reason === "permission_denied" || result.reason === "read_failed") {
+          return { fileName: item.fileName, outcome: "unreachable" as const };
+        }
         return {
           fileName: item.fileName,
           outcome: result.reason === "missing" ? ("missing" as const) : ("invalid" as const),
@@ -244,6 +289,21 @@ export async function checkWorkspaceStructure(
   for (const { fileName, outcome } of fileCheckResults) {
     if (outcome === "missing") missingItems.push(fileName);
     else if (outcome === "invalid") invalidItems.push(fileName);
+    else if (outcome === "unreachable") unreachableItems.push(fileName);
+  }
+
+  if (unreachableItems.length > 0) {
+    logCodedError(
+      "fileSystemAccess:check-structure",
+      "XQ-FS-015",
+      new Error(`Unreachable during structure check: ${unreachableItems.join(", ")}`)
+    );
+    return {
+      status: "error",
+      missingItems: [],
+      invalidItems: [],
+      message: codedMessage("XQ-FS-015"),
+    };
   }
 
   if (missingItems.length > 0) {
@@ -284,11 +344,35 @@ export async function loadWorkspaceFiles(
   // They're kept as always-null in the returned shape (rather than removed from
   // the WorkspaceLoadedFiles type) since that type lives in workspaceTypes.ts,
   // outside this change's scope.
-  const userDataDir = await getUserDataRoot(directoryHandle, false).catch(() => null);
+  const userDataDir = await getUserDataRoot(directoryHandle, false).catch((error: unknown) => {
+    // Only genuine absence may fall back to the legacy root-level location; a
+    // transient failure to OPEN the folder must not be read as "no user data".
+    if (!isNotFoundError(error)) {
+      throw tagErrorOnce(error, "XQ-FS-015");
+    }
+    return null;
+  });
 
   const usersPermissions = await readJsonFile<
     WorkspaceLoadedFiles["usersPermissions"]
   >(userDataDir ?? directoryHandle, WORKSPACE_FILE_NAMES.usersPermissions);
+
+  // A users file we could not READ is not a users file that does not exist.
+  // Returning null here made the provider hydrate the shipped DEFAULT users —
+  // and the next admin edit then persisted that default set to disk wholesale
+  // (userSync writes the full in-memory state), wiping every real account,
+  // role and password hash. The mount must fail loudly instead; the structure
+  // check that just passed proves the file was readable moments ago, so this
+  // is transient and a retry is the honest advice.
+  if (
+    !usersPermissions.ok &&
+    (usersPermissions.reason === "permission_denied" || usersPermissions.reason === "read_failed")
+  ) {
+    throw taggedError(
+      "XQ-FS-015",
+      `Cannot read ${WORKSPACE_FILE_NAMES.usersPermissions}: ${usersPermissions.message}`
+    );
+  }
 
   return {
     manifest: null,
@@ -318,62 +402,109 @@ export async function createWorkspaceStructure(
   // the manifest, writing the permissions file and stamping the schema fail for
   // completely different reasons, and the caller previously saw one
   // undifferentiated "check write permissions" message for all of them.
-  const systemHandle = await taggedStep("XQ-FS-006", async () => {
-    await directoryHandle.getDirectoryHandle(
-      WORKSPACE_FILE_NAMES.employeeAnswersFolder,
-      { create: true }
-    );
+  //
+  // The folder phases ride the transient-write retry ladder: "create structure"
+  // after login is typically the session's FIRST write-shaped touch of a
+  // UNC/SMB share, and the first I/O against an idle-disconnected SMB session
+  // is exactly the operation that fails once and succeeds on the next attempt
+  // — which used to force the user through the re-pick + re-grant ritual for a
+  // create that a 20 ms retry would have completed.
+  const systemHandle = await taggedStep("XQ-FS-006", () =>
+    retryTransientWrite(async () => {
+      await directoryHandle.getDirectoryHandle(
+        WORKSPACE_FILE_NAMES.employeeAnswersFolder,
+        { create: true }
+      );
 
-    await directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.population, { create: true });
-    await directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.userData, { create: true });
-    await directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.reports, { create: true });
+      await directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.population, { create: true });
+      await directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.userData, { create: true });
+      await directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.reports, { create: true });
 
-    return directoryHandle.getDirectoryHandle(
-      WORKSPACE_FILE_NAMES.systemFolder,
-      { create: true }
-    );
-  });
-
-  await taggedStep("XQ-FS-007", async () => {
-    await systemHandle.getDirectoryHandle(WORKSPACE_FILE_NAMES.locksFolder, {
-      create: true
-    });
-
-    await systemHandle.getDirectoryHandle(WORKSPACE_FILE_NAMES.auditFolder, {
-      create: true
-    });
-
-    await systemHandle.getDirectoryHandle(WORKSPACE_FILE_NAMES.backupsFolder, {
-      create: true
-    });
-
-    await directoryHandle.getDirectoryHandle(
-      WORKSPACE_FILE_NAMES.templatesFolder,
-      { create: true }
-    );
-  });
-
-  const userDataHandle = await taggedStep("XQ-FS-006", () =>
-    directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.userData, {
-      create: true
+      return directoryHandle.getDirectoryHandle(
+        WORKSPACE_FILE_NAMES.systemFolder,
+        { create: true }
+      );
     })
   );
 
-  await taggedStep("XQ-FS-008", async () =>
-    writeJsonFile(
-      systemHandle,
-      WORKSPACE_FILE_NAMES.manifest,
-      await prepareFileForWrite(createDefaultWorkspaceManifest(username), username)
+  await taggedStep("XQ-FS-007", () =>
+    retryTransientWrite(async () => {
+      await systemHandle.getDirectoryHandle(WORKSPACE_FILE_NAMES.locksFolder, {
+        create: true
+      });
+
+      await systemHandle.getDirectoryHandle(WORKSPACE_FILE_NAMES.auditFolder, {
+        create: true
+      });
+
+      await systemHandle.getDirectoryHandle(WORKSPACE_FILE_NAMES.backupsFolder, {
+        create: true
+      });
+
+      await directoryHandle.getDirectoryHandle(
+        WORKSPACE_FILE_NAMES.templatesFolder,
+        { create: true }
+      );
+    })
+  );
+
+  const userDataHandle = await taggedStep("XQ-FS-006", () =>
+    retryTransientWrite(() =>
+      directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.userData, {
+        create: true
+      })
     )
   );
 
-  await taggedStep("XQ-FS-009", async () =>
-    writeJsonFile(
+  // NEVER overwrite a live workspace's identity or its user/permission set.
+  // The structure check can misfire (or the share can recover between the
+  // check and this click), and this function used to rewrite BOTH files with
+  // defaults unconditionally — a fresh workspaceId, and every managed user,
+  // role and password hash replaced by the shipped defaults, with one .bak
+  // generation between the mistake and permanent loss. A file that already
+  // holds a valid envelope is kept; a file we could not READ refuses the
+  // create outright (XQ-FS-015) rather than treating the failure as absence.
+  const keepExisting = async (
+    dir: DirectoryHandleLike,
+    fileName: string
+  ): Promise<boolean> => {
+    const existing = await readJsonFile<JsonEnvelope<unknown>>(dir, fileName);
+    // Keep only a HEALTHY file (valid envelope, current schema): the
+    // invalid-structure repair path routes through this same function, so a
+    // corrupt or wrong-version file must still be recreatable.
+    if (
+      existing.ok &&
+      isJsonEnvelope(existing.file) &&
+      existing.file.metadata.schemaVersion === WORKSPACE_SCHEMA_VERSION
+    ) {
+      return true;
+    }
+    if (!existing.ok && (existing.reason === "permission_denied" || existing.reason === "read_failed")) {
+      throw taggedError(
+        "XQ-FS-015",
+        `Cannot verify existing ${fileName} before create: ${existing.message}`
+      );
+    }
+    return false;
+  };
+
+  await taggedStep("XQ-FS-008", async () => {
+    if (await keepExisting(systemHandle, WORKSPACE_FILE_NAMES.manifest)) return;
+    await writeJsonFile(
+      systemHandle,
+      WORKSPACE_FILE_NAMES.manifest,
+      await prepareFileForWrite(createDefaultWorkspaceManifest(username), username)
+    );
+  });
+
+  await taggedStep("XQ-FS-009", async () => {
+    if (await keepExisting(userDataHandle, WORKSPACE_FILE_NAMES.usersPermissions)) return;
+    await writeJsonFile(
       userDataHandle,
       WORKSPACE_FILE_NAMES.usersPermissions,
       await prepareFileForWrite(createDefaultUsersPermissions(username), username)
-    )
-  );
+    );
+  });
 
   await taggedStep("XQ-FS-010", async () => {
     const schema = await detectWorkspaceSchema(directoryHandle);

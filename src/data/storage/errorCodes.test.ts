@@ -168,6 +168,8 @@ const PINNED_MEANINGS: Record<string, string> = {
     "the folder accepts a .tmp file but a file with the FAILING file's own extension does not survive a write-then-read-back round trip — something outside the browser (antivirus, DLP, a sync client) is removing that file type, and no amount of retrying will help",
   "XQ-IO-032":
     "casLoop exhausted its retries because an attempt kept THROWING (not because it lost the revision race) and the exception carried no more specific code",
+  "XQ-FS-015":
+    "the workspace could not be READ (transient share/permission fault) — it was NOT judged missing; retry instead of creating, and the create/mount path refuses to overwrite files it could not verify",
   "XQ-IO-031":
     "NotFound persisted after every retry but the containing directory is reachable and writable — a genuine transient share flake, so retrying the action is the right advice",
   "XQ-AUTH-001":
@@ -228,6 +230,8 @@ const PINNED_MEANINGS: Record<string, string> = {
     "no sample data exists for the selected month",
   "XQ-SMP-007":
     "saveSampleMaster: writing sample.master.json threw",
+  "XQ-SMP-008":
+    "appendSampleRow rejected an enlargement: the dead row was already substituted by a DIFFERENT replacement row (XQ-DIST-005 partial-write state) — the recovery is retrying with the original candidate, which resumes",
 };
 
 function walk(dir: string): string[] {

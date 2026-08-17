@@ -28,6 +28,7 @@ import {
 } from "../../../../../data/workspace/bootProgress";
 import type { DistributionEntry } from "../../../../../data/distribution/distributionTypes";
 import {
+  classifyReplacementRowAvailability,
   executeReplacement,
 } from "../../../../../data/distribution/replacement";
 import { submitReassignmentRequests } from "../../../../../data/referral/submitReassignment";
@@ -1028,9 +1029,17 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           freshDead.assignedTo === entry.assignedTo &&
           (freshDead.status === "pending" || freshDead.status === "replacement-requested");
 
+        // "resume-partial" (an earlier attempt appended the sample row for this
+        // very substitution and then failed to write the events — XQ-DIST-005)
+        // must pass: retrying with the same candidate is the designed recovery,
+        // and the dialog stays open with the same candidate for exactly that.
         const replacementTaken =
-          freshRows.some((r) => r.xrayImageId === replacement.xrayImageId) ||
-          (freshDist?.entries.some((e) => e.xrayImageId === replacement.xrayImageId) ?? false);
+          classifyReplacementRowAvailability({
+            replacementXrayImageId: replacement.xrayImageId,
+            deadXrayImageId: entry.xrayImageId,
+            sample: { rows: freshRows, replacedRowIds: freshSample?.replacedRowIds },
+            entries: freshDist?.entries,
+          }) === "taken";
 
         if (!deadStillEligible || replacementTaken) {
           setReplacementError(STALE_MSG);

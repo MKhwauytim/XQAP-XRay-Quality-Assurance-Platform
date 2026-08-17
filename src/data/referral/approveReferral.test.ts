@@ -11,7 +11,7 @@ import {
   closeMonth,
   invalidateMonthLockCache,
 } from "../population/monthLock";
-import { loadSampleMaster, saveSampleMaster } from "../sampling/sampleStorage";
+import { appendSampleRow, loadSampleMaster, saveSampleMaster } from "../sampling/sampleStorage";
 import { executeReplacement } from "../distribution/replacement";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import {
@@ -534,6 +534,101 @@ describe("approveReplacement", () => {
     // The losing request stays pending for a human to resolve, never auto-denied.
     const log = await loadReplacementLog(root, MONTH);
     expect(log.requests.find((r) => r.requestId === "rep-2")!.status).toBe("pending");
+  });
+
+  it("resumes a partially-written replacement (XQ-DIST-005 crash state) instead of dead-ending", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    await seedReplacement(root);
+    await appendReplacementRequest(root, MONTH, makeReplacementRequest());
+
+    // The OPPOSITE half of the replay test above: the sample append landed
+    // (row appended + original retired in one CAS write) but the events write
+    // failed on the flaky share, so the log knows nothing about the request.
+    // The old step-3b guard read this state as "replacement row already in the
+    // sample" and returned stale-ownership on every retry, forever.
+    const appended = await appendSampleRow(root, MONTH, makeRow(REPL_ROW), undefined, "A1");
+    expect(appended.ok).toBe(true);
+    const eventsBefore = (await loadDistributionLog(root, MONTH)).events.length;
+
+    const result = await approveReplacement({
+      directoryHandle: root, monthFolderName: MONTH, requestId: "rep-1", reviewedBy: "sup1",
+    });
+    expect(result).toEqual({ ok: true, alreadyApplied: false });
+
+    // The resume re-used the already-appended row: no growth, no double retire.
+    const sample = await loadSampleMaster(root, MONTH);
+    expect(sample?.rows.map((r) => r.xrayImageId)).toEqual(["A1", "A2", REPL_ROW]);
+    expect(sample?.replacedRowIds).toEqual(["A1"]);
+    expect(sample?.totalActual).toBe(2);
+
+    const current = deriveCurrentDistribution(
+      await loadDistributionLog(root, MONTH),
+      (sample?.rows ?? []) as PreparedPopulationRow[]
+    );
+    expect(current.entries.find((e) => e.xrayImageId === "A1")?.status).toBe("replaced");
+    const replacement = current.entries.find((e) => e.xrayImageId === REPL_ROW);
+    expect(replacement?.assignedTo).toBe("emp1");
+    expect(replacement?.status).toBe("pending");
+    expect((await loadDistributionLog(root, MONTH)).events).toHaveLength(eventsBefore + 2);
+    expect((await loadReplacementLog(root, MONTH)).requests[0]!.status).toBe("approved");
+  });
+
+  it("still refuses an unowned in-sample row when the original was never retired", async () => {
+    // The resume exception must stay NARROW: a sample row with no distribution
+    // entry is normal in a partially-distributed month, and handing it out as
+    // a replacement would double-count it. Only the recorded substitution of
+    // THIS dead row (replacedRowIds) unlocks the resume.
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    const sampled = [makeRow("A1"), makeRow("A2"), makeRow("A3")];
+    await saveSampleMaster(root, MONTH, makeSample(sampled));
+    // A3 is drawn but not yet distributed — no entry owns it.
+    await appendDistributionEvents(root, MONTH, [
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "admin" }),
+      buildAssignEvent({ xrayImageId: "A2", assignedTo: "emp2", eventBy: "admin" }),
+    ]);
+    await appendReplacementRequest(
+      root,
+      MONTH,
+      makeReplacementRequest({
+        replacementXrayImageId: "A3",
+        replacementRowData: makeRow("A3") as unknown as Record<string, unknown>,
+      })
+    );
+
+    const result = await approveReplacement({
+      directoryHandle: root, monthFolderName: MONTH, requestId: "rep-1", reviewedBy: "sup1",
+    });
+    expect(result).toEqual({ ok: false, code: "stale-ownership", staleIds: ["A3"] });
+  });
+
+  it("fails loudly (XQ-SMP-008) on a different candidate after the partial write, instead of enlarging the sample", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    await seedReplacement(root);
+    // Partial write for the ORIGINAL candidate C1 (sample updated, no events).
+    const appended = await appendSampleRow(root, MONTH, makeRow(REPL_ROW), undefined, "A1");
+    expect(appended.ok).toBe(true);
+    // A second request for the same dead row names a different spare row D1.
+    // Committing it would be a plain enlargement (totalActual +1 forever) that
+    // also strands C1 in the sample with no owner.
+    await appendReplacementRequest(
+      root,
+      MONTH,
+      makeReplacementRequest({
+        requestId: "rep-2",
+        replacementXrayImageId: "D1",
+        replacementRowData: makeRow("D1") as unknown as Record<string, unknown>,
+      })
+    );
+
+    const result = await approveReplacement({
+      directoryHandle: root, monthFolderName: MONTH, requestId: "rep-2", reviewedBy: "sup1",
+    });
+    expect(result).toMatchObject({ ok: false, code: "dist-failed" });
+    expect((result as { error?: string }).error).toContain("XQ-SMP-008");
+
+    const sample = await loadSampleMaster(root, MONTH);
+    expect(sample?.rows.some((r) => r.xrayImageId === "D1")).toBe(false);
+    expect(sample?.totalActual).toBe(2);
   });
 
   it("refuses a replacement row that is already part of the drawn sample", async () => {

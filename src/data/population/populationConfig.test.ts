@@ -80,3 +80,54 @@ describe("populationConfig — CAS-protected save", () => {
     expect(["a", "b"]).toContain(loaded.customFields[0].key);
   });
 });
+
+// 2026-08-17 audit finding: loadPopulationConfig's catch wrote
+// DEFAULT_POPULATION_CONFIG over the existing config.json for ANY throw — so a
+// transient share fault on a path that runs on every wizard mount silently
+// destroyed the workspace's custom mapping templates, stage aliases, sampling
+// rules and employee allocations. Only a genuine NotFound (fresh workspace) may
+// seed defaults; a read failure returns defaults in memory and leaves the file
+// alone.
+describe("loadPopulationConfig — a transient read failure must not destroy config.json", () => {
+  it("returns defaults for the failed call but leaves the saved config untouched", async () => {
+    const { setSimulatedFaults, clearSimulatedFaults } = await import("../storage/memoryDirectory");
+    const root = makeRoot();
+    const custom = {
+      ...DEFAULT_POPULATION_CONFIG,
+      customFields: [{ key: "extra", labelAr: "إضافي", dataType: "string" as const }],
+    };
+    expect((await savePopulationConfig(root, custom)).ok).toBe(true);
+
+    // Fresh page load (the dir-handle cache is empty) on a flaky share: the
+    // OPEN of the population root throws — the path that reaches the
+    // destructive catch (safeReadJson's own not-ok results never did; the
+    // directory open is what threw).
+    const { __clearWorkspaceDirCacheForTests } = await import("../workspace/workspacePaths");
+    __clearWorkspaceDirCacheForTests();
+    setSimulatedFaults(root as never, [
+      {
+        operation: "getDirectoryHandle",
+        name: "1-population",
+        create: false,
+        errorName: "NotReadableError",
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+    const duringFault = await loadPopulationConfig(root);
+    expect(duringFault.customFields).toEqual([]);
+    clearSimulatedFaults(root as never);
+
+    // The file survived: the next healthy load sees the custom config.
+    const after = await loadPopulationConfig(root);
+    expect(after.customFields).toEqual(custom.customFields);
+  });
+
+  it("still seeds defaults on a genuinely fresh workspace (population root absent)", async () => {
+    const root = makeRoot();
+    const loaded = await loadPopulationConfig(root);
+    expect(loaded.customFields).toEqual([]);
+    // The seed write happened: a subsequent read finds the file.
+    const again = await loadPopulationConfig(root);
+    expect(again.samplingRules.length).toBeGreaterThan(0);
+  });
+});

@@ -396,6 +396,15 @@ export const DEFAULT_LABELS = {
   // refreshDistribution guard (Tier-1 Item H)
   msg_distribution_refresh_no_sample: "تعذر تحديث حالة التوزيع — لم يتم العثور على عينة محفوظة لهذا الشهر.",
 
+  // Phase 4 stale-snapshot guards: a row/batch computed against this tab's
+  // snapshot may already be owned on disk (assigned from another machine on a
+  // shared folder). Assigning it anyway silently transfers ownership.
+  msg_assign_row_already_owned: "تعذر التعيين — هذا الصف معيّن بالفعل للموظف {assignee} (ربما من جهاز آخر). تم تحديث العرض بالحالة الأحدث.",
+  msg_bulk_assign_stale_skipped: "تم تخطي {count} صفاً كان قد عُيّن من جهاز آخر أثناء عملك — لم يُعاد تعيينه.",
+  msg_bulk_assign_all_taken: "لم يُحفظ أي تعيين جديد — جميع الصفوف المحسوبة عُيّنت بالفعل من جهاز آخر. تم تحديث العرض بالحالة الأحدث.",
+  msg_row_state_changed_on_disk: "تعذر تنفيذ الإجراء — حالة هذا الصف تغيّرت من جهاز آخر منذ آخر تحديث. تم تحديث العرض بالحالة الأحدث.",
+  msg_sample_draw_empty_refused: "تم رفض حفظ العينة — الإعدادات الحالية تنتج عينة فارغة (جميع المستويات هدفها صفر). راجع أوزان العينة وأهداف المستويات ثم أعد السحب.",
+
   // KPIs
   kpi_population:      "إجمالي المجتمع",
   kpi_sample:          "إجمالي العينة",
@@ -896,6 +905,7 @@ export const DEFAULT_LABELS = {
   err_fs_008_write_manifest:           "تعذر كتابة ملف بيان مساحة العمل.",
   err_fs_009_write_users_permissions:  "تعذر كتابة ملف المستخدمين والصلاحيات.",
   err_fs_010_schema_stamp:             "تعذر تحديد أو تسجيل مخطط مساحة العمل.",
+  err_fs_015_workspace_unreachable:    "تعذر قراءة مجلد مساحة العمل في هذه اللحظة (انقطاع مؤقت في الشبكة أو المشاركة). لم يتم اعتبار مساحة العمل مفقودة — أعد المحاولة بعد لحظات أو تحقق من اتصال المجلد المشترك، ولا تقم بإنشاء بنية جديدة.",
   err_fs_011_file_missing:             "الملف {file} غير موجود.",
   err_fs_012_invalid_json:             "الملف {file} ليس ملف JSON صالح.",
   err_fs_013_read_permission_denied:   "لا توجد صلاحية كافية لقراءة الملف {file}.",
@@ -960,6 +970,7 @@ export const DEFAULT_LABELS = {
   err_smp_005_draw_threw:              "حدث خطأ غير متوقع أثناء سحب العينة.",
   err_smp_006_no_sample_for_month:     "لا توجد بيانات عينة للشهر المحدد.",
   err_smp_007_save_master_threw:       "تعذر حفظ ملف العينة الرئيسي.",
+  err_smp_008_substitution_conflict:   "هذا الصف المستبدَل سبق أن استُبدل بصف آخر لم يكتمل حفظ تعييناته. أعد محاولة الاستبدال الأصلية نفسها لإكمالها بدلاً من اختيار صف جديد.",
 
   // Report Designer — print preview overlay (accessible name of the dialog).
   rd_print_view_aria:                  "معاينة الطباعة",

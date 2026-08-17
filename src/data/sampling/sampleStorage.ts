@@ -333,6 +333,17 @@ export async function appendSampleRow(
       if (!appendsRow && !deadRow) {
         return { done: true, result: { ok: true as const, data: current } };
       }
+      // The dead row was already substituted — by a DIFFERENT row, since this
+      // one is not in the sample (the same-row replay resolved above). Reachable
+      // only from the XQ-DIST-005 crash state: an earlier replacement appended
+      // its row and retired this dead id, then failed to write the events, and
+      // the caller is now retrying with another candidate. Appending here would
+      // be a plain enlargement (totalActual +1 forever) that also strands the
+      // first replacement row in the sample with no owner. Refuse loudly; the
+      // recovery is retrying with the original candidate, which resumes.
+      if (appendsRow && replacesXrayImageId !== undefined && retiredIds.includes(replacesXrayImageId)) {
+        return { done: true, result: { ok: false as const, error: codedMessage("XQ-SMP-008") } };
+      }
 
       const nextRevision = (current.revision ?? 0) + 1;
       const isCertScan = isCertScanRow(newRow);

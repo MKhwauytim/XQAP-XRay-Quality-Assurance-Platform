@@ -348,6 +348,29 @@ export async function appendDistributionEventSegment(
     let existing = await readExistingSegment(eventsDir, fileName, segmentMemoKey(writer.scopeId, fileName));
     let existingBytes = utf8Length(existing.text);
 
+    // ROTATE AWAY FROM A SEGMENT WE COULD NOT RE-READ. An unreliable baseline
+    // means this session wrote `fileName` and the patient pre-append re-read
+    // still could not see it (share visibility lag, or something outside the
+    // browser holding/removing the entry). Writing here would REWRITE the file
+    // without lines that may still be on the share — the data-loss window that
+    // forced the post-close verify to stay fatal for this case (v97.1), and
+    // the one path that still surfaced a completed Phase 4 save as a failure
+    // (XQ-IO-031). Rotating removes the hazard instead of reporting it: the
+    // unreadable segment is left untouched — its bytes are still on the
+    // server, and every reader discovers segments by suffix glob, so its
+    // events remain part of the log — while the batch lands in a fresh
+    // segment whose empty baseline is trustworthy. An unconfirmable
+    // post-close check on the fresh segment is then benign (XQ-DIST-007)
+    // instead of fatal. The rotation target can never collide: the memo and
+    // `openSegmentSeqByWriter` advance together, so `seq` is the highest this
+    // session ever wrote, and no other writer shares this chain.
+    if (!existing.reliable && seq < MAX_SEGMENT_SEQ) {
+      seq += 1;
+      fileName = segmentFileNameForSeq(base, seq);
+      existing = await readExistingSegment(eventsDir, fileName, segmentMemoKey(writer.scopeId, fileName));
+      existingBytes = utf8Length(existing.text);
+    }
+
     if (seq < MAX_SEGMENT_SEQ && shouldRotate(existing.text, existingBytes, addedBytes, events.length)) {
       seq += 1;
       fileName = segmentFileNameForSeq(base, seq);

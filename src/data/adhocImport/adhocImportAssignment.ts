@@ -8,7 +8,7 @@ import { findAssignableEmployee } from "../distribution/bulkAssignment";
 import { getManagedLoginUsers } from "../../auth/userManagement";
 import type { NormalizedRiskRow } from "../../components/Sidebar/Tabs/Population/riskData/riskDataTypes";
 import { adhocMonthFolderName, type AdhocImportRecord, type AdhocImportRow } from "./adhocImportTypes";
-import { saveAdhocImportRecord } from "./adhocImportStorage";
+import { loadAdhocImportRecord, saveAdhocImportRecord } from "./adhocImportStorage";
 
 /**
  * Guarantees no collision with a real population's xrayImageId, which is
@@ -172,7 +172,19 @@ export async function assignAdhocRowsToEmployee(
   assignedTo: string,
   eventBy: string
 ): Promise<AssignAdhocRowsResult> {
-  if (record.status === "closed") {
+  // The caller's `record` is tab React state — potentially hours old on a
+  // shared workspace, while saveAdhocImportRecord below is a whole-document
+  // overwrite. Trusting it meant a stale tab could assign into an import
+  // another machine had CLOSED (and revert its status on save), durably
+  // assign a row an admin had excluded meanwhile (writing the exclusion
+  // away), and wipe every other machine's assigned/assignedTo/assignedAt
+  // bookkeeping by rebuilding `rows` from the stale copy. Re-read the record
+  // from disk and use THAT for the status gate, the row filters, and the
+  // save base; the ownedIds guard below still covers the event side.
+  const freshRecord =
+    (await loadAdhocImportRecord(directoryHandle, record.importId)) ?? record;
+
+  if (freshRecord.status === "closed") {
     return { ok: false, error: "هذا الاستيراد مُغلق — لا يمكن تعيين المزيد من الصفوف منه." };
   }
 
@@ -180,9 +192,9 @@ export async function assignAdhocRowsToEmployee(
     return { ok: false, error: "الموظف المحدد غير موجود، أو غير نشط، أو لا يملك صلاحية استلام العينات." };
   }
 
-  const monthFolderName = adhocMonthFolderName(record.importId);
+  const monthFolderName = adhocMonthFolderName(freshRecord.importId);
   const rowKeySet = new Set(rowKeys);
-  const targetRows = record.rows.filter(
+  const targetRows = freshRecord.rows.filter(
     (r) => rowKeySet.has(r.rowKey) && r.validation.valid && !r.excludedByAdmin && !r.assigned
   );
   if (targetRows.length === 0) {
@@ -193,7 +205,7 @@ export async function assignAdhocRowsToEmployee(
   // finalize time — see ensureAdhocSampleMaster) so the fold can resolve
   // each assign event's xrayImageId.
   const sampleRows = (await loadSampleMaster(directoryHandle, monthFolderName))?.rows
-    ?? await ensureAdhocSampleMaster(directoryHandle, record);
+    ?? await ensureAdhocSampleMaster(directoryHandle, freshRecord);
 
   const current = await loadOrDeriveDistributionCurrent(directoryHandle, monthFolderName, sampleRows);
   const ownedIds = new Set((current?.entries ?? []).map((e) => e.xrayImageId));
@@ -201,7 +213,7 @@ export async function assignAdhocRowsToEmployee(
   const sharedEventAt = new Date().toISOString();
   const eventsByRowKey = new Map<string, ReturnType<typeof buildAssignEvent>>();
   for (const row of targetRows) {
-    const xrayImageId = namespacedXrayImageId(record.importId, row.mapped.xrayImageId as string);
+    const xrayImageId = namespacedXrayImageId(freshRecord.importId, row.mapped.xrayImageId as string);
     if (ownedIds.has(xrayImageId)) continue;
     eventsByRowKey.set(
       row.rowKey,
@@ -209,7 +221,7 @@ export async function assignAdhocRowsToEmployee(
         xrayImageId,
         assignedTo,
         eventBy,
-        notes: `استيراد يدوي: ${record.fileName}`,
+        notes: `استيراد يدوي: ${freshRecord.fileName}`,
         eventAt: sharedEventAt,
       })
     );
@@ -235,7 +247,8 @@ export async function assignAdhocRowsToEmployee(
   await refreshDistributionCacheAfterWrite(directoryHandle, monthFolderName, sampleRows);
 
   const assignedAt = sharedEventAt;
-  const nextRows: AdhocImportRow[] = record.rows.map((r) => {
+  // Base the rewrite on the FRESH rows so other machines' bookkeeping survives.
+  const nextRows: AdhocImportRow[] = freshRecord.rows.map((r) => {
     const event = eventsByRowKey.get(r.rowKey);
     if (!event) return r;
     return {
@@ -247,7 +260,7 @@ export async function assignAdhocRowsToEmployee(
     };
   });
 
-  const savedRecord = await saveAdhocImportRecord(directoryHandle, { ...record, rows: nextRows });
+  const savedRecord = await saveAdhocImportRecord(directoryHandle, { ...freshRecord, rows: nextRows });
 
   return {
     ok: true,

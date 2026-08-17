@@ -178,6 +178,11 @@ export const ERROR_CODES = {
     meaning: "readJsonFile: read failed for an unclassified reason",
     labelKey: "err_fs_014_read_failed",
   },
+  "XQ-FS-015": {
+    meaning:
+      "the workspace could not be READ (transient share/permission fault) — it was NOT judged missing; retry instead of creating, and the create/mount path refuses to overwrite files it could not verify",
+    labelKey: "err_fs_015_workspace_unreachable",
+  },
 
   // ── IO: safeWrite / compressed envelope ──────────────────────────────────
   "XQ-IO-001": {
@@ -447,6 +452,11 @@ export const ERROR_CODES = {
   "XQ-SMP-007": {
     meaning: "saveSampleMaster: writing sample.master.json threw",
     labelKey: "err_smp_007_save_master_threw",
+  },
+  "XQ-SMP-008": {
+    meaning:
+      "appendSampleRow rejected an enlargement: the dead row was already substituted by a DIFFERENT replacement row (XQ-DIST-005 partial-write state) — the recovery is retrying with the original candidate, which resumes",
+    labelKey: "err_smp_008_substitution_conflict",
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
 

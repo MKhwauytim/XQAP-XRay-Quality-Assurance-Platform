@@ -142,6 +142,45 @@ export function getReplacementCandidates(
   return { recommended: [], all: capSeeded(fallbackStage?.[1] ?? [], REPLACEMENT_POOL_LIMIT, rng) };
 }
 
+export type ReplacementRowAvailability = "free" | "resume-partial" | "taken";
+
+/**
+ * Classify whether `replacementXrayImageId` may be committed as the
+ * replacement for `deadXrayImageId`, given a FRESH sample master and derived
+ * distribution entries.
+ *
+ * "taken" — the row is owned by a distribution entry, or sits in the sample
+ * for any reason other than a partial write of this very substitution.
+ * Committing it would silently transfer ownership or double-count the row.
+ *
+ * "resume-partial" — the XQ-DIST-005 crash state, and the reason this helper
+ * exists: an earlier executeReplacement for this same dead row appended the
+ * sample row and retired the dead id (one atomic CAS write — see
+ * appendSampleRow), then failed to write the distribution events. The sample
+ * says the substitution happened; the event log does not know. Re-running
+ * executeReplacement with the SAME candidate is the designed recovery: the
+ * sample append no-ops and only the missing events are emitted. Both call
+ * sites (approveReplacement step 3b and XrayReferrals' immediate-replace
+ * freshness re-check) used to treat this state as taken, which made the
+ * failure PERMANENT — every retry was rejected as a conflict, the dead row
+ * stayed live, and the appended row stayed stranded with no owner.
+ */
+export function classifyReplacementRowAvailability(params: {
+  replacementXrayImageId: string;
+  deadXrayImageId: string;
+  sample: Pick<SampleMasterData, "rows" | "replacedRowIds">;
+  entries: readonly DistributionEntry[] | null | undefined;
+}): ReplacementRowAvailability {
+  const { replacementXrayImageId, deadXrayImageId, sample, entries } = params;
+  const owned = entries?.some((entry) => entry.xrayImageId === replacementXrayImageId) ?? false;
+  const inSample = sample.rows.some((row) => row.xrayImageId === replacementXrayImageId);
+  if (!owned && !inSample) return "free";
+  if (!owned && inSample && (sample.replacedRowIds ?? []).includes(deadXrayImageId)) {
+    return "resume-partial";
+  }
+  return "taken";
+}
+
 export type ExecuteReplacementResult =
   | { ok: true; updatedSample: SampleMasterData }
   | { ok: false; error: string; partialSampleWrite?: true };
