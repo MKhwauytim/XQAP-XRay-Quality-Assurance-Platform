@@ -26,8 +26,9 @@ import { buildAssignEvent } from "./distributionLog";
 const MONTH = "5-May-2026";
 
 // `writeDistributionEventBatch` is module-private, so the fault goes in at the
-// boundary it actually calls — the durable segment write.
-const storeMock = vi.hoisted(() => ({ appendDistributionEventSegment: vi.fn() }));
+// boundary it actually calls — the durable append (chunking + reopen-retry +
+// per-event fallback live behind that one entry point).
+const storeMock = vi.hoisted(() => ({ appendDistributionEventsDurably: vi.fn() }));
 
 vi.mock("./distributionEventStore", async (importOriginal) => {
   const actual =
@@ -46,11 +47,11 @@ let root: DirectoryHandleLike;
 beforeEach(() => {
   root = createMemoryDirectory();
   clearErrors();
-  storeMock.appendDistributionEventSegment.mockReset();
+  storeMock.appendDistributionEventsDurably.mockReset();
 });
 
 async function appendFailingWith(error: Error) {
-  storeMock.appendDistributionEventSegment.mockRejectedValueOnce(error);
+  storeMock.appendDistributionEventsDurably.mockRejectedValueOnce(error);
   return appendDistributionEvent(
     root,
     MONTH,

@@ -326,6 +326,11 @@ export const ERROR_CODES = {
       "NotFound persisted after every retry but the containing directory is reachable and writable — a genuine transient share flake, so retrying the action is the right advice",
     labelKey: "err_io_031_share_lost_entry",
   },
+  "XQ-IO-034": {
+    meaning:
+      "the folder accepts short names and the failing file's extension, but a probe with the SAME NAME LENGTH cannot be created there — a path-length limit (Windows' 260-character cap on a deep UNC workspace path). Retrying can never help; the workspace must sit closer to the share root, or the writer must use shorter names",
+    labelKey: "err_io_034_path_too_long",
+  },
 
   // ── AUTH: login / session / permissions ──────────────────────────────────
   "XQ-AUTH-001": {
@@ -422,6 +427,11 @@ export const ERROR_CODES = {
   "XQ-DIST-006": {
     meaning: "distribution event file write: file handle exposes no createWritable",
     labelKey: "err_dist_006_no_createwritable",
+  },
+  "XQ-DIST-009": {
+    meaning:
+      "the NDJSON segment append failed on this share, so the batch was written as one immutable {eventId}.json file per event instead (the pre-segment layout every reader still merges). The events ARE durable — this records that the fast path is unusable here, e.g. a blocked .ndjson extension or a path-length limit",
+    labelKey: "err_dist_009_segment_fallback_used",
   },
 
   // ── SMP: sampling and the draw ───────────────────────────────────────────
