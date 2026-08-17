@@ -239,6 +239,31 @@ export function useDistributionActions(params: {
     const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
     const event = buildAssignEvent({ xrayImageId, assignedTo, eventBy: currentUsername });
     try {
+      // Stale-snapshot guard (same rationale as the bulk path below, at
+      // single-row scale): this tab renders the row as unassigned from React
+      // state that can be hours old on a shared UNC/SMB workspace, while
+      // another machine may have assigned it since. The fold's `assigned`
+      // handler overwrites `assignedTo` unconditionally, so appending blindly
+      // silently transfers ownership — no reassign event, no notification.
+      // Re-check on disk right before the durable write; an owned row refuses
+      // and repaints instead.
+      const freshLog = await loadDistributionLog(directoryHandle, monthFolderName);
+      if (freshLog.events.length > 0) {
+        const master = await loadSampleMaster(directoryHandle, monthFolderName);
+        const freshCurrent = deriveCurrentDistribution(
+          freshLog,
+          master?.rows ?? sampleDrawResult.rows
+        );
+        const owned = freshCurrent.entries.find((entry) => entry.xrayImageId === xrayImageId);
+        if (owned) {
+          await refreshDistribution(monthFolderName, freshLog);
+          setDistributionMessage({
+            type: "error",
+            text: getLabels().msg_assign_row_already_owned.split("{assignee}").join(owned.assignedTo),
+          });
+          return;
+        }
+      }
       const result = await appendDistributionEvent(
         directoryHandle,
         monthFolderName,
@@ -396,10 +421,38 @@ export function useDistributionActions(params: {
     setDistributionProgress({ percent: 2, message: "جارٍ تجهيز ملفات التعيينات للحفظ..." });
     const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
     try {
+      // Fresh on-disk ownership re-check right before the durable write. The
+      // events were computed against THIS tab's `distributionCurrent` — React
+      // state from whenever the month was last loaded, potentially hours old
+      // on a shared UNC/SMB workspace. Every row another supervisor assigned
+      // since then looks "unassigned" in that snapshot, and the fold's
+      // `assigned` handler overwrites `assignedTo` unconditionally — so
+      // appending blindly silently transfers those rows, with no reassign
+      // event and no notification to either side. Filter against what is
+      // actually on disk instead. The residual race is the append window
+      // itself, which no backend-free design can close (see CLAUDE.md).
+      const freshLog = await loadDistributionLog(directoryHandle, monthFolderName);
+      let eventsToAppend = events;
+      let staleSkipped = 0;
+      if (freshLog.events.length > 0) {
+        const master = await loadSampleMaster(directoryHandle, monthFolderName);
+        const freshCurrent = deriveCurrentDistribution(
+          freshLog,
+          master?.rows ?? sampleDrawResult.rows
+        );
+        const ownedIds = new Set(freshCurrent.entries.map((entry) => entry.xrayImageId));
+        eventsToAppend = events.filter((event) => !ownedIds.has(event.xrayImageId));
+        staleSkipped = events.length - eventsToAppend.length;
+      }
+      if (eventsToAppend.length === 0) {
+        await refreshDistribution(monthFolderName, freshLog);
+        setDistributionMessage({ type: "error", text: getLabels().msg_bulk_assign_all_taken });
+        return;
+      }
       const result = await appendDistributionEvents(
         directoryHandle,
         monthFolderName,
-        events,
+        eventsToAppend,
         {
           onProgress: (progress) => setDistributionProgress(distributionProgressFromWrite(progress)),
         }
@@ -412,17 +465,25 @@ export function useDistributionActions(params: {
           actorRole: currentRole,
           action: "distribution-bulk-assigned",
           monthFolderName,
-          details: { events: events.length },
+          details: { events: eventsToAppend.length, staleSkipped },
         });
         setDistributionProgress({ percent: 92, message: "جارٍ بناء ملخص التوزيع النهائي..." });
         await refreshDistribution(monthFolderName, result.log);
         // Build per-employee entry lists then write one XLSX per employee (fire-and-forget).
-        const assignedMap = buildAssignedEntryMap(events, sampleDrawResult.rows);
+        const assignedMap = buildAssignedEntryMap(eventsToAppend, sampleDrawResult.rows);
         for (const [emp, empEntries] of assignedMap) {
           void writeEmployeeXlsx(directoryHandle, monthFolderName, emp, empEntries).catch(logRejection(`distribution:write-employee-xlsx:${emp}`));
         }
         setDistributionProgress({ percent: 100, message: "اكتمل حفظ التوزيع بنجاح." });
-        setDistributionMessage({ type: "ok", text: "تم تطبيق وحفظ التوزيع الجماعي بنجاح." });
+        setDistributionMessage({
+          type: "ok",
+          text:
+            staleSkipped > 0
+              ? `تم تطبيق وحفظ التوزيع الجماعي بنجاح. ${getLabels()
+                  .msg_bulk_assign_stale_skipped.split("{count}")
+                  .join(staleSkipped.toLocaleString("ar-SA-u-nu-latn"))}`
+              : "تم تطبيق وحفظ التوزيع الجماعي بنجاح.",
+        });
       } else {
         setDistributionMessage({ type: "error", text: userFacingErrorText(result.error, "distribution:action-result") });
       }

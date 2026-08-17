@@ -448,6 +448,11 @@ export const ERROR_CODES = {
     meaning: "saveSampleMaster: writing sample.master.json threw",
     labelKey: "err_smp_007_save_master_threw",
   },
+  "XQ-SMP-008": {
+    meaning:
+      "appendSampleRow rejected an enlargement: the dead row was already substituted by a DIFFERENT replacement row (XQ-DIST-005 partial-write state) — the recovery is retrying with the original candidate, which resumes",
+    labelKey: "err_smp_008_substitution_conflict",
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export type ErrorCode = keyof typeof ERROR_CODES;

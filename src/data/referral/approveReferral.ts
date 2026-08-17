@@ -30,7 +30,7 @@ import {
   refreshDistributionCacheAfterWrite,
 } from "../distribution/distributionStorage";
 import { buildReassignEvent, deriveCurrentDistribution } from "../distribution/distributionLog";
-import { executeReplacement } from "../distribution/replacement";
+import { classifyReplacementRowAvailability, executeReplacement } from "../distribution/replacement";
 import { loadMonthPopulationFinal } from "../population/populationStorage";
 import { loadPopulationConfig } from "../population/populationConfig";
 import { loadSampleMaster } from "../sampling/sampleStorage";
@@ -309,11 +309,20 @@ export async function approveReplacement(params: {
     // it: a drawn row is already accounted for in the month's allocations, so
     // re-drawing it as a replacement double-counts it whether or not anyone
     // currently owns it.
-    const replacementTaken =
-      sample.rows.some((row) => row.xrayImageId === fresh.replacementXrayImageId) ||
-      (current?.entries.some((entry) => entry.xrayImageId === fresh.replacementXrayImageId) ??
-        false);
-    if (replacementTaken) {
+    //
+    // One state is deliberately NOT taken: the XQ-DIST-005 partial write, where
+    // an earlier attempt at THIS request appended the sample row and retired
+    // the original, then failed to write the events. That retry must resume
+    // (executeReplacement's sample append no-ops and emits the missing events)
+    // — treating it as a conflict made the failure permanent, since the fresher
+    // the retry, the more certainly the row was "already in the sample".
+    const availability = classifyReplacementRowAvailability({
+      replacementXrayImageId: fresh.replacementXrayImageId,
+      deadXrayImageId: fresh.originalXrayImageId,
+      sample,
+      entries: current?.entries,
+    });
+    if (availability === "taken") {
       return { ok: false, code: "stale-ownership", staleIds: [fresh.replacementXrayImageId] };
     }
 

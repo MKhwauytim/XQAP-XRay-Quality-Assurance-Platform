@@ -228,6 +228,8 @@ const PINNED_MEANINGS: Record<string, string> = {
     "no sample data exists for the selected month",
   "XQ-SMP-007":
     "saveSampleMaster: writing sample.master.json threw",
+  "XQ-SMP-008":
+    "appendSampleRow rejected an enlargement: the dead row was already substituted by a DIFFERENT replacement row (XQ-DIST-005 partial-write state) — the recovery is retrying with the original candidate, which resumes",
 };
 
 function walk(dir: string): string[] {
