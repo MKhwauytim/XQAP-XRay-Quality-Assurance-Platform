@@ -20,6 +20,7 @@ import {
 } from "../../../../data/distribution/distributionLog";
 import type {
   DistributionCurrentData,
+  DistributionEntry,
   DistributionEvent,
   DistributionLog
 } from "../../../../data/distribution/distributionTypes";
@@ -214,6 +215,43 @@ export function useDistributionActions(params: {
     }
   }
 
+  /**
+   * The row's CURRENT on-disk distribution entry, read fresh — never from
+   * `distributionCurrent`, which is React state that can be hours old on a
+   * shared UNC/SMB workspace. Every mutating handler gates on this right
+   * before its durable write. The fold protects `assignedTo` on most
+   * transitions (priorTransitionValues reads the existing entry, not the
+   * event), but it does NOT protect status everywhere: its terminal guard
+   * blocks only `assigned`/`reassigned` after `completed`, so a
+   * `replacement-requested` event REGRESSES a completed row back to an
+   * in-flight state — reopening it to executeReplacement's retire path and
+   * orphaning the submitted answer. And an event the fold DOES drop still
+   * read as success to the user ("تم ..." over a write that did nothing).
+   * Refusing here, with a repaint, is the one place that can stop both.
+   */
+  async function readFreshEntry(
+    monthFolderName: string,
+    xrayImageId: string
+  ): Promise<{ log: DistributionLog; entry: DistributionEntry | undefined }> {
+    if (!directoryHandle) throw new Error("readFreshEntry: no workspace directory");
+    const log = await loadDistributionLog(directoryHandle, monthFolderName);
+    if (log.events.length === 0) return { log, entry: undefined };
+    const master = await loadSampleMaster(directoryHandle, monthFolderName);
+    const current = deriveCurrentDistribution(log, master?.rows ?? sampleDrawResult?.rows ?? []);
+    return { log, entry: current.entries.find((entry) => entry.xrayImageId === xrayImageId) };
+  }
+
+  /** Refuse a handler whose target row changed on disk: repaint from the
+   *  fresh log so the user sees WHY, then surface the message. */
+  async function refuseChangedRow(
+    monthFolderName: string,
+    log: DistributionLog,
+    text: string
+  ): Promise<void> {
+    await refreshDistribution(monthFolderName, log);
+    setDistributionMessage({ type: "error", text });
+  }
+
   async function handleAssign(
     xrayImageId: string,
     assignedTo: string
@@ -239,30 +277,19 @@ export function useDistributionActions(params: {
     const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
     const event = buildAssignEvent({ xrayImageId, assignedTo, eventBy: currentUsername });
     try {
-      // Stale-snapshot guard (same rationale as the bulk path below, at
-      // single-row scale): this tab renders the row as unassigned from React
-      // state that can be hours old on a shared UNC/SMB workspace, while
-      // another machine may have assigned it since. The fold's `assigned`
-      // handler overwrites `assignedTo` unconditionally, so appending blindly
-      // silently transfers ownership — no reassign event, no notification.
-      // Re-check on disk right before the durable write; an owned row refuses
-      // and repaints instead.
-      const freshLog = await loadDistributionLog(directoryHandle, monthFolderName);
-      if (freshLog.events.length > 0) {
-        const master = await loadSampleMaster(directoryHandle, monthFolderName);
-        const freshCurrent = deriveCurrentDistribution(
+      // Stale-snapshot guard: the row this tab renders as unassigned may have
+      // been assigned from another machine since the snapshot loaded, and the
+      // fold's `assigned` handler overwrites `assignedTo` unconditionally —
+      // appending blindly silently transfers ownership. An owned row refuses
+      // and repaints instead (see readFreshEntry).
+      const { log: freshLog, entry: owned } = await readFreshEntry(monthFolderName, xrayImageId);
+      if (owned) {
+        await refuseChangedRow(
+          monthFolderName,
           freshLog,
-          master?.rows ?? sampleDrawResult.rows
+          getLabels().msg_assign_row_already_owned.split("{assignee}").join(owned.assignedTo)
         );
-        const owned = freshCurrent.entries.find((entry) => entry.xrayImageId === xrayImageId);
-        if (owned) {
-          await refreshDistribution(monthFolderName, freshLog);
-          setDistributionMessage({
-            type: "error",
-            text: getLabels().msg_assign_row_already_owned.split("{assignee}").join(owned.assignedTo),
-          });
-          return;
-        }
+        return;
       }
       const result = await appendDistributionEvent(
         directoryHandle,
@@ -297,12 +324,13 @@ export function useDistributionActions(params: {
       return;
     }
     if (!directoryHandle || !sampleDrawResult) return;
+    // Snapshot fast-path: a completed row is terminal for reassignment —
+    // moving it would either be dropped by the derivation guard or lose the
+    // submitted answer. Require the reopen flow first. (Re-checked FRESH
+    // below; this only saves the disk read when this tab already knows.)
     const existing = distributionCurrent?.entries.find(
       (e) => e.xrayImageId === xrayImageId
     );
-    // A completed row is terminal for reassignment: moving it would either be
-    // dropped by the derivation guard or lose the submitted answer. Require the
-    // reopen flow first.
     if (existing?.status === "completed") {
       setDistributionMessage({
         type: "error",
@@ -313,13 +341,31 @@ export function useDistributionActions(params: {
     setIsDistributing(true);
     setDistributionMessage(null);
     const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
-    const event = buildReassignEvent({
-      xrayImageId,
-      assignedTo: existing?.assignedTo ?? reassignedTo,
-      reassignedTo,
-      eventBy: currentUsername
-    });
     try {
+      // Fresh status gate: the fold DROPS a reassign on a completed/replaced
+      // row, but the user was still told "تم إعادة التعيين." for a write that
+      // did nothing. A missing entry means the snapshot row no longer exists.
+      const { log: freshLog, entry: fresh } = await readFreshEntry(monthFolderName, xrayImageId);
+      if (fresh?.status === "completed") {
+        await refuseChangedRow(
+          monthFolderName,
+          freshLog,
+          "لا يمكن إعادة تعيين عينة مكتملة — يجب إعادة فتحها أولاً عبر مسار إعادة الفتح."
+        );
+        return;
+      }
+      if (!fresh || fresh.status === "replaced") {
+        await refuseChangedRow(monthFolderName, freshLog, getLabels().msg_row_state_changed_on_disk);
+        return;
+      }
+      // Built from the FRESH entry so the event's "from" side names the actual
+      // current owner (row history renders it), not this tab's stale guess.
+      const event = buildReassignEvent({
+        xrayImageId,
+        assignedTo: fresh.assignedTo,
+        reassignedTo,
+        eventBy: currentUsername
+      });
       const result = await appendDistributionEvent(
         directoryHandle,
         monthFolderName,
@@ -347,15 +393,23 @@ export function useDistributionActions(params: {
     setIsDistributing(true);
     setDistributionMessage(null);
     const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
-    const existing = distributionCurrent?.entries.find(
-      (e) => e.xrayImageId === xrayImageId
-    );
-    const event = buildCompletedEvent({
-      xrayImageId,
-      assignedTo: existing?.assignedTo ?? currentUsername,
-      eventBy: currentUsername
-    });
     try {
+      // Fresh status gate: completing an already-completed row is a no-op the
+      // fold accepts (it just advances the entry's last-activity stamp), a
+      // replaced row's completion is dropped — and both told the user "تم".
+      // A missing entry means the row was never assigned or no longer exists.
+      // `replacement-requested` is deliberately allowed: completing it is a
+      // real supervisor decision that supersedes the pending request.
+      const { log: freshLog, entry: fresh } = await readFreshEntry(monthFolderName, xrayImageId);
+      if (!fresh || fresh.status === "completed" || fresh.status === "replaced") {
+        await refuseChangedRow(monthFolderName, freshLog, getLabels().msg_row_state_changed_on_disk);
+        return;
+      }
+      const event = buildCompletedEvent({
+        xrayImageId,
+        assignedTo: fresh.assignedTo,
+        eventBy: currentUsername
+      });
       const result = await appendDistributionEvent(
         directoryHandle,
         monthFolderName,
@@ -383,15 +437,25 @@ export function useDistributionActions(params: {
     setIsDistributing(true);
     setDistributionMessage(null);
     const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
-    const existing = distributionCurrent?.entries.find(
-      (e) => e.xrayImageId === xrayImageId
-    );
-    const event = buildReplacementRequestedEvent({
-      xrayImageId,
-      assignedTo: existing?.assignedTo ?? currentUsername,
-      eventBy: currentUsername
-    });
     try {
+      // Fresh status gate — and the one that closes a real terminal-state
+      // hole: the fold's terminal guard blocks only `assigned`/`reassigned`
+      // after `completed`, so a `replacement-requested` event on a row another
+      // machine completed meanwhile would fold through and REGRESS the
+      // terminal state — reopening the row to executeReplacement's retire
+      // path and orphaning the submitted answer, and un-arming the month
+      // auto-lock. Only a fresh `pending` row may request a replacement (a
+      // duplicate request on `replacement-requested` is refused here too).
+      const { log: freshLog, entry: fresh } = await readFreshEntry(monthFolderName, xrayImageId);
+      if (fresh?.status !== "pending") {
+        await refuseChangedRow(monthFolderName, freshLog, getLabels().msg_row_state_changed_on_disk);
+        return;
+      }
+      const event = buildReplacementRequestedEvent({
+        xrayImageId,
+        assignedTo: fresh.assignedTo,
+        eventBy: currentUsername
+      });
       const result = await appendDistributionEvent(
         directoryHandle,
         monthFolderName,

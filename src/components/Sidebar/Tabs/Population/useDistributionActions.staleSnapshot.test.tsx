@@ -21,7 +21,11 @@ import {
   appendDistributionEvents,
   loadDistributionLog,
 } from "../../../../data/distribution/distributionStorage";
-import { buildAssignEvent, deriveCurrentDistribution } from "../../../../data/distribution/distributionLog";
+import {
+  buildAssignEvent,
+  buildCompletedEvent,
+  deriveCurrentDistribution,
+} from "../../../../data/distribution/distributionLog";
 import { formatMonthFolderName } from "../../../../data/population/monthFolder";
 import type { SampleMasterData } from "../../../../data/sampling/sampleTypes";
 import { useDistributionActions } from "./useDistributionActions";
@@ -165,5 +169,82 @@ describe("useDistributionActions stale-snapshot guards", () => {
     expect((await foldFromDisk(dir)).entries.find((e) => e.xrayImageId === "A002")?.assignedTo).toBe(
       "hihaloraini"
     );
+  });
+});
+
+describe("useDistributionActions fresh terminal-state gates", () => {
+  /** A001 assigned AND completed on disk; the hook renders with an empty
+   *  (stale) snapshot, so every handler still believes A001 is pending. */
+  async function setupCompletedRow() {
+    const dir = await setupWorkspace();
+    await appendDistributionEvents(dir, MONTH_FOLDER, [
+      buildCompletedEvent({ xrayImageId: "A001", assignedTo: "jalgahamdi", eventBy: "jalgahamdi" }),
+    ]);
+    return dir;
+  }
+
+  it("request-replacement must NOT regress a row another machine completed", async () => {
+    // The fold's terminal guard blocks only assigned/reassigned after
+    // completed — a replacement-requested event folds through and REGRESSES
+    // the terminal state, reopening the row to the replacement retire path
+    // (orphaning the submitted answer) and un-arming the month auto-lock.
+    const dir = await setupCompletedRow();
+    const { result } = renderActions(dir);
+
+    await act(async () => {
+      await result.current.handleRequestReplacement("A001");
+    });
+
+    expect(result.current.distributionMessage?.type).toBe("error");
+    expect((await loadDistributionLog(dir, MONTH_FOLDER)).events).toHaveLength(2);
+    expect((await foldFromDisk(dir)).entries.find((e) => e.xrayImageId === "A001")?.status).toBe(
+      "completed"
+    );
+  });
+
+  it("mark-complete of an already-completed row refuses instead of reporting success", async () => {
+    // The duplicate `completed` event is accepted by the fold and advances the
+    // entry's last-activity stamp — a no-op that still said "تم".
+    const dir = await setupCompletedRow();
+    const { result } = renderActions(dir);
+
+    await act(async () => {
+      await result.current.handleMarkComplete("A001");
+    });
+
+    expect(result.current.distributionMessage?.type).toBe("error");
+    expect((await loadDistributionLog(dir, MONTH_FOLDER)).events).toHaveLength(2);
+  });
+
+  it("reassign of a row another machine completed refuses instead of reporting success", async () => {
+    // The fold DROPS this event, but the user was told "تم إعادة التعيين."
+    const dir = await setupCompletedRow();
+    const { result } = renderActions(dir);
+
+    await act(async () => {
+      await result.current.handleReassign("A001", "hihaloraini");
+    });
+
+    expect(result.current.distributionMessage?.type).toBe("error");
+    expect((await loadDistributionLog(dir, MONTH_FOLDER)).events).toHaveLength(2);
+    const entry = (await foldFromDisk(dir)).entries.find((e) => e.xrayImageId === "A001");
+    expect(entry?.status).toBe("completed");
+    expect(entry?.assignedTo).toBe("jalgahamdi");
+  });
+
+  it("request-replacement on a genuinely pending row still works", async () => {
+    const dir = await setupWorkspace();
+    const { result } = renderActions(dir);
+
+    await act(async () => {
+      await result.current.handleRequestReplacement("A001");
+    });
+
+    expect(result.current.distributionMessage?.type).toBe("ok");
+    const entry = (await foldFromDisk(dir)).entries.find((e) => e.xrayImageId === "A001");
+    expect(entry?.status).toBe("replacement-requested");
+    // The event's "from" side names the actual current owner, not this tab's
+    // stale guess (the hook rendered with an empty snapshot).
+    expect(entry?.assignedTo).toBe("jalgahamdi");
   });
 });

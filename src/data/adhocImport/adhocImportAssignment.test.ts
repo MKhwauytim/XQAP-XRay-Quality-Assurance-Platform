@@ -11,6 +11,7 @@ import { loadOrDeriveDistributionCurrent } from "../distribution/distributionSto
 import type { NormalizedRiskRow } from "../../components/Sidebar/Tabs/Population/riskData/riskDataTypes";
 import type { AdhocImportRecord, AdhocImportRow } from "./adhocImportTypes";
 import { adhocMonthFolderName } from "./adhocImportTypes";
+import { loadAdhocImportRecord, saveAdhocImportRecord } from "./adhocImportStorage";
 import {
   assignAdhocRowsToEmployee,
   ensureAdhocSampleMaster,
@@ -208,5 +209,84 @@ describe("adhocImportAssignment", () => {
     // an assignable sample role.
     const result = await assignAdhocRowsToEmployee(root, record, ["s1:2"], "amonem", "admin");
     expect(result.ok).toBe(false);
+  });
+});
+
+// The caller's `record` is tab React state — potentially hours old on a shared
+// workspace — while saveAdhocImportRecord is a whole-document overwrite. The
+// assignment path must therefore trust only the ON-DISK record for the status
+// gate, the row filters, and the save base; otherwise a stale tab reverts a
+// close, assigns excluded rows, and wipes other machines' bookkeeping.
+describe("assignAdhocRowsToEmployee against a stale tab record", () => {
+  it("refuses to assign into an import another machine closed, without reverting the close", async () => {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    const staleRecord = makeRecord("adh-8", [importRow("XR-1")]);
+    await ensureAdhocSampleMaster(root, staleRecord);
+    // Another machine closed the import after this tab loaded its copy.
+    await saveAdhocImportRecord(root, { ...staleRecord, status: "closed" });
+
+    const result = await assignAdhocRowsToEmployee(root, staleRecord, ["s1:2"], "jalgahamdi", "admin");
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain("مُغلق");
+    expect((await loadAdhocImportRecord(root, "adh-8"))?.status).toBe("closed");
+  });
+
+  it("honors on-disk exclusions and preserves other machines' assignment bookkeeping", async () => {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    // This tab's copy: three free rows.
+    const staleRecord = makeRecord("adh-9", [
+      importRow("XR-1", 2),
+      importRow("XR-2", 3),
+      importRow("XR-3", 4),
+    ]);
+    await ensureAdhocSampleMaster(root, staleRecord);
+    // Meanwhile on disk: an admin excluded XR-1 and another machine assigned
+    // XR-2 to someone else (record-level bookkeeping only — the exact state a
+    // stale full-document overwrite used to erase).
+    const onDisk: AdhocImportRecord = {
+      ...staleRecord,
+      rows: staleRecord.rows.map((r) => {
+        if (r.rowKey === "s1:2") return { ...r, excludedByAdmin: true };
+        if (r.rowKey === "s1:3") {
+          return {
+            ...r,
+            assigned: true,
+            assignedTo: "hihaloraini",
+            assignedAt: "2026-08-17T06:00:00.000Z",
+            namespacedXrayImageId: namespacedXrayImageId("adh-9", "XR-2"),
+          };
+        }
+        return r;
+      }),
+    };
+    await saveAdhocImportRecord(root, onDisk);
+
+    // The stale tab selects all three rows.
+    const result = await assignAdhocRowsToEmployee(
+      root, staleRecord, ["s1:2", "s1:3", "s1:4"], "jalgahamdi", "admin"
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Only the genuinely free row was assigned.
+    expect(result.assignedCount).toBe(1);
+
+    const saved = (await loadAdhocImportRecord(root, "adh-9"))!;
+    const byKey = new Map(saved.rows.map((r) => [r.rowKey, r]));
+    expect(byKey.get("s1:2")?.excludedByAdmin).toBe(true);
+    expect(byKey.get("s1:2")?.assigned).toBe(false);
+    expect(byKey.get("s1:3")?.assignedTo).toBe("hihaloraini");
+    expect(byKey.get("s1:3")?.assignedAt).toBe("2026-08-17T06:00:00.000Z");
+    expect(byKey.get("s1:4")?.assigned).toBe(true);
+    expect(byKey.get("s1:4")?.assignedTo).toBe("jalgahamdi");
+
+    // The durable event log agrees: exactly one assign event, for XR-3.
+    const monthFolderName = adhocMonthFolderName("adh-9");
+    const master = await loadSampleMaster(root, monthFolderName);
+    const current = await loadOrDeriveDistributionCurrent(root, monthFolderName, master?.rows ?? []);
+    expect(current?.entries).toHaveLength(1);
+    expect(current?.entries[0].xrayImageId).toBe("ADHOC-adh-9-XR-3");
   });
 });
