@@ -73,10 +73,17 @@ describe("appendDistributionEventSegment under transient NotFoundError", () => {
     expect(events.map((event) => event.xrayImageId)).toEqual(["IMG-1", "IMG-2"]);
   });
 
-  // 40 s: the post-write read-back ladder is deliberately patient (~11 s), and
-  // this test drives BOTH the re-read and the verify to exhaustion. The wait is
-  // the behaviour under test, not incidental slowness.
-  it("still fails when the file stays invisible on every attempt", { timeout: 40_000 }, async () => {
+  // 40 s: the pre-append re-read ladder is deliberately patient (~11 s) and is
+  // driven to exhaustion here by design. The wait is the behaviour under test,
+  // not incidental slowness.
+  it("rotates to a fresh segment when its own segment stays invisible — losing nothing and failing nothing", { timeout: 40_000 }, async () => {
+    // The OLD behaviour here was a hard failure (XQ-IO-031): the exhausted
+    // re-read fell back to "", the append blind-rewrote the segment without
+    // the lines still on the share, and the unconfirmable verify had to stay
+    // fatal because that rewrite was a real data-loss window. Rotation removes
+    // the window instead of reporting it: the unreadable segment is left
+    // untouched (readers glob *.ndjson, so its events stay in the log) and the
+    // batch lands in a fresh segment with a trustworthy empty baseline.
     const root = createMemoryDirectory("root");
     const session = "s-permanent";
     const segment = distributionEventSegmentFileName(DEVICE, session);
@@ -95,17 +102,35 @@ describe("appendDistributionEventSegment under transient NotFoundError", () => {
 
     await expect(
       appendDistributionEventSegment(root, [assignEvent("IMG-2")], writer(session))
-    ).rejects.toMatchObject({ name: "NotFoundError" });
+    ).resolves.toBe("verified");
 
-    // A permanent failure is still reported — the retry ladder is bounded, not
-    // an unconditional "assume it worked". And the exhausted-retry classifier
-    // recorded which of the two causes it was.
+    // The exhausted-retry classifier still recorded the lag — success must not
+    // make the share's misbehaviour invisible to the admin.
     const notFoundLogs = getRecentErrors().filter(
       (entry) =>
         entry.context.startsWith("distribution:segment-") && entry.message.includes("cause=")
     );
     expect(notFoundLogs.length).toBeGreaterThan(0);
     clearSimulatedFaults(root);
+
+    // NOTHING lost: the first segment kept its line, the batch landed in the
+    // rotated sibling, and a reader folds both.
+    const events = await loadDistributionEventSegments(root);
+    expect(events.map((event) => event.xrayImageId).sort()).toEqual(["IMG-1", "IMG-2"]);
+    const rotated = distributionEventSegmentFileName(DEVICE, session, 1);
+    const eventsDir = await root.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: false });
+    const seg0 = await (await (await eventsDir.getFileHandle(segment, { create: false })).getFile()).text();
+    const seg1 = await (await (await eventsDir.getFileHandle(rotated, { create: false })).getFile()).text();
+    expect(seg0).toContain("IMG-1");
+    expect(seg0).not.toContain("IMG-2");
+    expect(seg1).toContain("IMG-2");
+
+    // And the writer continues in the rotated segment — it never writes the
+    // abandoned name again.
+    await appendDistributionEventSegment(root, [assignEvent("IMG-3")], writer(session));
+    const seg1After = await (await (await eventsDir.getFileHandle(rotated, { create: false })).getFile()).text();
+    expect(seg1After).toContain("IMG-3");
+    expect(await (await (await eventsDir.getFileHandle(segment, { create: false })).getFile()).text()).toBe(seg0);
   });
 
   it("does not retry the very first read of a segment this session has never written (absence is the expected answer)", async () => {
