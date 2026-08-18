@@ -112,9 +112,32 @@ export type NotFoundCause =
   | "directory-unreachable"
   | "permission-denied"
   | "extension-blocked"
+  | "name-too-long"
   | "unknown";
 
 const PROBE_FILE_NAME = ".fs-reachability-probe.tmp";
+
+/**
+ * How long to wait before re-checking that a probe file is still there.
+ *
+ * The round-trip probe below writes and immediately re-reads, which every
+ * antivirus, DLP and file-sync client wins: they quarantine ASYNCHRONOUSLY,
+ * typically a second or more after the write lands. An instant round trip
+ * therefore reports the folder healthy for exactly the deployment where the
+ * app's own files keep disappearing — which is how a permanent failure kept
+ * being classified `directory-writable` (XQ-IO-031, "just retry").
+ *
+ * Paid only on the failure path, after every retry ladder has already been
+ * exhausted, so this adds no cost to a working share.
+ */
+const PROBE_SURVIVAL_WAIT_MS = 1_200;
+
+/**
+ * Only probe for a length problem when the failing name is long enough for
+ * length to be a plausible cause. Below this a `.tmp`/`.ndjson` probe already
+ * covers the same path budget, so the extra round trip would prove nothing.
+ */
+const NAME_LENGTH_PROBE_THRESHOLD = 24;
 
 /** The extension of `fileName`, including the dot, or "" if it has none. */
 function extensionOf(fileName: string): string {
@@ -131,7 +154,13 @@ function extensionOf(fileName: string): string {
  */
 async function probeRoundTrip(
   dir: DirectoryHandleLike,
-  name: string
+  name: string,
+  /**
+   * Wait this long and re-open the probe a SECOND time before calling it a
+   * survivor. Zero keeps the original instant check (used where the caller only
+   * needs "can this name be created at all").
+   */
+  survivalWaitMs = 0
 ): Promise<boolean> {
   try {
     const handle = await dir.getFileHandle(name, { create: true });
@@ -143,6 +172,14 @@ async function probeRoundTrip(
       // between the write and the next directory lookup.
       const check = await dir.getFileHandle(name, { create: false });
       await check.getFile();
+      if (survivalWaitMs > 0) {
+        await waitFor(survivalWaitMs);
+        // Second look, after the delay an async remover needs. A file that
+        // passed the instant check and is gone now was taken by something
+        // outside the browser.
+        const recheck = await dir.getFileHandle(name, { create: false });
+        await recheck.getFile();
+      }
     }
     return true;
   } catch {
@@ -154,6 +191,26 @@ async function probeRoundTrip(
       // A leftover probe file is harmless and reused by the next probe.
     }
   }
+}
+
+/**
+ * A probe name with the SAME total length and extension as `fileName`, so the
+ * only difference from the real write is the bytes of the stem.
+ *
+ * This is the one hypothesis every earlier probe left untested: a path that is
+ * too long for the target filesystem. The app's short probes (`.tmp`,
+ * `.ndjson` — 26 characters) fit under Windows' 260-character path limit on a
+ * deep UNC workspace path where a 73–87 character distribution segment name
+ * (plus Chromium's `.crswap` sibling) does not. That failure is a permanent,
+ * per-name `NotFoundError` in a directory that is genuinely writable — i.e.
+ * indistinguishable from a share flake until something probes for length.
+ */
+function sameLengthProbeName(fileName: string): string | null {
+  const extension = extensionOf(fileName);
+  const prefix = ".fs-len-probe";
+  const padding = fileName.length - prefix.length - extension.length;
+  if (padding < 0) return null;
+  return `${prefix}${"x".repeat(padding)}${extension}`;
 }
 
 /**
@@ -200,8 +257,24 @@ export async function classifyNotFound(
   // help: the fix is an exclusion rule on the folder.
   const extension = fileName ? extensionOf(fileName) : "";
   if (extension && extension !== ".tmp") {
-    const survived = await probeRoundTrip(dir, `.fs-extension-probe${extension}`);
+    const survived = await probeRoundTrip(
+      dir,
+      `.fs-extension-probe${extension}`,
+      PROBE_SURVIVAL_WAIT_MS
+    );
     if (!survived) return "extension-blocked";
+  }
+
+  // Extension is fine and the folder is writable — the remaining per-name
+  // hypothesis is LENGTH (see sameLengthProbeName). Probing it is what turns
+  // "retry forever" into "the path is too long; move the workspace closer to
+  // the share root", which is the only remedy that works.
+  if (fileName && fileName.length >= NAME_LENGTH_PROBE_THRESHOLD) {
+    const lengthProbe = sameLengthProbeName(fileName);
+    if (lengthProbe) {
+      const survived = await probeRoundTrip(dir, lengthProbe);
+      if (!survived) return "name-too-long";
+    }
   }
 
   return "directory-writable";
@@ -216,6 +289,9 @@ const CAUSE_CODE: Readonly<Record<NotFoundCause, ErrorCode | null>> = {
   // Retrying is futile in a different way: the folder is fine, this file TYPE
   // is being removed from it.
   "extension-blocked": "XQ-IO-033",
+  // Futile for a third reason: the folder is fine and the type is fine, but a
+  // name of THIS LENGTH cannot be created there — a path-length limit.
+  "name-too-long": "XQ-IO-034",
   "permission-denied": "XQ-IO-017",
   // No verdict: leave it untagged so `classifyFileSystemError` supplies the
   // plain XQ-IO-027 rather than asserting a cause we did not establish.
@@ -272,14 +348,22 @@ export async function logExhaustedNotFound(
  */
 export async function retryTransientWrite<T>(
   operation: () => Promise<T>,
-  diagnostics?: { context: string; dir: DirectoryHandleLike; fileName: string }
+  diagnostics?: { context: string; dir: DirectoryHandleLike; fileName: string },
+  /**
+   * Ladder to retry on. Defaults to the short one — right for a write whose
+   * failure the caller can report cheaply. Callers whose failure aborts a whole
+   * month save (the distribution event append) pass
+   * `VERIFY_READBACK_RETRY_DELAYS_MS` instead: giving up on THAT in 630 ms buys
+   * nothing, since the alternative to waiting is failing the operation.
+   */
+  delays: readonly number[] = TRANSIENT_WRITE_RETRY_DELAYS_MS
 ): Promise<T> {
   for (let attempt = 0; ; attempt += 1) {
     try {
       return await operation();
     } catch (error) {
-      if (isTransientWriteError(error) && attempt < TRANSIENT_WRITE_RETRY_DELAYS_MS.length) {
-        await waitFor(TRANSIENT_WRITE_RETRY_DELAYS_MS[attempt]!);
+      if (isTransientWriteError(error) && attempt < delays.length) {
+        await waitFor(delays[attempt]!);
         continue;
       }
       if (isNotFoundError(error) && diagnostics) {

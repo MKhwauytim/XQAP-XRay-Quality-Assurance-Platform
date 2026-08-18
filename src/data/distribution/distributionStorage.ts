@@ -18,10 +18,14 @@ import { codedMessage, logCodedError, resolveErrorCode } from "../storage/errorC
 import { listDirectoryEntries, readAppendOnlyDirectory, readNamedJsonFiles } from "../storage/directoryScan";
 import { ensureMonthWritable } from "../population/monthLock";
 import { syncSampleMirrors } from "../samples/sampleMirrorStorage";
-import { getPopulationMonthDir, getSampleMainDir } from "../workspace/workspacePaths";
+import {
+  getPopulationMonthDir,
+  getSampleMainDir,
+  invalidateWorkspaceDirCache,
+} from "../workspace/workspacePaths";
 import {
   DISTRIBUTION_EVENTS_DIR,
-  appendDistributionEventSegment,
+  appendDistributionEventsDurably,
   distributionEventSetId,
   getDistributionDeviceId,
   getDistributionSessionId,
@@ -65,18 +69,34 @@ async function writeDistributionEventBatch(
   directory: DirectoryHandleLike,
   events: DistributionEvent[],
   scopeId: string,
-  onProgress?: AppendDistributionEventsOptions["onProgress"]
+  onProgress?: AppendDistributionEventsOptions["onProgress"],
+  /** Root + month, so a failed write can retry against a freshly-resolved
+   *  directory handle (see DurableAppendOptions.reopenDir). */
+  reopen?: { root: DirectoryHandleLike; monthFolderName: string }
 ): Promise<"verified" | "unverified"> {
   onProgress?.({ phase: "events", completed: 0, total: events.length });
   // `scopeId` gives the "have I already written this segment" memo stable
   // workspace+month identity — without it a workspace switch mid-session leaves
   // a stale name-keyed hit that costs the whole retry ladder on the next append.
-  const verification = await appendDistributionEventSegment(directory, events, {
-    deviceId: getDistributionDeviceId(),
-    sessionId: getDistributionSessionId(),
-    scopeId,
+  const verification = await appendDistributionEventsDurably(directory, events, {
+    writer: {
+      deviceId: getDistributionDeviceId(),
+      sessionId: getDistributionSessionId(),
+      scopeId,
+    },
+    onChunk: (completed, total) => onProgress?.({ phase: "events", completed, total }),
+    reopenDir: reopen
+      ? async () => {
+          // Purge first: `getSampleMainDir` answers from the workspace
+          // directory-handle cache, so without this the "retry" would hand back
+          // the very handle that just failed.
+          invalidateWorkspaceDirCache(reopen.root);
+          return getDistributionDir(reopen.root, reopen.monthFolderName);
+        }
+      : undefined,
   });
-  onProgress?.({ phase: "events", completed: events.length, total: events.length });
+  // No closing tick here: `onChunk` already reported the last chunk, which IS
+  // `events.length`. Emitting again produced a duplicate final update.
   return verification;
 }
 
@@ -464,7 +484,8 @@ export async function appendDistributionEvents(
       eventDir,
       events,
       `${workspaceScopeId(directoryHandle)}|${monthFolderName}`,
-      options?.onProgress
+      options?.onProgress,
+      { root: directoryHandle, monthFolderName }
     );
   } catch (error) {
     // The raw `.message` used to be returned here, which meant the identifying

@@ -134,8 +134,73 @@ export const MAX_OPEN_SEGMENT_LINES = 2_000;
  */
 const MAX_SEGMENT_SEQ = 999_999;
 
+/**
+ * SHORT NAMES ARE A CORRECTNESS PROPERTY ON A NETWORK SHARE, not tidiness.
+ *
+ * `deviceId` and `sessionId` are UUIDs (36 characters each), so the original
+ * `{deviceId}-{sessionId}.ndjson` was **80 characters** — and Chromium writes
+ * through a `{name}.crswap` sibling, making the real path 87. Windows caps a
+ * path at 260 characters, so on a deep UNC workspace path
+ * (`\\host\share\dept\…\2-samples\11-november-2026\1-main\distribution.events\`)
+ * that name does not fit while every other file this app writes
+ * (`distribution.log.json` — 21, `sample.master.json` — 18, and the pre-segment
+ * `{eventId}.json` — 41) does. The failure surfaces as a permanent
+ * `NotFoundError` in a directory that is genuinely writable, i.e. exactly the
+ * XQ-IO-031 shape that four rounds of extra patience could not fix.
+ *
+ * 8 hex of device + 6 of session = a 15-character base, 22 with the suffix —
+ * shorter than the legacy per-event names that worked for months, and 56 bits
+ * of distinctness between concurrent writers.
+ *
+ * Those bits come from HASHING each id, not from slicing its head. Slicing looks
+ * equivalent for a UUID and is not for the other two id shapes this app
+ * produces: `ephemeral-{uuid}` (used when localStorage is unavailable) begins
+ * with the literal `ephemera` in every case, and the no-`crypto.randomUUID`
+ * fallback `{Date.now()}-{random}` yields a device part that is a 100-second
+ * bucket and a session part that is a 2.78-hour one — two machines starting in
+ * the same window would produce a byte-identical base. Hashing the whole value
+ * spreads every shape across the full range.
+ *
+ * That matters because a collision is NOT benign. `withResourceLock` is Web
+ * Locks: per-origin, per-browser, so it serialises nothing between two machines
+ * on a share. Both would read the same segment text and each write
+ * `existing + own lines`, and the second write would drop the first's events —
+ * silent loss, not a shared chain. This is the same invariant CRASH SAFETY
+ * states below (one writer per seq); the name is what has to keep it true.
+ *
+ * Compatibility is free: readers discover segments by `.ndjson` suffix glob, so
+ * long-named files written by earlier versions keep being read and folded. A
+ * writer simply never appends to them again — its own chain is a new, short
+ * base — and they are never renamed, so `foldCheckpoint.segmentOffsets` stays
+ * valid.
+ */
+const SEGMENT_DEVICE_ID_CHARS = 8;
+const SEGMENT_SESSION_ID_CHARS = 6;
+
+/**
+ * Hash an id down to `chars` filename-safe hex characters.
+ *
+ * Hashing rather than slicing: see segmentBaseName's note above — the head of an
+ * `ephemeral-…` or `{Date.now()}-{random}` id carries little or no entropy, so
+ * `slice()` would hand two machines the same base. The digest depends on the
+ * whole value, so every id shape gets the same distribution.
+ *
+ * djb2 via {@link createSimpleHasher} — already used in this file for the event
+ * set digest, so no new dependency. It is not a cryptographic hash and does not
+ * need to be: this picks a filename, it does not authenticate one.
+ */
+function shortenSegmentIdPart(value: string, chars: number): string {
+  const hasher = createSimpleHasher();
+  hasher.update(value);
+  // digest() is 32-bit hex; pad so a small digest still fills the budget rather
+  // than silently yielding a shorter, less distinct stem.
+  return hasher.digest().padStart(chars, "0").slice(0, chars);
+}
+
 function segmentBaseName(deviceId: string, sessionId: string): string {
-  return `${segmentIdPart(deviceId)}-${segmentIdPart(sessionId)}`;
+  const device = shortenSegmentIdPart(deviceId, SEGMENT_DEVICE_ID_CHARS);
+  const session = shortenSegmentIdPart(sessionId, SEGMENT_SESSION_ID_CHARS);
+  return `${segmentIdPart(device)}-${segmentIdPart(session)}`;
 }
 
 function segmentFileNameForSeq(base: string, seq: number): string {
@@ -396,7 +461,12 @@ export async function appendDistributionEventSegment(
         await writable.write(appended);
         await writable.close();
       },
-      { context: "distribution:append-segment", dir: eventsDir, fileName }
+      { context: "distribution:append-segment", dir: eventsDir, fileName },
+      // The PATIENT ladder (~11 s), not the short one (~630 ms). Failing here
+      // aborts a whole Phase 4 save, so there is nothing to be gained by giving
+      // up quickly — the same reasoning the post-close read-back already
+      // applies, which left the write itself as the odd one out.
+      VERIFY_READBACK_RETRY_DELAYS_MS
     );
     // Recorded before verification, deliberately: the bytes are already on the
     // share at this point, so the next append must continue in THIS segment
@@ -413,6 +483,175 @@ export async function appendDistributionEventSegment(
       existing.reliable
     );
   });
+}
+
+/**
+ * Split a batch so no single append rewrites more than one full segment's worth
+ * of bytes or lines.
+ *
+ * `shouldRotate` deliberately lets an OVERSIZED batch exceed the cap once
+ * (an empty segment must never rotate, or a large batch would rotate forever
+ * without landing). That escape hatch is what puts a multi-megabyte single
+ * write on the share for a whole-month bulk assignment — the largest, slowest,
+ * most failure-prone write the app performs, and the one the owner's Phase 4
+ * save actually is. Chunking here removes the escape hatch at the source: each
+ * append is bounded, so a 9,000-event month is many ~128 KiB writes instead of
+ * one ~2.3 MB write, and a failure costs one chunk rather than the batch.
+ *
+ * Chunks preserve input order, so the fold order of the batch is unchanged.
+ */
+export function chunkEventsForSegmentAppends(
+  events: DistributionEvent[]
+): DistributionEvent[][] {
+  const chunks: DistributionEvent[][] = [];
+  let current: DistributionEvent[] = [];
+  let currentBytes = 0;
+  for (const event of events) {
+    const eventBytes = utf8Length(encodeEventLine(event));
+    const wouldExceedBytes = currentBytes + eventBytes > MAX_OPEN_SEGMENT_BYTES;
+    const wouldExceedLines = current.length + 1 > MAX_OPEN_SEGMENT_LINES;
+    if (current.length > 0 && (wouldExceedBytes || wouldExceedLines)) {
+      chunks.push(current);
+      current = [];
+      currentBytes = 0;
+    }
+    current.push(event);
+    currentBytes += eventBytes;
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
+
+export type DurableAppendOptions = {
+  writer?: SegmentWriter;
+  /**
+   * Re-resolve the distribution directory for ONE retry after a failed segment
+   * write. `distributionStorage` passes a resolver that purges the workspace
+   * directory-handle cache first, because a handle held since mount goes stale
+   * when an SMB session idle-disconnects and every write through it then fails
+   * `NotFoundError` — the "works after re-picking the folder" report. Omit to
+   * skip that retry.
+   */
+  reopenDir?: () => Promise<DirectoryHandleLike>;
+  /** Progress after each chunk lands, for the save-progress bar. */
+  onChunk?: (completedEvents: number, totalEvents: number) => void;
+};
+
+/**
+ * Durably write `events`, degrading through every option before failing.
+ *
+ * 1. **Chunked segment appends** (the fast path) — bounded writes, see
+ *    `chunkEventsForSegmentAppends`.
+ * 2. **One retry against a freshly-resolved directory handle** — covers a stale
+ *    handle after an idle share disconnect.
+ * 3. **Per-event `{eventId}.json` files** — the pre-segment layout, which every
+ *    reader still merges (`loadImmutableDistributionEvents`, and the checkpoint
+ *    path's `legacyEventFileNames`). Names are 41 characters and the extension
+ *    is `.json`, so this survives both a path-length limit and an
+ *    `.ndjson`-blocking scanner. Slower, and that is the correct trade: the
+ *    alternative is refusing to distribute the month at all.
+ *
+ * Only when all three fail does the batch report failure. Retries and the
+ * fallback can each write an event twice; every reader dedupes by `eventId`
+ * (`mergeDistributionEvents`, `distributionEventSetIdFromIds`), so a duplicate
+ * is harmless where a lost event is not.
+ */
+export async function appendDistributionEventsDurably(
+  distributionDir: DirectoryHandleLike,
+  events: DistributionEvent[],
+  options?: DurableAppendOptions
+): Promise<SegmentVerification> {
+  if (events.length === 0) return "verified";
+  const writer = options?.writer ?? {
+    deviceId: getDistributionDeviceId(),
+    sessionId: getDistributionSessionId(),
+  };
+  const chunks = chunkEventsForSegmentAppends(events);
+  let verification: SegmentVerification = "verified";
+  let completed = 0;
+  let directory = distributionDir;
+  let fallbackReported = false;
+  // Once a chunk has exhausted the segment path AND the re-resolved handle AND
+  // degraded, the remaining chunks of THIS save go straight to the fallback.
+  //
+  // The causes this degrades for are properties of the NAME, not of the moment:
+  // a path too long for the share, or an extension a scanner removes, fails
+  // identically for every chunk. Re-deriving that per chunk costs the full
+  // ~11 s write ladder + ~1.2 s classification + a second ~11 s ladder on the
+  // re-resolved handle EVERY time — roughly 24 s of pure sleeping per chunk, so
+  // an 18-chunk month spent ~7 minutes asleep to reach the same conclusion 18
+  // times, and paid it again before surfacing an error if the fallback also
+  // failed. Deciding once turns that back into one diagnosis per save.
+  //
+  // Scoped to this call deliberately: a later save re-probes from scratch, so a
+  // genuinely transient failure never latches beyond the operation it hit.
+  let segmentPathUnusable = false;
+  // The failure that caused the first degradation, kept across iterations —
+  // later chunks skip the segment attempt and so produce no error of their own,
+  // but a fallback failure must still report the original classified cause.
+  let degradeCause: unknown = null;
+
+  for (const chunk of chunks) {
+    let chunkVerification: SegmentVerification | null = null;
+    let firstFailure: unknown = null;
+    try {
+      if (segmentPathUnusable) throw degradeCause;
+      chunkVerification = await appendDistributionEventSegment(directory, chunk, writer);
+    } catch (error) {
+      if (segmentPathUnusable) {
+        // Not a fresh diagnosis — the standing one. Fall through to the
+        // fallback without re-running the ladders or the reopen retry.
+        firstFailure = degradeCause;
+      } else {
+      // Degrade ONLY for the failure shape a different handle or a different
+      // file name could plausibly fix: a NotFound/NotReadable on a name the
+      // share will not produce. A revoked grant (NotAllowedError), a full disk
+      // (QuotaExceededError) or a browser with no `createWritable` fail the
+      // per-event path in exactly the same way, so retrying them through it
+      // would burn one write per event to reach the same error while hiding the
+      // specific, already-classified code the user needs to read.
+      if (!isNotFoundError(error) && !isNotReadableError(error)) throw error;
+      firstFailure = error;
+      }
+    }
+
+    if (chunkVerification === null && !segmentPathUnusable && options?.reopenDir) {
+      try {
+        directory = await options.reopenDir();
+        chunkVerification = await appendDistributionEventSegment(directory, chunk, writer);
+        logCodedError("distribution:append-segment-reopened", "XQ-DIST-007", firstFailure);
+      } catch {
+        // Keep `firstFailure` as the reported cause: the re-resolved handle
+        // failing the same way says nothing new.
+      }
+    }
+
+    if (chunkVerification === null) {
+      try {
+        for (const event of chunk) {
+          await writeImmutableDistributionEvent(directory, event);
+        }
+      } catch {
+        // The fallback failed too. Report the ORIGINAL cause: it is the one
+        // that was classified (path length, blocked extension, unreachable
+        // folder), and it is what the user must act on.
+        throw firstFailure ?? degradeCause;
+      }
+      chunkVerification = "verified";
+      segmentPathUnusable = true;
+      degradeCause ??= firstFailure;
+      if (!fallbackReported) {
+        logCodedError("distribution:append-events-fallback", "XQ-DIST-009", firstFailure);
+        fallbackReported = true;
+      }
+    }
+
+    if (chunkVerification === "unverified") verification = "unverified";
+    completed += chunk.length;
+    options?.onChunk?.(completed, events.length);
+  }
+
+  return verification;
 }
 
 /**

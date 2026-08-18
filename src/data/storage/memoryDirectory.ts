@@ -88,6 +88,20 @@ export type SimulatedFault = {
   nameSuffix?: string;
   /** Only match calls with this `create` flag. Omit to match either. */
   create?: boolean;
+  /**
+   * Match only names at least this long. Models a path-length limit: a share
+   * where a short name is created happily and a long one raises NotFoundError,
+   * which is what a workspace deep enough to cross Windows' 260-character path
+   * cap does to the distribution event segments (see
+   * distributionEventStore.ts's note on short names).
+   */
+  nameMinLength?: number;
+  /**
+   * Let this many matching calls through BEFORE the fault starts firing. Models
+   * an asynchronous remover (antivirus, DLP, a sync client): the write and its
+   * immediate read-back succeed, and only a later look finds the file gone.
+   */
+  skip?: number;
   /** DOMException `name` to throw. Defaults to "NotFoundError". */
   errorName?: string;
   /**
@@ -97,7 +111,7 @@ export type SimulatedFault = {
   times?: number;
 };
 
-type FaultState = { faults: SimulatedFault[]; consumed: number[] };
+type FaultState = { faults: SimulatedFault[]; consumed: number[]; skipped: number[] };
 type OperationLogState = { entries: OperationLogEntry[] };
 
 export type OperationLogEntry = {
@@ -168,6 +182,7 @@ export function setSimulatedFaults(dir: DirectoryHandleLike, faults: SimulatedFa
   if (!state) return;
   state.faults = faults;
   state.consumed = faults.map(() => 0);
+  state.skipped = faults.map(() => 0);
 }
 
 /** Test-only: remove every installed fault (equivalent to `setSimulatedFaults(dir, [])`). */
@@ -210,6 +225,11 @@ function applyFaults(
     if (fault.name !== undefined && fault.name !== entry.name) continue;
     if (fault.nameSuffix !== undefined && !entry.name.endsWith(fault.nameSuffix)) continue;
     if (fault.create !== undefined && fault.create !== (entry.create ?? false)) continue;
+    if (fault.nameMinLength !== undefined && entry.name.length < fault.nameMinLength) continue;
+    if (fault.skip !== undefined && faultState.skipped[index]! < fault.skip) {
+      faultState.skipped[index] += 1;
+      continue;
+    }
     const limit = fault.times ?? 1;
     if (faultState.consumed[index]! >= limit) continue;
     faultState.consumed[index] += 1;
@@ -489,6 +509,7 @@ export function createMemoryDirectory(
   const faultState: FaultState = {
     faults: options.faults ?? [],
     consumed: (options.faults ?? []).map(() => 0),
+    skipped: (options.faults ?? []).map(() => 0),
   };
   const operationLog: OperationLogState | null = options.trackOperations ? { entries: [] } : null;
   return makeDirectoryHandle(name, createNode(), permission, "", readLog, faultState, operationLog);

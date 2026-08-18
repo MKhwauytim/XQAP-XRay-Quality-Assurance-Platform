@@ -172,6 +172,8 @@ const PINNED_MEANINGS: Record<string, string> = {
     "the workspace could not be READ (transient share/permission fault) — it was NOT judged missing; retry instead of creating, and the create/mount path refuses to overwrite files it could not verify",
   "XQ-IO-031":
     "NotFound persisted after every retry but the containing directory is reachable and writable — a genuine transient share flake, so retrying the action is the right advice",
+  "XQ-IO-034":
+    "the folder accepts short names and the failing file's extension, but a probe with the SAME NAME LENGTH cannot be created there — a path-length limit (Windows' 260-character cap on a deep UNC workspace path). Retrying can never help; the workspace must sit closer to the share root, or the writer must use shorter names",
   "XQ-AUTH-001":
     "login rejected: unknown username or wrong password",
   "XQ-AUTH-002":
@@ -216,6 +218,8 @@ const PINNED_MEANINGS: Record<string, string> = {
     "distribution event segment read back at the WRONG size after retries — a genuine bad write, not a visibility artefact",
   "XQ-DIST-006":
     "distribution event file write: file handle exposes no createWritable",
+  "XQ-DIST-009":
+    "the NDJSON segment append failed on this share, so the batch was written as one immutable {eventId}.json file per event instead (the pre-segment layout every reader still merges). The events ARE durable — this records that the fast path is unusable here, e.g. a blocked .ndjson extension or a path-length limit",
   "XQ-SMP-001":
     "RESERVED (not wired): drawSample: there are no population rows to draw from",
   "XQ-SMP-002":
