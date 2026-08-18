@@ -11,7 +11,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import type { ComponentProps } from "react";
+import { useState, type ComponentProps } from "react";
 import PhaseThreeSampling from "./PhaseThreeSampling";
 import type { PopulationConfig, StageSamplingRule } from "../../../../../data/population/populationConfig";
 import { DEFAULT_POPULATION_CONFIG } from "../../../../../data/population/populationConfig";
@@ -113,15 +113,15 @@ afterEach(() => {
 describe("PhaseThreeSampling — CertScan quota fields lock+permission (B13 task 2)", () => {
   it("happy: unlocked stage with configure-sample permission leaves the CertScan fields editable", () => {
     render(<PhaseThreeSampling {...baseProps({ config: configWithRule(makeRule({ isLocked: false })), canConfigureSample: true })} />);
-    const certScanSelect = screen.getByLabelText("نوع كوتا CertScan") as HTMLSelectElement;
+    const certScanSelect = screen.getByLabelText("كوتا CertScan — المستوى الثاني") as HTMLSelectElement;
     expect(certScanSelect).not.toBeDisabled();
-    const certScanValue = screen.getByLabelText("القيمة") as HTMLInputElement;
+    const certScanValue = screen.getByLabelText("قيمة كوتا CertScan — المستوى الثاني") as HTMLInputElement;
     expect(certScanValue).not.toBeDisabled();
   });
 
   it("failure: unlocked stage WITHOUT configure-sample permission disables the CertScan fields (previously ignored permission entirely)", () => {
     render(<PhaseThreeSampling {...baseProps({ config: configWithRule(makeRule({ isLocked: false })), canConfigureSample: false })} />);
-    const certScanValue = screen.getByLabelText("القيمة") as HTMLInputElement;
+    const certScanValue = screen.getByLabelText("قيمة كوتا CertScan — المستوى الثاني") as HTMLInputElement;
     expect(certScanValue).toBeDisabled();
     // Cluster A fix: the sibling "القيمة المطلوبة" / "طريقة السحب" fields previously
     // ignored canConfigureSample entirely (lock-only gating) even though this component's
@@ -129,15 +129,15 @@ describe("PhaseThreeSampling — CertScan quota fields lock+permission (B13 task
     // a role with view-but-not-edit population access saw them rendered enabled while
     // handleConfigChange (index.tsx) silently rejected the edit. Now gated the same as the
     // CertScan fields.
-    const siblingValue = screen.getByLabelText("القيمة المطلوبة") as HTMLInputElement;
+    const siblingValue = screen.getByLabelText("القيمة المطلوبة — المستوى الثاني") as HTMLInputElement;
     expect(siblingValue).toBeDisabled();
-    const siblingMethod = screen.getByLabelText("طريقة السحب") as HTMLSelectElement;
+    const siblingMethod = screen.getByLabelText("طريقة السحب — المستوى الثاني") as HTMLSelectElement;
     expect(siblingMethod).toBeDisabled();
   });
 
   it("failure: a locked stage disables the CertScan fields regardless of permission (matches sibling fields' lock gating)", () => {
     render(<PhaseThreeSampling {...baseProps({ config: configWithRule(makeRule({ isLocked: true })), canConfigureSample: true })} />);
-    const certScanValue = screen.getByLabelText("القيمة") as HTMLInputElement;
+    const certScanValue = screen.getByLabelText("قيمة كوتا CertScan — المستوى الثاني") as HTMLInputElement;
     expect(certScanValue).toBeDisabled();
   });
 
@@ -163,7 +163,7 @@ describe("PhaseThreeSampling — lock-toggle render-time permission gate, no ale
     const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
     render(<PhaseThreeSampling {...baseProps({ config: configWithRule(makeRule({ isLocked: true })) })} />);
 
-    const lockButton = screen.getByRole("button", { name: /مغلق/ });
+    const lockButton = screen.getByRole("button", { name: /مقفل/ });
     expect(lockButton).toBeDisabled();
     expect(lockButton).toHaveAttribute("title", "لا تملك صلاحية إلغاء قفل مراحل العينة.");
 
@@ -176,7 +176,7 @@ describe("PhaseThreeSampling — lock-toggle render-time permission gate, no ale
     permissionsMock.state.canUnlock = true;
     render(<PhaseThreeSampling {...baseProps({ config: configWithRule(makeRule({ isLocked: true })) })} />);
 
-    const lockButton = screen.getByRole("button", { name: /مغلق/ });
+    const lockButton = screen.getByRole("button", { name: /مقفل/ });
     expect(lockButton).not.toBeDisabled();
   });
 });
@@ -233,7 +233,7 @@ describe("PhaseThreeSampling — running total shown before the draw (B task 1)"
     );
 
     // Running total = 50 (floored second stage) + 20 (third stage) = 70, not 10 + 20 = 30.
-    expect(screen.getByText((_, node) => node?.textContent === "إجمالي العينة المتوقع (كل المستويات): 70")).toBeInTheDocument();
+    expect(screen.getByLabelText("إجمالي العينة المتوقع (كل المستويات)").textContent).toBe("70");
   });
 
   it("shows an explicit override warning naming the stage, entered value, and effective value", () => {
@@ -284,7 +284,7 @@ describe("PhaseThreeSampling — running total shown before the draw (B task 1)"
     );
 
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.getByText((_, node) => node?.textContent === "إجمالي العينة المتوقع (كل المستويات): 60")).toBeInTheDocument();
+    expect(screen.getByLabelText("إجمالي العينة المتوقع (كل المستويات)").textContent).toBe("60");
   });
 });
 
@@ -336,5 +336,94 @@ describe("PhaseThreeSampling — unmapped-stage exclusion warning (P4)", () => {
   it("shows nothing when unmappedStageRowCount is absent (legacy draw / legacy sample master)", () => {
     render(<PhaseThreeSampling {...baseProps({ sampleDrawResult: baseResult() })} />);
     expect(screen.queryByText((_, node) => node?.textContent?.includes("تم استبعاد") ?? false)).not.toBeInTheDocument();
+  });
+});
+
+// ── 2026-08 redesign (design handoff panel `4b`) ────────────────────────────
+// The four stage cards collapsed into ONE editable plan table. These cover the
+// two behaviours that only exist because of that collapse: a live per-cell
+// recompute of المتوقع / the totals row, and a locked stage rendering *disabled*
+// controls (never hidden-but-focusable ones — a previously-fixed a11y bug here).
+describe("PhaseThreeSampling — خطة السحب plan table (4b)", () => {
+  function PlanHarness({
+    rows,
+    initialConfig,
+  }: {
+    rows: PreparedPopulationRow[];
+    initialConfig: PopulationConfig;
+  }) {
+    const [config, setConfig] = useState(initialConfig);
+    return (
+      <PhaseThreeSampling
+        {...baseProps({ populationRows: rows, config, onConfigChange: setConfig })}
+      />
+    );
+  }
+
+  function makeRows(stageText: string, count: number, prefix: string): PreparedPopulationRow[] {
+    return Array.from({ length: count }, (_, i) => makeRow(`${prefix}-${i}`, stageText));
+  }
+
+  it("editing a plan cell recomputes المتوقع and the totals row synchronously", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    const rows = makeRows("SECOND", 100, "S");
+    const rule = makeRule({ stageKey: "second", method: "percentage", value: 10, certScanPercentage: 0 });
+    const { container } = render(<PlanHarness rows={rows} initialConfig={configWithRule(rule)} />);
+
+    const expected = () => container.querySelector(".p3-plan-expected strong")?.textContent;
+    const grandTotal = () => container.querySelector(".p3-plan-totals strong")?.textContent;
+    expect(expected()).toBe("10");
+    expect(grandTotal()).toBe("10");
+
+    const valueInput = screen.getByLabelText("القيمة المطلوبة — المستوى الثاني") as HTMLInputElement;
+    fireEvent.change(valueInput, { target: { value: "25" } });
+
+    expect((screen.getByLabelText("القيمة المطلوبة — المستوى الثاني") as HTMLInputElement).value).toBe("25");
+    expect(expected()).toBe("25");
+    expect(grandTotal()).toBe("25");
+    expect(screen.getByLabelText("إجمالي العينة المتوقع (كل المستويات)").textContent).toBe("25");
+  });
+
+  it("a locked stage renders every plan control DISABLED (not hidden) plus a مقفل pill", () => {
+    // The first level is auto-locked by the algorithm's own rule.
+    const rule = makeRule({ stageKey: "first", method: "percentage", value: 10, certScanPercentage: 0 });
+    render(
+      <PhaseThreeSampling
+        {...baseProps({ populationRows: [makeRow("XR-1", "FIRST")], config: configWithRule(rule) })}
+      />
+    );
+
+    for (const label of [
+      "طريقة السحب — المستوى الأول",
+      "القيمة المطلوبة — المستوى الأول",
+      "كوتا CertScan — المستوى الأول",
+      "قيمة كوتا CertScan — المستوى الأول",
+    ]) {
+      const field = screen.getByLabelText(label);
+      expect(field).toBeInTheDocument();
+      expect(field).toBeDisabled();
+    }
+
+    expect(screen.getByRole("button", { name: /مقفل/ })).toBeInTheDocument();
+  });
+
+  it("a floor-overridden row shows the effective value with the entered value beneath it", () => {
+    const rule = makeRule({
+      stageKey: "second",
+      method: "exact",
+      value: 10,
+      minRequiredCount: 50,
+      certScanPercentage: 0,
+    });
+    const { container } = render(
+      <PhaseThreeSampling
+        {...baseProps({
+          populationRows: makeRows("SECOND", 100, "S"),
+          config: configWithRule(rule),
+        })}
+      />
+    );
+    expect(container.querySelector(".p3-plan-expected strong")?.textContent).toBe("50");
+    expect(container.querySelector(".p3-plan-instead")?.textContent).toContain("10");
   });
 });

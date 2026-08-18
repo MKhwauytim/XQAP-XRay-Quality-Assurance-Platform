@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -62,6 +63,7 @@ import { GlobalMonthProvider } from "../data/month/GlobalMonthProvider";
 import { useLabels } from "../data/labels/useLabels";
 import { getLabels } from "../data/labels/labelsStore";
 import { SyncTick } from "../data/workspace/SyncTick";
+import { SessionActionsContext, type SessionActions } from "./SessionActionsContext";
 
 type AuthGateProps = {
   children: ReactNode | ((session: AuthSession) => ReactNode);
@@ -358,6 +360,14 @@ export default function AuthGate({ children }: AuthGateProps) {
     setLockoutUntil(null);
   }, [clearWorkspace]);
 
+  /**
+   * Session actions published to the subtree (nav 1b's sidebar-footer logout).
+   * Handed over as a context VALUE rather than through the render prop — see
+   * SessionActionsContext's module comment for why that distinction matters to
+   * `react-hooks/refs`.
+   */
+  const sessionActions = useMemo<SessionActions>(() => ({ logout }), [logout]);
+
   // Switch the previewed role (admin only). Selecting "admin" exits preview mode.
   const changePreviewRole = useCallback((role: AuthRole): void => {
     const next = role === ADMIN_ROLE ? null : role;
@@ -641,11 +651,12 @@ export default function AuthGate({ children }: AuthGateProps) {
           session={session}
           previewRole={previewRole}
           onPreviewRoleChange={changePreviewRole}
-          onLogout={logout}
           onFeedback={() => window.dispatchEvent(new CustomEvent("feedback:toggle"))}
         />
 
-        {renderAuthenticatedChildren(effectiveSession)}
+        <SessionActionsContext.Provider value={sessionActions}>
+          {renderAuthenticatedChildren(effectiveSession)}
+        </SessionActionsContext.Provider>
       </GlobalMonthProvider>
     );
   }

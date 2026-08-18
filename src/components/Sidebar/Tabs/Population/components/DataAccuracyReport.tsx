@@ -1,250 +1,208 @@
-import { useMemo, useState } from "react";
-import { CheckCircle2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { CheckCircle2, ChevronDown, ChevronLeft, ChevronUp, Info, Search } from "lucide-react";
 import type { NormalizedRiskRow } from "../riskData/riskDataTypes";
 import type { NormalizedBiRow } from "../biData/biDataTypes";
-import { makeBiMatchKey } from "../processing/populationProcessor";
 import Pagination from "../../../../../components/Pagination/Pagination";
 import { clampPage, pageSlice } from "../../../../../utils/paginationUtils";
+import { formatNumber } from "../../../../../utils/formatting";
+import { useLabels } from "../../../../../data/labels/useLabels";
+import {
+  compareAccuracyAsync,
+  displayForCol,
+  severityOf,
+  type AccuracyCompareResult,
+  type ColStat,
+} from "./dataAccuracyCompare";
 import "./DataAccuracyReport.css";
 
-// ── column mapping definition ─────────────────────────────────────────────────
-
-type ColMapping = {
-  key: string;
-  label: string;
-  getRisk: (r: NormalizedRiskRow) => string | null;
-  getBi:   (b: NormalizedBiRow)   => string | null;
-};
-
-const COLUMN_MAPPINGS: ColMapping[] = [
-  { key: "xrayEntryDate",          label: "تاريخ دخول الأشعة",        getRisk: r => r.xrayEntryDate,           getBi: b => b.xrayEntryDate },
-  { key: "portCode",               label: "رمز المنفذ",               getRisk: r => r.portCode,                getBi: b => b.portCode },
-  { key: "portName",               label: "اسم المنفذ",               getRisk: r => r.portName,                getBi: b => b.portName },
-  { key: "portType",               label: "نوع المنفذ",               getRisk: r => r.portType,                getBi: b => b.portType },
-  { key: "declarationNumber",      label: "رقم البيان",               getRisk: r => r.declarationNumber,       getBi: b => b.declarationNumber },
-  { key: "declarationDate",        label: "تاريخ البيان",             getRisk: r => r.declarationDate,         getBi: b => b.declarationDate },
-  { key: "declarationHijriDate",   label: "تاريخ البيان هجري",       getRisk: r => r.declarationHijriDate,    getBi: b => b.declarationHijriDate },
-  { key: "plateOrContainerNumber", label: "رقم اللوحة/الحاوية",       getRisk: r => r.plateOrContainerNumber,  getBi: b => b.plateOrContainerNumber },
-  { key: "chassisNumber",          label: "رقم الهيكل",               getRisk: r => r.chassisNumber,           getBi: b => b.chassisNumber },
-  { key: "levelOneResult",         label: "نتيجة المستوى الأول",      getRisk: r => r.xrayLevelOneResult,      getBi: b => b.levelOneResult },
-  { key: "levelTwoResult",         label: "نتيجة المستوى الثاني",     getRisk: r => r.xrayLevelTwoResult,      getBi: b => b.levelTwoResult },
-  { key: "manualInspectionResult", label: "نتيجة التفتيش اليدوي",    getRisk: r => r.inspectorResult,         getBi: b => b.manualInspectionResult },
-  { key: "oppositeInspectionResult",label:"نتيجة التفتيش المعاكس",   getRisk: r => r.oppositeInspectorResult, getBi: b => b.oppositeInspectionResult },
-  { key: "liveMeansResult",        label: "نتيجة الوسائل الحية",     getRisk: r => r.liveMeansResult,         getBi: b => b.liveMeansResult },
-];
-
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-function norm(val: string | null | undefined): string {
-  if (val === null || val === undefined) return "";
-  const s = val.toString().trim();
-  // Normalize ISO-style dates: "2025-1-5" → "2025-01-05"
-  const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (iso) return `${iso[1]}-${iso[2].padStart(2,"0")}-${iso[3].padStart(2,"0")}`;
-  // Normalize DD/MM/YYYY
-  const slash = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (slash) return `${slash[3]}-${slash[2].padStart(2,"0")}-${slash[1].padStart(2,"0")}`;
-  return s.toLowerCase().replace(/\s+/g, " ");
-}
-
-
-// ── Result-value semantic normalization ───────────────────────────────────────
-// Result columns (level-1/2, manual, opposite, live-means) store their values
-// differently across the two source systems: the risk workbook may use numeric
-// codes (1, 2) while the BI workbook stores full Arabic phrases — or the same
-// concept is expressed with slightly different wording.  We map all known
-// variants to a canonical Arabic label so they compare equal and are displayed
-// with a readable explanation.
-
-const RESULT_COLUMN_KEYS = new Set([
-  "levelOneResult",
-  "levelTwoResult",
-  "manualInspectionResult",
-  "oppositeInspectionResult",
-  "liveMeansResult",
-]);
-
-function canonicalizeResult(normed: string): string {
-  // Numeric codes used by the risk workbook
-  if (normed === "1") return "سليمة";
-  if (normed === "2") return "اشتباه";
-  // Normalize Arabic letters for soft-matching (ة→ه, أإآ→ا, ى→ي)
-  const ar = normed
-    .replace(/[أإآ]/g, "ا")
-    .replace(/ى/g, "ي")
-    .replace(/[ةه]/g, "ه");
-  if (ar.startsWith("سليم") || ar.includes("يمكن فسحها") || ar.includes("مبدئ")) return "سليمة";
-  if (ar.startsWith("اشتباه") || ar.startsWith("مشتبه")) return "اشتباه";
-  return normed;
-}
-
-/** Comparison normalizer for result columns: apply base norm then canonicalize. */
-function normResult(val: string | null | undefined): string {
-  return canonicalizeResult(norm(val));
-}
-
-/** Picks the right normalizer based on whether the column is a result column. */
-function normForCol(val: string | null | undefined, colKey: string): string {
-  return RESULT_COLUMN_KEYS.has(colKey) ? normResult(val) : norm(val);
-}
+// ── verdict card ──────────────────────────────────────────────────────────────
 
 /**
- * Display helper for result columns.
- * When the raw value differs from its canonical label, shows "raw (canonical)"
- * so the reviewer immediately understands what the code means.
+ * The 300px "دقة البيانات الكلية" card of the 3b verdict row. Exported so
+ * `PhaseTwoReportAndProcessing` can place it beside the processing-result card
+ * in one `300px minmax(0,1fr)` grid; `DataAccuracyReport` renders it inline
+ * itself when it is used standalone.
  */
-function displayForCol(val: string | null | undefined, colKey: string): string {
-  if (val === null || val === undefined || val === "") return "—";
-  if (!RESULT_COLUMN_KEYS.has(colKey)) return val;
-  const canonical = canonicalizeResult(norm(val));
-  const raw = val.trim();
-  // Only annotate when the raw text doesn't already match the canonical label
-  if (canonical !== norm(raw) && canonical !== raw) return `${raw} (${canonical})`;
-  return raw;
-}
-
-function accColor(pct: number): string {
-  if (pct === 100) return "#059669";
-  if (pct >= 85)   return "#d97706";
-  return "#dc2626";
-}
-
-// ── types ─────────────────────────────────────────────────────────────────────
-
-type Mismatch = {
-  xrayImageId: string;
-  colKey:      string;
-  colLabel:    string;
-  riskValue:   string | null;
-  biValue:     string | null;
-};
-
-type ColStat = {
-  key:       string;
-  label:     string;
-  matched:   number;
-  mismatched: number;
-  accuracy:  number;
-};
-
-type CompareResult = {
-  totalRiskRows:     number;
-  matchedIds:        number;
-  onlyInRisk:        number;
-  onlyInBi:          number;
-  rowsWithMismatch:  number;
-  totalComparisons:  number;
-  totalMismatches:   number;
-  overallAccuracy:   number;
-  colStats:          ColStat[];
-  mismatches:        Mismatch[];
-};
-
-// ── computation ───────────────────────────────────────────────────────────────
-
-function compare(riskRows: NormalizedRiskRow[], biRows: NormalizedBiRow[]): CompareResult {
-  // Match on the SAME normalized ID+port key the population processor uses
-  // (makeBiMatchKey) so this accuracy report reflects the real BI→risk join —
-  // a bare `xrayImageId.trim()` key silently over- or under-counted matches.
-  const biMap = new Map<string, NormalizedBiRow>();
-  for (const b of biRows) {
-    if (b.xrayImageId) biMap.set(makeBiMatchKey(b.xrayImageId, b.portName), b);
-  }
-
-  const colCounters: Record<string, { matched: number; mismatched: number }> = {};
-  for (const col of COLUMN_MAPPINGS) colCounters[col.key] = { matched: 0, mismatched: 0 };
-
-  const mismatches: Mismatch[] = [];
-  let matchedIds       = 0;
-  let onlyInRisk       = 0;
-  let rowsWithMismatch = 0;
-
-  for (const r of riskRows) {
-    if (!r.xrayImageId) continue;
-    const b = biMap.get(makeBiMatchKey(r.xrayImageId, r.portName));
-    if (!b) { onlyInRisk++; continue; }
-    matchedIds++;
-
-    let rowHasMismatch = false;
-    for (const col of COLUMN_MAPPINGS) {
-      const rv = normForCol(col.getRisk(r), col.key);
-      const bv = normForCol(col.getBi(b), col.key);
-      if (rv !== bv) {
-        colCounters[col.key].mismatched++;
-        mismatches.push({
-          xrayImageId: r.xrayImageId,
-          colKey:      col.key,
-          colLabel:    col.label,
-          riskValue:   col.getRisk(r),
-          biValue:     col.getBi(b),
-        });
-        rowHasMismatch = true;
-      } else {
-        colCounters[col.key].matched++;
-      }
-    }
-    if (rowHasMismatch) rowsWithMismatch++;
-  }
-
-  const riskKeys = new Set(
-    riskRows.filter(r => r.xrayImageId).map(r => makeBiMatchKey(r.xrayImageId, r.portName))
+export function AccuracyVerdictCard({ result }: { result: AccuracyCompareResult }) {
+  const labels = useLabels();
+  const mismatchCols = result.colStats.filter(c => c.mismatched > 0);
+  const worst = mismatchCols.reduce<ColStat | null>(
+    (acc, c) => (acc === null || c.accuracy < acc.accuracy ? c : acc),
+    null,
   );
-  let onlyInBi = 0;
-  for (const b of biRows) {
-    if (b.xrayImageId && !riskKeys.has(makeBiMatchKey(b.xrayImageId, b.portName))) onlyInBi++;
-  }
 
-  const totalComparisons = matchedIds * COLUMN_MAPPINGS.length;
-  const totalMismatches  = mismatches.length;
-  const overallAccuracy  = totalComparisons > 0
-    ? Math.round(((totalComparisons - totalMismatches) / totalComparisons) * 100)
-    : 100;
+  const sentence = worst
+    ? labels.p2_accuracy_worst_sentence
+        .replace("{mismatched}", formatNumber(mismatchCols.length))
+        .replace("{total}", formatNumber(result.colStats.length))
+        .replace("{column}", worst.label)
+        .replace("{accuracy}", formatNumber(worst.accuracy))
+    : labels.p2_accuracy_all_match_sentence.replace("{total}", formatNumber(result.colStats.length));
 
-  const colStats: ColStat[] = COLUMN_MAPPINGS.map(col => {
-    const { matched, mismatched } = colCounters[col.key];
-    const total = matched + mismatched;
-    return {
-      key:       col.key,
-      label:     col.label,
-      matched,
-      mismatched,
-      accuracy:  total > 0 ? Math.round((matched / total) * 100) : 100,
-    };
-  });
+  return (
+    <div className={`dar-verdict ${result.overallAccuracy === 100 ? "is-perfect" : "is-degraded"}`}>
+      <span className="dar-verdict-label">{labels.p2_accuracy_title}</span>
+      <div className="dar-verdict-value-row">
+        <strong className="dar-verdict-value">{formatNumber(result.overallAccuracy)}%</strong>
+        <span className="dar-verdict-value-sub">
+          {labels.p2_accuracy_comparisons.replace("{count}", formatNumber(result.totalComparisons))}
+        </span>
+      </div>
+      <div className="dar-verdict-bar">
+        <div className="dar-verdict-bar-fill" style={{ width: `${result.overallAccuracy}%` }} />
+      </div>
+      <p className="dar-verdict-sentence">{sentence}</p>
+      <div className="dar-verdict-rows">
+        <span className="dar-kpi">
+          <span className="dar-kpi-label">{labels.p2_accuracy_matched_ids}</span>
+          <strong className="dar-kpi-value">{formatNumber(result.matchedIds)}</strong>
+        </span>
+        <span className="dar-kpi">
+          <span className="dar-kpi-label">{labels.p2_accuracy_only_in_risk}</span>
+          <strong className="dar-kpi-value warn">{formatNumber(result.onlyInRisk)}</strong>
+        </span>
+        <span className="dar-kpi">
+          <span className="dar-kpi-label">{labels.p2_accuracy_rows_with_mismatch}</span>
+          <strong className="dar-kpi-value danger">{formatNumber(result.rowsWithMismatch)}</strong>
+        </span>
+      </div>
+    </div>
+  );
+}
 
-  return {
-    totalRiskRows:   riskRows.filter(r => r.xrayImageId).length,
-    matchedIds,
-    onlyInRisk,
-    onlyInBi,
-    rowsWithMismatch,
-    totalComparisons,
-    totalMismatches,
-    overallAccuracy,
-    colStats,
-    mismatches,
-  };
+// ── column accuracy rows ──────────────────────────────────────────────────────
+
+function ColumnAccuracyRow({
+  col,
+  onInspect,
+}: {
+  col: ColStat;
+  onInspect?: (colKey: string) => void;
+}) {
+  const labels = useLabels();
+  const severity = severityOf(col.accuracy);
+  return (
+    <div className={`dar-col-row sev-${severity}`}>
+      <span className="dar-col-name">
+        <span className="dar-col-dot" aria-hidden="true" />
+        {col.label}
+      </span>
+      <span className="dar-col-num">{formatNumber(col.matched)}</span>
+      <span className="dar-miss-num">{formatNumber(col.mismatched)}</span>
+      <span className="dar-acc-pct">{formatNumber(col.accuracy)}%</span>
+      <span className="dar-acc-bar-wrap">
+        <span className="dar-acc-bar-bg">
+          <span className="dar-acc-bar-fill" style={{ width: `${col.accuracy}%` }} />
+        </span>
+        {onInspect && col.mismatched > 0 && (
+          <button type="button" className="dar-inspect-link" onClick={() => onInspect(col.key)}>
+            {labels.p2_col_inspect}
+          </button>
+        )}
+      </span>
+    </div>
+  );
 }
 
 // ── component ─────────────────────────────────────────────────────────────────
 
+const EMPTY_ACCURACY_RESULT: AccuracyCompareResult = {
+  totalRiskRows: 0,
+  matchedIds: 0,
+  onlyInRisk: 0,
+  onlyInBi: 0,
+  rowsWithMismatch: 0,
+  totalComparisons: 0,
+  totalMismatches: 0,
+  overallAccuracy: 100,
+  colStats: [],
+  mismatches: [],
+};
+
 export default function DataAccuracyReport({
   riskRows,
   biRows,
+  result: precomputed,
+  verdictHoisted = false,
 }: {
   riskRows: NormalizedRiskRow[];
   biRows:   NormalizedBiRow[];
+  /** Comparison already computed by the parent (PhaseTwo hoists it so the
+   *  verdict card and this report share one pass over the rows). */
+  result?:  AccuracyCompareResult;
+  /** True when the parent renders `AccuracyVerdictCard` itself. */
+  verdictHoisted?: boolean;
 }) {
-  const result = useMemo(() => compare(riskRows, biRows), [riskRows, biRows]);
+  const labels = useLabels();
 
-  const [search,    setSearch]    = useState("");
-  const [colFilter, setColFilter] = useState("__all__");
+  // Fix (population, 2026-08-18): the production caller (PhaseTwoReportAndProcessing)
+  // always hoists `precomputed`, so this fallback normally never runs -- but it used
+  // to run the comparison fully synchronously, which is exactly the "app freezes
+  // after a Phase 1 upload" bug for any caller that DOESN'T hoist. Runs the same
+  // chunked async comparison PhaseTwoReportAndProcessing now uses, so a future or
+  // untested call site can't reintroduce the freeze. `computedFallback` starts as
+  // an all-zero placeholder (not null) so every hook below it keeps operating on a
+  // real AccuracyCompareResult shape while the async pass is in flight.
+  const [fallback, setFallback] = useState<{
+    risk: NormalizedRiskRow[];
+    bi: NormalizedBiRow[];
+    result: AccuracyCompareResult;
+  } | null>(null);
+  // Stored WITH the rows it was computed from and read back only when those
+  // still match, so "inputs changed, result not in yet" is derived rather than
+  // set — no stale comparison for even one render, and no synchronous setState
+  // inside the effect.
+  const fallbackResult =
+    fallback && fallback.risk === riskRows && fallback.bi === biRows ? fallback.result : null;
+  const isComputingFallback = !precomputed && fallbackResult === null;
+
+  useEffect(() => {
+    if (precomputed) return;
+    let cancelled = false;
+    compareAccuracyAsync(riskRows, biRows).then((result) => {
+      if (cancelled) return;
+      setFallback({ risk: riskRows, bi: biRows, result });
+    });
+    return () => { cancelled = true; };
+  }, [precomputed, riskRows, biRows]);
+
+  const result = precomputed ?? fallbackResult ?? EMPTY_ACCURACY_RESULT;
+
+  const [search, setSearch] = useState("");
+  const [activeMismatchColumn, setActiveMismatchColumn] = useState<string>("all");
+  const [showMatchedColumns, setShowMatchedColumns] = useState(false);
+  // Owner request (2026-08-18): collapsed by default, same disclosure pattern
+  // as the final-population preview at the end of the page. Remembers nothing.
+  const [detailOpen, setDetailOpen] = useState(false);
+
+  const mismatchCols = useMemo(
+    () => result.colStats.filter(c => c.mismatched > 0).sort((a, b) => a.accuracy - b.accuracy),
+    [result.colStats],
+  );
+  const matchedCols = useMemo(() => result.colStats.filter(c => c.mismatched === 0), [result.colStats]);
+
+  // Fix (population, 2026-08-18): `activeMismatchColumn` used to be read raw,
+  // so a chip picked on one month's data (e.g. a column that only mismatches
+  // this month) silently pointed at nothing after a month switch or a
+  // reprocess -- the table would show "no rows match" with no visible sign a
+  // filter was even active, easy to mistake for genuinely clean data. Same
+  // stale-selection shape `pageState`/`resultPageKey` below already guards
+  // against for pagination; this falls back to "all" the same way once the
+  // selected column no longer appears in the current mismatch set.
+  const effectiveMismatchColumn = useMemo(
+    () =>
+      activeMismatchColumn === "all" || mismatchCols.some(c => c.key === activeMismatchColumn)
+        ? activeMismatchColumn
+        : "all",
+    [activeMismatchColumn, mismatchCols],
+  );
+
   const resultPageKey = `${result.mismatches.length}:${result.mismatches[0]?.xrayImageId ?? ""}:${result.mismatches.at(-1)?.xrayImageId ?? ""}`;
   const [pageState, setPageState] = useState<{ resultKey: string; page: number }>(() => ({ resultKey: resultPageKey, page: 1 }));
 
   const filtered = useMemo(() => {
     let rows = result.mismatches;
-    if (colFilter !== "__all__") rows = rows.filter(m => m.colKey === colFilter);
+    if (effectiveMismatchColumn !== "all") rows = rows.filter(m => m.colKey === effectiveMismatchColumn);
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       rows = rows.filter(m =>
@@ -254,145 +212,164 @@ export default function DataAccuracyReport({
       );
     }
     return rows;
-  }, [result.mismatches, colFilter, search]);
+  }, [result.mismatches, effectiveMismatchColumn, search]);
 
   const page = clampPage(pageState.resultKey === resultPageKey ? pageState.page : 1, filtered.length);
   const paginated = pageSlice(filtered, page);
 
-  function handleSearch(v: string) { setSearch(v);    setPageState({ resultKey: resultPageKey, page: 1 }); }
-  function handleFilter(v: string) { setColFilter(v); setPageState({ resultKey: resultPageKey, page: 1 }); }
-
-  const accColor100 = accColor(result.overallAccuracy);
+  function handleSearch(v: string) { setSearch(v); setPageState({ resultKey: resultPageKey, page: 1 }); }
+  function handleColumnChip(colKey: string) {
+    setActiveMismatchColumn(colKey);
+    setPageState({ resultKey: resultPageKey, page: 1 });
+  }
 
   return (
     <div className="dar-root">
 
-      {/* ── KPI strip ── */}
-      <div className="dar-kpi-strip">
-        <div className="dar-kpi">
-          <span className="dar-kpi-label">معرّفات المقارنة</span>
-          <strong className="dar-kpi-value" style={{ color: "#17365d" }}>
-            {result.matchedIds.toLocaleString("ar-SA-u-nu-latn")}
-          </strong>
-          <span className="dar-kpi-sub">من أصل {result.totalRiskRows.toLocaleString("ar-SA-u-nu-latn")} في المخاطر</span>
-        </div>
-        <div className="dar-kpi">
-          <span className="dar-kpi-label">فقط في المخاطر</span>
-          <strong className="dar-kpi-value" style={{ color: result.onlyInRisk > 0 ? "#d97706" : "#059669" }}>
-            {result.onlyInRisk.toLocaleString("ar-SA-u-nu-latn")}
-          </strong>
-          <span className="dar-kpi-sub">لا يقابلها معرّف في BI</span>
-        </div>
-        <div className="dar-kpi">
-          <span className="dar-kpi-label">سجلات بها اختلاف</span>
-          <strong className="dar-kpi-value" style={{ color: result.rowsWithMismatch > 0 ? "#dc2626" : "#059669" }}>
-            {result.rowsWithMismatch.toLocaleString("ar-SA-u-nu-latn")}
-          </strong>
-          <span className="dar-kpi-sub">من {result.matchedIds.toLocaleString("ar-SA-u-nu-latn")} سجل متطابق الهوية</span>
-        </div>
-        <div className="dar-kpi">
-          <span className="dar-kpi-label">إجمالي الاختلافات</span>
-          <strong className="dar-kpi-value" style={{ color: result.totalMismatches > 0 ? "#dc2626" : "#059669" }}>
-            {result.totalMismatches.toLocaleString("ar-SA-u-nu-latn")}
-          </strong>
-          <span className="dar-kpi-sub">عبر {COLUMN_MAPPINGS.length} أعمدة مقارنة</span>
-        </div>
-        <div className="dar-kpi">
-          <span className="dar-kpi-label">دقة البيانات الكلية</span>
-          <strong className="dar-kpi-value" style={{ color: accColor100 }}>
-            {result.overallAccuracy}%
-          </strong>
-          <span className="dar-kpi-sub">{result.totalComparisons.toLocaleString("ar-SA-u-nu-latn")} مقارنة إجمالية</span>
-        </div>
-      </div>
+      {isComputingFallback && (
+        <div className="upload-warning" role="status">{labels.p2_accuracy_computing}</div>
+      )}
 
-      {/* ── Column accuracy table ── */}
+      {!verdictHoisted && <AccuracyVerdictCard result={result} />}
+
+      {/* ── Columns with a mismatch (matched columns behind a toggle) ── */}
       <div className="dar-col-table">
-        <h3 className="dar-col-table-title">دقة كل عمود</h3>
-        <div className="dar-col-header">
-          <span>العمود</span>
-          <span style={{ textAlign: "center" }}>متطابق</span>
-          <span style={{ textAlign: "center" }}>مختلف</span>
-          <span style={{ textAlign: "center" }}>دقة</span>
-          <span>الشريط</span>
+        <div className="dar-col-table-head">
+          <h3 className="dar-col-table-title">{labels.p2_mismatch_columns_title}</h3>
+          <span className="dar-col-table-badge">
+            {labels.p2_mismatch_columns_badge
+              .replace("{mismatched}", formatNumber(mismatchCols.length))
+              .replace("{total}", formatNumber(result.colStats.length))}
+          </span>
+          {matchedCols.length > 0 && (
+            <button
+              type="button"
+              className="dar-matched-toggle"
+              aria-expanded={showMatchedColumns}
+              onClick={() => setShowMatchedColumns(v => !v)}
+            >
+              {showMatchedColumns
+                ? labels.p2_mismatch_columns_hide_matched
+                : labels.p2_mismatch_columns_show_matched.replace("{count}", formatNumber(matchedCols.length))}
+              {showMatchedColumns ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+            </button>
+          )}
         </div>
-        {result.colStats.map(col => {
-          const cls = col.accuracy === 100 ? "perfect" : col.accuracy >= 85 ? "" : col.accuracy >= 60 ? "low" : "critical";
-          const fillColor = accColor(col.accuracy);
-          return (
-            <div key={col.key} className={`dar-col-row ${cls}`}>
-              <span className="dar-col-name">{col.label}</span>
-              <span className="dar-col-num">{col.matched.toLocaleString("ar-SA-u-nu-latn")}</span>
-              <span className="dar-miss-num" style={{ color: col.mismatched > 0 ? "#dc2626" : "#059669", fontWeight: col.mismatched > 0 ? 700 : 400 }}>
-                {col.mismatched.toLocaleString("ar-SA-u-nu-latn")}
-              </span>
-              <span className="dar-acc-pct" style={{ color: fillColor }}>{col.accuracy}%</span>
-              <div className="dar-acc-bar-wrap">
-                <div className="dar-acc-bar-bg">
-                  <div className="dar-acc-bar-fill" style={{ width: `${col.accuracy}%`, background: fillColor }} />
-                </div>
-              </div>
-            </div>
-          );
-        })}
+
+        <div className="dar-col-header">
+          <span>{labels.p2_col_header_column}</span>
+          <span className="dar-col-center">{labels.p2_col_header_matched}</span>
+          <span className="dar-col-center">{labels.p2_col_header_mismatched}</span>
+          <span className="dar-col-center">{labels.p2_col_header_accuracy}</span>
+          <span />
+        </div>
+
+        {mismatchCols.length === 0 ? (
+          <div className="dar-empty">{labels.p2_mismatch_columns_none}</div>
+        ) : (
+          mismatchCols.map(col => (
+            <ColumnAccuracyRow key={col.key} col={col} onInspect={handleColumnChip} />
+          ))
+        )}
+
+        {showMatchedColumns && matchedCols.map(col => (
+          <ColumnAccuracyRow key={col.key} col={col} />
+        ))}
       </div>
 
-      {/* ── Mismatch detail table ── */}
+      {/* ── Mismatch detail table — a disclosure, collapsed on mount ── */}
       <div className="dar-detail">
+        <button
+          type="button"
+          className="dar-detail-disclosure"
+          aria-expanded={detailOpen}
+          onClick={() => setDetailOpen((open) => !open)}
+        >
+          <span className="dar-detail-chevron" aria-hidden="true">
+            {detailOpen ? <ChevronDown size={14} /> : <ChevronLeft size={14} />}
+          </span>
+          <h3 className="dar-detail-title">{labels.p2_details_title}</h3>
+          <span className="dar-detail-summary">
+            {labels.p2_details_summary.replace("{count}", formatNumber(result.totalMismatches))}
+          </span>
+          <span className="dar-detail-hint">
+            {detailOpen ? labels.p2_preview_collapse_hint : labels.p2_preview_expand_hint}
+          </span>
+        </button>
+
+        {detailOpen && (<>
         <div className="dar-detail-toolbar">
-          <h3 className="dar-detail-title">تفاصيل الاختلافات</h3>
-          <input
-            type="text"
-            className="dar-search-input"
-            aria-label="بحث بمعرف الأشعة أو القيمة"
-            placeholder="بحث بمعرف الأشعة أو القيمة..."
-            value={search}
-            onChange={e => handleSearch(e.target.value)}
-            dir="rtl"
-          />
-          <select
-            className="dar-col-filter"
-            value={colFilter}
-            onChange={e => handleFilter(e.target.value)}
-          >
-            <option value="__all__">كل الأعمدة</option>
-            {COLUMN_MAPPINGS.map(c => (
-              <option key={c.key} value={c.key}>{c.label}</option>
+          <span className="dar-count-chip">{formatNumber(filtered.length)}</span>
+          <label className="dar-search-field">
+            <Search size={14} aria-hidden="true" />
+            <input
+              type="text"
+              className="dar-search-input"
+              aria-label={labels.p2_details_search_aria}
+              placeholder={labels.p2_details_search_placeholder}
+              value={search}
+              onChange={e => handleSearch(e.target.value)}
+              dir="rtl"
+            />
+          </label>
+          <div className="dar-chip-row" role="group" aria-label={labels.p2_details_chips_aria}>
+            <button
+              type="button"
+              className={`dar-chip${effectiveMismatchColumn === "all" ? " active" : ""}`}
+              aria-pressed={effectiveMismatchColumn === "all"}
+              onClick={() => handleColumnChip("all")}
+            >
+              {labels.p2_details_chip_all}
+            </button>
+            {mismatchCols.map(col => (
+              <button
+                key={col.key}
+                type="button"
+                className={`dar-chip${effectiveMismatchColumn === col.key ? " active" : ""}`}
+                aria-pressed={effectiveMismatchColumn === col.key}
+                onClick={() => handleColumnChip(col.key)}
+              >
+                {col.label} <span className="dar-chip-count">{formatNumber(col.mismatched)}</span>
+              </button>
             ))}
-          </select>
-          <span className="dar-count-chip">{filtered.length.toLocaleString("ar-SA-u-nu-latn")} اختلاف</span>
+          </div>
+        </div>
+
+        <div className="dar-normalization-note">
+          <Info size={14} aria-hidden="true" />
+          <span>{labels.p2_details_normalization_note}</span>
         </div>
 
         {filtered.length === 0 ? (
           <div className="dar-empty">
             {result.mismatches.length === 0
-              ? <><CheckCircle2 size={16} style={{ verticalAlign: "middle", marginInlineEnd: 4, color: "#16a34a" }} /> لا توجد اختلافات — البيانات متطابقة بالكامل</>
-
-              : "لا توجد نتائج تطابق الفلتر المحدد"}
+              ? <><CheckCircle2 size={16} className="dar-empty-icon" aria-hidden="true" /> {labels.p2_details_empty_all_match}</>
+              : labels.p2_details_empty_filtered}
           </div>
         ) : (
           <>
             <div className="dar-detail-header">
-              <span>معرف الأشعة</span>
-              <span>العمود</span>
-              <span>قيمة وكالة المخاطر</span>
-              <span>قيمة BI</span>
+              <span>{labels.p2_details_header_id}</span>
+              <span>{labels.p2_details_header_column}</span>
+              <span>{labels.p2_details_header_risk}</span>
+              <span>{labels.p2_details_header_bi}</span>
             </div>
-            {paginated.map((m, i) => (
-              <div key={i} className="dar-detail-row">
-                <span className="dar-id">{m.xrayImageId}</span>
-                <span className="dar-col">{m.colLabel}</span>
-                <span className={`dar-risk-val${!m.riskValue ? " dar-null" : ""}`}>
-                  {displayForCol(m.riskValue, m.colKey)}
-                </span>
-                <span className={`dar-bi-val${!m.biValue ? " dar-null" : ""}`}>
-                  {displayForCol(m.biValue, m.colKey)}
-                </span>
-              </div>
-            ))}
+            {paginated.map((m, i) => {
+              const riskDisplay = displayForCol(m.riskValue, m.colKey, "risk");
+              const biDisplay = displayForCol(m.biValue, m.colKey, "bi");
+              return (
+                <div key={`${m.xrayImageId}-${m.colKey}-${i}`} className="dar-detail-row">
+                  <span className="dar-id">{m.xrayImageId}</span>
+                  <span className="dar-col">{m.colLabel}</span>
+                  <span className={`dar-val tone-${riskDisplay.tone}`}>{riskDisplay.text}</span>
+                  <span className={`dar-val tone-${biDisplay.tone}`}>{biDisplay.text}</span>
+                </div>
+              );
+            })}
             <Pagination page={page} totalItems={filtered.length} onPageChange={(nextPage) => setPageState({ resultKey: resultPageKey, page: nextPage })} itemLabel="اختلاف" />
           </>
         )}
+        </>)}
       </div>
     </div>
   );

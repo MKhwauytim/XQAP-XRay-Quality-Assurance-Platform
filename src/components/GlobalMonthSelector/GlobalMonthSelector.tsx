@@ -20,9 +20,21 @@ const MAX_YEAR = 2100;
 type GlobalMonthSelectorProps = {
   /** False in demo mode: the read-only workspace never creates months. */
   allowCreate: boolean;
+  /**
+   * Where this instance is rendered. Purely a styling hook -- both variants run
+   * the exact same selection/creation logic, so the month context stays a
+   * single implementation (nav 1b moved the control out of the toolbar and into
+   * the sidebar's context card; it is NOT a second copy).
+   *
+   * - `toolbar` (default): the original inline row, one cell of
+   *   `.auth-admin-toolbar`'s 4-track grid.
+   * - `sidebar`: the stacked context card in the nav rail -- label + state pill
+   *   on one row, month select + "شهر جديد" beneath.
+   */
+  variant?: "toolbar" | "sidebar";
 };
 
-export function GlobalMonthSelector({ allowCreate }: GlobalMonthSelectorProps) {
+export function GlobalMonthSelector({ allowCreate, variant = "toolbar" }: GlobalMonthSelectorProps) {
   const { months, selection, isSelectedMonthClosed, setSelectedMonth, startNewMonth } = useGlobalMonth();
   const { can, canMutate } = usePermissions();
   const labels = useLabels();
@@ -54,18 +66,36 @@ export function GlobalMonthSelector({ allowCreate }: GlobalMonthSelectorProps) {
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [pickerOpen]);
 
+  const isSidebar = variant === "sidebar";
+  const rootClassName = `gms-root${isSidebar ? " gms-sidebar" : ""}`;
+
   // No workspace / month list still loading — render an empty stable placeholder
   // so .auth-admin-toolbar's 4-track grid always has 4 children (returning null
   // would collapse a track, pull the actions cluster inward, and cause a layout
-  // jump when the async month-list load completes).
-  if (selection.kind === "none") return <div className="gms-root" aria-hidden />;
+  // jump when the async month-list load completes). The sidebar variant is not
+  // in that grid, so it says plainly that no month is selected instead.
+  if (selection.kind === "none") {
+    return isSidebar ? (
+      <div className={rootClassName} dir="rtl">
+        <span className="gms-label">{labels.gm_label}</span>
+        <span className="gms-sidebar-empty">{labels.gm_no_months}</span>
+      </div>
+    ) : (
+      <div className="gms-root" aria-hidden />
+    );
+  }
 
   const canCreate = allowCreate && can("process-population");
   const isPending = selection.kind === "pending";
 
   return (
-    <div className="gms-root" dir="rtl">
+    <div className={rootClassName} dir="rtl">
       <label className="gms-label" htmlFor="global-month-select">{labels.gm_label}</label>
+      {isSidebar && (
+        <span className={`gms-state-pill${isSelectedMonthClosed ? " is-closed" : ""}`}>
+          {isSelectedMonthClosed ? labels.gm_locked_badge : labels.gm_open_badge}
+        </span>
+      )}
       <select
         id="global-month-select"
         className="gms-select"
@@ -87,7 +117,9 @@ export function GlobalMonthSelector({ allowCreate }: GlobalMonthSelectorProps) {
         ))}
       </select>
 
-      {isSelectedMonthClosed && (
+      {/* Toolbar only: the sidebar variant already states open/closed in its
+          state pill above, so a second lock badge would just repeat it. */}
+      {isSelectedMonthClosed && !isSidebar && (
         <span className="gms-locked" title={labels.msg_month_closed_banner}>
           <Lock size={12} aria-hidden /> {labels.gm_locked_badge}
         </span>

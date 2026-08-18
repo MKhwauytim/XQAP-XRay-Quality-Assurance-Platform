@@ -1,12 +1,17 @@
-/* ── InspectionPanel ────────────────────────────────────────────────────── */
+/* ── InspectionPanel ────────────────────────────────────────────────────────
+   Design handoff 2026-08, §7 "صور الأشعة المحالة — approved (7a)": the
+   referrals page keeps today's layout and ONLY this panel is redesigned.
+   Every colour is a token from src/index.css (see check:hex-literals).
+   RTL is the default — logical properties only.
+   ────────────────────────────────────────────────────────────────────────── */
 
 .ip-panel {
   display: flex;
   flex-direction: column;
   background: var(--c-surface);
   border: 1px solid var(--c-border);
-  border-radius: var(--r-xl);
-  box-shadow: var(--sh-xs, 0 1px 2px rgba(13, 31, 50, 0.05));
+  border-radius: 14px;
+  box-shadow: var(--sh-sm);
   overflow: hidden;
   min-height: 0;
   flex-shrink: 0;
@@ -14,7 +19,7 @@
 
 /* Right panel — stretches to the full split container height via align-items: stretch */
 .ip-panel--right {
-  width: 480px;
+  width: 470px;
   max-width: 42%;
   flex-shrink: 0;
 }
@@ -22,9 +27,9 @@
 /* ── Header ─────────────────────────────────────────────────────────────── */
 
 .ip-header {
-  padding: 14px 16px 10px;
+  padding: 14px 16px 12px;
   border-bottom: 1px solid var(--c-border);
-  background: var(--c-bg);
+  background: var(--c-surface-2);
   flex-shrink: 0;
 }
 
@@ -32,29 +37,37 @@
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 8px;
-  margin-bottom: 10px;
+  gap: var(--sp-2);
 }
 
 .ip-header-id {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--sp-2);
   min-width: 0;
 }
 
 .ip-xray-id {
-  font-family: monospace;
-  font-size: 14px;
-  font-weight: 800;
-  color: var(--c-navy-2);
-  letter-spacing: 0.04em;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: var(--fw-bold);
+  color: var(--c-ink);
+  letter-spacing: 0.02em;
   word-break: break-all;
+}
+
+/* "المنفذ · المستوى · CertScan" */
+.ip-header-context {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  font-weight: var(--fw-semibold);
+  color: var(--c-ink-3);
+  line-height: var(--lh-normal);
 }
 
 .ip-header-controls {
   display: flex;
-  gap: 4px;
+  gap: var(--sp-1);
   flex-shrink: 0;
 }
 
@@ -63,7 +76,7 @@
   height: 28px;
   flex: 0 0 28px;
   border: 1px solid var(--c-border);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: var(--c-surface);
   color: var(--c-ink-2);
   font-size: 14px;
@@ -72,12 +85,46 @@
   align-items: center;
   justify-content: center;
   line-height: 1;
-  transition: background 0.12s, border-color 0.12s;
+  transition: background var(--t-fast) var(--ease-smooth),
+              border-color var(--t-fast) var(--ease-smooth);
 }
 
 .ip-ctrl-btn:hover {
-  background: var(--c-bg-2);
+  background: var(--c-navy-soft);
   border-color: var(--c-border-2);
+}
+
+/* ── Required-field progress ────────────────────────────────────────────── */
+
+.ip-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: 10px;
+}
+
+.ip-progress-track {
+  flex: 1 1 auto;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--c-navy-soft);
+  overflow: hidden;
+}
+
+.ip-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--c-sky);
+  transition: width var(--t-base) var(--ease-smooth);
+}
+
+.ip-progress-count {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: var(--fw-bold);
+  color: var(--c-ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* ── Metadata chips ─────────────────────────────────────────────────────── */
@@ -91,7 +138,7 @@
 .ip-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-1);
   background: var(--c-surface);
   border: 1px solid var(--c-border);
   border-radius: 20px;
@@ -112,7 +159,7 @@
 
 .ip-chip-value {
   color: var(--c-navy-2);
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -128,7 +175,7 @@
   gap: 0;
   padding: 0;
   border-bottom: 1px solid var(--c-border);
-  background: var(--c-bg);
+  background: var(--c-surface-2);
   flex-shrink: 0;
   overflow-x: auto;
 }
@@ -143,7 +190,8 @@
   background: transparent;
   cursor: pointer;
   border-bottom: 3px solid transparent;
-  transition: background 0.12s, border-color 0.12s;
+  transition: background var(--t-fast) var(--ease-smooth),
+              border-color var(--t-fast) var(--ease-smooth);
   text-align: right;
   flex: 1;
   min-width: 120px;
@@ -161,12 +209,12 @@
 }
 
 .ip-step:hover {
-  background: var(--c-bg-2);
+  background: var(--c-navy-soft);
 }
 
 .ip-step--active {
   border-bottom-color: var(--c-primary);
-  background: var(--c-bg-2);
+  background: var(--c-navy-soft);
 }
 
 .ip-step--done {
@@ -191,24 +239,26 @@
   background: var(--c-surface);
   color: var(--c-ink-2);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--fw-black);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  transition: background var(--t-fast) var(--ease-smooth),
+              border-color var(--t-fast) var(--ease-smooth),
+              color var(--t-fast) var(--ease-smooth);
 }
 
 .ip-step--active .ip-step-num {
   background: var(--c-primary);
   border-color: var(--c-primary);
-  color: #fff;
+  color: var(--c-surface);
 }
 
 .ip-step--done .ip-step-num {
   background: var(--c-success);
   border-color: var(--c-success);
-  color: #fff;
+  color: var(--c-surface);
 }
 
 .ip-step-text {
@@ -222,12 +272,12 @@
 .ip-step-label {
   font-size: 10px;
   color: var(--c-ink-3);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
 }
 
 .ip-step-title {
   font-size: 12.5px;
-  font-weight: 700;
+  font-weight: var(--fw-bold);
   color: var(--c-navy-2);
   white-space: nowrap;
   overflow: hidden;
@@ -236,7 +286,7 @@
 }
 
 .ip-step--active .ip-step-title { color: var(--c-primary); }
-.ip-step--done .ip-step-title   { color: var(--c-success-dark); }
+.ip-step--done .ip-step-title   { color: var(--c-success); }
 
 /* ── Form body ──────────────────────────────────────────────────────────── */
 
@@ -244,10 +294,10 @@
   flex: 1;
   min-height: 0; /* allow flex item to shrink so footer stays visible */
   overflow-y: auto;
-  padding: 18px 18px 4px;
+  padding: 16px 18px;
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 14px;
 }
 
 .ip-no-template {
@@ -263,42 +313,44 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-bottom: 18px;
+  margin-bottom: 0;
 }
 
 .ip-field-label {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--c-navy-2);
+  font-size: 12px;
+  font-weight: var(--fw-bold);
+  color: var(--c-ink-2);
 }
 
-.ip-required { color: var(--c-error); margin-inline-start: 2px; }
+.ip-required { color: var(--c-danger); margin-inline-start: 2px; }
 
 .ip-field--invalid .ip-input,
-.ip-field--invalid .ip-select {
-  border-color: var(--c-error);
-  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.08);
+.ip-field--invalid .ip-select,
+.ip-field--invalid .ip-segmented {
+  border-color: var(--c-danger);
 }
 
 .ip-field-error,
 .ip-validation-msg {
-  color: var(--c-error);
+  color: var(--c-danger);
   font-size: 12px;
-  font-weight: 700;
-  line-height: 1.6;
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-loose);
 }
 
 .ip-input,
 .ip-select {
   width: 100%;
-  padding: 9px 12px;
-  border: 1.5px solid var(--c-border);
-  border-radius: 8px;
-  font-size: 14px;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--c-border);
+  border-radius: 9px;
+  font-size: 13.5px;
   font-family: inherit;
-  color: var(--c-navy-2);
+  color: var(--c-ink-2);
   background: var(--c-surface);
-  transition: border-color 0.15s;
+  transition: border-color var(--t-fast) var(--ease-smooth),
+              box-shadow var(--t-fast) var(--ease-smooth);
   box-sizing: border-box;
   direction: rtl;
 }
@@ -306,13 +358,96 @@
 .ip-input:focus,
 .ip-select:focus {
   outline: none;
-  border-color: var(--c-primary);
+  border-color: var(--c-sky);
+  box-shadow: var(--focus-ring);
 }
 
 .ip-textarea {
-  min-height: 96px;
+  height: auto;
+  min-height: 96px;   /* ≈ 4 rows */
+  padding: 9px 12px;
   resize: vertical;
-  line-height: 1.6;
+  line-height: var(--lh-loose);
+}
+
+/* ── Segmented verdict control (dropdown with 2–3 options) ──────────────── */
+
+.ip-segmented {
+  display: flex;
+  gap: 6px;
+  border: 1px solid transparent; /* invalid state paints this */
+  border-radius: 9px;
+}
+
+.ip-segment {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--c-border);
+  border-radius: 9px;
+  background: var(--c-surface);
+  color: var(--c-ink-2);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: var(--fw-bold);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background var(--t-fast) var(--ease-smooth),
+              border-color var(--t-fast) var(--ease-smooth),
+              color var(--t-fast) var(--ease-smooth);
+}
+
+.ip-segment:hover:not(:disabled) {
+  border-color: var(--c-border-2);
+  background: var(--c-surface-2);
+}
+
+.ip-segment:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.ip-segment--selected,
+.ip-segment--selected:hover:not(:disabled) {
+  background: var(--c-success-bg);
+  border-color: var(--c-success-border);
+  color: var(--c-success);
+}
+
+.ip-segment:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Checkbox row (procedure confirmation) ──────────────────────────────── */
+
+/* Full-width row on the surface-2 token. `row-reverse` puts the box at the
+   inline start of the RTL row while the DOM keeps label-before-input, so the
+   <label for=…> association is untouched. */
+.ip-field--check {
+  flex-direction: row-reverse;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-border);
+  border-radius: 9px;
+  box-sizing: border-box;
+}
+
+.ip-field--check .ip-field-label { margin: 0; cursor: pointer; }
+
+.ip-checkbox {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  cursor: pointer;
+  accent-color: var(--c-success);
 }
 
 /* ── Submitted / read-only view ─────────────────────────────────────────── */
@@ -325,7 +460,7 @@
 
 .ip-readonly-phase h4 {
   font-size: 13px;
-  font-weight: 800;
+  font-weight: var(--fw-black);
   color: var(--c-ink-2);
   margin: 0 0 10px;
   padding-bottom: 6px;
@@ -352,7 +487,7 @@
 
 .ip-answer-value {
   color: var(--c-navy-2);
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   text-align: start;
 }
 
@@ -365,7 +500,7 @@
   gap: 10px;
   padding: 12px 16px;
   border-top: 1px solid var(--c-border);
-  background: var(--c-bg);
+  background: var(--c-surface-2);
   flex-shrink: 0;
   flex-wrap: wrap;
   direction: ltr;
@@ -381,51 +516,60 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--sp-2);
   direction: rtl;
 }
 
 .ip-footer-primary {
-  justify-content: flex-start;
+  flex: 1 0 100%;
+  justify-content: stretch;
 }
 
 .ip-footer-actions {
+  flex: 1 1 auto;
   justify-content: flex-end;
 }
 
 .ip-btn {
   padding: 8px 18px;
-  border-radius: 8px;
+  border-radius: 9px;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: var(--fw-bold);
   font-family: inherit;
   cursor: pointer;
-  border: none;
-  transition: background 0.15s, opacity 0.15s;
+  border: 1px solid transparent;
+  transition: background var(--t-fast) var(--ease-smooth),
+              opacity var(--t-fast) var(--ease-smooth);
   white-space: nowrap;
 }
 
 .ip-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .ip-btn--primary {
-  background: var(--c-primary);
-  color: #fff;
+  flex: 1 1 100%;
+  height: 42px;
+  padding: 0 18px;
+  background: var(--c-navy);
+  color: var(--c-surface);
+  font-size: 13.5px;
 }
-.ip-btn--primary:hover:not(:disabled) { background: var(--c-primary-dark); }
+.ip-btn--primary:hover:not(:disabled) { background: var(--c-navy-2); }
 
 .ip-btn--secondary {
+  flex: 1 1 0;
   background: var(--c-surface);
-  color: var(--c-navy-2);
-  border: 1.5px solid var(--c-border-2);
+  color: var(--c-ink-2);
+  border-color: var(--c-border-2);
 }
-.ip-btn--secondary:hover:not(:disabled) { background: var(--c-bg-2); }
+.ip-btn--secondary:hover:not(:disabled) { background: var(--c-surface-2); }
 
 .ip-btn--warning {
+  flex: 1 1 0;
   background: var(--c-warning-bg);
   color: var(--c-warning);
-  border: 1.5px solid var(--c-warning-border);
+  border-color: var(--c-warning-border);
 }
-.ip-btn--warning:hover:not(:disabled) { background: #FEE2C8; }
+.ip-btn--warning:hover:not(:disabled) { background: var(--c-surface-3); }
 
 /* ── Status badge (reused in header) ───────────────────────────────────── */
 
@@ -434,10 +578,24 @@
   padding: 2px 10px;
   border-radius: 20px;
   font-size: 11.5px;
-  font-weight: 700;
+  font-weight: var(--fw-bold);
   white-space: nowrap;
 }
 
-.ip-badge--done    { background: #D1FAE5; color: #065F46; }
-.ip-badge--pending { background: #EFF6FF; color: #1D4ED8; }
-.ip-badge--replaced { background: #F1F5F9; color: #64748B; }
+.ip-badge--done {
+  background: var(--c-success-bg);
+  color: var(--c-success);
+  border: 1px solid var(--c-success-border);
+}
+
+.ip-badge--pending {
+  background: var(--c-sky-light);
+  color: var(--c-sky-text);
+  border: 1px solid var(--c-sky);
+}
+
+.ip-badge--replaced {
+  background: var(--c-surface-2);
+  color: var(--c-ink-3);
+  border: 1px solid var(--c-border);
+}

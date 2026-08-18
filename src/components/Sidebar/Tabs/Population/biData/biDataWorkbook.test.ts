@@ -5,7 +5,12 @@
 // owner's actual workbook (fixtures only — the real file is never read from disk in a test).
 import { describe, expect, it } from "vitest";
 import * as XLSX from "xlsx";
-import { processBiWorkbook } from "./biDataWorkbook";
+import {
+  deriveSheetNameFromFileName,
+  mergeBiWorkbookResults,
+  processBiWorkbook
+} from "./biDataWorkbook";
+import type { BiWorkbookResult, NormalizedBiRow } from "./biDataTypes";
 
 /** Build a real .xlsx File (single sheet) in memory — exactly what the import worker parses. */
 function buildBiWorkbookFile(sheets: { sheetName: string; header: string; values: string[] }[]): File {
@@ -81,5 +86,140 @@ describe("processBiWorkbook · owner-reported 0-accepted bug (2026-08-12)", () =
     expect(sheet).toBeDefined();
     expect(sheet!.originalRowCount).toBe(0);
     expect(sheet!.zeroIdDiagnostic).toBeUndefined();
+  });
+});
+
+/** Build a real .csv File in memory — SheetJS parses it through the same XLSX.read path. */
+function buildBiCsvFile(fileName: string, header: string, values: string[]): File {
+  const csv = [header, ...values].join("\n");
+  return new File([csv], fileName, { type: "text/csv" });
+}
+
+function biRow(xrayImageId: string, source: string): NormalizedBiRow {
+  return {
+    source,
+    xrayImageId,
+    sourceSheetName: source,
+    sourceRowNumber: 1
+  } as unknown as NormalizedBiRow;
+}
+
+function biResult(overrides: Partial<BiWorkbookResult> = {}): BiWorkbookResult {
+  return {
+    rows: [],
+    sheetSummaries: [],
+    unknownSheetNames: [],
+    totalOriginalRows: 0,
+    totalNormalizedRows: 0,
+    totalExcludedMissingXrayIdCount: 0,
+    ...overrides
+  };
+}
+
+describe("mergeBiWorkbookResults · APPEND semantics (multi-file BI, 2026-08 handoff)", () => {
+  it("appends rows and keeps BOTH rows when two files share an xrayImageId — no dedupe, no rejection", () => {
+    const a = biResult({
+      rows: [biRow("SHARED-1", "بحري وارد"), biRow("A-2", "بحري وارد")],
+      sheetSummaries: [
+        { sheetName: "بحري وارد", source: "بحري وارد", originalRowCount: 2, normalizedRowCount: 2, excludedMissingXrayIdCount: 0 }
+      ],
+      totalOriginalRows: 2,
+      totalNormalizedRows: 2
+    });
+    const b = biResult({
+      // SHARED-1 again: a different population that happens to overlap.
+      rows: [biRow("SHARED-1", "بحري وارد"), biRow("B-2", "بحري وارد")],
+      sheetSummaries: [
+        { sheetName: "بحري وارد", source: "بحري وارد", originalRowCount: 3, normalizedRowCount: 2, excludedMissingXrayIdCount: 1 }
+      ],
+      totalOriginalRows: 3,
+      totalNormalizedRows: 2,
+      totalExcludedMissingXrayIdCount: 1
+    });
+
+    const merged = mergeBiWorkbookResults([a, b], ["a.xlsx", "b.xlsx"]);
+
+    expect(merged.rows).toHaveLength(4);
+    expect(merged.rows.filter((row) => row.xrayImageId === "SHARED-1")).toHaveLength(2);
+    expect(merged.totalOriginalRows).toBe(5);
+    expect(merged.totalNormalizedRows).toBe(4);
+    expect(merged.totalExcludedMissingXrayIdCount).toBe(1);
+  });
+
+  it("stamps the source file name onto each sheet summary so identical sheet names stay distinguishable", () => {
+    const sheet = { sheetName: "بحري وارد", source: "بحري وارد", originalRowCount: 1, normalizedRowCount: 1, excludedMissingXrayIdCount: 0 };
+    const merged = mergeBiWorkbookResults(
+      [biResult({ sheetSummaries: [sheet] }), biResult({ sheetSummaries: [sheet] })],
+      ["a.xlsx", "b.xlsx"]
+    );
+
+    expect(merged.sheetSummaries).toHaveLength(2);
+    expect(merged.sheetSummaries.map((s) => s.sourceFileName)).toEqual(["a.xlsx", "b.xlsx"]);
+    expect(merged.sheetSummaries.every((s) => s.sheetName === "بحري وارد")).toBe(true);
+  });
+
+  it("unions unknown sheet names instead of repeating them", () => {
+    const merged = mergeBiWorkbookResults(
+      [
+        biResult({ unknownSheetNames: ["ورقة غريبة"] }),
+        biResult({ unknownSheetNames: ["ورقة غريبة", "أخرى"] })
+      ],
+      ["a.xlsx", "b.xlsx"]
+    );
+
+    expect(merged.unknownSheetNames).toEqual(["ورقة غريبة", "أخرى"]);
+  });
+
+  it("returns an empty result for an empty input list", () => {
+    const merged = mergeBiWorkbookResults([], []);
+    expect(merged.rows).toHaveLength(0);
+    expect(merged.totalNormalizedRows).toBe(0);
+  });
+});
+
+describe("CSV support · sheet name derived from the file name", () => {
+  it("derives the base name, dropping directories and the extension", () => {
+    expect(deriveSheetNameFromFileName("بحري وارد.csv")).toBe("بحري وارد");
+    expect(deriveSheetNameFromFileName("C:\\data\\بري صادر.CSV")).toBe("بري صادر");
+    expect(deriveSheetNameFromFileName("uploads/بري وارد.csv")).toBe("بري وارد");
+    expect(deriveSheetNameFromFileName("bi.2026-08.xlsx")).toBe("bi.2026-08");
+  });
+
+  it("happy: a CSV named after a configured sheet classifies exactly like the same-named sheet in an .xlsx", async () => {
+    const file = buildBiCsvFile("بحري وارد.csv", "معرف الأشعة", ["30B9202605010002", "30B9202605010003"]);
+
+    const result = await processBiWorkbook(file);
+
+    expect(result.unknownSheetNames).toEqual([]);
+    expect(result.totalOriginalRows).toBe(2);
+    expect(result.totalNormalizedRows).toBe(2);
+    expect(result.sheetSummaries[0]!.sheetName).toBe("بحري وارد");
+    expect(result.sheetSummaries[0]!.source).toBe("بحري وارد");
+    expect(result.rows.every((row) => row.source === "بحري وارد")).toBe(true);
+  });
+
+  it("failure: a CSV whose derived name matches no configured pattern is reported as unknown, not imported as a silent zero", async () => {
+    const file = buildBiCsvFile("تصدير عشوائي.csv", "معرف الأشعة", ["30B9202605010002"]);
+
+    const result = await processBiWorkbook(file);
+
+    expect(result.unknownSheetNames).toEqual(["تصدير عشوائي"]);
+    expect(result.sheetSummaries).toHaveLength(0);
+    expect(result.totalNormalizedRows).toBe(0);
+    // This pair — zero accepted rows plus a non-empty unknown list — is exactly
+    // what index.tsx turns into an explicit error row for the file.
+    expect(result.totalNormalizedRows === 0 && result.unknownSheetNames.length > 0).toBe(true);
+  });
+
+  it("failure: an .xlsx with an unrecognized sheet name keeps the permissive fallback (unchanged behaviour)", async () => {
+    const file = buildBiWorkbookFile([
+      { sheetName: "ورقة غريبة", header: "معرف الأشعة", values: ["30B9202605010002"] }
+    ]);
+
+    const result = await processBiWorkbook(file);
+
+    expect(result.unknownSheetNames).toEqual([]);
+    expect(result.totalNormalizedRows).toBe(1);
+    expect(result.sheetSummaries[0]!.source).toBe("ورقة غريبة");
   });
 });

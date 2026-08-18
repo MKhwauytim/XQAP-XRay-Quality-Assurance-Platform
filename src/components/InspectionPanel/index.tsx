@@ -126,20 +126,35 @@ export default function InspectionPanel({
     return phases[0]!.phaseId;
   })();
 
-  const missingRequiredFields = useMemo(() => {
-    if (!template) return [];
+  /**
+   * Required-field progress and the missing-field list, in one pass.
+   *
+   * `total`/`filled` are DERIVED here (design handoff §"State Management":
+   * "requiredFilledCount derived from the template + answers (no new state)") —
+   * they are not stored, so they cannot drift from the answers and they change
+   * for free when a conditional field becomes visible or hidden. `missing`
+   * keeps its previous semantics exactly: visible required fields across every
+   * phase, in phase order, de-duplicated by fieldId.
+   */
+  const requiredFieldStats = useMemo(() => {
     const missing: Array<{ phaseId: string; field: TemplateField }> = [];
+    if (!template) return { total: 0, filled: 0, missing };
     const done = new Set<string>();
+    let total = 0;
     for (const phase of phases) {
       for (const field of getVisibleRequiredFields(template, phase.phaseId, ans)) {
-        if (!isAnswerFilled(field, ans[field.fieldId]) && !done.has(field.fieldId)) {
+        if (done.has(field.fieldId)) continue;
+        done.add(field.fieldId);
+        total += 1;
+        if (!isAnswerFilled(field, ans[field.fieldId])) {
           missing.push({ phaseId: phase.phaseId, field });
-          done.add(field.fieldId);
         }
       }
     }
-    return missing;
+    return { total, filled: total - missing.length, missing };
   }, [template, phases, ans]);
+
+  const missingRequiredFields = requiredFieldStats.missing;
 
   const invalidRequiredIds = useMemo(() => {
     const missingIds = new Set(missingRequiredFields.map(({ field }) => field.fieldId));
@@ -215,6 +230,8 @@ export default function InspectionPanel({
         entry={entry}
         savedAnswer={savedAnswer}
         onClose={onClose}
+        requiredTotal={requiredFieldStats.total}
+        requiredFilled={requiredFieldStats.filled}
       />
 
       {template && phases.length > 1 && (
@@ -295,7 +312,7 @@ export default function InspectionPanel({
                     setReopenReason("");
                   }}
                 >
-                  إلغاء
+                  {getLabels().ip_cancel_btn}
                 </button>
                 <button
                   type="button"
@@ -318,6 +335,11 @@ export default function InspectionPanel({
       {!isSubmitted && !readonly && (
         <div className="ip-footer">
           {validationMsg && <p className="ip-validation-msg">{validationMsg}</p>}
+          {/* Owner request (2026-08-18): no always-on missing-required-fields
+              banner. The required-field progress bar in the header carries the
+              same information passively; per-field validation still fires on a
+              submit attempt (handlePrimaryAction marks the missing fields and
+              shows validationMsg), so nothing blocks silently. */}
           <div className="ip-footer-primary">
             <button
               type="button"
@@ -335,7 +357,7 @@ export default function InspectionPanel({
                 className="ip-btn ip-btn--warning"
                 onClick={() => onReplace(entry)}
               >
-                استبدال العينة
+                {getLabels().ip_replace_btn}
               </button>
             )}
             {onReassign && (
@@ -344,7 +366,7 @@ export default function InspectionPanel({
                 className="ip-btn ip-btn--secondary"
                 onClick={() => onReassign(entry)}
               >
-                إسناد لموظف آخر
+                {getLabels().ip_reassign_btn}
               </button>
             )}
           </div>
@@ -451,6 +473,9 @@ function FormField({
   onChange: (v: string | number | boolean) => void;
 }) {
   const id = `ipf-${field.fieldId}`;
+  // A segmented group is not a labelable element, so it carries its own
+  // aria-label instead of being pointed at by `htmlFor`.
+  const segmented = field.type === "dropdown" && isSegmentedDropdown(field);
 
   if (field.type === "empty") {
     return (
@@ -461,8 +486,12 @@ function FormField({
   }
 
   return (
-    <div className={`ip-field${invalid ? " ip-field--invalid" : ""}`}>
-      <label className="ip-field-label" htmlFor={id}>
+    <div
+      className={`ip-field${invalid ? " ip-field--invalid" : ""}${
+        field.type === "checkbox" ? " ip-field--check" : ""
+      }`}
+    >
+      <label className="ip-field-label" htmlFor={segmented ? undefined : id}>
         {field.label}
         {field.required ? <span className="ip-required">*</span> : null}
       </label>
@@ -507,10 +536,36 @@ function FormField({
         <input
           id={id}
           type="checkbox"
+          className="ip-checkbox"
           checked={Boolean(value)}
           onChange={(e) => onChange(e.target.checked)}
-          style={{ width: 20, height: 20, cursor: "pointer" }}
         />
+      ) : field.type === "dropdown" && isSegmentedDropdown(field) ? (
+        // Verdict-shaped dropdown (design handoff §7): a 2–3 option choice is a
+        // segmented button group rather than a <select>. This is a RENDERING
+        // choice over the same template schema — the options, the label and the
+        // required-ness still come from `field`, nothing is hard-coded, and the
+        // stored value is byte-identical to what the <select> produced.
+        <div
+          className="ip-segmented"
+          role="group"
+          aria-label={field.label || getLabels().ip_segmented_group_aria}
+        >
+          {field.options.map((o) => {
+            const selected = String(value) === o;
+            return (
+              <button
+                key={o}
+                type="button"
+                className={`ip-segment${selected ? " ip-segment--selected" : ""}`}
+                aria-pressed={selected}
+                onClick={() => onChange(o)}
+              >
+                {o}
+              </button>
+            );
+          })}
+        </div>
       ) : field.type === "dropdown" ? (
         <select
           id={id}
@@ -550,6 +605,18 @@ function FormField({
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Design handoff §7: a `dropdown` field with 2 or 3 options renders as a
+ * segmented verdict control; 4 or more options keep the `<select>`, which stays
+ * the better control once the list is long enough to overflow a 470px panel.
+ * Every other field type is untouched.
+ */
+function isSegmentedDropdown(field: TemplateField): boolean {
+  return (
+    field.type === "dropdown" && field.options.length >= 2 && field.options.length <= 3
+  );
+}
 
 function formatAnswerValue(
   field: TemplateField,

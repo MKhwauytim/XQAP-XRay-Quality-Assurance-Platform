@@ -1,12 +1,13 @@
 import { useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronUp } from "lucide-react";
 import type { ProcessingSummary, RemovedPopulationRow } from "../processing/populationProcessingTypes";
 import { formatNumber, formatPercentage } from "./helpers";
-import SummaryCard from "./SummaryCard";
 import Pagination from "../../../../../components/Pagination/Pagination";
 import { clampPage, pageSlice } from "../../../../../utils/paginationUtils";
 import { formatStageLabel } from "../../../../../data/population/stageHelpers";
 import type { StageAliasMappings } from "../../../../../data/population/populationConfig";
+import { useLabels } from "../../../../../data/labels/useLabels";
+import type { Labels } from "../../../../../data/labels/labelsStore";
 
 /** The handful of preview-row fields this component's table actually renders —
  *  intentionally narrower than `PreparedPopulationRow` so both a live, freshly
@@ -119,23 +120,23 @@ function summarizeInvalidLevelCauses(rows: RemovedPopulationRow[]): InvalidLevel
 /** Renders the top invalid-level-result causes above the per-row drill-down —
  *  this is the "what's the single most common reason" answer a raw dropped-row
  *  table can't give at a glance. Renders nothing when there's nothing to
- *  summarize. */
-function InvalidLevelCauseSummarySection({ rows }: { rows: RemovedPopulationRow[] }) {
+ *  summarize. Always visible (never behind a disclosure) per the 3b handoff. */
+function InvalidLevelCauseSummarySection({ rows, labels }: { rows: RemovedPopulationRow[]; labels: Labels }) {
   if (rows.length === 0) return null;
   const causes = summarizeInvalidLevelCauses(rows);
   if (causes.length === 0) return null;
 
   return (
-    <div className="invalid-level-cause-summary">
-      <h5>أكثر أسباب استبعاد نتائج المستوى شيوعاً</h5>
+    <div className="p2-top-reasons">
+      <strong className="p2-top-reasons-title">{labels.p2_excluded_top_reasons_title}</strong>
       <ul>
         {causes.map((cause) => (
           <li key={cause.tag + cause.label}>
-            <span className="invalid-level-cause-label">{cause.label}</span>
-            <span className="invalid-level-cause-count">{formatNumber(cause.count)} صف</span>
+            <span className="p2-top-reasons-label">{cause.label}</span>
+            <strong className="p2-top-reasons-count">{formatNumber(cause.count)}</strong>
             {cause.examples.length > 0 && (
-              <span className="invalid-level-cause-examples">
-                أمثلة: {cause.examples.join(" — ")}
+              <span className="p2-top-reasons-examples">
+                {labels.p2_excluded_examples.replace("{examples}", cause.examples.join(" — "))}
               </span>
             )}
           </li>
@@ -147,7 +148,7 @@ function InvalidLevelCauseSummarySection({ rows }: { rows: RemovedPopulationRow[
 
 /** W8: collapsible per-row drill-down for one exclusion category (invalid ID,
  *  duplicate, invalid level result). Renders nothing when there are no rows. */
-function DroppedRowsCategory({ title, rows }: { title: string; rows: RemovedPopulationRow[] }) {
+function DroppedRowsCategory({ title, rows, labels }: { title: string; rows: RemovedPopulationRow[]; labels: Labels }) {
   const [open, setOpen] = useState(false);
   if (rows.length === 0) return null;
   const shown = rows.slice(0, DROPPED_ROWS_DISPLAY_CAP);
@@ -160,18 +161,18 @@ function DroppedRowsCategory({ title, rows }: { title: string; rows: RemovedPopu
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
       >
-        <span>{title}</span>
+        <span className="dropped-rows-title">{title}</span>
         <span className="dropped-rows-count">{formatNumber(rows.length)}</span>
         {open ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
       </button>
       {open && (
         <div className="dropped-rows-table" role="table">
           <div className="dropped-rows-row dropped-rows-header" role="row">
-            <span>معرف الأشعة</span>
-            <span>اسم المنفذ</span>
-            <span>رقم الصف المصدر</span>
-            <span>الورقة المصدر</span>
-            <span>السبب</span>
+            <span>{labels.p2_excluded_header_id}</span>
+            <span>{labels.p2_excluded_header_port}</span>
+            <span>{labels.p2_excluded_header_source_row}</span>
+            <span>{labels.p2_excluded_header_source_sheet}</span>
+            <span>{labels.p2_excluded_header_reason}</span>
           </div>
           {shown.map((droppedRow, index) => (
             <div key={droppedRowKey(droppedRow, index)} className="dropped-rows-row" role="row">
@@ -183,7 +184,7 @@ function DroppedRowsCategory({ title, rows }: { title: string; rows: RemovedPopu
             </div>
           ))}
           {extra > 0 && (
-            <p className="dropped-rows-more">+{formatNumber(extra)} صفاً إضافياً — التصدير الكامل متاح عبر زر تصدير Excel أعلاه.</p>
+            <p className="dropped-rows-more">{labels.p2_excluded_more_rows.replace("{count}", formatNumber(extra))}</p>
           )}
         </div>
       )}
@@ -193,24 +194,77 @@ function DroppedRowsCategory({ title, rows }: { title: string; rows: RemovedPopu
 
 /** W8: wraps the three exclusion categories; renders nothing when nothing was excluded. */
 function DroppedRowsSection({
+  summary,
   removedRows,
   duplicateRows,
   invalidResultRows,
+  labels,
 }: {
+  summary: ProcessingSummary;
   removedRows?: RemovedPopulationRow[];
   duplicateRows?: RemovedPopulationRow[];
   invalidResultRows?: RemovedPopulationRow[];
+  labels: Labels;
 }) {
   const hasAny =
     (removedRows?.length ?? 0) + (duplicateRows?.length ?? 0) + (invalidResultRows?.length ?? 0) > 0;
   if (!hasAny) return null;
+  const total =
+    summary.duplicateRiskIdRows + summary.removedInvalidResultRows + summary.invalidRiskIdRows;
   return (
-    <div className="dropped-rows-section">
-      <h4>تفاصيل الصفوف المستبعدة</h4>
-      <DroppedRowsCategory title="معرفات غير صالحة" rows={removedRows ?? []} />
-      <DroppedRowsCategory title="مكررات مستبعدة" rows={duplicateRows ?? []} />
-      <InvalidLevelCauseSummarySection rows={invalidResultRows ?? []} />
-      <DroppedRowsCategory title="نتائج مستوى غير صالحة" rows={invalidResultRows ?? []} />
+    <div className="dropped-rows-section p2-panel p2-panel-padded">
+      <div className="p2-panel-head p2-panel-head-flush">
+        <h4>{labels.p2_excluded_title}</h4>
+        <span className="p2-danger-badge">{formatNumber(total)}</span>
+      </div>
+      <DroppedRowsCategory title={labels.p2_excluded_duplicates} rows={duplicateRows ?? []} labels={labels} />
+      <DroppedRowsCategory title={labels.p2_excluded_invalid_results} rows={invalidResultRows ?? []} labels={labels} />
+      <DroppedRowsCategory title={labels.p2_excluded_invalid_ids} rows={removedRows ?? []} labels={labels} />
+      <InvalidLevelCauseSummarySection rows={invalidResultRows ?? []} labels={labels} />
+    </div>
+  );
+}
+
+/** "تعبئة الخانات من BI" — the per-column BI fill table (3b left panel). */
+function BiFillPanel({ summary, labels }: { summary: ProcessingSummary; labels: Labels }) {
+  return (
+    <div className="bi-fill-summary-section p2-panel">
+      <div className="p2-panel-head">
+        <h4>{labels.p2_bi_fill_title}</h4>
+        <span className="p2-panel-head-meta">
+          {labels.p2_bi_fill_total.replace("{count}", formatNumber(summary.totalBiFilledFields))}
+        </span>
+      </div>
+
+      {summary.biFieldFillSummary.length === 0 ? (
+        <p className="p2-panel-empty">{labels.p2_bi_fill_empty}</p>
+      ) : (
+        <div className="bi-fill-summary-table">
+          <div className="bi-fill-summary-header">
+            <span>{labels.p2_bi_fill_header_column}</span>
+            <span className="p2-center">{labels.p2_bi_fill_header_empty_before}</span>
+            <span className="p2-center">{labels.p2_bi_fill_header_filled}</span>
+            <span>{labels.p2_bi_fill_header_percent}</span>
+          </div>
+
+          {summary.biFieldFillSummary.map((field) => (
+            <div key={field.fieldName} className="bi-fill-summary-row">
+              <span className="bi-fill-field">{field.fieldName}</span>
+              <span className="p2-center p2-num">{formatNumber(field.riskEmptyBefore)}</span>
+              <span className="p2-center p2-num p2-filled">{formatNumber(field.filledFromBi)}</span>
+              <span className="bi-fill-bar-cell">
+                <span className="bi-fill-bar-bg">
+                  <span
+                    className="bi-fill-bar-fill"
+                    style={{ width: `${Math.max(0, Math.min(100, field.fillPercentage))}%` }}
+                  />
+                </span>
+                <span className="p2-num">{formatPercentage(field.fillPercentage)}</span>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -224,61 +278,85 @@ const PREVIEW_PAGE_SIZE = 10;
  * `Pagination` component. Renders nothing when there are no preview rows —
  * a locked month whose aggregate predates this feature, or a freshly
  * processed month with zero final rows, both fall through here silently.
+ *
+ * 3b handoff: the whole table is now behind a disclosure that is COLLAPSED on
+ * mount and remembers nothing across mounts (a plain `useState`, deliberately
+ * not persisted).
  */
 function PreparedPopulationPreviewSection({
   summary,
   previewRows,
   stageMappings,
+  labels,
 }: {
   summary: ProcessingSummary;
   previewRows: PopulationReportPreviewRow[];
   stageMappings?: Partial<StageAliasMappings>;
+  labels: Labels;
 }) {
+  const [finalPreviewOpen, setFinalPreviewOpen] = useState(false);
   const [page, setPage] = useState(1);
   if (previewRows.length === 0) return null;
 
   const safePage = clampPage(page, previewRows.length, PREVIEW_PAGE_SIZE);
   const shown = pageSlice(previewRows, safePage, PREVIEW_PAGE_SIZE);
 
+  const summaryLine = labels.p2_preview_summary
+    .replace("{rows}", formatNumber(summary.finalPreparedPopulationRows))
+    .replace("{certScan}", formatNumber(summary.certScanRows))
+    .replace("{nonCertScan}", formatNumber(summary.nonCertScanRows));
+
   return (
-    <div className="prepared-preview-section">
-      <h4>معاينة المجتمع النهائي</h4>
+    <div className="prepared-preview-section p2-panel">
+      <button
+        type="button"
+        className="prepared-preview-toggle"
+        aria-expanded={finalPreviewOpen}
+        onClick={() => setFinalPreviewOpen((open) => !open)}
+      >
+        <span className="prepared-preview-chevron" aria-hidden="true">
+          {finalPreviewOpen ? <ChevronDown size={14} /> : <ChevronLeft size={14} />}
+        </span>
+        <h4>{labels.p2_preview_title}</h4>
+        <span className="prepared-preview-summary">{summaryLine}</span>
+        <span className="prepared-preview-hint">
+          {finalPreviewOpen ? labels.p2_preview_collapse_hint : labels.p2_preview_expand_hint}
+        </span>
+      </button>
 
-      <div className="processing-summary-grid prepared-preview-stats">
-        <SummaryCard label="المجتمع النهائي" value={summary.finalPreparedPopulationRows} />
-        <SummaryCard label="CertScan" value={summary.certScanRows} />
-        <SummaryCard label="NonCertScan" value={summary.nonCertScanRows} />
-      </div>
+      {finalPreviewOpen && (
+        <>
+          <div className="prepared-preview-table">
+            <div className="prepared-preview-header">
+              <span>{labels.p2_preview_header_id}</span>
+              <span>{labels.p2_preview_header_port}</span>
+              <span>{labels.p2_preview_header_stage}</span>
+              <span>{labels.p2_preview_header_level_one}</span>
+              <span>{labels.p2_preview_header_level_two}</span>
+              <span>{labels.p2_preview_header_certscan}</span>
+            </div>
 
-      <div className="prepared-preview-table">
-        <div className="prepared-preview-header">
-          <span>معرف الأشعة</span>
-          <span>اسم المنفذ</span>
-          <span>المستوى</span>
-          <span>المستوى الأول</span>
-          <span>المستوى الثاني</span>
-          <span>CertScan</span>
-        </div>
-
-        {shown.map((row) => (
-          <div key={`${row.xrayImageId}-${row.sourceRowNumber}`} className="prepared-preview-row">
-            <span>{row.xrayImageId}</span>
-            <span>{row.portName ?? ""}</span>
-            <span>{formatStageLabel(row.stage, stageMappings)}</span>
-            <span>{row.xrayLevelOneResult}</span>
-            <span>{row.xrayLevelTwoResult}</span>
-            <span>{row.certScanStatus}</span>
+            {shown.map((row) => (
+              <div key={`${row.xrayImageId}-${row.sourceRowNumber}`} className="prepared-preview-row">
+                <span className="prepared-preview-id">{row.xrayImageId}</span>
+                <span>{row.portName ?? ""}</span>
+                <span>{formatStageLabel(row.stage, stageMappings)}</span>
+                <span>{row.xrayLevelOneResult}</span>
+                <span>{row.xrayLevelTwoResult}</span>
+                <span>{row.certScanStatus}</span>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
 
-      <Pagination
-        page={safePage}
-        totalItems={previewRows.length}
-        onPageChange={setPage}
-        pageSize={PREVIEW_PAGE_SIZE}
-        itemLabel="صف"
-      />
+          <Pagination
+            page={safePage}
+            totalItems={previewRows.length}
+            onPageChange={setPage}
+            pageSize={PREVIEW_PAGE_SIZE}
+            itemLabel="صف"
+          />
+        </>
+      )}
     </div>
   );
 }
@@ -291,107 +369,26 @@ export default function PopulationProcessingReport({
   duplicateRows,
   invalidResultRows,
 }: PopulationProcessingReportProps) {
-
-  const totalExcludedAfterProcessing =
-    summary.duplicateRiskIdRows +
-    summary.removedInvalidResultRows +
-    summary.invalidRiskIdRows;
+  const labels = useLabels();
 
   return (
     <section className="population-processing-result">
-      <div className="processing-summary-grid">
-        <SummaryCard
-          label="المجتمع النهائي"
-          value={summary.finalPreparedPopulationRows}
-        />
-
-        <SummaryCard
-          label="إجمالي المستبعد بعد المعالجة"
-          value={totalExcludedAfterProcessing}
-        />
-
-        <SummaryCard
-          label="المكررات المستبعدة"
-          value={summary.duplicateRiskIdRows}
-        />
-
-        <SummaryCard
-          label="نتائج غير صالحة"
-          value={summary.removedInvalidResultRows}
-        />
-
-        <SummaryCard label="CertScan" value={summary.certScanRows} />
-        <SummaryCard label="NonCertScan" value={summary.nonCertScanRows} />
-        <SummaryCard label="مطابقة BI" value={summary.biMatchedRows} />
-        <SummaryCard label="تعبئة من BI" value={summary.totalBiFilledFields} />
-
-        <SummaryCard
-          label="معرفات غير صالحة"
-          value={summary.invalidRiskIdRows}
+      <div className="p2-fill-exclusion-row">
+        <BiFillPanel summary={summary} labels={labels} />
+        <DroppedRowsSection
+          summary={summary}
+          removedRows={removedRows}
+          duplicateRows={duplicateRows}
+          invalidResultRows={invalidResultRows}
+          labels={labels}
         />
       </div>
 
-      <div className="processing-detail-grid">
-        <article className="processing-detail-card">
-          <h4>نسب CertScan</h4>
-          {summary.certScanProvided === false ? (
-            <p className="certscan-not-provided-note">
-              لم يتم توفير قائمة أجهزة CertScan لهذا التشغيل — القيمة صفر لأن المطابقة لم تُجرَ
-              أصلاً، وليست لأن المطابقة فشلت. أضف قائمة CertScan من إعدادات المعالجة لتفعيل التصنيف.
-            </p>
-          ) : (
-            <>
-              <p>CertScan: {formatPercentage(summary.certScanPercentage)}</p>
-              <p>NonCertScan: {formatPercentage(summary.nonCertScanPercentage)}</p>
-            </>
-          )}
-        </article>
-
-        <article className="processing-detail-card">
-          <h4>مطابقة ذكاء الأعمال</h4>
-          <p>تم رفع BI: {summary.biProvided ? "نعم" : "لا"}</p>
-          <p>نسبة المطابقة: {formatPercentage(summary.biMatchPercentage)}</p>
-          <p>غير مطابق: {formatNumber(summary.biUnmatchedRows)}</p>
-        </article>
-
-        <article className="processing-detail-card">
-          <h4>تنظيف بيانات وكالة المخاطر</h4>
-          <p>الأصلية: {formatNumber(summary.riskOriginalRows)}</p>
-          <p>بعد حذف المكررات: {formatNumber(summary.rowsAfterDeduplication)}</p>
-          <p>النهائية: {formatNumber(summary.finalPreparedPopulationRows)}</p>
-        </article>
-      </div>
-
-      <div className="bi-fill-summary-section">
-        <h4>ملخص تعبئة الخانات من BI</h4>
-
-        <div className="bi-fill-summary-table">
-          <div className="bi-fill-summary-header">
-            <span>العمود</span>
-            <span>فارغ قبل BI</span>
-            <span>تمت تعبئته</span>
-            <span>بقي فارغاً</span>
-            <span>نسبة التعبئة</span>
-          </div>
-
-          {summary.biFieldFillSummary.map((field) => (
-            <div key={field.fieldName} className="bi-fill-summary-row">
-              <span>{field.fieldName}</span>
-              <span>{formatNumber(field.riskEmptyBefore)}</span>
-              <span>{formatNumber(field.filledFromBi)}</span>
-              <span>{formatNumber(field.stillEmptyAfter)}</span>
-              <span>{formatPercentage(field.fillPercentage)}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <PreparedPopulationPreviewSection summary={summary} previewRows={previewRows} stageMappings={stageMappings} />
-
-      <DroppedRowsSection
-        removedRows={removedRows}
-        duplicateRows={duplicateRows}
-        invalidResultRows={invalidResultRows}
+      <PreparedPopulationPreviewSection
+        summary={summary}
+        previewRows={previewRows}
+        stageMappings={stageMappings}
+        labels={labels}
       />
     </section>
   );

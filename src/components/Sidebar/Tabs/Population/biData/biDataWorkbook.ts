@@ -44,7 +44,21 @@ function normalizeArabicText(value: string): string {
     .toLowerCase();
 }
 
-function detectBiSource(sheetName: string, customPatterns?: string[]): string | null {
+/**
+ * Resolve a sheet name to a BI source.
+ *
+ * `matched` reports whether the name actually hit one of the configured
+ * patterns, as opposed to falling through to the permissive "use the sheet's
+ * own name" branch. Callers that can afford that fallback (a multi-sheet
+ * .xlsx — unchanged behaviour) ignore it; the CSV path uses it to raise an
+ * explicit error instead of importing zero rows silently, because a CSV's
+ * single derived name IS the whole classification: if it matches nothing,
+ * nothing about the file is classifiable.
+ */
+function detectBiSourceInfo(
+  sheetName: string,
+  customPatterns?: string[]
+): { source: string | null; matched: boolean } {
   const normalizedSheetName = normalizeArabicText(sheetName);
   const patterns = customPatterns && customPatterns.length > 0 ? customPatterns : ["وارد", "صادر"];
 
@@ -56,18 +70,38 @@ function detectBiSource(sheetName: string, customPatterns?: string[]): string | 
     if (normalizedSheetName.includes(normPattern)) {
       const isInbound = normPattern.includes("وارد");
       const isOutbound = normPattern.includes("صادر");
-      
-      if (isSea && isInbound) return "بحري وارد";
-      if (isLand && isInbound) return "بري وارد";
-      if (isSea && isOutbound) return "بحري صادر";
-      if (isLand && isOutbound) return "بري صادر";
-      return pattern;
+
+      if (isSea && isInbound) return { source: "بحري وارد", matched: true };
+      if (isLand && isInbound) return { source: "بري وارد", matched: true };
+      if (isSea && isOutbound) return { source: "بحري صادر", matched: true };
+      if (isLand && isOutbound) return { source: "بري صادر", matched: true };
+      return { source: pattern, matched: true };
     }
   }
 
   // No pattern matched — process the sheet anyway using its own name as the source.
   // This handles files where sheet names don't follow the standard naming convention.
-  return sheetName;
+  return { source: sheetName, matched: false };
+}
+
+/**
+ * A CSV parses to exactly one sheet that SheetJS names "Sheet1", which carries
+ * no classification information at all — every row would land in
+ * `unknownSheetNames` and the file would import zero rows silently. The file
+ * name is where the operator actually put the source ("بحري وارد.csv"), so the
+ * single sheet is renamed to the file's base name before source detection.
+ * That makes a CSV classify through exactly the same detection + column-mapping
+ * + normalizer path a same-named sheet inside an .xlsx does — one parser, one
+ * mapping path, one normalizer.
+ */
+export function deriveSheetNameFromFileName(fileName: string): string {
+  const base = fileName.split(/[\\/]/).pop() ?? fileName;
+  const withoutExtension = base.replace(/\.[^.]+$/, "");
+  return withoutExtension.trim() || base.trim();
+}
+
+export function isCsvFileName(fileName: string): boolean {
+  return /\.csv$/i.test(fileName.trim());
 }
 
 /**
@@ -112,16 +146,40 @@ export async function processBiWorkbook(
   onProgress?.("تحميل بيانات ذكاء الأعمال...", 10);
   await yieldToMain();
 
-  const workbook = XLSX.read(arrayBuffer, {
-    type: "array",
+  const isCsv = isCsvFileName(file.name);
+
+  const readOptions = {
     cellDates: false,
     cellNF: false,
     cellStyles: false,
     cellHTML: false,
     WTF: false
-  });
+  } as const;
+
+  // Same parser either way. A CSV is handed to it as decoded TEXT rather than
+  // raw bytes: SheetJS falls back to a single-byte decode for a byte array it
+  // sniffs as CSV, which turns every Arabic header into mojibake — the column
+  // mapping then matches nothing and the file imports zero rows. TextDecoder
+  // strips a UTF-8 BOM (Excel writes one) as part of decoding.
+  const workbook = isCsv
+    ? XLSX.read(new TextDecoder("utf-8").decode(arrayBuffer), { type: "string", ...readOptions })
+    : XLSX.read(arrayBuffer, { type: "array", ...readOptions });
+
   onProgress?.("تحليل أوراق ذكاء الأعمال...", 30);
   await yieldToMain();
+
+  // CSV: rename the single parsed sheet to the file's base name before source
+  // detection (see deriveSheetNameFromFileName). Nothing else changes — the
+  // same workbook object continues down the same path.
+  if (isCsv && workbook.SheetNames.length === 1) {
+    const originalName = workbook.SheetNames[0];
+    const derivedName = deriveSheetNameFromFileName(file.name);
+    if (derivedName && derivedName !== originalName) {
+      workbook.Sheets[derivedName] = workbook.Sheets[originalName];
+      delete workbook.Sheets[originalName];
+      workbook.SheetNames = [derivedName];
+    }
+  }
 
   const allRows: NormalizedBiRow[] = [];
   const sheetSummaries: BiSheetSummary[] = [];
@@ -130,12 +188,15 @@ export async function processBiWorkbook(
   const totalSheets = workbook.SheetNames.length;
   for (let i = 0; i < totalSheets; i++) {
     const sheetName = workbook.SheetNames[i];
-    const source = detectBiSource(sheetName, sheetPatterns);
+    const { source, matched } = detectBiSourceInfo(sheetName, sheetPatterns);
 
     onProgress?.(`معالجة ورقة ذكاء الأعمال "${sheetName}"...`, Math.round(30 + (i / totalSheets) * 60));
     await yieldToMain();
 
-    if (!source) {
+    // A CSV whose derived name matches no configured pattern is unclassifiable:
+    // record it as unknown so the UI raises an explicit error row for the file
+    // instead of reporting a successful import of zero rows.
+    if (!source || (isCsv && !matched)) {
       unknownSheetNames.push(sheetName);
       continue;
     }
@@ -219,6 +280,76 @@ export async function processBiWorkbook(
     unknownSheetNames,
     totalOriginalRows,
     totalNormalizedRows: allRows.length,
+    totalExcludedMissingXrayIdCount
+  };
+}
+
+/**
+ * Append several BI workbook results into ONE `BiWorkbookResult`.
+ *
+ * Multiple BI files are DIFFERENT populations that share the same sheet
+ * patterns and column mappings — the owner sometimes receives the BI
+ * population as a single file and sometimes split across several. They are
+ * therefore CONCATENATED: never deduplicated, never rejected on overlap. Two
+ * files that both carry the same `xrayImageId` yield BOTH rows here.
+ * (`buildBiMatchMap`'s first-wins rule downstream is untouched and stays a
+ * defensive tiebreak — it is not the dedupe policy for this merge.)
+ *
+ * Everything downstream keeps receiving exactly one `BiWorkbookResult`, so no
+ * consumer needs to know how many files produced it.
+ *
+ * `fileNames` is index-aligned with `results` and is stamped onto each sheet
+ * summary as `sourceFileName`, so identical sheet names across files stay
+ * distinguishable in the UI.
+ */
+export function mergeBiWorkbookResults(
+  results: BiWorkbookResult[],
+  fileNames: string[]
+): BiWorkbookResult {
+  const rows: NormalizedBiRow[] = [];
+  const sheetSummaries: BiSheetSummary[] = [];
+  const unknownSheetNames: string[] = [];
+  const seenUnknown = new Set<string>();
+
+  let totalOriginalRows = 0;
+  let totalNormalizedRows = 0;
+  let totalExcludedMissingXrayIdCount = 0;
+
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    const fileName = fileNames[i];
+
+    // A loop, not push(...result.rows): a single BI population already exceeds
+    // V8's ~65k argument limit, let alone ten of them appended together.
+    for (const row of result.rows) rows.push(row);
+
+    for (const sheet of result.sheetSummaries) {
+      sheetSummaries.push(
+        fileName === undefined ? { ...sheet } : { ...sheet, sourceFileName: fileName }
+      );
+    }
+
+    // Union, not concat: the same unclassified sheet name appearing in two
+    // files is one problem to report, but the same name in the same file twice
+    // cannot happen, so the dedupe key is scoped per file.
+    for (const unknown of result.unknownSheetNames) {
+      const key = fileName === undefined ? unknown : `${fileName} ${unknown}`;
+      if (seenUnknown.has(key)) continue;
+      seenUnknown.add(key);
+      if (!unknownSheetNames.includes(unknown)) unknownSheetNames.push(unknown);
+    }
+
+    totalOriginalRows += result.totalOriginalRows;
+    totalNormalizedRows += result.totalNormalizedRows;
+    totalExcludedMissingXrayIdCount += result.totalExcludedMissingXrayIdCount;
+  }
+
+  return {
+    rows,
+    sheetSummaries,
+    unknownSheetNames,
+    totalOriginalRows,
+    totalNormalizedRows,
     totalExcludedMissingXrayIdCount
   };
 }

@@ -148,7 +148,7 @@ async function seedProcessedMonth(): Promise<DirectoryHandleLike> {
 }
 
 function hasPhaseStepper(): boolean {
-  return document.querySelector(".phase-stepper") !== null;
+  return document.querySelector(".pop-readiness-steps") !== null;
 }
 
 describe("PopulationTab — A1 conditional landing sub-tab (perf/sync enhancement 2026-08-12)", () => {

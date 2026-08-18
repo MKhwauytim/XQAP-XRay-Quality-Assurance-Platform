@@ -1,0 +1,353 @@
+/*
+ * Phase 1 — رفع البيانات (design handoff panel 2b).
+ *
+ * Scoped to the multi-file BI source card introduced by the redesign. The rest
+ * of the phase (upload grid, risk card, raw-file summary) keeps its rules in
+ * Population.css, which this file deliberately does not touch.
+ *
+ * Every colour is a `var(--token)` from src/index.css — raw #hex literals are a
+ * CI gate failure (scripts/check-hex-literals.mjs). RTL is the default, so
+ * spacing/borders use logical properties throughout.
+ */
+
+.bi-source-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-5);
+  border: 1px solid var(--c-border);
+  border-radius: 14px;
+  background: var(--c-surface);
+  box-shadow: var(--sh-xs);
+}
+
+.bi-source-card[aria-disabled="true"] {
+  opacity: 0.55;
+}
+
+.bi-source-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+
+.bi-source-card-heading {
+  min-width: 0;
+}
+
+.bi-source-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 5px;
+}
+
+.bi-source-card-title-row h3 {
+  margin: 0;
+  color: var(--c-ink);
+  font-size: 16.5px;
+  font-weight: 700;
+}
+
+.bi-source-badge {
+  height: 21px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
+  background: var(--c-surface-2);
+  color: var(--c-ink-3);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.bi-source-card-heading p {
+  margin: 0;
+  color: var(--c-ink-3);
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.65;
+}
+
+.bi-source-count-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 5px 10px;
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
+  background: var(--c-sky-light);
+  color: var(--c-sky-text);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── file table ─────────────────────────────────────────────────────────── */
+
+.bi-file-table {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  background: var(--c-surface);
+  overflow: hidden;
+}
+
+.bi-file-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px 104px 34px;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 9px var(--sp-3);
+  border-bottom: 1px solid var(--c-border);
+}
+
+.bi-file-row:last-child {
+  border-bottom: 0;
+}
+
+.bi-file-row.is-head {
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--c-surface-2);
+}
+
+.bi-file-row.is-head > span {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--c-ink-3);
+  letter-spacing: 0.03em;
+}
+
+.bi-file-cell-name {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.bi-file-icon {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 26px;
+  border-radius: 7px;
+  background: var(--c-success-bg);
+  color: var(--c-success);
+}
+
+.bi-file-icon.is-parsing {
+  background: var(--c-sky-light);
+  color: var(--c-sky-text);
+}
+
+.bi-file-icon.is-error {
+  background: var(--c-danger-bg);
+  color: var(--c-danger);
+}
+
+.bi-file-cell-text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.bi-file-cell-text strong {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--c-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bi-file-sheet {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--c-ink-4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bi-file-sheet.is-parsing {
+  color: var(--c-sky-text);
+  font-weight: 600;
+}
+
+.bi-file-sheet.is-error {
+  color: var(--c-danger);
+  font-weight: 600;
+  white-space: normal;
+}
+
+.bi-file-size {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--c-ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.bi-file-accepted {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--c-success);
+  font-variant-numeric: tabular-nums;
+}
+
+.bi-file-accepted.is-empty {
+  font-weight: 500;
+  color: var(--c-ink-4);
+}
+
+.bi-file-remove {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--c-border);
+  border-radius: 7px;
+  background: var(--c-surface);
+  color: var(--c-danger);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease-smooth),
+              border-color var(--t-fast) var(--ease-smooth);
+}
+
+.bi-file-remove:hover:not(:disabled) {
+  background: var(--c-danger-bg);
+  border-color: var(--c-danger-border);
+}
+
+.bi-file-remove:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.bi-file-empty {
+  padding: var(--sp-3);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--c-ink-4);
+}
+
+/* ── add-more zone ──────────────────────────────────────────────────────── */
+
+.bi-add-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) 14px;
+  border: 1.5px dashed var(--c-border-2);
+  border-radius: var(--r-lg);
+  background: var(--c-surface-2);
+  transition: opacity var(--t-fast) var(--ease-smooth);
+}
+
+.bi-add-zone.is-full {
+  opacity: 0.6;
+}
+
+.bi-add-zone-text {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.bi-add-zone-icon {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 30px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-surface);
+  color: var(--c-ink-4);
+}
+
+.bi-add-zone-lines {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.bi-add-zone-lines strong {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--c-ink-2);
+}
+
+.bi-add-zone-lines span {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--c-ink-4);
+  font-variant-numeric: tabular-nums;
+}
+
+.bi-add-zone-button {
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--c-border-2);
+  border-radius: var(--r-md);
+  background: var(--c-surface);
+  color: var(--c-navy);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background var(--t-fast) var(--ease-smooth);
+}
+
+.bi-add-zone-button:hover:not(:disabled) {
+  background: var(--c-navy-soft);
+}
+
+.bi-add-zone-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* ── footer total (derived) ─────────────────────────────────────────────── */
+
+.bi-accepted-total {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding-block-start: 2px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--c-ink-2);
+}
+
+.bi-accepted-total strong {
+  font-weight: 700;
+  color: var(--c-success);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Drag-and-drop affordance (owner request, 2026-08-18) ──────────────────
+   Both source cards are drop targets; the dashed sky outline appears only
+   while a drag is actually over the card. The risk card is wrapped (it is a
+   shared component), the BI card carries the class itself. */
+
+.risk-drop-wrap {
+  display: contents;
+}
+
+.risk-drop-wrap.is-drag-over > *,
+.bi-source-card.is-drag-over {
+  outline: 2px dashed var(--c-sky);
+  outline-offset: 3px;
+  border-radius: 14px;
+}
