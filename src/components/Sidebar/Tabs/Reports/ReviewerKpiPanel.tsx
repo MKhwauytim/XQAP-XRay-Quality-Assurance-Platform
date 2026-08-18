@@ -2,67 +2,21 @@ import { useState, type ReactElement } from "react";
 
 import { useLabels } from "../../../../data/labels/useLabels";
 import type { Labels } from "../../../../data/labels/labelsStore";
-import type { PChart, PChartGroup, ReviewerKpiModel } from "../../../../data/reporting/executive/model/reviewerKpis";
-import { P_CHART_MIN_N } from "../../../../data/reporting/executive/model/reviewerKpis";
-import {
-  buildPChartSvgGeometry,
-  P_CHART_SVG,
-  type SvgPoint,
-} from "./pChartSvgGeometry";
+import type { ReviewerKpiModel } from "../../../../data/reporting/executive/model/reviewerKpis";
+import type { AnswerGroups, ReviewerControlStatus } from "./kpiSelectors";
+import { answersBarsSvg } from "./kpiCharts";
 import "./ReviewerKpiPanel.css";
 
-/* ── Fixed palette (validated: CVD ΔE 73.4, ≥12 target; light mode all-PASS) ──
-   Data marks carry the visual weight; the control band is recessive gray.
-   in-control  → sky   (--c-sky   #009ADE)   filled dot
-   out-of-ctrl → coral (--c-coral #c0392b)   filled dot + reserved ring (non-color mark)
-   low-n       → muted (--c-ink-4 #8395AC)   HOLLOW dot (shape encodes, not color)
-   centre p̄   → neutral dashed line;  band → light-gray fill (~12% alpha).      */
-const COLOR = {
-  inControl: "var(--c-sky)",
-  outOfControl: "var(--c-coral)",
-  lowN: "var(--c-ink-4)",
-  center: "var(--c-ink-3)",
-  band: "var(--c-ink-3)",
-  grid: "var(--c-border)",
-  axis: "var(--c-ink-3)",
-} as const;
-
-type MarkStatus = "in" | "out" | "low";
-
-type ChartDatum = {
-  key: string;
-  name: string;
-  /** proportion as percent (0–100) */
-  pPct: number;
-  uclPct: number;
-  lclPct: number;
-  centerPct: number;
-  n: number;
-  status: MarkStatus;
-};
-
-function statusOf(g: PChartGroup): MarkStatus {
-  if (g.lowN) return "low";
-  return g.outOfControl ? "out" : "in";
-}
-
-function colorFor(status: MarkStatus): string {
-  return status === "out" ? COLOR.outOfControl : status === "low" ? COLOR.lowN : COLOR.inControl;
-}
-
-function toData(chart: PChart, resolveName: (key: string) => string): ChartDatum[] {
-  const center = chart.center ?? 0;
-  return chart.groups.map((g) => ({
-    key: g.key,
-    name: resolveName(g.key),
-    pPct: g.p * 100,
-    uclPct: g.ucl * 100,
-    lclPct: g.lcl * 100,
-    centerPct: center * 100,
-    n: g.n,
-    status: statusOf(g),
-  }));
-}
+/*
+ * المراجعون tab of the reworked KPI dashboard.
+ *
+ * The SPC p-chart that used to live here was replaced by a grouped bar chart of
+ * the reviewers' «دقة الاشتباه» answers (design handoff, 2026-08). The p-chart
+ * MATH in `reviewerKpis.ts` is unchanged and still the model behind the الحالة
+ * pill (ضمن الضبط / خارج الضبط / عيّنة صغيرة) — only the rendering changed. The
+ * caller derives the statuses via `buildReviewerStatuses`, which reads the
+ * existing p-chart groups verbatim.
+ */
 
 const nf = (n: number): string => n.toLocaleString("ar-SA-u-nu-latn");
 const pf = (n: number | null): string =>
@@ -70,166 +24,21 @@ const pf = (n: number | null): string =>
 const hf = (n: number | null): string =>
   n == null || !Number.isFinite(n) ? "—" : n.toFixed(1);
 
-function statusText(datum: ChartDatum, labels: Labels): string {
-  return datum.status === "out"
+function statusLabel(status: ReviewerControlStatus, labels: Labels): string {
+  return status === "out-of-control"
     ? labels.rk_status_out_of_control
-    : datum.status === "low"
-      ? labels.rk_status_low_n.replace("{n}", nf(P_CHART_MIN_N))
+    : status === "low-n"
+      ? labels.rk_legend_low_n
       : labels.rk_status_in_control;
-}
-
-function marker(datum: ChartDatum, point: SvgPoint): ReactElement {
-  const fill = colorFor(datum.status);
-  if (datum.status === "low") {
-    return <circle cx={point.x} cy={point.pY} r={5} fill="var(--c-surface)" stroke={fill} strokeWidth={2} />;
-  }
-  if (datum.status === "out") {
-    return (
-      <>
-        <circle cx={point.x} cy={point.pY} r={9} fill="none" stroke={fill} strokeWidth={1.6} opacity={0.9} />
-        <circle cx={point.x} cy={point.pY} r={5} fill={fill} />
-      </>
-    );
-  }
-  return <circle cx={point.x} cy={point.pY} r={5} fill={fill} />;
-}
-
-function PChartView(props: {
-  chart: PChart;
-  resolveName: (key: string) => string;
-  labels: Labels;
-  title: string;
-}): ReactElement {
-  const { chart, resolveName, labels, title } = props;
-  if (chart.center === null || chart.groups.length === 0) {
-    return <div className="rk-chart-empty">{labels.rk_pchart_empty}</div>;
-  }
-  const data = toData(chart, resolveName);
-  const centerPct = chart.center * 100;
-  const geometry = buildPChartSvgGeometry(data, centerPct);
-  const yTicks = [0, 25, 50, 75, 100];
-  const { width: svgWidth, height: svgHeight, plot } = P_CHART_SVG;
-  const yForTick = (value: number) =>
-    plot.top + ((100 - value) / 100) * (plot.bottom - plot.top);
-  return (
-    <>
-      <table className="rk-sr-only">
-        <caption>{title}</caption>
-        <thead>
-          <tr>
-            <th>{labels.rk_pchart_sr_col_group}</th>
-            <th>{labels.rk_pchart_sr_col_proportion}</th>
-            <th>{labels.rk_pchart_sr_col_cases}</th>
-            <th>{labels.rk_tooltip_center}</th>
-            <th>{labels.rk_tooltip_ucl}</th>
-            <th>{labels.rk_tooltip_lcl}</th>
-            <th>{labels.rk_pchart_sr_col_status}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((datum) => (
-            <tr key={datum.key}>
-              <td>{datum.name}</td>
-              <td>{pf(datum.pPct)}</td>
-              <td>{nf(datum.n)}</td>
-              <td>{pf(datum.centerPct)}</td>
-              <td>{pf(datum.uclPct)}</td>
-              <td>{pf(datum.lclPct)}</td>
-              <td>{statusText(datum, labels)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="rk-chart" dir="ltr" aria-hidden="true">
-        <svg
-          className="rk-native-chart"
-          viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-          focusable="false"
-          preserveAspectRatio="xMidYMid meet"
-        >
-          {yTicks.map((tick) => {
-            const y = yForTick(tick);
-            return (
-              <g key={tick}>
-                <line x1={plot.left} x2={plot.right} y1={y} y2={y} stroke={COLOR.grid} strokeDasharray="2 4" />
-                <text x={plot.right + 10} y={y + 4} className="rk-axis-label">{nf(tick)}</text>
-              </g>
-            );
-          })}
-          <line x1={plot.right} x2={plot.right} y1={plot.top} y2={plot.bottom} stroke={COLOR.axis} />
-          <line x1={plot.left} x2={plot.right} y1={plot.bottom} y2={plot.bottom} stroke={COLOR.axis} />
-          <path d={geometry.bandPath} fill={COLOR.band} fillOpacity={0.12} stroke="none" />
-          <path d={geometry.upperPath} fill="none" stroke={COLOR.band} strokeWidth={1} strokeDasharray="4 3" />
-          <path d={geometry.lowerPath} fill="none" stroke={COLOR.band} strokeWidth={1} strokeDasharray="4 3" />
-          <line
-            x1={plot.left}
-            x2={plot.right}
-            y1={geometry.centerY}
-            y2={geometry.centerY}
-            stroke={COLOR.center}
-            strokeWidth={1.4}
-            strokeDasharray="6 4"
-          />
-          <text
-            className="rk-axis-title"
-            x={svgWidth - 12}
-            y={(plot.top + plot.bottom) / 2}
-            textAnchor="middle"
-            transform={`rotate(-90 ${svgWidth - 12} ${(plot.top + plot.bottom) / 2})`}
-          >
-            {labels.rk_axis_proportion}
-          </text>
-          {data.map((datum, index) => {
-            const point = geometry.points[index]!;
-            const tooltip = [
-              datum.name,
-              `${labels.rk_tooltip_proportion} ${pf(datum.pPct)}`,
-              `${labels.rk_tooltip_cases} ${nf(datum.n)}`,
-              `${labels.rk_tooltip_center} ${pf(datum.centerPct)}`,
-              `${labels.rk_tooltip_ucl} ${pf(datum.uclPct)}`,
-              `${labels.rk_tooltip_lcl} ${pf(datum.lclPct)}`,
-              statusText(datum, labels),
-            ].join("، ");
-            return (
-              <g key={datum.key}>
-                <title>{tooltip}</title>
-                {marker(datum, point)}
-                <text
-                  x={point.x}
-                  y={plot.bottom + 18}
-                  className="rk-x-label"
-                  textAnchor="end"
-                  transform={`rotate(-30 ${point.x} ${plot.bottom + 18})`}
-                  direction="rtl"
-                >
-                  {datum.name}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
-      </div>
-    </>
-  );
-}
-
-function ChartLegend({ labels }: { labels: Labels }): ReactElement {
-  return (
-    <div className="rk-legend" aria-hidden="true">
-      <span className="rk-legend-item"><span className="rk-legend-dot rk-dot-in" />{labels.rk_legend_in_control}</span>
-      <span className="rk-legend-item"><span className="rk-legend-dot rk-dot-out" />{labels.rk_legend_out_of_control}</span>
-      <span className="rk-legend-item"><span className="rk-legend-dot rk-dot-low" />{labels.rk_legend_low_n}</span>
-      <span className="rk-legend-item"><span className="rk-legend-swatch rk-swatch-center" />{labels.rk_legend_center}</span>
-      <span className="rk-legend-item"><span className="rk-legend-swatch rk-swatch-band" />{labels.rk_legend_limits}</span>
-    </div>
-  );
 }
 
 export default function ReviewerKpiPanel(props: {
   model: ReviewerKpiModel;
   resolveName: (username: string) => string;
+  answers: AnswerGroups;
+  statuses: Map<string, ReviewerControlStatus>;
 }): ReactElement {
-  const { model, resolveName } = props;
+  const { model, resolveName, answers, statuses } = props;
   const labels = useLabels();
   const [view, setView] = useState<"reviewer" | "port">("reviewer");
 
@@ -244,58 +53,65 @@ export default function ReviewerKpiPanel(props: {
     );
   }
 
-  const activeChart = view === "reviewer" ? model.reviewerPChart : model.portPChart;
-  const chartTitle = view === "reviewer" ? labels.rk_pchart_reviewer_title : labels.rk_pchart_port_title;
-  // Ports are already Arabic names; only reviewer keys need username→display resolution.
-  const chartResolve = view === "reviewer" ? resolveName : (k: string) => k;
+  const groups = view === "reviewer" ? answers.reviewer : answers.port;
+  const chartTitle =
+    view === "reviewer" ? labels.kpi_answers_title_reviewer : labels.kpi_answers_title_port;
 
   return (
-    <section className="rk-panel" dir="rtl">
-      <header className="rk-head">
-        <h2>{labels.rk_section_title}</h2>
-        <p>{labels.rk_section_desc}</p>
-      </header>
-
-      {/* Reviewer KPI table */}
-      <div className="rk-table-wrap">
-        <table className="rk-table">
-          <caption className="rk-sr-only">{labels.rk_table_caption}</caption>
-          <thead>
-            <tr>
-              <th>{labels.rk_col_reviewer}</th>
-              <th>{labels.rk_col_assigned}</th>
-              <th>{labels.rk_col_completed}</th>
-              <th>{labels.rk_col_completion}</th>
-              <th>{labels.rk_col_throughput}</th>
-              <th>{labels.rk_col_turnaround_median}</th>
-              <th>{labels.rk_col_turnaround_p90}</th>
-              <th>{labels.rk_col_suspicion_rate}</th>
-              <th>{labels.rk_col_referral_rate}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {model.rows.map((r) => (
-              <tr key={r.reviewerId}>
-                <td className="rk-cell-name">{resolveName(r.reviewerId)}</td>
-                <td>{nf(r.assigned)}</td>
-                <td>{nf(r.completed)}</td>
-                <td>{pf(r.completionRate)}</td>
-                <td>{pf(r.throughputVsQuota)}</td>
-                <td>{hf(r.turnaroundMedianHours)}</td>
-                <td>{hf(r.turnaroundP90Hours)}</td>
-                <td>{pf(r.suspicionOrReferralRate)}</td>
-                <td>{pf(r.referralRate)}</td>
+    <div className="rk-panel" dir="rtl">
+      <section className="rk-card">
+        <h3 className="rk-card-title">{labels.kpi_reviewers_title}</h3>
+        <p className="rk-card-sub">{labels.kpi_reviewers_sub}</p>
+        <div className="rk-table-wrap">
+          <table className="rk-table">
+            <caption className="rk-sr-only">{labels.rk_table_caption}</caption>
+            <thead>
+              <tr>
+                <th>{labels.rk_col_reviewer}</th>
+                <th>{labels.rk_col_assigned}</th>
+                <th>{labels.rk_col_completed}</th>
+                <th>{labels.rk_col_completion}</th>
+                <th>{labels.rk_col_turnaround_median}</th>
+                <th>{labels.rk_col_suspicion_rate}</th>
+                <th>{labels.kpi_reviewers_col_status}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {model.rows.map((row) => {
+                const status = statuses.get(row.reviewerId) ?? "low-n";
+                return (
+                  <tr key={row.reviewerId}>
+                    <td className="rk-cell-name">{resolveName(row.reviewerId)}</td>
+                    <td className="rk-num">{nf(row.assigned)}</td>
+                    <td className="rk-num">{nf(row.completed)}</td>
+                    <td className="rk-cell-completion">
+                      <span className="rk-progress">
+                        <span
+                          className="rk-progress-fill"
+                          style={{ width: `${Math.max(0, Math.min(100, row.completionRate ?? 0))}%` }}
+                        />
+                      </span>
+                      <span className="rk-num rk-progress-value">{pf(row.completionRate)}</span>
+                    </td>
+                    <td className="rk-num">{hf(row.turnaroundMedianHours)}</td>
+                    <td className="rk-num">{pf(row.suspicionOrReferralRate)}</td>
+                    <td>
+                      <span className={`rk-status rk-status-${status}`}>
+                        {statusLabel(status, labels)}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
-      {/* p-chart with reviewer/port toggle */}
-      <div className="rk-chart-block">
+      <section className="rk-card">
         <div className="rk-chart-topbar">
-          <h3>{chartTitle}</h3>
-          <div className="rk-toggle" role="group" aria-label={labels.rk_section_title}>
+          <h3 className="rk-card-title">{chartTitle}</h3>
+          <div className="rk-toggle" role="group" aria-label={chartTitle}>
             <button
               type="button"
               aria-pressed={view === "reviewer"}
@@ -314,15 +130,54 @@ export default function ReviewerKpiPanel(props: {
             </button>
           </div>
         </div>
-        <p className="rk-chart-desc">{labels.rk_pchart_desc}</p>
-        <PChartView
-          chart={activeChart}
-          resolveName={chartResolve}
-          labels={labels}
-          title={chartTitle}
+        <p className="rk-card-sub">{labels.kpi_answers_desc}</p>
+
+        {/* Semantic screen-reader equivalent of the SVG — the chart itself is
+            aria-hidden, matching the accessibility pattern the p-chart used. */}
+        <table className="rk-sr-only">
+          <caption>{chartTitle}</caption>
+          <thead>
+            <tr>
+              <th>{labels.rk_pchart_sr_col_group}</th>
+              <th>{labels.kpi_answers_series_suspicion}</th>
+              <th>{labels.kpi_answers_series_clean}</th>
+              <th>{labels.kpi_answers_series_incomplete}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {groups.map((group) => (
+              <tr key={group.key}>
+                <td>{group.label}</td>
+                <td>{nf(group.suspicion)}</td>
+                <td>{nf(group.clean)}</td>
+                <td>{nf(group.incomplete)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <div
+          className="rk-chart"
+          dir="ltr"
+          aria-hidden="true"
+          dangerouslySetInnerHTML={{ __html: answersBarsSvg(groups, labels.kpi_answers_empty) }}
         />
-        <ChartLegend labels={labels} />
-      </div>
-    </section>
+
+        <div className="rk-legend" aria-hidden="true">
+          <span className="rk-legend-item">
+            <span className="rk-legend-swatch rk-swatch-suspicion" />
+            {labels.kpi_answers_series_suspicion}
+          </span>
+          <span className="rk-legend-item">
+            <span className="rk-legend-swatch rk-swatch-clean" />
+            {labels.kpi_answers_series_clean}
+          </span>
+          <span className="rk-legend-item">
+            <span className="rk-legend-swatch rk-swatch-incomplete" />
+            {labels.kpi_answers_series_incomplete}
+          </span>
+        </div>
+      </section>
+    </div>
   );
 }

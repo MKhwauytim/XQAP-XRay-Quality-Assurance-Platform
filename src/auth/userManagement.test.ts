@@ -5,14 +5,18 @@ import {
   createDefaultFeaturePermissions,
   createDefaultManagedUsers,
   createDefaultPermissions,
+  createEmptyUserManagementState,
   createManagedUser,
   FEATURE_TAB_LOOKUP,
   getRolePermission,
   hasFeature,
   MANAGED_TABS,
+  normalizeUserManagementState,
+  readUserManagementState,
   roleCeilingFor,
   TAB_FEATURE_MAP,
   TAB_ROLE_CEILINGS,
+  writeUserManagementState,
   type PermissionLevel,
 } from "./userManagement";
 
@@ -219,4 +223,51 @@ test("createDefaultManagedUsers grants CertScan license to exactly محمد ال
   const users = createDefaultManagedUsers();
   const licensed = users.filter((u) => u.hasCertScanLicense).map((u) => u.displayName).sort();
   expect(licensed).toEqual(["جميلة الغامدي", "محمد العتيبي"].sort());
+});
+
+// ── An emptied roster is a decision, not an "uninitialised" state ────────────
+//
+// `normalizeUserManagementState` runs on EVERY write (`writeUserManagementState`),
+// so treating `users: []` as "not initialised yet" resurrected the six shipped
+// seed accounts — each carrying the shipped default password — the moment an
+// admin deleted the last managed user, while the disk file kept the real (empty)
+// roster. Only a genuinely absent roster may be seeded.
+
+test("an explicitly emptied roster stays empty instead of resurrecting the shipped defaults", () => {
+  const normalized = normalizeUserManagementState({
+    users: [],
+    permissions: createDefaultPermissions(),
+    featurePermissions: createDefaultFeaturePermissions(),
+  });
+
+  expect(normalized.users).toEqual([]);
+});
+
+test("deleting every managed user one at a time never re-seeds the default accounts", () => {
+  writeUserManagementState(createEmptyUserManagementState(), false);
+  let state = readUserManagementState();
+  expect(state.users.length).toBe(6);
+
+  for (const user of [...state.users]) {
+    writeUserManagementState(
+      { ...state, users: state.users.filter((u) => u.id !== user.id) },
+      false,
+    );
+    state = readUserManagementState();
+  }
+
+  expect(state.users).toEqual([]);
+  // Restore the module-level runtime state for any later test in this file.
+  writeUserManagementState(createEmptyUserManagementState(), false);
+});
+
+test("a roster that was never initialised is still seeded from the shipped defaults", () => {
+  const normalized = normalizeUserManagementState({
+    permissions: [],
+    featurePermissions: [],
+  });
+
+  expect(normalized.users.map((u) => u.username)).toEqual(
+    createDefaultManagedUsers().map((u) => u.username),
+  );
 });

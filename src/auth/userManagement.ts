@@ -69,10 +69,17 @@ export type UserManagementState = {
 
 /**
  * What callers may hand to `writeUserManagementState` /
- * `normalizeUserManagementState`: `adminAccount` is optional on the way in (the
- * normalizer fills it from defaults) but always present on the way out.
+ * `normalizeUserManagementState`: `adminAccount` and `users` are optional on the
+ * way in (the normalizer fills them from defaults) but always present on the way
+ * out.
+ *
+ * `users` distinguishes "never initialised" (absent — seed the shipped roster)
+ * from "deliberately emptied" (`[]` — keep it empty). Collapsing the two brought
+ * every seeded account, default password included, back the moment an admin
+ * deleted the last managed user.
  */
-export type UserManagementStateInput = Omit<UserManagementState, "adminAccount"> & {
+export type UserManagementStateInput = Omit<UserManagementState, "adminAccount" | "users"> & {
+  users?: ManagedLoginUser[];
   adminAccount?: AdminAccountSettings;
 };
 
@@ -750,7 +757,11 @@ export function normalizeUserManagementState(
     return existing ?? def;
   });
 
-  const users = state.users.length > 0 ? state.users : createDefaultManagedUsers();
+  // Seed ONLY when the roster was never initialised. An empty array is an
+  // administrative decision (the last managed user was deleted) — re-seeding it
+  // handed the six shipped accounts, and their shipped default password, back to
+  // anyone who could reach the login form.
+  const users = state.users ?? createDefaultManagedUsers();
 
   // Tolerate a state object built before this field existed (older callers,
   // older disk files, tests) rather than letting `undefined` reach the login path.
@@ -784,16 +795,19 @@ export function resolveAdminPasswordHash(): PasswordHashRecord {
 }
 
 /**
- * Applies an admin-account change to the runtime state and returns the full new
- * state, so the caller can persist it with `syncUserManagementToDisk` — this
- * module never touches disk itself.
+ * The state an admin-account change WOULD produce, without applying it.
+ *
+ * Callers that must persist the change before it takes effect — the bootstrap
+ * passcode and its sign-in method both lock their own author out when the
+ * runtime state and the workspace file disagree — build the candidate with
+ * this, write it, and only then commit it with `writeUserManagementState`.
  */
-export function updateAdminAccount(
+export function buildAdminAccountUpdate(
   changes: Partial<Pick<AdminAccountSettings, "passwordHash" | "allowUsernameLogin">>,
   actor: string
 ): UserManagementState {
   const state = readUserManagementState();
-  const next: UserManagementState = {
+  return {
     ...state,
     adminAccount: {
       ...state.adminAccount,
@@ -802,7 +816,23 @@ export function updateAdminAccount(
       updatedBy: actor,
     },
   };
-  writeUserManagementState(next, true);
+}
+
+/**
+ * Applies an admin-account change to the runtime state and returns the full new
+ * state, so the caller can persist it with `syncUserManagementToDisk` — this
+ * module never touches disk itself.
+ *
+ * There is no rollback, so a caller whose persist can fail should use
+ * `buildAdminAccountUpdate` + `writeUserManagementState` in that order instead:
+ * a passcode applied at runtime but rejected by the workspace write locks its
+ * own author out.
+ */
+export function updateAdminAccount(
+  changes: Partial<Pick<AdminAccountSettings, "passwordHash" | "allowUsernameLogin">>,
+  actor: string
+): UserManagementState {
+  writeUserManagementState(buildAdminAccountUpdate(changes, actor), true);
   return readUserManagementState();
 }
 

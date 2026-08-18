@@ -5,8 +5,10 @@ import { readRealSession } from "../../../../auth/authSession";
 import { BOOTSTRAP_ADMIN_USERNAME } from "../../../../auth/authConfig";
 import { createPasswordHash } from "../../../../auth/passwordCrypto";
 import {
+  buildAdminAccountUpdate,
   readAdminAccount,
-  updateAdminAccount,
+  writeUserManagementState,
+  type UserManagementState,
 } from "../../../../auth/userManagement";
 import { usePermissions } from "../../../../auth/usePermissions";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
@@ -60,17 +62,29 @@ export function AdminAccountSection() {
   const canEdit = canMutate(ADMIN_ACCOUNT_FEATURE);
   const noPermissionText = "لا يمكن تعديل حساب المدير أثناء معاينة دور آخر.";
 
-  async function persist(state: ReturnType<typeof updateAdminAccount>): Promise<void> {
-    if (!directoryHandle) {
-      // Runtime state is already updated; without a workspace there is nowhere
-      // to persist it, so say so rather than implying the change was saved.
+  /**
+   * Write first, apply second.
+   *
+   * `syncUserManagementToDisk` rethrows on CAS exhaustion or a lost folder
+   * grant, and the runtime state has no rollback: committing the change before
+   * the write meant a failed save still swapped the live passcode (or the
+   * sign-in method) for the rest of the session — the admin was told the save
+   * failed while `resolveAdminPasswordHash()` had already moved on, and the
+   * next unrelated persist pushed the "rejected" value to every machine on the
+   * shared folder. With no workspace connected there is nothing to write, so
+   * the change applies session-only with its own explicit message.
+   */
+  async function persistThenApply(next: UserManagementState): Promise<void> {
+    if (directoryHandle) {
+      await syncUserManagementToDisk(directoryHandle, next, actor);
+    } else {
       setFeedback({
         type: "error",
         text: "طُبِّق التغيير في هذه الجلسة فقط — لا توجد مساحة عمل متصلة لحفظه.",
       });
-      return;
     }
-    await syncUserManagementToDisk(directoryHandle, state, actor);
+    writeUserManagementState(next, true);
+    setAccount(readAdminAccount());
   }
 
   async function handleToggleUsernameLogin(enabled: boolean): Promise<void> {
@@ -84,9 +98,7 @@ export function AdminAccountSection() {
     setIsSaving(true);
     setFeedback(null);
     try {
-      const next = updateAdminAccount({ allowUsernameLogin: enabled }, actor);
-      setAccount(next.adminAccount);
-      await persist(next);
+      await persistThenApply(buildAdminAccountUpdate({ allowUsernameLogin: enabled }, actor));
       setFeedback((current) =>
         current ?? {
           type: "ok",
@@ -128,9 +140,7 @@ export function AdminAccountSection() {
     setIsSaving(true);
     try {
       const passwordHash = await createPasswordHash(newPassword);
-      const next = updateAdminAccount({ passwordHash }, actor);
-      setAccount(next.adminAccount);
-      await persist(next);
+      await persistThenApply(buildAdminAccountUpdate({ passwordHash }, actor));
       setNewPassword("");
       setConfirmPassword("");
       setFeedback((current) =>

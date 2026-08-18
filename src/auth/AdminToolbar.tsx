@@ -1,22 +1,18 @@
 import "./AdminToolbar.css";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Briefcase,
   Eye,
-  FolderOpen,
   HelpCircle,
-  LogOut,
   RefreshCw,
   ShieldCheck,
   UserRound,
   UserCog,
 } from "lucide-react";
 import type { AuthRole, AuthSession } from "./authTypes";
-import { getManagedLoginUsers } from "./userManagement";
 import { runSync } from "../data/workspace/workspaceSync";
 import { useWorkspace } from "../data/workspace/useWorkspace";
 import { useGlobalMonth } from "../data/month/useGlobalMonth";
-import { GlobalMonthSelector } from "../components/GlobalMonthSelector/GlobalMonthSelector";
 import { useLabels, type Labels } from "../data/labels/useLabels";
 
 const PREVIEW_ROLE_IDS: AuthRole[] = ["admin", "manager", "supervisor", "employee", "guest"];
@@ -51,15 +47,20 @@ type AdminToolbarProps = {
   session: AuthSession;
   previewRole: AuthRole | null;
   onPreviewRoleChange: (role: AuthRole) => void;
-  onLogout: () => void;
   onFeedback: () => void;
 };
 
+/**
+ * Nav 1b demoted this bar to what it is actually for: the current mode, the
+ * admin's role-preview switch, and the two global icon actions. The month
+ * selector, the workspace chip, the user chip and logout all moved into the
+ * sidebar rail (`Sidebar.tsx`'s context card and footer) — they are NOT
+ * duplicated here.
+ */
 export function AdminToolbar({
   session,
   previewRole,
   onPreviewRoleChange,
-  onLogout,
   onFeedback,
 }: AdminToolbarProps) {
   const labels = useLabels();
@@ -73,13 +74,8 @@ export function AdminToolbar({
 
   const { directoryHandle, refreshPermissions } = useWorkspace();
   const { selection } = useGlobalMonth();
-  const workspaceName = directoryHandle?.name ?? null;
+  // Still read here (not rendered): runSync needs the selected month to probe it.
   const monthFolderName = selection.kind === "existing" ? selection.folderName : null;
-
-  const displayName = useMemo(() => {
-    const match = getManagedLoginUsers().find((u) => u.username === session.username);
-    return match?.displayName || session.username;
-  }, [session.username]);
 
   // Manual "refresh now" control — the MANUAL trigger of the app's one sync
   // path (`workspaceSync.ts`): it calls exactly the same runSync() the 45s
@@ -140,18 +136,7 @@ export function AdminToolbar({
           </strong>
         </div>
 
-        {workspaceName && (
-          <span
-            className="auth-toolbar-chip"
-            title={labels.toolbar_workspace_title.replace("{name}", workspaceName)}
-          >
-            <FolderOpen size={14} className="auth-toolbar-chip-icon" aria-hidden />
-            <span className="auth-toolbar-chip-text">{workspaceName}</span>
-          </span>
-        )}
       </div>
-
-      <GlobalMonthSelector allowCreate={!isDemo} />
 
       <div className="auth-toolbar-preview-panel">
         {isRealAdmin && (
@@ -175,12 +160,6 @@ export function AdminToolbar({
       </div>
 
       <div className="auth-toolbar-actions">
-        {!isDemo && (
-          <span className="auth-toolbar-user" title={labels.toolbar_user_title.replace("{name}", displayName)}>
-            <UserRound size={15} className="auth-toolbar-user-icon" aria-hidden />
-            <span className="auth-toolbar-user-name">{displayName}</span>
-          </span>
-        )}
         {!isDemo && (
           <button
             type="button"
@@ -208,10 +187,6 @@ export function AdminToolbar({
             <HelpCircle size={18} aria-hidden />
           </button>
         )}
-        <button type="button" className="auth-toolbar-logout" onClick={onLogout}>
-          <LogOut size={15} aria-hidden />
-          {labels.toolbar_logout_btn}
-        </button>
       </div>
     </div>
   );

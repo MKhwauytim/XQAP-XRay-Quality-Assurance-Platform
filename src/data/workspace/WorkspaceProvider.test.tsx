@@ -93,7 +93,7 @@ function RefreshPermissionsProbe() {
   );
 }
 
-function diskFileWithUser(username: string) {
+function diskFileWithUsers(usernames: string[]) {
   return {
     manifest: null,
     sampleMaster: null,
@@ -106,27 +106,29 @@ function diskFileWithUser(username: string) {
         writtenAt: "2026-01-01T00:00:00.000Z",
       },
       data: {
-        users: [
-          {
-            id: "u-refreshed",
-            username,
-            displayName: "Refreshed User",
-            passwordHash: { algorithm: "argon2id" as const, encoded: "x" },
-            role: "employee" as const,
-            isActive: true,
-            hasCertScanLicense: false,
-            createdAt: "2026-01-01T00:00:00.000Z",
-            createdBy: "admin",
-            updatedAt: "2026-01-01T00:00:00.000Z",
-            updatedBy: "admin",
-          },
-        ],
+        users: usernames.map((username) => ({
+          id: `u-${username}`,
+          username,
+          displayName: "Refreshed User",
+          passwordHash: { algorithm: "argon2id" as const, encoded: "x" },
+          role: "employee" as const,
+          isActive: true,
+          hasCertScanLicense: false,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          createdBy: "admin",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          updatedBy: "admin",
+        })),
         roles: [],
         permissions: [],
         featurePermissions: [],
       },
     },
   };
+}
+
+function diskFileWithUser(username: string) {
+  return diskFileWithUsers([username]);
 }
 
 describe("remembered workspace fallback", () => {
@@ -406,6 +408,38 @@ describe("refreshPermissions", () => {
     // spinner, which is exactly what refreshPermissions (unlike
     // reloadWorkspace) is meant to avoid for a silent background/manual sync.
     expect(screen.getByTestId("status")).toHaveTextContent("ready");
+  });
+
+  it("keeps an emptied roster empty instead of re-seeding the shipped default accounts", async () => {
+    // An admin deleted every managed user, so users.permissions.json legitimately
+    // holds `users: []`. Treating that as "not initialised" brought all six seeded
+    // accounts back — shipped default password included — on every single mount.
+    const handle = createMemoryDirectory("emptied-roster-workspace");
+    mocks.loadLastWorkspace.mockResolvedValue({
+      directoryHandle: handle,
+      directoryName: handle.name,
+      savedAt: new Date().toISOString(),
+    });
+    mocks.checkWorkspaceStructure.mockResolvedValue({
+      status: "ready",
+      missingItems: [],
+      invalidItems: [],
+      message: "ready",
+    });
+    mocks.loadWorkspaceFiles.mockResolvedValue(diskFileWithUsers([]));
+
+    render(
+      <WorkspaceProvider>
+        <RefreshPermissionsProbe />
+      </WorkspaceProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("ready"));
+
+    fireEvent.click(screen.getByRole("button", { name: "refresh" }));
+
+    await waitFor(() => expect(screen.getByTestId("usernames")).toHaveTextContent(""));
+    expect(getManagedLoginUsers()).toEqual([]);
   });
 
   it("is a no-op when no workspace is connected", async () => {

@@ -35,7 +35,14 @@ export type MonthManifestData = {
   processingSummaryFile?: string | null;
   sourceFiles?: {
     risk?: SourceFileMetadata | null;
-    bi?: SourceFileMetadata | null;
+    /**
+     * Fix (population, 2026-08-18): multi-file BI means "the" BI source file is
+     * no longer singular. Was `SourceFileMetadata | null` and silently recorded
+     * only the first attached file; now an array, one entry per attached file,
+     * so files 2..N are not misreported as absent (currently write-only — no
+     * reader exists yet, so this widening is safe).
+     */
+    bi?: SourceFileMetadata[] | null;
   };
 };
 

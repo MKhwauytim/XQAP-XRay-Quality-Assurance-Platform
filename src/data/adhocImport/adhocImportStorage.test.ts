@@ -10,6 +10,7 @@ import {
   loadAdhocImportRecord,
   saveAdhocImportRecord,
 } from "./adhocImportStorage";
+import { getAdhocImportsDir } from "../workspace/workspacePaths";
 
 function makeRecord(importId: string): AdhocImportRecord {
   return {
@@ -100,6 +101,37 @@ describe("adhocImportStorage", () => {
 
     const index = await loadAdhocImportIndex(root);
     expect(index.find((e) => e.importId === importId)).toBeUndefined();
+  });
+
+  // safeWrite.ts's own module doc: "An empty default handed to a
+  // read-modify-write is not a harmless placeholder: it is written back as the
+  // entire file." The index used to seed `{ imports: [] }` from ANY failed read,
+  // and safeReadJson reports a corrupt file (live/.bak/.tmp ladder exhausted)
+  // exactly as it reports a missing one — so the next save rewrote the whole
+  // index with just its own entry, and since the index is the only lister the
+  // app has, every other import's `{importId}.json` became unreachable.
+  it("refuses to rewrite a corrupt index, keeping the other imports' entries", async () => {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    await saveAdhocImportRecord(root, makeRecord("adh-1"));
+    await saveAdhocImportRecord(root, makeRecord("adh-2"));
+    expect((await loadAdhocImportIndex(root)).map((e) => e.importId)).toEqual(["adh-1", "adh-2"]);
+
+    const dir = await getAdhocImportsDir(root, false);
+    for (const suffix of ["", ".bak", ".tmp"]) {
+      const handle = await dir.getFileHandle(`adhoc-imports.index.json${suffix}`, { create: true });
+      const writable = await handle.createWritable?.();
+      if (!writable) throw new Error("memory directory handle is not writable");
+      await writable.write("{ truncated");
+      await writable.close();
+    }
+
+    await expect(saveAdhocImportRecord(root, makeRecord("adh-3"))).rejects.toThrow(/تالف/);
+
+    // The corrupt index was left alone rather than replaced by a one-entry one,
+    // so repairing it (or restoring a backup) still brings adh-1/adh-2 back.
+    const raw = await (await dir.getFileHandle("adhoc-imports.index.json", { create: false })).getFile();
+    expect(await raw.text()).toBe("{ truncated");
   });
 
   it("loadAdhocImportIndex returns an empty list for a fresh workspace with no imports", async () => {

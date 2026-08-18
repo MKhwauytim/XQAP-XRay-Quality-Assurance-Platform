@@ -14,8 +14,7 @@ import { useLabels } from "../../../../data/labels/useLabels";
 import { getLabels } from "../../../../data/labels/labelsStore";
 import { buildReportModel } from "../../../../data/reporting/executive/model/reportModel";
 import type { ReportModel } from "../../../../data/reporting/executive/model/reportModel";
-import { rankedBar, gauge, donut, heatmap } from "../../../../data/reporting/executive/ui/charts";
-import ReviewerKpiPanel from "./ReviewerKpiPanel";
+import KpiDashboard from "./KpiDashboard";
 import { DEFAULT_EXEC_CONFIG } from "../../../../data/reporting/executiveReportTypes";
 import type { ExecutiveReportInput } from "../../../../data/reporting/executiveReportTypes";
 import { getManagedLoginUsers } from "../../../../auth/userManagement";
@@ -73,36 +72,6 @@ type MonthMeta = {
 
 // ── Analytics dashboard helpers ─────────────────────────────────────────────
 
-const RESULT_SOURCE_LABELS_AR: Record<string, string> = {
-  levelOne: "المستوى الأول",
-  levelTwo: "المستوى الثاني",
-  manual: "الفحص اليدوي",
-  opposite: "الطرف المقابل",
-  liveMeans: "الوسائل الحية",
-  review: "المراجعة (المرجع)",
-};
-
-const BAND_LABELS_AR: Record<string, string> = {
-  none: "لا بيانات",
-  insufficient: "بيانات غير كافية",
-  limited: "بيانات محدودة",
-  sufficient: "بيانات كافية",
-};
-
-const INSUFFICIENT_NOTE = "بيانات غير كافية";
-
-/** Format a rate that may be null (empty denominator) — never shows 0% on no data. */
-function fmtPct(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return "—";
-  return `${Math.max(0, Math.min(100, value)).toFixed(1)}%`;
-}
-
-function fmtCount(value: number | null | undefined): string {
-  // App standard is Latin (Western) digits — "ar-SA-u-nu-latn" — not the
-  // Arabic-Indic digits "ar-SA" yields (audit C-10).
-  return value != null && Number.isFinite(value) ? value.toLocaleString("ar-SA-u-nu-latn") : "—";
-}
-
 /**
  * Maps a rejected export MutationCapability to the message shown to the user.
  *
@@ -128,10 +97,6 @@ function buildDisplayNameMap(): Record<string, string> {
   const map: Record<string, string> = {};
   for (const u of getManagedLoginUsers()) map[u.username] = u.displayName || u.username;
   return map;
-}
-
-function Chart({ svg }: { svg: string }) {
-  return <div className="rh-chart" dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 
 /** B2: fold (fileName → revision|null) pairs into a SourceRevisions map, dropping absent files. */
@@ -193,6 +158,15 @@ function ReportsContent() {
   // null.
   const kpiModelBuiltForRef = useRef<{ directoryHandle: typeof directoryHandle; month: string } | null>(null);
   const [exporting, setExporting] = useState<"document" | "deck" | "xlsx" | null>(null);
+  // Stable username -> display-name resolver for the KPI dashboard. Rebuilt only
+  // when the model is (a managed-user rename lands with the next model build), so
+  // the dashboard's useMemo derivations -- which walk `model.rows`, up to the full
+  // population -- are not invalidated on every unrelated re-render.
+  const reviewerDisplayNames = useMemo(() => (model ? buildDisplayNameMap() : {}), [model]);
+  const resolveReviewerName = useCallback(
+    (username: string) => reviewerDisplayNames[username] ?? username,
+    [reviewerDisplayNames]
+  );
   const [pbiExporting, setPbiExporting] = useState(false);
   const [pbiResult, setPbiResult] = useState<ExportManifest | null>(null);
   const [pbiError, setPbiError] = useState<string | null>(null);
@@ -655,299 +629,23 @@ function ReportsContent() {
       );
     }
 
-    const s = model.summary;
-    const dq = model.dataQuality;
-    const reviewerNames = buildDisplayNameMap();
-    const headlineNote = (band: string) =>
-      band === "none" || band === "insufficient" ? INSUFFICIENT_NOTE : undefined;
-
-    // Reviewer-agreement ranked bar (cross-team view) — agreement rate per source.
-    const agreementBars = model.resultComparison.reviewerAgreement
-      .filter((r) => r.comparable > 0 && r.agreementRate != null)
-      .map((r) => ({ label: RESULT_SOURCE_LABELS_AR[r.source] ?? r.source, value: Math.round(r.agreementRate ?? 0) }));
-
-    // Port accuracy ranked bar.
-    const portBars = model.portAccuracy
-      .filter((p) => p.accuracyByDecision != null)
-      .sort((a, b) => (b.accuracyByDecision ?? 0) - (a.accuracyByDecision ?? 0))
-      .slice(0, 8)
-      .map((p) => ({ label: p.key, value: Math.round(p.accuracyByDecision ?? 0) }));
-
-    // Outcome donut (error-mix).
-    const t = model.errorAnalysis.totals;
-    const outcomeDonut = [
-      { label: "سليمة صحيحة", value: t.correctClean },
-      { label: "اشتباه صحيح", value: t.correctSuspicion },
-      { label: "اشتباه فائت", value: t.missedSuspicion },
-      { label: "اشتباه زائد", value: t.falseSuspicion },
-    ];
-
     return (
-      <div className="rh-dash" aria-label="لوحة التحليلات التنفيذية">
-        {/* Exports toolbar */}
-        <div className="rh-dash-toolbar" role="group" aria-label="تصدير التقارير">
-          <span className="rh-dash-toolbar-label">تصدير</span>
-          <button
-            type="button"
-            className="rh-btn rh-btn-teal"
-            disabled={exporting !== null || !selectedMonth || !canExportReports}
-            title={exportDisabledTitle()}
-            onClick={() => { void handleExport("document"); }}
-          >
-            {exporting === "document" ? <span className="rh-spinner" /> : <FileText size={15} strokeWidth={2} />}
-            فتح التقرير التفصيلي (HTML)
-          </button>
-          <button
-            type="button"
-            className="rh-btn rh-btn-navy"
-            disabled={exporting !== null || !selectedMonth || !canExportReports}
-            title={exportDisabledTitle()}
-            onClick={() => { void handleExport("deck"); }}
-          >
-            {exporting === "deck" ? <span className="rh-spinner" /> : <BarChart2 size={15} strokeWidth={2} />}
-            فتح العرض التنفيذي (HTML)
-          </button>
-          {isAdmin ? (
-            <button
-              type="button"
-              className="rh-btn"
-              disabled={exporting !== null || !selectedMonth || !canExportReports}
-              title="تخصيص تصميم العرض التنفيذي (للمدير فقط)"
-              onClick={() => { handleOpenCustomizer(); }}
-            >
-              <Settings2 size={15} strokeWidth={2} />
-              تخصيص تصميم العرض
-            </button>
-          ) : null}
-          <button
-            type="button"
-            className="rh-btn rh-btn-indigo"
-            disabled={exporting !== null || !selectedMonth || !canExportReports}
-            title={exportDisabledTitle()}
-            onClick={() => { void handleExport("xlsx"); }}
-          >
-            {exporting === "xlsx" ? <span className="rh-spinner" /> : <Download size={15} strokeWidth={2} />}
-            بيانات التقرير (Excel)
-          </button>
-        </div>
-
-        {/* Data-quality banner */}
-        <div className={`rh-dash-band rh-band-${dq.overallBand}`}>
-          <span className="rh-dash-band-tag">{BAND_LABELS_AR[dq.overallBand]}</span>
-          <span>
-            {fmtCount(dq.evaluableDecisionRecords)} قرار قابل للتقييم من أصل {fmtCount(dq.totalDecisionRecords)}.
-            {!dq.biAvailable && " لا تتوفر بيانات BI لهذا الشهر."}
-          </span>
-        </div>
-
-        {/* Headline KPI cards */}
-        <div className="rh-dash-kpis">
-          <article className="rh-dash-kpi">
-            <span className="rh-dash-kpi-label">دقة الفحص الإجمالية</span>
-            <strong className="rh-dash-kpi-value">{fmtPct(s.overallAccuracy)}</strong>
-            {headlineNote(dq.overallBand) && <span className="rh-dash-kpi-note">{headlineNote(dq.overallBand)}</span>}
-          </article>
-          <article className="rh-dash-kpi">
-            <span className="rh-dash-kpi-label">معدل كشف الاشتباه</span>
-            <strong className="rh-dash-kpi-value">{fmtPct(s.detectionRate)}</strong>
-          </article>
-          <article className="rh-dash-kpi rh-dash-kpi-risk">
-            <span className="rh-dash-kpi-label">الاشتباه الفائت (المخاطرة الرئيسية)</span>
-            <strong className="rh-dash-kpi-value">{fmtPct(s.missedSuspicionRate)}</strong>
-          </article>
-          <article className="rh-dash-kpi">
-            <span className="rh-dash-kpi-label">نسبة الإنجاز</span>
-            <strong className="rh-dash-kpi-value">{fmtPct(s.completionRate)}</strong>
-          </article>
-        </div>
-
-        {/* Gauges + outcome donut */}
-        <div className="rh-dash-charts">
-          <div className="rh-dash-chart-card">
-            <h4>دقة الفحص الإجمالية</h4>
-            <Chart svg={gauge(s.overallAccuracy, { emptyNote: INSUFFICIENT_NOTE })} />
-          </div>
-          <div className="rh-dash-chart-card">
-            <h4>معدل كشف الاشتباه</h4>
-            <Chart svg={gauge(s.detectionRate, { emptyNote: INSUFFICIENT_NOTE })} />
-          </div>
-          <div className="rh-dash-chart-card">
-            <h4>توزيع نتائج القرارات</h4>
-            <Chart svg={donut(outcomeDonut, { emptyNote: INSUFFICIENT_NOTE })} />
-          </div>
-        </div>
-
-        {/* Reviewer-agreement (cross-team) */}
-        <section className="rh-dash-section">
-          <h3>اتفاق الفرق مع المراجعة (المرجع)</h3>
-          <div className="rh-dash-split">
-            <div className="rh-dash-chart-card rh-dash-grow">
-              <h4>معدل الاتفاق لكل مصدر</h4>
-              <Chart svg={rankedBar(agreementBars, { width: 380, emptyNote: INSUFFICIENT_NOTE })} />
-            </div>
-            <div className="rh-dash-table-wrap">
-              <table className="rh-dash-table">
-                <thead>
-                  <tr>
-                    <th>المصدر</th>
-                    <th>قابلة للمقارنة</th>
-                    <th>اتفاق</th>
-                    <th>اختلاف</th>
-                    <th>معدل الاتفاق</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {model.resultComparison.reviewerAgreement.map((r) => (
-                    <tr key={r.source}>
-                      <td>{RESULT_SOURCE_LABELS_AR[r.source] ?? r.source}</td>
-                      <td>{fmtCount(r.comparable)}</td>
-                      <td>{fmtCount(r.agree)}</td>
-                      <td>{fmtCount(r.disagree)}</td>
-                      <td>{r.comparable > 0 ? fmtPct(r.agreementRate) : "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </section>
-
-        {/* Port accuracy */}
-        <section className="rh-dash-section">
-          <h3>الدقة حسب المنفذ</h3>
-          <div className="rh-dash-split">
-            <div className="rh-dash-chart-card rh-dash-grow">
-              <Chart svg={rankedBar(portBars, { width: 380, emptyNote: INSUFFICIENT_NOTE })} />
-            </div>
-            <div className="rh-dash-table-wrap">
-              <table className="rh-dash-table">
-                <thead>
-                  <tr>
-                    <th>المنفذ</th>
-                    <th>قابلة للتقييم</th>
-                    <th>الدقة</th>
-                    <th>الاشتباه الفائت</th>
-                    <th>الكفاية</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {model.portAccuracy.map((p) => (
-                    <tr key={p.key}>
-                      <td>{p.key}</td>
-                      <td>{fmtCount(p.evaluable)}</td>
-                      <td>{fmtPct(p.accuracyByDecision)}</td>
-                      <td>{fmtPct(p.missedSuspicionRateByDecision)}</td>
-                      <td><span className={`rh-band-pill rh-band-${p.band}`}>{BAND_LABELS_AR[p.band]}</span></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </section>
-
-        {/* Stage coverage */}
-        <section className="rh-dash-section">
-          <h3>التغطية حسب المستوى</h3>
-          <div className="rh-dash-table-wrap">
-            <table className="rh-dash-table">
-              <thead>
-                <tr>
-                  <th>المستوى</th>
-                  <th>المجتمع</th>
-                  <th>حجم العينة</th>
-                  <th>التغطية</th>
-                  <th>المدروسة</th>
-                  <th>الإنجاز</th>
-                </tr>
-              </thead>
-              <tbody>
-                {model.population.byStage.map((st) => (
-                  <tr key={st.stageKey}>
-                    <td>{st.stageLabel}</td>
-                    <td>{fmtCount(st.population)}</td>
-                    <td>{fmtCount(st.sampleSize)}</td>
-                    <td>{fmtPct(st.coverage)}</td>
-                    <td>{fmtCount(st.studied)}</td>
-                    <td>{fmtPct(st.completionRate)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        {/* Employee / reviewer overview */}
-        <section className="rh-dash-section">
-          <h3>نظرة عامة على المراجعين</h3>
-          {!model.employeeOverview.inspectorIdentityMapped && (
-            <div className="rh-dash-band rh-band-insufficient">
-              <span className="rh-dash-band-tag">تنبيه</span>
-              <span>هوية المفتش غير مرتبطة (لم تتم مطابقة BI) — تُعرض أعباء عمل المراجعين فقط، لا دقة المفتشين.</span>
-            </div>
-          )}
-          <div className="rh-dash-table-wrap">
-            <table className="rh-dash-table">
-              <thead>
-                <tr>
-                  <th>المراجع</th>
-                  <th>المدروسة</th>
-                  <th>الدقة</th>
-                  <th>كشف الاشتباه</th>
-                  <th>الاشتباه الفائت</th>
-                  <th>الكفاية</th>
-                </tr>
-              </thead>
-              <tbody>
-                {model.employeeOverview.reviewerProfiles.length === 0 ? (
-                  <tr><td colSpan={6} className="rh-dash-empty-cell">{INSUFFICIENT_NOTE}</td></tr>
-                ) : (
-                  model.employeeOverview.reviewerProfiles.map((p) => (
-                    <tr key={p.username}>
-                      <td>{model.employeeOverview.reviewerDisplayNames[p.username] ?? p.username}</td>
-                      <td>{fmtCount(p.studied)}</td>
-                      <td>{fmtPct(p.overallAccuracy)}</td>
-                      <td>{fmtPct(p.suspiciousDetectionRate)}</td>
-                      <td>{fmtPct(p.missedSuspicionRate)}</td>
-                      <td><span className={`rh-band-pill ${p.reliable ? "rh-band-sufficient" : "rh-band-insufficient"}`}>{p.reliable ? "موثوق" : INSUFFICIENT_NOTE}</span></td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        {/* Per-reviewer KPIs + SPC p-charts (Tier-2 / research gap #18) */}
-        <ReviewerKpiPanel
-          model={model.reviewerKpis}
-          resolveName={(username) => reviewerNames[username] ?? username}
-        />
-
-        {/* Error-type mix by port (heatmap) */}
-        {model.errorAnalysis.byPort.length > 0 && (
-          <section className="rh-dash-section">
-            <h3>أنواع الأخطاء حسب المنفذ</h3>
-            <div className="rh-dash-chart-card">
-              <Chart
-                svg={heatmap(
-                  {
-                    rows: model.errorAnalysis.byPort.map((p) => p.key),
-                    cols: ["سليمة صحيحة", "اشتباه صحيح", "اشتباه فائت", "اشتباه زائد"],
-                    values: model.errorAnalysis.byPort.map((p) => [
-                      p.correctClean,
-                      p.correctSuspicion,
-                      p.missedSuspicion,
-                      p.falseSuspicion,
-                    ]),
-                  },
-                  { emptyNote: INSUFFICIENT_NOTE }
-                )}
-              />
-            </div>
-          </section>
-        )}
-      </div>
+      <KpiDashboard
+        model={model}
+        monthLabel={
+          globalMonth.kind === "none"
+            ? labels.kpi_page_title
+            : formatMonthFolderShortLabel(globalMonth.folderName)
+        }
+        resolveName={resolveReviewerName}
+        exporting={exporting}
+        canExportReports={canExportReports}
+        isAdmin={isAdmin}
+        exportDisabledTitle={exportDisabledTitle()}
+        exportsDisabled={!selectedMonth}
+        onExport={(kind) => { void handleExport(kind); }}
+        onOpenCustomizer={() => { handleOpenCustomizer(); }}
+      />
     );
   }
 
@@ -966,9 +664,13 @@ function ReportsContent() {
       {/* ── Page header ─────────────────────────────── */}
       <div className="rh-header">
         <div className="rh-header-main">
-          <div className="rh-eyebrow">إدارة التقارير</div>
-          <h1 className="rh-title">مركز التقارير</h1>
-          <p className="rh-sub">اختر التقرير المناسب وولّده مباشرةً — تقارير HTML تفاعلية جاهزة للمشاركة والطباعة.</p>
+          <div className="rh-eyebrow">{labels.kpi_page_eyebrow}</div>
+          <h1 className="rh-title">{section === "kpi" ? labels.kpi_page_title : "مركز التقارير"}</h1>
+          <p className="rh-sub">
+            {section === "kpi"
+              ? labels.kpi_page_sub
+              : "اختر التقرير المناسب وولّده مباشرةً — تقارير HTML تفاعلية جاهزة للمشاركة والطباعة."}
+          </p>
         </div>
         <div className="rh-nav" role="tablist" aria-label="أقسام إدارة التقارير">
           <button

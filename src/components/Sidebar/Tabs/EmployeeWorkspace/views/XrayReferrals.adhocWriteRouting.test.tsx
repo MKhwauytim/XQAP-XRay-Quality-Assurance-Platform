@@ -12,6 +12,10 @@
 //
 // The answer-save path (handleSave) already routed correctly; these cover the
 // three that did not — handleReplace, handleRequestReopen and handleReopenAnswer.
+//
+// The final describe covers the READ side of the same contract: a write routed
+// to the ad-hoc store is worthless if the view only ever reads the selected
+// month back, which is exactly what it used to do.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../../../workers/populationQueryWorker?worker&inline", async () => {
@@ -313,7 +317,7 @@ describe("XrayReferrals — ad-hoc rows never write into the selected real month
     await waitFor(() => expect(screen.getAllByText(ADHOC_ID).length).toBeGreaterThan(0));
 
     fireEvent.click(
-      await waitFor(() => screen.getByRole("button", { name: "استبدال العينة" }))
+      await waitFor(() => screen.getByRole("button", { name: "طلب استبدال" }))
     );
     const dlg = await waitFor(() => screen.getByRole("dialog"));
     fireEvent.change(within(dlg).getByLabelText(/سبب الاستبدال/), { target: { value: "سبب" } });
@@ -358,7 +362,7 @@ describe("XrayReferrals — ad-hoc rows never write into the selected real month
     // which already routed correctly — confirmed so the setup isn't in doubt.
     const noteInput = (await waitFor(() => screen.getByLabelText("ملاحظة"))) as HTMLInputElement;
     fireEvent.change(noteInput, { target: { value: "ملاحظة الفحص" } });
-    fireEvent.click(screen.getByRole("button", { name: "تقديم" }));
+    fireEvent.click(screen.getByRole("button", { name: "تقديم الفحص" }));
     await waitFor(() => expect(screen.getByText("تم التقديم.")).toBeInTheDocument());
 
     const adhocAnswers = await loadEmployeeAnswers(root, ADHOC_FOLDER, "jalgahamdi");
@@ -406,7 +410,7 @@ describe("XrayReferrals — ad-hoc rows never write into the selected real month
 
     const noteInput = (await waitFor(() => screen.getByLabelText("ملاحظة"))) as HTMLInputElement;
     fireEvent.change(noteInput, { target: { value: "ملاحظة الفحص" } });
-    fireEvent.click(screen.getByRole("button", { name: "تقديم" }));
+    fireEvent.click(screen.getByRole("button", { name: "تقديم الفحص" }));
     await waitFor(() => expect(screen.getByText("تم التقديم.")).toBeInTheDocument());
 
     fireEvent.click(
@@ -429,5 +433,71 @@ describe("XrayReferrals — ad-hoc rows never write into the selected real month
 
     const realLog = await loadDistributionLog(root, MONTH);
     expect(realLog.events.some((e) => e.xrayImageId === ADHOC_ID)).toBe(false);
+  });
+});
+
+describe("XrayReferrals — ad-hoc answers are read back from the store they were written to", () => {
+  it("still shows a submitted ad-hoc answer as submitted after a remount", async () => {
+    // Every ad-hoc WRITE is routed through folderForRow, but every answer READ
+    // used to be hard-wired to the globally selected month — so a submitted
+    // ad-hoc answer was correct on disk and invisible to the app. The row came
+    // back as an unanswered, fully editable form with a live "تقديم الفحص"
+    // button, and re-submitting overwrote the stored answer with whatever the
+    // employee retyped into the blank form.
+    writeSession({ role: "employee", username: "jalgahamdi", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedRealMonth(root);
+    await seedAdhocAssignment(root, "jalgahamdi");
+    await seedTemplate(root);
+
+    const first = render(<XrayReferrals directoryHandle={root} />);
+    await waitFor(() => expect(screen.getAllByText(ADHOC_ID).length).toBeGreaterThan(0));
+    const noteInput = (await waitFor(() => screen.getByLabelText("ملاحظة"))) as HTMLInputElement;
+    fireEvent.change(noteInput, { target: { value: "ملاحظة الفحص" } });
+    fireEvent.click(screen.getByRole("button", { name: "تقديم الفحص" }));
+    await waitFor(() => expect(screen.getByText("تم التقديم.")).toBeInTheDocument());
+
+    const stored = await loadEmployeeAnswers(root, ADHOC_FOLDER, "jalgahamdi");
+    expect(stored.items.find((i) => i.xrayImageId === ADHOC_ID)?.status).toBe("submitted");
+
+    first.unmount();
+    resetBootProgress();
+
+    render(<XrayReferrals directoryHandle={root} />);
+    await waitFor(() => expect(screen.getAllByText(ADHOC_ID).length).toBeGreaterThan(0));
+
+    // Read-only submitted view: the saved value is on screen and the submit
+    // button is gone, exactly as for a real month's row.
+    await waitFor(() => expect(screen.getByText("ملاحظة الفحص")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "تقديم الفحص" })).toBeNull();
+  });
+
+  it("surfaces an ad-hoc answer to an oversight user, who never reads a personal mirror", async () => {
+    writeSession({ role: "supervisor", username: "malrogi", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedRealMonth(root);
+    await seedAdhocAssignment(root, "malrogi");
+    await seedTemplate(root);
+
+    const first = render(<XrayReferrals directoryHandle={root} />);
+    await waitFor(() => expect(screen.getAllByText(ADHOC_ID).length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByText(ADHOC_ID)[0]);
+    const noteInput = (await waitFor(() => screen.getByLabelText("ملاحظة"))) as HTMLInputElement;
+    fireEvent.change(noteInput, { target: { value: "ملاحظة المشرف" } });
+    fireEvent.click(screen.getByRole("button", { name: "تقديم الفحص" }));
+    await waitFor(() => expect(screen.getByText("تم التقديم.")).toBeInTheDocument());
+
+    first.unmount();
+    resetBootProgress();
+
+    render(<XrayReferrals directoryHandle={root} />);
+    await waitFor(() => expect(screen.getAllByText(ADHOC_ID).length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByText(ADHOC_ID)[0]);
+    await waitFor(() => expect(screen.getByText("ملاحظة المشرف")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "تقديم الفحص" })).toBeNull();
   });
 });

@@ -171,7 +171,7 @@ describe("XrayReferrals — replacement dialog exclusion set", () => {
     expect(screen.queryByText("IMG-2")).not.toBeInTheDocument();
 
     // ── First open: the on-demand read supplies the full entry set. ──
-    fireEvent.click(screen.getByRole("button", { name: "استبدال العينة" }));
+    fireEvent.click(screen.getByRole("button", { name: "طلب استبدال" }));
     await waitFor(() => expect(lookupMock).toHaveBeenCalledTimes(1));
     expect(idsOf(lookupMock.mock.calls[0][4])).toEqual(["IMG-1", "IMG-2"]);
 
@@ -182,7 +182,7 @@ describe("XrayReferrals — replacement dialog exclusion set", () => {
 
     // ── Second open: short-circuits on the cached sample master. The entry set
     //    must not collapse back to the mirror-only view. ──
-    fireEvent.click(screen.getByRole("button", { name: "استبدال العينة" }));
+    fireEvent.click(screen.getByRole("button", { name: "طلب استبدال" }));
     await waitFor(() => expect(lookupMock).toHaveBeenCalledTimes(2));
     expect(idsOf(lookupMock.mock.calls[1][3].rows)).toEqual(["IMG-1", "IMG-2"]);
     expect(idsOf(lookupMock.mock.calls[1][4])).toEqual(["IMG-1", "IMG-2"]);

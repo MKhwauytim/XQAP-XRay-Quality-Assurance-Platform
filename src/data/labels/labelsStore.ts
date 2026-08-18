@@ -1,3 +1,8 @@
+import { phaseOneLabels } from "./labels.phaseOne";
+import { phaseTwoLabels } from "./labels.phaseTwo";
+import { phaseThreeFourLabels } from "./labels.phaseThreeFour";
+import { inspectionPanelLabels } from "./labels.inspectionPanel";
+
 export const DEFAULT_LABELS = {
   // App identity
   app_display_name:                    "نظام متابعة أعمال فحص صور الأشعة",
@@ -12,7 +17,21 @@ export const DEFAULT_LABELS = {
   sidebar_expand_label:      "توسيع القائمة",
   sidebar_collapse_label:    "طي القائمة",
   sidebar_nav_aria:          "تبويبات النظام",
-  sidebar_nav_heading:       "إدارة النظام",
+
+  // Sidebar — workflow-stage group headings (nav 1b). Replaces the single
+  // `sidebar_nav_heading` the flat rail used; order is fixed by
+  // TAB_NAV_GROUP_ORDER in src/auth/tabCatalog.ts.
+  sidebar_group_workflow: "مسار العمل",
+  sidebar_group_analysis: "التقارير والتحليل",
+  sidebar_group_system:   "إدارة النظام",
+
+  // Sidebar — month/workspace context card + user footer (nav 1b moved these
+  // out of the crowded AdminToolbar and into the rail).
+  sidebar_workspace_label:    "مساحة العمل",
+  sidebar_no_workspace:       "لا توجد مساحة عمل",
+  sidebar_footer_role_label:  "الدور",
+  sidebar_logout_aria:        "تسجيل الخروج",
+  sidebar_notifications_badge_aria: "{count} إشعار بانتظار الاطلاع",
 
   // Tab lazy-loading
   app_tab_loading: "جارٍ التحميل…",
@@ -160,6 +179,9 @@ export const DEFAULT_LABELS = {
   gm_cancel:               "إلغاء",
   gm_pending_suffix:       "(جديد)",
   gm_locked_badge:         "مُقفل",
+  // Sidebar variant states open/closed explicitly; the toolbar variant only
+  // ever badges the closed case, so this key is sidebar-only.
+  gm_open_badge:           "مفتوح",
   gm_no_months:            "لا توجد أشهر",
   gm_all_months:           "كل الأشهر",
   gm_month_switch_confirm: "توجد بيانات غير محفوظة في معالجة المجتمع — تغيير الشهر سيتجاهلها ويحمّل بيانات الشهر المحدد. هل تريد المتابعة؟",
@@ -364,7 +386,7 @@ export const DEFAULT_LABELS = {
   confirm_dialog_default_cancel: "إلغاء",
 
   // Inspection panel — form chrome and validation
-  ip_submit_btn:                "تقديم",
+  ip_submit_btn:                "تقديم الفحص",
   ip_submitting:                "جارٍ التقديم…",
   ip_next_phase_btn:            "المرحلة التالية",
   ip_msg_missing_required_submit: "أكمل جميع الحقول الإلزامية قبل التقديم.",
@@ -974,12 +996,184 @@ export const DEFAULT_LABELS = {
   err_smp_007_save_master_threw:       "تعذر حفظ ملف العينة الرئيسي.",
   err_smp_008_substitution_conflict:   "هذا الصف المستبدَل سبق أن استُبدل بصف آخر لم يكتمل حفظ تعييناته. أعد محاولة الاستبدال الأصلية نفسها لإكمالها بدلاً من اختيار صف جديد.",
 
+  // Population wizard — shared page chrome (2026-08 handoff, sections 2b/3b/4b/5c).
+  // The readiness rail replaced the old status bar + stepper; the action bar
+  // replaced the inline phase footer.
+  pop_header_eyebrow:              "معالجة المجتمع",
+  pop_header_settings_mapping:     "إعدادات الربط والتصدير",
+  pop_header_settings_processing:  "إعدادات المعالجة",
+  pop_readiness_aria:              "جاهزية الشهر",
+  pop_readiness_title:             "جاهزية الشهر",
+  pop_readiness_month:             "الشهر",
+  pop_readiness_population:        "المجتمع",
+  pop_readiness_sample:            "العينة",
+  pop_readiness_distribution:      "التوزيع",
+  pop_readiness_bi:                "بيانات BI",
+  pop_readiness_rows:              "{count} صف",
+  pop_readiness_items:             "{count} عنصر",
+  pop_readiness_assigned:          "{count} معين",
+  pop_readiness_absent:            "—",
+  pop_readiness_bi_absent:         "غير مرفوع",
+  pop_readiness_month_open:        "الشهر مفتوح",
+  pop_readiness_month_closed:      "الشهر مغلق",
+  pop_stepper_aria:                "مراحل معالجة المجتمع",
+  pop_step_state_current:          "المرحلة الحالية",
+  pop_step_state_done:             "مكتملة",
+  pop_step_state_future:           "لاحقاً",
+  pop_action_bar_aria:             "إجراءات المرحلة",
+  pop_action_next_step_label:      "الخطوة التالية",
+  pop_action_previous:             "السابق →",
+  pop_action_next:                 "← التالي",
+  pop_action_reading:              "جاري القراءة...",
+  pop_action_all_done:             "اكتملت جميع المراحل",
+
   // Report Designer — print preview overlay (accessible name of the dialog).
   rd_print_view_aria:                  "معاينة الطباعة",
+
+  // ── KPI dashboard (مؤشرات الأداء) — 2026-08 design-handoff rework ──────────
+  // Every user-facing string of the reworked Reports → مؤشرات dashboard lives
+  // here. `{n}` / `{a}` / `{b}` placeholders are substituted at the call site
+  // with already-formatted Latin-digit counts (see fmtCount in the Reports tab).
+  kpi_page_eyebrow:              "إدارة التقارير",
+  kpi_page_title:                "مؤشرات الأداء",
+  kpi_page_sub:                  "نظرة شهرية على جودة الفحص وتقدّم دراسة العينة وأداء المراجعين والمنافذ.",
+  kpi_exports_aria:              "تصدير التقارير",
+  kpi_export_document:           "التقرير التفصيلي",
+  kpi_export_document_aria:      "فتح التقرير التفصيلي (HTML)",
+  kpi_export_deck:               "العرض التنفيذي",
+  kpi_export_deck_aria:          "فتح العرض التنفيذي (HTML)",
+  kpi_export_xlsx:               "Excel",
+  kpi_export_xlsx_aria:          "تنزيل بيانات التقرير (Excel)",
+  kpi_export_customize:          "تخصيص تصميم العرض",
+  kpi_export_customize_title:    "تخصيص تصميم العرض التنفيذي (للمدير فقط)",
+  kpi_dq_chip:                   "{band} · {n} قرار قابل للتقييم",
+
+  kpi_card_accuracy:             "دقة الفحص الإجمالية",
+  kpi_card_accuracy_note:        "من {n} قراراً قابلاً للتقييم",
+  kpi_card_detection:            "معدل كشف الاشتباه",
+  kpi_card_detection_note:       "{a} اشتباهاً صحيحاً من {b} حالة اشتباه",
+  kpi_card_missed:               "الاشتباه الفائت — المخاطرة الرئيسية",
+  kpi_card_missed_badge:         "{n} حالة",
+  kpi_card_missed_note:          "كل حالة فائتة تستدعي مراجعة سبب الخطأ",
+  kpi_card_agreement:            "اتفاق المستويين مع المرجع",
+  kpi_card_agreement_note:       "متوسط اتفاق المستويين الأول والثاني",
+
+  kpi_progress_title:            "تقدّم دراسة العينة",
+  kpi_progress_sub:              "اكتمال دراسة عينة الشهر — إجمالاً ولكل مستوى من مستويات المخاطر الأربعة.",
+  kpi_progress_remaining_chip:   "المتبقي: {n} صورة",
+  kpi_progress_overall:          "الإنجاز الكلي",
+  kpi_progress_of:               "من",
+  kpi_progress_unit:             "عينة",
+  kpi_progress_level_remaining:  "المتبقي {n}",
+  kpi_progress_empty:            "لا توجد عينة مسحوبة لهذا الشهر بعد.",
+
+  kpi_tabs_aria:                 "أقسام لوحة المؤشرات",
+  kpi_tab_overview:              "نظرة عامة",
+  kpi_tab_ports:                 "المنافذ",
+  kpi_tab_reviewers:             "المراجعون",
+
+  kpi_chart_accuracy_title:      "دقة الفحص الإجمالية",
+  kpi_chart_detection_title:     "معدل كشف الاشتباه",
+  kpi_chart_outcome_title:       "توزيع نتائج القرارات",
+
+  kpi_agreement_title:           "اتفاق الفرق مع المراجعة (المرجع)",
+  kpi_agreement_sub:             "نسبة اتفاق كل مصدر فحص مع النتيجة المعتمدة من المرجع.",
+  kpi_agreement_comparable:      "{n} قابلة للمقارنة",
+  kpi_agreement_empty:           "لا توجد صور قابلة للمقارنة مع نتيجة المرجع.",
+  kpi_source_levelOne:           "المستوى الأول",
+  kpi_source_levelTwo:           "المستوى الثاني",
+  kpi_source_manual:             "الفحص اليدوي",
+  kpi_source_opposite:           "الطرف المقابل",
+  kpi_source_liveMeans:          "الوسائل الحية",
+  kpi_source_review:             "المراجعة (المرجع)",
+  kpi_band_none:                 "لا بيانات",
+  kpi_band_insufficient:         "بيانات غير كافية",
+  kpi_band_limited:              "بيانات محدودة",
+  kpi_band_sufficient:           "بيانات كافية",
+
+  kpi_calendar_title:            "خريطة عدم الدقة خلال الشهر",
+  kpi_calendar_sub:              "عدد القرارات غير الدقيقة المكتشفة أثناء المراجعة في كل يوم من أيام {month} — الأيام الأغمق شهدت عدم دقة أكثر.",
+  kpi_calendar_holiday:          "عطلة",
+  kpi_calendar_legend_high:      "الأعلى ({n})",
+  kpi_calendar_legend_low:       "أقل",
+  kpi_calendar_weekday_sat:      "السبت",
+  kpi_calendar_weekday_sun:      "الأحد",
+  kpi_calendar_weekday_mon:      "الاثنين",
+  kpi_calendar_weekday_tue:      "الثلاثاء",
+  kpi_calendar_weekday_wed:      "الأربعاء",
+  kpi_calendar_weekday_thu:      "الخميس",
+  kpi_calendar_weekday_fri:      "الجمعة",
+  kpi_cal_month_1:               "يناير",
+  kpi_cal_month_2:               "فبراير",
+  kpi_cal_month_3:               "مارس",
+  kpi_cal_month_4:               "أبريل",
+  kpi_cal_month_5:               "مايو",
+  kpi_cal_month_6:               "يونيو",
+  kpi_cal_month_7:               "يوليو",
+  kpi_cal_month_8:               "أغسطس",
+  kpi_cal_month_9:               "سبتمبر",
+  kpi_cal_month_10:              "أكتوبر",
+  kpi_cal_month_11:              "نوفمبر",
+  kpi_cal_month_12:              "ديسمبر",
+
+  kpi_ports_title:               "الدقة حسب المنفذ",
+  kpi_ports_sub:                 "اختر منفذاً من القائمة لعرض تفاصيله.",
+  kpi_ports_list_aria:           "قائمة المنافذ",
+  kpi_ports_decisions:           "{n} قرار",
+  kpi_ports_empty:               "لا توجد قرارات قابلة للتقييم لأي منفذ.",
+  kpi_port_detail_aria:          "تفاصيل المنفذ المحدد",
+  kpi_port_detail_accuracy:      "الدقة",
+  kpi_port_detail_evaluable:     "قابلة للتقييم",
+  kpi_port_detail_missed:        "الاشتباه الفائت",
+  kpi_port_detail_false:         "اشتباه زائد",
+  kpi_port_mix_title:            "مزيج النتائج",
+  kpi_outcome_correct_clean:     "سليمة صحيحة",
+  kpi_outcome_correct_suspicion: "اشتباه صحيح",
+  kpi_outcome_missed:            "اشتباه فائت",
+  kpi_outcome_false:             "اشتباه زائد",
+  kpi_errors_title:              "أنواع الأخطاء حسب المنفذ",
+  kpi_errors_sub:                "كثافة كل نتيجة قرار في كل منفذ — الخلايا الأغمق تعني عدداً أكبر.",
+
+  kpi_answers_title_reviewer:    "إجابات دقة الاشتباه — حسب المراجع",
+  kpi_answers_title_port:        "إجابات دقة الاشتباه — حسب المنفذ",
+  kpi_answers_desc:              "توزيع الإجابات المسجّلة في حقل «دقة الاشتباه» — عدد ما سُجّل اشتباهاً، وما سُجّل سليمة، وما لم تكتمل دراسته بعد.",
+  kpi_answers_series_suspicion:  "اشتباه",
+  kpi_answers_series_clean:      "سليمة",
+  kpi_answers_series_incomplete: "غير مكتملة",
+  kpi_answers_empty:             "لا توجد إجابات مسجّلة لرسم المخطط.",
+
+  kpi_reviewers_title:           "أداء المراجعين",
+  kpi_reviewers_sub:             "أعباء العمل والإنتاجية وزمن الإنجاز ومعدلات الإحالة لكل مراجع هذا الشهر.",
+  kpi_reviewers_col_status:      "الحالة",
+  kpi_unknown_key:               "غير محدد",
+
+  // The 2026-08 design-handoff redesign keeps its keys in one file per screen
+  // (see ./labels.*.ts). Spread here so they are indistinguishable from the
+  // keys defined inline above: same LabelKey union, same Settings-tab override
+  // path, same persistence.
+  ...phaseOneLabels,
+  ...phaseTwoLabels,
+  ...phaseThreeFourLabels,
+  ...inspectionPanelLabels,
 } as const;
 
 export type LabelKey = keyof typeof DEFAULT_LABELS;
 export type Labels = Record<LabelKey, string>;
+
+/**
+ * True when `key` is a label this build actually defines.
+ *
+ * `setLabel` cannot tell an unknown key from a known one on its own (its
+ * `trimmed === DEFAULT_LABELS[key]` comparison is `undefined` for a key that
+ * does not exist, so the value is stored), and a stored unknown key is
+ * unreachable from the Settings tab — every row there iterates
+ * `DEFAULT_LABELS`. Anything reading keys from outside this module (a workspace
+ * snapshot written by an older build, a restored backup) must filter through
+ * this first.
+ */
+export function isLabelKey(key: string): key is LabelKey {
+  return Object.prototype.hasOwnProperty.call(DEFAULT_LABELS, key);
+}
 
 type Subscriber = () => void;
 const subscribers = new Set<Subscriber>();

@@ -35,6 +35,7 @@ import { loadAdminBrowsePreset, loadUserBrowsePreset } from "../../../../../data
 import { subscribeToDataRefresh } from "../../../../../data/workspace/dataRefreshSignal";
 import { loadSampleMaster } from "../../../../../data/sampling/sampleStorage";
 import {
+  loadAdhocAnswerItems,
   loadAdhocEntriesForEmployeeView,
   type AdhocDistributionEntry,
 } from "../../../../../data/adhocImport/adhocImportEmployeeView";
@@ -270,12 +271,20 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
       const answerFiles = canSeeAll
         ? await loadAllEmployeeFiles(directoryHandle, selectedMonth)
         : [await loadEmployeeAnswers(directoryHandle, selectedMonth, username)];
+      // Ad-hoc rows' answers live in their own `2-samples/adhoc-{importId}/`
+      // store (that is where XrayReferrals writes them), so reading the selected
+      // month alone showed every ad-hoc row here as unanswered — no result, no
+      // submitted-at, and a disabled quality-note editor for work that was done.
+      const adhocAnswerItems = await loadAdhocAnswerItems(directoryHandle, adhocEntries);
 
       const answerByKey = new Map<string, ItemAnswer>();
       for (const file of answerFiles) {
         for (const item of file.items) {
           answerByKey.set(`${item.xrayImageId}::${item.answeredBy}`, item);
         }
+      }
+      for (const item of adhocAnswerItems) {
+        answerByKey.set(`${item.xrayImageId}::${item.answeredBy}`, item);
       }
 
       if (token !== loadTokenRef.current) return; // superseded by a newer month selection

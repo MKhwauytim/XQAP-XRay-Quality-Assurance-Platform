@@ -175,3 +175,102 @@
   background: rgba(0, 0, 0, 0.05);
   border-color: rgba(0, 0, 0, 0.25);
 }
+
+/* ─────────────────────────────────────────────────────────────
+   Sidebar variant (nav 1b)
+
+   The month context moved out of the top toolbar and into the nav
+   rail's context card. Same component, same logic — this block only
+   restacks it: label + state pill on one row, the month select and
+   the "شهر جديد" button beneath. Everything here is scoped under
+   `.gms-sidebar` so the toolbar variant is untouched.
+   ───────────────────────────────────────────────────────────── */
+
+.gms-root.gms-sidebar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px var(--sp-2);
+}
+
+.gms-sidebar .gms-label {
+  grid-column: 1;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.gms-sidebar .gms-state-pill {
+  grid-column: 2;
+  justify-self: end;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+
+  border-radius: 999px;
+  background: rgba(16, 207, 201, 0.16);
+  color: var(--c-teal-on-navy);
+
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.gms-sidebar .gms-state-pill.is-closed {
+  background: rgba(218, 163, 40, 0.20);
+  color: var(--c-gold-on-navy);
+}
+
+/* The select carries the month NAME in the mock's bold treatment; it stays a
+   real <select> because switching months is the whole point of the control. */
+.gms-sidebar .gms-select {
+  grid-column: 1;
+  min-width: 0;
+  width: 100%;
+  padding: 2px 4px;
+
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--c-surface);
+
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.gms-sidebar .gms-select option {
+  color: var(--c-ink);
+  background: var(--c-surface);
+}
+
+.gms-sidebar .gms-select:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.gms-sidebar .gms-new-wrap {
+  grid-column: 2;
+  justify-self: end;
+}
+
+.gms-sidebar .gms-new-btn {
+  padding: 4px 9px;
+  border: 1px dashed rgba(255, 255, 255, 0.3);
+  border-radius: var(--r-sm);
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 11.5px;
+}
+
+.gms-sidebar-empty {
+  grid-column: 1 / -1;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+/* The create popover anchors to the rail, which is narrower than the toolbar. */
+.gms-sidebar .gms-popover {
+  inset-inline-end: 0;
+  inset-inline-start: auto;
+}

@@ -87,7 +87,7 @@ describe("PopulationTab process sub-tab mount preservation (DEFECT 7)", () => {
     vi.stubGlobal("ResizeObserver", ResizeObserverStub);
     render(<PopulationTab />);
 
-    fireEvent.click(screen.getByLabelText("فتح إعدادات الربط والتصدير"));
+    fireEvent.click(screen.getByLabelText("إعدادات الربط والتصدير"));
     const input = draftInput();
     expect(input).not.toBeNull();
     fireEvent.change(input!, { target: { value: "inspectionSite" } });
@@ -107,7 +107,7 @@ describe("PopulationTab process sub-tab mount preservation (DEFECT 7)", () => {
     vi.stubGlobal("ResizeObserver", ResizeObserverStub);
     render(<PopulationTab />);
 
-    fireEvent.click(screen.getByLabelText("فتح إعدادات الربط والتصدير"));
+    fireEvent.click(screen.getByLabelText("إعدادات الربط والتصدير"));
     expect(draftInput()).not.toBeNull();
 
     switchTo("browse");
@@ -122,7 +122,7 @@ describe("PopulationTab process sub-tab mount preservation (DEFECT 7)", () => {
     vi.stubGlobal("ResizeObserver", ResizeObserverStub);
     render(<PopulationTab />);
 
-    const header = screen.getByLabelText("فتح إعدادات الربط والتصدير");
+    const header = screen.getByLabelText("إعدادات الربط والتصدير");
     switchTo("browse");
 
     expect(header).toBeInTheDocument();

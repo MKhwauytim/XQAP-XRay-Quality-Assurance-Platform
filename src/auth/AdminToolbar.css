@@ -10,7 +10,7 @@
   z-index: 1000;
 
   display: grid;
-  grid-template-columns: minmax(190px, 1fr) auto auto minmax(190px, 1fr);
+  grid-template-columns: minmax(190px, 1fr) auto minmax(190px, 1fr);
   align-items: center;
   gap: 16px;
 
@@ -76,34 +76,6 @@
   white-space: nowrap;
 }
 
-/* Workspace + user chips */
-.auth-toolbar-chip,
-.auth-toolbar-user {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  max-width: 200px;
-  padding: 6px 11px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.09);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  font-size: 12px;
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.92);
-}
-.auth-toolbar-chip-icon,
-.auth-toolbar-user-icon {
-  flex-shrink: 0;
-  color: rgba(255, 255, 255, 0.7);
-}
-.auth-toolbar-chip-text,
-.auth-toolbar-user-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .auth-toolbar-preview-panel {
   justify-content: center;
   gap: 10px;
@@ -166,14 +138,6 @@
 @keyframes auth-toolbar-refresh-spin {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
-}
-
-.auth-admin-toolbar .auth-toolbar-logout {
-  min-width: 118px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
 }
 
 /* ── Admin role-preview switcher ───────────────────────────── */
@@ -255,16 +219,10 @@
 /* ── Intermediate widths: shed optional chips before zones collide ── */
 
 @media (max-width: 1200px) {
-  .auth-toolbar-chip { display: none; }
   .auth-toolbar-mode:not(:last-child) {
     padding-inline-end: 0;
     border-inline-end: none;
   }
-}
-
-@media (max-width: 1024px) {
-  .auth-toolbar-user-name { display: none; }
-  .auth-toolbar-user { max-width: none; padding: 6px; }
 }
 
 /* ── Mobile ────────────────────────────────────────────────── */
@@ -283,19 +241,7 @@
     justify-content: space-between;
   }
 
-  /* GlobalMonthSelector: 4th toolbar child — stack full-width and let its own
-     contents wrap instead of overflowing the narrow single-column layout. */
-  .gms-root {
-    width: 100%;
-    flex-wrap: wrap;
-  }
-
   .auth-role-switcher {
     overflow-x: auto;
   }
-
-  /* room returns once the bar stacks — bring the chips back */
-  .auth-toolbar-chip { display: inline-flex; }
-  .auth-toolbar-user-name { display: inline; }
-  .auth-toolbar-user { max-width: 200px; padding: 6px 11px; }
 }

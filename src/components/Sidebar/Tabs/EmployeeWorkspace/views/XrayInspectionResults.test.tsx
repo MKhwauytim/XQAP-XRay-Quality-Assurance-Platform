@@ -321,11 +321,11 @@ describe("XrayInspectionResults background data-refresh vs. an open quality-note
 
 // ── THE GAP fix: ad-hoc-imported assignments must be visible in results too ──
 // (see src/data/adhocImport/adhocImportEmployeeView.ts).
-describe("XrayInspectionResults — ad-hoc import visibility (THE GAP fix)", () => {
-  it("shows an ad-hoc-imported assignment tagged with the ad-hoc badge, alongside the month's real results", async () => {
-    writeSession({ role: "employee", username: "jalgahamdi", loginAt: new Date().toISOString() });
-    writeUserManagementState(createEmptyUserManagementState(), false);
+const ADHOC_FOLDER = "adhoc-adh-1";
+const ADHOC_XRAY_ID = "ADHOC-adh-1-XR-1";
 
+/** One real (unanswered) month row plus one ad-hoc row assigned to jalgahamdi. */
+async function seedAdhocAssignmentForResults(): Promise<ReturnType<typeof createMemoryDirectory>> {
     const root = createMemoryDirectory("root");
     await saveSampleMaster(root, MONTH, makeSample([makeRow("IMG-ACTIVE")]));
     const assignResult = await appendDistributionEvents(root, MONTH, [
@@ -371,12 +371,48 @@ describe("XrayInspectionResults — ad-hoc import visibility (THE GAP fix)", () 
     };
     await ensureAdhocSampleMaster(root, record);
     const assigned = await assignAdhocRowsToEmployee(root, record, ["s1:2"], "jalgahamdi", "admin");
-    expect(assigned.ok).toBe(true);
+    if (!assigned.ok) throw new Error("seed ad-hoc assign failed");
+    return root;
+}
+
+describe("XrayInspectionResults — ad-hoc import visibility (THE GAP fix)", () => {
+  it("shows an ad-hoc-imported assignment tagged with the ad-hoc badge, alongside the month's real results", async () => {
+    writeSession({ role: "employee", username: "jalgahamdi", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = await seedAdhocAssignmentForResults();
 
     render(<XrayInspectionResults directoryHandle={root} />);
 
     await waitFor(() => expect(screen.getAllByText("IMG-ACTIVE").length).toBeGreaterThan(0));
     await waitFor(() => expect(screen.getAllByText("ADHOC-adh-1-XR-1").length).toBeGreaterThan(0));
     expect(screen.getAllByText("استيراد يدوي")).toHaveLength(1);
+  });
+
+  it("reads an ad-hoc row's answer from the ad-hoc store, so a submitted one is not shown as pending", async () => {
+    // The answer for an ad-hoc row is written to `2-samples/adhoc-{importId}/`
+    // (XrayReferrals routes it through folderForRow). Reading answers for the
+    // selected month alone found nothing, so submitted ad-hoc work rendered
+    // here as still pending — with no submitted-at and a disabled quality-note
+    // editor — and under-counted every completion/KPI total built off this view.
+    writeSession({ role: "employee", username: "jalgahamdi", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = await seedAdhocAssignmentForResults();
+    const answered = await upsertItemAnswer(root, ADHOC_FOLDER, "jalgahamdi", makeAnswer({
+      xrayImageId: ADHOC_XRAY_ID,
+      answeredBy: "jalgahamdi",
+      status: "submitted",
+      submittedAt: new Date().toISOString(),
+    }));
+    if (!answered.ok) throw new Error(`seed ad-hoc answer failed: ${answered.error}`);
+
+    render(<XrayInspectionResults directoryHandle={root} />);
+
+    await waitFor(() => expect(screen.getAllByText(ADHOC_XRAY_ID).length).toBeGreaterThan(0));
+    // The real month's row is unanswered, so exactly one row may read "completed".
+    await waitFor(() =>
+      expect(screen.getAllByText(DEFAULT_LABELS.status_completed)).toHaveLength(1)
+    );
   });
 });

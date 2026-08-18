@@ -14,7 +14,7 @@
 // same fixture — both must agree, and both must count 2 distinct matches,
 // not 1.
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, waitFor } from "@testing-library/react";
 import { buildPopulationReportData } from "./reportDataBuilder";
 import DataAccuracyReport from "../components/DataAccuracyReport";
 import type { NormalizedRiskRow } from "../riskData/riskDataTypes";
@@ -115,7 +115,7 @@ function kpiValue(container: HTMLElement, label: string): string | null {
 }
 
 describe("buildPopulationReportData — BI/risk comparison join key (B12 task 2)", () => {
-  it("counts a duplicate xrayImageId across two different ports as two distinct matches, matching the live DataAccuracyReport", () => {
+  it("counts a duplicate xrayImageId across two different ports as two distinct matches, matching the live DataAccuracyReport", async () => {
     // "X-100" appears twice on both sides, once per port — under the old
     // bare-ID key this pair collapsed into one Map entry per side.
     const riskRows: NormalizedRiskRow[] = [
@@ -160,7 +160,10 @@ describe("buildPopulationReportData — BI/risk comparison join key (B12 task 2)
 
     const { container } = render(<DataAccuracyReport riskRows={riskRows} biRows={biRows} />);
 
-    expect(kpiValue(container, "معرّفات المقارنة")).toBe("2");
+    // With no hoisted `result` prop, DataAccuracyReport runs its own async
+    // (chunked) comparison — wait for it to land before asserting (Fix,
+    // 2026-08-18: compareAccuracy no longer runs synchronously in render).
+    await waitFor(() => expect(kpiValue(container, "معرّفات المقارنة")).toBe("2"));
     expect(kpiValue(container, "فقط في المخاطر")).toBe("1"); // X-200
     expect(kpiValue(container, "سجلات بها اختلاف")).toBe("0");
 

@@ -67,6 +67,13 @@ export type ZeroXrayIdDiagnostic = {
 
 export type BiSheetSummary = {
   sheetName: string;
+  /**
+   * Name of the workbook/CSV this sheet came from. Populated by
+   * `mergeBiWorkbookResults` when several BI files are appended into one
+   * population, so two files that both contain a sheet called "بحري وارد"
+   * stay distinguishable in the UI. Undefined for a single-file result.
+   */
+  sourceFileName?: string;
   source: string;
   originalRowCount: number;
   normalizedRowCount: number;
@@ -84,3 +91,25 @@ export type BiWorkbookResult = {
 };
 
 export type BiSourceRow = Record<string, unknown>;
+
+/**
+ * One attached BI file in the Phase-1 upload list (design handoff 2b).
+ *
+ * Multiple BI files are DIFFERENT populations that share the same sheet
+ * patterns and column mappings; they are appended into one BI population, not
+ * deduplicated. The "N من 10" pill and the accepted-rows total are derived
+ * from this array on render — never stored.
+ */
+export type BiUploadEntry = {
+  id: string;
+  file: File;
+  /** Display sub-line: derived from the file name until parsed, then the sheets it contributed. */
+  sheetName: string;
+  sizeBytes: number;
+  acceptedRows: number | null;
+  state: "parsing" | "ready" | "error";
+  error?: string;
+};
+
+/** Hard cap on attached BI files (design handoff 2b). */
+export const MAX_BI_UPLOADS = 10;

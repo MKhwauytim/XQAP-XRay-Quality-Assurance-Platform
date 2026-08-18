@@ -22,12 +22,20 @@ export function aggregate(agg: Aggregation, values: unknown[], grandTotal = 0): 
       return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
     }
     case "min": {
+      // Reduced in a loop, not `Math.min(...nums)`: spreading blows the argument/stack
+      // limit past roughly 125k elements, and a month population can be far larger.
       const nums = toNumbers(values);
-      return nums.length ? Math.min(...nums) : 0;
+      if (nums.length === 0) return 0;
+      let lowest = nums[0]!;
+      for (const n of nums) if (n < lowest) lowest = n;
+      return lowest;
     }
     case "max": {
       const nums = toNumbers(values);
-      return nums.length ? Math.max(...nums) : 0;
+      if (nums.length === 0) return 0;
+      let highest = nums[0]!;
+      for (const n of nums) if (n > highest) highest = n;
+      return highest;
     }
     case "percentOfTotal": {
       const sum = toNumbers(values).reduce((a, b) => a + b, 0);

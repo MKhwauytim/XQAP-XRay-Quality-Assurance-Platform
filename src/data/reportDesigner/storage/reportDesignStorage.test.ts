@@ -32,6 +32,20 @@ describe("reportDesignStorage", () => {
     expect(index.designs.map((d) => d.reportId)).not.toContain(doc.reportId);
   });
 
+  it("deletes a design for good — no .bak/.tmp shadow left for safeReadJson to resurrect", async () => {
+    const dir = createMemoryDirectory("root");
+    const doc = createEmptyDocument("للحذف نهائيًا", "admin");
+    // Two saves so safeWriteJson has snapshotted the first revision into `{id}.json.bak`.
+    await saveDesign(dir, doc);
+    await saveDesign(dir, doc);
+
+    expect((await deleteDesign(dir, doc.reportId)).ok).toBe(true);
+
+    // safeReadJson probes `{file}`, `{file}.bak` and `{file}.tmp` on a miss, so a
+    // leftover snapshot would hand back a stale revision of a deleted design.
+    expect(await loadDesign(dir, doc.reportId)).toBeNull();
+  });
+
   it("preserves both index entries on concurrent saves (cross-machine CAS)", async () => {
     const dir = createMemoryDirectory("root");
     // Two authors on two PCs save different designs at the same instant. The

@@ -183,4 +183,61 @@ describe("population exporter characterization", () => {
     expect(Object.keys(prepared)).toEqual(["PORT", "ID", "حقل إضافي"]);
     expect(prepared).toEqual({ PORT: "المنفذ", ID: "XR-1", "حقل إضافي": "قيمة" });
   });
+
+  it("uses configured Arabic headers, not the raw English Excel headers of mapped columns", () => {
+    // Owner-reported bug: the source Excel carries English headers
+    // (XRAY_SCAN_ID, STAGE, ...). Those raw headers are alias-mapped onto the
+    // system fieldKeys, so once a column is configured with an Arabic export
+    // name, its raw English twin must NOT re-appear as an extra column.
+    const rawEnglishRow = {
+      ...preparedRow,
+      rawRow: {
+        "XRAY_SCAN_ID": "XR-1",
+        "STAGE": "FIRST_STAGE",
+        "PORT_CD": "P1",
+        "EXTRA_COL": "kept" // genuinely unmapped → stays, by design
+      }
+    } satisfies PreparedPopulationRow;
+    const result = processingResult();
+    result.preparedRows = [rawEnglishRow];
+
+    const columns: ExportColumnSetting[] = [
+      { fieldKey: "xrayImageId", exportHeader: "معرف الأشعة المخصص", isEnabled: true, order: 1 },
+      { fieldKey: "stage", exportHeader: "المستوى المخصص", isEnabled: true, order: 2 },
+      { fieldKey: "portCode", exportHeader: "رمز المنفذ المخصص", isEnabled: true, order: 3 }
+    ];
+    exportPopulationProcessingResult(result, riskWorkbook(), null, columns);
+
+    const prepared = xlsx.jsonToSheet.mock.calls[2]![0][0]!;
+    expect(prepared).toEqual({
+      "معرف الأشعة المخصص": "XR-1",
+      "المستوى المخصص": "FIRST_STAGE",
+      "رمز المنفذ المخصص": "P1",
+      "EXTRA_COL": "kept"
+    });
+    expect(Object.keys(prepared)).not.toContain("XRAY_SCAN_ID");
+    expect(Object.keys(prepared)).not.toContain("STAGE");
+    expect(Object.keys(prepared)).not.toContain("PORT_CD");
+  });
+
+  it("does not let an Arabic raw header overwrite the configured cell that shares its name", () => {
+    // Arabic-header workbooks: the raw key can be exactly the configured
+    // exportHeader ("المستوى"). The raw value must not clobber the configured
+    // column, and no duplicate column may appear.
+    const rawArabicRow = {
+      ...preparedRow,
+      stage: "المستوى الأول",
+      rawRow: { "المستوى": "raw-clobber", "حقل إضافي": "قيمة" }
+    } satisfies PreparedPopulationRow;
+    const result = processingResult();
+    result.preparedRows = [rawArabicRow];
+
+    const columns: ExportColumnSetting[] = [
+      { fieldKey: "stage", exportHeader: "المستوى", isEnabled: true, order: 1 }
+    ];
+    exportPopulationProcessingResult(result, riskWorkbook(), null, columns);
+
+    const prepared = xlsx.jsonToSheet.mock.calls[2]![0][0]!;
+    expect(prepared).toEqual({ "المستوى": "المستوى الأول", "حقل إضافي": "قيمة" });
+  });
 });

@@ -1,4 +1,5 @@
 import { Check } from "lucide-react";
+import { getLabels } from "../../data/labels/labelsStore";
 import type { TemplatePhase } from "../../data/templates/templateTypes";
 
 type Props = {
@@ -17,7 +18,7 @@ export function PhaseStepper({
   onSelect,
 }: Props) {
   return (
-    <div className="ip-stepper" dir="rtl" role="tablist" aria-label="مراحل النموذج">
+    <div className="ip-stepper" dir="rtl" role="tablist" aria-label={getLabels().ip_stepper_aria}>
       {phases.map((phase, i) => {
         const isActive = phase.phaseId === activePhaseId;
         const isDone   = completedPhaseIds.has(phase.phaseId);

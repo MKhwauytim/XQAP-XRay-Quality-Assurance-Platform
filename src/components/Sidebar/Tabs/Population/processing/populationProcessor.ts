@@ -231,9 +231,17 @@ const ENGLISH_MONTHS: Record<string, number> = {
 function pad2(n: number): string { return String(n).padStart(2, "0"); }
 
 function excelSerialToIso(serial: number): string | null {
-  // Excel epoch: Dec 30, 1899. JS epoch: Jan 1, 1970. Diff = 25569 days.
-  // Excel incorrectly treats 1900 as a leap year, so subtract 1 for dates after Feb 28 1900.
-  const adjusted = serial > 59 ? serial - 1 : serial;
+  // Excel day 0 is Dec 30, 1899 and 25569 is the Excel serial of Jan 1, 1970.
+  // That constant ALREADY absorbs Excel's phantom 29-Feb-1900, so for every
+  // serial past the phantom day `(serial - 25569)` is the whole conversion —
+  // applying a second leap-year correction here shifted every imported date one
+  // day early (fixed 2026-08-18; verified against the vendored SheetJS's own
+  // `XLSX.SSF.parse_date_code`, which is what actually read the cell).
+  // The serials at or below the phantom day (1..59 = 1900-01-01..1900-02-28) are
+  // the ones needing an adjustment, and it is +1, not -1. `normalizeDate` only
+  // routes serials in 25000..60000 here so that branch is unreachable today; it
+  // is kept correct rather than left as a trap if the range guard ever widens.
+  const adjusted = serial > 59 ? serial : serial + 1;
   const ms = (adjusted - 25569) * 86400000;
   const d = new Date(ms);
   if (isNaN(d.getTime())) return null;

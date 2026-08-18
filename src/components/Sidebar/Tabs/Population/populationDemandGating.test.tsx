@@ -265,7 +265,7 @@ describe("Population wizard — demand-gated load scope (Phase A steps 3c/3d)", 
 });
 
 function populationChipText(): string | null {
-  const chip = Array.from(document.querySelectorAll(".status-chip")).find((el) =>
+  const chip = Array.from(document.querySelectorAll(".pop-readiness-fact")).find((el) =>
     el.textContent?.includes("المجتمع")
   );
   return chip?.textContent ?? null;
@@ -346,7 +346,8 @@ describe("Population wizard — Phase 3 -> Phase 4 transition (Task 5: approval 
     // moving on -- otherwise the unrelated "!sampleDrawResult" data-readiness
     // gate (kept intentionally) would be the thing blocking phase 4, not what
     // this test means to exercise.
-    await screen.findByText("نتائج سحب عينة المستويات المشتركة");
+    // 2026-08 handoff §5: the draw-result block is now the "نتيجة السحب" card.
+    await screen.findByText("نتيجة السحب");
 
     // Click "next phase" -- this used to hit the four-eyes approval gate.
     const nextButton = screen.getByRole("button", { name: "← التالي" });

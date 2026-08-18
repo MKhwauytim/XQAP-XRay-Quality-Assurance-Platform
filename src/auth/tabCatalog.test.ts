@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   MANAGED_TABS,
+  navGroupFor,
   roleCeilingFor,
   SUB_TAB_ROLE_CEILINGS,
   TAB_CATALOG,
+  TAB_NAV_GROUP_ORDER,
   TAB_ROLE_CEILINGS,
   tabAllowedRoles,
 } from "./tabCatalog";
@@ -26,6 +28,28 @@ describe("tab catalog", () => {
     for (const entry of topLevel) {
       expect(TAB_ROLE_CEILINGS[entry.id]).toEqual(tabAllowedRoles(entry.id));
     }
+  });
+
+  it("gives every top-level tab an explicit nav group, and no sub-tab one", () => {
+    // navGroupFor() falls back to "system" so an ungrouped tab still renders
+    // rather than vanishing from the rail — this asserts nobody relies on that
+    // fallback, which is what makes it a safety net rather than an excuse.
+    for (const entry of TAB_CATALOG) {
+      if (entry.parentId) {
+        expect(entry.group).toBeUndefined();
+      } else {
+        expect(TAB_NAV_GROUP_ORDER).toContain(entry.group);
+        expect(navGroupFor(entry.id)).toBe(entry.group);
+      }
+    }
+  });
+
+  it("puts every nav group to use and keeps the workflow stages first", () => {
+    const used = new Set(
+      TAB_CATALOG.filter((entry) => !entry.parentId).map((entry) => entry.group),
+    );
+    expect([...TAB_NAV_GROUP_ORDER].every((group) => used.has(group))).toBe(true);
+    expect(TAB_NAV_GROUP_ORDER[0]).toBe("workflow");
   });
 
   it("fails closed for unknown tab IDs", () => {

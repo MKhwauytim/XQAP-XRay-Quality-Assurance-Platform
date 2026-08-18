@@ -124,7 +124,25 @@ async function mutateNotifications(
               await safeWriteJson(dir, NOTIFICATIONS_FILE, updated);
               const verify = await readNotificationsFile(directoryHandle);
               if (verify.revision === nextRevision && verify._writeToken === writeToken) {
-                return { done: true, result: { ok: true as const } };
+                return {
+                  done: true,
+                  result: { ok: true as const },
+                  // Delayed re-read (same contract actionLog.appendWorkspaceAction
+                  // and userSync.syncUserManagementToDisk use). The read-back above
+                  // cannot see a machine that read the same base state and commits
+                  // AFTER us; because this is a whole-file write, that clobber drops
+                  // this acceptance entirely while `acceptNotification` still reports
+                  // success — the user's banner hides and the roster shows them as
+                  // never having acknowledged it. A `false` here retries the attempt,
+                  // which re-folds the winner's changes in.
+                  verify: async () => {
+                    const recheck = await readNotificationsFile(directoryHandle);
+                    return (
+                      recheck.revision === nextRevision &&
+                      recheck._writeToken === writeToken
+                    );
+                  },
+                };
               }
               return { done: false };
             },

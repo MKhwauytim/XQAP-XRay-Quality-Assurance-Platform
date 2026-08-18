@@ -502,3 +502,98 @@ test("P4: SAMPLING_ALGORITHM_VERSION is unchanged by the unmapped-stage diagnost
   expect(SAMPLING_ALGORITHM_VERSION).toBe("1.1");
 });
 
+
+// Owner scenario (2026-08-18), asserted at real scale so it cannot silently
+// regress: المستوى الثاني targets 2,000 rows with a 25% CertScan quota (=500),
+// but only 200 CertScan rows exist in the whole stage. The draw must take all
+// 200 and fill the remaining 300 from NonCertscan so the stage still lands on
+// its 2,000 target — never return a short 1,700.
+//
+// This is the `certScanStrategy: "preferred"` branch in stagePortDraw, which is
+// the default for all four stages (see populationConfig.ts). Under "mandatory"
+// the stage deliberately under-fills instead — the second case below pins that
+// difference so the two strategies can never quietly converge.
+test("drawSample backfills a CertScan shortfall from NonCertscan and still hits the stage target (owner scenario: 2,000 target, 25% CertScan, only 200 available)", () => {
+  // 200 Certscan + 7,800 NonCertscan across two ports = an 8,000-row level 2.
+  const rows = [
+    ...makeRows("بري", 120, 4680).map((r) => ({ ...r, stage: "SECOND_STAGE" })),
+    ...makeRows("بحري", 80, 3120, "s").map((r) => ({ ...r, stage: "SECOND_STAGE" })),
+  ];
+  expect(rows.filter((r) => r.certScanStatus === "Certscan")).toHaveLength(200);
+  expect(rows).toHaveLength(8000);
+
+  const rule: StageSamplingRule = {
+    stageKey: "second",
+    method: "exact",
+    value: 2000,
+    isLocked: false,
+    minRequiredCount: 0,
+    certScanPercentage: 25,
+    certScanExactCount: 0,
+    certScanMethod: "percentage",
+    certScanStrategy: "preferred",
+  };
+
+  const result = drawSample(rows, { rngSeed: "owner-backfill-seed", samplingRules: [rule] }, "user");
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+
+  // The target is met in full — this is the assertion the owner asked for.
+  expect(result.data.totalActual).toBe(2000);
+  // CertScan itself is never invented: every one of the 200 that exist is taken...
+  expect(result.data.certScanActual).toBe(200);
+  // ...and the 300-row gap to the 500 quota is filled from NonCertscan.
+  expect(result.data.nonCertScanActual).toBe(1800);
+  expect(result.data.certScanActual + result.data.nonCertScanActual).toBe(2000);
+
+  // Every drawn row is a real, distinct population row — no duplicates.
+  expect(new Set(result.data.rows.map((r) => r.xrayImageId)).size).toBe(2000);
+
+  // The gap is still reported rather than hidden by the successful backfill.
+  const shortfalls = result.data.certScanShortfalls ?? [];
+  const requested = shortfalls.reduce((sum, entry) => sum + entry.requestedCertScanQuota, 0);
+  const available = shortfalls.reduce((sum, entry) => sum + entry.availableCertScanRows, 0);
+  expect(requested).toBe(500);
+  expect(available).toBe(200);
+});
+
+// Companion to the scenario above, pinning a behaviour that surprised us while
+// verifying it: `certScanStrategy: "mandatory"` does NOT change the stage total.
+// Its per-port branch in stagePortDraw does withhold the backfill (بري 120+900,
+// بحري 80+600 = 1,700), but the stage-level spillover pass then redistributes
+// the 300-row gap across the ports' remaining rows and the stage lands on 2,000
+// anyway — with the extra rows necessarily NonCertscan, since the CertScan pool
+// is already exhausted. So today the two strategies differ only in WHICH
+// NonCertscan rows get drawn, never in how many.
+//
+// This is pre-existing behaviour and is left as-is deliberately: the draw is
+// deterministic by contract, every shipped stage defaults to "preferred"
+// (populationConfig.ts), and "preferred" is what the owner's workflow wants.
+// The test exists so that if anyone later intends "mandatory" to really
+// under-fill, they find out here that spillover is what they have to change.
+test("certScanStrategy `mandatory` still reaches the stage target, because spillover refills the gap", () => {
+  const rows = [
+    ...makeRows("بري", 120, 4680).map((r) => ({ ...r, stage: "SECOND_STAGE" })),
+    ...makeRows("بحري", 80, 3120, "s").map((r) => ({ ...r, stage: "SECOND_STAGE" })),
+  ];
+
+  const rule: StageSamplingRule = {
+    stageKey: "second",
+    method: "exact",
+    value: 2000,
+    isLocked: false,
+    minRequiredCount: 0,
+    certScanPercentage: 25,
+    certScanExactCount: 0,
+    certScanMethod: "percentage",
+    certScanStrategy: "mandatory",
+  };
+
+  const result = drawSample(rows, { rngSeed: "owner-backfill-seed", samplingRules: [rule] }, "user");
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+
+  expect(result.data.certScanActual).toBe(200);
+  expect(result.data.nonCertScanActual).toBe(1800);
+  expect(result.data.totalActual).toBe(2000);
+});
