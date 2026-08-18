@@ -248,4 +248,51 @@ describe("a share that refuses .ndjson entirely", () => {
     // silently paying per-event write costs forever.
     expect(fallbackLogEntries().length).toBeGreaterThan(0);
   }, 60_000);
+
+  it("diagnoses the unusable segment path ONCE per save, not once per chunk", async () => {
+    // The causes this degrades for are properties of the NAME (a path the share
+    // cannot hold, an extension a scanner strips), so they fail identically for
+    // every chunk. Re-deriving that per chunk costs the full write ladder plus
+    // the classification plus a second ladder on the re-resolved handle each
+    // time — minutes of pure sleeping on a multi-chunk month to reach the same
+    // answer repeatedly. This pins the decision to once per save.
+    const root = createMemoryDirectory("root", {
+      faults: [
+        {
+          operation: "createWritable",
+          nameSuffix: ".ndjson",
+          errorName: "NotFoundError",
+          times: Number.POSITIVE_INFINITY,
+        },
+      ],
+    });
+
+    // Enough events to span several chunks, so "once per save" and "once per
+    // chunk" are distinguishable at all.
+    const events = assignEvents(MAX_OPEN_SEGMENT_LINES * 3, "MULTI");
+    const chunkCount = chunkEventsForSegmentAppends(events).length;
+    expect(chunkCount).toBeGreaterThan(1);
+
+    let reopenCalls = 0;
+    await expect(
+      appendDistributionEventsDurably(root, events, {
+        writer: writer(),
+        reopenDir: async () => {
+          reopenCalls += 1;
+          return root;
+        },
+      })
+    ).resolves.toBe("verified");
+
+    // Only the FIRST chunk pays the diagnosis. `reopenDir` is the precise
+    // witness: it runs once per segment-path diagnosis, so once-per-chunk
+    // behaviour would make this equal chunkCount rather than 1.
+    expect(reopenCalls).toBe(1);
+    expect(reopenCalls).toBeLessThan(chunkCount);
+
+    // ...and the events are still all durable, which is the point of degrading.
+    clearSimulatedFaults(root);
+    const perEvent = await loadImmutableDistributionEvents(root);
+    expect(perEvent).toHaveLength(events.length);
+  }, 60_000);
 });
