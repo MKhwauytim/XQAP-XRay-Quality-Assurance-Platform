@@ -18,6 +18,13 @@ describe("toCsvString", () => {
     expect(result).toContain('"hello, world"');
   });
 
+  it("wraps values containing a bare carriage return in double quotes", () => {
+    // Excel/Power BI treat a lone CR as a record terminator: left unquoted it splits
+    // the row in two and shifts every following column.
+    const result = toCsvString(["a", "b"], [{ a: "line1\rline2", b: "x" }]);
+    expect(result).toContain('"line1\rline2",x');
+  });
+
   it("escapes double quotes by doubling them", () => {
     const result = toCsvString(["v"], [{ v: 'say "hi"' }]);
     expect(result).toContain('"say ""hi"""');
@@ -64,7 +71,9 @@ describe("toCsvString", () => {
   it("neutralizes strings starting with a tab or carriage return", () => {
     const lines = toCsvString(["v"], [{ v: "\t=danger" }, { v: "\r=danger" }]).split("\n");
     expect(lines[1].startsWith("'\t")).toBe(true);
-    expect(lines[2].startsWith("'\r") || lines[1].includes("'\r")).toBe(true);
+    // The CR cell is neutralized AND quoted — an unquoted bare CR would terminate the
+    // record for Excel/Power BI and split the row.
+    expect(lines[2]).toBe('"\'\r=danger"');
   });
 
   it("does NOT prefix a pure negative number", () => {

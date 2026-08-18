@@ -207,6 +207,16 @@ export async function deleteDesign(
 
       if (dir.removeEntry) {
         await dir.removeEntry(`${reportId}.json`);
+        // safeWriteJson keeps `{file}.bak` (and transiently `{file}.tmp`) beside the
+        // live file, and safeReadJson probes both on a miss — leaving them behind
+        // would resurrect the deleted design at its previous revision.
+        for (const shadow of [`${reportId}.json.bak`, `${reportId}.json.tmp`]) {
+          try {
+            await dir.removeEntry(shadow);
+          } catch {
+            // Best effort: absent shadow files are the normal case.
+          }
+        }
       } else {
         await safeWriteJson(dir, `${reportId}.json`, {
           deleted: true,

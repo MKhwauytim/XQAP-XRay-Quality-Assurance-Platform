@@ -14,7 +14,9 @@ function escapeCell(value: unknown): string {
   if (FORMULA_INJECTION_START.test(str)) {
     str = `'${str}`;
   }
-  if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+  // A bare CR terminates the record for Excel/Power BI just as LF does, so it must be
+  // quoted too or the cell splits the row and shifts every column after it.
+  if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
     return `"${str.replace(/"/g, '""')}"`;
   }
   return str;

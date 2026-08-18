@@ -142,19 +142,28 @@ export function outcomeDonutSvg(data: DonutSlice[], emptyNote: string): string {
   const rInner = rad - stroke / 2;
   let angle = -Math.PI / 2;
   let segments = "";
-  positive.forEach((slice, index) => {
-    const sweep = (slice.value / total) * Math.PI * 2;
-    const start = angle + (positive.length > 1 ? 0.015 : 0);
-    const end = angle + sweep - (positive.length > 1 ? 0.015 : 0);
-    angle += sweep;
-    const large = end - start > Math.PI ? 1 : 0;
-    const point = (radius: number, a: number) =>
-      `${r(cx + radius * Math.cos(a))} ${r(cy + radius * Math.sin(a))}`;
-    segments +=
-      `<path d="M ${point(rOuter, start)} A ${r(rOuter)} ${r(rOuter)} 0 ${large} 1 ${point(rOuter, end)} ` +
-      `L ${point(rInner, end)} A ${r(rInner)} ${r(rInner)} 0 ${large} 0 ${point(rInner, start)} Z" ` +
-      `fill="${OUTCOME_COLORS[index % OUTCOME_COLORS.length]}"/>`;
-  });
+  if (positive.length === 1) {
+    // A lone slice sweeps the full 2π, so its arc would start and end on the same point
+    // — SVG omits an arc whose endpoints coincide, collapsing the ring to nothing. Draw
+    // the same annulus as a stroked circle instead, which is always visible.
+    segments =
+      `<circle cx="${r(cx)}" cy="${r(cy)}" r="${r(rad)}" fill="none" ` +
+      `stroke="${OUTCOME_COLORS[0]}" stroke-width="${r(stroke)}"/>`;
+  } else {
+    positive.forEach((slice, index) => {
+      const sweep = (slice.value / total) * Math.PI * 2;
+      const start = angle + 0.015;
+      const end = angle + sweep - 0.015;
+      angle += sweep;
+      const large = end - start > Math.PI ? 1 : 0;
+      const point = (radius: number, a: number) =>
+        `${r(cx + radius * Math.cos(a))} ${r(cy + radius * Math.sin(a))}`;
+      segments +=
+        `<path d="M ${point(rOuter, start)} A ${r(rOuter)} ${r(rOuter)} 0 ${large} 1 ${point(rOuter, end)} ` +
+        `L ${point(rInner, end)} A ${r(rInner)} ${r(rInner)} 0 ${large} 0 ${point(rInner, start)} Z" ` +
+        `fill="${OUTCOME_COLORS[index % OUTCOME_COLORS.length]}"/>`;
+    });
+  }
 
   // Legend anchored to the right edge (RTL: swatch outermost, label growing left).
   let legend = "";
