@@ -72,44 +72,48 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("Population wizard — rendered phase stepper", () => {
-  it("happy: renders the four-phase stepper with phase 1 (import) active", () => {
+// 2026-08 handoff §2: the standalone `.phase-stepper` became the step row of
+// the readiness rail (`.pop-readiness-steps` / `.pop-readiness-step`). The
+// gating rule is unchanged — what changed is that a locked step is now a real
+// `<button disabled>` rather than a div with no `role`, so it stays announced
+// to assistive tech while remaining unreachable by keyboard or pointer.
+describe("Population wizard — rendered phase steps", () => {
+  it("happy: renders the four phase steps with phase 1 (import) active", () => {
     const { container } = render(<PopulationTab />);
-    const stepper = container.querySelector(".phase-stepper");
-    expect(stepper).not.toBeNull();
+    const steps = container.querySelector(".pop-readiness-steps");
+    expect(steps).not.toBeNull();
 
-    const items = stepper!.querySelectorAll(".stepper-item");
+    const items = steps!.querySelectorAll(".pop-readiness-step");
     expect(items).toHaveLength(4);
 
     // Phase 1 (رفع البيانات = import) is the active step.
-    expect(items[0].className).toContain("active");
+    expect(items[0].className).toContain("is-active");
     expect(items[0].getAttribute("aria-current")).toBe("step");
 
     // All four phase titles are present in order.
     expect(screen.getAllByText("رفع البيانات").length).toBeGreaterThan(0);
-    expect(screen.getByText("تقرير البيانات والمعالجة")).toBeInTheDocument();
-    expect(screen.getByText("اختيار العينة")).toBeInTheDocument();
-    expect(screen.getByText("توزيع العينة")).toBeInTheDocument();
+    expect(screen.getAllByText("تقرير البيانات والمعالجة").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("اختيار العينة").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("توزيع العينة").length).toBeGreaterThan(0);
   });
 
   it("failure/gating: downstream phases are locked and cannot be skipped to", () => {
     const { container } = render(<PopulationTab />);
-    const stepper = container.querySelector(".phase-stepper")!;
-    const items = stepper.querySelectorAll(".stepper-item");
+    const steps = container.querySelector(".pop-readiness-steps")!;
+    const items = steps.querySelectorAll(".pop-readiness-step");
 
-    // Phases 2–4 are locked (not rendered as buttons → not keyboard/click navigable).
+    // Phases 2–4 are locked → really disabled, so neither click nor keyboard reaches them.
     for (const idx of [1, 2, 3]) {
-      expect(items[idx].className).toContain("locked");
-      expect(items[idx].getAttribute("role")).toBeNull();
+      expect(items[idx].className).toContain("is-locked");
+      expect(items[idx]).toBeDisabled();
     }
 
     // Clicking the locked "اختيار العينة" (sampling) step must NOT advance the wizard.
     fireEvent.click(items[2]);
-    const activeAfter = container.querySelectorAll(".phase-stepper .stepper-item.active");
+    const activeAfter = container.querySelectorAll(".pop-readiness-step.is-active");
     expect(activeAfter).toHaveLength(1);
-    expect(activeAfter[0].className).toContain("active");
     // Still phase 1 (the first item), i.e. import remains the active phase.
-    expect(container.querySelectorAll(".phase-stepper .stepper-item")[0]).toBe(activeAfter[0]);
+    expect(container.querySelectorAll(".pop-readiness-step")[0]).toBe(activeAfter[0]);
   });
 });
 

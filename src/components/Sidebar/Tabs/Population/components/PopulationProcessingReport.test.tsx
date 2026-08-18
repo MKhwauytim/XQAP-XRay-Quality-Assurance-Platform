@@ -3,6 +3,12 @@
 // "تقرير المعالجة" button (PhaseTwoReportAndProcessing.tsx) — the per-row detail
 // for rows excluded during processing must stay reachable from the Phase 2 UI
 // itself, not only via the (still-present) full Excel export.
+//
+// 3b design handoff (2026-08-18): this component no longer renders the nine
+// summary cards / three detail cards — those moved into the verdict row's
+// "نتيجة المعالجة" card in PhaseTwoReportAndProcessing.tsx (covered in that
+// file's test). What is left here is the BI-fill panel, the exclusions panel,
+// and the final-population preview, which is now COLLAPSED on mount.
 
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -54,6 +60,11 @@ function makePreviewRows(count: number): PopulationReportPreviewRow[] {
   }));
 }
 
+/** Opens the "معاينة المجتمع النهائي" disclosure, which is collapsed on mount. */
+function openPreview() {
+  fireEvent.click(screen.getByRole("button", { name: /معاينة المجتمع النهائي/ }));
+}
+
 afterEach(cleanup);
 
 describe("PopulationProcessingReport — dropped-rows drill-down (W8)", () => {
@@ -66,7 +77,7 @@ describe("PopulationProcessingReport — dropped-rows drill-down (W8)", () => {
       />,
     );
 
-    expect(screen.getByText("تفاصيل الصفوف المستبعدة")).toBeInTheDocument();
+    expect(screen.getByText("الصفوف المستبعدة")).toBeInTheDocument();
     expect(screen.queryByText("XR-1")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /نتائج مستوى غير صالحة/ }));
@@ -76,15 +87,78 @@ describe("PopulationProcessingReport — dropped-rows drill-down (W8)", () => {
 
   it("failure: renders no drill-down section at all when nothing was excluded", () => {
     render(<PopulationProcessingReport summary={makeSummary()} previewRows={[]} />);
-    expect(screen.queryByText("تفاصيل الصفوف المستبعدة")).not.toBeInTheDocument();
+    expect(screen.queryByText("الصفوف المستبعدة")).not.toBeInTheDocument();
+  });
+
+  it("3b: the invalid-level cause box is always visible, not behind a disclosure", () => {
+    render(
+      <PopulationProcessingReport
+        summary={makeSummary()}
+        previewRows={[]}
+        invalidResultRows={[makeRemovedRow({ reason: "Invalid level result [L2]: مفقود" })]}
+      />,
+    );
+
+    expect(screen.getByText("أكثر أسباب استبعاد نتائج المستوى")).toBeInTheDocument();
+    expect(screen.getByText("المستوى الثاني فقط (غير صالح/غير موجود)")).toBeInTheDocument();
   });
 });
 
-describe("PopulationProcessingReport — final-population preview (2026-08-12)", () => {
-  it("happy: shows only 10 example rows per page even when more rows are available, and pagination advances to the next 10", () => {
+describe("PopulationProcessingReport — BI fill panel (3b)", () => {
+  it("renders one row per BI-fillable column with its fill percentage", () => {
+    const summary: ProcessingSummary = {
+      ...makeSummary(),
+      biProvided: true,
+      totalBiFilledFields: 12,
+      biFieldFillSummary: [
+        { fieldName: "نتيجة التفتيش اليدوي", riskEmptyBefore: 20, filledFromBi: 12, stillEmptyAfter: 8, fillPercentage: 60 },
+      ],
+    };
+    render(<PopulationProcessingReport summary={summary} previewRows={[]} />);
+
+    expect(screen.getByText("تعبئة الخانات من BI")).toBeInTheDocument();
+    expect(screen.getByText("نتيجة التفتيش اليدوي")).toBeInTheDocument();
+    expect(screen.getByText("12 خانة معبّأة")).toBeInTheDocument();
+  });
+
+  it("shows an empty note when the run has no BI-fillable columns", () => {
+    render(<PopulationProcessingReport summary={makeSummary()} previewRows={[]} />);
+    expect(screen.getByText("لا توجد أعمدة قابلة للتعبئة من BI في هذا التشغيل.")).toBeInTheDocument();
+  });
+});
+
+describe("PopulationProcessingReport — final-population preview (2026-08-12 / 3b)", () => {
+  it("3b: the preview is COLLAPSED on mount — the header and its row-count summary show, the table does not", () => {
     render(<PopulationProcessingReport summary={makeSummary()} previewRows={makePreviewRows(25)} />);
 
-    expect(screen.getByText("معاينة المجتمع النهائي")).toBeInTheDocument();
+    const toggle = screen.getByRole("button", { name: /معاينة المجتمع النهائي/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText("7 صف · CertScan 3 · NonCertScan 4")).toBeInTheDocument();
+    expect(screen.getByText("اضغط للعرض")).toBeInTheDocument();
+    // No table rows until the user opens it.
+    expect(screen.queryByText("XR-1")).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("XR-1")).toBeInTheDocument();
+  });
+
+  it("3b: the disclosure remembers nothing across mounts — a remount starts collapsed again", () => {
+    const { unmount } = render(
+      <PopulationProcessingReport summary={makeSummary()} previewRows={makePreviewRows(3)} />,
+    );
+    openPreview();
+    expect(screen.getByText("XR-1")).toBeInTheDocument();
+    unmount();
+
+    render(<PopulationProcessingReport summary={makeSummary()} previewRows={makePreviewRows(3)} />);
+    expect(screen.queryByText("XR-1")).not.toBeInTheDocument();
+  });
+
+  it("happy: shows only 10 example rows per page even when more rows are available, and pagination advances to the next 10", () => {
+    render(<PopulationProcessingReport summary={makeSummary()} previewRows={makePreviewRows(25)} />);
+    openPreview();
+
     // Page 1: XR-1..XR-10 shown, XR-11 not yet.
     expect(screen.getByText("XR-1")).toBeInTheDocument();
     expect(screen.getByText("XR-10")).toBeInTheDocument();
@@ -105,12 +179,10 @@ describe("PopulationProcessingReport — final-population preview (2026-08-12)",
     expect(screen.queryByText("معاينة المجتمع النهائي")).not.toBeInTheDocument();
   });
 
-  it("does not add new statistics -- the preview summary strip reuses existing ProcessingSummary fields only", () => {
+  it("does not add new statistics -- the preview header line reuses existing ProcessingSummary fields only", () => {
     render(<PopulationProcessingReport summary={makeSummary()} previewRows={makePreviewRows(1)} />);
     // finalPreparedPopulationRows/certScanRows/nonCertScanRows from makeSummary(): 7/3/4.
-    expect(screen.getAllByText("7").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("3").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("4").length).toBeGreaterThan(0);
+    expect(screen.getByText("7 صف · CertScan 3 · NonCertScan 4")).toBeInTheDocument();
   });
 
   it("bug repro: renders the raw stage enum as its Arabic label instead of the stored code (owner report 2026-08-12)", () => {
@@ -126,30 +198,10 @@ describe("PopulationProcessingReport — final-population preview (2026-08-12)",
       },
     ];
     render(<PopulationProcessingReport summary={makeSummary()} previewRows={rows} />);
+    openPreview();
 
     expect(screen.getByText("المستوى الثالث")).toBeInTheDocument();
     expect(screen.queryByText("THIRD_STAGE")).not.toBeInTheDocument();
-  });
-
-  it("bug repro: a bare CertScan=0 with certScanProvided:false renders a 'not provided' note instead of a percentage (owner report 2026-08-12, 60,971 rows / 0 CertScan)", () => {
-    const summary = { ...makeSummary(), certScanRows: 0, certScanProvided: false };
-    render(<PopulationProcessingReport summary={summary} previewRows={[]} />);
-
-    expect(screen.getByText(/لم يتم توفير قائمة أجهزة CertScan لهذا التشغيل/)).toBeInTheDocument();
-    expect(screen.queryByText(/^CertScan: /)).not.toBeInTheDocument();
-  });
-
-  it("shows the normal CertScan/NonCertScan percentages when certScanProvided is true, even at 0 matched rows", () => {
-    const summary = { ...makeSummary(), certScanRows: 0, certScanProvided: true };
-    render(<PopulationProcessingReport summary={summary} previewRows={[]} />);
-
-    expect(screen.getByText(/^CertScan: /)).toBeInTheDocument();
-    expect(screen.queryByText(/لم يتم توفير قائمة أجهزة CertScan/)).not.toBeInTheDocument();
-  });
-
-  it("falls back to the normal percentages when certScanProvided is undefined (older aggregate/report builder that predates the field)", () => {
-    render(<PopulationProcessingReport summary={makeSummary()} previewRows={[]} />);
-    expect(screen.getByText(/^CertScan: /)).toBeInTheDocument();
   });
 
   it("respects custom stageMappings overrides passed down from the active population config", () => {
@@ -171,6 +223,7 @@ describe("PopulationProcessingReport — final-population preview (2026-08-12)",
         stageMappings={{ third: ["CUSTOM_THIRD"] }}
       />,
     );
+    openPreview();
 
     expect(screen.getByText("المستوى الثالث")).toBeInTheDocument();
   });

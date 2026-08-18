@@ -1,7 +1,12 @@
-import type { ChangeEvent, RefObject } from "react";
+import { useState, type ChangeEvent, type DragEvent, type RefObject } from "react";
+import { AlertTriangle, FileSpreadsheet, Plus, RefreshCw, X } from "lucide-react";
 import FileUploadCard from "./FileUploadCard";
+import { formatFileSize } from "./helpers";
+import { useLabels } from "../../../../../data/labels/useLabels";
 import type { RiskWorkbookResult } from "../riskData/riskDataTypes";
-import type { BiWorkbookResult } from "../biData/biDataTypes";
+import type { BiUploadEntry, BiWorkbookResult } from "../biData/biDataTypes";
+import { MAX_BI_UPLOADS } from "../biData/biDataTypes";
+import "./PhaseOneUpload.css";
 
 type UploadKey = "riskAgencyData" | "businessIntelligenceData";
 
@@ -10,8 +15,20 @@ type UploadState = {
   source: "file-system-api" | "input-fallback" | null;
 };
 
+/**
+ * The risk-agency file stays a single, REQUIRED upload exactly as before. The
+ * BI side became a list: multiple BI files are different populations that share
+ * the same sheet patterns and column mappings, and they are appended into one
+ * BI population (never deduplicated). Both the "N من 10" pill and the
+ * accepted-rows total are derived from `biUploads` at render time.
+ */
+type PhaseOneUploads = {
+  riskAgencyData: UploadState;
+  biUploads: BiUploadEntry[];
+};
+
 type PhaseOneUploadProps = {
-  uploads: Record<UploadKey, UploadState>;
+  uploads: PhaseOneUploads;
   uploadError: string;
   processingMessage: string;
   isProcessingWorkbooks: boolean;
@@ -23,12 +40,16 @@ type PhaseOneUploadProps = {
    * mouse click but left the buttons keyboard-focusable and activatable, and announced
    * nothing to assistive tech). The wrapper's `aria-disabled`/dimming stay as a visual/
    * semantic group-level cue; the buttons themselves now carry the real HTML `disabled`.
+   * The denser BI controls follow the same rule: disabled, never hidden-but-focusable.
    */
   canUpload: boolean;
   riskAgencyInputRef: RefObject<HTMLInputElement | null>;
   businessIntelligenceInputRef: RefObject<HTMLInputElement | null>;
   onPickFile: (uploadKey: UploadKey) => void;
   onClearFile: (uploadKey: UploadKey) => void;
+  onRemoveBiUpload: (id: string) => void;
+  /** Owner request (2026-08-18): drag-and-drop onto either source card. */
+  onDropFiles: (uploadKey: UploadKey, files: File[]) => void;
   onFallbackFileChange: (
     uploadKey: UploadKey,
     event: ChangeEvent<HTMLInputElement>
@@ -48,6 +69,14 @@ function formatCount(n: number): string {
   return n.toLocaleString("ar-SA-u-nu-latn");
 }
 
+/** Fill `{name}` placeholders in a label value. */
+function fill(template: string, values: Record<string, string | number>): string {
+  return Object.entries(values).reduce(
+    (text, [key, value]) => text.split(`{${key}}`).join(String(value)),
+    template
+  );
+}
+
 /** W4/W10: compact raw-file receipt — sheet/row counts read straight from the
  *  already-parsed workbook result, no extra reads or processing. */
 function RawFileSummaryCard({
@@ -57,6 +86,11 @@ function RawFileSummaryCard({
   title: string;
   result: RiskWorkbookResult | BiWorkbookResult;
 }) {
+  // A merged multi-file BI result can carry the same sheet name more than once
+  // (one per source file), so the React key has to include the file it came from.
+  const sheetKey = (sheet: { sheetName: string; sourceFileName?: string }) =>
+    sheet.sourceFileName ? `${sheet.sourceFileName}::${sheet.sheetName}` : sheet.sheetName;
+
   return (
     <div className="raw-file-summary-card">
       <strong>{title}</strong>
@@ -68,7 +102,7 @@ function RawFileSummaryCard({
       {result.sheetSummaries.length > 0 && (
         <div className="raw-file-summary-sheets">
           {result.sheetSummaries.map((sheet) => (
-            <span key={sheet.sheetName} className="raw-file-summary-sheet-chip">
+            <span key={sheetKey(sheet)} className="raw-file-summary-sheet-chip">
               {sheet.sheetName}: {formatCount(sheet.normalizedRowCount)}
             </span>
           ))}
@@ -77,7 +111,7 @@ function RawFileSummaryCard({
       {result.sheetSummaries
         .filter((sheet) => sheet.zeroIdDiagnostic)
         .map((sheet) => (
-          <p key={`${sheet.sheetName}-zero-id`} className="raw-file-summary-unknown" role="alert">
+          <p key={`${sheetKey(sheet)}-zero-id`} className="raw-file-summary-unknown" role="alert">
             تحذير: ورقة "{sheet.sheetName}" استبعدت كل صفوفها ({formatCount(sheet.originalRowCount)})
             بسبب عدم العثور على معرف أشعة. الأعمدة التي بحث عنها النظام:{" "}
             {sheet.zeroIdDiagnostic!.candidateHeaders.join("، ")}. الأعمدة الموجودة فعلياً في الورقة:{" "}
@@ -94,6 +128,196 @@ function RawFileSummaryCard({
   );
 }
 
+/**
+ * Drop-target behaviour shared by both source cards. `preventDefault` on
+ * dragover is what makes the element a legal drop target at all; the
+ * `isDragOver` flag only drives the visual affordance. Files are handed to the
+ * SAME appenders the picker uses, so cap/extension/permission rules apply
+ * identically no matter how a file arrives.
+ */
+function useFileDropZone(disabled: boolean, onFiles: (files: File[]) => void) {
+  const [isDragOver, setIsDragOver] = useState(false);
+  const dragProps = {
+    onDragOver: (event: DragEvent) => {
+      if (disabled) return;
+      event.preventDefault();
+      setIsDragOver(true);
+    },
+    onDragLeave: (event: DragEvent) => {
+      // Ignore bubbles from children still inside the zone.
+      if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+      setIsDragOver(false);
+    },
+    onDrop: (event: DragEvent) => {
+      event.preventDefault();
+      setIsDragOver(false);
+      if (disabled) return;
+      onFiles(Array.from(event.dataTransfer?.files ?? []));
+    },
+  };
+  return { isDragOver, dragProps };
+}
+
+/**
+ * The BI source card: one row per attached file, an add-more zone that disables
+ * at the cap, and a derived accepted-rows footer. Replaces the single-file
+ * FileUploadCard that used to sit here (the risk card still uses it).
+ */
+function BiSourceCard({
+  entries,
+  canUpload,
+  onPickFiles,
+  onDropFiles,
+  onRemove,
+}: {
+  entries: BiUploadEntry[];
+  canUpload: boolean;
+  onPickFiles: () => void;
+  onDropFiles: (files: File[]) => void;
+  onRemove: (id: string) => void;
+}) {
+  const labels = useLabels();
+  const isFull = entries.length >= MAX_BI_UPLOADS;
+  const { isDragOver, dragProps } = useFileDropZone(!canUpload || isFull, onDropFiles);
+  const remaining = Math.max(0, MAX_BI_UPLOADS - entries.length);
+  // Derived, never stored: only files that actually reported a row count count.
+  const acceptedTotal = entries.reduce((total, entry) => total + (entry.acceptedRows ?? 0), 0);
+
+  return (
+    <article
+      className={`bi-source-card${isDragOver ? " is-drag-over" : ""}`}
+      aria-disabled={!canUpload}
+      {...dragProps}
+    >
+      <div className="bi-source-card-header">
+        <div className="bi-source-card-heading">
+          <div className="bi-source-card-title-row">
+            <h3>{labels.phase_one_bi_title}</h3>
+            <span className="bi-source-badge">{labels.phase_one_bi_optional_badge}</span>
+          </div>
+          <p>{labels.phase_one_bi_description}</p>
+        </div>
+
+        <span className="bi-source-count-pill">
+          {fill(labels.phase_one_bi_count_pill, {
+            count: formatCount(entries.length),
+            max: formatCount(MAX_BI_UPLOADS),
+          })}
+        </span>
+      </div>
+
+      <div className="bi-file-table" role="table" aria-label={labels.phase_one_bi_list_aria}>
+        <div className="bi-file-row is-head" role="row">
+          <span role="columnheader">{labels.phase_one_bi_col_file}</span>
+          <span role="columnheader">{labels.phase_one_bi_col_size}</span>
+          <span role="columnheader">{labels.phase_one_bi_col_accepted}</span>
+          <span role="columnheader" aria-hidden />
+        </div>
+
+        {entries.length === 0 ? (
+          <p className="bi-file-empty">{labels.phase_one_bi_empty_list}</p>
+        ) : (
+          entries.map((entry) => {
+            const isParsing = entry.state === "parsing";
+            const isError = entry.state === "error";
+            const subLine = isParsing
+              ? labels.phase_one_bi_parsing
+              : isError
+                ? (entry.error ?? labels.phase_one_bi_no_value)
+                : entry.sheetName;
+
+            return (
+              <div className="bi-file-row" role="row" key={entry.id}>
+                <span className="bi-file-cell-name" role="cell">
+                  <span
+                    className={`bi-file-icon ${isParsing ? "is-parsing" : ""} ${isError ? "is-error" : ""}`}
+                    aria-hidden
+                  >
+                    {isParsing ? (
+                      <RefreshCw size={15} strokeWidth={1.8} />
+                    ) : isError ? (
+                      <AlertTriangle size={15} strokeWidth={1.8} />
+                    ) : (
+                      <FileSpreadsheet size={15} strokeWidth={1.8} />
+                    )}
+                  </span>
+                  <span className="bi-file-cell-text">
+                    <strong title={entry.file.name}>{entry.file.name}</strong>
+                    <span
+                      className={`bi-file-sheet ${isParsing ? "is-parsing" : ""} ${isError ? "is-error" : ""}`}
+                      role={isError ? "alert" : undefined}
+                    >
+                      {subLine}
+                    </span>
+                  </span>
+                </span>
+
+                <span className="bi-file-size" role="cell">
+                  {formatFileSize(entry.sizeBytes)}
+                </span>
+
+                <span
+                  className={`bi-file-accepted ${entry.acceptedRows === null ? "is-empty" : ""}`}
+                  role="cell"
+                >
+                  {entry.acceptedRows === null
+                    ? labels.phase_one_bi_no_value
+                    : formatCount(entry.acceptedRows)}
+                </span>
+
+                <button
+                  type="button"
+                  className="bi-file-remove"
+                  onClick={() => onRemove(entry.id)}
+                  disabled={!canUpload}
+                  title={labels.phase_one_bi_remove_file}
+                  aria-label={`${labels.phase_one_bi_remove_file}: ${entry.file.name}`}
+                >
+                  <X size={14} strokeWidth={2} aria-hidden />
+                </button>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Disabled at the cap, never hidden: a hidden-but-focusable control is
+          exactly the accessibility failure audit finding 12 called out. */}
+      <div className={`bi-add-zone ${isFull ? "is-full" : ""}`}>
+        <span className="bi-add-zone-text">
+          <span className="bi-add-zone-icon" aria-hidden>
+            <Plus size={16} strokeWidth={2} />
+          </span>
+          <span className="bi-add-zone-lines">
+            <strong>{labels.phase_one_bi_add_title}</strong>
+            <span>
+              {isFull
+                ? fill(labels.phase_one_bi_cap_reached, { max: formatCount(MAX_BI_UPLOADS) })
+                : fill(labels.phase_one_bi_add_hint, {
+                    remaining: formatCount(remaining),
+                    max: formatCount(MAX_BI_UPLOADS),
+                  })}
+            </span>
+          </span>
+        </span>
+
+        <button
+          type="button"
+          className="bi-add-zone-button"
+          onClick={onPickFiles}
+          disabled={!canUpload || isFull}
+        >
+          {labels.phase_one_bi_add_button}
+        </button>
+      </div>
+
+      <p className="bi-accepted-total">
+        {labels.phase_one_bi_total_label} <strong>{formatCount(acceptedTotal)}</strong>
+      </p>
+    </article>
+  );
+}
+
 const RISK_AGENCY_INFO_ITEMS = [
   "هذا هو الملف الأساسي المطلوب للانتقال إلى المعالجة.",
   "يتم قراءة ملف Excel كملف خام وليس كجداول Excel، لأن البيانات لا تأتي داخل Table.",
@@ -106,16 +330,6 @@ const RISK_AGENCY_INFO_ITEMS = [
   "يتم استبعاد أي صف لا يحتوي على معرف أشعة، لأن معرف الأشعة هو الحد الأدنى لقبول الصف ضمن مجتمع المعالجة."
 ];
 
-const BI_INFO_ITEMS = [
-  "هذا الملف داعم وليس شرطاً للانتقال إلى مرحلة المعالجة.",
-  "إذا تم رفعه، سيقرأ النظام أوراق بحري وارد، بري وارد، بحري صادر، وبري صادر.",
-  "يتم التعامل مع أول صف في كل ورقة على أنه صف العناوين.",
-  "يتم حذف الأعمدة والصفوف الفارغة قبل التوحيد.",
-  "يتم توحيد الأعمدة المختلفة مثل معرف الأشعة، رقم صورة الأشعة، وXRAY_SCAN_ID في حقل موحد.",
-  "سيتم استخدام هذا الملف لاحقاً في تعبئة الخانات الفارغة فقط عند وجود تطابق بين معرف الأشعة واسم المنفذ.",
-  "عدم رفع هذا الملف لا يمنع تكوين مجتمع وكالة المخاطر ولا يمنع عرض التقرير الأساسي."
-];
-
 export default function PhaseOneUpload({
   uploads,
   uploadError,
@@ -126,10 +340,15 @@ export default function PhaseOneUpload({
   businessIntelligenceInputRef,
   onPickFile,
   onClearFile,
+  onRemoveBiUpload,
+  onDropFiles,
   onFallbackFileChange,
   riskWorkbookResult = null,
   biWorkbookResult = null
 }: PhaseOneUploadProps) {
+  // FileUploadCard is shared with other flows, so the risk side's drop target
+  // is this thin wrapper rather than a change to the card itself.
+  const riskDrop = useFileDropZone(!canUpload, (files) => onDropFiles("riskAgencyData", files));
   return (
     <section className="upload-phase" aria-label="رفع البيانات">
       <div className="phase-panel-header">
@@ -148,27 +367,29 @@ export default function PhaseOneUpload({
         title={!canUpload ? "لا تملك صلاحية رفع ملفات البيانات، أو أن الشهر مغلق حالياً، أو أن بيانات الشهر قيد التحميل." : undefined}
         style={!canUpload ? { opacity: 0.55, cursor: "not-allowed" } : undefined}
       >
-        <FileUploadCard
-          title="بيانات وكالة المخاطر"
-          description="ملف أساسي يحتوي على أوراق بري، بحري، افراد، وعبور."
-          uploadState={uploads.riskAgencyData}
-          onPickFile={() => onPickFile("riskAgencyData")}
-          onClearFile={() => onClearFile("riskAgencyData")}
-          infoTitle="آلية معالجة بيانات وكالة المخاطر"
-          infoContent={RISK_AGENCY_INFO_ITEMS}
-          isRequired
-          disabled={!canUpload}
-        />
+        <div
+          className={`risk-drop-wrap${riskDrop.isDragOver ? " is-drag-over" : ""}`}
+          {...riskDrop.dragProps}
+        >
+          <FileUploadCard
+            title="بيانات وكالة المخاطر"
+            description="ملف أساسي يحتوي على أوراق بري، بحري، افراد، وعبور."
+            uploadState={uploads.riskAgencyData}
+            onPickFile={() => onPickFile("riskAgencyData")}
+            onClearFile={() => onClearFile("riskAgencyData")}
+            infoTitle="آلية معالجة بيانات وكالة المخاطر"
+            infoContent={RISK_AGENCY_INFO_ITEMS}
+            isRequired
+            disabled={!canUpload}
+          />
+        </div>
 
-        <FileUploadCard
-          title="بيانات ذكاء الأعمال"
-          description="ملف داعم يحتوي على أوراق بحري وارد، بري وارد، بحري صادر، وبري صادر."
-          uploadState={uploads.businessIntelligenceData}
-          onPickFile={() => onPickFile("businessIntelligenceData")}
-          onClearFile={() => onClearFile("businessIntelligenceData")}
-          infoTitle="آلية معالجة بيانات ذكاء الأعمال"
-          infoContent={BI_INFO_ITEMS}
-          disabled={!canUpload}
+        <BiSourceCard
+          entries={uploads.biUploads}
+          canUpload={canUpload}
+          onPickFiles={() => onPickFile("businessIntelligenceData")}
+          onDropFiles={(files) => onDropFiles("businessIntelligenceData", files)}
+          onRemove={onRemoveBiUpload}
         />
       </div>
 
@@ -222,7 +443,8 @@ export default function PhaseOneUpload({
         ref={businessIntelligenceInputRef}
         className="hidden-file-input"
         type="file"
-        accept=".xlsx,.xls"
+        multiple
+        accept=".xlsx,.xls,.csv"
         onChange={(event) =>
           onFallbackFileChange("businessIntelligenceData", event)
         }

@@ -3,9 +3,8 @@ import type { CertScanShortfall, SampleMasterData } from "../../../../../data/sa
 import type { SamplingPlanPriorMonthAdvisory } from "../../../../../data/sampling/samplingPlanStorage";
 import type { PopulationConfig, StageSamplingRule } from "../../../../../data/population/populationConfig";
 import { formatNumber, getStageKey } from "./helpers";
-import SummaryCard from "./SummaryCard";
 import { useMemo, useState } from "react";
-import { AlertTriangle, Info, Lock, Unlock } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Info, Lock, RefreshCw, Unlock } from "lucide-react";
 import { usePermissions } from "../../../../../auth/usePermissions";
 import { getLabels } from "../../../../../data/labels/labelsStore";
 import { formatMonthFolderShortLabel } from "../../../../../data/population/monthFolder";
@@ -18,6 +17,7 @@ import { formatMonthFolderShortLabel } from "../../../../../data/population/mont
 // internally, so the pre-draw shortfall estimate below can never drift from
 // what the real draw will actually request.
 import { configuredTarget, certScanConfiguredTarget } from "../../../../../data/sampling/sampleAlgorithmInternals";
+import "./PhaseThreeSampling.css";
 
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
 
@@ -53,8 +53,27 @@ function fillTemplate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (_m, key) => vars[key] ?? `{${key}}`);
 }
 
-/** B4: prior-month switching-rule advisory banner. Renders nothing when there is no signal. */
-function SwitchingAdvisory({ advisory }: { advisory: SamplingPlanPriorMonthAdvisory | null }) {
+function formatPercent(part: number, whole: number): string {
+  if (whole <= 0) return "0";
+  return ((part / whole) * 100).toLocaleString("ar-SA-u-nu-latn", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  });
+}
+
+const STAGE_LABELS: Record<string, string> = {
+  first:  "المستوى الأول",
+  second: "المستوى الثاني",
+  third:  "المستوى الثالث",
+  fourth: "المستوى الرابع"
+};
+
+/**
+ * B4: prior-month switching-rule advisory. Since the 2026-08 redesign (`4b`) this is
+ * no longer a standalone banner — it is one row of the grouped "تنبيهات قبل السحب"
+ * card. The signal itself is unchanged: renders nothing when there is none.
+ */
+function buildSwitchingAdvisoryText(advisory: SamplingPlanPriorMonthAdvisory | null): string | null {
   if (!advisory || advisory.priorMonthSuspicionRate === null || !advisory.inspectionRecommendation) {
     return null;
   }
@@ -64,41 +83,12 @@ function SwitchingAdvisory({ advisory }: { advisory: SamplingPlanPriorMonthAdvis
     ? formatMonthFolderShortLabel(advisory.priorMonthFolderName)
     : "";
   const ratePct = `${(advisory.priorMonthSuspicionRate * 100).toFixed(1)}%`;
-  return (
-    <div
-      className={`switching-advisory${tightened ? " tightened" : ""}`}
-      role="status"
-      style={{
-        margin: "12px 0",
-        padding: "12px 16px",
-        borderRadius: 10,
-        border: `1px solid ${tightened ? "#d97706" : "#0ea5e9"}`,
-        background: tightened ? "rgba(217,119,6,.08)" : "rgba(14,165,233,.06)",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
-        <Info size={16} aria-hidden />
-        {L.switching_advisory_title}
-      </div>
-      <p style={{ margin: "6px 0 0" }}>
-        {fillTemplate(L.switching_advisory_rate, { month: monthLabel, rate: ratePct })}
-      </p>
-      <p style={{ margin: "4px 0 0" }}>
-        {tightened ? L.switching_advisory_tightened : L.switching_advisory_normal}
-      </p>
-      <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--p-muted)" }}>
-        {L.switching_advisory_disclaimer}
-      </p>
-    </div>
-  );
+  return [
+    fillTemplate(L.switching_advisory_rate, { month: monthLabel, rate: ratePct }),
+    tightened ? L.switching_advisory_tightened : L.switching_advisory_normal,
+    L.switching_advisory_disclaimer,
+  ].join(" ");
 }
-
-const STAGE_LABELS: Record<string, string> = {
-  first:  "المستوى الأول",
-  second: "المستوى الثاني",
-  third:  "المستوى الثالث",
-  fourth: "المستوى الرابع"
-};
 
 export default function PhaseThreeSampling({
   populationRows,
@@ -140,7 +130,7 @@ export default function PhaseThreeSampling({
   const L = getLabels();
 
   // Precompute each stage's effective target (mirrors configuredTarget, the
-  // exact function drawStageSample uses) BEFORE rendering the cards, so the
+  // exact function drawStageSample uses) BEFORE rendering the plan table, so the
   // running total below can sum the numbers that will actually be drawn —
   // not the raw entered values, which is what let the owner's requested total
   // silently balloon before (floor override applied only after the draw ran).
@@ -167,8 +157,26 @@ export default function PhaseThreeSampling({
     };
   });
   const runningTotal = stageComputations.reduce((sum, c) => sum + c.finalCount, 0);
+  const populationTotal = stageComputations.reduce((sum, c) => sum + c.size, 0);
   const overriddenStages = stageComputations.filter((c) => c.floorOverridden);
+  const insufficientStages = stageComputations.filter((c) => c.insufficientPopulation);
   const certScanShortfallStages = stageComputations.filter((c) => c.certScanShortfallEstimate);
+  const certScanRequestedTotal = stageComputations.reduce((sum, c) => sum + c.certScanRequested, 0);
+  const certScanAvailableTotal = stageComputations.reduce((sum, c) => sum + c.certScanAvailable, 0);
+  const advisoryText = buildSwitchingAdvisoryText(priorMonthAdvisory);
+
+  // Grouped alert stack (`4b`): the same three already-computed sources — floor
+  // override, CertScan availability, and the prior-month switching advisory —
+  // regrouped into one card. The CertScan row is the only one that also has a
+  // *satisfied* state, and that state is deliberately NOT counted as an alert
+  // and does NOT carry role="alert".
+  const alertCount =
+    overriddenStages.length + insufficientStages.length + certScanShortfallStages.length + (advisoryText ? 1 : 0);
+  const alertsTitle =
+    alertCount === 0 ? L.p3_alerts_title_none
+      : alertCount === 1 ? L.p3_alerts_title_one
+      : alertCount === 2 ? L.p3_alerts_title_two
+      : fillTemplate(L.p3_alerts_title_many, { count: formatNumber(alertCount) });
 
   const handleRuleChange = (
     stageKey: "first" | "second" | "third" | "fourth",
@@ -181,8 +189,11 @@ export default function PhaseThreeSampling({
     onConfigChange({ ...config, samplingRules: updatedRules });
   };
 
+  const fieldAria = (field: string, stageKey: string) =>
+    fillTemplate(L.p3_plan_field_aria, { field, stage: STAGE_LABELS[stageKey] ?? stageKey });
+
   return (
-    <section className="sampling-phase" aria-label="اختيار العينة">
+    <section className="sampling-phase p3" aria-label="اختيار العينة">
       <div className="phase-panel-header compact">
         <div>
           <h2>المرحلة 3: اختيار العينة (حسب المستويات)</h2>
@@ -193,280 +204,345 @@ export default function PhaseThreeSampling({
         </div>
       </div>
 
-      <SwitchingAdvisory advisory={priorMonthAdvisory} />
-
-      {/* Running total across all stage cards, visible BEFORE the draw is triggered
-          (previously the summed total first appeared in SampleResultReport, i.e.
-          after the draw already ran — B task 1, owner-reported "requested 7,000, got
-          ~9,000"). Reflects each stage's *effective* target (after any floor
-          override), matching what drawStageSample will actually draw. */}
-      <div
-        className={`sampling-running-total${overriddenStages.length > 0 ? " has-override" : ""}`}
-        role="status"
-        style={{
-          margin: "12px 0",
-          padding: "12px 16px",
-          borderRadius: 10,
-          border: `1px solid ${overriddenStages.length > 0 ? "#d97706" : "var(--p-border, #cbd5e1)"}`,
-          background: overriddenStages.length > 0 ? "rgba(217,119,6,.08)" : "rgba(14,165,233,.06)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, fontSize: 16 }}>
-          {overriddenStages.length > 0 && <AlertTriangle size={16} aria-hidden />}
-          {L.sampling_running_total_label}: <strong>{formatNumber(runningTotal)}</strong>
+      <div className="p3-top-row">
+        {/* Running total across all stages, visible BEFORE the draw is triggered
+            (previously the summed total first appeared in SampleResultReport, i.e.
+            after the draw already ran — B task 1, owner-reported "requested 7,000, got
+            ~9,000"). Reflects each stage's *effective* target (after any floor
+            override), matching what drawStageSample will actually draw. */}
+        <div className="p3-total-card" role="status">
+          <span className="p3-total-title">{L.sampling_running_total_label}</span>
+          <div className="p3-total-value-row">
+            <strong className="p3-total-value" aria-label={L.sampling_running_total_label}>
+              {formatNumber(runningTotal)}
+            </strong>
+            <span className="p3-total-share">
+              {fillTemplate(L.p3_total_share_of_population, {
+                percent: formatPercent(runningTotal, populationTotal),
+              })}
+            </span>
+          </div>
+          <p className="p3-total-note">{L.sampling_running_total_note}</p>
+          <div className="p3-total-stages">
+            {stageComputations.map(({ rule, finalCount }) => (
+              <span key={rule.stageKey} className="p3-total-stage-row">
+                <span className="p3-total-stage-name">{STAGE_LABELS[rule.stageKey]}</span>
+                <span className={`p3-share-track stage-${rule.stageKey}`} aria-hidden="true">
+                  <span
+                    className="p3-share-fill"
+                    style={{ width: `${runningTotal > 0 ? (finalCount / runningTotal) * 100 : 0}%` }}
+                  />
+                </span>
+                <strong className="p3-total-stage-value">{formatNumber(finalCount)}</strong>
+              </span>
+            ))}
+          </div>
         </div>
-        <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--p-muted)" }}>
-          {L.sampling_running_total_note}
-        </p>
-        {overriddenStages.map(({ rule, calculatedCount, finalCount }) => (
-          <p key={rule.stageKey} className="sampling-warn" role="alert" style={{ margin: "6px 0 0" }}>
-            {fillTemplate(L.sampling_floor_override_warning, {
-              stage: STAGE_LABELS[rule.stageKey],
-              entered: String(calculatedCount),
-              effective: String(finalCount),
-              minRequired: String(rule.minRequiredCount),
-            })}
-          </p>
-        ))}
+
+        <div className={`p3-alerts-card${alertCount > 0 ? " has-alerts" : ""}`}>
+          <div className="p3-alerts-head">
+            <span className="p3-alerts-icon" aria-hidden="true">
+              {alertCount > 0 ? <AlertTriangle size={15} /> : <CheckCircle2 size={15} />}
+            </span>
+            <h3 className="p3-alerts-title">{alertsTitle}</h3>
+            <span className="p3-alerts-caption">{L.p3_alerts_caption}</span>
+          </div>
+
+          {overriddenStages.map(({ rule, calculatedCount, finalCount }) => (
+            <div key={`floor-${rule.stageKey}`} className="p3-alert warn" role="alert">
+              <span className="p3-alert-tag">{L.p3_alert_tag_floor}</span>
+              <span className="p3-alert-text">
+                {fillTemplate(L.sampling_floor_override_warning, {
+                  stage: STAGE_LABELS[rule.stageKey],
+                  entered: String(calculatedCount),
+                  effective: String(finalCount),
+                  minRequired: String(rule.minRequiredCount),
+                })}
+              </span>
+              <a className="p3-alert-edit" href={`#p3-plan-row-${rule.stageKey}`}>
+                {L.p3_alerts_edit_link}
+              </a>
+            </div>
+          ))}
+
+          {insufficientStages.map(({ rule, size }) => (
+            <div key={`pop-${rule.stageKey}`} className="p3-alert warn" role="alert">
+              <span className="p3-alert-tag">{L.p3_alert_tag_population}</span>
+              <span className="p3-alert-text">
+                {fillTemplate(L.p3_alert_population_insufficient, {
+                  stage: STAGE_LABELS[rule.stageKey],
+                  size: String(size),
+                  minRequired: String(rule.minRequiredCount),
+                })}
+              </span>
+              <a className="p3-alert-edit" href={`#p3-plan-row-${rule.stageKey}`}>
+                {L.p3_alerts_edit_link}
+              </a>
+            </div>
+          ))}
+
+          {/* CertScan shortfall estimate, visible BEFORE the draw runs (owner decision,
+              2026-08): a stratum short on CertScan under-fills rather than silently
+              backfilling from NonCertscan — this warns as early as possible instead of
+              the operator only discovering it after the draw, in SampleResultReport. */}
+          {certScanShortfallStages.length > 0 ? (
+            certScanShortfallStages.map(({ rule, certScanRequested, certScanAvailable }) => (
+              <div key={`cert-${rule.stageKey}`} className="p3-alert warn" role="alert">
+                <span className="p3-alert-tag">{L.p3_alert_tag_certscan}</span>
+                <span className="p3-alert-text">
+                  {fillTemplate(L.sampling_certscan_shortfall_predraw_row, {
+                    stage: STAGE_LABELS[rule.stageKey],
+                    requested: String(certScanRequested),
+                    available: String(certScanAvailable),
+                  })}
+                </span>
+                <a className="p3-alert-edit" href={`#p3-plan-row-${rule.stageKey}`}>
+                  {L.p3_alerts_edit_link}
+                </a>
+              </div>
+            ))
+          ) : (
+            <div className="p3-alert ok">
+              <span className="p3-alert-tag">{L.p3_alert_tag_certscan}</span>
+              <span className="p3-alert-text">
+                {fillTemplate(L.p3_alert_certscan_satisfied, {
+                  available: formatNumber(certScanAvailableTotal),
+                  requested: formatNumber(certScanRequestedTotal),
+                })}
+              </span>
+            </div>
+          )}
+
+          {advisoryText && (
+            <div className="p3-alert info switching-advisory" role="status">
+              <span className="p3-alert-tag">{L.p3_alert_tag_advisory}</span>
+              <span className="p3-alert-text">
+                <Info size={13} aria-hidden style={{ verticalAlign: "middle", marginInlineEnd: 4 }} />
+                {advisoryText}
+              </span>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* CertScan shortfall estimate, visible BEFORE the draw runs (owner decision,
-          2026-08): a stratum short on CertScan under-fills rather than silently
-          backfilling from NonCertscan — this warns as early as possible instead of
-          the operator only discovering it after the draw, in SampleResultReport. */}
-      {certScanShortfallStages.length > 0 && (
-        <div
-          className="sampling-certscan-shortfall-warning has-override"
-          role="alert"
-          style={{
-            margin: "12px 0",
-            padding: "12px 16px",
-            borderRadius: 10,
-            border: "1px solid #d97706",
-            background: "rgba(217,119,6,.08)",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, fontSize: 16 }}>
-            <AlertTriangle size={16} aria-hidden />
-            {L.sampling_certscan_shortfall_predraw_title}
-          </div>
-          {certScanShortfallStages.map(({ rule, certScanRequested, certScanAvailable }) => (
-            <p key={rule.stageKey} style={{ margin: "6px 0 0" }}>
-              {fillTemplate(L.sampling_certscan_shortfall_predraw_row, {
-                stage: STAGE_LABELS[rule.stageKey],
-                requested: String(certScanRequested),
-                available: String(certScanAvailable),
-              })}
-            </p>
-          ))}
+      <div className="p3-plan-card">
+        <div className="p3-plan-head">
+          <h3>{L.p3_plan_title}</h3>
+          <span className="p3-plan-caption">{L.p3_plan_caption}</span>
         </div>
-      )}
 
-      <div className="sampling-config-panel">
-        <div className="sampling-stage-rules">
-          {stageComputations.map(({ rule, size, finalCount, insufficientPopulation, floorOverridden }) => {
-            let warnMessage = "";
-            if (insufficientPopulation) {
-              warnMessage = `تنبيه: المجتمع المتاح (${size}) أقل من الحد الأدنى (${rule.minRequiredCount}). سيتم سحب 100%.`;
-            } else if (floorOverridden) {
-              warnMessage = `تم تطبيق الحد الأدنى (${rule.minRequiredCount}) بدلاً من القيمة المدخلة — راجع التنبيه أعلى الصفحة.`;
-            }
+        <div className="p3-plan-table" role="table" aria-label={L.p3_plan_title}>
+          <div className="p3-plan-row p3-plan-header" role="row">
+            <span role="columnheader">{L.p3_plan_col_stage}</span>
+            <span role="columnheader" className="num">{L.p3_plan_col_population}</span>
+            <span role="columnheader">{L.p3_plan_col_method}</span>
+            <span role="columnheader" className="num">{L.p3_plan_col_value}</span>
+            <span role="columnheader">{L.p3_plan_col_certscan_method}</span>
+            <span role="columnheader" className="num">{L.p3_plan_col_certscan_value}</span>
+            <span role="columnheader" className="num">{L.p3_plan_col_expected}</span>
+            <span role="columnheader">{L.p3_plan_col_status}</span>
+          </div>
 
+          {stageComputations.map(({ rule, size, calculatedCount, finalCount, insufficientPopulation, floorOverridden }) => {
             const isAutoLocked = rule.stageKey === "first" || insufficientPopulation;
             const isLockedState = (rule.isLocked || isAutoLocked) && !isAdminUnlocked;
+            const fieldsDisabled = isLockedState || !canConfigureSample;
             return (
               <div
                 key={rule.stageKey}
-                className={`sampling-stage-card${isLockedState ? " locked" : ""}`}
+                id={`p3-plan-row-${rule.stageKey}`}
+                className={`p3-plan-row${isLockedState ? " locked" : ""}`}
+                role="row"
               >
-                <div className="sampling-stage-card-header">
-                  <h3>{STAGE_LABELS[rule.stageKey]}</h3>
-                  <div className="sampling-stage-meta">
-                    <span>
-                      المجتمع المتوفر:{" "}
-                      <strong>{formatNumber(size)}</strong>
+                <span className="p3-plan-stage">{STAGE_LABELS[rule.stageKey]}</span>
+                <span className="num p3-plan-population">{formatNumber(size)}</span>
+
+                <select
+                  className="p3-plan-input"
+                  aria-label={fieldAria(L.p3_plan_col_method, rule.stageKey)}
+                  value={rule.method}
+                  disabled={fieldsDisabled}
+                  onChange={(e) =>
+                    handleRuleChange(rule.stageKey, "method", e.target.value as StageSamplingRule[keyof StageSamplingRule])
+                  }
+                >
+                  <option value="percentage">{L.p3_plan_method_percentage}</option>
+                  <option value="exact">{L.p3_plan_method_exact}</option>
+                </select>
+
+                <input
+                  type="number"
+                  className="p3-plan-input num"
+                  aria-label={fieldAria(L.p3_plan_col_value, rule.stageKey)}
+                  value={rule.value}
+                  min={0}
+                  max={rule.method === "percentage" ? 100 : undefined}
+                  disabled={fieldsDisabled}
+                  onChange={(e) => {
+                    // min/max are spinner hints, not enforcement — a typed
+                    // value out of range reaches the config unclamped
+                    // otherwise. A percentage-method target above 100 has no
+                    // meaning (configuredTarget already clamps it silently to
+                    // the population size), so this fix makes the input match
+                    // what the field can actually mean instead of accepting
+                    // 150% with no explanation.
+                    const raw = Math.max(0, parseInt(e.target.value, 10) || 0);
+                    const v = rule.method === "percentage" ? Math.min(100, raw) : raw;
+                    handleRuleChange(rule.stageKey, "value", v);
+                  }}
+                />
+
+                <select
+                  className="p3-plan-input"
+                  aria-label={fieldAria(L.p3_plan_col_certscan_method, rule.stageKey)}
+                  value={rule.certScanMethod}
+                  disabled={fieldsDisabled}
+                  onChange={(e) =>
+                    handleRuleChange(rule.stageKey, "certScanMethod", e.target.value as StageSamplingRule[keyof StageSamplingRule])
+                  }
+                >
+                  <option value="percentage">{L.p3_plan_method_percentage}</option>
+                  <option value="exact">{L.p3_plan_method_exact}</option>
+                </select>
+
+                <input
+                  type="number"
+                  className="p3-plan-input num"
+                  aria-label={fieldAria(L.p3_plan_col_certscan_value, rule.stageKey)}
+                  value={
+                    rule.certScanMethod === "percentage"
+                      ? rule.certScanPercentage
+                      : rule.certScanExactCount
+                  }
+                  min={0}
+                  max={rule.certScanMethod === "percentage" ? 100 : undefined}
+                  disabled={fieldsDisabled}
+                  onChange={(e) => {
+                    // Clamp: a typed negative percentage reached
+                    // stagePortDraw as a negative cert target, and
+                    // drawWithoutReplacement's `slice(0, negative)` then
+                    // drew ALL BUT the last N cert rows — a massive
+                    // silent overdraw with no shortfall recorded. Pure
+                    // input sanitation: every config valid today draws
+                    // byte-identically, so no algorithm-version bump. The
+                    // upper clamp on the percentage method is the same fix
+                    // applied to the value input above (Fix, 2026-08-18).
+                    const raw = Math.max(0, parseInt(e.target.value, 10) || 0);
+                    if (rule.certScanMethod === "percentage") {
+                      handleRuleChange(rule.stageKey, "certScanPercentage", Math.min(100, raw));
+                    } else {
+                      handleRuleChange(rule.stageKey, "certScanExactCount", raw);
+                    }
+                  }}
+                />
+
+                <span className="num p3-plan-expected">
+                  <strong>{formatNumber(finalCount)}</strong>
+                  {floorOverridden && (
+                    <span className="p3-plan-instead">
+                      {fillTemplate(L.p3_plan_expected_instead_of, { entered: formatNumber(calculatedCount) })}
                     </span>
-                    {(rule.isLocked || isAutoLocked) && (
-                      <button
-                        type="button"
-                        className={`lock-toggle-btn${isAutoLocked ? " auto" : ""}`}
-                        // Render-time gate matching the handler check below: previously this
-                        // button always rendered enabled regardless of canUnlock and only
-                        // rejected via alert() on click (audit: cluster A, filed twice — once
-                        // as a permission finding, once as a raw-alert() UX finding). Both are
-                        // fixed together: disabled state now reflects canUnlock, and the denial
-                        // is explained via `title` like every other gated control in this file
-                        // instead of a blocking native alert().
-                        disabled={!canUnlock}
-                        title={
-                          !canUnlock
-                            ? "لا تملك صلاحية إلغاء قفل مراحل العينة."
-                            : isAutoLocked
-                            ? "مقفل تلقائياً — يتطلب صلاحية إلغاء القفل"
-                            : ""
-                        }
-                        onClick={() => {
-                          if (!canUnlock) return;
-                          setIsAdminUnlocked(!isAdminUnlocked);
-                        }}
-                      >
-                        {isAdminUnlocked
-                          ? <><Unlock size={14} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} /> مفتوح</>
+                  )}
+                </span>
+
+                <span className="p3-plan-status">
+                  {(rule.isLocked || isAutoLocked) ? (
+                    <button
+                      type="button"
+                      className={`p3-lock-pill${isAutoLocked ? " auto" : ""}${isAdminUnlocked ? " open" : ""}`}
+                      // Render-time gate matching the handler check: this button previously
+                      // always rendered enabled regardless of canUnlock and only rejected via
+                      // alert() on click (audit: cluster A). Disabled state now reflects
+                      // canUnlock, and the denial is explained via `title`.
+                      disabled={!canUnlock}
+                      title={
+                        !canUnlock
+                          ? "لا تملك صلاحية إلغاء قفل مراحل العينة."
                           : isAutoLocked
-                          ? <><AlertTriangle size={14} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} /> مقفل تلقائياً</>
-                          : <><Lock size={14} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} /> مغلق</>}
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <div className="sampling-rule-row">
-                  <label className="sampling-rule-field flex-grow save-disk-label">
-                    طريقة السحب
-                    <select
-                      className="save-disk-input"
-                      value={rule.method}
-                      disabled={isLockedState || !canConfigureSample}
-                      onChange={(e) =>
-                        handleRuleChange(rule.stageKey, "method", e.target.value as StageSamplingRule[keyof StageSamplingRule])
+                          ? "مقفل تلقائياً — يتطلب صلاحية إلغاء القفل"
+                          : ""
                       }
+                      onClick={() => {
+                        if (!canUnlock) return;
+                        setIsAdminUnlocked(!isAdminUnlocked);
+                      }}
                     >
-                      <option value="percentage">نسبة مئوية (%)</option>
-                      <option value="exact">عدد محدد</option>
-                    </select>
-                  </label>
-
-                  <label className="sampling-rule-field narrow save-disk-label">
-                    القيمة المطلوبة
-                    <input
-                      type="number"
-                      className="save-disk-input"
-                      value={rule.value}
-                      min={0}
-                      disabled={isLockedState || !canConfigureSample}
-                      onChange={(e) =>
-                        // min={0} is a spinner hint, not enforcement — a typed
-                        // negative reaches the config unclamped otherwise.
-                        handleRuleChange(
-                          rule.stageKey,
-                          "value",
-                          Math.max(0, parseInt(e.target.value, 10) || 0)
-                        )
-                      }
-                    />
-                  </label>
-
-                  <div className="sampling-expected">
-                    <span>حجم العينة المتوقع:</span>
-                    <strong>{formatNumber(finalCount)}</strong>
-                  </div>
-                </div>
-
-                <div className="sampling-certscan-section">
-                  <h4>تخصيص CertScan للمستوى</h4>
-                  <div className="sampling-rule-row">
-                    <label className="sampling-rule-field flex-grow save-disk-label">
-                      نوع كوتا CertScan
-                      <select
-                        className="save-disk-input"
-                        value={rule.certScanMethod}
-                        disabled={isLockedState || !canConfigureSample}
-                        onChange={(e) =>
-                          handleRuleChange(rule.stageKey, "certScanMethod", e.target.value as StageSamplingRule[keyof StageSamplingRule])
-                        }
-                      >
-                        <option value="percentage">نسبة مئوية (%)</option>
-                        <option value="exact">عدد محدد</option>
-                      </select>
-                    </label>
-
-                    <label className="sampling-rule-field narrow save-disk-label">
-                      القيمة
-                      <input
-                        type="number"
-                        className="save-disk-input"
-                        value={
-                          rule.certScanMethod === "percentage"
-                            ? rule.certScanPercentage
-                            : rule.certScanExactCount
-                        }
-                        min={0}
-                        disabled={isLockedState || !canConfigureSample}
-                        onChange={(e) => {
-                          // Clamp: a typed negative percentage reached
-                          // stagePortDraw as a negative cert target, and
-                          // drawWithoutReplacement's `slice(0, negative)` then
-                          // drew ALL BUT the last N cert rows — a massive
-                          // silent overdraw with no shortfall recorded. Pure
-                          // input sanitation: every config valid today draws
-                          // byte-identically, so no algorithm-version bump.
-                          const v = Math.max(0, parseInt(e.target.value, 10) || 0);
-                          if (rule.certScanMethod === "percentage") {
-                            handleRuleChange(rule.stageKey, "certScanPercentage", v);
-                          } else {
-                            handleRuleChange(rule.stageKey, "certScanExactCount", v);
-                          }
-                        }}
-                      />
-                    </label>
-
-                  </div>
-                </div>
-
-                {warnMessage && (
-                  <p className="sampling-warn" role="alert">
-                    {warnMessage}
-                  </p>
-                )}
+                      {isAdminUnlocked
+                        ? <><Unlock size={12} aria-hidden /> {L.p3_plan_status_unlocked}</>
+                        : <><Lock size={12} aria-hidden /> {L.p3_plan_status_locked}</>}
+                    </button>
+                  ) : floorOverridden ? (
+                    <span className="p3-status-pill warn">
+                      {fillTemplate(L.p3_plan_status_floor, { minRequired: formatNumber(rule.minRequiredCount) })}
+                    </span>
+                  ) : (
+                    <span className="p3-status-pill ok">{L.p3_plan_status_ok}</span>
+                  )}
+                  {insufficientPopulation && (
+                    <span className="p3-status-pill warn">{L.p3_plan_status_insufficient}</span>
+                  )}
+                </span>
               </div>
             );
           })}
-        </div>
 
-        {/* W14: the RNG seed edit control moved to إعدادات المعالجة (MappingSettingsModal,
-            mode="processing") — this still drives the draw below via the sampleSeed prop,
-            only its edit UI relocated. A compact read-only reference stays here so the
-            operator can see which seed a draw will use / did use without leaving the page. */}
-        <div className="sampling-rng-row">
-          <span className="sampling-rng-current" style={{ flex: 1, fontSize: 12, color: "var(--p-muted)" }}>
-            رمز التوزيع العشوائي الحالي: <code>{sampleSeed}</code>
-            {" — "}يمكن تعديله من إعدادات المعالجة
-          </span>
-
-          <button
-            type="button"
-            className="primary-action"
-            onClick={onDrawSample}
-            // Not gated on populationRows.length === 0: under Phase A demand-gated loading,
-            // an empty array here can mean "genuinely no population" OR "not loaded in this
-            // view's scope yet" (see index.tsx's ensurePopulationLoaded) -- those look
-            // identical from this component's props alone. onDrawSample's own handler
-            // resolves the ambiguity (fetching on demand) and surfaces the same Arabic
-            // error message this button used to pre-empt if population turns out missing.
-            disabled={isDrawingSample || !canDrawSample}
-            title={!canDrawSample ? "لا تملك صلاحية سحب العينة، أو أن الشهر مغلق، أو أن بيانات الشهر قيد التحميل." : undefined}
-          >
-            {isDrawingSample ? "جاري سحب العينات..." : "سحب العينات وحفظها"}
-          </button>
-        </div>
-
-        {processingMessage && (
-          <div className="upload-warning" role="status">
-            {processingMessage}
+          <div className="p3-plan-row p3-plan-totals" role="row">
+            <span>{L.p3_plan_totals_label}</span>
+            <span className="num">{formatNumber(populationTotal)}</span>
+            <span /><span /><span /><span />
+            <strong className="num">{formatNumber(runningTotal)}</strong>
+            <span />
           </div>
-        )}
-
-        {sampleSaveMessage && (
-          <div
-            className={sampleSaveMessage.type === "ok" ? "msg-success" : "msg-error"}
-            role="status"
-          >
-            {sampleSaveMessage.text}
-          </div>
-        )}
+        </div>
       </div>
 
-      {sampleDrawResult && <SampleResultReport data={sampleDrawResult} />}
+      <div className="p3-draw-row">
+        {/* W14: the RNG seed edit control moved to إعدادات المعالجة (MappingSettingsModal,
+            mode="processing") — this still drives the draw below via the sampleSeed prop,
+            only its edit UI relocated. A compact read-only chip stays here so the
+            operator can see which seed a draw will use / did use without leaving the page. */}
+        <span className="p3-seed-chip">
+          {L.p3_result_seed_label}: <code>{sampleSeed}</code>
+          <span className="p3-seed-hint">{L.p3_result_seed_hint}</span>
+        </span>
+
+        <button
+          type="button"
+          className="primary-action"
+          onClick={onDrawSample}
+          // Not gated on populationRows.length === 0: under Phase A demand-gated loading,
+          // an empty array here can mean "genuinely no population" OR "not loaded in this
+          // view's scope yet" (see index.tsx's ensurePopulationLoaded) -- those look
+          // identical from this component's props alone.
+          disabled={isDrawingSample || !canDrawSample}
+          title={!canDrawSample ? "لا تملك صلاحية سحب العينة، أو أن الشهر مغلق، أو أن بيانات الشهر قيد التحميل." : undefined}
+        >
+          {isDrawingSample ? "جاري سحب العينات..." : "سحب العينات وحفظها"}
+        </button>
+      </div>
+
+      {processingMessage && (
+        <div className="upload-warning" role="status">
+          {processingMessage}
+        </div>
+      )}
+
+      {sampleSaveMessage && (
+        <div
+          className={sampleSaveMessage.type === "ok" ? "msg-success" : "msg-error"}
+          role="status"
+        >
+          {sampleSaveMessage.text}
+        </div>
+      )}
+
+      {sampleDrawResult && (
+        <SampleResultReport
+          data={sampleDrawResult}
+          canRedraw={canDrawSample && !isDrawingSample}
+          onRedraw={onDrawSample}
+        />
+      )}
     </section>
   );
 }
@@ -477,31 +553,23 @@ export default function PhaseThreeSampling({
  * explanation — this names each affected stratum, what was requested vs. what
  * was actually drawn, and why (insufficient CertScan rows available), so that
  * gap can never again pass unnoticed.
+ *
+ * KEPT deliberately through the 2026-08 redesign: the handoff's "do not design
+ * for a CertScan shortfall" note governs the MOCK's chosen state, not the
+ * runtime. A real shortfall must still be reported — only the styling changed.
  */
 function CertScanShortfallReport({ shortfalls }: { shortfalls: CertScanShortfall[] }) {
   if (shortfalls.length === 0) return null;
   const L = getLabels();
   return (
-    <div
-      className="sample-certscan-shortfall-report"
-      role="alert"
-      style={{
-        margin: "0 0 16px",
-        padding: "12px 16px",
-        borderRadius: 10,
-        border: "1px solid #d97706",
-        background: "rgba(217,119,6,.08)",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, fontSize: 16 }}>
-        <AlertTriangle size={16} aria-hidden />
+    <div className="p3-result-banner warn sample-certscan-shortfall-report" role="alert">
+      <div className="p3-result-banner-title">
+        <AlertTriangle size={15} aria-hidden />
         {L.sampling_certscan_shortfall_result_title}
       </div>
-      <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--p-muted)" }}>
-        {L.sampling_certscan_shortfall_result_intro}
-      </p>
+      <p className="p3-result-banner-note">{L.sampling_certscan_shortfall_result_intro}</p>
       {shortfalls.map((s, i) => (
-        <p key={`${s.stageKey}-${s.portName ?? "stage"}-${i}`} className="sampling-warn" role="alert" style={{ margin: "6px 0 0" }}>
+        <p key={`${s.stageKey}-${s.portName ?? "stage"}-${i}`} className="p3-result-banner-row" role="alert">
           {fillTemplate(
             s.portName === null
               ? L.sampling_certscan_shortfall_result_row_stage
@@ -523,36 +591,23 @@ function CertScanShortfallReport({ shortfalls }: { shortfalls: CertScanShortfall
 /**
  * Prominent post-draw exclusion banner (P4, 2026-08). Rows whose raw `stage`
  * value matched none of the four configured aliases never enter the draw at
- * all — they used to vanish with zero diagnostic on the success path. This
- * surfaces the count (and a sample of the offending raw values) so a
- * misconfigured/typo'd stage mapping can never again silently shrink the
- * population a sample is actually drawn from.
+ * all — they used to vanish with zero diagnostic on the success path.
  */
 function UnmappedStageWarning({ data }: { data: SampleMasterData }) {
   const count = data.unmappedStageRowCount ?? 0;
   if (count <= 0) return null;
   const L = getLabels();
   return (
-    <div
-      className="sampling-unmapped-stage-warning"
-      role="alert"
-      style={{
-        margin: "0 0 16px",
-        padding: "12px 16px",
-        borderRadius: 10,
-        border: "1px solid #d97706",
-        background: "rgba(217,119,6,.08)",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, fontSize: 16 }}>
-        <AlertTriangle size={16} aria-hidden />
+    <div className="p3-result-banner warn sampling-unmapped-stage-warning" role="alert">
+      <div className="p3-result-banner-title">
+        <AlertTriangle size={15} aria-hidden />
         {L.sampling_unmapped_stage_warning_title}
       </div>
-      <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--p-muted)" }}>
+      <p className="p3-result-banner-note">
         {fillTemplate(L.sampling_unmapped_stage_warning_intro, { count: formatNumber(count) })}
       </p>
       {(data.unmappedStageRawValues ?? []).length > 0 && (
-        <p style={{ margin: "6px 0 0", fontSize: 12 }}>
+        <p className="p3-result-banner-row">
           {L.sampling_unmapped_stage_warning_values_label}{" "}
           {(data.unmappedStageRawValues ?? []).join("، ")}
         </p>
@@ -561,48 +616,101 @@ function UnmappedStageWarning({ data }: { data: SampleMasterData }) {
   );
 }
 
-function SampleResultReport({ data }: { data: SampleMasterData }) {
+function SampleResultReport({
+  data,
+  canRedraw,
+  onRedraw,
+}: {
+  data: SampleMasterData;
+  canRedraw: boolean;
+  onRedraw: () => void;
+}) {
+  const L = getLabels();
+  const shortfall = data.totalRequested - data.totalActual;
   return (
-    <section className="sample-result-section" aria-label="نتائج العينة">
-      <h3>نتائج سحب عينة المستويات المشتركة</h3>
+    <section className="p3-result-card sample-result-section" aria-label="نتائج العينة">
+      <div className="p3-result-head">
+        <h3>{L.p3_result_title}</h3>
+        <span className="p3-status-pill ok">
+          <CheckCircle2 size={12} aria-hidden /> {L.p3_result_saved_pill}
+        </span>
+        <span className="p3-result-meta">
+          {new Date(data.drawnAt).toLocaleString("ar-SA-u-nu-latn")} · <code>{data.rngSeed}</code>
+        </span>
+        <button type="button" className="p3-redraw-btn" onClick={onRedraw} disabled={!canRedraw}>
+          <RefreshCw size={13} aria-hidden /> {L.p3_result_redraw}
+        </button>
+      </div>
 
       <UnmappedStageWarning data={data} />
       <CertScanShortfallReport shortfalls={data.certScanShortfalls ?? []} />
 
-      <div className="sample-kpi-grid">
-        <SummaryCard label="المستهدف الكلي"       value={data.totalRequested} />
-        <SummaryCard label="المسحوب الكلي فعلياً"  value={data.totalActual} />
-        <SummaryCard label="سجلات CertScan"        value={data.certScanActual} />
-        <SummaryCard label="سجلات عادية"           value={data.nonCertScanActual} />
+      <div className="p3-result-tiles">
+        <div className="p3-result-tile">
+          <span className="p3-tile-label">{L.p3_result_tile_actual}</span>
+          <strong className="p3-tile-value num">{formatNumber(data.totalActual)}</strong>
+          <span className="p3-tile-note">
+            {shortfall > 0
+              ? fillTemplate(L.p3_result_tile_actual_note_short, { diff: formatNumber(shortfall) })
+              : L.p3_result_tile_actual_note_match}
+          </span>
+        </div>
+        <div className="p3-result-tile">
+          <span className="p3-tile-label">{L.p3_result_tile_target}</span>
+          <strong className="p3-tile-value num">{formatNumber(data.totalRequested)}</strong>
+          <span className="p3-tile-note">{L.p3_result_tile_target_note}</span>
+        </div>
+        <div className="p3-result-tile">
+          <span className="p3-tile-label">{L.p3_result_tile_certscan}</span>
+          <strong className="p3-tile-value num">{formatNumber(data.certScanActual)}</strong>
+          <span className="p3-tile-note">
+            {fillTemplate(L.p3_result_tile_share_note, {
+              percent: formatPercent(data.certScanActual, data.totalActual),
+            })}
+          </span>
+        </div>
+        <div className="p3-result-tile">
+          <span className="p3-tile-label">{L.p3_result_tile_normal}</span>
+          <strong className="p3-tile-value num">{formatNumber(data.nonCertScanActual)}</strong>
+          <span className="p3-tile-note">
+            {fillTemplate(L.p3_result_tile_share_note, {
+              percent: formatPercent(data.nonCertScanActual, data.totalActual),
+            })}
+          </span>
+        </div>
       </div>
 
       {(data.stageAllocations ?? []).length > 0 && (
-        <div className="report-sheet-table" role="table" style={{ marginTop: "16px" }}>
-          <div className="report-sheet-header sample-stage-row" role="row">
-            <span>المستوى</span>
-            <span>المجتمع</span>
-            <span>المستهدف</span>
-            <span>CertScan</span>
-            <span>NonCertScan</span>
-            <span>المسحوب</span>
+        <div className="p3-result-table" role="table">
+          <div className="p3-result-row p3-result-table-header" role="row">
+            <span role="columnheader">{L.p3_plan_col_stage}</span>
+            <span role="columnheader" className="num">{L.p3_plan_col_population}</span>
+            <span role="columnheader" className="num">{L.p3_result_tile_target}</span>
+            <span role="columnheader" className="num">{L.p3_result_tile_certscan}</span>
+            <span role="columnheader" className="num">{L.p3_result_tile_normal}</span>
+            <span role="columnheader" className="num">{L.p3_result_tile_actual}</span>
+            <span role="columnheader">{L.p3_result_col_diff}</span>
           </div>
-          {data.stageAllocations.map(s => (
-            <div key={s.stageKey} className="report-sheet-row sample-stage-row" role="row">
-              <span>{s.stageLabel}</span>
-              <span>{formatNumber(s.populationSize)}</span>
-              <span>{formatNumber(s.targetQuota)}</span>
-              <span>{formatNumber(s.certScanDrawn)}</span>
-              <span>{formatNumber(s.nonCertScanDrawn)}</span>
-              <span>{formatNumber(s.actualDrawn)}</span>
-            </div>
-          ))}
+          {data.stageAllocations.map(s => {
+            const diff = s.targetQuota - s.actualDrawn;
+            return (
+              <div key={s.stageKey} className="p3-result-row" role="row">
+                <span>{s.stageLabel}</span>
+                <span className="num">{formatNumber(s.populationSize)}</span>
+                <span className="num">{formatNumber(s.targetQuota)}</span>
+                <span className="num">{formatNumber(s.certScanDrawn)}</span>
+                <span className="num">{formatNumber(s.nonCertScanDrawn)}</span>
+                <strong className="num">{formatNumber(s.actualDrawn)}</strong>
+                <span className={diff > 0 ? "p3-result-diff short" : "p3-result-diff done"}>
+                  {diff > 0
+                    ? fillTemplate(L.p3_result_diff_short, { diff: formatNumber(diff) })
+                    : L.p3_result_diff_complete}
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
-
-      <p style={{ marginTop: "10px", fontSize: "12px", color: "var(--p-muted)" }}>
-        رمز التوزيع العشوائي: <code>{data.rngSeed}</code> — تم السحب:{" "}
-        {new Date(data.drawnAt).toLocaleString("ar-SA-u-nu-latn")}
-      </p>
     </section>
   );
 }

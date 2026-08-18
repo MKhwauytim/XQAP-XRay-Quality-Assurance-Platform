@@ -15,6 +15,17 @@
   --sb-accent-2:   var(--brand-innovation);
   --sb-gold:       var(--brand-premium);
   --sb-accent-sub: rgba(0, 154, 222, 0.18);
+
+  /* nav 1b — grouped rail, context card and footer */
+  --sb-rule:        linear-gradient(90deg, rgba(217, 190, 158, 0.28), transparent);
+  --sb-group-label: rgba(255, 255, 255, 0.38);
+  --sb-card-bg:     rgba(255, 255, 255, 0.045);
+  --sb-card-border: rgba(217, 190, 158, 0.16);
+  --sb-tile-bg:     rgba(255, 255, 255, 0.06);
+  --sb-tile-active: rgba(0, 154, 222, 0.22);
+  --sb-icon-active: var(--c-sky-on-navy);
+  --sb-badge-warn-bg: rgba(218, 163, 40, 0.20);
+  --sb-badge-warn-fg: var(--c-gold-on-navy);
 }
 
 /* ── Shell ─────────────────────────────────────────────────── */
@@ -23,7 +34,7 @@
   grid-column: 2;
   grid-row: 1;
 
-  width: 280px;
+  width: 296px;
   min-height: calc(100vh - var(--topbar-height, 56px));
 
   display: flex;
@@ -32,10 +43,10 @@
   direction: rtl;
 
   background:
-    linear-gradient(180deg, rgba(16, 207, 201, 0.06), transparent 240px),
+    linear-gradient(180deg, rgba(16, 207, 201, 0.07), transparent 320px),
     var(--sb-bg);
 
-  box-shadow: -1px 0 0 rgba(217, 190, 158, 0.08);
+  box-shadow: -1px 0 0 rgba(217, 190, 158, 0.10);
 
   transition:
     width var(--t-slow) var(--ease-spring),
@@ -49,31 +60,29 @@
 /* ── Header ────────────────────────────────────────────────── */
 
 .sidebar-header {
-  min-height: 92px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 38px;
-  grid-template-rows: auto auto;
-  align-items: center;
-  column-gap: 14px;
-  row-gap: 14px;
-
-  padding: 16px 16px 18px;
+  padding: 16px 16px 14px;
 
   background: linear-gradient(135deg, var(--sb-bg-2), #0E2B51);
   border-bottom: 1px solid var(--sb-border);
 }
 
+.sidebar-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
 /* ── ZATCA identity mark ───────────────────────────────────── */
 
 .sidebar-logo {
-  grid-column: 1;
-  grid-row: 1;
-  justify-self: start;
-
-  height: 38px;
+  height: 34px;
   width: auto;
-  max-width: 190px;
+  max-width: 170px;
   object-fit: contain;
 
   /* recolor the dark/teal SVG to white for the navy nav (tweak the token) */
@@ -82,60 +91,49 @@
 }
 
 .sidebar-title-wrap {
-  grid-column: 1 / -1;
-  grid-row: 2;
   min-width: 0;
   display: grid;
-  gap: 5px;
+  gap: 4px;
   overflow: hidden;
+
+  /* Gold rule on the inline-start edge — RTL-correct via the logical property. */
+  padding-inline-start: 10px;
+  border-inline-start: 2px solid var(--sb-gold);
 }
 
 .sidebar-kicker {
   color: var(--sb-accent-2);
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 10.5px;
+  font-weight: 700;
   line-height: 1;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   white-space: nowrap;
 }
 
 .sidebar-title {
   margin: 0;
-  color: #FFFFFF;
-  font-size: 19px;
+  color: var(--c-surface);
+  font-size: 18px;
   font-weight: 700;
-  line-height: 1.3;
+  line-height: 1.25;
   white-space: nowrap;
   letter-spacing: 0;
-}
-
-.sidebar-subtitle {
-  margin: 0;
-  color: var(--sb-text-muted);
-  font-size: 11.5px;
-  font-weight: 500;
-  line-height: 1.4;
-  white-space: nowrap;
-  letter-spacing: 0.01em;
 }
 
 /* ── Collapse Button ───────────────────────────────────────── */
 
 .sidebar-collapse-button {
-  grid-column: 2;
-  grid-row: 1;
-
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
 
   display: grid;
   place-items: center;
   flex: 0 0 auto;
 
-  border: 1px solid var(--sb-border);
-  border-radius: var(--r-sm);
+  border: 1px solid rgba(217, 190, 158, 0.18);
+  border-radius: var(--r-md);
 
-  background: var(--sb-hover-bg);
+  background: var(--sb-tile-bg);
   color: var(--sb-text);
 
   cursor: pointer;
@@ -156,8 +154,8 @@
 }
 
 .sidebar-collapse-icon {
-  width: 18px;
-  height: 18px;
+  width: 17px;
+  height: 17px;
   transition: transform var(--t-slow) var(--ease-spring);
 }
 
@@ -169,6 +167,45 @@
   display: none;
 }
 
+/* ── Month + workspace context card (nav 1b) ───────────────── */
+
+.sidebar-context-card {
+  margin: var(--sp-3) var(--sp-3) 6px;
+  padding: 11px var(--sp-3);
+
+  display: grid;
+  gap: 9px;
+
+  border: 1px solid var(--sb-card-border);
+  border-radius: var(--r-lg);
+  background: var(--sb-card-bg);
+}
+
+.sidebar-context-workspace {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  padding-top: var(--sp-2);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.sidebar-context-workspace > svg {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.sidebar-context-workspace-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── Navigation ────────────────────────────────────────────── */
 
 .sidebar-nav {
@@ -176,22 +213,41 @@
   flex-direction: column;
   gap: 2px;
 
-  padding: 12px 10px;
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
 
   overflow-y: auto;
   flex: 1;
 }
 
+.sidebar-nav-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Group heading: label + a hairline that fades out toward the inline end. */
 .sidebar-nav-heading {
-  margin: 0 8px 6px;
-  padding: 0 4px 8px;
-  color: rgba(255, 255, 255, 0.42);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 11px;
-  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 14px 2px var(--sp-2);
+
+  color: var(--sb-group-label);
+  font-size: 10.5px;
+  font-weight: 700;
   line-height: 1;
-  letter-spacing: 0;
-  text-transform: none;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.sidebar-nav-section:first-child .sidebar-nav-heading {
+  margin-top: 10px;
+}
+
+.sidebar-nav-heading-rule {
+  height: 1px;
+  flex: 1;
+  background: var(--sb-rule);
 }
 
 .sidebar-nav-item {
@@ -203,12 +259,12 @@
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: var(--sp-3);
+  gap: 11px;
 
   border: 0;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-lg);
 
-  padding: 11px 13px;
+  padding: 10px var(--sp-3);
 
   background: transparent;
   color: var(--sb-text);
@@ -232,39 +288,69 @@
 
 .sidebar-nav-item:hover {
   background: var(--sb-hover-bg);
-  color: #FFFFFF;
+  color: var(--c-surface);
 }
 
+/* The accent sits on the INLINE-START edge, which in this RTL rail is the
+   right-hand side — hence the negative inset offset, not a positive one. */
 .sidebar-nav-item.active {
   background:
-    linear-gradient(90deg, rgba(0, 154, 222, 0.26), rgba(0, 154, 222, 0.10) 70%, transparent);
-  color: #FFFFFF;
+    linear-gradient(90deg, rgba(0, 154, 222, 0.28), rgba(0, 154, 222, 0.06) 76%, transparent);
+  color: var(--c-surface);
   font-weight: 700;
-  box-shadow:
-    inset 3px 0 0 var(--sb-accent),
-    0 4px 14px rgba(0, 154, 222, 0.20);
-}
-
-.sidebar-nav-item.active .sidebar-nav-icon {
-  filter: drop-shadow(0 0 6px rgba(0, 154, 222, 0.55));
+  box-shadow: inset -3px 0 0 var(--sb-accent-2);
 }
 
 .sidebar-nav-icon {
-  width: 20px;
-  height: 20px;
+  width: 26px;
+  height: 26px;
 
   display: grid;
   place-items: center;
-  flex: 0 0 20px;
+  flex: 0 0 26px;
 
+  border-radius: var(--r-md);
+  background: var(--sb-tile-bg);
   color: rgba(160, 210, 240, 0.95);
-  opacity: 1;
+
+  transition:
+    background-color var(--t-fast) var(--ease-smooth),
+    color            var(--t-fast) var(--ease-smooth);
 }
 
-.sidebar-nav-item:hover .sidebar-nav-icon,
 .sidebar-nav-item.active .sidebar-nav-icon {
-  opacity: 1;
-  color: var(--sb-accent);
+  background: var(--sb-tile-active);
+  color: var(--sb-icon-active);
+}
+
+/* Count badge — pushed to the inline end, ahead of any chevron. */
+.sidebar-nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  margin-inline-start: auto;
+
+  border-radius: 999px;
+  background: var(--sb-badge-warn-bg);
+  color: var(--sb-badge-warn-fg);
+
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar-nav-badge.is-alert {
+  background: var(--brand-error);
+  color: var(--c-surface);
+}
+
+/* With a badge present the chevron must not also claim the auto margin. */
+.sidebar-nav-badge + .sidebar-chevron {
+  margin-inline-start: 6px;
 }
 
 .sidebar-icon {
@@ -285,19 +371,16 @@
 /* ── Collapsed State ───────────────────────────────────────── */
 
 .sidebar.collapsed .sidebar-header {
-  justify-items: center;
-  grid-template-columns: 1fr;
-  grid-template-rows: auto;
+  align-items: center;
   min-height: 80px;
-  padding: 18px 12px;
+  padding: 18px var(--sp-3);
+}
+
+.sidebar.collapsed .sidebar-header-top {
+  justify-content: center;
 }
 
 .sidebar.collapsed .sidebar-logo { display: none; }
-
-.sidebar.collapsed .sidebar-collapse-button {
-  grid-column: 1;
-  grid-row: 1;
-}
 
 .sidebar.collapsed .sidebar-title-wrap {
   display: none;
@@ -314,7 +397,7 @@
 }
 
 .sidebar.collapsed .sidebar-nav-item.active {
-  box-shadow: inset 0 -3px 0 var(--sb-accent);
+  box-shadow: inset 0 -3px 0 var(--sb-accent-2);
 }
 
 .sidebar.collapsed .sidebar-nav-label {
@@ -362,26 +445,26 @@
 .sidebar-subtab-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 6px 0 10px 0;
-  border-inline-start: 2px solid rgba(255, 255, 255, 0.10);
-  margin: 2px 21px 4px 0;
+  gap: 3px;
+  padding: 6px 0 var(--sp-2);
+  border-inline-start: 1px solid rgba(255, 255, 255, 0.12);
+  margin: 0 34px 2px 4px;
 }
 
 .sidebar-subtab-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 13px 8px 10px;
-  font-size: 12.5px;
-  font-weight: 700;
-  color: var(--sb-text-muted);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  text-align: right;
+  gap: 9px;
   width: 100%;
-  border-radius: 8px 0 0 8px;
+  padding: 7px var(--sp-3);
+  border: none;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: rgba(249, 248, 244, 0.6);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: right;
+  cursor: pointer;
   transition:
     color      var(--t-fast) var(--ease-smooth),
     background var(--t-fast) var(--ease-smooth);
@@ -393,12 +476,98 @@
 }
 
 .sidebar-subtab-item.active {
-  color: #FFFFFF;
+  color: var(--c-surface);
   font-weight: 700;
-  background: var(--sb-accent-sub);
+  background: rgba(255, 255, 255, 0.09);
 }
 
-.sidebar-subtab-dot { display: none; }
+.sidebar-subtab-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  transition: background-color var(--t-fast) var(--ease-smooth);
+}
+
+.sidebar-subtab-item.active .sidebar-subtab-dot {
+  background: var(--sb-accent-2);
+}
+
+/* ── Footer: identity + logout (nav 1b) ────────────────────── */
+
+.sidebar-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+
+  padding: var(--sp-3) 14px;
+
+  border-top: 1px solid var(--sb-border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.sidebar-footer-avatar {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+
+  display: grid;
+  place-items: center;
+
+  border-radius: 999px;
+  background: rgba(0, 154, 222, 0.20);
+  color: var(--c-surface);
+
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.sidebar-footer-identity {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.sidebar-footer-name {
+  color: var(--c-surface);
+  font-size: 12.5px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-footer-role {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.sidebar-footer-logout {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+
+  display: grid;
+  place-items: center;
+
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--r-md);
+  background: var(--sb-tile-bg);
+  color: rgba(255, 255, 255, 0.8);
+
+  cursor: pointer;
+  transition:
+    background-color var(--t-fast) var(--ease-smooth),
+    color            var(--t-fast) var(--ease-smooth);
+}
+
+.sidebar-footer-logout:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--c-surface);
+}
 
 /* ── Scrollbar (dark-themed) ───────────────────────────────── */
 
@@ -412,7 +581,8 @@
 .sidebar-collapse-button:focus-visible,
 .sidebar-mobile-close:focus-visible,
 .sidebar-nav-item:focus-visible,
-.sidebar-subtab-item:focus-visible {
+.sidebar-subtab-item:focus-visible,
+.sidebar-footer-logout:focus-visible {
   outline: 2px solid var(--sb-accent);
   outline-offset: 2px;
 }
@@ -470,10 +640,6 @@
     gap: 11px;
   }
 
-  .sidebar.collapsed .sidebar-nav-item.active {
-    box-shadow: inset 3px 0 0 var(--sb-accent);
-  }
-
   .sidebar.collapsed .sidebar-nav-label {
     display: inline;
   }
@@ -483,11 +649,9 @@
   }
 
   .sidebar-mobile-close {
-    grid-column: 2;
-    grid-row: 1;
     display: grid;
-    width: 36px;
-    height: 36px;
+    width: 34px;
+    height: 34px;
     place-items: center;
     padding: 0;
     border: 1px solid var(--sb-border);
@@ -498,19 +662,21 @@
   }
 
   .sidebar.collapsed .sidebar-header {
-    justify-items: stretch;
-    grid-template-columns: minmax(0, 1fr) 38px;
-    grid-template-rows: auto auto;
-    padding: 16px 16px 18px;
+    align-items: stretch;
+    padding: 16px 16px 14px;
+  }
+
+  .sidebar.collapsed .sidebar-header-top {
+    justify-content: space-between;
   }
 
   .sidebar.collapsed .sidebar-logo {
     display: block;
   }
 
-  .sidebar.collapsed .sidebar-mobile-close {
-    grid-column: 2;
-    grid-row: 1;
+  /* Mobile drawer always shows the full rail, never the icon-only variant. */
+  .sidebar.collapsed .sidebar-nav-item.active {
+    box-shadow: inset -3px 0 0 var(--sb-accent-2);
   }
 }
 

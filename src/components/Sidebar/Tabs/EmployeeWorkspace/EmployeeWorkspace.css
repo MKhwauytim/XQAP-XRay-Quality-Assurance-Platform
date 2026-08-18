@@ -1109,16 +1109,9 @@
   font-weight: 700;
 }
 
-.ew-ref-workspace .ip-panel {
-  border-radius: 8px;
-  box-shadow: none;
-}
-
-.ew-ref-workspace .ip-header {
-  padding: var(--sp-3) var(--sp-3) var(--sp-2);
-  background: var(--c-surface);
-}
-
+/* 7a: the panel owns its own radius/shadow/header/field metrics now — the
+   page-level overrides that used to flatten them were removed. What remains
+   here is only the compact sizing the narrow split column genuinely needs. */
 .ew-ref-workspace .ip-header-top {
   align-items: center;
   margin-bottom: var(--sp-2);
@@ -1169,20 +1162,6 @@
 .ew-ref-workspace .ip-field {
   gap: var(--sp-1);
   margin-bottom: var(--sp-3);
-}
-
-.ew-ref-workspace .ip-field-label {
-  font-size: 12.5px;
-}
-
-.ew-ref-workspace .ip-input,
-.ew-ref-workspace .ip-select {
-  padding: var(--sp-2) var(--sp-3);
-  font-size: 13px;
-}
-
-.ew-ref-workspace .ip-footer {
-  padding: var(--sp-3) var(--sp-3);
 }
 
 .ew-ref-stats {

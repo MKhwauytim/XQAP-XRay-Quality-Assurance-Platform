@@ -45,7 +45,6 @@ function renderToolbar() {
       session={session}
       previewRole={null}
       onPreviewRoleChange={() => {}}
-      onLogout={() => {}}
       onFeedback={() => {}}
     />
   );
@@ -143,7 +142,6 @@ describe("AdminToolbar — the manual sync trigger", () => {
         session={{ ...session, role: "admin", username: "viewer", mode: "demo" }}
         previewRole={null}
         onPreviewRoleChange={() => {}}
-        onLogout={() => {}}
         onFeedback={() => {}}
       />
     );

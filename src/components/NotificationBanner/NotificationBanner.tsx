@@ -1,29 +1,29 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { Check, Pin } from "lucide-react";
 
 import type { AuthSession } from "../../auth/authTypes";
 import type { DirectoryHandleLike } from "../../data/storage/fileSystemAccess";
 import { getLabels } from "../../data/labels/labelsStore";
 import { useLabels } from "../../data/labels/useLabels";
-import { logRejection } from "../../data/storage/errorLogger";
-import {
-  acceptNotification,
-  loadNotifications,
-} from "../../data/notifications/notificationStorage";
+import { acceptNotification } from "../../data/notifications/notificationStorage";
 import {
   getUnacceptedFor,
-  isNotificationAudienceRole,
   shouldShowBanner,
   type AppNotification,
 } from "../../data/notifications/notificationTypes";
-import { subscribeToDataRefresh } from "../../data/workspace/dataRefreshSignal";
 import "./NotificationBanner.css";
-
-const POLL_INTERVAL_MS = 60_000;
 
 type Props = {
   session: AuthSession;
   directoryHandle: DirectoryHandleLike | null;
+  /**
+   * The notification list and its reloader, owned by `AppContent` via
+   * `useWorkspaceNotifications` — the app's single poll. The sidebar's
+   * unacknowledged badge reads the same list, so this component no longer
+   * fetches it itself.
+   */
+  notifications: AppNotification[];
+  onReload: () => Promise<void>;
 };
 
 /**
@@ -32,42 +32,15 @@ type Props = {
  * are polled from the workspace on mount, on window focus, and on a short
  * interval (the plan's accepted refresh model). Self-hides for every other case.
  */
-export function NotificationBanner({ session, directoryHandle }: Props) {
+export function NotificationBanner({
+  session,
+  directoryHandle,
+  notifications,
+  onReload,
+}: Props) {
   useLabels();
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [accepting, setAccepting] = useState(false);
   const [acceptError, setAcceptError] = useState<string | null>(null);
-
-  const audience = isNotificationAudienceRole(session.role);
-
-  const reload = useCallback(async () => {
-    if (!directoryHandle || !audience) return;
-    try {
-      setNotifications(await loadNotifications(directoryHandle));
-    } catch {
-      // Best-effort: a failed poll just leaves the last-known list in place.
-    }
-  }, [directoryHandle, audience]);
-
-  useEffect(() => {
-    if (!audience || !directoryHandle) return;
-    // Initial load via promise-chain (not `void reload()`) so setState lands in
-    // a `.then` callback, not synchronously in the effect body.
-    loadNotifications(directoryHandle)
-      .then(setNotifications)
-      .catch(logRejection("notificationBanner:loadNotifications"));
-    const onFocus = () => void reload();
-    window.addEventListener("focus", onFocus);
-    const interval = window.setInterval(() => void reload(), POLL_INTERVAL_MS);
-    // Also react instantly to the app-wide refresh signal (manual toolbar
-    // button + the automatic 45s sync run) instead of waiting up to POLL_INTERVAL_MS.
-    const unsubscribeDataRefresh = subscribeToDataRefresh(() => void reload());
-    return () => {
-      window.removeEventListener("focus", onFocus);
-      window.clearInterval(interval);
-      unsubscribeDataRefresh();
-    };
-  }, [audience, directoryHandle, reload]);
 
   // Hide when no workspace is connected, or when the shared audience+acceptance
   // rule (notificationTypes.shouldShowBanner) says this user has nothing
@@ -91,7 +64,7 @@ export function NotificationBanner({ session, directoryHandle }: Props) {
       // B6: surface a CAS write conflict instead of dropping the acknowledgement.
       const result = await acceptNotification(directoryHandle, current.id, session.username);
       if (result.ok) {
-        await reload();
+        await onReload();
       } else {
         setAcceptError(result.error);
       }

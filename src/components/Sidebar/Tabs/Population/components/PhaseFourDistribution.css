@@ -1,0 +1,563 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   المرحلة 4 — توزيع العينة (design handoff panel `5c`, 2026-08)
+
+   Presentation only: one employees × stages matrix instead of per-stage tabs
+   plus a separate preview table, and المراجعة اليدوية as an in-place
+   disclosure. Colours come from src/index.css tokens only (raw #hex literals
+   are a CI gate failure). RTL is the default — logical properties throughout.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.p4 .num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── header pill switch ───────────────────────────────────────────────── */
+.p4-pill-switch {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
+  background: var(--c-surface-2);
+}
+
+.p4-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: var(--fw-semibold);
+  color: var(--c-ink-3);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease-smooth),
+              color var(--t-fast) var(--ease-smooth);
+}
+
+.p4-pill.active {
+  background: var(--brand-deep-bg);
+  color: var(--c-surface);
+  font-weight: var(--fw-bold);
+}
+
+.p4-pill:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* ── top row: حالة التوزيع + bulk panel ───────────────────────────────── */
+.p4-top-row {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 18px;
+  margin-block: 14px;
+}
+
+@media (max-width: 1100px) {
+  .p4-top-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.p4-state-card,
+.p4-bulk-card,
+.p4-matrix-card,
+.p4-manual-card {
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-xl);
+  background: var(--c-surface);
+  box-shadow: var(--sh-sm);
+}
+
+.p4-state-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px;
+  border-inline-start: 3px solid var(--brand-digital);
+}
+
+.p4-state-title {
+  font-size: 11.5px;
+  font-weight: var(--fw-bold);
+  color: var(--c-ink-3);
+}
+
+.p4-state-headline {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.p4-state-percent {
+  font-size: 46px;
+  line-height: var(--lh-tight);
+  font-weight: var(--fw-bold);
+  color: var(--c-ink);
+}
+
+.p4-state-sub {
+  font-size: 12.5px;
+  font-weight: var(--fw-semibold);
+  color: var(--c-ink-3);
+}
+
+.p4-state-bar {
+  display: flex;
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--c-border);
+}
+
+.p4-state-bar .seg {
+  display: block;
+  height: 100%;
+  transition: width var(--t-base) var(--ease-smooth);
+}
+
+.p4-state-bar .seg.completed  { background: var(--brand-forest); }
+.p4-state-bar .seg.pending    { background: var(--brand-digital); }
+.p4-state-bar .seg.replaced   { background: var(--brand-premium); }
+.p4-state-bar .seg.unassigned { background: var(--c-border); }
+
+.p4-state-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.p4-state-legend > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  color: var(--c-ink-2);
+}
+
+.p4-state-legend strong {
+  margin-inline-start: auto;
+  font-size: 12.5px;
+  font-weight: var(--fw-bold);
+  color: var(--c-ink);
+}
+
+.p4-state-legend .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: none;
+}
+
+.p4-state-legend .dot.completed  { background: var(--brand-forest); }
+.p4-state-legend .dot.pending    { background: var(--brand-digital); }
+.p4-state-legend .dot.replaced   { background: var(--brand-premium); }
+.p4-state-legend .dot.unassigned { background: var(--c-border-2); }
+
+/* ── bulk panel ───────────────────────────────────────────────────────── */
+.p4-bulk-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px;
+}
+
+.p4-bulk-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.p4-bulk-head h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: var(--fw-bold);
+  color: var(--c-ink);
+}
+
+.p4-bulk-head .primary-action {
+  margin-inline-start: auto;
+}
+
+.p4-bulk-desc {
+  margin: 0;
+  max-width: 620px;
+  font-size: 12.5px;
+  line-height: var(--lh-normal);
+  color: var(--c-ink-3);
+}
+
+.p4-info-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border: 1px solid var(--c-info-border);
+  border-radius: var(--r-lg);
+  background: var(--c-sky-light);
+  color: var(--c-sky-text);
+  font-size: 12px;
+  line-height: var(--lh-normal);
+}
+
+.p4-info-strip.muted {
+  border-color: var(--c-border);
+  background: var(--c-surface-2);
+  color: var(--c-ink-3);
+}
+
+.p4-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-2);
+  font-size: 12px;
+  line-height: var(--lh-normal);
+}
+
+.p4-alert.warn {
+  border-color: var(--c-warning-border);
+  background: var(--c-warning-bg);
+  color: var(--c-warning);
+}
+
+.p4-alert-tag {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--c-surface);
+  font-size: 10.5px;
+  font-weight: var(--fw-bold);
+}
+
+/* ── حصص الخبراء عبر المستويات ────────────────────────────────────────── */
+.p4-matrix-card {
+  overflow: hidden;
+}
+
+.p4-matrix-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  border-block-end: 1px solid var(--c-border);
+  background: linear-gradient(90deg, var(--c-sky-light), transparent 60%);
+}
+
+.p4-matrix-head h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: var(--fw-bold);
+  color: var(--c-ink);
+}
+
+.p4-matrix-caption {
+  font-size: 11.5px;
+  color: var(--c-ink-3);
+}
+
+.p4-matrix-stage-counts {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-inline-start: auto;
+  font-size: 11px;
+  color: var(--c-ink-3);
+}
+
+.p4-matrix-stage-counts strong {
+  color: var(--c-ink-2);
+}
+
+.p4-matrix-table {
+  overflow-x: auto;
+}
+
+.p4-matrix-row {
+  display: grid;
+  grid-template-columns:
+    minmax(190px, 1.3fr) repeat(4, minmax(96px, 0.8fr)) 118px 96px 96px 104px;
+  align-items: center;
+  gap: 8px;
+  min-width: 1040px;
+  padding: 8px 16px;
+  border-block-end: 1px solid var(--c-border);
+  font-size: 12.5px;
+  color: var(--c-ink-2);
+}
+
+.p4-matrix-header {
+  padding-block: 9px;
+  background: var(--c-surface-2);
+  font-size: 10.5px;
+  font-weight: var(--fw-bold);
+  color: var(--c-ink-3);
+}
+
+.p4-matrix-row.excluded {
+  color: var(--c-ink-4);
+  background: var(--c-surface-2);
+}
+
+.p4-expert {
+  display: flex;
+  flex-direction: column;
+  line-height: var(--lh-tight);
+}
+
+.p4-expert strong {
+  font-size: 13px;
+  font-weight: var(--fw-bold);
+  color: var(--c-ink);
+}
+
+.p4-matrix-row.excluded .p4-expert strong {
+  color: var(--c-ink-3);
+}
+
+.p4-expert code {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--c-ink-4);
+}
+
+.p4-matrix-input {
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--c-border);
+  border-radius: 7px;
+  background: var(--c-surface);
+  font-family: inherit;
+  font-size: 12.5px;
+  color: var(--c-ink);
+  direction: ltr;
+  text-align: center;
+  transition: border-color var(--t-fast) var(--ease-smooth),
+              box-shadow var(--t-fast) var(--ease-smooth);
+}
+
+.p4-matrix-input:focus-visible {
+  outline: none;
+  border-color: var(--brand-digital);
+  box-shadow: var(--focus-ring);
+}
+
+.p4-matrix-input:disabled {
+  background: var(--c-surface-2);
+  color: var(--c-ink-4);
+  cursor: not-allowed;
+}
+
+/* Fix (population, 2026-08-18): a nonzero value that is NOT actually counted
+   (a leftover from the pre-matrix per-stage checkbox). Dashed warning border
+   so it reads as "check this", distinct from the plain-disabled treatment
+   above, which means "you cannot edit this" rather than "this is wrong". */
+.p4-matrix-input.is-inactive-legacy {
+  border-style: dashed;
+  border-color: var(--c-warning-border);
+}
+
+.p4-matrix-new {
+  font-size: 14px;
+  font-weight: var(--fw-bold);
+  color: var(--c-ink);
+}
+
+.p4-excluded-tag {
+  font-size: 11px;
+  font-weight: var(--fw-bold);
+  color: var(--c-ink-4);
+}
+
+.p4-matrix-totals {
+  border-block-end: none;
+  background: var(--c-surface-2);
+  font-weight: var(--fw-bold);
+  color: var(--c-ink);
+}
+
+.p4-total-share.ok    { color: var(--c-success); }
+.p4-total-share.warn  { color: var(--c-warning); }
+.p4-total-share.mixed { color: var(--c-ink-3); }
+
+.p4-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-2);
+  font-size: 11px;
+  font-weight: var(--fw-bold);
+  color: var(--c-ink-3);
+  white-space: nowrap;
+}
+
+.p4-status-pill.ok {
+  background: var(--c-success-bg);
+  border-color: var(--c-success-border);
+  color: var(--c-success);
+}
+
+.p4-status-pill.muted {
+  color: var(--c-ink-4);
+}
+
+/* ── المراجعة اليدوية (in-place disclosure) ───────────────────────────── */
+.p4-manual-card {
+  margin-block-start: 14px;
+  overflow: hidden;
+}
+
+.p4-manual-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 16px;
+  border: none;
+  background: var(--c-surface-2);
+  font-family: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.p4-manual-summary:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.p4-manual-summary h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: var(--fw-bold);
+  color: var(--c-ink);
+}
+
+.p4-manual-caption,
+.p4-manual-hint {
+  font-size: 11.5px;
+  color: var(--c-ink-3);
+}
+
+.p4-manual-hint {
+  margin-inline-start: auto;
+  font-weight: var(--fw-bold);
+  color: var(--c-sky-text);
+}
+
+.p4-manual-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-md);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  color: var(--c-ink-3);
+  transition: transform var(--t-fast) var(--ease-smooth);
+}
+
+.p4-manual-card.open .p4-manual-chevron {
+  transform: rotate(180deg);
+}
+
+.p4-manual-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  border-block-end: 1px solid var(--c-border);
+}
+
+.p4-status-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.p4-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
+  background: var(--c-surface);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: var(--fw-semibold);
+  color: var(--c-ink-2);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease-smooth),
+              color var(--t-fast) var(--ease-smooth);
+}
+
+.p4-chip.active {
+  background: var(--brand-deep-bg);
+  border-color: var(--brand-deep-bg);
+  color: var(--c-surface);
+}
+
+.p4-chip:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.p4-manual-table {
+  overflow-x: auto;
+}
+
+.p4-manual-row {
+  display: grid;
+  grid-template-columns:
+    170px minmax(120px, 1fr) 110px 128px minmax(140px, 1fr) minmax(230px, 1.2fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 940px;
+  padding: 8px 16px;
+  border-block-end: 1px solid var(--c-border);
+  font-size: 12.5px;
+  color: var(--c-ink-2);
+}
+
+.p4-manual-header {
+  padding-block: 9px;
+  background: var(--c-surface-2);
+  font-size: 10.5px;
+  font-weight: var(--fw-bold);
+  color: var(--c-ink-3);
+}
+
+.p4-manual-row .dist-cell.mono {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--c-ink);
+}
+
+.p4-manual-row .dist-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.p4-no-action {
+  font-size: 11.5px;
+  color: var(--c-ink-4);
+}

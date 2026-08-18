@@ -313,7 +313,7 @@ describe("XrayReferrals — ad-hoc rows never write into the selected real month
     await waitFor(() => expect(screen.getAllByText(ADHOC_ID).length).toBeGreaterThan(0));
 
     fireEvent.click(
-      await waitFor(() => screen.getByRole("button", { name: "استبدال العينة" }))
+      await waitFor(() => screen.getByRole("button", { name: "طلب استبدال" }))
     );
     const dlg = await waitFor(() => screen.getByRole("dialog"));
     fireEvent.change(within(dlg).getByLabelText(/سبب الاستبدال/), { target: { value: "سبب" } });
@@ -358,7 +358,7 @@ describe("XrayReferrals — ad-hoc rows never write into the selected real month
     // which already routed correctly — confirmed so the setup isn't in doubt.
     const noteInput = (await waitFor(() => screen.getByLabelText("ملاحظة"))) as HTMLInputElement;
     fireEvent.change(noteInput, { target: { value: "ملاحظة الفحص" } });
-    fireEvent.click(screen.getByRole("button", { name: "تقديم" }));
+    fireEvent.click(screen.getByRole("button", { name: "تقديم الفحص" }));
     await waitFor(() => expect(screen.getByText("تم التقديم.")).toBeInTheDocument());
 
     const adhocAnswers = await loadEmployeeAnswers(root, ADHOC_FOLDER, "jalgahamdi");
@@ -406,7 +406,7 @@ describe("XrayReferrals — ad-hoc rows never write into the selected real month
 
     const noteInput = (await waitFor(() => screen.getByLabelText("ملاحظة"))) as HTMLInputElement;
     fireEvent.change(noteInput, { target: { value: "ملاحظة الفحص" } });
-    fireEvent.click(screen.getByRole("button", { name: "تقديم" }));
+    fireEvent.click(screen.getByRole("button", { name: "تقديم الفحص" }));
     await waitFor(() => expect(screen.getByText("تم التقديم.")).toBeInTheDocument());
 
     fireEvent.click(

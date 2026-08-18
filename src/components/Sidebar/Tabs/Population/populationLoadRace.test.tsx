@@ -174,7 +174,7 @@ function selectPending(month: number, year: number, folderName: string): MockSel
 }
 
 function populationChipText(): string | null {
-  const chip = Array.from(document.querySelectorAll(".status-chip")).find((el) =>
+  const chip = Array.from(document.querySelectorAll(".pop-readiness-fact")).find((el) =>
     el.textContent?.includes("المجتمع")
   );
   return chip?.textContent ?? null;

@@ -1,12 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 
-import {
-  useMemo,
-  useRef,
-  useState,
-  useEffect,
-  type ChangeEvent
-} from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import { ScanLine } from "lucide-react";
 
 import type { SidebarTabModule } from "../tabTypes";
@@ -44,6 +38,7 @@ import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import { useGlobalMonth } from "../../../../data/month/useGlobalMonth";
 
 import type { BiWorkbookResult } from "./biData/biDataTypes";
+import { usePhaseOneUploads } from "./usePhaseOneUploads";
 
 import { exportPopulationProcessingResult } from "./processing/populationExporter";
 import { processPopulation } from "./processing/populationProcessor";
@@ -79,7 +74,6 @@ import { ConfirmDialog } from "../../../../components/ConfirmDialog/ConfirmDialo
 import BrowseDataView from "./BrowseDataView";
 import {
   computeMonthLoadScope,
-  isSupportedExcelFile,
   PHASES,
   reconstructedPopulation,
   sourceFileMetadata,
@@ -89,18 +83,14 @@ import { useMonthLoad, type LoadedMonthState } from "./useMonthLoad";
 import { useDistributionActions } from "./useDistributionActions";
 import {
   ClosedMonthBanner,
+  PhaseActionBar,
   PopulationHeader,
-  PopulationPhaseFooter,
-  PopulationStatusBar,
-  PopulationStepper
+  PopulationReadinessRail
 } from "./components/PopulationWorkflowChrome";
 
-type UploadKey = "riskAgencyData" | "businessIntelligenceData";
 
-type UploadState = {
-  file: File | null;
-  source: "file-system-api" | "input-fallback" | null;
-};
+
+
 
 
 export const tabConfig: SidebarTabModule["tabConfig"] = {
@@ -382,7 +372,7 @@ export default function PopulationTab() {
   function resetWizardState(): void {
     setUploads({
       riskAgencyData: { file: null, source: null },
-      businessIntelligenceData: { file: null, source: null },
+      biUploads: [],
     });
     setRiskWorkbookResult(null);
     setBiWorkbookResult(null);
@@ -436,8 +426,6 @@ export default function PopulationTab() {
     }
   }
 
-  const riskAgencyInputRef = useRef<HTMLInputElement | null>(null);
-  const businessIntelligenceInputRef = useRef<HTMLInputElement | null>(null);
   const workerRef = useRef<Worker | null>(null);
   useEffect(() => {
     const w = new WorkbookWorker();
@@ -533,11 +521,6 @@ export default function PopulationTab() {
     refreshGlobalMonths: refreshMonths,
   });
 
-  const [uploads, setUploads] = useState<Record<UploadKey, UploadState>>({
-    riskAgencyData: { file: null, source: null },
-    businessIntelligenceData: { file: null, source: null }
-  });
-
   const [uploadError, setUploadError] = useState("");
   const [processingMessage, setProcessingMessage] = useState("");
   const [isProcessingWorkbooks, setIsProcessingWorkbooks] = useState(false);
@@ -601,9 +584,54 @@ export default function PopulationTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- handleProcessPopulation is a fresh closure every render; the ref guard above (not a dependency) is what actually prevents repeat firing
   }, [activeSubTab, currentPhase, riskWorkbookResult, populationProcessingResult, isProcessingPopulation, isLoadingMonthData, canProcessNow]);
 
+  /**
+   * Phase-1 file attachment (multi-file BI, CSV, the 10-file cap and every
+   * permission/closed-month re-check). Lives in its own hook so this component
+   * stays inside the repo's max-lines-per-function budget — the behaviour is a
+   * straight move, not a rewrite.
+   */
+  const {
+    uploads,
+    setUploads,
+    riskAgencyInputRef,
+    businessIntelligenceInputRef,
+    pickExcelFile,
+    clearSelectedFile,
+    handleFallbackFileChange,
+    handleDroppedFiles,
+    removeBiUpload,
+    applyBiFileResults
+  } = usePhaseOneUploads({
+    canUploadNow,
+    setUploadError,
+    setProcessingMessage,
+    setBiWorkbookResult,
+    setRiskWorkbookResult,
+    // Any change to the attached set invalidates whatever was processed from
+    // the previous set.
+    onAttachedSetChanged: () => {
+      setPopulationProcessingResult(null);
+      setProcessingMessage("");
+    }
+  });
+
   const isPhaseOneComplete = useMemo(
     () => Boolean(uploads.riskAgencyData.file),
     [uploads.riskAgencyData.file]
+  );
+
+  /**
+   * `biFileName` on the month manifest is a single display string (see
+   * monthTypes.ts), so with several BI files it lists all their names joined.
+   * The raw archive keeps each file separately — see populationStorage's
+   * `biSourceFiles`.
+   */
+  const biFileNamesLabel = useMemo(
+    () =>
+      uploads.biUploads.length === 0
+        ? null
+        : uploads.biUploads.map((entry) => entry.file.name).join("، "),
+    [uploads.biUploads]
   );
 
   const riskColumnHints = useMemo(
@@ -615,139 +643,6 @@ export default function PopulationTab() {
     () => buildColumnHintsFromRows(biWorkbookResult?.rows ?? [], config),
     [biWorkbookResult, config]
   );
-
-  async function pickExcelFile(uploadKey: UploadKey): Promise<void> {
-    // Audit finding 12: this used to check only canUploadData, so a keyboard
-    // user (whose Tab/Enter bypasses the wrapper's now-removed pointer-events
-    // CSS trick) or any caller could still open the file picker during a
-    // closed month or while month data was still loading -- exactly the
-    // window canUploadNow (canUploadData && !selectedMonthClosed &&
-    // !isLoadingMonthData) exists to block.
-    if (!canUploadNow) {
-      setUploadError("لا تملك صلاحية رفع ملفات البيانات، أو أن الشهر مغلق حالياً، أو أن بيانات الشهر قيد التحميل.");
-      return;
-    }
-    setUploadError("");
-    setProcessingMessage("");
-
-    const browserWindow = window as Window & { showOpenFilePicker?: (...args: unknown[]) => Promise<FileSystemFileHandle[]> };
-
-    if (!browserWindow.showOpenFilePicker) {
-      openFallbackInput(uploadKey);
-      return;
-    }
-
-    try {
-      const handles = await browserWindow.showOpenFilePicker({
-        multiple: false,
-        types: [
-          {
-            description: "Excel Files",
-            accept: {
-              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [
-                ".xlsx"
-              ],
-              "application/vnd.ms-excel": [".xls"]
-            }
-          }
-        ],
-        excludeAcceptAllOption: true
-      });
-
-      const selectedFile = await handles[0]?.getFile();
-
-      if (!selectedFile) {
-        return;
-      }
-
-      applySelectedFile(uploadKey, selectedFile, "file-system-api");
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        return;
-      }
-
-      logCodedError("population:file-picker", "XQ-POP-001", error);
-      setUploadError(codedMessage("XQ-POP-001"));
-      openFallbackInput(uploadKey);
-    }
-  }
-
-  function openFallbackInput(uploadKey: UploadKey): void {
-    if (uploadKey === "riskAgencyData") {
-      riskAgencyInputRef.current?.click();
-      return;
-    }
-    businessIntelligenceInputRef.current?.click();
-  }
-
-  function handleFallbackFileChange(
-    uploadKey: UploadKey,
-    event: ChangeEvent<HTMLInputElement>
-  ): void {
-    const selectedFile = event.target.files?.[0];
-
-    if (!selectedFile) {
-      return;
-    }
-
-    // Audit finding 12: same canUploadNow re-check as pickExcelFile above --
-    // this is the fallback <input type=file> change handler, a second entry
-    // point into the same mutation that must not skip the closed-month/
-    // loading gate.
-    if (!canUploadNow) {
-      setUploadError("لا تملك صلاحية رفع ملفات البيانات، أو أن الشهر مغلق حالياً، أو أن بيانات الشهر قيد التحميل.");
-      event.target.value = "";
-      return;
-    }
-
-    applySelectedFile(uploadKey, selectedFile, "input-fallback");
-    event.target.value = "";
-  }
-
-  function applySelectedFile(
-    uploadKey: UploadKey,
-    file: File,
-    source: UploadState["source"]
-  ): void {
-    if (!isSupportedExcelFile(file)) {
-      setUploadError(
-        "صيغة الملف غير مدعومة. الرجاء اختيار ملف Excel بصيغة XLSX أو XLS."
-      );
-      return;
-    }
-
-    setUploads((currentUploads) => ({
-      ...currentUploads,
-      [uploadKey]: { file, source }
-    }));
-
-    setRiskWorkbookResult(null);
-    setBiWorkbookResult(null);
-    setPopulationProcessingResult(null);
-    setUploadError("");
-    setProcessingMessage("");
-  }
-
-  function clearSelectedFile(uploadKey: UploadKey): void {
-    // Audit finding 12: this checked nothing at all -- a keyboard user could
-    // wipe their own already-parsed in-memory workbook result during a window
-    // the UI means to block (closed month, no upload permission, or month
-    // data still loading), losing work with no way to recover it short of
-    // re-uploading and re-parsing.
-    if (!canUploadNow) {
-      setUploadError("لا تملك صلاحية رفع ملفات البيانات، أو أن الشهر مغلق حالياً، أو أن بيانات الشهر قيد التحميل.");
-      return;
-    }
-    setUploads((currentUploads) => ({
-      ...currentUploads,
-      [uploadKey]: { file: null, source: null }
-    }));
-
-    setRiskWorkbookResult(null);
-    setBiWorkbookResult(null);
-    setPopulationProcessingResult(null);
-    setProcessingMessage("");
-  }
 
   // W4/W10 (cheap half of the requested upload→process→compare restructure): this
   // used to both parse the uploaded workbook(s) AND immediately advance to Phase 2
@@ -763,13 +658,30 @@ export default function PopulationTab() {
     }
 
     const riskFile = uploads.riskAgencyData.file;
-    const biFile = uploads.businessIntelligenceData.file;
+    // Index-aligned with the response's biResults, so a per-file outcome can be
+    // written back onto the exact row it came from.
+    const biEntries = uploads.biUploads;
+    const biFiles = biEntries.map((entry) => entry.file);
 
     if (!riskFile) {
       setUploadError(
         "يجب رفع ملف بيانات وكالة المخاطر قبل الانتقال إلى المرحلة التالية."
       );
       return;
+    }
+
+    // Every attached BI file goes to "parsing" up front so the list shows the
+    // spinner rows the design specifies for the whole read, not just at the end.
+    if (biEntries.length > 0) {
+      setUploads((current) => ({
+        ...current,
+        biUploads: current.biUploads.map((entry) => ({
+          ...entry,
+          state: "parsing",
+          acceptedRows: null,
+          error: undefined
+        }))
+      }));
     }
 
     setIsProcessingWorkbooks(true);
@@ -812,16 +724,34 @@ export default function PopulationTab() {
           // frees its memory, and the mount effect recreates one on demand.
           worker.terminate();
           workerRef.current = null;
-          cleanup();
+          cleanup(true);
         }, SILENCE_LIMIT_MS);
       };
 
-      const cleanup = () => {
+      // `cleanup(didFail)`: the happy path (a "done" message already ran
+      // applyBiFileResults, which leaves nothing in "parsing") calls this with
+      // no argument, so the fallback map below is a defensive no-op. The
+      // watchdog/error/messageerror paths call it with `true` — nothing else
+      // clears "parsing" on those paths, so a stray row must not silently
+      // become indistinguishable from a normal unparsed row (Fix, 2026-08-18:
+      // it used to reset to "ready", which read as "fine, just not read yet"
+      // rather than "this failed").
+      const cleanup = (didFail = false) => {
         if (watchdog !== undefined) window.clearTimeout(watchdog);
         worker.removeEventListener("message", onMessage);
         worker.removeEventListener("error", onError);
         worker.removeEventListener("messageerror", onError);
         setIsProcessingWorkbooks(false);
+        setUploads((current) => ({
+          ...current,
+          biUploads: current.biUploads.map((entry) =>
+            entry.state !== "parsing"
+              ? entry
+              : didFail
+                ? { ...entry, state: "error", acceptedRows: null, error: getLabels().phase_one_bi_worker_failed }
+                : { ...entry, state: "ready" }
+          )
+        }));
         resolve();
       };
 
@@ -832,7 +762,7 @@ export default function PopulationTab() {
           setProcessingMessage(msg.message);
         } else if (msg.type === "done") {
           setRiskWorkbookResult(msg.riskResult);
-          setBiWorkbookResult(msg.biResult);
+          applyBiFileResults(biEntries, msg.biResults);
           hasUnsavedSessionWorkRef.current = true;
           if (msg.warning) setProcessingMessage(msg.warning);
           // No longer advances the phase here — see this function's header
@@ -849,14 +779,14 @@ export default function PopulationTab() {
             new Error(typeof msg.error === "string" ? msg.error : JSON.stringify(msg))
           );
           setProcessingMessage(codedMessage("XQ-POP-003"));
-          cleanup();
+          cleanup(true);
         }
       };
 
       const onError = (workerError: unknown) => {
         logCodedError("population:workbook-worker-error", "XQ-POP-003", workerError);
         setProcessingMessage(codedMessage("XQ-POP-003"));
-        cleanup();
+        cleanup(true);
       };
 
       worker.addEventListener("message", onMessage);
@@ -867,7 +797,7 @@ export default function PopulationTab() {
       armWatchdog();
       worker.postMessage({
         riskFile,
-        biFile,
+        biFiles,
         riskSheetPatterns: activeTemplate?.sheetPatterns?.risk,
         biSheetPatterns: activeTemplate?.sheetPatterns?.bi,
         columnMappings: activeTemplate?.columnMappings,
@@ -1030,9 +960,11 @@ export default function PopulationTab() {
         year: saveYear,
         username,
         riskFileName: uploads.riskAgencyData.file?.name ?? null,
-        biFileName: uploads.businessIntelligenceData.file?.name ?? null,
+        biFileName: biFileNamesLabel,
         riskSourceFile: uploads.riskAgencyData.file,
-        biSourceFile: uploads.businessIntelligenceData.file,
+        // Every attached BI file is archived, not just the first — the merged
+        // population is only reproducible from all of its sources.
+        biSourceFiles: uploads.biUploads.map((entry) => entry.file),
         certScanUsed: certScanPasteText.trim().length > 0,
         riskRawRows: riskResult.rows as Array<Record<string, unknown>>,
         biRawRows: biWorkbookResult
@@ -1062,7 +994,7 @@ export default function PopulationTab() {
         },
         processingFingerprint: stableHash({
           risk: sourceFileMetadata(uploads.riskAgencyData.file),
-          bi: sourceFileMetadata(uploads.businessIntelligenceData.file),
+          bi: uploads.biUploads.map((entry) => sourceFileMetadata(entry.file)),
           certScan: stableHash(certScanPasteText.trim()),
           mappingTemplate: config.mappingTemplates[0] ?? null,
           stageMappings: config.stageMappings,
@@ -1070,7 +1002,9 @@ export default function PopulationTab() {
         }),
         sourceFiles: {
           risk: sourceFileMetadata(uploads.riskAgencyData.file),
-          bi: sourceFileMetadata(uploads.businessIntelligenceData.file),
+          bi: uploads.biUploads
+            .map((entry) => sourceFileMetadata(entry.file))
+            .filter((meta): meta is NonNullable<typeof meta> => meta !== null),
         },
         confirmedOverwrite,
       });
@@ -1379,10 +1313,14 @@ export default function PopulationTab() {
       <div hidden={activeSubTab !== "process"}>
 
       <PopulationHeader
+        currentPhase={currentPhase}
         canConfigure={canConfigureSample}
         onOpenSettings={setSettingsModalMode}
       />
-      <PopulationStatusBar
+      {/* ── Readiness rail: the month's facts strip and the four-phase progress
+             row in one card (2026-08 handoff §2). Replaced the separate status
+             bar + stepper; same inputs, same phase-selection rule. ── */}
+      <PopulationReadinessRail
         month={saveMonth}
         year={saveYear}
         population={populationProcessingResult}
@@ -1390,6 +1328,10 @@ export default function PopulationTab() {
         sample={sampleDrawResult}
         distribution={distributionCurrent}
         biWorkbook={biWorkbookResult}
+        isMonthClosed={selectedMonthClosed}
+        currentPhase={currentPhase}
+        completedPhaseIds={completedPhaseIds}
+        onSelectPhase={setCurrentPhase}
       />
       {/* ── Closed-month banner (Tier-1 Item A + owner's system/person-lock distinction) ── */}
       <ClosedMonthBanner
@@ -1398,13 +1340,6 @@ export default function PopulationTab() {
         canUnlock={canMutate("archive.closeMonth")}
         isUnlocking={isUnlockingMonth}
         onUnlock={() => { void handleUnlockMonth(); }}
-      />
-
-      {/* ── Horizontal Stepper ── */}
-      <PopulationStepper
-        currentPhase={currentPhase}
-        completedPhaseIds={completedPhaseIds}
-        onSelect={setCurrentPhase}
       />
 
       {/* ── Active Phase Panel ── */}
@@ -1425,6 +1360,8 @@ export default function PopulationTab() {
             businessIntelligenceInputRef={businessIntelligenceInputRef}
             onPickFile={pickExcelFile}
             onClearFile={clearSelectedFile}
+            onRemoveBiUpload={removeBiUpload}
+            onDropFiles={handleDroppedFiles}
             onFallbackFileChange={handleFallbackFileChange}
             riskWorkbookResult={riskWorkbookResult}
             biWorkbookResult={biWorkbookResult}
@@ -1499,7 +1436,7 @@ export default function PopulationTab() {
         ) : null}
       </main>
 
-      <PopulationPhaseFooter
+      <PhaseActionBar
         currentPhase={currentPhase}
         hint={PHASE_HINTS[currentPhase]}
         busy={isProcessingWorkbooks || isProcessingPopulation}
@@ -1531,7 +1468,7 @@ export default function PopulationTab() {
         onSampleSeedChange={setSampleSeed}
         processingContext={{
           riskFileName: uploads.riskAgencyData.file?.name ?? null,
-          biFileName: uploads.businessIntelligenceData.file?.name ?? null,
+          biFileName: biFileNamesLabel,
           riskRows: riskWorkbookResult?.rows.length ?? null,
           biRows: biWorkbookResult?.rows.length ?? null,
           certScanProvided: certScanPasteText.trim().length > 0,

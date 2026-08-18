@@ -1,13 +1,14 @@
 import { getManagedLoginUsers, subscribeToUserManagementChanges } from "../../../../../auth/userManagement";
-import { AlertTriangle, CheckCircle2, Settings2, XCircle, FilePen, Search } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, FilePen, Search, Settings2, XCircle } from "lucide-react";
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
 import type { DistributionCurrentData, DistributionEvent } from "../../../../../data/distribution/distributionTypes";
 import type { PopulationConfig, EmployeeStageAllocation } from "../../../../../data/population/populationConfig";
-import SummaryCard from "./SummaryCard";
 import DistributionRow from "./DistributionRow";
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { getStageKey, formatNumber } from "./helpers";
+import { getLabels } from "../../../../../data/labels/labelsStore";
 import { calculateBulkAssignment, isAssignableSampleRole } from "../../../../../data/distribution/bulkAssignment";
+import "./PhaseFourDistribution.css";
 
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
 
@@ -20,11 +21,10 @@ type PhaseFourDistributionProps = {
   canConfigure: boolean;
   canDistribute: boolean;
   /**
-   * B13: gates the bulk-assignment ("تطبيق وحفظ التوزيع التلقائي") action specifically.
-   * Distinct from canDistribute (per-row assign/reassign/complete/replace) because the
-   * two features have independent role defaults — e.g. shipped supervisor defaults grant
-   * bulk-assign but not distribute-samples, so reusing canDistribute here wrongly disabled
-   * the bulk button for supervisors who actually have the permission.
+   * B13: gates the bulk-assignment action specifically. Distinct from canDistribute
+   * (per-row assign/reassign/complete/replace) because the two features have
+   * independent role defaults — e.g. shipped supervisor defaults grant bulk-assign
+   * but not distribute-samples.
    */
   canBulkAssign: boolean;
   config: PopulationConfig;
@@ -39,7 +39,10 @@ type PhaseFourDistributionProps = {
   onApplyBulkAssignment: (events: DistributionEvent[]) => Promise<void>;
 };
 
-const STAGE_LABELS: Record<string, string> = {
+const STAGE_KEYS = ["first", "second", "third", "fourth"] as const;
+type StageKey = (typeof STAGE_KEYS)[number];
+
+const STAGE_LABELS: Record<StageKey, string> = {
   first:  "المستوى الأول",
   second: "المستوى الثاني",
   third:  "المستوى الثالث",
@@ -53,6 +56,10 @@ const STATUS_LABELS: Record<string, string> = {
   "replacement-requested": "طلب استبدال",
   replaced: "مستبدل"
 };
+
+function fillTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (_m, key) => vars[key] ?? `{${key}}`);
+}
 
 export default function PhaseFourDistribution({
   sampleDrawResult,
@@ -74,22 +81,23 @@ export default function PhaseFourDistribution({
   onRequestReplacement,
   onApplyBulkAssignment
 }: PhaseFourDistributionProps) {
+  // `5c`: the two panels are no longer mutually exclusive tab bodies — the bulk
+  // panel is always in place and المراجعة اليدوية is an in-place disclosure below
+  // it. `activeTab` survives as the single source of truth for the header pill
+  // switch AND for whether that disclosure is open; it defaults to "bulk", so the
+  // manual review starts collapsed. (`selectedStageTab` is gone: the per-stage
+  // tabs collapsed into the employees × stages matrix.)
   const [activeTab, setActiveTab] = useState<"bulk" | "manual">("bulk");
-  const [selectedStageTab, setSelectedStageTab] = useState<"first" | "second" | "third" | "fourth">("first");
   const [bulkError, setBulkError] = useState("");
   const [manualSearch, setManualSearch] = useState("");
   const [manualStatusFilter, setManualStatusFilter] = useState("all");
-  const [manualCertFilter, setManualCertFilter] = useState("all");
   const [manualEmployeeFilter, setManualEmployeeFilter] = useState("all");
+
+  const L = getLabels();
 
   // Audit finding 6: this was a mount-time-only snapshot (`useMemo(...,[])`), so a
   // user added/deactivated after this phase mounted never showed up (or never
-  // disappeared) from the bulk-allocation table or the manual-assign dropdown
-  // (DistributionRow) until a full remount. Now it re-derives whenever the
-  // managed-user roster actually changes -- same pattern as AdhocImportTab's fix
-  // for the identical bug. The handler-side check in useDistributionActions
-  // (findAssignableEmployee) is the real authorization boundary; this only keeps
-  // the pickers from offering a stale option.
+  // disappeared) from the allocation matrix or the manual-assign dropdown.
   const computeAssignableEmployees = useCallback(
     () =>
       getManagedLoginUsers()
@@ -109,12 +117,9 @@ export default function PhaseFourDistribution({
 
   const sampleRows = useMemo(() => sampleDrawResult?.rows ?? [], [sampleDrawResult]);
 
-  // One classification pass instead of four `.filter()` sweeps — same buckets,
-  // same order within each bucket (rows are appended in sampleRows order).
+  // One classification pass instead of four `.filter()` sweeps.
   const stageSampleCounts = useMemo(() => {
-    const buckets: Record<"first" | "second" | "third" | "fourth", typeof sampleRows> = {
-      first: [], second: [], third: [], fourth: []
-    };
+    const buckets: Record<StageKey, typeof sampleRows> = { first: [], second: [], third: [], fourth: [] };
     for (const row of sampleRows) {
       const stageKey = getStageKey(row.stage, config.stageMappings);
       if (stageKey !== "unknown") buckets[stageKey].push(row);
@@ -124,8 +129,7 @@ export default function PhaseFourDistribution({
 
   const activeAllocations = useMemo(() => {
     const list: EmployeeStageAllocation[] = [];
-    const stageKeys = ["first", "second", "third", "fourth"] as const;
-    for (const sKey of stageKeys) {
+    for (const sKey of STAGE_KEYS) {
       for (const emp of employees) {
         const existing = config.employeeAllocations.find(
           (a) => a.username === emp.username && a.stageKey === sKey
@@ -136,9 +140,7 @@ export default function PhaseFourDistribution({
           method: existing?.method || "percentage",
           value: existing?.value !== undefined ? existing.value : 0,
           // Default to enabled at every level until an admin explicitly turns
-          // an employee off for a given level -- `??` only falls back when
-          // there's no saved allocation yet, so an explicit prior `false` is
-          // still respected.
+          // an employee off for a given level.
           isActive: existing?.isActive ?? true,
           maxWorkload: existing?.maxWorkload
         });
@@ -147,15 +149,25 @@ export default function PhaseFourDistribution({
     return list;
   }, [config.employeeAllocations, employees]);
 
-  const handleAllocationChange = (
-    username: string,
-    stageKey: "first" | "second" | "third" | "fourth",
-    field: keyof EmployeeStageAllocation,
-    val: EmployeeStageAllocation[keyof EmployeeStageAllocation]
-  ) => {
+  const allocationOf = useCallback(
+    (username: string, stageKey: StageKey) =>
+      activeAllocations.find((a) => a.username === username && a.stageKey === stageKey),
+    [activeAllocations]
+  );
+
+  /**
+   * `5c` dropped the per-stage "تفعيل بالمستوى" checkbox: the matrix expresses
+   * exclusion as a zero share ("صفر يستبعد الخبير من ذلك المستوى"). So the two
+   * flags are kept consistent here — a nonzero share re-activates the pairing,
+   * zero deactivates it — instead of leaving an unreachable `isActive: false`
+   * that the matrix could no longer clear. Nothing downstream changes: a zero
+   * weight already apportioned to zero rows in calculateBulkAssignment.
+   */
+  const handleShareChange = (username: string, stageKey: StageKey, rawValue: number) => {
+    const value = Math.max(0, rawValue);
     const updated = activeAllocations.map((alloc) =>
       alloc.username === username && alloc.stageKey === stageKey
-        ? { ...alloc, [field]: val }
+        ? { ...alloc, value, isActive: value > 0 }
         : alloc
     );
     onConfigChange({ ...config, employeeAllocations: updated });
@@ -179,9 +191,7 @@ export default function PhaseFourDistribution({
       summaryMap[emp.username] = { cert: 0, normal: 0, total: 0 };
     }
 
-    // Index once: this was a linear `sampleRows.find` per event, i.e. O(events x
-    // rows) on every recompute. Same lookup semantics (first row wins for a
-    // duplicated xrayImageId), constant time.
+    // Index once: this was a linear `sampleRows.find` per event.
     const rowById = new Map<string, (typeof sampleRows)[number]>();
     for (const row of sampleRows) {
       if (!rowById.has(row.xrayImageId)) rowById.set(row.xrayImageId, row);
@@ -197,13 +207,30 @@ export default function PhaseFourDistribution({
       }
     }
 
-    return { summaryMap, errors, skipped };
+    return { summaryMap, errors, skipped, newAssignments: events.length };
   }, [sampleDrawResult, sampleRows, activeAllocations, employees, operatorUsername, config.stageMappings, saveMonth, saveYear, distributionCurrent]);
 
   const entryMap = useMemo(
     () => new Map((distributionCurrent?.entries ?? []).map((e) => [e.xrayImageId, e])),
     [distributionCurrent]
   );
+
+  /** Per-status tallies over the sample itself, so the four segments always sum to the sample size. */
+  const statusCounts = useMemo(() => {
+    const counts = { unassigned: 0, pending: 0, completed: 0, replaced: 0, "replacement-requested": 0 };
+    for (const row of sampleRows) {
+      const status = entryMap.get(row.xrayImageId)?.status ?? "unassigned";
+      if (status in counts) counts[status as keyof typeof counts] += 1;
+      else counts.pending += 1;
+    }
+    return counts;
+  }, [entryMap, sampleRows]);
+
+  const totalRows = sampleRows.length;
+  const unassignedCount = statusCounts.unassigned;
+  const assignedCount = totalRows - unassignedCount;
+  const replacedSegment = statusCounts.replaced + statusCounts["replacement-requested"];
+  const assignedPercent = totalRows > 0 ? Math.round((assignedCount / totalRows) * 100) : 0;
 
   const assignedEmployeeOptions = useMemo(() => {
     const assigned = new Set(
@@ -222,7 +249,6 @@ export default function PhaseFourDistribution({
       const assignedTo = entry?.assignedTo ?? "";
       if (q && !row.xrayImageId.toLowerCase().includes(q)) return false;
       if (manualStatusFilter !== "all" && status !== manualStatusFilter) return false;
-      if (manualCertFilter !== "all" && row.certScanStatus !== manualCertFilter) return false;
       if (manualEmployeeFilter === "unassigned" && assignedTo) return false;
       if (
         manualEmployeeFilter !== "all" &&
@@ -231,7 +257,7 @@ export default function PhaseFourDistribution({
       ) return false;
       return true;
     });
-  }, [entryMap, manualCertFilter, manualEmployeeFilter, manualSearch, manualStatusFilter, sampleRows]);
+  }, [entryMap, manualEmployeeFilter, manualSearch, manualStatusFilter, sampleRows]);
 
   if (!sampleDrawResult) {
     return (
@@ -245,21 +271,48 @@ export default function PhaseFourDistribution({
   const hasManualFilter =
     manualSearch.trim() !== "" ||
     manualStatusFilter !== "all" ||
-    manualCertFilter !== "all" ||
     manualEmployeeFilter !== "all";
 
   const clearManualFilters = () => {
     setManualSearch("");
     setManualStatusFilter("all");
-    setManualCertFilter("all");
     setManualEmployeeFilter("all");
   };
 
-  const manualResultSummary = `${formatNumber(filteredManualRows.length)} / ${formatNumber(sampleRows.length)}`;
-
-  const certScanOptions = Array.from(
-    new Set(sampleRows.map((row) => row.certScanStatus).filter(Boolean))
+  const unlicensedWithShare = employees.filter(
+    (emp) => !emp.hasCertScanLicense && STAGE_KEYS.some((sk) => (allocationOf(emp.username, sk)?.value ?? 0) > 0)
   );
+
+  const stageShareTotals = STAGE_KEYS.map((sk) =>
+    employees.reduce((sum, emp) => sum + (allocationOf(emp.username, sk)?.value ?? 0), 0)
+  );
+  // Fix (population, 2026-08-18): the matrix has one input per cell now, but a
+  // legacy `exact`-method allocation (row COUNT, not a percentage) can still
+  // sit in the same stage as `percentage` allocations -- summing the two and
+  // comparing to 100 would misreport a correctly configured stage as short or
+  // over, or coincidentally read "ok" by accident. A stage with any active
+  // exact-method share renders the sum without an ok/warn verdict instead.
+  const stageHasMixedMethod = STAGE_KEYS.map((sk) =>
+    employees.some((emp) => {
+      const alloc = allocationOf(emp.username, sk);
+      return alloc?.method === "exact" && alloc.value > 0;
+    })
+  );
+
+  const previewTotals = employees.reduce(
+    (acc, emp) => {
+      const counts = previewData?.summaryMap[emp.username] ?? { cert: 0, normal: 0, total: 0 };
+      acc.normal += counts.normal;
+      acc.cert += counts.cert;
+      acc.total += counts.total;
+      return acc;
+    },
+    { normal: 0, cert: 0, total: 0 }
+  );
+
+  const experts = employees.filter(
+    (emp) => (previewData?.summaryMap[emp.username]?.total ?? 0) > 0
+  ).length;
 
   const handleRunBulkAssignment = async () => {
     if (!canBulkAssign) {
@@ -299,8 +352,10 @@ export default function PhaseFourDistribution({
     await onApplyBulkAssignment(events);
   };
 
+  const manualOpen = activeTab === "manual";
+
   return (
-    <section className="distribution-phase" aria-label="توزيع العينة">
+    <section className="distribution-phase p4" aria-label="توزيع العينة">
       <div className="phase-panel-header compact">
         <div>
           <h2>المرحلة 4: توزيع العينة</h2>
@@ -309,17 +364,27 @@ export default function PhaseFourDistribution({
             الذكي حسب كوتا كل مستوى والتوزيع اليدوي لكل صف.
           </p>
         </div>
-      </div>
-
-      {/* Summary Cards */}
-      {distributionCurrent && (
-        <div className="processing-summary-grid">
-          <SummaryCard label="إجمالي المعينة" value={distributionCurrent.totalAssigned} />
-          <SummaryCard label="قيد الانتظار"   value={distributionCurrent.totalPending} />
-          <SummaryCard label="مكتملة"          value={distributionCurrent.totalCompleted} />
-          <SummaryCard label="مستبدلة"         value={distributionCurrent.totalReplaced} />
+        <div className="p4-pill-switch" role="group" aria-label={L.p4_manual_title}>
+          <button
+            type="button"
+            className={`p4-pill${activeTab === "bulk" ? " active" : ""}`}
+            aria-pressed={activeTab === "bulk"}
+            onClick={() => setActiveTab("bulk")}
+          >
+            <Settings2 size={14} aria-hidden /> {L.p4_tab_bulk}
+          </button>
+          <button
+            type="button"
+            className={`p4-pill${manualOpen ? " active" : ""}`}
+            aria-pressed={manualOpen}
+            aria-expanded={manualOpen}
+            aria-controls="p4-manual-section"
+            onClick={() => setActiveTab(manualOpen ? "bulk" : "manual")}
+          >
+            <FilePen size={14} aria-hidden /> {L.p4_tab_manual}
+          </button>
         </div>
-      )}
+      </div>
 
       {distributionMessage && (
         <div
@@ -330,164 +395,85 @@ export default function PhaseFourDistribution({
         </div>
       )}
 
-      {/* Tab bar */}
-      <div className="dist-tab-bar" role="tablist">
-        <button
-          role="tab"
-          type="button"
-          className={`dist-tab-btn${activeTab === "bulk" ? " active" : ""}`}
-          aria-selected={activeTab === "bulk"}
-          onClick={() => setActiveTab("bulk")}
-        >
-          <Settings2 size={15} style={{ verticalAlign: "middle", marginInlineEnd: 5 }} /> التوزيع الجماعي الذكي
-        </button>
-        <button
-          role="tab"
-          type="button"
-          className={`dist-tab-btn${activeTab === "manual" ? " active" : ""}`}
-          aria-selected={activeTab === "manual"}
-          onClick={() => setActiveTab("manual")}
-        >
-          <FilePen size={15} style={{ verticalAlign: "middle", marginInlineEnd: 5 }} /> المراجعة اليدوية
-        </button>
-      </div>
-
-      {activeTab === "bulk" ? (
-        <div className="distribution-phase">
-          {/* Stage selector */}
-          <div className="dist-stage-bar" role="tablist" aria-label="اختيار المستوى">
-            {(["first", "second", "third", "fourth"] as const).map((sk) => (
-              <button
-                key={sk}
-                role="tab"
-                type="button"
-                className={`dist-stage-btn${selectedStageTab === sk ? " active" : ""}`}
-                aria-selected={selectedStageTab === sk}
-                onClick={() => setSelectedStageTab(sk)}
-              >
-                {STAGE_LABELS[sk]} ({formatNumber(stageSampleCounts[sk].length)})
-              </button>
-            ))}
-          </div>
-
-          {/* Allocation config */}
-          <div className="dist-config-card">
-            <h3>إعدادات توزيع موظفي {STAGE_LABELS[selectedStageTab]}</h3>
-            <div className="dist-alloc-table report-sheet-table" role="table">
-              <div className="dist-alloc-header" role="row">
-                <span>الموظف</span>
-                <span>تفعيل بالمستوى</span>
-                <span>طريقة التوزيع</span>
-                <span>الحصة / النسبة</span>
-                <span>ترخيص CertScan</span>
-              </div>
-
-              {employees.map((emp) => {
-                const alloc = activeAllocations.find(
-                  (a) => a.username === emp.username && a.stageKey === selectedStageTab
-                )!;
-                return (
-                  <div key={emp.username} className="dist-alloc-row" role="row">
-                    <span>
-                      {emp.displayName}{" "}
-                      <code style={{ fontSize: "11px", color: "var(--p-muted)" }}>
-                        ({emp.username})
-                      </code>
-                    </span>
-
-                    <span>
-                      <input
-                        type="checkbox"
-                        checked={alloc.isActive}
-                        disabled={!canConfigure}
-                        aria-label={`تفعيل ${emp.displayName} في ${STAGE_LABELS[selectedStageTab]}`}
-                        onChange={(e) =>
-                          handleAllocationChange(emp.username, selectedStageTab, "isActive", e.target.checked)
-                        }
-                      />
-                    </span>
-
-                    <span>
-                      <select
-                        className="save-disk-input"
-                        disabled={!canConfigure || !alloc.isActive}
-                        value={alloc.method}
-                        onChange={(e) =>
-                          handleAllocationChange(emp.username, selectedStageTab, "method", e.target.value)
-                        }
-                      >
-                        <option value="percentage">نسبة مئوية (%)</option>
-                        <option value="exact">عدد محدد</option>
-                      </select>
-                    </span>
-
-                    <span>
-                      <input
-                        type="number"
-                        className="save-disk-input"
-                        disabled={!canConfigure || !alloc.isActive}
-                        min={0}
-                        value={alloc.value}
-                        onChange={(e) =>
-                          handleAllocationChange(
-                            emp.username,
-                            selectedStageTab,
-                            "value",
-                            parseInt(e.target.value, 10) || 0
-                          )
-                        }
-                      />
-                    </span>
-
-                    <span>
-                      {emp.hasCertScanLicense ? (
-                        <span className="report-status ok"><CheckCircle2 size={13} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> مرخص</span>
-                      ) : (
-                        <span className="report-status muted"><XCircle size={13} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> غير مرخص</span>
-                      )}
-                    </span>
-                  </div>
-                );
+      <div className="p4-top-row">
+        {/* حالة التوزيع */}
+        <div className="p4-state-card" role="status">
+          <span className="p4-state-title">{L.p4_state_title}</span>
+          <div className="p4-state-headline">
+            <strong className="p4-state-percent num">{formatNumber(assignedPercent)}%</strong>
+            <span className="p4-state-sub num">
+              {fillTemplate(L.p4_state_headline_sub, {
+                assigned: formatNumber(assignedCount),
+                total: formatNumber(totalRows),
               })}
+            </span>
+          </div>
+          <div className="p4-state-bar" aria-hidden="true">
+            <span className="seg completed" style={{ width: `${pct(statusCounts.completed, totalRows)}%` }} />
+            <span className="seg pending" style={{ width: `${pct(statusCounts.pending, totalRows)}%` }} />
+            <span className="seg replaced" style={{ width: `${pct(replacedSegment, totalRows)}%` }} />
+            <span className="seg unassigned" style={{ width: `${pct(unassignedCount, totalRows)}%` }} />
+          </div>
+          <div className="p4-state-legend">
+            <span><span className="dot completed" aria-hidden />{L.p4_state_completed}<strong className="num">{formatNumber(statusCounts.completed)}</strong></span>
+            <span><span className="dot pending" aria-hidden />{L.p4_state_pending}<strong className="num">{formatNumber(statusCounts.pending)}</strong></span>
+            <span><span className="dot replaced" aria-hidden />{L.p4_state_replaced}<strong className="num">{formatNumber(replacedSegment)}</strong></span>
+            <span><span className="dot unassigned" aria-hidden />{L.p4_state_unassigned}<strong className="num">{formatNumber(unassignedCount)}</strong></span>
+          </div>
+        </div>
+
+        {/* التوزيع الجماعي */}
+        <div className="p4-bulk-card">
+          <div className="p4-bulk-head">
+            <div>
+              <h3>{L.p4_bulk_title}</h3>
+              <p className="p4-bulk-desc">
+                {fillTemplate(L.p4_bulk_description, { count: formatNumber(unassignedCount) })}
+              </p>
             </div>
+            <button
+              type="button"
+              className="primary-action"
+              onClick={handleRunBulkAssignment}
+              disabled={!canBulkAssign || isDistributing}
+              title={!canBulkAssign ? "لا تملك صلاحية التوزيع الجماعي، أو أن مساحة العمل للقراءة فقط." : undefined}
+            >
+              {isDistributing ? L.p4_bulk_applying : L.p4_bulk_apply}
+            </button>
           </div>
 
-          {/* Preview */}
           {previewData && (
-            <div className="dist-preview-card">
-              <h3>معاينة حصص الموظفين الناتجة (الحجم الكلي)</h3>
-              <div className="dist-alloc-table report-sheet-table" role="table">
-                <div className="dist-preview-header" role="row">
-                  <span>الموظف</span>
-                  <span>عادية</span>
-                  <span>CertScan</span>
-                  <span>المجموع المتوقع</span>
-                </div>
-
-                {employees.map((emp) => {
-                  const counts = previewData.summaryMap[emp.username] || { cert: 0, normal: 0, total: 0 };
-                  return (
-                    <div key={emp.username} className="dist-preview-row" role="row">
-                      <span>{emp.displayName}</span>
-                      <span>{counts.normal}</span>
-                      <span>{counts.cert}</span>
-                      <strong>{counts.total}</strong>
-                    </div>
-                  );
+            <div className="p4-info-strip">
+              <CheckCircle2 size={14} aria-hidden />
+              <span>
+                {fillTemplate(L.p4_bulk_preview_info, {
+                  count: formatNumber(previewData.newAssignments),
+                  experts: formatNumber(experts),
                 })}
-              </div>
+              </span>
+            </div>
+          )}
 
-              {previewData.skipped > 0 && (
-                <div className="dist-skip-note" role="status" style={{ marginTop: 8 }}>
-                  سيتم تخطي {formatNumber(previewData.skipped)} صفاً معيناً مسبقاً — التوزيع يشمل الصفوف غير المعينة فقط.
-                </div>
-              )}
+          {unlicensedWithShare.length > 0 && (
+            <div className="p4-alert warn" role="alert">
+              <span className="p4-alert-tag">{L.p4_bulk_license_tag}</span>
+              <span>
+                {fillTemplate(L.p4_bulk_license_warning, {
+                  names: unlicensedWithShare.map((e) => e.displayName).join("، "),
+                })}
+              </span>
+            </div>
+          )}
 
-              {previewData.errors.length > 0 && (
-                <div className="dist-err-block" role="alert">
-                  <AlertTriangle size={14} style={{ verticalAlign: "middle", marginInlineEnd: 5 }} /> {previewData.errors.join(" | ")}
-                </div>
-              )}
+          {previewData && previewData.skipped > 0 && (
+            <div className="p4-info-strip muted dist-skip-note" role="status">
+              سيتم تخطي {formatNumber(previewData.skipped)} صفاً معيناً مسبقاً — التوزيع يشمل الصفوف غير المعينة فقط.
+            </div>
+          )}
+
+          {previewData && previewData.errors.length > 0 && (
+            <div className="p4-alert warn dist-err-block" role="alert">
+              <AlertTriangle size={14} aria-hidden /> {previewData.errors.join(" | ")}
             </div>
           )}
 
@@ -497,17 +483,6 @@ export default function PhaseFourDistribution({
             </div>
           )}
 
-          <div className="dist-footer-row">
-            <button
-              type="button"
-              className="primary-action"
-              onClick={handleRunBulkAssignment}
-              disabled={!canBulkAssign || isDistributing}
-              title={!canBulkAssign ? "لا تملك صلاحية التوزيع الجماعي، أو أن مساحة العمل للقراءة فقط." : undefined}
-            >
-              {isDistributing ? "جاري توزيع وحفظ التعيينات..." : "تطبيق وحفظ التوزيع التلقائي"}
-            </button>
-          </div>
           {isDistributing && distributionProgress && (
             <div className="distribution-save-progress">
               <div
@@ -529,110 +504,256 @@ export default function PhaseFourDistribution({
             </div>
           )}
         </div>
-      ) : (
-        <div className="distribution-manual-panel">
-          <div className="distribution-manual-toolbar">
-            <label className="dist-search-box" htmlFor="manual-xray-search">
-              <Search size={15} aria-hidden="true" />
-              <input
-                id="manual-xray-search"
-                type="search"
-                aria-label="بحث بمعرف الأشعة"
-                value={manualSearch}
-                onChange={(e) => setManualSearch(e.target.value)}
-                placeholder="بحث بمعرف الأشعة..."
-              />
-            </label>
+      </div>
 
-            <label className="dist-filter-field" htmlFor="manual-status-filter">
-              الحالة
-              <select
-                id="manual-status-filter"
-                value={manualStatusFilter}
-                onChange={(e) => setManualStatusFilter(e.target.value)}
-              >
-                <option value="all">الكل</option>
-                {Object.entries(STATUS_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
-              </select>
-            </label>
+      {/* حصص الخبراء عبر المستويات — one matrix replacing the per-stage tabs AND the
+          separate preview table. Editing a cell recomputes عادية / CertScan / الجديد
+          and the totals row through the same calculateBulkAssignment preview. */}
+      <div className="p4-matrix-card">
+        <div className="p4-matrix-head">
+          <h3>{L.p4_matrix_title}</h3>
+          <span className="p4-matrix-caption">{L.p4_matrix_caption}</span>
+          <span className="p4-matrix-stage-counts">
+            {STAGE_KEYS.map((sk) => (
+              <span key={sk}>
+                {STAGE_LABELS[sk]} <strong className="num">{formatNumber(stageSampleCounts[sk].length)}</strong>
+              </span>
+            ))}
+          </span>
+        </div>
 
-            <label className="dist-filter-field" htmlFor="manual-cert-filter">
-              CertScan
-              <select
-                id="manual-cert-filter"
-                value={manualCertFilter}
-                onChange={(e) => setManualCertFilter(e.target.value)}
-              >
-                <option value="all">الكل</option>
-                {certScanOptions.map((value) => (
-                  <option key={value} value={value}>{value}</option>
-                ))}
-              </select>
-            </label>
-
-            <label className="dist-filter-field" htmlFor="manual-employee-filter">
-              الخبير
-              <select
-                id="manual-employee-filter"
-                value={manualEmployeeFilter}
-                onChange={(e) => setManualEmployeeFilter(e.target.value)}
-              >
-                <option value="all">الكل</option>
-                <option value="unassigned">غير معين</option>
-                {assignedEmployeeOptions.map((employee) => (
-                  <option key={employee.username} value={employee.username}>
-                    {employee.displayName}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <strong className="dist-filter-count">{manualResultSummary}</strong>
-
-            {hasManualFilter && (
-              <button type="button" className="dist-clear-filters-btn" onClick={clearManualFilters}>
-                مسح الفلاتر
-              </button>
-            )}
+        <div className="p4-matrix-table" role="table" aria-label={L.p4_matrix_title}>
+          <div className="p4-matrix-row p4-matrix-header" role="row">
+            <span role="columnheader">{L.p4_matrix_col_expert}</span>
+            {STAGE_KEYS.map((sk) => (
+              <span key={sk} role="columnheader" className="num">{STAGE_LABELS[sk]}</span>
+            ))}
+            <span role="columnheader">{L.p4_matrix_col_license}</span>
+            <span role="columnheader" className="num">{L.p4_matrix_col_normal}</span>
+            <span role="columnheader" className="num">{L.p4_matrix_col_certscan}</span>
+            <span role="columnheader" className="num">{L.p4_matrix_col_new}</span>
           </div>
 
-          <div className="distribution-table-wrapper">
-            <div className="distribution-table" role="table">
-              <div className="distribution-header" role="row">
-                <span>معرف الأشعة</span>
-                <span>المنفذ</span>
-                <span>CertScan</span>
-                <span>الحالة</span>
-                <span>خبير جودة الأشعة</span>
-                <span>الإجراء</span>
-              </div>
+          {employees.map((emp) => {
+            const counts = previewData?.summaryMap[emp.username] ?? { cert: 0, normal: 0, total: 0 };
+            const excluded = STAGE_KEYS.every((sk) => {
+              const alloc = allocationOf(emp.username, sk);
+              return !alloc || !alloc.isActive || alloc.value <= 0;
+            });
+            return (
+              <div
+                key={emp.username}
+                className={`p4-matrix-row${excluded ? " excluded" : ""}`}
+                role="row"
+              >
+                <span className="p4-expert">
+                  <strong>{emp.displayName}</strong>
+                  <code>{emp.username}</code>
+                </span>
 
-              {filteredManualRows.length === 0 ? (
-                <div className="distribution-empty-row" role="row">
-                  لا توجد نتائج مطابقة للفلاتر الحالية.
-                </div>
-              ) : filteredManualRows.map((row) => {
-                const entry = entryMap.get(row.xrayImageId);
-                return (
-                  <DistributionRow
-                    key={row.xrayImageId}
-                    row={row}
-                    entry={entry ?? null}
-                    employees={employees}
-                    isDisabled={!canDistribute || isDistributing}
-                    onAssign={onAssign}
-                    onReassign={onReassign}
-                    onMarkComplete={onMarkComplete}
-                    onRequestReplacement={onRequestReplacement}
-                  />
-                );
-              })}
-            </div>
+                {STAGE_KEYS.map((sk) => {
+                  const alloc = allocationOf(emp.username, sk);
+                  // A leftover from the pre-matrix per-stage checkbox: a
+                  // disabled allocation that still carries its old nonzero
+                  // value. It renders like any other cell but contributes
+                  // nothing until edited (see handleShareChange).
+                  const inactiveWithValue = Boolean(alloc && !alloc.isActive && alloc.value > 0);
+                  return (
+                    <input
+                      key={sk}
+                      type="number"
+                      className={`p4-matrix-input num${inactiveWithValue ? " is-inactive-legacy" : ""}`}
+                      aria-label={fillTemplate(L.p4_matrix_field_aria, {
+                        expert: emp.displayName,
+                        stage: STAGE_LABELS[sk],
+                      })}
+                      title={inactiveWithValue ? L.p4_matrix_cell_inactive_note : undefined}
+                      min={0}
+                      value={alloc?.value ?? 0}
+                      disabled={!canConfigure}
+                      onChange={(e) =>
+                        handleShareChange(emp.username, sk, parseInt(e.target.value, 10) || 0)
+                      }
+                    />
+                  );
+                })}
+
+                <span>
+                  {emp.hasCertScanLicense ? (
+                    <span className="p4-status-pill ok report-status ok">
+                      <CheckCircle2 size={12} aria-hidden /> {L.p4_matrix_license_yes}
+                    </span>
+                  ) : (
+                    <span className="p4-status-pill muted report-status muted">
+                      <XCircle size={12} aria-hidden /> {L.p4_matrix_license_no}
+                    </span>
+                  )}
+                </span>
+
+                <span className="num">{formatNumber(counts.normal)}</span>
+                <span className="num">{formatNumber(counts.cert)}</span>
+                {excluded ? (
+                  <span className="p4-excluded-tag">{L.p4_matrix_row_excluded}</span>
+                ) : (
+                  <strong className="num p4-matrix-new">{formatNumber(counts.total)}</strong>
+                )}
+              </div>
+            );
+          })}
+
+          <div className="p4-matrix-row p4-matrix-totals" role="row">
+            <span>{L.p4_matrix_totals_label}</span>
+            {STAGE_KEYS.map((sk, i) => {
+              const sum = stageShareTotals[i];
+              const mixed = stageHasMixedMethod[i];
+              const ok = sum === 100;
+              return (
+                <span
+                  key={sk}
+                  className={`num p4-total-share${mixed ? " mixed" : ok ? " ok" : " warn"}`}
+                  title={fillTemplate(
+                    mixed
+                      ? L.p4_matrix_totals_stage_mixed
+                      : ok ? L.p4_matrix_totals_stage_ok : L.p4_matrix_totals_stage_warn,
+                    { stage: STAGE_LABELS[sk], sum: formatNumber(sum) }
+                  )}
+                >
+                  {formatNumber(sum)}
+                </span>
+              );
+            })}
+            <span />
+            <span className="num">{formatNumber(previewTotals.normal)}</span>
+            <span className="num">{formatNumber(previewTotals.cert)}</span>
+            <strong className="num">{formatNumber(previewTotals.total)}</strong>
           </div>
         </div>
-      )}
+      </div>
+
+      {/* المراجعة اليدوية — in place, collapsed by default (activeTab === "bulk"). */}
+      <div className={`p4-manual-card${manualOpen ? " open" : ""}`}>
+        <button
+          type="button"
+          className="p4-manual-summary"
+          aria-expanded={manualOpen}
+          aria-controls="p4-manual-section"
+          onClick={() => setActiveTab(manualOpen ? "bulk" : "manual")}
+        >
+          <span className="p4-manual-chevron" aria-hidden>
+            <ChevronDown size={16} />
+          </span>
+          <h3>{L.p4_manual_title}</h3>
+          <span className="p4-manual-caption">
+            {fillTemplate(L.p4_manual_caption, {
+              unassigned: formatNumber(unassignedCount),
+              replacement: formatNumber(statusCounts["replacement-requested"]),
+            })}
+          </span>
+          <span className="p4-manual-hint">
+            {manualOpen ? L.p4_manual_collapse_hint : L.p4_manual_expand_hint}
+          </span>
+        </button>
+
+        {manualOpen && (
+          <div id="p4-manual-section" className="distribution-manual-panel">
+            <div className="p4-manual-toolbar distribution-manual-toolbar">
+              <label className="dist-search-box" htmlFor="manual-xray-search">
+                <Search size={15} aria-hidden="true" />
+                <input
+                  id="manual-xray-search"
+                  type="search"
+                  aria-label="بحث بمعرف الأشعة"
+                  value={manualSearch}
+                  onChange={(e) => setManualSearch(e.target.value)}
+                  placeholder={L.p4_manual_search_placeholder}
+                />
+              </label>
+
+              <div className="p4-status-chips" role="group" aria-label={L.p4_manual_col_status}>
+                {(["unassigned", "pending", "replacement-requested", "completed"] as const).map((status) => (
+                  <button
+                    key={status}
+                    type="button"
+                    className={`p4-chip${manualStatusFilter === status ? " active" : ""}`}
+                    aria-pressed={manualStatusFilter === status}
+                    onClick={() =>
+                      setManualStatusFilter(manualStatusFilter === status ? "all" : status)
+                    }
+                  >
+                    {STATUS_LABELS[status]}
+                    <strong className="num">{formatNumber(statusCounts[status])}</strong>
+                  </button>
+                ))}
+              </div>
+
+              <label className="dist-filter-field" htmlFor="manual-employee-filter">
+                {L.p4_matrix_col_expert}
+                <select
+                  id="manual-employee-filter"
+                  value={manualEmployeeFilter}
+                  onChange={(e) => setManualEmployeeFilter(e.target.value)}
+                >
+                  <option value="all">{L.p4_manual_all_experts}</option>
+                  <option value="unassigned">{L.p4_manual_unassigned_option}</option>
+                  {assignedEmployeeOptions.map((employee) => (
+                    <option key={employee.username} value={employee.username}>
+                      {employee.displayName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <strong className="dist-filter-count num">
+                {formatNumber(filteredManualRows.length)} / {formatNumber(totalRows)}
+              </strong>
+
+              {hasManualFilter && (
+                <button type="button" className="dist-clear-filters-btn" onClick={clearManualFilters}>
+                  {L.p4_manual_clear_filters}
+                </button>
+              )}
+            </div>
+
+            <div className="p4-manual-table distribution-table-wrapper">
+              <div className="distribution-table" role="table">
+                <div className="p4-manual-row p4-manual-header distribution-header" role="row">
+                  <span role="columnheader">{L.p4_manual_col_xray}</span>
+                  <span role="columnheader">{L.p4_manual_col_port}</span>
+                  <span role="columnheader">{L.p4_manual_col_certscan}</span>
+                  <span role="columnheader">{L.p4_manual_col_status}</span>
+                  <span role="columnheader">{L.p4_manual_col_expert}</span>
+                  <span role="columnheader">{L.p4_manual_col_action}</span>
+                </div>
+
+                {filteredManualRows.length === 0 ? (
+                  <div className="distribution-empty-row" role="row">
+                    {L.p4_manual_empty}
+                  </div>
+                ) : filteredManualRows.map((row) => {
+                  const entry = entryMap.get(row.xrayImageId);
+                  return (
+                    <DistributionRow
+                      key={row.xrayImageId}
+                      row={row}
+                      entry={entry ?? null}
+                      employees={employees}
+                      isDisabled={!canDistribute || isDistributing}
+                      onAssign={onAssign}
+                      onReassign={onReassign}
+                      onMarkComplete={onMarkComplete}
+                      onRequestReplacement={onRequestReplacement}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </section>
   );
+}
+
+function pct(part: number, whole: number): number {
+  return whole > 0 ? (part / whole) * 100 : 0;
 }

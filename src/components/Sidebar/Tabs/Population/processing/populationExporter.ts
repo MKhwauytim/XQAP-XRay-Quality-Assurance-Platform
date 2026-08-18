@@ -253,11 +253,12 @@ import type { ExportColumnSetting } from "../../../../../data/population/populat
 
 function preparedRowToExport(
   row: PreparedPopulationRow,
-  columnsSetting?: ExportColumnSetting[]
+  columnsSetting: ExportColumnSetting[] | undefined,
+  excludedRawKeys: ReadonlySet<string> | null
 ): Record<string, unknown> {
-  return !columnsSetting || columnsSetting.length === 0
+  return !columnsSetting || columnsSetting.length === 0 || !excludedRawKeys
     ? defaultPreparedRowToExport(row)
-    : configuredPreparedRowToExport(row, columnsSetting);
+    : configuredPreparedRowToExport(row, columnsSetting, excludedRawKeys);
 }
 
 function defaultPreparedRowToExport(row: PreparedPopulationRow): Record<string, unknown> {
@@ -319,19 +320,55 @@ function configuredColumnValue(row: PreparedPopulationRow, key: string): unknown
   return null;
 }
 
+/**
+ * Raw-row keys that a configured export must NOT re-append as extras.
+ *
+ * The raw row is keyed by the ORIGINAL Excel headers (English or Arabic), while
+ * `ExportColumnSetting.fieldKey` is the normalized system key ("xrayImageId").
+ * Excluding by fieldKey alone therefore excluded almost nothing: every source
+ * column re-appeared under its raw Excel header next to the configured Arabic
+ * one — the owner-reported "I configured Arabic names but got the English
+ * Excel names" bug. The exclusion set has to cover, per configured column:
+ * - the fieldKey itself (custom fields use the raw header as their key), and
+ * - every known source-header alias of that fieldKey, and
+ * - the configured exportHeader (a raw header equal to it would otherwise
+ *   overwrite the configured cell), all alias-normalized the same way
+ *   `getUnmappedRawFields` normalizes for the default export path.
+ */
+function buildConfiguredRawKeyExclusions(
+  columnsSetting: ExportColumnSetting[]
+): Set<string> {
+  const aliasesByFieldKey = RISK_COLUMN_ALIASES as Record<
+    string,
+    readonly string[] | undefined
+  >;
+  const excluded = new Set<string>();
+  for (const column of columnsSetting) {
+    excluded.add(normalizeArabicText(column.fieldKey));
+    excluded.add(normalizeArabicText(column.exportHeader));
+    for (const alias of aliasesByFieldKey[column.fieldKey] ?? []) {
+      excluded.add(normalizeArabicText(alias));
+    }
+  }
+  return excluded;
+}
+
 function appendUnconfiguredRawFields(
   target: Record<string, unknown>,
   row: PreparedPopulationRow,
-  configuredKeys: ReadonlySet<string>
+  excludedNormalizedKeys: ReadonlySet<string>
 ): void {
   for (const [key, value] of Object.entries(row.rawRow ?? {})) {
-    if (!configuredKeys.has(key)) target[key] = value;
+    if (!excludedNormalizedKeys.has(normalizeArabicText(key))) {
+      target[key] = value;
+    }
   }
 }
 
 function configuredPreparedRowToExport(
   row: PreparedPopulationRow,
-  columnsSetting: ExportColumnSetting[]
+  columnsSetting: ExportColumnSetting[],
+  excludedRawKeys: ReadonlySet<string>
 ): Record<string, unknown> {
   const exported: Record<string, unknown> = {};
   const enabledColumns = columnsSetting
@@ -340,11 +377,7 @@ function configuredPreparedRowToExport(
   for (const column of enabledColumns) {
     exported[column.exportHeader] = configuredColumnValue(row, column.fieldKey);
   }
-  appendUnconfiguredRawFields(
-    exported,
-    row,
-    new Set(columnsSetting.map((column) => column.fieldKey))
-  );
+  appendUnconfiguredRawFields(exported, row, excludedRawKeys);
   return exported;
 }
 
@@ -353,7 +386,12 @@ function preparedRowsToExport(
   rows: PreparedPopulationRow[],
   columnsSetting?: ExportColumnSetting[]
 ): Record<string, unknown>[] {
-  return rows.map((row) => preparedRowToExport(row, columnsSetting));
+  // Built once per export, not once per row — populations reach 500k rows.
+  const excludedRawKeys =
+    columnsSetting && columnsSetting.length > 0
+      ? buildConfiguredRawKeyExclusions(columnsSetting)
+      : null;
+  return rows.map((row) => preparedRowToExport(row, columnsSetting, excludedRawKeys));
 }
 
 function biFieldSummaryToExport(

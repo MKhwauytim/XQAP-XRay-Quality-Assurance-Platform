@@ -31,6 +31,18 @@
      keep --c-sky for icons, borders, fills and accents, which need just 3:1. */
   --c-sky-text:    #00719F;
   --c-sky-light:   #E5F5FB;
+  /* Border companion to --c-sky-light: the soft outline on info strips and
+     sky-tinted state pills, where --c-sky itself is too saturated. */
+  --c-sky-soft:    #B8E2F4;
+
+  /* On-navy text tints. The dark rail and its pills need light-side variants of
+     the brand teal/gold that stay readable on --brand-deep-bg; the normal
+     --brand-innovation / --brand-premium values are too dark there. Used by the
+     sidebar nav badges and the month-context pills, so they are shared tokens
+     rather than per-file literals. */
+  --c-teal-on-navy: #7BE7E3;
+  --c-gold-on-navy: #F0C674;
+  --c-sky-on-navy:  #4FC7F5;
 
   --c-ink:         #0B1F33;
   --c-ink-2:       #263C58;

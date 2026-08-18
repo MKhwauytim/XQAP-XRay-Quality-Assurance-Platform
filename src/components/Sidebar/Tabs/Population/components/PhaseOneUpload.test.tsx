@@ -11,20 +11,39 @@
 // `disabled` prop wired to a real HTML `disabled` attribute on its buttons, and index.tsx's
 // pickExcelFile/handleFallbackFileChange/clearSelectedFile all re-check canUploadNow
 // (not just canUploadData) as the authoritative handler-side gate.
+//
+// 2026-08 design handoff (panel 2b): the BI source became a MULTI-FILE list capped at 10.
+// The suite below also covers the cap, per-row removal, the derived accepted-rows total,
+// the parsing row, and the explicit error row a file that classified nothing must produce.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import PhaseOneUpload from "./PhaseOneUpload";
 import type { RiskWorkbookResult } from "../riskData/riskDataTypes";
+import type { BiUploadEntry } from "../biData/biDataTypes";
+import { MAX_BI_UPLOADS } from "../biData/biDataTypes";
 
 type Props = ComponentProps<typeof PhaseOneUpload>;
+
+function biEntry(overrides: Partial<BiUploadEntry> = {}): BiUploadEntry {
+  const name = overrides.file?.name ?? "bi.xlsx";
+  return {
+    id: name,
+    file: new File(["x"], name),
+    sheetName: "بحري وارد",
+    sizeBytes: 2048,
+    acceptedRows: 100,
+    state: "ready",
+    ...overrides,
+  };
+}
 
 function baseProps(overrides: Partial<Props> = {}): Props {
   return {
     uploads: {
       riskAgencyData: { file: null, source: null },
-      businessIntelligenceData: { file: null, source: null },
+      biUploads: [],
     },
     uploadError: "",
     processingMessage: "",
@@ -34,6 +53,8 @@ function baseProps(overrides: Partial<Props> = {}): Props {
     businessIntelligenceInputRef: { current: null },
     onPickFile: vi.fn(),
     onClearFile: vi.fn(),
+    onRemoveBiUpload: vi.fn(),
+    onDropFiles: vi.fn(),
     onFallbackFileChange: vi.fn(),
     ...overrides,
   };
@@ -74,15 +95,14 @@ describe("PhaseOneUpload — real `disabled` attribute on the file-picker button
           canUpload: true,
           uploads: {
             riskAgencyData: { file: new File(["x"], "risk.xlsx"), source: "input-fallback" },
-            businessIntelligenceData: { file: null, source: null },
+            biUploads: [],
           },
         })}
       />
     );
-    for (const btn of screen.getAllByRole("button", { name: /تغيير الملف|اختيار ملف Excel/ })) {
-      expect(btn).not.toBeDisabled();
-    }
+    expect(screen.getByRole("button", { name: "تغيير الملف" })).not.toBeDisabled();
     expect(screen.getByRole("button", { name: "إزالة" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "اختيار ملفات" })).not.toBeDisabled();
   });
 
   it("failure: pick/remove buttons carry the real HTML disabled attribute when canUpload is false", () => {
@@ -92,15 +112,151 @@ describe("PhaseOneUpload — real `disabled` attribute on the file-picker button
           canUpload: false,
           uploads: {
             riskAgencyData: { file: new File(["x"], "risk.xlsx"), source: "input-fallback" },
-            businessIntelligenceData: { file: null, source: null },
+            biUploads: [biEntry()],
           },
         })}
       />
     );
-    for (const btn of screen.getAllByRole("button", { name: /تغيير الملف|اختيار ملف Excel/ })) {
-      expect(btn).toBeDisabled();
-    }
+    expect(screen.getByRole("button", { name: "تغيير الملف" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "إزالة" })).toBeDisabled();
+    // The new denser BI controls follow the same rule: disabled, not hidden.
+    expect(screen.getByRole("button", { name: "اختيار ملفات" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /إزالة الملف: bi\.xlsx/ })).toBeDisabled();
+  });
+});
+
+describe("PhaseOneUpload — multi-file BI list (design handoff 2b)", () => {
+  it("happy: renders one row per attached file with a derived count pill and accepted-rows total", () => {
+    render(
+      <PhaseOneUpload
+        {...baseProps({
+          uploads: {
+            riskAgencyData: { file: null, source: null },
+            biUploads: [
+              biEntry({ id: "a", file: new File(["x"], "bi-1.xlsx"), acceptedRows: 14208 }),
+              biEntry({ id: "b", file: new File(["x"], "bi-2.xlsx"), acceptedRows: 9940 }),
+            ],
+          },
+        })}
+      />
+    );
+
+    expect(screen.getByText("bi-1.xlsx")).toBeTruthy();
+    expect(screen.getByText("bi-2.xlsx")).toBeTruthy();
+    // Derived, never stored.
+    expect(screen.getByText("2 من 10 ملفات")).toBeTruthy();
+    expect(screen.getByText("24,148")).toBeTruthy();
+  });
+
+  it("happy: the empty list still renders the table chrome and a zero total", () => {
+    render(<PhaseOneUpload {...baseProps()} />);
+    expect(screen.getByText("لم يتم إرفاق أي ملف ذكاء أعمال بعد.")).toBeTruthy();
+    expect(screen.getByText("0 من 10 ملفات")).toBeTruthy();
+    expect(screen.getByText("0")).toBeTruthy();
+  });
+
+  it("happy: a parsing row shows the reading state and no row count", () => {
+    render(
+      <PhaseOneUpload
+        {...baseProps({
+          uploads: {
+            riskAgencyData: { file: null, source: null },
+            biUploads: [biEntry({ state: "parsing", acceptedRows: null })],
+          },
+        })}
+      />
+    );
+    expect(screen.getByText("جارٍ القراءة…")).toBeTruthy();
+    expect(screen.getByText("—")).toBeTruthy();
+  });
+
+  it("failure: a file that classified nothing renders an explicit error row, not a silent zero", () => {
+    render(
+      <PhaseOneUpload
+        {...baseProps({
+          uploads: {
+            riskAgencyData: { file: null, source: null },
+            biUploads: [
+              biEntry({
+                file: new File(["x"], "غير معروف.csv"),
+                state: "error",
+                acceptedRows: 0,
+                error: "لم يتطابق أي اسم ورقة في هذا الملف مع أنماط الأوراق المُعرّفة (غير معروف).",
+              }),
+            ],
+          },
+        })}
+      />
+    );
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("لم يتطابق أي اسم ورقة");
+  });
+
+  it("failure: the add-more zone is disabled (not hidden) once the 10-file cap is reached", () => {
+    const biUploads = Array.from({ length: MAX_BI_UPLOADS }, (_, i) =>
+      biEntry({ id: `f${i}`, file: new File(["x"], `bi-${i}.xlsx`) })
+    );
+    render(
+      <PhaseOneUpload
+        {...baseProps({
+          uploads: { riskAgencyData: { file: null, source: null }, biUploads },
+        })}
+      />
+    );
+
+    const addButton = screen.getByRole("button", { name: "اختيار ملفات" });
+    expect(addButton).toBeDisabled();
+    expect(screen.getByText("تم بلوغ الحد الأقصى (10 ملفات). أزل ملفاً قبل إضافة غيره.")).toBeTruthy();
+    expect(screen.getByText("10 من 10 ملفات")).toBeTruthy();
+  });
+
+  it("happy: below the cap the add-more zone reports the remaining slots and is enabled", () => {
+    render(
+      <PhaseOneUpload
+        {...baseProps({
+          uploads: {
+            riskAgencyData: { file: null, source: null },
+            biUploads: [biEntry({ id: "a" }), biEntry({ id: "b", file: new File(["x"], "b.xlsx") })],
+          },
+        })}
+      />
+    );
+    expect(screen.getByRole("button", { name: "اختيار ملفات" })).not.toBeDisabled();
+    expect(
+      screen.getByText("‎.xlsx أو ‎.xls أو ‎.csv · يمكن اختيار عدة ملفات معاً · بقي 8 من أصل 10")
+    ).toBeTruthy();
+  });
+
+  it("happy: removing a row reports the row's own id, so the parent can recompute the total", () => {
+    const onRemoveBiUpload = vi.fn();
+    render(
+      <PhaseOneUpload
+        {...baseProps({
+          onRemoveBiUpload,
+          uploads: {
+            riskAgencyData: { file: null, source: null },
+            biUploads: [
+              biEntry({ id: "keep", file: new File(["x"], "keep.xlsx") }),
+              biEntry({ id: "drop", file: new File(["x"], "drop.xlsx") }),
+            ],
+          },
+        })}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "إزالة الملف: drop.xlsx" }));
+    expect(onRemoveBiUpload).toHaveBeenCalledWith("drop");
+  });
+
+  it("happy: the BI file input accepts CSV and multiple selection", () => {
+    const { container } = render(<PhaseOneUpload {...baseProps()} />);
+    const inputs = container.querySelectorAll<HTMLInputElement>("input.hidden-file-input");
+    const biInput = inputs[1];
+    expect(biInput.accept).toBe(".xlsx,.xls,.csv");
+    expect(biInput.multiple).toBe(true);
+    // The risk source stays single-file and Excel-only.
+    expect(inputs[0].accept).toBe(".xlsx,.xls");
+    expect(inputs[0].multiple).toBe(false);
   });
 });
 
@@ -121,8 +277,71 @@ describe("PhaseOneUpload — raw-file summary (W4/W10)", () => {
     expect(screen.getByText("الصفوف المقبولة: 10")).toBeTruthy();
   });
 
+  it("happy: a merged BI result keeps identical sheet names from different files distinct", () => {
+    render(
+      <PhaseOneUpload
+        {...baseProps({
+          biWorkbookResult: {
+            rows: [],
+            sheetSummaries: [
+              { sheetName: "بحري وارد", sourceFileName: "a.xlsx", source: "بحري وارد", originalRowCount: 5, normalizedRowCount: 5, excludedMissingXrayIdCount: 0 },
+              { sheetName: "بحري وارد", sourceFileName: "b.xlsx", source: "بحري وارد", originalRowCount: 7, normalizedRowCount: 7, excludedMissingXrayIdCount: 0 },
+            ],
+            unknownSheetNames: [],
+            totalOriginalRows: 12,
+            totalNormalizedRows: 12,
+            totalExcludedMissingXrayIdCount: 0,
+          },
+        })}
+      />
+    );
+    // Both chips render — a duplicate React key would have collapsed/warned.
+    expect(screen.getAllByText(/بحري وارد:/)).toHaveLength(2);
+  });
+
   it("failure: renders nothing extra before any workbook has been parsed", () => {
     render(<PhaseOneUpload {...baseProps()} />);
     expect(screen.queryByText("معلومات عامة عن الملفات المرفوعة")).toBeNull();
+  });
+});
+
+// ── Drag-and-drop (owner request, 2026-08-18) ───────────────────────────────
+
+describe("PhaseOneUpload — drag-and-drop", () => {
+  function dropOn(element: Element, files: File[]) {
+    // jsdom's DragEvent has no dataTransfer, so it is supplied explicitly.
+    fireEvent.drop(element, { dataTransfer: { files } });
+  }
+
+  it("routes files dropped on the BI card to the BI upload key", () => {
+    const onDropFiles = vi.fn();
+    const { container } = render(<PhaseOneUpload {...baseProps({ onDropFiles })} />);
+
+    const file = new File(["x"], "بحري وارد.xlsx");
+    dropOn(container.querySelector(".bi-source-card")!, [file]);
+
+    expect(onDropFiles).toHaveBeenCalledWith("businessIntelligenceData", [file]);
+  });
+
+  it("routes files dropped on the risk card to the risk-agency upload key", () => {
+    const onDropFiles = vi.fn();
+    const { container } = render(<PhaseOneUpload {...baseProps({ onDropFiles })} />);
+
+    const file = new File(["x"], "risk.xlsx");
+    dropOn(container.querySelector(".risk-drop-wrap")!, [file]);
+
+    expect(onDropFiles).toHaveBeenCalledWith("riskAgencyData", [file]);
+  });
+
+  it("ignores a drop while uploading is not permitted (closed month / no permission)", () => {
+    const onDropFiles = vi.fn();
+    const { container } = render(
+      <PhaseOneUpload {...baseProps({ onDropFiles, canUpload: false })} />
+    );
+
+    dropOn(container.querySelector(".bi-source-card")!, [new File(["x"], "a.xlsx")]);
+    dropOn(container.querySelector(".risk-drop-wrap")!, [new File(["x"], "b.xlsx")]);
+
+    expect(onDropFiles).not.toHaveBeenCalled();
   });
 });

@@ -4,11 +4,17 @@ import type { PopulationProcessingResult } from "../processing/populationProcess
 import type { SafeWriteProgressPhase } from "../../../../../data/storage/safeWrite";
 import type { PopulationAggregateLoadResult } from "../../../../../data/population/populationAggregate";
 import type { StageAliasMappings } from "../../../../../data/population/populationConfig";
+import { useEffect, useState } from "react";
 import { useLabels } from "../../../../../data/labels/useLabels";
-import DataAccuracyReport from "./DataAccuracyReport";
+import type { Labels } from "../../../../../data/labels/labelsStore";
+import DataAccuracyReport, { AccuracyVerdictCard } from "./DataAccuracyReport";
+import { compareAccuracyAsync, type AccuracyCompareResult } from "./dataAccuracyCompare";
 import PopulationProcessingReport from "./PopulationProcessingReport";
-import { AlertTriangle, Check, FolderOpen, Lock, X } from "lucide-react";
+import { AlertTriangle, Check, Download, FolderOpen, Info, Lock, Play, X } from "lucide-react";
 import CertScanMatchPreviewPanel from "./CertScanMatchPreviewPanel";
+import { formatNumber, formatPercentage } from "./helpers";
+import type { ProcessingSummary } from "../processing/populationProcessingTypes";
+import "./PhaseTwoReportAndProcessing.css";
 
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
 
@@ -64,6 +70,171 @@ type PhaseTwoReportAndProcessingProps = {
   onExportPopulation: () => void;
 };
 
+type ProcessingVerdictCardProps = {
+  summary: ProcessingSummary | null;
+  labels: Labels;
+  monthLabel: string;
+  hasDiskWorkspace: boolean;
+  savedOk: boolean;
+  isProcessingPopulation: boolean;
+  loadedFromDisk: boolean;
+  canProcess: boolean;
+  canExport: boolean;
+  showExport: boolean;
+  onProcessPopulation: () => void;
+  onExportPopulation: () => void;
+};
+
+/**
+ * "نتيجة المعالجة" — the wide column of the 3b verdict row: title + last-run
+ * line, the two actions, four stat tiles, and the BI-match info strip. Every
+ * figure comes straight off the already-computed `ProcessingSummary`; nothing
+ * new is calculated here beyond the ratios the tiles' captions state.
+ */
+function ProcessingVerdictCard({
+  summary,
+  labels,
+  monthLabel,
+  hasDiskWorkspace,
+  savedOk,
+  isProcessingPopulation,
+  loadedFromDisk,
+  canProcess,
+  canExport,
+  showExport,
+  onProcessPopulation,
+  onExportPopulation,
+}: ProcessingVerdictCardProps) {
+  const excludedTotal = summary
+    ? summary.duplicateRiskIdRows + summary.removedInvalidResultRows + summary.invalidRiskIdRows
+    : 0;
+  const keptPercentage =
+    summary && summary.riskOriginalRows > 0
+      ? (summary.finalPreparedPopulationRows / summary.riskOriginalRows) * 100
+      : 0;
+  const biUnmatchedPercentage = summary ? Math.max(0, 100 - summary.biMatchPercentage) : 0;
+  const certScanProvided = summary?.certScanProvided !== false;
+
+  return (
+    <div className="p2-result-card">
+      <div className="p2-result-head">
+        <div className="p2-result-head-text">
+          <h3>{labels.p2_result_title}</h3>
+          <p>
+            {labels.p2_result_subtitle.replace("{month}", monthLabel)}
+            {hasDiskWorkspace && savedOk ? ` · ${labels.p2_result_saved_note}` : ""}
+          </p>
+        </div>
+        <div className="p2-result-actions">
+          {showExport && (
+            <button
+              type="button"
+              className="proc-export-btn primary p2-action-export"
+              onClick={onExportPopulation}
+              disabled={!canExport}
+              title={!canExport ? "لا تملك صلاحية تصدير التقارير." : "تصدير المجتمع النهائي Excel"}
+            >
+              <Download size={15} aria-hidden="true" />
+              {labels.p2_result_export_excel}
+            </button>
+          )}
+          <button
+            type="button"
+            className="proc-run-btn p2-action-process"
+            onClick={onProcessPopulation}
+            disabled={isProcessingPopulation || loadedFromDisk || !canProcess}
+            title={
+              !canProcess
+                ? "لا تملك صلاحية معالجة المجتمع، أو أن الشهر مغلق حالياً، أو أن بيانات الشهر قيد التحميل."
+                : loadedFromDisk
+                ? "ارفع الملفات من المرحلة الأولى لإعادة المعالجة"
+                : undefined
+            }
+          >
+            {isProcessingPopulation ? (
+              <>
+                <span className="proc-spinner" aria-hidden="true" />
+                جاري المعالجة...
+              </>
+            ) : (
+              <>
+                <Play size={15} aria-hidden="true" />
+                {summary ? labels.p2_result_reprocess : labels.p2_result_process}
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {summary ? (
+        <>
+          <div className="p2-tile-grid">
+            <div className="p2-tile">
+              <span className="p2-tile-label">{labels.p2_tile_final_population}</span>
+              <strong className="p2-tile-value">{formatNumber(summary.finalPreparedPopulationRows)}</strong>
+              <span className="p2-tile-caption ok">
+                {labels.p2_tile_final_population_caption.replace("{percent}", formatPercentage(keptPercentage))}
+              </span>
+            </div>
+            <div className="p2-tile">
+              <span className="p2-tile-label">{labels.p2_tile_excluded}</span>
+              <strong className="p2-tile-value danger">{formatNumber(excludedTotal)}</strong>
+              <span className="p2-tile-caption">
+                {labels.p2_tile_excluded_caption
+                  .replace("{duplicates}", formatNumber(summary.duplicateRiskIdRows))
+                  .replace("{invalidResults}", formatNumber(summary.removedInvalidResultRows))
+                  .replace("{invalidIds}", formatNumber(summary.invalidRiskIdRows))}
+              </span>
+            </div>
+            <div className="p2-tile">
+              <span className="p2-tile-label">{labels.p2_tile_certscan_split}</span>
+              <strong className="p2-tile-value">
+                {certScanProvided
+                  ? `${formatNumber(Math.round(summary.certScanPercentage))} / ${formatNumber(Math.round(summary.nonCertScanPercentage))}`
+                  : labels.p2_value_empty}
+              </strong>
+              <span className="p2-tile-caption">
+                {certScanProvided
+                  ? labels.p2_tile_certscan_caption
+                      .replace("{certScan}", formatNumber(summary.certScanRows))
+                      .replace("{nonCertScan}", formatNumber(summary.nonCertScanRows))
+                  : labels.p2_tile_certscan_unavailable}
+              </span>
+            </div>
+            <div className="p2-tile">
+              <span className="p2-tile-label">{labels.p2_tile_bi_fill}</span>
+              <strong className="p2-tile-value">{formatNumber(summary.totalBiFilledFields)}</strong>
+              <span className="p2-tile-caption">
+                {labels.p2_tile_bi_fill_caption.replace("{count}", formatNumber(summary.biFieldFillSummary.length))}
+              </span>
+            </div>
+          </div>
+
+          <div className="p2-info-strip">
+            <Info size={15} aria-hidden="true" />
+            <span>
+              {summary.biProvided
+                ? labels.p2_strip_bi_match.replace("{percent}", formatPercentage(biUnmatchedPercentage))
+                : labels.p2_strip_bi_missing}
+            </span>
+          </div>
+
+          {!certScanProvided && (
+            <div className="p2-warn-strip" role="status">
+              <AlertTriangle size={15} aria-hidden="true" />
+              <span>{labels.p2_strip_certscan_missing}</span>
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="processing-placeholder">
+          <p>لم يتم تنفيذ معالجة المجتمع بعد.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function PhaseTwoReportAndProcessing({
   riskWorkbookResult,
   biWorkbookResult,
@@ -87,6 +258,44 @@ export default function PhaseTwoReportAndProcessing({
   onExportPopulation,
 }: PhaseTwoReportAndProcessingProps) {
   const labels = useLabels();
+
+  // One comparison pass, shared by the verdict card (hoisted into the verdict
+  // row) and the mismatch panels inside DataAccuracyReport. Computed before the
+  // early return below so the hook order stays stable.
+  //
+  // Fix (population, 2026-08-18): this used to run compareAccuracy() fully
+  // synchronously inside the useMemo above — over a real population (tens to
+  // hundreds of thousands of risk rows) that blocks the main thread for the
+  // whole comparison, which is exactly the "app becomes unclickable, worst
+  // right after a Phase 1 upload" report: landing on Phase 2 is what first
+  // triggers this computation. Runs the chunked async version instead and
+  // keeps `accuracy` null (both verdict cards and DataAccuracyReport already
+  // render their no-data state on null/undefined) until it resolves.
+  // The result is stored WITH the inputs it was computed from, and read back
+  // only when those still match. That makes "inputs changed, result not in yet"
+  // a derived null rather than a setState — so a stale verdict can never be on
+  // screen for even one render, and no state is set synchronously in an effect.
+  const [computed, setComputed] = useState<{
+    risk: RiskWorkbookResult;
+    bi: BiWorkbookResult;
+    result: AccuracyCompareResult;
+  } | null>(null);
+  const accuracy =
+    computed && computed.risk === riskWorkbookResult && computed.bi === biWorkbookResult
+      ? computed.result
+      : null;
+
+  useEffect(() => {
+    const risk = riskWorkbookResult;
+    const bi = biWorkbookResult;
+    if (!risk || !bi) return;
+    let cancelled = false;
+    compareAccuracyAsync(risk.rows, bi.rows).then((result) => {
+      if (cancelled) return;
+      setComputed({ risk, bi, result });
+    });
+    return () => { cancelled = true; };
+  }, [riskWorkbookResult, biWorkbookResult]);
 
   // Show placeholder only when there is absolutely nothing to display —
   // a locked month with an aggregate loaded counts as "something to display".
@@ -161,136 +370,90 @@ export default function PhaseTwoReportAndProcessing({
         <div className="upload-warning" role="status">{processingMessage}</div>
       )}
 
-      {/* ── Step A: Data Accuracy Report ── */}
-      <div className="phase2-substep">
-        <div className="phase2-substep-header">
-          <div className="phase2-substep-badge">أ</div>
-          <div>
-            <h3>مقارنة دقة البيانات</h3>
-            <p>مطابقة بيانات وكالة المخاطر مع بيانات BI عمود بعمود باستخدام معرف الأشعة.</p>
-          </div>
-        </div>
 
-        {loadedFromDisk ? (
-          <div className="dar-disk-banner" style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-            <FolderOpen size={16} style={{ flexShrink: 0, marginTop: 2 }} />
-            <span>تم تحميل هذا الشهر من القرص — البيانات الأصلية غير متاحة في الجلسة الحالية.
-            لعرض تقرير دقة البيانات، ارفع ملفَي وكالة المخاطر و BI من المرحلة الأولى.</span>
-          </div>
-        ) : !hasBi ? (
-          <div className="dar-no-bi" style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-            <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
-            <span>لم يتم رفع ملف BI — مقارنة الدقة غير متاحة. رفع ملف BI في المرحلة الأولى يتيح تقرير الدقة الكامل.</span>
-          </div>
-        ) : riskWorkbookResult && biWorkbookResult ? (
-          <DataAccuracyReport
-            riskRows={riskWorkbookResult.rows}
-            biRows={biWorkbookResult.rows}
-          />
-        ) : null}
+      {/* ── Verdict row: accuracy verdict + processing outcome ── */}
+      <div className={`p2-verdict-row${accuracy ? "" : " no-accuracy"}`}>
+        {accuracy && <AccuracyVerdictCard result={accuracy} />}
+        <ProcessingVerdictCard
+          summary={reportData?.summary ?? null}
+          labels={labels}
+          monthLabel={monthLabel}
+          hasDiskWorkspace={hasDiskWorkspace}
+          savedOk={saveToDiskMessage?.type === "ok" && !isSavingToDisk}
+          isProcessingPopulation={isProcessingPopulation}
+          loadedFromDisk={loadedFromDisk}
+          canProcess={canProcess}
+          canExport={canExport}
+          showExport={populationProcessingResult !== null && !isProcessingPopulation}
+          onProcessPopulation={onProcessPopulation}
+          onExportPopulation={onExportPopulation}
+        />
       </div>
 
-      {/* ── Step B: Processing ── */}
-      <section className="processing-workspace" aria-label="المعالجة">
-        <div className="phase2-substep-header" style={{ marginBottom: "14px" }}>
-          <div className="phase2-substep-badge">ب</div>
-          <div className="processing-workspace-header">
-            <h3>المعالجة</h3>
-            <p>
-              شغّل معالجة المجتمع. قائمة CertScan تُدار الآن من إعدادات المعالجة (شهرية ومتراكمة).
-            </p>
+      {isProcessingPopulation && (
+        <div className="processing-progress-wrapper" role="status">
+          <div className="progress-bar-bg">
+            <div className="progress-bar-fill" style={{ width: `${processingProgressPercent}%` }} />
           </div>
+          <p className="progress-bar-label">
+            {processingProgressMessage || "جاري المعالجة..."} ({processingProgressPercent}%)
+          </p>
         </div>
+      )}
 
-        {riskWorkbookResult && !loadedFromDisk && (
-          <CertScanMatchPreviewPanel
-            riskRows={riskWorkbookResult.rows}
-            certScanPasteText={certScanPasteText}
-          />
-        )}
+      {riskWorkbookResult && !loadedFromDisk && (
+        <CertScanMatchPreviewPanel
+          riskRows={riskWorkbookResult.rows}
+          certScanPasteText={certScanPasteText}
+        />
+      )}
 
-        <div className="proc-action-panel">
-          <button
-            type="button"
-            className="proc-run-btn"
-            onClick={onProcessPopulation}
-            disabled={isProcessingPopulation || loadedFromDisk || !canProcess}
-            title={
-              !canProcess
-                ? "لا تملك صلاحية معالجة المجتمع، أو أن الشهر مغلق حالياً، أو أن بيانات الشهر قيد التحميل."
-                : loadedFromDisk
-                ? "ارفع الملفات من المرحلة الأولى لإعادة المعالجة"
-                : undefined
-            }
-          >
-            {isProcessingPopulation ? (
-              <>
-                <span className="proc-spinner" aria-hidden="true" />
-                جاري المعالجة...
-              </>
-            ) : (
-              <>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-                {reportData ? "إعادة معالجة المجتمع" : "معالجة المجتمع"}
-              </>
-            )}
-          </button>
+      {/* ── Accuracy: mismatching columns + mismatch detail ── */}
+      {loadedFromDisk ? (
+        <div className="dar-disk-banner p2-banner">
+          <FolderOpen size={16} aria-hidden="true" />
+          <span>تم تحميل هذا الشهر من القرص — البيانات الأصلية غير متاحة في الجلسة الحالية.
+          لعرض تقرير دقة البيانات، ارفع ملفَي وكالة المخاطر و BI من المرحلة الأولى.</span>
+        </div>
+      ) : !hasBi ? (
+        <div className="dar-no-bi p2-banner">
+          <AlertTriangle size={16} aria-hidden="true" />
+          <span>لم يتم رفع ملف BI — مقارنة الدقة غير متاحة. رفع ملف BI في المرحلة الأولى يتيح تقرير الدقة الكامل.</span>
+        </div>
+      ) : riskWorkbookResult && biWorkbookResult && accuracy ? (
+        // Only rendered once `accuracy` has resolved -- passing `undefined`
+        // here while it's still computing would make DataAccuracyReport run
+        // its OWN (equally chunked, but redundant) fallback comparison
+        // concurrently with this one. The loading note below covers the gap.
+        <DataAccuracyReport
+          riskRows={riskWorkbookResult.rows}
+          biRows={biWorkbookResult.rows}
+          result={accuracy}
+          verdictHoisted
+        />
+      ) : riskWorkbookResult && biWorkbookResult ? (
+        <div className="upload-warning" role="status">{labels.p2_accuracy_computing}</div>
+      ) : null}
 
-          {populationProcessingResult && !isProcessingPopulation && (
-            <div className="proc-export-row">
-              <button
-                type="button"
-                className="proc-export-btn primary"
-                onClick={onExportPopulation}
-                disabled={!canExport}
-                title={!canExport ? "لا تملك صلاحية تصدير التقارير." : "تصدير المجتمع النهائي Excel"}
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                  <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-                </svg>
-                تصدير Excel
-              </button>
+      {/* ── Processing detail: BI fill + exclusions, then the final preview ── */}
+      {reportData && !isProcessingPopulation && (
+        <>
+          {populationLocked && (
+            <div className="upload-warning" role="status">
+              <Lock size={13} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} />
+              {labels.population_locked_report_notice}
             </div>
           )}
-        </div>
-
-        {isProcessingPopulation && (
-          <div className="processing-progress-wrapper" role="status">
-            <div className="progress-bar-bg">
-              <div className="progress-bar-fill" style={{ width: `${processingProgressPercent}%` }} />
-            </div>
-            <p className="progress-bar-label">
-              {processingProgressMessage || "جاري المعالجة..."} ({processingProgressPercent}%)
-            </p>
-          </div>
-        )}
-
-        {reportData && !isProcessingPopulation ? (
-          <>
-            {populationLocked && (
-              <div className="upload-warning" role="status">
-                <Lock size={13} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} />
-                {labels.population_locked_report_notice}
-              </div>
-            )}
-            <PopulationProcessingReport
-              summary={reportData.summary}
-              previewRows={reportData.previewRows}
-              stageMappings={stageMappings}
-              removedRows={populationProcessingResult?.removedRows}
-              duplicateRows={populationProcessingResult?.duplicateRows}
-              invalidResultRows={populationProcessingResult?.invalidResultRows}
-            />
-          </>
-        ) : !isProcessingPopulation ? (
-          <div className="processing-placeholder">
-            <p>لم يتم تنفيذ معالجة المجتمع بعد.</p>
-          </div>
-        ) : null}
-      </section>
+          <PopulationProcessingReport
+            summary={reportData.summary}
+            previewRows={reportData.previewRows}
+            stageMappings={stageMappings}
+            removedRows={populationProcessingResult?.removedRows}
+            duplicateRows={populationProcessingResult?.duplicateRows}
+            invalidResultRows={populationProcessingResult?.invalidResultRows}
+          />
+        </>
+      )}
     </section>
   );
 }

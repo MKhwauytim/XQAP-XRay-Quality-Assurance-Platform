@@ -176,7 +176,13 @@ export type SaveMonthRunParams = {
   riskFileName: string | null;
   biFileName: string | null;
   riskSourceFile?: File | null;
-  biSourceFile?: File | null;
+  /**
+   * Every BI source file the run was built from. Multi-file BI (2026-08 handoff
+   * §3) merges N files into ONE BI population, so archiving only the first would
+   * leave `1-raw/` unable to reproduce the run. One file still writes the
+   * historical `bi.source.<ext>` name; two or more write `bi.source.<n>.<ext>`.
+   */
+  biSourceFiles?: File[];
   certScanUsed: boolean;
   riskRawRows: Array<Record<string, unknown>>;
   biRawRows: Array<Record<string, unknown>>;
@@ -187,7 +193,14 @@ export type SaveMonthRunParams = {
   processingFingerprint?: string | null;
   sourceFiles?: {
     risk?: SourceFileMetadata | null;
-    bi?: SourceFileMetadata | null;
+    /**
+     * Fix (population, 2026-08-18): multi-file BI means "the" BI source file is
+     * no longer singular. Was `SourceFileMetadata | null` and silently recorded
+     * only the first attached file; now an array, one entry per attached file,
+     * so files 2..N are not misreported as absent (currently write-only — no
+     * reader exists yet, so this widening is safe).
+     */
+    bi?: SourceFileMetadata[] | null;
   };
   /**
    * When false/undefined, saveMonthRun re-checks (under the manifest lock) that
@@ -344,10 +357,18 @@ async function saveMonthRunLocked(
           await saveBinaryFile(rawDir, `risk.source.${ext}`, buf);
         })(),
         (async () => {
-          if (!params.biSourceFile) return;
-          const buf = await params.biSourceFile.arrayBuffer();
-          const ext = params.biSourceFile.name.split(".").pop() ?? "xlsx";
-          await saveBinaryFile(rawDir, `bi.source.${ext}`, buf);
+          const biFiles = params.biSourceFiles ?? [];
+          if (biFiles.length === 0) return;
+          const single = biFiles.length === 1;
+          // Sequential, not Promise.all: these can be tens of MB each, and a
+          // shared-folder handle does not benefit from racing several large
+          // binary writes against each other.
+          for (const [index, file] of biFiles.entries()) {
+            const buf = await file.arrayBuffer();
+            const ext = file.name.split(".").pop() ?? "xlsx";
+            const name = single ? `bi.source.${ext}` : `bi.source.${index + 1}.${ext}`;
+            await saveBinaryFile(rawDir, name, buf);
+          }
         })(),
         (async () => {
           if (riskRawRows.length === 0) return;

@@ -266,7 +266,7 @@ describe("XrayReferrals permission gating (render vs handler)", () => {
     // Previously: readonly = canSeeAll && assignedTo !== username — false for the
     // user's own sample regardless of canSubmitAnswers, so the form stayed editable
     // and only rejected once "تقديم" was actually clicked. Now it must never render.
-    expect(screen.queryByRole("button", { name: "تقديم" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "تقديم الفحص" })).not.toBeInTheDocument();
   });
 
   it("hides the self-service reopen-request button when the role cannot submit answers", async () => {
@@ -315,15 +315,15 @@ describe("XrayReferrals permission gating (render vs handler)", () => {
     await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
     // Previously: onReplace's render condition accepted (canRequestReplacement ||
     // canSubmitReferrals), so an employee with only submit-referrals enabled saw a
-    // working-looking "استبدال العينة" button that openReplacementDialog itself
+    // working-looking "طلب استبدال" button that openReplacementDialog itself
     // would reject (it only ever checks canRequestReplacement).
     // Sanity: the panel did render editable (submit-answers is enabled by default
     // for employee), so the button's absence checked below is specifically about
     // onReplace, not about the whole panel being read-only. Waited for explicitly:
     // the detail panel only appears once the auto-select-first-row effect commits
     // a re-render after "IMG-1" first appears in the list, one tick later.
-    await waitFor(() => expect(screen.getByRole("button", { name: "تقديم" })).toBeInTheDocument());
-    expect(screen.queryByRole("button", { name: "استبدال العينة" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "تقديم الفحص" })).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "طلب استبدال" })).not.toBeInTheDocument();
   });
 });
 
@@ -344,11 +344,11 @@ describe("XrayReferrals replacement-candidate lookup error handling", () => {
 
     await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
 
-    // Waited for explicitly: the detail panel (and its "استبدال العينة" button)
+    // Waited for explicitly: the detail panel (and its "طلب استبدال" button)
     // only appears once the auto-select-first-row effect commits a re-render
     // after "IMG-1" first appears in the list, one tick later.
     const replaceButton = await waitFor(() =>
-      screen.getByRole("button", { name: "استبدال العينة" })
+      screen.getByRole("button", { name: "طلب استبدال" })
     );
     fireEvent.click(replaceButton);
 
@@ -617,7 +617,7 @@ describe("XrayReferrals post-success reloads (Bug 1 regression)", () => {
     const noteInput = (await waitFor(() => screen.getByLabelText("ملاحظة"))) as HTMLInputElement;
     fireEvent.change(noteInput, { target: { value: "مسودة غير محفوظة" } });
 
-    const replaceButton = await waitFor(() => screen.getByRole("button", { name: "استبدال العينة" }));
+    const replaceButton = await waitFor(() => screen.getByRole("button", { name: "طلب استبدال" }));
     fireEvent.click(replaceButton);
 
     const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
@@ -675,7 +675,7 @@ describe("XrayReferrals post-success reloads (Bug 1 regression)", () => {
     render(<XrayReferrals directoryHandle={root} />);
     await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
 
-    fireEvent.click(await waitFor(() => screen.getByRole("button", { name: "استبدال العينة" })));
+    fireEvent.click(await waitFor(() => screen.getByRole("button", { name: "طلب استبدال" })));
     const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
     fireEvent.change(within(dialog).getByLabelText(/سبب الاستبدال/), {
       target: { value: "صورة غير واضحة" },
@@ -1613,7 +1613,7 @@ describe("XrayReferrals replacement dialog after the mirror fast path", () => {
     // Fast path really was taken: emp-2's row is nowhere in this employee's view.
     expect(screen.queryByText("IMG-2")).not.toBeInTheDocument();
 
-    fireEvent.click(await waitFor(() => screen.getByRole("button", { name: "استبدال العينة" })));
+    fireEvent.click(await waitFor(() => screen.getByRole("button", { name: "طلب استبدال" })));
 
     await waitFor(() => expect(getReplacementCandidatesIndexedMock).toHaveBeenCalled());
     const [, , , sampleArg, entriesArg] = getReplacementCandidatesIndexedMock.mock.calls[0];

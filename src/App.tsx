@@ -35,6 +35,8 @@ import {
   WorkspacePicker
 } from "./data/workspace/WorkspaceGate";
 import { touchTabMountLru } from "./app/tabMountLru";
+import { useWorkspaceNotifications } from "./data/notifications/useWorkspaceNotifications";
+import { useSessionActions } from "./auth/SessionActionsContext";
 
 import "./App.css";
 
@@ -43,8 +45,19 @@ type AppContentProps = {
 };
 
 export function AppContent({ session }: AppContentProps) {
+  // Nav 1b: logout moved from the AdminToolbar into the sidebar footer, which
+  // renders here rather than in AuthGate.
+  const { logout } = useSessionActions();
   const { directoryHandle, status: workspaceStatus } = useWorkspace();
   const labels = useLabels();
+  // The app's single broadcast-notification poll. Feeds both the banner below
+  // and the sidebar rail's unacknowledged-count badge, so the badge costs no
+  // extra workspace read.
+  const {
+    notifications,
+    unacceptedCount: unacceptedNotificationCount,
+    reload: reloadNotifications,
+  } = useWorkspaceNotifications(session, directoryHandle);
   const queryClient = useQueryClient();
   useQueryRefreshBridge(queryClient);
   const [selectedTabId, setSelectedTabId] = useState("");
@@ -259,7 +272,12 @@ export function AppContent({ session }: AppContentProps) {
           {labels.app_demo_banner}
         </div>
       )}
-      <NotificationBanner session={session} directoryHandle={directoryHandle} />
+      <NotificationBanner
+        session={session}
+        directoryHandle={directoryHandle}
+        notifications={notifications}
+        onReload={reloadNotifications}
+      />
       <main
         className={`app-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}
         dir="rtl"
@@ -300,6 +318,9 @@ export function AppContent({ session }: AppContentProps) {
         activeTabId={activeTabId}
         isCollapsed={isSidebarCollapsed}
         isMobileOpen={isMobileSidebarOpen}
+        session={session}
+        onLogout={logout}
+        notificationCount={unacceptedNotificationCount}
         onTabSelect={(tabId) => {
           setSelectedTabId(tabId);
           setIsMobileSidebarOpen(false);

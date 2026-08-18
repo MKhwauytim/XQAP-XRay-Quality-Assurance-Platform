@@ -167,53 +167,6 @@
   transform: translateY(1px);
 }
 
-/* ================================================================
-   Status Bar
-   ================================================================ */
-
-.population-status-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
-  margin-bottom: var(--sp-4);
-  padding: var(--sp-3) var(--sp-5);
-  border: 1px solid var(--p-border);
-  border-radius: var(--p-radius-lg);
-  background: var(--p-surface);
-  box-shadow: var(--p-shadow-sm);
-}
-
-.status-bar-label {
-  font-size: 11px;
-  font-weight: var(--p-medium);
-  color: var(--p-muted);
-  margin-inline-end: var(--sp-1);
-}
-
-.status-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-1);
-  padding: var(--sp-1) var(--sp-3);
-  border-radius: var(--p-radius-pill);
-  background: var(--p-surface-soft);
-  border: 1px solid var(--p-border);
-}
-
-.status-chip-key {
-  font-size: 11px;
-  font-weight: var(--p-medium);
-  color: var(--p-muted);
-}
-
-.status-chip-val {
-  font-size: 12px;
-  font-weight: var(--p-bold);
-  color: var(--p-text);
-  font-variant-numeric: tabular-nums;
-}
-
 .status-chip-val.idle {
   color: var(--p-muted);
   font-weight: var(--p-regular);
@@ -222,86 +175,11 @@
 .status-chip-val.ok {
   color: var(--p-success);
 }
-
-.status-bar-divider {
-  width: 1px;
-  height: 18px;
-  background: var(--p-border);
-  margin: 0 var(--sp-1);
-  flex-shrink: 0;
-}
-
-/* ================================================================
-   Horizontal Phase Stepper
-   ================================================================ */
-
-.phase-stepper {
-  display: flex;
-  flex-direction: row;          /* RTL handles direction */
-  align-items: stretch;
-  margin-bottom: var(--sp-4);
-  padding: 0;
-  border: 1px solid var(--p-border);
-  border-radius: var(--p-radius-xl);
-  background: var(--p-surface);
-  box-shadow: var(--p-shadow-sm);
-  overflow-x: auto;
-}
-
-.stepper-item {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: var(--sp-5) var(--sp-3) var(--sp-5);
-  position: relative;
-  min-width: 130px;
-  border-inline-end: 1px solid var(--p-border-light);
-  transition: background 150ms;
-}
-.stepper-item:last-child { border-inline-end: none; }
-
-/* Top progress bar per step */
-.stepper-item::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  inset-inline-start: 0;
-  inset-inline-end: 0;
-  height: 3px;
-  background: var(--p-border-light);
-  border-radius: 3px 3px 0 0;
-}
 .stepper-item.completed::before { background: var(--p-success); }
 .stepper-item.active::before    { background: var(--p-primary); }
 
 .stepper-item.clickable { cursor: pointer; }
 .stepper-item.clickable:hover { background: var(--p-surface-soft, #f5f7fa /* no-token: one-off */); }
-
-.stepper-node {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--sp-2);
-  position: relative;
-  z-index: 1;
-  width: 100%;
-}
-
-.stepper-circle {
-  width: 38px;
-  height: 38px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  border: 2px solid var(--p-border);
-  background: var(--p-surface-soft);
-  color: var(--p-muted);
-  font-size: 14px;
-  font-weight: var(--p-bold);
-  flex-shrink: 0;
-  transition: background 200ms ease, border-color 200ms ease, color 200ms ease, box-shadow 200ms ease;
-}
 
 .stepper-item.active .stepper-circle {
   border-color: var(--p-primary);
@@ -317,38 +195,8 @@
 }
 
 .stepper-item.locked .stepper-circle { opacity: 0.45; }
-
-.stepper-text {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: var(--sp-1);
-}
-
-.stepper-num {
-  font-size: 10px;
-  font-weight: var(--p-medium);
-  color: var(--p-muted);
-  letter-spacing: 0.04em;
-}
-
-.stepper-title {
-  font-size: 13px;
-  font-weight: var(--p-bold);
-  color: var(--p-primary);
-  line-height: 1.3;
-}
 .stepper-item.active .stepper-title { color: var(--p-primary); }
 .stepper-item.locked .stepper-title  { color: var(--p-muted); }
-
-.stepper-desc {
-  font-size: 11px;
-  color: var(--p-muted);
-  line-height: 1.5;
-  max-width: 160px;
-  text-align: center;
-}
 
 /* ================================================================
    Phase Panel (main content area)
@@ -397,35 +245,6 @@
   display: grid;
   place-content: center;
   text-align: center;
-}
-
-/* ================================================================
-   Phase Actions Footer
-   ================================================================ */
-
-.phase-actions {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: var(--sp-3);
-  margin-top: var(--sp-4);
-  padding: var(--sp-4) var(--sp-6);
-  border: 1px solid var(--p-border);
-  border-radius: var(--p-radius-lg);
-  background: var(--p-surface);
-  box-shadow: var(--p-shadow-sm);
-}
-
-.phase-actions-hint {
-  flex: 1;
-  font-size: 12px;
-  font-weight: var(--p-regular);
-  color: var(--p-muted);
-}
-
-.phase-actions-hint strong {
-  font-weight: var(--p-medium);
-  color: var(--p-text-secondary);
 }
 
 /* ================================================================
@@ -975,30 +794,6 @@
   gap: var(--sp-3);
 }
 
-.summary-card {
-  padding: var(--sp-4) var(--sp-4);
-  border: 1px solid var(--p-border);
-  border-radius: var(--p-radius-md);
-  background: var(--p-surface);
-}
-
-.summary-card span {
-  display: block;
-  color: var(--p-muted);
-  font-size: 12px;
-  font-weight: var(--p-medium);
-}
-
-.summary-card strong {
-  display: block;
-  margin-top: var(--sp-2);
-  color: var(--p-primary);
-  font-size: 26px;
-  font-weight: var(--p-bold);
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-
 /* ================================================================
    Report Tables
    ================================================================ */
@@ -1246,25 +1041,6 @@
   gap: var(--sp-4);
 }
 
-.processing-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--sp-3);
-}
-
-.processing-detail-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--sp-3);
-}
-
-.processing-detail-card {
-  padding: var(--sp-4);
-  border: 1px solid var(--p-border-light);
-  border-radius: var(--p-radius-md);
-  background: var(--p-surface);
-}
-
 .processing-detail-card h4,
 .bi-fill-summary-section h4,
 .prepared-preview-section h4 {
@@ -1272,27 +1048,6 @@
   color: var(--p-primary);
   font-size: 14px;
   font-weight: var(--p-bold);
-}
-
-.processing-detail-card p {
-  margin: var(--sp-1) 0;
-  color: var(--p-text-secondary);
-  font-size: 13px;
-  font-weight: var(--p-medium);
-}
-
-/* W-owner-2026-08-12c: distinguishes "no CertScan reference supplied" from a
-   bare zero, which reads identically to "matched none". */
-.certscan-not-provided-note {
-  margin: 0;
-  padding: var(--sp-2) var(--sp-3);
-  border: 1px solid var(--p-warning-border);
-  background: var(--p-warning-bg);
-  color: var(--p-warning);
-  border-radius: var(--p-radius-sm);
-  font-size: 12.5px;
-  font-weight: var(--p-medium);
-  line-height: 1.5;
 }
 
 /* BI + preview tables */
@@ -3606,4 +3361,322 @@ select.save-disk-input {
   color: var(--c-danger);
   font-size: 12px;
   font-weight: 700;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Population wizard — shared page chrome (2026-08 handoff, section 2)
+
+   The readiness rail replaced the old `.population-status-bar` +
+   `.phase-stepper` pair; the sticky action bar replaced `.phase-actions`.
+   Token-only: no raw hex literals (see scripts/check-hex-literals.mjs).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.pop-readiness {
+  border: 1px solid var(--c-border);
+  border-radius: 14px;
+  background: var(--c-surface);
+  box-shadow: var(--sh-sm);
+  overflow: hidden;
+}
+
+/* ── Facts strip ───────────────────────────────────────────── */
+
+.pop-readiness-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+
+  padding: var(--sp-3) var(--sp-5);
+
+  background: linear-gradient(90deg, rgba(0, 154, 222, 0.05), transparent 60%);
+  border-bottom: 1px solid var(--c-navy-soft);
+}
+
+.pop-readiness-strip-label {
+  color: var(--c-ink-3);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.pop-readiness-facts {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.pop-readiness-fact {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+
+  color: var(--c-ink-2);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pop-readiness-fact-value {
+  color: var(--c-ink-4);
+  font-size: 13.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.pop-readiness-fact-value.is-present {
+  color: var(--c-success);
+}
+
+.pop-readiness-month-pill {
+  display: inline-flex;
+  align-items: center;
+
+  padding: 3px 10px;
+  margin-inline-start: auto;
+
+  border: 1px solid var(--c-success-border);
+  border-radius: 999px;
+  background: var(--c-success-bg);
+  color: var(--c-success);
+
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.pop-readiness-month-pill.is-closed {
+  border-color: var(--c-warning-border);
+  background: var(--c-warning-bg);
+  color: var(--c-warning);
+}
+
+/* ── Step row ──────────────────────────────────────────────── */
+
+.pop-readiness-steps {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-2);
+
+  padding: var(--sp-5) var(--sp-4) var(--sp-4);
+}
+
+/* Connector sits behind the nodes, inset so it never pokes out past the first
+   and last node centres. */
+.pop-readiness-connector {
+  position: absolute;
+  inset-block-start: calc(var(--sp-5) + 17px);
+  inset-inline: 12.5%;
+
+  height: 2px;
+  background: var(--c-navy-soft);
+}
+
+.pop-readiness-connector-fill {
+  display: block;
+  height: 100%;
+  background: var(--c-sky);
+  transition: width var(--t-slow) var(--ease-smooth);
+}
+
+.pop-readiness-step {
+  position: relative;
+  z-index: 1;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+
+  padding: 0 var(--sp-2);
+  border: 0;
+  background: transparent;
+
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+
+.pop-readiness-step:disabled {
+  cursor: default;
+}
+
+.pop-readiness-node {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+
+  display: grid;
+  place-items: center;
+
+  border: 1.5px solid var(--c-border);
+  border-radius: 999px;
+  background: var(--c-surface);
+  color: var(--c-ink-4);
+
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+
+  transition:
+    background-color var(--t-base) var(--ease-smooth),
+    box-shadow       var(--t-base) var(--ease-smooth);
+}
+
+.pop-readiness-step.is-active .pop-readiness-node {
+  border-color: var(--c-navy);
+  background: var(--c-navy);
+  color: var(--c-surface);
+  box-shadow: 0 0 0 5px rgba(0, 154, 222, 0.14);
+}
+
+.pop-readiness-step.is-completed .pop-readiness-node,
+.pop-readiness-step.is-available .pop-readiness-node {
+  border-color: var(--c-success);
+  background: var(--c-success);
+  color: var(--c-surface);
+}
+
+.pop-readiness-step-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pop-readiness-step-title {
+  color: var(--c-ink);
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.pop-readiness-step-state {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--c-ink-4);
+}
+
+.pop-readiness-step.is-active .pop-readiness-step-state {
+  color: var(--c-sky-text);
+}
+
+.pop-readiness-step.is-completed .pop-readiness-step-state,
+.pop-readiness-step.is-available .pop-readiness-step-state {
+  color: var(--c-success);
+}
+
+.pop-readiness-step:focus-visible {
+  outline: 2px solid var(--c-sky);
+  outline-offset: 3px;
+  border-radius: var(--r-md);
+}
+
+/* ── Sticky action bar ─────────────────────────────────────── */
+
+.pop-action-bar {
+  position: sticky;
+  inset-block-end: var(--sp-3);
+  z-index: 2;
+
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+
+  padding: 14px var(--sp-5);
+
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-xl);
+  background: var(--c-surface);
+  box-shadow: 0 -6px 20px rgba(13, 31, 50, 0.08);
+}
+
+.pop-action-bubble {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+
+  display: grid;
+  place-items: center;
+
+  border-radius: 999px;
+  background: var(--c-sky-light);
+  color: var(--c-sky-text);
+
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.pop-action-next {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  min-width: 0;
+  flex: 1;
+}
+
+.pop-action-next strong {
+  color: var(--c-ink-2);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.pop-action-next span {
+  color: var(--c-ink-3);
+  font-size: 11.5px;
+  font-weight: 400;
+}
+
+.pop-action-secondary,
+.pop-action-primary {
+  height: 42px;
+  padding: 0 var(--sp-5);
+  border-radius: 9px;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background-color var(--t-fast) var(--ease-smooth),
+    box-shadow       var(--t-fast) var(--ease-smooth);
+}
+
+.pop-action-secondary {
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-2);
+  color: var(--c-ink-2);
+}
+
+.pop-action-primary {
+  border: 0;
+  background: var(--c-navy);
+  color: var(--c-surface);
+  box-shadow: 0 4px 12px rgba(14, 36, 68, 0.18);
+}
+
+.pop-action-secondary:disabled,
+.pop-action-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+@media (max-width: 900px) {
+  .pop-readiness-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: var(--sp-4);
+  }
+
+  /* With two rows of nodes a single straight connector would cut through the
+     second row, so it is dropped rather than drawn wrong. */
+  .pop-readiness-connector {
+    display: none;
+  }
+
+  .pop-action-bar {
+    flex-wrap: wrap;
+  }
 }
