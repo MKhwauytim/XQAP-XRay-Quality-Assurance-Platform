@@ -530,8 +530,14 @@ function applyDiskUsers(files: WorkspaceLoadedFiles): void {
 
   const now = new Date().toISOString();
 
-  const managedUsers: ManagedLoginUser[] = diskData?.users.length
-    ? diskData.users.map((diskUser) => ({
+  // An empty roster on disk is a real state (an admin deleted the last managed
+  // user), not a missing one: seeding the shipped accounts from it re-created
+  // them — default password and all — on every mount, permanently. Only a
+  // workspace with no users.permissions.json at all gets the defaults.
+  const diskUsers = diskData?.users;
+
+  const managedUsers: ManagedLoginUser[] = diskUsers
+    ? diskUsers.map((diskUser) => ({
     id: diskUser.id,
     username: diskUser.username,
     displayName: diskUser.displayName,

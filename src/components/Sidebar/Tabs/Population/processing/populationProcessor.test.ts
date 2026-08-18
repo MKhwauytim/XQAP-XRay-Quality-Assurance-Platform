@@ -1,4 +1,5 @@
 import { describe, expect, test, it } from "vitest";
+import * as XLSX from "xlsx";
 import { processPopulation, normalizeDate, normalizeResultValue } from "./populationProcessor";
 import type { RiskWorkbookResult } from "../riskData/riskDataTypes";
 import type { BiWorkbookResult } from "../biData/biDataTypes";
@@ -614,13 +615,13 @@ describe("normalizeDate", () => {
   const cases: Array<[string, string | number | Date | null, string | null]> = [
     // Excel serial numbers, as strings (how they arrive today via
     // riskDataNormalizer's String(value) conversion of a raw numeric cell).
-    ["excel serial string, mid-range (45814 -> 2025-06-05)", "45814", "2025-06-05"],
-    ["excel serial string, lower boundary (25000)", "25000", "1968-06-10"],
-    ["excel serial string, upper boundary (60000)", "60000", "2064-04-07"],
-    ["excel serial string with fractional time-of-day part", "45814.6136", "2025-06-05"],
+    ["excel serial string, mid-range (45814 -> 2025-06-06)", "45814", "2025-06-06"],
+    ["excel serial string, lower boundary (25000)", "25000", "1968-06-11"],
+    ["excel serial string, upper boundary (60000)", "60000", "2064-04-08"],
+    ["excel serial string with fractional time-of-day part", "45814.6136", "2025-06-06"],
     // Excel serial numbers, as an actual JS number (not pre-stringified).
-    ["excel serial as JS number", 45814, "2025-06-05"],
-    ["excel serial as JS number with fractional time-of-day part", 45814.25, "2025-06-05"],
+    ["excel serial as JS number", 45814, "2025-06-06"],
+    ["excel serial as JS number with fractional time-of-day part", 45814.25, "2025-06-06"],
     // A number outside the plausible serial range must not be reinterpreted —
     // it is presumably a genuine numeric ID, not a date.
     ["out-of-range number is left as its string form, not treated as a serial", 99999999, "99999999"],
@@ -645,6 +646,46 @@ describe("normalizeDate", () => {
 
   it.each(cases)("%s", (_label, input, expected) => {
     expect(normalizeDate(input)).toBe(expected);
+  });
+});
+
+// Regression net for the serial-date off-by-one fixed on 2026-08-18: the app's
+// own serial->ISO conversion double-applied Excel's 1900 leap-year correction
+// (the 25569 constant already absorbs it), so every imported date landed one day
+// early and any 1st-of-month row was filed under the previous month.
+//
+// Rather than re-pin a handful of hand-computed dates, this asserts agreement
+// with the vendored SheetJS's own `SSF.parse_date_code` — the very code that
+// read the cell in the first place. The app and its workbook reader disagreeing
+// about what a serial means is the actual defect class, so that is what is
+// pinned, across the whole range `normalizeDate` routes into the converter.
+describe("normalizeDate: Excel serials agree with the vendored SheetJS reader", () => {
+  function sheetJsIso(serial: number): string {
+    const parsed = XLSX.SSF.parse_date_code(serial);
+    if (!parsed) throw new Error(`SheetJS could not parse serial ${serial}`);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${parsed.y}-${pad(parsed.m)}-${pad(parsed.d)}`;
+  }
+
+  // The exact serial the regression was found on: 1 May 2025. Under the old
+  // double correction this returned "2025-04-30" — a May row filed as April.
+  it("serial 45778 is 2025-05-01, not the previous day", () => {
+    expect(normalizeDate(45778)).toBe("2025-05-01");
+    expect(normalizeDate("45778")).toBe("2025-05-01");
+    expect(sheetJsIso(45778)).toBe("2025-05-01");
+  });
+
+  it("matches SheetJS across the whole 25000-60000 guarded range", () => {
+    const serials = [25000, 25001, 30000, 36526, 40000, 44927, 45778, 45814, 50000, 59999, 60000];
+    for (const serial of serials) {
+      expect([serial, normalizeDate(serial)]).toEqual([serial, sheetJsIso(serial)]);
+      expect([serial, normalizeDate(String(serial))]).toEqual([serial, sheetJsIso(serial)]);
+    }
+  });
+
+  it("a fractional time-of-day part is dropped, not rounded into the next day", () => {
+    expect(normalizeDate(45778.99)).toBe("2025-05-01");
+    expect(normalizeDate("45778.99")).toBe("2025-05-01");
   });
 });
 

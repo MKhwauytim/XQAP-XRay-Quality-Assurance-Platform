@@ -25,6 +25,8 @@ import {
   getSampleMainDir,
   getSampleEmployeeDir,
   getSampleApprovalsDir,
+  getPopulationMonthDir,
+  getSystemRoot,
 } from "./workspacePaths";
 
 test("WORKSPACE_ROOTS are lowercase kebab-case", () => {
@@ -130,6 +132,54 @@ test("getRoot's legacy-folder probe is resolved once, not on every call", async 
   clearOperationLog(root);
   await getPopulationRoot(root, false);
   expect(dirOpens(root)).toHaveLength(0);
+});
+
+// A legacy-layout workspace is READ through the fallback path — but the
+// `create: true` branch used to skip that fallback entirely and create the
+// numbered root unconditionally, caching it as the resolved one. Since there is
+// no migration that moves the content across, one ordinary autosave
+// (saveCertScanGlobal, savePopulationConfig — all plain `getPopulationRoot(h,
+// true)` calls) next to an existing `Population/` folder made every legacy
+// month permanently invisible: the empty numbered folder now exists on disk and
+// always wins the primary-first probe on every later load.
+test("a create:true root resolution adopts a legacy folder instead of shadowing it", async () => {
+  const root = createMemoryDirectory("legacy-shadow-root");
+  __clearWorkspaceDirCacheForTests();
+  const legacy = await root.getDirectoryHandle(LEGACY_WORKSPACE_ROOTS.population, {
+    create: true,
+  });
+  await legacy.getDirectoryHandle("5-May-2026", { create: true });
+
+  const resolved = await getPopulationRoot(root, true);
+  expect(resolved.name).toBe(LEGACY_WORKSPACE_ROOTS.population);
+
+  // No empty numbered sibling was created next to the legacy root...
+  await expect(
+    root.getDirectoryHandle(WORKSPACE_ROOTS.population, { create: false })
+  ).rejects.toThrow();
+
+  // ...so after a reload (cold cache) the legacy month is still reachable.
+  __clearWorkspaceDirCacheForTests();
+  const monthDir = await getPopulationMonthDir(root, "5-May-2026", false);
+  expect(monthDir.name).toBe("5-May-2026");
+});
+
+test("a create:true root resolution still creates the numbered root when no legacy folder exists", async () => {
+  const root = createMemoryDirectory("fresh-create-root");
+  __clearWorkspaceDirCacheForTests();
+
+  const population = await getPopulationRoot(root, true);
+  expect(population.name).toBe(WORKSPACE_ROOTS.population);
+  const system = await getSystemRoot(root, true);
+  expect(system.name).toBe(WORKSPACE_ROOTS.system);
+
+  // Both are the real folders on disk, not detached handles.
+  await expect(
+    root.getDirectoryHandle(WORKSPACE_ROOTS.population, { create: false })
+  ).resolves.toBeDefined();
+  await expect(
+    root.getDirectoryHandle(WORKSPACE_ROOTS.system, { create: false })
+  ).resolves.toBeDefined();
 });
 
 test("bumpWorkspaceEpoch invalidates the month's cached handles", async () => {

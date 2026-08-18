@@ -235,7 +235,9 @@ export function buildInaccuracyCalendar(model: ReportModel): InaccuracyCalendar 
     if (record.outcomeClass === null || !INACCURATE.has(record.outcomeClass)) continue;
     const at = new Date(record.completedAt);
     if (Number.isNaN(at.getTime())) continue;
-    const monthKey = `${at.getFullYear()}-${at.getMonth()}`;
+    // Zero-padded month index so the lexicographic tie-break below stays chronological
+    // ("2026-09" < "2026-10"; the unpadded form ordered "2026-10" before "2026-9").
+    const monthKey = `${at.getFullYear()}-${String(at.getMonth()).padStart(2, "0")}`;
     const dayKey = `${monthKey}-${at.getDate()}`;
     perDay.set(dayKey, (perDay.get(dayKey) ?? 0) + 1);
     perMonth.set(monthKey, (perMonth.get(monthKey) ?? 0) + 1);

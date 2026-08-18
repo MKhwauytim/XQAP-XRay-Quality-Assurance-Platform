@@ -17,7 +17,15 @@ import type { Element, KpiConfig } from "../../../../../data/reportDesigner/repo
 
 // A row count large enough that Arabic-Indic ("١٢٬٣٤٥") and Latin ("12,345") renderings
 // are unmistakably different (thousands separator present).
-const rows = vi.hoisted(() => Array.from({ length: 12345 }, (_, i) => ({ xrayImageId: `img-${i}`, portName: "A" })));
+// `imageAvailable` is true on exactly one row in five (2,469 of 12,345 = 20%), which
+// gives the percentOfTotal case below an unambiguous expected share.
+const rows = vi.hoisted(() =>
+  Array.from({ length: 12345 }, (_, i) => ({
+    xrayImageId: `img-${i}`,
+    portName: "A",
+    imageAvailable: i % 5 === 0,
+  }))
+);
 
 const FAKE_DIRECTORY_HANDLE = vi.hoisted(() => ({}));
 vi.mock("../../../../../data/workspace/useWorkspace", () => ({
@@ -78,6 +86,28 @@ describe("KpiRenderer — B6 digit locale", () => {
     });
     // The Arabic-Indic rendering of the same count must not appear anywhere.
     expect(screen.queryByText("١٢٬٣٤٥")).not.toBeInTheDocument();
+  });
+
+  it("renders «نسبة من الإجمالي» as a real share, not a fabricated 0", async () => {
+    // percentOfTotal needs a denominator; without one the aggregator short-circuits to
+    // 0 and the tile shows a zero indistinguishable from a genuine one.
+    const element = kpiElement({
+      kind: "kpi",
+      dataSourceId: "population",
+      valueField: "imageAvailable",
+      agg: "percentOfTotal",
+    });
+    render(
+      <ExecutiveRowsProvider>
+        <KpiRenderer element={element} />
+      </ExecutiveRowsProvider>
+    );
+
+    // 2,469 of 12,345 rows carry a true value → 20%.
+    await waitFor(() => {
+      expect(screen.getByText("20")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("0")).not.toBeInTheDocument();
   });
 
   it("renders groupBy-breakdown counts with Latin digits, not Arabic-Indic", async () => {

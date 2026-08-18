@@ -81,11 +81,21 @@ export async function verifyPasswordHash(
     ) {
       return false;
     }
-    const salt = base64ToBytes(record.saltBase64);
-    const calculated = new Uint8Array(
-      await derivePbkdf2(normalized, salt, record.iterations as number)
-    );
-    return constantTimeEqual(calculated, base64ToBytes(record.hashBase64));
+    // Same guarantee the argon2id branch above already gives: a damaged record
+    // is an authentication FAILURE, never a rejected promise. `atob` throws
+    // InvalidCharacterError on any non-base64 salt/hash (a torn write, a hand
+    // edit), and both login submit handlers in AuthGate.tsx call this with no
+    // try/catch — an escaping rejection there leaves «دخول» dead and silent:
+    // no message, no failed-attempt counter, no log entry.
+    try {
+      const salt = base64ToBytes(record.saltBase64);
+      const calculated = new Uint8Array(
+        await derivePbkdf2(normalized, salt, record.iterations as number)
+      );
+      return constantTimeEqual(calculated, base64ToBytes(record.hashBase64));
+    } catch {
+      return false;
+    }
   }
 
   return false;

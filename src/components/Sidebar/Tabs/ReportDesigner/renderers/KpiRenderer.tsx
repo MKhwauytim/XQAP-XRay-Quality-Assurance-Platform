@@ -57,8 +57,11 @@ function computeResult(rows: Array<Record<string, unknown>>, config: KpiConfig, 
   }
 
   // All other aggregations delegate to the shared report-designer aggregator so
-  // KPI cards match the rest of the report engine exactly.
-  return { kind: "number", value: aggregate(config.agg, vals) };
+  // KPI cards match the rest of the report engine exactly. «نسبة من الإجمالي»
+  // (percentOfTotal) needs an explicit denominator — the total row count, since a KPI
+  // tile always spans the whole fact row set — otherwise it short-circuits to 0 and
+  // the tile shows a fabricated zero instead of the share.
+  return { kind: "number", value: aggregate(config.agg, vals, rows.length) };
 }
 
 interface KpiRendererProps {

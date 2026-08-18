@@ -364,9 +364,20 @@ export async function loadWorkspaceFiles(
   // role and password hash. The mount must fail loudly instead; the structure
   // check that just passed proves the file was readable moments ago, so this
   // is transient and a retry is the honest advice.
+  //
+  // `invalid_json` belongs in the SAME bucket, and used to fall through to
+  // null. A file that exists but does not parse (a torn write on an SMB share
+  // truncating both the live copy and its `.bak`) is not proof that this
+  // workspace has no users — yet `refreshPermissions` runs this on every 45s
+  // sync tick, with no structure check in front of it, so the swap to the
+  // shipped defaults happened silently mid-session and the next admin save
+  // persisted it. Only a genuinely ABSENT file (`missing`, after the
+  // live/`.bak`/`.tmp` ladder below) may hydrate defaults.
   if (
     !usersPermissions.ok &&
-    (usersPermissions.reason === "permission_denied" || usersPermissions.reason === "read_failed")
+    (usersPermissions.reason === "permission_denied" ||
+      usersPermissions.reason === "read_failed" ||
+      usersPermissions.reason === "invalid_json")
   ) {
     throw taggedError(
       "XQ-FS-015",
@@ -548,21 +559,42 @@ export async function readJsonFile<TFile>(
   // .json, users.permissions.json) don't brick workspace entry. Permission /
   // read failures are NOT recoverable here — pass them through unchanged.
   if (primary.reason === "missing" || primary.reason === "invalid_json") {
-    const backup = await readAndParseJsonFile<TFile>(
-      directoryHandle,
-      `${fileName}.bak`
-    );
-    if (backup.ok) {
+    const recovered = await readFirstRecoverableCopy<TFile>(directoryHandle, fileName);
+    if (recovered) {
       if (typeof window !== "undefined") {
         window.dispatchEvent(
           new CustomEvent("data:recovered-from-bak", { detail: { fileName } })
         );
       }
-      return backup;
+      return recovered;
     }
   }
 
   return primary;
+}
+
+/**
+ * The `.bak` then `.tmp` half of `safeReadJson`'s recovery ladder.
+ *
+ * `.tmp` matters because it is exactly what a failed commit leaves behind:
+ * `safeWriteJson` stages and byte-verifies `{file}.tmp` before committing, and
+ * its documented total-failure outcome keeps that staged copy. Probing only
+ * `.bak` here made the one surviving good copy invisible to the bootstrap
+ * readers (workspace.manifest.json, users.permissions.json) even though
+ * `safeReadJson` recovers it fine.
+ */
+async function readFirstRecoverableCopy<TFile>(
+  directoryHandle: DirectoryHandleLike,
+  fileName: string
+): Promise<ReadJsonResult<NonNullable<TFile>> | null> {
+  for (const suffix of [".bak", ".tmp"]) {
+    const candidate = await readAndParseJsonFile<TFile>(
+      directoryHandle,
+      `${fileName}${suffix}`
+    );
+    if (candidate.ok) return candidate;
+  }
+  return null;
 }
 
 async function readAndParseJsonFile<TFile>(

@@ -13,6 +13,7 @@ import { logError } from "../storage/errorLogger";
 import { getUserDataRoot } from "./workspacePaths";
 import {
   getCustomLabelOverrides,
+  isLabelKey,
   setLabel,
   type LabelKey,
 } from "../labels/labelsStore";
@@ -55,7 +56,13 @@ export async function importLabelsSnapshot(directoryHandle: DirectoryHandleLike)
     let applied = 0;
     for (const [key, value] of Object.entries(result.value.overrides)) {
       if (typeof value !== "string") continue;
-      setLabel(key as LabelKey, value);
+      // The skip this function has always documented, now actually performed:
+      // `setLabel` stores whatever key it is handed, and a key this build does
+      // not define is invisible to the Settings tab (which iterates
+      // DEFAULT_LABELS), so it could never be reset again — and would be
+      // re-exported to the workspace on the next save.
+      if (!isLabelKey(key)) continue;
+      setLabel(key, value);
       applied += 1;
     }
     return applied;

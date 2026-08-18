@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import DataTable, { type DataTableCol } from "../../../../../../components/DataTable";
 import { EmptyState, ErrorState, LoadingState } from "../../../../../../components/StateViews/StateViews";
+import { listAdhocSampleFolders } from "../../../../../../data/adhocImport/adhocImportEmployeeView";
 import { listMonthFolders } from "../../../../../../data/population/populationStorage";
 import { loadReferralLog, loadReopenLog, loadReplacementLog } from "../../../../../../data/referral/referralStorage";
 import type { ReferralRequest } from "../../../../../../data/referral/referralTypes";
@@ -106,7 +107,20 @@ export default function HistoryView({ directoryHandle, username, canApproveRefer
     async function run(): Promise<void> {
       setState("loading");
       try {
-        const months = await listMonthFolders(directoryHandle);
+        // Ad-hoc imports keep their requests in a synthetic
+        // `2-samples/adhoc-{importId}/` store that `listMonthFolders` cannot
+        // return (it only reports month-shaped folders under `1-population/`),
+        // so without this the "all months" history silently omitted every
+        // request filed against an ad-hoc row — the same blind spot the review
+        // queue had in useApprovalData.
+        const [monthFolders, adhocFolders] = await Promise.all([
+          listMonthFolders(directoryHandle),
+          listAdhocSampleFolders(directoryHandle),
+        ]);
+        const months = [
+          ...monthFolders.map((m) => ({ folderName: m.folderName })),
+          ...adhocFolders.map((folderName) => ({ folderName })),
+        ];
         const collected: HistoryRow[] = [];
         const skipped: string[] = [];
         for (const month of months) {

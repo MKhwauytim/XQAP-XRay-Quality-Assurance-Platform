@@ -216,19 +216,35 @@ async function getRoot(
   create: boolean
 ): Promise<DirectoryHandleLike> {
   const cached = readDirCache(directoryHandle, primaryName);
-  // A cached *legacy* handle must not satisfy a `create: true` call: the old
-  // code always created the numbered root in that case, and silently handing
-  // back `Population/` instead of creating `1-population/` would change which
-  // folder subsequent writes land in.
-  if (cached && (!create || cached.resolvedName === primaryName)) return cached.handle;
+  // A cached *legacy* handle satisfies a `create: true` call too: the create
+  // branch below resolves an existing legacy root rather than creating a
+  // numbered sibling next to it, so both paths now agree on which folder the
+  // writes land in.
+  if (cached) return cached.handle;
 
   return dedupeInFlight(
     `workspaceDir:${cacheKeyFor(directoryHandle, primaryName)}:${create ? "c" : "r"}`,
     async () => {
       const again = readDirCache(directoryHandle, primaryName);
-      if (again && (!create || again.resolvedName === primaryName)) return again.handle;
+      if (again) return again.handle;
 
       if (create) {
+        // NEVER create the numbered root over a legacy-layout workspace. This
+        // branch used to create `1-population/` unconditionally and cache it as
+        // the resolved root — so one ordinary autosave (saveCertScanGlobal,
+        // savePopulationConfig) next to an existing `Population/` folder made
+        // every legacy month permanently invisible: the numbered folder now
+        // exists on disk and always wins the primary-first probe, and there is
+        // no migration that moves the content across. Resolve an existing root
+        // (numbered first, then legacy) and only create when neither is there.
+        const existing = legacyName
+          ? await resolveExistingRoot(directoryHandle, primaryName, legacyName)
+          : null;
+        if (existing) {
+          cacheFor(directoryHandle).rootNames.set(primaryName, existing.resolvedName);
+          storeDirCache(directoryHandle, primaryName, null, existing.resolvedName, existing.handle);
+          return existing.handle;
+        }
         const handle = await directoryHandle.getDirectoryHandle(primaryName, { create: true });
         cacheFor(directoryHandle).rootNames.set(primaryName, primaryName);
         storeDirCache(directoryHandle, primaryName, null, primaryName, handle);
@@ -266,6 +282,29 @@ async function getRoot(
       return handle;
     }
   );
+}
+
+/**
+ * Probe for an already-existing root, numbered first and then the legacy
+ * unnumbered name, without creating anything. `null` means neither is there.
+ *
+ * As everywhere else in this module, only a named `NotFoundError` counts as
+ * absence: a revoked grant or a transient share failure must reach the caller
+ * rather than be laundered into "create a fresh empty root here".
+ */
+async function resolveExistingRoot(
+  directoryHandle: DirectoryHandleLike,
+  primaryName: string,
+  legacyName: string
+): Promise<{ handle: DirectoryHandleLike; resolvedName: string } | null> {
+  for (const name of [primaryName, legacyName]) {
+    try {
+      return { handle: await directoryHandle.getDirectoryHandle(name, { create: false }), resolvedName: name };
+    } catch (error) {
+      if (!isNotFoundError(error)) throw error;
+    }
+  }
+  return null;
 }
 
 /**

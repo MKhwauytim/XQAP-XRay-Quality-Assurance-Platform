@@ -106,6 +106,25 @@ describe("buildInaccuracyCalendar", () => {
     ).toBeNull();
   });
 
+  it("breaks a month tie toward the EARLIER month across the single/double digit boundary", () => {
+    // October is month index 9, November index 10. A composite key comparison must not
+    // let the string order ("2026-10" < "2026-9") invert the documented earlier-month
+    // tie-break and render November's day grid instead of October's.
+    const at = (monthIndex: number, day: number) => new Date(2026, monthIndex, day, 12).toISOString();
+    const calendar = buildInaccuracyCalendar(
+      makeReportModel({
+        factTable: [
+          { completedAt: at(9, 5), outcomeClass: "missed-suspicion" },
+          { completedAt: at(10, 5), outcomeClass: "missed-suspicion" },
+        ],
+      })
+    );
+
+    expect(calendar).not.toBeNull();
+    expect(calendar!.year).toBe(2026);
+    expect(calendar!.month).toBe(10);
+  });
+
   it("buckets missed/false suspicions by the day the review was submitted", () => {
     // Local-time construction: the selector reads local calendar days, so the
     // fixture must too or the test would drift with the runner's timezone.

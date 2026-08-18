@@ -4,6 +4,8 @@ import type { PreparedPopulationRow } from "../population/populationTypes";
 import { loadSampleMaster } from "../sampling/sampleStorage";
 import { loadOrDeriveDistributionCurrentForRead } from "../distribution/distributionStorage";
 import type { DistributionEntry } from "../distribution/distributionTypes";
+import { loadEmployeeAnswers } from "../answers/answerStorage";
+import type { ItemAnswer } from "../answers/answerTypes";
 import { loadAdhocImportIndex } from "./adhocImportStorage";
 import { adhocMonthFolderName } from "./adhocImportTypes";
 
@@ -118,4 +120,80 @@ export async function loadAdhocEntriesForEmployeeView(
   );
 
   return perImport.flat();
+}
+
+/**
+ * Every synthetic `2-samples/adhoc-{importId}/` folder that can hold employee
+ * writes, i.e. one per ad-hoc import with at least one assignment.
+ *
+ * `listMonthFolders` cannot answer this: it enumerates `1-population/` and
+ * keeps only `{m}-{MonthName}-{yyyy}`-shaped names, and an ad-hoc store is
+ * neither. Any view that walks "every month folder" to find employee-authored
+ * records — a referral/replacement/reopen request, an answer — has to walk
+ * these too, or the records it wrote through `monthFolderForEntry` above are
+ * durably stored somewhere nothing ever reads.
+ *
+ * Same cost bound and same fail-soft contract as
+ * `loadAdhocEntriesForEmployeeView`: one small index read, imports with no
+ * assignments cost nothing further, and any failure degrades to `[]` rather
+ * than throwing into a caller that must still render the real months.
+ */
+export async function listAdhocSampleFolders(
+  directoryHandle: DirectoryHandleLike
+): Promise<string[]> {
+  try {
+    const index = await loadAdhocImportIndex(directoryHandle);
+    return index
+      .filter((entry) => entry.assignedRows > 0)
+      .map((entry) => adhocMonthFolderName(entry.importId));
+  } catch (error) {
+    logError("adhocImportEmployeeView:listAdhocSampleFolders", error);
+    return [];
+  }
+}
+
+/**
+ * The saved answers for a set of ad-hoc entries, read from the store each entry
+ * actually belongs to.
+ *
+ * `handleSave` routes an ad-hoc row's answer through `monthFolderForEntry`, so
+ * it lands in `2-samples/adhoc-{importId}/2-employees/{user}.answers.json`.
+ * Reading answers for the globally-selected month therefore never finds it: the
+ * row rendered as unanswered after every reload, offered a blank, fully
+ * editable form for work that was already submitted, and re-submitting
+ * overwrote the stored item. Answers must be loaded per STORE, exactly as they
+ * are written.
+ *
+ * Scoping is inherited from the entries handed in — `loadAdhocEntriesForEmployeeView`
+ * has already filtered them to the caller's visibility — so this reads only the
+ * `{assignedTo}.answers.json` files those entries name. Fail-soft per file: one
+ * unreadable ad-hoc store must not blank out the rest, nor the real month's answers.
+ */
+export async function loadAdhocAnswerItems(
+  directoryHandle: DirectoryHandleLike,
+  entries: AdhocDistributionEntry[]
+): Promise<ItemAnswer[]> {
+  const byFolder = new Map<string, Set<string>>();
+  for (const entry of entries) {
+    const folder = adhocMonthFolderName(entry.adhocImportId);
+    const users = byFolder.get(folder) ?? new Set<string>();
+    users.add(entry.assignedTo);
+    byFolder.set(folder, users);
+  }
+  if (byFolder.size === 0) return [];
+
+  const targets = [...byFolder].flatMap(([folder, users]) =>
+    [...users].map((username) => ({ folder, username }))
+  );
+  const files = await Promise.all(
+    targets.map(async ({ folder, username }) => {
+      try {
+        return (await loadEmployeeAnswers(directoryHandle, folder, username)).items;
+      } catch (error) {
+        logError("adhocImportEmployeeView:loadAdhocAnswerItems", error);
+        return [];
+      }
+    })
+  );
+  return files.flat();
 }
