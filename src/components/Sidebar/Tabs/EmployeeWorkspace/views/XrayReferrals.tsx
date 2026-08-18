@@ -220,6 +220,39 @@ function isAdhocEntry(entry: DistributionEntry): entry is AdhocDistributionEntry
   return typeof (entry as AdhocDistributionEntry).adhocImportId === "string";
 }
 
+/**
+ * Start both ad-hoc reads for the load phase, without awaiting either.
+ *
+ * THE GAP fix: ad-hoc-imported assignments live in a synthetic
+ * `2-samples/adhoc-{importId}/` folder, never the selected month's own
+ * sample.master.json, so they are merged in alongside an employee's real
+ * assignments. Their ANSWERS live there too — handleSave routes an ad-hoc row's
+ * write through folderForRow, so reading answers for the selected month alone
+ * never found them and every ad-hoc row came back unanswered after a reload.
+ *
+ * The answers read is CHAINED off the entries read (it needs their stores)
+ * rather than awaited separately, so it still overlaps the rest of the load
+ * phase. Entries degrade to [] on any failure; see adhocImportEmployeeView.ts's
+ * docblock for the cost bound. Lives outside the component only to keep
+ * `XrayReferrals` inside the max-lines-per-function budget.
+ */
+function beginAdhocReads(
+  directoryHandle: DirectoryHandleLike,
+  username: string,
+  canSeeAll: boolean
+): { entries: Promise<AdhocDistributionEntry[]>; answers: Promise<ItemAnswer[]> } {
+  const entries = loadAdhocEntriesForEmployeeView(directoryHandle, username, canSeeAll).catch(
+    (err) => {
+      logError("xrayReferrals:loadAdhocEntries", err);
+      return [] as AdhocDistributionEntry[];
+    }
+  );
+  return {
+    entries,
+    answers: entries.then((list) => loadAdhocAnswerItems(directoryHandle, list)),
+  };
+}
+
 export default function XrayReferrals({ directoryHandle }: Props) {
   const session  = readSession();
   const username = session?.username ?? "";
@@ -623,27 +656,8 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       // the month) and the workspace-wide derivation are deliberately not in
       // here. population.final.json is not loaded here either; it is loaded
       // lazily only when the replacement dialog opens.
-      // THE GAP fix: ad-hoc-imported assignments live in a synthetic
-      // `2-samples/adhoc-{importId}/` folder, never the selected month's own
-      // sample.master.json — merged in below so an employee can see them
-      // alongside their real assignments. Degrades to [] on any failure; see
-      // adhocImportEmployeeView.ts's docblock for the cost bound.
-      const adhocEntriesPromise = loadAdhocEntriesForEmployeeView(
-        directoryHandle,
-        username,
-        canSeeAll
-      ).catch((err) => {
-        logError("xrayReferrals:loadAdhocEntries", err);
-        return [] as AdhocDistributionEntry[];
-      });
-      // …and so do their ANSWERS: handleSave routes an ad-hoc row's write
-      // through folderForRow, so reading answers for `selMonth` alone never
-      // finds them and every ad-hoc row came back as unanswered after a reload.
-      // Chained off the entries read (it needs their stores) rather than
-      // awaited separately, so it still overlaps the rest of this phase.
-      const adhocAnswersPromise = adhocEntriesPromise.then((entries) =>
-        loadAdhocAnswerItems(directoryHandle, entries)
-      );
+      const { entries: adhocEntriesPromise, answers: adhocAnswersPromise } =
+        beginAdhocReads(directoryHandle, username, canSeeAll);
       const [
         referralLog,
         replacementLog,
