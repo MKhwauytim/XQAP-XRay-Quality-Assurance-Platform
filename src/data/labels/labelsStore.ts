@@ -1158,6 +1158,21 @@ export const DEFAULT_LABELS = {
 export type LabelKey = keyof typeof DEFAULT_LABELS;
 export type Labels = Record<LabelKey, string>;
 
+/**
+ * True when `key` is a label this build actually defines.
+ *
+ * `setLabel` cannot tell an unknown key from a known one on its own (its
+ * `trimmed === DEFAULT_LABELS[key]` comparison is `undefined` for a key that
+ * does not exist, so the value is stored), and a stored unknown key is
+ * unreachable from the Settings tab — every row there iterates
+ * `DEFAULT_LABELS`. Anything reading keys from outside this module (a workspace
+ * snapshot written by an older build, a restored backup) must filter through
+ * this first.
+ */
+export function isLabelKey(key: string): key is LabelKey {
+  return Object.prototype.hasOwnProperty.call(DEFAULT_LABELS, key);
+}
+
 type Subscriber = () => void;
 const subscribers = new Set<Subscriber>();
 const LABELS_STORAGE_KEY = "xray_custom_labels_v1";

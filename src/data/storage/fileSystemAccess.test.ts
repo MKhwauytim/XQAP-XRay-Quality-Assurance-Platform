@@ -224,3 +224,63 @@ test("loadWorkspaceFiles throws XQ-FS-015 for an unreadable users file instead o
   const files = await loadWorkspaceFiles(dir);
   expect(files.usersPermissions).not.toBeNull();
 });
+
+// A users file that EXISTS but does not parse is not a workspace with no users
+// either. This is the same wipe as the test above, reached through the other
+// failure reason: `invalid_json` used to fall through to `usersPermissions:
+// null`, and `refreshPermissions` runs loadWorkspaceFiles on every 45s sync
+// tick with no structure check in front of it — so a torn write on the share
+// silently swapped the roster for the six shipped defaults mid-session, and the
+// next admin save persisted them over every real account and Argon2id hash.
+async function overwriteRaw(
+  dir: Awaited<ReturnType<typeof createMemoryDirectory>>,
+  fileName: string,
+  text: string
+): Promise<void> {
+  const handle = await dir.getFileHandle(fileName, { create: true });
+  const writable = await handle.createWritable?.();
+  if (!writable) throw new Error("memory directory handle is not writable");
+  await writable.write(text);
+  await writable.close();
+}
+
+test("loadWorkspaceFiles throws for a users file that exists but does not parse", async () => {
+  const { errorCodeOf } = await import("./errorCodes");
+  const { loadWorkspaceFiles } = await import("./fileSystemAccess");
+  const dir = createMemoryDirectory();
+  await createWorkspaceStructure(dir, "admin");
+  const userData = await dir.getDirectoryHandle("3-user-data", { create: false });
+
+  await overwriteRaw(userData, "users.permissions.json", "{ truncated");
+  await overwriteRaw(userData, "users.permissions.json.bak", "{ also truncated");
+  await overwriteRaw(userData, "users.permissions.json.tmp", "{ truncated too");
+
+  let thrown: unknown = null;
+  try {
+    await loadWorkspaceFiles(dir);
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown).not.toBeNull();
+  expect(errorCodeOf(thrown)).toBe("XQ-FS-015");
+});
+
+test("loadWorkspaceFiles recovers the users file from the .tmp a failed commit left behind", async () => {
+  const { loadWorkspaceFiles } = await import("./fileSystemAccess");
+  const dir = createMemoryDirectory();
+  await createWorkspaceStructure(dir, "admin");
+  const userData = await dir.getDirectoryHandle("3-user-data", { create: false });
+
+  const live = await readJsonFile<Record<string, unknown>>(userData, "users.permissions.json");
+  expect(live.ok).toBe(true);
+  if (!live.ok) return;
+
+  // safeWriteJson's documented total-failure outcome: the verified staged copy
+  // is kept as {file}.tmp. It is the only good copy left here.
+  await overwriteRaw(userData, "users.permissions.json.tmp", live.rawText);
+  await overwriteRaw(userData, "users.permissions.json", "{ truncated");
+  await overwriteRaw(userData, "users.permissions.json.bak", "{ truncated");
+
+  const files = await loadWorkspaceFiles(dir);
+  expect(files.usersPermissions).not.toBeNull();
+});

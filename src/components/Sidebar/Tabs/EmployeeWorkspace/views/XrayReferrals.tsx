@@ -45,6 +45,7 @@ import {
 import { loadEmployeeSampleMirror } from "../../../../../data/samples/sampleMirrorStorage";
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
 import {
+  loadAdhocAnswerItems,
   loadAdhocEntriesForEmployeeView,
   type AdhocDistributionEntry,
 } from "../../../../../data/adhocImport/adhocImportEmployeeView";
@@ -622,19 +623,41 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       // the month) and the workspace-wide derivation are deliberately not in
       // here. population.final.json is not loaded here either; it is loaded
       // lazily only when the replacement dialog opens.
-      const [referralLog, replacementLog, adhocEntries, personalMirror, logStamp, ownAnswerFile] =
+      // THE GAP fix: ad-hoc-imported assignments live in a synthetic
+      // `2-samples/adhoc-{importId}/` folder, never the selected month's own
+      // sample.master.json — merged in below so an employee can see them
+      // alongside their real assignments. Degrades to [] on any failure; see
+      // adhocImportEmployeeView.ts's docblock for the cost bound.
+      const adhocEntriesPromise = loadAdhocEntriesForEmployeeView(
+        directoryHandle,
+        username,
+        canSeeAll
+      ).catch((err) => {
+        logError("xrayReferrals:loadAdhocEntries", err);
+        return [] as AdhocDistributionEntry[];
+      });
+      // …and so do their ANSWERS: handleSave routes an ad-hoc row's write
+      // through folderForRow, so reading answers for `selMonth` alone never
+      // finds them and every ad-hoc row came back as unanswered after a reload.
+      // Chained off the entries read (it needs their stores) rather than
+      // awaited separately, so it still overlaps the rest of this phase.
+      const adhocAnswersPromise = adhocEntriesPromise.then((entries) =>
+        loadAdhocAnswerItems(directoryHandle, entries)
+      );
+      const [
+        referralLog,
+        replacementLog,
+        adhocEntries,
+        adhocAnswerItems,
+        personalMirror,
+        logStamp,
+        ownAnswerFile,
+      ] =
         await Promise.all([
           loadReferralLog(directoryHandle, selMonth),
           loadReplacementLog(directoryHandle, selMonth),
-          // THE GAP fix: ad-hoc-imported assignments live in a synthetic
-          // `2-samples/adhoc-{importId}/` folder, never the selected month's own
-          // sample.master.json — merged in here so an employee can see them
-          // alongside their real assignments. Degrades to [] on any failure; see
-          // adhocImportEmployeeView.ts's docblock for the cost bound.
-          loadAdhocEntriesForEmployeeView(directoryHandle, username, canSeeAll).catch((err) => {
-            logError("xrayReferrals:loadAdhocEntries", err);
-            return [];
-          }),
+          adhocEntriesPromise,
+          adhocAnswersPromise,
           // Oversight (canSeeAll) is UNCHANGED and never reads a mirror:
           // reading N mirrors would be N round trips for data the single
           // derived `distribution.current.json` already holds.
@@ -719,12 +742,12 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           // stale one from a previously selected month would be worse than
           // none. `openReplacementDialog` loads it (and the workspace-wide
           // entry set it needs for its exclusion sets) on demand instead.
-          commit(mirrorAll, mirrorQuota, null, ownAnswerFile!.items);
+          commit(mirrorAll, mirrorQuota, null, [...ownAnswerFile!.items, ...adhocAnswerItems]);
           return;
         }
         // Stale (or quota-less) mirror: paint it NOW so the employee sees their
         // queue immediately, then keep going and re-derive underneath.
-        commit(mirrorAll, mirrorQuota, null, ownAnswerFile!.items);
+        commit(mirrorAll, mirrorQuota, null, [...ownAnswerFile!.items, ...adhocAnswerItems]);
       }
 
       // ── Phase 3: the full read (oversight always; personal scope only when
@@ -743,15 +766,20 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           }
         : null;
 
+      // Real-month answers, plus the ad-hoc stores' own (see adhocAnswersPromise):
+      // every row's answers are read from the store that row's writes go to.
       const answerItems = canSeeAll
-        ? (
-            await Promise.all(
-              [...new Set(all.map((e) => e.assignedTo))].map((u) =>
-                loadEmployeeAnswers(directoryHandle, selMonth, u)
+        ? [
+            ...(
+              await Promise.all(
+                [...new Set(all.map((e) => e.assignedTo))].map((u) =>
+                  loadEmployeeAnswers(directoryHandle, selMonth, u)
+                )
               )
-            )
-          ).flatMap((f) => f.items)
-        : ownAnswerFile!.items;
+            ).flatMap((f) => f.items),
+            ...adhocAnswerItems,
+          ]
+        : [...ownAnswerFile!.items, ...adhocAnswerItems];
 
       // Boot reporting FIRST, then the staleness check (DEFECT 8). The previous
       // order -- bail on a stale token before touching bootProgress -- assumed a

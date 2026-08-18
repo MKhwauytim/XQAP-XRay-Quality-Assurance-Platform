@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { AdminAccountSection } from "./AdminAccountSection";
+import { BOOTSTRAP_ADMIN_PASSWORD_HASH } from "../../../../auth/authConfig";
 import * as authSession from "../../../../auth/authSession";
 import * as userManagement from "../../../../auth/userManagement";
 import type { AuthSession } from "../../../../auth/authTypes";
@@ -165,6 +166,53 @@ describe("AdminAccountSection — editing", () => {
       expect(userManagement.readAdminAccount().allowUsernameLogin).toBe(false);
     });
     expect(mocks.syncUserManagementToDisk).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not apply the new passcode when the workspace write fails", async () => {
+    // `syncUserManagementToDisk` rethrows on CAS exhaustion / a lost folder
+    // grant. Committing the new hash to runtime state BEFORE that write left
+    // `resolveAdminPasswordHash()` returning a passcode the admin was just told
+    // had not been saved — locking them out of their own workspace — and the
+    // next unrelated persist pushed it to every machine on the shared folder.
+    mocks.syncUserManagementToDisk.mockRejectedValueOnce(
+      new Error("تعارض في الكتابة: فشلت جميع المحاولات."),
+    );
+    open();
+    fireEvent.change(screen.getByLabelText("كلمة المرور الجديدة"), {
+      target: { value: "new-pass" },
+    });
+    fireEvent.change(screen.getByLabelText("تأكيد كلمة المرور"), {
+      target: { value: "new-pass" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "تحديث كلمة المرور" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("تعذّر حفظ كلمة المرور في مساحة العمل."),
+      ).toBeInTheDocument();
+    });
+    expect(userManagement.readAdminAccount().passwordHash).toBeNull();
+    expect(userManagement.resolveAdminPasswordHash()).toEqual(
+      BOOTSTRAP_ADMIN_PASSWORD_HASH,
+    );
+  });
+
+  it("does not apply the sign-in-method toggle when the workspace write fails", async () => {
+    mocks.syncUserManagementToDisk.mockRejectedValueOnce(new Error("disk full"));
+    open();
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: /السماح بتسجيل الدخول باسم المستخدم/ }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("تعذّر حفظ الإعداد في مساحة العمل.")).toBeInTheDocument();
+    });
+    // Still on: a failed save must not strand the workspace on shortcut-only
+    // admin sign-in.
+    expect(userManagement.readAdminAccount().allowUsernameLogin).toBe(true);
+    expect(
+      screen.getByRole("checkbox", { name: /السماح بتسجيل الدخول باسم المستخدم/ }),
+    ).toBeChecked();
   });
 
   it("says the change was session-only when no workspace is connected", async () => {

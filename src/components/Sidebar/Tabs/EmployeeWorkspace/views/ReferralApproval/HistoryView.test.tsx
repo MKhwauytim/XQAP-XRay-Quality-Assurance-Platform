@@ -9,8 +9,15 @@ import { createMemoryDirectory } from "../../../../../../data/storage/memoryDire
 import { safeWriteJson } from "../../../../../../data/storage/safeWrite";
 import { getPopulationMonthDir } from "../../../../../../data/workspace/workspacePaths";
 import type { MonthManifestData } from "../../../../../../data/population/monthTypes";
-import { appendReferralRequest } from "../../../../../../data/referral/referralStorage";
-import type { ReferralRequest } from "../../../../../../data/referral/referralTypes";
+import { appendReferralRequest, appendReopenRequest } from "../../../../../../data/referral/referralStorage";
+import type { ReferralRequest, ReopenRequest } from "../../../../../../data/referral/referralTypes";
+import { saveAdhocImportRecord } from "../../../../../../data/adhocImport/adhocImportStorage";
+import { adhocMonthFolderName } from "../../../../../../data/adhocImport/adhocImportTypes";
+import type {
+  AdhocImportRecord,
+  AdhocImportRow,
+} from "../../../../../../data/adhocImport/adhocImportTypes";
+import type { NormalizedRiskRow } from "../../../Population/riskData/riskDataTypes";
 import { invalidateMonthLockCache } from "../../../../../../data/population/monthLock";
 import HistoryView from "./HistoryView";
 
@@ -109,5 +116,73 @@ describe("HistoryView sample ids", () => {
 
     await waitFor(() => expect(screen.getByText("IMG-0250")).toBeInTheDocument());
     expect(screen.queryByText(/معروض 200 من 250/)).not.toBeInTheDocument();
+  });
+});
+
+// The all-months history walked `listMonthFolders` only, which reports
+// `{m}-{MonthName}-{yyyy}` folders under `1-population/`. A request filed
+// against an ad-hoc import lives in `2-samples/adhoc-{importId}/`, so it was
+// invisible here too — the exact blind spot useApprovalData's docblock claims
+// the history tab covers.
+describe("HistoryView ad-hoc import stores", () => {
+  const IMPORT_ID = "adh-1";
+  const ADHOC_FOLDER = adhocMonthFolderName(IMPORT_ID);
+  const ADHOC_XRAY_ID = `ADHOC-${IMPORT_ID}-XR-1`;
+
+  function adhocRow(): AdhocImportRow {
+    const mapped = {
+      movementType: "s1", portCode: null, portName: "ميناء جدة", portType: "بحري",
+      movementNumber: null, movementDate: null, movementHijriDate: null,
+      declarationNumber: "DEC-1", transitDeclarationNumber: null, declarationDate: null,
+      declarationHijriDate: null, manifestNumber: null, manifestType: null, manifestDate: null,
+      plateOrContainerNumber: null, finalDestination: null, entryDate: null, exitDate: null,
+      chassisNumber: null, reportNumber: null, hasReport: false,
+      xrayLevelOneResult: "سليمة", xrayLevelTwoResult: "اشتباه", inspectorResult: null,
+      oppositeInspectorResult: null, liveMeansResult: null, xrayImageId: "XR-1",
+      xrayEntryDate: null, targetedByRiskEngine: null, riskMessage: null,
+      stage: "المستوى الأول", sourceSheetName: "s1", sourceRowNumber: 2,
+    } satisfies NormalizedRiskRow;
+    return {
+      rowKey: "s1:2", mapped, validation: { valid: true }, excludedByAdmin: false,
+      assigned: true, assignedTo: "emp-a", assignedAt: new Date().toISOString(),
+      namespacedXrayImageId: ADHOC_XRAY_ID,
+    };
+  }
+
+  it("lists a decided reopen request that was filed against an ad-hoc import", async () => {
+    const root = await seed(["IMG-1"]);
+    const record: AdhocImportRecord = {
+      importId: IMPORT_ID,
+      fileName: "adh-1.xlsx",
+      importedBy: "admin",
+      importedAt: new Date().toISOString(),
+      status: "open",
+      rows: [adhocRow()],
+    };
+    await saveAdhocImportRecord(root, record);
+
+    const reopen: ReopenRequest = {
+      requestId: "reo-adhoc-1",
+      monthFolderName: ADHOC_FOLDER,
+      xrayImageId: ADHOC_XRAY_ID,
+      employeeUsername: "emp-a",
+      requestedBy: "emp-a",
+      requestedAt: "2026-08-14T05:42:25.182Z",
+      reason: "بحاجة لتصحيح",
+      status: "denied",
+      reviewedBy: "sup-1",
+      reviewedAt: "2026-08-14T06:00:00.000Z",
+      history: [],
+    };
+    const appended = await appendReopenRequest(root, ADHOC_FOLDER, reopen);
+    if (!appended.ok) throw new Error(`seed failed: ${appended.error}`);
+
+    renderHistory(root);
+
+    await waitFor(() =>
+      expect(screen.getByText(`إعادة فتح: ${ADHOC_XRAY_ID}`)).toBeInTheDocument()
+    );
+    // The real month's own history is still there alongside it.
+    expect(screen.getByText("1 عينة → emp-b")).toBeInTheDocument();
   });
 });

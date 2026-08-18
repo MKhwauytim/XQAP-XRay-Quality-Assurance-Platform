@@ -82,12 +82,28 @@ async function getActivityAuditDir(create: boolean): Promise<DirectoryHandleLike
   }
 }
 
-async function readDiskLog(): Promise<AuthActivityLogFile> {
+function emptyDiskLog(): AuthActivityLogFile {
+  return { revision: 0, updatedAt: nowIso(), entries: [] };
+}
+
+/**
+ * The workspace activity log, or `null` when the file is there but could not be
+ * read.
+ *
+ * The distinction matters because this is the base read of
+ * `flushMemoryToWorkspace`'s read-modify-write: an empty shell substituted for
+ * an unreadable file is not a neutral starting point, it is a whole-file
+ * replacement — every machine's recorded sign-in traded for whatever this one
+ * flush happens to hold, at revision 1, reporting success. Only a genuinely
+ * absent file (or a workspace with no audit folder yet) yields the shell.
+ * Mirrors `actionLog.readLogFile` / `notificationStorage.readNotificationsFile`.
+ */
+async function readDiskLog(): Promise<AuthActivityLogFile | null> {
   const dir = await getActivityAuditDir(false);
-  if (!dir) return { revision: 0, updatedAt: nowIso(), entries: [] };
+  if (!dir) return emptyDiskLog();
 
   const result = await safeReadJson<AuthActivityLogFile>(dir, ACTIVITY_LOG_FILE);
-  if (!result.ok) return { revision: 0, updatedAt: nowIso(), entries: [] };
+  if (!result.ok) return result.reason === "missing" ? emptyDiskLog() : null;
 
   return {
     revision: result.value.revision ?? 0,
@@ -126,9 +142,15 @@ async function flushMemoryToWorkspace(): Promise<void> {
   // No delayed verify: the merge-by-session-id pattern is self-healing — a
   // losing writer's entries survive (memoryEntries only advances on a
   // verified write) and are picked up whole on the next flush attempt.
-  await casLoop<{ ok: true }>(
+  await casLoop<{ ok: true } | { skipped: true }>(
     async (writeToken) => {
       const existing = await readDiskLog();
+      if (!existing) {
+        // Present but unreadable. Retrying cannot mend the file, and writing
+        // over it would destroy the history it still holds, so abandon this
+        // flush — memoryEntries stay pending for a later attempt.
+        return { done: true, result: { skipped: true as const } };
+      }
       const entries = mergeEntries(existing.entries, memoryEntries);
       const nextRevision = existing.revision + 1;
       await safeWriteJson<AuthActivityLogFile>(dir, ACTIVITY_LOG_FILE, {
@@ -138,7 +160,9 @@ async function flushMemoryToWorkspace(): Promise<void> {
         entries,
       });
       const verify = await readDiskLog();
-      if (verify.revision === nextRevision && verify._writeToken === writeToken) {
+      // An unreadable read-back proves nothing landed verifiably: retry rather
+      // than advance memoryEntries past a write we cannot confirm.
+      if (verify && verify.revision === nextRevision && verify._writeToken === writeToken) {
         memoryEntries = entries;
         return { done: true, result: { ok: true as const } };
       }
@@ -214,6 +238,8 @@ export async function readAuthActivityLog(): Promise<AuthActivityLogEntry[]> {
   await writeChain;
   if (!workspaceHandle) return memoryEntries;
   const disk = await readDiskLog();
+  // Unreadable on disk: show what this session knows rather than nothing.
+  if (!disk) return memoryEntries;
   return mergeEntries(disk.entries, memoryEntries);
 }
 

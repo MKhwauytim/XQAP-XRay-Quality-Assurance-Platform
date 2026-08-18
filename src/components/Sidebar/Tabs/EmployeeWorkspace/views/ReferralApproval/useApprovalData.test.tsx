@@ -11,11 +11,20 @@ import {
 } from "../../../../../../auth/userManagement";
 import {
   appendReferralRequest,
+  appendReopenRequest,
   loadReferralLog,
+  loadReopenLog,
   loadRequestLogs,
   updateReferralStatus,
 } from "../../../../../../data/referral/referralStorage";
-import type { ReferralRequest } from "../../../../../../data/referral/referralTypes";
+import type { ReferralRequest, ReopenRequest } from "../../../../../../data/referral/referralTypes";
+import { saveAdhocImportRecord } from "../../../../../../data/adhocImport/adhocImportStorage";
+import { adhocMonthFolderName } from "../../../../../../data/adhocImport/adhocImportTypes";
+import type {
+  AdhocImportRecord,
+  AdhocImportRow,
+} from "../../../../../../data/adhocImport/adhocImportTypes";
+import type { NormalizedRiskRow } from "../../../Population/riskData/riskDataTypes";
 import { broadcastDataRefresh } from "../../../../../../data/workspace/dataRefreshSignal";
 import { useApprovalData } from "./useApprovalData";
 
@@ -215,6 +224,112 @@ describe("useApprovalData deny-flow regressions", () => {
     expect(mayLog.requests[0].status).toBe("denied");
     const aprilLog = await loadReferralLog(root, "4-april-2026");
     expect(aprilLog.requests).toHaveLength(0);
+  });
+});
+
+// An ad-hoc import's requests live in a folder listMonthFolders can never return.
+describe("useApprovalData ad-hoc import stores", () => {
+  const ADHOC_IMPORT_ID = "adh-1";
+  const ADHOC_FOLDER = adhocMonthFolderName(ADHOC_IMPORT_ID);
+  const ADHOC_XRAY_ID = `ADHOC-${ADHOC_IMPORT_ID}-XR-1`;
+
+  function adhocRow(): AdhocImportRow {
+    const mapped = {
+      movementType: "s1", portCode: null, portName: "ميناء جدة", portType: "بحري",
+      movementNumber: null, movementDate: null, movementHijriDate: null,
+      declarationNumber: "DEC-1", transitDeclarationNumber: null, declarationDate: null,
+      declarationHijriDate: null, manifestNumber: null, manifestType: null, manifestDate: null,
+      plateOrContainerNumber: null, finalDestination: null, entryDate: null, exitDate: null,
+      chassisNumber: null, reportNumber: null, hasReport: false,
+      xrayLevelOneResult: "سليمة", xrayLevelTwoResult: "اشتباه", inspectorResult: null,
+      oppositeInspectorResult: null, liveMeansResult: null, xrayImageId: "XR-1",
+      xrayEntryDate: null, targetedByRiskEngine: null, riskMessage: null,
+      stage: "المستوى الأول", sourceSheetName: "s1", sourceRowNumber: 2,
+    } satisfies NormalizedRiskRow;
+    return {
+      rowKey: "s1:2",
+      mapped,
+      validation: { valid: true },
+      excludedByAdmin: false,
+      assigned: true,
+      assignedTo: "alice",
+      assignedAt: new Date().toISOString(),
+      namespacedXrayImageId: ADHOC_XRAY_ID,
+    };
+  }
+
+  const adhocReopen = (): ReopenRequest => ({
+    requestId: "reo-adhoc-1",
+    monthFolderName: ADHOC_FOLDER,
+    xrayImageId: ADHOC_XRAY_ID,
+    employeeUsername: "alice",
+    requestedBy: "alice",
+    requestedAt: new Date().toISOString(),
+    reason: "بحاجة لتصحيح",
+    status: "pending",
+    history: [],
+  });
+
+  async function seedAssignedAdhocImport(root: DirectoryHandleLike): Promise<void> {
+    const record: AdhocImportRecord = {
+      importId: ADHOC_IMPORT_ID,
+      fileName: "adh-1.xlsx",
+      importedBy: "admin",
+      importedAt: new Date().toISOString(),
+      status: "open",
+      rows: [adhocRow()],
+    };
+    await saveAdhocImportRecord(root, record);
+  }
+
+  it("surfaces a pending reopen request filed against an ad-hoc import, and decides it in that store", async () => {
+    // XrayReferrals routes an ad-hoc row's reopen request into the row's own
+    // `2-samples/adhoc-{importId}/` store (folderForRow / monthFolderForEntry).
+    // That folder is not under `1-population/` and is not `{m}-{Name}-{yyyy}`-
+    // shaped, so `months` (listMonthFolders) can never contain it: the employee
+    // got the "بانتظار موافقة المشرف" confirmation and the request was durably
+    // written, but no approver could see it on any month selection, forever.
+    setupSupervisor();
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    await seedAssignedAdhocImport(root);
+    const req = adhocReopen();
+    await appendReopenRequest(root, ADHOC_FOLDER, req);
+
+    const { result } = renderHook(() => useApprovalData(root));
+    await waitFor(() => expect(result.current.loadState).toBe("ready"));
+
+    await waitFor(() => expect(result.current.reopens).toHaveLength(1));
+    expect(result.current.reopens[0].requestId).toBe("reo-adhoc-1");
+    expect(result.current.reopens[0].monthFolderName).toBe(ADHOC_FOLDER);
+    expect(result.current.requests.some((r) => r.requestId === "reo-adhoc-1")).toBe(true);
+    expect(result.current.canReviewRequest(req)).toBe(true);
+
+    // The decision lands in the ad-hoc store the request came from — the same
+    // request.monthFolderName path the cross-month case already relies on.
+    const outcome = await result.current.denyReopen(req, "غير مبرر");
+    expect(outcome.ok).toBe(true);
+    const adhocLog = await loadReopenLog(root, ADHOC_FOLDER);
+    expect(adhocLog.requests[0].status).toBe("denied");
+    const aprilLog = await loadReopenLog(root, "4-april-2026");
+    expect(aprilLog.requests).toHaveLength(0);
+  });
+
+  it("ignores ad-hoc imports that have no assignments at all", async () => {
+    setupSupervisor();
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    const record: AdhocImportRecord = {
+      importId: "adh-empty",
+      fileName: "adh-empty.xlsx",
+      importedBy: "admin",
+      importedAt: new Date().toISOString(),
+      status: "open",
+      rows: [{ ...adhocRow(), assigned: false, assignedTo: null, assignedAt: null }],
+    };
+    await saveAdhocImportRecord(root, record);
+
+    const { result } = renderHook(() => useApprovalData(root));
+    await waitFor(() => expect(result.current.loadState).toBe("ready"));
+    expect(result.current.requests).toHaveLength(0);
   });
 });
 

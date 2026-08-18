@@ -135,6 +135,57 @@ describe("authActivityLog", () => {
   });
 });
 
+describe("authActivityLog — unreadable log file", () => {
+  beforeEach(() => {
+    resetAuthActivityLogForTests();
+  });
+
+  afterEach(() => {
+    endAuthActivitySession("logout");
+    resetAuthActivityLogForTests();
+  });
+
+  it("never rewrites the workspace history from an empty shell when activity.log.json cannot be read", async () => {
+    const root = createMemoryDirectory("root");
+    await createWorkspaceStructure(root, "admin");
+    configureAuthActivityLogWorkspace(root);
+
+    // Sign-ins already recorded on the shared folder by every machine.
+    startAuthActivitySession(makeSession("historic1", "2026-06-01T08:00:00.000Z"));
+    endAuthActivitySession("logout");
+    await waitForAuthActivityLogFlush();
+
+    const systemDir = await getSystemRoot(root, false);
+    const auditDir = await systemDir.getDirectoryHandle("audit", { create: false });
+    const before = await safeReadJson<AuthActivityLogFile>(auditDir, "activity.log.json");
+    expect(before.ok).toBe(true);
+
+    // A torn write / half-synced copy leaves the live file, its .bak and its
+    // .tmp all unparsable — safeReadJson reports "corrupt", not "missing".
+    for (const name of ["activity.log.json", "activity.log.json.bak", "activity.log.json.tmp"]) {
+      const handle = await auditDir.getFileHandle(name, { create: true });
+      const writable = await handle.createWritable!();
+      await writable.write("{ truncated");
+      await writable.close();
+    }
+
+    // A fresh sign-in then flushes against that unreadable file.
+    resetAuthActivityLogForTests();
+    configureAuthActivityLogWorkspace(root);
+    startAuthActivitySession(makeSession("newcomer", "2026-06-28T08:00:00.000Z"));
+    await waitForAuthActivityLogFlush();
+
+    // The flush must be skipped: an empty base read is not a neutral starting
+    // point here, it is a whole-file replacement of every machine's login
+    // history. Leaving the damaged file for recovery beats overwriting it with
+    // this one session and reporting success.
+    const after = await safeReadJson<AuthActivityLogFile>(auditDir, "activity.log.json");
+    expect(after.ok).toBe(false);
+    if (after.ok) return;
+    expect(after.reason).toBe("corrupt");
+  });
+});
+
 describe("configureAuthActivityLogWorkspace — deferred until login (Task 1)", () => {
   beforeEach(() => {
     resetAuthActivityLogForTests();

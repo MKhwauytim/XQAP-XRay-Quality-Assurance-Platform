@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { readSession } from "../../../../../../auth/authSession";
 import { usePermissions } from "../../../../../../auth/usePermissions";
 import { readUserManagementState } from "../../../../../../auth/userManagement";
+import { listAdhocSampleFolders } from "../../../../../../data/adhocImport/adhocImportEmployeeView";
 import { appendWorkspaceAction } from "../../../../../../data/audit/actionLog";
 import { getLabels } from "../../../../../../data/labels/labelsStore";
 import { logError } from "../../../../../../data/storage/errorLogger";
@@ -128,7 +129,20 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
       // selMonth only — already fully covered by the History tab — so the extra
       // reads stay proportional to "what still needs a decision" rather than
       // duplicating full cross-month history on every load.
-      const otherMonths = months.map((m) => m.folderName).filter((name) => name !== selMonth);
+      // Ad-hoc imports are the same gap in a different direction: an employee
+      // files a reopen/replacement request against an ad-hoc row and it is
+      // routed — correctly — into that import's synthetic
+      // `2-samples/adhoc-{importId}/` store (see monthFolderForEntry). That
+      // folder is not under `1-population/` and is not month-shaped, so
+      // `months` (listMonthFolders) can never contain it and the request was
+      // durably stored where NO approver could ever see it, at any permission
+      // level and on any month selection. Enumerated separately and folded into
+      // the same pending-only cross-folder read.
+      const adhocFolders = await listAdhocSampleFolders(directoryHandle);
+      const otherMonths = [
+        ...months.map((m) => m.folderName).filter((name) => name !== selMonth),
+        ...adhocFolders.filter((name) => name !== selMonth),
+      ];
       const otherMonthPending = await Promise.all(
         otherMonths.map(async (month) => {
           try {

@@ -2,11 +2,14 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { safeWriteJson } from "../storage/safeWrite";
 import {
+  getCustomLabelOverrides,
   getLabels,
   resetAllLabels,
   setLabel,
 } from "../labels/labelsStore";
+import { getUserDataRoot } from "./workspacePaths";
 import { exportLabelsSnapshot, importLabelsSnapshot } from "./labelsSnapshot";
 
 function makeRoot(): DirectoryHandleLike {
@@ -40,6 +43,30 @@ describe("labelsSnapshot", () => {
     const root = makeRoot();
     const applied = await importLabelsSnapshot(root);
     expect(applied).toBe(0);
+  });
+
+  it("skips keys the current build no longer knows instead of storing them forever", async () => {
+    // A snapshot written by an older build carries keys since renamed or
+    // deleted. Storing them puts entries in `xray_custom_labels_v1` that the
+    // Settings UI cannot see (it iterates DEFAULT_LABELS), so they can never be
+    // reset individually — and `exportLabelsSnapshot` writes them straight back
+    // to the workspace, making the pollution self-perpetuating.
+    const root = makeRoot();
+    const userDataDir = await getUserDataRoot(root, true);
+    await safeWriteJson(userDataDir, "labels.snapshot.json", {
+      overrides: {
+        sidebar_title: "لوحة مخصصة",
+        legacy_key_removed_in_v40: "قيمة قديمة",
+        "<script>alert(1)</script>": "junk",
+      },
+      savedAt: new Date().toISOString(),
+    });
+
+    const applied = await importLabelsSnapshot(root);
+
+    expect(applied).toBe(1);
+    expect(Object.keys(getCustomLabelOverrides())).toEqual(["sidebar_title"]);
+    expect(getLabels().sidebar_title).toBe("لوحة مخصصة");
   });
 
   it("exportLabelsSnapshot never throws even against a broken handle", async () => {

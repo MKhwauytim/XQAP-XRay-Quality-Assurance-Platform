@@ -25,6 +25,30 @@ function toIndexEntry(record: AdhocImportRecord): AdhocImportIndexEntry {
   };
 }
 
+const CORRUPT_INDEX_ERROR =
+  "تعذّر تحديث فهرس الاستيراد اليدوي: الفهرس الحالي تالف ولا يمكن قراءته، وتحديثه الآن سيحذف عمليات الاستيراد الأخرى.";
+
+/**
+ * The index as the read-modify-write below may start from.
+ *
+ * An empty default handed to a read-modify-write is not a harmless
+ * placeholder: it is written back as the ENTIRE file (safeWrite.ts's own module
+ * doc). `safeReadJson` reports a file that exists but cannot be parsed — after
+ * its live/`.bak`/`.tmp` ladder is exhausted — as `corrupt`, which is a
+ * different answer from `missing`. Seeding `{ imports: [] }` from a corrupt
+ * index deleted every other import's entry in a single write, and since this
+ * index is the only lister the app has, the surviving `{importId}.json`
+ * documents became permanently unreachable. Only a genuinely ABSENT index may
+ * start from empty.
+ */
+async function readIndexForUpdate(dir: DirectoryHandleLike): Promise<AdhocImportIndex> {
+  const indexResult = await safeReadJson<AdhocImportIndex>(dir, INDEX_FILE);
+  if (!indexResult.ok && indexResult.reason === "corrupt") {
+    throw new Error(CORRUPT_INDEX_ERROR);
+  }
+  return indexResult.ok ? indexResult.value : { imports: [] };
+}
+
 /**
  * CAS read-modify-write of the shared `adhoc-imports.index.json` — mirrors
  * `templateStorage.ts`'s `updateTemplateIndex` (same eventually-consistent
@@ -35,10 +59,14 @@ async function updateIndex(
   dir: DirectoryHandleLike,
   apply: (entries: AdhocImportIndexEntry[]) => AdhocImportIndexEntry[]
 ): Promise<void> {
+  // Checked once up front as well as inside every attempt: a corrupt index is a
+  // permanent condition, so failing here reports the real reason immediately
+  // instead of burning the whole CAS backoff ladder first (whose exhaustion
+  // message is a generic I/O code).
+  await readIndexForUpdate(dir);
   const outcome = await casLoop<{ ok: true }>(
     async (writeToken) => {
-      const indexResult = await safeReadJson<AdhocImportIndex>(dir, INDEX_FILE);
-      const existing: AdhocImportIndex = indexResult.ok ? indexResult.value : { imports: [] };
+      const existing = await readIndexForUpdate(dir);
       const nextRevision = (existing.revision ?? 0) + 1;
       const updated: AdhocImportIndex = {
         revision: nextRevision,
