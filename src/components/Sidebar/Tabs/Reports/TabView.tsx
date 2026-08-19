@@ -21,6 +21,7 @@ import { getManagedLoginUsers } from "../../../../auth/userManagement";
 import { usePermissions } from "../../../../auth/usePermissions";
 import type { MutationCapability } from "../../../../auth/mutationCapability";
 import { TabGuard } from "../../../PermissionGuard";
+import { isElementOnScreen } from "../../../../utils/viewVisibility";
 import { LoadingState } from "../../../StateViews/StateViews";
 import { loadSampleMaster, loadSampleMasterRevision } from "../../../../data/sampling/sampleStorage";
 import { loadAllEmployeeFiles } from "../../../../data/answers/answerStorage";
@@ -125,7 +126,7 @@ function collectRevisions(pairs: Array<[string, number | null]>): SourceRevision
 // Inner component that holds all the existing Reports state and logic.
 function ReportsContent() {
   const { directoryHandle } = useWorkspace();
-  const { can, canMutate, getMutationCapability } = usePermissions();
+  const { can, canMutate, getMutationCapability, canAccessTab } = usePermissions();
   const labels = useLabels();
 
   const { selection: globalMonth } = useGlobalMonth();
@@ -148,7 +149,16 @@ function ReportsContent() {
   const isAdmin = readSession()?.role === "admin";
   const [customizerOpen, setCustomizerOpen] = useState(false);
   const [monthMeta, setMonthMeta] = useState<MonthMeta | null>(null);
-  const [section, setSection] = useState<ReportsSection>("reports");
+  // T-15a: land on the first section this role may actually view, not on a
+  // hard-coded "reports". `reports/reports` and `reports/kpi` are independent
+  // matrix rows under the same parent page, so "supervisor sees the KPI
+  // dashboard but not the report centre" is an ordinary configuration -- and it
+  // used to open straight onto the section the matrix denies. The default
+  // matrix grants both rows to every role that can open this page at all, so
+  // for a stock workspace nothing about the landing changes.
+  const [section, setSection] = useState<ReportsSection>(
+    () => (canAccessTab("reports/reports") || !canAccessTab("reports/kpi") ? "reports" : "kpi")
+  );
   const [generating, setGenerating] = useState<ReportType | null>(null);
   const [formats, setFormats] = useState<Record<ReportBaseType, ReportFormat>>({
     executive: "document",
@@ -389,8 +399,11 @@ function ReportsContent() {
     const el = rootRef.current;
     // No committed node yet (first render, or the no-workspace branch): nothing
     // is cached to be stale, and treating it as visible never drops a refresh.
+    // (isElementOnScreen's own null answer is `false`, which is the right
+    // default for its other caller -- a month-change confirmation prompt -- but
+    // the wrong one here, hence the explicit branch.)
     if (!el) return true;
-    return el.closest("[hidden]") === null;
+    return isElementOnScreen(el);
   }, []);
 
   const applyRefresh = useCallback((): void => {
@@ -1105,7 +1118,20 @@ function ReportsContent() {
 // Wrapper that handles sub-tab routing for "مصمم التقارير" sub-tab.
 export default function ReportsTab() {
   const labels = useLabels();
-  const [activeSubTab, setActiveSubTab] = useState("reports");
+  const { canAccessTab } = usePermissions();
+  // T-15a, outer half: same rule one level up. A role granted only
+  // `reports/report-designer` under this page used to land on ReportsContent --
+  // the one sub-view its matrix row denies -- and had to find the sidebar link
+  // to get anywhere. ReportsContent stays mounted either way (it is hidden, not
+  // unmounted, while the designer is active), so this changes which view is on
+  // screen, never what mounts.
+  const [activeSubTab, setActiveSubTab] = useState(() =>
+    !canAccessTab("reports/reports")
+      && !canAccessTab("reports/kpi")
+      && canAccessTab("reports/report-designer")
+      ? "report-designer"
+      : "reports"
+  );
   // Once Report Designer has been opened, keep it mounted (hidden, not
   // unmounted) so switching back to it doesn't lose in-progress canvas
   // edits and doesn't re-trigger ReportsContent's own reload on the way

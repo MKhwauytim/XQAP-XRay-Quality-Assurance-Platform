@@ -128,6 +128,28 @@ export type DataTableProps<TRow = unknown> = {
   density?: "normal" | "compact";
   /** Column ids that should remain pinned to the RTL start edge while scrolling horizontally. */
   stickyColumnIds?: string[];
+  /**
+   * Identity of the CONTEXT the current `rows` belong to — a month folder, a
+   * selected import, a scope toggle. The table returns to page 1 when, and only
+   * when, this value changes.
+   *
+   * The point is what it deliberately does NOT react to: `rows` being replaced.
+   * Every view in this app re-reads its data on the 45s background sync and on a
+   * manual refresh, handing down a brand-new array each time; keying pagination
+   * off the rows themselves (as this component used to, via a
+   * length + first-key + last-key digest) meant any refresh that added, removed
+   * or reordered a row silently threw the reader back to page 1 — the exact
+   * "a refresh must never clobber local state" rule the workspace-sync layer is
+   * built around.
+   *
+   * Omit it when the table has no context that can change (e.g. a cross-month
+   * history log): the page then only ever moves when the user moves it, or is
+   * clamped down to the last existing page when the data shrinks.
+   *
+   * Filters and the global search are NOT part of this — those are the table's
+   * own state and reset the page from where they are handled.
+   */
+  resetToken?: string | number;
 };
 
 // ── Column config ────────────────────────────────────────────────────────────
@@ -247,6 +269,7 @@ export default function DataTable<TRow>({
   onFilteredRowsChange,
   density = "normal",
   stickyColumnIds = [],
+  resetToken,
 }: DataTableProps<TRow>) {
   const L = useLabels();
 
@@ -330,8 +353,12 @@ export default function DataTable<TRow>({
     totalFr: number;
     tableW: number;
   } | null>(null);
-  const rowsPageKey = `${rows.length}:${rows[0] ? getRowKey(rows[0]) : ""}:${rows.at(-1) ? getRowKey(rows.at(-1)!) : ""}`;
-  const [pageState, setPageState] = useState<{ rowsKey: string; page: number }>(() => ({ rowsKey: rowsPageKey, page: 1 }));
+  // See `resetToken` in DataTableProps: the ONLY thing that sends the reader
+  // back to page 1 on its own. Normalized to a string so `undefined` (a table
+  // with no changeable context) is a single stable key rather than a value that
+  // could ever compare unequal to itself.
+  const resetKey = String(resetToken ?? "");
+  const [pageState, setPageState] = useState<{ resetKey: string; page: number }>(() => ({ resetKey, page: 1 }));
 
   function setColCfg(c: ColConfig): void {
     setColCfgState(c);
@@ -460,7 +487,10 @@ export default function DataTable<TRow>({
     [searchFilteredRows, visibleCols, filters, rowMatchesFilter, detectedDates]
   );
 
-  const requestedPage = pageState.rowsKey === rowsPageKey ? pageState.page : 1;
+  const requestedPage = pageState.resetKey === resetKey ? pageState.page : 1;
+  // Clamped, never reset: a refresh that shrinks the data below the current page
+  // lands the reader on the last page that still exists, which is where the rows
+  // they were looking at went — not back at the top of the table.
   const page = clampPage(requestedPage, filteredRows.length, DATA_PAGE_SIZE);
   const pageRows = useMemo(
     () => pageSlice(filteredRows, page, DATA_PAGE_SIZE),
@@ -468,7 +498,7 @@ export default function DataTable<TRow>({
   );
 
   function changePage(nextPage: number): void {
-    setPageState({ rowsKey: rowsPageKey, page: nextPage });
+    setPageState({ resetKey, page: nextPage });
     // `scrollToOffset` updates the virtualizer's own tracked scroll position
     // synchronously (not just the DOM), which a raw `tableWrap.scrollTop = 0`
     // can't rely on -- jsdom (this component's tests) never dispatches the
@@ -589,15 +619,15 @@ export default function DataTable<TRow>({
   const activeFilterCount = Object.values(filters).filter((f) => !isFilterEmpty(f)).length;
   function setFilter(colId: string, f: AnyFilter): void {
     setFilters((p) => ({ ...p, [colId]: f }));
-    setPageState({ rowsKey: rowsPageKey, page: 1 });
+    setPageState({ resetKey, page: 1 });
   }
   function clearFilter(colId: string): void {
     setFilters((p) => { const n = { ...p }; delete n[colId]; return n; });
-    setPageState({ rowsKey: rowsPageKey, page: 1 });
+    setPageState({ resetKey, page: 1 });
   }
   function clearAllFilters(): void {
     setFilters({});
-    setPageState({ rowsKey: rowsPageKey, page: 1 });
+    setPageState({ resetKey, page: 1 });
   }
 
   // XLSX export — visible columns, filtered rows, accessor values.
@@ -788,7 +818,7 @@ export default function DataTable<TRow>({
             onChange={(e) => {
               const v = e.target.value;
               setGlobalSearch(v);
-              setPageState({ rowsKey: rowsPageKey, page: 1 });
+              setPageState({ resetKey, page: 1 });
               if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
               searchDebounceRef.current = setTimeout(
                 () => setDebouncedSearch(v.trim().toLowerCase()),
@@ -800,7 +830,7 @@ export default function DataTable<TRow>({
             <button
               type="button"
               className="dt-clear-filters-btn"
-              onClick={() => { clearAllFilters(); setGlobalSearch(""); setDebouncedSearch(""); setPageState({ rowsKey: rowsPageKey, page: 1 }); }}
+              onClick={() => { clearAllFilters(); setGlobalSearch(""); setDebouncedSearch(""); setPageState({ resetKey, page: 1 }); }}
             >
               {L.dt_clear_filters} {activeFilterCount > 0 ? `(${activeFilterCount})` : ""}
             </button>

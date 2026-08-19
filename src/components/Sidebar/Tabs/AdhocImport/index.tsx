@@ -359,6 +359,10 @@ export default function AdhocImportTab() {
           <DataTable<AdhocImportRow>
             columns={rowColumns}
             rows={selected.rows}
+            // Opening a different import is the whole context change here; the
+            // in-place row rewrites (exclude/assign) re-render the SAME import
+            // and must leave the admin on the page they were reviewing.
+            resetToken={selected.importId}
             getRowKey={(r) => r.rowKey}
             renderCell={(col, row) => {
               if (col.id === "select") {

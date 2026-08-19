@@ -510,6 +510,10 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
           isAdmin={canSeeAll}
           canConfigureColumns={false}
           exportFileName={`نتائج فحص الأشعة - ${selectedMonth || "كل الأشهر"}.xlsx`}
+          // The only user action that makes these rows a different set: picking
+          // another month. A background re-read of the same month must leave the
+          // reader where they were.
+          resetToken={selectedMonth}
           toolbarEndExtra={renderViewSwitcher(viewMode, setViewMode)}
           expandedKey={expandedRowKey}
           onRowClick={(row) => {
@@ -541,6 +545,9 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
           isAdmin={canSeeAll}
           canConfigureColumns={false}
           exportFileName={`${viewMode === "replaced" ? "سجل المستبدلة" : "سجل المحالة والمنقولة"} - ${selectedMonth || "كل الأشهر"}.xlsx`}
+          // Same as the active table, plus the history kind: the switcher folds
+          // a different slice of `auditEvents` into an unrelated row set.
+          resetToken={`${selectedMonth}::${viewMode}`}
           toolbarEndExtra={renderViewSwitcher(viewMode, setViewMode)}
         />
       )}

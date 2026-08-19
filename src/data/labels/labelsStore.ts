@@ -185,6 +185,9 @@ export const DEFAULT_LABELS = {
   gm_no_months:            "لا توجد أشهر",
   gm_all_months:           "كل الأشهر",
   gm_month_switch_confirm: "توجد بيانات غير محفوظة في معالجة المجتمع — تغيير الشهر سيتجاهلها ويحمّل بيانات الشهر المحدد. هل تريد المتابعة؟",
+  // Sibling of gm_month_switch_confirm for the OTHER unsaved-work surface: an
+  // employee's typed-but-unsaved answers in the inspection form.
+  gm_month_switch_draft_confirm: "توجد إجابات غير محفوظة في نموذج الفحص المفتوح — تغيير الشهر سيتجاهلها. هل تريد المتابعة؟",
   label_template:   "النموذج",
 
   // X-ray results messages

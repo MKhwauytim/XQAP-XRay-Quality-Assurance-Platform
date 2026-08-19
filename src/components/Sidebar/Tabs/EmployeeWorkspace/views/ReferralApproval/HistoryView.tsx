@@ -212,6 +212,9 @@ export default function HistoryView({ directoryHandle, username, canApproveRefer
             : (col.accessor(row) ?? "—")
         }
         storageKey="ra-history-table"
+        // No resetToken on purpose: this log spans every month and has no
+        // context the user can switch, so nothing here should ever move the page
+        // but the user (or a shrink, which DataTable clamps).
         exportFileName="سجل-طلبات-الاعتماد"
         expandedKey={expandedKey}
         onRowClick={(row) => setExpandedKey((cur) => (cur === row.key ? null : row.key))}

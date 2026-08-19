@@ -13,6 +13,7 @@ import {
 import { reopenSubmittedAnswer } from "../../../../../data/answers/reopenAnswer";
 import { MonthClosedError } from "../../../../../data/population/monthLock";
 import { getLabels } from "../../../../../data/labels/labelsStore";
+import { useVisibleUnsavedWorkMonthGuard } from "../../../../../hooks/useVisibleUnsavedWorkMonthGuard";
 import type { FieldAnswer, ItemAnswer } from "../../../../../data/answers/answerTypes";
 import {
   loadOrDeriveDistributionCurrent,
@@ -270,6 +271,30 @@ function isPopulationReadFailure(lookup: PopulationRowLookupResult): boolean {
   return !lookup.ok && lookup.reason !== "absent";
 }
 
+/**
+ * DataTable's `rowMatchesFilter` override for the synthetic "answerStatus"
+ * column, whose value lives in the answers map rather than on the entry.
+ *
+ * Returning null for every other column/filter kind hands that case back to
+ * DataTable's own default matching, which is what makes this an override rather
+ * than a replacement.
+ */
+function buildAnswerStatusFilter(
+  answersMap: Map<string, ItemAnswer>
+): (entry: DistributionEntry, colId: string, filter: AnyFilter) => boolean | null {
+  return (entry, colId, filter) => {
+    if (colId !== "answerStatus" || filter.kind !== "status") return null;
+    const v = filter.value;
+    if (!v || v === "all") return true;
+    if (entry.status === "replaced") return v === "replaced";
+    const answer = answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`);
+    const s = answer?.status;
+    if (v === "submitted") return s === "submitted";
+    if (v === "pending")   return !s || s === "draft";
+    return true;
+  };
+}
+
 export default function XrayReferrals({ directoryHandle }: Props) {
   const session  = readSession();
   const username = session?.username ?? "";
@@ -305,7 +330,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const baseColumns = useMemo(() => buildXrayColumns(L), [L]);
 
   const [loadState, setLoadState]   = useState<LoadState>("idle");
-  const { selection: globalMonth } = useGlobalMonth();
+  const { selection: globalMonth, registerMonthChangeGuard } = useGlobalMonth();
   // Pending months have no folder on disk yet — treat them as "no data" (empty states).
   const selMonth = globalMonth.kind === "existing" ? globalMonth.folderName : "";
   const [entries, setEntries]       = useState<DistributionEntry[]>([]);
@@ -514,6 +539,19 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   // immediately, before anything commits, so — unlike an effect — it opens no
   // window in which the panel is unmounted.
   const [lastPanelEntry, setLastPanelEntry] = useState<DistributionEntry | null>(null);
+
+  // ── Month-switch confirmation for the same draft (T-16) ────────────────────
+  // The retention above only covers a BACKGROUND refresh. A deliberate global
+  // month switch takes the other branch -- loadData's non-silent path clears
+  // selEntryId AND dirtyEntryId (see below) -- so the typed answers went away
+  // with no warning at all. See useVisibleUnsavedWorkMonthGuard for why the
+  // prompt is gated on this view being on screen, not merely mounted.
+  const pageSectionRef = useVisibleUnsavedWorkMonthGuard({
+    registerMonthChangeGuard,
+    hasUnsavedWork: dirtyEntryId !== null,
+    resolveMessage: () => getLabels().gm_month_switch_draft_confirm,
+  });
+
   if (selEntry !== null && selEntry !== lastPanelEntry) {
     // Guarded by the identity check above, so it runs once per entry change and
     // cannot loop.
@@ -1437,29 +1475,14 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   }
 
   // ── Custom filter override for answerStatus ────────────────────────────────
-
   // LOG-03: memoized — an unstable identity here makes DataTable's filteredRows
   // memo recompute every render and re-emit onFilteredRowsChange.
-  const rowMatchesFilter = useCallback((
-    entry: DistributionEntry,
-    colId: string,
-    filter: AnyFilter
-  ): boolean | null => {
-    if (colId !== "answerStatus" || filter.kind !== "status") return null;
-    const v = filter.value;
-    if (!v || v === "all") return true;
-    if (entry.status === "replaced") return v === "replaced";
-    const answer = answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`);
-    const s = answer?.status;
-    if (v === "submitted") return s === "submitted";
-    if (v === "pending")   return !s || s === "draft";
-    return true;
-  }, [answersMap]);
+  const rowMatchesFilter = useMemo(() => buildAnswerStatusFilter(answersMap), [answersMap]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <section className="ew-page" dir="rtl">
+    <section className="ew-page" dir="rtl" ref={pageSectionRef}>
       <PageHeader
         eyebrow={L.page_xray_referrals_eyebrow}
         title={L.page_xray_referrals_title}
@@ -1585,6 +1608,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               }}
               rowMatchesFilter={rowMatchesFilter}
               onFilteredRowsChange={setFilteredTableEntries}
+              // The only two user actions that make this a different queue:
+              // switching the global month, and (oversight users) toggling
+              // "الكل" / "المحالة لي". A background re-read is neither.
+              resetToken={`${selMonth}::${showMyOnly ? "mine" : "all"}`}
               exportFileName={`صور الأشعة المحالة - ${selMonth || "كل الأشهر"}.xlsx`}
               expandedKey={selEntryId}
               onRowClick={(e) => selectEntry(e.xrayImageId)}
