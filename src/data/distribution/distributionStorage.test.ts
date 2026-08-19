@@ -16,6 +16,7 @@ import {
   buildCompletedEvent,
   buildReassignEvent,
   deriveCurrentDistribution,
+  sampleRowsFingerprint,
 } from "./distributionLog";
 import {
   appendDistributionEventSegment,
@@ -605,6 +606,163 @@ describe("fold-checkpoint persistence (perf: O(new events) instead of O(all even
     // Refolded from the events, not patched forward from the v2 numbers.
     expect(reloaded?.quotas?.alice?.sampleCount).toBe(1);
     expect(reloaded?.quotas?.bob?.sampleCount).toBe(2);
+  });
+
+  it("cannot survive the v3 -> v4 bump either: a v3-stamped cache and its checkpoint both refold", async () => {
+    // Same shape as the v2 test above, for the v4 bump (row-set fingerprint on
+    // cache validity). A v3 artifact carries no `sampleRowsFingerprint` at all,
+    // so it can never be accepted again; the bump is what turns that into ONE
+    // refold per month rather than a cache that is silently rejected forever.
+    const root = await makeRoot();
+    const month = "5-May-2026";
+    const rows = [makeRow("A1"), makeRow("B2")];
+    __clearDeriveMemoForTests();
+    await appendDistributionEvents(root, month, [
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: "alice", eventBy: "admin" }),
+      buildAssignEvent({ xrayImageId: "B2", assignedTo: "bob", eventBy: "admin" }),
+    ]);
+    await loadOrDeriveDistributionCurrent(root, month, rows, { awaitCachePersist: true });
+
+    const dir = await getSampleMainDir(root, month, true);
+    const cache = ((await safeReadJson<DistributionCurrentData>(dir, "distribution.current.json")) as { value: DistributionCurrentData }).value;
+    // Exactly what a v3 client left behind: no fingerprint, and a marker total
+    // no fold could produce, so serving it is unmistakable.
+    const v3Cache: DistributionCurrentData = { ...cache, deriveVersion: 3, totalPending: 999 };
+    delete v3Cache.sampleRowsFingerprint;
+    await safeWriteJson(dir, "distribution.current.json", v3Cache);
+    const sidecar = ((await safeReadJson<Record<string, unknown>>(dir, DISTRIBUTION_CHECKPOINT_FILE)) as { value: Record<string, unknown> }).value;
+    await safeWriteJson(dir, DISTRIBUTION_CHECKPOINT_FILE, { ...sidecar, deriveVersion: 3 });
+    __clearDeriveMemoForTests();
+
+    const reloaded = await loadOrDeriveDistributionCurrent(root, month, rows);
+    expect(reloaded?.deriveVersion).toBe(DERIVE_VERSION);
+    expect(reloaded?.totalPending).toBe(2);
+    expect(reloaded?.sampleRowsFingerprint).toBe(sampleRowsFingerprint(rows));
+    // The constant is the versioned contract every workspace's stored caches
+    // are stamped against, so pin it: changing it is a deliberate, documented
+    // act (one refold per month per workspace on first load), never a drive-by.
+    expect(DERIVE_VERSION).toBe(4);
+  });
+});
+
+describe("distribution cache row-set fingerprint (v4)", () => {
+  /** The exact snapshot shape refreshDistribution persists: a bare
+   *  deriveCurrentDistribution (deriveVersion + sampleRowsFingerprint) plus
+   *  logRevision and eventSetId. `totalPending` is overwritten with a marker no
+   *  fold could produce, so "was this served from the cache?" is decidable from
+   *  the returned value alone -- the same idiom the deriveVersion test above
+   *  uses, and stronger than a spy: it proves the CONTENT came from disk. */
+  async function writeWritePathCache(
+    root: DirectoryHandleLike,
+    month: string,
+    rows: PreparedPopulationRow[],
+    overrides: Partial<DistributionCurrentData> = {}
+  ): Promise<void> {
+    const log = await loadDistributionLog(root, month);
+    const current: DistributionCurrentData = {
+      ...deriveCurrentDistribution(log, rows),
+      logRevision: log.revision,
+      ...(log.eventSetId === undefined ? {} : { eventSetId: log.eventSetId }),
+      totalPending: 999,
+      ...overrides,
+    };
+    await saveDistributionCurrent(root, month, current);
+  }
+
+  async function seed(root: DirectoryHandleLike, month: string): Promise<void> {
+    await appendDistributionEvents(root, month, [
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: "alice", eventBy: "admin" }),
+      buildAssignEvent({ xrayImageId: "B2", assignedTo: "alice", eventBy: "admin" }),
+    ]);
+  }
+
+  it("serves a fully-stamped write-path cache on the fast path, with no refold", async () => {
+    // Item 14: refreshDistribution now stamps all four validity fields, so the
+    // cache it writes right after a distribution is actually accepted instead
+    // of forcing a full refold at the most expensive possible moment.
+    const root = await makeRoot();
+    const month = "5-May-2026";
+    const rows = [makeRow("A1"), makeRow("B2")];
+    await seed(root, month);
+    __clearDeriveMemoForTests();
+    await writeWritePathCache(root, month, rows);
+    __clearDeriveMemoForTests();
+
+    const result = await loadOrDeriveDistributionCurrent(root, month, rows, {
+      persistCache: false,
+    });
+    expect(result?.totalPending).toBe(999);
+  });
+
+  it("refolds a cache whose row fingerprint does not match the rows in hand", async () => {
+    // The staleness window the fingerprint closes: a replacement appends a row
+    // to sample.master.json without appending an event, so logRevision and
+    // eventSetId are both unchanged while the row set the fold must run against
+    // is not. Reordering is the same discriminator applied to the same ids --
+    // the fold is not commutative, so a different order is a different fold.
+    const root = await makeRoot();
+    const month = "5-May-2026";
+    const rows = [makeRow("A1"), makeRow("B2")];
+    await seed(root, month);
+    __clearDeriveMemoForTests();
+    await writeWritePathCache(root, month, rows);
+    __clearDeriveMemoForTests();
+
+    const result = await loadOrDeriveDistributionCurrent(root, month, [rows[1]!, rows[0]!], {
+      persistCache: false,
+    });
+    // Refolded: the marker is gone and the snapshot carries the fingerprint of
+    // the rows actually handed in.
+    expect(result?.totalPending).toBe(2);
+    expect(result?.sampleRowsFingerprint).toBe(sampleRowsFingerprint([rows[1]!, rows[0]!]));
+  });
+
+  it("still refolds a legacy write-path cache that carries no eventSetId", async () => {
+    const root = await makeRoot();
+    const month = "5-May-2026";
+    const rows = [makeRow("A1"), makeRow("B2")];
+    await seed(root, month);
+    __clearDeriveMemoForTests();
+    const log = await loadDistributionLog(root, month);
+    // Pre-item-14 shape: logRevision only, exactly what refreshDistribution
+    // used to persist. Still rejected, so nothing about the old on-disk cache
+    // becomes authoritative retroactively.
+    await saveDistributionCurrent(root, month, {
+      ...deriveCurrentDistribution(log, rows),
+      logRevision: log.revision,
+      totalPending: 999,
+    });
+    __clearDeriveMemoForTests();
+
+    const result = await loadOrDeriveDistributionCurrent(root, month, rows, {
+      persistCache: false,
+    });
+    expect(result?.totalPending).toBe(2);
+  });
+
+  it("does not share a derive memo entry between same-length row sets with different ids", async () => {
+    // Item 17: the memo key used only sampleRows.length, so a replacement swap
+    // (one row retired, one appended -- same count) collapsed two different row
+    // sets onto one memo entry for the rest of the workspace epoch. No cache is
+    // written here (persistCache: false), so the memo is the ONLY thing that
+    // could serve the second call, and the stamped fingerprint on the result is
+    // what says WHICH row set the returned derivation belongs to.
+    const root = await makeRoot();
+    const month = "5-May-2026";
+    const rowsA = [makeRow("A1"), makeRow("B2")];
+    const rowsB = [makeRow("A1"), makeRow("C3")];
+    await appendDistributionEvents(root, month, [
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: "alice", eventBy: "admin" }),
+    ]);
+    __clearDeriveMemoForTests();
+
+    const first = await loadOrDeriveDistributionCurrent(root, month, rowsA, { persistCache: false });
+    const second = await loadOrDeriveDistributionCurrent(root, month, rowsB, { persistCache: false });
+
+    // Both are 2-row sets at the same (workspace, month, epoch); under the old
+    // length-only key the second call was handed the FIRST call's derivation.
+    expect(first?.sampleRowsFingerprint).toBe(sampleRowsFingerprint(rowsA));
+    expect(second?.sampleRowsFingerprint).toBe(sampleRowsFingerprint(rowsB));
   });
 });
 

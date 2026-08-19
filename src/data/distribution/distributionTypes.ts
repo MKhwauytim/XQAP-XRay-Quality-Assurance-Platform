@@ -188,6 +188,15 @@ export type DistributionCurrentData = {
   deriveVersion?: number;
   /** Event-set identity used to validate this rebuildable cache. */
   eventSetId?: string;
+  /**
+   * Identity of the `sampleRows` this snapshot was folded against (v4) — see
+   * `sampleRowsFingerprint` in distributionLog.ts. Validated alongside
+   * logRevision/eventSetId/deriveVersion before any cache is trusted, because
+   * the row set can change (a replacement appends a row to
+   * `sample.master.json`) while the event set does not. Optional only so a
+   * pre-v4 snapshot still type-checks; absent reads as stale.
+   */
+  sampleRowsFingerprint?: string;
   derivedAt: string;
   totalAssigned: number;
   totalCompleted: number;

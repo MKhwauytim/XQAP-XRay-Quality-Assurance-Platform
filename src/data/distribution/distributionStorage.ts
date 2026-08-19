@@ -3,6 +3,7 @@ import {
   DERIVE_VERSION,
   deriveCurrentDistributionIncremental,
   deriveCurrentDistributionWithFacts,
+  sampleRowsFingerprint,
 } from "./distributionLog";
 import type {
   DistributionCurrentData,
@@ -1057,20 +1058,26 @@ export type LoadOrDeriveDistributionCurrentOptions = {
 };
 
 /** Same key shape the dedupeInFlight callers below use (workspaceScopeId |
- *  month | epoch — see loadOrDeriveDistributionCurrentForRead's key), plus
- *  the same `sampleRows.length` discriminator that key already appends.
- *  Required for the same reason it's required there (see the "final-review
- *  Fix 3" regression test in distributionStorage.test.ts): two concurrent
- *  callers for the same (root, month, epoch) can legitimately pass
- *  differently-shaped sampleRows (e.g. one caller's sample-master read
+ *  month | epoch — see loadOrDeriveDistributionCurrentForRead's key), plus a
+ *  row-set discriminator. Required for the same reason it's required there (see
+ *  the "final-review Fix 3" regression test in distributionStorage.test.ts):
+ *  two concurrent callers for the same (root, month, epoch) can legitimately
+ *  pass differently-shaped sampleRows (e.g. one caller's sample-master read
  *  transiently fell back to `[]`), and must never share a memoized result
- *  derived from the OTHER caller's rows. */
+ *  derived from the OTHER caller's rows.
+ *
+ *  v4: that discriminator is now the full `sampleRowsFingerprint` rather than
+ *  `sampleRows.length`, which it strictly subsumes (the fingerprint embeds the
+ *  count). Length alone let two SAME-length different-row sets share one memo
+ *  entry — exactly what a replacement swap produces (one row retired, one
+ *  appended) — so the second caller was served a derivation of the first
+ *  caller's rows for the rest of the workspace epoch. */
 function deriveMemoKey(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   sampleRows: PreparedPopulationRow[]
 ): string {
-  return `${workspaceScopeId(directoryHandle)}|${monthFolderName}|${workspaceEpoch(directoryHandle, monthFolderName)}|${sampleRows.length}`;
+  return `${workspaceScopeId(directoryHandle)}|${monthFolderName}|${workspaceEpoch(directoryHandle, monthFolderName)}|${sampleRowsFingerprint(sampleRows)}`;
 }
 
 /**
@@ -1251,16 +1258,27 @@ export async function loadOrDeriveDistributionCurrent(
     }
 
     const cached = await loadDistributionCurrent(directoryHandle, monthFolderName);
+    // v4: a cache is only a candidate when it was derived from the SAME row set
+    // we are about to fold against. `logRevision`/`eventSetId` cannot see a
+    // replacement's appended row (it changes `sample.master.json`, not the event
+    // set), so without this a cache derived from the pre-replacement rows is
+    // served — and, on the resume path, extended — for a different row set. An
+    // absent fingerprint (any pre-v4 cache) never matches, which is what the
+    // DERIVE_VERSION bump turns into one refold per month rather than a
+    // permanently rejected cache.
+    const rowsFingerprint = sampleRowsFingerprint(sampleRows);
+    const cacheRowsMatch = cached?.sampleRowsFingerprint === rowsFingerprint;
     // The sidecar read is gated on the cache already being usable, so a month
     // with no/stale cache does not pay an extra round trip for a checkpoint it
     // could not resume from anyway.
     const checkpoint =
-      cached && cached.deriveVersion === DERIVE_VERSION
+      cached && cached.deriveVersion === DERIVE_VERSION && cacheRowsMatch
         ? await loadFoldCheckpoint(directoryHandle, monthFolderName, cached)
         : undefined;
     const canResume =
       !!cached &&
       cached.deriveVersion === DERIVE_VERSION &&
+      cacheRowsMatch &&
       !!checkpoint &&
       checkpoint.deriveVersion === DERIVE_VERSION;
     const memoKey = deriveMemoKey(directoryHandle, monthFolderName, sampleRows);
@@ -1296,12 +1314,14 @@ export async function loadOrDeriveDistributionCurrent(
     }
 
     // Fast path: cache is valid only if it was produced by the current
-    // derivation algorithm (deriveVersion) for this exact log revision.
+    // derivation algorithm (deriveVersion) for this exact log revision, this
+    // exact event set, and this exact ROW set (v4 — see rowsFingerprint above).
     // Pre-DERIVE_VERSION caches (inflated totalAssigned / resurrected rows)
     // are treated as stale and re-derived below.
     if (
       cached &&
       cached.deriveVersion === DERIVE_VERSION &&
+      cacheRowsMatch &&
       cached.logRevision === log.revision &&
       cached.eventSetId === log.eventSetId &&
       hasQuotaForAssignedEmployees(cached, log)
@@ -1376,6 +1396,14 @@ export async function loadOrDeriveDistributionCurrent(
       // these ids) — stated explicitly so the sidecar carries its own binding.
       eventSetId: distributionEventSetIdFromIds(knownEventIds),
     };
+    // `derived.sampleRowsFingerprint` is stamped by the derive itself, so on the
+    // HEALED path it describes `callerRows ∪ recovered` rather than the
+    // `sampleRows` this call was handed — deliberately. The snapshot's content
+    // really is the union fold, and a later reader still holding the pre-heal
+    // rows must refold (and re-heal) rather than be served entries for rows it
+    // does not know about. Costs one extra master read per load until that
+    // caller's own row set catches up; it cannot loop, because the heal is
+    // driven by what is on disk.
     const withRevision: DistributionCurrentData = {
       ...derived,
       logRevision: log.revision,
