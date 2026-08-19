@@ -27,6 +27,7 @@ import type { SlideBuilder } from "../slideKit";
 import { sectionSeparatorSlide } from "../slides";
 import { WORKLOAD_ACCURACY_CSS, workloadAccuracySlideBuilders } from "./workloadAccuracy";
 import { DAILY_TREND_CSS, dailyTrendSlide } from "./dailyTrend";
+import { OUTCOME_MATRIX_CSS, outcomeMatrixSlide } from "./outcomeMatrix";
 import { LEVEL_ACCURACY_CSS, levelAccuracySlideBuilders } from "./levelAccuracy";
 import { SOURCE_AGREEMENT_CSS, sourceAgreementSlide } from "./sourceAgreement";
 import { PORT_AGREEMENT_CSS, portAgreementSlideBuilders } from "./portAgreement";
@@ -44,6 +45,7 @@ import { QUALITY_IMPACT_CSS, qualityImpactSlide } from "./qualityImpact";
 export const SECTION_THREE_CSS = [
   WORKLOAD_ACCURACY_CSS,
   DAILY_TREND_CSS,
+  OUTCOME_MATRIX_CSS,
   LEVEL_ACCURACY_CSS,
   SOURCE_AGREEMENT_CSS,
   PORT_AGREEMENT_CSS,
@@ -69,6 +71,7 @@ export function sectionThreeBuilders(model: ReportModel, variantPreview: boolean
       }),
     ...workloadAccuracySlideBuilders(model, variantPreview),
     (num, total) => dailyTrendSlide(model, num, total, variantPreview),
+    (num, total) => outcomeMatrixSlide(model, num, total, variantPreview),
     ...levelAccuracySlideBuilders(model, variantPreview),
     (num, total) => sourceAgreementSlide(model, num, total, variantPreview),
     ...portAgreementSlideBuilders(model, variantPreview),
