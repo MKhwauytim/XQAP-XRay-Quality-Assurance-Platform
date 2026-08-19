@@ -272,11 +272,13 @@ export function configuredTarget(rule: StageSamplingRule, available: number): nu
  * derives internally. Exported so Phase 3 can warn about a CertScan shortfall
  * BEFORE the draw runs (owner decision, 2026-08): compare this against the
  * stage's actual CertScan row count to estimate the same gap
- * `detectStageCertShortfall`/`stagePortDraw` will report after the draw. This is
- * a stage-level estimate only (the real draw further splits by port), so it can
- * under-count a `percentage`-method shortfall that only appears once a specific
- * port's quota is apportioned — it exists to catch the common case early, not to
- * replace the authoritative post-draw `certScanShortfalls` on the result.
+ * `detectStageCertShortfall` will report after the draw. As of "1.2"
+ * (2026-08-19) this is exact rather than an estimate for both methods: the draw
+ * now derives its `percentage` CertScan target from this same stage-level
+ * rounding before apportioning it across ports, so the pre-draw warning and the
+ * post-draw `certScanShortfalls` agree. Under "1.1" and earlier the draw rounded
+ * per port instead, and this helper could under-count a shortfall that only
+ * appeared once a specific port's quota was apportioned.
  */
 export function certScanConfiguredTarget(rule: StageSamplingRule, effectiveTarget: number): number {
   return rule.certScanMethod === "percentage"
@@ -379,9 +381,52 @@ function exactCertTarget(
   return apportioned.find((entry) => entry.key === portName)?.allocated ?? 0;
 }
 
+/**
+ * This port's share of the stage's CertScan target for the `percentage` method.
+ *
+ * Rounding happens ONCE, at the stage level, and the resulting row count is then
+ * Hamilton-apportioned across the ports weighted by each port's CertScan pool —
+ * the same shape as {@link exactCertTarget}. Before 2026-08-19 the percentage was
+ * instead multiplied and `Math.round`ed against each port's own `allocated`
+ * quota, so the rounding ran once PER PORT and always broke upward at .5: ten
+ * ports each allocated 1 seat at a configured 50% each rounded 0.5 up to 1 and
+ * the stage drew 100% CertScan. That also contradicted
+ * {@link certScanConfiguredTarget}, the stage-level number Phase 3 shows the user
+ * BEFORE the draw. See SAMPLING_ALGORITHM_VERSION "1.2".
+ *
+ * The stage target is capped at the stage's CertScan pool (again mirroring
+ * `exactCertTarget`), so no port is ever asked for more CertScan rows than it
+ * holds; an over-ask is reported at stage level by `detectStageCertShortfall`.
+ */
+function percentageCertTarget(
+  rule: StageSamplingRule,
+  stageTarget: number,
+  stageRows: PreparedPopulationRow[],
+  portKeys: string[],
+  groups: Map<string, PreparedPopulationRow[]>,
+  portName: string
+): number {
+  const stageCertRows = stageRows.filter((row) => row.certScanStatus === "Certscan");
+  if (stageCertRows.length === 0 || rule.certScanPercentage <= 0) return 0;
+  const stageCertTarget = Math.min(
+    Math.round((rule.certScanPercentage / 100) * stageTarget),
+    stageCertRows.length
+  );
+  if (stageCertTarget <= 0) return 0;
+  const apportioned = hamiltonApportionment(
+    portKeys.map((key) => ({
+      key,
+      size: groups.get(key)!.filter((row) => row.certScanStatus === "Certscan").length
+    })),
+    stageCertTarget
+  );
+  return apportioned.find((entry) => entry.key === portName)?.allocated ?? 0;
+}
+
 function stagePortDraw(
   portName: string,
   allocated: number,
+  stageTarget: number,
   stageRows: PreparedPopulationRow[],
   portKeys: string[],
   groups: Map<string, PreparedPopulationRow[]>,
@@ -392,7 +437,7 @@ function stagePortDraw(
   const certRows = portRows.filter((row) => row.certScanStatus === "Certscan");
   const nonCertRows = portRows.filter((row) => row.certScanStatus === "NonCertscan");
   const target = rule.certScanMethod === "percentage"
-    ? Math.round((rule.certScanPercentage / 100) * allocated)
+    ? percentageCertTarget(rule, stageTarget, stageRows, portKeys, groups, portName)
     : exactCertTarget(rule, stageRows, portKeys, groups, portName);
   const certScanQuota = Math.min(allocated, target);
   const actualCertQuota = Math.min(certScanQuota, certRows.length);
@@ -402,10 +447,14 @@ function stagePortDraw(
     nonCertScanQuota += certScanQuota - actualCertQuota;
   }
   const drawnNonCert = drawWithoutReplacement(nonCertRows, Math.min(nonCertScanQuota, nonCertRows.length), rng);
-  // Detection only (owner decision, 2026-08): certScanQuota can exceed certRows.length
-  // when the `percentage` method's per-port share of `allocated` outpaces that port's
-  // actual CertScan pool — the draw already under-fills correctly above (actualCertQuota
-  // caps it), this just records the gap instead of letting it pass silently.
+  // Detection only (owner decision, 2026-08). Defensive as of "1.2" (2026-08-19):
+  // both CertScan methods now derive this port's target from a stage-level count
+  // that is capped at the stage's CertScan pool and Hamilton-apportioned by each
+  // port's own pool, so a port's share can no longer exceed `certRows.length` and
+  // this branch is not reachable from either path today. It is kept because the
+  // draw already under-fills correctly above (`actualCertQuota` caps it) and this
+  // records the gap rather than letting a future target source pass it silently;
+  // the reachable over-ask is reported at stage level by detectStageCertShortfall.
   const shortfall: CertScanShortfall | null = certScanQuota > certRows.length
     ? {
         stageKey: rule.stageKey,
@@ -441,26 +490,38 @@ function stagePortDraw(
 }
 
 /**
- * Stage-wide CertScan shortfall check (detection only): an `exact` CertScan
- * target is capped to the stage's whole CertScan pool by {@link exactCertTarget}
- * *before* per-port apportionment runs, so no single port's request ever exceeds
- * its own pool in that path — the shortfall, if any, only shows up here, at the
- * stage total, not per-port. `percentage`-method shortfalls surface per-port
- * instead (see `stagePortDraw`), since a port's request isn't known until its
- * allocated quota is apportioned.
+ * Stage-wide CertScan shortfall check (detection only). BOTH CertScan methods
+ * cap their target to the stage's whole CertScan pool ({@link exactCertTarget},
+ * {@link percentageCertTarget}) *before* per-port apportionment runs, so no
+ * single port's request can exceed its own pool in either path — an over-ask is
+ * only visible here, against the stage total.
+ *
+ * The `percentage` arm was added with "1.2" (2026-08-19). Until then a
+ * percentage rule rounded its CertScan target per port against that port's own
+ * `allocated` quota, so the request was not knowable until apportionment ran and
+ * the shortfall surfaced per-port inside `stagePortDraw`. Now that the target is
+ * a single stage-level count, the request IS knowable up front, exactly as for
+ * `exact` — and it has to be reported here, because the stage-level cap means
+ * `stagePortDraw` can no longer observe the gap at all. The reported request is
+ * the UNCAPPED figure (what the rule asked for), which is what makes it a
+ * shortfall record rather than a silently satisfied one.
  */
 function detectStageCertShortfall(
   rule: StageSamplingRule,
-  stageRows: PreparedPopulationRow[]
+  stageRows: PreparedPopulationRow[],
+  stageTarget: number
 ): CertScanShortfall | null {
-  if (rule.certScanMethod !== "exact" || rule.certScanExactCount <= 0) return null;
+  const requestedCertScanQuota = rule.certScanMethod === "exact"
+    ? rule.certScanExactCount
+    : Math.round((rule.certScanPercentage / 100) * stageTarget);
+  if (requestedCertScanQuota <= 0) return null;
   const availableCertScanRows = stageRows.filter((row) => row.certScanStatus === "Certscan").length;
-  if (rule.certScanExactCount <= availableCertScanRows) return null;
+  if (requestedCertScanQuota <= availableCertScanRows) return null;
   return {
     stageKey: rule.stageKey,
     stageLabel: STAGE_LABELS[rule.stageKey],
     portName: null,
-    requestedCertScanQuota: rule.certScanExactCount,
+    requestedCertScanQuota,
     actualCertScanDrawn: availableCertScanRows,
     availableCertScanRows
   };
@@ -477,10 +538,10 @@ function drawStage(stageRows: PreparedPopulationRow[], target: number, rule: Sta
   const allocations: PortAllocation[] = [];
   const counters = emptyCounters();
   const shortfalls: CertScanShortfall[] = [];
-  const stageShortfall = detectStageCertShortfall(rule, stageRows);
+  const stageShortfall = detectStageCertShortfall(rule, stageRows, target);
   if (stageShortfall) shortfalls.push(stageShortfall);
   for (const entry of apportioned) {
-    const draw = stagePortDraw(entry.key, entry.allocated, stageRows, portKeys, groups, rule, rng);
+    const draw = stagePortDraw(entry.key, entry.allocated, target, stageRows, portKeys, groups, rule, rng);
     rows.push(...draw.rows);
     allocations.push(draw.allocation);
     addCounters(counters, draw.counters);
