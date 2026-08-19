@@ -6,7 +6,7 @@ import { DEFAULT_EXEC_CONFIG } from "../../../executiveReportTypes";
 import type { ExecutiveReportInput } from "../../../executiveReportTypes";
 import { buildReportModel } from "../../model/reportModel";
 import type { ReportModel } from "../../model/reportModel";
-import { OUTCOME_MATRIX_CSS, outcomeMatrixSlide } from "./outcomeMatrix";
+import { OUTCOME_MATRIX_CSS, outcomeMatrixSlideBuilders } from "./outcomeMatrix";
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 //
@@ -160,15 +160,69 @@ function cellCount(html: string, label: string): number {
   return Number((match as RegExpExecArray)[1].replace(/,/g, ""));
 }
 
-describe("outcomeMatrixSlide", () => {
+/** Render page N (0-indexed) of this slide — same helper shape
+ *  `workloadAccuracy.test.ts`'s own `render` uses for its paginated slide.
+ *  Most existing tests only care about the single page a small (≤
+ *  PAGE1_PORT_CAP) fixture produces. */
+function render(model: ReportModel, num = 6, total = 20, variantPreview = false, page = 0): string {
+  return outcomeMatrixSlideBuilders(model, variantPreview)[page](num, total);
+}
+
+/** All pages, rendered in order. */
+function renderAll(model: ReportModel, variantPreview = false): string[] {
+  return outcomeMatrixSlideBuilders(model, variantPreview).map((b, i) => b(i + 1, 99));
+}
+
+/** Every named port row's key, across ALL pages of `htmls` — i.e. every port
+ *  that got its OWN `<tr>` (not folded into a remainder row). Reads the
+ *  `.v2-lg-idx`-prefixed cell text, same convention `ledgerIdx` renders. */
+function namedPortKeys(htmls: string[]): string[] {
+  const keys: string[] = [];
+  const re = /<tr><td><span class="v2-lg-idx">\d+<\/span>([^<]+)<\/td>/g;
+  for (const html of htmls) {
+    for (const m of html.matchAll(re)) keys.push(m[1]);
+  }
+  return keys;
+}
+
+/** Parses every fold row's summed evaluable/missed counts across ALL pages
+ *  of `htmls` (there is at most one, on the last page, but this reads
+ *  whichever pages actually carry one). */
+function foldRowSums(htmls: string[]): Array<{ foldedCount: number; evaluable: number; missed: number }> {
+  const re = /<tr class="v2-om-fold-row"><td><span class="v2-lg-idx">\d+<\/span>الباقي \((\d+) منفذ\)<\/td><td>([\d,]+)<\/td><td>([\d,]+)<\/td>/g;
+  const results: Array<{ foldedCount: number; evaluable: number; missed: number }> = [];
+  for (const html of htmls) {
+    for (const m of html.matchAll(re)) {
+      results.push({
+        foldedCount: Number(m[1]),
+        evaluable: Number(m[2].replace(/,/g, "")),
+        missed: Number(m[3].replace(/,/g, "")),
+      });
+    }
+  }
+  return results;
+}
+
+/** N ports, all tied at exactly 1 اشتباه فائت image (2 decision records) —
+ *  cheap to build at scale and, since every port ties on the sort's primary
+ *  key, sorts deterministically by key ascending, so which ports land on
+ *  which page is fully predictable from the zero-padded index alone. */
+function manyPortsPlan(n: number): Array<{ port: string; missedSuspicion: number }> {
+  return Array.from({ length: n }, (_, i) => ({
+    port: `منفذ ${String(i + 1).padStart(3, "0")}`,
+    missedSuspicion: 1,
+  }));
+}
+
+describe("outcomeMatrixSlideBuilders", () => {
   it("renders the slide shell", () => {
-    const html = outcomeMatrixSlide(modelWith([popRow()]), 6, 20, false);
+    const html = render(modelWith([popRow()]), 6, 20, false);
     expect(html).toContain('id="slide-s3-outcome-matrix"');
     expect(html).toContain('data-section="section3"');
   });
 
   it("states اشتباه فائت as an absolute count, not only a rate", () => {
-    const html = outcomeMatrixSlide(
+    const html = render(
       modelWith([
         popRow({
           xrayImageId: "A",
@@ -185,18 +239,18 @@ describe("outcomeMatrixSlide", () => {
   });
 
   it("renders — rather than 0% when there is nothing evaluable", () => {
-    const html = outcomeMatrixSlide(modelWith([]), 6, 20, false);
+    const html = render(modelWith([]), 6, 20, false);
     expect(html).not.toContain("0.0%");
   });
 
   it("lists ports below the month-wide matrix", () => {
-    const html = outcomeMatrixSlide(modelWith([popRow()]), 6, 20, false);
+    const html = render(modelWith([popRow()]), 6, 20, false);
     expect(html).toContain("v2-om-ports");
   });
 
   it("is deterministic", () => {
     const model = modelWith([popRow()]);
-    expect(outcomeMatrixSlide(model, 6, 20, false)).toBe(outcomeMatrixSlide(model, 6, 20, false));
+    expect(render(model, 6, 20, false)).toBe(render(model, 6, 20, false));
   });
 
   it("ships scoped CSS", () => {
@@ -216,7 +270,7 @@ describe("outcomeMatrixSlide", () => {
       evaluable: 34,
     });
 
-    const html = outcomeMatrixSlide(model, 6, 20, false);
+    const html = render(model, 6, 20, false);
     expect(cellCount(html, "اشتباه فائت")).toBe(4);
     expect(cellCount(html, "اشتباه صحيح")).toBe(6);
     expect(cellCount(html, "اشتباه خاطئ")).toBe(10);
@@ -236,7 +290,7 @@ describe("outcomeMatrixSlide", () => {
       evaluable: 2,
     });
 
-    const html = outcomeMatrixSlide(model, 6, 20, false);
+    const html = render(model, 6, 20, false);
     expect(cellCount(html, "اشتباه فائت")).toBe(2);
     expect(cellCount(html, "اشتباه صحيح")).toBe(0);
     expect(cellCount(html, "اشتباه خاطئ")).toBe(0);
@@ -244,24 +298,23 @@ describe("outcomeMatrixSlide", () => {
   });
 
   it("sorts the per-port table by اشتباه فائت descending, then port key ascending, and gives each port an honest own-denominator rate", () => {
-    // Exactly PORT_ROW_CAP (2) ports, so both are named individually and this
-    // test isolates ordering/rate behavior from the folding mechanism — the
-    // >cap folding case (which port ends up in which bucket, and that no
-    // count is lost) has its own dedicated test below.
+    // 3 ports, exactly PAGE1_PORT_CAP (3), so all three are named on page 1
+    // and this test isolates ordering/rate behavior from pagination/folding
+    // entirely — those have their own dedicated tests below.
     const model = buildOutcomeModel([
       { port: "منفذ ألف", missedSuspicion: 1, correctClean: 1 }, // 2 missed decisions
       { port: "منفذ باء", missedSuspicion: 3, correctClean: 1 }, // 6 missed decisions — should rank first
+      { port: "منفذ جيم", correctClean: 1 }, // 0 missed decisions — should rank last
     ]);
-    const html = outcomeMatrixSlide(model, 6, 20, false);
+    const html = render(model, 6, 20, false);
     const portsSection = html.slice(html.indexOf('class="v2-om-ports"'));
-    const order = ["منفذ باء", "منفذ ألف"].map((name) => portsSection.indexOf(name));
+    const order = ["منفذ باء", "منفذ ألف", "منفذ جيم"].map((name) => portsSection.indexOf(name));
     expect(order[0]).toBeGreaterThan(-1);
     expect(order[0]).toBeLessThan(order[1]);
-    // Both ports clear the sufficiency cut (6 evaluable each is still below
-    // `insufficient`'s floor... actually each port here has evaluable = 2*(missed+clean),
-    // ألف: 2*(1+1)=4, باء: 2*(3+1)=8 — both under the default `insufficient`
-    // floor, so both render muted rates, honestly, rather than a fabricated
-    // percentage on a thin base.
+    expect(order[1]).toBeLessThan(order[2]);
+    // All three ports are well under the default `insufficient` floor (2, 4,
+    // or 8 evaluable decisions), so every rate renders muted, honestly,
+    // rather than a fabricated percentage on a thin base.
     expect(portsSection).not.toContain("0.0%");
   });
 
@@ -272,65 +325,102 @@ describe("outcomeMatrixSlide", () => {
     // ARE 0.0% here — that check is scoped to the ports table specifically,
     // not the whole page, so it doesn't false-positive on those real zeros.
     const model = buildOutcomeModel([{ port: "منفذ صغير", missedSuspicion: 1 }]);
-    const html = outcomeMatrixSlide(model, 6, 20, false);
+    const html = render(model, 6, 20, false);
     const portsSection = html.slice(html.indexOf('class="v2-om-ports"'));
     expect(portsSection).not.toContain("0.0%");
     expect(portsSection).toContain('<span class="insuff">—</span>');
   });
 
-  it("folds ports beyond PORT_ROW_CAP into one honest remainder row that sums the folded ports' own counts, dropping nothing", () => {
-    // 5 ports, strictly decreasing اشتباه فائت counts so the sort order (missedSuspicion
-    // desc) is unambiguous. PORT_ROW_CAP is 2, so only the top 2 (A, B) are
-    // named individually; C, D, E must fold into one remainder row.
-    const model = buildOutcomeModel([
-      { port: "منفذ A", missedSuspicion: 5, correctClean: 1 },
-      { port: "منفذ B", missedSuspicion: 4, correctClean: 1 },
-      { port: "منفذ C", missedSuspicion: 3, correctClean: 1 },
-      { port: "منفذ D", missedSuspicion: 2, correctClean: 1 },
-      { port: "منفذ E", missedSuspicion: 1, correctClean: 1 },
-    ]);
-    const html = outcomeMatrixSlide(model, 6, 20, false);
-    const portsSection = html.slice(html.indexOf('class="v2-om-ports"'));
+  // ── Pagination (round-3 fix) ─────────────────────────────────────────────
+  // Round 2's cap+fold made the print-clipping bug go away but, at only 2
+  // named rows, stopped delivering a real per-port table for any month with
+  // more than 2 ports — spec §6.2 wants "counts and rates, month-wide, then
+  // a per-port table below". These tests cover the restored pagination.
 
-    // (a) the folded row appears, naming exactly the 3 folded ports (5 - cap 2).
-    const foldMatch = /<tr class="v2-om-fold-row"><td><span class="v2-lg-idx">(\d+)<\/span>الباقي \((\d+) منفذ\)<\/td><td>([\d,]+)<\/td><td>([\d,]+)<\/td><td>([^<]*)<\/td><td>([^<]*)<\/td><\/tr>/.exec(
-      portsSection,
-    );
-    expect(foldMatch, "no folded remainder row found").toBeTruthy();
-    const [, , foldedPortCount, foldedEvaluable, foldedMissed] = foldMatch as RegExpExecArray;
-    expect(foldedPortCount).toBe("3");
+  it("produces more than one builder for a port-heavy month, with a (تابع) continuation page", () => {
+    // 14 ports (matching the real LAND_PORTS/SEA_PORTS preview fixture size)
+    // is more than PAGE1_PORT_CAP (3); the remaining 11 land exactly on one
+    // continuation page (CONTINUATION_PORT_CAP is also 11) — exactly the
+    // everyday case pagination exists for, no folding involved at all.
+    const model = buildOutcomeModel(manyPortsPlan(14));
+    const builders = outcomeMatrixSlideBuilders(model, false);
+    expect(builders.length).toBe(2);
 
-    // Only A and B are named individually — C, D, E must not appear as their
-    // own named rows (only inside the "الباقي" label's port-count parenthetical).
-    expect(portsSection).toContain("منفذ A");
-    expect(portsSection).toContain("منفذ B");
-    expect(portsSection.match(/منفذ C/g)).toBeNull();
-    expect(portsSection.match(/منفذ D/g)).toBeNull();
-    expect(portsSection.match(/منفذ E/g)).toBeNull();
+    const [page1, page2] = renderAll(model);
+    // Both pages carry the "-N" suffix once there's more than one page —
+    // the same convention `portAgreementSlideBuilders` uses (its own
+    // `suffix = plan.pages > 1 ? \`-${page + 1}\` : ""` applies to EVERY
+    // page, including the first, once pagination is active).
+    expect(page1).toContain('id="slide-s3-outcome-matrix-1"');
+    expect(page1).not.toContain("(تابع)");
+    expect(page2).toContain('id="slide-s3-outcome-matrix-2"');
+    expect(page2).toContain("مصفوفة نتائج الفحص (تابع)");
+    // Page 1 still carries the month-wide matrix; the continuation page
+    // carries ONLY the ports table (no matrix repeated).
+    expect(page1).toContain("v2-om-matrix");
+    expect(page2).not.toContain("v2-om-matrix");
+  });
 
-    // (b) the folded row's counts equal the SUM of the folded ports' (C, D, E)
-    // own counts — read straight off model.errorAnalysis.byPort so this checks
-    // the real fold arithmetic, not a hand re-derived expectation.
+  it("shows every port exactly once across all pages for a realistic month, none of them folded", () => {
+    const model = buildOutcomeModel(manyPortsPlan(14));
+    const htmls = renderAll(model);
+    const expectedKeys = model.errorAnalysis.byPort.map((p) => p.key).sort();
+
+    const named = namedPortKeys(htmls);
+    expect(named.length).toBe(14); // every port got exactly one named row...
+    expect([...named].sort()).toEqual(expectedKeys); // ...and it's this exact set, no duplicates, none missing.
+
+    // No fold row anywhere — 14 ports fits entirely inside PAGE1_PORT_CAP +
+    // CONTINUATION_PORT_CAP (3 + 11 = 14) without needing the overflow guard.
+    expect(foldRowSums(htmls)).toEqual([]);
+  });
+
+  it("folds only the residual beyond MAX_CONTINUATION_PAGES, summing its own counts, dropping nothing", () => {
+    // 45 ports: page 1 shows PAGE1_PORT_CAP (3), 3 continuation pages show
+    // CONTINUATION_PORT_CAP (11) each (33), so 36 are named individually and
+    // 9 (45 - 36) must fold into ONE remainder row on the last page — this
+    // is the "within-page overflow guard" the fold was demoted to; it never
+    // fires for a realistic port count (see the previous two tests), only
+    // for this kind of pathological one.
+    const model = buildOutcomeModel(manyPortsPlan(45));
+    const htmls = renderAll(model);
+    expect(htmls.length).toBe(4); // page 1 + 3 continuation pages (the bound)
+
     const byPort = model.errorAnalysis.byPort;
-    const folded = ["منفذ C", "منفذ D", "منفذ E"].map(
-      (key) => byPort.find((p) => p.key === key)!,
-    );
-    expect(folded.every(Boolean)).toBe(true);
-    const expectedFoldedEvaluable = folded.reduce((s, p) => s + p.evaluable, 0);
-    const expectedFoldedMissed = folded.reduce((s, p) => s + p.missedSuspicion, 0);
-    expect(Number(foldedEvaluable)).toBe(expectedFoldedEvaluable);
-    expect(Number(foldedMissed)).toBe(expectedFoldedMissed);
+    expect(byPort.length).toBe(45);
 
-    // (c) no port's data is lost between the visible rows and the folded row:
-    // shown (A + B) + folded (C + D + E) must reconstruct the SAME grand
-    // total the totals row (and model.errorAnalysis.totals) report.
-    const shown = ["منفذ A", "منفذ B"].map((key) => byPort.find((p) => p.key === key)!);
+    const named = namedPortKeys(htmls);
+    expect(named.length).toBe(36);
+
+    const folds = foldRowSums(htmls);
+    expect(folds.length).toBe(1); // exactly one fold row, on the last page
+    expect(folds[0].foldedCount).toBe(9);
+
+    // (a) the folded row appears — asserted above (folds.length === 1).
+    // (b) its counts equal the SUM of the folded ports' own counts, and
+    // (c) no port's data is lost between the named rows and the folded row:
+    // reconstruct the grand total from (every named port's own counts) +
+    // (the fold row's counts) and compare against model.errorAnalysis.totals
+    // — read straight from the model, not a hand re-derived expectation, and
+    // covering every one of the 45 ports, not just the folded 9.
+    const namedSet = new Set(named);
+    expect(namedSet.size).toBe(36); // no port named twice across pages
+    const foldedPorts = byPort.filter((p) => !namedSet.has(p.key));
+    expect(foldedPorts.length).toBe(9);
+    // No port is both named and folded.
+    expect(foldedPorts.every((p) => !namedSet.has(p.key))).toBe(true);
+
+    const expectedFoldedEvaluable = foldedPorts.reduce((s, p) => s + p.evaluable, 0);
+    const expectedFoldedMissed = foldedPorts.reduce((s, p) => s + p.missedSuspicion, 0);
+    expect(folds[0].evaluable).toBe(expectedFoldedEvaluable);
+    expect(folds[0].missed).toBe(expectedFoldedMissed);
+
+    const namedPorts = byPort.filter((p) => namedSet.has(p.key));
     const reconstructedEvaluable =
-      shown.reduce((s, p) => s + p.evaluable, 0) + expectedFoldedEvaluable;
-    const reconstructedMissed = shown.reduce((s, p) => s + p.missedSuspicion, 0) + expectedFoldedMissed;
+      namedPorts.reduce((s, p) => s + p.evaluable, 0) + expectedFoldedEvaluable;
+    const reconstructedMissed =
+      namedPorts.reduce((s, p) => s + p.missedSuspicion, 0) + expectedFoldedMissed;
     expect(reconstructedEvaluable).toBe(model.errorAnalysis.totals.evaluable);
     expect(reconstructedMissed).toBe(model.errorAnalysis.totals.missedSuspicion);
-    // Cross-check against the rendered totals row itself, not just the model.
-    expect(portsSection).toContain(`<td>الإجمالي</td><td>${model.errorAnalysis.totals.evaluable}</td><td>${model.errorAnalysis.totals.missedSuspicion}</td>`);
   });
 });

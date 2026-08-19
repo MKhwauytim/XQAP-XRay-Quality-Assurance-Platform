@@ -31,6 +31,26 @@
 // should never have to compute it back out of a percentage.
 //
 // Pure: no Date, no Math.random, no I/O. Same input → byte-identical output.
+//
+// ── Pagination (round-3 fix) ─────────────────────────────────────────────
+// Round 2 capped the per-port table to 2 named rows + a fold, to stop it
+// silently clipping in print. That fix was geometrically correct but broke
+// the spec (§6.2: "counts and rates, month-wide, then a per-port table
+// below") — 2 of 14 real ports is not a per-port table. The fix here keeps
+// the clip-safety property but restores full per-port coverage by
+// paginating, the same mechanism `workloadAccuracySlideBuilders`
+// (workloadAccuracy.ts) and `portAgreementSlideBuilders` (portAgreement.ts)
+// already use via `planPortPages`. This page can't reuse `planPortPages`
+// directly — that function assumes one uniform rows-per-page budget shared
+// by every page (true for those two pages' land/sea split), but here page 1
+// carries the 2×2 matrix + totals band ABOVE the ports table and every
+// continuation page doesn't, so the two page kinds have genuinely different
+// row budgets. `planOutcomeMatrixPages` below is the bespoke two-tier
+// planner that follows from that; both budgets were measured live exactly
+// the way `PAGE1_PORT_CAP`/`CONTINUATION_PORT_CAP`'s own doc comments record.
+// The fold from round 2 is kept, but demoted: it now only ever fires beyond
+// `MAX_CONTINUATION_PAGES`, i.e. as a bound on deck growth for a pathological
+// port count, not as the everyday mechanism for a normal-sized month.
 
 import type { ReportModel } from "../../model/reportModel";
 import type { ErrorTypeBreakdown } from "../../model/aggregates";
@@ -38,7 +58,7 @@ import { band, isRankable } from "../../model/dataSufficiency";
 import { esc, fmtNum } from "../../primitives";
 import { icon } from "../../ui/icons";
 import { ledgerIdx, ledgerPortCard, pctCell, rateOf, v2Slide } from "../slideKit";
-import type { CellTone } from "../slideKit";
+import type { CellTone, SlideBuilder } from "../slideKit";
 
 const SLIDE_ID = "slide-s3-outcome-matrix";
 const SLIDE_TITLE = "مصفوفة نتائج الفحص";
@@ -115,56 +135,66 @@ function totalsBand(t: OutcomeCounts, portCount: number): string {
 type PortRow = ErrorTypeBreakdown & { rankable: boolean };
 
 /**
- * Named-row cap for the per-port table (round-2 fix, Finding 1: a print
- * export was silently dropping trailing port rows off the fixed-height
- * slide). Unlike `coverage.ts`'s `PORT_BUCKET_CAP` — which gives its port
- * card the WHOLE 459px slide-body height, alone — this page's ports card
- * shares that same fixed budget with the 2x2 matrix and totals band ABOVE
- * it, so its usable height is much smaller and had to be measured for THIS
- * layout specifically, not reused from that page's number.
- *
- * Verified live in the `deck-preview.html` dev tool (Chrome, 1400x900
- * viewport, the SEA_PORTS/LAND_PORTS fixture's 14 ports) against the
- * shipped CSS below, the same "measure, don't estimate" discipline
- * `slideKit.ts`'s `BASE_ROWS_PER_PAGE`/row-budget comment documents for this
- * deck's other capacity constants. The check that matters is geometric, not
- * arithmetic: with `.v2-om-ports{overflow:auto}` and its
- * `.v2-lg-port-card{height:100%}` child, the card's own box always renders
- * at the wrapper's fixed height regardless of content (so `scrollHeight`
- * alone is misleading — it reads back the forced box height, not whether
- * content actually fit); the real signal is whether the rendered
- * `<table>`'s bottom edge stays above the `.v2-om-ports` wrapper's own
- * bottom edge, since that wrapper is what the fixed 630px `.slide`
- * (`overflow:hidden`) ultimately bounds in print.
- *   - At `PORT_ROW_CAP = 3` (4 total `<tr>`s once folding kicks in — see
- *     below for why it's cap+1, not cap): the table's bottom edge sat only
- *     ~6.7px above the wrapper's bottom edge — real, but a margin so thin it
- *     is exactly the kind of print/font-rendering-variance risk this fix
- *     exists to move away from.
- *   - At `PORT_ROW_CAP = 2` (3 total `<tr>`s once folding kicks in): the
- *     table's bottom edge sat ~35px above the wrapper's bottom edge — a real
- *     margin worth more than one full row, comfortably absorbing rendering
- *     variance across browsers and the print/PDF engine.
- * The folded remainder row (`foldedPortRow` below) is itself an ordinary
- * `<tr>` and costs one row's worth of that same budget whenever ANY folding
- * happens, so the number that must fit safely is `PORT_ROW_CAP + 1`, not
- * `PORT_ROW_CAP` alone — missing this is exactly how a first pass at this
- * cap (3) landed on that thin ~6.7px margin instead of a real one.
- * Ports beyond this rank fold into one honest remainder row (`foldedPortRow`
- * below) that SUMS the folded ports' own counts into the same columns —
- * nothing silently vanishes, mirroring `coverage.ts`'s `foldedRow` /
- * `accountability.ts`'s `foldedEmployeeRow`. This page names no "busiest
- * port" or other superlative claim, so there is no risk of a folded port
- * being misquoted as a named one elsewhere on the page.
+ * Ports shown on PAGE 1, which also carries the 2x2 matrix + totals band
+ * above the ports card (round-3 fix, per-port pagination). Verified live in
+ * the `deck-preview.html` dev tool (Chrome, 1400x900 viewport, the
+ * SEA_PORTS/LAND_PORTS fixture's 14 ports), the same geometric check round
+ * 2 established: whether the rendered `<table>`'s bottom edge stays above
+ * the `.v2-om-ports` wrapper's own bottom edge (the wrapper is what the
+ * fixed 630px `.slide`, `overflow:hidden`, ultimately bounds in print) —
+ * `scrollHeight` alone is unreliable here since `.v2-lg-port-card{height:
+ * 100%}` always reports back its forced box height, not whether content
+ * actually fit. Page 1 has no fold row of its own (any overflow goes to
+ * page 2, not folded), so there's no "+1 row" tax the way round 2's
+ * `PORT_ROW_CAP + 1` had — the number below is the true row count.
+ *   - At 4 named rows: the table's bottom edge overflowed the wrapper by
+ *     ~6.7px — real, but the same thin margin round 2 explicitly rejected
+ *     (a first pass at this constant assumed 4 was "comfortable" without
+ *     re-measuring after the pagination rewrite; it was not — this is the
+ *     corrected, actually-measured number).
+ *   - At 3 named rows: the table's bottom edge sat ~35px above the
+ *     wrapper's bottom edge — a margin worth more than one full row,
+ *     matching the same safety bar round 2 used for `PORT_ROW_CAP`.
  */
-export const PORT_ROW_CAP = 2;
+export const PAGE1_PORT_CAP = 3;
+
+/**
+ * Ports shown on each PURE CONTINUATION page — no matrix, no totals band,
+ * just the ports card filling the whole 459px slide-body, exactly like
+ * `workloadAccuracySlideBuilders`'s land/sea cards. Verified live the same
+ * way as `PAGE1_PORT_CAP` above, against the same 1400x900 fixture (page 2
+ * of the 14-port preview, which shows all 11 remaining ports on one page):
+ *   - At 11 named rows: the table's bottom edge sat ~47.75px above the
+ *     wrapper's bottom edge — comfortably over one row's margin.
+ *   - At 10 named rows (one fewer): ~76.25px margin — the exact 28.5px
+ *     delta between the two confirms the per-row cost is a stable, linear
+ *     28.5px (same compact-tier row height `PAGE1_PORT_CAP`'s own
+ *     measurements used), so the NEXT row (12 named) is reliably
+ *     extrapolated at ~19.25px margin — positive, but under the one-row
+ *     safety bar, so 12 was rejected in favor of 11 without needing a
+ *     13th real port in the fixture to prove it directly.
+ */
+export const CONTINUATION_PORT_CAP = 11;
+
+/**
+ * Continuation pages beyond this bound fold their residual into ONE
+ * remainder row on the last page generated, instead of growing the deck
+ * without bound for a pathological port count (this is the "within-page
+ * overflow guard" the fold was demoted to in round 3 — for any realistic
+ * month's port count it never fires; `PAGE1_PORT_CAP + MAX_CONTINUATION_PAGES
+ * * CONTINUATION_PORT_CAP` = 3 + 3*11 = 36 named ports before folding even
+ * becomes possible, well above the ~20 ports Saudi customs' real port list
+ * carries).
+ */
+export const MAX_CONTINUATION_PAGES = 3;
 
 /** `byPort` sorted by اشتباه فائت descending, then port key ascending — a
  *  stable, deterministic order independent of the source Map's insertion
  *  order (the same "state a total order" discipline every other per-port
  *  table in this deck follows, e.g. `workloadAccuracy.ts`'s
- *  `collectWorkloadRows`). This is also the ranking `PORT_ROW_CAP` folds
- *  against — the highest-اشتباه-فائت ports are always the ones named. */
+ *  `collectWorkloadRows`). This is also the ranking the page plan below
+ *  chunks against — the highest-اشتباه-فائت ports are always shown first,
+ *  on page 1. */
 function collectPortRows(byPort: ErrorTypeBreakdown[]): PortRow[] {
   return byPort
     .map((p) => ({ ...p, rankable: isRankable(band(p.evaluable)) }))
@@ -184,12 +214,15 @@ function portRow(p: PortRow, i: number): string {
   );
 }
 
-/** One folded remainder row for ports beyond `PORT_ROW_CAP` — sums the folded
- *  ports' own counts into the SAME columns a named row would show (never a
- *  hidden or dropped total), same discipline as `coverage.ts`'s `foldedRow`
- *  and `accountability.ts`'s `foldedEmployeeRow`. Its own rate is gated on
- *  the pooled evaluable count's own band, independent of any individual
- *  folded port's rankability. */
+/** One folded remainder row for ports beyond `MAX_CONTINUATION_PAGES` — sums
+ *  the folded ports' own counts into the SAME columns a named row would show
+ *  (never a hidden or dropped total), same discipline as `coverage.ts`'s
+ *  `foldedRow` and `accountability.ts`'s `foldedEmployeeRow`. Its own rate is
+ *  gated on the pooled evaluable count's own band, independent of any
+ *  individual folded port's rankability. In a normal-sized month this never
+ *  renders at all — pagination (`planOutcomeMatrixPages`) is the everyday
+ *  mechanism now; this is only the within-page overflow guard for a
+ *  pathological port count. */
 function foldedPortRow(folded: PortRow[], rowIdx: number): string {
   const evaluable = folded.reduce((s, p) => s + p.evaluable, 0);
   const missed = folded.reduce((s, p) => s + p.missedSuspicion, 0);
@@ -203,8 +236,11 @@ function foldedPortRow(folded: PortRow[], rowIdx: number): string {
   );
 }
 
-/** Grand total across EVERY port, named and folded alike — the totals row
- *  must always reflect the whole month, independent of `PORT_ROW_CAP`. */
+/** This PAGE's own subtotal — shown (+ folded, on the last page only) ports
+ *  ONLY, never a whole-month grand total the table itself doesn't display.
+ *  Same "a totals row never covers rows the table doesn't show" discipline
+ *  `workloadAccuracy.ts`'s `tableCard` documents for its own paginated
+ *  land/sea tables. */
 function portsTotalsRow(rows: PortRow[]): string {
   const evaluable = rows.reduce((s, p) => s + p.evaluable, 0);
   const missed = rows.reduce((s, p) => s + p.missedSuspicion, 0);
@@ -218,17 +254,15 @@ function portsTotalsRow(rows: PortRow[]): string {
   );
 }
 
-/** Per-port breakdown card, wrapped in the required `.v2-om-ports` hook. Reuses
- *  the shared `ledgerPortCard` shell (P2, slideKit.ts) — the same card/table
- *  chrome `coverage.ts`'s `bucketCard` and `workloadAccuracy.ts`'s per-port
- *  cards already use — rather than a bespoke table, so this page's ports table
- *  looks and behaves identically to every other per-port table in the deck.
- *  Rows beyond `PORT_ROW_CAP` fold into one honest remainder row instead of
- *  being silently clipped by the slide's fixed height (round-2 fix). */
-function portsTable(byPort: ErrorTypeBreakdown[]): string {
-  const rows = collectPortRows(byPort);
-  const shown = rows.slice(0, PORT_ROW_CAP);
-  const folded = rows.slice(PORT_ROW_CAP);
+/** Per-port breakdown card for ONE page, wrapped in the required
+ *  `.v2-om-ports` hook. Reuses the shared `ledgerPortCard` shell (P2,
+ *  slideKit.ts) — the same card/table chrome `coverage.ts`'s `bucketCard`
+ *  and `workloadAccuracy.ts`'s per-port cards already use — rather than a
+ *  bespoke table, so this page's ports table looks and behaves identically
+ *  to every other per-port table in the deck. `folded` is non-empty only on
+ *  the very last page generated, and only when the port count exceeds
+ *  `MAX_CONTINUATION_PAGES`'s reach (round-3 fix; see the module header). */
+function portsCard(shown: PortRow[], folded: PortRow[]): string {
   const bodyRowsHtml =
     shown.map((p, i) => portRow(p, i)).join("") +
     (folded.length > 0 ? foldedPortRow(folded, shown.length) : "");
@@ -238,7 +272,7 @@ function portsTable(byPort: ErrorTypeBreakdown[]): string {
       theadCells:
         `<th>المنفذ</th><th>العيّنة</th><th>اشتباه فائت</th><th>نسبة الاشتباه الفائت</th><th>الدقة الإجمالية</th>`,
       bodyRowsHtml,
-      totalsRowHtml: portsTotalsRow(rows),
+      totalsRowHtml: portsTotalsRow([...shown, ...folded]),
       span: PORTS_SPAN,
       rowCount: 0,
       compact: true,
@@ -248,42 +282,94 @@ function portsTable(byPort: ErrorTypeBreakdown[]): string {
   </div>`;
 }
 
+// ── Pagination ───────────────────────────────────────────────────────────
+
+/** One page's worth of the plan: which ports it names individually, and
+ *  (only ever non-empty on the last page) which ports fold into that page's
+ *  remainder row instead. */
+type OutcomeMatrixPage = { shown: PortRow[]; folded: PortRow[] };
+
 /**
- * Page: مصفوفة نتائج الفحص — the four inspection-outcome classes as a 2×2
- * matrix (month-wide) plus a per-port breakdown table. Single body variant
+ * Splits the full, already-ranked port list into pages: page 1 takes up to
+ * `PAGE1_PORT_CAP` (it also carries the matrix + totals band, so its budget
+ * is smaller), each following page takes up to `CONTINUATION_PORT_CAP` (pure
+ * ports table, full slide-body). Bounded at `MAX_CONTINUATION_PAGES`
+ * continuation pages; any residual beyond that bound folds into the last
+ * page's own remainder row rather than growing the deck without limit.
+ *
+ * Always returns at least one page (an empty `shown`/`folded` pair renders
+ * `portsCard`'s own honest empty state) so callers never need a separate
+ * "zero ports" branch.
+ */
+function planOutcomeMatrixPages(rows: PortRow[]): OutcomeMatrixPage[] {
+  const pages: PortRow[][] = [rows.slice(0, PAGE1_PORT_CAP)];
+  let consumed = pages[0].length;
+  while (consumed < rows.length && pages.length - 1 < MAX_CONTINUATION_PAGES) {
+    const chunk = rows.slice(consumed, consumed + CONTINUATION_PORT_CAP);
+    pages.push(chunk);
+    consumed += chunk.length;
+  }
+  const residual = rows.slice(consumed);
+  return pages.map((shown, i) => ({
+    shown,
+    folded: i === pages.length - 1 ? residual : [],
+  }));
+}
+
+/**
+ * Build the مصفوفة نتائج الفحص page(s) — the four inspection-outcome classes
+ * as a 2×2 matrix (month-wide) plus a per-port breakdown table, paginated
+ * (round-3 fix) so a real month's full port list is actually shown rather
+ * than mostly folded away. Page 1 carries the matrix + totals band + the
+ * first chunk of ports; continuation pages ("(تابع)", matching
+ * `portAgreementSlideBuilders`'s convention) carry ONLY the ports table,
+ * using the much larger budget a page with no matrix leaves — repeating the
+ * month-wide matrix on every continuation page would be pure redundancy
+ * (it's already stated once, and it costs exactly the room a continuation
+ * page needs for more port rows instead). Single body variant per page
  * (`bodyVariants` repeats one body four times), the same pattern
  * `coverageSlide` (section4/coverage.ts:124) uses for a page whose content
  * doesn't warrant a full Ledger/Briefing/Grid fan-out.
  *
  * Pure — no Date, no Math.random, no I/O. Same input ⇒ byte-identical output.
  */
-export function outcomeMatrixSlide(
-  model: ReportModel,
-  num: number,
-  total: number,
-  variantPreview: boolean,
-): string {
+export function outcomeMatrixSlideBuilders(model: ReportModel, variantPreview: boolean): SlideBuilder[] {
   const { totals, byPort } = model.errorAnalysis;
-  const body = `<div class="v2-om-layout">
+  const rows = collectPortRows(byPort);
+  const pages = planOutcomeMatrixPages(rows);
+
+  return pages.map(({ shown, folded }, page) => {
+    const isFirst = page === 0;
+    const cont = isFirst ? "" : " (تابع)";
+    const suffix = pages.length > 1 ? `-${page + 1}` : "";
+    const title = `${SLIDE_TITLE}${cont}`;
+
+    const body = isFirst
+      ? `<div class="v2-om-layout">
     <div class="v2-om-top">
       ${matrixBlock(totals)}
       ${totalsBand(totals, byPort.length)}
     </div>
-    ${portsTable(byPort)}
+    ${portsCard(shown, folded)}
+  </div>`
+      : `<div class="v2-om-layout">
+    ${portsCard(shown, folded)}
   </div>`;
 
-  return v2Slide({
-    id: SLIDE_ID,
-    title: SLIDE_TITLE,
-    eyebrow: EYEBROW,
-    iconName: "alert",
-    headline: SLIDE_TITLE,
-    subhead: SUBHEAD,
-    bodyVariants: [body, body, body, body],
-    variantPreview,
-    num,
-    total,
-    section: "section3",
+    return (num: number, total: number) =>
+      v2Slide({
+        id: `${SLIDE_ID}${suffix}`,
+        title,
+        eyebrow: EYEBROW,
+        iconName: "alert",
+        headline: title,
+        subhead: SUBHEAD,
+        bodyVariants: [body, body, body, body],
+        variantPreview,
+        num,
+        total,
+        section: "section3",
+      });
   });
 }
 
