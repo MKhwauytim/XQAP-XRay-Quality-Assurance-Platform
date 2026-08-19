@@ -8,7 +8,8 @@ import type {
   DistributionCurrentData,
   DistributionEvent,
   DistributionFoldCheckpoint,
-  DistributionLog
+  DistributionLog,
+  QuotaFacts
 } from "./distributionTypes";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { readEnvelopeRevision, safeReadJson, safeWriteJson } from "../storage/safeWrite";
@@ -18,6 +19,7 @@ import { codedMessage, logCodedError, resolveErrorCode } from "../storage/errorC
 import { listDirectoryEntries, readAppendOnlyDirectory, readNamedJsonFiles } from "../storage/directoryScan";
 import { ensureMonthWritable } from "../population/monthLock";
 import { syncSampleMirrors } from "../samples/sampleMirrorStorage";
+import { loadSampleMaster } from "../sampling/sampleStorage";
 import {
   getPopulationMonthDir,
   getSampleMainDir,
@@ -999,6 +1001,80 @@ export function __clearDeriveMemoForTests(): void {
  * - Otherwise re-derive from the full log, persist a fresh checkpoint
  *   alongside the new cache, and return the derived result.
  */
+/**
+ * Outcome of re-checking an absorbing fold against a FRESH `sample.master.json`.
+ *
+ * - `authoritative` — every absorbed image is either genuinely unknown to the
+ *   master or is a row the caller deliberately left out (a replacement-retired
+ *   row: `liveSampleRows` filters those, and reporting/export call sites pass
+ *   the filtered set on purpose). Nothing to heal.
+ * - `healed` — the master holds live rows the caller's set did not, so the row
+ *   set the fold was handed was NOT authoritative. Carries the re-fold against
+ *   caller-rows ∪ the recovered rows.
+ * - `unverifiable` — the master could not be read (or is missing) so the
+ *   absorption cannot be judged at all.
+ */
+type AbsentRowRecheck =
+  | { outcome: "authoritative" }
+  | {
+      outcome: "healed";
+      current: DistributionCurrentData;
+      quotaFacts: QuotaFacts;
+      stillAbsent: ReadonlySet<string>;
+    }
+  | { outcome: "unverifiable" };
+
+/**
+ * Re-read `sample.master.json` and, if it holds rows the caller's set was
+ * missing, re-fold the SAME event log against caller-rows ∪ those rows.
+ *
+ * Why the union rather than the master's rows outright: two call sites
+ * (`runPowerBiExport`, the executive report data builder) pass
+ * `liveSampleRows(sample)` — the master minus replacement-retired rows — on
+ * purpose. Folding the master whole there would resurrect retired rows and
+ * change an export's output, which is forbidden. Adding back only the rows that
+ * are (a) referenced by an absorbed event, (b) present in the master and (c)
+ * NOT retired preserves every deliberate filter while recovering exactly what a
+ * stale or partial read lost.
+ */
+async function recheckAbsentRowsAgainstMaster(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  log: DistributionLog,
+  callerRows: PreparedPopulationRow[],
+  absentImageIds: ReadonlySet<string>
+): Promise<AbsentRowRecheck> {
+  let master;
+  try {
+    // Deliberately NOT a deduped/memoized read: the whole point is to get the
+    // file as it is on disk right now, not whatever this session last saw.
+    master = await loadSampleMaster(directoryHandle, monthFolderName);
+  } catch (error) {
+    // loadSampleMaster throws when the file exists but could not be read — the
+    // one case where "no rows" must never be inferred. Unverifiable.
+    logError("distribution:absent-row-recheck", error);
+    return { outcome: "unverifiable" };
+  }
+  if (!master) return { outcome: "unverifiable" };
+
+  const retired = new Set(master.replacedRowIds ?? []);
+  const recovered: PreparedPopulationRow[] = [];
+  for (const row of master.rows) {
+    if (!absentImageIds.has(row.xrayImageId)) continue;
+    if (retired.has(row.xrayImageId)) continue;
+    recovered.push(row);
+  }
+  if (recovered.length === 0) return { outcome: "authoritative" };
+
+  const healed = deriveCurrentDistributionWithFacts(log, [...callerRows, ...recovered]);
+  return {
+    outcome: "healed",
+    current: healed.current,
+    quotaFacts: healed.quotaFacts,
+    stillAbsent: healed.absentRowImageIds,
+  };
+}
+
 export async function loadOrDeriveDistributionCurrent(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
@@ -1082,7 +1158,58 @@ export async function loadOrDeriveDistributionCurrent(
     // Slow path: re-derive and update cache. segmentOffsets/legacyEventFileNames
     // come from the SAME scan loadDistributionLogWithCheckpointMeta already did
     // above -- no second directory re-scan needed to seed the fresh checkpoint.
-    const { current: derived, quotaFacts } = deriveCurrentDistributionWithFacts(log, sampleRows);
+    const folded = deriveCurrentDistributionWithFacts(log, sampleRows);
+    let derived = folded.current;
+    let quotaFacts = folded.quotaFacts;
+    // ── Absent-row persistence guard ─────────────────────────────────────────
+    // The fold ABSORBS every event whose xrayImageId is not in `sampleRows`
+    // (distributionDerivation.ts's `continue` on a missing row). That is the
+    // right thing for a genuine orphan and a catastrophe for a row set that was
+    // merely stale or partially read: the assignments those events carry are
+    // simply not in the result, and the result is what gets written to
+    // `distribution.current.json` + its fold-checkpoint sidecar. Once written,
+    // every machine trusts the cache and the checkpoint is accepted forever —
+    // so a one-off bad read of `sample.master.json` becomes the permanent,
+    // silent deletion of assignments from an audit month.
+    //
+    // The empty-row case is already gated at the top of this function (A6d) and
+    // the incremental path already refuses to advance its checkpoint
+    // (`absorbedAbsentRows`); this closes the remaining hole, the FULL refold
+    // against a partial row set.
+    //
+    // Order matters: heal first, refuse second. A fresh re-read of the master
+    // recovers the common case outright; only when the absorption survives that
+    // (or the master cannot be read at all) does the result become
+    // display-only — served in memory, never written to the cache, the
+    // checkpoint or the session memo.
+    let mayPersist = true;
+    if (folded.absentRowImageIds.size > 0) {
+      const recheck = await recheckAbsentRowsAgainstMaster(
+        directoryHandle, monthFolderName, log, sampleRows, folded.absentRowImageIds
+      );
+      if (recheck.outcome === "healed") {
+        derived = recheck.current;
+        quotaFacts = recheck.quotaFacts;
+        mayPersist = recheck.stillAbsent.size === 0;
+        logError(
+          "distribution:absent-row-healed",
+          new Error(
+            `${monthFolderName}: refolded against a fresh sample.master.json after ${folded.absentRowImageIds.size} absorbed image id(s); ${recheck.stillAbsent.size} still absent${mayPersist ? "" : " — cache/checkpoint left untouched"}`
+          )
+        );
+      } else if (recheck.outcome === "unverifiable") {
+        mayPersist = false;
+        logError(
+          "distribution:absent-row-unverifiable",
+          new Error(
+            `${monthFolderName}: ${folded.absentRowImageIds.size} absorbed image id(s) could not be checked against sample.master.json — serving the fold in memory only`
+          )
+        );
+      }
+      // "authoritative": the master agrees the rows are gone (a true orphan, or
+      // a retired row the caller filtered out on purpose). Nothing was lost by
+      // this read, so the cache stays as trustworthy as it was before.
+    }
     const knownEventIds = [...new Set(log.events.map((event) => event.eventId))].sort();
     const foldCheckpoint: DistributionFoldCheckpoint = {
       segmentOffsets,
@@ -1100,7 +1227,11 @@ export async function loadOrDeriveDistributionCurrent(
       eventSetId: log.eventSetId,
       foldCheckpoint,
     };
-    setDeriveMemo(memoKey, withRevision);
+    // Not memoized when the fold absorbed events it could not verify: the memo
+    // is read back by every subsequent mount in this session, so caching a
+    // known-incomplete fold spreads the same loss to every view for as long as
+    // the workspace epoch holds.
+    if (mayPersist) setDeriveMemo(memoKey, withRevision);
 
     // NOT awaited (when persistCache) — see the measured rationale on the
     // sibling save above. `distribution.current.json` measured ~18.8 MB for
@@ -1112,7 +1243,7 @@ export async function loadOrDeriveDistributionCurrent(
     // optimization, never a correctness input.
     // `awaitCachePersist` (Design B, step 1): only the write-path helper opts
     // in — see LoadOrDeriveDistributionCurrentOptions. Same write either way.
-    if (persistCache) {
+    if (persistCache && mayPersist) {
       const write = saveDistributionCurrent(directoryHandle, monthFolderName, withRevision).catch(
         logRejection("distribution:cache-write")
       );

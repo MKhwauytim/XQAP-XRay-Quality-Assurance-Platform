@@ -49,9 +49,37 @@ export function isNotReadableError(error: unknown): boolean {
   return errorName(error) === "NotReadableError";
 }
 
+/**
+ * File-LOCK contention, not lost permission.
+ *
+ * `NoModificationAllowedError` is what `createWritable()` (and `removeEntry`)
+ * raise when the entry is already held open for writing by someone else. On a
+ * single machine that "someone else" is another tab; on the UNC/SMB share this
+ * app actually runs on it is another MACHINE mid-write, or the share's own
+ * oplock still being released after a write that already finished. It is
+ * therefore a *timing* condition: the very same call succeeds moments later.
+ *
+ * It was previously grouped with `NotAllowedError`/`SecurityError` as terminal
+ * "the workspace grant is gone", which inverts this repo's own doctrine that a
+ * failed access is not proof of a permanent condition (see the module doc
+ * above: "could not read" is not "does not exist"). The consequence was the
+ * worst one available: a user on a busy share was told they had lost workspace
+ * access — and the recovery offered, re-picking the folder, does nothing for a
+ * lock another machine holds — while a bounded retry would have completed the
+ * write.
+ *
+ * `NotAllowedError` and `SecurityError` remain terminal: those are the names a
+ * revoked or never-granted permission actually uses.
+ */
+export function isLockContentionError(error: unknown): boolean {
+  return errorName(error) === "NoModificationAllowedError";
+}
+
 /** Transient on the WRITE/VERIFY path only — see the module doc above. */
 export function isTransientWriteError(error: unknown): boolean {
-  return isNotFoundError(error) || isNotReadableError(error);
+  return (
+    isNotFoundError(error) || isNotReadableError(error) || isLockContentionError(error)
+  );
 }
 
 /**

@@ -117,20 +117,49 @@ describe("casLoop — terminal permission-error classification", () => {
     });
   });
 
-  it("aborts on a NoModificationAllowedError", async () => {
-    const byName = await casLoop<string>(
+  // Was: "aborts on a NoModificationAllowedError". That pinned the defect.
+  // NoModificationAllowedError is file-LOCK contention — another tab, or
+  // another machine on the SMB share, holds the entry open — so it is transient
+  // by nature and is precisely what this retry loop exists for. Aborting on the
+  // first one told a user on a busy share that they had lost workspace access,
+  // and the remedy that message offers (re-pick the folder) cannot clear
+  // someone else's open handle.
+  it("retries a NoModificationAllowedError instead of reporting lost access", async () => {
+    let attempts = 0;
+    const result = await casLoop<string>(
       async () => {
-        const err = new Error("boom");
-        err.name = "NoModificationAllowedError";
-        throw err;
+        attempts += 1;
+        if (attempts < 3) {
+          const err = new Error("The file is locked by another writer");
+          err.name = "NoModificationAllowedError";
+          throw err;
+        }
+        return { done: true, result: "written" };
       },
       { maxRetries: 5, baseDelayMs: 1 }
     );
-    expect(byName).toEqual({
+    expect(attempts).toBe(3);
+    expect(result).toBe("written");
+  });
+
+  it("reports contention, not lost access, when a lock never clears", async () => {
+    const result = await casLoop<string>(
+      async () => {
+        const err = new Error("The file is locked by another writer");
+        err.name = "NoModificationAllowedError";
+        throw err;
+      },
+      { maxRetries: 3, baseDelayMs: 1 }
+    );
+    expect(result).toEqual({
+      ok: false,
+      // XQ-IO-035: "in use by another device or window — try again shortly".
+      error: expect.stringContaining("XQ-IO-035"),
+    });
+    expect(result).not.toEqual({
       ok: false,
       error: expect.stringContaining("فقد الوصول إلى مجلد العمل"),
     });
-
   });
 
   it("does not misclassify a transient NotReadableError as lost permission", async () => {

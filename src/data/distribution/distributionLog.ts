@@ -211,8 +211,19 @@ export function deriveCurrentDistribution(
 export function deriveCurrentDistributionWithFacts(
   log: DistributionLog,
   sampleRows: PreparedPopulationRow[]
-): { current: DistributionCurrentData; quotaFacts: QuotaFacts } {
-  const { entries, droppedEventIds, droppedImageIds, absentRowEventIds } = foldDistributionEvents(
+): {
+  current: DistributionCurrentData;
+  quotaFacts: QuotaFacts;
+  /**
+   * The `xrayImageId`s whose events this fold could not attach to any row and
+   * therefore absorbed (see FoldResult.absentRowImageIds). Reported so the
+   * caller can refuse to PERSIST a fold built on a row set that turns out not
+   * to have been the authoritative one — `current` itself is computed exactly
+   * as before.
+   */
+  absentRowImageIds: ReadonlySet<string>;
+} {
+  const { entries, droppedEventIds, droppedImageIds, absentRowEventIds, absentRowImageIds } = foldDistributionEvents(
     log.events,
     sampleRows,
     EVENT_SCHEMA_VERSION
@@ -256,7 +267,7 @@ export function deriveCurrentDistributionWithFacts(
     quotas,
   };
 
-  return { current, quotaFacts: facts };
+  return { current, quotaFacts: facts, absentRowImageIds };
 }
 
 export type DistributionIncrementalResult = {
