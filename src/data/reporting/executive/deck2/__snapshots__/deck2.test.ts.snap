@@ -3165,6 +3165,67 @@ body.theme-light .v2-wl-empty b{color:var(--navy);}
 body.theme-light .v2-wl-empty span{color:color-mix(in srgb,var(--navy) 72%,transparent);}
 
 
+/* ── القسم 3 · الاتجاه اليومي للدقة ───────────────────────────────────────── */
+.v2-dt-layout{display:flex;flex-direction:column;gap:11px;height:100%;min-height:0;}
+
+/* Share headline — a headline, not a footnote, per the page's own honesty rule. */
+.v2-dt-share{
+  display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+  padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.03);
+}
+.v2-dt-share-figure{display:flex;flex-direction:column;gap:1px;}
+.v2-dt-share-figure b{font-size:1.05rem;font-weight:900;color:rgba(255,255,255,.96);font-variant-numeric:tabular-nums;}
+.v2-dt-share-figure span{font-size:.62rem;font-weight:700;color:var(--slate);}
+.v2-dt-caution{
+  display:flex;align-items:center;gap:6px;margin-inline-start:auto;max-width:32em;
+  font-size:.66rem;font-weight:800;line-height:1.5;color:var(--gold);
+}
+.v2-dt-caution svg{display:block;flex-shrink:0;}
+
+/* Chart figure fills the remaining space in the body. */
+.v2-dt-layout figure{flex:1;min-height:0;}
+
+/* Per-day n strip. */
+.v2-dt-n-strip{display:flex;flex-direction:column;gap:4px;}
+.v2-dt-n-strip-head{font-size:.62rem;font-weight:800;color:var(--slate);}
+.v2-dt-n-strip-row{display:flex;flex-wrap:wrap;gap:4px;}
+.v2-dt-n-cell{
+  display:flex;flex-direction:column;align-items:center;gap:1px;min-width:2.6em;
+  padding:3px 4px;border-radius:6px;background:rgba(255,255,255,.04);
+}
+.v2-dt-n-cell b{font-size:.6rem;font-weight:800;color:rgba(255,255,255,.85);font-variant-numeric:tabular-nums;}
+.v2-dt-n-cell span{font-size:.52rem;font-weight:700;color:var(--slate);font-variant-numeric:tabular-nums;}
+
+/* Legend — band shading + low-n hollow-point explanation. */
+.v2-dt-legend{display:flex;flex-wrap:wrap;gap:6px 18px;}
+.v2-dt-legend-item{display:flex;align-items:center;gap:6px;font-size:.62rem;font-weight:700;color:var(--slate);}
+.v2-dt-swatch{display:inline-block;width:10px;height:10px;border-radius:3px;flex-shrink:0;}
+.v2-dt-swatch.band{background:var(--blue);opacity:.4;}
+.v2-dt-swatch.lown{border:1.5px solid var(--slate);background:transparent;border-radius:50%;}
+
+/* Empty state — no dated decision at all this month. */
+.v2-dt-empty{
+  display:flex;flex:1;min-height:0;flex-direction:column;align-items:center;justify-content:center;
+  gap:9px;text-align:center;padding:20px 18px;
+  border:1px dashed rgba(255,255,255,.2);border-radius:14px;background:rgba(255,255,255,.02);
+}
+.v2-dt-empty-icon{display:inline-flex;color:var(--gold);opacity:.75;}
+.v2-dt-empty-icon svg{display:block;}
+.v2-dt-empty b{font-size:.95rem;font-weight:900;color:rgba(255,255,255,.96);}
+.v2-dt-empty p{margin:0;max-width:62ch;font-size:.74rem;line-height:1.65;color:var(--slate);}
+
+body.theme-light .v2-dt-share{border-color:rgba(10,45,74,.16);background:rgba(10,45,74,.02);}
+body.theme-light .v2-dt-share-figure b,
+body.theme-light .v2-dt-empty b{color:rgba(10,45,74,.95);}
+body.theme-light .v2-dt-n-cell{background:rgba(10,45,74,.04);}
+body.theme-light .v2-dt-n-cell b{color:rgba(10,45,74,.85);}
+body.theme-light .v2-dt-empty{border-color:rgba(10,45,74,.2);background:rgba(10,45,74,.02);}
+
+@media print{
+  .v2-dt-share,.v2-dt-empty,.v2-dt-n-strip{break-inside:avoid;}
+}
+
+
 /* Section 3 — دقة إجابات المستوى الأول والثاني */
 /* Ledger/Briefing/Grid namespacing hooks (fan-out plan §11b, batch B2b) —
    "nothing bespoke beyond the shared components" role, same as every other
@@ -3854,9 +3915,9 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
           <p>تحاليل معمّقة تُكمل قراءة نتائج الجودة والدقة.</p>
         </div>
         <div class="v2-toc-side">
-          <div class="v2-toc-figure">7</div>
+          <div class="v2-toc-figure">8</div>
           <div class="v2-toc-figure-label">صفحة</div>
-          <div class="v2-toc-range" dir="ltr">14–20</div>
+          <div class="v2-toc-range" dir="ltr">14–21</div>
         </div>
       </div><div class="v2-toc-card blue">
         <div class="v2-toc-num">05</div>
@@ -3867,11 +3928,11 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
         <div class="v2-toc-side">
           <div class="v2-toc-figure">3</div>
           <div class="v2-toc-figure-label">صفحة</div>
-          <div class="v2-toc-range" dir="ltr">21–23</div>
+          <div class="v2-toc-range" dir="ltr">22–24</div>
         </div>
       </div></div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">02 / 24</div>
+  <div class="v2-page-foot" dir="ltr">02 / 25</div>
 </section>
 <section class="slide v2" id="slide-glossary-levels" data-title="مستويات المخاطر" data-section="glossary" data-section-label="المعجم">
   <div class="slide-controls">
@@ -3958,7 +4019,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     </div>
   </div></div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">03 / 24</div>
+  <div class="v2-page-foot" dir="ltr">03 / 25</div>
 </section>
 <section class="slide v2" id="slide-glossary-1" data-title="المعجم" data-section="glossary" data-section-label="المعجم">
   <div class="slide-controls">
@@ -4023,7 +4084,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
   </div></div>
   </div></div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">04 / 24</div>
+  <div class="v2-page-foot" dir="ltr">04 / 25</div>
 </section>
 <section class="slide v2 v2-sep-slide gold" id="slide-sep-1" data-title="مجتمع الفحص" data-section="section1" data-section-label="القسم 1 — مجتمع الفحص">
   <div class="slide-controls">
@@ -4064,7 +4125,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
       </div>
     </div>
   </div>
-  <div class="v2-page-foot" dir="ltr">05 / 24</div>
+  <div class="v2-page-foot" dir="ltr">05 / 25</div>
 </section>
 <section class="slide v2" id="slide-risk-stages" data-title="مجتمع الصور بناءً على المخاطر" data-section="section1" data-section-label="القسم 1 — مجتمع الفحص">
   <div class="slide-controls">
@@ -4138,7 +4199,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
   </div>
   </div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">06 / 24</div>
+  <div class="v2-page-foot" dir="ltr">06 / 25</div>
 </section>
 <section class="slide v2" id="slide-port-population-1" data-title="مجتمع صور الفحص" data-section="section1" data-section-label="القسم 1 — مجتمع الفحص">
   <div class="slide-controls">
@@ -4181,7 +4242,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     </table>
   </div></div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">07 / 24</div>
+  <div class="v2-page-foot" dir="ltr">07 / 25</div>
 </section>
 <section class="slide v2" id="slide-port-sample-1" data-title="عيّنة الفحص" data-section="section1" data-section-label="القسم 1 — مجتمع الفحص">
   <div class="slide-controls">
@@ -4224,7 +4285,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     </table>
   </div></div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">08 / 24</div>
+  <div class="v2-page-foot" dir="ltr">08 / 25</div>
 </section>
 <section class="slide v2" id="slide-stage-port-population" data-title="مجتمع صور الفحص حسب المستوى والمنفذ" data-section="section1" data-section-label="القسم 1 — مجتمع الفحص">
   <div class="slide-controls">
@@ -4267,7 +4328,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     </table>
   </div></div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">09 / 24</div>
+  <div class="v2-page-foot" dir="ltr">09 / 25</div>
 </section>
 <section class="slide v2" id="slide-stage-port-sample" data-title="عيّنة الفحص المسحوبة حسب المستوى والمنفذ" data-section="section1" data-section-label="القسم 1 — مجتمع الفحص">
   <div class="slide-controls">
@@ -4312,7 +4373,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     </table>
   </div></div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">10 / 24</div>
+  <div class="v2-page-foot" dir="ltr">10 / 25</div>
 </section>
 <section class="slide v2 v2-sep-slide cyan" id="slide-sep-2" data-title="نتائج فحص الجودة" data-section="section2" data-section-label="القسم 2 — نتائج فحص الجودة">
   <div class="slide-controls">
@@ -4353,7 +4414,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
       </div>
     </div>
   </div>
-  <div class="v2-page-foot" dir="ltr">11 / 24</div>
+  <div class="v2-page-foot" dir="ltr">11 / 25</div>
 </section>
 <section class="slide v2" id="slide-quality-ports-1" data-title="نتائج جودة الصور" data-section="section2" data-section-label="القسم 2 — نتائج فحص الجودة">
   <div class="slide-controls">
@@ -4396,7 +4457,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     </table>
   </div></div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">12 / 24</div>
+  <div class="v2-page-foot" dir="ltr">12 / 25</div>
 </section>
 <section class="slide v2" id="slide-quality-accuracy-1" data-title="دقة نتائج المنافذ" data-section="section2" data-section-label="القسم 2 — نتائج فحص الجودة">
   <div class="slide-controls">
@@ -4439,7 +4500,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     </table>
   </div></div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">13 / 24</div>
+  <div class="v2-page-foot" dir="ltr">13 / 25</div>
 </section>
 <section class="slide v2 v2-sep-slide gold" id="slide-sep-3" data-title="التحاليل المتقدمة" data-section="section3" data-section-label="القسم 3 — التحاليل المتقدمة">
   <div class="slide-controls">
@@ -4480,7 +4541,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
       </div>
     </div>
   </div>
-  <div class="v2-page-foot" dir="ltr">14 / 24</div>
+  <div class="v2-page-foot" dir="ltr">14 / 25</div>
 </section>
 <section class="slide v2" id="slide-s3-workload" data-title="الأداء حسب حجم الأعمال" data-section="section3" data-section-label="القسم 3 — التحاليل المتقدمة">
   <div class="slide-controls">
@@ -4526,7 +4587,41 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
         <p class="v2-wl-caveat"><span class="v2-wl-caveat-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="11" height="11" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l9 16H3l9-16z"/><path d="M12 10v4"/><path d="M12 17.5v.5"/></svg></span><span>ارتباط وصفي بين الحجم والدقة، لا يُقرأ كعلاقة سببية.</span></p>
       </div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">15 / 24</div>
+  <div class="v2-page-foot" dir="ltr">15 / 25</div>
+</section>
+<section class="slide v2" id="slide-s3-daily-trend" data-title="الاتجاه اليومي للدقة" data-section="section3" data-section-label="القسم 3 — التحاليل المتقدمة">
+  <div class="slide-controls">
+    <label class="slide-print-toggle" title="تضمين هذه الصفحة عند الطباعة">
+    <input type="checkbox" checked/>
+    <span class="slide-print-toggle-track"><span class="slide-print-toggle-thumb"></span></span>
+  </label>
+    
+  </div>
+  <div class="v2-rail" aria-hidden="true">
+    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab active">التحاليل المتقدمة</div>
+  </div>
+  <div class="slide-inner">
+    <div class="slide-eyebrow">
+      <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 4v15a1 1 0 0 0 1 1h14"/><path d="M9 16v-4"/><path d="M13 16V8"/><path d="M17 16v-6"/></svg></span>
+      <span>القسم 3 — التحاليل المتقدمة</span>
+    </div>
+    <div class="slide-headline">الاتجاه اليومي للدقة</div>
+    <div class="slide-subhead">دقة القرارات اليومية عبر أيام الشهر، مع نطاقات ضبط إحصائية لكل من دقة السليمة ودقة الاشتباه.</div>
+    <div class="slide-body"><div class="v2-dt-layout">
+          <div class="v2-dt-share">
+    <div class="v2-dt-share-figure"><b>—</b><span>نسبة القرارات المؤرخة</span></div>
+    <div class="v2-dt-share-figure"><b>0</b><span>قرار غير مؤرخ</span></div>
+    
+  </div>
+          <div class="v2-dt-empty">
+    <span class="v2-dt-empty-icon"><svg viewBox="0 0 24 24" width="24" height="24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 4v15a1 1 0 0 0 1 1h14"/><path d="M9 16v-4"/><path d="M13 16V8"/><path d="M17 16v-6"/></svg></span>
+    <b>لا يوجد قرار مؤرخ هذا الشهر</b>
+    <p>لم يحمل أي من قرارات هذا الشهر (0 قرارًا) تاريخ دخول قابل للاستخدام، لذا تعذّر رسم الاتجاه اليومي. تحقّق من حقل تاريخ الدخول في بيانات هذا الشهر.</p>
+  </div>
+        </div></div>
+  </div>
+  <div class="v2-page-foot" dir="ltr">16 / 25</div>
 </section>
 <section class="slide v2" id="slide-s3-level-accuracy" data-title="دقة إجابات المستوى الأول والثاني" data-section="section3" data-section-label="القسم 3 — التحاليل المتقدمة">
   <div class="slide-controls">
@@ -4553,7 +4648,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     <p>لم تُسجَّل نتيجة المراجع لأي صورة في هذا الشهر، ولا يمكن مقارنة قرار المستوى الأول أو الثاني بغير نتيجة مُعتمدة. تظهر النسب في هذه الصفحة فور اعتماد إجابات المراجعة.</p>
   </div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">16 / 24</div>
+  <div class="v2-page-foot" dir="ltr">17 / 25</div>
 </section>
 <section class="slide v2" id="slide-s3-source-agreement" data-title="توافق النتائج بين المستويات والمصادر" data-section="section3" data-section-label="القسم 3 — التحاليل المتقدمة">
   <div class="slide-controls">
@@ -4624,7 +4719,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
   </div>
   </div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">17 / 24</div>
+  <div class="v2-page-foot" dir="ltr">18 / 25</div>
 </section>
 <section class="slide v2" id="slide-s3-port-agreement" data-title="توافق المستويات حسب المنفذ" data-section="section3" data-section-label="القسم 3 — التحاليل المتقدمة">
   <div class="slide-controls">
@@ -4670,7 +4765,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     <div class="v2-agree-note"><span class="v2-agree-note-icon"><svg viewBox="0 0 24 24" width="11" height="11" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l9 16H3l9-16z"/><path d="M12 10v4"/><path d="M12 17.5v.5"/></svg></span><span>اتفاق المستويين محسوب على مجتمع الشهر كاملًا في المنفذ (عمود المجتمع)، أمّا مطابقة كل مستوى لنتيجة المراجع فتُحسب على العيّنة المدروسة فقط (عمود العيّنة) لأن المراجع لا يبدي نتيجته إلا على الصور المسحوبة في العيّنة — الأساسان مختلفان، ولا تصحّ المقارنة المباشرة بين النسبتين.</span></div>
   </div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">18 / 24</div>
+  <div class="v2-page-foot" dir="ltr">19 / 25</div>
 </section>
 <section class="slide v2" id="slide-s3-marking" data-title="أثر وجود التحديد على الدقة" data-section="section3" data-section-label="القسم 3 — التحاليل المتقدمة">
   <div class="slide-controls">
@@ -4708,7 +4803,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
   </div>
   </div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">19 / 24</div>
+  <div class="v2-page-foot" dir="ltr">20 / 25</div>
 </section>
 <section class="slide v2" id="slide-s3-quality" data-title="أثر جودة الصورة على الدقة" data-section="section3" data-section-label="القسم 3 — التحاليل المتقدمة">
   <div class="slide-controls">
@@ -4745,7 +4840,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
   </div>
   </div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">20 / 24</div>
+  <div class="v2-page-foot" dir="ltr">21 / 25</div>
 </section>
 <section class="slide v2 v2-sep-slide gold" id="slide-sep-4" data-title="التغطية والمساءلة التشغيلية" data-section="section4" data-section-label="القسم 4 — التغطية والمساءلة التشغيلية">
   <div class="slide-controls">
@@ -4786,7 +4881,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
       </div>
     </div>
   </div>
-  <div class="v2-page-foot" dir="ltr">21 / 24</div>
+  <div class="v2-page-foot" dir="ltr">22 / 25</div>
 </section>
 <section class="slide v2" id="slide-s4-coverage" data-title="التغطية التشغيلية" data-section="section4" data-section-label="القسم 4 — التغطية والمساءلة التشغيلية">
   <div class="slide-controls">
@@ -4813,7 +4908,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     <p>يُبنى هذا القسم من بيانات تقرير التوزيع — وزّع العيّنة على الموظفين أولاً ليظهر هنا.</p>
   </div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">22 / 24</div>
+  <div class="v2-page-foot" dir="ltr">23 / 25</div>
 </section>
 <section class="slide v2" id="slide-s4-accountability" data-title="المساءلة التشغيلية" data-section="section4" data-section-label="القسم 4 — التغطية والمساءلة التشغيلية">
   <div class="slide-controls">
@@ -4840,7 +4935,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     <p>يُبنى هذا القسم من بيانات تقرير الإدارة — وزّع العيّنة على الموظفين أولاً ليظهر هنا.</p>
   </div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">23 / 24</div>
+  <div class="v2-page-foot" dir="ltr">24 / 25</div>
 </section>
 <section class="slide v2" id="slide-closing" data-title="مصدر البيانات" data-section="closing" data-section-label="مصدر البيانات">
   <div class="slide-controls">
@@ -4893,7 +4988,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
       </div>
     </div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">24 / 24</div>
+  <div class="v2-page-foot" dir="ltr">25 / 25</div>
 </section>
 
 </div>
