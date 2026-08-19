@@ -636,6 +636,15 @@ export const DEFAULT_LABELS = {
   // ── UserManagement — governance actions log viewer (C-15) ──
   um_actions_tab_label:        "سجل الإجراءات",
   um_actions_desc:             "سجل الإجراءات الإدارية المحفوظ داخل مساحة العمل في",
+  /**
+   * Path shown under the Actions sub-tab. Since the per-actor split the live
+   * trail is a FOLDER of one file per actor; the old shared file is still read
+   * so pre-existing workspaces keep their history.
+   */
+  um_actions_path:             "5-system/audit/actions/ (ملف لكل مستخدم، مع قراءة السجل المشترك السابق 5-system/audit/actions.log.json)",
+  /** Same, for the Activity sub-tab. */
+  um_activity_desc:            "تعرض هذه الصفحة سجلات الدخول وساعات العمل المحفوظة داخل مساحة العمل في",
+  um_activity_path:            "5-system/audit/activity/ (ملف لكل مستخدم، مع قراءة السجل المشترك السابق 5-system/audit/activity.log.json)",
   um_actions_refresh_btn:      "تحديث السجل",
   um_actions_loading:          "جاري تحميل السجل...",
   um_actions_empty:            "لا توجد إجراءات مسجلة بعد.",
@@ -963,7 +972,13 @@ export const DEFAULT_LABELS = {
   err_io_029_unreadable_not_absent:        "تعذّرت قراءة ملف موجود، وأُلغيت العملية بدلاً من الكتابة فوق بياناته.",
   err_io_030_workspace_unreachable:        "لم يعد مجلد مساحة العمل متاحًا — يُرجّح أنه نُقل أو أُعيدت تسميته أو أُنشئ من جديد. أعد اختيار مجلد مساحة العمل ثم أعد المحاولة؛ إعادة المحاولة وحدها لن تنجح.",
   err_io_033_extension_blocked:            "المجلد يقبل الكتابة، لكن الملفات من نوع هذا الملف تُحذف بعد كتابتها مباشرة — غالبًا بسبب مضاد الفيروسات أو برنامج المزامنة. إعادة المحاولة لن تنجح؛ يلزم استثناء مجلد مساحة العمل من الفحص.",
-  err_io_032_cas_write_failed:             "تعذّر حفظ التغيير بعد عدة محاولات بسبب خطأ في الوصول إلى الملف، وليس بسبب تعارض مع مستخدم آخر. راجع سجل الأخطاء لمعرفة السبب.",
+  // The old wording asserted «وليس بسبب تعارض مع مستخدم آخر» ("not because of a
+  // conflict with another user"). casLoop reaches XQ-IO-032 precisely BECAUSE it
+  // could not classify the exception, so that claim was unsupportable at the
+  // throw site — and on a Windows/SMB share the unclassified names
+  // (ERROR_DELETE_PENDING, ERROR_NETNAME_DELETED, …) are concurrency failures,
+  // so it denied the very cause it was most often reporting.
+  err_io_032_cas_write_failed:             "تعذّر حفظ التغيير بعد عدة محاولات. قد يكون الملف قيد الاستخدام من جهاز آخر أو تعذّر الوصول إليه — أعد المحاولة بعد قليل، وراجع سجل الأخطاء لمعرفة التفاصيل.",
   err_io_031_share_lost_entry:             "تعذّر الوصول إلى الملف على الشبكة رغم عدة محاولات، والمجلد نفسه يعمل. أعد المحاولة بعد قليل.",
   err_io_034_path_too_long:                "مسار مجلد مساحة العمل طويل جدًا، فتعذّر إنشاء ملف بهذا الاسم داخله. إعادة المحاولة لن تنجح؛ انقل مجلد مساحة العمل إلى مسار أقصر (أقرب إلى جذر المجلد المشترك) ثم أعد المحاولة.",
 

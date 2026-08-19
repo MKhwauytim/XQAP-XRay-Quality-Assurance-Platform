@@ -30,6 +30,7 @@ import { errorCodeOf } from "./errorCodes";
 import { loadEmployeeAnswers, upsertItemAnswer } from "../answers/answerStorage";
 import type { ItemAnswer } from "../answers/answerTypes";
 import { appendWorkspaceAction, readWorkspaceActions } from "../audit/actionLog";
+import { actionsFileName } from "../audit/auditPaths";
 import {
   appendDecisionEvent,
   loadSupervisorDecisions,
@@ -43,6 +44,7 @@ import { loadSampleMaster, saveSampleMaster } from "../sampling/sampleStorage";
 import { saveMonthRun } from "../population/populationStorage";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import {
+  getAuditActionsDir,
   getSampleApprovalsDir,
   getSampleEmployeeDir,
   getSampleMainDir,
@@ -403,9 +405,14 @@ describe("P0-2 distribution: an unreadable event store never reads as zero event
 // ── P1: audit action log ────────────────────────────────────────────────────
 
 describe("P1 actionLog: an unreadable audit trail is never truncated to one entry", () => {
+  // PROD-2: the live trail is now one file per ACTOR under
+  // `5-system/audit/actions/`, so the read contract is exercised against the
+  // actor's own file. The legacy shared `actions.log.json` is read-only and no
+  // read-modify-write targets it any more.
+  const ACTOR_LOG_FILE = actionsFileName("admin");
+
   async function auditDir(root: DirectoryHandleLike): Promise<DirectoryHandleLike> {
-    const system = await getSystemRoot(root, true);
-    return system.getDirectoryHandle(SYSTEM_FOLDER_NAMES.audit, { create: true });
+    return getAuditActionsDir(root, true);
   }
 
   async function seed(root: DirectoryHandleLike): Promise<void> {
@@ -424,7 +431,7 @@ describe("P1 actionLog: an unreadable audit trail is never truncated to one entr
     const root = makeRoot();
     await seed(root);
 
-    makeBaseReadTransientlyUnreadable(root, "actions.log.json");
+    makeBaseReadTransientlyUnreadable(root, ACTOR_LOG_FILE);
     await appendWorkspaceAction(root, {
       actor: "admin",
       actorRole: "admin",
@@ -449,8 +456,8 @@ describe("P1 actionLog: an unreadable audit trail is never truncated to one entr
     const dir = await auditDir(root);
     // Snapshot the good bytes so the assertion can prove the append did not
     // overwrite them.
-    const before = await readRaw(dir, "actions.log.json");
-    const corrupted = await corruptInPlace(dir, "actions.log.json");
+    const before = await readRaw(dir, ACTOR_LOG_FILE);
+    const corrupted = await corruptInPlace(dir, ACTOR_LOG_FILE);
 
     await appendWorkspaceAction(root, {
       actor: "admin",
@@ -459,7 +466,7 @@ describe("P1 actionLog: an unreadable audit trail is never truncated to one entr
       target: "late",
     });
 
-    const after = await readRaw(dir, "actions.log.json");
+    const after = await readRaw(dir, ACTOR_LOG_FILE);
     expect(after).toBe(corrupted);
     expect(after).not.toBe(before);
   });

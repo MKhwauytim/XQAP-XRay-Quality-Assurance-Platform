@@ -645,6 +645,12 @@ function restoreActionFor(fileName: string): RestoreAction {
   // in an unrelated "*index*.json" file elsewhere in the tree.
   if (fileName.endsWith(EMPLOYEE_MIRROR_SUFFIX) || fileName === EMPLOYEE_MIRROR_INDEX_FILE) return "skip-derived";
   if (fileName === DISTRIBUTION_LOG_FILE) return "restore-if-absent";
+  // Per-user audit logs (`5-system/audit/{activity,actions}/*.json`, PROD-2)
+  // deliberately fall through to "replace". The generic `.json` walk from the
+  // workspace root already captures them, and a whole-file overwrite is exactly
+  // the semantics the shared file had before the split — except that a restore
+  // now rolls back ONE user's log rather than the whole fleet's. A union-merge
+  // restore action is a reasonable follow-up; it is not this change.
   return "replace";
 }
 
