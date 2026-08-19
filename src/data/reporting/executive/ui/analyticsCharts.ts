@@ -900,3 +900,231 @@ export function metricMatrix(
   ]);
   return figure(svg, srTable(title, headers, srRows));
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// 4. timeSeriesBand — day-of-month series, each carrying a shaded control band
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * One day's point for one series.
+ *
+ * `y === null` is a GAP — no evaluable decisions that day — and must never be
+ * interpolated across; a quiet day is not a measurement. `lo`/`hi` are that
+ * day's control-band bounds (independent of `y`, since a band can exist even
+ * where the series itself has no data, e.g. a fixed threshold). `n` is the
+ * day's sample size, surfaced only in the screen-reader table (the SVG never
+ * encodes it visually — a 31-day strip has no room for a second numeral per
+ * point without hurting legibility).
+ */
+export type BandPoint = {
+  x: number;
+  y: number | null;
+  n: number;
+  lo: number | null;
+  hi: number | null;
+};
+
+export type BandSeries = {
+  /** Series name — legend/sr-table text. Escaped on render (a real injection
+   *  surface: labels can originate from BI-imported free text). */
+  label: string;
+  tone: ColorRole;
+  points: BandPoint[];
+};
+
+export type TimeSeriesBandOpts = {
+  width?: number;
+  height?: number;
+  caption?: string;
+  /** Fixed axis maximum. Defaults to 31 — the axis is the MONTH, not the
+   *  data, so a sparse month (e.g. only 3 days with results so far) must not
+   *  silently compress into a chart that looks like a dense, complete one. */
+  xMax?: number;
+  emptyNote?: string;
+};
+
+/**
+ * Day-of-month percentage trend, one polyline per series, each series
+ * carrying its own shaded control band (e.g. ±2σ around a target rate). A
+ * point that falls outside its OWN band gets an explicit marker — that
+ * signal is the entire reason the band is drawn, and per the deck's no-
+ * colour-only-encoding rule it is a size/stroke difference, not just a hue,
+ * so it still reads in print and to colour-blind viewers.
+ *
+ * RTL: this module's x axes run right → left (header note 2) so numeric
+ * domains read in the document's natural direction — day 1 sits at the RIGHT
+ * edge (the RTL reading start) and day `xMax` at the LEFT, mirroring
+ * bubbleScatter's reversed range. The y-axis gutter therefore lives on the
+ * RIGHT, same as bubbleScatter's y ticks.
+ *
+ * A `null` y ends the current run without closing the series: each
+ * contiguous stretch of plottable points becomes its own <polyline> (and, if
+ * every point in that stretch has a band, its own shaded <polygon>) — two
+ * runs separated by a gap day render as two disconnected segments, never one
+ * line drawn straight across the gap.
+ *
+ * Pure SVG string, built once at render time — no runtime layout
+ * recomputation, per the deck's standing rule.
+ */
+export function timeSeriesBand(series: BandSeries[], opts: TimeSeriesBandOpts = {}): string {
+  const w = opts.width ?? 620;
+  const h = opts.height ?? 300;
+  const xMax = Math.max(1, opts.xMax ?? 31);
+  const title = opts.caption ?? "الاتجاه اليومي";
+  const plottable = series.filter((s) => s.points.some((p) => isNum(p.y)));
+
+  // data-x-max carries the fixed axis bound onto the DOM even in the empty
+  // case, so a caller/test can confirm the axis never silently shrank to fit
+  // whatever the (possibly sparse) data happened to contain.
+  if (plottable.length === 0) {
+    return `<div class="v2-ts-wrap" data-x-max="${xMax}">${emptyState(w, h, title, opts.emptyNote)}</div>`;
+  }
+
+  // ── reserved strips (all carved OUT of w×h; the plot never overflows) ──────
+  const legendH = TYPE.micro + 12; // one horizontal legend row above the plot
+  const xAxisH = TYPE.micro + 10; // day-number tick labels below the plot
+  const yGutter = 28; // RIGHT-hand gutter for the 0/25/50/75/100 tick labels
+  const gridLeft = 14;
+  const gridRight = Math.max(gridLeft + 20, w - yGutter);
+  const gridTop = legendH + 6;
+  const gridBottom = Math.max(gridTop + 20, h - xAxisH);
+  const plotW = gridRight - gridLeft;
+  const plotH = gridBottom - gridTop;
+  // Guard a 1-day domain (xMax === 1) so (x-1)/(xMax-1) never divides by 0.
+  const xSpan = xMax > 1 ? xMax - 1 : 1;
+
+  // RTL: range reversed — day 1 → gridRight, day xMax → gridLeft (see doc
+  // comment above; matches bubbleScatter's `.range([plotRight, plotLeft])`).
+  const sx = (x: number): number => gridRight - ((x - 1) / xSpan) * plotW;
+  const sy = (y: number): number => gridTop + (1 - clamp(y, 0, 100) / 100) * plotH;
+
+  // Horizontal gridlines + y labels at 0/25/50/75/100, ticks in the RIGHT
+  // gutter (RTL reading start) — same placement bubbleScatter's y axis uses.
+  const grid = [0, 25, 50, 75, 100]
+    .map(
+      (v) =>
+        `<line x1="${r(gridLeft)}" y1="${r(sy(v))}" x2="${r(gridRight)}" y2="${r(sy(v))}" ` +
+        `stroke="currentColor" stroke-opacity="0.12" stroke-width="1" stroke-dasharray="3 3"/>` +
+        `<text x="${r(gridRight + 6)}" y="${r(sy(v))}" text-anchor="start" dominant-baseline="middle" ` +
+        `font-size="${TYPE.micro}" fill="currentColor" fill-opacity="0.62">${v}</text>`,
+    )
+    .join("");
+
+  // X ticks every 5 days plus day 1 and the last day — enough to orient
+  // without cluttering a 31-slot axis.
+  const xTicks = [1, 5, 10, 15, 20, 25, 30, xMax].filter((d, i, a) => d <= xMax && a.indexOf(d) === i);
+  const ticks = xTicks
+    .map((d) => {
+      const x = sx(d);
+      return (
+        `<line x1="${r(x)}" y1="${r(gridBottom)}" x2="${r(x)}" y2="${r(gridBottom + 3)}" ` +
+        `stroke="currentColor" stroke-opacity="0.28" stroke-width="1"/>` +
+        `<text x="${r(x)}" y="${r(gridBottom + TYPE.micro + 7)}" text-anchor="middle" ` +
+        `font-size="${TYPE.micro}" fill="currentColor" fill-opacity="0.62">${d}</text>`
+      );
+    })
+    .join("");
+
+  const body = plottable
+    .map((s) => {
+      const color = cssVar(s.tone);
+      // Contiguous runs of plottable points — a null y ENDS the run without
+      // closing the series, so each run becomes its own polyline/polygon.
+      const runs: BandPoint[][] = [];
+      let run: BandPoint[] = [];
+      for (const p of s.points) {
+        if (isNum(p.y)) run.push(p);
+        else if (run.length > 0) {
+          runs.push(run);
+          run = [];
+        }
+      }
+      if (run.length > 0) runs.push(run);
+
+      // Shaded control band — only for runs where every point carries one;
+      // a run with a partial band would draw a misleading polygon edge.
+      const bands = runs
+        .filter((rn) => rn.every((p) => isNum(p.lo) && isNum(p.hi)))
+        .map((rn) => {
+          const top = rn.map((p) => `${r(sx(p.x))},${r(sy(p.hi as number))}`).join(" ");
+          const bottom = [...rn]
+            .reverse()
+            .map((p) => `${r(sx(p.x))},${r(sy(p.lo as number))}`)
+            .join(" ");
+          return `<polygon points="${top} ${bottom}" fill="${color}" fill-opacity="0.14" style="${PRINT_EXACT}"/>`;
+        })
+        .join("");
+
+      const lines = runs
+        .map(
+          (rn) =>
+            `<polyline points="${rn
+              .map((p) => `${r(sx(p.x))},${r(sy(p.y as number))}`)
+              .join(" ")}" fill="none" stroke="${color}" stroke-width="2"/>`,
+        )
+        .join("");
+
+      // Out-of-band points get a bigger radius PLUS a stroke ring — a
+      // shape/stroke difference, not just a colour swap, so the signal
+      // survives print and colour-blind viewing (deck rule: no colour-only
+      // encoding).
+      const dots = s.points
+        .filter((p) => isNum(p.y))
+        .map((p) => {
+          const y = p.y as number;
+          const out = isNum(p.lo) && isNum(p.hi) && (y > (p.hi as number) || y < (p.lo as number));
+          return out
+            ? `<circle class="ts-out" cx="${r(sx(p.x))}" cy="${r(sy(y))}" r="4.5" fill="${color}" ` +
+                `stroke="currentColor" stroke-width="1.5" style="${PRINT_EXACT}"/>`
+            : `<circle class="ts-dot" cx="${r(sx(p.x))}" cy="${r(sy(y))}" r="2.5" fill="${color}" ` +
+                `style="${PRINT_EXACT}"/>`;
+        })
+        .join("");
+
+      return bands + lines + dots;
+    })
+    .join("");
+
+  // Horizontal legend above the plot — one row, RTL: first series flush to
+  // the RIGHT edge (reading start), each subsequent series' slot growing
+  // leftward. Swatch-then-label-to-its-left mirrors legendRows' per-row
+  // pattern (swatch flush to the slot's right edge, text-anchor="end").
+  const legendItemW = 150;
+  const legend = plottable
+    .map((s, i) => {
+      const slotRight = gridRight - i * legendItemW;
+      const swatchX = slotRight - 4;
+      return (
+        `<rect x="${r(swatchX - 8)}" y="4" width="8" height="8" rx="2" fill="${cssVar(
+          s.tone,
+        )}" style="${PRINT_EXACT}"/>` +
+        `<text x="${r(swatchX - 12)}" y="11" text-anchor="end" ` +
+        `font-size="${TYPE.micro}" fill="currentColor" fill-opacity="0.78">${escText(s.label)}</text>`
+      );
+    })
+    .join("");
+
+  const svg = svgOpen(w, h, title) + grid + ticks + body + legend + `</svg>`;
+
+  // Screen-reader table: one row per day 1..xMax, one column per INPUT
+  // series (not just the plottable ones — an all-gap series is still
+  // meaningful information, same as bubbleScatter listing unplotted points).
+  const cellFor = (p: BandPoint | undefined): string => {
+    if (!p || !isNum(p.y)) return "—";
+    const val = `${fmtTick(clamp(p.y, 0, 100))}%`;
+    const band = isNum(p.lo) && isNum(p.hi) ? ` (${fmtTick(p.lo)}–${fmtTick(p.hi)}%)` : "";
+    return `${val}${band} ن=${p.n}`;
+  };
+  const byDay = series.map((s) => {
+    const m = new Map<number, BandPoint>();
+    for (const p of s.points) m.set(p.x, p);
+    return m;
+  });
+  const headers = ["اليوم", ...series.map((s) => s.label)];
+  const srRows: string[][] = [];
+  for (let d = 1; d <= xMax; d++) {
+    srRows.push([String(d), ...byDay.map((m) => cellFor(m.get(d)))]);
+  }
+
+  return `<div class="v2-ts-wrap" data-x-max="${xMax}">${figure(svg, srTable(title, headers, srRows))}</div>`;
+}
