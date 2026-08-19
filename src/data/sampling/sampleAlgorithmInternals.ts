@@ -1,6 +1,6 @@
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import { stripRawRow } from "../population/populationTypes";
-import { getStageKey } from "../population/stageHelpers";
+import { getStageKey, resolveStageMappings } from "../population/stageHelpers";
 import type { StageAliasMappings, StageSamplingRule } from "../population/populationConfig";
 import { hamiltonApportionment } from "./apportionment";
 import { createRng, drawWithoutReplacement, hashSeedString } from "./rng";
@@ -286,12 +286,20 @@ export function certScanConfiguredTarget(rule: StageSamplingRule, effectiveTarge
     : rule.certScanExactCount;
 }
 
-function buildStagePlan(rows: PreparedPopulationRow[], config: StageConfig): StagePlan {
+// `stageMappings` is the RESOLVED table (defaults merged with the config
+// override), resolved once by `drawStageSample` so the object stamped onto the
+// result is provably the same one every `getStageKey` call here consumed —
+// resolving separately for the stamp would leave room for the two to drift.
+function buildStagePlan(
+  rows: PreparedPopulationRow[],
+  config: StageConfig,
+  stageMappings: StageAliasMappings
+): StagePlan {
   const rowStageKeys = new Map<string, ReturnType<typeof getStageKey>>();
   const unmappedStageRawValuesSeen = new Set<string>();
   let unmappedStageRowCount = 0;
   for (const row of rows) {
-    const stageKey = getStageKey(row.stage, config.stageMappings);
+    const stageKey = getStageKey(row.stage, stageMappings);
     rowStageKeys.set(row.xrayImageId, stageKey);
     if (stageKey === "unknown") {
       unmappedStageRowCount += 1;
@@ -594,7 +602,13 @@ function successfulResult(
   stageAllocations: StageAllocation[],
   counters: DrawCounters,
   certScanShortfalls: CertScanShortfall[],
-  unmappedStage?: { rowCount: number; rawValues: string[] }
+  unmappedStage?: { rowCount: number; rawValues: string[] },
+  // The resolved stage alias table the caller classified its rows against.
+  // Omitted by `drawLegacySample`, which has no stages: the legacy path never
+  // calls `getStageKey`, so there is no mapping table it could honestly claim
+  // to have drawn under, and stamping the defaults there would be a fabricated
+  // provenance record rather than a true one.
+  stageMappingsSnapshot?: StageAliasMappings
 ): SampleDrawResult {
   const data: SampleMasterData = {
     rngSeed,
@@ -614,6 +628,10 @@ function successfulResult(
           unmappedStageRawValues: unmappedStage.rawValues
         }
       : {}),
+    // Spread-conditional for the same reason as the block above: a legacy-path
+    // draw keeps the exact file shape it has always been written with, so this
+    // stays a purely additive field on the stage path.
+    ...(stageMappingsSnapshot ? { stageMappingsSnapshot } : {}),
     drawnAt: new Date().toISOString(),
     drawnBy: username,
     // B5 (disk-bloat fix): `handleDrawSample` can run this draw on the
@@ -635,7 +653,11 @@ export function drawStageSample(
   username: string,
   algorithmVersion: string
 ): SampleDrawResult {
-  const plan = buildStagePlan(rows, config);
+  // Resolve the alias table ONCE: it is both what classifies every row below
+  // and what gets stamped onto the result as the draw's own record of the
+  // mappings it ran under (see SampleMasterData.stageMappingsSnapshot).
+  const stageMappingsSnapshot = resolveStageMappings(config.stageMappings);
+  const plan = buildStagePlan(rows, config, stageMappingsSnapshot);
   const totalMappedRows = STAGE_KEYS.reduce((sum, key) => sum + (plan.availableCounts.get(key) ?? 0), 0);
   if (totalMappedRows === 0) {
     return {
@@ -666,5 +688,6 @@ export function drawStageSample(
   }
   return successfulResult(config.rngSeed, username, algorithmVersion, totalRequested,
     allRows, Array.from(portAllocations.values()), stageAllocations, counters, certScanShortfalls,
-    { rowCount: plan.unmappedStageRowCount, rawValues: plan.unmappedStageRawValues });
+    { rowCount: plan.unmappedStageRowCount, rawValues: plan.unmappedStageRawValues },
+    stageMappingsSnapshot);
 }

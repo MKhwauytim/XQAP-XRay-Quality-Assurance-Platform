@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { PreparedPopulationRow } from "../population/populationTypes";
+import { DEFAULT_STAGE_MAPPINGS } from "../population/populationConfig";
 import type { StageAliasMappings, StageSamplingRule } from "../population/populationConfig";
 import { drawSample } from "./sampleAlgorithm";
 import type { SampleMasterData } from "./sampleTypes";
@@ -271,6 +272,27 @@ describe("drawSample — legacy path golden master", () => {
       ok: false,
       reason: "حجم العينة يجب أن يكون أكبر من صفر.",
     });
+  });
+
+  it("stamps NO stageMappingsSnapshot — the legacy path never classifies by stage", () => {
+    // `drawLegacySample` never calls `getStageKey`, so it has no alias table it
+    // could honestly claim to have drawn under. Stamping the defaults here would
+    // be a fabricated provenance record, and a consumer preferring the snapshot
+    // over live config would then silently classify replacements against a table
+    // this draw never used. The key must be ABSENT, not `undefined`: the file
+    // shape a legacy-path month is written with does not change at all.
+    const result = drawSample(rows, { totalSampleSize: 9, rngSeed: "golden-seed-1" }, "tester");
+    if (!result.ok) throw new Error("draw failed");
+    expect("stageMappingsSnapshot" in result.data).toBe(false);
+
+    // Also absent when the caller passes stage mappings the legacy path ignores.
+    const withMappings = drawSample(
+      rows,
+      { totalSampleSize: 9, rngSeed: "golden-seed-1", stageMappings: STAGE_MAPPINGS },
+      "tester"
+    );
+    if (!withMappings.ok) throw new Error("draw failed");
+    expect("stageMappingsSnapshot" in withMappings.data).toBe(false);
   });
 
   it("pins the null-portName bucket label", () => {
@@ -768,6 +790,128 @@ describe("drawSample — stage path golden master", () => {
       stageAllocations: [],
       portAllocations: [],
       certScanShortfalls: [],
+    });
+  });
+
+  it("stamps the RESOLVED stage mappings the draw classified against", () => {
+    // v103: the draw records its own alias table so consumers that re-classify
+    // a row later (appendSampleRow, getReplacementCandidates) can use the table
+    // the month was DRAWN under instead of workspace-global, admin-editable live
+    // config. "Resolved" = DEFAULT_STAGE_MAPPINGS merged with the config
+    // override — the exact object getStageKey consumed.
+    const result = drawSample(rows, config, "tester");
+    if (!result.ok) throw new Error("draw failed");
+
+    // This config overrides all four stages, so the resolved table is the
+    // override itself — pinned by value, not by reference.
+    expect(result.data.stageMappingsSnapshot).toEqual({
+      first: ["1"],
+      second: ["2"],
+      third: ["3"],
+      fourth: ["4"],
+    });
+
+    // A config that overrides only ONE stage must record the DEFAULTS for the
+    // other three, not omit them: "what the draw used" is the merged table, and
+    // a partial record would send a later consumer back to live config for the
+    // stages it left out.
+    const partial = drawSample(
+      rows,
+      { rngSeed: "golden-stage-1", samplingRules: rules, stageMappings: { first: ["1"] } as StageAliasMappings },
+      "tester"
+    );
+    if (!partial.ok) throw new Error("draw failed");
+    expect(partial.data.stageMappingsSnapshot?.first).toEqual(["1"]);
+    expect(partial.data.stageMappingsSnapshot?.second).toEqual(DEFAULT_STAGE_MAPPINGS.second);
+    expect(partial.data.stageMappingsSnapshot?.third).toEqual(DEFAULT_STAGE_MAPPINGS.third);
+    expect(partial.data.stageMappingsSnapshot?.fourth).toEqual(DEFAULT_STAGE_MAPPINGS.fourth);
+  });
+
+  it("pins that stamping the snapshot changed NO drawn output — the rest of the result is byte-identical to the v102.0.0 master", () => {
+    // The snapshot is additive by contract. This literal was recorded by running
+    // the v102.0.0 (pre-snapshot) `drawSample` against this exact config, so the
+    // assertion is a genuine before/after diff and not a re-recording of the
+    // current implementation: if adding the field perturbed apportionment, RNG
+    // consumption order or any counter, this fails.
+    const result = drawSample(rows, config, "tester");
+    if (!result.ok) throw new Error("draw failed");
+
+    const withoutSnapshot: Partial<SampleMasterData> = omitDrawnAt(result.data);
+    delete withoutSnapshot.stageMappingsSnapshot;
+
+    expect({
+      ...withoutSnapshot,
+      rows: result.data.rows.map((r) => r.xrayImageId),
+    }).toEqual({
+      rngSeed: "golden-stage-1",
+      samplingAlgorithmVersion: "1.2",
+      totalRequested: 15,
+      totalActual: 15,
+      certScanRequested: 7,
+      nonCertScanRequested: 8,
+      certScanActual: 7,
+      nonCertScanActual: 8,
+      portAllocations: [
+        {
+          portName: "بري",
+          populationSize: 22,
+          certScanCount: 9,
+          nonCertScanCount: 13,
+          allocatedQuota: 11,
+          certScanQuota: 5,
+          nonCertScanQuota: 6,
+          actualCertScanDrawn: 5,
+          actualNonCertScanDrawn: 6,
+          actualTotalDrawn: 11,
+        },
+        {
+          portName: "بحري",
+          populationSize: 10,
+          certScanCount: 3,
+          nonCertScanCount: 7,
+          allocatedQuota: 4,
+          certScanQuota: 2,
+          nonCertScanQuota: 2,
+          actualCertScanDrawn: 2,
+          actualNonCertScanDrawn: 2,
+          actualTotalDrawn: 4,
+        },
+      ],
+      stageAllocations: [
+        { stageKey: "first", stageLabel: "المستوى الأول", populationSize: 16, targetQuota: 5, actualDrawn: 5, certScanDrawn: 3, nonCertScanDrawn: 2 },
+        { stageKey: "second", stageLabel: "المستوى الثاني", populationSize: 12, targetQuota: 6, actualDrawn: 6, certScanDrawn: 2, nonCertScanDrawn: 4 },
+        { stageKey: "third", stageLabel: "المستوى الثالث", populationSize: 4, targetQuota: 4, actualDrawn: 4, certScanDrawn: 2, nonCertScanDrawn: 2 },
+      ],
+      certScanShortfalls: [
+        {
+          stageKey: "third",
+          stageLabel: "المستوى الثالث",
+          portName: null,
+          requestedCertScanQuota: 4,
+          actualCertScanDrawn: 2,
+          availableCertScanRows: 2,
+        },
+      ],
+      unmappedStageRowCount: 0,
+      unmappedStageRawValues: [],
+      drawnBy: "tester",
+      rows: [
+        "بري-S1-C1",
+        "بري-S1-C3",
+        "بري-S1-N4",
+        "Bبحري-S1-C1",
+        "Bبحري-S1-N0",
+        "بري-S2-C2",
+        "بري-S2-N4",
+        "بري-S2-N0",
+        "بري-S2-N1",
+        "Bبحري-S2-C0",
+        "Bبحري-S2-N0",
+        "بري-S3-C0",
+        "بري-S3-C1",
+        "بري-S3-N0",
+        "بري-S3-N1",
+      ],
     });
   });
 

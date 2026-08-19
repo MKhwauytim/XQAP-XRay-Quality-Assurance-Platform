@@ -44,7 +44,9 @@ export type ReplacementCandidates = {
  * @param populationRows  All processed rows for the month.
  * @param sampleMaster    Current sample master (rows in sample are excluded).
  * @param allEntries      All distribution entries (owned rows are excluded).
- * @param stageMappings   Optional stage alias overrides.
+ * @param stageMappings   Optional stage alias overrides. Used only as a fallback:
+ *                        `sampleMaster.stageMappingsSnapshot` — the table the
+ *                        draw itself classified against — wins when present.
  */
 // Deterministic cap: draws `limit` rows with the caller's seeded RNG so the
 // same inputs always produce the same candidate list (audit reproducibility).
@@ -103,15 +105,22 @@ export function getReplacementCandidates(
   // list on every call, so replacement pools are reproducible for audits.
   const rng = createRng(hashSeedString(`${sampleMaster.rngSeed}:${entry.xrayImageId}`));
 
+  // Classify against the table the DRAW recorded, falling back to the caller's
+  // live config only for a master drawn before the snapshot existed. A
+  // same-stage candidate pool built under aliases the month was NOT drawn under
+  // is not a same-stage pool: it silently offers replacements from a different
+  // stratum than the row being replaced.
+  const classifyMappings = sampleMaster.stageMappingsSnapshot ?? stageMappings;
+
   const { sampleIds, ownedIds } = buildExclusionSets(sampleMaster, allEntries);
-  const deadStageKey = getStageKey(entry.row.stage, stageMappings);
+  const deadStageKey = getStageKey(entry.row.stage, classifyMappings);
 
   // Base pool: valid id, not the dead row itself, not already sampled, not owned, same tier.
   const base = populationRows.filter((row) => isEligibleCandidate(row, entry, sampleIds, ownedIds));
 
   // Primary pool: same stage.
   const sameStage = base.filter(
-    (row) => getStageKey(row.stage, stageMappings) === deadStageKey
+    (row) => getStageKey(row.stage, classifyMappings) === deadStageKey
   );
 
   // Recommended: same stage AND same port (strict, no fallback).
@@ -128,7 +137,7 @@ export function getReplacementCandidates(
 
   const rowsByStage = new Map<string, PreparedPopulationRow[]>();
   for (const row of base) {
-    const stageKey = getStageKey(row.stage, stageMappings);
+    const stageKey = getStageKey(row.stage, classifyMappings);
     const rows = rowsByStage.get(stageKey) ?? [];
     rows.push(row);
     rowsByStage.set(stageKey, rows);
@@ -211,6 +220,13 @@ export async function executeReplacement(params: {
    * Stage alias overrides the month was drawn under. Forwarded to appendSampleRow
    * so the replacement row lands in the right stage bucket; omitted, a workspace
    * with custom aliases silently under-counts stageAllocations.
+   *
+   * A fallback since v103: appendSampleRow re-reads the sample master inside its
+   * CAS loop and prefers that master's own `stageMappingsSnapshot`, so this only
+   * decides the outcome for a month drawn before the snapshot existed. Nothing
+   * is loaded here purely to resolve it — the master is not in hand at this
+   * level, and adding a read for it would buy nothing appendSampleRow does not
+   * already do more freshly.
    */
   stageMappings?: Partial<StageAliasMappings>;
 }): Promise<ExecuteReplacementResult> {

@@ -7,6 +7,7 @@ import type { SampleMasterData } from "../sampling/sampleTypes";
 import { getReplacementCandidates, executeReplacement } from "./replacement";
 import { saveSampleMaster } from "../sampling/sampleStorage";
 import { loadDistributionLog } from "./distributionStorage";
+import { resolveStageMappings } from "../population/stageHelpers";
 
 const makeRow = (id: string, stage: string, port: string, certScan: "Certscan" | "NonCertscan" = "Certscan"): PreparedPopulationRow => ({
   xrayImageId: id,
@@ -182,6 +183,73 @@ describe("replacement candidates", () => {
     expect(first.recommended).toHaveLength(100);
     expect(second.all.map(r => r.xrayImageId)).toEqual(first.all.map(r => r.xrayImageId));
     expect(second.recommended.map(r => r.xrayImageId)).toEqual(first.recommended.map(r => r.xrayImageId));
+  });
+});
+
+describe("replacement candidates under a drifted stage-mapping config (v103)", () => {
+  // The same-stage rule is the whole point of the candidate pool: a replacement
+  // must come from the stratum the dead row belongs to. "Its stratum" is
+  // decided by the stage aliases, which live in workspace-global, admin-editable
+  // config — so an edit between the draw and the replacement silently
+  // re-partitioned the population and handed out cross-stratum replacements.
+  // The draw now records the table it used, and this function prefers it.
+  const deadRow = makeRow("img-1", "Level A", "PortA");
+  const entry: DistributionEntry = {
+    xrayImageId: "img-1",
+    assignedTo: "expert1",
+    status: "pending",
+    replacedById: null,
+    row: deadRow,
+    lastEventAt: new Date().toISOString(),
+  };
+  const popRows = [
+    deadRow,
+    makeRow("img-2", "Level A", "PortA"), // same stage under the DRAWN aliases
+    makeRow("img-3", "Level B", "PortA"), // a different stage under them
+  ];
+
+  function master(snapshot?: ReturnType<typeof resolveStageMappings>): SampleMasterData {
+    return {
+      rngSeed: "123",
+      totalRequested: 1,
+      totalActual: 1,
+      certScanRequested: 0,
+      nonCertScanRequested: 0,
+      certScanActual: 0,
+      nonCertScanActual: 0,
+      portAllocations: [],
+      stageAllocations: [],
+      drawnAt: new Date().toISOString(),
+      drawnBy: "admin",
+      rows: [deadRow],
+      ...(snapshot ? { stageMappingsSnapshot: snapshot } : {}),
+    };
+  }
+
+  it("uses the mappings the DRAW recorded, not the edited live config", () => {
+    // Drawn under: "Level A" and "Level B" are DIFFERENT stages, so only img-2
+    // shares the dead row's stratum.
+    const drawn = resolveStageMappings({ first: ["Level A"], second: ["Level B"] });
+    // An admin has since MERGED the two labels into one stage. Under live
+    // classification img-3 would now count as same-stage and be offered as a
+    // replacement for a row it does not actually share a stratum with — the
+    // exact cross-stratum substitution the same-stage rule exists to prevent.
+    const liveNow = resolveStageMappings({ first: ["Level A", "Level B"], second: [] });
+
+    const result = getReplacementCandidates(entry, popRows, master(drawn), [entry], liveNow);
+    expect(result.all.map((r) => r.xrayImageId)).toEqual(["img-2"]);
+    expect(result.recommended.map((r) => r.xrayImageId)).toEqual(["img-2"]);
+
+    // Control: with no snapshot the same live config DOES pull img-3 in. This
+    // is what every month silently did before the draw recorded its mappings.
+    const legacy = getReplacementCandidates(entry, popRows, master(), [entry], liveNow);
+    expect(legacy.all.map((r) => r.xrayImageId).sort()).toEqual(["img-2", "img-3"]);
+  });
+
+  it("falls back to live config for a legacy master with no snapshot", () => {
+    const liveNow = resolveStageMappings({ first: ["Level A"], second: ["Level B"] });
+    const result = getReplacementCandidates(entry, popRows, master(), [entry], liveNow);
+    expect(result.all.map((r) => r.xrayImageId)).toEqual(["img-2"]);
   });
 });
 

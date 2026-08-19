@@ -118,14 +118,21 @@ export default function PhaseFourDistribution({
   const sampleRows = useMemo(() => sampleDrawResult?.rows ?? [], [sampleDrawResult]);
 
   // One classification pass instead of four `.filter()` sweeps.
+  //
+  // Uses the same snapshot-first mappings as the bulk-assignment calls below,
+  // and must keep doing so: these are the per-stage counts shown next to the
+  // employee allocation inputs. Classifying them under live config while the
+  // assignment classifies under the draw's snapshot would show the operator one
+  // split and assign another the moment an admin edits the aliases mid-month.
   const stageSampleCounts = useMemo(() => {
     const buckets: Record<StageKey, typeof sampleRows> = { first: [], second: [], third: [], fourth: [] };
+    const mappings = sampleDrawResult?.stageMappingsSnapshot ?? config.stageMappings;
     for (const row of sampleRows) {
-      const stageKey = getStageKey(row.stage, config.stageMappings);
+      const stageKey = getStageKey(row.stage, mappings);
       if (stageKey !== "unknown") buckets[stageKey].push(row);
     }
     return buckets;
-  }, [sampleRows, config.stageMappings]);
+  }, [sampleRows, sampleDrawResult, config.stageMappings]);
 
   const activeAllocations = useMemo(() => {
     const list: EmployeeStageAllocation[] = [];
@@ -180,7 +187,12 @@ export default function PhaseFourDistribution({
       allocations: activeAllocations,
       employees: getManagedLoginUsers(),
       operatorUsername,
-      stageMappings: config.stageMappings,
+      // Bucket the sample's rows under the aliases the DRAW used, not whatever
+      // live config now holds: a mid-month alias edit would otherwise move rows
+      // into different stage buckets than the ones their per-stage employee
+      // allocations were computed against. Falls back to live config for a
+      // month drawn before the snapshot existed.
+      stageMappings: sampleDrawResult.stageMappingsSnapshot ?? config.stageMappings,
       month: saveMonth,
       year: saveYear,
       existingEntries: distributionCurrent?.entries,
@@ -209,6 +221,8 @@ export default function PhaseFourDistribution({
 
     return { summaryMap, errors, skipped, newAssignments: events.length };
   }, [sampleDrawResult, sampleRows, activeAllocations, employees, operatorUsername, config.stageMappings, saveMonth, saveYear, distributionCurrent]);
+  // `sampleDrawResult` is already a dependency above, so the snapshot it carries
+  // is covered without adding a second entry for the same object.
 
   const entryMap = useMemo(
     () => new Map((distributionCurrent?.entries ?? []).map((e) => [e.xrayImageId, e])),
@@ -325,7 +339,9 @@ export default function PhaseFourDistribution({
       allocations: activeAllocations,
       employees: getManagedLoginUsers(),
       operatorUsername,
-      stageMappings: config.stageMappings,
+      // Same snapshot preference as the preview above — the two must agree, or
+      // the run would assign a different split than the operator was shown.
+      stageMappings: sampleDrawResult?.stageMappingsSnapshot ?? config.stageMappings,
       month: saveMonth,
       year: saveYear,
       existingEntries: distributionCurrent?.entries,

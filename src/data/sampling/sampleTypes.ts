@@ -138,6 +138,30 @@ export type SampleMasterData = {
    */
   unmappedStageRawValues?: string[];
   /**
+   * The stage alias table this draw actually classified its rows against —
+   * `DEFAULT_STAGE_MAPPINGS` merged with the draw config's `stageMappings`,
+   * i.e. the exact object `getStageKey` consumed inside `drawStageSample`.
+   *
+   * **Why it is stored on the draw.** The audit claim this app makes is that a
+   * sample is reproducible from what is recorded alongside it. The seed and the
+   * algorithm version were recorded; the stage mappings were not. They live in
+   * `1-population/config.json`, which is workspace-GLOBAL and admin-editable at
+   * any time — so every consumer that had to re-classify a row after the draw
+   * (`appendSampleRow` folding a replacement into `stageAllocations`,
+   * `getReplacementCandidates` picking a same-stage pool) was reading a table
+   * that may no longer be the one the month was drawn under. Editing the aliases
+   * mid-month silently re-bucketed replacements against the NEW table while the
+   * drawn rows stayed bucketed under the OLD one. Stamping the resolved table
+   * here makes the draw self-describing: those consumers prefer this snapshot
+   * over live config whenever they already hold the sample master.
+   *
+   * Absent on: legacy sample masters written before this field existed (fall
+   * back to live config — deliberate, no history is rewritten), and on every
+   * legacy-path draw (`drawLegacySample` never classifies by stage at all, so
+   * it has no mappings to record).
+   */
+  stageMappingsSnapshot?: StageAliasMappings;
+  /**
    * Ids of rows retired by a replacement — still present in `rows`, but no
    * longer part of the sample under study.
    *
