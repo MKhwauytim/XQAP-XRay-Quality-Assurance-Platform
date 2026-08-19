@@ -36,12 +36,30 @@ import {
   hasAccepted,
   mergeAcknowledgements,
   type AppNotification,
+  type NotificationsArchiveFile,
   type NotificationsFile,
 } from "./notificationTypes";
 
 const NOTIFICATIONS_FILE = "notifications.json";
-/** Generous cap; oldest dropped. Admin broadcast tool, not high-volume. */
-const MAX_NOTIFICATIONS = 500;
+/**
+ * Generous live-file cap. On overflow the oldest entries are archived to a
+ * per-year file BEFORE the live file is trimmed (mirrors `audit/actionLog.ts`'s
+ * A6 pattern) — never dropped without archiving. A `let` + test seam, same
+ * shape as `actionLog`'s `__setMaxActionEntriesForTests`, so archival can be
+ * exercised without writing 500 notifications.
+ */
+const DEFAULT_MAX_NOTIFICATIONS = 500;
+let maxNotifications = DEFAULT_MAX_NOTIFICATIONS;
+
+/** @internal — test-only. Lower the live-file cap to exercise archival cheaply. */
+export function __setMaxNotificationsForTests(limit: number): void {
+  maxNotifications = limit;
+}
+
+/** @internal — test-only. Restore the production cap. */
+export function __resetMaxNotificationsForTests(): void {
+  maxNotifications = DEFAULT_MAX_NOTIFICATIONS;
+}
 
 export type NotificationWriteResult =
   | { ok: true }
@@ -85,6 +103,108 @@ async function readNotificationsFile(
     };
   }
   return { revision: 0, updatedAt: new Date().toISOString(), notifications: [] };
+}
+
+function notificationsArchiveFileName(year: number): string {
+  return `notifications.archive.${year}.json`;
+}
+
+function notificationYear(notification: AppNotification): number {
+  const parsed = new Date(notification.postedAt).getFullYear();
+  return Number.isNaN(parsed) ? new Date().getFullYear() : parsed;
+}
+
+/**
+ * Read a per-year archive file, or an empty shell when genuinely absent.
+ *
+ * **Throws when the archive exists but could not be read** — same reasoning as
+ * `readNotificationsFile`: `archiveOverflow` rewrites this file from what it
+ * returns, so an empty shell here would discard a whole year of archived
+ * notifications and then let the live-file trim proceed anyway. The throw is
+ * caught by `archiveOverflow`, which returns `false` and BLOCKS that trim, so
+ * no notification is ever dropped without being archived first.
+ */
+async function readNotificationsArchiveFile(
+  dir: DirectoryHandleLike,
+  year: number
+): Promise<NotificationsArchiveFile> {
+  const fileName = notificationsArchiveFileName(year);
+  const read = await readOptionalJson<NotificationsArchiveFile>(
+    `notifications:${fileName}`,
+    [{ directory: async () => dir, fileName }]
+  );
+  if (read.kind === "found") {
+    return {
+      year,
+      revision: read.value.revision ?? 0,
+      updatedAt: read.value.updatedAt ?? new Date().toISOString(),
+      notifications: Array.isArray(read.value.notifications) ? read.value.notifications : [],
+    };
+  }
+  return { year, revision: 0, updatedAt: new Date().toISOString(), notifications: [] };
+}
+
+/**
+ * Append overflow notifications (oldest first) to their per-year archive
+ * files. Idempotent by notification id, so a casLoop retry cannot
+ * double-append. Returns true only when every year's archive was written
+ * successfully; a false return must BLOCK the live-file trim so no
+ * notification is ever dropped without being archived first.
+ *
+ * Deliberately no tamper-evident hash chain here (unlike `actionLog`'s B5):
+ * notifications are not the audit log, so a plain retention copy is the right
+ * weight.
+ */
+async function archiveOverflow(
+  dir: DirectoryHandleLike,
+  overflow: AppNotification[]
+): Promise<boolean> {
+  if (overflow.length === 0) return true;
+
+  const byYear = new Map<number, AppNotification[]>();
+  for (const notification of overflow) {
+    const year = notificationYear(notification);
+    const bucket = byYear.get(year);
+    if (bucket) bucket.push(notification);
+    else byYear.set(year, [notification]);
+  }
+
+  try {
+    for (const [year, notifications] of byYear) {
+      const archive = await readNotificationsArchiveFile(dir, year);
+      const seen = new Set(archive.notifications.map((n) => n.id));
+      const additions = notifications.filter((n) => !seen.has(n.id));
+      if (additions.length === 0) continue; // already archived (retry) — idempotent
+      const updated: NotificationsArchiveFile = {
+        year,
+        revision: (archive.revision ?? 0) + 1,
+        updatedAt: new Date().toISOString(),
+        notifications: [...archive.notifications, ...additions],
+      };
+      await safeWriteJson(dir, notificationsArchiveFileName(year), updated);
+    }
+    return true;
+  } catch (error) {
+    logError("notifications:archive", error);
+    return false;
+  }
+}
+
+/**
+ * Read a per-year notifications archive (mirrors `readWorkspaceActionArchive`).
+ * Empty array when none exists or the folder cannot be read.
+ */
+export async function readNotificationsArchive(
+  directoryHandle: DirectoryHandleLike,
+  year: number
+): Promise<AppNotification[]> {
+  try {
+    const dir = await getNotificationsDir(directoryHandle, false);
+    return (await readNotificationsArchiveFile(dir, year)).notifications;
+  } catch (error) {
+    logError("notifications:read-archive", error);
+    return [];
+  }
 }
 
 /**
@@ -150,11 +270,25 @@ async function mutateNotifications(
               const dir = await getNotificationsDir(directoryHandle, true);
               const existing = await readNotificationsFile(directoryHandle);
               const nextRevision = (existing.revision ?? 0) + 1;
+              const merged = updater(existing.notifications);
+              // Archive overflow (oldest first) BEFORE trimming (mirrors
+              // actionLog's A6). If archival fails, keep the full list this
+              // write (over cap but never dropped) — the next write retries
+              // archival before trimming again.
+              let liveNotifications = merged;
+              if (merged.length > maxNotifications) {
+                const overflowCount = merged.length - maxNotifications;
+                const overflow = merged.slice(0, overflowCount);
+                const archived = await archiveOverflow(dir, overflow);
+                if (archived) {
+                  liveNotifications = merged.slice(overflowCount);
+                }
+              }
               const updated: NotificationsFile = {
                 revision: nextRevision,
                 _writeToken: writeToken,
                 updatedAt: new Date().toISOString(),
-                notifications: updater(existing.notifications).slice(-MAX_NOTIFICATIONS),
+                notifications: liveNotifications,
               };
               await safeWriteJson(dir, NOTIFICATIONS_FILE, updated);
               const verify = await readNotificationsFile(directoryHandle);
