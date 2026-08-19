@@ -114,11 +114,57 @@ function totalsBand(t: OutcomeCounts, portCount: number): string {
 
 type PortRow = ErrorTypeBreakdown & { rankable: boolean };
 
+/**
+ * Named-row cap for the per-port table (round-2 fix, Finding 1: a print
+ * export was silently dropping trailing port rows off the fixed-height
+ * slide). Unlike `coverage.ts`'s `PORT_BUCKET_CAP` — which gives its port
+ * card the WHOLE 459px slide-body height, alone — this page's ports card
+ * shares that same fixed budget with the 2x2 matrix and totals band ABOVE
+ * it, so its usable height is much smaller and had to be measured for THIS
+ * layout specifically, not reused from that page's number.
+ *
+ * Verified live in the `deck-preview.html` dev tool (Chrome, 1400x900
+ * viewport, the SEA_PORTS/LAND_PORTS fixture's 14 ports) against the
+ * shipped CSS below, the same "measure, don't estimate" discipline
+ * `slideKit.ts`'s `BASE_ROWS_PER_PAGE`/row-budget comment documents for this
+ * deck's other capacity constants. The check that matters is geometric, not
+ * arithmetic: with `.v2-om-ports{overflow:auto}` and its
+ * `.v2-lg-port-card{height:100%}` child, the card's own box always renders
+ * at the wrapper's fixed height regardless of content (so `scrollHeight`
+ * alone is misleading — it reads back the forced box height, not whether
+ * content actually fit); the real signal is whether the rendered
+ * `<table>`'s bottom edge stays above the `.v2-om-ports` wrapper's own
+ * bottom edge, since that wrapper is what the fixed 630px `.slide`
+ * (`overflow:hidden`) ultimately bounds in print.
+ *   - At `PORT_ROW_CAP = 3` (4 total `<tr>`s once folding kicks in — see
+ *     below for why it's cap+1, not cap): the table's bottom edge sat only
+ *     ~6.7px above the wrapper's bottom edge — real, but a margin so thin it
+ *     is exactly the kind of print/font-rendering-variance risk this fix
+ *     exists to move away from.
+ *   - At `PORT_ROW_CAP = 2` (3 total `<tr>`s once folding kicks in): the
+ *     table's bottom edge sat ~35px above the wrapper's bottom edge — a real
+ *     margin worth more than one full row, comfortably absorbing rendering
+ *     variance across browsers and the print/PDF engine.
+ * The folded remainder row (`foldedPortRow` below) is itself an ordinary
+ * `<tr>` and costs one row's worth of that same budget whenever ANY folding
+ * happens, so the number that must fit safely is `PORT_ROW_CAP + 1`, not
+ * `PORT_ROW_CAP` alone — missing this is exactly how a first pass at this
+ * cap (3) landed on that thin ~6.7px margin instead of a real one.
+ * Ports beyond this rank fold into one honest remainder row (`foldedPortRow`
+ * below) that SUMS the folded ports' own counts into the same columns —
+ * nothing silently vanishes, mirroring `coverage.ts`'s `foldedRow` /
+ * `accountability.ts`'s `foldedEmployeeRow`. This page names no "busiest
+ * port" or other superlative claim, so there is no risk of a folded port
+ * being misquoted as a named one elsewhere on the page.
+ */
+export const PORT_ROW_CAP = 2;
+
 /** `byPort` sorted by اشتباه فائت descending, then port key ascending — a
  *  stable, deterministic order independent of the source Map's insertion
  *  order (the same "state a total order" discipline every other per-port
  *  table in this deck follows, e.g. `workloadAccuracy.ts`'s
- *  `collectWorkloadRows`). */
+ *  `collectWorkloadRows`). This is also the ranking `PORT_ROW_CAP` folds
+ *  against — the highest-اشتباه-فائت ports are always the ones named. */
 function collectPortRows(byPort: ErrorTypeBreakdown[]): PortRow[] {
   return byPort
     .map((p) => ({ ...p, rankable: isRankable(band(p.evaluable)) }))
@@ -138,6 +184,27 @@ function portRow(p: PortRow, i: number): string {
   );
 }
 
+/** One folded remainder row for ports beyond `PORT_ROW_CAP` — sums the folded
+ *  ports' own counts into the SAME columns a named row would show (never a
+ *  hidden or dropped total), same discipline as `coverage.ts`'s `foldedRow`
+ *  and `accountability.ts`'s `foldedEmployeeRow`. Its own rate is gated on
+ *  the pooled evaluable count's own band, independent of any individual
+ *  folded port's rankability. */
+function foldedPortRow(folded: PortRow[], rowIdx: number): string {
+  const evaluable = folded.reduce((s, p) => s + p.evaluable, 0);
+  const missed = folded.reduce((s, p) => s + p.missedSuspicion, 0);
+  const correct = folded.reduce((s, p) => s + p.correctClean + p.correctSuspicion, 0);
+  const rankable = isRankable(band(evaluable));
+  const missedRate = rankable ? pctCell(rateOf(missed, evaluable)) : pctCell(null);
+  const accuracyRate = rankable ? pctCell(rateOf(correct, evaluable)) : pctCell(null);
+  return (
+    `<tr class="v2-om-fold-row"><td>${ledgerIdx(rowIdx)}الباقي (${fmtNum(folded.length)} منفذ)</td>` +
+    `<td>${fmtNum(evaluable)}</td><td>${fmtNum(missed)}</td><td>${missedRate}</td><td>${accuracyRate}</td></tr>`
+  );
+}
+
+/** Grand total across EVERY port, named and folded alike — the totals row
+ *  must always reflect the whole month, independent of `PORT_ROW_CAP`. */
 function portsTotalsRow(rows: PortRow[]): string {
   const evaluable = rows.reduce((s, p) => s + p.evaluable, 0);
   const missed = rows.reduce((s, p) => s + p.missedSuspicion, 0);
@@ -155,10 +222,16 @@ function portsTotalsRow(rows: PortRow[]): string {
  *  the shared `ledgerPortCard` shell (P2, slideKit.ts) — the same card/table
  *  chrome `coverage.ts`'s `bucketCard` and `workloadAccuracy.ts`'s per-port
  *  cards already use — rather than a bespoke table, so this page's ports table
- *  looks and behaves identically to every other per-port table in the deck. */
+ *  looks and behaves identically to every other per-port table in the deck.
+ *  Rows beyond `PORT_ROW_CAP` fold into one honest remainder row instead of
+ *  being silently clipped by the slide's fixed height (round-2 fix). */
 function portsTable(byPort: ErrorTypeBreakdown[]): string {
   const rows = collectPortRows(byPort);
-  const bodyRowsHtml = rows.map((p, i) => portRow(p, i)).join("");
+  const shown = rows.slice(0, PORT_ROW_CAP);
+  const folded = rows.slice(PORT_ROW_CAP);
+  const bodyRowsHtml =
+    shown.map((p, i) => portRow(p, i)).join("") +
+    (folded.length > 0 ? foldedPortRow(folded, shown.length) : "");
   return `<div class="v2-om-ports">
     ${ledgerPortCard({
       title: "حسب المنفذ",
@@ -168,7 +241,7 @@ function portsTable(byPort: ErrorTypeBreakdown[]): string {
       totalsRowHtml: portsTotalsRow(rows),
       span: PORTS_SPAN,
       rowCount: 0,
-      compact: false,
+      compact: true,
       extraClass: "om-ports-card",
       emptyText: "لا توجد بيانات منافذ لهذا الشهر.",
     })}
@@ -229,18 +302,18 @@ export const OUTCOME_MATRIX_CSS = `
 .v2-om-ports .v2-lg-port-card{height:100%;min-height:0;}
 
 .v2-om-matrix{
-  display:grid;grid-template-columns:104px 1fr 1fr;grid-auto-rows:auto;
-  gap:8px;align-items:stretch;
+  display:grid;grid-template-columns:92px 1fr 1fr;grid-auto-rows:auto;
+  gap:6px;align-items:stretch;
 }
 .v2-om-corner{}
 .v2-om-colhead,.v2-om-rowhead{
   display:flex;align-items:center;justify-content:center;text-align:center;
-  font-size:.68rem;font-weight:800;color:var(--slate);padding:4px;
+  font-size:.62rem;font-weight:800;color:var(--slate);padding:3px;
 }
-.v2-om-rowhead{justify-content:flex-end;text-align:right;padding-inline-end:8px;}
+.v2-om-rowhead{justify-content:flex-end;text-align:right;padding-inline-end:6px;}
 .v2-om-cell{
-  border-radius:14px;padding:12px 10px;text-align:center;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  border-radius:12px;padding:6px 10px;text-align:center;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
   border:1px solid color-mix(in srgb,var(--white) 14%,transparent);
   background:color-mix(in srgb,var(--white) 3%,transparent);
 }
@@ -252,9 +325,22 @@ export const OUTCOME_MATRIX_CSS = `
    fill mark it out from the other three without relying on color alone (the
    label + always-visible count already carry the meaning). */
 .v2-om-cell.emphasis{border-width:2px;background:color-mix(in srgb,var(--coral) 22%,transparent);}
-.v2-om-cell-label{font-size:.68rem;font-weight:700;color:var(--slate);}
-.v2-om-count{font-size:1.55rem;font-weight:900;color:#fff;line-height:1.1;}
-.v2-om-share{font-size:.7rem;font-weight:700;color:var(--muted);}
+.v2-om-cell-label{font-size:.6rem;font-weight:700;color:var(--slate);}
+.v2-om-count{font-size:1.15rem;font-weight:900;color:#fff;line-height:1.05;}
+.v2-om-share{font-size:.64rem;font-weight:700;color:var(--muted);}
+
+/* Compact totals band (Task-5 round-2 fix): this page's own denominator strip
+   sits BELOW the matrix, competing for the same fixed slide-body height as
+   the ports table below IT — unlike every other section-3 page that uses the
+   generic .v2-totals-band (18px margin-top, 1.15rem figures), which assumes
+   the band is the ONLY thing sharing the body. Same tightening technique
+   .v2-risk-layout .v2-totals-band / .v2-sys-brief .v2-totals-band already
+   apply elsewhere in this theme (theme.ts) — a precedented compact variant,
+   not a new one — reclaims the room the ports table needs. */
+.v2-om-top .v2-totals-band{margin-top:8px;gap:8px;}
+.v2-om-top .v2-totals-item{padding:6px 12px;}
+.v2-om-top .v2-totals-item b{font-size:.88rem;}
+.v2-om-top .v2-totals-item small{font-size:.58rem;}
 
 body.theme-light .v2-om-colhead,body.theme-light .v2-om-rowhead{color:#607386;}
 body.theme-light .v2-om-cell{background:#fff;border-color:#dde4ea;}
@@ -268,6 +354,12 @@ body.theme-light .v2-om-cell-label{color:#607386;}
 body.theme-light .v2-om-share{color:#607386;}
 
 .v2-om-port-missed{font-weight:800;}
+/* Folded remainder row (round-2 fix) — same muted/italic treatment
+   .v2-cov-fold-row / .v2-acc-fold-row already use for this exact pattern
+   elsewhere in the deck (theme.ts), so a folded row reads as visibly
+   different from a named port row without a legend. */
+.v2-om-fold-row td{color:var(--slate);font-style:italic;}
+body.theme-light .v2-om-fold-row td{color:#607386;}
 
 @media print{
   .v2-om-ports{overflow:visible;}

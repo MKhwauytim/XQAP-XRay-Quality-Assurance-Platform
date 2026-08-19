@@ -3233,18 +3233,18 @@ body.theme-light .v2-dt-empty{border-color:rgba(10,45,74,.2);background:rgba(10,
 .v2-om-ports .v2-lg-port-card{height:100%;min-height:0;}
 
 .v2-om-matrix{
-  display:grid;grid-template-columns:104px 1fr 1fr;grid-auto-rows:auto;
-  gap:8px;align-items:stretch;
+  display:grid;grid-template-columns:92px 1fr 1fr;grid-auto-rows:auto;
+  gap:6px;align-items:stretch;
 }
 .v2-om-corner{}
 .v2-om-colhead,.v2-om-rowhead{
   display:flex;align-items:center;justify-content:center;text-align:center;
-  font-size:.68rem;font-weight:800;color:var(--slate);padding:4px;
+  font-size:.62rem;font-weight:800;color:var(--slate);padding:3px;
 }
-.v2-om-rowhead{justify-content:flex-end;text-align:right;padding-inline-end:8px;}
+.v2-om-rowhead{justify-content:flex-end;text-align:right;padding-inline-end:6px;}
 .v2-om-cell{
-  border-radius:14px;padding:12px 10px;text-align:center;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  border-radius:12px;padding:6px 10px;text-align:center;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
   border:1px solid color-mix(in srgb,var(--white) 14%,transparent);
   background:color-mix(in srgb,var(--white) 3%,transparent);
 }
@@ -3256,9 +3256,22 @@ body.theme-light .v2-dt-empty{border-color:rgba(10,45,74,.2);background:rgba(10,
    fill mark it out from the other three without relying on color alone (the
    label + always-visible count already carry the meaning). */
 .v2-om-cell.emphasis{border-width:2px;background:color-mix(in srgb,var(--coral) 22%,transparent);}
-.v2-om-cell-label{font-size:.68rem;font-weight:700;color:var(--slate);}
-.v2-om-count{font-size:1.55rem;font-weight:900;color:#fff;line-height:1.1;}
-.v2-om-share{font-size:.7rem;font-weight:700;color:var(--muted);}
+.v2-om-cell-label{font-size:.6rem;font-weight:700;color:var(--slate);}
+.v2-om-count{font-size:1.15rem;font-weight:900;color:#fff;line-height:1.05;}
+.v2-om-share{font-size:.64rem;font-weight:700;color:var(--muted);}
+
+/* Compact totals band (Task-5 round-2 fix): this page's own denominator strip
+   sits BELOW the matrix, competing for the same fixed slide-body height as
+   the ports table below IT — unlike every other section-3 page that uses the
+   generic .v2-totals-band (18px margin-top, 1.15rem figures), which assumes
+   the band is the ONLY thing sharing the body. Same tightening technique
+   .v2-risk-layout .v2-totals-band / .v2-sys-brief .v2-totals-band already
+   apply elsewhere in this theme (theme.ts) — a precedented compact variant,
+   not a new one — reclaims the room the ports table needs. */
+.v2-om-top .v2-totals-band{margin-top:8px;gap:8px;}
+.v2-om-top .v2-totals-item{padding:6px 12px;}
+.v2-om-top .v2-totals-item b{font-size:.88rem;}
+.v2-om-top .v2-totals-item small{font-size:.58rem;}
 
 body.theme-light .v2-om-colhead,body.theme-light .v2-om-rowhead{color:#607386;}
 body.theme-light .v2-om-cell{background:#fff;border-color:#dde4ea;}
@@ -3272,6 +3285,12 @@ body.theme-light .v2-om-cell-label{color:#607386;}
 body.theme-light .v2-om-share{color:#607386;}
 
 .v2-om-port-missed{font-weight:800;}
+/* Folded remainder row (round-2 fix) — same muted/italic treatment
+   .v2-cov-fold-row / .v2-acc-fold-row already use for this exact pattern
+   elsewhere in the deck (theme.ts), so a folded row reads as visibly
+   different from a named port row without a legend. */
+.v2-om-fold-row td{color:var(--slate);font-style:italic;}
+body.theme-light .v2-om-fold-row td{color:#607386;}
 
 @media print{
   .v2-om-ports{overflow:visible;}
@@ -4731,7 +4750,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
   </div>
     </div>
     <div class="v2-om-ports">
-    <div class="v2-lg-port-card om-ports-card">
+    <div class="v2-lg-port-card compact om-ports-card">
     <div class="v2-lg-table-card-title">حسب المنفذ</div>
     <table class="deck-table">
       <thead><tr><th>المنفذ</th><th>العيّنة</th><th>اشتباه فائت</th><th>نسبة الاشتباه الفائت</th><th>الدقة الإجمالية</th></tr></thead>

@@ -244,17 +244,25 @@ describe("outcomeMatrixSlide", () => {
   });
 
   it("sorts the per-port table by اشتباه فائت descending, then port key ascending, and gives each port an honest own-denominator rate", () => {
+    // Exactly PORT_ROW_CAP (2) ports, so both are named individually and this
+    // test isolates ordering/rate behavior from the folding mechanism — the
+    // >cap folding case (which port ends up in which bucket, and that no
+    // count is lost) has its own dedicated test below.
     const model = buildOutcomeModel([
       { port: "منفذ ألف", missedSuspicion: 1, correctClean: 1 }, // 2 missed decisions
       { port: "منفذ باء", missedSuspicion: 3, correctClean: 1 }, // 6 missed decisions — should rank first
-      { port: "منفذ جيم", correctClean: 1 }, // 0 missed decisions — should rank last
     ]);
     const html = outcomeMatrixSlide(model, 6, 20, false);
     const portsSection = html.slice(html.indexOf('class="v2-om-ports"'));
-    const order = ["منفذ باء", "منفذ ألف", "منفذ جيم"].map((name) => portsSection.indexOf(name));
+    const order = ["منفذ باء", "منفذ ألف"].map((name) => portsSection.indexOf(name));
     expect(order[0]).toBeGreaterThan(-1);
     expect(order[0]).toBeLessThan(order[1]);
-    expect(order[1]).toBeLessThan(order[2]);
+    // Both ports clear the sufficiency cut (6 evaluable each is still below
+    // `insufficient`'s floor... actually each port here has evaluable = 2*(missed+clean),
+    // ألف: 2*(1+1)=4, باء: 2*(3+1)=8 — both under the default `insufficient`
+    // floor, so both render muted rates, honestly, rather than a fabricated
+    // percentage on a thin base.
+    expect(portsSection).not.toContain("0.0%");
   });
 
   it("mutes a port's rate to — (not 0%) when its own evaluable count is below the sufficiency cut", () => {
@@ -268,5 +276,61 @@ describe("outcomeMatrixSlide", () => {
     const portsSection = html.slice(html.indexOf('class="v2-om-ports"'));
     expect(portsSection).not.toContain("0.0%");
     expect(portsSection).toContain('<span class="insuff">—</span>');
+  });
+
+  it("folds ports beyond PORT_ROW_CAP into one honest remainder row that sums the folded ports' own counts, dropping nothing", () => {
+    // 5 ports, strictly decreasing اشتباه فائت counts so the sort order (missedSuspicion
+    // desc) is unambiguous. PORT_ROW_CAP is 2, so only the top 2 (A, B) are
+    // named individually; C, D, E must fold into one remainder row.
+    const model = buildOutcomeModel([
+      { port: "منفذ A", missedSuspicion: 5, correctClean: 1 },
+      { port: "منفذ B", missedSuspicion: 4, correctClean: 1 },
+      { port: "منفذ C", missedSuspicion: 3, correctClean: 1 },
+      { port: "منفذ D", missedSuspicion: 2, correctClean: 1 },
+      { port: "منفذ E", missedSuspicion: 1, correctClean: 1 },
+    ]);
+    const html = outcomeMatrixSlide(model, 6, 20, false);
+    const portsSection = html.slice(html.indexOf('class="v2-om-ports"'));
+
+    // (a) the folded row appears, naming exactly the 3 folded ports (5 - cap 2).
+    const foldMatch = /<tr class="v2-om-fold-row"><td><span class="v2-lg-idx">(\d+)<\/span>الباقي \((\d+) منفذ\)<\/td><td>([\d,]+)<\/td><td>([\d,]+)<\/td><td>([^<]*)<\/td><td>([^<]*)<\/td><\/tr>/.exec(
+      portsSection,
+    );
+    expect(foldMatch, "no folded remainder row found").toBeTruthy();
+    const [, , foldedPortCount, foldedEvaluable, foldedMissed] = foldMatch as RegExpExecArray;
+    expect(foldedPortCount).toBe("3");
+
+    // Only A and B are named individually — C, D, E must not appear as their
+    // own named rows (only inside the "الباقي" label's port-count parenthetical).
+    expect(portsSection).toContain("منفذ A");
+    expect(portsSection).toContain("منفذ B");
+    expect(portsSection.match(/منفذ C/g)).toBeNull();
+    expect(portsSection.match(/منفذ D/g)).toBeNull();
+    expect(portsSection.match(/منفذ E/g)).toBeNull();
+
+    // (b) the folded row's counts equal the SUM of the folded ports' (C, D, E)
+    // own counts — read straight off model.errorAnalysis.byPort so this checks
+    // the real fold arithmetic, not a hand re-derived expectation.
+    const byPort = model.errorAnalysis.byPort;
+    const folded = ["منفذ C", "منفذ D", "منفذ E"].map(
+      (key) => byPort.find((p) => p.key === key)!,
+    );
+    expect(folded.every(Boolean)).toBe(true);
+    const expectedFoldedEvaluable = folded.reduce((s, p) => s + p.evaluable, 0);
+    const expectedFoldedMissed = folded.reduce((s, p) => s + p.missedSuspicion, 0);
+    expect(Number(foldedEvaluable)).toBe(expectedFoldedEvaluable);
+    expect(Number(foldedMissed)).toBe(expectedFoldedMissed);
+
+    // (c) no port's data is lost between the visible rows and the folded row:
+    // shown (A + B) + folded (C + D + E) must reconstruct the SAME grand
+    // total the totals row (and model.errorAnalysis.totals) report.
+    const shown = ["منفذ A", "منفذ B"].map((key) => byPort.find((p) => p.key === key)!);
+    const reconstructedEvaluable =
+      shown.reduce((s, p) => s + p.evaluable, 0) + expectedFoldedEvaluable;
+    const reconstructedMissed = shown.reduce((s, p) => s + p.missedSuspicion, 0) + expectedFoldedMissed;
+    expect(reconstructedEvaluable).toBe(model.errorAnalysis.totals.evaluable);
+    expect(reconstructedMissed).toBe(model.errorAnalysis.totals.missedSuspicion);
+    // Cross-check against the rendered totals row itself, not just the model.
+    expect(portsSection).toContain(`<td>الإجمالي</td><td>${model.errorAnalysis.totals.evaluable}</td><td>${model.errorAnalysis.totals.missedSuspicion}</td>`);
   });
 });
