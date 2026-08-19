@@ -2,8 +2,8 @@
 
 **Date:** 2026-08-19
 **Status:** design, awaiting owner review
-**Scope:** `src/data/reporting/executive/deck2/section3/` plus the model and population-processing
-changes those pages need. Sections 1, 2 and 4 are untouched; cover / TOC / glossary are untouched
+**Scope:** `src/data/reporting/executive/deck2/section3/` plus the report-model changes those
+pages need. The population pipeline is **not** touched (see §4.1). Sections 1, 2 and 4 are untouched; cover / TOC / glossary are untouched
 (owner: "everything before مجتمع الفحص is acceptable").
 
 ---
@@ -15,8 +15,9 @@ advanced analytics — more studies**, and a complaint that some existing pages 
 
 Reading the code answered the third one and reframed the second. Most of the "more analytics"
 material is already computed by `ReportModel` and rendered on **zero** pages — so the work is
-mostly rendering, not new statistics. The trend chart is the one item that needs a genuinely new
-data path, because no inspection date currently reaches the report model at all.
+mostly rendering, not new statistics. The trend chart needs the one genuinely new data path — no
+inspection date currently reaches the report model — though that path turned out to be three
+bridged fields rather than a parser (§4.1).
 
 ### What is already computed and never rendered in deck2
 
@@ -51,7 +52,7 @@ because several look arbitrary until you know what was rejected.
 | D4 | New studies: **مصفوفة نتائج الفحص** and **توافق نتائج الفحص مع محرك المخاطر** | CertScan and risk-level accuracy cuts were offered and deferred |
 | D5 | The risk-engine page is framed as a **disagreement set**, not a targeting cross-tab | A plain "did targeting predict suspicion" table is largely circular — see §3 |
 | D6 | All new pages go in **القسم 3** | Promoting the outcome matrix into القسم 2 was recommended and declined |
-| D7 | Date parser is its **own shared module**, called from **Phase 2 processing**, with the report falling back to it for months already on disk | Parsing only at processing time strands every already-processed month; parsing only at report time makes the value unavailable to other consumers |
+| D7 | ~~Date parser is its own shared module called from Phase 2~~ — **superseded 2026-08-19 during planning: Phase 2 already normalizes `xrayEntryDate` to ISO via the exported `normalizeDate()`. No new parser, no new wiring.** See §4.1. | The decision as originally taken assumed the field arrived raw; it does not |
 | D8 | The risk engine gets its **own page**, not a 7th source in page 17's matrix | Adding it to `ALL_SOURCES` was nearly free but pushes that matrix from 15 to 21 cells on a 630px slide |
 | D9 | Page 15 gets a **full rework with a real correlation view**, then ships **disabled by default** | De-duplicating it was recommended as the cheaper path for a page slated for removal |
 | D10 | Pages 16, 17, 18 unchanged; page 18 explicitly kept | Merging 15/16/18 into one wide port table was offered and declined |
@@ -84,59 +85,52 @@ reader mistakes the structural part for a discovery.
 
 ## 4. Architecture
 
-### 4.1 Date normalization — `parseEntryDate`
+### 4.1 Date normalization — already done, do not rebuild
 
-New module `src/data/population/entryDateParsing.ts`:
+**Superseded finding (2026-08-19, during plan writing).** The original design called for a new
+`parseEntryDate` module plus a Phase 2 call. Both already exist.
+
+`populationProcessor.ts` exports `normalizeDate(value: string | number | Date | null): string | null`
+and **already applies it to `xrayEntryDate`** while building every row
+(`populationProcessor.ts:484`), and to BI-filled values on the enrichment path (`:692`). It
+handles Excel serial numbers (including the phantom-1900 leap-day correction fixed 2026-08-18),
+ISO with or without a time component, `DD/MM/YYYY`, `DD-MM-YYYY`, `DD.MM.YYYY`, `DDMmmYYYY`,
+`DD/MMM/YYYY` with English or Arabic month names, and `Date` objects.
+
+`PreparedPopulationRow.xrayEntryDate` is therefore **already `YYYY-MM-DD`** for any month
+processed by a current build. No new module, no new field, no Phase 2 change, no migration.
+
+**Date order is already decided in code**, closing this spec's original open question: day-first
+is assumed for Arabic data (`populationProcessor.ts:299`), with a month-first reading used only
+where day-first is syntactically impossible (the day slot is 13–31) and the month-first reading is
+the only valid one. Genuinely ambiguous values such as `03/04/2026` stay day-first.
+
+**Hijri is deliberately excluded** and the processor says so at `:676` — `normalizeDate` assumes
+Gregorian rules and would corrupt a Hijri value. The risk schema carries Hijri in dedicated
+`*HijriDate` columns, so `xrayEntryDate` is Gregorian by construction.
+
+### 4.2 What the report actually needs — `entryDayOf`
+
+One small pure helper in the report layer:
 
 ```ts
-export type ParsedEntryDate = { iso: string; dayOfMonth: number };
-export function parseEntryDate(raw: string | null | undefined): ParsedEntryDate | null;
+export function entryDayOf(iso: string | null | undefined): number | null;
 ```
 
-**Accepts:** Excel serial numbers, ISO `yyyy-mm-dd`, `dd/mm/yyyy`, `dd-mm-yyyy`, and any of the
-above written with Arabic-Indic digits (`٠١٢٣٤٥٦٧٨٩`), which the risk normalizer already has to
-cope with elsewhere.
+Returns 1–31 for a value matching `^\d{4}-\d{2}-\d{2}`, with the day in range; `null` for
+anything else.
 
-**Does not accept Hijri.** The risk schema carries Hijri in dedicated `*HijriDate` columns
-(`declarationHijriDate`, `movementHijriDate`), so `xrayEntryDate` is Gregorian by construction.
-Attempting a Hijri conversion here would silently mangle Gregorian dates that happen to parse.
+`null` is a first-class outcome, not an error. `normalizeDate` **falls back to returning its input
+unchanged** when it cannot parse (`?? raw`, `?? rawFill`, `String(value)`), so `xrayEntryDate` is
+*usually* but **not guaranteed** ISO. Every non-ISO value routes to the `غير مؤرخ` bucket (§6.1)
+rather than being guessed at or dropped.
 
-**Returns `null`, never a guess.** No inference of `dd/mm` vs `mm/dd` from the value: a date that
-is ambiguous under the configured order is returned as parsed under that order, and a date that
-cannot be read at all is `null`. `null` is a first-class outcome that flows to the `غير مؤرخ`
-bucket (§4.4).
+### 4.3 Known caveat: pre-2026-08-18 months
 
-Pure — no `Date.now()`, no locale dependence, no I/O. Same input, same output, on every machine.
-
-### 4.2 Phase 2 wiring
-
-`populationProcessor.ts` calls `parseEntryDate` while building each row and stamps:
-
-```ts
-xrayEntryDateIso?: string | null;   // new OPTIONAL field on PreparedPopulationRow
-```
-
-Optional, matching how `transitDeclarationNumber?`, `manifestNumber?` and friends were added — so
-no existing fixture, test, or hand-built row literal anywhere in the repo needs to change.
-
-`xrayEntryDate` (the raw string) is **kept unchanged** alongside it. The exports in
-`populationExporter.ts` continue to emit the raw value; nothing that currently reads
-`xrayEntryDate` changes behaviour.
-
-### 4.3 Report-time fallback — why both
-
-Months already processed on disk carry no `xrayEntryDateIso`. Reprocessing a real month is the
-hours-long path with a documented OOM history, so requiring it would strand every historical
-month's trend page.
-
-`buildExecutiveReportRows` therefore resolves the day as:
-
-```
-row.xrayEntryDateIso  →  if absent, parseEntryDate(row.xrayEntryDate)  →  if null, undated
-```
-
-Same module, same rules, both paths. New months arrive pre-parsed; old months parse on read at no
-storage cost. This is the whole content of decision D7.
+Months processed before 2026-08-18 carry Excel-serial dates **one day early** — a double
+leap-year correction fixed that day. Nothing in this work reprocesses them, so an old month's
+trend chart can be shifted by one day. Out of scope to fix here; recorded so the shift is
+recognized rather than investigated as a new bug.
 
 ### 4.4 Model changes
 
@@ -299,9 +293,7 @@ recompute automatically, as they already do for an empty section.
 
 | Area | Tests |
 |---|---|
-| `parseEntryDate` | table-driven over the full format zoo, including Arabic-Indic digits, Excel serials, and every malformed shape that must return `null` rather than a guess. This is where the bugs will be. |
-| Phase 2 stamping | `xrayEntryDateIso` populated on parse; `null` on failure; raw `xrayEntryDate` unchanged |
-| Report fallback | a row with `xrayEntryDateIso` uses it; a row with only the raw string parses; a row with neither lands in `غير مؤرخ` |
+| `entryDayOf` | valid ISO → day; ISO with a time component → day; non-ISO passthrough value → `null`; empty/null → `null`; out-of-range day → `null` |
 | `byEntryDay` | day bucketing, ascending order, gap days absent, undated bucket totals reconcile with the month total |
 | Control limits | shared helper returns identical values to the reviewer p-chart for identical input |
 | `timeSeriesBand` | snapshot; `null` gap rendering; fixed 1..31 axis with sparse data |
@@ -340,13 +332,11 @@ regression from this work.
 Every piece is independently revertible:
 
 - Page flags off → pages vanish, numbering recomputes, nothing else changes
-- `xrayEntryDateIso` is additive and optional → removing the Phase 2 call leaves rows valid, and
-  the report falls back to parsing the raw string
+- No population-pipeline change at all → nothing to roll back there
 - `timeSeriesBand` is a new export → unused if no page calls it
 - No existing page's output changes except `workloadAccuracy`, which ships disabled
 
-No data migration. No file-format change. `population.final.json` gains one optional field that
-older readers ignore.
+No data migration. No file-format change. `population.final.json` is untouched.
 
 ---
 
@@ -374,5 +364,6 @@ Named so they are not silently reintroduced:
    after the first real month.
 2. **What is real `xrayEntryDate` coverage?** If the dated share is low, the trend page is honest
    but thin, and D1 may deserve revisiting against `submittedAt`.
-3. **Which date order does the data use** — `dd/mm` or `mm/dd`? The parser must be configured, not
-   guess. Determine from a real file before implementation.
+3. ~~Which date order does the data use?~~ **Answered during planning:** already decided in
+   `populationProcessor.ts:299` — day-first for Arabic data, with a month-first fallback only
+   where day-first is syntactically impossible. No action needed.
