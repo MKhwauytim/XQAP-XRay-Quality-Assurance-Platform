@@ -2,12 +2,21 @@
  * Notification-center storage — workspace-wide broadcast notifications that
  * admin/manager users post and employee/supervisor users must acknowledge.
  *
- * Persisted as a single non-month-scoped file at
+ * **Two files, two owners.**
+ *
+ * BROADCASTS live in a single non-month-scoped file at
  * `5-system/notifications/notifications.json`, mirroring the audit action-log
- * precedent (`5-system/audit/actions.log.json`). Every mutation runs in the
- * cross-machine CAS loop (`casLoop`) under a same-tab resource lock, so two
- * writers on a shared workspace folder — e.g. two people accepting the same
- * notification near-simultaneously — never lose each other's write.
+ * precedent (`5-system/audit/actions.log.json`). Only admin/manager write it,
+ * rarely, so the cross-machine CAS loop (`casLoop`) under a same-tab resource
+ * lock is the right guard for it and is unchanged.
+ *
+ * ACKNOWLEDGEMENTS are written by every employee, potentially at once. They now
+ * live in per-employee files under `acks/` (`notificationAckStorage.ts`) — an
+ * employee writes only his own file, so acknowledging never contends with
+ * another employee's acknowledgement and never rewrites the broadcast log.
+ * Acceptances already stored inside the shared file (workspaces predating the
+ * split) are READ FOREVER and never rewritten or migrated; `loadNotifications`
+ * merges the two sources, so every reader sees one list either way.
  */
 
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
@@ -16,8 +25,18 @@ import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
 import { withWorkspaceWriteAccess } from "../storage/workspaceWriteAccess";
 import { logError } from "../storage/errorLogger";
-import { getSystemRoot, SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
-import type { AppNotification, NotificationsFile } from "./notificationTypes";
+import { getNotificationsDir } from "../workspace/workspacePaths";
+import {
+  loadAllUserAcks,
+  loadUserAcksForDisplay,
+  recordAcknowledgement,
+} from "./notificationAckStorage";
+import {
+  hasAccepted,
+  mergeAcknowledgements,
+  type AppNotification,
+  type NotificationsFile,
+} from "./notificationTypes";
 
 const NOTIFICATIONS_FILE = "notifications.json";
 /** Generous cap; oldest dropped. Admin broadcast tool, not high-volume. */
@@ -34,23 +53,15 @@ function createNotificationId(): string {
   return `ntf-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-async function getNotificationsDir(
-  directoryHandle: DirectoryHandleLike,
-  create: boolean
-): Promise<DirectoryHandleLike> {
-  const systemDir = await getSystemRoot(directoryHandle, create);
-  return systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.notifications, { create });
-}
-
 /**
  * The notifications file, or an empty shell for a workspace that has none yet.
  *
  * **Throws when the file exists but could not be read.** It is the base read of
  * the CAS read-modify-write below, so an empty shell substituted for an
- * unreadable file replaces every notification AND every recipient's
- * acknowledgement with whatever this one write carries. A missing notifications
- * folder is normal for a fresh workspace and still yields the shell; nothing
- * else does.
+ * unreadable file replaces every notification — and every legacy acknowledgement
+ * still stored alongside them — with whatever this one write carries. A missing
+ * notifications folder is normal for a fresh workspace and still yields the
+ * shell; nothing else does.
  */
 async function readNotificationsFile(
   directoryHandle: DirectoryHandleLike
@@ -75,12 +86,35 @@ async function readNotificationsFile(
   return { revision: 0, updatedAt: new Date().toISOString(), notifications: [] };
 }
 
-/** Read all notifications (as stored). Empty array on any failure. */
+/**
+ * Every broadcast notification, with its acknowledgements merged from BOTH
+ * sources: the acceptances stored inside the shared file by pre-split clients
+ * (read-only, never rewritten) and every per-employee `acks/{username}.acks.json`.
+ * Deduped by `(username, notificationId)`, so a user recorded in both appears
+ * once — a workspace holding only legacy acceptances renders exactly as it did
+ * before the split.
+ *
+ * Empty array when the broadcast file itself cannot be read. An unreadable ACK
+ * file is degraded to "that user has not acknowledged yet" rather than blanking
+ * the list (see `loadAllUserAcks`).
+ *
+ * `options.forUsername` narrows the ack fan-out to that one employee's file —
+ * correct, and one read instead of one per employee, for the two callers that
+ * only ever ask about the signed-in user (the banner and the unread badge).
+ * Omit it for anything that renders OTHER people's acknowledgement state, such
+ * as the manager "who acknowledged" roster.
+ */
 export async function loadNotifications(
-  directoryHandle: DirectoryHandleLike
+  directoryHandle: DirectoryHandleLike,
+  options?: { forUsername?: string }
 ): Promise<AppNotification[]> {
   try {
-    return (await readNotificationsFile(directoryHandle)).notifications;
+    const { notifications } = await readNotificationsFile(directoryHandle);
+    if (notifications.length === 0) return notifications;
+    const ackFiles = options?.forUsername
+      ? await loadUserAcksForDisplay(directoryHandle, options.forUsername)
+      : await loadAllUserAcks(directoryHandle);
+    return mergeAcknowledgements(notifications, ackFiles);
   } catch (error) {
     logError("notifications:read", error);
     return [];
@@ -186,27 +220,49 @@ export async function postNotification(
 }
 
 /**
- * Record one user's acceptance of a notification. Idempotent per user: if the
- * user has already accepted (or the notification is gone), it is a no-op that
- * still reports success. Records acceptance for THIS user only — never removes
- * or hides the notification for anyone else.
+ * Record one user's acceptance of a notification, in THAT USER'S OWN ack file.
+ *
+ * Idempotent per user: if the user has already accepted (or the notification is
+ * gone from the broadcast log), it is a no-op that still reports success.
+ * Records acceptance for this user only — never removes or hides the
+ * notification for anyone else, and **never writes the shared broadcast file**,
+ * so two employees acknowledging at the same moment cannot contend at all.
  */
 export async function acceptNotification(
   directoryHandle: DirectoryHandleLike,
   notificationId: string,
   username: string
 ): Promise<NotificationWriteResult> {
-  return mutateNotifications(directoryHandle, (list) =>
-    list.map((n) => {
-      if (n.id !== notificationId) return n;
-      if (n.acceptances.some((a) => a.username === username)) return n;
-      return {
-        ...n,
-        acceptances: [
-          ...n.acceptances,
-          { username, acceptedAt: new Date().toISOString() },
-        ],
-      };
-    })
-  );
+  try {
+    // Mirrors mutateNotifications: a remembered workspace (PR #36) opens with
+    // read permission only, so ask for write access before the acks folder is
+    // created rather than letting a raw NotAllowedError surface from inside the
+    // CAS loop as casLoop's misleading "access lost, reconnect".
+    return await withWorkspaceWriteAccess(directoryHandle, async () => {
+      // The broadcast log is READ here, never written: it answers "does this
+      // notification still exist", "did this user already accept it under the
+      // pre-split scheme", and supplies the id set for the single-owner prune.
+      let liveNotificationIds: ReadonlySet<string> | null = null;
+      try {
+        const { notifications } = await readNotificationsFile(directoryHandle);
+        const target = notifications.find((n) => n.id === notificationId);
+        // Gone from the log, or already acknowledged in a legacy shared-file
+        // entry — nothing to record, and the legacy entry stays exactly as it is.
+        if (!target || hasAccepted(target, username)) return { ok: true };
+        liveNotificationIds = new Set(notifications.map((n) => n.id));
+      } catch (error) {
+        // "I could not read the log" is not "none of these notifications
+        // exist": record the acknowledgement anyway, but with pruning disabled
+        // so no live ack is dropped on a bad read.
+        logError("notifications:acceptBaseRead", error);
+      }
+      return recordAcknowledgement(directoryHandle, notificationId, username, liveNotificationIds);
+    });
+  } catch (error) {
+    logError("notifications:accept", error);
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "خطأ غير معروف.",
+    };
+  }
 }

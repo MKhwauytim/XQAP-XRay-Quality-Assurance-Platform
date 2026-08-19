@@ -47,6 +47,21 @@ export const REPORTS_SUBFOLDERS = {
 } as const;
 
 /**
+ * Children of `5-system/notifications/`.
+ *
+ * `acks/` holds ONE file per acknowledging employee (`{username}.acks.json`).
+ * Acknowledgements used to live inside the shared `notifications.json`, so
+ * every employee pressing "قبول" rewrote the one file every other employee was
+ * also rewriting. The per-writer split follows the approvals precedent
+ * (`{supervisor}.decisions.json`): an employee only ever writes his own file,
+ * so cross-user contention on the acknowledgement path is impossible.
+ * Broadcasts themselves stay in the shared file — admin-written, low frequency.
+ */
+export const NOTIFICATIONS_SUBFOLDERS = {
+  acks: "acks",
+} as const;
+
+/**
  * A workspace root folder that is genuinely not there.
  *
  * Named `NotFoundError` on purpose: every optional-file reader in the data layer
@@ -463,6 +478,36 @@ export async function getTemplatesRoot(
   create = true
 ): Promise<DirectoryHandleLike> {
   return getRoot(directoryHandle, WORKSPACE_ROOTS.templates, LEGACY_WORKSPACE_ROOTS.templates, create);
+}
+
+/** `5-system/notifications/` — the shared broadcast log plus the `acks/` subfolder. */
+export async function getNotificationsDir(
+  directoryHandle: DirectoryHandleLike,
+  create = true
+): Promise<DirectoryHandleLike> {
+  return getChildDir(
+    directoryHandle,
+    WORKSPACE_ROOTS.system,
+    () => getSystemRoot(directoryHandle, create),
+    SYSTEM_FOLDER_NAMES.notifications,
+    create,
+    null
+  );
+}
+
+/** `5-system/notifications/acks/` — see `NOTIFICATIONS_SUBFOLDERS.acks`. */
+export async function getNotificationAcksDir(
+  directoryHandle: DirectoryHandleLike,
+  create = true
+): Promise<DirectoryHandleLike> {
+  return getChildDir(
+    directoryHandle,
+    `${WORKSPACE_ROOTS.system}/${SYSTEM_FOLDER_NAMES.notifications}`,
+    () => getNotificationsDir(directoryHandle, create),
+    NOTIFICATIONS_SUBFOLDERS.acks,
+    create,
+    null
+  );
 }
 
 /** `5-system/adhoc-imports/` — see `SYSTEM_FOLDER_NAMES.adhocImports`. */
