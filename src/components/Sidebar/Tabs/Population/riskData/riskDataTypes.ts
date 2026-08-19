@@ -58,6 +58,18 @@ export type ZeroXrayIdDiagnostic = {
   presentHeaders: string[];
 };
 
+/**
+ * Detection-only: two or more source headers in this sheet normalize to the
+ * same key, so `createHeaderLookup`'s last-write-wins `Map.set` collapsed
+ * them into one entry (`originals`, in the order they appeared, is the same
+ * order they were `Map.set` — so the LAST entry is the one that actually won).
+ * Precedence is untouched; this only reports that the collision happened.
+ */
+export type DuplicateHeaderCollision = {
+  normalized: string;
+  originals: string[];
+};
+
 export type RiskSheetSummary = {
   sheetName: string;
   movementType: string;
@@ -65,6 +77,7 @@ export type RiskSheetSummary = {
   normalizedRowCount: number;
   excludedMissingXrayIdCount: number;
   zeroIdDiagnostic?: ZeroXrayIdDiagnostic;
+  duplicateHeaders?: DuplicateHeaderCollision[];
 };
 
 export type RiskWorkbookResult = {

@@ -78,6 +78,40 @@ function createHeaderLookup(row: RiskSourceRow): Map<string, unknown> {
   return lookup;
 }
 
+/**
+ * Detection-only diagnostic: which source headers collapse onto the same
+ * normalized key. `createHeaderLookup`'s `Map.set` makes the LAST such header
+ * win, silently — that precedence is deliberately left untouched (changing it
+ * could switch which column a field reads for an existing workbook
+ * mid-history). This is purely additive: it reports the collision so the
+ * operator can see two columns collapsed into one key, without altering
+ * lookup construction, precedence, or per-row hot-path behavior. Callers
+ * compute this ONCE per sheet from the header row, never per data row.
+ */
+export function detectDuplicateNormalizedHeaders(
+  headers: string[]
+): Array<{ normalized: string; originals: string[] }> {
+  const byNormalized = new Map<string, string[]>();
+
+  for (const header of headers) {
+    const normalized = normalizeHeader(header);
+    const originals = byNormalized.get(normalized);
+    if (originals) {
+      originals.push(header);
+    } else {
+      byNormalized.set(normalized, [header]);
+    }
+  }
+
+  const collisions: Array<{ normalized: string; originals: string[] }> = [];
+  for (const [normalized, originals] of byNormalized) {
+    if (originals.length > 1) {
+      collisions.push({ normalized, originals });
+    }
+  }
+  return collisions;
+}
+
 function getFirstAvailableValue(
   lookup: Map<string, unknown>,
   candidateHeaders: readonly string[]

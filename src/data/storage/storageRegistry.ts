@@ -59,6 +59,12 @@ export const STORAGE_REGISTRY: readonly StorageEntry[] = [
     lossConsequence: "The month selection resets. No data at risk.",
   },
   {
+    id: "xray_error_log_v1",
+    layer: "local",
+    purpose: "Mirror of the in-memory error ring buffer (errorLogger.ts), so it survives a reload.",
+    lossConsequence: "Recent-error history is lost; the app keeps working with an empty log.",
+  },
+  {
     id: "xray-quality-app-persistence",
     layer: "indexeddb",
     purpose: "Handle for the last selected workspace folder.",

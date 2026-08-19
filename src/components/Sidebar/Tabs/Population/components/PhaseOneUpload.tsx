@@ -86,6 +86,7 @@ function RawFileSummaryCard({
   title: string;
   result: RiskWorkbookResult | BiWorkbookResult;
 }) {
+  const labels = useLabels();
   // A merged multi-file BI result can carry the same sheet name more than once
   // (one per source file), so the React key has to include the file it came
   // from — and the array index too, because attaching the SAME file name twice
@@ -124,6 +125,23 @@ function RawFileSummaryCard({
             تحقّق من إعدادات تعيين الأعمدة (Mapping Settings) فقد تكون تشير إلى عمود غير موجود في هذه الورقة.
           </p>
         ))}
+      {result.sheetSummaries
+        .map((sheet, index) => ({ sheet, index }))
+        .flatMap(({ sheet, index }) =>
+          (sheet.duplicateHeaders ?? []).map((collision, collisionIndex) => (
+            <p
+              key={`${sheetKey(sheet, index)}-dup-${collisionIndex}`}
+              className="raw-file-summary-unknown"
+              role="alert"
+            >
+              {fill(labels.phase_one_duplicate_headers_warning, {
+                sheet: sheet.sheetName,
+                normalized: collision.normalized,
+                originals: collision.originals.join("، ")
+              })}
+            </p>
+          ))
+        )}
       {result.unknownSheetNames.length > 0 && (
         <p className="raw-file-summary-unknown">
           أوراق غير معروفة (غير مدرجة في المجتمع): {result.unknownSheetNames.join("، ")}

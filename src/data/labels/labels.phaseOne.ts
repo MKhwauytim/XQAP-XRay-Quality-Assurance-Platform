@@ -62,4 +62,15 @@ export const phaseOneLabels = {
   phase_one_bi_unknown_error: "تعذّرت قراءة هذا الملف لسبب غير معروف. راجع سجل الأخطاء لمعرفة التفاصيل.",
   /** A file that parsed but yielded no usable row at all. */
   phase_one_bi_no_rows: "لم يُقرأ أي صف من هذا الملف. تحقّق من أن الملف يحتوي على صف عناوين وصفوف بيانات.",
+
+  // ── Duplicate-normalizing header diagnostic (detection-only) ───────────────
+  /**
+   * Detection-only warning: two or more source column headers in `{sheet}`
+   * normalize to the same internal key `{normalized}` (originals listed in
+   * `{originals}`). The system silently keeps only the LAST matching column's
+   * value for that field — this warning does not change that behavior, it only
+   * surfaces it so the operator can see which columns collapsed together.
+   */
+  phase_one_duplicate_headers_warning:
+    'تنبيه: في ورقة "{sheet}" يؤول أكثر من عمود إلى نفس المفتاح الموحّد "{normalized}" ({originals}). يعتمد النظام قيمة آخر عمود مطابق فقط لهذا الحقل — تحقّق من إعدادات تعيين الأعمدة إذا كانت هذه القيمة غير متوقعة.',
 } as const;
