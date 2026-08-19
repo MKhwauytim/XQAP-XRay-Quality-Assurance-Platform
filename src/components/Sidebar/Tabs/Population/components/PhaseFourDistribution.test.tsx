@@ -167,17 +167,44 @@ describe("PhaseFourDistribution — حصص الخبراء matrix (5c)", () => {
     return <PhaseFourDistribution {...baseProps({ config, onConfigChange: setConfig })} />;
   }
 
+  it("an unconfigured level defaults to an EVEN split, so nobody starts excluded", () => {
+    // Owner requirement (2026-08-19): distribution defaults to an equal share
+    // per employee at every level — four employees get 25% each. This mock
+    // roster holds one employee, so the sole even share is 100. Before that
+    // rule every unsaved share defaulted to 0, the row rendered مستبعدة, and
+    // the level distributed nothing until an admin typed each share by hand.
+    const { container } = render(<MatrixHarness initialConfig={DEFAULT_POPULATION_CONFIG} />);
+
+    expect(container.querySelector(".p4-matrix-row.excluded")).toBeNull();
+    expect(screen.queryByText("مستبعدة")).not.toBeInTheDocument();
+    expect(
+      (screen.getByLabelText("حصة الموظف الأول في المستوى الأول") as HTMLInputElement).value
+    ).toBe("100");
+    // The single sample row is level one, so the default share already yields
+    // exactly one new assignment with no configuration at all.
+    expect(container.querySelector(".p4-matrix-new")?.textContent).toBe("1");
+  });
+
   it("editing a matrix cell recomputes the الجديد preview and the totals row", () => {
     const { container } = render(<MatrixHarness initialConfig={DEFAULT_POPULATION_CONFIG} />);
 
-    // No share anywhere yet — the expert row is muted and reads مستبعدة.
-    expect(container.querySelector(".p4-matrix-row.excluded")).not.toBeNull();
-    expect(screen.getByText("مستبعدة")).toBeInTheDocument();
-
+    // Zero every level — مستبعدة means no share ANYWHERE, not just here, so an
+    // admin has to knock out all four to exclude an employee outright.
     const cell = screen.getByLabelText("حصة الموظف الأول في المستوى الأول") as HTMLInputElement;
-    fireEvent.change(cell, { target: { value: "100" } });
+    for (const level of ["الأول", "الثاني", "الثالث", "الرابع"]) {
+      fireEvent.change(screen.getByLabelText(`حصة الموظف الأول في المستوى ${level}`), {
+        target: { value: "0" },
+      });
+    }
 
-    // The single sample row is level one, so a 100 share yields exactly one new assignment.
+    expect(container.querySelector(".p4-matrix-row.excluded")).not.toBeNull();
+    // The مستبعدة tag REPLACES the الجديد count cell, so the count is absent
+    // rather than zero while the employee is excluded.
+    expect(screen.getByText("مستبعدة")).toBeInTheDocument();
+    expect(container.querySelector(".p4-matrix-new")).toBeNull();
+
+    // ...and back up to a full share on level one.
+    fireEvent.change(cell, { target: { value: "100" } });
     expect((screen.getByLabelText("حصة الموظف الأول في المستوى الأول") as HTMLInputElement).value).toBe("100");
     expect(container.querySelector(".p4-matrix-row.excluded")).toBeNull();
     expect(container.querySelector(".p4-matrix-new")?.textContent).toBe("1");
@@ -190,17 +217,21 @@ describe("PhaseFourDistribution — حصص الخبراء matrix (5c)", () => {
     const { container } = render(<MatrixHarness initialConfig={DEFAULT_POPULATION_CONFIG} />);
     const shares = () => Array.from(container.querySelectorAll(".p4-total-share"));
 
-    // Every stage starts at 0 — all four flagged.
+    // Every stage now starts on the even-split default, so all four total 100
+    // and none is flagged — the warn verdict is reserved for a level an admin
+    // has actually knocked off 100.
     expect(shares()).toHaveLength(4);
-    expect(shares().every((el) => el.className.includes("warn"))).toBe(true);
+    expect(shares().every((el) => el.className.includes("ok"))).toBe(true);
+    expect(shares()[0].textContent).toBe("100");
 
+    // Knock level one down to 40 — only that level is flagged.
     fireEvent.change(screen.getByLabelText("حصة الموظف الأول في المستوى الأول"), {
-      target: { value: "100" },
+      target: { value: "40" },
     });
 
-    expect(shares()[0].className).toContain("ok");
-    expect(shares()[0].textContent).toBe("100");
-    expect(shares()[1].className).toContain("warn");
+    expect(shares()[0].className).toContain("warn");
+    expect(shares()[0].textContent).toBe("40");
+    expect(shares()[1].className).toContain("ok");
   });
 
   it("matrix inputs are DISABLED (not hidden) when the role cannot configure", () => {
