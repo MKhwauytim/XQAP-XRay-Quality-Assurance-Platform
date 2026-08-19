@@ -38,6 +38,11 @@ export type UsernameRenameBlockReason =
  * Reuses `getUserWorkspaceFootprint` (which since T-10 also walks the ad-hoc
  * import stores) rather than inventing a second, drift-prone definition of
  * "has work on disk"; deletion and rename must agree on that answer.
+ *
+ * End-state ruling 2026-08-19: no migration will be built; a username with
+ * on-disk work is permanently immutable. The supported alternative is a new
+ * user, or a future display-name alias layer that never touches stored
+ * usernames.
  */
 export async function checkUsernameRenameBlocked(
   directoryHandle: DirectoryHandleLike | null,
