@@ -16,12 +16,14 @@ import { EMPLOYEE_MIRROR_INDEX_FILE, EMPLOYEE_MIRROR_SUFFIX } from "../samples/s
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
 import {
   copyFileBytes,
+  copyFileBytesVerified,
   isCompressedFileText,
   readFileTextWithRetry,
   safeReadJson,
   safeWriteJson,
   safeWriteJsonText,
 } from "../storage/safeWrite";
+import { errorCodeOf } from "../storage/errorCodes";
 import { mapWithConcurrency } from "../storage/concurrency";
 import { withWorkspaceWriteAccess } from "../storage/workspaceWriteAccess";
 import { logError } from "../storage/errorLogger";
@@ -100,6 +102,13 @@ export type BackupDatasetSummary = {
   xlsxFiles: string[];
 };
 
+export type BackupFileFailure = {
+  /** Source-relative path of the file that could not be certified. */
+  path: string;
+  /** Why, in Arabic — shown to the admin verbatim. */
+  reason: string;
+};
+
 export type BackupManifest = {
   createdAt: string;
   createdBy: string;
@@ -110,6 +119,21 @@ export type BackupManifest = {
   datasets: BackupDatasetSummary[];
   rowLimitPerWorkbookPart: number;
   excelSheetRowLimit: number;
+  /**
+   * `complete` only when every listed file was copied AND read back
+   * byte-identical. `partial` means the snapshot is missing named files and
+   * must not be treated as a full recovery point.
+   *
+   * OPTIONAL on purpose: manifests written before verification existed have
+   * neither field, and `loadBackupHistory` reads them as `complete` — that
+   * code aborted the whole backup on any failure, so a manifest it produced
+   * genuinely does describe a complete copy walk.
+   */
+  status?: "complete" | "partial";
+  /** Files whose copy could not be verified (after one retry). */
+  filesFailedVerification?: BackupFileFailure[];
+  /** Files that vanished between the directory listing and the copy. */
+  filesSkippedMissing?: string[];
 };
 
 export type BackupHistoryItem = {
@@ -121,6 +145,10 @@ export type BackupHistoryItem = {
   jsonFilesCount: number;
   xlsxFilesCount: number;
   totalRows: number;
+  /** See `BackupManifest.status`; a manifest without one reads as `complete`. */
+  status: "complete" | "partial";
+  /** How many files this snapshot is knowingly missing. */
+  failedFilesCount: number;
 };
 
 export type AutoBackupSettings = {
@@ -535,7 +563,96 @@ async function collectJsonFileEntries(params: {
   return pending;
 }
 
-async function copyAllJsonFiles(directoryHandle: DirectoryHandleLike, backupDir: DirectoryHandleLike): Promise<string[]> {
+/** One file the walk listed but could not certify as backed up. */
+type CopyFailure = { path: string; reason: string };
+
+type CopyWalkResult = {
+  /** Files copied AND verified byte-identical to what was read. */
+  copied: string[];
+  /** Files that failed verification twice — the snapshot does NOT hold them. */
+  failed: CopyFailure[];
+  /** Files that vanished between the listing and the copy. */
+  skippedMissing: string[];
+};
+
+type CopyEntryOutcome =
+  | { kind: "copied"; path: string }
+  | { kind: "skipped"; path: string }
+  | { kind: "failed"; failure: CopyFailure };
+
+/**
+ * Copies one listed file into the snapshot, byte for byte, and verifies it.
+ *
+ * BYTES, not text (STO-2). This walk used to read every file with
+ * `file.text()` and write the string back. That is wrong twice over on exactly
+ * the workspaces a backup matters most for:
+ *   - past V8's max string length the read throws `RangeError: Invalid string
+ *     length`, which propagated out of the whole walk — so ONE oversized
+ *     legacy `risk.raw.json` meant the workspace could never be backed up
+ *     again, on the workspace whose data is least replaceable;
+ *   - and it forced a special case for compressed files, since decoding a gzip
+ *     member as UTF-8 and re-encoding it is lossy.
+ * A byte copy is format-agnostic and size-agnostic, so both cases disappear
+ * rather than being handled.
+ *
+ * VERIFIED (STO-5). Nothing ever checked that the copy matched. A share that
+ * dropped mid-flush left a truncated file inside a folder the manifest then
+ * certified as a complete backup — discovered only by a restore that needed
+ * it. Verification compares the written copy against the bytes this call read
+ * from the source, never against a re-read of the live source (which may
+ * legitimately change under a running backup).
+ */
+async function copyOneFile(entry: PendingJsonCopy): Promise<CopyEntryOutcome> {
+  let outcome = await copyFileBytesVerified(
+    entry.sourceDir,
+    entry.fileName,
+    entry.targetDir,
+    entry.fileName
+  );
+  if (outcome.status === "verify_failed") {
+    // One retry: a torn copy is usually a share hiccup, and rewriting the
+    // whole target through a fresh handle is idempotent.
+    outcome = await copyFileBytesVerified(
+      entry.sourceDir,
+      entry.fileName,
+      entry.targetDir,
+      entry.fileName
+    );
+  }
+
+  if (outcome.status === "copied") return { kind: "copied", path: entry.relativePath };
+
+  if (outcome.status === "source_missing") {
+    // A last-write-wins JSON file that vanishes between the listing and the
+    // read is expected churn on a live workspace (safeWriteJson's .tmp appears
+    // and disappears constantly), and dropping it is recoverable — the next
+    // backup catches it. An event SEGMENT is different: it is append-only and
+    // never deleted, so it cannot legitimately disappear mid-walk, and
+    // silently omitting one drops events that exist nowhere else in the
+    // snapshot while the manifest still reports a clean backup. Fail the whole
+    // backup instead; assertBackupComplete then refuses the partial folder at
+    // restore time rather than folding a truncated history into the live log.
+    if (isSegmentFile(entry.fileName)) {
+      throw new Error(`تعذّرت قراءة سجل أحداث التوزيع أثناء النسخ الاحتياطي: ${entry.relativePath}`);
+    }
+    return { kind: "skipped", path: entry.relativePath };
+  }
+
+  // Verification failed twice. Same reasoning as above for a segment: an
+  // unverifiable event segment must fail the backup loudly rather than sit in
+  // a snapshot that claims to be complete.
+  if (isSegmentFile(entry.fileName)) {
+    throw new Error(
+      `تعذّر التحقق من نسخة سجل أحداث التوزيع أثناء النسخ الاحتياطي: ${entry.relativePath} — ${outcome.detail}`
+    );
+  }
+  return { kind: "failed", failure: { path: entry.relativePath, reason: outcome.detail } };
+}
+
+async function copyAllJsonFiles(
+  directoryHandle: DirectoryHandleLike,
+  backupDir: DirectoryHandleLike
+): Promise<CopyWalkResult> {
   const jsonDir = await ensureDir(backupDir, "json");
   const pending = await collectJsonFileEntries({
     sourceDir: directoryHandle,
@@ -547,47 +664,36 @@ async function copyAllJsonFiles(directoryHandle: DirectoryHandleLike, backupDir:
   // this path) so jsonFilesBackedUp keeps the walk's listing order — and
   // therefore a deterministic manifest — even though the 8 workers below
   // finish their individual read+write round trips in whatever order the
-  // underlying I/O actually completes. A null result marks an entry that was
-  // listed but turned out not to be copyable (source disappeared mid-walk,
-  // or the target handle had no createWritable) and is filtered out below,
-  // exactly as the old .push()-only-on-success code did.
+  // underlying I/O actually completes.
   const results = await mapWithConcurrency(pending, 8, async (entry) => {
-    const text = await readTextFile(entry.sourceDir, entry.fileName);
-    // A compressed workspace file is copied as BYTES. Its name is identical to a
-    // plain one's (the format lives in the file's first line, not its
-    // extension), so this is where the two are told apart on the backup walk —
-    // reading a gzip member as text and writing it back would silently corrupt
-    // the snapshot. Recognized from the text ALREADY read (the head line decodes
-    // losslessly even when the body does not), so this costs no extra I/O and
-    // still goes through readTextFile's transient-error retry.
-    if (isCompressedFileText(text)) {
-      await copyFileBytes(entry.sourceDir, entry.fileName, entry.targetDir, entry.fileName);
-      return entry.relativePath;
-    }
-    if (text === null) {
-      // A last-write-wins JSON file that vanishes between the listing and the
-      // read is expected churn on a live workspace (safeWriteJson's .tmp
-      // appears and disappears constantly), and dropping it is recoverable —
-      // the next backup catches it. An event SEGMENT is different: it is
-      // append-only and never deleted, so it cannot legitimately disappear
-      // mid-walk, and silently omitting one drops events that exist nowhere
-      // else in the snapshot while the manifest still reports a clean backup.
-      // Fail the whole backup instead; assertBackupComplete then refuses the
-      // partial folder at restore time rather than folding a truncated history
-      // into the live log.
-      if (isSegmentFile(entry.fileName)) {
-        throw new Error(`تعذّرت قراءة سجل أحداث التوزيع أثناء النسخ الاحتياطي: ${entry.relativePath}`);
+    try {
+      return await copyOneFile(entry);
+    } catch (error) {
+      // A target handle with no `createWritable` (read-only handle, or a
+      // browser without the write half of the API) is a per-file "cannot be
+      // written", not a reason to abort the walk — but it is NOT a success
+      // either, which is how the pre-verification code recorded it: silently
+      // dropped, with the manifest still reporting a clean backup.
+      if (errorCodeOf(error) === "XQ-IO-003" && !isSegmentFile(entry.fileName)) {
+        return {
+          kind: "failed" as const,
+          failure: {
+            path: entry.relativePath,
+            reason: error instanceof Error ? error.message : "تعذرت الكتابة.",
+          },
+        };
       }
-      return null;
+      throw error;
     }
-    const wrote = await writeTextFile(entry.targetDir, entry.fileName, text);
-    if (!wrote && isSegmentFile(entry.fileName)) {
-      throw new Error(`تعذّرت كتابة سجل أحداث التوزيع أثناء النسخ الاحتياطي: ${entry.relativePath}`);
-    }
-    return wrote ? entry.relativePath : null;
   });
 
-  return results.filter((path): path is string => path !== null);
+  const walk: CopyWalkResult = { copied: [], failed: [], skippedMissing: [] };
+  for (const result of results) {
+    if (result.kind === "copied") walk.copied.push(result.path);
+    else if (result.kind === "skipped") walk.skippedMissing.push(result.path);
+    else walk.failed.push(result.failure);
+  }
+  return walk;
 }
 
 /**
@@ -1227,7 +1333,8 @@ export async function createBackup(
       // the tree, so it is included by copyAllJsonFiles below (Tier-1 Item F).
       await exportLabelsSnapshot(directoryHandle);
 
-      const jsonFilesBackedUp = await copyAllJsonFiles(directoryHandle, backupDir);
+      const copyWalk = await copyAllJsonFiles(directoryHandle, backupDir);
+      const jsonFilesBackedUp = copyWalk.copied;
       const datasets: BackupDatasetSummary[] = [];
       let xlsxWarning: string | undefined;
 
@@ -1256,6 +1363,11 @@ export async function createBackup(
         datasets,
         rowLimitPerWorkbookPart: XLSX_ROWS_PER_PART,
         excelSheetRowLimit: EXCEL_MAX_ROWS,
+        // Truthfulness over tidiness: a snapshot that is missing files says so
+        // here, in the same file the restore path and the history list read.
+        status: copyWalk.failed.length > 0 ? "partial" : "complete",
+        filesFailedVerification: copyWalk.failed,
+        filesSkippedMissing: copyWalk.skippedMissing,
       };
 
       await safeWriteJson(backupDir, "backup.manifest.json", manifest);
@@ -1534,6 +1646,8 @@ export async function loadBackupHistory(
         jsonFilesCount: manifest.jsonFilesBackedUp?.length ?? 0,
         xlsxFilesCount: manifest.xlsxFilesBackedUp?.length ?? 0,
         totalRows: (manifest.datasets ?? []).reduce((sum, dataset) => sum + dataset.rowCount, 0),
+        status: manifest.status ?? "complete",
+        failedFilesCount: (manifest.filesFailedVerification ?? []).length,
       });
     }
 

@@ -414,6 +414,9 @@ export const DEFAULT_LABELS = {
   backup_restore_merge_notice:     "ملاحظة: الاستعادة تُعيد كتابة الملفات الموجودة في النسخة فقط، ولا تحذف الملفات التي أُنشئت بعدها. البيانات الأحدث من النسخة ستبقى كما هي. تُنشأ نسخة رجوع تلقائية قبل الاستعادة.",
   backup_include_xlsx_option:      "إضافة ملفات XLSX اختيارية (أبطأ)",
   backup_include_xlsx_hint:        "نسخة JSON كاملة وقابلة للاستعادة دائماً. فعّل هذا الخيار فقط إذا احتجت جداول XLSX إضافية للبيانات الصغيرة.",
+  // Backup copy verification (STO-5): a snapshot missing files must say so.
+  backup_partial_warning:          "نسخة احتياطية ناقصة: تعذّر التحقق من نسخ الملفات التالية",
+  backup_partial_badge:            "ناقصة",
 
   // refreshDistribution guard (Tier-1 Item H)
   msg_distribution_refresh_no_sample: "تعذر تحديث حالة التوزيع — لم يتم العثور على عينة محفوظة لهذا الشهر.",
