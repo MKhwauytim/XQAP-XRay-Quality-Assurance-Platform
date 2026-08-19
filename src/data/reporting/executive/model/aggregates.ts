@@ -178,6 +178,9 @@ export type ErrorTypeBreakdown = {
   evaluable: number;
 };
 
+/** One day-of-month bucket of the decision fact table. */
+export type DayAccuracy = AccuracyMetrics & { day: number };
+
 export type AgreementCell = {
   /** Images where both sources had a result. */
   comparable: number;
@@ -211,6 +214,12 @@ export type Aggregates = {
   byPortAndLevel: PortLevelAccuracy[];
   employeeByPortAndLevel: EmployeeByPortLevel[];
   errorTypeByPort: ErrorTypeBreakdown[];
+  /** Accuracy per day of month (1–31), ascending; days with no evaluable
+   *  decision are ABSENT, not zero-filled — a gap must render as a gap. */
+  byEntryDay: DayAccuracy[];
+  /** The غير مؤرخ bucket: evaluable decisions whose image carried no usable
+   *  entry date. Never merged into a day. */
+  undatedAccuracy: AccuracyMetrics;
   reviewerAgreement: ReviewerAgreementRow[];
   crossTeamMatrix: CrossTeamMatrixCell[];
 };
@@ -364,11 +373,41 @@ function buildErrorTypeByPort(records: DecisionRecord[]): ErrorTypeBreakdown[] {
   }));
 }
 
+/**
+ * Fold the fact table by day of month. Reuses `aggregateDecisions` — the ONE
+ * shared fold — so a day's accuracy can never drift from the port page's, which
+ * is exactly the class of bug three independent folds produced before.
+ *
+ * Undated records are keyed to a sentinel and split out afterwards rather than
+ * being dropped: the page states the dated/undated split, so both halves must
+ * survive the fold.
+ */
+const UNDATED_KEY = "__undated__";
+
+function buildByEntryDay(
+  records: DecisionRecord[],
+  config: ExecutiveReportConfig
+): { days: DayAccuracy[]; undated: AccuracyMetrics } {
+  const map = aggregateDecisions(records, "decision", (r) =>
+    typeof r.entryDay === "number" ? String(r.entryDay) : UNDATED_KEY
+  , UNDATED_KEY);
+
+  const undatedCounts = map.get(UNDATED_KEY) ?? emptyCounts();
+  const days: DayAccuracy[] = [];
+  for (const [key, counts] of map) {
+    if (key === UNDATED_KEY) continue;
+    days.push({ day: Number(key), ...metricsFromCounts(counts, config) });
+  }
+  days.sort((a, b) => a.day - b.day);
+  return { days, undated: metricsFromCounts(undatedCounts, config) };
+}
+
 export function buildAggregates(
   records: DecisionRecord[],
   comparisons: ImageResultComparison[],
   config: ExecutiveReportConfig
 ): Aggregates {
+  const entryDay = buildByEntryDay(records, config);
   return {
     byPort: foldBy(records, (r) => r.portName, config),
     byStage: foldBy(records, (r) => r.stage, config),
@@ -376,6 +415,8 @@ export function buildAggregates(
     byPortAndLevel: foldByPortAndLevel(records, config),
     employeeByPortAndLevel: buildEmployeeByPortAndLevel(records, config),
     errorTypeByPort: buildErrorTypeByPort(records),
+    byEntryDay: entryDay.days,
+    undatedAccuracy: entryDay.undated,
     reviewerAgreement: buildReviewerAgreement(comparisons),
     crossTeamMatrix: buildCrossTeamMatrix(comparisons),
   };
