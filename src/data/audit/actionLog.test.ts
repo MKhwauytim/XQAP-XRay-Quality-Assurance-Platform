@@ -4,13 +4,14 @@ import { createMemoryDirectory } from "../storage/memoryDirectory";
 import { clearErrors, getRecentErrors } from "../storage/errorLogger";
 import { safeWriteJson } from "../storage/safeWrite";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { getSystemRoot, SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
+import { getAuditActionsDir } from "../workspace/workspacePaths";
+import { actionsFileName } from "./auditPaths";
 import {
   appendWorkspaceAction,
   readWorkspaceActions,
   type WorkspaceActionEntry,
   type WorkspaceActionInput,
-  type WorkspaceActionLogFile,
+  type WorkspaceActionUserLogFile,
 } from "./actionLog";
 
 function makeRoot(): DirectoryHandleLike {
@@ -51,38 +52,40 @@ describe("actionLog", () => {
     expect(getRecentErrors()).toHaveLength(0);
   });
 
-  it("caps the log at 10,000 entries, dropping the oldest", async () => {
+  // The cap is now PER ACTOR (2,000), not workspace-wide (10,000) — one actor's
+  // volume can no longer evict another's entries.
+  it("caps an actor's own log at 2,000 entries, dropping the oldest", async () => {
     const root = makeRoot();
 
-    // Pre-seed the on-disk file at exactly the cap (building 10,000 real
-    // appends would be too slow), then append one more through the writer.
+    // Pre-seed the actor's own on-disk file at exactly the cap (building 2,000
+    // real appends would be too slow), then append one more through the writer.
+    const at = new Date().toISOString();
     const seededEntries: WorkspaceActionEntry[] = Array.from(
-      { length: 10_000 },
+      { length: 2_000 },
       (_, i) => ({
-        id: `act-seed-${i}`,
-        at: new Date().toISOString(),
+        id: `act-seed-${String(i).padStart(5, "0")}`,
+        at,
         actor: "admin",
         actorRole: "admin",
         action: "permission-changed",
         target: `t-${i}`,
       })
     );
-    const seededFile: WorkspaceActionLogFile = {
+    const seededFile: WorkspaceActionUserLogFile = {
+      actor: "admin",
       revision: 1,
-      updatedAt: new Date().toISOString(),
+      updatedAt: at,
       entries: seededEntries,
     };
-    const systemDir = await getSystemRoot(root, true);
-    const auditDir = await systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.audit, {
-      create: true,
-    });
-    await safeWriteJson(auditDir, "actions.log.json", seededFile);
+    const actionsDir = await getAuditActionsDir(root, true);
+    await safeWriteJson(actionsDir, actionsFileName("admin"), seededFile);
 
     await appendWorkspaceAction(root, makeInput({ target: "newest" }));
 
     const entries = await readWorkspaceActions(root);
-    expect(entries).toHaveLength(10_000);
-    // Oldest seeded entry dropped; the new entry is last.
+    expect(entries).toHaveLength(2_000);
+    // Oldest seeded entry dropped; the new entry is last. (Every seeded entry
+    // shares `at`, so the id tie-break is what orders them — hence the padding.)
     expect(entries[0]!.target).toBe("t-1");
     expect(entries[entries.length - 1]!.target).toBe("newest");
   });

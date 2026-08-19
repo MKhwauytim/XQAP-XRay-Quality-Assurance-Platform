@@ -192,6 +192,40 @@ describe("PhaseOneUpload — multi-file BI list (design handoff 2b)", () => {
     expect(alert.textContent).toContain("لم يتطابق أي اسم ورقة");
   });
 
+  // PROD-1: an imported-but-unmatched file is an advisory, not a failure. It
+  // must be visually and semantically distinct from the red error row above —
+  // that conflation is what made the owner's whole BI list turn red.
+  it("advisory: a ready row carrying a warning renders amber with role=status, never the red error row", () => {
+    const { container } = render(
+      <PhaseOneUpload
+        {...baseProps({
+          uploads: {
+            riskAgencyData: { file: null, source: null },
+            biUploads: [
+              biEntry({
+                file: new File(["x"], "BI_Export_2026-05.csv"),
+                state: "ready",
+                acceptedRows: 1204,
+                warning: "تم استيراد الصفوف واستُخدم اسم الملف كمصدر (BI_Export_2026-05).",
+              }),
+            ],
+          },
+        })}
+      />
+    );
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    const subLine = container.querySelector(".bi-file-sheet.is-warn") as HTMLElement;
+    expect(subLine).not.toBeNull();
+    expect(subLine.getAttribute("role")).toBe("status");
+    // Long messages must be inspectable without a screenshot.
+    expect(subLine.getAttribute("title")).toContain("BI_Export_2026-05");
+    expect(container.querySelectorAll(".bi-file-sheet.is-error")).toHaveLength(0);
+    // The rows really did land in the population — the row's own cell and the
+    // derived footer total both report them.
+    expect(screen.getAllByText("1,204")).toHaveLength(2);
+  });
+
   it("failure: the add-more zone is disabled (not hidden) once the 10-file cap is reached", () => {
     const biUploads = Array.from({ length: MAX_BI_UPLOADS }, (_, i) =>
       biEntry({ id: `f${i}`, file: new File(["x"], `bi-${i}.xlsx`) })
@@ -288,6 +322,7 @@ describe("PhaseOneUpload — raw-file summary (W4/W10)", () => {
               { sheetName: "بحري وارد", sourceFileName: "b.xlsx", source: "بحري وارد", originalRowCount: 7, normalizedRowCount: 7, excludedMissingXrayIdCount: 0 },
             ],
             unknownSheetNames: [],
+            unmatchedSheetNames: [],
             totalOriginalRows: 12,
             totalNormalizedRows: 12,
             totalExcludedMissingXrayIdCount: 0,

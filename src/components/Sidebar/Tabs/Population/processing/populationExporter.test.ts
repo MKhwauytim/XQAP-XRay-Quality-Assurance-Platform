@@ -135,6 +135,7 @@ function biWorkbook(): BiWorkbookResult {
     rows: [biRow],
     sheetSummaries: [],
     unknownSheetNames: [],
+    unmatchedSheetNames: [],
     totalOriginalRows: 1,
     totalNormalizedRows: 1,
     totalExcludedMissingXrayIdCount: 0
