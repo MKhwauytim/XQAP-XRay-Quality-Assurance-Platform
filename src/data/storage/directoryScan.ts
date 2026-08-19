@@ -555,36 +555,44 @@ export async function listDirectoryEntriesWithSize(
 
 /**
  * Stat budget for `boundedSizeSignature`. Every stat is a network round trip on
- * the UNC/SMB share, paid by every client on every sync tick, so the cost of the
- * segment probe must not grow with a month's history: at 128 KB per segment
- * (MAX_OPEN_SEGMENT_BYTES) 64 stats already cover ~8 MB of event log, and
- * anything past that is covered by NAME changes alone, which the listing gives
- * away for free.
+ * the UNC/SMB share, paid by every client on every sync tick, so the cost of a
+ * probe built on this must not grow without bound with the size of the
+ * directory: past the budget, a new or removed entry is still detected by NAME
+ * alone, which the listing gives away for free.
+ *
+ * 64 is sized against the largest current caller, the distribution event
+ * segments: at 128 KB per segment (MAX_OPEN_SEGMENT_BYTES) that already covers
+ * ~8 MB of event log. The per-employee ack files are far below it.
  */
 export const DEFAULT_SIZE_SIGNATURE_STAT_BUDGET = 64;
 
 /**
- * A bounded change signature for an append-only directory (the distribution
- * event segments).
+ * A bounded change signature for a directory whose per-file CONTENT is not worth
+ * reading on a sync tick. Two callers today, both in `workspaceSync.ts`:
  *
- * WHY, given the segments are already covered by `distribution.log.json`'s CAS
- * stamp: they are covered only while the two move TOGETHER. A restore merges
- * events into the segments and deliberately does not rewrite the projection
- * (backupStorage's `restore-if-absent`), and a partly-failed append can leave
- * events durable in a segment whose projection write never landed. In both cases
- * the durable event data moved and the stamp did not, so no other machine on the
- * share ever learns. This signature is the independent second signal.
+ *  - the distribution event segments. They are already covered by
+ *    `distribution.log.json`'s CAS stamp — but only while the two move
+ *    TOGETHER. A restore merges events into the segments and deliberately does
+ *    not rewrite the projection (backupStorage's `restore-if-absent`), and a
+ *    partly-failed append can leave events durable in a segment whose projection
+ *    write never landed. In both cases the durable event data moved and the
+ *    stamp did not, so no other machine on the share ever learns. This signature
+ *    is the independent second signal.
+ *  - the per-employee notification ack files. `notifications.json`'s revision
+ *    covers broadcasts only, so an ack moves nothing that probe can see.
  *
- * BOUNDED, deliberately: one directory listing, no file CONTENT is read, and at
+ * BOUNDED, deliberately: one directory listing, no file content is read, and at
  * most `maxStats` `getFile()` size probes — taken from the tail of the
  * name-sorted listing, so which entries are probed is stable across ticks (a
  * signature that reshuffled its own sample would report a change on an untouched
- * month). Every matched NAME is in the signature whether or not it was probed,
- * so a new or removed segment is always detected; on a month with more segments
- * than the budget, GROWTH of an unprobed segment is detected once it rotates
- * into a new name. An entry that vanishes mid-scan is dropped from the signature
- * exactly as `listDirectoryEntriesWithSize` drops it — worst case one extra
- * refresh, never a missed one.
+ * directory). Every matched NAME is in the signature whether or not it was
+ * probed, so a new or removed file is always detected; on a directory with more
+ * files than the budget, GROWTH of an unprobed file is not — for the segments
+ * that growth is picked up anyway once the segment rotates into a new name.
+ *
+ * An entry that vanishes mid-scan is dropped from the signature exactly as
+ * `listDirectoryEntriesWithSize` drops it — worst case one extra refresh, never
+ * a missed one.
  */
 export async function boundedSizeSignature(
   dir: DirectoryHandleLike,

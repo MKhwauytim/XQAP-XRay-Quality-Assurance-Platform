@@ -54,16 +54,18 @@ import {
 } from "../distribution/distributionEventStore";
 import { readEnvelopeRevision } from "../storage/safeWrite";
 import { logError } from "../storage/errorLogger";
+import { isNotFoundError } from "../storage/transientFileErrors";
+import { ACK_FILE_SUFFIX } from "../notifications/notificationAckStorage";
 import {
   getPopulationMonthDir,
   getSampleMonthDir,
   getSystemRoot,
+  NOTIFICATIONS_SUBFOLDERS,
   SAMPLE_SUBFOLDERS,
   SYSTEM_FOLDER_NAMES,
 } from "./workspacePaths";
 import { DEFAULT_SYNC_INTERVAL_MS, readSyncIntervalMs } from "./syncSettings";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { isNotFoundError } from "../storage/transientFileErrors";
 
 /** The cadence used until the workspace's own setting has been read (and
  *  whenever there is no workspace, no setting, or an unreadable one). §2's
@@ -124,6 +126,20 @@ type DistributionStamp = { revision: number; writeToken: string | undefined };
 type Probe = {
   distributionStamp: Probed<DistributionStamp>;
   notificationsRevision: Probed<number | null>;
+  /**
+   * Bounded name+size signature of `5-system/notifications/acks/*.acks.json`
+   * (see `boundedSizeSignature`), joined to the `notifications` family.
+   *
+   * The shared `notifications.json` revision above covers broadcasts only. Since
+   * acknowledgements moved to one file per employee, an ack writes NOTHING that
+   * revision can see, so the manager's "who acknowledged" roster — which reloads
+   * on the refresh signal — went stale until someone pressed refresh by hand.
+   * This is the signal for it.
+   *
+   * `""` is a real observation (no acks folder, or no ack files in it) and diffs
+   * normally; only a read that FAILED yields `UNPROBED`.
+   */
+  acksSignature: Probed<string>;
   /** Serialized, sorted name->(size, mtime) map covering BOTH the
    *  employee-answers dir and the approvals (supervisor decisions) dir. A
    *  single combined string because a per-file diff alone cannot cheaply
@@ -360,6 +376,42 @@ async function safeSegmentsSignature(dir: DirectoryHandleLike | null): Promise<P
 }
 
 /**
+ * Bounded signature of the per-employee acknowledgement files.
+ *
+ * ONE directory listing plus at most `DEFAULT_SIZE_SIGNATURE_STAT_BUDGET` size
+ * stats, and no file content is read — the same shape the segments probe above
+ * uses, and the reason `safeRevision` (one envelope read per file) was not
+ * reused here: an ack file exists per employee, so a per-file revision read
+ * would put N share round trips on every tick of every client.
+ *
+ * A workspace with no acks folder yet is a real observation (`""`), not a
+ * failure; only a read that THREW returns `UNPROBED`.
+ */
+async function safeAcksSignature(
+  notificationsDir: DirectoryHandleLike | null
+): Promise<Probed<string>> {
+  if (!notificationsDir) return "";
+  let acksDir: DirectoryHandleLike;
+  try {
+    acksDir = await notificationsDir.getDirectoryHandle(NOTIFICATIONS_SUBFOLDERS.acks, {
+      create: false,
+    });
+  } catch (error) {
+    // Absent is normal for a legacy or brand-new workspace: nobody has
+    // acknowledged anything yet. Anything else is a failed read.
+    if (isNotFoundError(error)) return "";
+    logError("workspaceSync:probeAcksOpen", error);
+    return UNPROBED;
+  }
+  try {
+    return await boundedSizeSignature(acksDir, ACK_FILE_SUFFIX);
+  } catch (error) {
+    logError("workspaceSync:probeAcks", error);
+    return UNPROBED;
+  }
+}
+
+/**
  * One run's worth of probing (§4.2's per-family change set).
  *
  * A folder or file that is NOT THERE (a fresh workspace, a month with no
@@ -385,6 +437,7 @@ async function probeMonth(
   const [
     distStamp,
     notificationsRevision,
+    acksSignature,
     answersSignature,
     approvalsSignature,
     manifestRevision,
@@ -402,6 +455,7 @@ async function probeMonth(
         return UNPROBED;
       }),
       safeRevision(dirs.notificationsDir, NOTIFICATIONS_FILE),
+      safeAcksSignature(dirs.notificationsDir),
       safeSignature(dirs.employeesDir, ANSWERS_SUFFIX),
       safeSignature(dirs.approvalsDir, DECISIONS_SUFFIX),
       safeRevision(dirs.populationMonthDir, MONTH_MANIFEST_FILE),
@@ -411,6 +465,7 @@ async function probeMonth(
   return {
     distributionStamp: distStamp,
     notificationsRevision,
+    acksSignature,
     answersSignature,
     approvalsSignature,
     manifestRevision,
@@ -422,6 +477,7 @@ function carryUnprobed(previous: Probe, current: Probe): Probe {
   return {
     distributionStamp: carry(previous.distributionStamp, current.distributionStamp),
     notificationsRevision: carry(previous.notificationsRevision, current.notificationsRevision),
+    acksSignature: carry(previous.acksSignature, current.acksSignature),
     answersSignature: carry(previous.answersSignature, current.answersSignature),
     approvalsSignature: carry(previous.approvalsSignature, current.approvalsSignature),
     manifestRevision: carry(previous.manifestRevision, current.manifestRevision),
@@ -449,7 +505,14 @@ function diffFamilies(previous: Probe | undefined, current: Probe): Set<DataRefr
   ) {
     changed.add("distribution");
   }
-  if (movedFrom(previous.notificationsRevision, current.notificationsRevision, sameValue)) {
+  if (
+    movedFrom(previous.notificationsRevision, current.notificationsRevision, sameValue) ||
+    // The shared notifications.json revision covers broadcasts only; a
+    // per-employee ack file moves nothing it can see. Second, independent
+    // signal for the same family. `movedFrom` keeps an unprobed tick on either
+    // side from counting as a change.
+    movedFrom(previous.acksSignature, current.acksSignature, sameValue)
+  ) {
     changed.add("notifications");
   }
   if (movedFrom(previous.answersSignature, current.answersSignature, sameValue)) {
