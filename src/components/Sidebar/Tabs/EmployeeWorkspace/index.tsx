@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { LayoutDashboard } from "lucide-react";
 import type { SidebarTabModule } from "../tabTypes";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
@@ -71,6 +71,11 @@ export default function EmployeeWorkspaceTab() {
   if (!visitedSubTabs.has(activeSubTab)) {
     setVisitedSubTabs((prev) => touchVisitedTabs(prev, activeSubTab));
   }
+  // Set once the user has picked a sub-tab themselves. The permission-aware
+  // landing correction below is a *landing* fix only: after a deliberate
+  // navigation the user stays put even if that sub-tab's permission is
+  // revoked mid-session, rather than being silently teleported elsewhere.
+  const userNavigatedRef = useRef(false);
 
   // Keep sidebar in sync whenever the active subtab changes
   useEffect(() => {
@@ -82,6 +87,7 @@ export default function EmployeeWorkspaceTab() {
     function handler(e: CustomEvent<{ subTabId: string }>) {
       const { subTabId } = e.detail;
       if (KNOWN_SUB_TABS.has(subTabId)) {
+        userNavigatedRef.current = true;
         setActiveSubTab(subTabId as WorkspaceSubTab);
       }
     }
@@ -108,19 +114,15 @@ export default function EmployeeWorkspaceTab() {
   );
   const inspectionFormElement = useMemo(() => <TemplateBuilderTab />, []);
 
-  if (!directoryHandle) {
-    return (
-      <section className="ew-page">
-        <p className="ew-empty">يجب تحديد مساحة عمل أولاً.</p>
-      </section>
-    );
-  }
-
   // Audit finding 14: these two now read SUB_TAB_FEATURE_MAP (shared with
   // App.tsx's sidebar filter) instead of an inline OR-list of `can()` calls,
   // so the sidebar link and this content gate structurally cannot drift --
   // previously a role with page "view" access but none of these features
   // still got a clickable sidebar link that only ever rendered AccessDenied.
+  //
+  // Computed above the `!directoryHandle` early return so the landing
+  // correction below can be a hook; all four are pure derived booleans, so
+  // hoisting them changes nothing about what renders.
   const canViewXrayReferrals =
     canAccessTab("ew/xray-referrals") &&
     hasRequiredSubTabFeature("ew/xray-referrals", role, featurePermissions);
@@ -135,6 +137,48 @@ export default function EmployeeWorkspaceTab() {
     (activeSubTab === SUB_TAB_REFERRAL_APPROVAL && canViewReferralApproval) ||
     (activeSubTab === SUB_TAB_XRAY_RESULTS && canViewXrayResults) ||
     (activeSubTab === SUB_TAB_INSPECTION_FORM && canViewInspectionForm);
+
+  // Permission-aware landing sub-tab. `activeSubTab` still *initializes* to
+  // XrayReferrals; this only corrects the landing for a role that cannot view
+  // it, which today strands the user on AccessDenied until they click a
+  // sidebar link. Deliberately a corrective effect rather than a smarter
+  // useState initializer: permission state can arrive late (disk sync), and
+  // an initializer only ever sees the first render.
+  //
+  // Containment -- it fires only when the current sub-tab is already denied,
+  // so nothing is ever mounted at the moment it runs and no view (nor any
+  // boot source such a view registers) can be unmounted by it. For a user who
+  // *can* view referrals, `activeAllowed` is true and the effect never acts.
+  useEffect(() => {
+    if (activeAllowed || userNavigatedRef.current) return;
+    const fallbackOrder: [WorkspaceSubTab, boolean][] = [
+      [SUB_TAB_XRAY_REFERRALS, canViewXrayReferrals],
+      [SUB_TAB_REFERRAL_APPROVAL, canViewReferralApproval],
+      [SUB_TAB_XRAY_RESULTS, canViewXrayResults],
+      [SUB_TAB_INSPECTION_FORM, canViewInspectionForm],
+    ];
+    const firstAllowed = fallbackOrder.find(([, allowed]) => allowed)?.[0];
+    // No permitted sub-tab at all: leave AccessDenied in place.
+    if (firstAllowed && firstAllowed !== activeSubTab) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- corrective landing redirect; must observe permission state that can arrive after the first render
+      setActiveSubTab(firstAllowed);
+    }
+  }, [
+    activeAllowed,
+    activeSubTab,
+    canViewXrayReferrals,
+    canViewReferralApproval,
+    canViewXrayResults,
+    canViewInspectionForm,
+  ]);
+
+  if (!directoryHandle) {
+    return (
+      <section className="ew-page">
+        <p className="ew-empty">يجب تحديد مساحة عمل أولاً.</p>
+      </section>
+    );
+  }
 
   return (
     <>
