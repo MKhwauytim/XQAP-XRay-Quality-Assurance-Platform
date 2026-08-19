@@ -35,7 +35,11 @@ import { submitReassignmentRequests } from "../../../../../data/referral/submitR
 import { isReassignEligible } from "../../../../../data/referral/planReassignment";
 import { appendWorkspaceAction } from "../../../../../data/audit/actionLog";
 import { getReplacementCandidatesIndexed } from "../../../../../data/distribution/replacementCandidateLookup";
-import { findPopulationRowById } from "../../../../../data/population/populationRowLookup";
+import {
+  findPopulationRowById,
+  type PopulationRowLookupResult,
+} from "../../../../../data/population/populationRowLookup";
+import { PopulationUnreadableError } from "../../../../../data/population/populationStorage";
 import type { ReplacementIndexRow } from "../../../../../data/population/replacementIndexTypes";
 import { loadPopulationConfig, type StageAliasMappings } from "../../../../../data/population/populationConfig";
 import { useGlobalMonth } from "../../../../../data/month/useGlobalMonth";
@@ -251,6 +255,19 @@ function beginAdhocReads(
     entries,
     answers: entries.then((list) => loadAdhocAnswerItems(directoryHandle, list)),
   };
+}
+
+/**
+ * T-08 — a lookup MISS is staleness; a failed READ is not.
+ *
+ * `findPopulationRowById` answers `absent` only when the month genuinely has no
+ * `population.final.json`. `unreadable`/`worker` mean the row may well be there
+ * and this call could not see it, so telling the user "البيانات تغيّرت" would
+ * report a data change that never happened — and send them looking for a row
+ * that is fine.
+ */
+function isPopulationReadFailure(lookup: PopulationRowLookupResult): boolean {
+  return !lookup.ok && lookup.reason !== "absent";
 }
 
 export default function XrayReferrals({ directoryHandle }: Props) {
@@ -1030,6 +1047,12 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       );
     } catch (error) {
       logError("xrayReferrals:getReplacementCandidatesIndexed", error);
+      // T-08: an empty pool would assert "no eligible replacement exists" — a
+      // claim about the data that an unreadable population cannot support.
+      if (error instanceof PopulationUnreadableError) {
+        setStatusMsg({ type: "error", text: getLabels().msg_population_unreadable });
+        return;
+      }
       candidates = { recommended: [], all: [] }; // dialog will show empty candidates gracefully
     }
     setReplacementError(null);
@@ -1102,6 +1125,12 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         // only the one matching row comes back. A miss and a failure are both
         // treated as "stale", exactly as the previous inline `.find()` was.
         const lookup = await findPopulationRowById(directoryHandle, selMonth, replacement.xrayImageId);
+        if (isPopulationReadFailure(lookup)) {
+          const text = getLabels().msg_population_unreadable;
+          setReplacementError(text);
+          setStatusMsg({ type: "error", text });
+          return;
+        }
         const fullReplacementRow = lookup.ok ? lookup.row ?? undefined : undefined;
         if (!fullReplacementRow) {
           setReplacementError(STALE_MSG);

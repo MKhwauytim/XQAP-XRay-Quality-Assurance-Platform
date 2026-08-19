@@ -123,6 +123,12 @@ export const phaseThreeFourLabels = {
   p4_matrix_totals_stage_mixed:
     "مجموع حصص {stage} = {sum} — تضم حصة بعدد محدد وليس نسبة، فلا ينطبق فحص 100%",
 
+  // T-14: rows whose stage no longer resolves through the stage mappings are
+  // skipped by bulk assignment. Silent before — the operator read "distributed"
+  // as "the whole month is assigned" while these rows stayed unowned.
+  p4_bulk_unmapped_warning: "تنبيه: {count} صفاً لم يُوزَّع لأن مستواه غير مطابق لإعدادات المستويات. راجع مطابقة المستويات ثم أعد التوزيع، أو عيّن هذه الصفوف يدوياً.",
+  p4_bulk_unmapped_warning_stages: "تنبيه: {count} صفاً لم يُوزَّع لأن مستواه غير مطابق لإعدادات المستويات ({stages}). راجع مطابقة المستويات ثم أعد التوزيع، أو عيّن هذه الصفوف يدوياً.",
+
   // ── المرحلة 4 — pill switch + المراجعة اليدوية ──────────────────────
   p4_tab_bulk: "التوزيع الجماعي",
   p4_tab_manual: "المراجعة اليدوية",

@@ -5,7 +5,7 @@ import {
   safeWriteJsonText,
   safeReadJson,
   readEnvelopeRevision,
-  readDecodedFileText,
+  readDecodedFileTextOutcome,
   copyFileBytes,
   isCompressedFile,
   type SafeWriteProgressPhase,
@@ -704,21 +704,88 @@ export async function loadAllPopulationRows(
   return [...seen.values()];
 }
 
+/**
+ * Absent vs unreadable, kept apart (T-08).
+ *
+ * `population.final.json` reads used to collapse "this month was never
+ * processed" and "this month's file could not be read right now" into the same
+ * `null`. Every surface downstream then rendered the friendly empty state —
+ * Population Browse literally invites the user to go re-process the month, and
+ * the replacement flow reports zero candidates — so a transient SMB read
+ * failure looks exactly like a month with no data, and the user's natural next
+ * click destroys the data that is actually still there.
+ *
+ * `absent` is only ever reported when the month folder, the processed
+ * subfolder, or the file itself said NotFound. Anything else — a damaged file,
+ * exhausted NotReadableError retries, a permission failure — is `unreadable`
+ * and must block rather than degrade to "empty".
+ */
+export type PopulationFinalOutcome<T> =
+  | { status: "loaded"; value: T }
+  | { status: "absent" }
+  | { status: "unreadable" };
+
+/** Thrown where a caller's contract has no room for an outcome union but must
+ *  still refuse to treat an unreadable month as an empty one. */
+export class PopulationUnreadableError extends Error {
+  readonly monthFolderName: string;
+  constructor(monthFolderName: string) {
+    super(`population.final.json for ${monthFolderName} exists but could not be read.`);
+    this.name = "PopulationUnreadableError";
+    this.monthFolderName = monthFolderName;
+  }
+}
+
+function isMissingEntryError(error: unknown): boolean {
+  return (
+    error !== null &&
+    typeof error === "object" &&
+    (error as { name?: string }).name === "NotFoundError"
+  );
+}
+
+/**
+ * Resolve the month's `2-processed/` directory, telling "not there" apart from
+ * "could not be opened". Returns `null` for a genuinely absent folder.
+ */
+async function openProcessedDir(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<{ status: "open"; dir: DirectoryHandleLike } | { status: "absent" } | { status: "unreadable" }> {
+  try {
+    const monthDir = await getMonthDir(directoryHandle, monthFolderName);
+    const dir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false });
+    return { status: "open", dir };
+  } catch (error) {
+    return isMissingEntryError(error) ? { status: "absent" } : { status: "unreadable" };
+  }
+}
+
+/** Discriminating counterpart of {@link loadMonthPopulationFinal}. */
+export async function readMonthPopulationFinal(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<PopulationFinalOutcome<PopulationFinalData>> {
+  const opened = await openProcessedDir(directoryHandle, monthFolderName);
+  if (opened.status !== "open") return opened;
+  let result: Awaited<ReturnType<typeof safeReadJson<PopulationFinalData>>>;
+  try {
+    result = await safeReadJson<PopulationFinalData>(opened.dir, "population.final.json");
+  } catch {
+    return { status: "unreadable" };
+  }
+  if (result.ok) return { status: "loaded", value: result.value };
+  // safeReadJson already walked live -> .bak -> .tmp: "missing" means every rung
+  // was absent, "corrupt" means at least one existed and could not be used.
+  return result.reason === "missing" ? { status: "absent" } : { status: "unreadable" };
+}
+
 export async function loadMonthPopulationFinal(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
 ): Promise<PopulationFinalData | null> {
-  try {
-    const monthDir = await getMonthDir(directoryHandle, monthFolderName);
-    const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false });
-    const result = await safeReadJson<PopulationFinalData>(
-      processedDir,
-      "population.final.json"
-    );
-    return result.ok ? result.value : null;
-  } catch {
-    return null;
-  }
+  const outcome = await readMonthPopulationFinal(directoryHandle, monthFolderName);
+  return outcome.status === "loaded" ? outcome.value : null;
 }
 
 /**
@@ -731,12 +798,15 @@ export async function loadMonthPopulationFinal(
  * Deliberately does NOT reuse `safeReadJson` here: `safeReadJson` also returns
  * `rawText`, but it gets there by calling `unwrap(JSON.parse(...))` first -- i.e. it
  * already pays the exact main-thread parse cost this accessor exists to avoid. This
- * calls the lower-level `readDecodedFileText` (text-only, no parse) instead — which
- * also transparently decompresses a compressed file, handing the worker the body
- * text rather than gzip bytes.
+ * calls the lower-level `readDecodedFileTextOutcome` (text-only, no parse) instead —
+ * which also transparently decompresses a compressed file, handing the worker the
+ * body text rather than gzip bytes.
  *
- * Returns null when the file doesn't exist yet (e.g. an unprocessed/pending month),
- * matching `loadMonthPopulationFinal`'s null-on-missing contract.
+ * Reports `absent` when the file doesn't exist yet (e.g. an unprocessed/pending
+ * month) and `unreadable` when a copy of it is there but could not be read — see
+ * {@link PopulationFinalOutcome}. `loadMonthPopulationFinalRawText` below keeps the
+ * older null-for-both contract for callers that genuinely cannot act on the
+ * difference.
  *
  * Recovery ladder (I1): skipping `safeReadJson` also skipped its `.bak` -> `.tmp`
  * fallback, so a lost/unreadable live file degraded straight to "no data" even with
@@ -750,44 +820,57 @@ export async function loadMonthPopulationFinal(
  * answers with an "error" response, and `BrowseDataView` surfaces that to the user
  * (rather than spinning forever, which is what it used to do).
  */
+export async function readMonthPopulationFinalRawText(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<PopulationFinalOutcome<string>> {
+  const opened = await openProcessedDir(directoryHandle, monthFolderName);
+  if (opened.status !== "open") return opened;
+
+  // A rung that EXISTED but produced nothing usable is remembered: once the
+  // whole ladder has been walked, "every rung was NotFound" is absence, while
+  // "at least one rung was there and unusable" is a read failure. Collapsing
+  // the two is what let a transient SMB failure render as "no data yet".
+  let sawUnreadableRung = false;
+
+  for (const candidate of [
+    "population.final.json",
+    "population.final.json.bak",
+    "population.final.json.tmp"
+  ]) {
+    // Dual read, not the raw one: a compressed file must be handed to the
+    // worker as its DECOMPRESSED body (which the worker's `unwrap` tolerates
+    // exactly like a legacy bare payload), while a plain file is still
+    // passed through verbatim with no parse on this thread.
+    const outcome = await readDecodedFileTextOutcome(opened.dir, candidate);
+    if (outcome.status === "unreadable") {
+      // The next rung of the ladder may still hold a usable copy, so keep
+      // walking — but do not let a later NotFound erase the fact that a copy
+      // of this file exists and could not be read.
+      sawUnreadableRung = true;
+      continue;
+    }
+    if (outcome.status === "absent") continue;
+    // A zero-byte torn write (a live file caught mid-safeWriteJson) reads back
+    // as "" rather than absent -- treat it as an unusable rung so the ladder
+    // still falls through to .bak/.tmp instead of handing the worker an empty
+    // string it can only fail to parse.
+    if (outcome.text.trim() === "") {
+      sawUnreadableRung = true;
+      continue;
+    }
+    return { status: "loaded", value: outcome.text };
+  }
+
+  return sawUnreadableRung ? { status: "unreadable" } : { status: "absent" };
+}
+
 export async function loadMonthPopulationFinalRawText(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
 ): Promise<string | null> {
-  try {
-    const monthDir = await getMonthDir(directoryHandle, monthFolderName);
-    const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false });
-
-    for (const candidate of [
-      "population.final.json",
-      "population.final.json.bak",
-      "population.final.json.tmp"
-    ]) {
-      try {
-        // Dual read, not the raw one: a compressed file must be handed to the
-        // worker as its DECOMPRESSED body (which the worker's `unwrap` tolerates
-        // exactly like a legacy bare payload), while a plain file is still
-        // passed through verbatim with no parse on this thread.
-        const text = await readDecodedFileText(processedDir, candidate);
-        // A zero-byte torn write (a live file caught mid-safeWriteJson) reads back
-        // as "" rather than null -- treat it the same as a missing rung so the
-        // ladder still falls through to .bak/.tmp instead of handing the worker an
-        // empty string it can only fail to parse.
-        if (text !== null && text.trim() !== "") {
-          return text;
-        }
-      } catch {
-        // A read that fails outright (permissions, exhausted NotReadableError
-        // retries) is treated the same as a missing file HERE, and only here:
-        // the next rung of the ladder may still hold a usable copy. If every
-        // rung fails the caller still gets null, exactly as before.
-      }
-    }
-
-    return null;
-  } catch {
-    return null;
-  }
+  const outcome = await readMonthPopulationFinalRawText(directoryHandle, monthFolderName);
+  return outcome.status === "loaded" ? outcome.value : null;
 }
 
 /** Envelope revision of `population.final.json` for report-to-revision linkage (B2). */

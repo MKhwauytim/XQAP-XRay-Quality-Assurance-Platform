@@ -331,9 +331,42 @@ export async function readDecodedFileText(
   dir: DirectoryHandleLike,
   name: string
 ): Promise<string | null> {
-  const content = await readContent(dir, name);
-  if (content === null || content.kind === "damaged") return null;
-  return content.kind === "compressed" ? content.bodyText : content.text;
+  const outcome = await readDecodedFileTextOutcome(dir, name);
+  return outcome.status === "text" ? outcome.text : null;
+}
+
+/**
+ * "Could not read" is NOT "does not exist".
+ *
+ * {@link readDecodedFileText} collapses three very different answers into one
+ * `null`: the file is genuinely absent, the file is there but its bytes are
+ * unusable (a torn/damaged compressed member), or the read failed outright
+ * (permissions, exhausted NotReadableError retries on an SMB share). Callers
+ * that render "no data yet" — and worse, invite the user to *re-create* the
+ * data — must not treat the last two as absence. This is the same read with
+ * the distinction preserved.
+ *
+ * `absent` means every layer said NotFound; anything else is `unreadable`.
+ */
+export type DecodedTextOutcome =
+  | { status: "text"; text: string }
+  | { status: "absent" }
+  | { status: "unreadable" };
+
+export async function readDecodedFileTextOutcome(
+  dir: DirectoryHandleLike,
+  name: string
+): Promise<DecodedTextOutcome> {
+  let content: FileContent | null;
+  try {
+    content = await readContent(dir, name);
+  } catch {
+    // readContent resolves null for NotFound, so a throw here is never absence.
+    return { status: "unreadable" };
+  }
+  if (content === null) return { status: "absent" };
+  if (content.kind === "damaged") return { status: "unreadable" };
+  return { status: "text", text: content.kind === "compressed" ? content.bodyText : content.text };
 }
 
 /**

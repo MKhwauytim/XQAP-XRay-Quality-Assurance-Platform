@@ -300,6 +300,14 @@ export const DEFAULT_LABELS = {
   // whose messages are internal English (e.g. safeWrite validation text).
   msg_unexpected_write_error: "تعذّر إتمام العملية بسبب خطأ غير متوقع أثناء الحفظ. أعد المحاولة، وإن تكرر الخطأ فأبلغ المسؤول.",
 
+  // Population file unreadable (T-08). Deliberately NOT phrased as "no data":
+  // the file may be perfectly intact and merely unreachable this second, and
+  // the user's next click after an "empty month" message is to re-process it.
+  msg_population_unreadable:        "تعذّرت قراءة ملف مجتمع هذا الشهر. قد يكون مجلد العمل غير متاح مؤقتاً — أعد المحاولة، ولا تُعِد معالجة الشهر قبل التأكد من وجود بياناته.",
+  browse_load_failed_title:         "تعذّر قراءة بيانات هذا الشهر",
+  browse_load_failed_desc:          "الملف موجود لكن تعذّرت قراءته الآن. لا يعني ذلك أن الشهر بلا بيانات — أعد المحاولة، ولا تُعِد معالجة الشهر قبل التأكد.",
+  browse_load_failed_retry:         "إعادة المحاولة",
+
   // Feedback widget
   fb_category_suggestion:   "اقتراح",
   fb_category_issue:        "مشكلة",

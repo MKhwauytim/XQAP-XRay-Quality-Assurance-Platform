@@ -15,8 +15,9 @@ import type { StageAliasMappings } from "../population/populationConfig";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import { getStageKey, type StageCountKey } from "../population/stageHelpers";
 import {
-  loadMonthPopulationFinal,
+  PopulationUnreadableError,
   loadMonthPopulationFinalRevision,
+  readMonthPopulationFinal,
 } from "../population/populationStorage";
 import {
   computeStageMappingsHash,
@@ -92,7 +93,16 @@ export async function getReplacementCandidatesIndexed(
 
   logError("distribution:replacement-index-fallback", `month=${monthFolderName} reason=${fallbackReason}`);
 
-  const finalData = await loadMonthPopulationFinal(directoryHandle, monthFolderName);
+  // T-08: an UNREADABLE population.final.json must not be laundered into an
+  // empty row list. That produced "no replacement candidates" — a factual claim
+  // about the month's data — from what is really a transient share failure, and
+  // the operator's next move is to go looking for the month in the processing
+  // tab. Refuse instead; the caller surfaces it as "unavailable, try again".
+  const finalOutcome = await readMonthPopulationFinal(directoryHandle, monthFolderName);
+  if (finalOutcome.status === "unreadable") {
+    throw new PopulationUnreadableError(monthFolderName);
+  }
+  const finalData = finalOutcome.status === "loaded" ? finalOutcome.value : null;
   const populationRows = (finalData?.rows ?? []) as PreparedPopulationRow[];
   const result = getReplacementCandidates(entry, populationRows, sampleMaster, allEntries, stageMappings);
 

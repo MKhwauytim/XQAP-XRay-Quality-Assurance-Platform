@@ -320,7 +320,7 @@ export default function PhaseFourDistribution({
       return;
     }
     setBulkError("");
-    const { events, errors, skipped } = calculateBulkAssignment({
+    const { events, errors, skipped, unmapped } = calculateBulkAssignment({
       rows: sampleRows,
       allocations: activeAllocations,
       employees: getManagedLoginUsers(),
@@ -338,12 +338,23 @@ export default function PhaseFourDistribution({
     if (skipped > 0) {
       messages.push(`تم تخطي ${formatNumber(skipped)} صفاً معيناً مسبقاً (لن يُعاد تعيينها).`);
     }
+    // T-14: rows whose stage no longer resolves are dropped by the stage loop.
+    // Reporting only — the assignment itself is unchanged — but without it the
+    // operator reads a successful run as "the month is fully assigned".
+    if (unmapped.count > 0) {
+      const template = unmapped.stages.length > 0
+        ? L.p4_bulk_unmapped_warning_stages.replace("{stages}", unmapped.stages.join("، "))
+        : L.p4_bulk_unmapped_warning;
+      messages.push(template.replace("{count}", formatNumber(unmapped.count)));
+    }
     if (messages.length > 0) {
       setBulkError(messages.join(" "));
     }
 
     if (events.length === 0) {
-      if (skipped > 0 && errors.length === 0) {
+      // Not "everything was already assigned" when rows were dropped for an
+      // unresolvable stage — that would overwrite the only notice of them.
+      if (skipped > 0 && errors.length === 0 && unmapped.count === 0) {
         setBulkError(`جميع الصفوف (${formatNumber(skipped)}) معينة مسبقاً — لا يوجد ما يُوزّع.`);
       }
       return;
