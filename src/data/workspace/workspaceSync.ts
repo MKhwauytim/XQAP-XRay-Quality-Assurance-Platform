@@ -44,15 +44,19 @@ import { broadcastDataRefresh, type DataRefreshFamily } from "./dataRefreshSigna
 import { bumpWorkspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
 import { readDistributionLogStamp } from "../distribution/distributionStorage";
 import {
+  boundedSizeSignature,
   listDirectoryEntriesWithSize,
   type SizedDirectoryEntry,
 } from "../storage/directoryScan";
 import { readEnvelopeRevision } from "../storage/safeWrite";
 import { logError } from "../storage/errorLogger";
+import { isNotFoundError } from "../storage/transientFileErrors";
+import { ACK_FILE_SUFFIX } from "../notifications/notificationAckStorage";
 import {
   getPopulationMonthDir,
   getSampleMonthDir,
   getSystemRoot,
+  NOTIFICATIONS_SUBFOLDERS,
   SAMPLE_SUBFOLDERS,
   SYSTEM_FOLDER_NAMES,
 } from "./workspacePaths";
@@ -75,10 +79,33 @@ const NOTIFICATIONS_FILE = "notifications.json";
 const ANSWERS_SUFFIX = ".answers.json";
 const DECISIONS_SUFFIX = ".json";
 
+/**
+ * "The acks folder could not be probed on this tick" — deliberately distinct
+ * from `""`, which is the real observation a workspace with no acks folder (or
+ * no ack files in it) produces and which must keep taking part in the diff. A
+ * failed read is not an observation: storing its placeholder as the new baseline
+ * would make the next healthy tick differ from it and broadcast a change nobody
+ * made, and a refresh is not free — it can clobber unsaved draft state (see
+ * `dataRefreshSignal`). An unprobed signature carries the PREVIOUS baseline
+ * forward untouched instead, and reports neither "changed" nor "reset".
+ */
+const ACKS_UNPROBED = null;
+
 type Probe = {
   distributionRevision: number | null;
   distributionWriteToken: string | undefined;
   notificationsRevision: number | null;
+  /**
+   * Bounded name+size signature of `5-system/notifications/acks/*.acks.json`
+   * (see `boundedSizeSignature`), joined to the `notifications` family.
+   *
+   * The shared `notifications.json` revision above covers broadcasts only. Since
+   * acknowledgements moved to one file per employee, an ack writes NOTHING that
+   * revision can see, so the manager's "who acknowledged" roster — which reloads
+   * on the refresh signal — went stale until someone pressed refresh by hand.
+   * This is the signal for it. `null` means UNPROBED, see `ACKS_UNPROBED`.
+   */
+  acksSignature: string | null;
   /** Serialized, sorted name->(size, mtime) map covering BOTH the
    *  employee-answers dir and the approvals (supervisor decisions) dir. A
    *  single combined string because a per-file diff alone cannot cheaply
@@ -275,6 +302,42 @@ async function safeSignature(dir: DirectoryHandleLike | null, suffix: string): P
 }
 
 /**
+ * Bounded signature of the per-employee acknowledgement files.
+ *
+ * ONE directory listing plus at most `DEFAULT_SIZE_SIGNATURE_STAT_BUDGET` size
+ * stats, and no file content is read — the same shape the answers/approvals
+ * probes use, and the reason `safeRevision` (one envelope read per file) was not
+ * reused here: an ack file exists per employee, so a per-file revision read
+ * would put N share round trips on every tick of every client.
+ *
+ * A workspace with no acks folder yet is a real observation (`""`), not a
+ * failure; only a read that THREW returns `ACKS_UNPROBED`.
+ */
+async function safeAcksSignature(
+  notificationsDir: DirectoryHandleLike | null
+): Promise<string | null> {
+  if (!notificationsDir) return "";
+  let acksDir: DirectoryHandleLike;
+  try {
+    acksDir = await notificationsDir.getDirectoryHandle(NOTIFICATIONS_SUBFOLDERS.acks, {
+      create: false,
+    });
+  } catch (error) {
+    // Absent is normal for a legacy or brand-new workspace: nobody has
+    // acknowledged anything yet. Anything else is a failed read.
+    if (isNotFoundError(error)) return "";
+    logError("workspaceSync:probeAcksOpen", error);
+    return ACKS_UNPROBED;
+  }
+  try {
+    return await boundedSizeSignature(acksDir, ACK_FILE_SUFFIX);
+  } catch (error) {
+    logError("workspaceSync:probeAcks", error);
+    return ACKS_UNPROBED;
+  }
+}
+
+/**
  * One run's worth of probing (§4.2's per-family change set). Every probe
  * degrades to a neutral "unreadable" value on failure (missing folder on a
  * fresh workspace, permission hiccup, ...) rather than throwing -- a probe
@@ -286,7 +349,14 @@ async function probeMonth(
   systemDir: DirectoryHandleLike | null
 ): Promise<Probe> {
   const dirs = await resolveProbeDirs(directoryHandle, monthFolderName, systemDir);
-  const [distStamp, notificationsRevision, answersSignature, approvalsSignature, manifestRevision] =
+  const [
+    distStamp,
+    notificationsRevision,
+    acksSignature,
+    answersSignature,
+    approvalsSignature,
+    manifestRevision,
+  ] =
     await Promise.all([
       readDistributionLogStamp(directoryHandle, monthFolderName, {
         currentDir: dirs.mainDir,
@@ -296,6 +366,7 @@ async function probeMonth(
         writeToken: undefined,
       })),
       safeRevision(dirs.notificationsDir, NOTIFICATIONS_FILE),
+      safeAcksSignature(dirs.notificationsDir),
       safeSignature(dirs.employeesDir, ANSWERS_SUFFIX),
       safeSignature(dirs.approvalsDir, DECISIONS_SUFFIX),
       safeRevision(dirs.populationMonthDir, MONTH_MANIFEST_FILE),
@@ -305,10 +376,17 @@ async function probeMonth(
     distributionRevision: distStamp.revision,
     distributionWriteToken: distStamp.writeToken,
     notificationsRevision,
+    acksSignature,
     answersSignature,
     approvalsSignature,
     manifestRevision,
   };
+}
+
+/** Previous acks baseline when this tick could not probe it; otherwise this tick's. */
+function carryUnprobedAcks(previous: Probe | undefined, current: Probe): Probe {
+  if (!previous || current.acksSignature !== ACKS_UNPROBED) return current;
+  return { ...current, acksSignature: previous.acksSignature };
 }
 
 function diffFamilies(previous: Probe | undefined, current: Probe): Set<DataRefreshFamily> {
@@ -327,7 +405,15 @@ function diffFamilies(previous: Probe | undefined, current: Probe): Set<DataRefr
   ) {
     changed.add("distribution");
   }
-  if (previous.notificationsRevision !== current.notificationsRevision) {
+  if (
+    previous.notificationsRevision !== current.notificationsRevision ||
+    // Both sides must be real observations: an unprobed tick is never a change.
+    // (`carryUnprobedAcks` has already replaced a `null` here with the previous
+    // baseline, so this only ever fires for a probe that has never succeeded.)
+    (previous.acksSignature !== ACKS_UNPROBED &&
+      current.acksSignature !== ACKS_UNPROBED &&
+      previous.acksSignature !== current.acksSignature)
+  ) {
     changed.add("notifications");
   }
   if (previous.answersSignature !== current.answersSignature) {
@@ -353,8 +439,13 @@ async function probeChangedFamilies(
   systemDir: DirectoryHandleLike | null
 ): Promise<Set<DataRefreshFamily>> {
   const key = probeKey(directoryHandle, monthFolderName);
-  const current = await probeMonth(directoryHandle, monthFolderName, systemDir);
-  const changed = diffFamilies(previousProbes.get(key), current);
+  const previous = previousProbes.get(key);
+  const probed = await probeMonth(directoryHandle, monthFolderName, systemDir);
+  // Carry BEFORE storing: a signature this tick could not read keeps the last
+  // value that was actually observed, so the next readable tick diffs against
+  // real state instead of against a placeholder.
+  const current = carryUnprobedAcks(previous, probed);
+  const changed = diffFamilies(previous, current);
   previousProbes.set(key, current);
   return changed;
 }

@@ -14,8 +14,15 @@ import {
   getSampleApprovalsDir,
   getSampleEmployeeDir,
   getSystemRoot,
+  NOTIFICATIONS_SUBFOLDERS,
   SYSTEM_FOLDER_NAMES,
+  __clearWorkspaceDirCacheForTests,
 } from "./workspacePaths";
+import {
+  acceptNotification,
+  loadNotifications,
+  postNotification,
+} from "../notifications/notificationStorage";
 import { appendDistributionEvent } from "../distribution/distributionStorage";
 import { buildAssignEvent } from "../distribution/distributionLog";
 import {
@@ -84,6 +91,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 
 beforeEach(() => {
   __clearInFlightForTests();
+  __clearWorkspaceDirCacheForTests();
   __resetWorkspaceSyncStateForTests();
 });
 
@@ -219,6 +227,123 @@ describe("runSync — change-set probe (§4.2 / A7)", () => {
     const reads = getReadLog(root).length - before;
 
     expect(reads).toBeLessThanOrEqual(9);
+  });
+});
+
+/**
+ * Acknowledgements live in one file per employee under
+ * `5-system/notifications/acks/`, so nothing an ack touches moves
+ * `notifications.json`'s revision — the only thing this probe used to compare
+ * for the `notifications` family. The manager's "who acknowledged" roster
+ * reloads on the refresh signal, so without the signature below it silently went
+ * stale until somebody pressed refresh by hand.
+ */
+describe("runSync — the per-employee acknowledgement signature", () => {
+  /**
+   * Wraps every `getDirectoryHandle` down the tree so the acks folder can be
+   * made unreadable AFTER a healthy baseline has been established — which
+   * fixed-at-construction fault injection cannot express.
+   */
+  function withAcksFailure(
+    handle: DirectoryHandleLike,
+    fail: { on: boolean }
+  ): DirectoryHandleLike {
+    return new Proxy(handle, {
+      get(target, property, receiver) {
+        if (property === "getDirectoryHandle") {
+          return async (name: string, options?: { create?: boolean }) => {
+            if (name === NOTIFICATIONS_SUBFOLDERS.acks && fail.on) {
+              const error = new Error("simulated share failure");
+              error.name = "NotReadableError";
+              throw error;
+            }
+            return withAcksFailure(await target.getDirectoryHandle(name, options), fail);
+          };
+        }
+        const value = Reflect.get(target, property, receiver) as unknown;
+        return typeof value === "function" ? (value as () => unknown).bind(target) : value;
+      },
+    }) as DirectoryHandleLike;
+  }
+
+  async function seedBroadcast(root: DirectoryHandleLike): Promise<string> {
+    await postNotification(root, { message: "تعميم", postedBy: "manager1" });
+    const [posted] = await loadNotifications(root);
+    return posted!.id;
+  }
+
+  it("an acknowledgement by one employee moves the baseline, so the next tick broadcasts notifications", async () => {
+    const root = makeRoot();
+    const notificationId = await seedBroadcast(root);
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    // Writes ONLY 5-system/notifications/acks/employee_b.acks.json — the shared
+    // broadcast file's revision is untouched (pinned in notificationAckStorage.test.ts).
+    await acceptNotification(root, notificationId, "employee_b");
+
+    const capture = captureBroadcasts();
+    const result = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    capture.stop();
+
+    expect(result.changed.has("notifications")).toBe(true);
+    expect(result.broadcast).toBe(true);
+    expect(capture.details).toHaveLength(1);
+  });
+
+  it("a second acknowledgement by a DIFFERENT employee moves it again (a new file, not a bigger one)", async () => {
+    const root = makeRoot();
+    const notificationId = await seedBroadcast(root);
+    await acceptNotification(root, notificationId, "employee_a");
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    await acceptNotification(root, notificationId, "employee_b");
+    const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+
+    expect(changed.has("notifications")).toBe(true);
+  });
+
+  it("an untouched workspace re-probes to an identical baseline and broadcasts nothing", async () => {
+    const root = makeRoot();
+    const notificationId = await seedBroadcast(root);
+    await acceptNotification(root, notificationId, "employee_a");
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    const capture = captureBroadcasts();
+    const result = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    capture.stop();
+
+    expect(result.changed.size).toBe(0);
+    expect(result.broadcast).toBe(false);
+    expect(capture.details).toHaveLength(0);
+  });
+
+  it("an UNREADABLE acks folder carries the baseline forward instead of faking a change", async () => {
+    const fail = { on: false };
+    const root = withAcksFailure(makeRoot(), fail);
+    const notificationId = await seedBroadcast(root);
+    await acceptNotification(root, notificationId, "employee_a");
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // healthy baseline
+
+    fail.on = true;
+    const capture = captureBroadcasts();
+    const blipped = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    capture.stop();
+
+    // A failed read is not an observation: neither "changed" now…
+    expect(blipped.changed.size).toBe(0);
+    expect(capture.details).toHaveLength(0);
+
+    // …nor "changed" on the next healthy tick, which is what storing the
+    // failure's placeholder as the new baseline would have produced.
+    fail.on = false;
+    const recovered = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(recovered.changed.size).toBe(0);
+    expect(recovered.broadcast).toBe(false);
+
+    // The carried baseline is still the real one: a genuine ack is detected.
+    await acceptNotification(root, notificationId, "employee_b");
+    const after = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(after.changed.has("notifications")).toBe(true);
   });
 });
 
@@ -613,9 +738,13 @@ describe("runSync — per-tick round-trip budget (UNC/SMB cost regression guard)
     // itself down from sixteen. The workspacePaths directory-handle cache
     // (item 1.7) now serves every handle it hands out, so the five it owns
     // (both roots, both {month} dirs, 5-system) cost nothing on a warm tick.
-    // What is left is the four this file resolves off an already-resolved
-    // parent handle itself, outside those getters.
-    expect(opens).toHaveLength(4);
+    // What is left is the five this file resolves off an already-resolved
+    // parent handle itself, outside those getters: 1-main, 2-employees,
+    // 3-approvals, notifications, and notifications/acks. The last is the one
+    // added with the acknowledgement signature — one open per tick, whose whole
+    // point is that it does NOT grow with the number of employees (the listing
+    // it feeds is bounded, see boundedSizeSignature).
+    expect(opens).toHaveLength(5);
     const distinct = new Set(opens.map((entry) => entry.name));
     expect(distinct.size).toBe(opens.length); // no directory opened twice
   });

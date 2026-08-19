@@ -30,6 +30,7 @@ import {
   loadAllUserAcks,
   loadUserAcksForDisplay,
   recordAcknowledgement,
+  type LiveNotificationSnapshot,
 } from "./notificationAckStorage";
 import {
   hasAccepted,
@@ -242,21 +243,25 @@ export async function acceptNotification(
       // The broadcast log is READ here, never written: it answers "does this
       // notification still exist", "did this user already accept it under the
       // pre-split scheme", and supplies the id set for the single-owner prune.
-      let liveNotificationIds: ReadonlySet<string> | null = null;
+      let live: LiveNotificationSnapshot | null = null;
+      // Taken BEFORE the read, so an ack recorded while the read was in flight
+      // is on the "newer than the snapshot" side of the prune's guard rather
+      // than judged by an id set that could not have contained it.
+      const readAtMs = Date.now();
       try {
         const { notifications } = await readNotificationsFile(directoryHandle);
         const target = notifications.find((n) => n.id === notificationId);
         // Gone from the log, or already acknowledged in a legacy shared-file
         // entry — nothing to record, and the legacy entry stays exactly as it is.
         if (!target || hasAccepted(target, username)) return { ok: true };
-        liveNotificationIds = new Set(notifications.map((n) => n.id));
+        live = { ids: new Set(notifications.map((n) => n.id)), readAtMs };
       } catch (error) {
         // "I could not read the log" is not "none of these notifications
         // exist": record the acknowledgement anyway, but with pruning disabled
         // so no live ack is dropped on a bad read.
         logError("notifications:acceptBaseRead", error);
       }
-      return recordAcknowledgement(directoryHandle, notificationId, username, liveNotificationIds);
+      return recordAcknowledgement(directoryHandle, notificationId, username, live);
     });
   } catch (error) {
     logError("notifications:accept", error);

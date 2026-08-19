@@ -139,21 +139,44 @@ export async function loadUserAcksForDisplay(
 }
 
 /**
+ * A read of the broadcast log, and WHEN it was taken.
+ *
+ * The timestamp is what makes the prune safe across a casLoop retry. `ids` is a
+ * snapshot: it is taken once, before the loop, and every attempt re-applies it
+ * to the file it just re-read. An ack for a notification posted AFTER the
+ * snapshot — landing in the file from this same user's other client while the
+ * loop retries — is absent from `ids` through no fault of its own, and pruning
+ * it would silently delete a real acknowledgement the user had just made. Any
+ * ack at least as new as the snapshot is therefore kept regardless of `ids`.
+ *
+ * Re-reading the log per attempt was the alternative, and was rejected: an
+ * attempt reads only this user's own ack file, so that would add a shared-file
+ * read to every retry — the exact cross-user traffic the per-employee split
+ * exists to remove — to fix a case a timestamp comparison settles for free.
+ */
+export type LiveNotificationSnapshot = {
+  /** Ids present in the broadcast log at `readAtMs`. */
+  ids: ReadonlySet<string>;
+  /** `Date.now()` taken BEFORE the read, so the window errs toward keeping. */
+  readAtMs: number;
+};
+
+/**
  * Append `notificationId` to `username`'s own ack file.
  *
- * `liveNotificationIds` enables the single-owner prune (requirement 4): an
- * employee may drop HIS OWN acks whose notification has fallen out of the
- * broadcast log (the log keeps only the newest 500). Pass `null` when the
- * broadcast log could not be read — the ack is still recorded, but nothing is
- * pruned, because "I could not read the log" must never be mistaken for "none
- * of these notifications exist any more". Pruning keeps the file bounded by the
- * broadcast log's own cap; no other file is ever touched.
+ * `live` enables the single-owner prune (requirement 4): an employee may drop
+ * HIS OWN acks whose notification has fallen out of the broadcast log (the log
+ * keeps only the newest 500). Pass `null` when the broadcast log could not be
+ * read — the ack is still recorded, but nothing is pruned, because "I could not
+ * read the log" must never be mistaken for "none of these notifications exist
+ * any more". Pruning keeps the file bounded by the broadcast log's own cap; no
+ * other file is ever touched.
  */
 export async function recordAcknowledgement(
   directoryHandle: DirectoryHandleLike,
   notificationId: string,
   username: string,
-  liveNotificationIds: ReadonlySet<string> | null
+  live: LiveNotificationSnapshot | null
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const fileName = ackFileName(username);
   // `:rmw` suffix keeps this outer read-modify-write lock distinct from
@@ -170,7 +193,7 @@ export async function recordAcknowledgement(
           _writeToken: writeToken,
           username,
           updatedAt: new Date().toISOString(),
-          acks: nextAcks(current.acks, notificationId, liveNotificationIds),
+          acks: nextAcks(current.acks, notificationId, live),
         };
         await safeWriteJson(dir, fileName, updated);
         const verify = await loadUserAcks(directoryHandle, username);
@@ -200,14 +223,26 @@ export async function recordAcknowledgement(
   return { ok: true };
 }
 
+/**
+ * Is this ack too new for `live` to be evidence against it?
+ *
+ * An unparsable/absent `acceptedAt` counts as too new: the prune is a
+ * housekeeping nicety and the ack is real data, so an ack whose age cannot be
+ * established is kept rather than deleted.
+ */
+function outlivesSnapshot(ack: NotificationAck, live: LiveNotificationSnapshot): boolean {
+  const acceptedAtMs = Date.parse(ack.acceptedAt);
+  return Number.isNaN(acceptedAtMs) || acceptedAtMs >= live.readAtMs;
+}
+
 /** The employee's next ack list: prune his own dead entries, then append. */
 function nextAcks(
   existing: NotificationAck[],
   notificationId: string,
-  liveNotificationIds: ReadonlySet<string> | null
+  live: LiveNotificationSnapshot | null
 ): NotificationAck[] {
-  const kept = liveNotificationIds
-    ? existing.filter((ack) => liveNotificationIds.has(ack.notificationId))
+  const kept = live
+    ? existing.filter((ack) => live.ids.has(ack.notificationId) || outlivesSnapshot(ack, live))
     : existing;
   if (kept.some((ack) => ack.notificationId === notificationId)) return kept;
   return [...kept, { notificationId, acceptedAt: new Date().toISOString() }];
