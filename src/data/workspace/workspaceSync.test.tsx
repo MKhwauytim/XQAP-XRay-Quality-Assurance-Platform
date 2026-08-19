@@ -3,9 +3,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import {
   clearOperationLog,
+  clearSimulatedFaults,
   createMemoryDirectory,
   getOperationLog,
   getReadLog,
+  setSimulatedFaults,
 } from "../storage/memoryDirectory";
 import { safeWriteJson } from "../storage/safeWrite";
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
@@ -13,9 +15,11 @@ import {
   getPopulationMonthDir,
   getSampleApprovalsDir,
   getSampleEmployeeDir,
+  getSampleMainDir,
   getSystemRoot,
   SYSTEM_FOLDER_NAMES,
 } from "./workspacePaths";
+import { DISTRIBUTION_EVENTS_DIR } from "../distribution/distributionEventStore";
 import { appendDistributionEvent } from "../distribution/distributionStorage";
 import { buildAssignEvent } from "../distribution/distributionLog";
 import {
@@ -638,5 +642,181 @@ describe("runSync — per-tick round-trip budget (UNC/SMB cost regression guard)
     expect(log.filter((entry) => entry.operation === "getFileHandle")).toHaveLength(1);
     expect(log).toHaveLength(1);
     expect(getSyncIntervalMs()).toBe(DEFAULT_SYNC_INTERVAL_MS);
+  });
+});
+
+describe("runSync — the distribution event segments are probed directly (restore visibility)", () => {
+  /**
+   * `distribution.log.json`'s CAS stamp covers the distribution family only
+   * while the stamp and the durable events move together. Two real cases break
+   * that: a RESTORE merges events into `distribution.events/` and deliberately
+   * does not rewrite the projection (backupStorage's `restore-if-absent`), and
+   * an append whose projection write failed leaves the events durable with the
+   * stamp unmoved. Both used to be invisible to every other machine on the
+   * share until someone happened to press the manual refresh button.
+   */
+  async function eventsDirFor(root: DirectoryHandleLike): Promise<DirectoryHandleLike> {
+    const main = await getSampleMainDir(root, MONTH, true);
+    return main.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: true });
+  }
+
+  const segment = (ids: string[]): string =>
+    ids
+      .map((id) =>
+        `${JSON.stringify({
+          eventId: id,
+          eventType: "assigned",
+          xrayImageId: `XR-${id}`,
+          assignedTo: "alice",
+          eventAt: "2026-05-01T08:00:00.000Z",
+          eventBy: "admin",
+        })}\n`
+      )
+      .join("");
+
+  it("reports the distribution family when a segment gains events with the projection stamp untouched", async () => {
+    const root = makeRoot();
+    const eventsDir = await eventsDirFor(root);
+    await writeRawFile(eventsDir, "devA-s1.ndjson", segment(["e01"]));
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    // Exactly what a restore's mergeEventSegment does: the same segment name,
+    // more lines, and not one byte written to distribution.log.json.
+    await writeRawFile(eventsDir, "devA-s1.ndjson", segment(["e01", "e02"]));
+    const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+
+    expect([...changed]).toEqual(["distribution"]);
+  });
+
+  it("reports the distribution family when a restore puts a whole missing segment back", async () => {
+    const root = makeRoot();
+    const eventsDir = await eventsDirFor(root);
+    await writeRawFile(eventsDir, "devA-s1.ndjson", segment(["e01"]));
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    await writeRawFile(eventsDir, "devB-s9.ndjson", segment(["e02"]));
+    const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+
+    expect([...changed]).toEqual(["distribution"]);
+  });
+
+  it("reports the distribution family when only the restored projection stamp moved", async () => {
+    const root = makeRoot();
+    const mainDir = await getSampleMainDir(root, MONTH, true);
+    await safeWriteJson(mainDir, "distribution.log.json", {
+      monthFolderName: MONTH,
+      revision: 7,
+      _writeToken: "before-restore",
+      events: [],
+    });
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    // What restoreBackupSnapshot's stamp refresh does: same revision, new token.
+    await safeWriteJson(mainDir, "distribution.log.json", {
+      monthFolderName: MONTH,
+      revision: 7,
+      _writeToken: "after-restore",
+      events: [],
+    });
+    const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+
+    expect([...changed]).toEqual(["distribution"]);
+  });
+
+  it("produces an identical signature for an untouched month with segments present (no spurious refresh)", async () => {
+    const root = makeRoot();
+    const eventsDir = await eventsDirFor(root);
+    await writeRawFile(eventsDir, "devA-s1.ndjson", segment(["e01"]));
+    await writeRawFile(eventsDir, "devB-s9.ndjson", segment(["e02", "e03"]));
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    const capture = captureBroadcasts();
+    try {
+      const first = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      const second = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      expect(first.changed.size).toBe(0);
+      expect(second.changed.size).toBe(0);
+      expect(capture.details).toEqual([]);
+    } finally {
+      capture.stop();
+    }
+  });
+});
+
+describe("runSync — a failed family read carries its baseline forward (no double refresh)", () => {
+  /**
+   * A probe read that FAILS is not an observation. It used to be stored as the
+   * new baseline anyway (revision -1, an empty signature), so the next healthy
+   * tick differed from that placeholder and broadcast a change nobody made.
+   * Every transient blip on the share therefore cost every client an extra
+   * refresh — and a refresh can clobber unsaved draft state.
+   */
+  async function seedDistribution(root: DirectoryHandleLike): Promise<void> {
+    const mainDir = await getSampleMainDir(root, MONTH, true);
+    await safeWriteJson(mainDir, "distribution.log.json", {
+      monthFolderName: MONTH,
+      revision: 5,
+      _writeToken: "steady",
+      events: [],
+    });
+  }
+
+  it("an unreadable distribution log, then a healthy tick over unchanged data, broadcasts nothing", async () => {
+    const root = makeRoot();
+    await seedDistribution(root);
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    const capture = captureBroadcasts();
+    try {
+      setSimulatedFaults(root, [
+        {
+          operation: "getFile",
+          name: "distribution.log.json",
+          errorName: "NotReadableError",
+          times: Number.POSITIVE_INFINITY,
+        },
+      ]);
+      const blocked = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      clearSimulatedFaults(root);
+      const recovered = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+
+      expect(blocked.changed.size).toBe(0);
+      expect(recovered.changed.size).toBe(0);
+      expect(capture.details).toEqual([]);
+    } finally {
+      clearSimulatedFaults(root);
+      capture.stop();
+    }
+  });
+
+  it("an unreadable subdirectory open, then a healthy tick over unchanged data, broadcasts nothing", async () => {
+    const root = makeRoot();
+    const answersDir = await getSampleEmployeeDir(root, MONTH, true);
+    await writeRawFile(answersDir, "alice.answers.json", JSON.stringify({ items: [] }));
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    const capture = captureBroadcasts();
+    try {
+      // A transient share failure on the DIRECTORY open, not on a file: every
+      // family hanging off it used to probe as "empty" and become the baseline.
+      setSimulatedFaults(root, [
+        {
+          operation: "getDirectoryHandle",
+          name: "2-employees",
+          errorName: "NotReadableError",
+          times: Number.POSITIVE_INFINITY,
+        },
+      ]);
+      const blocked = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      clearSimulatedFaults(root);
+      const recovered = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+
+      expect(blocked.changed.size).toBe(0);
+      expect(recovered.changed.size).toBe(0);
+      expect(capture.details).toEqual([]);
+    } finally {
+      clearSimulatedFaults(root);
+      capture.stop();
+    }
   });
 });

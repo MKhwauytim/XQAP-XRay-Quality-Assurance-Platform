@@ -540,6 +540,8 @@ export const DEFAULT_LABELS = {
   app_auto_backup_done:      "تم إنشاء النسخة الاحتياطية التلقائية: {folderName}",
   app_auto_backup_failed:    "تعذر إنشاء النسخة الاحتياطية التلقائية: {error}",
   app_unknown_error:         "خطأ غير معروف",
+  app_restore_interrupted_warning:
+    "تحذير: يبدو أن عملية استعادة نسخة احتياطية بدأها \"{startedBy}\" بتاريخ {startedAt} لم تكتمل. قد تكون بيانات مساحة العمل غير متطابقة — يُرجى إعادة تنفيذ الاستعادة من نفس النسخة الاحتياطية قبل متابعة العمل.",
   app_workspace_aria:        "مساحة العمل",
   app_no_tabs_title:         "لا توجد تبويبات متاحة",
   app_no_tabs_desc_prefix:   "لا توجد صفحات مفعلة لهذا الدور حالياً:",

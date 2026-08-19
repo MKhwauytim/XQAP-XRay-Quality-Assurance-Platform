@@ -44,9 +44,14 @@ import { broadcastDataRefresh, type DataRefreshFamily } from "./dataRefreshSigna
 import { bumpWorkspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
 import { readDistributionLogStamp } from "../distribution/distributionStorage";
 import {
+  boundedSizeSignature,
   listDirectoryEntriesWithSize,
   type SizedDirectoryEntry,
 } from "../storage/directoryScan";
+import {
+  DISTRIBUTION_EVENTS_DIR,
+  DISTRIBUTION_EVENT_SEGMENT_SUFFIX,
+} from "../distribution/distributionEventStore";
 import { readEnvelopeRevision } from "../storage/safeWrite";
 import { logError } from "../storage/errorLogger";
 import {
@@ -58,6 +63,7 @@ import {
 } from "./workspacePaths";
 import { DEFAULT_SYNC_INTERVAL_MS, readSyncIntervalMs } from "./syncSettings";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { isNotFoundError } from "../storage/transientFileErrors";
 
 /** The cadence used until the workspace's own setting has been read (and
  *  whenever there is no workspace, no setting, or an unreadable one). §2's
@@ -75,10 +81,49 @@ const NOTIFICATIONS_FILE = "notifications.json";
 const ANSWERS_SUFFIX = ".answers.json";
 const DECISIONS_SUFFIX = ".json";
 
+/**
+ * "This family could not be probed on this tick."
+ *
+ * Deliberately distinct from every legitimate probe value, INCLUDING the neutral
+ * ones a missing folder or a missing file produce (`null` revision, `""`
+ * signature): those are real observations of a real workspace and must keep
+ * taking part in the diff. A FAILED read is not an observation. Storing its
+ * neutral placeholder as the new baseline made the next SUCCESSFUL read differ
+ * from it and broadcast a change that never happened — so one transient share
+ * blip cost every client a spurious refresh, and a refresh is not free: it can
+ * clobber unsaved draft state (see dataRefreshSignal's note). An unprobed family
+ * therefore carries its PREVIOUS baseline forward untouched and reports nothing
+ * — neither "changed" nor "reset" — until it can be read again.
+ */
+const UNPROBED = Symbol("unprobed");
+type Probed<T> = T | typeof UNPROBED;
+
+function isProbed<T>(value: Probed<T>): value is T {
+  return value !== UNPROBED;
+}
+
+/** Previous value when this tick could not probe the family; otherwise this tick's. */
+function carry<T>(previous: Probed<T>, current: Probed<T>): Probed<T> {
+  return isProbed(current) ? current : previous;
+}
+
+/** False whenever EITHER side is unprobed — an unreadable tick is never a change. */
+function movedFrom<T>(
+  previous: Probed<T>,
+  current: Probed<T>,
+  equals: (a: T, b: T) => boolean
+): boolean {
+  if (!isProbed(previous) || !isProbed(current)) return false;
+  return !equals(previous, current);
+}
+
+const sameValue = <T,>(a: T, b: T): boolean => Object.is(a, b);
+
+type DistributionStamp = { revision: number; writeToken: string | undefined };
+
 type Probe = {
-  distributionRevision: number | null;
-  distributionWriteToken: string | undefined;
-  notificationsRevision: number | null;
+  distributionStamp: Probed<DistributionStamp>;
+  notificationsRevision: Probed<number | null>;
   /** Serialized, sorted name->(size, mtime) map covering BOTH the
    *  employee-answers dir and the approvals (supervisor decisions) dir. A
    *  single combined string because a per-file diff alone cannot cheaply
@@ -96,9 +141,17 @@ type Probe = {
    *  `listDirectoryEntriesWithSize` for why the envelope revision itself is
    *  deliberately NOT read here, and why it is still the signal for the
    *  single-file manifest/notifications probes). */
-  answersSignature: string;
-  approvalsSignature: string;
-  manifestRevision: number | null;
+  answersSignature: Probed<string>;
+  approvalsSignature: Probed<string>;
+  manifestRevision: Probed<number | null>;
+  /** Bounded name+size signature of `distribution.events/*.ndjson` (see
+   *  `boundedSizeSignature`). The compatibility log's CAS stamp above covers
+   *  the distribution family only while the stamp and the durable events move
+   *  together — a RESTORE moves the events and deliberately leaves the stamp
+   *  (backupStorage's `restore-if-absent`), and an append whose projection
+   *  write failed leaves events on disk with the stamp unmoved. This is the
+   *  independent signal for both. */
+  segmentsSignature: Probed<string>;
 };
 
 const previousProbes = new Map<string, Probe>();
@@ -197,9 +250,16 @@ async function openOrNull(
 ): Promise<DirectoryHandleLike | null> {
   try {
     return await resolve();
-  } catch {
+  } catch (error) {
     // A folder that does not exist yet is the normal state of a fresh
     // workspace, and must degrade to a neutral probe value, never to a throw.
+    // ONLY a genuine absence, though (same rule as distributionStorage's
+    // openOptionalDirectory): a transient share failure on the OPEN used to
+    // land here too, and every family hanging off that directory then probed
+    // as "empty" and became the baseline — so the next healthy tick reported
+    // the whole month as changed. Anything else propagates, which aborts this
+    // tick's probe with `ok: false` and leaves the previous baseline intact.
+    if (!isNotFoundError(error)) throw error;
     return null;
   }
 }
@@ -217,6 +277,8 @@ async function openOrNull(
  */
 type ProbeDirs = {
   mainDir: DirectoryHandleLike | null;
+  /** `2-samples/{month}/1-main/distribution.events`, or null when absent. */
+  eventsDir: DirectoryHandleLike | null;
   employeesDir: DirectoryHandleLike | null;
   approvalsDir: DirectoryHandleLike | null;
   populationMonthDir: DirectoryHandleLike | null;
@@ -246,18 +308,27 @@ async function resolveProbeDirs(
       ? openOrNull(() => systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.notifications, { create: false }))
       : null,
   ]);
-  return { mainDir, employeesDir, approvalsDir, populationMonthDir, notificationsDir };
+  // The one open that CANNOT join a batch above: it hangs off `mainDir`, which
+  // the batch above is what resolves. One extra round trip per tick, in exchange
+  // for the only signal that sees a restore (see Probe.segmentsSignature).
+  const eventsDir = mainDir
+    ? await openOrNull(() => mainDir.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: false }))
+    : null;
+  return { mainDir, eventsDir, employeesDir, approvalsDir, populationMonthDir, notificationsDir };
 }
 
 async function safeRevision(
   dir: DirectoryHandleLike | null,
   fileName: string
-): Promise<number | null> {
+): Promise<Probed<number | null>> {
+  // A folder that is not there is an OBSERVATION (revision: none), not a
+  // failure — it diffs normally. A read that threw is neither.
   if (!dir) return null;
   try {
     return await readEnvelopeRevision(dir, fileName);
-  } catch {
-    return null;
+  } catch (error) {
+    logError("workspaceSync:probeRevision", error);
+    return UNPROBED;
   }
 }
 
@@ -265,12 +336,26 @@ function signature(entries: SizedDirectoryEntry[]): string {
   return JSON.stringify(entries.map((entry) => [entry.name, entry.size, entry.lastModified]));
 }
 
-async function safeSignature(dir: DirectoryHandleLike | null, suffix: string): Promise<string> {
+async function safeSignature(
+  dir: DirectoryHandleLike | null,
+  suffix: string
+): Promise<Probed<string>> {
   if (!dir) return "";
   try {
     return signature(await listDirectoryEntriesWithSize(dir, suffix));
-  } catch {
-    return "";
+  } catch (error) {
+    logError("workspaceSync:probeSignature", error);
+    return UNPROBED;
+  }
+}
+
+async function safeSegmentsSignature(dir: DirectoryHandleLike | null): Promise<Probed<string>> {
+  if (!dir) return "";
+  try {
+    return await boundedSizeSignature(dir, DISTRIBUTION_EVENT_SEGMENT_SUFFIX);
+  } catch (error) {
+    logError("workspaceSync:probeSegments", error);
+    return UNPROBED;
   }
 }
 
@@ -286,28 +371,50 @@ async function probeMonth(
   systemDir: DirectoryHandleLike | null
 ): Promise<Probe> {
   const dirs = await resolveProbeDirs(directoryHandle, monthFolderName, systemDir);
-  const [distStamp, notificationsRevision, answersSignature, approvalsSignature, manifestRevision] =
-    await Promise.all([
-      readDistributionLogStamp(directoryHandle, monthFolderName, {
-        currentDir: dirs.mainDir,
-        legacyDir: dirs.populationMonthDir,
-      }).catch(() => ({
-        revision: -1,
-        writeToken: undefined,
-      })),
-      safeRevision(dirs.notificationsDir, NOTIFICATIONS_FILE),
-      safeSignature(dirs.employeesDir, ANSWERS_SUFFIX),
-      safeSignature(dirs.approvalsDir, DECISIONS_SUFFIX),
-      safeRevision(dirs.populationMonthDir, MONTH_MANIFEST_FILE),
-    ]);
-
-  return {
-    distributionRevision: distStamp.revision,
-    distributionWriteToken: distStamp.writeToken,
+  const [
+    distStamp,
     notificationsRevision,
     answersSignature,
     approvalsSignature,
     manifestRevision,
+    segmentsSignature,
+  ] =
+    await Promise.all([
+      readDistributionLogStamp(directoryHandle, monthFolderName, {
+        currentDir: dirs.mainDir,
+        legacyDir: dirs.populationMonthDir,
+      }).catch((error: unknown): Probed<DistributionStamp> => {
+        // Used to fall back to `{ revision: -1 }`, which then became the
+        // baseline: the next readable tick reported revision 12 != -1 and
+        // broadcast a distribution change nobody had made.
+        logError("workspaceSync:probeDistributionStamp", error);
+        return UNPROBED;
+      }),
+      safeRevision(dirs.notificationsDir, NOTIFICATIONS_FILE),
+      safeSignature(dirs.employeesDir, ANSWERS_SUFFIX),
+      safeSignature(dirs.approvalsDir, DECISIONS_SUFFIX),
+      safeRevision(dirs.populationMonthDir, MONTH_MANIFEST_FILE),
+      safeSegmentsSignature(dirs.eventsDir),
+    ]);
+
+  return {
+    distributionStamp: distStamp,
+    notificationsRevision,
+    answersSignature,
+    approvalsSignature,
+    manifestRevision,
+    segmentsSignature,
+  };
+}
+
+function carryUnprobed(previous: Probe, current: Probe): Probe {
+  return {
+    distributionStamp: carry(previous.distributionStamp, current.distributionStamp),
+    notificationsRevision: carry(previous.notificationsRevision, current.notificationsRevision),
+    answersSignature: carry(previous.answersSignature, current.answersSignature),
+    approvalsSignature: carry(previous.approvalsSignature, current.approvalsSignature),
+    manifestRevision: carry(previous.manifestRevision, current.manifestRevision),
+    segmentsSignature: carry(previous.segmentsSignature, current.segmentsSignature),
   };
 }
 
@@ -322,15 +429,19 @@ function diffFamilies(previous: Probe | undefined, current: Probe): Set<DataRefr
     return changed;
   }
   if (
-    previous.distributionRevision !== current.distributionRevision ||
-    previous.distributionWriteToken !== current.distributionWriteToken
+    movedFrom(
+      previous.distributionStamp,
+      current.distributionStamp,
+      (a, b) => a.revision === b.revision && a.writeToken === b.writeToken
+    ) ||
+    movedFrom(previous.segmentsSignature, current.segmentsSignature, sameValue)
   ) {
     changed.add("distribution");
   }
-  if (previous.notificationsRevision !== current.notificationsRevision) {
+  if (movedFrom(previous.notificationsRevision, current.notificationsRevision, sameValue)) {
     changed.add("notifications");
   }
-  if (previous.answersSignature !== current.answersSignature) {
+  if (movedFrom(previous.answersSignature, current.answersSignature, sameValue)) {
     // Ambiguous by construction (see Probe's doc comment): an answers-dir
     // size change could be a new referral/replacement/reopen request OR a
     // changed item answer. Mark both rather than guessing -- the cost is an
@@ -338,10 +449,10 @@ function diffFamilies(previous: Probe | undefined, current: Probe): Set<DataRefr
     changed.add("requests");
     changed.add("answers");
   }
-  if (previous.approvalsSignature !== current.approvalsSignature) {
+  if (movedFrom(previous.approvalsSignature, current.approvalsSignature, sameValue)) {
     changed.add("requests");
   }
-  if (previous.manifestRevision !== current.manifestRevision) {
+  if (movedFrom(previous.manifestRevision, current.manifestRevision, sameValue)) {
     changed.add("manifest");
   }
   return changed;
@@ -353,8 +464,13 @@ async function probeChangedFamilies(
   systemDir: DirectoryHandleLike | null
 ): Promise<Set<DataRefreshFamily>> {
   const key = probeKey(directoryHandle, monthFolderName);
-  const current = await probeMonth(directoryHandle, monthFolderName, systemDir);
-  const changed = diffFamilies(previousProbes.get(key), current);
+  const previous = previousProbes.get(key);
+  const probed = await probeMonth(directoryHandle, monthFolderName, systemDir);
+  // Carry BEFORE storing: a family this tick could not read keeps the last value
+  // that was actually observed, so the next readable tick diffs against real
+  // state instead of against a placeholder.
+  const current = previous ? carryUnprobed(previous, probed) : probed;
+  const changed = diffFamilies(previous, current);
   previousProbes.set(key, current);
   return changed;
 }

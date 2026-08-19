@@ -553,6 +553,69 @@ export async function listDirectoryEntriesWithSize(
   return out;
 }
 
+/**
+ * Stat budget for `boundedSizeSignature`. Every stat is a network round trip on
+ * the UNC/SMB share, paid by every client on every sync tick, so the cost of the
+ * segment probe must not grow with a month's history: at 128 KB per segment
+ * (MAX_OPEN_SEGMENT_BYTES) 64 stats already cover ~8 MB of event log, and
+ * anything past that is covered by NAME changes alone, which the listing gives
+ * away for free.
+ */
+export const DEFAULT_SIZE_SIGNATURE_STAT_BUDGET = 64;
+
+/**
+ * A bounded change signature for an append-only directory (the distribution
+ * event segments).
+ *
+ * WHY, given the segments are already covered by `distribution.log.json`'s CAS
+ * stamp: they are covered only while the two move TOGETHER. A restore merges
+ * events into the segments and deliberately does not rewrite the projection
+ * (backupStorage's `restore-if-absent`), and a partly-failed append can leave
+ * events durable in a segment whose projection write never landed. In both cases
+ * the durable event data moved and the stamp did not, so no other machine on the
+ * share ever learns. This signature is the independent second signal.
+ *
+ * BOUNDED, deliberately: one directory listing, no file CONTENT is read, and at
+ * most `maxStats` `getFile()` size probes — taken from the tail of the
+ * name-sorted listing, so which entries are probed is stable across ticks (a
+ * signature that reshuffled its own sample would report a change on an untouched
+ * month). Every matched NAME is in the signature whether or not it was probed,
+ * so a new or removed segment is always detected; on a month with more segments
+ * than the budget, GROWTH of an unprobed segment is detected once it rotates
+ * into a new name. An entry that vanishes mid-scan is dropped from the signature
+ * exactly as `listDirectoryEntriesWithSize` drops it — worst case one extra
+ * refresh, never a missed one.
+ */
+export async function boundedSizeSignature(
+  dir: DirectoryHandleLike,
+  suffix: string,
+  maxStats: number = DEFAULT_SIZE_SIGNATURE_STAT_BUDGET
+): Promise<string> {
+  const matched = await listMatchingFileEntries(dir, suffix);
+  const names = matched.map((entry) => entry.name);
+  const probed = matched.slice(Math.max(0, matched.length - Math.max(0, maxStats)));
+  const sizes: (number | null)[] = new Array(probed.length).fill(null);
+
+  await forEachBounded(probed.length, DIRECTORY_READ_CONCURRENCY, async (index) => {
+    // Same "no retry budget" reasoning as listDirectoryEntriesWithSize: this is
+    // a change-detection signature, not data, and it runs on every tick.
+    sizes[index] = await readListedEntry(dir, probed[index]!, async (file) => file.size, null);
+  });
+
+  const sized: [string, number][] = [];
+  const vanished: string[] = [];
+  for (let index = 0; index < probed.length; index += 1) {
+    const size = sizes[index];
+    if (size === null) {
+      vanished.push(probed[index]!.name);
+      continue;
+    }
+    sized.push([probed[index]!.name, size]);
+  }
+  logVanishedEntries("directoryScan:bounded-signature", dir, vanished);
+  return JSON.stringify([names, sized]);
+}
+
 export type SegmentTailOptions = {
   suffix: string;
   /** Byte offset already consumed per file name; a name missing from this map defaults to 0 (read from the start). */

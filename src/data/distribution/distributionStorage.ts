@@ -373,6 +373,68 @@ export async function readDistributionLogStamp(
   };
 }
 
+/**
+ * Move `distribution.log.json`'s CAS stamp WITHOUT changing anything it records.
+ *
+ * The sync probe (`workspaceSync.probeMonth`) decides whether the `distribution`
+ * family changed by comparing exactly the two fields `readDistributionLogStamp`
+ * returns: `revision` and `_writeToken`. A RESTORE, however, deliberately leaves
+ * this file alone — `distribution.log.json` is classified `restore-if-absent`
+ * (see backupStorage's `restoreActionFor`), because writing a backup's older
+ * revision over a newer live one would roll the revision backwards. So a restore
+ * that merges real events back into `distribution.events/` moves durable data
+ * while leaving the one stamp every other machine watches untouched, and those
+ * machines keep serving pre-restore state until someone presses the manual
+ * refresh button. This function is how the restore path moves that stamp.
+ *
+ * `revision` is deliberately NOT bumped: it is the mirror-staleness authority
+ * (`sourceLogRevision`) and advances only on an event append. Only the
+ * `_writeToken` is re-minted, which the probe compares just as strictly and
+ * nothing else treats as ordering.
+ *
+ * Returns true when the stamp was moved, false when there is no projection file
+ * to stamp (a month whose events live only in `distribution.events/`) or when
+ * every CAS attempt lost. Never throws — a restore must not fail because a
+ * change-detection stamp could not be refreshed; the bounded segment signature
+ * in the sync probe covers the same restore independently.
+ */
+export async function refreshDistributionLogWriteToken(
+  distributionDir: DirectoryHandleLike
+): Promise<boolean> {
+  const corruptMessage = `Corrupt distribution compatibility log: ${LOG_FILE}`;
+  try {
+    const outcome = await casLoop<{ touched: boolean }>(
+      async (writeToken) => {
+        const existing = await readCompatibilityLog(distributionDir, corruptMessage);
+        // No projection file at all: nothing to stamp, and writing one here
+        // would invent a revision-0 log for a month that never had one.
+        if (!existing) return { done: true, result: { touched: false } };
+        await safeWriteJson(distributionDir, LOG_FILE, { ...existing, _writeToken: writeToken });
+        const readBack = await readCompatibilityLog(distributionDir, corruptMessage);
+        if (
+          !readBack ||
+          readBack._writeToken !== writeToken ||
+          readBack.revision !== existing.revision
+        ) {
+          // Someone appended (or clobbered) between our read and read-back.
+          // Their write moved the stamp too, so the probe fires either way —
+          // retry anyway so the file is left with a coherent token.
+          return { done: false };
+        }
+        return { done: true, result: { touched: true } };
+      },
+      {
+        maxRetries: 3,
+        conflictError: "تعارض في الكتابة: تعذّر تحديث علامة سجل التوزيع بعد الاستعادة.",
+      }
+    );
+    return "touched" in outcome && outcome.touched;
+  } catch (error) {
+    logError("distribution:refresh-log-write-token", error);
+    return false;
+  }
+}
+
 /** Envelope revision of `distribution.current.json` for report-to-revision linkage (B2). */
 export async function loadDistributionCurrentRevision(
   directoryHandle: DirectoryHandleLike,

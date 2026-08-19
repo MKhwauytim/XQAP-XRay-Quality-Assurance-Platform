@@ -7,8 +7,13 @@ import {
   DISTRIBUTION_EVENT_SEGMENT_SUFFIX,
   mergeDistributionEvents,
 } from "../distribution/distributionEventStore";
-import { DISTRIBUTION_CHECKPOINT_FILE, loadDistributionLog } from "../distribution/distributionStorage";
+import {
+  DISTRIBUTION_CHECKPOINT_FILE,
+  loadDistributionLog,
+  refreshDistributionLogWriteToken,
+} from "../distribution/distributionStorage";
 import type { DistributionCurrentData, DistributionEvent } from "../distribution/distributionTypes";
+import { RESTORE_INPROGRESS_FILE } from "./restoreSentinel";
 import type { MonthFolderInfo } from "../population/monthFolder";
 import type { MonthManifestData, MonthRawData, PopulationFinalData } from "../population/monthTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
@@ -49,8 +54,10 @@ const AUTO_SETTINGS_FILE = "auto-backup-settings.json";
 // in this codebase yet): written directly under 5-system/ (not inside any one
 // backup folder) since it marks the WHOLE WORKSPACE as mid-restore, not a
 // single backup's own content. See restoreBackupSnapshot for the write/remove
-// sequencing and why this is what makes an interrupted restore detectable.
-const RESTORE_INPROGRESS_FILE = "restore.inprogress.json";
+// sequencing and why this is what makes an interrupted restore detectable, and
+// restoreSentinel.ts (which owns the name) for the read side that turns a
+// left-behind sentinel into the admin-facing warning banner.
+
 // Sentinel (new): lives alongside backup.manifest.json inside a single backup
 // folder. backup.manifest.json is already, informally, written last today and
 // already treated by loadBackupHistory/pruneAutoBackups as "this backup
@@ -917,6 +924,41 @@ async function invalidateDistributionCaches(dirs: Iterable<DirectoryHandleLike>)
   }
 }
 
+/**
+ * Make a completed restore VISIBLE to every other machine on the share.
+ *
+ * The 45s sync probe decides the `distribution` family changed by comparing
+ * `distribution.log.json`'s `revision` + `_writeToken` (workspaceSync.probeMonth
+ * -> readDistributionLogStamp). A restore never writes that file when the live
+ * workspace already has one — `restoreActionFor` classifies it
+ * `restore-if-absent` precisely so an older backup revision cannot roll the live
+ * one backwards — so a restore that merged real events back into
+ * `distribution.events/` moved durable data while leaving that stamp frozen.
+ * Every other client would keep serving its pre-restore snapshot indefinitely,
+ * with nothing on screen to suggest anything had happened.
+ *
+ * Re-minting the token (never the revision — see
+ * refreshDistributionLogWriteToken) is what moves the stamp. Called with exactly
+ * the directories whose segments the restore actually REWROTE, the same set
+ * invalidateDistributionCaches gets, so an idempotent no-op restore still
+ * broadcasts nothing.
+ *
+ * Best-effort, in line with invalidateDistributionCaches above: a stamp that
+ * cannot be refreshed must not fail an otherwise complete restore. The bounded
+ * segment signature in the sync probe detects the same restore independently.
+ */
+async function republishRestoredDistributionStamps(
+  dirs: Iterable<DirectoryHandleLike>
+): Promise<void> {
+  for (const dir of dirs) {
+    try {
+      await refreshDistributionLogWriteToken(dir);
+    } catch (error) {
+      logError("backup:restore-stamp-refresh", error);
+    }
+  }
+}
+
 // Was previously a live `for await (const entry of iterable)` walk directly
 // over getDirectoryEntries(sourceDir), restoring each file inline as the walk
 // visited it (including recursing into subdirectories mid-loop). Holding a
@@ -1008,6 +1050,7 @@ async function restoreJsonTree(params: {
     if (result.cacheDir) cacheDirs.add(result.cacheDir);
   }
   await invalidateDistributionCaches(cacheDirs);
+  await republishRestoredDistributionStamps(cacheDirs);
 }
 
 type LocatedJson<T> =
