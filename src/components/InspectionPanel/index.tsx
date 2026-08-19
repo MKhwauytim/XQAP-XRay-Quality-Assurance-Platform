@@ -7,6 +7,9 @@ import {
   getTemplatePhases,
   getVisibleTemplateFields,
   isFieldVisible,
+  parseMultiValue,
+  serializeMultiValue,
+  toggleMultiValue,
 } from "../../data/templates/templateRuntime";
 import { PhaseStepper } from "./PhaseStepper";
 import { PanelHeader } from "./PanelHeader";
@@ -598,6 +601,41 @@ function FormField({
             ))}
           </datalist>
         </>
+      ) : field.type === "multiselect" ? (
+        // Toggle buttons rather than a multiple <select>: a native multi-select
+        // needs ctrl/cmd-click to add a second option and silently drops the
+        // rest of the selection on a plain click, which is exactly the mistake
+        // this field exists to prevent. `aria-pressed` carries the state that
+        // the checkbox role would otherwise provide.
+        <div
+          className="ip-multiselect"
+          role="group"
+          aria-label={field.label || getLabels().ip_multiselect_group_aria}
+        >
+          {field.options.map((o) => {
+            const selected = parseMultiValue(value).includes(o);
+            return (
+              <button
+                key={o}
+                type="button"
+                className={`ip-multi-option${selected ? " ip-multi-option--selected" : ""}`}
+                aria-pressed={selected}
+                onClick={() =>
+                  onChange(
+                    serializeMultiValue(
+                      toggleMultiValue(parseMultiValue(value), o, field.options)
+                    )
+                  )
+                }
+              >
+                {o}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+      {field.type === "multiselect" ? (
+        <span className="ip-field-hint">{getLabels().ip_multiselect_hint}</span>
       ) : null}
       {invalid ? <span className="ip-field-error">{getLabels().ip_field_required_error}</span> : null}
     </div>
@@ -624,6 +662,12 @@ function formatAnswerValue(
 ): string {
   if (field.type === "empty") return "—";
   if (value === undefined || value === "") return "—";
+  // Read back with an Arabic list separator; the stored " | " form is a storage
+  // detail, not something a reviewer should have to read.
+  if (field.type === "multiselect") {
+    const selected = parseMultiValue(value);
+    return selected.length > 0 ? selected.join("، ") : "—";
+  }
   if (typeof value === "boolean") return value ? getLabels().rd_bool_yes : getLabels().rd_bool_no;
   return String(value);
 }
@@ -644,6 +688,7 @@ function isAnswerFilled(
 ): boolean {
   if (field.type === "empty") return true;
   if (field.type === "checkbox") return value === true;
+  if (field.type === "multiselect") return parseMultiValue(value).length > 0;
   if (typeof value === "string") return value.trim().length > 0;
   return value !== undefined && value !== null;
 }
