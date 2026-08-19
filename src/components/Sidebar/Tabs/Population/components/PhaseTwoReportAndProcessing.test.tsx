@@ -60,6 +60,7 @@ function makeBiResult(rows: NormalizedBiRow[] = []): BiWorkbookResult {
     rows,
     sheetSummaries: [],
     unknownSheetNames: [],
+    unmatchedSheetNames: [],
     totalOriginalRows: rows.length,
     totalNormalizedRows: rows.length,
     totalExcludedMissingXrayIdCount: 0,

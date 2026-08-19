@@ -107,6 +107,7 @@ describe("processPopulation async processing and column preservation", () => {
     ],
     sheetSummaries: [],
     unknownSheetNames: [],
+    unmatchedSheetNames: [],
     totalOriginalRows: 1,
     totalNormalizedRows: 1,
     totalExcludedMissingXrayIdCount: 0

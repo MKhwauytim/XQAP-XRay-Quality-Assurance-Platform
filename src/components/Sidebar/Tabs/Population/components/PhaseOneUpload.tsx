@@ -87,9 +87,13 @@ function RawFileSummaryCard({
   result: RiskWorkbookResult | BiWorkbookResult;
 }) {
   // A merged multi-file BI result can carry the same sheet name more than once
-  // (one per source file), so the React key has to include the file it came from.
-  const sheetKey = (sheet: { sheetName: string; sourceFileName?: string }) =>
-    sheet.sourceFileName ? `${sheet.sourceFileName}::${sheet.sheetName}` : sheet.sheetName;
+  // (one per source file), so the React key has to include the file it came
+  // from — and the array index too, because attaching the SAME file name twice
+  // makes even that pair collide ("two children with the same key").
+  const sheetKey = (sheet: { sheetName: string; sourceFileName?: string }, index: number) =>
+    sheet.sourceFileName
+      ? `${index}::${sheet.sourceFileName}::${sheet.sheetName}`
+      : `${index}::${sheet.sheetName}`;
 
   return (
     <div className="raw-file-summary-card">
@@ -101,17 +105,18 @@ function RawFileSummaryCard({
       </div>
       {result.sheetSummaries.length > 0 && (
         <div className="raw-file-summary-sheets">
-          {result.sheetSummaries.map((sheet) => (
-            <span key={sheetKey(sheet)} className="raw-file-summary-sheet-chip">
+          {result.sheetSummaries.map((sheet, index) => (
+            <span key={sheetKey(sheet, index)} className="raw-file-summary-sheet-chip">
               {sheet.sheetName}: {formatCount(sheet.normalizedRowCount)}
             </span>
           ))}
         </div>
       )}
       {result.sheetSummaries
-        .filter((sheet) => sheet.zeroIdDiagnostic)
-        .map((sheet) => (
-          <p key={`${sheetKey(sheet)}-zero-id`} className="raw-file-summary-unknown" role="alert">
+        .map((sheet, index) => ({ sheet, index }))
+        .filter(({ sheet }) => sheet.zeroIdDiagnostic)
+        .map(({ sheet, index }) => (
+          <p key={`${sheetKey(sheet, index)}-zero-id`} className="raw-file-summary-unknown" role="alert">
             تحذير: ورقة "{sheet.sheetName}" استبعدت كل صفوفها ({formatCount(sheet.originalRowCount)})
             بسبب عدم العثور على معرف أشعة. الأعمدة التي بحث عنها النظام:{" "}
             {sheet.zeroIdDiagnostic!.candidateHeaders.join("، ")}. الأعمدة الموجودة فعلياً في الورقة:{" "}
@@ -220,22 +225,28 @@ function BiSourceCard({
           entries.map((entry) => {
             const isParsing = entry.state === "parsing";
             const isError = entry.state === "error";
+            // PROD-1: a ready row can carry a non-blocking advisory (the file
+            // imported, but its name matched no configured pattern). Amber, not
+            // red — the rows ARE in the population.
+            const isWarn = !isParsing && !isError && entry.warning !== undefined;
             const subLine = isParsing
               ? labels.phase_one_bi_parsing
               : isError
                 ? (entry.error ?? labels.phase_one_bi_no_value)
-                : entry.sheetName;
+                : isWarn
+                  ? entry.warning!
+                  : entry.sheetName;
 
             return (
               <div className="bi-file-row" role="row" key={entry.id}>
                 <span className="bi-file-cell-name" role="cell">
                   <span
-                    className={`bi-file-icon ${isParsing ? "is-parsing" : ""} ${isError ? "is-error" : ""}`}
+                    className={`bi-file-icon ${isParsing ? "is-parsing" : ""} ${isError ? "is-error" : ""} ${isWarn ? "is-warn" : ""}`}
                     aria-hidden
                   >
                     {isParsing ? (
                       <RefreshCw size={15} strokeWidth={1.8} />
-                    ) : isError ? (
+                    ) : isError || isWarn ? (
                       <AlertTriangle size={15} strokeWidth={1.8} />
                     ) : (
                       <FileSpreadsheet size={15} strokeWidth={1.8} />
@@ -244,8 +255,11 @@ function BiSourceCard({
                   <span className="bi-file-cell-text">
                     <strong title={entry.file.name}>{entry.file.name}</strong>
                     <span
-                      className={`bi-file-sheet ${isParsing ? "is-parsing" : ""} ${isError ? "is-error" : ""}`}
-                      role={isError ? "alert" : undefined}
+                      className={`bi-file-sheet ${isParsing ? "is-parsing" : ""} ${isError ? "is-error" : ""} ${isWarn ? "is-warn" : ""}`}
+                      role={isError ? "alert" : isWarn ? "status" : undefined}
+                      // The sub-line is 10.5px inside a 4-column grid row; a long
+                      // message needs to be inspectable without a screenshot.
+                      title={subLine}
                     >
                       {subLine}
                     </span>

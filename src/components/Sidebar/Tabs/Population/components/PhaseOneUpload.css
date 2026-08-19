@@ -151,6 +151,13 @@
   color: var(--c-danger);
 }
 
+/* PROD-1: the file imported fine, but its name matched no configured pattern.
+   Amber, not red -- its rows ARE in the population. */
+.bi-file-icon.is-warn {
+  background: var(--c-warning-bg);
+  color: var(--c-warning);
+}
+
 .bi-file-cell-text {
   display: grid;
   gap: 1px;
@@ -182,6 +189,12 @@
 
 .bi-file-sheet.is-error {
   color: var(--c-danger);
+  font-weight: 600;
+  white-space: normal;
+}
+
+.bi-file-sheet.is-warn {
+  color: var(--c-warning-text);
   font-weight: 600;
   white-space: normal;
 }
