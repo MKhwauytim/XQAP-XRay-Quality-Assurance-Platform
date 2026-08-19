@@ -14,6 +14,7 @@ import { runSync } from "../data/workspace/workspaceSync";
 import { useWorkspace } from "../data/workspace/useWorkspace";
 import { useGlobalMonth } from "../data/month/useGlobalMonth";
 import { useLabels, type Labels } from "../data/labels/useLabels";
+import { useFeedbackUnread } from "../data/feedback/useFeedbackUnread";
 
 const PREVIEW_ROLE_IDS: AuthRole[] = ["admin", "manager", "supervisor", "employee", "guest"];
 
@@ -72,6 +73,9 @@ export function AdminToolbar({
   const effectiveRole: AuthRole = isRealAdmin && previewRole ? previewRole : session.role;
   const isImpersonating = effectiveRole !== session.role;
 
+  // Unread feedback, shared with the floating trigger in FeedbackWidget (see
+  // FeedbackUnreadProvider) — one poll feeds both dots.
+  const { unreadCount: unreadFeedbackCount } = useFeedbackUnread();
   const { directoryHandle, refreshPermissions } = useWorkspace();
   const { selection } = useGlobalMonth();
   // Still read here (not rendered): runSync needs the selected month to probe it.
@@ -181,10 +185,18 @@ export function AdminToolbar({
             type="button"
             className="auth-toolbar-help"
             onClick={onFeedback}
-            aria-label={labels.toolbar_feedback_label}
+            aria-label={
+              unreadFeedbackCount > 0
+                ? `${labels.toolbar_feedback_label} — ${labels.fb_unread_dot_aria.replace("{count}", unreadFeedbackCount.toLocaleString("ar-SA-u-nu-latn"))}`
+                : labels.toolbar_feedback_label
+            }
             title={labels.toolbar_feedback_label}
           >
             <HelpCircle size={18} aria-hidden />
+            {/* Unread dot: a message an employee sent (or a reply from anyone
+                else) that this admin has not opened the panel on yet. Decorative
+                only — the count is spelled out in the aria-label above. */}
+            {unreadFeedbackCount > 0 && <span className="auth-toolbar-dot" aria-hidden="true" />}
           </button>
         )}
       </div>

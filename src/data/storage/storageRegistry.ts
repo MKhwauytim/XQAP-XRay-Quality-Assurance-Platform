@@ -53,6 +53,14 @@ export const STORAGE_REGISTRY: readonly StorageEntry[] = [
     lossConsequence: "The first-run panel appears again once.",
   },
   {
+    id: "xray_feedback_seen_v1:",
+    layer: "local",
+    prefix: true,
+    purpose:
+      "Per-user marker for the newest feedback message/reply that user has already seen (drives the unread dot).",
+    lossConsequence: "The unread dot lights up once more; the messages themselves are on disk and untouched.",
+  },
+  {
     id: "xray_global_month_v1",
     layer: "session",
     purpose: "The month selected in the toolbar, for this tab only.",

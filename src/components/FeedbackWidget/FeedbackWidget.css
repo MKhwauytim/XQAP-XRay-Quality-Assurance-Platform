@@ -26,6 +26,23 @@
   outline-offset: 3px;
 }
 
+/* Unread dot — someone wrote to this user (a new message for a manager, a
+   reply for everyone else) since they last opened the panel. Positioned with
+   `top`/`right` rather than logical properties on purpose: the FAB is a fixed
+   circle, so the badge should stay pinned to the same visual corner in RTL and
+   LTR alike. The ring keeps it legible on the navy gradient underneath. */
+.fb-fab-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--c-unread-dot);
+  box-shadow: 0 0 0 2px var(--c-unread-dot-ring);
+  pointer-events: none;
+}
+
 /* ── Panel ────────────────────────────────────────────────── */
 .fb-panel {
   position: fixed;

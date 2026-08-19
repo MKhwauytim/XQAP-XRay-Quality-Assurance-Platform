@@ -116,6 +116,25 @@
   justify-content: center;
 }
 
+/* Unread-feedback dot on the toolbar's feedback button — same signal (and same
+   shared count) as the floating trigger's `.fb-fab-dot`. `position: relative` on
+   the button is what anchors it. */
+.auth-admin-toolbar .auth-toolbar-help {
+  position: relative;
+}
+
+.auth-admin-toolbar .auth-toolbar-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--c-unread-dot);
+  box-shadow: 0 0 0 2px var(--c-unread-dot-ring);
+  pointer-events: none;
+}
+
 .auth-admin-toolbar .auth-toolbar-refresh:disabled {
   cursor: default;
   opacity: 0.85;

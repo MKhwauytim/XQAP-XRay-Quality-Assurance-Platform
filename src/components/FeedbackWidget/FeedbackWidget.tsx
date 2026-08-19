@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Check, MessageCircle, X } from "lucide-react";
 import { readSession } from "../../auth/authSession";
-import type { AuthRole } from "../../auth/authTypes";
 import {
   loadFeedback,
   replyToFeedback,
@@ -9,6 +8,8 @@ import {
   type FeedbackCategory,
   type FeedbackMessage,
 } from "../../data/feedback/feedbackStorage";
+import { canManageFeedback } from "../../data/feedback/feedbackUnread";
+import { useFeedbackUnread } from "../../data/feedback/useFeedbackUnread";
 import { useWorkspace } from "../../data/workspace/useWorkspace";
 import Pagination from "../Pagination/Pagination";
 import { clampPage, pageSlice } from "../../utils/paginationUtils";
@@ -30,8 +31,6 @@ function categoryLabel(labels: Labels, category: FeedbackCategory): string {
   return labels.fb_category_suggestion;
 }
 
-const CAN_MANAGE: AuthRole[] = ["manager", "admin"];
-
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleString("ar-SA-u-nu-latn", {
     month: "short",
@@ -44,6 +43,9 @@ function formatTime(iso: string): string {
 export function FeedbackWidget() {
   const { directoryHandle } = useWorkspace();
   const session = readSession();
+  // Shared with AdminToolbar's trigger (see FeedbackUnreadProvider): one poll,
+  // one count, so both dots agree and opening the panel clears both.
+  const { unreadCount, markSeen, reload: reloadUnread } = useFeedbackUnread();
   const labels = useLabels();
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<FeedbackMessage[]>([]);
@@ -72,7 +74,7 @@ export function FeedbackWidget() {
     onEscape: () => setOpen(false),
     enabled: open,
   });
-  const isManager = session ? CAN_MANAGE.includes(session.role) : false;
+  const isManager = session ? canManageFeedback(session.role) : false;
 
   const refresh = useCallback(async () => {
     if (!directoryHandle) return;
@@ -80,7 +82,12 @@ export function FeedbackWidget() {
     const msgs = await loadFeedback(directoryHandle);
     setMessages(msgs);
     setLoading(false);
-  }, [directoryHandle]);
+    // Reading the panel IS reading the messages: mark the list just loaded as
+    // seen, from the list itself rather than from the shared poll's copy, which
+    // may be up to one poll interval older. Both triggers' dots clear together
+    // because the marker broadcasts (see feedbackUnread.markFeedbackSeen).
+    markSeen(msgs);
+  }, [directoryHandle, markSeen]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- async refresh; setState fires inside the async callback, not synchronously in the effect body
@@ -122,6 +129,7 @@ export function FeedbackWidget() {
       setSubmitted(true);
       setText("");
       void refresh();
+      void reloadUnread();
     } catch (err) {
       // B6: never fail silently — a CAS conflict surfaces its Arabic message.
       setSubmitError(err instanceof Error ? err.message : getLabels().fb_submit_error_generic);
@@ -150,6 +158,7 @@ export function FeedbackWidget() {
       );
       setReplyTexts((prev) => ({ ...prev, [msgId]: "" }));
       void refresh();
+      void reloadUnread();
     } catch (err) {
       // B6: surface a CAS conflict instead of an unhandled rejection.
       setSubmitError(err instanceof Error ? err.message : getLabels().fb_reply_error_generic);
@@ -186,11 +195,19 @@ export function FeedbackWidget() {
         <button
           type="button"
           className="fb-fab"
-          aria-label={getLabels().toolbar_feedback_label}
+          aria-label={
+            unreadCount > 0
+              ? `${getLabels().toolbar_feedback_label} — ${getLabels().fb_unread_dot_aria.replace("{count}", unreadCount.toLocaleString("ar-SA-u-nu-latn"))}`
+              : getLabels().toolbar_feedback_label
+          }
           title={getLabels().toolbar_feedback_label}
           onClick={() => window.dispatchEvent(new CustomEvent("feedback:toggle"))}
         >
           <MessageCircle size={22} aria-hidden />
+          {/* Unread dot: a message or reply from someone else that this user
+              has not opened the panel on yet. Purely decorative — the count it
+              stands for is spelled out in the button's own aria-label. */}
+          {unreadCount > 0 && <span className="fb-fab-dot" aria-hidden="true" />}
         </button>
       )}
 

@@ -36,7 +36,9 @@ type FeedbackFile = {
   messages: FeedbackMessage[];
 };
 
-const MESSAGES_FILE = "messages.json";
+/** Also probed by `workspaceSync` for the `feedback` refresh family. */
+export const FEEDBACK_MESSAGES_FILE = "messages.json";
+const MESSAGES_FILE = FEEDBACK_MESSAGES_FILE;
 
 // Feedback used to live at the workspace root (`feedback/`), an undocumented
 // 7th top-level folder breaking the numbered `1-`…`6-` root convention every
