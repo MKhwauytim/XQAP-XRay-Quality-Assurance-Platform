@@ -40,6 +40,32 @@ describe("scanReferentialIntegrity (B3)", () => {
     expect(result.answersOrphans).toEqual([]);
     expect(result.approvalsOrphans).toEqual([]);
     expect(result.sampleOrphans).toEqual([]);
+    expect(result.distributionOrphans).toEqual([]);
+  });
+
+  test("flags distribution entries absent from the sample (the distribution->sample edge)", () => {
+    const result = scanReferentialIntegrity({
+      populationIds: ["p1", "p2", "ghost-dist"],
+      sampleIds: ["p1", "p2"],
+      // "ghost-dist" is in the population but was never drawn into the sample --
+      // a distribution entry that references it anyway is orphaned.
+      distributionIds: ["p1", "p2", "ghost-dist"],
+      answersIds: [],
+      approvalsIds: [],
+    });
+    expect(result.distributionOrphans).toEqual(["ghost-dist"]);
+    expect(result.clean).toBe(false);
+  });
+
+  test("distribution orphans are deduped and sorted", () => {
+    const result = scanReferentialIntegrity({
+      populationIds: [],
+      sampleIds: [],
+      distributionIds: ["z", "a", "z", "a"],
+      answersIds: [],
+      approvalsIds: [],
+    });
+    expect(result.distributionOrphans).toEqual(["a", "z"]);
   });
 
   test("orphan lists are deduped and sorted", () => {

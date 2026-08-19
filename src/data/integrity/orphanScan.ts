@@ -3,20 +3,17 @@
  * foreign key that ties population → sample → distribution → answers/approvals. It
  * flags rows that have drifted out of that chain:
  *
- *  - `answersOrphans`   — ids with a saved answer but no current distribution entry
- *  - `approvalsOrphans` — ids referenced by a referral/replacement request but no
- *                         current distribution entry
- *  - `sampleOrphans`    — sample rows whose id is absent from the population
+ *  - `answersOrphans`      — ids with a saved answer but no current distribution entry
+ *  - `approvalsOrphans`    — ids referenced by a referral/replacement request but no
+ *                            current distribution entry
+ *  - `sampleOrphans`       — sample rows whose id is absent from the population
+ *  - `distributionOrphans` — distribution entries whose id is absent from the sample
  *
  * Pure and side-effect free so it is trivially unit-testable.
  *
- * NOTE: as of v70.12.0 this function has NO non-test callers — no UI surfaces it.
- * (The Data Accuracy view compares risk vs BI columns row-by-row and is unrelated
- * to orphan ids.) It is retained as ready-to-wire B3 logic; do not assume an
- * integrity scan runs anywhere in the app today. Whoever wires it up should also
- * close the missing distribution->sample edge: the scan currently checks
- * answers->distribution, approvals->distribution and sample->population, but not
- * whether a distribution entry references a row that is still in the sample.
+ * Wired read-only into the Archive tab (per-month, on-demand button) —
+ * `src/data/integrity/orphanScanLoader.ts` gathers the five id sets from disk and
+ * calls this function; see that module for how each family is read.
  */
 
 export type OrphanScanInput = {
@@ -31,6 +28,7 @@ export type OrphanScanResult = {
   answersOrphans: string[];
   approvalsOrphans: string[];
   sampleOrphans: string[];
+  distributionOrphans: string[];
   /** True when no orphans were found in any category. */
   clean: boolean;
 };
@@ -55,18 +53,22 @@ function missingFrom(ids: Iterable<string>, reference: Set<string>): string[] {
 export function scanReferentialIntegrity(input: OrphanScanInput): OrphanScanResult {
   const populationSet = toSet(input.populationIds);
   const distributionSet = toSet(input.distributionIds);
+  const sampleSet = toSet(input.sampleIds);
 
   const answersOrphans = missingFrom(input.answersIds, distributionSet);
   const approvalsOrphans = missingFrom(input.approvalsIds, distributionSet);
   const sampleOrphans = missingFrom(input.sampleIds, populationSet);
+  const distributionOrphans = missingFrom(input.distributionIds, sampleSet);
 
   return {
     answersOrphans,
     approvalsOrphans,
     sampleOrphans,
+    distributionOrphans,
     clean:
       answersOrphans.length === 0 &&
       approvalsOrphans.length === 0 &&
-      sampleOrphans.length === 0,
+      sampleOrphans.length === 0 &&
+      distributionOrphans.length === 0,
   };
 }

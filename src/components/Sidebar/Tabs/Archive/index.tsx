@@ -28,6 +28,9 @@ import { closeMonth, reopenMonth } from "../../../../data/population/monthLock";
 import { appendWorkspaceAction } from "../../../../data/audit/actionLog";
 import { syncUsersFromDisk } from "../../../../auth/userManagement";
 import { getLabels } from "../../../../data/labels/labelsStore";
+import { runMonthIntegrityScan } from "../../../../data/integrity/orphanScanLoader";
+import type { OrphanScanResult } from "../../../../data/integrity/orphanScan";
+import { LoadingState } from "../../../StateViews/StateViews";
 import { importLabelsSnapshot } from "../../../../data/workspace/labelsSnapshot";
 import { readJsonFile, type ReadJsonResult } from "../../../../data/storage/fileSystemAccess";
 import { WORKSPACE_FILE_NAMES } from "../../../../data/workspace/workspaceDefaults";
@@ -82,6 +85,10 @@ export default function ArchiveTab() {
   const canRestoreBackup = canMutate("archive.restoreBackup");
   const canCloseMonth = canMutate("archive.closeMonth");
   const mutationDeniedTitle = "يتطلب هذا الإجراء صلاحية التعديل ومساحة عمل قابلة للكتابة.";
+  // wire-orphan-scan: read-only, so gated on role alone (no canMutate check —
+  // there is nothing here to mutate) rather than a feature-permission entry.
+  const isSupervisorPlus =
+    session?.role === "supervisor" || session?.role === "manager" || session?.role === "admin";
 
   const [statuses, setStatuses] = useState<MonthArchiveStatus[]>([]);
   const [history, setHistory] = useState<BackupHistoryItem[]>([]);
@@ -102,6 +109,15 @@ export default function ArchiveTab() {
   // separate from `message` (which can hold unrelated, stale text from an
   // earlier action) so a dialog never shows another operation's leftover error.
   const [dialogError, setDialogError] = useState<string | null>(null);
+
+  // wire-orphan-scan: on-demand, per-month, strictly read-only. `scanMonthOverride`
+  // stays null until the admin explicitly picks a month, so the select's default
+  // (latest processed month) is a plain derived value below — no effect needed to
+  // seed it, which sidesteps this file's documented history of effect-timing bugs.
+  const [scanMonthOverride, setScanMonthOverride] = useState<string | null>(null);
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanResult, setScanResult] = useState<OrphanScanResult | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
 
   // refresh() fires from the mount effect, the manual "تحديث" button, and after
   // every mutating action (backup/restore/close/reopen) — those can overlap
@@ -370,6 +386,28 @@ export default function ArchiveTab() {
     );
   }, [statuses]);
 
+  // wire-orphan-scan: default to the most recently processed month (statuses
+  // is index-addressed in listMonthFolders' chronological order — see
+  // loadArchiveStatus above), until the admin picks a different one.
+  const scanMonth = scanMonthOverride ?? statuses[statuses.length - 1]?.folderName ?? "";
+
+  async function handleRunIntegrityScan(): Promise<void> {
+    if (!directoryHandle || !scanMonth) return;
+    setIsScanning(true);
+    setScanError(null);
+    setScanResult(null);
+    try {
+      const result = await runMonthIntegrityScan(directoryHandle, scanMonth);
+      setScanResult(result);
+    } catch (error) {
+      setScanError(
+        `${getLabels().archive_integrity_error_prefix}: ${error instanceof Error ? error.message : "خطأ غير معروف"}`
+      );
+    } finally {
+      setIsScanning(false);
+    }
+  }
+
   if (!directoryHandle) {
     return (
       <section className="arc-page">
@@ -615,6 +653,73 @@ export default function ArchiveTab() {
         )}
       </section>
 
+      {isSupervisorPlus ? (
+        <section className="arc-panel">
+          <div className="arc-panel-header">
+            <div>
+              <span className="arc-panel-kicker">{getLabels().archive_integrity_kicker}</span>
+              <h2>{getLabels().archive_integrity_title}</h2>
+            </div>
+          </div>
+          <p>{getLabels().archive_integrity_subtitle}</p>
+
+          {statuses.length === 0 ? (
+            <div className="arc-empty">{getLabels().archive_integrity_no_months}</div>
+          ) : (
+            <>
+              <div className="arc-integrity-controls">
+                <label className="arc-setting-row" htmlFor="integrity-scan-month">
+                  <span>{getLabels().archive_integrity_month_label}</span>
+                  <select
+                    id="integrity-scan-month"
+                    value={scanMonth}
+                    disabled={isScanning}
+                    onChange={(event) => setScanMonthOverride(event.target.value)}
+                  >
+                    {statuses.map((item) => (
+                      <option key={item.folderName} value={item.folderName}>
+                        {formatMonthFolderShortLabel(item.folderName)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="arc-btn-secondary"
+                  disabled={isScanning || !scanMonth}
+                  onClick={() => { void handleRunIntegrityScan(); }}
+                >
+                  {isScanning ? getLabels().archive_integrity_running : getLabels().archive_integrity_run_btn}
+                </button>
+              </div>
+
+              {isScanning ? <LoadingState bare label={getLabels().archive_integrity_running} /> : null}
+
+              {!isScanning && scanError ? (
+                <div className="arc-msg-error" role="alert">
+                  {scanError}
+                </div>
+              ) : null}
+
+              {!isScanning && scanResult ? (
+                scanResult.clean ? (
+                  <div className="arc-msg-ok" role="status">
+                    {getLabels().archive_integrity_clean}
+                  </div>
+                ) : (
+                  <div className="arc-integrity-results">
+                    <OrphanCategoryList label={getLabels().archive_integrity_category_sample} ids={scanResult.sampleOrphans} />
+                    <OrphanCategoryList label={getLabels().archive_integrity_category_distribution} ids={scanResult.distributionOrphans} />
+                    <OrphanCategoryList label={getLabels().archive_integrity_category_answers} ids={scanResult.answersOrphans} />
+                    <OrphanCategoryList label={getLabels().archive_integrity_category_approvals} ids={scanResult.approvalsOrphans} />
+                  </div>
+                )
+              ) : null}
+            </>
+          )}
+        </section>
+      ) : null}
+
       <section className="arc-panel">
         <div className="arc-panel-header">
           <div>
@@ -769,6 +874,40 @@ function SummaryTile({ label, value }: { label: string; value: string }) {
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
+  );
+}
+
+/** wire-orphan-scan: one collapsible category row — id list capped at 100
+ *  shown, with the remainder summarized rather than dumping an unbounded list
+ *  into the DOM. Strictly a display of `scanReferentialIntegrity`'s output —
+ *  no action, no mutation. */
+const ORPHAN_IDS_SHOWN_CAP = 100;
+
+function OrphanCategoryList({ label, ids }: { label: string; ids: string[] }) {
+  const hasOrphans = ids.length > 0;
+  const shown = ids.slice(0, ORPHAN_IDS_SHOWN_CAP);
+  const remaining = ids.length - shown.length;
+  return (
+    <details className="arc-integrity-category" open={hasOrphans}>
+      <summary>
+        <span>{label}</span>
+        <span className={hasOrphans ? "arc-integrity-count-bad" : "arc-integrity-count-ok"}>
+          {formatNumber(ids.length)}
+        </span>
+      </summary>
+      {hasOrphans ? (
+        <ul className="arc-integrity-id-list">
+          {shown.map((id) => (
+            <li key={id}>{id}</li>
+          ))}
+          {remaining > 0 ? (
+            <li className="arc-integrity-more">
+              {fillTemplate(getLabels().archive_integrity_show_more, { count: formatNumber(remaining) })}
+            </li>
+          ) : null}
+        </ul>
+      ) : null}
+    </details>
   );
 }
 
