@@ -18,6 +18,10 @@ import type { MonthManifestData, PopulationFinalData } from "../../../../data/po
 import type { SampleMasterData } from "../../../../data/sampling/sampleTypes";
 import type { EmployeeAnswerFile } from "../../../../data/answers/answerTypes";
 import { createMemoryDirectory } from "../../../../data/storage/memoryDirectory";
+import {
+  broadcastDataRefresh,
+  type DataRefreshFamily,
+} from "../../../../data/workspace/dataRefreshSignal";
 
 // Mutable module-level state so the test can flip the app-wide month selection mid-flight
 // (mirrors the pattern already used in ReferralApproval/useApprovalData.test.tsx).
@@ -1082,5 +1086,107 @@ describe("Reports — lazy report-builder imports (§N)", () => {
     expect(distributionReportSpies.buildDistributionXlsx).not.toHaveBeenCalled();
     expect(sampleReportSpies.buildSampleXlsx).not.toHaveBeenCalled();
     expect(executiveReportSpies.openExecutiveReport).not.toHaveBeenCalled();
+  });
+});
+
+// T-12 — Reports/KPI freshness. Everything this tab shows (the month chips and the
+// whole KPI dashboard) used to load exactly once, on mount / on a month change, and
+// subscribe to NOTHING: another machine's answer submission, a restore, or an admin's
+// manual sync never reached it, so the on-screen numbers could silently disagree with
+// an export generated from the very same screen seconds later. It now subscribes to
+// dataRefreshSignal like the other workspace-reading views — but gated on real
+// visibility, because the app-level tab-mount LRU keeps up to three tabs mounted
+// (hidden, via a `hidden` attribute on an ancestor) and re-running this tab's heaviest
+// read path for a view nobody is looking at is exactly what that gate exists to avoid.
+describe("Reports — background data refresh (T-12)", () => {
+  async function renderWithDashboardOpen(hidden: boolean) {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+
+    const view = render(
+      <div hidden={hidden || undefined}>
+        <ReportsTab />
+      </div>
+    );
+
+    await act(async () => {
+      deferredManifestFor("4-april-2026").resolve(mockManifest(7));
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(screen.getByText("7 صورة")).toBeInTheDocument();
+    });
+
+    // Open the KPI dashboard so the heavy model build is the observable effect.
+    fireEvent.click(await screen.findByRole("tab", { name: "مؤشرات" }));
+    await act(async () => {
+      deferredFor("4-april-2026").resolve(mockPop(1));
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(populationStorageSpies.loadMonthPopulationFinal).toHaveBeenCalledTimes(1);
+    });
+    return view;
+  }
+
+  it("re-reads month data when a refresh is broadcast while the tab is visible", async () => {
+    await renderWithDashboardOpen(false);
+    const manifestCallsBefore = populationStorageSpies.loadMonthManifest.mock.calls.length;
+
+    act(() => {
+      broadcastDataRefresh({ source: "periodic", changed: new Set<DataRefreshFamily>(["answers"]) });
+    });
+
+    await waitFor(() => {
+      expect(populationStorageSpies.loadMonthPopulationFinal).toHaveBeenCalledTimes(2);
+    });
+    expect(populationStorageSpies.loadMonthManifest.mock.calls.length).toBe(manifestCallsBefore + 1);
+    // A refresh re-reads; it must not tear the dashboard down and back up (that
+    // would discard the user's in-progress dashboard state).
+    expect(screen.queryByText(/جارٍ تجهيز لوحة التحليلات/)).not.toBeInTheDocument();
+  });
+
+  it("re-reads on a manual refresh too, regardless of the changed family set", async () => {
+    await renderWithDashboardOpen(false);
+
+    act(() => {
+      broadcastDataRefresh("manual");
+    });
+
+    await waitFor(() => {
+      expect(populationStorageSpies.loadMonthPopulationFinal).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("defers the re-read while mounted-but-hidden, then runs it once visible again", async () => {
+    const { rerender } = await renderWithDashboardOpen(false);
+
+    // The app shell hides a mounted-but-inactive tab with a `hidden` ancestor.
+    rerender(
+      <div hidden>
+        <ReportsTab />
+      </div>
+    );
+
+    act(() => {
+      broadcastDataRefresh({ source: "periodic", changed: new Set<DataRefreshFamily>(["answers"]) });
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // Hidden: the heavy read must NOT have run.
+    expect(populationStorageSpies.loadMonthPopulationFinal).toHaveBeenCalledTimes(1);
+
+    // Back on screen: the deferred refresh runs now.
+    rerender(
+      <div>
+        <ReportsTab />
+      </div>
+    );
+    await waitFor(() => {
+      expect(populationStorageSpies.loadMonthPopulationFinal).toHaveBeenCalledTimes(2);
+    });
   });
 });

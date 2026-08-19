@@ -12,7 +12,14 @@ import { DEFAULT_EXEC_CONFIG } from "../../../../../data/reporting/executiveRepo
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import { logError } from "../../../../../data/storage/errorLogger";
 import { useLabels } from "../../../../../data/labels/useLabels";
-import { ExecutiveRowsContext, type ExecutiveRowsValue } from "./executiveRowsContext";
+import {
+  EXECUTIVE_ROWS_EMPTY,
+  EXECUTIVE_ROWS_LOADING,
+  ExecutiveRowsContext,
+  toExecutiveRowsState,
+  type ExecutiveRow,
+  type ExecutiveRowsState,
+} from "./executiveRowsContext";
 
 /**
  * Loads the globally selected month once and builds the executive report rows the same way the
@@ -40,20 +47,20 @@ export function ExecutiveRowsProvider({ children }: { children: ReactNode }) {
   const { selection } = useGlobalMonth();
   const labels = useLabels();
   const monthFolder = selection.kind === "existing" ? selection.folderName : null;
-  const [rows, setRows] = useState<ExecutiveRowsValue>(null);
+  const [rows, setRows] = useState<ExecutiveRowsState>(EXECUTIVE_ROWS_LOADING);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!directoryHandle || !monthFolder) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- sync reset so a pending/none selection never shows a previous month's KPIs
-      setRows(null);
+      setRows(EXECUTIVE_ROWS_LOADING);
       setLoadError(null);
       return;
     }
     const root = directoryHandle;
     const month = monthFolder;
     let cancelled = false;
-    setRows(null);
+    setRows(EXECUTIVE_ROWS_LOADING);
     setLoadError(null);
     void (async () => {
       const [populationData, sample, templateSelection] = await Promise.all([
@@ -80,7 +87,7 @@ export function ExecutiveRowsProvider({ children }: { children: ReactNode }) {
       });
 
       if (!cancelled) {
-        setRows(execRows.map((r) => r as Record<string, unknown>));
+        setRows(toExecutiveRowsState(execRows.map((r) => r as ExecutiveRow)));
       }
     })().catch((error: unknown) => {
       // Previously a bare `void (async () => {...})()` with no `.catch` — a rejection here became
@@ -88,7 +95,9 @@ export function ExecutiveRowsProvider({ children }: { children: ReactNode }) {
       // as "still loading". Every KPI tile spun indefinitely instead of showing a failure.
       if (cancelled) return;
       logError("reportDesigner:executiveRowsProvider", error);
-      setRows([]);
+      // Settled, with nothing to show. Tiles render «—» (never a fabricated 0) and the
+      // banner below explains why.
+      setRows(EXECUTIVE_ROWS_EMPTY);
       setLoadError(labels.rd_kpi_rows_load_error);
     });
     return () => { cancelled = true; };

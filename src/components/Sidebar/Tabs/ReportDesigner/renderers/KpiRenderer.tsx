@@ -1,9 +1,9 @@
 import type { CSSProperties } from "react";
 import type { Element, KpiConfig } from "../../../../../data/reportDesigner/reportTypes";
-import { aggregate } from "../../../../../data/reportDesigner/query/aggregations";
+import { aggregateOrNull } from "../../../../../data/reportDesigner/query/aggregations";
 import { useLabels } from "../../../../../data/labels/useLabels";
 import type { Labels } from "../../../../../data/labels/labelsStore";
-import { useExecutiveRows } from "./executiveRowsContext";
+import { useExecutiveRows, type ExecutiveRow } from "./executiveRowsContext";
 
 function aggBadgeLabels(labels: Labels): Record<string, string> {
   return {
@@ -29,7 +29,16 @@ type KpiResult =
   | { kind: "tags"; values: string[] }
   | { kind: "breakdown"; rows: Array<{ label: string; count: number }>; total: number };
 
-function computeResult(rows: Array<Record<string, unknown>>, config: KpiConfig, labels: Labels): KpiResult {
+/**
+ * The tile's value, or `null` when there is nothing honest to show: no groups, no
+ * distinct values, or an aggregation with no denominator (see `aggregateOrNull`).
+ * `null` renders as «—», the same neutral marker the rest of the app's KPI surfaces
+ * use — never a 0 that reads as a measured result.
+ *
+ * `rows` is non-empty by construction: the caller only reaches here in the `loaded`
+ * state, and `loaded` guarantees at least one row.
+ */
+function computeResult(rows: ExecutiveRow[], config: KpiConfig, labels: Labels): KpiResult | null {
   const field = config.valueField;
   const vals = rows.map((r) => r[field]);
 
@@ -46,12 +55,16 @@ function computeResult(rows: Array<Record<string, unknown>>, config: KpiConfig, 
     const sorted = Array.from(map.entries())
       .sort((a, b) => b[1] - a[1])
       .map(([label, count]) => ({ label, count }));
+    // Every row's groupBy value was null/absent → no breakdown to draw. Previously
+    // this rendered an empty box; «—» says "nothing to show" out loud.
+    if (sorted.length === 0) return null;
     return { kind: "breakdown", rows: sorted, total: rows.length };
   }
 
   // distinctCount with small cardinality → render the distinct values as chips.
   if (config.agg === "distinctCount") {
     const unique = Array.from(new Set(vals.filter((v) => v != null).map((v) => toLabel(v, labels))));
+    if (unique.length === 0) return null;
     if (unique.length <= 8) return { kind: "tags", values: unique };
     return { kind: "number", value: unique.length };
   }
@@ -61,7 +74,8 @@ function computeResult(rows: Array<Record<string, unknown>>, config: KpiConfig, 
   // (percentOfTotal) needs an explicit denominator — the total row count, since a KPI
   // tile always spans the whole fact row set — otherwise it short-circuits to 0 and
   // the tile shows a fabricated zero instead of the share.
-  return { kind: "number", value: aggregate(config.agg, vals, rows.length) };
+  const value = aggregateOrNull(config.agg, vals, rows.length);
+  return value === null ? null : { kind: "number", value };
 }
 
 interface KpiRendererProps {
@@ -74,8 +88,11 @@ export default function KpiRenderer({ element }: KpiRendererProps) {
   const s = element.style;
   const rows = useExecutiveRows();
 
-  const result: KpiResult = rows ? computeResult(rows, config, labels) : { kind: "number", value: -1 };
-  const isLoading = rows === null;
+  // Three-state read (see executiveRowsContext): only `loaded` — which guarantees at
+  // least one fact row — can produce a number. `loading` and `loaded-empty` both fall
+  // through to the «—» marker below, rather than a fabricated 0 for a month whose data
+  // has not arrived, is empty, or failed to load.
+  const result: KpiResult | null = rows.status === "loaded" ? computeResult(rows.rows, config, labels) : null;
   const AGG_LABELS = aggBadgeLabels(labels);
   const accentColor = s.borderColor ?? "#0078d4";
 
@@ -107,11 +124,11 @@ export default function KpiRenderer({ element }: KpiRendererProps) {
       {/* Main content area */}
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", justifyContent: "center", gap: 3 }}>
 
-        {isLoading && (
+        {result === null && (
           <span style={{ fontSize: 20, color: "#a19f9d" }}>—</span>
         )}
 
-        {!isLoading && result.kind === "number" && (
+        {result !== null && result.kind === "number" && (
           <span style={{ fontSize: 26, fontWeight: 700, color: s.color ?? "#201f1e", lineHeight: 1 }}>
             {/* App standard is Latin (Western) digits — "ar-SA-u-nu-latn" — not the
                 Arabic-Indic digits plain "ar-SA" yields (audit C-10 / B6). */}
@@ -120,7 +137,7 @@ export default function KpiRenderer({ element }: KpiRendererProps) {
         )}
 
         {/* distinctCount: show unique values as colored chips when ≤ 8 */}
-        {!isLoading && result.kind === "tags" && (
+        {result !== null && result.kind === "tags" && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
             {result.values.map((v) => (
               <span key={v} style={{
@@ -138,7 +155,7 @@ export default function KpiRenderer({ element }: KpiRendererProps) {
         )}
 
         {/* groupBy breakdown: mini bar list */}
-        {!isLoading && result.kind === "breakdown" && (
+        {result !== null && result.kind === "breakdown" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 4, overflow: "hidden" }}>
             {result.rows.slice(0, 5).map(({ label, count }) => {
               const pct = result.total > 0 ? (count / result.total) * 100 : 0;
