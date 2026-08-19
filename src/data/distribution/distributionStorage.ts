@@ -8,7 +8,8 @@ import type {
   DistributionCurrentData,
   DistributionEvent,
   DistributionFoldCheckpoint,
-  DistributionLog
+  DistributionLog,
+  QuotaFacts
 } from "./distributionTypes";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { readEnvelopeRevision, safeReadJson, safeWriteJson } from "../storage/safeWrite";
@@ -18,6 +19,7 @@ import { codedMessage, logCodedError, resolveErrorCode } from "../storage/errorC
 import { listDirectoryEntries, readAppendOnlyDirectory, readNamedJsonFiles } from "../storage/directoryScan";
 import { ensureMonthWritable } from "../population/monthLock";
 import { syncSampleMirrors } from "../samples/sampleMirrorStorage";
+import { loadSampleMaster } from "../sampling/sampleStorage";
 import {
   getPopulationMonthDir,
   getSampleMainDir,
@@ -90,6 +92,27 @@ async function writeDistributionEventBatch(
           // Purge first: `getSampleMainDir` answers from the workspace
           // directory-handle cache, so without this the "retry" would hand back
           // the very handle that just failed.
+          //
+          // WHAT THIS CAN AND CANNOT RECOVER — state it precisely, because the
+          // difference decides whether the retry is worth anything.
+          //
+          // CAN: every handle BELOW the root. `invalidateWorkspaceDirCache(root)`
+          // drops that root's whole cache entry — resolved root names included —
+          // so the call below re-derives `2-samples`, the month folder and
+          // `1-main` from the root handle, in that order. Each is a fresh
+          // `getDirectoryHandle`, so a child that went stale (the share
+          // re-created the folder, an idle SMB session invalidated a descriptor)
+          // is replaced rather than reused. That is the whole of the cheap
+          // refresh available here, and it already covers every intermediate
+          // handle — there is no narrower subtree left to purge.
+          //
+          // CANNOT: the ROOT handle itself. `WorkspaceProvider` has held it
+          // since mount and nothing here can re-acquire it — `showDirectoryPicker`
+          // requires a user gesture, so a genuinely dead root can only be fixed
+          // by the user re-picking the workspace folder (XQ-IO-030 says exactly
+          // that). If the fault lives in the root, this retry re-resolves the
+          // same broken chain and fails identically; the durable-append path
+          // then degrades to per-event files, which is the actual recovery.
           invalidateWorkspaceDirCache(reopen.root);
           return getDistributionDir(reopen.root, reopen.monthFolderName);
         }
@@ -168,6 +191,52 @@ type CheckpointScanMeta = {
   legacyEventFileNames: string[];
 };
 
+/**
+ * Tie-order between the two immutable event layouts: NDJSON segments first,
+ * legacy one-file-per-event `{eventId}.json` second.
+ *
+ * `sortDistributionEventsForFold` is a stable sort by `eventAt` alone, so for a
+ * batch that shares ONE `eventAt` (which every bulk distribution does — see
+ * that function's doc) the fold order is exactly the order this concatenation
+ * produces. Two things follow.
+ *
+ * PURE LAYOUTS ARE UNCHANGED, BY CONSTRUCTION. A workspace whose events all
+ * live in segments passes an empty legacy array, and one whose events all live
+ * in per-event files passes an empty segment array; in both cases the
+ * concatenation is the identity on the non-empty side, whichever side that is.
+ * The deterministic-by-contract fold output for a pure layout is therefore
+ * byte-identical to what the previous `[...legacy, ...segments]` order gave —
+ * this only ever reorders a tie group that draws from BOTH layouts.
+ *
+ * MIXED LAYOUTS NOW FOLD IN BATCH ORDER. A mixed tie group is reachable in
+ * exactly one way in practice: `appendDistributionEventsDurably` writes chunks
+ * 1..k of a batch as segment appends, then a chunk fails and every remaining
+ * chunk degrades to per-event files (`segmentPathUnusable` latches for the rest
+ * of the save). The segment chunks are the EARLIER half of the batch, so
+ * putting segments first restores the batch's chunk order. The old order put
+ * the later, fallback half in front of it.
+ *
+ * RESIDUAL LIMITATION, deliberately not fixed here: within the fallback half,
+ * per-event files carry no sequence — they are discovered in file-NAME order,
+ * i.e. by random event UUID — so that half is still internally scrambled
+ * relative to how it was written. Fixing that needs an ordering key inside the
+ * event envelope (a batch sequence number), which is an on-disk contract change
+ * and is out of scope for this repair. The pure-legacy layout has always had
+ * this property; nothing here makes it worse.
+ *
+ * A genuinely historical mix (an old client's per-event files alongside a new
+ * client's segments) is unaffected in practice: those events differ in
+ * `eventAt`, so the primary comparison orders them and this tie-break never
+ * runs. Where it did run there is no causal truth to preserve anyway — two
+ * machines cannot be ordered by a timestamp they share.
+ */
+function orderImmutableSources(
+  segmentEvents: DistributionEvent[],
+  legacyPerEventFiles: DistributionEvent[]
+): DistributionEvent[] {
+  return [...segmentEvents, ...legacyPerEventFiles];
+}
+
 async function readCurrentDistributionSource(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
@@ -221,9 +290,12 @@ async function readCurrentDistributionSource(
   // Re-sort: the fold is order-sensitive, and a new event with an earlier
   // eventAt than a cached one must still land in the right place -- the
   // cache's own internal order is by-filename, not by-eventAt. Ties keep the
-  // supplied (name-sorted files, append-ordered lines) order — see
-  // sortDistributionEventsForFold for why that tie-break is load-bearing.
-  const immutableEvents = sortDistributionEventsForFold([...legacyValues, ...segmentDelta.events]);
+  // supplied (append-ordered segment lines, then name-sorted per-event files)
+  // order — see sortDistributionEventsForFold for why that tie-break is
+  // load-bearing, and see `orderImmutableSources` for why segments go first.
+  const immutableEvents = sortDistributionEventsForFold(
+    orderImmutableSources(segmentDelta.events, legacyValues)
+  );
   return { currentLog, immutableEvents, segmentOffsets: segmentDelta.offsets, legacyEventFileNames };
 }
 
@@ -369,6 +441,68 @@ export async function readDistributionLogStamp(
     revision: Math.max(currentLog.revision, legacyLog.revision),
     writeToken: selectWriteToken(currentLog, legacyLog),
   };
+}
+
+/**
+ * Move `distribution.log.json`'s CAS stamp WITHOUT changing anything it records.
+ *
+ * The sync probe (`workspaceSync.probeMonth`) decides whether the `distribution`
+ * family changed by comparing exactly the two fields `readDistributionLogStamp`
+ * returns: `revision` and `_writeToken`. A RESTORE, however, deliberately leaves
+ * this file alone — `distribution.log.json` is classified `restore-if-absent`
+ * (see backupStorage's `restoreActionFor`), because writing a backup's older
+ * revision over a newer live one would roll the revision backwards. So a restore
+ * that merges real events back into `distribution.events/` moves durable data
+ * while leaving the one stamp every other machine watches untouched, and those
+ * machines keep serving pre-restore state until someone presses the manual
+ * refresh button. This function is how the restore path moves that stamp.
+ *
+ * `revision` is deliberately NOT bumped: it is the mirror-staleness authority
+ * (`sourceLogRevision`) and advances only on an event append. Only the
+ * `_writeToken` is re-minted, which the probe compares just as strictly and
+ * nothing else treats as ordering.
+ *
+ * Returns true when the stamp was moved, false when there is no projection file
+ * to stamp (a month whose events live only in `distribution.events/`) or when
+ * every CAS attempt lost. Never throws — a restore must not fail because a
+ * change-detection stamp could not be refreshed; the bounded segment signature
+ * in the sync probe covers the same restore independently.
+ */
+export async function refreshDistributionLogWriteToken(
+  distributionDir: DirectoryHandleLike
+): Promise<boolean> {
+  const corruptMessage = `Corrupt distribution compatibility log: ${LOG_FILE}`;
+  try {
+    const outcome = await casLoop<{ touched: boolean }>(
+      async (writeToken) => {
+        const existing = await readCompatibilityLog(distributionDir, corruptMessage);
+        // No projection file at all: nothing to stamp, and writing one here
+        // would invent a revision-0 log for a month that never had one.
+        if (!existing) return { done: true, result: { touched: false } };
+        await safeWriteJson(distributionDir, LOG_FILE, { ...existing, _writeToken: writeToken });
+        const readBack = await readCompatibilityLog(distributionDir, corruptMessage);
+        if (
+          !readBack ||
+          readBack._writeToken !== writeToken ||
+          readBack.revision !== existing.revision
+        ) {
+          // Someone appended (or clobbered) between our read and read-back.
+          // Their write moved the stamp too, so the probe fires either way —
+          // retry anyway so the file is left with a coherent token.
+          return { done: false };
+        }
+        return { done: true, result: { touched: true } };
+      },
+      {
+        maxRetries: 3,
+        conflictError: "تعارض في الكتابة: تعذّر تحديث علامة سجل التوزيع بعد الاستعادة.",
+      }
+    );
+    return "touched" in outcome && outcome.touched;
+  } catch (error) {
+    logError("distribution:refresh-log-write-token", error);
+    return false;
+  }
 }
 
 /** Envelope revision of `distribution.current.json` for report-to-revision linkage (B2). */
@@ -725,7 +859,6 @@ async function readNewEventsSinceCheckpoint(
       : mergeDistributionEvents(legacyCompatLog.events, currentCompatLog.events);
 
   const knownIds = new Set(checkpoint.knownEventIds);
-  const newCompatEvents = compatEvents.filter((event) => !knownIds.has(event.eventId));
 
   let legacyEventFileNames = checkpoint.legacyEventFileNames;
   let newLegacyImmutable: DistributionEvent[] = [];
@@ -757,8 +890,32 @@ async function readNewEventsSinceCheckpoint(
 
   const segmentDelta = await readDistributionEventSegmentDelta(directory, checkpoint.segmentOffsets);
 
+  // ONE filter, applied to EVERY source (F-2). `knownEventIds` is the set this
+  // checkpoint has already folded into `cached`, and the fold is not idempotent
+  // — re-absorbing an event double-counts it. Only the compatibility log used to
+  // be filtered here; the other two sources relied on this call's own
+  // `dedupedById` map, which dedupes a batch against ITSELF and cannot see
+  // across the checkpoint boundary at all.
+  //
+  // Both of the other sources can genuinely re-present a known event. The
+  // durable-append path retries a chunk against a re-resolved handle and then
+  // degrades to per-event files, so one event can legitimately be written twice
+  // — once into a segment, once as `{eventId}.json` — and a client that
+  // checkpointed between the two writes then meets the second copy as brand-new
+  // bytes past its offset / a brand-new file name. `findLateEvent` does not
+  // catch it either: a duplicate has the same `eventAt` AND the same `eventId`
+  // as the entry it produced, so `isEventEarlierThanEntry` reports "not late"
+  // and the resume path folds it a second time.
+  //
+  // Filtering here is safe because a known id contributes nothing a re-read
+  // could add: its content is immutable (`mergeDistributionEvents` throws on
+  // conflicting content for a repeated id), so the copy being skipped is
+  // byte-equal to the one already folded.
   const dedupedById = new Map<string, DistributionEvent>();
-  for (const event of [...newCompatEvents, ...newLegacyImmutable, ...segmentDelta.events]) {
+  // Segments before legacy per-event files, for the reason `orderImmutableSources`
+  // documents; the compatibility log stays first, as it always has.
+  for (const event of [...compatEvents, ...orderImmutableSources(segmentDelta.events, newLegacyImmutable)]) {
+    if (knownIds.has(event.eventId)) continue;
     dedupedById.set(event.eventId, event);
   }
   const newEvents = sortDistributionEventsForFold([...dedupedById.values()]);
@@ -999,6 +1156,80 @@ export function __clearDeriveMemoForTests(): void {
  * - Otherwise re-derive from the full log, persist a fresh checkpoint
  *   alongside the new cache, and return the derived result.
  */
+/**
+ * Outcome of re-checking an absorbing fold against a FRESH `sample.master.json`.
+ *
+ * - `authoritative` — every absorbed image is either genuinely unknown to the
+ *   master or is a row the caller deliberately left out (a replacement-retired
+ *   row: `liveSampleRows` filters those, and reporting/export call sites pass
+ *   the filtered set on purpose). Nothing to heal.
+ * - `healed` — the master holds live rows the caller's set did not, so the row
+ *   set the fold was handed was NOT authoritative. Carries the re-fold against
+ *   caller-rows ∪ the recovered rows.
+ * - `unverifiable` — the master could not be read (or is missing) so the
+ *   absorption cannot be judged at all.
+ */
+type AbsentRowRecheck =
+  | { outcome: "authoritative" }
+  | {
+      outcome: "healed";
+      current: DistributionCurrentData;
+      quotaFacts: QuotaFacts;
+      stillAbsent: ReadonlySet<string>;
+    }
+  | { outcome: "unverifiable" };
+
+/**
+ * Re-read `sample.master.json` and, if it holds rows the caller's set was
+ * missing, re-fold the SAME event log against caller-rows ∪ those rows.
+ *
+ * Why the union rather than the master's rows outright: two call sites
+ * (`runPowerBiExport`, the executive report data builder) pass
+ * `liveSampleRows(sample)` — the master minus replacement-retired rows — on
+ * purpose. Folding the master whole there would resurrect retired rows and
+ * change an export's output, which is forbidden. Adding back only the rows that
+ * are (a) referenced by an absorbed event, (b) present in the master and (c)
+ * NOT retired preserves every deliberate filter while recovering exactly what a
+ * stale or partial read lost.
+ */
+async function recheckAbsentRowsAgainstMaster(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  log: DistributionLog,
+  callerRows: PreparedPopulationRow[],
+  absentImageIds: ReadonlySet<string>
+): Promise<AbsentRowRecheck> {
+  let master;
+  try {
+    // Deliberately NOT a deduped/memoized read: the whole point is to get the
+    // file as it is on disk right now, not whatever this session last saw.
+    master = await loadSampleMaster(directoryHandle, monthFolderName);
+  } catch (error) {
+    // loadSampleMaster throws when the file exists but could not be read — the
+    // one case where "no rows" must never be inferred. Unverifiable.
+    logError("distribution:absent-row-recheck", error);
+    return { outcome: "unverifiable" };
+  }
+  if (!master) return { outcome: "unverifiable" };
+
+  const retired = new Set(master.replacedRowIds ?? []);
+  const recovered: PreparedPopulationRow[] = [];
+  for (const row of master.rows) {
+    if (!absentImageIds.has(row.xrayImageId)) continue;
+    if (retired.has(row.xrayImageId)) continue;
+    recovered.push(row);
+  }
+  if (recovered.length === 0) return { outcome: "authoritative" };
+
+  const healed = deriveCurrentDistributionWithFacts(log, [...callerRows, ...recovered]);
+  return {
+    outcome: "healed",
+    current: healed.current,
+    quotaFacts: healed.quotaFacts,
+    stillAbsent: healed.absentRowImageIds,
+  };
+}
+
 export async function loadOrDeriveDistributionCurrent(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
@@ -1082,7 +1313,58 @@ export async function loadOrDeriveDistributionCurrent(
     // Slow path: re-derive and update cache. segmentOffsets/legacyEventFileNames
     // come from the SAME scan loadDistributionLogWithCheckpointMeta already did
     // above -- no second directory re-scan needed to seed the fresh checkpoint.
-    const { current: derived, quotaFacts } = deriveCurrentDistributionWithFacts(log, sampleRows);
+    const folded = deriveCurrentDistributionWithFacts(log, sampleRows);
+    let derived = folded.current;
+    let quotaFacts = folded.quotaFacts;
+    // ── Absent-row persistence guard ─────────────────────────────────────────
+    // The fold ABSORBS every event whose xrayImageId is not in `sampleRows`
+    // (distributionDerivation.ts's `continue` on a missing row). That is the
+    // right thing for a genuine orphan and a catastrophe for a row set that was
+    // merely stale or partially read: the assignments those events carry are
+    // simply not in the result, and the result is what gets written to
+    // `distribution.current.json` + its fold-checkpoint sidecar. Once written,
+    // every machine trusts the cache and the checkpoint is accepted forever —
+    // so a one-off bad read of `sample.master.json` becomes the permanent,
+    // silent deletion of assignments from an audit month.
+    //
+    // The empty-row case is already gated at the top of this function (A6d) and
+    // the incremental path already refuses to advance its checkpoint
+    // (`absorbedAbsentRows`); this closes the remaining hole, the FULL refold
+    // against a partial row set.
+    //
+    // Order matters: heal first, refuse second. A fresh re-read of the master
+    // recovers the common case outright; only when the absorption survives that
+    // (or the master cannot be read at all) does the result become
+    // display-only — served in memory, never written to the cache, the
+    // checkpoint or the session memo.
+    let mayPersist = true;
+    if (folded.absentRowImageIds.size > 0) {
+      const recheck = await recheckAbsentRowsAgainstMaster(
+        directoryHandle, monthFolderName, log, sampleRows, folded.absentRowImageIds
+      );
+      if (recheck.outcome === "healed") {
+        derived = recheck.current;
+        quotaFacts = recheck.quotaFacts;
+        mayPersist = recheck.stillAbsent.size === 0;
+        logError(
+          "distribution:absent-row-healed",
+          new Error(
+            `${monthFolderName}: refolded against a fresh sample.master.json after ${folded.absentRowImageIds.size} absorbed image id(s); ${recheck.stillAbsent.size} still absent${mayPersist ? "" : " — cache/checkpoint left untouched"}`
+          )
+        );
+      } else if (recheck.outcome === "unverifiable") {
+        mayPersist = false;
+        logError(
+          "distribution:absent-row-unverifiable",
+          new Error(
+            `${monthFolderName}: ${folded.absentRowImageIds.size} absorbed image id(s) could not be checked against sample.master.json — serving the fold in memory only`
+          )
+        );
+      }
+      // "authoritative": the master agrees the rows are gone (a true orphan, or
+      // a retired row the caller filtered out on purpose). Nothing was lost by
+      // this read, so the cache stays as trustworthy as it was before.
+    }
     const knownEventIds = [...new Set(log.events.map((event) => event.eventId))].sort();
     const foldCheckpoint: DistributionFoldCheckpoint = {
       segmentOffsets,
@@ -1100,7 +1382,11 @@ export async function loadOrDeriveDistributionCurrent(
       eventSetId: log.eventSetId,
       foldCheckpoint,
     };
-    setDeriveMemo(memoKey, withRevision);
+    // Not memoized when the fold absorbed events it could not verify: the memo
+    // is read back by every subsequent mount in this session, so caching a
+    // known-incomplete fold spreads the same loss to every view for as long as
+    // the workspace epoch holds.
+    if (mayPersist) setDeriveMemo(memoKey, withRevision);
 
     // NOT awaited (when persistCache) — see the measured rationale on the
     // sibling save above. `distribution.current.json` measured ~18.8 MB for
@@ -1112,7 +1398,7 @@ export async function loadOrDeriveDistributionCurrent(
     // optimization, never a correctness input.
     // `awaitCachePersist` (Design B, step 1): only the write-path helper opts
     // in — see LoadOrDeriveDistributionCurrentOptions. Same write either way.
-    if (persistCache) {
+    if (persistCache && mayPersist) {
       const write = saveDistributionCurrent(directoryHandle, monthFolderName, withRevision).catch(
         logRejection("distribution:cache-write")
       );

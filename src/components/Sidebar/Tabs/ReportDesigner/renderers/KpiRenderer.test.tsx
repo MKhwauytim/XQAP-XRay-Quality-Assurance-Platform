@@ -132,3 +132,47 @@ describe("KpiRenderer — B6 digit locale", () => {
     expect(screen.queryByText("١٢٬٣٤٥")).not.toBeInTheDocument();
   });
 });
+
+// T-19 — PIN. These snapshots were captured from the pre-T-19 renderer and must stay
+// byte-identical: the "fabricated zero" fix below only ever changes what an EMPTY
+// aggregate renders, never a tile that has real values behind it.
+describe("KpiRenderer — non-empty tile rendering is pinned (T-19)", () => {
+  async function renderTile(config: KpiConfig) {
+    const { container } = render(
+      <ExecutiveRowsProvider>
+        <KpiRenderer element={kpiElement(config)} />
+      </ExecutiveRowsProvider>
+    );
+    // Wait past the provider's async load so the pinned markup is the loaded state.
+    await waitFor(() => {
+      expect(container.textContent).not.toBe("");
+      expect(container.querySelector("span")).toBeTruthy();
+    });
+    return container;
+  }
+
+  it("pins the headline-number tile", async () => {
+    const container = await renderTile({ kind: "kpi", dataSourceId: "population", valueField: "xrayImageId", agg: "count" });
+    await waitFor(() => expect(screen.getByText("12,345")).toBeInTheDocument());
+    expect(container.innerHTML).toMatchSnapshot();
+  });
+
+  it("pins the distinctCount chips tile", async () => {
+    const container = await renderTile({ kind: "kpi", dataSourceId: "population", valueField: "portName", agg: "distinctCount" });
+    await waitFor(() => expect(screen.getByText("A")).toBeInTheDocument());
+    expect(container.innerHTML).toMatchSnapshot();
+  });
+
+  it("pins the groupBy-breakdown tile", async () => {
+    const container = await renderTile({
+      kind: "kpi",
+      dataSourceId: "population",
+      valueField: "xrayImageId",
+      agg: "count",
+      groupByField: "portName",
+      groupByLabel: "المنفذ",
+    });
+    await waitFor(() => expect(screen.getByText("12,345")).toBeInTheDocument());
+    expect(container.innerHTML).toMatchSnapshot();
+  });
+});

@@ -34,6 +34,19 @@ export type FoldResult = {
    * both sets (see {@link QuotaExcludedEvents}).
    */
   absentRowEventIds: Set<string>;
+  /**
+   * The distinct `xrayImageId`s behind `absentRowEventIds` — the images the
+   * event log knows about and `sampleRows` does not.
+   *
+   * Already computed for the aggregated log line at the end of the fold; it is
+   * returned as well so a caller can ask the ONE question the event-id set
+   * cannot answer: is this a genuine orphan, or was the row set it was handed
+   * merely stale? Only `sample.master.json` can settle that, and it can only be
+   * consulted per image id. See loadOrDeriveDistributionCurrent's absent-row
+   * guard, which uses this to decide whether a fold may be PERSISTED — the
+   * fold's own computation is unchanged by its presence.
+   */
+  absentRowImageIds: Set<string>;
 };
 
 /**
@@ -163,10 +176,11 @@ export function foldDistributionEvents(
     entries: [],
     droppedEventIds: new Set<string>(),
     droppedImageIds: new Set<string>(),
-    absentRowEventIds: new Set<string>()
+    absentRowEventIds: new Set<string>(),
+    absentRowImageIds: new Set<string>()
   };
 
-  const absentImageIds = new Set<string>();
+  const absentImageIds = result.absentRowImageIds;
 
   // A6e (H3): make an otherwise-silent mass-absorption visible. `rows` empty
   // while real events exist means every one of them is about to be absorbed

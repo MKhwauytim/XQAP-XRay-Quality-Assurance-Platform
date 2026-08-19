@@ -20,6 +20,7 @@ import { BootSplashOverlay } from "./components/Sidebar/BootSplashOverlay";
 import { SIDEBAR_TABS } from "./components/Sidebar/Tabs/tabRegistry";
 import { FeedbackWidget } from "./components/FeedbackWidget/FeedbackWidget";
 import { NotificationBanner } from "./components/NotificationBanner/NotificationBanner";
+import { RestoreWarningBanner } from "./components/RestoreWarningBanner/RestoreWarningBanner";
 import {
   createDailyAdminBackupIfDue,
 } from "./data/backup/backupStorage";
@@ -272,6 +273,10 @@ export function AppContent({ session }: AppContentProps) {
           {labels.app_demo_banner}
         </div>
       )}
+      {/* An interrupted restore leaves 5-system/restore.inprogress.json behind.
+          Nothing used to read it, so a half-restored workspace was
+          indistinguishable from a healthy one — this banner is that read side. */}
+      <RestoreWarningBanner directoryHandle={directoryHandle} />
       <NotificationBanner
         session={session}
         directoryHandle={directoryHandle}

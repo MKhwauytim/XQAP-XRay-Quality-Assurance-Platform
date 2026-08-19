@@ -21,12 +21,17 @@ import { getManagedLoginUsers } from "../../../../auth/userManagement";
 import { usePermissions } from "../../../../auth/usePermissions";
 import type { MutationCapability } from "../../../../auth/mutationCapability";
 import { TabGuard } from "../../../PermissionGuard";
+import { isElementOnScreen } from "../../../../utils/viewVisibility";
 import { LoadingState } from "../../../StateViews/StateViews";
 import { loadSampleMaster, loadSampleMasterRevision } from "../../../../data/sampling/sampleStorage";
 import { loadAllEmployeeFiles } from "../../../../data/answers/answerStorage";
 import { loadTemplate } from "../../../../data/templates/templateStorage";
 import { loadInspectionTemplateSelection } from "../../../../data/templates/templateSelectionStorage";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
+import {
+  subscribeToDataChange,
+  type DataRefreshFamily,
+} from "../../../../data/workspace/dataRefreshSignal";
 import { readSession } from "../../../../auth/authSession";
 import { loadDeckStyleChoices } from "../../../../data/reporting/executive/deck2/styleChoices";
 import DeckDesignCustomizer from "./DeckDesignCustomizer";
@@ -62,6 +67,16 @@ type ReportFormat = "xlsx" | "deck" | "document";
 type ReportsSection = "reports" | "kpi";
 
 const KNOWN_REPORT_SECTIONS = new Set<ReportsSection>(["reports", "kpi"]);
+
+/**
+ * The change families that actually invalidate what this tab shows: the month
+ * chips read `month.manifest.json` + `sample.master.json` ("manifest"), and the
+ * KPI model folds population + sample + distribution ("distribution") + every
+ * employee answer file ("answers"). Module-level so the subscription below is
+ * never torn down just because an array identity moved. "manual" broadcasts
+ * always arrive regardless of this list (subscribeToDataChange's contract).
+ */
+const REPORTS_REFRESH_FAMILIES: readonly DataRefreshFamily[] = ["manifest", "distribution", "answers"];
 
 type MonthMeta = {
   folderName: string;
@@ -111,7 +126,7 @@ function collectRevisions(pairs: Array<[string, number | null]>): SourceRevision
 // Inner component that holds all the existing Reports state and logic.
 function ReportsContent() {
   const { directoryHandle } = useWorkspace();
-  const { can, canMutate, getMutationCapability } = usePermissions();
+  const { can, canMutate, getMutationCapability, canAccessTab } = usePermissions();
   const labels = useLabels();
 
   const { selection: globalMonth } = useGlobalMonth();
@@ -134,7 +149,16 @@ function ReportsContent() {
   const isAdmin = readSession()?.role === "admin";
   const [customizerOpen, setCustomizerOpen] = useState(false);
   const [monthMeta, setMonthMeta] = useState<MonthMeta | null>(null);
-  const [section, setSection] = useState<ReportsSection>("reports");
+  // T-15a: land on the first section this role may actually view, not on a
+  // hard-coded "reports". `reports/reports` and `reports/kpi` are independent
+  // matrix rows under the same parent page, so "supervisor sees the KPI
+  // dashboard but not the report centre" is an ordinary configuration -- and it
+  // used to open straight onto the section the matrix denies. The default
+  // matrix grants both rows to every role that can open this page at all, so
+  // for a stock workspace nothing about the landing changes.
+  const [section, setSection] = useState<ReportsSection>(
+    () => (canAccessTab("reports/reports") || !canAccessTab("reports/kpi") ? "reports" : "kpi")
+  );
   const [generating, setGenerating] = useState<ReportType | null>(null);
   const [formats, setFormats] = useState<Record<ReportBaseType, ReportFormat>>({
     executive: "document",
@@ -186,36 +210,52 @@ function ReportsContent() {
     return () => window.removeEventListener("pop-set-subtab", handler as EventListener);
   }, []);
 
+  // Latest-wins guard for the chip load. A token ref rather than the previous
+  // per-effect `cancelled` closure because the same load now has two callers
+  // (the mount/month effect below and the background-refresh subscriber), and
+  // only a single shared token can order results across both.
+  const monthMetaTokenRef = useRef(0);
+
   // Load lightweight meta for the month bar chips (§L Tier 1/2: manifest
   // instead of the full population, no employee-files read at all --
   // studiedCount is sourced from the KPI model below once it's built,
   // matching the pattern that model already uses to defer its own cost).
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync null-clear when workspace or month is deselected; synchronizes with external workspace state
-    if (!directoryHandle || !selectedMonth) { setMonthMeta(null); return; }
-    let cancelled = false;
-    setMonthMeta(null);
-    void (async () => {
-      try {
-        const [manifest, sample] = await Promise.all([
-          loadMonthManifest(directoryHandle, selectedMonth),
-          loadSampleMaster(directoryHandle, selectedMonth),
-        ]);
-        if (cancelled) return;
-        setMonthMeta({
-          folderName: selectedMonth,
-          populationCount: manifest?.totalProcessedRows ?? null,
-          sampleCount: sample ? sample.rows.length : null,
-          studiedCount: null,
-        });
-      } catch {
-        if (!cancelled) {
-          setMonthMeta({ folderName: selectedMonth, populationCount: null, sampleCount: null, studiedCount: null });
-        }
-      }
-    })();
-    return () => { cancelled = true; };
+  // `silent` (background refresh) skips the null-clear so the chips are
+  // updated in place instead of blinking to "—" under the user.
+  const loadMonthMeta = useCallback(async (silent: boolean): Promise<void> => {
+    if (!directoryHandle || !selectedMonth) return;
+    const token = ++monthMetaTokenRef.current;
+    if (!silent) setMonthMeta(null);
+    try {
+      const [manifest, sample] = await Promise.all([
+        loadMonthManifest(directoryHandle, selectedMonth),
+        loadSampleMaster(directoryHandle, selectedMonth),
+      ]);
+      if (token !== monthMetaTokenRef.current) return;
+      setMonthMeta((current) => ({
+        folderName: selectedMonth,
+        populationCount: manifest?.totalProcessedRows ?? null,
+        sampleCount: sample ? sample.rows.length : null,
+        // The studied count is backfilled by the KPI model, not read here --
+        // carry the value already shown for THIS month forward rather than
+        // blanking a chip this load has no fresher number for.
+        studiedCount: current && current.folderName === selectedMonth ? current.studiedCount : null,
+      }));
+    } catch {
+      if (token !== monthMetaTokenRef.current) return;
+      setMonthMeta({ folderName: selectedMonth, populationCount: null, sampleCount: null, studiedCount: null });
+    }
   }, [directoryHandle, selectedMonth]);
+
+  useEffect(() => {
+    if (!directoryHandle || !selectedMonth) {
+      monthMetaTokenRef.current += 1;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync null-clear when workspace or month is deselected; synchronizes with external workspace state
+      setMonthMeta(null);
+      return;
+    }
+    void loadMonthMeta(false);
+  }, [directoryHandle, selectedMonth, loadMonthMeta]);
 
   // Assemble the executive-report input from disk — the SAME inputs that feed
   // openExecutiveReport / openExecutiveDeckV2 / buildExecutiveXlsx, so the live
@@ -256,6 +296,61 @@ function ReportsContent() {
     };
   }, [directoryHandle, selectedMonth]);
 
+  // Latest-wins guard for the model build -- same reasoning as
+  // monthMetaTokenRef above (foreground build + background refresh share it).
+  const kpiBuildTokenRef = useRef(0);
+  // Set when a data-change broadcast arrives while the dashboard is NOT the
+  // open section: the cached model is now known-stale, but rebuilding it right
+  // then would run this tab's heaviest read path for a view nobody is looking
+  // at. The rebuild is deferred to the moment the dashboard is opened again,
+  // and runs silently there so the cached numbers stay on screen until the
+  // fresh ones land.
+  const kpiModelStaleRef = useRef(false);
+
+  /**
+   * Assemble the live analytics model. `silent` = background refresh: no
+   * spinner, no teardown of the current model, and a failure leaves whatever
+   * is on screen in place (logged, not surfaced) rather than replacing a
+   * working dashboard -- and the user's in-progress dashboard state (filters,
+   * selected reviewer) survives, because KpiDashboard is never unmounted.
+   */
+  const buildKpiModel = useCallback(async (silent: boolean): Promise<void> => {
+    if (!directoryHandle || !selectedMonth) return;
+    const token = ++kpiBuildTokenRef.current;
+    if (!silent) {
+      setModelLoading(true);
+      setModel(null);
+      setModelError(null);
+    }
+    try {
+      const execInput = await loadExecInput();
+      if (token !== kpiBuildTokenRef.current) return;
+      if (!execInput) {
+        if (!silent) { setModel(null); setModelError("no-population"); }
+        return;
+      }
+      const builtModel = buildReportModel(execInput, buildDisplayNameMap());
+      if (token !== kpiBuildTokenRef.current) return;
+      setModel(builtModel);
+      setModelError(null);
+      kpiModelBuiltForRef.current = { directoryHandle, month: selectedMonth };
+      // §L Tier 2: backfill the studied-count chip from the model we just
+      // built instead of a separate loadAllEmployeeFiles read -- only
+      // available once the KPI dashboard has actually been opened.
+      setMonthMeta((current) =>
+        current && current.folderName === selectedMonth
+          ? { ...current, studiedCount: builtModel.sample.studied }
+          : current
+      );
+    } catch (err) {
+      if (token !== kpiBuildTokenRef.current) return;
+      logRejection("reports:buildReportModel")(err);
+      if (!silent) { setModel(null); setModelError("build-error"); }
+    } finally {
+      if (!silent && token === kpiBuildTokenRef.current) setModelLoading(false);
+    }
+  }, [directoryHandle, selectedMonth, loadExecInput]);
+
   // Build the live analytics model ONCE per (directoryHandle, month) while the
   // dashboard is open -- and keep it cached (not nulled) across a plain
   // switch away from "kpi" and back, so returning to the dashboard is
@@ -263,49 +358,86 @@ function ReportsContent() {
   useEffect(() => {
     if (section !== "kpi") return;
     if (!directoryHandle || !selectedMonth) {
+      kpiBuildTokenRef.current += 1;
       // eslint-disable-next-line react-hooks/set-state-in-effect -- sync-clear when dashboard closed / no month
       setModel(null);
       kpiModelBuiltForRef.current = null;
+      kpiModelStaleRef.current = false;
       return;
     }
     const alreadyBuilt =
       kpiModelBuiltForRef.current !== null &&
       kpiModelBuiltForRef.current.directoryHandle === directoryHandle &&
       kpiModelBuiltForRef.current.month === selectedMonth;
-    if (alreadyBuilt) return;
-
-    let cancelled = false;
-    setModelLoading(true);
-    setModel(null);
-    setModelError(null);
-    void (async () => {
-      try {
-        const execInput = await loadExecInput();
-        if (cancelled) return;
-        if (!execInput) { setModel(null); setModelError("no-population"); return; }
-        const builtModel = buildReportModel(execInput, buildDisplayNameMap());
-        setModel(builtModel);
-        kpiModelBuiltForRef.current = { directoryHandle, month: selectedMonth };
-        // §L Tier 2: backfill the studied-count chip from the model we just
-        // built instead of a separate loadAllEmployeeFiles read -- only
-        // available once the KPI dashboard has actually been opened.
-        setMonthMeta((current) =>
-          current && current.folderName === selectedMonth
-            ? { ...current, studiedCount: builtModel.sample.studied }
-            : current
-        );
-      } catch (err) {
-        if (!cancelled) {
-          setModel(null);
-          setModelError("build-error");
-          logRejection("reports:buildReportModel")(err);
-        }
-      } finally {
-        if (!cancelled) setModelLoading(false);
+    if (alreadyBuilt) {
+      if (kpiModelStaleRef.current) {
+        kpiModelStaleRef.current = false;
+        void buildKpiModel(true);
       }
-    })();
-    return () => { cancelled = true; };
-  }, [section, directoryHandle, selectedMonth, loadExecInput]);
+      return;
+    }
+    kpiModelStaleRef.current = false;
+    void buildKpiModel(false);
+  }, [section, directoryHandle, selectedMonth, buildKpiModel]);
+
+  // ── Background refresh (another machine's edits, a restore, a manual sync) ──
+  // Until this existed, everything above loaded once on mount/month change and
+  // subscribed to nothing: the chips and the whole KPI dashboard could sit on
+  // numbers that a freshly generated export from the very same screen would
+  // contradict.
+  //
+  // Gated on ACTUAL visibility, not on `section`: the app-level tab-mount LRU
+  // keeps up to three tabs mounted, and this tab's own Report Designer sub-tab
+  // hides ReportsContent rather than unmounting it, so "mounted" says nothing
+  // about "on screen". Both cases put a `hidden` attribute on an ancestor of
+  // this section, which is exactly what the DOM check below reads -- evaluated
+  // at broadcast time, so it can never go stale in a closure.
+  const rootRef = useRef<HTMLElement | null>(null);
+  const pendingRefreshRef = useRef(false);
+
+  const isViewVisible = useCallback((): boolean => {
+    const el = rootRef.current;
+    // No committed node yet (first render, or the no-workspace branch): nothing
+    // is cached to be stale, and treating it as visible never drops a refresh.
+    // (isElementOnScreen's own null answer is `false`, which is the right
+    // default for its other caller -- a month-change confirmation prompt -- but
+    // the wrong one here, hence the explicit branch.)
+    if (!el) return true;
+    return isElementOnScreen(el);
+  }, []);
+
+  const applyRefresh = useCallback((): void => {
+    pendingRefreshRef.current = false;
+    void loadMonthMeta(true);
+    if (section === "kpi") {
+      kpiModelStaleRef.current = false;
+      void buildKpiModel(true);
+    } else {
+      kpiModelStaleRef.current = true;
+    }
+  }, [section, loadMonthMeta, buildKpiModel]);
+
+  useEffect(
+    () =>
+      subscribeToDataChange(REPORTS_REFRESH_FAMILIES, () => {
+        if (!isViewVisible()) {
+          pendingRefreshRef.current = true;
+          return;
+        }
+        applyRefresh();
+      }),
+    [applyRefresh, isViewVisible]
+  );
+
+  // Flush a refresh that arrived while this view was mounted-but-hidden, once
+  // it is on screen again. Deliberately dependency-free: becoming visible is a
+  // prop of an ANCESTOR (the app shell's per-tab wrapper), so it re-renders
+  // this subtree without changing anything this component could list as a
+  // dependency. `applyRefresh` clears the flag first, so this settles in one
+  // extra pass instead of looping.
+  useEffect(() => {
+    if (pendingRefreshRef.current && isViewVisible()) applyRefresh();
+  });
 
   function showToast(type: "ok" | "error", text: string) {
     setToast({ type, text });
@@ -651,7 +783,7 @@ function ReportsContent() {
 
   return (
     <>
-    <section className="rh-page" dir="rtl">
+    <section className="rh-page" dir="rtl" ref={rootRef}>
       {/* ── Toast ───────────────────────────────────── */}
       {toast && (
         <div className={`rh-toast rh-toast-${toast.type}`} role="status">
@@ -986,7 +1118,20 @@ function ReportsContent() {
 // Wrapper that handles sub-tab routing for "مصمم التقارير" sub-tab.
 export default function ReportsTab() {
   const labels = useLabels();
-  const [activeSubTab, setActiveSubTab] = useState("reports");
+  const { canAccessTab } = usePermissions();
+  // T-15a, outer half: same rule one level up. A role granted only
+  // `reports/report-designer` under this page used to land on ReportsContent --
+  // the one sub-view its matrix row denies -- and had to find the sidebar link
+  // to get anywhere. ReportsContent stays mounted either way (it is hidden, not
+  // unmounted, while the designer is active), so this changes which view is on
+  // screen, never what mounts.
+  const [activeSubTab, setActiveSubTab] = useState(() =>
+    !canAccessTab("reports/reports")
+      && !canAccessTab("reports/kpi")
+      && canAccessTab("reports/report-designer")
+      ? "report-designer"
+      : "reports"
+  );
   // Once Report Designer has been opened, keep it mounted (hidden, not
   // unmounted) so switching back to it doesn't lose in-progress canvas
   // edits and doesn't re-trigger ReportsContent's own reload on the way

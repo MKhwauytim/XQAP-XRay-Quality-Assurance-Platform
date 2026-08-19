@@ -147,6 +147,8 @@ function makeHistoryItem(overrides: Partial<BackupHistoryItem> = {}): BackupHist
     jsonFilesCount: 10,
     xlsxFilesCount: 0,
     totalRows: 120,
+    status: "complete",
+    failedFilesCount: 0,
     ...overrides,
   };
 }
@@ -503,5 +505,52 @@ describe("Archive close-month confirm — pending count interpolation (P2-1)", (
     expect(scroller.contains(within(dialog).getByText(L.archive_close_month_confirm))).toBe(true);
     const confirmButton = within(dialog).getAllByRole("button", { name: L.archive_close_month_btn })[0];
     expect(scroller.contains(confirmButton)).toBe(false);
+  });
+});
+
+describe("partial backup surfacing (STO-5)", () => {
+  it("reports a backup whose copies could not be verified as a failure, naming the files", async () => {
+    // The whole point of verifying copies is that the admin is told. A
+    // snapshot missing files must never be announced with the success sentence.
+    vi.mocked(createBackup).mockResolvedValue({
+      ok: true,
+      folderName: "backup-partial",
+      manifest: {
+        createdAt: new Date().toISOString(),
+        createdBy: "test-user",
+        mode: "manual",
+        monthsFolders: [],
+        jsonFilesBackedUp: ["1-population/5-May-2026/month.manifest.json"],
+        xlsxFilesBackedUp: [],
+        datasets: [],
+        rowLimitPerWorkbookPart: 25_000,
+        excelSheetRowLimit: 1_048_576,
+        status: "partial",
+        filesFailedVerification: [
+          { path: "2-samples/5-May-2026/1-main/sample.master.json", reason: "حجم النسخة غير مطابق." },
+        ],
+        filesSkippedMissing: [],
+      },
+    });
+    loginAs("admin");
+
+    renderArchiveTab();
+    fireEvent.click(await screen.findByRole("button", { name: "نسخ احتياطي الآن" }));
+
+    const message = await screen.findByRole("status");
+    expect(message.className).toBe("arc-msg-error");
+    expect(message.textContent).toContain(L.backup_partial_warning);
+    expect(message.textContent).toContain("2-samples/5-May-2026/1-main/sample.master.json");
+  });
+
+  it("marks a partial snapshot in the backup history list", async () => {
+    vi.mocked(loadBackupHistory).mockResolvedValue([
+      makeHistoryItem({ status: "partial", failedFilesCount: 3 }),
+    ]);
+    loginAs("admin");
+
+    renderArchiveTab();
+
+    expect(await screen.findByText(new RegExp(L.backup_partial_badge))).toBeInTheDocument();
   });
 });

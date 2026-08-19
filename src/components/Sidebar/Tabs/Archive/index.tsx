@@ -169,11 +169,21 @@ export default function ArchiveTab() {
         includeXlsxExports,
       });
       if (result.ok) {
+        // A snapshot that could not verify every copy is NOT a recovery point,
+        // and saying "تم إنشاء النسخة الاحتياطية" for it is the exact
+        // false assurance STO-5 was about. Name the files instead.
+        const failed = result.manifest.filesFailedVerification ?? [];
+        const partialText =
+          failed.length > 0
+            ? `${getLabels().backup_partial_warning}: ${failed.map((failure) => failure.path).join("، ")}`
+            : null;
         setMessage({
-          type: result.xlsxWarning ? "error" : "ok",
-          text: result.xlsxWarning
-            ? `تم إنشاء نسخة JSON في .system/backups/${result.folderName}. ${result.xlsxWarning}`
-            : `تم إنشاء النسخة الاحتياطية في .system/backups/${result.folderName}`,
+          type: result.xlsxWarning || partialText ? "error" : "ok",
+          text: partialText
+            ? `${partialText} (${result.folderName})`
+            : result.xlsxWarning
+              ? `تم إنشاء نسخة JSON في .system/backups/${result.folderName}. ${result.xlsxWarning}`
+              : `تم إنشاء النسخة الاحتياطية في .system/backups/${result.folderName}`,
         });
         await refresh();
       } else {
@@ -620,7 +630,12 @@ export default function ArchiveTab() {
               <article key={item.folderName} className="arc-history-item">
                 <div>
                   <strong>{item.folderName}</strong>
-                  <span>{formatDateTime(item.createdAt)} · {item.createdBy} · {modeLabel(item.mode)}</span>
+                  <span>
+                    {formatDateTime(item.createdAt)} · {item.createdBy} · {modeLabel(item.mode)}
+                    {item.status === "partial"
+                      ? ` · ${getLabels().backup_partial_badge} (${formatNumber(item.failedFilesCount)})`
+                      : ""}
+                  </span>
                 </div>
                 <div className="arc-history-stats">
                   <span>{formatNumber(item.monthsCount)} شهر</span>

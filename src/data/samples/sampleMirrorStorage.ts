@@ -11,6 +11,10 @@ import { listMonthFolders } from "../population/populationStorage";
 import { isMonthClosed } from "../population/monthLock";
 import { loadEmployeeAnswers } from "../answers/answerStorage";
 import { loadSampleMaster } from "../sampling/sampleStorage";
+// Ad-hoc imports live in synthetic `2-samples/adhoc-{importId}/` folders that
+// `listMonthFolders` (which enumerates `1-population/`) can never return. Same
+// function-body-only usage rule as the deliberate cycles below.
+import { listAdhocSampleFolders } from "../adhocImport/adhocImportEmployeeView";
 // distributionStorage.ts imports syncSampleMirrors FROM this module, so this
 // is a deliberate circular import: safe here because both sides only use the
 // other's exports inside function bodies, never at module-eval time (P6,
@@ -542,17 +546,22 @@ async function staleMirrorPendingCount(
 }
 
 export type UserWorkspaceFootprint = {
-  /** Months (open only) where this user still owns pending/replacement-requested samples. */
+  /**
+   * Months (open only) where this user still owns pending/replacement-requested
+   * samples. Ad-hoc import stores (`adhoc-{importId}`) appear here under their
+   * synthetic folder name — they carry live assignments exactly like a real month.
+   */
   activeAssignments: Array<{ monthFolderName: string; pendingCount: number }>;
-  /** Months where this user has saved answer/referral/replacement data — never deleted. */
+  /** Months (real or ad-hoc) where this user has saved answer/referral/replacement data — never deleted. */
   answerFileMonths: string[];
 };
 
 /**
- * Scans every month folder for a user's workspace footprint before deletion
- * (Tier-1 Item B): active (pending / replacement-requested) sample assignments
- * that would be orphaned by deletion, and months with saved answer data that
- * must be preserved regardless (reports read them by `answeredBy`).
+ * Scans every month folder — real months AND ad-hoc import stores — for a
+ * user's workspace footprint before deletion or a username rename (Tier-1
+ * Item B; T-10/T-11, 2026-08-19): active (pending / replacement-requested)
+ * sample assignments that would be orphaned, and months with saved answer
+ * data that must be preserved regardless (reports read them by `answeredBy`).
  *
  * Closed months are skipped for `activeAssignments`: they are frozen history,
  * so a deletion cannot affect anything there.
@@ -585,13 +594,31 @@ export async function getUserWorkspaceFootprint(
   username: string
 ): Promise<UserWorkspaceFootprint> {
   const months = await listMonthFolders(directoryHandle);
+  // Ad-hoc imports are assigned through the exact same event-log +
+  // mirror-sync path as a real month (see `adhocImportAssignment.ts`), just
+  // against a synthetic `adhoc-{importId}` folder that `listMonthFolders`
+  // structurally cannot return. Walking only the real months therefore
+  // reported "no work on disk" for a user whose entire live workload was
+  // ad-hoc — and this is the one caller where that answer is IRREVERSIBLE
+  // (UserManagement reads it as "safe to delete"). Reuses the listing helper
+  // `adhocImportEmployeeView.ts` already exports rather than re-deriving the
+  // folder names here.
+  const adhocFolders = await listAdhocSampleFolders(directoryHandle);
+  const scanFolders: Array<{ folderName: string; canBeClosed: boolean }> = [
+    ...months.map((month) => ({ folderName: month.folderName, canBeClosed: true })),
+    // An ad-hoc store has no `month.manifest.json`, so the month lock is
+    // meaningless for it (`isMonthClosed` would fail open anyway); skip the
+    // probe and always count its pending work — the safe direction for a
+    // pre-deletion guard.
+    ...adhocFolders.map((folderName) => ({ folderName, canBeClosed: false })),
+  ];
   const activeAssignments: Array<{ monthFolderName: string; pendingCount: number }> = [];
   const answerFileMonths: string[] = [];
 
-  for (const month of months) {
-    const monthFolderName = month.folderName;
+  for (const folder of scanFolders) {
+    const monthFolderName = folder.folderName;
 
-    const closed = await isMonthClosed(directoryHandle, monthFolderName);
+    const closed = folder.canBeClosed && (await isMonthClosed(directoryHandle, monthFolderName));
     if (!closed) {
       const mirror = await loadEmployeeSampleMirror(directoryHandle, monthFolderName, username);
       const stamp = await readDistributionLogStamp(directoryHandle, monthFolderName);

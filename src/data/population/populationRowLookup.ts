@@ -5,7 +5,7 @@ import type {
   PopulationQueryWorkerRequest,
   PopulationQueryWorkerResponse,
 } from "../../workers/populationQueryWorkerTypes";
-import { loadMonthPopulationFinalRawText } from "./populationStorage";
+import { readMonthPopulationFinalRawText } from "./populationStorage";
 
 /**
  * Resolve ONE population row by `xrayImageId` without running `JSON.parse` on the
@@ -38,7 +38,15 @@ export type PopulationRowLookupResult =
   /** `row: null` = parsed fine, no such id (the stale-candidate case). */
   | { ok: true; row: PreparedPopulationRow | null }
   /** The lookup could not be performed — missing/corrupt file, or the worker failed. */
-  | { ok: false; error: string };
+  | { ok: false; reason: PopulationRowLookupFailure; error: string };
+
+/**
+ * Why a lookup produced no row. `absent` is the only value that means "this
+ * month genuinely has no population file"; `unreadable` and `worker` both mean
+ * the data may well be there and this call simply could not see it, so a caller
+ * must never present them as "that row is gone" (T-08).
+ */
+export type PopulationRowLookupFailure = "absent" | "unreadable" | "worker";
 
 /** Injectable for tests: Vitest cannot construct a real DedicatedWorker. */
 export type PopulationQueryWorkerLike = {
@@ -73,18 +81,23 @@ export async function findPopulationRowById(
   xrayImageId: string,
   options?: FindPopulationRowByIdOptions
 ): Promise<PopulationRowLookupResult> {
-  const rawJsonText = await loadMonthPopulationFinalRawText(directoryHandle, monthFolderName);
-  if (rawJsonText === null) {
+  const rawText = await readMonthPopulationFinalRawText(directoryHandle, monthFolderName);
+  if (rawText.status !== "loaded") {
     // Matches the direct-read path's behaviour: a month with no readable
-    // population.final.json yields no row rather than throwing.
-    return { ok: false, error: "تعذر قراءة ملف مجتمع الشهر." };
+    // population.final.json yields no row rather than throwing. The two
+    // non-loaded outcomes are reported separately so the caller can say
+    // "unavailable, try again" instead of "this row is stale".
+    return rawText.status === "absent"
+      ? { ok: false, reason: "absent", error: "لا يوجد ملف مجتمع محفوظ لهذا الشهر." }
+      : { ok: false, reason: "unreadable", error: "تعذر قراءة ملف مجتمع الشهر." };
   }
+  const rawJsonText = rawText.value;
 
   let worker: PopulationQueryWorkerLike;
   try {
     worker = await (options?.spawnWorker ?? defaultSpawnWorker)();
   } catch {
-    return { ok: false, error: "تعذر تشغيل عامل استعلام المجتمع." };
+    return { ok: false, reason: "worker", error: "تعذر تشغيل عامل استعلام المجتمع." };
   }
 
   try {
@@ -107,12 +120,12 @@ export async function findPopulationRowById(
       // `resolve`, not `reject`: every caller already handles `{ ok: false }`,
       // and the outer `finally` still terminates the worker either way.
       worker.onerror = () => {
-        resolve({ ok: false, error: codedMessage("XQ-POP-007") });
+        resolve({ ok: false, reason: "worker", error: codedMessage("XQ-POP-007") });
       };
       // Delivery failure of a message that WAS sent — a payload that could not
       // be deserialized. Distinct event from `error`, and just as silent.
       worker.onmessageerror = () => {
-        resolve({ ok: false, error: codedMessage("XQ-POP-007") });
+        resolve({ ok: false, reason: "worker", error: codedMessage("XQ-POP-007") });
       };
 
       worker.onmessage = (ev: MessageEvent<PopulationQueryWorkerResponse>) => {
@@ -125,7 +138,7 @@ export async function findPopulationRowById(
           // Covers a failed load (unparseable file) as well as a failed lookup —
           // either way this call cannot produce a row, and the distinction is not
           // one any caller acts on.
-          resolve({ ok: false, error: response.error });
+          resolve({ ok: false, reason: "worker", error: response.error });
         }
       };
 

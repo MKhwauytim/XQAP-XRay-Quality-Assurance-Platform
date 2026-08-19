@@ -37,6 +37,7 @@ import { loadSampleMaster } from "../../../../../data/sampling/sampleStorage";
 import {
   loadAdhocAnswerItems,
   loadAdhocEntriesForEmployeeView,
+  monthFolderForEntry,
   type AdhocDistributionEntry,
 } from "../../../../../data/adhocImport/adhocImportEmployeeView";
 import { loadTemplate } from "../../../../../data/templates/templateStorage";
@@ -394,9 +395,18 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
     setQualityNoteSavingKey(key);
     setQualityNoteError(null);
     try {
+      // Route by the ROW, not by the globally-selected month. An ad-hoc row's
+      // answer file lives in `2-samples/adhoc-{importId}/` — which is where the
+      // reads above (`loadAdhocAnswerItems`) find it — so passing `selectedMonth`
+      // wrote the note into the selected month's answer store instead. There it
+      // matched no item, `setItemQualityNote` took its idempotent no-op branch,
+      // and the save reported success while the note existed only in local
+      // state: it vanished on the next reload. Same class as the two earlier
+      // "month-folder walkers forget the ad-hoc store" defects — hence the
+      // shared `monthFolderForEntry` helper rather than another local branch.
       const result = await setItemQualityNote(
         directoryHandle,
-        selectedMonth,
+        monthFolderForEntry(row.entry, selectedMonth),
         row.entry.assignedTo,
         row.entry.xrayImageId,
         note
@@ -500,6 +510,10 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
           isAdmin={canSeeAll}
           canConfigureColumns={false}
           exportFileName={`نتائج فحص الأشعة - ${selectedMonth || "كل الأشهر"}.xlsx`}
+          // The only user action that makes these rows a different set: picking
+          // another month. A background re-read of the same month must leave the
+          // reader where they were.
+          resetToken={selectedMonth}
           toolbarEndExtra={renderViewSwitcher(viewMode, setViewMode)}
           expandedKey={expandedRowKey}
           onRowClick={(row) => {
@@ -531,6 +545,9 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
           isAdmin={canSeeAll}
           canConfigureColumns={false}
           exportFileName={`${viewMode === "replaced" ? "سجل المستبدلة" : "سجل المحالة والمنقولة"} - ${selectedMonth || "كل الأشهر"}.xlsx`}
+          // Same as the active table, plus the history kind: the switcher folds
+          // a different slice of `auditEvents` into an unrelated row set.
+          resetToken={`${selectedMonth}::${viewMode}`}
           toolbarEndExtra={renderViewSwitcher(viewMode, setViewMode)}
         />
       )}

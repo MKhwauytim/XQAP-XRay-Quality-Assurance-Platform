@@ -284,3 +284,86 @@ test("calculateBulkAssignment stamps every generated event with the current even
     expect(event.eventSchemaVersion).toBe(EVENT_SCHEMA_VERSION);
   }
 });
+
+// ── T-14: rows dropped for an unresolvable stage are reported, not silent ───
+//
+// The stage loop only walks first/second/third/fourth. A row whose stage label
+// no longer resolves through the workspace-global mappings (an admin edited
+// them after the draw, an import spelled the level differently) answers
+// "unknown" from getStageKey and matches none of them — it was never assigned
+// and never mentioned, so the operator believed the month was fully covered.
+
+test("calculateBulkAssignment reports rows skipped because their stage does not resolve", () => {
+  const rows = [
+    makeRow("img-1", "SECOND_STAGE", "NonCertscan"),
+    makeRow("img-2", "المستوى المستحدث", "NonCertscan"),
+    makeRow("img-3", "المستوى المستحدث", "NonCertscan"),
+    makeRow("img-4", "STAGE_X", "NonCertscan")
+  ];
+  const allocations: EmployeeStageAllocation[] = [
+    { username: "emp", stageKey: "second", method: "percentage", value: 100, isActive: true }
+  ];
+
+  const result = calculateBulkAssignment({
+    rows,
+    allocations,
+    employees: [makeUser("emp", "employee")],
+    operatorUsername: "test"
+  });
+
+  // Behaviour is unchanged: exactly the one resolvable row is assigned.
+  expect(result.events.map((event) => event.xrayImageId)).toEqual(["img-1"]);
+  // What is new: the three dropped rows are now counted and named.
+  expect(result.unmapped.count).toBe(3);
+  expect(new Set(result.unmapped.stages)).toEqual(new Set(["المستوى المستحدث", "STAGE_X"]));
+});
+
+test("calculateBulkAssignment reports no unmapped rows when every stage resolves", () => {
+  const rows = [
+    makeRow("img-1", "SECOND_STAGE", "NonCertscan"),
+    makeRow("img-2", "SECOND_STAGE", "NonCertscan")
+  ];
+  const allocations: EmployeeStageAllocation[] = [
+    { username: "emp", stageKey: "second", method: "percentage", value: 100, isActive: true }
+  ];
+
+  const result = calculateBulkAssignment({
+    rows,
+    allocations,
+    employees: [makeUser("emp", "employee")],
+    operatorUsername: "test"
+  });
+
+  expect(result.events).toHaveLength(2);
+  expect(result.unmapped.count).toBe(0);
+  expect(result.unmapped.stages).toEqual([]);
+});
+
+test("calculateBulkAssignment counts an already-assigned unmappable row as skipped, not unmapped", () => {
+  const rows = [makeRow("img-1", "STAGE_X", "NonCertscan")];
+  const existingEntries: DistributionEntry[] = [
+    {
+      xrayImageId: "img-1",
+      assignedTo: "emp",
+      assignedBy: "test",
+      assignedAt: new Date().toISOString(),
+      status: "assigned",
+      row: rows[0]
+    } as unknown as DistributionEntry
+  ];
+
+  const result = calculateBulkAssignment({
+    rows,
+    allocations: [
+      { username: "emp", stageKey: "second", method: "percentage", value: 100, isActive: true }
+    ],
+    employees: [makeUser("emp", "employee")],
+    operatorUsername: "test",
+    existingEntries
+  });
+
+  expect(result.skipped).toBe(1);
+  // Already owned — it is not waiting to be distributed, so warning about it
+  // would send the operator chasing a row that is fine.
+  expect(result.unmapped.count).toBe(0);
+});

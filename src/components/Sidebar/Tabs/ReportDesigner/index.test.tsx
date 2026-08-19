@@ -24,7 +24,7 @@ vi.mock("../../../../data/reportDesigner/storage/reportDesignStorage", async () 
   return { ...actual, saveDesign: vi.fn(actual.saveDesign) };
 });
 
-import { saveDesign } from "../../../../data/reportDesigner/storage/reportDesignStorage";
+import { loadDesign, saveDesign } from "../../../../data/reportDesigner/storage/reportDesignStorage";
 
 // Mutable module-level flag so each test can pick view-only vs edit access (mirrors the
 // pattern already used in Reports/index.test.tsx's globalMonthMock).
@@ -176,6 +176,111 @@ describe("ReportDesigner — B6 view vs edit gating", () => {
   });
 });
 
+// T-09 — opening a design is a READ, not a write. EditorHost's autosave effect is
+// scoped to `[doc]`, and that effect also runs on the first commit, so merely opening
+// a saved design used to schedule a write-back of the untouched loaded document 800ms
+// later: `updatedAt`/`updatedBy` were re-stamped with whoever opened it (destroying
+// authorship and re-ordering the design list by "last modified"), and a view-only user
+// got the "no edit permission" ribbon error for doing nothing but looking. The fix is an
+// identity guard: the exact document object the editor was handed is remembered, and
+// autosave only fires once state holds a DIFFERENT object -- which only a real mutation
+// can produce, since every mutation path builds a new document via setDoc.
+describe("EditorHost — opening a design does not write it back (T-09)", () => {
+  // The autosave debounce is 800ms; 1200ms of real time is comfortably past it.
+  // Real timers (not fake ones) on purpose: the pre-fix mount-time timer is scheduled
+  // by the component itself before the test could install fake timers, so only real
+  // elapsed time proves it never fires.
+  const PAST_AUTOSAVE_DEBOUNCE_MS = 1200;
+
+  async function waitPastAutosaveDebounce() {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, PAST_AUTOSAVE_DEBOUNCE_MS));
+    });
+  }
+
+  it("writes nothing and leaves authorship untouched when a design is opened and closed", async () => {
+    const root = createMemoryDirectory("root");
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+    const seeded = await seedDesign(root, "تقرير للقراءة فقط");
+    permissionsMock.state.canEdit = true;
+    const before = await loadDesign(root, seeded.reportId);
+    expect(before).not.toBeNull();
+    vi.mocked(saveDesign).mockClear();
+
+    const { unmount } = render(<ReportDesigner />);
+    await waitFor(() => {
+      expect(screen.getByText("تقرير للقراءة فقط")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("فتح").closest("button") as HTMLButtonElement);
+    await waitFor(() => {
+      expect(screen.getByTitle("طباعة")).toBeInTheDocument();
+    });
+
+    await waitPastAutosaveDebounce();
+    expect(saveDesign).not.toHaveBeenCalled();
+
+    // Leaving the editor must not flush a "pending" save either — there is none.
+    act(() => {
+      unmount();
+    });
+    expect(saveDesign).not.toHaveBeenCalled();
+
+    const after = await loadDesign(root, seeded.reportId);
+    expect(after?.updatedAt).toBe(before?.updatedAt);
+    expect(after?.updatedBy).toBe(before?.updatedBy);
+    expect(after?.revision).toBe(before?.revision);
+  });
+
+  it("shows no permission error to a view-only user who merely opens a design", async () => {
+    const root = createMemoryDirectory("root");
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+    await seedDesign(root, "تقرير مشرف");
+    permissionsMock.state.canEdit = false;
+    vi.mocked(saveDesign).mockClear();
+
+    render(<ReportDesigner />);
+    await waitFor(() => {
+      expect(screen.getByText("تقرير مشرف")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("فتح").closest("button") as HTMLButtonElement);
+    await waitFor(() => {
+      expect(screen.getByTitle("طباعة")).toBeInTheDocument();
+    });
+
+    await waitPastAutosaveDebounce();
+    expect(saveDesign).not.toHaveBeenCalled();
+    expect(screen.queryByText("تعذّر الحفظ التلقائي")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("لا تملك صلاحية تعديل تصاميم التقارير، أو أن مساحة العمل للقراءة فقط.")
+    ).not.toBeInTheDocument();
+  });
+
+  it("still autosaves exactly once after one real edit", async () => {
+    const root = createMemoryDirectory("root");
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+    const seeded = await seedDesign(root, "تقرير قابل للتحرير");
+    permissionsMock.state.canEdit = true;
+    vi.mocked(saveDesign).mockClear();
+
+    render(<ReportDesigner />);
+    await waitFor(() => {
+      expect(screen.getByText("تقرير قابل للتحرير")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("فتح").closest("button") as HTMLButtonElement);
+    await waitFor(() => {
+      expect(screen.getByTitle("طباعة")).toBeInTheDocument();
+    });
+
+    // One real mutation: add a text element to the current page.
+    fireEvent.click(screen.getByTitle("نص"));
+    await waitPastAutosaveDebounce();
+
+    expect(saveDesign).toHaveBeenCalledTimes(1);
+    const after = await loadDesign(root, seeded.reportId);
+    expect(after?.pages[0]?.elements.length).toBe(1);
+  });
+});
+
 // EditorHost's autosave debounce (800ms after the last `doc` change) used to be
 // discarded — not flushed — on unmount: clicking "رجوع" (or any other unmount)
 // less than 800ms after an edit silently dropped that edit. Covered here via the
@@ -198,13 +303,12 @@ describe("EditorHost — pending autosave flush on unmount", () => {
       expect(screen.getByTitle("طباعة")).toBeInTheDocument();
     });
 
-    // Mounting EditorHost itself schedules an autosave debounce for the just-
-    // loaded (unmodified) doc via the pre-existing `[doc]`-scoped effect. Flush
-    // it explicitly via the manual Save button (still under real timers, so
-    // this resolves quickly) so no real `setTimeout` is left pending once the
-    // test switches to fake timers below -- a real, already-scheduled timer
-    // would not be affected by vi.useFakeTimers() and could fire later,
-    // outside the test's control.
+    // Since T-09, mounting EditorHost schedules NO autosave for the just-loaded
+    // (unmodified) doc — the identity guard recognizes it as "straight off disk".
+    // The explicit Save click below is kept anyway: it establishes a known
+    // baseline (one completed save, no timer pending) under real timers before
+    // the test switches to fake ones, so these two tests assert purely on what
+    // the subsequent edit does.
     fireEvent.click(screen.getByText("حفظ").closest("button") as HTMLButtonElement);
     await waitFor(() => {
       expect(saveDesign).toHaveBeenCalled();

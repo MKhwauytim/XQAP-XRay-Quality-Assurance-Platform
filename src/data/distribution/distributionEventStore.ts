@@ -527,10 +527,13 @@ export type DurableAppendOptions = {
   /**
    * Re-resolve the distribution directory for ONE retry after a failed segment
    * write. `distributionStorage` passes a resolver that purges the workspace
-   * directory-handle cache first, because a handle held since mount goes stale
-   * when an SMB session idle-disconnects and every write through it then fails
-   * `NotFoundError` — the "works after re-picking the folder" report. Omit to
-   * skip that retry.
+   * directory-handle cache first, because a CACHED CHILD handle (`2-samples`,
+   * the month folder, `1-main`) goes stale when an SMB session idle-disconnects
+   * or the folder is re-created by another machine, and every write through it
+   * then fails `NotFoundError`. Re-resolution replaces those; it cannot replace
+   * the root handle the workspace has held since mount — that is what the
+   * "works after re-picking the folder" report needs, and it takes a user
+   * gesture. Omit to skip the retry entirely.
    */
   reopenDir?: () => Promise<DirectoryHandleLike>;
   /** Progress after each chunk lands, for the save-progress bar. */
@@ -543,7 +546,10 @@ export type DurableAppendOptions = {
  * 1. **Chunked segment appends** (the fast path) — bounded writes, see
  *    `chunkEventsForSegmentAppends`.
  * 2. **One retry against a freshly-resolved directory handle** — covers a stale
- *    handle after an idle share disconnect.
+ *    handle BELOW the workspace root (see `distributionStorage`'s resolver for
+ *    what re-resolution reaches and what it cannot: the root handle itself is
+ *    held since mount and needs a user gesture to replace, so a fault there
+ *    falls through to step 3).
  * 3. **Per-event `{eventId}.json` files** — the pre-segment layout, which every
  *    reader still merges (`loadImmutableDistributionEvents`, and the checkpoint
  *    path's `legacyEventFileNames`). Names are 41 characters and the extension
@@ -1074,11 +1080,19 @@ export function distributionEventSetId(events: DistributionEvent[]): string {
  * default order of an employee's queue silently becomes "sorted by random
  * UUID".
  *
- * `Array#sort` is specified as stable, and every input this is handed is
- * already in a deterministic order: legacy per-event files and segment files
- * are both name-sorted by `directoryScan`, and lines within a segment are in
- * append order. So ties resolve to append order — the real causal order — and
- * two clients reading the same directory still agree.
+ * `Array#sort` is specified as stable, so the tie order is exactly the INPUT
+ * order — which makes assembling that input the caller's responsibility, not
+ * this function's. Every input is deterministic: legacy per-event files and
+ * segment files are both name-sorted by `directoryScan`, and lines within a
+ * segment are in append order, so two clients reading the same directory always
+ * agree. Within one layout that order IS the causal order.
+ *
+ * ACROSS layouts it is only as good as the concatenation the caller chose, and
+ * a mixed workspace is reachable: `appendDistributionEventsDurably` degrades a
+ * batch's later chunks from segments to per-event files. `distributionStorage`'s
+ * `orderImmutableSources` is where that decision lives (segments first, so a
+ * degraded batch still folds in chunk order) and where the residual limit — a
+ * fallback chunk is internally name-ordered, i.e. by random UUID — is recorded.
  */
 export function sortDistributionEventsForFold<T extends DistributionEvent>(events: T[]): T[] {
   return events.sort((a, b) => a.eventAt.localeCompare(b.eventAt));

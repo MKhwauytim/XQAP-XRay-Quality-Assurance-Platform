@@ -331,6 +331,11 @@ export const ERROR_CODES = {
       "the folder accepts short names and the failing file's extension, but a probe with the SAME NAME LENGTH cannot be created there — a path-length limit (Windows' 260-character cap on a deep UNC workspace path). Retrying can never help; the workspace must sit closer to the share root, or the writer must use shorter names",
     labelKey: "err_io_034_path_too_long",
   },
+  "XQ-IO-035": {
+    meaning:
+      "NoModificationAllowedError survived every retry: the file stayed locked by another writer (another tab, or another machine on the SMB share) for the whole ladder. This is CONTENTION, not a lost permission grant — repeating the action shortly is the right advice",
+    labelKey: "err_io_035_file_locked",
+  },
 
   // ── AUTH: login / session / permissions ──────────────────────────────────
   "XQ-AUTH-001": {
@@ -628,6 +633,11 @@ export function classifyFileSystemError(error: unknown): ErrorCode | null {
       return "XQ-IO-017";
     case "NotReadableError":
       return "XQ-IO-018";
+    // Contention, not permission: another writer holds the entry open. Kept
+    // distinct from XQ-IO-017 so the user is told to retry rather than to
+    // re-grant access they never lost.
+    case "NoModificationAllowedError":
+      return "XQ-IO-035";
     case "QuotaExceededError":
       return "XQ-IO-020";
     case "NotFoundError":

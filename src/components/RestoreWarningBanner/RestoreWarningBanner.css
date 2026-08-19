@@ -1,0 +1,27 @@
+/* Interrupted-restore warning. In-flow (never a fixed overlay) like
+   `.app-demo-banner`, so it can never cover the AdminToolbar the admin needs in
+   order to act on it. Uses the shared warning tokens rather than its own
+   colours — see primitives.css. */
+.app-restore-warning {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--c-warning-border);
+  background: var(--c-warning-bg);
+  color: var(--c-warning);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.app-restore-warning-icon {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.app-restore-warning-text {
+  max-width: min(90ch, 100%);
+  overflow-wrap: break-word;
+}

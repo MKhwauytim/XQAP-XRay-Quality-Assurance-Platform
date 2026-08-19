@@ -48,6 +48,72 @@ function quarantines(
   }) as DirectoryHandleLike;
 }
 
+/**
+ * A directory where a file written with `blockedExtension` is READ BACK fine,
+ * except on the specific look-ups named in `failOn` — a share that blips rather
+ * than a scanner that quarantines.
+ *
+ * Look-ups are counted per name, `create: false` only, which is exactly the
+ * sequence `probeRoundTrip` performs on its probe file: 1 = the instant check
+ * after the write, 2 = the survival look after the 1.2 s wait, 3 = the
+ * confirming re-look.
+ */
+function blipsOnLookups(
+  root: DirectoryHandleLike,
+  blockedExtension: string,
+  failOn: number[]
+): { dir: DirectoryHandleLike; lookups: () => number } {
+  let lookups = 0;
+  const dir = new Proxy(root, {
+    get(target, prop, receiver) {
+      if (prop === "getFileHandle") {
+        return async (name: string, options?: { create?: boolean }) => {
+          if (name.endsWith(blockedExtension) && options?.create !== true) {
+            lookups += 1;
+            if (failOn.includes(lookups)) {
+              const error = new Error("A requested file could not be found");
+              error.name = "NotFoundError";
+              throw error;
+            }
+          }
+          return target.getFileHandle(name, options);
+        };
+      }
+      return Reflect.get(target, prop, receiver) as unknown;
+    },
+  }) as DirectoryHandleLike;
+  return { dir, lookups: () => lookups };
+}
+
+describe("the survival re-probe needs two consecutive failures, not one", () => {
+  // The verdict this feeds is PERMANENT: `extension-blocked` becomes XQ-IO-033,
+  // which tells the user retrying cannot work and that they must add an
+  // antivirus exclusion. Deriving that from a single `getFileHandle` on a
+  // UNC/SMB share — the one operation this whole module exists to call
+  // unreliable — turned any momentary listing blip into a standing accusation
+  // against the folder.
+  it("does NOT report extension-blocked when the survival look blips once", async () => {
+    // Look-up 2 is the survival look after the 1.2 s wait; 3 is the re-look.
+    const { dir, lookups } = blipsOnLookups(createMemoryDirectory(), ".ndjson", [2]);
+
+    const cause = await classifyNotFound(dir, "e-1.ndjson");
+
+    expect(cause).toBe("directory-writable");
+    // The re-look is what rescued it: without it, look-up 2 alone decided.
+    expect(lookups()).toBe(3);
+  }, 15_000);
+
+  it("still reports extension-blocked when the file is gone on both looks", async () => {
+    // A real remover has already taken the file; looking again finds it just as
+    // gone, so the permanent verdict stands and the user gets the exclusion
+    // advice they actually need.
+    const { dir, lookups } = blipsOnLookups(createMemoryDirectory(), ".ndjson", [2, 3]);
+
+    await expect(classifyNotFound(dir, "e-1.ndjson")).resolves.toBe("extension-blocked");
+    expect(lookups()).toBe(3);
+  }, 15_000);
+});
+
 describe("classifyNotFound distinguishes a slow share from a blocked file type", () => {
   it("reports extension-blocked when .tmp survives but the failing extension does not", async () => {
     const dir = quarantines(createMemoryDirectory(), ".ndjson");

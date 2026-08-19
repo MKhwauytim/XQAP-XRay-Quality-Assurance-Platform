@@ -30,6 +30,37 @@ export function findAssignableEmployee(
 }
 
 /**
+ * Rows the stage loop below can never reach (T-14).
+ *
+ * `calculateBulkAssignment` walks the four KNOWN stage keys. A row whose stage
+ * label no longer resolves through the workspace-global stage mappings answers
+ * `"unknown"` from `getStageKey` and therefore matches none of them — it is
+ * simply never apportioned, never assigned, and (before this) never mentioned.
+ * The operator saw "توزيع ناجح" and believed the month was fully assigned while
+ * those rows sat unowned for the rest of the cycle.
+ *
+ * This is REPORTING ONLY. Which rows get assigned is unchanged: the loop still
+ * covers exactly first/second/third/fourth, and no event is added or removed
+ * because of anything here.
+ */
+export type UnmappedStageReport = {
+  /** Assignable rows whose stage resolved to "unknown". */
+  count: number;
+  /** The distinct raw stage labels involved, for the operator's warning text. */
+  stages: string[];
+};
+
+export type BulkAssignmentResult = {
+  events: DistributionEvent[];
+  errors: string[];
+  skipped: number;
+  unmapped: UnmappedStageReport;
+};
+
+/** How many distinct stage labels a warning names before it stops listing them. */
+const UNMAPPED_STAGE_SAMPLE_LIMIT = 5;
+
+/**
  * Smart CertScan-first distribution:
  *
  * 1. Apportion total quota (cert+normal) among active employees.
@@ -56,7 +87,7 @@ export function calculateBulkAssignment(params: {
    * (never emits a second `assigned` event for an already-owned/completed row).
    */
   existingEntries?: DistributionEntry[];
-}): { events: DistributionEvent[]; errors: string[]; skipped: number } {
+}): BulkAssignmentResult {
   const { rows, allocations, employees, operatorUsername, stageMappings, month, year, existingEntries } = params;
   const events: DistributionEvent[] = [];
   const errors: string[] = [];
@@ -71,6 +102,23 @@ export function calculateBulkAssignment(params: {
     ? rows.filter((r) => !ownedIds.has(r.xrayImageId))
     : rows;
   const skipped = rowsBeforeFilter - assignableRows.length;
+
+  // Counted BEFORE the stage loop, over exactly the rows that loop will walk,
+  // so the tally cannot drift from what actually happens below.
+  const unmappedStages = new Set<string>();
+  let unmappedCount = 0;
+  for (const row of assignableRows) {
+    if (getStageKey(row.stage, stageMappings) !== "unknown") continue;
+    unmappedCount += 1;
+    // A blank stage is counted but contributes no name to the warning — there
+    // is nothing for the operator to look up in the mappings table.
+    const label = String(row.stage ?? "").trim();
+    if (label !== "") unmappedStages.add(label);
+  }
+  const unmapped: UnmappedStageReport = {
+    count: unmappedCount,
+    stages: [...unmappedStages].slice(0, UNMAPPED_STAGE_SAMPLE_LIMIT),
+  };
 
   const assignableEmployees = employees.filter(isAssignableSampleRole);
   const assignableUsernames = new Set(assignableEmployees.map((employee) => employee.username));
@@ -238,5 +286,5 @@ export function calculateBulkAssignment(params: {
     }
   }
 
-  return { events, errors, skipped };
+  return { events, errors, skipped, unmapped };
 }

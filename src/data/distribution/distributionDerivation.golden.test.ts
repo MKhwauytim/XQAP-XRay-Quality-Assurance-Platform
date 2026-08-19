@@ -445,6 +445,12 @@ describe("foldDistributionEvents — golden master", () => {
       droppedEventIds: new Set(),
       droppedImageIds: new Set(),
       absentRowEventIds: new Set(),
+      // Reported alongside absentRowEventIds so a caller can ask sample.master
+      // whether an absorbed image is a real orphan or a stale-read artifact
+      // (see loadOrDeriveDistributionCurrent's absent-row guard). It is
+      // REPORTING only: `entries` — the fold's actual output — is untouched by
+      // it, and every other pin in this golden master is unchanged.
+      absentRowImageIds: new Set(),
     });
     // Events with an empty row set: every event is absorbed as absent-row
     // (logged once via the distribution:fold-no-rows key), never as dropped.

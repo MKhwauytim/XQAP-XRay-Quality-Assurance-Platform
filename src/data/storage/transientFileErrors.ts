@@ -49,9 +49,37 @@ export function isNotReadableError(error: unknown): boolean {
   return errorName(error) === "NotReadableError";
 }
 
+/**
+ * File-LOCK contention, not lost permission.
+ *
+ * `NoModificationAllowedError` is what `createWritable()` (and `removeEntry`)
+ * raise when the entry is already held open for writing by someone else. On a
+ * single machine that "someone else" is another tab; on the UNC/SMB share this
+ * app actually runs on it is another MACHINE mid-write, or the share's own
+ * oplock still being released after a write that already finished. It is
+ * therefore a *timing* condition: the very same call succeeds moments later.
+ *
+ * It was previously grouped with `NotAllowedError`/`SecurityError` as terminal
+ * "the workspace grant is gone", which inverts this repo's own doctrine that a
+ * failed access is not proof of a permanent condition (see the module doc
+ * above: "could not read" is not "does not exist"). The consequence was the
+ * worst one available: a user on a busy share was told they had lost workspace
+ * access — and the recovery offered, re-picking the folder, does nothing for a
+ * lock another machine holds — while a bounded retry would have completed the
+ * write.
+ *
+ * `NotAllowedError` and `SecurityError` remain terminal: those are the names a
+ * revoked or never-granted permission actually uses.
+ */
+export function isLockContentionError(error: unknown): boolean {
+  return errorName(error) === "NoModificationAllowedError";
+}
+
 /** Transient on the WRITE/VERIFY path only — see the module doc above. */
 export function isTransientWriteError(error: unknown): boolean {
-  return isNotFoundError(error) || isNotReadableError(error);
+  return (
+    isNotFoundError(error) || isNotReadableError(error) || isLockContentionError(error)
+  );
 }
 
 /**
@@ -133,6 +161,40 @@ const PROBE_FILE_NAME = ".fs-reachability-probe.tmp";
 const PROBE_SURVIVAL_WAIT_MS = 1_200;
 
 /**
+ * How long to wait before the survival re-probe's SECOND look.
+ *
+ * The re-probe below is a plain `getFileHandle` on a UNC/SMB share, i.e. the one
+ * operation this whole module exists to say is unreliable in isolation — a
+ * directory listing that has not caught up, or a momentary `NotReadableError`
+ * while another process holds the entry, both look identical to "antivirus took
+ * the file". One such blip was enough to return `extension-blocked`, whose code
+ * (XQ-IO-033) tells the user retrying cannot work and that they need an
+ * antivirus exclusion. That is a permanent verdict from a single sample, and
+ * the wrong advice when the sample was a flake.
+ *
+ * So the verdict needs two consecutive failures. A real remover has already
+ * taken the file and takes it again; a blip does not repeat. Short, because the
+ * 1.2 s wait above is what gives an async remover time to act — this only has
+ * to outlast an instantaneous share hiccup, and it is paid at most once, on a
+ * path that has already exhausted every retry ladder.
+ */
+const PROBE_SURVIVAL_RECHECK_DELAY_MS = 300;
+
+/**
+ * Is `name` still openable and readable in `dir`? Any failure answers "no" —
+ * the caller decides what a "no" means.
+ */
+async function probeStillPresent(dir: DirectoryHandleLike, name: string): Promise<boolean> {
+  try {
+    const handle = await dir.getFileHandle(name, { create: false });
+    await handle.getFile();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Only probe for a length problem when the failing name is long enough for
  * length to be a plausible cause. Below this a `.tmp`/`.ndjson` probe already
  * covers the same path budget, so the extra round trip would prove nothing.
@@ -176,9 +238,14 @@ async function probeRoundTrip(
         await waitFor(survivalWaitMs);
         // Second look, after the delay an async remover needs. A file that
         // passed the instant check and is gone now was taken by something
-        // outside the browser.
-        const recheck = await dir.getFileHandle(name, { create: false });
-        await recheck.getFile();
+        // outside the browser — but ONE missed look does not establish that on
+        // a share where a stale listing is the norm, and the verdict this feeds
+        // is permanent. Confirm it (see PROBE_SURVIVAL_RECHECK_DELAY_MS): only
+        // two consecutive failures count as gone.
+        if (!(await probeStillPresent(dir, name))) {
+          await waitFor(PROBE_SURVIVAL_RECHECK_DELAY_MS);
+          if (!(await probeStillPresent(dir, name))) return false;
+        }
       }
     }
     return true;

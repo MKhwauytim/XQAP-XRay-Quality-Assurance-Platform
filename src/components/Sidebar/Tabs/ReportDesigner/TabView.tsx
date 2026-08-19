@@ -103,8 +103,27 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
   const pendingDocRef = useRef<ReportDocument>(doc);
   pendingDocRef.current = doc;
 
+  // IDENTITY of the document that is already on disk: the exact object this
+  // editor was handed at mount (loaded by `loadDesign`, or the freshly-saved
+  // one `handleCreate` just wrote), and thereafter the exact object each
+  // successful save persisted. Every mutation path here builds a NEW document
+  // object via `setDoc`, so "current state is still the same object we loaded"
+  // is a sound, leak-proof test for "nothing has been edited yet" -- unlike a
+  // hand-maintained `edited` boolean, which silently misses any future mutation
+  // path that forgets to flip it.
+  //
+  // Why it matters: the `[doc]` effect below also runs on the FIRST commit, so
+  // merely OPENING a design used to schedule an autosave of the untouched
+  // loaded document 800ms later. That re-stamped `updatedAt`/`updatedBy` with
+  // whoever happened to open it (destroying real authorship history and
+  // re-ordering the design list), and for a view-only user it fired
+  // `rd_edit_denied_msg` in the ribbon for doing nothing but looking.
+  const persistedDocRef = useRef<ReportDocument>(initialDoc);
+
   // Schedule autosave whenever doc changes
   useEffect(() => {
+    // Not an edit -- this is the document exactly as it came off disk.
+    if (doc === persistedDocRef.current) return;
     if (saveTimerRef.current !== null) {
       clearTimeout(saveTimerRef.current);
     }
@@ -164,7 +183,12 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
     setSaving(false);
     if (!result.ok) {
       setSaveError(result.error);
+      return;
     }
+    // Only a SUCCESSFUL write makes this document identity the on-disk one.
+    // (A failed save leaves the previous identity in place, so the change is
+    // still recognized as unsaved by the guard in the autosave effect.)
+    persistedDocRef.current = docToSave;
   }
 
   function handleExplicitSave() {
@@ -700,8 +724,9 @@ export default function ReportDesigner() {
   return (
     // Design-list thumbnails also render Canvas/KpiRenderer (view mode), so
     // they need the same shared-load provider as EditorHost -- otherwise a
-    // KPI element inside a thumbnail would read the context's default `null`
-    // forever (no provider above it) instead of loading data at all.
+    // KPI element inside a thumbnail would sit on the context's default
+    // "loading" state forever (no provider above it) instead of loading data
+    // at all.
     <ExecutiveRowsProvider>
     <div className="rd-root" dir="rtl">
       <PageHeader
