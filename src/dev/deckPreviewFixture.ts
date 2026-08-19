@@ -3,6 +3,13 @@
 // imported by app code — only by src/dev/deckPreview.ts.
 
 import type { PreparedPopulationRow } from "../data/population/populationTypes";
+import { toEmployeeMirrorRowStub } from "../data/population/populationTypes";
+import type {
+  DistributionCurrentData,
+  DistributionEntry,
+  DistributionEvent,
+  DistributionStatus,
+} from "../data/distribution/distributionTypes";
 import type {
   PortAllocation,
   SampleMasterData,
@@ -281,13 +288,151 @@ export function buildPreviewInput(): ExecutiveReportInput {
     portIdx++;
   }
   const sample = drawSample(rows);
+  const employeeFiles = buildPreviewAnswers(sample.rows);
+  // Built after the answers so the seeded LCG advances in a fixed order and the
+  // whole fixture stays reproducible across reloads.
+  const dist = buildPreviewDistribution(sample.rows);
   return {
     monthFolderName: "5-may-2026",
     populationRows: rows,
     sample,
-    distribution: null,
-    employeeFiles: buildPreviewAnswers(sample.rows),
+    distribution: dist.distribution,
+    employeeFiles,
     template: buildPreviewTemplate(),
     config: DEFAULT_EXEC_CONFIG,
+    distributionEvents: dist.events,
+    replacementReasons: dist.replacementReasons,
+  };
+}
+
+// ── Section 4 fixture — distribution coverage + accountability ────────────────
+// Section 4 (التغطية والمساءلة التشغيلية) reads `model.distributionCoverage`
+// and `model.accountabilityProgress`, both of which are `null` when the input
+// carries no distribution. The preview used to pass `distribution: null`, so
+// those two pages rendered their honest empty state and the preview could not
+// show what the section actually looks like. This builds a deterministic
+// synthetic distribution over the drawn sample (same seeded LCG as everything
+// else here) plus the matching event history and replacement reasons, so the
+// section renders with real buckets, per-employee progress, replacement rows,
+// and a reassignment count.
+
+const PREVIEW_REVIEWERS = [
+  "reviewer.alharbi",
+  "reviewer.alqahtani",
+  "reviewer.almutairi",
+  "reviewer.alshehri",
+  "reviewer.alzahrani",
+] as const;
+
+export const PREVIEW_REVIEWER_NAMES: Record<string, string> = {
+  "reviewer.alharbi": "عبدالله الحربي",
+  "reviewer.alqahtani": "نورة القحطاني",
+  "reviewer.almutairi": "سعد المطيري",
+  "reviewer.alshehri": "ريم الشهري",
+  "reviewer.alzahrani": "ماجد الزهراني",
+  "deck-preview-inspector": "فاحص المعاينة",
+};
+
+const REPLACEMENT_REASONS_POOL = [
+  "الصورة غير متوفرة في الأرشيف",
+  "الصورة تالفة ولا يمكن قراءتها",
+  "الحالة مكرّرة ضمن العيّنة",
+  "الإرسالية خارج نطاق الفحص",
+];
+
+type PreviewDistributionFixture = {
+  distribution: DistributionCurrentData;
+  events: DistributionEvent[];
+  replacementReasons: Record<string, string>;
+};
+
+function buildPreviewDistribution(sampleRows: PreparedPopulationRow[]): PreviewDistributionFixture {
+  const entries: DistributionEntry[] = [];
+  const events: DistributionEvent[] = [];
+  const replacementReasons: Record<string, string> = {};
+  let totalCompleted = 0;
+  let totalPending = 0;
+  let totalReplaced = 0;
+  let totalRequested = 0;
+  let eventSeq = 0;
+  const nextEventId = (): string => `evt-${String(++eventSeq).padStart(6, "0")}`;
+
+  sampleRows.forEach((row, i) => {
+    const assignedTo = PREVIEW_REVIEWERS[i % PREVIEW_REVIEWERS.length];
+    const assignedAt = `2026-05-${String(3 + (i % 20)).padStart(2, "0")}T08:00:00.000Z`;
+    const lastEventAt = `2026-05-${String(4 + (i % 20)).padStart(2, "0")}T13:00:00.000Z`;
+
+    const roll = rnd();
+    let status: DistributionStatus;
+    if (roll < 0.78) status = "completed";
+    else if (roll < 0.94) status = "pending";
+    else if (roll < 0.975) status = "replacement-requested";
+    else status = "replaced";
+
+    if (status === "completed") totalCompleted += 1;
+    else if (status === "pending") totalPending += 1;
+    else if (status === "replaced") totalReplaced += 1;
+    else totalRequested += 1;
+
+    entries.push({
+      xrayImageId: row.xrayImageId,
+      assignedTo,
+      status,
+      replacedById: status === "replaced" ? `${row.xrayImageId}-R` : null,
+      lastEventAt,
+      row: toEmployeeMirrorRowStub(row),
+    });
+
+    events.push({
+      eventId: nextEventId(),
+      eventType: "assigned",
+      xrayImageId: row.xrayImageId,
+      assignedTo,
+      eventAt: assignedAt,
+      eventBy: "deck-preview",
+    });
+    if (status === "completed") {
+      events.push({
+        eventId: nextEventId(),
+        eventType: "completed",
+        xrayImageId: row.xrayImageId,
+        assignedTo,
+        eventAt: lastEventAt,
+        eventBy: assignedTo,
+      });
+    }
+    if (status === "replaced" || status === "replacement-requested") {
+      replacementReasons[row.xrayImageId] =
+        REPLACEMENT_REASONS_POOL[i % REPLACEMENT_REASONS_POOL.length];
+    }
+    // ~4% of assignments were handed to a second reviewer at some point, so the
+    // accountability page's reassignment counter has something honest to count.
+    if (rnd() < 0.04) {
+      events.push({
+        eventId: nextEventId(),
+        eventType: "reassigned",
+        xrayImageId: row.xrayImageId,
+        assignedTo,
+        reassignedTo: PREVIEW_REVIEWERS[(i + 1) % PREVIEW_REVIEWERS.length],
+        eventAt: lastEventAt,
+        eventBy: "deck-preview",
+      });
+    }
+  });
+
+  void totalRequested;
+
+  return {
+    distribution: {
+      monthFolderName: "5-may-2026",
+      derivedAt: "2026-05-31T18:00:00.000Z",
+      totalAssigned: entries.length,
+      totalCompleted,
+      totalReplaced,
+      totalPending,
+      entries,
+    },
+    events,
+    replacementReasons,
   };
 }
