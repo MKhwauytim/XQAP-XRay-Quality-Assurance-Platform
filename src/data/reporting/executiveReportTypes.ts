@@ -64,6 +64,23 @@ export type ExecutiveReportRow = {
   otherResults: OtherResultsPanel;
   /** Level notes (ملاحظة المستويات) carried for traceability. */
   notes: string | null;
+  /**
+   * Day of month (1–31) from `xrayEntryDate`, or `null` when the value was not
+   * a well-formed ISO date. Optional for the same reason
+   * `PreparedPopulationRow.transitDeclarationNumber` is: nine test files build
+   * a full `ExecutiveReportRow` literal by hand, and making these required
+   * would force every one of them to learn about fields outside its concern.
+   */
+  entryDay?: number | null;
+  /** A محضر (seizure report) number is present and non-blank on the risk row. */
+  hasReport?: boolean;
+  /**
+   * RAW risk-engine targeting value, exactly as the risk file carried it. The
+   * flag→verdict mapping lives in the risk-engine page, NOT here — the real
+   * value vocabulary is unknown at design time, so nothing upstream may assume
+   * what an affirmative looks like.
+   */
+  targetedByRiskEngine?: string | null;
 };
 
 export type PortProfile = {
