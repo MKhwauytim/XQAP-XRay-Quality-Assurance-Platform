@@ -326,6 +326,7 @@
 
 .ip-field--invalid .ip-input,
 .ip-field--invalid .ip-select,
+.ip-field--invalid .ip-multiselect,
 .ip-field--invalid .ip-segmented {
   border-color: var(--c-danger);
 }
@@ -420,6 +421,58 @@
 .ip-segment:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ── Multi-select option group ──────────────────────────────────────────── */
+
+/* Wraps rather than scrolls: the panel is 470px and these option lists run to
+   nine entries, so a single row would clip the tail out of reach. */
+.ip-multiselect {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border: 1px solid transparent; /* invalid state paints this */
+  border-radius: 9px;
+}
+
+.ip-multi-option {
+  min-height: 34px;
+  padding: 6px 12px;
+  border: 1px solid var(--c-border);
+  border-radius: 9px;
+  background: var(--c-surface);
+  color: var(--c-ink-2);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: var(--fw-bold);
+  text-align: center;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease-smooth),
+              border-color var(--t-fast) var(--ease-smooth),
+              color var(--t-fast) var(--ease-smooth);
+}
+
+.ip-multi-option:hover {
+  border-color: var(--c-border-2);
+  background: var(--c-surface-2);
+}
+
+.ip-multi-option:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.ip-multi-option--selected,
+.ip-multi-option--selected:hover {
+  background: var(--c-success-bg);
+  border-color: var(--c-success-border);
+  color: var(--c-success);
+}
+
+.ip-field-hint {
+  color: var(--c-ink-3);
+  font-size: 12px;
+  line-height: var(--lh-loose);
 }
 
 /* ── Checkbox row (procedure confirmation) ──────────────────────────────── */

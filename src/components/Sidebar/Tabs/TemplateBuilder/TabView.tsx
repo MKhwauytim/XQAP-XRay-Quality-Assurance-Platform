@@ -28,6 +28,7 @@ import { PageHeader } from "../../../../components/PageHeader/PageHeader";
 import { EmptyState } from "../../../../components/StateViews/StateViews";
 import { ConfirmDialog } from "../../../../components/ConfirmDialog/ConfirmDialog";
 import { useLabels } from "../../../../data/labels/useLabels";
+import { buildDefaultInspectionTemplate } from "./defaultTemplate";
 
 const FIELD_TYPE_LABELS: Record<TemplateFieldType, string> = {
   text: "نص",
@@ -35,9 +36,23 @@ const FIELD_TYPE_LABELS: Record<TemplateFieldType, string> = {
   number: "رقم",
   dropdown: "قائمة منسدلة",
   combobox: "نص مع اقتراحات",
+  multiselect: "اختيار متعدد",
   checkbox: "علامة صح",
   date: "تاريخ",
   empty: "خلية فارغة / ملاحظة"
+};
+
+/** Field types whose `options` list is authored in the builder. */
+const FIELD_TYPES_WITH_OPTIONS = new Set<TemplateFieldType>([
+  "dropdown",
+  "combobox",
+  "multiselect"
+]);
+
+const OPTION_HEADINGS: Partial<Record<TemplateFieldType, string>> = {
+  dropdown: "خيارات القائمة:",
+  combobox: "اقتراحات الإكمال التلقائي:",
+  multiselect: "خيارات الاختيار المتعدد:"
 };
 
 const CONDITION_LABELS: Record<TemplateFieldConditionOperator, string> = {
@@ -49,124 +64,6 @@ const CONDITION_LABELS: Record<TemplateFieldConditionOperator, string> = {
 
 type EditorMode = "list" | "edit" | "create";
 type StatusMessage = { type: "ok" | "error"; text: string } | null;
-
-function buildDefaultInspectionTemplate(username: string): TemplateSchema {
-  const now = new Date().toISOString();
-  const phase1Id = createPhaseId();
-  const phase2Id = createPhaseId();
-
-  const fHasImage       = createFieldId();
-  const fNoImageReason  = createFieldId();
-  const fHasMarking     = createFieldId();
-  const fImageQuality   = createFieldId();
-  const fQualityReason  = createFieldId();
-  const fQualityOther   = createFieldId();
-  const fResultValidity    = createFieldId();
-  const fSuspicionLevel    = createFieldId();
-  const fSuspicionLocation = createFieldId();
-  const fSuspectedTypes    = createFieldId();
-  const fSmuggleMethod     = createFieldId();
-  const fNotes             = createFieldId();
-
-  return {
-    templateId: createTemplateId(),
-    templateName: "نموذج ضمان جودة الأشعة",
-    version: 1,
-    createdAt: now,
-    createdBy: username,
-    updatedAt: now,
-    updatedBy: username,
-    phases: [
-      { phaseId: phase1Id, title: "ضمان جودة الصورة",  description: "", order: 1 },
-      { phaseId: phase2Id, title: "ضمان جودة النتيجة", description: "", order: 2 },
-    ],
-    fields: [
-      // ── Phase 1 ──────────────────────────────────────────────────────────────
-      {
-        fieldId: fHasImage, phaseId: phase1Id, label: "هل يوجد صورة",
-        type: "dropdown", required: true,
-        options: ["نعم", "لا"], placeholder: "", condition: null, order: 1,
-      },
-      {
-        fieldId: fNoImageReason, phaseId: phase1Id, label: "سبب عدم وجود الصورة",
-        type: "dropdown", required: false,
-        options: ["المعرف غير صحيح", "لا يوجد رقم لوحة", "لا يوجد مستند فحص الصورة", "مؤرشف لفترات سابقة"],
-        placeholder: "",
-        condition: { sourceFieldId: fHasImage, operator: "equals", value: "لا" },
-        order: 2,
-      },
-      {
-        fieldId: fHasMarking, phaseId: phase1Id, label: "هل يوجد تحديد",
-        type: "dropdown", required: true,
-        options: ["نعم", "لا"], placeholder: "",
-        condition: { sourceFieldId: fHasImage, operator: "equals", value: "نعم" }, order: 3,
-      },
-      {
-        fieldId: fImageQuality, phaseId: phase1Id, label: "مستوى جودة الصورة",
-        type: "dropdown", required: true,
-        options: ["عالي", "متوسط", "منخفض"], placeholder: "",
-        condition: { sourceFieldId: fHasImage, operator: "equals", value: "نعم" }, order: 4,
-      },
-      {
-        fieldId: fQualityReason, phaseId: phase1Id, label: "اسباب انخفاض جودة الصورة",
-        type: "dropdown", required: false,
-        options: ["الأرسالية غير كاملة", "جودة التقاط الصورة منخفضة", "يوجد تموجات في الصورة", "اخرى"],
-        placeholder: "",
-        condition: { sourceFieldId: fImageQuality, operator: "notEquals", value: "عالي" },
-        order: 5,
-      },
-      {
-        fieldId: fQualityOther, phaseId: phase1Id, label: "سبب انخفاض الجودة (أخرى)",
-        type: "textarea", required: false,
-        options: [], placeholder: "اذكر سبب انخفاض الجودة...",
-        condition: { sourceFieldId: fQualityReason, operator: "equals", value: "اخرى" },
-        order: 6,
-      },
-      // ── Phase 2 ──────────────────────────────────────────────────────────────
-      {
-        fieldId: fResultValidity, phaseId: phase2Id, label: "صحة النتيجة",
-        type: "dropdown", required: true,
-        options: ["سليمة", "اشتباه"], placeholder: "",
-        condition: { sourceFieldId: fHasImage, operator: "equals", value: "نعم" }, order: 1,
-      },
-      {
-        fieldId: fSuspicionLevel, phaseId: phase2Id, label: "تقييم الاشتباه",
-        type: "dropdown", required: false,
-        options: ["عالي", "متوسط", "منخفض"], placeholder: "",
-        condition: { sourceFieldId: fResultValidity, operator: "equals", value: "اشتباه" },
-        order: 2,
-      },
-      {
-        fieldId: fSuspicionLocation, phaseId: phase2Id, label: "موقع الاشتباه",
-        type: "combobox", required: false,
-        options: ["الكبينة", "الحمولة", "العجلات", "الإطارات", "الباب الخلفي", "السقف", "الأرضية", "الخزان", "الجانب الأيمن", "الجانب الأيسر"],
-        placeholder: "اكتب أو اختر موقع الاشتباه...",
-        condition: { sourceFieldId: fResultValidity, operator: "equals", value: "اشتباه" },
-        order: 3,
-      },
-      {
-        fieldId: fSuspectedTypes, phaseId: phase2Id, label: "الاصناف المشبوهة",
-        type: "textarea", required: false,
-        options: [], placeholder: "اذكر الاصناف المشبوهة...",
-        condition: { sourceFieldId: fResultValidity, operator: "equals", value: "اشتباه" },
-        order: 4,
-      },
-      {
-        fieldId: fSmuggleMethod, phaseId: phase2Id, label: "الية التهريب المحتملة",
-        type: "textarea", required: false,
-        options: [], placeholder: "اذكر الية التهريب المحتملة...",
-        condition: { sourceFieldId: fResultValidity, operator: "equals", value: "اشتباه" },
-        order: 5,
-      },
-      {
-        fieldId: fNotes, phaseId: phase2Id, label: "الملاحظات العامة",
-        type: "textarea", required: false,
-        options: [], placeholder: "أي ملاحظات إضافية...",
-        condition: { sourceFieldId: fHasImage, operator: "equals", value: "نعم" }, order: 6,
-      },
-    ],
-  };
-}
 
 export default function TemplateBuilderTab() {
   const { directoryHandle } = useWorkspace();
@@ -711,8 +608,16 @@ function FieldEditor({
     : undefined;
 
   function addOption(): void {
-    const nextOption = optionInput.trim();
+    // "|" is the multiselect storage separator (MULTISELECT_SEPARATOR). An
+    // option carrying one would split into two on read-back, so it is stripped
+    // for every option type rather than only where it would bite today — a
+    // field's type can still be switched to multiselect after its options exist.
+    const nextOption = optionInput.replace(/\|/g, " ").replace(/\s+/g, " ").trim();
     if (!nextOption) return;
+    if (field.options.includes(nextOption)) {
+      setOptionInput("");
+      return;
+    }
     onChange({ ...field, options: [...field.options, nextOption] });
     setOptionInput("");
   }
@@ -730,7 +635,10 @@ function FieldEditor({
     if (sourceField.type === "checkbox") {
       return { sourceFieldId: sourceField.fieldId, operator: "equals", value: true };
     }
-    if (sourceField.type === "dropdown") {
+    // A multiselect source reads the same way as a dropdown here: the condition
+    // names ONE option, and templateRuntime evaluates `equals` on a multiselect
+    // as "this option is among the ones picked".
+    if (sourceField.type === "dropdown" || sourceField.type === "multiselect") {
       return {
         sourceFieldId: sourceField.fieldId,
         operator: "equals",
@@ -791,7 +699,9 @@ function FieldEditor({
               onChange({
                 ...field,
                 type: event.target.value as TemplateFieldType,
-                options: (event.target.value === "dropdown" || event.target.value === "combobox") ? field.options : []
+                options: FIELD_TYPES_WITH_OPTIONS.has(event.target.value as TemplateFieldType)
+                  ? field.options
+                  : []
               })
             }
           >
@@ -826,9 +736,9 @@ function FieldEditor({
         </label>
       ) : null}
 
-      {(field.type === "dropdown" || field.type === "combobox") ? (
+      {FIELD_TYPES_WITH_OPTIONS.has(field.type) ? (
         <div className="tb-options-section">
-          <p className="tb-options-heading">{field.type === "combobox" ? "اقتراحات الإكمال التلقائي:" : "خيارات القائمة:"}</p>
+          <p className="tb-options-heading">{OPTION_HEADINGS[field.type] ?? "خيارات القائمة:"}</p>
           <div className="tb-options-list">
             {field.options.map((option, optionIndex) => (
               <div key={`${option}-${optionIndex}`} className="tb-option-item">
@@ -923,7 +833,8 @@ function FieldEditor({
             {effectiveOperator === "equals" || effectiveOperator === "notEquals" ? (
               <label className="tb-label">
                 القيمة
-                {selectedSourceField?.type === "dropdown" ? (
+                {selectedSourceField?.type === "dropdown" ||
+                selectedSourceField?.type === "multiselect" ? (
                   <select
                     className="tb-select"
                     value={String(field.condition.value ?? "")}
@@ -1029,7 +940,7 @@ function normalizeFieldConditions(fields: TemplateField[]): TemplateField[] {
       };
     }
 
-    if (sourceField.type === "dropdown") {
+    if (sourceField.type === "dropdown" || sourceField.type === "multiselect") {
       const options = sourceField.options ?? [];
       const currentValue = String(field.condition.value ?? "");
       const value = options.includes(currentValue) ? currentValue : options[0] ?? "";
