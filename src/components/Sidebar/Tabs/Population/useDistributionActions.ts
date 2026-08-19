@@ -149,7 +149,18 @@ export function useDistributionActions(params: {
       }
     }
 
-    // Stamp logRevision so the next loadOrDeriveDistributionCurrent takes the fast path.
+    // Stamp logRevision so the snapshot on disk records which log revision it
+    // was derived from.
+    //
+    // It does NOT make the next `loadOrDeriveDistributionCurrent` take the fast
+    // path, despite what this comment used to claim: that check also requires
+    // `deriveVersion` and `eventSetId`, and `deriveCurrentDistribution` stamps
+    // neither, so a cache written here is always rejected and a full refold
+    // always follows. Stamping them here is NOT a free win — it would make a
+    // cache every existing workspace currently ignores suddenly authoritative,
+    // and this call site derives directly, so it has none of the absent-row
+    // guarding `loadOrDeriveDistributionCurrent` does before it persists. That
+    // is its own reviewed change, not a comment fix.
     const current: DistributionCurrentData = {
       ...deriveCurrentDistribution(log, sampleRows),
       logRevision: log.revision,

@@ -360,10 +360,21 @@ async function safeSegmentsSignature(dir: DirectoryHandleLike | null): Promise<P
 }
 
 /**
- * One run's worth of probing (§4.2's per-family change set). Every probe
- * degrades to a neutral "unreadable" value on failure (missing folder on a
- * fresh workspace, permission hiccup, ...) rather than throwing -- a probe
- * failure must never crash the run or block the OTHER families' probes.
+ * One run's worth of probing (§4.2's per-family change set).
+ *
+ * A folder or file that is NOT THERE (a fresh workspace, a month with no
+ * samples yet) is a real observation: it probes as a neutral value, diffs
+ * normally, and never blocks the other families' probes. A read that FAILED is
+ * not — it yields UNPROBED, which carries the previous baseline forward instead
+ * of replacing it, so a blip cannot manufacture a change on the next healthy
+ * tick (see `carryUnprobed`/`movedFrom`).
+ *
+ * The one case that is NOT contained here is a failure on a directory OPEN:
+ * `openOrNull` rethrows anything that is not a genuine NotFound, which aborts
+ * the whole run with `ok: false` and leaves the entire baseline intact. That is
+ * deliberate — every family hanging off an unopenable directory would otherwise
+ * probe as "empty" together, and one neutral-looking baseline for all of them is
+ * worse than one visibly failed tick.
  */
 async function probeMonth(
   directoryHandle: DirectoryHandleLike,
