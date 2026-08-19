@@ -1,10 +1,21 @@
 /**
  * Workspace action audit trail — records governance-relevant actions
  * (user deletion, permission changes, sample draws, referral decisions,
- * month close/reopen, backup restores) in an append-only log at
- * `5-system/audit/actions.log.json`.
+ * month close/reopen, backup restores) in an append-only log.
  *
- * Deliberately a separate file from `activity.log.json` (session-shaped,
+ * **Per-actor files since the 2026-08-19 owner directive.** Every actor used to
+ * append to one shared `5-system/audit/actions.log.json` through a whole-file
+ * read-modify-write with the shortest retry ladder in the app (~0.4 s), which on
+ * a shared SMB folder is not a ladder at all. Each actor now writes only
+ * `5-system/audit/actions/{stem}.actions.json`, with per-actor per-year
+ * archives alongside it.
+ *
+ * **The legacy shared files — `actions.log.json` and
+ * `actions.archive.{year}.json` — are read on every aggregate read, written
+ * never, deleted never, migrated never.** Existing field workspaces keep
+ * working and their history stays visible in the admin Actions view.
+ *
+ * Deliberately a separate file family from the activity log (session-shaped,
  * merge-by-id/heartbeat schema) — do not mix the two.
  *
  * Best-effort by contract: `appendWorkspaceAction` never throws to callers
@@ -17,16 +28,25 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { readOptionalJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
+import { readJsonDirectory } from "../storage/directoryScan";
 import { simpleHash } from "../storage/jsonEnvelope";
 import { logError } from "../storage/errorLogger";
-import { getSystemRoot, SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
+import { getAuditRoot, getAuditActionsDir } from "../workspace/workspacePaths";
+import {
+  ACTIONS_FILE_SUFFIX,
+  actionsArchiveFileName,
+  actionsFileName,
+} from "./auditPaths";
 
+/** LEGACY shared files. Read forever, never written. */
 const ACTIONS_LOG_FILE = "actions.log.json";
 
-// Live-log retention cap. When exceeded, the oldest overflow is appended to a
-// per-year archive file BEFORE the live log is trimmed (A6). A `let` + test seam
-// so the archival behaviour can be exercised without writing 10k entries.
-const DEFAULT_MAX_ACTION_ENTRIES = 10_000;
+// Per-actor live-log retention cap. When exceeded, the oldest overflow is
+// appended to that actor's per-year archive file BEFORE the live log is trimmed
+// (A6). Was 10,000 for the whole workspace; 2,000 is a long history for one
+// actor. A `let` + test seam so archival can be exercised without writing 2k
+// entries.
+const DEFAULT_MAX_ACTION_ENTRIES = 2_000;
 let maxActionEntries = DEFAULT_MAX_ACTION_ENTRIES;
 
 /** @internal — test-only. Lower the live-log cap to exercise archival cheaply. */
@@ -39,7 +59,8 @@ export function __resetMaxActionEntriesForTests(): void {
   maxActionEntries = DEFAULT_MAX_ACTION_ENTRIES;
 }
 
-function archiveFileName(year: number): string {
+/** LEGACY workspace-wide per-year archive. Read forever, never written. */
+function legacyArchiveFileName(year: number): string {
   return `actions.archive.${year}.json`;
 }
 
@@ -106,11 +127,24 @@ export type WorkspaceActionLogFile = {
   updatedAt: string;
   /**
    * Live entries. Capped at maxActionEntries: on overflow the oldest entries are
-   * appended to a per-year `actions.archive.{year}.json` BEFORE being trimmed
-   * here (A6) — never dropped without archiving. Archive failure blocks the trim.
+   * appended to a per-year archive BEFORE being trimmed here (A6) — never
+   * dropped without archiving. Archive failure blocks the trim.
    */
   entries: WorkspaceActionEntry[];
 };
+
+/** One actor's own live log — the only live-log shape this module writes. */
+export type WorkspaceActionUserLogFile = WorkspaceActionLogFile & {
+  /** RAW, unsanitized actor name. Informational; entries carry their own `actor`. */
+  actor: string;
+};
+
+/**
+ * There is deliberately no separate per-actor ARCHIVE type: the archive payload
+ * is unchanged and the actor scoping lives entirely in the file name, so a
+ * legacy `actions.archive.{year}.json` and a new `{stem}.actions.{year}.json`
+ * hash identically through `hashActionArchive` (the B5 chain link).
+ */
 
 /** Caller-supplied fields; `id` and `at` are stamped on append. */
 export type WorkspaceActionInput = Omit<WorkspaceActionEntry, "id" | "at">;
@@ -122,29 +156,24 @@ function createActionId(): string {
   return `act-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-async function getAuditDir(
-  directoryHandle: DirectoryHandleLike,
-  create: boolean
-): Promise<DirectoryHandleLike> {
-  const systemDir = await getSystemRoot(directoryHandle, create);
-  return systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.audit, { create });
-}
-
 /**
- * The live action log, or an empty shell for a workspace that has none yet.
+ * The LEGACY shared live log, or an empty shell for a workspace that has none.
  *
  * **Throws when the log exists but could not be read.** This is the base read of
  * an append-only read-modify-write: the empty shell is not a neutral starting
  * point, it is a whole-file replacement that truncates the audit trail to the
  * single entry being appended — and reports success. A missing audit folder is
  * normal for a fresh workspace and still yields the shell; nothing else does.
+ *
+ * Read-only since the per-actor split: nothing writes `actions.log.json` any
+ * more, but every aggregate read still unions it in.
  */
-async function readLogFile(
+async function readLegacyLogFile(
   directoryHandle: DirectoryHandleLike
 ): Promise<WorkspaceActionLogFile> {
   const read = await readOptionalJson<WorkspaceActionLogFile>(
     `audit:${ACTIONS_LOG_FILE}`,
-    [{ directory: () => getAuditDir(directoryHandle, false), fileName: ACTIONS_LOG_FILE }]
+    [{ directory: () => getAuditRoot(directoryHandle, false), fileName: ACTIONS_LOG_FILE }]
   );
   if (read.kind === "found") {
     return {
@@ -155,6 +184,32 @@ async function readLogFile(
     };
   }
   return { revision: 0, updatedAt: new Date().toISOString(), entries: [] };
+}
+
+/**
+ * ONE actor's live log. Same throw-on-unreadable contract as the legacy reader,
+ * and it matters exactly as much per-actor: this is still the base read of a
+ * read-modify-write that would otherwise truncate that actor's whole trail.
+ */
+async function readUserLogFile(
+  directoryHandle: DirectoryHandleLike,
+  actor: string
+): Promise<WorkspaceActionUserLogFile> {
+  const fileName = actionsFileName(actor);
+  const read = await readOptionalJson<WorkspaceActionUserLogFile>(
+    `audit:actions:${fileName}`,
+    [{ directory: () => getAuditActionsDir(directoryHandle, false), fileName }]
+  );
+  if (read.kind === "found") {
+    return {
+      actor: typeof read.value.actor === "string" ? read.value.actor : actor,
+      revision: read.value.revision ?? 0,
+      _writeToken: read.value._writeToken,
+      updatedAt: read.value.updatedAt ?? new Date().toISOString(),
+      entries: Array.isArray(read.value.entries) ? read.value.entries : [],
+    };
+  }
+  return { actor, revision: 0, updatedAt: new Date().toISOString(), entries: [] };
 }
 
 /**
@@ -169,9 +224,9 @@ async function readLogFile(
  */
 async function readArchiveFile(
   dir: DirectoryHandleLike,
+  fileName: string,
   year: number
 ): Promise<WorkspaceActionArchiveFile> {
-  const fileName = archiveFileName(year);
   const read = await readOptionalJson<WorkspaceActionArchiveFile>(
     `audit:${fileName}`,
     [{ directory: async () => dir, fileName }]
@@ -189,13 +244,19 @@ async function readArchiveFile(
 }
 
 /**
- * Append overflow entries to their per-year archive files (A6). Idempotent by
- * entry id, so a casLoop retry cannot double-append. Returns true only when every
- * year's archive was written; a false return must BLOCK the live-log trim so no
- * entry is ever dropped without being archived first.
+ * Append overflow entries to this ACTOR's per-year archive files (A6).
+ * Idempotent by entry id, so a casLoop retry cannot double-append. Returns true
+ * only when every year's archive was written; a false return must BLOCK the
+ * live-log trim so no entry is ever dropped without being archived first.
+ *
+ * The B5 `previousArchiveHash` chain is preserved in kind but narrowed in
+ * scope: it now links an actor's year-N archive to the SAME actor's year-(N-1)
+ * archive, rather than the workspace-wide year sequence. Tamper-evident with no
+ * secret key, exactly as before.
  */
 async function archiveOverflow(
   dir: DirectoryHandleLike,
+  actor: string,
   overflow: WorkspaceActionEntry[]
 ): Promise<boolean> {
   if (overflow.length === 0) return true;
@@ -210,7 +271,8 @@ async function archiveOverflow(
 
   try {
     for (const [year, entries] of byYear) {
-      const archive = await readArchiveFile(dir, year);
+      const fileName = actionsArchiveFileName(actor, year);
+      const archive = await readArchiveFile(dir, fileName, year);
       const seen = new Set(archive.entries.map((e) => e.id));
       const additions = entries.filter((e) => !seen.has(e.id));
       if (additions.length === 0) continue; // already archived (retry) — idempotent
@@ -219,7 +281,7 @@ async function archiveOverflow(
       // the chain anchor stays stable; only establish it on first write of the year.
       let previousArchiveHash = archive.previousArchiveHash;
       if (previousArchiveHash === undefined) {
-        const prior = await readArchiveFile(dir, year - 1);
+        const prior = await readArchiveFile(dir, actionsArchiveFileName(actor, year - 1), year - 1);
         if (prior.revision > 0) previousArchiveHash = hashActionArchive(prior);
       }
       const updated: WorkspaceActionArchiveFile = {
@@ -229,7 +291,7 @@ async function archiveOverflow(
         ...(previousArchiveHash !== undefined ? { previousArchiveHash } : {}),
         entries: [...archive.entries, ...additions],
       };
-      await safeWriteJson(dir, archiveFileName(year), updated);
+      await safeWriteJson(dir, fileName, updated);
     }
     return true;
   } catch (error) {
@@ -249,17 +311,21 @@ export async function appendWorkspaceAction(
 ): Promise<void> {
   if (!directoryHandle) return;
 
+  const actor = entry.actor;
+  const fileName = actionsFileName(actor);
+
   try {
     // NB: `:rmw` suffix keeps this outer read-modify-write lock distinct from
     // safeWriteJson's internal `${dir.name}/${fileName}` lock (v41.36 —
     // withResourceLock is not reentrant, a colliding key self-deadlocks).
-    // The outer lock serializes same-tab appends; the casLoop token guards
-    // against cross-machine races on a shared folder.
-    const result = await withResourceLock(`audit/${ACTIONS_LOG_FILE}:rmw`, () =>
+    // The key is now per-ACTOR, so two different actors no longer queue behind
+    // one lock; the casLoop token still guards cross-machine races on the same
+    // actor's file (two tabs, or the same account on two machines).
+    const result = await withResourceLock(`audit/actions/${fileName}:rmw`, () =>
       casLoop<{ ok: true }>(
       async (writeToken) => {
-        const dir = await getAuditDir(directoryHandle, true);
-        const existing = await readLogFile(directoryHandle);
+        const dir = await getAuditActionsDir(directoryHandle, true);
+        const existing = await readUserLogFile(directoryHandle, actor);
         const nextRevision = (existing.revision ?? 0) + 1;
         const fullEntry: WorkspaceActionEntry = {
           ...entry,
@@ -274,32 +340,35 @@ export async function appendWorkspaceAction(
         if (combined.length > maxActionEntries) {
           const overflowCount = combined.length - maxActionEntries;
           const overflow = combined.slice(0, overflowCount);
-          const archived = await archiveOverflow(dir, overflow);
+          const archived = await archiveOverflow(dir, actor, overflow);
           if (archived) {
             liveEntries = combined.slice(overflowCount);
           }
         }
-        const updated: WorkspaceActionLogFile = {
+        const updated: WorkspaceActionUserLogFile = {
+          actor,
           revision: nextRevision,
           _writeToken: writeToken,
           updatedAt: fullEntry.at,
           entries: liveEntries,
         };
-        await safeWriteJson(dir, ACTIONS_LOG_FILE, updated);
-        const verify = await readLogFile(directoryHandle);
+        await safeWriteJson(dir, fileName, updated);
+        const verify = await readUserLogFile(directoryHandle, actor);
         if (verify.revision === nextRevision && verify._writeToken === writeToken) {
           return {
             done: true,
             result: { ok: true as const },
             verify: async () => {
-              const recheck = await readLogFile(directoryHandle);
+              const recheck = await readUserLogFile(directoryHandle, actor);
               return recheck.revision === nextRevision && recheck._writeToken === writeToken;
             },
           };
         }
         return { done: false };
       },
-      { maxRetries: 4, baseDelayMs: 50, conflictError: "audit append conflict" }
+      // 4 × 50 ms ≈ 0.4 s was the shortest ladder in the app and not a ladder at
+      // all on a contended SMB entry.
+      { maxRetries: 6, baseDelayMs: 100, conflictError: "audit append conflict" }
       )
     );
     if (!result.ok) {
@@ -310,28 +379,103 @@ export async function appendWorkspaceAction(
   }
 }
 
-/** Read all recorded actions (newest last). Empty array on any failure. */
-export async function readWorkspaceActions(
+/**
+ * Dedup for action entries: **first writer wins.** Unlike an activity entry
+ * (extended by heartbeats), an action entry is immutable once appended, so the
+ * first copy encountered is as good as any and the rule is cheaper and stabler.
+ * Sorted ascending by `at`, tie-broken by `id` so two clients reading the same
+ * folder produce the same list. Newest last, matching the pre-split contract.
+ */
+function mergeActionEntries(groups: WorkspaceActionEntry[][]): WorkspaceActionEntry[] {
+  const byId = new Map<string, WorkspaceActionEntry>();
+  for (const group of groups) {
+    for (const entry of group) {
+      if (!entry || typeof entry.id !== "string") continue;
+      if (!byId.has(entry.id)) byId.set(entry.id, entry);
+    }
+  }
+  return [...byId.values()].sort((a, b) => {
+    const aAt = Date.parse(a.at);
+    const bAt = Date.parse(b.at);
+    const aValue = Number.isNaN(aAt) ? -Infinity : aAt;
+    const bValue = Number.isNaN(bAt) ? -Infinity : bAt;
+    if (aValue !== bValue) return aValue - bValue;
+    return a.id.localeCompare(b.id);
+  });
+}
+
+/**
+ * Read every per-actor file in `5-system/audit/actions/`.
+ *
+ * Note the suffix arithmetic that keeps the archives out without a second
+ * predicate: `"bob-1a2b3c.actions.2026.json".endsWith(".actions.json")` is
+ * FALSE, because the year sits between `.actions` and `.json`. A `.includes()`
+ * here would silently fold every archive into the live log — pinned by a test.
+ */
+async function readAllUserLogFiles(
   directoryHandle: DirectoryHandleLike
-): Promise<WorkspaceActionEntry[]> {
+): Promise<WorkspaceActionEntry[][]> {
   try {
-    return (await readLogFile(directoryHandle)).entries;
+    const dir = await getAuditActionsDir(directoryHandle, false);
+    const { values } = await readJsonDirectory<WorkspaceActionUserLogFile>(dir, {
+      suffix: ACTIONS_FILE_SUFFIX,
+      onUnreadable: "skip",
+    });
+    return values.map((file) => (Array.isArray(file?.entries) ? file.entries : []));
   } catch (error) {
     logError("audit:read", error);
     return [];
   }
 }
 
-/** Read a per-year audit archive (A6). Empty array when the archive is absent. */
+/**
+ * Read all recorded actions (newest last): every per-actor file ∪ the LEGACY
+ * shared `actions.log.json`. Empty array on any failure.
+ */
+export async function readWorkspaceActions(
+  directoryHandle: DirectoryHandleLike
+): Promise<WorkspaceActionEntry[]> {
+  const perActor = await readAllUserLogFiles(directoryHandle);
+  let legacy: WorkspaceActionEntry[] = [];
+  try {
+    legacy = (await readLegacyLogFile(directoryHandle)).entries;
+  } catch (error) {
+    logError("audit:read", error);
+    // An unreadable legacy file must not hide the per-actor trail.
+  }
+  return mergeActionEntries([...perActor, legacy]);
+}
+
+/**
+ * Read a per-year audit archive (A6): every `{stem}.actions.{year}.json` in
+ * `audit/actions/` ∪ the LEGACY workspace-wide `actions.archive.{year}.json`.
+ * Empty array when none exist.
+ */
 export async function readWorkspaceActionArchive(
   directoryHandle: DirectoryHandleLike,
   year: number
 ): Promise<WorkspaceActionEntry[]> {
+  const groups: WorkspaceActionEntry[][] = [];
+
   try {
-    const dir = await getAuditDir(directoryHandle, false);
-    return (await readArchiveFile(dir, year)).entries;
+    const dir = await getAuditActionsDir(directoryHandle, false);
+    const { values } = await readJsonDirectory<WorkspaceActionArchiveFile>(dir, {
+      suffix: `.actions.${year}.json`,
+      onUnreadable: "skip",
+    });
+    for (const file of values) {
+      if (Array.isArray(file?.entries)) groups.push(file.entries);
+    }
   } catch (error) {
     logError("audit:read-archive", error);
-    return [];
   }
+
+  try {
+    const legacyDir = await getAuditRoot(directoryHandle, false);
+    groups.push((await readArchiveFile(legacyDir, legacyArchiveFileName(year), year)).entries);
+  } catch (error) {
+    logError("audit:read-archive", error);
+  }
+
+  return mergeActionEntries(groups);
 }

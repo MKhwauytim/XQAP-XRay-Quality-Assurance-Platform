@@ -141,6 +141,7 @@ describe("buildPopulationReportData — BI/risk comparison join key (B12 task 2)
       rows: biRows,
       sheetSummaries: [],
       unknownSheetNames: [],
+      unmatchedSheetNames: [],
       totalOriginalRows: biRows.length,
       totalNormalizedRows: biRows.length,
       totalExcludedMissingXrayIdCount: 0

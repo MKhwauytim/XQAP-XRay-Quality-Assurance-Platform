@@ -26,16 +26,20 @@ function input(marker: string): WorkspaceActionInput {
 }
 
 /**
- * Wrap a directory so writes to any `actions.archive.*.json` fail — used to
- * verify that an archive failure blocks the live-log trim.
+ * Wrap a directory so writes to any per-year archive file fail — used to verify
+ * that an archive failure blocks the live-log trim. Matches BOTH shapes: the
+ * legacy workspace-wide `actions.archive.{year}.json` and the per-actor
+ * `{stem}.actions.{year}.json` this module writes now.
  */
+const ARCHIVE_FILE_PATTERN = /(^actions\.archive\.\d{4}\.json$)|(\.actions\.\d{4}\.json$)/;
+
 function wrapArchiveFailing(dir: DirectoryHandleLike): DirectoryHandleLike {
   return {
     ...dir,
     kind: "directory",
     name: dir.name,
     getFileHandle: async (name: string, options?: { create?: boolean }) => {
-      if (name.startsWith("actions.archive.")) {
+      if (ARCHIVE_FILE_PATTERN.test(name)) {
         throw new Error("archive write blocked (test)");
       }
       return dir.getFileHandle(name, options);

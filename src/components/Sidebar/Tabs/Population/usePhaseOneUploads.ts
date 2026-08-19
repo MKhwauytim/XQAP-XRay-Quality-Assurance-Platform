@@ -402,22 +402,32 @@ export function usePhaseOneUploads(deps: PhaseOneUploadDeps): PhaseOneUploadCont
             ...entry,
             state: "error",
             acceptedRows: null,
-            error: outcome.error ?? getLabels().phase_one_bi_no_value
+            // An empty message used to render a red row whose only text was "—".
+            error: outcome.error?.trim()
+              ? outcome.error
+              : getLabels().phase_one_bi_unknown_error,
+            warning: undefined
           };
         }
 
         const result = outcome.result;
-        // Zero accepted rows AND nothing classifiable = the silent-zero-import
-        // failure (a CSV whose derived name matched no configured pattern is the
-        // common case). Surface it as an explicit error row, not a quiet 0.
-        if (result.totalNormalizedRows === 0 && result.unknownSheetNames.length > 0) {
+        // PROD-1: `state: "error"` is now reserved for a GENUINE failure — the
+        // file yielded nothing usable at all. It used to fire on "zero accepted
+        // rows plus a non-empty unknown list", which a well-formed CSV hit for
+        // no reason other than its file name (see biDataWorkbook's PROD-1 note):
+        // several attached files all spun, then all turned red at once.
+        if (result.totalOriginalRows === 0 && result.totalNormalizedRows === 0) {
           return {
             ...entry,
             state: "error",
             acceptedRows: 0,
-            error: fillLabel(getLabels().phase_one_bi_unclassified, {
-              sheets: result.unknownSheetNames.join("، ")
-            })
+            error:
+              result.unknownSheetNames.length > 0
+                ? fillLabel(getLabels().phase_one_bi_unclassified, {
+                    sheets: result.unknownSheetNames.join("، ")
+                  })
+                : getLabels().phase_one_bi_no_rows,
+            warning: undefined
           };
         }
 
@@ -427,7 +437,15 @@ export function usePhaseOneUploads(deps: PhaseOneUploadDeps): PhaseOneUploadCont
           state: "ready",
           acceptedRows: result.totalNormalizedRows,
           sheetName: sheetNames.length > 0 ? sheetNames.join("، ") : entry.sheetName,
-          error: undefined
+          error: undefined,
+          // Imported, but the source was taken from the sheet/file name. Amber
+          // advisory on a ready row — never a red error row.
+          warning:
+            result.unmatchedSheetNames.length > 0
+              ? fillLabel(getLabels().phase_one_bi_unmatched_name, {
+                  sheets: result.unmatchedSheetNames.join("، ")
+                })
+              : undefined
         };
       })
     }));

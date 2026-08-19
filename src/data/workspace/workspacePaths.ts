@@ -62,6 +62,20 @@ export const NOTIFICATIONS_SUBFOLDERS = {
 } as const;
 
 /**
+ * `5-system/audit/` children holding the PER-USER audit logs.
+ *
+ * The shared single files (`activity.log.json`, `actions.log.json`,
+ * `actions.archive.{year}.json`) still sit directly in `audit/` and are read
+ * forever — they are never rewritten, moved or deleted. New writes go into
+ * these folders, one file per writer, so two employees working at the same time
+ * never contend for the same file.
+ */
+export const AUDIT_SUBFOLDERS = {
+  activity: "activity",
+  actions: "actions",
+} as const;
+
+/**
  * A workspace root folder that is genuinely not there.
  *
  * Named `NotFoundError` on purpose: every optional-file reader in the data layer
@@ -520,6 +534,58 @@ export async function getAdhocImportsDir(
     WORKSPACE_ROOTS.system,
     () => getSystemRoot(directoryHandle, create),
     SYSTEM_FOLDER_NAMES.adhocImports,
+    create,
+    null
+  );
+}
+
+/**
+ * `5-system/audit/` — resolved through `getChildDir`, so it is handle-cached
+ * AND registered with `registerDirectoryPath`. `authActivityLog` and `actionLog`
+ * used to call `systemDir.getDirectoryHandle("audit", …)` directly, which
+ * skipped both: every write re-walked the chain, and `withResourceLock` keys
+ * degraded to the bare leaf name — the "one lock for everything" defect
+ * `webLocks.ts` was written to remove.
+ */
+export async function getAuditRoot(
+  directoryHandle: DirectoryHandleLike,
+  create = true
+): Promise<DirectoryHandleLike> {
+  return getChildDir(
+    directoryHandle,
+    WORKSPACE_ROOTS.system,
+    () => getSystemRoot(directoryHandle, create),
+    SYSTEM_FOLDER_NAMES.audit,
+    create,
+    null
+  );
+}
+
+/** `5-system/audit/activity/` — one `{stem}.activity.json` per user. */
+export async function getAuditActivityDir(
+  directoryHandle: DirectoryHandleLike,
+  create = true
+): Promise<DirectoryHandleLike> {
+  return getChildDir(
+    directoryHandle,
+    `${WORKSPACE_ROOTS.system}/${SYSTEM_FOLDER_NAMES.audit}`,
+    () => getAuditRoot(directoryHandle, create),
+    AUDIT_SUBFOLDERS.activity,
+    create,
+    null
+  );
+}
+
+/** `5-system/audit/actions/` — one `{stem}.actions.json` per actor, plus per-actor yearly archives. */
+export async function getAuditActionsDir(
+  directoryHandle: DirectoryHandleLike,
+  create = true
+): Promise<DirectoryHandleLike> {
+  return getChildDir(
+    directoryHandle,
+    `${WORKSPACE_ROOTS.system}/${SYSTEM_FOLDER_NAMES.audit}`,
+    () => getAuditRoot(directoryHandle, create),
+    AUDIT_SUBFOLDERS.actions,
     create,
     null
   );
