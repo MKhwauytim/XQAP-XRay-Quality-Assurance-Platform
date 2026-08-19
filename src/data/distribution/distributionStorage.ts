@@ -90,6 +90,27 @@ async function writeDistributionEventBatch(
           // Purge first: `getSampleMainDir` answers from the workspace
           // directory-handle cache, so without this the "retry" would hand back
           // the very handle that just failed.
+          //
+          // WHAT THIS CAN AND CANNOT RECOVER — state it precisely, because the
+          // difference decides whether the retry is worth anything.
+          //
+          // CAN: every handle BELOW the root. `invalidateWorkspaceDirCache(root)`
+          // drops that root's whole cache entry — resolved root names included —
+          // so the call below re-derives `2-samples`, the month folder and
+          // `1-main` from the root handle, in that order. Each is a fresh
+          // `getDirectoryHandle`, so a child that went stale (the share
+          // re-created the folder, an idle SMB session invalidated a descriptor)
+          // is replaced rather than reused. That is the whole of the cheap
+          // refresh available here, and it already covers every intermediate
+          // handle — there is no narrower subtree left to purge.
+          //
+          // CANNOT: the ROOT handle itself. `WorkspaceProvider` has held it
+          // since mount and nothing here can re-acquire it — `showDirectoryPicker`
+          // requires a user gesture, so a genuinely dead root can only be fixed
+          // by the user re-picking the workspace folder (XQ-IO-030 says exactly
+          // that). If the fault lives in the root, this retry re-resolves the
+          // same broken chain and fails identically; the durable-append path
+          // then degrades to per-event files, which is the actual recovery.
           invalidateWorkspaceDirCache(reopen.root);
           return getDistributionDir(reopen.root, reopen.monthFolderName);
         }
@@ -168,6 +189,52 @@ type CheckpointScanMeta = {
   legacyEventFileNames: string[];
 };
 
+/**
+ * Tie-order between the two immutable event layouts: NDJSON segments first,
+ * legacy one-file-per-event `{eventId}.json` second.
+ *
+ * `sortDistributionEventsForFold` is a stable sort by `eventAt` alone, so for a
+ * batch that shares ONE `eventAt` (which every bulk distribution does — see
+ * that function's doc) the fold order is exactly the order this concatenation
+ * produces. Two things follow.
+ *
+ * PURE LAYOUTS ARE UNCHANGED, BY CONSTRUCTION. A workspace whose events all
+ * live in segments passes an empty legacy array, and one whose events all live
+ * in per-event files passes an empty segment array; in both cases the
+ * concatenation is the identity on the non-empty side, whichever side that is.
+ * The deterministic-by-contract fold output for a pure layout is therefore
+ * byte-identical to what the previous `[...legacy, ...segments]` order gave —
+ * this only ever reorders a tie group that draws from BOTH layouts.
+ *
+ * MIXED LAYOUTS NOW FOLD IN BATCH ORDER. A mixed tie group is reachable in
+ * exactly one way in practice: `appendDistributionEventsDurably` writes chunks
+ * 1..k of a batch as segment appends, then a chunk fails and every remaining
+ * chunk degrades to per-event files (`segmentPathUnusable` latches for the rest
+ * of the save). The segment chunks are the EARLIER half of the batch, so
+ * putting segments first restores the batch's chunk order. The old order put
+ * the later, fallback half in front of it.
+ *
+ * RESIDUAL LIMITATION, deliberately not fixed here: within the fallback half,
+ * per-event files carry no sequence — they are discovered in file-NAME order,
+ * i.e. by random event UUID — so that half is still internally scrambled
+ * relative to how it was written. Fixing that needs an ordering key inside the
+ * event envelope (a batch sequence number), which is an on-disk contract change
+ * and is out of scope for this repair. The pure-legacy layout has always had
+ * this property; nothing here makes it worse.
+ *
+ * A genuinely historical mix (an old client's per-event files alongside a new
+ * client's segments) is unaffected in practice: those events differ in
+ * `eventAt`, so the primary comparison orders them and this tie-break never
+ * runs. Where it did run there is no causal truth to preserve anyway — two
+ * machines cannot be ordered by a timestamp they share.
+ */
+function orderImmutableSources(
+  segmentEvents: DistributionEvent[],
+  legacyPerEventFiles: DistributionEvent[]
+): DistributionEvent[] {
+  return [...segmentEvents, ...legacyPerEventFiles];
+}
+
 async function readCurrentDistributionSource(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
@@ -221,9 +288,12 @@ async function readCurrentDistributionSource(
   // Re-sort: the fold is order-sensitive, and a new event with an earlier
   // eventAt than a cached one must still land in the right place -- the
   // cache's own internal order is by-filename, not by-eventAt. Ties keep the
-  // supplied (name-sorted files, append-ordered lines) order — see
-  // sortDistributionEventsForFold for why that tie-break is load-bearing.
-  const immutableEvents = sortDistributionEventsForFold([...legacyValues, ...segmentDelta.events]);
+  // supplied (append-ordered segment lines, then name-sorted per-event files)
+  // order — see sortDistributionEventsForFold for why that tie-break is
+  // load-bearing, and see `orderImmutableSources` for why segments go first.
+  const immutableEvents = sortDistributionEventsForFold(
+    orderImmutableSources(segmentDelta.events, legacyValues)
+  );
   return { currentLog, immutableEvents, segmentOffsets: segmentDelta.offsets, legacyEventFileNames };
 }
 
@@ -725,7 +795,6 @@ async function readNewEventsSinceCheckpoint(
       : mergeDistributionEvents(legacyCompatLog.events, currentCompatLog.events);
 
   const knownIds = new Set(checkpoint.knownEventIds);
-  const newCompatEvents = compatEvents.filter((event) => !knownIds.has(event.eventId));
 
   let legacyEventFileNames = checkpoint.legacyEventFileNames;
   let newLegacyImmutable: DistributionEvent[] = [];
@@ -757,8 +826,32 @@ async function readNewEventsSinceCheckpoint(
 
   const segmentDelta = await readDistributionEventSegmentDelta(directory, checkpoint.segmentOffsets);
 
+  // ONE filter, applied to EVERY source (F-2). `knownEventIds` is the set this
+  // checkpoint has already folded into `cached`, and the fold is not idempotent
+  // — re-absorbing an event double-counts it. Only the compatibility log used to
+  // be filtered here; the other two sources relied on this call's own
+  // `dedupedById` map, which dedupes a batch against ITSELF and cannot see
+  // across the checkpoint boundary at all.
+  //
+  // Both of the other sources can genuinely re-present a known event. The
+  // durable-append path retries a chunk against a re-resolved handle and then
+  // degrades to per-event files, so one event can legitimately be written twice
+  // — once into a segment, once as `{eventId}.json` — and a client that
+  // checkpointed between the two writes then meets the second copy as brand-new
+  // bytes past its offset / a brand-new file name. `findLateEvent` does not
+  // catch it either: a duplicate has the same `eventAt` AND the same `eventId`
+  // as the entry it produced, so `isEventEarlierThanEntry` reports "not late"
+  // and the resume path folds it a second time.
+  //
+  // Filtering here is safe because a known id contributes nothing a re-read
+  // could add: its content is immutable (`mergeDistributionEvents` throws on
+  // conflicting content for a repeated id), so the copy being skipped is
+  // byte-equal to the one already folded.
   const dedupedById = new Map<string, DistributionEvent>();
-  for (const event of [...newCompatEvents, ...newLegacyImmutable, ...segmentDelta.events]) {
+  // Segments before legacy per-event files, for the reason `orderImmutableSources`
+  // documents; the compatibility log stays first, as it always has.
+  for (const event of [...compatEvents, ...orderImmutableSources(segmentDelta.events, newLegacyImmutable)]) {
+    if (knownIds.has(event.eventId)) continue;
     dedupedById.set(event.eventId, event);
   }
   const newEvents = sortDistributionEventsForFold([...dedupedById.values()]);
