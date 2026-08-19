@@ -89,6 +89,46 @@ describe("processBiWorkbook · owner-reported 0-accepted bug (2026-08-12)", () =
   });
 });
 
+// duplicate-normalized-headers (Batch 4): computed ONCE per sheet from the
+// header row and threaded onto the sheet summary. Detection-only — precedence
+// (createHeaderLookup's last Map.set wins) is unchanged.
+describe("processBiWorkbook · duplicate-normalizing header diagnostic (Batch 4)", () => {
+  it("attaches duplicateHeaders to the sheet summary when two source headers normalize to the same key", async () => {
+    const fatha = String.fromCodePoint(0x064b);
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([
+      ["معرف الأشعة", "اسم المنفذ", "اسم" + fatha + " المنفذ"],
+      ["X-1", "الميناء الأول", "الميناء الثاني"]
+    ]);
+    XLSX.utils.book_append_sheet(wb, ws, "بري صادر");
+    const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+    const file = new File([buf], "bi-dup.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+
+    const result = await processBiWorkbook(file);
+
+    const sheet = result.sheetSummaries[0];
+    expect(sheet).toBeDefined();
+    expect(sheet!.duplicateHeaders).toEqual([
+      { normalized: "اسم المنفذ", originals: ["اسم المنفذ", "اسم" + fatha + " المنفذ"] }
+    ]);
+    // Precedence is untouched: portName still reads whichever header
+    // createHeaderLookup's Map.set applied last.
+    expect(result.rows[0]!.portName).toBe("الميناء الثاني");
+  });
+
+  it("does not attach duplicateHeaders when no source headers in the sheet collide", async () => {
+    const file = buildBiWorkbookFile([
+      { sheetName: "بري صادر", header: "معرف الأشعة", values: ["202605090023680130"] },
+    ]);
+
+    const result = await processBiWorkbook(file);
+
+    expect(result.sheetSummaries[0]!.duplicateHeaders).toBeUndefined();
+  });
+});
+
 /** Build a real .csv File in memory — SheetJS parses it through the same XLSX.read path. */
 function buildBiCsvFile(fileName: string, header: string, values: string[]): File {
   const csv = [header, ...values].join("\n");

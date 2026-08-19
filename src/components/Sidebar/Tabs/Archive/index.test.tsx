@@ -77,6 +77,10 @@ vi.mock("../../../../data/audit/actionLog", () => ({
   appendWorkspaceAction: vi.fn(),
 }));
 
+vi.mock("../../../../data/integrity/orphanScanLoader", () => ({
+  runMonthIntegrityScan: vi.fn(),
+}));
+
 import ArchiveTab from "./index";
 import {
   createBackup,
@@ -90,6 +94,8 @@ import {
 import { listMonthFolders } from "../../../../data/population/populationStorage";
 import { closeMonth, reopenMonth } from "../../../../data/population/monthLock";
 import { appendWorkspaceAction } from "../../../../data/audit/actionLog";
+import { runMonthIntegrityScan } from "../../../../data/integrity/orphanScanLoader";
+import type { OrphanScanResult } from "../../../../data/integrity/orphanScan";
 
 const L = getLabels();
 
@@ -188,6 +194,13 @@ beforeEach(() => {
   vi.mocked(closeMonth).mockResolvedValue({ ok: true });
   vi.mocked(reopenMonth).mockResolvedValue({ ok: true });
   vi.mocked(appendWorkspaceAction).mockResolvedValue(undefined);
+  vi.mocked(runMonthIntegrityScan).mockResolvedValue({
+    answersOrphans: [],
+    approvalsOrphans: [],
+    sampleOrphans: [],
+    distributionOrphans: [],
+    clean: true,
+  });
 });
 
 afterEach(() => {
@@ -552,5 +565,128 @@ describe("partial backup surfacing (STO-5)", () => {
     renderArchiveTab();
 
     expect(await screen.findByText(new RegExp(L.backup_partial_badge))).toBeInTheDocument();
+  });
+});
+
+describe("wire-orphan-scan — Archive integrity scan section", () => {
+  it("is hidden for guest and employee (gated to supervisor+)", async () => {
+    vi.mocked(loadArchiveStatus).mockResolvedValue([makeStatus()]);
+
+    loginAs("guest");
+    const guestRender = renderArchiveTab();
+    await screen.findByText("معالج");
+    expect(screen.queryByText(L.archive_integrity_title)).not.toBeInTheDocument();
+    guestRender.unmount();
+
+    loginAs("employee");
+    renderArchiveTab();
+    await screen.findByText("معالج");
+    expect(screen.queryByText(L.archive_integrity_title)).not.toBeInTheDocument();
+  });
+
+  it("is visible for supervisor, manager and admin", async () => {
+    vi.mocked(loadArchiveStatus).mockResolvedValue([makeStatus()]);
+
+    for (const role of ["supervisor", "manager", "admin"] as const) {
+      loginAs(role);
+      const { unmount } = renderArchiveTab();
+      await screen.findByText("معالج");
+      expect(screen.getByText(L.archive_integrity_title)).toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it("shows the no-months state when nothing has been processed yet", async () => {
+    vi.mocked(loadArchiveStatus).mockResolvedValue([]);
+    loginAs("admin");
+
+    renderArchiveTab();
+    await screen.findByText(L.archive_integrity_title);
+    expect(screen.getByText(L.archive_integrity_no_months)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: L.archive_integrity_run_btn })).not.toBeInTheDocument();
+  });
+
+  it("runs the scan for the selected month and shows the clean state", async () => {
+    vi.mocked(loadArchiveStatus).mockResolvedValue([makeStatus()]);
+    vi.mocked(runMonthIntegrityScan).mockResolvedValue({
+      answersOrphans: [],
+      approvalsOrphans: [],
+      sampleOrphans: [],
+      distributionOrphans: [],
+      clean: true,
+    });
+    loginAs("admin");
+
+    renderArchiveTab();
+    fireEvent.click(await screen.findByRole("button", { name: L.archive_integrity_run_btn }));
+
+    await waitFor(() => {
+      expect(screen.getByText(L.archive_integrity_clean)).toBeInTheDocument();
+    });
+    expect(vi.mocked(runMonthIntegrityScan)).toHaveBeenCalledWith(testDir, "5-may-2026");
+  });
+
+  it("renders per-category orphan counts and id lists when the scan finds orphans", async () => {
+    vi.mocked(loadArchiveStatus).mockResolvedValue([makeStatus()]);
+    const dirtyResult: OrphanScanResult = {
+      answersOrphans: ["answer-orphan"],
+      approvalsOrphans: ["approval-orphan"],
+      sampleOrphans: ["sample-orphan"],
+      distributionOrphans: ["dist-orphan"],
+      clean: false,
+    };
+    vi.mocked(runMonthIntegrityScan).mockResolvedValue(dirtyResult);
+    loginAs("admin");
+
+    renderArchiveTab();
+    fireEvent.click(await screen.findByRole("button", { name: L.archive_integrity_run_btn }));
+
+    await waitFor(() => {
+      expect(screen.getByText("sample-orphan")).toBeInTheDocument();
+    });
+    expect(screen.queryByText(L.archive_integrity_clean)).not.toBeInTheDocument();
+    expect(screen.getByText("dist-orphan")).toBeInTheDocument();
+    expect(screen.getByText("answer-orphan")).toBeInTheDocument();
+    expect(screen.getByText("approval-orphan")).toBeInTheDocument();
+    expect(screen.getByText(L.archive_integrity_category_sample)).toBeInTheDocument();
+    expect(screen.getByText(L.archive_integrity_category_distribution)).toBeInTheDocument();
+    expect(screen.getByText(L.archive_integrity_category_answers)).toBeInTheDocument();
+    expect(screen.getByText(L.archive_integrity_category_approvals)).toBeInTheDocument();
+  });
+
+  it("caps a large orphan id list at 100 shown, summarizing the rest", async () => {
+    vi.mocked(loadArchiveStatus).mockResolvedValue([makeStatus()]);
+    const manyIds = Array.from({ length: 130 }, (_, i) => `orphan-${String(i).padStart(3, "0")}`);
+    vi.mocked(runMonthIntegrityScan).mockResolvedValue({
+      answersOrphans: manyIds,
+      approvalsOrphans: [],
+      sampleOrphans: [],
+      distributionOrphans: [],
+      clean: false,
+    });
+    loginAs("admin");
+
+    renderArchiveTab();
+    fireEvent.click(await screen.findByRole("button", { name: L.archive_integrity_run_btn }));
+
+    await waitFor(() => {
+      expect(screen.getByText("orphan-000")).toBeInTheDocument();
+    });
+    expect(screen.getByText("orphan-099")).toBeInTheDocument();
+    expect(screen.queryByText("orphan-100")).not.toBeInTheDocument();
+    expect(screen.getByText(L.archive_integrity_show_more.replace("{count}", "30"))).toBeInTheDocument();
+  });
+
+  it("surfaces a load failure without crashing the section", async () => {
+    vi.mocked(loadArchiveStatus).mockResolvedValue([makeStatus()]);
+    vi.mocked(runMonthIntegrityScan).mockRejectedValue(new Error("تعذرت القراءة"));
+    loginAs("admin");
+
+    renderArchiveTab();
+    fireEvent.click(await screen.findByRole("button", { name: L.archive_integrity_run_btn }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("تعذرت القراءة");
+    });
   });
 });

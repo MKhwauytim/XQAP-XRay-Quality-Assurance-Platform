@@ -277,6 +277,50 @@ Each `population.final.json` row and each sampled `rows[]` item uses the process
 | `activity.log.json` | `revision`, `updatedAt`, `entries[]`. |
 | activity `entries[]` | `id`, `username`, `role`, `signedInAt`, `lastSeenAt`, `signedOutAt`, `durationMs`, `closeReason`. |
 
+### Username immutability (end-state ruling 2026-08-19)
+
+Every on-disk record above keys on the raw username string: `{username}.answers.json` /
+`{username}.samples.json` filenames, the `assignedTo` / `answeredBy` / `eventBy` fields inside
+immutable distribution events, the per-user quota map in `distribution.current.json`, referral and
+replacement requests, approvals, and notification acknowledgements. `src/auth/usernameRenameGuard.ts`
+blocks a rename fail-closed once `getUserWorkspaceFootprint` shows any on-disk work for that
+username (or the check cannot prove otherwise) — a username with on-disk work is **permanently
+immutable**. No cross-month migration is planned or will be built: the distribution event log is
+append-only and immutable by contract, and rewriting event files across every month to move a
+username would invalidate `eventSetId` digests, backup/restore checkpoints, and already-generated
+HTML reports, with no way to verify the rewrite against tampering. The supported paths are renaming
+before any work exists on disk (already allowed) or creating a new user. If the underlying need is a
+display-name correction rather than a login change, a presentation-layer display-name alias (stored
+per user, username on disk never touched) is the only acceptable future direction — a new feature,
+not part of this ruling.
+
+### Projection stamp invariant
+
+`distribution.log.json` carries two independent stamps, and consumers must not conflate them
+(`refreshDistributionLogWriteToken` in `src/data/distribution/distributionStorage.ts` is the
+authoritative docblock):
+
+- **`revision`** — the ordering/staleness authority. Advances **only** on an event append.
+- **`_writeToken`** — a change-detection stamp for the sync probe. It may be re-minted **without**
+  a `revision` bump — the restore path does exactly this via `refreshDistributionLogWriteToken`, so a
+  restore that merges events back in can move the one stamp every other machine watches, without
+  rolling `revision` backwards.
+
+Consumers and their contracts:
+
+- `workspaceSync.probeMonth` (`src/data/workspace/workspaceSync.ts`) compares **both** fields via
+  `readDistributionLogStamp` — either one changing is enough to signal the `distribution` family
+  changed.
+- Sample mirror staleness (`sampleMirrorStorage.ts`'s `sourceLogRevision`, and the equivalent
+  `personalMirror.sourceLogRevision >= logStamp.revision` check in `XrayReferrals.tsx`) compares
+  **`revision` only**, by design — a bare `_writeToken` re-mint must never invalidate an
+  already-current mirror.
+- `backupStorage.ts`'s restore path documents (near line 938–961) that a restore never writes
+  `distribution.log.json` directly when the live revision is newer; `refreshDistributionLogWriteToken`
+  is what moves the stamp after a restore merges events.
+- `readDistributionLogStamp` (`distributionStorage.ts`) is the single read API every consumer above
+  goes through; do not re-derive `revision`/`_writeToken` from the raw file elsewhere.
+
 ## Default Inspection Template
 
 The default template created from the Template Builder is named `نموذج ضمان جودة الأشعة`, version `1`. It covers employee inspection answers for each assigned X-ray sample. The template is saved as a normal template file in `6-templates/{templateId}.json`, listed in `templates.index.json`, and can be selected through `template.selection.json`.
@@ -346,6 +390,7 @@ Both files use `safeWriteJson` / `safeReadJson` and the `JsonEnvelope` schema-ve
 ## Data Protection Notes
 
 - JSON writes use the safe write layer where available: temporary write, commit, backup `.bak`, and content-hash validation. Compressed files verify the exact written bytes on read-back instead of carrying a content hash (see "On-disk format" above).
+- Before overwriting a compressed file's `.bak`, `hasRecoverableCurrentFile` (`src/data/storage/safeWrite.ts`) fully inflates the current file (streamed, chunk-discarded, no allocation) to prove it is actually recoverable before snapshotting over the last known-good `.bak` — a framing-only check once byte-copied a damaged file over the last recoverable backup. **Ruled accepted 2026-08-19:** the per-save CPU cost of this full verification is the contract, not a shortcut candidate; replacing it needs measured, user-visible save stalls plus an equally strong recoverability proof, not just a hunch about cost.
 - Concurrent writes use Web Locks or compare-and-swap loops in high-conflict areas such as distribution and answer files.
 - The activity log is best-effort workspace audit data. It records app-observed time, including heartbeat and close events when the browser delivers them; it is not a centralized attendance system.
 

@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
 import { yieldToMain } from "../../../../../data/storage/yieldToMain";
-import { normalizeBiRow } from "./biDataNormalizer";
+import { detectDuplicateNormalizedHeaders, normalizeBiRow } from "./biDataNormalizer";
 import { BI_COLUMN_ALIASES } from "./biDataColumns";
 import type {
   BiSheetSummary,
@@ -269,6 +269,13 @@ export async function processBiWorkbook(
     // this one says "imported, but the source was taken from the sheet/file name".
     if (!matched) unmatchedSheetNames.push(sheetName);
 
+    // Computed ONCE per sheet from the header row — never per data row, so it
+    // never touches the per-row hot path normalizeBiRow runs.
+    const duplicateHeaders =
+      sourceRows.length > 0
+        ? detectDuplicateNormalizedHeaders(Object.keys(sourceRows[0].row))
+        : [];
+
     sheetSummaries.push({
       sheetName,
       source,
@@ -278,7 +285,8 @@ export async function processBiWorkbook(
       excludedMissingXrayIdCount,
       ...(validRows.length === 0 && sourceRows.length > 0
         ? { zeroIdDiagnostic: buildZeroXrayIdDiagnostic(sourceRows, columnMappings) }
-        : {})
+        : {}),
+      ...(duplicateHeaders.length > 0 ? { duplicateHeaders } : {})
     });
   }
 

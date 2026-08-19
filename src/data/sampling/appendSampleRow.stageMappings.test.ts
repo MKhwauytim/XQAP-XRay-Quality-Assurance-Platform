@@ -16,7 +16,7 @@
 import { describe, expect, test } from "vitest";
 
 import { createMemoryDirectory } from "../storage/memoryDirectory";
-import type { StageAliasMappings } from "../population/stageHelpers";
+import { resolveStageMappings, type StageAliasMappings } from "../population/stageHelpers";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { SampleMasterData } from "./sampleTypes";
 import { appendSampleRow, loadSampleMaster, saveSampleMaster } from "./sampleStorage";
@@ -140,6 +140,124 @@ describe("appendSampleRow stage classification under custom stage mappings", () 
     const first = reloaded?.stageAllocations.find((s) => s.stageKey === "first");
     expect(first?.actualDrawn).toBe(1);
     expect(reloaded?.rows).toHaveLength(2);
+  });
+
+  // ── stageMappingsSnapshot (v103) ──────────────────────────────────────────
+  //
+  // Threading live config was only ever half a fix. `stageMappings` here comes
+  // from `1-population/config.json`, which is workspace-GLOBAL and admin-
+  // editable at any moment — so "the SAME stage aliases the month was drawn
+  // under" (this file's opening line) held only while nobody edited it. A draw
+  // now stamps the resolved table it classified against onto the sample master,
+  // and this function prefers that stamp over whatever the caller passes.
+
+  /** The same month, but drawn under current code: it carries the snapshot. */
+  function makeSampleWithSnapshot(): SampleMasterData {
+    return {
+      ...makeSample(),
+      // The RESOLVED table a draw stamps: defaults for the three untouched
+      // stages, the workspace's own alias list for `first`.
+      stageMappingsSnapshot: resolveStageMappings(CUSTOM_MAPPINGS),
+    };
+  }
+
+  test("classifies against the DRAWN mappings after the live config is edited to a conflicting one", async () => {
+    const dir = createMemoryDirectory();
+    await saveSampleMaster(dir, MONTH, makeSampleWithSnapshot());
+
+    // An admin has since re-pointed `first` at a completely different label, so
+    // the live table no longer recognises "Level A" as any stage at all. Before
+    // the snapshot existed this dropped the replacement row from
+    // stageAllocations silently, exactly as the no-mappings bug above did —
+    // except no caller was doing anything wrong.
+    const EDITED_LIVE_MAPPINGS: Partial<StageAliasMappings> = { first: ["Tier One"] };
+
+    const result = await appendSampleRow(
+      dir,
+      MONTH,
+      makeRow("A2", "Level A"),
+      EDITED_LIVE_MAPPINGS
+    );
+    expect(result.ok).toBe(true);
+
+    const reloaded = await loadSampleMaster(dir, MONTH);
+    const first = reloaded?.stageAllocations.find((s) => s.stageKey === "first");
+    expect(first?.actualDrawn).toBe(2);
+    expect(first?.nonCertScanDrawn).toBe(2);
+    expect(reloaded?.rows).toHaveLength(2);
+  });
+
+  test("the snapshot also wins when the live config would classify the row into a DIFFERENT stage", async () => {
+    const dir = createMemoryDirectory();
+    const sample = makeSampleWithSnapshot();
+    // Give the master a second bucket so a mis-classification has somewhere
+    // wrong to land — proving the snapshot chooses the bucket, rather than the
+    // row merely failing to be counted anywhere.
+    sample.stageAllocations = [
+      ...sample.stageAllocations,
+      {
+        stageKey: "second",
+        stageLabel: "المستوى الثاني",
+        populationSize: 10,
+        targetQuota: 2,
+        actualDrawn: 1,
+        certScanDrawn: 0,
+        nonCertScanDrawn: 1,
+      },
+    ];
+    await saveSampleMaster(dir, MONTH, sample);
+
+    // Live config now claims "Level A" is the SECOND stage.
+    const REASSIGNED: Partial<StageAliasMappings> = { first: ["Tier One"], second: ["Level A"] };
+    await appendSampleRow(dir, MONTH, makeRow("A2", "Level A"), REASSIGNED);
+
+    const reloaded = await loadSampleMaster(dir, MONTH);
+    expect(reloaded?.stageAllocations.find((s) => s.stageKey === "first")?.actualDrawn).toBe(2);
+    expect(reloaded?.stageAllocations.find((s) => s.stageKey === "second")?.actualDrawn).toBe(1);
+  });
+
+  test("a retired row is un-counted against the snapshot too, not the live table", async () => {
+    const dir = createMemoryDirectory();
+    await saveSampleMaster(dir, MONTH, makeSampleWithSnapshot());
+
+    // A real replacement: A2 comes in, A1 is retired. Both are "Level A", so
+    // both must move the `first` bucket — +1 and -1 — leaving it exactly where
+    // it started. Live config meanwhile claims "Level A" is the SECOND stage;
+    // under live-config classification the pair would have been booked into a
+    // freshly-invented `second` bucket instead, which is why this asserts that
+    // no such bucket appears rather than only that `first` is unchanged.
+    const REASSIGNED: Partial<StageAliasMappings> = { second: ["Level A"] };
+    const result = await appendSampleRow(
+      dir,
+      MONTH,
+      makeRow("A2", "Level A"),
+      REASSIGNED,
+      "A1"
+    );
+    expect(result.ok).toBe(true);
+
+    const reloaded = await loadSampleMaster(dir, MONTH);
+    const first = reloaded?.stageAllocations.find((s) => s.stageKey === "first");
+    expect(first?.actualDrawn).toBe(1);
+    expect(first?.nonCertScanDrawn).toBe(1);
+    expect(reloaded?.stageAllocations.find((s) => s.stageKey === "second")).toBeUndefined();
+    // Substitution, not enlargement.
+    expect(reloaded?.totalActual).toBe(1);
+    expect(reloaded?.replacedRowIds).toEqual(["A1"]);
+  });
+
+  test("a legacy master with NO snapshot still classifies via the live config", async () => {
+    const dir = createMemoryDirectory();
+    // makeSample() deliberately omits stageMappingsSnapshot — a month drawn
+    // before the field existed. Nothing is rewritten on read for those; the
+    // caller's live mappings remain the only signal available, and must still
+    // be honoured exactly as before.
+    await saveSampleMaster(dir, MONTH, makeSample());
+
+    await appendSampleRow(dir, MONTH, makeRow("A2", "Level A"), CUSTOM_MAPPINGS);
+
+    const reloaded = await loadSampleMaster(dir, MONTH);
+    expect(reloaded?.stageAllocations.find((s) => s.stageKey === "first")?.actualDrawn).toBe(2);
   });
 
   test("default mappings path is unchanged when no overrides are in play", async () => {

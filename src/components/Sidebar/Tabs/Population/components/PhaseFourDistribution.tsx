@@ -9,6 +9,7 @@ import { getStageKey, formatNumber } from "./helpers";
 import { getLabels } from "../../../../../data/labels/labelsStore";
 import { calculateBulkAssignment, isAssignableSampleRole } from "../../../../../data/distribution/bulkAssignment";
 import "./PhaseFourDistribution.css";
+import { hamiltonApportionment } from "../../../../../data/sampling/apportionment";
 
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
 
@@ -118,18 +119,57 @@ export default function PhaseFourDistribution({
   const sampleRows = useMemo(() => sampleDrawResult?.rows ?? [], [sampleDrawResult]);
 
   // One classification pass instead of four `.filter()` sweeps.
+  //
+  // Uses the same snapshot-first mappings as the bulk-assignment calls below,
+  // and must keep doing so: these are the per-stage counts shown next to the
+  // employee allocation inputs. Classifying them under live config while the
+  // assignment classifies under the draw's snapshot would show the operator one
+  // split and assign another the moment an admin edits the aliases mid-month.
   const stageSampleCounts = useMemo(() => {
     const buckets: Record<StageKey, typeof sampleRows> = { first: [], second: [], third: [], fourth: [] };
+    const mappings = sampleDrawResult?.stageMappingsSnapshot ?? config.stageMappings;
     for (const row of sampleRows) {
-      const stageKey = getStageKey(row.stage, config.stageMappings);
+      const stageKey = getStageKey(row.stage, mappings);
       if (stageKey !== "unknown") buckets[stageKey].push(row);
     }
     return buckets;
-  }, [sampleRows, config.stageMappings]);
+  }, [sampleRows, sampleDrawResult, config.stageMappings]);
 
   const activeAllocations = useMemo(() => {
     const list: EmployeeStageAllocation[] = [];
     for (const sKey of STAGE_KEYS) {
+      // An UNCONFIGURED level splits evenly across its employees — four
+      // employees get 25% each, three get 34/33/33. Previously every unsaved
+      // share defaulted to 0, so a fresh workspace showed a level totalling 0%
+      // and distributed nothing until an admin typed every share by hand; an
+      // even split is what that admin was going to type anyway.
+      //
+      // Only a level NO ONE has configured is defaulted. The moment any
+      // allocation is saved for a level, the unsaved employees there stay at 0
+      // rather than having invented shares pushed under the admin's numbers —
+      // silently inflating a level past 100% would be worse than showing a gap
+      // the existing ok/warn total verdict already flags.
+      //
+      // Hamilton (the same helper the draw uses) hands out the 100 so the
+      // shares always sum to exactly 100 instead of three 33s leaving 1% dark.
+      const configuredHere = config.employeeAllocations.some(
+        (a) => a.stageKey === sKey && a.value !== undefined
+      );
+      const eligible = employees.filter((emp) => {
+        const existing = config.employeeAllocations.find(
+          (a) => a.username === emp.username && a.stageKey === sKey
+        );
+        return existing?.isActive ?? true;
+      });
+      const evenShares = new Map<string, number>();
+      if (!configuredHere && eligible.length > 0) {
+        for (const seat of hamiltonApportionment(
+          eligible.map((emp) => ({ key: emp.username, size: 1 })),
+          100
+        )) {
+          evenShares.set(seat.key, seat.allocated);
+        }
+      }
       for (const emp of employees) {
         const existing = config.employeeAllocations.find(
           (a) => a.username === emp.username && a.stageKey === sKey
@@ -138,7 +178,10 @@ export default function PhaseFourDistribution({
           username: emp.username,
           stageKey: sKey,
           method: existing?.method || "percentage",
-          value: existing?.value !== undefined ? existing.value : 0,
+          value:
+            existing?.value !== undefined
+              ? existing.value
+              : evenShares.get(emp.username) ?? 0,
           // Default to enabled at every level until an admin explicitly turns
           // an employee off for a given level.
           isActive: existing?.isActive ?? true,
@@ -180,7 +223,12 @@ export default function PhaseFourDistribution({
       allocations: activeAllocations,
       employees: getManagedLoginUsers(),
       operatorUsername,
-      stageMappings: config.stageMappings,
+      // Bucket the sample's rows under the aliases the DRAW used, not whatever
+      // live config now holds: a mid-month alias edit would otherwise move rows
+      // into different stage buckets than the ones their per-stage employee
+      // allocations were computed against. Falls back to live config for a
+      // month drawn before the snapshot existed.
+      stageMappings: sampleDrawResult.stageMappingsSnapshot ?? config.stageMappings,
       month: saveMonth,
       year: saveYear,
       existingEntries: distributionCurrent?.entries,
@@ -209,6 +257,8 @@ export default function PhaseFourDistribution({
 
     return { summaryMap, errors, skipped, newAssignments: events.length };
   }, [sampleDrawResult, sampleRows, activeAllocations, employees, operatorUsername, config.stageMappings, saveMonth, saveYear, distributionCurrent]);
+  // `sampleDrawResult` is already a dependency above, so the snapshot it carries
+  // is covered without adding a second entry for the same object.
 
   const entryMap = useMemo(
     () => new Map((distributionCurrent?.entries ?? []).map((e) => [e.xrayImageId, e])),
@@ -325,7 +375,9 @@ export default function PhaseFourDistribution({
       allocations: activeAllocations,
       employees: getManagedLoginUsers(),
       operatorUsername,
-      stageMappings: config.stageMappings,
+      // Same snapshot preference as the preview above — the two must agree, or
+      // the run would assign a different split than the operator was shown.
+      stageMappings: sampleDrawResult?.stageMappingsSnapshot ?? config.stageMappings,
       month: saveMonth,
       year: saveYear,
       existingEntries: distributionCurrent?.entries,

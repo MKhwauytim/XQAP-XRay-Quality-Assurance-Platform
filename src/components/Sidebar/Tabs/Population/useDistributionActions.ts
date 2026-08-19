@@ -149,21 +149,33 @@ export function useDistributionActions(params: {
       }
     }
 
-    // Stamp logRevision so the snapshot on disk records which log revision it
-    // was derived from.
+    // Stamp the cache FULLY so the next `loadOrDeriveDistributionCurrent` can
+    // actually take its fast path (reviewed change, 2026-08-19).
     //
-    // It does NOT make the next `loadOrDeriveDistributionCurrent` take the fast
-    // path, despite what this comment used to claim: that check also requires
-    // `deriveVersion` and `eventSetId`, and `deriveCurrentDistribution` stamps
-    // neither, so a cache written here is always rejected and a full refold
-    // always follows. Stamping them here is NOT a free win — it would make a
-    // cache every existing workspace currently ignores suddenly authoritative,
-    // and this call site derives directly, so it has none of the absent-row
-    // guarding `loadOrDeriveDistributionCurrent` does before it persists. That
-    // is its own reviewed change, not a comment fix.
+    // Until v4 this stamped `logRevision` only. `deriveCurrentDistribution`
+    // supplies `deriveVersion` and (v4) `sampleRowsFingerprint`, but nothing
+    // supplied `eventSetId`, so the reader rejected every cache written here and
+    // paid a full refold immediately after every distribution write — the most
+    // expensive moment to pay it. The four fields below are exactly the reader's
+    // acceptance set, so stamping them is what makes this write worth doing.
+    //
+    // Safe to make authoritative because acceptance is a FOUR-field match, each
+    // independent: any appended event changes `eventSetId`, any changed row set
+    // changes `sampleRowsFingerprint`, any fold-semantics change bumps
+    // `deriveVersion`, and `logRevision` still pins the compat log. Plus the two
+    // guards this call site has of its own: it re-reads `sample.master.json`
+    // fresh on every call (never trusting React state that may be hours old —
+    // see the comment above), and it refuses to persist a zeroed derive when
+    // events exist. A wrong-but-stamped cache would still self-heal on the next
+    // event, since the cache is an optimization and never a correctness input.
+    //
+    // `eventSetId` is stamped only when the log actually carries one: a legacy
+    // log with no digest must leave the field absent, or the cache would claim
+    // an identity nothing can re-verify.
     const current: DistributionCurrentData = {
       ...deriveCurrentDistribution(log, sampleRows),
       logRevision: log.revision,
+      ...(log.eventSetId === undefined ? {} : { eventSetId: log.eventSetId }),
     };
     setDistributionCurrent(current);
     await saveDistributionCurrent(directoryHandle, monthFolderName, current);

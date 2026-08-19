@@ -1179,6 +1179,11 @@ export default function PopulationTab() {
               sampleData: drawResult.data,
               createdBy: username,
               priorMonthAdvisory: advisory,
+              // The rules and aliases this draw actually ran under, copied into
+              // the plan so it stays true after an admin edits the (workspace-
+              // global) config. Same two values passed to `drawSample` above.
+              samplingRules: config.samplingRules,
+              stageMappings: config.stageMappings,
             });
             const planResult = await saveSamplingPlan(directoryHandle, monthFolderName, plan);
             if (!planResult.ok) {

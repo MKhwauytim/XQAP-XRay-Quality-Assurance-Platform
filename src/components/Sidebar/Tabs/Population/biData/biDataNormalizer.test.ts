@@ -6,7 +6,7 @@
 // since the fix is plumbing-only and must not change what any field resolves
 // to.
 import { describe, expect, it } from "vitest";
-import { normalizeBiRow } from "./biDataNormalizer";
+import { detectDuplicateNormalizedHeaders, normalizeBiRow } from "./biDataNormalizer";
 import type { BiSourceRow } from "./biDataTypes";
 
 describe("normalizeBiRow", () => {
@@ -254,5 +254,65 @@ describe("empty saved alias list falls back to defaults (owner 2026-08-12: BI 24
     });
 
     expect(result.xrayImageId).toBe("XYZ-123");
+  });
+});
+
+// duplicate-normalized-headers (Batch 4): detection-only diagnostic. Precedence
+// in createHeaderLookup (last Map.set wins) is untouched by this — these tests
+// cover the pure detector plus a proof that row output is byte-identical
+// whether or not colliding headers are present. Mirrors riskDataNormalizer's
+// suite.
+describe("detectDuplicateNormalizedHeaders", () => {
+  it("reports one collision with both originals when two headers differ only in normalization-stripped content", () => {
+    const collisions = detectDuplicateNormalizedHeaders(["التاريخ ", "التاريخ"]);
+
+    expect(collisions).toHaveLength(1);
+    expect(collisions[0].originals).toEqual(["التاريخ ", "التاريخ"]);
+    expect(collisions[0].normalized).toBe("التاريخ");
+  });
+
+  it("reports no collision for headers that stay distinct after normalization", () => {
+    const collisions = detectDuplicateNormalizedHeaders(["معرف الأشعة", "اسم المنفذ", "رقم البيان"]);
+
+    expect(collisions).toEqual([]);
+  });
+
+  it("reports no collision for an empty header list", () => {
+    expect(detectDuplicateNormalizedHeaders([])).toEqual([]);
+  });
+
+  it("groups three-way collisions into a single entry with all originals", () => {
+    const fatha = String.fromCodePoint(0x064b);
+    const collisions = detectDuplicateNormalizedHeaders(["اسم المنفذ", "اسم" + fatha + " المنفذ", "اسم المنفذ "]);
+
+    expect(collisions).toHaveLength(1);
+    expect(collisions[0].originals).toEqual(["اسم المنفذ", "اسم" + fatha + " المنفذ", "اسم المنفذ "]);
+  });
+
+  it("does not change normalizeBiRow's output: last-set-wins precedence is untouched by the diagnostic (with vs without colliding headers)", () => {
+    const fatha = String.fromCodePoint(0x064b);
+    const sourceRowWithCollision: BiSourceRow = {
+      "اسم المنفذ": "الميناء الأول",
+      ["اسم" + fatha + " المنفذ"]: "الميناء الثاني"
+    };
+    const sourceRowWithoutCollision: BiSourceRow = {
+      ["اسم" + fatha + " المنفذ"]: "الميناء الثاني"
+    };
+
+    const withCollision = normalizeBiRow({
+      sourceRow: sourceRowWithCollision,
+      source: "بري وارد",
+      sourceSheetName: "بري وارد",
+      sourceRowNumber: 1
+    });
+    const withoutCollision = normalizeBiRow({
+      sourceRow: sourceRowWithoutCollision,
+      source: "بري وارد",
+      sourceSheetName: "بري وارد",
+      sourceRowNumber: 1
+    });
+
+    expect(withCollision.portName).toBe("الميناء الثاني");
+    expect(withCollision.portName).toBe(withoutCollision.portName);
   });
 });

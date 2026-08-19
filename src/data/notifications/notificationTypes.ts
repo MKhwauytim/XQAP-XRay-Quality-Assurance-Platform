@@ -43,6 +43,19 @@ export type NotificationsFile = {
   notifications: AppNotification[];
 };
 
+/**
+ * Per-year archive of broadcast notifications evicted from the live file's
+ * `MAX_NOTIFICATIONS` cap (mirrors `audit/actionLog.ts`'s `WorkspaceActionArchiveFile`,
+ * minus the B5 tamper-evident hash chain — notifications are not the audit
+ * log, so a plain retention copy is the right weight here).
+ */
+export type NotificationsArchiveFile = {
+  year: number;
+  revision: number;
+  updatedAt: string;
+  notifications: AppNotification[];
+};
+
 /** One acknowledgement inside a single employee's own ack file. */
 export type NotificationAck = {
   notificationId: string;

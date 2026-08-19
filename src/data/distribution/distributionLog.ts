@@ -28,8 +28,52 @@ export { computeDaysRemainingForDeadline } from "./distributionDerivation";
  *   instead of being recorded as dropped and still advancing the entry's
  *   `lastEventAt`/`lastEventId`. Both change persisted derived output, so every
  *   `distribution.current.json` and every fold checkpoint from v2 must refold.
+ * - v4: cache VALIDITY, not fold semantics. Every derived snapshot now also
+ *   carries `sampleRowsFingerprint` (below), and every acceptance check that
+ *   trusts a cache requires it to match the row set in hand. A v3 snapshot has
+ *   no fingerprint to compare, so it can never be accepted; bumping the version
+ *   is what makes that a one-time refold per month instead of a permanently
+ *   rejected cache. The folded ENTRIES a v4 refold produces are identical to
+ *   what v3 produced from the same events and rows — no historical derivation
+ *   is being reinterpreted, only re-validated.
  */
-export const DERIVE_VERSION = 3;
+export const DERIVE_VERSION = 4;
+
+/**
+ * Identity of the `sampleRows` a derivation was folded against (v4).
+ *
+ * The event set alone does not identify a fold. A replacement appends a NEW row
+ * to `sample.master.json`; until the next event lands, `logRevision` and
+ * `eventSetId` are both unchanged while the row set the fold must run against
+ * has changed. A cache validated on those two fields alone is therefore served
+ * for a row set it was never derived from. This closes that window: order-
+ * sensitive over the ids (the fold is not commutative and callers legitimately
+ * pass differently-ordered/filtered sets — e.g. `liveSampleRows` drops retired
+ * rows on purpose) and prefixed with the row count so two sets of different
+ * length can never collide, whatever the hash does.
+ *
+ * Bit-identical to `hashSeedString(rows.map(r => r.xrayImageId).join("|"))`
+ * (asserted in distributionLog.test.ts), but streamed rather than materializing
+ * a multi-megabyte join on a 200k-row month — this runs on every derive-memo
+ * lookup.
+ *
+ * A digest, not a security primitive: a collision costs a wrongly-served cache,
+ * which the surrounding logRevision/eventSetId/deriveVersion checks and the
+ * refold self-heal already bound to "an optimization, never a correctness
+ * input".
+ */
+export function sampleRowsFingerprint(rows: readonly PreparedPopulationRow[]): string {
+  let h = 5381;
+  for (let i = 0; i < rows.length; i++) {
+    if (i > 0) h = (Math.imul(h, 33) ^ 124 /* "|" */) >>> 0;
+    const id = rows[i].xrayImageId;
+    for (let c = 0; c < id.length; c++) {
+      h = (Math.imul(h, 33) ^ id.charCodeAt(c)) >>> 0;
+    }
+  }
+  if (h === 0) h = 1;
+  return `${rows.length}:${h.toString(16)}`;
+}
 
 /**
  * Current distribution-event schema version (A7). Stamped on every newly built
@@ -259,6 +303,10 @@ export function deriveCurrentDistributionWithFacts(
     // treats a missing revision as 0 and would freeze mirrors otherwise.
     logRevision: log.revision,
     deriveVersion: DERIVE_VERSION,
+    // v4: the row set this fold actually ran against, so a reader can tell a
+    // cache derived from THESE rows from one derived from a different set at
+    // the same logRevision/eventSetId (a replacement append).
+    sampleRowsFingerprint: sampleRowsFingerprint(sampleRows),
     derivedAt: new Date().toISOString(),
     // Live (non-replaced) entries only. Invariant:
     // totalPending + totalCompleted + count(status === "replacement-requested") === totalAssigned.
@@ -369,6 +417,10 @@ export function deriveCurrentDistributionIncremental(
     monthFolderName: previous.monthFolderName,
     logRevision: previous.logRevision,
     deriveVersion: DERIVE_VERSION,
+    // `sampleRows` is the COMPLETE row set this incremental fold ran against
+    // (the resumed entries were folded against it too, or the resume would have
+    // been rejected upstream), so the fingerprint describes the whole result.
+    sampleRowsFingerprint: sampleRowsFingerprint(sampleRows),
     derivedAt: new Date().toISOString(),
     ...summary,
     entries,

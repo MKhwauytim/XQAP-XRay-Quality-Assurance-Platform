@@ -1434,6 +1434,10 @@ async function readEnvelopeMetadataTolerant(
  * for the bare-legacy branch only, one full read of the plain file on the FIRST
  * compressed save over it — the same read the plain path performs on every save,
  * paid here once per file as it migrates format.
+ *
+ * Ruled accepted 2026-08-19: this full verification is the contract; do not
+ * shortcut it for speed without an equally strong recoverability proof and
+ * measured evidence of UI-visible stalls.
  */
 async function hasRecoverableCurrentFile(
   dir: DirectoryHandleLike,

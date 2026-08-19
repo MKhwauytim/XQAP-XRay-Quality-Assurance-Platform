@@ -1182,6 +1182,22 @@ export const DEFAULT_LABELS = {
   kpi_reviewers_col_status:      "الحالة",
   kpi_unknown_key:               "غير محدد",
 
+  // Referential-integrity scan (B3) — Archive tab, supervisor+, read-only.
+  archive_integrity_kicker:          "التحقق من سلامة البيانات",
+  archive_integrity_title:           "فحص السلامة المرجعية",
+  archive_integrity_subtitle:        "فحص اختياري عند الطلب لشهر واحد — يقارن معرّفات صور الأشعة عبر المجتمع والعينة والتوزيع والإجابات وطلبات الإحالة/الاستبدال، للعرض فقط دون أي تعديل على البيانات.",
+  archive_integrity_month_label:     "الشهر",
+  archive_integrity_run_btn:         "تشغيل الفحص",
+  archive_integrity_running:         "جاري الفحص...",
+  archive_integrity_no_months:       "لا توجد أشهر معالجة لفحصها.",
+  archive_integrity_clean:           "لا توجد صفوف يتيمة — البيانات متسقة لهذا الشهر.",
+  archive_integrity_error_prefix:    "تعذر إجراء الفحص",
+  archive_integrity_category_sample:       "عينة بلا أصل في المجتمع",
+  archive_integrity_category_distribution: "توزيع بلا أصل في العينة",
+  archive_integrity_category_answers:      "إجابات بلا سجل توزيع حالي",
+  archive_integrity_category_approvals:    "طلبات إحالة/استبدال بلا سجل توزيع حالي",
+  archive_integrity_show_more:       "و{count} أخرى",
+
   // The 2026-08 design-handoff redesign keeps its keys in one file per screen
   // (see ./labels.*.ts). Spread here so they are indistinguishable from the
   // keys defined inline above: same LabelKey union, same Settings-tab override
