@@ -98,10 +98,19 @@ function makeRow(
 ): PreparedPopulationRow {
   const suspicious1 = rnd() < 0.05;
   const suspicious2 = suspicious1 ? rnd() < 0.7 : rnd() < 0.02;
+  // Every 20th row keeps an unparseable date so the غير مؤرخ bucket renders
+  // (entryDayOf only accepts a well-formed YYYY-MM-DD — see entryDay.ts).
+  const undated = id % 20 === 0;
+  const engineRoll = rnd();
+  // ~55% نعم, ~35% لا, ~5% an unrecognized free-text value (engineVerdictOf
+  // maps neither to a verdict — surfaces the "unrecognized" coverage bucket),
+  // ~5% blank (surfaces the "blank" coverage bucket, distinct from "unknown").
+  const targetedByRiskEngine =
+    engineRoll < 0.55 ? "نعم" : engineRoll < 0.9 ? "لا" : engineRoll < 0.95 ? "قيد المراجعة" : null;
   return {
     stage: STAGE_RAW_ALIASES[pickStage(portIdx)],
     xrayImageId: `XR-${String(id).padStart(5, "0")}`,
-    xrayEntryDate: null,
+    xrayEntryDate: undated ? "غير متوفر" : `2026-05-${String(1 + Math.floor(rnd() * 31)).padStart(2, "0")}`,
     portCode,
     portType: isSea ? "منفذ بحري" : "منفذ بري",
     portName,
@@ -112,8 +121,8 @@ function makeRow(
     xrayLevelOneResult: suspicious1 ? "اشتباه" : "سليمة",
     xrayLevelTwoResult: suspicious2 ? "اشتباه" : "سليمة",
     movementType: isSea ? "بحري" : "بري",
-    reportNumber: null,
-    targetedByRiskEngine: null,
+    reportNumber: rnd() < 0.03 ? `M-${id}` : null,
+    targetedByRiskEngine,
     riskMessage: null,
     levelOneEmployee: `EMP-${1 + Math.floor(rnd() * 9)}`,
     levelTwoEmployee: `EMP-${10 + Math.floor(rnd() * 5)}`,

@@ -252,8 +252,20 @@ export const DAILY_TREND_CSS = `
 }
 .v2-dt-caution svg{display:block;flex-shrink:0;}
 
-/* Chart figure fills the remaining space in the body. */
-.v2-dt-layout figure{flex:1;min-height:0;}
+/* Chart wrapper fills the remaining space in the body — measured live via
+   report:static against a populated fixture (2026-08-20): the original rule
+   here targeted the inner figure element (analyticsCharts.ts's timeSeriesBand
+   wrapper), but that figure is a grandchild of this flex column, not a
+   direct flex item of it — .v2-ts-wrap (a plain block div) is the actual
+   flex item, so flex:1 on figure was a no-op and the chart rendered at its
+   unconstrained intrinsic height (~487px), pushing the per-day n-strip and
+   legend entirely past the slide's fixed 630px box. Targeting the real flex
+   item — with min-height:0 so it can shrink below the SVG's own intrinsic
+   size — lets flexbox allocate it only the space left after the share
+   headline, n-strip, and legend, and the height:100% chain (.v2-ts-wrap to
+   figure to svg) resolves against that now-definite height. */
+.v2-dt-layout .v2-ts-wrap{flex:1;min-height:0;display:flex;}
+.v2-dt-layout .v2-ts-wrap figure{flex:1;min-height:0;}
 
 /* Per-day n strip. */
 .v2-dt-n-strip{display:flex;flex-direction:column;gap:4px;}
