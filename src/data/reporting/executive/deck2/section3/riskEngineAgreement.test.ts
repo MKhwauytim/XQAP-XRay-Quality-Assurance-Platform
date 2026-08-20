@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { EmployeeAnswerFile, ItemAnswer } from "../../../../answers/answerTypes";
 import type { PreparedPopulationRow } from "../../../../population/populationTypes";
+import type { SampleMasterData } from "../../../../sampling/sampleTypes";
 import { DEFAULT_EXEC_CONFIG } from "../../../executiveReportTypes";
 import type { ExecutiveReportInput } from "../../../executiveReportTypes";
 import { buildReportModel } from "../../model/reportModel";
@@ -76,11 +77,34 @@ function answerFile(items: ItemAnswer[]): EmployeeAnswerFile {
   return { username: "reviewer-1", monthFolderName: "5-May-2026", items };
 }
 
-function input(rows: PreparedPopulationRow[], files: EmployeeAnswerFile[] = []): ExecutiveReportInput {
+/** A minimal, valid `SampleMasterData` carrying exactly the given rows as the
+ *  drawn sample — same pattern `sourceAgreement.test.ts`'s `sampleOf` uses. */
+function sampleOf(rows: PreparedPopulationRow[]): SampleMasterData {
+  return {
+    rngSeed: "seed",
+    totalRequested: rows.length,
+    totalActual: rows.length,
+    certScanRequested: 0,
+    nonCertScanRequested: rows.length,
+    certScanActual: 0,
+    nonCertScanActual: rows.length,
+    portAllocations: [],
+    stageAllocations: [],
+    drawnAt: "2026-05-01T00:00:00.000Z",
+    drawnBy: "admin",
+    rows,
+  };
+}
+
+function input(
+  rows: PreparedPopulationRow[],
+  files: EmployeeAnswerFile[] = [],
+  sampledRows: PreparedPopulationRow[] | null = null,
+): ExecutiveReportInput {
   return {
     monthFolderName: "5-May-2026",
     populationRows: rows,
-    sample: null,
+    sample: sampledRows ? sampleOf(sampledRows) : null,
     distribution: null,
     employeeFiles: files,
     template: null,
@@ -88,8 +112,12 @@ function input(rows: PreparedPopulationRow[], files: EmployeeAnswerFile[] = []):
   };
 }
 
-function modelWith(rows: PreparedPopulationRow[], files: EmployeeAnswerFile[] = []): ReportModel {
-  return buildReportModel(input(rows, files));
+function modelWith(
+  rows: PreparedPopulationRow[],
+  files: EmployeeAnswerFile[] = [],
+  sampledRows: PreparedPopulationRow[] | null = null,
+): ReportModel {
+  return buildReportModel(input(rows, files, sampledRows));
 }
 
 // ── engineVerdictOf ─────────────────────────────────────────────────────────
@@ -162,9 +190,21 @@ describe("riskEngineAgreementSlide", () => {
     expect(html).toContain("<b>4</b><small>بلا قيمة");
   });
 
-  it("carries the definitional-overlap footnote", () => {
+  it("carries all three mandatory footnotes (2026-08-20 whole-branch-review fix)", () => {
     const html = riskEngineAgreementSlide(modelWith([popRow()]), 8, 20, false);
     expect(html).toContain("v2-re-caveat");
+    // Scope footnote — reused verbatim from sourceAgreement.ts's SCOPE_FOOTNOTE
+    // (Important 2: the headline row is sample-scoped, the rows beneath it
+    // are population-scoped).
+    expect(html).toContain(
+      "المقارنات التي تشمل «المراجع» تقتصر على صور العيّنة المدروسة؛ وما عداها يشمل مجتمع الشهر كاملًا.",
+    );
+    // Level-axis footnote — المستوى الثاني means two different things on this
+    // one page (Important 1).
+    expect(html).toContain("معنى مختلف تمامًا لنفس الاسم");
+    // The definitional-overlap caveat is now scoped explicitly to the
+    // disagreement block, never to the agreement table above it.
+    expect(html).toContain("مجموعة الاختلاف أدناه: المستوى الثاني هنا هو مستوى المخاطر");
   });
 
   it("renders an empty state when no row carries a usable engine value", () => {
@@ -304,5 +344,43 @@ describe("riskEngineAgreementSlide", () => {
     expect(html).toContain("100.0%"); // L1 agreement stays 100%, never diluted
     expect(html).toContain("<td>12</td>"); // n stays 12
     expect(html).not.toContain("<td>24</td>"); // never doubles from the blank rows
+  });
+
+  // ── Important 3 (2026-08-20 whole-branch-review fix) ───────────────────────
+  //
+  // The unreviewed remainder of the المستوى الثاني set used to be labelled
+  // «بلا حكم مراجع بعد» ("no reviewer verdict YET") for every row lacking
+  // `expertResult` — including rows never drawn into the studied sample at
+  // all, which by design can never carry a reviewer verdict and are not
+  // "pending" anything. This fixture puts one stage-2 row IN the sample
+  // (genuinely awaiting review) and one OUTSIDE it (never drawn), so the two
+  // must be counted and labelled separately.
+  it('splits the unreviewed المستوى الثاني remainder into "outside the sample" vs "sampled, awaiting review" — never a blanket "not yet"', () => {
+    const inSampleRow = popRow({
+      xrayImageId: "P-IN",
+      stage: "SECOND_STAG",
+      targetedByRiskEngine: "نعم",
+    });
+    const outsideSampleRow = popRow({
+      xrayImageId: "P-OUT",
+      stage: "SECOND_STAG",
+      targetedByRiskEngine: "نعم",
+    });
+    const html = riskEngineAgreementSlide(
+      modelWith([inSampleRow, outsideSampleRow], [], [inSampleRow]),
+      8,
+      20,
+      false,
+    );
+
+    // The old, misleading "not yet" label for the WHOLE remainder must be gone.
+    expect(html).not.toContain("بلا حكم مراجع بعد");
+    // The genuinely-pending, in-sample row gets its own honest label and count.
+    expect(html).toContain("<b>1</b><small>ضمن العيّنة، بانتظار إجابة المراجع");
+    // The never-sampled row is disclosed in the block's own subtitle, scoped
+    // to the population total, not folded into "pending review".
+    expect(html).toContain(
+      "إجمالي صور مجتمع الشهر: 2؛ خارج العيّنة المدروسة (لم تُسحب أصلًا): 1.",
+    );
   });
 });

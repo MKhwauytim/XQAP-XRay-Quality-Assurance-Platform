@@ -1,5 +1,16 @@
 # Executive Report — Content Map and Rework Brief
 
+> **⚠ Stale as of 2026-08-19 (pre-rework).** §2's page numbers and القسم 3's
+> "Six analysis pages" count below describe the deck as it stood on 2026-08-19,
+> BEFORE the same-day v104.0 rework (three new القسم 3 pages added —
+> `dailyTrend.ts`/`outcomeMatrix.ts`/`riskEngineAgreement.ts` — and
+> `workloadAccuracy.ts` reworked into a dormant correlation view, disabled by
+> `SHOW_WORKLOAD_ACCURACY_SLIDE = false`). As merged, القسم 3 renders **8**
+> content pages, not six, الأداء حسب حجم الأعمال does **not** render at all
+> (dormant, not page 15), and every page number from القسم 3 onward below has
+> shifted. Treat §1 and §3 as current; treat §2's page numbers as historical
+> until this doc is regenerated against the current page list.
+
 Written 2026-08-19 against the code as it stands (deck2 is the live edition).
 Three parts:
 
@@ -94,9 +105,16 @@ fullscreen presenter mode (arrow keys / click to advance), and a print → PDF b
 | 12… | **نتائج جودة الصور** (paginates) | Per port: image-quality distribution (عالي / متوسط / منخفض) and marking presence % | `imageQuality`, `kpis` quality counts |
 | 13… | **دقة نتائج المنافذ** (paginates) | Per port: الدقة العامة, دقة الاشتباه (detection), دقة السليمة (clean confirmation) | `portAccuracy` (decision grain) |
 
-### القسم 3 — التحاليل المتقدمة (14–20)
+### القسم 3 — التحاليل المتقدمة (14–20, pre-rework — see the banner at the top of this doc)
 
-Six analysis pages, each in its own module with its own CSS.
+Six analysis pages, each in its own module with its own CSS, **as of 2026-08-19
+before the same-day v104.0 rework**. As merged, this section renders 8 content
+pages (`dailyTrend`, `outcomeMatrix`, `levelAccuracy`, `sourceAgreement`,
+`riskEngineAgreement`, `portAgreement`, `markingImpact`, `qualityImpact`) —
+الأداء حسب حجم الأعمال below is dormant (`SHOW_WORKLOAD_ACCURACY_SLIDE =
+false` in `workloadAccuracy.ts`), not rendered as page 15 or anywhere else,
+and every page number below (15 onward, including all of القسم 4 and the
+closing page) is stale.
 
 | # | Page | Question it answers | Model fields |
 |---|------|--------------------|--------------|

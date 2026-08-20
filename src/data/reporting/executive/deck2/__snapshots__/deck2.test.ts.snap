@@ -3281,7 +3281,7 @@ body.theme-light .v2-dt-empty{border-color:rgba(10,45,74,.2);background:rgba(10,
    label + always-visible count already carry the meaning). */
 .v2-om-cell.emphasis{border-width:2px;background:color-mix(in srgb,var(--coral) 22%,transparent);}
 .v2-om-cell-label{font-size:.6rem;font-weight:700;color:var(--slate);}
-.v2-om-count{font-size:1.15rem;font-weight:900;color:#fff;line-height:1.05;}
+.v2-om-count{font-size:1.15rem;font-weight:900;color:var(--white);line-height:1.05;}
 .v2-om-share{font-size:.64rem;font-weight:700;color:var(--muted);}
 
 /* Compact totals band (Task-5 round-2 fix): this page's own denominator strip
@@ -3297,16 +3297,16 @@ body.theme-light .v2-dt-empty{border-color:rgba(10,45,74,.2);background:rgba(10,
 .v2-om-top .v2-totals-item b{font-size:.88rem;}
 .v2-om-top .v2-totals-item small{font-size:.58rem;}
 
-body.theme-light .v2-om-colhead,body.theme-light .v2-om-rowhead{color:#607386;}
-body.theme-light .v2-om-cell{background:#fff;border-color:#dde4ea;}
-body.theme-light .v2-om-cell.blue{background:color-mix(in srgb,var(--blue) 10%,#fff);}
-body.theme-light .v2-om-cell.gold{background:color-mix(in srgb,var(--gold) 10%,#fff);}
-body.theme-light .v2-om-cell.green{background:color-mix(in srgb,var(--green) 10%,#fff);}
-body.theme-light .v2-om-cell.coral{background:color-mix(in srgb,var(--coral) 10%,#fff);}
-body.theme-light .v2-om-cell.emphasis{background:color-mix(in srgb,var(--coral) 16%,#fff);}
-body.theme-light .v2-om-count{color:#0a2d4a;}
-body.theme-light .v2-om-cell-label{color:#607386;}
-body.theme-light .v2-om-share{color:#607386;}
+body.theme-light .v2-om-colhead,body.theme-light .v2-om-rowhead{color:color-mix(in srgb,var(--navy) 68%,transparent);}
+body.theme-light .v2-om-cell{background:var(--white);border-color:color-mix(in srgb,var(--navy) 12%,transparent);}
+body.theme-light .v2-om-cell.blue{background:color-mix(in srgb,var(--blue) 10%,var(--white));}
+body.theme-light .v2-om-cell.gold{background:color-mix(in srgb,var(--gold) 10%,var(--white));}
+body.theme-light .v2-om-cell.green{background:color-mix(in srgb,var(--green) 10%,var(--white));}
+body.theme-light .v2-om-cell.coral{background:color-mix(in srgb,var(--coral) 10%,var(--white));}
+body.theme-light .v2-om-cell.emphasis{background:color-mix(in srgb,var(--coral) 16%,var(--white));}
+body.theme-light .v2-om-count{color:var(--navy);}
+body.theme-light .v2-om-cell-label{color:color-mix(in srgb,var(--navy) 68%,transparent);}
+body.theme-light .v2-om-share{color:color-mix(in srgb,var(--navy) 68%,transparent);}
 
 .v2-om-port-missed{font-weight:800;}
 /* Folded remainder row (round-2 fix) — same muted/italic treatment
@@ -3314,7 +3314,7 @@ body.theme-light .v2-om-share{color:#607386;}
    elsewhere in the deck (theme.ts), so a folded row reads as visibly
    different from a named port row without a legend. */
 .v2-om-fold-row td{color:var(--slate);font-style:italic;}
-body.theme-light .v2-om-fold-row td{color:#607386;}
+body.theme-light .v2-om-fold-row td{color:color-mix(in srgb,var(--navy) 68%,transparent);}
 
 @media print{
   .v2-om-ports{overflow:visible;}
@@ -3562,12 +3562,19 @@ body.theme-light .s3sa-lg-pair-totals{
 /* ── Coverage line — the vocabulary-discovery counter ─────────────────────── */
 .v2-re-coverage{flex-shrink:0;}
 
-/* ── Mandatory definitional-overlap caveat ────────────────────────────────── */
+/* ── Mandatory footnotes: scope + level-axis + definitional-overlap caveat ───
+   Three lines now (2026-08-20 whole-branch-review fix), not one — stacked
+   and right-flush (RTL) rather than centered, the same layout
+   sourceAgreement.ts's .s3sa-foot uses for its own two-line footnote, since
+   a centered multi-line block reads worse than a stacked one. */
 .v2-re-caveat{
-  flex-shrink:0;display:flex;align-items:center;gap:6px;text-align:center;
-  justify-content:center;font-size:.58rem;font-weight:700;line-height:1.35;color:var(--slate);
+  flex-shrink:0;display:flex;flex-direction:column;gap:1px;text-align:right;
+  font-size:.56rem;font-weight:700;line-height:1.3;color:var(--slate);
 }
-.v2-re-caveat-icon{display:inline-flex;flex-shrink:0;color:var(--gold);}
+.v2-re-caveat p{margin:0;}
+.v2-re-caveat-icon{
+  display:inline-flex;vertical-align:-1px;margin-inline-end:4px;flex-shrink:0;color:var(--gold);
+}
 .v2-re-caveat-icon svg{display:block;}
 
 /* ── Empty state — no recognized engine verdict this month ───────────────── */
@@ -4743,7 +4750,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     <div class="slide-subhead">دقة القرارات اليومية عبر أيام الشهر، مع نطاقات ضبط إحصائية لكل من دقة السليمة ودقة الاشتباه.</div>
     <div class="slide-body"><div class="v2-dt-layout">
           <div class="v2-dt-share">
-    <div class="v2-dt-share-figure"><b>—</b><span>نسبة القرارات المؤرخة</span></div>
+    <div class="v2-dt-share-figure"><b><span class="insuff">—</span></b><span>نسبة القرارات المؤرخة</span></div>
     <div class="v2-dt-share-figure"><b>0</b><span>قرار غير مؤرخ</span></div>
     
   </div>
@@ -4953,8 +4960,9 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
         <div class="v2-totals-item"><span class="v2-totals-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M7 3h7l4 4v14H7V3z"/><path d="M14 3v4h4"/><path d="M9.5 13h5"/><path d="M9.5 16.5h5"/></svg></span><span><b>2</b><small>بلا قيمة (فارغة) — لا تُحتسب سليمة</small></span></div>
       </div></div>
     <div class="v2-re-caveat">
-    <span class="v2-re-caveat-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="12" height="12" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l9 16H3l9-16z"/><path d="M12 10v4"/><path d="M12 17.5v.5"/></svg></span>
-    <span>المستوى الثاني مُعرَّف أصلًا بأن محرك المخاطر استهدف الصورة ولم تشتبه بها شاشتنا؛ لذلك فإن جزءًا من علاقة محرك المخاطر بنتائج شاشتنا هنا نتيجة تعريف إحصائي وليس اكتشافًا. توافق محرك المخاطر مع المراجع (أعلاه) هو المقياس الوحيد المستقل عن هذا التعريف.</span>
+    <p><span class="v2-re-caveat-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="11" height="11" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l9 16H3l9-16z"/><path d="M12 10v4"/><path d="M12 17.5v.5"/></svg></span>المقارنات التي تشمل «المراجع» تقتصر على صور العيّنة المدروسة؛ وما عداها يشمل مجتمع الشهر كاملًا.</p>
+    <p>«المستوى الأول» و«المستوى الثاني» في جدولي التوافق والمحضر أعلاه/أدناه يعنيان مرحلتي فحص الأشعة؛ أما «المستوى الثاني» في عنوان مجموعة الاختلاف فيعني مستوى المخاطر — معنى مختلف تمامًا لنفس الاسم.</p>
+    <p>مجموعة الاختلاف أدناه: المستوى الثاني هنا هو مستوى المخاطر، وهو مُعرَّف أصلًا بأن محرك المخاطر استهدف الصورة ولم تشتبه بها شاشتنا؛ لذلك فإن جزءًا من هذه العلاقة تحديدًا نتيجة تعريف إحصائي وليس اكتشافًا. توافق محرك المخاطر مع المراجع (أعلاه) هو المقياس الوحيد المستقل عن هذا التعريف.</p>
   </div>
   </div></div>
   </div>

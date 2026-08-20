@@ -33,6 +33,25 @@
 // decorative, and a reader must not mistake the definitional part of this page
 // for a discovery.
 //
+// ── Two footnotes this page must carry (2026-08-20 whole-branch-review fix) ─
+// 1. «المستوى الثاني» is used in TWO INCOMPATIBLE senses on this one page: the
+//    agreement table and the محضر table (block 1 and block 3) read it as the
+//    X-RAY INSPECTION LEVEL (`levelTwoResult`); the disagreement-set heading
+//    (block 2) reads it as the RISK-LEVEL CATEGORY (`getStageKey(stage) ===
+//    "second"`). `sourceAgreement.ts`'s `LEVEL_FOOTNOTE` and
+//    `levelAccuracy.ts`'s «مرحلتا فحص بالأشعة» sub-line disambiguate the same
+//    two axes on their own pages; `LEVEL_FOOTNOTE` below does the same here,
+//    and the disagreement caveat is worded to apply ONLY to block 2 so a
+//    reader never applies it to the inspection-level row printed above it.
+// 2. THE COMPARISON SCOPE IS ASYMMETRIC, same structural fact
+//    `sourceAgreement.ts`'s `SCOPE_FOOTNOTE` states: the engine-vs-المراجع
+//    headline row is scoped to the studied SAMPLE (`expertResult` is non-null
+//    only for reviewed sampled images), while the engine-vs-L1/L2 rows below
+//    it are scoped to the whole month's POPULATION — so their `ن` columns
+//    differ by orders of magnitude for a structural reason, not an error.
+//    `SCOPE_FOOTNOTE` below states this verbatim, reused unchanged from
+//    `sourceAgreement.ts` since it is the exact same fact.
+//
 // ── Grain: IMAGE ─────────────────────────────────────────────────────────
 // This page folds `model.rows` (one row per population image) — the same grain
 // `targetedByRiskEngine`/`hasReport`/`stage` all live at. It never touches
@@ -80,6 +99,20 @@ import { briefingSupport, pctCell, rateOf, v2Slide } from "../slideKit";
 const TITLE = "توافق نتائج الفحص مع محرك المخاطر";
 const SUBHEAD = "كيف تقارن قرارات فحص الأشعة باستهداف محرك مخاطر الجمارك، وماذا وجد المراجع عند الاختلاف.";
 const EYEBROW = "القسم 3 — التحاليل المتقدمة";
+
+/** Guards the asymmetric-scope fact (module header note #2). Reused verbatim
+ *  from `sourceAgreement.ts`'s `SCOPE_FOOTNOTE` — the same structural fact
+ *  (rows involving المراجع are sample-scoped, the rest are population-scoped)
+ *  applies unchanged to this page's block 1. */
+const SCOPE_FOOTNOTE =
+  "المقارنات التي تشمل «المراجع» تقتصر على صور العيّنة المدروسة؛ وما عداها يشمل مجتمع الشهر كاملًا.";
+
+/** Guards the two-senses-of-«المستوى الثاني» fact (module header note #1):
+ *  block 1/3 use it for the X-ray inspection level, block 2's heading uses it
+ *  for the risk-level category — the SAME label, two different axes, on one
+ *  page. */
+const LEVEL_FOOTNOTE =
+  "«المستوى الأول» و«المستوى الثاني» في جدولي التوافق والمحضر أعلاه/أدناه يعنيان مرحلتي فحص الأشعة؛ أما «المستوى الثاني» في عنوان مجموعة الاختلاف فيعني مستوى المخاطر — معنى مختلف تمامًا لنفس الاسم.";
 
 // ── The mapping rule (the page's own correctness core) ──────────────────────
 
@@ -198,7 +231,9 @@ function agreementBlock(rows: AgreementRow[]): string {
 
 type DisagreementFold = {
   /** All rows whose `stage` maps to المستوى الثاني — by definition the engine
-   *  flagged them and L1/L2 cleared them. */
+   *  flagged them and L1/L2 cleared them. This is a POPULATION-wide count
+   *  (every image the risk file marks stage-2, sampled or not), never the
+   *  studied-sample count — see `total`'s use in `disagreementBlock` below. */
   total: number;
   /** Of those, how many the reviewer has actually recorded a verdict for. */
   reviewed: number;
@@ -207,8 +242,16 @@ type DisagreementFold = {
   /** Reviewer sided with our screening (سليمة) — the engine's flag itself
    *  did not hold up under independent review. */
   cleared: number;
-  /** No reviewer verdict recorded yet. */
-  pending: number;
+  /** Never drawn into the studied sample at all (`selectedInSample === false`)
+   *  — cannot carry a reviewer verdict BY DESIGN, not because one is overdue.
+   *  On a real month this is the overwhelming majority of `total` (a ~1–2%
+   *  sample rate), which is exactly why it must never be folded into "pending
+   *  review" (2026-08-20 whole-branch-review fix, Important 3: «بلا حكم
+   *  مراجع بعد» previously mislabeled this as "not yet reviewed"). */
+  outsideSample: number;
+  /** Drawn into the sample (`selectedInSample === true`) but the reviewer has
+   *  not yet recorded a verdict — genuinely "pending", unlike `outsideSample`. */
+  awaitingReview: number;
   /** Share of REVIEWED cases the reviewer confirmed, gated on `reviewed`'s
    *  own sufficiency band — independent of `total`'s band. */
   confirmedRate: number | null;
@@ -219,17 +262,21 @@ type DisagreementFold = {
  * alias-matching helper — NEVER by comparing `row.stage` to a hard-coded
  * Arabic label (see the module header's stage-matching note for the bug this
  * avoids), then breaks them down by what the independent study reviewer
- * found.
+ * found. The un-reviewed remainder is further split by `selectedInSample`
+ * (2026-08-20 fix) — a row never drawn into the sample cannot be "pending",
+ * only a sampled-but-unanswered row can.
  */
 function foldDisagreementSet(rows: readonly ExecutiveReportRow[]): DisagreementFold {
   const level2 = rows.filter((r) => getStageKey(r.stage) === "second");
   let confirmed = 0;
   let cleared = 0;
-  let pending = 0;
+  let outsideSample = 0;
+  let awaitingReview = 0;
   for (const row of level2) {
     if (row.expertResult === "اشتباه") confirmed += 1;
     else if (row.expertResult === "سليمة") cleared += 1;
-    else pending += 1;
+    else if (row.selectedInSample) awaitingReview += 1;
+    else outsideSample += 1;
   }
   const reviewed = confirmed + cleared;
   const rankable = isRankable(band(reviewed));
@@ -238,7 +285,8 @@ function foldDisagreementSet(rows: readonly ExecutiveReportRow[]): DisagreementF
     reviewed,
     confirmed,
     cleared,
-    pending,
+    outsideSample,
+    awaitingReview,
     confirmedRate: rankable ? rateOf(confirmed, reviewed) : null,
   };
 }
@@ -247,12 +295,14 @@ function disagreementBlock(fold: DisagreementFold): string {
   const stats = briefingSupport([
     { iconName: "check", value: fmtNum(fold.confirmed), label: "أكّد المراجع الاشتباه (فاتته شاشتنا)" },
     { iconName: "shield", value: fmtNum(fold.cleared), label: "وافق المراجع فحصنا (سليمة فعلًا)" },
-    { iconName: "document", value: fmtNum(fold.pending), label: "بلا حكم مراجع بعد" },
+    { iconName: "document", value: fmtNum(fold.awaitingReview), label: "ضمن العيّنة، بانتظار إجابة المراجع" },
   ]);
   return `<div class="v2-re-disagree">
     <div class="v2-re-block-head">
       <b>${esc("مجموعة الاختلاف: المستوى الثاني")}</b>
-      <span>${esc(`استهدفها محرك المخاطر ولم تشتبه بها شاشتنا — ماذا وجد المراجع؟ (إجمالي ${fmtNum(fold.total)})`)}</span>
+      <span>${esc(
+        `استهدفها محرك المخاطر ولم تشتبه بها شاشتنا — ماذا وجد المراجع؟ إجمالي صور مجتمع الشهر: ${fmtNum(fold.total)}؛ خارج العيّنة المدروسة (لم تُسحب أصلًا): ${fmtNum(fold.outsideSample)}.`,
+      )}</span>
     </div>
     ${stats}
     <div class="v2-re-disagree-rate">
@@ -335,15 +385,23 @@ function coverageBlock(cov: Coverage): string {
   return `<div class="v2-re-coverage">${stats}</div>`;
 }
 
-/** Mandatory, non-negotiable footnote (design requirement, not decoration):
- *  states the definitional overlap between المستوى الثاني and engine-vs-L1/L2
- *  agreement so a reader never mistakes that structural fact for a finding. */
+/** Mandatory, non-negotiable footnotes (design requirement, not decoration).
+ *  Three lines, each guarding a distinct correctness fact (2026-08-20
+ *  whole-branch-review fix — see the module header's two-footnote note):
+ *   1. `SCOPE_FOOTNOTE` — block 1's headline row is sample-scoped, the rows
+ *      beneath it are population-scoped.
+ *   2. `LEVEL_FOOTNOTE` — «المستوى الثاني» means two different things on this
+ *      one page.
+ *   3. The definitional-overlap caveat — reworded to scope explicitly to
+ *      block 2 (the disagreement set) so a reader never applies it to the
+ *      inspection-level row printed in block 1, which it does NOT describe. */
 function caveatBlock(): string {
   return `<div class="v2-re-caveat">
-    <span class="v2-re-caveat-icon" aria-hidden="true">${icon("alert", 12)}</span>
-    <span>${esc(
-      "المستوى الثاني مُعرَّف أصلًا بأن محرك المخاطر استهدف الصورة ولم تشتبه بها شاشتنا؛ لذلك فإن جزءًا من علاقة محرك المخاطر بنتائج شاشتنا هنا نتيجة تعريف إحصائي وليس اكتشافًا. توافق محرك المخاطر مع المراجع (أعلاه) هو المقياس الوحيد المستقل عن هذا التعريف.",
-    )}</span>
+    <p><span class="v2-re-caveat-icon" aria-hidden="true">${icon("alert", 11)}</span>${esc(SCOPE_FOOTNOTE)}</p>
+    <p>${esc(LEVEL_FOOTNOTE)}</p>
+    <p>${esc(
+      "مجموعة الاختلاف أدناه: المستوى الثاني هنا هو مستوى المخاطر، وهو مُعرَّف أصلًا بأن محرك المخاطر استهدف الصورة ولم تشتبه بها شاشتنا؛ لذلك فإن جزءًا من هذه العلاقة تحديدًا نتيجة تعريف إحصائي وليس اكتشافًا. توافق محرك المخاطر مع المراجع (أعلاه) هو المقياس الوحيد المستقل عن هذا التعريف.",
+    )}</p>
   </div>`;
 }
 
@@ -469,12 +527,19 @@ export const RISK_ENGINE_CSS = `
 /* ── Coverage line — the vocabulary-discovery counter ─────────────────────── */
 .v2-re-coverage{flex-shrink:0;}
 
-/* ── Mandatory definitional-overlap caveat ────────────────────────────────── */
+/* ── Mandatory footnotes: scope + level-axis + definitional-overlap caveat ───
+   Three lines now (2026-08-20 whole-branch-review fix), not one — stacked
+   and right-flush (RTL) rather than centered, the same layout
+   sourceAgreement.ts's .s3sa-foot uses for its own two-line footnote, since
+   a centered multi-line block reads worse than a stacked one. */
 .v2-re-caveat{
-  flex-shrink:0;display:flex;align-items:center;gap:6px;text-align:center;
-  justify-content:center;font-size:.58rem;font-weight:700;line-height:1.35;color:var(--slate);
+  flex-shrink:0;display:flex;flex-direction:column;gap:1px;text-align:right;
+  font-size:.56rem;font-weight:700;line-height:1.3;color:var(--slate);
 }
-.v2-re-caveat-icon{display:inline-flex;flex-shrink:0;color:var(--gold);}
+.v2-re-caveat p{margin:0;}
+.v2-re-caveat-icon{
+  display:inline-flex;vertical-align:-1px;margin-inline-end:4px;flex-shrink:0;color:var(--gold);
+}
 .v2-re-caveat-icon svg{display:block;}
 
 /* ── Empty state — no recognized engine verdict this month ───────────────── */

@@ -412,7 +412,7 @@ export const OUTCOME_MATRIX_CSS = `
    label + always-visible count already carry the meaning). */
 .v2-om-cell.emphasis{border-width:2px;background:color-mix(in srgb,var(--coral) 22%,transparent);}
 .v2-om-cell-label{font-size:.6rem;font-weight:700;color:var(--slate);}
-.v2-om-count{font-size:1.15rem;font-weight:900;color:#fff;line-height:1.05;}
+.v2-om-count{font-size:1.15rem;font-weight:900;color:var(--white);line-height:1.05;}
 .v2-om-share{font-size:.64rem;font-weight:700;color:var(--muted);}
 
 /* Compact totals band (Task-5 round-2 fix): this page's own denominator strip
@@ -428,16 +428,16 @@ export const OUTCOME_MATRIX_CSS = `
 .v2-om-top .v2-totals-item b{font-size:.88rem;}
 .v2-om-top .v2-totals-item small{font-size:.58rem;}
 
-body.theme-light .v2-om-colhead,body.theme-light .v2-om-rowhead{color:#607386;}
-body.theme-light .v2-om-cell{background:#fff;border-color:#dde4ea;}
-body.theme-light .v2-om-cell.blue{background:color-mix(in srgb,var(--blue) 10%,#fff);}
-body.theme-light .v2-om-cell.gold{background:color-mix(in srgb,var(--gold) 10%,#fff);}
-body.theme-light .v2-om-cell.green{background:color-mix(in srgb,var(--green) 10%,#fff);}
-body.theme-light .v2-om-cell.coral{background:color-mix(in srgb,var(--coral) 10%,#fff);}
-body.theme-light .v2-om-cell.emphasis{background:color-mix(in srgb,var(--coral) 16%,#fff);}
-body.theme-light .v2-om-count{color:#0a2d4a;}
-body.theme-light .v2-om-cell-label{color:#607386;}
-body.theme-light .v2-om-share{color:#607386;}
+body.theme-light .v2-om-colhead,body.theme-light .v2-om-rowhead{color:color-mix(in srgb,var(--navy) 68%,transparent);}
+body.theme-light .v2-om-cell{background:var(--white);border-color:color-mix(in srgb,var(--navy) 12%,transparent);}
+body.theme-light .v2-om-cell.blue{background:color-mix(in srgb,var(--blue) 10%,var(--white));}
+body.theme-light .v2-om-cell.gold{background:color-mix(in srgb,var(--gold) 10%,var(--white));}
+body.theme-light .v2-om-cell.green{background:color-mix(in srgb,var(--green) 10%,var(--white));}
+body.theme-light .v2-om-cell.coral{background:color-mix(in srgb,var(--coral) 10%,var(--white));}
+body.theme-light .v2-om-cell.emphasis{background:color-mix(in srgb,var(--coral) 16%,var(--white));}
+body.theme-light .v2-om-count{color:var(--navy);}
+body.theme-light .v2-om-cell-label{color:color-mix(in srgb,var(--navy) 68%,transparent);}
+body.theme-light .v2-om-share{color:color-mix(in srgb,var(--navy) 68%,transparent);}
 
 .v2-om-port-missed{font-weight:800;}
 /* Folded remainder row (round-2 fix) — same muted/italic treatment
@@ -445,7 +445,7 @@ body.theme-light .v2-om-share{color:#607386;}
    elsewhere in the deck (theme.ts), so a folded row reads as visibly
    different from a named port row without a legend. */
 .v2-om-fold-row td{color:var(--slate);font-style:italic;}
-body.theme-light .v2-om-fold-row td{color:#607386;}
+body.theme-light .v2-om-fold-row td{color:color-mix(in srgb,var(--navy) 68%,transparent);}
 
 @media print{
   .v2-om-ports{overflow:visible;}

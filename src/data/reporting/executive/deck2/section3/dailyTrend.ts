@@ -45,9 +45,9 @@ import { buildPChart, P_CHART_MIN_N } from "../../model/reviewerKpis";
 import { timeSeriesBand } from "../../ui/analyticsCharts";
 import type { BandPoint, BandSeries } from "../../ui/analyticsCharts";
 import type { ReportModel } from "../../model/reportModel";
-import { esc, fmtNum, fmtPct } from "../../primitives";
+import { esc, fmtNum } from "../../primitives";
 import { icon } from "../../ui/icons";
-import { v2Slide } from "../slideKit";
+import { pctCell, v2Slide } from "../slideKit";
 
 /** Below this dated-share percentage the page renders an explicit caution
  *  line: the chart then describes a fraction of the month, and that fact has
@@ -134,7 +134,7 @@ function shareHeadline(model: ReportModel): string {
         )}</span></div>`
       : "";
   return `<div class="v2-dt-share">
-    <div class="v2-dt-share-figure"><b>${fmtPct(datedShare)}</b><span>نسبة القرارات المؤرخة</span></div>
+    <div class="v2-dt-share-figure"><b>${pctCell(datedShare)}</b><span>نسبة القرارات المؤرخة</span></div>
     <div class="v2-dt-share-figure"><b>${fmtNum(undated.evaluable)}</b><span>قرار غير مؤرخ</span></div>
     ${caution}
   </div>`;
