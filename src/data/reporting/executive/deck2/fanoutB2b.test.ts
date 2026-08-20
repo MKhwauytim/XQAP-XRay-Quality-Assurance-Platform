@@ -30,7 +30,7 @@ import { buildReportModel } from "../model/reportModel";
 import type { ReportModel } from "../model/reportModel";
 import { band } from "../model/dataSufficiency";
 import type { KeyedAccuracy } from "../model/aggregates";
-import { workloadAccuracySlideBuilders } from "./section3/workloadAccuracy";
+import { workloadAccuracyPageBuilders, workloadAccuracySlideBuilders } from "./section3/workloadAccuracy";
 import { levelAccuracySlideBuilders } from "./section3/levelAccuracy";
 import { portAgreementSlideBuilders } from "./section3/portAgreement";
 import { fmtNum, fmtPct } from "../primitives";
@@ -184,11 +184,26 @@ function workloadRows(port: string, portType: string, count: number, idPrefix: s
 
 const WORKLOAD_CAVEAT = "ارتباط وصفي بين الحجم والدقة، لا يُقرأ كعلاقة سببية.";
 
-describe("workloadAccuracySlideBuilders — Ledger/Briefing/Grid (fan-out plan §11a, batch B2b)", () => {
+// slide-s3-workload's Ledger/Briefing/Grid fan-out (this describe block's
+// original §11a coverage) was REMOVED 2026-08-19 when the page was reworked
+// into a correlation view (deviation-from-month-mean strip) and shipped
+// disabled by default — see task-7 of
+// .superpowers/sdd/2026-08-19-executive-report-section3-analytics/ and
+// `SHOW_WORKLOAD_ACCURACY_SLIDE` in section3/workloadAccuracy.ts. Maintaining
+// three separate hand-tuned designs for a page nobody currently sees was not
+// a good use of the rework, so all four variant slots now render the SAME
+// body (`[body, body, body, body]`) — the fan-out is deliberately collapsed,
+// not forgotten. These tests assert that collapsed shape instead of three
+// divergent designs; the old Ledger/Briefing/Grid-specific assertions
+// (ordinal badges, workload-sorted rank list, the C3/2026-07-28 fold-order
+// regression, the sequential-gold Grid matrix, foldRemainder's pooled-not-
+// averaged accuracy) no longer apply because those systems no longer exist
+// on this page.
+describe("workloadAccuracySlideBuilders — single-variant body (2026-08-19 rework, dormant page)", () => {
   // منفذ أ (land, 10 rows → workload 10): accuracy 90%, rankable.
   // منفذ ب (sea, 50 rows → workload 50, THE BUSIEST): only 5 evaluable →
   // insufficient → NOT rankable, so its accuracy must render "—", never a
-  // fabricated rate, even though it is the page's lede.
+  // fabricated rate.
   function fixtureModel(): ReportModel {
     const rows = [
       ...workloadRows("منفذ أ", "منفذ بري", 10, "A"),
@@ -201,172 +216,48 @@ describe("workloadAccuracySlideBuilders — Ledger/Briefing/Grid (fan-out plan �
     return modelWithAccuracy(rows, portAccuracy);
   }
 
-  it("(a) Ledger: no chart, ordinal badges, and the five required columns", () => {
-    const html = workloadAccuracySlideBuilders(fixtureModel(), true)[0](6, 20);
-    const panel1 = panelSlice(html, 1);
-    expect(panel1).toContain("v2-sys-ledger");
-    expect(panel1).toContain("v2-lg-workload");
-    expect(panel1).not.toContain("<figure"); // no metricMatrix chart in Ledger
-    expect(panel1).toContain('<span class="v2-lg-idx">1</span>منفذ أ');
-    for (const th of ["<th>المنفذ</th>", "<th>حجم الصور</th>", "<th>الدقة</th>", "<th>الاشتباه الفائت</th>", "<th>العيّنة</th>"]) {
-      expect(panel1).toContain(th);
-    }
-    // منفذ ب's insufficient accuracy is muted, never fabricated, but its
-    // workload (50) and evaluable base (5) still print as real numbers.
-    expect(panel1).toContain(">50</td>");
-    expect(panel1).toContain('<td class="v2-bar-cell neutral"><span class="insuff">—</span></td>');
-    // Mandatory caveat, verbatim.
-    expect(panel1).toContain(WORKLOAD_CAVEAT);
+  it("renders the identical body in all four variant slots", () => {
+    const html = workloadAccuracyPageBuilders(fixtureModel(), true)[0](6, 20);
+    // Bound the slice at the `.v2-wl-layout` wrapper's OWN closing `</div>`
+    // (right after the caveat paragraph's `</p>`, the last thing the body
+    // template renders) rather than at end-of-panel-slice: `panelSlice` for
+    // the LAST index (3) runs to end-of-string (picking up v2Slide's own
+    // trailing chrome — page-foot, `</section>`), while indices 0-2 instead
+    // pick up the next panel's opening `<div class="v2-variant-panel"` prefix
+    // — two different kinds of trailing junk that would otherwise make an
+    // untrimmed comparison fail even though the four bodies are byte-identical.
+    const bodyOf = (idx: 0 | 1 | 2 | 3) => {
+      const panel = panelSlice(html, idx);
+      const start = panel.indexOf('<div class="v2-wl-layout">');
+      const afterCaveat = panel.indexOf("</p>", start) + "</p>".length;
+      const closeIdx = panel.indexOf("</div>", afterCaveat) + "</div>".length;
+      return panel.slice(start, closeIdx);
+    };
+    expect(bodyOf(0)).toBe(bodyOf(1));
+    expect(bodyOf(1)).toBe(bodyOf(2));
+    expect(bodyOf(2)).toBe(bodyOf(3));
+    // The body is the real page content, not an empty stub — land/sea tables,
+    // the deviation strip, and the mandatory caveat all present.
+    expect(bodyOf(0)).toContain("v2-port-split");
+    expect(bodyOf(0)).toContain("v2-wa-dev");
+    expect(bodyOf(0)).toContain(WORKLOAD_CAVEAT);
   });
 
-  it("(b) Briefing: bar = workload, rows sorted workload-descending (2026-07-28 C3 fix), secondary line carries that port's accuracy", () => {
-    const html = workloadAccuracySlideBuilders(fixtureModel(), true)[0](6, 20);
-    const panel2 = panelSlice(html, 2);
-    expect(panel2).toContain("v2-sys-brief");
-    expect(panel2).toContain("v2-bf-workload");
-
-    // Lede = the BUSIEST port (منفذ ب, workload 50) — found via a reduce()
-    // scan, not by assuming rank #1, so this stays correct independent of
-    // the rank list's own ordering.
-    expect(panel2).toContain("أعلى المنافذ حجمًا: منفذ ب");
-    // Its accuracy is insufficient data → the lede figure is muted, never a
-    // fabricated rate, even though it's the headline figure.
-    expect(panel2).toContain(`<div class="v2-bf-lede-figure gold"><span class="insuff">—</span></div>`);
-
-    // ⚠️ 2026-07-28 whole-branch-review fix (C3): rows used to render in the
-    // page's raw land-then-sea concatenation order (منفذ أ before منفذ ب,
-    // i.e. workload-ASCENDING here), which is exactly the artifact that let
-    // `briefingRankList`'s POSITIONAL fold bucket large-value ports into "the
-    // rest" purely because of which side of the land/sea split they fell on.
-    // Rows must now be workload-DESCENDING: منفذ ب (50) before منفذ أ (10).
-    const labels = [...panel2.matchAll(/<span class="v2-bf-rank-label">([^<]*)<\/span>/g)].map((m) => m[1]);
-    expect(labels).toEqual(["منفذ ب", "منفذ أ"]);
-    const values = [...panel2.matchAll(/<span class="v2-bf-rank-value">([^<]*)<\/span>/g)].map((m) => m[1]);
-    expect(values).toEqual([fmtNum(50), fmtNum(10)]); // bar VALUE is workload, not accuracy
-    // Secondary line carries accuracy, muted (never fabricated) for منفذ ب.
-    expect(panel2).toContain(`دقة ${fmtPct(90)}`);
-    expect(panel2).toContain('دقة <span class="insuff">—</span>');
-
-    expect(panel2).toContain(WORKLOAD_CAVEAT);
+  it("the ungated page builder still renders full content while the flag is false — dormant, not deleted", () => {
+    const builders = workloadAccuracyPageBuilders(fixtureModel(), false);
+    expect(builders.length).toBeGreaterThan(0);
+    expect(builders[0](1, 1)).toContain('id="slide-s3-workload"');
   });
 
-  it("(b3) C3 regression: the positional fold buckets the SMALLEST-workload ports, never large ports stranded on the wrong side of the land/sea concatenation", () => {
-    // 10 land ports (workload 1..10, all small) + 8 sea ports (workload
-    // 101..108, all large) = 18 ports, past briefingRankPlan's 14-row
-    // no-fold cap → 13 named + 5 folded. Pre-fix, the raw land-then-sea
-    // concatenation put ALL 10 (small) land ports first, so the tail-sliced
-    // fold would have caught the 5 LARGEST sea ports (104..108) instead of
-    // the 5 smallest overall (land ports 1..5) — exactly the bug this test
-    // is built to catch.
-    const landRows = Array.from({ length: 10 }, (_, i) =>
-      workloadRows(`منفذ ل${i + 1}`, "منفذ بري", i + 1, `L${i + 1}`),
-    ).flat();
-    const seaRows = Array.from({ length: 8 }, (_, i) =>
-      workloadRows(`منفذ ب${i + 1}`, "منفذ بحري", 101 + i, `S${i + 1}`),
-    ).flat();
-    const model = modelWithAccuracy([...landRows, ...seaRows], []);
-    const html = workloadAccuracySlideBuilders(model, true)[0](6, 20);
-    const panel2 = panelSlice(html, 2);
-
-    const labels = [...panel2.matchAll(/<span class="v2-bf-rank-label">([^<]*)<\/span>/g)].map((m) => m[1]);
-    // Every sea port (the large-workload group) must have its OWN named row.
-    for (let i = 1; i <= 8; i++) expect(labels).toContain(`منفذ ب${i}`);
-    // Only the 5 SMALLEST land ports (1..5) may be folded away — the 5
-    // largest land ports (6..10) still get named rows alongside all 8 sea
-    // ports (13 named rows total).
-    for (let i = 6; i <= 10; i++) expect(labels).toContain(`منفذ ل${i}`);
-    for (let i = 1; i <= 5; i++) expect(labels).not.toContain(`منفذ ل${i}`);
-    // 13 named port rows + 1 folded "بقية المنافذ" remainder row = 14 total.
-    expect(labels.length).toBe(14);
-
-    // The folded remainder pools ONLY the 5 smallest land ports' workload
-    // (1+2+3+4+5=15) — never a sea port's workload.
-    expect(panel2).toContain("بقية المنافذ (5)");
-    const remainderIdx = panel2.indexOf("بقية المنافذ (5)");
-    const remainderRow = panel2.slice(panel2.lastIndexOf('<div class="v2-bf-rank-row', remainderIdx));
-    expect(remainderRow).toContain(`>${fmtNum(15)}<`);
+  it("workloadAccuracySlideBuilders (the gated entry point) contributes nothing to the deck", () => {
+    expect(workloadAccuracySlideBuilders(fixtureModel(), false)).toHaveLength(0);
   });
 
-  it("(b2) Briefing body order is lede → support → rank — the deck-wide convention (cross-page control for the 2026-07-28 B1 fix: markingImpact.ts/qualityImpact.ts had drifted to lede → rank → support; this page never did)", () => {
-    const html = workloadAccuracySlideBuilders(fixtureModel(), true)[0](6, 20);
-    const panel2 = panelSlice(html, 2);
-    const ledeIdx = panel2.indexOf('class="v2-bf-lede"');
-    const supportIdx = panel2.indexOf('class="v2-totals-band"');
-    const rankIdx = panel2.indexOf('class="v2-bf-rank ');
-    expect(ledeIdx).toBeGreaterThan(-1);
-    expect(supportIdx).toBeGreaterThan(-1);
-    expect(rankIdx).toBeGreaterThan(-1);
-    expect(ledeIdx).toBeLessThan(supportIdx);
-    expect(supportIdx).toBeLessThan(rankIdx);
-  });
-
-  it("(c) Grid: حجم الصور/الدقة/الاشتباه الفائت/العيّنة columns, land/sea panels, sequential-gold only", () => {
-    const html = workloadAccuracySlideBuilders(fixtureModel(), true)[0](6, 20);
-    const panel3 = panelSlice(html, 3);
-    expect(panel3).toContain("v2-sys-grid");
-    expect(panel3).toContain("v2-gd-workload");
-    expect(panel3).toContain("<figure");
-    for (const label of ["حجم الصور", "الدقة", "الاشتباه الفائت", "العيّنة"]) {
-      expect(panel3).toContain(label);
-    }
-    expect(panel3).not.toContain('fill="var(--coral)"');
-    expect(panel3).not.toContain('fill="var(--green)"');
-    expect(panel3).toContain(WORKLOAD_CAVEAT);
-  });
-
-  it("(d) empty state is shared verbatim across all four slots", () => {
-    const html = workloadAccuracySlideBuilders(modelWithAccuracy([], []), true)[0](1, 1);
+  it("empty state is shared verbatim across all four slots", () => {
+    const html = workloadAccuracyPageBuilders(modelWithAccuracy([], []), true)[0](1, 1);
     for (const idx of [0, 1, 2, 3] as const) {
       expect(panelSlice(html, idx)).toContain("لا توجد بيانات منافذ لهذا الشهر");
     }
-  });
-
-  it("(e) 2026-07-28 correctness risk: foldRemainder pools workload SUM and accuracy from SUMMED counts — never averages each folded port's own rate", () => {
-    // 10 land + 10 sea = 20 combined ports on a single compact page
-    // (planPortPages(10,10,7): overflow 3 ≤ COMPRESS_OVERFLOW_MAX). All 10
-    // land ports plus 3 sea ports tie at workload 1,000 (the 13 named rows,
-    // per briefingRankPlan(20) → named=13); the remaining 7 sea ports carry
-    // workload 1 and fold into the remainder. Two of the 7 folded ports carry
-    // wildly different accuracies (100% and 0%) so a NAIVE average (50%)
-    // reads nothing like the correct pooled figure (~99.9%).
-    const rows: ExecutiveReportRow[] = [];
-    const portAccuracy: KeyedAccuracy[] = [];
-    for (let i = 0; i < 10; i++) {
-      const port = `بر-${i}`;
-      rows.push(...workloadRows(port, "منفذ بري", 1000, `L${i}`));
-      portAccuracy.push(portAcc(port, { evaluable: 50, correctClean: 45, correctSuspicion: 0, missedSuspicion: 0, falseSuspicion: 5 }));
-    }
-    for (let i = 0; i < 3; i++) {
-      const port = `بحر-فلر-${i}`;
-      rows.push(...workloadRows(port, "منفذ بحري", 1000, `SF${i}`));
-      portAccuracy.push(portAcc(port, { evaluable: 50, correctClean: 45, correctSuspicion: 0, missedSuspicion: 0, falseSuspicion: 5 }));
-    }
-    for (let i = 0; i < 5; i++) {
-      const port = `بحر-ذيل-صفر-${i}`;
-      rows.push(...workloadRows(port, "منفذ بحري", 1, `SZ${i}`));
-      // evaluable 0 → contributes nothing to the pooled sums.
-    }
-    rows.push(...workloadRows("بحر-ذيل-مئة", "منفذ بحري", 1, "S5"));
-    portAccuracy.push(portAcc("بحر-ذيل-مئة", { evaluable: 1000, correctClean: 1000, correctSuspicion: 0, missedSuspicion: 0, falseSuspicion: 0 }));
-    rows.push(...workloadRows("بحر-ذيل-صفر٪", "منفذ بحري", 1, "S6"));
-    portAccuracy.push(portAcc("بحر-ذيل-صفر٪", { evaluable: 1, correctClean: 0, correctSuspicion: 0, missedSuspicion: 0, falseSuspicion: 1 }));
-
-    const model = modelWithAccuracy(rows, portAccuracy);
-    const builders = workloadAccuracySlideBuilders(model, true);
-    expect(builders).toHaveLength(1); // single compact page
-    const html = builders[0](6, 20);
-    const panel2 = panelSlice(html, 2);
-
-    expect((panel2.match(/class="v2-bf-rank-row(?: rest)?"/g) ?? []).length).toBe(14); // 13 named + 1 remainder
-    expect(panel2).toContain("بقية المنافذ (7)");
-    const remainderRow = panel2.slice(panel2.indexOf("بقية المنافذ"));
-    // Pooled: workload SUM = 7 (never an average). Accuracy pooled from
-    // summed counts: (1000 + 0) correct / (1000 + 1) evaluable ≈ 99.9%, NOT
-    // the naive average of 100% and 0% (50%).
-    expect(remainderRow).toContain(`<span class="v2-bf-rank-value">${fmtNum(7)}</span>`);
-    const pooledAccuracy = fmtPct((1000 / 1001) * 100);
-    expect(pooledAccuracy).not.toBe(fmtPct(50)); // sanity: naive average would differ
-    expect(remainderRow).toContain(`دقة ${pooledAccuracy}`);
   });
 });
 

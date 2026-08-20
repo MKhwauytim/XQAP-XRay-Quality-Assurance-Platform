@@ -55,6 +55,11 @@ export type DecisionRecord = {
   /** Band of the inspector this record belongs to; populated by aggregates once
    *  per-inspector evaluable counts are known. Starts `null` here. */
   dataSufficiencyGroup: DataSufficiencyBand | null;
+  /** Day of month from the image's entry date; `null` when undated. Optional —
+   *  `reviewerKpis.test.ts` builds `DecisionRecord` literals by hand. */
+  entryDay?: number | null;
+  /** Whether the image's risk row carried a محضر number. */
+  hasReport?: boolean;
 };
 
 export type ResultSource =
@@ -132,6 +137,8 @@ function buildLevelRecord(
     completedAt: row.submittedAt,
     sourceRowNumber: 0,
     dataSufficiencyGroup: null,
+    entryDay: row.entryDay ?? null,
+    hasReport: row.hasReport ?? false,
   };
 }
 

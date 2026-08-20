@@ -3121,15 +3121,6 @@ body.theme-light .v2-gd-sep .v2-gd-panel.gold .v2-gd-panel-head span{color:#8a6d
 body.theme-light .v2-gd-sep .v2-gd-panel.cyan .v2-gd-panel-head span{color:#1f8a94;}
 
 /* ── Section 3 · الأداء حسب حجم الأعمال ───────────────────────────────────── */
-/* Ledger/Grid namespacing hooks (fan-out plan §11a, batch B2b) — each wraps
-   its land/sea split PLUS the mandatory caveat strip in a flex column so the
-   split grows to fill the slide body and the caveat sits pinned below it,
-   mirroring slot 0's .v2-wl-layout above. Briefing needs no such wrapper:
-   .v2-sys-brief is already a flex column (theme.ts), so the caveat simply
-   joins the lede/support/rank list as its last flex child. */
-.v2-lg-workload,.v2-gd-workload{display:flex;flex-direction:column;height:100%;gap:7px;min-height:0;}
-.v2-lg-workload .v2-lg-split,.v2-gd-workload .v2-gd-split{flex:1 1 auto;min-height:0;}
-.v2-bf-workload{height:100%;}
 /* Headers stay on one line: a wrapped th would eat a row of the row budget
    and push the totals row out of the clipped card. */
 .v2-wl-split .v2-port-col .deck-table th{white-space:nowrap;}
@@ -3146,12 +3137,13 @@ body.theme-light .v2-wl-caveat{
   color:color-mix(in srgb,var(--navy) 78%,transparent);
   border-top-color:color-mix(in srgb,var(--navy) 14%,transparent);
 }
-/* Page shell: wraps the tables (or the empty state) plus the caveat strip
-   below them. The caveat's own top border is dropped here since the wrapper
-   already separates it visually with its flex gap. */
-.v2-wl-layout{display:flex;flex-direction:column;gap:8px;height:100%;min-height:0;}
+/* Page shell: wraps the tables, the deviation strip, and the caveat strip.
+   The land/sea split no longer owns the whole body (flex:1 1 auto still, but
+   sharing the column with the strip below) — this is exactly why
+   WORKLOAD_TABLE_ROWS_PER_PAGE had to shrink from BASE_ROWS_PER_PAGE. */
+.v2-wl-layout{display:flex;flex-direction:column;gap:7px;height:100%;min-height:0;}
 .v2-wl-layout .v2-wl-caveat{border-top:0;padding:0 2px;}
-.v2-wl-layout .v2-port-split{flex:1 1 auto;min-height:0;}
+.v2-wl-layout .v2-port-split{flex:0 0 auto;}
 .v2-wl-empty{
   flex:1 1 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;
   gap:10px;padding:24px;text-align:center;border-radius:14px;
@@ -3163,6 +3155,171 @@ body.theme-light .v2-wl-caveat{
 body.theme-light .v2-wl-empty{border-color:color-mix(in srgb,var(--navy) 20%,transparent);}
 body.theme-light .v2-wl-empty b{color:var(--navy);}
 body.theme-light .v2-wl-empty span{color:color-mix(in srgb,var(--navy) 72%,transparent);}
+
+/* ── Deviation strip (2026-08-19 rework) — the correlation view itself ──── */
+.v2-wa-dev{
+  flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:4px;
+  border-radius:12px;border:1px solid color-mix(in srgb,var(--white) 12%,transparent);
+  background:color-mix(in srgb,var(--white) 3%,transparent);padding:8px 10px;overflow:hidden;
+}
+.v2-wa-dev-head{display:flex;align-items:center;gap:6px;font-size:0.66rem;font-weight:800;color:var(--white);}
+.v2-wa-dev-head-icon{display:inline-flex;flex-shrink:0;color:var(--gold);}
+.v2-wa-dev-mean{margin-inline-start:auto;font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums;}
+.v2-wa-dev-table{width:100%;}
+.v2-wa-dev-table th,.v2-wa-dev-table td{padding:2.5px 6px;font-size:0.62rem;}
+.v2-wa-dev-table th{white-space:nowrap;}
+.v2-wa-dev-table td:first-child{overflow-wrap:anywhere;}
+body.theme-light .v2-wa-dev{
+  border-color:color-mix(in srgb,var(--navy) 16%,transparent);
+  background:color-mix(in srgb,var(--navy) 3%,transparent);
+}
+body.theme-light .v2-wa-dev-head{color:var(--navy);}
+body.theme-light .v2-wa-dev-mean{color:color-mix(in srgb,var(--navy) 72%,transparent);}
+
+
+/* ── القسم 3 · الاتجاه اليومي للدقة ───────────────────────────────────────── */
+.v2-dt-layout{display:flex;flex-direction:column;gap:11px;height:100%;min-height:0;}
+
+/* Share headline — a headline, not a footnote, per the page's own honesty rule. */
+.v2-dt-share{
+  display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+  padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.03);
+}
+.v2-dt-share-figure{display:flex;flex-direction:column;gap:1px;}
+.v2-dt-share-figure b{font-size:1.05rem;font-weight:900;color:rgba(255,255,255,.96);font-variant-numeric:tabular-nums;}
+.v2-dt-share-figure span{font-size:.62rem;font-weight:700;color:var(--slate);}
+.v2-dt-caution{
+  display:flex;align-items:center;gap:6px;margin-inline-start:auto;max-width:32em;
+  font-size:.66rem;font-weight:800;line-height:1.5;color:var(--gold);
+}
+.v2-dt-caution svg{display:block;flex-shrink:0;}
+
+/* Chart wrapper fills the remaining space in the body — measured live via
+   report:static against a populated fixture (2026-08-20): the original rule
+   here targeted the inner figure element (analyticsCharts.ts's timeSeriesBand
+   wrapper), but that figure is a grandchild of this flex column, not a
+   direct flex item of it — .v2-ts-wrap (a plain block div) is the actual
+   flex item, so flex:1 on figure was a no-op and the chart rendered at its
+   unconstrained intrinsic height (~487px), pushing the per-day n-strip and
+   legend entirely past the slide's fixed 630px box. Targeting the real flex
+   item — with min-height:0 so it can shrink below the SVG's own intrinsic
+   size — lets flexbox allocate it only the space left after the share
+   headline, n-strip, and legend, and the height:100% chain (.v2-ts-wrap to
+   figure to svg) resolves against that now-definite height. */
+.v2-dt-layout .v2-ts-wrap{flex:1;min-height:0;display:flex;}
+.v2-dt-layout .v2-ts-wrap figure{flex:1;min-height:0;}
+
+/* Per-day n strip. */
+.v2-dt-n-strip{display:flex;flex-direction:column;gap:4px;}
+.v2-dt-n-strip-head{font-size:.62rem;font-weight:800;color:var(--slate);}
+.v2-dt-n-strip-row{display:flex;flex-wrap:wrap;gap:4px;}
+.v2-dt-n-cell{
+  display:flex;flex-direction:column;align-items:center;gap:1px;min-width:2.6em;
+  padding:3px 4px;border-radius:6px;background:rgba(255,255,255,.04);
+}
+.v2-dt-n-cell b{font-size:.6rem;font-weight:800;color:rgba(255,255,255,.85);font-variant-numeric:tabular-nums;}
+.v2-dt-n-cell span{font-size:.52rem;font-weight:700;color:var(--slate);font-variant-numeric:tabular-nums;}
+
+/* Legend — band shading + low-n hollow-point explanation. */
+.v2-dt-legend{display:flex;flex-wrap:wrap;gap:6px 18px;}
+.v2-dt-legend-item{display:flex;align-items:center;gap:6px;font-size:.62rem;font-weight:700;color:var(--slate);}
+.v2-dt-swatch{display:inline-block;width:10px;height:10px;border-radius:3px;flex-shrink:0;}
+.v2-dt-swatch.band{background:var(--blue);opacity:.4;}
+.v2-dt-swatch.lown{border:1.5px solid var(--slate);background:transparent;border-radius:50%;}
+
+/* Empty state — no dated decision at all this month. */
+.v2-dt-empty{
+  display:flex;flex:1;min-height:0;flex-direction:column;align-items:center;justify-content:center;
+  gap:9px;text-align:center;padding:20px 18px;
+  border:1px dashed rgba(255,255,255,.2);border-radius:14px;background:rgba(255,255,255,.02);
+}
+.v2-dt-empty-icon{display:inline-flex;color:var(--gold);opacity:.75;}
+.v2-dt-empty-icon svg{display:block;}
+.v2-dt-empty b{font-size:.95rem;font-weight:900;color:rgba(255,255,255,.96);}
+.v2-dt-empty p{margin:0;max-width:62ch;font-size:.74rem;line-height:1.65;color:var(--slate);}
+
+body.theme-light .v2-dt-share{border-color:rgba(10,45,74,.16);background:rgba(10,45,74,.02);}
+body.theme-light .v2-dt-share-figure b,
+body.theme-light .v2-dt-empty b{color:rgba(10,45,74,.95);}
+body.theme-light .v2-dt-n-cell{background:rgba(10,45,74,.04);}
+body.theme-light .v2-dt-n-cell b{color:rgba(10,45,74,.85);}
+body.theme-light .v2-dt-empty{border-color:rgba(10,45,74,.2);background:rgba(10,45,74,.02);}
+
+@media print{
+  .v2-dt-share,.v2-dt-empty,.v2-dt-n-strip{break-inside:avoid;}
+}
+
+
+/* ── القسم 3 · مصفوفة نتائج الفحص ─────────────────────────────────────────── */
+.v2-om-layout{display:flex;flex-direction:column;gap:12px;height:100%;min-height:0;}
+.v2-om-top{flex:0 0 auto;}
+.v2-om-ports{flex:1 1 auto;min-height:0;overflow:auto;}
+.v2-om-ports .v2-lg-port-card{height:100%;min-height:0;}
+
+.v2-om-matrix{
+  display:grid;grid-template-columns:92px 1fr 1fr;grid-auto-rows:auto;
+  gap:6px;align-items:stretch;
+}
+.v2-om-corner{}
+.v2-om-colhead,.v2-om-rowhead{
+  display:flex;align-items:center;justify-content:center;text-align:center;
+  font-size:.62rem;font-weight:800;color:var(--slate);padding:3px;
+}
+.v2-om-rowhead{justify-content:flex-end;text-align:right;padding-inline-end:6px;}
+.v2-om-cell{
+  border-radius:12px;padding:6px 10px;text-align:center;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+  border:1px solid color-mix(in srgb,var(--white) 14%,transparent);
+  background:color-mix(in srgb,var(--white) 3%,transparent);
+}
+.v2-om-cell.blue{border-color:color-mix(in srgb,var(--blue) 55%,transparent);background:color-mix(in srgb,var(--blue) 14%,transparent);}
+.v2-om-cell.gold{border-color:color-mix(in srgb,var(--gold) 55%,transparent);background:color-mix(in srgb,var(--gold) 14%,transparent);}
+.v2-om-cell.green{border-color:color-mix(in srgb,var(--green) 55%,transparent);background:color-mix(in srgb,var(--green) 14%,transparent);}
+.v2-om-cell.coral{border-color:color-mix(in srgb,var(--coral) 55%,transparent);background:color-mix(in srgb,var(--coral) 14%,transparent);}
+/* اشتباه فائت is the headline cell — a thicker border and slightly stronger
+   fill mark it out from the other three without relying on color alone (the
+   label + always-visible count already carry the meaning). */
+.v2-om-cell.emphasis{border-width:2px;background:color-mix(in srgb,var(--coral) 22%,transparent);}
+.v2-om-cell-label{font-size:.6rem;font-weight:700;color:var(--slate);}
+.v2-om-count{font-size:1.15rem;font-weight:900;color:var(--white);line-height:1.05;}
+.v2-om-share{font-size:.64rem;font-weight:700;color:var(--muted);}
+
+/* Compact totals band (Task-5 round-2 fix): this page's own denominator strip
+   sits BELOW the matrix, competing for the same fixed slide-body height as
+   the ports table below IT — unlike every other section-3 page that uses the
+   generic .v2-totals-band (18px margin-top, 1.15rem figures), which assumes
+   the band is the ONLY thing sharing the body. Same tightening technique
+   .v2-risk-layout .v2-totals-band / .v2-sys-brief .v2-totals-band already
+   apply elsewhere in this theme (theme.ts) — a precedented compact variant,
+   not a new one — reclaims the room the ports table needs. */
+.v2-om-top .v2-totals-band{margin-top:8px;gap:8px;}
+.v2-om-top .v2-totals-item{padding:6px 12px;}
+.v2-om-top .v2-totals-item b{font-size:.88rem;}
+.v2-om-top .v2-totals-item small{font-size:.58rem;}
+
+body.theme-light .v2-om-colhead,body.theme-light .v2-om-rowhead{color:color-mix(in srgb,var(--navy) 68%,transparent);}
+body.theme-light .v2-om-cell{background:var(--white);border-color:color-mix(in srgb,var(--navy) 12%,transparent);}
+body.theme-light .v2-om-cell.blue{background:color-mix(in srgb,var(--blue) 10%,var(--white));}
+body.theme-light .v2-om-cell.gold{background:color-mix(in srgb,var(--gold) 10%,var(--white));}
+body.theme-light .v2-om-cell.green{background:color-mix(in srgb,var(--green) 10%,var(--white));}
+body.theme-light .v2-om-cell.coral{background:color-mix(in srgb,var(--coral) 10%,var(--white));}
+body.theme-light .v2-om-cell.emphasis{background:color-mix(in srgb,var(--coral) 16%,var(--white));}
+body.theme-light .v2-om-count{color:var(--navy);}
+body.theme-light .v2-om-cell-label{color:color-mix(in srgb,var(--navy) 68%,transparent);}
+body.theme-light .v2-om-share{color:color-mix(in srgb,var(--navy) 68%,transparent);}
+
+.v2-om-port-missed{font-weight:800;}
+/* Folded remainder row (round-2 fix) — same muted/italic treatment
+   .v2-cov-fold-row / .v2-acc-fold-row already use for this exact pattern
+   elsewhere in the deck (theme.ts), so a folded row reads as visibly
+   different from a named port row without a legend. */
+.v2-om-fold-row td{color:var(--slate);font-style:italic;}
+body.theme-light .v2-om-fold-row td{color:color-mix(in srgb,var(--navy) 68%,transparent);}
+
+@media print{
+  .v2-om-ports{overflow:visible;}
+  .v2-om-cell{break-inside:avoid;}
+}
 
 
 /* Section 3 — دقة إجابات المستوى الأول والثاني */
@@ -3352,6 +3509,96 @@ body.theme-light .s3sa-lg-pair-totals{
 }
 @media print{
   .s3sa-lg-pair-totals{break-inside:avoid;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+}
+
+
+/* ── القسم 3 · توافق نتائج الفحص مع محرك المخاطر ──────────────────────────── */
+.v2-re-layout{display:flex;flex-direction:column;gap:6px;height:100%;min-height:0;justify-content:center;}
+.v2-re-layout .insuff{color:var(--slate);font-weight:800;}
+
+.v2-re-agree,.v2-re-disagree,.v2-re-report{
+  border:1px solid rgba(255,255,255,.12);border-radius:10px;
+  padding:6px 10px;background:rgba(2,20,37,.32);
+  display:flex;flex-direction:column;gap:4px;
+}
+.v2-re-block-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;}
+.v2-re-block-head b{font-size:.7rem;font-weight:900;color:rgba(255,255,255,.95);}
+.v2-re-block-head span{font-size:.56rem;font-weight:700;color:var(--slate);line-height:1.3;}
+
+.v2-re-agree .deck-table th,.v2-re-agree .deck-table td,
+.v2-re-report .deck-table th,.v2-re-report .deck-table td{
+  padding:3px 7px;font-size:.66rem;text-align:center;line-height:1.2;
+}
+.v2-re-agree .deck-table th:first-child,.v2-re-agree .deck-table td:first-child,
+.v2-re-report .deck-table th:first-child,.v2-re-report .deck-table td:first-child{text-align:right;}
+/* The engine-vs-المراجع row is the page's headline figure — the one
+   comparison independent of how المستوى is defined (see module header).
+   Marked visually, never by color alone: a gold left rule plus bold text. */
+.v2-re-agree .deck-table tr.v2-re-headline td{
+  font-weight:900;background:color-mix(in srgb,var(--gold) 10%,transparent);
+  border-inline-start:2px solid var(--gold);
+}
+
+/* Both stat bands below (disagree + coverage) are shrunk from the shared
+   theme's hero-sized .v2-totals-band default (18px margin-top, 1.15rem
+   figures — meant for a slide's single headline stat strip) down to a
+   compact inline variant, the same pattern outcomeMatrix.ts's .v2-om-top
+   override uses: this page needs THREE stat-bearing blocks in one slide, not
+   one, so none of them can afford the hero sizing. Measured live via
+   report:static against a populated fixture — see module header. */
+.v2-re-disagree .v2-totals-band,.v2-re-report .v2-totals-band,.v2-re-coverage .v2-totals-band{
+  margin-top:0;gap:6px;
+}
+.v2-re-disagree .v2-totals-item,.v2-re-coverage .v2-totals-item{padding:4px 8px;}
+.v2-re-disagree .v2-totals-item b,.v2-re-coverage .v2-totals-item b{font-size:.8rem;}
+.v2-re-disagree .v2-totals-item small,.v2-re-coverage .v2-totals-item small{font-size:.54rem;}
+.v2-re-disagree-rate{
+  font-size:.64rem;font-weight:700;color:rgba(255,255,255,.88);
+  display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;
+}
+.v2-re-disagree-rate b{font-size:.74rem;font-weight:900;color:var(--gold);}
+.v2-re-disagree-n{font-size:.56rem;font-weight:700;color:var(--slate);font-variant-numeric:tabular-nums;}
+
+/* ── Coverage line — the vocabulary-discovery counter ─────────────────────── */
+.v2-re-coverage{flex-shrink:0;}
+
+/* ── Mandatory footnotes: scope + level-axis + definitional-overlap caveat ───
+   Three lines now (2026-08-20 whole-branch-review fix), not one — stacked
+   and right-flush (RTL) rather than centered, the same layout
+   sourceAgreement.ts's .s3sa-foot uses for its own two-line footnote, since
+   a centered multi-line block reads worse than a stacked one. */
+.v2-re-caveat{
+  flex-shrink:0;display:flex;flex-direction:column;gap:1px;text-align:right;
+  font-size:.56rem;font-weight:700;line-height:1.3;color:var(--slate);
+}
+.v2-re-caveat p{margin:0;}
+.v2-re-caveat-icon{
+  display:inline-flex;vertical-align:-1px;margin-inline-end:4px;flex-shrink:0;color:var(--gold);
+}
+.v2-re-caveat-icon svg{display:block;}
+
+/* ── Empty state — no recognized engine verdict this month ───────────────── */
+.v2-re-empty{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:9px;text-align:center;padding:20px 18px;flex:1;min-height:0;
+  border:1px dashed rgba(255,255,255,.2);border-radius:14px;background:rgba(255,255,255,.02);
+}
+.v2-re-empty-icon{display:inline-flex;color:var(--gold);opacity:.75;}
+.v2-re-empty-icon svg{display:block;}
+.v2-re-empty b{font-size:.92rem;font-weight:900;color:rgba(255,255,255,.96);}
+.v2-re-empty p{margin:0;max-width:64ch;font-size:.72rem;line-height:1.65;color:var(--slate);}
+
+body.theme-light .v2-re-agree,body.theme-light .v2-re-disagree,body.theme-light .v2-re-report{
+  background:rgba(10,45,74,.035);border-color:rgba(10,45,74,.12);
+}
+body.theme-light .v2-re-block-head b{color:rgba(10,45,74,.92);}
+body.theme-light .v2-re-disagree-rate{color:rgba(10,45,74,.85);}
+body.theme-light .v2-re-empty{border-color:rgba(10,45,74,.2);background:rgba(10,45,74,.02);}
+body.theme-light .v2-re-empty b{color:rgba(10,45,74,.95);}
+
+@media print{
+  .v2-re-agree,.v2-re-disagree,.v2-re-report,.v2-re-coverage,.v2-re-caveat,.v2-re-empty{break-inside:avoid;}
+  .v2-re-agree .deck-table tr.v2-re-headline td{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
 }
 
 
@@ -3854,9 +4101,9 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
           <p>تحاليل معمّقة تُكمل قراءة نتائج الجودة والدقة.</p>
         </div>
         <div class="v2-toc-side">
-          <div class="v2-toc-figure">7</div>
+          <div class="v2-toc-figure">9</div>
           <div class="v2-toc-figure-label">صفحة</div>
-          <div class="v2-toc-range" dir="ltr">14–20</div>
+          <div class="v2-toc-range" dir="ltr">14–22</div>
         </div>
       </div><div class="v2-toc-card blue">
         <div class="v2-toc-num">05</div>
@@ -3867,11 +4114,11 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
         <div class="v2-toc-side">
           <div class="v2-toc-figure">3</div>
           <div class="v2-toc-figure-label">صفحة</div>
-          <div class="v2-toc-range" dir="ltr">21–23</div>
+          <div class="v2-toc-range" dir="ltr">23–25</div>
         </div>
       </div></div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">02 / 24</div>
+  <div class="v2-page-foot" dir="ltr">02 / 26</div>
 </section>
 <section class="slide v2" id="slide-glossary-levels" data-title="مستويات المخاطر" data-section="glossary" data-section-label="المعجم">
   <div class="slide-controls">
@@ -3958,7 +4205,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     </div>
   </div></div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">03 / 24</div>
+  <div class="v2-page-foot" dir="ltr">03 / 26</div>
 </section>
 <section class="slide v2" id="slide-glossary-1" data-title="المعجم" data-section="glossary" data-section-label="المعجم">
   <div class="slide-controls">
@@ -4023,7 +4270,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
   </div></div>
   </div></div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">04 / 24</div>
+  <div class="v2-page-foot" dir="ltr">04 / 26</div>
 </section>
 <section class="slide v2 v2-sep-slide gold" id="slide-sep-1" data-title="مجتمع الفحص" data-section="section1" data-section-label="القسم 1 — مجتمع الفحص">
   <div class="slide-controls">
@@ -4064,7 +4311,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
       </div>
     </div>
   </div>
-  <div class="v2-page-foot" dir="ltr">05 / 24</div>
+  <div class="v2-page-foot" dir="ltr">05 / 26</div>
 </section>
 <section class="slide v2" id="slide-risk-stages" data-title="مجتمع الصور بناءً على المخاطر" data-section="section1" data-section-label="القسم 1 — مجتمع الفحص">
   <div class="slide-controls">
@@ -4138,7 +4385,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
   </div>
   </div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">06 / 24</div>
+  <div class="v2-page-foot" dir="ltr">06 / 26</div>
 </section>
 <section class="slide v2" id="slide-port-population-1" data-title="مجتمع صور الفحص" data-section="section1" data-section-label="القسم 1 — مجتمع الفحص">
   <div class="slide-controls">
@@ -4181,7 +4428,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     </table>
   </div></div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">07 / 24</div>
+  <div class="v2-page-foot" dir="ltr">07 / 26</div>
 </section>
 <section class="slide v2" id="slide-port-sample-1" data-title="عيّنة الفحص" data-section="section1" data-section-label="القسم 1 — مجتمع الفحص">
   <div class="slide-controls">
@@ -4224,7 +4471,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     </table>
   </div></div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">08 / 24</div>
+  <div class="v2-page-foot" dir="ltr">08 / 26</div>
 </section>
 <section class="slide v2" id="slide-stage-port-population" data-title="مجتمع صور الفحص حسب المستوى والمنفذ" data-section="section1" data-section-label="القسم 1 — مجتمع الفحص">
   <div class="slide-controls">
@@ -4267,7 +4514,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     </table>
   </div></div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">09 / 24</div>
+  <div class="v2-page-foot" dir="ltr">09 / 26</div>
 </section>
 <section class="slide v2" id="slide-stage-port-sample" data-title="عيّنة الفحص المسحوبة حسب المستوى والمنفذ" data-section="section1" data-section-label="القسم 1 — مجتمع الفحص">
   <div class="slide-controls">
@@ -4312,7 +4559,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     </table>
   </div></div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">10 / 24</div>
+  <div class="v2-page-foot" dir="ltr">10 / 26</div>
 </section>
 <section class="slide v2 v2-sep-slide cyan" id="slide-sep-2" data-title="نتائج فحص الجودة" data-section="section2" data-section-label="القسم 2 — نتائج فحص الجودة">
   <div class="slide-controls">
@@ -4353,7 +4600,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
       </div>
     </div>
   </div>
-  <div class="v2-page-foot" dir="ltr">11 / 24</div>
+  <div class="v2-page-foot" dir="ltr">11 / 26</div>
 </section>
 <section class="slide v2" id="slide-quality-ports-1" data-title="نتائج جودة الصور" data-section="section2" data-section-label="القسم 2 — نتائج فحص الجودة">
   <div class="slide-controls">
@@ -4396,7 +4643,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     </table>
   </div></div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">12 / 24</div>
+  <div class="v2-page-foot" dir="ltr">12 / 26</div>
 </section>
 <section class="slide v2" id="slide-quality-accuracy-1" data-title="دقة نتائج المنافذ" data-section="section2" data-section-label="القسم 2 — نتائج فحص الجودة">
   <div class="slide-controls">
@@ -4439,7 +4686,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     </table>
   </div></div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">13 / 24</div>
+  <div class="v2-page-foot" dir="ltr">13 / 26</div>
 </section>
 <section class="slide v2 v2-sep-slide gold" id="slide-sep-3" data-title="التحاليل المتقدمة" data-section="section3" data-section-label="القسم 3 — التحاليل المتقدمة">
   <div class="slide-controls">
@@ -4480,9 +4727,9 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
       </div>
     </div>
   </div>
-  <div class="v2-page-foot" dir="ltr">14 / 24</div>
+  <div class="v2-page-foot" dir="ltr">14 / 26</div>
 </section>
-<section class="slide v2" id="slide-s3-workload" data-title="الأداء حسب حجم الأعمال" data-section="section3" data-section-label="القسم 3 — التحاليل المتقدمة">
+<section class="slide v2" id="slide-s3-daily-trend" data-title="الاتجاه اليومي للدقة" data-section="section3" data-section-label="القسم 3 — التحاليل المتقدمة">
   <div class="slide-controls">
     <label class="slide-print-toggle" title="تضمين هذه الصفحة عند الطباعة">
     <input type="checkbox" checked/>
@@ -4499,34 +4746,90 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
       <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 4v15a1 1 0 0 0 1 1h14"/><path d="M9 16v-4"/><path d="M13 16V8"/><path d="M17 16v-6"/></svg></span>
       <span>القسم 3 — التحاليل المتقدمة</span>
     </div>
-    <div class="slide-headline">الأداء حسب حجم الأعمال</div>
-    <div class="slide-subhead">هل يرتبط انخفاض دقة المنفذ بارتفاع حجم صوره؟ مقارنة الدقة بحجم مجتمع كل منفذ.</div>
-    <div class="slide-body"><div class="v2-wl-layout">
-        <div class="v2-port-split v2-wl-split"><div class="v2-port-col land">
-    <div class="v2-port-col-head">
-      <span class="v2-port-col-icon"><span style="display:inline-flex;transform:translate(2.1%,-8.5%)"><svg viewBox="0 0 24 24" width="26" height="26" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M2 16V8a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v8"/><path d="M14 11h4l3 3v2h-2.2"/><circle cx="7" cy="17.5" r="1.7"/><circle cx="16.8" cy="17.5" r="1.7"/><path d="M8.7 17.5h6.4"/><path d="M2 16h3.3"/></svg></span></span>
-      <div><b>المنافذ البرية</b><span>1 منفذ</span></div>
-    </div>
-    <table class="deck-table">
-      <thead><tr><th>المنفذ</th><th>حجم الصور</th><th>الدقة</th><th>الاشتباه الفائت</th><th>العيّنة</th></tr></thead>
-      <tbody><tr><td>منفذ أ</td><td class="v2-bar-cell green" style="--w:100.0%">1</td><td class="v2-bar-cell neutral"><span class="insuff">—</span></td><td class="v2-bar-cell neutral"><span class="insuff">—</span></td><td>0</td></tr><tr class="v2-fill-row" aria-hidden="true"><td colspan="5"></td></tr></tbody>
-      <tfoot><tr><td>الإجمالي</td><td>1</td><td><span class="insuff">—</span></td><td><span class="insuff">—</span></td><td>0</td></tr></tfoot>
-    </table>
-  </div><div class="v2-port-col sea">
-    <div class="v2-port-col-head">
-      <span class="v2-port-col-icon"><svg viewBox="0 0 24 24" width="26" height="26" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M4 15l1.6 4.5h12.8L20 15l-8-2.6L4 15z"/><path d="M12 12.4V4"/><path d="M12 4l5.5 6.5H12"/></svg></span>
-      <div><b>المنافذ البحرية</b><span>1 منفذ</span></div>
-    </div>
-    <table class="deck-table">
-      <thead><tr><th>المنفذ</th><th>حجم الصور</th><th>الدقة</th><th>الاشتباه الفائت</th><th>العيّنة</th></tr></thead>
-      <tbody><tr><td>منفذ ب</td><td class="v2-bar-cell blue" style="--w:100.0%">1</td><td class="v2-bar-cell neutral"><span class="insuff">—</span></td><td class="v2-bar-cell neutral"><span class="insuff">—</span></td><td>0</td></tr><tr class="v2-fill-row" aria-hidden="true"><td colspan="5"></td></tr></tbody>
-      <tfoot><tr><td>الإجمالي</td><td>1</td><td><span class="insuff">—</span></td><td><span class="insuff">—</span></td><td>0</td></tr></tfoot>
-    </table>
-  </div></div>
-        <p class="v2-wl-caveat"><span class="v2-wl-caveat-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="11" height="11" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l9 16H3l9-16z"/><path d="M12 10v4"/><path d="M12 17.5v.5"/></svg></span><span>ارتباط وصفي بين الحجم والدقة، لا يُقرأ كعلاقة سببية.</span></p>
-      </div></div>
+    <div class="slide-headline">الاتجاه اليومي للدقة</div>
+    <div class="slide-subhead">دقة القرارات اليومية عبر أيام الشهر، مع نطاقات ضبط إحصائية لكل من دقة السليمة ودقة الاشتباه.</div>
+    <div class="slide-body"><div class="v2-dt-layout">
+          <div class="v2-dt-share">
+    <div class="v2-dt-share-figure"><b><span class="insuff">—</span></b><span>نسبة القرارات المؤرخة</span></div>
+    <div class="v2-dt-share-figure"><b>0</b><span>قرار غير مؤرخ</span></div>
+    
   </div>
-  <div class="v2-page-foot" dir="ltr">15 / 24</div>
+          <div class="v2-dt-empty">
+    <span class="v2-dt-empty-icon"><svg viewBox="0 0 24 24" width="24" height="24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 4v15a1 1 0 0 0 1 1h14"/><path d="M9 16v-4"/><path d="M13 16V8"/><path d="M17 16v-6"/></svg></span>
+    <b>لا يوجد قرار مؤرخ هذا الشهر</b>
+    <p>لم يحمل أي من قرارات هذا الشهر (0 قرارًا) تاريخ دخول قابل للاستخدام، لذا تعذّر رسم الاتجاه اليومي. تحقّق من حقل تاريخ الدخول في بيانات هذا الشهر.</p>
+  </div>
+        </div></div>
+  </div>
+  <div class="v2-page-foot" dir="ltr">15 / 26</div>
+</section>
+<section class="slide v2" id="slide-s3-outcome-matrix" data-title="مصفوفة نتائج الفحص" data-section="section3" data-section-label="القسم 3 — التحاليل المتقدمة">
+  <div class="slide-controls">
+    <label class="slide-print-toggle" title="تضمين هذه الصفحة عند الطباعة">
+    <input type="checkbox" checked/>
+    <span class="slide-print-toggle-track"><span class="slide-print-toggle-thumb"></span></span>
+  </label>
+    
+  </div>
+  <div class="v2-rail" aria-hidden="true">
+    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab active">التحاليل المتقدمة</div>
+  </div>
+  <div class="slide-inner">
+    <div class="slide-eyebrow">
+      <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l9 16H3l9-16z"/><path d="M12 10v4"/><path d="M12 17.5v.5"/></svg></span>
+      <span>القسم 3 — التحاليل المتقدمة</span>
+    </div>
+    <div class="slide-headline">مصفوفة نتائج الفحص</div>
+    <div class="slide-subhead">أربع نتائج فحص محتملة لكل قرار مستوى، إجمالاً وحسب المنفذ — قرار فريق الفحص مقابل قرار المراجع.</div>
+    <div class="slide-body"><div class="v2-om-layout">
+    <div class="v2-om-top">
+      <div class="v2-om-matrix">
+    <div class="v2-om-corner"></div>
+    <div class="v2-om-colhead">المراجع: اشتباه</div>
+    <div class="v2-om-colhead">المراجع: سليمة</div>
+    <div class="v2-om-rowhead">الفحص: اشتباه</div>
+    <div class="v2-om-cell blue">
+    <div class="v2-om-cell-label">اشتباه صحيح</div>
+    <div class="v2-om-count">0</div>
+    <div class="v2-om-share"><span class="insuff">—</span></div>
+  </div>
+    <div class="v2-om-cell gold">
+    <div class="v2-om-cell-label">اشتباه خاطئ</div>
+    <div class="v2-om-count">0</div>
+    <div class="v2-om-share"><span class="insuff">—</span></div>
+  </div>
+    <div class="v2-om-rowhead">الفحص: سليمة</div>
+    <div class="v2-om-cell coral emphasis">
+    <div class="v2-om-cell-label">اشتباه فائت</div>
+    <div class="v2-om-count">0</div>
+    <div class="v2-om-share"><span class="insuff">—</span></div>
+  </div>
+    <div class="v2-om-cell green">
+    <div class="v2-om-cell-label">سليمة صحيحة</div>
+    <div class="v2-om-count">0</div>
+    <div class="v2-om-share"><span class="insuff">—</span></div>
+  </div>
+  </div>
+      <div class="v2-totals-band">
+    <div class="v2-totals-item"><span class="v2-totals-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span><span><b>0</b><small>إجمالي القرارات القابلة للتقييم (مستوى أول ومستوى ثانٍ)</small></span></div>
+    <div class="v2-totals-item"><span class="v2-totals-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l9 16H3l9-16z"/><path d="M12 10v4"/><path d="M12 17.5v.5"/></svg></span><span><b>0</b><small>إجمالي حالات الاشتباه الفائت</small></span></div>
+    <div class="v2-totals-item"><span class="v2-totals-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 21V8l7-4 7 4v13"/><path d="M5 21h14"/><path d="M9 21v-6h6v6"/></svg></span><span><b>0</b><small>عدد المنافذ التي رُصدت فيها قرارات</small></span></div>
+  </div>
+    </div>
+    <div class="v2-om-ports">
+    <div class="v2-lg-port-card compact om-ports-card">
+    <div class="v2-lg-table-card-title">حسب المنفذ</div>
+    <table class="deck-table">
+      <thead><tr><th>المنفذ</th><th>العيّنة</th><th>اشتباه فائت</th><th>نسبة الاشتباه الفائت</th><th>الدقة الإجمالية</th></tr></thead>
+      <tbody><tr><td colspan="5"><span class="insuff">لا توجد بيانات منافذ لهذا الشهر.</span></td></tr></tbody>
+      <tfoot><tr><td>الإجمالي</td><td>0</td><td>0</td><td><span class="insuff">—</span></td><td><span class="insuff">—</span></td></tr></tfoot>
+    </table>
+  </div>
+  </div>
+  </div></div>
+  </div>
+  <div class="v2-page-foot" dir="ltr">16 / 26</div>
 </section>
 <section class="slide v2" id="slide-s3-level-accuracy" data-title="دقة إجابات المستوى الأول والثاني" data-section="section3" data-section-label="القسم 3 — التحاليل المتقدمة">
   <div class="slide-controls">
@@ -4553,7 +4856,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     <p>لم تُسجَّل نتيجة المراجع لأي صورة في هذا الشهر، ولا يمكن مقارنة قرار المستوى الأول أو الثاني بغير نتيجة مُعتمدة. تظهر النسب في هذه الصفحة فور اعتماد إجابات المراجعة.</p>
   </div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">16 / 24</div>
+  <div class="v2-page-foot" dir="ltr">17 / 26</div>
 </section>
 <section class="slide v2" id="slide-s3-source-agreement" data-title="توافق النتائج بين المستويات والمصادر" data-section="section3" data-section-label="القسم 3 — التحاليل المتقدمة">
   <div class="slide-controls">
@@ -4624,7 +4927,46 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
   </div>
   </div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">17 / 24</div>
+  <div class="v2-page-foot" dir="ltr">18 / 26</div>
+</section>
+<section class="slide v2" id="slide-s3-risk-engine" data-title="توافق نتائج الفحص مع محرك المخاطر" data-section="section3" data-section-label="القسم 3 — التحاليل المتقدمة">
+  <div class="slide-controls">
+    <label class="slide-print-toggle" title="تضمين هذه الصفحة عند الطباعة">
+    <input type="checkbox" checked/>
+    <span class="slide-print-toggle-track"><span class="slide-print-toggle-thumb"></span></span>
+  </label>
+    
+  </div>
+  <div class="v2-rail" aria-hidden="true">
+    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab active">التحاليل المتقدمة</div>
+  </div>
+  <div class="slide-inner">
+    <div class="slide-eyebrow">
+      <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 3l7 3v5c0 4.2-2.9 7.4-7 8.5C7.9 18.4 5 15.2 5 11V6l7-3z"/></svg></span>
+      <span>القسم 3 — التحاليل المتقدمة</span>
+    </div>
+    <div class="slide-headline">توافق نتائج الفحص مع محرك المخاطر</div>
+    <div class="slide-subhead">كيف تقارن قرارات فحص الأشعة باستهداف محرك مخاطر الجمارك، وماذا وجد المراجع عند الاختلاف.</div>
+    <div class="slide-body"><div class="v2-re-layout">
+    <div class="v2-re-empty">
+    <span class="v2-re-empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 3l7 3v5c0 4.2-2.9 7.4-7 8.5C7.9 18.4 5 15.2 5 11V6l7-3z"/></svg></span>
+    <b>لا توجد قيم معروفة لاستهداف محرك المخاطر هذا الشهر</b>
+    <p>لم تحمل أي صورة قيمة يمكن تصنيفها (نعم/لا أو ما يعادلها) في عمود استهداف محرك المخاطر، لذلك تعذّر حساب أي مقارنة على هذه الصفحة. عدد الصور الفارغة القيمة: 2، وعدد الصور بقيمة غير معروفة: 0.</p>
+  </div>
+    <div class="v2-re-coverage"><div class="v2-totals-band">
+        <div class="v2-totals-item"><span class="v2-totals-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg></span><span><b>0</b><small>قيم معروفة (نعم/لا أو ما يعادلها)</small></span></div>
+        <div class="v2-totals-item"><span class="v2-totals-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l9 16H3l9-16z"/><path d="M12 10v4"/><path d="M12 17.5v.5"/></svg></span><span><b>0</b><small>قيم غير معروفة (غير مصنَّفة بعد)</small></span></div>
+        <div class="v2-totals-item"><span class="v2-totals-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M7 3h7l4 4v14H7V3z"/><path d="M14 3v4h4"/><path d="M9.5 13h5"/><path d="M9.5 16.5h5"/></svg></span><span><b>2</b><small>بلا قيمة (فارغة) — لا تُحتسب سليمة</small></span></div>
+      </div></div>
+    <div class="v2-re-caveat">
+    <p><span class="v2-re-caveat-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="11" height="11" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l9 16H3l9-16z"/><path d="M12 10v4"/><path d="M12 17.5v.5"/></svg></span>المقارنات التي تشمل «المراجع» تقتصر على صور العيّنة المدروسة؛ وما عداها يشمل مجتمع الشهر كاملًا.</p>
+    <p>«المستوى الأول» و«المستوى الثاني» في جدولي التوافق والمحضر أعلاه/أدناه يعنيان مرحلتي فحص الأشعة؛ أما «المستوى الثاني» في عنوان مجموعة الاختلاف فيعني مستوى المخاطر — معنى مختلف تمامًا لنفس الاسم.</p>
+    <p>مجموعة الاختلاف أدناه: المستوى الثاني هنا هو مستوى المخاطر، وهو مُعرَّف أصلًا بأن محرك المخاطر استهدف الصورة ولم تشتبه بها شاشتنا؛ لذلك فإن جزءًا من هذه العلاقة تحديدًا نتيجة تعريف إحصائي وليس اكتشافًا. توافق محرك المخاطر مع المراجع (أعلاه) هو المقياس الوحيد المستقل عن هذا التعريف.</p>
+  </div>
+  </div></div>
+  </div>
+  <div class="v2-page-foot" dir="ltr">19 / 26</div>
 </section>
 <section class="slide v2" id="slide-s3-port-agreement" data-title="توافق المستويات حسب المنفذ" data-section="section3" data-section-label="القسم 3 — التحاليل المتقدمة">
   <div class="slide-controls">
@@ -4670,7 +5012,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     <div class="v2-agree-note"><span class="v2-agree-note-icon"><svg viewBox="0 0 24 24" width="11" height="11" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l9 16H3l9-16z"/><path d="M12 10v4"/><path d="M12 17.5v.5"/></svg></span><span>اتفاق المستويين محسوب على مجتمع الشهر كاملًا في المنفذ (عمود المجتمع)، أمّا مطابقة كل مستوى لنتيجة المراجع فتُحسب على العيّنة المدروسة فقط (عمود العيّنة) لأن المراجع لا يبدي نتيجته إلا على الصور المسحوبة في العيّنة — الأساسان مختلفان، ولا تصحّ المقارنة المباشرة بين النسبتين.</span></div>
   </div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">18 / 24</div>
+  <div class="v2-page-foot" dir="ltr">20 / 26</div>
 </section>
 <section class="slide v2" id="slide-s3-marking" data-title="أثر وجود التحديد على الدقة" data-section="section3" data-section-label="القسم 3 — التحاليل المتقدمة">
   <div class="slide-controls">
@@ -4708,7 +5050,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
   </div>
   </div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">19 / 24</div>
+  <div class="v2-page-foot" dir="ltr">21 / 26</div>
 </section>
 <section class="slide v2" id="slide-s3-quality" data-title="أثر جودة الصورة على الدقة" data-section="section3" data-section-label="القسم 3 — التحاليل المتقدمة">
   <div class="slide-controls">
@@ -4745,7 +5087,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
   </div>
   </div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">20 / 24</div>
+  <div class="v2-page-foot" dir="ltr">22 / 26</div>
 </section>
 <section class="slide v2 v2-sep-slide gold" id="slide-sep-4" data-title="التغطية والمساءلة التشغيلية" data-section="section4" data-section-label="القسم 4 — التغطية والمساءلة التشغيلية">
   <div class="slide-controls">
@@ -4786,7 +5128,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
       </div>
     </div>
   </div>
-  <div class="v2-page-foot" dir="ltr">21 / 24</div>
+  <div class="v2-page-foot" dir="ltr">23 / 26</div>
 </section>
 <section class="slide v2" id="slide-s4-coverage" data-title="التغطية التشغيلية" data-section="section4" data-section-label="القسم 4 — التغطية والمساءلة التشغيلية">
   <div class="slide-controls">
@@ -4813,7 +5155,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     <p>يُبنى هذا القسم من بيانات تقرير التوزيع — وزّع العيّنة على الموظفين أولاً ليظهر هنا.</p>
   </div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">22 / 24</div>
+  <div class="v2-page-foot" dir="ltr">24 / 26</div>
 </section>
 <section class="slide v2" id="slide-s4-accountability" data-title="المساءلة التشغيلية" data-section="section4" data-section-label="القسم 4 — التغطية والمساءلة التشغيلية">
   <div class="slide-controls">
@@ -4840,7 +5182,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     <p>يُبنى هذا القسم من بيانات تقرير الإدارة — وزّع العيّنة على الموظفين أولاً ليظهر هنا.</p>
   </div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">23 / 24</div>
+  <div class="v2-page-foot" dir="ltr">25 / 26</div>
 </section>
 <section class="slide v2" id="slide-closing" data-title="مصدر البيانات" data-section="closing" data-section-label="مصدر البيانات">
   <div class="slide-controls">
@@ -4893,7 +5235,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
       </div>
     </div></div>
   </div>
-  <div class="v2-page-foot" dir="ltr">24 / 24</div>
+  <div class="v2-page-foot" dir="ltr">26 / 26</div>
 </section>
 
 </div>

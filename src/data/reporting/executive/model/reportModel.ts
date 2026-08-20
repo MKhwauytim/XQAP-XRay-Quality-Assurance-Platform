@@ -95,6 +95,14 @@ export type ReportModel = {
    *  `Aggregates.byPortAndLevel`'s doc comment. Single source for the deck2
    *  level-accuracy page AND the executive workbook's per-level port columns. */
   portAccuracyByLevel: Aggregates["byPortAndLevel"];
+  /** Per-day accuracy for the القسم 3 trend page, plus the غير مؤرخ bucket and
+   *  the share of evaluable decisions that carried a usable date. `datedShare`
+   *  is `null` when there are no evaluable decisions at all. */
+  dailyTrend: {
+    days: Aggregates["byEntryDay"];
+    undated: Aggregates["undatedAccuracy"];
+    datedShare: number | null;
+  };
   imageQuality: {
     availabilityRate: number | null;
     markingRate: number | null;
@@ -322,6 +330,15 @@ export function buildReportModel(
     accountabilityProgress,
     portAccuracy: aggregates.byPort,
     portAccuracyByLevel: aggregates.byPortAndLevel,
+    dailyTrend: (() => {
+      const dated = aggregates.byEntryDay.reduce((s, d) => s + d.evaluable, 0);
+      const total = dated + aggregates.undatedAccuracy.evaluable;
+      return {
+        days: aggregates.byEntryDay,
+        undated: aggregates.undatedAccuracy,
+        datedShare: total > 0 ? (dated / total) * 100 : null,
+      };
+    })(),
     imageQuality: {
       availabilityRate: kpis.imageAvailabilityRate,
       markingRate: kpis.markingRate,

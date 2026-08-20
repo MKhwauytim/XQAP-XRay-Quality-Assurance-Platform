@@ -9,6 +9,7 @@ import type {
   ExecutiveReportInput,
 } from "./executiveReportTypes";
 import { buildPortProfiles, buildStageProfiles } from "./executiveKpiProfiles";
+import { entryDayOf } from "./executive/model/entryDay";
 
 type SubmittedAnswerInfo = {
   answers: FieldAnswer[];
@@ -202,6 +203,9 @@ export function buildExecutiveReportRows(input: ExecutiveReportInput): Executive
         liveMeans: { result: pop.otherResults?.liveMeans?.result ?? null, employeeId: pop.otherResults?.liveMeans?.employeeId ?? null },
       },
       notes: pop.notes ?? null,
+      entryDay: entryDayOf(pop.xrayEntryDate),
+      hasReport: (pop.reportNumber ?? "").trim().length > 0,
+      targetedByRiskEngine: pop.targetedByRiskEngine ?? null,
     };
   });
 }

@@ -38,3 +38,7 @@ lint-report.json
 testsprite_tests/tmp/
 .superpowers/
 testsprite_tests/tmp/config.json
+
+# Static executive-report preview (npm run report:static) — a regenerable
+# artifact, never committed.
+dist-preview/

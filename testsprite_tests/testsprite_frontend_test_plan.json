@@ -1,0 +1,1006 @@
+[
+  {
+    "id": "TC001",
+    "title": "Complete workspace sign-in to the correct role shell",
+    "description": "Verifies a managed user can open the app, choose a workspace, sign in, and reach the correct role-based shell.",
+    "category": "Workspace entry and session gating",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Choose a local workspace folder"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the role-based tab shell is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the workspace entry screen is no longer displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC002",
+    "title": "Open the workspace and reach the signed-in shell",
+    "description": "A managed user can choose a workspace, sign in, and enter the role-based app shell with permitted tabs visible.",
+    "category": "Workspace folder picker / unsupported browser gate",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Choose a workspace folder"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the signed-in workspace shell is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify permitted tabs are visible"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC003",
+    "title": "Keep tab state while switching between permitted tabs",
+    "description": "Verifies a signed-in user can open one permitted tab, switch to another, and return without losing the first tab's state.",
+    "category": "Workspace entry and session gating",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Choose a local workspace folder"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Open a permitted tab"
+      },
+      {
+        "type": "action",
+        "description": "Switch to another permitted tab"
+      },
+      {
+        "type": "action",
+        "description": "Return to the first tab"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the first tab still shows its prior state"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the tab shell remains available"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC004",
+    "title": "Switch between permitted tabs without leaving the shell",
+    "description": "A signed-in user can switch from one permitted tab to another and back while staying inside the same workspace shell.",
+    "category": "Role/permission-gated tab shell and navigation",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Choose a workspace folder"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click a permitted tab in the sidebar"
+      },
+      {
+        "type": "action",
+        "description": "Click another permitted tab in the sidebar"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the selected tab content is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the workspace shell remains visible"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC005",
+    "title": "Preview the app as another role as an admin",
+    "description": "This verifies that an admin can switch the role preview and see the available tabs change accordingly.",
+    "category": "Admin role-preview toolbar",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Choose a workspace folder"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Switch the role preview to another role"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the sidebar updates to reflect the selected role"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the available tabs change for the selected role"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC006",
+    "title": "Log out from the admin toolbar",
+    "description": "This verifies that an admin can log out and return to the sign-in flow.",
+    "category": "Admin role-preview toolbar",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Choose a workspace folder"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Click the logout control"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the sign-in flow is shown again"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the authenticated app shell is no longer visible"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC007",
+    "title": "See the boot checklist overlay while a tab loads",
+    "description": "This verifies that opening a loading tab shows the boot checklist overlay and that it disappears after the tab finishes loading.",
+    "category": "Boot splash / data-source checklist overlay",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Choose a workspace folder"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Open a tab that is still loading"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the boot checklist overlay is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the overlay disappears after loading completes"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC008",
+    "title": "Preview the app as another role and return to admin access",
+    "description": "Verifies an admin can use the role preview toolbar, open permitted tabs for the previewed role, and switch back to admin access.",
+    "category": "Role preview toolbar",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Choose a local workspace folder"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Open the role preview toolbar"
+      },
+      {
+        "type": "action",
+        "description": "Preview the app as a different role"
+      },
+      {
+        "type": "action",
+        "description": "Open a tab permitted for the previewed role"
+      },
+      {
+        "type": "action",
+        "description": "Switch back to admin access"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the admin controls are available again"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the previewed role state is no longer active"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC009",
+    "title": "Show an error for invalid login credentials",
+    "description": "A managed user entering invalid credentials sees an inline login error and does not enter the app shell.",
+    "category": "Login screen (client-side auth)",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Choose a workspace folder"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with invalid-user"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with invalid-password"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an inline login error is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the app shell is not displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC010",
+    "title": "Show and dismiss a workspace notification banner",
+    "description": "Verifies a signed-in user can view an active workspace notification banner and dismiss it from the UI.",
+    "category": "Notification banner / notification center",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Choose a local workspace folder"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an active notification banner is displayed"
+      },
+      {
+        "type": "action",
+        "description": "Dismiss the notification banner"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the notification banner is no longer displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC011",
+    "title": "Review notification history and acknowledge an item",
+    "description": "Verifies a signed-in user can open Notification Center, review notification history, and acknowledge a notification item.",
+    "category": "Notification banner / notification center",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Choose a local workspace folder"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Open the notification center tab"
+      },
+      {
+        "type": "action",
+        "description": "Acknowledge one notification item"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify notification history is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the acknowledged item is marked as acknowledged"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC012",
+    "title": "Recover after repeated failed sign-in attempts",
+    "description": "After repeated failed sign-in attempts, the login form shows a temporary lockout state and then becomes usable again after the countdown.",
+    "category": "Login screen (client-side auth)",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Choose a workspace folder"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with invalid-user"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with invalid-password"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form again with the same invalid credentials"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form a third time with the same invalid credentials"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a temporary lockout state is displayed"
+      },
+      {
+        "type": "action",
+        "description": "Wait for the lockout countdown to complete"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the login form becomes usable again"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC013",
+    "title": "Update a custom label and see it reflected in the interface",
+    "description": "Verifies an authorized user can change a label override in Settings, save it, and see the updated label reflected elsewhere in the UI.",
+    "category": "Settings tab and label customization",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Choose a local workspace folder"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Open the Settings tab"
+      },
+      {
+        "type": "action",
+        "description": "Edit a label override value"
+      },
+      {
+        "type": "action",
+        "description": "Save the label change"
+      },
+      {
+        "type": "action",
+        "description": "Open the area of the UI that uses the edited label"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the updated label is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the change appears persisted in the settings UI"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC014",
+    "title": "Submit feedback from the floating widget",
+    "description": "This verifies that a signed-in user can enter feedback and submit it successfully from the floating widget.",
+    "category": "Feedback widget",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Choose a workspace folder"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Open the floating feedback widget"
+      },
+      {
+        "type": "action",
+        "description": "Type feedback text into the feedback field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the feedback"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a feedback submission confirmation is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the widget remains usable after submission"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC015",
+    "title": "Change an admin setting and keep the saved value",
+    "description": "Verifies an authorized user can change an app-level setting in Settings and see the saved value retained in the interface.",
+    "category": "Settings tab and label customization",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Choose a local workspace folder"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Open the Settings tab"
+      },
+      {
+        "type": "action",
+        "description": "Change an admin app setting"
+      },
+      {
+        "type": "action",
+        "description": "Save the setting change"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the updated setting is shown in Settings"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a saved confirmation is visible"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC016",
+    "title": "Collapse and expand the sidebar during a session",
+    "description": "A signed-in user can collapse the sidebar, expand it again, and continue using the current tab without losing the session state.",
+    "category": "Role/permission-gated tab shell and navigation",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Choose a workspace folder"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Collapse the sidebar"
+      },
+      {
+        "type": "action",
+        "description": "Expand the sidebar"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the sidebar is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the current tab content remains visible"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC017",
+    "title": "Display validation for empty login submission",
+    "description": "Submitting the login form without credentials shows inline validation and keeps the user on the login screen.",
+    "category": "Login screen (client-side auth)",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Choose a workspace folder"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify inline validation is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the user remains on the login screen"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC018",
+    "title": "Open and close the feedback widget from the admin toolbar",
+    "description": "This verifies that an admin can toggle the feedback widget open and closed from the toolbar.",
+    "category": "Admin role-preview toolbar",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Choose a workspace folder"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Toggle the feedback widget on"
+      },
+      {
+        "type": "action",
+        "description": "Toggle the feedback widget off"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the feedback widget closes"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the main app shell remains visible"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC019",
+    "title": "Show an empty state for a role with no tabs",
+    "description": "A role with no permitted tabs sees an empty state instead of a broken shell after signing in.",
+    "category": "Role/permission-gated tab shell and navigation",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Choose a workspace folder"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with a user role that has no permitted tabs"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an empty state message is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify no permitted tabs are shown"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC020",
+    "title": "Close the floating feedback widget without submitting",
+    "description": "This verifies that a signed-in user can dismiss the feedback widget without sending feedback.",
+    "category": "Feedback widget",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Choose a workspace folder"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Open the floating feedback widget"
+      },
+      {
+        "type": "action",
+        "description": "Close the feedback widget"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the feedback widget is closed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the app shell remains accessible"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC021",
+    "title": "Submit the bootstrap-admin passcode modal",
+    "description": "The hidden admin shortcut accepts the bootstrap-admin passcode and closes the modal so the admin setup path can continue.",
+    "category": "Login screen (client-side auth)",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Choose a workspace folder"
+      },
+      {
+        "type": "action",
+        "description": "Press the hidden admin shortcut"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the passcode field with a valid bootstrap admin passcode"
+      },
+      {
+        "type": "action",
+        "description": "Submit the passcode form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the bootstrap-admin passcode modal is closed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the admin setup path is displayed"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC022",
+    "title": "Use the bootstrap-admin passcode modal from the keyboard",
+    "description": "Verifies keyboard users can open the bootstrap-admin passcode modal, keep focus trapped inside it, submit or cancel, and return focus to the opener.",
+    "category": "Accessibility and keyboard focus handling",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Choose a local workspace folder"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Open the bootstrap-admin passcode modal"
+      },
+      {
+        "type": "action",
+        "description": "Tab through the modal controls"
+      },
+      {
+        "type": "action",
+        "description": "Press Escape"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the modal is closed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify focus returns to the opener"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC023",
+    "title": "Show the unsupported browser state",
+    "description": "When the required file system access is unavailable, the app shows an unsupported-browser state instead of the workspace picker.",
+    "category": "Workspace folder picker / unsupported browser gate",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an unsupported browser state is displayed"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC024",
+    "title": "Open and cancel the bootstrap-admin passcode modal",
+    "description": "The hidden admin shortcut opens the bootstrap-admin passcode modal, and canceling it returns focus to the login screen.",
+    "category": "Login screen (client-side auth)",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Choose a workspace folder"
+      },
+      {
+        "type": "action",
+        "description": "Press the hidden admin shortcut"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the bootstrap-admin passcode modal is displayed"
+      },
+      {
+        "type": "action",
+        "description": "Cancel the modal"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify focus returns to the login screen"
+      }
+    ],
+    "priority": "Low"
+  }
+]

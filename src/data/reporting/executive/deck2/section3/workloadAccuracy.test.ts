@@ -7,7 +7,11 @@ import { buildReportModel } from "../../model/reportModel";
 import type { ReportModel } from "../../model/reportModel";
 import { band } from "../../model/dataSufficiency";
 import type { KeyedAccuracy } from "../../model/aggregates";
-import { WORKLOAD_ACCURACY_CSS, workloadAccuracySlideBuilders } from "./workloadAccuracy";
+import {
+  WORKLOAD_ACCURACY_CSS,
+  workloadAccuracyPageBuilders,
+  workloadAccuracySlideBuilders,
+} from "./workloadAccuracy";
 
 // ── Fixtures (same shape as deck2/deck2.test.ts) ────────────────────────────
 
@@ -114,14 +118,18 @@ function tableText(html: string): string {
 }
 
 /** Render page N (1-indexed) of this slide — most tests only care about the
- *  single page a small fixture produces. */
+ *  single page a small fixture produces. Uses the UNGATED page builder
+ *  (`workloadAccuracyPageBuilders`), not the gated `workloadAccuracySlideBuilders`
+ *  export: these tests exercise the page's actual content/behavior, which must
+ *  stay testable while `SHOW_WORKLOAD_ACCURACY_SLIDE` is false (see the
+ *  "disabled by default" describe block below, which tests the gate itself). */
 function render(model: ReportModel, num = 1, total = 2, variantPreview = false, page = 0): string {
-  return workloadAccuracySlideBuilders(model, variantPreview)[page](num, total);
+  return workloadAccuracyPageBuilders(model, variantPreview)[page](num, total);
 }
 
 /** All pages, rendered in order. */
 function renderAll(model: ReportModel, variantPreview = false): string[] {
-  return workloadAccuracySlideBuilders(model, variantPreview).map((b, i) => b(i + 1, 99));
+  return workloadAccuracyPageBuilders(model, variantPreview).map((b, i) => b(i + 1, 99));
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -301,18 +309,19 @@ describe("workloadAccuracySlide — computation", () => {
   });
 
   it("paginates a land group over the row budget (11 ports, no fixed top-N drop)", () => {
-    // Overflow of 4 rows (11 - BASE_ROWS_PER_PAGE 7) exceeds COMPRESS_OVERFLOW_MAX
-    // (3), so this is real pagination, not the compact tier — the SAME
-    // planPortPages decision every other land/sea page in the deck makes at
-    // this exact overflow. No port is silently dropped: 7 on page 1, 4 on page 2.
+    // WORKLOAD_TABLE_ROWS_PER_PAGE (4, shrunk from the deck-wide
+    // BASE_ROWS_PER_PAGE 7 to make room for the deviation strip below the two
+    // tables — see the rework's doc comment) makes an 11-port land group
+    // overflow by 7, past COMPRESS_OVERFLOW_MAX (3): real pagination, at 4
+    // rows/page, 3 pages (4+4+3). No port is silently dropped.
     const many = Array.from({ length: 11 }, (_, i) =>
       popRow({ xrayImageId: `X${i}`, portCode: `P${i}`, portName: `منفذ ${i}` }),
     );
     const pages = renderAll(modelWith(many, []));
-    expect(pages).toHaveLength(2);
+    expect(pages).toHaveLength(3);
 
     const page1Rows = pages[0].match(/<tr><td>منفذ /g) ?? [];
-    expect(page1Rows).toHaveLength(7);
+    expect(page1Rows).toHaveLength(4);
     expect(pages[0]).toContain('id="slide-s3-workload"');
     expect(pages[0]).not.toContain("تابع");
     expect(pages[0]).toContain("الإجمالي");
@@ -324,25 +333,99 @@ describe("workloadAccuracySlide — computation", () => {
     expect(pages[1]).toContain("(تابع)");
     expect(pages[1]).toContain("الإجمالي");
 
-    // Every one of the 11 ports appears exactly once across the two pages.
-    const allNames = [...pages[0].matchAll(/<tr><td>(منفذ \d+)<\/td>/g), ...pages[1].matchAll(/<tr><td>(منفذ \d+)<\/td>/g)].map(
-      (m) => m[1],
-    );
+    const page3Rows = pages[2].match(/<tr><td>منفذ /g) ?? [];
+    expect(page3Rows).toHaveLength(3);
+    expect(pages[2]).toContain('id="slide-s3-workload-3"');
+    expect(pages[2]).toContain("(تابع)");
+
+    // Every one of the 11 ports appears exactly once across the three pages.
+    const allNames = [
+      ...pages[0].matchAll(/<tr><td>(منفذ \d+)<\/td>/g),
+      ...pages[1].matchAll(/<tr><td>(منفذ \d+)<\/td>/g),
+      ...pages[2].matchAll(/<tr><td>(منفذ \d+)<\/td>/g),
+    ].map((m) => m[1]);
     expect(new Set(allNames).size).toBe(11);
   });
 
-  it("stays on one page in the compact tier when overflow is small (does not paginate at 8)", () => {
-    // Overflow of 1 row (8 - 7) is within COMPRESS_OVERFLOW_MAX — compact tier,
-    // one page, all 8 ports shown. This is the exact case that used to silently
-    // drop the 8th port under the old fixed top-7 cutoff.
-    const eight = Array.from({ length: 8 }, (_, i) =>
+  it("stays on one page in the compact tier when overflow is small (does not paginate at 7)", () => {
+    // Overflow of 3 rows (7 - WORKLOAD_TABLE_ROWS_PER_PAGE 4) is within
+    // COMPRESS_OVERFLOW_MAX — compact tier, one page, all 7 ports shown. This
+    // is the exact case that used to silently drop rows under the old fixed
+    // top-N cutoff (see the deck-wide `portPopulationSlideBuilders` history).
+    const seven = Array.from({ length: 7 }, (_, i) =>
       popRow({ xrayImageId: `X${i}`, portCode: `P${i}`, portName: `منفذ ${i}` }),
     );
-    const pages = renderAll(modelWith(eight, []));
+    const pages = renderAll(modelWith(seven, []));
     expect(pages).toHaveLength(1);
     const rows = pages[0].match(/<tr><td>منفذ /g) ?? [];
-    expect(rows).toHaveLength(8);
+    expect(rows).toHaveLength(7);
     expect(pages[0]).toContain('class="v2-port-col land compact"');
+  });
+});
+
+describe("workloadAccuracySlide — correlation view (v2-wa-dev deviation strip)", () => {
+  it("expresses each rankable port's accuracy as a deviation from the month's pooled accuracy", () => {
+    // منفذ أ: 90% (40 evaluable). منفذ ب: 50% (40 evaluable). Pooled month
+    // mean = (36+20)/80 = 70%. So أ deviates +20.0, ب deviates −20.0.
+    const rows = [
+      popRow({ xrayImageId: "A1", portName: "منفذ أ" }),
+      popRow({ xrayImageId: "B1", portName: "منفذ ب", portCode: "P2" }),
+    ];
+    const html = render(
+      modelWith(rows, [
+        portAcc("منفذ أ", { evaluable: 40, correctClean: 30, correctSuspicion: 6, missedSuspicion: 2, falseSuspicion: 2 }),
+        portAcc("منفذ ب", { evaluable: 40, correctClean: 15, correctSuspicion: 5, missedSuspicion: 15, falseSuspicion: 5 }),
+      ]),
+      1,
+      2,
+      false,
+    );
+    expect(html).toContain("v2-wa-dev");
+    expect(html).toContain("+20.0");
+    expect(html).toContain("−20.0");
+  });
+
+  it("orders ports by volume, busiest first", () => {
+    const rows = [
+      ...Array.from({ length: 100 }, (_, i) => popRow({ xrayImageId: `S${i}`, portName: "منفذ صغير", portCode: "P1" })),
+      ...Array.from({ length: 500 }, (_, i) => popRow({ xrayImageId: `L${i}`, portName: "منفذ كبير", portCode: "P2" })),
+      ...Array.from({ length: 250 }, (_, i) => popRow({ xrayImageId: `M${i}`, portName: "منفذ متوسط", portCode: "P3" })),
+    ];
+    const html = render(modelWith(rows, []), 5, 20);
+    const order = [...html.matchAll(/data-port="([^"]+)"/g)].map((m) => m[1]);
+    expect(order).toEqual(["منفذ كبير", "منفذ متوسط", "منفذ صغير"]);
+  });
+
+  it("keeps the association-not-causation caveat", () => {
+    const html = render(modelWith([popRow()], []), 5, 20);
+    expect(html).toContain(CAVEAT);
+  });
+
+  it("renders a muted dash, never a fabricated deviation, for a port below the sufficiency cut", () => {
+    // 5 evaluable → not rankable → no accuracy, so no deviation either.
+    const html = render(
+      modelWith([popRow()], [
+        portAcc("منفذ الاختبار", { evaluable: 5, correctClean: 5, correctSuspicion: 0, missedSuspicion: 0, falseSuspicion: 0 }),
+      ]),
+      1,
+      2,
+      false,
+    );
+    const devSection = html.slice(html.indexOf('class="v2-wa-dev"'));
+    expect(devSection).toContain(MUTED_CELL);
+    expect(devSection).not.toMatch(/[+-]\d+\.\d/);
+  });
+});
+
+describe("workload page — disabled by default", () => {
+  it("contributes no builder while the flag is false", () => {
+    expect(workloadAccuracySlideBuilders(modelWith([popRow()], []), false)).toHaveLength(0);
+  });
+
+  it("the ungated page builder still renders full content — dormant, not deleted", () => {
+    const builders = workloadAccuracyPageBuilders(modelWith([popRow()], []), false);
+    expect(builders.length).toBeGreaterThan(0);
+    expect(builders[0](1, 1)).toContain('id="slide-s3-workload"');
   });
 });
 
@@ -368,8 +451,14 @@ describe("workloadAccuracySlide — land/sea table layout (no chart)", () => {
   });
 
   it("prints the five required columns on both tables", () => {
-    for (const th of ["<th>المنفذ</th>", "<th>حجم الصور</th>", "<th>الدقة</th>", "<th>الاشتباه الفائت</th>", "<th>العيّنة</th>"]) {
+    // المنفذ/حجم الصور also head the deviation strip's own table below the two
+    // land/sea cards (2026-08-19 rework), so those two appear a third time —
+    // الدقة/الاشتباه الفائت/العيّنة are unique to the land/sea tables.
+    for (const th of ["<th>الدقة</th>", "<th>الاشتباه الفائت</th>", "<th>العيّنة</th>"]) {
       expect(html.match(new RegExp(th.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"))).toHaveLength(2);
+    }
+    for (const th of ["<th>المنفذ</th>", "<th>حجم الصور</th>"]) {
+      expect(html.match(new RegExp(th.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"))).toHaveLength(3);
     }
   });
 
