@@ -39,7 +39,14 @@ export type DataRefreshSource = "manual" | "periodic";
  * submissions, manifest changes, and permission propagation, none of which
  * touch the distribution log.
  */
-export type DataRefreshFamily = "distribution" | "notifications" | "requests" | "answers" | "manifest";
+export type DataRefreshFamily =
+  | "distribution"
+  | "notifications"
+  | "requests"
+  | "answers"
+  | "manifest"
+  /** The shared feedback ("chat") log — drives the unread dot on both widget triggers. */
+  | "feedback";
 
 /** Every family, in a stable order -- used as the "everything changed"
  *  shorthand for the back-compat bare-string "periodic" broadcast below, and
@@ -50,6 +57,7 @@ export const ALL_DATA_REFRESH_FAMILIES: readonly DataRefreshFamily[] = [
   "requests",
   "answers",
   "manifest",
+  "feedback",
 ];
 
 export type DataRefreshDetail =

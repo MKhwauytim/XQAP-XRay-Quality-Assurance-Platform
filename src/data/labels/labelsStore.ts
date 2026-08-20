@@ -344,6 +344,7 @@ export const DEFAULT_LABELS = {
   fb_reply_sending:         "...",
   fb_resolve_btn:           "إغلاق",
   fb_resolved_badge:        "مغلقة",
+  fb_unread_dot_aria:       "لديك {count} رسالة غير مقروءة",
 
   // Login screen (AuthGate) — the first screen every user sees
   auth_tagline:                 "منصة فحص صور الأشعة",

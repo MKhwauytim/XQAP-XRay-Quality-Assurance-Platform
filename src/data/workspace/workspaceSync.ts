@@ -56,6 +56,7 @@ import { readEnvelopeRevision } from "../storage/safeWrite";
 import { logError } from "../storage/errorLogger";
 import { isNotFoundError } from "../storage/transientFileErrors";
 import { ACK_FILE_SUFFIX } from "../notifications/notificationAckStorage";
+import { FEEDBACK_MESSAGES_FILE } from "../feedback/feedbackStorage";
 import {
   getPopulationMonthDir,
   getSampleMonthDir,
@@ -168,6 +169,20 @@ type Probe = {
    *  write failed leaves events on disk with the stamp unmoved. This is the
    *  independent signal for both. */
   segmentsSignature: Probed<string>;
+  /**
+   * Envelope revision of `5-system/feedback/messages.json` — the shared feedback
+   * ("chat") log. It is the signal behind the unread dot on both widget
+   * triggers, so a message or a reply posted on another machine has to reach
+   * other clients on a tick rather than on a manual refresh.
+   *
+   * Deliberately the CURRENT location only: a legacy workspace still holding its
+   * log at the top-level `feedback/` root probes as "no file" (a real
+   * observation, diffed normally) until its first mutation migrates it forward —
+   * see feedbackStorage's own note. Probing both would put a second directory
+   * open on every tick of every client to cover a state that heals itself the
+   * first time anyone posts.
+   */
+  feedbackRevision: Probed<number | null>;
 };
 
 const previousProbes = new Map<string, Probe>();
@@ -299,6 +314,7 @@ type ProbeDirs = {
   approvalsDir: DirectoryHandleLike | null;
   populationMonthDir: DirectoryHandleLike | null;
   notificationsDir: DirectoryHandleLike | null;
+  feedbackDir: DirectoryHandleLike | null;
 };
 
 async function resolveProbeDirs(
@@ -310,7 +326,7 @@ async function resolveProbeDirs(
     openOrNull(() => getSampleMonthDir(directoryHandle, monthFolderName, false)),
     openOrNull(() => getPopulationMonthDir(directoryHandle, monthFolderName, false)),
   ]);
-  const [mainDir, employeesDir, approvalsDir, notificationsDir] = await Promise.all([
+  const [mainDir, employeesDir, approvalsDir, notificationsDir, feedbackDir] = await Promise.all([
     samplesMonthDir
       ? openOrNull(() => samplesMonthDir.getDirectoryHandle(SAMPLE_SUBFOLDERS.main, { create: false }))
       : null,
@@ -323,6 +339,9 @@ async function resolveProbeDirs(
     systemDir
       ? openOrNull(() => systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.notifications, { create: false }))
       : null,
+    systemDir
+      ? openOrNull(() => systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.feedback, { create: false }))
+      : null,
   ]);
   // The one open that CANNOT join a batch above: it hangs off `mainDir`, which
   // the batch above is what resolves. One extra round trip per tick, in exchange
@@ -330,7 +349,15 @@ async function resolveProbeDirs(
   const eventsDir = mainDir
     ? await openOrNull(() => mainDir.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: false }))
     : null;
-  return { mainDir, eventsDir, employeesDir, approvalsDir, populationMonthDir, notificationsDir };
+  return {
+    mainDir,
+    eventsDir,
+    employeesDir,
+    approvalsDir,
+    populationMonthDir,
+    notificationsDir,
+    feedbackDir,
+  };
 }
 
 async function safeRevision(
@@ -442,6 +469,7 @@ async function probeMonth(
     approvalsSignature,
     manifestRevision,
     segmentsSignature,
+    feedbackRevision,
   ] =
     await Promise.all([
       readDistributionLogStamp(directoryHandle, monthFolderName, {
@@ -460,6 +488,7 @@ async function probeMonth(
       safeSignature(dirs.approvalsDir, DECISIONS_SUFFIX),
       safeRevision(dirs.populationMonthDir, MONTH_MANIFEST_FILE),
       safeSegmentsSignature(dirs.eventsDir),
+      safeRevision(dirs.feedbackDir, FEEDBACK_MESSAGES_FILE),
     ]);
 
   return {
@@ -470,6 +499,7 @@ async function probeMonth(
     approvalsSignature,
     manifestRevision,
     segmentsSignature,
+    feedbackRevision,
   };
 }
 
@@ -482,6 +512,7 @@ function carryUnprobed(previous: Probe, current: Probe): Probe {
     approvalsSignature: carry(previous.approvalsSignature, current.approvalsSignature),
     manifestRevision: carry(previous.manifestRevision, current.manifestRevision),
     segmentsSignature: carry(previous.segmentsSignature, current.segmentsSignature),
+    feedbackRevision: carry(previous.feedbackRevision, current.feedbackRevision),
   };
 }
 
@@ -528,6 +559,9 @@ function diffFamilies(previous: Probe | undefined, current: Probe): Set<DataRefr
   }
   if (movedFrom(previous.manifestRevision, current.manifestRevision, sameValue)) {
     changed.add("manifest");
+  }
+  if (movedFrom(previous.feedbackRevision, current.feedbackRevision, sameValue)) {
+    changed.add("feedback");
   }
   return changed;
 }

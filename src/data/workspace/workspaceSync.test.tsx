@@ -28,6 +28,7 @@ import {
   postNotification,
 } from "../notifications/notificationStorage";
 import { appendDistributionEvent } from "../distribution/distributionStorage";
+import { loadFeedback, replyToFeedback, submitFeedback } from "../feedback/feedbackStorage";
 import { buildAssignEvent } from "../distribution/distributionLog";
 import {
   ALL_DATA_REFRESH_FAMILIES,
@@ -746,15 +747,18 @@ describe("runSync — per-tick round-trip budget (UNC/SMB cost regression guard)
     // itself down from sixteen. The workspacePaths directory-handle cache
     // (item 1.7) now serves every handle it hands out, so the five it owns
     // (both roots, both {month} dirs, 5-system) cost nothing on a warm tick.
-    // What is left is the six this file resolves off an already-resolved parent
-    // handle itself, outside those getters: 1-main, 2-employees, 3-approvals,
-    // 1-main/distribution.events, notifications, and notifications/acks.
+    // What is left is the seven this file resolves off an already-resolved
+    // parent handle itself, outside those getters: 1-main, 2-employees,
+    // 3-approvals, 1-main/distribution.events, notifications,
+    // notifications/acks, and feedback.
     //
-    // The last two are the ones the acknowledgement signature and the segments
-    // signature added — one open each per tick, and the point of both is that
-    // they do NOT grow with the number of employees or with a month's history
-    // (the listings they feed are bounded, see boundedSizeSignature).
-    expect(opens).toHaveLength(6);
+    // Three of those were added by later signals — the acknowledgement
+    // signature, the segments signature, and the feedback log's revision (the
+    // unread-dot signal) — one open each per tick, and the point of all three
+    // is that they do NOT grow with the number of employees or with a month's
+    // history (the listings they feed are bounded, see boundedSizeSignature;
+    // the feedback probe reads one file's envelope revision, never its body).
+    expect(opens).toHaveLength(7);
     const distinct = new Set(opens.map((entry) => entry.name));
     expect(distinct.size).toBe(opens.length); // no directory opened twice
   });
@@ -953,5 +957,54 @@ describe("runSync — a failed family read carries its baseline forward (no doub
       clearSimulatedFaults(root);
       capture.stop();
     }
+  });
+});
+
+/**
+ * The feedback ("chat") log is shared by every user on every machine, and the
+ * unread dot on both widget triggers is driven by it. Without a probe of its
+ * own, a message or a reply posted elsewhere stayed invisible until someone
+ * pressed refresh by hand — which is exactly the staleness the change-set probe
+ * exists to remove.
+ */
+describe("runSync — the shared feedback log is its own family", () => {
+  it("a submitted message, then a reply, each report the feedback family", async () => {
+    const root = makeRoot();
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    await submitFeedback(root, {
+      from: "emp-1",
+      role: "employee",
+      category: "issue",
+      text: "الجهاز لا يعمل",
+    });
+    const afterSubmit = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(afterSubmit.changed.has("feedback")).toBe(true);
+    // The feedback log lives under 5-system and touches no month data.
+    expect(afterSubmit.changed.has("distribution")).toBe(false);
+    expect(afterSubmit.changed.has("answers")).toBe(false);
+
+    const [message] = await loadFeedback(root);
+    await replyToFeedback(
+      root,
+      message.id,
+      { from: "admin", role: "admin", text: "تم الاطلاع", timestamp: new Date().toISOString() },
+      false
+    );
+    const afterReply = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(afterReply.changed.has("feedback")).toBe(true);
+  });
+
+  it("reports nothing when the feedback log has not moved", async () => {
+    const root = makeRoot();
+    await submitFeedback(root, {
+      from: "emp-1",
+      role: "employee",
+      category: "inquiry",
+      text: "سؤال",
+    });
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+    const result = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(result.changed.has("feedback")).toBe(false);
   });
 });
