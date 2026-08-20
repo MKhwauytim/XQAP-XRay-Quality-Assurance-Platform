@@ -134,17 +134,32 @@ describe("riskEngineAgreementSlide", () => {
   });
 
   it("prints the recognized / unrecognized / blank counts so the vocabulary is discoverable", () => {
-    const html = riskEngineAgreementSlide(
-      modelWith([
-        popRow({ xrayImageId: "A", targetedByRiskEngine: "نعم" }),
-        popRow({ xrayImageId: "B", targetedByRiskEngine: "ربما" }),
-        popRow({ xrayImageId: "C", targetedByRiskEngine: null }),
-      ]),
-      8,
-      20,
-      false,
-    );
+    // Distinct counts per bucket (2/3/4, never equal) so this test cannot
+    // pass with the buckets swapped — a 1/1/1 fixture can't tell "recognized
+    // read as blank" apart from "blank read as recognized". Each count is
+    // asserted against its OWN labelled `<b>N</b><small>LABEL` markup pair
+    // (the exact shape `coverageBlock`'s `briefingSupport` call renders),
+    // not merely "a number appears somewhere on the page".
+    const rows = [
+      // 2 recognized (one affirmative, one negative — both count toward
+      // "recognized", never split by verdict).
+      popRow({ xrayImageId: "R1", targetedByRiskEngine: "نعم" }),
+      popRow({ xrayImageId: "R2", targetedByRiskEngine: "لا" }),
+      // 3 unrecognized — non-blank values outside the known vocabulary.
+      popRow({ xrayImageId: "U1", targetedByRiskEngine: "ربما" }),
+      popRow({ xrayImageId: "U2", targetedByRiskEngine: "xyz" }),
+      popRow({ xrayImageId: "U3", targetedByRiskEngine: "unknown-code" }),
+      // 4 blank — null or whitespace-only.
+      popRow({ xrayImageId: "B1", targetedByRiskEngine: null }),
+      popRow({ xrayImageId: "B2", targetedByRiskEngine: "" }),
+      popRow({ xrayImageId: "B3", targetedByRiskEngine: "   " }),
+      popRow({ xrayImageId: "B4", targetedByRiskEngine: null }),
+    ];
+    const html = riskEngineAgreementSlide(modelWith(rows), 8, 20, false);
     expect(html).toContain("v2-re-coverage");
+    expect(html).toContain("<b>2</b><small>قيم معروفة");
+    expect(html).toContain("<b>3</b><small>قيم غير معروفة");
+    expect(html).toContain("<b>4</b><small>بلا قيمة");
   });
 
   it("carries the definitional-overlap footnote", () => {
