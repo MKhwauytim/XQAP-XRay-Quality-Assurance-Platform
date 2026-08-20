@@ -331,9 +331,42 @@ export async function readDecodedFileText(
   dir: DirectoryHandleLike,
   name: string
 ): Promise<string | null> {
-  const content = await readContent(dir, name);
-  if (content === null || content.kind === "damaged") return null;
-  return content.kind === "compressed" ? content.bodyText : content.text;
+  const outcome = await readDecodedFileTextOutcome(dir, name);
+  return outcome.status === "text" ? outcome.text : null;
+}
+
+/**
+ * "Could not read" is NOT "does not exist".
+ *
+ * {@link readDecodedFileText} collapses three very different answers into one
+ * `null`: the file is genuinely absent, the file is there but its bytes are
+ * unusable (a torn/damaged compressed member), or the read failed outright
+ * (permissions, exhausted NotReadableError retries on an SMB share). Callers
+ * that render "no data yet" — and worse, invite the user to *re-create* the
+ * data — must not treat the last two as absence. This is the same read with
+ * the distinction preserved.
+ *
+ * `absent` means every layer said NotFound; anything else is `unreadable`.
+ */
+export type DecodedTextOutcome =
+  | { status: "text"; text: string }
+  | { status: "absent" }
+  | { status: "unreadable" };
+
+export async function readDecodedFileTextOutcome(
+  dir: DirectoryHandleLike,
+  name: string
+): Promise<DecodedTextOutcome> {
+  let content: FileContent | null;
+  try {
+    content = await readContent(dir, name);
+  } catch {
+    // readContent resolves null for NotFound, so a throw here is never absence.
+    return { status: "unreadable" };
+  }
+  if (content === null) return { status: "absent" };
+  if (content.kind === "damaged") return { status: "unreadable" };
+  return { status: "text", text: content.kind === "compressed" ? content.bodyText : content.text };
 }
 
 /**
@@ -1113,6 +1146,131 @@ export async function copyFileBytes(
 }
 
 /**
+ * A cheap, non-cryptographic digest over BYTES (FNV-1a and a djb2 variant run
+ * side by side and joined, so a truncation or a flipped byte has to beat two
+ * independent 32-bit accumulators, not one).
+ *
+ * Deliberately not `createSimpleHasher`: that one consumes a JS string, which
+ * is precisely what a byte-exact copy path must never build — the file may hold
+ * a gzip member or be larger than V8 can represent as one string.
+ */
+function createByteDigest(): {
+  update: (chunk: Uint8Array) => void;
+  digest: () => string;
+} {
+  let fnv = 0x811c9dc5;
+  let djb = 5381;
+  return {
+    update(chunk: Uint8Array) {
+      for (let i = 0; i < chunk.length; i += 1) {
+        const byte = chunk[i]!;
+        fnv = Math.imul(fnv ^ byte, 0x01000193);
+        djb = (Math.imul(djb, 33) ^ byte) >>> 0;
+      }
+    },
+    digest() {
+      return `${(fnv >>> 0).toString(16)}-${(djb >>> 0).toString(16)}`;
+    },
+  };
+}
+
+/** What one verified byte copy did. */
+export type VerifiedCopyOutcome =
+  /** The copy landed AND read back byte-identical to what was read. */
+  | { status: "copied"; bytes: number }
+  /** The source was gone before a single byte could be read. */
+  | { status: "source_missing" }
+  /** The copy exists but does not match the bytes that were read from the source. */
+  | { status: "verify_failed"; detail: string };
+
+/**
+ * Byte-for-byte copy that then PROVES the copy is what was written.
+ *
+ * Two properties this has and {@link copyFileBytes} does not:
+ *
+ *  1. It never decodes. A copy path that goes through `file.text()` cannot move
+ *     a gzip member losslessly, and cannot move a plain file at all once it
+ *     passes V8's max string length (~537M UTF-16 code units) — it throws
+ *     `RangeError: Invalid string length`. On a big legacy workspace that is
+ *     one oversized `risk.raw.json` killing the entire backup, every time,
+ *     forever.
+ *  2. It verifies. A torn/partial write (share dropped mid-flush, disk full,
+ *     antivirus truncation) otherwise produces a short file that nothing ever
+ *     looks at again until a restore needs it.
+ *
+ * The verification compares the read-back copy against the size and digest of
+ * the BYTES THIS CALL READ — never against a re-stat of the live source. The
+ * source is allowed to change under a running backup (another machine saving
+ * answers, a sync client); re-reading it would turn that legitimate change into
+ * a phantom corruption report, and would make the check meaningless in the one
+ * case it exists for.
+ */
+export async function copyFileBytesVerified(
+  sourceDir: DirectoryHandleLike,
+  sourceName: string,
+  targetDir: DirectoryHandleLike,
+  targetName: string
+): Promise<VerifiedCopyOutcome> {
+  return retryTransientWrite(
+    async () => {
+      const file = await openFile(sourceDir, sourceName);
+      if (file === null) return { status: "source_missing" as const };
+
+      const sourceDigest = createByteDigest();
+      let bytesRead = 0;
+      const writable = await openBinaryWritable(targetDir, targetName);
+      try {
+        for (let offset = 0; offset < file.size; offset += BYTE_COPY_SLICE_BYTES) {
+          const end = Math.min(offset + BYTE_COPY_SLICE_BYTES, file.size);
+          const bytes = new Uint8Array(await file.slice(offset, end).arrayBuffer());
+          sourceDigest.update(bytes);
+          bytesRead += bytes.byteLength;
+          await writable.write(bytes);
+        }
+        await writable.close();
+      } catch (error) {
+        try {
+          await writable.close();
+        } catch {
+          // Best-effort: never mask the original failure with a close error.
+        }
+        throw error;
+      }
+
+      // `retryMissing`: the file provably exists — this call just wrote and
+      // closed it — so a NotFoundError here is a lagging SMB directory
+      // listing, not an absence.
+      const copy = await openFile(targetDir, targetName, { retryMissing: true });
+      if (copy === null) {
+        return {
+          status: "verify_failed" as const,
+          detail: `الملف المنسوخ غير موجود بعد الكتابة (${targetName}).`,
+        };
+      }
+      if (copy.size !== bytesRead) {
+        return {
+          status: "verify_failed" as const,
+          detail: `حجم النسخة ${copy.size} بايت بدل ${bytesRead} بايت (${targetName}).`,
+        };
+      }
+      const copyDigest = createByteDigest();
+      for (let offset = 0; offset < copy.size; offset += BYTE_COPY_SLICE_BYTES) {
+        const end = Math.min(offset + BYTE_COPY_SLICE_BYTES, copy.size);
+        copyDigest.update(new Uint8Array(await copy.slice(offset, end).arrayBuffer()));
+      }
+      if (copyDigest.digest() !== sourceDigest.digest()) {
+        return {
+          status: "verify_failed" as const,
+          detail: `محتوى النسخة لا يطابق المصدر (${targetName}).`,
+        };
+      }
+      return { status: "copied" as const, bytes: bytesRead };
+    },
+    { context: "safeWrite:copyFileBytesVerified", dir: targetDir, fileName: targetName }
+  );
+}
+
+/**
  * Coalesces a token-sized chunk stream into ~{@link STREAM_FLUSH_AT} windows.
  *
  * `streamJsonStringify` yields one chunk per JSON token — a key, a comma, a
@@ -1276,6 +1434,10 @@ async function readEnvelopeMetadataTolerant(
  * for the bare-legacy branch only, one full read of the plain file on the FIRST
  * compressed save over it — the same read the plain path performs on every save,
  * paid here once per file as it migrates format.
+ *
+ * Ruled accepted 2026-08-19: this full verification is the contract; do not
+ * shortcut it for speed without an equally strong recoverability proof and
+ * measured evidence of UI-visible stalls.
  */
 async function hasRecoverableCurrentFile(
   dir: DirectoryHandleLike,

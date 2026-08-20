@@ -26,6 +26,8 @@ type UsersSectionProps = {
   canResetPasswords: boolean;
   isSaving: boolean;
   isCheckingDeletion: boolean;
+  /** True while the pre-rename workspace-footprint check (T-11) is in flight. */
+  isCheckingRename: boolean;
   showAddForm: boolean;
   onToggleAddForm: () => void;
   form: UserFormState;
@@ -58,7 +60,7 @@ function UserRow({ user, props }: { user: ManagedLoginUser; props: UsersSectionP
         <input value={identityDraft.displayName} disabled={!props.canEdit || props.isSaving} onChange={(event) => props.onIdentityDraftChange(user, "displayName", event.target.value)} aria-label="الاسم الظاهر" placeholder="الاسم الظاهر" />
         <input value={identityDraft.username} disabled={!props.canEdit || props.isSaving} onChange={(event) => props.onIdentityDraftChange(user, "username", event.target.value)} aria-label="اسم المستخدم" placeholder="اسم المستخدم" autoComplete="off" dir="ltr" />
         {props.canEdit && <div className="um-identity-actions">
-          <button type="button" className="um-identity-save" disabled={!hasIdentityChanges || props.isSaving} onClick={() => props.onSaveIdentity(user)}>حفظ</button>
+          <button type="button" className="um-identity-save" disabled={!hasIdentityChanges || props.isSaving || props.isCheckingRename} onClick={() => props.onSaveIdentity(user)}>حفظ</button>
           {hasIdentityChanges && <button type="button" className="um-identity-reset" disabled={props.isSaving} onClick={() => props.onResetIdentity(user.id)}>تراجع</button>}
         </div>}
       </div>

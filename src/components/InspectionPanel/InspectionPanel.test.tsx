@@ -4,6 +4,7 @@ import { render, screen, fireEvent, within, cleanup } from "@testing-library/rea
 import InspectionPanel from "./index";
 import { DEFAULT_LABELS } from "../../data/labels/labelsStore";
 import type { DistributionEntry } from "../../data/distribution/distributionTypes";
+import type { FieldAnswer } from "../../data/answers/answerTypes";
 import type { TemplateField, TemplateSchema } from "../../data/templates/templateTypes";
 
 // `globals: false` in this repo, so RTL's auto-cleanup never registers itself.
@@ -253,5 +254,117 @@ describe("InspectionPanel — footer", () => {
     // The header progress bar still reports 0/2; the removed banner must not
     // come back as a role=status element in the footer.
     expect(document.querySelector(".ip-blocking-hint")).toBeNull();
+  });
+});
+
+// ── Multi-select option group ───────────────────────────────────────────────
+
+describe("InspectionPanel — multiselect fields", () => {
+  function renderCapturing(template: TemplateSchema) {
+    const saved: FieldAnswer[][] = [];
+    render(
+      <InspectionPanel
+        entry={makeEntry()}
+        template={template}
+        savedAnswer={null}
+        readonly={false}
+        onClose={() => {}}
+        onSave={async (ans) => {
+          saved.push(ans);
+        }}
+      />
+    );
+    return saved;
+  }
+
+  const natureField = field({
+    fieldId: "nature",
+    label: "طبيعة البضاعة",
+    type: "multiselect",
+    required: true,
+    options: ["سوائل", "مركبات", "مساحيق"],
+  });
+
+  it("renders every option as an independent toggle, not a single-choice control", () => {
+    const { container } = renderPanel(makeTemplate([natureField]));
+
+    const group = screen.getByRole("group", { name: "طبيعة البضاعة" });
+    for (const option of ["سوائل", "مركبات", "مساحيق"]) {
+      expect(within(group).getByRole("button", { name: option })).toHaveAttribute(
+        "aria-pressed",
+        "false"
+      );
+    }
+    expect(container.querySelector("select")).toBeNull();
+
+    fireEvent.click(within(group).getByRole("button", { name: "سوائل" }));
+    fireEvent.click(within(group).getByRole("button", { name: "مساحيق" }));
+
+    // The second pick must not clear the first — that is the whole difference
+    // between this control and the dropdown it would otherwise have been.
+    expect(within(group).getByRole("button", { name: "سوائل" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(group).getByRole("button", { name: "مساحيق" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(group).getByRole("button", { name: "مركبات" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("toggles a selected option back off", () => {
+    renderPanel(makeTemplate([natureField]));
+    const group = screen.getByRole("group", { name: "طبيعة البضاعة" });
+    const liquids = within(group).getByRole("button", { name: "سوائل" });
+
+    fireEvent.click(liquids);
+    expect(liquids).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(liquids);
+    expect(liquids).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("counts as unanswered until at least one option is picked, and blocks submit", () => {
+    const saved = renderCapturing(makeTemplate([natureField]));
+
+    expect(screen.getByText(progressText(0, 1))).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.ip_submit_btn }));
+    expect(screen.getByText(DEFAULT_LABELS.ip_msg_missing_required_submit)).toBeInTheDocument();
+    expect(saved).toHaveLength(0);
+
+    const group = screen.getByRole("group", { name: "طبيعة البضاعة" });
+    fireEvent.click(within(group).getByRole("button", { name: "مركبات" }));
+    expect(screen.getByText(progressText(1, 1))).toBeInTheDocument();
+  });
+
+  it("stores the selection in template order, whatever order it was clicked in", () => {
+    const saved = renderCapturing(makeTemplate([natureField]));
+    const group = screen.getByRole("group", { name: "طبيعة البضاعة" });
+
+    // Clicked last-to-first on purpose.
+    fireEvent.click(within(group).getByRole("button", { name: "مساحيق" }));
+    fireEvent.click(within(group).getByRole("button", { name: "سوائل" }));
+    fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.ip_submit_btn }));
+
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toEqual([{ fieldId: "nature", value: "سوائل | مساحيق" }]);
+  });
+
+  it("reveals a field conditioned on one option even when several are picked", () => {
+    renderPanel(
+      makeTemplate([
+        natureField,
+        field({
+          fieldId: "vehicleDetail",
+          label: "تفاصيل المركبة",
+          type: "text",
+          condition: { sourceFieldId: "nature", operator: "equals", value: "مركبات" },
+        }),
+      ])
+    );
+
+    expect(screen.queryByLabelText("تفاصيل المركبة")).toBeNull();
+
+    const group = screen.getByRole("group", { name: "طبيعة البضاعة" });
+    fireEvent.click(within(group).getByRole("button", { name: "سوائل" }));
+    expect(screen.queryByLabelText("تفاصيل المركبة")).toBeNull();
+
+    fireEvent.click(within(group).getByRole("button", { name: "مركبات" }));
+    expect(screen.getByLabelText("تفاصيل المركبة")).toBeInTheDocument();
   });
 });

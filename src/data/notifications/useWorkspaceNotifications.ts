@@ -40,21 +40,25 @@ export function useWorkspaceNotifications(
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
   const audience = isNotificationAudienceRole(session.role);
+  // Acknowledgements live in per-employee files. Both consumers of this hook —
+  // the banner and the sidebar badge — ask only about the signed-in user, so
+  // the poll reads HIS ack file rather than fanning out over every employee's.
+  const username = session.username;
 
   const reload = useCallback(async () => {
     if (!directoryHandle || !audience) return;
     try {
-      setNotifications(await loadNotifications(directoryHandle));
+      setNotifications(await loadNotifications(directoryHandle, { forUsername: username }));
     } catch {
       // Best-effort: a failed poll just leaves the last-known list in place.
     }
-  }, [directoryHandle, audience]);
+  }, [directoryHandle, audience, username]);
 
   useEffect(() => {
     if (!audience || !directoryHandle) return;
     // Initial load via promise-chain (not `void reload()`) so setState lands in
     // a `.then` callback, not synchronously in the effect body.
-    loadNotifications(directoryHandle)
+    loadNotifications(directoryHandle, { forUsername: username })
       .then(setNotifications)
       .catch(logRejection("workspaceNotifications:loadNotifications"));
     const onFocus = () => void reload();
@@ -68,7 +72,7 @@ export function useWorkspaceNotifications(
       window.clearInterval(interval);
       unsubscribeDataRefresh();
     };
-  }, [audience, directoryHandle, reload]);
+  }, [audience, directoryHandle, reload, username]);
 
   return {
     notifications,

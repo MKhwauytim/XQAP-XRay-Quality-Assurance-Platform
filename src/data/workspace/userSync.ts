@@ -8,11 +8,20 @@
 import type { UserManagementState } from "../../auth/userManagement";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { readJsonFile, writeJsonFile } from "../storage/fileSystemAccess";
+import { codedMessage } from "../storage/errorCodes";
 import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
 import { WORKSPACE_FILE_NAMES } from "./workspaceDefaults";
 import { WORKSPACE_SCHEMA_VERSION, type UsersPermissionsFile } from "./workspaceTypes";
 import { getUserDataRoot } from "./workspacePaths";
+
+/**
+ * Either the write landed, or it was abandoned WITHOUT touching the file —
+ * carried through casLoop's result channel (rather than thrown) so an
+ * unreadable identity file aborts immediately instead of burning the whole CAS
+ * retry budget on a condition no retry inside this loop can fix.
+ */
+type SyncOutcome = { ok: true } | { ok: false; error: string };
 
 /**
  * Serializes the in-memory user-management state to
@@ -40,12 +49,40 @@ export async function syncUserManagementToDisk(
   // with a detectable revision, NOT a field-level three-way merge of two admins'
   // edits (same tradeoff savePopulationConfig documents for config.json).
   const outcome = await withResourceLock(`users-permissions:rmw`, () =>
-    casLoop<{ ok: true }>(
+    casLoop<SyncOutcome>(
       async (writeToken) => {
         const existing = await readJsonFile<UsersPermissionsFile>(
           userDataDir,
           WORKSPACE_FILE_NAMES.usersPermissions
         );
+        // "I could not read it" is NOT "there is nothing there". Collapsing
+        // every failed read into `prevMeta = null` made ONE transient share
+        // blip (NotReadableError on an idle SMB session, an antivirus lock, a
+        // revoked grant) restart the identity file's revision counter at 1 and
+        // re-stamp createdAt/createdBy — while still WRITING the file. Every
+        // other machine then holds a revision far ahead of the share's, so the
+        // CAS token/revision pair that is supposed to catch a lost update no
+        // longer means anything, and the next admin's edit silently fights it.
+        //
+        //  - missing / invalid_json → genuinely nothing usable on disk: seed a
+        //    fresh file (revision 1). An unparseable file has already lost its
+        //    metadata, and readJsonFile has already tried the .bak/.tmp ladder.
+        //  - read_failed → transient. Abort THIS cycle, keep the in-memory
+        //    roster authoritative, and let the caller retry on the next tick.
+        //  - permission_denied → terminal. Never seed, never reset the
+        //    revision; surface it so the user reconnects the workspace.
+        if (!existing.ok && existing.reason !== "missing" && existing.reason !== "invalid_json") {
+          return {
+            done: true,
+            result: {
+              ok: false as const,
+              error:
+                existing.reason === "permission_denied"
+                  ? codedMessage("XQ-FS-013", { file: WORKSPACE_FILE_NAMES.usersPermissions })
+                  : codedMessage("XQ-FS-014", { file: WORKSPACE_FILE_NAMES.usersPermissions }),
+            },
+          };
+        }
         const prevMeta = existing.ok ? existing.file.metadata : null;
         const now = new Date().toISOString();
         const nextRevision = prevMeta ? prevMeta.revision + 1 : 1;

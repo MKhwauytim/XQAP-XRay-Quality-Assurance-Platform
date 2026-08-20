@@ -174,6 +174,8 @@ const PINNED_MEANINGS: Record<string, string> = {
     "NotFound persisted after every retry but the containing directory is reachable and writable — a genuine transient share flake, so retrying the action is the right advice",
   "XQ-IO-034":
     "the folder accepts short names and the failing file's extension, but a probe with the SAME NAME LENGTH cannot be created there — a path-length limit (Windows' 260-character cap on a deep UNC workspace path). Retrying can never help; the workspace must sit closer to the share root, or the writer must use shorter names",
+  "XQ-IO-035":
+    "NoModificationAllowedError survived every retry: the file stayed locked by another writer (another tab, or another machine on the SMB share) for the whole ladder. This is CONTENTION, not a lost permission grant — repeating the action shortly is the right advice",
   "XQ-AUTH-001":
     "login rejected: unknown username or wrong password",
   "XQ-AUTH-002":

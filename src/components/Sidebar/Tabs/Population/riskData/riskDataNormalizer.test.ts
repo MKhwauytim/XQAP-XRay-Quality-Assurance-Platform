@@ -6,7 +6,7 @@
 // since the fix is plumbing-only and must not change what any field resolves
 // to.
 import { describe, expect, it } from "vitest";
-import { normalizeRiskRow } from "./riskDataNormalizer";
+import { detectDuplicateNormalizedHeaders, normalizeRiskRow } from "./riskDataNormalizer";
 import type { RiskSourceRow } from "./riskDataTypes";
 
 describe("normalizeRiskRow", () => {
@@ -218,5 +218,70 @@ describe("normalizeRiskRow", () => {
     expect(first.xrayImageId).toBe("X-1");
     expect(second.portName).toBe("ميناء ب");
     expect(second.xrayImageId).toBe("X-2");
+  });
+});
+
+// duplicate-normalized-headers (Batch 4): detection-only diagnostic. Precedence
+// in createHeaderLookup (last Map.set wins) is untouched by this — these tests
+// cover the pure detector plus a proof that row output is byte-identical
+// whether or not colliding headers are present.
+describe("detectDuplicateNormalizedHeaders", () => {
+  it("reports one collision with both originals when two headers differ only in normalization-stripped content", () => {
+    const collisions = detectDuplicateNormalizedHeaders(["التاريخ ", "التاريخ"]);
+
+    expect(collisions).toHaveLength(1);
+    expect(collisions[0].originals).toEqual(["التاريخ ", "التاريخ"]);
+    expect(collisions[0].normalized).toBe("التاريخ");
+  });
+
+  it("reports no collision for headers that stay distinct after normalization", () => {
+    const collisions = detectDuplicateNormalizedHeaders(["اسم المنفذ", "رقم البيان", "معرف الأشعة"]);
+
+    expect(collisions).toEqual([]);
+  });
+
+  it("reports no collision for an empty header list", () => {
+    expect(detectDuplicateNormalizedHeaders([])).toEqual([]);
+  });
+
+  it("groups three-way collisions into a single entry with all originals", () => {
+    const fatha = String.fromCodePoint(0x064b);
+    const collisions = detectDuplicateNormalizedHeaders(["التاريخ", "التاريخ" + fatha, "التاريخ "]);
+
+    expect(collisions).toHaveLength(1);
+    expect(collisions[0].originals).toEqual(["التاريخ", "التاريخ" + fatha, "التاريخ "]);
+  });
+
+  it("does not change normalizeRiskRow's output: last-set-wins precedence is untouched by the diagnostic (with vs without colliding headers)", () => {
+    // Two headers ("اسم المنفذ" and its diacritic-noised twin) both alias to
+    // portName and both normalize to the same key, so createHeaderLookup's
+    // Map.set makes the LAST one (object key insertion order) win — exactly as
+    // before this diagnostic existed.
+    const fatha = String.fromCodePoint(0x064b);
+    const sourceRowWithCollision: RiskSourceRow = {
+      "اسم المنفذ": "الميناء الأول",
+      ["اسم" + fatha + " المنفذ"]: "الميناء الثاني"
+    };
+    const sourceRowWithoutCollision: RiskSourceRow = {
+      ["اسم" + fatha + " المنفذ"]: "الميناء الثاني"
+    };
+
+    const withCollision = normalizeRiskRow({
+      sourceRow: sourceRowWithCollision,
+      movementType: "بري",
+      sourceSheetName: "Sheet1",
+      sourceRowNumber: 1
+    });
+    const withoutCollision = normalizeRiskRow({
+      sourceRow: sourceRowWithoutCollision,
+      movementType: "بري",
+      sourceSheetName: "Sheet1",
+      sourceRowNumber: 1
+    });
+
+    // Same last-set-wins result as the non-colliding-input row: the diagnostic
+    // is purely additive and never changes which value is picked.
+    expect(withCollision.portName).toBe("الميناء الثاني");
+    expect(withCollision.portName).toBe(withoutCollision.portName);
   });
 });

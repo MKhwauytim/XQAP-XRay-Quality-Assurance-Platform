@@ -2,6 +2,8 @@ import { describe, expect, test } from "vitest";
 
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import type { PreparedPopulationRow } from "../population/populationTypes";
+import type { StageSamplingRule } from "../population/populationConfig";
+import { resolveStageMappings } from "../population/stageHelpers";
 import type { SampleMasterData } from "./sampleTypes";
 import { SAMPLING_ALGORITHM_VERSION } from "./sampleAlgorithm";
 import {
@@ -205,5 +207,99 @@ describe("B4 switching-rule advisory", () => {
       createdBy: "supervisor",
     });
     expect(withoutAdvisory.priorMonthAdvisory).toBeUndefined();
+  });
+});
+
+describe("plan records the draw's own rules and stage mappings (v103)", () => {
+  const RULES: StageSamplingRule[] = [
+    {
+      stageKey: "first",
+      method: "exact",
+      value: 5,
+      isLocked: false,
+      minRequiredCount: 0,
+      certScanPercentage: 50,
+      certScanExactCount: 0,
+      certScanMethod: "percentage",
+      certScanStrategy: "mandatory",
+    },
+  ];
+
+  test("copies the sampling rules and the DRAW's resolved mappings into the plan", () => {
+    // Why this exists: the plan already claimed replayability by recording the
+    // seed and the algorithm version, but the rules and stage aliases it
+    // implicitly depended on live in workspace-global, admin-editable
+    // `1-population/config.json`. An edit after the draw left the plan pointing
+    // at inputs that no longer exist, with nothing in the file to reveal it.
+    const population = [makeRow("A1")];
+    const sampleData: SampleMasterData = {
+      ...makeSampleData(population),
+      stageMappingsSnapshot: resolveStageMappings({ first: ["Level A"] }),
+    };
+
+    const plan = buildSamplingPlan({
+      monthFolderName: "6-june-2026",
+      populationRows: population,
+      sampleData,
+      createdBy: "supervisor",
+      samplingRules: RULES,
+      // Live config has since drifted. The plan must record what the DRAW used.
+      stageMappings: { first: ["Tier One"], second: [], third: [], fourth: [] },
+    });
+
+    expect(plan.samplingRules).toEqual(RULES);
+    expect(plan.stageMappings?.first).toEqual(["Level A"]);
+  });
+
+  test("falls back to the passed mappings when the master carries no snapshot", () => {
+    // Legacy master (drawn before the snapshot existed): the caller's config is
+    // the only signal available, and recording it is still better than nothing.
+    const population = [makeRow("A1")];
+    const live = resolveStageMappings({ first: ["Tier One"] });
+    const plan = buildSamplingPlan({
+      monthFolderName: "6-june-2026",
+      populationRows: population,
+      sampleData: makeSampleData(population),
+      createdBy: "supervisor",
+      stageMappings: live,
+    });
+    expect(plan.stageMappings).toEqual(live);
+  });
+
+  test("omits both fields entirely when neither is available — legacy plan shape is unchanged", () => {
+    // A legacy-path (`totalSampleSize`) draw has no rules and no stage mappings.
+    // The keys must be ABSENT, not present-and-undefined, so a plan written for
+    // such a month keeps exactly the shape it has always had on disk, and a
+    // reader can distinguish "not recorded" from "recorded as empty".
+    const population = [makeRow("A1")];
+    const plan = buildSamplingPlan({
+      monthFolderName: "6-june-2026",
+      populationRows: population,
+      sampleData: makeSampleData(population),
+      createdBy: "supervisor",
+    });
+    expect("samplingRules" in plan).toBe(false);
+    expect("stageMappings" in plan).toBe(false);
+  });
+
+  test("both fields survive the save + load round-trip", async () => {
+    const dir = createMemoryDirectory();
+    const population = [makeRow("A1")];
+    const plan = buildSamplingPlan({
+      monthFolderName: "6-june-2026",
+      populationRows: population,
+      sampleData: {
+        ...makeSampleData(population),
+        stageMappingsSnapshot: resolveStageMappings({ first: ["Level A"] }),
+      },
+      createdBy: "supervisor",
+      samplingRules: RULES,
+    });
+    const saved = await saveSamplingPlan(dir, "6-june-2026", plan);
+    expect(saved.ok).toBe(true);
+
+    const loaded = await loadSamplingPlan(dir, "6-june-2026");
+    expect(loaded?.samplingRules).toEqual(RULES);
+    expect(loaded?.stageMappings?.first).toEqual(["Level A"]);
   });
 });

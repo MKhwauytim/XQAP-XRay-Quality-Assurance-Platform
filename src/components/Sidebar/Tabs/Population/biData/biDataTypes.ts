@@ -65,6 +65,18 @@ export type ZeroXrayIdDiagnostic = {
   presentHeaders: string[];
 };
 
+/**
+ * Detection-only: two or more source headers in this sheet normalize to the
+ * same key, so `createHeaderLookup`'s last-write-wins `Map.set` collapsed
+ * them into one entry (`originals`, in the order they appeared, is the same
+ * order they were `Map.set` — so the LAST entry is the one that actually won).
+ * Precedence is untouched; this only reports that the collision happened.
+ */
+export type DuplicateHeaderCollision = {
+  normalized: string;
+  originals: string[];
+};
+
 export type BiSheetSummary = {
   sheetName: string;
   /**
@@ -75,16 +87,34 @@ export type BiSheetSummary = {
    */
   sourceFileName?: string;
   source: string;
+  /**
+   * Whether `source` came from a configured sheet pattern (true) or from the
+   * permissive fallback that uses the sheet's own name — for a CSV, the file
+   * name (false). Advisory: false never means the rows were dropped.
+   */
+  sourceMatched?: boolean;
   originalRowCount: number;
   normalizedRowCount: number;
   excludedMissingXrayIdCount: number;
   zeroIdDiagnostic?: ZeroXrayIdDiagnostic;
+  duplicateHeaders?: DuplicateHeaderCollision[];
 };
 
 export type BiWorkbookResult = {
   rows: NormalizedBiRow[];
   sheetSummaries: BiSheetSummary[];
+  /**
+   * Sheets EXCLUDED from the population — they contributed no rows. Consumers
+   * treat a non-empty list as a problem to report.
+   */
   unknownSheetNames: string[];
+  /**
+   * PROD-1: sheets that WERE imported but whose name matched no configured
+   * pattern, so their `source` is the sheet's (or the CSV file's) own name.
+   * Purely advisory — deliberately a separate array from `unknownSheetNames`,
+   * which means the opposite.
+   */
+  unmatchedSheetNames: string[];
   totalOriginalRows: number;
   totalNormalizedRows: number;
   totalExcludedMissingXrayIdCount: number;
@@ -109,6 +139,14 @@ export type BiUploadEntry = {
   acceptedRows: number | null;
   state: "parsing" | "ready" | "error";
   error?: string;
+  /**
+   * PROD-1: a non-blocking advisory on an otherwise successful file — today,
+   * "its rows were imported, but the source was taken from the file name
+   * because it matched no configured pattern". Distinct from `error`: the file
+   * is `ready`, its rows are in the population, and the row renders amber
+   * rather than red.
+   */
+  warning?: string;
 };
 
 /** Hard cap on attached BI files (design handoff 2b). */

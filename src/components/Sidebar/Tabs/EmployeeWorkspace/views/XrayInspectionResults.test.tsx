@@ -415,4 +415,53 @@ describe("XrayInspectionResults — ad-hoc import visibility (THE GAP fix)", () 
       expect(screen.getAllByText(DEFAULT_LABELS.status_completed)).toHaveLength(1)
     );
   });
+
+  it("writes an ad-hoc row's quality note to the ad-hoc store, so it survives a remount", async () => {
+    // Third recurrence of the "month-folder walkers forget the ad-hoc store"
+    // class. Reads were already routed per row (loadAdhocAnswerItems above), but
+    // the quality-note SAVE passed the globally-selected month to
+    // setItemQualityNote. In the month's answer store no item matches the ad-hoc
+    // xrayImageId, so the update took its idempotent no-op branch: the UI showed
+    // the note saved (local state), nothing was written, and it vanished on the
+    // next load.
+    writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = await seedAdhocAssignmentForResults();
+    const answered = await upsertItemAnswer(root, ADHOC_FOLDER, "jalgahamdi", makeAnswer({
+      xrayImageId: ADHOC_XRAY_ID,
+      answeredBy: "jalgahamdi",
+      status: "submitted",
+      submittedAt: new Date().toISOString(),
+    }));
+    if (!answered.ok) throw new Error(`seed ad-hoc answer failed: ${answered.error}`);
+
+    const { unmount } = render(<XrayInspectionResults directoryHandle={root} />);
+    await waitFor(() => expect(screen.getAllByText(ADHOC_XRAY_ID).length).toBeGreaterThan(0));
+
+    fireEvent.click(screen.getByRole("row", { name: new RegExp(ADHOC_XRAY_ID) }));
+    const textarea = await screen.findByPlaceholderText(DEFAULT_LABELS.ew_quality_note_placeholder);
+    fireEvent.change(textarea, { target: { value: "ملاحظة على صف الاستيراد اليدوي" } });
+    fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.ew_quality_note_save }));
+
+    // The note lands in the ad-hoc store the row came from …
+    await waitFor(async () => {
+      const adhocFile = await loadEmployeeAnswers(root, ADHOC_FOLDER, "jalgahamdi");
+      const item = adhocFile.items.find((i) => i.xrayImageId === ADHOC_XRAY_ID);
+      expect(item?.qualityNote).toBe("ملاحظة على صف الاستيراد اليدوي");
+    });
+
+    // … and never in the selected month's store, which owns a different population.
+    const monthFile = await loadEmployeeAnswers(root, MONTH, "jalgahamdi");
+    expect(monthFile.items.some((i) => i.xrayImageId === ADHOC_XRAY_ID)).toBe(false);
+
+    // Read-back through the view itself: a remount re-reads from disk, which is
+    // exactly where the lost note used to disappear.
+    unmount();
+    render(<XrayInspectionResults directoryHandle={root} />);
+    await waitFor(() => expect(screen.getAllByText(ADHOC_XRAY_ID).length).toBeGreaterThan(0));
+    await waitFor(() =>
+      expect(screen.getAllByText("ملاحظة على صف الاستيراد اليدوي").length).toBeGreaterThan(0)
+    );
+  });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { PreparedPopulationRow } from "../population/populationTypes";
+import { DEFAULT_STAGE_MAPPINGS } from "../population/populationConfig";
 import type { StageAliasMappings, StageSamplingRule } from "../population/populationConfig";
 import { drawSample } from "./sampleAlgorithm";
 import type { SampleMasterData } from "./sampleTypes";
@@ -153,7 +154,10 @@ describe("drawSample — legacy path golden master", () => {
 
     expect(data).toEqual({
       rngSeed: "golden-seed-1",
-      samplingAlgorithmVersion: "1.1",
+      // Re-recorded 2026-08-19 for the "1.2" bump. The legacy path shares only
+      // this stamp with the stage path — every drawn row, counter and
+      // allocation below is byte-identical to what "1.1" produced.
+      samplingAlgorithmVersion: "1.2",
       drawnBy: "tester",
       totalRequested: 9,
       totalActual: 9,
@@ -268,6 +272,27 @@ describe("drawSample — legacy path golden master", () => {
       ok: false,
       reason: "حجم العينة يجب أن يكون أكبر من صفر.",
     });
+  });
+
+  it("stamps NO stageMappingsSnapshot — the legacy path never classifies by stage", () => {
+    // `drawLegacySample` never calls `getStageKey`, so it has no alias table it
+    // could honestly claim to have drawn under. Stamping the defaults here would
+    // be a fabricated provenance record, and a consumer preferring the snapshot
+    // over live config would then silently classify replacements against a table
+    // this draw never used. The key must be ABSENT, not `undefined`: the file
+    // shape a legacy-path month is written with does not change at all.
+    const result = drawSample(rows, { totalSampleSize: 9, rngSeed: "golden-seed-1" }, "tester");
+    if (!result.ok) throw new Error("draw failed");
+    expect("stageMappingsSnapshot" in result.data).toBe(false);
+
+    // Also absent when the caller passes stage mappings the legacy path ignores.
+    const withMappings = drawSample(
+      rows,
+      { totalSampleSize: 9, rngSeed: "golden-seed-1", stageMappings: STAGE_MAPPINGS },
+      "tester"
+    );
+    if (!withMappings.ok) throw new Error("draw failed");
+    expect("stageMappingsSnapshot" in withMappings.data).toBe(false);
   });
 
   it("pins the null-portName bucket label", () => {
@@ -394,8 +419,15 @@ describe("drawSample — stage path golden master", () => {
         certScanCount: 9,
         nonCertScanCount: 13,
         allocatedQuota: 11,
-        certScanQuota: 7,
-        nonCertScanQuota: 4,
+        // Re-recorded for "1.2" (2026-08-19): stage 3's rule asks for 100%
+        // CertScan of a 4-row target but the stage holds only 2 CertScan rows.
+        // "1.1" rounded that per port into a 4-seat CertScan request this port
+        // could not fill; "1.2" caps the stage request at the real pool, so 2 of
+        // those seats move to NonCertScan. The sum still equals allocatedQuota,
+        // and `actual*` below is unchanged — the draw was always capped, only
+        // the recorded *request* was inflated.
+        certScanQuota: 5,
+        nonCertScanQuota: 6,
         actualCertScanDrawn: 5,
         actualNonCertScanDrawn: 6,
         actualTotalDrawn: 11,
@@ -414,11 +446,15 @@ describe("drawSample — stage path golden master", () => {
       },
     ]);
 
+    // Re-recorded for "1.2": the same gap (asked 4, only 2 exist) is now
+    // reported once at STAGE level instead of once per port, because the
+    // stage-level cap means no individual port can observe the over-ask any
+    // more. Same numbers, `portName` is null.
     expect(result.data.certScanShortfalls).toEqual([
       {
         stageKey: "third",
         stageLabel: "المستوى الثالث",
-        portName: "بري",
+        portName: null,
         requestedCertScanQuota: 4,
         actualCertScanDrawn: 2,
         availableCertScanRows: 2,
@@ -433,11 +469,15 @@ describe("drawSample — stage path golden master", () => {
       samplingAlgorithmVersion: result.data.samplingAlgorithmVersion,
       rngSeed: result.data.rngSeed,
     }).toEqual({
-      certScanRequested: 9,
-      nonCertScanRequested: 6,
+      // Re-recorded for "1.2": 2 seats move from the CertScan request to the
+      // NonCertScan request (see the port allocation note above). The ACTUAL
+      // composition is untouched — 7 CertScan / 8 NonCertScan, exactly as under
+      // "1.1" — so this draw's rows did not change, only its bookkeeping.
+      certScanRequested: 7,
+      nonCertScanRequested: 8,
       certScanActual: 7,
       nonCertScanActual: 8,
-      samplingAlgorithmVersion: "1.1",
+      samplingAlgorithmVersion: "1.2",
       rngSeed: "golden-stage-1",
     });
   });
@@ -484,7 +524,7 @@ describe("drawSample — stage path golden master", () => {
     expect(result.data.totalActual).toBe(8);
   });
 
-  it("SURPRISE: spillover pushes a port's actualTotalDrawn ABOVE its own allocatedQuota", () => {
+  it("pins the 100%-CertScan-over-pool case: each port's request is capped at its own pool and no spillover is needed", () => {
     const result = drawSample(
       rows,
       {
@@ -504,10 +544,26 @@ describe("drawSample — stage path golden master", () => {
     );
     if (!result.ok) throw new Error("draw failed");
 
-    // certScanStrategy "mandatory": unfilled CertScan seats are NOT converted
-    // into NonCertScan seats inside the port draw, so both ports under-fill and
-    // the spillover round tops the stage back up to 12 — reconciling the extra
-    // rows into `actual*` but never into `allocatedQuota`/`nonCertScanQuota`.
+    // Re-recorded for "1.2" (2026-08-19). The stage asks for 100% CertScan of a
+    // 12-row target but the stage holds only 6 CertScan rows.
+    //
+    // Under "1.1" this test pinned a SURPRISE: each port's CertScan request was
+    // rounded against its own allocated quota (7 and 5), both ports over-asked,
+    // certScanStrategy "mandatory" refused to convert the unfillable seats, and
+    // the stage-level spillover round then topped the draw back up to 12 —
+    // pushing بري's actualTotalDrawn (8) ABOVE its own allocatedQuota (7).
+    //
+    // "1.2" caps the CertScan request at the stage's real pool and apportions it
+    // by each port's pool, so بري asks for 4 of its 4 and بحري for 2 of its 2.
+    // Nothing over-asks, nothing under-fills, spillover never runs, and every
+    // port lands exactly on its allocatedQuota. The stage total (12) and the
+    // Cert/NonCert composition (6/6) are identical to "1.1" — only WHICH
+    // NonCertScan rows are picked changed, because the seats are now filled
+    // inside the port draw instead of by the spillover pass.
+    //
+    // Spillover can still overshoot a port's quota in general (see the
+    // minRequiredCount case below, where a 0% CertScan rule still ends up
+    // drawing a CertScan row); this configuration simply no longer triggers it.
     expect(result.data.portAllocations).toEqual([
       {
         portName: "بري",
@@ -515,11 +571,11 @@ describe("drawSample — stage path golden master", () => {
         certScanCount: 4,
         nonCertScanCount: 6,
         allocatedQuota: 7,
-        certScanQuota: 7,
-        nonCertScanQuota: 0, // yet 4 NonCertScan rows end up drawn
+        certScanQuota: 4, // capped at this port's own CertScan pool
+        nonCertScanQuota: 3, // the 3 seats "1.1" left stranded
         actualCertScanDrawn: 4,
-        actualNonCertScanDrawn: 4,
-        actualTotalDrawn: 8, // > allocatedQuota (7)
+        actualNonCertScanDrawn: 3,
+        actualTotalDrawn: 7, // == allocatedQuota, no longer above it
       },
       {
         portName: "بحري",
@@ -527,29 +583,24 @@ describe("drawSample — stage path golden master", () => {
         certScanCount: 2,
         nonCertScanCount: 4,
         allocatedQuota: 5,
-        certScanQuota: 5,
-        nonCertScanQuota: 0,
+        certScanQuota: 2,
+        nonCertScanQuota: 3,
         actualCertScanDrawn: 2,
-        actualNonCertScanDrawn: 2,
-        actualTotalDrawn: 4, // < allocatedQuota (5)
+        actualNonCertScanDrawn: 3,
+        actualTotalDrawn: 5, // == allocatedQuota, no longer below it
       },
     ]);
+    // The same over-ask is still reported, now once at stage level: "1.1"'s two
+    // per-port records summed to requested 12 / available 6, which is exactly
+    // what the single stage-level record carries.
     expect(result.data.certScanShortfalls).toEqual([
       {
         stageKey: "first",
         stageLabel: "المستوى الأول",
-        portName: "بري",
-        requestedCertScanQuota: 7,
-        actualCertScanDrawn: 4,
-        availableCertScanRows: 4,
-      },
-      {
-        stageKey: "first",
-        stageLabel: "المستوى الأول",
-        portName: "بحري",
-        requestedCertScanQuota: 5,
-        actualCertScanDrawn: 2,
-        availableCertScanRows: 2,
+        portName: null,
+        requestedCertScanQuota: 12,
+        actualCertScanDrawn: 6,
+        availableCertScanRows: 6,
       },
     ]);
     expect(result.data.rows.map((r) => r.xrayImageId)).toEqual([
@@ -557,20 +608,23 @@ describe("drawSample — stage path golden master", () => {
       "بري-S1-C2",
       "بري-S1-C3",
       "بري-S1-C0",
+      // NonCertScan now drawn in-port rather than as a spillover tail
+      "بري-S1-N2",
+      "بري-S1-N3",
+      "بري-S1-N0",
       "Bبحري-S1-C1",
       "Bبحري-S1-C0",
-      // spillover tail
-      "بري-S1-N1",
-      "بري-S1-N4",
-      "بري-S1-N3",
-      "بري-S1-N2",
-      "Bبحري-S1-N3",
       "Bبحري-S1-N1",
+      "Bبحري-S1-N2",
+      "Bبحري-S1-N3",
     ]);
     expect(result.data.totalActual).toBe(12);
+    // Composition is unchanged from "1.1": 6 CertScan + 6 NonCertScan.
+    expect(result.data.certScanActual).toBe(6);
+    expect(result.data.nonCertScanActual).toBe(6);
   });
 
-  it("pins the 'preferred' CertScan strategy backfilling inside the port draw", () => {
+  it("pins 'preferred' and 'mandatory' now producing an identical draw, because no port over-asks any more", () => {
     const result = drawSample(
       rows,
       {
@@ -590,8 +644,18 @@ describe("drawSample — stage path golden master", () => {
       "tester"
     );
     if (!result.ok) throw new Error("draw failed");
-    // Same seed as the "mandatory" case above but a different row order and no
-    // spillover tail — the backfill happens inside each port draw instead.
+    // Re-recorded for "1.2" (2026-08-19). Same seed and rows as the "mandatory"
+    // case above, and now the SAME draw — under "1.1" the two strategies picked
+    // different NonCertScan rows here.
+    //
+    // Why they converged: `certScanStrategy` only ever mattered when a port's
+    // CertScan request exceeded its own pool ("preferred" converted the unfillable
+    // seats to NonCertScan inside the port draw, "mandatory" left them for
+    // spillover). "1.2" caps that request at the pool, so the over-ask the branch
+    // reacts to cannot arise from this path any more and the branch is inert. The
+    // `exact` CertScan method has been capped this way all along, so the strategy
+    // was already inert there — "1.2" makes `percentage` behave consistently with
+    // it. The rows below are byte-identical to the "mandatory" case's.
     expect(result.data.rows.map((r) => r.xrayImageId)).toEqual([
       "بري-S1-C1",
       "بري-S1-C2",
@@ -606,10 +670,11 @@ describe("drawSample — stage path golden master", () => {
       "Bبحري-S1-N2",
       "Bبحري-S1-N3",
     ]);
-    // The shortfall records are unchanged (detection is strategy-independent),
-    // but nonCertScanRequested now reflects the converted seats.
+    // Unchanged: the converted seats still show up as NonCertScan demand...
     expect(result.data.nonCertScanRequested).toBe(6);
-    expect(result.data.certScanShortfalls).toHaveLength(2);
+    // ...and the over-ask is still reported, as one stage-level record rather
+    // than the two per-port records "1.1" produced (same totals — see above).
+    expect(result.data.certScanShortfalls).toHaveLength(1);
   });
 
   it("pins minRequiredCount as a floor, and its inversion when it exceeds availability", () => {
@@ -725,6 +790,128 @@ describe("drawSample — stage path golden master", () => {
       stageAllocations: [],
       portAllocations: [],
       certScanShortfalls: [],
+    });
+  });
+
+  it("stamps the RESOLVED stage mappings the draw classified against", () => {
+    // v103: the draw records its own alias table so consumers that re-classify
+    // a row later (appendSampleRow, getReplacementCandidates) can use the table
+    // the month was DRAWN under instead of workspace-global, admin-editable live
+    // config. "Resolved" = DEFAULT_STAGE_MAPPINGS merged with the config
+    // override — the exact object getStageKey consumed.
+    const result = drawSample(rows, config, "tester");
+    if (!result.ok) throw new Error("draw failed");
+
+    // This config overrides all four stages, so the resolved table is the
+    // override itself — pinned by value, not by reference.
+    expect(result.data.stageMappingsSnapshot).toEqual({
+      first: ["1"],
+      second: ["2"],
+      third: ["3"],
+      fourth: ["4"],
+    });
+
+    // A config that overrides only ONE stage must record the DEFAULTS for the
+    // other three, not omit them: "what the draw used" is the merged table, and
+    // a partial record would send a later consumer back to live config for the
+    // stages it left out.
+    const partial = drawSample(
+      rows,
+      { rngSeed: "golden-stage-1", samplingRules: rules, stageMappings: { first: ["1"] } as StageAliasMappings },
+      "tester"
+    );
+    if (!partial.ok) throw new Error("draw failed");
+    expect(partial.data.stageMappingsSnapshot?.first).toEqual(["1"]);
+    expect(partial.data.stageMappingsSnapshot?.second).toEqual(DEFAULT_STAGE_MAPPINGS.second);
+    expect(partial.data.stageMappingsSnapshot?.third).toEqual(DEFAULT_STAGE_MAPPINGS.third);
+    expect(partial.data.stageMappingsSnapshot?.fourth).toEqual(DEFAULT_STAGE_MAPPINGS.fourth);
+  });
+
+  it("pins that stamping the snapshot changed NO drawn output — the rest of the result is byte-identical to the v102.0.0 master", () => {
+    // The snapshot is additive by contract. This literal was recorded by running
+    // the v102.0.0 (pre-snapshot) `drawSample` against this exact config, so the
+    // assertion is a genuine before/after diff and not a re-recording of the
+    // current implementation: if adding the field perturbed apportionment, RNG
+    // consumption order or any counter, this fails.
+    const result = drawSample(rows, config, "tester");
+    if (!result.ok) throw new Error("draw failed");
+
+    const withoutSnapshot: Partial<SampleMasterData> = omitDrawnAt(result.data);
+    delete withoutSnapshot.stageMappingsSnapshot;
+
+    expect({
+      ...withoutSnapshot,
+      rows: result.data.rows.map((r) => r.xrayImageId),
+    }).toEqual({
+      rngSeed: "golden-stage-1",
+      samplingAlgorithmVersion: "1.2",
+      totalRequested: 15,
+      totalActual: 15,
+      certScanRequested: 7,
+      nonCertScanRequested: 8,
+      certScanActual: 7,
+      nonCertScanActual: 8,
+      portAllocations: [
+        {
+          portName: "بري",
+          populationSize: 22,
+          certScanCount: 9,
+          nonCertScanCount: 13,
+          allocatedQuota: 11,
+          certScanQuota: 5,
+          nonCertScanQuota: 6,
+          actualCertScanDrawn: 5,
+          actualNonCertScanDrawn: 6,
+          actualTotalDrawn: 11,
+        },
+        {
+          portName: "بحري",
+          populationSize: 10,
+          certScanCount: 3,
+          nonCertScanCount: 7,
+          allocatedQuota: 4,
+          certScanQuota: 2,
+          nonCertScanQuota: 2,
+          actualCertScanDrawn: 2,
+          actualNonCertScanDrawn: 2,
+          actualTotalDrawn: 4,
+        },
+      ],
+      stageAllocations: [
+        { stageKey: "first", stageLabel: "المستوى الأول", populationSize: 16, targetQuota: 5, actualDrawn: 5, certScanDrawn: 3, nonCertScanDrawn: 2 },
+        { stageKey: "second", stageLabel: "المستوى الثاني", populationSize: 12, targetQuota: 6, actualDrawn: 6, certScanDrawn: 2, nonCertScanDrawn: 4 },
+        { stageKey: "third", stageLabel: "المستوى الثالث", populationSize: 4, targetQuota: 4, actualDrawn: 4, certScanDrawn: 2, nonCertScanDrawn: 2 },
+      ],
+      certScanShortfalls: [
+        {
+          stageKey: "third",
+          stageLabel: "المستوى الثالث",
+          portName: null,
+          requestedCertScanQuota: 4,
+          actualCertScanDrawn: 2,
+          availableCertScanRows: 2,
+        },
+      ],
+      unmappedStageRowCount: 0,
+      unmappedStageRawValues: [],
+      drawnBy: "tester",
+      rows: [
+        "بري-S1-C1",
+        "بري-S1-C3",
+        "بري-S1-N4",
+        "Bبحري-S1-C1",
+        "Bبحري-S1-N0",
+        "بري-S2-C2",
+        "بري-S2-N4",
+        "بري-S2-N0",
+        "بري-S2-N1",
+        "Bبحري-S2-C0",
+        "Bبحري-S2-N0",
+        "بري-S3-C0",
+        "بري-S3-C1",
+        "بري-S3-N0",
+        "بري-S3-N1",
+      ],
     });
   });
 

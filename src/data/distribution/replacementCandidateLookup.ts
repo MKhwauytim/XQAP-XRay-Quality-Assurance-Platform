@@ -15,8 +15,9 @@ import type { StageAliasMappings } from "../population/populationConfig";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import { getStageKey, type StageCountKey } from "../population/stageHelpers";
 import {
-  loadMonthPopulationFinal,
+  PopulationUnreadableError,
   loadMonthPopulationFinalRevision,
+  readMonthPopulationFinal,
 } from "../population/populationStorage";
 import {
   computeStageMappingsHash,
@@ -64,7 +65,14 @@ export async function getReplacementCandidatesIndexed(
   builtBy = "system"
 ): Promise<IndexedReplacementCandidates> {
   const sourceRevision = await loadMonthPopulationFinalRevision(directoryHandle, monthFolderName);
-  const liveHash = computeStageMappingsHash(stageMappings);
+  // The sample master is already in hand, so prefer the alias table the DRAW
+  // recorded over whatever live config currently holds (see
+  // SampleMasterData.stageMappingsSnapshot). Resolved once here and used for
+  // every mappings-dependent step below — the index freshness hash, the indexed
+  // read, the full-scan fallback and the background index rebuild — so the
+  // index can never be validated against one table and read under another.
+  const classifyMappings = sampleMaster.stageMappingsSnapshot ?? stageMappings;
+  const liveHash = computeStageMappingsHash(classifyMappings);
   const manifest =
     sourceRevision === null ? null : await loadReplacementIndexManifest(directoryHandle, monthFolderName);
 
@@ -82,7 +90,7 @@ export async function getReplacementCandidatesIndexed(
   } else if (!isReplacementIndexFresh(manifest, sourceRevision, liveHash)) {
     fallbackReason = "stale-index";
   } else {
-    const indexed = await readFromIndex(directoryHandle, monthFolderName, entry, sampleMaster, allEntries, stageMappings, manifest);
+    const indexed = await readFromIndex(directoryHandle, monthFolderName, entry, sampleMaster, allEntries, classifyMappings, manifest);
     if (indexed) return indexed;
     // Manifest claimed fresh but a bucket it lists failed to read (missing or
     // corrupt despite being published) — fall through to the safe full-scan
@@ -92,9 +100,18 @@ export async function getReplacementCandidatesIndexed(
 
   logError("distribution:replacement-index-fallback", `month=${monthFolderName} reason=${fallbackReason}`);
 
-  const finalData = await loadMonthPopulationFinal(directoryHandle, monthFolderName);
+  // T-08: an UNREADABLE population.final.json must not be laundered into an
+  // empty row list. That produced "no replacement candidates" — a factual claim
+  // about the month's data — from what is really a transient share failure, and
+  // the operator's next move is to go looking for the month in the processing
+  // tab. Refuse instead; the caller surfaces it as "unavailable, try again".
+  const finalOutcome = await readMonthPopulationFinal(directoryHandle, monthFolderName);
+  if (finalOutcome.status === "unreadable") {
+    throw new PopulationUnreadableError(monthFolderName);
+  }
+  const finalData = finalOutcome.status === "loaded" ? finalOutcome.value : null;
   const populationRows = (finalData?.rows ?? []) as PreparedPopulationRow[];
-  const result = getReplacementCandidates(entry, populationRows, sampleMaster, allEntries, stageMappings);
+  const result = getReplacementCandidates(entry, populationRows, sampleMaster, allEntries, classifyMappings);
 
   // Fire-and-forget: this call already paid the one unavoidable full read to
   // answer correctly; rebuilding the index from rows already in memory is
@@ -106,7 +123,7 @@ export async function getReplacementCandidatesIndexed(
       directoryHandle,
       monthFolderName,
       populationRows,
-      stageMappings,
+      classifyMappings,
       sourceRevision,
       builtBy
     ).catch(() => undefined);

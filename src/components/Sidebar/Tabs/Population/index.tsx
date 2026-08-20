@@ -427,10 +427,27 @@ export default function PopulationTab() {
   }
 
   const workerRef = useRef<Worker | null>(null);
+  const workerUnmountedRef = useRef(false);
+  /**
+   * PROD-1 §6: the worker used to be created ONCE by a `[]`-dep mount effect.
+   * The silence watchdog terminates it and nulls the ref on a presumed death —
+   * the comment there claimed "the mount effect recreates one on demand", which
+   * it never did — so every subsequent "قراءة الملفات" died with XQ-POP-002 and
+   * the only recovery was a page reload. Constructing lazily makes a watchdog
+   * kill actually recoverable.
+   */
+  const getWorker = (): Worker | null => {
+    if (workerUnmountedRef.current) return null;
+    if (!workerRef.current) workerRef.current = new WorkbookWorker();
+    return workerRef.current;
+  };
   useEffect(() => {
-    const w = new WorkbookWorker();
-    workerRef.current = w;
-    return () => { w.terminate(); };
+    workerUnmountedRef.current = false;
+    return () => {
+      workerUnmountedRef.current = true;
+      workerRef.current?.terminate();
+      workerRef.current = null;
+    };
   }, []);
 
   const [currentPhase, setCurrentPhase] = useState(1);
@@ -690,7 +707,7 @@ export default function PopulationTab() {
     setPopulationProcessingResult(null);
 
     const activeTemplate = config.mappingTemplates[0];
-    const worker = workerRef.current;
+    const worker = getWorker();
     if (!worker) {
       logCodedError("population:workbook-worker", "XQ-POP-002");
       setProcessingMessage(codedMessage("XQ-POP-002"));
@@ -721,9 +738,11 @@ export default function PopulationTab() {
           );
           setProcessingMessage(codedMessage("XQ-POP-007"));
           // The worker is presumed dead; terminating makes that definite and
-          // frees its memory, and the mount effect recreates one on demand.
+          // frees its memory. `getWorker()` builds a fresh one on the next read
+          // (PROD-1 §6) — before that this path left the tab permanently unable
+          // to import anything, failing every later read with XQ-POP-002.
           worker.terminate();
-          workerRef.current = null;
+          if (workerRef.current === worker) workerRef.current = null;
           cleanup(true);
         }, SILENCE_LIMIT_MS);
       };
@@ -736,19 +755,25 @@ export default function PopulationTab() {
       // become indistinguishable from a normal unparsed row (Fix, 2026-08-18:
       // it used to reset to "ready", which read as "fine, just not read yet"
       // rather than "this failed").
-      const cleanup = (didFail = false) => {
+      //
+      // PROD-1 §6: `reason` carries the worker's OWN message when it sent one,
+      // so a field report can tell the batch-level failure apart from the
+      // per-file paths without a screenshot. It falls back to the generic
+      // string when the worker died without saying anything.
+      const cleanup = (didFail = false, reason?: string) => {
         if (watchdog !== undefined) window.clearTimeout(watchdog);
         worker.removeEventListener("message", onMessage);
         worker.removeEventListener("error", onError);
         worker.removeEventListener("messageerror", onError);
         setIsProcessingWorkbooks(false);
+        const failureText = reason?.trim() ? reason : getLabels().phase_one_bi_worker_failed;
         setUploads((current) => ({
           ...current,
           biUploads: current.biUploads.map((entry) =>
             entry.state !== "parsing"
               ? entry
               : didFail
-                ? { ...entry, state: "error", acceptedRows: null, error: getLabels().phase_one_bi_worker_failed }
+                ? { ...entry, state: "error", acceptedRows: null, error: failureText, warning: undefined }
                 : { ...entry, state: "ready" }
           )
         }));
@@ -779,7 +804,7 @@ export default function PopulationTab() {
             new Error(typeof msg.error === "string" ? msg.error : JSON.stringify(msg))
           );
           setProcessingMessage(codedMessage("XQ-POP-003"));
-          cleanup(true);
+          cleanup(true, typeof msg.error === "string" ? msg.error : undefined);
         }
       };
 
@@ -1154,6 +1179,11 @@ export default function PopulationTab() {
               sampleData: drawResult.data,
               createdBy: username,
               priorMonthAdvisory: advisory,
+              // The rules and aliases this draw actually ran under, copied into
+              // the plan so it stays true after an admin edits the (workspace-
+              // global) config. Same two values passed to `drawSample` above.
+              samplingRules: config.samplingRules,
+              stageMappings: config.stageMappings,
             });
             const planResult = await saveSamplingPlan(directoryHandle, monthFolderName, plan);
             if (!planResult.ok) {

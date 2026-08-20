@@ -6,7 +6,7 @@ import { Database, Settings2, ChevronUp, ChevronDown } from "lucide-react";
 import { readSession } from "../../../../auth/authSession";
 import {
   loadBrowseRows,
-  loadMonthPopulationFinalRawText,
+  readMonthPopulationFinalRawText,
   type BrowseDatasetKind,
   type BrowseRow
 } from "../../../../data/population/populationStorage";
@@ -511,6 +511,17 @@ export default function BrowseDataView({
   const [showAllMonths, setShowAllMonths] = useState(false);
   const globalFolder = globalMonth.kind === "none" ? null : globalMonth.folderName;
   const [dataset, setDataset] = useState<BrowseDatasetKind>("population");
+  /**
+   * T-08: "could not read" is not "no data". A month whose
+   * `population.final.json` is present but unreadable (a transient SMB failure,
+   * a permission blip) used to be handed to the query worker as `{"rows":[]}`,
+   * which rendered the empty state — and that state's own copy tells the user
+   * to go re-process the month, i.e. to overwrite data that is still there.
+   * Held separately from the worker's own error so the retry below can clear it.
+   */
+  const [readFailed, setReadFailed] = useState(false);
+  /** Bumped by the error state's retry button to re-run the load effect. */
+  const [retryKey, setRetryKey] = useState(0);
 
   // Worker-backed path: scoped to the "population" dataset viewed at a single month
   // (per Task 4's brief — the proposal's stated concern is specifically the large
@@ -634,14 +645,22 @@ export default function BrowseDataView({
     let cancelled = false;
 
     if (useWorkerPath) {
-      void loadMonthPopulationFinalRawText(
-        directoryHandle as Parameters<typeof loadMonthPopulationFinalRawText>[0],
+      void readMonthPopulationFinalRawText(
+        directoryHandle as Parameters<typeof readMonthPopulationFinalRawText>[0],
         globalFolder as string
       )
-        .then((rawText) => rawText ?? JSON.stringify({ rows: [] }))
-        .catch(() => JSON.stringify({ rows: [] }))
-        .then((rawText) => {
+        .catch(() => ({ status: "unreadable" }) as const)
+        .then((outcome) => {
           if (cancelled) return;
+          if (outcome.status === "unreadable") {
+            // Never fabricate an empty dataset out of a failed read.
+            setReadFailed(true);
+            setLoading(false);
+            return;
+          }
+          setReadFailed(false);
+          // `absent` genuinely has no rows yet — the empty state is correct there.
+          const rawText = outcome.status === "loaded" ? outcome.value : JSON.stringify({ rows: [] });
           worker.loadRawJson(rawText, {
             stageMappings: config.stageMappings,
             monthFolder: globalFolder as string
@@ -649,6 +668,7 @@ export default function BrowseDataView({
           setLoadGeneration((generation) => generation + 1);
         });
     } else {
+      setReadFailed(false);
       loadBrowseRows(
         directoryHandle as Parameters<typeof loadBrowseRows>[0],
         dataset,
@@ -670,7 +690,7 @@ export default function BrowseDataView({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- worker.loadRawJson is useCallback([])-stable; including the whole `worker` object would re-run this effect every render (usePopulationBrowseWorker returns a fresh object each render)
-  }, [dataset, directoryHandle, globalFolder, isPresetLoaded, refreshKey, showAllMonths, useWorkerPath, config.stageMappings, worker.loadRawJson]);
+  }, [dataset, directoryHandle, globalFolder, isPresetLoaded, refreshKey, retryKey, showAllMonths, useWorkerPath, config.stageMappings, worker.loadRawJson]);
 
   // LINT-01c: dataset-scoped UI reset (filters/sort/open-dropdown), deferred to a
   // microtask to avoid a synchronous setState-in-effect lint error. Search is
@@ -775,6 +795,10 @@ export default function BrowseDataView({
   // (see usePopulationBrowseWorker). The fallback path has its own catch → empty
   // rows, so it never has a worker error to show.
   const browseError = useWorkerPath ? worker.error : null;
+  // Distinct from `browseError`: that one means "the worker could not use what it
+  // was given", this one means "the file could not be read at all". They render
+  // different copy because only the second one must warn against re-processing.
+  const showReadFailure = readFailed && !browseError;
 
   // Finding 10(b): the worker's "error" response carries the raw
   // `err.message` from a failed `JSON.parse` (e.g. "Unexpected token < in
@@ -1158,6 +1182,22 @@ export default function BrowseDataView({
         />
       )}
 
+      {showReadFailure && (
+        <ErrorState
+          title={labels.browse_load_failed_title}
+          description={labels.browse_load_failed_desc}
+          actions={
+            <button
+              type="button"
+              className="bv-clear-filters-btn"
+              onClick={() => setRetryKey((key) => key + 1)}
+            >
+              {labels.browse_load_failed_retry}
+            </button>
+          }
+        />
+      )}
+
       {/* A10 (perf/sync enhancement 2026-08-12): blank only on the very first
           load for this component's lifetime (loadGeneration === 0). A later
           reload (refreshKey bump, dataset/month switch) instead keeps
@@ -1165,7 +1205,7 @@ export default function BrowseDataView({
           effect's own comment: it never clears `rows`/`queryResult` when a
           reload starts, only when the reload's own new data lands -- and
           renders a dimmed overlay instead of unmounting the table (F24). */}
-      {!browseError && loading && loadGeneration === 0 && (
+      {!browseError && !showReadFailure && loading && loadGeneration === 0 && (
         <LoadingState label={showAllMonths ? "جاري تحميل بيانات جميع الأشهر..." : "جاري تحميل بيانات الشهر المحدد..."} />
       )}
 
@@ -1176,7 +1216,7 @@ export default function BrowseDataView({
           A1 makes the manager's landing view. `!loading` is sufficient to
           exclude both the initial load and a refresh, since isRefreshing
           implies loading. */}
-      {!browseError && !loading && total === 0 && (
+      {!browseError && !showReadFailure && !loading && total === 0 && (
         <EmptyState
           icon={<Database />}
           title="لا توجد بيانات محفوظة لهذا المصدر بعد"
@@ -1184,7 +1224,7 @@ export default function BrowseDataView({
         />
       )}
 
-      {!browseError && loadGeneration > 0 && (isRefreshing || total > 0) && (
+      {!browseError && !showReadFailure && loadGeneration > 0 && (isRefreshing || total > 0) && (
         <div className={`bv-table-view${isRefreshing ? " bv-table-view-refreshing" : ""}`} aria-busy={isRefreshing}>
           {isRefreshing && (
             <div className="bv-table-refresh-overlay" role="status" aria-live="polite">

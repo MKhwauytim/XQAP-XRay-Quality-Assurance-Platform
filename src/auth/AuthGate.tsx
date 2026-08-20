@@ -14,6 +14,7 @@ import "./AuthGate.css";
 
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import { AdminToolbar } from "./AdminToolbar";
+import { FeedbackUnreadProvider } from "../data/feedback/FeedbackUnreadProvider";
 import {
   ADMIN_SHORTCUT_KEYS,
   BOOTSTRAP_ADMIN_USERNAME,
@@ -647,16 +648,25 @@ export default function AuthGate({ children }: AuthGateProps) {
             SyncTick via useWorkspace(); the demo/viewer session is gated here,
             since only AuthGate knows the session mode. */}
         <SyncTick enabled={session.mode !== "demo"} />
-        <AdminToolbar
-          session={session}
-          previewRole={previewRole}
-          onPreviewRoleChange={changePreviewRole}
-          onFeedback={() => window.dispatchEvent(new CustomEvent("feedback:toggle"))}
-        />
+        {/* The unread-feedback count is read once here and shared by BOTH
+            triggers of the feedback widget: the toolbar icon below (real admin)
+            and the floating button inside the app tree (everyone else). They sit
+            on opposite sides of this subtree, so the provider has to wrap both —
+            otherwise each would poll the same file for the same dot. Keyed on
+            the REAL identity, not the previewed role: an admin previewing
+            "employee" is still reading their own inbox. */}
+        <FeedbackUnreadProvider session={session}>
+          <AdminToolbar
+            session={session}
+            previewRole={previewRole}
+            onPreviewRoleChange={changePreviewRole}
+            onFeedback={() => window.dispatchEvent(new CustomEvent("feedback:toggle"))}
+          />
 
-        <SessionActionsContext.Provider value={sessionActions}>
-          {renderAuthenticatedChildren(effectiveSession)}
-        </SessionActionsContext.Provider>
+          <SessionActionsContext.Provider value={sessionActions}>
+            {renderAuthenticatedChildren(effectiveSession)}
+          </SessionActionsContext.Provider>
+        </FeedbackUnreadProvider>
       </GlobalMonthProvider>
     );
   }

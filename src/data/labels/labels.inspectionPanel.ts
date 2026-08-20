@@ -25,6 +25,10 @@ export const inspectionPanelLabels = {
   // ── Segmented verdict control ─────────────────────────────────────────────
   ip_segmented_group_aria:     "اختيار الإجابة",
 
+  // ── Multi-select option group ─────────────────────────────────────────────
+  ip_multiselect_group_aria:   "اختيار متعدد",
+  ip_multiselect_hint:         "يمكن اختيار أكثر من خيار",
+
   // ── Footer ────────────────────────────────────────────────────────────────
   /**
    * NOTE (design handoff §7): the approved mock labels the primary action

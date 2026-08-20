@@ -89,6 +89,46 @@ describe("processBiWorkbook · owner-reported 0-accepted bug (2026-08-12)", () =
   });
 });
 
+// duplicate-normalized-headers (Batch 4): computed ONCE per sheet from the
+// header row and threaded onto the sheet summary. Detection-only — precedence
+// (createHeaderLookup's last Map.set wins) is unchanged.
+describe("processBiWorkbook · duplicate-normalizing header diagnostic (Batch 4)", () => {
+  it("attaches duplicateHeaders to the sheet summary when two source headers normalize to the same key", async () => {
+    const fatha = String.fromCodePoint(0x064b);
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([
+      ["معرف الأشعة", "اسم المنفذ", "اسم" + fatha + " المنفذ"],
+      ["X-1", "الميناء الأول", "الميناء الثاني"]
+    ]);
+    XLSX.utils.book_append_sheet(wb, ws, "بري صادر");
+    const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+    const file = new File([buf], "bi-dup.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+
+    const result = await processBiWorkbook(file);
+
+    const sheet = result.sheetSummaries[0];
+    expect(sheet).toBeDefined();
+    expect(sheet!.duplicateHeaders).toEqual([
+      { normalized: "اسم المنفذ", originals: ["اسم المنفذ", "اسم" + fatha + " المنفذ"] }
+    ]);
+    // Precedence is untouched: portName still reads whichever header
+    // createHeaderLookup's Map.set applied last.
+    expect(result.rows[0]!.portName).toBe("الميناء الثاني");
+  });
+
+  it("does not attach duplicateHeaders when no source headers in the sheet collide", async () => {
+    const file = buildBiWorkbookFile([
+      { sheetName: "بري صادر", header: "معرف الأشعة", values: ["202605090023680130"] },
+    ]);
+
+    const result = await processBiWorkbook(file);
+
+    expect(result.sheetSummaries[0]!.duplicateHeaders).toBeUndefined();
+  });
+});
+
 /** Build a real .csv File in memory — SheetJS parses it through the same XLSX.read path. */
 function buildBiCsvFile(fileName: string, header: string, values: string[]): File {
   const csv = [header, ...values].join("\n");
@@ -109,6 +149,7 @@ function biResult(overrides: Partial<BiWorkbookResult> = {}): BiWorkbookResult {
     rows: [],
     sheetSummaries: [],
     unknownSheetNames: [],
+    unmatchedSheetNames: [],
     totalOriginalRows: 0,
     totalNormalizedRows: 0,
     totalExcludedMissingXrayIdCount: 0,
@@ -198,28 +239,68 @@ describe("CSV support · sheet name derived from the file name", () => {
     expect(result.rows.every((row) => row.source === "بحري وارد")).toBe(true);
   });
 
-  it("failure: a CSV whose derived name matches no configured pattern is reported as unknown, not imported as a silent zero", async () => {
+  // PROD-1 (2026-08-19) — this test used to pin the OPPOSITE contract: an
+  // unmatched CSV name discarded the file's rows and reported it as unknown, so
+  // usePhaseOneUploads rendered a red error row for a perfectly good file. That
+  // rule cost the owner every multi-file BI import whose exporter names files
+  // "BI_Export_2026-05_part1.csv". The name is now advisory only.
+  it("failure→advisory: a CSV whose derived name matches no configured pattern is IMPORTED under that name and reported in unmatchedSheetNames", async () => {
     const file = buildBiCsvFile("تصدير عشوائي.csv", "معرف الأشعة", ["30B9202605010002"]);
 
     const result = await processBiWorkbook(file);
 
-    expect(result.unknownSheetNames).toEqual(["تصدير عشوائي"]);
-    expect(result.sheetSummaries).toHaveLength(0);
-    expect(result.totalNormalizedRows).toBe(0);
-    // This pair — zero accepted rows plus a non-empty unknown list — is exactly
-    // what index.tsx turns into an explicit error row for the file.
-    expect(result.totalNormalizedRows === 0 && result.unknownSheetNames.length > 0).toBe(true);
+    // Not excluded — `unknownSheetNames` keeps meaning "contributed no rows".
+    expect(result.unknownSheetNames).toEqual([]);
+    expect(result.unmatchedSheetNames).toEqual(["تصدير عشوائي"]);
+    expect(result.totalNormalizedRows).toBe(1);
+    expect(result.sheetSummaries).toHaveLength(1);
+    expect(result.sheetSummaries[0]!.source).toBe("تصدير عشوائي");
+    expect(result.sheetSummaries[0]!.sourceMatched).toBe(false);
+    expect(result.rows[0]!.source).toBe("تصدير عشوائي");
+    // The pair usePhaseOneUploads used to turn into a red error row can no
+    // longer arise from a name mismatch alone.
+    expect(result.totalNormalizedRows === 0 && result.unknownSheetNames.length > 0).toBe(false);
   });
 
-  it("failure: an .xlsx with an unrecognized sheet name keeps the permissive fallback (unchanged behaviour)", async () => {
-    const file = buildBiWorkbookFile([
-      { sheetName: "ورقة غريبة", header: "معرف الأشعة", values: ["30B9202605010002"] }
-    ]);
+  it("control: the SAME data as .xlsx with an unrecognized sheet name imports identically — CSV and XLSX must not diverge", async () => {
+    const csv = await processBiWorkbook(
+      buildBiCsvFile("ورقة غريبة.csv", "معرف الأشعة", ["30B9202605010002"])
+    );
+    const excel = await processBiWorkbook(
+      buildBiWorkbookFile([
+        { sheetName: "ورقة غريبة", header: "معرف الأشعة", values: ["30B9202605010002"] }
+      ])
+    );
 
-    const result = await processBiWorkbook(file);
+    for (const result of [csv, excel]) {
+      expect(result.unknownSheetNames).toEqual([]);
+      expect(result.unmatchedSheetNames).toEqual(["ورقة غريبة"]);
+      expect(result.totalNormalizedRows).toBe(1);
+      expect(result.sheetSummaries[0]!.source).toBe("ورقة غريبة");
+    }
+  });
 
-    expect(result.unknownSheetNames).toEqual([]);
-    expect(result.totalNormalizedRows).toBe(1);
-    expect(result.sheetSummaries[0]!.source).toBe("ورقة غريبة");
+  it("happy: a matched name reports no advisory at all", async () => {
+    const result = await processBiWorkbook(
+      buildBiCsvFile("بحري وارد.csv", "معرف الأشعة", ["30B9202605010002"])
+    );
+
+    expect(result.unmatchedSheetNames).toEqual([]);
+    expect(result.sheetSummaries[0]!.sourceMatched).toBe(true);
+  });
+});
+
+describe("mergeBiWorkbookResults · unmatchedSheetNames stays separate from unknownSheetNames", () => {
+  it("unions the advisory list without folding it into the exclusion list", () => {
+    const merged = mergeBiWorkbookResults(
+      [
+        biResult({ unmatchedSheetNames: ["BI_part1"], unknownSheetNames: [] }),
+        biResult({ unmatchedSheetNames: ["BI_part1", "BI_part2"], unknownSheetNames: ["فارغة"] })
+      ],
+      ["a.csv", "b.csv"]
+    );
+
+    expect(merged.unmatchedSheetNames).toEqual(["BI_part1", "BI_part2"]);
+    expect(merged.unknownSheetNames).toEqual(["فارغة"]);
   });
 });

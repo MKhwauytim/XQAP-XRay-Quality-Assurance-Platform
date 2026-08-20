@@ -293,12 +293,18 @@ test("drawSample under-fills (never backfills) a CertScan shortfall and reports 
   expect(result.data.nonCertScanActual).toBe(17);
 
   // 2) The shortfall is captured as structured data, not just a side-effect of
-  // the counts above — stage, port, requested vs. achieved, and pool size.
+  // the counts above — stage, requested vs. achieved, and pool size.
+  //
+  // Re-recorded for "1.2" (2026-08-19): `portName` is now null. The request
+  // (50% of the exact-20 target = 10) is computed once for the stage, so the
+  // over-ask against the 3-row CertScan pool is detected at stage level before
+  // apportionment, exactly as the `exact` method has always done. Every other
+  // field — and every drawn row asserted above — is unchanged.
   expect(result.data.certScanShortfalls).toEqual([
     {
       stageKey: "second",
       stageLabel: "المستوى الثاني",
-      portName: "بري",
+      portName: null,
       requestedCertScanQuota: 10,
       actualCertScanDrawn: 3,
       availableCertScanRows: 3,
@@ -499,7 +505,9 @@ test("P4: the legacy totalSampleSize path leaves unmappedStageRowCount undefined
 
 test("P4: SAMPLING_ALGORITHM_VERSION is unchanged by the unmapped-stage diagnostic (additive, not semantic)", async () => {
   const { SAMPLING_ALGORITHM_VERSION } = await import("./sampleAlgorithm");
-  expect(SAMPLING_ALGORITHM_VERSION).toBe("1.1");
+  // "1.2" (2026-08-19): bumped by the per-port CertScan rounding fix, NOT by the
+  // P4 diagnostic this test guards — that one is still additive-only.
+  expect(SAMPLING_ALGORITHM_VERSION).toBe("1.2");
 });
 
 
@@ -571,6 +579,12 @@ test("drawSample backfills a CertScan shortfall from NonCertscan and still hits 
 // (populationConfig.ts), and "preferred" is what the owner's workflow wants.
 // The test exists so that if anyone later intends "mandatory" to really
 // under-fill, they find out here that spillover is what they have to change.
+//
+// RULED DELIBERATE 2026-08-19 — mandatory remains total-preserving. Re-examined
+// while landing the "1.2" per-port CertScan rounding fix and explicitly kept:
+// that fix changes WHICH CertScan rows a percentage rule asks for, never whether
+// a stage reaches its total. The convergence pinned below is in scope of the
+// contract and must not be "fixed" as a side effect of a CertScan change.
 test("certScanStrategy `mandatory` still reaches the stage target, because spillover refills the gap", () => {
   const rows = [
     ...makeRows("بري", 120, 4680).map((r) => ({ ...r, stage: "SECOND_STAGE" })),
@@ -596,4 +610,55 @@ test("certScanStrategy `mandatory` still reaches the stage target, because spill
   expect(result.data.certScanActual).toBe(200);
   expect(result.data.nonCertScanActual).toBe(1800);
   expect(result.data.totalActual).toBe(2000);
+});
+
+
+// Regression (2026-08-19, "1.2"): the `percentage` CertScan target used to be
+// rounded independently PER PORT — `Math.round(pct/100 * allocated)` inside
+// stagePortDraw. With ten ports each allocated a single seat and a configured
+// 50%, every port rounded 0.5 UP to 1 and the stage drew 100% CertScan: the
+// rounding ran N times and always broke the same way, so the error compounded
+// instead of cancelling. It also disagreed with `certScanConfiguredTarget`, the
+// stage-level figure Phase 3 shows the user before the draw.
+//
+// The target is now rounded once for the stage and Hamilton-apportioned across
+// the ports, so exactly 5 of the 10 seats are CertScan. This is the smallest
+// configuration that reproduces the old bias at full strength (every port sits
+// exactly on the .5 boundary).
+test("drawSample rounds a `percentage` CertScan target once per STAGE, not once per port (10 ports x 1 seat at 50% draws 5 CertScan, not 10)", () => {
+  const rows = Array.from({ length: 10 }, (_, index) =>
+    makeRows(`port-${String(index).padStart(2, "0")}`, 1, 1)
+  )
+    .flat()
+    .map((row) => ({ ...row, stage: "SECOND_STAGE" }));
+  expect(rows).toHaveLength(20);
+  expect(rows.filter((row) => row.certScanStatus === "Certscan")).toHaveLength(10);
+
+  const samplingRules: StageSamplingRule[] = [
+    {
+      stageKey: "second",
+      method: "exact",
+      value: 10,
+      isLocked: false,
+      minRequiredCount: 0,
+      certScanPercentage: 50,
+      certScanExactCount: 0,
+      certScanMethod: "percentage",
+      certScanStrategy: "preferred",
+    },
+  ];
+
+  const result = drawSample(rows, { rngSeed: "per-port-rounding-bias", samplingRules }, "user");
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+
+  // Each port is allocated exactly 1 seat, so the old code drew 10/10 CertScan.
+  expect(result.data.portAllocations.every((port) => port.allocatedQuota === 1)).toBe(true);
+  expect(result.data.totalActual).toBe(10);
+  expect(result.data.certScanActual).toBe(5);
+  expect(result.data.nonCertScanActual).toBe(5);
+  // The request itself is honest too, not just the outcome after capping.
+  expect(result.data.certScanRequested).toBe(5);
+  // A satisfiable request is not a shortfall.
+  expect(result.data.certScanShortfalls).toEqual([]);
 });

@@ -309,6 +309,14 @@ export async function appendSampleRow(
   // back to DEFAULT_STAGE_MAPPINGS, so a workspace using custom stage aliases
   // classifies the replacement row as "unknown" and silently drops it from
   // stageAllocations — permanently under-counting the stage in every report.
+  //
+  // FALLBACK ONLY as of v103. A sample master drawn under current code carries
+  // `stageMappingsSnapshot` — the resolved table the draw itself classified
+  // against — and that wins over this parameter (see below). "Must match the
+  // mappings the month was drawn under" was previously an unenforceable hope:
+  // callers pass LIVE config, which an admin can edit at any time between the
+  // draw and the replacement. This parameter now only decides the outcome for a
+  // month drawn before the snapshot existed.
   stageMappings?: Partial<StageAliasMappings>,
   /** Id of the sample row this row replaces. Omit for a non-replacement append. */
   replacesXrayImageId?: string
@@ -345,6 +353,12 @@ export async function appendSampleRow(
         return { done: true, result: { ok: false as const, error: codedMessage("XQ-SMP-008") } };
       }
 
+      // Classify against the table the DRAW used, not the table live config
+      // happens to hold now. `current` is already in hand here — this costs no
+      // extra read. Falls back to the caller's live mappings for a legacy
+      // master with no snapshot (deliberate: nothing is rewritten on read).
+      const classifyMappings = current.stageMappingsSnapshot ?? stageMappings;
+
       const nextRevision = (current.revision ?? 0) + 1;
       const isCertScan = isCertScanRow(newRow);
       const deadIsCertScan = deadRow ? isCertScanRow(deadRow) : false;
@@ -353,11 +367,11 @@ export async function appendSampleRow(
       let stageAllocations = current.stageAllocations;
       if (appendsRow) {
         portAllocations = adjustPortAllocations(portAllocations, newRow, 1);
-        stageAllocations = adjustStageAllocations(stageAllocations, newRow, 1, stageMappings);
+        stageAllocations = adjustStageAllocations(stageAllocations, newRow, 1, classifyMappings);
       }
       if (deadRow) {
         portAllocations = adjustPortAllocations(portAllocations, deadRow, -1);
-        stageAllocations = adjustStageAllocations(stageAllocations, deadRow, -1, stageMappings);
+        stageAllocations = adjustStageAllocations(stageAllocations, deadRow, -1, classifyMappings);
       }
 
       const nextRows = appendsRow ? [...current.rows, newRow] : current.rows;

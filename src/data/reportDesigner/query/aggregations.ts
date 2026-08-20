@@ -9,6 +9,29 @@ function toNumbers(values: unknown[]): number[] {
   return out;
 }
 
+/**
+ * `aggregate`, but returning `null` for the cases where no honest number exists —
+ * the app-wide KPI invariant ("a null denominator renders «—», never 0", already
+ * enforced in `kpiSelectors`/`aggregates`/`reviewerKpis`) applied to the Report
+ * Designer's own aggregator:
+ *
+ * - `avg` / `min` / `max` over zero numeric values — undefined, not 0.
+ * - `percentOfTotal` with a zero grand total — a share of nothing, not 0%.
+ *
+ * `count`, `distinctCount` and `sum` are never null: zero of something counted, or
+ * the empty sum, is a real answer rather than a stand-in for a missing one.
+ *
+ * Kept as a wrapper so `aggregate` itself stays byte-for-byte unchanged for any
+ * caller that genuinely wants the numeric-with-zero-fallback behavior.
+ */
+export function aggregateOrNull(agg: Aggregation, values: unknown[], grandTotal = 0): number | null {
+  if (agg === "avg" || agg === "min" || agg === "max") {
+    if (toNumbers(values).length === 0) return null;
+  }
+  if (agg === "percentOfTotal" && grandTotal === 0) return null;
+  return aggregate(agg, values, grandTotal);
+}
+
 export function aggregate(agg: Aggregation, values: unknown[], grandTotal = 0): number {
   switch (agg) {
     case "count":

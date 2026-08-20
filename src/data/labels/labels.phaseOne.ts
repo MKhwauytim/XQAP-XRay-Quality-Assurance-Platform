@@ -48,4 +48,29 @@ export const phaseOneLabels = {
    * explicit. `{sheets}` lists the unmatched names.
    */
   phase_one_bi_unclassified: "لم يتطابق أي اسم ورقة في هذا الملف مع أنماط الأوراق المُعرّفة ({sheets})، ولم يُقبل منه أي صف. أعد تسمية الملف باسم الورقة (مثل: بحري وارد) أو عدّل أنماط الأوراق في إعدادات الربط.",
+  /**
+   * PROD-1: the file imported normally, but no configured pattern matched its
+   * sheet/file name, so the name itself was used as the source. A non-blocking
+   * advisory — the row stays "ready" and its rows are in the population.
+   * `{sheets}` lists the unmatched names.
+   */
+  phase_one_bi_unmatched_name: "تم استيراد الصفوف واستُخدم اسم الملف كمصدر ({sheets}) لأن الاسم لا يطابق أنماط الأوراق المُعرّفة.",
+  /**
+   * Fallback for a per-file failure whose thrown error carried no message —
+   * the row used to render red with "—" as its only text.
+   */
+  phase_one_bi_unknown_error: "تعذّرت قراءة هذا الملف لسبب غير معروف. راجع سجل الأخطاء لمعرفة التفاصيل.",
+  /** A file that parsed but yielded no usable row at all. */
+  phase_one_bi_no_rows: "لم يُقرأ أي صف من هذا الملف. تحقّق من أن الملف يحتوي على صف عناوين وصفوف بيانات.",
+
+  // ── Duplicate-normalizing header diagnostic (detection-only) ───────────────
+  /**
+   * Detection-only warning: two or more source column headers in `{sheet}`
+   * normalize to the same internal key `{normalized}` (originals listed in
+   * `{originals}`). The system silently keeps only the LAST matching column's
+   * value for that field — this warning does not change that behavior, it only
+   * surfaces it so the operator can see which columns collapsed together.
+   */
+  phase_one_duplicate_headers_warning:
+    'تنبيه: في ورقة "{sheet}" يؤول أكثر من عمود إلى نفس المفتاح الموحّد "{normalized}" ({originals}). يعتمد النظام قيمة آخر عمود مطابق فقط لهذا الحقل — تحقّق من إعدادات تعيين الأعمدة إذا كانت هذه القيمة غير متوقعة.',
 } as const;

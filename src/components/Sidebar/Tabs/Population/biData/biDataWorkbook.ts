@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
 import { yieldToMain } from "../../../../../data/storage/yieldToMain";
-import { normalizeBiRow } from "./biDataNormalizer";
+import { detectDuplicateNormalizedHeaders, normalizeBiRow } from "./biDataNormalizer";
 import { BI_COLUMN_ALIASES } from "./biDataColumns";
 import type {
   BiSheetSummary,
@@ -49,11 +49,19 @@ function normalizeArabicText(value: string): string {
  *
  * `matched` reports whether the name actually hit one of the configured
  * patterns, as opposed to falling through to the permissive "use the sheet's
- * own name" branch. Callers that can afford that fallback (a multi-sheet
- * .xlsx — unchanged behaviour) ignore it; the CSV path uses it to raise an
- * explicit error instead of importing zero rows silently, because a CSV's
- * single derived name IS the whole classification: if it matches nothing,
- * nothing about the file is classifiable.
+ * own name" branch.
+ *
+ * PROD-1 (2026-08-19): `matched` is ADVISORY ONLY — it never decides whether a
+ * sheet's rows are imported. It used to: a CSV whose derived name missed every
+ * pattern was hard-failed before `worksheetToSourceRows` ever ran, so a
+ * perfectly well-formed export named `BI_Export_2026-05.csv` contributed zero
+ * rows and a red error row, while the SAME bytes packaged as `.xlsx` (whose
+ * unrecognised sheet names have always taken the permissive fallback) imported
+ * fine. That asymmetry was the whole defect. The classification is not
+ * load-bearing anyway — BI↔risk matching keys on `xrayImageId + portName`
+ * (`processing/populationProcessor.ts`), and `source` only surfaces as the
+ * "Source" export column — so an unmatched name is now reported through
+ * `unmatchedSheetNames` and the rows are kept.
  */
 function detectBiSourceInfo(
   sheetName: string,
@@ -86,13 +94,13 @@ function detectBiSourceInfo(
 
 /**
  * A CSV parses to exactly one sheet that SheetJS names "Sheet1", which carries
- * no classification information at all — every row would land in
- * `unknownSheetNames` and the file would import zero rows silently. The file
- * name is where the operator actually put the source ("بحري وارد.csv"), so the
- * single sheet is renamed to the file's base name before source detection.
- * That makes a CSV classify through exactly the same detection + column-mapping
- * + normalizer path a same-named sheet inside an .xlsx does — one parser, one
- * mapping path, one normalizer.
+ * no classification information at all. The file name is where the operator
+ * actually put the source ("بحري وارد.csv"), so the single sheet is renamed to
+ * the file's base name before source detection. That makes a CSV classify
+ * through exactly the same detection + column-mapping + normalizer path a
+ * same-named sheet inside an .xlsx does — one parser, one mapping path, one
+ * normalizer, and (since PROD-1) one import rule: an unrecognised name is
+ * reported, never a reason to discard the rows.
  */
 export function deriveSheetNameFromFileName(fileName: string): string {
   const base = fileName.split(/[\\/]/).pop() ?? fileName;
@@ -183,7 +191,13 @@ export async function processBiWorkbook(
 
   const allRows: NormalizedBiRow[] = [];
   const sheetSummaries: BiSheetSummary[] = [];
+  // "Excluded from the population" — the only member of this pair that means a
+  // sheet contributed nothing. Consumed as such by PhaseOneUpload's summary
+  // card, reportDataBuilder and index.tsx's warning strip.
   const unknownSheetNames: string[] = [];
+  // Advisory only: the sheet WAS imported, using its own name as the source,
+  // because no configured pattern matched it. Never mix the two arrays.
+  const unmatchedSheetNames: string[] = [];
 
   const totalSheets = workbook.SheetNames.length;
   for (let i = 0; i < totalSheets; i++) {
@@ -193,10 +207,12 @@ export async function processBiWorkbook(
     onProgress?.(`معالجة ورقة ذكاء الأعمال "${sheetName}"...`, Math.round(30 + (i / totalSheets) * 60));
     await yieldToMain();
 
-    // A CSV whose derived name matches no configured pattern is unclassifiable:
-    // record it as unknown so the UI raises an explicit error row for the file
-    // instead of reporting a successful import of zero rows.
-    if (!source || (isCsv && !matched)) {
+    // `detectBiSourceInfo` only returns a null source for an empty sheet name,
+    // so this is effectively unreachable — it stays as the one honest reason to
+    // exclude a sheet from the population. An unmatched NAME is not one (PROD-1):
+    // that used to `continue` here for a CSV, discarding every row of a
+    // well-formed file before it was even read.
+    if (!source) {
       unknownSheetNames.push(sheetName);
       continue;
     }
@@ -249,15 +265,28 @@ export async function processBiWorkbook(
 
     for (const row of validRows) allRows.push(row);
 
+    // Recorded AFTER the rows are kept, so the two arrays can never be confused:
+    // this one says "imported, but the source was taken from the sheet/file name".
+    if (!matched) unmatchedSheetNames.push(sheetName);
+
+    // Computed ONCE per sheet from the header row — never per data row, so it
+    // never touches the per-row hot path normalizeBiRow runs.
+    const duplicateHeaders =
+      sourceRows.length > 0
+        ? detectDuplicateNormalizedHeaders(Object.keys(sourceRows[0].row))
+        : [];
+
     sheetSummaries.push({
       sheetName,
       source,
+      sourceMatched: matched,
       originalRowCount: sourceRows.length,
       normalizedRowCount: validRows.length,
       excludedMissingXrayIdCount,
       ...(validRows.length === 0 && sourceRows.length > 0
         ? { zeroIdDiagnostic: buildZeroXrayIdDiagnostic(sourceRows, columnMappings) }
-        : {})
+        : {}),
+      ...(duplicateHeaders.length > 0 ? { duplicateHeaders } : {})
     });
   }
 
@@ -278,6 +307,7 @@ export async function processBiWorkbook(
     rows: allRows,
     sheetSummaries,
     unknownSheetNames,
+    unmatchedSheetNames,
     totalOriginalRows,
     totalNormalizedRows: allRows.length,
     totalExcludedMissingXrayIdCount
@@ -310,6 +340,8 @@ export function mergeBiWorkbookResults(
   const sheetSummaries: BiSheetSummary[] = [];
   const unknownSheetNames: string[] = [];
   const seenUnknown = new Set<string>();
+  const unmatchedSheetNames: string[] = [];
+  const seenUnmatched = new Set<string>();
 
   let totalOriginalRows = 0;
   let totalNormalizedRows = 0;
@@ -339,6 +371,15 @@ export function mergeBiWorkbookResults(
       if (!unknownSheetNames.includes(unknown)) unknownSheetNames.push(unknown);
     }
 
+    // Same union rule, separate array — an advisory ("imported under its own
+    // name") must never be folded into the exclusion list.
+    for (const unmatched of result.unmatchedSheetNames) {
+      const key = fileName === undefined ? unmatched : `${fileName} ${unmatched}`;
+      if (seenUnmatched.has(key)) continue;
+      seenUnmatched.add(key);
+      if (!unmatchedSheetNames.includes(unmatched)) unmatchedSheetNames.push(unmatched);
+    }
+
     totalOriginalRows += result.totalOriginalRows;
     totalNormalizedRows += result.totalNormalizedRows;
     totalExcludedMissingXrayIdCount += result.totalExcludedMissingXrayIdCount;
@@ -348,6 +389,7 @@ export function mergeBiWorkbookResults(
     rows,
     sheetSummaries,
     unknownSheetNames,
+    unmatchedSheetNames,
     totalOriginalRows,
     totalNormalizedRows,
     totalExcludedMissingXrayIdCount

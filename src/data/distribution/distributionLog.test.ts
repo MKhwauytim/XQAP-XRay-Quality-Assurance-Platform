@@ -11,8 +11,10 @@ import {
   buildReplacedEvent,
   buildReplacementRequestedEvent,
   computeDaysRemainingForDeadline,
-  deriveCurrentDistribution
+  deriveCurrentDistribution,
+  sampleRowsFingerprint
 } from "./distributionLog";
+import { hashSeedString } from "../sampling/rng";
 import type { DistributionLog } from "./distributionTypes";
 
 function makeRow(id: string): PreparedPopulationRow {
@@ -382,4 +384,41 @@ test("daily quota is derived from assignment date through three days before mont
   expect(result.quotas?.emp1?.sampleCount).toBe(1000);
   expect(result.quotas?.emp1?.daysRemainingAtAssignment).toBe(27);
   expect(result.quotas?.emp1?.dailyQuota).toBe(38);
+});
+
+// ── sampleRowsFingerprint (v4 cache validity) ──────────────────────────────
+
+test("sampleRowsFingerprint distinguishes same-length row sets with different ids", () => {
+  const a = sampleRowsFingerprint([makeRow("A1"), makeRow("B2")]);
+  const b = sampleRowsFingerprint([makeRow("A1"), makeRow("C3")]);
+  // The exact case the length-only discriminator could not see: a replacement
+  // swap retires one row and appends another, leaving the count unchanged.
+  expect(a).not.toBe(b);
+});
+
+test("sampleRowsFingerprint is order-sensitive and count-prefixed", () => {
+  const forward = sampleRowsFingerprint([makeRow("A1"), makeRow("B2")]);
+  const reversed = sampleRowsFingerprint([makeRow("B2"), makeRow("A1")]);
+  expect(forward).not.toBe(reversed);
+  expect(forward.startsWith("2:")).toBe(true);
+  expect(sampleRowsFingerprint([]).startsWith("0:")).toBe(true);
+});
+
+test("sampleRowsFingerprint is stable for the same rows and matches the djb2 of the joined ids", () => {
+  const rows = [makeRow("A1"), makeRow("B2"), makeRow("C3")];
+  expect(sampleRowsFingerprint(rows)).toBe(sampleRowsFingerprint([...rows]));
+  // Pins the documented definition: djb2 over the ids joined with "|", i.e.
+  // the streamed loop must stay bit-identical to the materialized join.
+  const joined = hashSeedString(rows.map((row) => row.xrayImageId).join("|"));
+  expect(sampleRowsFingerprint(rows)).toBe(`3:${joined.toString(16)}`);
+});
+
+test("deriveCurrentDistribution stamps the fingerprint of the rows it folded against", () => {
+  const rows = [makeRow("A1"), makeRow("B2")];
+  const log = makeLog([
+    buildAssignEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "admin" })
+  ]);
+  expect(deriveCurrentDistribution(log, rows).sampleRowsFingerprint).toBe(
+    sampleRowsFingerprint(rows)
+  );
 });

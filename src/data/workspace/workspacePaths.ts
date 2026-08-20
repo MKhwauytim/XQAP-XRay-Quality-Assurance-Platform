@@ -47,6 +47,35 @@ export const REPORTS_SUBFOLDERS = {
 } as const;
 
 /**
+ * Children of `5-system/notifications/`.
+ *
+ * `acks/` holds ONE file per acknowledging employee (`{username}.acks.json`).
+ * Acknowledgements used to live inside the shared `notifications.json`, so
+ * every employee pressing "قبول" rewrote the one file every other employee was
+ * also rewriting. The per-writer split follows the approvals precedent
+ * (`{supervisor}.decisions.json`): an employee only ever writes his own file,
+ * so cross-user contention on the acknowledgement path is impossible.
+ * Broadcasts themselves stay in the shared file — admin-written, low frequency.
+ */
+export const NOTIFICATIONS_SUBFOLDERS = {
+  acks: "acks",
+} as const;
+
+/**
+ * `5-system/audit/` children holding the PER-USER audit logs.
+ *
+ * The shared single files (`activity.log.json`, `actions.log.json`,
+ * `actions.archive.{year}.json`) still sit directly in `audit/` and are read
+ * forever — they are never rewritten, moved or deleted. New writes go into
+ * these folders, one file per writer, so two employees working at the same time
+ * never contend for the same file.
+ */
+export const AUDIT_SUBFOLDERS = {
+  activity: "activity",
+  actions: "actions",
+} as const;
+
+/**
  * A workspace root folder that is genuinely not there.
  *
  * Named `NotFoundError` on purpose: every optional-file reader in the data layer
@@ -465,6 +494,36 @@ export async function getTemplatesRoot(
   return getRoot(directoryHandle, WORKSPACE_ROOTS.templates, LEGACY_WORKSPACE_ROOTS.templates, create);
 }
 
+/** `5-system/notifications/` — the shared broadcast log plus the `acks/` subfolder. */
+export async function getNotificationsDir(
+  directoryHandle: DirectoryHandleLike,
+  create = true
+): Promise<DirectoryHandleLike> {
+  return getChildDir(
+    directoryHandle,
+    WORKSPACE_ROOTS.system,
+    () => getSystemRoot(directoryHandle, create),
+    SYSTEM_FOLDER_NAMES.notifications,
+    create,
+    null
+  );
+}
+
+/** `5-system/notifications/acks/` — see `NOTIFICATIONS_SUBFOLDERS.acks`. */
+export async function getNotificationAcksDir(
+  directoryHandle: DirectoryHandleLike,
+  create = true
+): Promise<DirectoryHandleLike> {
+  return getChildDir(
+    directoryHandle,
+    `${WORKSPACE_ROOTS.system}/${SYSTEM_FOLDER_NAMES.notifications}`,
+    () => getNotificationsDir(directoryHandle, create),
+    NOTIFICATIONS_SUBFOLDERS.acks,
+    create,
+    null
+  );
+}
+
 /** `5-system/adhoc-imports/` — see `SYSTEM_FOLDER_NAMES.adhocImports`. */
 export async function getAdhocImportsDir(
   directoryHandle: DirectoryHandleLike,
@@ -475,6 +534,58 @@ export async function getAdhocImportsDir(
     WORKSPACE_ROOTS.system,
     () => getSystemRoot(directoryHandle, create),
     SYSTEM_FOLDER_NAMES.adhocImports,
+    create,
+    null
+  );
+}
+
+/**
+ * `5-system/audit/` — resolved through `getChildDir`, so it is handle-cached
+ * AND registered with `registerDirectoryPath`. `authActivityLog` and `actionLog`
+ * used to call `systemDir.getDirectoryHandle("audit", …)` directly, which
+ * skipped both: every write re-walked the chain, and `withResourceLock` keys
+ * degraded to the bare leaf name — the "one lock for everything" defect
+ * `webLocks.ts` was written to remove.
+ */
+export async function getAuditRoot(
+  directoryHandle: DirectoryHandleLike,
+  create = true
+): Promise<DirectoryHandleLike> {
+  return getChildDir(
+    directoryHandle,
+    WORKSPACE_ROOTS.system,
+    () => getSystemRoot(directoryHandle, create),
+    SYSTEM_FOLDER_NAMES.audit,
+    create,
+    null
+  );
+}
+
+/** `5-system/audit/activity/` — one `{stem}.activity.json` per user. */
+export async function getAuditActivityDir(
+  directoryHandle: DirectoryHandleLike,
+  create = true
+): Promise<DirectoryHandleLike> {
+  return getChildDir(
+    directoryHandle,
+    `${WORKSPACE_ROOTS.system}/${SYSTEM_FOLDER_NAMES.audit}`,
+    () => getAuditRoot(directoryHandle, create),
+    AUDIT_SUBFOLDERS.activity,
+    create,
+    null
+  );
+}
+
+/** `5-system/audit/actions/` — one `{stem}.actions.json` per actor, plus per-actor yearly archives. */
+export async function getAuditActionsDir(
+  directoryHandle: DirectoryHandleLike,
+  create = true
+): Promise<DirectoryHandleLike> {
+  return getChildDir(
+    directoryHandle,
+    `${WORKSPACE_ROOTS.system}/${SYSTEM_FOLDER_NAMES.audit}`,
+    () => getAuditRoot(directoryHandle, create),
+    AUDIT_SUBFOLDERS.actions,
     create,
     null
   );

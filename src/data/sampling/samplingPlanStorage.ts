@@ -17,6 +17,7 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { ensureMonthWritable } from "../population/monthLock";
 import { getSampleMainDir } from "../workspace/workspacePaths";
+import type { StageAliasMappings, StageSamplingRule } from "../population/populationConfig";
 import type { CertScanShortfall, SampleMasterData } from "./sampleTypes";
 
 const SAMPLING_PLAN_FILE = "sampling.plan.json";
@@ -143,6 +144,33 @@ export type SamplingPlan = {
    * absent on plans written before this field existed.
    */
   certScanShortfalls?: CertScanShortfall[];
+  /**
+   * The per-stage sampling rules the draw ran under — the "how many, from which
+   * stage, with what CertScan target" half of the plan.
+   *
+   * The plan already recorded the seed and the algorithm version, which together
+   * claim the draw is replayable. They are not sufficient on their own: the rules
+   * (and the stage aliases below) live in workspace-GLOBAL, admin-editable
+   * `1-population/config.json`, so an edit after the draw leaves the plan
+   * pointing at inputs that no longer exist. Copying them into the plan closes
+   * that gap — the plan becomes a complete statement of what produced this
+   * sample, not a pointer to mutable state.
+   *
+   * **Absent on legacy plans** written before this field existed. A reader must
+   * treat a missing value as "not recorded" and fall back to live config,
+   * NOT as "the draw used no rules".
+   */
+  samplingRules?: StageSamplingRule[];
+  /**
+   * The resolved stage alias table the draw classified rows against — mirrors
+   * {@link SampleMasterData.stageMappingsSnapshot}, recorded here so an auditor
+   * reading `sampling.plan.json` alone sees the complete input set.
+   *
+   * **Absent on legacy plans** and on legacy-path (`totalSampleSize`) draws,
+   * which never classify by stage. Same reader rule as `samplingRules`: missing
+   * means "not recorded", not "no mappings".
+   */
+  stageMappings?: StageAliasMappings;
 };
 
 const DEFAULT_QUALITY_THRESHOLD_NOTE =
@@ -187,6 +215,19 @@ export function buildSamplingPlan(params: {
   inspectionLevelNote?: string;
   /** B4 switching-rule advisory folded into the plan. Omit when no prior month. */
   priorMonthAdvisory?: SamplingPlanPriorMonthAdvisory;
+  /**
+   * The draw config's stage sampling rules, copied verbatim into the plan.
+   * Omit for a legacy-path (`totalSampleSize`) draw, which has none.
+   */
+  samplingRules?: StageSamplingRule[];
+  /**
+   * The draw config's stage alias overrides. The RESOLVED table the draw
+   * actually used is preferred when the sample master carries one
+   * (`stageMappingsSnapshot`), so the plan and the master can never disagree
+   * about which aliases were in force; this parameter is the fallback for a
+   * master drawn under older code.
+   */
+  stageMappings?: StageAliasMappings;
 }): SamplingPlan {
   const { monthFolderName, populationRows, sampleData, createdBy } = params;
   const populationSize = populationRows.length;
@@ -205,6 +246,12 @@ export function buildSamplingPlan(params: {
 
   const populationTargeted = countTargeted(populationRows);
   const sampleTargeted = countTargeted(sampleData.rows);
+
+  // Prefer what the draw itself recorded over what the caller passed: the
+  // snapshot is the resolved table `getStageKey` consumed, the parameter is the
+  // raw config override. They describe the same thing, but only the first is
+  // guaranteed to be the one that classified these rows.
+  const recordedStageMappings = sampleData.stageMappingsSnapshot ?? params.stageMappings;
 
   return {
     schema: SAMPLING_PLAN_SCHEMA,
@@ -234,6 +281,10 @@ export function buildSamplingPlan(params: {
       ? { priorMonthAdvisory: params.priorMonthAdvisory }
       : {}),
     certScanShortfalls: sampleData.certScanShortfalls ?? [],
+    // Both omitted rather than written as `undefined` so a legacy-path draw's
+    // plan keeps exactly the shape it has always had on disk.
+    ...(params.samplingRules ? { samplingRules: params.samplingRules } : {}),
+    ...(recordedStageMappings ? { stageMappings: recordedStageMappings } : {}),
   };
 }
 

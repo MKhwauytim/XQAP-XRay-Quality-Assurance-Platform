@@ -115,6 +115,7 @@ function reconstructedBiWorkbook(rows: MonthEditData["biRawRows"]): BiWorkbookRe
     rows: rows as unknown as NormalizedBiRow[],
     sheetSummaries: [],
     unknownSheetNames: [],
+    unmatchedSheetNames: [],
     totalOriginalRows: rows.length,
     totalNormalizedRows: rows.length,
     totalExcludedMissingXrayIdCount: 0

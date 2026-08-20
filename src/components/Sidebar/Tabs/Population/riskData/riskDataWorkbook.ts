@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
 import { yieldToMain } from "../../../../../data/storage/yieldToMain";
-import { normalizeRiskRow } from "./riskDataNormalizer";
+import { detectDuplicateNormalizedHeaders, normalizeRiskRow } from "./riskDataNormalizer";
 import { RISK_COLUMN_ALIASES } from "./riskDataColumns";
 import type {
   NormalizedRiskRow,
@@ -159,6 +159,13 @@ export async function processRiskWorkbook(
 
     for (const row of validRows) allRows.push(row);
 
+    // Computed ONCE per sheet from the header row — never per data row, so it
+    // never touches the per-row hot path normalizeRiskRow runs.
+    const duplicateHeaders =
+      sourceRows.length > 0
+        ? detectDuplicateNormalizedHeaders(Object.keys(sourceRows[0].row))
+        : [];
+
     sheetSummaries.push({
       sheetName,
       movementType,
@@ -167,7 +174,8 @@ export async function processRiskWorkbook(
       excludedMissingXrayIdCount,
       ...(validRows.length === 0 && sourceRows.length > 0
         ? { zeroIdDiagnostic: buildZeroXrayIdDiagnostic(sourceRows, columnMappings) }
-        : {})
+        : {}),
+      ...(duplicateHeaders.length > 0 ? { duplicateHeaders } : {})
     });
   }
 

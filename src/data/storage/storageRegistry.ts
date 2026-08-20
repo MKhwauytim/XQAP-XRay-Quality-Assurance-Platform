@@ -53,10 +53,24 @@ export const STORAGE_REGISTRY: readonly StorageEntry[] = [
     lossConsequence: "The first-run panel appears again once.",
   },
   {
+    id: "xray_feedback_seen_v1:",
+    layer: "local",
+    prefix: true,
+    purpose:
+      "Per-user marker for the newest feedback message/reply that user has already seen (drives the unread dot).",
+    lossConsequence: "The unread dot lights up once more; the messages themselves are on disk and untouched.",
+  },
+  {
     id: "xray_global_month_v1",
     layer: "session",
     purpose: "The month selected in the toolbar, for this tab only.",
     lossConsequence: "The month selection resets. No data at risk.",
+  },
+  {
+    id: "xray_error_log_v1",
+    layer: "local",
+    purpose: "Mirror of the in-memory error ring buffer (errorLogger.ts), so it survives a reload.",
+    lossConsequence: "Recent-error history is lost; the app keeps working with an empty log.",
   },
   {
     id: "xray-quality-app-persistence",

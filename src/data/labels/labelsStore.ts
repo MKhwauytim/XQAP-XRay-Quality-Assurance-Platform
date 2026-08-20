@@ -185,6 +185,9 @@ export const DEFAULT_LABELS = {
   gm_no_months:            "لا توجد أشهر",
   gm_all_months:           "كل الأشهر",
   gm_month_switch_confirm: "توجد بيانات غير محفوظة في معالجة المجتمع — تغيير الشهر سيتجاهلها ويحمّل بيانات الشهر المحدد. هل تريد المتابعة؟",
+  // Sibling of gm_month_switch_confirm for the OTHER unsaved-work surface: an
+  // employee's typed-but-unsaved answers in the inspection form.
+  gm_month_switch_draft_confirm: "توجد إجابات غير محفوظة في نموذج الفحص المفتوح — تغيير الشهر سيتجاهلها. هل تريد المتابعة؟",
   label_template:   "النموذج",
 
   // X-ray results messages
@@ -282,6 +285,9 @@ export const DEFAULT_LABELS = {
   um_delete_blocked_month_line:  "{month}: {count} عينة نشطة",
   um_delete_orphan_answers_warn: "تنبيه: توجد ملفات إجابات محفوظة لهذا المستخدم في أشهر سابقة. ستبقى محفوظة للتقارير ولن تُحذف.",
   um_delete_no_workspace_warn:   "لا يوجد مجلد عمل متصل — تعذر التحقق من تعيينات المستخدم قبل الحذف.",
+  um_rename_blocked_footprint:   "لا يمكن تغيير اسم المستخدم: توجد بيانات محفوظة باسمه الحالي على مساحة العمل (تكليفات أو إجابات)، ولا توجد آلية لنقلها إلى الاسم الجديد. تم حفظ الاسم الظاهر فقط. لتغيير الهوية أنشئ حساباً جديداً ثم أوقف هذا الحساب.",
+  um_rename_blocked_no_workspace: "لا يمكن تغيير اسم المستخدم دون مجلد عمل متصل — تعذر التحقق من وجود بيانات محفوظة باسمه. تم حفظ الاسم الظاهر فقط. اتصل بمجلد العمل ثم أعد المحاولة.",
+  um_rename_blocked_unreadable:  "لا يمكن تغيير اسم المستخدم — تعذّرت قراءة مساحة العمل للتحقق من بيانات المستخدم. تم حفظ الاسم الظاهر فقط. أعد المحاولة بعد التأكد من الوصول إلى مجلد العمل.",
 
   // Referral approval idempotency (Tier-1 Item C)
   msg_request_already_reviewed: "تمت مراجعة هذا الطلب مسبقاً — تم تحديث القائمة.",
@@ -299,6 +305,14 @@ export const DEFAULT_LABELS = {
   // text via the result.ok === false branch; this covers thrown exceptions,
   // whose messages are internal English (e.g. safeWrite validation text).
   msg_unexpected_write_error: "تعذّر إتمام العملية بسبب خطأ غير متوقع أثناء الحفظ. أعد المحاولة، وإن تكرر الخطأ فأبلغ المسؤول.",
+
+  // Population file unreadable (T-08). Deliberately NOT phrased as "no data":
+  // the file may be perfectly intact and merely unreachable this second, and
+  // the user's next click after an "empty month" message is to re-process it.
+  msg_population_unreadable:        "تعذّرت قراءة ملف مجتمع هذا الشهر. قد يكون مجلد العمل غير متاح مؤقتاً — أعد المحاولة، ولا تُعِد معالجة الشهر قبل التأكد من وجود بياناته.",
+  browse_load_failed_title:         "تعذّر قراءة بيانات هذا الشهر",
+  browse_load_failed_desc:          "الملف موجود لكن تعذّرت قراءته الآن. لا يعني ذلك أن الشهر بلا بيانات — أعد المحاولة، ولا تُعِد معالجة الشهر قبل التأكد.",
+  browse_load_failed_retry:         "إعادة المحاولة",
 
   // Feedback widget
   fb_category_suggestion:   "اقتراح",
@@ -330,6 +344,7 @@ export const DEFAULT_LABELS = {
   fb_reply_sending:         "...",
   fb_resolve_btn:           "إغلاق",
   fb_resolved_badge:        "مغلقة",
+  fb_unread_dot_aria:       "لديك {count} رسالة غير مقروءة",
 
   // Login screen (AuthGate) — the first screen every user sees
   auth_tagline:                 "منصة فحص صور الأشعة",
@@ -414,6 +429,9 @@ export const DEFAULT_LABELS = {
   backup_restore_merge_notice:     "ملاحظة: الاستعادة تُعيد كتابة الملفات الموجودة في النسخة فقط، ولا تحذف الملفات التي أُنشئت بعدها. البيانات الأحدث من النسخة ستبقى كما هي. تُنشأ نسخة رجوع تلقائية قبل الاستعادة.",
   backup_include_xlsx_option:      "إضافة ملفات XLSX اختيارية (أبطأ)",
   backup_include_xlsx_hint:        "نسخة JSON كاملة وقابلة للاستعادة دائماً. فعّل هذا الخيار فقط إذا احتجت جداول XLSX إضافية للبيانات الصغيرة.",
+  // Backup copy verification (STO-5): a snapshot missing files must say so.
+  backup_partial_warning:          "نسخة احتياطية ناقصة: تعذّر التحقق من نسخ الملفات التالية",
+  backup_partial_badge:            "ناقصة",
 
   // refreshDistribution guard (Tier-1 Item H)
   msg_distribution_refresh_no_sample: "تعذر تحديث حالة التوزيع — لم يتم العثور على عينة محفوظة لهذا الشهر.",
@@ -537,6 +555,8 @@ export const DEFAULT_LABELS = {
   app_auto_backup_done:      "تم إنشاء النسخة الاحتياطية التلقائية: {folderName}",
   app_auto_backup_failed:    "تعذر إنشاء النسخة الاحتياطية التلقائية: {error}",
   app_unknown_error:         "خطأ غير معروف",
+  app_restore_interrupted_warning:
+    "تحذير: يبدو أن عملية استعادة نسخة احتياطية بدأها \"{startedBy}\" بتاريخ {startedAt} لم تكتمل. قد تكون بيانات مساحة العمل غير متطابقة — يُرجى إعادة تنفيذ الاستعادة من نفس النسخة الاحتياطية قبل متابعة العمل.",
   app_workspace_aria:        "مساحة العمل",
   app_no_tabs_title:         "لا توجد تبويبات متاحة",
   app_no_tabs_desc_prefix:   "لا توجد صفحات مفعلة لهذا الدور حالياً:",
@@ -636,6 +656,15 @@ export const DEFAULT_LABELS = {
   // ── UserManagement — governance actions log viewer (C-15) ──
   um_actions_tab_label:        "سجل الإجراءات",
   um_actions_desc:             "سجل الإجراءات الإدارية المحفوظ داخل مساحة العمل في",
+  /**
+   * Path shown under the Actions sub-tab. Since the per-actor split the live
+   * trail is a FOLDER of one file per actor; the old shared file is still read
+   * so pre-existing workspaces keep their history.
+   */
+  um_actions_path:             "5-system/audit/actions/ (ملف لكل مستخدم، مع قراءة السجل المشترك السابق 5-system/audit/actions.log.json)",
+  /** Same, for the Activity sub-tab. */
+  um_activity_desc:            "تعرض هذه الصفحة سجلات الدخول وساعات العمل المحفوظة داخل مساحة العمل في",
+  um_activity_path:            "5-system/audit/activity/ (ملف لكل مستخدم، مع قراءة السجل المشترك السابق 5-system/audit/activity.log.json)",
   um_actions_refresh_btn:      "تحديث السجل",
   um_actions_loading:          "جاري تحميل السجل...",
   um_actions_empty:            "لا توجد إجراءات مسجلة بعد.",
@@ -963,9 +992,16 @@ export const DEFAULT_LABELS = {
   err_io_029_unreadable_not_absent:        "تعذّرت قراءة ملف موجود، وأُلغيت العملية بدلاً من الكتابة فوق بياناته.",
   err_io_030_workspace_unreachable:        "لم يعد مجلد مساحة العمل متاحًا — يُرجّح أنه نُقل أو أُعيدت تسميته أو أُنشئ من جديد. أعد اختيار مجلد مساحة العمل ثم أعد المحاولة؛ إعادة المحاولة وحدها لن تنجح.",
   err_io_033_extension_blocked:            "المجلد يقبل الكتابة، لكن الملفات من نوع هذا الملف تُحذف بعد كتابتها مباشرة — غالبًا بسبب مضاد الفيروسات أو برنامج المزامنة. إعادة المحاولة لن تنجح؛ يلزم استثناء مجلد مساحة العمل من الفحص.",
-  err_io_032_cas_write_failed:             "تعذّر حفظ التغيير بعد عدة محاولات بسبب خطأ في الوصول إلى الملف، وليس بسبب تعارض مع مستخدم آخر. راجع سجل الأخطاء لمعرفة السبب.",
+  // The old wording asserted «وليس بسبب تعارض مع مستخدم آخر» ("not because of a
+  // conflict with another user"). casLoop reaches XQ-IO-032 precisely BECAUSE it
+  // could not classify the exception, so that claim was unsupportable at the
+  // throw site — and on a Windows/SMB share the unclassified names
+  // (ERROR_DELETE_PENDING, ERROR_NETNAME_DELETED, …) are concurrency failures,
+  // so it denied the very cause it was most often reporting.
+  err_io_032_cas_write_failed:             "تعذّر حفظ التغيير بعد عدة محاولات. قد يكون الملف قيد الاستخدام من جهاز آخر أو تعذّر الوصول إليه — أعد المحاولة بعد قليل، وراجع سجل الأخطاء لمعرفة التفاصيل.",
   err_io_031_share_lost_entry:             "تعذّر الوصول إلى الملف على الشبكة رغم عدة محاولات، والمجلد نفسه يعمل. أعد المحاولة بعد قليل.",
   err_io_034_path_too_long:                "مسار مجلد مساحة العمل طويل جدًا، فتعذّر إنشاء ملف بهذا الاسم داخله. إعادة المحاولة لن تنجح؛ انقل مجلد مساحة العمل إلى مسار أقصر (أقرب إلى جذر المجلد المشترك) ثم أعد المحاولة.",
+  err_io_035_file_locked:                  "الملف قيد الاستخدام من جهاز أو نافذة أخرى، فتعذّر حفظ التغيير رغم عدة محاولات. لم يُفقد الوصول إلى مساحة العمل — أعد المحاولة بعد قليل.",
 
   err_auth_006_rehash_failed:          "تعذر تحديث تشفير كلمة المرور، وتم الإبقاء على التشفير السابق.",
   err_auth_007_rehash_persist_failed:  "تعذر حفظ تشفير كلمة المرور المحدّث في مساحة العمل.",
@@ -1146,6 +1182,22 @@ export const DEFAULT_LABELS = {
   kpi_reviewers_sub:             "أعباء العمل والإنتاجية وزمن الإنجاز ومعدلات الإحالة لكل مراجع هذا الشهر.",
   kpi_reviewers_col_status:      "الحالة",
   kpi_unknown_key:               "غير محدد",
+
+  // Referential-integrity scan (B3) — Archive tab, supervisor+, read-only.
+  archive_integrity_kicker:          "التحقق من سلامة البيانات",
+  archive_integrity_title:           "فحص السلامة المرجعية",
+  archive_integrity_subtitle:        "فحص اختياري عند الطلب لشهر واحد — يقارن معرّفات صور الأشعة عبر المجتمع والعينة والتوزيع والإجابات وطلبات الإحالة/الاستبدال، للعرض فقط دون أي تعديل على البيانات.",
+  archive_integrity_month_label:     "الشهر",
+  archive_integrity_run_btn:         "تشغيل الفحص",
+  archive_integrity_running:         "جاري الفحص...",
+  archive_integrity_no_months:       "لا توجد أشهر معالجة لفحصها.",
+  archive_integrity_clean:           "لا توجد صفوف يتيمة — البيانات متسقة لهذا الشهر.",
+  archive_integrity_error_prefix:    "تعذر إجراء الفحص",
+  archive_integrity_category_sample:       "عينة بلا أصل في المجتمع",
+  archive_integrity_category_distribution: "توزيع بلا أصل في العينة",
+  archive_integrity_category_answers:      "إجابات بلا سجل توزيع حالي",
+  archive_integrity_category_approvals:    "طلبات إحالة/استبدال بلا سجل توزيع حالي",
+  archive_integrity_show_more:       "و{count} أخرى",
 
   // The 2026-08 design-handoff redesign keeps its keys in one file per screen
   // (see ./labels.*.ts). Spread here so they are indistinguishable from the

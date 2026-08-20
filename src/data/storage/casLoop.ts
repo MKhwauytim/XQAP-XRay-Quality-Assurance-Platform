@@ -41,14 +41,18 @@ function verifyDelayMs(): number {
 // stable platform name. Do not classify from message text: Chromium's transient
 // NotReadableError message can mention "permission problems" even though a
 // retry may succeed.
+//
+// `NoModificationAllowedError` used to be listed here and is deliberately NOT.
+// It is file-LOCK contention — another machine on the share holds the entry
+// open — so it is exactly what this retry loop exists for. Treating it as a
+// lost grant aborted on the first attempt and told the user they had lost
+// access to the workspace, whose only offered remedy (re-pick the folder) is
+// powerless against someone else's open handle. See `isLockContentionError`
+// in transientFileErrors.ts; it now falls through to the retry path below.
 function isPermissionLostError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const name = (error as { name?: string }).name;
-  return (
-    name === "NotAllowedError" ||
-    name === "SecurityError" ||
-    name === "NoModificationAllowedError"
-  );
+  return name === "NotAllowedError" || name === "SecurityError";
 }
 
 /**

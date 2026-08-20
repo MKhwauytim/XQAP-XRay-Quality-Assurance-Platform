@@ -62,9 +62,18 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+// T-19: the context is a three-state union now (loading / loaded-empty / loaded),
+// so this consumer reports each state distinctly instead of collapsing
+// "not loaded yet" and "loaded with nothing in it" into one falsy value.
 function Consumer({ label }: { label: string }) {
   const rows = useExecutiveRows();
-  return <span data-testid={label}>{rows ? `loaded:${rows.length}` : "loading"}</span>;
+  const text =
+    rows.status === "loaded"
+      ? `loaded:${rows.rows.length}`
+      : rows.status === "loaded-empty"
+        ? "loaded-empty"
+        : "loading";
+  return <span data-testid={label}>{text}</span>;
 }
 
 describe("ExecutiveRowsProvider", () => {
@@ -126,8 +135,46 @@ describe("ExecutiveRowsProvider", () => {
       expect(screen.getByRole("alert")).toBeInTheDocument();
     });
 
-    // No longer stuck at "loading" — the provider settles rows to [] so consumers exit isLoading.
+    // No longer stuck at "loading" — the provider settles to the explicit "loaded-empty"
+    // state (T-19), so consumers stop waiting and render the neutral «—» marker.
     expect(screen.getByTestId("tile")).not.toHaveTextContent("loading");
     expect(logError).toHaveBeenCalledWith("reportDesigner:executiveRowsProvider", expect.any(Error));
+  });
+});
+
+// T-19 — "loading" and "loaded, and there is nothing" are separate states now. They used
+// to be the same falsy value, so a consumer could not tell a month whose data had not
+// arrived from a month that genuinely has no fact rows.
+describe("ExecutiveRowsProvider — loading vs loaded-empty are distinguishable (T-19)", () => {
+  it("reports loading first, then loaded-empty for a month that builds zero rows", async () => {
+    buildExecutiveReportRows.mockReturnValueOnce([]);
+
+    render(
+      <ExecutiveRowsProvider>
+        <Consumer label="tile" />
+      </ExecutiveRowsProvider>
+    );
+
+    // Synchronously after mount the load is still in flight.
+    expect(screen.getByTestId("tile")).toHaveTextContent("loading");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("tile")).toHaveTextContent("loaded-empty");
+    });
+  });
+
+  it("reports loaded-empty (not loading) after a failed load, so tiles stop spinning", async () => {
+    loadMonthPopulationFinal.mockRejectedValueOnce(new Error("boom"));
+
+    render(
+      <ExecutiveRowsProvider>
+        <Consumer label="tile" />
+      </ExecutiveRowsProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("tile")).toHaveTextContent("loaded-empty");
+    });
+    expect(screen.getByRole("alert")).toBeInTheDocument();
   });
 });

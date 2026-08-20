@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { aggregate } from "./aggregations";
+import { aggregate, aggregateOrNull } from "./aggregations";
 
 describe("aggregate", () => {
   it("counts rows including nulls", () => {
@@ -33,5 +33,41 @@ describe("aggregate", () => {
   it("returns 0 for empty avg/sum", () => {
     expect(aggregate("avg", [])).toBe(0);
     expect(aggregate("sum", [])).toBe(0);
+  });
+});
+
+// T-19 — the app-wide KPI invariant ("a null denominator renders «—», never 0") applied
+// to this aggregator. `aggregate` itself is unchanged: callers that want the
+// numeric-with-zero-fallback behavior still get exactly the numbers asserted above.
+describe("aggregateOrNull", () => {
+  it("returns null for avg/min/max with no numeric values behind them", () => {
+    expect(aggregateOrNull("avg", [])).toBeNull();
+    expect(aggregateOrNull("avg", [null, "غير متاح", undefined])).toBeNull();
+    expect(aggregateOrNull("min", [])).toBeNull();
+    expect(aggregateOrNull("max", ["x"])).toBeNull();
+  });
+
+  it("returns null for a percentage of a zero grand total", () => {
+    expect(aggregateOrNull("percentOfTotal", [3], 0)).toBeNull();
+  });
+
+  it("never nulls count/distinctCount/sum — zero of something is a real answer", () => {
+    expect(aggregateOrNull("count", [])).toBe(0);
+    expect(aggregateOrNull("distinctCount", [null])).toBe(0);
+    expect(aggregateOrNull("sum", [])).toBe(0);
+  });
+
+  it("agrees with aggregate for every case that has a real value", () => {
+    expect(aggregateOrNull("avg", [2, 4, 6])).toBe(aggregate("avg", [2, 4, 6]));
+    expect(aggregateOrNull("min", [5, 2, 9])).toBe(aggregate("min", [5, 2, 9]));
+    expect(aggregateOrNull("max", [5, 2, 9])).toBe(aggregate("max", [5, 2, 9]));
+    expect(aggregateOrNull("percentOfTotal", [25], 100)).toBe(aggregate("percentOfTotal", [25], 100));
+    expect(aggregateOrNull("sum", [2, 3, true, "x", null])).toBe(aggregate("sum", [2, 3, true, "x", null]));
+  });
+
+  it("keeps a genuine zero measurement as 0, not null", () => {
+    expect(aggregateOrNull("avg", [0, 0])).toBe(0);
+    expect(aggregateOrNull("min", [0, 4])).toBe(0);
+    expect(aggregateOrNull("percentOfTotal", [0], 100)).toBe(0);
   });
 });

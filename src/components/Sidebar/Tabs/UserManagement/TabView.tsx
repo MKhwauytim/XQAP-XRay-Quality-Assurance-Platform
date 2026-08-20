@@ -33,6 +33,7 @@ import {
 } from "../../../../auth/userManagement";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import { getUserWorkspaceFootprint } from "../../../../data/samples/sampleMirrorStorage";
+import { checkUsernameRenameBlocked } from "../../../../auth/usernameRenameGuard";
 import {
   appendWorkspaceAction,
   readWorkspaceActions,
@@ -128,6 +129,7 @@ export default function UserManagementTab() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isCheckingDeletion, setIsCheckingDeletion] = useState(false);
+  const [isCheckingRename, setIsCheckingRename] = useState(false);
   const [deleteBlockedInfo, setDeleteBlockedInfo] = useState<{ userId: string; lines: string[] } | null>(null);
   const [collapsedParents, setCollapsedParents] = useState<Set<string>>(new Set());
   const [activityEntries, setActivityEntries] = useState<AuthActivityLogEntry[]>([]);
@@ -375,7 +377,20 @@ export default function UserManagementTab() {
     });
   }
 
-  function handleSaveIdentity(user: ManagedLoginUser): void {
+  /**
+   * Saves a row's identity edit. A username CHANGE is guarded (T-11): every
+   * on-disk record keys on the raw username string and nothing migrates them,
+   * so renaming a user who owns work on disk orphans it. The guard fails
+   * closed — an unverifiable footprint (no workspace mounted, unreadable
+   * workspace) refuses the rename too.
+   *
+   * A rejected rename does NOT reject the co-submitted display-name edit:
+   * the two arrive through one form but are independent, and the display name
+   * is never a key for anything on disk, so discarding it would be a second,
+   * unrelated loss of the admin's work. The draft is reset either way so the
+   * username input stops showing an edit that was not applied.
+   */
+  async function handleSaveIdentity(user: ManagedLoginUser): Promise<void> {
     if (!canEdit) { showMsg("صلاحيتك للعرض فقط.", "bad"); return; }
     const draft = getIdentityDraft(user);
     const username = normalizeUsername(draft.username);
@@ -392,6 +407,32 @@ export default function UserManagementTab() {
     if (!isUsernameAvailable(state.users, username, user.id)) {
       showMsg("اسم المستخدم موجود مسبقاً.", "bad");
       return;
+    }
+
+    if (username !== user.username) {
+      setIsCheckingRename(true);
+      let blockReason: Awaited<ReturnType<typeof checkUsernameRenameBlocked>>;
+      try {
+        blockReason = await checkUsernameRenameBlocked(directoryHandle, user.username);
+      } finally {
+        setIsCheckingRename(false);
+      }
+      if (blockReason) {
+        if (displayName !== user.displayName) {
+          updateUser(user.id, (current) => ({ ...current, displayName }));
+        }
+        resetIdentityDraft(user.id);
+        const L = getLabels();
+        showMsg(
+          blockReason === "no-workspace"
+            ? L.um_rename_blocked_no_workspace
+            : blockReason === "unreadable-workspace"
+              ? L.um_rename_blocked_unreadable
+              : L.um_rename_blocked_footprint,
+          "bad"
+        );
+        return;
+      }
     }
 
     updateUser(user.id, (current) => ({ ...current, username, displayName }));
@@ -575,7 +616,8 @@ export default function UserManagementTab() {
           onAddUser={handleAddUser}
           getIdentityDraft={getIdentityDraft}
           onIdentityDraftChange={updateIdentityDraft}
-          onSaveIdentity={handleSaveIdentity}
+          onSaveIdentity={(user) => { void handleSaveIdentity(user); }}
+          isCheckingRename={isCheckingRename}
           onResetIdentity={resetIdentityDraft}
           onUpdateUser={updateUser}
           resetPasswords={resetPasswords}

@@ -83,7 +83,7 @@ export function ActivitySection(props: {
     : "لا يوجد مجلد عمل متصل — تُعرض بيانات الجلسة الحالية فقط، وليس سجل الأنشطة الكامل المحفوظ على القرص.";
 
   return <div className="um-section">
-    <div className="um-matrix-desc">تعرض هذه الصفحة سجلات الدخول وساعات العمل المحفوظة داخل مساحة العمل في<strong> 5-system/audit/activity.log.json</strong>.</div>
+    <div className="um-matrix-desc">{getLabels().um_activity_desc}<strong> {getLabels().um_activity_path}</strong></div>
     <div className="um-activity-toolbar"><button type="button" className="um-add-btn" onClick={props.onRefresh}>تحديث السجل</button><span>{props.isLoading ? "جاري تحميل الأنشطة..." : `${props.entries.length.toLocaleString("ar-SA-u-nu-latn")} سجل`}</span></div>
     <div className="um-activity-summary-grid">
       {summaries.map(({ user, todayMs, weekMs, signIns, latest }) => <article key={user.id} className="um-activity-card"><div><strong>{user.displayName}</strong><span>{user.username}</span></div><dl><div><dt>اليوم</dt><dd>{formatDuration(todayMs)}</dd></div><div><dt>هذا الأسبوع</dt><dd>{formatDuration(weekMs)}</dd></div><div><dt>مرات الدخول</dt><dd>{signIns.toLocaleString("ar-SA-u-nu-latn")}</dd></div><div><dt>آخر حالة</dt><dd>{getCloseReasonLabel(latest?.closeReason ?? null)}</dd></div></dl></article>)}
@@ -115,7 +115,7 @@ export function ActionsSection(props: {
     : "لا يوجد مجلد عمل متصل — تعذر قراءة سجل الإجراءات.";
   return <div className="um-section">
     <h3 className="um-add-form-title">{labels.um_actions_tab_label}</h3>
-    <div className="um-matrix-desc">{labels.um_actions_desc}<strong> 5-system/audit/actions.log.json</strong></div>
+    <div className="um-matrix-desc">{labels.um_actions_desc}<strong> {labels.um_actions_path}</strong></div>
     <div className="um-activity-toolbar"><button type="button" className="um-add-btn" onClick={props.onRefresh}>{labels.um_actions_refresh_btn}</button><span>{props.isLoading ? labels.um_actions_loading : `${props.entries.length.toLocaleString("ar-SA-u-nu-latn")} ${labels.um_actions_count_suffix}`}</span></div>
     {entries.length === 0 ? <div className="um-empty">{emptyMessage}</div> : <><div className="um-activity-table-wrap"><table className="um-activity-table"><thead><tr><th>{labels.um_actions_col_time}</th><th>{labels.um_actions_col_actor}</th><th>{labels.um_actions_col_role}</th><th>{labels.um_actions_col_action}</th><th>{labels.um_actions_col_target}</th><th>{labels.um_actions_col_month}</th><th>{labels.um_actions_col_details}</th></tr></thead><tbody>{entries.map((entry) => <tr key={entry.id}><td>{formatDateTime(entry.at)}</td><td>{entry.actor}</td><td>{entry.actorRole}</td><td>{labels[ACTION_TYPE_LABEL_KEYS[entry.action]] ?? entry.action}</td><td>{entry.target ?? "—"}</td><td>{entry.monthFolderName ?? "—"}</td><td>{entry.details ? JSON.stringify(entry.details) : "—"}</td></tr>)}</tbody></table></div><Pagination page={page} totalItems={sortedEntries.length} onPageChange={(nextPage) => setPageState({ entriesKey: entriesPageKey, page: nextPage })} itemLabel="سجل" /></>}
   </div>;

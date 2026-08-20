@@ -3,9 +3,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import {
   clearOperationLog,
+  clearSimulatedFaults,
   createMemoryDirectory,
   getOperationLog,
   getReadLog,
+  setSimulatedFaults,
 } from "../storage/memoryDirectory";
 import { safeWriteJson } from "../storage/safeWrite";
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
@@ -13,10 +15,20 @@ import {
   getPopulationMonthDir,
   getSampleApprovalsDir,
   getSampleEmployeeDir,
+  getSampleMainDir,
   getSystemRoot,
+  NOTIFICATIONS_SUBFOLDERS,
   SYSTEM_FOLDER_NAMES,
+  __clearWorkspaceDirCacheForTests,
 } from "./workspacePaths";
+import { DISTRIBUTION_EVENTS_DIR } from "../distribution/distributionEventStore";
+import {
+  acceptNotification,
+  loadNotifications,
+  postNotification,
+} from "../notifications/notificationStorage";
 import { appendDistributionEvent } from "../distribution/distributionStorage";
+import { loadFeedback, replyToFeedback, submitFeedback } from "../feedback/feedbackStorage";
 import { buildAssignEvent } from "../distribution/distributionLog";
 import {
   ALL_DATA_REFRESH_FAMILIES,
@@ -84,6 +96,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 
 beforeEach(() => {
   __clearInFlightForTests();
+  __clearWorkspaceDirCacheForTests();
   __resetWorkspaceSyncStateForTests();
 });
 
@@ -219,6 +232,123 @@ describe("runSync — change-set probe (§4.2 / A7)", () => {
     const reads = getReadLog(root).length - before;
 
     expect(reads).toBeLessThanOrEqual(9);
+  });
+});
+
+/**
+ * Acknowledgements live in one file per employee under
+ * `5-system/notifications/acks/`, so nothing an ack touches moves
+ * `notifications.json`'s revision — the only thing this probe used to compare
+ * for the `notifications` family. The manager's "who acknowledged" roster
+ * reloads on the refresh signal, so without the signature below it silently went
+ * stale until somebody pressed refresh by hand.
+ */
+describe("runSync — the per-employee acknowledgement signature", () => {
+  /**
+   * Wraps every `getDirectoryHandle` down the tree so the acks folder can be
+   * made unreadable AFTER a healthy baseline has been established — which
+   * fixed-at-construction fault injection cannot express.
+   */
+  function withAcksFailure(
+    handle: DirectoryHandleLike,
+    fail: { on: boolean }
+  ): DirectoryHandleLike {
+    return new Proxy(handle, {
+      get(target, property, receiver) {
+        if (property === "getDirectoryHandle") {
+          return async (name: string, options?: { create?: boolean }) => {
+            if (name === NOTIFICATIONS_SUBFOLDERS.acks && fail.on) {
+              const error = new Error("simulated share failure");
+              error.name = "NotReadableError";
+              throw error;
+            }
+            return withAcksFailure(await target.getDirectoryHandle(name, options), fail);
+          };
+        }
+        const value = Reflect.get(target, property, receiver) as unknown;
+        return typeof value === "function" ? (value as () => unknown).bind(target) : value;
+      },
+    }) as DirectoryHandleLike;
+  }
+
+  async function seedBroadcast(root: DirectoryHandleLike): Promise<string> {
+    await postNotification(root, { message: "تعميم", postedBy: "manager1" });
+    const [posted] = await loadNotifications(root);
+    return posted!.id;
+  }
+
+  it("an acknowledgement by one employee moves the baseline, so the next tick broadcasts notifications", async () => {
+    const root = makeRoot();
+    const notificationId = await seedBroadcast(root);
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    // Writes ONLY 5-system/notifications/acks/employee_b.acks.json — the shared
+    // broadcast file's revision is untouched (pinned in notificationAckStorage.test.ts).
+    await acceptNotification(root, notificationId, "employee_b");
+
+    const capture = captureBroadcasts();
+    const result = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    capture.stop();
+
+    expect(result.changed.has("notifications")).toBe(true);
+    expect(result.broadcast).toBe(true);
+    expect(capture.details).toHaveLength(1);
+  });
+
+  it("a second acknowledgement by a DIFFERENT employee moves it again (a new file, not a bigger one)", async () => {
+    const root = makeRoot();
+    const notificationId = await seedBroadcast(root);
+    await acceptNotification(root, notificationId, "employee_a");
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    await acceptNotification(root, notificationId, "employee_b");
+    const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+
+    expect(changed.has("notifications")).toBe(true);
+  });
+
+  it("an untouched workspace re-probes to an identical baseline and broadcasts nothing", async () => {
+    const root = makeRoot();
+    const notificationId = await seedBroadcast(root);
+    await acceptNotification(root, notificationId, "employee_a");
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    const capture = captureBroadcasts();
+    const result = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    capture.stop();
+
+    expect(result.changed.size).toBe(0);
+    expect(result.broadcast).toBe(false);
+    expect(capture.details).toHaveLength(0);
+  });
+
+  it("an UNREADABLE acks folder carries the baseline forward instead of faking a change", async () => {
+    const fail = { on: false };
+    const root = withAcksFailure(makeRoot(), fail);
+    const notificationId = await seedBroadcast(root);
+    await acceptNotification(root, notificationId, "employee_a");
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // healthy baseline
+
+    fail.on = true;
+    const capture = captureBroadcasts();
+    const blipped = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    capture.stop();
+
+    // A failed read is not an observation: neither "changed" now…
+    expect(blipped.changed.size).toBe(0);
+    expect(capture.details).toHaveLength(0);
+
+    // …nor "changed" on the next healthy tick, which is what storing the
+    // failure's placeholder as the new baseline would have produced.
+    fail.on = false;
+    const recovered = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(recovered.changed.size).toBe(0);
+    expect(recovered.broadcast).toBe(false);
+
+    // The carried baseline is still the real one: a genuine ack is detected.
+    await acceptNotification(root, notificationId, "employee_b");
+    const after = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(after.changed.has("notifications")).toBe(true);
   });
 });
 
@@ -561,6 +691,10 @@ describe("runSync — per-tick round-trip budget (UNC/SMB cost regression guard)
     await seedNotification(root);
     const answersDir = await getSampleEmployeeDir(root, MONTH, true);
     const approvalsDir = await getSampleApprovalsDir(root, MONTH, true);
+    // `1-main` must exist for this fixture to be representative: the segments
+    // probe hangs off it, so a workspace without it silently skips one of the
+    // opens the budget below is meant to pin.
+    await getSampleMainDir(root, MONTH, true);
     for (let index = 0; index < employees; index += 1) {
       await writeRawFile(answersDir, `emp${index}.answers.json`, JSON.stringify({ items: [] }));
       await writeRawFile(approvalsDir, `emp${index}.json`, JSON.stringify({ decisions: [] }));
@@ -613,9 +747,18 @@ describe("runSync — per-tick round-trip budget (UNC/SMB cost regression guard)
     // itself down from sixteen. The workspacePaths directory-handle cache
     // (item 1.7) now serves every handle it hands out, so the five it owns
     // (both roots, both {month} dirs, 5-system) cost nothing on a warm tick.
-    // What is left is the four this file resolves off an already-resolved
-    // parent handle itself, outside those getters.
-    expect(opens).toHaveLength(4);
+    // What is left is the seven this file resolves off an already-resolved
+    // parent handle itself, outside those getters: 1-main, 2-employees,
+    // 3-approvals, 1-main/distribution.events, notifications,
+    // notifications/acks, and feedback.
+    //
+    // Three of those were added by later signals — the acknowledgement
+    // signature, the segments signature, and the feedback log's revision (the
+    // unread-dot signal) — one open each per tick, and the point of all three
+    // is that they do NOT grow with the number of employees or with a month's
+    // history (the listings they feed are bounded, see boundedSizeSignature;
+    // the feedback probe reads one file's envelope revision, never its body).
+    expect(opens).toHaveLength(7);
     const distinct = new Set(opens.map((entry) => entry.name));
     expect(distinct.size).toBe(opens.length); // no directory opened twice
   });
@@ -638,5 +781,230 @@ describe("runSync — per-tick round-trip budget (UNC/SMB cost regression guard)
     expect(log.filter((entry) => entry.operation === "getFileHandle")).toHaveLength(1);
     expect(log).toHaveLength(1);
     expect(getSyncIntervalMs()).toBe(DEFAULT_SYNC_INTERVAL_MS);
+  });
+});
+
+describe("runSync — the distribution event segments are probed directly (restore visibility)", () => {
+  /**
+   * `distribution.log.json`'s CAS stamp covers the distribution family only
+   * while the stamp and the durable events move together. Two real cases break
+   * that: a RESTORE merges events into `distribution.events/` and deliberately
+   * does not rewrite the projection (backupStorage's `restore-if-absent`), and
+   * an append whose projection write failed leaves the events durable with the
+   * stamp unmoved. Both used to be invisible to every other machine on the
+   * share until someone happened to press the manual refresh button.
+   */
+  async function eventsDirFor(root: DirectoryHandleLike): Promise<DirectoryHandleLike> {
+    const main = await getSampleMainDir(root, MONTH, true);
+    return main.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: true });
+  }
+
+  const segment = (ids: string[]): string =>
+    ids
+      .map((id) =>
+        `${JSON.stringify({
+          eventId: id,
+          eventType: "assigned",
+          xrayImageId: `XR-${id}`,
+          assignedTo: "alice",
+          eventAt: "2026-05-01T08:00:00.000Z",
+          eventBy: "admin",
+        })}\n`
+      )
+      .join("");
+
+  it("reports the distribution family when a segment gains events with the projection stamp untouched", async () => {
+    const root = makeRoot();
+    const eventsDir = await eventsDirFor(root);
+    await writeRawFile(eventsDir, "devA-s1.ndjson", segment(["e01"]));
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    // Exactly what a restore's mergeEventSegment does: the same segment name,
+    // more lines, and not one byte written to distribution.log.json.
+    await writeRawFile(eventsDir, "devA-s1.ndjson", segment(["e01", "e02"]));
+    const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+
+    expect([...changed]).toEqual(["distribution"]);
+  });
+
+  it("reports the distribution family when a restore puts a whole missing segment back", async () => {
+    const root = makeRoot();
+    const eventsDir = await eventsDirFor(root);
+    await writeRawFile(eventsDir, "devA-s1.ndjson", segment(["e01"]));
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    await writeRawFile(eventsDir, "devB-s9.ndjson", segment(["e02"]));
+    const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+
+    expect([...changed]).toEqual(["distribution"]);
+  });
+
+  it("reports the distribution family when only the restored projection stamp moved", async () => {
+    const root = makeRoot();
+    const mainDir = await getSampleMainDir(root, MONTH, true);
+    await safeWriteJson(mainDir, "distribution.log.json", {
+      monthFolderName: MONTH,
+      revision: 7,
+      _writeToken: "before-restore",
+      events: [],
+    });
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    // What restoreBackupSnapshot's stamp refresh does: same revision, new token.
+    await safeWriteJson(mainDir, "distribution.log.json", {
+      monthFolderName: MONTH,
+      revision: 7,
+      _writeToken: "after-restore",
+      events: [],
+    });
+    const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+
+    expect([...changed]).toEqual(["distribution"]);
+  });
+
+  it("produces an identical signature for an untouched month with segments present (no spurious refresh)", async () => {
+    const root = makeRoot();
+    const eventsDir = await eventsDirFor(root);
+    await writeRawFile(eventsDir, "devA-s1.ndjson", segment(["e01"]));
+    await writeRawFile(eventsDir, "devB-s9.ndjson", segment(["e02", "e03"]));
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    const capture = captureBroadcasts();
+    try {
+      const first = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      const second = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      expect(first.changed.size).toBe(0);
+      expect(second.changed.size).toBe(0);
+      expect(capture.details).toEqual([]);
+    } finally {
+      capture.stop();
+    }
+  });
+});
+
+describe("runSync — a failed family read carries its baseline forward (no double refresh)", () => {
+  /**
+   * A probe read that FAILS is not an observation. It used to be stored as the
+   * new baseline anyway (revision -1, an empty signature), so the next healthy
+   * tick differed from that placeholder and broadcast a change nobody made.
+   * Every transient blip on the share therefore cost every client an extra
+   * refresh — and a refresh can clobber unsaved draft state.
+   */
+  async function seedDistribution(root: DirectoryHandleLike): Promise<void> {
+    const mainDir = await getSampleMainDir(root, MONTH, true);
+    await safeWriteJson(mainDir, "distribution.log.json", {
+      monthFolderName: MONTH,
+      revision: 5,
+      _writeToken: "steady",
+      events: [],
+    });
+  }
+
+  it("an unreadable distribution log, then a healthy tick over unchanged data, broadcasts nothing", async () => {
+    const root = makeRoot();
+    await seedDistribution(root);
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    const capture = captureBroadcasts();
+    try {
+      setSimulatedFaults(root, [
+        {
+          operation: "getFile",
+          name: "distribution.log.json",
+          errorName: "NotReadableError",
+          times: Number.POSITIVE_INFINITY,
+        },
+      ]);
+      const blocked = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      clearSimulatedFaults(root);
+      const recovered = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+
+      expect(blocked.changed.size).toBe(0);
+      expect(recovered.changed.size).toBe(0);
+      expect(capture.details).toEqual([]);
+    } finally {
+      clearSimulatedFaults(root);
+      capture.stop();
+    }
+  });
+
+  it("an unreadable subdirectory open, then a healthy tick over unchanged data, broadcasts nothing", async () => {
+    const root = makeRoot();
+    const answersDir = await getSampleEmployeeDir(root, MONTH, true);
+    await writeRawFile(answersDir, "alice.answers.json", JSON.stringify({ items: [] }));
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    const capture = captureBroadcasts();
+    try {
+      // A transient share failure on the DIRECTORY open, not on a file: every
+      // family hanging off it used to probe as "empty" and become the baseline.
+      setSimulatedFaults(root, [
+        {
+          operation: "getDirectoryHandle",
+          name: "2-employees",
+          errorName: "NotReadableError",
+          times: Number.POSITIVE_INFINITY,
+        },
+      ]);
+      const blocked = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      clearSimulatedFaults(root);
+      const recovered = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+
+      expect(blocked.changed.size).toBe(0);
+      expect(recovered.changed.size).toBe(0);
+      expect(capture.details).toEqual([]);
+    } finally {
+      clearSimulatedFaults(root);
+      capture.stop();
+    }
+  });
+});
+
+/**
+ * The feedback ("chat") log is shared by every user on every machine, and the
+ * unread dot on both widget triggers is driven by it. Without a probe of its
+ * own, a message or a reply posted elsewhere stayed invisible until someone
+ * pressed refresh by hand — which is exactly the staleness the change-set probe
+ * exists to remove.
+ */
+describe("runSync — the shared feedback log is its own family", () => {
+  it("a submitted message, then a reply, each report the feedback family", async () => {
+    const root = makeRoot();
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    await submitFeedback(root, {
+      from: "emp-1",
+      role: "employee",
+      category: "issue",
+      text: "الجهاز لا يعمل",
+    });
+    const afterSubmit = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(afterSubmit.changed.has("feedback")).toBe(true);
+    // The feedback log lives under 5-system and touches no month data.
+    expect(afterSubmit.changed.has("distribution")).toBe(false);
+    expect(afterSubmit.changed.has("answers")).toBe(false);
+
+    const [message] = await loadFeedback(root);
+    await replyToFeedback(
+      root,
+      message.id,
+      { from: "admin", role: "admin", text: "تم الاطلاع", timestamp: new Date().toISOString() },
+      false
+    );
+    const afterReply = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(afterReply.changed.has("feedback")).toBe(true);
+  });
+
+  it("reports nothing when the feedback log has not moved", async () => {
+    const root = makeRoot();
+    await submitFeedback(root, {
+      from: "emp-1",
+      role: "employee",
+      category: "inquiry",
+      text: "سؤال",
+    });
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+    const result = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(result.changed.has("feedback")).toBe(false);
   });
 });

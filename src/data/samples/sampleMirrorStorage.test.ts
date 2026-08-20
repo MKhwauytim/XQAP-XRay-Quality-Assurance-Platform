@@ -22,6 +22,12 @@ import type { ItemAnswer } from "../answers/answerTypes";
 import type { MonthManifestData } from "../population/monthTypes";
 import { getPopulationMonthDir, getSampleEmployeeDir } from "../workspace/workspacePaths";
 import type { DistributionCurrentData, DistributionEntry } from "../distribution/distributionTypes";
+import type { NormalizedRiskRow } from "../../components/Sidebar/Tabs/Population/riskData/riskDataTypes";
+import { adhocMonthFolderName, type AdhocImportRecord, type AdhocImportRow } from "../adhocImport/adhocImportTypes";
+import {
+  assignAdhocRowsToEmployee,
+  ensureAdhocSampleMaster,
+} from "../adhocImport/adhocImportAssignment";
 import {
   getUserWorkspaceFootprint,
   loadEmployeeSampleMirror,
@@ -471,5 +477,111 @@ describe("getUserWorkspaceFootprint", () => {
     // deletion would proceed despite the real, newer A2 assignment.
     expect(footprint.activeAssignments).toHaveLength(1);
     expect(footprint.activeAssignments[0]).toEqual({ monthFolderName: MONTH_A, pendingCount: 1 });
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// T-10 (2026-08-19): the footprint scan is the pre-deletion safety check, and
+// it used to walk ONLY `listMonthFolders` — which enumerates `1-population/`
+// and structurally cannot return an ad-hoc store's synthetic
+// `adhoc-{importId}` folder. A user whose entire live workload came from
+// ad-hoc imports therefore reported an EMPTY footprint and deleting them
+// silently orphaned every assignment and answer they owned.
+// ---------------------------------------------------------------------------
+
+const ADHOC_EMP = "jalgahamdi";
+
+function adhocMappedRow(xrayImageId: string, sourceRowNumber: number): NormalizedRiskRow {
+  return {
+    movementType: "s1",
+    portCode: null, portName: "ميناء جدة", portType: "بحري",
+    movementNumber: null, movementDate: null, movementHijriDate: null,
+    declarationNumber: "DEC-1", transitDeclarationNumber: null, declarationDate: null, declarationHijriDate: null,
+    manifestNumber: null, manifestType: null, manifestDate: null,
+    plateOrContainerNumber: null, finalDestination: null,
+    entryDate: null, exitDate: null,
+    chassisNumber: null, reportNumber: null, hasReport: false,
+    xrayLevelOneResult: "سليمة", xrayLevelTwoResult: "اشتباه",
+    inspectorResult: null, oppositeInspectorResult: null, liveMeansResult: null,
+    xrayImageId, xrayEntryDate: null,
+    targetedByRiskEngine: null, riskMessage: null, stage: "المستوى الأول",
+    sourceSheetName: "s1", sourceRowNumber,
+  };
+}
+
+function adhocImportRow(xrayImageId: string, sourceRowNumber: number): AdhocImportRow {
+  return {
+    rowKey: `s1:${sourceRowNumber}`,
+    mapped: adhocMappedRow(xrayImageId, sourceRowNumber),
+    validation: { valid: true },
+    excludedByAdmin: false,
+    assigned: false,
+    assignedTo: null,
+    assignedAt: null,
+    namespacedXrayImageId: null,
+  };
+}
+
+function adhocRecord(importId: string, rows: AdhocImportRow[]): AdhocImportRecord {
+  return {
+    importId,
+    fileName: `${importId}.xlsx`,
+    importedBy: "admin",
+    importedAt: "2026-08-07T10:00:00.000Z",
+    status: "open",
+    rows,
+  };
+}
+
+describe("getUserWorkspaceFootprint — ad-hoc import stores", () => {
+  it("REGRESSION (T-10): a user whose ONLY work is an ad-hoc assignment has a non-empty footprint", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    invalidateMonthLockCache();
+
+    const record = adhocRecord("adh-fp-1", [adhocImportRow("XR-1", 2), adhocImportRow("XR-2", 3)]);
+    await ensureAdhocSampleMaster(root, record);
+    const assigned = await assignAdhocRowsToEmployee(root, record, ["s1:2", "s1:3"], ADHOC_EMP, "admin");
+    expect(assigned.ok).toBe(true);
+
+    const footprint = await getUserWorkspaceFootprint(root, ADHOC_EMP);
+
+    // Before the fix: [] — the ad-hoc folder is invisible to listMonthFolders,
+    // so UserManagement read "no active assignments, safe to delete".
+    expect(footprint.activeAssignments).toEqual([
+      { monthFolderName: adhocMonthFolderName("adh-fp-1"), pendingCount: 2 },
+    ]);
+  });
+
+  it("REGRESSION (T-10): an answer saved into an ad-hoc store is reported in answerFileMonths", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    invalidateMonthLockCache();
+
+    const record = adhocRecord("adh-fp-2", [adhocImportRow("XR-9", 2)]);
+    await ensureAdhocSampleMaster(root, record);
+    const assigned = await assignAdhocRowsToEmployee(root, record, ["s1:2"], ADHOC_EMP, "admin");
+    expect(assigned.ok).toBe(true);
+
+    const folder = adhocMonthFolderName("adh-fp-2");
+    await upsertItemAnswer(root, folder, ADHOC_EMP, {
+      ...makeAnswer("ADHOC-adh-fp-2-XR-9"),
+      answeredBy: ADHOC_EMP,
+    });
+
+    const footprint = await getUserWorkspaceFootprint(root, ADHOC_EMP);
+    expect(footprint.answerFileMonths).toContain(folder);
+  });
+
+  it("leaves a user with no ad-hoc work unchanged (empty footprint)", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    invalidateMonthLockCache();
+
+    const record = adhocRecord("adh-fp-3", [adhocImportRow("XR-1", 2)]);
+    await ensureAdhocSampleMaster(root, record);
+    await assignAdhocRowsToEmployee(root, record, ["s1:2"], ADHOC_EMP, "admin");
+
+    const footprint = await getUserWorkspaceFootprint(root, "ghost-user");
+    expect(footprint.activeAssignments).toHaveLength(0);
+    expect(footprint.answerFileMonths).toHaveLength(0);
   });
 });
