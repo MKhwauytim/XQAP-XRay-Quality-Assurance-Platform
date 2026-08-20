@@ -22,6 +22,7 @@ const ACTION_TYPE_LABEL_KEYS: Record<WorkspaceActionType, LabelKey> = {
   "replacement-denied": "um_action_type_replacement_denied",
   "reopen-approved": "um_action_type_reopen_approved",
   "reopen-denied": "um_action_type_reopen_denied",
+  "decision-reverted": "um_action_type_decision_reverted",
   "answer-reopened": "um_action_type_answer_reopened",
   "month-closed": "um_action_type_month_closed",
   "month-reopened": "um_action_type_month_reopened",

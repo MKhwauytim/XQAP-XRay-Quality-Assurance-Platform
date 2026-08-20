@@ -59,7 +59,7 @@ const BASELINE = {
   "src/components/Sidebar/Sidebar.css": 5,
   "src/components/Sidebar/Tabs/AdhocImport/AdhocImport.css": 0,
   "src/components/Sidebar/Tabs/Archive/Archive.css": 28,
-  "src/components/Sidebar/Tabs/EmployeeWorkspace/views/NotificationManager.css": 9,
+  "src/components/Sidebar/Tabs/EmployeeWorkspace/views/NotificationManager/NotificationManager.css": 0,
   "src/components/Sidebar/Tabs/Population/components/DataAccuracyReport.css": 15,
   "src/components/Sidebar/Tabs/ReportDesigner/ReportDesigner.css": 82,
   "src/components/Sidebar/Tabs/Settings/ErrorLogSection.css": 3,

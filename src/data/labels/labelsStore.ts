@@ -301,6 +301,52 @@ export const DEFAULT_LABELS = {
   approval_sort_oldest_first: "الأقدم أولاً",
   approval_sort_newest_first: "الأحدث أولاً",
 
+  // اعتماد الطلبات — in-page decision redesign. The queue/detail split decides
+  // without a confirm modal and reports the outcome on a toast that carries the
+  // undo affordance, so the copy below covers a screen that no longer has a
+  // dialog to put any of it in.
+  approval_subtitle_reviewer:   "مراجعة طلبات الإحالة والاستبدال وإعادة فتح الحالة — القرار من داخل الصفحة، مع إمكانية التراجع.",
+  approval_oldest_wait:         "أقدم طلب ينتظر",
+  approval_wait_one_day:        "يوم واحد انتظار",
+  approval_wait_days:           "{days} أيام انتظار",
+  approval_wait_today:          "اليوم",
+  approval_kind_all:            "كل الأنواع",
+  approval_queue_count:         "{count} طلب",
+  approval_bulk_selected:       "تم تحديد {count} طلب",
+  approval_bulk_approve:        "موافقة على المحدد",
+  approval_bulk_deny:           "رفض المحدد",
+  approval_bulk_clear:          "إلغاء التحديد",
+  approval_approve:             "موافقة",
+  approval_deny:                "رفض",
+  approval_detail_samples:      "بيانات العينة",
+  approval_col_image_id:        "معرّف الصورة",
+  approval_col_port:            "الميناء",
+  approval_col_stage:           "المستوى",
+  approval_col_plate:           "رقم اللوحة / الحاوية",
+  approval_role_original:       "أصلي",
+  approval_role_replacement:    "بديل",
+  approval_detail_requested_by: "مقدم الطلب: {name} · {date}",
+  approval_card_request_date:   "تاريخ الطلب",
+  approval_card_wait:           "مدة الانتظار",
+  approval_card_employee:       "الموظف المعني",
+  approval_detail_reason:       "سبب الطلب",
+  approval_detail_timeline:     "مسار الطلب",
+  approval_note_label:          "ملاحظة للموظف (اختياري)",
+  approval_note_placeholder:    "تُرفق مع قرارك وتظهر للموظف في مساحة عمله…",
+  approval_select_prompt_title: "اختر طلباً لعرض تفاصيله",
+  approval_select_prompt_body:  "تفاصيل الطلب وبيانات عيّناته وأزرار القرار تظهر هنا بعد اختيار طلب من القائمة.",
+  approval_toast_approved_one:  "تمت الموافقة على الطلب.",
+  approval_toast_approved_many: "تمت الموافقة على {count} طلب.",
+  approval_toast_denied_one:    "تم رفض الطلب.",
+  approval_toast_denied_many:   "تم رفض {count} طلب.",
+  approval_undo:                "تراجع",
+  approval_undo_done:           "تم التراجع عن القرار — عاد الطلب إلى قائمة الانتظار.",
+  approval_undo_partial:        "تعذر التراجع عن بعض القرارات: {errors}",
+  approval_timeline_reverted:   "تم التراجع عن القرار",
+  approval_samples_referral:    "{count} عينة",
+  approval_samples_replacement: "عينتان — الأصلية والبديلة",
+  approval_samples_reopen:      "عينة واحدة",
+
   // Generic write-failure message. Domain-level failures carry their own Arabic
   // text via the result.ok === false branch; this covers thrown exceptions,
   // whose messages are internal English (e.g. safeWrite validation text).
@@ -612,6 +658,57 @@ export const DEFAULT_LABELS = {
   notif_mgr_pending:           "لم يطّلع بعد",
   notif_mgr_audience_none:     "لا يوجد موظفون أو مشرفون نشطون في قائمة الاستهداف.",
 
+  // مركز الإشعارات — targeted publishing redesign: a notification is addressed
+  // to a group (or named people), previewed before it goes out, and tracked
+  // through an acknowledgement roster afterwards.
+  notif_mgr_subtitle_targeted: "انشر إشعاراً لفئة محددة من الموظفين والمشرفين، وتابع من اطّلع عليه.",
+  notif_stat_total:            "إشعارات منشورة",
+  notif_stat_pending:          "بانتظار الاطّلاع",
+  notif_compose_title:         "نص الإشعار الجديد",
+  notif_edit_title:            "تعديل الإشعار",
+  notif_edit_cancel:           "إلغاء التعديل",
+  notif_edit_save:             "حفظ التعديل",
+  notif_edit_success:          "تم حفظ التعديل.",
+  notif_target_label:          "الاستهداف",
+  notif_target_all:            "الكل",
+  notif_target_employees:      "الموظفون",
+  notif_target_supervisors:    "المشرفون",
+  notif_target_custom:         "أشخاص محددون",
+  notif_audience_count:        "{count} مستلم مستهدف",
+  notif_preview_show:          "معاينة",
+  notif_preview_hide:          "إخفاء المعاينة",
+  notif_preview_title:         "معاينة كما ستظهر للمستلم",
+  notif_search_placeholder:    "ابحث في نص الإشعارات أو اسم الناشر…",
+  notif_filter_aria:           "تصفية الإشعارات",
+  notif_filter_all:            "الكل",
+  notif_filter_pending:        "بانتظار اطّلاع",
+  notif_filter_complete:       "اطّلع الجميع",
+  notif_list_count:            "{count} إشعار",
+  notif_list_empty_title:      "لا توجد إشعارات مطابقة",
+  notif_list_empty_desc:       "عدّل البحث أو التصفية، أو انشر إشعاراً جديداً من الأعلى.",
+  notif_detail_prompt_title:   "اختر إشعاراً لعرض تفاصيله",
+  notif_detail_prompt_body:    "نص الإشعار ونسبة الاطّلاع وقائمة المستهدفين تظهر هنا بعد اختيار إشعار من القائمة.",
+  notif_detail_edited:         "عُدّل في {date}",
+  notif_action_edit:           "تعديل",
+  notif_action_remind:         "تذكير من لم يطّلع",
+  notif_action_delete:         "حذف",
+  notif_ack_percent_label:     "نسبة الاطّلاع",
+  notif_ack_ratio:             "{accepted} من {total} اطّلعوا",
+  notif_roster_title:          "قائمة المستهدفين",
+  notif_roster_all:            "الكل",
+  notif_roster_pending:        "لم يطّلع",
+  notif_roster_accepted:       "اطّلع",
+  notif_roster_search:         "ابحث باسم الموظف…",
+  notif_roster_empty:          "لا يوجد أسماء مطابقة لهذه التصفية.",
+  notif_remind_prefix:         "تذكير: {message}",
+  notif_remind_success:        "أُرسل تذكير إلى {count} شخصاً لم يطّلعوا بعد.",
+  notif_remind_none:           "لا يوجد من لم يطّلع — الجميع اطّلعوا على هذا الإشعار.",
+  notif_delete_success:        "تم حذف الإشعار.",
+  notif_delete_undone:         "تمت استعادة الإشعار.",
+  notif_undo:                  "تراجع",
+  notif_role_employee:         "موظف",
+  notif_role_supervisor:       "مشرف",
+
   // ── Per-reviewer KPI upgrade + SPC p-charts (Tier-2 / research gap #18) ──
   rk_section_title:            "أداء المراجعين ولوحات الضبط الإحصائي",
   rk_section_desc:             "أعباء العمل والإنتاجية وزمن الإنجاز ومعدلات الإحالة لكل مراجع، مع لوحات ضبط (p-chart) توفّر مرجعاً موثّقاً لمعرفة ما إذا كان معدل هذا الشهر ضمن الحدود المقبولة بدلاً من التقدير بالنظر.",
@@ -691,6 +788,7 @@ export const DEFAULT_LABELS = {
   um_action_type_replacement_denied:         "رفض استبدال",
   um_action_type_reopen_approved:            "اعتماد إعادة فتح",
   um_action_type_reopen_denied:              "رفض إعادة فتح",
+  um_action_type_decision_reverted:          "تراجع عن قرار",
   um_action_type_answer_reopened:            "إعادة فتح إجابة",
   um_action_type_month_closed:               "إقفال شهر",
   um_action_type_month_reopened:             "إعادة فتح شهر",
@@ -1207,6 +1305,24 @@ export const DEFAULT_LABELS = {
   ...phaseTwoLabels,
   ...phaseThreeFourLabels,
   ...inspectionPanelLabels,
+
+  // ── XrayReferrals redesign (design handoff §3, 2026-08) ────────────────────
+  // APPEND-ONLY BLOCK. Added at the very end of DEFAULT_LABELS so this screen's
+  // rework never collides with the per-screen label files spread just above;
+  // every key here is new, so nothing spread earlier is shadowed.
+  /** Inspection-panel header: previous/next sample within the filtered queue. */
+  ip_prev_sample_title:        "العينة السابقة",
+  ip_next_sample_title:        "العينة التالية",
+  ip_sample_nav_aria:          "التنقل بين العينات",
+  /** Unsaved-draft confirmation shown before prev/next re-points the panel. */
+  ew_sample_nav_draft_title:   "إجابات غير محفوظة",
+  ew_sample_nav_draft_confirm: "لديك إجابات لم تُحفظ في هذه العينة. الانتقال إلى عينة أخرى سيتجاهلها نهائياً. هل تريد المتابعة؟",
+  ew_sample_nav_draft_ok:      "تجاهل والانتقال",
+  ew_sample_nav_draft_cancel:  "البقاء في هذه العينة",
+  /** Select column: `{id}` is the x-ray image id of a completed/replaced row. */
+  ew_row_select_blocked_aria:  "لا يمكن إسناد {id} — مكتملة أو مستبدلة",
+  /** Retry action on the queue's load-failure state. */
+  ew_load_retry_btn:           "إعادة المحاولة",
 } as const;
 
 export type LabelKey = keyof typeof DEFAULT_LABELS;

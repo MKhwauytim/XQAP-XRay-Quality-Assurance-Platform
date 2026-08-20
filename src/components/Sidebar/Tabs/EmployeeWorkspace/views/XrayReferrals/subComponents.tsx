@@ -530,6 +530,10 @@ export function SampleDetailPanel({
   onReopen,
   onRequestReopen,
   onDraftDirty,
+  onPrevSample,
+  onNextSample,
+  hasPrevSample,
+  hasNextSample,
 }: {
   entry: DistributionEntry;
   template: TemplateSchema | null;
@@ -543,6 +547,18 @@ export function SampleDetailPanel({
   onRequestReopen?: (reason: string) => void;
   /** Forwarded straight through — see InspectionPanel's own docblock. */
   onDraftDirty?: () => void;
+  /**
+   * Previous/next sample navigation, forwarded straight through. The `key`
+   * below is what makes the handoff's "reset the panel to phase 1 on switch"
+   * requirement automatic: an accepted switch changes `entry.xrayImageId`, the
+   * panel remounts, and its phase/answer state is seeded fresh. That same key
+   * is why the caller must guard an unsaved draft BEFORE calling these — a
+   * remount is exactly what destroys typed-but-unsaved input.
+   */
+  onPrevSample?: () => void;
+  onNextSample?: () => void;
+  hasPrevSample?: boolean;
+  hasNextSample?: boolean;
 }) {
   return (
     <InspectionPanel
@@ -558,6 +574,10 @@ export function SampleDetailPanel({
       onReopen={onReopen}
       onRequestReopen={onRequestReopen}
       onDraftDirty={onDraftDirty}
+      onPrevSample={onPrevSample}
+      onNextSample={onNextSample}
+      hasPrevSample={hasPrevSample}
+      hasNextSample={hasNextSample}
     />
   );
 }

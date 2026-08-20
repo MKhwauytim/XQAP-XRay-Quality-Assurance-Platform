@@ -1,14 +1,19 @@
 /* @vitest-environment jsdom */
-// Regression tests for the NotificationManager hardening pass (synthesis medium,
-// 4 merged findings):
-//  1. loadState now has a real LoadingState/ErrorState + retry instead of a
+// Regression tests for the NotificationManager hardening pass, carried forward
+// onto the targeted-publishing rebuild (the single-column view became
+// `NotificationManager/{index,NotificationComposer,NotificationList,NotificationDetail}`):
+//  1. loadState has a real LoadingState/ErrorState + retry instead of a
 //     `.catch(() => {})` that left the page permanently stuck on an empty list.
 //  2. audienceUsers re-derives via subscribeToUserManagementChanges instead of
-//     being frozen forever at `useMemo(..., [])`'s first-mount value.
-//  3. The post composer disables its textarea while a post is in flight, and only
+//     being frozen forever at its first-mount value.
+//  3. A background/manual refresh never blanks or remounts a rendered list, and
+//     a failed silent refresh never surfaces an error state.
+//  4. The composer disables its textarea while a post is in flight, and only
 //     clears the draft if it still matches exactly what was submitted (guards
 //     against clobbering text the user started typing the instant the request
 //     settles).
+//  5. Posting is gated on the post-notification permission at the render
+//     boundary, not only in the handler.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { DirectoryHandleLike } from "../../../../../data/storage/fileSystemAccess";
@@ -25,6 +30,9 @@ import NotificationManager from "./NotificationManager";
 vi.mock("../../../../../data/notifications/notificationStorage", () => ({
   loadNotifications: vi.fn(),
   postNotification: vi.fn(),
+  updateNotificationMessage: vi.fn(),
+  deleteNotification: vi.fn(),
+  restoreNotification: vi.fn(),
 }));
 
 // usePermissions() reads useWorkspace() only to gate canMutate on "is a workspace
@@ -45,6 +53,32 @@ function createDeferred<T>(): {
     resolve = res;
   });
   return { promise, resolve };
+}
+
+function makeNotification(overrides: Partial<AppNotification> = {}): AppNotification {
+  return {
+    id: "n1",
+    message: "رسالة تجريبية",
+    postedBy: "mgr-1",
+    postedAt: "2026-08-01T08:00:00.000Z",
+    acceptances: [],
+    ...overrides,
+  };
+}
+
+/**
+ * The list card for a message. The body text now renders twice — once in the
+ * left-hand list card and once in the detail pane — so an unqualified
+ * `getByText` is ambiguous by construction; the card is the occurrence inside
+ * an `<li>`.
+ */
+function listCard(message: string): HTMLLIElement {
+  const card = screen
+    .getAllByText(message)
+    .map((node) => node.closest("li"))
+    .find((node): node is HTMLLIElement => node !== null);
+  if (!card) throw new Error(`no list card rendered for "${message}"`);
+  return card;
 }
 
 beforeEach(() => {
@@ -74,7 +108,7 @@ describe("NotificationManager loading/error hardening", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "إعادة المحاولة" }));
 
-    await waitFor(() => expect(screen.getByText("لا توجد إشعارات")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("لا توجد إشعارات مطابقة")).toBeInTheDocument());
     expect(screen.queryByText("تعذر تحميل الإشعارات.")).not.toBeInTheDocument();
     expect(loadNotificationsMock).toHaveBeenCalledTimes(2);
   });
@@ -84,14 +118,7 @@ describe("NotificationManager loading/error hardening", () => {
     const initialState = createEmptyUserManagementState();
     writeUserManagementState(initialState, false);
 
-    const notification: AppNotification = {
-      id: "n1",
-      message: "رسالة تجريبية",
-      postedBy: "mgr-1",
-      postedAt: new Date().toISOString(),
-      acceptances: [],
-    };
-    loadNotificationsMock.mockResolvedValue([notification]);
+    loadNotificationsMock.mockResolvedValue([makeNotification()]);
 
     render(<NotificationManager directoryHandle={{} as DirectoryHandleLike} />);
 
@@ -122,17 +149,11 @@ describe("NotificationManager silent refresh (A2)", () => {
     writeSession({ role: "manager", username: "mgr-1", loginAt: new Date().toISOString() });
     writeUserManagementState(createEmptyUserManagementState(), false);
 
-    const notification: AppNotification = {
-      id: "n1",
-      message: "رسالة أولى",
-      postedBy: "mgr-1",
-      postedAt: new Date().toISOString(),
-      acceptances: [],
-    };
+    const notification = makeNotification({ message: "رسالة أولى" });
     loadNotificationsMock.mockResolvedValue([notification]);
 
     render(<NotificationManager directoryHandle={{} as DirectoryHandleLike} />);
-    await waitFor(() => expect(screen.getByText("رسالة أولى")).toBeInTheDocument());
+    await waitFor(() => expect(listCard("رسالة أولى")).toBeInTheDocument());
 
     // Hold a reference to the actual rendered list item -- a naive silent-flag
     // no-op (opts.silent landing on the event's source string, exactly like the
@@ -141,46 +162,35 @@ describe("NotificationManager silent refresh (A2)", () => {
     // exclusive `loadState === "loading"` / `loadState === "ready"` render
     // gates, and hand back a freshly created node on the next render even if
     // the content ends up identical.
-    const listItemBefore = screen.getByText("رسالة أولى").closest("li");
-    expect(listItemBefore).not.toBeNull();
+    const listItemBefore = listCard("رسالة أولى");
 
-    const secondNotification: AppNotification = {
+    const secondNotification = makeNotification({
       id: "n2",
       message: "رسالة ثانية",
-      postedBy: "mgr-1",
-      postedAt: new Date().toISOString(),
-      acceptances: [],
-    };
+      postedAt: "2026-08-02T08:00:00.000Z",
+    });
     loadNotificationsMock.mockResolvedValue([secondNotification, notification]);
 
     act(() => {
       broadcastDataRefresh("periodic");
     });
 
-    await waitFor(() => expect(screen.getByText("رسالة ثانية")).toBeInTheDocument());
+    await waitFor(() => expect(listCard("رسالة ثانية")).toBeInTheDocument());
     expect(screen.queryByText("جارٍ التحميل…")).not.toBeInTheDocument();
     expect(screen.queryByText("تعذر تحميل الإشعارات.")).not.toBeInTheDocument();
 
     // The pre-existing item's DOM node was never destroyed and recreated.
-    const listItemAfter = screen.getByText("رسالة أولى").closest("li");
-    expect(listItemAfter).toBe(listItemBefore);
+    expect(listCard("رسالة أولى")).toBe(listItemBefore);
   });
 
   it("keeps the previously rendered list and shows no error state when a silent background refresh's read fails", async () => {
     writeSession({ role: "manager", username: "mgr-1", loginAt: new Date().toISOString() });
     writeUserManagementState(createEmptyUserManagementState(), false);
 
-    const notification: AppNotification = {
-      id: "n1",
-      message: "رسالة موجودة",
-      postedBy: "mgr-1",
-      postedAt: new Date().toISOString(),
-      acceptances: [],
-    };
-    loadNotificationsMock.mockResolvedValue([notification]);
+    loadNotificationsMock.mockResolvedValue([makeNotification({ message: "رسالة موجودة" })]);
 
     render(<NotificationManager directoryHandle={{} as DirectoryHandleLike} />);
-    await waitFor(() => expect(screen.getByText("رسالة موجودة")).toBeInTheDocument());
+    await waitFor(() => expect(listCard("رسالة موجودة")).toBeInTheDocument());
 
     loadNotificationsMock.mockRejectedValueOnce(new Error("transient UNC hiccup"));
 
@@ -193,7 +203,7 @@ describe("NotificationManager silent refresh (A2)", () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
 
-    expect(screen.getByText("رسالة موجودة")).toBeInTheDocument();
+    expect(listCard("رسالة موجودة")).toBeInTheDocument();
     expect(screen.queryByText("تعذر تحميل الإشعارات.")).not.toBeInTheDocument();
   });
 });
@@ -208,7 +218,7 @@ describe("NotificationManager post composer hardening", () => {
     postNotificationMock.mockReturnValue(deferred.promise);
 
     render(<NotificationManager directoryHandle={{} as DirectoryHandleLike} />);
-    await waitFor(() => expect(screen.getByText("لا توجد إشعارات")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("لا توجد إشعارات مطابقة")).toBeInTheDocument());
 
     const textarea = screen.getByLabelText("نص الإشعار الجديد") as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: "رسالة أولى" } });
@@ -219,7 +229,7 @@ describe("NotificationManager post composer hardening", () => {
     await waitFor(() => expect(textarea).toBeDisabled());
     expect(postNotificationMock).toHaveBeenCalledWith(
       {},
-      { message: "رسالة أولى", postedBy: "mgr-1" }
+      { message: "رسالة أولى", postedBy: "mgr-1", target: "all", audience: [] }
     );
 
     // A draft change lands while the request is still pending (the race the
@@ -235,5 +245,78 @@ describe("NotificationManager post composer hardening", () => {
     // Previously: `setMessage("")` unconditionally cleared the textarea here,
     // discarding whatever the user had already started typing next.
     expect(textarea.value).toBe("مسودة جديدة أثناء الإرسال");
+  });
+
+  it("clears the draft on success when the user did not type anything else", async () => {
+    writeSession({ role: "manager", username: "mgr-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+    loadNotificationsMock.mockResolvedValue([]);
+    postNotificationMock.mockResolvedValue({ ok: true });
+
+    render(<NotificationManager directoryHandle={{} as DirectoryHandleLike} />);
+    await waitFor(() => expect(screen.getByText("لا توجد إشعارات مطابقة")).toBeInTheDocument());
+
+    const textarea = screen.getByLabelText("نص الإشعار الجديد") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "رسالة" } });
+    fireEvent.click(screen.getByRole("button", { name: "نشر الإشعار" }));
+
+    await waitFor(() => expect(screen.getByText("تم نشر الإشعار.")).toBeInTheDocument());
+    expect(textarea.value).toBe("");
+  });
+
+  it("surfaces the storage layer's rejection instead of pretending the post landed", async () => {
+    writeSession({ role: "manager", username: "mgr-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+    loadNotificationsMock.mockResolvedValue([]);
+    postNotificationMock.mockResolvedValue({ ok: false, error: "تعارض في الكتابة" });
+
+    render(<NotificationManager directoryHandle={{} as DirectoryHandleLike} />);
+    await waitFor(() => expect(screen.getByText("لا توجد إشعارات مطابقة")).toBeInTheDocument());
+
+    const textarea = screen.getByLabelText("نص الإشعار الجديد") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "رسالة" } });
+    fireEvent.click(screen.getByRole("button", { name: "نشر الإشعار" }));
+
+    await waitFor(() => expect(screen.getByText("تعارض في الكتابة")).toBeInTheDocument());
+    expect(screen.queryByText("تم نشر الإشعار.")).not.toBeInTheDocument();
+    // The draft is kept so the user can retry without retyping it.
+    expect(textarea.value).toBe("رسالة");
+  });
+
+  it("does not submit a whitespace-only draft", async () => {
+    writeSession({ role: "manager", username: "mgr-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+    loadNotificationsMock.mockResolvedValue([]);
+
+    render(<NotificationManager directoryHandle={{} as DirectoryHandleLike} />);
+    await waitFor(() => expect(screen.getByText("لا توجد إشعارات مطابقة")).toBeInTheDocument());
+
+    const textarea = screen.getByLabelText("نص الإشعار الجديد") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "    " } });
+
+    const postButton = screen.getByRole("button", { name: "نشر الإشعار" });
+    expect(postButton).toBeDisabled();
+    fireEvent.click(postButton);
+    expect(postNotificationMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("NotificationManager permission gating", () => {
+  it("hides the composer and the per-notification actions from a role without post-notification", async () => {
+    // supervisor is inside the must-accept audience but has no posting rights
+    // (userManagement defaults: admin + manager only).
+    writeSession({ role: "supervisor", username: "malrogi", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+    loadNotificationsMock.mockResolvedValue([makeNotification({ message: "رسالة للمشرف" })]);
+
+    render(<NotificationManager directoryHandle={{} as DirectoryHandleLike} />);
+    await waitFor(() => expect(listCard("رسالة للمشرف")).toBeInTheDocument());
+
+    expect(screen.queryByLabelText("نص الإشعار الجديد")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "نشر الإشعار" })).not.toBeInTheDocument();
+    // The detail pane still renders — read-only — but offers no mutations.
+    expect(screen.queryByRole("button", { name: /تعديل/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /حذف/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /تذكير/ })).not.toBeInTheDocument();
   });
 });

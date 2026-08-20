@@ -1,0 +1,261 @@
+/* ── صور الأشعة المحالة — XrayReferrals ──────────────────────────────────────
+   Design handoff 2026-08, §3.
+
+   THE PROBLEM THIS FILE EXISTS TO FIX: the queue/panel split used a fixed
+   `470px` inspection panel (`.ip-panel--right`) inside a `1fr / clamp(300px,
+   25vw, 380px)` grid. On a small screen the form was squeezed; on a large one
+   the table stopped growing and the page ended in dead space. The split is now
+   a real fluid two-column grid with honest minimums on BOTH tracks, and the
+   search bar and selection bar span the full width above it so the table and
+   the panel start on the same line.
+
+   Every colour is a token from src/index.css — no raw hex literals.
+   RTL is the page default, so column 1 is the RIGHT-hand (queue) column.
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* The grid container keeps the existing `.ew-ref-queue` class as well, so the
+   toolbar-compaction rules already written for this queue in
+   EmployeeWorkspace.css (which this screen's owner must not edit) keep
+   applying unchanged — including `.ew-ref-queue .dt-row-count { display:none }`.
+   The compound `.ew-ref-queue.ew-xr-grid` selector is what lets this file
+   override that file's `display: flex` regardless of stylesheet order. */
+.ew-ref-queue.ew-xr-grid {
+  display: grid;
+  /* The handoff's own track definition. Both minimums are real: the queue can
+     never be squeezed below 340px (it scrolls horizontally instead — see
+     `.dt-table` below), and the form column never below 430px. */
+  grid-template-columns: minmax(340px, 1.15fr) minmax(430px, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  align-items: stretch;
+  /* `gap: 14px` in the handoff. Split deliberately: the row tracks below are
+     addressed by explicit line numbers so a CONDITIONAL child (the selection
+     bar, and Pagination — which returns null under one page of rows) cannot
+     shuffle everything else into the wrong track. A row gap would then show up
+     as 14px of dead space wherever such a child is absent, so the vertical
+     rhythm is carried by margins on the children that are always present. */
+  column-gap: 14px;
+  row-gap: 0;
+  min-width: 0;
+}
+
+/* ── Full-width strip above both columns ─────────────────────────────────── */
+
+.ew-ref-queue.ew-xr-grid > .dt-toolbar {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  margin-block-end: 14px;
+}
+
+/* ── Column 1 (RTL: right) — the queue ───────────────────────────────────── */
+
+.ew-ref-queue.ew-xr-grid > .dt-table-wrap {
+  grid-column: 1;
+  grid-row: 2;
+  /* The panel's own floor, so the two columns agree on where the fold is. */
+  min-height: 560px;
+  max-height: max(560px, calc(100vh - 240px));
+}
+
+.ew-ref-queue.ew-xr-grid > .data-pagination {
+  grid-column: 1;
+  grid-row: 3;
+  margin-block-start: 14px;
+}
+
+/* ── Column 2 (RTL: left) — the inspection panel ─────────────────────────── */
+
+/* Spans the queue's table + pagination rows so the panel is as tall as the
+   whole queue, which is what `position: sticky` on `.ip-panel--right` needs
+   room to travel within. */
+.ew-ref-queue.ew-xr-grid > .ew-xr-panel-col {
+  grid-column: 2;
+  grid-row: 2 / 4;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ew-xr-panel-col > .ip-panel {
+  flex: 1 1 auto;
+}
+
+/* ── Selection bar variant ───────────────────────────────────────────────── */
+
+/* Rendered only for users who may file a reassignment, so every row below it
+   shifts down by one track. Addressed as an explicit variant rather than left
+   to auto-placement: auto-placement would silently re-flow the panel into a
+   brand-new row underneath the pagination the moment a conditional child
+   appeared or disappeared. */
+.ew-ref-queue.ew-xr-grid--with-bar {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
+.ew-ref-queue.ew-xr-grid--with-bar > .ew-selection-bar {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  margin-block-end: 14px;
+}
+
+.ew-ref-queue.ew-xr-grid--with-bar > .dt-toolbar   { grid-row: 2; }
+.ew-ref-queue.ew-xr-grid--with-bar > .dt-table-wrap { grid-row: 3; }
+.ew-ref-queue.ew-xr-grid--with-bar > .data-pagination { grid-row: 4; }
+.ew-ref-queue.ew-xr-grid--with-bar > .ew-xr-panel-col { grid-row: 3 / 5; }
+
+/* ── Table ───────────────────────────────────────────────────────────────── */
+
+/* Scroll, don't compress. `.dt-table-wrap` is already `overflow: auto`; the
+   floor here is what makes a narrow queue column push the table into a
+   horizontal scroll instead of crushing every cell to an ellipsis. Column
+   widths stay `table-layout: auto` (DataTable's default) so each column still
+   fits its own content above that floor. */
+.ew-xr-grid .dt-table-wrap .dt-table {
+  min-width: 640px;
+}
+
+/* Selected row: handoff §3 asks for the navy accent rather than the sky one
+   DataTable paints by default, so the open sample reads as "this is the row
+   the form on the left belongs to" and not as a hover state. */
+.ew-xr-grid .dt-tr.selected {
+  background: var(--c-navy-soft);
+  box-shadow: inset 3px 0 0 var(--c-navy);
+}
+
+/* A row whose sample can no longer be reassigned keeps its checkbox (so the
+   column never jumps between rows) but renders it plainly disabled. */
+.ew-xr-grid .ew-row-check:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+/* ── Per-column header filtering ─────────────────────────────────────────── */
+
+/* The handoff draws this affordance as a lucide `filter` funnel. DataTable
+   renders the button's glyph as a literal "▾" text node and this screen may not
+   edit that shared component, so the glyph is masked out and the funnel painted
+   in `currentColor` instead — which keeps the button's existing hover/active
+   colour transitions working untouched. The button's accessible name comes from
+   its `aria-label`, not from the glyph, so hiding the text costs nothing. */
+.ew-xr-grid {
+  --ew-xr-filter-icon: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polygon points='22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3'/></svg>");
+}
+
+.ew-xr-grid .dt-filter-btn {
+  font-size: 0;
+  position: relative;
+}
+
+.ew-xr-grid .dt-filter-btn::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  /* Mask, so only the alpha channel matters — the `stroke` below is a named
+     colour purely to make the shape opaque. */
+  -webkit-mask: var(--ew-xr-filter-icon) center / contain no-repeat;
+  mask: var(--ew-xr-filter-icon) center / contain no-repeat;
+}
+
+/* Active treatment — handoff §3 pins the navy border explicitly (DataTable's
+   own default is a sky border), matching the `.ref-filter-btn.active` recipe. */
+.ew-xr-grid .dt-filter-btn.active {
+  border-color: var(--c-navy);
+  background: var(--c-sky-light);
+  color: var(--c-navy);
+}
+
+.ew-xr-grid .dt-filter-menu {
+  min-width: 210px;
+  box-shadow: var(--sh-lg);
+}
+
+/* ── Inspection panel metrics ────────────────────────────────────────────── */
+
+/* EmployeeWorkspace.css shrinks the panel's own type and stepper scale because
+   the panel used to be a 470px / 25vw sliver. It is now at least 430px and
+   grows with the viewport, so the handoff's full metrics are restored. Written
+   at a higher specificity than that file's `.ew-ref-workspace .ip-*` rules so
+   the result does not depend on stylesheet import order. */
+.ew-ref-workspace .ew-xr-grid .ip-xray-id {
+  font-size: 15px;
+  font-weight: var(--fw-bold);
+}
+
+.ew-ref-workspace .ew-xr-grid .ip-step {
+  gap: 10px;
+  min-width: 120px;
+  padding: 12px 16px;
+}
+
+.ew-ref-workspace .ew-xr-grid .ip-step-num {
+  width: 28px;
+  height: 28px;
+  flex-basis: 28px;
+  border-width: 2px;
+  font-size: 12px;
+}
+
+.ew-ref-workspace .ew-xr-grid .ip-step-label { font-size: 10px; }
+
+.ew-ref-workspace .ew-xr-grid .ip-step-title { font-size: 12.5px; }
+
+.ew-ref-workspace .ew-xr-grid .ip-form-body { padding: 16px 18px; }
+
+.ew-ref-workspace .ew-xr-grid .ip-field {
+  gap: 6px;
+  margin-bottom: 0;
+}
+
+/* ── Placeholder shown while no sample is open ───────────────────────────── */
+
+.ew-xr-grid .ew-ref-empty-panel {
+  min-height: 560px;
+  position: sticky;
+  top: 16px;
+}
+
+/* ── Narrow viewports ────────────────────────────────────────────────────── */
+
+/* Below the point where both minimums (340px + 430px + gap) can coexist with
+   the page's own padding, the two tracks stack. Every explicit placement above
+   is re-declared at matching specificity rather than overridden with
+   `!important`, and the panel drops its sticky/height behaviour because there
+   is no second column left for it to stay level with. */
+@media (max-width: 1100px) {
+  .ew-ref-queue.ew-xr-grid,
+  .ew-ref-queue.ew-xr-grid--with-bar {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    row-gap: 0;
+  }
+
+  .ew-ref-queue.ew-xr-grid > .dt-toolbar,
+  .ew-ref-queue.ew-xr-grid--with-bar > .dt-toolbar,
+  .ew-ref-queue.ew-xr-grid--with-bar > .ew-selection-bar,
+  .ew-ref-queue.ew-xr-grid > .dt-table-wrap,
+  .ew-ref-queue.ew-xr-grid--with-bar > .dt-table-wrap,
+  .ew-ref-queue.ew-xr-grid > .data-pagination,
+  .ew-ref-queue.ew-xr-grid--with-bar > .data-pagination,
+  .ew-ref-queue.ew-xr-grid > .ew-xr-panel-col,
+  .ew-ref-queue.ew-xr-grid--with-bar > .ew-xr-panel-col {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .ew-ref-queue.ew-xr-grid > .dt-table-wrap,
+  .ew-ref-queue.ew-xr-grid--with-bar > .dt-table-wrap {
+    min-height: clamp(320px, 46vh, 520px);
+    max-height: clamp(320px, 46vh, 520px);
+  }
+
+  .ew-ref-queue.ew-xr-grid > .ew-xr-panel-col,
+  .ew-ref-queue.ew-xr-grid--with-bar > .ew-xr-panel-col {
+    margin-block-start: 14px;
+  }
+
+  .ew-xr-grid .ip-panel--right,
+  .ew-xr-grid .ew-ref-empty-panel {
+    position: static;
+    min-height: 0;
+    max-height: none;
+  }
+}

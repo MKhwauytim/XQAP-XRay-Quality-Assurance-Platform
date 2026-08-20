@@ -104,6 +104,7 @@ export type WorkspaceActionType =
   | "replacement-denied"
   | "reopen-approved"
   | "reopen-denied"
+  | "decision-reverted"
   | "answer-reopened"
   | "month-closed"
   | "month-reopened"

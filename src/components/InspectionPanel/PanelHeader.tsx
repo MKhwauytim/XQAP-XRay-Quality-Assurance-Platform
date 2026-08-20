@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import type { DistributionEntry } from "../../data/distribution/distributionTypes";
 import type { ItemAnswer } from "../../data/answers/answerTypes";
 import { formatStageLabel } from "../../data/population/stageHelpers";
@@ -18,6 +18,21 @@ type Props = {
    */
   requiredTotal: number;
   requiredFilled: number;
+  /**
+   * Sample-to-sample navigation (design handoff §3). Omit BOTH callbacks and no
+   * navigation control renders at all — the panel is then exactly what it was
+   * before this addition, which is what keeps it usable outside a queue.
+   *
+   * The panel deliberately owns none of the navigation logic: which rows are
+   * "next" and "previous" is a property of the caller's currently FILTERED row
+   * set, and whether a switch is even allowed depends on the caller's unsaved
+   * draft state (see XrayReferrals' `navigateToSample`). This is presentation
+   * only — a disabled button when there is nowhere to go.
+   */
+  onPrevSample?: () => void;
+  onNextSample?: () => void;
+  hasPrevSample?: boolean;
+  hasNextSample?: boolean;
 };
 
 export function PanelHeader({
@@ -26,6 +41,10 @@ export function PanelHeader({
   onClose,
   requiredTotal,
   requiredFilled,
+  onPrevSample,
+  onNextSample,
+  hasPrevSample = false,
+  hasNextSample = false,
 }: Props) {
   const L = getLabels();
   const isSubmitted = entry.status === "completed" || savedAnswer?.status === "submitted";
@@ -50,6 +69,8 @@ export function PanelHeader({
       : null,
   ].filter((part): part is string => typeof part === "string" && part.trim().length > 0);
 
+  const showSampleNav = Boolean(onPrevSample || onNextSample);
+
   const showProgress = requiredTotal > 0;
   const pct = showProgress
     ? Math.max(0, Math.min(100, Math.round((requiredFilled / requiredTotal) * 100)))
@@ -63,6 +84,31 @@ export function PanelHeader({
           <span className={`ip-badge ${badgeClass}`}>{badgeText}</span>
         </div>
         <div className="ip-header-controls">
+          {showSampleNav && (
+            <div className="ip-sample-nav" role="group" aria-label={L.ip_sample_nav_aria}>
+              {/* RTL: "previous" is the chevron pointing to the physical right. */}
+              <button
+                type="button"
+                className="ip-ctrl-btn"
+                title={L.ip_prev_sample_title}
+                aria-label={L.ip_prev_sample_title}
+                disabled={!hasPrevSample || !onPrevSample}
+                onClick={() => onPrevSample?.()}
+              >
+                <ChevronRight size={16} />
+              </button>
+              <button
+                type="button"
+                className="ip-ctrl-btn"
+                title={L.ip_next_sample_title}
+                aria-label={L.ip_next_sample_title}
+                disabled={!hasNextSample || !onNextSample}
+                onClick={() => onNextSample?.()}
+              >
+                <ChevronLeft size={16} />
+              </button>
+            </div>
+          )}
           <button
             type="button"
             className="ip-ctrl-btn"

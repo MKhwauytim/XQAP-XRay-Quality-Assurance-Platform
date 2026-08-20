@@ -3,7 +3,8 @@ import { CalendarOff, X } from "lucide-react";
 import { readSession } from "../../../../../auth/authSession";
 import { usePermissions } from "../../../../../auth/usePermissions";
 import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
-import { EmptyState } from "../../../../../components/StateViews/StateViews";
+import { ConfirmDialog } from "../../../../../components/ConfirmDialog/ConfirmDialog";
+import { EmptyState, ErrorState, LoadingState } from "../../../../../components/StateViews/StateViews";
 import { logError, logRejection } from "../../../../../data/storage/errorLogger";
 import { thrownErrorText, userFacingErrorText } from "../../../../../data/storage/writeErrorText";
 import {
@@ -90,6 +91,7 @@ import {
 import { submitReopenRequest } from "../../../../../data/referral/requestReopen";
 import type { ReplacementRequest } from "../../../../../data/referral/referralTypes";
 import { useLabels } from "../../../../../data/labels/useLabels";
+import type { Labels } from "../../../../../data/labels/labelsStore";
 import { formatStageLabel } from "../../../../../data/population/stageHelpers";
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import {
@@ -109,6 +111,7 @@ import {
   pct,
   isStudyCompleted,
 } from "./XrayReferrals/subComponents";
+import "./XrayReferrals/XrayReferrals.css";
 
 // ── Column definitions ────────────────────────────────────────────────────────
 
@@ -293,6 +296,198 @@ function buildAnswerStatusFilter(
     if (v === "pending")   return !s || s === "draft";
     return true;
   };
+}
+
+/**
+ * The queue table's cell renderer, as a factory over the pieces of component
+ * state it reads. Module-level on purpose: it is pure with respect to those
+ * inputs, and keeping it out of the component body keeps `XrayReferrals` inside
+ * the repo's `max-lines-per-function` regression budget.
+ */
+function createRenderCell(deps: {
+  selectedIds: Set<string>;
+  toggleSelect: (id: string, checked: boolean) => void;
+  answersMap: Map<string, ItemAnswer>;
+  stageMappings: StageAliasMappings | undefined;
+  labels: Labels;
+}) {
+  const { selectedIds, toggleSelect, answersMap, stageMappings, labels: L } = deps;
+  return function renderCell(
+    col: DataTableCol<DistributionEntry>,
+    entry: DistributionEntry,
+    { isDate, dateFmt }: CellMeta
+  ) {
+    if (col.id === SELECT_COL_ID) {
+      // Design handoff §3: the select column DISABLES a row that cannot be
+      // reassigned rather than omitting its checkbox. Eligibility is the same
+      // predicate the selection bar counts with and the submit path enforces
+      // (planReassignment.ts), so a tickable box always means "this click will
+      // actually request this sample". Previously only "replaced" was excluded
+      // and a completed row rendered a live checkbox the planner then silently
+      // dropped — the drift this shares an implementation to prevent.
+      const eligible = isReassignEligible(entry);
+      return (
+        <input
+          type="checkbox"
+          className="ew-row-check"
+          checked={eligible && selectedIds.has(entry.xrayImageId)}
+          disabled={!eligible}
+          onChange={(e) => toggleSelect(entry.xrayImageId, e.target.checked)}
+          onClick={(e) => e.stopPropagation()}
+          aria-label={
+            eligible
+              ? `تحديد ${entry.xrayImageId}`
+              : L.ew_row_select_blocked_aria.replace("{id}", entry.xrayImageId)
+          }
+        />
+      );
+    }
+    if (col.id === "xrayImageId") {
+      return (
+        <span className="dt-mono ew-xray-id-cell">
+          {entry.xrayImageId}
+          {isAdhocEntry(entry) && (
+            <span className="ew-adhoc-badge" title={`${L.badge_adhoc_import_title}: ${entry.adhocFileName}`}>
+              {L.badge_adhoc_import}
+            </span>
+          )}
+        </span>
+      );
+    }
+    if (col.id === "answerStatus") {
+      const answer = answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`);
+      return <StatusBadge answer={answer} entryStatus={entry.status} labels={L} />;
+    }
+    const raw = col.id === "stage"
+      ? formatStageLabel(entry.row.stage, stageMappings)
+      : col.accessor(entry);
+    if (!raw) return <span className="dt-muted">{L.value_empty}</span>;
+    // The expert observation timestamp is shown with date AND time by default.
+    if (col.id === "submittedAt") {
+      return <span className="dt-cell">{formatDate(raw, dateFmt === "date" ? "datetime" : dateFmt)}</span>;
+    }
+    if (isDate) return <span className="dt-cell">{formatDate(raw, dateFmt)}</span>;
+    return <span className="dt-cell">{raw}</span>;
+  }
+}
+
+/**
+ * Opens the إحالة (reassign) modal for a set of ids. A factory over the three
+ * setters it drives — module-level so the component body stays inside the
+ * repo's `max-lines-per-function` regression budget.
+ */
+function createOpenReassignModal(deps: {
+  setStatusMsg: (msg: StatusMsg) => void;
+  setReassignError: (error: string | null) => void;
+  setReassignModal: (state: ReassignModalState) => void;
+}) {
+  const { setStatusMsg, setReassignError, setReassignModal } = deps;
+  return function openReassignModal(
+    xrayImageIds: string[],
+    source: "single" | "selected" | "filtered"
+  ): void {
+    if (xrayImageIds.length === 0) {
+      // A click must never be a silent no-op — the buttons are already
+      // `disabled` when their respective count is 0, but this guard stays as
+      // defense-in-depth against a state race (e.g. the underlying
+      // selection/filtered set emptying out between render and click), so it
+      // must explain itself instead of doing nothing.
+      setStatusMsg({
+        type: "error",
+        text: source === "filtered"
+          ? "لا توجد عينات مطابقة للتصفية/البحث الحالي لإحالتها."
+          : "لا توجد عينات محددة لإحالتها.",
+      });
+      return;
+    }
+    setReassignError(null);
+    setReassignModal({
+      xrayImageIds,
+      source,
+      // Only ever reached from a click (the two bar buttons and the inspection
+      // panel's "إسناد لموظف آخر"), never during render — but the compiler
+      // cannot see that now that a render-time prop callback forwards to it.
+      // The value must be random-and-unique, not a counter: it is the
+      // idempotency key a retry replays against, so a value that repeats after
+      // a page reload would make a genuinely new batch look like a replay and
+      // silently drop it.
+      sourceRequestId: `bulk-reassign-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    });
+  }
+}
+
+/**
+ * The "متابعة العمل" figures. Oversight users in the "الكل" view read the whole
+ * workspace; everyone else reads only what is assigned to them. Module-level so
+ * the component body stays inside the repo's `max-lines-per-function` budget.
+ */
+function computePersonalStats(input: {
+  allEntries: DistributionEntry[];
+  entries: DistributionEntry[];
+  displayEntries: DistributionEntry[];
+  canSeeAll: boolean;
+  username: string;
+  answersMap: Map<string, ItemAnswer>;
+}): PersonalStats {
+  const { allEntries, entries, displayEntries, canSeeAll, username, answersMap } = input;
+  const source = canSeeAll
+    ? displayEntries
+    : (allEntries.length > 0 ? allEntries : entries).filter((entry) => entry.assignedTo === username);
+  const submitted = source.filter((entry) => isStudyCompleted(entry, answersMap)).length;
+  const replaced = source.filter((entry) => entry.status === "replaced").length;
+  const notStarted = Math.max(0, source.length - submitted - replaced);
+  return {
+    assigned: source.length,
+    submitted,
+    notStarted,
+    replaced,
+    active: Math.max(0, source.length - replaced),
+    completionPct: pct(submitted, source.length),
+  };
+}
+
+/**
+ * The previous/next neighbours of the open sample within the CURRENTLY FILTERED
+ * rows. An open row that the filter has taken out of that set (index -1) is
+ * treated as "just before the start", so next lands on the first filtered row
+ * and previous on the last — a reader who filters to a set not containing their
+ * open sample keeps working chevrons instead of two dead buttons.
+ */
+function sampleNavNeighbours(
+  panelEntry: DistributionEntry | null | undefined,
+  filtered: DistributionEntry[]
+): { prev: DistributionEntry | undefined; next: DistributionEntry | undefined } {
+  if (!panelEntry) return { prev: undefined, next: undefined };
+  const index = filtered.findIndex((entry) => entry.xrayImageId === panelEntry.xrayImageId);
+  return index === -1
+    ? { prev: filtered[filtered.length - 1], next: filtered[0] }
+    : { prev: filtered[index - 1], next: filtered[index + 1] };
+}
+
+/**
+ * Unsaved-draft confirmation for the panel's previous/next chevrons. A
+ * background refresh is involuntary and is absorbed silently by the retention
+ * block in `XrayReferrals`; a chevron click is deliberate, so it asks rather
+ * than either discarding the draft or refusing to move.
+ */
+function SampleNavDraftDialog({ pendingNavId, labels: L, onConfirm, onCancel }: {
+  pendingNavId: string | null;
+  labels: Labels;
+  onConfirm: (xrayImageId: string) => void;
+  onCancel: () => void;
+}) {
+  return (
+    <ConfirmDialog
+      open={pendingNavId !== null}
+      title={L.ew_sample_nav_draft_title}
+      message={L.ew_sample_nav_draft_confirm}
+      confirmLabel={L.ew_sample_nav_draft_ok}
+      cancelLabel={L.ew_sample_nav_draft_cancel}
+      danger
+      onConfirm={() => { if (pendingNavId !== null) onConfirm(pendingNavId); }}
+      onCancel={onCancel}
+    />
+  );
 }
 
 export default function XrayReferrals({ directoryHandle }: Props) {
@@ -592,27 +787,43 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     setDirtyEntryId(null);
   }, []);
 
+  // ── Previous / next sample navigation (design handoff §3) ──────────────────
+  // The panel's two chevrons move within the CURRENTLY FILTERED rows —
+  // `filteredTableEntries` is DataTable's own post-search, post-column-filter
+  // set across ALL pages (see its onFilteredRowsChange contract), which is
+  // exactly what the handoff asks for and is already wired up for the selection
+  // bar's "everything matching the filter" counts.
+  //
+  // The draft guard is the load-bearing part. SampleDetailPanel keys
+  // InspectionPanel on `xrayImageId`, so accepting a switch REMOUNTS the panel
+  // and destroys whatever the employee typed but never saved — the same
+  // mechanism the background-refresh retention above exists to defend against.
+  // A refresh is involuntary and is therefore absorbed silently; this is a
+  // deliberate click, so it is confirmed rather than blocked. Nothing here
+  // changes `onDraftDirty`'s own one-way contract, and `selectEntry` still
+  // clears the protection exactly once the user has chosen to move on.
+  const [pendingNavId, setPendingNavId] = useState<string | null>(null);
+  const { prev: prevNavEntry, next: nextNavEntry } = sampleNavNeighbours(panelEntry, filteredTableEntries);
+
+  const navigateToSample = useCallback((xrayImageId: string): void => {
+    // Guarded on `dirtyEntryId` alone: it is only ever set to the id the panel
+    // is currently mounted on, and is cleared by every explicit navigation.
+    if (dirtyEntryId !== null && dirtyEntryId !== xrayImageId) {
+      setPendingNavId(xrayImageId);
+      return;
+    }
+    selectEntry(xrayImageId);
+  }, [dirtyEntryId, selectEntry]);
+
   const selAnswer = useMemo(
     () => panelEntry ? (answersMap.get(`${panelEntry.xrayImageId}::${panelEntry.assignedTo}`) ?? null) : null,
     [panelEntry, answersMap]
   );
 
-  const personalStats = useMemo<PersonalStats>(() => {
-    const source = canSeeAll
-      ? displayEntries
-      : (allEntries.length > 0 ? allEntries : entries).filter((entry) => entry.assignedTo === username);
-    const submitted = source.filter((entry) => isStudyCompleted(entry, answersMap)).length;
-    const replaced = source.filter((entry) => entry.status === "replaced").length;
-    const notStarted = Math.max(0, source.length - submitted - replaced);
-    return {
-      assigned: source.length,
-      submitted,
-      notStarted,
-      replaced,
-      active: Math.max(0, source.length - replaced),
-      completionPct: pct(submitted, source.length),
-    };
-  }, [allEntries, entries, displayEntries, canSeeAll, username, answersMap]);
+  const personalStats = useMemo<PersonalStats>(
+    () => computePersonalStats({ allEntries, entries, displayEntries, canSeeAll, username, answersMap }),
+    [allEntries, entries, displayEntries, canSeeAll, username, answersMap]
+  );
 
   // Bug (load-token): guards a slow load for a previously-selected month from
   // clobbering a later selection — including the truthy→"" empty transition.
@@ -1290,39 +1501,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
 
   // ── Reassignment handler (shared by all three sample-choosing methods) ─────
 
-  function openReassignModal(
-    xrayImageIds: string[],
-    source: "single" | "selected" | "filtered"
-  ): void {
-    if (xrayImageIds.length === 0) {
-      // A click must never be a silent no-op — the buttons are already
-      // `disabled` when their respective count is 0, but this guard stays as
-      // defense-in-depth against a state race (e.g. the underlying
-      // selection/filtered set emptying out between render and click), so it
-      // must explain itself instead of doing nothing.
-      setStatusMsg({
-        type: "error",
-        text: source === "filtered"
-          ? "لا توجد عينات مطابقة للتصفية/البحث الحالي لإحالتها."
-          : "لا توجد عينات محددة لإحالتها.",
-      });
-      return;
-    }
-    setReassignError(null);
-    setReassignModal({
-      xrayImageIds,
-      source,
-      // Only ever reached from a click (the two bar buttons and the inspection
-      // panel's "إسناد لموظف آخر"), never during render — but the compiler
-      // cannot see that now that a render-time prop callback forwards to it.
-      // The value must be random-and-unique, not a counter: it is the
-      // idempotency key a retry replays against, so a value that repeats after
-      // a page reload would make a genuinely new batch look like a replay and
-      // silently drop it.
-      // eslint-disable-next-line react-hooks/purity -- see above
-      sourceRequestId: `bulk-reassign-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    });
-  }
+  const openReassignModal = createOpenReassignModal({ setStatusMsg, setReassignError, setReassignModal });
 
   async function handleReassignConfirm(toEmployee: string, reason: string): Promise<void> {
     // Handler-boundary check — mirrors every other mutating handler in this
@@ -1428,51 +1607,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
 
   // ── Cell renderer ──────────────────────────────────────────────────────────
 
-  function renderCell(
-    col: DataTableCol<DistributionEntry>,
-    entry: DistributionEntry,
-    { isDate, dateFmt }: CellMeta
-  ) {
-    if (col.id === SELECT_COL_ID) {
-      if (entry.status === "replaced") return null;
-      return (
-        <input
-          type="checkbox"
-          className="ew-row-check"
-          checked={selectedIds.has(entry.xrayImageId)}
-          onChange={(e) => toggleSelect(entry.xrayImageId, e.target.checked)}
-          onClick={(e) => e.stopPropagation()}
-          aria-label={`تحديد ${entry.xrayImageId}`}
-        />
-      );
-    }
-    if (col.id === "xrayImageId") {
-      return (
-        <span className="dt-mono ew-xray-id-cell">
-          {entry.xrayImageId}
-          {isAdhocEntry(entry) && (
-            <span className="ew-adhoc-badge" title={`${L.badge_adhoc_import_title}: ${entry.adhocFileName}`}>
-              {L.badge_adhoc_import}
-            </span>
-          )}
-        </span>
-      );
-    }
-    if (col.id === "answerStatus") {
-      const answer = answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`);
-      return <StatusBadge answer={answer} entryStatus={entry.status} labels={L} />;
-    }
-    const raw = col.id === "stage"
-      ? formatStageLabel(entry.row.stage, stageMappings)
-      : col.accessor(entry);
-    if (!raw) return <span className="dt-muted">{L.value_empty}</span>;
-    // The expert observation timestamp is shown with date AND time by default.
-    if (col.id === "submittedAt") {
-      return <span className="dt-cell">{formatDate(raw, dateFmt === "date" ? "datetime" : dateFmt)}</span>;
-    }
-    if (isDate) return <span className="dt-cell">{formatDate(raw, dateFmt)}</span>;
-    return <span className="dt-cell">{raw}</span>;
-  }
+  const renderCell = createRenderCell({ selectedIds, toggleSelect, answersMap, stageMappings, labels: L });
 
   // ── Custom filter override for answerStatus ────────────────────────────────
   // LOG-03: memoized — an unstable identity here makes DataTable's filteredRows
@@ -1511,8 +1646,27 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         </div>
       )}
 
-      {loadState === "loading" && <p className="ew-empty">جاري التحميل...</p>}
-      {loadState === "error"   && <p className="ew-empty">تعذر تحميل البيانات.</p>}
+      {/* Design handoff §"الحالات": the shared StateViews components rather than
+          two bare paragraphs — and, for the error case, a way back. `loadData()`
+          with no options is the non-silent path, which is what a retry should
+          be: it re-flashes the loading state and re-reads from scratch.
+
+          The two strings are deliberately UNCHANGED. Sibling regression tests
+          assert these exact texts are ABSENT during a silent background refresh
+          (a placeholder there would mean the open inspection form had just been
+          unmounted, taking any unsaved draft with it); rewording them would
+          leave those assertions passing while testing nothing at all. */}
+      {loadState === "loading" && <LoadingState label="جاري التحميل..." />}
+      {loadState === "error" && (
+        <ErrorState
+          title="تعذر تحميل البيانات."
+          actions={
+            <button type="button" className="ew-btn-secondary" onClick={() => { void loadData(); }}>
+              {L.ew_load_retry_btn}
+            </button>
+          }
+        />
+      )}
 
       {/* Zero assignments: the shared EmptyState the sibling Employee Workspace
           views already use (XrayInspectionResults, ReferralApproval), instead of
@@ -1565,9 +1719,21 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         // flow until a user happened to open "الأعمدة" and turn it on manually — a real
         // contributor to the reported "not able to do that" gap.
         const defaultVisibleCols = hasSelectColumn ? [SELECT_COL_ID, ...DEFAULT_VISIBLE] : DEFAULT_VISIBLE;
+        // Design handoff §3 grid. The queue container IS the two-column grid
+        // now: DataTable renders a Fragment, so its toolbar / table / pagination
+        // are direct children here and the toolbar can span `1 / -1` above both
+        // columns while the table and the panel start on the same line. That is
+        // only expressible if they are siblings — a wrapper around the table
+        // would put the search bar back inside one column.
+        //
+        // `--with-bar` is passed explicitly rather than inferred in CSS because
+        // the row tracks are placed by line number (see XrayReferrals.css): the
+        // selection bar is conditional, and auto-placement would re-flow the
+        // panel underneath the pagination the moment it appeared.
+        const showSelectionBar = canReassignSamples && entries.length > 0;
         const tableEl = (
-          <div className="ew-ref-queue">
-            {canReassignSamples && entries.length > 0 && (
+          <div className={`ew-ref-queue ew-xr-grid${showSelectionBar ? " ew-xr-grid--with-bar" : ""}`}>
+            {showSelectionBar && (
               <ReassignSelectionBar
                 selectedCount={selectedIds.size}
                 eligibleSelectedCount={eligibleSelectedIds.length}
@@ -1641,24 +1807,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                 ) : undefined
               }
             />
-          </div>
-        );
-
-        return (
-          <div className="ew-ref-workspace">
-            <ReferralStatsStrip
-              stats={personalStats}
-              quota={myQuota}
-              username={username}
-              // Exactly the branch `personalStats` itself takes: in the "الكل"
-              // view an oversight user's figures are the whole workspace's.
-              scope={canSeeAll && !showMyOnly ? "all" : "own"}
-            />
-            {showingRetainedDraft && (
-              <p className="ew-msg-warn" role="status">{L.ew_draft_retained_notice}</p>
-            )}
-            <div className={`ew-split ew-split--right${panelEntry ? "" : " ew-split--empty"}`}>
-              {tableEl}
+            {/* Second grid column. The wrapper is what `position: sticky` on the
+                panel travels inside, and it keeps the empty-state placeholder in
+                the same track without a second set of placement rules. */}
+            <div className="ew-xr-panel-col">
               {panelEntry ? (
                 <SampleDetailPanel
                   entry={panelEntry}
@@ -1671,6 +1823,18 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                   // row keeps it on screen instead of swapping the employee to
                   // a different x-ray. See the retention block further up.
                   onDraftDirty={() => setDirtyEntryId(panelEntry.xrayImageId)}
+                  // Previous/next within the filtered set. Both go through
+                  // `navigateToSample`, which is the ONLY thing standing between
+                  // a deliberate chevron click and a remount that would discard
+                  // whatever `onDraftDirty` just reported.
+                  // Always supplied, so the control keeps its place in the
+                  // header and merely disables at the ends of the filtered set
+                  // — a chevron that disappears while the reader is filtering
+                  // reads as a bug, and moves everything beside it.
+                  onPrevSample={() => { if (prevNavEntry) navigateToSample(prevNavEntry.xrayImageId); }}
+                  onNextSample={() => { if (nextNavEntry) navigateToSample(nextNavEntry.xrayImageId); }}
+                  hasPrevSample={prevNavEntry !== undefined}
+                  hasNextSample={nextNavEntry !== undefined}
                   onSave={(ans) =>
                     handleSave(panelEntry.xrayImageId, ans, panelEntry.assignedTo)
                   }
@@ -1708,7 +1872,31 @@ export default function XrayReferrals({ directoryHandle }: Props) {
             </div>
           </div>
         );
+
+        return (
+          <div className="ew-ref-workspace">
+            <ReferralStatsStrip
+              stats={personalStats}
+              quota={myQuota}
+              username={username}
+              // Exactly the branch `personalStats` itself takes: in the "الكل"
+              // view an oversight user's figures are the whole workspace's.
+              scope={canSeeAll && !showMyOnly ? "all" : "own"}
+            />
+            {showingRetainedDraft && (
+              <p className="ew-msg-warn" role="status">{L.ew_draft_retained_notice}</p>
+            )}
+            {tableEl}
+          </div>
+        );
       })()}
+
+      <SampleNavDraftDialog
+        pendingNavId={pendingNavId}
+        labels={L}
+        onConfirm={(target) => { setPendingNavId(null); selectEntry(target); }}
+        onCancel={() => setPendingNavId(null)}
+      />
 
       {replacementDialog ? (
         <ReplacementDialog

@@ -17,11 +17,39 @@
   flex-shrink: 0;
 }
 
-/* Right panel — stretches to the full split container height via align-items: stretch */
+/* Right panel.
+   Design handoff §3: the old `width: 470px; max-width: 42%` was the problem the
+   redesign exists to fix — it cramped the form on a small screen and left dead
+   space on a large one. The panel now takes whatever width its grid column
+   gives it (the caller sets the track's own minmax floor) and owns only its
+   HEIGHT behaviour: never shorter than 560px, never taller than the viewport
+   minus the page chrome, and sticky so it stays in view while the queue beside
+   it scrolls. `min-width: 0` lets it actually shrink inside a grid track, whose
+   default `min-width: auto` would otherwise floor it at its content width. */
 .ip-panel--right {
-  width: 470px;
-  max-width: 42%;
-  flex-shrink: 0;
+  min-width: 0;
+  min-height: 560px;
+  max-height: max(560px, calc(100vh - 240px));
+  position: sticky;
+  top: 16px;
+}
+
+/* Previous / next sample controls (design handoff §3) — a tight pair so they
+   read as one control next to the standalone close button. */
+.ip-sample-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.ip-ctrl-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ip-ctrl-btn:disabled:hover {
+  background: var(--c-surface);
+  border-color: var(--c-border);
 }
 
 /* ── Header ─────────────────────────────────────────────────────────────── */

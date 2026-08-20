@@ -38,6 +38,7 @@ import {
   type AppNotification,
   type NotificationsArchiveFile,
   type NotificationsFile,
+  type NotificationTarget,
 } from "./notificationTypes";
 
 const NOTIFICATIONS_FILE = "notifications.json";
@@ -340,18 +341,94 @@ async function mutateNotifications(
 /** Post a new broadcast notification (admin/manager). */
 export async function postNotification(
   directoryHandle: DirectoryHandleLike,
-  params: { message: string; postedBy: string }
+  params: { message: string; postedBy: string; target?: NotificationTarget; audience?: string[] }
 ): Promise<NotificationWriteResult> {
   const message = params.message.trim();
   if (!message) return { ok: false, error: "نص الإشعار مطلوب." };
+  const target = params.target ?? "all";
+  // A custom target with nobody in it would be posted, counted, and read by no
+  // one — reject it here rather than let it sit in the list forever at 0/0.
+  const audience = target === "custom" ? (params.audience ?? []).filter(Boolean) : undefined;
+  if (target === "custom" && (!audience || audience.length === 0)) {
+    return { ok: false, error: "اختر مستلماً واحداً على الأقل قبل النشر." };
+  }
   const notification: AppNotification = {
     id: createNotificationId(),
     message,
     postedBy: params.postedBy,
     postedAt: new Date().toISOString(),
     acceptances: [],
+    target,
+    ...(audience ? { audience } : {}),
   };
   return mutateNotifications(directoryHandle, (list) => [...list, notification]);
+}
+
+/**
+ * Edit a posted notification's text in place.
+ *
+ * The id, the posting timestamp and every acknowledgement already recorded are
+ * preserved: an edit corrects the wording of the same broadcast, it does not
+ * re-issue it. Acknowledgements are therefore NOT cleared — a reader who
+ * acknowledged the original is not asked again — and `editedAt` records that
+ * the text they acknowledged is not the text now on file.
+ */
+export async function updateNotificationMessage(
+  directoryHandle: DirectoryHandleLike,
+  notificationId: string,
+  params: { message: string; target?: NotificationTarget; audience?: string[] }
+): Promise<NotificationWriteResult> {
+  const message = params.message.trim();
+  if (!message) return { ok: false, error: "نص الإشعار مطلوب." };
+  const target = params.target;
+  const audience = target === "custom" ? (params.audience ?? []).filter(Boolean) : undefined;
+  if (target === "custom" && (!audience || audience.length === 0)) {
+    return { ok: false, error: "اختر مستلماً واحداً على الأقل قبل الحفظ." };
+  }
+  let found = false;
+  const result = await mutateNotifications(directoryHandle, (list) =>
+    list.map((notification) => {
+      if (notification.id !== notificationId) return notification;
+      found = true;
+      const next: AppNotification = { ...notification, message, editedAt: new Date().toISOString() };
+      if (target) {
+        next.target = target;
+        if (audience) next.audience = audience;
+        else delete next.audience;
+      }
+      return next;
+    })
+  );
+  if (result.ok && !found) return { ok: false, error: "الإشعار لم يعد موجوداً — ربما حذفه مستخدم آخر." };
+  return result;
+}
+
+/** Remove a notification from the live broadcast list. */
+export async function deleteNotification(
+  directoryHandle: DirectoryHandleLike,
+  notificationId: string
+): Promise<NotificationWriteResult> {
+  return mutateNotifications(directoryHandle, (list) => list.filter((n) => n.id !== notificationId));
+}
+
+/**
+ * Put a deleted notification back, exactly as it was.
+ *
+ * This is what the delete toast's "تراجع" calls. The record is restored under
+ * its ORIGINAL id, so every acknowledgement already recorded against it in the
+ * per-employee ack files re-attaches on the next read — a delete + restore
+ * round trip is invisible to readers who had already acknowledged. Re-posting
+ * the text as a new notification would instead ask all of them again.
+ */
+export async function restoreNotification(
+  directoryHandle: DirectoryHandleLike,
+  notification: AppNotification
+): Promise<NotificationWriteResult> {
+  return mutateNotifications(directoryHandle, (list) =>
+    list.some((n) => n.id === notification.id)
+      ? list
+      : [...list, notification].sort((a, b) => a.postedAt.localeCompare(b.postedAt))
+  );
 }
 
 /**

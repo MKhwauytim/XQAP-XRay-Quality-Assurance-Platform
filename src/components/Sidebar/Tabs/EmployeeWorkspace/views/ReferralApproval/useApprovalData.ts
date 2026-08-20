@@ -22,6 +22,7 @@ import {
   type DenyResult,
 } from "../../../../../../data/referral/approveReferral";
 import { loadRequestLogs } from "../../../../../../data/referral/referralStorage";
+import { undoDecision } from "../../../../../../data/referral/undoDecision";
 import type { ReferralRequest, ReopenRequest, ReplacementRequest } from "../../../../../../data/referral/referralTypes";
 import { loadSampleMaster } from "../../../../../../data/sampling/sampleStorage";
 import type { DirectoryHandleLike } from "../../../../../../data/storage/fileSystemAccess";
@@ -463,11 +464,54 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
     return outcomes;
   }
 
+  /**
+   * Take back decisions the toast is still offering an undo for.
+   *
+   * Undo is append-only at the domain level (`undoDecision` writes a revocation
+   * event and, for an approved referral, the counter-reassignments) — nothing
+   * here rewrites or deletes the original decision. Mirrors `bulkDecision`'s
+   * one-reload-in-a-finally shape so a partial failure still reconciles.
+   */
+  async function undoDecisions(entries: CardRequest[]): Promise<BulkOutcome[]> {
+    const outcomes: BulkOutcome[] = [];
+    try {
+      for (const request of entries) {
+        const kind = requestKind(request);
+        const result = await undoDecision({
+          directoryHandle,
+          monthFolderName: request.monthFolderName,
+          kind,
+          requestId: request.requestId,
+          reviewedBy: username,
+        });
+        outcomes.push({
+          requestId: request.requestId,
+          label: describeRequestShort(request),
+          ok: result.ok,
+          error: result.ok ? undefined : result.error,
+        });
+        if (result.ok) {
+          void appendWorkspaceAction(directoryHandle, {
+            actor: username,
+            actorRole: role,
+            action: "decision-reverted",
+            monthFolderName: request.monthFolderName,
+            target: request.requestId,
+            details: { kind },
+          });
+        }
+      }
+    } finally {
+      await loadData({ silent: true });
+    }
+    return outcomes;
+  }
+
   return {
     username, role, canApproveReferrals, canApproveReplacements, canApproveReopens,
     userDisplayMap, months, selMonth,
     referrals, replacements, reopens, requests, sampleDetails, loadState, reload: loadData,
     approveReferral, denyReferral, approveReplacement, denyReplacement, approveReopen, denyReopen,
-    approve, deny, canReviewRequest, bulkDecision,
+    approve, deny, canReviewRequest, bulkDecision, undoDecisions,
   };
 }

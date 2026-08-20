@@ -1,4 +1,5 @@
 import type { DecisionEvent } from "../../../../../../data/approvals/approvalTypes";
+import { getLabels } from "../../../../../../data/labels/labelsStore";
 
 type Props = {
   requestedAt: string;
@@ -7,10 +8,14 @@ type Props = {
   userDisplayMap: Record<string, string>;
 };
 
-const STATUS_LABEL: Record<DecisionEvent["status"], string> = {
-  approved: "تمت الموافقة",
-  denied: "تم الرفض",
-};
+function statusLabel(status: DecisionEvent["status"]): string {
+  if (status === "approved") return "تمت الموافقة";
+  if (status === "denied") return "تم الرفض";
+  // An undo appends a revocation rather than removing the decision it takes
+  // back, so both entries stay on the trail — the revocation is what explains
+  // why an approved request is sitting in the pending queue again.
+  return getLabels().approval_timeline_reverted;
+}
 
 function formatAt(iso: string): string {
   return new Date(iso).toLocaleString("ar-SA-u-nu-latn", {
@@ -33,7 +38,7 @@ export default function RequestTimeline({ requestedAt, requestedBy, history, use
           <span className="ew-timeline-dot" />
           <div className="ew-timeline-body">
             <span className="ew-timeline-meta">
-              {STATUS_LABEL[event.status]} — {displayName(event.reviewedBy)} · {formatAt(event.reviewedAt)}
+              {statusLabel(event.status)} — {displayName(event.reviewedBy)} · {formatAt(event.reviewedAt)}
             </span>
             {event.reviewNotes && <p className="ew-timeline-note">{event.reviewNotes}</p>}
           </div>

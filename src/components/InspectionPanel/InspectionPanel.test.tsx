@@ -257,6 +257,63 @@ describe("InspectionPanel — footer", () => {
   });
 });
 
+// ── Header sample navigation ────────────────────────────────────────────────
+
+describe("InspectionPanel — previous/next sample controls", () => {
+  const template = makeTemplate([field({ fieldId: "t", label: "نص", type: "text" })]);
+
+  function renderWithNav(props: {
+    onPrevSample?: () => void;
+    onNextSample?: () => void;
+    hasPrevSample?: boolean;
+    hasNextSample?: boolean;
+  }) {
+    return render(
+      <InspectionPanel
+        entry={makeEntry()}
+        template={template}
+        savedAnswer={null}
+        readonly={false}
+        onClose={() => {}}
+        onSave={async () => {}}
+        {...props}
+      />
+    );
+  }
+
+  it("renders no navigation control at all when the caller wires none", () => {
+    // The panel must stay usable outside a queue — this is the pre-redesign
+    // shape, and every existing call site that does not navigate keeps it.
+    renderPanel(template);
+    expect(screen.queryByRole("button", { name: DEFAULT_LABELS.ip_prev_sample_title })).toBeNull();
+    expect(screen.queryByRole("button", { name: DEFAULT_LABELS.ip_next_sample_title })).toBeNull();
+  });
+
+  it("calls back on click and disables whichever end of the set it is at", () => {
+    const calls: string[] = [];
+    renderWithNav({
+      onPrevSample: () => calls.push("prev"),
+      onNextSample: () => calls.push("next"),
+      hasPrevSample: false,
+      hasNextSample: true,
+    });
+
+    const prev = screen.getByRole("button", { name: DEFAULT_LABELS.ip_prev_sample_title });
+    const next = screen.getByRole("button", { name: DEFAULT_LABELS.ip_next_sample_title });
+    expect(prev).toBeDisabled();
+    expect(next).not.toBeDisabled();
+
+    fireEvent.click(next);
+    expect(calls).toEqual(["next"]);
+
+    // The disabled end is inert rather than merely unstyled — the panel never
+    // re-points itself, so a click that got through would ask the caller to
+    // navigate somewhere it has already said does not exist.
+    fireEvent.click(prev);
+    expect(calls).toEqual(["next"]);
+  });
+});
+
 // ── Multi-select option group ───────────────────────────────────────────────
 
 describe("InspectionPanel — multiselect fields", () => {

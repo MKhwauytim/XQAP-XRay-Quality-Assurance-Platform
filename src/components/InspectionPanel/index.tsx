@@ -51,6 +51,21 @@ type Props = {
    * FAILED must still count as dirty, and that is indistinguishable from here.
    */
   onDraftDirty?: () => void;
+  /**
+   * Previous/next sample navigation (design handoff §3), rendered in the header.
+   *
+   * Purely a request to the caller: this panel never re-points itself. The
+   * caller decides which sample is "next" within its own filtered row set, and
+   * — critically — whether the switch may happen at all while `onDraftDirty`
+   * has fired for the open sample. Callers key this component on
+   * `entry.xrayImageId`, so an accepted switch remounts the panel and the phase
+   * stepper returns to phase 1 by construction (see `activePhaseId`'s lazy
+   * initializer), with no extra reset state to keep in sync.
+   */
+  onPrevSample?: () => void;
+  onNextSample?: () => void;
+  hasPrevSample?: boolean;
+  hasNextSample?: boolean;
 };
 
 export default function InspectionPanel({
@@ -65,6 +80,10 @@ export default function InspectionPanel({
   onReopen,
   onRequestReopen,
   onDraftDirty,
+  onPrevSample,
+  onNextSample,
+  hasPrevSample,
+  hasNextSample,
 }: Props) {
   const [ans, setAns] = useState<Record<string, string | number | boolean>>(() => {
     if (!savedAnswer) return {};
@@ -235,6 +254,10 @@ export default function InspectionPanel({
         onClose={onClose}
         requiredTotal={requiredFieldStats.total}
         requiredFilled={requiredFieldStats.filled}
+        onPrevSample={onPrevSample}
+        onNextSample={onNextSample}
+        hasPrevSample={hasPrevSample}
+        hasNextSample={hasNextSample}
       />
 
       {template && phases.length > 1 && (

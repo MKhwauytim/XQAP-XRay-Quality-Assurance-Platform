@@ -49,7 +49,7 @@ export function NotificationBanner({
     return null;
   }
 
-  const unaccepted = getUnacceptedFor(notifications, session.username);
+  const unaccepted = getUnacceptedFor(notifications, session.username, session.role);
   const current = unaccepted[0];
   if (!current) return null;
 

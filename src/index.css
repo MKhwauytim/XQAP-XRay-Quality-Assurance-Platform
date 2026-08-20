@@ -102,6 +102,11 @@
   --c-unread-dot:           #F97316;
   --c-unread-dot-ring:      #FFD5B0;
   --c-gray-800:             #333333;
+  /* Announcement accent (مركز الإشعارات): the megaphone/pin circle on a posted
+     broadcast. Warm orange so a broadcast reads as an announcement rather than
+     as one more navy surface. */
+  --c-announce-bg:          #FDE7D3;
+  --c-announce-fg:          #C2410C;
 
   /* ── Shadows ───────────────────────────────────────────────── */
   --sh-xs: 0 1px 2px rgba(13, 31, 50, 0.05);

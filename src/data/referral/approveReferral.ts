@@ -40,6 +40,7 @@ import {
   loadAllSupervisorDecisions,
   mergeDecisionHistory,
 } from "../approvals/approvalStorage";
+import { idsWithTransferApplied } from "./undoDecision";
 import {
   loadReferralLog,
   loadReopenLog,
@@ -83,16 +84,17 @@ export async function approveReferral(params: {
   //    track replay state per sample rather than treating one event as the
   //    completion of the whole request.
   const distLog = await loadDistributionLog(directoryHandle, monthFolderName);
-  const appliedIds = new Set(
-    distLog.events
-      .filter(
-        (event) =>
-          event.sourceRequestId === fresh.requestId &&
-          event.eventType === "reassigned" &&
-          event.reassignedTo === fresh.toEmployee
-      )
-      .map((event) => event.xrayImageId)
-  );
+  // Undo-aware: a request that was approved, taken back (which emits counter-
+  // reassignments under `undo:{requestId}`), and then approved again must
+  // re-emit the transfer. Counting the forward events alone would report the
+  // reversed ids as already applied and leave the samples with the original
+  // owner while the decision said otherwise.
+  const appliedIds = idsWithTransferApplied({
+    events: distLog.events,
+    requestId: fresh.requestId,
+    xrayImageIds: fresh.xrayImageIds,
+    toEmployee: fresh.toEmployee,
+  });
   const missingIds = fresh.xrayImageIds.filter((id) => !appliedIds.has(id));
   const alreadyApplied = missingIds.length === 0;
   const sample = await loadSampleMaster(directoryHandle, monthFolderName);
@@ -163,12 +165,17 @@ export async function approveReferral(params: {
   //     merged view can miss a decision another reviewer wrote on a different
   //     machine between our load and now. Re-scan EVERY reviewer's file right
   //     before persisting; if any decision for this request already exists, abort.
-  const priorDecisions = mergeDecisionHistory(
-    await loadAllSupervisorDecisions(directoryHandle, monthFolderName),
-    "referral",
-    requestId
+  // `effectiveDecision`, not a raw event count: a decision the reviewer already
+  // took back leaves its event in the file forever, and counting events would
+  // make an undone request permanently un-decidable.
+  const priorDecision = effectiveDecision(
+    mergeDecisionHistory(
+      await loadAllSupervisorDecisions(directoryHandle, monthFolderName),
+      "referral",
+      requestId
+    )
   );
-  if (priorDecisions.length > 0) {
+  if (priorDecision) {
     return { ok: false, code: "already-reviewed" };
   }
 

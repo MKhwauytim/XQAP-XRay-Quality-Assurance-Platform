@@ -178,7 +178,7 @@ guard already does — needs a new UI confirmation branch plus tests and belongs
 | `{username}.answers.json` | `2-samples/{month}/2-employees/` | Employee answers plus referral/replacement requests for that employee. |
 | `{supervisor}.decisions.json` | `2-samples/{month}/3-approvals/` | Supervisor referral/replacement decisions. |
 | `activity.log.json` | `5-system/audit/` | Sign-in and working-hours audit log. |
-| `notifications.json` | `5-system/notifications/` | Workspace-wide broadcast notifications: admin/manager posts plus each recipient's acceptance (id, message, postedBy, postedAt, acceptances[]). CAS-protected. |
+| `notifications.json` | `5-system/notifications/` | Workspace-wide broadcast notifications: admin/manager posts plus each recipient's acceptance (id, message, postedBy, postedAt, acceptances[], target, audience[], editedAt). CAS-protected. `target` (`all` / `employees` / `supervisors` / `custom`) and `audience[]` (usernames, `custom` only) address the broadcast; both are absent on notifications written before targeting existed and those are read as `all`. `editedAt` records that the text was corrected after posting — an edit keeps the id, `postedAt` and every acceptance already recorded. |
 
 ## Population Row Data Dictionary
 
@@ -273,7 +273,7 @@ Each `population.final.json` row and each sampled `rows[]` item uses the process
 | `{username}.samples.json` | Employee mirror: `monthFolderName`, `username`, `updatedAt`, `sourceLogRevision`, `entries[]`. |
 | `{username}.answers.json` | `username`, `monthFolderName`, `revision`, `_writeToken`, `lastUpdatedAt`, `items[]`, `referralRequests[]`, `replacementRequests[]`. |
 | `items[]` | `xrayImageId`, `templateId`, `templateVersion`, `answers`, `lastSavedAt`, `submittedAt`, `answeredBy`, `status`. |
-| `{supervisor}.decisions.json` | `supervisorUsername`, `monthFolderName`, `referralDecisions[]`, `replacementDecisions[]`, `decisionEvents[]`, `lastUpdatedAt`. Each `decisionEvents[]` entry carries an optional `previousDecisionHash` (B5) — a djb2 hash of the immediately-preceding decision in the file, forming a tamper-EVIDENT chain (absent on the first/legacy events; no cryptographic non-repudiation — see `docs/architecture/SECURITY_MODEL.md` §6). |
+| `{supervisor}.decisions.json` | `supervisorUsername`, `monthFolderName`, `referralDecisions[]`, `replacementDecisions[]`, `decisionEvents[]`, `lastUpdatedAt`. A `decisionEvents[]` entry has `status: "approved" | "denied" | "reverted"`; `"reverted"` is the append-only undo marker, naming the decision it takes back through `revokesDecisionAt` (that decision's `reviewedAt`, in the same reviewer's file). The revoked decision is never rewritten or removed — `effectiveDecision` simply skips it, so the request returns to pending with both events still on its trail. Each `decisionEvents[]` entry carries an optional `previousDecisionHash` (B5) — a djb2 hash of the immediately-preceding decision in the file, forming a tamper-EVIDENT chain (absent on the first/legacy events; no cryptographic non-repudiation — see `docs/architecture/SECURITY_MODEL.md` §6). |
 | `activity.log.json` | `revision`, `updatedAt`, `entries[]`. |
 | activity `entries[]` | `id`, `username`, `role`, `signedInAt`, `lastSeenAt`, `signedOutAt`, `durationMs`, `closeReason`. |
 

@@ -6,7 +6,12 @@ import { simpleHash } from "../storage/jsonEnvelope";
 import { readJsonDirectory } from "../storage/directoryScan";
 import { ensureMonthWritable } from "../population/monthLock";
 import { bumpWorkspaceEpoch } from "../storage/inFlightReads";
-import type { DecisionEvent, DecisionEventKind, SupervisorDecisionFile } from "./approvalTypes";
+import type {
+  DecisionEvent,
+  DecisionEventKind,
+  DecisionOutcomeEvent,
+  SupervisorDecisionFile,
+} from "./approvalTypes";
 import { getPopulationMonthDir, getSampleApprovalsDir, safeWorkspaceFilePart } from "../workspace/workspacePaths";
 
 /**
@@ -192,13 +197,42 @@ export function mergeDecisionHistory(
   return events.sort((a, b) => a.reviewedAt.localeCompare(b.reviewedAt));
 }
 
-/** The request's effective decision — FIRST-wins: the EARLIEST decision (by
- *  reviewedAt) is authoritative, or undefined if nobody has reviewed it yet.
- *  Decisions live in per-supervisor files, so two reviewers can each write a
- *  decision before seeing the other's. Latest-wins would make the outcome depend
+/** Key identifying one decision event within the merged history. A revocation
+ *  names its target by (reviewer, reviewedAt): a reviewer may only revoke a
+ *  decision from their own file, so the pair is unambiguous. */
+function decisionKey(event: Pick<DecisionEvent, "reviewedBy" | "reviewedAt">): string {
+  return `${event.reviewedBy}|${event.reviewedAt}`;
+}
+
+/** The `(reviewer, reviewedAt)` keys revoked by `"reverted"` events in `history`. */
+export function revokedDecisionKeys(history: DecisionEvent[]): Set<string> {
+  const revoked = new Set<string>();
+  for (const event of history) {
+    if (event.status !== "reverted" || !event.revokesDecisionAt) continue;
+    revoked.add(decisionKey({ reviewedBy: event.reviewedBy, reviewedAt: event.revokesDecisionAt }));
+  }
+  return revoked;
+}
+
+/** The request's effective decision — FIRST-wins among decisions that are still
+ *  standing: the EARLIEST non-revoked decision (by reviewedAt) is authoritative,
+ *  or undefined if nobody has reviewed it yet (or every decision has been taken
+ *  back). Decisions live in per-supervisor files, so two reviewers can each write
+ *  a decision before seeing the other's. Latest-wins would make the outcome depend
  *  on clock skew / write ordering; first-wins is deterministic — whoever decided
  *  first owns the request, and a later reviewer's write is surfaced as a conflict
- *  (see approveReferral). `history` is pre-sorted oldest→newest by mergeDecisionHistory. */
-export function effectiveDecision(history: DecisionEvent[]): DecisionEvent | undefined {
-  return history.length > 0 ? history[0] : undefined;
+ *  (see approveReferral).
+ *
+ *  Undo is append-only: a reviewer takes their decision back by appending a
+ *  `"reverted"` event naming it, never by deleting it. Skipping revoked decisions
+ *  here — rather than dropping them in mergeDecisionHistory — is what keeps the
+ *  full trail (decision AND its revocation) visible to the request timeline while
+ *  the effective status returns to pending. `history` is pre-sorted oldest→newest
+ *  by mergeDecisionHistory. */
+export function effectiveDecision(history: DecisionEvent[]): DecisionOutcomeEvent | undefined {
+  const revoked = revokedDecisionKeys(history);
+  return history.find(
+    (event): event is DecisionOutcomeEvent =>
+      event.status !== "reverted" && !revoked.has(decisionKey(event))
+  );
 }

@@ -23,7 +23,21 @@ export type AppNotification = {
   postedAt: string;
   /** One entry per user who has accepted; absence = not yet accepted. */
   acceptances: NotificationAcceptance[];
+  /**
+   * Who the notification is addressed to. Absent on every notification written
+   * before targeting existed, which is why `notificationTarget` reads it through
+   * a default rather than the field being required: those broadcasts went to the
+   * whole must-accept audience and must keep doing so.
+   */
+  target?: NotificationTarget;
+  /** Usernames addressed, for `target: "custom"` only. */
+  audience?: string[];
+  /** ISO timestamp of the last message edit; absent when never edited. */
+  editedAt?: string;
 };
+
+/** Who a broadcast is addressed to. */
+export type NotificationTarget = "all" | "employees" | "supervisors" | "custom";
 
 /**
  * On-disk shape of `5-system/notifications/notifications.json`.
@@ -137,6 +151,44 @@ export function isNotificationAudienceRole(role: AuthRole): boolean {
   return role === "employee" || role === "supervisor";
 }
 
+/** A notification's target, defaulting legacy (pre-targeting) broadcasts to "all". */
+export function notificationTarget(notification: AppNotification): NotificationTarget {
+  return notification.target ?? "all";
+}
+
+/**
+ * Whether this user is addressed by the notification.
+ *
+ * Role gates first: admin/manager post and monitor acknowledgements but are
+ * never themselves an audience (`isNotificationAudienceRole`), so no target
+ * value puts a notification in front of them.
+ */
+export function isTargetedAt(
+  notification: AppNotification,
+  username: string,
+  role: AuthRole
+): boolean {
+  if (!isNotificationAudienceRole(role)) return false;
+  switch (notificationTarget(notification)) {
+    case "employees":
+      return role === "employee";
+    case "supervisors":
+      return role === "supervisor";
+    case "custom":
+      return (notification.audience ?? []).includes(username);
+    case "all":
+      return true;
+  }
+}
+
+/** The subset of the must-accept roster a notification is addressed to. */
+export function audienceFor<TUser extends { username: string; role: AuthRole }>(
+  notification: AppNotification,
+  users: readonly TUser[]
+): TUser[] {
+  return users.filter((user) => isTargetedAt(notification, user.username, user.role));
+}
+
 /** True if `username` already appears in the notification's acceptance list. */
 export function hasAccepted(
   notification: AppNotification,
@@ -151,10 +203,11 @@ export function hasAccepted(
  */
 export function getUnacceptedFor(
   notifications: AppNotification[],
-  username: string
+  username: string,
+  role?: AuthRole
 ): AppNotification[] {
   return notifications
-    .filter((n) => !hasAccepted(n, username))
+    .filter((n) => (role === undefined || isTargetedAt(n, username, role)) && !hasAccepted(n, username))
     .sort((a, b) => a.postedAt.localeCompare(b.postedAt));
 }
 
@@ -168,5 +221,5 @@ export function shouldShowBanner(
   notifications: AppNotification[]
 ): boolean {
   if (!isNotificationAudienceRole(role)) return false;
-  return getUnacceptedFor(notifications, username).length > 0;
+  return getUnacceptedFor(notifications, username, role).length > 0;
 }

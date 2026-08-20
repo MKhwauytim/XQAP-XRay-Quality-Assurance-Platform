@@ -2013,3 +2013,384 @@
 .ew-bulk-bar-count { font-size: 13px; font-weight: 700; color: var(--c-navy); margin-inline-end: auto; }
 
 .ew-referral-card--selected { border-color: var(--c-sky); box-shadow: 0 0 0 2px rgba(0, 154, 222, 0.15); }
+
+/* ── اعتماد الطلبات — queue + detail decision surface ───────── */
+/* The page decides in place: a filterable queue on one side, a sticky detail
+   pane carrying the موافقة/رفض buttons on the other, and a toast that owns the
+   undo affordance. No confirm dialog is involved anywhere in the flow. */
+
+.ew-approval-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-5);
+  flex-wrap: wrap;
+}
+
+.ew-approval-oldest {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 10px var(--sp-3);
+  border: 1px solid var(--c-warning-border);
+  border-radius: var(--r-lg);
+  background: var(--c-warning-bg);
+  color: var(--c-warning);
+  font-size: 12px;
+  font-weight: var(--fw-bold);
+  flex-shrink: 0;
+}
+
+.ew-approval-oldest strong { font-size: 18px; line-height: 1; }
+
+.ew-approval-kind-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: var(--sp-1);
+  background: var(--c-surface-2);
+  border: 1.5px solid var(--c-border);
+  border-radius: 999px;
+}
+
+.ew-approval-kind-chip {
+  padding: var(--sp-1) 14px;
+  height: 28px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--c-ink-3);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease-smooth), color var(--t-fast) var(--ease-smooth);
+}
+
+.ew-approval-kind-chip:hover { color: var(--c-navy); }
+.ew-approval-kind-chip.active {
+  background: var(--c-surface);
+  color: var(--c-navy);
+  font-weight: var(--fw-bold);
+  box-shadow: var(--sh-xs);
+}
+
+.ew-approval-split {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.7fr);
+  gap: var(--sp-4);
+  align-items: start;
+  margin-top: var(--sp-3);
+}
+
+@media (max-width: 1180px) {
+  .ew-approval-split { grid-template-columns: minmax(0, 1fr); }
+  .ew-approval-detail { position: static; }
+}
+
+.ew-approval-queue { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.ew-approval-queue-count { margin-inline-start: auto; }
+
+.ew-approval-queue-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: var(--sp-3);
+  min-height: 260px;
+  padding: var(--sp-10) var(--sp-6);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-xs);
+}
+
+.ew-approval-queue-empty h3 { margin: 0; font-size: var(--fs-md); font-weight: var(--fw-bold); color: var(--c-ink); }
+.ew-approval-queue-empty p { margin: 0; max-width: 42ch; font-size: var(--fs-sm); line-height: var(--lh-loose); color: var(--c-ink-3); }
+
+.ew-approval-queue-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-border);
+  color: var(--c-ink-4);
+}
+
+.ew-approval-qcard {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: var(--sp-3) 14px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-xs);
+  cursor: pointer;
+  text-align: start;
+  transition: border-color var(--t-fast) var(--ease-smooth), box-shadow var(--t-fast) var(--ease-smooth);
+}
+
+.ew-approval-qcard:hover { border-color: var(--c-border-2); }
+.ew-approval-qcard:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.ew-approval-qcard.selected {
+  border-color: var(--c-sky);
+  box-shadow: 0 0 0 2px rgba(0, 154, 222, 0.15);
+}
+
+.ew-approval-qcard-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.ew-approval-qcard-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ew-approval-qcard-date { margin-inline-start: auto; font-size: var(--fs-2xs); font-weight: var(--fw-semibold); color: var(--c-ink-3); }
+
+.ew-approval-qcard-title {
+  font-size: var(--fs-base);
+  font-weight: var(--fw-bold);
+  color: var(--c-navy);
+  line-height: var(--lh-normal);
+  overflow-wrap: anywhere;
+}
+
+.ew-approval-qcard-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: var(--fw-semibold);
+  color: var(--c-ink-3);
+}
+
+/* Two lines of reason, then clamp — the full text lives in the detail pane. */
+.ew-approval-qcard-reason {
+  font-size: var(--fs-xs);
+  color: var(--c-ink-2);
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ew-approval-qcard-decided {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: var(--fw-bold);
+}
+
+.ew-approval-qcard-decided--approved { color: var(--c-success); }
+.ew-approval-qcard-decided--denied { color: var(--c-danger); }
+.ew-approval-decided-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+
+/* Waiting-time badge. Tone tracks how long the request has sat unreviewed:
+   5+ days danger, 3+ warning, otherwise success. */
+.ew-approval-wait {
+  padding: 2px 9px;
+  border-radius: 10px;
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-bold);
+  white-space: nowrap;
+}
+
+.ew-approval-wait--ok { background: var(--c-success-bg); color: var(--c-success); }
+.ew-approval-wait--warn { background: var(--c-warning-bg); color: var(--c-warning); }
+.ew-approval-wait--late { background: var(--c-danger-bg); color: var(--c-danger); }
+
+.ew-approval-wait-text--ok { color: var(--c-success); }
+.ew-approval-wait-text--warn { color: var(--c-warning); }
+.ew-approval-wait-text--late { color: var(--c-danger); }
+
+.ew-approval-detail {
+  position: sticky;
+  top: var(--sp-5);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-sm);
+  overflow: hidden;
+}
+
+.ew-approval-detail--empty {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: var(--sp-2);
+  min-height: 260px;
+  padding: var(--sp-10) var(--sp-6);
+}
+
+.ew-approval-detail--empty h3 { margin: 0; font-size: var(--fs-md); font-weight: var(--fw-bold); color: var(--c-ink); }
+.ew-approval-detail--empty p { margin: 0; max-width: 44ch; font-size: var(--fs-sm); line-height: var(--lh-loose); color: var(--c-ink-3); }
+
+.ew-approval-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: 18px var(--sp-6);
+  background: var(--c-surface-2);
+  border-bottom: 1px solid var(--c-border);
+  flex-wrap: wrap;
+}
+
+.ew-approval-detail-headings { min-width: 0; }
+.ew-approval-detail-badges { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: 6px; flex-wrap: wrap; }
+.ew-approval-detail-title { margin: 0 0 4px; font-size: var(--fs-lg); font-weight: var(--fw-bold); color: var(--c-navy); line-height: 1.4; }
+.ew-approval-detail-meta { margin: 0; font-size: 12.5px; font-weight: var(--fw-semibold); color: var(--c-ink-3); }
+.ew-approval-detail-actions { display: flex; align-items: center; gap: var(--sp-2); flex-shrink: 0; }
+
+.ew-approval-decide {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 18px;
+  font-size: var(--fs-sm);
+}
+
+.ew-approval-detail-body {
+  padding: var(--sp-5) var(--sp-6);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.ew-approval-section-label {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.06em;
+  color: var(--c-ink-3);
+}
+
+/* Identifiers must not wrap mid-token: the grid keeps real minimum column
+   widths and the container scrolls sideways rather than squeezing cells. */
+.ew-approval-table {
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  overflow-x: auto;
+}
+
+.ew-approval-table-head,
+.ew-approval-table-row {
+  display: grid;
+  grid-template-columns: minmax(190px, 1.6fr) minmax(100px, 1fr) minmax(80px, 0.8fr) minmax(150px, 1.2fr);
+  gap: var(--sp-3);
+  white-space: nowrap;
+  min-width: 520px;
+}
+
+.ew-approval-table-head {
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--table-head-bg);
+  border-bottom: 1px solid var(--c-border);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-bold);
+  color: var(--c-ink-3);
+}
+
+.ew-approval-table-row {
+  padding: 10px var(--sp-3);
+  border-bottom: 1px solid var(--c-surface-2);
+  font-size: 12.5px;
+  color: var(--c-ink-2);
+  align-items: center;
+}
+
+.ew-approval-table-row:last-child { border-bottom: none; }
+.ew-approval-table-id { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ew-approval-table-id strong { font-size: var(--fs-xs); font-weight: var(--fw-bold); color: var(--c-navy); overflow: hidden; text-overflow: ellipsis; }
+
+.ew-approval-role {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: var(--fw-bold);
+}
+
+.ew-approval-role--original { background: var(--c-danger-bg); color: var(--c-danger); }
+.ew-approval-role--replacement { background: var(--c-success-bg); color: var(--c-success); }
+
+.ew-approval-detail-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+
+.ew-approval-detail-card {
+  padding: var(--sp-3) 14px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-surface-2);
+}
+
+.ew-approval-detail-card p { margin: 0 0 var(--sp-1); font-size: var(--fs-2xs); font-weight: var(--fw-bold); color: var(--c-ink-3); }
+.ew-approval-detail-card strong { font-size: var(--fs-sm); font-weight: var(--fw-bold); color: var(--c-ink); }
+
+.ew-approval-reason {
+  margin: 0;
+  padding: var(--sp-3) 14px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-surface);
+  font-size: 13.5px;
+  line-height: 1.8;
+  color: var(--c-ink-2);
+}
+
+.ew-approval-note {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--c-border);
+}
+
+.ew-approval-toast {
+  position: fixed;
+  inset-inline-start: var(--sp-6);
+  bottom: var(--sp-6);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-sm);
+  box-shadow: var(--sh-md);
+  font-size: 13.5px;
+  font-weight: var(--fw-bold);
+  direction: rtl;
+}
+
+.ew-approval-toast--approved { background: var(--c-success-bg); border: 1px solid var(--c-success-border); color: var(--c-success); }
+.ew-approval-toast--denied { background: var(--c-danger-bg); border: 1px solid var(--c-danger-border); color: var(--c-danger); }
+.ew-approval-toast-note { font-weight: var(--fw-semibold); font-size: var(--fs-xs); max-width: 44ch; }
+
+.ew-approval-toast-undo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px var(--sp-3);
+  border: 1px solid currentColor;
+  border-radius: var(--r-sm);
+  background: var(--c-surface);
+  color: inherit;
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  cursor: pointer;
+}
+
+.ew-approval-toast-undo:disabled { opacity: 0.6; cursor: default; }
+
+.ew-approval-toast-close {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}

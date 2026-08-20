@@ -76,7 +76,7 @@ export function useWorkspaceNotifications(
 
   return {
     notifications,
-    unacceptedCount: audience ? getUnacceptedFor(notifications, session.username).length : 0,
+    unacceptedCount: audience ? getUnacceptedFor(notifications, session.username, session.role).length : 0,
     reload,
   };
 }
