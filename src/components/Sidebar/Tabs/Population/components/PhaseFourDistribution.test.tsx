@@ -15,6 +15,10 @@ import { DEFAULT_POPULATION_CONFIG } from "../../../../../data/population/popula
 import type { PopulationConfig } from "../../../../../data/population/populationConfig";
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
+import type {
+  DistributionCurrentData,
+  DistributionStatus,
+} from "../../../../../data/distribution/distributionTypes";
 
 vi.mock("../../../../../auth/userManagement", () => ({
   getManagedLoginUsers: () => [
@@ -239,6 +243,83 @@ describe("PhaseFourDistribution — حصص الخبراء matrix (5c)", () => {
     const cell = screen.getByLabelText("حصة الموظف الأول في المستوى الأول");
     expect(cell).toBeInTheDocument();
     expect(cell).toBeDisabled();
+  });
+});
+
+// ── Fix (distribution, 2026-08-20) ──────────────────────────────────────────
+// Owner report: after a month was fully distributed, the حصص الخبراء matrix
+// showed 0 عادية / 0 CertScan / 0 الجديد for EVERY expert while the حالة التوزيع
+// card above read 100٪. Cause: all three columns were fed from the bulk-assign
+// PREVIEW, which is empty by design once every row is already owned. عادية and
+// CertScan are plain count columns and must include what is already assigned.
+describe("PhaseFourDistribution — matrix counts after the month is distributed", () => {
+  function currentWith(
+    entries: Array<{ xrayImageId: string; assignedTo: string; status: DistributionStatus }>
+  ): DistributionCurrentData {
+    return {
+      monthFolderName: "7-July-2026",
+      derivedAt: "2026-07-22T00:00:00.000Z",
+      totalAssigned: entries.length,
+      totalCompleted: 0,
+      totalReplaced: 0,
+      totalPending: entries.length,
+      entries: entries.map((e) => ({
+        ...e,
+        replacedById: null,
+        lastEventAt: "2026-07-22T00:00:00.000Z",
+        // PreparedPopulationRow is a superset of the persisted stub.
+        row: makeRow(e.xrayImageId),
+      })),
+    };
+  }
+
+  /** [عادية, CertScan] for the first (and only) expert row. */
+  function rowCounts(container: HTMLElement): string[] {
+    const row = container.querySelectorAll(".p4-matrix-row")[1];
+    return Array.from(row.querySelectorAll("span.num")).map((el) => el.textContent ?? "");
+  }
+
+  it("an already-assigned row still counts under عادية, while الجديد correctly reads 0", () => {
+    const { container } = render(
+      <PhaseFourDistribution
+        {...baseProps({
+          distributionCurrent: currentWith([
+            { xrayImageId: "XR-1", assignedTo: "employee.one", status: "pending" },
+          ]),
+        })}
+      />
+    );
+
+    expect(rowCounts(container)).toEqual(["1", "0"]);
+    // الجديد is preview-only and SHOULD be zero — there is nothing left to distribute.
+    expect(container.querySelector(".p4-matrix-new")?.textContent).toBe("0");
+
+    const totals = container.querySelector(".p4-matrix-totals") as HTMLElement;
+    expect(Array.from(totals.querySelectorAll("span.num:not(.p4-total-share)")).map((el) => el.textContent))
+      .toEqual(["1", "0"]);
+    expect(totals.querySelector("strong.num")?.textContent).toBe("0");
+  });
+
+  it("a replaced row is not billed to the expert who handed it back", () => {
+    const { container } = render(
+      <PhaseFourDistribution
+        {...baseProps({
+          distributionCurrent: currentWith([
+            { xrayImageId: "XR-1", assignedTo: "employee.one", status: "replaced" },
+          ]),
+        })}
+      />
+    );
+
+    // Nothing owned (the row moved on) and nothing previewed either — the row
+    // still carries an entry, so calculateBulkAssignment skips it.
+    expect(rowCounts(container)).toEqual(["0", "0"]);
+  });
+
+  it("undistributed month is unchanged: the preview alone drives all three columns", () => {
+    const { container } = render(<PhaseFourDistribution {...baseProps({ distributionCurrent: null })} />);
+    expect(rowCounts(container)).toEqual(["1", "0"]);
+    expect(container.querySelector(".p4-matrix-new")?.textContent).toBe("1");
   });
 });
 

@@ -100,6 +100,12 @@ export const phaseThreeFourLabels = {
   p4_matrix_col_normal: "عادية",
   p4_matrix_col_certscan: "CertScan",
   p4_matrix_col_new: "الجديد",
+  p4_matrix_col_normal_hint:
+    "السجلات العادية المعيَّنة لهذا الخبير من هذه العينة — المعيَّن حالياً بالإضافة إلى ما سيضيفه التوزيع التالي.",
+  p4_matrix_col_certscan_hint:
+    "سجلات CertScan المعيَّنة لهذا الخبير من هذه العينة — المعيَّن حالياً بالإضافة إلى ما سيضيفه التوزيع التالي.",
+  p4_matrix_col_new_hint:
+    "ما سيضيفه التوزيع التالي فقط. صفر يعني أن كل صفوف هذا المستوى معيَّنة مسبقاً ولا يوجد ما يُوزَّع.",
   p4_matrix_field_aria: "حصة {expert} في {stage}",
   // Fix (population, 2026-08-18): a config saved before this matrix existed
   // could have a stage the admin had disabled (the old per-stage checkbox)

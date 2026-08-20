@@ -265,6 +265,49 @@ export default function PhaseFourDistribution({
     [distributionCurrent]
   );
 
+  /**
+   * What each expert ALREADY owns in this sample, read straight off
+   * distribution.current — as opposed to `previewData`, which by design only
+   * ever describes rows a NEW bulk run would add.
+   *
+   * Fix (distribution, 2026-08-20): عادية / CertScan are plain count columns,
+   * but both were fed from the preview alone. Once a month is fully
+   * distributed the preview is empty (every row is skipped as already-owned),
+   * so the matrix read 0 / 0 / 0 for every expert while the distribution card
+   * directly above it read 100٪ — the counts looked broken even though the
+   * assignment itself was correct. الجديد stays preview-only: that column is
+   * labelled "new" and means exactly that.
+   */
+  const currentCounts = useMemo(() => {
+    const map: Record<string, { cert: number; normal: number; total: number }> = {};
+    for (const row of sampleRows) {
+      const entry = entryMap.get(row.xrayImageId);
+      // A `replaced` row has moved on to whoever took it over, and that
+      // successor carries its own entry — counting it here would bill the same
+      // row to two experts.
+      if (!entry || !entry.assignedTo || entry.status === "replaced") continue;
+      const data = (map[entry.assignedTo] ??= { cert: 0, normal: 0, total: 0 });
+      data.total += 1;
+      if (row.certScanStatus === "Certscan") data.cert += 1;
+      else data.normal += 1;
+    }
+    return map;
+  }, [entryMap, sampleRows]);
+
+  /** Owned + about-to-be-assigned, which is what the matrix columns mean. */
+  const matrixCountsOf = useCallback(
+    (username: string) => {
+      const preview = previewData?.summaryMap[username];
+      const owned = currentCounts[username];
+      return {
+        normal: (owned?.normal ?? 0) + (preview?.normal ?? 0),
+        cert: (owned?.cert ?? 0) + (preview?.cert ?? 0),
+        newTotal: preview?.total ?? 0,
+      };
+    },
+    [currentCounts, previewData]
+  );
+
   /** Per-status tallies over the sample itself, so the four segments always sum to the sample size. */
   const statusCounts = useMemo(() => {
     const counts = { unassigned: 0, pending: 0, completed: 0, replaced: 0, "replacement-requested": 0 };
@@ -349,15 +392,15 @@ export default function PhaseFourDistribution({
     })
   );
 
-  const previewTotals = employees.reduce(
+  const matrixTotals = employees.reduce(
     (acc, emp) => {
-      const counts = previewData?.summaryMap[emp.username] ?? { cert: 0, normal: 0, total: 0 };
+      const counts = matrixCountsOf(emp.username);
       acc.normal += counts.normal;
       acc.cert += counts.cert;
-      acc.total += counts.total;
+      acc.newTotal += counts.newTotal;
       return acc;
     },
-    { normal: 0, cert: 0, total: 0 }
+    { normal: 0, cert: 0, newTotal: 0 }
   );
 
   const experts = employees.filter(
@@ -592,13 +635,13 @@ export default function PhaseFourDistribution({
               <span key={sk} role="columnheader" className="num">{STAGE_LABELS[sk]}</span>
             ))}
             <span role="columnheader">{L.p4_matrix_col_license}</span>
-            <span role="columnheader" className="num">{L.p4_matrix_col_normal}</span>
-            <span role="columnheader" className="num">{L.p4_matrix_col_certscan}</span>
-            <span role="columnheader" className="num">{L.p4_matrix_col_new}</span>
+            <span role="columnheader" className="num" title={L.p4_matrix_col_normal_hint}>{L.p4_matrix_col_normal}</span>
+            <span role="columnheader" className="num" title={L.p4_matrix_col_certscan_hint}>{L.p4_matrix_col_certscan}</span>
+            <span role="columnheader" className="num" title={L.p4_matrix_col_new_hint}>{L.p4_matrix_col_new}</span>
           </div>
 
           {employees.map((emp) => {
-            const counts = previewData?.summaryMap[emp.username] ?? { cert: 0, normal: 0, total: 0 };
+            const counts = matrixCountsOf(emp.username);
             const excluded = STAGE_KEYS.every((sk) => {
               const alloc = allocationOf(emp.username, sk);
               return !alloc || !alloc.isActive || alloc.value <= 0;
@@ -658,7 +701,7 @@ export default function PhaseFourDistribution({
                 {excluded ? (
                   <span className="p4-excluded-tag">{L.p4_matrix_row_excluded}</span>
                 ) : (
-                  <strong className="num p4-matrix-new">{formatNumber(counts.total)}</strong>
+                  <strong className="num p4-matrix-new">{formatNumber(counts.newTotal)}</strong>
                 )}
               </div>
             );
@@ -686,9 +729,9 @@ export default function PhaseFourDistribution({
               );
             })}
             <span />
-            <span className="num">{formatNumber(previewTotals.normal)}</span>
-            <span className="num">{formatNumber(previewTotals.cert)}</span>
-            <strong className="num">{formatNumber(previewTotals.total)}</strong>
+            <span className="num">{formatNumber(matrixTotals.normal)}</span>
+            <span className="num">{formatNumber(matrixTotals.cert)}</span>
+            <strong className="num">{formatNumber(matrixTotals.newTotal)}</strong>
           </div>
         </div>
       </div>
