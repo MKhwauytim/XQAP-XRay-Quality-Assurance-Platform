@@ -8,12 +8,18 @@ describe("ADHOC_FIELD_CATALOG", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
-  it("requires xrayImageId and nothing else", () => {
-    // L1/L2/stage are required in the Population catalog; a bare image list is
-    // a legitimate ad-hoc import and must not fail every row over them.
+  it("requires the identity and both result fields, and nothing else", () => {
+    // L1/L2 are required because `PreparedPopulationRow` types them
+    // `"سليمة" | "اشتباه"` with no representable "unknown" — an unmapped pair
+    // could only be projected as a fabricated clinical result. A bare image list
+    // stays importable because a `{ kind: "constant" }` source satisfies the
+    // requirement; the admin just has to declare the file's value once.
     expect(
       ADHOC_FIELD_CATALOG.filter((field) => field.required).map((field) => field.key)
-    ).toEqual(["xrayImageId"]);
+    ).toEqual(["xrayImageId", "xrayLevelOneResult", "xrayLevelTwoResult"]);
+    // `stage` IS required in the Population catalog, and deliberately is not
+    // here: it has no strict union downstream, so an empty one is representable.
+    expect(getAdhocField(ADHOC_FIELD_CATALOG, "stage")?.required).toBe(false);
   });
 
   it("gives every enum field its canonical options and no other field options", () => {

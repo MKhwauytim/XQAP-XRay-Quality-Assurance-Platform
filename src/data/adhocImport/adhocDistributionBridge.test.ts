@@ -12,7 +12,15 @@ import {
 } from "../../auth/userManagement";
 import { ADHOC_FIELD_CATALOG } from "./adhocFieldCatalog";
 import { adhocMonthFolder } from "./adhocImportModel";
-import type { AdhocRecord, AdhocRow, PlannedAssignment } from "./adhocImportModel";
+import type {
+  AdhocRecord,
+  AdhocRow,
+  FieldSource,
+  ImportMapping,
+  PlannedAssignment,
+  SourceTable,
+} from "./adhocImportModel";
+import { projectTable } from "./adhocRowProjection";
 import { planAdhocAssignment } from "./adhocAssignmentPlan";
 import { saveAdhocRecord, loadAdhocRecord } from "./adhocImportStorage";
 import {
@@ -23,7 +31,31 @@ import {
 
 const REVIEWERS = ["jalgahamdi", "hihaloraini", "saalhijji"];
 
+/**
+ * A validated row, as every caller of the bridge hands one over: an identity
+ * plus the two required results.
+ *
+ * The results are defaulted rather than repeated in twenty fixtures because
+ * they are a PRECONDITION of projection, not the subject of these tests —
+ * `projectToDistributionRow` throws without them rather than inventing one, so
+ * a fixture missing them would be testing the throw. `bareRow` below is the
+ * deliberate opposite, for the tests that ARE about that.
+ */
 function row(rowKey: string, xrayImageId: string, mapped: Record<string, string | null> = {}): AdhocRow {
+  const base = bareRow(rowKey, xrayImageId, mapped);
+  return {
+    ...base,
+    // Defaults first, so an explicit result in `mapped` still wins.
+    mapped: { xrayLevelOneResult: "سليمة", xrayLevelTwoResult: "سليمة", ...base.mapped },
+  };
+}
+
+/** A row whose L1/L2 never resolved — what a caller that skipped validation has. */
+function bareRow(
+  rowKey: string,
+  xrayImageId: string,
+  mapped: Record<string, string | null> = {}
+): AdhocRow {
   return {
     rowKey,
     mapped: { xrayImageId, ...mapped },
@@ -113,6 +145,122 @@ describe("projectToDistributionRow", () => {
   it("refuses a row with no identity — a programmer error, since every caller filters on validity", () => {
     const identityless: AdhocRow = { ...row("s1:2", "XR-1"), mapped: {} };
     expect(() => projectToDistributionRow("adh-1", identityless, ADHOC_FIELD_CATALOG, 0)).toThrow();
+  });
+
+  it("carries the mapped L1/L2 results through unchanged", () => {
+    const prepared = projectToDistributionRow(
+      "adh-1",
+      row("s1:2", "XR-1", { xrayLevelOneResult: "اشتباه", xrayLevelTwoResult: "سليمة" }),
+      ADHOC_FIELD_CATALOG,
+      0
+    );
+    expect(prepared.xrayLevelOneResult).toBe("اشتباه");
+    expect(prepared.xrayLevelTwoResult).toBe("سليمة");
+  });
+
+  it("throws rather than substituting a result when L1 or L2 never resolved", () => {
+    // The whole point of requiring the two fields: there is no representable
+    // "unknown" on PreparedPopulationRow, so any value picked here would render
+    // in the reviewer's table as though a person had recorded it. A caller that
+    // skipped validation gets an exception, not a fabricated clinical result.
+    expect(() =>
+      projectToDistributionRow("adh-1", bareRow("s1:2", "XR-1"), ADHOC_FIELD_CATALOG, 0)
+    ).toThrow(/xrayLevelOneResult/);
+
+    // L2 alone is just as fatal as both.
+    expect(() =>
+      projectToDistributionRow(
+        "adh-1",
+        bareRow("s1:3", "XR-2", { xrayLevelOneResult: "سليمة" }),
+        ADHOC_FIELD_CATALOG,
+        0
+      )
+    ).toThrow(/xrayLevelTwoResult/);
+  });
+
+  it("refuses a stored value the catalog does not offer instead of letting it through as a result", () => {
+    // `mapped` is a plain string bag — a hand-edited record, or one written
+    // against an older catalog, can hold anything. It must not reach
+    // PreparedPopulationRow's `"سليمة" | "اشتباه"` union verbatim, and it must
+    // not quietly become the other option either.
+    expect(() =>
+      projectToDistributionRow(
+        "adh-1",
+        row("s1:2", "XR-1", { xrayLevelOneResult: "غير معروف" }),
+        ADHOC_FIELD_CATALOG,
+        0
+      )
+    ).toThrow(/xrayLevelOneResult/);
+  });
+});
+
+/**
+ * The two halves of "a file with no result columns is still importable":
+ * the admin declares the value once and every row carries it, or nobody
+ * declares it and every row is visibly rejected before assignment.
+ */
+describe("a bare image list", () => {
+  const BARE_TABLE: SourceTable = {
+    sheetName: "الورقة1",
+    headers: ["معرف الأشعة"],
+    rows: [
+      { sourceRowNumber: 2, values: { "معرف الأشعة": "XR-1" } },
+      { sourceRowNumber: 3, values: { "معرف الأشعة": "XR-2" } },
+    ],
+  };
+
+  function mappingWith(results: FieldSource): ImportMapping {
+    return {
+      fields: {
+        xrayImageId: { kind: "column", header: "معرف الأشعة" },
+        xrayLevelOneResult: results,
+        xrayLevelTwoResult: results,
+      },
+      valueMappings: {},
+    };
+  }
+
+  function project(results: FieldSource): AdhocRow[] {
+    return projectTable({
+      table: BARE_TABLE,
+      mapping: mappingWith(results),
+      catalog: ADHOC_FIELD_CATALOG,
+      binding: { kind: "isolated" },
+    });
+  }
+
+  it("imports and projects when the admin declares the file's result as a constant", async () => {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    const rows = project({ kind: "constant", value: "سليمة" });
+    expect(rows.every((r) => r.validation.valid)).toBe(true);
+
+    const written = await ensureAdhocSampleMaster(root, record("adh-const", rows));
+
+    expect(written.map((r) => r.xrayImageId)).toEqual([
+      "ADHOC-adh-const-XR-1",
+      "ADHOC-adh-const-XR-2",
+    ]);
+    // The declared value rides on every row — recorded once, attributable to
+    // the admin who declared it, and never invented per row.
+    expect(written.map((r) => r.xrayLevelOneResult)).toEqual(["سليمة", "سليمة"]);
+    expect(written.map((r) => r.xrayLevelTwoResult)).toEqual(["سليمة", "سليمة"]);
+  });
+
+  it("invalidates every row when nobody declares one, so the rejection is operator-visible", async () => {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    const rows = project({ kind: "none" });
+
+    expect(rows.map((r) => r.validation.valid)).toEqual([false, false]);
+    const reason = rows[0].validation.valid === false ? rows[0].validation.reason : "";
+    expect(reason).toContain("نتيجة المستوى الأول");
+
+    // And the bridge skips them rather than throwing: an invalid row is never
+    // projected, so the admin sees a rejection count, not a crashed screen.
+    const written = await ensureAdhocSampleMaster(root, record("adh-bare", rows));
+    expect(written).toEqual([]);
+    expect((await loadSampleMaster(root, adhocMonthFolder("adh-bare")))?.rows).toEqual([]);
   });
 });
 

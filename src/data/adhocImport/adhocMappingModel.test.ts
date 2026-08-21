@@ -24,6 +24,20 @@ function columnOf(mapping: ImportMapping, key: string): string | null {
   return source && source.kind === "column" ? source.header : null;
 }
 
+/**
+ * The admin's "every row in this file is سليمة" declaration — the escape hatch
+ * that keeps a file with no result columns importable now that both result
+ * fields are required. Used by the tests below that are about some OTHER
+ * required field, so the two results are not the thing under test.
+ */
+function declaredResults(mapping: ImportMapping, value = "سليمة"): ImportMapping {
+  return setFieldSource(
+    setFieldSource(mapping, "xrayLevelOneResult", { kind: "constant", value }),
+    "xrayLevelTwoResult",
+    { kind: "constant", value }
+  );
+}
+
 describe("detectHeaderCandidates", () => {
   it("matches an alias verbatim", () => {
     const target = field("t", "معرف الأشعة", ["XRAY_SCAN_ID"]);
@@ -224,30 +238,64 @@ describe("seedValueMapping", () => {
 });
 
 describe("findMappingIssues", () => {
-  it("flags a required field with no source and leaves optional ones alone", () => {
+  it("flags every required field with no source and leaves optional ones alone", () => {
     const mapping = autoDetectMapping(["اسم المنفذ"], ADHOC_FIELD_CATALOG);
     const issues = findMappingIssues(mapping, ADHOC_FIELD_CATALOG);
 
-    expect(issues).toHaveLength(1);
-    expect(issues[0].kind).toBe("required-unmapped");
-    expect(issues[0].fieldKey).toBe("xrayImageId");
+    expect(issues.map((issue) => issue.kind)).toEqual([
+      "required-unmapped",
+      "required-unmapped",
+      "required-unmapped",
+    ]);
+    expect(issues.map((issue) => issue.fieldKey)).toEqual([
+      "xrayImageId",
+      "xrayLevelOneResult",
+      "xrayLevelTwoResult",
+    ]);
     expect(issues[0].message).toContain("معرف الأشعة");
+    // The one header the file does carry, and every other optional field, are
+    // silent — only the required three are reported.
+    expect(issues.some((issue) => issue.fieldKey === "portName")).toBe(false);
+    expect(issues.some((issue) => issue.fieldKey === "stage")).toBe(false);
+  });
+
+  it("reports both result fields when a bare image list binds neither", () => {
+    // The operator-visible half of the "no fabricated result" rule: a file that
+    // is nothing but image ids maps `xrayImageId` and stops, and the screen has
+    // to say what is still missing rather than let the import proceed and
+    // invent a clinical result per row.
+    const mapping = autoDetectMapping(["معرف الأشعة"], ADHOC_FIELD_CATALOG);
+    const issues = findMappingIssues(mapping, ADHOC_FIELD_CATALOG);
+
+    expect(issues).toEqual([
+      {
+        kind: "required-unmapped",
+        fieldKey: "xrayLevelOneResult",
+        message: 'الحقل الإلزامي "نتيجة المستوى الأول" غير مرتبط بأي عمود أو قيمة ثابتة.',
+      },
+      {
+        kind: "required-unmapped",
+        fieldKey: "xrayLevelTwoResult",
+        message: 'الحقل الإلزامي "نتيجة المستوى الثاني" غير مرتبط بأي عمود أو قيمة ثابتة.',
+      },
+    ]);
   });
 
   it("treats a blank constant on a required field as unmapped", () => {
     const mapping = setFieldSource(
-      autoDetectMapping(["اسم المنفذ"], ADHOC_FIELD_CATALOG),
+      declaredResults(autoDetectMapping(["اسم المنفذ"], ADHOC_FIELD_CATALOG)),
       "xrayImageId",
       { kind: "constant", value: "  " }
     );
-    expect(
-      findMappingIssues(mapping, ADHOC_FIELD_CATALOG).map((issue) => issue.kind)
-    ).toEqual(["required-unmapped"]);
+    const issues = findMappingIssues(mapping, ADHOC_FIELD_CATALOG);
+
+    expect(issues.map((issue) => issue.kind)).toEqual(["required-unmapped"]);
+    expect(issues[0].fieldKey).toBe("xrayImageId");
   });
 
-  it("accepts a declared constant on a required field", () => {
+  it("accepts declared constants on every required field, so a bare image list is mappable", () => {
     const mapping = setFieldSource(
-      autoDetectMapping(["اسم المنفذ"], ADHOC_FIELD_CATALOG),
+      declaredResults(autoDetectMapping(["اسم المنفذ"], ADHOC_FIELD_CATALOG)),
       "xrayImageId",
       { kind: "constant", value: "IMG-1" }
     );

@@ -72,12 +72,12 @@ export type AdhocPreparedRow = PreparedPopulationRow & {
  * hold a value the catalog no longer offers, and `PreparedPopulationRow`'s
  * strict unions would take it verbatim.
  */
-function catalogValue(
+function catalogValue<TFallback extends string | null>(
   row: AdhocRow,
   catalog: AdhocField[],
   key: string,
-  fallback: string
-): string {
+  fallback: TFallback
+): string | TFallback {
   const value = row.mapped[key];
   if (value === null || value === undefined || value === "") return fallback;
   const options = catalog.find((field) => field.key === key)?.options;
@@ -122,16 +122,42 @@ function sourceLocation(rowKey: string): { sheetName: string; rowNumber: number 
  * mapped column, with `"NonCertscan"` kept only as the fallback for a file that
  * does not say.
  *
- * **The one place a value is still invented, stated plainly:**
- * `xrayLevelOneResult` / `xrayLevelTwoResult` are typed `"سليمة" | "اشتباه"` and
- * read by 25 non-test files, so there is no representable "unknown". A bare
- * image list (`kind: "sample"`) legitimately carries neither — the reviewer is
- * being asked to produce them, and their real answer lands in `ItemAnswer`, not
- * here. Such a row falls back to `"سليمة"`. An admin who knows the file's L1/L2
- * value declares it once as a `{ kind: "constant" }` source, which is recorded
- * on the import and attributable to a person; that is the intended path, and
- * widening the union is the tier-3 alternative the plan rejected.
+ * **Nothing here invents an L1/L2 result.** `xrayLevelOneResult` /
+ * `xrayLevelTwoResult` are typed `"سليمة" | "اشتباه"` and read by 25 non-test
+ * files, so there is no representable "unknown" — which means a row arriving
+ * without them could only be given a made-up clinical result, one that renders
+ * in an employee's table exactly as if a reviewer had recorded it. Rather than
+ * pick a placeholder, the catalog marks both fields required and a
+ * `{ kind: "constant" }` source satisfies that requirement, so a bare image list
+ * is still importable: the admin declares the file's value once, it is recorded
+ * on the import, and it is attributable to a person. An unresolved value can
+ * therefore only reach this function through a programmer error, and it throws
+ * rather than substituting one. (Widening the union to allow null is the
+ * tier-3 alternative the plan weighed and rejected.)
  */
+/**
+ * An L1/L2 result that is guaranteed present, or a thrown programmer error.
+ *
+ * Never a fallback value: see this module's note on why a substituted result is
+ * worse than a failed projection. Callers filter on `validation.valid`, and the
+ * catalog requires both fields, so reaching the throw means a caller skipped
+ * validation or a record was hand-edited — both bugs, neither an operator
+ * mistake to paper over.
+ */
+function requiredResult(
+  row: AdhocRow,
+  catalog: AdhocField[],
+  key: "xrayLevelOneResult" | "xrayLevelTwoResult"
+): "سليمة" | "اشتباه" {
+  const value = catalogValue(row, catalog, key, null);
+  if (value !== "سليمة" && value !== "اشتباه") {
+    throw new Error(
+      `projectToDistributionRow requires a validated row (${key} must be "سليمة" or "اشتباه", got ${JSON.stringify(value)}).`
+    );
+  }
+  return value;
+}
+
 export function projectToDistributionRow(
   importId: string,
   row: AdhocRow,
@@ -145,8 +171,8 @@ export function projectToDistributionRow(
     throw new Error("projectToDistributionRow requires a validated row (xrayImageId present).");
   }
 
-  const levelOne = catalogValue(row, catalog, "xrayLevelOneResult", "سليمة");
-  const levelTwo = catalogValue(row, catalog, "xrayLevelTwoResult", "سليمة");
+  const levelOne = requiredResult(row, catalog, "xrayLevelOneResult");
+  const levelTwo = requiredResult(row, catalog, "xrayLevelTwoResult");
   const { sheetName, rowNumber } = sourceLocation(row.rowKey);
 
   return {
@@ -166,8 +192,8 @@ export function projectToDistributionRow(
     plateOrContainerNumber: text(row, "plateOrContainerNumber"),
     chassisNumber: text(row, "chassisNumber"),
     finalDestination: text(row, "finalDestination"),
-    xrayLevelOneResult: levelOne as "سليمة" | "اشتباه",
-    xrayLevelTwoResult: levelTwo as "سليمة" | "اشتباه",
+    xrayLevelOneResult: levelOne,
+    xrayLevelTwoResult: levelTwo,
     movementType: text(row, "movementType"),
     movementNumber: text(row, "movementNumber"),
     movementDate: text(row, "movementDate"),

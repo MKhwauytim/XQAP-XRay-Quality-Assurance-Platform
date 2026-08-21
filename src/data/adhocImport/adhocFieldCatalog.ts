@@ -14,13 +14,25 @@
  * wherever one exists, because a later step projects a mapped row onto that
  * type and a renamed key would land the value nowhere.
  *
- * Required fields: `xrayImageId` ONLY. The Population catalog additionally
- * marks `xrayLevelOneResult`, `xrayLevelTwoResult` and `stage` required, and v1
- * inherited that — which made a perfectly legitimate `kind: "sample"` import (a
- * bare list of images to be reviewed) fail every row. Those three are now
- * ordinary optional fields; an admin who wants a fixed value for the whole file
- * declares it via a `{ kind: "constant" }` source, which is attributable to a
- * person rather than invented per row.
+ * Required fields: `xrayImageId`, `xrayLevelOneResult`, `xrayLevelTwoResult`.
+ *
+ * The Population catalog also marks `stage` required and v1 inherited that,
+ * which made a perfectly legitimate `kind: "sample"` import (a bare list of
+ * images to be reviewed) fail every row over a field the file has no reason to
+ * carry. `stage` is therefore an ordinary optional field here.
+ *
+ * `xrayLevelOneResult` and `xrayLevelTwoResult` stay required, and the
+ * distinction from `stage` is deliberate: both are
+ * typed `"سليمة" | "اشتباه"` on `PreparedPopulationRow` with no representable
+ * "unknown", so a row that reaches projection without them has to be given a
+ * value — and any value the app picks is a fabricated clinical result that
+ * renders in an employee's table as though a reviewer recorded it. Requiring
+ * them does not force a column to exist: a `{ kind: "constant" }` source
+ * satisfies the requirement, and that is the whole point. The admin declares
+ * "every row in this file is سليمة" ONCE, it is recorded on the import, and it
+ * is attributable to a person. Leaving the fields optional made that declaration
+ * merely available; requiring them makes it mandatory, which is the only version
+ * that cannot silently invent a result.
  */
 
 import type { AdhocField } from "./adhocImportModel";
@@ -123,7 +135,9 @@ export const ADHOC_FIELD_CATALOG: AdhocField[] = [
   {
     key: "xrayLevelOneResult",
     labelAr: "نتيجة المستوى الأول",
-    required: false,
+    // Satisfiable by a constant — see the module header. Required so that an
+    // unmapped pair fails loudly at review time instead of being invented.
+    required: true,
     kind: "enum",
     options: RESULT_OPTIONS,
     seedAliases: [
@@ -137,7 +151,8 @@ export const ADHOC_FIELD_CATALOG: AdhocField[] = [
   {
     key: "xrayLevelTwoResult",
     labelAr: "نتيجة المستوى الثاني",
-    required: false,
+    // Satisfiable by a constant — see `xrayLevelOneResult` above.
+    required: true,
     kind: "enum",
     options: RESULT_OPTIONS,
     seedAliases: [

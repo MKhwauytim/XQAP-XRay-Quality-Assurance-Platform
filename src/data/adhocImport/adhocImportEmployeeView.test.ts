@@ -184,7 +184,14 @@ describe("adhocImportEmployeeView month filter", () => {
       rows: [
         {
           rowKey: "s1:2",
-          mapped: { xrayImageId },
+          // Both result fields are required by `ADHOC_FIELD_CATALOG` and are
+          // what the reviewer's table renders, so a record that reached
+          // assignment carries them — a row without them never gets this far.
+          mapped: {
+            xrayImageId,
+            xrayLevelOneResult: "سليمة",
+            xrayLevelTwoResult: "اشتباه",
+          },
           validation: { valid: true },
           excludedByAdmin: false,
           assignments: [],

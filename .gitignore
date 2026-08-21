@@ -42,3 +42,8 @@ testsprite_tests/tmp/config.json
 # Static executive-report preview (npm run report:static) — a regenerable
 # artifact, never committed.
 dist-preview/
+
+# Netlify CLI/MCP local link state — records which remote site this working
+# copy deploys to. Machine-local, not a project setting: committing it would
+# point every clone at one person's preview site.
+.netlify/
