@@ -68,16 +68,18 @@ function employeeWorkspaceRegistersItsSources() {
 }
 
 describe("BootSplashOverlay -- late registration after a checklist-less landing", () => {
-  // SKIPPED: this is a red test for a bug that is still open in BootSplashOverlay.tsx.
-  // The overlay DOES currently re-cover the app on this path, so the assertion below
-  // fails against main. It is committed skipped rather than deleted so the analysis in
-  // the file header survives; un-skip it as the first step of fixing the bug.
+  // Fixed by the per-session boot WINDOW (`bootWindowMs`, default 2000ms): the
+  // checklist may only make its FIRST appearance while that window is open. It
+  // closes on the timer, or earlier on the user's first pointerdown/keydown --
+  // and every late-registration trigger in the app (tab switch, month switch)
+  // starts with exactly one of those.
   //
-  // Note the sibling case below passes only because `timedOut` has already latched by
-  // then -- the safety valve, not the dismissal logic, is what covers that path. The
-  // unprotected window is therefore the first `timeoutMs` (8s) after login, which is
-  // exactly when a real user makes their first tab switch.
-  it.skip("stays hidden when the landing tab registered nothing and the user switches tabs a few seconds later", () => {
+  // Before the fix, the sibling case further down passed only because `timedOut`
+  // had already latched by then -- the safety valve, not the dismissal logic, was
+  // what covered it. The unprotected window was therefore the first `timeoutMs`
+  // (8s) after login, which is exactly when a real user makes their first tab
+  // switch.
+  it("stays hidden when the landing tab registered nothing and the user switches tabs a few seconds later", () => {
     renderOverlay();
 
     // Landing tab (Population, no month selected) registers no sources at all,
@@ -95,6 +97,37 @@ describe("BootSplashOverlay -- late registration after a checklist-less landing"
 
     // Same boot session, user is long past login: the checklist is a
     // post-login courtesy and must not cover the app they're working in.
+    expect(screen.queryByTestId("boot-splash-overlay")).not.toBeInTheDocument();
+    expect(screen.getByTestId("app-content")).toBeInTheDocument();
+  });
+
+  it("still shows for a genuine landing-tab registration inside the boot window", () => {
+    // The guard above must not become "never show the checklist": a landing tab
+    // that registers promptly, with no user interaction in between, is the whole
+    // reason this component exists.
+    renderOverlay();
+
+    act(() => {
+      vi.advanceTimersByTime(400); // a realistic landing-load delay, inside the window
+    });
+    employeeWorkspaceRegistersItsSources();
+
+    expect(screen.getByTestId("boot-splash-overlay")).toBeInTheDocument();
+  });
+
+  it("stays hidden when the user clicks through to another tab while the boot window is still open", () => {
+    // The timer alone leaves a hole: a fast user can reach a second tab well
+    // inside `bootWindowMs`. The pointerdown that starts that navigation lands
+    // (capture phase) before React commits the tab switch, so it closes the
+    // window ahead of the new tab's registration.
+    renderOverlay();
+
+    act(() => {
+      vi.advanceTimersByTime(300); // still inside the 2000ms boot window
+      window.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+    });
+    employeeWorkspaceRegistersItsSources();
+
     expect(screen.queryByTestId("boot-splash-overlay")).not.toBeInTheDocument();
     expect(screen.getByTestId("app-content")).toBeInTheDocument();
   });
