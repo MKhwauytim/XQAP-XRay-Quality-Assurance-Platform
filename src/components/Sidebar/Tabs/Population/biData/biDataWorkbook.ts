@@ -9,7 +9,7 @@ import type {
   NormalizedBiRow,
   ZeroXrayIdDiagnostic
 } from "./biDataTypes";
-import { worksheetToSourceRows } from "../workbook/worksheetRows";
+import { worksheetToSourceRows } from "../../../../../data/workbook/worksheetRows";
 
 // Same diacritic/zero-width character class stripped in biDataNormalizer.ts's
 // header lookup — kept identical here so a sheet-name match (not just a

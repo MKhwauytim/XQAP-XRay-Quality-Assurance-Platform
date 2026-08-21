@@ -9,7 +9,7 @@ import type {
   RiskWorkbookResult,
   ZeroXrayIdDiagnostic
 } from "./riskDataTypes";
-import { worksheetToSourceRows } from "../workbook/worksheetRows";
+import { worksheetToSourceRows } from "../../../../../data/workbook/worksheetRows";
 
 function normalizeArabicText(value: string): string {
   return value

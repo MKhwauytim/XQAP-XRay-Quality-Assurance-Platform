@@ -2,7 +2,7 @@ import * as XLSX from "xlsx";
 
 import { normalizeRiskRow } from "../../components/Sidebar/Tabs/Population/riskData/riskDataNormalizer";
 import type { NormalizedRiskRow, RiskSourceRow } from "../../components/Sidebar/Tabs/Population/riskData/riskDataTypes";
-import { worksheetToSourceRows } from "../../components/Sidebar/Tabs/Population/workbook/worksheetRows";
+import { worksheetToSourceRows } from "../workbook/worksheetRows";
 import { DEFAULT_MAPPING_TEMPLATE, loadPopulationConfig } from "../population/populationConfig";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import type { AdhocImportRow, AdhocImportRowValidation } from "./adhocImportTypes";
