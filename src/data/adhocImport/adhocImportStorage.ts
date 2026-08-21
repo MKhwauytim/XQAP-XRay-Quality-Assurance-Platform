@@ -3,26 +3,14 @@ import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
 import { getAdhocImportsDir } from "../workspace/workspacePaths";
+import type { AdhocIndexEntry, AdhocRecord } from "./adhocImportModel";
 import type { AdhocImportIndex, AdhocImportIndexEntry, AdhocImportRecord } from "./adhocImportTypes";
+import { normalizeAdhocRecord, toIndexEntry, toLegacyRecord } from "./adhocRecordMigration";
 
 const INDEX_FILE = "adhoc-imports.index.json";
 
 function recordFileName(importId: string): string {
   return `${importId}.json`;
-}
-
-function toIndexEntry(record: AdhocImportRecord): AdhocImportIndexEntry {
-  const validRows = record.rows.filter((r) => r.validation.valid);
-  return {
-    importId: record.importId,
-    fileName: record.fileName,
-    importedBy: record.importedBy,
-    importedAt: record.importedAt,
-    status: record.status,
-    totalRows: record.rows.length,
-    validRows: validRows.length,
-    assignedRows: record.rows.filter((r) => r.assigned).length,
-  };
 }
 
 const CORRUPT_INDEX_ERROR =
@@ -89,49 +77,55 @@ async function updateIndex(
 
 export async function loadAdhocImportIndex(
   directoryHandle: DirectoryHandleLike
-): Promise<AdhocImportIndexEntry[]> {
+): Promise<AdhocIndexEntry[]> {
   const dir = await getAdhocImportsDir(directoryHandle, false).catch(() => null);
   if (!dir) return [];
   const result = await safeReadJson<AdhocImportIndex>(dir, INDEX_FILE);
   return result.ok ? result.value.imports : [];
 }
 
-export async function loadAdhocImportRecord(
+/**
+ * The import document, read as an `AdhocRecord` whatever schema it was written
+ * under — see `adhocRecordMigration.ts`. The upgrade is in memory only; nothing
+ * is written back here.
+ */
+export async function loadAdhocRecord(
   directoryHandle: DirectoryHandleLike,
   importId: string
-): Promise<AdhocImportRecord | null> {
+): Promise<AdhocRecord | null> {
   const dir = await getAdhocImportsDir(directoryHandle, false).catch(() => null);
   if (!dir) return null;
-  const result = await safeReadJson<AdhocImportRecord>(dir, recordFileName(importId));
-  return result.ok ? result.value : null;
+  const result = await safeReadJson<unknown>(dir, recordFileName(importId));
+  return result.ok ? normalizeAdhocRecord(result.value) : null;
 }
 
 /**
  * CAS read-modify-write of the per-import `{importId}.json` document, then
  * refreshes its index entry — mirrors `templateStorage.ts`'s
  * `saveTemplateFile`. Returns the saved record (with its stamped revision).
+ *
+ * What lands on disk is `toLegacyRecord(record)`: the v2 document plus v1's
+ * assignment scalars, so a copy of last week's single-file build reading this
+ * workspace still sees which rows are taken. That compatibility layer is
+ * temporary — see `adhocRecordMigration.ts`'s one-release note.
  */
-export async function saveAdhocImportRecord(
+export async function saveAdhocRecord(
   directoryHandle: DirectoryHandleLike,
-  record: AdhocImportRecord
-): Promise<AdhocImportRecord> {
+  record: AdhocRecord
+): Promise<AdhocRecord> {
   const dir = await getAdhocImportsDir(directoryHandle, true);
   const fileName = recordFileName(record.importId);
 
   const outcome = await withResourceLock(`adhoc-import/${record.importId}:rmw`, () =>
-    casLoop<{ ok: true; saved: AdhocImportRecord }>(
+    casLoop<{ ok: true; saved: AdhocRecord }>(
       async (writeToken) => {
-        const existing = await safeReadJson<AdhocImportRecord>(dir, fileName);
+        const existing = await safeReadJson<{ revision?: number }>(dir, fileName);
         const nextRevision = (existing.ok ? existing.value.revision ?? 0 : 0) + 1;
-        const updated: AdhocImportRecord = {
-          ...record,
-          revision: nextRevision,
-          _writeToken: writeToken,
-        };
-        await safeWriteJson(dir, fileName, updated);
-        const verify = await safeReadJson<AdhocImportRecord>(dir, fileName);
+        const saved: AdhocRecord = { ...record, revision: nextRevision, _writeToken: writeToken };
+        await safeWriteJson(dir, fileName, toLegacyRecord(saved));
+        const verify = await safeReadJson<{ revision?: number; _writeToken?: string }>(dir, fileName);
         if (verify.ok && verify.value.revision === nextRevision && verify.value._writeToken === writeToken) {
-          return { done: true, result: { ok: true as const, saved: updated } };
+          return { done: true, result: { ok: true as const, saved } };
         }
         return { done: false };
       },
@@ -149,6 +143,32 @@ export async function saveAdhocImportRecord(
   });
 
   return outcome.saved;
+}
+
+/**
+ * v1 signature, kept while the Ad-hoc Import tab is rebuilt against the v2
+ * model. Reads exactly the same document as `loadAdhocRecord` and returns the
+ * legacy VIEW of it — `assigned` / `assignedTo` / `assignedAt` /
+ * `namespacedXrayImageId` re-derived, everything else carried through.
+ */
+export async function loadAdhocImportRecord(
+  directoryHandle: DirectoryHandleLike,
+  importId: string
+): Promise<AdhocImportRecord | null> {
+  const record = await loadAdhocRecord(directoryHandle, importId);
+  return record === null ? null : toLegacyRecord(record);
+}
+
+/** v1 signature — see `loadAdhocImportRecord`. A v1 record is upgraded on the way in. */
+export async function saveAdhocImportRecord(
+  directoryHandle: DirectoryHandleLike,
+  record: AdhocImportRecord
+): Promise<AdhocImportRecord> {
+  const normalized = normalizeAdhocRecord(record);
+  if (normalized === null) {
+    throw new Error("تعذّر حفظ الاستيراد اليدوي: السجل غير صالح.");
+  }
+  return toLegacyRecord(await saveAdhocRecord(directoryHandle, normalized));
 }
 
 export async function deleteAdhocImportRecord(

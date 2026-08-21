@@ -157,7 +157,7 @@ Both previously documented drifts have since been **fixed in code**. **`4-report
 | Notifications | `src/data/notifications/` | Workspace-wide broadcast notifications + per-recipient acknowledgement (`ew/notifications` tab); single CAS-protected file |
 | Audit | `src/data/audit/` | CAS-protected action-log event history + archival |
 | Data integrity | `src/data/integrity/` | `orphanScan.ts` — referential-integrity check (B3) across the population → sample → distribution → answers/approvals `xrayImageId` chain |
-| Ad-hoc import | `src/data/adhocImport/` | Admin-uploaded one-off Excel imports, assigned outside the regular Population pipeline; synthesizes a `sample.master.json` for a synthetic month folder. Stored under `5-system/adhoc-imports/` |
+| Ad-hoc import | `src/data/adhocImport/` | Admin-uploaded one-off Excel/pasted imports with their own column-mapping workbench, assigned outside the regular Population pipeline; synthesizes a `sample.master.json` for a synthetic month folder. Owns its parsing end-to-end (never routes through the Population ingest) and reaches the rest of the app only through `adhocDistributionBridge.ts`. Also imports already-answered historical studies. Stored under `5-system/adhoc-imports/` |
 | Feedback | `src/data/feedback/` | User feedback records |
 | Labels | `src/data/labels/` | UI label overrides (`labelsStore.ts`) persisted to `localStorage`; `useLabels()` re-renders on change |
 | Preferences | `src/data/preferences/` | Browse preset storage |
@@ -187,16 +187,15 @@ Tabs are auto-discovered by `tabRegistry.ts`. Each top-level tab exports a defau
 
 | Tab id | File | Roles | Order | Sub-tabs |
 |--------|------|-------|-------|----------|
-| `population` | `Tabs/Population/` | all | 10 | `process`, `browse` |
+| `population` | `Tabs/Population/` | all | 10 | `process`, `browse`, `adhoc-import` (admin) |
 | `employee-workspace` | `Tabs/EmployeeWorkspace/` | all | 15 | `ew/xray-referrals`, `ew/xray-results`, `ew/referral-approval`, `ew/inspection-form` (renders `Tabs/TemplateBuilder/`) |
 | `ew/notifications` | `Tabs/NotificationCenter/` | all (defaults to manager, admin) | 20 | — |
 | `reports` | `Tabs/Reports/` | guest, supervisor, manager, admin | 25 | `reports`, `kpi` (supervisor, manager, admin), `report-designer` (supervisor, manager, admin → `Tabs/ReportDesigner/`) |
 | `archive` | `Tabs/Archive/` | guest, supervisor, manager, admin | 30 | — |
 | `user-management` | `Tabs/UserManagement/` | admin | 40 | `users`, `page-permissions`, `feature-permissions`, `activity`, `actions` |
 | `settings` | `Tabs/Settings/` | guest, admin | 95 | — |
-| `adhoc-import` | `Tabs/AdhocImport/` | admin | 97 | — |
 
-`TemplateBuilder` and `ReportDesigner` no longer register standalone tabs — they render inside the sub-tabs noted above.
+`TemplateBuilder`, `ReportDesigner` and `AdhocImport` no longer register standalone tabs — they render inside the sub-tabs noted above. A sub-tab-only component exports a default component and **nothing else**: re-adding a `tabConfig` export resurrects it as a top-level tab, and no test catches that (nothing compares `SIDEBAR_TABS` against `TAB_CATALOG`), so the app would ship a duplicate entry whose permission lookup resolves to `none` for every non-admin.
 
 ### Population tab — core workflow
 

@@ -1,3 +1,22 @@
+/**
+ * Shared Excel reader: worksheet → header-keyed row objects + true row numbers.
+ *
+ * Not pipeline logic — it lives here because two independent callers need it:
+ * the Population tab's BI/risk ingest (`Population/biData`, `Population/riskData`)
+ * and the ad-hoc import module (`src/data/adhocImport/`). It knows nothing about
+ * either domain.
+ *
+ * Two behaviors in here are load-bearing and must not be "simplified" away:
+ *
+ * 1. `preprocessLargeNumbers` — SheetJS stores a ≥16-digit numeric ID as a
+ *    float, so reading it as a number loses digits and stringifies to
+ *    exponential notation. The cells are rewritten to strings BEFORE
+ *    `sheet_to_json` runs, which is what keeps X-ray IDs intact.
+ * 2. `blankrows: true` — keeps fully blank rows in the array long enough for
+ *    `sourceRowNumber` to be the user's REAL spreadsheet line, so a dropped-row
+ *    diagnostic points at the line they actually have to fix.
+ */
+
 import type { WorkSheet } from "xlsx";
 
 export type RawCell = string | number | boolean | Date | null | undefined;
@@ -93,7 +112,12 @@ function cleanHeader(value: RawCell): string {
   return String(value).trim();
 }
 
-function makeUniqueHeaders(headers: string[]): string[] {
+/**
+ * Exported so the ad-hoc paste parser can disambiguate duplicate headers the
+ * exact same way a workbook does — a pasted block and the file it was copied
+ * from must produce identical header names, or a saved mapping stops matching.
+ */
+export function makeUniqueHeaders(headers: string[]): string[] {
   const seenHeaders = new Map<string, number>();
 
   return headers.map((header) => {

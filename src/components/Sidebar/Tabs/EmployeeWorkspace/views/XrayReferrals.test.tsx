@@ -1441,12 +1441,17 @@ describe("XrayReferrals — ad-hoc import visibility (THE GAP fix)", () => {
     const assigned = await assignAdhocRowsToEmployee(root, record, ["s1:2"], "jalgahamdi", "admin");
     expect(assigned.ok).toBe(true);
 
-    // Corrupt the ad-hoc import's sample.master.json with no valid .bak to recover from.
+    // Corrupt every rung of safeReadJson's recovery ladder, not just the live
+    // file: assignment rewrites sample.master.json (it must, so a fan-out plan's
+    // replica ids exist before any event names them), so a valid `.bak` is left
+    // behind that the reader would otherwise recover from.
     const badDir = await getSampleMainDir(root, adhocMonthFolderName("adh-3"), true);
-    const handle = await badDir.getFileHandle("sample.master.json", { create: true });
-    const writable = await handle.createWritable!();
-    await writable.write("{not valid json");
-    await writable.close();
+    for (const name of ["sample.master.json", "sample.master.json.bak", "sample.master.json.tmp"]) {
+      const handle = await badDir.getFileHandle(name, { create: true });
+      const writable = await handle.createWritable!();
+      await writable.write("{not valid json");
+      await writable.close();
+    }
 
     render(<XrayReferrals directoryHandle={root} />);
 

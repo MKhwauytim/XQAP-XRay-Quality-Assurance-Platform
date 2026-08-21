@@ -12,12 +12,8 @@ import type { NormalizedRiskRow } from "../../components/Sidebar/Tabs/Population
 import type { AdhocImportRecord, AdhocImportRow } from "./adhocImportTypes";
 import { adhocMonthFolderName } from "./adhocImportTypes";
 import { loadAdhocImportRecord, saveAdhocImportRecord } from "./adhocImportStorage";
-import {
-  assignAdhocRowsToEmployee,
-  ensureAdhocSampleMaster,
-  namespacedXrayImageId,
-  toPreparedPopulationRow,
-} from "./adhocImportAssignment";
+import { namespacedXrayImageId } from "./adhocImportModel";
+import { assignAdhocRowsToEmployee, ensureAdhocSampleMaster } from "./adhocImportAssignment";
 
 function mappedRow(xrayImageId: string, sourceRowNumber = 2): NormalizedRiskRow {
   return {
@@ -64,19 +60,6 @@ function makeRecord(importId: string, rows: AdhocImportRow[]): AdhocImportRecord
 describe("adhocImportAssignment", () => {
   it("namespaces the xrayImageId so it can never collide with a real population id", () => {
     expect(namespacedXrayImageId("adh-1", "XR-1")).toBe("ADHOC-adh-1-XR-1");
-  });
-
-  it("toPreparedPopulationRow rejects an unvalidated row (missing L1/L2 result)", () => {
-    const bad = mappedRow("XR-1");
-    bad.xrayLevelOneResult = "Pass";
-    expect(() => toPreparedPopulationRow("adh-1", bad)).toThrow();
-  });
-
-  it("toPreparedPopulationRow defaults CertScan/BI fields honestly (no cert-scan matching or BI file for ad-hoc data)", () => {
-    const row = toPreparedPopulationRow("adh-1", mappedRow("XR-1"));
-    expect(row.certScanStatus).toBe("NonCertscan");
-    expect(row.biEnrichmentStatus).toBe("BI Not Provided");
-    expect(row.xrayImageId).toBe("ADHOC-adh-1-XR-1");
   });
 
   it("ensureAdhocSampleMaster writes sample.master.json under 2-samples/adhoc-{importId}/, never under 1-population/", async () => {

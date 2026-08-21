@@ -72,6 +72,7 @@ import { touchVisitedTabs } from "../../../../app/visitedTabs";
 import "./Population.css";
 import { ConfirmDialog } from "../../../../components/ConfirmDialog/ConfirmDialog";
 import BrowseDataView from "./BrowseDataView";
+import AdhocImportView from "../AdhocImport";
 import {
   computeMonthLoadScope,
   PHASES,
@@ -79,6 +80,7 @@ import {
   sourceFileMetadata,
   stableHash
 } from "./populationWorkflowHelpers";
+import type { PopulationSubTab } from "./populationWorkflowHelpers";
 import { useMonthLoad, type LoadedMonthState } from "./useMonthLoad";
 import { useDistributionActions } from "./useDistributionActions";
 import {
@@ -102,18 +104,22 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
   subTabs: [
     { id: "process", label: "معالجة البيانات" },
     { id: "browse",  label: "استعراض البيانات" },
+    // Moved here from its own top-level tab on 2026-08-21. Admin-only via the
+    // `population/adhoc-import` sub-tab ceiling in tabCatalog.ts; App.tsx filters
+    // the link out for every other role before it reaches the sidebar.
+    { id: "adhoc-import", label: "استيراد بيانات مخصص" },
   ]
 };
 
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
 
-type SubTab = "process" | "browse";
+type SubTab = PopulationSubTab;
 
 // The "pop-set-subtab" event is dispatched by the Sidebar for EVERY tab's sub-tab
 // clicks, not just Population's. Because App.tsx keeps up to 3 tabs mounted (hidden)
 // at once, this listener stays live while another tab is active and would otherwise
 // accept a foreign sub-tab id. Mirrors the guard used by the sibling tabs.
-const KNOWN_POPULATION_SUB_TABS = new Set<string>(["process", "browse"]);
+const KNOWN_POPULATION_SUB_TABS = new Set<string>(["process", "browse", "adhoc-import"]);
 
 type WizardCapabilities = {
   canUploadData: boolean;
@@ -123,6 +129,8 @@ type WizardCapabilities = {
   canDistributeSamples: boolean;
   canBulkAssign: boolean;
   canViewBrowse: boolean;
+  /** Either ad-hoc feature is enough to make the sub-tab worth rendering (OR semantics, matching SUB_TAB_FEATURE_MAP). */
+  canUseAdhocImport: boolean;
   canExportReports: boolean;
   canUploadNow: boolean;
   canProcessNow: boolean;
@@ -158,6 +166,11 @@ function computeWizardCapabilities(
     canDistributeSamples: canMutate("distribute-samples") && !selectedMonthClosed && !isLoadingMonthData,
     canBulkAssign: canMutate("bulk-assign") && !selectedMonthClosed && !isLoadingMonthData,
     canViewBrowse: can("view-browse"),
+    // `can`, not `canMutate`: this only decides whether to render the workbench at
+    // all, and canMutate additionally demands a mounted workspace -- which would
+    // turn "no workspace yet" into a permission error. The wizard runs its own
+    // canMutate("adhoc-import.ingest"/".assign") checks on every write.
+    canUseAdhocImport: can("adhoc-import.ingest") || can("adhoc-import.assign"),
     canExportReports,
     canUploadNow: canUploadData && !selectedMonthClosed && !isLoadingMonthData,
     canProcessNow: canProcessPopulation && !selectedMonthClosed && !isLoadingMonthData,
@@ -250,7 +263,7 @@ export default function PopulationTab() {
     isWizardBusyRef,
     onLoadError: (message) => setProcessingMessage(message),
   });
-  const { canUploadData, canProcessPopulation, canConfigureSample, canDrawSample, canDistributeSamples, canBulkAssign, canViewBrowse, canExportReports, canUploadNow, canProcessNow, canExportNow } = computeWizardCapabilities(can, canMutate, selectedMonthClosed, isLoadingMonthData);
+  const { canUploadData, canProcessPopulation, canConfigureSample, canDrawSample, canDistributeSamples, canBulkAssign, canViewBrowse, canUseAdhocImport, canExportReports, canUploadNow, canProcessNow, canExportNow } = computeWizardCapabilities(can, canMutate, selectedMonthClosed, isLoadingMonthData);
   const [config, setConfig] = useState<PopulationConfig>(DEFAULT_POPULATION_CONFIG);
   const [settingsModalMode, setSettingsModalMode] = useState<"mapping" | "processing" | null>(null);
 
@@ -306,6 +319,13 @@ export default function PopulationTab() {
     ),
     [directoryHandle, appliedBrowseRefreshKey, config, canExportReports]
   );
+
+  // Same stable-element trick Browse uses above, and for the same reason: this
+  // component re-renders on every wizard/import/distribution progress tick, and
+  // handing the ad-hoc workbench a fresh element each time would re-render its
+  // whole tree (DataTable + mapping grid) while it is hidden. It takes no props,
+  // so the reference can be created once and never invalidated.
+  const adhocElement = useMemo(() => <AdhocImportView />, []);
 
   // Load cumulative CertScan data from workspace on mount
   useEffect(() => {
@@ -1325,6 +1345,22 @@ export default function PopulationTab() {
         <div className="placeholder-phase">
           <h2>غير مصرح</h2>
           <p>لا تملك صلاحية استعراض البيانات.</p>
+        </div>
+      )}
+
+      {/* ── Ad-hoc import sub-tab (moved under Population 2026-08-21) ──
+          Mount preservation is mandatory here, not an optimisation: the wizard
+          holds an unsaved source table, a half-finished column mapping and a
+          partly-ticked review grid, none of which is on disk until the operator
+          saves. Unmounting on a sub-tab switch would silently throw all of it
+          away — the same class of bug DEFECT 7 fixed for Process. ── */}
+      {visitedSubTabs.has("adhoc-import") && canUseAdhocImport && (
+        <div hidden={activeSubTab !== "adhoc-import"}>{adhocElement}</div>
+      )}
+      {activeSubTab === "adhoc-import" && !canUseAdhocImport && (
+        <div className="placeholder-phase">
+          <h2>غير مصرح</h2>
+          <p>{getLabels().adhoc_import_denied}</p>
         </div>
       )}
 

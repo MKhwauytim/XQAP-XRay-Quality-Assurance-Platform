@@ -1,0 +1,500 @@
+/* ================================================================
+   Ad-hoc import — paste source + mapping workbench + value mapping.
+
+   Visual language is lifted from Population's `.certscan-*` grid (the
+   interaction the owner asked for), but every color here is a STATE, not a
+   per-field identity: sky = bound column, amber = armed target, red =
+   required-but-unmapped. See MappingWorkbench.tsx's header comment for why 19
+   fields cannot each carry their own color. No raw hex literals — `check:hex-literals`
+   is a CI gate and every value below resolves through an index.css token.
+   ================================================================ */
+
+.amw-root,
+.amw-paste-root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+/* ── Paste source ───────────────────────────────────────────── */
+
+.amw-paste-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  min-height: 120px;
+  padding: var(--sp-6);
+  text-align: center;
+  cursor: text;
+  border: 2px dashed var(--c-border-2);
+  border-radius: var(--r-lg);
+  background: var(--c-surface-2);
+  transition: border-color 150ms, background 150ms;
+}
+
+.amw-paste-zone:focus,
+.amw-paste-zone:focus-within {
+  outline: none;
+  border-color: var(--c-sky);
+  background: var(--c-sky-light);
+}
+
+.amw-paste-zone[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.amw-paste-icon {
+  color: var(--c-sky-text);
+  line-height: 0;
+}
+
+.amw-paste-title {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--c-navy);
+}
+
+.amw-paste-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--c-ink-3);
+}
+
+.amw-paste-error {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  font-size: 12.5px;
+  color: var(--c-danger);
+  background: var(--c-danger-bg);
+  border: 1px solid var(--c-danger-border);
+  border-radius: var(--r-sm);
+}
+
+.amw-paste-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.amw-paste-preview-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.amw-paste-preview-title {
+  font-size: 11.5px;
+  color: var(--c-ink-3);
+}
+
+/* ── Toolbar / hints / issues ───────────────────────────────── */
+
+.amw-toolbar {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.amw-heading {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--c-ink);
+}
+
+.amw-toolbar-hint,
+.amw-grid-note,
+.amw-empty,
+.amw-vm-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--c-ink-3);
+}
+
+/* The armed-state cue. Amber everywhere, never a per-field color. */
+.amw-cursor-hint {
+  align-self: flex-start;
+  padding: var(--sp-2) var(--sp-3);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--c-warning);
+  background: var(--c-warning-bg);
+  border: 1px solid var(--c-warning-border);
+  border-radius: var(--r-sm);
+}
+
+.amw-issues {
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--c-warning-border);
+  background: var(--c-warning-bg);
+  border-radius: var(--r-sm);
+  color: var(--c-warning);
+}
+
+.amw-issues-title {
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.amw-issues-list {
+  margin: var(--sp-1) 0 0;
+  padding-inline-start: var(--sp-4);
+  font-size: 12px;
+}
+
+/* ── Two panes: rail first (right, in RTL), grid second (left) ── */
+
+.amw-panes {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.amw-rail {
+  flex: 1 1 340px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.amw-grid {
+  flex: 2 1 420px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.amw-pane-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--c-ink-3);
+}
+
+/* ── Field rail ─────────────────────────────────────────────── */
+
+.amw-field-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  max-height: 460px;
+  overflow-y: auto;
+}
+
+.amw-field-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  padding: var(--sp-2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
+  background: var(--c-surface);
+}
+
+/* Bound = sky tint. */
+.amw-field-row.is-bound {
+  background: var(--c-sky-light);
+  border-color: var(--c-sky-soft);
+}
+
+/* Required but still unmapped = red. Outranks the bound tint by source order. */
+.amw-field-row.is-required-unmapped {
+  background: var(--c-danger-bg);
+  border-color: var(--c-danger-border);
+}
+
+/* Armed = amber ring. Wins over both, because it is the transient state the
+   operator is acting on right now. */
+.amw-field-row.is-armed {
+  border-color: var(--c-warning-border);
+  box-shadow: 0 0 0 3px var(--c-warning-bg);
+}
+
+.amw-field-arm {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-3);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--c-ink);
+  background: transparent;
+  border: 1px solid var(--c-border-2);
+  border-radius: var(--r-pill);
+  cursor: pointer;
+}
+
+.amw-field-arm:hover:not(:disabled) {
+  background: var(--c-sky-light);
+  border-color: var(--c-sky-soft);
+}
+
+.amw-field-arm[aria-pressed="true"] {
+  background: var(--c-warning-bg);
+  border-color: var(--c-warning-border);
+  color: var(--c-warning);
+}
+
+.amw-field-arm:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.amw-field-label {
+  white-space: nowrap;
+}
+
+.amw-required {
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 1px 5px /* no-scale */;
+  border-radius: var(--r-sm);
+  color: var(--c-danger);
+  background: var(--c-danger-bg);
+}
+
+.amw-field-binding {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: 11.5px;
+  color: var(--c-ink-2);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.amw-constant-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: 11.5px;
+  color: var(--c-ink-3);
+  cursor: pointer;
+}
+
+.amw-constant-input,
+.amw-select {
+  font: inherit;
+  font-size: 12px;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--c-border-2);
+  border-radius: var(--r-sm);
+  background: var(--c-surface);
+  color: var(--c-ink);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.amw-ghost-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font: inherit;
+  font-size: 11.5px;
+  padding: var(--sp-1) var(--sp-2);
+  color: var(--c-ink-3);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.amw-ghost-btn:hover:not(:disabled) {
+  color: var(--c-danger);
+  border-color: var(--c-danger-border);
+  background: var(--c-danger-bg);
+}
+
+.amw-ghost-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* ── Chips ──────────────────────────────────────────────────── */
+
+.amw-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 1px var(--sp-2);
+  border-radius: var(--r-pill);
+  white-space: nowrap;
+  background: var(--c-surface-2);
+  color: var(--c-ink-3);
+}
+
+.amw-chip-ok,
+.amw-chip-origin-auto {
+  background: var(--c-success-bg);
+  color: var(--c-success-strong);
+}
+
+.amw-chip-origin-manual {
+  background: var(--c-sky-light);
+  color: var(--c-sky-text);
+}
+
+.amw-chip-origin-constant {
+  background: var(--c-info-bg);
+  color: var(--c-info-strong);
+}
+
+.amw-chip-origin-none {
+  background: var(--c-surface-2);
+  color: var(--c-ink-4);
+}
+
+.amw-chip-warn {
+  background: var(--c-warning-bg);
+  color: var(--c-warning);
+}
+
+.amw-chip-danger {
+  background: var(--c-danger-bg);
+  color: var(--c-danger);
+}
+
+/* ── Grids (preview + mapping) ──────────────────────────────── */
+
+.amw-scroll {
+  overflow: auto;
+  max-height: 320px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  background: var(--c-surface);
+}
+
+.amw-scroll.is-selecting {
+  cursor: crosshair;
+}
+
+.amw-grid-table,
+.amw-preview-table,
+.amw-vm-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  min-width: 100%;
+}
+
+.amw-th {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky-cell);
+  padding: var(--sp-1) var(--sp-2);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--c-ink-3);
+  text-align: start;
+  white-space: nowrap;
+  background: var(--c-surface-2);
+  border-bottom: 2px solid var(--c-border);
+  border-inline-end: 1px solid var(--c-border);
+}
+
+/* Bound column: sky, on the header and every cell beneath it. */
+.amw-th.is-bound {
+  background: var(--c-sky-light);
+  color: var(--c-sky-text);
+  border-bottom-color: var(--c-sky-soft);
+}
+
+.amw-th-rownum,
+.amw-td-rownum {
+  color: var(--c-ink-4);
+  font-variant-numeric: tabular-nums;
+}
+
+.amw-header-btn {
+  font: inherit;
+  font-weight: 700;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.amw-header-btn:hover {
+  text-decoration: underline;
+}
+
+.amw-header-bound {
+  display: block;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--c-sky-text);
+  overflow-wrap: anywhere;
+  white-space: normal;
+  max-width: 160px;
+}
+
+.amw-td {
+  padding: var(--sp-1) var(--sp-2);
+  border-bottom: 1px solid var(--c-border);
+  border-inline-end: 1px solid var(--c-border);
+  color: var(--c-ink-2);
+  text-align: start;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.amw-td.is-bound {
+  background: var(--c-sky-light);
+}
+
+/* ── Value mapping ──────────────────────────────────────────── */
+
+.amw-vm-root {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
+  background: var(--c-surface);
+}
+
+.amw-vm-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.amw-vm-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--c-ink-2);
+}
+
+.amw-vm-table .amw-th {
+  position: static;
+}
+
+.amw-vm-source {
+  margin-inline-end: var(--sp-2);
+}
+
+/* An unresolved value is a decision the admin still owes — it is never allowed
+   to look like a quietly-defaulted row. */
+.amw-vm-row-unresolved .amw-td {
+  background: var(--c-danger-bg);
+}

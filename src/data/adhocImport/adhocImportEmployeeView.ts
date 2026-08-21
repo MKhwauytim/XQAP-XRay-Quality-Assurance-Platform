@@ -6,8 +6,9 @@ import { loadOrDeriveDistributionCurrentForRead } from "../distribution/distribu
 import type { DistributionEntry } from "../distribution/distributionTypes";
 import { loadEmployeeAnswers } from "../answers/answerStorage";
 import type { ItemAnswer } from "../answers/answerTypes";
+import type { AdhocIndexEntry } from "./adhocImportModel";
+import { adhocMonthFolder } from "./adhocImportModel";
 import { loadAdhocImportIndex } from "./adhocImportStorage";
-import { adhocMonthFolderName } from "./adhocImportTypes";
 
 /**
  * A `DistributionEntry` that was assigned through an ad-hoc import
@@ -49,7 +50,31 @@ export function monthFolderForEntry(
   entry: DistributionEntry,
   selectedMonthFolder: string,
 ): string {
-  return isAdhocEntry(entry) ? adhocMonthFolderName(entry.adhocImportId) : selectedMonthFolder;
+  return isAdhocEntry(entry) ? adhocMonthFolder(entry.adhocImportId) : selectedMonthFolder;
+}
+
+/**
+ * The imports a month-scoped view must open.
+ *
+ * `linkedMonths` is on the INDEX precisely so this decision costs one small
+ * read: an import bound to another month, or to none, is skipped without ever
+ * opening its `sample.master.json` or its derived distribution cache. On a
+ * workspace with dozens of historical study imports that is the difference
+ * between one file read and dozens per month switch.
+ *
+ * Omitting `monthFolderName` keeps the unscoped behavior exactly as it was —
+ * every import with assignments, isolated ones included. Passing one excludes an
+ * import whose entry carries no `linkedMonths` at all: an index entry written
+ * before month binding existed describes an isolated import, and isolated means
+ * "invisible to month-scoped views" (see `AdhocMonthBinding`).
+ */
+function importsToOpen(
+  index: AdhocIndexEntry[],
+  monthFolderName: string | undefined
+): AdhocIndexEntry[] {
+  const withAssignments = index.filter((entry) => entry.assignedRows > 0);
+  if (monthFolderName === undefined) return withAssignments;
+  return withAssignments.filter((entry) => (entry.linkedMonths ?? []).includes(monthFolderName));
 }
 
 /**
@@ -78,7 +103,8 @@ export function monthFolderForEntry(
 export async function loadAdhocEntriesForEmployeeView(
   directoryHandle: DirectoryHandleLike,
   username: string,
-  canSeeAll: boolean
+  canSeeAll: boolean,
+  monthFolderName?: string
 ): Promise<AdhocDistributionEntry[]> {
   let index: Awaited<ReturnType<typeof loadAdhocImportIndex>>;
   try {
@@ -88,18 +114,18 @@ export async function loadAdhocEntriesForEmployeeView(
     return [];
   }
 
-  const withAssignments = index.filter((entry) => entry.assignedRows > 0);
+  const withAssignments = importsToOpen(index, monthFolderName);
   if (withAssignments.length === 0) return [];
 
   const perImport = await Promise.all(
     withAssignments.map(async (indexEntry): Promise<AdhocDistributionEntry[]> => {
       try {
-        const monthFolderName = adhocMonthFolderName(indexEntry.importId);
-        const sample = await loadSampleMaster(directoryHandle, monthFolderName);
+        const storeFolder = adhocMonthFolder(indexEntry.importId);
+        const sample = await loadSampleMaster(directoryHandle, storeFolder);
         const sampleRows = (sample?.rows ?? []) as PreparedPopulationRow[];
         if (sampleRows.length === 0) return [];
 
-        const dist = await loadOrDeriveDistributionCurrentForRead(directoryHandle, monthFolderName, sampleRows);
+        const dist = await loadOrDeriveDistributionCurrentForRead(directoryHandle, storeFolder, sampleRows);
         const entries = dist?.entries ?? [];
         // Personal-scope users only ever see rows assigned to them — same
         // scoping rule the real-month views apply to `distribution.current`.
@@ -136,16 +162,18 @@ export async function loadAdhocEntriesForEmployeeView(
  * Same cost bound and same fail-soft contract as
  * `loadAdhocEntriesForEmployeeView`: one small index read, imports with no
  * assignments cost nothing further, and any failure degrades to `[]` rather
- * than throwing into a caller that must still render the real months.
+ * than throwing into a caller that must still render the real months. The
+ * optional `monthFolderName` narrows the result to imports LINKED to that month
+ * (see `importsToOpen`); omitting it lists every import with assignments, as
+ * before.
  */
 export async function listAdhocSampleFolders(
-  directoryHandle: DirectoryHandleLike
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName?: string
 ): Promise<string[]> {
   try {
     const index = await loadAdhocImportIndex(directoryHandle);
-    return index
-      .filter((entry) => entry.assignedRows > 0)
-      .map((entry) => adhocMonthFolderName(entry.importId));
+    return importsToOpen(index, monthFolderName).map((entry) => adhocMonthFolder(entry.importId));
   } catch (error) {
     logError("adhocImportEmployeeView:listAdhocSampleFolders", error);
     return [];
@@ -175,7 +203,7 @@ export async function loadAdhocAnswerItems(
 ): Promise<ItemAnswer[]> {
   const byFolder = new Map<string, Set<string>>();
   for (const entry of entries) {
-    const folder = adhocMonthFolderName(entry.adhocImportId);
+    const folder = adhocMonthFolder(entry.adhocImportId);
     const users = byFolder.get(folder) ?? new Set<string>();
     users.add(entry.assignedTo);
     byFolder.set(folder, users);
