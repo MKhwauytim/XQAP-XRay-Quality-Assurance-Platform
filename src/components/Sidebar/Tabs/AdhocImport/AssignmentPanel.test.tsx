@@ -10,17 +10,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { createManagedUser, type ManagedLoginUser } from "../../../../auth/userManagement";
+import type { PasswordHashRecord } from "../../../../auth/passwordCrypto";
 import { DEFAULT_LABELS as L } from "../../../../data/labels/labelsStore";
 import type { AdhocRow, AssignmentPlan } from "../../../../data/adhocImport/adhocImportModel";
 import AssignmentPanel from "./AssignmentPanel";
 
 afterEach(cleanup);
 
-const HASH = {
-  algorithm: "pbkdf2-sha256" as const,
-  iterations: 1,
-  salt: "c2FsdA==",
-  hash: "aGFzaA==",
+/** Shape-only stand-in: nothing here verifies a password, the panel only reads the roster. */
+const HASH: PasswordHashRecord = {
+  algorithm: "argon2id",
+  encoded: "$argon2id$v=19$m=19456,t=2,p=1$AAAA$AAAA",
 };
 
 function employee(username: string): ManagedLoginUser {

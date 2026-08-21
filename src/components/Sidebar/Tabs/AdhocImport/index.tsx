@@ -520,6 +520,64 @@ function ReviewTable({
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
+ * Landing screen — the imports list
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+function ImportsList({
+  imports,
+  onOpen,
+}: {
+  imports: AdhocIndexEntry[];
+  onOpen: (importId: string) => void;
+}) {
+  const L = useLabels();
+
+  return (
+    <section className="adhoc-import-list-card">
+      <h2>{L.adhoc_import_list_title}</h2>
+      {imports.length === 0 ? (
+        <p className="adhoc-import-empty">{L.adhoc_import_list_empty}</p>
+      ) : (
+        <table className="adhoc-import-list-table">
+          <thead>
+            <tr>
+              <th>{L.adhoc_import_col_file_name}</th>
+              <th>{L.adhoc_import_col_imported_by}</th>
+              <th>{L.adhoc_import_col_imported_at}</th>
+              <th>{L.adhoc_import_col_status}</th>
+              <th>{L.adhoc_import_col_total_rows}</th>
+              <th>{L.adhoc_import_col_valid_rows}</th>
+              <th>{L.adhoc_import_col_assigned_rows}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {imports.map((entry) => (
+              <tr
+                key={entry.importId}
+                onClick={() => onOpen(entry.importId)}
+                className="adhoc-import-list-row"
+              >
+                <td>{entry.fileName}</td>
+                <td>{entry.importedBy}</td>
+                <td>{formatDateTime(entry.importedAt)}</td>
+                <td>
+                  {entry.status === "open"
+                    ? L.adhoc_import_status_open
+                    : L.adhoc_import_status_closed}
+                </td>
+                <td>{entry.totalRows}</td>
+                <td>{entry.validRows}</td>
+                <td>{entry.assignedRows}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
  * Tab
  * ──────────────────────────────────────────────────────────────────────────── */
 
@@ -795,6 +853,19 @@ export default function AdhocImportTab() {
     });
   }, []);
 
+  const selectAllAssignable = useCallback(() => {
+    if (editor === null) return;
+    setSelectedRowKeys(
+      new Set(
+        editor.record.rows
+          .filter((row) => row.validation.valid && !row.excludedByAdmin && row.assignments.length === 0)
+          .map((row) => row.rowKey)
+      )
+    );
+  }, [editor]);
+
+  const clearSelection = useCallback(() => setSelectedRowKeys(new Set()), []);
+
   const persist = useCallback(
     async (record: AdhocRecord): Promise<AdhocRecord | null> => {
       if (!directoryHandle || !canIngest) {
@@ -1005,47 +1076,7 @@ export default function AdhocImportTab() {
             </button>
           </section>
 
-          <section className="adhoc-import-list-card">
-            <h2>{L.adhoc_import_list_title}</h2>
-            {imports.length === 0 ? (
-              <p className="adhoc-import-empty">{L.adhoc_import_list_empty}</p>
-            ) : (
-              <table className="adhoc-import-list-table">
-                <thead>
-                  <tr>
-                    <th>{L.adhoc_import_col_file_name}</th>
-                    <th>{L.adhoc_import_col_imported_by}</th>
-                    <th>{L.adhoc_import_col_imported_at}</th>
-                    <th>{L.adhoc_import_col_status}</th>
-                    <th>{L.adhoc_import_col_total_rows}</th>
-                    <th>{L.adhoc_import_col_valid_rows}</th>
-                    <th>{L.adhoc_import_col_assigned_rows}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {imports.map((entry) => (
-                    <tr
-                      key={entry.importId}
-                      onClick={() => void openImport(entry.importId)}
-                      className="adhoc-import-list-row"
-                    >
-                      <td>{entry.fileName}</td>
-                      <td>{entry.importedBy}</td>
-                      <td>{formatDateTime(entry.importedAt)}</td>
-                      <td>
-                        {entry.status === "open"
-                          ? L.adhoc_import_status_open
-                          : L.adhoc_import_status_closed}
-                      </td>
-                      <td>{entry.totalRows}</td>
-                      <td>{entry.validRows}</td>
-                      <td>{entry.assignedRows}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </section>
+          <ImportsList imports={imports} onOpen={(importId) => void openImport(importId)} />
         </>
       )}
 
@@ -1158,18 +1189,28 @@ export default function AdhocImportTab() {
                 onToggleExcluded={(rowKey) => void toggleExcluded(rowKey)}
               />
 
-              {canIngest && (
-                <div className="adhoc-import-assign-bar">
+              <div className="adhoc-import-assign-bar">
+                {canIngest && (
                   <button type="button" onClick={() => void handleSave()} disabled={saving}>
                     {saving ? L.adhoc_review_saving : L.adhoc_review_save_button}
                   </button>
-                  <span>
-                    {fillTemplate(L.adhoc_import_selected_count, {
-                      count: String(selectedRowKeys.size),
-                    })}
-                  </span>
-                </div>
-              )}
+                )}
+                {canAssign && (
+                  <>
+                    <button type="button" onClick={selectAllAssignable}>
+                      {L.adhoc_import_select_all}
+                    </button>
+                    <button type="button" onClick={clearSelection}>
+                      {L.adhoc_import_clear_selection}
+                    </button>
+                  </>
+                )}
+                <span>
+                  {fillTemplate(L.adhoc_import_selected_count, {
+                    count: String(selectedRowKeys.size),
+                  })}
+                </span>
+              </div>
 
               <AssignmentPanel
                 importId={editor.record.importId}
