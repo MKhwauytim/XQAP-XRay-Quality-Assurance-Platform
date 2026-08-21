@@ -11,6 +11,10 @@ import {
   saveAdhocImportRecord,
 } from "./adhocImportStorage";
 import { getAdhocImportsDir } from "../workspace/workspacePaths";
+import { safeReadJson } from "../storage/safeWrite";
+import { loadAdhocRecord, saveAdhocRecord } from "./adhocImportStorage";
+import { ADHOC_FIELD_CATALOG } from "./adhocFieldCatalog";
+import type { AdhocRecord } from "./adhocImportModel";
 
 function makeRecord(importId: string): AdhocImportRecord {
   return {
@@ -138,5 +142,104 @@ describe("adhocImportStorage", () => {
     const root = createMemoryDirectory();
     await createWorkspaceStructure(root, "admin");
     expect(await loadAdhocImportIndex(root)).toEqual([]);
+  });
+});
+
+/**
+ * The document on disk is the v2 record PLUS v1's assignment scalars. This app
+ * ships as a single `index.html` that people keep copies of, so a workspace
+ * written by this build has to stay readable by last week's build for one
+ * release — see `adhocRecordMigration.ts`.
+ */
+describe("adhocImportStorage v1 ↔ v2", () => {
+  function v2Record(importId: string): AdhocRecord {
+    return {
+      importId,
+      schemaVersion: 2,
+      fileName: "study.xlsx",
+      importedBy: "admin",
+      importedAt: "2026-08-21T10:00:00.000Z",
+      status: "open",
+      kind: "historical",
+      sourceKind: "paste",
+      mapping: { fields: { xrayImageId: { kind: "column", header: "معرف الأشعة" } }, valueMappings: {} },
+      fieldCatalog: ADHOC_FIELD_CATALOG,
+      monthBinding: { kind: "month", monthFolderName: "5-may-2026" },
+      rows: [
+        {
+          rowKey: "s1:2",
+          mapped: { xrayImageId: "XR-1" },
+          validation: { valid: true },
+          excludedByAdmin: false,
+          assignments: [
+            { username: "a", replicaIndex: 0, xrayImageId: `ADHOC-${importId}-XR-1`, assignedAt: "t0" },
+            { username: "b", replicaIndex: 1, xrayImageId: `ADHOC-${importId}-R1-XR-1`, assignedAt: "t0" },
+          ],
+        },
+      ],
+    };
+  }
+
+  it("writes the v1 assignment scalars alongside the v2 fields", async () => {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    await saveAdhocRecord(root, v2Record("adh-compat"));
+
+    const dir = await getAdhocImportsDir(root, false);
+    const raw = await safeReadJson<Record<string, unknown>>(dir, "adh-compat.json");
+    expect(raw.ok).toBe(true);
+    if (!raw.ok) return;
+    const rows = raw.value.rows as Array<Record<string, unknown>>;
+    expect(rows[0].assigned).toBe(true);
+    expect(rows[0].assignedTo).toBe("a");
+    expect(rows[0].namespacedXrayImageId).toBe("ADHOC-adh-compat-XR-1");
+    // …and the v2 fields are the real storage.
+    expect(rows[0].assignments).toHaveLength(2);
+    expect(raw.value.schemaVersion).toBe(2);
+    expect(raw.value.monthBinding).toEqual({ kind: "month", monthFolderName: "5-may-2026" });
+  });
+
+  it("indexes the assignment COUNT and the linked months, so a month-scoped reader can skip this import unopened", async () => {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    await saveAdhocRecord(root, v2Record("adh-index"));
+
+    const entry = (await loadAdhocImportIndex(root)).find((e) => e.importId === "adh-index");
+    expect(entry?.kind).toBe("historical");
+    expect(entry?.assignedRows).toBe(2);
+    expect(entry?.linkedMonths).toEqual(["5-may-2026"]);
+  });
+
+  it("upgrades a v1 record saved through the legacy signature, without losing its assignment", async () => {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    const v1 = makeRecord("adh-upgrade");
+    await saveAdhocImportRecord(root, {
+      ...v1,
+      rows: v1.rows.map((r) => ({
+        ...r,
+        assigned: true,
+        assignedTo: "jalgahamdi",
+        assignedAt: "2026-08-07T11:00:00.000Z",
+        namespacedXrayImageId: "ADHOC-adh-upgrade-XR-1",
+      })),
+    });
+
+    const upgraded = await loadAdhocRecord(root, "adh-upgrade");
+    expect(upgraded?.schemaVersion).toBe(2);
+    expect(upgraded?.monthBinding).toEqual({ kind: "isolated" });
+    expect(upgraded?.rows[0].assignments).toEqual([
+      {
+        username: "jalgahamdi",
+        replicaIndex: 0,
+        xrayImageId: "ADHOC-adh-upgrade-XR-1",
+        assignedAt: "2026-08-07T11:00:00.000Z",
+      },
+    ]);
+
+    // The legacy view of the same document still answers the v1 question.
+    const legacy = await loadAdhocImportRecord(root, "adh-upgrade");
+    expect(legacy?.rows[0].assigned).toBe(true);
+    expect(legacy?.rows[0].assignedTo).toBe("jalgahamdi");
   });
 });

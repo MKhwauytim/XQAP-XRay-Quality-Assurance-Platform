@@ -7,7 +7,14 @@ import type { NormalizedRiskRow } from "../../components/Sidebar/Tabs/Population
 import type { AdhocImportRecord, AdhocImportRow } from "./adhocImportTypes";
 import { adhocMonthFolderName } from "./adhocImportTypes";
 import { assignAdhocRowsToEmployee, ensureAdhocSampleMaster } from "./adhocImportAssignment";
-import { loadAdhocEntriesForEmployeeView } from "./adhocImportEmployeeView";
+import { saveAdhocRecord } from "./adhocImportStorage";
+import { assignAdhocPlan } from "./adhocDistributionBridge";
+import { ADHOC_FIELD_CATALOG } from "./adhocFieldCatalog";
+import type { AdhocMonthBinding, AdhocRecord } from "./adhocImportModel";
+import {
+  listAdhocSampleFolders,
+  loadAdhocEntriesForEmployeeView,
+} from "./adhocImportEmployeeView";
 
 function mappedRow(xrayImageId: string, sourceRowNumber = 2): NormalizedRiskRow {
   return {
@@ -130,12 +137,131 @@ describe("adhocImportEmployeeView", () => {
     const assignedBad = await assignAdhocRowsToEmployee(root, bad, ["s1:2"], "jalgahamdi", "admin");
     expect(assignedBad.ok).toBe(true);
     const badDir = await getSampleMainDir(root, adhocMonthFolderName("adh-bad"), true);
-    const handle = await badDir.getFileHandle("sample.master.json", { create: true });
-    const writable = await handle.createWritable!();
-    await writable.write("{not valid json");
-    await writable.close();
+    // Every rung of safeReadJson's recovery ladder has to be garbage, not just
+    // the live file: assignment rewrites sample.master.json (it must, so a
+    // fan-out plan's replica ids exist before any event names them), which
+    // leaves a perfectly valid `.bak` behind that the reader would otherwise
+    // recover from — and then this would be testing recovery, not degradation.
+    for (const name of ["sample.master.json", "sample.master.json.bak", "sample.master.json.tmp"]) {
+      const handle = await badDir.getFileHandle(name, { create: true });
+      const writable = await handle.createWritable!();
+      await writable.write("{not valid json");
+      await writable.close();
+    }
 
     const entries = await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false);
     expect(entries.map((e) => e.xrayImageId)).toEqual(["ADHOC-adh-good-XR-1"]);
+  });
+});
+
+/**
+ * Month scoping. `linkedMonths` lives on the index so a month-scoped reader can
+ * decide what to open from one small file — an import bound to another month
+ * must cost nothing, not a sample-master read that is then discarded.
+ */
+describe("adhocImportEmployeeView month filter", () => {
+  const MAY = "5-may-2026";
+  const JUNE = "6-june-2026";
+
+  async function seedImport(
+    root: ReturnType<typeof createMemoryDirectory>,
+    importId: string,
+    xrayImageId: string,
+    monthBinding: AdhocMonthBinding
+  ): Promise<void> {
+    const record: AdhocRecord = {
+      importId,
+      schemaVersion: 2,
+      fileName: `${importId}.xlsx`,
+      importedBy: "admin",
+      importedAt: "2026-08-07T10:00:00.000Z",
+      status: "open",
+      kind: "sample",
+      sourceKind: "file",
+      mapping: { fields: {}, valueMappings: {} },
+      fieldCatalog: ADHOC_FIELD_CATALOG,
+      monthBinding,
+      rows: [
+        {
+          rowKey: "s1:2",
+          mapped: { xrayImageId },
+          validation: { valid: true },
+          excludedByAdmin: false,
+          assignments: [],
+        },
+      ],
+    };
+    const saved = await saveAdhocRecord(root, record);
+    const result = await assignAdhocPlan(
+      root,
+      saved,
+      [
+        {
+          rowKey: "s1:2",
+          username: "jalgahamdi",
+          replicaIndex: 0,
+          xrayImageId: `ADHOC-${importId}-${xrayImageId}`,
+        },
+      ],
+      "admin"
+    );
+    expect(result.ok).toBe(true);
+  }
+
+  async function seedThreeImports(): Promise<ReturnType<typeof createMemoryDirectory>> {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    await seedImport(root, "adh-may", "XR-MAY", { kind: "month", monthFolderName: MAY });
+    await seedImport(root, "adh-june", "XR-JUNE", { kind: "month", monthFolderName: JUNE });
+    await seedImport(root, "adh-iso", "XR-ISO", { kind: "isolated" });
+    return root;
+  }
+
+  it("opens only the imports linked to the requested month", async () => {
+    const root = await seedThreeImports();
+
+    const entries = await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false, MAY);
+    expect(entries.map((e) => e.xrayImageId)).toEqual(["ADHOC-adh-may-XR-MAY"]);
+
+    const june = await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false, JUNE);
+    expect(june.map((e) => e.xrayImageId)).toEqual(["ADHOC-adh-june-XR-JUNE"]);
+  });
+
+  it("excludes an isolated import from every month scope, and includes it when unscoped", async () => {
+    const root = await seedThreeImports();
+
+    const scoped = await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false, MAY);
+    expect(scoped.some((e) => e.adhocImportId === "adh-iso")).toBe(false);
+
+    const unscoped = await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false);
+    expect(unscoped.map((e) => e.adhocImportId).sort()).toEqual(["adh-iso", "adh-june", "adh-may"]);
+  });
+
+  it("answers [] for a month no import links to, without opening anything", async () => {
+    const root = await seedThreeImports();
+    expect(await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false, "1-january-2026")).toEqual([]);
+  });
+
+  it("scopes listAdhocSampleFolders the same way, so employee-authored records are looked for in the right stores", async () => {
+    const root = await seedThreeImports();
+
+    expect(await listAdhocSampleFolders(root, MAY)).toEqual(["adhoc-adh-may"]);
+    expect((await listAdhocSampleFolders(root)).sort()).toEqual([
+      "adhoc-adh-iso",
+      "adhoc-adh-june",
+      "adhoc-adh-may",
+    ]);
+  });
+
+  it("treats a legacy index entry with no linkedMonths as isolated under a month scope", async () => {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    // A record saved before month binding existed: v1 shape, no binding at all.
+    const record = makeRecord("adh-legacy", [importRow("XR-1")]);
+    await ensureAdhocSampleMaster(root, record);
+    expect((await assignAdhocRowsToEmployee(root, record, ["s1:2"], "jalgahamdi", "admin")).ok).toBe(true);
+
+    expect(await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false, MAY)).toEqual([]);
+    expect(await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false)).toHaveLength(1);
   });
 });

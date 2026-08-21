@@ -246,8 +246,11 @@ export default function MappingWorkbench({
                         <Check size={12} aria-hidden="true" />
                         {labels.adhoc_map_column_label.replace("{header}", boundHeader)}
                       </>
-                    ) : isConstant ? (
-                      labels.adhoc_map_origin_constant
+                    ) : isConstant && source.value.trim() !== "" ? (
+                      // An empty constant resolves to nothing on every row, so
+                      // it reads as unmapped here too — matching how
+                      // `findMappingIssues` scores it.
+                      labels.adhoc_map_constant_binding.replace("{value}", source.value)
                     ) : (
                       labels.adhoc_map_not_mapped
                     )}

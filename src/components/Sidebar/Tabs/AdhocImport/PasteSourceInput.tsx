@@ -78,7 +78,6 @@ export default function PasteSourceInput({ onTable, disabled }: PasteSourceInput
       <div
         className="amw-paste-zone"
         tabIndex={disabled ? -1 : 0}
-        role="textbox"
         aria-label={labels.adhoc_paste_aria}
         aria-disabled={disabled ? true : undefined}
         onPaste={handlePaste}
