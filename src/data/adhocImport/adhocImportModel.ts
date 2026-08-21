@@ -120,6 +120,25 @@ export type ImportMapping = {
   valueMappings: Record<string, ValueMapping>;
   /** `TemplateField.fieldId` → source. Historical study imports only. */
   templateFields?: Record<string, FieldSource>;
+  /**
+   * Historical study imports only: which column (or declared constant) names the
+   * reviewer who carried out the study, and when they submitted it.
+   *
+   * These live on the mapping rather than being passed in by the caller for the
+   * same reason every other binding does — a mapping that is not snapshotted is
+   * a mapping that can silently change meaning later (defect G8). Without them
+   * here, re-planning an import months on would mean re-picking these two
+   * columns from memory, and nothing would record that the reviewer column was
+   * ever `"اسم المدقق"` rather than `"الموظف"`.
+   *
+   * `answeredBy` must resolve to a real managed user or the answer lands in a
+   * file nothing reads, so it is validated as a blocking pre-flight before any
+   * write. `submittedAt` legitimately falls back to the record's `importedAt`
+   * when unmapped: unlike a clinical result, a missing timestamp has a
+   * defensible stand-in and inventing one misleads nobody about what was found.
+   */
+  answeredBySource?: FieldSource;
+  submittedAtSource?: FieldSource;
 };
 
 /** How a field's source was decided — surfaced as a chip in the mapping UI. */

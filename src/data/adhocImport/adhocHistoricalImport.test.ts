@@ -418,7 +418,7 @@ describe("applyHistoricalImport", () => {
   });
 
   it("refuses the whole import for one unknown reviewer, before touching disk", async () => {
-    const root = createMemoryDirectory({ trackOperations: true });
+    const root = createMemoryDirectory("root", { trackOperations: true });
     await createWorkspaceStructure(root, "admin");
     const rows = [row("s1:2", "XR-1"), row("s1:3", "XR-2")];
     const rec = await saveAdhocRecord(root, record("adh-r5", rows));
@@ -513,7 +513,7 @@ describe("applyHistoricalImport", () => {
   });
 
   it("writes the sample-master rows before any event references them", async () => {
-    const root = createMemoryDirectory({ trackOperations: true });
+    const root = createMemoryDirectory("root", { trackOperations: true });
     await createWorkspaceStructure(root, "admin");
     const rows = [row("s1:2", "XR-1")];
     const rec = await saveAdhocRecord(root, record("adh-r9", rows));

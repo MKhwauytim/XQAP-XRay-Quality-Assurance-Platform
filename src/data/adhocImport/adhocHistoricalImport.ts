@@ -317,11 +317,23 @@ function summarizeCoverage(params: {
 export function planHistoricalImport(params: {
   record: AdhocRecord;
   schema: TemplateSchema;
-  answeredBySource: FieldSource;
-  submittedAtSource: FieldSource;
+  /**
+   * Optional overrides. Normally BOTH come off the record's snapshotted
+   * mapping, which is where the admin's choice is durably recorded — passing
+   * them here is for a caller re-planning with a correction it has not saved
+   * yet. Taking the record's value as the default is what stops the reviewer
+   * and date columns from being the one part of the mapping that lives only in
+   * someone's memory (defect G8).
+   */
+  answeredBySource?: FieldSource;
+  submittedAtSource?: FieldSource;
   rawValuesByRowKey: Record<string, Record<string, unknown>>;
 }): HistoricalImportPlan {
-  const { record, schema, answeredBySource, submittedAtSource, rawValuesByRowKey } = params;
+  const { record, schema, rawValuesByRowKey } = params;
+  const answeredBySource: FieldSource =
+    params.answeredBySource ?? record.mapping.answeredBySource ?? { kind: "none" };
+  const submittedAtSource: FieldSource =
+    params.submittedAtSource ?? record.mapping.submittedAtSource ?? { kind: "none" };
   const templateFields = record.mapping.templateFields ?? {};
 
   const plan: HistoricalRowPlan[] = [];
