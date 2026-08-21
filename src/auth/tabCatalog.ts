@@ -30,6 +30,11 @@ export const TAB_CATALOG: readonly TabCatalogEntry[] = [
   { id: "population", label: "إدارة بيانات الأشعة", allowedRoles: ALL_ROLES, group: "workflow" },
   { id: "population/process", label: "معالجة البيانات", parentId: "population", allowedRoles: ALL_ROLES },
   { id: "population/browse", label: "استعراض البيانات", parentId: "population", allowedRoles: ALL_ROLES },
+  // Ad-hoc import moved under Population (2026-08-21): it used to be a stand-alone
+  // top-level "system" tab. Its ADMIN_ONLY ceiling is a SUB-TAB ceiling now and is
+  // independent of the parent's ALL_ROLES ceiling (see SUB_TAB_ROLE_CEILINGS), so
+  // the page stays admin-only even though Population itself is open to every role.
+  { id: "population/adhoc-import", label: "استيراد بيانات مخصص", parentId: "population", allowedRoles: ADMIN_ONLY },
   { id: "employee-workspace", label: "إدارة مساحة العمل", allowedRoles: ALL_ROLES, group: "workflow" },
   { id: "ew/xray-referrals", label: "صور الأشعة المحالة", parentId: "employee-workspace", allowedRoles: ALL_ROLES },
   { id: "ew/xray-results", label: "نتائج فحص الأشعة", parentId: "employee-workspace", allowedRoles: ALL_ROLES },
@@ -55,7 +60,6 @@ export const TAB_CATALOG: readonly TabCatalogEntry[] = [
   { id: "user-management/activity", label: "متابعة الأنشطة", parentId: "user-management", allowedRoles: ADMIN_ONLY },
   { id: "user-management/actions", label: "سجل الإجراءات", parentId: "user-management", allowedRoles: ADMIN_ONLY },
   { id: "settings", label: "إدارة الإعدادات", allowedRoles: ["guest", "admin"], group: "system" },
-  { id: "adhoc-import", label: "استيراد بيانات مخصص", allowedRoles: ADMIN_ONLY, group: "system" },
 ] as const;
 
 export const MANAGED_TABS: readonly ManagedTab[] = TAB_CATALOG.map(

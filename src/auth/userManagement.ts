@@ -320,6 +320,13 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
     ],
   },
   {
+    // Kept as its own group after the 2026-08-21 move under Population. These
+    // groupIds are a UI grouping for the feature-permissions screen only — they are
+    // NOT tab ids and nothing resolves them against the catalog (TAB_FEATURE_MAP,
+    // which is what drives the cascade, is a separate map). Folding these two into
+    // the "population" group would bury them among eight sampling/processing
+    // features they have nothing to do with; a named group keeps the admin's mental
+    // model of "the ad-hoc importer's permissions" intact.
     groupId: "adhoc-import",
     label: "استيراد بيانات مخصص",
     features: [
@@ -344,7 +351,13 @@ const ALL_FEATURE_IDS = MANAGED_FEATURE_GROUPS.flatMap((g) =>
 
 /** Maps each tab to the feature IDs that belong to it. */
 export const TAB_FEATURE_MAP: Readonly<Record<string, readonly string[]>> = {
-  "population":         ["upload-data", "process-population", "configure-sample", "draw-sample", "distribute-samples", "bulk-assign", "view-browse", "unlock-sampling-stage"],
+  // adhoc-import.ingest / adhoc-import.assign live here (not under their own tab id)
+  // since the ad-hoc importer moved under Population as the `population/adhoc-import`
+  // sub-tab (2026-08-21). FEATURE_TAB_LOOKUP is derived from this map and drives
+  // can()/getMutationCapability()'s cascade against the PARENT tab's grant, so a key
+  // pointing at a tab id that is no longer in the catalog would make both features
+  // permanently un-grantable -- read-only for every role, admin included.
+  "population":         ["upload-data", "process-population", "configure-sample", "draw-sample", "distribute-samples", "bulk-assign", "view-browse", "unlock-sampling-stage", "adhoc-import.ingest", "adhoc-import.assign"],
   "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "submit-referrals", "request-replacement", "bulk-reassign-referrals", "submit-answers", "configure-referral-columns", "ew.reopenAnswer", "manage-inspection-template", "employee-reopen-instant"],
   // post-notification is rendered on the ew/notifications top-level tab (NotificationManager),
   // never on employee-workspace -- cascading it against employee-workspace let can()/
@@ -356,7 +369,6 @@ export const TAB_FEATURE_MAP: Readonly<Record<string, readonly string[]>> = {
   "reports":            ["export-reports", "report-designer.edit"],
   "archive":            ["archive.closeMonth", "archive.createBackup", "archive.restoreBackup"],
   "settings":           ["view-error-log", "edit-interface-labels", "settings.syncInterval", "settings.adminAccount"],
-  "adhoc-import":       ["adhoc-import.ingest", "adhoc-import.assign"],
 };
 
 /** Reverse lookup: feature ID → parent tab ID. */
@@ -418,8 +430,12 @@ const FEATURE_DEFAULTS: Record<string, Partial<Record<AuthRole, boolean>>> = {
   // itself (audit finding 13) — no non-admin role should ever be able to grant
   // this to itself even hypothetically.
   "settings.adminAccount": { guest: false, employee: false, supervisor: false, manager: false },
-  // Admin-only feature by design (the tab itself is admin-only — see tabCatalog.ts);
-  // no non-admin role gets it by default, matching manage-users/reset-passwords above.
+  // Admin-only by default. The page itself is admin-only via the
+  // `population/adhoc-import` SUB-TAB ceiling (tabCatalog.ts); the features now
+  // cascade off the Population page grant, so an admin could technically enable them
+  // for another role -- the sub-tab ceiling still refuses to open the page, and
+  // PopulationTab's own gate refuses to render it. Defaults stay off for every
+  // non-admin role, matching manage-users/reset-passwords above.
   "adhoc-import.ingest":  { guest: false, employee: false, supervisor: false, manager: false },
   "adhoc-import.assign":  { guest: false, employee: false, supervisor: false, manager: false },
 };
@@ -436,7 +452,6 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "guest",      tabId: "archive",            access: "none" },
     { role: "guest",      tabId: "user-management",    access: "none" },
     { role: "guest",      tabId: "settings",           access: "none" },
-    { role: "guest",      tabId: "adhoc-import",       access: "none" },
     // Employee — no default access to population (was "view"; scoped down)
     { role: "employee",   tabId: "population",         access: "none" },
     { role: "employee",   tabId: "employee-workspace", access: "edit" },
@@ -445,7 +460,6 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "employee",   tabId: "archive",            access: "none" },
     { role: "employee",   tabId: "user-management",    access: "none" },
     { role: "employee",   tabId: "settings",           access: "none" },
-    { role: "employee",   tabId: "adhoc-import",       access: "none" },
     // Supervisor — population/reports/archive default to "none" (was "view"; scoped down)
     { role: "supervisor", tabId: "population",         access: "none" },
     { role: "supervisor", tabId: "employee-workspace", access: "edit" },
@@ -454,7 +468,6 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "supervisor", tabId: "archive",            access: "none" },
     { role: "supervisor", tabId: "user-management",    access: "none" },
     { role: "supervisor", tabId: "settings",           access: "none" },
-    { role: "supervisor", tabId: "adhoc-import",       access: "none" },
     // Manager — full access except user-management and archive (archive was
     // "edit"; scoped down) (admin-only by default)
     { role: "manager",    tabId: "population",         access: "edit" },
@@ -466,10 +479,6 @@ export function createDefaultPermissions(): RolePermission[] {
     // Settings is code-gated to guest + admin (see TAB_ROLE_CEILINGS); manager
     // has no access, so the shipped default is "none" to match reality.
     { role: "manager",    tabId: "settings",           access: "none" },
-    // Ad-hoc import (owner requirement, 2026-08) — admin-only page (see tabCatalog.ts's
-    // ADMIN_ONLY ceiling), so managers get no default access even though they otherwise
-    // have broad population/reports edit rights.
-    { role: "manager",    tabId: "adhoc-import",       access: "none" },
     // Admin (bootstrap) — always full, locked in normalizer
     { role: "admin",      tabId: "population",              access: "edit" },
     { role: "admin",      tabId: "employee-workspace",      access: "edit" },
@@ -487,7 +496,6 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "admin",      tabId: "user-management/activity",            access: "edit" },
     { role: "admin",      tabId: "user-management/actions",             access: "edit" },
     { role: "admin",      tabId: "settings",                access: "edit" },
-    { role: "admin",      tabId: "adhoc-import",            access: "edit" },
     // Manager — full access to EW sub-tabs except xray-referrals (was "edit"; scoped down)
     { role: "manager",    tabId: "ew/xray-referrals",       access: "none" },
     { role: "manager",    tabId: "ew/xray-results",         access: "edit" },
@@ -534,6 +542,15 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "supervisor", tabId: "population/browse",        access: "none" },
     { role: "manager",    tabId: "population/browse",        access: "edit" },
     { role: "admin",      tabId: "population/browse",        access: "edit" },
+    // Ad-hoc import (owner requirement, 2026-08) — admin-only page. It moved from a
+    // stand-alone top-level tab to this Population sub-tab on 2026-08-21; the
+    // ADMIN_ONLY ceiling now lives on the sub-tab id, so the non-admin rows below are
+    // belt-and-braces (isTabRestrictedForRole already refuses them).
+    { role: "guest",      tabId: "population/adhoc-import",  access: "none" },
+    { role: "employee",   tabId: "population/adhoc-import",  access: "none" },
+    { role: "supervisor", tabId: "population/adhoc-import",  access: "none" },
+    { role: "manager",    tabId: "population/adhoc-import",  access: "none" },
+    { role: "admin",      tabId: "population/adhoc-import",  access: "edit" },
     // supervisor was "view" on both reports sub-tabs; scoped down to "none".
     { role: "guest",      tabId: "reports/reports",          access: "none" },
     { role: "employee",   tabId: "reports/reports",          access: "none" },

@@ -76,8 +76,16 @@ export function stableHash(value: unknown): string {
  * itself still applies its own independent manifest-status gate on top (A1 perf
  * finding), so this never re-reads the two raw files for an already-processed month.
  */
+/**
+ * The Population tab's sub-tab ids. Lives here (rather than only in index.tsx) so
+ * `computeMonthLoadScope` and the tab itself cannot drift apart when a sub-tab is
+ * added -- `population/adhoc-import` was added on 2026-08-21 and, like "browse",
+ * needs no population/raw read.
+ */
+export type PopulationSubTab = "process" | "browse" | "adhoc-import";
+
 export function computeMonthLoadScope(params: {
-  activeSubTab: "process" | "browse";
+  activeSubTab: PopulationSubTab;
   canDrawSample: boolean;
   canProcessPopulation: boolean;
 }): MonthLoadScope {

@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import { createWorkspaceStructure } from "../storage/fileSystemAccess";
-import { loadSampleMaster } from "../sampling/sampleStorage";
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { loadSampleMaster, saveSampleMaster } from "../sampling/sampleStorage";
+import { readEnvelopeRevision } from "../storage/safeWrite";
+import { getSampleMainDir } from "../workspace/workspacePaths";
 import { loadOrDeriveDistributionCurrent } from "../distribution/distributionStorage";
 import { loadEmployeeSampleMirror } from "../samples/sampleMirrorStorage";
 import {
@@ -317,6 +320,182 @@ describe("ensureAdhocSampleMaster", () => {
     const master = await loadSampleMaster(root, adhocMonthFolder("adh-cs"));
     expect(master?.certScanActual).toBe(1);
     expect(master?.nonCertScanActual).toBe(1);
+  });
+});
+
+/**
+ * The write-amplification guard.
+ *
+ * `ensureAdhocSampleMaster` runs on EVERY record save — a single
+ * exclude-checkbox toggle during review included — so an unconditional rewrite
+ * pushed the whole (potentially multi-megabyte) document through
+ * `safeWriteJson`'s stage-verify-commit-reverify ladder plus a `.bak` rotation
+ * per click. Every test here observes the FILE, never the return value: a skip
+ * is only a skip if nothing on disk moved, and a write is only proven by the
+ * ids that end up persisted.
+ */
+describe("ensureAdhocSampleMaster write coverage", () => {
+  const FILE = "sample.master.json";
+
+  /** `safeWriteJson` increments this on every commit, so it counts writes. */
+  async function revisionOf(root: DirectoryHandleLike, importId: string): Promise<number> {
+    const dir = await getSampleMainDir(root, adhocMonthFolder(importId), false);
+    return (await readEnvelopeRevision(dir, FILE)) ?? -1;
+  }
+
+  async function persistedIds(root: DirectoryHandleLike, importId: string): Promise<string[]> {
+    const master = await loadSampleMaster(root, adhocMonthFolder(importId));
+    return (master?.rows ?? []).map((r) => r.xrayImageId);
+  }
+
+  it("does not write again when the same record is saved a second time", async () => {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    const rec = record("adh-skip", [row("s1:2", "XR-1"), row("s1:3", "XR-2")]);
+
+    await ensureAdhocSampleMaster(root, rec);
+
+    // A sentinel in a field the write path REBUILDS from the record: `drawnBy`
+    // comes back as the importer's username the instant a write happens, so its
+    // survival is direct evidence, not an inference from timing. The envelope
+    // revision is the second, independent witness.
+    const master = await loadSampleMaster(root, adhocMonthFolder("adh-skip"));
+    if (master === null) throw new Error("first call must have written the file");
+    await saveSampleMaster(root, adhocMonthFolder("adh-skip"), { ...master, drawnBy: "SENTINEL" });
+    const revisionBefore = await revisionOf(root, "adh-skip");
+
+    const second = await ensureAdhocSampleMaster(root, rec);
+
+    expect(await revisionOf(root, "adh-skip")).toBe(revisionBefore);
+    expect((await loadSampleMaster(root, adhocMonthFolder("adh-skip")))?.drawnBy).toBe("SENTINEL");
+    // And the caller cannot tell: it gets exactly the rows a write would return.
+    expect(second.map((r) => r.xrayImageId)).toEqual([
+      "ADHOC-adh-skip-XR-1",
+      "ADHOC-adh-skip-XR-2",
+    ]);
+  });
+
+  it("writes for a fan-out plan whose replica ids are not in the file yet, and persists every one", async () => {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    const rows = [row("s1:2", "XR-1"), row("s1:3", "XR-2")];
+    const rec = record("adh-fan-cover", rows);
+
+    // Replica 0 only — the state a plain save leaves behind.
+    await ensureAdhocSampleMaster(root, rec);
+    const revisionBefore = await revisionOf(root, "adh-fan-cover");
+
+    const plan = planAdhocAssignment({
+      rows,
+      mode: "fanout",
+      targets: REVIEWERS.map((username) => ({ username })),
+      importId: "adh-fan-cover",
+    }).plan;
+    expect(plan.some((planned) => planned.replicaIndex > 0)).toBe(true);
+
+    await ensureAdhocSampleMaster(root, rec, plan);
+
+    expect(await revisionOf(root, "adh-fan-cover")).toBe(revisionBefore + 1);
+    // The safety property, asserted against the PERSISTED file: an assign event
+    // naming an id that is not a sample row is silently dropped by
+    // foldDistributionEvents — durably written, permanently invisible.
+    const ids = new Set(await persistedIds(root, "adh-fan-cover"));
+    for (const planned of plan) {
+      expect(ids.has(planned.xrayImageId)).toBe(true);
+    }
+  });
+
+  it("writes when a new valid row joins the record", async () => {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    await ensureAdhocSampleMaster(root, record("adh-grow", [row("s1:2", "XR-1")]));
+    const revisionBefore = await revisionOf(root, "adh-grow");
+
+    await ensureAdhocSampleMaster(
+      root,
+      record("adh-grow", [row("s1:2", "XR-1"), row("s1:3", "XR-2")])
+    );
+
+    expect(await revisionOf(root, "adh-grow")).toBe(revisionBefore + 1);
+    expect(await persistedIds(root, "adh-grow")).toEqual([
+      "ADHOC-adh-grow-XR-1",
+      "ADHOC-adh-grow-XR-2",
+    ]);
+  });
+
+  it("writes when a re-mapped column changes what a row says, even though no id moved", async () => {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    await ensureAdhocSampleMaster(
+      root,
+      record("adh-remap", [row("s1:2", "XR-1", { certScanStatus: "NonCertscan" })])
+    );
+    const revisionBefore = await revisionOf(root, "adh-remap");
+
+    // Coverage is about the rows, not just their names: an admin who re-maps a
+    // column keeps every xrayImageId while changing the row's content, and a
+    // file left un-refreshed there disagrees with the record every report is
+    // read beside.
+    await ensureAdhocSampleMaster(
+      root,
+      record("adh-remap", [row("s1:2", "XR-1", { certScanStatus: "Certscan" })])
+    );
+
+    expect(await revisionOf(root, "adh-remap")).toBe(revisionBefore + 1);
+    const master = await loadSampleMaster(root, adhocMonthFolder("adh-remap"));
+    expect(master?.rows[0].certScanStatus).toBe("Certscan");
+  });
+
+  it("skips the rewrite when the required set SHRINKS, and the dropped row survives on disk", async () => {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    const rec = record("adh-shrink", [row("s1:2", "XR-1"), row("s1:3", "XR-2")]);
+    await ensureAdhocSampleMaster(root, rec);
+    const revisionBefore = await revisionOf(root, "adh-shrink");
+
+    // Two ways the review table shrinks what this call would write. Excluding a
+    // row does NOT actually shrink the sample rows — `excludedByAdmin` gates
+    // assignability, not browsability — so the real shrink is the second row,
+    // which a re-map has made invalid and which is therefore no longer
+    // projected at all.
+    const shrunk = record("adh-shrink", [
+      { ...rec.rows[0], excludedByAdmin: true },
+      { ...rec.rows[1], validation: { valid: false, reason: "عمود ناقص" } },
+    ]);
+
+    const written = await ensureAdhocSampleMaster(root, shrunk);
+
+    expect(written.map((r) => r.xrayImageId)).toEqual(["ADHOC-adh-shrink-XR-1"]);
+    expect(await revisionOf(root, "adh-shrink")).toBe(revisionBefore);
+    // Rewriting to drop the row would delete a sample row an assignment may
+    // still name; an extra row costs bytes and nothing else.
+    expect(await persistedIds(root, "adh-shrink")).toEqual([
+      "ADHOC-adh-shrink-XR-1",
+      "ADHOC-adh-shrink-XR-2",
+    ]);
+  });
+
+  it("falls through to a write when the existing file is corrupt instead of reading it as covered", async () => {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    const rec = record("adh-corrupt", [row("s1:2", "XR-1")]);
+    await ensureAdhocSampleMaster(root, rec);
+
+    // Every rung of safeReadJson's recovery ladder has to be garbage, or this
+    // would be testing recovery rather than the fall-through.
+    const dir = await getSampleMainDir(root, adhocMonthFolder("adh-corrupt"), true);
+    for (const name of [FILE, `${FILE}.bak`, `${FILE}.tmp`]) {
+      const handle = await dir.getFileHandle(name, { create: true });
+      const writable = await handle.createWritable?.();
+      if (!writable) throw new Error("the memory directory must be writable");
+      await writable.write("{not valid json");
+      await writable.close();
+    }
+
+    const written = await ensureAdhocSampleMaster(root, rec);
+
+    expect(written.map((r) => r.xrayImageId)).toEqual(["ADHOC-adh-corrupt-XR-1"]);
+    expect(await persistedIds(root, "adh-corrupt")).toEqual(["ADHOC-adh-corrupt-XR-1"]);
   });
 });
 

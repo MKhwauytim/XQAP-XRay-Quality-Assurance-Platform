@@ -64,8 +64,9 @@ describe("user-management permission sections", () => {
       />
     );
 
-    // user-management and adhoc-import are admin-only by design; the four managed
-    // role columns must read as restricted, with no clickable control.
+    // user-management (and the population/adhoc-import sub-tab) are admin-only by
+    // design; the four managed role columns must read as restricted, with no
+    // clickable control.
     expect(screen.getAllByText(SYSTEM_RESTRICTED_LABEL).length).toBeGreaterThanOrEqual(12);
     expect(screen.queryByRole("button", { name: /user-management:/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /adhoc-import/ })).toBeNull();
@@ -178,7 +179,14 @@ describe("user-management permission sections", () => {
     expect(screen.getAllByRole("checkbox").length).toBeGreaterThan(0);
   });
 
-  it("keeps every adhoc-import feature cell restricted (admin-only page)", () => {
+  it("cascades the adhoc-import features off the population page after the 2026-08-21 move", () => {
+    // Before the move these two features hung off their own admin-only
+    // "adhoc-import" tab, so every managed-role cell was a permanent
+    // SYSTEM_RESTRICTED notice. The importer is now the `population/adhoc-import`
+    // SUB-TAB, and the features cascade off POPULATION -- a page no role is
+    // ceiling-locked out of. So the cells become ordinary toggles: recoverable
+    // "grant the page first" for roles without population edit, live for the ones
+    // that have it. (The page itself stays admin-only via the sub-tab ceiling.)
     render(
       <FeaturePermissionsSection
         permissions={createDefaultPermissions()}
@@ -190,7 +198,14 @@ describe("user-management permission sections", () => {
       />
     );
 
-    expect(screen.getAllByText(SYSTEM_RESTRICTED_LABEL)).toHaveLength(8);
-    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+    expect(screen.queryByText(SYSTEM_RESTRICTED_LABEL)).toBeNull();
+    // 2 features x 4 managed roles.
+    const checkboxes = screen.getAllByRole("checkbox");
+    expect(checkboxes).toHaveLength(8);
+    // Shipped defaults: only manager holds population "edit", so only its two
+    // cells are live -- and both start off, exactly as before the move.
+    expect(checkboxes.filter((box) => !(box as HTMLInputElement).disabled)).toHaveLength(2);
+    expect(checkboxes.some((box) => (box as HTMLInputElement).checked)).toBe(false);
+    expect(screen.getAllByTitle("يتطلب تفعيل صلاحية الصفحة أولاً")).toHaveLength(6);
   });
 });

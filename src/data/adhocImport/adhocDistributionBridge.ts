@@ -107,6 +107,29 @@ function sourceLocation(rowKey: string): { sheetName: string; rowNumber: number 
 }
 
 /**
+ * An L1/L2 result that is guaranteed present, or a thrown programmer error.
+ *
+ * Never a fallback value: see this module's note on why a substituted result is
+ * worse than a failed projection. Callers filter on `validation.valid`, and the
+ * catalog requires both fields, so reaching the throw means a caller skipped
+ * validation or a record was hand-edited — both bugs, neither an operator
+ * mistake to paper over.
+ */
+function requiredResult(
+  row: AdhocRow,
+  catalog: AdhocField[],
+  key: "xrayLevelOneResult" | "xrayLevelTwoResult"
+): "سليمة" | "اشتباه" {
+  const value = catalogValue(row, catalog, key, null);
+  if (value !== "سليمة" && value !== "اشتباه") {
+    throw new Error(
+      `projectToDistributionRow requires a validated row (${key} must be "سليمة" or "اشتباه", got ${JSON.stringify(value)}).`
+    );
+  }
+  return value;
+}
+
+/**
  * One ad-hoc row, as the row shape `sample.master.json` and the distribution
  * fold consume. Replaces v1's `toPreparedPopulationRow`.
  *
@@ -135,29 +158,6 @@ function sourceLocation(rowKey: string): { sheetName: string; rowNumber: number 
  * rather than substituting one. (Widening the union to allow null is the
  * tier-3 alternative the plan weighed and rejected.)
  */
-/**
- * An L1/L2 result that is guaranteed present, or a thrown programmer error.
- *
- * Never a fallback value: see this module's note on why a substituted result is
- * worse than a failed projection. Callers filter on `validation.valid`, and the
- * catalog requires both fields, so reaching the throw means a caller skipped
- * validation or a record was hand-edited — both bugs, neither an operator
- * mistake to paper over.
- */
-function requiredResult(
-  row: AdhocRow,
-  catalog: AdhocField[],
-  key: "xrayLevelOneResult" | "xrayLevelTwoResult"
-): "سليمة" | "اشتباه" {
-  const value = catalogValue(row, catalog, key, null);
-  if (value !== "سليمة" && value !== "اشتباه") {
-    throw new Error(
-      `projectToDistributionRow requires a validated row (${key} must be "سليمة" or "اشتباه", got ${JSON.stringify(value)}).`
-    );
-  }
-  return value;
-}
-
 export function projectToDistributionRow(
   importId: string,
   row: AdhocRow,
@@ -261,6 +261,47 @@ function replicaIndicesByRow(record: AdhocRecord, plan: PlannedAssignment[]): Ma
 }
 
 /**
+ * Whether the file on disk already holds every row this call would write.
+ *
+ * A SUPERSET test, deliberately not an equality one. The persisted file may
+ * legitimately carry ids that are no longer required — a row that stopped being
+ * valid, or one the record no longer lists, shrinks the required set — and
+ * rewriting to drop them would delete sample rows that live assignments still
+ * name. That is precisely how an assignment goes invisible: `foldDistributionEvents`
+ * drops an event whose xrayImageId is absent from the rows it folds against. An
+ * extra row costs bytes and nothing else, so a shrink is a skip.
+ *
+ * Payloads are compared alongside ids because a re-mapped column keeps every
+ * xrayImageId while changing what the row SAYS; treating that as covered would
+ * leave `sample.master.json` disagreeing with the record every report is read
+ * beside. Comparing is O(n) against a Map — this runs on every record save,
+ * including a single exclude-checkbox toggle.
+ *
+ * A missing, unreadable or corrupt file is never covered: `loadSampleMaster`
+ * either answers null or throws for one it merely failed to read, and both must
+ * become a write rather than a skipped one.
+ */
+async function persistedRowsCover(
+  directoryHandle: DirectoryHandleLike,
+  importId: string,
+  required: AdhocPreparedRow[]
+): Promise<boolean> {
+  let persisted: PreparedPopulationRow[] | null;
+  try {
+    persisted = await loadAdhocSampleRows(directoryHandle, importId);
+  } catch {
+    return false;
+  }
+  if (persisted === null) return false;
+
+  const byId = new Map(persisted.map((row) => [row.xrayImageId, row]));
+  return required.every((row) => {
+    const found = byId.get(row.xrayImageId);
+    return found !== undefined && JSON.stringify(found) === JSON.stringify(row);
+  });
+}
+
+/**
  * Writes/refreshes `2-samples/adhoc-{importId}/1-main/sample.master.json` with
  * every row — and every REPLICA — this import can currently reference.
  *
@@ -272,9 +313,23 @@ function replicaIndicesByRow(record: AdhocRecord, plan: PlannedAssignment[]): Ma
  * not exist on any row yet, so the file has to be rewritten with them *before*
  * the events are appended, not after.
  *
- * Unlike v1 this always rewrites rather than reusing an existing file: a plan
- * that introduces replicas changes the row set, and "the file exists" no longer
- * implies "the file covers what we are about to reference".
+ * v1 reused an existing file, which broke the moment fan-out arrived: a plan's
+ * replica ids exist on no row until the plan is made, so "the file exists"
+ * stopped implying "the file covers every id we are about to reference". The
+ * fix for that was to rewrite unconditionally — correct, but the ad-hoc tab
+ * calls this on EVERY record save, so a single checkbox toggle pushed a
+ * multi-megabyte document through the whole stage-verify-commit-reverify ladder
+ * plus a `.bak` rotation. The condition is now actual COVERAGE (see
+ * `persistedRowsCover`) rather than nothing at all: the write is skipped only
+ * when every id this call would write is already persisted with the same
+ * payload, so the ordering property above still holds byte for byte.
+ *
+ * Both branches return the freshly projected rows, so the return value stays a
+ * pure function of `(record, plan)` and no caller can tell a skip from a write
+ * except by timing. Rows the file retains but no longer requires are
+ * deliberately not returned: callers never saw them before this change either,
+ * and inventing them into a fold input here would change distribution behavior
+ * under the banner of a performance fix.
  */
 export async function ensureAdhocSampleMaster(
   directoryHandle: DirectoryHandleLike,
@@ -293,6 +348,10 @@ export async function ensureAdhocSampleMaster(
     for (const replicaIndex of [...replicas].sort((left, right) => left - right)) {
       rows.push(projectToDistributionRow(record.importId, row, record.fieldCatalog, replicaIndex));
     }
+  }
+
+  if (await persistedRowsCover(directoryHandle, record.importId, rows)) {
+    return rows;
   }
 
   const certScanActual = rows.filter((row) => row.certScanStatus === "Certscan").length;

@@ -37,7 +37,9 @@ const EXPECTED_RESTRICTED: ReadonlyArray<readonly [AuthRole, string]> = [
       "user-management/feature-permissions",
       "user-management/activity",
       "user-management/actions",
-      "adhoc-import",
+      // Ad-hoc import moved under Population on 2026-08-21; the ADMIN_ONLY ceiling
+      // travelled with it onto the sub-tab id.
+      "population/adhoc-import",
     ].map((tabId) => [role, tabId] as const),
   ),
   // Settings is code-gated to guest + admin.
@@ -173,6 +175,36 @@ describe("feature permission matrix — every settable toggle takes effect", () 
     }
   });
 
+  it("keeps the ad-hoc import features grantable through their new population parent", () => {
+    // THE regression this move is most likely to cause: FEATURE_TAB_LOOKUP is derived
+    // from TAB_FEATURE_MAP, and getMutationCapability resolves the feature's PARENT
+    // tab through it. Left pointing at the retired "adhoc-import" tab id, both
+    // features would resolve to a tab absent from the catalog and — because
+    // hasRolePermission finds no row for it — become un-grantable for every role,
+    // admin included: the whole workbench silently read-only.
+    for (const featureId of ["adhoc-import.ingest", "adhoc-import.assign"]) {
+      expect(FEATURE_TAB_LOOKUP[featureId], featureId).toBe("population");
+      // Admin, on the shipped defaults, with nothing granted by hand.
+      expect(
+        capability("admin", featureId, createDefaultPermissions(), createDefaultFeaturePermissions())
+          .allowed,
+        `admin must keep ${featureId}`,
+      ).toBe(true);
+      // And a managed role can still be granted it (page edit + the toggle).
+      expect(
+        capability("manager", featureId, grantPage("population", "manager", "edit"), grantFeature(featureId, "manager"))
+          .allowed,
+      ).toBe(true);
+      // ...but not off the Population page alone — the toggle is still required.
+      expect(
+        capability("manager", featureId, grantPage("population", "manager", "edit"), createDefaultFeaturePermissions())
+          .reason,
+      ).toBe("feature-disabled");
+    }
+    // The retired tab id must no longer appear anywhere in the map.
+    expect(Object.values(FEATURE_TAB_LOOKUP)).not.toContain("adhoc-import");
+  });
+
   it("lists the feature cells that stay permanently restricted", () => {
     const restricted = new Set<string>();
     for (const role of MATRIX_ROLES) {
@@ -182,14 +214,19 @@ describe("feature permission matrix — every settable toggle takes effect", () 
         }
       }
     }
-    // user-management (3 features) + adhoc-import (2) x 4 roles, plus the four
-    // settings features (including settings.adminAccount, audit finding 13) for
+    // user-management (3 features) x 4 roles, plus the four settings features
+    // (including settings.adminAccount, audit finding 13) for
     // employee/supervisor/manager. Nothing else.
+    //
+    // adhoc-import.ingest/.assign are deliberately NOT here any more: since the
+    // importer became the `population/adhoc-import` sub-tab, both features cascade
+    // off the POPULATION page, which no role is ceiling-restricted from. They stay
+    // off by default (FEATURE_DEFAULTS) and the sub-tab's own admin-only ceiling
+    // still refuses to open the page — but the toggles are no longer permanently
+    // inert, which is what this list means.
     const featureIds = new Set([...restricted].map((entry) => entry.split(":")[0]));
     expect([...featureIds].sort()).toEqual(
       [
-        "adhoc-import.assign",
-        "adhoc-import.ingest",
         "edit-interface-labels",
         "edit-permissions",
         "manage-users",

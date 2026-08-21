@@ -108,11 +108,29 @@ describe("tab catalog", () => {
       "user-management/feature-permissions",
       "user-management/activity",
       "user-management/actions",
-      "adhoc-import",
+      // Ad-hoc import lives under Population as of 2026-08-21. Its ADMIN_ONLY
+      // ceiling moved with it onto the sub-tab id and must NOT be inherited from
+      // (or widened to) the parent's ALL_ROLES ceiling.
+      "population/adhoc-import",
     ]) {
       expect(roleCeilingFor(tabId), tabId).toEqual(["admin"]);
     }
     expect(roleCeilingFor("settings")).toEqual(["guest", "admin"]);
+  });
+
+  it("keeps ad-hoc import under population as an admin-only sub-tab, with no top-level entry", () => {
+    const entry = TAB_CATALOG.find((tab) => tab.id === "population/adhoc-import");
+    expect(entry).toBeDefined();
+    expect(entry?.parentId).toBe("population");
+    expect(entry?.group).toBeUndefined();
+    expect(entry?.allowedRoles).toEqual(["admin"]);
+    // The stand-alone tab id is gone: nothing may resolve it any more, or a stale
+    // TAB_FEATURE_MAP/permission row pointing at it would silently keep "working".
+    expect(TAB_CATALOG.some((tab) => tab.id === "adhoc-import")).toBe(false);
+    expect(roleCeilingFor("adhoc-import")).toBeUndefined();
+    expect(TAB_ROLE_CEILINGS["adhoc-import"]).toBeUndefined();
+    // The parent stays open to everyone -- the sub-tab ceiling does the gating.
+    expect(roleCeilingFor("population")).toContain("employee");
   });
 
   it("never excludes admin from any tab", () => {

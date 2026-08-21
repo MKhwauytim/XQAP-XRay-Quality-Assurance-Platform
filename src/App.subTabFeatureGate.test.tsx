@@ -26,6 +26,19 @@ vi.mock("./components/Sidebar/Tabs/tabRegistry", () => ({
         { id: "xray-results", label: "نتائج فحص الأشعة" },
       ],
     },
+    {
+      id: "population",
+      label: "إدارة بيانات الأشعة",
+      order: 10,
+      allowedRoles: ["employee", "supervisor", "manager", "admin", "guest"] as AuthRole[],
+      TabComponent: () => <div>POP-TAB-CONTENT</div>,
+      subTabs: [
+        { id: "browse", label: "استعراض البيانات" },
+        // Moved under Population 2026-08-21; the filter builds "population/adhoc-import"
+        // from the parent id, which is the id SUB_TAB_FEATURE_MAP is keyed on.
+        { id: "adhoc-import", label: "استيراد بيانات مخصص" },
+      ],
+    },
   ],
 }));
 
@@ -100,6 +113,22 @@ describe("App sidebar sub-tab filter (audit finding 14)", () => {
     // The sub-tab whose content needs one of several features stays hidden --
     // before this fix it would render as a dead link here.
     expect(screen.queryByTestId("nav-employee-workspace/xray-referrals")).not.toBeInTheDocument();
+  });
+
+  test("hides population/adhoc-import from a role holding the page but neither ad-hoc feature", () => {
+    userManagementMock.featurePermissions = [];
+    renderAppContent(makeSession("manager"));
+
+    // The sibling sub-tab with no feature requirement is unaffected.
+    expect(screen.getByTestId("nav-population/browse")).toBeInTheDocument();
+    expect(screen.queryByTestId("nav-population/adhoc-import")).not.toBeInTheDocument();
+  });
+
+  test("shows population/adhoc-import for admin with no stored feature grants at all", () => {
+    userManagementMock.featurePermissions = [];
+    renderAppContent(makeSession("admin"));
+
+    expect(screen.getByTestId("nav-population/adhoc-import")).toBeInTheDocument();
   });
 
   test("shows ew/xray-referrals once at least one of its required features is granted", () => {

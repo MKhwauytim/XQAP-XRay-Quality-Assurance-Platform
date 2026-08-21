@@ -1,8 +1,5 @@
-/* eslint-disable react-refresh/only-export-components */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FileSpreadsheet } from "lucide-react";
 
-import { tabAllowedRoles } from "../../../../auth/tabCatalog";
 import { usePermissions } from "../../../../auth/usePermissions";
 import { readSession } from "../../../../auth/authSession";
 import {
@@ -49,16 +46,17 @@ import type {
 import MappingWorkbench from "./MappingWorkbench";
 import PasteSourceInput from "./PasteSourceInput";
 import AssignmentPanel from "./AssignmentPanel";
-import type { SidebarTabModule } from "../tabTypes";
 import "./AdhocImport.css";
 
-export const tabConfig: SidebarTabModule["tabConfig"] = {
-  id: "adhoc-import",
-  label: "استيراد بيانات مخصص",
-  order: 97,
-  allowedRoles: tabAllowedRoles("adhoc-import"),
-  icon: <FileSpreadsheet size={20} strokeWidth={1.8} aria-hidden />,
-};
+/*
+ * NO `tabConfig` export here, deliberately. The ad-hoc importer is a SUB-TAB of
+ * Population (`population/adhoc-import`) as of 2026-08-21, rendered by
+ * `Tabs/Population/index.tsx`. `tabRegistry.ts` eagerly globs every `index.tsx` one level down
+ * and registers every module that exports a `tabConfig`, so re-adding one here
+ * would resurrect the stand-alone top-level tab and put the registry out of
+ * agreement with `auth/tabCatalog.ts`. `TemplateBuilder/index.tsx` and
+ * `ReportDesigner/index.tsx` are the same shape: default export only.
+ */
 
 function fillTemplate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (_m, key: string) => vars[key] ?? `{${key}}`);

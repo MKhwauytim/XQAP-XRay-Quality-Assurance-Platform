@@ -6,9 +6,12 @@
 // auth/usePermissions and auth/userManagement are left REAL (driven through a
 // real session via writeSession/clearSession, like Archive/index.test.tsx) so the
 // permission assertions reflect the actual shipped default matrix instead of a
-// hand-rolled stand-in that could silently drift from it. The tab is admin-only
-// (tabCatalog.ts's ADMIN_ONLY ceiling + userManagement.ts's "adhoc-import"
-// default permission rows).
+// hand-rolled stand-in that could silently drift from it. The page is admin-only:
+// as of 2026-08-21 it is Population's `population/adhoc-import` SUB-TAB, whose own
+// ADMIN_ONLY ceiling (tabCatalog.ts) plus the shipped `adhoc-import.ingest` /
+// `adhoc-import.assign` feature defaults (both off for every managed role) keep it
+// closed. This module exports only a default component -- no `tabConfig` -- so
+// tabRegistry.ts does not resurrect it as a top-level tab.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
