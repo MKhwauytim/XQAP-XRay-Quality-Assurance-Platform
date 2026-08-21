@@ -109,3 +109,270 @@
   padding-top: 0.5rem;
   border-top: 1px solid var(--c-border);
 }
+
+/* ── Wizard shell (rework revision 2) ─────────────────────────────────────── */
+
+.adhoc-steps {
+  display: flex;
+  gap: 0.5rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex-wrap: wrap;
+}
+
+.adhoc-step {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  padding: 0.45rem 0.8rem;
+  background: var(--c-surface-2);
+  font-size: 0.8rem;
+  color: var(--c-ink-3);
+}
+
+.adhoc-step.is-active {
+  border-color: var(--c-border-2);
+  background: var(--c-surface);
+  color: var(--c-ink);
+}
+
+.adhoc-step-num {
+  font-size: 0.7rem;
+  color: var(--c-ink-3);
+}
+
+.adhoc-step-title {
+  font-weight: 600;
+}
+
+.adhoc-step-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  padding: 1rem;
+  background: var(--c-surface-2);
+}
+
+.adhoc-field-group {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  padding: 0.6rem 0.9rem;
+  margin: 0;
+}
+
+.adhoc-field-group legend {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--c-ink-2);
+  padding: 0 0.35rem;
+}
+
+.adhoc-field-row,
+.adhoc-file-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+}
+
+.adhoc-file-row input[type="file"] {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.adhoc-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.adhoc-hint {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  border: 1px solid var(--c-warning-border);
+  background: var(--c-warning-bg);
+  color: var(--c-ink);
+  border-radius: 10px;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.82rem;
+}
+
+.adhoc-hint-fields {
+  font-weight: 600;
+}
+
+.adhoc-blocked {
+  font-size: 0.82rem;
+  color: var(--c-danger);
+}
+
+.adhoc-chip-warn {
+  font-size: 0.75rem;
+  border: 1px solid var(--c-warning-border);
+  background: var(--c-warning-bg);
+  color: var(--c-ink);
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+}
+
+.adhoc-wizard-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--c-border);
+}
+
+.adhoc-import-notes {
+  margin: 0;
+  padding-inline-start: 1.2rem;
+  font-size: 0.82rem;
+  color: var(--c-ink-2);
+}
+
+/* ── Assignment panel ─────────────────────────────────────────────────────── */
+
+.adhoc-assign-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  padding: 1rem;
+  background: var(--c-surface-2);
+}
+
+.adhoc-assign-title {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.adhoc-assign-pool {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--c-ink-3);
+}
+
+.adhoc-assign-modes {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  padding: 0.6rem 0.9rem;
+  margin: 0;
+}
+
+.adhoc-assign-modes legend {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--c-ink-2);
+  padding: 0 0.35rem;
+}
+
+.adhoc-assign-mode-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.adhoc-assign-warning {
+  margin: 0;
+  border: 1px solid var(--c-warning-border);
+  background: var(--c-warning-bg);
+  border-radius: 10px;
+  padding: 0.5rem 0.8rem;
+  font-size: 0.82rem;
+}
+
+.adhoc-assign-explicit {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+}
+
+.adhoc-assign-employee-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.4rem;
+}
+
+.adhoc-assign-employee-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  padding: 0.35rem 0.6rem;
+  background: var(--c-surface);
+}
+
+.adhoc-assign-employee-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.adhoc-assign-number {
+  width: 5rem;
+  min-width: 0;
+}
+
+.adhoc-assign-preview {
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  padding: 0.6rem 0.9rem;
+  background: var(--c-surface);
+  font-size: 0.85rem;
+}
+
+.adhoc-assign-preview h4 {
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+}
+
+.adhoc-assign-preview-list {
+  margin: 0;
+  padding-inline-start: 1.2rem;
+}
+
+.adhoc-assign-errors {
+  margin-top: 0.5rem;
+  color: var(--c-danger);
+  font-size: 0.8rem;
+}
+
+.adhoc-assign-errors-title {
+  font-weight: 600;
+}
+
+.adhoc-assign-errors ul {
+  margin: 0.2rem 0 0;
+  padding-inline-start: 1.2rem;
+}
+
+.adhoc-assign-submit {
+  align-self: flex-start;
+}
