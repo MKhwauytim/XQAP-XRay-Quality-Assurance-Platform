@@ -39,6 +39,32 @@ type BootSplashOverlayProps = {
    * boot session, same as `timeoutMs`.
    */
   minVisibleMs?: number;
+  /**
+   * How long after a boot session begins the checklist may still make its
+   * FIRST appearance. Once this window closes -- on the timer, or earlier on
+   * the user's first interaction with the app, whichever comes first -- a
+   * registration arriving later can no longer open the checklist for this
+   * session.
+   *
+   * This is what makes "exactly once per boot session" hold on the path where
+   * the checklist never appeared at all. `dismissed` only retires a checklist
+   * that actually ran its course, so a landing tab that registers NOTHING
+   * (Population with no month selected is the common case) leaves every latch
+   * unarmed -- and the first registration of the session then arrives from a
+   * tab the user navigated to minutes into their work, popping an "app is
+   * loading" screen over the app they are working in. That is exactly the
+   * frozen-mid-task sensation this feature exists to prevent.
+   *
+   * The interaction half is the precise signal (a tab switch, a month change
+   * -- the two known late-registration triggers -- are both user-driven, and
+   * the pointerdown/keydown that starts one always lands before the effect
+   * that registers); the timer is the backstop for a late registration no
+   * interaction preceded. A landing load slow enough to register after the
+   * window simply forgoes the courtesy checklist -- the app underneath is
+   * mounted and running either way, and its own per-tab loading state still
+   * shows -- which is the safe side to fail on.
+   */
+  bootWindowMs?: number;
 };
 
 /**
@@ -53,6 +79,14 @@ type BootSessionLatch = {
   timedOut: boolean;
   /** This session's checklist already ran its course; it must never return. */
   dismissed: boolean;
+  /**
+   * This session's opening window has passed (see `bootWindowMs`), so the
+   * checklist may no longer appear for the FIRST time. Deliberately gates
+   * only the first appearance: a checklist already on screen when the window
+   * closes stays there until it genuinely runs its course (`dismissed`) or
+   * the safety valve fires (`timedOut`).
+   */
+  bootWindowClosed: boolean;
   /**
    * This session's overlay has actually been visibly rendered at least once.
    * Also what `showOverlay` itself is keyed on (not `!allLoaded` directly --
@@ -81,7 +115,7 @@ type BootSessionLatch = {
 };
 
 function armLatch(key: string, staleGeneration: number): BootSessionLatch {
-  return { key, timedOut: false, dismissed: false, shown: false, staleGeneration };
+  return { key, timedOut: false, dismissed: false, shown: false, bootWindowClosed: false, staleGeneration };
 }
 
 const STATUS_TITLE: Record<BootSourceEntry["status"], string> = {
@@ -123,6 +157,16 @@ function StatusMark({ status }: { status: BootSourceEntry["status"] }) {
  * run its course, and any later re-registration is ignored until
  * `bootSessionKey` says a genuinely new session has begun.
  *
+ * `dismissed` alone cannot carry that guarantee, though, because it only ever
+ * retires a checklist that actually APPEARED. On the very common path where
+ * the landing tab registers nothing at all (Population with no month selected),
+ * no latch is ever armed -- so the session's first registration is the one that
+ * arrives from whatever tab the user navigates to next, and it would open the
+ * checklist over the app they are already working in. `bootWindowMs` closes
+ * that path: the checklist may only make its FIRST appearance while this
+ * session's opening window is still open -- until the user's first interaction,
+ * or `bootWindowMs`, whichever comes first.
+ *
  * `minVisibleMs` floors how soon "run its course" can retire it -- the
  * always-registered sources are small, fast reads that routinely finish
  * before a user could read a single line, so without a floor the checklist
@@ -148,6 +192,7 @@ export function BootSplashOverlay({
   bootSessionKey,
   timeoutMs = 8000,
   minVisibleMs = 600,
+  bootWindowMs = 2000,
 }: BootSplashOverlayProps): ReactElement {
   const { entries, allLoaded, resetGeneration } = useBootProgress();
   // Armed with the CURRENT resetGeneration, not a `null`/"no guard needed"
@@ -210,7 +255,13 @@ export function BootSplashOverlay({
   // `Date.now()` is an impure call and React requires render to stay pure/
   // idempotent (react-hooks/purity lint rule), so it can't be called during
   // render at all, StrictMode double-render or not.
-  const visibleNow = dataIsFresh && !session.dismissed && !session.timedOut && !allLoaded;
+  // `!session.bootWindowClosed` is what keeps the checklist from opening over
+  // a live app: `dismissed` cannot cover the path where the checklist never
+  // appeared in the first place (see the `bootWindowMs` prop doc), and only
+  // the FIRST appearance is gated -- `showOverlay` below reads `session.shown`,
+  // so a checklist already on screen when the window closes is untouched.
+  const visibleNow =
+    dataIsFresh && !session.dismissed && !session.timedOut && !session.bootWindowClosed && !allLoaded;
   if (visibleNow && !session.shown) {
     session = { ...session, shown: true };
   }
@@ -273,6 +324,46 @@ export function BootSplashOverlay({
     entries,
     minVisibleMs,
   ]);
+
+  // Closes this session's opening window (see the `bootWindowMs` prop doc for
+  // what that buys). Two triggers, whichever lands first:
+  //
+  //   - the user's first interaction. Both known late-registration triggers --
+  //     switching tabs (XrayReferrals.tsx's first mount) and switching months
+  //     (useMonthLoad.ts's non-silent reload) -- start with a pointerdown or a
+  //     keydown, and a listener in the CAPTURE phase runs before React's own
+  //     delegated handler, so the window is already closed by the time the
+  //     resulting render commits and the new tab's mount effect registers.
+  //     A user who clicks during a genuine boot merely forgoes the courtesy
+  //     checklist; the app under it was mounted and loading the whole time.
+  //   - `bootWindowMs` elapsing, for a late registration no interaction
+  //     preceded (a background month probe resolving, say).
+  //
+  // Armed only once `dataIsFresh` -- the session truly begins when its own
+  // reset lands (App.tsx's useLayoutEffect), not at mount, and before that
+  // `visibleNow` is false anyway, so there is nothing to gate yet. Both
+  // setters re-check `staleGeneration` as well as `key`, since a workspace
+  // switch A -> B -> A within one login regenerates the identical key string.
+  useEffect(() => {
+    if (!dataIsFresh || session.bootWindowClosed) return;
+    const close = () => {
+      setLatch((current) =>
+        current.key === bootSessionKey &&
+        current.staleGeneration === session.staleGeneration &&
+        !current.bootWindowClosed
+          ? { ...current, bootWindowClosed: true }
+          : current // a newer session already re-armed this latch -- stale trigger, ignore
+      );
+    };
+    const timer = window.setTimeout(close, bootWindowMs);
+    window.addEventListener("pointerdown", close, true);
+    window.addEventListener("keydown", close, true);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("pointerdown", close, true);
+      window.removeEventListener("keydown", close, true);
+    };
+  }, [bootSessionKey, session.staleGeneration, session.bootWindowClosed, dataIsFresh, bootWindowMs]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
