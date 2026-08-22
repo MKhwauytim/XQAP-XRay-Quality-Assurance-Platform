@@ -7,7 +7,9 @@
 // ── The correctness core: a blank is NOT سليمة ──────────────────────────────
 // `targetedByRiskEngine` is free text off the risk file, with a vocabulary that
 // is UNKNOWN at design time (see `ExecutiveReportRow.targetedByRiskEngine`'s
-// own doc comment). `engineVerdictOf` maps it to a سليمة/اشتباه verdict for a
+// own doc comment). `engineVerdictOf` — now shared from
+// `src/data/population/riskEngineVerdict.ts`, since the employee case-queue
+// filter applies the same rule — maps it to a سليمة/اشتباه verdict for a
 // small, explicit recognized set; everything else — including every blank —
 // maps to `null` and is excluded from every rate on this page. A blank means
 // "we do not know what the engine said", never "the engine cleared it": if a
@@ -89,6 +91,7 @@
 // byte-identical output.
 
 import { getStageKey } from "../../../../population/stageHelpers";
+import { engineVerdictOf } from "../../../../population/riskEngineVerdict";
 import type { ExecutiveReportRow } from "../../../executiveReportTypes";
 import type { ReportModel } from "../../model/reportModel";
 import { band, isRankable } from "../../model/dataSufficiency";
@@ -116,29 +119,16 @@ const LEVEL_FOOTNOTE =
 
 // ── The mapping rule (the page's own correctness core) ──────────────────────
 
-/** Recognized affirmative values, normalized (trimmed, lower-cased). Extend
- *  this list — with a test — once a real month reveals the actual vocabulary
- *  the risk file uses; `.v2-re-coverage` below exists precisely to surface
- *  that need instead of leaving it silently guessed at. */
-const AFFIRMATIVE = new Set(["نعم", "مستهدف", "y", "yes", "true", "1"]);
-const NEGATIVE = new Set(["لا", "غير مستهدف", "n", "no", "false", "0"]);
-
 /**
- * Map the RAW risk-engine column value to a سليمة/اشتباه verdict.
- *
- * Returns `null` for blank AND for unrecognized values, and both are excluded
- * from every rate on the page. A blank means "we do not know what the engine
- * said" — NOT "the engine cleared it". Mapping blanks to سليمة would fabricate
- * agreement across potentially most of the month and inflate every figure
- * here.
+ * Re-exported, not re-implemented. The vocabulary and the mapping now live in
+ * `src/data/population/riskEngineVerdict.ts` — the population layer owns
+ * `targetedByRiskEngine`, and the employee case-queue filter («مستهدف المؤشر»)
+ * applies the exact same rule, so a second copy here would be free to drift the
+ * first time a real month teaches one of them a new value. The re-export keeps
+ * this module's public surface unchanged for existing importers (its own test
+ * imports `engineVerdictOf` from here).
  */
-export function engineVerdictOf(raw: string | null | undefined): "اشتباه" | "سليمة" | null {
-  const key = (raw ?? "").trim().toLowerCase();
-  if (!key) return null;
-  if (AFFIRMATIVE.has(key)) return "اشتباه";
-  if (NEGATIVE.has(key)) return "سليمة";
-  return null;
-}
+export { engineVerdictOf };
 
 // ── Coverage: recognized / unrecognized / blank ──────────────────────────────
 

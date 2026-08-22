@@ -25,6 +25,7 @@ import InspectionPanel from "../../../../../../components/InspectionPanel";
 import Pagination from "../../../../../../components/Pagination/Pagination";
 import { clampPage, pageSlice } from "../../../../../../utils/paginationUtils";
 import { useLabels, type Labels } from "../../../../../../data/labels/useLabels";
+import { CASE_FILTERS, type CaseFilter, type CaseFilterCounts } from "./caseFilter";
 import { formatStageLabel } from "../../../../../../data/population/stageHelpers";
 import type { ReplacementIndexRow } from "../../../../../../data/population/replacementIndexTypes";
 import type { PersonalStats, PersonalQuota, ReplacementDialogState, ReassignModalState } from "../XrayReferrals";
@@ -829,5 +830,95 @@ export function ReplacementDialog({
       )}
       <Pagination page={safePage} totalItems={rows.length} onPageChange={setPage} itemLabel="بديل" />
     </ModalShell>
+  );
+}
+
+// ── Queue segmented controls (above the table) ──────────────────────────────
+
+/**
+ * «الكل» / «المحالة لي» — the OVERSIGHT scope switcher.
+ *
+ * Moved here verbatim from XrayReferrals.tsx's inline JSX (markup, classes and
+ * Arabic text unchanged) so the component body stays inside the repo's
+ * `max-lines-per-function` budget once the case-filter control below joined it
+ * in the same toolbar. Still rendered only when `canSeeAll` — an ordinary
+ * employee's queue is already scoped to them, so the switcher would be two
+ * buttons that do the same thing.
+ */
+export function QueueScopeSwitcher({
+  showMyOnly,
+  onChange,
+}: {
+  showMyOnly: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <div className="ew-view-switcher" role="group" aria-label="نطاق العرض">
+      <button
+        type="button"
+        className={`ew-view-seg${!showMyOnly ? " active" : ""}`}
+        onClick={() => onChange(false)}
+      >
+        الكل
+      </button>
+      <button
+        type="button"
+        className={`ew-view-seg${showMyOnly ? " active" : ""}`}
+        onClick={() => onChange(true)}
+      >
+        المحالة لي
+      </button>
+    </div>
+  );
+}
+
+/**
+ * «جميع الحالات» / «مستهدف المؤشر» / «إحالات استثنائية» — the case filter.
+ *
+ * Deliberately NOT gated on `canSeeAll`, unlike the scope switcher above: an
+ * ordinary employee is the primary user of this control — the owner's stated
+ * goal is that they can "identify and reach" the targeted and the exceptional
+ * cases in their own queue.
+ *
+ * Each chip carries its count, which is what makes the control scannable
+ * BEFORE it is clicked. Counts come from `countCaseFilters` over the same
+ * scope-filtered set the chips then narrow, so a chip that says 7 always opens
+ * onto exactly 7 rows. The three buckets overlap by design (an ad-hoc row can
+ * also be engine-targeted), so they do not sum to «جميع الحالات».
+ *
+ * Markup mirrors `.ew-view-switcher` / `.ew-view-seg` above so it reads as one
+ * native control family; `aria-pressed` states each chip's own on/off, which a
+ * `role="group"` of plain buttons otherwise leaves unannounced.
+ */
+export function CaseFilterSwitcher({
+  value,
+  counts,
+  onChange,
+}: {
+  value: CaseFilter;
+  counts: CaseFilterCounts;
+  onChange: (next: CaseFilter) => void;
+}) {
+  const L = useLabels();
+  const chipLabel: Record<CaseFilter, string> = {
+    all: L.ew_case_filter_all,
+    "risk-targeted": L.ew_case_filter_risk_targeted,
+    adhoc: L.ew_case_filter_adhoc,
+  };
+  return (
+    <div className="ew-view-switcher ew-case-filter" role="group" aria-label={L.ew_case_filter_aria}>
+      {CASE_FILTERS.map((id) => (
+        <button
+          key={id}
+          type="button"
+          className={`ew-view-seg${value === id ? " active" : ""}`}
+          aria-pressed={value === id}
+          onClick={() => onChange(id)}
+        >
+          {chipLabel[id]}
+          <span className="ew-case-filter-count">{counts[id]}</span>
+        </button>
+      ))}
+    </div>
   );
 }

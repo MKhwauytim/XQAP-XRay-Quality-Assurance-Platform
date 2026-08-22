@@ -228,6 +228,23 @@ export const DEFAULT_LABELS = {
   tb_delete_confirm_ok:            "حذف نهائي",
   ew_draft_retained_notice:        "تم نقل هذه العينة من قائمتك (إحالة أو استبدال أثناء العمل عليها). إجاباتك غير المحفوظة لا تزال معروضة هنا — انسخها قبل الانتقال إلى عينة أخرى.",
 
+  // ── Case-queue filter chips (صور الأشعة المحالة) ─────────────────────────
+  // Three top-level buckets above the queue table, so an employee can reach
+  // the cases that matter without hunting through column filters:
+  //   • «جميع الحالات»     — no filtering (the default).
+  //   • «مستهدف المؤشر»    — the customs risk engine actually said "yes" for
+  //     this image. Read through `engineVerdictOf` (riskEngineVerdict.ts): a
+  //     blank or an unrecognized value is "unknown", never "targeted".
+  //   • «إحالات استثنائية» — rows assigned through an ad-hoc import rather
+  //     than the regular monthly sampling pipeline.
+  // Each chip carries its own count, which is the point of the control: the
+  // reader can see how many cases are in each bucket before clicking.
+  ew_case_filter_aria:             "تصفية الحالات",
+  ew_case_filter_all:              "جميع الحالات",
+  ew_case_filter_risk_targeted:    "مستهدف المؤشر",
+  ew_case_filter_adhoc:            "إحالات استثنائية",
+  ew_case_filter_empty:            "لا توجد حالات ضمن هذه التصفية. اختر «جميع الحالات» للعودة إلى القائمة كاملة.",
+
   // Population — sampling & processing guards
   sample_redraw_blocked: "لا يمكن إعادة سحب العينة بعد بدء التوزيع: يوجد سجل توزيع فعّال لهذا الشهر، وإعادة السحب ستؤدي إلى فقدان التعيينات والإجابات المسجلة.",
 

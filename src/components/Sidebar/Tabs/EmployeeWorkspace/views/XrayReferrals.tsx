@@ -95,6 +95,8 @@ import type { Labels } from "../../../../../data/labels/labelsStore";
 import { formatStageLabel } from "../../../../../data/population/stageHelpers";
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import {
+  CaseFilterSwitcher,
+  QueueScopeSwitcher,
   QueueToolbar,
   ReassignSelectionBar,
   ReassignModal,
@@ -111,6 +113,7 @@ import {
   pct,
   isStudyCompleted,
 } from "./XrayReferrals/subComponents";
+import { useCaseFilter } from "./XrayReferrals/caseFilter";
 import "./XrayReferrals/XrayReferrals.css";
 
 // ── Column definitions ────────────────────────────────────────────────────────
@@ -424,14 +427,17 @@ function createOpenReassignModal(deps: {
 function computePersonalStats(input: {
   allEntries: DistributionEntry[];
   entries: DistributionEntry[];
-  displayEntries: DistributionEntry[];
+  /** The "الكل" / "المحالة لي" SCOPE, before the case-filter chips narrow it —
+   *  "متابعة العمل" answers "how much work do I have", which a temporary view
+   *  filter must not silently rewrite. */
+  scopedEntries: DistributionEntry[];
   canSeeAll: boolean;
   username: string;
   answersMap: Map<string, ItemAnswer>;
 }): PersonalStats {
-  const { allEntries, entries, displayEntries, canSeeAll, username, answersMap } = input;
+  const { allEntries, entries, scopedEntries, canSeeAll, username, answersMap } = input;
   const source = canSeeAll
-    ? displayEntries
+    ? scopedEntries
     : (allEntries.length > 0 ? allEntries : entries).filter((entry) => entry.assignedTo === username);
   const submitted = source.filter((entry) => isStudyCompleted(entry, answersMap)).length;
   const replaced = source.filter((entry) => entry.status === "replaced").length;
@@ -689,10 +695,16 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   );
 
   // Permissioned oversight view: "المحالة لي" shows only rows assigned to the current user.
-  const displayEntries = useMemo(
+  const scopedEntries = useMemo(
     () => (canSeeAll && showMyOnly ? entries.filter((e) => e.assignedTo === username) : entries),
     [entries, canSeeAll, showMyOnly, username]
   );
+  // The three case chips COMPOSE on top of that scope rather than replacing it:
+  // they narrow `scopedEntries`, and their counts are taken over the same set,
+  // so the numbers always add up to the queue the reader is looking at. All of
+  // it lives in ./XrayReferrals/caseFilter.ts (predicate, counts, state hook).
+  const caseFilter = useCaseFilter(scopedEntries);
+  const displayEntries = caseFilter.entries;
 
   const selEntry = useMemo(
     () => selEntryId ? (displayEntries.find((e) => e.xrayImageId === selEntryId) ?? null) : null,
@@ -821,8 +833,8 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   );
 
   const personalStats = useMemo<PersonalStats>(
-    () => computePersonalStats({ allEntries, entries, displayEntries, canSeeAll, username, answersMap }),
-    [allEntries, entries, displayEntries, canSeeAll, username, answersMap]
+    () => computePersonalStats({ allEntries, entries, scopedEntries, canSeeAll, username, answersMap }),
+    [allEntries, entries, scopedEntries, canSeeAll, username, answersMap]
   );
 
   // Bug (load-token): guards a slow load for a previously-selected month from
@@ -1774,10 +1786,14 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               }}
               rowMatchesFilter={rowMatchesFilter}
               onFilteredRowsChange={setFilteredTableEntries}
-              // The only two user actions that make this a different queue:
-              // switching the global month, and (oversight users) toggling
-              // "الكل" / "المحالة لي". A background re-read is neither.
-              resetToken={`${selMonth}::${showMyOnly ? "mine" : "all"}`}
+              // The only user actions that make this a different queue: the
+              // global month, (oversight) "الكل" / "المحالة لي", and the case
+              // chip. A background re-read is none of them. The case chip
+              // belongs here because it changes the visible row set outright —
+              // page 4 of a now one-page result is a dead end. It cannot bounce
+              // a reviewer off an open row: resetToken moves PAGING only, never
+              // the selection (`expandedKey`/`selEntryId` are untouched).
+              resetToken={`${selMonth}::${showMyOnly ? "mine" : "all"}::${caseFilter.value}`}
               exportFileName={`صور الأشعة المحالة - ${selMonth || "كل الأشهر"}.xlsx`}
               expandedKey={selEntryId}
               onRowClick={(e) => selectEntry(e.xrayImageId)}
@@ -1786,26 +1802,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                   ? "dt-tr--completed"
                   : rowStatusClass(entry, pendingReferralIds, pendingReplacementIds)
               }
-              toolbarEndExtra={
-                canSeeAll ? (
-                  <div className="ew-view-switcher" role="group" aria-label="نطاق العرض">
-                    <button
-                      type="button"
-                      className={`ew-view-seg${!showMyOnly ? " active" : ""}`}
-                      onClick={() => setShowMyOnly(false)}
-                    >
-                      الكل
-                    </button>
-                    <button
-                      type="button"
-                      className={`ew-view-seg${showMyOnly ? " active" : ""}`}
-                      onClick={() => setShowMyOnly(true)}
-                    >
-                      المحالة لي
-                    </button>
-                  </div>
-                ) : undefined
-              }
+              // Every role that can open this page sees the case chips (an
+              // ordinary employee is their primary user); the scope switcher
+              // stays oversight-only, as before.
+              toolbarStart={<CaseFilterSwitcher value={caseFilter.value} counts={caseFilter.counts} onChange={caseFilter.setValue} />}
+              toolbarEndExtra={canSeeAll ? <QueueScopeSwitcher showMyOnly={showMyOnly} onChange={setShowMyOnly} /> : undefined}
             />
             {/* Second grid column. The wrapper is what `position: sticky` on the
                 panel travels inside, and it keeps the empty-state placeholder in
@@ -1885,6 +1886,13 @@ export default function XrayReferrals({ directoryHandle }: Props) {
             />
             {showingRetainedDraft && (
               <p className="ew-msg-warn" role="status">{L.ew_draft_retained_notice}</p>
+            )}
+            {/* A chip that filters everything out leaves DataTable with zero
+                `rows`, and its own "no results" row only fires when rows exist
+                and the COLUMN filters emptied them — so without this the reader
+                would get a bare header and no explanation. */}
+            {caseFilter.counts[caseFilter.value] === 0 && caseFilter.counts.all > 0 && (
+              <p className="ew-case-filter-empty" role="status">{L.ew_case_filter_empty}</p>
             )}
             {tableEl}
           </div>
