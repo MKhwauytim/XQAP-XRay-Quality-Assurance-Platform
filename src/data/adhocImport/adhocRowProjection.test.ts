@@ -204,6 +204,30 @@ describe("projectTable — field sources", () => {
       "نتيجة المستوى الأول"
     );
   });
+
+  /**
+   * The source-level case above ("mapped to `none`") invalidates the whole
+   * table at once. This is the per-ROW case: the column IS mapped and most
+   * rows fill it, but one leaves it blank. Both reach `requiredProblem`, by
+   * different routes, and only this one proves the check is evaluated per row
+   * rather than once for the table — a regression that would silently admit
+   * identity-less rows into an assignment plan.
+   */
+  it("invalidates only the row whose mapped required cell is blank, not its siblings", () => {
+    const rows = project(
+      tableOf([
+        { معرف: "A-1", النتيجة: "سليمة" },
+        { معرف: "", النتيجة: "سليمة" },
+        { معرف: "A-3", النتيجة: "سليمة" },
+      ]),
+      mappingOf()
+    );
+
+    expect(rows.map((row) => row.validation.valid)).toEqual([true, false, true]);
+    expect(rows[1].validation.valid === false && rows[1].validation.reason).toContain(
+      "معرّف الأشعة"
+    );
+  });
 });
 
 describe("projectTable — enum resolution", () => {

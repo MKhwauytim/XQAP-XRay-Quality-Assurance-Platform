@@ -83,7 +83,7 @@ function importsToOpen(
  * ever read `sample.master.json` under the selected month's own folder, so an
  * ad-hoc assignment — durably written through the exact same
  * `buildAssignEvent`/`appendDistributionEvents` path, just against a synthetic
- * `2-samples/adhoc-{importId}/` "month" (see `adhocImportAssignment.ts`) — was
+ * `2-samples/adhoc-{importId}/` "month" (see `adhocDistributionBridge.ts`) — was
  * assigned but never rendered anywhere an employee could see it.
  *
  * Cost bound: the shared `adhoc-imports.index.json` (one small file) is read

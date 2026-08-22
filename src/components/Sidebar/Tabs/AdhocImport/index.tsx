@@ -16,6 +16,7 @@ import { subscribeToDataRefresh } from "../../../../data/workspace/dataRefreshSi
 import { useLabels } from "../../../../data/labels/useLabels";
 import { formatDateTime } from "../../../../utils/formatting";
 import { logError } from "../../../../data/storage/errorLogger";
+import { recordAction } from "../../../../data/audit/actionLog";
 import { listMonthFolders } from "../../../../data/population/populationStorage";
 import type { MonthFolderInfo } from "../../../../data/population/monthFolder";
 import { ADHOC_FIELD_CATALOG } from "../../../../data/adhocImport/adhocFieldCatalog";
@@ -698,7 +699,7 @@ function ImportsList({
 export default function AdhocImportTab() {
   const L = useLabels();
   const { directoryHandle, status: workspaceStatus } = useWorkspace();
-  const { canMutate } = usePermissions();
+  const { canMutate, role } = usePermissions();
   const session = readSession();
   const operator = session?.username ?? "";
 
@@ -1152,9 +1153,19 @@ export default function AdhocImportTab() {
     setError(null);
     setNotice(null);
     setSaving(true);
+    const isFirstSave = !editor.persisted;
     try {
       const saved = await persist(editor.record);
       if (saved === null) return;
+      // Only the FIRST successful persist is "created". Every later save is a
+      // routine edit of a record that already exists, and logging each one
+      // would turn one import into a dozen indistinguishable entries.
+      if (isFirstSave) {
+        recordAction(directoryHandle, operator, role, "adhoc-import-created", {
+          target: saved.importId,
+          details: { rows: saved.rows.length, fileName: saved.fileName, kind: saved.kind },
+        });
+      }
       setEditor((previous) =>
         previous === null ? previous : { ...previous, record: saved, persisted: true }
       );
@@ -1170,7 +1181,7 @@ export default function AdhocImportTab() {
     } finally {
       setSaving(false);
     }
-  }, [editor, canIngest, persist, refreshIndex, L]);
+  }, [editor, canIngest, persist, refreshIndex, directoryHandle, operator, role, L]);
 
   const toggleExcluded = useCallback(
     async (rowKey: string) => {
@@ -1229,6 +1240,10 @@ export default function AdhocImportTab() {
         setEditor((previous) =>
           previous === null ? previous : { ...previous, record: result.record, persisted: true }
         );
+        recordAction(directoryHandle, operator, role, "adhoc-rows-assigned", {
+          target: base.importId,
+          details: { assigned: result.assignedCount, skipped: result.skippedCount, leftover: plan.leftover },
+        });
         setSelectedRowKeys(new Set());
         let message = fillTemplate(L.adhoc_import_assign_success, {
           count: String(result.assignedCount),
@@ -1256,7 +1271,7 @@ export default function AdhocImportTab() {
         setAssigning(false);
       }
     },
-    [editor, directoryHandle, canAssign, persist, operator, refreshIndex, L]
+    [editor, directoryHandle, canAssign, persist, operator, role, refreshIndex, L]
   );
 
   /**
@@ -1312,6 +1327,10 @@ export default function AdhocImportTab() {
       setEditor((previous) =>
         previous === null ? previous : { ...previous, record: result.record, persisted: true }
       );
+      recordAction(directoryHandle, operator, role, "adhoc-historical-imported", {
+        target: base.importId,
+        details: { imported: result.importedCount, skipped: result.skippedCount },
+      });
       let message = fillTemplate(L.adhoc_hist_import_success, {
         count: String(result.importedCount),
       });
@@ -1335,7 +1354,7 @@ export default function AdhocImportTab() {
     } finally {
       setImportingHistorical(false);
     }
-  }, [editor, directoryHandle, canAssign, historicalPlan, persist, operator, refreshIndex, L]);
+  }, [editor, directoryHandle, canAssign, historicalPlan, persist, operator, role, refreshIndex, L]);
 
   const applyImportStatusToggle = useCallback(async () => {
     if (editor === null || !canIngest) return;
@@ -1349,6 +1368,9 @@ export default function AdhocImportTab() {
         closedAt: nextStatus === "closed" ? new Date().toISOString() : editor.record.closedAt,
       });
       if (saved === null) return;
+      recordAction(directoryHandle, operator, role,
+        nextStatus === "closed" ? "adhoc-import-closed" : "adhoc-import-reopened",
+        { target: saved.importId, details: { rows: saved.rows.length } });
       setEditor((previous) =>
         previous === null ? previous : { ...previous, record: saved, persisted: true }
       );
@@ -1361,7 +1383,7 @@ export default function AdhocImportTab() {
         })
       );
     }
-  }, [editor, canIngest, persist, operator, refreshIndex, L]);
+  }, [editor, canIngest, persist, directoryHandle, operator, role, refreshIndex, L]);
 
   /* ── render ─────────────────────────────────────────────────────────────── */
 

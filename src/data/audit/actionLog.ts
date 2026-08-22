@@ -91,24 +91,144 @@ function entryYear(entry: WorkspaceActionEntry): number {
 }
 
 export type WorkspaceActionType =
+  // ── users & permissions ────────────────────────────────────────────────────
   | "user-deleted"
   | "user-created"
+  | "user-updated"
+  | "user-password-reset"
   | "permission-changed"
   | "feature-permission-changed"
+  // ── population, sampling & distribution ────────────────────────────────────
+  | "population-saved"
   | "sample-drawn"
   | "distribution-bulk-assigned"
+  | "distribution-row-changed"
+  // ── referral / replacement / reopen workflow ───────────────────────────────
   | "referral-requested"
   | "referral-approved"
   | "referral-denied"
+  | "replacement-requested"
+  | "replacement-applied"
   | "replacement-approved"
   | "replacement-denied"
+  | "reopen-requested"
   | "reopen-approved"
   | "reopen-denied"
   | "decision-reverted"
+  // ── answers ────────────────────────────────────────────────────────────────
+  | "answer-submitted"
+  | "answer-submitted-on-behalf"
+  | "answer-quality-note-set"
   | "answer-reopened"
+  // ── ad-hoc / exceptional-case imports ──────────────────────────────────────
+  | "adhoc-import-created"
+  | "adhoc-rows-assigned"
+  | "adhoc-historical-imported"
+  | "adhoc-import-closed"
+  | "adhoc-import-reopened"
+  // ── inspection templates ───────────────────────────────────────────────────
+  | "template-created"
+  | "template-updated"
+  | "template-deleted"
+  | "inspection-template-selected"
+  // ── notifications ──────────────────────────────────────────────────────────
+  | "notification-posted"
+  | "notification-edited"
+  | "notification-deleted"
+  | "notification-restored"
+  // ── months, backups & workspace settings ───────────────────────────────────
   | "month-closed"
   | "month-reopened"
-  | "backup-restored";
+  | "backup-created"
+  | "backup-restored"
+  | "backup-settings-changed"
+  | "label-override-changed"
+  | "sync-interval-changed"
+  | "admin-account-changed"
+  | "report-generated";
+
+/**
+ * Every `WorkspaceActionType`, in union order — the canonical enumeration.
+ *
+ * TypeScript cannot iterate a string-literal union, and more than one consumer
+ * needs the full list (the viewer's type picker, its "select all", and the
+ * round-trip test that proves each type survives a write/read cycle). Keeping
+ * it here, next to the union it mirrors, is what makes the exhaustiveness
+ * checks possible: `actionCatalog.ts` maps every entry to a label and a group
+ * and a test compares both against this array, so a type added to the union
+ * without a label or a group fails the suite instead of shipping.
+ */
+export const ALL_ACTION_TYPES: readonly WorkspaceActionType[] = [
+  "user-deleted",
+  "user-created",
+  "user-updated",
+  "user-password-reset",
+  "permission-changed",
+  "feature-permission-changed",
+  "population-saved",
+  "sample-drawn",
+  "distribution-bulk-assigned",
+  "distribution-row-changed",
+  "referral-requested",
+  "referral-approved",
+  "referral-denied",
+  "replacement-requested",
+  "replacement-applied",
+  "replacement-approved",
+  "replacement-denied",
+  "reopen-requested",
+  "reopen-approved",
+  "reopen-denied",
+  "decision-reverted",
+  "answer-submitted",
+  "answer-submitted-on-behalf",
+  "answer-quality-note-set",
+  "answer-reopened",
+  "adhoc-import-created",
+  "adhoc-rows-assigned",
+  "adhoc-historical-imported",
+  "adhoc-import-closed",
+  "adhoc-import-reopened",
+  "template-created",
+  "template-updated",
+  "template-deleted",
+  "inspection-template-selected",
+  "notification-posted",
+  "notification-edited",
+  "notification-deleted",
+  "notification-restored",
+  "month-closed",
+  "month-reopened",
+  "backup-created",
+  "backup-restored",
+  "backup-settings-changed",
+  "label-override-changed",
+  "sync-interval-changed",
+  "admin-account-changed",
+  "report-generated",
+];
+
+/**
+ * Types whose entry count scales with routine reviewer throughput rather than
+ * with governance events, and which the Actions viewer therefore leaves
+ * UNCHECKED on first render (the reader switches them on deliberately).
+ *
+ * `answer-submitted` is the big one: roughly 6,500 entries a month on a real
+ * workspace. That is safe to record — the live log is capped PER ACTOR at
+ * `DEFAULT_MAX_ACTION_ENTRIES` and overflows into per-actor per-year archives
+ * before it is trimmed (see `archiveOverflow`), so no single file grows without
+ * bound and no employee's volume evicts anyone else's history — but it would
+ * bury every governance action in the default view, which is what the filter
+ * default exists to prevent.
+ *
+ * `answer-submitted-on-behalf` is deliberately NOT here. It is rare (a
+ * supervisor authoring someone else's assignment) and it is precisely the
+ * accountability record the log exists for, so it stays visible by default.
+ */
+export const HIGH_VOLUME_ACTION_TYPES: readonly WorkspaceActionType[] = [
+  "answer-submitted",
+  "label-override-changed",
+];
 
 export type WorkspaceActionEntry = {
   id: string;
@@ -313,9 +433,16 @@ export async function appendWorkspaceAction(
   if (!directoryHandle) return;
 
   const actor = entry.actor;
-  const fileName = actionsFileName(actor);
 
   try {
+    // Inside the try, not above it. `actionsFileName` throws on a non-string
+    // actor (`safeWorkspaceFilePart` calls `.trim()`), and computing it outside
+    // meant such a call rejected the returned promise — breaking this
+    // function's "never throws to callers" contract at exactly the callers who
+    // rely on it hardest, the `void`-ed fire-and-forget ones, where it surfaces
+    // as an unhandled rejection instead of an error-ring entry. Now every
+    // failure mode lands in the same catch.
+    const fileName = actionsFileName(actor);
     // NB: `:rmw` suffix keeps this outer read-modify-write lock distinct from
     // safeWriteJson's internal `${dir.name}/${fileName}` lock (v41.36 —
     // withResourceLock is not reentrant, a colliding key self-deadlocks).
@@ -378,6 +505,31 @@ export async function appendWorkspaceAction(
   } catch (error) {
     logError("audit:append", error);
   }
+}
+
+/**
+ * Fire-and-forget shorthand over `appendWorkspaceAction`.
+ *
+ * Every call site is the success branch of a user operation that has already
+ * committed to disk, and none of them may fail because the audit write did —
+ * `appendWorkspaceAction` already resolves rather than throws, so the only
+ * thing left to get wrong is the `void`. Wrapping it here means a call site is
+ * one statement instead of a seven-line object literal, which matters: the two
+ * busiest views in this app (`XrayReferrals`, `PopulationTab`) sit against the
+ * repo's `max-lines-per-function` budget, and an audit call is not a good
+ * reason to spend that budget.
+ *
+ * Call it AFTER the write succeeded, never before — an entry written ahead of
+ * the operation claims something that may not have happened.
+ */
+export function recordAction(
+  directoryHandle: DirectoryHandleLike | null,
+  actor: string,
+  actorRole: string,
+  action: WorkspaceActionType,
+  extra?: Pick<WorkspaceActionInput, "monthFolderName" | "target" | "details">
+): void {
+  void appendWorkspaceAction(directoryHandle, { actor, actorRole, action, ...extra });
 }
 
 /**

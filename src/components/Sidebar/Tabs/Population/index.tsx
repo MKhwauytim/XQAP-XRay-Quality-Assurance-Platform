@@ -66,7 +66,7 @@ import { getLabels } from "../../../../data/labels/labelsStore";
 import { MonthClosedError, reopenMonth } from "../../../../data/population/monthLock";
 import type { MonthManifestData } from "../../../../data/population/monthTypes";
 import type { PopulationAggregateLoadResult } from "../../../../data/population/populationAggregate";
-import { appendWorkspaceAction } from "../../../../data/audit/actionLog";
+import { appendWorkspaceAction, recordAction } from "../../../../data/audit/actionLog";
 import { touchVisitedTabs } from "../../../../app/visitedTabs";
 
 import "./Population.css";
@@ -1056,6 +1056,7 @@ export default function PopulationTab() {
       });
 
       if (result.ok) {
+        recordAction(directoryHandle, username, sessionRef.current?.role ?? "unknown", "population-saved", { monthFolderName: result.monthFolderName, details: { rows: processingResult.preparedRows.length, removed: processingResult.removedRows.length, duplicates: processingResult.duplicateRows.length, overwrote: confirmedOverwrite } });
         setSaveToDiskMessage({
           type: "ok",
           text: `تم حفظ شهر ${result.monthFolderName} على القرص بنجاح.`

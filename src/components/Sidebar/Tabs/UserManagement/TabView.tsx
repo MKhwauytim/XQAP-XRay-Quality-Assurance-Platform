@@ -37,7 +37,9 @@ import { checkUsernameRenameBlocked } from "../../../../auth/usernameRenameGuard
 import {
   appendWorkspaceAction,
   readWorkspaceActions,
+  recordAction,
   type WorkspaceActionEntry,
+  type WorkspaceActionType,
 } from "../../../../data/audit/actionLog";
 import { getLabels } from "../../../../data/labels/labelsStore";
 import { syncUserManagementToDisk } from "../../../../data/workspace/userSync";
@@ -321,6 +323,14 @@ export default function UserManagementTab() {
         hasCertScanLicense: form.hasCertScanLicense,
       });
       persistState({ ...state, users: [...state.users, newUser] });
+      // Matches the existing `user-deleted` call one screen down: logged right
+      // after the state commit, which is the same point that write is durable
+      // from this layer's perspective (persistState's disk sync is itself
+      // fire-and-forget). Never the password — only that one was set.
+      recordAction(directoryHandle, session?.username ?? "unknown", session?.role ?? "unknown", "user-created", {
+        target: username,
+        details: { role: form.role, displayName, certScanLicense: form.hasCertScanLicense },
+      });
       setForm(INITIAL_USER_FORM);
       setShowAddForm(false);
       showMsg("تمت إضافة المستخدم.", "ok");
@@ -331,16 +341,33 @@ export default function UserManagementTab() {
     }
   }
 
+  /**
+   * `audit` exists because every row-level edit funnels through here — role,
+   * active flag, CertScan licence, display name, username, and the password
+   * reset — and the log would otherwise record all of them as one
+   * indistinguishable "user-updated". A password reset in particular is a
+   * different question from a display-name fix and gets its own type.
+   *
+   * `target` is read from state BEFORE the update so a rename is recorded
+   * against the name it is moving away from; the new one goes in `details`.
+   */
   function updateUser(
     userId: string,
-    updater: (u: ManagedLoginUser) => ManagedLoginUser
+    updater: (u: ManagedLoginUser) => ManagedLoginUser,
+    audit: { action: WorkspaceActionType; details?: Record<string, string | number | boolean | null> } =
+      { action: "user-updated" }
   ): void {
     if (!canEdit) { showMsg("صلاحيتك للعرض فقط.", "bad"); return; }
+    const previous = state.users.find((u) => u.id === userId);
     persistState({
       ...state,
       users: state.users.map((u) =>
         u.id === userId ? { ...updater(u), updatedAt: new Date().toISOString() } : u
       ),
+    });
+    recordAction(directoryHandle, session?.username ?? "unknown", session?.role ?? "unknown", audit.action, {
+      target: previous?.username ?? userId,
+      details: audit.details,
     });
     showMsg("تم تحديث المستخدم.", "ok");
   }
@@ -435,7 +462,11 @@ export default function UserManagementTab() {
       }
     }
 
-    updateUser(user.id, (current) => ({ ...current, username, displayName }));
+    updateUser(
+      user.id,
+      (current) => ({ ...current, username, displayName }),
+      { action: "user-updated", details: { newUsername: username, newDisplayName: displayName } }
+    );
     resetIdentityDraft(user.id);
   }
 
@@ -446,7 +477,7 @@ export default function UserManagementTab() {
     setIsSaving(true);
     try {
       const passwordHash = await createPasswordHash(next);
-      updateUser(userId, (u) => ({ ...u, passwordHash }));
+      updateUser(userId, (u) => ({ ...u, passwordHash }), { action: "user-password-reset" });
       setResetPasswords((r) => ({ ...r, [userId]: "" }));
       showMsg("تم تغيير كلمة المرور.", "ok");
     } catch {
@@ -522,6 +553,10 @@ export default function UserManagementTab() {
       : [...state.permissions, { role, tabId, access }];
 
     persistState({ ...state, permissions: next });
+    recordAction(directoryHandle, session?.username ?? "unknown", session?.role ?? "unknown", "permission-changed", {
+      target: tabId,
+      details: { role, access },
+    });
   }
 
   function updateFeaturePermission(
@@ -541,6 +576,10 @@ export default function UserManagementTab() {
       : [...state.featurePermissions, { role, featureId, enabled }];
 
     persistState({ ...state, featurePermissions: next });
+    recordAction(directoryHandle, session?.username ?? "unknown", session?.role ?? "unknown", "feature-permission-changed", {
+      target: featureId,
+      details: { role, enabled },
+    });
   }
 
   function toggleParent(tabId: string) {

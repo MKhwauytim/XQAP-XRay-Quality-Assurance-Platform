@@ -33,6 +33,7 @@ import {
   type DataRefreshFamily,
 } from "../../../../data/workspace/dataRefreshSignal";
 import { readSession } from "../../../../auth/authSession";
+import { recordAction } from "../../../../data/audit/actionLog";
 import { loadDeckStyleChoices } from "../../../../data/reporting/executive/deck2/styleChoices";
 import DeckDesignCustomizer from "./DeckDesignCustomizer";
 import type { ExportManifest } from "../../../../data/powerbiExport/exportTypes";
@@ -126,12 +127,31 @@ function collectRevisions(pairs: Array<[string, number | null]>): SourceRevision
 // Inner component that holds all the existing Reports state and logic.
 function ReportsContent() {
   const { directoryHandle } = useWorkspace();
-  const { can, canMutate, getMutationCapability, canAccessTab } = usePermissions();
+  const { can, canMutate, getMutationCapability, canAccessTab, role, username } = usePermissions();
   const labels = useLabels();
 
   const { selection: globalMonth } = useGlobalMonth();
   // Pending months have no folder on disk yet — treat them as "no data" (empty states).
   const selectedMonth = globalMonth.kind === "existing" ? globalMonth.folderName : "";
+  /**
+   * Report generation IS logged, and the call is deliberate rather than
+   * incidental: an export is a READ, but it is a read that leaves the
+   * workspace. `buildExecutiveXlsx` and the Power BI export both write files
+   * the user can forward anywhere, carrying population and per-employee answer
+   * data with them, so "who took a copy of month X's data, and when" is exactly
+   * the kind of question this log exists to answer — and it is cheap, a handful
+   * of entries a month rather than one per sample.
+   *
+   * One type with a `kind` detail rather than five types: the reader filters on
+   * "an export happened", and the flavour is a detail of that, not a different
+   * kind of event.
+   */
+  function logExport(kind: string): void {
+    recordAction(directoryHandle, username, role, "report-generated", {
+      monthFolderName: selectedMonth,
+      details: { kind },
+    });
+  }
   // B5: export/generate controls must be permission-gated — previously ANY authenticated
   // user who could reach this tab could trigger real exports (including the PowerBI
   // disk write in handlePbiExport) with no check against the "export-reports" feature.
@@ -460,15 +480,18 @@ function ReportsContent() {
       if (kind === "document") {
         const { openExecutiveReport } = await import("../../../../data/reporting/executiveReport");
         await openExecutiveReport(execInput, names);
+        logExport("executive-document");
         showToast("ok", "تم فتح التقرير التفصيلي.");
       } else if (kind === "deck") {
         const saved = directoryHandle ? await loadDeckStyleChoices(directoryHandle) : null;
         const { openExecutiveDeckV2 } = await import("../../../../data/reporting/executive/deck2");
         await openExecutiveDeckV2(execInput, names, saved?.choices);
+        logExport("executive-deck");
         showToast("ok", "تم فتح العرض التنفيذي.");
       } else {
         const { buildExecutiveXlsx } = await import("../../../../data/reporting/executiveReport");
         await buildExecutiveXlsx(execInput, names);
+        logExport("executive-xlsx");
         showToast("ok", "تم تنزيل بيانات التقرير (Excel).");
       }
     } catch {
@@ -509,6 +532,7 @@ function ReportsContent() {
     try {
       const { runPowerBiExport } = await import("../../../../data/powerbiExport/exportManager");
       const manifest = await runPowerBiExport(directoryHandle, selectedMonth);
+      logExport("power-bi");
       setPbiResult(manifest);
     } catch (err) {
       setPbiError(err instanceof Error ? err.message : "حدث خطأ أثناء التصدير");
@@ -641,6 +665,11 @@ function ReportsContent() {
           showToast("ok", labels.mgmt_card_toast_opened);
         }
       }
+      // One call for all twelve report/format combinations, at the single point
+      // every branch converges on having succeeded. Every "no data for this
+      // month" branch above `return`s before reaching it, so a generate that
+      // produced nothing is not logged as if it had.
+      logExport(type);
     } catch {
       showToast("error", "حدث خطأ أثناء توليد التقرير.");
     } finally {

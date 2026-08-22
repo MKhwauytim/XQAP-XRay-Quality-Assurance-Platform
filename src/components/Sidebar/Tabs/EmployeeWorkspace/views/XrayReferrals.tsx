@@ -36,7 +36,7 @@ import {
 } from "../../../../../data/distribution/replacement";
 import { submitReassignmentRequests } from "../../../../../data/referral/submitReassignment";
 import { isReassignEligible } from "../../../../../data/referral/planReassignment";
-import { appendWorkspaceAction } from "../../../../../data/audit/actionLog";
+import { appendWorkspaceAction, recordAction } from "../../../../../data/audit/actionLog";
 import { getReplacementCandidatesIndexed } from "../../../../../data/distribution/replacementCandidateLookup";
 import {
   findPopulationRowById,
@@ -412,6 +412,7 @@ function createSaveAnswerHandler(deps: {
   directoryHandle: DirectoryHandleLike;
   folderForRow: (xrayImageId: string) => string;
   username: string;
+  role: string;
   activeTpl: TemplateSchema | null;
   selMonth: string;
   canSubmitAnswers: boolean;
@@ -420,7 +421,7 @@ function createSaveAnswerHandler(deps: {
   setStatusMsg: (msg: StatusMsg) => void;
 }) {
   const {
-    directoryHandle, folderForRow, username, activeTpl, selMonth,
+    directoryHandle, folderForRow, username, role, activeTpl, selMonth,
     canSubmitAnswers, canAnswerOnBehalf, setAnswers, setStatusMsg,
   } = deps;
   return async function handleSave(
@@ -456,6 +457,27 @@ function createSaveAnswerHandler(deps: {
         ? await upsertItemAnswer(directoryHandle, folder, forUser, item)
         : await upsertItemAnswerOnBehalf(directoryHandle, folder, forUser, item, username);
       if (result.ok) {
+        // AFTER the write, inside its ok branch. An on-behalf submission is a
+        // distinct action type rather than a flag on the ordinary one so it can
+        // be filtered for on its own, and it names BOTH parties: the actor is
+        // the real author, `target` the sample, and `details.assignee` the
+        // person whose assignment it was. Neither is derivable from the other
+        // once `answeredBy` has been pinned to the assignee (answerTypes.ts).
+        //
+        // `assignee` is omitted on the SELF path rather than repeated: there it
+        // equals `actor` by construction, and this is the highest-volume entry
+        // in the log (~6,500/month) — every redundant field is paid for on
+        // every append, in a file that is read and rewritten whole.
+        const onBehalf = forUser !== username;
+        recordAction(directoryHandle, username, role,
+          onBehalf ? "answer-submitted-on-behalf" : "answer-submitted",
+          {
+            monthFolderName: folder,
+            target: xrayImageId,
+            details: onBehalf
+              ? { assignee: forUser, templateId: activeTpl.templateId }
+              : { templateId: activeTpl.templateId },
+          });
         setAnswers((prev) => [
           ...prev.filter((a) => !(a.xrayImageId === xrayImageId && a.answeredBy === forUser)),
           item,
@@ -549,6 +571,16 @@ function createReopenHandlers(deps: {
         instant: canReopenInstant,
       });
       if (result.ok) {
+        // The instant branch is already logged as `answer-reopened` by
+        // reopenAnswer.ts — recording a second entry for it would double-count
+        // the same event. Only the routed-for-approval branch is new history.
+        if (result.mode !== "instant") {
+          recordAction(directoryHandle, username, role, "reopen-requested", {
+            monthFolderName: folderForRow(entry.xrayImageId),
+            target: entry.xrayImageId,
+            details: { employee: entry.assignedTo, reason },
+          });
+        }
         selectEntry(null);
         setStatusMsg({
           type: "ok",
@@ -778,6 +810,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       updatedAt: new Date().toISOString(),
       updatedBy: username,
     });
+    // `shouldSave` is false on the mount-time restore, which writes nothing and
+    // is therefore not an action; only a deliberate, persisted change is logged.
+    if (result.ok) recordAction(directoryHandle, username, role, "inspection-template-selected", { target: id });
     setStatusMsg(
       result.ok
         ? { type: "ok", text: "تم تعيين نموذج الفحص." }
@@ -1355,7 +1390,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   // Module-level (createSaveAnswerHandler, above) so this component body stays
   // inside the repo's `max-lines-per-function` budget.
   const handleSave = createSaveAnswerHandler({
-    directoryHandle, folderForRow, username, activeTpl, selMonth,
+    directoryHandle, folderForRow, username, role, activeTpl, selMonth,
     canSubmitAnswers, canAnswerOnBehalf, setAnswers, setStatusMsg,
   });
 
@@ -1556,6 +1591,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           return;
         }
         if (result.ok) setSampleMaster(result.updatedSample);
+        recordAction(directoryHandle, username, role, "replacement-applied", { monthFolderName: rowFolder, target: entry.xrayImageId, details: { replacement: replacement.xrayImageId, employee: entry.assignedTo, reason } });
         setReplacementDialog(null);
         setStatusMsg({ type: "ok", text: "تم استبدال العينة وإسناد البديل." });
         // Silent: this refresh follows a successful action already reflected in
@@ -1592,6 +1628,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           setStatusMsg({ type: "error", text: userFacingErrorText(result.error, "xrayReferrals:result") });
           return;
         }
+        recordAction(directoryHandle, username, role, "replacement-requested", { monthFolderName: request.monthFolderName, target: request.requestId, details: { original: entry.xrayImageId, replacement: replacement.xrayImageId, employee: entry.assignedTo } });
         setReplacementDialog(null);
         setStatusMsg({ type: "ok", text: "تم إرسال طلب الاستبدال — بانتظار موافقة المشرف." });
         // Silent for the same reason as the recommended-replacement branch above —

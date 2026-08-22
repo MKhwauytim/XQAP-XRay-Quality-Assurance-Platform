@@ -30,7 +30,7 @@ import { writeEmployeeXlsx } from "../../../../data/answers/employeeXlsx";
 import { getLabels } from "../../../../data/labels/labelsStore";
 import { logError, logRejection } from "../../../../data/storage/errorLogger";
 import { userFacingErrorText } from "../../../../data/storage/writeErrorText";
-import { appendWorkspaceAction } from "../../../../data/audit/actionLog";
+import { appendWorkspaceAction, recordAction } from "../../../../data/audit/actionLog";
 import { buildAssignedEntryMap, distributionErrorText } from "./populationWorkflowHelpers";
 import { findAssignableEmployee } from "../../../../data/distribution/bulkAssignment";
 import { getManagedLoginUsers } from "../../../../auth/userManagement";
@@ -275,6 +275,26 @@ export function useDistributionActions(params: {
     setDistributionMessage({ type: "error", text });
   }
 
+  /**
+   * The per-ROW distribution edits (assign / reassign / mark-complete / request
+   * replacement). One action type carrying the change kind rather than four
+   * types: a reader filters on "someone hand-edited the distribution", and
+   * which of the four gestures it was is a property of that event, not a
+   * different kind of event. Bulk assignment keeps its own type because it is a
+   * different scale of act — one entry standing for thousands of rows.
+   */
+  function logRowChange(
+    monthFolderName: string,
+    xrayImageId: string,
+    details: Record<string, string | number | boolean | null>
+  ): void {
+    recordAction(directoryHandle, currentUsername, currentRole, "distribution-row-changed", {
+      monthFolderName,
+      target: xrayImageId,
+      details,
+    });
+  }
+
   async function handleAssign(
     xrayImageId: string,
     assignedTo: string
@@ -322,6 +342,7 @@ export function useDistributionActions(params: {
       if (result.ok) {
         await updateMonthStatus(directoryHandle, monthFolderName, "distributed");
         await refreshDistribution(monthFolderName, result.log);
+        logRowChange(monthFolderName, xrayImageId, { change: "assigned", to: assignedTo });
         setDistributionMessage({ type: "ok", text: "تم التعيين." });
       } else {
         setDistributionMessage({ type: "error", text: userFacingErrorText(result.error, "distribution:action-result") });
@@ -396,6 +417,7 @@ export function useDistributionActions(params: {
       );
       if (result.ok) {
         await refreshDistribution(monthFolderName, result.log);
+        logRowChange(monthFolderName, xrayImageId, { change: "reassigned", from: fresh.assignedTo, to: reassignedTo });
         setDistributionMessage({ type: "ok", text: "تم إعادة التعيين." });
       } else {
         setDistributionMessage({ type: "error", text: userFacingErrorText(result.error, "distribution:action-result") });
@@ -440,6 +462,7 @@ export function useDistributionActions(params: {
       );
       if (result.ok) {
         await refreshDistribution(monthFolderName, result.log);
+        logRowChange(monthFolderName, xrayImageId, { change: "completed", from: fresh.assignedTo });
         setDistributionMessage({ type: "ok", text: "تم تعليم الصف كمكتمل." });
       } else {
         setDistributionMessage({ type: "error", text: userFacingErrorText(result.error, "distribution:action-result") });
@@ -486,6 +509,7 @@ export function useDistributionActions(params: {
       );
       if (result.ok) {
         await refreshDistribution(monthFolderName, result.log);
+        logRowChange(monthFolderName, xrayImageId, { change: "replacement-requested", from: fresh.assignedTo });
         setDistributionMessage({ type: "ok", text: "تم تسجيل طلب الاستبدال." });
       } else {
         setDistributionMessage({ type: "error", text: userFacingErrorText(result.error, "distribution:action-result") });

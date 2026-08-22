@@ -75,6 +75,7 @@ vi.mock("../../../../data/population/monthLock", () => ({
 
 vi.mock("../../../../data/audit/actionLog", () => ({
   appendWorkspaceAction: vi.fn(),
+  recordAction: vi.fn(),
 }));
 
 vi.mock("../../../../data/integrity/orphanScanLoader", () => ({

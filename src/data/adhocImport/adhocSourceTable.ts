@@ -20,9 +20,10 @@ import { PASTE_SHEET_NAME } from "./adhocImportModel";
 import type { SourceRow, SourceTable } from "./adhocImportModel";
 
 /**
- * Same options as `adhocImportMapping.ts` uses. `cellDates: false` matters:
- * the field catalog treats dates as opaque display strings, so letting SheetJS
- * hand back `Date` objects here would reformat what the operator's file said.
+ * This module is the ad-hoc feature's only workbook reader. `cellDates: false`
+ * matters: the field catalog treats dates as opaque display strings, so letting
+ * SheetJS hand back `Date` objects here would reformat what the operator's file
+ * said.
  */
 const WORKBOOK_READ_OPTIONS = {
   type: "array",

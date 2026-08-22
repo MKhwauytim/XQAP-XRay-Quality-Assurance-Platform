@@ -5,6 +5,7 @@ import { readRealSession } from "../../../../auth/authSession";
 import { usePermissions } from "../../../../auth/usePermissions";
 import { useLabels } from "../../../../data/labels/useLabels";
 import { logError } from "../../../../data/storage/errorLogger";
+import { recordAction } from "../../../../data/audit/actionLog";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import {
   MAX_SYNC_INTERVAL_MS,
@@ -134,6 +135,8 @@ export function SyncIntervalSection() {
       // The draft is now what is on disk, so let it follow the effective value
       // again (e.g. if another admin changes it later).
       setDraftSeconds(null);
+      recordAction(directoryHandle, realSession?.username ?? "admin", realSession?.role ?? "unknown",
+        "sync-interval-changed", { details: { seconds } });
       setFeedback({ type: "ok", text: labels.settings_sync_saved });
     } catch (error) {
       logError("settings.syncInterval.save", error);

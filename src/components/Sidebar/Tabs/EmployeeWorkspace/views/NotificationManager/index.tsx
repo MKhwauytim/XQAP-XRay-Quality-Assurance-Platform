@@ -11,6 +11,7 @@ import { getManagedLoginUsers, subscribeToUserManagementChanges } from "../../..
 import { getLabels } from "../../../../../../data/labels/labelsStore";
 import { useLabels } from "../../../../../../data/labels/useLabels";
 import { logError } from "../../../../../../data/storage/errorLogger";
+import { recordAction } from "../../../../../../data/audit/actionLog";
 import {
   deleteNotification,
   loadNotifications,
@@ -58,7 +59,7 @@ function computeAudienceUsers(): AudienceUser[] {
 
 export default function NotificationManager({ directoryHandle }: Props) {
   const L = useLabels();
-  const { can, canMutate, username } = usePermissions();
+  const { can, canMutate, role, username } = usePermissions();
   const canSeePost = can("post-notification");
   const canPost = canMutate("post-notification");
 
@@ -206,6 +207,10 @@ export default function NotificationManager({ directoryHandle }: Props) {
         return;
       }
       const wasEditing = editingId !== null;
+      recordAction(directoryHandle, username, role, wasEditing ? "notification-edited" : "notification-posted", {
+        target: editingId,
+        details: { target, audience: picked.length, chars: text.length },
+      });
       // Only clear the composer if it still holds exactly the text that was
       // submitted — guards against clobbering a draft the user started typing
       // the instant the write settled.
@@ -222,7 +227,7 @@ export default function NotificationManager({ directoryHandle }: Props) {
       setStatus({ type: "ok", text: wasEditing ? getLabels().notif_edit_success : getLabels().notif_mgr_post_success });
       await reload({ silent: true });
     });
-  }, [canPost, message, editingId, directoryHandle, target, picked, username, reload]);
+  }, [canPost, message, editingId, directoryHandle, target, picked, role, username, reload]);
 
   function startEdit(notification: AppNotification): void {
     setEditingId(notification.id);
@@ -252,6 +257,13 @@ export default function NotificationManager({ directoryHandle }: Props) {
         target: "custom",
         audience: pendingUsers,
       });
+      // A reminder IS a post (see the comment above) and is logged as one, with
+      // `reminderFor` naming the original so the pair reads as a thread.
+      if (result.ok) {
+        recordAction(directoryHandle, username, role, "notification-posted", {
+          details: { reminderFor: notification.id, recipients: pendingUsers.length },
+        });
+      }
       setStatus(
         result.ok
           ? { type: "ok", text: L.notif_remind_success.replace("{count}", String(pendingUsers.length)) }
@@ -269,6 +281,7 @@ export default function NotificationManager({ directoryHandle }: Props) {
         setStatus({ type: "error", text: result.error });
         return;
       }
+      recordAction(directoryHandle, username, role, "notification-deleted", { target: notification.id });
       if (editingId === notification.id) resetComposer();
       // Keep the deleted record in hand so the toast can put it back under its
       // original id — acknowledgements live in per-employee ack files keyed by
@@ -284,6 +297,7 @@ export default function NotificationManager({ directoryHandle }: Props) {
     setToast(null);
     await withBusy(async () => {
       const result = await restoreNotification(directoryHandle, restore);
+      if (result.ok) recordAction(directoryHandle, username, role, "notification-restored", { target: restore.id });
       setStatus(
         result.ok
           ? { type: "ok", text: L.notif_delete_undone }

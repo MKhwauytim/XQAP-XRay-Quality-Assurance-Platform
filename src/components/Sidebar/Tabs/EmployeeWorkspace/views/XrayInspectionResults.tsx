@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarOff, StickyNote } from "lucide-react";
 import { readSession } from "../../../../../auth/authSession";
 import { usePermissions } from "../../../../../auth/usePermissions";
+import { recordAction } from "../../../../../data/audit/actionLog";
 import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
 import { logError, logRejection } from "../../../../../data/storage/errorLogger";
 import { EmptyState, ErrorState, LoadingState } from "../../../../../components/StateViews/StateViews";
@@ -416,6 +417,14 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
         return;
       }
       const trimmed = note.trim();
+      // Logged after the write, and only when it actually changed something:
+      // clearing a note is still an oversight action, so `cleared` is recorded
+      // rather than the note text being dropped from the trail.
+      recordAction(directoryHandle, username, session?.role ?? "unknown", "answer-quality-note-set", {
+        monthFolderName: monthFolderForEntry(row.entry, selectedMonth),
+        target: row.entry.xrayImageId,
+        details: { employee: row.entry.assignedTo, cleared: trimmed.length === 0 },
+      });
       setRows((prev) =>
         prev.map((r) =>
           r.entry.xrayImageId === row.entry.xrayImageId && r.entry.assignedTo === row.entry.assignedTo && r.answer

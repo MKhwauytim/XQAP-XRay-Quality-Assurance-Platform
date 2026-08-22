@@ -4,8 +4,10 @@ import { createMemoryDirectory } from "../storage/memoryDirectory";
 import { createWorkspaceStructure } from "../storage/fileSystemAccess";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { loadSampleMaster, saveSampleMaster } from "../sampling/sampleStorage";
-import { readEnvelopeRevision } from "../storage/safeWrite";
-import { getSampleMainDir } from "../workspace/workspacePaths";
+import { readEnvelopeRevision, safeWriteJson } from "../storage/safeWrite";
+import { getPopulationMonthDir, getSampleMainDir } from "../workspace/workspacePaths";
+import { closeMonth, MonthClosedError } from "../population/monthLock";
+import type { MonthManifestData } from "../population/monthTypes";
 import { loadOrDeriveDistributionCurrent } from "../distribution/distributionStorage";
 import { loadEmployeeSampleMirror } from "../samples/sampleMirrorStorage";
 import {
@@ -651,5 +653,167 @@ describe("assignAdhocPlan", () => {
     const saved = await loadAdhocRecord(root, "adh-stale");
     expect(saved?.rows.find((r) => r.rowKey === "s1:2")?.excludedByAdmin).toBe(true);
     expect(saved?.rows.find((r) => r.rowKey === "s1:2")?.assignments).toEqual([]);
+  });
+});
+
+/**
+ * Guards that used to be proven only through the v1 adapter's own test file
+ * (`adhocImportAssignment.test.ts`). Each one exercises a branch the describes
+ * above genuinely leave open, so they belong to the bridge regardless of what
+ * happens to the v1 entry point:
+ *
+ *  - the month-lock gate — the bridge's own docblock cites a test as proof that
+ *    `ensureMonthWritable` is INVOKED (and merely fails open for a synthetic
+ *    month with no manifest) rather than bypassed. Nothing here proved that.
+ *  - `sample.master.json` staying out of `1-population/`.
+ *  - `findAssignableEmployee`'s ROLE branch. The describes above cover its other
+ *    two rejections (absent user, deactivated user); a present, active account
+ *    whose role simply cannot work a review is a third branch.
+ *  - the stale-tab close, and another machine's assignment bookkeeping surviving
+ *    the whole-document save.
+ */
+describe("assignAdhocPlan — guards carried over from the v1 adapter", () => {
+  it("respects the month lock: the append rejects when the synthetic month's manifest is closed", async () => {
+    // Ad-hoc months normally have no population manifest at all, so
+    // `ensureMonthWritable` fails OPEN for them by design. This simulates the
+    // rare case where a manifest does exist for the synthetic folder name, which
+    // is the only way to observe that the gate runs at all.
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    const rows = [row("s1:2", "XR-1")];
+    const rec = await saveAdhocRecord(root, record("adh-locked", rows));
+    const plan = explicitPlan("adh-locked", rows, "jalgahamdi");
+
+    const monthFolderName = adhocMonthFolder("adh-locked");
+    const monthDir = await getPopulationMonthDir(root, monthFolderName, true);
+    const manifest: MonthManifestData = {
+      monthFolderName,
+      month: 0,
+      year: 0,
+      processedAt: new Date().toISOString(),
+      processedBy: "admin",
+      riskFileName: null,
+      biFileName: null,
+      certScanUsed: false,
+      templateVersion: null,
+      rngSeed: null,
+      totalRawRows: 0,
+      totalProcessedRows: 1,
+      status: "distributed",
+    };
+    await safeWriteJson(monthDir, "month.manifest.json", manifest);
+    await closeMonth(root, monthFolderName, "admin");
+
+    await expect(assignAdhocPlan(root, rec, plan, "admin")).rejects.toThrow(MonthClosedError);
+  });
+
+  it("writes the sample master under 2-samples/adhoc-{importId}/, never under 1-population/", async () => {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    const rec = record("adh-not-pop", [row("s1:2", "XR-1"), row("s1:3", "XR-2")]);
+
+    await ensureAdhocSampleMaster(root, rec);
+
+    const monthFolderName = adhocMonthFolder("adh-not-pop");
+    const master = await loadSampleMaster(root, monthFolderName);
+    expect(master?.rows.map((r) => r.xrayImageId).sort()).toEqual([
+      "ADHOC-adh-not-pop-XR-1",
+      "ADHOC-adh-not-pop-XR-2",
+    ]);
+
+    // An ad-hoc import must never manufacture a population month folder: a real
+    // month is a genuine audited population, and a synthetic one appearing there
+    // would show up in month listings, reports and the archive as if it were.
+    const populationRoot = await root
+      .getDirectoryHandle("1-population", { create: false })
+      .catch(() => null);
+    if (populationRoot) {
+      await expect(
+        populationRoot.getDirectoryHandle(monthFolderName, { create: false })
+      ).rejects.toThrow();
+    }
+  });
+
+  it("refuses a manager username — present and active in the roster, but never assignable a review", async () => {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    const rows = [row("s1:2", "XR-1")];
+    const rec = await saveAdhocRecord(root, record("adh-role", rows));
+    // "amonem" is a default MANAGER account. Accepting it would strand the
+    // review with nobody able to open it, which is why the role is checked and
+    // not just the account's existence.
+    const plan = explicitPlan("adh-role", rows, "amonem");
+
+    const result = await assignAdhocPlan(root, rec, plan, "admin");
+    expect(result.ok).toBe(false);
+    // Pinned to the assignability message specifically: a plan that was simply
+    // empty, or rows that were ineligible, would also fail here and would make
+    // this test pass while proving nothing about the role check.
+    if (result.ok) return;
+    expect(result.error).toMatch(/غير موجود|غير نشط/);
+
+    const monthFolderName = adhocMonthFolder("adh-role");
+    const master = await loadSampleMaster(root, monthFolderName);
+    const current = await loadOrDeriveDistributionCurrent(root, monthFolderName, master?.rows ?? []);
+    expect(current?.entries ?? []).toHaveLength(0);
+  });
+
+  it("refuses to assign into an import another machine closed, without reverting the close", async () => {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    const rows = [row("s1:2", "XR-1")];
+    // This tab loaded the import while it was still open...
+    const stale = await saveAdhocRecord(root, record("adh-stale-closed", rows));
+    const plan = explicitPlan("adh-stale-closed", rows, "jalgahamdi");
+    // ...and another machine closed it afterwards.
+    await saveAdhocRecord(root, { ...stale, status: "closed" });
+
+    const result = await assignAdhocPlan(root, stale, plan, "admin");
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain("مُغلق");
+    // The stale copy said "open"; saving from it would have reopened the import.
+    expect((await loadAdhocRecord(root, "adh-stale-closed"))?.status).toBe("closed");
+  });
+
+  it("preserves another machine's assignment bookkeeping across the whole-document save", async () => {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    // This tab's copy: two free rows.
+    const rows = [row("s1:2", "XR-1"), row("s1:3", "XR-2")];
+    const stale = await saveAdhocRecord(root, record("adh-keep-bk", rows));
+    const plan = explicitPlan("adh-keep-bk", rows, "jalgahamdi");
+
+    // Meanwhile on disk, another machine assigned XR-2 to someone else.
+    const otherAssignment = {
+      username: "hihaloraini",
+      replicaIndex: 0,
+      xrayImageId: "ADHOC-adh-keep-bk-XR-2",
+      assignedAt: "2026-08-17T06:00:00.000Z",
+    };
+    await saveAdhocRecord(root, {
+      ...stale,
+      rows: stale.rows.map((r) =>
+        r.rowKey === "s1:3" ? { ...r, assignments: [otherAssignment] } : r
+      ),
+    });
+
+    const result = await assignAdhocPlan(root, stale, plan, "admin");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Only the genuinely free row was taken.
+    expect(result.assignedCount).toBe(1);
+
+    const saved = await loadAdhocRecord(root, "adh-keep-bk");
+    const byKey = new Map((saved?.rows ?? []).map((r) => [r.rowKey, r]));
+    expect(byKey.get("s1:2")?.assignments.map((a) => a.username)).toEqual(["jalgahamdi"]);
+    // Not overwritten, not duplicated, and its timestamp is the other machine's.
+    expect(byKey.get("s1:3")?.assignments).toEqual([otherAssignment]);
+
+    // The durable event log agrees: exactly one new assign event, for XR-1.
+    const monthFolderName = adhocMonthFolder("adh-keep-bk");
+    const master = await loadSampleMaster(root, monthFolderName);
+    const current = await loadOrDeriveDistributionCurrent(root, monthFolderName, master?.rows ?? []);
+    expect(current?.entries.map((e) => e.xrayImageId)).toEqual(["ADHOC-adh-keep-bk-XR-1"]);
   });
 });

@@ -32,6 +32,8 @@ import {
   type LabelKey,
 } from "../../../../data/labels/labelsStore";
 import { useLabels } from "../../../../data/labels/useLabels";
+import { readSession } from "../../../../auth/authSession";
+import { recordAction } from "../../../../data/audit/actionLog";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import {
   exportLabelsSnapshot,
@@ -236,6 +238,16 @@ export const LABEL_GROUPS: LabelGroup[] = [
       { key: "um_actions_loading",     desc: "رسالة تحميل سجل الإجراءات" },
       { key: "um_actions_empty",       desc: "رسالة عدم وجود إجراءات مسجلة" },
       { key: "um_actions_count_suffix", desc: "لاحقة عدد السجلات" },
+      { key: "um_actions_count_filtered", desc: "عدد السجلات المعروضة من الإجمالي" },
+      { key: "um_actions_no_match",      desc: "رسالة عدم تطابق التصفية" },
+      { key: "um_actions_filter_types",  desc: "عنوان تصفية نوع الإجراء" },
+      { key: "um_actions_filter_actor",  desc: "عنوان تصفية المستخدم" },
+      { key: "um_actions_filter_from",   desc: "عنوان تصفية «من تاريخ»" },
+      { key: "um_actions_filter_to",     desc: "عنوان تصفية «إلى تاريخ»" },
+      { key: "um_actions_filter_search", desc: "عنوان البحث الحر في السجل" },
+      { key: "um_actions_filter_reset",  desc: "زر إعادة ضبط التصفية" },
+      { key: "um_actions_filter_active", desc: "شارة «التصفية مُفعّلة»" },
+      { key: "um_actions_filter_high_volume_hint", desc: "تنبيه الأنواع عالية العدد" },
       { key: "um_actions_col_time",    desc: "عمود الوقت في سجل الإجراءات" },
       { key: "um_actions_col_actor",   desc: "عمود المستخدم في سجل الإجراءات" },
       { key: "um_actions_col_role",    desc: "عمود الدور في سجل الإجراءات" },
@@ -311,6 +323,9 @@ function LabelRow({
   const [val, setVal] = useState<string>(current);
   const [saved, setSaved] = useState(false);
   const { directoryHandle } = useWorkspace();
+  const session = readSession();
+  const actor = session?.username ?? "unknown";
+  const actorRole = session?.role ?? "unknown";
 
   // Resync the visible input when the label changes externally (e.g. "استعادة
   // الكل" while this row's section stays open) — otherwise the input keeps
@@ -333,14 +348,20 @@ function LabelRow({
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
     if (directoryHandle) void exportLabelsSnapshot(directoryHandle);
-  }, [canEdit, labelKey, val, directoryHandle]);
+    // The VALUE is not recorded — a label override can be an arbitrarily long
+    // paragraph of Arabic and there can be hundreds of them, and the auditable
+    // fact is which key an admin changed, not what they changed it to (the
+    // snapshot on disk holds that).
+    recordAction(directoryHandle, actor, actorRole, "label-override-changed", { target: labelKey, details: { mode: "set" } });
+  }, [canEdit, labelKey, val, directoryHandle, actor, actorRole]);
 
   const reset = useCallback(() => {
     if (!canEdit) return;
     resetLabel(labelKey);
     setVal(DEFAULT_LABELS[labelKey]);
     if (directoryHandle) void exportLabelsSnapshot(directoryHandle);
-  }, [canEdit, labelKey, directoryHandle]);
+    recordAction(directoryHandle, actor, actorRole, "label-override-changed", { target: labelKey, details: { mode: "reset" } });
+  }, [canEdit, labelKey, directoryHandle, actor, actorRole]);
 
   const handleKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") save();
@@ -458,6 +479,9 @@ function SettingsPage() {
     resetAllLabels();
     setConfirmReset(false);
     if (directoryHandle) void exportLabelsSnapshot(directoryHandle);
+    const session = readSession();
+    recordAction(directoryHandle, session?.username ?? "unknown", session?.role ?? "unknown",
+      "label-override-changed", { details: { mode: "reset-all" } });
   }
 
   function toggleSection(title: string) {

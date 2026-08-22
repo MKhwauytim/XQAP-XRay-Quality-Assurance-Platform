@@ -21,6 +21,7 @@ import type {
   TemplatePhase,
   TemplateSchema
 } from "../../../../data/templates/templateTypes";
+import { recordAction } from "../../../../data/audit/actionLog";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import { logRejection } from "../../../../data/storage/errorLogger";
 import "./TemplateBuilder.css";
@@ -169,6 +170,13 @@ export default function TemplateBuilderTab() {
       };
       const result = await saveTemplate(directoryHandle, updated);
       if (result.ok) {
+        // `mode` is the only thing that distinguishes the two — the schema
+        // itself looks identical either way — and the distinction is worth
+        // keeping: "who introduced this template" and "who has been editing it
+        // since" are different questions.
+        recordAction(directoryHandle, username, session?.role ?? "unknown",
+          mode === "create" ? "template-created" : "template-updated",
+          { target: updated.templateId, details: { templateName: updated.templateName, version: updated.version } });
         setStatusMessage({ type: "ok", text: "تم حفظ نموذج الفحص بنجاح." });
         setIndex(await loadTemplateIndex(directoryHandle));
         setMode("list");
@@ -196,6 +204,7 @@ export default function TemplateBuilderTab() {
     try {
       const result = await deleteTemplate(directoryHandle, templateId);
       if (result.ok) {
+        recordAction(directoryHandle, username, session?.role ?? "unknown", "template-deleted", { target: templateId });
         setStatusMessage({ type: "ok", text: "تم حذف النموذج." });
         setIndex(await loadTemplateIndex(directoryHandle));
       } else {
