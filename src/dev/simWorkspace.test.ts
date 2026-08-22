@@ -17,6 +17,19 @@ import { listMonthFolders, loadMonthPopulationFinal } from "../data/population/p
 import { loadSampleMaster } from "../data/sampling/sampleStorage";
 import { loadOrDeriveDistributionCurrent } from "../data/distribution/distributionStorage";
 import { loadEmployeeAnswers } from "../data/answers/answerStorage";
+import {
+  ALL_ACTION_TYPES,
+  HIGH_VOLUME_ACTION_TYPES,
+  readWorkspaceActions,
+  type WorkspaceActionEntry,
+} from "../data/audit/actionLog";
+import {
+  SIM_ACTION_ACTOR_ROLES,
+  SIM_ACTION_LOG_DAY_SPAN,
+  SIM_ACTION_LOG_FIRST_DAY,
+  SIM_ACTION_RETIRED_SUBJECTS,
+} from "./simActionLog";
+import { DATA_PAGE_SIZE } from "../utils/paginationUtils";
 import { loadTemplate, loadTemplateIndex } from "../data/templates/templateStorage";
 import { loadInspectionTemplateSelection } from "../data/templates/templateSelectionStorage";
 import { engineVerdictOf } from "../data/population/riskEngineVerdict";
@@ -36,6 +49,60 @@ const EXPECTED_ASSIGNMENTS: ReadonlyArray<readonly [string, number]> = [
   ["saalhijji", 19],
   ["malrogi", 14],
 ];
+
+// ─── Action log ────────────────────────────────────────────────────────────
+// Same rule as the counts above: OBSERVED values of the deterministic seed,
+// pinned so a change to the action-log seed fails here instead of silently
+// invalidating a browser test that was asserting on them.
+const EXPECTED_ACTION_ENTRIES = 171;
+const EXPECTED_ACTIONS_BY_ACTOR: ReadonlyArray<readonly [string, number]> = [
+  ["admin", 56],
+  ["malrogi", 30],
+  ["amonem", 19],
+  ["jalgahamdi", 19],
+  ["mkhuwaytim", 18],
+  ["hihaloraini", 17],
+  ["saalhijji", 12],
+];
+const EXPECTED_ACTIONS_BY_TYPE: ReadonlyArray<readonly [string, number]> = [
+  ["answer-submitted", 40],
+  ["label-override-changed", 8],
+  ["answer-quality-note-set", 8],
+  ["distribution-row-changed", 8],
+  ["referral-requested", 8],
+  ["referral-approved", 6],
+  ["report-generated", 6],
+  ["answer-reopened", 4],
+  ["notification-deleted", 4],
+  ["notification-posted", 4],
+  ["reopen-requested", 4],
+  ["replacement-requested", 4],
+  ["answer-submitted-on-behalf", 3],
+  ["template-updated", 3],
+];
+/** Every entry naming a single sample row puts that row in `target`. */
+const ROW_TARGET_ACTIONS = new Set([
+  "answer-submitted",
+  "answer-submitted-on-behalf",
+  "answer-quality-note-set",
+  "answer-reopened",
+  "reopen-requested",
+  "replacement-applied",
+  "distribution-row-changed",
+]);
+/** `details` keys that hold a username, wherever they appear. */
+const USERNAME_DETAIL_KEYS = ["employee", "assignee", "toEmployee", "from", "to"];
+const XRAY_ID_PATTERN = /^DEMO-[A-Z]{3}-\d{4}$/;
+
+function countBy<T>(items: readonly T[], key: (item: T) => string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const item of items) counts.set(key(item), (counts.get(key(item)) ?? 0) + 1);
+  return counts;
+}
+
+function detailValues(entry: WorkspaceActionEntry): string[] {
+  return Object.values(entry.details ?? {}).map((value) => String(value ?? ""));
+}
 
 async function loadSampleRows(handle: DirectoryHandleLike): Promise<PreparedPopulationRow[]> {
   const master = await loadSampleMaster(handle, MONTH_FOLDER);
@@ -207,6 +274,188 @@ describe("simulated workspace seed", () => {
       const b = await loadEmployeeAnswers(second, MONTH_FOLDER, username);
       expect(JSON.stringify(b.items)).toBe(JSON.stringify(a.items));
     }
+  });
+
+  it("seeds a workspace action log spread across actors, types and dates", async () => {
+    const handle = await createSimulatedWorkspace();
+    const entries = await readWorkspaceActions(handle);
+
+    expect(entries).toHaveLength(EXPECTED_ACTION_ENTRIES);
+
+    // The actor <select> needs more than one option to be a filter at all, and
+    // the counts have to be unequal or "narrowed to actor X" is indistinguishable
+    // from "did nothing".
+    const byActor = countBy(entries, (entry) => entry.actor);
+    expect(
+      [...byActor.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    ).toEqual(EXPECTED_ACTIONS_BY_ACTOR.map(([actor, count]) => [actor, count]));
+
+    const byType = countBy(entries, (entry) => entry.action);
+    for (const [action, count] of EXPECTED_ACTIONS_BY_TYPE) {
+      expect(byType.get(action), `count for ${action}`).toBe(count);
+    }
+
+    // Every declared action type has at least one entry, so no checkbox in the
+    // grouped type picker is a dead control — including the ones whose group
+    // would otherwise be empty (ad-hoc imports, notifications, templates).
+    for (const action of ALL_ACTION_TYPES) {
+      expect(byType.get(action) ?? 0, `no seeded entry for ${action}`).toBeGreaterThan(0);
+    }
+
+    // The high-volume types arrive UNCHECKED in the viewer, so a browser test
+    // has to be able to prove that enabling them reveals rows that were hidden.
+    const highVolume = entries.filter((entry) =>
+      HIGH_VOLUME_ACTION_TYPES.includes(entry.action)
+    );
+    expect(highVolume.length).toBe(48);
+    for (const action of HIGH_VOLUME_ACTION_TYPES) {
+      expect(byType.get(action) ?? 0, `no seeded entry for ${action}`).toBeGreaterThan(0);
+    }
+
+    // …and the default (high-volume-off) view still overflows one page, so
+    // paging is exercisable without touching the type picker first.
+    const defaultVisible = entries.length - highVolume.length;
+    expect(defaultVisible).toBe(123);
+    expect(defaultVisible).toBeGreaterThan(DATA_PAGE_SIZE);
+
+    // `target`/`details` are the free-text haystack. The search box scans detail
+    // KEYS as well as values, so both have to carry something findable.
+    const withTarget = entries.filter((entry) => (entry.target ?? "") !== "");
+    const withDetails = entries.filter((entry) => entry.details !== undefined);
+    expect(withTarget.length).toBeGreaterThan(entries.length / 2);
+    expect(withDetails.length).toBeGreaterThan(entries.length / 2);
+    const detailKeys = new Set(entries.flatMap((entry) => Object.keys(entry.details ?? {})));
+    expect(detailKeys.has("seed")).toBe(true);
+    expect(detailKeys.has("employee")).toBe(true);
+    expect(
+      entries.some((entry) => detailValues(entry).includes(SIM_SEED_PROFILE.rngSeed))
+    ).toBe(true);
+  });
+
+  it("spreads the action log over a date range wider than any window a test would pick", async () => {
+    const handle = await createSimulatedWorkspace();
+    const entries = await readWorkspaceActions(handle);
+
+    const days = [...new Set(entries.map((entry) => entry.at.slice(0, 10)))].sort();
+    expect(days).toHaveLength(SIM_ACTION_LOG_DAY_SPAN);
+    expect(days[0]).toBe(SIM_ACTION_LOG_FIRST_DAY);
+    expect(days.at(-1)).toBe("2026-07-15");
+    for (const entry of entries) {
+      expect(Number.isNaN(Date.parse(entry.at)), entry.id).toBe(false);
+    }
+
+    // The point of the spread: an inner window has entries on BOTH sides of it,
+    // so a date-range filter narrows to strictly fewer rows than it started with.
+    const inWindow = entries.filter(
+      (entry) => entry.at.slice(0, 10) >= "2026-07-01" && entry.at.slice(0, 10) <= "2026-07-07"
+    );
+    expect(inWindow.length).toBeGreaterThan(0);
+    expect(inWindow.length).toBeLessThan(entries.length);
+    expect(entries.some((entry) => entry.at.slice(0, 10) < "2026-07-01")).toBe(true);
+    expect(entries.some((entry) => entry.at.slice(0, 10) > "2026-07-07")).toBe(true);
+  });
+
+  it("references only rows and users that exist elsewhere in the seed", async () => {
+    const handle = await createSimulatedWorkspace();
+    const entries = await readWorkspaceActions(handle);
+
+    const population = await loadMonthPopulationFinal(handle, MONTH_FOLDER);
+    const populationIds = new Set(
+      ((population?.rows ?? []) as PreparedPopulationRow[]).map((row) => row.xrayImageId)
+    );
+    const sampleRows = await loadSampleRows(handle);
+    const sampleIds = new Set(sampleRows.map((row) => row.xrayImageId));
+    const current = await loadOrDeriveDistributionCurrent(handle, MONTH_FOLDER, sampleRows);
+    const assignedTo = new Map(
+      (current?.entries ?? []).map((entry) => [entry.xrayImageId, entry.assignedTo])
+    );
+    const roster = new Set(buildSimManagedUsers().map((user) => user.username));
+    roster.add(SIM_ROLE_USERNAMES.admin);
+    const knownNames = new Set([...roster, ...SIM_ACTION_RETIRED_SUBJECTS]);
+
+    const submittedBy = new Map<string, Set<string>>();
+    for (const [username] of EXPECTED_ASSIGNMENTS) {
+      const file = await loadEmployeeAnswers(handle, MONTH_FOLDER, username);
+      submittedBy.set(
+        username,
+        new Set(file.items.filter((item) => item.status === "submitted").map((item) => item.xrayImageId))
+      );
+    }
+
+    for (const entry of entries) {
+      // 1. The actor is a real account, stamped with the role that account holds.
+      expect(roster.has(entry.actor), `unknown actor ${entry.actor}`).toBe(true);
+      expect(entry.actorRole).toBe(SIM_ACTION_ACTOR_ROLES[entry.actor]);
+      // 2. A month-scoped entry names the one month the seed wrote.
+      expect(entry.monthFolderName === null || entry.monthFolderName === MONTH_FOLDER).toBe(true);
+
+      // 3. Anything shaped like an xray image id — in `target` OR in any detail
+      //    value — is a real population row. A replacement row is deliberately
+      //    off-sample, so the population is the right denominator here.
+      for (const value of [entry.target ?? "", ...detailValues(entry)]) {
+        if (XRAY_ID_PATTERN.test(value)) {
+          expect(populationIds.has(value), `${entry.id}: unknown row ${value}`).toBe(true);
+        }
+      }
+
+      // 4. A row-level entry names a DRAWN row, assigned to the person the entry
+      //    holds responsible for it.
+      if (ROW_TARGET_ACTIONS.has(entry.action)) {
+        const row = entry.target ?? "";
+        expect(sampleIds.has(row), `${entry.id}: ${row} is not in the sample`).toBe(true);
+        // Who the entry says holds the row: the assignee an on-behalf answer was
+        // written for, the employee an oversight action was taken against, the
+        // `to` side of a reassignment — else the actor acting on their own row.
+        const owner = String(
+          entry.details?.assignee ?? entry.details?.employee ?? entry.details?.to ?? entry.actor
+        );
+        expect(assignedTo.get(row), `${entry.id}: ${row} owner`).toBe(owner);
+      }
+
+      // 5. `answer-submitted` is the strongest claim in the log — that this
+      //    person submitted this answer — so it is checked against the answer
+      //    file itself, not merely against the assignment.
+      if (entry.action === "answer-submitted") {
+        expect(
+          submittedBy.get(entry.actor)?.has(entry.target ?? ""),
+          `${entry.id}: no submitted answer for ${entry.target} by ${entry.actor}`
+        ).toBe(true);
+      }
+
+      // 6. Every username-bearing detail, and the subject of every user action,
+      //    is a real account — or one of the two subjects the log itself records
+      //    as removed.
+      for (const key of USERNAME_DETAIL_KEYS) {
+        const value = entry.details?.[key];
+        if (typeof value === "string") {
+          expect(knownNames.has(value), `${entry.id}: unknown user ${value} in ${key}`).toBe(true);
+        }
+      }
+      if (entry.action.startsWith("user-")) {
+        expect(knownNames.has(entry.target ?? ""), `${entry.id}: unknown user target`).toBe(true);
+      }
+    }
+
+    // The retired subjects really are absent — otherwise rule 6 would be
+    // permitting names that are simply in the roster after all.
+    for (const subject of SIM_ACTION_RETIRED_SUBJECTS) {
+      expect(roster.has(subject)).toBe(false);
+    }
+    expect(await loadTemplate(handle, "sim-inspection-template-legacy")).toBeNull();
+  });
+
+  it("writes an identical action log on every build", async () => {
+    const [first, second] = await Promise.all([
+      createSimulatedWorkspace(),
+      createSimulatedWorkspace(),
+    ]);
+
+    const a = await readWorkspaceActions(first);
+    const b = await readWorkspaceActions(second);
+    // Whole entries, ids and timestamps included: unlike the distribution event
+    // ids (UUIDs from the real writer) nothing here is allowed to vary, which is
+    // the reason the entries are built rather than appended. See simActionLog.ts.
+    expect(JSON.stringify(b)).toBe(JSON.stringify(a));
   });
 
   it("seeds an active managed account for every role the URL contract accepts", async () => {

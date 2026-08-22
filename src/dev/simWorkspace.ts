@@ -33,6 +33,8 @@
 
 import { createWorkspaceStructure, type DirectoryHandleLike } from "../data/storage/fileSystemAccess";
 import { createMemoryDirectory } from "../data/storage/memoryDirectory";
+import { formatMonthFolderName } from "../data/population/monthFolder";
+import { seedSimulatedActionLog } from "./simActionLog";
 import {
   seedWorkspaceMonth,
   type WorkspaceSeedPort,
@@ -193,5 +195,14 @@ export async function createSimulatedWorkspace(): Promise<DirectoryHandleLike> {
     BOOTSTRAP_ADMIN_USERNAME
   );
   await seedWorkspaceMonth(handle, SIM_SEED_PROFILE);
+  // Last, and reading back what the month seed wrote: every row an action entry
+  // names has to already exist on disk. See `simActionLog.ts` for why this one
+  // block does not go through `appendWorkspaceAction`.
+  await seedSimulatedActionLog(handle, {
+    monthFolderName: formatMonthFolderName(SIM_MONTH, SIM_YEAR),
+    reviewers: SIM_ALLOCATIONS.map((allocation) => allocation.username),
+    templateId: SIM_TEMPLATE_ID,
+    rngSeed: SIM_SEED_PROFILE.rngSeed,
+  });
   return handle;
 }
