@@ -23,7 +23,7 @@
 //     would put un-flagged cases in front of a reviewer as if the engine had
 //     flagged them.
 //
-//   • "adhoc"         — «إحالات استثنائية». Rows assigned through an ad-hoc
+//   • "adhoc"         — «حالات استثنائية». Rows assigned through an ad-hoc
 //     import (`src/data/adhocImport/`) instead of the regular monthly sampling
 //     pipeline, identified by `isAdhocEntry`.
 //

@@ -187,7 +187,7 @@ Tabs are auto-discovered by `tabRegistry.ts`. Each top-level tab exports a defau
 
 | Tab id | File | Roles | Order | Sub-tabs |
 |--------|------|-------|-------|----------|
-| `population` | `Tabs/Population/` | all | 10 | `process`, `browse`, `adhoc-import` (admin) |
+| `population` | `Tabs/Population/` | all | 10 | `process`, `browse`, `adhoc-import` (grantable to all but guest; default-off for every role but admin) |
 | `employee-workspace` | `Tabs/EmployeeWorkspace/` | all | 15 | `ew/xray-referrals`, `ew/xray-results`, `ew/referral-approval`, `ew/inspection-form` (renders `Tabs/TemplateBuilder/`) |
 | `ew/notifications` | `Tabs/NotificationCenter/` | all (defaults to manager, admin) | 20 | — |
 | `reports` | `Tabs/Reports/` | guest, supervisor, manager, admin | 25 | `reports`, `kpi` (supervisor, manager, admin), `report-designer` (supervisor, manager, admin → `Tabs/ReportDesigner/`) |

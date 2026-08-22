@@ -1041,7 +1041,7 @@ export function QueueScopePicker({
 }
 
 /**
- * «جميع الحالات» / «مستهدف المؤشر» / «إحالات استثنائية» — the case filter.
+ * «جميع الحالات» / «مستهدف المؤشر» / «حالات استثنائية» — the case filter.
  *
  * Deliberately NOT gated on `canSeeAll`, unlike the scope switcher above: an
  * ordinary employee is the primary user of this control — the owner's stated

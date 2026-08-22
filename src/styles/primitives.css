@@ -22,7 +22,8 @@
 
      Layer order, bottom to top:
        local < sticky cells < sticky headers < popovers/dropdowns <
-       app chrome < sidebar < floating widget < modal < dialog < boot splash  */
+       app chrome < sidebar < floating widget < modal < dialog <
+       portalled popover < boot splash  */
   --z-local:            1;    /* in-card stacking, decorative rails            */
   --z-sticky-cell:      2;    /* sticky table header cell                      */
   --z-sticky-corner:    3;    /* sticky row+column intersection cell           */
@@ -39,6 +40,9 @@
   --z-toast:         9999;    /* transient toast, above page chrome            */
   --z-modal:        10020;    /* full-screen modal backdrop                    */
   --z-dialog:       11000;    /* confirm dialog, must clear modals             */
+  --z-popover-layer:12000;    /* body-portalled anchored popover (see
+                                 components/Popover) — a filter menu opened
+                                 from inside a modal must sit above it        */
   --z-boot-splash:  20000;    /* boot checklist, clears everything             */
 
   /* ── Shape (4.4 Shape Consistency Lock) ──────────────────────

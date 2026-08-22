@@ -235,14 +235,16 @@ export const DEFAULT_LABELS = {
   //   • «مستهدف المؤشر»    — the customs risk engine actually said "yes" for
   //     this image. Read through `engineVerdictOf` (riskEngineVerdict.ts): a
   //     blank or an unrecognized value is "unknown", never "targeted".
-  //   • «إحالات استثنائية» — rows assigned through an ad-hoc import rather
-  //     than the regular monthly sampling pipeline.
+  //   • «حالات استثنائية»  — rows assigned through an ad-hoc import rather
+  //     than the regular monthly sampling pipeline. Worded to match the screen
+  //     that produces them («ارفاق حالات استثنائية», page_adhoc_import_title) and
+  //     its sibling chips, which all speak of «حالات», not «إحالات».
   // Each chip carries its own count, which is the point of the control: the
   // reader can see how many cases are in each bucket before clicking.
   ew_case_filter_aria:             "تصفية الحالات",
   ew_case_filter_all:              "جميع الحالات",
   ew_case_filter_risk_targeted:    "مستهدف المؤشر",
-  ew_case_filter_adhoc:            "إحالات استثنائية",
+  ew_case_filter_adhoc:            "حالات استثنائية",
   ew_case_filter_empty:            "لا توجد حالات ضمن هذه التصفية. اختر «جميع الحالات» للعودة إلى القائمة كاملة.",
 
   // ── Case-queue scope picker (oversight only) ─────────────────────────────
@@ -1002,7 +1004,7 @@ export const DEFAULT_LABELS = {
   // uploading a one-off Excel file (not the regular monthly Population pipeline) and
   // assigning its rows to employees. See src/data/adhocImport/.
   page_adhoc_import_eyebrow:        "استيراد خارج المسار المعتاد",
-  page_adhoc_import_title:          "استيراد بيانات مخصص",
+  page_adhoc_import_title:          "ارفاق حالات استثنائية",
   page_adhoc_import_subtitle:       "ارفع ملف إكسل مستقل خارج مسار معالجة المجتمع المعتاد وعيّن صفوفه للموظفين مباشرة.",
   adhoc_import_upload_label:        "اختر ملف إكسل",
   adhoc_import_upload_button:       "رفع ومعالجة",
@@ -1510,6 +1512,54 @@ export const DEFAULT_LABELS = {
   ew_row_select_blocked_aria:  "لا يمكن إسناد {id} — مكتملة أو مستبدلة",
   /** Retry action on the queue's load-failure state. */
   ew_load_retry_btn:           "إعادة المحاولة",
+
+  // ── Ad-hoc import — historical (already-answered) study back-fill ──────────
+  // APPEND-ONLY BLOCK. The `kind: "historical"` path through the existing
+  // three-step wizard: pick the inspection template the old answers map onto
+  // (step 1), map the template's own fields plus the two provenance columns
+  // (step 2), then import the rows as assigned+completed work rather than
+  // distributing them (step 3). Data layer: src/data/adhocImport/adhocHistoricalImport.ts.
+  adhoc_hist_template_label:        "قالب الفحص المستخدم",
+  adhoc_hist_template_select_aria:  "قالب الفحص الذي تُنسب إليه إجابات الدراسة",
+  adhoc_hist_template_placeholder:  "— اختر قالباً —",
+  adhoc_hist_template_option:       "{name} (الإصدار {version})",
+  adhoc_hist_template_empty:        "لا توجد قوالب فحص في مساحة العمل — أنشئ قالباً من «نموذج الفحص» أولاً.",
+  adhoc_hist_template_note:         "القالب المعتمد حالياً في مساحة العمل هو المقترح افتراضياً. الإجابات المستوردة تُنسب إلى القالب وإصداره كما هما وقت الاستيراد.",
+  adhoc_hist_template_loading:      "جارٍ تحميل القالب...",
+
+  // Step 2 — the template half of the mapping, grouped by مرحلة, plus the two
+  // provenance columns (من أجاب، ومتى).
+  adhoc_hist_map_title:             "مطابقة حقول القالب",
+  adhoc_hist_map_intro:             "اربط كل سؤال في قالب الفحص بالعمود الذي يحمل إجابته. الحقول غير المرتبطة تبقى بلا إجابة، وهذا متوقع في دراسة أجريت قبل اعتماد القالب.",
+  adhoc_hist_map_no_template:       "اختر قالب الفحص في الخطوة الأولى لتظهر حقوله هنا.",
+  adhoc_hist_map_field_aria:        "العمود الذي يحمل إجابة الحقل {field}",
+  adhoc_hist_map_not_imported:      "— لا يُستورد —",
+  adhoc_hist_map_coverage:          "تمت مطابقة {mapped} من {total} حقلاً في القالب.",
+  adhoc_hist_provenance_title:      "بيانات المراجعة",
+  adhoc_hist_answered_by_label:     "عمود اسم المراجع",
+  adhoc_hist_answered_by_aria:      "العمود الذي يحمل اسم المراجع",
+  adhoc_hist_answered_by_required:  "اسم المراجع إلزامي: يجب أن يطابق مستخدماً نشطاً في النظام، وإلا رُفض الاستيراد قبل أي كتابة.",
+  adhoc_hist_submitted_at_label:    "عمود تاريخ المراجعة",
+  adhoc_hist_submitted_at_aria:     "العمود الذي يحمل تاريخ المراجعة",
+  adhoc_hist_submitted_at_fallback: "لم يُربط عمود تاريخ المراجعة — سيُسجَّل تاريخ استيراد الملف ({date}) تاريخاً للمراجعة في كل الصفوف.",
+
+  // Step 3 — "import as completed work" replaces the distribution panel.
+  adhoc_hist_panel_title:           "استيراد كعمل مُنجز",
+  adhoc_hist_panel_note:            "لا يُوزَّع هذا الملف على موظفين: كل صف يُسجَّل مهمة معيَّنة ومكتملة باسم المراجع الذي أنجزها، ومعها إجاباته وتاريخ مراجعته.",
+  adhoc_hist_plan_rows:             "الصفوف القابلة للاستيراد: {count}",
+  adhoc_hist_plan_reviewers:        "عدد المراجعين المذكورين: {count}",
+  adhoc_hist_plan_answers:          "إجمالي الإجابات: {answers} (بمعدل {perRow} إجابة لكل صف)",
+  adhoc_hist_plan_errors_title:     "لا يمكن تنفيذ الاستيراد قبل معالجة ما يلي:",
+  adhoc_hist_plan_warnings_title:   "ملاحظات على الاستيراد",
+  adhoc_hist_row_warnings_title:    "ملاحظات على صفوف بعينها",
+  adhoc_hist_row_warning:           "الصف {rowKey}: {warning}",
+  adhoc_hist_no_source:             "الخلايا الأصلية للإجابات لا تُحفظ داخل سجل الاستيراد، فلا يمكن تنفيذ استيراد دراسة سابقة إلا في الجلسة نفسها التي قُرئ فيها الملف. أعد رفع الملف عبر «استيراد جديد».",
+  adhoc_hist_import_button:         "استيراد كعمل مُنجز",
+  adhoc_hist_importing:             "جارٍ الاستيراد...",
+  adhoc_hist_import_success:        "تم استيراد {count} صف كعمل مُنجز.",
+  adhoc_hist_import_skipped:        "({count} صف كان مستورداً بالفعل وتم تجاوزه.)",
+  adhoc_hist_import_failed:         "تعذّر الاستيراد: {error}",
+  adhoc_wizard_step3_title_historical: "المراجعة والاستيراد",
 } as const;
 
 export type LabelKey = keyof typeof DEFAULT_LABELS;

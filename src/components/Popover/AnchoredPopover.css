@@ -1,0 +1,32 @@
+/* ═══════════════════════════════════════════════════════════
+   AnchoredPopover.css — base layer for every body-portalled
+   anchored popover (filter menus, column pickers, dropdowns).
+
+   Only positioning lives here. Each call site keeps its own skin
+   class (.dt-filter-menu, .bv-column-filter-menu, …) unchanged.
+   ═══════════════════════════════════════════════════════════ */
+
+.ui-anchored-popover {
+  /* `fixed` + a portal to <body> is what actually escapes the two traps that
+     broke these menus: the scroll container's `overflow` clip, and a tab
+     wrapper's `transform` (which would otherwise become the containing block
+     for a `fixed` descendant — the same reason ModalPortal exists). */
+  position: fixed;
+
+  /* PHYSICAL top/left, deliberately NOT inset-inline-*: the offsets are
+     written by AnchoredPopover's layout effect from computeAnchoredPosition,
+     which has already folded the anchor's direction into the number. Mapping
+     them through a logical property would flip RTL twice. Direction-sensitive
+     styling *inside* a popover still uses logical properties. */
+  top: 0;
+  left: 0;
+
+  /* Above every dialog it can be opened from — a filter menu inside a modal
+     must not render behind that modal — and below the boot splash. */
+  z-index: var(--z-popover-layer);
+
+  /* The JS clamp hands us a max-height; without a scroller the overflowing
+     part would just be invisible instead of unreachable-but-scrollable. */
+  overflow: auto;
+  overscroll-behavior: contain;
+}

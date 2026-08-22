@@ -18,6 +18,7 @@ import { useLabels } from "../../data/labels/useLabels";
 import { registerPendingSaveFlush } from "../../data/storage/pendingSaveFlush";
 import { logError } from "../../data/storage/errorLogger";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
+import { AnchoredPopover } from "../Popover/AnchoredPopover";
 import Pagination from "../Pagination/Pagination";
 import { DATA_PAGE_SIZE, clampPage, pageSlice } from "../../utils/paginationUtils";
 import "./DataTable.css";
@@ -295,9 +296,12 @@ export default function DataTable<TRow>({
     onColConfigChangeRef.current = onColConfigChange;
   });
   const [colPickerOpen, setColPickerOpen]       = useState(false);
-  const [colPickerAnchorRect, setColPickerAnchorRect] = useState<DOMRect | null>(null);
+  // The anchor ELEMENT, not a rect snapshot: a rect captured at click time
+  // goes stale the moment the page or the table wrapper scrolls, which left
+  // the (position: fixed) panel stranded away from its button.
+  const [colPickerAnchor, setColPickerAnchor] = useState<HTMLElement | null>(null);
   const [openFilterCol, setOpenFilterCol]       = useState<string | null>(null);
-  const [filterAnchorRect, setFilterAnchorRect] = useState<DOMRect | null>(null);
+  const [filterAnchor, setFilterAnchor] = useState<HTMLElement | null>(null);
   const [filters, setFilters]                   = useState<FiltersMap>({});
   const [isExporting, setIsExporting]            = useState(false);
   // Finding 10 — surfaces a thrown export failure as an in-page role="alert"
@@ -867,7 +871,7 @@ export default function DataTable<TRow>({
                 type="button"
                 className="dt-col-picker-btn"
                 onClick={(event) => {
-                  setColPickerAnchorRect(event.currentTarget.getBoundingClientRect());
+                  setColPickerAnchor(event.currentTarget);
                   setColPickerOpen((open) => !open);
                   setOpenFilterCol(null);
                 }}
@@ -878,14 +882,14 @@ export default function DataTable<TRow>({
           )}
         </div>
       </div>
-      {colPickerOpen && colPickerAnchorRect && (
+      {colPickerOpen && colPickerAnchor && (
         <ColPickerPanel
           columns={columns as DataTableCol<unknown>[]}
           cfg={colCfg}
           isAdmin={isAdmin}
           detectedDates={detectedDates}
           defaultVisible={defaultVisible}
-          anchorRect={colPickerAnchorRect}
+          anchor={colPickerAnchor}
           onChange={setColCfg}
           onClose={() => setColPickerOpen(false)}
         />
@@ -944,19 +948,18 @@ export default function DataTable<TRow>({
                         aria-label={`${L.dt_filter_button_prefix}: ${col.label}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                          setFilterAnchorRect(rect);
+                          setFilterAnchor(e.currentTarget);
                           setOpenFilterCol((c) => (c === col.id ? null : col.id));
                           setColPickerOpen(false);
                         }}
                       >▾</button>
                     </div>
-                    {openFilterCol === col.id && filterAnchorRect && (
+                    {openFilterCol === col.id && filterAnchor && (
                       <ColFilterMenu
                         col={col as DataTableCol<unknown>}
                         filter={filters[col.id]}
                         isDateCol={isDate}
-                        anchorRect={filterAnchorRect}
+                        anchor={filterAnchor}
                         options={openColOptions}
                         onSet={(f) => {
                           setFilter(col.id, f);
@@ -1072,13 +1075,13 @@ type ColPickerPanelProps = {
   isAdmin: boolean;
   detectedDates: Set<string>;
   defaultVisible?: string[];
-  anchorRect: DOMRect;
+  anchor: HTMLElement | null;
   onChange: (c: ColConfig) => void;
   onClose: () => void;
 };
 
 function ColPickerPanel({
-  columns, cfg, isAdmin, detectedDates, defaultVisible, anchorRect, onChange, onClose,
+  columns, cfg, isAdmin, detectedDates, defaultVisible, anchor, onChange, onClose,
 }: ColPickerPanelProps) {
   const L = useLabels();
   // Finding 11: was a plain outside-click-only ref with no Escape handling and
@@ -1101,13 +1104,6 @@ function ColPickerPanel({
   // back in short of the "إعادة الافتراضي" reset button — refuse the toggle
   // instead (mirrors the alwaysVisible guard right below).
   const visibleCount = cols.filter((c) => !cfg.hidden.includes(c.id)).length;
-  const pickerWidth = 300;
-  const style: CSSProperties = {
-    position: "fixed",
-    top: anchorRect.bottom + 6,
-    left: Math.max(8, Math.min(anchorRect.left, window.innerWidth - pickerWidth - 8)),
-    zIndex: 9999,
-  };
 
   function toggle(id: string): void {
     if (columns.find((c) => c.id === id)?.alwaysVisible) return;
@@ -1134,7 +1130,13 @@ function ColPickerPanel({
   }
 
   return (
-    <div ref={ref} className="dt-col-picker" style={style} role="dialog" aria-label={L.dt_columns_title}>
+    <AnchoredPopover
+      ref={ref}
+      anchor={anchor}
+      className="dt-col-picker"
+      role="dialog"
+      aria-label={L.dt_columns_title}
+    >
       <div className="dt-col-picker-header">
         <strong>{L.dt_columns_title}</strong>
         <span className="dt-col-picker-count">
@@ -1223,7 +1225,7 @@ function ColPickerPanel({
           onClick={onClose}
         >{L.dt_done}</button>
       </div>
-    </div>
+    </AnchoredPopover>
   );
 }
 
@@ -1233,14 +1235,14 @@ type ColFilterMenuProps = {
   col: DataTableCol<unknown>;
   filter: AnyFilter | undefined;
   isDateCol: boolean;
-  anchorRect: DOMRect;
+  anchor: HTMLElement | null;
   options: string[];
   onSet: (f: AnyFilter) => void;
   onClear: () => void;
   onClose: () => void;
 };
 
-function ColFilterMenu({ col, filter, isDateCol, anchorRect, options, onSet, onClear, onClose }: ColFilterMenuProps) {
+function ColFilterMenu({ col, filter, isDateCol, anchor, options, onSet, onClear, onClose }: ColFilterMenuProps) {
   const L = useLabels();
   // Finding 11 — see ColPickerPanel's identical note above.
   const ref = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
@@ -1253,13 +1255,12 @@ function ColFilterMenu({ col, filter, isDateCol, anchorRect, options, onSet, onC
     return () => document.removeEventListener("mousedown", h);
   }, [onClose, ref]);
 
-  // Position fixed below the filter button, right-aligned to the button in RTL
-  const style: CSSProperties = {
-    position: "fixed",
-    top: anchorRect.bottom + 4,
-    right: window.innerWidth - anchorRect.right,
-    zIndex: 9999,
-  };
+  // Positioning (viewport clamp, above/below flip, RTL edge choice) is
+  // AnchoredPopover's job — see components/Popover/anchoredPosition.ts. What
+  // used to live here was `top: anchorRect.bottom + 4` with an unclamped
+  // `right: innerWidth - anchorRect.right`, which ran off the bottom of the
+  // viewport for a low button and off the physical left edge for the last
+  // columns of a wide RTL table.
 
   const resolvedKind = col.filterKind ?? (isDateCol ? "date" : "multiselect");
 
@@ -1272,7 +1273,7 @@ function ColFilterMenu({ col, filter, isDateCol, anchorRect, options, onSet, onC
       onSet({ kind: "multiselect", values: Array.from(next) });
     }
     return (
-      <div ref={ref} className="dt-filter-menu dt-filter-multiselect" style={style} dir="rtl" role="dialog" aria-label={col.label}>
+      <AnchoredPopover ref={ref} anchor={anchor} className="dt-filter-menu dt-filter-multiselect" dir="rtl" role="dialog" aria-label={col.label}>
         <div className="dt-filter-head">
           <strong>{col.label}</strong>
           <button type="button" onClick={onClear} disabled={selected.size === 0}>{L.dt_filter_clear}</button>
@@ -1297,7 +1298,7 @@ function ColFilterMenu({ col, filter, isDateCol, anchorRect, options, onSet, onC
             {L.dt_done} {selected.size > 0 ? `(${selected.size})` : ""}
           </button>
         </div>
-      </div>
+      </AnchoredPopover>
     );
   }
 
@@ -1306,7 +1307,7 @@ function ColFilterMenu({ col, filter, isDateCol, anchorRect, options, onSet, onC
     const opts = col.statusOptions ?? [{ value: "all", label: "الكل" }];
     const cur  = filter?.kind === "status" ? filter.value : "all";
     return (
-      <div ref={ref} className="dt-filter-menu" style={style} dir="rtl" role="dialog" aria-label={col.label}>
+      <AnchoredPopover ref={ref} anchor={anchor} className="dt-filter-menu" dir="rtl" role="dialog" aria-label={col.label}>
         <div className="dt-filter-head">
           <strong>{col.label}</strong>
           <button type="button" onClick={onClear}>{L.dt_filter_clear}</button>
@@ -1322,7 +1323,7 @@ function ColFilterMenu({ col, filter, isDateCol, anchorRect, options, onSet, onC
             {label}
           </label>
         ))}
-      </div>
+      </AnchoredPopover>
     );
   }
 
@@ -1336,7 +1337,7 @@ function ColFilterMenu({ col, filter, isDateCol, anchorRect, options, onSet, onC
         ref={ref}
         label={col.label}
         filter={cur}
-        style={style}
+        anchor={anchor}
         onSet={onSet}
         onClear={onClear}
       />
@@ -1346,13 +1347,13 @@ function ColFilterMenu({ col, filter, isDateCol, anchorRect, options, onSet, onC
   // Text filter
   const cur = filter?.kind === "text" ? filter.value : "";
   return (
-    <div ref={ref} className="dt-filter-menu" style={style} dir="rtl">
+    <AnchoredPopover ref={ref} anchor={anchor} className="dt-filter-menu" dir="rtl">
       <div className="dt-filter-head">
         <strong>{col.label}</strong>
         <button type="button" onClick={onClear}>{L.dt_filter_clear}</button>
       </div>
       <TextFilterBody value={cur} onSubmit={(v) => onSet({ kind: "text", value: v })} />
-    </div>
+    </AnchoredPopover>
   );
 }
 
@@ -1384,8 +1385,8 @@ function TextFilterBody({ value, onSubmit }: { value: string; onSubmit: (v: stri
 // ── DateFilterMenu ────────────────────────────────────────────────────────────
 
 const DateFilterMenu = forwardRef(function DateFilterMenu(
-  { label, filter, style, onSet, onClear }:
-  { label: string; filter: DateFilter; style?: CSSProperties; onSet: (f: AnyFilter) => void; onClear: () => void },
+  { label, filter, anchor, onSet, onClear }:
+  { label: string; filter: DateFilter; anchor: HTMLElement | null; onSet: (f: AnyFilter) => void; onClear: () => void },
   ref: ForwardedRef<HTMLDivElement>
 ) {
   const L = useLabels();
@@ -1395,7 +1396,7 @@ const DateFilterMenu = forwardRef(function DateFilterMenu(
   const [to,     setTo]     = useState(filter.to);
 
   return (
-    <div ref={ref} className="dt-filter-menu dt-filter-date" style={style} dir="rtl" role="dialog" aria-label={label}>
+    <AnchoredPopover ref={ref} anchor={anchor} className="dt-filter-menu dt-filter-date" dir="rtl" role="dialog" aria-label={label}>
       <div className="dt-filter-head">
         <strong>{label}</strong>
         <button type="button" onClick={onClear}>{L.dt_filter_clear}</button>
@@ -1436,6 +1437,6 @@ const DateFilterMenu = forwardRef(function DateFilterMenu(
         onClick={() => onSet({ kind: "date", mode, single, from, to })}
         className="dt-filter-apply-btn"
       >{L.dt_filter_apply}</button>
-    </div>
+    </AnchoredPopover>
   );
 });

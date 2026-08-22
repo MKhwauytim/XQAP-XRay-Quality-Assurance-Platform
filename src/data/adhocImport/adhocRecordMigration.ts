@@ -236,9 +236,24 @@ function normalizeMapping(raw: unknown): ImportMapping {
     valueMappings: normalizeValueMappings(source.valueMappings),
   };
   const templateFields = asObject(source.templateFields);
-  return templateFields === null
-    ? mapping
-    : { ...mapping, templateFields: normalizeFieldSources(templateFields) };
+  const withTemplateFields =
+    templateFields === null
+      ? mapping
+      : { ...mapping, templateFields: normalizeFieldSources(templateFields) };
+
+  // The two provenance sources are part of the SNAPSHOT, not caller state, and
+  // dropping them here silently undid that: `applyHistoricalImport` re-reads
+  // the record from disk before it writes, and a re-planned import whose
+  // reviewer column had been normalized away resolved every row to a blank
+  // reviewer. Absent stays absent — an optional field that was never set must
+  // not appear as `{kind:"none"}` and change what the record claims.
+  const answeredBySource = normalizeFieldSource(source.answeredBySource);
+  const submittedAtSource = normalizeFieldSource(source.submittedAtSource);
+  return {
+    ...withTemplateFields,
+    ...(answeredBySource === null ? {} : { answeredBySource }),
+    ...(submittedAtSource === null ? {} : { submittedAtSource }),
+  };
 }
 
 function normalizeCatalog(raw: unknown): AdhocField[] {

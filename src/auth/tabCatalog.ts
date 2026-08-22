@@ -25,16 +25,31 @@ export type TabCatalogEntry = ManagedTab & {
 
 const ALL_ROLES = ["guest", "employee", "supervisor", "manager", "admin"] as const;
 const ADMIN_ONLY = ["admin"] as const;
+/**
+ * Every role that can hold and act on casework -- i.e. ALL_ROLES minus `guest`.
+ * `guest` is defined as a read-only observer/external auditor (see MANAGED_ROLES
+ * in userManagement.ts), and the pages on this ceiling exist only to CREATE work
+ * (ingest rows, assign them to employees). There is nothing for a viewer to view
+ * there, so leaving guest out keeps the matrix honest instead of offering a
+ * grant that contradicts the role's definition.
+ */
+const OPERATIONAL_ROLES = ["employee", "supervisor", "manager", "admin"] as const;
 
 export const TAB_CATALOG: readonly TabCatalogEntry[] = [
   { id: "population", label: "إدارة بيانات الأشعة", allowedRoles: ALL_ROLES, group: "workflow" },
   { id: "population/process", label: "معالجة البيانات", parentId: "population", allowedRoles: ALL_ROLES },
   { id: "population/browse", label: "استعراض البيانات", parentId: "population", allowedRoles: ALL_ROLES },
-  // Ad-hoc import moved under Population (2026-08-21): it used to be a stand-alone
-  // top-level "system" tab. Its ADMIN_ONLY ceiling is a SUB-TAB ceiling now and is
-  // independent of the parent's ALL_ROLES ceiling (see SUB_TAB_ROLE_CEILINGS), so
-  // the page stays admin-only even though Population itself is open to every role.
-  { id: "population/adhoc-import", label: "استيراد بيانات مخصص", parentId: "population", allowedRoles: ADMIN_ONLY },
+  // Ad-hoc import ("ارفاق حالات استثنائية") moved under Population (2026-08-21): it
+  // used to be a stand-alone top-level "system" tab. Its ceiling is a SUB-TAB ceiling
+  // now and is independent of the parent's ALL_ROLES ceiling (see SUB_TAB_ROLE_CEILINGS).
+  //
+  // Widened from ADMIN_ONLY to OPERATIONAL_ROLES: a ceiling is a hard cap on what an
+  // admin may EVER grant, and an admin-only cap made the whole row a dead
+  // "مقيّد بالنظام" notice in the page-permissions matrix -- the owner's requirement is
+  // that the app be fully customizable from admin. Widening the ceiling makes the page
+  // GRANTABLE, not granted: createDefaultPermissions() still ships "none" for every
+  // managed role, and the two ad-hoc features stay off by default (FEATURE_DEFAULTS).
+  { id: "population/adhoc-import", label: "ارفاق حالات استثنائية", parentId: "population", allowedRoles: OPERATIONAL_ROLES },
   { id: "employee-workspace", label: "إدارة مساحة العمل", allowedRoles: ALL_ROLES, group: "workflow" },
   { id: "ew/xray-referrals", label: "صور الأشعة المحالة", parentId: "employee-workspace", allowedRoles: ALL_ROLES },
   { id: "ew/xray-results", label: "نتائج فحص الأشعة", parentId: "employee-workspace", allowedRoles: ALL_ROLES },

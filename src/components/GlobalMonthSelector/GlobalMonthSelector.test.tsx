@@ -69,6 +69,46 @@ describe("GlobalMonthSelector — new-month popover focus trap", () => {
   });
 });
 
+describe("GlobalMonthSelector — new-month popover placement", () => {
+  it("renders through AnchoredPopover into document.body", () => {
+    // The rail becomes `position: fixed; transform: translateX(...)` at <=640px,
+    // and a transform is a containing block for `position: fixed` descendants —
+    // so the popover has to leave the rail's subtree entirely, not just switch
+    // positioning scheme. It states its own `direction: rtl` in CSS because it
+    // no longer inherits it from `.gms-root`.
+    render(<GlobalMonthSelector allowCreate variant="sidebar" />);
+    fireEvent.click(screen.getByText(/شهر جديد/));
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.parentElement).toBe(document.body);
+    expect(dialog.closest(".gms-root")).toBeNull();
+    expect(dialog.classList.contains("ui-anchored-popover")).toBe(true);
+    expect(dialog.classList.contains("gms-popover")).toBe(true);
+  });
+
+  it("a click INSIDE the portalled popover does not dismiss it", () => {
+    // Regression guard for the portal move: the outside-click check tested only
+    // `.gms-new-wrap`, which no longer contains the popover — every click on the
+    // month grid would have read as an outside click and closed it immediately.
+    render(<GlobalMonthSelector allowCreate variant="sidebar" />);
+    fireEvent.click(screen.getByText(/شهر جديد/));
+
+    const dialog = screen.getByRole("dialog");
+    fireEvent.mouseDown(within(dialog).getByRole("button", { name: "مايو" }));
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("a click outside both the trigger and the popover still dismisses it", () => {
+    render(<GlobalMonthSelector allowCreate variant="sidebar" />);
+    fireEvent.click(screen.getByText(/شهر جديد/));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+});
+
 describe("GlobalMonthSelector — new-month confirm handler-time permission gate (cluster A)", () => {
   it("blocks startNewMonth when canMutate is false, even though can()=true left the button reachable", () => {
     permissionsMock.state.canMutate = false;

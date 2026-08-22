@@ -64,12 +64,50 @@ describe("user-management permission sections", () => {
       />
     );
 
-    // user-management (and the population/adhoc-import sub-tab) are admin-only by
-    // design; the four managed role columns must read as restricted, with no
-    // clickable control.
+    // user-management is admin-only by design; the four managed role columns must
+    // read as restricted, with no clickable control.
     expect(screen.getAllByText(SYSTEM_RESTRICTED_LABEL).length).toBeGreaterThanOrEqual(12);
     expect(screen.queryByRole("button", { name: /user-management:/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: /adhoc-import/ })).toBeNull();
+  });
+
+  it("renders ارفاق حالات استثنائية as a real, settable control for every role but guest", () => {
+    // The ceiling on `population/adhoc-import` used to be ADMIN_ONLY, which made the
+    // whole row a dead SYSTEM_RESTRICTED notice: an admin had no way to grant the page
+    // to anyone. It is now every operational role, so the cells must be actual
+    // segmented controls -- `guest` alone keeps the notice, deliberately.
+    const onUpdate = vi.fn();
+    render(
+      <PagePermissionsSection
+        permissions={createDefaultPermissions().map((permission) =>
+          permission.tabId === "population" && permission.role !== "admin"
+            ? { ...permission, access: "edit" as const }
+            : permission
+        )}
+        collapsedParents={new Set()}
+        canEdit
+        onToggleParent={vi.fn()}
+        onUpdate={onUpdate}
+      />
+    );
+
+    expect(screen.getByText("ارفاق حالات استثنائية")).toBeInTheDocument();
+    for (const [roleLabel, role] of [
+      ["موظف", "employee"],
+      ["مشرف", "supervisor"],
+      ["مدير", "manager"],
+    ] as const) {
+      const button = screen.getByRole("button", {
+        name: `${roleLabel}: population/adhoc-import - تعديل كامل`,
+      });
+      expect(button, role).toBeEnabled();
+      fireEvent.click(button);
+      expect(onUpdate).toHaveBeenLastCalledWith(role, "population/adhoc-import", "edit");
+    }
+    // guest is the read-only observer role: the page only ingests rows and assigns
+    // work, so its ceiling still excludes it and the cell stays a notice.
+    expect(
+      screen.queryByRole("button", { name: /^ضيف: population\/adhoc-import/ })
+    ).toBeNull();
   });
 
   it("renders reports and archive as live, settable controls for employees", () => {
@@ -186,7 +224,8 @@ describe("user-management permission sections", () => {
     // SUB-TAB, and the features cascade off POPULATION -- a page no role is
     // ceiling-locked out of. So the cells become ordinary toggles: recoverable
     // "grant the page first" for roles without population edit, live for the ones
-    // that have it. (The page itself stays admin-only via the sub-tab ceiling.)
+    // that have it. (The sub-tab's own ceiling now admits every role but guest, so
+    // page grant + feature toggle is a grant an admin can actually complete.)
     render(
       <FeaturePermissionsSection
         permissions={createDefaultPermissions()}

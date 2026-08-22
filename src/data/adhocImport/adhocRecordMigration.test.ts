@@ -6,7 +6,7 @@ import { safeWriteJson } from "../storage/safeWrite";
 import { getAdhocImportsDir } from "../workspace/workspacePaths";
 import { ADHOC_FIELD_CATALOG } from "./adhocFieldCatalog";
 import type { AdhocRecord, AdhocRow } from "./adhocImportModel";
-import { loadAdhocRecord } from "./adhocImportStorage";
+import { loadAdhocRecord, saveAdhocRecord } from "./adhocImportStorage";
 import { normalizeAdhocRecord, toIndexEntry, toLegacyRecord } from "./adhocRecordMigration";
 
 /**
@@ -214,6 +214,55 @@ describe("normalizeAdhocRecord", () => {
     // A `month` binding with no month name is not a binding.
     expect(record?.monthBinding).toEqual({ kind: "isolated" });
     expect(record?.fieldCatalog).toBe(ADHOC_FIELD_CATALOG);
+  });
+
+  // The two provenance sources used to be normalized away on read. That is not
+  // a cosmetic loss: `applyHistoricalImport` re-reads the record from disk
+  // before it writes, so a re-planned historical import resolved every row to a
+  // blank reviewer and refused itself — the exact "mapping that lives only in
+  // someone's memory" defect these fields were added to prevent.
+  it("keeps a historical import's reviewer and review-date sources across a disk round-trip", async () => {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    const saved = await saveAdhocRecord(
+      root,
+      v2Record([v2Row("لصق:2", "XR-1", [])], {
+        importId: "adh-hist-round-trip",
+        kind: "historical",
+        templateId: "tpl-2026",
+        templateVersion: 3,
+        mapping: {
+          fields: {},
+          valueMappings: {},
+          templateFields: { "f-verdict": { kind: "column", header: "النتيجة" } },
+          answeredBySource: { kind: "column", header: "المراجع" },
+          submittedAtSource: { kind: "column", header: "تاريخ المراجعة" },
+        },
+      })
+    );
+    expect(saved.mapping.answeredBySource).toEqual({ kind: "column", header: "المراجع" });
+
+    const reloaded = await loadAdhocRecord(root, "adh-hist-round-trip");
+    expect(reloaded?.mapping.answeredBySource).toEqual({ kind: "column", header: "المراجع" });
+    expect(reloaded?.mapping.submittedAtSource).toEqual({
+      kind: "column",
+      header: "تاريخ المراجعة",
+    });
+    expect(reloaded?.mapping.templateFields).toEqual({
+      "f-verdict": { kind: "column", header: "النتيجة" },
+    });
+  });
+
+  it("leaves both provenance sources absent when the document never carried them", async () => {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    await saveAdhocRecord(root, v2Record([v2Row("s1:2", "XR-1", [])], { importId: "adh-no-prov" }));
+
+    const reloaded = await loadAdhocRecord(root, "adh-no-prov");
+    // Absent, not `{kind:"none"}`: an ordinary sample import never answered
+    // these questions, and inventing an answer changes what the record claims.
+    expect(reloaded?.mapping.answeredBySource).toBeUndefined();
+    expect(reloaded?.mapping.submittedAtSource).toBeUndefined();
   });
 });
 

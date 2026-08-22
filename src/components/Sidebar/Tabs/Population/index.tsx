@@ -104,10 +104,11 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
   subTabs: [
     { id: "process", label: "معالجة البيانات" },
     { id: "browse",  label: "استعراض البيانات" },
-    // Moved here from its own top-level tab on 2026-08-21. Admin-only via the
-    // `population/adhoc-import` sub-tab ceiling in tabCatalog.ts; App.tsx filters
-    // the link out for every other role before it reaches the sidebar.
-    { id: "adhoc-import", label: "استيراد بيانات مخصص" },
+    // Moved here from its own top-level tab on 2026-08-21. Gated by the
+    // `population/adhoc-import` sub-tab ceiling in tabCatalog.ts (every role but
+    // guest, and off by default for all of them); App.tsx filters the link out for
+    // any role without the grant before it reaches the sidebar.
+    { id: "adhoc-import", label: "ارفاق حالات استثنائية" },
   ]
 };
 

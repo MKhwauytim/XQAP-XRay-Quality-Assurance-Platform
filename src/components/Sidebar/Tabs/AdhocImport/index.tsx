@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { usePermissions } from "../../../../auth/usePermissions";
 import { readSession } from "../../../../auth/authSession";
@@ -33,6 +33,14 @@ import {
   assignAdhocPlan,
   ensureAdhocSampleMaster,
 } from "../../../../data/adhocImport/adhocDistributionBridge";
+import {
+  applyHistoricalImport,
+  planHistoricalImport,
+  type HistoricalImportPlan,
+} from "../../../../data/adhocImport/adhocHistoricalImport";
+import { loadTemplate, loadTemplateIndex } from "../../../../data/templates/templateStorage";
+import { loadInspectionTemplateSelection } from "../../../../data/templates/templateSelectionStorage";
+import type { TemplateIndex, TemplateSchema } from "../../../../data/templates/templateTypes";
 import type {
   AdhocImportKind,
   AdhocIndexEntry,
@@ -46,6 +54,8 @@ import type {
 import MappingWorkbench from "./MappingWorkbench";
 import PasteSourceInput from "./PasteSourceInput";
 import AssignmentPanel from "./AssignmentPanel";
+import TemplateMappingPanel from "./TemplateMappingPanel";
+import HistoricalPanel from "./HistoricalPanel";
 import "./AdhocImport.css";
 
 /*
@@ -93,6 +103,17 @@ type EditorState = {
   /** Which sheet the mapping workbench previews (mapping itself is shared). */
   previewSheet: string;
   persisted: boolean;
+  /**
+   * `kind: "historical"` only — the inspection template the old answers map
+   * onto, loaded in full.
+   *
+   * The record snapshots only `templateId`/`templateVersion`; the schema itself
+   * is needed here because every step of the historical path is a function of
+   * its FIELDS — auto-detection, the per-phase mapping rail, and the coercion
+   * `planHistoricalImport` runs. Held in editor state rather than re-read per
+   * render so the plan recomputes on a mapping edit without a disk round-trip.
+   */
+  templateSchema: TemplateSchema | null;
 };
 
 function newRecord(operator: string): AdhocRecord {
@@ -116,9 +137,58 @@ function newRecord(operator: string): AdhocRecord {
  * Step 1 — source
  * ──────────────────────────────────────────────────────────────────────────── */
 
+type TemplatePickerProps = {
+  templates: TemplateIndex["templates"];
+  templateId: string | undefined;
+  disabled: boolean;
+  onTemplate: (templateId: string) => void;
+};
+
+/**
+ * Which inspection template the old answers map onto — a `kind: "historical"`
+ * question and nothing else's.
+ *
+ * The choice is stamped onto the record (`templateId` + `templateVersion`) and
+ * `applyHistoricalImport` refuses to write without it, because an `ItemAnswer`
+ * whose template is unknown cannot say what its `fieldId`s mean and a later
+ * template edit would silently re-interpret it.
+ */
+function TemplatePicker({ templates, templateId, disabled, onTemplate }: TemplatePickerProps) {
+  const L = useLabels();
+
+  return (
+    <div className="adhoc-field-row">
+      <label htmlFor="adhoc-hist-template">{L.adhoc_hist_template_label}</label>
+      {templates.length === 0 ? (
+        <p className="adhoc-import-empty">{L.adhoc_hist_template_empty}</p>
+      ) : (
+        <select
+          id="adhoc-hist-template"
+          aria-label={L.adhoc_hist_template_select_aria}
+          value={templateId ?? ""}
+          disabled={disabled}
+          onChange={(event) => onTemplate(event.target.value)}
+        >
+          <option value="">{L.adhoc_hist_template_placeholder}</option>
+          {templates.map((entry) => (
+            <option key={entry.templateId} value={entry.templateId}>
+              {fillTemplate(L.adhoc_hist_template_option, {
+                name: entry.templateName,
+                version: String(entry.version),
+              })}
+            </option>
+          ))}
+        </select>
+      )}
+      <p className="adhoc-import-scope-note">{L.adhoc_hist_template_note}</p>
+    </div>
+  );
+}
+
 type SourceStepProps = {
   editor: EditorState;
   months: MonthFolderInfo[];
+  templates: TemplateIndex["templates"];
   disabled: boolean;
   reading: boolean;
   onFile: (file: File) => void;
@@ -126,12 +196,14 @@ type SourceStepProps = {
   onSourceMode: (mode: SourceMode) => void;
   onToggleSheet: (sheetName: string) => void;
   onKind: (kind: AdhocImportKind) => void;
+  onTemplate: (templateId: string) => void;
   onBinding: (binding: AdhocMonthBinding) => void;
 };
 
 function SourceStep({
   editor,
   months,
+  templates,
   disabled,
   reading,
   onFile,
@@ -139,6 +211,7 @@ function SourceStep({
   onSourceMode,
   onToggleSheet,
   onKind,
+  onTemplate,
   onBinding,
 }: SourceStepProps) {
   const L = useLabels();
@@ -244,6 +317,15 @@ function SourceStep({
         </select>
       </div>
 
+      {record.kind === "historical" && (
+        <TemplatePicker
+          templates={templates}
+          templateId={record.templateId}
+          disabled={disabled}
+          onTemplate={onTemplate}
+        />
+      )}
+
       <fieldset className="adhoc-field-group">
         <legend>{L.adhoc_binding_label}</legend>
         <label className="adhoc-radio">
@@ -330,7 +412,14 @@ function SourceStep({
 type MappingStepProps = {
   editor: EditorState;
   disabled: boolean;
-  onMapping: (next: ImportMapping) => void;
+  /**
+   * An UPDATER. Step 2 now hosts TWO editors of one `ImportMapping` — the
+   * catalog workbench and, for a historical import, the template panel — and
+   * their auto-detection effects can land in the same commit. A handler that
+   * took a finished value would let whichever ran second overwrite the first
+   * from a `mapping` prop captured before either wrote.
+   */
+  onMapping: (update: (previous: ImportMapping) => ImportMapping) => void;
   onPreviewSheet: (sheetName: string) => void;
 };
 
@@ -387,9 +476,36 @@ function MappingStep({ editor, disabled, onMapping, onPreviewSheet }: MappingSte
         table={previewTable}
         catalog={editor.record.fieldCatalog}
         mapping={editor.record.mapping}
-        onMappingChange={onMapping}
+        // The workbench owns `fields`/`valueMappings` only, but its
+        // auto-detection returns a WHOLE fresh mapping — so the historical half
+        // is carried across explicitly rather than dropped.
+        onMappingChange={(next) =>
+          onMapping((previous) => ({
+            ...next,
+            templateFields: previous.templateFields,
+            answeredBySource: previous.answeredBySource,
+            submittedAtSource: previous.submittedAtSource,
+          }))
+        }
         disabled={disabled}
       />
+
+      {/* The template half sits BELOW the catalog half, and only for a
+          historical import: it maps what the reviewer already answered, which
+          the other two kinds have no such thing as. */}
+      {editor.record.kind === "historical" &&
+        (editor.templateSchema === null ? (
+          <p className="adhoc-import-empty">{L.adhoc_hist_map_no_template}</p>
+        ) : (
+          <TemplateMappingPanel
+            schema={editor.templateSchema}
+            headers={previewTable.headers}
+            mapping={editor.record.mapping}
+            importedAt={editor.record.importedAt}
+            onMappingChange={onMapping}
+            disabled={disabled}
+          />
+        ))}
     </section>
   );
 }
@@ -588,10 +704,14 @@ export default function AdhocImportTab() {
 
   const [imports, setImports] = useState<AdhocIndexEntry[]>([]);
   const [months, setMonths] = useState<MonthFolderInfo[]>([]);
+  const [templates, setTemplates] = useState<TemplateIndex["templates"]>([]);
+  /** The workspace's active inspection template — the default a historical import proposes. */
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [reading, setReading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [assigning, setAssigning] = useState(false);
+  const [importingHistorical, setImportingHistorical] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [notes, setNotes] = useState<string[]>([]);
@@ -629,6 +749,12 @@ export default function AdhocImportTab() {
     const timer = window.setTimeout(() => {
       void refreshIndex();
       void listMonthFolders(directoryHandle).then(setMonths);
+      // Both are cheap index reads and both are needed the moment "دراسة سابقة
+      // مُجابة" is picked in step 1, which is a click away from mount.
+      void loadTemplateIndex(directoryHandle).then((index) => setTemplates(index.templates));
+      void loadInspectionTemplateSelection(directoryHandle).then((selection) =>
+        setSelectedTemplateId(selection?.templateId ?? "")
+      );
     }, 0);
     return () => window.clearTimeout(timer);
   }, [workspaceReady, directoryHandle, refreshIndex]);
@@ -643,6 +769,25 @@ export default function AdhocImportTab() {
       void refreshIndex();
     });
   }, [workspaceReady, refreshIndex]);
+
+  /**
+   * The one mapping writer, in functional form so two concurrent editors of the
+   * same `ImportMapping` (see `MappingStepProps.onMapping`) compose instead of
+   * clobbering each other.
+   */
+  const updateMapping = useCallback(
+    (update: (previous: ImportMapping) => ImportMapping) => {
+      setEditor((previous) =>
+        previous === null
+          ? previous
+          : {
+              ...previous,
+              record: { ...previous.record, mapping: update(previous.record.mapping) },
+            }
+      );
+    },
+    []
+  );
 
   const patchRecord = useCallback((patch: Partial<AdhocRecord>) => {
     setEditor((previous) =>
@@ -669,6 +814,7 @@ export default function AdhocImportTab() {
       activeSheets: [],
       previewSheet: "",
       persisted: false,
+      templateSchema: null,
     });
   }, [canIngest, operator, L]);
 
@@ -677,6 +823,13 @@ export default function AdhocImportTab() {
       if (!directoryHandle) return;
       const record = await loadAdhocRecord(directoryHandle, importId);
       if (record === null) return;
+      // A historical import's own template, so the review step describes the
+      // same schema the mapping was authored against rather than the
+      // workspace's current selection.
+      const schema =
+        record.kind === "historical" && record.templateId !== undefined
+          ? await loadTemplate(directoryHandle, record.templateId)
+          : null;
       setError(null);
       setNotice(null);
       setNotes([]);
@@ -689,6 +842,7 @@ export default function AdhocImportTab() {
         activeSheets: [],
         previewSheet: "",
         persisted: true,
+        templateSchema: schema,
       });
     },
     [directoryHandle]
@@ -777,6 +931,69 @@ export default function AdhocImportTab() {
     });
   }, []);
 
+  /**
+   * Binds the import to one inspection template, in full.
+   *
+   * Switching template also CLEARS `mapping.templateFields`, because its keys
+   * are `fieldId`s of the template being left behind — carrying them over would
+   * leave bindings pointing at questions the new schema does not ask, and
+   * `planHistoricalImport` would then coerce every cell against the wrong field
+   * list. Clearing also re-arms `TemplateMappingPanel`'s auto-detection, which
+   * is keyed by template id for the same reason.
+   */
+  const handleTemplate = useCallback(
+    async (templateId: string) => {
+      if (!directoryHandle) return;
+      const schema = templateId === "" ? null : await loadTemplate(directoryHandle, templateId);
+      setEditor((previous) =>
+        previous === null
+          ? previous
+          : {
+              ...previous,
+              templateSchema: schema,
+              record: {
+                ...previous.record,
+                templateId: schema?.templateId,
+                templateVersion: schema?.version,
+                mapping: { ...previous.record.mapping, templateFields: {} },
+              },
+            }
+      );
+    },
+    [directoryHandle]
+  );
+
+  /**
+   * Proposes the workspace's active inspection template once a historical
+   * import has none, so the common case needs no second decision.
+   *
+   * An effect rather than part of the kind handler because the template index
+   * and the workspace selection both arrive asynchronously: a kind picked
+   * before they land would silently get no proposal at all.
+   *
+   * The ref keys the proposal to the import, so it fires exactly once per
+   * import — an admin who then clears the picker has made a deliberate choice
+   * and is not overruled on the next render, and a template that fails to load
+   * cannot spin the effect. It is claimed INSIDE the timeout, not beside it: a
+   * dependency change that cancels a pending proposal must leave the next run
+   * free to schedule another, or the one cancelled proposal is lost for good.
+   */
+  const proposedTemplateFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (editor === null || editor.record.kind !== "historical") return;
+    if (editor.record.templateId !== undefined) return;
+    const importId = editor.record.importId;
+    if (proposedTemplateFor.current === importId) return;
+    const fallback = selectedTemplateId || templates[0]?.templateId || "";
+    if (fallback === "") return;
+    const timer = window.setTimeout(() => {
+      if (proposedTemplateFor.current === importId) return;
+      proposedTemplateFor.current = importId;
+      void handleTemplate(fallback);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [editor, selectedTemplateId, templates, handleTemplate]);
+
   /* ── step transitions ───────────────────────────────────────────────────── */
 
   const includedTables = useMemo(
@@ -796,6 +1013,52 @@ export default function AdhocImportTab() {
           ),
     [editor]
   );
+
+  const isHistorical = editor?.record.kind === "historical";
+
+  /**
+   * The ORIGINAL cells of every included row, keyed exactly as `projectTable`
+   * keys its rows (`${sheetName}:${sourceRowNumber}`).
+   *
+   * `planHistoricalImport` needs these rather than `row.mapped`: the template
+   * answers, the reviewer name and the review date all come from columns the
+   * population field catalog knows nothing about, so `mapped` cannot carry them.
+   *
+   * Only the in-memory source tables can supply them. `AdhocRow` persists just
+   * its MAPPED values, so an import re-opened from disk has no answer cells left
+   * to plan from — a real limit of the record format, reported in step 3 as
+   * `adhoc_hist_no_source` rather than shown as an empty plan.
+   */
+  const rawValuesByRowKey = useMemo(() => {
+    const map: Record<string, Record<string, unknown>> = {};
+    for (const table of includedTables) {
+      for (const row of table.rows) {
+        map[`${table.sheetName}:${row.sourceRowNumber}`] = row.values;
+      }
+    }
+    return map;
+  }, [includedTables]);
+
+  const historicalPlan = useMemo<HistoricalImportPlan | null>(() => {
+    if (editor === null || !isHistorical) return null;
+    if (editor.templateSchema === null) return null;
+    if (Object.keys(rawValuesByRowKey).length === 0) return null;
+    // Pure and cheap, and re-run on every mapping edit on purpose: the errors it
+    // returns (an unresolvable reviewer above all) are what the step-3 button
+    // gates on, so a stale plan would be a plan that permits a bad write.
+    return planHistoricalImport({
+      record: editor.record,
+      schema: editor.templateSchema,
+      rawValuesByRowKey,
+    });
+  }, [editor, isHistorical, rawValuesByRowKey]);
+
+  const historicalUnavailable = useMemo(() => {
+    if (editor === null || !isHistorical) return null;
+    if (editor.templateSchema === null) return L.adhoc_hist_map_no_template;
+    if (Object.keys(rawValuesByRowKey).length === 0) return L.adhoc_hist_no_source;
+    return null;
+  }, [editor, isHistorical, rawValuesByRowKey, L]);
 
   const canAdvance = useMemo(() => {
     if (editor === null) return false;
@@ -996,6 +1259,84 @@ export default function AdhocImportTab() {
     [editor, directoryHandle, canAssign, persist, operator, refreshIndex, L]
   );
 
+  /**
+   * Commits a historical study as ALREADY-COMPLETED work.
+   *
+   * Gated on `adhoc-import.assign`, not on `.ingest`. The two capabilities split
+   * on what reaches the rest of the app: `.ingest` covers reading a file and
+   * mapping its columns, which stays inside the import's own record, while
+   * `.assign` covers "تعيين صفوف من ملف مستورد يدوياً لموظف عبر سجل التوزيع
+   * القياسي" — and that is exactly what this does. `applyHistoricalImport`
+   * appends `assigned` + `completed` events to the distribution log and writes
+   * an `ItemAnswer` into another user's answer file; the fact that the work is
+   * already finished makes its footprint larger than an ordinary assignment's,
+   * not smaller. `persist` still applies `.ingest` for the record write itself,
+   * exactly as the ordinary assign path does for an unsaved import.
+   */
+  const handleHistoricalImport = useCallback(async () => {
+    if (editor === null || !directoryHandle) return;
+    // Handler-boundary capability check — the panel's hidden button is only a hint.
+    if (!canAssign) {
+      setError(L.adhoc_import_denied);
+      return;
+    }
+    if (editor.record.status === "closed") {
+      setError(L.adhoc_import_assign_closed);
+      return;
+    }
+    // Blocking pre-flight: an unresolvable reviewer, a blank reviewer or a
+    // template mismatch must stop the whole import before any write, never be
+    // discovered halfway through one.
+    if (historicalPlan === null || historicalPlan.errors.length > 0) return;
+
+    setError(null);
+    setNotice(null);
+    setNotes([]);
+    setImportingHistorical(true);
+    try {
+      const base = editor.persisted ? editor.record : await persist(editor.record);
+      if (base === null) return;
+      const result = await applyHistoricalImport(
+        directoryHandle,
+        base,
+        historicalPlan.plan,
+        operator
+      );
+      if (!result.ok) {
+        setEditor((previous) =>
+          previous === null ? previous : { ...previous, record: base, persisted: true }
+        );
+        setError(fillTemplate(L.adhoc_hist_import_failed, { error: result.error }));
+        return;
+      }
+      setEditor((previous) =>
+        previous === null ? previous : { ...previous, record: result.record, persisted: true }
+      );
+      let message = fillTemplate(L.adhoc_hist_import_success, {
+        count: String(result.importedCount),
+      });
+      if (result.skippedCount > 0) {
+        message +=
+          " " + fillTemplate(L.adhoc_hist_import_skipped, { count: String(result.skippedCount) });
+      }
+      setNotice(message);
+      // The warnings are NOT re-announced here. `HistoricalPanel` renders the
+      // live plan's warnings, whole-import and per-row alike, and it keeps
+      // rendering them after a successful run — copying them into the notes
+      // list as well would print every one of them twice on the same screen.
+      await refreshIndex();
+    } catch (err) {
+      logError("AdhocImport.historical", err);
+      setError(
+        fillTemplate(L.adhoc_hist_import_failed, {
+          error: err instanceof Error ? err.message : String(err),
+        })
+      );
+    } finally {
+      setImportingHistorical(false);
+    }
+  }, [editor, directoryHandle, canAssign, historicalPlan, persist, operator, refreshIndex, L]);
+
   const applyImportStatusToggle = useCallback(async () => {
     if (editor === null || !canIngest) return;
     setShowCloseConfirm(false);
@@ -1037,7 +1378,13 @@ export default function AdhocImportTab() {
     );
   }
 
-  const stepTitles = [L.adhoc_wizard_step1_title, L.adhoc_wizard_step2_title, L.adhoc_wizard_step3_title];
+  const stepTitles = [
+    L.adhoc_wizard_step1_title,
+    L.adhoc_wizard_step2_title,
+    // Step 3 of a historical import is not a distribution step — it records
+    // finished work — so the rail says so rather than promising an assignment.
+    isHistorical ? L.adhoc_wizard_step3_title_historical : L.adhoc_wizard_step3_title,
+  ];
 
   return (
     <div className="adhoc-import-tab">
@@ -1136,6 +1483,7 @@ export default function AdhocImportTab() {
             <SourceStep
               editor={editor}
               months={months}
+              templates={templates}
               disabled={!canIngest}
               reading={reading}
               onFile={(file) => void handleFile(file)}
@@ -1143,6 +1491,7 @@ export default function AdhocImportTab() {
               onSourceMode={handleSourceMode}
               onToggleSheet={handleToggleSheet}
               onKind={(kind) => patchRecord({ kind })}
+              onTemplate={(templateId) => void handleTemplate(templateId)}
               onBinding={(monthBinding) => patchRecord({ monthBinding })}
             />
           )}
@@ -1151,7 +1500,7 @@ export default function AdhocImportTab() {
             <MappingStep
               editor={editor}
               disabled={!canIngest}
-              onMapping={(mapping) => patchRecord({ mapping })}
+              onMapping={updateMapping}
               onPreviewSheet={(previewSheet) =>
                 setEditor((previous) => (previous === null ? previous : { ...previous, previewSheet }))
               }
@@ -1193,7 +1542,9 @@ export default function AdhocImportTab() {
                     {saving ? L.adhoc_review_saving : L.adhoc_review_save_button}
                   </button>
                 )}
-                {canAssign && (
+                {/* Row selection is a DISTRIBUTION control: a historical file's
+                    rows are not being handed out, so it says nothing there. */}
+                {canAssign && !isHistorical && (
                   <>
                     <button type="button" onClick={selectAllAssignable}>
                       {L.adhoc_import_select_all}
@@ -1201,25 +1552,36 @@ export default function AdhocImportTab() {
                     <button type="button" onClick={clearSelection}>
                       {L.adhoc_import_clear_selection}
                     </button>
+                    <span>
+                      {fillTemplate(L.adhoc_import_selected_count, {
+                        count: String(selectedRowKeys.size),
+                      })}
+                    </span>
                   </>
                 )}
-                <span>
-                  {fillTemplate(L.adhoc_import_selected_count, {
-                    count: String(selectedRowKeys.size),
-                  })}
-                </span>
               </div>
 
-              <AssignmentPanel
-                importId={editor.record.importId}
-                rows={editor.record.rows}
-                employees={employees}
-                explicitRowKeys={[...selectedRowKeys]}
-                canAssign={canAssign}
-                disabled={editor.record.status === "closed"}
-                busy={assigning}
-                onAssign={(plan) => void handleAssign(plan)}
-              />
+              {isHistorical ? (
+                <HistoricalPanel
+                  plan={historicalPlan}
+                  unavailableReason={historicalUnavailable}
+                  busy={importingHistorical}
+                  disabled={editor.record.status === "closed"}
+                  canImport={canAssign}
+                  onImport={() => void handleHistoricalImport()}
+                />
+              ) : (
+                <AssignmentPanel
+                  importId={editor.record.importId}
+                  rows={editor.record.rows}
+                  employees={employees}
+                  explicitRowKeys={[...selectedRowKeys]}
+                  canAssign={canAssign}
+                  disabled={editor.record.status === "closed"}
+                  busy={assigning}
+                  onAssign={(plan) => void handleAssign(plan)}
+                />
+              )}
             </>
           )}
 
