@@ -30,6 +30,7 @@ import {
   tagErrorOnce,
   type ErrorCode
 } from "../storage/errorCodes";
+import { logError } from "../storage/errorLogger";
 import { setReadOnlyMode } from "../storage/readOnlyMode";
 import { WORKSPACE_PERMISSION_LOST_EVENT } from "../storage/workspaceWriteAccess";
 
@@ -49,15 +50,35 @@ import {
   loadLastWorkspace,
   saveLastWorkspace
 } from "./workspacePersistence";
+import { mountSimulatedWorkspace, readSimModeConfig } from "../../dev/simMode";
 
 type WorkspaceProviderProps = {
   children: ReactNode;
 };
 
+/**
+ * DEV-ONLY: the `?sim=1` request carried by this page load, or `null`.
+ *
+ * Read once at module scope because the URL cannot change without a reload, and
+ * because the very first render already has to know: the initial `status` and
+ * `isSupported` below both branch on it, so an async answer would let the
+ * folder-picker screen paint before the simulated workspace took over.
+ *
+ * `import.meta.env.DEV` is a compile-time constant, so a production build folds
+ * this to `null` and drops the call. `simMode.ts` is additionally swapped for an
+ * inert stub at build time (see `src/dev/simModePlugin.ts`), so the simulated
+ * workspace and its seed data are not in the production bundle at all.
+ */
+const SIM_MODE_CONFIG = import.meta.env.DEV ? readSimModeConfig() : null;
+
 export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
-  const [status, setStatus] = useState<WorkspaceStatus>(() =>
-    isFileSystemAccessSupported() ? "not_selected" : "unsupported_browser"
-  );
+  const [status, setStatus] = useState<WorkspaceStatus>(() => {
+    // The simulated workspace never touches the File System Access API, so it
+    // must not be gated on it — a browser without `showDirectoryPicker` (or a
+    // headless one that hides it) would otherwise land on the unsupported card.
+    if (SIM_MODE_CONFIG) return "checking";
+    return isFileSystemAccessSupported() ? "not_selected" : "unsupported_browser";
+  });
 
   const [directoryHandle, setDirectoryHandle] =
     useState<DirectoryHandleLike | null>(null);
@@ -79,11 +100,12 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
   const [invalidItems, setInvalidItems] = useState<string[]>([]);
   const [pendingReconnect, setPendingReconnect] = useState(false);
 
-  const [message, setMessage] = useState(
-    isFileSystemAccessSupported()
+  const [message, setMessage] = useState(() => {
+    if (SIM_MODE_CONFIG) return "جارٍ تحضير مساحة عمل المحاكاة...";
+    return isFileSystemAccessSupported()
       ? "لم يتم اختيار مساحة العمل بعد."
-      : "المتصفح الحالي لا يدعم الوصول المباشر إلى ملفات النظام."
-  );
+      : "المتصفح الحالي لا يدعم الوصول المباشر إلى ملفات النظام.";
+  });
 
   const applyWorkspaceHandle = useCallback(async (
     handle: DirectoryHandleLike,
@@ -131,7 +153,52 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     }
   }, []);
 
+  // ── DEV-ONLY: `?sim=1` mounts the writable simulated workspace ────────────
+  // Deliberately does NOT end with `setReadOnlyMode(true)` the way
+  // `enterDemoWorkspace` does — read-only is precisely what makes the demo
+  // workspace useless for driving a real flow, since every answer, reassignment
+  // and import is rejected. `setReadOnlyMode(false)` is still called so a
+  // previously-entered demo session cannot leave the flag on.
+  //
+  // Whole body is compile-time dead in a production build (`import.meta.env.DEV`
+  // folds to `false`), and `simMode.ts` is swapped for an inert stub at build
+  // time on top of that. See `docs/development/SIMULATED_WORKSPACE.md`.
   useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    if (!SIM_MODE_CONFIG) return;
+
+    let cancelled = false;
+
+    void mountSimulatedWorkspace()
+      .then(async (handle) => {
+        if (cancelled) return;
+        setReadOnlyMode(false);
+        await applyWorkspaceHandle(handle, { persist: false });
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        // Deliberately NOT a coded error: every XQ-* code documents a
+        // user-facing production failure mode, and stamping one on a dev-only
+        // path would put "enterDemoWorkspace failed" in a support report for
+        // something that cannot happen in a shipped build.
+        logError("workspace:sim", error);
+        setStatus("error");
+        setMessage(
+          `Simulated workspace failed to mount: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applyWorkspaceHandle]);
+
+  useEffect(() => {
+    // The simulated workspace owns the mount in sim mode; the last-workspace
+    // restore must not race it for `status`/`directoryHandle`.
+    if (import.meta.env.DEV && SIM_MODE_CONFIG) return;
     if (!isFileSystemAccessSupported()) return;
 
     let cancelled = false;
@@ -456,7 +523,9 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       missingItems,
       invalidItems,
       message,
-      isSupported: isFileSystemAccessSupported(),
+      // Sim mode runs entirely on an in-memory handle, so the File System
+      // Access API's absence is irrelevant there (see the initial `status`).
+      isSupported: SIM_MODE_CONFIG ? true : isFileSystemAccessSupported(),
       pendingReconnect,
       usersHydrated,
       selectWorkspace,

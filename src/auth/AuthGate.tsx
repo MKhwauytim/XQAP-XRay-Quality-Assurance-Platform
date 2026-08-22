@@ -56,6 +56,10 @@ import {
 } from "./userManagement";
 import { ORGANIZATION_PATH_TEXT, ZATCA_LOGO_URL } from "../branding/organization";
 import { DEMO_WORKSPACE_NAME } from "../data/workspace/demoWorkspace";
+import {
+  readSimModeConfig,
+  SIM_WORKSPACE_HANDLE_NAME
+} from "../dev/simMode";
 import { useWorkspace } from "../data/workspace/useWorkspace";
 import { syncUserManagementToDisk } from "../data/workspace/userSync";
 import { codedMessage, logCodedError } from "../data/storage/errorCodes";
@@ -229,6 +233,53 @@ export default function AuthGate({ children }: AuthGateProps) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- derive the demo session from the mounted demo workspace; guarded by !session so it settles in one step
       setSession(demoSession);
     }
+  }, [directoryHandle, session]);
+
+  // ── DEV-ONLY: auto-login for the `?sim=1` simulated workspace ────────────
+  // Same shape as the demo auto-login above (keyed on the mounted handle's name
+  // so it survives a StrictMode remount and cannot fire once the user logs out),
+  // with two deliberate differences:
+  //
+  //   • the session carries NO `mode: "demo"`. That flag forces
+  //     `usePermissions().isReadOnly` true, which would block every mutation the
+  //     simulation exists to exercise.
+  //   • because it is an ordinary session, it is subject to AuthGate's
+  //     `stillHasManagedUser` re-validation once the workspace hydrates — which
+  //     is why the seed writes a real, active managed account for every role
+  //     `?role=` accepts (see `SIM_ROLE_USERNAMES` in src/dev/simWorkspace.ts).
+  //     `role=admin` maps to the bootstrap admin, exempt by design.
+  //
+  // Compile-time dead in a production build, and `simMode.ts` resolves to an
+  // inert stub there whose SIM_WORKSPACE_HANDLE_NAME is "" — a name no handle
+  // can have — so even a caller that lost its guard could not match.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    if (!SIM_WORKSPACE_HANDLE_NAME) return;
+    if (directoryHandle?.name !== SIM_WORKSPACE_HANDLE_NAME) return;
+    const simConfig = readSimModeConfig();
+    if (!simConfig) return;
+    // NOT `if (session) return`. `writeSession` persists an ordinary session to
+    // localStorage, so navigating from `?sim=1&role=employee` to
+    // `?sim=1&role=admin` in the same browser context restores the PREVIOUS
+    // run's session and the new `role=` would be silently ignored — which is
+    // precisely the move a Playwright suite makes between scenarios. Re-issue
+    // whenever the persisted identity disagrees with the URL; matching sessions
+    // fall through, so this still settles in one step.
+    if (session?.role === simConfig.role && session.username === simConfig.username) {
+      return;
+    }
+
+    const simSession: AuthSession = {
+      role: simConfig.role,
+      username: simConfig.username,
+      // Wall-clock on purpose: authSession's 7-day TTL rejects a fixed past
+      // timestamp. This is session identity, not seeded workspace data — the
+      // seed itself never reads the clock.
+      loginAt: new Date().toISOString()
+    };
+    writeSession(simSession);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- derive the sim session from the mounted sim workspace; the identity guard above makes it settle in one step
+    setSession(simSession);
   }, [directoryHandle, session]);
 
   useEffect(() => {

@@ -1,0 +1,23 @@
+# CodeQL scan scope for XQAP.
+#
+# The exclusions below are about signal, not about hiding problems: everything
+# excluded is either generated, vendored, or test-only, and an alert in any of
+# them would be noise a reviewer has to dismiss by hand every week.
+name: XQAP CodeQL config
+
+paths-ignore:
+  # The committed release build — one self-contained ~3.8 MB index.html with the
+  # whole app inlined. Scanning it re-reports every src/ finding against
+  # unreadable generated code.
+  - dist
+  # The vendored SheetJS tarball (see vendor/README.md). Upgrades follow the
+  # documented procedure; a CodeQL alert here has no actionable fix in this repo.
+  - vendor
+  # Documentation, including the edit logs.
+  - docs
+  # Dev-only preview entry points that never ship in dist/index.html.
+  - src/dev
+  # Test files: fixtures deliberately contain hard-coded credentials and
+  # hand-built payloads, which is exactly what the security queries flag.
+  - "**/*.test.ts"
+  - "**/*.test.tsx"

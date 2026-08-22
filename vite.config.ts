@@ -5,6 +5,7 @@ import { viteSingleFile } from "vite-plugin-singlefile";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { deckStyleChoicesPlugin } from "./src/dev/deckStyleChoicesPlugin";
+import { simModePlugin } from "./src/dev/simModePlugin";
 
 // Single source of truth for the app version: read it straight from package.json rather than
 // hand-maintaining a separate version.ts that can drift out of sync (D7).
@@ -28,6 +29,9 @@ export default defineConfig({
     babel({ presets: [reactCompilerPreset()] }),
     viteSingleFile(),
     deckStyleChoicesPlugin(),
+    // Build-only: rewrites src/dev/simMode.ts to its inert production stub so the
+    // writable, picker-free `?sim=1` workspace can never reach dist/index.html.
+    simModePlugin(),
   ],
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
