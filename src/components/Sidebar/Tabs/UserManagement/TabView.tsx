@@ -10,6 +10,8 @@ import {
 } from "react";
 
 import type { AuthRole } from "../../../../auth/authTypes";
+import { resolveInitialSubTab } from "../../../../app/subTabSelection";
+import { useSubTabSelection } from "../../../../app/useSubTabSelection";
 import { readSession } from "../../../../auth/authSession";
 import { usePermissions } from "../../../../auth/usePermissions";
 import { logRejection } from "../../../../data/storage/errorLogger";
@@ -70,6 +72,9 @@ const KNOWN_USER_MANAGEMENT_SECTIONS = new Set<PageSection>([
   "actions",
 ]);
 
+/** This tab's id in the sidebar rail / sub-tab selection store. */
+const TAB_ID = "user-management";
+
 // ── Coalesced disk writer ─────────────────────────────────────────────────────
 
 type MutableRef<T> = { current: T };
@@ -117,7 +122,12 @@ export default function UserManagementTab() {
   const [state, setState] = useState<UserManagementState>(() =>
     readUserManagementState()
   );
-  const [section, setSection] = useState<PageSection>("users");
+  // Opens on the rail's own selection when it has one. This tab is a
+  // React.lazy boundary, so its very first visit is the case where a sub-tab
+  // click cannot reach a listener at all -- see src/app/subTabSelection.ts.
+  const [section, setSection] = useState<PageSection>(() =>
+    resolveInitialSubTab(TAB_ID, KNOWN_USER_MANAGEMENT_SECTIONS as ReadonlySet<string>, "users")
+  );
   const [featureGroup, setFeatureGroup] = useState<FeatureSubGroup>("workspace");
   const [form, setForm] = useState<UserFormState>(INITIAL_USER_FORM);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -176,16 +186,17 @@ export default function UserManagementTab() {
     window.dispatchEvent(new CustomEvent("pop-subtab-changed", { detail: section }));
   }, [section]);
 
-  useEffect(() => {
-    function handler(e: CustomEvent<{ subTabId: string }>) {
-      const { subTabId } = e.detail;
-      if (KNOWN_USER_MANAGEMENT_SECTIONS.has(subTabId as PageSection)) {
-        setSection(subTabId as PageSection);
-      }
-    }
-    window.addEventListener("pop-set-subtab", handler as EventListener);
-    return () => window.removeEventListener("pop-set-subtab", handler as EventListener);
+  // Follow the sidebar rail: its live events, plus the one selection that may
+  // have been made before this tab mounted (see useSubTabSelection). Only ids
+  // in KNOWN_USER_MANAGEMENT_SECTIONS reach this callback.
+  const applySectionFromRail = useCallback((subTabId: string) => {
+    setSection(subTabId as PageSection);
   }, []);
+  useSubTabSelection(
+    TAB_ID,
+    KNOWN_USER_MANAGEMENT_SECTIONS as ReadonlySet<string>,
+    applySectionFromRail
+  );
 
   useEffect(() => {
     if (section !== "activity") return;

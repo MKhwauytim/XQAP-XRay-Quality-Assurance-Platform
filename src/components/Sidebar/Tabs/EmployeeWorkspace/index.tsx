@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LayoutDashboard } from "lucide-react";
 import type { SidebarTabModule } from "../tabTypes";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
@@ -7,6 +7,8 @@ import { usePermissions } from "../../../../auth/usePermissions";
 import { tabAllowedRoles } from "../../../../auth/tabCatalog";
 import { hasRequiredSubTabFeature } from "../../../../auth/subTabFeatureGate";
 import { AccessDenied } from "../../../PermissionGuard";
+import { resolveInitialSubTab } from "../../../../app/subTabSelection";
+import { useSubTabSelection } from "../../../../app/useSubTabSelection";
 import { touchVisitedTabs } from "../../../../app/visitedTabs";
 import { useLabels } from "../../../../data/labels/useLabels";
 import { LoadingState } from "../../../StateViews/StateViews";
@@ -36,6 +38,9 @@ const KNOWN_SUB_TABS = new Set<string>([
   SUB_TAB_INSPECTION_FORM,
 ]);
 
+/** This tab's id in the sidebar rail / sub-tab selection store. */
+const TAB_ID = "employee-workspace";
+
 // ── Tab config (auto-registered by tabRegistry) ───────────────────────────────
 
 export const tabConfig: SidebarTabModule["tabConfig"] = {
@@ -58,7 +63,12 @@ export default function EmployeeWorkspaceTab() {
   const { directoryHandle } = useWorkspace();
   const { canAccessTab, role, featurePermissions } = usePermissions();
   const labels = useLabels();
-  const [activeSubTab, setActiveSubTab] = useState<WorkspaceSubTab>(SUB_TAB_XRAY_REFERRALS);
+  // Opens on whatever the rail last selected for this tab -- a click made
+  // while this component was unmounted reaches it no other way -- and on the
+  // reviewer's own queue otherwise.
+  const [activeSubTab, setActiveSubTab] = useState<WorkspaceSubTab>(() =>
+    resolveInitialSubTab(TAB_ID, KNOWN_SUB_TABS, SUB_TAB_XRAY_REFERRALS)
+  );
   // Once a sub-tab has been the active tab, keep it mounted (hidden, not
   // unmounted) so switching back doesn't re-trigger its own data load — §T.
   // Adjusted during render (not in an effect) per React's "adjusting state
@@ -75,6 +85,10 @@ export default function EmployeeWorkspaceTab() {
   // landing correction below is a *landing* fix only: after a deliberate
   // navigation the user stays put even if that sub-tab's permission is
   // revoked mid-session, rather than being silently teleported elsewhere.
+  // Deliberately still false when the landing sub-tab came from the rail's
+  // recorded selection: the permission-aware correction below has to be able
+  // to move a user off a sub-tab they may not view, and a recovered selection
+  // is the one case where the click and this mount are not the same moment.
   const userNavigatedRef = useRef(false);
 
   // Keep sidebar in sync whenever the active subtab changes
@@ -82,18 +96,14 @@ export default function EmployeeWorkspaceTab() {
     window.dispatchEvent(new CustomEvent("pop-subtab-changed", { detail: activeSubTab }));
   }, [activeSubTab]);
 
-  // Listen for sub-tab selection events dispatched by Sidebar
-  useEffect(() => {
-    function handler(e: CustomEvent<{ subTabId: string }>) {
-      const { subTabId } = e.detail;
-      if (KNOWN_SUB_TABS.has(subTabId)) {
-        userNavigatedRef.current = true;
-        setActiveSubTab(subTabId as WorkspaceSubTab);
-      }
-    }
-    window.addEventListener("pop-set-subtab", handler as EventListener);
-    return () => window.removeEventListener("pop-set-subtab", handler as EventListener);
+  // Follow the sidebar rail: its live events, plus the one selection that may
+  // have been made before this tab mounted (see useSubTabSelection). Only ids
+  // in KNOWN_SUB_TABS reach this callback.
+  const applySubTabFromRail = useCallback((subTabId: string) => {
+    userNavigatedRef.current = true;
+    setActiveSubTab(subTabId as WorkspaceSubTab);
   }, []);
+  useSubTabSelection(TAB_ID, KNOWN_SUB_TABS, applySubTabFromRail);
 
   // Stable element references (recomputed only when directoryHandle changes)
   // so switching activeSubTab back and forth — which re-renders

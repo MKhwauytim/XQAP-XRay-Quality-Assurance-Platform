@@ -1,6 +1,6 @@
 # End-to-end browser tests (`npm run e2e`)
 
-**Status:** active · **Added:** 2026-08-22 · **Runner:** Playwright (Chromium only) · **Suite:** 112 tests / 14 spec files
+**Status:** active · **Added:** 2026-08-22 · **Runner:** Playwright (Chromium only) · **Suite:** 118 tests / 15 spec files
 
 A full pass over the application in a real browser, from login to report
 generation, with no human in the loop. It drives the same screens a user sees,
@@ -83,6 +83,7 @@ e2e/
   user-management.spec.ts
   action-log.spec.ts
   settings.spec.ts
+  subtab-navigation.spec.ts
 playwright.config.ts
 tsconfig.e2e.json    so `npm run typecheck` covers the suite too
 ```
@@ -102,7 +103,8 @@ tsconfig.e2e.json    so `npm run typecheck` covers the suite too
 | `notifications` | Empty state, publish being disabled without text, targeting changing the recipient count, publishing and the acknowledgement counters |
 | `user-management` | Roster (7 seeded users), adding a user, a role change, the page matrix's three access levels per role, **revoking a page and watching the rail re-gate**, the feature matrix's grouping and page cascade, the activity view, admin-only gating |
 | `action-log` | The reader and its filters, and two actions performed by the test then found again in the log — a page-permission change and a label override (the latter proving the high-volume types are off by default until asked for) |
-| `settings` | Label groups, an override propagating out of the settings page into the sidebar with no reload, the bootstrap-admin block, a rejected password pair, the error log and storage report |
+| `settings` | Label groups, an override propagating out of the settings page into the sidebar with no reload, the editor row reverting its own override, the override counter, the bootstrap-admin block, a rejected password pair, the error log and storage report |
+| `subtab-navigation` | Sub-tab clicks made at full speed — a lazy tab's first visit, a tab remounted after the mount LRU evicted it, and rail-vs-content agreement. Every click is made once and asserted against the content |
 
 ---
 
@@ -119,9 +121,10 @@ tsconfig.e2e.json    so `npm run typecheck` covers the suite too
    ```
 
 2. **Use `openSubTab` for sub-tabs, and give it a `ready` locator** from
-   `helpers/sections.ts` (or a new one there). It is not optional padding —
-   see *Bugs this suite found* below for why the click has to be verified
-   against the CONTENT rather than the rail.
+   `helpers/sections.ts` (or a new one there). It is not optional padding: the
+   rail's `aria-current` moves synchronously on click while the content follows
+   an event, so only the content proves the navigation happened. (It used to
+   re-click, too — see *Bugs this suite found* below.)
 
 3. **Assert seeded numbers from `helpers/seed.ts`, never inline literals.**
    Those constants mirror `SIM_SEED_PROFILE` and the counts pinned in
@@ -208,73 +211,78 @@ that needed one.
 
 ---
 
-## Bugs this suite found
+## Bugs this suite found — all three now fixed
 
-Writing the suite surfaced three defects in the application. None of them is
-worked around silently — each is either asserted around with an explanatory
-comment, or left unasserted with a pointer here.
+Writing the suite surfaced three defects in the application. Each is now fixed,
+with the test that pins it named below. Every one of those tests was checked
+against the unfixed code first: revert the fix and it fails.
 
-### 1. A sub-tab click is silently dropped when its tab is not mounted yet
+### 1. A sub-tab click was silently dropped when its tab was not mounted yet
 
-**Reproduces ~80 % of the time.** Select a top-level tab and click one of its
-sub-tabs immediately (within roughly 300 ms): the rail highlights the sub-tab
-you clicked, and the content shows the parent's **default** sub-tab instead.
-Nothing announces the loss. Waiting ~300 ms first makes it work every time.
+**Reproduced ~80 % of the time.** Select a top-level tab and click one of its
+sub-tabs immediately: the rail highlighted the sub-tab you clicked while the
+content showed the parent's **default** sub-tab. Nothing announced the loss.
 
 Mechanism: `Sidebar.handleSubTabClick` sets its own `activeSubTabId`
 synchronously — which is what paints `aria-current="page"` — and then
-fire-and-forgets a `window` CustomEvent (`pop-set-subtab`). The tab component
-only subscribes to that event in a mount effect. On the first visit to a lazily
-loaded tab (`user-management`, `reports`, …) the listener does not exist yet, so
-the event goes nowhere while the rail has already moved. The rail and the
-content are then out of sync until something else changes the selection.
+fire-and-forgets a `window` CustomEvent (`pop-set-subtab`) in the same handler
+that merely *schedules* the tab's mount. The tab component subscribes to that
+event from a mount effect, so on the first visit to a lazily loaded tab
+(`user-management`, `reports`, both `React.lazy`) the listener did not exist
+yet and the event went nowhere.
 
-Most visible on `إدارة المستخدمين` and `إدارة التقارير`, both lazy boundaries.
-The suite copes by re-clicking until the sub-tab's own content is on screen
-(`openSubTab`'s `ready` argument) — which is also why that argument is required.
+Fix: `src/app/subTabSelection.ts` records the rail's selection per parent tab,
+and `src/app/useSubTabSelection.ts` replays it once as the tab mounts —
+alongside, not instead of, the live events, and behind each tab's existing
+known-sub-tab guard. `openSubTab` is a single click again.
 
-### 2. A label override does not re-render its own editor row
+Pinned by `subtab-navigation.spec.ts` (and, at unit level,
+`src/app/subTabSelection.test.tsx` plus
+`UserManagement/index.sectionSwitch.test.tsx`).
 
-Override any label in «إدارة الإعدادات». The new text is saved, persisted to
-`localStorage`, and applied everywhere in the app immediately — the sidebar
-title changes under you, and the "تم" badge flashes. But the row that made the
-change does not notice:
+### 2. A label override did not re-render its own editor row
 
-* its «استعادة القيمة الافتراضية» button stays **disabled**, so the admin cannot
-  revert that label from the row that changed it;
-* the `is-custom` styling and the «الافتراضي: …» hint never appear.
+Override any label in «إدارة الإعدادات». The new text was saved, persisted and
+applied everywhere immediately — but the row that made the change did not
+notice: its «استعادة القيمة الافتراضية» button stayed **disabled** and the
+`is-custom` / «الافتراضي: …» markers never appeared until the page remounted.
 
-Everything corrects itself once the Settings page is remounted (leave the tab
-and come back).
+Mechanism: `LabelRow` read `isCustomized(labelKey)` and `getLabels()` directly
+instead of subscribing, so it wrote to a store it did not listen to — a shape
+the React Compiler is free to memoize, precisely because the read has no
+reactive dependency. (Note it only bites in a compiled build: under Vitest,
+which does not run the compiler, the parent's own `useLabels()` re-render is
+enough to hide it. That is why the regression test is a browser one.)
 
-Mechanism: `LabelRow` reads `isCustomized(labelKey)` and `getLabels()` directly
-instead of subscribing via `useLabels()`. It writes to a store it does not
-listen to. The `setSaved(true)` re-render happens (the badge proves it) but
-`custom` is not recomputed from it — a shape the React Compiler is free to
-memoize, precisely because the read has no reactive dependency.
+Fix: the row reads `useLabels()` and the new `useIsCustomized()`
+(`useSyncExternalStore` over the label store).
 
-`settings.spec.ts` asserts the parts that work and explicitly does **not** pin
-the broken reset button.
+Pinned by `settings.spec.ts` › "the row that wrote an override can revert it
+without a remount".
 
-### 3. Approving a referral leaves the sibling queue stale for up to 45 s
+### 3. Approving a referral left the sibling queue stale for up to 45 s
 
 Approve a reassignment request in «اعتماد الطلبات» and switch back to «صور
-الأشعة المحالة»: the assignment counts still show the pre-approval numbers. The
-approval really did land — a manual refresh, or the next 45 s tick, shows
-34 → 33 and 29 → 30 — but the sibling tab was never told.
+الأشعة المحالة»: the assignment counts still showed the pre-approval numbers
+until a manual refresh or the next 45 s tick.
 
-Mechanism: `broadcastDataRefresh` has exactly two callers, both in
-`workspaceSync.ts` (the AdminToolbar refresh button and `SyncTick`'s timer). No
-domain action broadcasts, and the referrals tab stays mounted behind the
-approvals tab (tab-mount LRU), so it keeps rendering what it loaded. During the
-window the stale row is still listed as the old reviewer's and still selectable.
+Mechanism: `broadcastDataRefresh` had exactly two callers, both in
+`workspaceSync.ts`. No domain action announced itself, and the referrals view
+stays mounted behind the approvals view (tab-mount LRU), so it kept rendering
+what it had loaded — with the stale row still listed as the old reviewer's and
+still selectable.
 
-Note that CLAUDE.md deliberately caps the app at those two refresh triggers, so
-the fix is presumably a targeted local reload in the approval handler rather
-than a third global trigger.
+Fix: `notifyLocalDataChange` in `dataRefreshSignal.ts` — the local echo of a
+write that already landed, broadcast as an ordinary `"periodic"` delta so every
+subscriber's existing silent-refresh handling (including XrayReferrals'
+unsaved-draft retention) applies unchanged. It is called from exactly one
+place, `useApprovalData`'s `settleAfterDecision`, once per completed decision
+or bulk run. `runSync` remains the only thing that SYNCS: no probe, no timer,
+no second refresh path.
 
-`reassignment.spec.ts` clicks the refresh button before asserting the moved
-counts, with a comment marking it as required rather than defensive.
+Pinned by `reassignment.spec.ts` › "approving the request is what actually
+moves the row" (which no longer clicks the refresh button) and by
+`useApprovalData.test.tsx` › "announces a decision to the sibling views".
 
 ### Smaller observations, not chased down
 

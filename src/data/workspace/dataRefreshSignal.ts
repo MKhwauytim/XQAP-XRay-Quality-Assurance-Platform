@@ -4,14 +4,19 @@
  * everything else that reads workspace disk state (samples, distribution,
  * referrals/replacements/reopens, notifications, answers, ...).
  *
- * Broadcast from exactly one place -- `runSync()` in `workspaceSync.ts`,
- * whose two triggers are the manual refresh button (AdminToolbar) and the
- * automatic 45s timer (`SyncTick.tsx`, rendered inside `AuthGate`'s
- * `GlobalMonthProvider`); any
- * view that loads workspace data on mount can subscribe to re-run its own
- * load function when this fires, so an action taken by another
- * user/tab/machine (a reassigned sample, a posted notification, an approved
- * referral) shows up without a full page reload.
+ * SYNCING is broadcast from exactly one place -- `runSync()` in
+ * `workspaceSync.ts`, whose two triggers are the manual refresh button
+ * (AdminToolbar) and the automatic 45s timer (`SyncTick.tsx`, rendered inside
+ * `AuthGate`'s `GlobalMonthProvider`); any view that loads workspace data on
+ * mount can subscribe to re-run its own load function when this fires, so an
+ * action taken by another user/tab/machine (a reassigned sample, a posted
+ * notification, an approved referral) shows up without a full page reload.
+ *
+ * The one other broadcaster is `notifyLocalDataChange` below: the echo of a
+ * write THIS tab just made, for the sibling views mounted beside it, which
+ * would otherwise show pre-write state for up to a full tick. It probes
+ * nothing and schedules nothing -- see its own docblock for why that is not a
+ * third sync path.
  *
  * This only broadcasts a "go re-read your data" signal within the current
  * tab — it does not itself read or write anything on disk.
@@ -89,6 +94,40 @@ export function broadcastDataRefresh(arg: DataRefreshSource | DataRefreshDetail 
       ? { source: "periodic", changed: new Set(ALL_DATA_REFRESH_FAMILIES) }
       : { source: "manual" };
   window.dispatchEvent(new CustomEvent<DataRefreshDetail>(DATA_REFRESH_EVENT_NAME, { detail }));
+}
+
+/**
+ * A domain write THIS tab just made, announced to the other views mounted
+ * beside it.
+ *
+ * Not a third sync path, and deliberately not a new timer: it runs no probe,
+ * re-reads no permissions, and touches none of `workspaceSync.ts`'s baseline
+ * state — the two triggers documented there (the 45s tick and the manual
+ * refresh button) remain the only things that SYNC. This is the local echo of
+ * a write that already landed, for the views that would otherwise sit stale
+ * until the next tick: the tab-mount LRU keeps up to three tabs (and every
+ * visited sub-tab) mounted, so "the sibling view is showing state my write
+ * just invalidated" is the normal case, not the exception.
+ *
+ * Broadcast as `"periodic"` with an explicit change set, which is exactly what
+ * it is: a delta naming the families that moved. That matters — `"manual"`
+ * additionally means "discard every cache", which `directoryScan.ts` and
+ * `workspacePaths.ts` honour by dropping their whole caches. A local write has
+ * already invalidated what it invalidated (writers bump the workspace epoch),
+ * so demanding a full purge per action would be pure cost.
+ *
+ * Call it once per completed user action, never per write inside one: a
+ * broadcast makes every mounted view re-read, so firing it inside a loop (or
+ * on each of thousands of answer saves) is its own defect. Callers that batch
+ * — bulk approve, for instance — notify once when the batch settles.
+ *
+ * Silently does nothing outside a browser, so a domain module that calls it
+ * stays importable from Vitest's default `node` environment.
+ */
+export function notifyLocalDataChange(families: readonly DataRefreshFamily[]): void {
+  if (typeof window === "undefined") return;
+  if (families.length === 0) return;
+  broadcastDataRefresh({ source: "periodic", changed: new Set(families) });
 }
 
 /**

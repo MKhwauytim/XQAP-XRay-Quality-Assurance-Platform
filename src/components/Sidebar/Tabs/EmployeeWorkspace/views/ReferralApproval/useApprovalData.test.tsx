@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { createMemoryDirectory } from "../../../../../../data/storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../../../../../../data/storage/fileSystemAccess";
 import { clearSession, writeSession } from "../../../../../../auth/authSession";
@@ -25,7 +25,11 @@ import type {
   AdhocImportRow,
 } from "../../../../../../data/adhocImport/adhocImportTypes";
 import type { NormalizedRiskRow } from "../../../Population/riskData/riskDataTypes";
-import { broadcastDataRefresh } from "../../../../../../data/workspace/dataRefreshSignal";
+import {
+  broadcastDataRefresh,
+  subscribeToDataChange,
+  type DataRefreshDetail,
+} from "../../../../../../data/workspace/dataRefreshSignal";
 import { useApprovalData } from "./useApprovalData";
 
 // A2/A3 tests need to count/interrupt individual `loadRequestLogs` calls
@@ -71,6 +75,14 @@ vi.mock("../../../../../../data/workspace/useWorkspace", () => ({
 }));
 
 afterEach(() => {
+  // Unmount every hook this test rendered. Testing Library's automatic
+  // cleanup is not installed here (`globals: false`), so without this each
+  // test's `useApprovalData` stayed mounted — and subscribed to the app-wide
+  // refresh signal — for the whole file. Harmless while nothing but the sync
+  // tick ever broadcast; now that a decision announces itself, those leftover
+  // instances each answer it with a reload and the reload counters below
+  // count the whole file's zombies instead of the hook under test.
+  cleanup();
   clearSession();
   globalMonthMock.state.selection = globalMonthMock.APRIL;
   globalMonthMock.state.months = globalMonthMock.APRIL_ONLY;
@@ -462,5 +474,100 @@ describe("useApprovalData bulkDecision reload count (A3)", () => {
     const countAfter = vi.mocked(loadRequestLogs).mock.calls.length;
 
     expect(countAfter - countBefore).toBe(1);
+  });
+});
+
+describe("useApprovalData announces a decision to the sibling views", () => {
+  /**
+   * A decision moves state that OTHER mounted views own: the reviewer's own
+   * «صور الأشعة المحالة» queue keeps listing an approved reassignment as the
+   * old reviewer's, and keeps letting them open it, because the tab-mount LRU
+   * left it mounted behind this desk. Nothing told it. Before this, the only
+   * broadcasters were the 45s sync tick and the manual refresh button, so the
+   * stale window was up to a full tick wide.
+   *
+   * Asserted through the public subscription every such view uses, not through
+   * a spy on the emitter: what matters is that a subscriber is woken, and with
+   * a change set that names what actually moved.
+   */
+  function recordBroadcasts(): { detail: DataRefreshDetail[]; stop: () => void } {
+    const detail: DataRefreshDetail[] = [];
+    const stop = subscribeToDataChange(["requests", "distribution", "answers"], (d) => {
+      detail.push(d);
+    });
+    return { detail, stop };
+  }
+
+  it("broadcasts once when a single request is decided", async () => {
+    setupSupervisor();
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    const req = mockReferral("req-signal-1", "4-april-2026");
+    await appendReferralRequest(root, "4-april-2026", req);
+
+    const { result } = renderHook(() => useApprovalData(root));
+    await waitFor(() => expect(result.current.loadState).toBe("ready"));
+    await waitFor(() => expect(result.current.referrals).toHaveLength(1));
+
+    const heard = recordBroadcasts();
+    try {
+      const outcome = await result.current.denyReferral(req, "ok");
+      expect(outcome.ok).toBe(true);
+      expect(heard.detail).toHaveLength(1);
+      const [only] = heard.detail;
+      expect(only.source).toBe("periodic");
+      if (only.source !== "periodic") throw new Error("expected a delta broadcast");
+      // "periodic", not "manual": this is a delta, and "manual" additionally
+      // means "drop every cache" to directoryScan/workspacePaths.
+      expect([...only.changed].sort()).toEqual(["answers", "distribution", "requests"]);
+    } finally {
+      heard.stop();
+    }
+  });
+
+  it("broadcasts once for a whole bulk run, not once per item", async () => {
+    setupSupervisor();
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    const reqs = Array.from({ length: 5 }, (_, i) => mockReferral(`req-signal-bulk-${i}`, "4-april-2026"));
+    for (const r of reqs) await appendReferralRequest(root, "4-april-2026", r);
+
+    const { result } = renderHook(() => useApprovalData(root));
+    await waitFor(() => expect(result.current.loadState).toBe("ready"));
+    await waitFor(() => expect(result.current.referrals).toHaveLength(5));
+
+    const heard = recordBroadcasts();
+    try {
+      await act(async () => {
+        const outcomes = await result.current.bulkDecision(reqs, "deny", "bulk note");
+        expect(outcomes.every((o) => o.ok)).toBe(true);
+      });
+      // A broadcast makes every mounted view re-read; one per item would be a
+      // defect of its own.
+      expect(heard.detail).toHaveLength(1);
+    } finally {
+      heard.stop();
+    }
+  });
+
+  it("says nothing when a decision is refused", async () => {
+    setupSupervisor();
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    const req = mockReferral("req-signal-refused", "4-april-2026");
+    await appendReferralRequest(root, "4-april-2026", req);
+    await updateReferralStatus(root, "4-april-2026", "req-signal-refused", {
+      status: "approved", reviewedBy: "sup-2", reviewedAt: new Date().toISOString(),
+    });
+
+    const { result } = renderHook(() => useApprovalData(root));
+    await waitFor(() => expect(result.current.loadState).toBe("ready"));
+    await waitFor(() => expect(result.current.referrals).toHaveLength(1));
+
+    const heard = recordBroadcasts();
+    try {
+      const outcome = await result.current.denyReferral(req, "too late");
+      expect(outcome.ok).toBe(false);
+      expect(heard.detail).toHaveLength(0);
+    } finally {
+      heard.stop();
+    }
   });
 });

@@ -46,16 +46,15 @@ export async function openTab(page: Page, name: string): Promise<void> {
  * Open a top-level tab and then one of its sub-tabs, and wait until that
  * sub-tab's own content is on screen.
  *
- * `ready` is not defensive padding — it is the only trustworthy signal.
- * Sub-tab selection is a fire-and-forget `window` CustomEvent
- * (`pop-set-subtab`, dispatched by `Sidebar.handleSubTabClick`) that a tab
- * component only listens for once it has mounted, while the rail's own
- * `aria-current` is set synchronously by the click. Click a sub-tab of a tab
- * that is not mounted yet — which is what happens on the first visit to a lazy
- * tab — and the event is dropped: the rail highlights what you clicked and the
- * content shows the parent's DEFAULT sub-tab. That is a real app bug (see
- * docs/development/E2E_TESTS.md § "Bugs this suite found"), so the click is
- * retried until the content agrees rather than trusted once.
+ * One click, asserted against the CONTENT rather than the rail. The rail moves
+ * synchronously on click while the tab follows a `window` CustomEvent, so a
+ * rail-only assertion (`aria-current`) proves nothing about what is on screen.
+ *
+ * This used to re-click until the content agreed, because a click made before
+ * the owning tab had mounted — every lazy tab's first visit — was dropped
+ * outright. `src/app/subTabSelection.ts` now carries the selection across the
+ * mount, so a single click is enough. If a retry ever looks necessary again,
+ * that is the bug coming back: fix it there rather than here.
  */
 export async function openSubTab(
   page: Page,
@@ -68,11 +67,8 @@ export async function openSubTab(
     .getByRole("navigation", { name: "تبويبات النظام" })
     .getByRole("button", { name: child, exact: true });
   await expect(sub).toBeVisible();
-
-  await expect(async () => {
-    await sub.click();
-    await expect(ready).toBeVisible({ timeout: 2_000 });
-  }).toPass({ timeout: 30_000 });
+  await sub.click();
+  await expect(ready).toBeVisible();
 }
 
 /** The shared DataTable's free-text filter, scoped to the active tab. */

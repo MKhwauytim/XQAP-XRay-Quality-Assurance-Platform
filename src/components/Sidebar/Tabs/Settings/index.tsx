@@ -31,7 +31,7 @@ import {
   setLabel,
   type LabelKey,
 } from "../../../../data/labels/labelsStore";
-import { useLabels } from "../../../../data/labels/useLabels";
+import { useIsCustomized, useLabels } from "../../../../data/labels/useLabels";
 import { readSession } from "../../../../auth/authSession";
 import { recordAction } from "../../../../data/audit/actionLog";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
@@ -318,8 +318,15 @@ function LabelRow({
   desc: string;
   canEdit: boolean;
 }) {
-  const current = getLabels()[labelKey];
-  const custom  = isCustomized(labelKey);
+  // Both reads are SUBSCRIBED (`useLabels` / `useIsCustomized`), and that is
+  // the whole point: this row writes the label store on save and reset, so a
+  // row that read it with a bare `getLabels()` / `isCustomized()` call could
+  // not see its own change — the reset button stayed disabled and the
+  // `is-custom` / «الافتراضي:» markers never appeared until the page was
+  // remounted. (Nothing forced a re-render either: the React Compiler is free
+  // to hoist a call whose only argument is a constant prop.)
+  const current = useLabels()[labelKey];
+  const custom  = useIsCustomized(labelKey);
   const [val, setVal] = useState<string>(current);
   const [saved, setSaved] = useState(false);
   const { directoryHandle } = useWorkspace();

@@ -36,13 +36,45 @@ test("overriding a label re-renders the rest of the app immediately", async ({ p
   await expect(sidebar(page).getByText("لوحة اختبار آلي")).toBeVisible();
   await expect(sidebar(page).getByText("لوحة الإدارة")).toHaveCount(0);
   await expect(ws.locator(".settings-saved-badge")).toBeVisible();
+});
 
-  // NOT asserted: that the row's own «استعادة القيمة الافتراضية» button becomes
-  // enabled. It does not — the editor row reads `isCustomized()` without
-  // subscribing to the labels store, so the override it just wrote is invisible
-  // to itself until the page remounts. Recorded in
-  // docs/development/E2E_TESTS.md § "Bugs this suite found"; this test is left
-  // asserting the behaviour that IS correct rather than pinning the defect.
+test("the row that wrote an override can revert it without a remount", async ({ page }) => {
+  const ws = workspace(page);
+  await ws.getByRole("button", { name: /^القائمة الجانبية/ }).click();
+
+  const editor = ws.getByRole("textbox", { name: "عنوان القائمة الجانبية" });
+  const revert = ws.getByRole("button", {
+    name: "استعادة القيمة الافتراضية للحقل: عنوان القائمة الجانبية",
+  });
+  await expect(revert).toBeDisabled();
+
+  await editor.fill("لوحة اختبار آلي");
+  await editor.blur();
+
+  // The row writes the label store, so the row has to SEE the label store: the
+  // revert button arms itself, the default value is offered back, and the row
+  // marks itself as overridden — all without leaving the page and returning.
+  await expect(revert).toBeEnabled();
+  await expect(ws.getByText("الافتراضي: لوحة الإدارة")).toBeVisible();
+  await expect(ws.locator(".settings-label-row.is-custom")).toHaveCount(1);
+
+  // And the button does what it says: one click puts the sidebar back.
+  await revert.click();
+  await expect(sidebar(page).getByText("لوحة الإدارة")).toBeVisible();
+  await expect(revert).toBeDisabled();
+  await expect(editor).toHaveValue("لوحة الإدارة");
+});
+
+test("the override counter follows the overrides that exist", async ({ page }) => {
+  const ws = workspace(page);
+  await expect(ws.getByRole("button", { name: /^استعادة الكل/ })).toHaveCount(0);
+
+  await ws.getByRole("button", { name: /^القائمة الجانبية/ }).click();
+  const editor = ws.getByRole("textbox", { name: "عنوان القائمة الجانبية" });
+  await editor.fill("لوحة اختبار آلي");
+  await editor.blur();
+
+  await expect(ws.getByRole("button", { name: /^استعادة الكل \(1 تعديل\)/ })).toBeVisible();
 });
 
 test("the bootstrap-admin section is present with its login toggle", async ({ page }) => {

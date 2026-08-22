@@ -1,10 +1,12 @@
 /* eslint-disable react-refresh/only-export-components */
 
-import { useMemo, useRef, useState, useEffect } from "react";
+import { useCallback, useMemo, useRef, useState, useEffect } from "react";
 import { ScanLine } from "lucide-react";
 
 import type { SidebarTabModule } from "../tabTypes";
 
+import { resolveInitialSubTab } from "../../../../app/subTabSelection";
+import { useSubTabSelection } from "../../../../app/useSubTabSelection";
 import { readSession } from "../../../../auth/authSession";
 import { tabAllowedRoles } from "../../../../auth/tabCatalog";
 import { usePermissions } from "../../../../auth/usePermissions";
@@ -122,6 +124,9 @@ type SubTab = PopulationSubTab;
 // accept a foreign sub-tab id. Mirrors the guard used by the sibling tabs.
 const KNOWN_POPULATION_SUB_TABS = new Set<string>(["process", "browse", "adhoc-import"]);
 
+/** This tab's id in the sidebar rail / sub-tab selection store. */
+const TAB_ID = "population";
+
 type WizardCapabilities = {
   canUploadData: boolean;
   canProcessPopulation: boolean;
@@ -193,11 +198,26 @@ export default function PopulationTab() {
   // a multi-MB UNC read they pay nothing for today. For a manager/admin who
   // does hold one of those capabilities, landing on browse is a net win: it
   // avoids the per-tick population reload the "process" sub-tab would trigger.
+  // The rail's own selection wins when it has one: clicking a sub-tab (or a
+  // parent tab, which auto-selects the first sub-tab) records it, and a tab
+  // mounting afterwards must open on what the rail is already highlighting --
+  // otherwise the two disagree with nothing to reconcile them. The landing
+  // rule below is what applies on a mount the rail did not ask for, which is
+  // every app start.
   const [activeSubTab, setActiveSubTab] = useState<SubTab>(() =>
-    can("view-browse") && (canMutate("draw-sample") || canMutate("process-population"))
-      ? "browse"
-      : "process"
+    resolveInitialSubTab(
+      TAB_ID,
+      KNOWN_POPULATION_SUB_TABS,
+      can("view-browse") && (canMutate("draw-sample") || canMutate("process-population"))
+        ? "browse"
+        : "process"
+    )
   );
+  // The rail only ever hands over an id this tab declared (useSubTabSelection
+  // filters on KNOWN_POPULATION_SUB_TABS), so the narrowing cast is safe.
+  const applySubTabFromRail = useCallback((subTabId: string) => {
+    setActiveSubTab(subTabId as SubTab);
+  }, []);
   // Browse owns its own data-load effect (BrowseDataView) with no
   // "already loaded" guard; keeping it mounted-but-hidden once visited,
   // instead of unmounting on every sub-tab switch, avoids re-loading its
@@ -338,17 +358,9 @@ export default function PopulationTab() {
       .catch(logRejection("population:loadCertScanGlobal"));
   }, [directoryHandle]);
 
-  // Listen for sub-tab changes dispatched from the Sidebar
-  useEffect(() => {
-    const handler = (e: CustomEvent<{ subTabId: string }>) => {
-      const { subTabId } = e.detail;
-      if (KNOWN_POPULATION_SUB_TABS.has(subTabId)) {
-        setActiveSubTab(subTabId as SubTab);
-      }
-    };
-    window.addEventListener("pop-set-subtab", handler as EventListener);
-    return () => window.removeEventListener("pop-set-subtab", handler as EventListener);
-  }, []);
+  // Follow the sidebar rail: its live events, plus the one selection that may
+  // have been made before this tab mounted (see useSubTabSelection).
+  useSubTabSelection(TAB_ID, KNOWN_POPULATION_SUB_TABS, applySubTabFromRail);
 
   // Notify Sidebar of active sub-tab so it can highlight the correct item
   useEffect(() => {

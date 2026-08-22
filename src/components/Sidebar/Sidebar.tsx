@@ -4,6 +4,7 @@ import type { SidebarTabDefinition } from "./Tabs/tabTypes";
 import type { AuthRole, AuthSession } from "../../auth/authTypes";
 import { getManagedLoginUsers } from "../../auth/userManagement";
 import { navGroupFor, TAB_NAV_GROUP_ORDER, type TabNavGroup } from "../../auth/tabCatalog";
+import { setSubTabSelection } from "../../app/subTabSelection";
 import { GlobalMonthSelector } from "../GlobalMonthSelector/GlobalMonthSelector";
 import { useWorkspace } from "../../data/workspace/useWorkspace";
 import { useLabels, type Labels } from "../../data/labels/useLabels";
@@ -144,6 +145,14 @@ export default function Sidebar({
   function handleSubTabClick(parentTabId: string, subTabId: string) {
     onTabSelect(parentTabId);
     setActiveSubTabId(subTabId);
+    // Record the selection BEFORE announcing it. `onTabSelect` above only
+    // schedules the parent tab's mount (a setState, applied on the next
+    // commit), so the two events below are dispatched while the owning tab may
+    // still be unmounted — a lazy tab's first visit is exactly that — and a
+    // listener that does not exist yet cannot hear them. The store is what the
+    // tab reads as it mounts, so the click is honoured either way; see
+    // src/app/subTabSelection.ts.
+    setSubTabSelection(parentTabId, subTabId);
     // Legacy Population-specific event (keep for backward compat)
     window.dispatchEvent(new CustomEvent("pop-set-subtab", { detail: { subTabId } }));
     // Generic event — all tab components can listen for their own parent

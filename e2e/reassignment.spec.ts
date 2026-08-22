@@ -87,14 +87,12 @@ test("approving the request is what actually moves the row", async ({ page }) =>
 
   // …and only now does the assignment count move: 34 → 33, 29 → 30.
   //
-  // The explicit refresh is REQUIRED, not defensive padding. No domain action
-  // broadcasts `dataRefreshSignal` — only the AdminToolbar refresh button and
-  // the 45 s tick in SyncTick.tsx do (see workspaceSync.ts). The referrals tab
-  // stays mounted behind the approval tab (tab-mount LRU), so without this it
-  // keeps rendering the pre-approval counts. That staleness window is a real
-  // finding, recorded in docs/development/E2E_TESTS.md.
+  // No refresh button is clicked here, deliberately. The referrals queue stays
+  // mounted behind this desk (tab-mount LRU), so it is showing pre-approval
+  // state — and the approval is what tells it otherwise (`notifyLocalDataChange`
+  // in useApprovalData). Re-add a manual refresh here and this stops testing
+  // anything: it would pass just as well with the queue left stale for 45 s.
   await openSubTab(page, "إدارة مساحة العمل", "صور الأشعة المحالة", REFERRALS_READY(page));
-  await page.getByRole("button", { name: /تحديث كل البيانات/ }).click();
   await expect(scopePicker(page).getByRole("option", { name: new RegExp(`${FROM.displayName}.*\\(${FROM.count - 1}\\)`) }))
     .toBeAttached();
   await expect(scopePicker(page).getByRole("option", { name: new RegExp(`${TO.displayName}.*\\(${TO.count + 1}\\)`) }))

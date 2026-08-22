@@ -1,4 +1,5 @@
 import type { AuthRole, AuthSession } from "./authTypes";
+import { clearSubTabSelections } from "../app/subTabSelection";
 import {
   endAuthActivitySession,
   startAuthActivitySession,
@@ -148,4 +149,10 @@ export function clearSession(): void {
   runtimeSession = null;
   clearStoredSession();
   setPreviewRole(null);
+  // Where the previous user had navigated is theirs, not the next user's. The
+  // rail's recorded sub-tab selection outlives a logout otherwise (it is
+  // module state, and logging out does not reload the page), and the next
+  // session would mount its tabs on sub-tabs that user may not be permitted
+  // to open. See src/app/subTabSelection.ts.
+  clearSubTabSelections();
 }

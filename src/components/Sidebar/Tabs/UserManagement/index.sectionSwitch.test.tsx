@@ -7,6 +7,10 @@ import * as usePermissionsModule from "../../../../auth/usePermissions";
 import * as authActivityLog from "../../../../auth/authActivityLog";
 import * as actionLog from "../../../../data/audit/actionLog";
 import * as useWorkspaceModule from "../../../../data/workspace/useWorkspace";
+import {
+  __resetSubTabSelectionsForTests,
+  setSubTabSelection,
+} from "../../../../app/subTabSelection";
 import { createMemoryDirectory } from "../../../../data/storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
 
@@ -67,6 +71,54 @@ async function waitForMount() {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  __resetSubTabSelectionsForTests();
+});
+
+describe("UserManagementTab — a sub-tab clicked before the tab mounted", () => {
+  // This tab is a `lazy()` boundary, so its very first visit spends a Suspense
+  // fallback: the rail's `pop-set-subtab` event is dispatched (synchronously,
+  // in the click handler that also schedules this mount) while nothing is
+  // listening anywhere. The rail moves, the event is lost, and the tab used to
+  // open on its own default section — `users` — with no way back into sync.
+  // The rail's selection is recorded durably for exactly this case.
+  it("opens on the recorded selection instead of the default section", async () => {
+    mockSession();
+    const handle = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    mockWorkspace(handle);
+    const readSpy = vi
+      .spyOn(actionLog, "readWorkspaceActions")
+      .mockResolvedValue([]);
+
+    // The click: recorded by the rail, announced to a listener that does not
+    // exist yet. No event is dispatched here at all — that is the point.
+    setSubTabSelection("user-management", "actions");
+
+    render(<UserManagementTab />);
+    await waitForMount();
+
+    // The actions section is the only one that reads the workspace action log.
+    await waitFor(() => expect(readSpy).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("5-system/audit/actions/", { exact: false })).toBeTruthy();
+  });
+
+  it("leaves a tab that owns no such sub-tab on its own default", async () => {
+    mockSession();
+    const handle = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    mockWorkspace(handle);
+    const readSpy = vi
+      .spyOn(actionLog, "readWorkspaceActions")
+      .mockResolvedValue([]);
+
+    // "browse" belongs to the population tab; this one must ignore it.
+    setSubTabSelection("user-management", "browse");
+
+    render(<UserManagementTab />);
+    await waitForMount();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(readSpy).not.toHaveBeenCalled();
+  });
 });
 
 describe("UserManagementTab — activity/actions section-switch skip-guard", () => {
