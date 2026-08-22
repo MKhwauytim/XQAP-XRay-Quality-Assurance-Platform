@@ -31,6 +31,7 @@ import { logError } from "../../../../data/storage/errorLogger";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
 import { EmptyState, ErrorState, LoadingState } from "../../../../components/StateViews/StateViews";
 import Pagination from "../../../../components/Pagination/Pagination";
+import { AnchoredPopover } from "../../../../components/Popover/AnchoredPopover";
 import { DATA_PAGE_SIZE } from "../../../../utils/paginationUtils";
 import { formatStageLabel } from "./components/helpers";
 import { buildBrowseFilterOptionPreview } from "./browseFilterOptions";
@@ -558,6 +559,12 @@ export default function BrowseDataView({
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
   const [sort, setSort] = useState<PopulationQuerySort>(null);
   const [openFilterColumn, setOpenFilterColumn] = useState<string | null>(null);
+  // The buttons the two floating panels pin to. Both panels are portalled to
+  // <body> (see AnchoredPopover) because `.bv-table-scroll` is `overflow:
+  // auto` — an absolutely-positioned menu declared inside a `th` was clipped
+  // by that scroll container instead of escaping it.
+  const [filterAnchor, setFilterAnchor] = useState<HTMLElement | null>(null);
+  const [colPickerAnchor, setColPickerAnchor] = useState<HTMLElement | null>(null);
   const [colPickerOpen, setColPickerOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [queryResult, setQueryResult] = useState<PopulationQueryResult<BrowseRow>>(EMPTY_QUERY_RESULT);
@@ -1281,10 +1288,11 @@ export default function BrowseDataView({
               <button
                 type="button"
                 className="bv-col-picker-btn"
-                onClick={() => {
+                onClick={(event) => {
                   // Mutually exclusive with the per-column filter menu, as in
                   // DataTable: two floating panels open at once left two live
                   // focus traps fighting over Tab and Escape.
+                  setColPickerAnchor(event.currentTarget);
                   setColPickerOpen((o) => !o);
                   setOpenFilterColumn(null);
                 }}
@@ -1292,7 +1300,9 @@ export default function BrowseDataView({
                 <Settings2 size={14} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} /> الأعمدة ({visibleCols.size})
               </button>
               {colPickerOpen && (
-                <div
+                <AnchoredPopover
+                  anchor={colPickerAnchor}
+                  align="end"
                   className="bv-col-picker-dropdown"
                   ref={colPickerFocusTrapRef}
                   role="dialog"
@@ -1319,7 +1329,7 @@ export default function BrowseDataView({
                       {c.label}
                     </label>
                   ))}
-                </div>
+                </AnchoredPopover>
               )}
             </div>
           </div>
@@ -1375,6 +1385,7 @@ export default function BrowseDataView({
                           aria-label={`تصفية ${c.label}`}
                           onClick={(event) => {
                             event.stopPropagation();
+                            setFilterAnchor(event.currentTarget);
                             setOpenFilterColumn((current) => current === c.key ? null : c.key);
                             setColPickerOpen(false);
                           }}
@@ -1386,7 +1397,8 @@ export default function BrowseDataView({
                         <span className="bv-th-label">{c.label}</span>
                       </div>
                       {openFilterColumn === c.key && (
-                        <div
+                        <AnchoredPopover
+                          anchor={filterAnchor}
                           className="bv-column-filter-menu"
                           ref={filterMenuFocusTrapRef}
                           role="dialog"
@@ -1422,7 +1434,7 @@ export default function BrowseDataView({
                               <span className="bv-filter-empty">عرض أول 100 قيمة. استخدم البحث للوصول إلى قيم أخرى.</span>
                             )}
                           </div>
-                        </div>
+                        </AnchoredPopover>
                       )}
                     </th>
                   ))}

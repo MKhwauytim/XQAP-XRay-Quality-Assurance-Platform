@@ -37,15 +37,16 @@ const EXPECTED_RESTRICTED: ReadonlyArray<readonly [AuthRole, string]> = [
       "user-management/feature-permissions",
       "user-management/activity",
       "user-management/actions",
-      // Ad-hoc import moved under Population on 2026-08-21; the ADMIN_ONLY ceiling
-      // travelled with it onto the sub-tab id.
-      "population/adhoc-import",
     ].map((tabId) => [role, tabId] as const),
   ),
   // Settings is code-gated to guest + admin.
   ["employee", "settings"],
   ["supervisor", "settings"],
   ["manager", "settings"],
+  // Ad-hoc import («ارفاق حالات استثنائية») is grantable to every operational role,
+  // but not to `guest`: it is the read-only observer role and the page exists only
+  // to ingest rows and assign work.
+  ["guest", "population/adhoc-import"],
   // KPI dashboard / report designer keep their own narrower sub-tab ceilings.
   ["guest", "reports/kpi"],
   ["employee", "reports/kpi"],

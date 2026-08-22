@@ -376,3 +376,128 @@
 .adhoc-assign-submit {
   align-self: flex-start;
 }
+
+/* ── Historical import (kind: "historical") ───────────────────────────────── */
+
+.adhoc-hist-map {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  padding: 1rem;
+  background: var(--c-surface-2);
+  margin-top: 1rem;
+}
+
+.adhoc-hist-map-title {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.adhoc-hist-coverage {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--c-ink-3);
+}
+
+.adhoc-hist-field-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.4rem;
+}
+
+.adhoc-hist-field-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  padding: 0.35rem 0.6rem;
+  background: var(--c-surface);
+}
+
+.adhoc-hist-field-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.adhoc-hist-select {
+  max-width: 12rem;
+  min-width: 0;
+}
+
+.adhoc-hist-required-note,
+.adhoc-hist-fallback-note {
+  margin: 0;
+  font-size: 0.8rem;
+  border-radius: 8px;
+  padding: 0.4rem 0.7rem;
+}
+
+.adhoc-hist-required-note {
+  color: var(--c-ink-2);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+}
+
+.adhoc-hist-fallback-note {
+  border: 1px solid var(--c-warning-border);
+  background: var(--c-warning-bg);
+}
+
+.adhoc-hist-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  padding: 1rem;
+  background: var(--c-surface-2);
+}
+
+.adhoc-hist-unavailable {
+  margin: 0;
+  border: 1px solid var(--c-warning-border);
+  background: var(--c-warning-bg);
+  border-radius: 10px;
+  padding: 0.5rem 0.8rem;
+  font-size: 0.82rem;
+}
+
+.adhoc-hist-stats {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  font-size: 0.85rem;
+}
+
+/* Blocking. Styled like the assignment panel's error block so "you cannot
+   proceed" reads the same everywhere on this screen. */
+.adhoc-hist-errors {
+  color: var(--c-danger);
+  font-size: 0.8rem;
+}
+
+/* NOT blocking. Partial template coverage lives here and is the expected state
+   of an honest historical file, so it must never wear the error color. */
+.adhoc-hist-warnings {
+  color: var(--c-ink-2);
+  font-size: 0.8rem;
+}
+
+.adhoc-hist-errors ul,
+.adhoc-hist-warnings ul {
+  margin: 0.2rem 0 0;
+  padding-inline-start: 1.2rem;
+}

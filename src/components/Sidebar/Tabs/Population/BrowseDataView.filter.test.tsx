@@ -102,11 +102,10 @@ describe("BrowseDataView — per-column filter option list (B12 task 1)", () => 
     const filterButton = screen.getByRole("button", { name: "تصفية المنفذ" });
     fireEvent.click(filterButton);
 
-    const columnHeader = filterButton.closest("th");
-    if (!columnHeader) {
-      throw new Error("Expected the filter button to be inside a <th> column header");
-    }
-    const header = within(columnHeader);
+    // The menu is portalled to <body> by AnchoredPopover (it used to be an
+    // absolutely-positioned child of the `th`, where `.bv-table-scroll`'s
+    // `overflow: auto` clipped it), so scope to the dialog, not the header.
+    const header = within(screen.getByRole("dialog", { name: "تصفية المنفذ" }));
 
     // Sanity check: before checking anything, all three ports are listed.
     // The dropdown's option list is now populated via an async worker query
@@ -141,5 +140,64 @@ describe("BrowseDataView — per-column filter option list (B12 task 1)", () => 
     // user commits; but at minimum the dropdown's own contents must be
     // unaffected by its own selection).
     expect(screen.getAllByText("ميناء الأول").length).toBeGreaterThan(0);
+  });
+});
+
+// ── Placement (popover escape + RTL) ────────────────────────────────────────
+// Separate concern from B12 above, sharing this file's worker/month harness.
+//
+// `.bv-column-filter-menu` used to be `position: absolute` inside the column's
+// `th`, i.e. inside `.bv-table-scroll` — which is `overflow: auto`, so the
+// scroll container clipped the menu instead of letting it escape. The column
+// picker had the same shape and no height cap at all, so a workspace with many
+// columns opened a panel that ran off the bottom of the screen. Both now render
+// through AnchoredPopover.
+//
+// jsdom has no layout engine, so nothing below asserts pixels — only the DOM
+// location, the applied classes, and that keyboard dismissal survived.
+describe("BrowseDataView — floating panel placement", () => {
+  it("portals the per-column filter menu out of the scrolling table wrapper", async () => {
+    await renderPopulationBrowse([
+      { xrayImageId: "X-1", portName: "ميناء الأول", stage: "المستوى الأول" }
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "تصفية المنفذ" }));
+
+    const menu = screen.getByRole("dialog", { name: "تصفية المنفذ" });
+    expect(menu.closest(".bv-table-scroll")).toBeNull();
+    expect(menu.closest("th")).toBeNull();
+    expect(menu.parentElement).toBe(document.body);
+    expect(menu.classList.contains("ui-anchored-popover")).toBe(true);
+    expect(menu.classList.contains("bv-column-filter-menu")).toBe(true);
+    expect(menu.style.top).not.toBe("");
+    expect(menu.style.left).not.toBe("");
+    expect(menu.style.maxHeight).not.toBe("");
+    // A logical inset would re-apply the RTL flip on top of the already
+    // direction-resolved pixel offset.
+    expect(menu.style.getPropertyValue("inset-inline-start")).toBe("");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "تصفية المنفذ" })).toBeNull()
+    );
+  });
+
+  it("portals the column picker and keeps it dismissible with Escape", async () => {
+    await renderPopulationBrowse([
+      { xrayImageId: "X-1", portName: "ميناء الأول", stage: "المستوى الأول" }
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: /الأعمدة/ }));
+
+    const picker = screen.getByRole("dialog", { name: "اختيار الأعمدة" });
+    expect(picker.parentElement).toBe(document.body);
+    expect(picker.classList.contains("ui-anchored-popover")).toBe(true);
+    expect(picker.classList.contains("bv-col-picker-dropdown")).toBe(true);
+    expect(picker.style.maxHeight).not.toBe("");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "اختيار الأعمدة" })).toBeNull()
+    );
   });
 });

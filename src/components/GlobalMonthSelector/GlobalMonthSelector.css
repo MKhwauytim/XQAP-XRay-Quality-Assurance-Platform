@@ -57,11 +57,14 @@
   border-color: rgba(255, 255, 255, 0.5);
 }
 
+/* Skin only. Placement belongs to AnchoredPopover (`.ui-anchored-popover`),
+   which portals this popover to <body> and pins it to the "شهر جديد" button in
+   viewport coordinates — so it also survives the mobile sidebar's
+   `transform: translateX(...)`, which would otherwise become the containing
+   block for anything `position: fixed` inside the rail. */
 .gms-popover {
-  position: absolute;
-  top: calc(100% + 6px);
-  inset-inline-start: 0;
-  z-index: var(--z-popover);
+  /* Portalled out of `.gms-root`'s dir="rtl" subtree, so it states its own. */
+  direction: rtl;
   /* Clamped: the toolbar wraps to full width at <=640px, so this popover's
      anchor can sit anywhere across it and an unclamped 280px would overflow a
      narrow phone. */
@@ -269,8 +272,5 @@
   font-weight: 600;
 }
 
-/* The create popover anchors to the rail, which is narrower than the toolbar. */
-.gms-sidebar .gms-popover {
-  inset-inline-end: 0;
-  inset-inline-start: auto;
-}
+/* The create popover anchors to the rail, which is narrower than the toolbar;
+   the side it opens toward is the `align` prop at the call site, not CSS. */

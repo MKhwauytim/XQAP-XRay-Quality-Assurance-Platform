@@ -98,7 +98,7 @@ describe("PopulationTab ad-hoc import sub-tab", () => {
     const subTabs = tabConfig?.subTabs ?? [];
     expect(subTabs.map((sub) => sub.id)).toEqual(["process", "browse", "adhoc-import"]);
     expect(subTabs.find((sub) => sub.id === "adhoc-import")?.label).toBe(
-      "استيراد بيانات مخصص",
+      "ارفاق حالات استثنائية",
     );
   });
 

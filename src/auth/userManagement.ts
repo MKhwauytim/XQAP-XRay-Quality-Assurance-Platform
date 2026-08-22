@@ -333,7 +333,7 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
     // features they have nothing to do with; a named group keeps the admin's mental
     // model of "the ad-hoc importer's permissions" intact.
     groupId: "adhoc-import",
-    label: "استيراد بيانات مخصص",
+    label: "ارفاق حالات استثنائية",
     features: [
       {
         id: "adhoc-import.ingest",
@@ -442,12 +442,13 @@ const FEATURE_DEFAULTS: Record<string, Partial<Record<AuthRole, boolean>>> = {
   // itself (audit finding 13) — no non-admin role should ever be able to grant
   // this to itself even hypothetically.
   "settings.adminAccount": { guest: false, employee: false, supervisor: false, manager: false },
-  // Admin-only by default. The page itself is admin-only via the
-  // `population/adhoc-import` SUB-TAB ceiling (tabCatalog.ts); the features now
-  // cascade off the Population page grant, so an admin could technically enable them
-  // for another role -- the sub-tab ceiling still refuses to open the page, and
-  // PopulationTab's own gate refuses to render it. Defaults stay off for every
-  // non-admin role, matching manage-users/reset-passwords above.
+  // Off for every managed role by default. Both features cascade off the POPULATION
+  // page grant (TAB_FEATURE_MAP), never off an `adhoc-import` tab id of their own, so
+  // they have always been grantable from the feature matrix; what used to make the
+  // grant pointless was the `population/adhoc-import` SUB-TAB ceiling refusing to open
+  // the page at all. That ceiling is now every role except guest, so page + feature
+  // together are a real grant an admin can make. The defaults below are unchanged --
+  // widening a ceiling grants nobody anything.
   "adhoc-import.ingest":  { guest: false, employee: false, supervisor: false, manager: false },
   "adhoc-import.assign":  { guest: false, employee: false, supervisor: false, manager: false },
 };
@@ -554,10 +555,12 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "supervisor", tabId: "population/browse",        access: "none" },
     { role: "manager",    tabId: "population/browse",        access: "edit" },
     { role: "admin",      tabId: "population/browse",        access: "edit" },
-    // Ad-hoc import (owner requirement, 2026-08) — admin-only page. It moved from a
-    // stand-alone top-level tab to this Population sub-tab on 2026-08-21; the
-    // ADMIN_ONLY ceiling now lives on the sub-tab id, so the non-admin rows below are
-    // belt-and-braces (isTabRestrictedForRole already refuses them).
+    // Ad-hoc import — «ارفاق حالات استثنائية» (owner requirement, 2026-08). It moved
+    // from a stand-alone top-level tab to this Population sub-tab on 2026-08-21, and
+    // its sub-tab ceiling was widened from admin-only to every role except guest so an
+    // admin can grant it (tabCatalog.ts). These rows are what makes "grantable" stay
+    // distinct from "granted": the shipped default is still "none" for every managed
+    // role, exactly as when the ceiling refused them outright.
     { role: "guest",      tabId: "population/adhoc-import",  access: "none" },
     { role: "employee",   tabId: "population/adhoc-import",  access: "none" },
     { role: "supervisor", tabId: "population/adhoc-import",  access: "none" },

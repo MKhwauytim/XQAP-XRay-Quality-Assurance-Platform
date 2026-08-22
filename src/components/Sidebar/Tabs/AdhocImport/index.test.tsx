@@ -6,11 +6,12 @@
 // auth/usePermissions and auth/userManagement are left REAL (driven through a
 // real session via writeSession/clearSession, like Archive/index.test.tsx) so the
 // permission assertions reflect the actual shipped default matrix instead of a
-// hand-rolled stand-in that could silently drift from it. The page is admin-only:
-// as of 2026-08-21 it is Population's `population/adhoc-import` SUB-TAB, whose own
-// ADMIN_ONLY ceiling (tabCatalog.ts) plus the shipped `adhoc-import.ingest` /
-// `adhoc-import.assign` feature defaults (both off for every managed role) keep it
-// closed. This module exports only a default component -- no `tabConfig` -- so
+// hand-rolled stand-in that could silently drift from it. The page ships closed to
+// every managed role: as of 2026-08-21 it is Population's `population/adhoc-import`
+// SUB-TAB, and while its ceiling is now grantable to every role but guest, the
+// shipped defaults still say "none" for the page and off for both
+// `adhoc-import.ingest` / `adhoc-import.assign` features. An admin has to grant it
+// deliberately. This module exports only a default component -- no `tabConfig` -- so
 // tabRegistry.ts does not resurrect it as a top-level tab.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -240,10 +241,11 @@ describe("AdhocImportTab — permission gating", () => {
     expect(await screen.findByRole("button", { name: L.adhoc_wizard_new_import })).toBeDisabled();
   });
 
-  it("disables the new-import control for a manager session (tab is admin-only)", async () => {
+  it("disables the new-import control for a manager session (default page access = none)", async () => {
     // Managers have broad population/reports edit rights elsewhere, but the ad-hoc
-    // import tab's role ceiling is ADMIN_ONLY (tabCatalog.ts) and its default page
-    // permission is "none" for manager — this is the regression this test guards.
+    // import sub-tab's default page permission is "none" for manager and both ad-hoc
+    // features ship off — this is the regression this test guards. Widening the role
+    // ceiling so an admin CAN grant the page must not hand it to manager by default.
     await renderTab("manager");
     expect(await screen.findByRole("button", { name: L.adhoc_wizard_new_import })).toBeDisabled();
   });

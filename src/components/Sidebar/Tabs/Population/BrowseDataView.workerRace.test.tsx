@@ -143,11 +143,8 @@ describe("BrowseDataView — main-table vs filter-preview query lanes (C1)", () 
     const filterButton = screen.getByRole("button", { name: "تصفية المنفذ" });
     fireEvent.click(filterButton);
 
-    const columnHeader = filterButton.closest("th");
-    if (!columnHeader) {
-      throw new Error("Expected the filter button to be inside a <th> column header");
-    }
-    const header = within(columnHeader);
+    // Portalled to <body> by AnchoredPopover — see BrowseDataView's filter menu.
+    const header = within(screen.getByRole("dialog", { name: "تصفية المنفذ" }));
     await waitFor(() => expect(header.getByText("ميناء الأول")).toBeTruthy());
 
     const optionCheckbox = header

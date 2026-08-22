@@ -6,6 +6,7 @@ import { usePermissions } from "../../auth/usePermissions";
 import { useLabels } from "../../data/labels/useLabels";
 import { formatMonthFolderName, formatMonthFolderShortLabel } from "../../data/population/monthFolder";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
+import { AnchoredPopover } from "../Popover/AnchoredPopover";
 
 import "./GlobalMonthSelector.css";
 
@@ -44,6 +45,9 @@ export function GlobalMonthSelector({ allowCreate, variant = "toolbar" }: Global
   // without silently coercing to 0; validated against MIN_YEAR/MAX_YEAR below.
   const [newYearInput, setNewYearInput] = useState(() => String(new Date().getFullYear()));
   const popoverWrapRef = useRef<HTMLDivElement>(null);
+  // The "شهر جديد" button the popover pins to. Kept in state rather than a ref
+  // so the popover re-positions if the button is re-rendered under it.
+  const [popoverAnchor, setPopoverAnchor] = useState<HTMLElement | null>(null);
   const popoverFocusTrapRef = useFocusTrap<HTMLDivElement>({
     onEscape: () => setPickerOpen(false),
     enabled: pickerOpen,
@@ -58,13 +62,17 @@ export function GlobalMonthSelector({ allowCreate, variant = "toolbar" }: Global
   useEffect(() => {
     if (!pickerOpen) return;
     function handlePointerDown(event: MouseEvent) {
-      if (popoverWrapRef.current && !popoverWrapRef.current.contains(event.target as Node)) {
-        setPickerOpen(false);
-      }
+      const target = event.target as Node;
+      // The popover is portalled to <body>, so it is NOT inside the wrap any
+      // more — testing the wrap alone would treat every click on the month
+      // grid as an outside click and close the popover on first use.
+      if (popoverWrapRef.current?.contains(target)) return;
+      if (popoverFocusTrapRef.current?.contains(target)) return;
+      setPickerOpen(false);
     }
     document.addEventListener("mousedown", handlePointerDown);
     return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, [pickerOpen]);
+  }, [pickerOpen, popoverFocusTrapRef]);
 
   const isSidebar = variant === "sidebar";
   const rootClassName = `gms-root${isSidebar ? " gms-sidebar" : ""}`;
@@ -130,13 +138,26 @@ export function GlobalMonthSelector({ allowCreate, variant = "toolbar" }: Global
           <button
             type="button"
             className="gms-new-btn"
-            onClick={() => setPickerOpen((open) => !open)}
+            onClick={(event) => {
+              setPopoverAnchor(event.currentTarget);
+              setPickerOpen((open) => !open);
+            }}
             aria-expanded={pickerOpen}
           >
             <CalendarPlus size={14} aria-hidden /> {labels.gm_new_month_btn}
           </button>
           {pickerOpen && (
-            <div className="gms-popover" role="dialog" aria-label={labels.gm_new_month_title} ref={popoverFocusTrapRef}>
+            <AnchoredPopover
+              anchor={popoverAnchor}
+              /* The sidebar card's button is the inline-END-most control, so
+                 the popover grows back across the card instead of off the
+                 rail; the toolbar variant keeps its original start edge. */
+              align={isSidebar ? "end" : "start"}
+              className="gms-popover"
+              role="dialog"
+              aria-label={labels.gm_new_month_title}
+              ref={popoverFocusTrapRef}
+            >
               <strong className="gms-popover-title">{labels.gm_new_month_title}</strong>
               <div className="gms-month-grid" role="group">
                 {ARABIC_MONTHS.map((name, idx) => (
@@ -195,7 +216,7 @@ export function GlobalMonthSelector({ allowCreate, variant = "toolbar" }: Global
                   {labels.gm_cancel}
                 </button>
               </div>
-            </div>
+            </AnchoredPopover>
           )}
         </div>
       )}

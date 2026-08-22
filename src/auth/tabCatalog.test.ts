@@ -9,6 +9,7 @@ import {
   TAB_ROLE_CEILINGS,
   tabAllowedRoles,
 } from "./tabCatalog";
+import { createDefaultFeaturePermissions, createDefaultPermissions } from "./userManagement";
 
 describe("tab catalog", () => {
   it("has unique IDs and valid parent references", () => {
@@ -108,22 +109,24 @@ describe("tab catalog", () => {
       "user-management/feature-permissions",
       "user-management/activity",
       "user-management/actions",
-      // Ad-hoc import lives under Population as of 2026-08-21. Its ADMIN_ONLY
-      // ceiling moved with it onto the sub-tab id and must NOT be inherited from
-      // (or widened to) the parent's ALL_ROLES ceiling.
-      "population/adhoc-import",
     ]) {
       expect(roleCeilingFor(tabId), tabId).toEqual(["admin"]);
     }
     expect(roleCeilingFor("settings")).toEqual(["guest", "admin"]);
   });
 
-  it("keeps ad-hoc import under population as an admin-only sub-tab, with no top-level entry", () => {
+  it("keeps ad-hoc import under population as a sub-tab, with no top-level entry", () => {
     const entry = TAB_CATALOG.find((tab) => tab.id === "population/adhoc-import");
     expect(entry).toBeDefined();
     expect(entry?.parentId).toBe("population");
     expect(entry?.group).toBeUndefined();
-    expect(entry?.allowedRoles).toEqual(["admin"]);
+    expect(entry?.label).toBe("ارفاق حالات استثنائية");
+    // Ceiling widened from ADMIN_ONLY so an admin can actually grant the page
+    // (owner: "the app must be fully customizable from admin"). `guest` stays out
+    // on purpose: it is the read-only observer role and this page exists only to
+    // ingest rows and assign work.
+    expect(entry?.allowedRoles).toEqual(["employee", "supervisor", "manager", "admin"]);
+    expect(entry?.allowedRoles).not.toContain("guest");
     // The stand-alone tab id is gone: nothing may resolve it any more, or a stale
     // TAB_FEATURE_MAP/permission row pointing at it would silently keep "working".
     expect(TAB_CATALOG.some((tab) => tab.id === "adhoc-import")).toBe(false);
@@ -131,6 +134,37 @@ describe("tab catalog", () => {
     expect(TAB_ROLE_CEILINGS["adhoc-import"]).toBeUndefined();
     // The parent stays open to everyone -- the sub-tab ceiling does the gating.
     expect(roleCeilingFor("population")).toContain("employee");
+  });
+
+  it("ships ad-hoc import granted to nobody but admin, despite the widened ceiling", () => {
+    // A ceiling is a cap on what an admin MAY grant, never a grant itself. This
+    // pins the distinction: a fresh workspace must hand the page to no managed
+    // role, and must leave both ad-hoc features off for all of them.
+    const defaults = createDefaultPermissions();
+    for (const role of ["guest", "employee", "supervisor", "manager"] as const) {
+      const row = defaults.find(
+        (permission) => permission.role === role && permission.tabId === "population/adhoc-import",
+      );
+      expect(row?.access, role).toBe("none");
+    }
+    expect(
+      defaults.find(
+        (permission) => permission.role === "admin" && permission.tabId === "population/adhoc-import",
+      )?.access,
+    ).toBe("edit");
+
+    const featureDefaults = createDefaultFeaturePermissions();
+    for (const featureId of ["adhoc-import.ingest", "adhoc-import.assign"]) {
+      for (const role of ["guest", "employee", "supervisor", "manager"] as const) {
+        expect(
+          featureDefaults.find((item) => item.role === role && item.featureId === featureId)?.enabled,
+          `${role}:${featureId}`,
+        ).toBe(false);
+      }
+      expect(
+        featureDefaults.find((item) => item.role === "admin" && item.featureId === featureId)?.enabled,
+      ).toBe(true);
+    }
   });
 
   it("never excludes admin from any tab", () => {

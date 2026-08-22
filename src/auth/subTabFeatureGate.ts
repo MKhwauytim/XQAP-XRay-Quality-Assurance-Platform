@@ -22,10 +22,10 @@ import { hasFeature, type FeaturePermission } from "./userManagement";
 export const SUB_TAB_FEATURE_MAP: Readonly<Record<string, readonly string[]>> = {
   "ew/xray-referrals": ["submit-answers", "submit-referrals", "request-replacement", "view-all-entries"],
   "ew/referral-approval": ["approve-referrals", "approve-replacements", "ew.reopenAnswer"],
-  // Ad-hoc import moved under Population (2026-08-21). Its own ADMIN_ONLY sub-tab
-  // ceiling already keeps every managed role out, but a role that IS granted the
-  // page and neither feature would still see a link to a page whose every action
-  // is refused -- exactly the dead link this map exists to prevent.
+  // Ad-hoc import moved under Population (2026-08-21). Now that its sub-tab ceiling
+  // is grantable beyond admin, this map is load-bearing rather than belt-and-braces:
+  // a role granted the page but neither feature would otherwise see a link to a page
+  // whose every action is refused -- exactly the dead link this map exists to prevent.
   "population/adhoc-import": ["adhoc-import.ingest", "adhoc-import.assign"],
 };
 
