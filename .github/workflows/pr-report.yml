@@ -1,0 +1,206 @@
+name: PR report
+
+# Posts ONE sticky comment per pull request and edits it in place on every push
+# (a new comment per push is exactly the noise this replaces). The comment is a
+# report, not a verdict: `ci.yml` is the gate, and this job stays green even
+# when a measurement fails, so nothing here can block a PR on its own.
+#
+# What it reports, and why these four numbers:
+#   * Bundle raw/gzip delta vs the base, plus headroom against the budget in
+#     `scripts/check-bundle-size.mjs`. That ceiling has been raised three times;
+#     seeing the cost of a change while reviewing it is what makes a fourth
+#     raise a decision rather than a formality.
+#   * `max-lines-per-function` headroom. `check:complexity` only speaks up once
+#     a function is already over 1450 lines; the top component sits ~30 lines
+#     short of that, so the useful signal is the approach, not the breach.
+#   * Test count delta, which every edit-log entry records anyway.
+#   * `check:release` state and the version this PR claims.
+#
+# Trigger choice: `pull_request`, never `pull_request_target`. This workflow
+# builds the PR's code, so it must run with the fork-safe read-only token and
+# no access to secrets. The cost is that fork PRs cannot be commented on — the
+# comment step is skipped there and the report goes to the job summary instead.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+# One report per PR at a time; a newer push makes an in-flight run pointless.
+concurrency:
+  group: pr-report-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  metrics:
+    # Both sides are measured in parallel by the same script, so wall-clock
+    # time is one side (~5 min), not two. The base side is cached by commit,
+    # so the second and later pushes to a PR usually skip it entirely.
+    name: Measure (${{ matrix.side }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - side: pr
+            ref: ${{ github.event.pull_request.head.sha }}
+          - side: base
+            ref: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - name: Restore metrics measured for this exact commit
+        id: cached-metrics
+        uses: actions/cache@v4
+        with:
+          path: metrics-${{ matrix.side }}.json
+          # Exact key only, no restore-keys: metrics from a different commit
+          # would be silently wrong rather than merely stale.
+          key: pr-report-metrics-v1-${{ matrix.ref }}
+
+      - name: Check out the ${{ matrix.side }} commit
+        if: steps.cached-metrics.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+          path: repo
+
+      - name: Check out this PR's reporter scripts
+        # Deliberately the PR's copy on both sides, so the two measurements can
+        # never differ because of the measuring code.
+        if: steps.cached-metrics.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: reporter
+          sparse-checkout: .github/scripts
+
+      - name: Set up Node.js
+        if: steps.cached-metrics.outputs.cache-hit != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: repo/package-lock.json
+
+      - name: Install dependencies (npm ci)
+        if: steps.cached-metrics.outputs.cache-hit != 'true'
+        working-directory: repo
+        run: npm ci
+
+      - name: Measure
+        if: steps.cached-metrics.outputs.cache-hit != 'true'
+        working-directory: repo
+        # The script always exits 0 and records failures inside its JSON, so a
+        # broken build on one side degrades one line of the report instead of
+        # turning this workflow red.
+        run: >-
+          node ../reporter/.github/scripts/pr-report-metrics.mjs
+          --out ../metrics-${{ matrix.side }}.json
+          --side ${{ matrix.side }}
+          --sha ${{ matrix.ref }}
+
+      - name: Upload metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-report-metrics-${{ matrix.side }}
+          path: metrics-${{ matrix.side }}.json
+          if-no-files-found: warn
+          retention-days: 5
+
+  report:
+    name: Post the report
+    needs: metrics
+    # Runs even when a measurement job failed, so the comment can say which
+    # number is missing. Skipped only when the whole run was cancelled.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # Only this job needs write access, and only to create/edit one comment.
+      pull-requests: write
+    steps:
+      - name: Check out this PR's reporter scripts
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          sparse-checkout: .github/scripts
+
+      - name: Set up Node.js
+        # No dependencies are installed here — this only pins the Node that
+        # renders the markdown, so the report cannot vary with the runner image.
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Download metrics
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pr-report-metrics-*
+          merge-multiple: true
+          path: metrics
+
+      - name: Render the report
+        run: >-
+          node .github/scripts/pr-report-render.mjs
+          --pr metrics/metrics-pr.json
+          --base metrics/metrics-base.json
+          --pr-sha ${{ github.event.pull_request.head.sha }}
+          --base-sha ${{ github.event.pull_request.base.sha }}
+          --base-ref ${{ github.event.pull_request.base.ref }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          --out pr-report.md
+
+      - name: Add the report to the job summary
+        # Always available, including on fork PRs where commenting is not.
+        run: cat pr-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create or update the sticky comment
+        # Fork PRs and Dependabot PRs get a read-only token, so commenting is
+        # impossible there by design; the job summary above still has the
+        # report. The script also swallows a 403 rather than failing the job.
+        if: >-
+          github.event.pull_request.head.repo.full_name == github.repository
+          && github.actor != 'dependabot[bot]'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            // Must match MARKER in .github/scripts/pr-report-render.mjs.
+            const marker = "<!-- xqap-pr-report -->";
+            const body = fs.readFileSync("pr-report.md", "utf8");
+            const { owner, repo } = context.repo;
+            const issueNumber = context.payload.pull_request.number;
+            try {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner,
+                repo,
+                issue_number: issueNumber,
+                per_page: 100,
+              });
+              const existing = comments.find(
+                (comment) => comment.user?.type === "Bot" && comment.body?.includes(marker),
+              );
+              if (existing) {
+                await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+                core.info(`Updated the existing report comment (${existing.id}).`);
+              } else {
+                const created = await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: issueNumber,
+                  body,
+                });
+                core.info(`Created the report comment (${created.data.id}).`);
+              }
+            } catch (error) {
+              core.warning(
+                `Could not post the report comment (${error.status ?? "no status"}: ${error.message}). ` +
+                  "The report is in this job's summary.",
+              );
+            }

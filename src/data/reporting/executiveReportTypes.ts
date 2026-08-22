@@ -76,9 +76,11 @@ export type ExecutiveReportRow = {
   hasReport?: boolean;
   /**
    * RAW risk-engine targeting value, exactly as the risk file carried it. The
-   * flag→verdict mapping lives in the risk-engine page, NOT here — the real
-   * value vocabulary is unknown at design time, so nothing upstream may assume
-   * what an affirmative looks like.
+   * flag→verdict mapping lives in `src/data/population/riskEngineVerdict.ts`
+   * (shared by the executive deck's risk-engine page and the employee
+   * case-queue filter), NOT here — the real value vocabulary is unknown at
+   * design time, so nothing upstream may assume what an affirmative looks
+   * like.
    */
   targetedByRiskEngine?: string | null;
 };

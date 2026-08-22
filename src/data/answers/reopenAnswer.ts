@@ -57,7 +57,12 @@ export async function reopenSubmittedAnswer(params: {
   if (!item) {
     return { ok: false, error: "لا توجد إجابة محفوظة لهذه العينة." };
   }
-  const lastHistory = item.history?.[item.history.length - 1];
+  // `history` is a shared oversight trail — it also carries
+  // "answered-on-behalf" entries — so "the last reopen" must be selected by
+  // action, not by position. Taking the last element would read an on-behalf
+  // entry's previousSubmittedAt into the reopen event's idempotency key, and
+  // would make a never-reopened draft look reopenable.
+  const lastHistory = [...(item.history ?? [])].reverse().find((h) => h.action === "reopened");
   const previousSubmittedAt =
     item.status === "submitted" ? item.submittedAt : (lastHistory?.previousSubmittedAt ?? null);
   if (item.status !== "submitted" && !lastHistory) {

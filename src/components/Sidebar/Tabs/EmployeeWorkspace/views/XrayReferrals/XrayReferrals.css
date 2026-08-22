@@ -101,6 +101,59 @@
 .ew-ref-queue.ew-xr-grid--with-bar > .data-pagination { grid-row: 4; }
 .ew-ref-queue.ew-xr-grid--with-bar > .ew-xr-panel-col { grid-row: 3 / 5; }
 
+/* ── Case-filter chips (جميع الحالات / مستهدف المؤشر / إحالات استثنائية) ──── */
+
+/* Reuses `.ew-view-switcher` / `.ew-view-seg` from EmployeeWorkspace.css so the
+   two segmented controls in this toolbar read as one family. Only the count
+   badge and the chip's inner layout are new. The toolbar is `flex-wrap: nowrap;
+   overflow-x: auto` for this queue, so the group must refuse to shrink — a
+   squeezed chip would ellipsize its own count, which is the one thing it is
+   there to show. */
+.ew-case-filter {
+  flex: 0 0 auto;
+}
+
+.ew-case-filter .ew-view-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding-inline: var(--sp-3);
+}
+
+.ew-case-filter-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  padding-inline: 5px;
+  border-radius: 999px;
+  background: var(--c-surface-3);
+  color: var(--c-ink-3);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 17px;
+}
+
+.ew-case-filter .ew-view-seg.active .ew-case-filter-count {
+  background: var(--c-navy);
+  color: var(--c-surface);
+}
+
+/* Zero rows for the ACTIVE chip. DataTable's own "no results" row only fires
+   when it has rows and the column filters emptied them, so a chip that filters
+   everything out would otherwise leave a bare header with no explanation. */
+.ew-case-filter-empty {
+  margin-bottom: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--c-surface-2);
+  border: 1.5px solid var(--c-border);
+  border-radius: var(--r-sm);
+  color: var(--c-ink-2);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
 /* ── Table ───────────────────────────────────────────────────────────────── */
 
 /* Scroll, don't compress. `.dt-table-wrap` is already `overflow: auto`; the
@@ -258,4 +311,45 @@
     min-height: 0;
     max-height: none;
   }
+}
+
+/* ── Oversight scope picker (whose queue am I looking at?) ────────────────── */
+
+/* A `<select>` rather than the chip row the case filter uses: this toolbar is
+   `flex-wrap: nowrap; overflow-x: auto`, and one chip per employee overflows it
+   as soon as the workspace has more than a handful of people. Reuses `.ew-select`
+   from EmployeeWorkspace.css so it matches the toolbar's other controls, and
+   refuses to shrink for the same reason the chips do — a squeezed option list
+   ellipsizes the very names it exists to let the reader choose between. */
+.ew-queue-scope-select {
+  flex: 0 0 auto;
+  min-width: 190px;
+  max-width: 260px;
+  min-height: 34px;
+  padding-block: var(--sp-1);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* ── Panel authoring notice (answering on another employee's behalf) ──────── */
+
+/* Informational sibling of `.ew-msg-warn` in EmployeeWorkspace.css: "you are
+   authoring for {name}" is a statement of fact about a permitted action, not a
+   warning about a blocked one. The two blocked cases keep `.ew-msg-warn`. */
+/* The panel column is a flex column whose `.ip-panel` takes `flex: 1 1 auto`,
+   so a notice above it must refuse to be squashed by the panel's growth. */
+.ew-xr-panel-col > .ew-msg-info,
+.ew-xr-panel-col > .ew-msg-warn {
+  flex: 0 0 auto;
+}
+
+.ew-msg-info {
+  margin-bottom: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--c-info-bg);
+  border: 1.5px solid var(--c-info-border);
+  border-radius: var(--r-sm);
+  color: var(--c-info);
+  font-size: 13.5px;
+  font-weight: 600;
 }

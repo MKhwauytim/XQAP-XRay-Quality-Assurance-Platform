@@ -1,0 +1,75 @@
+# Dependabot for XQAP. Tuned for one maintainer: weekly, grouped, and capped, so
+# it produces a small number of reviewable PRs instead of a per-package flood.
+#
+# Every Dependabot PR still has to clear `ci.yml` (typecheck, lint, complexity,
+# hex literals, release consistency, vendor integrity, tests, build, bundle
+# size) and gets a `pr-report` job summary with the bundle delta, which is the
+# number that actually decides whether a dependency bump is affordable here.
+# Merging is deliberately manual: this repo requires an edit-log entry for every
+# change, and Dependabot cannot write one.
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Riyadh
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+
+    ignore:
+      # `xlsx` is intentionally NOT the npm-registry package. It is pinned to
+      # the vendored SheetJS CDN tarball (`file:vendor/xlsx-0.20.3.tgz`) because
+      # the registry copy is years stale, and vendoring is what lets `npm ci`
+      # run without reaching cdn.sheetjs.com — see vendor/README.md and the
+      # "Build & dependency gotchas" section of CLAUDE.md. A Dependabot PR
+      # rewriting this to a registry version would be a silent downgrade of the
+      # Excel parser that `check:vendor` would then fail on. Upgrades follow the
+      # manual procedure in vendor/README.md instead.
+      #
+      # Dependabot does not normally touch `file:` dependencies, so this entry
+      # is belt and braces — it costs nothing and removes the possibility.
+      - dependency-name: xlsx
+
+    groups:
+      # Majors are deliberately left out of every group: React 20 or Vite 9
+      # deserves its own PR and its own read of the changelog. Minor/patch
+      # updates are where grouping pays off.
+      production-minor-patch:
+        dependency-type: production
+        update-types:
+          - minor
+          - patch
+      development-minor-patch:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    # "/" is correct here — it means .github/workflows, not a directory named /.
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Riyadh
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: "chore(actions)"
+    groups:
+      # Four workflows share the same handful of actions; one PR a week that
+      # moves them together is far easier to review than five.
+      github-actions:
+        patterns:
+          - "*"

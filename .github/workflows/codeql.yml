@@ -1,0 +1,59 @@
+name: CodeQL
+
+# Free static security analysis for public repositories. Complements `ci.yml`
+# rather than repeating it: ESLint here is a style/correctness gate, while
+# CodeQL does cross-file taint tracking (injection, unsafe DOM sinks, path
+# handling) that a lint rule cannot see.
+#
+# Worth knowing for THIS app: with no backend, every finding lands in browser
+# code. `docs/architecture/SECURITY_MODEL.md` already accepts that the auth
+# layer is advisory and that workspace JSON is tamperable, so alerts restating
+# that are expected — the value is in the report builders and the Excel/ad-hoc
+# import paths, which assemble HTML and parse untrusted spreadsheets.
+#
+# Results appear under the repository's Security tab, not as PR comments, so
+# this adds no PR noise. Alerts are surfaced on the PR only when a PR actually
+# introduces one.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Mondays 04:27 UTC. Off the hour on purpose: scheduled jobs queued at :00
+    # wait behind everyone else's cron. A weekly run catches newly published
+    # queries against unchanged code.
+    - cron: "27 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze JavaScript/TypeScript
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # Required to upload the SARIF results to the Security tab.
+      security-events: write
+      # CodeQL reads workflow run metadata to attribute results to a run.
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          # No compilation step: TypeScript is analysed from source.
+          build-mode: none
+          config-file: .github/codeql/codeql-config.yml
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"
