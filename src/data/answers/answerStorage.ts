@@ -84,7 +84,10 @@ function withValueHistory(previous: ItemAnswer | undefined, next: ItemAnswer): I
   }
   const entry: ItemValueHistoryEntry = {
     changedAt: new Date().toISOString(),
-    changedBy: next.answeredBy,
+    // The real author, not the file owner. `answeredBy` is pinned to the
+    // assignee (see `answeredOnBehalfBy` in answerTypes.ts), so on an on-behalf
+    // write it would attribute the supervisor's edit to the assignee.
+    changedBy: next.answeredOnBehalfBy ?? next.answeredBy,
     reason: changeReason(previous),
     previous: {
       answers: previous.answers,
@@ -131,11 +134,26 @@ export async function loadEmployeeAnswers(
   return read.kind === "found" ? read.value : emptyAnswerFile(username, monthFolderName);
 }
 
+/**
+ * What an updater returns: the next file, or a refusal that aborts the write.
+ *
+ * A refusal exists so a precondition that depends on the file's CURRENT content
+ * (e.g. "this item has not been submitted yet") can be evaluated against the
+ * very bytes the write would overwrite, inside the same read-modify-write.
+ * Checking before calling and writing afterwards leaves a window where two
+ * clients both pass the check and the second silently clobbers the first.
+ */
+type AnswerFileUpdate = EmployeeAnswerFile | { refuse: string };
+
+function isRefusal(update: AnswerFileUpdate): update is { refuse: string } {
+  return "refuse" in update;
+}
+
 async function updateEmployeeAnswerFile(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   username: string,
-  updater: (file: EmployeeAnswerFile) => EmployeeAnswerFile
+  updater: (file: EmployeeAnswerFile) => AnswerFileUpdate
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   // Month lock gate — single choke point for every employee-file write
   // (answers, referral/replacement requests, reopen). Rejects loudly.
@@ -149,9 +167,17 @@ async function updateEmployeeAnswerFile(
       // `{ ok: false, error }`. Nothing is written on that path — the old
       // behaviour substituted an empty base here and reported success.
       const existing = await loadEmployeeAnswers(directoryHandle, monthFolderName, username);
+      // Preconditions are evaluated here, against the state this attempt just
+      // read and is about to overwrite — not by the caller beforehand. A refusal
+      // is terminal (no retry: a losing precondition does not become winnable)
+      // and writes nothing at all.
+      const update = updater(existing);
+      if (isRefusal(update)) {
+        return { done: true, result: { ok: false as const, error: update.refuse } };
+      }
       const nextRevision = (existing.revision ?? 0) + 1;
       const updated: EmployeeAnswerFile = {
-        ...updater(existing),
+        ...update,
         username,
         monthFolderName,
         revision: nextRevision,
@@ -177,6 +203,52 @@ async function updateEmployeeAnswerFile(
   );
 }
 
+/**
+ * Same normalization `normalizeUsername` (auth/userManagement) applies, inlined
+ * so the answer-storage layer keeps no dependency on the auth module. Used only
+ * to compare two usernames for equality, never to build a file name — that is
+ * `answerFileName`/`safeWorkspaceFilePart`'s job.
+ */
+function sameUser(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+/**
+ * Drop any `answeredOnBehalfBy` an incoming item carries.
+ *
+ * Every write path except `upsertItemAnswerOnBehalf` funnels through here, so
+ * the field can only ever be set together with its `"answered-on-behalf"`
+ * history entry — a caller cannot forge attribution by hand-setting the field,
+ * and, more importantly for real use, cannot accidentally *keep* it: when the
+ * assignee later re-answers their own item the client is re-saving an object it
+ * read from disk, which still carries the supervisor's name. Stripping makes
+ * the field always describe the answers currently stored, while the permanent
+ * record of the supervisor's authorship survives in `history` (and their actual
+ * answers in `valueHistory`).
+ */
+function stripOnBehalf(item: ItemAnswer): ItemAnswer {
+  if (item.answeredOnBehalfBy === undefined) return item;
+  return { ...item, answeredOnBehalfBy: undefined };
+}
+
+/**
+ * Take `history` from the STORED predecessor, never from the incoming item —
+ * the same rule `withValueHistory` already applies to `valueHistory`, and for
+ * the same reason: the oversight trail is append-only and a client must not be
+ * able to rewrite it.
+ *
+ * This also makes the trail durable. Callers build a whole fresh `ItemAnswer`
+ * per save (see `XrayReferrals.handleSave`) with no `history` on it, so before
+ * this fold every ordinary re-save silently erased the item's `"reopened"` /
+ * `"answered-on-behalf"` entries — the answers survived in `valueHistory` but
+ * the record of WHO acted did not. A first insert has no predecessor, so a
+ * client-supplied trail is dropped rather than trusted.
+ */
+function withStoredHistory(previous: ItemAnswer | undefined, next: ItemAnswer): ItemAnswer {
+  if (previous?.history === next.history) return next;
+  return { ...next, history: previous?.history };
+}
+
 export async function saveEmployeeAnswers(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
@@ -189,9 +261,25 @@ export async function saveEmployeeAnswers(
     const prevById = new Map(file.items.map((i) => [i.xrayImageId, i]));
     return {
       ...file,
-      items: items.map((item) => withValueHistory(prevById.get(item.xrayImageId), item)),
+      items: items.map((item) => {
+        const previous = prevById.get(item.xrayImageId);
+        return withValueHistory(previous, withStoredHistory(previous, stripOnBehalf(item)));
+      }),
     };
   });
+}
+
+/**
+ * Replace one item in the file, folding A4 value history against its
+ * predecessor. `item` is expected to have been through `stripOnBehalf` /
+ * `withStoredHistory` already (or, for the on-behalf path, to carry the
+ * deliberately-appended trail).
+ */
+function upsertItemInFile(file: EmployeeAnswerFile, item: ItemAnswer): EmployeeAnswerFile {
+  const previous = file.items.find((i) => i.xrayImageId === item.xrayImageId);
+  const others = file.items.filter((i) => i.xrayImageId !== item.xrayImageId);
+  // A4: record the overwritten snapshot before replacing the item.
+  return { ...file, items: [...others, withValueHistory(previous, item)] };
 }
 
 export async function upsertItemAnswer(
@@ -202,9 +290,100 @@ export async function upsertItemAnswer(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   return updateEmployeeAnswerFile(directoryHandle, monthFolderName, username, (file) => {
     const previous = file.items.find((i) => i.xrayImageId === item.xrayImageId);
-    const others = file.items.filter((i) => i.xrayImageId !== item.xrayImageId);
-    // A4: record the overwritten snapshot before replacing the item.
-    return { ...file, items: [...others, withValueHistory(previous, item)] };
+    return upsertItemInFile(file, withStoredHistory(previous, stripOnBehalf(item)));
+  });
+}
+
+/**
+ * Write an answer that a user OTHER than the assignee authored — the
+ * `answer-on-behalf` feature ("supervisor answers a sample assigned to someone
+ * else"). Gated at the call site by `canMutate("answer-on-behalf")`; this
+ * function is the storage half only.
+ *
+ * Everything the on-behalf case needs lands in ONE `updateEmployeeAnswerFile`
+ * pass — the same CAS/lock/verify cycle as any other answer write — so the
+ * author can never be recorded without the answer, nor the answer without the
+ * author:
+ *
+ * 1. the answers themselves, in **`assigneeUsername`'s** file, exactly where a
+ *    self-answer would have gone;
+ * 2. `answeredBy` forced to `assigneeUsername`, defensively — this is precisely
+ *    the call site most likely to pass the acting user, and doing so would
+ *    break the `${xrayImageId}::${assignedTo}` join (see `answeredOnBehalfBy`
+ *    in answerTypes.ts);
+ * 3. `answeredOnBehalfBy` = the real author;
+ * 4. an appended `"answered-on-behalf"` history entry naming author, assignee,
+ *    timestamp and the `submittedAt` it replaced.
+ *
+ * **Only an UNANSWERED item may be answered on behalf.** If the item already
+ * exists with `status === "submitted"`, this refuses with `{ ok: false, error }`
+ * and writes nothing: one person's submitted work is never overwritten by
+ * someone else through this path. The test is the STATUS, not mere existence —
+ * an item `reopenItemAnswer` flipped back to `"draft"` is by definition no
+ * longer submitted and becomes answerable on behalf again, which is exactly the
+ * correction route. The check runs inside `updateEmployeeAnswerFile`'s fold, on
+ * the same file state the write would overwrite, so two supervisors racing
+ * cannot both pass it.
+ *
+ * The restriction is specific to this path. An assignee overwriting their OWN
+ * submitted answer keeps today's behaviour untouched, `withValueHistory`
+ * snapshot included — `upsertItemAnswer` is not tightened.
+ *
+ * Refuses rather than degrades when `authorUsername` is blank: a caller that
+ * declares an on-behalf write must name the author, and silently writing an
+ * unattributed answer into someone else's file is the exact failure this
+ * feature exists to prevent. Nothing is written on that path.
+ *
+ * `authorUsername === assigneeUsername` is NOT an error — it is a self-answer
+ * that happened to arrive through the supervisor UI, so it is recorded as one:
+ * no attribution field, no history entry, identical bytes to
+ * `upsertItemAnswer`. Attribution stays meaningful because it only ever appears
+ * when it is actually true.
+ */
+export async function upsertItemAnswerOnBehalf(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  assigneeUsername: string,
+  item: ItemAnswer,
+  authorUsername: string,
+  reason = ""
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const author = authorUsername.trim();
+  if (author === "") {
+    return {
+      ok: false,
+      error: "تعذر حفظ الإجابة نيابةً عن الموظف: لم يُحدَّد المستخدم الذي قام بالإجابة.",
+    };
+  }
+  if (sameUser(author, assigneeUsername)) {
+    // Not on behalf of anyone — the assignee answering their own sample.
+    return upsertItemAnswer(directoryHandle, monthFolderName, assigneeUsername, item);
+  }
+  return updateEmployeeAnswerFile(directoryHandle, monthFolderName, assigneeUsername, (file) => {
+    const previous = file.items.find((i) => i.xrayImageId === item.xrayImageId);
+    if (previous?.status === "submitted") {
+      return {
+        refuse:
+          "لا يمكن الإجابة نيابةً عن الموظف: تم تقديم إجابة لهذه العينة بالفعل. أعد فتح الإجابة أولاً إذا لزم تصحيحها.",
+      };
+    }
+    const historyEntry: ItemAnswerHistoryEntry = {
+      action: "answered-on-behalf",
+      at: new Date().toISOString(),
+      by: author,
+      reason,
+      previousSubmittedAt: previous?.submittedAt ?? null,
+      onBehalfOf: assigneeUsername,
+    };
+    const next: ItemAnswer = {
+      ...item,
+      answeredBy: assigneeUsername,
+      answeredOnBehalfBy: author,
+      // Folded from the STORED predecessor, never from the incoming item, so a
+      // client cannot rewrite the trail (same rule as withValueHistory).
+      history: [...(previous?.history ?? []), historyEntry],
+    };
+    return upsertItemInFile(file, next);
   });
 }
 

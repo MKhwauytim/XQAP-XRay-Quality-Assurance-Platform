@@ -12,7 +12,8 @@
 //     (the same rule the executive deck's risk-engine page enforces, now shared
 //     from src/data/population/riskEngineVerdict.ts);
 //  3. the count on each chip is the length of the list that chip opens, over the
-//     same «الكل»/«المحالة لي» scope the reader is already in;
+//     same scope the reader is already in — which, since the oversight scope
+//     control became an employee picker, may be one named employee's queue;
 //  4. switching chips does NOT destroy an unsaved inspection draft. A chip that
 //     filters the open row out is the same shape of event as a supervisor
 //     reassigning it mid-edit, and the view's `dirtyEntryId`/`lastPanelEntry`
@@ -57,6 +58,7 @@ import type {
   AdhocImportRow,
 } from "../../../../../data/adhocImport/adhocImportTypes";
 import type { NormalizedRiskRow } from "../../Population/riskData/riskDataTypes";
+import { QUEUE_SCOPE_ALL } from "./XrayReferrals/subComponents";
 import XrayReferrals from "./XrayReferrals";
 
 const MONTH = "5-may-2026";
@@ -262,6 +264,16 @@ function rowFor(id: string): HTMLElement | null {
   );
 }
 
+/** The oversight scope picker (`<select>`), by its accessible name. */
+function scopePicker(): HTMLSelectElement {
+  return screen.getByRole("combobox", { name: L.ew_queue_scope_label }) as HTMLSelectElement;
+}
+
+/** Switch the queue to a username, or to `QUEUE_SCOPE_ALL`. */
+function pickScope(value: string): void {
+  fireEvent.change(scopePicker(), { target: { value } });
+}
+
 /** Every xrayImageId currently rendered as a queue row. */
 function queueIds(candidates: string[]): string[] {
   return candidates.filter((id) => rowFor(id) !== null);
@@ -305,8 +317,10 @@ describe("XrayReferrals case filter — the three chips", () => {
 
     // The whole point of the control: an employee, not just an oversight user.
     expect(screen.getByRole("group", { name: L.ew_case_filter_aria })).toBeInTheDocument();
-    // The scope switcher stays oversight-only, so an employee sees no «الكل».
-    expect(screen.queryByRole("group", { name: "نطاق العرض" })).toBeNull();
+    // The scope picker stays oversight-only: an ordinary employee's queue is
+    // already scoped to them, and offering them one would force the full
+    // workspace read their sample-mirror fast path exists to avoid.
+    expect(screen.queryByRole("combobox", { name: L.ew_queue_scope_label })).toBeNull();
 
     expect(chip(L.ew_case_filter_all)).toHaveAttribute("aria-pressed", "true");
     expect(chip(L.ew_case_filter_risk_targeted)).toHaveAttribute("aria-pressed", "false");
@@ -368,10 +382,10 @@ describe("XrayReferrals case filter — the three chips", () => {
   });
 });
 
-describe("XrayReferrals case filter — composition with «المحالة لي»", () => {
+describe("XrayReferrals case filter — composition with the scope picker", () => {
   it("filters within the active scope, and the counts follow the scope switch", async () => {
-    // supervisor => can("view-all-entries") => the scope switcher is rendered,
-    // and the view opens on the personal scope («المحالة لي»).
+    // supervisor => can("view-all-entries") => the scope picker is rendered,
+    // and the view opens on the reader's own rows.
     writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
     writeUserManagementState(createEmptyUserManagementState(), false);
 
@@ -397,12 +411,109 @@ describe("XrayReferrals case filter — composition with «المحالة لي»
 
     // Widening the scope keeps the chip selected and re-counts over the wider
     // set — the case filter composes with the scope, it does not replace it.
-    fireEvent.click(screen.getByRole("button", { name: "الكل" }));
+    pickScope(QUEUE_SCOPE_ALL);
     await waitFor(() => expect(rowFor("IMG-THEIRS-YES")).not.toBeNull());
     expect(chip(L.ew_case_filter_risk_targeted)).toHaveAttribute("aria-pressed", "true");
     expect(queueIds(ids)).toEqual(["IMG-MINE-YES", "IMG-THEIRS-YES"]);
     expect(chipCount(L.ew_case_filter_all)).toBe("4");
     expect(chipCount(L.ew_case_filter_risk_targeted)).toBe("2");
+
+    // …and narrowing to ONE named employee re-counts over just their queue.
+    // This is the case the old two-option switcher could not express at all.
+    pickScope("emp-2");
+    await waitFor(() => expect(rowFor("IMG-MINE-YES")).toBeNull());
+    expect(queueIds(ids)).toEqual(["IMG-THEIRS-YES"]);
+    expect(chipCount(L.ew_case_filter_all)).toBe("2");
+    expect(chipCount(L.ew_case_filter_risk_targeted)).toBe("1");
+  });
+
+  it("shows only the picked employee's rows, and «الكل» restores every row", async () => {
+    writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedMonth(root, [
+      ["IMG-MINE", null, "sup-1"],
+      ["IMG-A-1", null, "emp-a"],
+      ["IMG-A-2", null, "emp-a"],
+      ["IMG-B-1", null, "emp-b"],
+    ]);
+    const ids = ["IMG-MINE", "IMG-A-1", "IMG-A-2", "IMG-B-1"];
+
+    render(<XrayReferrals directoryHandle={root} />);
+    await waitFor(() => expect(rowFor("IMG-MINE")).not.toBeNull());
+
+    // Default is unchanged: the reader's own rows, nobody else's.
+    expect(scopePicker().value).toBe("sup-1");
+    expect(queueIds(ids)).toEqual(["IMG-MINE"]);
+
+    // The whole point of the control — open ONE employee's queue.
+    pickScope("emp-a");
+    await waitFor(() => expect(rowFor("IMG-A-1")).not.toBeNull());
+    expect(queueIds(ids)).toEqual(["IMG-A-1", "IMG-A-2"]);
+
+    pickScope("emp-b");
+    await waitFor(() => expect(rowFor("IMG-A-1")).toBeNull());
+    expect(queueIds(ids)).toEqual(["IMG-B-1"]);
+
+    pickScope(QUEUE_SCOPE_ALL);
+    await waitFor(() => expect(rowFor("IMG-MINE")).not.toBeNull());
+    expect(queueIds(ids)).toEqual(ids);
+  });
+
+  it("offers everyone who holds a row, and counts each queue in the option", async () => {
+    writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedMonth(root, [
+      ["IMG-MINE", null, "sup-1"],
+      ["IMG-A-1", null, "emp-a"],
+      ["IMG-A-2", null, "emp-a"],
+    ]);
+
+    render(<XrayReferrals directoryHandle={root} />);
+    await waitFor(() => expect(rowFor("IMG-MINE")).not.toBeNull());
+
+    const optionTexts = [...scopePicker().options].map((o) => o.textContent ?? "");
+    // «الكل» carries the unscoped total, each employee their own — so the size
+    // of a queue is visible BEFORE switching into it.
+    expect(optionTexts[0]).toBe(L.ew_queue_scope_all.replace("{count}", "3"));
+    expect(optionTexts).toContain(
+      L.ew_queue_scope_option.replace("{name}", "emp-a").replace("{count}", "2")
+    );
+    // The reader themselves is pickable and marked as such — unlike the
+    // reassign dialog's roster, which excludes them.
+    expect(optionTexts).toContain(
+      L.ew_queue_scope_option_self.replace("{name}", "sup-1").replace("{count}", "1")
+    );
+  });
+
+  it("keeps an unsaved draft when the picked employee excludes the open row", async () => {
+    writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedMonth(root, [
+      ["IMG-MINE", null, "sup-1"],
+      ["IMG-THEIRS", null, "emp-a"],
+    ]);
+    await seedDraftableTemplate(root);
+
+    render(<XrayReferrals directoryHandle={root} />);
+    await waitFor(() => expect(rowFor("IMG-MINE")).not.toBeNull());
+
+    const noteInput = (await waitFor(() => screen.getByLabelText("ملاحظة"))) as HTMLInputElement;
+    fireEvent.change(noteInput, { target: { value: "مسودة غير محفوظة" } });
+
+    // Switching to another employee takes the open row out of the queue — the
+    // same shape of event as a chip filtering it out, or a supervisor
+    // reassigning it mid-edit, and the render-derived retention must absorb it.
+    pickScope("emp-a");
+
+    await waitFor(() => expect(rowFor("IMG-MINE")).toBeNull());
+    expect((screen.getByLabelText("ملاحظة") as HTMLInputElement).value).toBe("مسودة غير محفوظة");
+    expect(screen.getByText(L.ew_draft_retained_notice)).toBeInTheDocument();
   });
 });
 

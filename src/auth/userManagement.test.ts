@@ -271,3 +271,52 @@ test("a roster that was never initialised is still seeded from the shipped defau
     createDefaultManagedUsers().map((u) => u.username),
   );
 });
+
+// ── answer-on-behalf: a grantable, never-automatic oversight feature ─────────
+//
+// The whole point of the feature is that one person's work can be attributed to
+// another's assignment, so it must be OFF for every managed role until an admin
+// deliberately turns it on. These tests pin all four wiring points at once —
+// the catalogue entry, the tab cascade, the defaults row, and grantability —
+// because missing any one of them leaves the feature either un-grantable or
+// silently already on.
+
+test("answer-on-behalf exists in the feature catalogue and cascades off employee-workspace", () => {
+  const featureIds = new Set(createDefaultFeaturePermissions().map((f) => f.featureId));
+  expect(featureIds.has("answer-on-behalf")).toBe(true);
+  expect(TAB_FEATURE_MAP["employee-workspace"]).toContain("answer-on-behalf");
+  // Same parent tab as its siblings — a wrong/absent tab makes it permanently
+  // inert (see the ad-hoc import regression in permissionMatrixEffect.test.ts).
+  expect(FEATURE_TAB_LOOKUP["answer-on-behalf"]).toBe("employee-workspace");
+  expect(FEATURE_TAB_LOOKUP["answer-on-behalf"]).toBe(FEATURE_TAB_LOOKUP["submit-answers"]);
+});
+
+test("answer-on-behalf is off by default for EVERY managed role, supervisor included", () => {
+  const feats = createDefaultFeaturePermissions();
+  for (const role of ["guest", "employee", "supervisor", "manager"] as const) {
+    expect(hasFeature(feats, role, "answer-on-behalf"), `${role}:answer-on-behalf`).toBe(false);
+  }
+  // Admin keeps the bootstrap-superuser blanket grant (hasFeature short-circuit).
+  expect(hasFeature(feats, "admin", "answer-on-behalf")).toBe(true);
+});
+
+test("answer-on-behalf is grantable per role and survives normalization of an older state", () => {
+  const granted = createDefaultFeaturePermissions().map((f) =>
+    f.role === "supervisor" && f.featureId === "answer-on-behalf" ? { ...f, enabled: true } : f,
+  );
+  expect(hasFeature(granted, "supervisor", "answer-on-behalf")).toBe(true);
+  expect(hasFeature(granted, "employee", "answer-on-behalf")).toBe(false);
+
+  // A workspace file written before the feature existed must backfill it as
+  // disabled rather than dropping it (which would hide the toggle entirely).
+  const normalized = normalizeUserManagementState({
+    users: [],
+    permissions: createDefaultPermissions(),
+    featurePermissions: createDefaultFeaturePermissions().filter(
+      (f) => f.featureId !== "answer-on-behalf",
+    ),
+  });
+  const rows = normalized.featurePermissions.filter((f) => f.featureId === "answer-on-behalf");
+  expect(rows).toHaveLength(5);
+  expect(rows.filter((f) => f.role !== "admin").every((f) => f.enabled === false)).toBe(true);
+});

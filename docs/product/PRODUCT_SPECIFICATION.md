@@ -222,6 +222,7 @@ hasFeature(featurePermissions, role, featureId): boolean
 | `submit-referrals` | تحويل العينات | ✗ | ✓ | ✓ | ✓ | ✓ |
 | `request-replacement` | طلب الاستبدال | ✗ | ✓ | ✗ | ✗ | ✓ |
 | `submit-answers` | رفع الإجابات | ✗ | ✓ | ✗ | ✗ | ✓ |
+| `answer-on-behalf` | الإجابة نيابةً عن موظف | ✗ | ✗ | ✗ | ✗ | ✓ |
 | `approve-referrals` | اعتماد التحويلات | ✗ | ✗ | ✓ | ✓ | ✓ |
 | `approve-replacements` | اعتماد الاستبدال | ✗ | ✗ | ✓ | ✓ | ✓ |
 | `view-all-entries` | عرض جميع المدخلات | ✗ | ✗ | ✓ | ✓ | ✓ |
@@ -1374,6 +1375,7 @@ type WorkbookWorkerRequest = {
 | `submit-referrals` | ✗ | ✓ | ✓ | ✓ | ✓ (locked) |
 | `request-replacement` | ✗ | ✓ | ✗ | ✗ | ✓ (locked) |
 | `submit-answers` | ✗ | ✓ | ✗ | ✗ | ✓ (locked) |
+| `answer-on-behalf` | ✗ | ✗ | ✗ | ✗ | ✓ (locked) |
 | `approve-referrals` | ✗ | ✗ | ✓ | ✓ | ✓ (locked) |
 | `approve-replacements` | ✗ | ✗ | ✓ | ✓ | ✓ (locked) |
 | `view-all-entries` | ✗ | ✗ | ✓ | ✓ | ✓ (locked) |

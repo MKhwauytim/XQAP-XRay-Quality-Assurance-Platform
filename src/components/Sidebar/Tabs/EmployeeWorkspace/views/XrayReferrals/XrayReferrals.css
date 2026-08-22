@@ -312,3 +312,44 @@
     max-height: none;
   }
 }
+
+/* ── Oversight scope picker (whose queue am I looking at?) ────────────────── */
+
+/* A `<select>` rather than the chip row the case filter uses: this toolbar is
+   `flex-wrap: nowrap; overflow-x: auto`, and one chip per employee overflows it
+   as soon as the workspace has more than a handful of people. Reuses `.ew-select`
+   from EmployeeWorkspace.css so it matches the toolbar's other controls, and
+   refuses to shrink for the same reason the chips do — a squeezed option list
+   ellipsizes the very names it exists to let the reader choose between. */
+.ew-queue-scope-select {
+  flex: 0 0 auto;
+  min-width: 190px;
+  max-width: 260px;
+  min-height: 34px;
+  padding-block: var(--sp-1);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* ── Panel authoring notice (answering on another employee's behalf) ──────── */
+
+/* Informational sibling of `.ew-msg-warn` in EmployeeWorkspace.css: "you are
+   authoring for {name}" is a statement of fact about a permitted action, not a
+   warning about a blocked one. The two blocked cases keep `.ew-msg-warn`. */
+/* The panel column is a flex column whose `.ip-panel` takes `flex: 1 1 auto`,
+   so a notice above it must refuse to be squashed by the panel's growth. */
+.ew-xr-panel-col > .ew-msg-info,
+.ew-xr-panel-col > .ew-msg-warn {
+  flex: 0 0 auto;
+}
+
+.ew-msg-info {
+  margin-bottom: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--c-info-bg);
+  border: 1.5px solid var(--c-info-border);
+  border-radius: var(--r-sm);
+  color: var(--c-info);
+  font-size: 13.5px;
+  font-weight: 600;
+}

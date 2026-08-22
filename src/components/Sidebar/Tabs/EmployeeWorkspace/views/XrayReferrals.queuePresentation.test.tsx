@@ -7,7 +7,10 @@
 //     requests were the only rows in the app that lost their status colour. The
 //     helpers already scope by username, so the short-circuit bought nothing.
 //  2. The stats strip labelled itself "إحصائياتي" even in the "الكل" scope,
-//     where every number it shows is workspace-wide.
+//     where every number it shows is workspace-wide. Since the scope control
+//     became an EMPLOYEE PICKER there is a third case — one named other
+//     employee — which is neither "mine" nor "everyone's" and gets its own
+//     wording rather than being folded into either.
 //  3. A zero-assignment queue rendered a bare empty table instead of the
 //     shared EmptyState the sibling Employee Workspace views use.
 
@@ -28,6 +31,8 @@ import { invalidateMonthLockCache } from "../../../../../data/population/monthLo
 import { appendReferralRequest, appendReplacementRequest } from "../../../../../data/referral/referralStorage";
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import { resetBootProgress } from "../../../../../data/workspace/bootProgress";
+import { getLabels } from "../../../../../data/labels/labelsStore";
+import { QUEUE_SCOPE_ALL } from "./XrayReferrals/subComponents";
 import { setReadOnlyMode } from "../../../../../data/storage/readOnlyMode";
 import XrayReferrals from "./XrayReferrals";
 
@@ -134,6 +139,18 @@ async function seedAssignedSample(
   if (!result.ok) throw new Error(`seed failed: ${result.error}`);
 }
 
+const L = getLabels();
+
+/** The oversight scope picker (`<select>`), by its accessible name. */
+function scopePicker(): HTMLSelectElement {
+  return screen.getByRole("combobox", { name: L.ew_queue_scope_label }) as HTMLSelectElement;
+}
+
+/** Switch the queue to a username, or to `QUEUE_SCOPE_ALL`. */
+function pickScope(value: string): void {
+  fireEvent.change(scopePicker(), { target: { value } });
+}
+
 function findRowByXrayImageId(id: string): HTMLElement {
   const matches = screen.getAllByText(id);
   const row = matches.map((el) => el.closest("tr")).find((tr): tr is HTMLTableRowElement => tr !== null);
@@ -195,25 +212,38 @@ describe("XrayReferrals pending-row colouring for oversight users", () => {
 });
 
 describe("XrayReferrals stats strip scope labelling", () => {
-  it("labels the strip as personal in 'المحالة لي' and as workspace-wide in 'الكل'", async () => {
+  it("names whose figures it shows: mine, everyone's, or one picked employee's", async () => {
     writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
     writeUserManagementState(createEmptyUserManagementState(), false);
 
     const root = createMemoryDirectory("root");
-    await seedAssignedSample(root, "sup-1");
+    await saveSampleMaster(root, MONTH, makeSample([makeRow("IMG-1"), makeRow("IMG-2")]));
+    const seeded = await appendDistributionEvents(root, MONTH, [
+      buildAssignEvent({ xrayImageId: "IMG-1", assignedTo: "sup-1", eventBy: "admin" }),
+      buildAssignEvent({ xrayImageId: "IMG-2", assignedTo: "emp-2", eventBy: "admin" }),
+    ]);
+    if (!seeded.ok) throw new Error(`seed failed: ${seeded.error}`);
 
     render(<XrayReferrals directoryHandle={root} />);
     await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
 
-    // The view opens on personal scope (showMyOnly = true).
+    // The view still opens on the reader's own rows, as the old default did.
+    expect(scopePicker().value).toBe("sup-1");
     expect(screen.getByLabelText("إحصائياتي")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "الكل" }));
+    pickScope(QUEUE_SCOPE_ALL);
 
-    // In "الكل" every number shown is workspace-wide, so the strip must stop
-    // claiming to be the current user's own statistics.
-    expect(screen.queryByLabelText("إحصائياتي")).not.toBeInTheDocument();
+    // Everyone's: the strip must stop claiming to be the reader's own figures.
+    await waitFor(() => expect(screen.queryByLabelText("إحصائياتي")).not.toBeInTheDocument());
     expect(screen.getByLabelText("إحصائيات جميع الموظفين")).toBeInTheDocument();
+
+    // One named OTHER employee is neither of the two — it must not be
+    // mislabelled as the reader's own figures nor as the whole workspace's.
+    pickScope("emp-2");
+    const employeeAria = L.ew_queue_stats_employee_aria.replace("{name}", "emp-2");
+    await waitFor(() => expect(screen.getByLabelText(employeeAria)).toBeInTheDocument());
+    expect(screen.queryByLabelText("إحصائياتي")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("إحصائيات جميع الموظفين")).not.toBeInTheDocument();
   });
 });
 

@@ -245,6 +245,40 @@ export const DEFAULT_LABELS = {
   ew_case_filter_adhoc:            "إحالات استثنائية",
   ew_case_filter_empty:            "لا توجد حالات ضمن هذه التصفية. اختر «جميع الحالات» للعودة إلى القائمة كاملة.",
 
+  // ── Case-queue scope picker (oversight only) ─────────────────────────────
+  // Replaces the old two-button «الكل» / «المحالة لي» switcher. A supervisor
+  // needs to open ONE named employee's queue (someone on leave with hundreds
+  // of unfinished samples) and act on it, which a binary own/everyone toggle
+  // cannot express. Rendered only for `view-all-entries`: an ordinary
+  // employee's queue is already scoped to them.
+  //
+  // `{name}` is the employee's display name and `{count}` how many rows of the
+  // CURRENT month they hold — both interpolated by the caller, so the reader
+  // can see the size of a queue before switching into it.
+  ew_queue_scope_label:            "نطاق العرض",
+  ew_queue_scope_all:              "الكل — جميع الموظفين ({count})",
+  ew_queue_scope_option:           "{name} ({count})",
+  ew_queue_scope_option_self:      "{name} — أنا ({count})",
+
+  // The stats strip («متابعة العمل») above the queue names WHOSE figures it is
+  // showing. "own" and "all" keep their original wording; these three cover the
+  // third case the picker introduced — a specific OTHER employee — which is
+  // neither of them and must not be mislabelled as either.
+  ew_queue_stats_employee_title:   "متابعة العمل — {name}",
+  ew_queue_stats_employee_aria:    "إحصائيات الموظف {name}",
+  ew_queue_stats_employee_scope:   "نطاق العرض: {name}",
+
+  // ── Answering on another employee's behalf (`answer-on-behalf`) ───────────
+  // The inspection panel used to be flatly read-only on anyone else's row. It
+  // is now editable for a holder of the feature, but ONLY while that row is
+  // still unanswered: an answer its owner already submitted must never be
+  // overwritten from here (reopen it first). Each blocked case says WHY rather
+  // than rendering as a dead form. `{name}` is the assignee.
+  ew_panel_on_behalf_notice:       "أنت تجيب نيابةً عن {name}. تُحفظ الإجابة في ملف الموظف المسند إليه، ويُسجَّل اسمك كمن قام بالإجابة فعلياً.",
+  ew_panel_locked_answered:        "هذه العينة مسندة إلى {name} وقد أُجيب عنها بالفعل. لا يمكن تعديل إجابة موظف آخر من هنا — أعد فتح الإجابة أولاً إن لزم التصحيح.",
+  ew_panel_locked_no_permission:   "هذه العينة مسندة إلى {name}. لا تملك صلاحية الإجابة نيابةً عن الموظفين، لذا يظهر النموذج للاطّلاع فقط.",
+  msg_answer_on_behalf_denied:     "لا تملك صلاحية الإجابة نيابةً عن الموظفين، أو أن مساحة العمل للقراءة فقط.",
+
   // Population — sampling & processing guards
   sample_redraw_blocked: "لا يمكن إعادة سحب العينة بعد بدء التوزيع: يوجد سجل توزيع فعّال لهذا الشهر، وإعادة السحب ستؤدي إلى فقدان التعيينات والإجابات المسجلة.",
 

@@ -64,6 +64,8 @@ import {
 import { saveTemplate } from "../../../../../data/templates/templateStorage";
 import { saveInspectionTemplateSelection } from "../../../../../data/templates/templateSelectionStorage";
 import type { TemplateSchema } from "../../../../../data/templates/templateTypes";
+import { getLabels } from "../../../../../data/labels/labelsStore";
+import { QUEUE_SCOPE_ALL } from "./XrayReferrals/subComponents";
 import XrayReferrals from "./XrayReferrals";
 import { setReadOnlyMode } from "../../../../../data/storage/readOnlyMode";
 import { ensureAdhocSampleMaster, assignAdhocRowsToEmployee } from "../../../../../data/adhocImport/adhocImportAssignment";
@@ -427,6 +429,18 @@ describe("XrayReferrals background data-refresh vs. an open inspection form", ()
 
 // Locates the <tr> for a given xrayImageId's cell among possibly multiple text
 // matches on the page (the same id can also render inside the detail panel).
+const L = getLabels();
+
+/** The oversight scope picker (`<select>`), by its accessible name. */
+function scopePicker(): HTMLSelectElement {
+  return screen.getByRole("combobox", { name: L.ew_queue_scope_label }) as HTMLSelectElement;
+}
+
+/** Switch the queue to a username, or to `QUEUE_SCOPE_ALL`. */
+function pickScope(value: string): void {
+  fireEvent.change(scopePicker(), { target: { value } });
+}
+
 function findRowByXrayImageId(id: string): HTMLElement {
   const matches = screen.getAllByText(id);
   const row = matches.map((el) => el.closest("tr")).find((tr): tr is HTMLTableRowElement => tr !== null);
@@ -854,6 +868,38 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     await waitFor(() => expect(screen.getByText(/2 مطابقة للتصفية\/البحث الحالي/)).toBeInTheDocument());
   });
 
+  it("keeps a manual selection across an employee-scope switch — reaching across employees is what the flow is for", async () => {
+    // DELIBERATE, not an oversight. Ticking rows under one employee, switching
+    // the picker to another and still submitting is the ONLY way the planner's
+    // 'already-assigned-to-target' skip can be reached (see the skip-report test
+    // below), and selected ids are re-validated against the CURRENT entries
+    // before anything is written, so nothing stale can be submitted. The same
+    // persistence already holds across case-filter changes and silent refreshes.
+    writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await saveSampleMaster(root, MONTH, makeSample([makeRow("IMG-1"), makeRow("IMG-2")]));
+    const seeded = await appendDistributionEvents(root, MONTH, [
+      buildAssignEvent({ xrayImageId: "IMG-1", assignedTo: "sup-1", eventBy: "admin" }),
+      buildAssignEvent({ xrayImageId: "IMG-2", assignedTo: "emp-a", eventBy: "admin" }),
+    ]);
+    if (!seeded.ok) throw new Error(`seed failed: ${seeded.error}`);
+
+    render(<XrayReferrals directoryHandle={root} />);
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+
+    fireEvent.click(screen.getByRole("button", { name: "تحديد الكل المطابق" }));
+    await waitFor(() => expect(screen.getByText("1 محددة يدوياً")).toBeInTheDocument());
+
+    // Switch to a different employee's queue — IMG-1 is no longer on screen…
+    pickScope("emp-a");
+    await waitFor(() => expect(screen.getAllByText("IMG-2").length).toBeGreaterThan(0));
+    expect(screen.queryAllByText("IMG-1").filter((el) => el.closest("tr") !== null)).toHaveLength(0);
+    // …and the selection it came from is still held.
+    expect(screen.getByText("1 محددة يدوياً")).toBeInTheDocument();
+  });
+
   it("hides per-row checkboxes and the bulk-reassign bar when bulk-reassign-referrals is disabled for the role (render-boundary permission gating)", async () => {
     writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
     writeUserManagementState(supervisorWithBulkReassignDisabled(), false);
@@ -997,9 +1043,10 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     if (!moved.ok) throw new Error(`seed failed: ${moved.error}`);
 
     render(<XrayReferrals directoryHandle={root} />);
-    // IMG-1 now belongs to jalgahamdi, so it is outside the default
-    // "المحالة لي" oversight view — widen to الكل to get both rows on screen.
-    fireEvent.click(await waitFor(() => screen.getByRole("button", { name: "الكل" })));
+    // IMG-1 now belongs to jalgahamdi, so it is outside the default oversight
+    // scope (the reader's own rows) — widen to «الكل» to get both on screen.
+    await waitFor(() => scopePicker());
+    pickScope(QUEUE_SCOPE_ALL);
     await waitFor(() => expect(screen.getAllByText("IMG-2").length).toBeGreaterThan(0));
 
     // Both rows are pending, so the button legitimately counts 2 here.
@@ -1249,9 +1296,10 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     await seedTwoAssignedSamples(root, "emp-a");
 
     render(<XrayReferrals directoryHandle={root} />);
-    // The samples belong to another employee, so switch the oversight view off
-    // "my samples only" before they are on screen at all.
-    fireEvent.click(await waitFor(() => screen.getByRole("button", { name: "الكل" })));
+    // The samples belong to another employee, so widen the oversight scope off
+    // the reader's own rows before they are on screen at all.
+    await waitFor(() => scopePicker());
+    pickScope(QUEUE_SCOPE_ALL);
     await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
 
     fireEvent.click(screen.getByRole("button", { name: /إسناد الكل المطابق للتصفية/ }));

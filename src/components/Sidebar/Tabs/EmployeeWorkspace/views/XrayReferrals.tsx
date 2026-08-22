@@ -10,6 +10,7 @@ import { thrownErrorText, userFacingErrorText } from "../../../../../data/storag
 import {
   loadEmployeeAnswers,
   upsertItemAnswer,
+  upsertItemAnswerOnBehalf,
 } from "../../../../../data/answers/answerStorage";
 import { reopenSubmittedAnswer } from "../../../../../data/answers/reopenAnswer";
 import { MonthClosedError } from "../../../../../data/population/monthLock";
@@ -96,13 +97,17 @@ import { formatStageLabel } from "../../../../../data/population/stageHelpers";
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import {
   CaseFilterSwitcher,
-  QueueScopeSwitcher,
+  QueueScopePicker,
+  QUEUE_SCOPE_ALL,
+  buildQueueScopeOptions,
   QueueToolbar,
   ReassignSelectionBar,
   ReassignModal,
   SampleDetailPanel,
   StatusBadge,
   ReferralStatsStrip,
+  PanelAuthoringNotice,
+  resolvePanelAuthoring,
   ReplacementDialog,
   SELECT_COL_ID,
   DEFAULT_VISIBLE,
@@ -375,6 +380,193 @@ function createRenderCell(deps: {
 }
 
 /**
+ * Arabic text for an error THROWN by a workspace write.
+ *
+ * Raw thrown-error text is internal English (Chromium DOMException wording,
+ * safeWrite validation strings) and has no place in an Arabic UI, and a closed
+ * month is a rule rather than a fault, so it gets its own sentence. Shared by
+ * every mutating handler below, which previously each carried their own copy of
+ * this three-line ternary plus the same paragraph explaining it.
+ */
+function thrownWriteErrorText(error: unknown): string {
+  return error instanceof MonthClosedError
+    ? getLabels().msg_month_closed_write_blocked
+    : thrownErrorText(error);
+}
+
+/**
+ * The inspection panel's "submit answers" write.
+ *
+ * Two write paths, chosen by WHOSE assignment this is. A self-answer goes
+ * through `upsertItemAnswer` exactly as before. Answering for someone else goes
+ * through `upsertItemAnswerOnBehalf`, which files the item in the ASSIGNEE's
+ * answer file, pins `answeredBy` to them, and records the real author in
+ * `answeredOnBehalfBy` plus an append-only history entry. There is deliberately
+ * no third path: the on-behalf write is the same CAS/lock/verify cycle as any
+ * other, and inventing a parallel one is how attribution and answers drift
+ * apart.
+ *
+ * Module-level for the same budget reason as `createReopenHandlers` below.
+ */
+function createSaveAnswerHandler(deps: {
+  directoryHandle: DirectoryHandleLike;
+  folderForRow: (xrayImageId: string) => string;
+  username: string;
+  activeTpl: TemplateSchema | null;
+  selMonth: string;
+  canSubmitAnswers: boolean;
+  canAnswerOnBehalf: boolean;
+  setAnswers: React.Dispatch<React.SetStateAction<ItemAnswer[]>>;
+  setStatusMsg: (msg: StatusMsg) => void;
+}) {
+  const {
+    directoryHandle, folderForRow, username, activeTpl, selMonth,
+    canSubmitAnswers, canAnswerOnBehalf, setAnswers, setStatusMsg,
+  } = deps;
+  return async function handleSave(
+    xrayImageId: string, ans: FieldAnswer[], forUser: string
+  ): Promise<void> {
+    if (!canSubmitAnswers) {
+      setStatusMsg({ type: "error", text: "لا تملك صلاحية تقديم الإجابات، أو أن مساحة العمل للقراءة فقط." });
+      return;
+    }
+    // Handler-boundary check for the on-behalf case, mirroring every other
+    // mutating handler here: the panel is already gated at render
+    // (resolvePanelAuthoring), but a stale panel must not be able to write.
+    if (forUser !== username && !canAnswerOnBehalf) {
+      setStatusMsg({ type: "error", text: getLabels().msg_answer_on_behalf_denied });
+      return;
+    }
+    // No on-disk month selected → the upsert target folder would be "" (writes
+    // to the workspace root). Bail before touching disk.
+    if (!activeTpl || !selMonth) return;
+    const now  = new Date().toISOString();
+    const item: ItemAnswer = {
+      xrayImageId, templateId: activeTpl.templateId, templateVersion: activeTpl.version,
+      answers: ans, lastSavedAt: now,
+      // The ASSIGNEE, always — even when a supervisor authored this. `answeredBy`
+      // is the `${xrayImageId}::${assignedTo}` join key, not attribution; the
+      // real author is recorded by upsertItemAnswerOnBehalf (see answerTypes.ts).
+      submittedAt: now, answeredBy: forUser,
+      status: "submitted",
+    };
+    try {
+      const folder = folderForRow(xrayImageId);
+      const result = forUser === username
+        ? await upsertItemAnswer(directoryHandle, folder, forUser, item)
+        : await upsertItemAnswerOnBehalf(directoryHandle, folder, forUser, item, username);
+      if (result.ok) {
+        setAnswers((prev) => [
+          ...prev.filter((a) => !(a.xrayImageId === xrayImageId && a.answeredBy === forUser)),
+          item,
+        ]);
+        setStatusMsg({ type: "ok", text: "تم التقديم." });
+      } else {
+        setStatusMsg({ type: "error", text: userFacingErrorText(result.error, "xrayReferrals:result") });
+      }
+    } catch (error) {
+      setStatusMsg({ type: "error", text: thrownWriteErrorText(error) });
+    }
+  };
+}
+
+/**
+ * The two answer-reopen handlers: a supervisor reopening someone's submitted
+ * answer outright, and an employee asking for their own to be reopened (applied
+ * instantly or routed for approval, per `canReopenInstant`).
+ *
+ * Module-level for the same reason as `createOpenReassignModal` below — the
+ * component body is against the repo's `max-lines-per-function` budget, and
+ * these two close over nothing that cannot be passed in. Both write through
+ * `folderForRow`, never the selected month: an ad-hoc row's answer lives in its
+ * own store, and a request filed against the wrong folder fails approval with
+ * "no saved answer" while polluting an unrelated month's queue.
+ */
+function createReopenHandlers(deps: {
+  directoryHandle: DirectoryHandleLike;
+  folderForRow: (xrayImageId: string) => string;
+  username: string;
+  role: string;
+  selMonth: string;
+  canReopenAnswer: boolean;
+  canSubmitAnswers: boolean;
+  canReopenInstant: boolean;
+  setStatusMsg: (msg: StatusMsg) => void;
+  selectEntry: (xrayImageId: string | null) => void;
+  reload: (opts?: { silent?: boolean }) => Promise<void>;
+}) {
+  const {
+    directoryHandle, folderForRow, username, role, selMonth,
+    canReopenAnswer, canSubmitAnswers, canReopenInstant,
+    setStatusMsg, selectEntry, reload,
+  } = deps;
+
+  async function handleReopenAnswer(entry: DistributionEntry, reason: string): Promise<void> {
+    if (!canReopenAnswer) {
+      setStatusMsg({ type: "error", text: "لا تملك صلاحية إعادة فتح الإجابات، أو أن مساحة العمل للقراءة فقط." });
+      return;
+    }
+    if (!selMonth) return;
+    try {
+      const result = await reopenSubmittedAnswer({
+        directoryHandle,
+        monthFolderName: folderForRow(entry.xrayImageId),
+        employeeUsername: entry.assignedTo,
+        xrayImageId: entry.xrayImageId,
+        reopenedBy: username,
+        reopenedByRole: role,
+        reason,
+      });
+      if (result.ok) {
+        setStatusMsg({ type: "ok", text: getLabels().msg_reopen_done });
+        await reload();
+      } else {
+        setStatusMsg({ type: "error", text: userFacingErrorText(result.error, "xrayReferrals:result") });
+      }
+    } catch (error) {
+      setStatusMsg({ type: "error", text: thrownWriteErrorText(error) });
+    }
+  }
+
+  // Batch B: employee self-service reopen. Branches on canReopenInstant — either
+  // applies immediately or files a pending request routed to a supervisor.
+  async function handleRequestReopen(entry: DistributionEntry, reason: string): Promise<void> {
+    if (!canSubmitAnswers) {
+      setStatusMsg({ type: "error", text: "لا تملك صلاحية طلب إعادة فتح الإجابة، أو أن مساحة العمل للقراءة فقط." });
+      return;
+    }
+    if (!selMonth) return;
+    try {
+      const result = await submitReopenRequest({
+        directoryHandle,
+        monthFolderName: folderForRow(entry.xrayImageId),
+        employeeUsername: entry.assignedTo,
+        xrayImageId: entry.xrayImageId,
+        assignedTo: entry.assignedTo,
+        requestedBy: username,
+        requestedByRole: role,
+        reason,
+        instant: canReopenInstant,
+      });
+      if (result.ok) {
+        selectEntry(null);
+        setStatusMsg({
+          type: "ok",
+          text: result.mode === "instant" ? getLabels().msg_reopen_done : getLabels().msg_reopen_request_sent,
+        });
+        await reload();
+      } else {
+        setStatusMsg({ type: "error", text: userFacingErrorText(result.error, "xrayReferrals:result") });
+      }
+    } catch (error) {
+      setStatusMsg({ type: "error", text: thrownWriteErrorText(error) });
+    }
+  }
+
+  return { handleReopenAnswer, handleRequestReopen };
+}
+
+/**
  * Opens the إحالة (reassign) modal for a set of ids. A factory over the three
  * setters it drives — module-level so the component body stays inside the
  * repo's `max-lines-per-function` regression budget.
@@ -427,9 +619,14 @@ function createOpenReassignModal(deps: {
 function computePersonalStats(input: {
   allEntries: DistributionEntry[];
   entries: DistributionEntry[];
-  /** The "الكل" / "المحالة لي" SCOPE, before the case-filter chips narrow it —
-   *  "متابعة العمل" answers "how much work do I have", which a temporary view
-   *  filter must not silently rewrite. */
+  /** The picked SCOPE (everyone, or one named employee), before the case-filter
+   *  chips narrow it — "متابعة العمل" answers "how much work is in the queue I
+   *  am looking at", which a temporary view filter must not silently rewrite.
+   *  DELIBERATE consequence of the employee picker: for an oversight user these
+   *  figures follow the picked employee, so the strip reports THAT person's
+   *  workload, not the reader's. That is the point of picking them, and the
+   *  strip is relabelled to name whose numbers they are (ReferralStatsStrip's
+   *  "employee" scope) rather than left claiming "إحصائياتي". */
   scopedEntries: DistributionEntry[];
   canSeeAll: boolean;
   username: string;
@@ -523,6 +720,13 @@ export default function XrayReferrals({ directoryHandle }: Props) {
    */
   const canReassignSamples = canSeeAll ? canBulkReassignReferrals : canSubmitReferrals;
   const canSubmitAnswers = canMutate("submit-answers");
+  /**
+   * May this user author an answer for a sample assigned to SOMEONE ELSE?
+   * Grantable per role and off by default everywhere (see userManagement.ts);
+   * it never widens what may be done to an ALREADY-ANSWERED row — see
+   * `resolvePanelAuthoring`, which still refuses that case.
+   */
+  const canAnswerOnBehalf = canMutate("answer-on-behalf");
   const canReopenAnswer = canMutate("ew.reopenAnswer");
   // Batch B: when enabled for this role, the employee's self-service reopen request
   // is applied instantly; when disabled it is routed to a supervisor for approval.
@@ -548,8 +752,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const [sampleMaster, setSampleMaster] = useState<SampleMasterData | null>(null);
   const [replacementDialog, setReplacementDialog] = useState<ReplacementDialogState>(null);
   const [replacementError, setReplacementError] = useState<string | null>(null);
-  // Permissioned oversight users can switch to "all", but the page opens on personal samples.
-  const [showMyOnly, setShowMyOnly] = useState(true);
+  // Permissioned oversight users pick WHOSE queue they are looking at — a named
+  // employee, or everyone (QUEUE_SCOPE_ALL). The page still opens on the
+  // reader's own samples, exactly as the old "المحالة لي" default did.
+  const [scopeEmployee, setScopeEmployee] = useState<string>(username);
   const [replacementBusy, setReplacementBusy] = useState(false);
   const [colPreset, setColPreset]     = useState<ColConfig | undefined>(undefined);
   const [myQuota, setMyQuota]         = useState<PersonalQuota>(null);
@@ -694,11 +900,22 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     [columns, effectiveColConfig, canSeeAll]
   );
 
-  // Permissioned oversight view: "المحالة لي" shows only rows assigned to the current user.
+  // Permissioned oversight view: the picked employee's rows, or everyone's.
+  // This predicate is the ONLY thing the picker changes — chip counts,
+  // `displayEntries`, the table and the stats strip all flow from here.
   const scopedEntries = useMemo(
-    () => (canSeeAll && showMyOnly ? entries.filter((e) => e.assignedTo === username) : entries),
-    [entries, canSeeAll, showMyOnly, username]
+    () => (canSeeAll && scopeEmployee !== QUEUE_SCOPE_ALL
+      ? entries.filter((e) => e.assignedTo === scopeEmployee)
+      : entries),
+    [entries, canSeeAll, scopeEmployee]
   );
+  // Roster ∪ actual assignees, with per-employee counts. Rebuilt when `entries`
+  // changes, which is also when the counts can move; see buildQueueScopeOptions.
+  const scopeOptions = useMemo(
+    () => (canSeeAll ? buildQueueScopeOptions(entries, username) : []),
+    [canSeeAll, entries, username]
+  );
+  const pickedScopeName = scopeOptions.find((o) => o.username === scopeEmployee)?.displayName ?? scopeEmployee;
   // The three case chips COMPOSE on top of that scope rather than replacing it:
   // they narrow `scopedEntries`, and their counts are taken over the same set,
   // so the numbers always add up to the queue the reader is looking at. All of
@@ -830,6 +1047,21 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const selAnswer = useMemo(
     () => panelEntry ? (answersMap.get(`${panelEntry.xrayImageId}::${panelEntry.assignedTo}`) ?? null) : null,
     [panelEntry, answersMap]
+  );
+
+  // Who may type into the panel for the row it is showing, and what to tell the
+  // reader when they may not. Pure and module-level (subComponents.tsx) so the
+  // "someone else's row is editable only while unanswered" rule sits in one
+  // testable place rather than inside a JSX prop expression.
+  const panelAuthoring = useMemo(
+    () => resolvePanelAuthoring({
+      entry: panelEntry ?? null,
+      username,
+      answersMap,
+      canSubmitAnswers,
+      canAnswerOnBehalf,
+    }),
+    [panelEntry, username, answersMap, canSubmitAnswers, canAnswerOnBehalf]
   );
 
   const personalStats = useMemo<PersonalStats>(
@@ -1120,131 +1352,34 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     await applyTemplate(id, canSetTemplate);
   }
 
-  async function handleSave(
-    xrayImageId: string, ans: FieldAnswer[], forUser: string
-  ): Promise<void> {
-    // No on-disk month selected → the upsert target folder would be "" (writes
-    // to the workspace root). Bail before touching disk.
-    if (!canSubmitAnswers) {
-      setStatusMsg({ type: "error", text: "لا تملك صلاحية تقديم الإجابات، أو أن مساحة العمل للقراءة فقط." });
-      return;
-    }
-    if (!activeTpl || !selMonth) return;
-    const now  = new Date().toISOString();
-    const item: ItemAnswer = {
-      xrayImageId, templateId: activeTpl.templateId, templateVersion: activeTpl.version,
-      answers: ans, lastSavedAt: now,
-      submittedAt: now, answeredBy: forUser,
-      status: "submitted",
-    };
-    try {
-      const result = await upsertItemAnswer(directoryHandle, folderForRow(xrayImageId), forUser, item);
-      if (result.ok) {
-        setAnswers((prev) => [
-          ...prev.filter((a) => !(a.xrayImageId === xrayImageId && a.answeredBy === forUser)),
-          item,
-        ]);
-        setStatusMsg({ type: "ok", text: "تم التقديم." });
-      } else {
-        setStatusMsg({ type: "error", text: userFacingErrorText(result.error, "xrayReferrals:result") });
-      }
-    } catch (error) {
-      setStatusMsg({
-        type: "error",
-        // Raw thrown-error text is internal English (Chromium DOMException
-        // wording, safeWrite validation strings) and has no place in an Arabic
-        // UI -- map it, keep the detail in the admin error log.
-        text: error instanceof MonthClosedError
-          ? getLabels().msg_month_closed_write_blocked
-          : thrownErrorText(error),
-      });
-    }
-  }
+  // Module-level (createSaveAnswerHandler, above) so this component body stays
+  // inside the repo's `max-lines-per-function` budget.
+  const handleSave = createSaveAnswerHandler({
+    directoryHandle, folderForRow, username, activeTpl, selMonth,
+    canSubmitAnswers, canAnswerOnBehalf, setAnswers, setStatusMsg,
+  });
 
-  async function handleReopenAnswer(entry: DistributionEntry, reason: string): Promise<void> {
-    if (!canReopenAnswer) {
-      setStatusMsg({ type: "error", text: "لا تملك صلاحية إعادة فتح الإجابات، أو أن مساحة العمل للقراءة فقط." });
-      return;
-    }
-    if (!selMonth) return;
-    try {
-      const result = await reopenSubmittedAnswer({
-        directoryHandle,
-        // Routed on the ROW, not the selected month — see folderForRow. The
-        // answer being reopened was written by handleSave to the row's own
-        // store, so an ad-hoc row's reopen must read and rewrite it there.
-        monthFolderName: folderForRow(entry.xrayImageId),
-        employeeUsername: entry.assignedTo,
-        xrayImageId: entry.xrayImageId,
-        reopenedBy: username,
-        reopenedByRole: role,
-        reason,
-      });
-      if (result.ok) {
-        setStatusMsg({ type: "ok", text: getLabels().msg_reopen_done });
-        await loadData();
-      } else {
-        setStatusMsg({ type: "error", text: userFacingErrorText(result.error, "xrayReferrals:result") });
-      }
-    } catch (error) {
-      setStatusMsg({
-        type: "error",
-        // Raw thrown-error text is internal English (Chromium DOMException
-        // wording, safeWrite validation strings) and has no place in an Arabic
-        // UI -- map it, keep the detail in the admin error log.
-        text: error instanceof MonthClosedError
-          ? getLabels().msg_month_closed_write_blocked
-          : thrownErrorText(error),
-      });
-    }
-  }
-
-  // Batch B: employee self-service reopen. Branches on canReopenInstant — either
-  // applies immediately or files a pending request routed to a supervisor.
-  async function handleRequestReopen(entry: DistributionEntry, reason: string): Promise<void> {
-    if (!canSubmitAnswers) {
-      setStatusMsg({ type: "error", text: "لا تملك صلاحية طلب إعادة فتح الإجابة، أو أن مساحة العمل للقراءة فقط." });
-      return;
-    }
-    if (!selMonth) return;
-    try {
-      const result = await submitReopenRequest({
-        directoryHandle,
-        // Routed on the ROW (see folderForRow): the request has to land in the
-        // same store as the answer its approver will reopen, or approval fails
-        // with "no saved answer" while polluting an unrelated month's queue.
-        monthFolderName: folderForRow(entry.xrayImageId),
-        employeeUsername: entry.assignedTo,
-        xrayImageId: entry.xrayImageId,
-        assignedTo: entry.assignedTo,
-        requestedBy: username,
-        requestedByRole: role,
-        reason,
-        instant: canReopenInstant,
-      });
-      if (result.ok) {
-        selectEntry(null);
-        setStatusMsg({
-          type: "ok",
-          text: result.mode === "instant" ? getLabels().msg_reopen_done : getLabels().msg_reopen_request_sent,
-        });
-        await loadData();
-      } else {
-        setStatusMsg({ type: "error", text: userFacingErrorText(result.error, "xrayReferrals:result") });
-      }
-    } catch (error) {
-      setStatusMsg({
-        type: "error",
-        // Raw thrown-error text is internal English (Chromium DOMException
-        // wording, safeWrite validation strings) and has no place in an Arabic
-        // UI -- map it, keep the detail in the admin error log.
-        text: error instanceof MonthClosedError
-          ? getLabels().msg_month_closed_write_blocked
-          : thrownErrorText(error),
-      });
-    }
-  }
-
+  // Both reopen handlers live at module scope (createReopenHandlers, above) to
+  // keep this component body inside the repo's `max-lines-per-function` budget.
+  // Behaviour is unchanged — they are the same two functions, closing over the
+  // same values, now passed explicitly.
+  // `loadData` bumps loadTokenRef.current, but only inside the async handlers this factory
+  // returns (an event-handler call chain), never during render — the same exemption the two
+  // prop callbacks further down used to carry one each.
+  // eslint-disable-next-line react-hooks/refs -- see above
+  const { handleReopenAnswer, handleRequestReopen } = createReopenHandlers({
+    directoryHandle,
+    folderForRow,
+    username,
+    role,
+    selMonth,
+    canReopenAnswer,
+    canSubmitAnswers,
+    canReopenInstant,
+    setStatusMsg,
+    selectEntry,
+    reload: loadData,
+  });
   /**
    * The sample master + every-employee entry set the replacement dialog needs.
    * Returns what `loadData` already put in state when the full read ran, and
@@ -1787,13 +1922,14 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               rowMatchesFilter={rowMatchesFilter}
               onFilteredRowsChange={setFilteredTableEntries}
               // The only user actions that make this a different queue: the
-              // global month, (oversight) "الكل" / "المحالة لي", and the case
-              // chip. A background re-read is none of them. The case chip
-              // belongs here because it changes the visible row set outright —
-              // page 4 of a now one-page result is a dead end. It cannot bounce
-              // a reviewer off an open row: resetToken moves PAGING only, never
-              // the selection (`expandedKey`/`selEntryId` are untouched).
-              resetToken={`${selMonth}::${showMyOnly ? "mine" : "all"}::${caseFilter.value}`}
+              // global month, (oversight) the picked employee, and the case
+              // chip. A background re-read is none of them. Both the picker and
+              // the case chip belong here because they change the visible row
+              // set outright — page 4 of a now one-page result is a dead end.
+              // Neither can bounce a reviewer off an open row: resetToken moves
+              // PAGING only, never the selection (`expandedKey`/`selEntryId`
+              // are untouched).
+              resetToken={`${selMonth}::${scopeEmployee}::${caseFilter.value}`}
               exportFileName={`صور الأشعة المحالة - ${selMonth || "كل الأشهر"}.xlsx`}
               expandedKey={selEntryId}
               onRowClick={(e) => selectEntry(e.xrayImageId)}
@@ -1803,21 +1939,41 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                   : rowStatusClass(entry, pendingReferralIds, pendingReplacementIds)
               }
               // Every role that can open this page sees the case chips (an
-              // ordinary employee is their primary user); the scope switcher
+              // ordinary employee is their primary user); the scope picker
               // stays oversight-only, as before.
               toolbarStart={<CaseFilterSwitcher value={caseFilter.value} counts={caseFilter.counts} onChange={caseFilter.setValue} />}
-              toolbarEndExtra={canSeeAll ? <QueueScopeSwitcher showMyOnly={showMyOnly} onChange={setShowMyOnly} /> : undefined}
+              toolbarEndExtra={canSeeAll ? (
+                <QueueScopePicker
+                  value={scopeEmployee}
+                  options={scopeOptions}
+                  totalCount={entries.length}
+                  // Selection is DELIBERATELY not cleared here: ids already
+                  // persist across case-filter changes and silent refreshes, are
+                  // re-validated against `entriesById` before anything is
+                  // submitted, and reaching across employees is the whole point
+                  // of the bulk-reassign flow.
+                  onChange={setScopeEmployee}
+                />
+              ) : undefined}
             />
             {/* Second grid column. The wrapper is what `position: sticky` on the
                 panel travels inside, and it keeps the empty-state placeholder in
                 the same track without a second set of placement rules. */}
             <div className="ew-xr-panel-col">
               {panelEntry ? (
+                <>
+                <PanelAuthoringNotice
+                  authoring={panelAuthoring}
+                  assignee={
+                    scopeOptions.find((o) => o.username === panelEntry.assignedTo)?.displayName
+                      ?? panelEntry.assignedTo
+                  }
+                />
                 <SampleDetailPanel
                   entry={panelEntry}
                   template={activeTpl}
                   savedAnswer={selAnswer}
-                  readonly={!canSubmitAnswers || (canSeeAll && panelEntry.assignedTo !== username)}
+                  readonly={panelAuthoring.readonly}
                   onClose={() => selectEntry(null)}
                   // Draft protection (P0): the panel tells us it now holds
                   // unsaved input, so a background refresh that removes this
@@ -1846,24 +2002,31 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                   }
                   onReassign={
                     // Same authority as the selection bar (see canReassignSamples):
-                    // the panel is just a third way to build the id list.
-                    canReassignSamples && panelEntry.assignedTo === username && panelEntry.status === "pending"
+                    // the panel is just a third way to build the id list. An
+                    // oversight user holding `bulk-reassign-referrals` may also
+                    // reassign ANOTHER employee's row one at a time — reviewing
+                    // one person's queue and moving a single sample out of it is
+                    // the natural gesture there, and refusing it while allowing
+                    // the same thing in bulk was arbitrary. An ordinary employee
+                    // still only reaches their own rows (the `=== username` arm).
+                    canReassignSamples
+                    && (panelEntry.assignedTo === username || canBulkReassignReferrals)
+                    && panelEntry.status === "pending"
                       ? (entry) => openReassignModal([entry.xrayImageId], "single")
                       : undefined
                   }
                   onReopen={
                     canReopenAnswer
-                      // eslint-disable-next-line react-hooks/refs -- handleReopenAnswer's post-write loadData() bumps loadTokenRef.current inside an event-handler call chain, never during render
                       ? (reason) => { void handleReopenAnswer(panelEntry, reason); }
                       : undefined
                   }
                   onRequestReopen={
                     canSubmitAnswers && panelEntry.assignedTo === username
-                      // eslint-disable-next-line react-hooks/refs -- see onReopen above; handleRequestReopen's loadData() call is the same pattern
                       ? (reason) => { void handleRequestReopen(panelEntry, reason); }
                       : undefined
                   }
                 />
+                </>
               ) : (
                 <div className="ew-ref-empty-panel">
                   <strong>اختر عينة لعرض التفاصيل</strong>
@@ -1880,9 +2043,15 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               stats={personalStats}
               quota={myQuota}
               username={username}
-              // Exactly the branch `personalStats` itself takes: in the "الكل"
-              // view an oversight user's figures are the whole workspace's.
-              scope={canSeeAll && !showMyOnly ? "all" : "own"}
+              // Exactly the branch `personalStats` itself takes. Three cases
+              // now, because the picker made "not mine" and "everyone's" two
+              // different things: everyone, one named other employee, or me.
+              scope={
+                !canSeeAll || scopeEmployee === username
+                  ? "own"
+                  : scopeEmployee === QUEUE_SCOPE_ALL ? "all" : "employee"
+              }
+              scopeEmployeeName={pickedScopeName}
             />
             {showingRetainedDraft && (
               <p className="ew-msg-warn" role="status">{L.ew_draft_retained_notice}</p>

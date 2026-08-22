@@ -358,14 +358,24 @@ export default function InspectionPanel({
         </div>
       )}
 
-      {!isSubmitted && !readonly && (
+      {/* The footer used to require `!readonly`, which coupled two unrelated
+          things: whether this reader may TYPE an answer, and whether they may
+          act on the sample at all. An oversight user looking at another
+          employee's row gets a read-only form but may still hold the authority
+          to reassign it — refusing the action because the form is read-only made
+          the panel's only route to «إسناد لموظف آخر» unreachable exactly where
+          it is most useful. The primary submit control stays gated on
+          `!readonly`; the secondary actions are gated on being passed at all,
+          which is where their permission checks already live. */}
+      {!isSubmitted && (!readonly || onReplace || onReassign) && (
         <div className="ip-footer">
-          {validationMsg && <p className="ip-validation-msg">{validationMsg}</p>}
+          {!readonly && validationMsg && <p className="ip-validation-msg">{validationMsg}</p>}
           {/* Owner request (2026-08-18): no always-on missing-required-fields
               banner. The required-field progress bar in the header carries the
               same information passively; per-field validation still fires on a
               submit attempt (handlePrimaryAction marks the missing fields and
               shows validationMsg), so nothing blocks silently. */}
+          {!readonly && (
           <div className="ip-footer-primary">
             <button
               type="button"
@@ -376,6 +386,7 @@ export default function InspectionPanel({
               {submitting ? getLabels().ip_submitting : primaryActionLabel}
             </button>
           </div>
+          )}
           <div className="ip-footer-actions">
             {onReplace && (
               <button

@@ -170,6 +170,11 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
         description: "ملء نموذج الفحص وتقديم الإجابات",
       },
       {
+        id: "answer-on-behalf",
+        label: "الإجابة نيابةً عن موظف آخر",
+        description: "ملء نموذج الفحص وتقديم الإجابة لعينة معيَّنة لموظف آخر — تُحفظ الإجابة باسم الموظف المعيَّنة له وتُسجَّل في سجل العينة باسم من قام بالإجابة فعلياً",
+      },
+      {
         id: "configure-referral-columns",
         label: "تخصيص أعمدة صور الأشعة المحالة",
         description: "إظهار زر الأعمدة وتغيير الأعمدة الظاهرة في جدول صور الأشعة المحالة",
@@ -358,7 +363,7 @@ export const TAB_FEATURE_MAP: Readonly<Record<string, readonly string[]>> = {
   // pointing at a tab id that is no longer in the catalog would make both features
   // permanently un-grantable -- read-only for every role, admin included.
   "population":         ["upload-data", "process-population", "configure-sample", "draw-sample", "distribute-samples", "bulk-assign", "view-browse", "unlock-sampling-stage", "adhoc-import.ingest", "adhoc-import.assign"],
-  "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "submit-referrals", "request-replacement", "bulk-reassign-referrals", "submit-answers", "configure-referral-columns", "ew.reopenAnswer", "manage-inspection-template", "employee-reopen-instant"],
+  "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "submit-referrals", "request-replacement", "bulk-reassign-referrals", "submit-answers", "answer-on-behalf", "configure-referral-columns", "ew.reopenAnswer", "manage-inspection-template", "employee-reopen-instant"],
   // post-notification is rendered on the ew/notifications top-level tab (NotificationManager),
   // never on employee-workspace -- cascading it against employee-workspace let can()/
   // getMutationCapability() authorize posting off employee-workspace's edit access even when
@@ -400,6 +405,13 @@ const FEATURE_DEFAULTS: Record<string, Partial<Record<AuthRole, boolean>>> = {
   "request-replacement":  { guest: false, employee: true,  supervisor: true,  manager: false },
   "bulk-reassign-referrals": { guest: false, employee: false, supervisor: true, manager: true },
   "submit-answers":       { guest: false, employee: true,  supervisor: true,  manager: false },
+  // Off for EVERY managed role by default, supervisor included. Answering for
+  // someone else attributes one person's work to another's assignment, so it is
+  // a deliberate grant an admin makes per role — never something a role simply
+  // has. The answer still lands in the assignee's file under their name; the
+  // real author is recorded in the item's history (`answeredOnBehalfBy` /
+  // "answered-on-behalf", src/data/answers/answerTypes.ts).
+  "answer-on-behalf":     { guest: false, employee: false, supervisor: false, manager: false },
   "configure-referral-columns": { guest: false, employee: false, supervisor: false, manager: true },
   "ew.reopenAnswer":      { guest: false, employee: false, supervisor: true,  manager: true  },
   "upload-data":          { guest: false, employee: false, supervisor: false, manager: true  },

@@ -644,6 +644,7 @@ export function ReferralStatsStrip({
   quota,
   username,
   scope = "own",
+  scopeEmployeeName = "",
 }: {
   stats: PersonalStats;
   quota: PersonalQuota;
@@ -654,16 +655,28 @@ export function ReferralStatsStrip({
    * `personalStats` in XrayReferrals.tsx), so labelling it "إحصائياتي" there
    * misattributed every figure to the current user. Defaults to "own", which is
    * what a personal-scope user always sees.
+   *
+   * "employee" is the third case the scope picker introduced: the figures belong
+   * to one NAMED other employee. It is neither "own" nor "all" — reusing either
+   * would attribute another person's workload to the reader or to the whole
+   * workspace — so it names its subject via `scopeEmployeeName`.
    */
-  scope?: "own" | "all";
+  scope?: "own" | "all" | "employee";
+  /** Display name behind the figures when `scope` is "employee". */
+  scopeEmployeeName?: string;
 }) {
   const isAllScope = scope === "all";
+  // True whenever the figures are NOT the reader's own — the quota caveat and
+  // the "these are not your numbers" wording apply to both foreign scopes.
+  const isForeignScope = scope !== "own";
+  const L = useLabels();
+  const named = (key: string): string => key.replace("{name}", scopeEmployeeName);
   const statsItems = [
     // The daily quota is always the CURRENT user's own frozen quota, never a
     // workspace aggregate, so it is disambiguated rather than relabelled when
     // the surrounding figures switch to workspace scope.
     {
-      label: isAllScope ? "حصة اليوم (لي)" : "حصة اليوم",
+      label: isForeignScope ? "حصة اليوم (لي)" : "حصة اليوم",
       value: quota ? quota.dailyQuota.toLocaleString("ar-SA-u-nu-latn") : "—",
       tone: "quota",
     },
@@ -680,10 +693,18 @@ export function ReferralStatsStrip({
   return (
     <section
       className="ew-ref-stats"
-      aria-label={isAllScope ? "إحصائيات جميع الموظفين" : "إحصائياتي"}
+      aria-label={
+        scope === "employee"
+          ? named(L.ew_queue_stats_employee_aria)
+          : isAllScope ? "إحصائيات جميع الموظفين" : "إحصائياتي"
+      }
     >
       <div className="ew-ref-stats-title" title={quotaTitle}>
-        <strong>{isAllScope ? "متابعة العمل — جميع الموظفين" : "متابعة العمل"}</strong>
+        <strong>
+          {scope === "employee"
+            ? named(L.ew_queue_stats_employee_title)
+            : isAllScope ? "متابعة العمل — جميع الموظفين" : "متابعة العمل"}
+        </strong>
       </div>
 
       <div className="ew-ref-stats-inline">
@@ -697,7 +718,11 @@ export function ReferralStatsStrip({
 
       <div
         className="ew-ref-progress"
-        title={isAllScope ? "نطاق العرض: جميع الموظفين" : `المستخدم: ${username}`}
+        title={
+          scope === "employee"
+            ? named(L.ew_queue_stats_employee_scope)
+            : isAllScope ? "نطاق العرض: جميع الموظفين" : `المستخدم: ${username}`
+        }
       >
         <div className="ew-ref-progress-track" aria-hidden="true">
           <div
@@ -716,6 +741,82 @@ export function isStudyCompleted(
 ): boolean {
   if (entry.status === "completed") return true;
   return answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`)?.status === "submitted";
+}
+
+/**
+ * Who may type into the inspection panel for the row it is currently showing,
+ * and what the reader must be told when they may not.
+ *
+ * The panel used to be flatly read-only on anyone else's row. The
+ * `answer-on-behalf` feature opens that up, but under one hard rule: a foreign
+ * row is editable ONLY while it is still unanswered. An answer its owner has
+ * already submitted must never be overwritten from this path — the way to
+ * correct one is «إعادة فتح الإجابة», which leaves an auditable trail. "Already
+ * answered" is `isStudyCompleted` above, the same test the queue itself uses,
+ * so the panel and the row colouring can never disagree about it.
+ *
+ * The reader's OWN row is untouched by all of this: they may still revisit and
+ * re-save their own answer exactly as before, answered or not. Only answering
+ * for someone else carries the unanswered restriction.
+ *
+ * Every blocked case names its reason. A read-only form with no explanation is
+ * the failure this replaces — the reader could not tell "you lack the feature"
+ * from "this one is already done" from "the app is broken".
+ */
+export type PanelAuthoring = {
+  readonly: boolean;
+  /** The assignee whose file the answer will be filed under, when the reader is
+   *  authoring for someone else; null for an ordinary self-answer. */
+  onBehalfOf: string | null;
+  reason: "on-behalf" | "locked-answered" | "locked-no-permission" | null;
+};
+
+export function resolvePanelAuthoring(input: {
+  /** Null when no row is open — answers "read-only, say nothing". */
+  entry: DistributionEntry | null;
+  username: string;
+  answersMap: Map<string, ItemAnswer>;
+  canSubmitAnswers: boolean;
+  canAnswerOnBehalf: boolean;
+}): PanelAuthoring {
+  const { entry, username, answersMap, canSubmitAnswers, canAnswerOnBehalf } = input;
+  if (!entry) return { readonly: true, onBehalfOf: null, reason: null };
+  if (entry.assignedTo === username) {
+    return { readonly: !canSubmitAnswers, onBehalfOf: null, reason: null };
+  }
+  if (!canSubmitAnswers || !canAnswerOnBehalf) {
+    return { readonly: true, onBehalfOf: null, reason: "locked-no-permission" };
+  }
+  if (isStudyCompleted(entry, answersMap)) {
+    return { readonly: true, onBehalfOf: null, reason: "locked-answered" };
+  }
+  return { readonly: false, onBehalfOf: entry.assignedTo, reason: "on-behalf" };
+}
+
+/** The one-line explanation above the panel for a `PanelAuthoring.reason`. */
+export function PanelAuthoringNotice({
+  authoring,
+  assignee,
+}: {
+  authoring: PanelAuthoring;
+  /** Display name (or username) of the row's assignee. */
+  assignee: string;
+}) {
+  const L = useLabels();
+  if (authoring.reason === null) return null;
+  const text = {
+    "on-behalf": L.ew_panel_on_behalf_notice,
+    "locked-answered": L.ew_panel_locked_answered,
+    "locked-no-permission": L.ew_panel_locked_no_permission,
+  }[authoring.reason];
+  return (
+    <p
+      className={authoring.reason === "on-behalf" ? "ew-msg-info" : "ew-msg-warn"}
+      role="status"
+    >
+      {text.replace("{name}", assignee)}
+    </p>
+  );
 }
 
 
@@ -836,39 +937,106 @@ export function ReplacementDialog({
 // ── Queue segmented controls (above the table) ──────────────────────────────
 
 /**
- * «الكل» / «المحالة لي» — the OVERSIGHT scope switcher.
+ * The OVERSIGHT scope picker — "whose queue am I looking at?".
  *
- * Moved here verbatim from XrayReferrals.tsx's inline JSX (markup, classes and
- * Arabic text unchanged) so the component body stays inside the repo's
- * `max-lines-per-function` budget once the case-filter control below joined it
- * in the same toolbar. Still rendered only when `canSeeAll` — an ordinary
- * employee's queue is already scoped to them, so the switcher would be two
- * buttons that do the same thing.
+ * Replaces the old two-button «الكل» / «المحالة لي» switcher. That control could
+ * only say "mine" or "everyone", but the job it exists for is to open ONE named
+ * employee's queue — someone on leave with hundreds of unfinished samples — and
+ * act on it. A `<select>` rather than a chip row because this queue's toolbar is
+ * `flex-wrap: nowrap; overflow-x: auto` (XrayReferrals.css): one chip per
+ * employee overflows it the moment the workspace has more than a handful. The
+ * case-filter chips below stay chips — they are a fixed set of three.
+ *
+ * Still rendered only when `canSeeAll`: an ordinary employee's queue is already
+ * scoped to them, and offering them a picker would force the full workspace read
+ * their mirror fast path exists to avoid.
  */
-export function QueueScopeSwitcher({
-  showMyOnly,
+export const QUEUE_SCOPE_ALL = "__all__";
+
+export type QueueScopeOption = {
+  username: string;
+  displayName: string;
+  /** Rows this employee holds in the CURRENT month's loaded queue. */
+  count: number;
+  isSelf: boolean;
+};
+
+/**
+ * The picker's option list: the assignable roster UNION everyone who actually
+ * holds a row.
+ *
+ * Neither source alone is right. The roster alone silently loses the employee
+ * whose account was deactivated while their queue still holds work — precisely
+ * the "on leave with 500 unfinished samples" case this control was asked for.
+ * `entries` alone hides an active employee with zero rows, so a supervisor
+ * checking "does X have anything?" would find no option at all and could not
+ * tell "nothing assigned" from "not offered". The union answers both, and the
+ * per-option count (taken from `entries`) makes the difference visible before
+ * the switch. The current user is always present, marked as themselves — unlike
+ * ReassignModal's roster, which excludes them because you cannot reassign work
+ * to yourself; here your own queue is the DEFAULT thing to look at.
+ *
+ * Falls back to the raw username as a display name for anyone the roster does
+ * not know, so an unknown assignee is still reachable rather than unnamed.
+ */
+export function buildQueueScopeOptions(
+  entries: DistributionEntry[],
+  currentUser: string
+): QueueScopeOption[] {
+  const counts = new Map<string, number>();
+  for (const entry of entries) {
+    counts.set(entry.assignedTo, (counts.get(entry.assignedTo) ?? 0) + 1);
+  }
+  const names = new Map<string, string>();
+  for (const user of readUserManagementState().users) {
+    if (user.isActive && isAssignableSampleRole(user)) names.set(user.username, user.displayName);
+  }
+  if (currentUser) names.set(currentUser, names.get(currentUser) ?? currentUser);
+  for (const assignee of counts.keys()) {
+    if (assignee && !names.has(assignee)) names.set(assignee, assignee);
+  }
+  return [...names.entries()]
+    .map(([username, displayName]) => ({
+      username,
+      displayName,
+      count: counts.get(username) ?? 0,
+      isSelf: username === currentUser,
+    }))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName, "ar"));
+}
+
+export function QueueScopePicker({
+  value,
+  options,
+  totalCount,
   onChange,
 }: {
-  showMyOnly: boolean;
-  onChange: (next: boolean) => void;
+  /** A username, or `QUEUE_SCOPE_ALL`. */
+  value: string;
+  options: QueueScopeOption[];
+  /** Rows in the unscoped queue — the count shown against «الكل». */
+  totalCount: number;
+  onChange: (next: string) => void;
 }) {
+  const L = useLabels();
   return (
-    <div className="ew-view-switcher" role="group" aria-label="نطاق العرض">
-      <button
-        type="button"
-        className={`ew-view-seg${!showMyOnly ? " active" : ""}`}
-        onClick={() => onChange(false)}
-      >
-        الكل
-      </button>
-      <button
-        type="button"
-        className={`ew-view-seg${showMyOnly ? " active" : ""}`}
-        onClick={() => onChange(true)}
-      >
-        المحالة لي
-      </button>
-    </div>
+    <select
+      className="ew-select ew-queue-scope-select"
+      aria-label={L.ew_queue_scope_label}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    >
+      <option value={QUEUE_SCOPE_ALL}>
+        {L.ew_queue_scope_all.replace("{count}", String(totalCount))}
+      </option>
+      {options.map((option) => (
+        <option key={option.username} value={option.username}>
+          {(option.isSelf ? L.ew_queue_scope_option_self : L.ew_queue_scope_option)
+            .replace("{name}", option.displayName)
+            .replace("{count}", String(option.count))}
+        </option>
+      ))}
+    </select>
   );
 }
 
