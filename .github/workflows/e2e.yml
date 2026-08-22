@@ -1,0 +1,101 @@
+name: E2E
+
+# Browser end-to-end suite, kept in its own workflow — SEPARATE from `ci.yml`
+# on purpose. The two prove different things and fail for different reasons:
+#
+#   ci.yml  → typecheck, lint, unit tests, and the production BUILD. That build
+#             step is what proves the shipped single-file `dist/index.html`
+#             still assembles.
+#   e2e.yml → the real app, in a real Chromium, driven through the dev-only
+#             simulated workspace (`?sim=1`). It proves the FEATURES work.
+#
+# The suite runs against the Vite DEV SERVER, not a preview of `dist/`, and it
+# has to: `?sim=1` is stripped from production builds by three independent
+# guards, so a built bundle has no way to mount a workspace without a real
+# folder picker and a real user gesture. See docs/development/E2E_TESTS.md.
+#
+# Keeping them apart means a red X tells you at a glance whether the bundle
+# broke or a feature did.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to the same branch makes the previous browser run irrelevant.
+# Unit CI is cheap enough to let finish; a browser matrix is not.
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Playwright (Chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies (npm ci)
+        run: npm ci
+
+      # The browser binary is ~150 MB and changes only when @playwright/test's
+      # pinned revision does, so the lockfile hash is the right cache key.
+      # `--with-deps` is skipped on a cache hit only for the download; the
+      # system libraries still have to be installed, so the restore path runs
+      # `install-deps` alone.
+      - name: Resolve Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ steps.pw.outputs.version }}
+
+      - name: Install Chromium (+ system deps)
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Install system deps only (cached browser)
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      # Starting the dev server is the config's job (`webServer`), so a failure
+      # to boot shows up as a test failure with the server's stderr attached
+      # rather than as an opaque step error.
+      - name: Run E2E suite
+        run: npm run e2e
+
+      - name: Upload HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14
+
+      # Traces, screenshots and videos for failed tests only (the config keeps
+      # them on failure). Absent on a green run, which is why `if-no-files-found`
+      # is `ignore` rather than the default warning.
+      - name: Upload failure traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failures
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 14

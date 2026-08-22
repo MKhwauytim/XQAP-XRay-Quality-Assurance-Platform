@@ -47,3 +47,11 @@ dist-preview/
 # copy deploys to. Machine-local, not a project setting: committing it would
 # point every clone at one person's preview site.
 .netlify/
+
+# Playwright (npm run e2e) — regenerable run artifacts, never committed.
+# `test-results/` holds failure traces, screenshots and videos; `playwright-report/`
+# is the generated HTML report. Both are uploaded as CI artifacts instead.
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
