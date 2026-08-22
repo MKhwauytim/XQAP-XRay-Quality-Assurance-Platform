@@ -40,6 +40,21 @@ export default defineConfig([
     },
   },
   {
+    // Playwright specs: Node-side test code, not app code. The React-specific
+    // rule sets above are inapplicable here (there are no components and no
+    // Fast Refresh boundary), and the suite runs under Node, so it needs Node
+    // globals rather than only the browser ones. Everything else — the
+    // TypeScript rules, unused-vars, prefer-const — still applies.
+    files: ['e2e/**/*.ts', 'playwright.config.ts'],
+    languageOptions: {
+      globals: { ...globals.node, ...globals.browser },
+    },
+    rules: {
+      'react-refresh/only-export-components': 'off',
+      'react-hooks/rules-of-hooks': 'off',
+    },
+  },
+  {
     files: ['**/*.{ts,tsx}'],
     ignores: [
       'src/components/Sidebar/Tabs/ReportDesigner/**',

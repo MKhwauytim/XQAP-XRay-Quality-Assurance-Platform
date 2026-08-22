@@ -13,6 +13,7 @@ import { listMonthFolders } from "../population/populationStorage";
 import { getLabels } from "../labels/labelsStore";
 import { useLabels } from "../labels/useLabels";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
+import { setSubTabSelection } from "../../app/subTabSelection";
 import { wasStoragePreviouslyPersisted } from "../storage/storageRegistry";
 import { isFileOrigin } from "./originDetection";
 import { useWorkspace } from "./useWorkspace";
@@ -529,8 +530,13 @@ function readDismissed(key: string): boolean {
 }
 
 /** Deep-link into the app: switch the top-level tab (App listens on `app-navigate`),
- *  then — deferred so the target tab has mounted its listeners — its sub-tab. */
+ *  then — deferred so the target tab has mounted its listeners — its sub-tab.
+ *  The deferral is now a fallback rather than the mechanism: the selection is
+ *  recorded synchronously below, and the target tab reads it as it mounts
+ *  (src/app/subTabSelection.ts), so a tab that takes longer than the timeout to
+ *  appear still lands on the right sub-tab. */
 function navigateToTab(tabId: string, subTabId?: string): void {
+  if (subTabId) setSubTabSelection(tabId, subTabId);
   window.dispatchEvent(new CustomEvent("app-navigate", { detail: { tabId } }));
   if (subTabId) {
     window.setTimeout(() => {

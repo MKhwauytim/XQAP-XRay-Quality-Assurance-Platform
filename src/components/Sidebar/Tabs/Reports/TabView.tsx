@@ -32,6 +32,8 @@ import {
   subscribeToDataChange,
   type DataRefreshFamily,
 } from "../../../../data/workspace/dataRefreshSignal";
+import { resolveInitialSubTab } from "../../../../app/subTabSelection";
+import { useSubTabSelection } from "../../../../app/useSubTabSelection";
 import { readSession } from "../../../../auth/authSession";
 import { recordAction } from "../../../../data/audit/actionLog";
 import { loadDeckStyleChoices } from "../../../../data/reporting/executive/deck2/styleChoices";
@@ -68,6 +70,17 @@ type ReportFormat = "xlsx" | "deck" | "document";
 type ReportsSection = "reports" | "kpi";
 
 const KNOWN_REPORT_SECTIONS = new Set<ReportsSection>(["reports", "kpi"]);
+
+/** This tab's id in the sidebar rail / sub-tab selection store. */
+const TAB_ID = "reports";
+
+/** Every sub-tab the RAIL offers under this tab -- the two sections this
+ *  component owns, plus the Report Designer, which the wrapper below routes. */
+const KNOWN_RAIL_SUB_TABS: ReadonlySet<string> = new Set<string>([
+  "reports",
+  "kpi",
+  "report-designer",
+]);
 
 /**
  * The change families that actually invalidate what this tab shows: the month
@@ -176,8 +189,15 @@ function ReportsContent() {
   // used to open straight onto the section the matrix denies. The default
   // matrix grants both rows to every role that can open this page at all, so
   // for a stock workspace nothing about the landing changes.
-  const [section, setSection] = useState<ReportsSection>(
-    () => (canAccessTab("reports/reports") || !canAccessTab("reports/kpi") ? "reports" : "kpi")
+  // The rail's own selection wins when it names one of THIS component's two
+  // sections -- a click made before this lazy tab mounted reaches it no other
+  // way. T-15a's permission-aware landing is what applies otherwise.
+  const [section, setSection] = useState<ReportsSection>(() =>
+    resolveInitialSubTab(
+      TAB_ID,
+      KNOWN_REPORT_SECTIONS as ReadonlySet<string>,
+      canAccessTab("reports/reports") || !canAccessTab("reports/kpi") ? "reports" : "kpi"
+    )
   );
   const [generating, setGenerating] = useState<ReportType | null>(null);
   const [formats, setFormats] = useState<Record<ReportBaseType, ReportFormat>>({
@@ -219,16 +239,14 @@ function ReportsContent() {
     window.dispatchEvent(new CustomEvent("pop-subtab-changed", { detail: section }));
   }, [section]);
 
-  useEffect(() => {
-    function handler(e: CustomEvent<{ subTabId: string }>) {
-      const { subTabId } = e.detail;
-      if (KNOWN_REPORT_SECTIONS.has(subTabId as ReportsSection)) {
-        setSection(subTabId as ReportsSection);
-      }
-    }
-    window.addEventListener("pop-set-subtab", handler as EventListener);
-    return () => window.removeEventListener("pop-set-subtab", handler as EventListener);
+  // Follow the sidebar rail: its live events, plus the one selection that may
+  // have been made before this tab mounted (see useSubTabSelection). Only ids
+  // in KNOWN_REPORT_SECTIONS reach this callback -- "report-designer" belongs
+  // to the wrapper below, not to this component.
+  const applySectionFromRail = useCallback((subTabId: string) => {
+    setSection(subTabId as ReportsSection);
   }, []);
+  useSubTabSelection(TAB_ID, KNOWN_REPORT_SECTIONS as ReadonlySet<string>, applySectionFromRail);
 
   // Latest-wins guard for the chip load. A token ref rather than the previous
   // per-effect `cancelled` closure because the same load now has two callers
@@ -1154,12 +1172,16 @@ export default function ReportsTab() {
   // to get anywhere. ReportsContent stays mounted either way (it is hidden, not
   // unmounted, while the designer is active), so this changes which view is on
   // screen, never what mounts.
-  const [activeSubTab, setActiveSubTab] = useState(() =>
-    !canAccessTab("reports/reports")
-      && !canAccessTab("reports/kpi")
-      && canAccessTab("reports/report-designer")
-      ? "report-designer"
-      : "reports"
+  const [activeSubTab, setActiveSubTab] = useState<string>(() =>
+    resolveInitialSubTab<string>(
+      TAB_ID,
+      KNOWN_RAIL_SUB_TABS,
+      !canAccessTab("reports/reports")
+        && !canAccessTab("reports/kpi")
+        && canAccessTab("reports/report-designer")
+        ? "report-designer"
+        : "reports"
+    )
   );
   // Once Report Designer has been opened, keep it mounted (hidden, not
   // unmounted) so switching back to it doesn't lose in-progress canvas
@@ -1175,14 +1197,13 @@ export default function ReportsTab() {
   if (activeSubTab === "report-designer" && !visitedReportDesigner) {
     setVisitedReportDesigner(true);
   }
-  const handleSubTabEvent = useCallback((e: Event) => {
-    const { parentTabId, subTabId } = (e as CustomEvent<{ parentTabId: string; subTabId: string }>).detail;
-    if (parentTabId === "reports") setActiveSubTab(subTabId);
+  // Same rail wiring as the sections above, one level up: this component owns
+  // the Report Designer route, so its known set is the rail's full sub-tab
+  // list. Selections made before this lazy tab mounted are replayed here too.
+  const handleSubTabSelected = useCallback((subTabId: string) => {
+    setActiveSubTab(subTabId);
   }, []);
-  useEffect(() => {
-    window.addEventListener("sidebar-subtab-changed", handleSubTabEvent);
-    return () => window.removeEventListener("sidebar-subtab-changed", handleSubTabEvent);
-  }, [handleSubTabEvent]);
+  useSubTabSelection(TAB_ID, KNOWN_RAIL_SUB_TABS, handleSubTabSelected);
   // Stable element reference — recomputed only when `labels` changes (a
   // label-store broadcast, not an ordinary re-render) — so switching
   // `activeSubTab` back and forth, which re-renders ReportsTab, doesn't

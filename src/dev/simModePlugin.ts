@@ -54,7 +54,7 @@ const SIM_MODE_SPECIFIER = /^(?:\.{1,2}\/)+dev\/simMode$/;
  * usernames shipped while every marker string had been shaken away. A partial
  * leak is still a leak, and only the module id sees it.
  */
-const FORBIDDEN_MODULE_PATTERN = /[/\\]src[/\\]dev[/\\]sim(Mode|Workspace)\.ts$/;
+const FORBIDDEN_MODULE_PATTERN = /[/\\]src[/\\]dev[/\\]sim(Mode|Workspace|ActionLog)\.ts$/;
 
 export function simModePlugin(): Plugin {
   return {

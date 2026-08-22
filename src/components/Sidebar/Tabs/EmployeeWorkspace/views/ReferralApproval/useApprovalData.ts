@@ -26,7 +26,11 @@ import { undoDecision } from "../../../../../../data/referral/undoDecision";
 import type { ReferralRequest, ReopenRequest, ReplacementRequest } from "../../../../../../data/referral/referralTypes";
 import { loadSampleMaster } from "../../../../../../data/sampling/sampleStorage";
 import type { DirectoryHandleLike } from "../../../../../../data/storage/fileSystemAccess";
-import { subscribeToDataRefresh } from "../../../../../../data/workspace/dataRefreshSignal";
+import {
+  notifyLocalDataChange,
+  subscribeToDataRefresh,
+  type DataRefreshFamily,
+} from "../../../../../../data/workspace/dataRefreshSignal";
 import { isReferral, isReplacement, requestKind, type CardRequest } from "./requestKind";
 
 export type LoadState = "idle" | "loading" | "ready" | "error";
@@ -53,6 +57,26 @@ function denyErrorMsg(result: Exclude<DenyResult, { ok: true }>): string {
     ? getLabels().msg_request_already_reviewed
     : result.error;
 }
+
+/**
+ * What a supervisor decision moves, for the views mounted beside this one.
+ *
+ * "requests" — the decision itself: this desk's own queue, and the requester's
+ * pending markers in «صور الأشعة المحالة».
+ * "distribution" — an approved referral/replacement re-assigns samples, so the
+ * reviewer's queue and its assignment counts are no longer what they were.
+ * "answers" — an approved reopen puts a submitted answer back in play.
+ *
+ * A deny moves only the first of the three, but the desk cannot know which
+ * subscribers care until it has already told them; naming the union of what a
+ * decision CAN change keeps this honest and costs a re-read of state that a
+ * human just changed on purpose.
+ */
+const DECISION_REFRESH_FAMILIES: readonly DataRefreshFamily[] = [
+  "requests",
+  "distribution",
+  "answers",
+];
 
 function unexpectedErrorMsg(error: unknown): string {
   if (error instanceof MonthClosedError) return getLabels().msg_month_closed_write_blocked;
@@ -86,6 +110,10 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
   // Bug #4: guards a slow load for a previously-selected month from clobbering
   // the results of a later selection.
   const loadTokenRef = useRef(0);
+
+  // Raised only while this hook's own post-decision broadcast is being
+  // delivered — see the refresh subscription and `settleAfterDecision` below.
+  const ownDecisionBroadcastRef = useRef(false);
 
   // No selected on-disk month → nothing to load; land in the ready/empty state.
   useEffect(() => {
@@ -218,7 +246,49 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
   // its callback with the bare `DataRefreshSource` string as its first
   // argument, which would otherwise land in `opts` and make `opts?.silent`
   // undefined -- silently defeating the silent-refresh behaviour.
-  useEffect(() => subscribeToDataRefresh(() => { void loadData({ silent: true }); }), [loadData]);
+  //
+  // `ownDecisionBroadcastRef` skips this desk's OWN announcement (see
+  // `settleAfterDecision`): it has already reloaded by the time it broadcasts,
+  // and a second full read of every employee + decision file per decision is
+  // pure cost. `dispatchEvent` delivers synchronously, so the flag is raised
+  // for exactly the delivery of that one broadcast — no unrelated refresh can
+  // slip through the window.
+  useEffect(
+    () =>
+      subscribeToDataRefresh(() => {
+        if (ownDecisionBroadcastRef.current) return;
+        void loadData({ silent: true });
+      }),
+    [loadData]
+  );
+
+  /**
+   * One decision (or one bulk run) has finished writing. Reconcile this view,
+   * then tell the OTHER mounted views to re-read.
+   *
+   * Without the broadcast an approved reassignment stayed invisible to «صور
+   * الأشعة المحالة» — mounted behind this sub-tab, still listing the row as the
+   * old reviewer's and still letting them open it — until the 45s sync tick or
+   * the manual refresh button came round. The signal is the same "periodic"
+   * delta those two send, so every subscriber's existing silent-refresh
+   * handling (including XrayReferrals' unsaved-draft retention) applies
+   * unchanged; it just arrives when the write happens instead of up to a tick
+   * later.
+   *
+   * Fired once per user action, never per item: `bulkDecision` and
+   * `undoDecisions` pass `{ reload: false }` to each item and call this once
+   * when the loop settles.
+   */
+  async function settleAfterDecision(opts?: { reload?: boolean }): Promise<void> {
+    if (!(opts?.reload ?? true)) return;
+    await loadData({ silent: true });
+    ownDecisionBroadcastRef.current = true;
+    try {
+      notifyLocalDataChange(DECISION_REFRESH_FAMILIES);
+    } finally {
+      ownDecisionBroadcastRef.current = false;
+    }
+  }
 
   // Approve/deny delegate to the domain module in data/referral/approveReferral.ts,
   // which owns the idempotency re-check (bug #1), the ownership re-check (bug #2),
@@ -250,7 +320,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
           target: request.requestId,
           details: { samples: request.xrayImageIds.length, toEmployee: request.toEmployee },
         });
-        if (opts?.reload ?? true) await loadData({ silent: true });
+        await settleAfterDecision(opts);
         return { ok: true };
       }
       return { ok: false, error: approvalErrorMsg(result) };
@@ -277,7 +347,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
           monthFolderName: request.monthFolderName,
           target: request.requestId,
         });
-        if (opts?.reload ?? true) await loadData({ silent: true });
+        await settleAfterDecision(opts);
         return { ok: true };
       }
       return { ok: false, error: denyErrorMsg(result) };
@@ -305,7 +375,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
           target: request.requestId,
           details: { original: request.originalXrayImageId, replacement: request.replacementXrayImageId },
         });
-        if (opts?.reload ?? true) await loadData({ silent: true });
+        await settleAfterDecision(opts);
         return { ok: true };
       }
       return { ok: false, error: approvalErrorMsg(result) };
@@ -332,7 +402,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
           monthFolderName: request.monthFolderName,
           target: request.requestId,
         });
-        if (opts?.reload ?? true) await loadData({ silent: true });
+        await settleAfterDecision(opts);
         return { ok: true };
       }
       return { ok: false, error: denyErrorMsg(result) };
@@ -361,7 +431,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
           target: request.requestId,
           details: { xrayImageId: request.xrayImageId, employee: request.employeeUsername },
         });
-        if (opts?.reload ?? true) await loadData({ silent: true });
+        await settleAfterDecision(opts);
         return { ok: true };
       }
       return { ok: false, error: approvalErrorMsg(result) };
@@ -388,7 +458,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
           monthFolderName: request.monthFolderName,
           target: request.requestId,
         });
-        if (opts?.reload ?? true) await loadData({ silent: true });
+        await settleAfterDecision(opts);
         return { ok: true };
       }
       return { ok: false, error: denyErrorMsg(result) };
@@ -459,7 +529,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
         });
       }
     } finally {
-      await loadData({ silent: true });
+      await settleAfterDecision();
     }
     return outcomes;
   }
@@ -502,7 +572,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
         }
       }
     } finally {
-      await loadData({ silent: true });
+      await settleAfterDecision();
     }
     return outcomes;
   }
