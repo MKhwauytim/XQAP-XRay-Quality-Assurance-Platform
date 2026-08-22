@@ -27,12 +27,48 @@ import { gzipSync } from "node:zlib";
 // unchanged and still holds ~46 kB of headroom; gzip governs actual transfer,
 // and holding that line is what keeps this a budget rather than a rubber stamp.
 //
-// Worth knowing before the next raise: `adhocImportMapping.ts` and
-// `adhocImportAssignment.ts` are now orphaned from the UI (the wizard uses the
-// v2 modules), so deleting them is real headroom available without cutting
-// features -- deferred here only because it is a separate slice with its own
-// test surface, not because it was assessed and rejected.
-const MAX_BYTES = 3_900_000;
+// CORRECTION, 2026-08-22 -- do not go looking for the reserve described here
+// before: a previous note claimed `adhocImportMapping.ts` and
+// `adhocImportAssignment.ts` were "real headroom available without cutting
+// features". They are not. Both are orphaned from the UI, but they are orphaned
+// from the PRODUCTION MODULE GRAPH too: nothing reachable from `src/main.tsx`
+// imports either, so Rollup already tree-shakes them and they contribute zero
+// bytes to `dist/index.html`. Measured directly -- deleting both modules and
+// rebuilding produced a BYTE-IDENTICAL bundle (3805.8 kB / 1238.7 kB gzip).
+// `adhocImportMapping.ts` has since been deleted anyway, as dead-code hygiene,
+// and the budget did not move.
+//
+// The general lesson, since this will come up again: "orphaned from the UI" is
+// not the same test as "in the bundle". Only a module the entry graph actually
+// reaches costs bytes, and test files are not part of that graph -- a module
+// whose only remaining importers are `*.test.ts` is already free. Before
+// banking any deletion as headroom, measure it: build, delete, rebuild, diff
+// the two `dist/index.html` sizes. Real headroom comes from code the shipped
+// app genuinely loads.
+// Raw budget raised 3.90 -> 3.95 MB on 2026-08-22 for the action-log expansion:
+// 29 new action types wired to real call sites across ten screens (including
+// four that were DECLARED but never fired -- `backup-restored` among them, so
+// the most destructive operation in the app left no trace in the log meant to
+// record it), a grouped filter bar over the log viewer, and 52 new label keys.
+// Overage without this raise was ~17 kB (0.5%). GZIP is again deliberately
+// unchanged and still holds ~25 kB.
+//
+// Read the correction above before treating any raise as routine. There is no
+// cheap reserve left: the bundle was measured at 3805.8 kB with 348 kB of that
+// being base64 fonts (IBM Plex Sans Arabic 400/700 + Somar Sans in four
+// weights). Both families are needed by the live UI AND by generated reports,
+// which are standalone files with no network, and Somar was ALREADY
+// deduplicated in an earlier pass -- the app and the report builders used to
+// embed separate ~240 kB copies. `vite-plugin-singlefile` inlines everything by
+// design, so code-splitting and lazy-loading are not available escape routes.
+//
+// The one genuine optimisation left is subsetting the Arabic fonts to the
+// glyphs actually used, which could plausibly reclaim 100 kB+. That is its own
+// piece of work with its own risk (a missing glyph renders as a box in a report
+// nobody re-checks), not something to bolt onto a feature change. Until it is
+// done, expect the next sizeable feature to need another raise -- and say so
+// out loud rather than quietly bumping the number.
+const MAX_BYTES = 3_950_000;
 const MAX_GZIP_BYTES = 1_300_000;
 const bundlePath = new URL("../dist/index.html", import.meta.url);
 

@@ -5,7 +5,8 @@
  * of `DEFAULT_SYSTEM_FIELDS` / `DEFAULT_MAPPING_TEMPLATE.columnMappings` from
  * `src/data/population/populationConfig.ts` — not an import, and not a read of
  * the workspace's live `config.json`. That is the G8 defect this rework
- * removes: the v1 path called `loadActiveColumnMappings()`, so an admin editing
+ * removes: the v1 path called `loadActiveColumnMappings()` (a function that has
+ * since been deleted along with `adhocImportMapping.ts`), so an admin editing
  * the Population mapping screen retroactively changed how an ALREADY-SAVED
  * ad-hoc import parsed its rows. A copy drifts, visibly, in a diff; a live read
  * rewrites history silently.

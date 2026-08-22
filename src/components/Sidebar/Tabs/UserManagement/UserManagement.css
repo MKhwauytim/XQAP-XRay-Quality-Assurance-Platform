@@ -1132,3 +1132,107 @@
   .um-users-toolbar { flex-direction: column; align-items: stretch; }
   .um-add-btn { margin-inline-start: 0; }
 }
+
+/* ── Actions viewer — filter bar ─────────────────────────────────────────────
+   Plain CSS, co-located, no new tokens: every colour below is an existing
+   --app-* variable so the bar follows the app theme like the tables above it. */
+.um-actions-filters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin: var(--sp-3) 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--app-border);
+  border-radius: 10px;
+  background: var(--app-surface-soft);
+}
+.um-actions-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-3);
+}
+.um-actions-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--app-muted);
+}
+.um-actions-filter-field select,
+.um-actions-filter-field input {
+  min-width: 150px;
+  padding: 6px 8px;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-surface);
+  color: var(--app-text);
+  font: inherit;
+  font-weight: 500;
+}
+.um-actions-filter-search {
+  flex: 1 1 220px;
+}
+.um-actions-filter-search input {
+  width: 100%;
+}
+.um-actions-filter-reset,
+.um-actions-filter-link {
+  padding: 6px 10px;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-surface);
+  color: var(--app-text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.um-actions-filter-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--app-border);
+  color: var(--app-text);
+  font-size: 11px;
+  font-weight: 700;
+}
+.um-actions-typepicker-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+  font-size: 12px;
+}
+.um-actions-filter-hint {
+  color: var(--app-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+.um-actions-typepicker-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: var(--sp-2);
+}
+.um-actions-typegroup {
+  margin: 0;
+  padding: var(--sp-2);
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-surface);
+}
+.um-actions-typegroup legend {
+  padding: 0 4px;
+  color: var(--app-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+.um-actions-typeopt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: 12px;
+  cursor: pointer;
+}

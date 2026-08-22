@@ -18,8 +18,10 @@
  * distribution write. It never matches the real `{month}-{MonthName}-{year}`
  * pattern, so `ensureMonthWritable` fails OPEN for it — no population manifest
  * exists to be "closed" — exactly like any other month with no manifest. That is
- * the existing fail-open behavior, not a bypass, and
- * `adhocImportAssignment.test.ts` proves the gate is still invoked.
+ * the existing fail-open behavior, not a bypass, and this module's own test
+ * ("respects the month lock", in `adhocDistributionBridge.test.ts`) proves the
+ * gate is still invoked, by writing a manifest for the synthetic folder name
+ * and closing it.
  */
 
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";

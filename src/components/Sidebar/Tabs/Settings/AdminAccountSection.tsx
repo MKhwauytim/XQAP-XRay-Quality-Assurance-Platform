@@ -14,6 +14,7 @@ import { usePermissions } from "../../../../auth/usePermissions";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import { syncUserManagementToDisk } from "../../../../data/workspace/userSync";
 import { logError } from "../../../../data/storage/errorLogger";
+import { recordAction } from "../../../../data/audit/actionLog";
 import "./AdminAccountSection.css";
 
 const MIN_ADMIN_PASSWORD_LENGTH = 3;
@@ -74,7 +75,7 @@ export function AdminAccountSection() {
    * shared folder. With no workspace connected there is nothing to write, so
    * the change applies session-only with its own explicit message.
    */
-  async function persistThenApply(next: UserManagementState): Promise<void> {
+  async function persistThenApply(next: UserManagementState, change: string): Promise<void> {
     if (directoryHandle) {
       await syncUserManagementToDisk(directoryHandle, next, actor);
     } else {
@@ -85,6 +86,12 @@ export function AdminAccountSection() {
     }
     writeUserManagementState(next, true);
     setAccount(readAdminAccount());
+    // Inside persistThenApply, AFTER both the disk write and the runtime commit
+    // — the two callers reach this point only when nothing threw, and a
+    // workspace-less session has already been told the change is session-only.
+    recordAction(directoryHandle, actor, realSession?.role ?? "admin", "admin-account-changed", {
+      details: { change, sessionOnly: directoryHandle === null },
+    });
   }
 
   async function handleToggleUsernameLogin(enabled: boolean): Promise<void> {
@@ -98,7 +105,7 @@ export function AdminAccountSection() {
     setIsSaving(true);
     setFeedback(null);
     try {
-      await persistThenApply(buildAdminAccountUpdate({ allowUsernameLogin: enabled }, actor));
+      await persistThenApply(buildAdminAccountUpdate({ allowUsernameLogin: enabled }, actor), enabled ? "username-login-enabled" : "username-login-disabled");
       setFeedback((current) =>
         current ?? {
           type: "ok",
@@ -140,7 +147,7 @@ export function AdminAccountSection() {
     setIsSaving(true);
     try {
       const passwordHash = await createPasswordHash(newPassword);
-      await persistThenApply(buildAdminAccountUpdate({ passwordHash }, actor));
+      await persistThenApply(buildAdminAccountUpdate({ passwordHash }, actor), "passcode-changed");
       setNewPassword("");
       setConfirmPassword("");
       setFeedback((current) =>

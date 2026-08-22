@@ -595,7 +595,7 @@ export async function getUserWorkspaceFootprint(
 ): Promise<UserWorkspaceFootprint> {
   const months = await listMonthFolders(directoryHandle);
   // Ad-hoc imports are assigned through the exact same event-log +
-  // mirror-sync path as a real month (see `adhocImportAssignment.ts`), just
+  // mirror-sync path as a real month (see `adhocDistributionBridge.ts`), just
   // against a synthetic `adhoc-{importId}` folder that `listMonthFolders`
   // structurally cannot return. Walking only the real months therefore
   // reported "no work on disk" for a user whose entire live workload was

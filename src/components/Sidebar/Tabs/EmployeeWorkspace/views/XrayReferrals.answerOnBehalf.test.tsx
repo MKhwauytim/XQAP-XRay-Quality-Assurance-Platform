@@ -45,6 +45,7 @@ import { setReadOnlyMode } from "../../../../../data/storage/readOnlyMode";
 import { resetBootProgress } from "../../../../../data/workspace/bootProgress";
 import { getLabels } from "../../../../../data/labels/labelsStore";
 import { loadEmployeeAnswers, upsertItemAnswer } from "../../../../../data/answers/answerStorage";
+import { readWorkspaceActions } from "../../../../../data/audit/actionLog";
 import type { ItemAnswer } from "../../../../../data/answers/answerTypes";
 import { saveTemplate } from "../../../../../data/templates/templateStorage";
 import { saveInspectionTemplateSelection } from "../../../../../data/templates/templateSelectionStorage";
@@ -283,6 +284,44 @@ describe("XrayReferrals — answering on another employee's behalf", () => {
     // Nothing was written into the supervisor's own file.
     const ownFile = await loadEmployeeAnswers(root, MONTH, "sup-1");
     expect(ownFile?.items ?? []).toHaveLength(0);
+
+    // …and the same act is recorded in the workspace action log, which is where
+    // an auditor looks — the answer file's `history` is only reachable by
+    // already knowing which employee's file to open.
+    await waitFor(async () => {
+      const actions = await readWorkspaceActions(root);
+      const logged = actions.find((a) => a.action === "answer-submitted-on-behalf");
+      expect(logged).toBeDefined();
+      // Both parties, neither derivable from the other: the actor is the real
+      // author, `details.assignee` the person whose assignment it was.
+      expect(logged!.actor).toBe("sup-1");
+      expect(logged!.details?.assignee).toBe("emp-a");
+      expect(logged!.target).toBe("IMG-THEIRS");
+      // Not filed as an ordinary submission — the two are separately filterable.
+      expect(actions.some((a) => a.action === "answer-submitted")).toBe(false);
+    });
+  });
+
+  it("logs NOTHING when the on-behalf write is refused", async () => {
+    writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(supervisorWith("answer-on-behalf", true), false);
+
+    const root = createMemoryDirectory("root");
+    await seedMonth(root, [["IMG-DONE", "emp-a"]]);
+    await seedSubmittedAnswer(root, "emp-a", "IMG-DONE");
+
+    render(<XrayReferrals directoryHandle={root} />);
+    await openEmployeeQueue("emp-a", "IMG-DONE");
+    await waitFor(() =>
+      expect(
+        screen.getByText(L.ew_panel_locked_answered.replace("{name}", "emp-a"))
+      ).toBeInTheDocument()
+    );
+
+    // The audit call sits inside the write's ok branch, so an operation the app
+    // refused leaves no trace claiming it happened. `seedSubmittedAnswer` writes
+    // through the storage layer directly and is not itself an action.
+    expect(await readWorkspaceActions(root)).toHaveLength(0);
   });
 
   it("refuses an ALREADY-ANSWERED row of another employee even WITH the feature, and explains why", async () => {

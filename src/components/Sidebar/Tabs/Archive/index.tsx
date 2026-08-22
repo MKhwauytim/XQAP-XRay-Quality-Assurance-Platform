@@ -25,7 +25,7 @@ import {
 } from "../../../../data/backup/backupStorage";
 import { monthFoldersQueryOptions, invalidateMonthFolders } from "../../../../data/query/monthFoldersQuery";
 import { closeMonth, reopenMonth } from "../../../../data/population/monthLock";
-import { appendWorkspaceAction } from "../../../../data/audit/actionLog";
+import { appendWorkspaceAction, recordAction } from "../../../../data/audit/actionLog";
 import { syncUsersFromDisk } from "../../../../auth/userManagement";
 import { getLabels } from "../../../../data/labels/labelsStore";
 import { runMonthIntegrityScan } from "../../../../data/integrity/orphanScanLoader";
@@ -193,6 +193,13 @@ export default function ArchiveTab() {
           failed.length > 0
             ? `${getLabels().backup_partial_warning}: ${failed.map((failure) => failure.path).join("، ")}`
             : null;
+        // A snapshot with unverified files is still a real, logged event — the
+        // entry records that it was partial rather than pretending it did not
+        // happen, which is the same distinction the message below draws.
+        recordAction(directoryHandle, username, session?.role ?? "unknown", "backup-created", {
+          target: result.folderName,
+          details: { months: months.length, failedVerification: failed.length, includeXlsxExports },
+        });
         setMessage({
           type: result.xlsxWarning || partialText ? "error" : "ok",
           text: partialText
@@ -218,6 +225,9 @@ export default function ArchiveTab() {
       const result = await saveAutoBackupSettings(directoryHandle, frequency, username);
       if (result.ok) {
         setAutoSettings(result.settings);
+        recordAction(directoryHandle, username, session?.role ?? "unknown", "backup-settings-changed", {
+          details: { frequency },
+        });
         setMessage({ type: "ok", text: "تم تحديث فترة النسخ الاحتياطي التلقائي." });
       } else {
         setMessage({ type: "error", text: `تعذر حفظ إعدادات النسخ: ${result.error}` });
@@ -283,6 +293,14 @@ export default function ArchiveTab() {
         username,
       });
       if (result.ok) {
+        // `backup-restored` has been a declared WorkspaceActionType with no call
+        // site since it was introduced — the single most consequential
+        // operation in the app (it overwrites live months from a snapshot) left
+        // no trace in the very log meant to record it.
+        recordAction(directoryHandle, username, session?.role ?? "unknown", "backup-restored", {
+          target: folderName,
+          details: { rollbackFolderName: result.rollbackFolderName, months: months.length },
+        });
         setRestoreTarget(null);
         setJustRestored(true);
         setMessage({
