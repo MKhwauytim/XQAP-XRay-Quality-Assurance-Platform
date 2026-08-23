@@ -35,7 +35,7 @@
   grid-row: 1;
 
   width: 296px;
-  min-height: calc(100vh - var(--topbar-height, 56px));
+  min-height: calc(var(--app-vh) - var(--topbar-height, 56px));
 
   display: flex;
   flex-direction: column;

@@ -14,7 +14,7 @@
   /* Matches the backdrop's 24px vertical padding, so a long confirmation
      message on a short viewport (landscape phone) scrolls inside the dialog
      instead of pushing the action buttons off-screen. */
-  max-height: calc(100vh - 48px);
+  max-height: calc(var(--app-vh) - 48px);
   overflow-y: auto;
   padding: 22px 24px;
   border-radius: var(--r-md);

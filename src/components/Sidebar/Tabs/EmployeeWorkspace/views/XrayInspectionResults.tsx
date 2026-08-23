@@ -33,6 +33,7 @@ import {
 } from "../../../../../data/referral/referralStorage";
 import type { ReferralRequest, ReplacementRequest } from "../../../../../data/referral/referralTypes";
 import { loadAdminBrowsePreset, loadUserBrowsePreset } from "../../../../../data/preferences/browsePresetStorage";
+import { useColumnPreset } from "../../../../../data/preferences/useColumnPreset";
 import { subscribeToDataRefresh } from "../../../../../data/workspace/dataRefreshSignal";
 import { loadSampleMaster } from "../../../../../data/sampling/sampleStorage";
 import {
@@ -355,7 +356,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
   );
 
   const columns = useMemo<DataTableCol<ResultRow>[]>(() => {
-    const visibleSampleColumns = getVisibleSampleColumns(sampleColumns, referralColConfig).map<DataTableCol<ResultRow>>((column) => ({
+    const visibleSampleColumns = orderSampleColumns(sampleColumns, referralColConfig).map<DataTableCol<ResultRow>>((column) => ({
       ...column,
       accessor: (row) => getSampleColumnValue(row, column, L),
     }));
@@ -382,7 +383,43 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
     return [...visibleSampleColumns, ...answerColumns, qualityNoteColumn];
   }, [L, answerFields, referralColConfig, sampleColumns]);
 
+  /**
+   * What the table shows before anyone touches its picker: exactly the columns
+   * it showed when the sample set was pre-filtered — the referrals layout's
+   * visible ones, plus every answer column and the quality note. The newly
+   * reachable columns are the sample ones that layout hides, and they stay
+   * hidden until someone asks for them.
+   */
+  const defaultVisibleColumns = useMemo(
+    () => [
+      ...defaultVisibleSampleColumnIds(sampleColumns, referralColConfig),
+      ...answerFields.map((field) => `answer:${field.fieldId}`),
+      "qualityNote",
+    ],
+    [answerFields, referralColConfig, sampleColumns]
+  );
+
   const auditColumns = useMemo<DataTableCol<AuditRow>[]>(() => buildAuditColumns(), []);
+
+  // Each of the two tables owns its own stored layout. They show different row
+  // shapes entirely — studies versus movement history — so one shared preset
+  // would have each of them hiding columns the other has never heard of.
+  const resultsPreset = useColumnPreset({
+    directoryHandle,
+    username,
+    presetKey: "xray-results",
+    columnIds: columns.map((column) => column.id),
+    canShareDefault: canSeeAll,
+    logScope: "xrayInspectionResults",
+  });
+  const auditPreset = useColumnPreset({
+    directoryHandle,
+    username,
+    presetKey: "xray-results-audit",
+    columnIds: auditColumns.map((column) => column.id),
+    canShareDefault: canSeeAll,
+    logScope: "xrayInspectionResults.audit",
+  });
 
   // P2-2: persists ItemAnswer.qualityNote via setItemQualityNote (answerStorage.ts).
   // Gated on canWriteQualityNote — the same capability tier used for approval
@@ -516,9 +553,11 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
           getRowKey={resultRowKey}
           renderCell={renderCell}
           storageKey={RESULTS_COL_KEY}
-          defaultVisible={columns.map((column) => column.id)}
+          defaultVisible={defaultVisibleColumns}
           isAdmin={canSeeAll}
-          canConfigureColumns={false}
+          canConfigureColumns
+          initialColConfig={resultsPreset.initialColConfig}
+          onColConfigChange={resultsPreset.onColConfigChange}
           exportFileName={`نتائج فحص الأشعة - ${selectedMonth || "كل الأشهر"}.xlsx`}
           // The only user action that makes these rows a different set: picking
           // another month. A background re-read of the same month must leave the
@@ -553,7 +592,9 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
           storageKey={`${RESULTS_COL_KEY}_audit_${viewMode}`}
           defaultVisible={auditColumns.map((column) => column.id)}
           isAdmin={canSeeAll}
-          canConfigureColumns={false}
+          canConfigureColumns
+          initialColConfig={auditPreset.initialColConfig}
+          onColConfigChange={auditPreset.onColConfigChange}
           exportFileName={`${viewMode === "replaced" ? "سجل المستبدلة" : "سجل المحالة والمنقولة"} - ${selectedMonth || "كل الأشهر"}.xlsx`}
           // Same as the active table, plus the history kind: the switcher folds
           // a different slice of `auditEvents` into an unrelated row set.
@@ -806,7 +847,19 @@ function loadLocalReferralColConfig(): ColConfig | null {
   return null;
 }
 
-function getVisibleSampleColumns(
+/**
+ * The sample columns in the referrals layout's ORDER — all of them, hidden ones
+ * included.
+ *
+ * This used to also drop the hidden ones, which is why the table below had no
+ * column picker: a picker over a set that had already been filtered somewhere
+ * else can hide more columns but cannot reveal one, and a control that only
+ * works in one direction is worse than none. Visibility is now `defaultVisible`
+ * plus this table's own picker (see `orderedSampleColumnIds` /
+ * `defaultVisibleSampleColumnIds`), so the default look is unchanged and every
+ * column is reachable.
+ */
+function orderSampleColumns(
   sampleColumns: DataTableCol<DistributionEntry>[],
   config: ColConfig | null
 ): DataTableCol<DistributionEntry>[] {
@@ -819,8 +872,18 @@ function getVisibleSampleColumns(
   const appended = sampleColumns.filter((c) => !keptSet.has(c.id)).map((c) => c.id);
   return [...kept, ...appended]
     .map((id) => sampleColumns.find((column) => column.id === id))
-    .filter((column): column is DataTableCol<DistributionEntry> => Boolean(column))
-    .filter((column) => !cfg.hidden.includes(column.id));
+    .filter((column): column is DataTableCol<DistributionEntry> => Boolean(column));
+}
+
+/** Which of those start visible — the referrals layout's own answer. */
+function defaultVisibleSampleColumnIds(
+  sampleColumns: DataTableCol<DistributionEntry>[],
+  config: ColConfig | null
+): string[] {
+  const cfg = config ?? buildDefaultReferralColConfig(sampleColumns);
+  return orderSampleColumns(sampleColumns, config)
+    .filter((column) => !cfg.hidden.includes(column.id))
+    .map((column) => column.id);
 }
 
 function getSampleColumnValue(row: ResultRow, column: DataTableCol<DistributionEntry>, labels: Labels): string | null {

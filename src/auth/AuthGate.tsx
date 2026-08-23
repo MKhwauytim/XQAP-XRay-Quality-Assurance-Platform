@@ -36,9 +36,9 @@ import {
 import type { AuthRole, AuthSession, MessageType } from "./authTypes";
 import {
   createPasswordHash,
-  needsRehash,
-  verifyPasswordHash
+  needsRehash
 } from "./passwordCrypto";
+import { verifyPasswordWithLayoutFallback } from "./keyboardLayout";
 import {
   clearLastLoginUsername,
   readLastLoginUsername,
@@ -527,10 +527,10 @@ export default function AuthGate({ children }: AuthGateProps) {
       normalizedInput === BOOTSTRAP_ADMIN_USERNAME &&
       readAdminAccount().allowUsernameLogin
     ) {
-      const isPasscodeValid = await verifyPasswordHash(
+      const isPasscodeValid = await verifyPasswordWithLayoutFallback(
         password,
         resolveAdminPasswordHash()
-      );
+      ) !== null;
 
       if (!isPasscodeValid) {
         registerFailedAttempt();
@@ -562,12 +562,16 @@ export default function AuthGate({ children }: AuthGateProps) {
       return;
     }
 
-    const isPasswordValid = await verifyPasswordHash(
+    // The plaintext that actually matched — which is not necessarily what was
+    // typed. An operator who left the keyboard on Arabic submits `ةاةي` for the
+    // password `mhmd`; both are the same keystrokes and both sign in, but only
+    // the matching one may ever be re-hashed below. See `keyboardLayout.ts`.
+    const matchedPassword = await verifyPasswordWithLayoutFallback(
       password,
       user.passwordHash
     );
 
-    if (!isPasswordValid) {
+    if (matchedPassword === null) {
       registerFailedAttempt();
       showMessage(codedMessage("XQ-AUTH-001"), "bad");
       return;
@@ -577,7 +581,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     // now that we hold the plaintext. Non-fatal: keep the old hash on failure.
     if (needsRehash(user.passwordHash)) {
       try {
-        const upgraded = await createPasswordHash(password);
+        const upgraded = await createPasswordHash(matchedPassword);
         persistUserPasswordHash(user.id, upgraded);
         // Persist the upgraded hash to the shared workspace file too — otherwise
         // the Argon2id rehash lived only in this tab's runtime state and was lost
@@ -608,12 +612,12 @@ export default function AuthGate({ children }: AuthGateProps) {
   }
 
   async function loginAsBootstrapAdmin(): Promise<void> {
-    const isPasscodeValid = await verifyPasswordHash(
+    const isPasscodeValid = await verifyPasswordWithLayoutFallback(
       adminPasscode,
       // The workspace's own admin passcode once one has been set in Settings,
       // otherwise the shipped default.
       resolveAdminPasswordHash()
-    );
+    ) !== null;
 
     if (!isPasscodeValid) {
       showMessage(codedMessage("XQ-AUTH-003"), "bad");

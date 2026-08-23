@@ -5,7 +5,7 @@
 .workspace-gate {
   display: grid;
   place-items: center;
-  min-height: 100vh;
+  min-height: var(--app-vh);
   padding: 24px;
   background: var(--c-surface-3, #EEF2F7);
 }
@@ -170,13 +170,13 @@
   inset-inline-end: 24px;
   bottom: 96px; /* stacked above the feedback widget (bottom: ~24px) */
   z-index: 1100;
-  width: min(374px, calc(100vw - 48px));
+  width: min(374px, calc(var(--app-vw) - 48px));
   background: var(--c-surface, #FFFFFF);
   border: 1px solid var(--c-border, #D6E2EF);
   border-radius: var(--r-lg, 16px);
   box-shadow: var(--sh-lg, 0 16px 40px rgba(13, 31, 50, 0.18));
   overflow: hidden auto;
-  max-height: calc(100vh - 120px);
+  max-height: calc(var(--app-vh) - 120px);
   font-family: inherit;
 }
 

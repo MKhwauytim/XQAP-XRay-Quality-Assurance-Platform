@@ -12,6 +12,7 @@ import { PageHeader } from "../../../../components/PageHeader/PageHeader";
 import DataTable, { type DataTableCol } from "../../../../components/DataTable";
 import { ConfirmDialog } from "../../../ConfirmDialog/ConfirmDialog";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
+import { useColumnPreset } from "../../../../data/preferences/useColumnPreset";
 import { subscribeToDataRefresh } from "../../../../data/workspace/dataRefreshSignal";
 import { useLabels } from "../../../../data/labels/useLabels";
 import { formatDateTime } from "../../../../utils/formatting";
@@ -515,6 +516,21 @@ function MappingStep({ editor, disabled, onMapping, onPreviewSheet }: MappingSte
  * Step 3 — review
  * ──────────────────────────────────────────────────────────────────────────── */
 
+/** The review table's out-of-the-box columns; the rest are reachable through
+ *  its column picker. Module-level so the array identity is stable. */
+const DEFAULT_VISIBLE_REVIEW_COLUMNS = [
+  "select",
+  "rowKey",
+  "xrayImageId",
+  "portName",
+  "declarationNumber",
+  "xrayLevelOneResult",
+  "xrayLevelTwoResult",
+  "validation",
+  "excluded",
+  "assignedTo",
+];
+
 type ReviewStepProps = {
   record: AdhocRecord;
   selectedRowKeys: Set<string>;
@@ -533,6 +549,8 @@ function ReviewTable({
   onToggleExcluded,
 }: ReviewStepProps) {
   const L = useLabels();
+  const { directoryHandle } = useWorkspace();
+  const operator = readSession()?.username ?? "";
 
   const columns: DataTableCol<AdhocRow>[] = useMemo(
     () => [
@@ -572,6 +590,17 @@ function ReviewTable({
     ],
     [L]
   );
+
+  const columnPreset = useColumnPreset({
+    directoryHandle,
+    username: operator,
+    presetKey: "adhoc-import-rows",
+    columnIds: columns.map((column) => column.id),
+    // Ad-hoc import is admin-only work; whoever can ingest sets the default
+    // everyone else opening the same workspace sees.
+    canShareDefault: canIngest,
+    logScope: "adhocImport.review",
+  });
 
   return (
     <DataTable<AdhocRow>
@@ -617,19 +646,14 @@ function ReviewTable({
         }
         return col.accessor(row) ?? "—";
       }}
-      defaultVisible={[
-        "select",
-        "rowKey",
-        "xrayImageId",
-        "portName",
-        "declarationNumber",
-        "xrayLevelOneResult",
-        "xrayLevelTwoResult",
-        "validation",
-        "excluded",
-        "assignedTo",
-      ]}
-      canConfigureColumns={false}
+      defaultVisible={DEFAULT_VISIBLE_REVIEW_COLUMNS}
+      // Was hard-disabled, which was the worst combination available: this table
+      // ships with several of its mapped columns hidden by `defaultVisible`, and
+      // with no picker there was no way for an admin to see them at all — the
+      // data was on screen in principle and unreachable in practice.
+      canConfigureColumns
+      initialColConfig={columnPreset.initialColConfig}
+      onColConfigChange={columnPreset.onColConfigChange}
     />
   );
 }

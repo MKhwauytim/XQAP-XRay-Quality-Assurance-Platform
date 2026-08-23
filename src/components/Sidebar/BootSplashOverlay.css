@@ -30,7 +30,7 @@
      opaque cover with the checklist parked far below the fold. Capping the
      (single) grid row at one screen keeps the card centered on screen for tall
      content and changes nothing at all when the workspace is shorter. */
-  grid-template-rows: min(100%, calc(100vh - var(--topbar-height, 56px)));
+  grid-template-rows: min(100%, calc(var(--app-vh) - var(--topbar-height, 56px)));
   place-items: center;
   padding: 24px;
   background: linear-gradient(150deg, #071528 0%, #0C1E38 55%, var(--c-navy) 100%);
@@ -38,7 +38,7 @@
 
 .boot-splash-card {
   width: min(420px, 100%);
-  max-height: calc(100vh - 64px);
+  max-height: calc(var(--app-vh) - 64px);
   overflow-y: auto;
   padding: 26px 24px 20px;
   border-radius: var(--r-2xl);
