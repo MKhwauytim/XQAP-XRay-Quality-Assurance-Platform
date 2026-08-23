@@ -23,8 +23,11 @@
   display: grid;
   /* The handoff's own track definition. Both minimums are real: the queue can
      never be squeezed below 340px (it scrolls horizontally instead — see
-     `.dt-table` below), and the form column never below 430px. */
-  grid-template-columns: minmax(340px, 1.15fr) minmax(430px, 1fr);
+     `.dt-table` below), and the form column never below 430px. The fr shares
+     are custom properties (falling back to the handoff's 1.15/1 split) so the
+     resize grip (`.ew-xr-resize-grip`) can override them per drag/preset
+     without a second copy of this rule — see the "Resize grip" section below. */
+  grid-template-columns: minmax(340px, var(--ew-xr-queue-fr, 1.15fr)) minmax(430px, var(--ew-xr-panel-fr, 1fr));
   grid-template-rows: auto minmax(0, 1fr) auto;
   align-items: stretch;
   /* `gap: 14px` in the handoff. Split deliberately: the row tracks below are
@@ -52,11 +55,14 @@
   grid-column: 1;
   grid-row: 2;
   /* The panel's own floor, so the two columns agree on where the fold is.
-     Both bounds follow `--ui-table-height-scale`; see `--ui-queue-floor`. */
-  min-height: var(--ui-queue-floor);
-  max-height: max(
-    var(--ui-queue-floor),
-    calc((var(--app-vh) - 240px) * var(--ui-table-height-scale))
+     Both bounds follow `--ui-table-height-scale`; see `--ui-queue-floor`.
+     `--ew-xr-split-height`, when the resize grip (or a saved preset) has set
+     it, pins BOTH bounds to one fixed pixel height instead — a deliberate
+     drag/preset value should stop tracking the viewport until it is cleared. */
+  min-height: var(--ew-xr-split-height, var(--ui-queue-floor));
+  max-height: var(
+    --ew-xr-split-height,
+    max(var(--ui-queue-floor), calc((var(--app-vh) - 240px) * var(--ui-table-height-scale)))
   );
 }
 
@@ -82,6 +88,56 @@
 .ew-xr-panel-col > .ip-panel {
   flex: 1 1 auto;
 }
+
+/* ── Resize grip (admin/manager — `configure-referral-columns`) ─────────────── */
+
+/* Placed in the SAME grid cell as `.dt-table-wrap` (row 2, col 1) and pinned
+   to its bottom-start corner (RTL: physical bottom-left, the corner touching
+   the panel column) with `justify-self`/`align-self` rather than
+   `position: absolute` — a plain grid placement stays correct without
+   duplicating `.dt-table-wrap`'s own height/scroll math. Dragging updates
+   `--ew-xr-queue-fr` / `--ew-xr-panel-fr` (width split, horizontal motion) and
+   `--ew-xr-split-height` (shared height, vertical motion) together, like the
+   resize handle on a native `<textarea>`. Only rendered by XrayReferrals.tsx
+   when `ResizeModeToggle` is on, which is itself only rendered for
+   `configure-referral-columns` holders — see ew_xr_resize_toggle_* labels. */
+.ew-xr-resize-grip {
+  position: relative;
+  grid-column: 1;
+  grid-row: 2;
+  justify-self: start;
+  align-self: end;
+  width: 18px;
+  height: 18px;
+  margin-inline-start: -9px;
+  margin-block-end: -9px;
+  z-index: var(--z-sticky-corner);
+  border-radius: 4px;
+  cursor: nwse-resize;
+  background: var(--c-navy);
+  box-shadow: var(--sh-sm);
+  transition: filter 120ms ease;
+}
+
+.ew-xr-resize-grip:hover,
+.ew-xr-resize-grip:active {
+  filter: brightness(1.2);
+}
+
+/* Three diagonal dots at the grip's own inner corner, echoing the classic
+   resize-corner affordance. */
+.ew-xr-resize-grip::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, var(--c-surface) 1.4px, transparent 1.6px);
+  background-size: 5px 5px;
+  background-position: 10px 4px, 10px 10px, 4px 10px;
+  background-repeat: no-repeat;
+  border-radius: inherit;
+}
+
+.ew-ref-queue.ew-xr-grid--with-bar > .ew-xr-resize-grip { grid-row: 3; }
 
 /* ── Selection bar variant ───────────────────────────────────────────────── */
 
@@ -267,8 +323,10 @@
 .ew-xr-grid .ew-ref-empty-panel {
   /* Stands in for the inspection panel, so it floors at the same place — a
      different value here makes the page jump height the moment a sample is
-     opened or closed. */
-  min-height: var(--ui-queue-floor);
+     opened or closed. Mirrors the `--ew-xr-split-height` override above for
+     the same reason: a resized queue must not leave the empty-state block a
+     different height than the table beside it. */
+  min-height: var(--ew-xr-split-height, var(--ui-queue-floor));
   position: sticky;
   top: 16px;
 }
@@ -305,6 +363,12 @@
   .ew-ref-queue.ew-xr-grid--with-bar > .dt-table-wrap {
     min-height: clamp(320px, 46vh, 520px);
     max-height: clamp(320px, 46vh, 520px);
+  }
+
+  /* The grip resizes a width split and a shared height that both stop
+     existing once the columns stack — nothing left for it to drag. */
+  .ew-xr-resize-grip {
+    display: none;
   }
 
   .ew-ref-queue.ew-xr-grid > .ew-xr-panel-col,
