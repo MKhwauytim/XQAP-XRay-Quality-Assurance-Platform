@@ -71,8 +71,8 @@ test("a pasted TSV is parsed, auto-mapped, and blocks on the mandatory result fi
 
   // The auto-mapper resolved the columns whose headers it recognises…
   // The binding is exposed as the header cell's accessible name, not as text.
-  await expect(ws.getByRole("cell", { name: /مرتبط بـ معرف الأشعة/ })).toBeVisible();
-  await expect(ws.getByRole("cell", { name: /مرتبط بـ رقم اللوحة\/الحاوية/ })).toBeVisible();
+  await expect(ws.getByRole("columnheader", { name: /مرتبط بـ معرف الأشعة/ })).toBeVisible();
+  await expect(ws.getByRole("columnheader", { name: /مرتبط بـ رقم اللوحة\/الحاوية/ })).toBeVisible();
   // …and reports exactly what it could not resolve.
   await expect(ws.getByRole("status").filter({ hasText: "الحقل الإلزامي" }))
     .toContainText('الحقل الإلزامي "نتيجة المستوى الأول" غير مرتبط');
@@ -84,8 +84,8 @@ test("mapping the result columns by clicking headers unblocks the review step", 
   const ws = workspace(page);
 
   await mapResultColumns(page);
-  await expect(ws.getByRole("cell", { name: /مرتبط بـ نتيجة المستوى الأول/ })).toBeVisible();
-  await expect(ws.getByRole("cell", { name: /مرتبط بـ نتيجة المستوى الثاني/ })).toBeVisible();
+  await expect(ws.getByRole("columnheader", { name: /مرتبط بـ نتيجة المستوى الأول/ })).toBeVisible();
+  await expect(ws.getByRole("columnheader", { name: /مرتبط بـ نتيجة المستوى الثاني/ })).toBeVisible();
 
   await ws.getByRole("button", { name: "التالي", exact: true }).click();
   await expect(ws.getByText("4 صف — 4 صالح، 0 غير صالح، 0 مستبعد يدوياً.")).toBeVisible();
