@@ -28,11 +28,16 @@ export function buildDefaultInspectionTemplate(username: string): TemplateSchema
   const fImageQuality   = createFieldId();
   const fQualityReason  = createFieldId();
   const fQualityOther   = createFieldId();
+  const fCanViewDeclaration = createFieldId();
   const fDeclarationType   = createFieldId();
+  const fDeclarationTypeOther = createFieldId();
   const fDeclaredNature    = createFieldId();
+  const fDeclaredNatureOther = createFieldId();
   const fObservedNature    = createFieldId();
+  const fObservedNatureOther = createFieldId();
   const fMatchesDeclaration = createFieldId();
   const fMismatchReasons   = createFieldId();
+  const fMismatchReasonsOther = createFieldId();
   const fDeclarationNotes  = createFieldId();
   const fResultValidity    = createFieldId();
   const fSuspicionLevel    = createFieldId();
@@ -84,7 +89,7 @@ export function buildDefaultInspectionTemplate(username: string): TemplateSchema
       {
         fieldId: fQualityReason, phaseId: phase1Id, label: "اسباب انخفاض جودة الصورة",
         type: "dropdown", required: false,
-        options: ["الأرسالية غير كاملة", "جودة التقاط الصورة منخفضة", "يوجد تموجات في الصورة", "اخرى"],
+        options: ["الأرسالية غير كاملة", "جودة التقاط الصورة منخفضة", "يوجد تموجات في الصورة", "أخرى"],
         placeholder: "",
         condition: { sourceFieldId: fImageQuality, operator: "notEquals", value: "عالي" },
         order: 5,
@@ -93,21 +98,48 @@ export function buildDefaultInspectionTemplate(username: string): TemplateSchema
         fieldId: fQualityOther, phaseId: phase1Id, label: "سبب انخفاض الجودة (أخرى)",
         type: "textarea", required: false,
         options: [], placeholder: "اذكر سبب انخفاض الجودة...",
-        condition: { sourceFieldId: fQualityReason, operator: "equals", value: "اخرى" },
+        condition: { sourceFieldId: fQualityReason, operator: "equals", value: "أخرى" },
         order: 6,
       },
       // ── Phase 2 — تحليل البيان الجمركي ───────────────────────────────────────
       // Sits between "is there a usable image?" and "is the result sound?" so
       // the reviewer has read what the shipment is DECLARED to be before
-      // judging what the scan shows. Every field is gated on an image existing:
-      // with no image there is nothing to compare the declaration against.
+      // judging what the scan shows.
+      //
+      // The phase opens with its own gate rather than repeating the phase-1
+      // image gate on every field. A reviewer who cannot pull up the customs
+      // declaration answers ONE question and the phase is finished: nothing
+      // below is visible, so nothing below is required, so the phase counts as
+      // complete and the stepper moves on. Everything else hangs off this gate,
+      // and `isFieldVisible` walks a condition's source field recursively — so
+      // gating on the gate keeps the original "no image ⇒ no declaration work"
+      // rule intact without stating it eleven times.
+      {
+        fieldId: fCanViewDeclaration, phaseId: phase2Id, label: "هل يمكن الاطلاع على البيان",
+        type: "dropdown", required: true,
+        options: ["نعم", "لا"], placeholder: "",
+        condition: { sourceFieldId: fHasImage, operator: "equals", value: "نعم" },
+        order: 1,
+      },
       {
         fieldId: fDeclarationType, phaseId: phase2Id, label: "نوع البيان",
         type: "dropdown", required: true,
         options: ["استيراد", "تصدير", "إعادة تصدير", "عبور", "إدخال مؤقت", "أخرى"],
         placeholder: "",
-        condition: { sourceFieldId: fHasImage, operator: "equals", value: "نعم" },
-        order: 1,
+        condition: { sourceFieldId: fCanViewDeclaration, operator: "equals", value: "نعم" },
+        order: 2,
+      },
+      // Every "أخرى" option in this template is paired with its own free-text
+      // companion, revealed by picking it and hidden (and therefore dropped
+      // from the saved answer, since `collect()` persists visible fields only)
+      // when it is unpicked. Without one, "أخرى" records that the reviewer had
+      // something to say and not what it was.
+      {
+        fieldId: fDeclarationTypeOther, phaseId: phase2Id, label: "نوع البيان (أخرى)",
+        type: "textarea", required: false,
+        options: [], placeholder: "اذكر نوع البيان...",
+        condition: { sourceFieldId: fDeclarationType, operator: "equals", value: "أخرى" },
+        order: 3,
       },
       // Declared and observed share ONE vocabulary on purpose. Two different
       // lists (a commercial one for the declaration, a visual one for the scan)
@@ -127,8 +159,18 @@ export function buildDefaultInspectionTemplate(username: string): TemplateSchema
           "أخرى",
         ],
         placeholder: "",
-        condition: { sourceFieldId: fHasImage, operator: "equals", value: "نعم" },
-        order: 2,
+        condition: { sourceFieldId: fCanViewDeclaration, operator: "equals", value: "نعم" },
+        order: 4,
+      },
+      // `equals` against a multiselect source asks "is this option among the
+      // picked ones?" (see evaluateCondition), so this box survives the
+      // reviewer picking a second category alongside "أخرى".
+      {
+        fieldId: fDeclaredNatureOther, phaseId: phase2Id, label: "طبيعة البضاعة المصرح بها (أخرى)",
+        type: "textarea", required: false,
+        options: [], placeholder: "اذكر طبيعة البضاعة المصرح بها...",
+        condition: { sourceFieldId: fDeclaredNature, operator: "equals", value: "أخرى" },
+        order: 5,
       },
       // Same list plus two answers that only the scan can produce: a load whose
       // contents do not separate into categories, and one the image cannot
@@ -148,8 +190,15 @@ export function buildDefaultInspectionTemplate(username: string): TemplateSchema
           "أخرى",
         ],
         placeholder: "",
-        condition: { sourceFieldId: fHasImage, operator: "equals", value: "نعم" },
-        order: 3,
+        condition: { sourceFieldId: fCanViewDeclaration, operator: "equals", value: "نعم" },
+        order: 6,
+      },
+      {
+        fieldId: fObservedNatureOther, phaseId: phase2Id, label: "طبيعة البضاعة الظاهرة بالأشعة (أخرى)",
+        type: "textarea", required: false,
+        options: [], placeholder: "اذكر طبيعة البضاعة الظاهرة بالأشعة...",
+        condition: { sourceFieldId: fObservedNature, operator: "equals", value: "أخرى" },
+        order: 7,
       },
       // One verdict field, not a "is there a difference?" flag AND a separate
       // match result — two fields carrying one judgment can disagree with each
@@ -159,8 +208,8 @@ export function buildDefaultInspectionTemplate(username: string): TemplateSchema
         fieldId: fMatchesDeclaration, phaseId: phase2Id, label: "هل الوارد مطابق للبيان الجمركي",
         type: "dropdown", required: true,
         options: ["نعم", "لا"], placeholder: "",
-        condition: { sourceFieldId: fHasImage, operator: "equals", value: "نعم" },
-        order: 4,
+        condition: { sourceFieldId: fCanViewDeclaration, operator: "equals", value: "نعم" },
+        order: 8,
       },
       {
         fieldId: fMismatchReasons, phaseId: phase2Id, label: "أسباب عدم المطابقة",
@@ -178,17 +227,24 @@ export function buildDefaultInspectionTemplate(username: string): TemplateSchema
         ],
         placeholder: "",
         condition: { sourceFieldId: fMatchesDeclaration, operator: "equals", value: "لا" },
-        order: 5,
+        order: 9,
       },
-      // Optional and ungated by the verdict: it is the only place an "أخرى"
-      // pick in either nature field can be written down, and that can happen on
-      // a fully matching declaration too.
+      {
+        fieldId: fMismatchReasonsOther, phaseId: phase2Id, label: "أسباب عدم المطابقة (أخرى)",
+        type: "textarea", required: false,
+        options: [], placeholder: "اذكر سبب عدم المطابقة...",
+        condition: { sourceFieldId: fMismatchReasons, operator: "equals", value: "أخرى" },
+        order: 10,
+      },
+      // Optional and ungated by the verdict: a matching declaration can still
+      // be worth a remark. The per-option "أخرى" boxes above cover the "what
+      // did they mean by other?" case, so this is free-form commentary only.
       {
         fieldId: fDeclarationNotes, phaseId: phase2Id, label: "ملاحظات على البيان الجمركي",
         type: "textarea", required: false,
         options: [], placeholder: "أي ملاحظات على البيان أو على المقارنة...",
-        condition: { sourceFieldId: fHasImage, operator: "equals", value: "نعم" },
-        order: 6,
+        condition: { sourceFieldId: fCanViewDeclaration, operator: "equals", value: "نعم" },
+        order: 11,
       },
       // ── Phase 3 — ضمان جودة النتيجة ──────────────────────────────────────────
       {
