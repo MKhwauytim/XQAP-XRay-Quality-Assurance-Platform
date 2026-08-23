@@ -136,6 +136,19 @@
   direction: ltr;
 }
 
+/* A range input inherits the text-field rule above, which gives it a border and
+   padding it does not want. Undo those and let the slider be a slider. Full
+   width because these two sliders are the widest-travel control in Settings and
+   a cramped track makes 5 % steps hard to hit. */
+.admin-account-password-fields input[type="range"] {
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  accent-color: var(--app-primary);
+  cursor: pointer;
+}
+
 .admin-account-save-btn {
   align-self: flex-start;
   padding: 7px 16px;

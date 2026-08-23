@@ -53,8 +53,8 @@
      overflow-x: hidden does NOT clip it and no scrollbar is created — an
      unclamped 380px panel simply hung off-screen on a phone with no way to
      reach the cut-off part. Measured at 320px wide: right edge landed at 404px. */
-  width: min(380px, calc(100vw - 32px));
-  max-height: min(560px, calc(100vh - 88px));
+  width: min(380px, calc(var(--app-vw) - 32px));
+  max-height: min(560px, calc(var(--app-vh) - 88px));
   background: var(--c-surface);
   border: 1px solid var(--c-border);
   border-radius: 16px;

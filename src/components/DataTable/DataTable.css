@@ -151,12 +151,17 @@
   border-radius: var(--r-sm);
   overflow-x: auto;
   overflow-y: auto;
-  max-height: calc(100vh - 260px);
+  /* `--ui-table-height-scale` is the admin's table-height control
+     (src/data/preferences/uiScaleStore.ts). Below 1 the table gets shorter,
+     which is what pulls a page's action buttons back above the fold on a
+     short screen; above 1 it grows past the viewport and the PAGE scrolls
+     instead of the table, which is the right trade on a tall one. */
+  max-height: calc((var(--app-vh) - 260px) * var(--ui-table-height-scale));
   box-shadow: none;
 }
 
 .dt-density-compact {
-  max-height: calc(100vh - 214px);
+  max-height: calc((var(--app-vh) - 214px) * var(--ui-table-height-scale));
 }
 
 /* ── Table ─────────────────────────────────────────────────── */
@@ -553,7 +558,7 @@ td.dt-td.dt-td--numeric {
 .dt-filter-radio input[type="radio"] { accent-color: var(--c-sky); }
 
 .dt-filter-multiselect {
-  width: min(280px, calc(100vw - 28px));
+  width: min(280px, calc(var(--app-vw) - 28px));
 }
 
 .dt-filter-options {

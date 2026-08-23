@@ -28,8 +28,11 @@
    default `min-width: auto` would otherwise floor it at its content width. */
 .ip-panel--right {
   min-width: 0;
-  min-height: 560px;
-  max-height: max(560px, calc(100vh - 240px));
+  min-height: var(--ui-queue-floor);
+  max-height: max(
+    var(--ui-queue-floor),
+    calc((var(--app-vh) - 240px) * var(--ui-table-height-scale))
+  );
   position: sticky;
   top: 16px;
 }

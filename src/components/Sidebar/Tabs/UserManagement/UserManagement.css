@@ -3,7 +3,7 @@
 .um-page {
   width: 100%;
   max-width: 1440px;
-  min-height: calc(100vh - 44px);
+  min-height: calc(var(--app-vh) - 44px);
   margin: 0 auto;
   padding: 28px /* no-scale */;
   direction: rtl;
@@ -1063,7 +1063,7 @@
 
 .um-activity-table-wrap {
   overflow: auto;
-  max-height: min(620px, calc(100vh - 320px));
+  max-height: min(620px, calc(var(--app-vh) - 320px));
   border: 1px solid var(--app-border);
   border-radius: var(--r-xl);
 }

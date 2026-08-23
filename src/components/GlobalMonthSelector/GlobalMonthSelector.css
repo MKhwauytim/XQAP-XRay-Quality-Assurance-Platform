@@ -68,8 +68,8 @@
   /* Clamped: the toolbar wraps to full width at <=640px, so this popover's
      anchor can sit anywhere across it and an unclamped 280px would overflow a
      narrow phone. */
-  width: min(280px, calc(100vw - 32px));
-  max-width: calc(100vw - 32px);
+  width: min(280px, calc(var(--app-vw) - 32px));
+  max-width: calc(var(--app-vw) - 32px);
   padding: 12px;
   border: 1px solid rgba(0, 0, 0, 0.12);
   border-radius: 10px;

@@ -78,6 +78,21 @@ export const DEFAULT_LABELS = {
   settings_sync_no_permission:   "لا تملك صلاحية تعديل فترة المزامنة.",
   settings_sync_manual_note:     "لا يؤثر هذا الإعداد على زر التحديث اليدوي — يظل يعمل فوراً عند الضغط عليه.",
 
+  // ── مقياس الواجهة (uiScaleStore.ts) ───────────────────────────────────────
+  // A display preference, stored per BROWSER in localStorage — deliberately not
+  // in the workspace, so two machines with different screens can each pick the
+  // size that fits. The wording says so, because "يُحفظ على هذا الجهاز" is the
+  // difference between an admin thinking they set it for the whole department
+  // and knowing they set it for this laptop.
+  settings_uiscale_title:        "مقياس الواجهة",
+  settings_uiscale_note:         "يصغّر أو يكبّر الواجهة كاملة — الجداول والصفحات والقوائم. التصغير يُظهر أعمدة وصفوفاً أكثر دون التمرير يميناً ويساراً. يُحفظ على هذا الجهاز فقط.",
+  settings_uiscale_field:        "حجم الواجهة",
+  settings_uiscale_table_field:  "ارتفاع الجداول",
+  settings_uiscale_table_hint:   "التصغير يقصّر منطقة الجدول فتظهر الأزرار أسفلها دون تمرير. التكبير يمدّها فتتمرر الصفحة بدل الجدول.",
+  settings_uiscale_value:        "{percent}%",
+  settings_uiscale_reset:        "إعادة الضبط إلى 100%",
+  settings_uiscale_preview:      "يُطبَّق فوراً أثناء السحب.",
+
   // Employee workspace pages
   page_xray_referrals_eyebrow:      "مساحة عمل الفحص",
   page_xray_referrals_title:        "صور الأشعة المحالة",

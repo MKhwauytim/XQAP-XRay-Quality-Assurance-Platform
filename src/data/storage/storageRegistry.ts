@@ -34,6 +34,12 @@ export const STORAGE_REGISTRY: readonly StorageEntry[] = [
     lossConsequence: "Custom wording reverts to defaults; restorable from the workspace snapshot.",
   },
   {
+    id: "xray_ui_scale_v1",
+    layer: "local",
+    purpose: "App-wide UI zoom + data-table height, set from the Settings tab.",
+    lossConsequence: "The interface returns to 100%; re-set it from Settings in one drag.",
+  },
+  {
     id: "xray_distribution_device_id_v1",
     layer: "local",
     purpose: "Stable per-machine id embedded in distribution event ids.",

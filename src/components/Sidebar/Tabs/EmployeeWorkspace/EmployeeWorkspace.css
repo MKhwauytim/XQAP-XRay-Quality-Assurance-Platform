@@ -39,7 +39,9 @@
 }
 
 .ew-split--right {
-  --ew-inspection-row-height: clamp(360px, calc(100vh - 252px), 680px);
+  --ew-inspection-row-height: calc(
+    clamp(360px, calc(var(--app-vh) - 252px), 680px) * var(--ui-table-height-scale)
+  );
   grid-template-columns: minmax(min(100%, 620px), 1fr) clamp(300px, 25vw, 380px);
   align-items: start;
 }
@@ -585,7 +587,7 @@
 
 .ew-replace-modal {
   width: min(840px, 100%);
-  max-height: min(700px, calc(100vh - 48px));
+  max-height: min(700px, calc(var(--app-vh) - 48px));
   display: flex;
   flex-direction: column;
   background: var(--c-surface);
@@ -1285,7 +1287,7 @@
   border: 1px solid var(--c-border);
   border-radius: var(--r-md);
   overflow: auto;
-  max-height: calc(100vh - 260px);
+  max-height: calc((var(--app-vh) - 260px) * var(--ui-table-height-scale));
   box-shadow: var(--sh-xs, 0 1px 3px rgba(13, 31, 50, 0.06));
 }
 
@@ -1496,7 +1498,7 @@
   inset-inline-end: 0;
   z-index: 200;
   /* Clamped so the column-picker cannot overflow a narrow viewport. */
-  width: min(320px, calc(100vw - 32px));
+  width: min(320px, calc(var(--app-vw) - 32px));
   background: var(--c-surface);
   border: 1px solid var(--c-border);
   border-radius: var(--r-md);

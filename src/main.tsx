@@ -6,6 +6,7 @@ import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { WorkspaceProvider } from "./data/workspace/WorkspaceProvider";
 import { queryClient } from "./data/query/queryClient";
+import { applyUiScaleToDocument } from "./data/preferences/uiScaleStore";
 import { ARABIC_FONT_FACE_CSS } from "./branding/fonts";
 import { SOMAR_SANS_APP_FONT_FACE_CSS } from "./branding/somarFonts";
 
@@ -28,6 +29,11 @@ const somarFontStyle = document.createElement("style");
 somarFontStyle.setAttribute("data-somar-font", "");
 somarFontStyle.textContent = SOMAR_SANS_APP_FONT_FACE_CSS;
 document.head.appendChild(somarFontStyle);
+
+// The admin's UI scale, applied BEFORE React mounts. Doing it from an effect
+// instead would paint the first frame unscaled and then jump, which reads as a
+// layout bug on every page load. See `uiScaleStore.ts`.
+applyUiScaleToDocument();
 
 const rootElement = document.getElementById("root");
 

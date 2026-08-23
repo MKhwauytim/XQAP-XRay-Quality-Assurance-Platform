@@ -41,7 +41,7 @@
 .auth-hydrating-gate {
   display: grid;
   place-items: center;
-  min-height: 100vh;
+  min-height: var(--app-vh);
 }
 
 /* ── Root: full-screen background ───────────────────────── */
@@ -637,7 +637,7 @@
 /* ── Employee Blank Page ─────────────────────────────────── */
 
 .employee-blank-page {
-  min-height: 100vh;
+  min-height: var(--app-vh);
   direction: rtl;
   background: var(--c-surface-3, #F9F8F4);
 }

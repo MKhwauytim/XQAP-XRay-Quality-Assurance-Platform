@@ -51,9 +51,13 @@
 .ew-ref-queue.ew-xr-grid > .dt-table-wrap {
   grid-column: 1;
   grid-row: 2;
-  /* The panel's own floor, so the two columns agree on where the fold is. */
-  min-height: 560px;
-  max-height: max(560px, calc(100vh - 240px));
+  /* The panel's own floor, so the two columns agree on where the fold is.
+     Both bounds follow `--ui-table-height-scale`; see `--ui-queue-floor`. */
+  min-height: var(--ui-queue-floor);
+  max-height: max(
+    var(--ui-queue-floor),
+    calc((var(--app-vh) - 240px) * var(--ui-table-height-scale))
+  );
 }
 
 .ew-ref-queue.ew-xr-grid > .data-pagination {
@@ -261,7 +265,10 @@
 /* ── Placeholder shown while no sample is open ───────────────────────────── */
 
 .ew-xr-grid .ew-ref-empty-panel {
-  min-height: 560px;
+  /* Stands in for the inspection panel, so it floors at the same place — a
+     different value here makes the page jump height the moment a sample is
+     opened or closed. */
+  min-height: var(--ui-queue-floor);
   position: sticky;
   top: 16px;
 }
