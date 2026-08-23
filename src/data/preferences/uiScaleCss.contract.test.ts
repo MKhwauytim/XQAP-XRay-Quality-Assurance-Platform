@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
@@ -90,7 +90,7 @@ describe("UI scale — viewport units in CSS", () => {
     const offenders: string[] = [];
 
     for (const file of files) {
-      const name = file.slice(file.lastIndexOf("/") + 1);
+      const name = basename(file);
       const allowed = ALLOWED_RAW_VIEWPORT_UNITS.get(name) ?? [];
       for (const line of withoutComments(readFileSync(file, "utf-8")).split("\n")) {
         if (!/\b100v[hw]\b/.test(line)) continue;
