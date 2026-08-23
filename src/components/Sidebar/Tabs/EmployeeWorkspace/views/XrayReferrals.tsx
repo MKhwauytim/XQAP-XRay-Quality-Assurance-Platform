@@ -935,7 +935,6 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     [columns, colPreset]
   );
 
-  // Queue/panel resize grip — extracted into useQueuePanelResize.
   const { resizeMode, setResizeMode, gridRef, gridStyle, handleSplitGripMouseDown } =
     useQueuePanelResize({ directoryHandle, username, canConfigureColumns, baseColumns, effectiveColConfig, loadedLayout: loadedSplitLayout });
 
@@ -1994,7 +1993,6 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               toolbarStart={<CaseFilterSwitcher value={caseFilter.value} counts={caseFilter.counts} onChange={caseFilter.setValue} />}
               toolbarEndExtra={(canSeeAll || canConfigureColumns) ? (
                 <>
-                  {/* Reveals `.ew-xr-resize-grip` — see useQueuePanelResize. */}
                   {canConfigureColumns && (
                     <ResizeModeToggle active={resizeMode} onToggle={() => setResizeMode((v) => !v)} />
                   )}
@@ -2014,7 +2012,6 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                 </>
               ) : undefined}
             />
-            {/* See "Resize grip" in XrayReferrals.css for the grid placement. */}
             {canConfigureColumns && resizeMode && (
               <div
                 className="ew-xr-resize-grip"
