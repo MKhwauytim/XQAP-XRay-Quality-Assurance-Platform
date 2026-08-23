@@ -7,8 +7,12 @@ import type { DistributionEntry } from "../distribution/distributionTypes";
 import { loadEmployeeAnswers } from "../answers/answerStorage";
 import type { ItemAnswer } from "../answers/answerTypes";
 import type { AdhocIndexEntry } from "./adhocImportModel";
-import { adhocMonthFolder } from "./adhocImportModel";
-import { loadAdhocImportIndex } from "./adhocImportStorage";
+import { adhocMonthFolder, originalXrayImageId } from "./adhocImportModel";
+import {
+  adhocStoreHasDistributionEvents,
+  listAdhocStoreImportIds,
+  loadAdhocImportIndex,
+} from "./adhocImportStorage";
 
 /**
  * A `DistributionEntry` that was assigned through an ad-hoc import
@@ -28,6 +32,25 @@ export function isAdhocEntry(
   entry: DistributionEntry,
 ): entry is AdhocDistributionEntry {
   return typeof (entry as Partial<AdhocDistributionEntry>).adhocImportId === "string";
+}
+
+/**
+ * The id to SHOW for an entry, whatever kind of queue it is sitting in.
+ *
+ * An ad-hoc entry's `xrayImageId` is namespaced (`ADHOC-{importId}-…`) so it can
+ * never collide with a real population row — a storage concern that had been
+ * leaking into every table cell, panel header, export and aria-label, where it
+ * read as a corrupted id and hid the real one off the right edge of the column.
+ * This returns the operator's own id for an ad-hoc entry and the id itself for
+ * every other entry, so one mixed queue renders consistently.
+ *
+ * Display only. Selection, answer keys, folder routing and every write still go
+ * through `entry.xrayImageId` — the namespaced id remains the identity.
+ */
+export function displayXrayImageId(entry: DistributionEntry): string {
+  return isAdhocEntry(entry)
+    ? originalXrayImageId(entry.xrayImageId, entry.adhocImportId)
+    : entry.xrayImageId;
 }
 
 /**
@@ -54,27 +77,81 @@ export function monthFolderForEntry(
 }
 
 /**
- * The imports a month-scoped view must open.
- *
- * `linkedMonths` is on the INDEX precisely so this decision costs one small
- * read: an import bound to another month, or to none, is skipped without ever
- * opening its `sample.master.json` or its derived distribution cache. On a
- * workspace with dozens of historical study imports that is the difference
- * between one file read and dozens per month switch.
- *
- * Omitting `monthFolderName` keeps the unscoped behavior exactly as it was —
- * every import with assignments, isolated ones included. Passing one excludes an
- * import whose entry carries no `linkedMonths` at all: an index entry written
- * before month binding existed describes an isolated import, and isolated means
- * "invisible to month-scoped views" (see `AdhocMonthBinding`).
+ * One ad-hoc store a reader has to open, plus the display name to tag its rows
+ * with. `fileName` falls back to the import id for a store the index cannot
+ * describe — a label is worth having even when the bookkeeping is missing.
  */
-function importsToOpen(
+type AdhocStoreTarget = { importId: string; fileName: string };
+
+/**
+ * The ad-hoc stores a view must open — the index's own answer, UNIONED with the
+ * stores that actually exist on disk.
+ *
+ * The index half is unchanged and is still the fast path. `linkedMonths` is on
+ * the INDEX precisely so a month-scoped read costs one small file: an import
+ * bound to another month, or to none, is skipped without ever opening its
+ * `sample.master.json` or its derived distribution cache. On a workspace with
+ * dozens of historical study imports that is the difference between one file
+ * read and dozens per month switch. Omitting `monthFolderName` keeps the
+ * unscoped behavior exactly as it was — every import with assignments, isolated
+ * ones included.
+ *
+ * The disk half is a repair path, and it is why `assignedRows > 0` is no longer
+ * the sole gate. An assignment commits sample rows, then distribution events,
+ * then the record that refreshes the index. The events are the durable part and
+ * they land SECOND, so a failure on the third write leaves rows genuinely
+ * assigned while the index still says `assignedRows: 0` — invisible to every
+ * reader, and unrecoverable by retrying, because the retry finds its own events
+ * already there and reports «كل الصفوف المحددة معيّنة بالفعل». Reading the
+ * folder listing too means visibility follows what is on disk rather than a
+ * counter a half-failed write can strand. See `listAdhocStoreImportIds`.
+ *
+ * The disk half never opens a store speculatively. Every save of an ad-hoc
+ * record writes its `sample.master.json`, so a store folder existing proves
+ * nothing; `adhocStoreHasDistributionEvents` is what separates "uploaded" from
+ * "assigned", at one directory probe per candidate the index cannot vouch for.
+ * An import an admin uploaded and never assigned therefore still costs nothing
+ * beyond that probe.
+ *
+ * A store the index DOES describe as assigned, and the month filter then
+ * excluded, stays excluded: month scoping is a deliberate decision and the
+ * repair path must not quietly undo it. Only stores the index cannot vouch for
+ * (`assignedRows: 0`, or no entry at all) are added back, because for those
+ * "which month" has no trustworthy answer either and showing the work beats
+ * losing it.
+ */
+async function storesToOpen(
+  directoryHandle: DirectoryHandleLike,
   index: AdhocIndexEntry[],
   monthFolderName: string | undefined
-): AdhocIndexEntry[] {
-  const withAssignments = index.filter((entry) => entry.assignedRows > 0);
-  if (monthFolderName === undefined) return withAssignments;
-  return withAssignments.filter((entry) => (entry.linkedMonths ?? []).includes(monthFolderName));
+): Promise<AdhocStoreTarget[]> {
+  const byImportId = new Map(index.map((entry) => [entry.importId, entry]));
+  const targets: AdhocStoreTarget[] = [];
+  const taken = new Set<string>();
+
+  for (const entry of index) {
+    if (entry.assignedRows <= 0) continue;
+    if (monthFolderName !== undefined && !(entry.linkedMonths ?? []).includes(monthFolderName)) {
+      continue;
+    }
+    targets.push({ importId: entry.importId, fileName: entry.fileName });
+    taken.add(entry.importId);
+  }
+
+  const candidates = (await listAdhocStoreImportIds(directoryHandle)).filter((importId) => {
+    if (taken.has(importId)) return false;
+    // Vouched for AND month-excluded above — leave it excluded.
+    return (byImportId.get(importId)?.assignedRows ?? 0) <= 0;
+  });
+  const hasEvents = await Promise.all(
+    candidates.map((importId) => adhocStoreHasDistributionEvents(directoryHandle, importId))
+  );
+  candidates.forEach((importId, index) => {
+    if (!hasEvents[index]) return;
+    targets.push({ importId, fileName: byImportId.get(importId)?.fileName ?? importId });
+  });
+
+  return targets;
 }
 
 /**
@@ -86,11 +163,12 @@ function importsToOpen(
  * `2-samples/adhoc-{importId}/` "month" (see `adhocDistributionBridge.ts`) — was
  * assigned but never rendered anywhere an employee could see it.
  *
- * Cost bound: the shared `adhoc-imports.index.json` (one small file) is read
- * first and is the ONLY unconditional read. Only imports whose index entry
- * already reports `assignedRows > 0` trigger a further read (their
- * `sample.master.json` + derived `distribution.current.json`) — an ad-hoc
- * import an admin uploaded but never assigned costs nothing here. There is no
+ * Cost bound: the shared `adhoc-imports.index.json` (one small file) plus one
+ * listing of `2-samples/` are the only unconditional reads. Only stores
+ * `storesToOpen` returns trigger a further read (their `sample.master.json` +
+ * derived `distribution.current.json`), and a store folder exists only because
+ * an assignment attempt wrote sample rows into it — so an ad-hoc import an admin
+ * uploaded but never assigned still costs nothing here. There is no
  * independent polling/refetch trigger added: callers are expected to invoke
  * this from the same load path their existing `subscribeToDataRefresh`
  * listener already re-runs (the app's single invalidation authority — see
@@ -114,11 +192,11 @@ export async function loadAdhocEntriesForEmployeeView(
     return [];
   }
 
-  const withAssignments = importsToOpen(index, monthFolderName);
-  if (withAssignments.length === 0) return [];
+  const stores = await storesToOpen(directoryHandle, index, monthFolderName);
+  if (stores.length === 0) return [];
 
   const perImport = await Promise.all(
-    withAssignments.map(async (indexEntry): Promise<AdhocDistributionEntry[]> => {
+    stores.map(async (indexEntry): Promise<AdhocDistributionEntry[]> => {
       try {
         const storeFolder = adhocMonthFolder(indexEntry.importId);
         const sample = await loadSampleMaster(directoryHandle, storeFolder);
@@ -160,12 +238,12 @@ export async function loadAdhocEntriesForEmployeeView(
  * durably stored somewhere nothing ever reads.
  *
  * Same cost bound and same fail-soft contract as
- * `loadAdhocEntriesForEmployeeView`: one small index read, imports with no
- * assignments cost nothing further, and any failure degrades to `[]` rather
- * than throwing into a caller that must still render the real months. The
- * optional `monthFolderName` narrows the result to imports LINKED to that month
- * (see `importsToOpen`); omitting it lists every import with assignments, as
- * before.
+ * `loadAdhocEntriesForEmployeeView`: one small index read plus one `2-samples/`
+ * listing, imports with no assignment attempt cost nothing further, and any
+ * failure degrades to `[]` rather than throwing into a caller that must still
+ * render the real months. The optional `monthFolderName` narrows the result to
+ * imports LINKED to that month (see `storesToOpen`); omitting it lists every
+ * import with assignments, as before.
  */
 export async function listAdhocSampleFolders(
   directoryHandle: DirectoryHandleLike,
@@ -173,7 +251,8 @@ export async function listAdhocSampleFolders(
 ): Promise<string[]> {
   try {
     const index = await loadAdhocImportIndex(directoryHandle);
-    return importsToOpen(index, monthFolderName).map((entry) => adhocMonthFolder(entry.importId));
+    const stores = await storesToOpen(directoryHandle, index, monthFolderName);
+    return stores.map((store) => adhocMonthFolder(store.importId));
   } catch (error) {
     logError("adhocImportEmployeeView:listAdhocSampleFolders", error);
     return [];
