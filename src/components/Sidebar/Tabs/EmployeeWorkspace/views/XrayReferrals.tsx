@@ -52,6 +52,7 @@ import {
 import { loadEmployeeSampleMirror } from "../../../../../data/samples/sampleMirrorStorage";
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
 import {
+  displayXrayImageId,
   loadAdhocAnswerItems,
   loadAdhocEntriesForEmployeeView,
   type AdhocDistributionEntry,
@@ -344,8 +345,8 @@ function createRenderCell(deps: {
           onClick={(e) => e.stopPropagation()}
           aria-label={
             eligible
-              ? `تحديد ${entry.xrayImageId}`
-              : L.ew_row_select_blocked_aria.replace("{id}", entry.xrayImageId)
+              ? `تحديد ${displayXrayImageId(entry)}`
+              : L.ew_row_select_blocked_aria.replace("{id}", displayXrayImageId(entry))
           }
         />
       );
@@ -353,7 +354,7 @@ function createRenderCell(deps: {
     if (col.id === "xrayImageId") {
       return (
         <span className="dt-mono ew-xray-id-cell">
-          {entry.xrayImageId}
+          {displayXrayImageId(entry)}
           {isAdhocEntry(entry) && (
             <span className="ew-adhoc-badge" title={`${L.badge_adhoc_import_title}: ${entry.adhocFileName}`}>
               {L.badge_adhoc_import}

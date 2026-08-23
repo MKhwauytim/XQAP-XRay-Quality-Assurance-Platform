@@ -7,11 +7,18 @@ import type { NormalizedRiskRow } from "../../components/Sidebar/Tabs/Population
 import type { AdhocImportRecord, AdhocImportRow } from "./adhocImportTypes";
 import { adhocMonthFolderName } from "./adhocImportTypes";
 import { assignAdhocRowsToEmployee, ensureAdhocSampleMaster } from "./adhocImportAssignment";
-import { saveAdhocRecord } from "./adhocImportStorage";
+import {
+  adhocStoreHasDistributionEvents,
+  loadAdhocImportIndex,
+  saveAdhocRecord,
+} from "./adhocImportStorage";
+import { normalizeAdhocRecord } from "./adhocRecordMigration";
+import type { DistributionEntry } from "../distribution/distributionTypes";
 import { assignAdhocPlan } from "./adhocDistributionBridge";
 import { ADHOC_FIELD_CATALOG } from "./adhocFieldCatalog";
 import type { AdhocMonthBinding, AdhocRecord } from "./adhocImportModel";
 import {
+  displayXrayImageId,
   listAdhocSampleFolders,
   loadAdhocEntriesForEmployeeView,
 } from "./adhocImportEmployeeView";
@@ -270,5 +277,104 @@ describe("adhocImportEmployeeView month filter", () => {
 
     expect(await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false, MAY)).toEqual([]);
     expect(await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false)).toHaveLength(1);
+  });
+});
+
+/**
+ * The repair path. Visibility must follow what is on disk, not a counter a
+ * half-failed write can strand.
+ *
+ * An assignment commits in three writes — sample rows, distribution events,
+ * then the record that refreshes `adhoc-imports.index.json`. The events are the
+ * durable part and they land SECOND, so a failure on the third write (a share
+ * hiccup, a lost workspace handle, a CAS conflict) leaves rows genuinely
+ * assigned while the index still says `assignedRows: 0`. That used to hide them
+ * from every reader permanently: re-running the assignment finds its own events
+ * already there and answers «كل الصفوف المحددة معيّنة بالفعل», so the
+ * bookkeeping can never catch up on its own.
+ *
+ * The failure is simulated by re-saving the PRE-assignment record, which is
+ * exactly the document a failed third write leaves behind.
+ */
+describe("adhocImportEmployeeView — assignments the index lost", () => {
+  it("still surfaces rows whose events are on disk when the index reports assignedRows: 0", async () => {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    const record = makeRecord("adh-stranded", [importRow("XR-1")]);
+    await ensureAdhocSampleMaster(root, record);
+    expect((await assignAdhocRowsToEmployee(root, record, ["s1:2"], "jalgahamdi", "admin")).ok).toBe(true);
+
+    // The third write never landed: the record on disk is still the one from
+    // before the assignment, so its index entry counts zero assignments.
+    await saveAdhocRecord(root, normalizeAdhocRecord(record)!);
+    const index = await loadAdhocImportIndex(root);
+    expect(index.find((entry) => entry.importId === "adh-stranded")?.assignedRows).toBe(0);
+
+    const entries = await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false);
+    expect(entries.map((e) => e.xrayImageId)).toEqual(["ADHOC-adh-stranded-XR-1"]);
+    expect(entries[0].assignedTo).toBe("jalgahamdi");
+    // …and the employee's writes are routed to the store that holds them.
+    expect(await listAdhocSampleFolders(root)).toEqual(["adhoc-adh-stranded"]);
+  });
+
+  it("still ignores an import that was saved but never assigned — a store folder is not an assignment", async () => {
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    // `persist` in the AdhocImport tab writes sample.master.json on every save,
+    // so the store folder exists for an unassigned import too. Only
+    // `distribution.events/` proves an assignment, and nothing wrote one here.
+    const record = makeRecord("adh-idle", [importRow("XR-1")]);
+    await saveAdhocRecord(root, normalizeAdhocRecord(record)!);
+    await ensureAdhocSampleMaster(root, record);
+
+    expect(await adhocStoreHasDistributionEvents(root, "adh-idle")).toBe(false);
+    expect(await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false)).toEqual([]);
+    expect(await listAdhocSampleFolders(root)).toEqual([]);
+  });
+});
+
+/**
+ * Display identity. The namespaced id is storage; the operator's own id is what
+ * belongs on screen.
+ */
+describe("displayXrayImageId", () => {
+  const adhocEntry = (xrayImageId: string, adhocImportId: string): DistributionEntry => ({
+    xrayImageId,
+    assignedTo: "jalgahamdi",
+    status: "pending",
+    replacedById: null,
+    lastEventAt: "2026-08-07T10:00:00.000Z",
+    row: { xrayImageId } as unknown as DistributionEntry["row"],
+    adhocImportId,
+    adhocFileName: `${adhocImportId}.xlsx`,
+  } as DistributionEntry);
+
+  it("shows the operator's own id for an ad-hoc row, not the ADHOC- namespace", () => {
+    const entry = adhocEntry("ADHOC-adh-9f2c-4b11-10B1326010300151", "adh-9f2c-4b11");
+    expect(displayXrayImageId(entry)).toBe("10B1326010300151");
+  });
+
+  it("strips the replica marker a fan-out adds, so every reviewer sees the same id", () => {
+    const entry = adhocEntry("ADHOC-adh-9f2c-R3-10B1326010300151", "adh-9f2c");
+    expect(displayXrayImageId(entry)).toBe("10B1326010300151");
+  });
+
+  it("leaves a real population row's id completely alone", () => {
+    const entry = {
+      xrayImageId: "10B1326010300151",
+      assignedTo: "jalgahamdi",
+      status: "pending",
+      replacedById: null,
+      lastEventAt: "2026-08-07T10:00:00.000Z",
+      row: {} as unknown as DistributionEntry["row"],
+    } as DistributionEntry;
+    expect(displayXrayImageId(entry)).toBe("10B1326010300151");
+  });
+
+  it("returns an ad-hoc id it does not recognize untouched rather than guessing at it", () => {
+    // Belt and braces: an entry whose id was not built from its own importId
+    // (a hand-edited file, a future id shape) must not be silently truncated.
+    const entry = adhocEntry("ADHOC-adh-other-XR-1", "adh-mine");
+    expect(displayXrayImageId(entry)).toBe("ADHOC-adh-other-XR-1");
   });
 });

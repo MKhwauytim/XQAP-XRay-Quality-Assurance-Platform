@@ -26,6 +26,7 @@ import Pagination from "../../../../../../components/Pagination/Pagination";
 import { clampPage, pageSlice } from "../../../../../../utils/paginationUtils";
 import { useLabels, type Labels } from "../../../../../../data/labels/useLabels";
 import { CASE_FILTERS, type CaseFilter, type CaseFilterCounts } from "./caseFilter";
+import { displayXrayImageId } from "../../../../../../data/adhocImport/adhocImportEmployeeView";
 import { formatStageLabel } from "../../../../../../data/population/stageHelpers";
 import type { ReplacementIndexRow } from "../../../../../../data/population/replacementIndexTypes";
 import type { PersonalStats, PersonalQuota, ReplacementDialogState, ReassignModalState } from "../XrayReferrals";
@@ -37,7 +38,7 @@ export const SELECT_COL_ID = "__select__";
 
 export function buildXrayColumns(L: Labels): DataTableCol<DistributionEntry>[] {
   return [
-  { id: "xrayImageId",            label: L.col_xray_image_id,             widthFr: 20, alwaysVisible: true, filterKind: "text", accessor: (e) => e.xrayImageId },
+  { id: "xrayImageId",            label: L.col_xray_image_id,             widthFr: 20, alwaysVisible: true, filterKind: "text", accessor: (e) => displayXrayImageId(e) },
   { id: "stage",                  label: L.col_stage,                     widthFr: 8,  accessor: (e) => e.row.stage },
   { id: "assignedTo",             label: L.col_xray_quality_expert,       widthFr: 9,  adminOnly: true,     accessor: (e) => e.assignedTo },
   { id: "portName",               label: L.col_port_name,                 widthFr: 13, accessor: (e) => e.row.portName },
@@ -431,7 +432,7 @@ export function ReassignModal({
                     aria-expanded={isExpanded}
                     title="عرض بيانات العينة"
                   >
-                    {id}
+                    {entry ? displayXrayImageId(entry) : id}
                   </button>
                   {isExpanded && entry ? (
                     <ReferralSamplePreview
@@ -852,7 +853,7 @@ export function ReplacementDialog({
     <ModalShell
       variant="ew"
       title="استبدال العينة"
-      subtitle={`${state.entry.xrayImageId} · ${stageLabel} · ${state.entry.row.portName ?? "—"}`}
+      subtitle={`${displayXrayImageId(state.entry)} · ${stageLabel} · ${state.entry.row.portName ?? "—"}`}
       onClose={onClose}
     >
       <div className="ew-replace-reason">

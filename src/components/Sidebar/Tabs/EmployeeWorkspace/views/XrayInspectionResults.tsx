@@ -36,6 +36,7 @@ import { loadAdminBrowsePreset, loadUserBrowsePreset } from "../../../../../data
 import { subscribeToDataRefresh } from "../../../../../data/workspace/dataRefreshSignal";
 import { loadSampleMaster } from "../../../../../data/sampling/sampleStorage";
 import {
+  displayXrayImageId,
   loadAdhocAnswerItems,
   loadAdhocEntriesForEmployeeView,
   monthFolderForEntry,
@@ -60,7 +61,7 @@ const SAMPLE_DEFAULT_VISIBLE = [
 
 function buildSampleColumns(L: Labels): DataTableCol<DistributionEntry>[] {
   return [
-    { id: "xrayImageId",            label: L.col_xray_image_id,             widthFr: 20, alwaysVisible: true, filterKind: "text", accessor: (e) => e.xrayImageId },
+    { id: "xrayImageId",            label: L.col_xray_image_id,             widthFr: 20, alwaysVisible: true, filterKind: "text", accessor: (e) => displayXrayImageId(e) },
     { id: "movementStatus",         label: "حركة العينة",                   widthFr: 10, filterKind: "multiselect", accessor: () => null },
     { id: "stage",                  label: L.col_stage,                     widthFr: 8,  accessor: (e) => e.row.stage },
     { id: "assignedTo",             label: L.col_xray_quality_expert,       widthFr: 9,  accessor: (e) => e.assignedTo },

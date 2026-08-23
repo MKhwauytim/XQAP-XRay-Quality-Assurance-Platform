@@ -368,7 +368,71 @@ export function namespacedXrayImageId(
     : `ADHOC-${importId}-R${replicaIndex}-${originalXrayImageId}`;
 }
 
+/** Prefix of every synthetic ad-hoc store folder under `2-samples/`. */
+export const ADHOC_MONTH_FOLDER_PREFIX = "adhoc-";
+
 /** The synthetic "month" folder that owns an import's samples/answers. */
 export function adhocMonthFolder(importId: string): string {
-  return `adhoc-${importId}`;
+  return `${ADHOC_MONTH_FOLDER_PREFIX}${importId}`;
+}
+
+/**
+ * The inverse of `adhocMonthFolder`, or `null` for a folder name that is not an
+ * ad-hoc store.
+ *
+ * `null` rather than a best-effort slice so a caller enumerating `2-samples/`
+ * cannot turn a stray `adhoc-` directory (or the prefix on its own) into an
+ * import id that no record will ever answer for.
+ */
+export function importIdFromAdhocMonthFolder(folderName: string): string | null {
+  if (!folderName.startsWith(ADHOC_MONTH_FOLDER_PREFIX)) return null;
+  const importId = folderName.slice(ADHOC_MONTH_FOLDER_PREFIX.length);
+  return importId === "" ? null : importId;
+}
+
+/**
+ * The operator's OWN xrayImageId, recovered from a namespaced one.
+ *
+ * `namespacedXrayImageId` exists so an ad-hoc row can never collide with a real
+ * population row and so a fanned-out row can have one id per reviewer. Both are
+ * storage concerns. Nobody reviewing an image cares that the app prefixed
+ * `ADHOC-adh-3f8a…-b335-fb1422722179-` onto the id printed on their sheet — and
+ * a 55-character prefix in front of every id in the queue is not a cosmetic
+ * problem: the real id is what an operator matches against the source file, the
+ * customs system and their own notes, and the prefix pushes it out of the
+ * column entirely. Views therefore render THIS; storage, joins and answer keys
+ * keep using the namespaced id unchanged.
+ *
+ * Exact rather than heuristic: the caller supplies the `importId` the entry
+ * already carries, so the prefix is known, not guessed. A string that does not
+ * carry that prefix is returned untouched — a real-population id passes through
+ * this function unharmed, which is what lets one display helper serve a mixed
+ * queue.
+ *
+ * One inherent ambiguity, documented rather than papered over: an operator id
+ * that itself begins `R<digits>-` is indistinguishable from a replica marker at
+ * `replicaIndex 0`, so such an id would display with its own leading `R1-`
+ * stripped. `pass replicaIndex` when the caller knows it, which removes the
+ * guess entirely.
+ */
+export function originalXrayImageId(
+  namespaced: string,
+  importId: string,
+  replicaIndex?: number
+): string {
+  const prefix = `ADHOC-${importId}-`;
+  if (!namespaced.startsWith(prefix)) {
+    return namespaced;
+  }
+  const rest = namespaced.slice(prefix.length);
+  if (replicaIndex !== undefined) {
+    // The exact marker this replica was built with — no pattern matching.
+    return replicaIndex === 0 ? rest : stripPrefix(rest, `R${replicaIndex}-`);
+  }
+  const marker = /^R\d+-/.exec(rest);
+  return marker ? rest.slice(marker[0].length) : rest;
+}
+
+function stripPrefix(value: string, prefix: string): string {
+  return value.startsWith(prefix) ? value.slice(prefix.length) : value;
 }

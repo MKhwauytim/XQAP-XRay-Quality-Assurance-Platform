@@ -1,6 +1,7 @@
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import type { DistributionEntry } from "../../data/distribution/distributionTypes";
 import type { ItemAnswer } from "../../data/answers/answerTypes";
+import { displayXrayImageId } from "../../data/adhocImport/adhocImportEmployeeView";
 import { formatStageLabel } from "../../data/population/stageHelpers";
 import { getLabels } from "../../data/labels/labelsStore";
 import { formatNumber } from "../../utils/formatting";
@@ -80,7 +81,7 @@ export function PanelHeader({
     <div className="ip-header" dir="rtl">
       <div className="ip-header-top">
         <div className="ip-header-id">
-          <span className="ip-xray-id">{entry.xrayImageId}</span>
+          <span className="ip-xray-id">{displayXrayImageId(entry)}</span>
           <span className={`ip-badge ${badgeClass}`}>{badgeText}</span>
         </div>
         <div className="ip-header-controls">

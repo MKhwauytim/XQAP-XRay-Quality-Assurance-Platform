@@ -63,7 +63,10 @@ import XrayReferrals from "./XrayReferrals";
 
 const MONTH = "5-may-2026";
 const IMPORT_ID = "adh-1";
-const ADHOC_ID = "ADHOC-adh-1-XR-1";
+/** What the queue SHOWS for the ad-hoc row: the operator's own id, with the
+ *  `ADHOC-{importId}-` storage namespace stripped (see `displayXrayImageId`).
+ *  Every screen lookup below goes through this. */
+const ADHOC_SHOWN_ID = "XR-1";
 
 const L = getLabels();
 
@@ -299,7 +302,7 @@ const MIXED: Seed[] = [
   ["IMG-NO", "لا", "jalgahamdi"],
   ["IMG-UNKNOWN", "ربما", "jalgahamdi"],
 ];
-const ALL_IDS = ["IMG-BLANK", "IMG-YES", "IMG-NO", "IMG-UNKNOWN", ADHOC_ID];
+const ALL_IDS = ["IMG-BLANK", "IMG-YES", "IMG-NO", "IMG-UNKNOWN", ADHOC_SHOWN_ID];
 
 async function renderMixedQueue(): Promise<void> {
   writeSession({ role: "employee", username: "jalgahamdi", loginAt: new Date().toISOString() });
@@ -308,7 +311,7 @@ async function renderMixedQueue(): Promise<void> {
   await seedMonth(root, MIXED);
   await seedAdhocAssignment(root, "jalgahamdi");
   render(<XrayReferrals directoryHandle={root} />);
-  await waitFor(() => expect(rowFor(ADHOC_ID)).not.toBeNull());
+  await waitFor(() => expect(rowFor(ADHOC_SHOWN_ID)).not.toBeNull());
 }
 
 describe("XrayReferrals case filter — the three chips", () => {
@@ -367,7 +370,7 @@ describe("XrayReferrals case filter — the three chips", () => {
     fireEvent.click(chip(L.ew_case_filter_adhoc));
 
     await waitFor(() => expect(rowFor("IMG-YES")).toBeNull());
-    expect(queueIds(ALL_IDS)).toEqual([ADHOC_ID]);
+    expect(queueIds(ALL_IDS)).toEqual([ADHOC_SHOWN_ID]);
   });
 
   it("returns to the full queue when «جميع الحالات» is picked again", async () => {

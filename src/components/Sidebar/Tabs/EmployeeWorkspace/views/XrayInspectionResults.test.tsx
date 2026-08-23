@@ -323,6 +323,9 @@ describe("XrayInspectionResults background data-refresh vs. an open quality-note
 // (see src/data/adhocImport/adhocImportEmployeeView.ts).
 const ADHOC_FOLDER = "adhoc-adh-1";
 const ADHOC_XRAY_ID = "ADHOC-adh-1-XR-1";
+/** What the table SHOWS for that row — see `displayXrayImageId`. Storage
+ *  assertions stay on `ADHOC_XRAY_ID`. */
+const ADHOC_SHOWN_XRAY_ID = "XR-1";
 
 /** One real (unanswered) month row plus one ad-hoc row assigned to jalgahamdi. */
 async function seedAdhocAssignmentForResults(): Promise<ReturnType<typeof createMemoryDirectory>> {
@@ -385,7 +388,7 @@ describe("XrayInspectionResults — ad-hoc import visibility (THE GAP fix)", () 
     render(<XrayInspectionResults directoryHandle={root} />);
 
     await waitFor(() => expect(screen.getAllByText("IMG-ACTIVE").length).toBeGreaterThan(0));
-    await waitFor(() => expect(screen.getAllByText("ADHOC-adh-1-XR-1").length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText(ADHOC_SHOWN_XRAY_ID).length).toBeGreaterThan(0));
     expect(screen.getAllByText("استيراد يدوي")).toHaveLength(1);
   });
 
@@ -409,7 +412,7 @@ describe("XrayInspectionResults — ad-hoc import visibility (THE GAP fix)", () 
 
     render(<XrayInspectionResults directoryHandle={root} />);
 
-    await waitFor(() => expect(screen.getAllByText(ADHOC_XRAY_ID).length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText(ADHOC_SHOWN_XRAY_ID).length).toBeGreaterThan(0));
     // The real month's row is unanswered, so exactly one row may read "completed".
     await waitFor(() =>
       expect(screen.getAllByText(DEFAULT_LABELS.status_completed)).toHaveLength(1)
@@ -437,9 +440,9 @@ describe("XrayInspectionResults — ad-hoc import visibility (THE GAP fix)", () 
     if (!answered.ok) throw new Error(`seed ad-hoc answer failed: ${answered.error}`);
 
     const { unmount } = render(<XrayInspectionResults directoryHandle={root} />);
-    await waitFor(() => expect(screen.getAllByText(ADHOC_XRAY_ID).length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText(ADHOC_SHOWN_XRAY_ID).length).toBeGreaterThan(0));
 
-    fireEvent.click(screen.getByRole("row", { name: new RegExp(ADHOC_XRAY_ID) }));
+    fireEvent.click(screen.getByRole("row", { name: new RegExp(ADHOC_SHOWN_XRAY_ID) }));
     const textarea = await screen.findByPlaceholderText(DEFAULT_LABELS.ew_quality_note_placeholder);
     fireEvent.change(textarea, { target: { value: "ملاحظة على صف الاستيراد اليدوي" } });
     fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.ew_quality_note_save }));
@@ -459,7 +462,7 @@ describe("XrayInspectionResults — ad-hoc import visibility (THE GAP fix)", () 
     // exactly where the lost note used to disappear.
     unmount();
     render(<XrayInspectionResults directoryHandle={root} />);
-    await waitFor(() => expect(screen.getAllByText(ADHOC_XRAY_ID).length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText(ADHOC_SHOWN_XRAY_ID).length).toBeGreaterThan(0));
     await waitFor(() =>
       expect(screen.getAllByText("ملاحظة على صف الاستيراد اليدوي").length).toBeGreaterThan(0)
     );

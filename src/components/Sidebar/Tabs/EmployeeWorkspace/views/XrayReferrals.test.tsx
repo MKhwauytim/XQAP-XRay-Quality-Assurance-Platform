@@ -1455,7 +1455,7 @@ describe("XrayReferrals — ad-hoc import visibility (THE GAP fix)", () => {
     await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
     // ...and the ad-hoc row appears too, carrying the visible "استيراد يدوي" badge —
     // exactly once (the real row above must NOT be tagged as ad-hoc).
-    await waitFor(() => expect(screen.getAllByText("ADHOC-adh-1-XR-1").length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText("XR-1").length).toBeGreaterThan(0));
     expect(screen.getAllByText("استيراد يدوي")).toHaveLength(1);
   });
 
@@ -1474,7 +1474,7 @@ describe("XrayReferrals — ad-hoc import visibility (THE GAP fix)", () => {
     render(<XrayReferrals directoryHandle={root} />);
 
     await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
-    expect(screen.queryByText("ADHOC-adh-2-XR-9")).not.toBeInTheDocument();
+    expect(screen.queryByText("XR-9")).not.toBeInTheDocument();
   });
 
   it("still renders the month's real assignments when an ad-hoc store is corrupt (degrades, never blanks the page)", async () => {
@@ -1508,7 +1508,7 @@ describe("XrayReferrals — ad-hoc import visibility (THE GAP fix)", () => {
     // ...and the load must not have fallen into the hard error state.
     expect(screen.queryByText("تعذر تحميل البيانات.")).not.toBeInTheDocument();
     // The corrupt ad-hoc row itself is simply absent, not crashing the page.
-    expect(screen.queryByText("ADHOC-adh-3-XR-1")).not.toBeInTheDocument();
+    expect(screen.queryByText("XR-1")).not.toBeInTheDocument();
   });
 });
 

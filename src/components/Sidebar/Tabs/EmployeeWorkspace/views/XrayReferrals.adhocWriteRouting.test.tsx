@@ -71,6 +71,11 @@ const MONTH = "5-may-2026";
 const IMPORT_ID = "adh-1";
 const ADHOC_FOLDER = adhocMonthFolderName(IMPORT_ID);
 const ADHOC_ID = "ADHOC-adh-1-XR-1";
+/** What the queue SHOWS for that row: the operator's own id, with the
+ *  `ADHOC-{importId}-` storage namespace stripped (see `displayXrayImageId`).
+ *  Storage assertions below stay on `ADHOC_ID` — the namespaced id is still
+ *  the identity every event, answer and mirror is keyed by. */
+const ADHOC_SHOWN_ID = "XR-1";
 
 vi.mock("../../../../../data/distribution/replacementCandidateLookup", () => ({
   getReplacementCandidatesIndexed: vi.fn(),
@@ -314,7 +319,7 @@ describe("XrayReferrals — ad-hoc rows never write into the selected real month
     });
 
     render(<XrayReferrals directoryHandle={root} />);
-    await waitFor(() => expect(screen.getAllByText(ADHOC_ID).length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText(ADHOC_SHOWN_ID).length).toBeGreaterThan(0));
 
     fireEvent.click(
       await waitFor(() => screen.getByRole("button", { name: "طلب استبدال" }))
@@ -356,7 +361,7 @@ describe("XrayReferrals — ad-hoc rows never write into the selected real month
     await seedTemplate(root);
 
     render(<XrayReferrals directoryHandle={root} />);
-    await waitFor(() => expect(screen.getAllByText(ADHOC_ID).length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText(ADHOC_SHOWN_ID).length).toBeGreaterThan(0));
 
     // Submit the answer through the real UI path (handleSave → folderForRow),
     // which already routed correctly — confirmed so the setup isn't in doubt.
@@ -404,9 +409,9 @@ describe("XrayReferrals — ad-hoc rows never write into the selected real month
     await seedTemplate(root);
 
     render(<XrayReferrals directoryHandle={root} />);
-    await waitFor(() => expect(screen.getAllByText(ADHOC_ID).length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText(ADHOC_SHOWN_ID).length).toBeGreaterThan(0));
     // Oversight scope shows both rows; select the ad-hoc one explicitly.
-    fireEvent.click(screen.getAllByText(ADHOC_ID)[0]);
+    fireEvent.click(screen.getAllByText(ADHOC_SHOWN_ID)[0]);
 
     const noteInput = (await waitFor(() => screen.getByLabelText("ملاحظة"))) as HTMLInputElement;
     fireEvent.change(noteInput, { target: { value: "ملاحظة الفحص" } });
@@ -453,7 +458,7 @@ describe("XrayReferrals — ad-hoc answers are read back from the store they wer
     await seedTemplate(root);
 
     const first = render(<XrayReferrals directoryHandle={root} />);
-    await waitFor(() => expect(screen.getAllByText(ADHOC_ID).length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText(ADHOC_SHOWN_ID).length).toBeGreaterThan(0));
     const noteInput = (await waitFor(() => screen.getByLabelText("ملاحظة"))) as HTMLInputElement;
     fireEvent.change(noteInput, { target: { value: "ملاحظة الفحص" } });
     fireEvent.click(screen.getByRole("button", { name: "تقديم الفحص" }));
@@ -466,7 +471,7 @@ describe("XrayReferrals — ad-hoc answers are read back from the store they wer
     resetBootProgress();
 
     render(<XrayReferrals directoryHandle={root} />);
-    await waitFor(() => expect(screen.getAllByText(ADHOC_ID).length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText(ADHOC_SHOWN_ID).length).toBeGreaterThan(0));
 
     // Read-only submitted view: the saved value is on screen and the submit
     // button is gone, exactly as for a real month's row.
@@ -484,8 +489,8 @@ describe("XrayReferrals — ad-hoc answers are read back from the store they wer
     await seedTemplate(root);
 
     const first = render(<XrayReferrals directoryHandle={root} />);
-    await waitFor(() => expect(screen.getAllByText(ADHOC_ID).length).toBeGreaterThan(0));
-    fireEvent.click(screen.getAllByText(ADHOC_ID)[0]);
+    await waitFor(() => expect(screen.getAllByText(ADHOC_SHOWN_ID).length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByText(ADHOC_SHOWN_ID)[0]);
     const noteInput = (await waitFor(() => screen.getByLabelText("ملاحظة"))) as HTMLInputElement;
     fireEvent.change(noteInput, { target: { value: "ملاحظة المشرف" } });
     fireEvent.click(screen.getByRole("button", { name: "تقديم الفحص" }));
@@ -495,8 +500,8 @@ describe("XrayReferrals — ad-hoc answers are read back from the store they wer
     resetBootProgress();
 
     render(<XrayReferrals directoryHandle={root} />);
-    await waitFor(() => expect(screen.getAllByText(ADHOC_ID).length).toBeGreaterThan(0));
-    fireEvent.click(screen.getAllByText(ADHOC_ID)[0]);
+    await waitFor(() => expect(screen.getAllByText(ADHOC_SHOWN_ID).length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByText(ADHOC_SHOWN_ID)[0]);
     await waitFor(() => expect(screen.getByText("ملاحظة المشرف")).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "تقديم الفحص" })).toBeNull();
   });

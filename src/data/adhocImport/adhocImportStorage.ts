@@ -2,10 +2,13 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
-import { getAdhocImportsDir } from "../workspace/workspacePaths";
+import { getAdhocImportsDir, getSampleMainDir, getSamplesRoot } from "../workspace/workspacePaths";
 import type { AdhocIndexEntry, AdhocRecord } from "./adhocImportModel";
 import type { AdhocImportIndex, AdhocImportIndexEntry, AdhocImportRecord } from "./adhocImportTypes";
 import { normalizeAdhocRecord, toIndexEntry, toLegacyRecord } from "./adhocRecordMigration";
+import { adhocMonthFolder, ADHOC_MONTH_FOLDER_PREFIX, importIdFromAdhocMonthFolder } from "./adhocImportModel";
+import { DISTRIBUTION_EVENTS_DIR } from "../distribution/distributionEventStore";
+import { logError } from "../storage/errorLogger";
 
 const INDEX_FILE = "adhoc-imports.index.json";
 
@@ -188,4 +191,119 @@ export function createImportId(): string {
     return `adh-${crypto.randomUUID()}`;
   }
   return `adh-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Store discovery — the index is bookkeeping, the folders are the truth
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+type DirectoryEntryLike = { name: string; kind: string };
+
+/**
+ * `dir.values()` / `dir.entries()` / async-iteration, whichever this handle
+ * implements. Same shape as `populationStorage.ts` and `backupStorage.ts` use;
+ * kept local for the same reason they do — `DirectoryHandleLike` deliberately
+ * does not declare the iteration surface, because a read-only handle need not
+ * have one.
+ */
+function getDirectoryEntries(
+  dir: DirectoryHandleLike
+): AsyncIterable<DirectoryEntryLike> | null {
+  const directory = dir as DirectoryHandleLike & {
+    values?: () => AsyncIterable<DirectoryEntryLike>;
+    entries?: () => AsyncIterable<[string, DirectoryEntryLike]>;
+    [Symbol.asyncIterator]?: () => AsyncIterator<DirectoryEntryLike>;
+  };
+  if (typeof directory.values === "function") return directory.values.call(directory);
+  if (typeof directory.entries === "function") {
+    return {
+      async *[Symbol.asyncIterator]() {
+        for await (const [, entry] of directory.entries!.call(directory)) yield entry;
+      },
+    };
+  }
+  if (typeof directory[Symbol.asyncIterator] === "function") {
+    return directory as unknown as AsyncIterable<DirectoryEntryLike>;
+  }
+  return null;
+}
+
+/**
+ * Every `2-samples/adhoc-{importId}/` store that actually exists on disk, as
+ * import ids.
+ *
+ * Why this exists at all: `adhoc-imports.index.json` is a projection, and
+ * `assignedRows` on it is the ONLY thing that used to decide whether an ad-hoc
+ * import's rows are visible to anybody. But an assignment is committed in three
+ * writes — sample rows, then the distribution events, then the record (which is
+ * what refreshes the index). The events are the durable part and they land
+ * SECOND, so a failure on the third write (a share hiccup, a lost workspace
+ * handle, a CAS conflict) leaves rows genuinely assigned on disk while the index
+ * still reports `assignedRows: 0` — and every reader skipped them forever. Worse,
+ * re-running the assignment then reports «كل الصفوف المحددة معيّنة بالفعل»,
+ * because the events it would write are already there, so the bookkeeping can
+ * never catch up on its own.
+ *
+ * The folder listing cannot drift that way: a store folder exists only because
+ * `ensureAdhocSampleMaster` wrote sample rows into it. Callers union this with
+ * the index so a stale counter can no longer hide real work, and read the
+ * FOLDER's own distribution to decide what is in it — a folder with sample rows
+ * but no events contributes nothing, which is exactly right for an import whose
+ * assignment failed before the events landed.
+ *
+ * One cheap directory listing, fail-soft to `[]` — a workspace with no
+ * `2-samples/` yet (nothing drawn, nothing imported) is not an error.
+ */
+export async function listAdhocStoreImportIds(
+  directoryHandle: DirectoryHandleLike
+): Promise<string[]> {
+  try {
+    const samplesRoot = await getSamplesRoot(directoryHandle, false);
+    const iterable = getDirectoryEntries(samplesRoot);
+    if (!iterable) return [];
+    const ids: string[] = [];
+    for await (const entry of iterable) {
+      if (entry.kind !== "directory") continue;
+      if (!entry.name.startsWith(ADHOC_MONTH_FOLDER_PREFIX)) continue;
+      const importId = importIdFromAdhocMonthFolder(entry.name);
+      if (importId !== null) ids.push(importId);
+    }
+    return ids;
+  } catch (error) {
+    logError("adhocImportStorage:listAdhocStoreImportIds", error);
+    return [];
+  }
+}
+
+/**
+ * Does this ad-hoc store hold distribution events on disk?
+ *
+ * The discriminator that keeps `listAdhocStoreImportIds` usable as a repair
+ * path without turning it into a cost regression. Every SAVE of an ad-hoc
+ * record writes its `sample.master.json` (an unassigned import stays browsable
+ * under its synthetic month — see the AdhocImport tab's `persist`), so a store
+ * FOLDER existing proves nothing about assignment. `distribution.events/` is
+ * different: it is created only by `appendDistributionEvents`, i.e. only when
+ * rows were actually assigned.
+ *
+ * One `getDirectoryHandle` round trip, no file read, no listing. Fail-soft to
+ * `false`: a store whose events cannot be probed is left to the index's own
+ * verdict rather than opened speculatively.
+ *
+ * Scope note: this looks for the immutable event directory current clients
+ * write, not the legacy full-body `distribution.log.json` projection. A store
+ * holding only the legacy shape was written by a client that also updated the
+ * index, so the index already vouches for it and it never reaches this probe.
+ */
+export async function adhocStoreHasDistributionEvents(
+  directoryHandle: DirectoryHandleLike,
+  importId: string
+): Promise<boolean> {
+  try {
+    const mainDir = await getSampleMainDir(directoryHandle, adhocMonthFolder(importId), false);
+    await mainDir.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: false });
+    return true;
+  } catch {
+    return false;
+  }
 }
