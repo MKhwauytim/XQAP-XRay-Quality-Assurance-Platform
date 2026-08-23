@@ -52,7 +52,7 @@ jobs:
     steps:
       - name: Restore metrics measured for this exact commit
         id: cached-metrics
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: metrics-${{ matrix.side }}.json
           # Exact key only, no restore-keys: metrics from a different commit
@@ -61,7 +61,7 @@ jobs:
 
       - name: Check out the ${{ matrix.side }} commit
         if: steps.cached-metrics.outputs.cache-hit != 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ matrix.ref }}
           path: repo
@@ -70,7 +70,7 @@ jobs:
         # Deliberately the PR's copy on both sides, so the two measurements can
         # never differ because of the measuring code.
         if: steps.cached-metrics.outputs.cache-hit != 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           path: reporter
@@ -78,7 +78,7 @@ jobs:
 
       - name: Set up Node.js
         if: steps.cached-metrics.outputs.cache-hit != 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -103,7 +103,7 @@ jobs:
 
       - name: Upload metrics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pr-report-metrics-${{ matrix.side }}
           path: metrics-${{ matrix.side }}.json
@@ -124,7 +124,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Check out this PR's reporter scripts
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           sparse-checkout: .github/scripts
@@ -132,14 +132,14 @@ jobs:
       - name: Set up Node.js
         # No dependencies are installed here — this only pins the Node that
         # renders the markdown, so the report cannot vary with the runner image.
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
 
       - name: Download metrics
         id: download
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: pr-report-metrics-*
           merge-multiple: true
@@ -167,7 +167,7 @@ jobs:
         if: >-
           github.event.pull_request.head.repo.full_name == github.repository
           && github.actor != 'dependabot[bot]'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require("fs");
