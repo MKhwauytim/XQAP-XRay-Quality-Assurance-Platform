@@ -17,7 +17,21 @@ export type BrowseDatasetPreset = {
   updatedAt: string;
 };
 
-export type BrowsePresetDatasetKind = BrowseDatasetKind | "xray-referrals";
+/**
+ * Every table that stores a column layout.
+ *
+ * `BrowseDatasetKind` covers the Population browse datasets; the string
+ * literals are the tables outside it that gained a column picker. Widening this
+ * union is backward compatible by construction — both preset files hold a
+ * `Partial<Record<…>>`, so a file written before a key existed simply lacks it
+ * and that table falls back to its own defaults.
+ */
+export type BrowsePresetDatasetKind =
+  | BrowseDatasetKind
+  | "xray-referrals"
+  | "xray-results"
+  | "xray-results-audit"
+  | "adhoc-import-rows";
 
 export type UserBrowsePresetFile = {
   username: string;

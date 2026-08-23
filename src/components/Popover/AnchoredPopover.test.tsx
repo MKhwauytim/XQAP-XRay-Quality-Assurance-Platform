@@ -235,3 +235,100 @@ describe("AnchoredPopover — direction resolution", () => {
     expect(screen.getByRole("dialog", { name: "قائمة" }).style.left).toBe("400px");
   });
 });
+
+/**
+ * The two bugs that made a long popover unusable, and that made every popover
+ * land in the wrong place once the app-wide UI scale existed.
+ *
+ * jsdom performs no layout, so neither is asserted through measured geometry —
+ * what IS observable is the mechanism: which scroll events the component reacts
+ * to, whether it preserves `scrollTop` across a re-measure, and what it divides
+ * the written offsets by. The rendered consequences are covered end to end in
+ * `e2e/table-columns.spec.ts`.
+ */
+describe("AnchoredPopover — scrolling its own content", () => {
+  // A VALID length, deliberately: the CSSOM silently discards an invalid value,
+  // so a word like "SENTINEL" never lands on the element and the assertion
+  // passes against whatever was already there. That is a test that cannot fail.
+  const SENTINEL = "12345px";
+
+  // Dispatched WITHOUT `act`: these handlers are plain DOM listeners that touch
+  // no React state, and `act` forces a commit — which re-runs the dependency-less
+  // layout effect and repositions the popover for reasons unrelated to the
+  // event under test.
+  it("does not reposition when the scroll came from inside the popover", () => {
+    setViewport(1000, 800);
+    render(<Harness anchorRect={{ left: 400, top: 100, width: 24, height: 24 }} popoverRect={{ left: 0, top: 0, width: 220, height: 150 }} />);
+    fireEvent.click(screen.getByRole("button", { name: "فتح" }));
+
+    const dialog = screen.getByRole("dialog", { name: "قائمة" });
+    // `position()` clears the max-height clamp to measure, which un-overflows
+    // the box and makes a real browser reset scrollTop to 0. Reacting to the
+    // popover's OWN scroll therefore snapped a long column picker back to the
+    // top on every wheel notch — it could not be scrolled at all.
+    const inner = dialog.querySelector("button")!;
+    dialog.style.maxHeight = SENTINEL;
+
+    inner.dispatchEvent(new Event("scroll", { bubbles: false }));
+
+    // Untouched ⇒ position() never ran for this event.
+    expect(dialog.style.maxHeight).toBe(SENTINEL);
+  });
+
+  it("still repositions when an ANCESTOR scrolls", () => {
+    setViewport(1000, 800);
+    render(<Harness anchorRect={{ left: 400, top: 100, width: 24, height: 24 }} popoverRect={{ left: 0, top: 0, width: 220, height: 150 }} />);
+    fireEvent.click(screen.getByRole("button", { name: "فتح" }));
+
+    const dialog = screen.getByRole("dialog", { name: "قائمة" });
+    dialog.style.maxHeight = SENTINEL;
+
+    document.querySelector(".scrolling-container")!
+      .dispatchEvent(new Event("scroll", { bubbles: false }));
+
+    // Recomputed ⇒ the escape-the-scroll-container behaviour is intact.
+    expect(dialog.style.maxHeight).not.toBe(SENTINEL);
+  });
+
+  // The OTHER half of the scroll fix — preserving `scrollTop` across the
+  // clamp-clearing measurement — is deliberately not asserted here. jsdom
+  // performs no layout, so nothing ever overflows, so the browser behaviour the
+  // fix exists to counter (an un-overflowed element having its scrollTop reset)
+  // never happens and the assertion passes with the fix removed. It is verified
+  // for real in `e2e/table-columns.spec.ts`, where a column picker with 1136px
+  // of content in a 276px box is actually scrolled.
+});
+
+describe("AnchoredPopover — under a zoomed root", () => {
+  it("divides the written offsets by the effective zoom", () => {
+    setViewport(1000, 800);
+    render(<Harness anchorRect={{ left: 400, top: 100, width: 24, height: 24 }} popoverRect={{ left: 0, top: 0, width: 220, height: 150 }} />);
+    fireEvent.click(screen.getByRole("button", { name: "فتح" }));
+
+    const dialog = screen.getByRole("dialog", { name: "قائمة" });
+    // Baseline at zoom 1: below the anchor, LTR left edges flush.
+    expect(dialog.style.left).toBe("400px");
+    const unzoomedTop = parseFloat(dialog.style.top);
+
+    // `getBoundingClientRect` reports DEVICE pixels; `style.top` is read as CSS
+    // pixels and then multiplied by the zoom. Without the correction a picker
+    // whose anchor ended at y=231 was drawn at y=166.
+    Object.defineProperty(dialog, "currentCSSZoom", { value: 0.5, configurable: true });
+    window.dispatchEvent(new Event("resize"));
+
+    expect(dialog.style.left).toBe("800px");
+    expect(parseFloat(dialog.style.top)).toBeCloseTo(unzoomedTop / 0.5, 5);
+  });
+
+  it("writes unscaled offsets where currentCSSZoom is unavailable", () => {
+    setViewport(1000, 800);
+    render(<Harness anchorRect={{ left: 400, top: 100, width: 24, height: 24 }} popoverRect={{ left: 0, top: 0, width: 220, height: 150 }} />);
+    fireEvent.click(screen.getByRole("button", { name: "فتح" }));
+
+    // A missing property must mean "no correction", never a division by zero —
+    // which would write `Infinity` and put the popover nowhere at all.
+    const dialog = screen.getByRole("dialog", { name: "قائمة" });
+    expect(dialog.style.left).toBe("400px");
+    expect(Number.isFinite(parseFloat(dialog.style.top))).toBe(true);
+  });
+});
