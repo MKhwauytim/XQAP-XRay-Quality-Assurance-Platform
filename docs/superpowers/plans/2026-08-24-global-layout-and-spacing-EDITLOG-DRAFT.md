@@ -2,6 +2,22 @@
 
 Source plan: `docs/superpowers/plans/2026-08-24-global-layout-and-spacing-plan.md`
 
+**Post-landing addendum (same session, live owner feedback):** after the three groups below
+were committed, the owner watched the running app and reported two follow-on issues, fixed in
+the same session as a fourth, decimal-bump change riding on top of Group 1/2's work — see
+"Group 4 — post-landing density/padding follow-up" at the end of this document for both the
+why and the before/after. Summary: (1) `.sidebar-nav` was genuinely scrolling at everyday
+viewport heights (confirmed live at 800×1280, not just the plan's ~600px edge case) for a role
+with the full tab catalog and an expanded sub-tab group — tightened header/context-card/nav-item/
+sub-tab-item density in `Sidebar.css` until the worst-case role+tab combination fits with zero
+overflow at 900px and near-zero at 800px, no items or information removed. (2) `.page-shell`'s
+inline padding was tightened (`clamp(--sp-3..2vw..--sp-8)` → `clamp(--sp-2..1.2vw..--sp-6)`,
+~12-32px down to ~8-24px) to give table-heavy pages (XrayReferrals, Population Browse,
+XrayInspectionResults) more usable width, per an explicit ask to prioritize table width over
+gutter size; this does not by itself eliminate every wide table's own horizontal scrollbar on a
+moderate browser window (Population Browse's 8-column table needs ~1387px of intrinsic width),
+but it measurably grows the content column at every viewport size, which was the specific ask.
+
 This worktree is shared by several concurrent agent sessions, so this plan's entries are
 drafted here instead of being inserted directly into `docs/edit logs/2026-08-24.md` or
 `package.json`. Whoever consolidates the day's log should insert these, newest-first (Group 3
@@ -574,3 +590,116 @@ Phase 2 radius/elevation change (Group 3). Both are flagged inline above as the 
 items for a human pass before this plan is treated as fully, visually closed — every automated
 signal (code review, unit tests, hex-literal counts, and 127/127 e2e specs including the two
 geometry-sensitive `ui-scale` tests) is green.
+
+---
+
+## Group 4 — Fix (sidebar/css): tighten nav density and page-shell gutters after live owner feedback
+
+Decimal bump (density/spacing tuning on top of Groups 1 and 2's already-landed structural
+work, not a new architectural change).
+
+### Issue 1 — `.sidebar-nav` was genuinely scrolling at everyday viewport heights
+
+**Why:** Group 1's own risk register (R-region around `.sidebar-nav`) anticipated nav scrolling
+only as a "collapse the window to ~600px tall to force it" edge case. Live in the running app,
+the owner reported the nav rail visibly cut off, requiring a scroll to reach lower items — not
+an edge case they had to manufacture. Measured directly in a real Chromium tab against the
+running dev server at a very ordinary laptop size, **1280×800**, with the admin role (the
+largest tab catalog) and its default-active parent group expanded: `.sidebar-nav`'s content
+needed **568px**, the box had **438px**, a **130px** shortfall. The root cause was not a
+bounded-shell bug — `.sidebar-nav { flex: 1; overflow-y: auto }` was pre-existing and correctly
+clipping exactly as Group 1 intended — the rail's own chrome (header 116px + month/workspace
+context card 121px + footer 65px = 302px of the 800px viewport) plus each nav item's
+`min-height: 46px` and each group heading's `14px`-top margin simply left too little room for a
+7-item, 3-heading catalog with one 3-4-item sub-tab group expanded.
+
+**What changed:** Tightened density only — no items, groups, or information removed — across
+`.sidebar-header` (gap 14→10→8px, `padding: 16px 16px 14px` → `12px 16px 8px`),
+`.sidebar-context-card` (`margin: var(--sp-3) var(--sp-3) 6px` → `6px var(--sp-3) 4px`,
+`padding: 11px var(--sp-3)` → `6px var(--sp-3)`, `gap: 9px` → `5px`, plus its inner
+`.sidebar-context-workspace` separator's `padding-top: var(--sp-2)` → `6px`), `.sidebar-nav`
+(`padding: var(--sp-2) var(--sp-3) var(--sp-3)` → `5px var(--sp-3) 6px`), `.sidebar-nav-heading`
+(`margin: 14px 2px var(--sp-2)` → `6px 2px 4px`; first-section top margin `10px` → `3px`),
+`.sidebar-nav-item` (`min-height: 46px` → `36px`, `padding: 10px var(--sp-3)` → `7px
+var(--sp-3)`), `.sidebar-subtab-list` (`padding: 6px 0 var(--sp-2)` → `3px 0 4px`, `gap: 3px` →
+`2px`), and `.sidebar-subtab-item` (`padding: 7px var(--sp-3)` → `3px var(--sp-3)`). `.sidebar-
+footer` (holding the sign-out button) was deliberately left untouched — its 65px height and the
+32px logout button inside it were already compact and shrinking it further would compromise the
+touch target.
+
+**Result, measured live after each incremental change:** at 1280×800 with the previously-worst
+case (`.population-page`'s parent group expanded, 3 sub-items), overflow went 138px → 3px — the
+remaining 3px is rounding noise, not a visible scrollbar. Re-checked against
+`employee-workspace`'s parent group (4 sub-items, the largest sub-tab count of any top-level
+tab), the actual worst case across the whole catalog: overflow went from an estimated ~150px to
+**25px at 800px** and **0px at 900px** (confirmed live). Real laptop/desktop browser content
+heights are overwhelmingly ≥900px (a 1366×768 or 1280×800 *physical* screen, after browser
+chrome, still typically leaves 700-760px — genuinely short screens will still see a small
+internal nav scroll, which is the correct fallback behavior Group 1 built, not a bug).
+
+### Issue 2 — `.page-shell`'s gutters were taking width the owner wanted given to tables
+
+**Why:** the owner confirmed on three pages — `XrayReferrals`, `.population-page` (Population
+Browse), `XrayInspectionResults` — that the visible margins either side of the page content
+felt oversized relative to how tightly the tables inside them were already packing columns, and
+asked explicitly for that space to go to the tables, not to stay as a wider but still-fixed
+gutter under Group 2's new shared name. Measured live: Population Browse's actual `<table
+class="bv-table">` needs **1387px** of intrinsic width for its 8 columns, while its scroll
+container was only 839px wide at a 1280px browser window (946px page width minus ~2×25.6px
+gutters minus other page chrome) — the table was already horizontally scrolling internally.
+
+**What changed:** `.page-shell`'s `padding-inline` (the plan's Task 7 primitive, `src/styles/
+primitives.css`) tightened from `clamp(var(--sp-3), 2vw, var(--sp-8))` (12-32px per side) to
+`clamp(var(--sp-2), 1.2vw, var(--sp-6))` (8-24px per side) — roughly 8-16px reclaimed per side
+depending on viewport width. `padding-block-start`/`padding-block-end` (top/bottom breathing
+room, not implicated in the "narrow table" complaint) were deliberately left at the plan's
+original values. `max-width: 1600px` was also deliberately left unchanged — raising it further
+is a separate, bigger design call this follow-up did not make (the plan's own reasoning for
+1600px, tied to `KpiDashboard`'s auto-fit grids, still applies to `.page-shell`'s other three
+consumers even though it isn't the limiting factor on these three table pages).
+
+**Honest limit, stated plainly:** this reclaims real width on every `.page-shell` page, but it
+does **not** by itself make Population Browse's 1387px-wide table fit inside a moderate (e.g.
+1280-1440px) browser window without its own horizontal scrollbar — no padding reduction bounded
+enough to keep the page usable could close a ~300-500px gap at those widths. What it delivers is
+strictly more content width at every viewport size, which is what was asked; eliminating that
+table's horizontal scroll entirely (if wanted) would need either a wider `.page-shell` ceiling
+(a bigger call, not made here) or narrowing/hiding some of the table's own 8 columns by default
+(a `DataTable`/`BrowseDataView` column-density change, out of this plan's scope).
+
+**Verification:** re-ran the fast gate set after both changes — `npx vitest run
+uiScaleCss.contract.test.ts` (pass, no raw viewport units introduced), `npm run check:hex-
+literals` (pass, `primitives.css` and `Sidebar.css` both stay within baseline), `npm run
+typecheck`, `npm run lint`, `npm run check:complexity` (all clean), `npm run build` + `npm run
+check:bundle-size` (clean, 3830.9 kB / 1244.0 kB gzip, unchanged from before this addendum
+within rounding), a full `npx vitest run src/components/Sidebar` pass (132 passed, 2 pre-
+existing failures — the same font-loading infra issue documented above, unrelated to Sidebar),
+and two full `npm run e2e` runs plus two targeted serial re-runs. Both full parallel e2e runs
+turned up a handful of failures (a different, non-overlapping subset each time — 11 in the
+first, 4 in the second) all sharing one signature: `<div ... class="app-backup-toast"> intercepts
+pointer events` inside `e2e/helpers/app.ts`'s shared `openTab` click helper. Re-running every
+spec file that failed in *either* parallel run with `--workers=1` (serial, no resource
+contention) — `settings.spec.ts` (8/8), `employee-workspace.spec.ts` + `notifications.spec.ts`
+(13/13) — passed **completely clean**, and live geometry checks in a real browser tab confirmed
+the settings nav item and the toast never overlap in the current layout (settings item bottom
+edge ~725px, toast top edge ~906-928px at the suite's 1600×1000 viewport). Combined with the
+fact that a *different* set of specs failed between the two parallel runs (inconsistent with a
+deterministic layout regression, consistent with a timing race), and that `.app-backup-toast`
+and the auto-backup notice mechanism it belongs to were not touched by any group in this plan,
+this is assessed as **pre-existing flakiness in `openTab` racing the auto-backup toast's timer
+under heavy parallel-worker load**, not a regression introduced here. Flagged as a follow-up
+(not fixed in this pass): either give `.app-backup-toast` a lower `z-index`/different placement
+that can't overlap the sidebar rail, or have `openTab`/the toast's own dismiss button close it
+before a click is attempted.
+
+**File:** `src/components/Sidebar/Sidebar.css`
+
+**File:** `src/styles/primitives.css`
+
+**Lines:** 2 files — `Sidebar.css` density-only edits across 7 rules (no net line-count change
+beyond the one explanatory comment added to `.sidebar-header`, +9 lines); `primitives.css`
++16/-3 (the `.page-shell` padding-inline value plus an expanded comment explaining the change).
+
+**Migration/rollback:** revert the `padding-inline` value in `primitives.css` and the seven
+density declarations in `Sidebar.css` to restore the Group 1/2 baseline exactly; no data,
+schema, or markup changed — CSS values only.

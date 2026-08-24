@@ -439,14 +439,30 @@
    the delta is <=2px" rule, not a design decision (see
    docs/audit/hardening-2026-07-08/03-approved-plan.md). Bottom
    gutter is deliberately larger so the last card never sits flush
-   against the scrollport's edge. */
+   against the scrollport's edge.
+
+   Owner feedback (2026-08-24), after the first landing of this
+   primitive: the inline gutters were still visibly wide on the
+   table-heavy pages (XrayReferrals, Population Browse,
+   XrayInspectionResults) relative to how tight columns already run
+   inside those tables — the ask was explicitly to give that space to
+   the tables, not to keep the same visual gutter under a new name.
+   Tightened padding-inline's clamp (was --sp-3..2vw..--sp-8, i.e.
+   12-32px) down to --sp-2..1.2vw..--sp-6 (8-24px). This does not by
+   itself remove a wide table's own horizontal scrollbar on a modest
+   browser window — an 8-column table can need more width than any
+   gutter reduction alone supplies — but it measurably grows the
+   content column on every viewport width, which is the requested
+   direction. max-width stays at 1600px; widening that is a separate,
+   bigger design call this pass did not make (see the rationale
+   above). */
 .page-shell {
   width: 100%;
   max-width: 1600px;
   margin-inline: auto;
   padding-block-start: clamp(var(--sp-3), 2.2vw, var(--sp-8));
   padding-block-end: var(--sp-12);
-  padding-inline: clamp(var(--sp-3), 2vw, var(--sp-8));
+  padding-inline: clamp(var(--sp-2), 1.2vw, var(--sp-6));
 }
 
 /* ── State views: empty / loading / error ──────────────────────
