@@ -5,7 +5,11 @@ import { safeWriteJson } from "../storage/safeWrite";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
 import {
+  createThread,
   loadFeedback,
+  loadThread,
+  loadThreads,
+  loadThreadsIndex,
   replyToFeedback,
   submitFeedback,
   type FeedbackMessage,
@@ -111,5 +115,33 @@ describe("feedbackStorage", () => {
     const messages = await loadFeedback(root);
     expect(messages).toHaveLength(2);
     expect(messages.map((m) => m.from).sort()).toEqual(["userA", "userB"]);
+  });
+
+  it("loadThread returns null for an id that has no file, and the thread for one that does", async () => {
+    const root = makeRoot();
+    const created = await createThread(root, {
+      from: "sara",
+      role: "employee",
+      category: "suggestion",
+      text: "اقتراح",
+    });
+
+    expect(await loadThread(root, "t20260101000000-deadbeef")).toBeNull();
+    const found = await loadThread(root, created.id);
+    expect(found?.text).toBe("اقتراح");
+    expect(found?.status).toBe("open");
+    expect(found?.replies).toEqual([]);
+  });
+
+  it("loadThreads reads only the ids it is given, in the order it is given", async () => {
+    const root = makeRoot();
+    const a = await createThread(root, { from: "a", role: "employee", category: "issue", text: "أ" });
+    const b = await createThread(root, { from: "b", role: "employee", category: "issue", text: "ب" });
+    const c = await createThread(root, { from: "c", role: "employee", category: "issue", text: "ج" });
+
+    const loaded = await loadThreads(root, [c.id, a.id]);
+    expect(loaded.map((t) => t.from)).toEqual(["c", "a"]);
+    // b was never asked for and must not have been read.
+    expect(loaded.some((t) => t.id === b.id)).toBe(false);
   });
 });

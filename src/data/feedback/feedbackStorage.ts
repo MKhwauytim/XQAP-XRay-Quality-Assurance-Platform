@@ -2,7 +2,9 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
-import { getFeedbackDir, getLegacyFeedbackDir } from "../workspace/workspacePaths";
+import { getFeedbackDir, getFeedbackThreadsDir, getLegacyFeedbackDir } from "../workspace/workspacePaths";
+import { listDirectoryEntries, readNamedJsonFiles } from "../storage/directoryScan";
+import { logError } from "../storage/errorLogger";
 
 export type FeedbackCategory = "suggestion" | "issue" | "inquiry";
 
@@ -22,6 +24,150 @@ export interface FeedbackMessage {
   timestamp: string;
   status: "open" | "resolved";
   replies: FeedbackReply[];
+}
+
+/**
+ * One conversation, stored whole in its own file at
+ * `5-system/feedback/threads/{threadId}.json`.
+ *
+ * `FeedbackMessage` is deliberately the base: `id` IS the thread id and
+ * `timestamp` IS the creation time, so every existing consumer
+ * (`feedbackUnread.ts`, `FeedbackUnreadProvider`, `MessageCard`) reads a thread
+ * without a projection step or a type change.
+ *
+ * The CAS fields guard the ONE remaining same-file race: two admins replying to
+ * the SAME thread at the same instant. Two different threads cannot collide at
+ * all any more, which is the actual fix — this is the residual case, not the
+ * main one.
+ */
+export interface FeedbackThread extends FeedbackMessage {
+  revision?: number;
+  _writeToken?: string;
+}
+
+/** Row of `threads.index.json` — enough to render and filter the list view without opening a thread. */
+export interface FeedbackThreadSummary {
+  threadId: string;
+  from: string;
+  role: string;
+  category: FeedbackCategory;
+  status: "open" | "resolved";
+  createdAt: string;
+  /**
+   * As of the last INDEX write — i.e. thread creation or a status change. A
+   * plain reply deliberately does not touch the index (that is what keeps the
+   * shared file rarely written), so this is advisory. The list view orders by
+   * `createdAt`, never by this field.
+   */
+  lastActivityAt: string;
+  /** First line of the original message, truncated — for the collapsed row only. */
+  preview: string;
+}
+
+/**
+ * `threads.index.json` — a REBUILDABLE CACHE, not the source of truth.
+ *
+ * The thread files are authoritative. `listThreadSummaries` reconciles the
+ * index against a names-only listing of `threads/` on every read, so a create
+ * whose index write lost the CAS race permanently still shows up (and repairs
+ * the index on the way past). Same standing as `distribution.current.json`
+ * next to the durable `distribution.events/` files.
+ */
+export type FeedbackThreadsIndex = {
+  revision?: number;
+  _writeToken?: string;
+  threads: FeedbackThreadSummary[];
+};
+
+export const FEEDBACK_THREADS_INDEX_FILE = "threads.index.json";
+export const FEEDBACK_THREAD_FILE_SUFFIX = ".json";
+
+/** Max characters of the original message kept in a summary row. */
+const PREVIEW_MAX_CHARS = 120;
+
+export function feedbackThreadPreview(text: string): string {
+  const firstLine = text.split("\n", 1)[0]!.trim();
+  return firstLine.length > PREVIEW_MAX_CHARS
+    ? `${firstLine.slice(0, PREVIEW_MAX_CHARS)}…`
+    : firstLine;
+}
+
+// Validate, never sanitize: two distinct ids mapping to one file would silently
+// overwrite one user's message with another's. Same rule as
+// distributionEventStore's eventFileName.
+const THREAD_ID_PATTERN = /^[A-Za-z0-9._-]{1,80}$/;
+
+export function feedbackThreadFileName(threadId: string): string {
+  if (!THREAD_ID_PATTERN.test(threadId)) {
+    throw new Error(`Invalid feedback thread id: ${threadId}`);
+  }
+  return `${threadId}${FEEDBACK_THREAD_FILE_SUFFIX}`;
+}
+
+/**
+ * `t{YYYYMMDDHHmmss}-{8 hex}` — short (a deep UNC path plus Chromium's
+ * `.crswap` sibling must stay under 260 characters, see
+ * distributionEventStore's SHORT NAMES note) and lexicographically
+ * time-ordered (the sync probe samples the TAIL of the name-sorted listing, so
+ * the sample has to be the newest threads).
+ */
+export function newFeedbackThreadId(now: Date = new Date()): string {
+  const stamp = now.toISOString().replace(/[-:T.]/g, "").slice(0, 14);
+  const random = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
+  return `t${stamp}-${random}`;
+}
+
+export async function loadThread(
+  dir: DirectoryHandleLike,
+  threadId: string
+): Promise<FeedbackThread | null> {
+  let threadsDir: DirectoryHandleLike;
+  try {
+    threadsDir = await getFeedbackThreadsDir(dir, false);
+  } catch {
+    return null;
+  }
+  const result = await safeReadJson<FeedbackThread>(
+    threadsDir,
+    feedbackThreadFileName(threadId)
+  );
+  return result.ok && typeof result.value.id === "string" ? normalizeThread(result.value) : null;
+}
+
+/**
+ * Bounded-concurrency read of an explicit id list — the list view's page load.
+ * `readNamedJsonFiles` is the shared core `readJsonDirectory` uses, so this
+ * costs no directory listing and reads exactly the named files, at
+ * DIRECTORY_READ_CONCURRENCY in flight. Input order is preserved; an
+ * unreadable/absent id is skipped rather than aborting the page ("skip", not
+ * "throw": one corrupt thread must not blank the whole panel).
+ */
+export async function loadThreads(
+  dir: DirectoryHandleLike,
+  threadIds: readonly string[]
+): Promise<FeedbackThread[]> {
+  if (threadIds.length === 0) return [];
+  let threadsDir: DirectoryHandleLike;
+  try {
+    threadsDir = await getFeedbackThreadsDir(dir, false);
+  } catch {
+    return [];
+  }
+  const { values } = await readNamedJsonFiles<FeedbackThread>(
+    threadsDir,
+    threadIds.map(feedbackThreadFileName),
+    { onUnreadable: "skip" }
+  );
+  return values.filter((value) => typeof value.id === "string").map(normalizeThread);
+}
+
+/** Defensive: a hand-edited or partially-written thread must never crash a render. */
+function normalizeThread(value: FeedbackThread): FeedbackThread {
+  return {
+    ...value,
+    status: value.status === "resolved" ? "resolved" : "open",
+    replies: Array.isArray(value.replies) ? value.replies : [],
+  };
 }
 
 /**
