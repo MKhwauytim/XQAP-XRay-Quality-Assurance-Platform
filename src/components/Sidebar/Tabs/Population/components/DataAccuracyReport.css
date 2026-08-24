@@ -63,7 +63,11 @@
   gap: 14px;
   padding: 20px;
   border: 1px solid var(--c-border);
-  border-radius: 14px;
+  /* --r-xl, matching the identically-shaped .p3-top-row / .p4-top-row cards
+     one phase over. The raw 14px this used to carry matched no token at all
+     (--r-lg is 10px, --r-xl is 12px). overflow: hidden stays — it clips the
+     ::before accent rail below to this same radius. */
+  border-radius: var(--r-xl);
   background: var(--c-surface);
   box-shadow: var(--sh-sm);
   overflow: hidden;
@@ -148,9 +152,13 @@
 .dar-col-table {
   background: var(--c-surface);
   border: 1px solid var(--c-border);
-  border-radius: 14px;
+  /* Same radius AND same elevation as the two verdict cards above: these
+     four boxes (.dar-verdict, .p2-result-card, .dar-col-table, .dar-detail)
+     are peers in one vertical run, and two shadow depths across them is
+     what made the phase read as unrelated fragments. */
+  border-radius: var(--r-xl);
   overflow: hidden;
-  box-shadow: var(--sh-xs);
+  box-shadow: var(--sh-sm);
 }
 
 .dar-col-table-head {
@@ -306,9 +314,13 @@
 .dar-detail {
   background: var(--c-surface);
   border: 1px solid var(--c-border);
-  border-radius: 14px;
+  /* Same radius AND same elevation as the two verdict cards above: these
+     four boxes (.dar-verdict, .p2-result-card, .dar-col-table, .dar-detail)
+     are peers in one vertical run, and two shadow depths across them is
+     what made the phase read as unrelated fragments. */
+  border-radius: var(--r-xl);
   overflow: hidden;
-  box-shadow: var(--sh-xs);
+  box-shadow: var(--sh-sm);
 }
 
 /* Owner request (2026-08-18): the whole details table sits behind this
