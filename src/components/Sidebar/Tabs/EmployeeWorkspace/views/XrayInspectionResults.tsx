@@ -356,10 +356,21 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
   );
 
   const columns = useMemo<DataTableCol<ResultRow>[]>(() => {
-    const visibleSampleColumns = orderSampleColumns(sampleColumns, referralColConfig).map<DataTableCol<ResultRow>>((column) => ({
-      ...column,
-      accessor: (row) => getSampleColumnValue(row, column, L),
-    }));
+    const visibleSampleColumns = orderSampleColumns(sampleColumns, referralColConfig).map<DataTableCol<ResultRow>>((column) => {
+      // `column.sortAccessor` (if DataTable's `DataTableCol` type ever grows one
+      // set for real) is typed against `DistributionEntry`, not `ResultRow` --
+      // buildSampleColumns never actually sets it (every column here is
+      // sourced from that same list, always `undefined` at runtime), so drop
+      // it explicitly rather than spreading a value TypeScript can't verify is
+      // safe for this row type. Sort falls back to `accessor` below, same as
+      // every other column that doesn't define its own sortAccessor.
+      const { sortAccessor, ...rest } = column;
+      void sortAccessor;
+      return {
+        ...rest,
+        accessor: (row) => getSampleColumnValue(row, column, L),
+      };
+    });
 
     const answerColumns = answerFields.map<DataTableCol<ResultRow>>((field) => ({
       id: `answer:${field.fieldId}`,

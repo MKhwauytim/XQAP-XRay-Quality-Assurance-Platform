@@ -1,4 +1,4 @@
-import { Eye, EyeOff, Maximize2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Eye, EyeOff, Maximize2 } from "lucide-react";
 import { yieldToMain } from "../../data/storage/yieldToMain";
 import {
   Fragment,
@@ -33,6 +33,7 @@ import {
   type AnyFilter,
   type FiltersMap,
 } from "./utils";
+import { cycleTableSort, sortRowsBy, type TableSort } from "../../utils/tableSort";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -58,6 +59,20 @@ export type DataTableCol<TRow = unknown> = {
   statusOptions?: Array<{ value: string; label: string }>;
   /** Returns the raw string value for this column (used for filtering & auto-date-detect). */
   accessor: (row: TRow) => string | null;
+  /**
+   * Set false to hide this column's sort control. Defaults true. Use it for
+   * columns whose accessor value is not a meaningful sort key (an action
+   * column, a rendered badge whose accessor exists only to feed the filter).
+   */
+  sortable?: boolean;
+  /**
+   * Value used for SORTING only, when it must differ from `accessor`'s value.
+   * The common case is a cell rendered as a formatted string ("80.0%",
+   * "١٢٣") whose accessor returns the display text — sorting that
+   * lexicographically is wrong. Return the raw comparable value here.
+   * Defaults to `accessor`.
+   */
+  sortAccessor?: (row: TRow) => string;
 };
 
 export type ColConfig = {
@@ -151,6 +166,14 @@ export type DataTableProps<TRow = unknown> = {
    * own state and reset the page from where they are handled.
    */
   resetToken?: string | number;
+  /** Shows per-column sort controls. Defaults to true. */
+  canSortColumns?: boolean;
+  /**
+   * Sort applied on first mount. Sort is transient per-mount state and is
+   * deliberately NOT persisted through ColConfig/onColConfigChange — a caller
+   * that wants a durable default passes it here.
+   */
+  initialSort?: TableSort;
 };
 
 // ── Column config ────────────────────────────────────────────────────────────
@@ -271,6 +294,8 @@ export default function DataTable<TRow>({
   density = "normal",
   stickyColumnIds = [],
   resetToken,
+  canSortColumns = true,
+  initialSort,
 }: DataTableProps<TRow>) {
   const L = useLabels();
 
@@ -301,6 +326,7 @@ export default function DataTable<TRow>({
   // the (position: fixed) panel stranded away from its button.
   const [colPickerAnchor, setColPickerAnchor] = useState<HTMLElement | null>(null);
   const [openFilterCol, setOpenFilterCol]       = useState<string | null>(null);
+  const [sort, setSort] = useState<TableSort>(initialSort ?? null);
   const [filterAnchor, setFilterAnchor] = useState<HTMLElement | null>(null);
   const [filters, setFilters]                   = useState<FiltersMap>({});
   const [isExporting, setIsExporting]            = useState(false);
@@ -491,14 +517,28 @@ export default function DataTable<TRow>({
     [searchFilteredRows, visibleCols, filters, rowMatchesFilter, detectedDates]
   );
 
+  // Sort runs after search+filter and before pagination — same order as
+  // runPopulationQuery (src/data/population/populationQuery.ts:136-159), so the
+  // two engines cannot drift. `sortRowsBy` is a no-op for a null sort and
+  // returns `filteredRows` itself, so an unsorted table pays nothing and keeps
+  // its array identity.
+  const sortedRows = useMemo(
+    () => sortRowsBy(filteredRows, sort, (row, columnId) => {
+      const col = visibleCols.find((c) => c.id === columnId);
+      if (!col) return "";
+      return col.sortAccessor ? col.sortAccessor(row) : (col.accessor(row) ?? "");
+    }),
+    [filteredRows, sort, visibleCols]
+  );
+
   const requestedPage = pageState.resetKey === resetKey ? pageState.page : 1;
   // Clamped, never reset: a refresh that shrinks the data below the current page
   // lands the reader on the last page that still exists, which is where the rows
   // they were looking at went — not back at the top of the table.
-  const page = clampPage(requestedPage, filteredRows.length, DATA_PAGE_SIZE);
+  const page = clampPage(requestedPage, sortedRows.length, DATA_PAGE_SIZE);
   const pageRows = useMemo(
-    () => pageSlice(filteredRows, page, DATA_PAGE_SIZE),
-    [filteredRows, page]
+    () => pageSlice(sortedRows, page, DATA_PAGE_SIZE),
+    [sortedRows, page]
   );
 
   function changePage(nextPage: number): void {
@@ -649,12 +689,12 @@ export default function DataTable<TRow>({
     try {
       const header = visibleCols.map((c) => c.label);
       const body: string[][] = [];
-      for (let i = 0; i < filteredRows.length; i += EXPORT_CHUNK_SIZE) {
-        const chunk = filteredRows.slice(i, i + EXPORT_CHUNK_SIZE);
+      for (let i = 0; i < sortedRows.length; i += EXPORT_CHUNK_SIZE) {
+        const chunk = sortedRows.slice(i, i + EXPORT_CHUNK_SIZE);
         for (const row of chunk) {
           body.push(visibleCols.map((col) => col.accessor(row) ?? ""));
         }
-        if (filteredRows.length > EXPORT_CHUNK_SIZE) {
+        if (sortedRows.length > EXPORT_CHUNK_SIZE) {
           await yieldToMain();
         }
       }
@@ -717,7 +757,7 @@ export default function DataTable<TRow>({
   // Below this floor the header wraps onto a second line instead (see the
   // .dt-th-label white-space rule in DataTable.css) rather than clipping.
   function headerMinWidth(col: DataTableCol<TRow>): number {
-    return Math.min(180, Math.max(88, col.label.length * 9 + 28));
+    return Math.min(180, Math.max(88, col.label.length * 9 + 28 + 48));
   }
 
   function estimateColumnFr(col: DataTableCol<TRow>): number {
@@ -728,7 +768,7 @@ export default function DataTable<TRow>({
     );
     const tableW = tableRef.current?.getBoundingClientRect().width ?? 800;
     const total = visibleCols.reduce((s, c) => s + getColFr(c), 0);
-    const px = Math.min(Math.max(70, maxChars * 8 + 42), 420);
+    const px = Math.min(Math.max(70, maxChars * 8 + 62), 420);
     return (px / tableW) * total;
   }
 
@@ -941,6 +981,35 @@ export default function DataTable<TRow>({
                     <div className="dt-th-inner">
                       <span className="dt-th-grip" aria-hidden="true">⋮⋮</span>
                       <span className="dt-th-label">{col.label}</span>
+                      {canSortColumns && col.sortable !== false && (
+                        <button
+                          type="button"
+                          className={`dt-sort-btn${sort?.column === col.id ? " active" : ""}`}
+                          title={
+                            sort?.column === col.id
+                              ? `${L.dt_sort_button_prefix}: ${col.label} (${sort.direction === "asc" ? L.dt_sort_asc : L.dt_sort_desc})`
+                              : `${L.dt_sort_button_prefix}: ${col.label}`
+                          }
+                          aria-label={
+                            sort?.column === col.id
+                              ? `${L.dt_sort_button_prefix}: ${col.label} (${sort.direction === "asc" ? L.dt_sort_asc : L.dt_sort_desc})`
+                              : `${L.dt_sort_button_prefix}: ${col.label}`
+                          }
+                          draggable={false}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSort((current) => cycleTableSort(current, col.id));
+                            setPageState({ resetKey, page: 1 });
+                          }}
+                        >
+                          {sort?.column === col.id ? (
+                            sort.direction === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} />
+                          ) : (
+                            <ChevronUp size={12} className="dt-sort-btn-idle-icon" />
+                          )}
+                        </button>
+                      )}
                       <button
                         type="button"
                         className={`dt-filter-btn${hasFilter ? " active" : ""}`}

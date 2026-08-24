@@ -33,6 +33,7 @@ import { EmptyState, ErrorState, LoadingState } from "../../../../components/Sta
 import Pagination from "../../../../components/Pagination/Pagination";
 import { AnchoredPopover } from "../../../../components/Popover/AnchoredPopover";
 import { DATA_PAGE_SIZE } from "../../../../utils/paginationUtils";
+import { cycleTableSort } from "../../../../utils/tableSort";
 import { formatStageLabel } from "./components/helpers";
 import { buildBrowseFilterOptionPreview } from "./browseFilterOptions";
 import {
@@ -465,17 +466,6 @@ const EXPORT_CHUNK_SIZE = 1000;
 // unbounded scan instead — see fallbackFilterOptions below — since it already holds
 // the full row array in memory with no extra cost.
 const FILTER_PREVIEW_MAX_PAGES = 5;
-
-// Single-column sort cycle: none -> ascending -> descending -> none.
-function cycleSort(current: PopulationQuerySort, column: string): PopulationQuerySort {
-  if (!current || current.column !== column) {
-    return { column, direction: "asc" };
-  }
-  if (current.direction === "asc") {
-    return { column, direction: "desc" };
-  }
-  return null;
-}
 
 const EMPTY_QUERY_RESULT: PopulationQueryResult<BrowseRow> = { pageRows: [], totalRows: 0, totalPages: 1 };
 const EMPTY_FILTER_PREVIEW = { options: [] as string[], truncated: false };
@@ -1022,7 +1012,7 @@ export default function BrowseDataView({
   }
 
   function handleSortClick(columnKey: string): void {
-    setSort((current) => cycleSort(current, columnKey));
+    setSort((current) => cycleTableSort(current, columnKey));
     setPage(1);
   }
 
