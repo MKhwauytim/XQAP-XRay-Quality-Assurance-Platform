@@ -428,7 +428,10 @@ function createSaveAnswerHandler(deps: {
    *  (see XrayReferrals' subscribeToDataRefresh effect) skips it: `setAnswers`
    *  below has already reconciled this view exactly, and a second full read
    *  per submission is pure cost. Correct only while `notifyLocalDataChange`
-   *  delivers synchronously — `window.dispatchEvent` does. */
+   *  delivers synchronously — `window.dispatchEvent` does. Passed as a ref
+   *  (not read here during render — only inside the async `handleSave` this
+   *  factory returns, i.e. from the eventual submit-button click) the same
+   *  way `createReopenHandlers` below is already exempted at its call site. */
   ownBroadcastRef: React.RefObject<boolean>;
   /** Cleared on a successful submit: the row's answers are on disk, so the
    *  month-switch guard and the vanished-row draft retention must stop
@@ -1428,7 +1431,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   }
 
   // Module-level (createSaveAnswerHandler, above) so this component body stays
-  // inside the repo's `max-lines-per-function` budget.
+  // inside the repo's `max-lines-per-function` budget. `ownBroadcastRef` is
+  // read only inside the async `handleSave` this returns (an event-handler
+  // call chain), never during render — the same exemption `createReopenHandlers`
+  // below already carries for its own refs.
+  // eslint-disable-next-line react-hooks/refs -- see above
   const handleSave = createSaveAnswerHandler({
     directoryHandle, folderForRow, username, role, activeTpl, selMonth,
     canSubmitAnswers, canAnswerOnBehalf, setAnswers, setStatusMsg,

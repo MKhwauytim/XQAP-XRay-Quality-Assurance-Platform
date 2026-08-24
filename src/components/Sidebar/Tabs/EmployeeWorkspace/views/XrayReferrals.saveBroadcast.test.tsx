@@ -197,8 +197,10 @@ describe("XrayReferrals — submit broadcasts a data refresh", () => {
       // "discard every cache", which directoryScan.ts and workspacePaths.ts
       // honour by dropping theirs wholesale. One answer file does not justify
       // that (see dataRefreshSignal.ts:110-117).
-      expect(seen[0]!.source).toBe("periodic");
-      expect([...(seen[0] as { changed: Set<string> }).changed]).toEqual(["answers"]);
+      const detail = seen[0]!;
+      expect(detail.source).toBe("periodic");
+      if (detail.source !== "periodic") throw new Error("unreachable — asserted above");
+      expect([...detail.changed]).toEqual(["answers"]);
     } finally {
       stop();
     }
