@@ -27,75 +27,6 @@
   scrollbar-width: thin;
 }
 
-/* ── DataTable + InspectionPanel split ─────────────────────── */
-
-.ew-split {
-  display: grid;
-  gap: var(--sp-4);
-  align-items: stretch;
-  min-height: 0;
-}
-
-.ew-split--right {
-  --ew-inspection-row-height: calc(
-    clamp(360px, calc(var(--app-vh) - 252px), 680px) * var(--ui-table-height-scale)
-  );
-  grid-template-columns: minmax(min(100%, 620px), 1fr) clamp(300px, 25vw, 380px);
-  align-items: start;
-}
-
-.ew-split--right .ew-ref-queue {
-  height: var(--ew-inspection-row-height);
-}
-
-.ew-split--right .dt-table-wrap {
-  /* `.ew-ref-queue` is a flex column now (see above); `.dt-table-wrap`'s own
-     `flex: 1 1 0` there already claims the remaining height within the fixed
-     `--ew-inspection-row-height` container, so this only needs to drop the
-     component-level default max-height cap, not re-assert a height. */
-  max-height: none;
-}
-
-.ew-split--right > .ip-panel {
-  height: var(--ew-inspection-row-height);
-  width: 100%;
-  max-width: none;
-}
-
-.ew-split--right .dt-table-wrap .dt-table {
-  table-layout: fixed;
-  min-width: clamp(760px, 74vw, 1040px);
-}
-
-.ew-split--empty {
-  grid-template-columns: 1fr minmax(280px, 340px);
-}
-
-@media (max-width: 1180px) {
-  .ew-split--right {
-    --ew-inspection-row-height: clamp(340px, 48vh, 540px);
-    grid-template-columns: 1fr;
-    height: auto;
-  }
-
-  .ew-split--right > .ip-panel {
-    width: 100%;
-    max-width: none;
-    height: auto;
-    max-height: none;
-  }
-
-  .ew-split--right .dt-table-wrap {
-    height: var(--ew-inspection-row-height);
-  }
-}
-
-@media (max-width: 760px) {
-  .ew-split--right {
-    --ew-inspection-row-height: clamp(300px, 48vh, 460px);
-  }
-}
-
 /* ── Daily Quota Badge ─────────────────────────────────────── */
 
 .ew-quota-badge {
@@ -1086,7 +1017,7 @@
 }
 
 .ew-ref-empty-panel {
-  min-height: var(--ew-inspection-row-height, 420px);
+  min-height: 420px;
   display: grid;
   align-content: center;
   justify-items: center;

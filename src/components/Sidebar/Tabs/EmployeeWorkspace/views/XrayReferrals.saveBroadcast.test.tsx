@@ -20,7 +20,7 @@ vi.mock("../../../../../workers/populationQueryWorker?worker&inline", async () =
   return { default: createPopulationQueryWorkerStubClass() };
 });
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createMemoryDirectory, clearReadLog, getReadLog } from "../../../../../data/storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../../../../../data/storage/fileSystemAccess";
 import { clearSession, writeSession } from "../../../../../auth/authSession";
@@ -235,5 +235,42 @@ describe("XrayReferrals — submit broadcasts a data refresh", () => {
     await waitFor(() => {
       expect(getReadLog(root).some((path) => path.includes("sample.master.json"))).toBe(true);
     });
+  });
+});
+
+describe("XrayReferrals — status banner dismiss button", () => {
+  // Regression guard: the dismiss "×" used to be pinned with an inline
+  // `style={{ float: "left" }}`, which is wrong in this RTL app — it sticks
+  // the button to the physical-left edge regardless of Arabic reading
+  // direction. The fix replicates ReferralApproval/index.tsx's
+  // `.ew-msg-dismissible` / `.ew-msg-dismiss-btn` flex pattern instead
+  // (EmployeeWorkspace.css), so this both bans the float style AND pins the
+  // class names that carry the correct layout.
+  it("dismisses via a flex-positioned button, not an inline float:left", async () => {
+    writeSession({ role: "employee", username: "emp-a", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedMonth(root, [["IMG-001", "emp-a"]]);
+
+    render(<XrayReferrals directoryHandle={root} />);
+    await waitFor(() => expect(screen.getAllByText("IMG-001").length).toBeGreaterThan(0));
+
+    const note = (await waitFor(() => screen.getByLabelText("ملاحظة"))) as HTMLInputElement;
+    fireEvent.change(note, { target: { value: "تمت المراجعة" } });
+    fireEvent.click(await waitFor(() => screen.getByRole("button", { name: "تقديم الفحص" })));
+    await waitFor(() => expect(screen.getByText("تم التقديم.")).toBeInTheDocument());
+
+    const banner = screen.getByRole("status");
+    expect(banner.className).toContain("ew-msg-dismissible");
+
+    const dismissBtn = within(banner).getByRole("button", { name: "إغلاق" });
+    expect(dismissBtn.className).toContain("ew-msg-dismiss-btn");
+    // No inline positioning left on the element at all — the RTL-correct
+    // placement now comes entirely from the stylesheet classes above.
+    expect(dismissBtn.getAttribute("style")).toBeNull();
+
+    fireEvent.click(dismissBtn);
+    await waitFor(() => expect(screen.queryByText("تم التقديم.")).not.toBeInTheDocument());
   });
 });

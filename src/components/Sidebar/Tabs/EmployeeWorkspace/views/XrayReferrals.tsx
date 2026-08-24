@@ -1896,14 +1896,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       </PageHeader>
 
       {statusMsg && (
-        <div className={statusMsg.type === "ok" ? "ew-msg-ok" : "ew-msg-error"} role="status">
-          {statusMsg.text}
-          <button
-            type="button"
-            aria-label="إغلاق"
-            style={{ float: "left", background: "none", border: "none", cursor: "pointer" }}
-            onClick={() => setStatusMsg(null)}
-          ><X size={14} /></button>
+        <div className={`${statusMsg.type === "ok" ? "ew-msg-ok" : "ew-msg-error"} ew-msg-dismissible`} role="status">
+          <span>{statusMsg.text}</span>
+          <button type="button" className="ew-msg-dismiss-btn" aria-label="إغلاق" onClick={() => setStatusMsg(null)}>
+            <X size={14} />
+          </button>
         </div>
       )}
 
