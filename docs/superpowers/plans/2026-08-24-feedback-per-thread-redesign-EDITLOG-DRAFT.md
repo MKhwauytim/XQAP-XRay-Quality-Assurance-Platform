@@ -136,3 +136,36 @@ Category prefix for every entry below: the plan is tier 3. Titles already carry 
 **Lines:** 3 files, +34 / -14
 
 ---
+
+## Task 9 (partial) — scoped gate results
+
+Per the coordinator's shared-worktree protocol, whole-repo `test:run`/`build`/`check:release`/
+`check:bundle-size`/`check:vendor` were **not** run from this session (other concurrent agents'
+in-flight files would make a whole-repo run noisy and non-attributable). Gates were instead run
+scoped to every file this plan touched, after all 9 tasks' code and tests were written:
+
+- `npx vitest run src/data/feedback/ src/data/workspace/workspaceSync.test.tsx src/data/workspace/workspacePaths.test.ts src/components/FeedbackWidget/` — **8 test files, 123 tests, all passed.**
+- `npm run typecheck` (whole-repo `tsc -b`, run anyway since it is fast and project-wide by nature) — **clean, zero errors**, including every concurrently in-flight file from other sessions at the time of the run.
+- `npx eslint <every file this plan touched>` — **clean** after one fix (below).
+- `npm run check:complexity` (whole-repo, `eslint --rule complexity/max-lines-per-function`) — **clean**.
+- `npm run check:hex-literals` — **clean**, no swept CSS file (including `FeedbackWidget.css`) exceeds its baseline.
+
+**One real lint failure found and fixed during this pass, not merely reformatted:** the first cut of
+Task 7 wrapped `visibleSummaries`/`visibleIds` in `useMemo`, depending on `mySummaries`/
+`filteredSummaries` — plain, unmemoized `const`s recomputed every render. The repo's React Compiler
+lint rule (`react-hooks/preserve-manual-memoization`) correctly flagged this as unsafe manual
+memoization over an unstable dependency. Fixed by dropping both `useMemo` calls entirely and
+computing `visibleSummaries`/`visibleIds` as plain consts, matching every other derived value in
+this component (`openCount`, `mySummaries`, `filteredSummaries`) — the React Compiler memoizes the
+component as a whole, so the manual wrapping was both unsafe and redundant. Re-ran the full scoped
+lint + typecheck + test sweep after the fix; all green. Removed the now-unused `useMemo` import.
+Committed separately: "Fix (feedback-widget): drop manual useMemo around visibleSummaries/visibleIds
+to satisfy the React Compiler lint rule."
+
+**Not run from this session, left to the consolidation pass:** `npm run build`,
+`npm run check:bundle-size`, `npm run check:release`, `npm run check:vendor`, whole-repo
+`npm run test:run`. None of this plan's own changes are expected to move the bundle-size or vendor
+checks (no new dependency, a few hundred lines of logic); `check:release` depends on package.json
+being synced to whichever version this plan's entries land at during consolidation.
+
+---
