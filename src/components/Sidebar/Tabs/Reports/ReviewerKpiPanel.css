@@ -31,42 +31,12 @@
 }
 
 /* ── Reviewer table ─────────────────────────────────────────────────────── */
-
-.rk-table-wrap {
-  overflow-x: auto;
-}
-
-.rk-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-.rk-table th {
-  padding: 10px 12px;
-  border-bottom: 2px solid var(--c-border);
-  color: var(--c-ink-3);
-  font-size: 12px;
-  font-weight: 800;
-  text-align: start;
-  white-space: nowrap;
-}
-
-.rk-table td {
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--c-border);
-  color: var(--c-ink-2);
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.rk-table tbody tr {
-  transition: background-color var(--t-fast) var(--ease-smooth);
-}
-
-.rk-table tbody tr:hover {
-  background: var(--c-surface-2);
-}
+/* The `.rk-table*` rules that used to style a hand-rolled <table> here were
+   retired when the reviewer table moved onto the shared DataTable component
+   (2026-08-24 datatable-sort-filter-consistency plan, Task 4). DataTable owns
+   its own header/row/cell chrome (`dt-*` classes in DataTable.css); the
+   classes below are still applied by ReviewerKpiPanel's `renderCell` for the
+   custom progress-bar and status-pill cells and stay in use. */
 
 .rk-cell-name {
   color: var(--c-navy);
@@ -75,10 +45,6 @@
 
 .rk-num {
   font-variant-numeric: tabular-nums;
-}
-
-.rk-cell-completion {
-  min-width: 150px;
 }
 
 .rk-progress {
