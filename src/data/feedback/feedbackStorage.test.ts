@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { clearOperationLog, createMemoryDirectory, getOperationLog } from "../storage/memoryDirectory";
+import {
+  clearOperationLog,
+  createMemoryDirectory,
+  getOperationLog,
+  setSimulatedWritePermission,
+} from "../storage/memoryDirectory";
 import { safeWriteJson } from "../storage/safeWrite";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
@@ -12,6 +17,7 @@ import {
   loadThread,
   loadThreads,
   loadThreadsIndex,
+  migrateLegacyMessages,
   replyToFeedback,
   submitFeedback,
   type FeedbackMessage,
@@ -25,7 +31,45 @@ function makeRoot(
   return createMemoryDirectory(name, options) as DirectoryHandleLike;
 }
 
-describe("feedbackStorage", () => {
+async function seedLegacyLog(
+  root: DirectoryHandleLike,
+  messages: FeedbackMessage[],
+  where: "system" | "workspace-root"
+): Promise<void> {
+  const dir =
+    where === "system"
+      ? await (await root.getDirectoryHandle("5-system", { create: true })).getDirectoryHandle(
+          SYSTEM_FOLDER_NAMES.feedback,
+          { create: true }
+        )
+      : await root.getDirectoryHandle(SYSTEM_FOLDER_NAMES.feedback, { create: true });
+  // Legacy writers persisted the bare array (wrapped only by safeWriteJson's envelope).
+  await safeWriteJson<FeedbackMessage[]>(dir, "messages.json", messages);
+}
+
+const LEGACY_ONE: FeedbackMessage = {
+  id: "legacy-1",
+  from: "old",
+  role: "employee",
+  category: "inquiry",
+  text: "قديم",
+  timestamp: "2026-06-01T00:00:00.000Z",
+  status: "open",
+  replies: [],
+};
+
+const LEGACY_TWO: FeedbackMessage = {
+  id: "legacy-2",
+  from: "older",
+  role: "supervisor",
+  category: "issue",
+  text: "أقدم",
+  timestamp: "2026-05-01T00:00:00.000Z",
+  status: "resolved",
+  replies: [{ from: "admin", role: "admin", text: "تم", timestamp: "2026-05-02T00:00:00.000Z" }],
+};
+
+describe("feedbackStorage — per-thread storage", () => {
   it("submits a message and reads it back", async () => {
     const root = makeRoot();
     await submitFeedback(root, {
@@ -58,61 +102,11 @@ describe("feedbackStorage", () => {
     expect(after!.status).toBe("resolved");
   });
 
-  it("reads the legacy bare-array messages.json shape", async () => {
-    const root = makeRoot();
-    const feedbackDir = await root.getDirectoryHandle(SYSTEM_FOLDER_NAMES.feedback, {
-      create: true,
-    });
-    const legacy: FeedbackMessage[] = [
-      {
-        id: "legacy-1",
-        from: "old",
-        role: "employee",
-        category: "inquiry",
-        text: "قديم",
-        timestamp: "2026-06-01T00:00:00.000Z",
-        status: "open",
-        replies: [],
-      },
-    ];
-    // Legacy writers persisted the bare array (wrapped only by safeWriteJson's envelope).
-    await safeWriteJson<FeedbackMessage[]>(feedbackDir, "messages.json", legacy);
-
-    const messages = await loadFeedback(root);
-    expect(messages).toHaveLength(1);
-    expect(messages[0]!.id).toBe("legacy-1");
-
-    // A subsequent write migrates the file forward without losing the legacy entry.
-    await submitFeedback(root, { from: "new", role: "admin", category: "issue", text: "جديد" });
-    const after = await loadFeedback(root);
-    expect(after).toHaveLength(2);
-    expect(after.some((m) => m.id === "legacy-1")).toBe(true);
-    expect(after.some((m) => m.from === "new")).toBe(true);
-  });
-
-  it("writes new feedback under 5-system/feedback/, not the legacy workspace-root folder", async () => {
-    const root = makeRoot();
-    await submitFeedback(root, { from: "sara", role: "employee", category: "suggestion", text: "اقتراح" });
-
-    const systemDir = await root.getDirectoryHandle("5-system", { create: false });
-    const feedbackDir = await systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.feedback, {
-      create: false,
-    });
-    const handle = await feedbackDir.getFileHandle("messages.json", { create: false });
-    const text = await (await handle.getFile()).text();
-    expect(text).toContain("اقتراح");
-
-    // Nothing was ever written to the legacy root-level folder for a fresh workspace.
-    await expect(
-      root.getDirectoryHandle(SYSTEM_FOLDER_NAMES.feedback, { create: false })
-    ).rejects.toThrow();
-  });
-
   it("survives two concurrent submits without losing either (cross-machine CAS)", async () => {
     const root = makeRoot();
-    // Two users on two PCs submit at the same instant. Each read the list, each
-    // unshifts its own message — neither may clobber the other. The
-    // withResourceLock + casLoop read-back/retry loop must land both.
+    // Two users on two PCs submit at the same instant. Each mints its own
+    // never-before-used thread id — neither can clobber the other, because
+    // there is no shared file for them to contend on.
     await Promise.all([
       submitFeedback(root, { from: "userA", role: "employee", category: "suggestion", text: "من الجهاز الأول" }),
       submitFeedback(root, { from: "userB", role: "supervisor", category: "issue", text: "من الجهاز الثاني" }),
@@ -325,5 +319,131 @@ describe("feedbackStorage", () => {
     const summaries = await listThreadSummaries(root);
     expect(summaries[0]!.threadId).toBe(second.id);
     expect(summaries[1]!.threadId).toBe(first.id);
+  });
+});
+
+describe("feedbackStorage — legacy migration", () => {
+  it("splits a legacy messages.json into one thread file per message on first read", async () => {
+    const root = makeRoot();
+    await seedLegacyLog(root, [LEGACY_ONE, LEGACY_TWO], "system");
+
+    const summaries = await listThreadSummaries(root);
+    expect(summaries.map((s) => s.threadId).sort()).toEqual(["legacy-1", "legacy-2"]);
+
+    // Each message is now its own self-contained file, replies included.
+    const two = await loadThread(root, "legacy-2");
+    expect(two!.status).toBe("resolved");
+    expect(two!.replies).toHaveLength(1);
+  });
+
+  it("never touches the legacy messages.json", async () => {
+    const root = makeRoot();
+    await seedLegacyLog(root, [LEGACY_ONE], "system");
+    const systemDir = await root.getDirectoryHandle("5-system", { create: false });
+    const feedbackDir = await systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.feedback, { create: false });
+    const before = await (await (await feedbackDir.getFileHandle("messages.json")).getFile()).text();
+
+    await listThreadSummaries(root);
+    await submitFeedback(root, { from: "new", role: "admin", category: "issue", text: "جديد" });
+
+    const after = await (await (await feedbackDir.getFileHandle("messages.json")).getFile()).text();
+    expect(after).toBe(before);
+  });
+
+  it("migrates from the legacy workspace-ROOT feedback/ folder too", async () => {
+    const root = makeRoot();
+    await seedLegacyLog(root, [LEGACY_ONE], "workspace-root");
+
+    const summaries = await listThreadSummaries(root);
+    expect(summaries.map((s) => s.threadId)).toEqual(["legacy-1"]);
+  });
+
+  it("is idempotent — a second call migrates nothing and duplicates nothing", async () => {
+    const root = makeRoot();
+    await seedLegacyLog(root, [LEGACY_ONE, LEGACY_TWO], "system");
+
+    const first = await migrateLegacyMessages(root);
+    expect(first.migrated).toBe(2);
+    const second = await migrateLegacyMessages(root);
+    expect(second.migrated).toBe(0);
+    expect(second.skipped).toBe("already-migrated");
+
+    expect((await listThreadSummaries(root)).map((s) => s.threadId).sort()).toEqual([
+      "legacy-1",
+      "legacy-2",
+    ]);
+  });
+
+  it("survives two clients migrating the same workspace concurrently", async () => {
+    const root = makeRoot();
+    await seedLegacyLog(root, [LEGACY_ONE, LEGACY_TWO], "system");
+
+    await Promise.all([migrateLegacyMessages(root), migrateLegacyMessages(root)]);
+
+    // Thread files are keyed by the legacy id, so both writers produce
+    // byte-identical content at identical names -- no duplicates, no loss.
+    const index = await loadThreadsIndex(root);
+    expect(index.threads.map((t) => t.threadId).sort()).toEqual(["legacy-1", "legacy-2"]);
+  });
+
+  it("never migrates on top of existing threads", async () => {
+    const root = makeRoot();
+    await createThread(root, { from: "sara", role: "employee", category: "issue", text: "حديث" });
+    await seedLegacyLog(root, [LEGACY_ONE], "system");
+
+    const outcome = await migrateLegacyMessages(root);
+    expect(outcome.skipped).toBe("already-migrated");
+    expect(outcome.migrated).toBe(0);
+    // The legacy message stays visible through the legacy fallback in
+    // loadFeedback -- but it is NOT copied over an already-migrated workspace,
+    // which would resurrect messages a later state deliberately supersedes.
+    expect((await listThreadSummaries(root)).map((s) => s.threadId)).not.toContain("legacy-1");
+  });
+
+  it("still serves legacy messages read-only when the workspace cannot be written", async () => {
+    const root = makeRoot();
+    await seedLegacyLog(root, [LEGACY_ONE], "system");
+    setSimulatedWritePermission(root, "denied", "denied");
+
+    // A guest with a read grant must still SEE the history; migration failing
+    // is not a reason to show an empty panel.
+    const messages = await loadFeedback(root);
+    expect(messages.map((m) => m.id)).toEqual(["legacy-1"]);
+  });
+
+  it("reports no legacy data for a brand-new workspace", async () => {
+    const root = makeRoot();
+    const outcome = await migrateLegacyMessages(root);
+    expect(outcome).toEqual({ migrated: 0, skipped: "no-legacy-data" });
+  });
+});
+
+describe("feedbackStorage — loadFeedback aggregate", () => {
+  it("returns every thread as a FeedbackMessage, newest-first", async () => {
+    const root = makeRoot();
+    const first = await createThread(root, { from: "a", role: "employee", category: "issue", text: "أ" });
+    const second = await createThread(root, { from: "b", role: "employee", category: "issue", text: "ب" });
+    await appendReply(root, first.id, { from: "admin", role: "admin", text: "رد", timestamp: "2026-08-24T11:00:00.000Z" }, false);
+
+    const messages = await loadFeedback(root);
+    expect(messages.map((m) => m.id)).toEqual([second.id, first.id]);
+    expect(messages.find((m) => m.id === first.id)!.replies).toHaveLength(1);
+  });
+
+  it("keeps the submit -> reply -> resolve round trip working through the wrappers", async () => {
+    const root = makeRoot();
+    await submitFeedback(root, { from: "sara", role: "employee", category: "issue", text: "خطأ" });
+    const [msg] = await loadFeedback(root);
+
+    await replyToFeedback(
+      root,
+      msg!.id,
+      { from: "admin", role: "admin", text: "تم", timestamp: "2026-07-01T10:00:00.000Z" },
+      true
+    );
+
+    const [after] = await loadFeedback(root);
+    expect(after!.replies).toHaveLength(1);
+    expect(after!.status).toBe("resolved");
   });
 });

@@ -417,6 +417,7 @@ export async function appendReply(
 export async function listThreadSummaries(
   dir: DirectoryHandleLike
 ): Promise<FeedbackThreadSummary[]> {
+  await ensureMigrated(dir);
   const index = await loadThreadsIndex(dir);
   const known = new Map(index.threads.map((summary) => [summary.threadId, summary]));
 
@@ -471,10 +472,15 @@ function lastActivityOf(thread: FeedbackThread): string {
 }
 
 /**
- * On-disk shape for `messages.json`. The list is wrapped so it can carry the CAS
- * bookkeeping (`revision` + `_writeToken`) that lets casLoop detect a concurrent
- * write from another machine. Legacy files persisted the bare `FeedbackMessage[]`
- * directly — `loadFeedbackFile` still reads that shape.
+ * On-disk shape for the LEGACY `messages.json`. The list is wrapped so it can
+ * carry the CAS bookkeeping (`revision` + `_writeToken`) that let casLoop
+ * detect a concurrent write from another machine; older files persisted the
+ * bare `FeedbackMessage[]` directly — `loadFeedbackFile` still reads that shape.
+ *
+ * READ-ONLY as of v116.0. Nothing writes this file any more: feedback lives in
+ * `5-system/feedback/threads/{threadId}.json`, one file per conversation, and
+ * `migrateLegacyMessages` copies out of here exactly once and leaves the
+ * original untouched forever.
  */
 type FeedbackFile = {
   revision?: number;
@@ -520,58 +526,118 @@ async function loadFeedbackFile(dir: DirectoryHandleLike): Promise<FeedbackFile>
   return { messages: [] };
 }
 
+/**
+ * Every message, newest-first — the FULL aggregate.
+ *
+ * This is the ONE remaining read that opens every thread file, and it exists
+ * for `FeedbackUnreadProvider`: `countUnreadFeedback` needs each individual
+ * reply's author and timestamp, which the summaries deliberately do not carry.
+ * The widget's LIST view must not call this — it uses `listThreadSummaries`
+ * plus a page-scoped `loadThreads`.
+ *
+ * Cost note (a trade, not an oversight): one large file read becomes N small
+ * ones at DIRECTORY_READ_CONCURRENCY. Same bytes, more round trips. The read
+ * path was never the reported failure — the shared WRITE was (XQ-IO-032).
+ *
+ * Falls back to the legacy log whenever migration could not run (read-only
+ * grant) or has not run yet, so no reader ever sees an empty panel over a
+ * workspace that has data.
+ */
 export async function loadFeedback(dir: DirectoryHandleLike): Promise<FeedbackMessage[]> {
-  return (await loadFeedbackFile(dir)).messages;
+  const summaries = await listThreadSummaries(dir);
+  if (summaries.length === 0) {
+    return [...(await loadFeedbackFile(dir)).messages].sort((a, b) =>
+      b.timestamp.localeCompare(a.timestamp)
+    );
+  }
+  const threads = await loadThreads(dir, summaries.map((summary) => summary.threadId));
+  return threads.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 }
 
 /**
- * Read-modify-write the shared feedback log under a CAS retry loop.
+ * ONE-TIME, LAZY split of a legacy `messages.json` into per-thread files.
  *
- * `5-system/feedback/messages.json` is appended to by any user on any machine.
- * The `:rmw` outer `withResourceLock` serializes same-tab writers; `casLoop`
- * re-reads fresh state each attempt, bumps `revision`, stamps `_writeToken`, and
- * verifies BOTH on read-back so a concurrent write from another machine is never
- * silently dropped. Same RMW-append contract as
- * `approvalStorage.appendDecisionEvent`.
+ * Runs from the read path (loadFeedback / listThreadSummaries) the first time a
+ * workspace with legacy data is opened by a client that speaks the new layout.
+ * There is no mount hook and no timer: a workspace nobody opens is never
+ * touched.
  *
- * No delayed verify: feedback messages are low-stakes user input (not
- * business-critical RMW data) — a rare lost update means at most a
- * re-submission, not data corruption. See docs/edit logs/2026-07-14.md v55.2.
+ * THE LEGACY FILE IS NEVER WRITTEN, MOVED OR DELETED — at either location. It
+ * stays readable forever, which is CLAUDE.md's permanent-fallback rule and the
+ * whole rollback story: remove `threads/` + `threads.index.json` and a
+ * downgraded client resumes on `messages.json` exactly as it was.
+ *
+ * IDEMPOTENT BY CONSTRUCTION: each thread file is keyed by the legacy
+ * message's own `id`, so a second client running this concurrently writes
+ * byte-identical content to identical names. The index write is a casLoop, so
+ * one wins and the other retries against fresh state.
+ *
+ * NEVER migrates on top of an already-migrated workspace: legacy content that
+ * a later state deliberately superseded must not be resurrected.
  */
-async function mutateFeedback(
-  dir: DirectoryHandleLike,
-  mutate: (messages: FeedbackMessage[]) => FeedbackMessage[]
-): Promise<void> {
-  // Writes always go to the new `5-system/feedback/` location, even when the
-  // current data was read back from the legacy root `feedback/` — the first
-  // mutation after this change effectively migrates a workspace's feedback
-  // log forward without ever touching (or deleting) the legacy file.
-  const feedbackDir = await getFeedbackDir(dir, true);
-  // `:rmw` suffix keeps this outer lock distinct from safeWriteJson's internal
-  // `${dir.name}/${fileName}` lock (withResourceLock is not reentrant).
-  const outcome = await withResourceLock(`${feedbackDir.name}/${MESSAGES_FILE}:rmw`, () =>
-    casLoop<{ ok: true }>(
-      async (writeToken) => {
-        const current = await loadFeedbackFile(dir);
-        const nextRevision = (current.revision ?? 0) + 1;
-        const messages = mutate([...current.messages]);
-        const updated: FeedbackFile = {
-          revision: nextRevision,
-          _writeToken: writeToken,
-          messages,
-        };
-        await safeWriteJson<FeedbackFile>(feedbackDir, MESSAGES_FILE, updated);
-        const verify = await loadFeedbackFile(dir);
-        if (verify.revision === nextRevision && verify._writeToken === writeToken) {
-          return { done: true, result: { ok: true as const } };
-        }
-        return { done: false };
-      },
-      { conflictError: "تعذّر حفظ الملاحظات: تعارض في الكتابة بعد عدة محاولات." }
-    )
-  );
-  if (!outcome.ok) {
-    throw new Error(outcome.error);
+export async function migrateLegacyMessages(
+  dir: DirectoryHandleLike
+): Promise<{ migrated: number; skipped: "already-migrated" | "no-legacy-data" | null }> {
+  if (await hasAnyThreadFile(dir)) {
+    return { migrated: 0, skipped: "already-migrated" };
+  }
+  const legacy = await loadFeedbackFile(dir);
+  if (legacy.messages.length === 0) {
+    return { migrated: 0, skipped: "no-legacy-data" };
+  }
+
+  const threadsDir = await getFeedbackThreadsDir(dir, true);
+  const summaries: FeedbackThreadSummary[] = [];
+  for (const message of legacy.messages) {
+    const thread: FeedbackThread = {
+      ...message,
+      status: message.status === "resolved" ? "resolved" : "open",
+      replies: Array.isArray(message.replies) ? message.replies : [],
+      revision: 1,
+    };
+    await safeWriteJson<FeedbackThread>(threadsDir, feedbackThreadFileName(thread.id), thread);
+    summaries.push(summarize(thread, lastActivityOf(thread)));
+  }
+
+  await updateThreadsIndex(dir, (threads) => {
+    const merged = new Map(threads.map((summary) => [summary.threadId, summary]));
+    for (const summary of summaries) merged.set(summary.threadId, summary);
+    return [...merged.values()];
+  });
+
+  return { migrated: summaries.length, skipped: null };
+}
+
+/** Cheap "has this workspace been migrated?" probe: one names-only listing, no reads. */
+async function hasAnyThreadFile(dir: DirectoryHandleLike): Promise<boolean> {
+  let threadsDir: DirectoryHandleLike;
+  try {
+    threadsDir = await getFeedbackThreadsDir(dir, false);
+  } catch {
+    return false;
+  }
+  for (const entry of await listDirectoryEntries(threadsDir)) {
+    if (entry.kind !== "file") continue;
+    if (!entry.name.endsWith(FEEDBACK_THREAD_FILE_SUFFIX)) continue;
+    const threadId = entry.name.slice(0, -FEEDBACK_THREAD_FILE_SUFFIX.length);
+    if (THREAD_ID_PATTERN.test(threadId) && !threadId.endsWith(".json")) return true;
+  }
+  return false;
+}
+
+/**
+ * Best-effort migration, for the read path.
+ *
+ * A failure here is NEVER fatal: a read-only handle (safeWriteJson throws via
+ * assertWritableMode), a revoked grant, a lost race with another client. The
+ * caller falls back to the legacy log, so a guest with a read grant still sees
+ * the full history instead of an empty panel.
+ */
+async function ensureMigrated(dir: DirectoryHandleLike): Promise<void> {
+  try {
+    await migrateLegacyMessages(dir);
+  } catch (error) {
+    logError("feedback:migrateLegacyMessages", error);
   }
 }
 
