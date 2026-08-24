@@ -40,6 +40,17 @@ export const SYSTEM_FOLDER_NAMES = {
    * machinery. See `src/data/adhocImport/`.
    */
   adhocImports: "adhoc-imports",
+  /**
+   * Persistent error log (owner requirement, 2026-08-24): one
+   * `{stem}.errors.json` per user plus per-user per-year archives, written by
+   * `src/data/errorLog/`. Deliberately NOT under `audit/` — the audit trail
+   * records what PEOPLE deliberately did and is governance evidence; this
+   * records what the SOFTWARE failed to do and is diagnostics. Mixing them
+   * would put a 6,500-entries-a-month telemetry stream inside the folder an
+   * auditor reads, and would drag the audit log's B5 hash-chain semantics onto
+   * data that does not warrant them.
+   */
+  systemErrors: "system-errors",
 } as const;
 
 export const REPORTS_SUBFOLDERS = {
@@ -59,6 +70,22 @@ export const REPORTS_SUBFOLDERS = {
  */
 export const NOTIFICATIONS_SUBFOLDERS = {
   acks: "acks",
+} as const;
+
+/**
+ * Children of `5-system/feedback/`.
+ *
+ * `threads/` holds ONE self-contained file per conversation
+ * (`{threadId}.json`: the original message plus every reply). Feedback used to
+ * be a single shared `messages.json` that every employee and every admin
+ * rewrote in full on every submit and every reply — the same one-file-many-
+ * writers shape the notification acks and the audit logs were already split
+ * out of, and for the same reason: on a UNC/SMB share two concurrent writers
+ * contend, the loser retries against a growing file, and the CAS ladder
+ * exhausts (XQ-IO-032). A reply now rewrites only its own thread.
+ */
+export const FEEDBACK_SUBFOLDERS = {
+  threads: "threads",
 } as const;
 
 /**
@@ -589,6 +616,70 @@ export async function getAuditActionsDir(
     create,
     null
   );
+}
+
+/**
+ * `5-system/system-errors/` — one `{stem}.errors.json` per user, plus per-user
+ * yearly archives. Resolved through `getChildDir` for the same two reasons
+ * `getAuditRoot` documents: the handle is cached (no re-walk per write) and the
+ * path is registered with `registerDirectoryPath`, so `withResourceLock` keys
+ * stay path-qualified instead of degrading to the bare leaf name.
+ */
+export async function getSystemErrorsDir(
+  directoryHandle: DirectoryHandleLike,
+  create = true
+): Promise<DirectoryHandleLike> {
+  return getChildDir(
+    directoryHandle,
+    WORKSPACE_ROOTS.system,
+    () => getSystemRoot(directoryHandle, create),
+    SYSTEM_FOLDER_NAMES.systemErrors,
+    create,
+    null
+  );
+}
+
+/** `5-system/feedback/` — the feedback ("chat") root. */
+export async function getFeedbackDir(
+  directoryHandle: DirectoryHandleLike,
+  create = true
+): Promise<DirectoryHandleLike> {
+  return getChildDir(
+    directoryHandle,
+    WORKSPACE_ROOTS.system,
+    () => getSystemRoot(directoryHandle, create),
+    SYSTEM_FOLDER_NAMES.feedback,
+    create,
+    null
+  );
+}
+
+/** `5-system/feedback/threads/` — see `FEEDBACK_SUBFOLDERS.threads`. */
+export async function getFeedbackThreadsDir(
+  directoryHandle: DirectoryHandleLike,
+  create = true
+): Promise<DirectoryHandleLike> {
+  return getChildDir(
+    directoryHandle,
+    `${WORKSPACE_ROOTS.system}/${SYSTEM_FOLDER_NAMES.feedback}`,
+    () => getFeedbackDir(directoryHandle, create),
+    FEEDBACK_SUBFOLDERS.threads,
+    create,
+    null
+  );
+}
+
+/**
+ * The legacy workspace-ROOT `feedback/` folder — an undocumented 7th top-level
+ * folder that predates the move under `5-system/`. READ-ONLY by contract:
+ * `create` is not a parameter because nothing may ever create it again, and
+ * nothing may ever write into it. See `data-system-report.md` and
+ * `feedbackStorage.ts`'s module note.
+ */
+export async function getLegacyFeedbackDir(
+  directoryHandle: DirectoryHandleLike
+): Promise<DirectoryHandleLike> {
+  return directoryHandle.getDirectoryHandle(SYSTEM_FOLDER_NAMES.feedback, { create: false });
 }
 
 export function safeWorkspaceFilePart(value: string): string {
