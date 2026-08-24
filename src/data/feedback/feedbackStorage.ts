@@ -2,7 +2,7 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
-import { getSystemRoot, SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
+import { getFeedbackDir, getLegacyFeedbackDir } from "../workspace/workspacePaths";
 
 export type FeedbackCategory = "suggestion" | "issue" | "inquiry";
 
@@ -39,26 +39,6 @@ type FeedbackFile = {
 /** Also probed by `workspaceSync` for the `feedback` refresh family. */
 export const FEEDBACK_MESSAGES_FILE = "messages.json";
 const MESSAGES_FILE = FEEDBACK_MESSAGES_FILE;
-
-// Feedback used to live at the workspace root (`feedback/`), an undocumented
-// 7th top-level folder breaking the numbered `1-`…`6-` root convention every
-// other module follows (audit, notifications, browse presets all nest under
-// `5-system/`). It now writes under `5-system/feedback/` like its peers, but
-// reads still check the legacy root location so pre-existing workspaces keep
-// working. The legacy file is never deleted — only the new location is ever
-// written to, and once a mutation happens its content (legacy + new) lands in
-// the new location, which subsequent reads then prefer.
-async function getFeedbackDir(
-  dir: DirectoryHandleLike,
-  create: boolean
-): Promise<DirectoryHandleLike> {
-  const systemDir = await getSystemRoot(dir, create);
-  return systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.feedback, { create });
-}
-
-async function getLegacyFeedbackDir(dir: DirectoryHandleLike): Promise<DirectoryHandleLike> {
-  return dir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.feedback, { create: false });
-}
 
 function normalizeFeedbackFile(value: FeedbackFile | FeedbackMessage[]): FeedbackFile {
   // Legacy shape: a bare array of messages with no revision wrapper.
