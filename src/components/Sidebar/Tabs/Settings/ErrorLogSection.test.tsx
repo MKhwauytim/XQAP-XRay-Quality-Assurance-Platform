@@ -11,10 +11,13 @@
 // (The third fix in this bucket -- the four undefined CSS custom properties
 // in ErrorLogSection.css -- is a pure token rename with no runtime behavior
 // to assert here.)
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { clearErrors, logError } from "../../../../data/storage/errorLogger";
+import { createMemoryDirectory } from "../../../../data/storage/memoryDirectory";
+import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
+import { DEFAULT_LABELS } from "../../../../data/labels/labelsStore";
 import { ErrorLogSection } from "./ErrorLogSection";
 
 const permissionsMock = vi.hoisted(() => ({ can: true, canMutate: true }));
@@ -27,10 +30,27 @@ vi.mock("../../../../auth/usePermissions", () => ({
   }),
 }));
 
+// The component now also reads useWorkspace() (to decide whether to show the
+// export button) — every pre-existing test in this file exercised the
+// component with no workspace mock at all, so without this it would fail at
+// render for every one of them, not just the new export tests below.
+// Defaults to no workspace connected, matching the pre-existing tests' world.
+const workspaceMock = vi.hoisted(() => ({ handle: null as DirectoryHandleLike | null }));
+vi.mock("../../../../data/workspace/useWorkspace", () => ({
+  useWorkspace: () => ({ directoryHandle: workspaceMock.handle, status: "ready" }),
+}));
+
+const exportMock = vi.hoisted(() => ({ run: vi.fn() }));
+vi.mock("../../../../data/errorLog/errorLogExport", () => ({
+  exportWorkspaceErrorLog: exportMock.run,
+}));
+
 beforeEach(() => {
   clearErrors();
   permissionsMock.can = true;
   permissionsMock.canMutate = true;
+  workspaceMock.handle = null;
+  exportMock.run.mockReset().mockResolvedValue({ rowCount: 3 });
 });
 
 afterEach(() => {
@@ -97,5 +117,55 @@ describe("ErrorLogSection — visibility, clear gating, refresh", () => {
     });
 
     expect(screen.getByText("1")).toBeInTheDocument();
+  });
+});
+
+describe("ErrorLogSection — workspace export", () => {
+  function openPanel() {
+    render(<ErrorLogSection />);
+    fireEvent.click(screen.getByRole("button", { name: /سجل الأخطاء الأخيرة/ }));
+  }
+
+  it("exports the workspace-wide log, not just this browser's ring buffer", async () => {
+    workspaceMock.handle = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    openPanel();
+    fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.errlog_export_btn }));
+    await waitFor(() => expect(exportMock.run).toHaveBeenCalledWith(workspaceMock.handle, expect.anything()));
+  });
+
+  it("disables the export button while an export is running", async () => {
+    workspaceMock.handle = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    let resolve!: (v: { rowCount: number }) => void;
+    exportMock.run.mockReturnValue(new Promise((r) => { resolve = r; }));
+    openPanel();
+
+    const button = screen.getByRole("button", { name: DEFAULT_LABELS.errlog_export_btn });
+    fireEvent.click(button);
+    await waitFor(() => expect(screen.getByRole("button", { name: DEFAULT_LABELS.errlog_exporting })).toBeDisabled());
+
+    await act(async () => { resolve({ rowCount: 3 }); });
+    await waitFor(() => expect(screen.getByRole("button", { name: DEFAULT_LABELS.errlog_export_btn })).toBeEnabled());
+  });
+
+  it("reports an empty export as empty rather than as a silent success", async () => {
+    workspaceMock.handle = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    exportMock.run.mockResolvedValue({ rowCount: 0 });
+    openPanel();
+    fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.errlog_export_btn }));
+    expect(await screen.findByRole("status")).toHaveTextContent(DEFAULT_LABELS.errlog_export_empty);
+  });
+
+  it("surfaces a thrown export as an in-page alert, not an unhandled rejection", async () => {
+    workspaceMock.handle = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    exportMock.run.mockRejectedValue(new Error("boom"));
+    openPanel();
+    fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.errlog_export_btn }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(DEFAULT_LABELS.errlog_export_failed);
+  });
+
+  it("hides the export button when no workspace is connected", () => {
+    workspaceMock.handle = null;
+    openPanel();
+    expect(screen.queryByRole("button", { name: DEFAULT_LABELS.errlog_export_btn })).not.toBeInTheDocument();
   });
 });
