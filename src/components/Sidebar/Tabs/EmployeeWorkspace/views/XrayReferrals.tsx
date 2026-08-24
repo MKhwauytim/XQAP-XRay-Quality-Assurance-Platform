@@ -153,6 +153,17 @@ export type ReplacementDialogState = {
   entry: DistributionEntry;
   recommended: ReplacementIndexRow[];
   all: ReplacementIndexRow[];
+  /**
+   * Idempotency key for the non-recommended (approval-required) branch of
+   * `handleReplace`, stable across retries of the same confirm click — same
+   * shape and reason as `ReassignModalState.sourceRequestId` above. Generated
+   * once when the dialog opens (`openReplacementDialog`) and reused on every
+   * retry so a partial-failure retry never creates a second copy of a request
+   * already durably written for this exact candidate pairing; a genuinely new
+   * dialog open (after this one closes) gets a fresh id, so a later request
+   * for the same original/replacement pair is never mistaken for a replay.
+   */
+  requestId: string;
 } | null;
 // Exported so subComponents.tsx's ReassignModal can `import type` it back.
 export type ReassignModalState = {
@@ -1535,14 +1546,27 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       candidates = { recommended: [], all: [] }; // dialog will show empty candidates gracefully
     }
     setReplacementError(null);
-    setReplacementDialog({ entry, ...candidates });
+    setReplacementDialog({
+      entry,
+      ...candidates,
+      // Generated once per dialog open, not per confirm click — see the type's
+      // own doc comment (B-XQIO032 peer finding: this used to be regenerated
+      // inline on every `handleReplace` call, so a retry after a failed write
+      // could never be recognized as a replay by appendReplacementToEmployee's
+      // requestId dedup, and risked writing a duplicate request).
+      requestId: `rep-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    });
   }
 
   async function handleReplace(
     entry: DistributionEntry,
     replacement: ReplacementIndexRow,
     reason: string,
-    fromRecommended: boolean
+    fromRecommended: boolean,
+    /** `replacementDialog.requestId` — see that type's own doc comment. Passed
+     *  explicitly rather than read from the closure, matching how `entry`
+     *  itself already arrives as a param instead of via `replacementDialog.entry`. */
+    requestId: string
   ): Promise<void> {
     if (!canRequestReplacement) {
       setStatusMsg({ type: "error", text: "لا تملك صلاحية طلب الاستبدال، أو أن مساحة العمل للقراءة فقط." });
@@ -1656,7 +1680,12 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         // Non-recommended — requires supervisor approval.
         // Store only the id (not the full row) to avoid stale copies.
         const request: ReplacementRequest = {
-          requestId: `rep-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          // Stable across retries of this same confirm click (the dialog's own
+          // requestId, generated once when it opened) — never regenerated here,
+          // so a retry after a failed write is recognized as a replay by
+          // appendReplacementToEmployee's requestId dedup instead of writing a
+          // second request. See ReplacementDialogState's own doc comment.
+          requestId,
           // Must match the folder the request is appended to (below): every
           // distribution read/write approveReplacement performs is keyed off
           // this field, so a record stored in the ad-hoc store while naming the
@@ -1827,11 +1856,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       // must refresh the queue in place rather than flashing the loading state.
       await loadData({ silent: true });
     } catch (error) {
-      setReassignError(
-        error instanceof MonthClosedError
-          ? getLabels().msg_month_closed_write_blocked
-          : error instanceof Error ? error.message : "خطأ غير معروف"
-      );
+      // Was a hand-rolled `error instanceof Error ? error.message : "..."` —
+      // the exact raw-English-on-an-Arabic-screen pattern `thrownWriteErrorText`
+      // exists to prevent (see its doc comment above), and unlike every sibling
+      // handler in this file it never called `logError`/`logCodedError` either.
+      setReassignError(thrownWriteErrorText(error));
     } finally {
       setReassignBusy(false);
     }
@@ -1867,14 +1896,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       </PageHeader>
 
       {statusMsg && (
-        <div className={statusMsg.type === "ok" ? "ew-msg-ok" : "ew-msg-error"} role="status">
-          {statusMsg.text}
-          <button
-            type="button"
-            aria-label="إغلاق"
-            style={{ float: "left", background: "none", border: "none", cursor: "pointer" }}
-            onClick={() => setStatusMsg(null)}
-          ><X size={14} /></button>
+        <div className={`${statusMsg.type === "ok" ? "ew-msg-ok" : "ew-msg-error"} ew-msg-dismissible`} role="status">
+          <span>{statusMsg.text}</span>
+          <button type="button" className="ew-msg-dismiss-btn" aria-label="إغلاق" onClick={() => setStatusMsg(null)}>
+            <X size={14} />
+          </button>
         </div>
       )}
 
@@ -2171,7 +2197,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
             setReplacementDialog(null);
             setReplacementError(null);
           }}
-          onSelect={(row, reason, fromRecommended) => { void handleReplace(replacementDialog.entry, row, reason, fromRecommended); }}
+          onSelect={(row, reason, fromRecommended) => { void handleReplace(replacementDialog.entry, row, reason, fromRecommended, replacementDialog.requestId); }}
         />
       ) : null}
 

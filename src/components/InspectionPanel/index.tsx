@@ -217,6 +217,22 @@ export default function InspectionPanel({
     setSubmitting(true);
     try {
       await onSave(collect());
+    } catch {
+      // Defense in depth (B-XQIO032). Every current caller's `onSave`
+      // (XrayReferrals' `handleSave`) already catches its own write errors
+      // internally and resolves normally, reporting failure through the
+      // page-level status banner — this branch is not expected to run today.
+      // But this panel's own prop contract does not promise `onSave` never
+      // rejects, and if it ever did, an uncaught rejection here would leave
+      // the button stuck on "جارٍ التقديم…" with no visible explanation at
+      // all, which is strictly worse than the generic message below. `ans`
+      // is untouched either way — this branch does not, and must not, clear
+      // it; the whole point is that the typed answer survives to be retried.
+      // The raw exception is intentionally not shown: it is internal English
+      // (DOMException wording, safeWrite validation strings) with no place in
+      // an Arabic UI — see `thrownWriteErrorText` in XrayReferrals.tsx, which
+      // applies the same rule at the page level.
+      setValidationMsg(getLabels().ip_msg_save_failed_generic);
     } finally {
       // Always clears, so a rejected save cannot leave the button stuck.
       setSubmitting(false);

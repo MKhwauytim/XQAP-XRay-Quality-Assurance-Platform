@@ -91,7 +91,7 @@ export default function QueueSplitResizer() {
     if (event.button !== 0) return;
     const handle = handleRef.current;
     if (!handle) return;
-    // The stacked (`@media max-width: 1100px`) layout hides this handle with
+    // The stacked (`@media max-width: 1160px`) layout hides this handle with
     // `display: none`. `offsetParent` cannot be used to detect that here — it
     // is permanently `null` under jsdom regardless of visibility, which would
     // make every test below fail to start a drag — so this reads the computed

@@ -328,12 +328,26 @@
 
 /* ── Narrow viewports ────────────────────────────────────────────────────── */
 
-/* Below the point where both minimums (340px + 430px + gap) can coexist with
-   the page's own padding, the two tracks stack. Every explicit placement above
-   is re-declared at matching specificity rather than overridden with
-   `!important`, and the panel drops its sticky/height behaviour because there
-   is no second column left for it to stay level with. */
-@media (max-width: 1100px) {
+/* Below the point where both minimums (340px + 430px + 14px gap = 784px) can
+   coexist with the surrounding chrome, the two tracks stack. The original
+   1100px threshold only checked raw viewport width against that 784px floor
+   and ignored everything the grid actually sits inside: the expanded sidebar
+   (280px, `--sidebar-width` in App.css), `.app-workspace`'s own
+   `padding-inline` (2 × `--sp-6` = 48px), and `.page-shell`'s fluid
+   `padding-inline: clamp(var(--sp-2), 1.2vw, var(--sp-6))` (≈27px combined in
+   this band). That leaves a real content width of roughly
+   `viewport - 280 - 48 - 0.024·viewport`, which only clears 784px once the
+   viewport reaches ~1139px — so viewports from just above 1100px up to ~1139px
+   had LESS room than the grid needed while the media query hadn't triggered
+   yet, and `.app-workspace`'s `overflow-x: hidden` silently clipped the
+   inspection-panel column instead of ever showing it. 1160px clears that
+   ~1139px break with a small margin for the vertical scrollbar `.app-workspace`
+   (`overflow-y: auto`) shows on any queue taller than one screen, which eats
+   more of the content width that this calc doesn't otherwise account for.
+   Every explicit placement below is re-declared at matching specificity rather
+   than overridden with `!important`, and the panel drops its sticky/height
+   behaviour because there is no second column left for it to stay level with. */
+@media (max-width: 1160px) {
   .ew-ref-queue.ew-xr-grid,
   .ew-ref-queue.ew-xr-grid--with-bar {
     grid-template-columns: minmax(0, 1fr);

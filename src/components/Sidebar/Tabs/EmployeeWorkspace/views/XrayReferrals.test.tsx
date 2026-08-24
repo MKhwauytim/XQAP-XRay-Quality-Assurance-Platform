@@ -48,6 +48,7 @@ import {
   appendReferralRequest,
   appendReplacementRequest,
   loadReferralLog,
+  loadReplacementLog,
 } from "../../../../../data/referral/referralStorage";
 import { readWorkspaceActions } from "../../../../../data/audit/actionLog";
 import type { ItemAnswer } from "../../../../../data/answers/answerTypes";
@@ -101,6 +102,25 @@ vi.mock("../../../../../data/distribution/replacement", async (importOriginal) =
 });
 
 const executeReplacementMock = vi.mocked(executeReplacement);
+
+// Partial mock, same delegate-to-actual-by-default shape as `executeReplacement`
+// above — every existing test keeps the REAL append (several seed helpers call
+// it directly), and only a test that installs a `…Once` override sees different
+// behaviour. Needed to make the non-recommended (approval-required) branch of
+// `handleReplace` FAIL on demand without simulating a genuine casLoop
+// exhaustion, to prove the confirm-retry requestId stability fix (B-XQIO032
+// peer finding).
+vi.mock("../../../../../data/referral/referralStorage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../../../data/referral/referralStorage")>();
+  return {
+    ...actual,
+    appendReplacementRequest: vi.fn((...args: Parameters<typeof actual.appendReplacementRequest>) =>
+      actual.appendReplacementRequest(...args)
+    ),
+  };
+});
+
+const appendReplacementRequestMock = vi.mocked(appendReplacementRequest);
 
 vi.mock("../../../../../data/month/useGlobalMonth", () => ({
   useGlobalMonth: () => ({
@@ -711,6 +731,79 @@ describe("XrayReferrals post-success reloads (Bug 1 regression)", () => {
           entry.message.includes("could not be found")
       )
     ).toBe(true);
+  });
+});
+
+// B-XQIO032 peer finding: the approval-required (non-recommended) branch of
+// handleReplace used to build `requestId` inline with `Date.now()` +
+// `Math.random()` on every call, so a retry after a failed write generated a
+// BRAND NEW id instead of reusing the one already written for this attempt —
+// defeating appendReplacementToEmployee's own requestId dedup and risking a
+// duplicate pending request for the same intended replacement. The fix moves
+// id generation to `openReplacementDialog` (once per dialog open, stored on
+// `replacementDialog.requestId`), mirroring `ReassignModalState.sourceRequestId`,
+// which already got this right.
+describe("XrayReferrals replacement request retry — stable requestId across a failed confirm click (B-XQIO032 peer finding)", () => {
+  it("reuses the same request id on retry after a failed non-recommended replacement submission", async () => {
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedAssignedSample(root, "emp-1");
+
+    const replacementRow = makeRow("IMG-2");
+    // Empty "recommended" list so the dialog defaults straight to the "all"
+    // tab — its per-row action is the approval-required branch
+    // (fromRecommended === false), the one whose requestId this test pins.
+    getReplacementCandidatesIndexedMock.mockResolvedValue({ recommended: [], all: [replacementRow] });
+
+    // Clears call history left by other tests in this file (several call the
+    // REAL `appendReplacementRequest` directly for seeding), without disturbing
+    // the delegate-to-actual base implementation the module mock installed —
+    // this test's own call-count assertions below need to start from zero.
+    appendReplacementRequestMock.mockClear();
+    appendReplacementRequestMock.mockImplementationOnce(async () => ({
+      ok: false,
+      error: "فشل الكتابة (محاكاة)",
+    }));
+
+    render(<XrayReferrals directoryHandle={root} />);
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+
+    fireEvent.click(await waitFor(() => screen.getByRole("button", { name: "طلب استبدال" })));
+    const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
+    fireEvent.change(within(dialog).getByLabelText(/سبب الاستبدال/), {
+      target: { value: "صورة غير واضحة" },
+    });
+
+    // First confirm click fails via the mocked rejection above. The dialog
+    // must stay open (no close-on-failure) with the same candidate and reason.
+    fireEvent.click(within(dialog).getByRole("button", { name: "طلب استبدال" }));
+    await waitFor(() => expect(appendReplacementRequestMock).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    // Retry — same button, same still-open dialog, nothing re-typed.
+    fireEvent.click(within(dialog).getByRole("button", { name: "طلب استبدال" }));
+    await waitFor(() => expect(appendReplacementRequestMock).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.getByText("تم إرسال طلب الاستبدال — بانتظار موافقة المشرف.")).toBeInTheDocument()
+    );
+
+    const firstRequest = appendReplacementRequestMock.mock.calls[0]![2];
+    const secondRequest = appendReplacementRequestMock.mock.calls[1]![2];
+    expect(secondRequest.requestId).toBe(firstRequest.requestId);
+
+    // And the durable effect matches the id-level assertion above: exactly one
+    // request was ever actually persisted for this candidate, not two — the
+    // write-layer dedup-by-requestId this fix relies on (appendReplacementToEmployee)
+    // actually held because both calls carried the same id. The first call's
+    // mocked rejection never reached disk at all, so this also confirms the
+    // retry (the real, non-mocked second call) is what wrote it.
+    const log = await loadReplacementLog(root, MONTH);
+    expect(log.requests).toHaveLength(1);
+    expect(log.requests[0]!.requestId).toBe(firstRequest.requestId);
+    expect(log.requests[0]!.originalXrayImageId).toBe("IMG-1");
+    expect(log.requests[0]!.replacementXrayImageId).toBe("IMG-2");
   });
 });
 
