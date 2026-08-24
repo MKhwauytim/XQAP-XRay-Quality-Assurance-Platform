@@ -202,3 +202,78 @@ describe("casLoop — terminal permission-error classification", () => {
     expect(result).toEqual({ ok: false, error: "تعارض في الكتابة" });
   });
 });
+
+// B-XQIO032: the `onExhausted` observability hook — a call-site-specific
+// telemetry seam distinct from casLoop's own unconditional `casLoop:exhausted`
+// log entry (that behaviour is untouched and not re-tested here).
+describe("casLoop — onExhausted hook (B-XQIO032)", () => {
+  it("fires with the raw cause and resolved code only when every attempt threw", async () => {
+    const seen: Array<{ cause: unknown; code: string }> = [];
+    const boom = new Error("share went away mid-write");
+    boom.name = "SomeUnclassifiedError";
+
+    const result = await casLoop<string>(
+      async () => {
+        throw boom;
+      },
+      {
+        maxRetries: 3,
+        baseDelayMs: 1,
+        onExhausted: (cause, code) => seen.push({ cause, code }),
+      }
+    );
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.cause).toBe(boom);
+    expect(seen[0]!.code).toBe("XQ-IO-032"); // unclassified DOM name → catch-all
+    expect(result).toEqual({ ok: false, error: expect.any(String) });
+  });
+
+  it("does not fire on a plain lost-revision exhaustion (no exception ever thrown)", async () => {
+    const seen: unknown[] = [];
+    await casLoop<string>(
+      async () => ({ done: false }),
+      { maxRetries: 3, baseDelayMs: 1, onExhausted: (cause) => seen.push(cause) }
+    );
+    expect(seen).toHaveLength(0);
+  });
+
+  it("does not fire, and does not retry, on a terminal permission-lost error", async () => {
+    const seen: unknown[] = [];
+    let attempts = 0;
+    const result = await casLoop<string>(
+      async () => {
+        attempts += 1;
+        const err = new Error("no longer allowed");
+        err.name = "NotAllowedError";
+        throw err;
+      },
+      { maxRetries: 5, baseDelayMs: 1, onExhausted: (cause) => seen.push(cause) }
+    );
+    expect(attempts).toBe(1);
+    expect(seen).toHaveLength(0);
+    expect(result).toEqual({
+      ok: false,
+      error: expect.stringContaining("فقد الوصول إلى مجلد العمل"),
+    });
+  });
+
+  it("a throwing observer cannot change the resolved outcome", async () => {
+    const boom = new Error("disk full");
+    const result = await casLoop<string>(
+      async () => {
+        throw boom;
+      },
+      {
+        maxRetries: 2,
+        baseDelayMs: 1,
+        conflictError: "تعارض",
+        onExhausted: () => {
+          throw new Error("observer itself is broken");
+        },
+      }
+    );
+    // Still resolves normally — the observer's own failure is swallowed.
+    expect(result).toEqual({ ok: false, error: expect.any(String) });
+  });
+});

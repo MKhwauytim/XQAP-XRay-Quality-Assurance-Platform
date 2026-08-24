@@ -534,6 +534,12 @@ export const DEFAULT_LABELS = {
   ip_next_phase_btn:            "المرحلة التالية",
   ip_msg_missing_required_submit: "أكمل جميع الحقول الإلزامية قبل التقديم.",
   ip_msg_missing_required_phase:  "أكمل الحقول الإلزامية في هذه المرحلة قبل الانتقال.",
+  // B-XQIO032 defense in depth: every current caller's onSave already catches
+  // its own write errors and resolves normally, but this panel's own contract
+  // does not guarantee that — shown only if onSave ever rejects outright, so
+  // the button never gets stuck with no visible explanation. The entered
+  // answer is untouched either way (`ans` is not reset on this path).
+  ip_msg_save_failed_generic:    "تعذّر حفظ الإجابة. الإجابة التي أدخلتها ما زالت موجودة — يمكنك المحاولة مرة أخرى.",
   ip_no_template_msg:           "اختر نموذجاً لعرض حقول الفحص.",
   ip_no_visible_fields_msg:     "لا توجد حقول ظاهرة في هذه المرحلة.",
   ip_select_placeholder:        "اختر...",
