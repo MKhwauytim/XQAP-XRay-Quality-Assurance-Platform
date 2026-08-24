@@ -170,6 +170,142 @@ function normalizeThread(value: FeedbackThread): FeedbackThread {
   };
 }
 
+/** Raw index read, no reconciliation — `listThreadSummaries` (Task 4) is the reconciling reader. */
+export async function loadThreadsIndex(
+  dir: DirectoryHandleLike
+): Promise<FeedbackThreadsIndex> {
+  try {
+    const feedbackDir = await getFeedbackDir(dir, false);
+    const result = await safeReadJson<FeedbackThreadsIndex>(feedbackDir, FEEDBACK_THREADS_INDEX_FILE);
+    if (result.ok && Array.isArray(result.value.threads)) {
+      return { ...result.value, threads: result.value.threads };
+    }
+  } catch {
+    // No feedback folder yet, or the index is unreadable. Either way the thread
+    // files are the authority; an empty index is a safe starting point because
+    // listThreadSummaries reconciles against the directory listing.
+  }
+  return { threads: [] };
+}
+
+/**
+ * CAS read-modify-write of the shared `threads.index.json`.
+ *
+ * Same contract as reportDesignStorage's `updateDesignIndex`: the caller's
+ * outer `withResourceLock` serializes same-tab writers, casLoop re-reads fresh,
+ * bumps `revision`, stamps `_writeToken` and verifies BOTH on read-back so a
+ * concurrent writer on another machine is never silently dropped.
+ *
+ * WHAT CHANGED vs. the old `mutateFeedback`: this file is now touched only on
+ * thread CREATE and on a STATUS CHANGE — never on a reply — and it carries no
+ * message bodies, so it stays small and rarely written. The old shared log was
+ * rewritten in full by every submit AND every reply, which is what exhausted
+ * the ladder (XQ-IO-032).
+ *
+ * No delayed verify: this is a rebuildable cache (see FeedbackThreadsIndex).
+ * A lost index update self-heals on the next `listThreadSummaries`, which
+ * reconciles against the thread-file listing. The durable content lives in the
+ * per-thread file, which is written before this runs.
+ */
+async function updateThreadsIndex(
+  dir: DirectoryHandleLike,
+  apply: (threads: FeedbackThreadSummary[]) => FeedbackThreadSummary[]
+): Promise<void> {
+  const feedbackDir = await getFeedbackDir(dir, true);
+  // `:index` suffix keeps this outer lock distinct from safeWriteJson's own
+  // `${dir.name}/${fileName}` lock -- withResourceLock is not reentrant.
+  const outcome = await withResourceLock(`${feedbackDir.name}/${FEEDBACK_THREADS_INDEX_FILE}:index`, () =>
+    casLoop<{ ok: true }>(
+      async (writeToken) => {
+        const existing = await safeReadJson<FeedbackThreadsIndex>(
+          feedbackDir,
+          FEEDBACK_THREADS_INDEX_FILE
+        );
+        const current: FeedbackThreadsIndex = existing.ok
+          ? { ...existing.value, threads: Array.isArray(existing.value.threads) ? existing.value.threads : [] }
+          : { threads: [] };
+        const nextRevision = (current.revision ?? 0) + 1;
+        const updated: FeedbackThreadsIndex = {
+          revision: nextRevision,
+          _writeToken: writeToken,
+          threads: apply(current.threads),
+        };
+        await safeWriteJson<FeedbackThreadsIndex>(feedbackDir, FEEDBACK_THREADS_INDEX_FILE, updated);
+        const verify = await safeReadJson<FeedbackThreadsIndex>(
+          feedbackDir,
+          FEEDBACK_THREADS_INDEX_FILE
+        );
+        if (
+          verify.ok &&
+          verify.value.revision === nextRevision &&
+          verify.value._writeToken === writeToken
+        ) {
+          return { done: true, result: { ok: true as const } };
+        }
+        return { done: false };
+      },
+      { conflictError: "تعذّر تحديث فهرس الملاحظات: تعارض في الكتابة بعد عدة محاولات." }
+    )
+  );
+  if (!outcome.ok) {
+    throw new Error(outcome.error);
+  }
+}
+
+function summarize(thread: FeedbackThread, lastActivityAt: string): FeedbackThreadSummary {
+  return {
+    threadId: thread.id,
+    from: thread.from,
+    role: thread.role,
+    category: thread.category,
+    status: thread.status,
+    createdAt: thread.timestamp,
+    lastActivityAt,
+    preview: feedbackThreadPreview(thread.text),
+  };
+}
+
+/**
+ * Start a new conversation.
+ *
+ * The thread file is written FIRST and needs NO CAS: its id was just minted and
+ * has never existed, so no other writer on any machine can be targeting that
+ * name. That is the actual contention fix — under the old shared-log design
+ * this same operation rewrote a file every other user was also rewriting.
+ *
+ * The index append runs second and is best-effort-durable: if it fails after
+ * the thread landed, the message is still on disk and `listThreadSummaries`
+ * folds it back in (and repairs the index) on the next read. The error is
+ * still surfaced so the user is not told a partial save succeeded.
+ */
+export async function createThread(
+  dir: DirectoryHandleLike,
+  payload: { from: string; role: string; category: FeedbackCategory; text: string }
+): Promise<FeedbackThread> {
+  const now = new Date();
+  const thread: FeedbackThread = {
+    id: newFeedbackThreadId(now),
+    from: payload.from,
+    role: payload.role,
+    category: payload.category,
+    text: payload.text,
+    timestamp: now.toISOString(),
+    status: "open",
+    replies: [],
+    revision: 1,
+  };
+
+  const threadsDir = await getFeedbackThreadsDir(dir, true);
+  await safeWriteJson<FeedbackThread>(threadsDir, feedbackThreadFileName(thread.id), thread);
+
+  await updateThreadsIndex(dir, (threads) => [
+    ...threads.filter((summary) => summary.threadId !== thread.id),
+    summarize(thread, thread.timestamp),
+  ]);
+
+  return thread;
+}
+
 /**
  * On-disk shape for `messages.json`. The list is wrapped so it can carry the CAS
  * bookkeeping (`revision` + `_writeToken`) that lets casLoop detect a concurrent
@@ -275,23 +411,12 @@ async function mutateFeedback(
   }
 }
 
+/** Compatibility wrapper — the widget, the sync tests and the unread tests all call this name. */
 export async function submitFeedback(
   dir: DirectoryHandleLike,
   payload: { from: string; role: string; category: FeedbackCategory; text: string }
 ): Promise<void> {
-  await mutateFeedback(dir, (messages) => {
-    messages.unshift({
-      id: crypto.randomUUID(),
-      from: payload.from,
-      role: payload.role,
-      category: payload.category,
-      text: payload.text,
-      timestamp: new Date().toISOString(),
-      status: "open",
-      replies: [],
-    });
-    return messages;
-  });
+  await createThread(dir, payload);
 }
 
 export async function replyToFeedback(

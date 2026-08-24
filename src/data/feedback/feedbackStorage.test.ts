@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createMemoryDirectory } from "../storage/memoryDirectory";
+import { clearOperationLog, createMemoryDirectory, getOperationLog } from "../storage/memoryDirectory";
 import { safeWriteJson } from "../storage/safeWrite";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
@@ -15,8 +15,11 @@ import {
   type FeedbackMessage,
 } from "./feedbackStorage";
 
-function makeRoot(): DirectoryHandleLike {
-  return createMemoryDirectory("root") as DirectoryHandleLike;
+function makeRoot(
+  name = "root",
+  options: Parameters<typeof createMemoryDirectory>[1] = {}
+): DirectoryHandleLike {
+  return createMemoryDirectory(name, options) as DirectoryHandleLike;
 }
 
 describe("feedbackStorage", () => {
@@ -115,6 +118,67 @@ describe("feedbackStorage", () => {
     const messages = await loadFeedback(root);
     expect(messages).toHaveLength(2);
     expect(messages.map((m) => m.from).sort()).toEqual(["userA", "userB"]);
+  });
+
+  it("writes a new thread to its own file under 5-system/feedback/threads/", async () => {
+    const root = makeRoot();
+    const thread = await createThread(root, {
+      from: "sara",
+      role: "employee",
+      category: "suggestion",
+      text: "اقتراح",
+    });
+
+    const systemDir = await root.getDirectoryHandle("5-system", { create: false });
+    const feedbackDir = await systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.feedback, {
+      create: false,
+    });
+    const threadsDir = await feedbackDir.getDirectoryHandle("threads", { create: false });
+    const handle = await threadsDir.getFileHandle(`${thread.id}.json`, { create: false });
+    expect(await (await handle.getFile()).text()).toContain("اقتراح");
+
+    // The shared legacy log is never written to by the new path.
+    await expect(feedbackDir.getFileHandle("messages.json", { create: false })).rejects.toThrow();
+  });
+
+  it("appends the new thread's summary to threads.index.json", async () => {
+    const root = makeRoot();
+    const thread = await createThread(root, {
+      from: "sara",
+      role: "employee",
+      category: "issue",
+      text: "سطر أول\nسطر ثانٍ",
+    });
+
+    const index = await loadThreadsIndex(root);
+    expect(index.threads).toHaveLength(1);
+    expect(index.threads[0]!.threadId).toBe(thread.id);
+    expect(index.threads[0]!.status).toBe("open");
+    // Preview is the FIRST LINE only -- the body stays in the thread file.
+    expect(index.threads[0]!.preview).toBe("سطر أول");
+    expect(index.threads[0]!.preview).not.toContain("سطر ثانٍ");
+  });
+
+  it("two concurrent submits never touch the same thread file (the contention fix)", async () => {
+    const root = makeRoot("root", { trackOperations: true });
+    clearOperationLog(root);
+
+    const [a, b] = await Promise.all([
+      createThread(root, { from: "userA", role: "employee", category: "suggestion", text: "من الجهاز الأول" }),
+      createThread(root, { from: "userB", role: "supervisor", category: "issue", text: "من الجهاز الثاني" }),
+    ]);
+
+    expect(a.id).not.toBe(b.id);
+    const written = getOperationLog(root)
+      .filter((entry) => entry.operation === "createWritable")
+      .map((entry) => entry.name);
+    // Each submit wrote its OWN thread file. The two names are disjoint, so no
+    // retry ladder can be triggered by the other writer -- that is the fix.
+    expect(written).toContain(`${a.id}.json`);
+    expect(written).toContain(`${b.id}.json`);
+
+    const index = await loadThreadsIndex(root);
+    expect(index.threads.map((t) => t.from).sort()).toEqual(["userA", "userB"]);
   });
 
   it("loadThread returns null for an id that has no file, and the thread for one that does", async () => {
