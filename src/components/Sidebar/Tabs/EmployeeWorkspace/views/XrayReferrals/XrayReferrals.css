@@ -23,8 +23,15 @@
   display: grid;
   /* The handoff's own track definition. Both minimums are real: the queue can
      never be squeezed below 340px (it scrolls horizontally instead — see
-     `.dt-table` below), and the form column never below 430px. */
-  grid-template-columns: minmax(340px, 1.15fr) minmax(430px, 1fr);
+     `.dt-table` below), and the form column never below 430px — and they stay
+     real once the divider is draggable: CSS clamps before the ratio does.
+     The first track is a PERCENTAGE rather than the original `1.15fr` because
+     a custom property cannot produce an `fr` (`var(--x) fr` is invalid, and
+     `fr` inside `calc()` is not usable here). 53.49% is 1.15 ÷ 2.15 — the
+     proportion this grid has always rendered. QueueSplitResizer overwrites the
+     property on the element; the fallback here is what an untouched install,
+     or a cleared localStorage, gets. */
+  grid-template-columns: minmax(340px, var(--ew-xr-queue-basis, 53.49%)) minmax(430px, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto;
   align-items: stretch;
   /* `gap: 14px` in the handoff. Split deliberately: the row tracks below are
@@ -75,12 +82,58 @@
   grid-column: 2;
   grid-row: 2 / 4;
   min-width: 0;
+  position: relative;
   display: flex;
   flex-direction: column;
 }
 
 .ew-xr-panel-col > .ip-panel {
   flex: 1 1 auto;
+}
+
+/* ── The draggable divider (QueueSplitResizer.tsx) ───────────────────────── */
+
+/* Deliberately NOT a grid child. Every child of this grid is placed by
+   explicit line number (see the comments above and the `--with-bar` variant),
+   so a new one would need placement rules in both variants and would be one
+   more thing that can re-flow the panel under the pagination. Absolutely
+   positioning it into the 14px gutter at the panel column's inline-start edge
+   needs no grid change at all, and `.ew-xr-panel-col` already spans exactly
+   the rows the divider should cover. `inset-inline-start` puts it on the
+   correct side in RTL and LTR alike. */
+.ew-xr-split-handle {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: -14px;      /* == column-gap */
+  width: 14px;
+  z-index: 2;
+  cursor: col-resize;
+  background: none;
+  border: none;
+  touch-action: none;             /* the pointer stream is ours, not a scroll */
+}
+
+/* The visible line is a 2px rule centred in the gutter — the hit area stays
+   the full 14px, because a 2px target is not one. */
+.ew-xr-split-handle::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 6px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--c-border);
+  transition: background 120ms ease;
+}
+
+.ew-xr-split-handle:hover::before,
+.ew-xr-split-handle:focus-visible::before {
+  background: var(--c-navy);
+}
+
+.ew-xr-split-handle:focus-visible {
+  outline: 2px solid var(--c-navy);
+  outline-offset: -2px;
 }
 
 /* ── Selection bar variant ───────────────────────────────────────────────── */
@@ -318,6 +371,11 @@
     min-height: 0;
     max-height: none;
   }
+
+  /* Stacked: there is no gutter and no split. The component also refuses to
+     start a drag while `offsetParent` is null, so hiding it here is the whole
+     disable — no second code path. */
+  .ew-xr-split-handle { display: none; }
 }
 
 /* ── Oversight scope picker (whose queue am I looking at?) ────────────────── */
