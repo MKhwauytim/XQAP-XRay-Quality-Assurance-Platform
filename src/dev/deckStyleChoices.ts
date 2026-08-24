@@ -4,7 +4,7 @@
 // middleware (deckStyleChoicesPlugin.ts), never from browser or app code.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { wrap, isEnvelope, type JsonEnvelope } from "../data/storage/jsonEnvelope";
+import { wrap, isEnvelope, type JsonEnvelope } from "../data/storage/jsonEnvelope.ts";
 
 export type DeckStyleChoices = Record<string, number>;
 
