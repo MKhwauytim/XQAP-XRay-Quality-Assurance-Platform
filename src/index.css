@@ -252,7 +252,12 @@ html {
 
   width: 100%;
   min-width: 320px;
-  min-height: 100%;
+  /* Bounded, not `min-height`: the whole shell below is a fixed-height
+     layout with its own internal scroll regions (.app-workspace and
+     .sidebar-nav). Letting the document scroll instead is what used to push
+     the sidebar footer — and the sign-out button in it — off the bottom of
+     any page taller than the viewport. */
+  height: 100%;
   margin: 0;
   padding: 0;
   background: var(--app-bg);
@@ -262,10 +267,13 @@ html {
 body {
   width: 100%;
   min-width: 320px;
-  min-height: var(--app-vh);
+  height: 100%;
   margin: 0;
   padding: 0;
-  overflow-x: hidden;
+  /* The document itself no longer scrolls in EITHER axis — .app-workspace
+     owns vertical scrolling and each table wrapper owns its own horizontal
+     scrolling. See the mobile re-declaration in App.css. */
+  overflow: hidden;
   background: var(--app-bg);
 }
 
@@ -273,9 +281,17 @@ body {
   width: 100%;
   min-width: 100%;
   max-width: none;
-  min-height: var(--app-vh);
+  height: 100%;
   margin: 0;
   padding: 0;
+  /* #root holds the AdminToolbar, the demo/restore/notification banners AND
+     .app-shell as siblings (see AuthGate.tsx:713-724 and App.tsx:267-395).
+     A flex column lets the chrome keep its intrinsic height while the shell
+     takes exactly the remainder — `height: 100%` on .app-shell alone would
+     make it a full viewport TALL PLUS the toolbar. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background: var(--app-bg);
 }
 
@@ -417,3 +433,32 @@ textarea:hover:not(:disabled) {
 ::-webkit-scrollbar-track  { background: transparent; }
 ::-webkit-scrollbar-thumb  { background: var(--c-border-2); border-radius: 999px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--c-ink-4); }
+
+/* ── Print ─────────────────────────────────────────────────────
+   The bounded shell above (html/body at `height: 100%; overflow:
+   hidden`, with .app-workspace owning the scrolling) is a SCREEN
+   layout. Print has no viewport to bound to and paginates a
+   free-flowing document instead, so the bounds are released here.
+
+   Concretely: ReportDesigner's print path
+   (ReportDesigner.css:848-869) hides every body child except
+   .rd-print-overlay and sets it back to `position: static`. Under a
+   clipped html/body that static overlay would be cut off at one
+   screen and only its first .rd-print-page would ever reach the
+   printer. */
+@media print {
+  html,
+  body,
+  #root {
+    height: auto;
+    overflow: visible;
+  }
+
+  .app-shell {
+    overflow: visible;
+  }
+
+  .app-workspace {
+    overflow: visible;
+  }
+}

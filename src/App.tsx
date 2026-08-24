@@ -224,6 +224,11 @@ export function AppContent({ session }: AppContentProps) {
 
   const activeTabId = activeTab?.id ?? "";
   const tabScrollPositions = useRef(new Map<string, number>());
+  // The document no longer scrolls (see App.css `.app-shell` / `.app-workspace`
+  // and the `body { overflow: hidden }` in index.css). `window.scrollY` is
+  // therefore permanently 0 and `window.scrollTo` a no-op, so per-tab scroll
+  // memory has to read and write the real scrollport instead.
+  const workspaceRef = useRef<HTMLElement | null>(null);
 
   // Tell the error log where the user is, so an error logged from anywhere in
   // the tree — including the data layer, which has no React context — is
@@ -236,11 +241,17 @@ export function AppContent({ session }: AppContentProps) {
     if (!activeTabId) return;
     const scrollPositions = tabScrollPositions.current;
     const animationFrame = window.requestAnimationFrame(() => {
-      window.scrollTo({ top: scrollPositions.get(activeTabId) ?? 0 });
+      const workspace = workspaceRef.current;
+      if (workspace) workspace.scrollTop = scrollPositions.get(activeTabId) ?? 0;
     });
     return () => {
       window.cancelAnimationFrame(animationFrame);
-      scrollPositions.set(activeTabId, window.scrollY);
+      // Deliberately reads the LIVE ref here, not a value captured when the
+      // effect ran: this cleanup fires at the moment the user navigates away
+      // from activeTabId, and it's the scroll position at THAT moment (after
+      // the user has scrolled the tab) that must be remembered.
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above
+      scrollPositions.set(activeTabId, workspaceRef.current?.scrollTop ?? 0);
     };
   }, [activeTabId]);
 
@@ -261,10 +272,15 @@ export function AppContent({ session }: AppContentProps) {
 
   useEffect(() => {
     if (!isMobileSidebarOpen) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    // Same reason as ModalPortal's lock: the body no longer scrolls, so
+    // locking it would be a no-op and the page would scroll behind the open
+    // drawer. workspaceRef is the scrollport (see the per-tab scroll effect).
+    const workspace = workspaceRef.current;
+    if (!workspace) return;
+    const previousOverflow = workspace.style.overflow;
+    workspace.style.overflow = "hidden";
     return () => {
-      document.body.style.overflow = previousOverflow;
+      workspace.style.overflow = previousOverflow;
     };
   }, [isMobileSidebarOpen]);
 
@@ -343,6 +359,7 @@ export function AppContent({ session }: AppContentProps) {
       />
 
       <section
+        ref={workspaceRef}
         className="app-workspace"
         aria-label={labels.app_workspace_aria}
         aria-hidden={isMobileSidebarOpen || undefined}

@@ -35,7 +35,12 @@
   grid-row: 1;
 
   width: 296px;
-  min-height: calc(var(--app-vh) - var(--topbar-height, 56px));
+  /* Grid item, same `min-height: auto` trap as .app-workspace. Bounded here
+     is what finally makes `.sidebar-nav { flex: 1; overflow-y: auto }`
+     (below) clip instead of grow — and therefore what keeps .sidebar-footer,
+     with the sign-out button, pinned to the bottom of the rail at all times. */
+  min-height: 0;
+  overflow: hidden;
 
   display: flex;
   flex-direction: column;

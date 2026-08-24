@@ -10,10 +10,19 @@
   width: 100%;
   min-width: 100%;
   max-width: none;
-  min-height: calc(var(--app-vh) - var(--topbar-height));
+  /* Takes the remainder of #root's flex column (below the toolbar and any
+     banners) rather than a hard-coded `--app-vh` minus a guessed chrome
+     height — the banner stack's height is variable. `min-height: 0` lets it
+     actually shrink to that remainder. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
 
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--sidebar-width);
+  /* Without an explicit row track the single implicit row is `auto`, which
+     sizes to content and overflows a bounded container. */
+  grid-template-rows: minmax(0, 1fr);
 
   margin: 0;
   padding: 0;
@@ -44,7 +53,12 @@
 
   width: 100%;
   min-width: 0;
-  min-height: calc(var(--app-vh) - var(--topbar-height));
+  /* A grid item defaults to `min-height: auto` and refuses to shrink below
+     its content, which would make `overflow-y` below never engage. This is
+     the line that makes the whole bounded-shell model work. */
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 
   direction: rtl;
   background: transparent;
@@ -64,7 +78,10 @@
 
 .tab-blank {
   width: 100%;
-  min-height: calc(var(--app-vh) - var(--topbar-height));
+  /* Direct child of the bounded scrollport (.app-workspace) — a percentage
+     is both correct and immune to the chrome-height guess `calc(var(--app-vh)
+     - var(--topbar-height))` used to require. */
+  min-height: 100%;
   margin: 0;
   padding: 0;
   background: transparent;
@@ -169,7 +186,9 @@
 }
 
 .app-no-tabs {
-  min-height: calc(var(--app-vh) - 44px);
+  /* Same reasoning as .tab-blank above — a direct child of the bounded
+     scrollport can size off `100%` instead of a stale chrome-height guess. */
+  min-height: 100%;
   display: grid;
   place-items: center;
   padding: 24px;
@@ -192,11 +211,20 @@
   .app-shell,
   .app-shell.sidebar-collapsed {
     display: block;
-    min-height: calc(var(--app-vh) - var(--topbar-height));
+    /* Mobile keeps the shell as ONE block: the sidebar is a fixed-position
+       drawer here (Sidebar.css:592-611), not a grid column, so there is no
+       second column to keep level with and no reason to bound the shell. */
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .app-workspace {
-    min-height: calc(100dvh - var(--topbar-height));
+    /* Still the scrollport on mobile — the desktop rule's overflow-y is
+       inherited, only the height source changes. `height: 100%` (of the
+       block-level .app-shell, which is itself the flex remainder) rather
+       than a dvh calc: the banner stack above is variable-height. */
+    height: 100%;
     padding: 12px 12px 22px;
   }
 

@@ -50,14 +50,27 @@ test.describe("UI scale", () => {
     await gotoSim(page, "employee");
     await openQueue(page);
 
-    const metrics = await page.evaluate(() => ({
-      shell: document.querySelector(".app-shell")!.getBoundingClientRect().height,
-      viewport: window.innerHeight,
-      docScrollWidth: document.documentElement.scrollWidth,
-      docClientWidth: document.documentElement.clientWidth,
-    }));
+    const metrics = await page.evaluate(() => {
+      // The shell no longer fills the viewport on its own — it is the flex
+      // remainder below the AdminToolbar and any banners (see
+      // src/index.css `#root`). What must still hold is that #root's
+      // column, toolbar included, leaves no dead band.
+      const shell = document.querySelector(".app-shell")!.getBoundingClientRect();
+      const root = document.getElementById("root")!.getBoundingClientRect();
+      return {
+        shell: shell.height,
+        shellBottom: shell.bottom,
+        root: root.height,
+        viewport: window.innerHeight,
+        docScrollWidth: document.documentElement.scrollWidth,
+        docClientWidth: document.documentElement.clientWidth,
+      };
+    });
 
-    expect(metrics.shell).toBeGreaterThanOrEqual(metrics.viewport - 2);
+    expect(metrics.root).toBeGreaterThanOrEqual(metrics.viewport - 2);
+    // And the shell reaches the bottom edge — a dead band would show up here
+    // even when #root itself measures full height.
+    expect(metrics.shellBottom).toBeGreaterThanOrEqual(metrics.viewport - 2);
     // The body must never scroll horizontally; only the table may.
     expect(metrics.docScrollWidth).toBeLessThanOrEqual(metrics.docClientWidth + 1);
   });
@@ -66,18 +79,26 @@ test.describe("UI scale", () => {
     await gotoSimWithScale(page, 0.7);
     await openQueue(page);
 
-    const metrics = await page.evaluate(() => ({
+    const metrics = await page.evaluate(() => {
       // getBoundingClientRect reports post-zoom device pixels, which is exactly
-      // what "does the user see empty space" needs.
-      shell: document.querySelector(".app-shell")!.getBoundingClientRect().height,
-      viewport: window.innerHeight,
-      appliedScale: getComputedStyle(document.documentElement).getPropertyValue("--ui-scale").trim(),
-    }));
+      // what "does the user see empty space" needs. See the sibling test above
+      // for why #root (not .app-shell alone) is the fill-the-viewport metric.
+      const shell = document.querySelector(".app-shell")!.getBoundingClientRect();
+      const root = document.getElementById("root")!.getBoundingClientRect();
+      return {
+        shell: shell.height,
+        shellBottom: shell.bottom,
+        root: root.height,
+        viewport: window.innerHeight,
+        appliedScale: getComputedStyle(document.documentElement).getPropertyValue("--ui-scale").trim(),
+      };
+    });
 
     expect(metrics.appliedScale).toBe("0.7");
     // The regression this pins: with a raw `100vh` the shell would come back at
     // ~0.7 × viewport and a third of the screen would be blank.
-    expect(metrics.shell).toBeGreaterThanOrEqual(metrics.viewport - 2);
+    expect(metrics.root).toBeGreaterThanOrEqual(metrics.viewport - 2);
+    expect(metrics.shellBottom).toBeGreaterThanOrEqual(metrics.viewport - 2);
   });
 
   test("scaling down gives the queue measurably more horizontal room", async ({ page }) => {
