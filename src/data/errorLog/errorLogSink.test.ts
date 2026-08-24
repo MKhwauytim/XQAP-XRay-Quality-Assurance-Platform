@@ -83,7 +83,18 @@ describe("errorLogSink", () => {
     logError("ctx", new Error("boom"));
     expect(await readAllWorkspaceErrors(dir)).toHaveLength(0);
 
-    await vi.advanceTimersByTimeAsync(5_000);
+    // runAllTimersAsync, not a bounded advanceTimersByTimeAsync(5_000): the
+    // flush timer fires at t=5000, but the write it triggers goes through
+    // casLoop's own internal (real, unmocked-in-intent) verify-delay sleep —
+    // a SECOND, nested fake timer scheduled just past the 5s mark. A bounded
+    // advance stops before that nested timer fires, leaving its promise
+    // permanently pending once this test's afterEach swaps back to real
+    // timers — and because withResourceLock's fallback-lock chain is a
+    // module-level map keyed only by username (see webLocks.ts), a promise
+    // that never settles holds "alice"'s lock forever and hangs every later
+    // test in this file that touches the same username. Fully draining with
+    // runAllTimersAsync lets that nested sleep resolve before the test ends.
+    await vi.runAllTimersAsync();
     expect(await readAllWorkspaceErrors(dir)).toHaveLength(1);
   });
 
