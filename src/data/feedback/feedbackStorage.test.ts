@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   clearOperationLog,
@@ -70,6 +70,10 @@ const LEGACY_TWO: FeedbackMessage = {
 };
 
 describe("feedbackStorage — per-thread storage", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("submits a message and reads it back", async () => {
     const root = makeRoot();
     await submitFeedback(root, {
@@ -313,8 +317,15 @@ describe("feedbackStorage — per-thread storage", () => {
 
   it("orders summaries newest-first by createdAt", async () => {
     const root = makeRoot();
+    // Pin the clock so `first` and `second` land in different milliseconds --
+    // see the matching comment on the "loadFeedback aggregate" describe block's
+    // afterEach below for why an unpinned clock makes this assertion flaky.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-24T10:00:00.000Z"));
     const first = await createThread(root, { from: "a", role: "employee", category: "issue", text: "أ" });
+    vi.setSystemTime(new Date("2026-08-24T10:00:01.000Z"));
     const second = await createThread(root, { from: "b", role: "employee", category: "issue", text: "ب" });
+    vi.useRealTimers();
 
     const summaries = await listThreadSummaries(root);
     expect(summaries[0]!.threadId).toBe(second.id);
@@ -419,10 +430,23 @@ describe("feedbackStorage — legacy migration", () => {
 });
 
 describe("feedbackStorage — loadFeedback aggregate", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("returns every thread as a FeedbackMessage, newest-first", async () => {
     const root = makeRoot();
+    // Pin the clock so `first` and `second` land in different milliseconds. Both
+    // land on real (in-memory) I/O fast enough that two sequential `new
+    // Date().toISOString()` reads inside createThread can otherwise tie on the
+    // same millisecond, making the sort's tiebreak (insertion/listing order,
+    // not creation order) decide the outcome — flaky, not a production bug.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-24T10:00:00.000Z"));
     const first = await createThread(root, { from: "a", role: "employee", category: "issue", text: "أ" });
+    vi.setSystemTime(new Date("2026-08-24T10:00:01.000Z"));
     const second = await createThread(root, { from: "b", role: "employee", category: "issue", text: "ب" });
+    vi.useRealTimers();
     await appendReply(root, first.id, { from: "admin", role: "admin", text: "رد", timestamp: "2026-08-24T11:00:00.000Z" }, false);
 
     const messages = await loadFeedback(root);
