@@ -107,6 +107,10 @@ export const DEFAULT_LABELS = {
   dt_clear_filters:          "مسح التصفية",
   dt_export_xlsx:            "تصدير XLSX",
   dt_exporting:              "جارٍ التصدير...",
+  errlog_export_btn:         "تصدير سجل الأخطاء إلى Excel",
+  errlog_exporting:          "جارٍ التصدير…",
+  errlog_export_failed:      "تعذّر تصدير سجل الأخطاء — حاول مرة أخرى.",
+  errlog_export_empty:       "لا توجد أخطاء مسجّلة في مساحة العمل.",
   msg_export_not_permitted:  "لا تملك صلاحية تصدير التقارير.",
   // The demo/viewer session is read-only (getMutationCapability reason
   // "read-only-mode") — distinct from msg_export_not_permitted, which covers
@@ -117,6 +121,9 @@ export const DEFAULT_LABELS = {
   dt_resize_handle_title:    "اسحب لتغيير العرض، أو انقر مرتين للملاءمة التلقائية",
   dt_no_results:             "لا توجد نتائج مطابقة",
   dt_filter_button_prefix:   "تصفية",
+  dt_sort_button_prefix:     "ترتيب حسب",
+  dt_sort_asc:               "تصاعدي",
+  dt_sort_desc:              "تنازلي",
   dt_last_visible_column_hint: "يجب أن يبقى عمود واحد ظاهرًا على الأقل",
   dt_columns_button:         "الأعمدة",
   dt_columns_title:          "الأعمدة",
@@ -276,6 +283,13 @@ export const DEFAULT_LABELS = {
   ew_queue_scope_all:              "الكل — جميع الموظفين ({count})",
   ew_queue_scope_option:           "{name} ({count})",
   ew_queue_scope_option_self:      "{name} — أنا ({count})",
+
+  // The draggable divider between the queue and the inspection panel
+  // (QueueSplitResizer). Arabic wording is the owner's to adjust later
+  // through Settings; these are the defaults.
+  ew_queue_split_handle_aria:      "تغيير عرض قائمة العينات مقابل نموذج الفحص",
+  ew_queue_split_handle_title:     "اسحب لتغيير العرض — انقر مرتين للعودة إلى الوضع الافتراضي",
+  ew_queue_split_reset_announce:   "تمت إعادة العرض إلى الوضع الافتراضي",
 
   // The stats strip («متابعة العمل») above the queue names WHOSE figures it is
   // showing. "own" and "all" keep their original wording; these three cover the

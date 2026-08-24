@@ -40,6 +40,12 @@ export const STORAGE_REGISTRY: readonly StorageEntry[] = [
     lossConsequence: "The interface returns to 100%; re-set it from Settings in one drag.",
   },
   {
+    id: "xray_queue_split_v1",
+    layer: "local",
+    purpose: "Width split between the queue and the inspection panel on «صور الأشعة المحالة».",
+    lossConsequence: "The split returns to its default; re-drag the divider once.",
+  },
+  {
     id: "xray_distribution_device_id_v1",
     layer: "local",
     purpose: "Stable per-machine id embedded in distribution event ids.",
@@ -75,8 +81,10 @@ export const STORAGE_REGISTRY: readonly StorageEntry[] = [
   {
     id: "xray_error_log_v1",
     layer: "local",
-    purpose: "Mirror of the in-memory error ring buffer (errorLogger.ts), so it survives a reload.",
-    lossConsequence: "Recent-error history is lost; the app keeps working with an empty log.",
+    purpose:
+      "Mirror of the in-memory error ring buffer (errorLogger.ts), so it survives a reload. Since v116 this is the LOCAL copy only — the durable fleet-wide record lives in the workspace at 5-system/system-errors/ (src/data/errorLog/).",
+    lossConsequence:
+      "Recent-error history for THIS browser is lost; the app keeps working with an empty local ring and the workspace copy is untouched.",
   },
   {
     id: "xray-quality-app-persistence",

@@ -115,6 +115,31 @@
   background: var(--c-surface-2);
 }
 
+/* Colors/sizing come from the composed .ui-btn.ui-btn--primary.ui-btn--sm
+   primitives (src/styles/primitives.css) — this class only fixes this
+   toolbar's own layout so the button doesn't stretch beyond its siblings. */
+.error-log-export-btn {
+  white-space: nowrap;
+}
+
+.error-log-export-notice {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.error-log-export-notice.is-error {
+  background: color-mix(in srgb, var(--c-danger) 12%, transparent);
+  color: var(--c-danger);
+}
+
+.error-log-export-notice.is-empty {
+  background: var(--app-surface-soft);
+  color: var(--app-muted);
+}
+
 .error-log-empty {
   text-align: center;
   color: var(--app-muted);

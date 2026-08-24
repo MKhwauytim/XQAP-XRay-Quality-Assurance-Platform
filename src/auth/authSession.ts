@@ -4,6 +4,7 @@ import {
   endAuthActivitySession,
   startAuthActivitySession,
 } from "./authActivityLog";
+import { clearErrorActor, setErrorActor } from "../data/storage/errorContext";
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SESSION_STORAGE_KEY = "xray_auth_session_v1";
@@ -141,6 +142,7 @@ export function writeSession(session: AuthSession): void {
   } else {
     writeStoredSession(session);
   }
+  setErrorActor(session.username, session.role);
   startAuthActivitySession(session);
 }
 
@@ -155,4 +157,7 @@ export function clearSession(): void {
   // session would mount its tabs on sub-tabs that user may not be permitted
   // to open. See src/app/subTabSelection.ts.
   clearSubTabSelections();
+  // The next user on this page load must not inherit the previous one's name
+  // on their errors — same reasoning as the sub-tab reset above.
+  clearErrorActor();
 }

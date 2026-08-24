@@ -1,5 +1,6 @@
-import type { BiWorkbookResult } from "../components/Sidebar/Tabs/Population/biData/biDataTypes";
-import type { RiskWorkbookResult } from "../components/Sidebar/Tabs/Population/riskData/riskDataTypes";
+import type { BiWorkbookResult, NormalizedBiRow } from "../components/Sidebar/Tabs/Population/biData/biDataTypes";
+import type { NormalizedRiskRow } from "../components/Sidebar/Tabs/Population/riskData/riskDataTypes";
+import type { BiFileShell, RiskWorkbookShell } from "./workbookResultStream";
 
 export type WorkbookWorkerRequest = {
   riskFile: File;
@@ -30,7 +31,29 @@ export type BiFileResult = {
   error?: string;
 };
 
+/**
+ * The result is streamed, not posted whole.
+ *
+ * Posting `riskResult` + every `biResults[i].result` in ONE message asked
+ * structured clone for a single contiguous allocation of the entire ingest
+ * output -- rows plus their full `rawRow`s -- and a large month failed it with
+ * `DataCloneError: Data cannot be cloned, out of memory` (XQ-POP-003).
+ *
+ * The sequence is now: `progress`* → `risk-rows`* → (`bi-rows`* per file)
+ * → `done`. `done` is the single commit point and carries only the small
+ * metadata shells; the window stitches the streamed rows back into them
+ * (`createWorkbookResultAccumulator`), producing exactly the object graph a
+ * single `done` used to carry. Nothing downstream of `applyBiFileResults` /
+ * `setRiskWorkbookResult` can tell the difference.
+ *
+ * There is no `requestId` here, unlike `populationQueryWorkerTypes.ts` -- this
+ * worker runs one job at a time and its listener is torn down per run, so a
+ * stale chunk has no accumulator to land in.
+ */
 export type WorkbookWorkerResponse =
   | { type: "progress"; message: string }
-  | { type: "done"; riskResult: RiskWorkbookResult; biResults: BiFileResult[]; warning?: string }
+  | { type: "risk-rows"; rows: NormalizedRiskRow[] }
+  /** `fileIndex` is index-aligned with `WorkbookWorkerRequest.biFiles`. */
+  | { type: "bi-rows"; fileIndex: number; rows: NormalizedBiRow[] }
+  | { type: "done"; riskResult: RiskWorkbookShell; biResults: BiFileShell[]; warning?: string }
   | { type: "error"; error: string };

@@ -1007,4 +1007,21 @@ describe("runSync — the shared feedback log is its own family", () => {
     const result = await runSync({ directoryHandle: root, monthFolderName: MONTH });
     expect(result.changed.has("feedback")).toBe(false);
   });
+
+  it("reports the feedback family for a reply to a thread nobody resolved", async () => {
+    const root = makeRoot();
+    await submitFeedback(root, { from: "emp-1", role: "employee", category: "issue", text: "الجهاز لا يعمل" });
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    const [message] = await loadFeedback(root);
+    await replyToFeedback(
+      root,
+      message.id,
+      { from: "admin", role: "admin", text: "تم الاطلاع", timestamp: new Date().toISOString() },
+      false // NOT resolved -- so threads.index.json is deliberately untouched
+    );
+
+    const after = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(after.changed.has("feedback")).toBe(true);
+  });
 });

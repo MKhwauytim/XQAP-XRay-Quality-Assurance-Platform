@@ -249,4 +249,25 @@ describe("XrayReferrals — month switch vs. an unsaved inspection draft", () =>
     expect(container.querySelector("[hidden]")).not.toBeNull();
     expect(firstGuardMessage()).toBeNull();
   });
+
+  it("stops warning about unsaved work once the answer has actually been submitted", async () => {
+    // The month-switch guard reads `dirtyEntryId !== null`, and nothing on the
+    // success path cleared it — so submitting an answer and then switching month
+    // prompted «إجابات غير محفوظة» about an answer already on disk. A prompt that
+    // fires when nothing is at stake is how a real one gets clicked through.
+    const root = await seedWorkspace();
+
+    render(<XrayReferrals directoryHandle={root} />);
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+
+    const noteInput = (await waitFor(() => screen.getByLabelText("ملاحظة"))) as HTMLInputElement;
+    fireEvent.change(noteInput, { target: { value: "مسودة قبل التقديم" } });
+    expect(firstGuardMessage()).toBe(getLabels().gm_month_switch_draft_confirm);
+
+    fireEvent.click(await waitFor(() => screen.getByRole("button", { name: "تقديم الفحص" })));
+    await waitFor(() => expect(screen.getByText("تم التقديم.")).toBeInTheDocument());
+
+    // Saved, on the same row, panel still open -- the guard must clear.
+    expect(firstGuardMessage()).toBeNull();
+  });
 });

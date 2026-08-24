@@ -1,6 +1,7 @@
 import { processBiWorkbook } from "../components/Sidebar/Tabs/Population/biData/biDataWorkbook";
 import { processRiskWorkbook } from "../components/Sidebar/Tabs/Population/riskData/riskDataWorkbook";
-import type { BiFileResult, WorkbookWorkerRequest, WorkbookWorkerResponse } from "./workbookWorkerTypes";
+import { streamRowsInChunks, type BiFileShell } from "./workbookResultStream";
+import type { WorkbookWorkerRequest, WorkbookWorkerResponse } from "./workbookWorkerTypes";
 
 // At runtime this module executes inside a DedicatedWorker, not a Window.
 // We cast globalThis once to avoid conflicts with the DOM lib's Window types.
@@ -22,10 +23,20 @@ ctx.onmessage = async (ev) => {
       columnMappings
     );
 
+    // Stream and RELEASE the risk rows here, before BI parsing allocates
+    // anything, rather than holding them until the end. Two reasons: the
+    // one-shot `postMessage` of the whole result is what threw
+    // `DataCloneError: … out of memory` (XQ-POP-003), and streaming early means
+    // the worker never holds a full risk population and a full BI population at
+    // the same moment. `riskRows` is CONSUMED by streamRowsInChunks; nothing
+    // below reads it, only the small `riskShell`.
+    const { rows: riskRows, ...riskShell } = riskResult;
+    await streamRowsInChunks(riskRows, (chunk) => send({ type: "risk-rows", rows: chunk }));
+
     // Every BI file is processed with the SAME sheet patterns and column
     // mappings — they are different populations of one BI dataset, not
     // differently-shaped sources. The main thread appends the results.
-    const biResults: BiFileResult[] = [];
+    const biResults: BiFileShell[] = [];
     const failedFileNames: string[] = [];
 
     for (let i = 0; i < biFiles.length; i++) {
@@ -47,7 +58,14 @@ ctx.onmessage = async (ev) => {
           biSheetPatterns,
           biColumnMappings ?? columnMappings
         );
-        biResults.push({ fileName: biFile.name, result });
+        // Same as the risk side: stream this file's rows out and drop them
+        // before the NEXT file is parsed, so ten attached BI files never
+        // accumulate ten full row arrays in the worker.
+        const { rows: biRows, ...biShell } = result;
+        await streamRowsInChunks(biRows, (chunk) =>
+          send({ type: "bi-rows", fileIndex: i, rows: chunk })
+        );
+        biResults.push({ fileName: biFile.name, result: biShell });
       } catch (biErr) {
         // BI files are optional — a per-file SOFT failure. It yields an error
         // entry (which the UI renders as an error row) and a warning, never a
@@ -64,7 +82,10 @@ ctx.onmessage = async (ev) => {
         ? `تمت قراءة بيانات وكالة المخاطر، ولكن تعذر قراءة ملفات ذكاء الأعمال التالية: ${failedFileNames.join("، ")}. يمكنك المتابعة لأن ملفات ذكاء الأعمال داعمة وليست شرطاً.`
         : undefined;
 
-    send({ type: "done", riskResult, biResults, warning });
+    // `done` now carries only metadata shells — the rows already went out as
+    // `risk-rows`/`bi-rows`. It stays the single commit point: the window
+    // applies nothing to React state until this message arrives.
+    send({ type: "done", riskResult: riskShell, biResults, warning });
   } catch (err) {
     send({ type: "error", error: err instanceof Error ? err.message : "خطأ غير معروف في معالجة الملفات." });
   }

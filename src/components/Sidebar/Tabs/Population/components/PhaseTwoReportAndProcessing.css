@@ -32,7 +32,10 @@
   gap: 14px;
   padding: 20px;
   border: 1px solid var(--c-border);
-  border-radius: 14px;
+  /* --r-xl, matching the identically-shaped .p3-top-row / .p4-top-row cards
+     one phase over. The raw 14px this used to carry matched no token at all
+     (--r-lg is 10px, --r-xl is 12px). */
+  border-radius: var(--r-xl);
   background: var(--c-surface);
   box-shadow: var(--sh-sm);
 }
@@ -180,7 +183,9 @@
 
 .population-processing-result .p2-panel {
   border: 1px solid var(--c-border);
-  border-radius: 14px;
+  /* Matches the .p2-result-card / .dar-verdict radius above so this pair of
+     panels doesn't visibly disagree with the rest of Phase 2 by 2px. */
+  border-radius: var(--r-xl);
   background: var(--c-surface);
   box-shadow: var(--sh-xs);
   overflow: hidden;

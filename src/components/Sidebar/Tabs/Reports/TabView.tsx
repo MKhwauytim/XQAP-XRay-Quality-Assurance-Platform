@@ -761,7 +761,7 @@ function ReportsContent() {
 
   if (!directoryHandle) {
     return (
-      <section className="rh-page" dir="rtl">
+      <section className="page-shell rh-page" dir="rtl">
         <div className="rh-empty">
           <span className="rh-empty-icon"><FolderOpen size={28} strokeWidth={1.75} aria-hidden /></span>
           <strong>لم يتم تحديد مساحة عمل</strong>
@@ -830,7 +830,7 @@ function ReportsContent() {
 
   return (
     <>
-    <section className="rh-page" dir="rtl" ref={rootRef}>
+    <section className="page-shell rh-page" dir="rtl" ref={rootRef}>
       {/* ── Toast ───────────────────────────────────── */}
       {toast && (
         <div className={`rh-toast rh-toast-${toast.type}`} role="status">

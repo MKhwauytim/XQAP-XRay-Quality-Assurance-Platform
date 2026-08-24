@@ -604,7 +604,7 @@ export default function UserManagementTab() {
   // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
-    <section className="um-page" aria-label="إدارة المستخدمين">
+    <section className="page-shell um-page" aria-label="إدارة المستخدمين">
       <PageHeader
         eyebrow="إدارة النظام"
         title="إدارة المستخدمين والصلاحيات"

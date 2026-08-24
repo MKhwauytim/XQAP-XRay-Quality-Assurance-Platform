@@ -68,6 +68,7 @@ import { GlobalMonthProvider } from "../data/month/GlobalMonthProvider";
 import { useLabels } from "../data/labels/useLabels";
 import { getLabels } from "../data/labels/labelsStore";
 import { SyncTick } from "../data/workspace/SyncTick";
+import { WorkspaceErrorSink } from "../data/errorLog/WorkspaceErrorSink";
 import { SessionActionsContext, type SessionActions } from "./SessionActionsContext";
 
 type AuthGateProps = {
@@ -703,6 +704,17 @@ export default function AuthGate({ children }: AuthGateProps) {
             SyncTick via useWorkspace(); the demo/viewer session is gated here,
             since only AuthGate knows the session mode. */}
         <SyncTick enabled={session.mode !== "demo"} />
+        {/* Headless — installs the durable error-log sink for THIS user, so an
+            error hit anywhere in the tree (including the data layer, which has
+            no React context) lands in 5-system/system-errors/{stem}.errors.json.
+            Mounted beside SyncTick for the same two reasons: it needs a ready
+            workspace via useWorkspace(), and only AuthGate knows the session
+            mode — the read-only demo/viewer session must not write. Keyed on
+            the REAL username, never the previewed role's identity. */}
+        <WorkspaceErrorSink
+          username={session.username}
+          enabled={session.mode !== "demo"}
+        />
         {/* The unread-feedback count is read once here and shared by BOTH
             triggers of the feedback widget: the toolbar icon below (real admin)
             and the floating button inside the app tree (everyone else). They sit

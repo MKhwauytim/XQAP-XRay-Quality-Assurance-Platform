@@ -25,11 +25,17 @@
  * parent id, so those guards remain necessary and are unchanged.
  */
 
+import { setErrorPageSubTab } from "../data/storage/errorContext";
+
 const selectionByTabId = new Map<string, string>();
 
 /** Record the rail's selection. Called by the one place that makes it. */
 export function setSubTabSelection(parentTabId: string, subTabId: string): void {
   selectionByTabId.set(parentTabId, subTabId);
+  // Same fact, second consumer: the error log needs page granularity down to
+  // the sub-tab, and this is already the single place the rail's selection is
+  // recorded (Sidebar.tsx:155 and WorkspaceGate.tsx:539 both route through it).
+  setErrorPageSubTab(parentTabId, subTabId);
 }
 
 /** The rail's latest selection for a tab, or `undefined` if it never made one. */

@@ -3,9 +3,13 @@ import { AlertTriangle, ChevronRight } from "lucide-react";
 import {
   clearErrors,
   getRecentErrors,
+  logError,
   type ErrorEntry,
 } from "../../../../data/storage/errorLogger";
 import { usePermissions } from "../../../../auth/usePermissions";
+import { useWorkspace } from "../../../../data/workspace/useWorkspace";
+import { useLabels } from "../../../../data/labels/useLabels";
+import { exportWorkspaceErrorLog } from "../../../../data/errorLog/errorLogExport";
 import "./ErrorLogSection.css";
 
 // Keeps the badge count (and, while expanded, the entry list) live even when
@@ -17,8 +21,14 @@ export function ErrorLogSection() {
   const { can, canMutate } = usePermissions();
   const canView = can("view-error-log");
   const canClear = canMutate("view-error-log");
+  const { directoryHandle } = useWorkspace();
+  const L = useLabels();
   const [isOpen, setIsOpen] = useState(false);
   const [errors, setErrors] = useState<ErrorEntry[]>(() => getRecentErrors());
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportNotice, setExportNotice] = useState<
+    { kind: "error" | "empty"; text: string } | null
+  >(null);
 
   // Refresh on an interval instead of relying only on the one-time mount
   // snapshot, so the header's badge count (rendered whether or not the panel
@@ -43,6 +53,25 @@ export function ErrorLogSection() {
     if (!canClear) return;
     clearErrors();
     setErrors([]);
+  }
+
+  async function handleExport() {
+    if (!directoryHandle || isExporting) return;
+    setExportNotice(null);
+    setIsExporting(true);
+    try {
+      const { rowCount } = await exportWorkspaceErrorLog(directoryHandle, { includeArchives: true });
+      // A zero-row export downloads a header-only file, which is
+      // indistinguishable from a broken button. Say so explicitly — same
+      // reasoning as DataTable's export-error banner, where a silent failure
+      // was the actual bug being fixed.
+      if (rowCount === 0) setExportNotice({ kind: "empty", text: L.errlog_export_empty });
+    } catch (err) {
+      logError("errorlog:export", err);
+      setExportNotice({ kind: "error", text: L.errlog_export_failed });
+    } finally {
+      setIsExporting(false);
+    }
   }
 
   return (
@@ -76,6 +105,16 @@ export function ErrorLogSection() {
             >
               مسح السجل
             </button>
+            {directoryHandle && (
+              <button
+                type="button"
+                className="ui-btn ui-btn--primary ui-btn--sm error-log-export-btn"
+                onClick={() => { void handleExport(); }}
+                disabled={isExporting}
+              >
+                {isExporting ? L.errlog_exporting : L.errlog_export_btn}
+              </button>
+            )}
             <button
               type="button"
               className="error-log-refresh-btn"
@@ -84,6 +123,14 @@ export function ErrorLogSection() {
               تحديث
             </button>
           </div>
+          {exportNotice && (
+            <p
+              className={`error-log-export-notice is-${exportNotice.kind}`}
+              role={exportNotice.kind === "error" ? "alert" : "status"}
+            >
+              {exportNotice.text}
+            </p>
+          )}
 
           {errors.length === 0 ? (
             <p className="error-log-empty">لا توجد أخطاء مسجّلة.</p>

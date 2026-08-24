@@ -2,9 +2,10 @@ import { useState, type ReactElement } from "react";
 
 import { useLabels } from "../../../../data/labels/useLabels";
 import type { Labels } from "../../../../data/labels/labelsStore";
-import type { ReviewerKpiModel } from "../../../../data/reporting/executive/model/reviewerKpis";
+import type { ReviewerKpiModel, ReviewerKpiRow } from "../../../../data/reporting/executive/model/reviewerKpis";
 import type { AnswerGroups, ReviewerControlStatus } from "./kpiSelectors";
 import { answersBarsSvg } from "./kpiCharts";
+import DataTable, { type DataTableCol } from "../../../../components/DataTable";
 import "./ReviewerKpiPanel.css";
 
 /*
@@ -57,55 +58,68 @@ export default function ReviewerKpiPanel(props: {
   const chartTitle =
     view === "reviewer" ? labels.kpi_answers_title_reviewer : labels.kpi_answers_title_port;
 
+  // accessor returns the RAW comparable value so search and (numeric) sort work
+  // on the value; renderCell below draws the progress bar / formatted text.
+  // null numerics map to "" (compareTableValues' blank-string guard keeps ""
+  // out of the numeric sort branch, and an empty accessor value is correctly
+  // excluded from the multiselect filter's option list) — pf/hf still render
+  // "—" on screen via renderCell.
+  const reviewerColumns: DataTableCol<ReviewerKpiRow>[] = [
+    { id: "reviewer",   label: labels.rk_col_reviewer,          accessor: (row) => resolveName(row.reviewerId) },
+    { id: "assigned",   label: labels.rk_col_assigned,           accessor: (row) => String(row.assigned),  isNumeric: true },
+    { id: "completed",  label: labels.rk_col_completed,          accessor: (row) => String(row.completed), isNumeric: true },
+    { id: "completion", label: labels.rk_col_completion,         accessor: (row) => row.completionRate == null ? "" : String(row.completionRate), isNumeric: true },
+    { id: "turnaround", label: labels.rk_col_turnaround_median,  accessor: (row) => row.turnaroundMedianHours == null ? "" : String(row.turnaroundMedianHours), isNumeric: true },
+    { id: "suspicion",  label: labels.rk_col_suspicion_rate,     accessor: (row) => row.suspicionOrReferralRate == null ? "" : String(row.suspicionOrReferralRate), isNumeric: true },
+    // Sorting a status pill alphabetically is not useful; filtering it is.
+    { id: "status",     label: labels.kpi_reviewers_col_status,  sortable: false, filterKind: "multiselect",
+      accessor: (row) => statusLabel(statuses.get(row.reviewerId) ?? "low-n", labels) },
+  ];
+
   return (
     <div className="rk-panel" dir="rtl">
       <section className="rk-card">
         <h3 className="rk-card-title">{labels.kpi_reviewers_title}</h3>
         <p className="rk-card-sub">{labels.kpi_reviewers_sub}</p>
-        <div className="rk-table-wrap">
-          <table className="rk-table">
-            <caption className="rk-sr-only">{labels.rk_table_caption}</caption>
-            <thead>
-              <tr>
-                <th>{labels.rk_col_reviewer}</th>
-                <th>{labels.rk_col_assigned}</th>
-                <th>{labels.rk_col_completed}</th>
-                <th>{labels.rk_col_completion}</th>
-                <th>{labels.rk_col_turnaround_median}</th>
-                <th>{labels.rk_col_suspicion_rate}</th>
-                <th>{labels.kpi_reviewers_col_status}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {model.rows.map((row) => {
-                const status = statuses.get(row.reviewerId) ?? "low-n";
+        <DataTable
+          columns={reviewerColumns}
+          rows={model.rows}
+          getRowKey={(row) => row.reviewerId}
+          canConfigureColumns={false}
+          density="compact"
+          renderCell={(col, row) => {
+            switch (col.id) {
+              case "reviewer":
+                return <span className="rk-cell-name">{resolveName(row.reviewerId)}</span>;
+              case "assigned":
+                return nf(row.assigned);
+              case "completed":
+                return nf(row.completed);
+              case "completion":
                 return (
-                  <tr key={row.reviewerId}>
-                    <td className="rk-cell-name">{resolveName(row.reviewerId)}</td>
-                    <td className="rk-num">{nf(row.assigned)}</td>
-                    <td className="rk-num">{nf(row.completed)}</td>
-                    <td className="rk-cell-completion">
-                      <span className="rk-progress">
-                        <span
-                          className="rk-progress-fill"
-                          style={{ width: `${Math.max(0, Math.min(100, row.completionRate ?? 0))}%` }}
-                        />
-                      </span>
-                      <span className="rk-num rk-progress-value">{pf(row.completionRate)}</span>
-                    </td>
-                    <td className="rk-num">{hf(row.turnaroundMedianHours)}</td>
-                    <td className="rk-num">{pf(row.suspicionOrReferralRate)}</td>
-                    <td>
-                      <span className={`rk-status rk-status-${status}`}>
-                        {statusLabel(status, labels)}
-                      </span>
-                    </td>
-                  </tr>
+                  <>
+                    <span className="rk-progress">
+                      <span
+                        className="rk-progress-fill"
+                        style={{ width: `${Math.max(0, Math.min(100, row.completionRate ?? 0))}%` }}
+                      />
+                    </span>
+                    <span className="rk-num rk-progress-value">{pf(row.completionRate)}</span>
+                  </>
                 );
-              })}
-            </tbody>
-          </table>
-        </div>
+              case "turnaround":
+                return hf(row.turnaroundMedianHours);
+              case "suspicion":
+                return pf(row.suspicionOrReferralRate);
+              case "status": {
+                const status = statuses.get(row.reviewerId) ?? "low-n";
+                return <span className={`rk-status rk-status-${status}`}>{statusLabel(status, labels)}</span>;
+              }
+              default:
+                return null;
+            }
+          }}
+        />
       </section>
 
       <section className="rk-card">

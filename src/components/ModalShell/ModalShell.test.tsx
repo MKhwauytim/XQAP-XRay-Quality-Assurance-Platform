@@ -103,15 +103,28 @@ describe("ModalShell", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it("locks and restores body scroll around its lifetime", () => {
+  it("locks and restores the app scrollport (.app-workspace), not document.body", () => {
+    // The document no longer scrolls under the bounded app shell (see
+    // src/App.css / src/index.css) — .app-workspace is the real scrollport,
+    // so ModalPortal's lock targets it instead of document.body. Render a
+    // stand-in .app-workspace so the lock has something to find, the same
+    // way the real app shell always provides one.
+    const workspace = document.createElement("section");
+    workspace.className = "app-workspace";
+    document.body.appendChild(workspace);
+
     const view = render(
       <ModalShell variant="ew" title="عنوان" onClose={vi.fn()}>
         <p>body</p>
       </ModalShell>
     );
 
-    expect(document.body.style.overflow).toBe("hidden");
-    view.unmount();
+    expect(workspace.style.overflow).toBe("hidden");
     expect(document.body.style.overflow).toBe("");
+    view.unmount();
+    expect(workspace.style.overflow).toBe("");
+    expect(document.body.style.overflow).toBe("");
+
+    workspace.remove();
   });
 });

@@ -2,11 +2,10 @@
    Reports Hub — Reports.css
    ========================================================= */
 
+/* Width + gutters come from .page-shell (src/styles/primitives.css).
+   This page's old 1040px cap is what held KpiDashboard's own
+   `max-width: 1180px` down to 984px. */
 .rh-page {
-  width: 100%;
-  max-width: 1040px;
-  margin: 0 auto;
-  padding: 28px 28px 48px /* no-scale */;
   direction: rtl;
   font-family: var(--font-sans);
   color: var(--c-ink);

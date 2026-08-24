@@ -184,7 +184,7 @@ export default function EmployeeWorkspaceTab() {
 
   if (!directoryHandle) {
     return (
-      <section className="ew-page">
+      <section className="page-shell ew-page">
         <p className="ew-empty">يجب تحديد مساحة عمل أولاً.</p>
       </section>
     );

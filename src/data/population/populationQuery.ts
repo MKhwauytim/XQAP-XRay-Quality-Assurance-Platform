@@ -9,8 +9,9 @@
 // from a Web Worker once later Phase B tasks wire one up.
 
 import { DATA_PAGE_SIZE, clampPage, pageSlice } from "../../utils/paginationUtils";
+import { sortRowsBy, type TableSort } from "../../utils/tableSort";
 
-export type PopulationQuerySort = { column: string; direction: "asc" | "desc" } | null;
+export type PopulationQuerySort = TableSort;
 
 export type PopulationQueryParams = {
   search: string;
@@ -70,57 +71,6 @@ function rowMatchesColumnFilters<T>(
   });
 }
 
-// New sort comparator: numeric comparison when both display values parse as finite numbers,
-// otherwise Arabic-aware locale string comparison (consistent with this file area's existing
-// `compareBrowseFilterOptions` convention in BrowseDataView.tsx).
-function compareQueryValues(first: string, second: string): number {
-  const firstNumeric = Number(first);
-  const secondNumeric = Number(second);
-  const bothNumeric =
-    first.trim() !== "" &&
-    second.trim() !== "" &&
-    Number.isFinite(firstNumeric) &&
-    Number.isFinite(secondNumeric);
-
-  if (bothNumeric) {
-    return firstNumeric - secondNumeric;
-  }
-
-  return first.localeCompare(second, "ar");
-}
-
-// New: single-column stable sort. `null` sort is a no-op (original row order preserved). Stability
-// is made explicit via an index tiebreaker rather than relied upon implicitly from the runtime's
-// `Array.prototype.sort`, so equal keys always preserve their relative (pre-sort) order regardless
-// of `direction`.
-function sortRows<T>(
-  rows: T[],
-  sort: PopulationQuerySort,
-  displayValueGetter: (row: T, key: string) => string
-): T[] {
-  if (!sort) {
-    return rows;
-  }
-
-  const { column, direction } = sort;
-  const decorated = rows.map((row, index) => ({
-    row,
-    index,
-    value: displayValueGetter(row, column)
-  }));
-
-  decorated.sort((a, b) => {
-    const primary = compareQueryValues(a.value, b.value);
-    const directed = direction === "desc" ? -primary : primary;
-    if (directed !== 0) {
-      return directed;
-    }
-    return a.index - b.index;
-  });
-
-  return decorated.map((entry) => entry.row);
-}
-
 /**
  * Straight-line composition: search-filter → column-filter → sort → paginate.
  *
@@ -146,7 +96,7 @@ export function runPopulationQuery<T extends Record<string, unknown>>(
       )
     : searchFilteredRows;
 
-  const sortedRows = sortRows(filteredRows, params.sort, displayValueGetter);
+  const sortedRows = sortRowsBy(filteredRows, params.sort, displayValueGetter);
 
   const pageSize =
     params.pageSize !== undefined && params.pageSize > 0

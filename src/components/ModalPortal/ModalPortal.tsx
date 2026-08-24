@@ -2,21 +2,38 @@ import { useEffect, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 let lockCount = 0;
-let previousBodyOverflow: string | null = null;
+let lockedElement: HTMLElement | null = null;
+let previousOverflow: string | null = null;
+
+/**
+ * The app's scrollport. `document.body` no longer scrolls — `.app-workspace`
+ * does (see `src/App.css`) — so locking the body would silently stop locking
+ * anything and the page behind an open modal would keep scrolling. Falls back
+ * to the body for the pre-login screens (AuthGate / WorkspacePicker), which
+ * render before `.app-workspace` exists.
+ */
+function scrollportElement(): HTMLElement {
+  return document.querySelector<HTMLElement>(".app-workspace") ?? document.body;
+}
 
 function acquireScrollLock(): void {
   if (lockCount === 0) {
-    previousBodyOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    lockedElement = scrollportElement();
+    previousOverflow = lockedElement.style.overflow;
+    lockedElement.style.overflow = "hidden";
   }
   lockCount += 1;
 }
 
 function releaseScrollLock(): void {
   lockCount = Math.max(0, lockCount - 1);
-  if (lockCount === 0) {
-    document.body.style.overflow = previousBodyOverflow ?? "";
-    previousBodyOverflow = null;
+  if (lockCount === 0 && lockedElement) {
+    // Restore against the element that was actually locked, not a fresh
+    // lookup: a tab switch between acquire and release could resolve a
+    // different node and leave the original stuck at `overflow: hidden`.
+    lockedElement.style.overflow = previousOverflow ?? "";
+    lockedElement = null;
+    previousOverflow = null;
   }
 }
 
@@ -39,7 +56,8 @@ type ModalPortalProps = {
  * inset: 0` on it covers the true viewport regardless of scroll position,
  * sidebar width, or which tab is active.
  *
- * Also applies a reference-counted scroll lock on `document.body` for as
+ * Also applies a reference-counted scroll lock on the app's scrollport
+ * (`.app-workspace`, falling back to `document.body` pre-login) for as
  * long as any `ModalPortal` is mounted, so nested modals (e.g. a
  * `ConfirmDialog` opened from inside another dialog) don't re-enable
  * scrolling when the inner one closes.
