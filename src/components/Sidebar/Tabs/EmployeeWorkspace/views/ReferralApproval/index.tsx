@@ -196,7 +196,7 @@ export default function ReferralApproval({ directoryHandle }: Props) {
   }
 
   return (
-    <section className="ew-page" dir="rtl">
+    <section className="page-shell ew-page" dir="rtl">
       <div className="ew-approval-header">
         <PageHeader
           eyebrow="اعتماد الطلبات"

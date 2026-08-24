@@ -75,12 +75,8 @@
   font-family: var(--p-font);
 }
 
+/* Width + gutters come from .page-shell (src/styles/primitives.css). */
 .population-page {
-  width: 100%;
-  min-height: calc(var(--app-vh) - 44px);
-  max-width: 1440px;
-  margin: 0 auto;
-  padding: 28px /* no-scale */;
   direction: rtl;
   background: var(--p-bg);
   color: var(--p-text);

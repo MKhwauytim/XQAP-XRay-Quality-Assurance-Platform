@@ -4,11 +4,9 @@
 
 /* ── Page Shell ────────────────────────────────────────────── */
 
+/* Width + gutters come from .page-shell (src/styles/primitives.css) —
+   including the fluid padding this page originally introduced. */
 .ew-page {
-  width: 100%;
-  max-width: 1600px;
-  margin: 0 auto;
-  padding: clamp(14px, 2.2vw, 32px) clamp(12px, 2vw, 28px) /* no-scale */;
   direction: rtl;
   font-family: var(--font-sans);
   color: var(--c-ink);

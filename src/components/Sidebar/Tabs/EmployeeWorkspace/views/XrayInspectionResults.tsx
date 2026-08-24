@@ -534,7 +534,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
   }
 
   return (
-    <section className="ew-page" dir="rtl">
+    <section className="page-shell ew-page" dir="rtl">
       <PageHeader
         eyebrow={L.page_xray_results_eyebrow}
         title={L.page_xray_results_title}

@@ -1849,7 +1849,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <section className="ew-page" dir="rtl" ref={pageSectionRef}>
+    <section className="page-shell ew-page" dir="rtl" ref={pageSectionRef}>
       <PageHeader
         eyebrow={L.page_xray_referrals_eyebrow}
         title={L.page_xray_referrals_title}

@@ -208,6 +208,51 @@
   color: var(--c-ink);
 }
 
+/* ── Card row (2-up) ───────────────────────────────────────────
+   The app's existing convention for a top-level side-by-side pair,
+   written down: the CONTAINER is transparent and each CHILD is its
+   own card. Verified across .p2-verdict-row, .p3-top-row,
+   .p4-top-row, .arc-layout, .ew-ref-queue.ew-xr-grid,
+   .kpi-level-grid, .ew-approval-split and .ntf-split — none of them
+   carries a border, radius, background or shadow of its own. The
+   container-as-card pattern (.kpi-progress-grid, .kpi-ports-grid,
+   .um-activity-card dl) is only ever used to SUBDIVIDE a card that
+   already exists, never for the top-level pairing.
+
+   `300px minmax(0, 1fr)` with `gap: 18px` is the shape three
+   Population phase rows already use verbatim. `minmax(0, …)` is
+   load-bearing: a grid track's default `min-width: auto` floors it
+   at its content width, so a wide table inside would blow the row
+   out instead of scrolling.
+
+   align-items stays at the grid default `stretch` so both cards end
+   up the same height — spelled out here because it is the whole
+   reason a 2-up reads as one row. Reach for --top only when a child
+   is `position: sticky`, which cannot travel inside a stretched
+   track (see .ew-approval-split / .ntf-split, which both use
+   `align-items: start` for exactly that). */
+.ui-card-row {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 18px;
+  align-items: stretch;
+}
+
+.ui-card-row--even {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.ui-card-row--top {
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .ui-card-row,
+  .ui-card-row--even {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* ── Stat / KPI card ───────────────────────────────────────── */
 
 .ui-stat {
@@ -371,6 +416,37 @@
   align-items: center;
   gap: var(--sp-2);
   flex-wrap: wrap;
+}
+
+/* ── Page shell ────────────────────────────────────────────────
+   The single width + gutter contract for a top-level tab's root
+   element. Four pages used to hand-roll this with three different
+   max-widths (1040 / 1440 / 1600) and three different paddings; the
+   1040px one silently capped KpiDashboard's own `max-width: 1180px`
+   at 984px for its entire life.
+
+   1600px is chosen because it was already the widest value in
+   production (.ew-page, the most table-dense page) — a validated
+   width rather than a new guess. Anything narrower regresses
+   EmployeeWorkspace; anything wider exceeds what the auto-fit grids
+   in KpiDashboard were designed for. Sub-layouts that want to stay
+   narrower keep their own max-width and still work (KpiDashboard
+   self-caps at 1180px).
+
+   The padding is fluid so the small-viewport behaviour .ew-page
+   already had survives, but every stop is a --sp-* token: the raw
+   28px these pages carried was an artefact of B6's "only snap when
+   the delta is <=2px" rule, not a design decision (see
+   docs/audit/hardening-2026-07-08/03-approved-plan.md). Bottom
+   gutter is deliberately larger so the last card never sits flush
+   against the scrollport's edge. */
+.page-shell {
+  width: 100%;
+  max-width: 1600px;
+  margin-inline: auto;
+  padding-block-start: clamp(var(--sp-3), 2.2vw, var(--sp-8));
+  padding-block-end: var(--sp-12);
+  padding-inline: clamp(var(--sp-3), 2vw, var(--sp-8));
 }
 
 /* ── State views: empty / loading / error ──────────────────────

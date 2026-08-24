@@ -1368,7 +1368,7 @@ export default function PopulationTab() {
   };
 
   return (
-    <section className="population-page" aria-label="إدارة بيانات الأشعة">
+    <section className="page-shell population-page" aria-label="إدارة بيانات الأشعة">
 
       {/* ── Browse sub-tab (mounted once visited, hidden — not unmounted —
           afterward, so switching away and back doesn't re-load the full
