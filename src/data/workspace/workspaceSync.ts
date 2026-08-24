@@ -56,11 +56,12 @@ import { readEnvelopeRevision } from "../storage/safeWrite";
 import { logError } from "../storage/errorLogger";
 import { isNotFoundError } from "../storage/transientFileErrors";
 import { ACK_FILE_SUFFIX } from "../notifications/notificationAckStorage";
-import { FEEDBACK_MESSAGES_FILE } from "../feedback/feedbackStorage";
+import { FEEDBACK_THREAD_FILE_SUFFIX } from "../feedback/feedbackStorage";
 import {
   getPopulationMonthDir,
   getSampleMonthDir,
   getSystemRoot,
+  FEEDBACK_SUBFOLDERS,
   NOTIFICATIONS_SUBFOLDERS,
   SAMPLE_SUBFOLDERS,
   SYSTEM_FOLDER_NAMES,
@@ -170,19 +171,34 @@ type Probe = {
    *  independent signal for both. */
   segmentsSignature: Probed<string>;
   /**
-   * Envelope revision of `5-system/feedback/messages.json` — the shared feedback
-   * ("chat") log. It is the signal behind the unread dot on both widget
-   * triggers, so a message or a reply posted on another machine has to reach
-   * other clients on a tick rather than on a manual refresh.
+   * Bounded name+size signature of `5-system/feedback/threads/*.json` — the
+   * shared feedback ("chat") threads. It is the signal behind the unread dot on
+   * both widget triggers, so a message or a reply posted on another machine has
+   * to reach other clients on a tick rather than on a manual refresh.
    *
-   * Deliberately the CURRENT location only: a legacy workspace still holding its
-   * log at the top-level `feedback/` root probes as "no file" (a real
-   * observation, diffed normally) until its first mutation migrates it forward —
-   * see feedbackStorage's own note. Probing both would put a second directory
-   * open on every tick of every client to cover a state that heals itself the
-   * first time anyone posts.
+   * The THREADS directory, not `threads.index.json`: a plain reply deliberately
+   * does not touch the index (that is what keeps the one shared file rarely
+   * written — see feedbackStorage's `updateThreadsIndex`), so an index-revision
+   * probe would go blind to exactly the event this family exists to report.
+   * The thread files are the authority, so they are what is watched.
+   *
+   * Same bounded shape as the segments and acks probes: one listing, no file
+   * content, at most DEFAULT_SIZE_SIGNATURE_STAT_BUDGET size stats taken from
+   * the TAIL of the name-sorted listing. A new thread adds a NAME (always
+   * detected); a reply changes a SIZE (detected for the newest 64 — which is
+   * what feedbackStorage's time-ordered thread ids guarantee the tail holds).
+   * A reply to an older thread than that is picked up by
+   * FeedbackUnreadProvider's own 60 s poll instead; this tick is a latency
+   * optimization on top of that poll, never the only path.
+   *
+   * Deliberately the CURRENT location only: a legacy workspace whose feedback
+   * still sits in `messages.json` probes as "no folder" (a real observation,
+   * diffed normally) until the first client to open it migrates it forward —
+   * see feedbackStorage's `migrateLegacyMessages`. Probing the legacy root too
+   * would put a second directory open on every tick of every client to cover a
+   * state that heals itself the first time anyone opens the panel.
    */
-  feedbackRevision: Probed<number | null>;
+  feedbackSignature: Probed<string>;
 };
 
 const previousProbes = new Map<string, Probe>();
@@ -439,6 +455,34 @@ async function safeAcksSignature(
 }
 
 /**
+ * Bounded signature of the per-thread feedback files. Same shape and same
+ * reasoning as `safeAcksSignature` above — and the same reason `safeRevision`
+ * (one envelope read per file) is not reused: a file exists per conversation.
+ */
+async function safeFeedbackSignature(
+  feedbackDir: DirectoryHandleLike | null
+): Promise<Probed<string>> {
+  if (!feedbackDir) return "";
+  let threadsDir: DirectoryHandleLike;
+  try {
+    threadsDir = await feedbackDir.getDirectoryHandle(FEEDBACK_SUBFOLDERS.threads, {
+      create: false,
+    });
+  } catch (error) {
+    // Absent is normal for a brand-new or not-yet-migrated workspace.
+    if (isNotFoundError(error)) return "";
+    logError("workspaceSync:probeFeedbackOpen", error);
+    return UNPROBED;
+  }
+  try {
+    return await boundedSizeSignature(threadsDir, FEEDBACK_THREAD_FILE_SUFFIX);
+  } catch (error) {
+    logError("workspaceSync:probeFeedback", error);
+    return UNPROBED;
+  }
+}
+
+/**
  * One run's worth of probing (§4.2's per-family change set).
  *
  * A folder or file that is NOT THERE (a fresh workspace, a month with no
@@ -469,7 +513,7 @@ async function probeMonth(
     approvalsSignature,
     manifestRevision,
     segmentsSignature,
-    feedbackRevision,
+    feedbackSignature,
   ] =
     await Promise.all([
       readDistributionLogStamp(directoryHandle, monthFolderName, {
@@ -488,7 +532,7 @@ async function probeMonth(
       safeSignature(dirs.approvalsDir, DECISIONS_SUFFIX),
       safeRevision(dirs.populationMonthDir, MONTH_MANIFEST_FILE),
       safeSegmentsSignature(dirs.eventsDir),
-      safeRevision(dirs.feedbackDir, FEEDBACK_MESSAGES_FILE),
+      safeFeedbackSignature(dirs.feedbackDir),
     ]);
 
   return {
@@ -499,7 +543,7 @@ async function probeMonth(
     approvalsSignature,
     manifestRevision,
     segmentsSignature,
-    feedbackRevision,
+    feedbackSignature,
   };
 }
 
@@ -512,7 +556,7 @@ function carryUnprobed(previous: Probe, current: Probe): Probe {
     approvalsSignature: carry(previous.approvalsSignature, current.approvalsSignature),
     manifestRevision: carry(previous.manifestRevision, current.manifestRevision),
     segmentsSignature: carry(previous.segmentsSignature, current.segmentsSignature),
-    feedbackRevision: carry(previous.feedbackRevision, current.feedbackRevision),
+    feedbackSignature: carry(previous.feedbackSignature, current.feedbackSignature),
   };
 }
 
@@ -560,7 +604,7 @@ function diffFamilies(previous: Probe | undefined, current: Probe): Set<DataRefr
   if (movedFrom(previous.manifestRevision, current.manifestRevision, sameValue)) {
     changed.add("manifest");
   }
-  if (movedFrom(previous.feedbackRevision, current.feedbackRevision, sameValue)) {
+  if (movedFrom(previous.feedbackSignature, current.feedbackSignature, sameValue)) {
     changed.add("feedback");
   }
   return changed;
