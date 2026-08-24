@@ -31,6 +31,7 @@ import { getLabels } from "./data/labels/labelsStore";
 import { useLabels } from "./data/labels/useLabels";
 import { useWorkspace } from "./data/workspace/useWorkspace";
 import { resetBootProgress } from "./data/workspace/bootProgress";
+import { setErrorPageTab } from "./data/storage/errorContext";
 import {
   WorkspaceGate,
   WorkspacePicker
@@ -223,6 +224,13 @@ export function AppContent({ session }: AppContentProps) {
 
   const activeTabId = activeTab?.id ?? "";
   const tabScrollPositions = useRef(new Map<string, number>());
+
+  // Tell the error log where the user is, so an error logged from anywhere in
+  // the tree — including the data layer, which has no React context — is
+  // attributed to the page that produced it. See errorContext.ts.
+  useEffect(() => {
+    if (activeTabId) setErrorPageTab(activeTabId);
+  }, [activeTabId]);
 
   useEffect(() => {
     if (!activeTabId) return;
