@@ -5,7 +5,9 @@ import { safeWriteJson } from "../storage/safeWrite";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
 import {
+  appendReply,
   createThread,
+  listThreadSummaries,
   loadFeedback,
   loadThread,
   loadThreads,
@@ -13,6 +15,7 @@ import {
   replyToFeedback,
   submitFeedback,
   type FeedbackMessage,
+  type FeedbackThread,
 } from "./feedbackStorage";
 
 function makeRoot(
@@ -207,5 +210,120 @@ describe("feedbackStorage", () => {
     expect(loaded.map((t) => t.from)).toEqual(["c", "a"]);
     // b was never asked for and must not have been read.
     expect(loaded.some((t) => t.id === b.id)).toBe(false);
+  });
+
+  it("a reply rewrites only its own thread file and never the index", async () => {
+    const root = makeRoot("root", { trackOperations: true });
+    const target = await createThread(root, { from: "sara", role: "employee", category: "issue", text: "خطأ" });
+    const other = await createThread(root, { from: "omar", role: "employee", category: "issue", text: "خطأ آخر" });
+
+    clearOperationLog(root);
+    await appendReply(
+      root,
+      target.id,
+      { from: "admin", role: "admin", text: "تم", timestamp: "2026-08-24T10:00:00.000Z" },
+      false
+    );
+
+    const written = getOperationLog(root)
+      .filter((entry) => entry.operation === "createWritable")
+      .map((entry) => entry.name);
+    expect(written.some((name) => name.startsWith(`${target.id}.json`))).toBe(true);
+    // The other thread and the shared index are untouched -- that is the fix.
+    expect(written.some((name) => name.startsWith(`${other.id}.json`))).toBe(false);
+    expect(written.some((name) => name.startsWith("threads.index.json"))).toBe(false);
+
+    const after = await loadThread(root, target.id);
+    expect(after!.replies).toHaveLength(1);
+    expect(after!.status).toBe("open");
+  });
+
+  it("resolving a thread updates its own file AND its index summary", async () => {
+    const root = makeRoot();
+    const thread = await createThread(root, { from: "sara", role: "employee", category: "issue", text: "خطأ" });
+
+    await appendReply(
+      root,
+      thread.id,
+      { from: "admin", role: "admin", text: "تم", timestamp: "2026-08-24T10:00:00.000Z" },
+      true
+    );
+
+    expect((await loadThread(root, thread.id))!.status).toBe("resolved");
+    const summaries = await listThreadSummaries(root);
+    expect(summaries.find((s) => s.threadId === thread.id)!.status).toBe("resolved");
+  });
+
+  it("replies to two DIFFERENT threads at the same instant both land", async () => {
+    const root = makeRoot();
+    const a = await createThread(root, { from: "a", role: "employee", category: "issue", text: "أ" });
+    const b = await createThread(root, { from: "b", role: "employee", category: "issue", text: "ب" });
+
+    await Promise.all([
+      appendReply(root, a.id, { from: "admin", role: "admin", text: "ردأ", timestamp: "2026-08-24T10:00:00.000Z" }, false),
+      appendReply(root, b.id, { from: "admin", role: "admin", text: "ردب", timestamp: "2026-08-24T10:00:00.000Z" }, false),
+    ]);
+
+    expect((await loadThread(root, a.id))!.replies).toHaveLength(1);
+    expect((await loadThread(root, b.id))!.replies).toHaveLength(1);
+  });
+
+  it("two concurrent replies to the SAME thread both land (residual CAS case)", async () => {
+    const root = makeRoot();
+    const thread = await createThread(root, { from: "sara", role: "employee", category: "issue", text: "خطأ" });
+
+    await Promise.all([
+      appendReply(root, thread.id, { from: "admin1", role: "admin", text: "أولاً", timestamp: "2026-08-24T10:00:00.000Z" }, false),
+      appendReply(root, thread.id, { from: "admin2", role: "manager", text: "ثانياً", timestamp: "2026-08-24T10:00:01.000Z" }, false),
+    ]);
+
+    const after = await loadThread(root, thread.id);
+    expect(after!.replies.map((r) => r.from).sort()).toEqual(["admin1", "admin2"]);
+  });
+
+  it("appendReply rejects an unknown thread id instead of inventing one", async () => {
+    const root = makeRoot();
+    await expect(
+      appendReply(root, "t20260101000000-deadbeef", { from: "admin", role: "admin", text: "x", timestamp: "2026-08-24T10:00:00.000Z" }, false)
+    ).rejects.toThrow();
+  });
+
+  it("listThreadSummaries folds in a thread the index never recorded, and repairs the index", async () => {
+    const root = makeRoot();
+    const known = await createThread(root, { from: "sara", role: "employee", category: "issue", text: "معروف" });
+
+    // Simulate a create whose index write lost the CAS race permanently: the
+    // thread file is on disk, the index does not mention it.
+    const orphan: FeedbackThread = {
+      id: "t20260824120000-aaaaaaaa",
+      from: "omar",
+      role: "employee",
+      category: "inquiry",
+      text: "يتيم",
+      timestamp: "2026-08-24T12:00:00.000Z",
+      status: "open",
+      replies: [],
+    };
+    const systemDir = await root.getDirectoryHandle("5-system", { create: false });
+    const feedbackDir = await systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.feedback, { create: false });
+    const threadsDir = await feedbackDir.getDirectoryHandle("threads", { create: false });
+    await safeWriteJson<FeedbackThread>(threadsDir, `${orphan.id}.json`, orphan);
+
+    const summaries = await listThreadSummaries(root);
+    expect(summaries.map((s) => s.threadId).sort()).toEqual([known.id, orphan.id].sort());
+
+    // Repaired in place, so the next read costs no extra thread opens.
+    const index = await loadThreadsIndex(root);
+    expect(index.threads.map((t) => t.threadId).sort()).toEqual([known.id, orphan.id].sort());
+  });
+
+  it("orders summaries newest-first by createdAt", async () => {
+    const root = makeRoot();
+    const first = await createThread(root, { from: "a", role: "employee", category: "issue", text: "أ" });
+    const second = await createThread(root, { from: "b", role: "employee", category: "issue", text: "ب" });
+
+    const summaries = await listThreadSummaries(root);
+    expect(summaries[0]!.threadId).toBe(second.id);
+    expect(summaries[1]!.threadId).toBe(first.id);
   });
 });

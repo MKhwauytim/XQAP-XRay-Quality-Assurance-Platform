@@ -307,6 +307,170 @@ export async function createThread(
 }
 
 /**
+ * Append a reply to ONE thread — the operation this whole redesign exists for.
+ *
+ * The CAS loop covers a single conversation file. Two admins replying to
+ * DIFFERENT threads write disjoint names and cannot contend at all; two
+ * replying to the SAME thread contend on a small file, which is the genuine
+ * rare case CAS is for. Under the old shared log every reply rewrote the file
+ * every other user was also rewriting, so a busy moment exhausted the ladder
+ * and surfaced as XQ-IO-032.
+ *
+ * The index is touched ONLY when `resolve` actually flips `open -> resolved`.
+ * A plain reply leaves the shared file alone — that is what keeps the one
+ * remaining shared write rare.
+ *
+ * A delayed `verify` IS supplied here (unlike the index write): a lost reply is
+ * user content, not a rebuildable cache, so the lost-update interleaving
+ * (A-read / B-read / A-commit-ok / B-clobbers) must be caught and retried.
+ * Same reasoning as reportDesignStorage's `saveDesignFile`.
+ */
+export async function appendReply(
+  dir: DirectoryHandleLike,
+  threadId: string,
+  reply: FeedbackReply,
+  resolve: boolean
+): Promise<FeedbackThread> {
+  const threadsDir = await getFeedbackThreadsDir(dir, true);
+  const fileName = feedbackThreadFileName(threadId);
+  let statusChanged = false;
+
+  const outcome = await withResourceLock(`${threadsDir.name}/${fileName}:rmw`, () =>
+    casLoop<{ ok: true; thread: FeedbackThread }>(
+      async (writeToken) => {
+        const existing = await safeReadJson<FeedbackThread>(threadsDir, fileName);
+        if (!existing.ok) {
+          // Reject, never invent: writing a thread here would fabricate a
+          // conversation whose original message nobody wrote.
+          throw new Error(`Feedback thread not found: ${threadId}`);
+        }
+        const current = normalizeThread(existing.value);
+        const nextRevision = (current.revision ?? 0) + 1;
+        const nextStatus = resolve ? "resolved" : current.status;
+        statusChanged = nextStatus !== current.status;
+        const updated: FeedbackThread = {
+          ...current,
+          status: nextStatus,
+          replies: [...current.replies, reply],
+          revision: nextRevision,
+          _writeToken: writeToken,
+        };
+        await safeWriteJson<FeedbackThread>(threadsDir, fileName, updated);
+        const verify = await safeReadJson<FeedbackThread>(threadsDir, fileName);
+        if (
+          verify.ok &&
+          verify.value.revision === nextRevision &&
+          verify.value._writeToken === writeToken
+        ) {
+          return {
+            done: true,
+            result: { ok: true as const, thread: updated },
+            verify: async () => {
+              const recheck = await safeReadJson<FeedbackThread>(threadsDir, fileName);
+              return (
+                recheck.ok &&
+                recheck.value.revision === nextRevision &&
+                recheck.value._writeToken === writeToken
+              );
+            },
+          };
+        }
+        return { done: false };
+      },
+      { conflictError: "تعذّر حفظ الرد: تعارض في الكتابة بعد عدة محاولات." }
+    )
+  );
+  if (!outcome.ok) {
+    throw new Error(outcome.error);
+  }
+
+  if (statusChanged) {
+    await updateThreadsIndex(dir, (threads) =>
+      threads.map((summary) =>
+        summary.threadId === threadId
+          ? { ...summary, status: outcome.thread.status, lastActivityAt: reply.timestamp }
+          : summary
+      )
+    );
+  }
+
+  return outcome.thread;
+}
+
+/**
+ * Every thread's summary, newest-first.
+ *
+ * The index is a CACHE and is treated as one: one names-only
+ * `listDirectoryEntries` over `threads/` (a single round trip, no file content
+ * read) reconciles it. Any `.json` name the index does not know is read
+ * individually and folded in, and the repaired index is written back
+ * best-effort. That is what makes a create that lost the index race, a
+ * half-finished migration, and a hand-copied thread file all self-healing
+ * rather than invisible.
+ *
+ * Steady state cost: 1 index read + 1 listing + 0 thread reads.
+ *
+ * Ordered by `createdAt`, NOT `lastActivityAt` — see FeedbackThreadSummary:
+ * a plain reply deliberately does not touch the index, so `lastActivityAt` is
+ * advisory and must never drive ordering.
+ */
+export async function listThreadSummaries(
+  dir: DirectoryHandleLike
+): Promise<FeedbackThreadSummary[]> {
+  const index = await loadThreadsIndex(dir);
+  const known = new Map(index.threads.map((summary) => [summary.threadId, summary]));
+
+  let threadsDir: DirectoryHandleLike | null = null;
+  try {
+    threadsDir = await getFeedbackThreadsDir(dir, false);
+  } catch {
+    // No threads folder yet: a brand-new workspace, or one whose feedback has
+    // not been migrated. Either way the index is all there is to report.
+  }
+
+  const missingIds: string[] = [];
+  if (threadsDir) {
+    for (const entry of await listDirectoryEntries(threadsDir)) {
+      if (entry.kind !== "file") continue;
+      if (!entry.name.endsWith(FEEDBACK_THREAD_FILE_SUFFIX)) continue;
+      const threadId = entry.name.slice(0, -FEEDBACK_THREAD_FILE_SUFFIX.length);
+      // safeWriteJson keeps `{file}.bak`/`.tmp` siblings; their stems end in
+      // `.json`/`.tmp` and must never be mistaken for a thread.
+      if (!THREAD_ID_PATTERN.test(threadId) || threadId.endsWith(".json")) continue;
+      if (!known.has(threadId)) missingIds.push(threadId);
+    }
+  }
+
+  if (missingIds.length > 0) {
+    const recovered = await loadThreads(dir, missingIds);
+    for (const thread of recovered) {
+      known.set(thread.id, summarize(thread, lastActivityOf(thread)));
+    }
+    if (recovered.length > 0) {
+      try {
+        const repaired = [...known.values()];
+        await updateThreadsIndex(dir, () => repaired);
+      } catch (error) {
+        // Best effort: a read-only handle, or a lost race with a live writer.
+        // The summaries returned below are already correct either way; the
+        // repair simply retries on the next read.
+        logError("feedback:repairThreadsIndex", error);
+      }
+    }
+  }
+
+  return [...known.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+function lastActivityOf(thread: FeedbackThread): string {
+  let latest = thread.timestamp;
+  for (const reply of thread.replies) {
+    if (reply.timestamp > latest) latest = reply.timestamp;
+  }
+  return latest;
+}
+
+/**
  * On-disk shape for `messages.json`. The list is wrapped so it can carry the CAS
  * bookkeeping (`revision` + `_writeToken`) that lets casLoop detect a concurrent
  * write from another machine. Legacy files persisted the bare `FeedbackMessage[]`
@@ -419,18 +583,12 @@ export async function submitFeedback(
   await createThread(dir, payload);
 }
 
+/** Compatibility wrapper — the widget, the sync tests and the unread tests all call this name. */
 export async function replyToFeedback(
   dir: DirectoryHandleLike,
   messageId: string,
   reply: FeedbackReply,
   resolve: boolean
 ): Promise<void> {
-  await mutateFeedback(dir, (messages) => {
-    const msg = messages.find((m) => m.id === messageId);
-    if (msg) {
-      msg.replies.push(reply);
-      if (resolve) msg.status = "resolved";
-    }
-    return messages;
-  });
+  await appendReply(dir, messageId, reply, resolve);
 }
