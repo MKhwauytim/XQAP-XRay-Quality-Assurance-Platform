@@ -22,7 +22,10 @@ import {
   loadOrDeriveDistributionCurrentForRead,
   readDistributionLogStamp,
 } from "../../../../../data/distribution/distributionStorage";
-import { subscribeToDataRefresh } from "../../../../../data/workspace/dataRefreshSignal";
+import {
+  notifyLocalDataChange,
+  subscribeToDataRefresh,
+} from "../../../../../data/workspace/dataRefreshSignal";
 import {
   registerBootSources,
   markBootSourceLoading,
@@ -120,6 +123,7 @@ import {
   isStudyCompleted,
 } from "./XrayReferrals/subComponents";
 import { useCaseFilter } from "./XrayReferrals/caseFilter";
+import QueueSplitResizer from "./XrayReferrals/QueueSplitResizer";
 import "./XrayReferrals/XrayReferrals.css";
 
 // ── Column definitions ────────────────────────────────────────────────────────
@@ -420,10 +424,21 @@ function createSaveAnswerHandler(deps: {
   canAnswerOnBehalf: boolean;
   setAnswers: React.Dispatch<React.SetStateAction<ItemAnswer[]>>;
   setStatusMsg: (msg: StatusMsg) => void;
+  /** Raised across this handler's OWN broadcast so the view's subscription
+   *  (see XrayReferrals' subscribeToDataRefresh effect) skips it: `setAnswers`
+   *  below has already reconciled this view exactly, and a second full read
+   *  per submission is pure cost. Correct only while `notifyLocalDataChange`
+   *  delivers synchronously — `window.dispatchEvent` does. */
+  ownBroadcastRef: React.RefObject<boolean>;
+  /** Cleared on a successful submit: the row's answers are on disk, so the
+   *  month-switch guard and the vanished-row draft retention must stop
+   *  treating them as work at risk. */
+  setDirtyEntryId: (id: string | null) => void;
 }) {
   const {
     directoryHandle, folderForRow, username, role, activeTpl, selMonth,
     canSubmitAnswers, canAnswerOnBehalf, setAnswers, setStatusMsg,
+    ownBroadcastRef, setDirtyEntryId,
   } = deps;
   return async function handleSave(
     xrayImageId: string, ans: FieldAnswer[], forUser: string
@@ -483,7 +498,25 @@ function createSaveAnswerHandler(deps: {
           ...prev.filter((a) => !(a.xrayImageId === xrayImageId && a.answeredBy === forUser)),
           item,
         ]);
+        // Saved ⇒ no longer a draft. Ordering matters only for readability
+        // here (both are React state updates batched into one commit), but it
+        // belongs beside the state it invalidates, not at the end of the block.
+        setDirtyEntryId(null);
         setStatusMsg({ type: "ok", text: "تم التقديم." });
+        // Tell the OTHER mounted views. Without this a submitted answer stayed
+        // invisible to the approval desk, «نتائج فحص الأشعة» and Reports — all
+        // kept mounted beside this one by the tab-mount LRU — until the 45 s
+        // sync tick or the manual refresh button came round. `"answers"` and
+        // nothing else: this write appends no distribution event and files no
+        // request, so widening the change set would only make unrelated views
+        // re-read. Once per completed user action, inside the ok branch, so a
+        // refused write never announces one.
+        ownBroadcastRef.current = true;
+        try {
+          notifyLocalDataChange(["answers"]);
+        } finally {
+          ownBroadcastRef.current = false;
+        }
       } else {
         setStatusMsg({ type: "error", text: userFacingErrorText(result.error, "xrayReferrals:result") });
       }
@@ -1381,8 +1414,14 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   // auto-refresh) so a referral/reassignment made by someone else -- or on
   // another machine -- shows up without navigating away and back. Passed silently
   // so it never force-closes an employee's currently open inspection form (see the
-  // `silent` handling inside loadData above).
-  useEffect(() => subscribeToDataRefresh(() => { void loadData({ silent: true }); }), [loadData]);
+  // `silent` handling inside loadData above). `ownAnswerBroadcastRef` skips this
+  // view's OWN submit announcement — handleSave's setAnswers already reconciled
+  // it (same idiom as useApprovalData.ts's ownDecisionBroadcastRef).
+  const ownAnswerBroadcastRef = useRef(false);
+  useEffect(() => subscribeToDataRefresh(() => {
+    if (ownAnswerBroadcastRef.current) return;
+    void loadData({ silent: true });
+  }), [loadData]);
 
   async function handleTplSelect(id: string): Promise<void> {
     await applyTemplate(id, canSetTemplate);
@@ -1393,6 +1432,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const handleSave = createSaveAnswerHandler({
     directoryHandle, folderForRow, username, role, activeTpl, selMonth,
     canSubmitAnswers, canAnswerOnBehalf, setAnswers, setStatusMsg,
+    ownBroadcastRef: ownAnswerBroadcastRef, setDirtyEntryId,
   });
 
   // Both reopen handlers live at module scope (createReopenHandlers, above) to
@@ -1998,6 +2038,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                 panel travels inside, and it keeps the empty-state placeholder in
                 the same track without a second set of placement rules. */}
             <div className="ew-xr-panel-col">
+              <QueueSplitResizer />
               {panelEntry ? (
                 <>
                 <PanelAuthoringNotice
