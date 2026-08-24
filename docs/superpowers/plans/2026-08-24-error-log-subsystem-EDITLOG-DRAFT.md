@@ -22,8 +22,43 @@ protocol change) at versions **v115.3 through v117.5** — see
 | 4 | `569352a0` | Per-user CAS-protected error store (`errorLogStorage.ts`, `errorLogTypes.ts`) — TIER 3 |
 | 5 | `c1b435fe` | Batching sink (`errorLogSink.ts`, `WorkspaceErrorSink.tsx`) |
 | 6 | `5164eb24` | XLSX export builder (`errorLogExport.ts`) |
+| fix | `0ba1f6d5` | `errorLogSink.test.ts`: `advanceTimersByTimeAsync` → `runAllTimersAsync` to avoid a cross-test lock deadlock (see below) |
+| 7 | `7561b279` | Settings export button (`ErrorLogSection.tsx`, `labelsStore.ts`) |
+| 8 (partial) | `f23202ef` | `SECURITY_MODEL.md` addendum + this draft file |
 
-Tasks 7 and 8 below are **implemented but not yet committed** as of this draft —
+**Note on Task 8's other two files:** `docs/architecture/data-system-report.md`
+and `CLAUDE.md` were edited by this session (the two new file-table rows and the
+disk-layout/module-table entries described below), but this is a SHARED,
+non-isolated worktree and another concurrently-running session's commit
+(`844601b3`, "Docs (feedback): document the per-thread layout in
+data-system-report, CLAUDE.md and feedbackUnread") captured the full contents of
+both files — including this session's error-log edits — before this session got
+to commit them separately. Verified: `git show 844601b3:CLAUDE.md` and `git show
+844601b3:docs/architecture/data-system-report.md` both contain the
+`system-errors/`/`Error log` content described in the Task 8 section below, so
+nothing was lost — it just landed under someone else's commit message rather than
+this session's own. No further action needed for those two files; only
+`SECURITY_MODEL.md` and this draft needed a dedicated commit.
+
+A found-and-fixed test bug, not one of the plan's 8 tasks: the "flushes on a
+timer even when the batch never fills" test in `errorLogSink.test.ts` used a
+bounded `vi.advanceTimersByTimeAsync(5_000)` that left a nested fake timer
+(casLoop's own post-write verify-delay sleep) dangling once the test's `afterEach`
+restored real timers. Because `withResourceLock`'s fallback-lock chain
+(`webLocks.ts`) is a module-level `Map` keyed only by the deterministic per-user
+lock string (not by which `createMemoryDirectory()` instance is in play), that one
+dangling promise permanently held the "alice" lock for the rest of the test file,
+hanging the 4 tests declared after it (each timing out at vitest's 20s default —
+~80s of wall time for the file). Fixed by switching to `vi.runAllTimersAsync()`,
+which fully drains the nested timer before the assertion runs; all 8 tests in the
+file now pass in ~1.4s. Worth flagging to whoever else in this worktree writes a
+`vi.useFakeTimers()` test that goes through `casLoop` (any CAS-protected write)
+with a BOUNDED timer advance rather than `runAllTimersAsync` — the same trap is
+generic to `casLoop`'s always-present verify-delay sleep, not specific to this
+plan's code.
+
+Tasks 7 and 8 below are **implemented and committed** as of this draft (see the
+table above for exact commits) —
 entries written here instead of the shared log per the protocol change. Their
 source/test changes will be committed with a specific `git add` (never
 `package.json`, never the edit-log file).
