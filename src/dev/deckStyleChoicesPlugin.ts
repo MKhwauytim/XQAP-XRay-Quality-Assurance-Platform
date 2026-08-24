@@ -2,7 +2,7 @@
 // persistence endpoint. Dev-only: only registered by vite.config.ts's plugin
 // list, never runs in `npm run build` output.
 import type { Plugin } from "vite";
-import { readChoices, writeChoice } from "./deckStyleChoices";
+import { readChoices, writeChoice } from "./deckStyleChoices.ts";
 
 const ENDPOINT = "/__deck-style-choices";
 const CHOICES_PATH = "dev-workspace/6-templates/deck-style-choices.json";
