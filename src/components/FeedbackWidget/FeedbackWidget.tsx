@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Check, MessageCircle, X } from "lucide-react";
 import { readSession } from "../../auth/authSession";
 import {
@@ -194,18 +194,19 @@ export function FeedbackWidget() {
   const safeMyPage = clampPage(myPage, mySummaries.length);
   const safeAdminPage = clampPage(adminPage, filteredSummaries.length);
 
-  const visibleSummaries = useMemo(
-    () =>
-      isManager && adminTab === "all"
-        ? pageSlice(filteredSummaries, safeAdminPage)
-        : pageSlice(mySummaries, safeMyPage),
-    [isManager, adminTab, filteredSummaries, safeAdminPage, mySummaries, safeMyPage]
-  );
+  // Plain consts, not useMemo: `mySummaries`/`filteredSummaries` are cheap
+  // filters over already-small summary arrays, and the React Compiler already
+  // memoizes this component -- wrapping a derived value in a manual useMemo
+  // whose own inputs are unmemoized plain consts is what the compiler flags
+  // as "existing memoization could not be preserved". Every other derived
+  // value in this component (openCount, mySummaries, filteredSummaries) is
+  // the same plain-const shape.
+  const visibleSummaries =
+    isManager && adminTab === "all"
+      ? pageSlice(filteredSummaries, safeAdminPage)
+      : pageSlice(mySummaries, safeMyPage);
 
-  const visibleIds = useMemo(
-    () => visibleSummaries.map((summary) => summary.threadId),
-    [visibleSummaries]
-  );
+  const visibleIds = visibleSummaries.map((summary) => summary.threadId);
   // Stable dependency: the array identity changes on every render, the joined
   // key does not.
   const visibleIdsKey = visibleIds.join("|");
