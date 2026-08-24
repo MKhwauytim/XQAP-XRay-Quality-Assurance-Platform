@@ -49,6 +49,7 @@ import type { PopulationProcessingResult } from "./processing/populationProcessi
 import type { RiskWorkbookResult } from "./riskData/riskDataTypes";
 
 import WorkbookWorker from "../../../../workers/workbookWorker?worker&inline";
+import { createWorkbookResultAccumulator } from "../../../../workers/workbookResultStream";
 import type { WorkbookWorkerRequest, WorkbookWorkerResponse } from "../../../../workers/workbookWorkerTypes";
 
 import PhaseOneUpload from "./components/PhaseOneUpload";
@@ -813,14 +814,34 @@ export default function PopulationTab() {
         resolve();
       };
 
+      // Scoped to THIS parse run, alongside onMessage: a superseded run's
+      // listener is removed by cleanup(), so its accumulator (and the rows it
+      // holds) becomes garbage and a late chunk has nowhere to land. This is
+      // why the protocol needs no requestId — see workbookWorkerTypes.ts.
+      const accumulator = createWorkbookResultAccumulator();
+
       const onMessage = (ev: MessageEvent) => {
         const msg = ev.data as WorkbookWorkerResponse;
         if (msg.type === "progress") {
           armWatchdog();
           setProcessingMessage(msg.message);
+        } else if (msg.type === "risk-rows") {
+          // A chunk is proof of life just as much as a progress message is, so
+          // it re-arms the 180 s silence watchdog. Streaming a 400k-row month
+          // can otherwise run for a while with no `progress` in between.
+          armWatchdog();
+          accumulator.acceptRiskRows(msg.rows);
+        } else if (msg.type === "bi-rows") {
+          armWatchdog();
+          accumulator.acceptBiRows(msg.fileIndex, msg.rows);
         } else if (msg.type === "done") {
-          setRiskWorkbookResult(msg.riskResult);
-          applyBiFileResults(biEntries, msg.biResults);
+          // `done` carries only metadata shells now; finalize() stitches the
+          // streamed rows back in and yields the SAME object graph a single
+          // monolithic `done` used to carry (see workbookResultStream.ts).
+          // Nothing below this line changed.
+          const { riskResult, biResults } = accumulator.finalize(msg);
+          setRiskWorkbookResult(riskResult);
+          applyBiFileResults(biEntries, biResults);
           hasUnsavedSessionWorkRef.current = true;
           if (msg.warning) setProcessingMessage(msg.warning);
           // No longer advances the phase here — see this function's header
