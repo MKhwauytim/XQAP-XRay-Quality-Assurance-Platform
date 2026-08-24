@@ -174,7 +174,7 @@ Both previously documented drifts have since been **fixed in code**. **`4-report
 
 | Component | Path | Notes |
 |-----------|------|-------|
-| `DataTable` | `src/components/DataTable/` | Reusable filterable/sortable table with column visibility, XLSX export |
+| `DataTable` | `src/components/DataTable/` | Reusable table: global search, per-column filters, per-column sort (opt-out via `sortable: false` / `canSortColumns={false}`; transient per-mount, never persisted through `ColConfig`), column visibility/reorder/resize, XLSX export, virtualized paging. Sort primitives are shared with Population Browse via `src/utils/tableSort.ts` |
 | `PageHeader` | `src/components/PageHeader/` | Eyebrow + title + subtitle header pattern |
 | `FeedbackWidget` | `src/components/FeedbackWidget/` | Floating feedback collector |
 | `PermissionGuard` | `src/components/PermissionGuard.tsx` | Renders children only when the current user has a given permission |
