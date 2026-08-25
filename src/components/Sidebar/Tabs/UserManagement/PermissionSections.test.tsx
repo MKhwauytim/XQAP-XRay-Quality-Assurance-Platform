@@ -53,21 +53,51 @@ describe("user-management permission sections", () => {
     expect(checkbox).toBeDisabled();
   });
 
-  it("shows a system-restriction notice instead of a toggle for admin-only pages", () => {
+  it("renders إدارة المستخدمين as a real, settable control for every role but guest", () => {
+    // Ceiling widened from ADMIN_ONLY (2026-08-25): an admin-only cap made this
+    // entire section -- parent and all 5 sub-tabs -- a dead SYSTEM_RESTRICTED block,
+    // since admin is never a column in this matrix (MANAGED_ROLES excludes it). It
+    // is now every operational role, matching the population/adhoc-import precedent;
+    // `guest` alone keeps the notice, as the read-only observer role.
+    const onUpdate = vi.fn();
+    // Grant the parent page to every non-admin role so the 5 sub-tab rows aren't
+    // ALSO showing the separate, recoverable parentBlocked cascade -- this test is
+    // only about the ceiling (ADMIN_ONLY -> OPERATIONAL_ROLES), not the cascade.
+    const permissions = createDefaultPermissions().map((permission) =>
+      permission.tabId === "user-management" && permission.role !== "admin"
+        ? { ...permission, access: "edit" as const }
+        : permission
+    );
     render(
       <PagePermissionsSection
-        permissions={createDefaultPermissions()}
-        collapsedParents={new Set(["user-management"])}
+        permissions={permissions}
+        collapsedParents={new Set()}
         canEdit
         onToggleParent={vi.fn()}
-        onUpdate={vi.fn()}
+        onUpdate={onUpdate}
       />
     );
 
-    // user-management is admin-only by design; the four managed role columns must
-    // read as restricted, with no clickable control.
-    expect(screen.getAllByText(SYSTEM_RESTRICTED_LABEL).length).toBeGreaterThanOrEqual(12);
-    expect(screen.queryByRole("button", { name: /user-management:/ })).toBeNull();
+    for (const tabId of [
+      "user-management",
+      "user-management/users",
+      "user-management/page-permissions",
+      "user-management/feature-permissions",
+      "user-management/activity",
+      "user-management/actions",
+    ]) {
+      for (const [roleLabel, role] of [
+        ["موظف", "employee"],
+        ["مشرف", "supervisor"],
+        ["مدير", "manager"],
+      ] as const) {
+        const button = screen.getByRole("button", { name: `${roleLabel}: ${tabId} - لا وصول` });
+        expect(button, `${role}:${tabId}`).toBeEnabled();
+      }
+      expect(screen.queryByRole("button", { name: new RegExp(`^ضيف: ${tabId} `) })).toBeNull();
+    }
+    fireEvent.click(screen.getByRole("button", { name: "مدير: user-management - تعديل كامل" }));
+    expect(onUpdate).toHaveBeenLastCalledWith("manager", "user-management", "edit");
   });
 
   it("renders ارفاق حالات استثنائية as a real, settable control for every role but guest", () => {
@@ -209,10 +239,13 @@ describe("user-management permission sections", () => {
     // view-error-log, edit-interface-labels, settings.syncInterval, and
     // settings.adminAccount (audit finding 13) all live on `settings` (guest + admin
     // only), so employee/supervisor/manager get the permanent notice -- not the
-    // recoverable "enable the page first" hint they used to get.
+    // recoverable "enable the page first" hint they used to get. manage-users,
+    // reset-passwords and edit-permissions live on `user-management`, whose ceiling
+    // was widened from ADMIN_ONLY to every operational role (2026-08-25) -- only
+    // guest is still permanently excluded there.
     const notices = screen.getAllByText(SYSTEM_RESTRICTED_LABEL);
-    // 3 admin-only user-management features x 4 roles + 4 settings features x 3 roles.
-    expect(notices).toHaveLength(24);
+    // 3 user-management features x 1 role (guest) + 4 settings features x 3 roles.
+    expect(notices).toHaveLength(15);
     // guest keeps a real toggle for the settings features -- the ceiling allows it.
     expect(screen.getAllByRole("checkbox").length).toBeGreaterThan(0);
   });

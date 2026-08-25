@@ -101,7 +101,12 @@ describe("tab catalog", () => {
     }
   });
 
-  it("keeps the deliberate admin-only and settings ceilings intact", () => {
+  it("widens user-management to every operational role, like population/adhoc-import", () => {
+    // Widened from ADMIN_ONLY (2026-08-25): admin is never a column in the
+    // page-permissions matrix (MANAGED_ROLES excludes it), so an admin-only
+    // ceiling made the whole section a permanently dead "مقيّد بالنظام" block.
+    // `guest` stays out on purpose -- it is the read-only observer role and this
+    // section only mutates other accounts/permissions, nothing to view.
     for (const tabId of [
       "user-management",
       "user-management/users",
@@ -110,8 +115,11 @@ describe("tab catalog", () => {
       "user-management/activity",
       "user-management/actions",
     ]) {
-      expect(roleCeilingFor(tabId), tabId).toEqual(["admin"]);
+      expect(roleCeilingFor(tabId), tabId).toEqual(["employee", "supervisor", "manager", "admin"]);
     }
+  });
+
+  it("keeps the deliberate settings ceiling intact", () => {
     expect(roleCeilingFor("settings")).toEqual(["guest", "admin"]);
   });
 
