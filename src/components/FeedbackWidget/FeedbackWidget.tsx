@@ -86,14 +86,22 @@ export function FeedbackWidget() {
   const refresh = useCallback(async () => {
     if (!directoryHandle) return;
     setLoading(true);
-    const [list] = await Promise.all([
-      listThreadSummaries(directoryHandle),
-      // The unread provider owns the full aggregate read; awaiting its reload
-      // here is what lets markSeen() below use the SAME freshness the old
-      // markSeen(msgs) had -- applyMessages sets messagesRef synchronously
-      // before setState, so the ref is already the list just fetched.
-      reloadUnread(),
-    ]);
+    // SEQUENCED, not Promise.all. Both branches walk the same feedback
+    // directory: `reloadUnread` → `loadFeedback` → `listThreadSummaries`, and
+    // the explicit call below is a second `listThreadSummaries`. Running them
+    // concurrently made one panel open issue two overlapping reconciles of the
+    // same shared file from the same tab — pointless load on the workspace the
+    // 2026-08-25 incident showed is the scarce resource. Sequencing costs a
+    // little panel-open latency, already covered by the spinner.
+    //
+    // Order matters: the read-only pass runs first, so the repairing pass below
+    // sees an already-migrated, warm state.
+    await reloadUnread();
+    // `repairIndex` ONLY here: this runs when a user opens or refreshes the
+    // feedback panel, a deliberate action at human rate. The 60 s background
+    // poll in FeedbackUnreadProvider must never ask for it — see
+    // listThreadSummaries' doc for what that cost.
+    const list = await listThreadSummaries(directoryHandle, { repairIndex: true });
     setSummaries(list);
     setLoading(false);
     markSeen();

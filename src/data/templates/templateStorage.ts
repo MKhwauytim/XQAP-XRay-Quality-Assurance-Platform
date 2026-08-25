@@ -43,7 +43,7 @@ async function updateTemplateIndex(
       }
       return { done: false };
     },
-    { conflictError: "تعذّر تحديث فهرس القوالب: تعارض في الكتابة بعد عدة محاولات." }
+    { context: "templates:index", conflictError: "تعذّر تحديث فهرس القوالب: تعارض في الكتابة بعد عدة محاولات." }
   );
   if (!outcome.ok) {
     throw new Error(outcome.error);
@@ -93,7 +93,7 @@ async function saveTemplateFile(
       }
       return { done: false };
     },
-    { conflictError: "تعذّر حفظ القالب: تعارض في الكتابة بعد عدة محاولات." }
+    { context: "templates:template", conflictError: "تعذّر حفظ القالب: تعارض في الكتابة بعد عدة محاولات." }
   );
   if (!outcome.ok) {
     throw new Error(outcome.error);

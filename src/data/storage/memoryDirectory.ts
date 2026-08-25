@@ -73,10 +73,27 @@ export interface MemoryDirectoryOptions {
  * a few milliseconds later.
  */
 export type SimulatedFault = {
-  /** Which handle method to fail. */
-  operation: "getFileHandle" | "getDirectoryHandle" | "getFile" | "createWritable";
   /**
-   * Entry name to match. Omit to match every name. For `getFile` /
+   * Which handle method to fail.
+   *
+   * `readFile` is NOT a handle method — it fails the read of the `File` that
+   * `getFile()` already returned (`text`, `arrayBuffer`, `slice(...).*`,
+   * `stream`). That distinction is the whole point of it existing separately
+   * from `getFile`: Chromium's stale-snapshot `InvalidStateError`
+   * (XQ-IO-036) is raised at exactly that boundary — `getFile()` SUCCEEDS and
+   * hands back a `File` carrying a (size, mtime) snapshot, and only the later
+   * touch of the bytes discovers the file changed underneath it. Faulting
+   * `getFile` instead would test a condition that never happens in production
+   * and would let a "fix" that reuses the already-stale `File` pass.
+   */
+  operation:
+    | "getFileHandle"
+    | "getDirectoryHandle"
+    | "getFile"
+    | "readFile"
+    | "createWritable";
+  /**
+   * Entry name to match. Omit to match every name. For `getFile` / `readFile` /
    * `createWritable` this is the file handle's own name.
    */
   name?: string;
@@ -301,6 +318,79 @@ function createNode(): MemoryNode {
   return { files: new Map(), dirs: new Map() };
 }
 
+/**
+ * Make a real `File` fail its READ methods under a `readFile` fault.
+ *
+ * Every byte-touching entry point is covered — `text`, `arrayBuffer`, `bytes`,
+ * `stream`, and the `Blob` returned by `slice` (recursively, so
+ * `file.slice(0, n).arrayBuffer()` faults exactly like `file.text()` does).
+ * Anything that reads has to be able to fault, or a caller could dodge the
+ * simulated condition by picking a different read method — which is precisely
+ * how safeWrite.ts reads: `readText` uses `text()`, `classifyFile` and
+ * `readContent` use `slice().arrayBuffer()`, and `streamFileChunks` slices in a
+ * loop.
+ *
+ * Metadata (`size`, `lastModified`, `name`) deliberately still works: the real
+ * DOMException is raised when the snapshot is USED, not when it is read, and a
+ * double that broke `size` too would fail reads for the wrong reason.
+ *
+ * Properties are redefined on the instance rather than subclassing `File`
+ * because `slice()` returns a plain `Blob`, not a `File`, so there is no one
+ * class to extend.
+ */
+function withReadFaults(
+  file: File,
+  name: string,
+  faultState: FaultState | null,
+  operationLog: OperationLogState | null
+): File {
+  // Evaluated at getFile() time, which is always AFTER any setSimulatedFaults
+  // call, so a plan installed on an already-built tree is still seen. Checking
+  // `faultState` for non-null would be dead code — createMemoryDirectory
+  // allocates one unconditionally so a plan can be installed later — and would
+  // leave every File in every test wrapped for nothing.
+  const wantsReadFaults =
+    faultState?.faults.some((fault) => fault.operation === "readFile") ?? false;
+  if (!wantsReadFaults && !operationLog) return file;
+  const guard = (): void => {
+    applyFaults(faultState, operationLog, { operation: "readFile", name });
+  };
+  // Only wrap methods this runtime actually has. The component tests run under
+  // jsdom, whose Blob implementation does not carry the full set that Node's
+  // does — binding an absent method would throw inside `getFile()` and break
+  // every jsdom test, faults installed or not.
+  const wrapBlob = <TBlob extends Blob>(blob: TBlob): TBlob => {
+    const guarded = (method: "text" | "arrayBuffer" | "bytes" | "stream"): void => {
+      const native = (blob as unknown as Record<string, unknown>)[method];
+      if (typeof native !== "function") return;
+      const bound = (native as (...args: unknown[]) => unknown).bind(blob);
+      Object.defineProperty(blob, method, {
+        configurable: true,
+        writable: true,
+        value: (...args: unknown[]) => {
+          guard();
+          return bound(...args);
+        },
+      });
+    };
+    guarded("text");
+    guarded("arrayBuffer");
+    guarded("bytes");
+    guarded("stream");
+
+    if (typeof blob.slice === "function") {
+      const nativeSlice = blob.slice.bind(blob);
+      Object.defineProperty(blob, "slice", {
+        configurable: true,
+        writable: true,
+        value: (...args: Parameters<Blob["slice"]>) => wrapBlob(nativeSlice(...args)),
+      });
+    }
+    return blob;
+  };
+  return wrapBlob(file);
+}
+
 function makeFileHandle(
   name: string,
   node: MemoryNode,
@@ -320,10 +410,11 @@ function makeFileHandle(
       const content = entry ? entry.content : EMPTY_CONTENT;
       // `new File([...])` snapshots the bytes it is given (Blob semantics), so a
       // later write to this node cannot mutate a File a test is still reading.
-      return new File([content], name, {
+      const file = new File([content], name, {
         type: "application/json",
         lastModified: entry ? entry.lastModified : 0,
       });
+      return withReadFaults(file, name, faultState, operationLog);
     },
     createWritable: async () => {
       applyFaults(faultState, operationLog, { operation: "createWritable", name });

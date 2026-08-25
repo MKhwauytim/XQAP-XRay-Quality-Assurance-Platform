@@ -58,9 +58,11 @@ import {
 import { directoryResourceKey, withResourceLock } from "./webLocks";
 import { withWorkspaceWriteAccess } from "./workspaceWriteAccess";
 import {
+  SNAPSHOT_STALE_RETRY_DELAYS_MS,
   VERIFY_READBACK_RETRY_DELAYS_MS,
   isNotFoundError,
   isNotReadableError,
+  isSnapshotStaleError,
   logExhaustedNotFound,
   retryTransientWrite,
 } from "./transientFileErrors";
@@ -92,6 +94,46 @@ const NOT_READABLE_RETRY_DELAYS_MS = [20, 60] as const;
 
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+/**
+ * How many retries of each recoverable read fault one read has already spent.
+ *
+ * The two are counted SEPARATELY on purpose. They are different conditions with
+ * different timescales (see the ladders' own docs), and one budget shared
+ * between them would let a burst of the cheap fault exhaust the patience the
+ * expensive one needs.
+ */
+type ReadRetryBudget = { unreadable: number; stale: number };
+
+function newReadRetryBudget(): ReadRetryBudget {
+  return { unreadable: 0, stale: 0 };
+}
+
+/**
+ * How long to wait before retrying `error`, or `null` for "this read is over,
+ * rethrow".
+ *
+ * Six read paths in this module (`readText`, `readContent`, `classifyFile`,
+ * `openFile`, `streamFileChunks`'s window reader and
+ * `readEnvelopeMetadataTolerant`) each had their own hand-written NotReadable
+ * branch, so when the XQ-IO-032 incident showed that `InvalidStateError` needs
+ * the same treatment, "add one more branch" meant adding it in six places and
+ * keeping them in step forever. This is that decision, made once.
+ *
+ * Retrying is only meaningful because every one of those loops re-acquires the
+ * handle — and therefore takes a FRESH (size, mtime) snapshot — at the top of
+ * the next pass. A retry that reused the stale interface object would fail
+ * identically, forever; see `isSnapshotStaleError`.
+ */
+function readRetryDelayMs(error: unknown, budget: ReadRetryBudget): number | null {
+  if (isNotReadableError(error) && budget.unreadable < NOT_READABLE_RETRY_DELAYS_MS.length) {
+    return NOT_READABLE_RETRY_DELAYS_MS[budget.unreadable++]!;
+  }
+  if (isSnapshotStaleError(error) && budget.stale < SNAPSHOT_STALE_RETRY_DELAYS_MS.length) {
+    return SNAPSHOT_STALE_RETRY_DELAYS_MS[budget.stale++]!;
+  }
+  return null;
 }
 
 type ReadTextOptions = {
@@ -155,7 +197,7 @@ async function readText(
 ): Promise<string | null> {
   const missingRetries = options?.retryMissing ? VERIFY_READBACK_RETRY_DELAYS_MS.length : 0;
   let missingAttempts = 0;
-  let unreadableAttempts = 0;
+  const retries = newReadRetryBudget();
   let lastMissingError: unknown = null;
   for (;;) {
     try {
@@ -184,9 +226,9 @@ async function readText(
         }
         return null;
       }
-      if (isNotReadableError(error) && unreadableAttempts < NOT_READABLE_RETRY_DELAYS_MS.length) {
-        await wait(NOT_READABLE_RETRY_DELAYS_MS[unreadableAttempts]!);
-        unreadableAttempts += 1;
+      const retryDelay = readRetryDelayMs(error, retries);
+      if (retryDelay !== null) {
+        await wait(retryDelay);
         continue;
       }
       throw error;
@@ -223,7 +265,7 @@ async function readContent(
   name: string,
   options?: ReadTextOptions
 ): Promise<FileContent | null> {
-  let unreadableAttempts = 0;
+  const retries = newReadRetryBudget();
   for (;;) {
     const file = await openFile(dir, name, options);
     if (file === null) return null;
@@ -252,14 +294,36 @@ async function readContent(
         }
         return { kind: "compressed", head: classified.head, bodyText: parts.join("") };
       }
+      if (file.size <= HEAD_PROBE_BYTES && window.byteLength === file.size) {
+        // The head window already IS the whole file, so decode it rather than
+        // touching the bytes a second time.
+        //
+        // This function's own doc comment above has always claimed that for a
+        // file smaller than the probe window this is "not even a second read of
+        // anything" — the code never implemented it, and read every small file
+        // twice: once as a slice for classification, once as `text()`. Both
+        // touches validate the SAME (size, mtime) snapshot, with awaits in
+        // between, so the second one is a free extra chance to hit XQ-IO-036 on
+        // exactly the small, hot, contended files where a stale snapshot bites
+        // hardest — `threads.index.json`, `month.manifest.json`, the
+        // notification and lock files. It is also one SMB round trip per read.
+        //
+        // Guarded on strict equality, not just `size <= HEAD_PROBE_BYTES`: a
+        // short read would otherwise be served as the whole file. Compressed,
+        // damaged and larger files take the unchanged paths above and below.
+        //
+        // `TextDecoder("utf-8")` matches `Blob.text()`: UTF-8, leading BOM
+        // stripped (the default `ignoreBOM: false` removes it).
+        return { kind: "plain", text: new TextDecoder("utf-8").decode(window) };
+      }
       if (file.size > maxStringLengthForTests) {
         throw stringLengthRangeError(name);
       }
       return { kind: "plain", text: await file.text() };
     } catch (error) {
-      if (isNotReadableError(error) && unreadableAttempts < NOT_READABLE_RETRY_DELAYS_MS.length) {
-        await wait(NOT_READABLE_RETRY_DELAYS_MS[unreadableAttempts]!);
-        unreadableAttempts += 1;
+      const retryDelay = readRetryDelayMs(error, retries);
+      if (retryDelay !== null) {
+        await wait(retryDelay);
         continue;
       }
       throw error;
@@ -282,7 +346,7 @@ async function classifyFile(
   name: string,
   options?: ReadTextOptions
 ): Promise<{ kind: "missing" } | { kind: "plain" } | { kind: "compressed"; head: CompressedHead }> {
-  let unreadableAttempts = 0;
+  const retries = newReadRetryBudget();
   for (;;) {
     const file = await openFile(dir, name, options);
     if (file === null) return { kind: "missing" };
@@ -299,9 +363,9 @@ async function classifyFile(
         ? { kind: "plain" }
         : { kind: "compressed", head: classified.head };
     } catch (error) {
-      if (isNotReadableError(error) && unreadableAttempts < NOT_READABLE_RETRY_DELAYS_MS.length) {
-        await wait(NOT_READABLE_RETRY_DELAYS_MS[unreadableAttempts]!);
-        unreadableAttempts += 1;
+      const retryDelay = readRetryDelayMs(error, retries);
+      if (retryDelay !== null) {
+        await wait(retryDelay);
         continue;
       }
       throw error;
@@ -433,7 +497,7 @@ async function openFile(
 ): Promise<File | null> {
   const missingRetries = options?.retryMissing ? VERIFY_READBACK_RETRY_DELAYS_MS.length : 0;
   let missingAttempts = 0;
-  let unreadableAttempts = 0;
+  const retries = newReadRetryBudget();
   let lastMissingError: unknown = null;
   for (;;) {
     try {
@@ -458,9 +522,9 @@ async function openFile(
         }
         return null;
       }
-      if (isNotReadableError(error) && unreadableAttempts < NOT_READABLE_RETRY_DELAYS_MS.length) {
-        await wait(NOT_READABLE_RETRY_DELAYS_MS[unreadableAttempts]!);
-        unreadableAttempts += 1;
+      const retryDelay = readRetryDelayMs(error, retries);
+      if (retryDelay !== null) {
+        await wait(retryDelay);
         continue;
       }
       throw error;
@@ -485,20 +549,24 @@ async function streamFileChunks(
   }
   const size = file.size;
   const decoder = new TextDecoder("utf-8");
-  // One window, with the same bounded NotReadableError tolerance every other
-  // read here gets.
+  // One window, with the same bounded transient-read tolerance every other read
+  // here gets.
+  //
+  // This is the loop MOST exposed to a stale snapshot (XQ-IO-036): unlike every
+  // other read in this module it holds one `File` across many `slice()` calls,
+  // so the (size, mtime) snapshot taken by the original `openFile` has to stay
+  // valid for the whole stream rather than for one round trip. Re-opening on the
+  // fault is therefore not an optimisation here, it is the only recovery: the
+  // stale interface object can never succeed again.
   const readWindow = async (start: number, end: number): Promise<ArrayBuffer> => {
-    let unreadableAttempts = 0;
+    const retries = newReadRetryBudget();
     for (;;) {
       try {
         return await file!.slice(start, end).arrayBuffer();
       } catch (error) {
-        if (
-          isNotReadableError(error) &&
-          unreadableAttempts < NOT_READABLE_RETRY_DELAYS_MS.length
-        ) {
-          await wait(NOT_READABLE_RETRY_DELAYS_MS[unreadableAttempts]!);
-          unreadableAttempts += 1;
+        const retryDelay = readRetryDelayMs(error, retries);
+        if (retryDelay !== null) {
+          await wait(retryDelay);
           // The handle can go stale while another process swaps the file; re-open
           // it, but only adopt the replacement when it is still the same file by
           // size — otherwise keep failing rather than splicing two versions.
@@ -1389,23 +1457,28 @@ async function isRecoverableCompressedFile(
 }
 
 /**
- * `readEnvelopeMetadata` with this module's transient-NotReadableError retry.
- * It lives in `compressedEnvelope.ts`, which deliberately does no retrying —
- * that is safeWrite's job, and the pre-write read of the existing file is
- * exactly where a briefly unreadable file must not fail the whole save.
+ * `readEnvelopeMetadata` with this module's transient-read retry. It lives in
+ * `compressedEnvelope.ts`, which deliberately does no retrying — that is
+ * safeWrite's job, and the pre-write read of the existing file is exactly where
+ * a briefly unreadable file must not fail the whole save.
+ *
+ * It is also the read most likely to meet a stale snapshot (XQ-IO-036): it runs
+ * against a file this app itself may have written moments ago, which is when a
+ * share's cached metadata is furthest behind the bytes. `readEnvelopeMetadata`
+ * re-opens the file itself, so each pass here takes a fresh snapshot.
  */
 async function readEnvelopeMetadataTolerant(
   dir: DirectoryHandleLike,
   fileName: string
 ): Promise<Awaited<ReturnType<typeof readEnvelopeMetadata>>> {
-  let attempts = 0;
+  const retries = newReadRetryBudget();
   for (;;) {
     try {
       return await readEnvelopeMetadata(dir, fileName);
     } catch (error) {
-      if (isNotReadableError(error) && attempts < NOT_READABLE_RETRY_DELAYS_MS.length) {
-        await wait(NOT_READABLE_RETRY_DELAYS_MS[attempts]!);
-        attempts += 1;
+      const retryDelay = readRetryDelayMs(error, retries);
+      if (retryDelay !== null) {
+        await wait(retryDelay);
         continue;
       }
       throw error;

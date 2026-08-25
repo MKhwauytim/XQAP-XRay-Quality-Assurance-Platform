@@ -87,6 +87,54 @@ describe("casLoop — lost-update hardening (verify callback)", () => {
     expect(final.value).toBe("A");
   });
 
+  it("keeps a verified write when the delayed verify THROWS instead of answering", async () => {
+    // "Could not confirm" is not "was clobbered". The attempt already passed its
+    // in-attempt read-back — that is what `done: true` means — so a verify that
+    // cannot read produces no evidence against it. Retrying here (which is what
+    // happened while the verify sat inside the outer catch) discards a write
+    // that provably succeeded and issues ANOTHER write to a share that just
+    // failed a read. On the answer path that multiplies by 14.
+    let attempts = 0;
+    const result = await casLoop<{ ok: true }>(
+      async () => {
+        attempts += 1;
+        return {
+          done: true,
+          result: { ok: true as const },
+          verify: async () => {
+            const error = new Error("state had changed since it was read from disk");
+            error.name = "InvalidStateError";
+            throw error;
+          },
+        };
+      },
+      { maxRetries: 5, baseDelayMs: 1 }
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(attempts).toBe(1);
+  });
+
+  it("still retries when the delayed verify ANSWERS that the write was clobbered", async () => {
+    // The guarantee the verify exists for must survive the change above: a
+    // definite `false` is evidence, and is still acted on.
+    let attempts = 0;
+    const result = await casLoop<{ ok: true }>(
+      async () => {
+        attempts += 1;
+        return {
+          done: true,
+          result: { ok: true as const },
+          verify: async () => attempts >= 2,
+        };
+      },
+      { maxRetries: 5, baseDelayMs: 1 }
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(attempts).toBe(2);
+  });
+
   it("does not require verify — legacy done:true attempts still succeed", async () => {
     let attempts = 0;
     const result = await casLoop<number>(async () => {

@@ -109,6 +109,20 @@ export async function casLoop<T>(
      * receives back — and never changes the resolved value either way.
      */
     onExhausted?: (cause: unknown, code: ErrorCode) => void;
+    /**
+     * `module:operation` naming the WRITE this loop is running, e.g.
+     * `"feedback:threadsIndex"`. Appended to the `casLoop:exhausted` log
+     * context so an exhaustion entry says which writer failed.
+     *
+     * Without it every one of casLoop's ~25 call sites logs the identical
+     * string `casLoop:exhausted [XQ-IO-032]`. That is why the `admin` entry in
+     * the 2026-08-25 logs is unattributable to this day: it arrived with no
+     * paired action entry, and one of those ~25 writers failed, with nothing
+     * recorded to say which. `onExhausted` above already solves this — for the
+     * single call site that passes one. This is the cheap version every other
+     * site can adopt without wiring its own observer.
+     */
+    context?: string;
   }
 ): Promise<T | { ok: false; error: string }> {
   const max = options?.maxRetries ?? DEFAULT_MAX_RETRIES;
@@ -128,7 +142,35 @@ export async function casLoop<T>(
         if (!r.verify) return r.result;
         // Delayed re-read: give a competing machine's clobber time to land.
         await sleep(verifyDelayMs());
-        const stillMine = await r.verify();
+        let stillMine: boolean;
+        try {
+          stillMine = await r.verify();
+        } catch (verifyError) {
+          // "Could not confirm" is NOT "was clobbered" — the same distinction
+          // transientFileErrors.ts enforces between an unreadable file and an
+          // absent one, applied to the confirmation read.
+          //
+          // The write has ALREADY passed its in-attempt read-back (revision AND
+          // token), which is what `done: true` means. This delayed re-read is a
+          // second, stronger check for one specific interleaving; a THROW from
+          // it produces no evidence either way. Treating that as a lost update
+          // — which is what happened while it sat inside the outer catch —
+          // discards a write that provably succeeded and re-runs the whole
+          // read-modify-write, adding another write to a share that just proved
+          // it could not serve a read. That is amplification aimed at exactly
+          // the wrong moment, and on the answer path it multiplies by 14.
+          //
+          // So: keep the verified result, and record why the second check could
+          // not run, since an unconfirmed write is worth seeing in the log.
+          logCodedError(
+            options?.context
+              ? `casLoop:verify-inconclusive(${options.context})`
+              : "casLoop:verify-inconclusive",
+            resolveErrorCode(verifyError) ?? "XQ-IO-032",
+            verifyError
+          );
+          return r.result;
+        }
         if (stillMine) return r.result;
         // Lost update detected — fall through to retry the whole attempt.
       }
@@ -165,7 +207,11 @@ export async function casLoop<T>(
     // An exception beat us, so this is NOT a write conflict — report what it
     // actually was, with a quotable code, and put the raw detail in the log.
     const code = resolveErrorCode(lastCause) ?? "XQ-IO-032";
-    logCodedError("casLoop:exhausted", code, lastCause);
+    logCodedError(
+      options?.context ? `casLoop:exhausted(${options.context})` : "casLoop:exhausted",
+      code,
+      lastCause
+    );
     try {
       options?.onExhausted?.(lastCause, code);
     } catch {

@@ -37,6 +37,7 @@ import {
   WorkspacePicker
 } from "./data/workspace/WorkspaceGate";
 import { touchTabMountLru } from "./app/tabMountLru";
+import { getDirtyTabIds, subscribeToUnsavedWork } from "./app/unsavedWorkRegistry";
 import { useWorkspaceNotifications } from "./data/notifications/useWorkspaceNotifications";
 import { useSessionActions } from "./auth/SessionActionsContext";
 
@@ -262,13 +263,25 @@ export function AppContent({ session }: AppContentProps) {
     () => activeTabId ? [activeTabId] : []
   );
 
+  // Bumped whenever a tab reports (or clears) unsaved work, so the LRU effect
+  // below re-runs and can re-admit a tab that just became dirty.
+  const [unsavedWorkVersion, setUnsavedWorkVersion] = useState(0);
+  useEffect(
+    () => subscribeToUnsavedWork(() => setUnsavedWorkVersion((version) => version + 1)),
+    []
+  );
+
   useEffect(() => {
     const allowedIds = new Set(allowedTabs.map((tab) => tab.id));
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the LRU changes in response to navigation and access changes
     setMountedTabIds((current) =>
-      touchTabMountLru(current, activeTabId, allowedIds)
+      // A tab holding work that lives only in component state must not be
+      // evicted: unmounting it destroys the work with no dialog and no trace.
+      touchTabMountLru(current, activeTabId, allowedIds, undefined, getDirtyTabIds())
     );
-  }, [activeTabId, allowedTabs]);
+    // unsavedWorkVersion is the invalidation signal for the getDirtyTabIds()
+    // read above — it is not otherwise referenced in the effect body.
+  }, [activeTabId, allowedTabs, unsavedWorkVersion]);
 
   useEffect(() => {
     if (!isMobileSidebarOpen) return;

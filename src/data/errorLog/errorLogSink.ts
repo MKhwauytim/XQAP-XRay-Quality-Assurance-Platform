@@ -73,6 +73,7 @@ function toPersisted(entry: ErrorEntry, fallbackUsername: string): PersistedErro
     context: entry.context,
     message: entry.message,
     ...(entry.errorCode !== undefined ? { errorCode: entry.errorCode } : {}),
+    ...(entry.errorName !== undefined ? { errorName: entry.errorName } : {}),
     ...(entry.stack !== undefined ? { stack: entry.stack } : {}),
   };
 }

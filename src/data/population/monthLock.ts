@@ -210,7 +210,7 @@ export async function closeMonth(
           }
           return { done: false };
         },
-        { conflictError: "تعذّر إقفال الشهر: تعارض في الكتابة بعد عدة محاولات." }
+        { context: "population:closeMonth", conflictError: "تعذّر إقفال الشهر: تعارض في الكتابة بعد عدة محاولات." }
       )
     );
     invalidateMonthLockCache(monthFolderName);
@@ -288,7 +288,7 @@ export async function reopenMonth(
           }
           return { done: false };
         },
-        { conflictError: "تعذّر إعادة فتح الشهر: تعارض في الكتابة بعد عدة محاولات." }
+        { context: "population:reopenMonth", conflictError: "تعذّر إعادة فتح الشهر: تعارض في الكتابة بعد عدة محاولات." }
       )
     );
     invalidateMonthLockCache(monthFolderName);

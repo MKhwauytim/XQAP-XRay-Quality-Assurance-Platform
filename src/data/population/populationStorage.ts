@@ -567,7 +567,7 @@ export async function updateMonthStatus(
             }
             return { done: false };
           },
-          { maxRetries: 5, baseDelayMs: 50, conflictError: "manifest status update conflict" }
+          { context: "population:manifestStatus", maxRetries: 5, baseDelayMs: 50, conflictError: "manifest status update conflict" }
         )
     );
     if (!result.ok) {

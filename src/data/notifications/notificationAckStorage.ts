@@ -213,7 +213,7 @@ export async function recordAcknowledgement(
         return { done: false };
       },
       {
-        maxRetries: 6,
+        context: "notifications:ack", maxRetries: 6,
         baseDelayMs: 50,
         conflictError: "تعارض في الكتابة: تعذّر حفظ الإشعارات بعد عدة محاولات.",
       }

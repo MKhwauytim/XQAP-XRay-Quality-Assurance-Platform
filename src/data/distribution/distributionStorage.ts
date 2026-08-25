@@ -496,7 +496,7 @@ export async function refreshDistributionLogWriteToken(
       },
       {
         maxRetries: 3,
-        conflictError: "تعارض في الكتابة: تعذّر تحديث علامة سجل التوزيع بعد الاستعادة.",
+        context: "distribution:restoreMark", conflictError: "تعارض في الكتابة: تعذّر تحديث علامة سجل التوزيع بعد الاستعادة.",
       }
     );
     return "touched" in outcome && outcome.touched;
@@ -702,7 +702,7 @@ export async function appendDistributionEvents(
       }
       return { done: false };
     },
-    { conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ الأحداث بعد عدة محاولات." }
+    { context: "distribution:events", conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ الأحداث بعد عدة محاولات." }
   );
   if (result.ok) {
     bumpWorkspaceEpoch(directoryHandle, monthFolderName);

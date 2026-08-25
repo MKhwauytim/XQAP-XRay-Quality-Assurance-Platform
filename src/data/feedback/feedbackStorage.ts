@@ -170,22 +170,52 @@ function normalizeThread(value: FeedbackThread): FeedbackThread {
   };
 }
 
+/**
+ * Raw index read plus the one distinction the plain reader cannot express:
+ * whether the empty result means "there is no index" or "the index could not
+ * be read".
+ *
+ * Both used to collapse to `{ threads: [] }`, and the difference matters a
+ * great deal downstream. An index that is genuinely absent means every thread
+ * file really is unknown, so reconciling them all in is correct. An index that
+ * merely could not be read this once means nothing of the sort — yet it
+ * produced the same verdict, which turned a single read blip into a read of
+ * EVERY thread file plus a full rewrite of the shared index from a
+ * reconstruction, i.e. a blind overwrite of a file whose current contents were
+ * never seen. That is the opposite of what this repo's read contract requires
+ * ("could not read" is never "is not there", see transientFileErrors.ts and
+ * readContract.test.ts) and it is amplification precisely when the share is
+ * already struggling.
+ */
+async function readThreadsIndex(
+  dir: DirectoryHandleLike
+): Promise<{ index: FeedbackThreadsIndex; readable: boolean }> {
+  let feedbackDir: DirectoryHandleLike;
+  try {
+    feedbackDir = await getFeedbackDir(dir, false);
+  } catch {
+    // No feedback folder yet — a brand-new workspace. Genuinely absent.
+    return { index: { threads: [] }, readable: true };
+  }
+  try {
+    const result = await safeReadJson<FeedbackThreadsIndex>(feedbackDir, FEEDBACK_THREADS_INDEX_FILE);
+    if (result.ok && Array.isArray(result.value.threads)) {
+      return { index: { ...result.value, threads: result.value.threads }, readable: true };
+    }
+    // `missing` is absence; `corrupt` is a file that exists but cannot be
+    // trusted — and a corrupt index must not be rewritten from a guess either.
+    return { index: { threads: [] }, readable: result.ok || result.reason === "missing" };
+  } catch {
+    // A THROW is never absence — see this function's doc.
+    return { index: { threads: [] }, readable: false };
+  }
+}
+
 /** Raw index read, no reconciliation — `listThreadSummaries` (Task 4) is the reconciling reader. */
 export async function loadThreadsIndex(
   dir: DirectoryHandleLike
 ): Promise<FeedbackThreadsIndex> {
-  try {
-    const feedbackDir = await getFeedbackDir(dir, false);
-    const result = await safeReadJson<FeedbackThreadsIndex>(feedbackDir, FEEDBACK_THREADS_INDEX_FILE);
-    if (result.ok && Array.isArray(result.value.threads)) {
-      return { ...result.value, threads: result.value.threads };
-    }
-  } catch {
-    // No feedback folder yet, or the index is unreadable. Either way the thread
-    // files are the authority; an empty index is a safe starting point because
-    // listThreadSummaries reconciles against the directory listing.
-  }
-  return { threads: [] };
+  return (await readThreadsIndex(dir)).index;
 }
 
 /**
@@ -244,7 +274,31 @@ async function updateThreadsIndex(
         }
         return { done: false };
       },
-      { conflictError: "تعذّر تحديث فهرس الملاحظات: تعارض في الكتابة بعد عدة محاولات." }
+      {
+        context: "feedback:threadsIndex",
+        // A REBUILDABLE CACHE does not warrant the 10 × 200 ms ladder casLoop
+        // defaults to for user content — that ladder is ~2 s of one machine
+        // holding the single most contended file in the workspace while every
+        // other machine waits for it. Every caller is now best-effort
+        // (`createThread`, `appendReply`) or reconciled on read
+        // (`listThreadSummaries`), so nothing durable rides on winning. Matches
+        // the derived-cache precedent in distributionStorage and the shared-file
+        // appenders in actionLog / errorLog / notifications.
+        maxRetries: 3,
+        baseDelayMs: 100,
+        conflictError: "تعذّر تحديث فهرس الملاحظات: تعارض في الكتابة بعد عدة محاولات.",
+        // The RAW cause, not just the Arabic sentence the catch sites keep. The
+        // incident's feedback entries were Arabic-only and could not be tied to
+        // a platform condition at all until they were paired with
+        // `casLoop:exhausted` rows by timestamp.
+        onExhausted: (cause, code) => {
+          logError(
+            "feedback:threads-index-write",
+            cause instanceof Error ? cause : new Error(String(cause)),
+            { action: "threads-index-write", errorCode: code }
+          );
+        },
+      }
     )
   );
   if (!outcome.ok) {
@@ -273,10 +327,18 @@ function summarize(thread: FeedbackThread, lastActivityAt: string): FeedbackThre
  * name. That is the actual contention fix — under the old shared-log design
  * this same operation rewrote a file every other user was also rewriting.
  *
- * The index append runs second and is best-effort-durable: if it fails after
- * the thread landed, the message is still on disk and `listThreadSummaries`
- * folds it back in (and repairs the index) on the next read. The error is
- * still surfaced so the user is not told a partial save succeeded.
+ * The index append runs second and is genuinely best-effort: if it fails after
+ * the thread landed, the message IS on disk, and `listThreadSummaries`
+ * reconciles it back in on the next read whether or not the index is ever
+ * repaired.
+ *
+ * So its failure must not fail this call. It used to, and the result was the
+ * worst possible report: the user's message was durably written, and they were
+ * told the save had failed — which invites them to send it again, producing a
+ * duplicate thread. A rebuildable cache is exactly the thing whose write is
+ * allowed to lose. The failure is recorded in the error log instead, where it
+ * belongs, so the condition is still visible without being handed to the user
+ * as a lie about their own data.
  */
 export async function createThread(
   dir: DirectoryHandleLike,
@@ -298,10 +360,14 @@ export async function createThread(
   const threadsDir = await getFeedbackThreadsDir(dir, true);
   await safeWriteJson<FeedbackThread>(threadsDir, feedbackThreadFileName(thread.id), thread);
 
-  await updateThreadsIndex(dir, (threads) => [
-    ...threads.filter((summary) => summary.threadId !== thread.id),
-    summarize(thread, thread.timestamp),
-  ]);
+  try {
+    await updateThreadsIndex(dir, (threads) => [
+      ...threads.filter((summary) => summary.threadId !== thread.id),
+      summarize(thread, thread.timestamp),
+    ]);
+  } catch (error) {
+    logError("feedback:createThreadIndex", error);
+  }
 
   return thread;
 }
@@ -377,7 +443,7 @@ export async function appendReply(
         }
         return { done: false };
       },
-      { conflictError: "تعذّر حفظ الرد: تعارض في الكتابة بعد عدة محاولات." }
+      { context: "feedback:threadReply", conflictError: "تعذّر حفظ الرد: تعارض في الكتابة بعد عدة محاولات." }
     )
   );
   if (!outcome.ok) {
@@ -385,16 +451,63 @@ export async function appendReply(
   }
 
   if (statusChanged) {
-    await updateThreadsIndex(dir, (threads) =>
-      threads.map((summary) =>
-        summary.threadId === threadId
-          ? { ...summary, status: outcome.thread.status, lastActivityAt: reply.timestamp }
-          : summary
-      )
-    );
+    try {
+      await updateThreadsIndex(dir, (threads) =>
+        threads.map((summary) =>
+          summary.threadId === threadId
+            ? { ...summary, status: outcome.thread.status, lastActivityAt: reply.timestamp }
+            : summary
+        )
+      );
+    } catch (error) {
+      // The reply AND the status flip are already durable in the thread file,
+      // verified above. This is the same rebuildable-cache write `createThread`
+      // treats as best-effort, and for the same reason: throwing here told the
+      // user their reply had failed AFTER it provably landed — the false-failure
+      // shape of the 2026-08-25 incident — which invites them to send it again.
+      //
+      // The cost of losing this write, stated plainly so it is a contract and
+      // not an accident: the panel's summary row can show a stale status chip
+      // until the next successful index write. The repair path does not heal
+      // that, because it only folds in ids the index does not know — it never
+      // re-reads a thread the index already lists. The thread itself is correct
+      // the moment anyone opens it.
+      logError("feedback:statusIndex", error);
+    }
   }
 
   return outcome.thread;
+}
+
+/**
+ * How long a failed index repair suppresses the next attempt, per tab.
+ *
+ * The repair is a write, and the condition it repairs — the index not knowing a
+ * thread file — is not cleared by a repair that FAILS. So a failing repair is
+ * rediscovered by the very next read and attempted again, forever, at whatever
+ * rate the app happens to read. That is a write storm with no exit, and every
+ * machine on the share runs its own copy of it.
+ *
+ * Longer than the 60 s `FeedbackUnreadProvider` poll and the 45 s `SyncTick`, so
+ * a share that is genuinely busy is left alone for a while rather than being
+ * hammered by every client at once. The window is per-tab and in-memory: a
+ * reload retries immediately, which is the right behaviour for a user actively
+ * trying to fix something.
+ */
+const INDEX_REPAIR_COOLDOWN_MS = 5 * 60_000;
+
+/**
+ * Per-workspace-handle repair state. A WeakMap so a workspace the user has
+ * disconnected takes its entry with it.
+ */
+const indexRepairState = new WeakMap<
+  DirectoryHandleLike,
+  { blockedUntil: number; reported: boolean }
+>();
+
+/** @internal — test-only. Forget the cooldown so a test can retry immediately. */
+export function __resetIndexRepairCooldownForTests(dir: DirectoryHandleLike): void {
+  indexRepairState.delete(dir);
 }
 
 /**
@@ -403,10 +516,33 @@ export async function appendReply(
  * The index is a CACHE and is treated as one: one names-only
  * `listDirectoryEntries` over `threads/` (a single round trip, no file content
  * read) reconciles it. Any `.json` name the index does not know is read
- * individually and folded in, and the repaired index is written back
- * best-effort. That is what makes a create that lost the index race, a
- * half-finished migration, and a hand-copied thread file all self-healing
- * rather than invisible.
+ * individually and folded in. That reconciliation is what makes a create that
+ * lost the index race, a half-finished migration, and a hand-copied thread file
+ * all visible rather than lost — and it happens ENTIRELY IN MEMORY. The
+ * returned summaries are correct whether or not the index on disk is ever
+ * repaired.
+ *
+ * **Writing the repaired index back is opt-in (`repairIndex`), and OFF by
+ * default, because this function is on the read path.**
+ *
+ * It used to always write, which made a read a writer — and this function is
+ * reached by `loadFeedback` from `FeedbackUnreadProvider`, which every signed-in
+ * user mounts app-wide and polls on mount, on window focus, every 60 s, and on
+ * every `feedback` refresh broadcast. So N machines each issued a CAS write to
+ * the ONE shared `threads.index.json` on a timer, on every page in the app,
+ * whether or not anyone had feedback open. That is how a manager sitting on
+ * `reports/kpi` came to be writing a feedback file at all, and why
+ * `feedback:repairThreadsIndex` appears in the 2026-08-25 logs beside answer
+ * saves that had nothing to do with it.
+ *
+ * Worse, it could not converge: a repair that fails leaves the index exactly as
+ * stale as it found it, so the next poll rediscovers the same missing ids and
+ * tries again. Contention on the file therefore SUSTAINED itself, and each
+ * failure wrote an error-log entry, which is itself another workspace write.
+ *
+ * Pass `repairIndex: true` only from a deliberate, user-initiated feedback
+ * surface (opening the panel) — never from a poll. Even then the write is
+ * best-effort and rate-limited by `INDEX_REPAIR_COOLDOWN_MS`.
  *
  * Steady state cost: 1 index read + 1 listing + 0 thread reads.
  *
@@ -415,10 +551,11 @@ export async function appendReply(
  * advisory and must never drive ordering.
  */
 export async function listThreadSummaries(
-  dir: DirectoryHandleLike
+  dir: DirectoryHandleLike,
+  options?: { repairIndex?: boolean }
 ): Promise<FeedbackThreadSummary[]> {
   await ensureMigrated(dir);
-  const index = await loadThreadsIndex(dir);
+  const { index, readable } = await readThreadsIndex(dir);
   const known = new Map(index.threads.map((summary) => [summary.threadId, summary]));
 
   let threadsDir: DirectoryHandleLike | null = null;
@@ -447,15 +584,47 @@ export async function listThreadSummaries(
     for (const thread of recovered) {
       known.set(thread.id, summarize(thread, lastActivityOf(thread)));
     }
-    if (recovered.length > 0) {
-      try {
-        const repaired = [...known.values()];
-        await updateThreadsIndex(dir, () => repaired);
-      } catch (error) {
-        // Best effort: a read-only handle, or a lost race with a live writer.
-        // The summaries returned below are already correct either way; the
-        // repair simply retries on the next read.
-        logError("feedback:repairThreadsIndex", error);
+    // `readable` gates the WRITE only, never the reconciliation above: the
+    // summaries are correct either way. Rewriting an index we could not read
+    // would replace whatever it holds with a reconstruction built from a
+    // listing — losing any row whose thread file was itself unreadable in the
+    // same blip.
+    if (recovered.length > 0 && readable && options?.repairIndex === true) {
+      const state = indexRepairState.get(dir) ?? { blockedUntil: 0, reported: false };
+      if (Date.now() >= state.blockedUntil) {
+        try {
+          // MERGE, never replace. `updateThreadsIndex` re-reads the index inside
+          // its CAS attempt and hands that fresh list to this callback; ignoring
+          // it and writing our own snapshot turns a read-modify-write into a
+          // blind overwrite, dropping any row another machine added between our
+          // read at the top of this function and the CAS re-read. Rows we
+          // actually recovered win, because those are the ones we opened the
+          // thread files to build.
+          const recoveredById = new Map(
+            [...known.values()].map((summary) => [summary.threadId, summary])
+          );
+          await updateThreadsIndex(dir, (current) => {
+            const merged = new Map(current.map((summary) => [summary.threadId, summary]));
+            for (const [threadId, summary] of recoveredById) merged.set(threadId, summary);
+            return [...merged.values()];
+          });
+          indexRepairState.delete(dir);
+        } catch (error) {
+          // Best effort: a read-only handle, or a lost race with a live writer.
+          // The summaries returned below are already correct either way.
+          //
+          // Logged ONCE per cooldown, not once per attempt. Every `logError`
+          // here reaches the durable per-user error file in
+          // `5-system/system-errors/`, i.e. another CAS write to the same share
+          // that is already failing — so a chatty failure path makes the
+          // condition it is reporting worse, and buries the user's real errors
+          // under repeats of a cache miss they cannot act on.
+          if (!state.reported) logError("feedback:repairThreadsIndex", error);
+          indexRepairState.set(dir, {
+            blockedUntil: Date.now() + INDEX_REPAIR_COOLDOWN_MS,
+            reported: true,
+          });
+        }
       }
     }
   }
@@ -542,6 +711,11 @@ async function loadFeedbackFile(dir: DirectoryHandleLike): Promise<FeedbackFile>
  * Falls back to the legacy log whenever migration could not run (read-only
  * grant) or has not run yet, so no reader ever sees an empty panel over a
  * workspace that has data.
+ *
+ * PURELY A READ. `FeedbackUnreadProvider` calls this on a 60 s timer, on focus
+ * and on every refresh broadcast, for every signed-in user on every page — so
+ * it must never write. It therefore does not ask `listThreadSummaries` to
+ * repair the index; see that function's own doc for what asking used to cost.
  */
 export async function loadFeedback(dir: DirectoryHandleLike): Promise<FeedbackMessage[]> {
   const summaries = await listThreadSummaries(dir);

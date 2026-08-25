@@ -81,7 +81,7 @@ export async function saveDeckStyleChoices(
           }
           return { done: false };
         },
-        { conflictError: "تعذّر حفظ تخصيص التصميم: تعارض في الكتابة بعد عدة محاولات." },
+        { context: "executiveDeck:styleChoices", conflictError: "تعذّر حفظ تخصيص التصميم: تعارض في الكتابة بعد عدة محاولات." },
       ),
     );
     if (!outcome.ok) {

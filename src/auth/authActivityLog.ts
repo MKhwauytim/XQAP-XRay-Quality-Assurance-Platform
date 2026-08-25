@@ -305,7 +305,7 @@ async function flushUser(
         }
         return { done: false };
       },
-      { conflictError: "تعذّر حفظ سجل نشاط الجلسات: تعارض في الكتابة بعد عدة محاولات." }
+      { context: "auth:activityLog", conflictError: "تعذّر حفظ سجل نشاط الجلسات: تعارض في الكتابة بعد عدة محاولات." }
     )
   );
   // Best-effort: queueFlush already swallows failures. A persistent conflict just

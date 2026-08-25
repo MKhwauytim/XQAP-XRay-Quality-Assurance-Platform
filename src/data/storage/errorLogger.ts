@@ -7,6 +7,21 @@ export type ErrorEntry = {
   /** Optional stack trace, present only when the logged error carried one. */
   stack?: string;
   /**
+   * The thrown value's `name` — `"InvalidStateError"`, `"NotFoundError"`,
+   * `"QuotaExceededError"`, … — recorded whenever it says more than the bare
+   * `"Error"` a plain `new Error()` carries.
+   *
+   * Its absence is what made the 2026-08-25 XQ-IO-032 incident so expensive to
+   * diagnose. A DOMException's `name` is the ONLY stable, non-localised thing
+   * about it — `classifyFileSystemError` and every predicate in
+   * transientFileErrors.ts switch on exactly this — yet the ring recorded only
+   * `.message` and `.stack`, so four users' exported logs could say a write had
+   * failed but not which platform condition failed it. The unclassified name
+   * that fell through every allowlist was therefore invisible in precisely the
+   * artifact meant to reveal it.
+   */
+  errorName?: string;
+  /**
    * Every field below is OPTIONAL on purpose. They are filled from the ambient
    * `errorContext` and from the context string itself, so all 56 existing
    * `logError(context, error)` call sites keep working verbatim — and an entry
@@ -170,6 +185,9 @@ function hydrateFromStorage(): void {
         ...(typeof candidate.stack === "string"
           ? { stack: truncate(candidate.stack, MAX_STACK_LENGTH) }
           : {}),
+        ...(typeof candidate.errorName === "string"
+          ? { errorName: truncate(candidate.errorName, MAX_CONTEXT_LENGTH) }
+          : {}),
         restored: true
       });
     }
@@ -187,6 +205,19 @@ export function logError(context: string, error: unknown, meta?: ErrorLogMeta): 
   const message =
     error instanceof Error ? error.message : String(error ?? "unknown error");
   const stack = error instanceof Error ? error.stack : undefined;
+  // A plain `new Error()` reports name "Error", which is noise; a DOMException
+  // reports the one field that identifies the platform condition. Keep only the
+  // second. Read structurally rather than via `instanceof Error` because a
+  // DOMException crossing a worker or realm boundary can fail that check while
+  // still carrying a perfectly good name.
+  const rawName =
+    error && typeof error === "object"
+      ? (error as { name?: unknown }).name
+      : undefined;
+  const errorName =
+    typeof rawName === "string" && rawName !== "" && rawName !== "Error"
+      ? truncate(rawName, MAX_CONTEXT_LENGTH)
+      : undefined;
   const safeContext = truncate(context, MAX_CONTEXT_LENGTH);
   const { page, username, role } = readErrorContext();
   const errorCode = meta?.errorCode ?? codeFromContext(safeContext);
@@ -196,6 +227,7 @@ export function logError(context: string, error: unknown, meta?: ErrorLogMeta): 
     message: truncate(message, MAX_MESSAGE_LENGTH),
     timestamp: new Date().toISOString(),
     ...(stack !== undefined ? { stack: truncate(stack, MAX_STACK_LENGTH) } : {}),
+    ...(errorName !== undefined ? { errorName } : {}),
     page,
     // The context string already IS the action label at every existing call
     // site ("audit:append", "datatable:export", "population:save"), so this
