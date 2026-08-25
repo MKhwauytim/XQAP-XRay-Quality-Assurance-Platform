@@ -72,7 +72,7 @@ const OUTCOME_CLASSES: Array<{ key: keyof MarkStratum["outcomes"]; label: string
   { key: "falseSusp", label: "اشتباه خاطئ", tone: "gold" },
 ];
 
-type MarkStratum = {
+export type MarkStratum = {
   /** Group heading (يوجد تحديد / لا يوجد تحديد). */
   label: string;
   /** One-line clarification of what the group contains. */
@@ -102,7 +102,7 @@ type MarkStratum = {
 /** Fold one arm's rows into its tally. Every rate goes through `rateOf`, so a
  *  zero denominator yields null (rendered "—") instead of a fabricated 0%, and
  *  every rate is additionally gated on the arm being rankable. */
-function foldStratum(
+export function foldStratum(
   rows: ExecutiveReportRow[],
   label: string,
   caption: string,
@@ -154,14 +154,14 @@ function foldStratum(
  * deliberately no "close enough" middle ground: a difference of two rates each
  * computed on <10 images is noise.
  */
-function comparable(present: MarkStratum, absent: MarkStratum): boolean {
+export function comparable(present: MarkStratum, absent: MarkStratum): boolean {
   return present.rankable && absent.rankable && present.accuracy !== null && absent.accuracy !== null;
 }
 
 /** يوجد تحديد accuracy − لا يوجد تحديد accuracy, in percentage points. Only
  *  meaningful after `comparable()` has returned true — callers must check
  *  that first. */
-function effectOf(present: MarkStratum, absent: MarkStratum): number {
+export function effectOf(present: MarkStratum, absent: MarkStratum): number {
   return (present.accuracy ?? 0) - (absent.accuracy ?? 0);
 }
 
@@ -173,8 +173,38 @@ function effectOf(present: MarkStratum, absent: MarkStratum): number {
  * and `gridMarkMatrix`'s share columns, so the three systems can never quietly
  * compute it three different ways.
  */
-function outcomeShare(s: MarkStratum, key: keyof MarkStratum["outcomes"]): number | null {
+export function outcomeShare(s: MarkStratum, key: keyof MarkStratum["outcomes"]): number | null {
   return s.rankable ? rateOf(s.outcomes[key], s.n) : null;
+}
+
+/**
+ * Reproduces the two `foldStratum` calls `markingImpactSlide` used to run
+ * inline (same filtering, same label/caption/tone literals), plus the
+ * `unknown`/`recorded` counts it derives around them — so deck3 can reuse
+ * this page's exact business logic instead of a second implementation.
+ */
+export function computeMarkingImpact(model: ReportModel): {
+  present: MarkStratum;
+  absent: MarkStratum;
+  unknown: number;
+  recorded: number;
+} {
+  const evaluated = model.rows.filter((r) => r.verificationCategory !== null);
+  const present = foldStratum(
+    evaluated.filter((r) => r.hasMarking === true),
+    "يوجد تحديد",
+    "صور سُجّل عليها تحديد",
+    "green",
+  );
+  const absent = foldStratum(
+    evaluated.filter((r) => r.hasMarking === false),
+    "لا يوجد تحديد",
+    "صور لم يُسجّل عليها تحديد",
+    "coral",
+  );
+  const unknown = evaluated.filter((r) => r.hasMarking === null).length;
+  const recorded = present.n + absent.n;
+  return { present, absent, unknown, recorded };
 }
 
 /**
@@ -538,20 +568,7 @@ export function markingImpactSlide(
   // verdict carry no accuracy signal at all and are out of scope for every
   // figure on this page (including the "no marking record" count).
   const evaluated = model.rows.filter((r) => r.verificationCategory !== null);
-  const present = foldStratum(
-    evaluated.filter((r) => r.hasMarking === true),
-    "يوجد تحديد",
-    "صور سُجّل عليها تحديد",
-    "green",
-  );
-  const absent = foldStratum(
-    evaluated.filter((r) => r.hasMarking === false),
-    "لا يوجد تحديد",
-    "صور لم يُسجّل عليها تحديد",
-    "coral",
-  );
-  const unknown = evaluated.filter((r) => r.hasMarking === null).length;
-  const recorded = present.n + absent.n;
+  const { present, absent, unknown, recorded } = computeMarkingImpact(model);
 
   const compare = `<div class="v2-mark-compare">
       ${markTile(present)}

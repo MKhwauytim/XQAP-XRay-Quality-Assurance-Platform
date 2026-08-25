@@ -64,7 +64,7 @@ const UNKNOWN_PORT = "غير محدد";
  *  section-2 port tables use, so the two pages read identically. */
 const INSUFF_CELL = `<td class="v2-bar-cell neutral"><span class="insuff">—</span></td>`;
 
-type LevelCounts = {
+export type LevelCounts = {
   correctClean: number;
   correctSuspicion: number;
   missedSuspicion: number;
@@ -72,7 +72,7 @@ type LevelCounts = {
 };
 
 /** One inspection level's scorecard at one port. */
-type LevelStats = {
+export type LevelStats = {
   /** The raw tally this was derived from — kept so the totals row can sum
    *  integers rather than re-multiplying rounded percentages back into counts. */
   counts: LevelCounts;
@@ -94,7 +94,7 @@ type LevelStats = {
   detectionRankable: boolean;
 };
 
-type LevelAccuracyRow = {
+export type LevelAccuracyRow = {
   name: string;
   sea: boolean;
   l1: LevelStats;
@@ -152,7 +152,7 @@ function statsFromPortLevel(entry: PortLevelAccuracy | undefined): LevelStats {
  * with `model.portAccuracy` (asserted in the tests) without a second count
  * loop over the fact table.
  */
-function collectLevelAccuracyRows(model: ReportModel): {
+export function collectLevelAccuracyRows(model: ReportModel): {
   land: LevelAccuracyRow[];
   sea: LevelAccuracyRow[];
 } {

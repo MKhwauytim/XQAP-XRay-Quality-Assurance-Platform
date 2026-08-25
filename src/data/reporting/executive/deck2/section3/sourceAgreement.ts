@@ -309,7 +309,7 @@ function countCell(value: number, max: number, tone: CellTone): string {
  * `reviewerCard` below calls this and renders identically to before the
  * extraction (same inputs, same formula, byte-identical output).
  */
-type ReviewerTotals = {
+export type ReviewerTotals = {
   totalComparable: number;
   totalAgree: number;
   /** Pooled from summed counts, never averaged — null below the sufficiency cut. */
@@ -318,7 +318,7 @@ type ReviewerTotals = {
   totalCleared: number;
 };
 
-function reviewerTotals(rows: ReviewerAgreementRow[]): ReviewerTotals {
+export function computeReviewerTotals(rows: ReviewerAgreementRow[]): ReviewerTotals {
   const totalComparable = rows.reduce((s, r) => s + r.comparable, 0);
   const totalAgree = rows.reduce((s, r) => s + r.agree, 0);
   const totalFlagged = rows.reduce((s, r) => s + r.teamFlaggedReviewerClean, 0);
@@ -335,7 +335,7 @@ function reviewerCard(rows: ReviewerAgreementRow[]): string {
   // which of the two dominates.
   const barMax = maxOf([...flagged, ...cleared]);
 
-  const { totalComparable, totalRate, totalFlagged, totalCleared } = reviewerTotals(rows);
+  const { totalComparable, totalRate, totalFlagged, totalCleared } = computeReviewerTotals(rows);
 
   const trs = rows
     .map(
@@ -532,7 +532,7 @@ function ledgerReviewerTable(rows: ReviewerAgreementRow[]): string {
   const flagged = rows.map((r) => r.teamFlaggedReviewerClean);
   const cleared = rows.map((r) => r.teamClearedReviewerFlagged);
   const barMax = maxOf([...flagged, ...cleared]);
-  const { totalComparable, totalRate, totalFlagged, totalCleared } = reviewerTotals(rows);
+  const { totalComparable, totalRate, totalFlagged, totalCleared } = computeReviewerTotals(rows);
 
   const trs = rows
     .map(
@@ -586,7 +586,7 @@ const REVIEWER_SCOPE_BASIS = "يقتصر التوافق مع المراجع عل
 
 function briefingBody(model: ReportModel): string {
   const pairs = orderedPairs(model.resultComparison.crossTeamMatrix);
-  const totals = reviewerTotals(model.resultComparison.reviewerAgreement);
+  const totals = computeReviewerTotals(model.resultComparison.reviewerAgreement);
 
   const rankable = pairs.filter((p) => isRankable(band(p.cell.comparable)));
   const excluded = pairs.filter((p) => !isRankable(band(p.cell.comparable)));
@@ -731,7 +731,7 @@ function gridReviewerMatrix(rows: ReviewerAgreementRow[]): string {
 function gridBody(model: ReportModel): string {
   const cells = model.resultComparison.crossTeamMatrix;
   const rows = model.resultComparison.reviewerAgreement;
-  const totals = reviewerTotals(rows);
+  const totals = computeReviewerTotals(rows);
 
   const heat = percentHeatmap(buildLevelsTeamsMatrix(cells), {
     width: 620,

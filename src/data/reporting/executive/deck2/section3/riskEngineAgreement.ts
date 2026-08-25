@@ -132,7 +132,7 @@ export { engineVerdictOf };
 
 // ── Coverage: recognized / unrecognized / blank ──────────────────────────────
 
-type Coverage = { recognized: number; unrecognized: number; blank: number };
+export type Coverage = { recognized: number; unrecognized: number; blank: number };
 
 /** Classifies every row's RAW `targetedByRiskEngine` value into exactly one of
  *  the three buckets — the vocabulary-discovery counter this page's own
@@ -140,7 +140,7 @@ type Coverage = { recognized: number; unrecognized: number; blank: number };
  *  here (unlike `engineVerdictOf`, which collapses both to `null`) precisely
  *  so a reader can tell "the column is empty" apart from "the column has
  *  values we don't recognize yet". */
-function coverageOf(rows: readonly ExecutiveReportRow[]): Coverage {
+export function coverageOf(rows: readonly ExecutiveReportRow[]): Coverage {
   let recognized = 0;
   let unrecognized = 0;
   let blank = 0;
@@ -158,7 +158,7 @@ function coverageOf(rows: readonly ExecutiveReportRow[]): Coverage {
 
 // ── Block 1: agreement — engine vs L1, vs L2, vs المراجع (headline) ─────────
 
-type AgreementRow = { label: string; n: number; agree: number; rate: number | null; headline: boolean };
+export type AgreementRow = { label: string; n: number; agree: number; rate: number | null; headline: boolean };
 
 /**
  * Folds engine-verdict agreement against one other result field, gated on
@@ -188,7 +188,7 @@ function agreementFold(
   return { label, n, agree, rate: rankable ? rateOf(agree, n) : null, headline };
 }
 
-function buildAgreementRows(rows: readonly ExecutiveReportRow[]): AgreementRow[] {
+export function buildAgreementRows(rows: readonly ExecutiveReportRow[]): AgreementRow[] {
   return [
     // Headline FIRST: the one comparison independent of stage's own
     // definition (see the module header's non-circularity note).
@@ -219,7 +219,7 @@ function agreementBlock(rows: AgreementRow[]): string {
 
 // ── Block 2: المستوى الثاني disagreement set ────────────────────────────────
 
-type DisagreementFold = {
+export type DisagreementFold = {
   /** All rows whose `stage` maps to المستوى الثاني — by definition the engine
    *  flagged them and L1/L2 cleared them. This is a POPULATION-wide count
    *  (every image the risk file marks stage-2, sampled or not), never the
@@ -256,7 +256,7 @@ type DisagreementFold = {
  * (2026-08-20 fix) — a row never drawn into the sample cannot be "pending",
  * only a sampled-but-unanswered row can.
  */
-function foldDisagreementSet(rows: readonly ExecutiveReportRow[]): DisagreementFold {
+export function foldDisagreementSet(rows: readonly ExecutiveReportRow[]): DisagreementFold {
   const level2 = rows.filter((r) => getStageKey(r.stage) === "second");
   let confirmed = 0;
   let cleared = 0;
@@ -304,7 +304,7 @@ function disagreementBlock(fold: DisagreementFold): string {
 
 // ── Block 3: محضر — hasReport === true ──────────────────────────────────────
 
-type ReportFold = {
+export type ReportFold = {
   n: number;
   l1Suspected: number;
   l2Suspected: number;
@@ -318,7 +318,7 @@ type ReportFold = {
 /** Folds every row with a recorded محضر number — what our own two levels
  *  concluded, and separately what the independent reviewer concluded (gated
  *  on ITS OWN, usually smaller, reviewed-count denominator). */
-function foldReportRows(rows: readonly ExecutiveReportRow[]): ReportFold {
+export function foldReportRows(rows: readonly ExecutiveReportRow[]): ReportFold {
   const reported = rows.filter((r) => r.hasReport === true);
   let l1Suspected = 0;
   let l2Suspected = 0;

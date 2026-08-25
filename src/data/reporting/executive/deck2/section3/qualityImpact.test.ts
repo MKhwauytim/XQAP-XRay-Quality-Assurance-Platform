@@ -11,7 +11,7 @@ import type { PreparedPopulationRow } from "../../../../population/populationTyp
 import { buildReportModel } from "../../model/reportModel";
 import type { ReportModel } from "../../model/reportModel";
 import { XSS_COMBINED, XSS_MARKER, findLiveInjection } from "../../../xssPayloads";
-import { QUALITY_IMPACT_CSS, qualityImpactSlide } from "./qualityImpact";
+import { QUALITY_IMPACT_CSS, accuracyGradient, computeQualityImpactStrata, qualityImpactSlide } from "./qualityImpact";
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -227,6 +227,15 @@ const NONSORTED_STRATA: ExecutiveReportRow[] = [
 ];
 
 // ── Shell ───────────────────────────────────────────────────────────────────
+
+describe("computeQualityImpactStrata", () => {
+  it("returns 3 strata and accuracyGradient computes a delta", () => {
+    const fold = computeQualityImpactStrata(THREE_STRATA);
+    expect(fold.strata.length).toBe(3);
+    const gradient = accuracyGradient(fold.strata);
+    expect(typeof gradient === "number" || gradient === null).toBe(true);
+  });
+});
 
 describe("qualityImpactSlide — slide shell", () => {
   it("renders the agreed id, section, eyebrow, title and subhead", () => {
