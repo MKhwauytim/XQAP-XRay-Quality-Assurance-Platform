@@ -294,6 +294,13 @@
 }
 .rh-card-customize-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
+.rh-deck-edition-toggle{
+  display:flex;align-items:center;gap:8px;font-size:0.78rem;font-weight:700;
+  color:var(--slate,#5d6b7a);cursor:pointer;margin:6px 0 2px;
+}
+.rh-deck-edition-toggle input{ width:16px;height:16px;cursor:pointer; }
+.rh-deck-edition-toggle input:disabled{ cursor:not-allowed;opacity:.5; }
+
 /* Icon */
 .rh-icon {
   width: 44px;

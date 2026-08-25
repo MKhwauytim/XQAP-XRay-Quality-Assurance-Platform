@@ -108,6 +108,21 @@ vi.mock("../../../../data/reporting/executive/deck2", () => ({
     Promise.resolve("<html><body>mock deck preview</body></html>"),
 }));
 
+// Executive-report design toggle — the "التصميم الجديد" checkbox routes
+// handleExport("deck")/generate("executive-deck") to deck3's
+// openExecutiveDeckV3 instead of deck2's openExecutiveDeckV2 (index.tsx:
+// both call sites branch on `deckEdition`). `deckEditionPreference.ts`
+// itself is left unmocked — it degrades to "v2" against the real memory
+// directory when nothing has been saved yet, same as `loadDeckStyleChoices`
+// would without its own mock, so no test needs to stub it just to render.
+const deckV3ExportMock = vi.hoisted(() => ({
+  impl: vi.fn((_execInput: unknown, _names: unknown) => undefined),
+}));
+
+vi.mock("../../../../data/reporting/executive/deck3", () => ({
+  openExecutiveDeckV3: (execInput: unknown, names: unknown) => deckV3ExportMock.impl(execInput, names),
+}));
+
 // Stubs the real (disk-writing) Power BI export so the gating tests below never touch
 // the filesystem; also doubles as the source manifest for the digit-format test.
 const pbiExportMock = vi.hoisted(() => ({
@@ -913,6 +928,38 @@ describe("Reports executive-deck export — style choices loaded before export (
     //    (no third arg) would make this `undefined` instead.
     const [, , forwardedChoices] = deckExportMock.impl.mock.calls[0];
     expect(forwardedChoices).toEqual({ "exec-cover": 2 });
+  });
+});
+
+describe("Reports executive-deck export — design toggle routes to deck3", () => {
+  it("routes the executive deck export to deck3 when the design toggle is on", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+
+    const { container } = render(<ReportsTab />);
+
+    await act(async () => {
+      deferredFor("4-april-2026").resolve(mockPop(0));
+      await Promise.resolve();
+    });
+
+    const featuredCard = await waitFor(() => {
+      const el = container.querySelector(".rh-card-featured");
+      expect(el).toBeTruthy();
+      return el as HTMLElement;
+    });
+
+    // Flip "التصميم الجديد" on before exporting — mirrors flipping the
+    // format toggle in the D1 test above, just for the edition instead.
+    fireEvent.click(within(featuredCard).getByRole("checkbox"));
+
+    fireEvent.click(within(featuredCard).getByTitle("عرض تقديمي تفاعلي (HTML)"));
+    fireEvent.click(within(featuredCard).getByRole("button", { name: "التصدير" }));
+
+    await waitFor(() => {
+      expect(deckV3ExportMock.impl).toHaveBeenCalledTimes(1);
+    });
+    expect(deckExportMock.impl).not.toHaveBeenCalled();
   });
 });
 

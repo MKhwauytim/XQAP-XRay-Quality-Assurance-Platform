@@ -37,6 +37,11 @@ import { useSubTabSelection } from "../../../../app/useSubTabSelection";
 import { readSession } from "../../../../auth/authSession";
 import { recordAction } from "../../../../data/audit/actionLog";
 import { loadDeckStyleChoices } from "../../../../data/reporting/executive/deck2/styleChoices";
+import {
+  loadDeckEditionPreference,
+  saveDeckEditionPreference,
+  type ExecutiveDeckEdition,
+} from "../../../../data/reporting/executive/deckEditionPreference";
 import DeckDesignCustomizer from "./DeckDesignCustomizer";
 import type { ExportManifest } from "../../../../data/powerbiExport/exportTypes";
 import "./Reports.css";
@@ -234,6 +239,16 @@ function ReportsContent() {
   const [pbiExporting, setPbiExporting] = useState(false);
   const [pbiResult, setPbiResult] = useState<ExportManifest | null>(null);
   const [pbiError, setPbiError] = useState<string | null>(null);
+  const [deckEdition, setDeckEdition] = useState<ExecutiveDeckEdition>("v2");
+
+  useEffect(() => {
+    if (!directoryHandle) return;
+    let cancelled = false;
+    void loadDeckEditionPreference(directoryHandle).then((pref) => {
+      if (!cancelled && pref) setDeckEdition(pref.edition);
+    });
+    return () => { cancelled = true; };
+  }, [directoryHandle]);
 
   useEffect(() => {
     window.dispatchEvent(new CustomEvent("pop-subtab-changed", { detail: section }));
@@ -482,6 +497,21 @@ function ReportsContent() {
     setTimeout(() => setToast(null), 5000);
   }
 
+  function handleToggleDeckEdition(): void {
+    const next: ExecutiveDeckEdition = deckEdition === "v3" ? "v2" : "v3";
+    setDeckEdition(next); // reflects immediately for the next export/preview, regardless of save outcome
+    if (!directoryHandle) return;
+    const capability = getMutationCapability("export-reports");
+    if (!capability.allowed) {
+      showToast("error", exportBlockedMessage(capability.reason));
+      return;
+    }
+    const session = readSession();
+    void saveDeckEditionPreference(directoryHandle, next, session?.username ?? "admin").then((result) => {
+      if (!result.ok) showToast("error", result.error);
+    });
+  }
+
   // Dashboard export actions — reuse the assembled exec input for all three.
   async function handleExport(kind: "document" | "deck" | "xlsx"): Promise<void> {
     if (!directoryHandle || !selectedMonth || exporting) return;
@@ -501,9 +531,14 @@ function ReportsContent() {
         logExport("executive-document");
         showToast("ok", "تم فتح التقرير التفصيلي.");
       } else if (kind === "deck") {
-        const saved = directoryHandle ? await loadDeckStyleChoices(directoryHandle) : null;
-        const { openExecutiveDeckV2 } = await import("../../../../data/reporting/executive/deck2");
-        await openExecutiveDeckV2(execInput, names, saved?.choices);
+        if (deckEdition === "v3") {
+          const { openExecutiveDeckV3 } = await import("../../../../data/reporting/executive/deck3");
+          await openExecutiveDeckV3(execInput, names);
+        } else {
+          const saved = directoryHandle ? await loadDeckStyleChoices(directoryHandle) : null;
+          const { openExecutiveDeckV2 } = await import("../../../../data/reporting/executive/deck2");
+          await openExecutiveDeckV2(execInput, names, saved?.choices);
+        }
         logExport("executive-deck");
         showToast("ok", "تم فتح العرض التنفيذي.");
       } else {
@@ -636,9 +671,14 @@ function ReportsContent() {
           await buildExecutiveXlsx(execInput, names);
           showToast("ok", "تم تنزيل ملف بيانات التقرير (Excel).");
         } else if (type === "executive-deck") {
-          const saved = directoryHandle ? await loadDeckStyleChoices(directoryHandle) : null;
-          const { openExecutiveDeckV2 } = await import("../../../../data/reporting/executive/deck2");
-          await openExecutiveDeckV2(execInput, names, saved?.choices);
+          if (deckEdition === "v3") {
+            const { openExecutiveDeckV3 } = await import("../../../../data/reporting/executive/deck3");
+            await openExecutiveDeckV3(execInput, names);
+          } else {
+            const saved = directoryHandle ? await loadDeckStyleChoices(directoryHandle) : null;
+            const { openExecutiveDeckV2 } = await import("../../../../data/reporting/executive/deck2");
+            await openExecutiveDeckV2(execInput, names, saved?.choices);
+          }
           showToast("ok", "تم فتح العرض التنفيذي. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         } else {
           const { openExecutiveReport } = await import("../../../../data/reporting/executiveReport");
@@ -944,6 +984,15 @@ function ReportsContent() {
                 ) : null}
               </div>
             </div>
+            <label className="rh-deck-edition-toggle">
+              <input
+                type="checkbox"
+                checked={deckEdition === "v3"}
+                onChange={handleToggleDeckEdition}
+                disabled={!selectedMonth}
+              />
+              <span>التصميم الجديد</span>
+            </label>
             <div className="rh-card-title">التقرير التنفيذي</div>
             <p className="rh-card-desc">
               ثلاث صيغ من نفس التحليل: عرض تنفيذي بالشرائح للاجتماعات، وتقرير تفصيلي كامل
