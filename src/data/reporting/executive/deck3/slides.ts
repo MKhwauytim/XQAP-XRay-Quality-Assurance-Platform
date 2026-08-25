@@ -10,7 +10,7 @@ import { computeReviewerTotals } from "../deck2/section3/sourceAgreement";
 import {
   coverSlide, closingSlide, contentsSlide, glossaryCard, glossarySlide,
   levelDefinitionCard, levelDefinitionSlide, kpiGrid, sectionDivider,
-  twoPanelTable, matrixSlide, comparisonPanels, impactSplitSlide,
+  twoPanelTable, matrixSlide, comparisonPanels, impactSplitSlide, pageFoot,
 } from "./slideKit";
 import { barChart, groupedBarChart } from "./chartKit";
 
@@ -223,7 +223,7 @@ export async function buildDeck3Slides(model: ReportModel, monthLabel: string, m
     parts.push(`<section class="slide v3"><div class="slide-inner"><h2 class="v3-h2">رسم الدقة حسب المنفذ</h2>${barChart({
       bars: byPort.map((p) => ({ label: p.key, value: p.accuracyByDecision ?? 0 })),
       min: 86, max: 98, referenceValue: avg, referenceLabel: "المتوسط",
-    })}</div></section>`);
+    })}${pageFoot(12, TOTAL)}</div></section>`);
   }
 
   // 13 — Accuracy by level (chart) — reuses Task 1's collectLevelAccuracyRows
@@ -237,7 +237,7 @@ export async function buildDeck3Slides(model: ReportModel, monthLabel: string, m
         b: { label: "اشتباه", value: r.l2.accuracy ?? 0 },
       })),
       min: 60, max: 100,
-    })}</div></section>`);
+    })}${pageFoot(13, TOTAL)}</div></section>`);
   }
 
   await yieldToMain();
@@ -302,12 +302,12 @@ export async function buildDeck3Slides(model: ReportModel, monthLabel: string, m
     parts.push(`<section class="slide v3"><div class="slide-inner"><h2 class="v3-h2">دقة المستويين في المنافذ البرية</h2>${groupedBarChart({
       groups: land.map((r) => ({ label: r.name, a: { label: "مستوى 1", value: r.l1.accuracy ?? 0 }, b: { label: "مستوى 2", value: r.l2.accuracy ?? 0 } })),
       min: 86, max: 96, referenceValue: landAvg, referenceLabel: "المتوسط",
-    })}</div></section>`);
+    })}${pageFoot(17, TOTAL)}</div></section>`);
     const seaAvg = sea.reduce((s, r) => s + (r.l1.accuracy ?? 0), 0) / (sea.length || 1);
     parts.push(`<section class="slide v3"><div class="slide-inner"><h2 class="v3-h2">دقة المستويين في المنافذ البحرية</h2>${groupedBarChart({
       groups: sea.map((r) => ({ label: r.name, a: { label: "مستوى 1", value: r.l1.accuracy ?? 0 }, b: { label: "مستوى 2", value: r.l2.accuracy ?? 0 } })),
       min: 86, max: 96, referenceValue: seaAvg, referenceLabel: "المتوسط",
-    })}</div></section>`);
+    })}${pageFoot(18, TOTAL)}</div></section>`);
   }
 
   // 19 — Security-team + risk-engine agreement (reuses Task 3's + Task 6's exports)
