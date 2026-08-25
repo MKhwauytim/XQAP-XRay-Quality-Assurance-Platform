@@ -15,6 +15,7 @@ It is a research/reference document, not a spec for this app — nothing here ch
 4. [Data pipeline: population → sampling → distribution](#4-data-pipeline)
 5. [Answers, templates, sample mirrors, reporting](#5-answers-templates-reporting)
 6. [Cross-cutting support domains](#6-cross-cutting-domains)
+   - 6.1 [Per-employee file mapping — the identity key, and what breaks when it moves](#6-1-employee-file-mapping)
 7. [Performance & optimization](#7-performance-optimization)
 8. [Concurrency patterns — decision cheat sheet](#8-concurrency-cheat-sheet)
 9. [Full chronological issue/bug history (Jun 23 – Aug 25, 2026)](#9-issue-history)
@@ -183,6 +184,39 @@ Assignment/completion/replacement/reassignment/reopen state changes are modeled 
 | Approvals | **Per-supervisor** decision files, append-only | CAS-under-lock per supervisor | "First-decision-wins" (earliest timestamp), not last-write-wins — because two supervisors' files can't be serialized against each other, and last-write-wins would make the outcome depend on clock skew. |
 | Labels / preferences / month selection | `localStorage` / `sessionStorage`, not workspace disk | None needed | Correctly scoped as per-browser UI preference, not shared business data — no CAS machinery imported where it isn't needed. |
 | Backup | Manifest-tracked copy + verify-by-read-back, sentinel files marking "restore in progress" / "backup complete" | Coarse-grained, sentinel-sequenced rather than CAS'd (single-admin-initiated operations) | Derived/rebuildable files (distribution's current-state cache, fold checkpoint) are **explicitly never restored** — restoring a stale checkpoint after a later segment merge would cause silent event loss on the next read. |
+
+<a id="6-1-employee-file-mapping"></a>
+### 6.1 Per-employee file mapping — the identity key, and what breaks when it moves
+
+The table above shows the *pattern* (per-writer files) but not the *key* every one of those files is named by, nor the specific ways that key has caused real conflicts. This subsection pulls that together in one place.
+
+**The mapping scheme.** Almost every per-employee file in the system is named directly off the **raw username string**, or a sanitized/hashed derivative of it:
+
+| File | Naming pattern | Notes |
+|---|---|---|
+| Employee answers | `{username}.answers.json` | Sole owner, no shared-file conflicts by construction. |
+| Sample mirror (read-replica) | `{username}.samples.json` | Rewritten whole on every projection, never edited in place. |
+| Notification acknowledgements | `acks/{username}.acks.json` | Split out of one shared file specifically to kill cross-employee write contention. |
+| Browse/table presets | `{username}.browse-preset.json` | Plus one shared `admin-shared.browse-preset.json` that seeds the default view. |
+| Audit log | `{stem}.actions.json`, where `stem = safeWorkspaceFilePart(username)-{6-hex djb2 hash of the raw username}` | The hash suffix exists specifically so two usernames that *sanitize* to the same filesystem-safe string still land in two distinct files — a plain sanitized name alone is not collision-resistant. |
+| Error log | `{stem}.errors.json`, same stem function reused deliberately ("so having two independent implementations of it is how they drift apart") | |
+| Approvals | `{supervisor}.decisions.json` | Keyed by the *reviewer*, not the requester — requests themselves live in the requester's own answer file. |
+
+**The identity hazard this creates: the username has no migration path.** Every file above is durably keyed to the username string at the moment it was written, and — following the codebase's own "detect and permanently support, never migrate" doctrine (§3.4) — **nothing ever rewrites that key**. A username rename was, for a period, a plain in-place field edit to the roster record: the account's *display* changed, but every file already on disk stayed keyed to the *old* string, silently orphaning every assignment, answer, mirror, and ack under a login that no longer resolves to anyone. This was closed by a dedicated `usernameRenameGuard.ts`: it blocks a rename whenever the user has **any** footprint at all (see next point), and — the important part for a new app to copy — **fails closed**: if the footprint scan itself can't be established (a read error, not a clean "zero"), the rename is blocked rather than allowed through on an inconclusive check. This is the same "absent vs. unreadable" discipline from §10 applied specifically to identity mutation.
+
+**The "safe to delete" footprint-scan blind spot** (§9.3, v99.10/114.2): the check gating user deletion originally walked only the regular monthly folder structure, which is structurally blind to the ad-hoc-import synthetic month store — a user whose *entire* live workload came from ad-hoc assignments reported an empty footprint and was reported "safe to delete." Fixed by unioning the real-month scan with a direct listing of the ad-hoc storage location. **General lesson: any "is this identity safe to remove" check must enumerate every storage location that can key off that identity, not just the primary/most-common one** — a second, less-obvious storage path for the same entity is exactly where this kind of check goes blind.
+
+**Ownership-conflict bug class — the same shape, independently rediscovered at least five times.** Beyond the *naming* conflicts above, a second and more consequential class of bug recurs throughout §9: **acting on which employee/supervisor "owns" a row using stale in-memory or cached state, instead of re-reading fresh immediately before the decision that matters.** Every instance below is the same root cause in a different call site:
+
+- **[§9.1, v43.6/43.7]** Two supervisors' decision files can't be serialized against each other (they're genuinely separate files) — an ownership check needs to re-scan *every* supervisor's file, not just the acting one's, both before and after the write.
+- **[§9.2, v59.9/57.9]** A reassignment-approval ownership check read the rebuildable *derived* cache (which can be stale-but-valid) instead of folding the authoritative event log fresh — an approval could silently no-op or misreport ownership.
+- **[§9.3, v88.0/89.1]** An employee's assignment count was derived from raw `assigned` **events** rather than final live-ownership state, so an ordinary reassignment between two employees silently corrupted *both* their quotas in routine daily use, with no data corruption or hand-editing involved.
+- **[§9.3, v90.0]** — the most serious instance: replacement approval never checked whether a candidate row was already owned by someone else, so two pending requests naming the same candidate could **both succeed**, the second silently transferring another employee's already-assigned, already-in-progress row out from under them with no event trail and no notification.
+- **[§9.3, v98.4/98.5]** Both manual reassignment and bulk assignment trusted whatever ownership state the open browser tab had loaded, possibly hours stale — a supervisor working from a stale table could silently take another supervisor's already-owned row, or regress an already-*completed* row back to pending, discarding the employee's submitted work.
+
+**The fix, every time, was the same:** re-read the authoritative source (the folded event log, or the row's current on-disk status) **immediately before** the write that depends on ownership, never trust a snapshot taken earlier in the interaction — this is the single most repeated conflict-avoidance fix in the whole per-employee data model, worth building into a new app's "assign/reassign/approve" code path as a hard rule from the start rather than a per-incident patch.
+
+**Identity vs. attribution — a related but distinct conflict already covered in §5:** when a supervisor answers "on behalf of" an employee, the file is still keyed to the *assignee's* username (so cross-referencing against the distribution log's `assignedTo` still works), while the *real* actor is tracked in a separate `answeredOnBehalfBy` field, explicitly stripped from every other write path so a client can never forge or accidentally retain it on an answer that wasn't actually delegated. This is the pattern to reuse whenever a per-employee file's *storage key* and its *true author* can legitimately differ: keep the storage key stable for cross-referencing, and carry the real actor as a separate, narrowly-scoped field rather than overloading the key itself.
 
 ---
 
