@@ -116,6 +116,7 @@ import {
   SELECT_COL_ID,
   DEFAULT_VISIBLE,
   buildXrayColumns,
+  buildReferralTableColumns,
   buildDefaultColConfig,
   loadLocalColConfig,
   getVisibleReferralColumns,
@@ -945,37 +946,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
      stageMappings/canSeeAll/answersMap/username are stable across renders (they come from
      useState/session/derived useMemo values that are safe in practice); these hooks keep
      their manual dependency arrays and behave correctly, just without compiler auto-memoization. */
-  const columns = useMemo<DataTableCol<DistributionEntry>[]>(() => {
-    const mapped = baseColumns.map((col) => {
-      if (col.id === "stage") {
-        return { ...col, accessor: (entry: DistributionEntry) => formatStageLabel(entry.row.stage, stageMappings) };
-      }
-      // The submitted-at timestamp lives on the answer, not the distribution entry,
-      // so inject an accessor that reads it from the answers map (renders + exports).
-      if (col.id === "submittedAt") {
-        return {
-          ...col,
-          accessor: (entry: DistributionEntry) =>
-            answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`)?.submittedAt ?? null,
-        };
-      }
-      return col;
-    });
-    // Checkbox column: rendered exactly when the user can act on a selection —
-    // the same flag that renders the selection bar, so a checkbox never appears
-    // without the button that consumes it. The accessor returns a stable empty
-    // string; actual checked state is read from selectedIds inside renderCell so
-    // this memo doesn't re-create on every checkbox tick.
-    if (!canReassignSamples) return mapped;
-    const selectCol: DataTableCol<DistributionEntry> = {
-      id: SELECT_COL_ID,
-      label: "",
-      widthFr: 3,
-      alwaysVisible: true,
-      accessor: () => "",
-    };
-    return [selectCol, ...mapped];
-  }, [baseColumns, stageMappings, canReassignSamples, answersMap]);
+  const columns = useMemo<DataTableCol<DistributionEntry>[]>(
+    () => buildReferralTableColumns(baseColumns, stageMappings, canReassignSamples, answersMap),
+    [baseColumns, stageMappings, canReassignSamples, answersMap]
+  );
 
   const effectiveColConfig = useMemo(() => colPreset ?? loadLocalColConfig() ?? buildDefaultColConfig(columns), [columns, colPreset]);
   // QueueSplitResizer's commit callback: a privileged drag also pushes to the shared preset, carrying the same column fields onColConfigChange below writes (one preset object per dataset).

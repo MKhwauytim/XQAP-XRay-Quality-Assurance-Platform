@@ -101,6 +101,56 @@ export function loadLocalColConfig(): ColConfig | null {
   return null;
 }
 
+/**
+ * The queue's live column set: the label-derived base columns from
+ * `buildXrayColumns`, with the two accessors that need runtime data injected,
+ * and the selection checkbox prepended when the viewer can act on a selection.
+ *
+ * Pure, and deliberately module-scope rather than inline in `XrayReferrals`'s
+ * `useMemo`. That component sits on `max-lines-per-function`'s 1450-line
+ * ceiling, and the repo's PR report is explicit that a raise is paid for with a
+ * refactor rather than a bigger number — so a self-contained block like this one
+ * belongs next to `buildXrayColumns`, which already owns the same concern.
+ *
+ * The caller keeps the memo; this function keeps the logic.
+ */
+export function buildReferralTableColumns(
+  baseColumns: DataTableCol<DistributionEntry>[],
+  stageMappings: StageAliasMappings | undefined,
+  canReassignSamples: boolean,
+  answersMap: Map<string, ItemAnswer>
+): DataTableCol<DistributionEntry>[] {
+  const mapped = baseColumns.map((col) => {
+    if (col.id === "stage") {
+      return { ...col, accessor: (entry: DistributionEntry) => formatStageLabel(entry.row.stage, stageMappings) };
+    }
+    // The submitted-at timestamp lives on the answer, not the distribution entry,
+    // so inject an accessor that reads it from the answers map (renders + exports).
+    if (col.id === "submittedAt") {
+      return {
+        ...col,
+        accessor: (entry: DistributionEntry) =>
+          answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`)?.submittedAt ?? null,
+      };
+    }
+    return col;
+  });
+  // Checkbox column: rendered exactly when the user can act on a selection —
+  // the same flag that renders the selection bar, so a checkbox never appears
+  // without the button that consumes it. The accessor returns a stable empty
+  // string; actual checked state is read from selectedIds inside renderCell so
+  // the caller's memo doesn't re-create on every checkbox tick.
+  if (!canReassignSamples) return mapped;
+  const selectCol: DataTableCol<DistributionEntry> = {
+    id: SELECT_COL_ID,
+    label: "",
+    widthFr: 3,
+    alwaysVisible: true,
+    accessor: () => "",
+  };
+  return [selectCol, ...mapped];
+}
+
 export function getVisibleReferralColumns(
   columns: DataTableCol<DistributionEntry>[],
   cfg: ColConfig,
