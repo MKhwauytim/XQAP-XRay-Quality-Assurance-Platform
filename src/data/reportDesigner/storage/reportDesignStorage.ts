@@ -65,7 +65,7 @@ async function updateDesignIndex(
       }
       return { done: false };
     },
-    { conflictError: "تعذّر تحديث فهرس التقارير: تعارض في الكتابة بعد عدة محاولات." }
+    { context: "reportDesigner:index", conflictError: "تعذّر تحديث فهرس التقارير: تعارض في الكتابة بعد عدة محاولات." }
   );
   if (!outcome.ok) {
     throw new Error(outcome.error);
@@ -122,7 +122,7 @@ async function saveDesignFile(
       }
       return { done: false };
     },
-    { conflictError: "تعذّر حفظ تصميم التقرير: تعارض في الكتابة بعد عدة محاولات." }
+    { context: "reportDesigner:design", conflictError: "تعذّر حفظ تصميم التقرير: تعارض في الكتابة بعد عدة محاولات." }
   );
   if (!outcome.ok) {
     throw new Error(outcome.error);

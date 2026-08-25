@@ -475,7 +475,7 @@ export async function savePopulationConfig(
         }
         return { done: false };
       },
-      { conflictError: "تعذّر حفظ إعدادات المجتمع: تعارض في الكتابة بعد عدة محاولات." }
+      { context: "population:config", conflictError: "تعذّر حفظ إعدادات المجتمع: تعارض في الكتابة بعد عدة محاولات." }
     )
   );
 }

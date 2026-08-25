@@ -29,6 +29,20 @@ export type PersistedErrorEntry = {
   errorCode?: string;
   /** Truncated at MAX_STACK_LENGTH (500) by errorLogger before it gets here. */
   stack?: string;
+  /**
+   * The thrown value's DOM `name` — `"InvalidStateError"`, `"NotFoundError"`,
+   * `"NoModificationAllowedError"`, … — when it said more than a plain
+   * `"Error"`. Optional, like every field here, so a file written before this
+   * existed stays readable.
+   *
+   * This is the field the 2026-08-25 XQ-IO-032 incident needed and did not
+   * have. `errorCode` alone could not identify the fault: the whole point of
+   * XQ-IO-032 is that the classifier did NOT recognise the exception, so the
+   * code recorded was the catch-all and the one piece of evidence that would
+   * have named the condition — the DOM name — was never written down. An
+   * unrecognised name is exactly the case where this matters most.
+   */
+  errorName?: string;
 };
 
 /** ONE user's own live log — the only live shape this module ever writes. */

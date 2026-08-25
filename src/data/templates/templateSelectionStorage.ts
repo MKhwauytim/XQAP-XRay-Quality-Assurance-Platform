@@ -93,7 +93,7 @@ async function casUpdateSelection(
           }
           return { done: false };
         },
-        { conflictError }
+        { context: "templates:selection", conflictError }
       )
     );
     if (!outcome.ok) {

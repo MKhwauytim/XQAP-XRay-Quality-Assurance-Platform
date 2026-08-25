@@ -336,6 +336,18 @@ export const ERROR_CODES = {
       "NoModificationAllowedError survived every retry: the file stayed locked by another writer (another tab, or another machine on the SMB share) for the whole ladder. This is CONTENTION, not a lost permission grant — repeating the action shortly is the right advice",
     labelKey: "err_io_035_file_locked",
   },
+  // The XQ-IO-032 production incident (2026-08-25). Every entry in all four
+  // reported user error logs carried Chromium's InvalidStateError sentence,
+  // "An operation that depends on state cached in an interface object was made
+  // but the state had changed since it was read from disk." — the DOM name for
+  // which was classified NOWHERE, so `resolveErrorCode` returned null and
+  // casLoop reported its XQ-IO-032 catch-all. See `isSnapshotStaleError` in
+  // transientFileErrors.ts for the mechanism.
+  "XQ-IO-036": {
+    meaning:
+      "InvalidStateError: the (size, mtime) snapshot cached by a File/writable-stream interface object no longer matched the file on disk when the operation touched the bytes — a concurrent write from another machine on the share, or the Windows SMB metadata cache serving a stale mtime to the snapshot. Every retry re-acquires the handle and takes a FRESH snapshot, so retrying is the correct remedy; this code is reported only once the whole ladder is spent",
+    labelKey: "err_io_036_stale_snapshot",
+  },
 
   // ── AUTH: login / session / permissions ──────────────────────────────────
   "XQ-AUTH-001": {
@@ -638,6 +650,11 @@ export function classifyFileSystemError(error: unknown): ErrorCode | null {
     // re-grant access they never lost.
     case "NoModificationAllowedError":
       return "XQ-IO-035";
+    // Stale cached snapshot, not damage and not a lost grant. Its absence from
+    // this switch is what made the whole 2026-08-25 incident report as the
+    // XQ-IO-032 catch-all — see XQ-IO-036's own entry above.
+    case "InvalidStateError":
+      return "XQ-IO-036";
     case "QuotaExceededError":
       return "XQ-IO-020";
     case "NotFoundError":

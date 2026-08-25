@@ -496,7 +496,7 @@ export async function appendWorkspaceAction(
       },
       // 4 × 50 ms ≈ 0.4 s was the shortest ladder in the app and not a ladder at
       // all on a contended SMB entry.
-      { maxRetries: 6, baseDelayMs: 100, conflictError: "audit append conflict" }
+      { maxRetries: 6, baseDelayMs: 100, context: "audit:actionLog", conflictError: "audit append conflict" }
       )
     );
     if (!result.ok) {

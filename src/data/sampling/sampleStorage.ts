@@ -251,7 +251,7 @@ export async function approveSampleMaster(
       }
       return { done: false };
     },
-    { conflictError: "تعارض في الكتابة: لم يتمكن النظام من تسجيل اعتماد العينة بعد عدة محاولات." }
+    { context: "sampling:approval", conflictError: "تعارض في الكتابة: لم يتمكن النظام من تسجيل اعتماد العينة بعد عدة محاولات." }
   );
 }
 
@@ -416,6 +416,6 @@ export async function appendSampleRow(
       }
       return { done: false };
     },
-    { conflictError: "تعارض في الكتابة: لم يتمكن النظام من إضافة سطر العينة بعد عدة محاولات." }
+    { context: "sampling:appendRow", conflictError: "تعارض في الكتابة: لم يتمكن النظام من إضافة سطر العينة بعد عدة محاولات." }
   );
 }

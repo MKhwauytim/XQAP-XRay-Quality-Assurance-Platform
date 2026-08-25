@@ -82,6 +82,30 @@ describe("errorLogger — enriched entries and the persistence sink", () => {
     expect(getRecentErrors()[0].errorCode).toBeUndefined();
   });
 
+  it("records the DOM error name — the field the XQ-IO-032 incident had no way to report", () => {
+    // A code of XQ-IO-032 means "the classifier did not recognise this", so the
+    // DOM name is the ONLY thing left that identifies the fault. It was not
+    // captured, which is why four users' exported logs could say a write failed
+    // but not what failed it.
+    const error = new Error("state had changed since it was read from disk");
+    error.name = "InvalidStateError";
+    logError("answerStorage:answer-save", error);
+    expect(getRecentErrors()[0].errorName).toBe("InvalidStateError");
+  });
+
+  it("does not record the noise name a plain Error carries", () => {
+    logError("population:save", new Error("boom"));
+    expect(getRecentErrors()[0].errorName).toBeUndefined();
+  });
+
+  it("records the name of a thrown value that is not an Error instance", () => {
+    // A DOMException crossing a worker or realm boundary can fail `instanceof
+    // Error` while still carrying a perfectly good name, so the name is read
+    // structurally rather than through that check.
+    logError("worker:boundary", { name: "QuotaExceededError", message: "full" });
+    expect(getRecentErrors()[0].errorName).toBe("QuotaExceededError");
+  });
+
   it("hands each entry to a registered sink", () => {
     const seen: ErrorEntry[] = [];
     registerErrorSink((entry) => { seen.push(entry); });

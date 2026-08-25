@@ -75,10 +75,61 @@ export function isLockContentionError(error: unknown): boolean {
   return errorName(error) === "NoModificationAllowedError";
 }
 
+/**
+ * A STALE SNAPSHOT, not a broken file — the XQ-IO-032 production incident.
+ *
+ * Chromium's File System Access implementation caches a file's size and
+ * modification time at the moment the interface object is created, and
+ * re-checks that snapshot against the file on disk when the operation that
+ * depends on it actually touches the bytes:
+ *
+ * - READ: `handle.getFile()` snapshots (size, mtime). The later `file.text()` /
+ *   `arrayBuffer()` / `slice()` opens the file and compares. A mismatch throws.
+ * - WRITE: `handle.createWritable()` snapshots the target. The later `close()`,
+ *   which swaps the staged content into place, compares. A mismatch throws.
+ *
+ * Both raise `InvalidStateError` with the same fixed sentence: "An operation
+ * that depends on state cached in an interface object was made but the state
+ * had changed since it was read from disk."
+ *
+ * On a local disk this is rare. On the UNC/SMB share this app actually runs on
+ * it is routine, for two independent reasons, and neither means the file is
+ * damaged:
+ *
+ *  1. Another machine on the share genuinely wrote the file inside our
+ *     snapshot→use window. That is ordinary contention.
+ *  2. Nobody wrote anything — the Windows SMB redirector's own metadata cache
+ *     (FileInfoCacheLifetime / FileNotFoundCacheLifetime, ~10 s by default)
+ *     served a stale mtime to the snapshot, and the subsequent open saw the
+ *     true one. THIS APP'S OWN WRITE is the usual trigger: safeWriteJson
+ *     stages `.tmp`, commits, then reads back within milliseconds, so the
+ *     read-back's snapshot is taken while the directory's cached metadata
+ *     still describes the pre-write file.
+ *
+ * Either way the remedy is identical and is the same one this module already
+ * applies to NotFound and NotReadable: throw the stale interface object away,
+ * re-acquire the handle, take a FRESH snapshot, and try again. The snapshot is
+ * re-taken per attempt, so a retry is not a hopeful repetition of the same
+ * call — it is a different call against newer state.
+ *
+ * It must NOT be treated as terminal. Before this was classified, an
+ * `InvalidStateError` fell past `isTransientWriteError` (no retry at the
+ * safeWrite layer), past `classifyFileSystemError` (no code), and out to
+ * `casLoop`, which reported the XQ-IO-032 catch-all — telling four production
+ * users their save had failed for an unknown reason while their typed
+ * inspection answers were dropped.
+ */
+export function isSnapshotStaleError(error: unknown): boolean {
+  return errorName(error) === "InvalidStateError";
+}
+
 /** Transient on the WRITE/VERIFY path only — see the module doc above. */
 export function isTransientWriteError(error: unknown): boolean {
   return (
-    isNotFoundError(error) || isNotReadableError(error) || isLockContentionError(error)
+    isNotFoundError(error) ||
+    isNotReadableError(error) ||
+    isLockContentionError(error) ||
+    isSnapshotStaleError(error)
   );
 }
 
@@ -116,6 +167,35 @@ export const TRANSIENT_WRITE_RETRY_DELAYS_MS = [20, 60, 150, 400] as const;
 export const VERIFY_READBACK_RETRY_DELAYS_MS = [
   20, 60, 150, 400, 800, 1600, 3000, 5000,
 ] as const;
+
+/**
+ * Backoff ladder for a STALE SNAPSHOT on the READ path — see
+ * `isSnapshotStaleError`. 4 attempts after the first, ~630 ms worst case.
+ *
+ * Deliberately the SAME shape as `TRANSIENT_WRITE_RETRY_DELAYS_MS` above, and
+ * deliberately NOT the ~11 s verify-readback ladder, because the job here is
+ * narrow: absorb a short-lived snapshot mismatch in place so the caller does
+ * not have to throw away and re-run its whole read-modify-write cycle. It is
+ * not to outlast the condition — that is the outer ladder's job.
+ *
+ * Why not longer. Nearly every read that can hit this is already nested inside
+ * `casLoop`, which re-runs the entire attempt up to 14 times on the answer path
+ * (answerStorage.ts) and 10 on the shared feedback index. An inner ladder
+ * multiplies against that: a couple of seconds inside one read becomes tens of
+ * seconds of a user waiting, and — worse on a contended share — every extra
+ * moment spent inside an attempt is a moment this machine keeps a shared file
+ * open while N other machines are trying for it. Patience at the wrong layer
+ * makes contention worse, not better. Each outer attempt takes a genuinely
+ * fresh snapshot anyway, so the long tail is covered without any single read
+ * blocking for it.
+ *
+ * Why not shorter. A single immediate retry would catch only the case where the
+ * mismatch was already resolved by the time we asked again. The first three
+ * rungs cost under a quarter second in total and cover the ordinary case: our
+ * own just-committed write, where the mismatch clears as soon as the client's
+ * view of the file catches up with bytes it already wrote.
+ */
+export const SNAPSHOT_STALE_RETRY_DELAYS_MS = [20, 60, 150, 400] as const;
 
 export function waitFor(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));

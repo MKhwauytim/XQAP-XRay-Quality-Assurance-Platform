@@ -233,6 +233,7 @@ async function updateEmployeeAnswerFile(
       return { done: false };
     },
     {
+      context: "answers:employeeFile",
       maxRetries: ANSWER_SAVE_MAX_RETRIES,
       baseDelayMs: ANSWER_SAVE_BASE_DELAY_MS,
       conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ ملف الموظف بعد عدة محاولات.",

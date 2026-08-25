@@ -30,6 +30,7 @@ describe("errorLogExport", () => {
         context: "population:save [XQ-IO-032]",
         message: "boom",
         errorCode: "XQ-IO-032",
+        errorName: "InvalidStateError",
         stack: "at foo",
       },
     ]);
@@ -43,6 +44,10 @@ describe("errorLogExport", () => {
       "population/browse",
       "population:save",
       "XQ-IO-032",
+      // The column that makes an XQ-IO-032 row diagnosable: the code says the
+      // classifier did not recognise the exception, so the DOM name is the only
+      // thing left that identifies it.
+      "InvalidStateError",
       "population:save [XQ-IO-032]",
       "boom",
       "at foo",
@@ -55,7 +60,7 @@ describe("errorLogExport", () => {
       page: "unknown", action: "x", context: "x", message: "boom",
     }]);
     expect(row).not.toContain("undefined");
-    expect(row!.filter((c) => c === "")).toHaveLength(3); // role, errorCode, stack
+    expect(row!.filter((c) => c === "")).toHaveLength(4); // role, errorCode, errorName, stack
   });
 
   it("is deterministic — the same entries always produce the same rows", () => {

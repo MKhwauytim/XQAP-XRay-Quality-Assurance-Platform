@@ -194,7 +194,7 @@ export async function saveAdminBrowseDatasetPreset(
         }
         return { done: false };
       },
-      { conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ إعدادات الأعمدة بعد عدة محاولات." }
+      { context: "preferences:browsePreset", conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ إعدادات الأعمدة بعد عدة محاولات." }
     )
   );
 }

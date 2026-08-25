@@ -317,7 +317,7 @@ async function mutateNotifications(
               return { done: false };
             },
             {
-              maxRetries: 6,
+              context: "notifications:post", maxRetries: 6,
               baseDelayMs: 50,
               conflictError:
                 "تعارض في الكتابة: تعذّر حفظ الإشعارات بعد عدة محاولات.",

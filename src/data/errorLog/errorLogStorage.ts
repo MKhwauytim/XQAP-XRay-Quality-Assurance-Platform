@@ -224,7 +224,7 @@ export async function appendUserErrors(
         },
         // 4 x 50 ms was the shortest ladder in the app and not a ladder at
         // all on a contended SMB entry — see actionLog.ts:497-499.
-        { maxRetries: 6, baseDelayMs: 100, conflictError: "error log append conflict" }
+        { maxRetries: 6, baseDelayMs: 100, context: "errorLog:userFile", conflictError: "error log append conflict" }
       )
     );
     if (!result.ok) {

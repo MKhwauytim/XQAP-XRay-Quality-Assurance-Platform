@@ -38,6 +38,11 @@ export const ERROR_EXPORT_HEADERS = [
   "الصفحة",
   "الإجراء",
   "رمز الخطأ",
+  // The DOM error name, next to the code rather than buried in the stack. When
+  // the code is the XQ-IO-032 catch-all this is the ONLY column that says what
+  // actually failed — which is precisely the case an admin exports the log to
+  // investigate.
+  "نوع الخطأ",
   "السياق",
   "الرسالة",
   "التفاصيل التقنية",
@@ -58,6 +63,7 @@ export function buildErrorLogExportRows(entries: readonly PersistedErrorEntry[])
     entry.page ?? "",
     entry.action ?? "",
     entry.errorCode ?? "",
+    entry.errorName ?? "",
     entry.context ?? "",
     entry.message ?? "",
     entry.stack ?? "",

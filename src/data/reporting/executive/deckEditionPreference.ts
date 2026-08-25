@@ -79,7 +79,7 @@ export async function saveDeckEditionPreference(
           }
           return { done: false };
         },
-        { conflictError: "تعذّر حفظ تفضيل تصميم العرض التنفيذي: تعارض في الكتابة بعد عدة محاولات." },
+        { context: "executiveDeck:edition", conflictError: "تعذّر حفظ تفضيل تصميم العرض التنفيذي: تعارض في الكتابة بعد عدة محاولات." },
       ),
     );
     if (!outcome.ok) {

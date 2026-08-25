@@ -162,7 +162,7 @@ export async function appendDecisionEvent(
         }
         return { done: false };
       },
-      { conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ قرار الاعتماد بعد عدة محاولات." }
+      { context: "approvals:decisionEvent", conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ قرار الاعتماد بعد عدة محاولات." }
     )
   );
 }

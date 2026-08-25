@@ -234,6 +234,7 @@ export async function saveSyncIntervalMs(
               return { done: false };
             },
             {
+              context: "workspace:syncSettings",
               maxRetries: 6,
               baseDelayMs: 50,
               conflictError:

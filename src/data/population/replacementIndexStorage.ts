@@ -242,7 +242,7 @@ export async function rebuildReplacementIndex(
           }
           return { done: false };
         },
-        { conflictError: "تعذّر نشر فهرس بدائل الاستبدال: تعارض في الكتابة بعد عدة محاولات." }
+        { context: "population:replacementIndex", conflictError: "تعذّر نشر فهرس بدائل الاستبدال: تعارض في الكتابة بعد عدة محاولات." }
       );
     });
   } catch (error) {

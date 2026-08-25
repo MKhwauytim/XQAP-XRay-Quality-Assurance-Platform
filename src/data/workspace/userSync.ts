@@ -169,7 +169,10 @@ export async function syncUserManagementToDisk(
         }
         return { done: false };
       },
-      { conflictError: "تعذّر حفظ المستخدمين والصلاحيات: تعارض في الكتابة بعد عدة محاولات." }
+      {
+        context: "workspace:usersPermissions",
+        conflictError: "تعذّر حفظ المستخدمين والصلاحيات: تعارض في الكتابة بعد عدة محاولات.",
+      }
     )
   );
 

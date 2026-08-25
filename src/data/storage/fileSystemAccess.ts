@@ -28,7 +28,12 @@ import {
   type WorkspaceStructureCheckResult
 } from "../workspace/workspaceTypes";
 import { detectWorkspaceSchema, initializeWorkspaceSchemaMetadata } from "../workspace/workspaceSchema";
-import { retryTransientWrite } from "./transientFileErrors";
+import {
+  SNAPSHOT_STALE_RETRY_DELAYS_MS,
+  isSnapshotStaleError,
+  retryTransientWrite,
+  waitFor,
+} from "./transientFileErrors";
 
 type FileSystemPermissionMode = "read" | "readwrite";
 type FileSystemPermissionState = "granted" | "denied" | "prompt";
@@ -597,17 +602,55 @@ async function readFirstRecoverableCopy<TFile>(
   return null;
 }
 
+/**
+ * One file's text, retrying ONLY a stale-snapshot InvalidStateError
+ * (XQ-IO-036), with a fresh handle and therefore a fresh (size, mtime) snapshot
+ * on every pass.
+ *
+ * Every other failure — absent, unreadable, permission — propagates on the
+ * first throw so `readAndParseJsonFile`'s existing classification below still
+ * decides what it means. This retries the one condition that is provably a
+ * stale interface object rather than a fact about the file.
+ */
+async function readTextRetryingStaleSnapshot(
+  directoryHandle: DirectoryHandleLike,
+  fileName: string
+): Promise<string> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const fileHandle = await directoryHandle.getFileHandle(fileName, { create: false });
+      const file = await fileHandle.getFile();
+      return await file.text();
+    } catch (error) {
+      if (isSnapshotStaleError(error) && attempt < SNAPSHOT_STALE_RETRY_DELAYS_MS.length) {
+        await waitFor(SNAPSHOT_STALE_RETRY_DELAYS_MS[attempt]!);
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
 async function readAndParseJsonFile<TFile>(
   directoryHandle: DirectoryHandleLike,
   fileName: string
 ): Promise<ReadJsonResult<NonNullable<TFile>>> {
   try {
-    const fileHandle = await directoryHandle.getFileHandle(fileName, {
-      create: false
-    });
-
-    const file = await fileHandle.getFile();
-    const rawText = await file.text();
+    // Re-acquires the handle on every pass, so each attempt reads through a
+    // FRESH (size, mtime) snapshot. That is what makes a stale-snapshot
+    // InvalidStateError (XQ-IO-036) recoverable here: reusing the interface
+    // object that already failed the check would fail identically forever.
+    //
+    // This read sits outside safeWrite.ts — it is the workspace-identity /
+    // permissions read used at login and by every sync tick — so it does not
+    // inherit that module's read ladder and needs its own. Without it, a share
+    // that changed under the snapshot reported XQ-FS-014 ("read failed"), which
+    // on the login path means a workspace that looks broken rather than busy.
+    // NOT `retryTransientWrite`: that ladder also retries NotFoundError, and on
+    // a READ "not found" means absent and must resolve promptly (see
+    // transientFileErrors.ts's module doc). Retrying it here would add ~1.5 s to
+    // every optional-file probe, login included.
+    const rawText = await readTextRetryingStaleSnapshot(directoryHandle, fileName);
 
     try {
       const parsed = JSON.parse(rawText) as NonNullable<TFile>;

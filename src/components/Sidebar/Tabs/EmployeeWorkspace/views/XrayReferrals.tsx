@@ -16,6 +16,7 @@ import { reopenSubmittedAnswer } from "../../../../../data/answers/reopenAnswer"
 import { MonthClosedError } from "../../../../../data/population/monthLock";
 import { getLabels } from "../../../../../data/labels/labelsStore";
 import { useVisibleUnsavedWorkMonthGuard } from "../../../../../hooks/useVisibleUnsavedWorkMonthGuard";
+import { useUnsavedWork } from "../../../../../hooks/useUnsavedWork";
 import type { FieldAnswer, ItemAnswer } from "../../../../../data/answers/answerTypes";
 import {
   loadOrDeriveDistributionCurrent,
@@ -1065,6 +1066,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     hasUnsavedWork: dirtyEntryId !== null,
     resolveMessage: () => getLabels().gm_month_switch_draft_confirm,
   });
+
+  // The guard above covers navigation the APP controls; this one covers a
+  // closed/reloaded browser tab and LRU eviction. See useUnsavedWork for why.
+  useUnsavedWork("employee-workspace", dirtyEntryId !== null);
 
   if (selEntry !== null && selEntry !== lastPanelEntry) {
     // Guarded by the identity check above, so it runs once per entry change and

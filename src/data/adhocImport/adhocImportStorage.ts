@@ -71,7 +71,7 @@ async function updateIndex(
       }
       return { done: false };
     },
-    { conflictError: "تعذّر تحديث فهرس الاستيراد اليدوي: تعارض في الكتابة بعد عدة محاولات." }
+    { context: "adhocImport:index", conflictError: "تعذّر تحديث فهرس الاستيراد اليدوي: تعارض في الكتابة بعد عدة محاولات." }
   );
   if (!outcome.ok) {
     throw new Error(outcome.error);
@@ -132,7 +132,7 @@ export async function saveAdhocRecord(
         }
         return { done: false };
       },
-      { conflictError: `تعذّر حفظ الاستيراد اليدوي (${record.importId}): تعارض في الكتابة بعد عدة محاولات.` }
+      { context: "adhocImport:record", conflictError: `تعذّر حفظ الاستيراد اليدوي (${record.importId}): تعارض في الكتابة بعد عدة محاولات.` }
     )
   );
 

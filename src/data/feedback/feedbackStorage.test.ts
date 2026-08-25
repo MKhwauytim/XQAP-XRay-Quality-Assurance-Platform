@@ -2,16 +2,21 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   clearOperationLog,
+  clearSimulatedFaults,
   createMemoryDirectory,
   getOperationLog,
+  setSimulatedFaults,
   setSimulatedWritePermission,
 } from "../storage/memoryDirectory";
+import { clearErrors, getRecentErrors } from "../storage/errorLogger";
 import { safeWriteJson } from "../storage/safeWrite";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
 import {
+  __resetIndexRepairCooldownForTests,
   appendReply,
   createThread,
+  FEEDBACK_THREADS_INDEX_FILE,
   listThreadSummaries,
   loadFeedback,
   loadThread,
@@ -307,12 +312,216 @@ describe("feedbackStorage — per-thread storage", () => {
     const threadsDir = await feedbackDir.getDirectoryHandle("threads", { create: false });
     await safeWriteJson<FeedbackThread>(threadsDir, `${orphan.id}.json`, orphan);
 
+    // A PLAIN read reconciles in memory and returns the orphan...
     const summaries = await listThreadSummaries(root);
     expect(summaries.map((s) => s.threadId).sort()).toEqual([known.id, orphan.id].sort());
 
-    // Repaired in place, so the next read costs no extra thread opens.
+    // ...but writes nothing. This function is reached by `loadFeedback` from
+    // FeedbackUnreadProvider, which every signed-in user polls every 60 s on
+    // every page; repairing from there turned N machines into N writers on one
+    // shared file, on a timer, forever — and could not converge, because a
+    // repair that fails leaves the index exactly as stale as it found it. See
+    // listThreadSummaries' own doc, and the 2026-08-25 XQ-IO-032 logs where
+    // `feedback:repairThreadsIndex` appears for a manager sitting on
+    // `reports/kpi`.
+    const afterRead = await loadThreadsIndex(root);
+    expect(afterRead.threads.map((t) => t.threadId)).toEqual([known.id]);
+
+    // The repair is opt-in, for a deliberate user-initiated surface only.
+    const repaired = await listThreadSummaries(root, { repairIndex: true });
+    expect(repaired.map((s) => s.threadId).sort()).toEqual([known.id, orphan.id].sort());
+
     const index = await loadThreadsIndex(root);
     expect(index.threads.map((t) => t.threadId).sort()).toEqual([known.id, orphan.id].sort());
+  });
+
+  it("does not re-attempt a failing index repair on every read", async () => {
+    const root = makeRoot();
+    const known = await createThread(root, { from: "sara", role: "employee", category: "issue", text: "معروف" });
+
+    const orphan: FeedbackThread = {
+      id: "t20260824120000-bbbbbbbb",
+      from: "omar",
+      role: "employee",
+      category: "inquiry",
+      text: "يتيم",
+      timestamp: "2026-08-24T12:00:00.000Z",
+      status: "open",
+      replies: [],
+    };
+    const systemDir = await root.getDirectoryHandle("5-system", { create: false });
+    const feedbackDir = await systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.feedback, { create: false });
+    const threadsDir = await feedbackDir.getDirectoryHandle("threads", { create: false });
+    await safeWriteJson<FeedbackThread>(threadsDir, `${orphan.id}.json`, orphan);
+
+    // A share that refuses the index write. The old code retried this on every
+    // single read, forever, each failure also writing a durable error-log entry
+    // — another write to the same failing share.
+    setSimulatedFaults(root, [
+      {
+        operation: "createWritable",
+        name: FEEDBACK_THREADS_INDEX_FILE,
+        errorName: "InvalidStateError",
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+
+    clearErrors();
+    const first = await listThreadSummaries(root, { repairIndex: true });
+    const second = await listThreadSummaries(root, { repairIndex: true });
+    const third = await listThreadSummaries(root, { repairIndex: true });
+
+    // Every read still returns the right answer — the repair was only ever an
+    // optimisation over the in-memory reconciliation.
+    for (const summaries of [first, second, third]) {
+      expect(summaries.map((s) => s.threadId).sort()).toEqual([known.id, orphan.id].sort());
+    }
+
+    // ...and the failure is reported once, not three times.
+    const reported = getRecentErrors().filter((e) => e.context.startsWith("feedback:repairThreadsIndex"));
+    expect(reported).toHaveLength(1);
+
+    clearSimulatedFaults(root);
+  });
+
+  it("does not fail createThread when only the rebuildable index write fails", async () => {
+    const root = makeRoot();
+    setSimulatedFaults(root, [
+      {
+        operation: "createWritable",
+        name: FEEDBACK_THREADS_INDEX_FILE,
+        errorName: "InvalidStateError",
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+
+    // The thread file is written first and needs no CAS. Failing the call after
+    // it lands tells the user their message was not saved when it WAS — which
+    // invites them to send it again and produces a duplicate thread.
+    const thread = await createThread(root, {
+      from: "sara",
+      role: "employee",
+      category: "issue",
+      text: "رسالة",
+    });
+
+    clearSimulatedFaults(root);
+    expect(await loadThread(root, thread.id)).toMatchObject({ id: thread.id, text: "رسالة" });
+
+    // And it is still visible, because the read path reconciles against the
+    // thread files rather than trusting the index.
+    const summaries = await listThreadSummaries(root);
+    expect(summaries.map((s) => s.threadId)).toContain(thread.id);
+  });
+
+  it("never rewrites the index from a reconstruction when the index could not be READ", async () => {
+    const root = makeRoot();
+    const known = await createThread(root, { from: "sara", role: "employee", category: "issue", text: "معروف" });
+
+    const orphan: FeedbackThread = {
+      id: "t20260824120000-cccccccc",
+      from: "omar",
+      role: "employee",
+      category: "inquiry",
+      text: "يتيم",
+      timestamp: "2026-08-24T12:00:00.000Z",
+      status: "open",
+      replies: [],
+    };
+    const systemDir = await root.getDirectoryHandle("5-system", { create: false });
+    const feedbackDir = await systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.feedback, { create: false });
+    const threadsDir = await feedbackDir.getDirectoryHandle("threads", { create: false });
+    await safeWriteJson<FeedbackThread>(threadsDir, `${orphan.id}.json`, orphan);
+    await listThreadSummaries(root, { repairIndex: true });
+    __resetIndexRepairCooldownForTests(root);
+
+    // Now make the index UNREADABLE (not absent). Collapsing that to an empty
+    // index made every thread look unknown, so one read blip became a read of
+    // every thread file plus a blind overwrite of a shared file whose current
+    // contents were never seen.
+    setSimulatedFaults(root, [
+      {
+        operation: "readFile",
+        name: FEEDBACK_THREADS_INDEX_FILE,
+        errorName: "InvalidStateError",
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+
+    await listThreadSummaries(root, { repairIndex: true });
+
+    clearSimulatedFaults(root);
+    // Untouched — still the index the successful repair wrote, not a rewrite
+    // derived from a read that failed.
+    const index = await loadThreadsIndex(root);
+    expect(index.threads.map((t) => t.threadId).sort()).toEqual([known.id, orphan.id].sort());
+  });
+
+  it("does not fail a durably-landed reply when only the status index write fails", async () => {
+    const root = makeRoot();
+    const thread = await createThread(root, { from: "sara", role: "employee", category: "issue", text: "رسالة" });
+
+    setSimulatedFaults(root, [
+      {
+        operation: "createWritable",
+        name: FEEDBACK_THREADS_INDEX_FILE,
+        errorName: "InvalidStateError",
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+
+    clearErrors();
+    const updated = await appendReply(
+      root,
+      thread.id,
+      { from: "admin", role: "admin", text: "رد", timestamp: "2026-08-25T10:00:00.000Z" },
+      true
+    );
+
+    // The reply and the status flip are durable in the thread file; only the
+    // cache write failed. Telling the user otherwise is the false-failure shape
+    // of the incident, and invites a duplicate reply.
+    expect(updated.status).toBe("resolved");
+
+    clearSimulatedFaults(root);
+    const stored = await loadThread(root, thread.id);
+    expect(stored?.status).toBe("resolved");
+    expect(stored?.replies).toHaveLength(1);
+    expect(getRecentErrors().filter((e) => e.context.startsWith("feedback:statusIndex"))).toHaveLength(1);
+
+    // The documented cost, pinned so it stays a deliberate contract: the
+    // summary row's status chip is stale until the next successful index write.
+    // The repair path does not heal it — it only folds in ids the index does
+    // not already know.
+    const [summary] = await listThreadSummaries(root);
+    expect(summary!.status).toBe("open");
+  });
+
+  it("reports the RAW cause of a failed index write, not only the Arabic sentence", async () => {
+    const root = makeRoot();
+    await createThread(root, { from: "sara", role: "employee", category: "issue", text: "رسالة" });
+
+    setSimulatedFaults(root, [
+      {
+        operation: "createWritable",
+        name: FEEDBACK_THREADS_INDEX_FILE,
+        errorName: "InvalidStateError",
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+
+    clearErrors();
+    await createThread(root, { from: "omar", role: "employee", category: "inquiry", text: "أخرى" });
+
+    // The incident's feedback entries carried only the translated Arabic and a
+    // minified stack, so they could not be tied to a platform condition at all
+    // until they were paired with `casLoop:exhausted` rows by timestamp.
+    const raw = getRecentErrors().find((e) => e.context.startsWith("feedback:threads-index-write"));
+    expect(raw).toBeDefined();
+    expect(raw!.errorCode).toBe("XQ-IO-036");
+    expect(raw!.errorName).toBe("InvalidStateError");
+
+    clearSimulatedFaults(root);
   });
 
   it("orders summaries newest-first by createdAt", async () => {
