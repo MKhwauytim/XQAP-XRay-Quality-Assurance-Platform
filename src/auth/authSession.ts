@@ -108,6 +108,24 @@ export function readRealSession(): AuthSession | null {
     runtimeSession = readStoredSession();
     if (runtimeSession && !isExpired(runtimeSession)) {
       startAuthActivitySession(runtimeSession);
+      // A RESTORED session is still a signed-in user, and the error log has to
+      // know who they are. `setErrorActor` used to be called only from
+      // `writeSession` — i.e. only on an explicit login — so every error logged
+      // during a session restored from localStorage carried `role: null` for
+      // the whole page load. `username` masked the gap because the error sink
+      // substitutes its own `fallbackUsername`; `role` has no fallback and was
+      // simply lost.
+      //
+      // Since the SEC-02 relaxation persists the session, a restore is the
+      // NORMAL way a user arrives — so this was the common case, not the edge
+      // one. The 2026-08-25 XQ-IO-032 export shows it cleanly: `jalgahamdi`
+      // (fresh login) carries a role on all 22 of their rows, while
+      // `saalhijji` (16) and `admin` (2) carry none at all.
+      //
+      // The REAL role, never a previewed one — this function is the
+      // preview-ignoring reader, which is exactly why the call belongs here
+      // rather than in `readSession` below.
+      setErrorActor(runtimeSession.username, runtimeSession.role);
     }
   }
 
@@ -131,6 +149,16 @@ export function readSession(): AuthSession | null {
   }
   const preview = readPreviewRole();
   return preview && preview !== real.role ? { ...real, role: preview } : real;
+}
+
+/**
+ * @internal — test-only. Drop the in-memory session WITHOUT touching storage,
+ * which is exactly what a page reload does: the module variable is gone, the
+ * persisted session is not. There is no other way to exercise the restore
+ * branch of `readRealSession` from a test.
+ */
+export function __dropRuntimeSessionForTests(): void {
+  runtimeSession = null;
 }
 
 export function writeSession(session: AuthSession): void {
