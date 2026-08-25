@@ -81,8 +81,46 @@ import { gzipSync } from "node:zlib";
 // module still costs its full weight in the shipped file, just not in the
 // initial JS *execution* path. Overage without this raise was ~6 kB (0.15%).
 // GZIP is deliberately unchanged and still holds ~48 kB of headroom.
-const MAX_BYTES = 4_000_000;
-const MAX_GZIP_BYTES = 1_300_000;
+//
+// ── 2026-08-25: owner raise, 4.00 MB -> 30 MB ────────────────────────────────
+// The owner set the ceiling for the built app at 30 MB. That is a deliberate
+// policy decision, not another feature-by-feature raise, so it is recorded
+// differently from the seven above: no feature is being paid for here, and the
+// bundle has not grown -- it is 3868.5 kB at the time of writing, i.e. ~13 % of
+// the new ceiling.
+//
+// WHY GZIP MOVES TOO. It has to, or the raise would be a no-op. These are
+// checked with OR below, so whichever limit binds first is the real ceiling --
+// and at 1.30 MB gzip the effective raw cap was about 4 MB. Leaving gzip alone
+// would have kept the old gate under a new number. It moves to 10 MB, which is
+// the same ~3.1x compression ratio this bundle actually achieves, so raw stays
+// the binding constraint at the value the owner named.
+//
+// WHY RAW IS THE ONE THAT MATTERS HERE, contra every note above. Those notes
+// say "gzip governs actual transfer". That is true of a static-server
+// deployment and false of this one: the app is distributed as a single file
+// copied onto a Windows share and opened directly -- the 2026-08-25 error logs
+// show `file:///Y:/...html` and `file:///Z:/...html` -- and a file:// load
+// performs no content-encoding negotiation at all. Every byte in the raw
+// figure is read off the SMB share on every open. If the app is ever served
+// over HTTP instead, gzip becomes the meaningful number again and this
+// reasoning inverts.
+//
+// WHAT STILL GUARDS AGAINST DRIFT. Not this ceiling -- 26 MB of headroom
+// cannot catch a 200 kB accident. The `Measure (pr)` CI job does: it builds
+// the PR and `main` and reports raw/gzip Δ in the PR comment on every push, so
+// unexplained growth is visible per-change regardless of how far the ceiling
+// sits. That job is now the regression guard; this file is the hard stop.
+//
+// AND THE PART THAT DOES NOT CHANGE. A bigger ceiling is permission, not a
+// target. Load time off a contended share scales with the raw figure, and the
+// browser parses the whole inlined graph before first paint, so the users who
+// hit the XQ-IO-032 contention are the same ones who would pay for a bigger
+// file. The font-subsetting work described above (~100 kB+ reclaimable) is
+// still the right optimisation whenever it is worth doing; it is just no
+// longer urgent.
+const MAX_BYTES = 30_000_000;
+const MAX_GZIP_BYTES = 10_000_000;
 const bundlePath = new URL("../dist/index.html", import.meta.url);
 
 const bundle = await readFile(bundlePath);
