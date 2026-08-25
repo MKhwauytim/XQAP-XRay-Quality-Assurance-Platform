@@ -123,16 +123,27 @@ describe("UI scale — viewport units in CSS", () => {
     expect(indexCss).toContain("--ui-queue-floor: calc(560px * var(--ui-table-height-scale))");
 
     // Both columns of that page floor at the SAME value, or they disagree about
-    // where the fold is.
-    for (const file of [
-      join(SRC_ROOT, "components", "InspectionPanel", "InspectionPanel.css"),
-      join(
-        SRC_ROOT, "components", "Sidebar", "Tabs", "EmployeeWorkspace",
-        "views", "XrayReferrals", "XrayReferrals.css"
-      ),
-    ]) {
+    // where the fold is. XrayReferrals.css wraps the floor in a
+    // `--ew-xr-split-height` fallback (the resize grip's admin-set override —
+    // see its "Resize grip" section), so its expected substring differs from
+    // InspectionPanel.css's, but the floor itself — the fallback value — is
+    // still `--ui-queue-floor` in both, and both still forbid a flat 560px.
+    const queueFloorExpectations = new Map<string, string>([
+      [
+        join(SRC_ROOT, "components", "InspectionPanel", "InspectionPanel.css"),
+        "min-height: var(--ui-queue-floor);",
+      ],
+      [
+        join(
+          SRC_ROOT, "components", "Sidebar", "Tabs", "EmployeeWorkspace",
+          "views", "XrayReferrals", "XrayReferrals.css"
+        ),
+        "min-height: var(--ew-xr-split-height, var(--ui-queue-floor));",
+      ],
+    ]);
+    for (const [file, expected] of queueFloorExpectations) {
       const css = withoutComments(readFileSync(file, "utf-8"));
-      expect(css).toContain("min-height: var(--ui-queue-floor);");
+      expect(css).toContain(expected);
       expect(css).not.toMatch(/min-height:\s*560px/);
     }
   });

@@ -14,6 +14,18 @@ export type BrowseDatasetPreset = {
   widths?: Record<string, number>;
   /** Per-column date-format overrides — mirrors ColConfig.dateFmt */
   dateFmt?: Record<string, string>;
+  /**
+   * Queue/panel split geometry for two-column layouts (e.g. XrayReferrals'
+   * table + inspection-panel split). Absent for tables without a split panel.
+   */
+  layout?: {
+    /** fr share of the queue (table) column. */
+    queueFr: number;
+    /** fr share of the panel (form) column. */
+    panelFr: number;
+    /** Shared row height in px — overrides the viewport-derived default. */
+    heightPx: number;
+  };
   updatedAt: string;
 };
 

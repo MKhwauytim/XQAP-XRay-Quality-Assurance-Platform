@@ -121,14 +121,16 @@ import {
   getVisibleReferralColumns,
   pct,
   isStudyCompleted,
+  ResizeModeToggle,
+  REFERRALS_PRESET_KEY,
+  useQueuePanelResize,
+  type QueuePanelSplitLayout,
 } from "./XrayReferrals/subComponents";
 import { useCaseFilter } from "./XrayReferrals/caseFilter";
 import QueueSplitResizer from "./XrayReferrals/QueueSplitResizer";
 import "./XrayReferrals/XrayReferrals.css";
 
 // ── Column definitions ────────────────────────────────────────────────────────
-
-const REFERRALS_PRESET_KEY = "xray-referrals";
 
 const COL_KEY = "xray_ref_cols_v4";
 
@@ -838,6 +840,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const [scopeEmployee, setScopeEmployee] = useState<string>(username);
   const [replacementBusy, setReplacementBusy] = useState(false);
   const [colPreset, setColPreset]     = useState<ColConfig | undefined>(undefined);
+  const [loadedSplitLayout, setLoadedSplitLayout] = useState<QueuePanelSplitLayout | undefined>(undefined);
   const [myQuota, setMyQuota]         = useState<PersonalQuota>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [filteredTableEntries, setFilteredTableEntries] = useState<DistributionEntry[]>([]);
@@ -896,6 +899,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           widths:  p.widths ?? {},
           dateFmt: (p.dateFmt ?? {}) as ColConfig["dateFmt"],
         });
+        setLoadedSplitLayout(p.layout); // fed to useQueuePanelResize below, constructed after effectiveColConfig
       }
       })
       .catch(logRejection("xrayReferrals:loadBrowsePresets"));
@@ -977,6 +981,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     () => colPreset ?? loadLocalColConfig() ?? buildDefaultColConfig(columns),
     [columns, colPreset]
   );
+
+  const { resizeMode, setResizeMode, gridRef, gridStyle, handleSplitGripMouseDown } =
+    useQueuePanelResize({ directoryHandle, username, canConfigureColumns, baseColumns, effectiveColConfig, loadedLayout: loadedSplitLayout });
 
   const visiblePreviewColumns = useMemo(
     () => getVisibleReferralColumns(columns, effectiveColConfig, canSeeAll),
@@ -1990,7 +1997,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         // panel underneath the pagination the moment it appeared.
         const showSelectionBar = canReassignSamples && entries.length > 0;
         const tableEl = (
-          <div className={`ew-ref-queue ew-xr-grid${showSelectionBar ? " ew-xr-grid--with-bar" : ""}`}>
+          <div
+            ref={gridRef}
+            className={`ew-ref-queue ew-xr-grid${showSelectionBar ? " ew-xr-grid--with-bar" : ""}`}
+            style={gridStyle}
+          >
             {showSelectionBar && (
               <ReassignSelectionBar
                 selectedCount={selectedIds.size}
@@ -2053,20 +2064,36 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               // ordinary employee is their primary user); the scope picker
               // stays oversight-only, as before.
               toolbarStart={<CaseFilterSwitcher value={caseFilter.value} counts={caseFilter.counts} onChange={caseFilter.setValue} />}
-              toolbarEndExtra={canSeeAll ? (
-                <QueueScopePicker
-                  value={scopeEmployee}
-                  options={scopeOptions}
-                  totalCount={entries.length}
-                  // Selection is DELIBERATELY not cleared here: ids already
-                  // persist across case-filter changes and silent refreshes, are
-                  // re-validated against `entriesById` before anything is
-                  // submitted, and reaching across employees is the whole point
-                  // of the bulk-reassign flow.
-                  onChange={setScopeEmployee}
-                />
+              toolbarEndExtra={(canSeeAll || canConfigureColumns) ? (
+                <>
+                  {canConfigureColumns && (
+                    <ResizeModeToggle active={resizeMode} onToggle={() => setResizeMode((v) => !v)} />
+                  )}
+                  {canSeeAll && (
+                    <QueueScopePicker
+                      value={scopeEmployee}
+                      options={scopeOptions}
+                      totalCount={entries.length}
+                      // Selection is DELIBERATELY not cleared here: ids already
+                      // persist across case-filter changes and silent refreshes, are
+                      // re-validated against `entriesById` before anything is
+                      // submitted, and reaching across employees is the whole point
+                      // of the bulk-reassign flow.
+                      onChange={setScopeEmployee}
+                    />
+                  )}
+                </>
               ) : undefined}
             />
+            {canConfigureColumns && resizeMode && (
+              <div
+                className="ew-xr-resize-grip"
+                role="separator"
+                aria-label={L.ew_xr_resize_grip_title}
+                title={L.ew_xr_resize_grip_title}
+                onMouseDown={handleSplitGripMouseDown}
+              />
+            )}
             {/* Second grid column. The wrapper is what `position: sticky` on the
                 panel travels inside, and it keeps the empty-state placeholder in
                 the same track without a second set of placement rules. */}
