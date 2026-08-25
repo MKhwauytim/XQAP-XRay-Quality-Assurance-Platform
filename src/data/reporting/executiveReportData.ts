@@ -8,6 +8,7 @@ import type {
   ExecutiveReportConfig,
   ExecutiveReportInput,
 } from "./executiveReportTypes";
+import { isRowStudied } from "./executiveReportTypes";
 import { buildPortProfiles, buildStageProfiles } from "./executiveKpiProfiles";
 import { entryDayOf } from "./executive/model/entryDay";
 
@@ -224,7 +225,7 @@ export function calculateExecutiveKPIs(
   const suspicionRate = rows.length > 0 ? (suspiciousCount / rows.length) * 100 : 0;
 
   const sampleRows = rows.filter((r) => r.selectedInSample);
-  const studiedImages = sampleRows.filter((r) => r.answerStatus === "submitted").length;
+  const studiedImages = sampleRows.filter(isRowStudied).length;
   const remainingImages = Math.max(0, totalSample - studiedImages);
   const completionRate = totalSample > 0 ? (studiedImages / totalSample) * 100 : 0;
 

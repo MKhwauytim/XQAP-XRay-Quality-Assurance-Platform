@@ -28,6 +28,10 @@ import type { ReferralRequest, ReplacementRequest } from "../../../../../data/re
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import { loadEmployeeAnswers, upsertItemAnswer } from "../../../../../data/answers/answerStorage";
 import type { ItemAnswer } from "../../../../../data/answers/answerTypes";
+import { HAS_IMAGE_FIELD_LABEL } from "../../../../../data/answers/noImageAnswer";
+import { saveTemplate } from "../../../../../data/templates/templateStorage";
+import { saveInspectionTemplateSelection } from "../../../../../data/templates/templateSelectionStorage";
+import type { TemplateSchema } from "../../../../../data/templates/templateTypes";
 import { DEFAULT_LABELS } from "../../../../../data/labels/labelsStore";
 import { broadcastDataRefresh } from "../../../../../data/workspace/dataRefreshSignal";
 import XrayInspectionResults from "./XrayInspectionResults";
@@ -466,5 +470,99 @@ describe("XrayInspectionResults — ad-hoc import visibility (THE GAP fix)", () 
     await waitFor(() =>
       expect(screen.getAllByText("ملاحظة على صف الاستيراد اليدوي").length).toBeGreaterThan(0)
     );
+  });
+});
+
+// "معلق" (on-hold): a submitted answer that says "لا يوجد صورة" is real,
+// valid work by the template's own rules — everything else becomes optional —
+// but is not a finished inspection. It must never read as "مكتمل", and a
+// supervisor/admin must be able to reopen it once the image turns up.
+function hasImageTemplate(): TemplateSchema {
+  return {
+    templateId: "tmpl-has-image",
+    templateName: "قالب الاختبار",
+    version: 1,
+    createdAt: new Date().toISOString(),
+    createdBy: "admin",
+    updatedAt: new Date().toISOString(),
+    updatedBy: "admin",
+    fields: [
+      { fieldId: "f-has-image", label: HAS_IMAGE_FIELD_LABEL, type: "dropdown", required: true, options: ["نعم", "لا"] },
+    ],
+  };
+}
+
+async function seedActiveEntryWithNoImageAnswer(): Promise<ReturnType<typeof createMemoryDirectory>> {
+  const root = createMemoryDirectory("root");
+  await saveSampleMaster(root, MONTH, makeSample([makeRow("IMG-ACTIVE")]));
+  const assignResult = await appendDistributionEvents(root, MONTH, [
+    buildAssignEvent({ xrayImageId: "IMG-ACTIVE", assignedTo: "emp-1", eventBy: "admin" }),
+  ]);
+  if (!assignResult.ok) throw new Error(`seed assign failed: ${assignResult.error}`);
+  const template = hasImageTemplate();
+  const savedTpl = await saveTemplate(root, template);
+  if (!savedTpl.ok) throw new Error(`seed template failed: ${savedTpl.error}`);
+  const savedSelection = await saveInspectionTemplateSelection(root, {
+    templateId: template.templateId,
+    updatedAt: new Date().toISOString(),
+    updatedBy: "admin",
+  });
+  if (!savedSelection.ok) throw new Error(`seed template selection failed: ${savedSelection.error}`);
+  const answerResult = await upsertItemAnswer(root, MONTH, "emp-1", makeAnswer({
+    answers: [{ fieldId: "f-has-image", value: "لا" }],
+    status: "submitted",
+    submittedAt: new Date().toISOString(),
+  }));
+  if (!answerResult.ok) throw new Error(`seed answer failed: ${answerResult.error}`);
+  return root;
+}
+
+describe("XrayInspectionResults — لا يوجد صورة shows معلق, not مكتمل", () => {
+  it("shows the on-hold status, not completed, for a submitted no-image answer", async () => {
+    writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = await seedActiveEntryWithNoImageAnswer();
+    render(<XrayInspectionResults directoryHandle={root} />);
+
+    await waitFor(() => expect(screen.getAllByText("IMG-ACTIVE").length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText(DEFAULT_LABELS.status_on_hold).length).toBeGreaterThan(0));
+    expect(screen.queryByText(DEFAULT_LABELS.status_completed)).not.toBeInTheDocument();
+  });
+
+  it("lets a supervisor (ew.reopenAnswer) reopen a submitted no-image answer for re-study", async () => {
+    writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = await seedActiveEntryWithNoImageAnswer();
+    render(<XrayInspectionResults directoryHandle={root} />);
+
+    await waitFor(() => expect(screen.getAllByText("IMG-ACTIVE").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("row", { name: /IMG-ACTIVE/ }));
+
+    fireEvent.click(await screen.findByRole("button", { name: DEFAULT_LABELS.ew_reopen_case_btn }));
+    const reasonBox = await screen.findByPlaceholderText(DEFAULT_LABELS.ew_reopen_case_reason_placeholder);
+    fireEvent.change(reasonBox, { target: { value: "توفّرت الصورة الآن" } });
+    fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.ew_reopen_case_confirm_btn }));
+
+    await waitFor(async () => {
+      const file = await loadEmployeeAnswers(root, MONTH, "emp-1");
+      const item = file.items.find((i) => i.xrayImageId === "IMG-ACTIVE");
+      expect(item?.status).toBe("draft");
+    });
+  });
+
+  it("an employee (no ew.reopenAnswer) sees no reopen control", async () => {
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = await seedActiveEntryWithNoImageAnswer();
+    render(<XrayInspectionResults directoryHandle={root} />);
+
+    await waitFor(() => expect(screen.getAllByText("IMG-ACTIVE").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("row", { name: /IMG-ACTIVE/ }));
+
+    await screen.findByText(DEFAULT_LABELS.ew_quality_note_empty_readonly);
+    expect(screen.queryByRole("button", { name: DEFAULT_LABELS.ew_reopen_case_btn })).not.toBeInTheDocument();
   });
 });

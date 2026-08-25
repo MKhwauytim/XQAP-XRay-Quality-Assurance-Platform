@@ -29,6 +29,12 @@ import { appendDistributionEvents } from "../../../../../data/distribution/distr
 import { buildAssignEvent } from "../../../../../data/distribution/distributionLog";
 import { invalidateMonthLockCache } from "../../../../../data/population/monthLock";
 import { appendReferralRequest, appendReplacementRequest } from "../../../../../data/referral/referralStorage";
+import { upsertItemAnswer } from "../../../../../data/answers/answerStorage";
+import type { ItemAnswer } from "../../../../../data/answers/answerTypes";
+import { HAS_IMAGE_FIELD_LABEL } from "../../../../../data/answers/noImageAnswer";
+import { saveTemplate } from "../../../../../data/templates/templateStorage";
+import { saveInspectionTemplateSelection } from "../../../../../data/templates/templateSelectionStorage";
+import type { TemplateSchema } from "../../../../../data/templates/templateTypes";
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import { resetBootProgress } from "../../../../../data/workspace/bootProgress";
 import { getLabels } from "../../../../../data/labels/labelsStore";
@@ -262,5 +268,73 @@ describe("XrayReferrals zero-assignment empty state", () => {
       expect(screen.getByText("لا توجد عينات مسندة إليك في هذا الشهر")).toBeInTheDocument()
     );
     expect(document.querySelector("table")).toBeNull();
+  });
+});
+
+describe("XrayReferrals stats strip — معلقة (on-hold) bucket", () => {
+  it("counts a submitted لا يوجد صورة answer as معلقة, distinct from a real مكتملة completion", async () => {
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await saveSampleMaster(root, MONTH, makeSample([makeRow("IMG-1"), makeRow("IMG-2"), makeRow("IMG-3")]));
+    const seeded = await appendDistributionEvents(root, MONTH, [
+      buildAssignEvent({ xrayImageId: "IMG-1", assignedTo: "emp-1", eventBy: "admin" }),
+      buildAssignEvent({ xrayImageId: "IMG-2", assignedTo: "emp-1", eventBy: "admin" }),
+      buildAssignEvent({ xrayImageId: "IMG-3", assignedTo: "emp-1", eventBy: "admin" }),
+    ]);
+    if (!seeded.ok) throw new Error(`seed failed: ${seeded.error}`);
+
+    const template: TemplateSchema = {
+      templateId: "tmpl-stats-test",
+      templateName: "قالب الاختبار",
+      version: 1,
+      createdAt: new Date().toISOString(),
+      createdBy: "admin",
+      updatedAt: new Date().toISOString(),
+      updatedBy: "admin",
+      fields: [
+        { fieldId: "f-has-image", label: HAS_IMAGE_FIELD_LABEL, type: "dropdown", required: true, options: ["نعم", "لا"] },
+      ],
+    };
+    const savedTpl = await saveTemplate(root, template);
+    if (!savedTpl.ok) throw new Error(`seed template failed: ${savedTpl.error}`);
+    const savedSelection = await saveInspectionTemplateSelection(root, {
+      templateId: template.templateId,
+      updatedAt: new Date().toISOString(),
+      updatedBy: "admin",
+    });
+    if (!savedSelection.ok) throw new Error(`seed template selection failed: ${savedSelection.error}`);
+
+    function makeAnswer(xrayImageId: string, hasImage: "نعم" | "لا"): ItemAnswer {
+      return {
+        xrayImageId,
+        templateId: template.templateId,
+        templateVersion: 1,
+        answers: [{ fieldId: "f-has-image", value: hasImage }],
+        lastSavedAt: new Date().toISOString(),
+        submittedAt: new Date().toISOString(),
+        answeredBy: "emp-1",
+        status: "submitted",
+      };
+    }
+    // IMG-1: a real completion (نعم). IMG-2: no image (لا) — must count as
+    // معلقة, not مكتملة. IMG-3: left untouched — لم تبدأ.
+    const answer1 = await upsertItemAnswer(root, MONTH, "emp-1", makeAnswer("IMG-1", "نعم"));
+    if (!answer1.ok) throw new Error(`seed answer1 failed: ${answer1.error}`);
+    const answer2 = await upsertItemAnswer(root, MONTH, "emp-1", makeAnswer("IMG-2", "لا"));
+    if (!answer2.ok) throw new Error(`seed answer2 failed: ${answer2.error}`);
+
+    render(<XrayReferrals directoryHandle={root} />);
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+
+    await waitFor(() => {
+      const doneToken = screen.getByText("مكتملة").closest(".ew-ref-stat-token");
+      expect(doneToken).toHaveTextContent("1");
+    });
+    const holdToken = screen.getByText("معلقة").closest(".ew-ref-stat-token");
+    expect(holdToken).toHaveTextContent("1");
+    const notStartedToken = screen.getByText("لم تبدأ").closest(".ew-ref-stat-token");
+    expect(notStartedToken).toHaveTextContent("1");
   });
 });

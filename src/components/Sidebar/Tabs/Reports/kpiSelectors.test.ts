@@ -80,6 +80,26 @@ describe("buildAnswerGroups", () => {
     expect(groups.port[1]).toMatchObject({ suspicion: 0, clean: 1, incomplete: 1 });
   });
 
+  it("counts a submitted لا يوجد صورة answer as غير مكتملة, not as a completed/clean/suspicious study", () => {
+    // A submitted answer with imageAvailable: false is a valid submission by
+    // the template's own rules but nothing was actually studied — it must
+    // land in `incomplete`, never in `suspicion`/`clean`, and must not
+    // inflate `completed` (assigned − incomplete) the way a real study would.
+    const groups = buildAnswerGroups(
+      makeReportModel({
+        rows: [
+          { assignedTo: "u1", portName: "أ", expertResult: "سليمة", answerStatus: "submitted", imageAvailable: true },
+          { assignedTo: "u1", portName: "أ", expertResult: null, answerStatus: "submitted", imageAvailable: false },
+        ],
+      }),
+      (u) => u,
+      "غير محدد"
+    );
+    expect(groups.reviewer).toEqual([
+      { key: "u1", label: "u1", suspicion: 0, clean: 1, incomplete: 1, total: 2 },
+    ]);
+  });
+
   it("falls back to the supplied unknown label for a row with no port", () => {
     const groups = buildAnswerGroups(
       makeReportModel({

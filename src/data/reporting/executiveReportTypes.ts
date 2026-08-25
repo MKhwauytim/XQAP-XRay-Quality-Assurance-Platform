@@ -85,6 +85,31 @@ export type ExecutiveReportRow = {
   targetedByRiskEngine?: string | null;
 };
 
+/**
+ * Was this case actually studied? A submitted "لا يوجد صورة" answer is a
+ * complete, valid submission by the template's own rules — every other
+ * field becomes optional once that's answered — but nothing was actually
+ * inspected. Every "how many cases were completed/studied" figure in the
+ * report (coverage/completion rates, reviewer workload-completion counts,
+ * the reviewer/port answer-mix chart's «مكتملة» bucket) reads through this,
+ * never through `answerStatus === "submitted"` directly — that check alone
+ * cannot tell a real completion from a no-image submission.
+ *
+ * Deliberately NOT used by the image-availability KPIs themselves
+ * (`imageAvailableCount`/`imageMissingCount`/`missingImageReasons` and their
+ * per-port equivalent in deck2's `collectPortQualityStats`) — those measure
+ * submitted answers directly, no-image ones included, since that is what
+ * they exist to count.
+ *
+ * `imageAvailable === null` (an unmapped/legacy field) is treated as
+ * studied — this only excludes a row where the employee explicitly answered
+ * "لا", never an unknown one (the same "don't punish a blank as if it were a
+ * negative answer" rule `caseFilter.ts` documents for the risk-engine chip).
+ */
+export function isRowStudied(row: Pick<ExecutiveReportRow, "answerStatus" | "imageAvailable">): boolean {
+  return row.answerStatus === "submitted" && row.imageAvailable !== false;
+}
+
 export type PortProfile = {
   portName: string;
   population: number;

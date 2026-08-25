@@ -1,4 +1,5 @@
 import type { ExecutiveReportRow } from "../../executiveReportTypes";
+import { isRowStudied } from "../../executiveReportTypes";
 import type { DataSufficiencyBand } from "./dataSufficiency";
 
 /**
@@ -104,7 +105,7 @@ function buildLevelRecord(
   const inspectorId = isLevelOne ? row.levelOneEmployeeId : row.levelTwoEmployeeId;
   const employeeDecision: ResultValue = isLevelOne ? row.levelOneResult : row.levelTwoResult;
   const studyReviewResult = row.expertResult;
-  const reviewCompleted = row.answerStatus === "submitted";
+  const reviewCompleted = isRowStudied(row);
 
   // Master §9 evaluability: image exists + reviewer result + employee decision +
   // employee id all present. `employeeDecision` is always present (L1/L2 gated at

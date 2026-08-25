@@ -9,6 +9,7 @@
 // rule for report data.
 
 import type { ReportModel } from "../../../../data/reporting/executive/model/reportModel";
+import { isRowStudied } from "../../../../data/reporting/executiveReportTypes";
 
 /**
  * Format a rate that may be null (empty denominator) — never shows 0% on no
@@ -154,7 +155,9 @@ function finalize(
  * Reads `model.rows` (the executive report rows — one per X-ray image), the
  * same source the fact table is exploded from, so both views describe exactly
  * the images that were distributed for study (`assignedTo !== null`).
- * `غير مكتملة` is assigned − completed, per the design's data mapping.
+ * `غير مكتملة` is assigned − completed, per the design's data mapping. A
+ * submitted "لا يوجد صورة" answer falls into `غير مكتملة` too, via
+ * `isRowStudied` — it was answered, but nothing was actually studied.
  */
 export function buildAnswerGroups(
   model: ReportModel,
@@ -169,7 +172,7 @@ export function buildAnswerGroups(
     const port = tally(byPort, row.portName ?? unknownPortLabel);
     reviewer.assigned += 1;
     port.assigned += 1;
-    if (row.answerStatus !== "submitted") continue;
+    if (!isRowStudied(row)) continue;
     reviewer.completed += 1;
     port.completed += 1;
     if (row.expertResult === "اشتباه") {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarOff, StickyNote } from "lucide-react";
+import { CalendarOff, RotateCw, StickyNote } from "lucide-react";
 import { readSession } from "../../../../../auth/authSession";
 import { usePermissions } from "../../../../../auth/usePermissions";
 import { recordAction } from "../../../../../data/audit/actionLog";
@@ -22,6 +22,8 @@ import {
   setItemQualityNote,
 } from "../../../../../data/answers/answerStorage";
 import type { ItemAnswer } from "../../../../../data/answers/answerTypes";
+import { isNoImageSubmission } from "../../../../../data/answers/noImageAnswer";
+import { reopenSubmittedAnswer } from "../../../../../data/answers/reopenAnswer";
 import {
   loadDistributionLogForRead,
   loadOrDeriveDistributionCurrentForRead,
@@ -72,7 +74,15 @@ function buildSampleColumns(L: Labels): DataTableCol<DistributionEntry>[] {
     { id: "xrayEntryDate",          label: L.col_xray_entry_date,           widthFr: 11, isDate: true, accessor: (e) => e.row.xrayEntryDate },
     { id: "lastEventAt",            label: L.col_distribution_date,         widthFr: 11, isDate: true, accessor: (e) => e.lastEventAt ?? null },
     { id: "plateOrContainerNumber", label: L.col_plate_or_container_number, widthFr: 11, accessor: (e) => e.row.plateOrContainerNumber },
-    { id: "answerStatus",           label: L.col_answer_status,             widthFr: 9,  filterKind: "status", accessor: () => null },
+    { id: "answerStatus",           label: L.col_answer_status,             widthFr: 9,  filterKind: "status",
+      statusOptions: [
+        { value: "all",             label: L.status_all },
+        { value: L.status_completed, label: L.status_completed },
+        { value: L.status_on_hold,   label: L.status_on_hold },
+        { value: L.status_pending,   label: L.status_pending },
+        { value: L.status_replaced,  label: L.status_replaced },
+      ],
+      accessor: () => null },
     { id: "xrayLevelOneResult",     label: L.col_xray_l1_result,            widthFr: 8,  accessor: (e) => e.row.xrayLevelOneResult },
     { id: "xrayLevelTwoResult",     label: L.col_xray_l2_result,            widthFr: 8,  accessor: (e) => e.row.xrayLevelTwoResult },
     { id: "certScanStatus",         label: L.col_certscan_status,           widthFr: 9,  accessor: (e) => e.row.certScanStatus },
@@ -150,6 +160,10 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
   // already governing supervisor-side direct writes onto ItemAnswer (answerStorage.ts),
   // rather than inventing a new permission key for the same role tier.
   const canWriteQualityNote = canMutate("ew.reopenAnswer");
+  // Same capability, named for its own feature: reopening a submitted answer
+  // straight from this results list (chiefly for a "معلق" no-image case whose
+  // image later turns up) — see ReopenCaseAction below.
+  const canReopenAnswer = canMutate("ew.reopenAnswer");
 
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const { months, selection: globalMonth } = useGlobalMonth();
@@ -171,6 +185,10 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
   const [expandedRowKey, setExpandedRowKey] = useState<string | null>(null);
   const [qualityNoteSavingKey, setQualityNoteSavingKey] = useState<string | null>(null);
   const [qualityNoteError, setQualityNoteError] = useState<string | null>(null);
+  // Reopen-from-results state, independent of the quality-note panel above —
+  // a row can be mid-reopen without touching its quality note or vice versa.
+  const [reopenBusyKey, setReopenBusyKey] = useState<string | null>(null);
+  const [reopenError, setReopenError] = useState<string | null>(null);
 
   useEffect(() => {
     void Promise.all([
@@ -211,6 +229,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
       setTemplate(null);
       setExpandedRowKey(null);
       setQualityNoteError(null);
+      setReopenError(null);
       setLoadState("ready");
     }
   }, [selectedMonth]);
@@ -233,6 +252,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
       setLoadState("loading");
       setExpandedRowKey(null);
       setQualityNoteError(null);
+      setReopenError(null);
     }
     try {
       const [sampleMaster, selection, referralLog, replacementLog, adhocEntries] = await Promise.all([
@@ -368,7 +388,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
       void sortAccessor;
       return {
         ...rest,
-        accessor: (row) => getSampleColumnValue(row, column, L),
+        accessor: (row) => getSampleColumnValue(row, column, template, L),
       };
     });
 
@@ -392,7 +412,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
     };
 
     return [...visibleSampleColumns, ...answerColumns, qualityNoteColumn];
-  }, [L, answerFields, referralColConfig, sampleColumns]);
+  }, [L, answerFields, referralColConfig, sampleColumns, template]);
 
   /**
    * What the table shows before anyone touches its picker: exactly the columns
@@ -488,6 +508,47 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
     }
   }
 
+  /**
+   * Reopen-from-results: sends a submitted answer back to draft so the
+   * assignee can answer it again — the "we said لا يوجد صورة, the image
+   * turned up later" case. Wraps `reopenSubmittedAnswer`, the same
+   * orchestrator the employee queue's own reopen action uses (Tier-1 Item D),
+   * which already handles the distribution-entry side (returning a
+   * supervisor-completed row to "pending") and its own audit trail — nothing
+   * further to log here.
+   */
+  async function handleReopenCase(row: ResultRow, reason: string): Promise<void> {
+    const key = resultRowKey(row);
+    if (!canReopenAnswer) {
+      setReopenError(L.ew_reopen_case_denied);
+      return;
+    }
+    if (!row.answer) return;
+    setReopenBusyKey(key);
+    setReopenError(null);
+    try {
+      const result = await reopenSubmittedAnswer({
+        directoryHandle,
+        monthFolderName: monthFolderForEntry(row.entry, selectedMonth),
+        employeeUsername: row.entry.assignedTo,
+        xrayImageId: row.entry.xrayImageId,
+        reopenedBy: username,
+        reopenedByRole: session?.role ?? "unknown",
+        reason,
+      });
+      if (!result.ok) {
+        setReopenError(result.error);
+        return;
+      }
+      setExpandedRowKey(null);
+      await loadData({ silent: true });
+    } catch (err) {
+      setReopenError(err instanceof Error ? err.message : "خطأ غير معروف.");
+    } finally {
+      setReopenBusyKey(null);
+    }
+  }
+
   function renderCell(column: DataTableCol<ResultRow>, row: ResultRow, meta: CellMeta) {
     if (column.id === "qualityNote") {
       const note = row.answer?.qualityNote ?? null;
@@ -580,17 +641,29 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
             const key = resultRowKey(row);
             setExpandedRowKey((cur) => (cur === key ? null : key));
             setQualityNoteError(null);
+            setReopenError(null);
           }}
           renderExpanded={(row) => (
-            <QualityNoteEditor
-              key={resultRowKey(row)}
-              row={row}
-              canEdit={canWriteQualityNote}
-              saving={qualityNoteSavingKey === resultRowKey(row)}
-              error={expandedRowKey === resultRowKey(row) ? qualityNoteError : null}
-              labels={L}
-              onSave={handleSaveQualityNote}
-            />
+            <>
+              <ReopenCaseAction
+                key={`reopen-${resultRowKey(row)}`}
+                row={row}
+                canReopen={canReopenAnswer}
+                busy={reopenBusyKey === resultRowKey(row)}
+                error={expandedRowKey === resultRowKey(row) ? reopenError : null}
+                labels={L}
+                onReopen={handleReopenCase}
+              />
+              <QualityNoteEditor
+                key={resultRowKey(row)}
+                row={row}
+                canEdit={canWriteQualityNote}
+                saving={qualityNoteSavingKey === resultRowKey(row)}
+                error={expandedRowKey === resultRowKey(row) ? qualityNoteError : null}
+                labels={L}
+                onSave={handleSaveQualityNote}
+              />
+            </>
           )}
         />
       )}
@@ -644,6 +717,88 @@ function renderViewSwitcher(
       >
         المحالة/المنقولة
       </button>
+    </div>
+  );
+}
+
+/**
+ * Reopen-from-results expanded-row action: a second entry point onto the same
+ * `reopenSubmittedAnswer` orchestrator the employee queue's reopen button
+ * uses. Renders nothing for a row with no submitted answer to reopen — there
+ * is nothing to reopen yet.
+ */
+function ReopenCaseAction({
+  row,
+  canReopen,
+  busy,
+  error,
+  labels: L,
+  onReopen,
+}: {
+  row: ResultRow;
+  canReopen: boolean;
+  busy: boolean;
+  error: string | null;
+  labels: Labels;
+  onReopen: (row: ResultRow, reason: string) => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [reason, setReason] = useState("");
+
+  if (!canReopen || !row.answer || row.answer.status !== "submitted") return null;
+
+  return (
+    <div className="ew-reopen-case-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="ew-reopen-case-title">
+        <RotateCw size={15} aria-hidden />
+        <span>{L.ew_reopen_case_btn}</span>
+      </div>
+      {!confirming ? (
+        <>
+          <p className="ew-quality-note-hint">{L.ew_reopen_case_hint}</p>
+          <button
+            type="button"
+            className="ew-btn-secondary ew-btn-sm"
+            onClick={() => setConfirming(true)}
+          >
+            {L.ew_reopen_case_btn}
+          </button>
+        </>
+      ) : (
+        <>
+          <textarea
+            className="ew-input ew-textarea ew-quality-note-textarea"
+            rows={2}
+            value={reason}
+            placeholder={L.ew_reopen_case_reason_placeholder}
+            disabled={busy}
+            onChange={(e) => setReason(e.target.value)}
+          />
+          <div className="ew-quality-note-actions">
+            <button
+              type="button"
+              className="ew-btn-primary ew-btn-sm"
+              disabled={busy || !reason.trim()}
+              onClick={() => onReopen(row, reason.trim())}
+            >
+              {busy ? L.ew_reopen_case_busy : L.ew_reopen_case_confirm_btn}
+            </button>
+            <button
+              type="button"
+              className="ew-btn-secondary ew-btn-sm"
+              disabled={busy}
+              onClick={() => { setConfirming(false); setReason(""); }}
+            >
+              {L.ew_reopen_case_cancel_btn}
+            </button>
+            {error && (
+              <span className="ew-quality-note-error" role="alert">
+                {error}
+              </span>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -897,20 +1052,39 @@ function defaultVisibleSampleColumnIds(
     .map((column) => column.id);
 }
 
-function getSampleColumnValue(row: ResultRow, column: DataTableCol<DistributionEntry>, labels: Labels): string | null {
+function getSampleColumnValue(
+  row: ResultRow,
+  column: DataTableCol<DistributionEntry>,
+  template: TemplateSchema | null,
+  labels: Labels
+): string | null {
   if (column.id === "stage") return formatStageLabel(row.entry.row.stage);
   if (column.id === "movementStatus") return getMovementStatusLabel(row.movement.status);
   if (column.id === "movementFrom") return row.movement.from;
   if (column.id === "movementTo") return row.movement.to;
-  if (column.id === "answerStatus") return getAnswerStatusLabel(row.answer, row.entry.status, labels);
+  if (column.id === "answerStatus") return getAnswerStatusLabel(row.answer, row.entry.status, template, labels);
   if (column.id === "submittedAt") return row.answer?.submittedAt ?? null;
   return column.accessor(row.entry);
 }
 
-function getAnswerStatusLabel(answer: ItemAnswer | null, entryStatus: string, labels: Labels): string {
+/**
+ * A submitted "لا يوجد صورة" answer is real work done — the template makes it
+ * a valid, complete submission — but it is not a finished inspection: there
+ * is nothing to inspect until an image turns up. It shows as
+ * `status_on_hold` ("معلق") rather than `status_completed`, distinct from
+ * both a true completion and an untouched assignment.
+ */
+function getAnswerStatusLabel(
+  answer: ItemAnswer | null,
+  entryStatus: string,
+  template: TemplateSchema | null,
+  labels: Labels
+): string {
   if (entryStatus === "completed") return labels.status_completed;
   if (entryStatus === "replaced") return labels.status_replaced;
-  if (answer?.status === "submitted") return labels.status_completed;
+  if (answer?.status === "submitted") {
+    return isNoImageSubmission(answer, template) ? labels.status_on_hold : labels.status_completed;
+  }
   return labels.status_pending;
 }
 

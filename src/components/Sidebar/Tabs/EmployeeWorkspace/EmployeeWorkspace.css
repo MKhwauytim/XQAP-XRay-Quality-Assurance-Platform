@@ -319,6 +319,7 @@
 
 .ew-badge-done    { background: var(--c-success-bg); color: var(--c-success); }
 .ew-badge-pending { background: var(--c-info-bg);    color: var(--c-info); }
+.ew-badge-onhold  { background: var(--c-warning-bg); color: var(--c-warning); }
 
 /* ── No template ───────────────────────────────────────────── */
 
@@ -1159,6 +1160,7 @@
 .ew-ref-stat-token--total { --stat-color: #0F2744 /* no-token: one-off */; }
 .ew-ref-stat-token--quota { --stat-color: var(--c-info-strong); }
 .ew-ref-stat-token--done { --stat-color: var(--c-emerald); }
+.ew-ref-stat-token--hold { --stat-color: var(--c-warning); }
 .ew-ref-stat-token--pending { --stat-color: #DC2626 /* no-token: one-off */; }
 .ew-ref-stat-token--replaced { --stat-color: #64748B /* no-token: one-off */; }
 
@@ -1600,6 +1602,29 @@
   border: 1.5px solid var(--c-warning-border);
   border-radius: var(--r-sm);
   cursor: default;
+}
+
+/* Visually distinct (blue vs. the quality note's amber) so the two expanded-row
+   panels never read as one action. */
+.ew-reopen-case-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--sp-3) var(--sp-4);
+  margin: 4px 0;
+  background: var(--c-info-bg);
+  border: 1.5px solid var(--c-info-border);
+  border-radius: var(--r-sm);
+  cursor: default;
+}
+
+.ew-reopen-case-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--c-info);
 }
 
 .ew-quality-note-title {
