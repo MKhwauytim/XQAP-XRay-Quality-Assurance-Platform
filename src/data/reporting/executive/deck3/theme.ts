@@ -49,4 +49,18 @@ ${DECK_V3_FONT_FACE_CSS}
   .deck-viewer-v3{ padding:0; background:#fff; }
   .slide.v3{ transform:none!important; margin:0; box-shadow:none; page-break-after:always; }
 }
+.v3-chart-plot{ position:relative; background:var(--v3-panel); border-bottom:2px solid var(--v3-navy); height:100%; }
+.v3-chart-bars{ position:absolute; inset:0; z-index:1; display:flex; align-items:stretch; gap:12px; padding:0 12px; }
+.v3-chart-plot-grouped .v3-chart-bars{ gap:26px; }
+.v3-chart-group{ flex:1; display:flex; gap:8px; align-items:stretch; }
+.v3-chart-cell{ flex:1; display:flex; flex-direction:column; justify-content:flex-end; align-self:stretch; height:100%; }
+.v3-chart-bar{ background:var(--v3-gold); position:relative; }
+.v3-chart-bar-a{ background:var(--v3-gold); }
+.v3-chart-bar-b{ background:var(--v3-blue); }
+.v3-chart-value{ display:block; padding-top:10px; text-align:center; color:#fff; font-size:24px; font-weight:700; }
+.v3-chart-refline{ position:absolute; right:0; left:0; border-top:3px dashed var(--v3-navy); }
+.v3-chart-refline span{ position:absolute; inset-inline-end:0; top:-28px; font-size:24px; color:var(--v3-muted); }
+.v3-chart-labels{ display:flex; gap:12px; padding:10px 12px 0; }
+.v3-chart-plot-grouped + .v3-chart-labels{ gap:26px; }
+.v3-chart-label{ flex:1; text-align:center; font-size:25px; color:var(--v3-text); }
 `;
