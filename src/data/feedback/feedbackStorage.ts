@@ -782,6 +782,134 @@ export async function migrateLegacyMessages(
   return { migrated: summaries.length, skipped: null };
 }
 
+/** Archived name for a legacy log this admin has explicitly finalized (see `finalizeLegacyMigration`). */
+export const FEEDBACK_MESSAGES_ARCHIVED_FILE = "messages.json.migrated";
+
+/**
+ * Rename `messages.json` to `FEEDBACK_MESSAGES_ARCHIVED_FILE` **in one specific
+ * directory** — copy the bytes under the new name, then remove the original.
+ * Not a move: the File System Access API has no rename, so this is
+ * write-then-remove, same technique `copyFileBytes` uses elsewhere.
+ *
+ * Returns `false` (never throws) when there is nothing to archive here, or the
+ * directory handle cannot remove entries (`removeEntry` is optional on
+ * `DirectoryHandleLike` — a read-only grant, or a very old browser). The
+ * ARCHIVED copy is written before the original is removed, so a failure
+ * between those two steps leaves both files present rather than losing data.
+ */
+async function archiveLegacyMessagesFileAt(dir: DirectoryHandleLike): Promise<boolean> {
+  const existing = await safeReadJson<FeedbackFile | FeedbackMessage[]>(dir, MESSAGES_FILE);
+  if (!existing.ok) return false;
+  if (typeof dir.removeEntry !== "function") return false;
+  await safeWriteJson<FeedbackFile>(dir, FEEDBACK_MESSAGES_ARCHIVED_FILE, normalizeFeedbackFile(existing.value));
+  await dir.removeEntry(MESSAGES_FILE);
+  return true;
+}
+
+/**
+ * Deliberate, admin-triggered finish to the lazy migration `migrateLegacyMessages`
+ * already performs automatically. Where that function copies legacy tickets out
+ * and — per CLAUDE.md's permanent-fallback doctrine — never touches the
+ * original, this one takes the extra, EXPLICIT step of retiring
+ * `messages.json` once every ticket in it is confirmed present in the new
+ * per-thread system.
+ *
+ * ARCHIVES, NEVER DELETES: the legacy content survives under
+ * `FEEDBACK_MESSAGES_ARCHIVED_FILE` at whichever location(s) held a live
+ * `messages.json`. Nothing reads that archived name — it is a manual-recovery
+ * copy an admin could open by hand, not a second fallback path — so this still
+ * differs from a hard delete without reintroducing the read-path cost the
+ * legacy fallback existed to avoid.
+ *
+ * Verification-before-archive: this only archives once every legacy message id
+ * has a readable thread file. A workspace that cannot confirm that (a partial
+ * migration, an unreadable thread) is left exactly as it was — never archived
+ * on a guess.
+ */
+export async function finalizeLegacyMigration(dir: DirectoryHandleLike): Promise<{
+  /** Legacy messages copied into `threads/` by THIS call (0 if already migrated earlier). */
+  migratedNow: number;
+  /** Legacy messages confirmed present as thread files, out of the legacy log's total. */
+  verifiedCount: number;
+  totalLegacyCount: number;
+  archived: boolean;
+  reason: "no-legacy-data" | "verification-failed" | "remove-unsupported" | null;
+}> {
+  // Best-effort, like `ensureMigrated`: a write-denied workspace (read-only
+  // grant) must fall through to verification below and report
+  // "verification-failed" — never throw and abort the whole admin action —
+  // because verification against whatever thread files DO already exist is
+  // still the correct, informative answer.
+  let migration: { migrated: number };
+  try {
+    migration = await migrateLegacyMessages(dir);
+  } catch (error) {
+    logError("feedback:finalizeLegacyMigration:migrate", error);
+    migration = { migrated: 0 };
+  }
+
+  const legacy = await loadFeedbackFile(dir);
+  if (legacy.messages.length === 0) {
+    return {
+      migratedNow: migration.migrated,
+      verifiedCount: 0,
+      totalLegacyCount: 0,
+      archived: false,
+      reason: "no-legacy-data",
+    };
+  }
+
+  const legacyIds = legacy.messages.map((message) => message.id);
+  let threadsDir: DirectoryHandleLike | null = null;
+  try {
+    threadsDir = await getFeedbackThreadsDir(dir, false);
+  } catch {
+    // No threads/ folder at all — e.g. migration above could not write it.
+    // Every legacy id is therefore unverified, handled below.
+  }
+  const { values } = threadsDir
+    ? await readNamedJsonFiles<FeedbackThread>(
+        threadsDir,
+        legacyIds.map(feedbackThreadFileName),
+        { onUnreadable: "skip" }
+      )
+    : { values: [] as FeedbackThread[] };
+  const verifiedIds = new Set(values.map((thread) => thread.id));
+  const verifiedCount = legacyIds.filter((id) => verifiedIds.has(id)).length;
+
+  if (verifiedCount !== legacyIds.length) {
+    return {
+      migratedNow: migration.migrated,
+      verifiedCount,
+      totalLegacyCount: legacyIds.length,
+      archived: false,
+      reason: "verification-failed",
+    };
+  }
+
+  let archived = false;
+  try {
+    const feedbackDir = await getFeedbackDir(dir, true);
+    archived = (await archiveLegacyMessagesFileAt(feedbackDir)) || archived;
+  } catch (error) {
+    logError("feedback:finalizeLegacyMigration:archiveCurrent", error);
+  }
+  try {
+    const legacyDir = await getLegacyFeedbackDir(dir);
+    archived = (await archiveLegacyMessagesFileAt(legacyDir)) || archived;
+  } catch {
+    // No legacy workspace-root folder — nothing to archive there.
+  }
+
+  return {
+    migratedNow: migration.migrated,
+    verifiedCount,
+    totalLegacyCount: legacyIds.length,
+    archived,
+    reason: archived ? null : "remove-unsupported",
+  };
+}
+
 /** Cheap "has this workspace been migrated?" probe: one names-only listing, no reads. */
 async function hasAnyThreadFile(dir: DirectoryHandleLike): Promise<boolean> {
   let threadsDir: DirectoryHandleLike;
