@@ -4,8 +4,8 @@ import babel from "@rolldown/plugin-babel";
 import { viteSingleFile } from "vite-plugin-singlefile";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { deckStyleChoicesPlugin } from "./src/dev/deckStyleChoicesPlugin";
-import { simModePlugin } from "./src/dev/simModePlugin";
+import { deckStyleChoicesPlugin } from "./src/dev/deckStyleChoicesPlugin.ts";
+import { simModePlugin } from "./src/dev/simModePlugin.ts";
 
 // Single source of truth for the app version: read it straight from package.json rather than
 // hand-maintaining a separate version.ts that can drift out of sync (D7).
