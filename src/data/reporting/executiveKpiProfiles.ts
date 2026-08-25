@@ -6,6 +6,7 @@ import type {
   PortProfile,
   StageProfile,
 } from "./executiveReportTypes";
+import { isRowStudied } from "./executiveReportTypes";
 import { aggregateDecisions, buildDecisionRecords, emptyCounts } from "./executive/model/decisionFactTable";
 import type { Counts } from "./executive/model/decisionFactTable";
 
@@ -85,7 +86,7 @@ function buildPortProfile(
   const clean = rows.filter((row) => row.imageResult === "سليمة").length;
   const suspicious = rows.filter((row) => row.imageResult === "اشتباه").length;
   const sampled = rows.filter((row) => row.selectedInSample);
-  const studied = sampled.filter((row) => row.answerStatus === "submitted").length;
+  const studied = sampled.filter(isRowStudied).length;
 
   // Unchanged population-sample-size gate: "do we have enough images with a
   // reviewer verdict at this port". `imageCounts.evaluable` is exactly the
@@ -164,7 +165,7 @@ export function buildStageProfiles(
       const studied = rows.filter(
         (row) =>
           row.selectedInSample &&
-          row.answerStatus === "submitted" &&
+          isRowStudied(row) &&
           formatStageLabel(row.stage) === allocation.stageLabel,
       ).length;
       return {
@@ -185,7 +186,7 @@ export function buildStageProfiles(
   return [...groupRows(rows, (row) => row.stage ?? "غير محدد")].map(
     ([stageLabel, stageRows], index) => {
       const sampled = stageRows.filter((row) => row.selectedInSample);
-      const studied = sampled.filter((row) => row.answerStatus === "submitted").length;
+      const studied = sampled.filter(isRowStudied).length;
       return {
         stageKey: String(index),
         stageLabel,

@@ -197,9 +197,14 @@ describe("calculateExecutiveKPIs — golden master", () => {
       // Sourced from sample.totalActual, NOT from counting selectedInSample.
       totalSample: 6,
       sampleCoverage: 60,
-      studiedImages: 4,
-      remainingImages: 2,
-      completionRate: (4 / 6) * 100,
+      // img-3 and img-4 are submitted (and even carry a verificationCategory,
+      // in this synthetic fixture) but imageAvailable: false — a "لا يوجد
+      // صورة" answer is a valid submission, not a completed study, so
+      // `isRowStudied` excludes them. Only img-1/img-2 (imageAvailable: true)
+      // count as studied.
+      studiedImages: 2,
+      remainingImages: 4,
+      completionRate: (2 / 6) * 100,
       suspiciousCount: 4,
       cleanCount: 6,
       suspicionRate: 40,
@@ -315,7 +320,7 @@ describe("calculateExecutiveKPIs — golden master", () => {
         suspicionRate: (3 / 7) * 100,
         sampleSize: 4,
         coverage: (4 / 7) * 100,
-        studied: 2,
+        studied: 2, // img-1, img-2 — both imageAvailable: true
         completionRate: 50,
         // SURPRISE: all three accuracy figures are hard-nulled — not "computed
         // from a small sample" — because `reliable` gates on
@@ -336,8 +341,11 @@ describe("calculateExecutiveKPIs — golden master", () => {
         suspicionRate: (1 / 3) * 100,
         sampleSize: 2,
         coverage: (2 / 3) * 100,
-        studied: 2,
-        completionRate: 100,
+        // img-3, img-4: both submitted with imageAvailable: false — "لا يوجد
+        // صورة" answers, not completed studies. isRowStudied excludes them,
+        // so this port (all its sampled work is no-image) shows 0 studied.
+        studied: 0,
+        completionRate: 0,
         accuracyByImage: null,
         suspiciousDetectionRateByImage: null,
         missedSuspicionRateByImage: null,
@@ -359,8 +367,10 @@ describe("calculateExecutiveKPIs — golden master", () => {
         population: 10,
         sampleSize: 6,
         coverage: 60,
-        studied: 4,
-        completionRate: (4 / 6) * 100,
+        // img-3/img-4 (imageAvailable: false) are excluded — see the
+        // completion-block comment above.
+        studied: 2,
+        completionRate: (2 / 6) * 100,
       },
     ]);
   });
@@ -393,9 +403,11 @@ describe("calculateExecutiveKPIs — golden master", () => {
         coverage: 60,
         // `studied` matches rows whose formatStageLabel(row.stage) equals the
         // allocation label — the fixture rows carry stage "1", which the
-        // DEFAULT stage mappings resolve to "المستوى الأول".
-        studied: 4,
-        completionRate: (4 / 6) * 100,
+        // DEFAULT stage mappings resolve to "المستوى الأول". img-3/img-4
+        // (imageAvailable: false) are excluded — see the completion-block
+        // comment above.
+        studied: 2,
+        completionRate: (2 / 6) * 100,
       },
     ]);
   });
@@ -412,7 +424,9 @@ describe("calculateExecutiveKPIs — golden master", () => {
     );
     expect(inflated.totalSample).toBe(100);
     expect(inflated.sampleCoverage).toBe(1000);
-    expect(inflated.remainingImages).toBe(96);
+    // 100 - studiedImages(2) — see the completion-block comment above for
+    // why only img-1/img-2 count as studied.
+    expect(inflated.remainingImages).toBe(98);
   });
 
   it("pins the empty-input shape (every ratio null, every count zero)", () => {

@@ -20,6 +20,9 @@ type Overrides = Partial<{
     portName: string | null;
     expertResult: "سليمة" | "اشتباه" | null;
     answerStatus: "draft" | "submitted" | null;
+    /** Defaults to `true` when omitted — set `false` to fixture a "لا يوجد
+     *  صورة" submission (isRowStudied excludes it from "completed"/"studied"). */
+    imageAvailable?: boolean | null;
   }>;
   factTable: Array<{ completedAt: string | null; outcomeClass: string | null }>;
   reviewers: Array<{ reviewerId: string; assigned: number; completed: number }>;
@@ -211,7 +214,7 @@ export function makeReportModel(overrides: Overrides = {}): ReportModel {
       periodId: "أبريل 2026",
       xrayImageId: "x",
     })),
-    rows: rows.map((row) => ({ ...row, xrayImageId: "x" })),
+    rows: rows.map((row) => ({ imageAvailable: true, ...row, xrayImageId: "x" })),
     kpis: {},
   };
   return model as unknown as ReportModel;
