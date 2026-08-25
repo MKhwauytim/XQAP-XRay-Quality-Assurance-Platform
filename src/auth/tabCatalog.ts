@@ -24,7 +24,6 @@ export type TabCatalogEntry = ManagedTab & {
 };
 
 const ALL_ROLES = ["guest", "employee", "supervisor", "manager", "admin"] as const;
-const ADMIN_ONLY = ["admin"] as const;
 /**
  * Every role that can hold and act on casework -- i.e. ALL_ROLES minus `guest`.
  * `guest` is defined as a read-only observer/external auditor (see MANAGED_ROLES
@@ -68,12 +67,18 @@ export const TAB_CATALOG: readonly TabCatalogEntry[] = [
   { id: "reports/kpi", label: "مؤشرات الأداء", parentId: "reports", allowedRoles: ["supervisor", "manager", "admin"] },
   { id: "reports/report-designer", label: "مصمم التقارير", parentId: "reports", allowedRoles: ["supervisor", "manager", "admin"] },
   { id: "archive", label: "إدارة الأرشيف", allowedRoles: ALL_ROLES, group: "analysis" },
-  { id: "user-management", label: "إدارة المستخدمين", allowedRoles: ADMIN_ONLY, group: "system" },
-  { id: "user-management/users", label: "المستخدمون", parentId: "user-management", allowedRoles: ADMIN_ONLY },
-  { id: "user-management/page-permissions", label: "صلاحيات الصفحات", parentId: "user-management", allowedRoles: ADMIN_ONLY },
-  { id: "user-management/feature-permissions", label: "صلاحيات الميزات", parentId: "user-management", allowedRoles: ADMIN_ONLY },
-  { id: "user-management/activity", label: "متابعة الأنشطة", parentId: "user-management", allowedRoles: ADMIN_ONLY },
-  { id: "user-management/actions", label: "سجل الإجراءات", parentId: "user-management", allowedRoles: ADMIN_ONLY },
+  // Widened from ADMIN_ONLY (2026-08-25), same rationale as population/adhoc-import above:
+  // an admin-only ceiling made the entire section a dead "مقيّد بالنظام" block in the
+  // page-permissions matrix, since admin is never a column there (MANAGED_ROLES excludes
+  // it -- see userManagement.ts). Widening only makes the section GRANTABLE; every
+  // managed role still ships "none" by default (createDefaultPermissions()), so nothing
+  // is auto-elevated by this change alone.
+  { id: "user-management", label: "إدارة المستخدمين", allowedRoles: OPERATIONAL_ROLES, group: "system" },
+  { id: "user-management/users", label: "المستخدمون", parentId: "user-management", allowedRoles: OPERATIONAL_ROLES },
+  { id: "user-management/page-permissions", label: "صلاحيات الصفحات", parentId: "user-management", allowedRoles: OPERATIONAL_ROLES },
+  { id: "user-management/feature-permissions", label: "صلاحيات الميزات", parentId: "user-management", allowedRoles: OPERATIONAL_ROLES },
+  { id: "user-management/activity", label: "متابعة الأنشطة", parentId: "user-management", allowedRoles: OPERATIONAL_ROLES },
+  { id: "user-management/actions", label: "سجل الإجراءات", parentId: "user-management", allowedRoles: OPERATIONAL_ROLES },
   { id: "settings", label: "إدارة الإعدادات", allowedRoles: ["guest", "admin"], group: "system" },
 ] as const;
 

@@ -28,25 +28,23 @@ const ALL_FEATURE_IDS = Object.keys(FEATURE_TAB_LOOKUP);
 
 /** Exactly the role x tab cells the matrix is allowed to present as restricted. */
 const EXPECTED_RESTRICTED: ReadonlyArray<readonly [AuthRole, string]> = [
-  // Admin-only by design: user management and the ad-hoc importer.
-  ...(["guest", "employee", "supervisor", "manager"] as const).flatMap((role) =>
-    [
-      "user-management",
-      "user-management/users",
-      "user-management/page-permissions",
-      "user-management/feature-permissions",
-      "user-management/activity",
-      "user-management/actions",
-    ].map((tabId) => [role, tabId] as const),
-  ),
   // Settings is code-gated to guest + admin.
   ["employee", "settings"],
   ["supervisor", "settings"],
   ["manager", "settings"],
-  // Ad-hoc import («ارفاق حالات استثنائية») is grantable to every operational role,
-  // but not to `guest`: it is the read-only observer role and the page exists only
-  // to ingest rows and assign work.
+  // Ad-hoc import («ارفاق حالات استثنائية») and user management are both grantable
+  // to every operational role, but not to `guest`: it is the read-only observer
+  // role, and neither page has anything for a pure viewer to do (one only ingests
+  // rows and assigns work; the other only mutates other accounts/permissions).
   ["guest", "population/adhoc-import"],
+  ...[
+    "user-management",
+    "user-management/users",
+    "user-management/page-permissions",
+    "user-management/feature-permissions",
+    "user-management/activity",
+    "user-management/actions",
+  ].map((tabId) => ["guest", tabId] as const),
   // KPI dashboard / report designer keep their own narrower sub-tab ceilings.
   ["guest", "reports/kpi"],
   ["employee", "reports/kpi"],
@@ -215,15 +213,16 @@ describe("feature permission matrix — every settable toggle takes effect", () 
         }
       }
     }
-    // user-management (3 features) x 4 roles, plus the four settings features
-    // (including settings.adminAccount, audit finding 13) for
-    // employee/supervisor/manager. Nothing else.
+    // user-management (3 features) x guest only (its ceiling was widened from
+    // ADMIN_ONLY to every operational role on 2026-08-25 -- see tabCatalog.ts),
+    // plus the four settings features (including settings.adminAccount, audit
+    // finding 13) for employee/supervisor/manager. Nothing else.
     //
     // adhoc-import.ingest/.assign are deliberately NOT here any more: since the
     // importer became the `population/adhoc-import` sub-tab, both features cascade
     // off the POPULATION page, which no role is ceiling-restricted from. They stay
-    // off by default (FEATURE_DEFAULTS) and the sub-tab's own admin-only ceiling
-    // still refuses to open the page — but the toggles are no longer permanently
+    // off by default (FEATURE_DEFAULTS) and the sub-tab's own ceiling still refuses
+    // to open the page for guest -- but the toggles are no longer permanently
     // inert, which is what this list means.
     const featureIds = new Set([...restricted].map((entry) => entry.split(":")[0]));
     expect([...featureIds].sort()).toEqual(
@@ -243,5 +242,11 @@ describe("feature permission matrix — every settable toggle takes effect", () 
     expect(restricted.has("export-reports:employee")).toBe(false);
     expect(restricted.has("archive.closeMonth:employee")).toBe(false);
     expect(restricted.has("report-designer.edit:employee")).toBe(false);
+    // User-management features are only dead for guest now, not the other
+    // three managed roles (the whole point of the 2026-08-25 widening).
+    expect(restricted.has("manage-users:guest")).toBe(true);
+    expect(restricted.has("manage-users:employee")).toBe(false);
+    expect(restricted.has("manage-users:supervisor")).toBe(false);
+    expect(restricted.has("manage-users:manager")).toBe(false);
   });
 });
