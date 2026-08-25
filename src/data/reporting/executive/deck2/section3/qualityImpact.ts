@@ -95,7 +95,7 @@ const BAND_LABEL: Record<DataSufficiencyBand, string> = {
   sufficient: "بيانات كافية",
 };
 
-type QualityStratum = {
+export type QualityStratum = {
   level: QualityLevel;
   n: number;
   accurate: number;
@@ -120,7 +120,7 @@ type QualityStratum = {
   missedRateRankable: boolean;
 };
 
-type QualityFold = {
+export type QualityFold = {
   strata: QualityStratum[];
   /** Evaluable rows whose quality level was never recorded — reported, never
    *  folded into a stratum and never used as an accuracy denominator. */
@@ -137,7 +137,7 @@ type QualityFold = {
  * A verified row whose `imageQuality` is null lands in `unknown` — counted,
  * never imputed into a stratum.
  */
-function collectQualityStrata(rows: readonly ExecutiveReportRow[]): QualityFold {
+export function computeQualityImpactStrata(rows: readonly ExecutiveReportRow[]): QualityFold {
   const tally = new Map<QualityLevel, { n: number; accurate: number; correctSusp: number; missedSusp: number }>();
   for (const level of QUALITY_ORDER) {
     tally.set(level, { n: 0, accurate: 0, correctSusp: 0, missedSusp: 0 });
@@ -194,7 +194,7 @@ function collectQualityStrata(rows: readonly ExecutiveReportRow[]): QualityFold 
  * points. Null unless BOTH ends are rankable — an unrankable stratum has no
  * publishable accuracy, so it can have no publishable gap either.
  */
-function accuracyGradient(strata: readonly QualityStratum[]): number | null {
+export function accuracyGradient(strata: readonly QualityStratum[]): number | null {
   const high = strata.find((s) => s.level === "عالي");
   const low = strata.find((s) => s.level === "منخفض");
   if (!high || !low || high.accuracy === null || low.accuracy === null) return null;
@@ -630,7 +630,7 @@ export function qualityImpactSlide(
   total: number,
   variantPreview: boolean,
 ): string {
-  const fold = collectQualityStrata(model.rows);
+  const fold = computeQualityImpactStrata(model.rows);
 
   const body =
     fold.evaluated === 0

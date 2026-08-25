@@ -7,7 +7,7 @@ import { DEFAULT_EXEC_CONFIG } from "../../../executiveReportTypes";
 import type { ExecutiveReportInput } from "../../../executiveReportTypes";
 import { buildReportModel } from "../../model/reportModel";
 import type { ReportModel } from "../../model/reportModel";
-import { LEVEL_ACCURACY_CSS, levelAccuracySlideBuilders } from "./levelAccuracy";
+import { LEVEL_ACCURACY_CSS, collectLevelAccuracyRows, levelAccuracySlideBuilders } from "./levelAccuracy";
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 // The page folds `model.factTable`, which only exists once a real model is
@@ -144,6 +144,15 @@ function rowHtml(html: string, portName: string): string {
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
+
+describe("collectLevelAccuracyRows", () => {
+  it("is exported and returns land/sea rows", () => {
+    const model = buildModel([{ name: "منفذ ألف", portType: "منفذ بري", images: cleanImages(20) }]);
+    const { land, sea } = collectLevelAccuracyRows(model);
+    expect(Array.isArray(land)).toBe(true);
+    expect(Array.isArray(sea)).toBe(true);
+  });
+});
 
 describe("levelAccuracySlideBuilders — slide shell", () => {
   it("stamps the section-3 identity, icon, headline and subhead", () => {

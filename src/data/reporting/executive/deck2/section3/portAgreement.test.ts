@@ -13,7 +13,7 @@ import type { EmployeeAnswerFile } from "../../../../answers/answerTypes";
 import type { PreparedPopulationRow } from "../../../../population/populationTypes";
 import { buildReportModel } from "../../model/reportModel";
 import type { ReportModel } from "../../model/reportModel";
-import { PORT_AGREEMENT_CSS, portAgreementSlideBuilders } from "./portAgreement";
+import { PORT_AGREEMENT_CSS, collectPortAgreementRows, portAgreementSlideBuilders } from "./portAgreement";
 
 type Result = "سليمة" | "اشتباه";
 
@@ -158,6 +158,15 @@ function percentsIn(tr: string): string[] {
 function mutedCount(tr: string): number {
   return (tr.match(/<span class="insuff">—<\/span>/g) ?? []).length;
 }
+
+describe("collectPortAgreementRows", () => {
+  it("is exported and returns land/sea rows", () => {
+    const model = modelOf(portRows({ port: "منفذ بري أ", count: 12, idPrefix: "A" }));
+    const { land, sea } = collectPortAgreementRows(model);
+    expect(Array.isArray(land)).toBe(true);
+    expect(Array.isArray(sea)).toBe(true);
+  });
+});
 
 // ── Shell / contract ────────────────────────────────────────────────────────
 describe("portAgreementSlideBuilders — slide shell", () => {

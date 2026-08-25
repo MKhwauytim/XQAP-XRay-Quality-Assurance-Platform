@@ -68,7 +68,20 @@ import { gzipSync } from "node:zlib";
 // nobody re-checks), not something to bolt onto a feature change. Until it is
 // done, expect the next sizeable feature to need another raise -- and say so
 // out loud rather than quietly bumping the number.
-const MAX_BYTES = 3_950_000;
+// Raw budget raised 3.95 -> 4.00 MB on 2026-08-25 for the deck3 executive-
+// report edition (design toggle feature): a wholly new sibling deck module
+// (theme.ts, chartKit.ts, slideKit.ts, slides.ts, index.ts) reproducing the
+// design-handoff's 21-slide visual system, plus deckEditionPreference.ts and
+// the TabView.tsx toggle wiring. `openExecutiveDeckV3` is dynamically
+// imported at its TabView.tsx call site, same as `openExecutiveDeckV2`
+// already is -- but per this file's own 2026-08-22 correction, dynamic
+// `import()` is NOT an escape route from this budget: `vite-plugin-
+// singlefile` inlines the whole module graph into one `dist/index.html`
+// regardless of which imports are static vs. dynamic, so a lazily-imported
+// module still costs its full weight in the shipped file, just not in the
+// initial JS *execution* path. Overage without this raise was ~6 kB (0.15%).
+// GZIP is deliberately unchanged and still holds ~48 kB of headroom.
+const MAX_BYTES = 4_000_000;
 const MAX_GZIP_BYTES = 1_300_000;
 const bundlePath = new URL("../dist/index.html", import.meta.url);
 

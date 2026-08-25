@@ -75,7 +75,7 @@ const SCOPE_NOTE =
 
 const UNNAMED_PORT = "غير محدد";
 
-type PortAgreementRow = {
+export type PortAgreementRow = {
   name: string;
   sea: boolean;
   /** Images at this port where BOTH inspection levels have a result. */
@@ -115,7 +115,7 @@ function emptyRow(name: string, sea: boolean): PortAgreementRow {
  * how the section-2 port tables split their columns — the comparison records
  * carry only `portName`, so the port-type lookup has to come from the rows.
  */
-function collectPortAgreementRows(model: ReportModel): { land: PortAgreementRow[]; sea: PortAgreementRow[] } {
+export function collectPortAgreementRows(model: ReportModel): { land: PortAgreementRow[]; sea: PortAgreementRow[] } {
   const seaByPort = new Map<string, boolean>();
   for (const r of model.rows) {
     const name = r.portName ?? UNNAMED_PORT;

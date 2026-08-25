@@ -5,7 +5,7 @@ import type { ExecutiveReportInput, ExecutiveReportRow } from "../../../executiv
 import type { PreparedPopulationRow } from "../../../../population/populationTypes";
 import { buildReportModel } from "../../model/reportModel";
 import type { ReportModel } from "../../model/reportModel";
-import { MARKING_IMPACT_CSS, markingImpactSlide } from "./markingImpact";
+import { MARKING_IMPACT_CSS, computeMarkingImpact, markingImpactSlide } from "./markingImpact";
 
 // ── Fixtures (deck2.test.ts style) ──────────────────────────────────────────
 
@@ -155,6 +155,17 @@ const CAVEAT = "مقارنة وصفية بين مجموعتين غير متكا�
 const INSUFFICIENT = "بيانات غير كافية للمقارنة";
 
 // ── Tests ───────────────────────────────────────────────────────────────────
+
+describe("computeMarkingImpact", () => {
+  it("returns present/absent strata summing to the recorded count", () => {
+    const model = modelWith([
+      ...arm({ prefix: "P", hasMarking: true, ...STRONG_ARM }),
+      ...arm({ prefix: "A", hasMarking: false, ...WEAK_ARM }),
+    ]);
+    const { present, absent, recorded } = computeMarkingImpact(model);
+    expect(present.n + absent.n).toBe(recorded);
+  });
+});
 
 describe("markingImpactSlide — slide shell", () => {
   it("renders the section-3 shell with the agreed id, section, title and subhead", () => {

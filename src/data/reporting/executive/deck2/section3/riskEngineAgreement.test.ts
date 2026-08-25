@@ -7,7 +7,15 @@ import { DEFAULT_EXEC_CONFIG } from "../../../executiveReportTypes";
 import type { ExecutiveReportInput } from "../../../executiveReportTypes";
 import { buildReportModel } from "../../model/reportModel";
 import type { ReportModel } from "../../model/reportModel";
-import { RISK_ENGINE_CSS, engineVerdictOf, riskEngineAgreementSlide } from "./riskEngineAgreement";
+import {
+  RISK_ENGINE_CSS,
+  buildAgreementRows,
+  coverageOf,
+  engineVerdictOf,
+  foldDisagreementSet,
+  foldReportRows,
+  riskEngineAgreementSlide,
+} from "./riskEngineAgreement";
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 // Same pattern `levelAccuracy.test.ts`/`dailyTrend.test.ts` use: `employeeFiles`
@@ -149,6 +157,20 @@ describe("engineVerdictOf", () => {
   it("ignores surrounding whitespace and case", () => {
     expect(engineVerdictOf("  yes  ")).toBe("اشتباه");
     expect(engineVerdictOf(" نعم ")).toBe("اشتباه");
+  });
+});
+
+describe("exported risk-engine computation functions", () => {
+  it("exposes the 4 computation functions with working output shapes", () => {
+    const model = modelWith([popRow()]);
+    const rows = model.rows;
+    const coverage = coverageOf(rows);
+    expect(coverage.recognized + coverage.unrecognized + coverage.blank).toBe(rows.length);
+    expect(Array.isArray(buildAgreementRows(rows))).toBe(true);
+    const dis = foldDisagreementSet(rows);
+    expect(dis.total).toBeGreaterThanOrEqual(0);
+    const rpt = foldReportRows(rows);
+    expect(rpt.n).toBeGreaterThanOrEqual(0);
   });
 });
 

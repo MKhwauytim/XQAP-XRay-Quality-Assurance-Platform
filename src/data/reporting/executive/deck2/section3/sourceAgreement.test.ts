@@ -8,7 +8,7 @@ import type { ExecutiveReportInput } from "../../../executiveReportTypes";
 import { DEFAULT_EXEC_CONFIG } from "../../../executiveReportTypes";
 import { buildReportModel } from "../../model/reportModel";
 import { BASE_ROWS_PER_PAGE, COMPRESS_OVERFLOW_MAX } from "../slideKit";
-import { SOURCE_AGREEMENT_CSS, sourceAgreementSlide } from "./sourceAgreement";
+import { SOURCE_AGREEMENT_CSS, computeReviewerTotals, sourceAgreementSlide } from "./sourceAgreement";
 
 const NOW = "2026-06-01T00:00:00.000Z";
 
@@ -199,6 +199,16 @@ const MUTED_RATE_CELL = '<td class="v2-bar-cell neutral"><span class="insuff">â€
 function countOf(html: string, needle: string): number {
   return html.split(needle).length - 1;
 }
+
+describe("computeReviewerTotals", () => {
+  it("pools comparable/agree counts across reviewer rows", () => {
+    const { rows, reviews } = knownProfile();
+    const model = buildReportModel(input(rows, { reviews }));
+    const totals = computeReviewerTotals(model.resultComparison.reviewerAgreement);
+    expect(totals.totalComparable).toBeGreaterThanOrEqual(0);
+    expect(totals.totalAgree).toBeLessThanOrEqual(totals.totalComparable);
+  });
+});
 
 describe("sourceAgreementSlide â€” slide shell", () => {
   it("renders the section-3 identity, title, subhead and icon", () => {
