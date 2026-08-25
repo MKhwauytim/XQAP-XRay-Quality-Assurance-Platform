@@ -2,11 +2,8 @@
    used by Tabs/EmployeeWorkspace/index.tsx etc.: this sibling file legitimately exports both
    sub-components and the pure helper functions/constants they (and the main XrayReferrals
    component) share. */
-import {
-  useCallback, useEffect, useMemo, useRef, useState,
-  type CSSProperties, type MouseEvent as ReactMouseEvent,
-} from "react";
-import { AlertTriangle, Maximize2, RotateCw } from "lucide-react";
+import { useMemo, useState } from "react";
+import { AlertTriangle, RotateCw } from "lucide-react";
 import { ModalShell } from "../../../../../ModalShell/ModalShell";
 import { readUserManagementState } from "../../../../../../auth/userManagement";
 import type { FieldAnswer, ItemAnswer } from "../../../../../../data/answers/answerTypes";
@@ -32,14 +29,6 @@ import { CASE_FILTERS, type CaseFilter, type CaseFilterCounts } from "./caseFilt
 import { displayXrayImageId } from "../../../../../../data/adhocImport/adhocImportEmployeeView";
 import { formatStageLabel } from "../../../../../../data/population/stageHelpers";
 import type { ReplacementIndexRow } from "../../../../../../data/population/replacementIndexTypes";
-import type { DirectoryHandleLike } from "../../../../../../data/storage/fileSystemAccess";
-import {
-  loadAdminBrowsePreset,
-  loadUserBrowsePreset,
-  saveAdminBrowseDatasetPreset,
-  saveUserBrowseDatasetPreset,
-} from "../../../../../../data/preferences/browsePresetStorage";
-import { logRejection } from "../../../../../../data/storage/errorLogger";
 import type { PersonalStats, PersonalQuota, ReplacementDialogState, ReassignModalState } from "../XrayReferrals";
 
 /** Shared with population/adhoc browse presets — see BrowsePresetDatasetKind. */
@@ -1055,233 +1044,31 @@ export function QueueScopePicker({
   );
 }
 
-// ── Queue/panel resize grip geometry ────────────────────────────────────────
-// The grip drags the queue/panel width split and the shared table height at
-// once (see `.ew-xr-resize-grip` in XrayReferrals.css). Defaults mirror the
-// handoff's hardcoded CSS ratio (1.15fr / 1fr) so a user who never resizes
-// sees no change; the fr split is computed from raw pointer position each
-// move (not accumulated deltas), so it can't drift across a long drag.
-const XR_SPLIT_DEFAULT_QUEUE_FR = 1.15;
-const XR_SPLIT_DEFAULT_PANEL_FR = 1;
-const XR_SPLIT_TOTAL_FR = XR_SPLIT_DEFAULT_QUEUE_FR + XR_SPLIT_DEFAULT_PANEL_FR;
-// Soft safety net on top of the CSS `minmax(340px, …)` / `minmax(430px, …)`
-// floors, which already stop either column collapsing in absolute pixels.
-const XR_SPLIT_MIN_QUEUE_SHARE = 0.3;
-const XR_SPLIT_MAX_QUEUE_SHARE = 0.75;
-const XR_SPLIT_MIN_HEIGHT_PX = 360;
-const XR_SPLIT_MAX_HEIGHT_PX = 1400;
-
-export type QueuePanelSplitLayout = { queueFr: number; panelFr: number; heightPx: number };
-
 /**
- * All state + the drag handler behind the queue/panel resize grip, pulled out
- * of `XrayReferrals` to keep that component under the repo's per-function
- * line budget (`npm run check:complexity`). Mirrors DataTable's own
- * `handleResizeMouseDown` shape (fresh onMove/onUp closures per drag, state
- * updated live on every move, persisted once on release) — see
- * src/components/DataTable/index.tsx.
- *
- * The width share is recomputed from the pointer's raw position each move,
- * not accumulated from deltas, so a long drag can't drift. RTL: column 1
- * (queue) is the physical right-hand column, so the queue's share is how much
- * of the container's width lies to the right of the pointer.
- */
-export function useQueuePanelResize({
-  directoryHandle,
-  username,
-  canConfigureColumns,
-  baseColumns,
-  effectiveColConfig,
-}: {
-  directoryHandle: DirectoryHandleLike;
-  username: string;
-  canConfigureColumns: boolean;
-  baseColumns: DataTableCol<DistributionEntry>[];
-  effectiveColConfig: ColConfig;
-}) {
-  const [resizeMode, setResizeMode] = useState(false);
-  const [queueFr, setQueueFr] = useState(XR_SPLIT_DEFAULT_QUEUE_FR);
-  const [panelFr, setPanelFr] = useState(XR_SPLIT_DEFAULT_PANEL_FR);
-  const [splitHeightPx, setSplitHeightPx] = useState<number | null>(null);
-  const gridRef = useRef<HTMLDivElement>(null);
-
-  // Owns its own preset read (personal-over-admin) rather than depending on the
-  // caller's mount effect, so this hook is a self-contained unit — the caller
-  // only needs to render the grip and pass the same fields it already has.
-  useEffect(() => {
-    void Promise.all([
-      loadAdminBrowsePreset(directoryHandle),
-      loadUserBrowsePreset(directoryHandle, username),
-    ])
-      .then(([adminFile, userFile]) => {
-        const layout =
-          userFile.browseData[REFERRALS_PRESET_KEY]?.layout ??
-          adminFile.browseData[REFERRALS_PRESET_KEY]?.layout;
-        if (!layout) return;
-        setQueueFr(layout.queueFr);
-        setPanelFr(layout.panelFr);
-        setSplitHeightPx(layout.heightPx);
-      })
-      .catch(logRejection("xrayReferrals:loadQueueSplitLayout"));
-  }, [directoryHandle, username]);
-
-  // Read by the grid-column/height rules in XrayReferrals.css;
-  // `--ew-xr-split-height` is only emitted once a height has actually been
-  // set, so the viewport-derived CSS default keeps applying until then.
-  const gridStyle = useMemo(() => ({
-    "--ew-xr-queue-fr": `${queueFr}fr`,
-    "--ew-xr-panel-fr": `${panelFr}fr`,
-    ...(splitHeightPx != null ? { "--ew-xr-split-height": `${splitHeightPx}px` } : {}),
-  } as CSSProperties), [queueFr, panelFr, splitHeightPx]);
-
-  /**
-   * Persists the split alongside whatever column layout is currently
-   * effective — same shape and same personal/admin-shared pair as
-   * `onColConfigChange` in XrayReferrals.tsx (columns and the split live in
-   * one preset file per dataset, so a save from either surface must carry
-   * both or it would silently drop the other on write).
-   */
-  const persistSplitLayout = useCallback((layout: QueuePanelSplitLayout) => {
-    const preset = {
-      columnOrder:    effectiveColConfig.order,
-      visibleColumns: baseColumns.map((c) => c.id).filter((id) => !effectiveColConfig.hidden.includes(id)),
-      widths:         effectiveColConfig.widths,
-      dateFmt:        effectiveColConfig.dateFmt,
-      layout,
-    };
-    void saveUserBrowseDatasetPreset(directoryHandle, username, REFERRALS_PRESET_KEY, preset);
-    if (canConfigureColumns) {
-      void saveAdminBrowseDatasetPreset(directoryHandle, REFERRALS_PRESET_KEY, preset);
-    }
-  }, [effectiveColConfig, baseColumns, directoryHandle, username, canConfigureColumns]);
-
-  const handleSplitGripMouseDown = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const container = gridRef.current;
-    if (!container) return;
-    const containerRect = container.getBoundingClientRect();
-    const tableWrap = container.querySelector<HTMLElement>(".dt-table-wrap");
-    const startHeight = tableWrap?.getBoundingClientRect().height ?? splitHeightPx ?? 560;
-    const startY = e.clientY;
-    let nextLayout: QueuePanelSplitLayout = { queueFr, panelFr, heightPx: splitHeightPx ?? startHeight };
-
-    document.body.style.cursor     = "nwse-resize";
-    document.body.style.userSelect = "none";
-
-    function onMove(ev: MouseEvent): void {
-      const offsetFromLeft = ev.clientX - containerRect.left;
-      const queueShareRaw  = (containerRect.width - offsetFromLeft) / containerRect.width;
-      const queueShare     = Math.min(XR_SPLIT_MAX_QUEUE_SHARE, Math.max(XR_SPLIT_MIN_QUEUE_SHARE, queueShareRaw));
-      const nextHeight     = Math.min(
-        XR_SPLIT_MAX_HEIGHT_PX,
-        Math.max(XR_SPLIT_MIN_HEIGHT_PX, startHeight + (ev.clientY - startY))
-      );
-      nextLayout = {
-        queueFr:  queueShare * XR_SPLIT_TOTAL_FR,
-        panelFr:  (1 - queueShare) * XR_SPLIT_TOTAL_FR,
-        heightPx: nextHeight,
-      };
-      setQueueFr(nextLayout.queueFr);
-      setPanelFr(nextLayout.panelFr);
-      setSplitHeightPx(nextLayout.heightPx);
-    }
-
-    function onUp(): void {
-      document.body.style.cursor     = "";
-      document.body.style.userSelect = "";
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup",   onUp);
-      persistSplitLayout(nextLayout);
-    }
-
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup",   onUp);
-  }, [queueFr, panelFr, splitHeightPx, persistSplitLayout]);
-
-  return { resizeMode, setResizeMode, gridRef, gridStyle, handleSplitGripMouseDown };
-}
-
-/**
- * «تغيير الحجم» — reveals the queue/panel drag grip (see `.ew-xr-resize-grip`
- * in XrayReferrals.css). Only rendered by the caller for `configure-referral-
- * columns` holders, same gate as the column-width admin-shared write: this
- * button doesn't check permissions itself, it's just a plain on/off pill.
- *
- * Markup mirrors `.ew-view-switcher` / `.ew-view-seg` like `CaseFilterSwitcher`
- * below, so it reads as one native control family with the other toolbar chips.
- */
-export function ResizeModeToggle({ active, onToggle }: { active: boolean; onToggle: () => void }) {
-  const L = useLabels();
-  return (
-    <div className="ew-view-switcher" role="group" aria-label={L.ew_xr_resize_toggle_aria}>
-      <button
-        type="button"
-        className={`ew-view-seg${active ? " active" : ""}`}
-        aria-pressed={active}
-        title={L.ew_xr_resize_toggle_title}
-        onClick={onToggle}
-      >
-        <Maximize2 size={13} aria-hidden="true" style={{ verticalAlign: "-2px", marginInlineEnd: "4px" }} />
-        {L.ew_xr_resize_toggle_label}
-      </button>
-    </div>
-  );
-}
-
-/**
- * The queue toolbar's right-side controls: `ResizeModeToggle` (admin/manager
- * only) and `QueueScopePicker` (oversight only). Extracted purely to keep
- * `XrayReferrals`'s render under `check:complexity`'s function line budget —
- * see `useQueuePanelResize` above for the same reasoning applied to state.
+ * The queue toolbar's right-side controls: `QueueScopePicker` (oversight
+ * only). Extracted purely to keep `XrayReferrals`'s render under
+ * `check:complexity`'s function line budget.
  */
 export function XrQueueToolbarExtras({
-  canConfigureColumns, resizeMode, onToggleResize,
   canSeeAll, scopeEmployee, scopeOptions, totalCount, onChangeScope,
 }: {
-  canConfigureColumns: boolean;
-  resizeMode: boolean;
-  onToggleResize: () => void;
   canSeeAll: boolean;
   scopeEmployee: string;
   scopeOptions: QueueScopeOption[];
   totalCount: number;
   onChangeScope: (next: string) => void;
 }) {
-  if (!canConfigureColumns && !canSeeAll) return null;
+  if (!canSeeAll) return null;
   return (
-    <>
-      {canConfigureColumns && <ResizeModeToggle active={resizeMode} onToggle={onToggleResize} />}
-      {canSeeAll && (
-        <QueueScopePicker
-          value={scopeEmployee}
-          options={scopeOptions}
-          totalCount={totalCount}
-          // Selection is DELIBERATELY not cleared here: ids already persist across
-          // case-filter changes and silent refreshes, are re-validated against
-          // entriesById before anything is submitted, and reaching across employees
-          // is the whole point of the bulk-reassign flow.
-          onChange={onChangeScope}
-        />
-      )}
-    </>
-  );
-}
-
-/** The queue's resize-corner grip — see `.ew-xr-resize-grip` in XrayReferrals.css. */
-export function XrResizeGrip({ visible, label, onMouseDown }: {
-  visible: boolean;
-  label: string;
-  onMouseDown: (e: ReactMouseEvent<HTMLDivElement>) => void;
-}) {
-  if (!visible) return null;
-  return (
-    <div
-      className="ew-xr-resize-grip"
-      role="separator"
-      aria-label={label}
-      title={label}
-      onMouseDown={onMouseDown}
+    <QueueScopePicker
+      value={scopeEmployee}
+      options={scopeOptions}
+      totalCount={totalCount}
+      // Selection is DELIBERATELY not cleared here: ids already persist across
+      // case-filter changes and silent refreshes, are re-validated against
+      // entriesById before anything is submitted, and reaching across employees
+      // is the whole point of the bulk-reassign flow.
+      onChange={onChangeScope}
     />
   );
 }

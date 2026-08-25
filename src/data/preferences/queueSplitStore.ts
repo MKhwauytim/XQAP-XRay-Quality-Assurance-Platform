@@ -17,8 +17,15 @@
  * `storageRegistry.ts` like every other key this app owns. It is a
  * per-machine display preference, not workspace data: two operators on two
  * screens must be able to choose differently, so nothing here is written to
- * the workspace folder, and it must NOT migrate into the workspace column
- * preset (`browsePresetStorage`) — see the plan this shipped with.
+ * the workspace folder from THIS module.
+ *
+ * Owner follow-up (2026-08-25): a privileged user (`configure-referral-
+ * columns`) can additionally push their dragged ratio to the workspace-shared
+ * preset (`browsePresetStorage`'s `layout.ratio`) — that write lives in
+ * `XrayReferrals.tsx`, not here, to keep this module free of the workspace
+ * layer. `resolveQueueSplit` below is the read side: this browser's own
+ * stored ratio wins when present, the shared one is only the default for a
+ * browser that has never dragged the divider.
  *
  * ## What this store does NOT do
  *
@@ -139,6 +146,27 @@ export function resetQueueSplit(): number {
 /** True when the ratio differs from the default — drives the reset affordance. */
 export function isQueueSplitCustomized(): boolean {
   return getQueueSplit() !== DEFAULT_QUEUE_SPLIT;
+}
+
+/** True when THIS browser has an explicit stored ratio (a real drag, not just the default). */
+export function hasStoredQueueSplit(): boolean {
+  try {
+    return localStorage.getItem(QUEUE_SPLIT_STORAGE_KEY) !== null;
+  } catch (error) {
+    logError("queueSplitStore:read", error);
+    return false;
+  }
+}
+
+/**
+ * The ratio to actually render: this browser's own drag if it has one,
+ * otherwise the workspace-shared default (an admin/manager's pushed ratio),
+ * otherwise the hardcoded default. Pure — never reads/writes `current` or
+ * touches storage beyond the `hasStoredQueueSplit()` check, so a caller can
+ * call this on every render without side effects.
+ */
+export function resolveQueueSplit(sharedRatio: number | undefined): number {
+  return hasStoredQueueSplit() ? getQueueSplit() : sanitize(sharedRatio ?? DEFAULT_QUEUE_SPLIT);
 }
 
 export function subscribeToQueueSplit(fn: Subscriber): () => void {

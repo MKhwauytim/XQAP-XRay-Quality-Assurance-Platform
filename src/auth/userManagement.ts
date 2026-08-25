@@ -181,6 +181,12 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
         mutationStorage: "browser",
       },
       {
+        id: "resize-referral-layout",
+        label: "تغيير حجم قائمة صور الأشعة المحالة",
+        description: "سحب الفاصل بين قائمة العينات ونموذج الفحص لتغيير عرض كل منهما — مفعّل لكل الأدوار افتراضياً",
+        mutationStorage: "browser",
+      },
+      {
         id: "ew.reopenAnswer",
         label: "إعادة فتح الإجابات المقدمة",
         description: "إرجاع إجابة مقدمة إلى مسودة ليتمكن الموظف من تصحيحها",
@@ -363,7 +369,7 @@ export const TAB_FEATURE_MAP: Readonly<Record<string, readonly string[]>> = {
   // pointing at a tab id that is no longer in the catalog would make both features
   // permanently un-grantable -- read-only for every role, admin included.
   "population":         ["upload-data", "process-population", "configure-sample", "draw-sample", "distribute-samples", "bulk-assign", "view-browse", "unlock-sampling-stage", "adhoc-import.ingest", "adhoc-import.assign"],
-  "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "submit-referrals", "request-replacement", "bulk-reassign-referrals", "submit-answers", "answer-on-behalf", "configure-referral-columns", "ew.reopenAnswer", "manage-inspection-template", "employee-reopen-instant"],
+  "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "submit-referrals", "request-replacement", "bulk-reassign-referrals", "submit-answers", "answer-on-behalf", "configure-referral-columns", "resize-referral-layout", "ew.reopenAnswer", "manage-inspection-template", "employee-reopen-instant"],
   // post-notification is rendered on the ew/notifications top-level tab (NotificationManager),
   // never on employee-workspace -- cascading it against employee-workspace let can()/
   // getMutationCapability() authorize posting off employee-workspace's edit access even when
@@ -413,6 +419,11 @@ const FEATURE_DEFAULTS: Record<string, Partial<Record<AuthRole, boolean>>> = {
   // "answered-on-behalf", src/data/answers/answerTypes.ts).
   "answer-on-behalf":     { guest: false, employee: false, supervisor: false, manager: false },
   "configure-referral-columns": { guest: false, employee: false, supervisor: false, manager: true },
+  // On for every role by default — a personal layout preference, not an
+  // oversight capability. An admin/manager's drag additionally reflects to
+  // everyone else's default (gated separately, on `configure-referral-columns`);
+  // this permission only controls whether a role may drag the divider AT ALL.
+  "resize-referral-layout": { guest: true, employee: true, supervisor: true, manager: true },
   "ew.reopenAnswer":      { guest: false, employee: false, supervisor: true,  manager: true  },
   "upload-data":          { guest: false, employee: false, supervisor: false, manager: true  },
   "process-population":   { guest: false, employee: false, supervisor: false, manager: true  },

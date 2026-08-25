@@ -15,17 +15,12 @@ export type BrowseDatasetPreset = {
   /** Per-column date-format overrides — mirrors ColConfig.dateFmt */
   dateFmt?: Record<string, string>;
   /**
-   * Queue/panel split geometry for two-column layouts (e.g. XrayReferrals'
-   * table + inspection-panel split). Absent for tables without a split panel.
+   * Queue/panel split for two-column layouts (e.g. XrayReferrals' table +
+   * inspection-panel divider — `QueueSplitResizer`). Absent for tables
+   * without a split panel. `ratio` is the queue (table) column's share of
+   * the combined width, `0..1` — mirrors `queueSplitStore.ts`'s own value.
    */
-  layout?: {
-    /** fr share of the queue (table) column. */
-    queueFr: number;
-    /** fr share of the panel (form) column. */
-    panelFr: number;
-    /** Shared row height in px — overrides the viewport-derived default. */
-    heightPx: number;
-  };
+  layout?: { ratio: number };
   updatedAt: string;
 };
 

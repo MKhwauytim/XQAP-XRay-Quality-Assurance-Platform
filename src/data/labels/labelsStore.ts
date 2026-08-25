@@ -284,18 +284,6 @@ export const DEFAULT_LABELS = {
   ew_queue_scope_option:           "{name} ({count})",
   ew_queue_scope_option_self:      "{name} — أنا ({count})",
 
-  // ── Queue/panel resize mode (admin/manager only, `configure-referral-columns`) ─
-  // A toggle that reveals a drag grip on the queue table's corner: dragging it
-  // resizes BOTH the table/panel width split and the shared table height in one
-  // motion, like the resize grip on a native textarea. Saved through the same
-  // personal/admin-shared preset pair as the column layout on this page, so a
-  // privileged user's drag becomes every other user's default (until they drag
-  // their own).
-  ew_xr_resize_toggle_aria:        "وضع تغيير حجم الجدول",
-  ew_xr_resize_toggle_label:       "تغيير الحجم",
-  ew_xr_resize_toggle_title:       "فعّل سحب زاوية الجدول لتغيير عرض الجدول والنموذج وارتفاعهما. يُحفظ التغيير كافتراضي لجميع المستخدمين.",
-  ew_xr_resize_grip_title:         "اسحب لتغيير عرض الجدول والنموذج وارتفاع الجدول",
-
   // The draggable divider between the queue and the inspection panel
   // (QueueSplitResizer). Arabic wording is the owner's to adjust later
   // through Settings; these are the defaults.
