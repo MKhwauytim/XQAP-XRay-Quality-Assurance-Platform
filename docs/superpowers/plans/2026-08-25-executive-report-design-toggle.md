@@ -8,7 +8,7 @@
 
 **Tech Stack:** React 19 + TypeScript (strict), Vite, Vitest (`node` env by default), existing `safeWrite`/`casLoop`/`webLocks` storage primitives, `Somar Sans` font already embedded in `src/branding/somarFonts.ts`.
 
-**Spec:** `docs/superpowers/specs/2026-08-25-executive-report-design-toggle-design.md` — read it alongside this plan; it is the source of truth for exact color/type/spacing tokens, the full 21-slide list with descriptions, locked Arabic terminology, and the chart-construction CSS pattern. The design handoff itself (`design_handoff_xray_qa_deck/README.md`, at `C:\Users\WorkNStudy\Downloads\design_handoff_xray_qa_deck\README.md` on this machine) has the complete per-slide visual description (§"Slides (in order)") and is the authoritative visual reference for any layout detail not repeated verbatim below.
+**Spec:** `docs/superpowers/specs/2026-08-25-executive-report-design-toggle-design.md` — read it alongside this plan; it is the source of truth for exact color/type/spacing tokens, the full 21-slide list with descriptions, locked Arabic terminology, and the chart-construction CSS pattern. The design handoff itself is checked into this repo at `docs/design/design_handoff_xray_qa_deck/` — `README.md` there has the complete per-slide visual description (§"Slides (in order)") and is the authoritative visual reference for any layout detail not repeated verbatim below; `Executive Report Deck v2.dc.html` in that same folder is the actual shipped 21-slide deck (used in Task 11 for the exact locked risk-level definition text).
 
 ## Global Constraints
 

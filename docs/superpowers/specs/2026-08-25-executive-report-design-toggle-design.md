@@ -6,8 +6,8 @@
 ## Problem
 
 The owner supplied a high-fidelity design handoff (`design_handoff_xray_qa_deck/`,
-outside the repo, at `../design_handoff_xray_qa_deck` relative to the worktree —
-absolute path used during design: `C:\Users\WorkNStudy\Downloads\design_handoff_xray_qa_deck`)
+originally outside the repo; checked into this repo at
+`docs/design/design_handoff_xray_qa_deck/` so it travels with the spec/plan)
 for a 21-slide Arabic executive deck with its own color palette, typography,
 chart-construction pattern, and slide layouts. They want the ability to toggle
 between the CURRENT executive deck (`deck2`, unchanged) and a NEW edition that
