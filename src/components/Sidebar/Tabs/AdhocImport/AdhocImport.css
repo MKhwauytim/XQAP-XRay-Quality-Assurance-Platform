@@ -1,8 +1,8 @@
 .adhoc-import-tab {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  padding: 1.25rem;
+  gap: var(--sp-4);
+  padding: var(--sp-5);
 }
 
 .adhoc-import-scope-note {
@@ -15,8 +15,8 @@
   background: var(--c-danger-bg);
   color: var(--c-danger);
   border: 1px solid var(--c-danger);
-  border-radius: 8px;
-  padding: 0.6rem 0.9rem;
+  border-radius: var(--r-md);
+  padding: var(--sp-2) var(--sp-4);
   font-size: 0.85rem;
 }
 
@@ -24,8 +24,8 @@
   background: var(--c-success-bg);
   color: var(--c-success-strong);
   border: 1px solid var(--c-success-strong);
-  border-radius: 8px;
-  padding: 0.6rem 0.9rem;
+  border-radius: var(--r-md);
+  padding: var(--sp-2) var(--sp-4);
   font-size: 0.85rem;
 }
 
@@ -39,11 +39,11 @@
 .adhoc-import-detail {
   background: var(--c-surface);
   border: 1px solid var(--c-border);
-  border-radius: 12px;
-  padding: 1rem;
+  border-radius: var(--r-xl);
+  padding: var(--sp-4);
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--sp-3);
 }
 
 .adhoc-import-upload-card {
@@ -69,7 +69,7 @@
 
 .adhoc-import-list-table th,
 .adhoc-import-list-table td {
-  padding: 0.5rem 0.75rem;
+  padding: var(--sp-2) var(--sp-3);
   text-align: start;
   border-bottom: 1px solid var(--c-border);
 }
@@ -85,7 +85,7 @@
 .adhoc-import-detail-toolbar {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: var(--sp-4);
   flex-wrap: wrap;
 }
 
@@ -104,9 +104,9 @@
 .adhoc-import-assign-bar {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: var(--sp-3);
   flex-wrap: wrap;
-  padding-top: 0.5rem;
+  padding-top: var(--sp-2);
   border-top: 1px solid var(--c-border);
 }
 
@@ -114,7 +114,7 @@
 
 .adhoc-steps {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--sp-2);
   list-style: none;
   margin: 0;
   padding: 0;
@@ -124,10 +124,10 @@
 .adhoc-step {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: var(--sp-1);
   border: 1px solid var(--c-border);
-  border-radius: 10px;
-  padding: 0.45rem 0.8rem;
+  border-radius: var(--r-lg);
+  padding: var(--sp-2) var(--sp-3);
   background: var(--c-surface-2);
   font-size: 0.8rem;
   color: var(--c-ink-3);
@@ -151,21 +151,21 @@
 .adhoc-step-card {
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
+  gap: var(--sp-4);
   border: 1px solid var(--c-border);
-  border-radius: 12px;
-  padding: 1rem;
+  border-radius: var(--r-xl);
+  padding: var(--sp-4);
   background: var(--c-surface-2);
 }
 
 .adhoc-field-group {
   display: flex;
   align-items: center;
-  gap: 0.9rem;
+  gap: var(--sp-4);
   flex-wrap: wrap;
   border: 1px solid var(--c-border);
-  border-radius: 10px;
-  padding: 0.6rem 0.9rem;
+  border-radius: var(--r-lg);
+  padding: var(--sp-2) var(--sp-4);
   margin: 0;
 }
 
@@ -173,14 +173,14 @@
   font-size: 0.8rem;
   font-weight: 600;
   color: var(--c-ink-2);
-  padding: 0 0.35rem;
+  padding: 0 var(--sp-1);
 }
 
 .adhoc-field-row,
 .adhoc-file-row {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: var(--sp-2);
   flex-wrap: wrap;
   font-size: 0.85rem;
 }
@@ -193,19 +193,19 @@
 .adhoc-radio {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: var(--sp-1);
   font-size: 0.85rem;
 }
 
 .adhoc-hint {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: var(--sp-1);
   border: 1px solid var(--c-warning-border);
   background: var(--c-warning-bg);
   color: var(--c-ink);
-  border-radius: 10px;
-  padding: 0.6rem 0.9rem;
+  border-radius: var(--r-lg);
+  padding: var(--sp-2) var(--sp-4);
   font-size: 0.82rem;
 }
 
@@ -223,22 +223,22 @@
   border: 1px solid var(--c-warning-border);
   background: var(--c-warning-bg);
   color: var(--c-ink);
-  border-radius: 999px;
-  padding: 0.15rem 0.6rem;
+  border-radius: var(--r-pill);
+  padding: 2px var(--sp-2);
 }
 
 .adhoc-wizard-nav {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: var(--sp-3);
   flex-wrap: wrap;
-  padding-top: 0.5rem;
+  padding-top: var(--sp-2);
   border-top: 1px solid var(--c-border);
 }
 
 .adhoc-import-notes {
   margin: 0;
-  padding-inline-start: 1.2rem;
+  padding-inline-start: var(--sp-5);
   font-size: 0.82rem;
   color: var(--c-ink-2);
 }
@@ -248,10 +248,10 @@
 .adhoc-assign-panel {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--sp-3);
   border: 1px solid var(--c-border);
-  border-radius: 12px;
-  padding: 1rem;
+  border-radius: var(--r-xl);
+  padding: var(--sp-4);
   background: var(--c-surface-2);
 }
 
@@ -268,11 +268,11 @@
 
 .adhoc-assign-modes {
   display: flex;
-  gap: 1rem;
+  gap: var(--sp-4);
   flex-wrap: wrap;
   border: 1px solid var(--c-border);
-  border-radius: 10px;
-  padding: 0.6rem 0.9rem;
+  border-radius: var(--r-lg);
+  padding: var(--sp-2) var(--sp-4);
   margin: 0;
 }
 
@@ -280,13 +280,13 @@
   font-size: 0.8rem;
   font-weight: 600;
   color: var(--c-ink-2);
-  padding: 0 0.35rem;
+  padding: 0 var(--sp-1);
 }
 
 .adhoc-assign-mode-option {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: var(--sp-1);
   font-size: 0.85rem;
 }
 
@@ -294,15 +294,15 @@
   margin: 0;
   border: 1px solid var(--c-warning-border);
   background: var(--c-warning-bg);
-  border-radius: 10px;
-  padding: 0.5rem 0.8rem;
+  border-radius: var(--r-lg);
+  padding: var(--sp-2) var(--sp-3);
   font-size: 0.82rem;
 }
 
 .adhoc-assign-explicit {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: var(--sp-2);
   flex-wrap: wrap;
   font-size: 0.85rem;
 }
@@ -313,24 +313,24 @@
   padding: 0;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 0.4rem;
+  gap: var(--sp-2);
 }
 
 .adhoc-assign-employee-row {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--sp-2);
   font-size: 0.85rem;
   border: 1px solid var(--c-border);
-  border-radius: 8px;
-  padding: 0.35rem 0.6rem;
+  border-radius: var(--r-md);
+  padding: var(--sp-1) var(--sp-2);
   background: var(--c-surface);
 }
 
 .adhoc-assign-employee-row label {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: var(--sp-1);
   flex: 1;
   min-width: 0;
 }
@@ -342,24 +342,24 @@
 
 .adhoc-assign-preview {
   border: 1px solid var(--c-border);
-  border-radius: 10px;
-  padding: 0.6rem 0.9rem;
+  border-radius: var(--r-lg);
+  padding: var(--sp-2) var(--sp-4);
   background: var(--c-surface);
   font-size: 0.85rem;
 }
 
 .adhoc-assign-preview h4 {
-  margin: 0 0 0.35rem;
+  margin: 0 0 var(--sp-1);
   font-size: 0.85rem;
 }
 
 .adhoc-assign-preview-list {
   margin: 0;
-  padding-inline-start: 1.2rem;
+  padding-inline-start: var(--sp-5);
 }
 
 .adhoc-assign-errors {
-  margin-top: 0.5rem;
+  margin-top: var(--sp-2);
   color: var(--c-danger);
   font-size: 0.8rem;
 }
@@ -369,10 +369,14 @@
 }
 
 .adhoc-assign-errors ul {
-  margin: 0.2rem 0 0;
-  padding-inline-start: 1.2rem;
+  margin: var(--sp-1) 0 0;
+  padding-inline-start: var(--sp-5);
 }
 
+/* Layout only. The button chrome comes from `.ui-btn .ui-btn--primary` in
+   primitives.css — this class exists solely to stop the submit button
+   stretching to the full width of its flex-column parent. Do not re-add
+   padding/border/background here; that is what left it looking inert. */
 .adhoc-assign-submit {
   align-self: flex-start;
 }
@@ -382,12 +386,12 @@
 .adhoc-hist-map {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--sp-3);
   border: 1px solid var(--c-border);
-  border-radius: 12px;
-  padding: 1rem;
+  border-radius: var(--r-xl);
+  padding: var(--sp-4);
   background: var(--c-surface-2);
-  margin-top: 1rem;
+  margin-top: var(--sp-4);
 }
 
 .adhoc-hist-map-title {
@@ -407,17 +411,17 @@
   padding: 0;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 0.4rem;
+  gap: var(--sp-2);
 }
 
 .adhoc-hist-field-row {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--sp-2);
   font-size: 0.85rem;
   border: 1px solid var(--c-border);
-  border-radius: 8px;
-  padding: 0.35rem 0.6rem;
+  border-radius: var(--r-md);
+  padding: var(--sp-1) var(--sp-2);
   background: var(--c-surface);
 }
 
@@ -438,8 +442,8 @@
 .adhoc-hist-fallback-note {
   margin: 0;
   font-size: 0.8rem;
-  border-radius: 8px;
-  padding: 0.4rem 0.7rem;
+  border-radius: var(--r-md);
+  padding: var(--sp-2) var(--sp-3);
 }
 
 .adhoc-hist-required-note {
@@ -456,10 +460,10 @@
 .adhoc-hist-panel {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--sp-3);
   border: 1px solid var(--c-border);
-  border-radius: 12px;
-  padding: 1rem;
+  border-radius: var(--r-xl);
+  padding: var(--sp-4);
   background: var(--c-surface-2);
 }
 
@@ -467,8 +471,8 @@
   margin: 0;
   border: 1px solid var(--c-warning-border);
   background: var(--c-warning-bg);
-  border-radius: 10px;
-  padding: 0.5rem 0.8rem;
+  border-radius: var(--r-lg);
+  padding: var(--sp-2) var(--sp-3);
   font-size: 0.82rem;
 }
 
@@ -478,7 +482,7 @@
   padding: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem 1.25rem;
+  gap: var(--sp-2) var(--sp-5);
   font-size: 0.85rem;
 }
 
@@ -498,6 +502,6 @@
 
 .adhoc-hist-errors ul,
 .adhoc-hist-warnings ul {
-  margin: 0.2rem 0 0;
-  padding-inline-start: 1.2rem;
+  margin: var(--sp-1) 0 0;
+  padding-inline-start: var(--sp-5);
 }

@@ -1462,7 +1462,12 @@ export default function AdhocImportTab() {
       {editor === null && (
         <>
           <section className="adhoc-import-upload-card">
-            <button type="button" onClick={startNewImport} disabled={!canIngest}>
+            <button
+              type="button"
+              className="ui-btn ui-btn--primary"
+              onClick={startNewImport}
+              disabled={!canIngest}
+            >
               {L.adhoc_wizard_new_import}
             </button>
           </section>
@@ -1474,7 +1479,7 @@ export default function AdhocImportTab() {
       {editor !== null && (
         <section className="adhoc-import-detail">
           <div className="adhoc-import-detail-toolbar">
-            <button type="button" onClick={backToList}>
+            <button type="button" className="ui-btn ui-btn--secondary" onClick={backToList}>
               {L.adhoc_import_back_to_list}
             </button>
             <h2>
@@ -1488,6 +1493,7 @@ export default function AdhocImportTab() {
             {canIngest && editor.persisted && (
               <button
                 type="button"
+                className="ui-btn ui-btn--secondary"
                 onClick={() => {
                   if (editor.record.status === "open") setShowCloseConfirm(true);
                   else void applyImportStatusToggle();
@@ -1584,7 +1590,12 @@ export default function AdhocImportTab() {
 
               <div className="adhoc-import-assign-bar">
                 {canIngest && (
-                  <button type="button" onClick={() => void handleSave()} disabled={saving}>
+                  <button
+                    type="button"
+                    className="ui-btn ui-btn--primary"
+                    onClick={() => void handleSave()}
+                    disabled={saving}
+                  >
                     {saving ? L.adhoc_review_saving : L.adhoc_review_save_button}
                   </button>
                 )}
@@ -1592,10 +1603,18 @@ export default function AdhocImportTab() {
                     rows are not being handed out, so it says nothing there. */}
                 {canAssign && !isHistorical && (
                   <>
-                    <button type="button" onClick={selectAllAssignable}>
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn--secondary"
+                      onClick={selectAllAssignable}
+                    >
                       {L.adhoc_import_select_all}
                     </button>
-                    <button type="button" onClick={clearSelection}>
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn--secondary"
+                      onClick={clearSelection}
+                    >
                       {L.adhoc_import_clear_selection}
                     </button>
                     <span>
@@ -1633,10 +1652,20 @@ export default function AdhocImportTab() {
 
           {editor.origin === "new" && editor.step < 3 && (
             <div className="adhoc-wizard-nav">
-              <button type="button" onClick={goBack} disabled={editor.step === 1}>
+              <button
+                type="button"
+                className="ui-btn ui-btn--secondary"
+                onClick={goBack}
+                disabled={editor.step === 1}
+              >
                 {L.adhoc_wizard_back}
               </button>
-              <button type="button" onClick={goNext} disabled={!canIngest || !canAdvance}>
+              <button
+                type="button"
+                className="ui-btn ui-btn--primary"
+                onClick={goNext}
+                disabled={!canIngest || !canAdvance}
+              >
                 {L.adhoc_wizard_next}
               </button>
               {editor.step === 1 && includedTables.length === 0 && (
@@ -1652,7 +1681,7 @@ export default function AdhocImportTab() {
 
           {editor.origin === "new" && editor.step === 3 && (
             <div className="adhoc-wizard-nav">
-              <button type="button" onClick={goBack}>
+              <button type="button" className="ui-btn ui-btn--secondary" onClick={goBack}>
                 {L.adhoc_wizard_back}
               </button>
             </div>

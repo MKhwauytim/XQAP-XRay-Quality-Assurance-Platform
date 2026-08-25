@@ -314,6 +314,93 @@ describe("InspectionPanel — previous/next sample controls", () => {
   });
 });
 
+// ── Failed save does not discard the entered answer (B-XQIO032 part 1) ─────
+//
+// The reported bug (XQ-IO-032, intermittent write failures) raised a real
+// question: does a failed save clear what the employee just typed? It does
+// not — `ans` is plain `useState` seeded once at mount, `onSave` failing
+// (rejecting, exactly like every real write-path error here: `handleSave` in
+// XrayReferrals.tsx always resolves normally and reports failure via
+// `setStatusMsg`, but this panel must stay safe even against an `onSave` that
+// rejects outright, since it is a generic prop) touches none of it, and the
+// panel is keyed on `entry.xrayImageId` so nothing here remounts it. This
+// suite pins that down directly, from the field's own value in the DOM.
+
+describe("InspectionPanel — a failed save preserves the typed answer (B-XQIO032)", () => {
+  const template = makeTemplate([
+    field({ fieldId: "r1", label: "المنفذ", type: "text", required: true }),
+  ]);
+
+  it("keeps the typed value on screen and re-enables the submit button after onSave rejects", async () => {
+    let calls = 0;
+    const { container } = render(
+      <InspectionPanel
+        entry={makeEntry()}
+        template={template}
+        savedAnswer={null}
+        readonly={false}
+        onClose={() => {}}
+        onSave={async () => {
+          calls += 1;
+          throw new Error("XQ-IO-032");
+        }}
+      />
+    );
+
+    const input = container.querySelector<HTMLInputElement>("#ipf-r1")!;
+    fireEvent.change(input, { target: { value: "جدة" } });
+    expect(input.value).toBe("جدة");
+
+    const submitBtn = screen.getByRole("button", { name: DEFAULT_LABELS.ip_submit_btn });
+    fireEvent.click(submitBtn);
+    // submitStudy's `finally` resets `submitting` once the rejected promise
+    // settles — await that microtask turn before asserting the button state.
+    await screen.findByRole("button", { name: DEFAULT_LABELS.ip_submit_btn });
+
+    expect(calls).toBe(1);
+    // The whole point: the typed value must still be exactly what was typed.
+    expect(input.value).toBe("جدة");
+    // Not stuck on "جاري الإرسال..." (submitting=false was restored), and not
+    // disabled — the existing button IS the retry affordance.
+    expect(submitBtn).not.toBeDisabled();
+    // A clear, visible (Arabic, not the raw exception text) error message.
+    expect(screen.getByText(DEFAULT_LABELS.ip_msg_save_failed_generic)).toBeInTheDocument();
+  });
+
+  it("retrying with the same button re-submits the same data the user already entered", async () => {
+    const saved: Array<Array<{ fieldId: string; value: unknown }>> = [];
+    let shouldFail = true;
+    const { container } = render(
+      <InspectionPanel
+        entry={makeEntry()}
+        template={template}
+        savedAnswer={null}
+        readonly={false}
+        onClose={() => {}}
+        onSave={async (ans) => {
+          if (shouldFail) throw new Error("XQ-IO-032");
+          saved.push(ans);
+        }}
+      />
+    );
+
+    const input = container.querySelector<HTMLInputElement>("#ipf-r1")!;
+    fireEvent.change(input, { target: { value: "الدمام" } });
+
+    const submitBtn = screen.getByRole("button", { name: DEFAULT_LABELS.ip_submit_btn });
+    fireEvent.click(submitBtn);
+    await screen.findByRole("button", { name: DEFAULT_LABELS.ip_submit_btn });
+    expect(saved).toHaveLength(0);
+
+    // Same click target, no retyping required — this IS the retry path.
+    shouldFail = false;
+    fireEvent.click(submitBtn);
+    await screen.findByRole("button", { name: DEFAULT_LABELS.ip_submit_btn });
+
+    expect(saved).toEqual([[{ fieldId: "r1", value: "الدمام" }]]);
+  });
+});
+
 // ── Multi-select option group ───────────────────────────────────────────────
 
 describe("InspectionPanel — multiselect fields", () => {

@@ -492,6 +492,11 @@ export default function KpiDashboard(props: Props): ReactElement {
               <p className="kpi-panel-sub">
                 {fill(labels.kpi_calendar_sub, { month: calendarMonthLabel })}
               </p>
+              {/* Screen-reader alternative to the aria-hidden calendar heat map
+                  below — NOT a browsable data table, and deliberately not
+                  routed through the shared DataTable: a visually-hidden a11y
+                  affordance has no use for a toolbar, search box, column picker
+                  or pagination. Same pattern as ReviewerKpiPanel's .rk-sr-only. */}
               <table className="kpi-sr-only">
                 <caption>{labels.kpi_calendar_title}</caption>
                 <tbody>

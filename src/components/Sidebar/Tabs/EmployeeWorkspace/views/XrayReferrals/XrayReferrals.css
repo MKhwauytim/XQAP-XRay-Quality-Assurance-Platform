@@ -23,11 +23,18 @@
   display: grid;
   /* The handoff's own track definition. Both minimums are real: the queue can
      never be squeezed below 340px (it scrolls horizontally instead — see
-     `.dt-table` below), and the form column never below 430px. The fr shares
-     are custom properties (falling back to the handoff's 1.15/1 split) so the
-     resize grip (`.ew-xr-resize-grip`) can override them per drag/preset
-     without a second copy of this rule — see the "Resize grip" section below. */
-  grid-template-columns: minmax(340px, var(--ew-xr-queue-fr, 1.15fr)) minmax(430px, var(--ew-xr-panel-fr, 1fr));
+     `.dt-table` below), and the form column never below 430px. Two independent
+     drag mechanisms can set the first track: the resize grip
+     (`.ew-xr-resize-grip`) sets `--ew-xr-queue-fr` (an `fr` share); the
+     divider (`.ew-xr-split-handle` / QueueSplitResizer) sets
+     `--ew-xr-queue-basis` (a percentage, since a custom property cannot
+     produce a bare `fr` unit). The grip's `fr` var wins when present because
+     it resizes width and height together; otherwise the basis percentage
+     applies; the innermost default (53.49% — 1.15 ÷ 2.15, this grid's
+     original ratio) is what an untouched install or a cleared localStorage
+     gets. The second track mirrors the same precedence: `--ew-xr-panel-fr`
+     from the grip, else the plain `1fr` both mechanisms have always used. */
+  grid-template-columns: minmax(340px, var(--ew-xr-queue-fr, var(--ew-xr-queue-basis, 53.49%))) minmax(430px, var(--ew-xr-panel-fr, 1fr));
   grid-template-rows: auto minmax(0, 1fr) auto;
   align-items: stretch;
   /* `gap: 14px` in the handoff. Split deliberately: the row tracks below are
@@ -81,6 +88,7 @@
   grid-column: 2;
   grid-row: 2 / 4;
   min-width: 0;
+  position: relative;
   display: flex;
   flex-direction: column;
 }
@@ -138,6 +146,51 @@
 }
 
 .ew-ref-queue.ew-xr-grid--with-bar > .ew-xr-resize-grip { grid-row: 3; }
+
+/* ── The draggable divider (QueueSplitResizer.tsx) ───────────────────────── */
+
+/* Deliberately NOT a grid child. Every child of this grid is placed by
+   explicit line number (see the comments above and the `--with-bar` variant),
+   so a new one would need placement rules in both variants and would be one
+   more thing that can re-flow the panel under the pagination. Absolutely
+   positioning it into the 14px gutter at the panel column's inline-start edge
+   needs no grid change at all, and `.ew-xr-panel-col` already spans exactly
+   the rows the divider should cover. `inset-inline-start` puts it on the
+   correct side in RTL and LTR alike. */
+.ew-xr-split-handle {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: -14px;      /* == column-gap */
+  width: 14px;
+  z-index: 2;
+  cursor: col-resize;
+  background: none;
+  border: none;
+  touch-action: none;             /* the pointer stream is ours, not a scroll */
+}
+
+/* The visible line is a 2px rule centred in the gutter — the hit area stays
+   the full 14px, because a 2px target is not one. */
+.ew-xr-split-handle::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 6px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--c-border);
+  transition: background 120ms ease;
+}
+
+.ew-xr-split-handle:hover::before,
+.ew-xr-split-handle:focus-visible::before {
+  background: var(--c-navy);
+}
+
+.ew-xr-split-handle:focus-visible {
+  outline: 2px solid var(--c-navy);
+  outline-offset: -2px;
+}
 
 /* ── Selection bar variant ───────────────────────────────────────────────── */
 
@@ -333,12 +386,26 @@
 
 /* ── Narrow viewports ────────────────────────────────────────────────────── */
 
-/* Below the point where both minimums (340px + 430px + gap) can coexist with
-   the page's own padding, the two tracks stack. Every explicit placement above
-   is re-declared at matching specificity rather than overridden with
-   `!important`, and the panel drops its sticky/height behaviour because there
-   is no second column left for it to stay level with. */
-@media (max-width: 1100px) {
+/* Below the point where both minimums (340px + 430px + 14px gap = 784px) can
+   coexist with the surrounding chrome, the two tracks stack. The original
+   1100px threshold only checked raw viewport width against that 784px floor
+   and ignored everything the grid actually sits inside: the expanded sidebar
+   (280px, `--sidebar-width` in App.css), `.app-workspace`'s own
+   `padding-inline` (2 × `--sp-6` = 48px), and `.page-shell`'s fluid
+   `padding-inline: clamp(var(--sp-2), 1.2vw, var(--sp-6))` (≈27px combined in
+   this band). That leaves a real content width of roughly
+   `viewport - 280 - 48 - 0.024·viewport`, which only clears 784px once the
+   viewport reaches ~1139px — so viewports from just above 1100px up to ~1139px
+   had LESS room than the grid needed while the media query hadn't triggered
+   yet, and `.app-workspace`'s `overflow-x: hidden` silently clipped the
+   inspection-panel column instead of ever showing it. 1160px clears that
+   ~1139px break with a small margin for the vertical scrollbar `.app-workspace`
+   (`overflow-y: auto`) shows on any queue taller than one screen, which eats
+   more of the content width that this calc doesn't otherwise account for.
+   Every explicit placement below is re-declared at matching specificity rather
+   than overridden with `!important`, and the panel drops its sticky/height
+   behaviour because there is no second column left for it to stay level with. */
+@media (max-width: 1160px) {
   .ew-ref-queue.ew-xr-grid,
   .ew-ref-queue.ew-xr-grid--with-bar {
     grid-template-columns: minmax(0, 1fr);
@@ -382,6 +449,11 @@
     min-height: 0;
     max-height: none;
   }
+
+  /* Stacked: there is no gutter and no split. The component also refuses to
+     start a drag while `offsetParent` is null, so hiding it here is the whole
+     disable — no second code path. */
+  .ew-xr-split-handle { display: none; }
 }
 
 /* ── Oversight scope picker (whose queue am I looking at?) ────────────────── */

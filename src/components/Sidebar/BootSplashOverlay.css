@@ -24,12 +24,14 @@
   inset: 0;
   z-index: var(--z-boot-splash);
   display: grid;
-  /* The cover spans all of .app-workspace, which scrolls and can be several
-     screens tall -- but the card must center on what the user can SEE, not on
-     the full scroll height, or a tall landing tab leaves them staring at an
-     opaque cover with the checklist parked far below the fold. Capping the
-     (single) grid row at one screen keeps the card centered on screen for tall
-     content and changes nothing at all when the workspace is shorter. */
+  /* .app-workspace is now a bounded, independently-scrolling region (see
+     App.css) -- its own box is exactly one screen tall, with any taller
+     content scrolling INSIDE it. `inset: 0` on this overlay therefore
+     already matches .app-workspace's rendered height, not its (possibly
+     much taller) scrollable content. `min(100%, calc(var(--app-vh) - ...))`
+     is kept as a defensive floor in case a future .app-workspace ever grows
+     past the viewport again (e.g. an extra banner row), so the card still
+     centers on the visible screen rather than being pushed off it. */
   grid-template-rows: min(100%, calc(var(--app-vh) - var(--topbar-height, 56px)));
   place-items: center;
   padding: 24px;

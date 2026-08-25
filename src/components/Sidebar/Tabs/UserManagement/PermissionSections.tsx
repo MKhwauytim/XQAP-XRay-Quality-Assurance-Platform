@@ -126,6 +126,12 @@ export function PagePermissionsSection(props: {
           </div>
         ))}
       </div>
+      {/* A permission MATRIX, not a row list: columns are roles, every cell is
+          an interactive control (segmented group / toggle), and parents own a
+          collapsible child tree. Deliberately not on the shared DataTable —
+          that component requires `accessor: (row) => string | null` per column
+          to drive filtering, sorting and export, and a "role × tab → control"
+          cell has no meaningful string value to give it. */}
       <div className="um-perm-table-wrap">
         <table className="um-perm-table">
           <thead><tr><th className="um-perm-tab-col">الصفحة / التبويب</th>{MANAGED_ROLES.map((role) => <th key={role.id} className="um-perm-role-col"><RoleBadge role={role.id} /></th>)}</tr></thead>
@@ -181,6 +187,8 @@ export function FeaturePermissionsSection(props: {
       </div>
       {currentGroup && (
         <div className="um-feat-matrix-wrap">
+          {/* Same permission-matrix shape as um-perm-table above — not on the
+              shared DataTable, for the same reason. */}
           <table className="um-feat-table">
             <thead><tr><th className="um-feat-label-col">الميزة</th>{MANAGED_ROLES.map((role) => <th key={role.id} className="um-feat-role-col"><RoleBadge role={role.id} /></th>)}</tr></thead>
             <tbody>{currentGroup.features.map((feature) => {

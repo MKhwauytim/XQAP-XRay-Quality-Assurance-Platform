@@ -663,6 +663,11 @@ export function logCodedError(
 ): void {
   logError(
     `${context} [${code}]`,
-    error === undefined ? new Error(errorCodeMeaning(code)) : error
+    error === undefined ? new Error(errorCodeMeaning(code)) : error,
+    // Explicit, even though errorLogger can also recover this from the `[...]`
+    // suffix above. The suffix parse is the fallback for entries that reach the
+    // ring by another route (an already-formatted context, a hydrated legacy
+    // entry); here the code is known for certain, so say so.
+    { errorCode: code }
   );
 }

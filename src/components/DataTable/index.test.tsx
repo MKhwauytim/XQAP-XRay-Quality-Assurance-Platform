@@ -1,18 +1,17 @@
 /* @vitest-environment jsdom */
 // D1 (Batch 3) — characterization test pinning the CURRENT behavior of the shared DataTable.
 //
-// NOTE on "sort": DataTable has NO row-sort UI (verified — no sortBy/sortDir/row comparator).
 // Its interactive surface is: global search, per-column filters (multiselect/text/date/status),
-// column visibility + drag-reorder + resize, and XLSX export. The plan's "sort" item is therefore
-// covered here as FILTERING (global search + per-column multiselect). If a row-sort feature is ever
-// added, this header note is the signal to extend these tests.
+// per-column sort (Task 3 of the 2026-08-24 datatable-sort-filter-consistency plan — see
+// "DataTable — column sorting" below), column visibility + drag-reorder + resize, and XLSX export.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import * as XLSX from "xlsx";
-import DataTable, { type DataTableCol } from "./index";
+import DataTable, { type DataTableCol, type DataTableProps } from "./index";
 import { looksLikeNumber } from "./utils";
 import { __clearPendingSaveFlushesForTests } from "../../data/storage/pendingSaveFlush";
+import { getLabels } from "../../data/labels/labelsStore";
 
 // The vendored xlsx module namespace is frozen (ESM), so `vi.spyOn` can't replace writeFile.
 // Partial-mock the module: keep the real `utils` (the export builds a real sheet) but stub
@@ -420,6 +419,109 @@ describe("DataTable — pending column-config save flush (pagehide/visibilitycha
 
     expect(onColConfigChangeB).toHaveBeenCalledTimes(1);
     expect(onColConfigChangeA).not.toHaveBeenCalled();
+  });
+});
+
+describe("DataTable — column sorting", () => {
+  // Seeded out of order on purpose, with a duplicate `dept` to exercise the
+  // stable tiebreak and a numeric column to prove numeric-not-lexicographic.
+  const rows = [
+    { id: "c", dept: "تشغيل", count: "10" },
+    { id: "a", dept: "أمن",   count: "2"  },
+    { id: "b", dept: "تشغيل", count: "9"  },
+  ];
+  const columns: DataTableCol<(typeof rows)[number]>[] = [
+    { id: "id",    label: "المعرف", accessor: (r) => r.id },
+    { id: "dept",  label: "القسم",  accessor: (r) => r.dept },
+    { id: "count", label: "العدد",  accessor: (r) => r.count, isNumeric: true },
+  ];
+
+  function renderTable(extra: Partial<DataTableProps<(typeof rows)[number]>> = {}) {
+    return render(
+      <DataTable
+        columns={columns}
+        rows={rows}
+        getRowKey={(r) => r.id}
+        renderCell={(col, row) => col.accessor(row)}
+        {...extra}
+      />
+    );
+  }
+
+  function bodyIds(): string[] {
+    return Array.from(document.querySelectorAll("tbody tr"))
+      .map((tr) => tr.querySelector("td")?.textContent ?? "")
+      .filter((t) => t !== "");
+  }
+
+  it("renders a sort button in every sortable column header", () => {
+    renderTable();
+    expect(screen.getByRole("button", { name: `${getLabels().dt_sort_button_prefix}: المعرف` }))
+      .toBeInTheDocument();
+  });
+
+  it("leaves rows in caller order until the user sorts", () => {
+    renderTable();
+    expect(bodyIds()).toEqual(["c", "a", "b"]);
+  });
+
+  it("cycles a column asc → desc → back to caller order", () => {
+    renderTable();
+    const btn = screen.getByRole("button", { name: `${getLabels().dt_sort_button_prefix}: المعرف` });
+    fireEvent.click(btn);
+    expect(bodyIds()).toEqual(["a", "b", "c"]);
+    fireEvent.click(btn);
+    expect(bodyIds()).toEqual(["c", "b", "a"]);
+    fireEvent.click(btn);
+    expect(bodyIds()).toEqual(["c", "a", "b"]);
+  });
+
+  it("sorts a numeric column numerically, not lexicographically", () => {
+    renderTable();
+    fireEvent.click(screen.getByRole("button", { name: `${getLabels().dt_sort_button_prefix}: العدد` }));
+    // Lexicographic would give 10, 2, 9.
+    expect(bodyIds()).toEqual(["a", "b", "c"]);
+  });
+
+  it("keeps sort and column filters composed — filtering does not clear the sort", () => {
+    renderTable();
+    fireEvent.click(screen.getByRole("button", { name: `${getLabels().dt_sort_button_prefix}: المعرف` }));
+    fireEvent.change(screen.getByLabelText(getLabels().dt_search_placeholder), {
+      target: { value: "تشغيل" },
+    });
+    return waitFor(() => expect(bodyIds()).toEqual(["b", "c"]));
+  });
+
+  it("omits the sort button when the column opts out", () => {
+    renderTable({
+      columns: columns.map((c) => (c.id === "dept" ? { ...c, sortable: false } : c)),
+    });
+    expect(
+      screen.queryByRole("button", { name: `${getLabels().dt_sort_button_prefix}: القسم` })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: `${getLabels().dt_sort_button_prefix}: المعرف` })
+    ).toBeInTheDocument();
+  });
+
+  it("omits every sort button when the table opts out", () => {
+    renderTable({ canSortColumns: false });
+    for (const label of ["المعرف", "القسم", "العدد"]) {
+      expect(
+        screen.queryByRole("button", { name: `${getLabels().dt_sort_button_prefix}: ${label}` })
+      ).not.toBeInTheDocument();
+    }
+  });
+
+  it("announces the active direction in the sort button's accessible name", () => {
+    renderTable();
+    const btn = screen.getByRole("button", { name: `${getLabels().dt_sort_button_prefix}: المعرف` });
+    fireEvent.click(btn);
+    expect(
+      screen.getByRole("button", {
+        name: `${getLabels().dt_sort_button_prefix}: المعرف (${getLabels().dt_sort_asc})`,
+      })
+    ).toBeInTheDocument();
   });
 });
 

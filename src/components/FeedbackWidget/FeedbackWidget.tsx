@@ -2,11 +2,14 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, MessageCircle, X } from "lucide-react";
 import { readSession } from "../../auth/authSession";
 import {
-  loadFeedback,
+  listThreadSummaries,
+  loadThreads,
   replyToFeedback,
   submitFeedback,
   type FeedbackCategory,
   type FeedbackMessage,
+  type FeedbackThread,
+  type FeedbackThreadSummary,
 } from "../../data/feedback/feedbackStorage";
 import { canManageFeedback } from "../../data/feedback/feedbackUnread";
 import { useFeedbackUnread } from "../../data/feedback/useFeedbackUnread";
@@ -48,7 +51,11 @@ export function FeedbackWidget() {
   const { unreadCount, markSeen, reload: reloadUnread } = useFeedbackUnread();
   const labels = useLabels();
   const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState<FeedbackMessage[]>([]);
+  // The list view holds SUMMARIES only (one index read + one names-only
+  // listing). Thread bodies and replies are loaded for the current page alone
+  // -- opening the panel no longer reads every conversation on the share.
+  const [summaries, setSummaries] = useState<FeedbackThreadSummary[]>([]);
+  const [threadsById, setThreadsById] = useState<Record<string, FeedbackThread>>({});
   const [loading, setLoading] = useState(false);
   const [adminTab, setAdminTab] = useState<"new" | "all">("new");
   const [filter, setFilter] = useState<"open" | "resolved" | "all">("open");
@@ -79,15 +86,18 @@ export function FeedbackWidget() {
   const refresh = useCallback(async () => {
     if (!directoryHandle) return;
     setLoading(true);
-    const msgs = await loadFeedback(directoryHandle);
-    setMessages(msgs);
+    const [list] = await Promise.all([
+      listThreadSummaries(directoryHandle),
+      // The unread provider owns the full aggregate read; awaiting its reload
+      // here is what lets markSeen() below use the SAME freshness the old
+      // markSeen(msgs) had -- applyMessages sets messagesRef synchronously
+      // before setState, so the ref is already the list just fetched.
+      reloadUnread(),
+    ]);
+    setSummaries(list);
     setLoading(false);
-    // Reading the panel IS reading the messages: mark the list just loaded as
-    // seen, from the list itself rather than from the shared poll's copy, which
-    // may be up to one poll interval older. Both triggers' dots clear together
-    // because the marker broadcasts (see feedbackUnread.markFeedbackSeen).
-    markSeen(msgs);
-  }, [directoryHandle, markSeen]);
+    markSeen();
+  }, [directoryHandle, markSeen, reloadUnread]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- async refresh; setState fires inside the async callback, not synchronously in the effect body
@@ -157,6 +167,11 @@ export function FeedbackWidget() {
         resolve
       );
       setReplyTexts((prev) => ({ ...prev, [msgId]: "" }));
+      setThreadsById((prev) => {
+        const next = { ...prev };
+        delete next[msgId];
+        return next;
+      });
       void refresh();
       void reloadUnread();
     } catch (err) {
@@ -167,15 +182,56 @@ export function FeedbackWidget() {
     }
   }
 
-  const openCount = messages.filter((m) => m.status === "open").length;
-  const myMessages = session
-    ? messages.filter((m) => m.from === session.username)
+  // All three run on SUMMARIES -- status, author and count are index fields, so
+  // filtering and paginating costs no thread reads at all.
+  const openCount = summaries.filter((s) => s.status === "open").length;
+  const mySummaries = session
+    ? summaries.filter((s) => s.from === session.username)
     : [];
-  const filteredMessages = messages.filter((m) =>
-    filter === "all" ? true : m.status === filter
+  const filteredSummaries = summaries.filter((s) =>
+    filter === "all" ? true : s.status === filter
   );
-  const safeMyPage = clampPage(myPage, myMessages.length);
-  const safeAdminPage = clampPage(adminPage, filteredMessages.length);
+  const safeMyPage = clampPage(myPage, mySummaries.length);
+  const safeAdminPage = clampPage(adminPage, filteredSummaries.length);
+
+  // Plain consts, not useMemo: `mySummaries`/`filteredSummaries` are cheap
+  // filters over already-small summary arrays, and the React Compiler already
+  // memoizes this component -- wrapping a derived value in a manual useMemo
+  // whose own inputs are unmemoized plain consts is what the compiler flags
+  // as "existing memoization could not be preserved". Every other derived
+  // value in this component (openCount, mySummaries, filteredSummaries) is
+  // the same plain-const shape.
+  const visibleSummaries =
+    isManager && adminTab === "all"
+      ? pageSlice(filteredSummaries, safeAdminPage)
+      : pageSlice(mySummaries, safeMyPage);
+
+  const visibleIds = visibleSummaries.map((summary) => summary.threadId);
+  // Stable dependency: the array identity changes on every render, the joined
+  // key does not.
+  const visibleIdsKey = visibleIds.join("|");
+
+  useEffect(() => {
+    if (!directoryHandle || !open || visibleIds.length === 0) return;
+    let cancelled = false;
+    loadThreads(directoryHandle, visibleIds)
+      .then((threads) => {
+        if (cancelled) return;
+        setThreadsById((prev) => {
+          const next = { ...prev };
+          for (const thread of threads) next[thread.id] = thread;
+          return next;
+        });
+      })
+      .catch(() => {
+        // A page that cannot be read leaves the previously-loaded threads in
+        // place; the cards fall back to their summary rows.
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- visibleIdsKey is the stable identity of visibleIds
+  }, [directoryHandle, open, visibleIdsKey]);
 
   // The read-only demo/viewer session reports role "admin" purely to unlock
   // full tab visibility (see AdminToolbar's own isDemo/isRealAdmin split) — it
@@ -328,26 +384,31 @@ export function FeedbackWidget() {
                 )}
 
                 {/* User's own message history */}
-                {!submitted && myMessages.length > 0 && (
+                {!submitted && mySummaries.length > 0 && (
                   <div style={{ marginTop: 20 }}>
                     <span className="fb-label">{getLabels().fb_my_messages_label}</span>
                     <div className="fb-msg-list" style={{ marginTop: 8 }}>
-                      {pageSlice(myMessages, safeMyPage).map((msg) => (
-                        <MessageCard
-                          key={msg.id}
-                          msg={msg}
-                          isAdmin={false}
-                          canReply={msg.status === "open"}
-                          replyText={replyTexts[msg.id] ?? ""}
-                          onReplyChange={(v) =>
-                            setReplyTexts((prev) => ({ ...prev, [msg.id]: v }))
-                          }
-                          onReply={() => { void handleReply(msg.id, false); }}
-                          isSending={replying === msg.id}
-                        />
-                      ))}
+                      {visibleSummaries.map((s) => {
+                        const msg = threadsById[s.threadId];
+                        // The thread file for this row has not arrived yet.
+                        if (!msg) return <p key={s.threadId} className="fb-empty">{getLabels().fb_loading}</p>;
+                        return (
+                          <MessageCard
+                            key={msg.id}
+                            msg={msg}
+                            isAdmin={false}
+                            canReply={msg.status === "open"}
+                            replyText={replyTexts[msg.id] ?? ""}
+                            onReplyChange={(v) =>
+                              setReplyTexts((prev) => ({ ...prev, [msg.id]: v }))
+                            }
+                            onReply={() => { void handleReply(msg.id, false); }}
+                            isSending={replying === msg.id}
+                          />
+                        );
+                      })}
                     </div>
-                    <Pagination page={safeMyPage} totalItems={myMessages.length} onPageChange={setMyPage} itemLabel="رسالة" />
+                    <Pagination page={safeMyPage} totalItems={mySummaries.length} onPageChange={setMyPage} itemLabel="رسالة" />
                   </div>
                 )}
               </>
@@ -358,27 +419,31 @@ export function FeedbackWidget() {
               <>
                 {loading ? (
                   <p className="fb-empty">{getLabels().fb_loading}</p>
-                ) : filteredMessages.length === 0 ? (
+                ) : filteredSummaries.length === 0 ? (
                   <p className="fb-empty">{getLabels().fb_empty}</p>
                 ) : (
                   <>
                     <div className="fb-msg-list">
-                      {pageSlice(filteredMessages, safeAdminPage).map((msg) => (
-                      <MessageCard
-                        key={msg.id}
-                        msg={msg}
-                        isAdmin
-                        replyText={replyTexts[msg.id] ?? ""}
-                        onReplyChange={(v) =>
-                          setReplyTexts((prev) => ({ ...prev, [msg.id]: v }))
-                        }
-                        onReply={() => { void handleReply(msg.id, false); }}
-                        onResolve={() => { void handleReply(msg.id, true); }}
-                        isSending={replying === msg.id}
-                      />
-                      ))}
+                      {visibleSummaries.map((s) => {
+                        const msg = threadsById[s.threadId];
+                        if (!msg) return <p key={s.threadId} className="fb-empty">{getLabels().fb_loading}</p>;
+                        return (
+                          <MessageCard
+                            key={msg.id}
+                            msg={msg}
+                            isAdmin
+                            replyText={replyTexts[msg.id] ?? ""}
+                            onReplyChange={(v) =>
+                              setReplyTexts((prev) => ({ ...prev, [msg.id]: v }))
+                            }
+                            onReply={() => { void handleReply(msg.id, false); }}
+                            onResolve={() => { void handleReply(msg.id, true); }}
+                            isSending={replying === msg.id}
+                          />
+                        );
+                      })}
                     </div>
-                    <Pagination page={safeAdminPage} totalItems={filteredMessages.length} onPageChange={setAdminPage} itemLabel="رسالة" />
+                    <Pagination page={safeAdminPage} totalItems={filteredSummaries.length} onPageChange={setAdminPage} itemLabel="رسالة" />
                   </>
                 )}
               </>

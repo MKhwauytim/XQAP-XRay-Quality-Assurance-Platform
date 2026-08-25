@@ -37,9 +37,58 @@ export function workspace(page: Page): Locator {
   return page.getByRole("region", { name: "مساحة العمل" });
 }
 
+/**
+ * Dismiss the fixed-position auto-backup toast (`.app-backup-toast`,
+ * `src/App.tsx`/`App.css`) if it is currently on screen.
+ *
+ * The toast has no auto-dismiss timer -- once an admin/manager session's
+ * once-per-login backup finishes (or fails), it sits at a fixed viewport
+ * position until someone clicks its close button. In a fresh simulated
+ * workspace the daily backup is essentially never "already done today", so
+ * this toast reliably appears during admin/manager specs and can then
+ * intercept a sidebar click for the rest of the test if the click target
+ * happens to land under its fixed footprint.
+ */
+async function dismissBackupToastIfPresent(page: Page): Promise<void> {
+  const toast = page.locator(".app-backup-toast");
+  if (!(await toast.isVisible().catch(() => false))) return;
+  const closeButton = toast.getByRole("button");
+  // No close button while a backup is actively running (`autoBackupRunning`) --
+  // that state is transient, so just proceed; the caller's retry loop covers it.
+  if (await closeButton.isVisible().catch(() => false)) {
+    await closeButton.click().catch(() => {});
+  }
+}
+
+/**
+ * Click a locator, dismissing the auto-backup toast on every retry rather
+ * than once up front.
+ *
+ * A single dismiss-then-click isn't enough: the backup effect's async chain
+ * (query months, then write the backup) can still be in flight when a spec
+ * reaches its first sidebar click, so the toast can appear — or, under dev-mode
+ * StrictMode's double-effect-invocation, reappear once already dismissed —
+ * at any point during the click's own actionability wait. Polling here, not
+ * relying on Playwright's built-in click retry, is what actually clears a
+ * toast that shows up mid-wait instead of only the one already visible when
+ * the helper is first called.
+ */
+async function clickPastBackupToast(page: Page, locator: Locator, timeoutMs = 25_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    await dismissBackupToastIfPresent(page);
+    try {
+      await locator.click({ timeout: 2_000 });
+      return;
+    } catch (error) {
+      if (Date.now() > deadline) throw error;
+    }
+  }
+}
+
 /** Click a top-level tab or one of its sub-tabs in the sidebar rail. */
 export async function openTab(page: Page, name: string): Promise<void> {
-  await sidebar(page).getByRole("button", { name, exact: true }).click();
+  await clickPastBackupToast(page, sidebar(page).getByRole("button", { name, exact: true }));
 }
 
 /**
@@ -67,7 +116,7 @@ export async function openSubTab(
     .getByRole("navigation", { name: "تبويبات النظام" })
     .getByRole("button", { name: child, exact: true });
   await expect(sub).toBeVisible();
-  await sub.click();
+  await clickPastBackupToast(page, sub);
   await expect(ready).toBeVisible();
 }
 

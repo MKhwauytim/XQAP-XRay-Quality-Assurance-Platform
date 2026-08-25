@@ -95,14 +95,17 @@ and path** — keep it in sync. Summary:
   {month}/…        per-employee sample mirrors, answers, referral/replacement, approvals
 3-user-data/       workspace user/permission files (when initialized via workspace defaults)
 4-reports/         designs/ — Report Designer designs.index.json + {reportId}.json
-5-system/          workspace.schema.json, backups/, audit/, locks/, presets, notifications
+5-system/          workspace.schema.json, backups/, audit/, locks/, presets, notifications,
+                   system-errors/ — one {stem}.errors.json per user + per-user yearly archives
+  feedback/        threads/{threadId}.json (one per conversation), threads.index.json (CAS cache),
+                   messages.json (legacy, read-only)
 6-templates/       {templateId}.json, templates.index.json, template selection
 feedback/          legacy top-level root — read-only fallback; new writes go to 5-system/feedback/
 ```
 
 Month folder names follow `{month}-{MonthName-en}-{year}` (e.g. `5-May-2026`). Legacy roots remain readable. There is **no active schema migration**: `workspaceSchema.ts` only *detects* the layout and stamps `workspace.schema.json` on a brand-new workspace, so legacy/mixed layouts are read through permanent fallback paths in `workspacePaths.ts` and are never moved or deleted. Roots are resolved through `workspacePaths.ts` — never hard-code a folder name.
 
-Both previously documented drifts have since been **fixed in code**. **`4-reports/` is not empty** — Report Designer (`src/data/reportDesigner/storage/reportDesignStorage.ts`) writes `designs.index.json` (CAS-protected) and per-design `{reportId}.json` under `4-reports/designs/` via `getReportsRoot(..., true)`. **`feedback/` now writes under `5-system/feedback/`** — `feedbackStorage.ts` still *reads* the legacy top-level `feedback/` root so pre-existing workspaces keep working. See `docs/architecture/data-system-report.md` for the current picture.
+Both previously documented drifts have since been **fixed in code**. **`4-reports/` is not empty** — Report Designer (`src/data/reportDesigner/storage/reportDesignStorage.ts`) writes `designs.index.json` (CAS-protected) and per-design `{reportId}.json` under `4-reports/designs/` via `getReportsRoot(..., true)`. **`feedback/` now writes under `5-system/feedback/`, one file per conversation** — `threads/{threadId}.json` is the source of truth, `threads.index.json` a rebuildable CAS-protected summary cache written only on create/status-change, and the pre-v116 shared `messages.json` is read-only and migrated out of lazily on first read. `feedbackStorage.ts` still *reads* the legacy top-level `feedback/` root so pre-existing workspaces keep working. See `docs/architecture/data-system-report.md` for the current picture.
 
 ## Architecture
 
@@ -156,6 +159,7 @@ Both previously documented drifts have since been **fixed in code**. **`4-report
 | Referrals | `src/data/referral/` | Referral request storage |
 | Notifications | `src/data/notifications/` | Workspace-wide broadcast notifications + per-recipient acknowledgement (`ew/notifications` tab); single CAS-protected file |
 | Audit | `src/data/audit/` | CAS-protected action-log event history + archival |
+| Error log | `src/data/errorLog/` | Durable per-user error records under `5-system/system-errors/`, fed by a sink registered into `storage/errorLogger.ts`; admin XLSX export. Per-user files and the 6×100 ms casLoop config are copied from `audit/actionLog.ts` for the same SMB-contention reason |
 | Data integrity | `src/data/integrity/` | `orphanScan.ts` — referential-integrity check (B3) across the population → sample → distribution → answers/approvals `xrayImageId` chain |
 | Ad-hoc import | `src/data/adhocImport/` | Admin-uploaded one-off Excel/pasted imports with their own column-mapping workbench, assigned outside the regular Population pipeline; synthesizes a `sample.master.json` for a synthetic month folder. Owns its parsing end-to-end (never routes through the Population ingest) and reaches the rest of the app only through `adhocDistributionBridge.ts`. Also imports already-answered historical studies. Stored under `5-system/adhoc-imports/` |
 | Feedback | `src/data/feedback/` | User feedback records |
@@ -163,14 +167,14 @@ Both previously documented drifts have since been **fixed in code**. **`4-report
 | Preferences | `src/data/preferences/` | Browse preset storage |
 | Global month | `src/data/month/` | App-wide month selection (provider + toolbar selector); sessionStorage key `xray_global_month_v1` |
 | Workspace | `src/data/workspace/` | Directory-handle context/provider, numbered-root path resolution (`workspacePaths.ts`), layout schema detection/migration (`workspaceSchema.ts`: current/legacy/mixed/empty), defaults, demo workspace |
-| Error logger | `src/data/storage/errorLogger.ts` | In-memory ring buffer (last 50 entries) for silent-catch observability; `logError`, `getRecentErrors`, `clearErrors` |
+| Error logger | `src/data/storage/errorLogger.ts` | In-memory ring buffer (last 50 entries) for silent-catch observability; `logError`, `getRecentErrors`, `clearErrors`. Since v116 this is the LOCAL half of a two-tier log only — the durable, fleet-wide, admin-exportable half is `src/data/errorLog/` above. `logError` also accepts an optional `ErrorLogMeta` and exposes `registerErrorSink` so `errorLog/` can install itself without `errorLogger.ts` importing the workspace layer (would cycle through `safeWrite.ts`) |
 | JsonEnvelope | `src/data/storage/jsonEnvelope.ts` | Schema versioning wrapper for all `safeWriteJson` writes; `wrap`, `isEnvelope`, `unwrap` factory functions |
 
 ### Shared UI components
 
 | Component | Path | Notes |
 |-----------|------|-------|
-| `DataTable` | `src/components/DataTable/` | Reusable filterable/sortable table with column visibility, XLSX export |
+| `DataTable` | `src/components/DataTable/` | Reusable table: global search, per-column filters, per-column sort (opt-out via `sortable: false` / `canSortColumns={false}`; transient per-mount, never persisted through `ColConfig`), column visibility/reorder/resize, XLSX export, virtualized paging. Sort primitives are shared with Population Browse via `src/utils/tableSort.ts` |
 | `PageHeader` | `src/components/PageHeader/` | Eyebrow + title + subtitle header pattern |
 | `FeedbackWidget` | `src/components/FeedbackWidget/` | Floating feedback collector |
 | `PermissionGuard` | `src/components/PermissionGuard.tsx` | Renders children only when the current user has a given permission |

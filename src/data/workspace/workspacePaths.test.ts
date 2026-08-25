@@ -22,11 +22,16 @@ import {
   SAMPLE_SUBFOLDERS,
   SYSTEM_FOLDER_NAMES,
   REPORTS_SUBFOLDERS,
+  FEEDBACK_SUBFOLDERS,
   getSampleMainDir,
   getSampleEmployeeDir,
   getSampleApprovalsDir,
   getPopulationMonthDir,
   getSystemRoot,
+  getFeedbackDir,
+  getFeedbackThreadsDir,
+  getLegacyFeedbackDir,
+  getSystemErrorsDir,
 } from "./workspacePaths";
 
 test("WORKSPACE_ROOTS are lowercase kebab-case", () => {
@@ -56,8 +61,23 @@ test("POPULATION_SUBFOLDERS, SAMPLE_SUBFOLDERS, SYSTEM_FOLDER_NAMES, REPORTS_SUB
     feedback: "feedback",
     notifications: "notifications",
     adhocImports: "adhoc-imports",
+    systemErrors: "system-errors",
   });
   expect(REPORTS_SUBFOLDERS).toEqual({ designs: "designs" });
+});
+
+test("resolves 5-system/system-errors/ and creates it on demand", async () => {
+  const root = createMemoryDirectory("root");
+  const dir = await getSystemErrorsDir(root, true);
+  expect(dir.name).toBe("system-errors");
+
+  const system = await root.getDirectoryHandle("5-system", { create: false });
+  await expect(system.getDirectoryHandle("system-errors", { create: false })).resolves.toBeDefined();
+});
+
+test("rejects rather than creating when getSystemErrorsDir is called with create=false on an empty workspace", async () => {
+  const root = createMemoryDirectory("root");
+  await expect(getSystemErrorsDir(root, false)).rejects.toThrow();
 });
 
 test("getSampleMainDir/EmployeeDir/ApprovalsDir create lowercase numbered subfolders", async () => {
@@ -71,6 +91,37 @@ test("getSampleMainDir/EmployeeDir/ApprovalsDir create lowercase numbered subfol
 
   const approvals = await getSampleApprovalsDir(root, "5-may-2026", true);
   expect(approvals.name).toBe("3-approvals");
+});
+
+test("resolves 5-system/feedback and its threads/ subfolder", async () => {
+  const root = createMemoryDirectory("root") as DirectoryHandleLike;
+
+  const threadsDir = await getFeedbackThreadsDir(root, true);
+  expect(threadsDir.name).toBe(FEEDBACK_SUBFOLDERS.threads);
+
+  // Nested under 5-system/feedback/, never at the workspace root.
+  const systemDir = await root.getDirectoryHandle("5-system", { create: false });
+  const feedbackDir = await systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.feedback, {
+    create: false,
+  });
+  await expect(
+    feedbackDir.getDirectoryHandle(FEEDBACK_SUBFOLDERS.threads, { create: false })
+  ).resolves.toBeDefined();
+  await expect(
+    root.getDirectoryHandle(SYSTEM_FOLDER_NAMES.feedback, { create: false })
+  ).rejects.toThrow();
+});
+
+test("getFeedbackDir with create:false does not create the folder", async () => {
+  const root = createMemoryDirectory("root") as DirectoryHandleLike;
+  await expect(getFeedbackDir(root, false)).rejects.toThrow();
+});
+
+test("getLegacyFeedbackDir resolves the workspace-root feedback/ folder only", async () => {
+  const root = createMemoryDirectory("root") as DirectoryHandleLike;
+  await root.getDirectoryHandle(SYSTEM_FOLDER_NAMES.feedback, { create: true });
+  const legacy = await getLegacyFeedbackDir(root);
+  expect(legacy.name).toBe(SYSTEM_FOLDER_NAMES.feedback);
 });
 
 /* --------------------------------------------------------------------------

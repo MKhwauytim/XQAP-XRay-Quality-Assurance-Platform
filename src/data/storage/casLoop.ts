@@ -3,7 +3,7 @@
 // written JSON and verifies it on read-back. If another machine wrote concurrently it
 // will have stored a different token, making the false-positive revision match detectable.
 
-import { codedMessage, logCodedError, resolveErrorCode } from "./errorCodes";
+import { codedMessage, logCodedError, resolveErrorCode, type ErrorCode } from "./errorCodes";
 
 const DEFAULT_MAX_RETRIES = 10;
 const DEFAULT_BASE_DELAY_MS = 200;
@@ -95,6 +95,20 @@ export async function casLoop<T>(
     maxRetries?: number;
     baseDelayMs?: number;
     conflictError?: string;
+    /**
+     * Additive observability hook, called once — only when every attempt
+     * THREW (never on a plain lost-revision exhaustion, where there is no
+     * exception to report) — right before casLoop resolves to the generic
+     * coded result. casLoop itself has already logged the exhaustion under
+     * its own generic `casLoop:exhausted` context via `logCodedError` by the
+     * time this runs; this hook exists because casLoop has no idea WHICH
+     * feature called it, so a specific call site (e.g. the answer-save write
+     * in `answerStorage.ts`) can attach its own page/action context to the
+     * same raw error for its own diagnosability. Must never throw — a
+     * misbehaving observer must not be able to change what the caller
+     * receives back — and never changes the resolved value either way.
+     */
+    onExhausted?: (cause: unknown, code: ErrorCode) => void;
   }
 ): Promise<T | { ok: false; error: string }> {
   const max = options?.maxRetries ?? DEFAULT_MAX_RETRIES;
@@ -152,6 +166,12 @@ export async function casLoop<T>(
     // actually was, with a quotable code, and put the raw detail in the log.
     const code = resolveErrorCode(lastCause) ?? "XQ-IO-032";
     logCodedError("casLoop:exhausted", code, lastCause);
+    try {
+      options?.onExhausted?.(lastCause, code);
+    } catch {
+      // The observer's own failure is not this write's problem — see the
+      // option's own doc comment above.
+    }
     return { ok: false, error: codedMessage(code) };
   }
   // No exception: every attempt lost the revision race. The caller's Arabic

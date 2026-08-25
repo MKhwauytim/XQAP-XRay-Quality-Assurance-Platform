@@ -215,3 +215,28 @@ cannot enforce this without a backend session store, which is out of scope (§1)
 
 **Accepted by:** XQAP owner (explicit request, sampling-config/session-persistence work item)
 **Date:** 2026-08-07
+
+### (e) Persistent error log (2026-08-24) — plain JSON, no new trust boundary, no tamper-evidence
+
+`src/data/errorLog/` (added v116/v117, `docs/superpowers/plans/2026-08-24-error-log-subsystem-plan.md`)
+persists every error the app logs — error messages and truncated stack traces, which can carry
+`xrayImageId`s and usernames — as plain JSON under `5-system/system-errors/{stem}.errors.json` in
+the shared workspace, readable and editable by anyone with folder access, **exactly like every
+other business file this app writes.** This changes no trust boundary described in §1: workspace
+JSON was already plain and already tamperable before this subsystem existed.
+
+**Not tamper-evident, by design.** Unlike the governance audit trail (`src/data/audit/`), which
+carries an optional B5 `previousArchiveHash` chain (djb2 hash of the previous calendar year's
+archive) because its entries are evidence about what people deliberately did, the error log
+carries **no such chain**. It is diagnostic telemetry about software failures, not evidence about
+people, and adding a hash chain would imply an evidentiary property this data does not have and is
+not meant to have. Do not describe it as tamper-evident in any documentation or UI copy.
+
+**The only bound on what reaches disk** is `errorLogger.ts`'s existing 500-character
+message/stack-trace truncation (`MAX_MESSAGE_LENGTH`/`MAX_STACK_LENGTH`) and 100-character context
+truncation, unchanged by this subsystem and applied identically to the local ring buffer and the
+persisted copy. Widening those limits to capture more diagnostic context is a privacy decision, not
+an engineering one, and was explicitly out of scope for this plan.
+
+**Accepted by:** XQAP owner (error-log subsystem work item)
+**Date:** 2026-08-24

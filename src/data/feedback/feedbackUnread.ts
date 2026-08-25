@@ -1,12 +1,18 @@
 /**
  * Unread bookkeeping for the feedback ("chat") widget.
  *
- * The feedback log itself (`5-system/feedback/messages.json`) is shared by every
- * user on every machine and carries no per-user read state — adding one would
- * mean every reader writing to a file only writers touch today, on a UNC/SMB
- * share, under CAS. Read state is therefore PER BROWSER, in `localStorage`: one
- * ISO timestamp per username marking the newest inbound activity that user has
- * already looked at. Losing it re-shows the dot once; nothing on disk is at risk.
+ * The feedback threads (`5-system/feedback/threads/{threadId}.json`) are shared
+ * by every user on every machine and carry no per-user read state — adding one
+ * would mean every reader writing to files only writers touch today, on a
+ * UNC/SMB share, under CAS. Read state is therefore PER BROWSER, in
+ * `localStorage`: one ISO timestamp per username marking the newest inbound
+ * activity that user has already looked at. Losing it re-shows the dot once;
+ * nothing on disk is at risk.
+ *
+ * This module consumes `loadFeedback`'s full aggregate (every thread) rather
+ * than the summary index, because counting inbound items needs each individual
+ * reply's author and timestamp — which `FeedbackThreadSummary` deliberately
+ * does not carry.
  *
  * "Inbound" is deliberately asymmetric, because the two sides of this widget see
  * different things:

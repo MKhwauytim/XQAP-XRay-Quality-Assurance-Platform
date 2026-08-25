@@ -140,7 +140,7 @@ export default function HistoricalPanel({
       {canImport && (
         <button
           type="button"
-          className="adhoc-assign-submit"
+          className="ui-btn ui-btn--primary adhoc-assign-submit"
           disabled={blocked || busy || disabled}
           onClick={onImport}
         >

@@ -107,6 +107,10 @@ export const DEFAULT_LABELS = {
   dt_clear_filters:          "مسح التصفية",
   dt_export_xlsx:            "تصدير XLSX",
   dt_exporting:              "جارٍ التصدير...",
+  errlog_export_btn:         "تصدير سجل الأخطاء إلى Excel",
+  errlog_exporting:          "جارٍ التصدير…",
+  errlog_export_failed:      "تعذّر تصدير سجل الأخطاء — حاول مرة أخرى.",
+  errlog_export_empty:       "لا توجد أخطاء مسجّلة في مساحة العمل.",
   msg_export_not_permitted:  "لا تملك صلاحية تصدير التقارير.",
   // The demo/viewer session is read-only (getMutationCapability reason
   // "read-only-mode") — distinct from msg_export_not_permitted, which covers
@@ -117,6 +121,9 @@ export const DEFAULT_LABELS = {
   dt_resize_handle_title:    "اسحب لتغيير العرض، أو انقر مرتين للملاءمة التلقائية",
   dt_no_results:             "لا توجد نتائج مطابقة",
   dt_filter_button_prefix:   "تصفية",
+  dt_sort_button_prefix:     "ترتيب حسب",
+  dt_sort_asc:               "تصاعدي",
+  dt_sort_desc:              "تنازلي",
   dt_last_visible_column_hint: "يجب أن يبقى عمود واحد ظاهرًا على الأقل",
   dt_columns_button:         "الأعمدة",
   dt_columns_title:          "الأعمدة",
@@ -288,6 +295,13 @@ export const DEFAULT_LABELS = {
   ew_xr_resize_toggle_label:       "تغيير الحجم",
   ew_xr_resize_toggle_title:       "فعّل سحب زاوية الجدول لتغيير عرض الجدول والنموذج وارتفاعهما. يُحفظ التغيير كافتراضي لجميع المستخدمين.",
   ew_xr_resize_grip_title:         "اسحب لتغيير عرض الجدول والنموذج وارتفاع الجدول",
+
+  // The draggable divider between the queue and the inspection panel
+  // (QueueSplitResizer). Arabic wording is the owner's to adjust later
+  // through Settings; these are the defaults.
+  ew_queue_split_handle_aria:      "تغيير عرض قائمة العينات مقابل نموذج الفحص",
+  ew_queue_split_handle_title:     "اسحب لتغيير العرض — انقر مرتين للعودة إلى الوضع الافتراضي",
+  ew_queue_split_reset_announce:   "تمت إعادة العرض إلى الوضع الافتراضي",
 
   // The stats strip («متابعة العمل») above the queue names WHOSE figures it is
   // showing. "own" and "all" keep their original wording; these three cover the
@@ -532,6 +546,12 @@ export const DEFAULT_LABELS = {
   ip_next_phase_btn:            "المرحلة التالية",
   ip_msg_missing_required_submit: "أكمل جميع الحقول الإلزامية قبل التقديم.",
   ip_msg_missing_required_phase:  "أكمل الحقول الإلزامية في هذه المرحلة قبل الانتقال.",
+  // B-XQIO032 defense in depth: every current caller's onSave already catches
+  // its own write errors and resolves normally, but this panel's own contract
+  // does not guarantee that — shown only if onSave ever rejects outright, so
+  // the button never gets stuck with no visible explanation. The entered
+  // answer is untouched either way (`ans` is not reset on this path).
+  ip_msg_save_failed_generic:    "تعذّر حفظ الإجابة. الإجابة التي أدخلتها ما زالت موجودة — يمكنك المحاولة مرة أخرى.",
   ip_no_template_msg:           "اختر نموذجاً لعرض حقول الفحص.",
   ip_no_visible_fields_msg:     "لا توجد حقول ظاهرة في هذه المرحلة.",
   ip_select_placeholder:        "اختر...",

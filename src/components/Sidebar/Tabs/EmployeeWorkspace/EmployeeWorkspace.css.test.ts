@@ -34,9 +34,7 @@ describe("EmployeeWorkspace.css — .ew-ref-queue layout", () => {
   );
 
   // Anchored to the start of a line: selectors in this file are each written
-  // flush-left on their own line, so without the anchor a lookup for
-  // ".ew-ref-queue" would also match as a substring of the earlier, unrelated
-  // ".ew-split--right .ew-ref-queue { height: ... }" rule.
+  // flush-left on their own line.
   function ruleBodyFor(selector: string): string {
     const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const match = css.match(new RegExp(`(?:^|\\n)${escaped}\\s*\\{([^}]*)\\}`));
@@ -59,11 +57,5 @@ describe("EmployeeWorkspace.css — .ew-ref-queue layout", () => {
     const body = ruleBodyFor(".ew-ref-queue .dt-table-wrap");
     expect(body).toMatch(/flex:\s*1\s+1\s+0/);
     expect(body).toMatch(/min-height:\s*0/);
-  });
-
-  it("the desktop split no longer forces a height:100% on .dt-table-wrap (would fight the flex sizing above)", () => {
-    const body = ruleBodyFor(".ew-split--right .dt-table-wrap");
-    expect(body).not.toMatch(/height:\s*100%/);
-    expect(body).toMatch(/max-height:\s*none/);
   });
 });

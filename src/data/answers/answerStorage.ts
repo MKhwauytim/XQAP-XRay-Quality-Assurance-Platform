@@ -16,6 +16,30 @@ import { getPopulationMonthDir, getSampleEmployeeDir, safeWorkspaceFilePart } fr
 
 const ANSWERS_FOLDER = "employee-answers";
 
+/**
+ * `updateEmployeeAnswerFile`'s own casLoop tuning (B-XQIO032). This file is
+ * the single highest-stakes CAS write in the app — an employee's typed
+ * inspection answers, submitted through نموذج الفحص, with no backend and no
+ * second copy anywhere else — so it gets a deliberately wider ladder than
+ * casLoop's shared defaults (`DEFAULT_MAX_RETRIES`/`DEFAULT_BASE_DELAY_MS` in
+ * casLoop.ts), passed as a per-call override the same way `actionLog.ts`
+ * already tunes its own SMB-sensitive append. casLoop's defaults are
+ * light-touch on purpose — most of its ~15 other callers are low-stakes or
+ * already re-tried at a higher layer — and are left untouched here.
+ *
+ * The scale is picked to match this app's own precedent for absorbing SMB
+ * propagation delay rather than inventing a new one: `transientFileErrors.ts`
+ * documents a post-write verification ladder that waits up to ~11 s across 8
+ * attempts for exactly this reason (a share's directory listing lagging
+ * behind a write that already completed). 14 attempts at a 150 ms base give
+ * a worst case of 91 * 150 ms ≈ 13.6 s before jitter (~20 s with casLoop's
+ * ±50 % jitter) — comparable order of magnitude, reached with more, finer-
+ * grained attempts so a short contention window is more likely to be caught
+ * on some attempt rather than straddled by too few, wide gaps.
+ */
+const ANSWER_SAVE_MAX_RETRIES = 14;
+const ANSWER_SAVE_BASE_DELAY_MS = 150;
+
 async function getAnswersDir(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
@@ -153,7 +177,16 @@ async function updateEmployeeAnswerFile(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   username: string,
-  updater: (file: EmployeeAnswerFile) => AnswerFileUpdate
+  updater: (file: EmployeeAnswerFile) => AnswerFileUpdate,
+  /**
+   * Telemetry label for this write, attached only if casLoop's retry ladder
+   * is fully exhausted (B-XQIO032). Distinct from `logCodedError`'s generic
+   * `casLoop:exhausted` entry — that one still fires unconditionally and is
+   * unchanged — this is additive, call-site-specific context (e.g.
+   * `"answer-save"`) so a future occurrence is diagnosable by feature rather
+   * than only by the generic coded message the user sees.
+   */
+  telemetryAction: string = "answer-file-write"
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   // Month lock gate — single choke point for every employee-file write
   // (answers, referral/replacement requests, reopen). Rejects loudly.
@@ -199,7 +232,25 @@ async function updateEmployeeAnswerFile(
       }
       return { done: false };
     },
-    { conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ ملف الموظف بعد عدة محاولات." }
+    {
+      maxRetries: ANSWER_SAVE_MAX_RETRIES,
+      baseDelayMs: ANSWER_SAVE_BASE_DELAY_MS,
+      conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ ملف الموظف بعد عدة محاولات.",
+      // B-XQIO032: capture the RAW error casLoop caught — name/message/stack,
+      // not just the XQ-IO code it resolved to — into the persisted error log
+      // with this write's own page/action context. `page` comes for free from
+      // the ambient errorContext (whatever tab/sub-tab the user was actually
+      // on); only `action` needs stating here, since casLoop has no way to
+      // know this attempt was an inspection-form answer save versus, say, a
+      // reopen-request append that happens to share the same file.
+      onExhausted: (cause, code) => {
+        logError(
+          `answerStorage:${telemetryAction}`,
+          cause instanceof Error ? cause : new Error(String(cause)),
+          { action: telemetryAction, errorCode: code }
+        );
+      },
+    }
   );
 }
 
@@ -266,7 +317,7 @@ export async function saveEmployeeAnswers(
         return withValueHistory(previous, withStoredHistory(previous, stripOnBehalf(item)));
       }),
     };
-  });
+  }, "answer-save-bulk");
 }
 
 /**
@@ -291,7 +342,7 @@ export async function upsertItemAnswer(
   return updateEmployeeAnswerFile(directoryHandle, monthFolderName, username, (file) => {
     const previous = file.items.find((i) => i.xrayImageId === item.xrayImageId);
     return upsertItemInFile(file, withStoredHistory(previous, stripOnBehalf(item)));
-  });
+  }, "answer-save");
 }
 
 /**
@@ -384,7 +435,7 @@ export async function upsertItemAnswerOnBehalf(
       history: [...(previous?.history ?? []), historyEntry],
     };
     return upsertItemInFile(file, next);
-  });
+  }, "answer-save-on-behalf");
 }
 
 /**
@@ -423,7 +474,7 @@ export async function reopenItemAnswer(
       ...file,
       items: file.items.map((i) => (i.xrayImageId === xrayImageId ? reopened : i)),
     };
-  });
+  }, "answer-reopen");
 }
 
 /**
@@ -449,7 +500,7 @@ export async function setItemQualityNote(
       ...file,
       items: file.items.map((i) => (i.xrayImageId === xrayImageId ? updated : i)),
     };
-  });
+  }, "quality-note-save");
 }
 
 /** Idempotently append a referral request to the originating employee's personal file. */
@@ -465,7 +516,7 @@ export async function appendReferralToEmployee(
         return file;
       }
       return { ...file, referralRequests: [...(file.referralRequests ?? []), request] };
-    });
+    }, "referral-request-append");
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "خطأ غير معروف." };
   }
@@ -484,7 +535,7 @@ export async function appendReplacementToEmployee(
         return file;
       }
       return { ...file, replacementRequests: [...(file.replacementRequests ?? []), request] };
-    });
+    }, "replacement-request-append");
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "خطأ غير معروف." };
   }
@@ -503,7 +554,7 @@ export async function appendReopenToEmployee(
         return file;
       }
       return { ...file, reopenRequests: [...(file.reopenRequests ?? []), request] };
-    });
+    }, "reopen-request-append");
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "خطأ غير معروف." };
   }

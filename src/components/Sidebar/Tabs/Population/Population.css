@@ -75,12 +75,8 @@
   font-family: var(--p-font);
 }
 
+/* Width + gutters come from .page-shell (src/styles/primitives.css). */
 .population-page {
-  width: 100%;
-  min-height: calc(var(--app-vh) - 44px);
-  max-width: 1440px;
-  margin: 0 auto;
-  padding: 28px /* no-scale */;
   direction: rtl;
   background: var(--p-bg);
   color: var(--p-text);
@@ -3131,6 +3127,47 @@ select.save-disk-input {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* Sits next to .bv-filter-btn in the same .bv-th-content flex row and is
+   deliberately sized/skinned identically — the two are peer affordances on one
+   header cell. Before this rule existed the sort button rendered with
+   user-agent <button> chrome (grey face, outset border) beside a transparent
+   24px filter square, which is what read as a detached chip. */
+.bv-sort-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--p-muted);
+  cursor: pointer;
+  line-height: 1;
+}
+.bv-sort-btn:hover,
+.bv-sort-btn.active {
+  border-color: var(--p-border);
+  background: var(--c-surface);
+  color: var(--p-primary);
+}
+/* The `active` class was already applied by BrowseDataView.tsx and consumed by
+   nothing, so a sorted column was visually identical to an unsorted one. The
+   inset ring is the same accent .bv-filter-btn.active uses. */
+.bv-sort-btn.active {
+  box-shadow: inset 0 0 0 1px rgba(23, 54, 93, 0.08);
+}
+/* Unsorted state: the chevron is an affordance ("you may sort by this"), not a
+   status ("this is sorted ascending"). Dimming it keeps the header quiet across
+   a wide table while leaving the control discoverable on hover. */
+.bv-sort-btn-idle-icon {
+  opacity: 0.42;
+}
+.bv-sort-btn:hover .bv-sort-btn-idle-icon {
+  opacity: 1;
 }
 .bv-filter-btn {
   flex: 0 0 auto;

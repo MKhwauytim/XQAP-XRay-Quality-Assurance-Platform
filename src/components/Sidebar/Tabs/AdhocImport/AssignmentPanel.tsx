@@ -304,7 +304,7 @@ export default function AssignmentPanel({
       {canAssign && (
         <button
           type="button"
-          className="adhoc-assign-submit"
+          className="ui-btn ui-btn--primary adhoc-assign-submit"
           disabled={locked || preview.plan.length === 0}
           onClick={handleSubmit}
         >
