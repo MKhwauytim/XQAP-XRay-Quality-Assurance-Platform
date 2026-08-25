@@ -34,9 +34,12 @@ import { formatStageLabel } from "../../../../../../data/population/stageHelpers
 import type { ReplacementIndexRow } from "../../../../../../data/population/replacementIndexTypes";
 import type { DirectoryHandleLike } from "../../../../../../data/storage/fileSystemAccess";
 import {
+  loadAdminBrowsePreset,
+  loadUserBrowsePreset,
   saveAdminBrowseDatasetPreset,
   saveUserBrowseDatasetPreset,
 } from "../../../../../../data/preferences/browsePresetStorage";
+import { logRejection } from "../../../../../../data/storage/errorLogger";
 import type { PersonalStats, PersonalQuota, ReplacementDialogState, ReassignModalState } from "../XrayReferrals";
 
 /** Shared with population/adhoc browse presets — see BrowsePresetDatasetKind. */
@@ -1089,15 +1092,12 @@ export function useQueuePanelResize({
   canConfigureColumns,
   baseColumns,
   effectiveColConfig,
-  loadedLayout,
 }: {
   directoryHandle: DirectoryHandleLike;
   username: string;
   canConfigureColumns: boolean;
   baseColumns: DataTableCol<DistributionEntry>[];
   effectiveColConfig: ColConfig;
-  /** A preset's saved geometry once the caller's own mount effect loads it (personal-over-admin already resolved there). */
-  loadedLayout: QueuePanelSplitLayout | undefined;
 }) {
   const [resizeMode, setResizeMode] = useState(false);
   const [queueFr, setQueueFr] = useState(XR_SPLIT_DEFAULT_QUEUE_FR);
@@ -1105,13 +1105,25 @@ export function useQueuePanelResize({
   const [splitHeightPx, setSplitHeightPx] = useState<number | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
 
+  // Owns its own preset read (personal-over-admin) rather than depending on the
+  // caller's mount effect, so this hook is a self-contained unit — the caller
+  // only needs to render the grip and pass the same fields it already has.
   useEffect(() => {
-    if (!loadedLayout) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing state IN from the workspace disk preset, loaded async by the caller's own mount effect
-    setQueueFr(loadedLayout.queueFr);
-    setPanelFr(loadedLayout.panelFr);
-    setSplitHeightPx(loadedLayout.heightPx);
-  }, [loadedLayout]);
+    void Promise.all([
+      loadAdminBrowsePreset(directoryHandle),
+      loadUserBrowsePreset(directoryHandle, username),
+    ])
+      .then(([adminFile, userFile]) => {
+        const layout =
+          userFile.browseData[REFERRALS_PRESET_KEY]?.layout ??
+          adminFile.browseData[REFERRALS_PRESET_KEY]?.layout;
+        if (!layout) return;
+        setQueueFr(layout.queueFr);
+        setPanelFr(layout.panelFr);
+        setSplitHeightPx(layout.heightPx);
+      })
+      .catch(logRejection("xrayReferrals:loadQueueSplitLayout"));
+  }, [directoryHandle, username]);
 
   // Read by the grid-column/height rules in XrayReferrals.css;
   // `--ew-xr-split-height` is only emitted once a height has actually been
@@ -1214,6 +1226,63 @@ export function ResizeModeToggle({ active, onToggle }: { active: boolean; onTogg
         {L.ew_xr_resize_toggle_label}
       </button>
     </div>
+  );
+}
+
+/**
+ * The queue toolbar's right-side controls: `ResizeModeToggle` (admin/manager
+ * only) and `QueueScopePicker` (oversight only). Extracted purely to keep
+ * `XrayReferrals`'s render under `check:complexity`'s function line budget —
+ * see `useQueuePanelResize` above for the same reasoning applied to state.
+ */
+export function XrQueueToolbarExtras({
+  canConfigureColumns, resizeMode, onToggleResize,
+  canSeeAll, scopeEmployee, scopeOptions, totalCount, onChangeScope,
+}: {
+  canConfigureColumns: boolean;
+  resizeMode: boolean;
+  onToggleResize: () => void;
+  canSeeAll: boolean;
+  scopeEmployee: string;
+  scopeOptions: QueueScopeOption[];
+  totalCount: number;
+  onChangeScope: (next: string) => void;
+}) {
+  if (!canConfigureColumns && !canSeeAll) return null;
+  return (
+    <>
+      {canConfigureColumns && <ResizeModeToggle active={resizeMode} onToggle={onToggleResize} />}
+      {canSeeAll && (
+        <QueueScopePicker
+          value={scopeEmployee}
+          options={scopeOptions}
+          totalCount={totalCount}
+          // Selection is DELIBERATELY not cleared here: ids already persist across
+          // case-filter changes and silent refreshes, are re-validated against
+          // entriesById before anything is submitted, and reaching across employees
+          // is the whole point of the bulk-reassign flow.
+          onChange={onChangeScope}
+        />
+      )}
+    </>
+  );
+}
+
+/** The queue's resize-corner grip — see `.ew-xr-resize-grip` in XrayReferrals.css. */
+export function XrResizeGrip({ visible, label, onMouseDown }: {
+  visible: boolean;
+  label: string;
+  onMouseDown: (e: ReactMouseEvent<HTMLDivElement>) => void;
+}) {
+  if (!visible) return null;
+  return (
+    <div
+      className="ew-xr-resize-grip"
+      role="separator"
+      aria-label={label}
+      title={label}
+      onMouseDown={onMouseDown}
+    />
   );
 }
 
