@@ -294,6 +294,8 @@
 .fb-msg-badge.issue { background: #FEF2F2; color: #991B1B; }
 .fb-msg-badge.inquiry { background: #FFFBEB; color: #92400E; }
 .fb-msg-badge.resolved-badge { background: #DCFCE7; color: #166534; }
+.fb-msg-badge.answered-badge { background: var(--c-success-bg); color: var(--c-success); }
+.fb-msg-badge.awaiting-badge { background: var(--c-warning-bg); color: var(--c-warning); }
 
 .fb-msg-body {
   padding: 10px 12px;
@@ -393,4 +395,28 @@
   background: var(--c-navy);
   color: #fff;
   border-color: var(--c-navy);
+}
+
+/* ── Legacy-migration finalize (real admin only) ─────────── */
+.fb-finalize-legacy {
+  padding: 10px 16px 0;
+  flex-shrink: 0;
+}
+.fb-finalize-legacy-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  background: var(--c-surface-2);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--c-ink-2);
+  cursor: pointer;
+  font-family: inherit;
+}
+.fb-finalize-legacy-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.fb-finalize-legacy-msg {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--c-ink-3);
+  line-height: 1.5;
 }

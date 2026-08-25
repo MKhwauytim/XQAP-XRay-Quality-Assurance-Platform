@@ -85,11 +85,16 @@ describe("FeedbackWidget — per-thread data fetching", () => {
   });
 
   it("reads the index for the list and opens only the current page's thread files", async () => {
+    // Newest-first, matching what the real `listThreadSummaries` guarantees
+    // (feedbackStorage.ts sorts by `createdAt` descending) -- the widget's own
+    // "my messages" sort-by-latest-activity then keeps that order stable
+    // before any thread body has loaded (it falls back to `createdAt`), so
+    // page one is still the newest 100 either way.
     const summaries = Array.from({ length: 150 }, (_, i) =>
       summary({
         threadId: `t2026082410${String(i).padStart(4, "0")}-aaaaaaaa`,
         from: "sara",
-        createdAt: new Date(Date.UTC(2026, 7, 24, 10, 0, i)).toISOString(),
+        createdAt: new Date(Date.UTC(2026, 7, 24, 10, 0, 149 - i)).toISOString(),
       })
     );
     storage.listThreadSummaries.mockResolvedValue(summaries);
@@ -100,7 +105,8 @@ describe("FeedbackWidget — per-thread data fetching", () => {
     await waitFor(() => expect(storage.listThreadSummaries).toHaveBeenCalled());
     await waitFor(() => expect(storage.loadThreads).toHaveBeenCalled());
 
-    // DATA_PAGE_SIZE is 100: page one, and only page one.
+    // DATA_PAGE_SIZE is 100: page one, and only page one -- the OLDEST
+    // summary (index 149, last in this newest-first fixture) is on page two.
     const requestedIds = storage.loadThreads.mock.calls.at(-1)![1];
     expect(requestedIds).toHaveLength(100);
     expect(requestedIds).not.toContain(summaries[149]!.threadId);

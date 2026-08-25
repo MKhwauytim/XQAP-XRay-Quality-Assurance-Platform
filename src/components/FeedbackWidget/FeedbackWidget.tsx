@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, MessageCircle, X } from "lucide-react";
 import { readSession } from "../../auth/authSession";
 import {
+  finalizeLegacyMigration,
   listThreadSummaries,
   loadThreads,
   replyToFeedback,
@@ -43,6 +44,32 @@ function formatTime(iso: string): string {
   });
 }
 
+/** Independent of `status` (open/resolved is a manual admin action) — this is
+ *  purely "did anyone reply yet", the thing a ticket opener actually wants to
+ *  scan for. */
+function hasReply(msg: FeedbackMessage): boolean {
+  return msg.replies.length > 0;
+}
+
+/** Newest timestamp touching this thread — its own message or any reply. */
+function latestActivity(msg: FeedbackMessage): string {
+  let latest = msg.timestamp;
+  for (const reply of msg.replies) {
+    if (reply.timestamp > latest) latest = reply.timestamp;
+  }
+  return latest;
+}
+
+type ReplyFilter = "all" | "awaiting" | "answered";
+
+function matchesReplyFilter(msg: FeedbackMessage | undefined, filter: ReplyFilter): boolean {
+  // A row whose thread body has not loaded yet is never hidden by the filter —
+  // it would otherwise flicker out of the list the instant a filter is picked
+  // and back in once the body arrives.
+  if (!msg || filter === "all") return true;
+  return filter === "answered" ? hasReply(msg) : !hasReply(msg);
+}
+
 export function FeedbackWidget() {
   const { directoryHandle } = useWorkspace();
   const session = readSession();
@@ -59,8 +86,15 @@ export function FeedbackWidget() {
   const [loading, setLoading] = useState(false);
   const [adminTab, setAdminTab] = useState<"new" | "all">("new");
   const [filter, setFilter] = useState<"open" | "resolved" | "all">("open");
+  const [myReplyFilter, setMyReplyFilter] = useState<ReplyFilter>("all");
+  const [adminReplyFilter, setAdminReplyFilter] = useState<ReplyFilter>("all");
   const [myPage, setMyPage] = useState(1);
   const [adminPage, setAdminPage] = useState(1);
+
+  // Admin-only, one-time "finish the legacy migration" action (see
+  // finalizeLegacyMigration's own doc). Not part of the regular refresh cycle.
+  const [finalizing, setFinalizing] = useState(false);
+  const [finalizeMessage, setFinalizeMessage] = useState<string | null>(null);
 
   // Submit form state
   const [category, setCategory] = useState<FeedbackCategory>("suggestion");
@@ -82,6 +116,12 @@ export function FeedbackWidget() {
     enabled: open,
   });
   const isManager = session ? canManageFeedback(session.role) : false;
+  // The legacy-migration finalize action is destructive-adjacent (it removes
+  // `messages.json` once archived) and workspace-wide, not per-conversation —
+  // gated to the REAL admin only, same split AdminToolbar uses for its own
+  // admin-only controls: a demo session reports role "admin" purely to unlock
+  // tab visibility and must never see this button.
+  const isRealAdmin = session?.role === "admin" && session?.mode !== "demo";
 
   const refresh = useCallback(async () => {
     if (!directoryHandle) return;
@@ -190,6 +230,41 @@ export function FeedbackWidget() {
     }
   }
 
+  async function handleFinalizeLegacyMigration() {
+    if (!directoryHandle) return;
+    setFinalizing(true);
+    setFinalizeMessage(null);
+    try {
+      const result = await finalizeLegacyMigration(directoryHandle);
+      const l = getLabels();
+      if (result.reason === "no-legacy-data") {
+        setFinalizeMessage(l.fb_finalize_legacy_result_none);
+      } else if (result.reason === "verification-failed") {
+        setFinalizeMessage(
+          l.fb_finalize_legacy_result_failed
+            .replace("{verified}", String(result.verifiedCount))
+            .replace("{total}", String(result.totalLegacyCount))
+        );
+      } else if (result.reason === "remove-unsupported") {
+        setFinalizeMessage(l.fb_finalize_legacy_result_archive_failed);
+      } else if (result.migratedNow > 0) {
+        setFinalizeMessage(
+          l.fb_finalize_legacy_result_migrated
+            .replace("{migrated}", String(result.migratedNow))
+            .replace("{verified}", String(result.verifiedCount))
+        );
+      } else {
+        setFinalizeMessage(
+          l.fb_finalize_legacy_result_verified.replace("{verified}", String(result.verifiedCount))
+        );
+      }
+    } catch {
+      setFinalizeMessage(getLabels().fb_finalize_legacy_error);
+    } finally {
+      setFinalizing(false);
+    }
+  }
+
   // All three run on SUMMARIES -- status, author and count are index fields, so
   // filtering and paginating costs no thread reads at all.
   const openCount = summaries.filter((s) => s.status === "open").length;
@@ -199,20 +274,48 @@ export function FeedbackWidget() {
   const filteredSummaries = summaries.filter((s) =>
     filter === "all" ? true : s.status === filter
   );
-  const safeMyPage = clampPage(myPage, mySummaries.length);
-  const safeAdminPage = clampPage(adminPage, filteredSummaries.length);
 
-  // Plain consts, not useMemo: `mySummaries`/`filteredSummaries` are cheap
-  // filters over already-small summary arrays, and the React Compiler already
-  // memoizes this component -- wrapping a derived value in a manual useMemo
-  // whose own inputs are unmemoized plain consts is what the compiler flags
-  // as "existing memoization could not be preserved". Every other derived
-  // value in this component (openCount, mySummaries, filteredSummaries) is
-  // the same plain-const shape.
+  // Sorted by LATEST ACTIVITY, not createdAt: this is specifically what makes
+  // "which of my tickets just got a reply" findable at a glance. The index
+  // deliberately carries no reply-recency field (a plain reply must never
+  // write the shared index -- see appendReply's doc and the regression test
+  // pinning it), so this reads it from whichever thread bodies happen to be
+  // loaded already (`threadsById`, filled by the effect below) and falls back
+  // to `createdAt` for a row not loaded yet. Rows re-sort slightly as bodies
+  // stream in -- the same "fills in progressively" shape the reply list itself
+  // already has, not a new pattern for this panel.
+  //
+  // Crucially, this reorders WITHOUT changing which ids get fetched: fetching
+  // stays bounded to the current page either way (see the loadThreads effect
+  // below), so a mailbox with far more than one page of tickets still opens
+  // only that page's thread files, never the whole history.
+  const myByActivity = [...mySummaries].sort((a, b) => {
+    const ta = threadsById[a.threadId];
+    const tb = threadsById[b.threadId];
+    const la = ta ? latestActivity(ta) : a.createdAt;
+    const lb = tb ? latestActivity(tb) : b.createdAt;
+    return lb.localeCompare(la);
+  });
+  const myFilteredSummaries = myByActivity.filter((s) =>
+    matchesReplyFilter(threadsById[s.threadId], myReplyFilter)
+  );
+  const adminFilteredSummaries = filteredSummaries.filter((s) =>
+    matchesReplyFilter(threadsById[s.threadId], adminReplyFilter)
+  );
+
+  const safeMyPage = clampPage(myPage, myFilteredSummaries.length);
+  const safeAdminPage = clampPage(adminPage, adminFilteredSummaries.length);
+
+  // Plain consts, not useMemo: these are cheap filters/sorts over already-small
+  // summary arrays, and the React Compiler already memoizes this component --
+  // wrapping a derived value in a manual useMemo whose own inputs are
+  // unmemoized plain consts is what the compiler flags as "existing
+  // memoization could not be preserved". Every other derived value in this
+  // component is the same plain-const shape.
   const visibleSummaries =
     isManager && adminTab === "all"
-      ? pageSlice(filteredSummaries, safeAdminPage)
-      : pageSlice(mySummaries, safeMyPage);
+      ? pageSlice(adminFilteredSummaries, safeAdminPage)
+      : pageSlice(myFilteredSummaries, safeMyPage);
 
   const visibleIds = visibleSummaries.map((summary) => summary.threadId);
   // Stable dependency: the array identity changes on every render, the joined
@@ -320,17 +423,50 @@ export function FeedbackWidget() {
 
           {/* Filter bar (admin, all-messages view) */}
           {isManager && adminTab === "all" && (
-            <div className="fb-filter-bar">
-              {(["open", "resolved", "all"] as const).map((f) => (
-                <button
-                  key={f}
-                  className={`fb-filter-btn${filter === f ? " active" : ""}`}
-                  onClick={() => { setFilter(f); setAdminPage(1); }}
-                >
-                  {f === "open" ? getLabels().fb_filter_open : f === "resolved" ? getLabels().fb_filter_resolved : getLabels().fb_filter_all}
-                </button>
-              ))}
-            </div>
+            <>
+              <div className="fb-filter-bar">
+                {(["open", "resolved", "all"] as const).map((f) => (
+                  <button
+                    key={f}
+                    className={`fb-filter-btn${filter === f ? " active" : ""}`}
+                    onClick={() => { setFilter(f); setAdminPage(1); }}
+                  >
+                    {f === "open" ? getLabels().fb_filter_open : f === "resolved" ? getLabels().fb_filter_resolved : getLabels().fb_filter_all}
+                  </button>
+                ))}
+              </div>
+              {/* Reply-status filter: separate axis from open/resolved -- a
+                  ticket can be open AND already answered (waiting on the
+                  requester), which the status filter alone cannot say. */}
+              <div className="fb-filter-bar">
+                {(["all", "awaiting", "answered"] as const).map((f) => (
+                  <button
+                    key={f}
+                    className={`fb-filter-btn${adminReplyFilter === f ? " active" : ""}`}
+                    onClick={() => { setAdminReplyFilter(f); setAdminPage(1); }}
+                  >
+                    {f === "all"
+                      ? getLabels().fb_reply_filter_all
+                      : f === "awaiting"
+                        ? getLabels().fb_reply_filter_awaiting
+                        : getLabels().fb_reply_filter_answered}
+                  </button>
+                ))}
+              </div>
+              {isRealAdmin && (
+                <div className="fb-finalize-legacy">
+                  <button
+                    type="button"
+                    className="fb-finalize-legacy-btn"
+                    disabled={finalizing}
+                    onClick={() => { void handleFinalizeLegacyMigration(); }}
+                  >
+                    {finalizing ? getLabels().fb_finalize_legacy_running : getLabels().fb_finalize_legacy_btn}
+                  </button>
+                  {finalizeMessage && <p className="fb-finalize-legacy-msg">{finalizeMessage}</p>}
+                </div>
+              )}
+            </>
           )}
 
           {/* Body */}
@@ -395,6 +531,24 @@ export function FeedbackWidget() {
                 {!submitted && mySummaries.length > 0 && (
                   <div style={{ marginTop: 20 }}>
                     <span className="fb-label">{getLabels().fb_my_messages_label}</span>
+                    {/* Sorted newest-activity-first (see myByActivity above) --
+                        this filter narrows it further to just what needs a
+                        look, or just what has already been handled. */}
+                    <div className="fb-filter-bar" style={{ padding: "6px 0 0" }}>
+                      {(["all", "awaiting", "answered"] as const).map((f) => (
+                        <button
+                          key={f}
+                          className={`fb-filter-btn${myReplyFilter === f ? " active" : ""}`}
+                          onClick={() => { setMyReplyFilter(f); setMyPage(1); }}
+                        >
+                          {f === "all"
+                            ? getLabels().fb_reply_filter_all
+                            : f === "awaiting"
+                              ? getLabels().fb_reply_filter_awaiting
+                              : getLabels().fb_reply_filter_answered}
+                        </button>
+                      ))}
+                    </div>
                     <div className="fb-msg-list" style={{ marginTop: 8 }}>
                       {visibleSummaries.map((s) => {
                         const msg = threadsById[s.threadId];
@@ -416,7 +570,7 @@ export function FeedbackWidget() {
                         );
                       })}
                     </div>
-                    <Pagination page={safeMyPage} totalItems={mySummaries.length} onPageChange={setMyPage} itemLabel="رسالة" />
+                    <Pagination page={safeMyPage} totalItems={myFilteredSummaries.length} onPageChange={setMyPage} itemLabel="رسالة" />
                   </div>
                 )}
               </>
@@ -427,7 +581,7 @@ export function FeedbackWidget() {
               <>
                 {loading ? (
                   <p className="fb-empty">{getLabels().fb_loading}</p>
-                ) : filteredSummaries.length === 0 ? (
+                ) : adminFilteredSummaries.length === 0 ? (
                   <p className="fb-empty">{getLabels().fb_empty}</p>
                 ) : (
                   <>
@@ -451,7 +605,7 @@ export function FeedbackWidget() {
                         );
                       })}
                     </div>
-                    <Pagination page={safeAdminPage} totalItems={filteredSummaries.length} onPageChange={setAdminPage} itemLabel="رسالة" />
+                    <Pagination page={safeAdminPage} totalItems={adminFilteredSummaries.length} onPageChange={setAdminPage} itemLabel="رسالة" />
                   </>
                 )}
               </>
@@ -496,6 +650,15 @@ function MessageCard({
         </span>
         {msg.status === "resolved" && (
           <span className="fb-msg-badge resolved-badge">{getLabels().fb_resolved_badge}</span>
+        )}
+        {/* Independent of the resolved badge above: "resolved" is a manual
+            admin action, "answered" is just "did anyone reply" -- an open
+            ticket can already have a reply and still be waiting on the
+            requester, which is exactly what this badge is for. */}
+        {hasReply(msg) ? (
+          <span className="fb-msg-badge answered-badge">{getLabels().fb_answered_badge}</span>
+        ) : (
+          <span className="fb-msg-badge awaiting-badge">{getLabels().fb_awaiting_badge}</span>
         )}
         <span className="fb-msg-time">{formatTime(msg.timestamp)}</span>
       </div>

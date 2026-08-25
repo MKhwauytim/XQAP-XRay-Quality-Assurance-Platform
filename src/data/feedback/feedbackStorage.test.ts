@@ -16,7 +16,9 @@ import {
   __resetIndexRepairCooldownForTests,
   appendReply,
   createThread,
+  FEEDBACK_MESSAGES_ARCHIVED_FILE,
   FEEDBACK_THREADS_INDEX_FILE,
+  finalizeLegacyMigration,
   listThreadSummaries,
   loadFeedback,
   loadThread,
@@ -678,5 +680,99 @@ describe("feedbackStorage — loadFeedback aggregate", () => {
     const [after] = await loadFeedback(root);
     expect(after!.replies).toHaveLength(1);
     expect(after!.status).toBe("resolved");
+  });
+});
+
+describe("feedbackStorage — finalizeLegacyMigration", () => {
+  it("archives messages.json once every legacy message is verified in the new system", async () => {
+    const root = makeRoot();
+    await seedLegacyLog(root, [LEGACY_ONE, LEGACY_TWO], "system");
+
+    const result = await finalizeLegacyMigration(root);
+    expect(result).toEqual({
+      migratedNow: 2,
+      verifiedCount: 2,
+      totalLegacyCount: 2,
+      archived: true,
+      reason: null,
+    });
+
+    const systemDir = await root.getDirectoryHandle("5-system", { create: false });
+    const feedbackDir = await systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.feedback, { create: false });
+
+    // Archived under the new name, byte-for-byte the same messages...
+    const archivedText = await (
+      await (await feedbackDir.getFileHandle(FEEDBACK_MESSAGES_ARCHIVED_FILE)).getFile()
+    ).text();
+    expect(archivedText).toContain("قديم");
+    expect(archivedText).toContain("أقدم");
+
+    // ...and the live name is gone, never merely emptied.
+    await expect(feedbackDir.getFileHandle("messages.json", { create: false })).rejects.toThrow();
+
+    // The tickets themselves are unaffected -- still readable through the new system.
+    expect((await listThreadSummaries(root)).map((s) => s.threadId).sort()).toEqual([
+      "legacy-1",
+      "legacy-2",
+    ]);
+  });
+
+  it("archives the legacy workspace-ROOT feedback/ folder too", async () => {
+    const root = makeRoot();
+    await seedLegacyLog(root, [LEGACY_ONE], "workspace-root");
+
+    const result = await finalizeLegacyMigration(root);
+    expect(result.archived).toBe(true);
+
+    const legacyDir = await root.getDirectoryHandle(SYSTEM_FOLDER_NAMES.feedback, { create: false });
+    await expect(legacyDir.getFileHandle("messages.json", { create: false })).rejects.toThrow();
+    await expect(legacyDir.getFileHandle(FEEDBACK_MESSAGES_ARCHIVED_FILE)).resolves.toBeDefined();
+  });
+
+  it("reports no-legacy-data for a brand-new workspace and archives nothing", async () => {
+    const root = makeRoot();
+    const result = await finalizeLegacyMigration(root);
+    expect(result).toEqual({
+      migratedNow: 0,
+      verifiedCount: 0,
+      totalLegacyCount: 0,
+      archived: false,
+      reason: "no-legacy-data",
+    });
+  });
+
+  it("archives on a workspace that was already lazily migrated earlier", async () => {
+    const root = makeRoot();
+    await seedLegacyLog(root, [LEGACY_ONE, LEGACY_TWO], "system");
+    // The read path already split these out, exactly as it does for every
+    // ordinary reader -- finalize must still find and archive the original.
+    await listThreadSummaries(root);
+
+    const result = await finalizeLegacyMigration(root);
+    expect(result.migratedNow).toBe(0); // nothing left for THIS call to migrate
+    expect(result.verifiedCount).toBe(2);
+    expect(result.archived).toBe(true);
+  });
+
+  it("never archives when a legacy message cannot be verified in the new system", async () => {
+    const root = makeRoot();
+    await seedLegacyLog(root, [LEGACY_ONE, LEGACY_TWO], "system");
+    // Deny writes so the migration step cannot create the thread files —
+    // simulating a workspace finalize attempted without write access.
+    setSimulatedWritePermission(root, "denied", "denied");
+
+    const result = await finalizeLegacyMigration(root);
+    expect(result.archived).toBe(false);
+    expect(result.reason).toBe("verification-failed");
+    expect(result.verifiedCount).toBe(0);
+    expect(result.totalLegacyCount).toBe(2);
+
+    setSimulatedWritePermission(root, "granted", "granted");
+    // Nothing was lost or half-written: the legacy log is exactly where it
+    // was, under its ORIGINAL name.
+    const systemDir = await root.getDirectoryHandle("5-system", { create: false });
+    const feedbackDir = await systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.feedback, { create: false });
+    await expect(feedbackDir.getFileHandle("messages.json", { create: false })).resolves.toBeDefined();
+    await expect(feedbackDir.getFileHandle(FEEDBACK_MESSAGES_ARCHIVED_FILE, { create: false })).rejects.toThrow();
   });
 });

@@ -488,6 +488,21 @@ export const DEFAULT_LABELS = {
   fb_resolve_btn:           "إغلاق",
   fb_resolved_badge:        "مغلقة",
   fb_unread_dot_aria:       "لديك {count} رسالة غير مقروءة",
+  fb_answered_badge:        "تم الرد",
+  fb_awaiting_badge:        "بانتظار الرد",
+  fb_reply_filter_all:      "الكل",
+  fb_reply_filter_awaiting: "بانتظار الرد",
+  fb_reply_filter_answered: "تم الرد",
+
+  // Legacy feedback-log finalize (admin-only, one-time action)
+  fb_finalize_legacy_btn:              "أرشفة الرسائل القديمة نهائيًا",
+  fb_finalize_legacy_running:          "جارٍ التحقق والأرشفة...",
+  fb_finalize_legacy_result_migrated:  "تم نقل {migrated} رسالة والتحقق من {verified} رسالة إجمالاً، وأُرشف الملف القديم.",
+  fb_finalize_legacy_result_verified:  "جميع الرسائل القديمة ({verified}) موجودة بالفعل في النظام الجديد، وأُرشف الملف القديم.",
+  fb_finalize_legacy_result_none:      "لا توجد رسائل قديمة لترحيلها.",
+  fb_finalize_legacy_result_failed:    "تم التحقق من {verified} فقط من أصل {total} رسالة قديمة — لم تُؤرشف أي بيانات، حتى لا يُفقد شيء. أعد المحاولة لاحقاً.",
+  fb_finalize_legacy_result_archive_failed: "تم التحقق من جميع الرسائل القديمة، لكن تعذّرت أرشفة الملف القديم على هذا الجهاز.",
+  fb_finalize_legacy_error:            "حدث خطأ أثناء محاولة الترحيل — أعد المحاولة.",
 
   // Login screen (AuthGate) — the first screen every user sees
   auth_tagline:                 "منصة فحص صور الأشعة",
