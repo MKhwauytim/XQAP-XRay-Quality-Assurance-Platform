@@ -101,7 +101,6 @@ import { formatStageLabel } from "../../../../../data/population/stageHelpers";
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import {
   CaseFilterSwitcher,
-  QueueScopePicker,
   QUEUE_SCOPE_ALL,
   buildQueueScopeOptions,
   QueueToolbar,
@@ -121,13 +120,12 @@ import {
   getVisibleReferralColumns,
   pct,
   isStudyCompleted,
-  ResizeModeToggle,
   REFERRALS_PRESET_KEY,
-  useQueuePanelResize,
-  type QueuePanelSplitLayout,
+  XrQueueToolbarExtras,
 } from "./XrayReferrals/subComponents";
 import { useCaseFilter } from "./XrayReferrals/caseFilter";
 import QueueSplitResizer from "./XrayReferrals/QueueSplitResizer";
+import { DEFAULT_QUEUE_SPLIT } from "../../../../../data/preferences/queueSplitStore";
 import "./XrayReferrals/XrayReferrals.css";
 
 // ── Column definitions ────────────────────────────────────────────────────────
@@ -784,11 +782,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const canSeeAll = can("view-all-entries");
   const canSetTemplate = canMutate("manage-inspection-template");
   const canConfigureColumns = canMutate("configure-referral-columns");
+  // On for every role by default. `can`, not `canMutate`: a personal, localStorage-only drag needs no writable workspace.
+  const canResizeLayout = can("resize-referral-layout");
   const canRequestReplacement = canMutate("request-replacement");
   const canSubmitReferrals = canMutate("submit-referrals");
-  // Oversight-only: select rows (manually or via the active filter) and request
-  // their reassignment to another employee in one action, through the same
-  // approval flow as إحالة and استبدال (see submitReassignmentRequests).
+  // Oversight-only: select rows and request reassignment in one action, via the same approval flow as إحالة/استبدال (submitReassignmentRequests).
   const canBulkReassignReferrals = canMutate("bulk-reassign-referrals");
   /**
    * May this user file a reassignment (إسناد لموظف آخر) at all — from the
@@ -840,7 +838,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const [scopeEmployee, setScopeEmployee] = useState<string>(username);
   const [replacementBusy, setReplacementBusy] = useState(false);
   const [colPreset, setColPreset]     = useState<ColConfig | undefined>(undefined);
-  const [loadedSplitLayout, setLoadedSplitLayout] = useState<QueuePanelSplitLayout | undefined>(undefined);
+  const [sharedSplitRatio, setSharedSplitRatio] = useState<number | undefined>(undefined);
   const [myQuota, setMyQuota]         = useState<PersonalQuota>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [filteredTableEntries, setFilteredTableEntries] = useState<DistributionEntry[]>([]);
@@ -899,8 +897,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           widths:  p.widths ?? {},
           dateFmt: (p.dateFmt ?? {}) as ColConfig["dateFmt"],
         });
-        setLoadedSplitLayout(p.layout); // fed to useQueuePanelResize below, constructed after effectiveColConfig
       }
+      // The split's personal layer is localStorage (queueSplitStore), not this file — only the ADMIN file feeds the shared default; QueueSplitResizer resolves personal-over-shared itself.
+      setSharedSplitRatio(adminFile.browseData[REFERRALS_PRESET_KEY]?.layout?.ratio ?? DEFAULT_QUEUE_SPLIT);
       })
       .catch(logRejection("xrayReferrals:loadBrowsePresets"));
   // eslint-disable-next-line react-hooks/exhaustive-deps -- applyTemplate is intentionally excluded; it is recreated on every render and including it would trigger an infinite loop
@@ -977,18 +976,19 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     return [selectCol, ...mapped];
   }, [baseColumns, stageMappings, canReassignSamples, answersMap]);
 
-  const effectiveColConfig = useMemo(
-    () => colPreset ?? loadLocalColConfig() ?? buildDefaultColConfig(columns),
-    [columns, colPreset]
-  );
-
-  const { resizeMode, setResizeMode, gridRef, gridStyle, handleSplitGripMouseDown } =
-    useQueuePanelResize({ directoryHandle, username, canConfigureColumns, baseColumns, effectiveColConfig, loadedLayout: loadedSplitLayout });
-
-  const visiblePreviewColumns = useMemo(
-    () => getVisibleReferralColumns(columns, effectiveColConfig, canSeeAll),
-    [columns, effectiveColConfig, canSeeAll]
-  );
+  const effectiveColConfig = useMemo(() => colPreset ?? loadLocalColConfig() ?? buildDefaultColConfig(columns), [columns, colPreset]);
+  // QueueSplitResizer's commit callback: a privileged drag also pushes to the shared preset, carrying the same column fields onColConfigChange below writes (one preset object per dataset).
+  const handleSplitCommit = useCallback((ratio: number) => {
+    if (!canConfigureColumns) return;
+    void saveAdminBrowseDatasetPreset(directoryHandle, REFERRALS_PRESET_KEY, {
+      columnOrder:    effectiveColConfig.order,
+      visibleColumns: baseColumns.map((c) => c.id).filter((id) => !effectiveColConfig.hidden.includes(id)),
+      widths:         effectiveColConfig.widths,
+      dateFmt:        effectiveColConfig.dateFmt,
+      layout:         { ratio },
+    });
+  }, [canConfigureColumns, effectiveColConfig, baseColumns, directoryHandle]);
+  const visiblePreviewColumns = useMemo(() => getVisibleReferralColumns(columns, effectiveColConfig, canSeeAll), [columns, effectiveColConfig, canSeeAll]);
 
   // Permissioned oversight view: the picked employee's rows, or everyone's.
   // This predicate is the ONLY thing the picker changes — chip counts,
@@ -1885,7 +1885,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <section className="page-shell ew-page" dir="rtl" ref={pageSectionRef}>
+    <section className="page-shell ew-page ew-xr-page-shell" dir="rtl" ref={pageSectionRef}>
       <PageHeader
         eyebrow={L.page_xray_referrals_eyebrow}
         title={L.page_xray_referrals_title}
@@ -1997,11 +1997,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         // panel underneath the pagination the moment it appeared.
         const showSelectionBar = canReassignSamples && entries.length > 0;
         const tableEl = (
-          <div
-            ref={gridRef}
-            className={`ew-ref-queue ew-xr-grid${showSelectionBar ? " ew-xr-grid--with-bar" : ""}`}
-            style={gridStyle}
-          >
+          <div className={`ew-ref-queue ew-xr-grid${showSelectionBar ? " ew-xr-grid--with-bar" : ""}`}>
             {showSelectionBar && (
               <ReassignSelectionBar
                 selectedCount={selectedIds.size}
@@ -2055,50 +2051,24 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               exportFileName={`صور الأشعة المحالة - ${selMonth || "كل الأشهر"}.xlsx`}
               expandedKey={selEntryId}
               onRowClick={(e) => selectEntry(e.xrayImageId)}
-              getRowClassName={(entry) =>
-                isStudyCompleted(entry, answersMap)
-                  ? "dt-tr--completed"
-                  : rowStatusClass(entry, pendingReferralIds, pendingReplacementIds)
-              }
+              getRowClassName={(entry) => isStudyCompleted(entry, answersMap) ? "dt-tr--completed" : rowStatusClass(entry, pendingReferralIds, pendingReplacementIds)}
               // Every role that can open this page sees the case chips (an
               // ordinary employee is their primary user); the scope picker
               // stays oversight-only, as before.
               toolbarStart={<CaseFilterSwitcher value={caseFilter.value} counts={caseFilter.counts} onChange={caseFilter.setValue} />}
-              toolbarEndExtra={(canSeeAll || canConfigureColumns) ? (
-                <>
-                  {canConfigureColumns && (
-                    <ResizeModeToggle active={resizeMode} onToggle={() => setResizeMode((v) => !v)} />
-                  )}
-                  {canSeeAll && (
-                    <QueueScopePicker
-                      value={scopeEmployee}
-                      options={scopeOptions}
-                      totalCount={entries.length}
-                      // Selection is DELIBERATELY not cleared here: ids already
-                      // persist across case-filter changes and silent refreshes, are
-                      // re-validated against `entriesById` before anything is
-                      // submitted, and reaching across employees is the whole point
-                      // of the bulk-reassign flow.
-                      onChange={setScopeEmployee}
-                    />
-                  )}
-                </>
-              ) : undefined}
+              toolbarEndExtra={
+                <XrQueueToolbarExtras
+                  canSeeAll={canSeeAll}
+                  scopeEmployee={scopeEmployee}
+                  scopeOptions={scopeOptions}
+                  totalCount={entries.length}
+                  onChangeScope={setScopeEmployee}
+                />
+              }
             />
-            {canConfigureColumns && resizeMode && (
-              <div
-                className="ew-xr-resize-grip"
-                role="separator"
-                aria-label={L.ew_xr_resize_grip_title}
-                title={L.ew_xr_resize_grip_title}
-                onMouseDown={handleSplitGripMouseDown}
-              />
-            )}
-            {/* Second grid column. The wrapper is what `position: sticky` on the
-                panel travels inside, and it keeps the empty-state placeholder in
-                the same track without a second set of placement rules. */}
+            {/* Second grid column: the sticky panel and the empty-state placeholder both live in this one placed track. */}
             <div className="ew-xr-panel-col">
-              <QueueSplitResizer />
+              <QueueSplitResizer enabled={canResizeLayout} sharedRatio={sharedSplitRatio} onCommit={handleSplitCommit} />
               {panelEntry ? (
                 <>
                 <PanelAuthoringNotice

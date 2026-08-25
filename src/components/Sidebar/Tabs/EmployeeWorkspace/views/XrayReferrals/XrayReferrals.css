@@ -13,6 +13,16 @@
    RTL is the page default, so column 1 is the RIGHT-hand (queue) column.
    ────────────────────────────────────────────────────────────────────────── */
 
+/* Owner feedback (2026-08-25): `.page-shell`'s shared 1600px cap (see its own
+   comment in primitives.css) left large empty margins on wide monitors —
+   width the table/panel split badly needed, since a narrow split is what was
+   crowding the inspection-panel phase stepper and hiding table columns. This
+   page alone raises the cap; the shared primitive (and every other page still
+   using its 1600px default) is untouched. */
+.page-shell.ew-xr-page-shell {
+  max-width: 2400px;
+}
+
 /* The grid container keeps the existing `.ew-ref-queue` class as well, so the
    toolbar-compaction rules already written for this queue in
    EmployeeWorkspace.css (which this screen's owner must not edit) keep
@@ -23,18 +33,12 @@
   display: grid;
   /* The handoff's own track definition. Both minimums are real: the queue can
      never be squeezed below 340px (it scrolls horizontally instead — see
-     `.dt-table` below), and the form column never below 430px. Two independent
-     drag mechanisms can set the first track: the resize grip
-     (`.ew-xr-resize-grip`) sets `--ew-xr-queue-fr` (an `fr` share); the
-     divider (`.ew-xr-split-handle` / QueueSplitResizer) sets
-     `--ew-xr-queue-basis` (a percentage, since a custom property cannot
-     produce a bare `fr` unit). The grip's `fr` var wins when present because
-     it resizes width and height together; otherwise the basis percentage
-     applies; the innermost default (53.49% — 1.15 ÷ 2.15, this grid's
-     original ratio) is what an untouched install or a cleared localStorage
-     gets. The second track mirrors the same precedence: `--ew-xr-panel-fr`
-     from the grip, else the plain `1fr` both mechanisms have always used. */
-  grid-template-columns: minmax(340px, var(--ew-xr-queue-fr, var(--ew-xr-queue-basis, 53.49%))) minmax(430px, var(--ew-xr-panel-fr, 1fr));
+     `.dt-table` below), and the form column never below 430px. The divider
+     (`.ew-xr-split-handle` / QueueSplitResizer.tsx) sets `--ew-xr-queue-basis`
+     (a percentage) on this element directly; the fallback (53.49% — 1.15 ÷
+     2.15, the grid's pre-divider ratio) is what an untouched install, a
+     cleared localStorage, or `resize-referral-layout` turned off all get. */
+  grid-template-columns: minmax(340px, var(--ew-xr-queue-basis, 53.49%)) minmax(430px, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto;
   align-items: stretch;
   /* `gap: 14px` in the handoff. Split deliberately: the row tracks below are
@@ -62,15 +66,9 @@
   grid-column: 1;
   grid-row: 2;
   /* The panel's own floor, so the two columns agree on where the fold is.
-     Both bounds follow `--ui-table-height-scale`; see `--ui-queue-floor`.
-     `--ew-xr-split-height`, when the resize grip (or a saved preset) has set
-     it, pins BOTH bounds to one fixed pixel height instead — a deliberate
-     drag/preset value should stop tracking the viewport until it is cleared. */
-  min-height: var(--ew-xr-split-height, var(--ui-queue-floor));
-  max-height: var(
-    --ew-xr-split-height,
-    max(var(--ui-queue-floor), calc((var(--app-vh) - 240px) * var(--ui-table-height-scale)))
-  );
+     Both bounds follow `--ui-table-height-scale`; see `--ui-queue-floor`. */
+  min-height: var(--ui-queue-floor);
+  max-height: max(var(--ui-queue-floor), calc((var(--app-vh) - 240px) * var(--ui-table-height-scale)));
 }
 
 .ew-ref-queue.ew-xr-grid > .data-pagination {
@@ -81,12 +79,20 @@
 
 /* ── Column 2 (RTL: left) — the inspection panel ─────────────────────────── */
 
-/* Spans the queue's table + pagination rows so the panel is as tall as the
-   whole queue, which is what `position: sticky` on `.ip-panel--right` needs
-   room to travel within. */
+/* Owner feedback (2026-08-25): this used to span `2 / 4` (table row + the
+   pagination row below it), on the theory that the panel should be "as tall
+   as the whole queue". But `.ip-panel--right`'s own max-height (below) is
+   capped by the SAME formula as `.dt-table-wrap`'s — with no added term for
+   the pagination bar — so a panel spanning both rows always finished ~40-50px
+   SHORT of the table+pagination's combined height, i.e. the two columns never
+   ended at the same length, and the gap read as "scroll further to find the
+   table's own pagination". Spanning row 2 ONLY makes the panel's bottom edge
+   match `.dt-table-wrap`'s bottom edge exactly (same formula, same row) —
+   pagination becomes a small control strip below the table with nothing
+   competing for space against it on the panel's side. */
 .ew-ref-queue.ew-xr-grid > .ew-xr-panel-col {
   grid-column: 2;
-  grid-row: 2 / 4;
+  grid-row: 2;
   min-width: 0;
   position: relative;
   display: flex;
@@ -96,56 +102,6 @@
 .ew-xr-panel-col > .ip-panel {
   flex: 1 1 auto;
 }
-
-/* ── Resize grip (admin/manager — `configure-referral-columns`) ─────────────── */
-
-/* Placed in the SAME grid cell as `.dt-table-wrap` (row 2, col 1) and pinned
-   to its bottom-start corner (RTL: physical bottom-left, the corner touching
-   the panel column) with `justify-self`/`align-self` rather than
-   `position: absolute` — a plain grid placement stays correct without
-   duplicating `.dt-table-wrap`'s own height/scroll math. Dragging updates
-   `--ew-xr-queue-fr` / `--ew-xr-panel-fr` (width split, horizontal motion) and
-   `--ew-xr-split-height` (shared height, vertical motion) together, like the
-   resize handle on a native `<textarea>`. Only rendered by XrayReferrals.tsx
-   when `ResizeModeToggle` is on, which is itself only rendered for
-   `configure-referral-columns` holders — see ew_xr_resize_toggle_* labels. */
-.ew-xr-resize-grip {
-  position: relative;
-  grid-column: 1;
-  grid-row: 2;
-  justify-self: start;
-  align-self: end;
-  width: 18px;
-  height: 18px;
-  margin-inline-start: -9px;
-  margin-block-end: -9px;
-  z-index: var(--z-sticky-corner);
-  border-radius: 4px;
-  cursor: nwse-resize;
-  background: var(--c-navy);
-  box-shadow: var(--sh-sm);
-  transition: filter 120ms ease;
-}
-
-.ew-xr-resize-grip:hover,
-.ew-xr-resize-grip:active {
-  filter: brightness(1.2);
-}
-
-/* Three diagonal dots at the grip's own inner corner, echoing the classic
-   resize-corner affordance. */
-.ew-xr-resize-grip::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image: radial-gradient(circle, var(--c-surface) 1.4px, transparent 1.6px);
-  background-size: 5px 5px;
-  background-position: 10px 4px, 10px 10px, 4px 10px;
-  background-repeat: no-repeat;
-  border-radius: inherit;
-}
-
-.ew-ref-queue.ew-xr-grid--with-bar > .ew-xr-resize-grip { grid-row: 3; }
 
 /* ── The draggable divider (QueueSplitResizer.tsx) ───────────────────────── */
 
@@ -192,6 +148,18 @@
   outline-offset: -2px;
 }
 
+/* `resize-referral-layout` off: no cursor/hit-area/visible line — the
+   element stays mounted purely so the layout effect can still find the grid
+   and apply the resolved ratio (see QueueSplitResizer.tsx's own comment). */
+.ew-xr-split-handle--disabled {
+  cursor: default;
+  pointer-events: none;
+}
+
+.ew-xr-split-handle--disabled::before {
+  display: none;
+}
+
 /* ── Selection bar variant ───────────────────────────────────────────────── */
 
 /* Rendered only for users who may file a reassignment, so every row below it
@@ -212,7 +180,11 @@
 .ew-ref-queue.ew-xr-grid--with-bar > .dt-toolbar   { grid-row: 2; }
 .ew-ref-queue.ew-xr-grid--with-bar > .dt-table-wrap { grid-row: 3; }
 .ew-ref-queue.ew-xr-grid--with-bar > .data-pagination { grid-row: 4; }
-.ew-ref-queue.ew-xr-grid--with-bar > .ew-xr-panel-col { grid-row: 3 / 5; }
+/* Row 3 only — same reasoning as the base (non-`--with-bar`) rule above: the
+   panel's height formula has no term for the pagination row, so spanning
+   past it always finished the panel short of the table+pagination's combined
+   height. */
+.ew-ref-queue.ew-xr-grid--with-bar > .ew-xr-panel-col { grid-row: 3; }
 
 /* ── Case-filter chips (جميع الحالات / مستهدف المؤشر / إحالات استثنائية) ──── */
 
@@ -376,10 +348,8 @@
 .ew-xr-grid .ew-ref-empty-panel {
   /* Stands in for the inspection panel, so it floors at the same place — a
      different value here makes the page jump height the moment a sample is
-     opened or closed. Mirrors the `--ew-xr-split-height` override above for
-     the same reason: a resized queue must not leave the empty-state block a
-     different height than the table beside it. */
-  min-height: var(--ew-xr-split-height, var(--ui-queue-floor));
+     opened or closed. */
+  min-height: var(--ui-queue-floor);
   position: sticky;
   top: 16px;
 }
@@ -430,12 +400,6 @@
   .ew-ref-queue.ew-xr-grid--with-bar > .dt-table-wrap {
     min-height: clamp(320px, 46vh, 520px);
     max-height: clamp(320px, 46vh, 520px);
-  }
-
-  /* The grip resizes a width split and a shared height that both stop
-     existing once the columns stack — nothing left for it to drag. */
-  .ew-xr-resize-grip {
-    display: none;
   }
 
   .ew-ref-queue.ew-xr-grid > .ew-xr-panel-col,

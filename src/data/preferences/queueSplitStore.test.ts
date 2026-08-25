@@ -9,8 +9,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_QUEUE_SPLIT, MAX_QUEUE_SPLIT, MIN_QUEUE_SPLIT, QUEUE_SPLIT_STORAGE_KEY,
-  __resetQueueSplitCacheForTests, getQueueSplit, isQueueSplitCustomized,
-  resetQueueSplit, setQueueSplit, subscribeToQueueSplit,
+  __resetQueueSplitCacheForTests, getQueueSplit, hasStoredQueueSplit, isQueueSplitCustomized,
+  resetQueueSplit, resolveQueueSplit, setQueueSplit, subscribeToQueueSplit,
 } from "./queueSplitStore";
 
 describe("queueSplitStore", () => {
@@ -60,5 +60,41 @@ describe("queueSplitStore", () => {
     stop();
     setQueueSplit(0.4);
     expect(calls).toBe(1);
+  });
+
+  // ── Shared default (owner follow-up, 2026-08-25) ──────────────────────────
+
+  it("hasStoredQueueSplit: false for an untouched browser, true once dragged", () => {
+    expect(hasStoredQueueSplit()).toBe(false);
+    setQueueSplit(0.6);
+    expect(hasStoredQueueSplit()).toBe(true);
+  });
+
+  it("hasStoredQueueSplit: true even after dragging back to the default (key removed, but was set)", () => {
+    // resolveQueueSplit's contract is about THIS drag having ever happened,
+    // not the current value — resetQueueSplit removes the key (see "removes
+    // the key rather than storing the default" above), so this is genuinely
+    // indistinguishable from "never touched" once reset. Documented here so a
+    // future reader doesn't expect otherwise.
+    setQueueSplit(0.6);
+    resetQueueSplit();
+    expect(hasStoredQueueSplit()).toBe(false);
+  });
+
+  it("resolveQueueSplit: personal storage wins over the shared ratio", () => {
+    setQueueSplit(0.4);
+    expect(resolveQueueSplit(0.6)).toBeCloseTo(0.4, 4);
+  });
+
+  it("resolveQueueSplit: the shared ratio is the default for an untouched browser", () => {
+    expect(resolveQueueSplit(0.6)).toBeCloseTo(0.6, 4);
+  });
+
+  it("resolveQueueSplit: the hardcoded default when neither personal nor shared exists", () => {
+    expect(resolveQueueSplit(undefined)).toBeCloseTo(DEFAULT_QUEUE_SPLIT, 4);
+  });
+
+  it("resolveQueueSplit: clamps an out-of-range shared ratio", () => {
+    expect(resolveQueueSplit(0.99)).toBe(MAX_QUEUE_SPLIT);
   });
 });

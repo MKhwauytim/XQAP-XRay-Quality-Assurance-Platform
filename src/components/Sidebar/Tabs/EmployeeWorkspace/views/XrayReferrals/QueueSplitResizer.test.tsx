@@ -20,7 +20,7 @@
 //      QueueSplitResizer.tsx): it is permanently null under jsdom regardless
 //      of visibility, which would fail every drag test below before it could
 //      start. The component checks `getComputedStyle(...).display` instead.
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { __resetQueueSplitCacheForTests, getQueueSplit } from "../../../../../../data/preferences/queueSplitStore";
 import QueueSplitResizer from "./QueueSplitResizer";
@@ -28,7 +28,11 @@ import QueueSplitResizer from "./QueueSplitResizer";
 const GRID_LEFT = 100;
 const GRID_WIDTH = 1000;   // right edge at 1100
 
-function renderInGrid(direction: "rtl" | "ltr" = "rtl") {
+function renderInGrid(direction: "rtl" | "ltr" = "rtl", props: {
+  enabled?: boolean;
+  sharedRatio?: number;
+  onCommit?: (ratio: number) => void;
+} = {}) {
   const grid = document.createElement("div");
   grid.className = "ew-ref-queue ew-xr-grid";
   grid.style.direction = direction;
@@ -40,7 +44,10 @@ function renderInGrid(direction: "rtl" | "ltr" = "rtl") {
   panelCol.className = "ew-xr-panel-col";
   grid.appendChild(panelCol);
   document.body.appendChild(grid);
-  const view = render(<QueueSplitResizer />, { container: panelCol });
+  const view = render(
+    <QueueSplitResizer enabled={props.enabled ?? true} sharedRatio={props.sharedRatio} onCommit={props.onCommit} />,
+    { container: panelCol }
+  );
   return { grid, view };
 }
 
@@ -121,4 +128,45 @@ it("exposes its position to assistive tech", () => {
   expect(handle).toHaveAttribute("aria-orientation", "vertical");
   expect(handle).toHaveAttribute("aria-valuenow");
   expect(handle).toHaveAttribute("tabindex", "0");
+});
+
+// ── Permission gate + shared default (owner follow-up, 2026-08-25) ─────────
+
+it("renders nothing when resize-referral-layout is off, but still applies the resolved ratio", () => {
+  const { grid, view } = renderInGrid("rtl", { enabled: false, sharedRatio: 0.6 });
+  expect(view.queryByRole("separator")).toBeNull();
+  expect(grid.style.getPropertyValue("--ew-xr-queue-basis")).toBe("60%");
+});
+
+it("prefers this browser's own stored ratio over the shared default", () => {
+  localStorage.setItem("xray_queue_split_v1", "0.4");
+  __resetQueueSplitCacheForTests();
+  const { grid } = renderInGrid("rtl", { sharedRatio: 0.6 });
+  expect(grid.style.getPropertyValue("--ew-xr-queue-basis")).toBe("40%");
+});
+
+it("falls back to the shared ratio once it resolves, for a browser with no stored drag", () => {
+  const { grid, view } = renderInGrid("rtl", { sharedRatio: undefined });
+  expect(grid.style.getPropertyValue("--ew-xr-queue-basis")).toBe("53.49%");
+  view.rerender(<QueueSplitResizer enabled sharedRatio={0.6} />);
+  expect(grid.style.getPropertyValue("--ew-xr-queue-basis")).toBe("60%");
+});
+
+it("calls onCommit with the persisted ratio on drag release, keyboard nudge, and reset", () => {
+  const onCommit = vi.fn();
+  const { view } = renderInGrid("rtl", { onCommit });
+  const handle = view.getByRole("separator");
+
+  fireEvent.pointerDown(handle, { clientX: 635, pointerId: 1, button: 0 });
+  fireEvent.pointerMove(handle, { clientX: 550, pointerId: 1 });
+  fireEvent.pointerUp(handle, { clientX: 550, pointerId: 1 });
+  expect(onCommit).toHaveBeenCalledWith(0.55);
+
+  onCommit.mockClear();
+  fireEvent.keyDown(handle, { key: "ArrowLeft" });
+  expect(onCommit).toHaveBeenCalledTimes(1);
+
+  onCommit.mockClear();
+  fireEvent.keyDown(handle, { key: "Home" });
+  expect(onCommit).toHaveBeenCalledWith(0.5349);
 });
