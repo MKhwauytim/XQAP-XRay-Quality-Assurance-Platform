@@ -184,6 +184,7 @@ export const DEFAULT_LABELS = {
   status_submitted: "مقدمة",
   status_draft:     "مسودة",
   status_pending:   "لم تُبدأ",
+  status_on_hold:   "معلق",
   status_replaced:  "مستبدلة",
   value_empty:      "—",
   // Ad-hoc import visibility badge (EmployeeWorkspace views) — distinguishes a
@@ -231,6 +232,20 @@ export const DEFAULT_LABELS = {
   ew_quality_note_no_answer:       "لا توجد إجابة محفوظة بعد لإضافة ملاحظة عليها.",
   ew_quality_note_empty_readonly:  "لا توجد ملاحظة جودة لهذه العينة.",
   ew_quality_note_denied:          "لا تملك صلاحية إضافة ملاحظات الجودة، أو أن مساحة العمل للقراءة فقط.",
+
+  // Reopen-from-results (نتائج فحص الأشعة): lets a supervisor/admin send a
+  // submitted answer back to draft straight from the results list — chiefly
+  // for a "معلق" (no-image) case whose image later turns up and needs a real
+  // study. Wraps the same reopenSubmittedAnswer used by the employee queue's
+  // own reopen action (Tier-1 Item D); this is just a second entry point.
+  ew_reopen_case_btn:              "إعادة فتح الحالة للدراسة",
+  ew_reopen_case_hint:             "أعد فتح هذه الحالة إذا توفّرت الصورة لاحقاً — تعود إلى قائمة عمل الموظف كحالة نشطة يمكن الإجابة عليها من جديد.",
+  ew_reopen_case_reason_placeholder: "سبب إعادة الفتح (مثال: توفّرت الصورة الآن)...",
+  ew_reopen_case_confirm_btn:      "تأكيد إعادة الفتح",
+  ew_reopen_case_busy:             "جارٍ إعادة الفتح...",
+  ew_reopen_case_cancel_btn:       "إلغاء",
+  ew_reopen_case_denied:           "لا تملك صلاحية إعادة فتح الحالات، أو أن مساحة العمل للقراءة فقط.",
+  ew_reopen_case_done:             "تم إعادة فتح الحالة.",
 
   // Shown when the open inspection panel's sample left this user's queue (a
   // supervisor reassigned or replaced it) while unsaved answers were typed in.

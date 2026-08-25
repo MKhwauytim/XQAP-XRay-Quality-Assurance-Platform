@@ -122,6 +122,7 @@ import {
   getVisibleReferralColumns,
   pct,
   isStudyCompleted,
+  isOnHoldEntry,
   REFERRALS_PRESET_KEY,
   XrQueueToolbarExtras,
 } from "./XrayReferrals/subComponents";
@@ -145,6 +146,9 @@ type StatusMsg = { type: "ok" | "error"; text: string } | null;
 export type PersonalStats = {
   assigned: number;
   submitted: number;
+  /** Submitted "لا يوجد صورة" — real, valid work, but not a finished
+   *  inspection (see isOnHoldEntry). Excluded from `submitted`. */
+  onHold: number;
   notStarted: number;
   replaced: number;
   active: number;
@@ -335,9 +339,10 @@ function createRenderCell(deps: {
   toggleSelect: (id: string, checked: boolean) => void;
   answersMap: Map<string, ItemAnswer>;
   stageMappings: StageAliasMappings | undefined;
+  template: TemplateSchema | null;
   labels: Labels;
 }) {
-  const { selectedIds, toggleSelect, answersMap, stageMappings, labels: L } = deps;
+  const { selectedIds, toggleSelect, answersMap, stageMappings, template, labels: L } = deps;
   return function renderCell(
     col: DataTableCol<DistributionEntry>,
     entry: DistributionEntry,
@@ -382,7 +387,7 @@ function createRenderCell(deps: {
     }
     if (col.id === "answerStatus") {
       const answer = answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`);
-      return <StatusBadge answer={answer} entryStatus={entry.status} labels={L} />;
+      return <StatusBadge answer={answer} entryStatus={entry.status} template={template} labels={L} />;
     }
     const raw = col.id === "stage"
       ? formatStageLabel(entry.row.stage, stageMappings)
@@ -713,17 +718,24 @@ function computePersonalStats(input: {
   canSeeAll: boolean;
   username: string;
   answersMap: Map<string, ItemAnswer>;
+  template: TemplateSchema | null;
 }): PersonalStats {
-  const { allEntries, entries, scopedEntries, canSeeAll, username, answersMap } = input;
+  const { allEntries, entries, scopedEntries, canSeeAll, username, answersMap, template } = input;
   const source = canSeeAll
     ? scopedEntries
     : (allEntries.length > 0 ? allEntries : entries).filter((entry) => entry.assignedTo === username);
-  const submitted = source.filter((entry) => isStudyCompleted(entry, answersMap)).length;
+  const onHold = source.filter((entry) => isOnHoldEntry(entry, answersMap, template)).length;
+  // isStudyCompleted counts a "لا يوجد صورة" submission as completed too — it
+  // answers "is this row touched/done in a generic sense" for row styling, not
+  // "is this a real completion". Subtracting onHold here is what keeps this
+  // strip's "مكتملة" figure from double-counting them.
+  const submitted = source.filter((entry) => isStudyCompleted(entry, answersMap)).length - onHold;
   const replaced = source.filter((entry) => entry.status === "replaced").length;
-  const notStarted = Math.max(0, source.length - submitted - replaced);
+  const notStarted = Math.max(0, source.length - submitted - onHold - replaced);
   return {
     assigned: source.length,
     submitted,
+    onHold,
     notStarted,
     replaced,
     active: Math.max(0, source.length - replaced),
@@ -1134,8 +1146,8 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   );
 
   const personalStats = useMemo<PersonalStats>(
-    () => computePersonalStats({ allEntries, entries, scopedEntries, canSeeAll, username, answersMap }),
-    [allEntries, entries, scopedEntries, canSeeAll, username, answersMap]
+    () => computePersonalStats({ allEntries, entries, scopedEntries, canSeeAll, username, answersMap, template: activeTpl }),
+    [allEntries, entries, scopedEntries, canSeeAll, username, answersMap, activeTpl]
   );
 
   // Bug (load-token): guards a slow load for a previously-selected month from
@@ -1854,7 +1866,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
 
   // ── Cell renderer ──────────────────────────────────────────────────────────
 
-  const renderCell = createRenderCell({ selectedIds, toggleSelect, answersMap, stageMappings, labels: L });
+  const renderCell = createRenderCell({ selectedIds, toggleSelect, answersMap, stageMappings, template: activeTpl, labels: L });
 
   // ── Custom filter override for answerStatus ────────────────────────────────
   // LOG-03: memoized — an unstable identity here makes DataTable's filteredRows
@@ -2184,6 +2196,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           visibleColumns={visiblePreviewColumns}
           dateFmt={effectiveColConfig.dateFmt}
           answersMap={answersMap}
+          template={activeTpl}
           currentUser={username}
           busy={reassignBusy}
           error={reassignError}

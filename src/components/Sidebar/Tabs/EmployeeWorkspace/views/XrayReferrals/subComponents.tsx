@@ -7,6 +7,7 @@ import { AlertTriangle, RotateCw } from "lucide-react";
 import { ModalShell } from "../../../../../ModalShell/ModalShell";
 import { readUserManagementState } from "../../../../../../auth/userManagement";
 import type { FieldAnswer, ItemAnswer } from "../../../../../../data/answers/answerTypes";
+import { isNoImageSubmission } from "../../../../../../data/answers/noImageAnswer";
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
 import { isAssignableSampleRole } from "../../../../../../data/distribution/bulkAssignment";
 import {
@@ -362,6 +363,7 @@ export function ReassignModal({
   visibleColumns,
   dateFmt,
   answersMap,
+  template,
   currentUser,
   busy,
   error,
@@ -374,6 +376,7 @@ export function ReassignModal({
   visibleColumns: DataTableCol<DistributionEntry>[];
   dateFmt: Record<string, DateFormatMode>;
   answersMap: Map<string, ItemAnswer>;
+  template: TemplateSchema | null;
   currentUser: string;
   busy: boolean;
   error: string | null;
@@ -493,6 +496,7 @@ export function ReassignModal({
                       visibleColumns={visibleColumns}
                       dateFmt={dateFmt}
                       answersMap={answersMap}
+                      template={template}
                     />
                   ) : null}
                 </div>
@@ -642,11 +646,13 @@ export function ReferralSamplePreview({
   visibleColumns,
   dateFmt,
   answersMap,
+  template,
 }: {
   entry: DistributionEntry;
   visibleColumns: DataTableCol<DistributionEntry>[];
   dateFmt: Record<string, DateFormatMode>;
   answersMap: Map<string, ItemAnswer>;
+  template: TemplateSchema | null;
 }) {
   const L = useLabels();
   return (
@@ -654,7 +660,7 @@ export function ReferralSamplePreview({
       {visibleColumns.map((column) => (
         <div key={column.id} className="ew-referral-sample-field">
           <span>{column.label}</span>
-          <strong>{getReferralPreviewValue(entry, column, dateFmt, answersMap, L)}</strong>
+          <strong>{getReferralPreviewValue(entry, column, dateFmt, answersMap, template, L)}</strong>
         </div>
       ))}
     </div>
@@ -666,12 +672,15 @@ export function getReferralPreviewValue(
   column: DataTableCol<DistributionEntry>,
   dateFmt: Record<string, DateFormatMode>,
   answersMap: Map<string, ItemAnswer>,
+  template: TemplateSchema | null,
   labels: Labels
 ): string {
   if (column.id === "answerStatus") {
     if (entry.status === "replaced") return labels.status_replaced;
     const answer = answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`);
-    if (answer?.status === "submitted") return labels.status_completed;
+    if (answer?.status === "submitted") {
+      return isNoImageSubmission(answer, template) ? labels.status_on_hold : labels.status_completed;
+    }
     return labels.status_pending;
   }
 
@@ -685,11 +694,32 @@ export function getReferralPreviewValue(
 
 // ── StatusBadge ───────────────────────────────────────────────────────────────
 
-export function StatusBadge({ answer, entryStatus, labels }: { answer?: ItemAnswer; entryStatus: string; labels: Labels }) {
+/**
+ * A submitted "لا يوجد صورة" answer is real work done — the template makes
+ * it a valid, complete submission — but it is not a finished inspection:
+ * there is nothing to inspect until an image turns up. It renders as
+ * `status_on_hold` ("معلق"), distinct from both a real completion and an
+ * untouched assignment.
+ */
+export function StatusBadge({
+  answer,
+  entryStatus,
+  template,
+  labels,
+}: {
+  answer?: ItemAnswer;
+  entryStatus: string;
+  template: TemplateSchema | null;
+  labels: Labels;
+}) {
   if (entryStatus === "replaced")
     return <span className="ew-status-badge" style={{ background: "#f1f5f9", color: "#64748b" }}>{labels.status_replaced}</span>;
-  if (answer?.status === "submitted")
+  if (answer?.status === "submitted") {
+    if (isNoImageSubmission(answer, template)) {
+      return <span className="ew-status-badge ew-badge-onhold">{labels.status_on_hold}</span>;
+    }
     return <span className="ew-status-badge ew-badge-done">{labels.status_completed}</span>;
+  }
   return <span className="ew-status-badge ew-badge-pending">{labels.status_pending}</span>;
 }
 
@@ -736,6 +766,7 @@ export function ReferralStatsStrip({
     },
     { label: "الإجمالي", value: stats.assigned.toLocaleString("ar-SA-u-nu-latn"), tone: "total" },
     { label: "مكتملة", value: stats.submitted.toLocaleString("ar-SA-u-nu-latn"), tone: "done" },
+    { label: "معلقة", value: stats.onHold.toLocaleString("ar-SA-u-nu-latn"), tone: "hold" },
     { label: "لم تبدأ", value: stats.notStarted.toLocaleString("ar-SA-u-nu-latn"), tone: "pending" },
     { label: "المستبدلة \\ المحالة", value: stats.replaced.toLocaleString("ar-SA-u-nu-latn"), tone: "replaced" },
     { label: "نسبة الإنجاز", value: `${stats.completionPct}%`, tone: "done" },
@@ -795,6 +826,22 @@ export function isStudyCompleted(
 ): boolean {
   if (entry.status === "completed") return true;
   return answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`)?.status === "submitted";
+}
+
+/**
+ * A submitted "لا يوجد صورة" answer, and not (yet) a supervisor-finalized
+ * completion. `entry.status === "completed"` always wins over the answer
+ * content — a supervisor who manually closed the row out is a real, final
+ * decision that a stale "لا يوجد صورة" answer must not override.
+ */
+export function isOnHoldEntry(
+  entry: DistributionEntry,
+  answersMap: Map<string, ItemAnswer>,
+  template: TemplateSchema | null
+): boolean {
+  if (entry.status === "completed") return false;
+  const answer = answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`);
+  return isNoImageSubmission(answer, template);
 }
 
 /**

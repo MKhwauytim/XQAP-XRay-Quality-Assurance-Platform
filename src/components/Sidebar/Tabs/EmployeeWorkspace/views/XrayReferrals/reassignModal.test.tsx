@@ -56,6 +56,7 @@ describe("ReassignModal — internal scroll", () => {
         visibleColumns={[]}
         dateFmt={{}}
         answersMap={new Map()}
+        template={null}
         currentUser="bob"
         busy={false}
         error={null}

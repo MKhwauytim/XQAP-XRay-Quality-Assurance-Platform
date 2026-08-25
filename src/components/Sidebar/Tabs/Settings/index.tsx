@@ -156,6 +156,7 @@ export const LABEL_GROUPS: LabelGroup[] = [
       { key: "status_submitted",       desc: "حالة مقدمة" },
       { key: "status_draft",           desc: "حالة مسودة" },
       { key: "status_pending",         desc: "حالة لم تبدأ" },
+      { key: "status_on_hold",         desc: "حالة معلّقة (تمّت الإجابة بلا صورة)" },
       { key: "status_replaced",        desc: "حالة مستبدلة" },
       { key: "value_empty",            desc: "قيمة فارغة" },
       { key: "label_month",            desc: "تسمية حقل الشهر" },
