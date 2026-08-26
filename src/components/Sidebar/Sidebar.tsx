@@ -89,14 +89,16 @@ function avatarMonogram(name: string): string {
  * toolbar used to render, not a second implementation — so month selection,
  * creation and the closed-month state stay in one place.
  */
-function SidebarContextCard({ isDemo }: { isDemo: boolean }) {
+function SidebarContextCard() {
   const labels = useLabels();
   const { directoryHandle } = useWorkspace();
   const workspaceName = directoryHandle?.name ?? null;
 
   return (
     <div className="sidebar-context-card">
-      <GlobalMonthSelector allowCreate={!isDemo} variant="sidebar" />
+      {/* Demo sessions are writable now — month creation runs against the
+          in-memory demo tree like everything else, so it is not gated. */}
+      <GlobalMonthSelector allowCreate variant="sidebar" />
       <div className="sidebar-context-workspace">
         <FolderOpen size={13} strokeWidth={1.8} aria-hidden />
         <span
@@ -288,7 +290,7 @@ export default function Sidebar({
         </div>
       </div>
 
-      {!isCollapsed && <SidebarContextCard isDemo={session.mode === "demo"} />}
+      {!isCollapsed && <SidebarContextCard />}
 
       <nav className="sidebar-nav" aria-label={L.sidebar_nav_aria}>
         {groupedTabs.map(({ group, groupTabs }) => (

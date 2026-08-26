@@ -136,15 +136,20 @@ describe("AdminToolbar — the manual sync trigger", () => {
     expect(refreshButton()).toBeTruthy();
   });
 
-  it("is not rendered at all for a demo/viewer session", () => {
+  it("keeps refresh AND the role-preview switch for a demo session (writable demo, 2026-08-26)", () => {
     render(
       <AdminToolbar
-        session={{ ...session, role: "admin", username: "viewer", mode: "demo" }}
+        session={{ ...session, role: "admin", username: "demo", mode: "demo" }}
         previewRole={null}
         onPreviewRoleChange={() => {}}
         onFeedback={() => {}}
       />
     );
-    expect(document.querySelector(".auth-toolbar-refresh")).toBeNull();
+    // The demo walks through every role's view with the SAME switch a real
+    // admin gets — no separate demo control (owner request: "keep it as it is").
+    expect(document.querySelector(".auth-toolbar-refresh")).not.toBeNull();
+    expect(document.querySelector(".auth-role-switcher")).not.toBeNull();
+    // Only the admin feedback button stays real-admin-only.
+    expect(document.querySelector(".auth-toolbar-help")).toBeNull();
   });
 });

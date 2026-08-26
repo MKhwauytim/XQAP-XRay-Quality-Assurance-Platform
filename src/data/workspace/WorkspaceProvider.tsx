@@ -457,9 +457,14 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
   );
 
   const enterDemoWorkspace = useCallback(async (): Promise<void> => {
+    // WRITABLE demo (2026-08-26, owner request): the demo used to end with
+    // `setReadOnlyMode(true)`, which blocked every mutation — precisely what
+    // made it useless for demonstrating answering/reassignment flows. All
+    // demo writes land in the in-memory tree only (persist: false below keeps
+    // the handle out of workspace persistence), so read-only mode stays OFF.
     setReadOnlyMode(false);
     setStatus("checking");
-    setMessage("جارٍ تحضير وضع العرض التجريبي...");
+    setMessage("جارٍ تحضير الوضع التجريبي...");
     // Observability only: the rejection still propagates exactly as before.
     let handle;
     try {
@@ -469,7 +474,6 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       throw error;
     }
     await applyWorkspaceHandle(handle, { persist: false });
-    setReadOnlyMode(true);
   }, [applyWorkspaceHandle]);
 
   const clearWorkspace = useCallback((): void => {

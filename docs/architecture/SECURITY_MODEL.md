@@ -75,18 +75,22 @@ security — it changes discoverability, not what an attacker who knows the shor
 
 ## 3. Demo/viewer static passcode (TEC-06 — accepted by design)
 
-`src/auth/authConfig.ts` defines a hardcoded demo/preview account:
+`src/auth/authConfig.ts` defines a hardcoded demo account (renamed from viewer/view on
+2026-08-26 when the demo entries were unified):
 
 ```ts
-export const VIEWER_USERNAME = "viewer";
-export const VIEWER_PASSWORD = "view";
+export const DEMO_USERNAME = "demo";
+export const DEMO_PASSWORD = "demo";
 ```
 
-This is intentionally a plaintext, static, publicly-known credential — not a secret. Logging in
-as `viewer` mounts an **in-memory, ephemeral demo workspace** (`createDemoWorkspace` in
+This is intentionally a plaintext, static, publicly-known credential — not a secret. Signing in
+as `demo` (from the picker's «الدخول التجريبي» dialog or the ordinary login form) mounts an
+**in-memory, ephemeral demo workspace** (`createDemoWorkspace` in
 `src/data/workspace/demoWorkspace.ts`): no real folder is opened, nothing is ever written to the
-user's disk, and the session cannot touch real workspace data. Treat it the same as a public
-read-only demo link, not as an access-controlled account.
+user's disk, and the session cannot touch real workspace data. The demo session is WRITABLE
+since 2026-08-26, but every write lands in the in-memory tree only and evaporates on logout —
+the session itself is never persisted. Treat it the same as a public demo link, not as an
+access-controlled account.
 
 **Accepted risk:** fine as-is for a local-exploration/demo aid. **If demo mode is ever changed
 to point at real data** (e.g. a seeded copy of production-shaped data with sensitive content, or

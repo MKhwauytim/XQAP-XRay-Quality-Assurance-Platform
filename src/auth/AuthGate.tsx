@@ -18,7 +18,8 @@ import { FeedbackUnreadProvider } from "../data/feedback/FeedbackUnreadProvider"
 import {
   ADMIN_SHORTCUT_KEYS,
   BOOTSTRAP_ADMIN_USERNAME,
-  VIEWER_USERNAME
+  DEMO_PASSWORD,
+  DEMO_USERNAME
 } from "./authConfig";
 
 import {
@@ -145,7 +146,8 @@ export default function AuthGate({ children }: AuthGateProps) {
     status: workspaceStatus,
     usersHydrated,
     selectWorkspace,
-    clearWorkspace
+    clearWorkspace,
+    enterDemoWorkspace
   } = useWorkspace();
   const labels = useLabels();
   const [session, setSession] = useState<AuthSession | null>(getInitialSession);
@@ -215,8 +217,10 @@ export default function AuthGate({ children }: AuthGateProps) {
     );
   }, [session, directoryHandle, workspaceStatus]);
 
-  // Auto-login for the demo/viewer account: when the picker mounts the in-memory
-  // demo workspace, enter the read-only demo session directly — no login form.
+  // Auto-login for the demo account: when the picker (or the login form's
+  // demo/demo branch) mounts the in-memory demo workspace, enter the demo
+  // session directly — no further login step. The session carries the admin
+  // role so the role-preview switch can walk through every role's view.
   // Keyed on the demo handle's name so it survives React StrictMode remounts;
   // logout unmounts the workspace, so it can't re-fire after the user leaves.
   useEffect(() => {
@@ -224,7 +228,7 @@ export default function AuthGate({ children }: AuthGateProps) {
       isDemoSessionRef.current = true;
       const demoSession: AuthSession = {
         role: ADMIN_ROLE,
-        username: VIEWER_USERNAME,
+        username: DEMO_USERNAME,
         loginAt: new Date().toISOString(),
         mode: "demo"
       };
@@ -519,6 +523,26 @@ export default function AuthGate({ children }: AuthGateProps) {
 
     const normalizedInput = normalizeUsername(selectedUsername);
 
+    // Demo account through the ordinary form (owner requirement, 2026-08-26):
+    // demo/demo swaps the mounted workspace for the in-memory demo workspace;
+    // the auto-login effect above then issues the demo session once the demo
+    // handle lands. Checked FIRST so the reserved name can never collide with
+    // a managed user. Plaintext compare on purpose — these are published demo
+    // credentials, not a secret.
+    if (normalizedInput === DEMO_USERNAME && password === DEMO_PASSWORD) {
+      isDemoSessionRef.current = true;
+      setPassword("");
+      setFailedAttempts(0);
+      setLockoutUntil(null);
+      showMessage(getLabels().auth_msg_login_success, "ok");
+      enterDemoWorkspace().catch((error: unknown) => {
+        isDemoSessionRef.current = false;
+        logCodedError("authGate:demoLogin", "XQ-WS-016", error);
+        showMessage(codedMessage("XQ-WS-016"), "bad");
+      });
+      return;
+    }
+
     // Bootstrap admin through the ordinary form (owner requirement, 2026-08-13):
     // "admin" + the admin passcode signs in as the bootstrap superuser without
     // the hidden Alt+A / Alt+T shortcut. Checked BEFORE the managed-user lookup
@@ -701,20 +725,18 @@ export default function AuthGate({ children }: AuthGateProps) {
             AuthGate's own body) because it needs useGlobalMonth(), which only
             exists below this provider -- see SyncTick.tsx's module doc for the
             full F17 rationale. Workspace-readiness gating happens inside
-            SyncTick via useWorkspace(); the demo/viewer session is gated here,
-            since only AuthGate knows the session mode. */}
-        <SyncTick enabled={session.mode !== "demo"} />
+            SyncTick via useWorkspace(); demo sessions are writable now, so
+            the periodic sync runs for them too (it only ever touches the
+            in-memory demo tree). */}
+        <SyncTick enabled />
         {/* Headless — installs the durable error-log sink for THIS user, so an
             error hit anywhere in the tree (including the data layer, which has
             no React context) lands in 5-system/system-errors/{stem}.errors.json.
-            Mounted beside SyncTick for the same two reasons: it needs a ready
-            workspace via useWorkspace(), and only AuthGate knows the session
-            mode — the read-only demo/viewer session must not write. Keyed on
+            Mounted beside SyncTick for the same reason: it needs a ready
+            workspace via useWorkspace(). Demo sessions write too now — their
+            errors land in the in-memory demo tree and vanish with it. Keyed on
             the REAL username, never the previewed role's identity. */}
-        <WorkspaceErrorSink
-          username={session.username}
-          enabled={session.mode !== "demo"}
-        />
+        <WorkspaceErrorSink username={session.username} enabled />
         {/* The unread-feedback count is read once here and shared by BOTH
             triggers of the feedback widget: the toolbar icon below (real admin)
             and the floating button inside the app tree (everyone else). They sit
