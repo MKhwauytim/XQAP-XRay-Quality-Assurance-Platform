@@ -18,7 +18,6 @@ import { FeedbackUnreadProvider } from "../data/feedback/FeedbackUnreadProvider"
 import {
   ADMIN_SHORTCUT_KEYS,
   BOOTSTRAP_ADMIN_USERNAME,
-  DEMO_PASSWORD,
   DEMO_USERNAME
 } from "./authConfig";
 
@@ -146,8 +145,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     status: workspaceStatus,
     usersHydrated,
     selectWorkspace,
-    clearWorkspace,
-    enterDemoWorkspace
+    clearWorkspace
   } = useWorkspace();
   const labels = useLabels();
   const [session, setSession] = useState<AuthSession | null>(getInitialSession);
@@ -523,25 +521,11 @@ export default function AuthGate({ children }: AuthGateProps) {
 
     const normalizedInput = normalizeUsername(selectedUsername);
 
-    // Demo account through the ordinary form (owner requirement, 2026-08-26):
-    // demo/demo swaps the mounted workspace for the in-memory demo workspace;
-    // the auto-login effect above then issues the demo session once the demo
-    // handle lands. Checked FIRST so the reserved name can never collide with
-    // a managed user. Plaintext compare on purpose — these are published demo
-    // credentials, not a secret.
-    if (normalizedInput === DEMO_USERNAME && password === DEMO_PASSWORD) {
-      isDemoSessionRef.current = true;
-      setPassword("");
-      setFailedAttempts(0);
-      setLockoutUntil(null);
-      showMessage(getLabels().auth_msg_login_success, "ok");
-      enterDemoWorkspace().catch((error: unknown) => {
-        isDemoSessionRef.current = false;
-        logCodedError("authGate:demoLogin", "XQ-WS-016", error);
-        showMessage(codedMessage("XQ-WS-016"), "bad");
-      });
-      return;
-    }
+    // NOTE: the demo has exactly ONE entry point — WorkspaceGate's «الدخول
+    // بنمط التجربة» popup on the address-picker screen, BEFORE any workspace
+    // is chosen (owner decision, 2026-08-26: a second demo/demo branch here
+    // was removed as redundant). The login form only ever authenticates
+    // against the mounted workspace's own accounts.
 
     // Bootstrap admin through the ordinary form (owner requirement, 2026-08-13):
     // "admin" + the admin passcode signs in as the bootstrap superuser without

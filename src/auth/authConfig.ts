@@ -4,21 +4,23 @@ export const ADMIN_SHORTCUT_KEYS = ["a", "t", "ش", "ف"] as const;
 
 export const BOOTSTRAP_ADMIN_USERNAME = "admin";
 
-// ── Demo account (demo / demo) ──────────────────────────────────────────────
+// ── Demo mode (password: demo) ──────────────────────────────────────────────
 // The ONE demo entry (2026-08-26, owner request — replaces the old hidden
-// viewer/view passcode): signing in with these credentials — from the
-// workspace picker's «الدخول التجريبي» dialog or the ordinary login form —
-// mounts a WRITABLE in-memory demo workspace seeded with a realistic month
-// (~100-row sample, per-employee queues), so every flow (answering,
-// reassignment, reports, exports) can be demonstrated end-to-end without the
-// File System Access API and without ever touching real data. The session has
-// the admin role plus the role-preview switch, so the demo can walk through
-// every role's view; `mode: "demo"` keeps it runtime-only (never persisted)
-// and everything it writes lives in memory and vanishes on logout.
+// viewer/view passcode): WorkspaceGate's «الدخول بنمط التجربة» popup on the
+// address-picker screen, BEFORE any workspace is chosen, asks for
+// DEMO_PASSWORD alone and mounts a WRITABLE in-memory demo workspace seeded
+// with a realistic month (~100-image sample, per-employee queues), so every
+// flow (answering, reassignment, reports, exports) can be demonstrated
+// end-to-end without the File System Access API and without ever touching
+// real data. The session (username DEMO_USERNAME) has the admin role plus the
+// role-preview switch, so the demo can walk through every role's view;
+// `mode: "demo"` keeps it runtime-only (never persisted) and everything it
+// writes lives in memory and vanishes on logout. The ordinary login form has
+// NO demo branch (removed 2026-08-26 as redundant — the picker entry comes
+// first anyway).
 //
 // To REMOVE the demo entirely, delete this block and its uses in AuthGate.tsx
-// (the demo-credential check in `loginAsEmployee` + the auto-login effect) and
-// WorkspaceGate.tsx (the demo dialog).
+// (the auto-login effect) and WorkspaceGate.tsx (the demo dialog).
 export const DEMO_USERNAME = "demo";
 export const DEMO_PASSWORD = "demo";
 

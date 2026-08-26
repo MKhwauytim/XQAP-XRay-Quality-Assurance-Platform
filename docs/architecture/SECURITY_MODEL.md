@@ -84,8 +84,8 @@ export const DEMO_PASSWORD = "demo";
 ```
 
 This is intentionally a plaintext, static, publicly-known credential — not a secret. Signing in
-as `demo` (the picker's «الدخول بنمط التجربة» dialog asks for the password only; the ordinary
-login form takes the full demo/demo pair) mounts an
+as `demo` (the picker's «الدخول بنمط التجربة» dialog, before any workspace is chosen, asks
+for the password only — the ordinary login form has no demo branch) mounts an
 **in-memory, ephemeral demo workspace** (`createDemoWorkspace` in
 `src/data/workspace/demoWorkspace.ts`): no real folder is opened, nothing is ever written to the
 user's disk, and the session cannot touch real workspace data. The demo session is WRITABLE
