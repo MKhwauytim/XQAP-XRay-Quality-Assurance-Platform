@@ -5,8 +5,8 @@ import type { ExecutiveReportInput } from "../../executiveReportTypes";
 import type { PreparedPopulationRow } from "../../../population/populationTypes";
 import { buildExecutiveDeckV3 } from "./index";
 
-// Same fixture pattern as deck2.test.ts (Task 9's exploration confirmed this
-// shape) — a minimal but complete PreparedPopulationRow, overridden per test row.
+// Same fixture pattern as deck2.test.ts — a minimal but complete
+// PreparedPopulationRow, overridden per test row.
 function popRow(overrides: Partial<PreparedPopulationRow> = {}): PreparedPopulationRow {
   return {
     stage: "المستوى الثاني", xrayImageId: "XR-1", xrayEntryDate: null,
@@ -46,17 +46,53 @@ describe("buildExecutiveDeckV3", () => {
     expect(slideCount).toBe(21);
   });
 
+  it("carries the deck2 viewer chrome: side nav, toolbar, print/PDF, fullscreen", async () => {
+    const html = await buildExecutiveDeckV3(input([popRow()]));
+    expect(html).toContain('id="deck-nav"');
+    expect(html).toContain('id="deck-nav-sections"');
+    expect(html).toContain('id="deck-fullscreen-button"');
+    expect(html).toContain("طباعة / PDF");
+    expect(html).toContain('id="deck-slide-prev"');
+    expect(html).toContain('id="deck-slide-counter"');
+  });
+
+  it("gives every slide the section hooks the nav script reads", async () => {
+    const html = await buildExecutiveDeckV3(input([popRow()]));
+    const sectioned = (html.match(/data-section=/g) ?? []).length;
+    expect(sectioned).toBe(21);
+    expect(html).toContain('data-section-label="القسم الثالث — التحاليل المتقدمة"');
+  });
+
+  it("renders the three dark section dividers (the invisible-divider regression)", async () => {
+    const html = await buildExecutiveDeckV3(input([popRow()]));
+    const dividers = (html.match(/class="slide v3 v3-divider"/g) ?? []).length;
+    expect(dividers).toBe(3);
+    // The divider background rule must exist — white-ish divider text on the
+    // light page background was a real shipped bug.
+    expect(html).toContain(".slide.v3.v3-divider{background:var(--v3-navy)");
+  });
+
   it("uses locked terminology verbatim", async () => {
     const html = await buildExecutiveDeckV3(input([popRow()]));
     expect(html).toContain("نتائج الوسائل الآلية");
     expect(html).toContain("نسبة تحديد موقع الاشتباه");
     expect(html).toContain("دقة السليمة");
+    expect(html).toContain("دقة الاشتباه");
+    expect(html).toContain("الدقة العامة");
   });
 
   it("wires real population counts, not the handoff's placeholder 148326/7563", async () => {
     const html = await buildExecutiveDeckV3(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
     expect(html).not.toContain("148,326");
     expect(html).not.toContain("148326");
+    expect(html).not.toContain("7,563");
+  });
+
+  it("derives the fixed-count level shares from the real monthly target", async () => {
+    const html = await buildExecutiveDeckV3(input([popRow()]));
+    const target = DEFAULT_EXEC_CONFIG.monthlyTarget;
+    expect(html).toContain(Math.round(target * 0.4).toLocaleString("ar-SA-u-nu-latn"));
+    expect(html).not.toContain("6,250");
   });
 
   it("embeds the Somar font-face and handoff color tokens", async () => {
@@ -65,10 +101,23 @@ describe("buildExecutiveDeckV3", () => {
     expect(html).toContain("#10304f");
   });
 
-  it("footer page indicators are sequential 1..21", async () => {
+  it("numbers content slides NN / 21 and leaves covers and dividers uncounted", async () => {
     const html = await buildExecutiveDeckV3(input([popRow()]));
-    for (let n = 1; n <= 21; n++) {
-      expect(html).toContain(`>${n} / 21<`);
+    // Content slides carry zero-padded counters…
+    for (const n of [2, 3, 4, 5, 7, 8, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20]) {
+      expect(html).toContain(`>${String(n).padStart(2, "0")} / 21<`);
     }
+    // …while covers (1, 21) and dividers (6, 9, 14) don't, per the handoff.
+    for (const n of [1, 6, 9, 14, 21]) {
+      expect(html).not.toContain(`>${String(n).padStart(2, "0")} / 21<`);
+    }
+  });
+
+  it("escapes data-derived strings (port names) in the slides", async () => {
+    const html = await buildExecutiveDeckV3(
+      input([popRow({ portName: '<img src=x onerror=alert(1)>' })]),
+    );
+    expect(html).not.toContain('<img src=x onerror=alert(1)>');
+    expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
   });
 });

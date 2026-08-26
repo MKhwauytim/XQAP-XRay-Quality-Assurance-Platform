@@ -1,23 +1,108 @@
+// Executive deck v3 entry points — the handoff-styled edition behind the
+// Reports tab's «التصميم الجديد» toggle. Same contract as deck2: one
+// ReportModel drives everything, so the numbers can never disagree with the
+// other editions. The on-screen viewer chrome (side section nav, sticky
+// toolbar with fullscreen + print/PDF, single-slide fullscreen mode) is
+// deck2's, verbatim: the nav/fullscreen scripts are imported from
+// deck2/index.ts and the markup mirrors buildDeckV2Html's, so the two decks
+// review identically — only the slide design differs (theme.ts).
 import { buildReportModel } from "../model/reportModel";
 import { buildDeck3Slides } from "./slides";
 import { DECK_V3_CSS } from "./theme";
-import { ARABIC_FONT_FACE_CSS } from "../../../../branding/fonts";
+import { icon } from "../ui/icons";
+import { DECK_NAV_SCRIPT, DECK_FULLSCREEN_SCRIPT } from "../deck2";
 import { openReportWindow, writeOrCloseOnFailure } from "../../htmlReport";
 import { formatMonthFolderShortLabel } from "../../../population/monthFolder";
+import { getLabels } from "../../../labels/labelsStore";
+import { ZATCA_LOGO_URL } from "../../../../branding/organization";
+import { esc } from "../primitives";
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
 
+/**
+ * Slides are a fixed 1920×1080 canvas scaled as one block via the
+ * `--v3-scale` custom property (theme.ts). CSS alone can't derive the
+ * unitless <number> `transform:scale()` needs from `100vw` (dividing a
+ * length by a plain number stays a length, so the whole declaration is
+ * dropped at parse time), so this script owns the ratio: an immediate
+ * viewport-based estimate before first paint (it runs from <head>), then the
+ * precise measurement of the viewer's content box once the DOM exists, re-run
+ * on resize and fullscreen changes. In fullscreen the slide must fit BOTH
+ * axes (one slide fills the screen), so the height ratio joins the min().
+ */
+const DECK_V3_SCALE_SCRIPT = `(function(){
+  var root = document.documentElement;
+  function fullscreen(){ return document.fullscreenElement || document.webkitFullscreenElement; }
+  function apply(scale){ root.style.setProperty('--v3-scale', String(scale > 0 ? scale : 1)); }
+  function estimate(){
+    var nav = window.innerWidth > 1280 ? 252 : 0;
+    apply(Math.min(1, (window.innerWidth - nav - 32) / 1920));
+  }
+  function fit(){
+    if (fullscreen()) {
+      apply(Math.min((window.innerWidth - 32) / 1920, (window.innerHeight - 32) / 1080));
+      return;
+    }
+    var viewer = document.querySelector('.deck-viewer-v3');
+    if (!viewer) { estimate(); return; }
+    var cs = getComputedStyle(viewer);
+    var width = viewer.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    apply(Math.min(1, width / 1920));
+  }
+  estimate();
+  window.addEventListener('resize', fit);
+  document.addEventListener('fullscreenchange', fit);
+  document.addEventListener('webkitfullscreenchange', fit);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fit);
+  else fit();
+})();`;
+
 export function buildDeckV3Html(slides: string, monthLabel: string): string {
+  const labels = getLabels();
+  const fullscreenEnter = esc(labels.exec_deck_fullscreen_enter);
+  const fullscreenExit = esc(labels.exec_deck_fullscreen_exit);
+  const slidePrevLabel = esc(labels.exec_deck_slideshow_prev);
+  const slideNextLabel = esc(labels.exec_deck_slideshow_next);
   return `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-<meta charset="UTF-8" />
-<title>العرض التنفيذي — ${monthLabel}</title>
-<style>${ARABIC_FONT_FACE_CSS}${DECK_V3_CSS}</style>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>العرض التنفيذي — ${esc(monthLabel)}</title>
+<style>${DECK_V3_CSS}</style>
+<script>${DECK_V3_SCALE_SCRIPT}</script>
 </head>
 <body>
-<div class="deck-viewer-v3">
+<nav class="deck-nav" id="deck-nav" aria-label="التنقّل بين أقسام العرض">
+  <div class="deck-nav-brand">
+    <img src="${ZATCA_LOGO_URL}" alt=""/>
+    <span>العرض التنفيذي</span>
+  </div>
+  <div class="deck-nav-progress">
+    <div class="deck-nav-progress-bar"><div class="deck-nav-progress-fill" id="deck-nav-fill"></div></div>
+    <div class="deck-nav-progress-text" id="deck-nav-progress-text">الصفحة 1</div>
+  </div>
+  <ol class="deck-nav-sections" id="deck-nav-sections"></ol>
+</nav>
+<div class="deck-viewer deck-viewer-v3">
+  <div class="deck-toolbar">
+    <div class="deck-brand">
+      <img src="${ZATCA_LOGO_URL}" alt=""/>
+      <div>
+        <strong>العرض التنفيذي</strong>
+        <span>ضمان جودة الأشعة — ${esc(monthLabel)}</span>
+      </div>
+    </div>
+    <div class="deck-toolbar-actions">
+      <button class="btn btn-fullscreen" id="deck-fullscreen-button" type="button" aria-pressed="false" aria-label="${fullscreenEnter}" title="${fullscreenEnter}" data-enter-label="${fullscreenEnter}" data-exit-label="${fullscreenExit}"><span class="btn-fullscreen-icon btn-fullscreen-icon-expand">${icon("expand", 15)}</span><span class="btn-fullscreen-icon btn-fullscreen-icon-compress">${icon("compress", 15)}</span></button>
+      <button class="btn" onclick="window.print()" title="اختر «حفظ كـ PDF» من المتصفح عند الطباعة، وليس «Microsoft Print to PDF»، لضمان الحجم والجودة الصحيحين">طباعة / PDF</button>
+    </div>
+  </div>
 ${slides}
 </div>
+<button type="button" class="btn-slide-nav btn-slide-prev" id="deck-slide-prev" aria-label="${slidePrevLabel}" title="${slidePrevLabel}">${icon("arrow", 20)}</button>
+<button type="button" class="btn-slide-nav btn-slide-next" id="deck-slide-next" aria-label="${slideNextLabel}" title="${slideNextLabel}">${icon("arrow", 20)}</button>
+<span class="deck-slide-counter" id="deck-slide-counter" dir="ltr"></span>
+<script>${DECK_NAV_SCRIPT}${DECK_FULLSCREEN_SCRIPT}</script>
 </body>
 </html>`;
 }
@@ -27,8 +112,9 @@ export async function buildExecutiveDeckV3(
   employeeDisplayNames: Record<string, string> = {},
 ): Promise<string> {
   const model = buildReportModel(input, employeeDisplayNames);
-  const slides = await buildDeck3Slides(model, formatMonthFolderShortLabel(input.monthFolderName), input.config.monthlyTarget);
-  return buildDeckV3Html(slides, formatMonthFolderShortLabel(input.monthFolderName));
+  const monthLabel = formatMonthFolderShortLabel(input.monthFolderName);
+  const slides = await buildDeck3Slides(model, monthLabel, input.config.monthlyTarget);
+  return buildDeckV3Html(slides, monthLabel);
 }
 
 export async function openExecutiveDeckV3(

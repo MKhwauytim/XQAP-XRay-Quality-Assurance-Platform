@@ -65,12 +65,16 @@ export function AdminToolbar({
   onFeedback,
 }: AdminToolbarProps) {
   const labels = useLabels();
-  // Demo/view sessions carry the admin role only to unlock full tab visibility —
-  // they are NOT the admin. Present them as read-only "view mode": no role
-  // switcher, no admin tools, just a clear badge and logout.
+  // Demo sessions (demo/demo) carry the admin role and are fully interactive:
+  // the same role-preview switch a real admin gets is how the demo walks
+  // through every role's view (owner request, 2026-08-26 — "keep it as it
+  // is": the ordinary switch, no separate demo-accounts control). Only the
+  // admin-feedback button stays real-admin-only, and the mode badge keeps
+  // demo sessions clearly labeled.
   const isDemo = session.mode === "demo";
   const isRealAdmin = session.role === "admin" && !isDemo;
-  const effectiveRole: AuthRole = isRealAdmin && previewRole ? previewRole : session.role;
+  const canPreviewRoles = session.role === "admin";
+  const effectiveRole: AuthRole = canPreviewRoles && previewRole ? previewRole : session.role;
   const isImpersonating = effectiveRole !== session.role;
 
   // Unread feedback, shared with the floating trigger in FeedbackWidget (see
@@ -131,7 +135,7 @@ export function AdminToolbar({
           <span className="auth-toolbar-kicker">{labels.toolbar_mode_kicker}</span>
           <strong className="auth-toolbar-mode-value">
             <span className="auth-toolbar-mode-icon">
-              <RoleIcon role={isDemo ? "guest" : effectiveRole} />
+              <RoleIcon role={effectiveRole} />
             </span>
             {isDemo
               ? labels.toolbar_mode_demo
@@ -143,7 +147,7 @@ export function AdminToolbar({
       </div>
 
       <div className="auth-toolbar-preview-panel">
-        {isRealAdmin && (
+        {canPreviewRoles && (
           <>
             <span className="auth-role-switcher-label">{labels.toolbar_preview_role_label}</span>
             <div className="auth-role-switcher" role="group" aria-label={labels.toolbar_preview_role_aria}>
@@ -164,22 +168,20 @@ export function AdminToolbar({
       </div>
 
       <div className="auth-toolbar-actions">
-        {!isDemo && (
-          <button
-            type="button"
-            className={`auth-toolbar-refresh${refreshState !== "idle" ? ` is-${refreshState}` : ""}`}
-            onClick={() => void handleRefresh()}
-            disabled={refreshState === "running"}
-            aria-label={refreshTitle}
-            title={refreshTitle}
-          >
-            <RefreshCw
-              size={16}
-              aria-hidden
-              className={refreshState === "running" ? "auth-toolbar-refresh-icon is-spinning" : "auth-toolbar-refresh-icon"}
-            />
-          </button>
-        )}
+        <button
+          type="button"
+          className={`auth-toolbar-refresh${refreshState !== "idle" ? ` is-${refreshState}` : ""}`}
+          onClick={() => void handleRefresh()}
+          disabled={refreshState === "running"}
+          aria-label={refreshTitle}
+          title={refreshTitle}
+        >
+          <RefreshCw
+            size={16}
+            aria-hidden
+            className={refreshState === "running" ? "auth-toolbar-refresh-icon is-spinning" : "auth-toolbar-refresh-icon"}
+          />
+        </button>
         {isRealAdmin && (
           <button
             type="button"

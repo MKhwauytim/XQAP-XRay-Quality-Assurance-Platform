@@ -73,7 +73,11 @@ export function usePermissions(): UsePermissionsResult {
       featureId,
       permissions: state.permissions,
       featurePermissions: state.featurePermissions,
-      isReadOnly: session.mode === "demo" || isReadOnlyMode(),
+      // Demo sessions are WRITABLE (2026-08-26): every mutation runs for real
+      // against the in-memory demo workspace, so mode "demo" no longer forces
+      // read-only. `isReadOnlyMode()` stays as the storage-level guard for any
+      // future surface that genuinely needs a frozen session.
+      isReadOnly: isReadOnlyMode(),
       workspaceReady:
         workspaceStatus === "ready" && directoryHandle !== null,
     });

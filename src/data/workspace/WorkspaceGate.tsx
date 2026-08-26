@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, Check, Folder, FolderArchive, Info, Keyboard, Rocket, Wrench, X, XCircle } from "lucide-react";
 
 import type { AuthSession } from "../../auth/authTypes";
-import { ADMIN_SHORTCUT_KEYS, VIEWER_PASSWORD } from "../../auth/authConfig";
+import { ADMIN_SHORTCUT_KEYS, DEMO_PASSWORD } from "../../auth/authConfig";
 import {
   createDefaultPermissions,
   getManagedLoginUsers,
@@ -41,13 +41,15 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
   } = useWorkspace();
   const labels = useLabels();
 
-  // Hidden view-mode entry (mirrors the admin shortcut): on the address-picker
-  // screen, hold Alt and press A then T to open a passcode prompt; entering the
-  // view passcode mounts the read-only demo workspace, which then auto-enters
-  // view mode. Bound only while the picker is shown, so it can't collide with
-  // the admin shortcut on the login screen.
+  // Demo entry: a visible «الدخول بنمط التجربة» button beside the
+  // address-picker opens a popup asking for ONE password (demo); entering it
+  // mounts the writable in-memory demo workspace, which then auto-enters the
+  // demo session. Also reachable through the legacy Alt+A-then-T shortcut,
+  // and — deliberately — from the unsupported-browser screen too: the demo
+  // needs no File System Access API at all. (The ordinary login form still
+  // accepts the full demo/demo pair — see AuthGate's loginAsEmployee.)
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [viewPasscode, setViewPasscode] = useState("");
+  const [demoPassword, setDemoPassword] = useState("");
   const [viewError, setViewError] = useState("");
   const altSequenceRef = useRef<string[]>([]);
   const altSequenceTimerRef = useRef<number | null>(null);
@@ -135,9 +137,7 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
       const sequence = altSequenceRef.current.join("");
       if (sequence === "at" || sequence === "شف") {
         altSequenceRef.current = [];
-        setViewPasscode("");
-        setViewError("");
-        setIsViewModalOpen(true);
+        openDemoModal();
       }
     }
 
@@ -148,10 +148,16 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
     };
   }, [status]);
 
-  function submitViewPasscode(): void {
-    if (viewPasscode === VIEWER_PASSWORD) {
+  function openDemoModal(): void {
+    setDemoPassword("");
+    setViewError("");
+    setIsViewModalOpen(true);
+  }
+
+  function submitDemoLogin(): void {
+    if (demoPassword.trim().toLowerCase() === DEMO_PASSWORD) {
       setIsViewModalOpen(false);
-      setViewPasscode("");
+      setDemoPassword("");
       setViewError("");
       void enterDemoWorkspace();
     } else {
@@ -161,11 +167,53 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
 
   function closeViewModal(): void {
     setIsViewModalOpen(false);
-    setViewPasscode("");
+    setDemoPassword("");
     setViewError("");
   }
 
-  // Browser does not support File System Access API
+  const demoModal = isViewModalOpen ? (
+    <div className="auth-modal-backdrop" role="presentation">
+      <section
+        ref={viewDialogRef}
+        className="auth-admin-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="demoLoginTitle"
+      >
+        <h2 id="demoLoginTitle">{labels.wsgate_view_modal_title}</h2>
+        <p>{labels.wsgate_view_modal_desc}</p>
+        <input
+          type="password"
+          dir="ltr"
+          aria-label={labels.wsgate_demo_password_label}
+          value={demoPassword}
+          onChange={(event) => setDemoPassword(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") submitDemoLogin();
+            if (event.key === "Escape") closeViewModal();
+          }}
+          placeholder={labels.wsgate_demo_password_label}
+        />
+        {viewError && (
+          <p style={{ color: "var(--c-danger)", fontSize: 13, margin: "8px 0 0" }}>
+            {viewError}
+          </p>
+        )}
+        <div className="auth-modal-actions">
+          <button type="button" className="secondary" onClick={closeViewModal}>
+            {labels.wsgate_cancel_btn}
+          </button>
+          <button type="button" onClick={submitDemoLogin}>
+            {labels.wsgate_enter_btn}
+          </button>
+        </div>
+      </section>
+    </div>
+  ) : null;
+
+  // Browser does not support File System Access API. The demo needs no File
+  // System Access at all (in-memory workspace), so it stays available here —
+  // the one thing an unsupported browser CAN run.
   if (!isSupported || status === "unsupported_browser") {
     return (
       <div className="workspace-gate" dir="rtl">
@@ -178,7 +226,11 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
             <strong>Microsoft Edge</strong> {labels.wsgate_unsupported_suffix}
           </p>
           <p>{labels.wsgate_unsupported_retry}</p>
+          <button type="button" className="secondary" onClick={openDemoModal}>
+            {labels.wsgate_demo_btn}
+          </button>
         </div>
+        {demoModal}
       </div>
     );
   }
@@ -259,46 +311,13 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
           >
             {labels.wsgate_pick_folder_btn}
           </button>
+
+          <button type="button" className="secondary" onClick={openDemoModal}>
+            {labels.wsgate_demo_btn}
+          </button>
         </div>
 
-        {isViewModalOpen && (
-          <div className="auth-modal-backdrop" role="presentation">
-            <section
-              ref={viewDialogRef}
-              className="auth-admin-modal"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="viewPasscodeTitle"
-            >
-              <h2 id="viewPasscodeTitle">{labels.wsgate_view_modal_title}</h2>
-              <p>{labels.wsgate_view_modal_desc}</p>
-              <input
-                type="password"
-                aria-label={labels.wsgate_view_passcode_label}
-                value={viewPasscode}
-                onChange={(event) => setViewPasscode(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") submitViewPasscode();
-                  if (event.key === "Escape") closeViewModal();
-                }}
-                placeholder={labels.wsgate_view_passcode_label}
-              />
-              {viewError && (
-                <p style={{ color: "var(--c-danger)", fontSize: 13, margin: "8px 0 0" }}>
-                  {viewError}
-                </p>
-              )}
-              <div className="auth-modal-actions">
-                <button type="button" className="secondary" onClick={closeViewModal}>
-                  {labels.wsgate_cancel_btn}
-                </button>
-                <button type="button" onClick={submitViewPasscode}>
-                  {labels.wsgate_enter_btn}
-                </button>
-              </div>
-            </section>
-          </div>
-        )}
+        {demoModal}
       </div>
     );
   }

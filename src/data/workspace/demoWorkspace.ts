@@ -4,7 +4,13 @@ import {
 } from "../storage/fileSystemAccess";
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import { logError } from "../storage/errorLogger";
-import { createDefaultManagedUsers } from "../../auth/userManagement";
+import {
+  createDefaultManagedUsers,
+  createEmptyUserManagementState,
+  normalizeUsername,
+  type ManagedLoginUser,
+} from "../../auth/userManagement";
+import { syncUserManagementToDisk } from "./userSync";
 import { formatMonthFolderName } from "../population/monthFolder";
 import { saveMonthRun, updateMonthStatus } from "../population/populationStorage";
 import type { PreparedPopulationRow } from "../population/populationTypes";
@@ -23,16 +29,21 @@ import { saveInspectionTemplateSelection } from "../templates/templateSelectionS
 import type { TemplateSchema } from "../templates/templateTypes";
 
 /**
- * Build a valid, "ready" in-memory workspace for the demo/viewer account.
+ * Build a valid, "ready" in-memory workspace for the demo account (demo/demo).
  *
  * No real folder or File System Access permission is required — the handle is
- * backed by an in-memory tree, so nothing is ever written to the user's disk.
+ * backed by an in-memory tree, so nothing is ever written to the user's disk,
+ * and the demo works even in browsers without the File System Access API.
  * `createWorkspaceStructure` seeds the required folders plus the default
- * managed users, so User Management and role routing are populated out of the
- * box. `seedWorkspaceMonth` (below) then layers one month of realistic
+ * managed users; the roster is then extended with the demo's own `demo`
+ * employee account (so the demo user has an assigned queue of its own in the
+ * employee workspace, distinct from the other seeded employees').
+ * `seedWorkspaceMonth` (below) then layers one month of realistic
  * population/sample/distribution/answer data on top, built entirely through the
  * real domain writers so the seeded JSON never drifts from the production
- * schema.
+ * schema. The demo is WRITABLE (2026-08-26): answering, reassignment and every
+ * other mutation runs for real against the in-memory tree and evaporates on
+ * logout.
  */
 /** Name of the in-memory demo directory handle — used to detect demo mode. */
 export const DEMO_WORKSPACE_NAME = "Demo-Workspace";
@@ -41,7 +52,16 @@ export async function createDemoWorkspace(): Promise<DirectoryHandleLike> {
   const handle = createMemoryDirectory(DEMO_WORKSPACE_NAME);
   await createWorkspaceStructure(handle, DEMO_SEED_PROFILE.username);
   try {
-    await seedWorkspaceMonth(handle, DEMO_SEED_PROFILE);
+    // Overwrites the default roster written by createWorkspaceStructure with
+    // the same defaults plus the demo employee account — before the month
+    // seed, which assigns part of the sample to that account.
+    const roster = buildDemoManagedUsers();
+    await syncUserManagementToDisk(
+      handle,
+      { ...createEmptyUserManagementState(), users: roster },
+      DEMO_SEED_PROFILE.username
+    );
+    await seedWorkspaceMonth(handle, { ...DEMO_SEED_PROFILE, employees: roster });
   } catch (error) {
     // Best-effort: a seeding failure must never block demo mode from opening
     // with at least the (still valid) empty workspace structure.
@@ -110,32 +130,66 @@ export type WorkspaceSeedProfile = {
   /** Fixed ISO timestamp stamped on every seeded answer. Never `Date.now()`. */
   seededAt: string;
   riskEngineSpread: RiskEngineSeedSpread;
+  /**
+   * Roster handed to `calculateBulkAssignment` — the accounts assignments can
+   * land on. Defaults to the shipped default users; the demo profile extends
+   * it with the demo account so `demo` gets a queue of its own.
+   */
+  employees?: ManagedLoginUser[];
 };
 
 const DEMO_MONTH = 5;
 const DEMO_YEAR = 2026;
-const DEMO_USERNAME = "viewer";
+const DEMO_OPERATOR_USERNAME = "demo";
 
 /** Exported so the seeded answers, the seeded template and any test agree on one id. */
 export const DEMO_TEMPLATE_ID = "demo-inspection-template";
 
-// Three ports summing to ~200 rows — enough for a stratified-looking draw
-// without paying real-population-scale processing cost.
+/**
+ * The demo's own employee account, appended to the default roster in the demo
+ * workspace only (never in `createDefaultManagedUsers` itself). This is what
+ * lets the demo user open الموظف view and find an assigned queue of their own,
+ * distinct from the other seeded employees' queues — the reassignment showcase
+ * (demo → supervisor and back) needs both sides populated.
+ */
+export function buildDemoManagedUsers(): ManagedLoginUser[] {
+  const defaults = createDefaultManagedUsers();
+  const demoUser: ManagedLoginUser = {
+    id: "demo-user-demo",
+    username: normalizeUsername(DEMO_OPERATOR_USERNAME),
+    displayName: "الحساب التجريبي",
+    role: "employee",
+    // Cloned from the defaults rather than re-derived: hashing is async, and a
+    // seed must not depend on WASM Argon2 being available.
+    passwordHash: { ...defaults[0].passwordHash },
+    isActive: true,
+    hasCertScanLicense: false,
+    createdAt: "2026-06-01T08:00:00.000Z",
+    updatedAt: "2026-06-01T08:00:00.000Z",
+  };
+  return [...defaults, demoUser];
+}
+
+// Five ports summing to 400 rows — enough for a ~100-row sample (the owner's
+// demo target) with a real-looking land/sea stratification, while still
+// seeding in well under a second.
 const DEMO_PORTS: WorkspaceSeedPort[] = [
-  { name: "ميناء جدة الإسلامي", code: "JED", portType: "بحري", sheetName: "بحري", count: 90 },
-  { name: "ميناء الدمام",       code: "DMM", portType: "بحري", sheetName: "بحري", count: 70 },
-  { name: "منفذ البطحاء",       code: "BTH", portType: "بري",  sheetName: "بري",  count: 40 },
+  { name: "ميناء جدة الإسلامي", code: "JED", portType: "بحري", sheetName: "بحري", count: 110 },
+  { name: "ميناء الدمام",       code: "DMM", portType: "بحري", sheetName: "بحري", count: 90 },
+  { name: "منفذ البطحاء",       code: "BTH", portType: "بري",  sheetName: "بري",  count: 90 },
+  { name: "منفذ الحديثة",       code: "HDT", portType: "بري",  sheetName: "بري",  count: 60 },
+  { name: "منفذ الرقعي",        code: "RQI", portType: "بري",  sheetName: "بري",  count: 50 },
 ];
 
 // Real sampling rules are calibrated for populations in the thousands; a
-// direct copy would draw ~100% of this small demo population. Scale the
-// stage-1 target down to a fraction so the demo shows a genuine sample <
-// population, exactly like a real (small) monthly run would configure it.
+// direct copy would draw ~100% of this small demo population. 25% of the
+// 400-row population draws the ~100-image sample the owner asked the demo to
+// carry — a genuine sample < population, like a real (small) monthly run.
 const DEMO_SAMPLING_RULES: StageSamplingRule[] = [
   {
     stageKey: "first",
     method: "percentage",
-    value: 30,
+    value: 25,
     isLocked: false,
     minRequiredCount: 0,
     certScanPercentage: 0,
@@ -145,23 +199,27 @@ const DEMO_SAMPLING_RULES: StageSamplingRule[] = [
   },
 ];
 
-// Four of the six default managed users are assignable (employee/supervisor);
-// the other two (manager) never receive direct assignments in the real UI either.
+// The demo account takes the largest share (its queue is the one the demo
+// walks through), the supervisor gets a slice too so "the supervisor's queue
+// differs from the employee's" is visibly true, and reassignment demo →
+// supervisor has a populated target.
 const DEMO_ALLOCATIONS: EmployeeStageAllocation[] = [
-  { username: "jalgahamdi",  stageKey: "first", method: "percentage", value: 35, isActive: true },
-  { username: "hihaloraini", stageKey: "first", method: "percentage", value: 30, isActive: true },
-  { username: "saalhijji",   stageKey: "first", method: "percentage", value: 20, isActive: true },
-  { username: "malrogi",     stageKey: "first", method: "percentage", value: 15, isActive: true },
+  { username: "demo",        stageKey: "first", method: "percentage", value: 35, isActive: true },
+  { username: "jalgahamdi",  stageKey: "first", method: "percentage", value: 25, isActive: true },
+  { username: "hihaloraini", stageKey: "first", method: "percentage", value: 20, isActive: true },
+  { username: "saalhijji",   stageKey: "first", method: "percentage", value: 10, isActive: true },
+  { username: "malrogi",     stageKey: "first", method: "percentage", value: 10, isActive: true },
 ];
 
 /**
- * The viewer/demo workspace's own seed configuration. Kept `"binary"` so the
- * shipped demo's numbers are unchanged by the parameterization.
+ * The demo workspace's own seed configuration. `"binary"` keeps the demo's
+ * risk column simple (نعم/لا); the four-way vocabulary spread belongs to the
+ * dev-only simulated workspace.
  */
 export const DEMO_SEED_PROFILE: WorkspaceSeedProfile = {
   month: DEMO_MONTH,
   year: DEMO_YEAR,
-  username: DEMO_USERNAME,
+  username: DEMO_OPERATOR_USERNAME,
   riskFileName: "بيانات_مخاطر_تجريبية.xlsx",
   rngSeed: "xray-demo-fixed-seed-v1",
   templateId: DEMO_TEMPLATE_ID,
@@ -171,6 +229,11 @@ export const DEMO_SEED_PROFILE: WorkspaceSeedProfile = {
   allocations: DEMO_ALLOCATIONS,
   seededAt: "2026-06-01T08:00:00.000Z",
   riskEngineSpread: "binary",
+  // NOTE: no `employees` here — the demo roster is attached at call time in
+  // createDemoWorkspace. A module-scope buildDemoManagedUsers() call would run
+  // createDefaultManagedUsers() at import time, which breaks every test that
+  // module-mocks auth/userManagement (demoWorkspace is imported transitively
+  // by AuthGate).
 };
 
 /** A value that `engineVerdictOf` does NOT recognize — neither affirmative nor negative. */
@@ -423,7 +486,7 @@ export async function seedWorkspaceMonth(
   await updateMonthStatus(handle, monthFolderName, "sampled");
 
   // ── 3. Distribution — deterministic Hamilton apportionment, no RNG ──
-  const employees = createDefaultManagedUsers();
+  const employees = profile.employees ?? createDefaultManagedUsers();
   const { events } = calculateBulkAssignment({
     rows: drawResult.data.rows,
     allocations: profile.allocations,

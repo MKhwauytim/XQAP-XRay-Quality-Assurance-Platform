@@ -7,7 +7,7 @@ import * as authSession from "./authSession";
 import * as authActivityLog from "./authActivityLog";
 import * as passwordCrypto from "./passwordCrypto";
 import { writeLastLoginUsername } from "./loginPersistence";
-import { VIEWER_USERNAME } from "./authConfig";
+import { DEMO_USERNAME } from "./authConfig";
 import { WorkspaceProvider } from "../data/workspace/WorkspaceProvider";
 import { createMemoryDirectory } from "../data/storage/memoryDirectory";
 import * as populationStorage from "../data/population/populationStorage";
@@ -320,7 +320,7 @@ describe("AuthGate — startup session-hydration race (B2)", () => {
 
   it("does not clear a demo/viewer session once hydration completes, even though 'viewer' is never a managed user", async () => {
     // Regression: the demo session carries role "admin" (for full tab
-    // visibility) but username VIEWER_USERNAME, so it fails
+    // visibility) but username DEMO_USERNAME, so it fails
     // isBootstrapAdminSession(). Before the isExemptFromManagedUserValidation
     // fix, the usersHydrated-gated re-validation added for this same bucket
     // would run stillHasManagedUser() against it, always find no match (the
@@ -328,7 +328,7 @@ describe("AuthGate — startup session-hydration race (B2)", () => {
     // session on every single demo login.
     const demoSession: AuthSession = {
       role: "admin",
-      username: VIEWER_USERNAME,
+      username: DEMO_USERNAME,
       loginAt: new Date().toISOString(),
       mode: "demo",
     };
@@ -444,7 +444,7 @@ describe("AuthGate — usersHydrated render gate (P1 item 4)", () => {
   it("never gates an exempt (demo) session", async () => {
     const demoSession: AuthSession = {
       role: "admin",
-      username: VIEWER_USERNAME,
+      username: DEMO_USERNAME,
       loginAt: new Date().toISOString(),
       mode: "demo",
     };
@@ -696,23 +696,28 @@ describe("AuthGate — permission auto-refresh", () => {
     expect(mocks.loadWorkspaceFiles.mock.calls.length).toBe(callsAfterHydration);
   });
 
-  it("does not schedule an auto-refresh for a demo/viewer session", async () => {
+  it("schedules the auto-refresh for a demo session too (demo is writable now)", async () => {
     vi.spyOn(authSession, "readRealSession").mockReturnValue({
       role: "admin",
-      username: VIEWER_USERNAME,
+      username: DEMO_USERNAME,
       loginAt: new Date().toISOString(),
       mode: "demo",
     });
-    mockReadyWorkspace("auto-refresh-demo-skipped", [NON_SEED_USERNAME]);
+    mockReadyWorkspace("auto-refresh-demo-enabled", [NON_SEED_USERNAME]);
     const setIntervalSpy = vi.spyOn(window, "setInterval");
 
     renderAuthGate();
 
     await waitFor(() => expect(screen.getByText("authenticated")).toBeInTheDocument());
 
-    const refreshCall = setIntervalSpy.mock.calls.find(
-      (call) => call[1] === AUTO_REFRESH_INTERVAL_MS,
-    );
-    expect(refreshCall).toBeUndefined();
+    // Same pattern as the real-session test above: the interval registers in
+    // an effect pass after workspaceStatus flips to "ready" — poll, don't
+    // assert immediately.
+    await waitFor(() => {
+      const refreshCall = setIntervalSpy.mock.calls.find(
+        (call) => call[1] === AUTO_REFRESH_INTERVAL_MS,
+      );
+      expect(refreshCall).toBeDefined();
+    });
   });
 });

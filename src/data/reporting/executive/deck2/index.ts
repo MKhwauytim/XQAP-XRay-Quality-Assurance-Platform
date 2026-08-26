@@ -35,8 +35,12 @@ import { getLabels } from "../../../labels/labelsStore";
  * framework, no external file — this is UI chrome for reviewing on screen,
  * not slide-layout math, so it doesn't conflict with the deck's
  * no-runtime-layout-recompute rule.
+ *
+ * Exported (2026-08-26) so deck3 can reuse the exact same chrome scripts —
+ * they only depend on the generic hooks (`.slide[data-section]`, the
+ * `#deck-nav-*` ids, `#deck-fullscreen-button`), not on any v2 CSS.
  */
-const DECK_NAV_SCRIPT = `(function(){
+export const DECK_NAV_SCRIPT = `(function(){
   var slides = Array.prototype.slice.call(document.querySelectorAll('.slide[data-section]'));
   if (!slides.length) return;
   var total = slides.length;
@@ -244,8 +248,9 @@ const DECK_VARIANT_SCRIPT = `(function(){
   }).catch(function(){});
 })();`;
 
-/** Full-screen presentation control for the exported, self-contained HTML. */
-const DECK_FULLSCREEN_SCRIPT = `(function(){
+/** Full-screen presentation control for the exported, self-contained HTML.
+ *  Exported for deck3 reuse — see DECK_NAV_SCRIPT's export note above. */
+export const DECK_FULLSCREEN_SCRIPT = `(function(){
   var button = document.getElementById('deck-fullscreen-button');
   if (!button) return;
   var root = document.documentElement;
