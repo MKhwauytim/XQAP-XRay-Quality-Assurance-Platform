@@ -91,6 +91,11 @@ export type ReportModel = {
     reassignments: ManagementModel["reassignments"];
   } | null;
   portAccuracy: Aggregates["byPort"];
+  /** Decision-combined fold per risk level (المستوى) — the same
+   *  `aggregates.byStage` fold model.test.ts already reconciles against the
+   *  total evaluable count. Exposed for deck3's per-risk-level accuracy table
+   *  and chart, so the deck reads the shared fold instead of re-tallying. */
+  stageAccuracy: Aggregates["byStage"];
   /** Decision-per-level fold, keyed on (portName, decisionLevel) — see
    *  `Aggregates.byPortAndLevel`'s doc comment. Single source for the deck2
    *  level-accuracy page AND the executive workbook's per-level port columns. */
@@ -329,6 +334,7 @@ export function buildReportModel(
     distributionCoverage,
     accountabilityProgress,
     portAccuracy: aggregates.byPort,
+    stageAccuracy: aggregates.byStage,
     portAccuracyByLevel: aggregates.byPortAndLevel,
     dailyTrend: (() => {
       const dated = aggregates.byEntryDay.reduce((s, d) => s + d.evaluable, 0);
