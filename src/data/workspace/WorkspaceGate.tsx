@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, Check, Folder, FolderArchive, Info, Keyboard, Rocket, Wrench, X, XCircle } from "lucide-react";
 
 import type { AuthSession } from "../../auth/authTypes";
-import { ADMIN_SHORTCUT_KEYS, DEMO_PASSWORD, DEMO_USERNAME } from "../../auth/authConfig";
+import { ADMIN_SHORTCUT_KEYS, DEMO_PASSWORD } from "../../auth/authConfig";
 import {
   createDefaultPermissions,
   getManagedLoginUsers,
@@ -41,14 +41,14 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
   } = useWorkspace();
   const labels = useLabels();
 
-  // Demo entry (demo/demo): a visible «الدخول التجريبي» button on the picker
-  // card opens a small credentials dialog; signing in with demo/demo mounts
-  // the writable in-memory demo workspace, which then auto-enters the demo
-  // session. Also reachable through the legacy Alt+A-then-T shortcut, and —
-  // deliberately — from the unsupported-browser screen too: the demo needs no
-  // File System Access API at all.
+  // Demo entry: a visible «الدخول بنمط التجربة» button beside the
+  // address-picker opens a popup asking for ONE password (demo); entering it
+  // mounts the writable in-memory demo workspace, which then auto-enters the
+  // demo session. Also reachable through the legacy Alt+A-then-T shortcut,
+  // and — deliberately — from the unsupported-browser screen too: the demo
+  // needs no File System Access API at all. (The ordinary login form still
+  // accepts the full demo/demo pair — see AuthGate's loginAsEmployee.)
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [demoUsername, setDemoUsername] = useState("");
   const [demoPassword, setDemoPassword] = useState("");
   const [viewError, setViewError] = useState("");
   const altSequenceRef = useRef<string[]>([]);
@@ -149,19 +149,14 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
   }, [status]);
 
   function openDemoModal(): void {
-    setDemoUsername("");
     setDemoPassword("");
     setViewError("");
     setIsViewModalOpen(true);
   }
 
   function submitDemoLogin(): void {
-    if (
-      demoUsername.trim().toLowerCase() === DEMO_USERNAME &&
-      demoPassword === DEMO_PASSWORD
-    ) {
+    if (demoPassword.trim().toLowerCase() === DEMO_PASSWORD) {
       setIsViewModalOpen(false);
-      setDemoUsername("");
       setDemoPassword("");
       setViewError("");
       void enterDemoWorkspace();
@@ -172,7 +167,6 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
 
   function closeViewModal(): void {
     setIsViewModalOpen(false);
-    setDemoUsername("");
     setDemoPassword("");
     setViewError("");
   }
@@ -188,19 +182,6 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
       >
         <h2 id="demoLoginTitle">{labels.wsgate_view_modal_title}</h2>
         <p>{labels.wsgate_view_modal_desc}</p>
-        <input
-          type="text"
-          dir="ltr"
-          autoComplete="off"
-          aria-label={labels.wsgate_demo_username_label}
-          value={demoUsername}
-          onChange={(event) => setDemoUsername(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") submitDemoLogin();
-            if (event.key === "Escape") closeViewModal();
-          }}
-          placeholder={labels.wsgate_demo_username_label}
-        />
         <input
           type="password"
           dir="ltr"
