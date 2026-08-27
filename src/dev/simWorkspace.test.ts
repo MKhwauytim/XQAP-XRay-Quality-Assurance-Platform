@@ -206,6 +206,14 @@ describe("simulated workspace seed", () => {
       "qualityImageResult",
       "result",
       "notes",
+      "hasImage",
+      "noImageReason",
+      "hasMarking",
+      "imageQuality",
+      "lowQualityReason",
+      "suspicionLevel",
+      "suspectedTypes",
+      "smuggleMethod",
     ]);
 
     const selection = await loadInspectionTemplateSelection(handle);
