@@ -21,6 +21,11 @@ const ctx = globalThis as unknown as {
 
 const send = (msg: PendingCorrectionsImportResponse) => ctx.postMessage(msg);
 
+// Well above any realistic معلقة queue size for this app's domain, but low
+// enough that a pathological accidental multi-hundred-thousand-row upload
+// fails fast with a message instead of hanging the tab.
+const MAX_IMPORT_ROWS = 20_000;
+
 ctx.onmessage = async (ev) => {
   try {
     const { file } = ev.data;
@@ -51,6 +56,13 @@ ctx.onmessage = async (ev) => {
         record[header] = String(raw[idx] ?? "").trim();
       });
       rows.push(record);
+    }
+    if (rows.length > MAX_IMPORT_ROWS) {
+      send({
+        type: "error",
+        error: `عدد صفوف الملف (${rows.length.toLocaleString("ar-SA-u-nu-latn")}) يتجاوز الحد الأقصى المسموح به (${MAX_IMPORT_ROWS.toLocaleString("ar-SA-u-nu-latn")} صف).`,
+      });
+      return;
     }
     send({ type: "done", headerRow, rows });
   } catch (err) {

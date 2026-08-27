@@ -10,7 +10,7 @@
  * distribution cache both need patching, why bulk reopen is a separate,
  * explicit action rather than automatic after import).
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ModalShell } from "../../../../../ModalShell/ModalShell";
 import { ConfirmDialog } from "../../../../../ConfirmDialog/ConfirmDialog";
 import type { DirectoryHandleLike } from "../../../../../../data/storage/fileSystemAccess";
@@ -129,8 +129,27 @@ export default function PendingCorrections({
   const [reopenMsg, setReopenMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const workerRef = useRef<Worker | null>(null);
+  // Bumped on every new file selection; a worker response is only applied if it
+  // still matches the LATEST generation when it arrives. Guards against the
+  // worker's async `onmessage` (it yields at `await file.arrayBuffer()`) resolving
+  // two picked-in-a-row files out of order and letting a stale response overwrite
+  // a newer one.
+  const importGenerationRef = useRef(0);
+  // Synchronous re-entrancy guard for bulk-reopen: `ConfirmDialog` has no
+  // disabled/busy prop, so its confirm button stays clickable through the whole
+  // sequential reopen loop. `reopenBusy` state alone can't stop a same-tick double
+  // click (React state updates aren't visible until the next render), so this ref
+  // is checked first and set synchronously before any await.
+  const reopenInFlightRef = useRef(false);
 
   const pendingCount = entries.filter((entry) => isPendingReferralEntry(entry, answersMap, template)).length;
+
+  useEffect(() => {
+    return () => {
+      workerRef.current?.terminate();
+      workerRef.current = null;
+    };
+  }, []);
 
   if (!canManage || !monthFolderName) return null;
 
@@ -152,11 +171,16 @@ export default function PendingCorrections({
   }
 
   function handleFileSelected(file: File): void {
+    if (importState.phase === "parsing") return; // a parse is already in flight
+    const generation = ++importGenerationRef.current;
     setImportState({ phase: "parsing" });
     setImportOpen(true);
     if (!workerRef.current) workerRef.current = new PendingCorrectionsWorker();
     const worker = workerRef.current;
     worker.onmessage = (ev: MessageEvent<PendingCorrectionsImportResponse>) => {
+      // Discard a response for a request that's no longer the latest one — the
+      // user picked another file before this one's async parse landed.
+      if (generation !== importGenerationRef.current) return;
       const msg = ev.data;
       if (msg.type === "progress") return;
       if (msg.type === "error") {
@@ -167,8 +191,11 @@ export default function PendingCorrections({
         try {
           const parsed = parseImportRows(msg.rows, msg.headerRow, L);
           const populationIndex = await loadCorrectionPopulationIndex(directoryHandle, monthFolderName);
+          // Re-check: an even newer selection could have landed during the await above.
+          if (generation !== importGenerationRef.current) return;
           setImportState({ phase: "preview", preview: computeCorrectionPreview(parsed, populationIndex) });
         } catch (error) {
+          if (generation !== importGenerationRef.current) return;
           logError("pendingCorrections:preview", error);
           setImportState({ phase: "error", message: L.ew_pending_import_error });
         }
@@ -199,6 +226,8 @@ export default function PendingCorrections({
   }
 
   async function handleBulkReopen(): Promise<void> {
+    if (reopenInFlightRef.current) return;
+    reopenInFlightRef.current = true;
     setReopenBusy(true);
     try {
       const result = await bulkReopenPendingItems({
@@ -223,6 +252,7 @@ export default function PendingCorrections({
       setReopenConfirmOpen(false);
       await onChanged();
     } finally {
+      reopenInFlightRef.current = false;
       setReopenBusy(false);
     }
   }
@@ -237,6 +267,7 @@ export default function PendingCorrections({
         <button
           type="button"
           className="ew-btn-secondary ew-btn-sm"
+          disabled={importState.phase === "parsing"}
           onClick={() => { setImportState({ phase: "idle" }); fileInputRef.current?.click(); }}
         >
           {L.ew_pending_import_btn}
