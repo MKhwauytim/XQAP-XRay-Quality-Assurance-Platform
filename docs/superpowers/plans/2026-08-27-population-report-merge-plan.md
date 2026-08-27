@@ -831,7 +831,7 @@ describe("computePopulationReportModel", () => {
     ];
     const sample = makeSampleMaster([populationRows[0]]);
     const distribution = makeDistribution([
-      { xrayImageId: "1", assignedTo: "user1", row: { ...populationRows[0] } },
+      { id: "1", assignedTo: "user1", status: "completed", row: { ...populationRows[0] } },
     ]);
     const model = computePopulationReportModel({
       monthFolderName: "8-August-2026",
@@ -1536,7 +1536,7 @@ describe("buildPopulationDeck", () => {
   it("produces a self-contained HTML deck with all three sections and no workflow-status text", async () => {
     const populationRows = [makeRow("1", "ميناء جدة", { portType: "بحري" })];
     const sample = makeSampleMaster(populationRows);
-    const distribution = makeDistribution([{ xrayImageId: "1", assignedTo: "user1", row: { ...populationRows[0] } }]);
+    const distribution = makeDistribution([{ id: "1", assignedTo: "user1", status: "completed", row: { ...populationRows[0] } }]);
     const html = await buildPopulationDeck({
       monthFolderName: "8-August-2026",
       manifest: makeManifest(),
@@ -1561,7 +1561,7 @@ describe("buildPopulationDeck", () => {
       try {
         const populationRows = [makeRow("1", "ميناء جدة", { portType: "بحري" })];
         const sample = makeSampleMaster(populationRows);
-        const distribution = makeDistribution([{ xrayImageId: "1", assignedTo: "user1", row: { ...populationRows[0] } }]);
+        const distribution = makeDistribution([{ id: "1", assignedTo: "user1", status: "completed", row: { ...populationRows[0] } }]);
         const html = await buildPopulationDeck({
           monthFolderName: "8-August-2026",
           manifest: makeManifest(),
@@ -1809,7 +1809,7 @@ function baseInput() {
   const populationRows = [makeRow("1", "ميناء جدة", { portType: "بحري" }), makeRow("2", "منفذ الحديثة", { portType: "بري" })];
   const sample = makeSampleMaster(populationRows);
   const distribution = makeDistribution(
-    populationRows.map((r) => ({ xrayImageId: r.xrayImageId, assignedTo: "user1", row: { ...r } }))
+    populationRows.map((r) => ({ id: r.xrayImageId, assignedTo: "user1", status: "completed" as const, row: { ...r } }))
   );
   return {
     monthFolderName: "8-August-2026",
@@ -1841,9 +1841,12 @@ describe("buildPopulationDocument", () => {
     const manyEntries = Array.from({ length: 50 }, (_, i) => ({
       xrayImageId: `IMG-${i}`,
       assignedTo: `user${i}`,
+      status: "completed" as const,
+      replacedById: null,
+      lastEventAt: "2026-08-01T00:00:00.000Z",
       row: { ...input.populationRows[0], xrayImageId: `IMG-${i}` },
     }));
-    input.distributionEntries = manyEntries as typeof input.distributionEntries;
+    input.distributionEntries = manyEntries;
     input.employeeDisplayNames = Object.fromEntries(manyEntries.map((e) => [e.assignedTo, `موظف ${e.assignedTo}`]));
     const html = await buildPopulationDocument(input);
     expect(html).toContain("موظف user0");
@@ -2211,7 +2214,7 @@ describe("buildPopulationXlsx", () => {
   it("writes one sheet per section with a filename matching the report convention", async () => {
     const populationRows = [makeRow("1", "ميناء جدة", { portType: "بحري" })];
     const sample = makeSampleMaster(populationRows);
-    const distribution = makeDistribution([{ xrayImageId: "1", assignedTo: "user1", row: { ...populationRows[0] } }]);
+    const distribution = makeDistribution([{ id: "1", assignedTo: "user1", status: "completed", row: { ...populationRows[0] } }]);
     await buildPopulationXlsx({
       monthFolderName: "8-August-2026",
       manifest: makeManifest(),
