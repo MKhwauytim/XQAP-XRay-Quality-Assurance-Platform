@@ -1,6 +1,7 @@
 import type { ExecutiveReportRow } from "../../executiveReportTypes";
 import { isRowStudied } from "../../executiveReportTypes";
 import type { DataSufficiencyBand } from "./dataSufficiency";
+import { classifyImageResult } from "../../../population/imageResult";
 
 /**
  * Decision-level fact table (design spec §3.1).
@@ -254,8 +255,7 @@ function collapseToImageRecords(records: DecisionRecord[]): DecisionRecord[] {
   for (const { l1, l2 } of byImage.values()) {
     const base = l1 ?? l2;
     if (!base) continue;
-    const employeeDecision: ResultValue =
-      l1?.employeeDecision === "اشتباه" || l2?.employeeDecision === "اشتباه" ? "اشتباه" : "سليمة";
+    const employeeDecision: ResultValue = classifyImageResult(l1?.employeeDecision, l2?.employeeDecision);
     combined.push({
       ...base,
       employeeDecision,
