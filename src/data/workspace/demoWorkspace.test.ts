@@ -13,6 +13,7 @@ import { loadSampleMaster } from "../sampling/sampleStorage";
 import { loadDistributionLog } from "../distribution/distributionStorage";
 import { loadTemplate } from "../templates/templateStorage";
 import { loadInspectionTemplateSelection } from "../templates/templateSelectionStorage";
+import { loadEmployeeAnswers } from "../answers/answerStorage";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 
 // Characterization test for the shipped demo workspace. `seedWorkspaceMonth`
@@ -84,6 +85,47 @@ describe("demo workspace", () => {
     expect(await loadTemplate(handle, DEMO_TEMPLATE_ID)).not.toBeNull();
     expect((await loadInspectionTemplateSelection(handle))?.templateId).toBe(
       DEMO_TEMPLATE_ID
+    );
+  });
+
+  it("links the demo's template to the real default study template, not a bespoke one", async () => {
+    const handle = await createDemoWorkspace();
+    const template = await loadTemplate(handle, DEMO_TEMPLATE_ID);
+    // Same phase count and question set a brand-new real workspace's
+    // `buildDefaultInspectionTemplate` produces — image quality, customs
+    // declaration analysis, and result — not the old 3-field demo-only form.
+    expect(template?.phases).toHaveLength(3);
+    const fieldIds = template?.fields.map((f) => f.fieldId) ?? [];
+    expect(fieldIds).toEqual(
+      expect.arrayContaining([
+        "hasImage",
+        "hasMarking",
+        "imageQuality",
+        "canViewDeclaration",
+        "declarationType",
+        "declaredNature",
+        "observedNature",
+        "matchesDeclaration",
+        // The one field pinned to the reporting pipeline's fixed ground-truth
+        // id (executiveReportTypes.ts → expertResultFieldId).
+        "qualityImageResult",
+        "notes",
+      ])
+    );
+    // No leftover ids from the old bespoke template.
+    expect(fieldIds).not.toContain("result");
+  });
+
+  it("seeds demo answers that fill the real template's fields, not just the ground-truth one", async () => {
+    const handle = await createDemoWorkspace();
+    const file = await loadEmployeeAnswers(handle, MONTH_FOLDER, "demo");
+    expect(file.items.length).toBeGreaterThan(0);
+
+    const submitted = file.items.find((item) => item.status === "submitted");
+    expect(submitted).toBeDefined();
+    const fieldIds = submitted?.answers.map((a) => a.fieldId) ?? [];
+    expect(fieldIds).toEqual(
+      expect.arrayContaining(["hasImage", "canViewDeclaration", "declarationType", "qualityImageResult"])
     );
   });
 });

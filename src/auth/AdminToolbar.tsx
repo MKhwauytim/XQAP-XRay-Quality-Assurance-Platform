@@ -2,6 +2,8 @@ import "./AdminToolbar.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Briefcase,
+  Bug,
+  Download,
   Eye,
   HelpCircle,
   RefreshCw,
@@ -15,6 +17,10 @@ import { useWorkspace } from "../data/workspace/useWorkspace";
 import { useGlobalMonth } from "../data/month/useGlobalMonth";
 import { useLabels, type Labels } from "../data/labels/useLabels";
 import { useFeedbackUnread } from "../data/feedback/useFeedbackUnread";
+import { useDemoDebugEnabled, setDemoDebugEnabled } from "../data/debug/demoDebugStore";
+import { recordSyncSample } from "../data/debug/syncMetrics";
+import { exportDemoDebugReport } from "../data/debug/demoDebugReport";
+import { DemoDebugPanel } from "../components/DebugPanel/DemoDebugPanel";
 
 const PREVIEW_ROLE_IDS: AuthRole[] = ["admin", "manager", "supervisor", "employee", "guest"];
 
@@ -108,16 +114,52 @@ export function AdminToolbar({
   const handleRefresh = useCallback(async () => {
     if (refreshState === "running") return;
     setRefreshState("running");
+    const startedAt = performance.now();
     const result = await runSync({
       manual: true,
       directoryHandle,
       monthFolderName,
       refreshPermissions,
     });
+    // Demo debug tools observe this SAME call's result — never a second
+    // runSync trigger — so a manual refresh's timing shows up in the debug
+    // panel/report without touching workspaceSync.ts or SyncTick.tsx.
+    if (isDemo) {
+      recordSyncSample({
+        at: Date.now(),
+        ok: result.ok,
+        ran: result.ran,
+        broadcast: result.broadcast,
+        changedCount: result.changed.size,
+        durationMs: performance.now() - startedAt,
+      });
+    }
     setRefreshState(result.ok ? "success" : "failed");
     if (refreshResetTimer.current !== null) window.clearTimeout(refreshResetTimer.current);
     refreshResetTimer.current = window.setTimeout(() => setRefreshState("idle"), 2000);
-  }, [directoryHandle, monthFolderName, refreshPermissions, refreshState]);
+  }, [directoryHandle, isDemo, monthFolderName, refreshPermissions, refreshState]);
+
+  // Demo-only debug tools (owner request, 2026-08-27): a toggle that shows a
+  // live diagnostics panel (connection, sync timing, main-thread
+  // responsiveness, recent errors) plus an export-to-JSON report button, so a
+  // demo session can be debugged from an artifact instead of a screen-share.
+  // Gated on `isDemo` alone — never rendered for a real session.
+  const debugEnabled = useDemoDebugEnabled();
+  const [isExportingDebug, setIsExportingDebug] = useState(false);
+
+  const handleToggleDebug = useCallback(() => {
+    setDemoDebugEnabled(!debugEnabled);
+  }, [debugEnabled]);
+
+  const handleExportDebug = useCallback(async () => {
+    if (isExportingDebug) return;
+    setIsExportingDebug(true);
+    try {
+      await exportDemoDebugReport();
+    } finally {
+      setIsExportingDebug(false);
+    }
+  }, [isExportingDebug]);
 
   const refreshTitle =
     refreshState === "running" ? labels.toolbar_refresh_running
@@ -201,7 +243,35 @@ export function AdminToolbar({
             {unreadFeedbackCount > 0 && <span className="auth-toolbar-dot" aria-hidden="true" />}
           </button>
         )}
+        {isDemo && (
+          <>
+            <button
+              type="button"
+              className={`auth-toolbar-debug${debugEnabled ? " is-active" : ""}`}
+              onClick={handleToggleDebug}
+              aria-pressed={debugEnabled}
+              aria-label={debugEnabled ? labels.toolbar_debug_toggle_hide : labels.toolbar_debug_toggle_show}
+              title={debugEnabled ? labels.toolbar_debug_toggle_hide : labels.toolbar_debug_toggle_show}
+            >
+              <Bug size={16} aria-hidden />
+            </button>
+            {debugEnabled && (
+              <button
+                type="button"
+                className="auth-toolbar-debug-export"
+                onClick={() => { void handleExportDebug(); }}
+                disabled={isExportingDebug}
+                title={labels.toolbar_debug_export_btn}
+              >
+                <Download size={14} aria-hidden />
+                {isExportingDebug ? labels.toolbar_debug_exporting : labels.toolbar_debug_export_btn}
+              </button>
+            )}
+          </>
+        )}
       </div>
+
+      {isDemo && debugEnabled && <DemoDebugPanel onClose={() => setDemoDebugEnabled(false)} />}
     </div>
   );
 }

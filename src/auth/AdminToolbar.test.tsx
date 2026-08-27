@@ -31,6 +31,11 @@ vi.mock("../components/GlobalMonthSelector/GlobalMonthSelector", () => ({
 }));
 vi.mock("../data/workspace/workspaceSync", () => ({
   runSync: mocks.runSync,
+  // Read by the demo-only DemoDebugPanel (rendered when debug mode is toggled
+  // on for a demo session) — not exercised by the non-demo tests below, but
+  // the module still needs to export something callable.
+  getSyncIntervalMs: () => 45_000,
+  getLastSyncStartedAt: () => 0,
 }));
 
 const session: AuthSession = {
@@ -151,5 +156,65 @@ describe("AdminToolbar — the manual sync trigger", () => {
     expect(document.querySelector(".auth-role-switcher")).not.toBeNull();
     // Only the admin feedback button stays real-admin-only.
     expect(document.querySelector(".auth-toolbar-help")).toBeNull();
+  });
+});
+
+describe("AdminToolbar — demo-only debug tools", () => {
+  const demoSession: AuthSession = { ...session, role: "admin", username: "demo", mode: "demo" };
+
+  afterEach(async () => {
+    cleanup();
+    const { __resetDemoDebugStoreForTests } = await import("../data/debug/demoDebugStore");
+    __resetDemoDebugStoreForTests();
+  });
+
+  function debugToggle(): HTMLButtonElement {
+    const button = document.querySelector<HTMLButtonElement>(".auth-toolbar-debug");
+    if (!button) throw new Error("debug toggle not rendered");
+    return button;
+  }
+
+  it("is not rendered for a non-demo session, even an admin", () => {
+    render(
+      <AdminToolbar
+        session={{ ...session, role: "admin" }}
+        previewRole={null}
+        onPreviewRoleChange={() => {}}
+        onFeedback={() => {}}
+      />
+    );
+    expect(document.querySelector(".auth-toolbar-debug")).toBeNull();
+  });
+
+  it("toggles the debug panel and the export button on/off, and the panel's close button toggles it back off", () => {
+    render(
+      <AdminToolbar session={demoSession} previewRole={null} onPreviewRoleChange={() => {}} onFeedback={() => {}} />
+    );
+
+    expect(document.querySelector(".demo-debug-panel")).toBeNull();
+    expect(document.querySelector(".auth-toolbar-debug-export")).toBeNull();
+
+    fireEvent.click(debugToggle());
+    expect(document.querySelector(".demo-debug-panel")).not.toBeNull();
+    expect(document.querySelector(".auth-toolbar-debug-export")).not.toBeNull();
+    expect(debugToggle().getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(document.querySelector<HTMLButtonElement>(".demo-debug-panel-close")!);
+    expect(document.querySelector(".demo-debug-panel")).toBeNull();
+    expect(document.querySelector(".auth-toolbar-debug-export")).toBeNull();
+  });
+
+  it("records a sample for the demo debug panel when a manual refresh runs", async () => {
+    mocks.runSync.mockResolvedValue({ ran: true, ok: true, changed: new Set(["distribution"]), broadcast: true });
+    const { getSyncSamples, __clearSyncSamplesForTests } = await import("../data/debug/syncMetrics");
+    __clearSyncSamplesForTests();
+
+    render(
+      <AdminToolbar session={demoSession} previewRole={null} onPreviewRoleChange={() => {}} onFeedback={() => {}} />
+    );
+    fireEvent.click(document.querySelector<HTMLButtonElement>(".auth-toolbar-refresh")!);
+
+    await waitFor(() => expect(getSyncSamples()).toHaveLength(1));
+    expect(getSyncSamples()[0]).toMatchObject({ ok: true, ran: true, broadcast: true, changedCount: 1 });
   });
 });
