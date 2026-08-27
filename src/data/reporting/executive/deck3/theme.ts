@@ -38,10 +38,17 @@ ${DECK_V3_FONT_FACE_CSS}
   --v3-scale:1; --v3-tx:0px;
 }
 html,body{margin:0;padding:0;}
-body{background:var(--v3-bg);font-family:"Somar","IBM Plex Sans Arabic","Tahoma","Arial",sans-serif;}
+body{background:var(--v3-navy);font-family:"Somar","IBM Plex Sans Arabic","Tahoma","Arial",sans-serif;}
 
 /* ── Viewer shell ─────────────────────────────────────────────────────────── */
-.deck-viewer-v3{display:block;min-height:100vh;padding:28px 16px 56px;background:var(--v3-bg);}
+/* Dark navy surround, NOT --v3-bg — the handoff's own canvas backdrop is a
+   dark navy (#0b1f33) behind the light slide "paper", and every other
+   edition in this app (deck/deckTheme.ts's EXEC_CSS body, which deck1/deck2
+   share) already uses the same page-darker-than-slide convention. Reusing
+   --v3-bg here (this rule's original value) made the slide and the page
+   around it the exact same color, indistinguishable except for a 1px hairline
+   border — that's what made the report hard to read at a glance. */
+.deck-viewer-v3{display:block;min-height:100vh;padding:28px 16px 56px;background:var(--v3-navy);}
 .slide.v3{
   /* Horizontal centering is a MEASURED pixel shift (--v3-tx, set by
      DECK_V3_SCALE_SCRIPT in index.ts), not a CSS margin/right trick. Two
