@@ -1494,6 +1494,52 @@ export async function refreshDistributionCacheAfterWrite(
   }
 }
 
+/**
+ * Force the next `loadOrDeriveDistributionCurrent` to do a full refold from
+ * the event log against FRESH `sample.master.json` rows, rather than serving
+ * the persisted `distribution.current.json` cache.
+ *
+ * Why this is needed at all: the cache's own validity check
+ * (`sampleRowsFingerprint`, v4) is an id-set/order fingerprint — a djb2 hash
+ * of the joined `xrayImageId`s — not a content hash of the rows. A caller that
+ * OVERWRITES FIELD VALUES on an existing sample row (e.g. correcting the
+ * معلقة/pending-item identifying data in populationCorrections.ts) without
+ * adding/removing/reordering any id produces the exact same fingerprint, so
+ * the normal cache-validity check would keep serving the pre-correction
+ * `.row` stubs in `distribution.current.json` and every employee mirror
+ * indefinitely. Deleting the cache (a documented "rebuildable cache", see
+ * CLAUDE.md) sidesteps that gap entirely instead of teaching the fingerprint
+ * about content — the next read has no cache to accept and must derive fresh,
+ * which re-embeds `toEmployeeMirrorRowStub(row)` from the now-corrected
+ * `sampleRows` for every entry (see foldDistributionEvents).
+ *
+ * Best-effort and non-throwing, same contract as `refreshDistributionCacheAfterWrite`:
+ * a failure here just means the NEXT natural refold (a future cache miss)
+ * eventually picks up the correction instead of this one being immediate.
+ * Caller is expected to follow this with `refreshDistributionCacheAfterWrite`
+ * so the corrected cache/mirrors are rebuilt right away rather than lazily on
+ * next read.
+ */
+export async function invalidateDistributionCacheForFieldEdit(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<void> {
+  try {
+    await ensureMonthWritable(directoryHandle, monthFolderName);
+    const dir = await getDistributionDir(directoryHandle, monthFolderName, false);
+    if (!dir.removeEntry) return;
+    for (const name of [
+      CURRENT_FILE, `${CURRENT_FILE}.bak`, `${CURRENT_FILE}.tmp`,
+      DISTRIBUTION_CHECKPOINT_FILE, `${DISTRIBUTION_CHECKPOINT_FILE}.bak`, `${DISTRIBUTION_CHECKPOINT_FILE}.tmp`,
+    ]) {
+      await dir.removeEntry(name).catch(() => undefined);
+    }
+    bumpWorkspaceEpoch(directoryHandle, monthFolderName);
+  } catch (error) {
+    logError("distribution:invalidate-cache-for-field-edit", error);
+  }
+}
+
 /** Deduped sibling of loadDistributionLog for READ-ONLY call sites only.
  *  Never use this for a fresh-read-before-write correctness check -- see the
  *  exclusion list in this task's plan doc / the parent implementation plan. */

@@ -79,14 +79,14 @@ describe("tab catalog", () => {
     expect(roleCeilingFor("unknown-tab-id")).toBeUndefined();
   });
 
-  it("widens reports/kpi to include supervisor while report-designer keeps excluding guest", () => {
-    // Synthesis finding: reports/kpi's sub-tab ceiling was never actually enforced,
-    // so supervisors already got working "view" access per the permission matrix
-    // defaults. Once sub-tab ceilings are enforced (B1), the ceiling itself must
-    // widen to match that tested reality instead of silently breaking supervisors.
-    expect(roleCeilingFor("reports/kpi")).toEqual(["supervisor", "manager", "admin"]);
+  it("widens reports/kpi and report-designer to every operational role", () => {
+    // Widened again on 2026-08-27: excluding `employee` made that whole matrix
+    // row a dead control for these two sub-tabs (same pattern as the
+    // user-management widening two days earlier). `guest` stays out on purpose,
+    // same rationale as population/adhoc-import.
+    expect(roleCeilingFor("reports/kpi")).toEqual(["employee", "supervisor", "manager", "admin"]);
     expect(roleCeilingFor("reports/kpi")).not.toContain("guest");
-    expect(roleCeilingFor("reports/kpi")).not.toContain("employee");
+    expect(roleCeilingFor("reports/report-designer")).toEqual(["employee", "supervisor", "manager", "admin"]);
     expect(roleCeilingFor("reports/report-designer")).not.toContain("guest");
   });
 
@@ -119,8 +119,14 @@ describe("tab catalog", () => {
     }
   });
 
-  it("keeps the deliberate settings ceiling intact", () => {
-    expect(roleCeilingFor("settings")).toEqual(["guest", "admin"]);
+  it("widens settings to every role, like the 2026-08-25 user-management fix", () => {
+    // Widened from ["guest", "admin"] (2026-08-27): the owner reported that
+    // Settings could not be granted to employee/supervisor/manager from the
+    // page-permissions matrix, which was true -- an admin-only-plus-guest
+    // ceiling made 3 of the 4 managed-role columns dead controls, same bug
+    // pattern as the earlier user-management fix (#109). `guest` was already
+    // allowed and stays allowed.
+    expect(roleCeilingFor("settings")).toEqual(["guest", "employee", "supervisor", "manager", "admin"]);
   });
 
   it("keeps ad-hoc import under population as a sub-tab, with no top-level entry", () => {

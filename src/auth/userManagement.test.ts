@@ -140,7 +140,7 @@ test("every non-'none' default permission stays within its tab's code role ceili
   }
 });
 
-test("manager has no settings access by default (matches code ceiling)", () => {
+test("manager has no settings access by default (ceiling widened 2026-08-27, but nothing auto-granted)", () => {
   const perms = createDefaultPermissions();
   expect(getRolePermission(perms, "manager", "settings")).toBe("none");
 });
@@ -164,8 +164,10 @@ test("every non-'none' default permission stays within its OWN tab's code role c
   }
 });
 
-test("reports/kpi ceiling includes supervisor (widened) while report-designer keeps excluding guest", () => {
-  expect(roleCeilingFor("reports/kpi")).toEqual(["supervisor", "manager", "admin"]);
+test("reports/kpi and report-designer ceilings include employee (widened 2026-08-27) while still excluding guest", () => {
+  expect(roleCeilingFor("reports/kpi")).toEqual(["employee", "supervisor", "manager", "admin"]);
+  expect(roleCeilingFor("reports/kpi")).not.toContain("guest");
+  expect(roleCeilingFor("reports/report-designer")).toEqual(["employee", "supervisor", "manager", "admin"]);
   expect(roleCeilingFor("reports/report-designer")).not.toContain("guest");
 });
 

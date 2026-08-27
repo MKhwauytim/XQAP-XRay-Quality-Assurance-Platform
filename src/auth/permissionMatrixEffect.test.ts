@@ -28,14 +28,12 @@ const ALL_FEATURE_IDS = Object.keys(FEATURE_TAB_LOOKUP);
 
 /** Exactly the role x tab cells the matrix is allowed to present as restricted. */
 const EXPECTED_RESTRICTED: ReadonlyArray<readonly [AuthRole, string]> = [
-  // Settings is code-gated to guest + admin.
-  ["employee", "settings"],
-  ["supervisor", "settings"],
-  ["manager", "settings"],
-  // Ad-hoc import («ارفاق حالات استثنائية») and user management are both grantable
-  // to every operational role, but not to `guest`: it is the read-only observer
-  // role, and neither page has anything for a pure viewer to do (one only ingests
-  // rows and assigns work; the other only mutates other accounts/permissions).
+  // Ad-hoc import («ارفاق حالات استثنائية»), user management, and the
+  // reports/kpi + reports/report-designer sub-tabs are all grantable to every
+  // operational role, but not to `guest`: it is the read-only observer role, and
+  // none of these pages has anything for a pure viewer to do. (`settings`
+  // already allowed guest and was widened to every operational role too, on
+  // 2026-08-27 -- it now has no restricted cells at all.)
   ["guest", "population/adhoc-import"],
   ...[
     "user-management",
@@ -45,11 +43,8 @@ const EXPECTED_RESTRICTED: ReadonlyArray<readonly [AuthRole, string]> = [
     "user-management/activity",
     "user-management/actions",
   ].map((tabId) => ["guest", tabId] as const),
-  // KPI dashboard / report designer keep their own narrower sub-tab ceilings.
   ["guest", "reports/kpi"],
-  ["employee", "reports/kpi"],
   ["guest", "reports/report-designer"],
-  ["employee", "reports/report-designer"],
 ];
 
 function key(role: AuthRole, tabId: string): string {
@@ -213,10 +208,12 @@ describe("feature permission matrix — every settable toggle takes effect", () 
         }
       }
     }
-    // user-management (3 features) x guest only (its ceiling was widened from
-    // ADMIN_ONLY to every operational role on 2026-08-25 -- see tabCatalog.ts),
-    // plus the four settings features (including settings.adminAccount, audit
-    // finding 13) for employee/supervisor/manager. Nothing else.
+    // user-management (3 features) x guest only: its ceiling was widened from
+    // ADMIN_ONLY to every operational role on 2026-08-25 -- see tabCatalog.ts.
+    // Nothing else: `settings`'s own ceiling was widened to every role on
+    // 2026-08-27, so its 4 features (edit-interface-labels, view-error-log,
+    // settings.syncInterval, settings.adminAccount) are no longer dead for ANY
+    // managed role and have dropped out of this "restricted" list entirely.
     //
     // adhoc-import.ingest/.assign are deliberately NOT here any more: since the
     // importer became the `population/adhoc-import` sub-tab, both features cascade
@@ -226,18 +223,14 @@ describe("feature permission matrix — every settable toggle takes effect", () 
     // inert, which is what this list means.
     const featureIds = new Set([...restricted].map((entry) => entry.split(":")[0]));
     expect([...featureIds].sort()).toEqual(
-      [
-        "edit-interface-labels",
-        "edit-permissions",
-        "manage-users",
-        "reset-passwords",
-        "settings.adminAccount",
-        "settings.syncInterval",
-        "view-error-log",
-      ].sort(),
+      ["edit-permissions", "manage-users", "reset-passwords"].sort(),
     );
+    // Settings features are no longer restricted for any managed role -- the
+    // whole point of the 2026-08-27 widening.
     expect(restricted.has("view-error-log:guest")).toBe(false);
-    expect(restricted.has("view-error-log:manager")).toBe(true);
+    expect(restricted.has("view-error-log:manager")).toBe(false);
+    expect(restricted.has("view-error-log:employee")).toBe(false);
+    expect(restricted.has("view-error-log:supervisor")).toBe(false);
     // Reports/archive features are no longer dead for employees.
     expect(restricted.has("export-reports:employee")).toBe(false);
     expect(restricted.has("archive.closeMonth:employee")).toBe(false);

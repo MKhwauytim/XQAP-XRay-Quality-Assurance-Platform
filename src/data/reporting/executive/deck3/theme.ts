@@ -31,8 +31,11 @@ ${DECK_V3_FONT_FACE_CSS}
   --v3-avg-green:#5d8a72; --v3-avg-red:#c98a78; --v3-track:#eceae3;
   /* Set by DECK_V3_SCALE_SCRIPT (index.ts): slides are a fixed 1920×1080
      canvas scaled as a whole. A CSS-only calc can't produce the unitless
-     <number> transform:scale() needs from 100vw, so a tiny script owns it. */
-  --v3-scale:1;
+     <number> transform:scale() needs from 100vw, so a tiny script owns it.
+     --v3-tx is that same script's MEASURED horizontal centering correction
+     (px) — see the script's own doc comment for why this can't be a CSS
+     margin/right trick. */
+  --v3-scale:1; --v3-tx:0px;
 }
 html,body{margin:0;padding:0;}
 body{background:var(--v3-bg);font-family:"Somar","IBM Plex Sans Arabic","Tahoma","Arial",sans-serif;}
@@ -40,9 +43,19 @@ body{background:var(--v3-bg);font-family:"Somar","IBM Plex Sans Arabic","Tahoma"
 /* ── Viewer shell ─────────────────────────────────────────────────────────── */
 .deck-viewer-v3{display:block;min-height:100vh;padding:28px 16px 56px;background:var(--v3-bg);}
 .slide.v3{
-  width:1920px;height:1080px;margin:0 auto;
+  /* Horizontal centering is a MEASURED pixel shift (--v3-tx, set by
+     DECK_V3_SCALE_SCRIPT in index.ts), not a CSS margin/right trick. Two
+     CSS-only attempts both broke on real windows: margin:0 auto and later
+     right:50%/margin-right:-960px (see index.ts's doc comment for exactly
+     why the latter fails — box-model over-constraint resolution for a
+     position:relative box in a dir=rtl document silently recomputes
+     margin-left around margin-right, landing hundreds of px off in a way
+     that happened to look fine in every viewport size tested here). Letting
+     JS measure the box's actual rendered position and correct it exactly is
+     immune to that class of bug by construction. */
+  width:1920px;height:1080px;margin:0;
   margin-bottom:calc(-1080px * (1 - var(--v3-scale)) + 26px);
-  transform:scale(var(--v3-scale));transform-origin:top center;
+  transform:translateX(var(--v3-tx,0px)) scale(var(--v3-scale));transform-origin:top left;
   position:relative;overflow:hidden;box-sizing:border-box;
   background:var(--v3-bg);color:var(--v3-text);
   border:1px solid var(--v3-hair);
@@ -402,6 +415,10 @@ body.deck-fullscreen .btn-fullscreen{
 body.deck-fullscreen.deck-controls-visible .btn-fullscreen{opacity:1;pointer-events:auto;}
 body.deck-fullscreen .slide.v3{display:none;}
 body.deck-fullscreen .slide.v3.deck-slide-active{
+  /* .deck-viewer-v3 itself flex-centers the active slide in fullscreen (see
+     body.deck-fullscreen .deck-viewer-v3 below) — reliable, direction-aware
+     flexbox centering, unrelated to the base rule's --v3-tx pixel shift, so
+     this override drops translateX entirely rather than trying to cancel it. */
   display:flex;flex:0 0 auto;margin:0;border:none;
   transform:scale(var(--v3-scale));transform-origin:center center;
 }
@@ -433,6 +450,7 @@ body.deck-fullscreen.deck-controls-visible .deck-slide-counter{opacity:1;pointer
   .deck-nav{display:none;}
 }
 @media print{
+  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important;}
   body{background:#fff;}
   .deck-nav,.deck-toolbar,.btn-slide-nav,.deck-slide-counter,.btn-fullscreen{display:none!important;}
   .deck-viewer-v3{padding:0;background:#fff;}

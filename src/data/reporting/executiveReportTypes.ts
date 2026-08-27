@@ -1,5 +1,6 @@
 import { MONTHLY_SAMPLE_TARGET } from "../population/populationConfig";
 import type { PreparedPopulationRow } from "../population/populationTypes";
+import type { ProcessingSummaryData } from "../population/monthTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { DistributionCurrentData } from "../distribution/distributionTypes";
 import type { EmployeeAnswerFile } from "../answers/answerTypes";
@@ -311,4 +312,17 @@ export type ExecutiveReportInput = {
    * omitted callers show replaced images without a reason.
    */
   replacementReasons?: Record<string, string>;
+  /**
+   * Population processing diagnostics for the month — the invalid-ID,
+   * duplicate-ID, and invalid-result rows dropped before the population was
+   * finalized (`processing.summary.json`, loaded via `loadProcessingSummary`).
+   * Optional: only the Reports tab's `loadExecInput` populates it today: the
+   * executive workbook's "الصفوف المستبعدة" sheet uses it to export the real
+   * dropped-row list instead of a placeholder note. Other callers/fixtures
+   * that omit it (or a workspace saved before a processing summary existed
+   * for the month) get the sheet's honest "not available" fallback rather
+   * than a fabricated one. Not read by the HTML/deck editions — they keep
+   * pointing readers at `processing.summary.json` directly.
+   */
+  processingSummary?: ProcessingSummaryData | null;
 };

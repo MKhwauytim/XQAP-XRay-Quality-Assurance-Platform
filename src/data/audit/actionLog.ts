@@ -120,6 +120,16 @@ export type WorkspaceActionType =
   | "answer-submitted-on-behalf"
   | "answer-quality-note-set"
   | "answer-reopened"
+  // ── معلقة (on-hold) export/correction/bulk-reopen workflow ─────────────────
+  // One "pending-correction-applied" entry per (xrayImageId, changed field) —
+  // never a single blob for the whole re-import — and one
+  // "pending-bulk-reopened" entry per id actually reopened, ADDITIONAL to the
+  // "answer-reopened" entry reopenSubmittedAnswer already writes for the state
+  // transition itself (see pendingBulkReopen.ts): that one records the reopen,
+  // this one records that it happened via this specific bulk workflow.
+  | "pending-export-generated"
+  | "pending-correction-applied"
+  | "pending-bulk-reopened"
   // ── ad-hoc / exceptional-case imports ──────────────────────────────────────
   | "adhoc-import-created"
   | "adhoc-rows-assigned"
@@ -184,6 +194,9 @@ export const ALL_ACTION_TYPES: readonly WorkspaceActionType[] = [
   "answer-submitted-on-behalf",
   "answer-quality-note-set",
   "answer-reopened",
+  "pending-export-generated",
+  "pending-correction-applied",
+  "pending-bulk-reopened",
   "adhoc-import-created",
   "adhoc-rows-assigned",
   "adhoc-historical-imported",
@@ -228,6 +241,10 @@ export const ALL_ACTION_TYPES: readonly WorkspaceActionType[] = [
 export const HIGH_VOLUME_ACTION_TYPES: readonly WorkspaceActionType[] = [
   "answer-submitted",
   "label-override-changed",
+  // A single pending-corrections re-import can legitimately touch hundreds of
+  // (id, field) pairs at once — same "scales with routine throughput, would
+  // bury governance events" reasoning as answer-submitted above.
+  "pending-correction-applied",
 ];
 
 export type WorkspaceActionEntry = {

@@ -224,7 +224,7 @@ describe("user-management permission sections", () => {
     expect(checkbox).toBeDisabled();
   });
 
-  it("marks settings-backed features as system-restricted for roles the settings page excludes", () => {
+  it("marks user-management-backed features as system-restricted for guest only, now that settings is wide open too", () => {
     render(
       <FeaturePermissionsSection
         permissions={createDefaultPermissions()}
@@ -237,16 +237,19 @@ describe("user-management permission sections", () => {
     );
 
     // view-error-log, edit-interface-labels, settings.syncInterval, and
-    // settings.adminAccount (audit finding 13) all live on `settings` (guest + admin
-    // only), so employee/supervisor/manager get the permanent notice -- not the
-    // recoverable "enable the page first" hint they used to get. manage-users,
-    // reset-passwords and edit-permissions live on `user-management`, whose ceiling
-    // was widened from ADMIN_ONLY to every operational role (2026-08-25) -- only
-    // guest is still permanently excluded there.
+    // settings.adminAccount (audit finding 13) all live on `settings`, whose
+    // ceiling was widened from ["guest", "admin"] to every role on 2026-08-27
+    // (the owner reported it as ungrantable, same bug pattern as #109) -- none
+    // of the four settings features are system-restricted for anyone any more.
+    // manage-users, reset-passwords and edit-permissions live on
+    // `user-management`, whose ceiling was widened from ADMIN_ONLY to every
+    // operational role on 2026-08-25 -- only guest is still permanently
+    // excluded there.
     const notices = screen.getAllByText(SYSTEM_RESTRICTED_LABEL);
-    // 3 user-management features x 1 role (guest) + 4 settings features x 3 roles.
-    expect(notices).toHaveLength(15);
-    // guest keeps a real toggle for the settings features -- the ceiling allows it.
+    // 3 user-management features x 1 role (guest). Settings contributes zero now.
+    expect(notices).toHaveLength(3);
+    // Every role keeps a real toggle for the settings features -- the ceiling
+    // allows all of them now.
     expect(screen.getAllByRole("checkbox").length).toBeGreaterThan(0);
   });
 
