@@ -17,22 +17,60 @@ import { summarizeMs, type MsStats } from "./debugStats";
  * A prior real user's session can therefore still be sitting in it when a
  * demo session is later opened in the same tab. `username`, `role`, and
  * `stack` are the fields on `ErrorEntry` that can identify that real person
- * (a stack trace can embed file/user paths), so this report omits them —
- * everything else (`message`, `context`, `page`, `action`, `errorCode`,
- * `errorName`, `at`/`timestamp`, `restored`) stays, since none of those are
- * populated with free text that names a person; see `ErrorEntry` in
- * `errorLogger.ts` for the field contracts this relies on.
+ * outright (a stack trace can embed file/user paths), so this report omits
+ * them entirely.
+ *
+ * That is NOT sufficient on its own: `message`, `context`, and `action` are
+ * free text and can still carry a real username. Per-user workspace files are
+ * named `{username}.answers.json` / `{username}.samples.json`
+ * (`safeWorkspaceFilePart`, `answerStorage.ts`/`sampleMirrorStorage.ts`) and
+ * `{username}-{hash}.errors.json` / `.activity.json` / `.actions.json`
+ * (`auditUserStem`, `auditPaths.ts`/`errorLogPaths.ts`). When a write to one
+ * of those files fails, `safeWrite.ts` throws raw messages like
+ * `` `Safe-write staging failed for ${fileName}.` `` that embed the full
+ * filename — and call sites such as `answerStorage.ts`'s `onExhausted` pass
+ * that raw cause straight into `logError`, landing verbatim on
+ * `ErrorEntry.message`. So a real user's identity can reach this report
+ * through `message` (and, defensively, `context`/`action`, in case a similar
+ * embedded-filename pattern ever appears there) even though the entry's own
+ * `username` field was stripped. `redactUserFilenames` below finds any
+ * substring shaped like one of those per-user filenames and replaces the
+ * identifying part with a fixed `[user]` placeholder — keeping which file
+ * TYPE failed (and the rest of the diagnostic text) intact — before those
+ * three fields go into the report. `page`, `errorCode`, `errorName`,
+ * `at`/`timestamp`, and `restored` are left as-is: they are drawn from fixed
+ * enumerations or structured values, never free text a caller composes with a
+ * username. See `ErrorEntry` in `errorLogger.ts` for the field contracts this
+ * relies on.
  */
 export type DemoDebugErrorEntry = Omit<ErrorEntry, "username" | "role" | "stack">;
 
+/**
+ * Matches a per-user workspace filename embedded in a message/context/action
+ * string — `{identifier}.answers.json`, `{identifier}.samples.json`, or
+ * `{identifier}-{hash}.errors[.{year}].json` / `.activity.json` /
+ * `.actions.json` — and captures the suffix so the replacement can say which
+ * file type it was without keeping the identifying part. `\S+` (rather than a
+ * fixed character class) deliberately makes no assumption about what
+ * characters a username may contain — this app allows Arabic names — and
+ * relies on greedy backtracking to land on the rightmost occurrence of the
+ * known suffix within the run of non-whitespace characters.
+ */
+const USER_FILENAME_PATTERN =
+  /\S+\.(answers|samples|errors|activity|actions)(?:\.\d{4})?\.json/g;
+
+function redactUserFilenames(value: string): string {
+  return value.replace(USER_FILENAME_PATTERN, (_match, suffix: string) => `[user].${suffix}.json`);
+}
+
 function toDemoDebugErrorEntry(entry: ErrorEntry): DemoDebugErrorEntry {
   return {
-    context: entry.context,
-    message: entry.message,
+    context: redactUserFilenames(entry.context),
+    message: redactUserFilenames(entry.message),
     timestamp: entry.timestamp,
     ...(entry.errorName !== undefined ? { errorName: entry.errorName } : {}),
     ...(entry.page !== undefined ? { page: entry.page } : {}),
-    ...(entry.action !== undefined ? { action: entry.action } : {}),
+    ...(entry.action !== undefined ? { action: redactUserFilenames(entry.action) } : {}),
     ...(entry.errorCode !== undefined ? { errorCode: entry.errorCode } : {}),
     ...(entry.restored !== undefined ? { restored: entry.restored } : {}),
   };

@@ -177,6 +177,22 @@ export default function PendingCorrections({
     setImportOpen(true);
     if (!workerRef.current) workerRef.current = new PendingCorrectionsWorker();
     const worker = workerRef.current;
+    // A genuine worker-level failure (the module fails to start, or throws
+    // outside its own try/catch) — distinct from the `{type:"error"}` message
+    // the worker posts for a caught domain failure, which `onmessage` below
+    // already handles. Without this handler, a dead/never-responding worker
+    // leaves `importState` stuck at "parsing" forever: no message ever
+    // arrives, so the import button stays disabled with no visible error and
+    // no way to recover short of leaving and re-mounting this tab.
+    worker.onerror = (event: ErrorEvent) => {
+      // The worker that just failed is not assumed reusable — null it out so
+      // the next file selection spins up a fresh instance rather than
+      // re-posting into an instance that already proved broken.
+      workerRef.current = null;
+      if (generation !== importGenerationRef.current) return;
+      logError("pendingCorrections:workerError", event.message ? new Error(event.message) : event);
+      setImportState({ phase: "error", message: L.ew_pending_import_error });
+    };
     worker.onmessage = (ev: MessageEvent<PendingCorrectionsImportResponse>) => {
       // Discard a response for a request that's no longer the latest one — the
       // user picked another file before this one's async parse landed.

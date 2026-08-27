@@ -18,6 +18,13 @@
 //  (c) The bulk-reopen confirm handler has no protection against a second
 //      click landing before the first (sequential, multi-step) reopen pass
 //      finishes, since `ConfirmDialog` exposes no disabled/busy prop.
+//  (d) A worker-level failure (as opposed to a caught `{type:"error"}`
+//      message) had no `onerror` handler at all, so `importState` got stuck
+//      at "parsing" forever — the import button (disabled while parsing)
+//      never became clickable again for the rest of the component's mounted
+//      lifetime. The fix adds `worker.onerror`, mirroring the existing
+//      error-message UX, and nulls `workerRef.current` so a later retry
+//      builds a fresh worker instead of reusing the one that just failed.
 //
 // Same WORKER BOUNDARY limitation as usePopulationBrowseWorker.test.ts:
 // jsdom cannot run a real DedicatedWorker, so the `?worker&inline` import is
@@ -34,6 +41,7 @@ import { createMemoryDirectory } from "../../../../../../data/storage/memoryDire
 
 interface WorkerStubInstance {
   onmessage: ((ev: MessageEvent) => void) | null;
+  onerror: ((ev: ErrorEvent) => void) | null;
   posted: unknown[];
   terminated: boolean;
 }
@@ -43,6 +51,7 @@ const workerInstances = vi.hoisted((): WorkerStubInstance[] => []);
 vi.mock("../../../../../../workers/pendingCorrectionsImportWorker?worker&inline", () => {
   class WorkerStub implements WorkerStubInstance {
     onmessage: ((ev: MessageEvent) => void) | null = null;
+    onerror: ((ev: ErrorEvent) => void) | null = null;
     posted: unknown[] = [];
     terminated = false;
     constructor() {
@@ -218,6 +227,32 @@ describe("PendingCorrections", () => {
       } as MessageEvent);
     });
     expect(await screen.findByText(/B/)).toBeInTheDocument();
+  });
+
+  it("recovers from a worker-level error instead of leaving the import button permanently disabled (Fix 4)", async () => {
+    const { container } = render(<PendingCorrections {...baseProps()} />);
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+
+    selectFile(input, pickFile("a.xlsx"));
+    const instance = workerInstances[0];
+    expect(instance.onerror).not.toBeNull();
+
+    const importBtn = screen.getByText(getLabels().ew_pending_import_btn);
+    expect(importBtn).toBeDisabled(); // stuck at "parsing" until the worker responds
+
+    act(() => {
+      instance.onerror!({ message: "worker module failed to start" } as ErrorEvent);
+    });
+
+    // The button is clickable again and the UI shows a clear failure instead
+    // of an infinite spinner.
+    expect(importBtn).not.toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent(getLabels().ew_pending_import_error);
+
+    // The failed instance is not reused — the next selection builds a fresh worker.
+    selectFile(input, pickFile("b.xlsx"));
+    expect(workerInstances).toHaveLength(2);
+    expect(workerInstances[1]).not.toBe(instance);
   });
 
   it("guards bulk-reopen against a second confirm before the first call resolves (Fix 3)", async () => {

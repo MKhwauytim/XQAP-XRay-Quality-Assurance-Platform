@@ -34,6 +34,18 @@ function aoaWithDataRows(count: number): unknown[][] {
   return rows;
 }
 
+// A handful of real rows padded with a huge number of fully-blank rows — the
+// scenario the raw-row-count fix targets: counting only non-blank rows would
+// let this sail under the cap despite the worker still having to allocate and
+// scan a massive array-of-arrays.
+function aoaMostlyBlank(blankCount: number, nonBlankCount: number): unknown[][] {
+  const header = ["id"];
+  const rows: unknown[][] = [header];
+  for (let i = 0; i < nonBlankCount; i++) rows.push([String(i)]);
+  for (let i = 0; i < blankCount; i++) rows.push(["", ""]);
+  return rows;
+}
+
 function fakeFile(): File {
   return { arrayBuffer: async () => new ArrayBuffer(0) } as unknown as File;
 }
@@ -101,5 +113,25 @@ describe("pendingCorrectionsImportWorker row cap (Fix 4)", () => {
       | undefined;
     expect(done).toBeDefined();
     expect(done!.rows).toHaveLength(MAX_IMPORT_ROWS);
+  });
+
+  it("rejects a sheet whose RAW row count exceeds the cap even though only a few rows are non-blank", async () => {
+    // Only 5 non-blank rows (well under the cap) but the raw post-header row
+    // count is over it. Under the old "count non-blank rows after building the
+    // full record set" logic this would have sailed through with `rows.length
+    // === 5`; the fix must reject it before ever reaching the per-row loop.
+    xlsxMock.sheetToJson.mockReturnValue(aoaMostlyBlank(MAX_IMPORT_ROWS, 5));
+
+    await (globalThis as unknown as { onmessage: (ev: MessageEvent) => unknown }).onmessage({
+      data: { file: fakeFile() },
+    } as MessageEvent);
+
+    const errorMsg = posted.find((m) => (m as { type: string }).type === "error") as
+      | { type: "error"; error: string }
+      | undefined;
+    expect(errorMsg).toBeDefined();
+    // Raw count = 5 non-blank + MAX_IMPORT_ROWS blank rows.
+    expect(errorMsg!.error).toContain((MAX_IMPORT_ROWS + 5).toLocaleString("ar-SA-u-nu-latn"));
+    expect(posted.some((m) => (m as { type: string }).type === "done")).toBe(false);
   });
 });

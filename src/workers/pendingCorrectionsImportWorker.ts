@@ -44,6 +44,28 @@ ctx.onmessage = async (ev) => {
       return;
     }
     const headerRow = (aoa[0] ?? []).map((cell) => String(cell ?? "").trim());
+    // Cap check happens HERE — right after `aoa.length` is known (an O(1) read;
+    // `sheet_to_json` already fully materialized the array-of-arrays above) and
+    // BEFORE the per-row loop below builds a `Record<string,string>` for every
+    // row. Doing it here, rather than after that loop, means an oversized sheet
+    // fails fast instead of paying for the full per-row construction anyway.
+    //
+    // This counts RAW post-header rows, not just non-blank ones. Counting only
+    // non-blank rows (as a naive "cap the useful rows" reading would do) is
+    // actually the wrong choice here: the blank-row filter in the loop below is
+    // itself only a cheap `Array.every` scan, so it doesn't save the expensive
+    // work either way — and worse, it would let a sheet padded with hundreds of
+    // thousands of blank rows sail through the cap (few "real" rows) while still
+    // forcing the worker to allocate and scan that entire huge array-of-arrays,
+    // which is exactly the slowness this cap exists to prevent.
+    const dataRowCount = aoa.length - 1;
+    if (dataRowCount > MAX_IMPORT_ROWS) {
+      send({
+        type: "error",
+        error: `عدد صفوف الملف (${dataRowCount.toLocaleString("ar-SA-u-nu-latn")}) يتجاوز الحد الأقصى المسموح به (${MAX_IMPORT_ROWS.toLocaleString("ar-SA-u-nu-latn")} صف).`,
+      });
+      return;
+    }
     const rows: Record<string, string>[] = [];
     for (let i = 1; i < aoa.length; i++) {
       const raw = aoa[i] ?? [];
@@ -56,13 +78,6 @@ ctx.onmessage = async (ev) => {
         record[header] = String(raw[idx] ?? "").trim();
       });
       rows.push(record);
-    }
-    if (rows.length > MAX_IMPORT_ROWS) {
-      send({
-        type: "error",
-        error: `عدد صفوف الملف (${rows.length.toLocaleString("ar-SA-u-nu-latn")}) يتجاوز الحد الأقصى المسموح به (${MAX_IMPORT_ROWS.toLocaleString("ar-SA-u-nu-latn")} صف).`,
-      });
-      return;
     }
     send({ type: "done", headerRow, rows });
   } catch (err) {

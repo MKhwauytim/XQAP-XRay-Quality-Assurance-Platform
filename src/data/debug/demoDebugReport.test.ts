@@ -59,4 +59,47 @@ describe("buildDemoDebugReport", () => {
     expect(entry.errorCode).toBe("XQ-WS-006");
     expect(typeof entry.timestamp).toBe("string");
   });
+
+  it("redacts a real username embedded in a raw safe-write error message — the stripped username/role/stack fields are not the only place a real person's identity can leak", async () => {
+    // Shaped exactly like the raw error safeWrite.ts throws
+    // (`Safe-write staging failed for ${fileName}.`, safeWrite.ts:1618/1808/
+    // 1889/1995/2020) when a real employee's answer-file write fails, and
+    // exactly like what answerStorage.ts's onExhausted (answerStorage.ts:247)
+    // then hands to logError as the RAW cause — filename included. No
+    // setErrorActor/username-field involved here at all: the leak this guards
+    // against lives in free text, not the entry's own `username` field.
+    logError(
+      "answerStorage:save-answer",
+      new Error("Safe-write staging failed for ahmad.ali.answers.json."),
+      { action: "save-answer", errorCode: "XQ-IO-006" }
+    );
+
+    const report = await buildDemoDebugReport();
+
+    expect(report.errors.length).toBeGreaterThan(0);
+    const entry = report.errors[report.errors.length - 1];
+
+    // The username must be gone from every free-text field it could hide in.
+    expect(JSON.stringify(entry)).not.toContain("ahmad.ali");
+
+    // But the entry must still say which file TYPE failed and how, so the
+    // report stays useful for diagnosing the underlying problem.
+    expect(entry.message).toBe("Safe-write staging failed for [user].answers.json.");
+    expect(entry.context).toBe("answerStorage:save-answer");
+    expect(entry.action).toBe("save-answer");
+    expect(entry.errorCode).toBe("XQ-IO-006");
+  });
+
+  it("redacts the hashed per-user filename shape used by the durable error log (auditUserStem: {username}-{hash}.errors.json)", async () => {
+    logError(
+      "errorLog:persist",
+      new Error("Safe-write staging failed for ahmad.ali-4f3a21.errors.json.")
+    );
+
+    const report = await buildDemoDebugReport();
+    const entry = report.errors[report.errors.length - 1];
+
+    expect(entry.message).not.toContain("ahmad.ali");
+    expect(entry.message).toBe("Safe-write staging failed for [user].errors.json.");
+  });
 });
