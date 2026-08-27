@@ -973,6 +973,14 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
    or CSS. Use the browser's own "Save as PDF" destination instead. */
 @media print{
   @page{size:297mm 167mm;margin:0;}
+  /* Blanket rule, not just body{} — print-color-adjust is nominally an
+     inherited property, but this codebase's own history (see the narrow
+     per-element overrides added in deck2/theme.ts: .v2-bar-cell,
+     .v2-prop-seg, .v2-num-tile, etc.) shows that relying on inheritance
+     alone left real elements printing without their background colors.
+     A blanket star-selector rule (same fix applied to deck3/theme.ts)
+     can't miss one. */
+  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important;}
   body{-webkit-print-color-adjust:exact;print-color-adjust:exact;background:#fff;}
   .deck-toolbar{display:none!important;}
   .deck-viewer{padding:0;background:transparent;}
