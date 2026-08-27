@@ -1154,9 +1154,16 @@ ${c1}
    the admin design customizer's iframe, both very ordinary cases — silently
    clipped content via this rule's own overflow:hidden, since the budget
    math never shrinks to match. Width still narrows via min(1120px,100%)
-   for real narrow/mobile viewports; the max-width:900px query below already
+   for real narrow/mobile viewports; the max-width:1152px query below
    switches those to aspect-ratio:auto natural flow, so this fixed height
-   only governs the range where the framed-card look is still intended. */
+   only governs the range where the framed-card look is still intended.
+   That query's threshold used to be 900px, which left a dead zone: between
+   900px and 1120px the card was narrower than its 1120px design width but
+   still pinned to 630px, so the row-budget math overflowed and this rule's
+   overflow:hidden silently cut it. Browser zoom moves the effective CSS
+   viewport width exactly like a resize, so ordinary zoom levels landed in
+   that band. Raising the threshold to the design width closes it: at or
+   above 1120px you get the framed card, below it the auto-height flow. */
 .slide{
   width:min(1120px,100%);
   height:630px;
@@ -1438,7 +1445,7 @@ ${c1}
 }
 
 /* ── Responsive (on-screen review) ────────────────────────────────────── */
-@media screen and (max-width:900px){
+@media screen and (max-width:1152px){
   .slide-split,.slide-split.wide-left,.slide-split.even{grid-template-columns:1fr;}
   .kpi-band.n4,.kpi-band.n5{grid-template-columns:repeat(2,1fr);}
   .kpi-band.n3{grid-template-columns:1fr 1fr;}
@@ -2390,7 +2397,7 @@ body.theme-light .v2-gd-agree .v2-gd-panel.sea .v2-gd-panel-head span{color:colo
 }
 .v2-agree-note-icon{display:inline-flex;color:var(--gold);flex-shrink:0;margin-top:1px;}
 @media print{.v2-agree-note{break-inside:avoid;}}
-@media (max-width:900px){
+@media screen and (max-width:1152px){
   .v2-agree-wrap{height:auto;}
   .v2-agree-split .v2-port-col .deck-table th{font-size:0.66rem;}
   .v2-agree-split .v2-port-col .deck-table td{font-size:0.72rem;}
@@ -2779,7 +2786,7 @@ body.theme-light .v2-cov-fold-row td{color:#607386;}
 body.theme-light .v2-cov-empty b{color:rgba(10,45,74,.95);}
 body.theme-light .v2-cov-empty{border-color:rgba(10,45,74,.2);background:rgba(10,45,74,.02);}
 
-@media screen and (max-width:900px){
+@media screen and (max-width:1152px){
   .v2-cov-split{grid-template-columns:1fr;}
 }
 @media print{
@@ -2809,7 +2816,7 @@ body.theme-light .v2-cov-empty{border-color:rgba(10,45,74,.2);background:rgba(10
 
 body.theme-light .v2-acc-fold-row td{color:#607386;}
 
-@media screen and (max-width:900px){
+@media screen and (max-width:1152px){
   .v2-acc-split{grid-template-columns:1fr;}
 }
 @media print{
@@ -3723,7 +3730,7 @@ body.theme-light .v2-stage-port-card .deck-table tfoot td{color:#0a2d4a;}
   .slide:has(.slide-print-toggle input:not(:checked)){display:none!important;}
 }
 
-@media screen and (max-width:900px){
+@media screen and (max-width:1152px){
   .deck-viewer-v2{padding:12px 8px 36px;}
   .deck-toolbar{position:relative;flex-wrap:wrap;margin-bottom:12px;padding:10px 12px;}
   .deck-toolbar .deck-brand span{display:none;}
@@ -4168,7 +4175,7 @@ body.theme-light .v2-risk-tile{background:linear-gradient(165deg,rgba(244,180,0,
 body.theme-light .v2-risk-tile-head{border-color:#e4e9ee;}
 body.theme-light .v2-risk-tile-titles b,body.theme-light .v2-risk-tile-figure b,body.theme-light .v2-risk-tile-foot b{color:#0a2d4a;}
 body.theme-light .v2-risk-tile-foot{background:rgba(10,45,74,.035);border-color:#e4e9ee;}
-@media screen and (max-width:900px){
+@media screen and (max-width:1152px){
   .v2-risk-tile-grid{grid-template-columns:1fr;grid-template-rows:repeat(4,auto);}
 }
 
@@ -4423,7 +4430,7 @@ body.theme-light .v2-risk-tile{background-image:var(--v2-hex-tex-light),linear-g
 .v2-src-card{background-image:var(--v2-hex-tex),linear-gradient(180deg,rgba(14,58,95,.55),rgba(7,39,67,.75));background-repeat:repeat,no-repeat;}
 body.theme-light .v2-src-card{background-image:var(--v2-hex-tex-light),none;background-repeat:repeat,no-repeat;}
 
-@media screen and (max-width:900px){
+@media screen and (max-width:1152px){
   .v2-cover-grid,.v2-closing{grid-template-columns:1fr;}
   .v2-summary-top{grid-template-columns:1fr;}
   .v2-summary-tilegroups{flex-direction:column;}
@@ -4571,7 +4578,7 @@ body.theme-light .v2-lg-stage-card .v2-lg-table-card-title{color:#0a2d4a;}
 .v2-lg-closing{height:100%;display:flex;align-items:center;gap:28px;}
 .v2-lg-closing .v2-lg-table-card{flex:1.5;margin-top:0;}
 .v2-lg-closing .v2-closing-side{flex:1;}
-@media screen and (max-width:900px){
+@media screen and (max-width:1152px){
   .v2-lg-closing{flex-direction:column;align-items:stretch;}
   .v2-lg-closing .v2-closing-side{border-inline-start:0;padding-inline-start:0;}
 }
@@ -5066,7 +5073,7 @@ body.theme-light .v2-gd-stage-port-legend{color:#607386;}
 .v2-gd-closing .v2-lg-table-card{flex:1.5;margin-top:0;border:0;border-radius:0;background:transparent;}
 .v2-gd-closing .deck-table{border-radius:0;}
 .v2-gd-closing .v2-closing-side{flex:1;}
-@media screen and (max-width:900px){
+@media screen and (max-width:1152px){
   .v2-gd-closing{flex-direction:column;align-items:stretch;}
   .v2-gd-closing .v2-closing-side{border-inline-start:0;padding-inline-start:0;}
 }

@@ -714,9 +714,16 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
    the admin design customizer's iframe, both very ordinary cases — silently
    clipped content via this rule's own overflow:hidden, since the budget
    math never shrinks to match. Width still narrows via min(1120px,100%)
-   for real narrow/mobile viewports; the max-width:900px query below already
+   for real narrow/mobile viewports; the max-width:1152px query below
    switches those to aspect-ratio:auto natural flow, so this fixed height
-   only governs the range where the framed-card look is still intended. */
+   only governs the range where the framed-card look is still intended.
+   That query's threshold used to be 900px, which left a dead zone: between
+   900px and 1120px the card was narrower than its 1120px design width but
+   still pinned to 630px, so the row-budget math overflowed and this rule's
+   overflow:hidden silently cut it. Browser zoom moves the effective CSS
+   viewport width exactly like a resize, so ordinary zoom levels landed in
+   that band. Raising the threshold to the design width closes it: at or
+   above 1120px you get the framed card, below it the auto-height flow. */
 .slide{
   width:min(1120px,100%);
   height:630px;
@@ -998,7 +1005,7 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
 }
 
 /* ── Responsive (on-screen review) ────────────────────────────────────── */
-@media screen and (max-width:900px){
+@media screen and (max-width:1152px){
   .slide-split,.slide-split.wide-left,.slide-split.even{grid-template-columns:1fr;}
   .kpi-band.n4,.kpi-band.n5{grid-template-columns:repeat(2,1fr);}
   .kpi-band.n3{grid-template-columns:1fr 1fr;}

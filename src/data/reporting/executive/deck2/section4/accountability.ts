@@ -212,7 +212,7 @@ export const ACCOUNTABILITY_CSS = `
 
 body.theme-light .v2-acc-fold-row td{color:#607386;}
 
-@media screen and (max-width:900px){
+@media screen and (max-width:1152px){
   .v2-acc-split{grid-template-columns:1fr;}
 }
 @media print{
