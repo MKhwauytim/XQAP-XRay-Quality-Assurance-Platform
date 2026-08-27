@@ -13,7 +13,7 @@ import {
 import { syncUserManagementToDisk } from "./userSync";
 import { formatMonthFolderName } from "../population/monthFolder";
 import { saveMonthRun, updateMonthStatus } from "../population/populationStorage";
-import type { PreparedPopulationRow } from "../population/populationTypes";
+import type { PreparedPopulationRow, RemovedPopulationRow } from "../population/populationTypes";
 import type { ProcessingSummaryData } from "../population/monthTypes";
 import type { EmployeeStageAllocation, StageSamplingRule } from "../population/populationConfig";
 import { drawSample } from "../sampling/sampleAlgorithm";
@@ -138,11 +138,14 @@ export type WorkspaceSeedProfile = {
   employees?: ManagedLoginUser[];
   /**
    * Overrides the seeded inspection template. Defaults to `buildSeedTemplate`
-   * (the small 3-field template the dev-only simulated workspace still relies
-   * on — see `simWorkspace.test.ts`'s frozen field-id assertion). The demo
-   * profile overrides this with `buildDemoInspectionTemplate` so the demo
-   * shows the SAME template a brand-new real workspace gets, not a bespoke
-   * demo-only form.
+   * (the bespoke 11-field template the dev-only simulated workspace still
+   * relies on — see `simWorkspace.test.ts`'s frozen field-id assertion). The
+   * demo profile overrides this with `buildDemoInspectionTemplate` so the
+   * demo shows the SAME template a brand-new real workspace gets — and stays
+   * linked to it: since `buildDemoInspectionTemplate` calls
+   * `buildDefaultInspectionTemplate` directly, a future edit to the real
+   * template automatically reaches the demo, with no separate demo-only copy
+   * to fall out of sync.
    */
   templateBuilder?: (profile: WorkspaceSeedProfile) => TemplateSchema | Promise<TemplateSchema>;
   /**
@@ -265,6 +268,141 @@ export const DEMO_SEED_PROFILE: WorkspaceSeedProfile = {
 /** A value that `engineVerdictOf` does NOT recognize — neither affirmative nor negative. */
 const UNRECOGNIZED_RISK_VALUE = "قيد المراجعة";
 
+// ─── Report-completeness fixtures (2026-08-27) ─────────────────────────────
+// Every field below feeds a report SECTION that renders an empty/"غير متاحة"
+// state when the source field is null (see the executive report model's
+// `inspectorIdentityMapped`, `decisionEvaluable`, image-quality KPIs, and the
+// sample report's BI-enrichment page). All deterministic — keyed on `seq`
+// only, never `Math.random()`/`Date.now()`, per this file's determinism
+// contract above.
+
+/** Front-line inspector IDs a BI match would resolve to (§3.4 identity). Distinct
+ *  from the app reviewer usernames — these are the L1/L2 "inspectorId" values the
+ *  executive report's accuracy-by-inspector pages key on. */
+const INSPECTOR_POOL = ["MFT-2031", "MFT-2044", "MFT-2057", "MFT-2069", "MFT-2082", "MFT-2095"];
+
+const BI_FILLED_FIELD_NAME = "الوجهة النهائية";
+const BI_DESTINATIONS = ["مستودع جدة المركزي", "مستودع الدمام الجمركي", "مستودع الرياض البري"];
+
+const NO_IMAGE_REASONS = [
+  "تعطل جهاز الأشعة",
+  "لم يتم حفظ الصورة في الأرشيف",
+  "الحاوية أعيد فحصها يدوياً دون تصوير",
+];
+const LOW_QUALITY_REASONS = ["إضاءة غير كافية", "زاوية تصوير غير مناسبة", "تشويش في الصورة"];
+const SUSPECTED_TYPE_VALUES = ["مواد غذائية غير مصرح بها", "أجهزة إلكترونية مقلدة", "مواد كيميائية غير مصنفة"];
+const SMUGGLE_METHOD_VALUES = ["إخفاء داخل تجويف مصنّع", "خلط مع بضاعة مصرح بها", "تغليف مزدوج غير ظاهر"];
+
+const QUALITY_LEVELS = ["عالي", "متوسط", "منخفض"] as const;
+
+function flipResult(r: "سليمة" | "اشتباه"): "سليمة" | "اشتباه" {
+  return r === "سليمة" ? "اشتباه" : "سليمة";
+}
+
+/**
+ * BI enrichment (§3.4 inspector identity) for one row. ~83% of rows match —
+ * the rest deliberately stay unmatched so `inspectorIdentityMapped` and the
+ * dataQuality band reflect a realistic partial-match month, not a fantasy
+ * 100%. `biFilledFields` names exactly the one field this seed actually fills
+ * (`finalDestination`), so the claim stays true to the data (per the "must
+ * actually match" constraint on this seed).
+ */
+function buildBiEnrichment(seq: number): {
+  biMatched: boolean;
+  biEnrichmentStatus: PreparedPopulationRow["biEnrichmentStatus"];
+  biFilledFields: string[];
+  levelOneEmployee: string | null;
+  levelTwoEmployee: string | null;
+  finalDestination: string | null;
+} {
+  const biMatched = seq % 6 !== 0;
+  if (!biMatched) {
+    return {
+      biMatched: false,
+      biEnrichmentStatus: "BI Not Matched",
+      biFilledFields: [],
+      levelOneEmployee: null,
+      levelTwoEmployee: null,
+      finalDestination: null,
+    };
+  }
+  return {
+    biMatched: true,
+    biEnrichmentStatus: "BI Matched",
+    biFilledFields: [BI_FILLED_FIELD_NAME],
+    // L1/L2 may be the same inspector or different ones — both happen in real BI data.
+    levelOneEmployee: INSPECTOR_POOL[seq % INSPECTOR_POOL.length],
+    levelTwoEmployee: INSPECTOR_POOL[(seq + 2) % INSPECTOR_POOL.length],
+    finalDestination: BI_DESTINATIONS[seq % BI_DESTINATIONS.length],
+  };
+}
+
+/**
+ * The three non-L1/L2 corroborating "other results" (manual / opposite /
+ * live-means), active on a minority of rows each so the cross-team comparison
+ * panel and `resultComparison` have real agreement AND real disagreement to
+ * show — never uniformly "—". `manual.employeeId` stays `null` on every row:
+ * per `PreparedPopulationRow.otherResults`'s own doc comment, the manual team
+ * has no BI-mapped employee field.
+ */
+function buildOtherResults(seq: number, groundTruth: "سليمة" | "اشتباه"): PreparedPopulationRow["otherResults"] {
+  const manualActive = seq % 4 === 0;
+  const oppositeActive = seq % 7 === 0;
+  const liveMeansActive = seq % 11 === 0;
+  return {
+    manual: {
+      result: manualActive ? (seq % 20 === 0 ? flipResult(groundTruth) : groundTruth) : null,
+      code: manualActive ? `MAN-${seq}` : null,
+      employeeId: null,
+    },
+    opposite: {
+      result: oppositeActive ? (seq % 21 === 0 ? flipResult(groundTruth) : groundTruth) : null,
+      code: oppositeActive ? `OPP-${seq}` : null,
+      employeeId: oppositeActive ? "TEAM-OPP-02" : null,
+    },
+    liveMeans: {
+      result: liveMeansActive ? (seq % 33 === 0 ? flipResult(groundTruth) : groundTruth) : null,
+      code: liveMeansActive ? `LM-${seq}` : null,
+      employeeId: liveMeansActive ? "TEAM-LM-03" : null,
+    },
+  };
+}
+
+/**
+ * Extra inspection-form answers for a SUBMITTED item (image availability,
+ * marking, quality, and — for اشتباه rows — suspicion level/type/method).
+ * Without these the demo's inspection template never asked about them, so
+ * every one of these executive-report KPIs read null/"—" no matter how many
+ * answers were seeded. `seq` is the row's own sequence number (deterministic,
+ * matches every other per-row derivation in this file).
+ */
+function buildQualityFieldAnswers(seq: number, qualityResult: "سليمة" | "اشتباه"): FieldAnswer[] {
+  const extra: FieldAnswer[] = [];
+  const hasImage = seq % 9 !== 0; // ~89% of studied cases actually had an image
+  extra.push({ fieldId: "hasImage", value: hasImage ? "نعم" : "لا" });
+  if (!hasImage) {
+    extra.push({ fieldId: "noImageReason", value: NO_IMAGE_REASONS[seq % NO_IMAGE_REASONS.length] });
+    return extra; // marking/quality/suspicion are meaningless with no image to grade
+  }
+
+  const hasMarking = qualityResult === "اشتباه" ? seq % 4 !== 3 : seq % 6 === 0;
+  extra.push({ fieldId: "hasMarking", value: hasMarking ? "نعم" : "لا" });
+
+  const imageQuality = QUALITY_LEVELS[seq % QUALITY_LEVELS.length];
+  extra.push({ fieldId: "imageQuality", value: imageQuality });
+  if (imageQuality !== "عالي") {
+    extra.push({ fieldId: "lowQualityReason", value: LOW_QUALITY_REASONS[seq % LOW_QUALITY_REASONS.length] });
+  }
+
+  if (qualityResult === "اشتباه") {
+    extra.push({ fieldId: "suspicionLevel", value: QUALITY_LEVELS[(seq + 1) % QUALITY_LEVELS.length] });
+    extra.push({ fieldId: "suspectedTypes", value: SUSPECTED_TYPE_VALUES[seq % SUSPECTED_TYPE_VALUES.length] });
+    extra.push({ fieldId: "smuggleMethod", value: SMUGGLE_METHOD_VALUES[seq % SMUGGLE_METHOD_VALUES.length] });
+  }
+
+  return extra;
+}
+
 /**
  * The seeded `targetedByRiskEngine` cell for one row.
  *
@@ -299,6 +437,7 @@ function buildSeedPopulationRow(
   const day = (seq % 28) + 1;
   const entryDate = `${profile.year}-${String(profile.month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   const riskValue = seedRiskEngineValue(seq, isSuspicious, profile.riskEngineSpread);
+  const bi = buildBiEnrichment(seq);
 
   return {
     stage: "المستوى الأول",
@@ -320,7 +459,7 @@ function buildSeedPopulationRow(
 
     plateOrContainerNumber: `PLT-${padded}`,
     chassisNumber: `CHS-${padded}`,
-    finalDestination: null,
+    finalDestination: bi.finalDestination,
 
     xrayLevelOneResult: result,
     xrayLevelTwoResult: result,
@@ -341,19 +480,15 @@ function buildSeedPopulationRow(
     certScanSnippet: null,
     originalCertScanSnippet: null,
 
-    levelOneEmployee: null,
-    levelTwoEmployee: null,
+    levelOneEmployee: bi.levelOneEmployee,
+    levelTwoEmployee: bi.levelTwoEmployee,
 
-    otherResults: {
-      manual: { result: null, code: null, employeeId: null },
-      opposite: { result: null, code: null, employeeId: null },
-      liveMeans: { result: null, code: null, employeeId: null },
-    },
+    otherResults: buildOtherResults(seq, result),
     notes: null,
 
-    biEnrichmentStatus: "BI Not Provided",
-    biMatched: false,
-    biFilledFields: [],
+    biEnrichmentStatus: bi.biEnrichmentStatus,
+    biMatched: bi.biMatched,
+    biFilledFields: bi.biFilledFields,
 
     sourceSheetName: port.sheetName,
     sourceRowNumber: seq + 1,
@@ -415,6 +550,83 @@ function buildSeedTemplate(profile: WorkspaceSeedProfile): TemplateSchema {
         required: false,
         options: [],
         order: 3,
+      },
+      // The eight fields below map onto DEFAULT_EXEC_FIELD_MAPPINGS
+      // (executiveReportTypes.ts) by LABEL, exactly as a real inspection
+      // template's fields would. Without them the executive report's
+      // image-availability/marking/quality/suspicion-detail KPIs read
+      // null/"—" for every seeded row — see the module doc comment above.
+      {
+        fieldId: "hasImage",
+        phaseId,
+        label: "هل يوجد صورة",
+        type: "dropdown",
+        required: false,
+        options: ["نعم", "لا"],
+        order: 4,
+      },
+      {
+        fieldId: "noImageReason",
+        phaseId,
+        label: "سبب عدم وجود الصورة",
+        type: "text",
+        required: false,
+        options: [],
+        order: 5,
+      },
+      {
+        fieldId: "hasMarking",
+        phaseId,
+        label: "هل يوجد تحديد",
+        type: "dropdown",
+        required: false,
+        options: ["نعم", "لا"],
+        order: 6,
+      },
+      {
+        fieldId: "imageQuality",
+        phaseId,
+        label: "مستوى جودة الصورة",
+        type: "dropdown",
+        required: false,
+        options: ["عالي", "متوسط", "منخفض"],
+        order: 7,
+      },
+      {
+        fieldId: "lowQualityReason",
+        phaseId,
+        label: "اسباب انخفاض جودة الصورة",
+        type: "text",
+        required: false,
+        options: [],
+        order: 8,
+      },
+      {
+        fieldId: "suspicionLevel",
+        phaseId,
+        label: "تقييم الاشتباه",
+        type: "dropdown",
+        required: false,
+        options: ["عالي", "متوسط", "منخفض"],
+        order: 9,
+      },
+      {
+        fieldId: "suspectedTypes",
+        phaseId,
+        label: "الاصناف المشبوهة",
+        type: "text",
+        required: false,
+        options: [],
+        order: 10,
+      },
+      {
+        fieldId: "smuggleMethod",
+        phaseId,
+        label: "الية التهريب المحتملة",
+        type: "text",
+        required: false,
+        options: [],
+        order: 11,
       },
     ],
   };
@@ -540,8 +752,10 @@ async function buildDemoInspectionTemplate(profile: WorkspaceSeedProfile): Promi
 }
 
 /** Default seeded answer shape, paired with `buildSeedTemplate` above (the
- *  simulated workspace's 3-field template). */
-function buildDefaultSeedAnswerFields({ qualityResult, isDraft }: SeedAnswerFieldsArgs): FieldAnswer[] {
+ *  simulated workspace's 11-field template). The submitted branch also fills
+ *  `buildQualityFieldAnswers`' image/marking/quality/suspicion fields — see
+ *  that function's own doc comment for why they exist. */
+function buildDefaultSeedAnswerFields({ qualityResult, isDraft, seq }: SeedAnswerFieldsArgs): FieldAnswer[] {
   if (isDraft) {
     return [
       { fieldId: "result", value: "سليمة" },
@@ -552,6 +766,7 @@ function buildDefaultSeedAnswerFields({ qualityResult, isDraft }: SeedAnswerFiel
     { fieldId: "result", value: "سليمة" },
     { fieldId: "notes", value: "لا ملاحظات" },
     { fieldId: DEMO_RESULT_FIELD_ID, value: qualityResult },
+    ...buildQualityFieldAnswers(seq, qualityResult),
   ];
 }
 
@@ -654,28 +869,80 @@ export async function seedWorkspaceMonth(
   }
 
   const totalRows = preparedRows.length;
+
+  // A few excluded rows (R-add, 2026-08-27) so the "الصفوف المستبعدة" report
+  // sections (executive workbook sheet, sample-report processing pages) have
+  // something real to show instead of an honest-but-uninteresting "0
+  // removed". IDs are synthetic and never appear in `preparedRows` — they
+  // were dropped BEFORE the population was finalized, same as a real month's
+  // processing pipeline would drop them.
+  const removedRows: RemovedPopulationRow[] = [
+    {
+      reason: "معرّف أشعة غير صالح",
+      xrayImageId: null,
+      portName: profile.ports[0]?.name ?? null,
+      sourceSheetName: profile.ports[0]?.sheetName ?? null,
+      sourceRowNumber: totalRows + 1,
+    },
+  ];
+  const duplicateRows: RemovedPopulationRow[] = [
+    {
+      reason: "تكرار معرّف الأشعة",
+      xrayImageId: "DEMO-EXCL-0002",
+      portName: profile.ports[0]?.name ?? null,
+      sourceSheetName: profile.ports[0]?.sheetName ?? null,
+      sourceRowNumber: totalRows + 2,
+    },
+  ];
+  const invalidResultRows: RemovedPopulationRow[] = [
+    {
+      reason: "نتيجة مستوى غير صالحة",
+      xrayImageId: "DEMO-EXCL-0003",
+      portName: profile.ports[profile.ports.length - 1]?.name ?? null,
+      sourceSheetName: profile.ports[profile.ports.length - 1]?.sheetName ?? null,
+      sourceRowNumber: totalRows + 3,
+    },
+  ];
+
+  const biMatchedRows = preparedRows.filter((r) => r.biMatched).length;
+  const biUnmatchedRows = totalRows - biMatchedRows;
+  const biMatchPercentage = totalRows > 0 ? (biMatchedRows / totalRows) * 100 : 0;
+  const invalidRiskIdRows = removedRows.length;
+  const duplicateRiskIdRows = duplicateRows.length;
+  const removedInvalidResultRows = invalidResultRows.length;
+  const validRiskIdRows = totalRows + duplicateRiskIdRows + removedInvalidResultRows;
+  const rowsAfterDeduplication = validRiskIdRows - duplicateRiskIdRows;
+
   const processingSummary: Omit<ProcessingSummaryData, "savedAt"> = {
-    removedRows: [],
-    duplicateRows: [],
-    invalidResultRows: [],
+    removedRows,
+    duplicateRows,
+    invalidResultRows,
     summary: {
-      riskOriginalRows: totalRows,
-      validRiskIdRows: totalRows,
-      invalidRiskIdRows: 0,
-      duplicateRiskIdRows: 0,
-      rowsAfterDeduplication: totalRows,
-      removedInvalidResultRows: 0,
+      riskOriginalRows: validRiskIdRows + invalidRiskIdRows,
+      validRiskIdRows,
+      invalidRiskIdRows,
+      duplicateRiskIdRows,
+      rowsAfterDeduplication,
+      removedInvalidResultRows,
       finalPreparedPopulationRows: totalRows,
       certScanRows: 0,
       nonCertScanRows: totalRows,
       certScanPercentage: 0,
       nonCertScanPercentage: 100,
-      biProvided: false,
-      biMatchedRows: 0,
-      biUnmatchedRows: 0,
-      biMatchPercentage: 0,
-      totalBiFilledFields: 0,
-      biFieldFillSummary: [],
+      biProvided: biMatchedRows > 0,
+      biMatchedRows,
+      biUnmatchedRows,
+      biMatchPercentage,
+      totalBiFilledFields: biMatchedRows,
+      biFieldFillSummary: [
+        {
+          fieldName: BI_FILLED_FIELD_NAME,
+          riskEmptyBefore: totalRows,
+          filledFromBi: biMatchedRows,
+          stillEmptyAfter: biUnmatchedRows,
+          fillPercentage: biMatchPercentage,
+        },
+      ],
     },
   };
 
@@ -685,7 +952,11 @@ export async function seedWorkspaceMonth(
     year: profile.year,
     username: profile.username,
     riskFileName: profile.riskFileName,
-    biFileName: null,
+    // biMatchedRows > 0 whenever the seed produced any BI-matched row (see
+    // buildBiEnrichment) — record a source file name so the month manifest
+    // agrees with `processingSummary.biProvided` instead of claiming "no BI
+    // file" while the population rows carry BI-enriched fields.
+    biFileName: biMatchedRows > 0 ? "بيانات_BI_تجريبية.xlsx" : null,
     certScanUsed: false,
     riskRawRows,
     biRawRows: [],
