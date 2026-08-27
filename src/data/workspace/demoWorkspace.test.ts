@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildDemoManagedUsers,
   createDemoWorkspace,
+  DEMO_FIELD_ID_BY_LABEL,
   DEMO_SEED_PROFILE,
   DEMO_TEMPLATE_ID,
   DEMO_WORKSPACE_NAME,
@@ -14,6 +15,7 @@ import { loadDistributionLog } from "../distribution/distributionStorage";
 import { loadTemplate } from "../templates/templateStorage";
 import { loadInspectionTemplateSelection } from "../templates/templateSelectionStorage";
 import { loadEmployeeAnswers } from "../answers/answerStorage";
+import { buildDefaultInspectionTemplate } from "../templates/defaultInspectionTemplate";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 
 // Characterization test for the shipped demo workspace. `seedWorkspaceMonth`
@@ -114,6 +116,19 @@ describe("demo workspace", () => {
     );
     // No leftover ids from the old bespoke template.
     expect(fieldIds).not.toContain("result");
+  });
+
+  it("maps every field label of the real default template to a stable demo id", () => {
+    // DEMO_FIELD_ID_BY_LABEL's own doc comment promises a stable, readable id
+    // for every field of buildDefaultInspectionTemplate; a label with no entry
+    // silently falls back to a positional `demo-field-N` id instead of
+    // failing loudly (see canonicalizeTemplate). This is a full-coverage
+    // assertion so a future field added to the real template without a
+    // matching map entry fails here instead of shipping the gap again.
+    const template = buildDefaultInspectionTemplate("demo");
+    const labels = template.fields.map((f) => f.label);
+    const uncovered = labels.filter((label) => !(label in DEMO_FIELD_ID_BY_LABEL));
+    expect(uncovered).toEqual([]);
   });
 
   it("seeds demo answers that fill the real template's fields, not just the ground-truth one", async () => {

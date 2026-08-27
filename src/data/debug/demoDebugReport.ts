@@ -11,6 +11,33 @@ import { getSyncSamples, type SyncSample } from "./syncMetrics";
 import { getFrameSamples, getClickLatencySamples, type FrameSample, type ClickLatencySample } from "./responsivenessMonitor";
 import { summarizeMs, type MsStats } from "./debugStats";
 
+/**
+ * The ring buffer this report reads from (`errorLogger.ts`'s `entries`) is
+ * module-scoped and outlives login/logout — it is never cleared on sign-out.
+ * A prior real user's session can therefore still be sitting in it when a
+ * demo session is later opened in the same tab. `username`, `role`, and
+ * `stack` are the fields on `ErrorEntry` that can identify that real person
+ * (a stack trace can embed file/user paths), so this report omits them —
+ * everything else (`message`, `context`, `page`, `action`, `errorCode`,
+ * `errorName`, `at`/`timestamp`, `restored`) stays, since none of those are
+ * populated with free text that names a person; see `ErrorEntry` in
+ * `errorLogger.ts` for the field contracts this relies on.
+ */
+export type DemoDebugErrorEntry = Omit<ErrorEntry, "username" | "role" | "stack">;
+
+function toDemoDebugErrorEntry(entry: ErrorEntry): DemoDebugErrorEntry {
+  return {
+    context: entry.context,
+    message: entry.message,
+    timestamp: entry.timestamp,
+    ...(entry.errorName !== undefined ? { errorName: entry.errorName } : {}),
+    ...(entry.page !== undefined ? { page: entry.page } : {}),
+    ...(entry.action !== undefined ? { action: entry.action } : {}),
+    ...(entry.errorCode !== undefined ? { errorCode: entry.errorCode } : {}),
+    ...(entry.restored !== undefined ? { restored: entry.restored } : {}),
+  };
+}
+
 export type DemoDebugReport = {
   generatedAt: string;
   environment: EnvironmentSnapshot & { storage: StorageEstimateInfo };
@@ -25,7 +52,7 @@ export type DemoDebugReport = {
     clickSamples: ClickLatencySample[];
     clickStats: MsStats;
   };
-  errors: ErrorEntry[];
+  errors: DemoDebugErrorEntry[];
 };
 
 export async function buildDemoDebugReport(): Promise<DemoDebugReport> {
@@ -47,7 +74,7 @@ export async function buildDemoDebugReport(): Promise<DemoDebugReport> {
       clickSamples,
       clickStats: summarizeMs(clickSamples.map((s) => s.latencyMs)),
     },
-    errors: getRecentErrors(),
+    errors: getRecentErrors().map(toDemoDebugErrorEntry),
   };
 }
 

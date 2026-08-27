@@ -656,9 +656,10 @@ const DEMO_RESULT_FIELD_ID = "qualityImageResult";
  * that template that adds/renames a field degrades gracefully instead of
  * breaking the demo seed.
  */
-const DEMO_FIELD_ID_BY_LABEL: Record<string, string> = {
+export const DEMO_FIELD_ID_BY_LABEL: Record<string, string> = {
   "هل يوجد صورة": "hasImage",
   "سبب عدم وجود الصورة": "noImageReason",
+  "سبب عدم وجود الصورة (أخرى)": "noImageReasonOther",
   "هل يوجد تحديد": "hasMarking",
   "مستوى جودة الصورة": "imageQuality",
   "اسباب انخفاض جودة الصورة": "qualityReason",

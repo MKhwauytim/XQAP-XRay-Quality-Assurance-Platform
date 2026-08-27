@@ -619,8 +619,17 @@ async function writeText(
         throw taggedError("XQ-IO-001", `Browser cannot write ${name}.`);
       }
       const writable = await handle.createWritable();
-      await writable.write(content);
-      await writable.close();
+      try {
+        await writable.write(content);
+        await writable.close();
+      } catch (error) {
+        try {
+          await writable.close();
+        } catch {
+          // Best-effort: never mask the original failure with a close error.
+        }
+        throw error;
+      }
     },
     { context: "safeWrite:writeText", dir, fileName: name }
   );

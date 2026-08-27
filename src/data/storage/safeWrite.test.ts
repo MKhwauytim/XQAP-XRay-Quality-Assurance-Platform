@@ -368,6 +368,42 @@ test("failed live commit leaves previous valid file readable", async () => {
   }
 });
 
+test("writeText closes the writable stream when write() throws, mirroring streamToFile/copyFileBytes", async () => {
+  const base = createMemoryDirectory();
+
+  let closeCalls = 0;
+  const failingDir: DirectoryHandleLike = {
+    ...base,
+    getFileHandle: async (name, options) => {
+      const handle = await base.getFileHandle(name, options);
+      if (name !== "b.json.tmp") {
+        return handle;
+      }
+      return {
+        ...handle,
+        createWritable: async () => {
+          const writable = await handle.createWritable!();
+          return {
+            write: async () => {
+              throw new Error("simulated write failure");
+            },
+            close: async () => {
+              closeCalls += 1;
+              return writable.close();
+            },
+          };
+        },
+      } satisfies FileHandleLike;
+    },
+  };
+
+  await expect(safeWriteJson(failingDir, "b.json", { v: 1 })).rejects.toThrow(
+    "simulated write failure"
+  );
+
+  expect(closeCalls).toBe(1);
+});
+
 test("concurrent writes to the same file are serialized and preserve revisions", async () => {
   const dir = createMemoryDirectory();
   await Promise.all([
