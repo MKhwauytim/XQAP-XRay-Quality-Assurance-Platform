@@ -7,10 +7,15 @@ import {
   dataTable,
   kpiBand,
   slideShell,
+  closingSlide,
 } from "../executive/deck3/slideKit";
 import type { SlideMeta, TableCell, KpiCell, OrgBlock } from "../executive/deck3/slideKit";
 import { fmtNum, fmtPct, esc } from "../executive/primitives";
-import type { PopulationReportModel } from "./model";
+import { openReportWindow, writeOrCloseOnFailure } from "../htmlReport";
+import { buildDeckV3Html } from "../executive/deck3";
+import { yieldToMain } from "../../storage/yieldToMain";
+import type { PopulationReportModel, PopulationReportInput } from "./model";
+import { computePopulationReportModel } from "./model";
 import type { PortBreakdown, ResultCounts } from "./types";
 
 const ORG: OrgBlock = { logoUrl: "", orgName: "ضمان جودة الأشعة", lines: [] };
@@ -182,3 +187,168 @@ ${portBreakdownTwoColumn(model.reconciled.byPort)}`;
 }
 
 export { resultRow, RESULT_HEADERS, portBreakdownTwoColumn };
+
+const STAGE_LABELS: Record<string, string> = {
+  first: "المستوى الأول",
+  second: "المستوى الثاني",
+  third: "المستوى الثالث",
+  fourth: "المستوى الرابع",
+  unknown: "غير محدد",
+};
+
+function buildSection2Slides(model: PopulationReportModel, meta: (num: number) => SlideMeta): string[] {
+  const slides: string[] = [];
+
+  slides.push(
+    sectionDivider({
+      eyebrow: "القسم الثاني",
+      ghost: "٢",
+      kicker: "القسم الثاني",
+      title: "العينة",
+      description: "العينة المسحوبة من المجتمع، على نفس المحاور",
+      footItems: [],
+      meta: meta(9),
+    })
+  );
+
+  const sampleStageRows = model.sample.byStage.map((b) => resultRow(b.stageLabel, b.counts));
+  slides.push(
+    slideShell(
+      meta(10),
+      "",
+      `${contentHead({ eyebrow: "القسم الثاني", title: "العينة حسب المرحلة" })}
+${dataTable({ headers: RESULT_HEADERS, rows: sampleStageRows, totals: resultRow("الإجمالي", model.sample.totals) })}`
+    )
+  );
+
+  slides.push(
+    slideShell(
+      meta(11),
+      "",
+      `${contentHead({ eyebrow: "القسم الثاني", title: "العينة حسب المنفذ" })}
+${portBreakdownTwoColumn(model.sample.byPort)}`
+    )
+  );
+
+  return slides;
+}
+
+function employeeStageTable(model: PopulationReportModel): string {
+  const headers = ["الموظف", ...model.distribution.stageKeysPresent.map((k) => STAGE_LABELS[k] ?? k), "الإجمالي"];
+  const rows: TableCell[][] = model.distribution.byEmployeeStage.map((emp) => [
+    { html: esc(emp.displayName) },
+    ...model.distribution.stageKeysPresent.map((k) => ({ html: fmtNum(emp.stages[k]?.total ?? 0) })),
+    { html: fmtNum(emp.total.total), cls: "v-navy" },
+  ]);
+  return dataTable({ headers, rows });
+}
+
+function employeePortTable(model: PopulationReportModel): string {
+  const headers = ["الموظف", "برية", "بحرية", "الإجمالي"];
+  const rows: TableCell[][] = model.distribution.byEmployeePort.map((emp) => [
+    { html: esc(emp.displayName) },
+    { html: fmtNum(emp.ports.land.total) },
+    { html: fmtNum(emp.ports.sea.total) },
+    { html: fmtNum(emp.total.total), cls: "v-navy" },
+  ]);
+  return dataTable({ headers, rows });
+}
+
+function certScanTable(model: PopulationReportModel): string {
+  const rows: TableCell[][] = model.distribution.certScanByEmployee.map((emp) => [
+    { html: esc(emp.displayName) },
+    { html: fmtNum(emp.certScanCount), cls: "v-gold" },
+    { html: fmtNum(emp.nonCertScanCount) },
+    { html: fmtNum(emp.total), cls: "v-navy" },
+  ]);
+  return dataTable({ headers: ["الموظف", "CertScan", "غير CertScan", "الإجمالي"], rows });
+}
+
+function buildSection3Slides(model: PopulationReportModel, meta: (num: number) => SlideMeta): string[] {
+  const slides: string[] = [];
+
+  slides.push(
+    sectionDivider({
+      eyebrow: "القسم الثالث",
+      ghost: "٣",
+      kicker: "القسم الثالث",
+      title: "التوزيع",
+      description: "من استلم ماذا، وما هي النتائج",
+      footItems: [],
+      meta: meta(12),
+    })
+  );
+
+  slides.push(
+    slideShell(
+      meta(13),
+      "",
+      `${contentHead({ eyebrow: "القسم الثالث", title: "التوزيع حسب الموظف والمرحلة" })}
+${employeeStageTable(model)}`
+    )
+  );
+
+  slides.push(
+    slideShell(
+      meta(14),
+      "",
+      `${contentHead({ eyebrow: "القسم الثالث", title: "التوزيع حسب الموظف والمنفذ" })}
+${employeePortTable(model)}`
+    )
+  );
+
+  slides.push(
+    slideShell(
+      meta(15),
+      "",
+      `${contentHead({ eyebrow: "القسم الثالث", title: "التوزيع حسب CertScan" })}
+${certScanTable(model)}`
+    )
+  );
+
+  return slides;
+}
+
+const TOTAL_SLIDES = 16; // cover, contents, s1-divider + 5, s2-divider + 2, s3-divider + 3, closing
+
+export async function buildPopulationDeckSlides(model: PopulationReportModel): Promise<string> {
+  const meta = (num: number): SlideMeta => ({
+    num,
+    total: TOTAL_SLIDES,
+    sectionKey: num <= 8 ? "s1" : num <= 11 ? "s2" : "s3",
+    sectionLabel: num <= 8 ? "المجتمع" : num <= 11 ? "العينة" : "التوزيع",
+    footText: `تقرير المجتمع — ${model.monthLabel}`,
+  });
+
+  const parts: string[] = [];
+  parts.push(...buildSection1Slides(model, meta));
+  await yieldToMain();
+  parts.push(...buildSection2Slides(model, meta));
+  await yieldToMain();
+  parts.push(...buildSection3Slides(model, meta));
+  await yieldToMain();
+  parts.push(
+    closingSlide({
+      org: ORG,
+      kicker: "تقرير المجتمع",
+      title: "نهاية التقرير",
+      closingLine: `تقرير المجتمع — ${model.monthLabel}`,
+      metaRows: [],
+      meta: meta(TOTAL_SLIDES),
+    })
+  );
+  return parts.join("\n");
+}
+
+export async function buildPopulationDeck(input: PopulationReportInput): Promise<string> {
+  const model = computePopulationReportModel(input);
+  const slides = await buildPopulationDeckSlides(model);
+  return buildDeckV3Html(slides, model.monthLabel);
+}
+
+export async function openPopulationDeck(input: PopulationReportInput): Promise<void> {
+  const reportWindow = openReportWindow();
+  await writeOrCloseOnFailure(reportWindow, () => buildPopulationDeck(input), `تقرير_المجتمع_${input.monthFolderName}.html`);
+}
+
+export type { PopulationReportInput as PopulationDeckInput } from "./model";

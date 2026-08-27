@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { buildSection1Slides } from "./deck";
+import { describe, it, expect, vi } from "vitest";
+import { buildSection1Slides, buildPopulationDeck } from "./deck";
 import { computePopulationReportModel } from "./model";
-import { makeRow, makeManifest, makeProcessingSummary } from "../reportTestFixtures";
+import { makeRow, makeManifest, makeProcessingSummary, makeSampleMaster, makeDistribution } from "../reportTestFixtures";
 
 function testModel() {
   return computePopulationReportModel({
@@ -43,5 +43,54 @@ describe("buildSection1Slides", () => {
     expect(html).not.toContain("قيد الانتظار");
     expect(html).not.toContain("مكتمل");
     expect(html).not.toContain("مستبدل");
+  });
+});
+
+describe("buildPopulationDeck", () => {
+  it("produces a self-contained HTML deck with all three sections and no workflow-status text", async () => {
+    const populationRows = [makeRow("1", "ميناء جدة", { portType: "بحري" })];
+    const sample = makeSampleMaster(populationRows);
+    const distribution = makeDistribution([{ id: "1", assignedTo: "user1", status: "completed", row: { ...populationRows[0] } }]);
+    const html = await buildPopulationDeck({
+      monthFolderName: "8-August-2026",
+      manifest: makeManifest(),
+      processingSummary: makeProcessingSummary(),
+      riskRawRowCount: 10,
+      biRawRowCount: 8,
+      populationRows,
+      sampleRows: sample.rows,
+      distributionEntries: distribution.entries,
+      employeeDisplayNames: { user1: "أحمد" },
+    });
+    expect(html).toContain("<!DOCTYPE html>");
+    expect(html).toContain("تقرير المجتمع");
+    expect(html).toContain("أحمد");
+    expect(html).not.toContain("قيد الانتظار");
+  });
+
+  describe("golden snapshot (deterministic-by-contract)", () => {
+    it("matches the frozen-time snapshot", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-07-29T12:00:00.000Z"));
+      try {
+        const populationRows = [makeRow("1", "ميناء جدة", { portType: "بحري" })];
+        const sample = makeSampleMaster(populationRows);
+        const distribution = makeDistribution([{ id: "1", assignedTo: "user1", status: "completed", row: { ...populationRows[0] } }]);
+        const html = await buildPopulationDeck({
+          monthFolderName: "8-August-2026",
+          manifest: makeManifest(),
+          processingSummary: makeProcessingSummary(),
+          riskRawRowCount: 10,
+          biRawRowCount: 8,
+          populationRows,
+          sampleRows: sample.rows,
+          distributionEntries: distribution.entries,
+          employeeDisplayNames: { user1: "أحمد" },
+        });
+        expect(html).toMatchSnapshot();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });
