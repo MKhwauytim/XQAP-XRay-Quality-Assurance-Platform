@@ -612,7 +612,7 @@ body.theme-light .v2-gd-agree .v2-gd-panel.sea .v2-gd-panel-head span{color:colo
 }
 .v2-agree-note-icon{display:inline-flex;color:var(--gold);flex-shrink:0;margin-top:1px;}
 @media print{.v2-agree-note{break-inside:avoid;}}
-@media (max-width:900px){
+@media screen and (max-width:1152px){
   .v2-agree-wrap{height:auto;}
   .v2-agree-split .v2-port-col .deck-table th{font-size:0.66rem;}
   .v2-agree-split .v2-port-col .deck-table td{font-size:0.72rem;}
