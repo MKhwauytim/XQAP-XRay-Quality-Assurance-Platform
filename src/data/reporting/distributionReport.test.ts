@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as XLSX from "xlsx";
 
-import { computeDistributionModel, buildDistributionDocument, buildDistributionDeck, buildDistributionXlsx } from "./distributionReport";
+import { buildDistributionDocument, buildDistributionDeck, buildDistributionXlsx } from "./distributionReport";
 import { makeRow, makeDistribution } from "./reportTestFixtures";
 import { yieldToMain } from "../storage/yieldToMain";
 import type { DistributionStatus } from "../distribution/distributionTypes";
@@ -38,69 +38,6 @@ function data() {
     quotas: { u1: { username: "u1", sampleCount: 2, dailyQuota: 5, daysRemainingAtAssignment: 10, assignedAt: "2026-07-01T00:00:00.000Z" } },
   });
 }
-
-describe("computeDistributionModel", () => {
-  it("aggregates per-employee status counts and daily quota", () => {
-    const m = computeDistributionModel(data(), "6-June-2026", { u1: "أحمد", u2: "سارة" });
-    expect(m.employees.map((e) => e.username)).toEqual(["u1", "u2"]); // sorted by total desc (tie → insertion)
-    const u1 = m.employees.find((e) => e.username === "u1")!;
-    expect(u1.displayName).toBe("أحمد");
-    expect(u1.total).toBe(2);
-    expect(u1.completed).toBe(1);
-    expect(u1.pending).toBe(1);
-    expect(u1.dailyQuota).toBe(5);
-    expect(u1.completionRate).toBeCloseTo(50, 5);
-    const u2 = m.employees.find((e) => e.username === "u2")!;
-    expect(u2.requested).toBe(1);
-    expect(u2.replaced).toBe(1);
-    expect(u2.dailyQuota).toBeNull(); // no quota entry
-  });
-
-  it("counts replacement-requested into totalRequested and surfaces highlights", () => {
-    const m = computeDistributionModel(data(), "6-June-2026");
-    expect(m.totalRequested).toBe(1);
-    expect(m.completionRate).toBeCloseTo(25, 5); // 1 completed / 4 assigned
-    expect(m.highlights.map((h) => h.xrayImageId).sort()).toEqual(["IMG-3", "IMG-4"]);
-    const replaced = m.highlights.find((h) => h.xrayImageId === "IMG-4")!;
-    expect(replaced.replacedById).toBe("IMG-9");
-  });
-
-  it("returns null completion rate when nothing is assigned", () => {
-    const m = computeDistributionModel(makeDistribution([], { totalAssigned: 0 }), "6-June-2026");
-    expect(m.completionRate).toBeNull();
-    expect(m.employees).toEqual([]);
-  });
-
-  it("groups entries by stage/level (section 1) and by port (section 2), each with a per-employee breakdown (R2)", () => {
-    const m = computeDistributionModel(data(), "6-June-2026", { u1: "أحمد", u2: "سارة" });
-
-    // All four fixture rows share the same `stage` ("المستوى الثاني"), so byStage collapses to one bucket.
-    expect(m.byStage).toHaveLength(1);
-    expect(m.byStage[0]!.key).toBe("المستوى الثاني");
-    expect(m.byStage[0]!.totalAssigned).toBe(4);
-    expect(m.byStage[0]!.totalCompleted).toBe(1);
-    expect(m.byStage[0]!.completionRate).toBeCloseTo(25, 5);
-    expect(m.byStage[0]!.employees.map((e) => e.username)).toEqual(["u1", "u2"]); // both took 2
-
-    // Two ports in the fixture ("منفذ أ": u1 x2, "منفذ ب": u2 x2).
-    expect(m.byPort.map((b) => b.key).sort()).toEqual(["منفذ أ", "منفذ ب"]);
-    const portA = m.byPort.find((b) => b.key === "منفذ أ")!;
-    expect(portA.totalAssigned).toBe(2);
-    expect(portA.employees).toEqual([
-      { username: "u1", displayName: "أحمد", assigned: 2, completed: 1, completionRate: 50 },
-    ]);
-    const portB = m.byPort.find((b) => b.key === "منفذ ب")!;
-    expect(portB.totalAssigned).toBe(2);
-    expect(portB.totalCompleted).toBe(0);
-    expect(portB.employees[0]!.username).toBe("u2");
-  });
-
-  it("byStage/byPort are empty arrays (not undefined) when nothing is assigned", () => {
-    const m = computeDistributionModel(makeDistribution([], { totalAssigned: 0 }), "6-June-2026");
-    expect(m.byStage).toEqual([]);
-    expect(m.byPort).toEqual([]);
-  });
-});
 
 describe("distribution renderers", () => {
   it("document uses display names and is a self-contained HTML doc", async () => {

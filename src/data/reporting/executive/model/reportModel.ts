@@ -24,8 +24,7 @@ import type { ReviewerKpiModel, ReviewerReferralInput } from "./reviewerKpis";
 import { band } from "./dataSufficiency";
 import type { DataSufficiencyBand } from "./dataSufficiency";
 import { formatMonthFolderShortLabel } from "../../../population/monthFolder";
-import { computeDistributionModel } from "../../distributionReport";
-import type { DistributionBucket } from "../../distributionReport";
+import { computeDistributionModel, type DistributionBucket } from "./distributionCoverageModel";
 import { computeManagementModel } from "../../management/managementModel";
 import type { ManagementBucket, ManagementModel } from "../../management/managementModel";
 

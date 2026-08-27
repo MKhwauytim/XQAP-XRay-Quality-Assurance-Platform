@@ -6,7 +6,7 @@ import type { ProcessingSummaryData } from "../../../population/monthTypes";
 import { buildReportModel } from "../model/reportModel";
 import type { ReportModel } from "../model/reportModel";
 import type { DecisionRecord, ResultSource } from "../model/decisionFactTable";
-import type { DistributionBucket } from "../../distributionReport";
+import type { DistributionBucket } from "../model/distributionCoverageModel";
 import type { ManagementBucket } from "../../management/managementModel";
 import {
   sourceRevisionsSheetAoa,
