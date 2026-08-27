@@ -1318,15 +1318,19 @@ import {
   slideShell,
 } from "../executive/deck3/slideKit";
 import type { SlideMeta, TableCell, KpiCell, OrgBlock } from "../executive/deck3/slideKit";
-import { fmtNum, fmtPct } from "../executive/primitives";
+import { fmtNum, fmtPct, esc } from "../executive/primitives";
 import type { PopulationReportModel } from "./model";
 import type { PortBreakdown, ResultCounts } from "./types";
 
 const ORG: OrgBlock = { logoUrl: "", orgName: "ضمان جودة الأشعة", lines: [] };
 
+// deck3's dataTable()/kpiBand() do NOT escape their `html` fields themselves
+// (same convention as every other deck3 slide) — every cell built from
+// data (port names, stage labels, employee display names) must be escaped
+// by the caller, here, before it reaches a TableCell.
 function resultRow(label: string, counts: ResultCounts): TableCell[] {
   return [
-    { html: label },
+    { html: esc(label) },
     { html: fmtNum(counts.total), cls: "v-navy" },
     { html: fmtNum(counts.سليمة), cls: "v-green" },
     { html: fmtNum(counts.اشتباه), cls: "v-red" },
@@ -1649,7 +1653,7 @@ ${portBreakdownTwoColumn(model.sample.byPort)}`
 function employeeStageTable(model: PopulationReportModel): string {
   const headers = ["الموظف", ...model.distribution.stageKeysPresent.map((k) => STAGE_LABELS[k] ?? k), "الإجمالي"];
   const rows: TableCell[][] = model.distribution.byEmployeeStage.map((emp) => [
-    { html: emp.displayName },
+    { html: esc(emp.displayName) },
     ...model.distribution.stageKeysPresent.map((k) => ({ html: fmtNum(emp.stages[k]?.total ?? 0) })),
     { html: fmtNum(emp.total.total), cls: "v-navy" },
   ]);
@@ -1659,7 +1663,7 @@ function employeeStageTable(model: PopulationReportModel): string {
 function employeePortTable(model: PopulationReportModel): string {
   const headers = ["الموظف", "برية", "بحرية", "الإجمالي"];
   const rows: TableCell[][] = model.distribution.byEmployeePort.map((emp) => [
-    { html: emp.displayName },
+    { html: esc(emp.displayName) },
     { html: fmtNum(emp.ports.land.total) },
     { html: fmtNum(emp.ports.sea.total) },
     { html: fmtNum(emp.total.total), cls: "v-navy" },
@@ -1669,7 +1673,7 @@ function employeePortTable(model: PopulationReportModel): string {
 
 function certScanTable(model: PopulationReportModel): string {
   const rows: TableCell[][] = model.distribution.certScanByEmployee.map((emp) => [
-    { html: emp.displayName },
+    { html: esc(emp.displayName) },
     { html: fmtNum(emp.certScanCount), cls: "v-gold" },
     { html: fmtNum(emp.nonCertScanCount) },
     { html: fmtNum(emp.total), cls: "v-navy" },
@@ -1887,7 +1891,7 @@ import {
   docPaginateTable,
 } from "../executive/documentV3/shared";
 import { DOCUMENT_V3_CSS } from "../executive/documentV3/theme";
-import { fmtNum, fmtPct } from "../executive/primitives";
+import { fmtNum, fmtPct, esc } from "../executive/primitives";
 import { yieldToMain } from "../../storage/yieldToMain";
 import { openReportWindow, writeOrCloseOnFailure } from "../htmlReport";
 import { computePopulationReportModel } from "./model";
@@ -2054,7 +2058,7 @@ async function buildSection3Pages(model: PopulationReportModel): Promise<string[
 
   const stageHeaders = ["الموظف", ...model.distribution.stageKeysPresent.map((k) => STAGE_LABELS[k] ?? k), "الإجمالي"];
   const stageRows = model.distribution.byEmployeeStage.map((emp) => [
-    { html: emp.displayName },
+    { html: esc(emp.displayName) },
     ...model.distribution.stageKeysPresent.flatMap((k) => {
       const c = emp.stages[k] ?? { سليمة: 0, اشتباه: 0, total: 0 };
       return [{ html: `${fmtNum(c.total)} (${fmtNum(c.سليمة)}/${fmtNum(c.اشتباه)})` }];
@@ -2067,7 +2071,7 @@ async function buildSection3Pages(model: PopulationReportModel): Promise<string[
   }
 
   const portRows = model.distribution.byEmployeePort.map((emp) => [
-    { html: emp.displayName },
+    { html: esc(emp.displayName) },
     { html: `${fmtNum(emp.ports.land.total)} (${fmtNum(emp.ports.land.سليمة)}/${fmtNum(emp.ports.land.اشتباه)})` },
     { html: `${fmtNum(emp.ports.sea.total)} (${fmtNum(emp.ports.sea.سليمة)}/${fmtNum(emp.ports.sea.اشتباه)})` },
     { html: fmtNum(emp.total.total) },
@@ -2078,7 +2082,7 @@ async function buildSection3Pages(model: PopulationReportModel): Promise<string[
   }
 
   const certRows = model.distribution.certScanByEmployee.map((emp) => [
-    { html: emp.displayName },
+    { html: esc(emp.displayName) },
     { html: fmtNum(emp.certScanCount) },
     { html: fmtNum(emp.nonCertScanCount) },
     { html: fmtNum(emp.total) },
