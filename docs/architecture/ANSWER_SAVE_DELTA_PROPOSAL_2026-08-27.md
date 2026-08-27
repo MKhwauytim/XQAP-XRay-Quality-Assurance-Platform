@@ -1,62 +1,52 @@
 # Employee Answer Saves — Append-Only Rewrite Proposal
 
-**Date:** 2026-08-27 · **Status:** approved by owner (verbal sign-off in session) · revision 2, after an independent adversarial design review found the v1 draft not ready to implement · **Scope:** `src/data/answers/answerStorage.ts` and every reader/writer of item-answer/reopen/quality-note events. Referral/replacement/reopen **request queues stay on the existing whole-file path** — see §6.
-**Decision order:** Stage 1 (isolated new storage primitives, zero production risk) → Stage 2 (wire read/write, dual-format) → Stage 3 (validation) → Stage 4 (ship). Each stage is independently revertible.
+**Date:** 2026-08-27 · **Status:** approved by owner (verbal sign-off in session) · revision 3, after TWO independent adversarial design reviews — round 1 found the single-writer premise false, round 2 found two correctness regressions in the round-1 fix (a new shared-write hotspot re-creating the XQ-IO-032 incident, and a legacy-file corruption path) plus confirmed the honest scope was no longer "simpler than distribution." **This revision changes structural approach on the owner's explicit direction: generalize the existing, incident-hardened `src/data/distribution/distributionEventStore.ts` rather than write a parallel implementation.**
+**Decision order:** Stage 0 (extract generic primitives from distribution's code, zero behavior change to distribution, validated against distribution's own full test suite) → Stage 1 (answers-specific fold logic on top of the generic primitives, isolated) → Stage 2 (wire read/write) → Stage 3 (validation) → Stage 4 (ship). Each stage is independently revertible. **A third adversarial review is required before Stage 0 begins**, given the stakes of touching a production module.
 
-## 0. Why this needed explicit sign-off before starting
+## 0. History — why this revision looks different from rounds 1 and 2
 
-This exact change — "per-item answer-file splitting" — was evaluated once already and explicitly declined: `docs/audit/XQ-IO-032_MULTI_MODEL_FINDINGS_2026-08-25.md:488`, *"Explicitly do not: … implement per-item answer-file splitting (tier-3 data-format change overlapping the owner-gated Phase C/D sequence)."* It was also the **original spec** (`docs/archive/03-build-spec-v0.7.md §11A.3-4`, `04-build-spec-v0.10.md`) and was quietly simplified away during implementation with no edit-log entry explaining why, landing instead on the current mutable-file-plus-capped-history-trail design (v47.5, A4). A later design doc states the team's settled position outright: `docs/superpowers/specs/2026-08-03-distribution-performance-and-workflow-design.md:155` — *"Only `distribution.events/` is truly append-only … Applying incremental caching to a mutable file would ship a silent stale-data bug."*
+- **v1** claimed answer files are single-writer and dropped distribution's cross-machine machinery on that basis. **False**: five cross-user write paths exist (quality-note edits, bulk reopen, bulk reassignment, supervisor replacement requests, instant reopens), three of them supervisor bulk loops.
+- **v2** restored the machinery, scoped request queues out of the new event stream, redesigned the on-behalf refusal, and fixed the cache-write performance claim. Round 2 found this still had two live defects:
+  - **A new shared-write hotspot.** v2's fix for the workspace-sync freshness gap was a single per-month CAS-stamped file bumped by every employee's save — structurally identical to the exact pattern that caused the XQ-IO-032 incident two days ago (`docs/audit/XQ-IO-032_MULTI_MODEL_FINDINGS_2026-08-25.md:470`: *"removing the write from the read path entirely… the herd load is gone, not argued away by ladder arithmetic"*). v2 also mis-cited its own precedent — the actual distribution mechanism for this exact problem is a **read-only** bounded directory-listing signature, zero extra writes.
+  - **Legacy-file corruption.** v2 kept the three request queues on the existing whole-file-rewrite path "unchanged," but that path reads via the same loader that also returns folded segment data — so a routine referral request would write the newly-folded item state back into the file v2 elsewhere promises is "never rewritten," corrupting the exact separation the whole design depends on.
+  - Round 2's overall verdict, honestly: after two rounds of closing gaps, the design had re-accumulated nearly all of distribution's complexity (writer-session naming, rotation, checkpoint, late-event detection, dedup, cache validation) while writing it a second time, independently — the "simpler than distribution" framing no longer held, and a second independent implementation of subtle SMB-safety mechanics was itself a real risk (four rounds of hard-won fixes already went into the one that exists).
+- **This revision (v3)** acts on round 2's own recommendation: don't re-implement the mechanics, **generalize the ones that already work**.
 
-The owner reviewed this history in-session and authorized proceeding.
+## 1. What actually generalizes vs. what stays domain-specific
 
-## 0a. Revision note — what changed after adversarial review, and why
+Distribution's code has always mixed two concerns: durable, ordered, append-only storage **mechanics** (segment naming, rotation, checkpointing, late-event/duplicate detection), and distribution's own **business logic** (the 7-member `eventType` union, transition-legality table, quota-fact accumulation). Only the first category is reusable — extracting the second would just be a different way of forcing answers into distribution's shape.
 
-**v1 of this proposal claimed answer files are "single-writer by construction" and, on that basis, dropped distribution's cross-machine machinery (writer-session-hashed segment names, eventAt sort, late-event detection).** An independent design review found that claim false: there are **five distinct cross-user write paths** into one employee's answer data, three of them supervisor-initiated **bulk loops**, not rare edge cases:
+**Extracts into a new generic module**, `src/data/storage/appendOnlyEventLog.ts`:
+- Writer-session-hashed segment naming (`{deviceHash}-{sessionHash}[-{seq}]`), rotation by size/line cap, per-writer-chain lock, re-read-before-append, post-write size verify — today's `distributionEventStore.ts:192-486`, made generic over the event's shape (a type parameter, not a distribution-specific type) and the directory/suffix (a parameter, not a hardcoded constant).
+- Checkpoint shape and the resume/dedup contract: `segmentOffsets`, **`knownEventIds` dedup across the checkpoint boundary** (the exact mechanism round 2 found missing from v2 — `distributionStorage.ts:895-916`), a `deriveVersion` gate, and a generic "domain digest" binding the checkpoint to the specific accumulator state it was built from (distribution's `eventSetId`, generalized to any caller-supplied digest function over whatever the caller considers its identity set).
+- Late-event detection: a generic `isEventOutOfOrder(newEvent, lastKnownEventAt, lastKnownEventId)` matching `findLateEvent`'s conservative "missing `lastEventId` counts as late" rule (`distributionDerivation.ts:275-298`), parameterized over how the caller extracts those two fields from its own folded-entry type. On a positive result, the generic module's contract is the same as distribution's: **the caller must do a full refold, never patch in place.**
 
-- Quality-note edits (`XrayInspectionResults.tsx:477-483`) — a supervisor writes into any employee's file, routinely.
-- Bulk reopen (`pendingBulkReopen.ts:55-92`) — one supervisor click loops across N employees' files.
-- Bulk reassignment (`submitReassignment.ts:113-140`) — same shape, into the request queues.
-- Supervisor-authored replacement requests and instant reopens.
+**Stays in `distributionEventStore.ts` / `distributionDerivation.ts`** (untouched in meaning, refactored only to call through the generic module for the mechanics above): the `AssignmentDistributionEvent` type, `isIllegalTerminalTransition`, quota-fact accumulation, `foldDistributionEvents`'s own business rules.
 
-This is exactly the "two machines, no coordination" scenario distribution's segment-naming scheme exists to solve, and `withResourceLock` (Web Locks, per-browser) does not help across machines — the review's cited precedent from this file itself: *"Both would read the same segment text and each write `existing + own lines`, and the second write would drop the first's events — silent loss, not a shared chain"* (`distributionEventStore.ts:164-170`).
+**Lives in the new `src/data/answers/answerEventStore.ts`** (built on the same generic module): the `AnswerEvent` type (§3 below), `foldAnswerEvents`'s own business rules (upsert-by-id, valueHistory/history append, the append-then-confirm on-behalf protocol).
 
-**v2 (this revision) restores the parts of distribution's design that were wrongly cut**, and fixes six further gaps the review found (non-deterministic fold steps, a migration seed that can double-apply history entries, a performance claim that didn't survive the derived-cache write, and a blind spot that would have silently killed cross-machine live-refresh for answers). Every §-numbered section below reflects the revised design; nothing from v1 should be implemented as originally written.
+## 2. Stage 0 — the generalization itself, validated in isolation
 
-## 1. Right-sized still means something — what's actually kept simple
+This is the highest-risk part of the whole proposal, because it touches code a production incident was fixed in two days ago. The discipline:
 
-Even after restoring the concurrency machinery, this is not a blind port of `src/data/distribution/`:
+1. Extract the generic module with distribution's **existing exported function signatures completely unchanged** — `appendDistributionEventSegment`, `readSegmentTails`, `sortDistributionEventsForFold`, etc. keep their names, parameters, and return types; internally they become thin calls into the generic primitives.
+2. **Zero behavior change is the acceptance bar**, proven by running distribution's own full test suite (all 30 files in `src/data/distribution/`, unmodified) against the refactored code and requiring byte-identical pass/fail results — not "still passes," but the same tests, unedited, green.
+3. A dedicated before/after diff review: for every distribution test that exercises a fault-injection scenario (`distributionEventSegmentRotation.test.ts`'s "loses no events and writes none twice when the rotation write fails outright", `segmentVerifyNotAFailure.test.ts`, `distributionCheckpointSidecar.test.ts`), confirm the refactored code path is the *same* code, not a re-derivation that happens to pass today's assertions.
+4. Only after Stage 0 is independently validated (its own adversarial review, given the stakes) does Stage 1 begin.
 
-- **Scope is narrower.** Only item-answer save/reopen/quality-note events move to the new format (§6). The three request queues (`referralRequests`/`replacementRequests`/`reopenRequests`) stay on the existing whole-file path — they're low-volume, already `requestId`-idempotent, and the file they live in gets smaller (and thus cheaper to rewrite) once item events move out, for free.
-- **No multi-source merge complexity.** Distribution merges three historical layouts (legacy compat log, legacy per-event files, current segments) because of its migration history. Answers only ever had one prior format (the current mutable file), so there are exactly two sources to merge: the legacy file (read-only, frozen at its last pre-migration state) and the new segment stream.
-- **No `eventSchemaVersion`-gated transition-legality table.** Distribution's fold enforces legal state machine transitions (`assigned → completed → …`) because distribution events can arrive from many uncoordinated writers with a wide time skew. Answer events have a much simpler state space (draft/submitted per item, with reopen as the only "undo"), and the review confirmed the actual risk is ordering, not illegal transitions — addressed in §3.
-
-## 2. Current state and cause
-
-### Before
-
-- One file per employee per month: `{username}.answers.json`, holding `items[]` (per-item current answer + a capped 20-entry `valueHistory` + an uncapped `history` for reopen/on-behalf actions), plus three request queues.
-- Every write — `upsertItemAnswer`, `upsertItemAnswerOnBehalf`, `reopenItemAnswer`, `setItemQualityNote`, and the three `append*ToEmployee` queue writers — funnels through one choke point, `updateEmployeeAnswerFile` (`answerStorage.ts:176-256`), a **full read, full rewrite** of the entire file inside a `casLoop` tuned to 14 retries × 150 ms base.
-- Measured cost (this session's own investigation, real numbers against the actual code): **9 whole-file passes per save attempt**, growing with the employee's accumulated answer count — 125 ms median at 10 items, 348 ms at 1,000 items, in-memory; each pass is a full network round-trip carrying the whole file on a real SMB share.
-- File System Access API has no true append primitive — a "small append" still means read-existing + concatenate + full rewrite of whatever's open (confirmed against `distributionEventStore.ts:352-362`), which is why segment rotation bounds the rewrite unit instead of leaving it unbounded.
-
-### After
-
-- One append-only segment directory per employee per month, `{username}.answers.events/{deviceHash}-{sessionHash}[-{seq}].ndjson` — **writer-session-hashed names, restored from distribution's actual scheme** (`distributionEventStore.ts:192-229`), not the plain incrementing sequence v1 proposed. One JSON line per item-save/reopen/quality-note mutation, capped per-segment size/line count so a save's rewrite cost is bounded by the open segment, never by the month's total.
-- A derived cache is **not** written on the save path (§5 — this is the central fix to the performance claim). Reads fold on demand from a checkpoint, and the checkpoint/cache pair is refreshed **after** a write, off the critical path, debounced.
-- Every existing reader (`loadEmployeeAnswers`, `loadAllEmployeeFiles`, and everything downstream) keeps its exact current function signature and return shape — `EmployeeAnswerFile`.
-- Legacy `{username}.answers.json` files are never rewritten or deleted. A recorded migration marker (§4), not file-existence inference, decides whether a month's fold seeds from the legacy file or from the segment stream alone.
-
-## 3. Target write/read model
+## 3. Target write/read model for answers (built on the generic module)
 
 ```ts
 type AnswerEvent = {
-  eventId: string;              // evt-<uuid>
+  eventId: string;              // stable per-user-action id (see §4) — NOT a
+                                  // fresh uuid per attempt, so a retried
+                                  // append after an ambiguous failure is a
+                                  // detectable duplicate, not a silent replay
   eventType: "item-saved" | "item-reopened" | "quality-note-set";
-  eventAt: string;               // ISO, caller-supplied at append time — fold
-                                  // steps take timestamps from HERE, never
-                                  // from `new Date()` inside a fold function
-                                  // (v1's bug — see §7 Finding 3)
+  eventAt: string;
   eventBy: string;
+  authority: "self" | "supervisor";   // NEW, see §4 — the tie-break the
+                                        // round-2 review found missing
   xrayImageId: string;
   answers?: FieldAnswer[];
   status?: "draft" | "submitted";
@@ -65,91 +55,51 @@ type AnswerEvent = {
   qualityNote?: string;
   eventSchemaVersion?: number;
 };
-
-// Fold is pure, no I/O, but is NOT a naive input-order replay:
-// 1. Sort by (eventAt, eventId) before folding — restores the ordering
-//    guarantee v1 dropped (§7 Finding 2). Single writer-session segments
-//    are already append-ordered; the sort only matters across sessions/
-//    writers, which DO exist (§0a).
-// 2. Each folded item tracks lastEventAt/lastEventId (new fields — see
-//    §7 Finding 2b) so a resumed-checkpoint fold can detect a late event
-//    arriving out of order and force a full refold, mirroring
-//    distributionDerivation.ts's findLateEvent, instead of silently
-//    applying events in the wrong order.
-// 3. valueHistory/history snapshot timestamps come from event.eventAt,
-//    not wall-clock-at-fold-time.
-function foldAnswerEvents(
-  events: readonly AnswerEvent[],
-  resumeState?: EmployeeAnswerFile
-): { file: EmployeeAnswerFile; requiresFullRefold: boolean };
 ```
 
-### The on-behalf refusal cannot be a pre-check anymore (§7 Finding 3)
+Storage: `2-samples/{month}/answers.events/{username}--{deviceHash}-{sessionHash}[-{seq}].ndjson` — **one flat per-month directory across all employees** (not one directory per employee), so the new freshness-signal probe (§6) is a single bounded listing, matching distribution's own layout shape (`distribution.events/`, not `distribution.events.{employee}/`).
 
-Today, `upsertItemAnswerOnBehalf` refuses (writes nothing) if the item is already `submitted`, checked **against the exact bytes about to be overwritten inside the same read-modify-write** (`answerStorage.ts:161-169`) — the whole point being that a check-then-write split has a race window. An append-only log has no "bytes about to be overwritten" to check.
+## 4. Concurrency and ordering — closing round 2's Finding 1
 
-**Resolution: append-then-confirm.** `upsertItemAnswerOnBehalf` appends its event unconditionally (inside the writer-session lock), then immediately folds the just-appended event on top of a fresh read of current state. If the fold determines the item was already `submitted` at a point in the true event order that precedes this append, the event is marked `superseded` in the fold's own bookkeeping (not deleted — it's durable and immutable) and the caller is told `{ ok: false, error: "..." }`. This is cheaper than today's casLoop (one append + one confirm-read, vs. a read-modify-write retry ladder) and closes the exact race the original check protected against, since the confirmation reads the true post-append order rather than a pre-append snapshot.
+Writer-session naming (from the generic module) makes two uncoordinated writers physically unable to collide on one segment file — this closes the *lost-write* half of round 2's finding for all five cross-user paths (quality-note edits, bulk reopen, bulk reassignment, supervisor replacement requests, instant reopens), including the two (`item-reopened`, `quality-note-set`) that stayed in the item-event stream after request queues were scoped out.
 
-## 4. Concurrency model
+It does **not**, by itself, guarantee correct *causal* order across machines with clock skew — round 2's correctly-identified gap. **Fix adopted:** fold-time precedence is `authority` first, `(eventAt, eventId)` second. A `supervisor`-authored event always wins over a concurrently-arriving `self`-authored event for the same item, regardless of timestamp skew — this reproduces today's actual observable behavior (a supervisor's reopen/quality-note action is authoritative) without depending on clock agreement between machines. This is recorded as an explicit, intentional business rule in `foldAnswerEvents`, analogous to (but simpler than) distribution's transition-legality table.
 
-- **Segment naming restores distribution's `{deviceHash}-{sessionHash}[-{seq}]` scheme** (`distributionEventStore.ts:48-76, 192-229`) — `deviceId` persists in `localStorage`, `sessionId` is fresh per module load. This is what makes two uncoordinated writers (an employee's own tab and a supervisor's on-behalf/bulk-reopen/quality-note session) physically incapable of targeting the same segment file, closing §0a's race at the naming layer rather than relying on a lock that only serializes within one browser.
-- The append path still uses `withResourceLock` scoped to the writer's own segment chain (matching `distributionEventStore.ts:410`) for same-tab/same-session serialization, and still re-reads the open segment immediately before appending.
-- No `casLoop` on the event append itself — appends are naturally non-colliding by construction (distinct writer-session files), so there's no shared-state read-modify-write to protect. This removes the casLoop-verify-throw fragility class (XQ-F-05 / XQ-IO-032 finding S2) from the answer-save path rather than needing to defend against it.
-- The derived cache write is **not part of the write's critical path** (§5) and is a plain `safeWriteJson`, no CAS, matching `distribution.current.json`.
+## 5. The on-behalf refusal — closing round 2's Finding 3
 
-## 5. Performance design — the actual bottleneck was the cache, not the segment
+Append-then-confirm (as in v2), but the confirmation is **scoped to one item**, not a whole-file or whole-checkpoint fold: `foldSingleItem(events, xrayImageId)` replays only that image's events (small by construction — an item accumulates at most a handful of save/reopen/note events per month) to determine whether the append actually took effect under the true fold order. This closes round 2's cost objection (an unbounded refold on every on-behalf save) without weakening the guarantee: the single-item fold uses the same `authority`-then-`(eventAt,eventId)` precedence as the full fold, so its answer is consistent with what a full fold would produce for that item.
 
-The adversarial review's central finding: writing `{username}.answers.current.json` with plain `safeWriteJson` on every save, containing an **uncapped** value-history trail, does not fix the complaint — it relocates the same unbounded whole-file-rewrite cost from the legacy file onto the cache, and makes it larger. Fixed as follows:
+## 6. Freshness signal — closing round 2's Finding 5 correctly this time
 
-1. **Cache is not written on the save path.** A save appends its event (bounded cost, §4) and returns. The cache is refreshed **after** the write completes, off the critical path — matching this codebase's own A6b doctrine (`reopenAnswer.ts:119-122`: refresh caches after writes, never on reads) and `ensureMonthWritable`'s constraint that a **closed month's readers** (Reports, Archive, Power BI export) must never attempt a write. A stale-but-present cache is refolded on the next read if its checkpoint doesn't match the latest known segment state; a missing cache triggers a full fold from segments + legacy seed.
-2. **`VALUE_HISTORY_CAP` (20) still applies to the folded/cached output.** The raw segment log is the uncapped source of truth (a real improvement — no data is discarded at append time), but `foldAnswerEvents` caps `valueHistory` in what it returns to callers, exactly as today. This keeps every downstream reader's memory profile (reports, exports, the UI) identical to today's, while still gaining a genuine benefit: a full, uncapped history is now recoverable from the segment log if ever needed, where today it's permanently lost past 20 entries.
-3. **`bumpWorkspaceEpoch` fires after the durable append confirms** — not after the cache write, and not before. This matches today's exact ordering guarantee (epoch never advances ahead of readable data) with "readable" now meaning "present in the segment log," which is durable before the cache exists.
+**No new writes.** Add `safeAnswerSegmentsSignature = boundedSizeSignature(answersEventsDir, ".ndjson")` — a read-only, bounded (top-N by name) directory listing, the same primitive distribution already uses for exactly this purpose (`workspaceSync.ts:411-419`, `directoryScan.ts`'s `boundedSizeSignature`) — feeding the existing `answers` change-signature family in `workspaceSync.ts`. One listing per 45 s tick, zero additional writes, no new shared-file contention. Segment names are prefixed with a sortable time component so an ongoing session's most recent appends are never evicted from the top-N the bounded signature actually stats.
 
-## 6. Scope: request queues stay on the legacy path
+## 7. Request queues — closing round 2's Finding 6a/6b
 
-The adversarial review recommended splitting the three request queues (`referralRequests`, `replacementRequests`, `reopenRequests`) out of the new event stream, for three concrete reasons this proposal adopts:
+Round 2 showed keeping the queues on `updateEmployeeAnswerFile` "unchanged" actually corrupts the frozen-legacy-file premise, because that function's read side returns folded (segment + legacy) state, and its write side writes that whole merged object back. **Fix:** give the three request queues their own file, `{username}.requests.json`, split out of `EmployeeAnswerFile` entirely rather than kept inside it. This is a strictly smaller, cleaner change than v2's "leave them where they are": the legacy `.answers.json` stops being written *at all* after migration (truly frozen, as originally intended), the request-queue file keeps today's exact whole-file-rewrite mechanics (low volume, already correct, not worth touching), and `loadRequestLogs`'s read cost (round 2's Finding 6b) drops rather than growing, since it now reads a small dedicated file instead of folding item-event history it never needed.
 
-- They're the exact path supervisor bulk-reassignment loops write through (`submitReassignment.ts`), so folding them into the same segment stream as item-save events would import the highest-risk cross-writer path into the highest-volume stream, rather than keeping the (already-safe, already-CAS-protected) queues isolated.
-- Their `requestId` idempotency is only useful if a failed append is *known* to have failed and can be safely retried — true today (casLoop detects and retries), not true if silently folded into a stream designed around append-and-move-on.
-- They're low-volume (a handful per month vs. ~6,500 item-save events), so sharing a fold accumulator with item events would make every request-queue read (`loadRequestLogs`, called across `ew/referral-approval`, `ew/xray-referrals`, Reports) pay the cost of folding the entire item-event history to find a handful of requests.
+`loadEmployeeAnswers` becomes a merge of exactly two sources: item state (legacy-seed-or-segments, per §8) and `{username}.requests.json` — still returning the identical `EmployeeAnswerFile` shape to every existing caller.
 
-`appendReferralToEmployee` / `appendReplacementToEmployee` / `appendReopenToEmployee` keep using `updateEmployeeAnswerFile` exactly as today. Their whole-file-rewrite cost gets strictly cheaper under this change anyway, since `items[]` moves out of the file they're rewriting.
+## 8. Migration marker — closing round 2's Finding 6c
 
-**Consequence accepted explicitly:** one employee-month's answer data now lives in two places with two update protocols (segments for items, legacy file for requests), and `loadEmployeeAnswers` must merge them into one `EmployeeAnswerFile`. This is bounded, testable complexity (a fixed two-source merge, not an open-ended one), traded deliberately against the unbounded correctness risk of the unified-stream alternative.
+The marker must be **independently durable and immune to a mis-scoped backup restore**, not stored in a rebuildable checkpoint sidecar (round 2's contradiction: v2 named the sidecar as the marker's home in one place and treated it as absent-until-first-checkpoint in another). **Fix:** the marker is the first event ever appended for an employee-month — a `migration-seed` pseudo-event (`{ eventType: "migration-seed", legacyContentHash, at }`) written into `seq 0` of that employee's first segment. Being an ordinary segment event, it is covered by the exact same backup classification as every other event (`merge-events`, not `skip-derived`/`replace`), so a restore can never silently revert or duplicate it. Fold precedence becomes a single unambiguous read: segments present → look for `migration-seed` at the start of the earliest known segment; found → seed from the named legacy content hash once, never again; segments present with no `migration-seed` → pre-v3-rollback residue (see §9) or a corrupted first segment, treated as a hard read failure per §10, not silently guessed at.
 
-## 7. Migration, rollback, and the workspace-sync signal
+## 9. Rollback
 
-### Migration marker, not inference
+Unchanged from v2's plan: reverting resumes writing `.answers.json` directly; a subsequent roll-forward must not re-fold segments written after the revert against a legacy file that has since diverged. Rollback procedure includes renaming `{username}.answers.events/` directories (now `answers.events/` at the month level, per §3) to a `.disabled` suffix, via script, as an explicit step — not left as "nothing to undo," which v1 incorrectly claimed.
 
-A month's fold must unambiguously know whether to seed from the legacy file or not. **Do not infer this from segment-directory existence** (a crashed first append can create the directory without landing a line — the review's flagged hazard). Instead, the first successful append for a given employee-month writes an explicit marker into the checkpoint sidecar: `seededFromLegacy: { contentHash, at }` (empty/absent if the employee had no pre-existing file). Fold precedence becomes:
+## 10. Explicitly not doing
 
-- checkpoint present → resume from its cached state, apply only events after its recorded offsets, **never re-touch the legacy file** (closes the double-apply risk on `valueHistory`/`history` the review identified — those two fields have no dedup and would gain duplicate entries on every double-seed).
-- no checkpoint, marker present in a readable partial state → legacy seed + **all** events from offset 0.
-- no segments at all → legacy file alone, exactly today's behavior.
+- Not touching `{supervisor}.decisions.json`.
+- Not implementing segment compaction, matching distribution's own choice.
+- Not defining corrupt-segment recovery beyond "throw" (matching `distributionEventStore.ts:325-338` and this module's own P0-1 "unreadable never becomes empty" contract).
+- Not migrating `saveEmployeeAnswers` (whole-array replace) — stays on the legacy path, documented as test/seed-only usage (per round-1 Finding 7c, unchanged in this revision).
+- Not touching `adhocHistoricalImport.ts`'s bulk `upsertItemAnswer` loop in Stage 1 — flagged by round 2 as a sixth bulk-writer path; addressed in Stage 2's wiring review, not a Stage 0/1 concern since ad-hoc months are a separate synthetic-folder code path already.
 
-### Rollback
+## 11. Validation plan
 
-A reverted build resumes writing `.answers.json` directly, as today. Left unaddressed, a later roll-forward would fold segment events on top of a legacy file that has since diverged (post-revert edits), double-applying old events and losing new ones. **Rollback procedure therefore includes one explicit step**: on revert, rename any `{username}.answers.events/` directories to `.answers.events.disabled/` (a script, not a manual per-file operation) so a future roll-forward starts a clean migration rather than reconciling divergent history. This is the one piece of "something to undo on disk" v1 incorrectly claimed didn't exist.
+**Stage 0** (generalization): distribution's own full test suite, unmodified, byte-identical pass/fail against the refactored internals; a dedicated adversarial review of the extraction before Stage 1 begins, focused specifically on "did any distribution behavior change," not on answers at all.
+**Stage 1** (answers-specific module, isolated): unit tests for `AnswerEvent` fold logic, the `authority`-based tie-break, `foldSingleItem`, the `migration-seed` marker — zero production call sites touched.
+**Stage 2** (wiring): every existing contract test in `src/data/answers/` and every cross-module test enumerated in round 1's research (`answerOnBehalf.test.ts`, `answerValueHistory.test.ts`, `reopenAnswer.test.ts`, `readContract.test.ts`'s P0-1 test, `staleSnapshot.test.ts`, `pipeline.workflow.test.ts`, `InspectionPanel.test.tsx`, `sampleMirrorDropToZero.test.ts`) must pass unmodified.
+**Stage 3**: full whole-repo gate, a real before/after latency measurement (append-only save cost, excluding the now-async cache refresh, measured separately), and independent adversarial validation of the diff before it ships.
 
-### `saveEmployeeAnswers` (whole-array replace) — omitted from v1, addressed here
-
-`saveEmployeeAnswers` (`answerStorage.ts:304-322`) replaces the entire `items[]` array — items not present in the incoming array are deleted. This has no append-only equivalent without a truncate/replace event type, and is semantically different from every other writer in this module. Its only production caller is demo-workspace seeding (`demoWorkspace.ts:1076`), which runs against `createMemoryDirectory()`, never a real workspace — it is exercised by real tests (`pipeline.workflow.test.ts`, `answerOnBehalf.test.ts`) but never by a real user action. **Resolution: `saveEmployeeAnswers` stays on the legacy whole-file path, unconditionally, and is documented as such** — it is not part of the item-event migration, matching its actual (test/seed-only) usage. This must be called out explicitly in the module's docblock so it isn't mistaken for an oversight later.
-
-### Workspace-sync freshness signal (§7 Finding 7a — the blocking one)
-
-`workspaceSync.ts:531`'s `answersSignature` watches file name+size for anything ending in `.answers.json` — the exact suffix legacy files keep forever under this design (§2, "never rewritten"). Left unaddressed, that signature becomes a permanent constant after migration: no error, no test failure, cross-machine "someone else's answer/request just changed" live-refresh silently stops working for every migrated month.
-
-**Fix, decided explicitly (not left as an implementation detail):** add a small per-month CAS stamp file, `answers.stamp.json`, bumped on every segment append across every employee in that month — mirroring how the distribution family already uses a compat-log CAS stamp for the identical purpose (`workspaceSync.ts:165-169`). `workspaceSync`'s answers probe reads this one small stamp instead of scanning every employee's segment directory (which would cost one listing per employee per 45 s tick — rejected as unbudgeted). This is a new, small write on the append path (a CAS bump on a tiny stamp file, not a cache rewrite) and is accounted for in the performance model in §5 as part of "durable append," not as an additional unbounded pass.
-
-## 8. Explicitly not doing
-
-- Not touching `{supervisor}.decisions.json` or the request queues (§6) — scope is item-save/reopen/quality-note events only.
-- Not implementing segment compaction, for the same reason distribution doesn't: a closed writer session can't be reliably distinguished from a crashed tab.
-- Not changing `revision`/`_writeToken` semantics on `EmployeeAnswerFile` for the legacy-path fields (request queues, `saveEmployeeAnswers`) — those keep their current CAS-loop-based meaning unchanged, since they stay on the legacy path.
-- Not defining corrupt-segment recovery beyond "throw," matching distribution's own choice (`distributionEventStore.ts:325-338`) — a corrupt segment line is a hard failure, not a silent skip, consistent with the P0-1 "unreadable never becomes empty" contract this module already guarantees and which must extend unchanged to the fold path.
-
-## 9. Validation plan
-
-Stage 1 (new module, isolated): unit tests mirroring distribution's own test structure (segment rotation, mixed-source fold, late-event detection, writer-session naming collision-avoidance) — zero production call sites touched, zero risk.
-Stage 2 (wiring): every existing contract test in `src/data/answers/` and every cross-module test that pins this file's behavior (`answerOnBehalf.test.ts`, `answerValueHistory.test.ts`, `reopenAnswer.test.ts`, `readContract.test.ts`'s P0-1 test, `staleSnapshot.test.ts`, `pipeline.workflow.test.ts`, `InspectionPanel.test.tsx`, `sampleMirrorDropToZero.test.ts`) must pass unmodified, proving the contract didn't change from any caller's point of view. New tests specifically for: the on-behalf append-then-confirm race (two writers, verify only one wins and the loser gets `{ok:false}`), the migration-marker double-apply guard, and `workspaceSync`'s new stamp file actually triggering a refresh across two simulated clients.
-Stage 3: full whole-repo gate (tsc, lint, complexity, hex-literals, vendor, release, full test:run, build, bundle-size) plus a real before/after latency measurement using the same methodology as this session's earlier investigation (`createMemoryDirectory()`, real functions, N = 10/100/500/1000 items) — this time measuring the append-only save cost **excluding** any cache write, per §5, plus the cache-refresh cost separately as an off-critical-path number. Plus a second independent adversarial review of the revised design before Stage 1 code is written, and adversarial validation of the diff before it ships.
+This proposal will get a **third** design review before Stage 0 begins, given that Stage 0 modifies a production module with recent incident history — the highest-stakes single step in this whole plan.
