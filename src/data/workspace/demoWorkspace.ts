@@ -136,6 +136,31 @@ export type WorkspaceSeedProfile = {
    * it with the demo account so `demo` gets a queue of its own.
    */
   employees?: ManagedLoginUser[];
+  /**
+   * Overrides the seeded inspection template. Defaults to `buildSeedTemplate`
+   * (the bespoke 11-field template the dev-only simulated workspace still
+   * relies on — see `simWorkspace.test.ts`'s frozen field-id assertion). The
+   * demo profile overrides this with `buildDemoInspectionTemplate` so the
+   * demo shows the SAME template a brand-new real workspace gets — and stays
+   * linked to it: since `buildDemoInspectionTemplate` calls
+   * `buildDefaultInspectionTemplate` directly, a future edit to the real
+   * template automatically reaches the demo, with no separate demo-only copy
+   * to fall out of sync.
+   */
+  templateBuilder?: (profile: WorkspaceSeedProfile) => TemplateSchema | Promise<TemplateSchema>;
+  /**
+   * Overrides how each seeded answer's field values are built. Defaults to
+   * `buildDefaultSeedAnswerFields` (the `result`/`notes`/`qualityImageResult`
+   * shape the simulated workspace's template expects). Must stay paired with
+   * `templateBuilder` — the field ids each produces have to agree.
+   */
+  answerFieldsBuilder?: (args: SeedAnswerFieldsArgs) => FieldAnswer[];
+};
+
+export type SeedAnswerFieldsArgs = {
+  qualityResult: "سليمة" | "اشتباه";
+  isDraft: boolean;
+  seq: number;
 };
 
 const DEMO_MONTH = 5;
@@ -223,7 +248,9 @@ export const DEMO_SEED_PROFILE: WorkspaceSeedProfile = {
   riskFileName: "بيانات_مخاطر_تجريبية.xlsx",
   rngSeed: "xray-demo-fixed-seed-v1",
   templateId: DEMO_TEMPLATE_ID,
-  templateName: "نموذج فحص الجودة (تجريبي)",
+  // Same name a brand-new real workspace's template gets (buildDefaultInspectionTemplate)
+  // — the demo's template is linked to that real default, not a bespoke one.
+  templateName: "نموذج ضمان جودة الأشعة",
   ports: DEMO_PORTS,
   samplingRules: DEMO_SAMPLING_RULES,
   allocations: DEMO_ALLOCATIONS,
@@ -234,6 +261,8 @@ export const DEMO_SEED_PROFILE: WorkspaceSeedProfile = {
   // createDefaultManagedUsers() at import time, which breaks every test that
   // module-mocks auth/userManagement (demoWorkspace is imported transitively
   // by AuthGate).
+  templateBuilder: buildDemoInspectionTemplate,
+  answerFieldsBuilder: buildDemoAnswerFields,
 };
 
 /** A value that `engineVerdictOf` does NOT recognize — neither affirmative nor negative. */
@@ -467,13 +496,19 @@ function buildSeedPopulationRow(
 }
 
 /**
- * The inspection template the seeded answers reference.
+ * The DEFAULT seeded inspection template — small and bespoke, 3 fields.
  *
- * Without this the seeded `ItemAnswer.templateId` pointed at a template that
- * did not exist anywhere in the workspace, so the inspection form had nothing
- * to render. `qualityImageResult` is the reporting pipeline's ground-truth
- * field (`executiveReportTypes.ts` → `expertResultFieldId`) and must keep that
- * exact id.
+ * This is the fallback used only when a profile does not supply its own
+ * `templateBuilder` (currently: the dev-only simulated workspace, whose test
+ * pins this exact 3-field shape — see `simWorkspace.test.ts`). The demo
+ * profile overrides this with `buildDemoInspectionTemplate` below, so the
+ * demo's own template is the real "new workspace" default, not this one.
+ *
+ * Without a template the seeded `ItemAnswer.templateId` would point at a
+ * template that does not exist anywhere in the workspace, so the inspection
+ * form would have nothing to render. `qualityImageResult` is the reporting
+ * pipeline's ground-truth field (`executiveReportTypes.ts` →
+ * `expertResultFieldId`) and must keep that exact id.
  */
 function buildSeedTemplate(profile: WorkspaceSeedProfile): TemplateSchema {
   const phaseId = "phase-quality-review";
@@ -597,6 +632,198 @@ function buildSeedTemplate(profile: WorkspaceSeedProfile): TemplateSchema {
   };
 }
 
+// ─── Demo-only: the REAL default template, not a bespoke one ───────────────
+// Owner request (2026-08-27): the demo's inspection template must be the same
+// one a brand-new real workspace gets (`buildDefaultInspectionTemplate`),
+// never a separate demo-only form that can drift from it.
+
+/**
+ * The one field both the seeded answers and the executive report key on by a
+ * literal id. `DEFAULT_EXEC_CONFIG.expertResultFieldId` (executiveReportTypes.ts)
+ * is a fixed, app-wide constant — not a per-workspace setting — so seeded
+ * answers can only drive the executive report's expert-accuracy numbers if a
+ * field with exactly this id exists. In `buildDefaultInspectionTemplate` this
+ * is the "صحة النتيجة" field; canonicalization below pins its id here instead
+ * of a random one.
+ */
+const DEMO_RESULT_FIELD_LABEL = "صحة النتيجة";
+const DEMO_RESULT_FIELD_ID = "qualityImageResult";
+
+/**
+ * Stable, readable ids for every field of `buildDefaultInspectionTemplate`,
+ * keyed by its (fixed) Arabic label. A label with no entry here falls back to
+ * a positional id (`demo-field-N`) rather than throwing, so a future edit to
+ * that template that adds/renames a field degrades gracefully instead of
+ * breaking the demo seed.
+ */
+const DEMO_FIELD_ID_BY_LABEL: Record<string, string> = {
+  "هل يوجد صورة": "hasImage",
+  "سبب عدم وجود الصورة": "noImageReason",
+  "هل يوجد تحديد": "hasMarking",
+  "مستوى جودة الصورة": "imageQuality",
+  "اسباب انخفاض جودة الصورة": "qualityReason",
+  "سبب انخفاض الجودة (أخرى)": "qualityOther",
+  "هل يمكن الاطلاع على البيان": "canViewDeclaration",
+  "نوع البيان": "declarationType",
+  "نوع البيان (أخرى)": "declarationTypeOther",
+  "طبيعة البضاعة المصرح بها": "declaredNature",
+  "طبيعة البضاعة المصرح بها (أخرى)": "declaredNatureOther",
+  "طبيعة البضاعة الظاهرة بالأشعة": "observedNature",
+  "طبيعة البضاعة الظاهرة بالأشعة (أخرى)": "observedNatureOther",
+  "هل الوارد مطابق للبيان الجمركي": "matchesDeclaration",
+  "أسباب عدم المطابقة": "mismatchReasons",
+  "أسباب عدم المطابقة (أخرى)": "mismatchReasonsOther",
+  "ملاحظات على البيان الجمركي": "declarationNotes",
+  [DEMO_RESULT_FIELD_LABEL]: DEMO_RESULT_FIELD_ID,
+  "تقييم الاشتباه": "suspicionLevel",
+  "موقع الاشتباه": "suspicionLocation",
+  "الاصناف المشبوهة": "suspectedTypes",
+  "الية التهريب المحتملة": "smuggleMethod",
+  "الملاحظات العامة": "notes",
+};
+
+/**
+ * `buildDefaultInspectionTemplate` is intentionally non-deterministic — every
+ * phase/field id comes from `createFieldId()`/`createPhaseId()`
+ * (`Date.now()` + `Math.random()`), because it exists to give a real,
+ * brand-new workspace fresh ids on every call. This file's seed, by
+ * contract, may not depend on either, so this remaps every id (and every
+ * `condition.sourceFieldId` reference to it) to the fixed table above right
+ * after generation — the CONTENT (labels, options, phases, conditions) is
+ * untouched, only the ids become stable.
+ */
+function canonicalizeTemplate(template: TemplateSchema): TemplateSchema {
+  const phases = template.phases ?? [];
+  const phaseIdMap = new Map<string, string>();
+  phases.forEach((phase, index) => phaseIdMap.set(phase.phaseId, `demo-phase-${index + 1}`));
+
+  const fieldIdMap = new Map<string, string>();
+  template.fields.forEach((field, index) => {
+    fieldIdMap.set(field.fieldId, DEMO_FIELD_ID_BY_LABEL[field.label] ?? `demo-field-${index + 1}`);
+  });
+
+  return {
+    ...template,
+    phases: phases.map((phase) => ({
+      ...phase,
+      phaseId: phaseIdMap.get(phase.phaseId) ?? phase.phaseId,
+    })),
+    fields: template.fields.map((field) => ({
+      ...field,
+      fieldId: fieldIdMap.get(field.fieldId) ?? field.fieldId,
+      phaseId: field.phaseId ? phaseIdMap.get(field.phaseId) ?? field.phaseId : field.phaseId,
+      condition: field.condition
+        ? {
+            ...field.condition,
+            sourceFieldId: fieldIdMap.get(field.condition.sourceFieldId) ?? field.condition.sourceFieldId,
+          }
+        : field.condition,
+    })),
+  };
+}
+
+/**
+ * The demo's actual inspection template: the real default study template
+ * (`buildDefaultInspectionTemplate`), canonicalized for determinism, restamped
+ * with this profile's id/name/authorship. Same phases, fields, labels,
+ * options and conditional logic a genuine new workspace's inspector fills in
+ * — never a separate demo-only form.
+ *
+ * Loaded via a dynamic `import()` rather than a static one: `demoWorkspace.ts`
+ * is reachable from `AuthGate` (see the module doc above), which every
+ * session loads, so a static import of the ~300-line template definition
+ * would ship it in the MAIN bundle for every user instead of only when a demo
+ * session actually seeds itself. This mirrors why TemplateBuilder itself is a
+ * lazy tab boundary (`eslint.config.js`) — same bundle-size reasoning, applied
+ * to its underlying data.
+ */
+async function buildDemoInspectionTemplate(profile: WorkspaceSeedProfile): Promise<TemplateSchema> {
+  const { buildDefaultInspectionTemplate } = await import("../templates/defaultInspectionTemplate");
+  const canonical = canonicalizeTemplate(buildDefaultInspectionTemplate(profile.username));
+  return {
+    ...canonical,
+    templateId: profile.templateId,
+    templateName: profile.templateName,
+    createdAt: profile.seededAt,
+    createdBy: profile.username,
+    updatedAt: profile.seededAt,
+    updatedBy: profile.username,
+  };
+}
+
+/** Default seeded answer shape, paired with `buildSeedTemplate` above (the
+ *  simulated workspace's 11-field template). The submitted branch also fills
+ *  `buildQualityFieldAnswers`' image/marking/quality/suspicion fields — see
+ *  that function's own doc comment for why they exist. */
+function buildDefaultSeedAnswerFields({ qualityResult, isDraft, seq }: SeedAnswerFieldsArgs): FieldAnswer[] {
+  if (isDraft) {
+    return [
+      { fieldId: "result", value: "سليمة" },
+      { fieldId: "qualityImageResult", value: qualityResult },
+    ];
+  }
+  return [
+    { fieldId: "result", value: "سليمة" },
+    { fieldId: "notes", value: "لا ملاحظات" },
+    { fieldId: DEMO_RESULT_FIELD_ID, value: qualityResult },
+    ...buildQualityFieldAnswers(seq, qualityResult),
+  ];
+}
+
+/**
+ * The demo's seeded answer shape, paired with `buildDemoInspectionTemplate`
+ * above: fills a representative slice of all three real phases (image
+ * quality, customs-declaration analysis, result) instead of just the one
+ * ground-truth field, so opening a seeded answer in the real inspection form
+ * shows a genuinely filled-in inspection. Every choice is a function of
+ * `seq`/`qualityResult` only — no `Math.random()` — so the seed stays
+ * reproducible.
+ */
+function buildDemoAnswerFields({ qualityResult, isDraft, seq }: SeedAnswerFieldsArgs): FieldAnswer[] {
+  const isSuspicion = qualityResult === "اشتباه";
+  const imageQuality = seq % 5 === 0 ? "منخفض" : seq % 3 === 0 ? "متوسط" : "عالي";
+  const declaredNature =
+    seq % 2 === 0
+      ? "طرود متجانسة (كراتين أو أكياس متكررة)"
+      : "بضائع معدنية كثيفة (آلات ومعدات وقطع غيار)";
+  const observedNature = isSuspicion ? "حمولة غير متجانسة" : declaredNature;
+
+  const fields: FieldAnswer[] = [
+    { fieldId: "hasImage", value: "نعم" },
+    { fieldId: "hasMarking", value: isSuspicion ? "نعم" : "لا" },
+    { fieldId: "imageQuality", value: imageQuality },
+  ];
+  if (imageQuality !== "عالي") {
+    fields.push({ fieldId: "qualityReason", value: "جودة التقاط الصورة منخفضة" });
+  }
+  fields.push(
+    { fieldId: "canViewDeclaration", value: "نعم" },
+    { fieldId: "declarationType", value: "استيراد" },
+    { fieldId: "declaredNature", value: declaredNature },
+    { fieldId: "observedNature", value: observedNature },
+    { fieldId: "matchesDeclaration", value: isSuspicion ? "لا" : "نعم" }
+  );
+  if (isSuspicion) {
+    fields.push(
+      { fieldId: "mismatchReasons", value: "وجود أجسام أو مواد غير مذكورة" },
+      { fieldId: DEMO_RESULT_FIELD_ID, value: qualityResult },
+      { fieldId: "suspicionLevel", value: "متوسط" },
+      { fieldId: "suspicionLocation", value: "الحمولة" },
+      { fieldId: "suspectedTypes", value: "بضائع غير مصرح بها ضمن الحمولة" },
+      { fieldId: "smuggleMethod", value: "إخفاء داخل الحمولة الظاهرة" }
+    );
+  } else {
+    fields.push({ fieldId: DEMO_RESULT_FIELD_ID, value: qualityResult });
+  }
+  if (!isDraft) {
+    fields.push({
+      fieldId: "notes",
+      value: isSuspicion ? "يستدعي المراجعة اليدوية" : "لا ملاحظات",
+    });
+  }
+  return fields;
+}
+
 /**
  * Seed one complete month — population → sample → distribution → answers —
  * plus the inspection template those answers reference, into `handle`.
@@ -611,7 +838,8 @@ export async function seedWorkspaceMonth(
   const monthFolderName = formatMonthFolderName(profile.month, profile.year);
 
   // ── 0. Inspection template + active selection ──
-  await saveTemplate(handle, buildSeedTemplate(profile));
+  const template = await (profile.templateBuilder ?? buildSeedTemplate)(profile);
+  await saveTemplate(handle, template);
   await saveInspectionTemplateSelection(handle, {
     templateId: profile.templateId,
     updatedAt: profile.seededAt,
@@ -814,17 +1042,13 @@ async function seedAnswers(
       const seq = row ? row.sourceRowNumber - 1 : 0;
       const qualityResult: "سليمة" | "اشتباه" =
         seq % 15 === 0 ? (baseResult === "سليمة" ? "اشتباه" : "سليمة") : baseResult;
+      const buildAnswerFields = profile.answerFieldsBuilder ?? buildDefaultSeedAnswerFields;
       if (bucket < 2) {
         items.push({
           xrayImageId: evt.xrayImageId,
           templateId: profile.templateId,
           templateVersion: 1,
-          answers: [
-            { fieldId: "result", value: "سليمة" },
-            { fieldId: "notes", value: "لا ملاحظات" },
-            { fieldId: "qualityImageResult", value: qualityResult },
-            ...buildQualityFieldAnswers(seq, qualityResult),
-          ],
+          answers: buildAnswerFields({ qualityResult, isDraft: false, seq }),
           lastSavedAt: now,
           submittedAt: now,
           answeredBy: empUsername,
@@ -838,10 +1062,7 @@ async function seedAnswers(
           xrayImageId: evt.xrayImageId,
           templateId: profile.templateId,
           templateVersion: 1,
-          answers: [
-            { fieldId: "result", value: "سليمة" },
-            { fieldId: "qualityImageResult", value: qualityResult },
-          ],
+          answers: buildAnswerFields({ qualityResult, isDraft: true, seq }),
           lastSavedAt: now,
           submittedAt: null,
           answeredBy: empUsername,
