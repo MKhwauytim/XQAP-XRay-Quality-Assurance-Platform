@@ -1,10 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { createMemoryDirectory } from "../storage/memoryDirectory";
+import { describe, expect, it, vi } from "vitest";
+import {
+  createMemoryDirectory,
+  setSimulatedFaults,
+  clearSimulatedFaults,
+} from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeWriteJson } from "../storage/safeWrite";
 import { getPopulationMonthDir, POPULATION_SUBFOLDERS } from "../workspace/workspacePaths";
 import type { PreparedPopulationRow } from "./populationTypes";
 import type { PopulationFinalData } from "./monthTypes";
+import { loadMonthPopulationFinal } from "./populationStorage";
 import { saveSampleMaster, loadSampleMaster } from "../sampling/sampleStorage";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import {
@@ -150,6 +155,16 @@ describe("applyPopulationFieldCorrections", () => {
     });
     expect(result.ok).toBe(true);
 
+    // The SOURCE OF TRUTH must actually carry the patch too — the previous
+    // suite never read population.final.json back, which is exactly the gap
+    // that let a silently-skipped patch (loadMonthPopulationFinal returning
+    // null) still report {ok:true} off the downstream sample-master/
+    // distribution/audit steps alone.
+    const final = await loadMonthPopulationFinal(root, MONTH);
+    const finalRow = final!.rows.find((r) => r["xrayImageId"] === "A1") as Record<string, unknown>;
+    expect(finalRow.portName).toBe("الميناء الجديد");
+    expect(finalRow.declarationNumber).toBe("NEW-DECL");
+
     const sample = await loadSampleMaster(root, MONTH);
     const sampleRow = sample!.rows.find((r) => r.xrayImageId === "A1")!;
     expect(sampleRow.portName).toBe("الميناء الجديد");
@@ -186,5 +201,105 @@ describe("applyPopulationFieldCorrections", () => {
     expect(result.ok).toBe(true);
     const actions = await readWorkspaceActions(root);
     expect(actions.some((a) => a.action === "pending-correction-applied")).toBe(false);
+  });
+
+  it("fails cleanly, without patching anything, when population.final.json cannot be loaded for the month", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    // sample.master.json exists (as it would for an already-distributed month)
+    // but population.final.json was never written for this month --
+    // loadMonthPopulationFinal reports an absent file the same way it reports
+    // a present-but-unreadable one (see its own docblock), so this reproduces
+    // defect A without needing fault injection: the whole call must abort
+    // rather than patch sample.master.json off a population read that never
+    // actually happened.
+    const rows = [makeRow("A1", "الميناء القديم")];
+    await saveSampleMaster(root, MONTH, makeSample(rows));
+
+    const result = await applyPopulationFieldCorrections({
+      directoryHandle: root,
+      monthFolderName: MONTH,
+      changes: [
+        { xrayImageId: "A1", field: "portName", oldValue: "الميناء القديم", newValue: "الميناء الجديد" },
+      ],
+      actorUsername: "sup1",
+      actorRole: "supervisor",
+    });
+
+    expect(result.ok).toBe(false);
+
+    const sample = await loadSampleMaster(root, MONTH);
+    expect(sample!.rows.find((r) => r.xrayImageId === "A1")!.portName).toBe("الميناء القديم");
+
+    const actions = await readWorkspaceActions(root);
+    expect(actions.some((a) => a.action === "pending-correction-applied")).toBe(false);
+  });
+
+  it("fails cleanly and leaves sample.master.json / the distribution cache untouched when the sample-master CAS write is exhausted", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    await seed(root);
+
+    // Simulate a busy SMB workspace where every attempt to write
+    // sample.master.json fails (a concurrent replacement/approval holding the
+    // file, or a transient share fault) -- saveSampleMaster catches this and
+    // returns { ok: false }, so casLoop retries to exhaustion rather than
+    // throwing.
+    setSimulatedFaults(root, [
+      {
+        operation: "createWritable",
+        name: "sample.master.json",
+        errorName: "NotFoundError",
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+
+    vi.useFakeTimers();
+    try {
+      const resultPromise = applyPopulationFieldCorrections({
+        directoryHandle: root,
+        monthFolderName: MONTH,
+        changes: [
+          { xrayImageId: "A1", field: "portName", oldValue: "الميناء القديم", newValue: "الميناء الجديد" },
+        ],
+        actorUsername: "sup1",
+        actorRole: "supervisor",
+      });
+      // Drains casLoop's own backoff sleeps (default 10 retries / 200ms base)
+      // without the test actually waiting seconds of wall-clock time.
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(result.ok).toBe(false);
+
+      clearSimulatedFaults(root);
+
+      // population.final.json DID get patched -- that step has its own lock
+      // and completed before the sample-master CAS loop ever ran. This is
+      // exactly why the two files are now inconsistent and why this must be
+      // reported as a failure instead of falling through to "success".
+      const final = await loadMonthPopulationFinal(root, MONTH);
+      const finalRow = final!.rows.find((r) => r["xrayImageId"] === "A1") as Record<string, unknown>;
+      expect(finalRow.portName).toBe("الميناء الجديد");
+
+      // sample.master.json must still carry the OLD value -- the write never
+      // committed.
+      const sample = await loadSampleMaster(root, MONTH);
+      const sampleRow = sample!.rows.find((r) => r.xrayImageId === "A1")!;
+      expect(sampleRow.portName).toBe("الميناء القديم");
+
+      // The durable distribution cache / employee mirror must not have been
+      // rewritten with rows that were never actually committed to
+      // sample.master.json -- this is the defect-B regression: it must still
+      // reflect the (still-uncorrected) sample-master rows.
+      const current = await loadOrDeriveDistributionCurrentForRead(root, MONTH, sample!.rows);
+      const entry = current?.entries.find((e) => e.xrayImageId === "A1");
+      expect(entry?.row.portName).toBe("الميناء القديم");
+
+      // No "pending-correction-applied" audit entry for a correction that
+      // didn't fully commit.
+      const actions = await readWorkspaceActions(root);
+      expect(actions.some((a) => a.action === "pending-correction-applied")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

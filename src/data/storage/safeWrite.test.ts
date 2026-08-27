@@ -368,6 +368,176 @@ test("failed live commit leaves previous valid file readable", async () => {
   }
 });
 
+/**
+ * A writable double that also carries `abort`, which this repo's
+ * `WritableFileStreamLike` does not declare (every real
+ * `FileSystemWritableFileStream` has it — it is a `WritableStream`). Typed as a
+ * variable rather than an inline literal so the extra member is not rejected as
+ * an excess property where it is handed back as a `WritableFileStreamLike`.
+ */
+type WritableDouble = {
+  write: (data: string) => Promise<void>;
+  close: () => Promise<void>;
+  abort?: (reason?: unknown) => Promise<void>;
+};
+
+/**
+ * `close()` on a writable stream is a COMMIT — the swap file only replaces the
+ * destination when the sink's close algorithm runs — so `writeText`'s error
+ * path must never call it. This is the case that matters: `safeWriteJson`'s
+ * step 3 writes the LIVE file, and a throw there propagates straight out (the
+ * `.bak` rollback runs only for a failed read-back verify, not for a throw), so
+ * anything committed on the way out is final.
+ *
+ * The double below is deliberately the shape every hand-written `{ write,
+ * close }` double in this suite has, and the shape a real stream has whenever
+ * the failure did not come from the sink itself: `close()` still commits after
+ * a failed `write()`. Under the previous `close()`-in-catch teardown this test
+ * truncated a good `a.json` to an empty file.
+ */
+test("writeText aborts (never commits) the writable when write() throws over the LIVE file", async () => {
+  const base = createMemoryDirectory();
+  await safeWriteJson(base, "a.json", { v: 1 });
+  const before = await readRaw(base, "a.json");
+
+  let commits = 0;
+  let aborts = 0;
+  const failingDir: DirectoryHandleLike = {
+    ...base,
+    getFileHandle: async (name, options) => {
+      const handle = await base.getFileHandle(name, options);
+      // Only the live commit fails: the `.bak` snapshot and the `.tmp` staging
+      // both have to succeed for the write to reach step 3 at all.
+      if (name !== "a.json") {
+        return handle;
+      }
+      return {
+        ...handle,
+        createWritable: async () => {
+          const inner = await handle.createWritable!();
+          const stream: WritableDouble = {
+            write: async () => {
+              throw new Error("simulated live write failure");
+            },
+            close: async () => {
+              commits += 1;
+              await inner.close();
+            },
+            abort: async () => {
+              aborts += 1;
+            },
+          };
+          return stream;
+        },
+      } satisfies FileHandleLike;
+    },
+  };
+
+  await expect(safeWriteJson(failingDir, "a.json", { v: 2 })).rejects.toThrow(
+    "simulated live write failure"
+  );
+
+  expect(commits).toBe(0);
+  expect(aborts).toBe(1);
+  // The previously-good live file is byte-identical, not truncated.
+  expect(await readRaw(base, "a.json")).toBe(before);
+  const result = await safeReadJson<{ v: number }>(base, "a.json");
+  expect(result.ok).toBe(true);
+  if (result.ok) expect(result.value.v).toBe(1);
+});
+
+/**
+ * Pins the platform premise the teardown comment in `safeWrite.ts` rests on,
+ * using the runtime's own `WritableStream` (the spec Chromium implements): a
+ * sink `write` rejection leaves the stream ERRORED, so a subsequent `close()`
+ * rejects and the sink's close/commit algorithm never runs. That is why the old
+ * `close()`-in-catch was inert rather than destructive for a failure raised by
+ * `write()` itself — and why the guarantee cannot be left resting on where the
+ * failure happened to come from.
+ */
+test("platform premise: close() on a stream whose write() rejected does not run the commit algorithm", async () => {
+  let committed = false;
+  const stream = new WritableStream<string>({
+    write() {
+      throw new Error("sink write failed");
+    },
+    close() {
+      committed = true;
+    },
+  });
+
+  const writer = stream.getWriter();
+  await expect(writer.write("payload")).rejects.toThrow("sink write failed");
+  writer.releaseLock();
+
+  await expect(stream.close()).rejects.toThrow(TypeError);
+  expect(committed).toBe(false);
+  // abort() on an already-errored stream resolves — it is safe to call blind.
+  await expect(stream.abort(new Error("teardown"))).resolves.toBeUndefined();
+});
+
+/**
+ * The same live-file scenario as the first test, but driven through a real
+ * `WritableStream` wired up the way `FileSystemWritableFileStream` is (commit
+ * on the sink's close, discard on its abort). Guards the end-to-end outcome
+ * against the faithful state machine, not just against a hand-rolled double.
+ */
+test("writeText leaves the live file intact when a real stream-backed writable fails mid-write", async () => {
+  const base = createMemoryDirectory();
+  await safeWriteJson(base, "a.json", { v: 1 });
+  const before = await readRaw(base, "a.json");
+
+  let committed = false;
+  const failingDir: DirectoryHandleLike = {
+    ...base,
+    getFileHandle: async (name, options) => {
+      const handle = await base.getFileHandle(name, options);
+      if (name !== "a.json") {
+        return handle;
+      }
+      return {
+        ...handle,
+        createWritable: async () => {
+          const inner = await handle.createWritable!();
+          const chunks: string[] = [];
+          const backing = new WritableStream<string>({
+            write() {
+              throw new Error("simulated live write failure");
+            },
+            // The commit: only reaching here replaces the destination bytes,
+            // exactly as a real swap file is only published by close().
+            async close() {
+              committed = true;
+              await inner.write(chunks.join(""));
+              await inner.close();
+            },
+          });
+          const stream: WritableDouble = {
+            write: async (data: string) => {
+              const writer = backing.getWriter();
+              try {
+                await writer.write(data);
+              } finally {
+                writer.releaseLock();
+              }
+            },
+            close: () => backing.close(),
+            abort: (reason?: unknown) => backing.abort(reason),
+          };
+          return stream;
+        },
+      } satisfies FileHandleLike;
+    },
+  };
+
+  await expect(safeWriteJson(failingDir, "a.json", { v: 2 })).rejects.toThrow(
+    "simulated live write failure"
+  );
+
+  expect(committed).toBe(false);
+  expect(await readRaw(base, "a.json")).toBe(before);
+});
+
 test("concurrent writes to the same file are serialized and preserve revisions", async () => {
   const dir = createMemoryDirectory();
   await Promise.all([

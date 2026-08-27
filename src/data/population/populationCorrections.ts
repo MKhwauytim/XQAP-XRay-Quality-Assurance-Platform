@@ -237,6 +237,16 @@ export async function applyPopulationFieldCorrections(params: {
     //    same month. No revision/_writeToken on this file type (see
     //    monthTypes.ts) — saveMonthRun itself uses the identical plain
     //    read-modify-write-under-lock pattern for it.
+    //
+    //    `finalPatched` is flipped only after the write itself completes —
+    //    `loadMonthPopulationFinal` collapses "month never processed" and
+    //    "file present but unreadable" into the same `null` (see its own
+    //    docblock), so a callback that merely returned on `!final` used to
+    //    let steps 2-4 (sample-master patch, distribution refold, audit
+    //    trail) run and report success even though the source of truth was
+    //    never touched. The flag is checked right after the lock releases,
+    //    before anything else runs.
+    let finalPatched = false;
     await withResourceLock(manifestLockKey(monthFolderName), async () => {
       const final = await loadMonthPopulationFinal(directoryHandle, monthFolderName);
       if (!final) return;
@@ -248,23 +258,38 @@ export async function applyPopulationFieldCorrections(params: {
       const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, true);
       const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: true });
       await safeWriteJson(processedDir, "population.final.json", { ...final, rows: patchedRows });
+      finalPatched = true;
     });
+    if (!finalPatched) {
+      return {
+        ok: false,
+        error: "تعذّر تحميل بيانات المجتمع لهذا الشهر — لم يتم تطبيق أي تصحيح.",
+      };
+    }
 
     // 2. sample.master.json — CAS loop, same idiom as appendSampleRow /
     //    approveSampleMaster in sampleStorage.ts, so a concurrent
     //    replacement/approval append cannot be silently clobbered.
-    let updatedSampleRows: PreparedPopulationRow[] | null = null;
-    const sampleResult = await casLoop<{ ok: true }>(
+    //
+    //    The rows only travel back to the caller INSIDE the casLoop success
+    //    result (`rows`), never assigned from within the attempt callback
+    //    itself — an attempt can compute patchedRows and still lose the CAS
+    //    race (or exhaust retries), and reading rows off the last, unwritten
+    //    attempt used to let step 3 refold the distribution cache with data
+    //    that was never actually committed to sample.master.json. `rows` is
+    //    `null` for the legitimate "no sample drawn yet for this month" case
+    //    (nothing to patch, still a success), distinct from `rows: [...]`
+    //    which means the write was verified.
+    const sampleResult = await casLoop<{ ok: true; rows: PreparedPopulationRow[] | null }>(
       async (writeToken) => {
         const current = await loadSampleMaster(directoryHandle, monthFolderName);
-        if (!current) return { done: true, result: { ok: true as const } };
+        if (!current) return { done: true, result: { ok: true as const, rows: null } };
         const patchedRows = current.rows.map((row) => {
           const changesForId = changesById.get(row.xrayImageId);
           return changesForId
             ? { ...row, ...Object.fromEntries(changesForId.map((c) => [c.field, c.newValue])) }
             : row;
         });
-        updatedSampleRows = patchedRows;
         const nextRevision = (current.revision ?? 0) + 1;
         const writeResult = await saveSampleMaster(directoryHandle, monthFolderName, {
           ...current,
@@ -275,15 +300,25 @@ export async function applyPopulationFieldCorrections(params: {
         if (!writeResult.ok) return { done: false };
         const verify = await loadSampleMaster(directoryHandle, monthFolderName);
         if (verify?.revision === nextRevision && verify._writeToken === writeToken) {
-          return { done: true, result: { ok: true as const } };
+          return { done: true, result: { ok: true as const, rows: patchedRows } };
         }
         return { done: false };
       },
       { context: "population:pending-corrections-sample-patch", conflictError: "تعارض في الكتابة أثناء تحديث بيانات العينة." }
     );
     if (!sampleResult.ok) {
+      // population.final.json WAS already patched (finalPatched above) but
+      // sample.master.json never committed — the two on-disk copies are now
+      // inconsistent. Report failure instead of falling through to the
+      // distribution refold and "success" audit entries: those must never
+      // fire for a correction that didn't fully commit.
       logError("population:pending-corrections-sample-patch", new Error(sampleResult.error));
+      return {
+        ok: false,
+        error: "تم تحديث بيانات المجتمع، لكن تعذّر تحديث بيانات العينة — التصحيح غير مكتمل.",
+      };
     }
+    const updatedSampleRows = sampleResult.rows;
 
     // 3. Force a fresh refold so distribution.current.json / every employee
     //    mirror stop serving the pre-correction row stub — see this module's
