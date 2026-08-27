@@ -422,22 +422,31 @@ export default function NotificationManager({ directoryHandle }: Props) {
             <Pagination page={safePage} totalItems={filtered.length} onPageChange={setPage} itemLabel="إشعار" />
           </div>
 
-          {selected && selectedStats ? (
-            <NotificationDetail
-              notification={selected}
-              stats={selectedStats}
-              canPost={canPost}
-              busy={busy}
-              onEdit={() => startEdit(selected)}
-              onRemind={() => void handleRemind(selected)}
-              onDelete={() => void handleDelete(selected)}
-            />
-          ) : (
-            <div className="ntf-detail ntf-detail--empty">
-              <h3>{L.notif_detail_prompt_title}</h3>
-              <p>{L.notif_detail_prompt_body}</p>
+          <div className="ntf-detail-col">
+            {/* Invisible twin of .ntf-sort: reserves the same height so the
+                detail box's top edge lines up with the list box's top edge
+                instead of sitting a row higher. */}
+            <div className="ntf-sort ntf-sort--ghost" aria-hidden="true">
+              <ArrowDownUp size={13} aria-hidden />
+              <span>{L.approval_sort_newest_first}</span>
             </div>
-          )}
+            {selected && selectedStats ? (
+              <NotificationDetail
+                notification={selected}
+                stats={selectedStats}
+                canPost={canPost}
+                busy={busy}
+                onEdit={() => startEdit(selected)}
+                onRemind={() => void handleRemind(selected)}
+                onDelete={() => void handleDelete(selected)}
+              />
+            ) : (
+              <div className="ntf-detail ntf-detail--empty">
+                <h3>{L.notif_detail_prompt_title}</h3>
+                <p>{L.notif_detail_prompt_body}</p>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
