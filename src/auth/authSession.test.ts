@@ -6,7 +6,13 @@ import {
   clearSession,
   setPreviewRole,
   readPreviewRole,
+  __dropRuntimeSessionForTests,
 } from "./authSession";
+import {
+  endAuthActivitySession,
+  readAuthActivityLog,
+  resetAuthActivityLogForTests,
+} from "./authActivityLog";
 import type { AuthSession } from "./authTypes";
 
 describe("authSession", () => {
@@ -170,5 +176,51 @@ describe("authSession", () => {
     // Resetting preview role
     setPreviewRole(null);
     expect(readSession()?.role).toBe("admin");
+  });
+
+  describe("session restore stamps activity from the reconnect moment (not the stale loginAt)", () => {
+    const backing = new Map<string, string>();
+    const fakeStorage = {
+      getItem: (key: string) => backing.get(key) ?? null,
+      setItem: (key: string, value: string) => void backing.set(key, value),
+      removeItem: (key: string) => void backing.delete(key),
+    };
+
+    beforeEach(() => {
+      backing.clear();
+      vi.stubGlobal("localStorage", fakeStorage);
+      resetAuthActivityLogForTests();
+    });
+
+    afterEach(() => {
+      endAuthActivitySession("logout");
+      resetAuthActivityLogForTests();
+      vi.unstubAllGlobals();
+    });
+
+    it("a session restored a day later gets a fresh signedInAt, not the original login time", async () => {
+      const loginAt = new Date("2026-06-01T08:00:00.000Z");
+      vi.setSystemTime(loginAt);
+      const session: AuthSession = {
+        username: "reconnect_user",
+        role: "employee",
+        loginAt: loginAt.toISOString(),
+      };
+      writeSession(session);
+
+      // Simulate closing the browser (module state gone, localStorage kept)
+      // and reopening the next day.
+      const reconnectAt = new Date("2026-06-02T09:00:00.000Z");
+      vi.setSystemTime(reconnectAt);
+      __dropRuntimeSessionForTests();
+      readRealSession();
+
+      const entries = await readAuthActivityLog();
+      const restored = entries.find((e) => e.signedOutAt === null);
+      expect(restored).toBeDefined();
+      expect(restored?.signedInAt).toBe(reconnectAt.toISOString());
+      // Before the fix this was ~25 hours (reconnectAt minus the ORIGINAL loginAt).
+      expect(restored?.durationMs).toBeLessThan(60 * 1000);
+    });
   });
 });
