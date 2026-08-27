@@ -1722,7 +1722,7 @@ ${certScanTable(model)}`
   return slides;
 }
 
-const TOTAL_SLIDES = 17; // cover, contents, s1-divider + 5, s2-divider + 2, s3-divider + 3, closing
+const TOTAL_SLIDES = 16; // cover, contents, s1-divider + 5, s2-divider + 2, s3-divider + 3, closing
 
 export async function buildPopulationDeckSlides(model: PopulationReportModel): Promise<string> {
   const meta = (num: number): SlideMeta => ({
@@ -1900,6 +1900,13 @@ const STAGE_LABELS: Record<string, string> = {
   unknown: "غير محدد",
 };
 
+// rowsPerPage is set well above any realistic port count (a country's customs
+// ports are a small, bounded list) so the [0] chunk below is never actually
+// truncating data — a real unbounded list would need per-column pagination
+// instead of the fixed two-column layout this page uses. If a future
+// workspace ever exceeds this, this is the line to revisit.
+const PORT_TABLE_ROWS_PER_PAGE = 60;
+
 function portBreakdownPage(id: string, pageNo: string, title: string, breakdown: PortBreakdown): string {
   return docPage({
     id,
@@ -1907,8 +1914,8 @@ function portBreakdownPage(id: string, pageNo: string, title: string, breakdown:
     title,
     body: `${docPageHeader({ eyebrow: "", title })}
 ${docTwoColumn({
-  land: { title: "المنافذ البرية", body: docPaginateTable({ headers: RESULT_HEADERS, rows: breakdown.land.map((p) => resultRow(p.portName, p.counts)) })[0] },
-  sea: { title: "المنافذ البحرية", body: docPaginateTable({ headers: RESULT_HEADERS, rows: breakdown.sea.map((p) => resultRow(p.portName, p.counts)) })[0] },
+  land: { title: "المنافذ البرية", body: docPaginateTable({ headers: RESULT_HEADERS, rows: breakdown.land.map((p) => resultRow(p.portName, p.counts)), rowsPerPage: PORT_TABLE_ROWS_PER_PAGE })[0] },
+  sea: { title: "المنافذ البحرية", body: docPaginateTable({ headers: RESULT_HEADERS, rows: breakdown.sea.map((p) => resultRow(p.portName, p.counts)), rowsPerPage: PORT_TABLE_ROWS_PER_PAGE })[0] },
 })}`,
   });
 }
