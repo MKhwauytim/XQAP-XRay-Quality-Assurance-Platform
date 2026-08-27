@@ -673,6 +673,7 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
 export const EXEC_DOCUMENT_PRINT_CSS = `
 @media print{
   @page{size:A4 portrait;margin:0;}
+  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important;}
   body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
   .sidebar{display:none!important;}
   .viewer{display:block;}

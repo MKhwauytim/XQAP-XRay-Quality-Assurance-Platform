@@ -376,6 +376,11 @@
 .ntf-column { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
 .ntf-column-count { margin-inline-start: auto; }
 
+/* Mirrors .ntf-column's layout so the detail box's top edge lines up with the
+   list box's top edge — see the ".ntf-sort--ghost" spacer in index.tsx. */
+.ntf-detail-col { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.ntf-sort--ghost { visibility: hidden; }
+
 .ntf-list {
   list-style: none;
   margin: 0;

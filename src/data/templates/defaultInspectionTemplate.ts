@@ -29,6 +29,7 @@ export function buildDefaultInspectionTemplate(username: string): TemplateSchema
 
   const fHasImage       = createFieldId();
   const fNoImageReason  = createFieldId();
+  const fNoImageReasonOther = createFieldId();
   const fHasMarking     = createFieldId();
   const fImageQuality   = createFieldId();
   const fQualityReason  = createFieldId();
@@ -74,22 +75,29 @@ export function buildDefaultInspectionTemplate(username: string): TemplateSchema
       {
         fieldId: fNoImageReason, phaseId: phase1Id, label: "سبب عدم وجود الصورة",
         type: "dropdown", required: false,
-        options: ["المعرف غير صحيح", "لا يوجد رقم لوحة", "لا يوجد مستند فحص الصورة", "مؤرشف لفترات سابقة"],
+        options: ["المعرف غير صحيح", "لا يوجد رقم لوحة", "لا يوجد مستند فحص الصورة", "مؤرشف لفترات سابقة", "أخرى"],
         placeholder: "",
         condition: { sourceFieldId: fHasImage, operator: "equals", value: "لا" },
         order: 2,
       },
       {
+        fieldId: fNoImageReasonOther, phaseId: phase1Id, label: "سبب عدم وجود الصورة (أخرى)",
+        type: "textarea", required: false,
+        options: [], placeholder: "اذكر سبب عدم وجود الصورة...",
+        condition: { sourceFieldId: fNoImageReason, operator: "equals", value: "أخرى" },
+        order: 3,
+      },
+      {
         fieldId: fHasMarking, phaseId: phase1Id, label: "هل يوجد تحديد",
         type: "dropdown", required: true,
         options: ["نعم", "لا"], placeholder: "",
-        condition: { sourceFieldId: fHasImage, operator: "equals", value: "نعم" }, order: 3,
+        condition: { sourceFieldId: fHasImage, operator: "equals", value: "نعم" }, order: 4,
       },
       {
         fieldId: fImageQuality, phaseId: phase1Id, label: "مستوى جودة الصورة",
         type: "dropdown", required: true,
         options: ["عالي", "متوسط", "منخفض"], placeholder: "",
-        condition: { sourceFieldId: fHasImage, operator: "equals", value: "نعم" }, order: 4,
+        condition: { sourceFieldId: fHasImage, operator: "equals", value: "نعم" }, order: 5,
       },
       {
         fieldId: fQualityReason, phaseId: phase1Id, label: "اسباب انخفاض جودة الصورة",
@@ -97,14 +105,14 @@ export function buildDefaultInspectionTemplate(username: string): TemplateSchema
         options: ["الأرسالية غير كاملة", "جودة التقاط الصورة منخفضة", "يوجد تموجات في الصورة", "أخرى"],
         placeholder: "",
         condition: { sourceFieldId: fImageQuality, operator: "notEquals", value: "عالي" },
-        order: 5,
+        order: 6,
       },
       {
         fieldId: fQualityOther, phaseId: phase1Id, label: "سبب انخفاض الجودة (أخرى)",
         type: "textarea", required: false,
         options: [], placeholder: "اذكر سبب انخفاض الجودة...",
         condition: { sourceFieldId: fQualityReason, operator: "equals", value: "أخرى" },
-        order: 6,
+        order: 7,
       },
       // ── Phase 2 — تحليل البيان الجمركي ───────────────────────────────────────
       // Sits between "is there a usable image?" and "is the result sound?" so
