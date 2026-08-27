@@ -51,6 +51,9 @@ export const ACTION_TYPE_LABEL_KEYS: Record<WorkspaceActionType, LabelKey> = {
   "answer-submitted-on-behalf": "um_action_type_answer_submitted_on_behalf",
   "answer-quality-note-set": "um_action_type_answer_quality_note_set",
   "answer-reopened": "um_action_type_answer_reopened",
+  "pending-export-generated": "um_action_type_pending_export_generated",
+  "pending-correction-applied": "um_action_type_pending_correction_applied",
+  "pending-bulk-reopened": "um_action_type_pending_bulk_reopened",
   "adhoc-import-created": "um_action_type_adhoc_import_created",
   "adhoc-rows-assigned": "um_action_type_adhoc_rows_assigned",
   "adhoc-historical-imported": "um_action_type_adhoc_historical_imported",
@@ -124,6 +127,14 @@ export const ACTION_TYPE_GROUPS: readonly ActionTypeGroup[] = [
       "answer-submitted-on-behalf",
       "answer-quality-note-set",
       "answer-reopened",
+    ],
+  },
+  {
+    titleKey: "um_actions_group_pending_corrections",
+    types: [
+      "pending-export-generated",
+      "pending-correction-applied",
+      "pending-bulk-reopened",
     ],
   },
   {

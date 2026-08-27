@@ -452,6 +452,31 @@ function answerSpecs(pools: RowPools, templateId: string): SimActionSpec[] {
   return specs;
 }
 
+/**
+ * معلقة (pending / no-image) export → correction re-import → bulk reopen —
+ * see `data/population/pendingCorrections.ts`. One of each type is enough for
+ * the seed's "every ALL_ACTION_TYPES entry has at least one row" contract.
+ */
+function pendingCorrectionSpecs(pools: RowPools): SimActionSpec[] {
+  const reviewer = reviewersOf(pools)[0];
+  const target = pick(pools.submitted.get(reviewer) ?? [], 0);
+  return [
+    { actor: "malrogi", action: "pending-export-generated", noMonth: false, details: { count: 3 } },
+    {
+      actor: "malrogi",
+      action: "pending-correction-applied",
+      target,
+      details: { field: "portName", oldValue: "الميناء القديم", newValue: "الميناء الجديد" },
+    },
+    {
+      actor: "malrogi",
+      action: "pending-bulk-reopened",
+      target,
+      details: { employee: reviewer },
+    },
+  ];
+}
+
 /** Referral / replacement / reopen — the approval-gated workflow. */
 function workflowSpecs(pools: RowPools): SimActionSpec[] {
   const reviewers = reviewersOf(pools);
@@ -657,6 +682,7 @@ export async function seedSimulatedActionLog(
     ...adhocSpecs(),
     ...systemSpecs(),
     ...answerSpecs(pools, options.templateId),
+    ...pendingCorrectionSpecs(pools),
     ...workflowSpecs(pools),
     ...labelOverrideSpecs(),
   ];

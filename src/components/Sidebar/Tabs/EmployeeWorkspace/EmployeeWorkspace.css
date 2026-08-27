@@ -933,6 +933,22 @@
   flex-wrap: nowrap;
 }
 
+/* معلقة export/re-import/bulk-reopen bar — Tabs/EmployeeWorkspace/views/XrayReferrals/PendingCorrections.tsx */
+.ew-pending-corrections-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  padding: var(--sp-2) 0;
+}
+
+.ew-pending-corrections-bar strong {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--c-text-muted);
+  white-space: nowrap;
+}
+
 .ew-ref-queue-toolbar .ew-label {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);

@@ -284,6 +284,40 @@ export const DEFAULT_LABELS = {
   ew_case_filter_adhoc:            "حالات استثنائية",
   ew_case_filter_empty:            "لا توجد حالات ضمن هذه التصفية. اختر «جميع الحالات» للعودة إلى القائمة كاملة.",
 
+  // ── Pending (معلقة) export / correction re-import / bulk reopen ──────────
+  // The three actions the owner asked for on top of the "لا يوجد صورة"
+  // (no-image) queue: export every currently-معلقة row's identifying
+  // population fields to Excel, re-import a corrected sheet (merged by
+  // xrayImageId, non-destructive), then bulk-reopen the items that are still
+  // معلقة so they're ready to be re-answered. See pendingCorrections.ts /
+  // populationCorrections.ts / pendingBulkReopen.ts.
+  ew_pending_bar_title:            "الحالات المعلقة (لا يوجد صورة)",
+  ew_pending_export_btn:           "تصدير المعلقة إلى Excel",
+  ew_pending_export_empty:         "لا توجد حالات معلقة في هذا الشهر لتصديرها.",
+  ew_pending_import_btn:           "استيراد تصحيحات",
+  ew_pending_bulk_reopen_btn:      "إعادة فتح كل المعلقة",
+  ew_pending_bulk_reopen_confirm_title: "إعادة فتح الحالات المعلقة",
+  ew_pending_bulk_reopen_confirm_message: "سيتم إعادة فتح {count} حالة معلقة لإعادة الإجابة عليها. سيُسجَّل كل إعادة فتح بشكل منفصل في سجل الإجراءات.",
+  ew_pending_bulk_reopen_confirm_ok: "إعادة فتح",
+  ew_pending_bulk_reopen_none: "لا توجد حالات معلقة حالياً لإعادة فتحها.",
+  ew_pending_bulk_reopen_done: "تمت إعادة فتح {ok} من {total} حالة معلقة.",
+  ew_pending_bulk_reopen_partial: "تعذّرت إعادة فتح {failed} حالة من أصل {total} — راجع سجل الإجراءات.",
+  ew_pending_import_modal_title:  "استيراد تصحيحات الحالات المعلقة",
+  ew_pending_import_pick_file:    "اختر ملف Excel المصحَّح...",
+  ew_pending_import_parsing:      "جارٍ قراءة الملف...",
+  ew_pending_import_error:        "تعذّر قراءة الملف",
+  ew_pending_import_summary_matched:   "معرّفات مطابقة",
+  ew_pending_import_summary_changed:   "حقول تم تغييرها",
+  ew_pending_import_summary_unmatched: "معرّفات غير معروفة لهذا الشهر",
+  ew_pending_import_summary_unchanged: "صفوف بلا أي تغيير فعلي",
+  ew_pending_import_unmatched_list: "المعرّفات غير المعروفة (لن يتم استيرادها): {ids}",
+  ew_pending_import_no_changes:   "لا توجد أي تغييرات فعلية في الملف المستورد.",
+  ew_pending_import_apply_btn:    "تأكيد وتطبيق التصحيحات",
+  ew_pending_import_cancel_btn:   "إلغاء",
+  ew_pending_import_applying:     "جارٍ تطبيق التصحيحات...",
+  ew_pending_import_done:         "تم تصحيح {changed} حقلاً عبر {ids} حالة.",
+  ew_pending_import_offer_reopen: "هل تريد إعادة فتح الحالات المصحَّحة الآن؟",
+
   // ── Case-queue scope picker (oversight only) ─────────────────────────────
   // Replaces the old two-button «الكل» / «المحالة لي» switcher. A supervisor
   // needs to open ONE named employee's queue (someone on leave with hundreds
@@ -922,6 +956,9 @@ export const DEFAULT_LABELS = {
   um_action_type_answer_submitted_on_behalf: "تقديم إجابة نيابةً عن موظف",
   um_action_type_answer_quality_note_set:    "ملاحظة جودة على إجابة",
   um_action_type_answer_reopened:            "إعادة فتح إجابة",
+  um_action_type_pending_export_generated:   "تصدير الحالات المعلقة",
+  um_action_type_pending_correction_applied: "تصحيح بيانات حالة معلقة",
+  um_action_type_pending_bulk_reopened:      "إعادة فتح جماعي للحالات المعلقة",
   um_action_type_adhoc_import_created:       "إنشاء استيراد استثنائي",
   um_action_type_adhoc_rows_assigned:        "إسناد صفوف استيراد استثنائي",
   um_action_type_adhoc_historical_imported:  "استيراد دراسات سابقة",
@@ -950,6 +987,7 @@ export const DEFAULT_LABELS = {
   um_actions_group_population:    "المجتمع والعينة والتوزيع",
   um_actions_group_workflow:      "الإحالة والاستبدال وإعادة الفتح",
   um_actions_group_answers:       "الإجابات",
+  um_actions_group_pending_corrections: "تصحيح الحالات المعلقة",
   um_actions_group_adhoc:         "الاستيراد الاستثنائي",
   um_actions_group_templates:     "نماذج الفحص",
   um_actions_group_notifications: "التنبيهات",

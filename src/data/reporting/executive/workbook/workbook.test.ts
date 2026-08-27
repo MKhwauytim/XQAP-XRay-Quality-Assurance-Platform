@@ -4,8 +4,10 @@ import * as XLSX from "xlsx";
 import { DEFAULT_EXEC_CONFIG } from "../../executiveReportTypes";
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
 import type { PreparedPopulationRow } from "../../../population/populationTypes";
+import type { ProcessingSummaryData } from "../../../population/monthTypes";
 import { buildExecutiveWorkbookObject, SHEET_NAMES } from "./workbook";
 import { yieldToMain } from "../../../storage/yieldToMain";
+import { makeDistribution } from "../../reportTestFixtures";
 
 // Wrap the real `yieldToMain` in a spy (keep its actual setTimeout-based
 // behavior) so the chunked-yielding tests below can assert the population-scale
@@ -219,13 +221,113 @@ describe("buildExecutiveWorkbook", () => {
     expect(header).toContain("رقم الأشعة");
   });
 
-  it("raw-BI and exclusions sheets carry the spec-compliant unavailable notes", async () => {
+  it("raw-BI and exclusions sheets carry the spec-compliant unavailable notes when the data truly isn't there", async () => {
+    // seededInput()'s rows are all biMatched: false / biEnrichmentStatus:
+    // "BI Not Provided" and the input carries no processingSummary — both
+    // sheets must still fall back to the honest empty-state note, not crash
+    // or fabricate rows.
     const wb = await buildExecutiveWorkbookObject(seededInput());
     const bi = readSheet(wb, SHEET_NAMES.rawBi);
     expect(String(bi[0]?.[0] ?? "")).toContain("بيانات BI غير متاحة");
     const exclusions = readSheet(wb, SHEET_NAMES.exclusions);
     const joined = exclusions.flat().map((c) => String(c ?? "")).join(" ");
     expect(joined).toContain("processing.summary.json");
+  });
+
+  it("raw-BI sheet exports the real BI-contributed fields when BI was matched", async () => {
+    const inp = input([
+      popRow({
+        xrayImageId: "XR-1",
+        biMatched: true,
+        biEnrichmentStatus: "BI Matched",
+        biFilledFields: ["اسم المفتش", "رمز التفتيش المعاكس"],
+        rawRow: { "رقم الأشعة": "XR-1", "اسم المفتش": "أحمد", "رمز التفتيش المعاكس": "O-3" },
+      }),
+    ]);
+    const wb = await buildExecutiveWorkbookObject(inp);
+    const rows = readSheet(wb, SHEET_NAMES.rawBi);
+    const header = rows[0] as string[];
+    expect(header).toContain("اسم المفتش");
+    expect(header).toContain("رمز التفتيش المعاكس");
+    const nameCol = header.indexOf("اسم المفتش");
+    const codeCol = header.indexOf("رمز التفتيش المعاكس");
+    expect(rows[1]![nameCol]).toBe("أحمد");
+    expect(rows[1]![codeCol]).toBe("O-3");
+  });
+
+  it("exclusions sheet exports the real dropped-row list from processingSummary", async () => {
+    const processingSummary: ProcessingSummaryData = {
+      summary: {
+        riskOriginalRows: 10,
+        validRiskIdRows: 8,
+        invalidRiskIdRows: 1,
+        duplicateRiskIdRows: 1,
+        rowsAfterDeduplication: 8,
+        removedInvalidResultRows: 1,
+        finalPreparedPopulationRows: 7,
+        certScanRows: 0,
+        nonCertScanRows: 7,
+        certScanPercentage: 0,
+        nonCertScanPercentage: 100,
+        biProvided: false,
+        biMatchedRows: 0,
+        biUnmatchedRows: 0,
+        biMatchPercentage: 0,
+        totalBiFilledFields: 0,
+        biFieldFillSummary: [],
+      },
+      savedAt: "2026-08-27T00:00:00.000Z",
+      removedRows: [
+        { reason: "Invalid X-ray ID", xrayImageId: null, portName: "منفذ الاختبار", sourceSheetName: "Sheet1", sourceRowNumber: 5 },
+      ],
+      duplicateRows: [
+        { reason: "Duplicate X-ray ID", xrayImageId: "XR-9", portName: "منفذ الاختبار", sourceSheetName: "Sheet1", sourceRowNumber: 9 },
+      ],
+      invalidResultRows: [
+        { reason: "Missing level-two result", xrayImageId: "XR-3", portName: "منفذ ٢", sourceSheetName: "Sheet1", sourceRowNumber: 3 },
+      ],
+    };
+    const inp = { ...seededInput(), processingSummary };
+    const wb = await buildExecutiveWorkbookObject(inp);
+    const rows = readSheet(wb, SHEET_NAMES.exclusions);
+    const header = rows[0] as string[];
+    const reasonCol = header.indexOf("السبب");
+    const reasons = rows.slice(1).map((r) => r[reasonCol]);
+    expect(reasons).toContain("Invalid X-ray ID");
+    expect(reasons).toContain("Duplicate X-ray ID");
+    expect(reasons).toContain("Missing level-two result");
+    expect(rows.length).toBe(4); // header + 3 dropped rows
+  });
+
+  it("coverage/accountability sheets show the operational empty-state note when no distribution exists yet", async () => {
+    const wb = await buildExecutiveWorkbookObject(seededInput());
+    const coverage = readSheet(wb, SHEET_NAMES.coverage);
+    expect(String(coverage[0]?.[0] ?? "")).toContain("لا يوجد توزيع");
+    const accountability = readSheet(wb, SHEET_NAMES.accountability);
+    expect(String(accountability[0]?.[0] ?? "")).toContain("لا يوجد توزيع");
+  });
+
+  it("coverage/accountability sheets export the real distribution/management figures when present", async () => {
+    const row = popRow({ xrayImageId: "XR-1" });
+    const distribution = makeDistribution([
+      { id: row.xrayImageId, assignedTo: "reviewer-1", status: "completed", row },
+    ]);
+    const inp = { ...input([row]), distribution };
+    const wb = await buildExecutiveWorkbookObject(inp, { "reviewer-1": "المراجع الأول" });
+
+    const coverage = readSheet(wb, SHEET_NAMES.coverage);
+    const coverageJoined = coverage.flat().map((c) => String(c ?? "")).join(" ");
+    expect(coverageJoined).toContain("حسب المستوى");
+    expect(coverageJoined).toContain("حسب المنفذ");
+    // The single completed assignment should surface as a totalAssigned/totalCompleted of 1 somewhere in the sheet.
+    expect(coverage.some((r) => r.includes(1))).toBe(true);
+
+    const accountability = readSheet(wb, SHEET_NAMES.accountability);
+    const accHeader = accountability.find((r) => r[0] === "المنفذ" && r[1] === "الموظف") as string[] | undefined;
+    expect(accHeader, "per-port employee progress header should be present").toBeDefined();
+    const accJoined = accountability.flat().map((c) => String(c ?? "")).join(" ");
+    expect(accJoined).toContain("المراجع الأول");
+    expect(accJoined).toContain("إجمالي المستبدلة");
   });
 
   it("resolves reviewer display names in the reviewer column", async () => {

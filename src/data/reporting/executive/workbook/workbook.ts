@@ -1,10 +1,13 @@
 import * as XLSX from "xlsx";
 
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
-import type { PreparedPopulationRow } from "../../../population/populationTypes";
+import type { PreparedPopulationRow, RemovedPopulationRow } from "../../../population/populationTypes";
+import type { ProcessingSummaryData } from "../../../population/monthTypes";
 import { buildReportModel } from "../model/reportModel";
 import type { ReportModel } from "../model/reportModel";
 import type { DecisionRecord, ResultSource } from "../model/decisionFactTable";
+import type { DistributionBucket } from "../../distributionReport";
+import type { ManagementBucket } from "../../management/managementModel";
 import {
   sourceRevisionsSheetAoa,
   SOURCE_REVISIONS_SHEET_NAME_AR,
@@ -144,6 +147,14 @@ export const SHEET_NAMES = {
   employeeByPort: "الموظفون حسب المنفذ",
   errorAnalysis: "تحليل الأخطاء",
   crossTeam: "توافق الفرق",
+  // Part 6 (R4, 2026-08-07 owner requirement) — the workbook counterpart of
+  // `document/partCoverageAccountability.ts`'s "التغطية والمساءلة التشغيلية"
+  // section, previously present in the HTML/deck editions but missing here
+  // entirely. Sourced from `ReportModel.distributionCoverage` /
+  // `ReportModel.accountabilityProgress` — see `coverageSheet`/
+  // `accountabilitySheet` below.
+  coverage: "التغطية التشغيلية",
+  accountability: "المساءلة التشغيلية",
 } as const;
 
 // ─── Sheet builders ───────────────────────────────────────────────────────────
@@ -417,27 +428,101 @@ async function rawRiskSheet(rows: PreparedPopulationRow[]): Promise<Cell[][]> {
 }
 
 /**
- * Raw — BI. BI source rows are NOT carried on `ExecutiveReportInput` (the BI
- * enrichment is already folded into the population rows: inspector ids,
- * other-team results/codes/employees). Threading raw BI rows through would
- * require changing the input type + every caller, so per §7 we emit the
- * spec-compliant unavailable note rather than fabricating data.
+ * Raw — BI. The BI source file itself is not carried on `ExecutiveReportInput`,
+ * but its enrichment IS: `PreparedPopulationRow.rawRow` is the risk+BI-merged
+ * raw record (`attachLazyRawRow` in `population/populationTypes.ts`), and
+ * `biFilledFields` names exactly which keys BI contributed/overrode for that
+ * row. Per §7's honesty discipline, only emit the "غير متاحة" note when BI
+ * genuinely was not part of this month's import (mirrors the `dataSources`
+ * check in `reportModel.ts`) — otherwise export the real BI-contributed
+ * field values, one row per BI-matched image.
  */
-function rawBiSheet(): Cell[][] {
-  return [["بيانات BI غير متاحة لهذه الفترة"]];
+async function rawBiSheet(rows: PreparedPopulationRow[]): Promise<Cell[][]> {
+  const biProvided =
+    rows.some((r) => r.biMatched) || rows.some((r) => r.biEnrichmentStatus !== "BI Not Provided");
+  if (!biProvided) {
+    return [["بيانات BI غير متاحة لهذه الفترة"]];
+  }
+
+  const matchedRows = rows.filter((r) => r.biMatched);
+
+  const fieldKeys: string[] = [];
+  const seen = new Set<string>();
+  for (const row of matchedRows) {
+    for (const key of row.biFilledFields) {
+      if (!seen.has(key)) {
+        seen.add(key);
+        fieldKeys.push(key);
+      }
+    }
+  }
+
+  if (matchedRows.length === 0 || fieldKeys.length === 0) {
+    return [["تم توفير بيانات BI لهذه الفترة لكن لم تُسجَّل أي مطابقة/حقول معبأة."]];
+  }
+
+  const header: Cell[] = ["رقم الأشعة", "المنفذ", "حالة إثراء BI", ...fieldKeys];
+  const body: Cell[][] = [];
+  for (let i = 0; i < matchedRows.length; i += EXPORT_CHUNK_SIZE) {
+    const chunk = matchedRows.slice(i, i + EXPORT_CHUNK_SIZE);
+    for (const row of chunk) {
+      const filled = new Set(row.biFilledFields);
+      const raw = row.rawRow ?? {};
+      body.push([
+        row.xrayImageId,
+        text(row.portName),
+        text(row.biEnrichmentStatus),
+        ...fieldKeys.map((key): Cell => {
+          if (!filled.has(key)) return "";
+          const value = raw[key];
+          if (value === null || value === undefined || value === "") return "";
+          if (typeof value === "number") return value;
+          if (typeof value === "boolean") return value ? "نعم" : "لا";
+          return String(value);
+        }),
+      ]);
+    }
+    if (matchedRows.length > EXPORT_CHUNK_SIZE) await yieldToMain();
+  }
+
+  return [header, ...body];
 }
 
 /**
- * Exclusions. The processing result (dropped rows + reasons + source row) is
- * not reachable from `ExecutiveReportInput`; it lives in
- * `processing.summary.json` / the processing result. Per §7 we emit the
- * unavailable note pointing at the authoritative artifact.
+ * Exclusions. `ExecutiveReportInput.processingSummary` (loaded via
+ * `loadProcessingSummary` in the Reports tab's `loadExecInput`) carries the
+ * actual dropped-row lists from population processing — invalid X-ray IDs,
+ * duplicate X-ray IDs, and invalid-level-result rows — each with its reason,
+ * source sheet, and source row number. When present, export the real rows;
+ * when absent (an older/omitted caller, or a workspace saved before a
+ * processing summary existed for the month), fall back to the honest
+ * unavailable note rather than fabricating rows.
  */
-function exclusionsSheet(): Cell[][] {
-  return [
-    ["الصف المستبعد", "السبب", "ورقة المصدر", "رقم صف المصدر"],
-    ["الصفوف المستبعدة غير متاحة من مدخلات التقرير التنفيذي — راجع تقرير معالجة المجتمع (processing.summary.json)."],
+function exclusionRows(rows: RemovedPopulationRow[], category: string): Cell[][] {
+  return rows.map((r) => [category, id(r.xrayImageId), text(r.portName), text(r.reason), text(r.sourceSheetName), r.sourceRowNumber ?? ""]);
+}
+
+function exclusionsSheet(processingSummary: ProcessingSummaryData | null | undefined): Cell[][] {
+  const header: Cell[] = ["الفئة", "رقم الأشعة", "المنفذ", "السبب", "ورقة المصدر", "رقم صف المصدر"];
+
+  if (!processingSummary) {
+    return [
+      header,
+      ["الصفوف المستبعدة غير متاحة من مدخلات التقرير التنفيذي — راجع تقرير معالجة المجتمع (processing.summary.json)."],
+    ];
+  }
+
+  const body: Cell[][] = [
+    ...exclusionRows(processingSummary.removedRows, "معرّف أشعة غير صالح"),
+    ...exclusionRows(processingSummary.duplicateRows, "تكرار معرّف الأشعة"),
+    ...exclusionRows(processingSummary.invalidResultRows, "نتيجة مستوى غير صالحة"),
   ];
+
+  if (body.length === 0) {
+    return [header, ["لا توجد صفوف مستبعدة مسجّلة لهذه الفترة."]];
+  }
+
+  return [header, ...body];
 }
 
 /** Decision Fact Table — the analytical spine (§3.1). */
@@ -616,6 +701,90 @@ function crossTeamSheet(model: ReportModel): Cell[][] {
   return [reviewerHeader, ...reviewerRows, [], matrixHeader, ...matrixRows];
 }
 
+function coverageBucketRows(buckets: DistributionBucket[]): Cell[][] {
+  return buckets.map((b) => [text(b.label), b.totalAssigned, b.totalCompleted, pct(b.completionRate)]);
+}
+
+/**
+ * Coverage — Part 6a (R2 reuse). Distribution assignment + completion, per
+ * stage and per port, read verbatim from `model.distributionCoverage`
+ * (computed once by `computeDistributionModel`, never refolded here) — the
+ * same figures `document/partCoverageAccountability.ts`'s `buildCoverageSection`
+ * renders. `null` (no distribution yet for the month) is a legitimate
+ * empty state, not an error.
+ */
+function coverageSheet(model: ReportModel): Cell[][] {
+  const cov = model.distributionCoverage;
+  if (cov === null) {
+    return [["لا يوجد توزيع لهذا الشهر بعد — يُبنى هذا القسم من بيانات تقرير التوزيع (R2). وزّع العينة أولاً ليظهر هنا."]];
+  }
+  return [
+    ["حسب المستوى"],
+    ["المستوى", "المعيّنة", "المكتملة", "الإنجاز%"],
+    ...coverageBucketRows(cov.byStage),
+    [],
+    ["حسب المنفذ"],
+    ["المنفذ", "المعيّنة", "المكتملة", "الإنجاز%"],
+    ...coverageBucketRows(cov.byPort),
+  ];
+}
+
+function accountabilityBucketRows(buckets: ManagementBucket[]): Cell[][] {
+  return buckets.map((b) => [text(b.label), b.totalAssigned, b.totalCompleted, pct(b.completionRate)]);
+}
+
+/** Every employee row across a set of buckets, port/stage label first. */
+function accountabilityEmployeeRows(buckets: ManagementBucket[]): Cell[][] {
+  return buckets.flatMap((b) =>
+    b.employees.map((e) => [text(b.label), text(e.displayName), text(e.username), e.assigned, e.completed, pct(e.completionRate)])
+  );
+}
+
+/**
+ * Accountability — Part 6b (R3 reuse). Replacement reasons, reassignment
+ * count, and per-employee progress by stage/port, read verbatim from
+ * `model.accountabilityProgress` (computed once by `computeManagementModel`)
+ * — the same figures `document/partCoverageAccountability.ts`'s
+ * `buildAccountabilitySection` renders, expanded to full per-employee rows
+ * (the HTML page truncates to the top 10 ports to fit a printed page; a
+ * spreadsheet has no such limit). `null` (no distribution yet) is a
+ * legitimate empty state, not an error.
+ */
+function accountabilitySheet(model: ReportModel): Cell[][] {
+  const acc = model.accountabilityProgress;
+  if (acc === null) {
+    return [["لا يوجد توزيع لهذا الشهر بعد — يُبنى هذا القسم من بيانات تقرير الإدارة (R3). وزّع العينة أولاً ليظهر هنا."]];
+  }
+  const reasonRows: Cell[][] = acc.replacements.byReason.map((r) => [text(r.reason), r.count]);
+  const stageEmployeeRows = accountabilityEmployeeRows(acc.byStage);
+  const portEmployeeRows = accountabilityEmployeeRows(acc.byPort);
+
+  return [
+    ["الملخص", ""],
+    ["إجمالي المستبدلة", acc.replacements.total],
+    ["إجمالي إعادة التعيين", acc.reassignments.total],
+    [],
+    ["أسباب الاستبدال", "العدد"],
+    ...(reasonRows.length > 0 ? reasonRows : [["لا توجد استبدالات موثّقة لهذا الشهر", 0]]),
+    [],
+    ["التقدّم التراكمي حسب المستوى"],
+    ["المستوى", "المعيّنة", "المكتملة", "الإنجاز%"],
+    ...accountabilityBucketRows(acc.byStage),
+    [],
+    ["التقدّم التراكمي حسب المنفذ"],
+    ["المنفذ", "المعيّنة", "المكتملة", "الإنجاز%"],
+    ...accountabilityBucketRows(acc.byPort),
+    [],
+    ["تقدّم الموظفين حسب المستوى"],
+    ["المستوى", "الموظف", "اسم المستخدم", "المعيّنة", "المكتملة", "الإنجاز%"],
+    ...(stageEmployeeRows.length > 0 ? stageEmployeeRows : [["لا يوجد تقدّم مسجّل لهذا الشهر", "", "", "", "", ""]]),
+    [],
+    ["تقدّم الموظفين حسب المنفذ"],
+    ["المنفذ", "الموظف", "اسم المستخدم", "المعيّنة", "المكتملة", "الإنجاز%"],
+    ...(portEmployeeRows.length > 0 ? portEmployeeRows : [["لا يوجد تقدّم مسجّل لهذا الشهر", "", "", "", "", ""]]),
+  ];
+}
+
 // ─── Workbook assembly ─────────────────────────────────────────────────────────
 
 /**
@@ -647,13 +816,18 @@ export async function buildExecutiveWorkbookObject(
 
   // Raw → analytical chain (§7).
   append(SHEET_NAMES.rawRisk, await rawRiskSheet(input.populationRows));
-  append(SHEET_NAMES.rawBi, rawBiSheet());
-  append(SHEET_NAMES.exclusions, exclusionsSheet());
+  append(SHEET_NAMES.rawBi, await rawBiSheet(input.populationRows));
+  append(SHEET_NAMES.exclusions, exclusionsSheet(input.processingSummary));
   append(SHEET_NAMES.factTable, factTableSheet(model));
   append(SHEET_NAMES.resultComparison, await resultComparisonSheet(model, popById));
   append(SHEET_NAMES.employeeByPort, employeeByPortSheet(model));
   append(SHEET_NAMES.errorAnalysis, errorAnalysisSheet(model));
   append(SHEET_NAMES.crossTeam, crossTeamSheet(model));
+
+  // Part 6 (R4) — operational coverage/accountability, mirroring the HTML's
+  // "التغطية والمساءلة التشغيلية" section (previously absent from the workbook).
+  append(SHEET_NAMES.coverage, coverageSheet(model));
+  append(SHEET_NAMES.accountability, accountabilitySheet(model));
 
   // B2: report-to-revision linkage — cite the exact source-file revisions used.
   if (hasSourceRevisions(input.sourceRevisions)) {

@@ -5,7 +5,7 @@ import { AlertTriangle, BarChart2, Building2, Check, ClipboardList, Database, Do
 import { loadOrDeriveDistributionCurrentForRead, loadDistributionCurrentRevision, loadDistributionLog } from "../../../../data/distribution/distributionStorage";
 import { loadReplacementLog, loadReferralLog } from "../../../../data/referral/referralStorage";
 import { logRejection } from "../../../../data/storage/errorLogger";
-import { loadMonthPopulationFinal, loadMonthForEditing, loadMonthPopulationFinalRevision, loadMonthManifest } from "../../../../data/population/populationStorage";
+import { loadMonthPopulationFinal, loadMonthForEditing, loadMonthPopulationFinalRevision, loadMonthManifest, loadProcessingSummary } from "../../../../data/population/populationStorage";
 import { useGlobalMonth } from "../../../../data/month/useGlobalMonth";
 import type { SourceRevisions } from "../../../../data/reporting/sourceRevisions";
 import { formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
@@ -315,7 +315,7 @@ function ReportsContent() {
   // dashboard and the exported artifacts can never disagree.
   const loadExecInput = useCallback(async (): Promise<ExecutiveReportInput | null> => {
     if (!directoryHandle || !selectedMonth) return null;
-    const [populationFinal, sample, employeeFiles, templateSelection, popRev, sampleRev, distRev] = await Promise.all([
+    const [populationFinal, sample, employeeFiles, templateSelection, popRev, sampleRev, distRev, processingSummary] = await Promise.all([
       loadMonthPopulationFinal(directoryHandle, selectedMonth),
       loadSampleMaster(directoryHandle, selectedMonth),
       loadAllEmployeeFiles(directoryHandle, selectedMonth),
@@ -323,6 +323,11 @@ function ReportsContent() {
       loadMonthPopulationFinalRevision(directoryHandle, selectedMonth),
       loadSampleMasterRevision(directoryHandle, selectedMonth),
       loadDistributionCurrentRevision(directoryHandle, selectedMonth),
+      // Feeds the executive workbook's "الصفوف المستبعدة" sheet with the real
+      // dropped-row list instead of a placeholder note (see
+      // `ExecutiveReportInput.processingSummary`'s doc comment). Best-effort —
+      // `loadProcessingSummary` already resolves to null on any read failure.
+      loadProcessingSummary(directoryHandle, selectedMonth),
     ]);
     if (!populationFinal) return null;
     const template = templateSelection?.templateId
@@ -346,6 +351,7 @@ function ReportsContent() {
       template,
       config: DEFAULT_EXEC_CONFIG,
       sourceRevisions,
+      processingSummary,
     };
   }, [directoryHandle, selectedMonth]);
 

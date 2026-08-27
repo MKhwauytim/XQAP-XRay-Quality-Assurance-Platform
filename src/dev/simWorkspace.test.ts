@@ -54,10 +54,10 @@ const EXPECTED_ASSIGNMENTS: ReadonlyArray<readonly [string, number]> = [
 // Same rule as the counts above: OBSERVED values of the deterministic seed,
 // pinned so a change to the action-log seed fails here instead of silently
 // invalidating a browser test that was asserting on them.
-const EXPECTED_ACTION_ENTRIES = 171;
+const EXPECTED_ACTION_ENTRIES = 174;
 const EXPECTED_ACTIONS_BY_ACTOR: ReadonlyArray<readonly [string, number]> = [
   ["admin", 56],
-  ["malrogi", 30],
+  ["malrogi", 33],
   ["amonem", 19],
   ["jalgahamdi", 19],
   ["mkhuwaytim", 18],
@@ -307,7 +307,7 @@ describe("simulated workspace seed", () => {
     const highVolume = entries.filter((entry) =>
       HIGH_VOLUME_ACTION_TYPES.includes(entry.action)
     );
-    expect(highVolume.length).toBe(48);
+    expect(highVolume.length).toBe(49);
     for (const action of HIGH_VOLUME_ACTION_TYPES) {
       expect(byType.get(action) ?? 0, `no seeded entry for ${action}`).toBeGreaterThan(0);
     }
@@ -315,7 +315,7 @@ describe("simulated workspace seed", () => {
     // …and the default (high-volume-off) view still overflows one page, so
     // paging is exercisable without touching the type picker first.
     const defaultVisible = entries.length - highVolume.length;
-    expect(defaultVisible).toBe(123);
+    expect(defaultVisible).toBe(125);
     expect(defaultVisible).toBeGreaterThan(DATA_PAGE_SIZE);
 
     // `target`/`details` are the free-text haystack. The search box scans detail

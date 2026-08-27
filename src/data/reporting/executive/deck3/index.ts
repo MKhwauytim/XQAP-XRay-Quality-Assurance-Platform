@@ -28,11 +28,28 @@ import type { ExecutiveReportInput } from "../../executiveReportTypes";
  * precise measurement of the viewer's content box once the DOM exists, re-run
  * on resize and fullscreen changes. In fullscreen the slide must fit BOTH
  * axes (one slide fills the screen), so the height ratio joins the min().
+ *
+ * Horizontal centering (`--v3-tx`, base/stacked mode only — fullscreen mode
+ * centers via its own flex layout instead, see theme.ts) is a MEASURED pixel
+ * correction, not a CSS percentage trick. A `right:50%;margin-right:-960px`
+ * version shipped first and looked correct in every test here, but broke on
+ * a real narrow window: for a `position:relative` box in a `dir="rtl"`
+ * document, once `width` + both margins are all definite (margin-left
+ * defaults to 0, not `auto`, the moment `margin-right` is set), the box model
+ * is "over-constrained" and the spec has the browser silently recompute
+ * `margin-left` around the *specified* `margin-right` — not leave it at the
+ * `0` the CSS appears to say — so the box lands hundreds of pixels off from
+ * a purely CSS-side calculation, direction- and width-dependent in a way
+ * that's easy to miss testing a handful of viewport sizes. Measuring the
+ * slide's actual rendered position after the scale is applied and shifting
+ * it by exactly the pixel delta needed is immune to that: it doesn't matter
+ * *why* the browser put the box where it did, only where it actually is.
  */
 const DECK_V3_SCALE_SCRIPT = `(function(){
   var root = document.documentElement;
   function fullscreen(){ return document.fullscreenElement || document.webkitFullscreenElement; }
   function apply(scale){ root.style.setProperty('--v3-scale', String(scale > 0 ? scale : 1)); }
+  function setTx(px){ root.style.setProperty('--v3-tx', px + 'px'); }
   function estimate(){
     var nav = window.innerWidth > 1280 ? 252 : 0;
     apply(Math.min(1, (window.innerWidth - nav - 32) / 1920));
@@ -40,13 +57,24 @@ const DECK_V3_SCALE_SCRIPT = `(function(){
   function fit(){
     if (fullscreen()) {
       apply(Math.min((window.innerWidth - 32) / 1920, (window.innerHeight - 32) / 1080));
+      setTx(0);
       return;
     }
     var viewer = document.querySelector('.deck-viewer-v3');
     if (!viewer) { estimate(); return; }
     var cs = getComputedStyle(viewer);
-    var width = viewer.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
-    apply(Math.min(1, width / 1920));
+    var padL = parseFloat(cs.paddingLeft) || 0;
+    var padR = parseFloat(cs.paddingRight) || 0;
+    var avail = viewer.clientWidth - padL - padR;
+    var scale = Math.min(1, avail / 1920);
+    apply(scale);
+    var slide = document.querySelector('.slide.v3');
+    if (!slide) return;
+    var viewerLeft = viewer.getBoundingClientRect().left;
+    var extra = Math.max(0, avail - 1920 * scale);
+    var targetLeft = viewerLeft + padL + extra / 2;
+    var curLeft = slide.getBoundingClientRect().left;
+    setTx(targetLeft - curLeft);
   }
   estimate();
   window.addEventListener('resize', fit);

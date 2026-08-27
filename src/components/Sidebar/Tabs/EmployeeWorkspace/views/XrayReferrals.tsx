@@ -128,6 +128,7 @@ import {
 } from "./XrayReferrals/subComponents";
 import { useCaseFilter } from "./XrayReferrals/caseFilter";
 import QueueSplitResizer from "./XrayReferrals/QueueSplitResizer";
+import PendingCorrections from "./XrayReferrals/PendingCorrections";
 import { DEFAULT_QUEUE_SPLIT } from "../../../../../data/preferences/queueSplitStore";
 import "./XrayReferrals/XrayReferrals.css";
 
@@ -822,6 +823,15 @@ export default function XrayReferrals({ directoryHandle }: Props) {
    */
   const canAnswerOnBehalf = canMutate("answer-on-behalf");
   const canReopenAnswer = canMutate("ew.reopenAnswer");
+  /**
+   * معلقة export/correction-reimport/bulk-reopen bar. Reuses the two existing
+   * oversight capabilities that already gate "act on many other people's
+   * samples at once" rather than introducing a new permission key: bulk
+   * reassignment (the closest existing analogue to a bulk data-fix import) and
+   * reopen (needed for the bulk-reopen step). `canSeeAll` keeps it out of a
+   * personal-scope employee's own queue, where it would never apply anyway.
+   */
+  const canManagePendingCorrections = canSeeAll && canBulkReassignReferrals && canReopenAnswer;
   // Batch B: when enabled for this role, the employee's self-service reopen request
   // is applied instantly; when disabled it is routed to a supervisor for approval.
   const canReopenInstant = can("employee-reopen-instant");
@@ -1892,6 +1902,19 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           onReloadTemplate={() => { if (selTplId) void applyTemplate(selTplId, false); }}
         />
       </PageHeader>
+
+      <PendingCorrections
+        directoryHandle={directoryHandle}
+        monthFolderName={selMonth}
+        entries={allEntries}
+        answersMap={answersMap}
+        template={activeTpl}
+        username={username}
+        role={role}
+        labels={L}
+        canManage={canManagePendingCorrections}
+        onChanged={() => loadData({ silent: true })}
+      />
 
       {statusMsg && (
         <div className={`${statusMsg.type === "ok" ? "ew-msg-ok" : "ew-msg-error"} ew-msg-dismissible`} role="status">

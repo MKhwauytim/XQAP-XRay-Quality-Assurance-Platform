@@ -200,20 +200,24 @@ describe("getMutationCapability", () => {
   it("refuses a feature whose parent page is outside the role's code ceiling, even with an edit row", () => {
     // Only reachable via a hand-edited users.permissions.json (the UI renders this
     // cell as a system restriction, not a toggle) -- it must still be refused.
+    // `settings` was widened to every role on 2026-08-27 (see tabCatalog.ts), so
+    // manager is no longer outside its ceiling; `user-management` still excludes
+    // `guest` (the read-only observer role), so that pairing keeps this test's
+    // "ceiling refuses even a tampered edit row" intent alive.
     const tampered = [
-      ...permissions.filter((p) => !(p.role === "manager" && p.tabId === "settings")),
-      { role: "manager" as const, tabId: "settings", access: "edit" as const },
+      ...permissions.filter((p) => !(p.role === "guest" && p.tabId === "user-management")),
+      { role: "guest" as const, tabId: "user-management", access: "edit" as const },
     ];
     const tamperedFeatures = [
       ...featurePermissions.filter(
-        (f) => !(f.role === "manager" && f.featureId === "view-error-log")
+        (f) => !(f.role === "guest" && f.featureId === "manage-users")
       ),
-      { role: "manager" as const, featureId: "view-error-log", enabled: true },
+      { role: "guest" as const, featureId: "manage-users", enabled: true },
     ];
     expect(
       getMutationCapability({
-        role: "manager",
-        featureId: "view-error-log",
+        role: "guest",
+        featureId: "manage-users",
         permissions: tampered,
         featurePermissions: tamperedFeatures,
         isReadOnly: false,

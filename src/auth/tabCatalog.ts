@@ -64,8 +64,14 @@ export const TAB_CATALOG: readonly TabCatalogEntry[] = [
   // ceilings -- a sub-tab ceiling is independent of its parent's.)
   { id: "reports", label: "إدارة التقارير", allowedRoles: ALL_ROLES, group: "analysis" },
   { id: "reports/reports", label: "التقارير", parentId: "reports", allowedRoles: ALL_ROLES },
-  { id: "reports/kpi", label: "مؤشرات الأداء", parentId: "reports", allowedRoles: ["supervisor", "manager", "admin"] },
-  { id: "reports/report-designer", label: "مصمم التقارير", parentId: "reports", allowedRoles: ["supervisor", "manager", "admin"] },
+  // Widened from ["supervisor", "manager", "admin"] (2026-08-27): excluding
+  // `employee` made that whole matrix row a dead control for these two sub-tabs
+  // -- an admin could click it but the ceiling would still refuse it. Widening
+  // only makes the row GRANTABLE; createDefaultPermissions() still ships "none"
+  // for employee on both, so nothing is auto-elevated by this change alone.
+  // `guest` stays out on purpose, same rationale as population/adhoc-import.
+  { id: "reports/kpi", label: "مؤشرات الأداء", parentId: "reports", allowedRoles: OPERATIONAL_ROLES },
+  { id: "reports/report-designer", label: "مصمم التقارير", parentId: "reports", allowedRoles: OPERATIONAL_ROLES },
   { id: "archive", label: "إدارة الأرشيف", allowedRoles: ALL_ROLES, group: "analysis" },
   // Widened from ADMIN_ONLY (2026-08-25), same rationale as population/adhoc-import above:
   // an admin-only ceiling made the entire section a dead "مقيّد بالنظام" block in the
@@ -79,7 +85,13 @@ export const TAB_CATALOG: readonly TabCatalogEntry[] = [
   { id: "user-management/feature-permissions", label: "صلاحيات الميزات", parentId: "user-management", allowedRoles: OPERATIONAL_ROLES },
   { id: "user-management/activity", label: "متابعة الأنشطة", parentId: "user-management", allowedRoles: OPERATIONAL_ROLES },
   { id: "user-management/actions", label: "سجل الإجراءات", parentId: "user-management", allowedRoles: OPERATIONAL_ROLES },
-  { id: "settings", label: "إدارة الإعدادات", allowedRoles: ["guest", "admin"], group: "system" },
+  // Widened from ["guest", "admin"] (2026-08-27): excluding employee/supervisor/
+  // manager made the entire settings row a dead "مقيّد بالنظام" block for 3 of
+  // the 4 managed-role columns in the page-permissions matrix. Widening only
+  // makes the section GRANTABLE; createDefaultPermissions() still ships "none"
+  // for every non-admin role on settings, so nothing is auto-elevated by this
+  // change alone. `guest` was already allowed and stays allowed -- only widening.
+  { id: "settings", label: "إدارة الإعدادات", allowedRoles: ALL_ROLES, group: "system" },
 ] as const;
 
 export const MANAGED_TABS: readonly ManagedTab[] = TAB_CATALOG.map(
