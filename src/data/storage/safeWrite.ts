@@ -600,6 +600,52 @@ async function streamFileChunks(
 }
 
 /**
+ * `abort` exists on every real `FileSystemWritableFileStream` (it is a
+ * `WritableStream`), but this repo's `WritableFileStreamLike` does not declare
+ * it and the hand-written `{ write, close }` doubles in the suite do not
+ * implement it — so it is probed, never assumed. Same widening-at-the-call-site
+ * approach as `openBinaryWritable` below and `compressedEnvelope.ts`.
+ */
+type AbortableWritable = { abort?: (reason?: unknown) => Promise<void> };
+
+/**
+ * Throw away a writable stream on an error path WITHOUT committing it.
+ *
+ * `close()` is a COMMIT: a `createWritable()` stream writes into a swap file and
+ * only replaces the destination when `close()` runs the sink's close algorithm.
+ * That makes it the wrong teardown for `writeText`, which — unlike the byte-copy
+ * writers below, which only ever target a `.bak`/`.tmp` — also writes the LIVE
+ * destination (`safeWriteJson`'s commit step). A throw from that step propagates
+ * straight out of `safeWriteJson`: the `.bak` rollback runs only when the
+ * read-back verify mismatches, never for a throw. So anything this path commits
+ * is final.
+ *
+ * Measured against the platform's own `WritableStream` (the same spec Chromium
+ * implements): when a sink's `write` rejects, the stream is left `errored`, so a
+ * following `close()` rejects with a TypeError and the sink's close/commit
+ * algorithm never runs. The old `close()` here was therefore inert rather than
+ * destructive *for a failure raised by `write()` itself* — but that is a
+ * property of where the failure came from, not of `close()`. A throw raised
+ * between `write()` and `close()` leaves the stream `writable`, and `close()`
+ * would then publish a partial file over a good one.
+ * `compressedEnvelope.writeCompressedFile` hit exactly that shape (a head-only
+ * file getting committed) and fixed it this same way.
+ *
+ * There is deliberately no `close()` fallback when `abort` is absent:
+ * committing is precisely what must not happen here, and abandoning the stream
+ * leaves the destination exactly as it was. Only test doubles lack `abort`.
+ */
+async function discardWritable(writable: object, reason: unknown): Promise<void> {
+  const candidate = writable as AbortableWritable;
+  if (typeof candidate.abort !== "function") return;
+  try {
+    await candidate.abort(reason);
+  } catch {
+    // Best-effort: never mask the original failure with a teardown error.
+  }
+}
+
+/**
  * Whole-content write. Idempotent by construction — it re-opens the handle with
  * `{ create: true }` and writes the complete `content` every time — so a retry
  * after a transient failure produces exactly the same end state as a first
@@ -623,11 +669,7 @@ async function writeText(
         await writable.write(content);
         await writable.close();
       } catch (error) {
-        try {
-          await writable.close();
-        } catch {
-          // Best-effort: never mask the original failure with a close error.
-        }
+        await discardWritable(writable, error);
         throw error;
       }
     },
