@@ -188,7 +188,7 @@ body.theme-light .v2-cov-fold-row td{color:#607386;}
 body.theme-light .v2-cov-empty b{color:rgba(10,45,74,.95);}
 body.theme-light .v2-cov-empty{border-color:rgba(10,45,74,.2);background:rgba(10,45,74,.02);}
 
-@media screen and (max-width:900px){
+@media screen and (max-width:1152px){
   .v2-cov-split{grid-template-columns:1fr;}
 }
 @media print{
