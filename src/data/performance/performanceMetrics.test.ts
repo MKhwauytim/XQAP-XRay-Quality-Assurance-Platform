@@ -240,7 +240,24 @@ describe("filterDailyPerformance / flattenGaps / aggregateSamplesByDay / summari
     expect(summary.totalEffectiveMs).toBe(10 * 60 * 1000 + 30 * 60 * 1000);
   });
 
-  it("flattenGaps is empty here (each employee has only one finish that day, no second point to gap against)", () => {
-    expect(flattenGaps(all)).toEqual([]);
+  it("flattenGaps includes the signIn-to-first-finish gap even when there is only one finish that day", () => {
+    const gaps = flattenGaps(all);
+    expect(gaps).toHaveLength(2);
+    expect(gaps[0]).toEqual({
+      employee: "omar",
+      day: "2026-06-01",
+      startAt: "2026-06-01T06:00:00.000Z",
+      endAt: "2026-06-01T06:30:00.000Z",
+      durationMs: 30 * 60 * 1000,
+      tier: "unclassified",
+    });
+    expect(gaps[1]).toEqual({
+      employee: "sara",
+      day: "2026-06-01",
+      startAt: "2026-06-01T06:00:00.000Z",
+      endAt: "2026-06-01T06:10:00.000Z",
+      durationMs: 10 * 60 * 1000,
+      tier: "unclassified",
+    });
   });
 });

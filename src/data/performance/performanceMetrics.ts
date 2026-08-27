@@ -126,7 +126,6 @@ type RawGap = { startAt: string; endAt: string; durationMs: number };
 /** sign-in → first finish, then finish → finish. Never fabricates a gap before an unknown sign-in or after the last finish of the day. */
 function rawGapsForDay(signInAt: string | null, finishes: readonly string[]): RawGap[] {
   const gaps: RawGap[] = [];
-  if (finishes.length < 2) return gaps;
   const points = signInAt ? [signInAt, ...finishes] : finishes;
   for (let i = 0; i + 1 < points.length; i += 1) {
     const startAt = points[i]!;
