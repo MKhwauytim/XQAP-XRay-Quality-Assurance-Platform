@@ -1,4 +1,4 @@
-import { safeWriteJson } from "./safeWrite";
+import { newReadRetryBudget, readRetryDelayMs, safeWriteJson } from "./safeWrite";
 import {
   codedMessage,
   logCodedError,
@@ -29,8 +29,6 @@ import {
 } from "../workspace/workspaceTypes";
 import { detectWorkspaceSchema, initializeWorkspaceSchemaMetadata } from "../workspace/workspaceSchema";
 import {
-  SNAPSHOT_STALE_RETRY_DELAYS_MS,
-  isSnapshotStaleError,
   retryTransientWrite,
   waitFor,
 } from "./transientFileErrors";
@@ -603,27 +601,33 @@ async function readFirstRecoverableCopy<TFile>(
 }
 
 /**
- * One file's text, retrying ONLY a stale-snapshot InvalidStateError
- * (XQ-IO-036), with a fresh handle and therefore a fresh (size, mtime) snapshot
- * on every pass.
+ * One file's text, retrying a stale-snapshot InvalidStateError (XQ-IO-036)
+ * and a transient NotReadableError, with a fresh handle and therefore a fresh
+ * (size, mtime) snapshot on every pass.
  *
- * Every other failure — absent, unreadable, permission — propagates on the
- * first throw so `readAndParseJsonFile`'s existing classification below still
- * decides what it means. This retries the one condition that is provably a
- * stale interface object rather than a fact about the file.
+ * Every other failure — absent, permission — propagates on the first throw so
+ * `readAndParseJsonFile`'s existing classification below still decides what it
+ * means. This shares `safeWrite.ts`'s `readRetryDelayMs` budget rather than
+ * hand-rolling a second copy: at HEAD this loop retried ONLY the stale-snapshot
+ * class, so a transient NotReadableError on `users.permissions.json` — read on
+ * every 45s sync tick via `WorkspaceProvider`'s `refreshPermissions` — got zero
+ * retries and surfaced immediately as XQ-FS-014/XQ-WS-013, even though the
+ * exact same fault class is retried everywhere `safeWrite.ts` itself reads.
  */
 async function readTextRetryingStaleSnapshot(
   directoryHandle: DirectoryHandleLike,
   fileName: string
 ): Promise<string> {
-  for (let attempt = 0; ; attempt += 1) {
+  const budget = newReadRetryBudget();
+  for (;;) {
     try {
       const fileHandle = await directoryHandle.getFileHandle(fileName, { create: false });
       const file = await fileHandle.getFile();
       return await file.text();
     } catch (error) {
-      if (isSnapshotStaleError(error) && attempt < SNAPSHOT_STALE_RETRY_DELAYS_MS.length) {
-        await waitFor(SNAPSHOT_STALE_RETRY_DELAYS_MS[attempt]!);
+      const retryDelay = readRetryDelayMs(error, budget);
+      if (retryDelay !== null) {
+        await waitFor(retryDelay);
         continue;
       }
       throw error;
@@ -641,11 +645,14 @@ async function readAndParseJsonFile<TFile>(
     // InvalidStateError (XQ-IO-036) recoverable here: reusing the interface
     // object that already failed the check would fail identically forever.
     //
-    // This read sits outside safeWrite.ts — it is the workspace-identity /
-    // permissions read used at login and by every sync tick — so it does not
-    // inherit that module's read ladder and needs its own. Without it, a share
-    // that changed under the snapshot reported XQ-FS-014 ("read failed"), which
-    // on the login path means a workspace that looks broken rather than busy.
+    // This read sits outside safeWrite.ts's six read loops — it is the
+    // workspace-identity / permissions read used at login and by every sync
+    // tick — but shares that module's readRetryDelayMs budget directly (see
+    // readTextRetryingStaleSnapshot above) rather than a hand-rolled copy.
+    // Without that retry, a share that changed under the snapshot, or a
+    // handle that was briefly unreadable, reported XQ-FS-014/XQ-WS-013 ("read
+    // failed") with zero retries, which on the login/sync path means a
+    // workspace that looks broken rather than momentarily busy.
     // NOT `retryTransientWrite`: that ladder also retries NotFoundError, and on
     // a READ "not found" means absent and must resolve promptly (see
     // transientFileErrors.ts's module doc). Retrying it here would add ~1.5 s to

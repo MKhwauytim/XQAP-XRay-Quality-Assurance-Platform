@@ -104,9 +104,9 @@ function wait(milliseconds: number): Promise<void> {
  * between them would let a burst of the cheap fault exhaust the patience the
  * expensive one needs.
  */
-type ReadRetryBudget = { unreadable: number; stale: number };
+export type ReadRetryBudget = { unreadable: number; stale: number };
 
-function newReadRetryBudget(): ReadRetryBudget {
+export function newReadRetryBudget(): ReadRetryBudget {
   return { unreadable: 0, stale: 0 };
 }
 
@@ -125,8 +125,13 @@ function newReadRetryBudget(): ReadRetryBudget {
  * handle — and therefore takes a FRESH (size, mtime) snapshot — at the top of
  * the next pass. A retry that reused the stale interface object would fail
  * identically, forever; see `isSnapshotStaleError`.
+ *
+ * Exported so `fileSystemAccess.ts`'s own read path (outside this module,
+ * used at login and on every sync tick) can share this exact budget instead
+ * of hand-rolling a narrower copy that silently drifts out of step — see its
+ * `readTextRetryingStaleSnapshot`.
  */
-function readRetryDelayMs(error: unknown, budget: ReadRetryBudget): number | null {
+export function readRetryDelayMs(error: unknown, budget: ReadRetryBudget): number | null {
   if (isNotReadableError(error) && budget.unreadable < NOT_READABLE_RETRY_DELAYS_MS.length) {
     return NOT_READABLE_RETRY_DELAYS_MS[budget.unreadable++]!;
   }

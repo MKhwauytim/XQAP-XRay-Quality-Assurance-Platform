@@ -15,6 +15,7 @@ import { describe, expect, it, beforeEach } from "vitest";
 
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { clearErrors, getRecentErrors } from "../storage/errorLogger";
 import { getSampleMainDir } from "../workspace/workspacePaths";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import type { PreparedPopulationRow } from "../population/populationTypes";
@@ -209,6 +210,79 @@ describe("fold-checkpoint sidecar (v85)", () => {
     // month was refolded from the event store instead of resumed.
     expect(result?.entries.map((entry) => entry.xrayImageId).sort()).toEqual(["A1", "A2", "A3"]);
     expect(result?.totalAssigned).toBe(3);
+  });
+
+  // Regression for the 2026-08-26 production log: `saveDistributionCurrent`
+  // writes the cache and its sidecar as two separate, non-atomic commits, and
+  // a reader landing between them logged `distribution:checkpoint-mismatch`
+  // even though a fresh re-read a moment later already agreed — 560
+  // occurrences across 5 days in one real workspace. This must not fire when
+  // the mismatch is exactly that kind of same-write-cycle race, WITHOUT
+  // changing the refold itself (still exercised identically below).
+  it("does not log a checkpoint-mismatch when the pair catches up to itself within the re-read window", async () => {
+    const root = makeRoot();
+    const rows = [makeRow("A1")];
+    await assign(root, "A1", "2026-05-01T08:00:00.000Z");
+    await loadOrDeriveDistributionCurrent(root, MONTH, rows, { awaitCachePersist: true });
+    await settle();
+
+    const dir = await getSampleMainDir(root, MONTH, true);
+    const goodSidecar = await readRaw<DistributionFoldCheckpoint>(root, DISTRIBUTION_CHECKPOINT_FILE);
+
+    // The sidecar half of the write has not landed yet when `cached` is about
+    // to be captured — simulated by leaving a stale/wrong sidecar in place.
+    await safeWriteJson(dir, DISTRIBUTION_CHECKPOINT_FILE, {
+      ...goodSidecar!,
+      eventSetId: "d1:1:deadbeef:deadbeef",
+    });
+
+    __clearDeriveMemoForTests();
+    clearErrors();
+
+    const resultPromise = loadOrDeriveDistributionCurrent(root, MONTH, rows, {
+      awaitCachePersist: true,
+    });
+    // Land the real sidecar shortly after the mismatch is first observed, but
+    // well inside the re-read window — the exact shape of the real race.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await safeWriteJson(dir, DISTRIBUTION_CHECKPOINT_FILE, goodSidecar!);
+
+    const result = await resultPromise;
+
+    expect(result?.entries.map((entry) => entry.xrayImageId)).toEqual(["A1"]);
+    expect(
+      getRecentErrors().some((entry) => entry.context === "distribution:checkpoint-mismatch")
+    ).toBe(false);
+  });
+
+  it("still logs a checkpoint-mismatch (and still refolds, losing nothing) when the mismatch does not clear", async () => {
+    const root = makeRoot();
+    const rows = [makeRow("A1"), makeRow("A2")];
+    await assign(root, "A1", "2026-05-01T08:00:00.000Z");
+    await assign(root, "A2", "2026-05-01T09:00:00.000Z");
+    await loadOrDeriveDistributionCurrent(root, MONTH, rows, { awaitCachePersist: true });
+    await settle();
+
+    const dir = await getSampleMainDir(root, MONTH, true);
+    const goodSidecar = await readRaw<DistributionFoldCheckpoint>(root, DISTRIBUTION_CHECKPOINT_FILE);
+    // A genuinely wrong sidecar that is never corrected — the case that must
+    // still surface, unchanged from before this fix.
+    await safeWriteJson(dir, DISTRIBUTION_CHECKPOINT_FILE, {
+      ...goodSidecar!,
+      eventSetId: "d1:1:deadbeef:deadbeef",
+    });
+
+    __clearDeriveMemoForTests();
+    clearErrors();
+
+    const result = await loadOrDeriveDistributionCurrent(root, MONTH, rows, {
+      awaitCachePersist: true,
+    });
+
+    expect(result?.entries.map((entry) => entry.xrayImageId).sort()).toEqual(["A1", "A2"]);
+    expect(
+      getRecentErrors().filter((entry) => entry.context === "distribution:checkpoint-mismatch")
+    ).toHaveLength(1);
   });
 });
 

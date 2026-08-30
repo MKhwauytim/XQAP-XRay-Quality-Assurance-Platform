@@ -225,6 +225,35 @@ test("loadWorkspaceFiles throws XQ-FS-015 for an unreadable users file instead o
   expect(files.usersPermissions).not.toBeNull();
 });
 
+// Regression for the 2026-08-26 production log: `readTextRetryingStaleSnapshot`
+// retried ONLY the stale-snapshot InvalidStateError class, not NotReadableError
+// — unlike every read loop inside safeWrite.ts, which retries both. Since
+// `refreshPermissions` calls `loadWorkspaceFiles` on every 45s sync tick, a
+// single transient NotReadableError on `users.permissions.json` got zero
+// retries and surfaced immediately as XQ-FS-014/XQ-WS-013 (96 occurrences
+// across ~4 users in 5 days in the real log). This must now be absorbed like
+// any other transient read fault.
+test("loadWorkspaceFiles recovers from a TRANSIENT NotReadableError on the users file instead of failing immediately (XQ-FS-014/XQ-WS-013 regression)", async () => {
+  const { setSimulatedFaults, clearSimulatedFaults } = await import("./memoryDirectory");
+  const { loadWorkspaceFiles } = await import("./fileSystemAccess");
+  const dir = createMemoryDirectory();
+  await createWorkspaceStructure(dir, "admin");
+
+  setSimulatedFaults(dir, [
+    {
+      operation: "getFile",
+      name: "users.permissions.json",
+      errorName: "NotReadableError",
+      times: 1,
+    },
+  ]);
+
+  const files = await loadWorkspaceFiles(dir);
+
+  clearSimulatedFaults(dir);
+  expect(files.usersPermissions).not.toBeNull();
+});
+
 // A users file that EXISTS but does not parse is not a workspace with no users
 // either. This is the same wipe as the test above, reached through the other
 // failure reason: `invalid_json` used to fall through to `usersPermissions:
