@@ -423,6 +423,10 @@ export async function approveReopen(params: {
     reopenedBy: reviewedBy,
     reopenedByRole: reviewedByRole,
     reason: fresh.reason,
+    // This is the exact request step 3 below is about to record a decision
+    // for — excluded from reopenSubmittedAnswer's own stale-request sweep so
+    // it is never auto-approved with a generic note and THEN re-decided here.
+    sourceRequestId: fresh.requestId,
   });
   if (!applied.ok) {
     return { ok: false, code: "dist-failed", error: applied.error };

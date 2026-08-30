@@ -26,6 +26,9 @@ import { readWorkspaceActions } from "../audit/actionLog";
 import type { ItemAnswer } from "./answerTypes";
 import { loadEmployeeAnswers, reopenItemAnswer, upsertItemAnswer } from "./answerStorage";
 import { reopenSubmittedAnswer } from "./reopenAnswer";
+import { submitReopenRequest } from "../referral/requestReopen";
+import { loadReopenLog } from "../referral/referralStorage";
+import { approveReopen } from "../referral/approveReferral";
 
 const MONTH = "5-May-2026";
 const EMP = "emp1";
@@ -231,5 +234,91 @@ describe("reopenAnswer", () => {
     // Nothing changed.
     const file = await loadEmployeeAnswers(root, MONTH, EMP);
     expect(file.items[0]!.status).toBe("submitted");
+  });
+
+  describe("auto-resolving a stray pending reopen request (regression)", () => {
+    it("a supervisor's DIRECT reopen (bypassing the approval desk) auto-approves the employee's outstanding request", async () => {
+      const root = createMemoryDirectory("root") as DirectoryHandleLike;
+      await seed(root);
+
+      // The employee files a reopen request (approval-required path)…
+      const submitted = await submitReopenRequest({
+        directoryHandle: root, monthFolderName: MONTH, employeeUsername: EMP, xrayImageId: IMG,
+        assignedTo: EMP, requestedBy: EMP, requestedByRole: "employee", reason: "تصحيح النتيجة",
+        instant: false,
+      });
+      expect(submitted).toEqual({ ok: true, mode: "requested" });
+      const beforeLog = await loadReopenLog(root, MONTH);
+      expect(beforeLog.requests[0]!.status).toBe("pending");
+
+      // …but the supervisor never opens «اعتماد الطلبات» — they reopen the
+      // case directly from the queue instead (`ew.reopenAnswer`), exactly as
+      // `XrayReferrals.handleReopenAnswer` / `XrayInspectionResults.handleReopenCase` do.
+      const direct = await reopenSubmittedAnswer({
+        directoryHandle: root, monthFolderName: MONTH, employeeUsername: EMP, xrayImageId: IMG,
+        reopenedBy: "sup1", reopenedByRole: "supervisor", reason: "فتح مباشر",
+      });
+      expect(direct.ok).toBe(true);
+
+      // The answer really was reopened…
+      const file = await loadEmployeeAnswers(root, MONTH, EMP);
+      expect(file.items[0]!.status).toBe("draft");
+
+      // …and the request the employee filed for exactly this is no longer
+      // stranded "pending": it reads as resolved, not still waiting.
+      const afterLog = await loadReopenLog(root, MONTH);
+      expect(afterLog.requests[0]!.status).toBe("approved");
+      expect(afterLog.requests[0]!.reviewedBy).toBe("sup1");
+    });
+
+    it("approving the request itself still records exactly one decision (no duplicate from the auto-resolve sweep)", async () => {
+      const root = createMemoryDirectory("root") as DirectoryHandleLike;
+      await seed(root);
+
+      await submitReopenRequest({
+        directoryHandle: root, monthFolderName: MONTH, employeeUsername: EMP, xrayImageId: IMG,
+        assignedTo: EMP, requestedBy: EMP, requestedByRole: "employee", reason: "تصحيح",
+        instant: false,
+      });
+      const before = await loadReopenLog(root, MONTH);
+      const requestId = before.requests[0]!.requestId;
+
+      const outcome = await approveReopen({
+        directoryHandle: root, monthFolderName: MONTH, requestId,
+        reviewedBy: "sup1", reviewedByRole: "supervisor",
+      });
+      expect(outcome.ok).toBe(true);
+
+      const after = await loadReopenLog(root, MONTH);
+      expect(after.requests[0]!.status).toBe("approved");
+      // Exactly one decision event recorded for this request — the
+      // auto-resolve sweep correctly excluded it via sourceRequestId.
+      expect(after.requests[0]!.history ?? []).toHaveLength(1);
+    });
+
+    it("a second employee's unrelated pending request for a different case is left untouched", async () => {
+      const root = createMemoryDirectory("root") as DirectoryHandleLike;
+      await seed(root);
+      const OTHER_IMG = "A2";
+      await saveSampleMaster(root, MONTH, makeSample([makeRow(IMG), makeRow(OTHER_IMG)]));
+      await appendDistributionEvents(root, MONTH, [
+        buildAssignEvent({ xrayImageId: OTHER_IMG, assignedTo: EMP, eventBy: "admin" }),
+      ]);
+      await upsertItemAnswer(root, MONTH, EMP, { ...makeSubmittedAnswer(), xrayImageId: OTHER_IMG });
+      await submitReopenRequest({
+        directoryHandle: root, monthFolderName: MONTH, employeeUsername: EMP, xrayImageId: OTHER_IMG,
+        assignedTo: EMP, requestedBy: EMP, requestedByRole: "employee", reason: "طلب آخر",
+        instant: false,
+      });
+
+      await reopenSubmittedAnswer({
+        directoryHandle: root, monthFolderName: MONTH, employeeUsername: EMP, xrayImageId: IMG,
+        reopenedBy: "sup1", reopenedByRole: "supervisor", reason: "فتح مباشر",
+      });
+
+      const log = await loadReopenLog(root, MONTH);
+      const other = log.requests.find((r) => r.xrayImageId === OTHER_IMG)!;
+      expect(other.status).toBe("pending"); // untouched — different case
+    });
   });
 });

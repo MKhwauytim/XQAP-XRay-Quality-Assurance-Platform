@@ -26,6 +26,7 @@ import {
 import {
   notifyLocalDataChange,
   subscribeToDataRefresh,
+  type DataRefreshFamily,
 } from "../../../../../data/workspace/dataRefreshSignal";
 import {
   registerBootSources,
@@ -572,12 +573,27 @@ function createReopenHandlers(deps: {
   setStatusMsg: (msg: StatusMsg) => void;
   selectEntry: (xrayImageId: string | null) => void;
   reload: (opts?: { silent?: boolean }) => Promise<void>;
+  /** Raised across this handler's OWN broadcast so this view's
+   *  `subscribeToDataRefresh` subscription (see the effect near the bottom of
+   *  the component) skips it — `reload()` above already reconciled this view
+   *  exactly, and a second full read per action is pure cost. Same idiom
+   *  `createSaveAnswerHandler`'s `ownBroadcastRef` already uses. */
+  ownBroadcastRef: React.RefObject<boolean>;
 }) {
   const {
     directoryHandle, folderForRow, username, role, selMonth,
     canReopenAnswer, canSubmitAnswers, canReopenInstant,
-    setStatusMsg, selectEntry, reload,
+    setStatusMsg, selectEntry, reload, ownBroadcastRef,
   } = deps;
+
+  function broadcastOwn(families: DataRefreshFamily[]): void {
+    ownBroadcastRef.current = true;
+    try {
+      notifyLocalDataChange(families);
+    } finally {
+      ownBroadcastRef.current = false;
+    }
+  }
 
   async function handleReopenAnswer(entry: DistributionEntry, reason: string): Promise<void> {
     if (!canReopenAnswer) {
@@ -598,6 +614,14 @@ function createReopenHandlers(deps: {
       if (result.ok) {
         setStatusMsg({ type: "ok", text: getLabels().msg_reopen_done });
         await reload();
+        // Tell the OTHER mounted views. A direct reopen can flip an ANSWER
+        // back to draft, return a COMPLETED distribution entry to pending,
+        // and — reopenAnswer.ts's own auto-resolve sweep — silently settle a
+        // REQUEST the employee filed for this exact case. Without this, «اعتماد
+        // الطلبات» (kept mounted behind this view by the tab-mount LRU) goes on
+        // showing that request as still pending until the next 45s tick or a
+        // manual refresh, even though it was just resolved.
+        broadcastOwn(["answers", "requests", "distribution"]);
       } else {
         setStatusMsg({ type: "error", text: userFacingErrorText(result.error, "xrayReferrals:result") });
       }
@@ -643,6 +667,10 @@ function createReopenHandlers(deps: {
           text: result.mode === "instant" ? getLabels().msg_reopen_done : getLabels().msg_reopen_request_sent,
         });
         await reload();
+        // A new pending request (or an instant reopen) is exactly what «اعتماد
+        // الطلبات» needs to know about right away — see handleReopenAnswer's
+        // matching broadcast above for why this can't wait for the next tick.
+        broadcastOwn(result.mode === "instant" ? ["answers", "requests", "distribution"] : ["requests"]);
       } else {
         setStatusMsg({ type: "error", text: userFacingErrorText(result.error, "xrayReferrals:result") });
       }
@@ -1481,6 +1509,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     setStatusMsg,
     selectEntry,
     reload: loadData,
+    ownBroadcastRef: ownAnswerBroadcastRef,
   });
   /**
    * The sample master + every-employee entry set the replacement dialog needs.
