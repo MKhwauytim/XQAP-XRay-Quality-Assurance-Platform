@@ -79,15 +79,12 @@ describe("tab catalog", () => {
     expect(roleCeilingFor("unknown-tab-id")).toBeUndefined();
   });
 
-  it("widens reports/kpi and report-designer to every operational role", () => {
-    // Widened again on 2026-08-27: excluding `employee` made that whole matrix
-    // row a dead control for these two sub-tabs (same pattern as the
-    // user-management widening two days earlier). `guest` stays out on purpose,
-    // same rationale as population/adhoc-import.
-    expect(roleCeilingFor("reports/kpi")).toEqual(["employee", "supervisor", "manager", "admin"]);
-    expect(roleCeilingFor("reports/kpi")).not.toContain("guest");
-    expect(roleCeilingFor("reports/report-designer")).toEqual(["employee", "supervisor", "manager", "admin"]);
-    expect(roleCeilingFor("reports/report-designer")).not.toContain("guest");
+  it("widens reports/kpi and report-designer to every role, guest included", () => {
+    // Widened ["supervisor","manager","admin"] -> +employee (2026-08-27) -> +guest
+    // (2026-08-30, owner: no "مقيّد بالنظام" cell should remain anywhere admin can
+    // otherwise customize the matrix).
+    expect(roleCeilingFor("reports/kpi")).toEqual(["guest", "employee", "supervisor", "manager", "admin"]);
+    expect(roleCeilingFor("reports/report-designer")).toEqual(["guest", "employee", "supervisor", "manager", "admin"]);
   });
 
   it("keeps reports and archive open to every role so the matrix column is not a dead control", () => {
@@ -101,12 +98,12 @@ describe("tab catalog", () => {
     }
   });
 
-  it("widens user-management to every operational role, like population/adhoc-import", () => {
-    // Widened from ADMIN_ONLY (2026-08-25): admin is never a column in the
-    // page-permissions matrix (MANAGED_ROLES excludes it), so an admin-only
-    // ceiling made the whole section a permanently dead "مقيّد بالنظام" block.
-    // `guest` stays out on purpose -- it is the read-only observer role and this
-    // section only mutates other accounts/permissions, nothing to view.
+  it("widens every user-management tab and sub-tab to every role, guest included", () => {
+    // Widened ADMIN_ONLY -> OPERATIONAL_ROLES (2026-08-25, admin is never a column
+    // in the page-permissions matrix so an admin-only ceiling was a permanently
+    // dead "مقيّد بالنظام" block) -> ALL_ROLES (2026-08-30, owner: no "مقيّد
+    // بالنظام" cell should remain anywhere admin can otherwise customize the
+    // matrix, including guest).
     for (const tabId of [
       "user-management",
       "user-management/users",
@@ -114,8 +111,9 @@ describe("tab catalog", () => {
       "user-management/feature-permissions",
       "user-management/activity",
       "user-management/actions",
+      "user-management/performance",
     ]) {
-      expect(roleCeilingFor(tabId), tabId).toEqual(["employee", "supervisor", "manager", "admin"]);
+      expect(roleCeilingFor(tabId), tabId).toEqual(["guest", "employee", "supervisor", "manager", "admin"]);
     }
   });
 
@@ -135,12 +133,10 @@ describe("tab catalog", () => {
     expect(entry?.parentId).toBe("population");
     expect(entry?.group).toBeUndefined();
     expect(entry?.label).toBe("ارفاق حالات استثنائية");
-    // Ceiling widened from ADMIN_ONLY so an admin can actually grant the page
-    // (owner: "the app must be fully customizable from admin"). `guest` stays out
-    // on purpose: it is the read-only observer role and this page exists only to
-    // ingest rows and assign work.
-    expect(entry?.allowedRoles).toEqual(["employee", "supervisor", "manager", "admin"]);
-    expect(entry?.allowedRoles).not.toContain("guest");
+    // Ceiling widened from ADMIN_ONLY, then to include guest (2026-08-30) so an
+    // admin can actually grant the page to any role (owner: "the app must be
+    // fully customizable from admin").
+    expect(entry?.allowedRoles).toEqual(["guest", "employee", "supervisor", "manager", "admin"]);
     // The stand-alone tab id is gone: nothing may resolve it any more, or a stale
     // TAB_FEATURE_MAP/permission row pointing at it would silently keep "working".
     expect(TAB_CATALOG.some((tab) => tab.id === "adhoc-import")).toBe(false);
@@ -184,6 +180,20 @@ describe("tab catalog", () => {
   it("never excludes admin from any tab", () => {
     for (const entry of TAB_CATALOG) {
       expect(entry.allowedRoles, entry.id).toContain("admin");
+    }
+  });
+
+  it("no tab or sub-tab ceiling excludes any role any more (2026-08-30)", () => {
+    // Every prior widening (adhoc-import, user-management, reports/kpi,
+    // report-designer, settings) still excluded `guest` "deliberately". The owner
+    // asked for that pattern to end entirely: the code ceiling should never be the
+    // reason a "مقيّد بالنظام" cell shows up in the page-permissions matrix -- what
+    // each role can actually do stays governed by the matrix itself
+    // (createDefaultPermissions/RolePermission rows), not by a hidden code cap.
+    // This is a whole-catalog guard so a future narrow ceiling gets caught here
+    // instead of silently reintroducing a dead matrix cell.
+    for (const entry of TAB_CATALOG) {
+      expect(entry.allowedRoles, entry.id).toEqual(["guest", "employee", "supervisor", "manager", "admin"]);
     }
   });
 });
