@@ -123,9 +123,14 @@ describe("buildExecutiveDeckV3", () => {
 });
 
 describe("buildDeckV3Html footerNote", () => {
-  it("omits any footer markup when footerNote is not passed (backward compatible)", () => {
+  it("omits any footer content/styling when footerNote is not passed (backward compatible)", () => {
     const html = buildDeckV3Html("<section>x</section>", "أغسطس 2026");
-    expect(html).not.toContain("source-revisions");
+    // The base CSS unconditionally carries a `.source-revisions` fullscreen
+    // display:none guard (theme.ts) so it's ready the moment a footer IS
+    // passed elsewhere — that selector reference alone isn't a leak. What
+    // must stay absent is the actual footer block and its dedicated styling.
+    expect(html).not.toContain('<section class="source-revisions"');
+    expect(html).not.toContain(".srev-title");
   });
 
   it("appends footerNote after the slides when provided", () => {

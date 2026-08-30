@@ -19,8 +19,9 @@ import { computePopulationReportModel } from "./model";
 import type { PortBreakdown, ResultCounts, PopulationReportScope } from "./types";
 import { STAGE_LABELS } from "./fold";
 import { sourceRevisionsFooterHtml } from "../sourceRevisions";
+import { ZATCA_LOGO_URL } from "../../../branding/organization";
 
-const ORG: OrgBlock = { logoUrl: "", orgName: "ضمان جودة الأشعة", lines: [] };
+const ORG: OrgBlock = { logoUrl: ZATCA_LOGO_URL, orgName: "ضمان جودة الأشعة", lines: [] };
 
 // deck3's dataTable()/kpiBand() do NOT escape their `html` fields themselves
 // (same convention as every other deck3 slide) — every cell built from
