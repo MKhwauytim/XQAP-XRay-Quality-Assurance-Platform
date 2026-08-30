@@ -1791,6 +1791,287 @@ git commit -m "Add (reporting): population report deck — Section 2/3, closing,
 
 ---
 
+### Task 7b: Export-scope switch (population / sample / both) — deck retrofit
+
+**Why this task exists:** added mid-flight, after Task 7 shipped and was reviewed, via
+`docs/superpowers/specs/2026-08-27-population-report-merge-design.md` §9 (decision D11): the تقرير
+المجتمع card needs a 3-way segmented switch — **المجتمع فقط** (population only → Section 1 alone),
+**العينة فقط** (sample only → Sections 2 **and** 3 together), **الكل** (both, default → all three).
+Applies uniformly to whichever format is exported. Task 7's deck (this task retrofits) hardcoded
+absolute slide numbers assuming all three sections always render — this task makes that
+scope-relative. Tasks 8/9/10 (not yet built) incorporate scope from the start instead of needing a
+retrofit.
+
+**Files:**
+- Modify: `src/data/reporting/populationReport/types.ts` (add `PopulationReportScope`)
+- Modify: `src/data/reporting/populationReport/deck.ts`
+- Modify: `src/data/reporting/populationReport/deck.test.ts`
+
+**Interfaces:**
+- Produces: `export type PopulationReportScope = "population" | "sample" | "both"` (types.ts) —
+  consumed by Tasks 8, 9, 10.
+- Modifies (backward-compatible, default `"both"` reproduces today's exact output byte-for-byte):
+  `buildSection1Slides(model, meta, scope = "both")`, `buildPopulationDeckSlides(model, scope = "both")`,
+  `buildPopulationDeck(input, scope = "both")`, `openPopulationDeck(input, scope = "both")`.
+
+- [ ] **Step 1: Add the scope type**
+
+```ts
+// src/data/reporting/populationReport/types.ts — append
+export type PopulationReportScope = "population" | "sample" | "both";
+```
+
+- [ ] **Step 2: Write the failing tests**
+
+Append to `src/data/reporting/populationReport/deck.test.ts`:
+
+```ts
+import type { PopulationReportScope } from "./types";
+
+describe("export scope", () => {
+  function scopedModel() {
+    const populationRows = [makeRow("1", "ميناء جدة", { portType: "بحري" })];
+    const sample = makeSampleMaster(populationRows);
+    const distribution = makeDistribution([
+      { id: "1", assignedTo: "user1", status: "completed", row: { ...populationRows[0] } },
+    ]);
+    return computePopulationReportModel({
+      monthFolderName: "8-August-2026",
+      manifest: makeManifest(),
+      processingSummary: makeProcessingSummary(),
+      riskRawRowCount: 10,
+      biRawRowCount: 8,
+      populationRows,
+      sampleRows: sample.rows,
+      distributionEntries: distribution.entries,
+      employeeDisplayNames: { user1: "أحمد" },
+    });
+  }
+
+  it("scope='population' includes only Section 1 content, still has cover/contents/closing", async () => {
+    const html = await buildPopulationDeckSlides(scopedModel(), "population");
+    expect(html).toContain("الاستلام"); // Section 1 content present
+    expect(html).not.toContain("التوزيع حسب الموظف"); // Section 3 content absent
+    expect(html).not.toContain("العينة حسب المرحلة"); // Section 2 content absent
+  });
+
+  it("scope='sample' includes Sections 2+3 together but not Section 1's content", async () => {
+    const html = await buildPopulationDeckSlides(scopedModel(), "sample");
+    expect(html).toContain("العينة حسب المرحلة"); // Section 2 present
+    expect(html).toContain("التوزيع حسب الموظف والمرحلة"); // Section 3 present
+    expect(html).not.toContain("بيانات المخاطر — قبل وبعد"); // Section 1 content absent
+  });
+
+  it("defaults to 'both' when scope is omitted, matching today's full output", async () => {
+    const withDefault = await buildPopulationDeckSlides(scopedModel());
+    const withExplicitBoth = await buildPopulationDeckSlides(scopedModel(), "both");
+    expect(withDefault).toBe(withExplicitBoth);
+  });
+
+  describe("golden snapshot — non-default scope (deterministic-by-contract)", () => {
+    it("matches the frozen-time snapshot for scope='population'", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-07-29T12:00:00.000Z"));
+      try {
+        const html = await buildPopulationDeck(
+          {
+            monthFolderName: "8-August-2026",
+            manifest: makeManifest(),
+            processingSummary: makeProcessingSummary(),
+            riskRawRowCount: 10,
+            biRawRowCount: 8,
+            populationRows: [makeRow("1", "ميناء جدة", { portType: "بحري" })],
+            sampleRows: [],
+            distributionEntries: [],
+            employeeDisplayNames: {},
+          },
+          "population" satisfies PopulationReportScope
+        );
+        expect(html).toMatchSnapshot();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+});
+```
+
+- [ ] **Step 3: Run to verify the new tests fail**
+
+Run: `npx vitest run src/data/reporting/populationReport/deck.test.ts`
+Expected: FAIL — `buildPopulationDeckSlides`/`buildPopulationDeck` don't accept a second `scope` argument yet, and Section-1-only/Section-2+3-only output doesn't exist yet.
+
+- [ ] **Step 4: Refactor `deck.ts` to be scope-aware**
+
+Replace the `contentsSlide`'s hardcoded `rows` array inside `buildSection1Slides` and the function's signature, add a `contentsRows` helper, add an early return for `scope === "sample"`, give `buildSection2Slides`/`buildSection3Slides` a `startNum` parameter instead of their hardcoded `meta(9)`..`meta(15)` calls, and rewrite `buildPopulationDeckSlides`/`buildPopulationDeck`/`openPopulationDeck` to compute slide counts and boundaries from which sections are included. Full replacement code for the affected functions:
+
+```ts
+// Replace the `rows: [...]` array literal inside buildSection1Slides's contentsSlide call with:
+      rows: contentsRows(scope),
+
+// Add this helper above buildSection1Slides:
+function contentsRows(
+  scope: PopulationReportScope
+): Array<{ index: number; title: string; description: string; topics: string; pages: string }> {
+  const rows: Array<{ index: number; title: string; description: string; topics: string; pages: string }> = [];
+  if (scope !== "sample") {
+    rows.push({
+      index: rows.length + 1,
+      title: "المجتمع",
+      description: "المجتمع المستلم والمعالج",
+      topics: "الاستلام، المعالجة، التوزيع حسب المرحلة والمنفذ",
+      pages: "٥",
+    });
+  }
+  if (scope !== "population") {
+    rows.push({
+      index: rows.length + 1,
+      title: "العينة",
+      description: "تكوين العينة المسحوبة",
+      topics: "حسب المرحلة والمنفذ",
+      pages: "٢",
+    });
+    rows.push({
+      index: rows.length + 1,
+      title: "التوزيع",
+      description: "التوزيع على الموظفين",
+      topics: "حسب المرحلة، المنفذ، وCertScan",
+      pages: "٣",
+    });
+  }
+  return rows;
+}
+
+// buildSection1Slides's new signature and early return (everything else in its body is unchanged):
+export function buildSection1Slides(
+  model: PopulationReportModel,
+  meta: (num: number) => SlideMeta,
+  scope: PopulationReportScope = "both"
+): string[] {
+  const slides: string[] = [];
+  // 1 — Cover (unchanged)
+  slides.push(coverSlide({ /* ...unchanged... */ meta: meta(1) }));
+  // 2 — Contents (rows now come from contentsRows(scope))
+  slides.push(contentsSlide({ eyebrow: "تقرير المجتمع", title: "المحتويات", rows: contentsRows(scope), meta: meta(2) }));
+
+  if (scope === "sample") return slides; // cover + contents only; Section 1's own content is excluded
+
+  // 3 — Section 1 divider, 4-8 content slides: UNCHANGED from the existing implementation
+  // ...
+  return slides;
+}
+
+// buildSection2Slides and buildSection3Slides: replace every meta(9)/meta(10)/meta(11) and
+// meta(12)/meta(13)/meta(14)/meta(15) call with meta(startNum), meta(startNum + 1), etc., and add
+// `startNum: number` as a new third parameter to both function signatures:
+function buildSection2Slides(model: PopulationReportModel, meta: (num: number) => SlideMeta, startNum: number): string[] {
+  const slides: string[] = [];
+  slides.push(sectionDivider({ /* ...unchanged fields... */ meta: meta(startNum) }));
+  const sampleStageRows = model.sample.byStage.map((b) => resultRow(b.stageLabel, b.counts));
+  slides.push(slideShell(meta(startNum + 1), "", `${contentHead({ eyebrow: "القسم الثاني", title: "العينة حسب المرحلة" })}
+${dataTable({ headers: RESULT_HEADERS, rows: sampleStageRows, totals: resultRow("الإجمالي", model.sample.totals) })}`));
+  slides.push(slideShell(meta(startNum + 2), "", `${contentHead({ eyebrow: "القسم الثاني", title: "العينة حسب المنفذ" })}
+${portBreakdownTwoColumn(model.sample.byPort)}`));
+  return slides;
+}
+
+function buildSection3Slides(model: PopulationReportModel, meta: (num: number) => SlideMeta, startNum: number): string[] {
+  const slides: string[] = [];
+  slides.push(sectionDivider({ /* ...unchanged fields... */ meta: meta(startNum) }));
+  slides.push(slideShell(meta(startNum + 1), "", `${contentHead({ eyebrow: "القسم الثالث", title: "التوزيع حسب الموظف والمرحلة" })}
+${employeeStageTable(model)}`));
+  slides.push(slideShell(meta(startNum + 2), "", `${contentHead({ eyebrow: "القسم الثالث", title: "التوزيع حسب الموظف والمنفذ" })}
+${employeePortTable(model)}`));
+  slides.push(slideShell(meta(startNum + 3), "", `${contentHead({ eyebrow: "القسم الثالث", title: "التوزيع حسب CertScan" })}
+${certScanTable(model)}`));
+  return slides;
+}
+
+// Replace TOTAL_SLIDES and buildPopulationDeckSlides/buildPopulationDeck/openPopulationDeck entirely:
+export async function buildPopulationDeckSlides(
+  model: PopulationReportModel,
+  scope: PopulationReportScope = "both"
+): Promise<string> {
+  const includePopulation = scope !== "sample";
+  const includeSample = scope !== "population";
+  const section1Count = includePopulation ? 6 : 0; // divider + 5 content slides, NOT counting cover/contents
+  const totalSlides = 2 /* cover + contents */ + section1Count + (includeSample ? 7 : 0) /* s2(3) + s3(4) */ + 1 /* closing */;
+  const s1End = 2 + section1Count;
+  const s2End = s1End + (includeSample ? 3 : 0);
+
+  const meta = (num: number): SlideMeta => ({
+    num,
+    total: totalSlides,
+    sectionKey: num <= s1End ? "s1" : num <= s2End ? "s2" : "s3",
+    sectionLabel: num <= s1End ? "المجتمع" : num <= s2End ? "العينة" : "التوزيع",
+    footText: `تقرير المجتمع — ${model.monthLabel}`,
+  });
+
+  const parts: string[] = [];
+  parts.push(...buildSection1Slides(model, meta, scope));
+  await yieldToMain();
+  if (includeSample) {
+    parts.push(...buildSection2Slides(model, meta, s1End + 1));
+    await yieldToMain();
+    parts.push(...buildSection3Slides(model, meta, s1End + 4));
+    await yieldToMain();
+  }
+  parts.push(
+    closingSlide({
+      org: ORG,
+      kicker: "تقرير المجتمع",
+      title: "نهاية التقرير",
+      closingLine: `تقرير المجتمع — ${model.monthLabel}`,
+      metaRows: [],
+      meta: meta(totalSlides),
+    })
+  );
+  return parts.join("\n");
+}
+
+export async function buildPopulationDeck(
+  input: PopulationReportInput,
+  scope: PopulationReportScope = "both"
+): Promise<string> {
+  const model = computePopulationReportModel(input);
+  const slides = await buildPopulationDeckSlides(model, scope);
+  return buildDeckV3Html(slides, model.monthLabel, {
+    title: "تقرير المجتمع",
+    navBrand: "تقرير المجتمع",
+    toolbarBrand: "تقرير المجتمع",
+  });
+}
+
+export async function openPopulationDeck(input: PopulationReportInput, scope: PopulationReportScope = "both"): Promise<void> {
+  const reportWindow = openReportWindow();
+  await writeOrCloseOnFailure(reportWindow, () => buildPopulationDeck(input, scope), `تقرير_المجتمع_${input.monthFolderName}.html`);
+}
+```
+
+Add `import type { PopulationReportScope } from "./types";` to `deck.ts`'s existing imports (it already imports other types from `./types`).
+
+Double-check `s1End + 4` for Section 3's `startNum`: Section 2 occupies `s1End+1, s1End+2, s1End+3` (3 slides: divider + 2 content), so Section 3 correctly starts at `s1End + 4`.
+
+- [ ] **Step 5: Run to verify tests pass and generate the new golden snapshot**
+
+Run: `npx vitest run src/data/reporting/populationReport/deck.test.ts`
+Expected: PASS, including the pre-existing Task 6/7 tests (the `"both"`-default behavior must be byte-identical to before — the `toBe()` equality test in Step 2 checks this directly). A new snapshot entry for scope=`"population"` is added to the existing `__snapshots__/deck.test.ts.snap` file — eyeball it: cover, contents (listing only "المجتمع"), Section 1 divider + 5 content slides, closing — 9 slides total, no "العينة"/"التوزيع" section content anywhere.
+
+- [ ] **Step 6: Typecheck and lint**
+
+Run: `npm run typecheck && npm run lint`
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/data/reporting/populationReport/types.ts src/data/reporting/populationReport/deck.ts \
+  src/data/reporting/populationReport/deck.test.ts \
+  src/data/reporting/populationReport/__snapshots__/deck.test.ts.snap
+git commit -m "Add (reporting): export-scope switch (population/sample/both) — deck retrofit"
+```
+
+---
+
 ### Task 8: Population Report document (A4, full detail, paginated)
 
 **Files:**
@@ -1799,7 +2080,16 @@ git commit -m "Add (reporting): population report deck — Section 2/3, closing,
 
 **Interfaces:**
 - Consumes: `docPage`, `docCover`, `docClosing`, `docSectionDivider`, `docPageHeader`, `docKpiStrip`, `docTwoColumn`, `docPaginateTable` from `../executive/documentV3/shared` (Task 5); `DOCUMENT_V3_CSS` from `../executive/documentV3/theme`; `PopulationReportModel`/`PopulationReportInput`/`computePopulationReportModel` from `./model`; `RESULT_HEADERS`, `resultRow` re-exported from `./deck` (Task 6/7 — reuse, don't duplicate); `openReportWindow`/`writeOrCloseOnFailure` from `../htmlReport`; `yieldToMain` from `../../storage/yieldToMain`; `fmtNum`, `fmtPct` from `../executive/primitives`.
-- Produces: `export async function buildPopulationDocument(input: PopulationReportInput): Promise<string>`, `export async function openPopulationDocument(input: PopulationReportInput): Promise<void>` — consumed by Task 10.
+- Produces: `export async function buildPopulationDocument(input: PopulationReportInput, scope: PopulationReportScope = "both"): Promise<string>`, `export async function openPopulationDocument(input: PopulationReportInput, scope: PopulationReportScope = "both"): Promise<void>` — consumed by Task 10.
+
+**Scope note (spec §9/D11, added after Tasks 1-7 shipped):** this task builds scope support in from
+the start, unlike Task 7b which had to retrofit it. `PopulationReportScope` (`"population" | "sample"
+| "both"`, from `./types`, added in Task 7b) gates which sections' pages are included: `scope !==
+"sample"` includes Section 1's pages, `scope !== "population"` includes Sections 2+3's pages together
+(never independently). Cover and closing always render. Unlike the deck, the document has no
+cross-section absolute page numbering to recompute — each section's page-number counter (`pad(n++)`)
+is already local to that section's own build function, so skipping a section's pages entirely
+requires no renumbering math, just conditionally calling (or not calling) that section's builder.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2095,15 +2385,20 @@ async function buildSection3Pages(model: PopulationReportModel): Promise<string[
   return pages;
 }
 
-export async function buildPopulationDocument(input: PopulationReportInput): Promise<string> {
+export async function buildPopulationDocument(
+  input: PopulationReportInput,
+  scope: PopulationReportScope = "both"
+): Promise<string> {
   const model = computePopulationReportModel(input);
   const org = { logoUrl: "", orgName: "ضمان جودة الأشعة", lines: [] };
   const pages: string[] = [
     docCover({ org, title: "تقرير المجتمع", periodLabel: "الفترة", periodValue: model.monthLabel, metaRows: [] }),
   ];
-  pages.push(...(await buildSection1Pages(model)));
-  pages.push(...(await buildSection2Pages(model)));
-  pages.push(...(await buildSection3Pages(model)));
+  if (scope !== "sample") pages.push(...(await buildSection1Pages(model)));
+  if (scope !== "population") {
+    pages.push(...(await buildSection2Pages(model)));
+    pages.push(...(await buildSection3Pages(model)));
+  }
   pages.push(docClosing({ org, title: "نهاية التقرير", closingLine: `تقرير المجتمع — ${model.monthLabel}` }));
 
   return `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8" />
@@ -2113,11 +2408,40 @@ export async function buildPopulationDocument(input: PopulationReportInput): Pro
 <main class="content">${pages.join("\n")}</main></div></body></html>`;
 }
 
-export async function openPopulationDocument(input: PopulationReportInput): Promise<void> {
+export async function openPopulationDocument(
+  input: PopulationReportInput,
+  scope: PopulationReportScope = "both"
+): Promise<void> {
   const reportWindow = openReportWindow();
-  await writeOrCloseOnFailure(reportWindow, () => buildPopulationDocument(input), `تقرير_المجتمع_${input.monthFolderName}.html`);
+  await writeOrCloseOnFailure(reportWindow, () => buildPopulationDocument(input, scope), `تقرير_المجتمع_${input.monthFolderName}.html`);
 }
 ```
+
+Add `import type { PopulationReportScope } from "./types";` to `document.ts`'s existing import list.
+
+- [ ] **Step 3b: Add a scope test**
+
+Append to `document.test.ts`:
+
+```ts
+describe("export scope", () => {
+  it("scope='population' excludes Sections 2+3's content", async () => {
+    const html = await buildPopulationDocument(baseInput(), "population");
+    expect(html).toContain("الاستلام");
+    expect(html).not.toContain("العينة حسب المرحلة");
+    expect(html).not.toContain("التوزيع حسب الموظف والمرحلة");
+  });
+
+  it("scope='sample' excludes Section 1's content but includes Sections 2+3 together", async () => {
+    const html = await buildPopulationDocument(baseInput(), "sample");
+    expect(html).not.toContain("بيانات المخاطر — قبل وبعد");
+    expect(html).toContain("العينة حسب المرحلة");
+    expect(html).toContain("التوزيع حسب الموظف والمرحلة");
+  });
+});
+```
+
+Run `npx vitest run src/data/reporting/populationReport/document.test.ts` after adding this — it must pass alongside the existing tests before moving to Step 4.
 
 - [ ] **Step 4: Run test to verify it passes and generate the golden snapshot**
 
@@ -2198,7 +2522,11 @@ git commit -m "Add (reporting): population report document (A4, deck3 visual lan
 
 **Interfaces:**
 - Consumes: `xlsx` (vendored SheetJS); `PopulationReportModel`/`PopulationReportInput`/`computePopulationReportModel` from `./model`; `yieldToMain` from `../../storage/yieldToMain`.
-- Produces: `export async function buildPopulationXlsx(input: PopulationReportInput): Promise<void>` — consumed by Task 10.
+- Produces: `export async function buildPopulationXlsx(input: PopulationReportInput, scope: PopulationReportScope = "both"): Promise<void>` — consumed by Task 10.
+
+**Scope note (spec §9/D11):** `scope !== "sample"` includes the two المجتمع sheets, `scope !==
+"population"` includes all five العينة/التوزيع sheets together. No cross-sheet numbering concerns —
+just conditionally call `book_append_sheet` for each sheet.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2304,12 +2632,22 @@ function portSheetRows(model: PopulationReportModel, source: "reconciled" | "sam
   ];
 }
 
-export async function buildPopulationXlsx(input: PopulationReportInput): Promise<void> {
+export async function buildPopulationXlsx(
+  input: PopulationReportInput,
+  scope: PopulationReportScope = "both"
+): Promise<void> {
   const model = computePopulationReportModel(input);
   const wb = XLSX.utils.book_new();
 
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(stageSheetRows(model, "reconciled")), "المجتمع - المرحلة");
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(portSheetRows(model, "reconciled")), "المجتمع - المنفذ");
+  if (scope !== "sample") {
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(stageSheetRows(model, "reconciled")), "المجتمع - المرحلة");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(portSheetRows(model, "reconciled")), "المجتمع - المنفذ");
+  }
+  if (scope === "population") {
+    XLSX.writeFile(wb, `تقرير_المجتمع_${input.monthFolderName}.xlsx`);
+    return;
+  }
+
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(stageSheetRows(model, "sample")), "العينة - المرحلة");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(portSheetRows(model, "sample")), "العينة - المنفذ");
 
@@ -2375,8 +2713,14 @@ git commit -m "Add (reporting): population report xlsx export"
 - Modify: `src/components/Sidebar/Tabs/Reports/TabView.tsx`
 
 **Interfaces:**
-- Consumes: `buildPopulationDocument`/`openPopulationDocument` from `./document`; `buildPopulationDeck`/`openPopulationDeck` from `./deck`; `buildPopulationXlsx` from `./xlsx`; `type PopulationReportInput` from `./model`.
+- Consumes: `buildPopulationDocument`/`openPopulationDocument` from `./document`; `buildPopulationDeck`/`openPopulationDeck` from `./deck`; `buildPopulationXlsx` from `./xlsx`; `type PopulationReportInput` from `./model`; `type PopulationReportScope` from `./types` (added in Task 7b).
 - Produces: the public surface `TabView.tsx` imports via dynamic `import(".../populationReport")`.
+
+**Scope note (spec §9/D11):** this task adds the UI half of the export-scope switch — a 3-way
+segmented control (المجتمع فقط / العينة فقط / الكل, default الكل) on the تقرير المجتمع card, threaded
+into every `generate()` call for this report. Tasks 7b/8/9 already built the format-side support
+(`scope` parameter on every builder, defaulting to `"both"`) — this task is purely UI + wiring, no
+new report-building logic.
 
 - [ ] **Step 1: Write `index.ts`**
 
@@ -2386,6 +2730,7 @@ export { buildPopulationDocument, openPopulationDocument } from "./document";
 export { buildPopulationDeck, openPopulationDeck } from "./deck";
 export { buildPopulationXlsx } from "./xlsx";
 export type { PopulationReportInput, PopulationReportModel } from "./model";
+export type { PopulationReportScope } from "./types";
 ```
 
 - [ ] **Step 2: Add the new `ReportBaseType`/`ReportType` members in `TabView.tsx`**
@@ -2451,16 +2796,18 @@ if (type === "population-report" || type === "population-report-xlsx" || type ==
   };
   if (type === "population-report-xlsx") {
     const { buildPopulationXlsx } = await import("../../../../data/reporting/populationReport");
-    await buildPopulationXlsx(input);
+    await buildPopulationXlsx(input, populationReportScope);
   } else if (type === "population-report-deck") {
     const { openPopulationDeck } = await import("../../../../data/reporting/populationReport");
-    await openPopulationDeck(input);
+    await openPopulationDeck(input, populationReportScope);
   } else {
     const { openPopulationDocument } = await import("../../../../data/reporting/populationReport");
-    await openPopulationDocument(input);
+    await openPopulationDocument(input, populationReportScope);
   }
 }
 ```
+
+(`populationReportScope` is the component-level state added in Step 5b below — this branch reads it directly, the same way it already reads other component state like `selectedMonth`.)
 
 Verify the exact relative import depth (`../../../../data/reporting/populationReport`) against `TabView.tsx`'s real path (`src/components/Sidebar/Tabs/Reports/TabView.tsx` is 4 levels below `src/`, matching the existing dynamic import depth already used for `sampleReport`/`distributionReport` in the code being replaced — copy that exact prefix rather than re-deriving it, to avoid an off-by-one).
 
@@ -2490,6 +2837,46 @@ Remove the Sample card block (~lines 1019–1040) and the Distribution card bloc
 
 Add `Layers` to the existing `lucide-react` import line at the top of `TabView.tsx` if it isn't already imported (it likely already is, since `sampleReport.ts`'s doc pages use `iconName: "layers"` in the old chrome — but that's a string key into an icon-name lookup, not necessarily the same as a direct `lucide-react` import in `TabView.tsx`; check the existing import list and add `Layers` from `"lucide-react"` if missing).
 
+- [ ] **Step 5b: Add the export-scope segmented control (spec §9/D11)**
+
+Add component state (near the existing `deckEdition` state, ~line 242):
+
+```ts
+const [populationReportScope, setPopulationReportScope] = useState<PopulationReportScope>("both");
+```
+
+Add the import (alongside the other `populationReport` type imports this task already needs):
+
+```ts
+import type { PopulationReportScope } from "../../../../data/reporting/populationReport/types";
+```
+
+Before writing the control's JSX, read `renderExportControls`'s existing 3-way format toggle (deck/xlsx/document — the same function this card already calls at the bottom of the card block) to see its real CSS class names and button structure. Mirror that exact pattern for visual consistency — this card should not introduce a visibly different toggle style from the format toggle sitting directly below it. If, after reading it, the format toggle's classes are a clean fit, reuse them directly (e.g. wrap the same button/icon-button class in a new row); if they're too tightly coupled to icon-based formats to reuse for text-only labels, fall back to this plain, self-contained structure instead of forcing a mismatch:
+
+```tsx
+<div className="rh-scope-toggle" role="radiogroup" aria-label="نطاق التصدير">
+  {(
+    [
+      { value: "population" as const, label: "المجتمع فقط" },
+      { value: "sample" as const, label: "العينة فقط" },
+      { value: "both" as const, label: "الكل" },
+    ]
+  ).map((opt) => (
+    <button
+      key={opt.value}
+      type="button"
+      className={`rh-scope-btn${populationReportScope === opt.value ? " rh-scope-btn-active" : ""}`}
+      aria-pressed={populationReportScope === opt.value}
+      onClick={() => setPopulationReportScope(opt.value)}
+    >
+      {opt.label}
+    </button>
+  ))}
+</div>
+```
+
+Place this inside the تقرير المجتمع card, above `renderExportControls`'s call (so scope is chosen before format/export). If you used the fallback structure, add matching CSS to `src/components/Sidebar/Tabs/Reports/Reports.css` — a plain segmented-button row is enough (flex row, one bordered button per option, an `-active` modifier class with a filled/highlighted background); mirror the existing `.rh-deck-edition-toggle` or format-toggle button's border-radius/padding/font-size values from the same file so it doesn't look like a foreign component bolted onto the card.
+
 - [ ] **Step 6: Update the "Quick actions" bar**
 
 Find the three shortcut buttons calling `generate("executive")`, `generate("sample")`, `generate("distribution")` (~lines 1131–1160). Replace the `generate("sample")` and `generate("distribution")` buttons with one `generate("population-report")` button, keeping the same label/icon pattern as its siblings.
@@ -2501,7 +2888,7 @@ Expected: this is where any remaining reference to `"sample"`/`"distribution"` `
 
 - [ ] **Step 8: Manual smoke test in the dev server**
 
-Run: `npm run dev`, open the Reports tab in Chrome/Edge with a workspace that has at least one processed-and-sampled-and-distributed month selected. Confirm: only one card reads "تقرير المجتمع" (no leftover Sample/Distribution cards), the format toggle (deck/xlsx/document) works, and clicking "التصدير" for each format produces a report containing real Arabic content with no console errors. This is a UI change — CLAUDE.md requires exercising it in a real browser, not just trusting the test suite.
+Run: `npm run dev`, open the Reports tab in Chrome/Edge with a workspace that has at least one processed-and-sampled-and-distributed month selected. Confirm: only one card reads "تقرير المجتمع" (no leftover Sample/Distribution cards), the format toggle (deck/xlsx/document) works, and clicking "التصدير" for each format produces a report containing real Arabic content with no console errors. Also exercise the new scope switch: select "المجتمع فقط" and export the deck — confirm it opens with only Section 1 content (no العينة/التوزيع slides) and the contents page lists only one section; switch to "العينة فقط" and confirm the opposite (Section 1 absent, Sections 2+3 present together); confirm "الكل" (the default) still produces the full three-section report. This is a UI change — CLAUDE.md requires exercising it in a real browser, not just trusting the test suite.
 
 - [ ] **Step 9: Lint**
 
