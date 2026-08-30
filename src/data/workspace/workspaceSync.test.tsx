@@ -22,6 +22,7 @@ import {
   __clearWorkspaceDirCacheForTests,
 } from "./workspacePaths";
 import { DISTRIBUTION_EVENTS_DIR } from "../distribution/distributionEventStore";
+import { ANSWER_EVENTS_DIR } from "../answers/answerEventStore";
 import {
   acceptNotification,
   loadNotifications,
@@ -747,18 +748,20 @@ describe("runSync — per-tick round-trip budget (UNC/SMB cost regression guard)
     // itself down from sixteen. The workspacePaths directory-handle cache
     // (item 1.7) now serves every handle it hands out, so the five it owns
     // (both roots, both {month} dirs, 5-system) cost nothing on a warm tick.
-    // What is left is the seven this file resolves off an already-resolved
+    // What is left is the eight this file resolves off an already-resolved
     // parent handle itself, outside those getters: 1-main, 2-employees,
-    // 3-approvals, 1-main/distribution.events, notifications,
-    // notifications/acks, and feedback.
+    // 3-approvals, 1-main/distribution.events, 1-main/answers.events,
+    // notifications, notifications/acks, and feedback.
     //
-    // Three of those were added by later signals — the acknowledgement
-    // signature, the segments signature, and the feedback log's revision (the
-    // unread-dot signal) — one open each per tick, and the point of all three
-    // is that they do NOT grow with the number of employees or with a month's
-    // history (the listings they feed are bounded, see boundedSizeSignature;
-    // the feedback probe reads one file's envelope revision, never its body).
-    expect(opens).toHaveLength(7);
+    // Four of those were added by later signals — the acknowledgement
+    // signature, the distribution segments signature, the answers.events
+    // segments signature (§6 of the answer-save append-only rewrite), and the
+    // feedback log's revision (the unread-dot signal) — one open each per
+    // tick, and the point of all four is that they do NOT grow with the
+    // number of employees or with a month's history (the listings they feed
+    // are bounded, see boundedSizeSignature; the feedback probe reads one
+    // file's envelope revision, never its body).
+    expect(opens).toHaveLength(8);
     const distinct = new Set(opens.map((entry) => entry.name));
     expect(distinct.size).toBe(opens.length); // no directory opened twice
   });
@@ -1023,5 +1026,75 @@ describe("runSync — the shared feedback log is its own family", () => {
 
     const after = await runSync({ directoryHandle: root, monthFolderName: MONTH });
     expect(after.changed.has("feedback")).toBe(true);
+  });
+});
+
+describe("runSync — §6 of the answer-save proposal: the answers.events segments are probed directly", () => {
+  /**
+   * `answersSignature` (the legacy per-employee `.answers.json`/`.requests.json`
+   * name+size listing) covers request-queue and pre-migration item files, but
+   * an employee whose answers now live entirely in `answers.events/` moves
+   * nothing that listing can see — mirrors the exact gap `segmentsSignature`
+   * closes for distribution (see the describe block above), applied to
+   * answers' own flat event directory. Zero new writes: this is a read-only,
+   * bounded (top-N by name) directory listing, the same primitive distribution
+   * already uses for exactly this purpose.
+   */
+  async function answerEventsDirFor(root: DirectoryHandleLike): Promise<DirectoryHandleLike> {
+    const main = await getSampleMainDir(root, MONTH, true);
+    return main.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: true });
+  }
+
+  const answerSegment = (ids: string[]): string =>
+    ids
+      .map((id) =>
+        `${JSON.stringify({
+          eventId: id,
+          eventType: "item-saved",
+          eventAt: "2026-05-01T08:00:00.000Z",
+          eventBy: "emp1",
+          authority: "self",
+          xrayImageId: `XR-${id}`,
+          answers: [{ fieldId: "f1", value: "v" }],
+          status: "draft",
+          answeredBy: "emp1",
+        })}\n`
+      )
+      .join("");
+
+  it("reports the answers family when an answer segment gains events", async () => {
+    const root = makeRoot();
+    const eventsDir = await answerEventsDirFor(root);
+    await writeRawFile(eventsDir, "a1-ans-devA-s1.ndjson", answerSegment(["e01"]));
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    await writeRawFile(eventsDir, "a1-ans-devA-s1.ndjson", answerSegment(["e01", "e02"]));
+    const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+
+    // Ambiguous by construction with the legacy answers-dir signature (Probe's
+    // own doc comment): both "requests" and "answers" are marked, never just one.
+    expect([...changed].sort()).toEqual(["answers", "requests"]);
+  });
+
+  it("reports the answers family when a whole new writer's answer segment appears", async () => {
+    const root = makeRoot();
+    const eventsDir = await answerEventsDirFor(root);
+    await writeRawFile(eventsDir, "a1-ans-devA-s1.ndjson", answerSegment(["e01"]));
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    await writeRawFile(eventsDir, "a1-ans-devB-s9.ndjson", answerSegment(["e02"]));
+    const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+
+    expect([...changed].sort()).toEqual(["answers", "requests"]);
+  });
+
+  it("reports nothing on a tick where the answer segments genuinely did not change", async () => {
+    const root = makeRoot();
+    const eventsDir = await answerEventsDirFor(root);
+    await writeRawFile(eventsDir, "a1-ans-devA-s1.ndjson", answerSegment(["e01"]));
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(changed.size).toBe(0);
   });
 });

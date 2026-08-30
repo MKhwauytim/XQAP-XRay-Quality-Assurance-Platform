@@ -107,7 +107,12 @@ export function readRealSession(): AuthSession | null {
   if (!runtimeSession) {
     runtimeSession = readStoredSession();
     if (runtimeSession && !isExpired(runtimeSession)) {
-      startAuthActivitySession(runtimeSession);
+      // A restored session is a RECONNECT, not a continuation of the
+      // original login — stamp the new activity entry from this moment,
+      // not from the persisted (possibly days-stale) `loginAt`. See
+      // `startAuthActivitySession` in authActivityLog.ts for why this must
+      // be passed explicitly.
+      startAuthActivitySession(runtimeSession, new Date().toISOString());
       // A RESTORED session is still a signed-in user, and the error log has to
       // know who they are. `setErrorActor` used to be called only from
       // `writeSession` — i.e. only on an explicit login — so every error logged

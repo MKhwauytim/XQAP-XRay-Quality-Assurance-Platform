@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { loadAllEmployeeFiles } from "../answers/answerStorage";
+import { loadAllEmployeeRequestFiles } from "../answers/answerStorage";
 import { loadAllSupervisorDecisions } from "../approvals/approvalStorage";
 import { getSampleEmployeeDir } from "../workspace/workspacePaths";
 import {
@@ -19,14 +19,20 @@ import {
 } from "./referralStorage";
 import type { ReferralRequest, ReopenRequest, ReplacementLog, ReplacementRequest } from "./referralTypes";
 
-// A4: `loadAllEmployeeFiles`/`loadAllSupervisorDecisions` are the two directory
-// scans `loadRequestLogs` is meant to perform exactly once per call, no matter
-// how many of the three per-kind exports a caller awaits concurrently. Wrapped
-// in `vi.fn(actual)` so the default behaviour is unchanged and only the call
-// count is observed.
+// A4: `loadAllEmployeeRequestFiles`/`loadAllSupervisorDecisions` are the two
+// directory scans `loadRequestLogs` is meant to perform exactly once per call,
+// no matter how many of the three per-kind exports a caller awaits
+// concurrently. Wrapped in `vi.fn(actual)` so the default behaviour is
+// unchanged and only the call count is observed.
+//
+// `loadAllEmployeeRequestFiles`, not `loadAllEmployeeFiles`: Stage 2 of the
+// answer-save append-only rewrite (§7 Finding 5c) switched this module to the
+// requests-only fast path, since every field `loadRequestLogs` reads off an
+// employee file now lives in `{username}.requests.json` and never needed the
+// item-answer segments/fold `loadAllEmployeeFiles` would pull in.
 vi.mock("../answers/answerStorage", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../answers/answerStorage")>();
-  return { ...actual, loadAllEmployeeFiles: vi.fn(actual.loadAllEmployeeFiles) };
+  return { ...actual, loadAllEmployeeRequestFiles: vi.fn(actual.loadAllEmployeeRequestFiles) };
 });
 vi.mock("../approvals/approvalStorage", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../approvals/approvalStorage")>();
@@ -328,13 +334,13 @@ describe("loadRequestLogs (A4 — one shared scan backing all three request logs
     status: "pending",
   });
 
-  it("performs exactly one loadAllEmployeeFiles scan and one loadAllSupervisorDecisions scan for a Promise.all of all three exported loaders (down from three each)", async () => {
+  it("performs exactly one loadAllEmployeeRequestFiles scan and one loadAllSupervisorDecisions scan for a Promise.all of all three exported loaders (down from three each)", async () => {
     const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
     await appendReferralRequest(root, "5-May-2026", mockReferral("req-1", "alice", "bob"));
     await appendReplacementRequest(root, "5-May-2026", mockReplacement("rep-1", "alice"));
     await appendReopenRequest(root, "5-May-2026", mockReopen("reo-1", "alice"));
 
-    vi.mocked(loadAllEmployeeFiles).mockClear();
+    vi.mocked(loadAllEmployeeRequestFiles).mockClear();
     vi.mocked(loadAllSupervisorDecisions).mockClear();
 
     const [referrals, replacements, reopens] = await Promise.all([
@@ -346,7 +352,7 @@ describe("loadRequestLogs (A4 — one shared scan backing all three request logs
     expect(referrals.requests).toHaveLength(1);
     expect(replacements.requests).toHaveLength(1);
     expect(reopens.requests).toHaveLength(1);
-    expect(vi.mocked(loadAllEmployeeFiles)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(loadAllEmployeeRequestFiles)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(loadAllSupervisorDecisions)).toHaveBeenCalledTimes(1);
   });
 
@@ -354,7 +360,7 @@ describe("loadRequestLogs (A4 — one shared scan backing all three request logs
     const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
     await appendReferralRequest(root, "5-May-2026", mockReferral("req-1", "alice", "bob"));
 
-    vi.mocked(loadAllEmployeeFiles).mockClear();
+    vi.mocked(loadAllEmployeeRequestFiles).mockClear();
     vi.mocked(loadAllSupervisorDecisions).mockClear();
 
     const [a, b, c] = await Promise.all([
@@ -365,13 +371,13 @@ describe("loadRequestLogs (A4 — one shared scan backing all three request logs
     expect(a.referrals.requests).toHaveLength(1);
     expect(b.referrals.requests).toHaveLength(1);
     expect(c.referrals.requests).toHaveLength(1);
-    expect(vi.mocked(loadAllEmployeeFiles)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(loadAllEmployeeRequestFiles)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(loadAllSupervisorDecisions)).toHaveBeenCalledTimes(1);
 
     // A call started after the previous one settled is fresh work again --
     // dedupeInFlight is not a TTL cache.
     await loadRequestLogs(root, "5-May-2026");
-    expect(vi.mocked(loadAllEmployeeFiles)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(loadAllEmployeeRequestFiles)).toHaveBeenCalledTimes(2);
   });
 
   it("one corrupt *.answers.json among three still returns the requests from the two good files, for all three request kinds", async () => {

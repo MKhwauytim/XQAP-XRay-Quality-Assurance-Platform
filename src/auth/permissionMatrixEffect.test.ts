@@ -42,6 +42,7 @@ const EXPECTED_RESTRICTED: ReadonlyArray<readonly [AuthRole, string]> = [
     "user-management/feature-permissions",
     "user-management/activity",
     "user-management/actions",
+    "user-management/performance",
   ].map((tabId) => ["guest", tabId] as const),
   ["guest", "reports/kpi"],
   ["guest", "reports/report-designer"],

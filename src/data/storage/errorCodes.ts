@@ -27,6 +27,8 @@
  * | `POP`  | Population import / processing / save                        |
  * | `DIST` | Distribution and its event log                               |
  * | `SMP`  | Sampling and the draw                                        |
+ * | `ANS`  | Employee answers and their append-only event log (Stage 2 of |
+ * |        | docs/architecture/ANSWER_SAVE_DELTA_PROPOSAL_2026-08-27.md)   |
  *
  * Each entry carries an English **meaning** (for us, in the log and in this
  * file) and a **labelKey** pointing at the Arabic user-facing sentence in
@@ -37,7 +39,7 @@
 import { getLabels, type LabelKey } from "../labels/labelsStore";
 import { logError } from "./errorLogger";
 
-export type ErrorArea = "WS" | "FS" | "IO" | "AUTH" | "POP" | "DIST" | "SMP";
+export type ErrorArea = "WS" | "FS" | "IO" | "AUTH" | "POP" | "DIST" | "SMP" | "ANS";
 
 export type ErrorCodeEntry = {
   /** English technical meaning — for the error log and for us. Never shown raw. */
@@ -484,6 +486,42 @@ export const ERROR_CODES = {
     meaning:
       "appendSampleRow rejected an enlargement: the dead row was already substituted by a DIFFERENT replacement row (XQ-DIST-005 partial-write state) — the recovery is retrying with the original candidate, which resumes",
     labelKey: "err_smp_008_substitution_conflict",
+  },
+
+  // ── ANS: employee answers and their append-only event log ────────────────
+  "XQ-ANS-001": {
+    meaning: "answer event file write: file handle exposes no createWritable",
+    labelKey: "err_ans_001_no_createwritable",
+  },
+  "XQ-ANS-002": {
+    meaning:
+      "answer events were durably written but the post-close read-back could not confirm the segment (share visibility lag); the append was kept because the bytes are on disk",
+    labelKey: "err_ans_002_write_unconfirmed",
+  },
+  "XQ-ANS-003": {
+    meaning:
+      "answer event segment read back at the WRONG size after retries — a genuine bad write, not a visibility artefact",
+    labelKey: "err_ans_003_segment_size_mismatch",
+  },
+  "XQ-ANS-004": {
+    meaning:
+      "the answer event log could not be read, or a segment's NDJSON could not be parsed — an unreadable answer history, never silently treated as empty",
+    labelKey: "err_ans_004_unreadable_segment",
+  },
+  "XQ-ANS-005": {
+    meaning:
+      "an employee's answer event chain has events but no migration-seed marker in its earliest segment — pre-migration rollback residue or a corrupted first segment (proposal §8/§10); refused rather than guessed at",
+    labelKey: "err_ans_005_missing_migration_seed",
+  },
+  "XQ-ANS-006": {
+    meaning:
+      "a migration-seed event names a legacy answers.json content hash that does not match the legacy file actually on disk — the legacy file diverged after migration (§9 rollback residue) or the seed record is corrupt",
+    labelKey: "err_ans_006_migration_seed_hash_mismatch",
+  },
+  "XQ-ANS-007": {
+    meaning:
+      "RESERVED (not wired): an answer fold checkpoint's event-set digest did not match the cache it was paired with, so the checkpoint would be discarded and the month refolded from scratch rather than resumed — reserved for the persisted-checkpoint optimization Stage 2 deliberately does not implement (every read cold-folds the event log); wire this when that lands",
+    labelKey: "err_ans_007_checkpoint_digest_mismatch",
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
