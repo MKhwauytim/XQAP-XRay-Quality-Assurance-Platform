@@ -69,6 +69,26 @@ describe("buildPopulationDeck", () => {
     expect(html).not.toContain("قيد الانتظار");
   });
 
+  it("includes the source-revisions footer when sourceRevisions is populated", async () => {
+    const populationRows = [makeRow("1", "ميناء جدة", { portType: "بحري" })];
+    const sample = makeSampleMaster(populationRows);
+    const distribution = makeDistribution([{ id: "1", assignedTo: "user1", status: "completed", row: { ...populationRows[0] } }]);
+    const html = await buildPopulationDeck({
+      monthFolderName: "8-August-2026",
+      manifest: makeManifest(),
+      processingSummary: makeProcessingSummary(),
+      riskRawRowCount: 10,
+      biRawRowCount: 8,
+      populationRows,
+      sampleRows: sample.rows,
+      distributionEntries: distribution.entries,
+      employeeDisplayNames: { user1: "أحمد" },
+      sourceRevisions: { "population.final.json": 3 },
+    });
+    expect(html).toContain("source-revisions");
+    expect(html).toContain("population.final.json");
+  });
+
   describe("golden snapshot (deterministic-by-contract)", () => {
     it("matches the frozen-time snapshot", async () => {
       vi.useFakeTimers({ toFake: ["Date"] });

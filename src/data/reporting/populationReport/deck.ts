@@ -18,6 +18,7 @@ import type { PopulationReportModel, PopulationReportInput } from "./model";
 import { computePopulationReportModel } from "./model";
 import type { PortBreakdown, ResultCounts, PopulationReportScope } from "./types";
 import { STAGE_LABELS } from "./fold";
+import { sourceRevisionsFooterHtml } from "../sourceRevisions";
 
 const ORG: OrgBlock = { logoUrl: "", orgName: "ضمان جودة الأشعة", lines: [] };
 
@@ -383,11 +384,16 @@ export async function buildPopulationDeck(
 ): Promise<string> {
   const model = computePopulationReportModel(input);
   const slides = await buildPopulationDeckSlides(model, scope);
-  return buildDeckV3Html(slides, model.monthLabel, {
-    title: "تقرير المجتمع",
-    navBrand: "تقرير المجتمع",
-    toolbarBrand: "تقرير المجتمع",
-  });
+  return buildDeckV3Html(
+    slides,
+    model.monthLabel,
+    {
+      title: "تقرير المجتمع",
+      navBrand: "تقرير المجتمع",
+      toolbarBrand: "تقرير المجتمع",
+    },
+    sourceRevisionsFooterHtml(model.sourceRevisions, esc)
+  );
 }
 
 export async function openPopulationDeck(input: PopulationReportInput, scope: PopulationReportScope = "both"): Promise<void> {

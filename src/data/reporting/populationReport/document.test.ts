@@ -33,6 +33,12 @@ describe("buildPopulationDocument", () => {
     expect(html).not.toContain("قيد الانتظار");
   });
 
+  it("includes the source-revisions footer when sourceRevisions is populated", async () => {
+    const html = await buildPopulationDocument({ ...baseInput(), sourceRevisions: { "sample.master.json": 1 } });
+    expect(html).toContain("source-revisions");
+    expect(html).toContain("sample.master.json");
+  });
+
   it("paginates per-employee detail rather than truncating it", async () => {
     const input = baseInput();
     // 50 distinct employees to force pagination of the employee tables

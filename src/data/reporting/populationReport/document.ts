@@ -22,6 +22,7 @@ import type { PopulationReportModel, PopulationReportInput } from "./model";
 import { RESULT_HEADERS, resultRow } from "./deck";
 import { STAGE_LABELS } from "./fold";
 import type { PortBreakdown, PopulationReportScope } from "./types";
+import { sourceRevisionsFooterHtml, SOURCE_REVISIONS_CSS } from "../sourceRevisions";
 
 // rowsPerPage is set well above any realistic port count (a country's customs
 // ports are a small, bounded list) so the [0] chunk below is never actually
@@ -232,12 +233,13 @@ export async function buildPopulationDocument(
     pages.push(...(await buildSection3Pages(model)));
   }
   pages.push(docClosing({ org, title: "نهاية التقرير", closingLine: `تقرير المجتمع — ${model.monthLabel}` }));
+  const footer = sourceRevisionsFooterHtml(model.sourceRevisions, esc);
 
   return `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8" />
 <title>تقرير المجتمع — ${esc(model.monthLabel)}</title>
-<style>${DOCUMENT_V3_CSS}</style></head>
+<style>${DOCUMENT_V3_CSS}${footer ? SOURCE_REVISIONS_CSS : ""}</style></head>
 <body><div class="docviewer"><aside class="sidebar no-print"><div class="doc-brand">تقرير المجتمع</div><div class="doc-brand-sub">${esc(model.monthLabel)}</div></aside>
-<main class="content">${pages.join("\n")}</main></div></body></html>`;
+<main class="content">${pages.join("\n")}${footer}</main></div></body></html>`;
 }
 
 export async function openPopulationDocument(

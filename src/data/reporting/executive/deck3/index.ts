@@ -16,6 +16,7 @@ import { formatMonthFolderShortLabel } from "../../../population/monthFolder";
 import { getLabels } from "../../../labels/labelsStore";
 import { ZATCA_LOGO_URL } from "../../../../branding/organization";
 import { esc } from "../primitives";
+import { SOURCE_REVISIONS_CSS } from "../../sourceRevisions";
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
 
 /**
@@ -88,6 +89,7 @@ export function buildDeckV3Html(
   slides: string,
   monthLabel: string,
   brand: { title?: string; navBrand?: string; toolbarBrand?: string } = {},
+  footerNote: string = "",
 ): string {
   const labels = getLabels();
   const fullscreenEnter = esc(labels.exec_deck_fullscreen_enter);
@@ -103,7 +105,7 @@ export function buildDeckV3Html(
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>${esc(title)} — ${esc(monthLabel)}</title>
-<style>${DECK_V3_CSS}</style>
+<style>${DECK_V3_CSS}${footerNote ? SOURCE_REVISIONS_CSS : ""}</style>
 <script>${DECK_V3_SCALE_SCRIPT}</script>
 </head>
 <body>
@@ -132,7 +134,7 @@ export function buildDeckV3Html(
       <button class="btn" onclick="window.print()" title="اختر «حفظ كـ PDF» من المتصفح عند الطباعة، وليس «Microsoft Print to PDF»، لضمان الحجم والجودة الصحيحين">طباعة / PDF</button>
     </div>
   </div>
-${slides}
+${slides}${footerNote ? `\n${footerNote}` : ""}
 </div>
 <button type="button" class="btn-slide-nav btn-slide-prev" id="deck-slide-prev" aria-label="${slidePrevLabel}" title="${slidePrevLabel}">${icon("arrow", 20)}</button>
 <button type="button" class="btn-slide-nav btn-slide-next" id="deck-slide-next" aria-label="${slideNextLabel}" title="${slideNextLabel}">${icon("arrow", 20)}</button>

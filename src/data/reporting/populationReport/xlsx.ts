@@ -7,6 +7,7 @@ import { computePopulationReportModel } from "./model";
 import type { PopulationReportInput, PopulationReportModel } from "./model";
 import { STAGE_LABELS } from "./fold";
 import type { PopulationReportScope } from "./types";
+import { hasSourceRevisions, sourceRevisionsSheetAoa, SOURCE_REVISIONS_SHEET_NAME_AR } from "../sourceRevisions";
 
 function stageSheetRows(model: PopulationReportModel, source: "reconciled" | "sample") {
   const bucket = model[source];
@@ -72,6 +73,14 @@ export async function buildPopulationXlsx(
       الإجمالي: emp.total,
     }));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(certScanRows), "التوزيع - CertScan");
+  }
+
+  if (hasSourceRevisions(input.sourceRevisions)) {
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet(sourceRevisionsSheetAoa(input.sourceRevisions)),
+      SOURCE_REVISIONS_SHEET_NAME_AR
+    );
   }
 
   XLSX.writeFile(wb, `تقرير_المجتمع_${input.monthFolderName}.xlsx`);

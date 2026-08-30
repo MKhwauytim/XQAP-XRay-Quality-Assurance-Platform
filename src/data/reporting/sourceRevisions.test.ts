@@ -55,22 +55,16 @@ describe("sourceRevisions helper (B2)", () => {
   });
 });
 
-// NOTE (found while migrating this file off buildSampleDocument/buildSampleDeck
-// for the population/report merge): unlike the retired sample builder,
-// buildPopulationDocument/buildPopulationDeck do NOT render a source-revisions
-// footer — `sourceRevisions` flows through into `PopulationReportModel` (see
-// populationReport/model.ts) but neither builder reads
-// `model.sourceRevisions` anywhere. That looks like a real gap (the Reports
-// tab's TabView.tsx already computes and passes `sourceRevisions` into the
-// population report input, expecting it to show up somewhere), but wiring a
-// footer into the v3 document/deck chrome is a product/visual decision for
-// the report owner, not something to improvise inside this test migration.
-// These tests are therefore scoped down to what's actually true today: the
-// field is accepted on the real `PopulationReportInput` shape, with and
-// without a value, and the builders still produce well-formed output. This
-// file's role here has always been "a convenient real HTML-producing
-// builder" (per the population-report-merge plan), not sample-report-specific
-// behavior — see the original block this replaced in git history.
+// NOTE: originally (Task 11 era) buildPopulationDocument/buildPopulationDeck
+// did NOT render a source-revisions footer — `sourceRevisions` flowed through
+// into `PopulationReportModel` (see populationReport/model.ts) but neither
+// builder read `model.sourceRevisions` anywhere. That tracked gap (the
+// Reports tab's TabView.tsx already computed and passed `sourceRevisions`
+// into the population report input, expecting it to show up somewhere) is
+// closed by Task 11b: both builders now render `sourceRevisionsFooterHtml`
+// via `buildDeckV3Html`'s `footerNote` parameter / document.ts's own footer
+// concatenation. The tests below assert the new real (positive) behavior
+// instead of the old no-op — see git history for the original block.
 describe("sourceRevisions field on PopulationReportInput (B2)", () => {
   const rows = [makeRow("A1", "بري"), makeRow("A2", "بري")];
   function buildInput(overrides: Partial<PopulationReportInput> = {}): PopulationReportInput {
@@ -89,26 +83,23 @@ describe("sourceRevisions field on PopulationReportInput (B2)", () => {
     };
   }
 
-  // Executable canary for the gap described above: asserts the CURRENT no-op
-  // behavior directly (output is byte-identical whether or not sourceRevisions
-  // is populated), rather than a vacuous "it builds" check that would pass
-  // regardless. This will fail the instant someone wires the footer into
-  // document.ts/deck.ts without updating this test — which is correct: at
-  // that point this test needs to be rewritten to assert the new real
-  // behavior instead of the no-op.
-  test("sourceRevisions currently has no observable effect on the rendered document (tracked gap — see comment above)", async () => {
+  test("sourceRevisions now renders as a footer on the document (tracked gap from Task 11 closed by Task 11b)", async () => {
     const withRevisions = await buildPopulationDocument(
       buildInput({ sourceRevisions: { "population.final.json": 3, "sample.master.json": 1 } })
     );
     const withoutRevisions = await buildPopulationDocument(buildInput({ sourceRevisions: undefined }));
-    expect(withRevisions).toBe(withoutRevisions);
+    expect(withRevisions).not.toBe(withoutRevisions);
+    expect(withRevisions).toContain("population.final.json");
+    expect(withoutRevisions).not.toContain("source-revisions");
   });
 
-  test("sourceRevisions currently has no observable effect on the rendered deck (tracked gap — see comment above)", async () => {
+  test("sourceRevisions now renders as a footer on the deck (tracked gap from Task 11 closed by Task 11b)", async () => {
     const withRevisions = await buildPopulationDeck(
       buildInput({ sourceRevisions: { "population.final.json": 3, "sample.master.json": 1 } })
     );
     const withoutRevisions = await buildPopulationDeck(buildInput({ sourceRevisions: undefined }));
-    expect(withRevisions).toBe(withoutRevisions);
+    expect(withRevisions).not.toBe(withoutRevisions);
+    expect(withRevisions).toContain("population.final.json");
+    expect(withoutRevisions).not.toContain("source-revisions");
   });
 });
