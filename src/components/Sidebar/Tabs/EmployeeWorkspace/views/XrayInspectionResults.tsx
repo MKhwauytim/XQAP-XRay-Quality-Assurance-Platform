@@ -36,7 +36,7 @@ import {
 import type { ReferralRequest, ReplacementRequest } from "../../../../../data/referral/referralTypes";
 import { loadAdminBrowsePreset, loadUserBrowsePreset } from "../../../../../data/preferences/browsePresetStorage";
 import { useColumnPreset } from "../../../../../data/preferences/useColumnPreset";
-import { subscribeToDataRefresh } from "../../../../../data/workspace/dataRefreshSignal";
+import { notifyLocalDataChange, subscribeToDataRefresh } from "../../../../../data/workspace/dataRefreshSignal";
 import { loadSampleMaster } from "../../../../../data/sampling/sampleStorage";
 import {
   displayXrayImageId,
@@ -542,6 +542,12 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
       }
       setExpandedRowKey(null);
       await loadData({ silent: true });
+      // Tell the other mounted views — this can flip an answer to draft,
+      // return a completed distribution entry to pending, and (reopenAnswer.ts's
+      // own auto-resolve sweep) silently settle a request the employee filed
+      // for this exact case, none of which «اعتماد الطلبات» or «صور الأشعة
+      // المحالة» would otherwise see before their next periodic refresh.
+      notifyLocalDataChange(["answers", "requests", "distribution"]);
     } catch (err) {
       setReopenError(err instanceof Error ? err.message : "خطأ غير معروف.");
     } finally {
