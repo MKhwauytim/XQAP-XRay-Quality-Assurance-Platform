@@ -24,15 +24,6 @@ export type TabCatalogEntry = ManagedTab & {
 };
 
 const ALL_ROLES = ["guest", "employee", "supervisor", "manager", "admin"] as const;
-/**
- * Every role that can hold and act on casework -- i.e. ALL_ROLES minus `guest`.
- * `guest` is defined as a read-only observer/external auditor (see MANAGED_ROLES
- * in userManagement.ts), and the pages on this ceiling exist only to CREATE work
- * (ingest rows, assign them to employees). There is nothing for a viewer to view
- * there, so leaving guest out keeps the matrix honest instead of offering a
- * grant that contradicts the role's definition.
- */
-const OPERATIONAL_ROLES = ["employee", "supervisor", "manager", "admin"] as const;
 
 export const TAB_CATALOG: readonly TabCatalogEntry[] = [
   { id: "population", label: "إدارة بيانات الأشعة", allowedRoles: ALL_ROLES, group: "workflow" },
@@ -42,13 +33,15 @@ export const TAB_CATALOG: readonly TabCatalogEntry[] = [
   // used to be a stand-alone top-level "system" tab. Its ceiling is a SUB-TAB ceiling
   // now and is independent of the parent's ALL_ROLES ceiling (see SUB_TAB_ROLE_CEILINGS).
   //
-  // Widened from ADMIN_ONLY to OPERATIONAL_ROLES: a ceiling is a hard cap on what an
-  // admin may EVER grant, and an admin-only cap made the whole row a dead
-  // "مقيّد بالنظام" notice in the page-permissions matrix -- the owner's requirement is
-  // that the app be fully customizable from admin. Widening the ceiling makes the page
-  // GRANTABLE, not granted: createDefaultPermissions() still ships "none" for every
-  // managed role, and the two ad-hoc features stay off by default (FEATURE_DEFAULTS).
-  { id: "population/adhoc-import", label: "ارفاق حالات استثنائية", parentId: "population", allowedRoles: OPERATIONAL_ROLES },
+  // Widened ADMIN_ONLY -> OPERATIONAL_ROLES (2026-08-21) -> ALL_ROLES (2026-08-30):
+  // a ceiling is a hard cap on what an admin may EVER grant, and excluding `guest`
+  // (the read-only observer/external-auditor role) kept this row a dead "مقيّد
+  // بالنظام" notice in that one column even after the first widening -- the owner's
+  // requirement is that the app be fully customizable from admin, `guest` included.
+  // Widening the ceiling makes the page GRANTABLE, not granted: createDefaultPermissions()
+  // still ships "none" for every managed role, and the two ad-hoc features stay off
+  // by default (FEATURE_DEFAULTS).
+  { id: "population/adhoc-import", label: "ارفاق حالات استثنائية", parentId: "population", allowedRoles: ALL_ROLES },
   { id: "employee-workspace", label: "إدارة مساحة العمل", allowedRoles: ALL_ROLES, group: "workflow" },
   { id: "ew/xray-referrals", label: "صور الأشعة المحالة", parentId: "employee-workspace", allowedRoles: ALL_ROLES },
   { id: "ew/xray-results", label: "نتائج فحص الأشعة", parentId: "employee-workspace", allowedRoles: ALL_ROLES },
@@ -60,32 +53,37 @@ export const TAB_CATALOG: readonly TabCatalogEntry[] = [
   // click it but canAccessTab/App.tsx would still refuse. Nothing in the product
   // requires reports or archive to be closed to employees -- the shipped matrix
   // defaults still ship them as "none", so this only restores the admin's ability to
-  // grant them. (reports/kpi and reports/report-designer keep their own, narrower
-  // ceilings -- a sub-tab ceiling is independent of its parent's.)
+  // grant them. (reports/kpi and reports/report-designer carry their own sub-tab
+  // ceiling, independent of their parent's -- see below.)
   { id: "reports", label: "إدارة التقارير", allowedRoles: ALL_ROLES, group: "analysis" },
   { id: "reports/reports", label: "التقارير", parentId: "reports", allowedRoles: ALL_ROLES },
-  // Widened from ["supervisor", "manager", "admin"] (2026-08-27): excluding
-  // `employee` made that whole matrix row a dead control for these two sub-tabs
-  // -- an admin could click it but the ceiling would still refuse it. Widening
-  // only makes the row GRANTABLE; createDefaultPermissions() still ships "none"
-  // for employee on both, so nothing is auto-elevated by this change alone.
-  // `guest` stays out on purpose, same rationale as population/adhoc-import.
-  { id: "reports/kpi", label: "مؤشرات الأداء", parentId: "reports", allowedRoles: OPERATIONAL_ROLES },
-  { id: "reports/report-designer", label: "مصمم التقارير", parentId: "reports", allowedRoles: OPERATIONAL_ROLES },
+  // Widened ["supervisor","manager","admin"] -> OPERATIONAL_ROLES (2026-08-27,
+  // added employee) -> ALL_ROLES (2026-08-30, added guest): each step closed a
+  // dead matrix row/column an admin could click but the ceiling still refused.
+  // createDefaultPermissions() still ships "none" for guest/employee on both,
+  // so nothing is auto-elevated by this change alone.
+  { id: "reports/kpi", label: "مؤشرات الأداء", parentId: "reports", allowedRoles: ALL_ROLES },
+  { id: "reports/report-designer", label: "مصمم التقارير", parentId: "reports", allowedRoles: ALL_ROLES },
   { id: "archive", label: "إدارة الأرشيف", allowedRoles: ALL_ROLES, group: "analysis" },
-  // Widened from ADMIN_ONLY (2026-08-25), same rationale as population/adhoc-import above:
-  // an admin-only ceiling made the entire section a dead "مقيّد بالنظام" block in the
-  // page-permissions matrix, since admin is never a column there (MANAGED_ROLES excludes
-  // it -- see userManagement.ts). Widening only makes the section GRANTABLE; every
-  // managed role still ships "none" by default (createDefaultPermissions()), so nothing
-  // is auto-elevated by this change alone.
-  { id: "user-management", label: "إدارة المستخدمين", allowedRoles: OPERATIONAL_ROLES, group: "system" },
-  { id: "user-management/users", label: "المستخدمون", parentId: "user-management", allowedRoles: OPERATIONAL_ROLES },
-  { id: "user-management/page-permissions", label: "صلاحيات الصفحات", parentId: "user-management", allowedRoles: OPERATIONAL_ROLES },
-  { id: "user-management/feature-permissions", label: "صلاحيات الميزات", parentId: "user-management", allowedRoles: OPERATIONAL_ROLES },
-  { id: "user-management/activity", label: "متابعة الأنشطة", parentId: "user-management", allowedRoles: OPERATIONAL_ROLES },
-  { id: "user-management/actions", label: "سجل الإجراءات", parentId: "user-management", allowedRoles: OPERATIONAL_ROLES },
-  { id: "user-management/performance", label: "تقييم الأداء", parentId: "user-management", allowedRoles: OPERATIONAL_ROLES },
+  // Widened ADMIN_ONLY -> OPERATIONAL_ROLES (2026-08-25): an admin-only ceiling made
+  // the entire section a dead "مقيّد بالنظام" block in the page-permissions matrix,
+  // since admin is never a column there (MANAGED_ROLES excludes it -- see
+  // userManagement.ts). That widening still excluded `guest` "deliberately" (it
+  // mutates other accounts/permissions -- nothing for a viewer to view), but two of
+  // these six sub-tabs (activity, actions) are pure audit-trail reads, exactly what
+  // the read-only-observer role exists for, and the owner asked for every remaining
+  // "مقيّد بالنظام" cell to go regardless. Widened to ALL_ROLES (2026-08-30) across
+  // the board rather than splitting the six by mutate-vs-view, for one matrix rule
+  // admins can reason about instead of two. Widening only makes a row GRANTABLE;
+  // every managed role -- guest included -- still ships "none" by default
+  // (createDefaultPermissions()), so nothing is auto-elevated by this change alone.
+  { id: "user-management", label: "إدارة المستخدمين", allowedRoles: ALL_ROLES, group: "system" },
+  { id: "user-management/users", label: "المستخدمون", parentId: "user-management", allowedRoles: ALL_ROLES },
+  { id: "user-management/page-permissions", label: "صلاحيات الصفحات", parentId: "user-management", allowedRoles: ALL_ROLES },
+  { id: "user-management/feature-permissions", label: "صلاحيات الميزات", parentId: "user-management", allowedRoles: ALL_ROLES },
+  { id: "user-management/activity", label: "متابعة الأنشطة", parentId: "user-management", allowedRoles: ALL_ROLES },
+  { id: "user-management/actions", label: "سجل الإجراءات", parentId: "user-management", allowedRoles: ALL_ROLES },
+  { id: "user-management/performance", label: "تقييم الأداء", parentId: "user-management", allowedRoles: ALL_ROLES },
   // Widened from ["guest", "admin"] (2026-08-27): excluding employee/supervisor/
   // manager made the entire settings row a dead "مقيّد بالنظام" block for 3 of
   // the 4 managed-role columns in the page-permissions matrix. Widening only
