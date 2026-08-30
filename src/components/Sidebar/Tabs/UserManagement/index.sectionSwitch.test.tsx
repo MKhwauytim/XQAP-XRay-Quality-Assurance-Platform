@@ -186,3 +186,45 @@ describe("UserManagementTab — activity/actions section-switch skip-guard", () 
     await waitFor(() => expect(readSpy).toHaveBeenCalledTimes(2));
   });
 });
+
+describe("UserManagementTab — performance section reuses the activity/actions loaders", () => {
+  it("loads both the activity log and the action log when switching to 'performance'", async () => {
+    mockSession();
+    const handle = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    mockWorkspace(handle);
+    const activitySpy = vi
+      .spyOn(authActivityLog, "readAuthActivityLog")
+      .mockResolvedValue([]);
+    const actionsSpy = vi
+      .spyOn(actionLog, "readWorkspaceActions")
+      .mockResolvedValue([]);
+
+    render(<UserManagementTab />);
+    await waitForMount();
+    switchSection("performance");
+
+    await waitFor(() => expect(activitySpy).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(actionsSpy).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("تقييم الأداء")).toBeTruthy();
+  });
+
+  it("does not re-fetch the activity log when switching from 'activity' to 'performance' for the same workspace", async () => {
+    mockSession();
+    const handle = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    mockWorkspace(handle);
+    const activitySpy = vi
+      .spyOn(authActivityLog, "readAuthActivityLog")
+      .mockResolvedValue([]);
+
+    render(<UserManagementTab />);
+    await waitForMount();
+    switchSection("activity");
+    await waitFor(() => expect(activitySpy).toHaveBeenCalledTimes(1));
+
+    switchSection("performance");
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(activitySpy).toHaveBeenCalledTimes(1);
+  });
+});

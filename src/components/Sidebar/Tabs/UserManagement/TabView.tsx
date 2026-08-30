@@ -55,6 +55,7 @@ import {
   type FeatureSubGroup,
 } from "./PermissionSections";
 import { ActionsSection, ActivitySection } from "./AuditSections";
+import { PerformanceSection } from "./PerformanceSection";
 import {
   UsersSection,
 } from "./UsersSection";
@@ -62,7 +63,7 @@ import { INITIAL_USER_FORM, type UserFormState } from "./userForm";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type PageSection = "users" | "page-permissions" | "feature-permissions" | "activity" | "actions";
+type PageSection = "users" | "page-permissions" | "feature-permissions" | "activity" | "actions" | "performance";
 
 const KNOWN_USER_MANAGEMENT_SECTIONS = new Set<PageSection>([
   "users",
@@ -70,6 +71,7 @@ const KNOWN_USER_MANAGEMENT_SECTIONS = new Set<PageSection>([
   "feature-permissions",
   "activity",
   "actions",
+  "performance",
 ]);
 
 /** This tab's id in the sidebar rail / sub-tab selection store. */
@@ -199,7 +201,7 @@ export default function UserManagementTab() {
   );
 
   useEffect(() => {
-    if (section !== "activity") return;
+    if (section !== "activity" && section !== "performance") return;
     if (activityLoadedForRef.current === directoryHandle) return;
     let cancelled = false;
     setIsActivityLoading(true);
@@ -220,7 +222,7 @@ export default function UserManagementTab() {
   }, [section, directoryHandle]);
 
   useEffect(() => {
-    if (section !== "actions") return;
+    if (section !== "actions" && section !== "performance") return;
     if (!directoryHandle) {
       // Nothing to read without a connected workspace -- resolve the flag so
       // it can't stay stuck "loading" from a previous in-flight read whose
@@ -724,6 +726,31 @@ export default function UserManagementTab() {
           hasWorkspace={!!directoryHandle}
           onRefresh={() => {
             if (!directoryHandle) return;
+            setIsActionsLoading(true);
+            void readWorkspaceActions(directoryHandle)
+              .then(setActionEntries)
+              .catch(logRejection("userManagement:refreshWorkspaceActions"))
+              .finally(() => setIsActionsLoading(false));
+          }}
+        />
+      )}
+      {section === "performance" && (
+        <PerformanceSection
+          users={state.users}
+          activityEntries={activityEntries}
+          actionEntries={actionEntries}
+          isLoading={isActivityLoading || isActionsLoading}
+          hasWorkspace={!!directoryHandle}
+          onRefresh={() => {
+            setIsActivityLoading(true);
+            void readAuthActivityLog()
+              .then(setActivityEntries)
+              .catch(logRejection("userManagement:refreshActivityLog"))
+              .finally(() => setIsActivityLoading(false));
+            if (!directoryHandle) {
+              setIsActionsLoading(false);
+              return;
+            }
             setIsActionsLoading(true);
             void readWorkspaceActions(directoryHandle)
               .then(setActionEntries)

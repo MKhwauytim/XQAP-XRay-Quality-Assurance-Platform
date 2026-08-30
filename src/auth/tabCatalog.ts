@@ -85,6 +85,7 @@ export const TAB_CATALOG: readonly TabCatalogEntry[] = [
   { id: "user-management/feature-permissions", label: "صلاحيات الميزات", parentId: "user-management", allowedRoles: OPERATIONAL_ROLES },
   { id: "user-management/activity", label: "متابعة الأنشطة", parentId: "user-management", allowedRoles: OPERATIONAL_ROLES },
   { id: "user-management/actions", label: "سجل الإجراءات", parentId: "user-management", allowedRoles: OPERATIONAL_ROLES },
+  { id: "user-management/performance", label: "تقييم الأداء", parentId: "user-management", allowedRoles: OPERATIONAL_ROLES },
   // Widened from ["guest", "admin"] (2026-08-27): excluding employee/supervisor/
   // manager made the entire settings row a dead "مقيّد بالنظام" block for 3 of
   // the 4 managed-role columns in the page-permissions matrix. Widening only

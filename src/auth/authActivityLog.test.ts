@@ -60,6 +60,18 @@ describe("authActivityLog", () => {
     expect(entry?.durationMs).toBe(3 * 60 * 60 * 1000);
   });
 
+  it("accepts an explicit start timestamp distinct from the session's loginAt (session-restore fix)", async () => {
+    vi.setSystemTime(new Date("2026-06-02T09:00:00.000Z"));
+    startAuthActivitySession(
+      makeSession("user1", "2026-06-01T08:00:00.000Z"),
+      "2026-06-02T09:00:00.000Z"
+    );
+
+    const [entry] = await readAuthActivityLog();
+    expect(entry?.signedInAt).toBe("2026-06-02T09:00:00.000Z");
+    expect(entry?.durationMs).toBe(0);
+  });
+
   it("closes the previous active session when a new sign-in starts", async () => {
     startAuthActivitySession(makeSession("user1", "2026-06-28T08:00:00.000Z"));
 
