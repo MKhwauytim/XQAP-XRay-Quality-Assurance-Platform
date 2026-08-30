@@ -16,7 +16,7 @@ import { buildDeckV3Html } from "../executive/deck3";
 import { yieldToMain } from "../../storage/yieldToMain";
 import type { PopulationReportModel, PopulationReportInput } from "./model";
 import { computePopulationReportModel } from "./model";
-import type { PortBreakdown, ResultCounts } from "./types";
+import type { PortBreakdown, ResultCounts, PopulationReportScope } from "./types";
 import { STAGE_LABELS } from "./fold";
 
 const ORG: OrgBlock = { logoUrl: "", orgName: "ضمان جودة الأشعة", lines: [] };
@@ -62,7 +62,43 @@ ${tintedPanel({
 </div>`;
 }
 
-export function buildSection1Slides(model: PopulationReportModel, meta: (num: number) => SlideMeta): string[] {
+function contentsRows(
+  scope: PopulationReportScope
+): Array<{ index: number; title: string; description: string; topics: string; pages: string }> {
+  const rows: Array<{ index: number; title: string; description: string; topics: string; pages: string }> = [];
+  if (scope !== "sample") {
+    rows.push({
+      index: rows.length + 1,
+      title: "المجتمع",
+      description: "المجتمع المستلم والمعالج",
+      topics: "الاستلام، المعالجة، التوزيع حسب المرحلة والمنفذ",
+      pages: "٥",
+    });
+  }
+  if (scope !== "population") {
+    rows.push({
+      index: rows.length + 1,
+      title: "العينة",
+      description: "تكوين العينة المسحوبة",
+      topics: "حسب المرحلة والمنفذ",
+      pages: "٢",
+    });
+    rows.push({
+      index: rows.length + 1,
+      title: "التوزيع",
+      description: "التوزيع على الموظفين",
+      topics: "حسب المرحلة، المنفذ، وCertScan",
+      pages: "٣",
+    });
+  }
+  return rows;
+}
+
+export function buildSection1Slides(
+  model: PopulationReportModel,
+  meta: (num: number) => SlideMeta,
+  scope: PopulationReportScope = "both"
+): string[] {
   const slides: string[] = [];
 
   // 1 — Cover
@@ -83,14 +119,12 @@ export function buildSection1Slides(model: PopulationReportModel, meta: (num: nu
     contentsSlide({
       eyebrow: "تقرير المجتمع",
       title: "المحتويات",
-      rows: [
-        { index: 1, title: "المجتمع", description: "المجتمع المستلم والمعالج", topics: "الاستلام، المعالجة، التوزيع حسب المرحلة والمنفذ", pages: "٥" },
-        { index: 2, title: "العينة", description: "تكوين العينة المسحوبة", topics: "حسب المرحلة والمنفذ", pages: "٢" },
-        { index: 3, title: "التوزيع", description: "التوزيع على الموظفين", topics: "حسب المرحلة، المنفذ، وCertScan", pages: "٣" },
-      ],
+      rows: contentsRows(scope),
       meta: meta(2),
     })
   );
+
+  if (scope === "sample") return slides; // cover + contents only; Section 1's own content is excluded
 
   // 3 — Section 1 divider
   slides.push(
@@ -189,7 +223,7 @@ ${portBreakdownTwoColumn(model.reconciled.byPort)}`;
 
 export { resultRow, RESULT_HEADERS, portBreakdownTwoColumn };
 
-function buildSection2Slides(model: PopulationReportModel, meta: (num: number) => SlideMeta): string[] {
+function buildSection2Slides(model: PopulationReportModel, meta: (num: number) => SlideMeta, startNum: number): string[] {
   const slides: string[] = [];
 
   slides.push(
@@ -200,14 +234,14 @@ function buildSection2Slides(model: PopulationReportModel, meta: (num: number) =
       title: "العينة",
       description: "العينة المسحوبة من المجتمع، على نفس المحاور",
       footItems: [],
-      meta: meta(9),
+      meta: meta(startNum),
     })
   );
 
   const sampleStageRows = model.sample.byStage.map((b) => resultRow(b.stageLabel, b.counts));
   slides.push(
     slideShell(
-      meta(10),
+      meta(startNum + 1),
       "",
       `${contentHead({ eyebrow: "القسم الثاني", title: "العينة حسب المرحلة" })}
 ${dataTable({ headers: RESULT_HEADERS, rows: sampleStageRows, totals: resultRow("الإجمالي", model.sample.totals) })}`
@@ -216,7 +250,7 @@ ${dataTable({ headers: RESULT_HEADERS, rows: sampleStageRows, totals: resultRow(
 
   slides.push(
     slideShell(
-      meta(11),
+      meta(startNum + 2),
       "",
       `${contentHead({ eyebrow: "القسم الثاني", title: "العينة حسب المنفذ" })}
 ${portBreakdownTwoColumn(model.sample.byPort)}`
@@ -257,7 +291,7 @@ function certScanTable(model: PopulationReportModel): string {
   return dataTable({ headers: ["الموظف", "CertScan", "غير CertScan", "الإجمالي"], rows });
 }
 
-function buildSection3Slides(model: PopulationReportModel, meta: (num: number) => SlideMeta): string[] {
+function buildSection3Slides(model: PopulationReportModel, meta: (num: number) => SlideMeta, startNum: number): string[] {
   const slides: string[] = [];
 
   slides.push(
@@ -268,13 +302,13 @@ function buildSection3Slides(model: PopulationReportModel, meta: (num: number) =
       title: "التوزيع",
       description: "من استلم ماذا، وما هي النتائج",
       footItems: [],
-      meta: meta(12),
+      meta: meta(startNum),
     })
   );
 
   slides.push(
     slideShell(
-      meta(13),
+      meta(startNum + 1),
       "",
       `${contentHead({ eyebrow: "القسم الثالث", title: "التوزيع حسب الموظف والمرحلة" })}
 ${employeeStageTable(model)}`
@@ -283,7 +317,7 @@ ${employeeStageTable(model)}`
 
   slides.push(
     slideShell(
-      meta(14),
+      meta(startNum + 2),
       "",
       `${contentHead({ eyebrow: "القسم الثالث", title: "التوزيع حسب الموظف والمنفذ" })}
 ${employeePortTable(model)}`
@@ -292,7 +326,7 @@ ${employeePortTable(model)}`
 
   slides.push(
     slideShell(
-      meta(15),
+      meta(startNum + 3),
       "",
       `${contentHead({ eyebrow: "القسم الثالث", title: "التوزيع حسب CertScan" })}
 ${certScanTable(model)}`
@@ -302,24 +336,34 @@ ${certScanTable(model)}`
   return slides;
 }
 
-const TOTAL_SLIDES = 16; // cover, contents, s1-divider + 5, s2-divider + 2, s3-divider + 3, closing
+export async function buildPopulationDeckSlides(
+  model: PopulationReportModel,
+  scope: PopulationReportScope = "both"
+): Promise<string> {
+  const includePopulation = scope !== "sample";
+  const includeSample = scope !== "population";
+  const section1Count = includePopulation ? 6 : 0; // divider + 5 content slides, NOT counting cover/contents
+  const totalSlides = 2 /* cover + contents */ + section1Count + (includeSample ? 7 : 0) /* s2(3) + s3(4) */ + 1 /* closing */;
+  const s1End = 2 + section1Count;
+  const s2End = s1End + (includeSample ? 3 : 0);
 
-export async function buildPopulationDeckSlides(model: PopulationReportModel): Promise<string> {
   const meta = (num: number): SlideMeta => ({
     num,
-    total: TOTAL_SLIDES,
-    sectionKey: num <= 8 ? "s1" : num <= 11 ? "s2" : "s3",
-    sectionLabel: num <= 8 ? "المجتمع" : num <= 11 ? "العينة" : "التوزيع",
+    total: totalSlides,
+    sectionKey: num <= s1End ? "s1" : num <= s2End ? "s2" : "s3",
+    sectionLabel: num <= s1End ? "المجتمع" : num <= s2End ? "العينة" : "التوزيع",
     footText: `تقرير المجتمع — ${model.monthLabel}`,
   });
 
   const parts: string[] = [];
-  parts.push(...buildSection1Slides(model, meta));
+  parts.push(...buildSection1Slides(model, meta, scope));
   await yieldToMain();
-  parts.push(...buildSection2Slides(model, meta));
-  await yieldToMain();
-  parts.push(...buildSection3Slides(model, meta));
-  await yieldToMain();
+  if (includeSample) {
+    parts.push(...buildSection2Slides(model, meta, s1End + 1));
+    await yieldToMain();
+    parts.push(...buildSection3Slides(model, meta, s1End + 4));
+    await yieldToMain();
+  }
   parts.push(
     closingSlide({
       org: ORG,
@@ -327,15 +371,18 @@ export async function buildPopulationDeckSlides(model: PopulationReportModel): P
       title: "نهاية التقرير",
       closingLine: `تقرير المجتمع — ${model.monthLabel}`,
       metaRows: [],
-      meta: meta(TOTAL_SLIDES),
+      meta: meta(totalSlides),
     })
   );
   return parts.join("\n");
 }
 
-export async function buildPopulationDeck(input: PopulationReportInput): Promise<string> {
+export async function buildPopulationDeck(
+  input: PopulationReportInput,
+  scope: PopulationReportScope = "both"
+): Promise<string> {
   const model = computePopulationReportModel(input);
-  const slides = await buildPopulationDeckSlides(model);
+  const slides = await buildPopulationDeckSlides(model, scope);
   return buildDeckV3Html(slides, model.monthLabel, {
     title: "تقرير المجتمع",
     navBrand: "تقرير المجتمع",
@@ -343,9 +390,9 @@ export async function buildPopulationDeck(input: PopulationReportInput): Promise
   });
 }
 
-export async function openPopulationDeck(input: PopulationReportInput): Promise<void> {
+export async function openPopulationDeck(input: PopulationReportInput, scope: PopulationReportScope = "both"): Promise<void> {
   const reportWindow = openReportWindow();
-  await writeOrCloseOnFailure(reportWindow, () => buildPopulationDeck(input), `تقرير_المجتمع_${input.monthFolderName}.html`);
+  await writeOrCloseOnFailure(reportWindow, () => buildPopulationDeck(input, scope), `تقرير_المجتمع_${input.monthFolderName}.html`);
 }
 
 export type { PopulationReportInput as PopulationDeckInput } from "./model";

@@ -27,3 +27,5 @@ export type EmployeeCertScanRow = {
   nonCertScanCount: number;
   total: number;
 };
+
+export type PopulationReportScope = "population" | "sample" | "both";
