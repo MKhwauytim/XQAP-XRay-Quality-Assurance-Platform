@@ -53,16 +53,14 @@ describe("user-management permission sections", () => {
     expect(checkbox).toBeDisabled();
   });
 
-  it("renders إدارة المستخدمين as a real, settable control for every role but guest", () => {
-    // Ceiling widened from ADMIN_ONLY (2026-08-25): an admin-only cap made this
-    // entire section -- parent and all 5 sub-tabs -- a dead SYSTEM_RESTRICTED block,
-    // since admin is never a column in this matrix (MANAGED_ROLES excludes it). It
-    // is now every operational role, matching the population/adhoc-import precedent;
-    // `guest` alone keeps the notice, as the read-only observer role.
+  it("renders إدارة المستخدمين as a real, settable control for every role, guest included", () => {
+    // Ceiling widened ADMIN_ONLY -> OPERATIONAL_ROLES (2026-08-25, parent + all
+    // sub-tabs) -> ALL_ROLES (2026-08-30, guest included): no code ceiling should
+    // be the reason a "مقيّد بالنظام" cell shows up in this matrix any more.
     const onUpdate = vi.fn();
-    // Grant the parent page to every non-admin role so the 5 sub-tab rows aren't
+    // Grant the parent page to every non-admin role so the sub-tab rows aren't
     // ALSO showing the separate, recoverable parentBlocked cascade -- this test is
-    // only about the ceiling (ADMIN_ONLY -> OPERATIONAL_ROLES), not the cascade.
+    // only about the ceiling, not the cascade.
     const permissions = createDefaultPermissions().map((permission) =>
       permission.tabId === "user-management" && permission.role !== "admin"
         ? { ...permission, access: "edit" as const }
@@ -85,8 +83,10 @@ describe("user-management permission sections", () => {
       "user-management/feature-permissions",
       "user-management/activity",
       "user-management/actions",
+      "user-management/performance",
     ]) {
       for (const [roleLabel, role] of [
+        ["ضيف", "guest"],
         ["موظف", "employee"],
         ["مشرف", "supervisor"],
         ["مدير", "manager"],
@@ -94,17 +94,17 @@ describe("user-management permission sections", () => {
         const button = screen.getByRole("button", { name: `${roleLabel}: ${tabId} - لا وصول` });
         expect(button, `${role}:${tabId}`).toBeEnabled();
       }
-      expect(screen.queryByRole("button", { name: new RegExp(`^ضيف: ${tabId} `) })).toBeNull();
     }
     fireEvent.click(screen.getByRole("button", { name: "مدير: user-management - تعديل كامل" }));
     expect(onUpdate).toHaveBeenLastCalledWith("manager", "user-management", "edit");
   });
 
-  it("renders ارفاق حالات استثنائية as a real, settable control for every role but guest", () => {
+  it("renders ارفاق حالات استثنائية as a real, settable control for every role, guest included", () => {
     // The ceiling on `population/adhoc-import` used to be ADMIN_ONLY, which made the
-    // whole row a dead SYSTEM_RESTRICTED notice: an admin had no way to grant the page
-    // to anyone. It is now every operational role, so the cells must be actual
-    // segmented controls -- `guest` alone keeps the notice, deliberately.
+    // whole row a dead SYSTEM_RESTRICTED notice: an admin had no way to grant the
+    // page to anyone. It was widened to OPERATIONAL_ROLES (2026-08-21) and then to
+    // ALL_ROLES (2026-08-30), so every cell -- guest included -- is now a real
+    // segmented control.
     const onUpdate = vi.fn();
     render(
       <PagePermissionsSection
@@ -122,6 +122,7 @@ describe("user-management permission sections", () => {
 
     expect(screen.getByText("ارفاق حالات استثنائية")).toBeInTheDocument();
     for (const [roleLabel, role] of [
+      ["ضيف", "guest"],
       ["موظف", "employee"],
       ["مشرف", "supervisor"],
       ["مدير", "manager"],
@@ -133,11 +134,6 @@ describe("user-management permission sections", () => {
       fireEvent.click(button);
       expect(onUpdate).toHaveBeenLastCalledWith(role, "population/adhoc-import", "edit");
     }
-    // guest is the read-only observer role: the page only ingests rows and assigns
-    // work, so its ceiling still excludes it and the cell stays a notice.
-    expect(
-      screen.queryByRole("button", { name: /^ضيف: population\/adhoc-import/ })
-    ).toBeNull();
   });
 
   it("renders reports and archive as live, settable controls for employees", () => {
@@ -224,7 +220,7 @@ describe("user-management permission sections", () => {
     expect(checkbox).toBeDisabled();
   });
 
-  it("marks user-management-backed features as system-restricted for guest only, now that settings is wide open too", () => {
+  it("leaves no feature system-restricted for any role, now that every ceiling is wide open", () => {
     render(
       <FeaturePermissionsSection
         permissions={createDefaultPermissions()}
@@ -237,19 +233,14 @@ describe("user-management permission sections", () => {
     );
 
     // view-error-log, edit-interface-labels, settings.syncInterval, and
-    // settings.adminAccount (audit finding 13) all live on `settings`, whose
-    // ceiling was widened from ["guest", "admin"] to every role on 2026-08-27
-    // (the owner reported it as ungrantable, same bug pattern as #109) -- none
-    // of the four settings features are system-restricted for anyone any more.
-    // manage-users, reset-passwords and edit-permissions live on
-    // `user-management`, whose ceiling was widened from ADMIN_ONLY to every
-    // operational role on 2026-08-25 -- only guest is still permanently
-    // excluded there.
-    const notices = screen.getAllByText(SYSTEM_RESTRICTED_LABEL);
-    // 3 user-management features x 1 role (guest). Settings contributes zero now.
-    expect(notices).toHaveLength(3);
-    // Every role keeps a real toggle for the settings features -- the ceiling
-    // allows all of them now.
+    // settings.adminAccount live on `settings` (widened to every role on
+    // 2026-08-27); manage-users, reset-passwords and edit-permissions live on
+    // `user-management` (widened ADMIN_ONLY -> OPERATIONAL_ROLES on 2026-08-25,
+    // then to include guest on 2026-08-30, the last role any tab still excluded).
+    // No code ceiling excludes any role from any tab any more, so this group has
+    // zero SYSTEM_RESTRICTED_LABEL notices.
+    expect(screen.queryByText(SYSTEM_RESTRICTED_LABEL)).toBeNull();
+    // Every role keeps a real toggle for every feature in this group.
     expect(screen.getAllByRole("checkbox").length).toBeGreaterThan(0);
   });
 

@@ -164,11 +164,9 @@ test("every non-'none' default permission stays within its OWN tab's code role c
   }
 });
 
-test("reports/kpi and report-designer ceilings include employee (widened 2026-08-27) while still excluding guest", () => {
-  expect(roleCeilingFor("reports/kpi")).toEqual(["employee", "supervisor", "manager", "admin"]);
-  expect(roleCeilingFor("reports/kpi")).not.toContain("guest");
-  expect(roleCeilingFor("reports/report-designer")).toEqual(["employee", "supervisor", "manager", "admin"]);
-  expect(roleCeilingFor("reports/report-designer")).not.toContain("guest");
+test("reports/kpi and report-designer ceilings include every role, guest included (widened 2026-08-30)", () => {
+  expect(roleCeilingFor("reports/kpi")).toEqual(["guest", "employee", "supervisor", "manager", "admin"]);
+  expect(roleCeilingFor("reports/report-designer")).toEqual(["guest", "employee", "supervisor", "manager", "admin"]);
 });
 
 // ── B1 (task 2): post-notification cascade fix ──────────────────────────────
