@@ -635,8 +635,8 @@ function ReportsContent() {
           distributionEntries: distributionCurrent?.entries ?? [],
           employeeDisplayNames: buildDisplayNameMap(),
           sourceRevisions: collectRevisions([
-            ["المجتمع", populationRev],
-            ["العينة", sampleRev],
+            ["population.final.json", populationRev],
+            ["sample.master.json", sampleRev],
           ]),
         };
         if (type === "population-report-xlsx") {
