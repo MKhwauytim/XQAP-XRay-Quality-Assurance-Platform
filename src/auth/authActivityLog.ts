@@ -350,7 +350,19 @@ export function configureAuthActivityLogWorkspace(directoryHandle: DirectoryHand
   if (workspaceHandle) queueFlush();
 }
 
-export function startAuthActivitySession(session: AuthSession): void {
+/**
+ * Starts a new activity entry. `startedAt` defaults to `session.loginAt` —
+ * correct for a FRESH login, where `loginAt` IS the current moment.
+ *
+ * It must be passed explicitly on a RESTORED session (`readRealSession`'s
+ * restore branch in authSession.ts): `session.loginAt` there is the
+ * ORIGINAL login time, which SEC-02 persists in localStorage for up to 7
+ * days so an employee doesn't have to re-login after closing the browser.
+ * Before this fix, a restore always used that stale `loginAt`, so a session
+ * resumed a day later got a new entry spanning "yesterday's login" to
+ * "today's heartbeat" — 24+ hours of apparent work for zero actual gap.
+ */
+export function startAuthActivitySession(session: AuthSession, startedAt: string = session.loginAt): void {
   endAuthActivitySession("session-replaced");
 
   const timestamp = nowIso();
@@ -358,10 +370,10 @@ export function startAuthActivitySession(session: AuthSession): void {
     id: createActivityId(session),
     username: session.username,
     role: session.role,
-    signedInAt: session.loginAt,
+    signedInAt: startedAt,
     lastSeenAt: timestamp,
     signedOutAt: null,
-    durationMs: Math.max(0, Date.parse(timestamp) - Date.parse(session.loginAt)),
+    durationMs: Math.max(0, Date.parse(timestamp) - Date.parse(startedAt)),
     closeReason: null,
   };
 

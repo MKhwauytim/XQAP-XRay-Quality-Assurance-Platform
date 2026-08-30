@@ -16,6 +16,7 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
     { id: "feature-permissions", label: "صلاحيات الميزات" },
     { id: "activity", label: "متابعة الأنشطة" },
     { id: "actions", label: "سجل الإجراءات" },
+    { id: "performance", label: "تقييم الأداء" },
   ],
 };
 

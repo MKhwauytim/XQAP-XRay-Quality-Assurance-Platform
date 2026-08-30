@@ -1232,3 +1232,77 @@
   font-size: 12px;
   cursor: pointer;
 }
+
+/* ── Performance evaluation (تقييم الأداء) ─────────────────────────────────── */
+
+.um-perf-filters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin: var(--sp-3) 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--app-border);
+  border-radius: 10px;
+  background: var(--app-surface-soft);
+}
+
+.um-perf-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-3);
+}
+
+.um-perf-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--sp-3);
+  margin: var(--sp-3) 0;
+}
+
+.um-perf-card {
+  display: grid;
+  gap: var(--sp-1);
+  padding: var(--sp-3);
+  border: 1px solid var(--app-border);
+  border-radius: var(--r-xl);
+  background: var(--c-surface-2);
+}
+
+.um-perf-card span {
+  color: var(--app-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.um-perf-card strong {
+  color: var(--app-primary);
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.um-perf-chart {
+  margin: var(--sp-4) 0;
+}
+
+.um-perf-chart h4 {
+  margin: 0 0 var(--sp-2);
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--app-text);
+}
+
+/* Visually hidden but reachable by assistive tech — the semantic twin of the
+   aria-hidden SVG charts in تقييم الأداء (mirrors .rk-sr-only in
+   ReviewerKpiPanel.css / .kpi-sr-only in KpiDashboard.css). */
+.um-perf-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
