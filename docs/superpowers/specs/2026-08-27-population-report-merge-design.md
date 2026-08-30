@@ -39,6 +39,7 @@ currently borrow from the older `executive/document` and `executive/deck` (v1/v2
 | D8 | Deck **and** Document both move to the deck3 visual language | Deck-only reskin (leaving the doc on the old chrome) was offered and declined — owner wants both formats matching |
 | D9 | **New module**, not an evolution of `sampleReport.ts`/`distributionReport.ts` | Patching either file in place was considered; rejected because the content, data sources, and visual system are all changing simultaneously — a clean new module is easier to review and to golden-snapshot from scratch than a file that used to mean something else |
 | D10 | Excel export **kept**, restructured to mirror the three sections | Dropping xlsx was offered; owner: "Yes, keep xlsx too" |
+| D11 | **Added 2026-08-27, after implementation began (post-Task 7):** the report card gets a 3-way export-scope switch — **population only** (Section 1), **sample only** (Sections 2+3 together), **both** (all three sections, default) — applying to whichever format (doc/deck/xlsx) is exported | See §9 for the full addendum. Three independent toggles (population/sample/both all separately on-able) was considered and rejected — owner specified three mutually-exclusive switches, i.e. a segmented control, not independent checkboxes |
 
 ## 3. Non-goals
 
@@ -223,3 +224,44 @@ chunking between pages, per CLAUDE.md's "deterministic by contract" pagination p
   a second consumer.
 - New document-chrome module's exact API surface (mirrors `executive/document/shared`'s today).
 - Whether `reportBuilders.xss.test.ts` migrates in the same PR or a follow-up.
+
+## 9. Addendum (2026-08-27, post-Task-7): export-scope switch
+
+Added after implementation had already started (deck Sections 1–3 built per the original 13-task
+plan, `docs/superpowers/plans/2026-08-27-population-report-merge-plan.md`). This addendum is the
+source of truth for the requirement below; the plan file's Tasks 8–10 (document, xlsx, Reports-tab
+wiring) predate it and do not yet reflect it.
+
+**Requirement:** the تقرير المجتمع card gets a 3-way segmented switch — not three independent
+toggles — with these options:
+
+- **المجتمع فقط** (population only) → Section 1 alone
+- **العينة فقط** (sample only) → Sections 2 **and** 3 together (confirmed directly: these two are
+  "sample" as a pair — composition plus who it went to — not Section 2 alone)
+- **الكل** (both / all) → Sections 1+2+3 — **default selection**
+
+Exactly one option is selected at a time (a segmented control / radio group), matching how the
+existing "التصميم الجديد" deck2/deck3 toggle already works elsewhere in this same Reports tab
+(`Reports/TabView.tsx`) — reuse that UI pattern rather than inventing a new one.
+
+**Applies uniformly** to whichever format is exported next (doc, deck, or xlsx) — the scope
+selection is a property of the report request, not of one format. Cover, contents, and closing
+pages/slides still always render regardless of scope; only the three content sections are
+gated. The contents/TOC listing (deck3 `contentsSlide` pattern, §5) must reflect only the included
+sections, not always list all three.
+
+**Implementation guidance for whoever picks this up** (the in-flight implementer session, or a
+follow-up pass once its PR is further along — this was intentionally not force-merged into the
+concurrently-running Tasks 8–10 to avoid racing that session's commits):
+
+- Thread a `scope: "population" | "sample" | "both"` parameter through the model-build and
+  page/slide-assembly functions for all three formats (Tasks 8 document, 9 xlsx, and the already-
+  built deck from Tasks 6–7, which will need a small follow-up to accept the same parameter).
+- Data loading can stay unconditional (always load all sources per §4.1) rather than skipping
+  fetches per scope — simpler, and the per-month data volumes here don't justify the added
+  complexity of conditional loading. Only page/slide/sheet *inclusion* is scope-gated.
+- Task 10 ("Public index + wire into Reports tab") is where the UI switch itself belongs — add it
+  there, defaulting to `"both"`, passed through to whichever `generate()` branch the user triggers.
+- Golden-snapshot tests (per CLAUDE.md's "deterministic by contract" rule) should cover at least
+  one non-default scope (e.g. `"population"`) in addition to the default `"both"`, since scope-gated
+  content is exactly the kind of conditional path a snapshot pinned only on the default would miss.
