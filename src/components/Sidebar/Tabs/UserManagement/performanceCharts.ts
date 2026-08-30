@@ -1,4 +1,4 @@
-// Hand-rolled inline-SVG chart primitives for تقييم الأداء (employee
+// Hand-rolled inline-SVG chart primitive for تقييم الأداء (employee
 // performance evaluation). Scoped to UserManagement — deliberately NOT
 // shared with Reports/kpiCharts.ts, which is that tab's own chart module.
 // Same discipline as both kpiCharts.ts and
@@ -7,27 +7,22 @@
 //   • every caller-supplied label routed through esc()
 //   • direction:ltr on the <svg>; RTL expressed in the coordinate math
 //   • no raw #hex — every colour is a var(--c-…) token
+//
+// The working-hours strip (per-employee/per-day timeline with gap chips) is
+// deliberately NOT an SVG — it needs per-segment text chips and tooltips
+// that read far more naturally as plain HTML, so it is built directly in
+// PerformanceSection.tsx as flex/absolute-positioned elements instead.
 
 const C = {
   navy: "var(--c-navy)",
-  navySoft: "var(--c-navy-soft)",
   ink: "var(--c-ink)",
   ink3: "var(--c-ink-3)",
   ink4: "var(--c-ink-4)",
   border: "var(--c-border)",
-  teal: "var(--c-teal-deep)",
-  coral: "var(--c-coral)",
   gold: "var(--brand-premium)",
+  goldBg: "var(--c-warning-bg)",
   sky: "var(--c-sky)",
 } as const;
-
-const GAP_TIER_COLORS: Record<string, string> = {
-  normal: C.teal,
-  small: C.sky,
-  medium: C.gold,
-  large: C.coral,
-  unclassified: C.ink4,
-};
 
 function esc(value: string): string {
   return value
@@ -63,109 +58,64 @@ function emptyState(w: number, h: number, note: string): string {
 
 export type DayCount = { day: string; count: number };
 
+/** Arithmetic mean of a set of daily counts (0 for an empty set) — shared by the chart's own average line and the caller's "المتوسط اليومي" badge so both always agree. */
+export function averageCount(points: readonly DayCount[]): number {
+  if (points.length === 0) return 0;
+  return points.reduce((sum, p) => sum + p.count, 0) / points.length;
+}
+
+function formatAvgTick(value: number): string {
+  return String(Math.round(value * 10) / 10);
+}
+
 /**
- * Samples-finished-per-day trend line. RTL: the EARLIEST day sits at the
- * right edge, most recent at the left — same date-axis direction as
- * Reports' inaccuracyCalendarSvg and the executive report's timeSeriesBand.
+ * Samples-finished-per-day bar chart, with a dashed average-value reference
+ * line so each bar reads against a baseline instead of in isolation. RTL:
+ * the EARLIEST day sits at the right edge, most recent at the left — same
+ * date-axis direction as Reports' inaccuracyCalendarSvg and the executive
+ * report's timeSeriesBand.
  */
 export function samplesTrendSvg(points: readonly DayCount[], emptyNote: string): string {
-  const w = 720;
-  const h = 220;
+  const w = 760;
+  const h = 300;
   if (points.length === 0) return emptyState(w, h, emptyNote);
-  const plot = { top: 16, right: 690, bottom: 180, left: 30 };
+
+  const plot = { top: 34, right: 730, bottom: 246, left: 30 };
   const pw = plot.right - plot.left;
-  const ph = plot.bottom - plot.top;
+  const barAreaH = plot.bottom - plot.top;
   const maxCount = Math.max(1, ...points.map((p) => p.count));
-  const stepX = points.length > 1 ? pw / (points.length - 1) : 0;
-  const xFor = (index: number) => plot.right - index * stepX;
-  const yFor = (count: number) => plot.bottom - (count / maxCount) * ph;
+  const avg = averageCount(points);
 
-  let gridAndAxis = "";
-  for (let tick = 0; tick <= 4; tick += 1) {
-    const value = Math.round((maxCount / 4) * tick);
-    const y = yFor(value);
-    gridAndAxis +=
-      `<line x1="${r(plot.left)}" x2="${r(plot.right)}" y1="${r(y)}" y2="${r(y)}" stroke="${C.border}" stroke-dasharray="2 4"/>` +
-      `<text x="${r(plot.right + 8)}" y="${r(y + 4)}" font-size="11" fill="${C.ink3}">${value}</text>`;
-  }
+  const slot = pw / points.length;
+  const barW = Math.max(6, Math.min(42, slot * 0.6));
 
-  const path = points
-    .map((p, i) => `${i === 0 ? "M" : "L"} ${r(xFor(i))} ${r(yFor(p.count))}`)
-    .join(" ");
-
-  const labelStride = Math.max(1, Math.ceil(points.length / 10));
-  let dots = "";
+  let bars = "";
   points.forEach((p, i) => {
-    const x = xFor(i);
-    const y = yFor(p.count);
-    dots += `<circle cx="${r(x)}" cy="${r(y)}" r="3.5" fill="${C.navy}"/>`;
-    if (i === 0 || i === points.length - 1 || i % labelStride === 0) {
-      dots += `<text x="${r(x)}" y="${r(plot.bottom + 18)}" text-anchor="middle" font-size="10" fill="${C.ink3}">${esc(p.day.slice(5))}</text>`;
-    }
+    const slotCenter = plot.right - slot * (i + 0.5);
+    const barH = Math.max(3, (p.count / maxCount) * barAreaH);
+    const y = plot.bottom - barH;
+    bars +=
+      `<rect x="${r(slotCenter - barW / 2)}" y="${r(y)}" width="${r(barW)}" height="${r(barH)}" rx="5" fill="url(#um-perf-trend-grad)"/>` +
+      `<text x="${r(slotCenter)}" y="${r(y - 8)}" text-anchor="middle" font-size="12" font-weight="800" fill="${C.navy}">${p.count}</text>` +
+      `<text x="${r(slotCenter)}" y="${r(plot.bottom + 18)}" text-anchor="middle" font-size="10" fill="${C.ink3}">${esc(p.day.slice(5))}</text>`;
   });
+
+  const avgRatio = Math.max(0, Math.min(1, avg / maxCount));
+  const avgY = plot.bottom - avgRatio * barAreaH;
+  const avgLabel = formatAvgTick(avg);
+  const avgLine =
+    `<line x1="${r(plot.left)}" x2="${r(plot.right)}" y1="${r(avgY)}" y2="${r(avgY)}" stroke="${C.gold}" stroke-width="2" stroke-dasharray="5 4"/>` +
+    `<rect x="${r(plot.left)}" y="${r(avgY - 15)}" width="${r(16 + avgLabel.length * 7)}" height="14" rx="4" fill="${C.goldBg}"/>` +
+    `<text x="${r(plot.left + 6)}" y="${r(avgY - 5)}" font-size="10.5" font-weight="800" fill="${C.gold}">${esc(avgLabel)}</text>`;
 
   return (
     open(w, h, "min-width:480px;height:auto") +
-    gridAndAxis +
-    `<line x1="${r(plot.left)}" x2="${r(plot.right)}" y1="${r(plot.bottom)}" y2="${r(plot.bottom)}" stroke="${C.ink3}"/>` +
-    `<path d="${path}" fill="none" stroke="${C.navy}" stroke-width="2.5" stroke-linejoin="round"/>` +
-    dots +
+    `<defs><linearGradient id="um-perf-trend-grad" x1="0" y1="0" x2="0" y2="1">` +
+    `<stop offset="0%" stop-color="${C.sky}"/><stop offset="100%" stop-color="${C.navy}"/>` +
+    `</linearGradient></defs>` +
+    `<line x1="${r(plot.left)}" x2="${r(plot.right)}" y1="${r(plot.bottom)}" y2="${r(plot.bottom)}" stroke="${C.border}"/>` +
+    bars +
+    avgLine +
     `</svg>`
   );
-}
-
-export type DayStrip = {
-  day: string;
-  /** Minutes since local midnight, or null when unknown. */
-  signInMinute: number | null;
-  lastFinishMinute: number | null;
-  gapSegments: { startMinute: number; endMinute: number; tier: string }[];
-};
-
-/**
- * One horizontal 24h strip per day: a base bar from sign-in to last finish,
- * with each non-"normal", non-"unclassified" gap overlaid in its tier
- * colour. RTL: 00:00 at the right edge, 24:00 at the left, matching
- * samplesTrendSvg's date-axis direction. A "normal" gap is not drawn — it
- * is expected pacing, not something worth highlighting on the strip. An
- * "unclassified" gap (no reliable monthly baseline yet, see
- * classifyGapTier) is also not drawn — with no baseline to be flagged
- * against, it has no basis for being singled out as an anomaly either, so
- * it should not visually read as one.
- */
-export function workingHoursStripSvg(days: readonly DayStrip[], emptyNote: string): string {
-  const w = 720;
-  const rowH = 30;
-  const labelW = 90;
-  const h = 24 + days.length * rowH + 8;
-  if (days.length === 0) return emptyState(w, 120, emptyNote);
-
-  const trackW = w - labelW - 10;
-  const minutesPerPx = 1440 / trackW;
-  const xFor = (minute: number) => w - labelW - minute / minutesPerPx;
-
-  let out = "";
-  days.forEach((day, index) => {
-    const y = 20 + index * rowH;
-    out += `<text x="${r(w)}" y="${r(y + rowH / 2 + 4)}" text-anchor="end" font-size="12" font-weight="700" fill="${C.ink}">${esc(day.day)}</text>`;
-    out += `<rect x="10" y="${r(y + 4)}" width="${r(trackW)}" height="${r(rowH - 12)}" rx="4" fill="${C.navySoft}" fill-opacity="0.15"/>`;
-    if (
-      day.signInMinute !== null &&
-      day.lastFinishMinute !== null &&
-      day.lastFinishMinute > day.signInMinute
-    ) {
-      const x1 = xFor(day.lastFinishMinute);
-      const x2 = xFor(day.signInMinute);
-      out += `<rect x="${r(x1)}" y="${r(y + 4)}" width="${r(x2 - x1)}" height="${r(rowH - 12)}" rx="4" fill="${C.navy}" fill-opacity="0.35"/>`;
-    }
-    for (const gap of day.gapSegments) {
-      if (gap.tier === "normal" || gap.tier === "unclassified") continue;
-      const x1 = xFor(gap.endMinute);
-      const x2 = xFor(gap.startMinute);
-      const color = GAP_TIER_COLORS[gap.tier] ?? C.ink4;
-      out += `<rect x="${r(x1)}" y="${r(y + 4)}" width="${r(Math.max(1, x2 - x1))}" height="${r(rowH - 12)}" rx="3" fill="${color}"/>`;
-    }
-  });
-
-  return open(w, h, "min-width:480px;height:auto") + out + `</svg>`;
 }

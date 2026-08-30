@@ -5,17 +5,19 @@ import {
   aggregateSamplesByDay,
   classifyGapTier,
   computeAllDailyPerformance,
+  computeEmployeeComparison,
   dayKey,
   filterDailyPerformance,
   finishTimestampsByEmployeeDay,
   firstSignInByEmployeeDay,
   flattenGaps,
   medianGapBaseline,
+  medianOf,
   minutesOfDay,
   sanitizeActivityEntries,
   summarizePerformance,
 } from "./performanceMetrics";
-import { GAP_TIER_THRESHOLDS_MS } from "./performanceTypes";
+import { GAP_TIER_THRESHOLDS_MS, type DailyPerformance, type GapEvent } from "./performanceTypes";
 
 function activityEntry(over: Partial<AuthActivityLogEntry> = {}): AuthActivityLogEntry {
   return {
@@ -280,5 +282,105 @@ describe("filterDailyPerformance / flattenGaps / aggregateSamplesByDay / summari
       durationMs: 10 * 60 * 1000,
       tier: "unclassified",
     });
+  });
+});
+
+describe("medianOf", () => {
+  it("returns null for an empty list", () => {
+    expect(medianOf([])).toBeNull();
+  });
+  it("returns the middle value for an odd count", () => {
+    expect(medianOf([5, 1, 3])).toBe(3);
+  });
+  it("averages the two middle values for an even count", () => {
+    expect(medianOf([1, 2, 3, 4])).toBe(2.5);
+  });
+});
+
+function dailyRecord(over: Partial<DailyPerformance> = {}): DailyPerformance {
+  return {
+    employee: "a",
+    day: "2026-06-01",
+    samplesFinished: 1,
+    signInAt: "2026-06-01T06:00:00.000Z",
+    lastFinishAt: "2026-06-01T06:10:00.000Z",
+    effectiveTimeMs: 10 * 60 * 1000,
+    gaps: [],
+    ...over,
+  };
+}
+
+function gapEvent(over: Partial<GapEvent> = {}): GapEvent {
+  return {
+    employee: "a",
+    day: "2026-06-01",
+    startAt: "2026-06-01T06:00:00.000Z",
+    endAt: "2026-06-01T06:10:00.000Z",
+    durationMs: 10 * 60 * 1000,
+    tier: "small",
+    ...over,
+  };
+}
+
+describe("computeEmployeeComparison", () => {
+  it("includes a zero-activity roster member, ranked after everyone with samples", () => {
+    const records = [dailyRecord({ employee: "a", samplesFinished: 10 })];
+    const { rows } = computeEmployeeComparison(records, new Map([["a", "أ"], ["z", "ز"]]));
+    expect(rows.map((r) => r.username)).toEqual(["a", "z"]);
+    expect(rows[1]!.samples).toBe(0);
+    expect(rows[1]!.effectiveMs).toBeNull();
+    expect(rows[1]!.paceMs).toBeNull();
+    expect(rows[1]!.lastActiveDay).toBeNull();
+    expect(rows[1]!.rank).toBe(2);
+  });
+
+  it("derives above/within/below status from the samples-vs-team-average ratio", () => {
+    const records = [
+      dailyRecord({ employee: "a", samplesFinished: 15 }),
+      dailyRecord({ employee: "b", samplesFinished: 10 }),
+      dailyRecord({ employee: "c", samplesFinished: 5 }),
+    ];
+    const names = new Map([["a", "أ"], ["b", "ب"], ["c", "ج"]]);
+    const { rows, teamAvgSamples } = computeEmployeeComparison(records, names);
+    expect(teamAvgSamples).toBe(10);
+    const byUsername = new Map(rows.map((row) => [row.username, row]));
+    expect(byUsername.get("a")!.statusKind).toBe("above"); // 15/10 = 1.5 >= 1.15
+    expect(byUsername.get("b")!.statusKind).toBe("within"); // 10/10 = 1.0
+    expect(byUsername.get("c")!.statusKind).toBe("below"); // 5/10 = 0.5 <= 0.85
+  });
+
+  it("escalates to hasFrequentLargeGaps at 3+ large gaps, regardless of the samples ratio", () => {
+    const records = [
+      dailyRecord({ employee: "a", day: "2026-06-01", samplesFinished: 20, gaps: [gapEvent({ day: "2026-06-01", tier: "large" })] }),
+      dailyRecord({ employee: "a", day: "2026-06-02", samplesFinished: 20, gaps: [gapEvent({ day: "2026-06-02", tier: "large" })] }),
+      dailyRecord({ employee: "a", day: "2026-06-03", samplesFinished: 20, gaps: [gapEvent({ day: "2026-06-03", tier: "large" })] }),
+    ];
+    const { rows } = computeEmployeeComparison(records, new Map([["a", "أ"]]));
+    expect(rows[0]!.hasFrequentLargeGaps).toBe(true);
+    expect(rows[0]!.gapCounts.large).toBe(3);
+    expect(rows[0]!.gapPercents.large).toBe(100);
+  });
+
+  it("computes an employee's own pace as the median of their gap durations in scope (distinct from the per-month tiering baseline)", () => {
+    const gaps: GapEvent[] = [1, 2, 3, 4, 5].map((n) => gapEvent({ durationMs: n * 60_000, tier: "unclassified" }));
+    const records = [dailyRecord({ samplesFinished: 5, gaps })];
+    const { rows } = computeEmployeeComparison(records, new Map([["a", "أ"]]));
+    expect(rows[0]!.paceMs).toBe(3 * 60_000);
+  });
+
+  it("uses the latest day with any record as lastActiveDay", () => {
+    const records = [
+      dailyRecord({ day: "2026-06-01" }),
+      dailyRecord({ day: "2026-06-03" }),
+      dailyRecord({ day: "2026-06-02" }),
+    ];
+    const { rows } = computeEmployeeComparison(records, new Map([["a", "أ"]]));
+    expect(rows[0]!.lastActiveDay).toBe("2026-06-03");
+  });
+
+  it("returns a null team pace when no employee has a reliable pace baseline", () => {
+    const records = [dailyRecord({ gaps: [gapEvent()] })];
+    const { teamMedianPaceMs } = computeEmployeeComparison(records, new Map([["a", "أ"]]));
+    expect(teamMedianPaceMs).toBeNull();
   });
 });

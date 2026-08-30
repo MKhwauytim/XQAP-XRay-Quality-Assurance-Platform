@@ -9,10 +9,16 @@
 import type { AuthActivityLogEntry } from "../../auth/authActivityLog";
 import type { WorkspaceActionEntry } from "../audit/actionLog";
 import {
+  FREQUENT_LARGE_GAPS_MIN_COUNT,
   GAP_TIER_THRESHOLDS_MS,
   IMPLAUSIBLE_SESSION_SPAN_MS,
   MIN_GAP_SAMPLES_FOR_BASELINE,
+  STATUS_ABOVE_AVERAGE_RATIO,
+  STATUS_BELOW_AVERAGE_RATIO,
   type DailyPerformance,
+  type EmployeeComparisonRow,
+  type EmployeeComparisonSummary,
+  type EmployeeStatusKind,
   type GapEvent,
   type GapTier,
   type PerformanceScopeFilter,
@@ -277,4 +283,112 @@ export function summarizePerformance(records: readonly DailyPerformance[]): Perf
   const medianGapMs = medianGapBaseline(gaps.map((g) => g.durationMs));
 
   return { totalSamples, totalEffectiveMs, gapCountsByTier, medianGapMs };
+}
+
+/** Plain median, no reliability threshold — for team-level aggregates (teamMedianPaceMs), not per-employee gap tiering (see medianGapBaseline). */
+export function medianOf(values: readonly number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!;
+}
+
+function pctOfTotal(count: number, total: number): number {
+  return total === 0 ? 0 : Math.round((count / total) * 100);
+}
+
+function deriveEmployeeStatus(
+  samples: number,
+  teamAvgSamples: number,
+  gapCounts: Record<GapTier, number>
+): { statusKind: EmployeeStatusKind; hasFrequentLargeGaps: boolean } {
+  const ratio = teamAvgSamples > 0 ? samples / teamAvgSamples : 1;
+  const statusKind: EmployeeStatusKind =
+    ratio >= STATUS_ABOVE_AVERAGE_RATIO ? "above" : ratio <= STATUS_BELOW_AVERAGE_RATIO ? "below" : "within";
+  return { statusKind, hasFrequentLargeGaps: gapCounts.large >= FREQUENT_LARGE_GAPS_MIN_COUNT };
+}
+
+/**
+ * Per-employee rows for the تقييم الأداء comparison table, ranked by samples
+ * descending. `records` should be date-range filtered but NOT
+ * employee-filtered — every employee stays comparable against the same team
+ * average regardless of which single employee the rest of the screen is
+ * scoped to. `employeeNames` seeds the roster so an employee with zero
+ * activity in scope still appears, with zeroed/null stats, instead of
+ * silently dropping out of the comparison.
+ */
+export function computeEmployeeComparison(
+  records: readonly DailyPerformance[],
+  employeeNames: ReadonlyMap<string, string>
+): EmployeeComparisonSummary {
+  const byEmployee = new Map<string, DailyPerformance[]>();
+  for (const record of records) {
+    const bucket = byEmployee.get(record.employee);
+    if (bucket) bucket.push(record);
+    else byEmployee.set(record.employee, [record]);
+  }
+
+  const usernames = new Set<string>([...employeeNames.keys(), ...byEmployee.keys()]);
+
+  const draft = [...usernames].map((username) => {
+    const empRecords = byEmployee.get(username) ?? [];
+    const samples = empRecords.reduce((sum, r) => sum + r.samplesFinished, 0);
+    const effectiveDurations = empRecords
+      .map((r) => r.effectiveTimeMs)
+      .filter((v): v is number => v !== null);
+    const effectiveMs = effectiveDurations.length > 0 ? effectiveDurations.reduce((a, b) => a + b, 0) : null;
+    const gaps = flattenGaps(empRecords);
+    const gapCounts: Record<GapTier, number> = { ...EMPTY_TIER_COUNTS };
+    for (const gap of gaps) gapCounts[gap.tier] += 1;
+    const totalGaps = gaps.length;
+    const paceMs = medianGapBaseline(gaps.map((g) => g.durationMs));
+    const lastActiveDay =
+      empRecords.length > 0
+        ? empRecords.reduce((max, r) => (r.day > max ? r.day : max), empRecords[0]!.day)
+        : null;
+    return {
+      username,
+      displayName: employeeNames.get(username) ?? username,
+      samples,
+      effectiveMs,
+      paceMs,
+      gapCounts,
+      totalGaps,
+      lastActiveDay,
+    };
+  });
+
+  const totalSamplesAll = draft.reduce((sum, r) => sum + r.samples, 0);
+  const teamAvgSamples = draft.length > 0 ? Math.round(totalSamplesAll / draft.length) : 0;
+  const teamMedianPaceMs = medianOf(draft.map((r) => r.paceMs).filter((v): v is number => v !== null));
+
+  const rows: EmployeeComparisonRow[] = draft
+    .slice()
+    .sort((a, b) => b.samples - a.samples || a.displayName.localeCompare(b.displayName, "ar"))
+    .map((row, index) => {
+      const { statusKind, hasFrequentLargeGaps } = deriveEmployeeStatus(row.samples, teamAvgSamples, row.gapCounts);
+      const gapPercents: Record<GapTier, number> = {
+        normal: pctOfTotal(row.gapCounts.normal, row.totalGaps),
+        small: pctOfTotal(row.gapCounts.small, row.totalGaps),
+        medium: pctOfTotal(row.gapCounts.medium, row.totalGaps),
+        large: pctOfTotal(row.gapCounts.large, row.totalGaps),
+        unclassified: pctOfTotal(row.gapCounts.unclassified, row.totalGaps),
+      };
+      return {
+        username: row.username,
+        displayName: row.displayName,
+        rank: index + 1,
+        samples: row.samples,
+        effectiveMs: row.effectiveMs,
+        paceMs: row.paceMs,
+        gapCounts: row.gapCounts,
+        totalGaps: row.totalGaps,
+        gapPercents,
+        lastActiveDay: row.lastActiveDay,
+        statusKind,
+        hasFrequentLargeGaps,
+      };
+    });
+
+  return { rows, teamAvgSamples, teamMedianPaceMs };
 }
