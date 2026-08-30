@@ -1489,6 +1489,14 @@ export const DEFAULT_LABELS = {
   err_smp_007_save_master_threw:       "تعذر حفظ ملف العينة الرئيسي.",
   err_smp_008_substitution_conflict:   "هذا الصف المستبدَل سبق أن استُبدل بصف آخر لم يكتمل حفظ تعييناته. أعد محاولة الاستبدال الأصلية نفسها لإكمالها بدلاً من اختيار صف جديد.",
 
+  err_ans_001_no_createwritable:            "المتصفح الحالي لا يسمح بالكتابة على ملف أحداث الإجابات هذا.",
+  err_ans_002_write_unconfirmed:            "تم تسجيل إجابتك لكن تعذّر تأكيدها فورًا بسبب بطء الشبكة. لا حاجة لإعادة المحاولة.",
+  err_ans_003_segment_size_mismatch:        "فشل التحقق من ملف أحداث الإجابات بعد الكتابة: الحجم غير مطابق. لم يكتمل الحفظ بشكل سليم.",
+  err_ans_004_unreadable_segment:           "تعذّرت قراءة سجل إجابات هذا الموظف لهذا الشهر. لن يُعرض سجل فارغ بدلاً منه — يرجى إعادة المحاولة أو مراجعة مسؤول النظام.",
+  err_ans_005_missing_migration_seed:       "سجل إجابات هذا الموظف غير مكتمل (لا يحتوي على نقطة الترحيل الأولى). يرجى مراجعة مسؤول النظام قبل المتابعة.",
+  err_ans_006_migration_seed_hash_mismatch: "لا يتطابق محتوى ملف الإجابات القديم مع البيانات التي بُني عليها الترحيل إلى السجل الجديد. يرجى مراجعة مسؤول النظام قبل المتابعة.",
+  err_ans_007_checkpoint_digest_mismatch:   "تعذّر إعادة استخدام النسخة المخزّنة من إجابات الشهر؛ تمت إعادة بنائها بالكامل من السجل.",
+
   // Population wizard — shared page chrome (2026-08 handoff, sections 2b/3b/4b/5c).
   // The readiness rail replaced the old status bar + stepper; the action bar
   // replaced the inline phase footer.

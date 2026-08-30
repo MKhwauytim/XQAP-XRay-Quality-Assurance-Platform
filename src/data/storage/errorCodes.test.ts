@@ -240,6 +240,20 @@ const PINNED_MEANINGS: Record<string, string> = {
     "saveSampleMaster: writing sample.master.json threw",
   "XQ-SMP-008":
     "appendSampleRow rejected an enlargement: the dead row was already substituted by a DIFFERENT replacement row (XQ-DIST-005 partial-write state) — the recovery is retrying with the original candidate, which resumes",
+  "XQ-ANS-001":
+    "answer event file write: file handle exposes no createWritable",
+  "XQ-ANS-002":
+    "answer events were durably written but the post-close read-back could not confirm the segment (share visibility lag); the append was kept because the bytes are on disk",
+  "XQ-ANS-003":
+    "answer event segment read back at the WRONG size after retries — a genuine bad write, not a visibility artefact",
+  "XQ-ANS-004":
+    "the answer event log could not be read, or a segment's NDJSON could not be parsed — an unreadable answer history, never silently treated as empty",
+  "XQ-ANS-005":
+    "an employee's answer event chain has events but no migration-seed marker in its earliest segment — pre-migration rollback residue or a corrupted first segment (proposal §8/§10); refused rather than guessed at",
+  "XQ-ANS-006":
+    "a migration-seed event names a legacy answers.json content hash that does not match the legacy file actually on disk — the legacy file diverged after migration (§9 rollback residue) or the seed record is corrupt",
+  "XQ-ANS-007":
+    "RESERVED (not wired): an answer fold checkpoint's event-set digest did not match the cache it was paired with, so the checkpoint would be discarded and the month refolded from scratch rather than resumed — reserved for the persisted-checkpoint optimization Stage 2 deliberately does not implement (every read cold-folds the event log); wire this when that lands",
 };
 
 function walk(dir: string): string[] {
@@ -271,7 +285,7 @@ describe("error-code catalog", () => {
 
   it("uses the XQ-<AREA>-<NNN> shape with a known area", () => {
     for (const code of allErrorCodes()) {
-      expect(code).toMatch(/^XQ-(WS|FS|IO|AUTH|POP|DIST|SMP)-\d{3}$/);
+      expect(code).toMatch(/^XQ-(WS|FS|IO|AUTH|POP|DIST|SMP|ANS)-\d{3}$/);
       expect(errorCodeArea(code)).toBe(code.split("-")[1]);
     }
   });
@@ -319,7 +333,7 @@ describe("error-code catalog", () => {
     }
     expect(
       allErrorCodes().filter((code) => errorCodeMeaning(code).startsWith("RESERVED"))
-    ).toEqual(["XQ-SMP-001", "XQ-SMP-002", "XQ-SMP-003"]);
+    ).toEqual(["XQ-SMP-001", "XQ-SMP-002", "XQ-SMP-003", "XQ-ANS-007"]);
   });
 
   it("leaves no catalog entry unused", () => {
@@ -340,6 +354,7 @@ describe("error-code catalog", () => {
       "XQ-SMP-001",
       "XQ-SMP-002",
       "XQ-SMP-003",
+      "XQ-ANS-007",
     ]);
     expect(
       allErrorCodes().filter((code) => !seen.has(code) && !allowedElsewhere.has(code))
