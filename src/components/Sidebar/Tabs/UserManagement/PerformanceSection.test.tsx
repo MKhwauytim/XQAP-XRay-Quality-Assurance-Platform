@@ -87,9 +87,15 @@ describe("PerformanceSection", () => {
         onRefresh={vi.fn()}
       />
     );
-    expect(screen.getByText("العينات المُنجزة")).toBeInTheDocument();
+    // "العينات المُنجزة" now also labels a column in the trend chart's
+    // screen-reader-only table (Fix 3), so it can match more than once —
+    // find the summary-card occurrence specifically.
+    const summaryCardLabel = screen
+      .getAllByText("العينات المُنجزة")
+      .find((el) => el.closest("article") !== null);
+    expect(summaryCardLabel).toBeDefined();
     // One sample finished by sara.
-    expect(screen.getByText("العينات المُنجزة").closest("article")).toHaveTextContent("1");
+    expect(summaryCardLabel!.closest("article")).toHaveTextContent("1");
   });
 
   it("shows the working-hours empty message until a single employee is selected", () => {

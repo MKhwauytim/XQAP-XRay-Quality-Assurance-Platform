@@ -19,11 +19,21 @@ import {
   type PerformanceSummary,
 } from "./performanceTypes";
 
-/** YYYY-MM-DD for a timestamp, or "" when unparseable. */
+/**
+ * YYYY-MM-DD for a timestamp, or "" when unparseable. Buckets by the LOCAL
+ * calendar day — consistent with `minutesOfDay()` (also local) and the
+ * date-range `<input type="date">` filter (always local), so a day's
+ * sign-in/finish/gap data never straddles a bucket boundary that the rest
+ * of this module doesn't use.
+ */
 export function dayKey(at: string): string {
   const parsed = Date.parse(at);
   if (Number.isNaN(parsed)) return "";
-  return new Date(parsed).toISOString().slice(0, 10);
+  const date = new Date(parsed);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 /** YYYY-MM for a day key. */
@@ -107,9 +117,9 @@ export function finishTimestampsByEmployeeDay(
  */
 export function classifyGapTier(durationMs: number, baselineMs: number | null): GapTier {
   if (baselineMs === null) return "unclassified";
-  if (durationMs <= baselineMs + GAP_TIER_THRESHOLDS_MS.smallExtraMs) return "normal";
-  if (durationMs <= baselineMs + GAP_TIER_THRESHOLDS_MS.mediumExtraMs) return "small";
-  if (durationMs <= baselineMs + GAP_TIER_THRESHOLDS_MS.largeExtraMs) return "medium";
+  if (durationMs <= baselineMs + GAP_TIER_THRESHOLDS_MS.normalMaxExtraMs) return "normal";
+  if (durationMs <= baselineMs + GAP_TIER_THRESHOLDS_MS.smallMaxExtraMs) return "small";
+  if (durationMs <= baselineMs + GAP_TIER_THRESHOLDS_MS.mediumMaxExtraMs) return "medium";
   return "large";
 }
 
@@ -267,9 +277,4 @@ export function summarizePerformance(records: readonly DailyPerformance[]): Perf
   const medianGapMs = medianGapBaseline(gaps.map((g) => g.durationMs));
 
   return { totalSamples, totalEffectiveMs, gapCountsByTier, medianGapMs };
-}
-
-/** Distinct employees present in a set of daily records, sorted for a picker. */
-export function employeesInPerformanceData(records: readonly DailyPerformance[]): string[] {
-  return [...new Set(records.map((r) => r.employee))].sort((a, b) => a.localeCompare(b, "ar"));
 }

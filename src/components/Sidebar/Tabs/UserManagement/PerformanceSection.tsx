@@ -74,14 +74,18 @@ export function PerformanceSection(props: {
   const summary = useMemo(() => summarizePerformance(filtered), [filtered]);
   const trendPoints = useMemo(() => aggregateSamplesByDay(filtered), [filtered]);
   const gaps = useMemo(() => flattenGaps(filtered), [filtered]);
+  const gapsForDisplay = useMemo(() => [...gaps].reverse(), [gaps]);
   const employeeOptions = useMemo(() => buildEmployeeOptions(props.users, allDaily), [props.users, allDaily]);
   const totalSamples = useMemo(() => allDaily.reduce((sum, d) => sum + d.samplesFinished, 0), [allDaily]);
 
-  const hourStrips: DayStrip[] = useMemo(() => {
+  const hourStripsSource: DailyPerformance[] = useMemo(() => {
     if (filter.employee === "") return [];
-    return filtered
-      .filter((d) => d.employee === filter.employee)
-      .map((d) => ({
+    return filtered.filter((d) => d.employee === filter.employee);
+  }, [filtered, filter.employee]);
+
+  const hourStrips: DayStrip[] = useMemo(
+    () =>
+      hourStripsSource.map((d) => ({
         day: d.day,
         signInMinute: d.signInAt ? minutesOfDay(d.signInAt) : null,
         lastFinishMinute: d.lastFinishAt ? minutesOfDay(d.lastFinishAt) : null,
@@ -90,17 +94,18 @@ export function PerformanceSection(props: {
           endMinute: minutesOfDay(g.endAt),
           tier: g.tier,
         })),
-      }));
-  }, [filtered, filter.employee]);
+      })),
+    [hourStripsSource]
+  );
 
   const pageKey = `${filter.employee}:${filter.from}:${filter.to}`;
   const [pageState, setPageState] = useState<{ key: string; page: number }>(() => ({ key: pageKey, page: 1 }));
   const page = clampPage(pageState.key === pageKey ? pageState.page : 1, gaps.length);
-  const pagedGaps = pageSlice(gaps, page);
+  const pagedGaps = pageSlice(gapsForDisplay, page);
 
   const emptyMessage = !props.hasWorkspace
     ? labels.um_perf_no_workspace
-    : allDaily.length === 0
+    : allDaily.length === 0 || filtered.length === 0
       ? labels.um_perf_empty
       : null;
 
@@ -146,10 +151,10 @@ export function PerformanceSection(props: {
             <article className="um-perf-card"><span>{labels.um_perf_summary_samples}</span><strong>{summary.totalSamples.toLocaleString("ar-SA-u-nu-latn")}</strong></article>
             <article className="um-perf-card"><span>{labels.um_perf_summary_effective}</span><strong>{summary.totalEffectiveMs === null ? "—" : formatDuration(summary.totalEffectiveMs)}</strong></article>
             <article className="um-perf-card"><span>{labels.um_perf_summary_pace}</span><strong>{summary.medianGapMs === null ? "—" : formatDuration(summary.medianGapMs)}</strong></article>
-            <article className="um-perf-card"><span>{labels.um_perf_summary_gaps_normal}</span><strong>{summary.gapCountsByTier.normal}</strong></article>
-            <article className="um-perf-card"><span>{labels.um_perf_summary_gaps_small}</span><strong>{summary.gapCountsByTier.small}</strong></article>
-            <article className="um-perf-card"><span>{labels.um_perf_summary_gaps_medium}</span><strong>{summary.gapCountsByTier.medium}</strong></article>
-            <article className="um-perf-card"><span>{labels.um_perf_summary_gaps_large}</span><strong>{summary.gapCountsByTier.large}</strong></article>
+            <article className="um-perf-card"><span>{labels.um_perf_summary_gaps_normal}</span><strong>{summary.gapCountsByTier.normal.toLocaleString("ar-SA-u-nu-latn")}</strong></article>
+            <article className="um-perf-card"><span>{labels.um_perf_summary_gaps_small}</span><strong>{summary.gapCountsByTier.small.toLocaleString("ar-SA-u-nu-latn")}</strong></article>
+            <article className="um-perf-card"><span>{labels.um_perf_summary_gaps_medium}</span><strong>{summary.gapCountsByTier.medium.toLocaleString("ar-SA-u-nu-latn")}</strong></article>
+            <article className="um-perf-card"><span>{labels.um_perf_summary_gaps_large}</span><strong>{summary.gapCountsByTier.large.toLocaleString("ar-SA-u-nu-latn")}</strong></article>
           </div>
 
           <div className="um-perf-chart">
@@ -157,7 +162,26 @@ export function PerformanceSection(props: {
             {trendPoints.length === 0 ? (
               <div className="um-empty">{labels.um_perf_trend_empty}</div>
             ) : (
-              <div dir="ltr" aria-hidden="true" dangerouslySetInnerHTML={{ __html: samplesTrendSvg(trendPoints, labels.um_perf_trend_empty) }} />
+              <>
+                <div dir="ltr" aria-hidden="true" dangerouslySetInnerHTML={{ __html: samplesTrendSvg(trendPoints, labels.um_perf_trend_empty) }} />
+                <table className="um-perf-sr-only">
+                  <caption>{labels.um_perf_trend_title}</caption>
+                  <thead>
+                    <tr>
+                      <th>{labels.um_perf_gaps_col_day}</th>
+                      <th>{labels.um_perf_summary_samples}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {trendPoints.map((p) => (
+                      <tr key={p.day}>
+                        <td>{p.day}</td>
+                        <td>{p.count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
             )}
           </div>
 
@@ -166,7 +190,28 @@ export function PerformanceSection(props: {
             {hourStrips.length === 0 ? (
               <div className="um-empty">{labels.um_perf_hours_empty}</div>
             ) : (
-              <div dir="ltr" aria-hidden="true" dangerouslySetInnerHTML={{ __html: workingHoursStripSvg(hourStrips, labels.um_perf_hours_empty) }} />
+              <>
+                <div dir="ltr" aria-hidden="true" dangerouslySetInnerHTML={{ __html: workingHoursStripSvg(hourStrips, labels.um_perf_hours_empty) }} />
+                <table className="um-perf-sr-only">
+                  <caption>{labels.um_perf_hours_title}</caption>
+                  <thead>
+                    <tr>
+                      <th>{labels.um_perf_gaps_col_day}</th>
+                      <th>{labels.um_perf_hours_col_signin}</th>
+                      <th>{labels.um_perf_hours_col_finish}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {hourStripsSource.map((d) => (
+                      <tr key={d.day}>
+                        <td>{d.day}</td>
+                        <td>{d.signInAt ? formatDateTime(d.signInAt) : "—"}</td>
+                        <td>{d.lastFinishAt ? formatDateTime(d.lastFinishAt) : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
             )}
           </div>
 

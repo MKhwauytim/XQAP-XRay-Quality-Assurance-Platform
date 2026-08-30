@@ -31,14 +31,6 @@ export type DailyPerformance = {
   gaps: GapEvent[];
 };
 
-export type EmployeeMonthlyBaseline = {
-  employee: string;
-  month: string; // YYYY-MM
-  /** Median within-day gap duration across the month, or null when fewer than MIN_GAP_SAMPLES_FOR_BASELINE gaps exist. */
-  medianGapMs: number | null;
-  sampleCount: number;
-};
-
 export type PerformanceScopeFilter = {
   /** A username, or "" for every employee. */
   employee: string;
@@ -56,9 +48,9 @@ export type PerformanceSummary = {
 
 /** Gap tiers, relative to the employee's own monthly median gap ("avg" in the design doc). */
 export const GAP_TIER_THRESHOLDS_MS = {
-  smallExtraMs: 5 * 60 * 1000,
-  mediumExtraMs: 20 * 60 * 1000,
-  largeExtraMs: 60 * 60 * 1000,
+  normalMaxExtraMs: 5 * 60 * 1000,
+  smallMaxExtraMs: 20 * 60 * 1000,
+  mediumMaxExtraMs: 60 * 60 * 1000,
 } as const;
 
 /** Below this many within-day gaps in a calendar month, the median baseline is unreliable — report null, not a noisy value. */

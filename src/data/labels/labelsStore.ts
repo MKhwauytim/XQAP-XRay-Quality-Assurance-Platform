@@ -1035,6 +1035,8 @@ export const DEFAULT_LABELS = {
   um_perf_trend_empty:          "لا توجد عينات مُنجزة ضمن الفترة المحددة.",
   um_perf_hours_title:          "ساعات العمل اليومية",
   um_perf_hours_empty:          "اختر موظفاً واحداً لعرض ساعات عمله اليومية.",
+  um_perf_hours_col_signin:     "وقت تسجيل الدخول",
+  um_perf_hours_col_finish:     "وقت آخر إنجاز",
   um_perf_gaps_title:           "سجل الفجوات",
   um_perf_gaps_empty:           "لا توجد فجوات مسجلة ضمن الفترة المحددة.",
   um_perf_gaps_col_employee:    "الموظف",

@@ -1291,3 +1291,18 @@
   font-weight: 800;
   color: var(--app-text);
 }
+
+/* Visually hidden but reachable by assistive tech — the semantic twin of the
+   aria-hidden SVG charts in تقييم الأداء (mirrors .rk-sr-only in
+   ReviewerKpiPanel.css / .kpi-sr-only in KpiDashboard.css). */
+.um-perf-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

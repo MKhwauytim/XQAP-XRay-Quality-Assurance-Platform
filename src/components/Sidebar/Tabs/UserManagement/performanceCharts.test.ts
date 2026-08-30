@@ -62,4 +62,20 @@ describe("workingHoursStripSvg", () => {
     const rectCount = (svg.match(/<rect/g) ?? []).length;
     expect(rectCount).toBe(2); // track + base bar only, no gap overlay
   });
+
+  it("does not draw an overlay for an unclassified-tier gap", () => {
+    const svg = workingHoursStripSvg(
+      [
+        {
+          day: "2026-06-01",
+          signInMinute: 6 * 60,
+          lastFinishMinute: 7 * 60,
+          gapSegments: [{ startMinute: 6 * 60, endMinute: 6 * 60 + 5, tier: "unclassified" }],
+        },
+      ],
+      "اختر موظفاً"
+    );
+    const rectCount = (svg.match(/<rect/g) ?? []).length;
+    expect(rectCount).toBe(2); // track + base bar only, no gap overlay
+  });
 });

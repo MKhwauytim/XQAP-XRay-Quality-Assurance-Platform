@@ -124,10 +124,14 @@ export type DayStrip = {
 
 /**
  * One horizontal 24h strip per day: a base bar from sign-in to last finish,
- * with each non-"normal" gap overlaid in its tier colour. RTL: 00:00 at the
- * right edge, 24:00 at the left, matching samplesTrendSvg's date-axis
- * direction. A "normal" gap is not drawn — it is expected pacing, not
- * something worth highlighting on the strip.
+ * with each non-"normal", non-"unclassified" gap overlaid in its tier
+ * colour. RTL: 00:00 at the right edge, 24:00 at the left, matching
+ * samplesTrendSvg's date-axis direction. A "normal" gap is not drawn — it
+ * is expected pacing, not something worth highlighting on the strip. An
+ * "unclassified" gap (no reliable monthly baseline yet, see
+ * classifyGapTier) is also not drawn — with no baseline to be flagged
+ * against, it has no basis for being singled out as an anomaly either, so
+ * it should not visually read as one.
  */
 export function workingHoursStripSvg(days: readonly DayStrip[], emptyNote: string): string {
   const w = 720;

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AuthActivityLogEntry } from "../../auth/authActivityLog";
 import type { WorkspaceActionEntry } from "../audit/actionLog";
 import {
@@ -51,6 +51,18 @@ describe("dayKey", () => {
   });
   it("returns empty string for an unparseable timestamp", () => {
     expect(dayKey("not-a-date")).toBe("");
+  });
+});
+
+describe("dayKey — local timezone, not UTC", () => {
+  it("buckets by the LOCAL calendar day, not the UTC one", () => {
+    vi.stubEnv("TZ", "Asia/Riyadh"); // UTC+3, no DST
+    try {
+      // 2026-06-01T23:30:00Z is 2026-06-02T02:30 in Asia/Riyadh — a different calendar day.
+      expect(dayKey("2026-06-01T23:30:00.000Z")).toBe("2026-06-02");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 
@@ -128,13 +140,13 @@ describe("classifyGapTier", () => {
     expect(classifyGapTier(10 * 60 * 1000, null)).toBe("unclassified");
   });
   it("normal at and below baseline + 5min", () => {
-    expect(classifyGapTier(baseline + GAP_TIER_THRESHOLDS_MS.smallExtraMs, baseline)).toBe("normal");
+    expect(classifyGapTier(baseline + GAP_TIER_THRESHOLDS_MS.normalMaxExtraMs, baseline)).toBe("normal");
   });
   it("small just above the normal boundary", () => {
-    expect(classifyGapTier(baseline + GAP_TIER_THRESHOLDS_MS.smallExtraMs + 1000, baseline)).toBe("small");
+    expect(classifyGapTier(baseline + GAP_TIER_THRESHOLDS_MS.normalMaxExtraMs + 1000, baseline)).toBe("small");
   });
   it("medium just above the small boundary", () => {
-    expect(classifyGapTier(baseline + GAP_TIER_THRESHOLDS_MS.mediumExtraMs + 1000, baseline)).toBe("medium");
+    expect(classifyGapTier(baseline + GAP_TIER_THRESHOLDS_MS.smallMaxExtraMs + 1000, baseline)).toBe("medium");
   });
   it("large beyond the medium boundary (the user's 2-hour example)", () => {
     expect(classifyGapTier(baseline + 2 * 60 * 60 * 1000, baseline)).toBe("large");
