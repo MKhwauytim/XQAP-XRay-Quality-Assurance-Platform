@@ -66,6 +66,12 @@ body{background:var(--v3-navy);font-family:"Somar","IBM Plex Sans Arabic","Tahom
   position:relative;overflow:hidden;box-sizing:border-box;
   background:var(--v3-bg);color:var(--v3-text);
   border:1px solid var(--v3-hair);
+  /* The cover/closing/divider variants below share the page's own navy
+     family (--v3-cover-navy / --v3-navy is literally the page background for
+     dividers), so a border alone can't separate them from .deck-viewer-v3's
+     surround — only this shadow, kept on the shared base rule so every
+     variant inherits it, does. */
+  box-shadow:0 10px 32px rgba(0,0,0,.4);
   display:flex;flex-direction:column;padding:84px 100px 56px;
 }
 .slide.v3.v3-cover,.slide.v3.v3-closing{background:var(--v3-cover-navy);color:#fff;padding:96px 120px 84px;border:none;}
@@ -421,6 +427,13 @@ body.deck-fullscreen .btn-fullscreen{
 }
 body.deck-fullscreen.deck-controls-visible .btn-fullscreen{opacity:1;pointer-events:auto;}
 body.deck-fullscreen .slide.v3{display:none;}
+/* The optional source-revisions footer (populationReport/deck.ts's footerNote)
+   is a direct sibling of .slide.v3 inside .deck-viewer-v3, not a slide itself,
+   so the display:none rule above never touches it. Left visible, it becomes a
+   second flex child next to the active slide in fullscreen's flex-centered
+   .deck-viewer-v3, which crowds and offsets the slide instead of centering it
+   alone — hide it in single-slide fullscreen, same as the toolbar/nav chrome. */
+body.deck-fullscreen .deck-viewer-v3>.source-revisions{display:none;}
 body.deck-fullscreen .slide.v3.deck-slide-active{
   /* .deck-viewer-v3 itself flex-centers the active slide in fullscreen (see
      body.deck-fullscreen .deck-viewer-v3 below) — reliable, direction-aware

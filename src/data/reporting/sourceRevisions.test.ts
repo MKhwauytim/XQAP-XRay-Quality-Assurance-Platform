@@ -90,7 +90,11 @@ describe("sourceRevisions field on PopulationReportInput (B2)", () => {
     const withoutRevisions = await buildPopulationDocument(buildInput({ sourceRevisions: undefined }));
     expect(withRevisions).not.toBe(withoutRevisions);
     expect(withRevisions).toContain("population.final.json");
-    expect(withoutRevisions).not.toContain("source-revisions");
+    // The base CSS (shared with deck3) carries a `.source-revisions`
+    // fullscreen display:none guard unconditionally, so the bare class name
+    // legitimately appears even with no revisions — what must stay absent is
+    // the actual footer block.
+    expect(withoutRevisions).not.toContain('<section class="source-revisions"');
   });
 
   test("sourceRevisions now renders as a footer on the deck (tracked gap from Task 11 closed by Task 11b)", async () => {
@@ -100,6 +104,6 @@ describe("sourceRevisions field on PopulationReportInput (B2)", () => {
     const withoutRevisions = await buildPopulationDeck(buildInput({ sourceRevisions: undefined }));
     expect(withRevisions).not.toBe(withoutRevisions);
     expect(withRevisions).toContain("population.final.json");
-    expect(withoutRevisions).not.toContain("source-revisions");
+    expect(withoutRevisions).not.toContain('<section class="source-revisions"');
   });
 });

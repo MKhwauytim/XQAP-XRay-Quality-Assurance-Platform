@@ -2,8 +2,9 @@
 // Reuses deck3's exact CSS (tokens + every .v3-* component class — panels,
 // tables, KPI bands, eyebrows are all canvas-size-agnostic) and layers a
 // page-shell block on top that replaces .slide.v3's fixed dimensions with
-// A4 print-flow rules. No border-radius, no box-shadow — inherited from
-// deck3's CSS, not re-declared here.
+// A4 print-flow rules. No border-radius, inherited from deck3's CSS, not
+// re-declared here. Unlike deck3, this DOES declare its own box-shadow (see
+// .docpage.v3 below) — screen-only, stripped under @media print.
 import { DECK_V3_CSS } from "../deck3/theme";
 
 const DOCUMENT_V3_PAGE_CSS = `
@@ -21,11 +22,16 @@ html,body{margin:0;padding:0;background:var(--v3-bg);}
   font-size:16px;border-bottom:1px solid rgba(249,248,245,.12);
 }
 .docviewer .sidebar nav.toc a.active{color:var(--v3-gold-lighter);font-weight:600;}
-.docviewer .content{flex:1;padding:24px 0;}
+.docviewer .content{flex:1;padding:24px 0;background:var(--v3-panel);}
 .docpage.v3{
   width:210mm;min-height:297mm;box-sizing:border-box;margin:0 auto 24px;
   background:var(--v3-bg);padding:18mm 16mm;display:flex;flex-direction:column;gap:28px;
-  page-break-after:always;border:none;box-shadow:none;
+  page-break-after:always;border:none;
+  /* .content's own background above is a slightly darker tone than the page
+     itself (both were --v3-bg before, making every page invisible against
+     its container outside of print) — the shadow below gives each page a
+     "sheet" edge on top of that, same reasoning as deck3's .slide.v3. */
+  box-shadow:0 6px 22px rgba(0,0,0,.18);
 }
 .docpage.v3 .docpage-foot{
   margin-top:auto;display:flex;justify-content:space-between;
@@ -46,7 +52,8 @@ html,body{margin:0;padding:0;background:var(--v3-bg);}
 .doc-contents-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px;font-size:20px;}
 @media print {
   .docviewer .sidebar, .docviewer .no-print { display:none; }
-  .docpage.v3 { margin:0; }
+  .docviewer .content { background:none; }
+  .docpage.v3 { margin:0; box-shadow:none; }
 }
 `;
 

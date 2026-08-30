@@ -23,6 +23,7 @@ import { RESULT_HEADERS, resultRow, contentsRows } from "./deck";
 import { STAGE_LABELS } from "./fold";
 import type { PortBreakdown, PopulationReportScope } from "./types";
 import { sourceRevisionsFooterHtml, SOURCE_REVISIONS_CSS } from "../sourceRevisions";
+import { ZATCA_LOGO_URL } from "../../../branding/organization";
 
 // rowsPerPage is set well above any realistic port count (a country's customs
 // ports are a small, bounded list) so the [0] chunk below is never actually
@@ -234,7 +235,7 @@ export async function buildPopulationDocument(
   scope: PopulationReportScope = "both"
 ): Promise<string> {
   const model = computePopulationReportModel(input);
-  const org = { logoUrl: "", orgName: "ضمان جودة الأشعة", lines: [] };
+  const org = { logoUrl: ZATCA_LOGO_URL, orgName: "ضمان جودة الأشعة", lines: [] };
   const pages: string[] = [
     docCover({ org, title: "تقرير المجتمع", periodLabel: "الفترة", periodValue: model.monthLabel, metaRows: [] }),
     buildContentsPage(scope),

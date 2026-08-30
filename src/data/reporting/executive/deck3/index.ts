@@ -77,10 +77,24 @@ const DECK_V3_SCALE_SCRIPT = `(function(){
     var curLeft = slide.getBoundingClientRect().left;
     setTx(targetLeft - curLeft);
   }
+  // On EXIT, fit()'s non-fullscreen branch measures .deck-viewer-v3's live
+  // padding/clientWidth to compute the scale — but that measurement is only
+  // correct once DECK_FULLSCREEN_SCRIPT's own 'fullscreenchange' listener has
+  // toggled body.deck-fullscreen off (that class removal is what restores the
+  // real padding this script reads). Listeners for the same event fire in
+  // attachment order, and this script's <script> tag is emitted in <head> —
+  // before DECK_FULLSCREEN_SCRIPT's, at the end of <body> — so this fit()
+  // call would otherwise run FIRST, on the stale still-fullscreen layout
+  // (padding:0), locking in a wrong, too-large scale that never self-corrects
+  // (nothing re-triggers fit() afterward). Deferring the fullscreen-triggered
+  // call to the next frame — after both listeners' synchronous work for this
+  // event has completed — reads the final, correct DOM state regardless of
+  // which script's listener happened to attach first.
+  function fitAfterFullscreenChange(){ requestAnimationFrame(fit); }
   estimate();
   window.addEventListener('resize', fit);
-  document.addEventListener('fullscreenchange', fit);
-  document.addEventListener('webkitfullscreenchange', fit);
+  document.addEventListener('fullscreenchange', fitAfterFullscreenChange);
+  document.addEventListener('webkitfullscreenchange', fitAfterFullscreenChange);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fit);
   else fit();
 })();`;
