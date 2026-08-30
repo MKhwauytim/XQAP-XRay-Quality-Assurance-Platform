@@ -234,9 +234,9 @@ export async function buildPopulationDocument(
   pages.push(docClosing({ org, title: "نهاية التقرير", closingLine: `تقرير المجتمع — ${model.monthLabel}` }));
 
   return `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8" />
-<title>تقرير المجتمع — ${model.monthLabel}</title>
+<title>تقرير المجتمع — ${esc(model.monthLabel)}</title>
 <style>${DOCUMENT_V3_CSS}</style></head>
-<body><div class="docviewer"><aside class="sidebar no-print"><div class="doc-brand">تقرير المجتمع</div><div class="doc-brand-sub">${model.monthLabel}</div></aside>
+<body><div class="docviewer"><aside class="sidebar no-print"><div class="doc-brand">تقرير المجتمع</div><div class="doc-brand-sub">${esc(model.monthLabel)}</div></aside>
 <main class="content">${pages.join("\n")}</main></div></body></html>`;
 }
 
