@@ -3,7 +3,8 @@ import {
   appendReferralToEmployee,
   appendReopenToEmployee,
   appendReplacementToEmployee,
-  loadAllEmployeeFiles,
+  loadAllEmployeeRequestFiles,
+  type EmployeeRequestQueues,
 } from "../answers/answerStorage";
 import {
   appendDecisionEvent,
@@ -22,7 +23,6 @@ import type {
   ReplacementLog,
   ReplacementRequest,
 } from "./referralTypes";
-import type { EmployeeAnswerFile } from "../answers/answerTypes";
 
 // ── Referral requests ─────────────────────────────────────────────────────────
 
@@ -50,13 +50,22 @@ export async function appendReferralRequest(
  * loadReopenLog])` — share a single underlying scan rather than each
  * delegating export independently awaiting its own copy.
  *
- * Failure-domain note: `loadAllEmployeeFiles` and `loadAllSupervisorDecisions`
- * already degrade independently to `[]` on their own read/list failure, and
- * each uses `onUnreadable: "skip"` internally so one corrupt file only drops
- * that file. Calling them once here and reusing the result for all three
- * kinds does not collapse that — the per-file skip behaviour lives inside
- * `readJsonDirectory`, not in how many times the caller invokes these
- * functions.
+ * Failure-domain note: `loadAllEmployeeRequestFiles` and
+ * `loadAllSupervisorDecisions` already degrade independently to `[]` on their
+ * own read/list failure, and each uses `onUnreadable: "skip"` internally so
+ * one corrupt file only drops that file. Calling them once here and reusing
+ * the result for all three kinds does not collapse that — the per-file skip
+ * behaviour lives inside `readJsonDirectory`, not in how many times the caller
+ * invokes these functions.
+ *
+ * Uses the REQUESTS-ONLY fast path (`loadAllEmployeeRequestFiles`, Stage 2 of
+ * the answer-save append-only rewrite, §7 Finding 5c) rather than
+ * `loadAllEmployeeFiles`: every field this function reads off an employee file
+ * — `referralRequests`/`replacementRequests`/`reopenRequests` — lives in
+ * `{username}.requests.json` now, so this surface never needed the item-answer
+ * segments/fold at all. Reading only the request queues is what makes this
+ * scan's cost drop instead of growing to a full per-employee event-log fold it
+ * never used.
  */
 export async function loadRequestLogs(
   directoryHandle: DirectoryHandleLike,
@@ -65,7 +74,7 @@ export async function loadRequestLogs(
   const key = `${workspaceScopeId(directoryHandle)}|${monthFolderName}|${workspaceEpoch(directoryHandle, monthFolderName)}|request-logs`;
   return dedupeInFlight(key, async () => {
     const [empFiles, allDecisions] = await Promise.all([
-      loadAllEmployeeFiles(directoryHandle, monthFolderName),
+      loadAllEmployeeRequestFiles(directoryHandle, monthFolderName),
       loadAllSupervisorDecisions(directoryHandle, monthFolderName),
     ]);
 
@@ -79,10 +88,10 @@ export async function loadRequestLogs(
 
 function buildLog<TRequest extends { requestId: string }>(
   monthFolderName: string,
-  empFiles: EmployeeAnswerFile[],
+  empFiles: EmployeeRequestQueues[],
   allDecisions: SupervisorDecisionFile[],
   kind: "referral" | "replacement" | "reopen",
-  pick: (f: EmployeeAnswerFile) => TRequest[]
+  pick: (f: EmployeeRequestQueues) => TRequest[]
 ): { monthFolderName: string; revision: number; requests: TRequest[] } {
   const allRequests = empFiles.flatMap(pick);
 

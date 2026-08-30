@@ -161,12 +161,12 @@ export function answerSegmentTimePrefix(nowMs: number = Date.now()): string {
  * number that does not exist in its own directory (which §8's "earliest segment
  * in the writer's chain" marker rule depends on not happening).
  *
- * DIAGNOSTICS CODES ARE BORROWED, DELIBERATELY. `XQ-DIST-006/007/008` describe
- * DISTRIBUTION event segments; their Arabic user-facing text is wrong for an
- * answer save. Registering `XQ-ANS-*` codes means editing `errorCodes.ts` and
- * `labelsStore.ts`, which Stage 1 does not touch (this module has no callers,
- * so no user can see these strings yet). **Stage 2 must add the answers codes
- * before wiring a writer.**
+ * DIAGNOSTICS CODES ARE ANSWERS' OWN, registered in `errorCodes.ts`'s `ANS`
+ * area with their own Arabic user-facing text in `labelsStore.ts` (Stage 2 —
+ * `XQ-ANS-001/002/003`, mirroring distribution's `XQ-DIST-006/007/008`
+ * one-for-one by failure mode). Stage 1 borrowed the distribution codes as
+ * placeholders here since this module had no callers yet; Stage 2 wired a
+ * writer and switched these over.
  */
 export function buildAnswerEventLogConfig(nowMs?: number): AppendOnlyEventLogConfig {
   return {
@@ -178,9 +178,9 @@ export function buildAnswerEventLogConfig(nowMs?: number): AppendOnlyEventLogCon
       writeContext: "answers:append-segment",
       rereadContext: "answers:segment-reread",
       verifyContext: "answers:segment-verify",
-      cannotWriteCode: "XQ-DIST-006",
-      unverifiedCode: "XQ-DIST-007",
-      sizeMismatchCode: "XQ-DIST-008",
+      cannotWriteCode: "XQ-ANS-001",
+      unverifiedCode: "XQ-ANS-002",
+      sizeMismatchCode: "XQ-ANS-003",
       segmentParseError: (segmentName) => `Cannot parse answer event segment: ${segmentName}`,
       verificationFailedError: (fileName, expectedBytes, observedBytes) =>
         `Answer event segment write verification failed: ${fileName} ` +
@@ -577,10 +577,21 @@ export type AnswerFoldResult = {
  * apart from an I/O failure — and, per §10 and the P0-1 "unreadable never
  * becomes empty" contract, so that neither is ever turned into empty state.
  */
+export type AnswerFoldErrorReason = "missing-migration-seed" | "legacy-seed-hash-mismatch";
+
 export class AnswerFoldError extends Error {
-  constructor(message: string) {
+  /**
+   * Which of the two hard-failure rules this is (§8/§10) — a real
+   * discriminant for a caller that needs to tell them apart (Stage 2's
+   * `XQ-ANS-005` vs `XQ-ANS-006` classification in `answerStorage.ts`),
+   * added so that classification does not have to match on `message` text.
+   */
+  readonly reason: AnswerFoldErrorReason;
+
+  constructor(message: string, reason: AnswerFoldErrorReason) {
     super(message);
     this.name = "AnswerFoldError";
+    this.reason = reason;
   }
 }
 
@@ -597,7 +608,8 @@ function seedItemsFromLegacy(
   if (!legacySeed) {
     throw new AnswerFoldError(
       `Answer migration-seed ${event.eventId} names legacy content ${hash}, ` +
-        `but no legacy snapshot was supplied to the fold.`
+        `but no legacy snapshot was supplied to the fold.`,
+      "legacy-seed-hash-mismatch"
     );
   }
   if (legacySeed.contentHash !== hash) {
@@ -606,7 +618,8 @@ function seedItemsFromLegacy(
     // state no single writer ever wrote.
     throw new AnswerFoldError(
       `Answer migration-seed ${event.eventId} names legacy content ${hash}, ` +
-        `but the supplied legacy snapshot hashes to ${legacySeed.contentHash}.`
+        `but the supplied legacy snapshot hashes to ${legacySeed.contentHash}.`,
+      "legacy-seed-hash-mismatch"
     );
   }
   return legacySeed.items.map((item) => ({ ...item }));
@@ -762,7 +775,8 @@ export function foldAnswerEvents(
       throw new AnswerFoldError(
         `Answer event segments contain ${ordered.length} event(s) but no migration-seed marker. ` +
           `This is pre-migration rollback residue or a corrupted first segment — refusing to guess ` +
-          `at the missing baseline (proposal §8/§10).`
+          `at the missing baseline (proposal §8/§10).`,
+        "missing-migration-seed"
       );
     }
   }

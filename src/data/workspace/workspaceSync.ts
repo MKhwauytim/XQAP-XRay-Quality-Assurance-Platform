@@ -52,6 +52,10 @@ import {
   DISTRIBUTION_EVENTS_DIR,
   DISTRIBUTION_EVENT_SEGMENT_SUFFIX,
 } from "../distribution/distributionEventStore";
+import {
+  ANSWER_EVENTS_DIR,
+  ANSWER_EVENT_SEGMENT_SUFFIX,
+} from "../answers/answerEventStore";
 import { readEnvelopeRevision } from "../storage/safeWrite";
 import { logError } from "../storage/errorLogger";
 import { isNotFoundError } from "../storage/transientFileErrors";
@@ -170,6 +174,17 @@ type Probe = {
    *  write failed leaves events on disk with the stamp unmoved. This is the
    *  independent signal for both. */
   segmentsSignature: Probed<string>;
+  /**
+   * Bounded name+size signature of `answers.events/*.ndjson` (§6 of the
+   * answer-save append-only rewrite) — the read-only freshness signal for
+   * another user's answer save. Zero new writes: same primitive and shape as
+   * `segmentsSignature` above, joined into the `answers` family below (an
+   * answer segment changing is exactly as ambiguous by construction as the
+   * legacy per-employee file signature already is — see `answersSignature`'s
+   * own doc comment — so it is folded into the same "requests" + "answers"
+   * broadcast rather than trying to guess which one moved).
+   */
+  answersEventsSignature: Probed<string>;
   /**
    * Bounded name+size signature of `5-system/feedback/threads/*.json` — the
    * shared feedback ("chat") threads. It is the signal behind the unread dot on
@@ -326,6 +341,8 @@ type ProbeDirs = {
   mainDir: DirectoryHandleLike | null;
   /** `2-samples/{month}/1-main/distribution.events`, or null when absent. */
   eventsDir: DirectoryHandleLike | null;
+  /** `2-samples/{month}/1-main/answers.events`, or null when absent. */
+  answersEventsDir: DirectoryHandleLike | null;
   employeesDir: DirectoryHandleLike | null;
   approvalsDir: DirectoryHandleLike | null;
   populationMonthDir: DirectoryHandleLike | null;
@@ -362,12 +379,18 @@ async function resolveProbeDirs(
   // The one open that CANNOT join a batch above: it hangs off `mainDir`, which
   // the batch above is what resolves. One extra round trip per tick, in exchange
   // for the only signal that sees a restore (see Probe.segmentsSignature).
-  const eventsDir = mainDir
-    ? await openOrNull(() => mainDir.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: false }))
-    : null;
+  // `answersEventsDir` hangs off the same `mainDir` and joins this batch for
+  // the identical reason (§6 of the answer-save proposal).
+  const [eventsDir, answersEventsDir] = mainDir
+    ? await Promise.all([
+        openOrNull(() => mainDir.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: false })),
+        openOrNull(() => mainDir.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: false })),
+      ])
+    : [null, null];
   return {
     mainDir,
     eventsDir,
+    answersEventsDir,
     employeesDir,
     approvalsDir,
     populationMonthDir,
@@ -414,6 +437,17 @@ async function safeSegmentsSignature(dir: DirectoryHandleLike | null): Promise<P
     return await boundedSizeSignature(dir, DISTRIBUTION_EVENT_SEGMENT_SUFFIX);
   } catch (error) {
     logError("workspaceSync:probeSegments", error);
+    return UNPROBED;
+  }
+}
+
+/** §6 of the answer-save proposal: read-only, bounded — same primitive and shape as `safeSegmentsSignature` above. */
+async function safeAnswerSegmentsSignature(dir: DirectoryHandleLike | null): Promise<Probed<string>> {
+  if (!dir) return "";
+  try {
+    return await boundedSizeSignature(dir, ANSWER_EVENT_SEGMENT_SUFFIX);
+  } catch (error) {
+    logError("workspaceSync:probeAnswerSegments", error);
     return UNPROBED;
   }
 }
@@ -513,6 +547,7 @@ async function probeMonth(
     approvalsSignature,
     manifestRevision,
     segmentsSignature,
+    answersEventsSignature,
     feedbackSignature,
   ] =
     await Promise.all([
@@ -532,6 +567,7 @@ async function probeMonth(
       safeSignature(dirs.approvalsDir, DECISIONS_SUFFIX),
       safeRevision(dirs.populationMonthDir, MONTH_MANIFEST_FILE),
       safeSegmentsSignature(dirs.eventsDir),
+      safeAnswerSegmentsSignature(dirs.answersEventsDir),
       safeFeedbackSignature(dirs.feedbackDir),
     ]);
 
@@ -543,6 +579,7 @@ async function probeMonth(
     approvalsSignature,
     manifestRevision,
     segmentsSignature,
+    answersEventsSignature,
     feedbackSignature,
   };
 }
@@ -556,6 +593,7 @@ function carryUnprobed(previous: Probe, current: Probe): Probe {
     approvalsSignature: carry(previous.approvalsSignature, current.approvalsSignature),
     manifestRevision: carry(previous.manifestRevision, current.manifestRevision),
     segmentsSignature: carry(previous.segmentsSignature, current.segmentsSignature),
+    answersEventsSignature: carry(previous.answersEventsSignature, current.answersEventsSignature),
     feedbackSignature: carry(previous.feedbackSignature, current.feedbackSignature),
   };
 }
@@ -590,7 +628,14 @@ function diffFamilies(previous: Probe | undefined, current: Probe): Set<DataRefr
   ) {
     changed.add("notifications");
   }
-  if (movedFrom(previous.answersSignature, current.answersSignature, sameValue)) {
+  if (
+    movedFrom(previous.answersSignature, current.answersSignature, sameValue) ||
+    // §6 of the answer-save proposal: the item-answer event log's own
+    // freshness signal, independent of the legacy per-employee file
+    // signature above (an employee whose answers now live entirely in
+    // `answers.events/` moves nothing the legacy signature can see).
+    movedFrom(previous.answersEventsSignature, current.answersEventsSignature, sameValue)
+  ) {
     // Ambiguous by construction (see Probe's doc comment): an answers-dir
     // size change could be a new referral/replacement/reopen request OR a
     // changed item answer. Mark both rather than guessing -- the cost is an

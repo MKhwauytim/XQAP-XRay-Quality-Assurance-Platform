@@ -2,6 +2,7 @@ import * as XLSX from "xlsx";
 
 import type { EmployeeAnswerFile } from "../answers/answerTypes";
 import { loadAllEmployeeFiles } from "../answers/answerStorage";
+import { ANSWER_EVENTS_DIR, type AnswerEvent } from "../answers/answerEventStore";
 import {
   DISTRIBUTION_EVENTS_DIR,
   DISTRIBUTION_EVENT_SEGMENT_SUFFIX,
@@ -485,6 +486,144 @@ function encodeSegmentLines(events: DistributionEvent[]): string {
   return events.map((event) => `${JSON.stringify(event)}\n`).join("");
 }
 
+/**
+ * Any `*.events/` directory participates in the fold-cache-invalidation dance
+ * below — distribution's `distribution.events` and answers' `answers.events`
+ * today, and any future consumer that follows the same
+ * `{consumerNamespace}.events` naming convention `appendOnlyEventLog.ts`
+ * establishes. Round 3's finding: the cache-directory capture used to match
+ * `DISTRIBUTION_EVENTS_DIR` by literal string equality, so a restore that
+ * merged `answers.events/` never invalidated ITS fold checkpoint (whose
+ * `segmentOffsets` are byte offsets into files the merge just rewrote — a
+ * stale sidecar there mis-parses or silently skips real events on the next
+ * incremental read). Matching by suffix generalizes the fix to any consumer,
+ * present or future, without a second hardcoded literal here.
+ */
+function isEventsDirName(name: string): boolean {
+  return name.endsWith(".events");
+}
+
+type BackupMergeableEvent = { eventId: string } & Record<string, unknown>;
+
+/** Local NDJSON codec for any event shape — the answers/generic counterpart of `parseSegmentLines`/`encodeSegmentLines` above. */
+function parseGenericSegmentLines(text: string, segmentName: string): BackupMergeableEvent[] {
+  const events: BackupMergeableEvent[] = [];
+  for (const line of text.split("\n")) {
+    if (line.length === 0) continue;
+    try {
+      events.push(JSON.parse(line) as BackupMergeableEvent);
+    } catch {
+      throw new Error(`Cannot parse event segment: ${segmentName}`);
+    }
+  }
+  return events;
+}
+
+function encodeGenericSegmentLines(events: BackupMergeableEvent[]): string {
+  return events.map((event) => `${JSON.stringify(event)}\n`).join("");
+}
+
+/**
+ * `AnswerEvent`-aware content comparator for `mergeEventSegment`'s conflict
+ * detection (round 3's other backup/restore finding). Every field
+ * `AnswerEvent` carries, compared directly — the answers counterpart of
+ * distribution's own field-subset `sameEvent` (distributionEventStore.ts,
+ * module-private). Needed because `eventId` is deliberately STABLE across a
+ * retried append (§3 of the answer-save proposal): a retry after an
+ * ambiguous failure can genuinely produce two lines sharing one `eventId`,
+ * and this is what tells a harmless duplicate apart from a real conflict —
+ * distribution's own comparator would declare them "identical" the moment
+ * every DISTRIBUTION-only field it checks is `undefined` on both sides of an
+ * answer event, silently keeping one and dropping the other instead of
+ * throwing.
+ */
+function sameAnswerEventContent(left: BackupMergeableEvent, right: BackupMergeableEvent): boolean {
+  const fields: readonly (keyof AnswerEvent)[] = [
+    "eventId",
+    "eventType",
+    "eventAt",
+    "eventBy",
+    "authority",
+    "xrayImageId",
+    "status",
+    "answeredBy",
+    "answeredOnBehalfBy",
+    "qualityNote",
+    "templateId",
+    "templateVersion",
+    "lastSavedAt",
+    "submittedAt",
+    "reason",
+    "legacyContentHash",
+  ];
+  for (const field of fields) {
+    if (left[field] !== right[field]) return false;
+  }
+  if ((left.eventSchemaVersion ?? 1) !== (right.eventSchemaVersion ?? 1)) return false;
+  return JSON.stringify(left.answers ?? []) === JSON.stringify(right.answers ?? []);
+}
+
+/**
+ * Conservative default comparator for any event shape this module has no
+ * dedicated comparator for: whole-object deep-equal via a canonical
+ * (sorted-key) JSON encoding. Strictly more conservative than a field-subset
+ * comparator — it can only ever answer "different" MORE often than a
+ * hand-picked field list would, never less, so it cannot silently
+ * under-detect a real conflict (round 3's explicit requirement for the
+ * fallback case).
+ */
+function sameEventContentByDeepEqual(left: BackupMergeableEvent, right: BackupMergeableEvent): boolean {
+  return canonicalEventJson(left) === canonicalEventJson(right);
+}
+
+function canonicalEventJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalEventJson).join(",")}]`;
+  const keys = Object.keys(value as Record<string, unknown>).sort();
+  return `{${keys
+    .map((key) => `${JSON.stringify(key)}:${canonicalEventJson((value as Record<string, unknown>)[key])}`)
+    .join(",")}}`;
+}
+
+/**
+ * Generic union-merge by `eventId`, mirroring `mergeDistributionEvents`'s
+ * shape (base order preserved, new-only additions appended) for any event
+ * type this module does not have a dedicated merge for. Backs the
+ * `answers.events/` consumer and the safe default for any future/unrecognized
+ * one.
+ */
+function mergeEventLinesGeneric(
+  liveEvents: BackupMergeableEvent[],
+  backupEvents: BackupMergeableEvent[],
+  sameEvent: (left: BackupMergeableEvent, right: BackupMergeableEvent) => boolean
+): BackupMergeableEvent[] {
+  const byId = new Map<string, BackupMergeableEvent>();
+  const orderedBase: BackupMergeableEvent[] = [];
+  for (const event of liveEvents) {
+    const existing = byId.get(event.eventId);
+    if (existing && !sameEvent(existing, event)) {
+      throw new Error(`Event id has conflicting content: ${event.eventId}`);
+    }
+    if (!existing) orderedBase.push(event);
+    byId.set(event.eventId, event);
+  }
+  const additions: BackupMergeableEvent[] = [];
+  const seenAddition = new Set<string>();
+  for (const event of backupEvents) {
+    const existing = byId.get(event.eventId);
+    if (existing) {
+      if (!sameEvent(existing, event)) {
+        throw new Error(`Event id has conflicting content: ${event.eventId}`);
+      }
+      continue;
+    }
+    if (seenAddition.has(event.eventId)) continue;
+    seenAddition.add(event.eventId);
+    additions.push(event);
+  }
+  return [...orderedBase, ...additions];
+}
+
 async function fileExists(dir: DirectoryHandleLike, fileName: string): Promise<boolean> {
   try {
     await dir.getFileHandle(fileName, { create: false });
@@ -774,12 +913,20 @@ type PendingJsonRestore = {
   relativePath: string;
   action: RestoreAction;
   /**
-   * For `merge-events` entries only: the target directory holding the
-   * `distribution.current.json` derived from these segments — i.e. the PARENT of
-   * `distribution.events/`, not the segment's own directory. Carried down from
-   * the walk because the flat pending list has no other way back up the tree.
+   * For `merge-events` entries only: the target directory holding the derived
+   * cache for these segments — i.e. the PARENT of the `*.events/` directory
+   * they live in, not the segment's own directory. Carried down from the walk
+   * because the flat pending list has no other way back up the tree.
    */
   cacheDir: DirectoryHandleLike | null;
+  /**
+   * For `merge-events` entries only: the NAME of the `*.events/` directory
+   * this segment lives in (`distribution.events`, `answers.events`, …) — how
+   * `mergeEventSegment` picks the right per-consumer content comparator
+   * (round 3's backup/restore finding). `null` for anything not reached
+   * through an events directory.
+   */
+  eventsDirName: string | null;
 };
 
 // Mirrors collectJsonFileEntries's two-phase shape above (see its comment):
@@ -807,8 +954,10 @@ async function collectJsonRestoreEntries(params: {
   sourceDir: DirectoryHandleLike;
   targetDir: DirectoryHandleLike;
   sourcePath: string;
-  /** Inherited from the parent of a `distribution.events/` directory; null everywhere else. */
+  /** Inherited from the parent of a `*.events/` directory; null everywhere else. */
   cacheDir: DirectoryHandleLike | null;
+  /** Inherited from the `*.events/` directory's own NAME; null everywhere else. */
+  eventsDirName: string | null;
 }): Promise<{ pending: PendingJsonRestore[]; skippedPaths: string[] }> {
   const pending: PendingJsonRestore[] = [];
   const skippedPaths: string[] = [];
@@ -822,15 +971,22 @@ async function collectJsonRestoreEntries(params: {
         continue;
       }
       const targetChild = await ensureDir(params.targetDir, entry.name);
+      // Descending into ANY `*.events/` directory (round 3's generalization —
+      // matched by suffix, not a hardcoded second literal alongside
+      // `DISTRIBUTION_EVENTS_DIR`, so a future consumer that follows the same
+      // `appendOnlyEventLog.ts` naming convention needs no change here) is the
+      // moment the current directory becomes "the place the fold cache for
+      // these segments lives" — capture it here, since the flat pending list
+      // below cannot walk back up to it later. The directory's own NAME is
+      // captured alongside it so `mergeEventSegment` can pick the right
+      // per-consumer content comparator.
+      const isEventsDir = isEventsDirName(entry.name);
       const nested = await collectJsonRestoreEntries({
         sourceDir: sourceChild,
         targetDir: targetChild,
         sourcePath: relativePath,
-        // Descending INTO distribution.events/ is the moment the current
-        // directory becomes "the place the fold cache for these segments
-        // lives" — capture it here, since the flat pending list below cannot
-        // walk back up to it later.
-        cacheDir: entry.name === DISTRIBUTION_EVENTS_DIR ? params.targetDir : params.cacheDir,
+        cacheDir: isEventsDir ? params.targetDir : params.cacheDir,
+        eventsDirName: isEventsDir ? entry.name : params.eventsDirName,
       });
       pending.push(...nested.pending);
       skippedPaths.push(...nested.skippedPaths);
@@ -850,6 +1006,7 @@ async function collectJsonRestoreEntries(params: {
       relativePath: params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name,
       action,
       cacheDir: params.cacheDir,
+      eventsDirName: params.eventsDirName,
     });
   }
 
@@ -860,35 +1017,61 @@ async function collectJsonRestoreEntries(params: {
  * Union the backup's copy of one event segment with the live one, keyed by
  * `eventId`. Returns whether the live file actually changed.
  *
- * `mergeDistributionEvents` is the codebase's existing dedupe/merge primitive —
- * deliberately reused rather than reimplemented. Passing the LIVE side first
- * keeps the live file's own line order as the base and appends only ids the live
- * file lacks. It throws when one id carries conflicting content on the two
- * sides, which is a genuine integrity contradiction (two different events minted
- * under one id) and must surface as a failed restore rather than a silent pick.
+ * `eventsDirName` picks the per-consumer content comparator (round 3's
+ * finding): distribution's own `mergeDistributionEvents` for
+ * `distribution.events/` (unchanged — its field-subset `sameEvent` is exactly
+ * right for `DistributionEvent`, and is the codebase's existing dedupe/merge
+ * primitive, deliberately reused rather than reimplemented), the
+ * `AnswerEvent`-aware comparator for `answers.events/`, and the conservative
+ * deep-equal default for anything else (an events directory this module does
+ * not specifically recognize — still classified `merge-events` by
+ * `restoreActionFor`'s suffix match, so it must still merge safely, just
+ * without a hand-tuned comparator). Every path passes the LIVE side first, so
+ * the live file's own line order stays the base and only ids the live file
+ * lacks are appended. Any comparator throws when one id carries conflicting
+ * content on the two sides — a genuine integrity contradiction (two different
+ * events minted under one id) that must surface as a failed restore rather
+ * than a silent pick.
  */
 async function mergeEventSegment(
   targetDir: DirectoryHandleLike,
   fileName: string,
-  backupText: string
+  backupText: string,
+  eventsDirName: string | null
 ): Promise<boolean> {
-  const backupEvents = parseSegmentLines(backupText, fileName);
   const liveText = await readTextFile(targetDir, fileName);
-  const liveEvents = liveText === null ? [] : parseSegmentLines(liveText, fileName);
 
-  const merged = mergeDistributionEvents(liveEvents, backupEvents);
-  // The backup added nothing this segment did not already hold — leave the bytes
-  // (and therefore any fold checkpoint keyed on this segment's size) untouched.
+  if (eventsDirName === DISTRIBUTION_EVENTS_DIR) {
+    const backupEvents = parseSegmentLines(backupText, fileName);
+    const liveEvents = liveText === null ? [] : parseSegmentLines(liveText, fileName);
+    const merged = mergeDistributionEvents(liveEvents, backupEvents);
+    // The backup added nothing this segment did not already hold — leave the
+    // bytes (and therefore any fold checkpoint keyed on this segment's size)
+    // untouched.
+    if (liveText !== null && merged.length === liveEvents.length) return false;
+    const text = encodeSegmentLines(merged);
+    if (!(await writeTextFile(targetDir, fileName, text))) return false;
+    const readBack = await readTextFile(targetDir, fileName);
+    if (readBack !== text) {
+      throw new Error(`Distribution event segment restore verification failed: ${fileName}`);
+    }
+    return true;
+  }
+
+  const sameEvent = eventsDirName === ANSWER_EVENTS_DIR ? sameAnswerEventContent : sameEventContentByDeepEqual;
+  const backupEvents = parseGenericSegmentLines(backupText, fileName);
+  const liveEvents = liveText === null ? [] : parseGenericSegmentLines(liveText, fileName);
+  const merged = mergeEventLinesGeneric(liveEvents, backupEvents, sameEvent);
+  // Same "nothing new" short-circuit as the distribution branch above.
   if (liveText !== null && merged.length === liveEvents.length) return false;
-
-  const text = encodeSegmentLines(merged);
+  const text = encodeGenericSegmentLines(merged);
   if (!(await writeTextFile(targetDir, fileName, text))) return false;
   // Same reasoning as the append path's post-close size check: on a UNC/SMB
   // share a close() that returned can still have landed short, and a truncated
   // segment is silent event loss.
   const readBack = await readTextFile(targetDir, fileName);
   if (readBack !== text) {
-    throw new Error(`Distribution event segment restore verification failed: ${fileName}`);
+    throw new Error(`Event segment restore verification failed: ${fileName}`);
   }
   return true;
 }
@@ -994,6 +1177,7 @@ async function restoreJsonTree(params: {
     targetDir: params.targetDir,
     sourcePath: params.sourcePath,
     cacheDir: null,
+    eventsDirName: null,
   });
   params.skipped.push(...skippedPaths);
 
@@ -1031,7 +1215,7 @@ async function restoreJsonTree(params: {
     }
 
     if (entry.action === "merge-events") {
-      const changed = await mergeEventSegment(entry.targetDir, entry.fileName, text);
+      const changed = await mergeEventSegment(entry.targetDir, entry.fileName, text, entry.eventsDirName);
       // Only a segment that actually gained lines invalidates the fold cache —
       // a no-op restore must not cost every month a full re-derive.
       return changed ? { path: entry.relativePath, cacheDir: entry.cacheDir } : null;
