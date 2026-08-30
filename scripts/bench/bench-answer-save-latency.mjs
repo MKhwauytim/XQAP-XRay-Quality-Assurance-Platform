@@ -462,7 +462,23 @@ async function main() {
       console.log(`  legacy whole-file save:  ${legacyGrowth.toFixed(2)}x   (expected: grows with N)`);
       console.log(
         `  append-only ${NEW_PATH_BACKEND}${NEW_PATH_BACKEND === "wired" ? " (real production write)" : ""}: ` +
-          `${appendGrowth.toFixed(2)}x   (expected: ~flat — segment rotation caps rewrite size)`
+          (NEW_PATH_BACKEND === "wired"
+            ? // The WIRED backend times upsertItemAnswer end to end, not just the
+              // append: every call also folds this employee's full accumulated
+              // event list from scratch to compute `previous` (performAnswerWrite
+              // -> foldEmployeeEvents — see answerStorage.ts's cache doc, "Every
+              // call to foldEmployeeEvents still folds the complete accumulated
+              // raw-event list from scratch"). ONLY the disk-read/rewrite half is
+              // ~flat (segment rotation caps it, and the cache makes a warm read
+              // cheap); the fold half is genuinely O(N) in this ONE employee's own
+              // item count — never in total team activity, which is the scaling
+              // this whole rewrite exists to remove. So real growth here, bounded
+              // by one employee's own monthly item count, is expected — it is not
+              // the "expected: ~flat" claim that describes the primitive backend's
+              // pure append cost below.
+              `${appendGrowth.toFixed(2)}x   (expected: grows with N — this is per-save fold cost over one ` +
+              `employee's own item history, not disk cost; see the comment above this line)`
+            : `${appendGrowth.toFixed(2)}x   (expected: ~flat — segment rotation caps rewrite size)`)
       );
       console.log(
         `  fold N events (mean):    ${foldGrowth === null ? "n/a — " + NEW_PATH_BACKEND + " backend has no separate fold step (see NEW_PATH_BACKENDS.wired's own comment)" : foldGrowth.toFixed(2) + "x   (expected: grows with N — this is the async-refresh cost §12 asks to measure separately)"}`

@@ -254,4 +254,57 @@ describe("backup/restore — answers.events segments (Stage 2, round 3's backup 
     expect(text).toContain("\"legacyContentHash\":\"abc123\"");
     expect(text).toContain("\"migration-seed\"");
   });
+
+  it(
+    "an answers-only restore does NOT invalidate or re-stamp distribution's own derived cache " +
+      "(distribution.events/ and answers.events/ share the same parent 1-main directory as their " +
+      "cacheDir, so the restore's cache-invalidation must be scoped by which events dir actually " +
+      "changed, not merely by which directory the change happened under)",
+    async () => {
+      const root = makeRoot();
+      const eventsDir = await getAnswerEventsDir(root);
+      await writeRaw(eventsDir, "a1-ans-devA-s1.ndjson", toNdjson([answerEvent("e01")]));
+
+      // Distribution's own derived-cache files, sitting in the SAME 1-main
+      // directory as answers.events/ — untouched by this restore, since only
+      // an answer event is ever added back in.
+      const mainDir = await getSampleMainDir(root, month.folderName, true);
+      await writeRaw(mainDir, "distribution.current.json", '{"marker":"pre-restore"}');
+      await writeRaw(mainDir, "distribution.checkpoint.json", '{"marker":"pre-restore"}');
+      await writeRaw(
+        mainDir,
+        "distribution.log.json",
+        '{"revision":1,"_writeToken":"pre-restore-token","events":[]}'
+      );
+
+      const backup = await createBackup(root, [month], "admin", "manual");
+      expect(backup.ok).toBe(true);
+      if (!backup.ok) return;
+
+      // Live answers segment loses an event the backup still has — this makes
+      // the restore genuinely MERGE new answer lines back in, without touching
+      // any distribution.events/ segment at all (there is none in this test).
+      await writeRaw(eventsDir, "a1-ans-devA-s1.ndjson", "");
+
+      const restored = await restoreBackupSnapshot({
+        directoryHandle: root,
+        months: [month],
+        backupFolderName: backup.folderName,
+        username: "admin",
+      });
+      expect(restored.ok).toBe(true);
+      // Confirm the restore actually did something (else this test would pass
+      // vacuously): the answer event came back.
+      expect(await segmentEventIds(root)).toEqual(["e01"]);
+
+      // Distribution's derived cache and log stamp must be exactly as they
+      // were before the restore — an answers-only change must never delete or
+      // re-mint them.
+      const mainDirAfter = await getSampleMainDir(root, month.folderName, true);
+      expect(await readRaw(mainDirAfter, "distribution.current.json")).toBe('{"marker":"pre-restore"}');
+      expect(await readRaw(mainDirAfter, "distribution.checkpoint.json")).toBe('{"marker":"pre-restore"}');
+      const logText = await readRaw(mainDirAfter, "distribution.log.json");
+      expect(JSON.parse(logText)._writeToken).toBe("pre-restore-token");
+    }
+  );
 });
