@@ -1,5 +1,5 @@
 /* @vitest-environment jsdom */
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ManagedLoginUser } from "../../../../auth/userManagement";
@@ -76,7 +76,7 @@ describe("PerformanceSection", () => {
     expect(screen.getByText("لا توجد بيانات كافية لعرض الإحصاءات ضمن التصفية الحالية.")).toBeInTheDocument();
   });
 
-  it("renders summary cards and the samples-finished count from real data", () => {
+  it("renders the employee comparison table, ranked by samples, from real data", () => {
     render(
       <PerformanceSection
         users={[SARA]}
@@ -87,18 +87,15 @@ describe("PerformanceSection", () => {
         onRefresh={vi.fn()}
       />
     );
-    // "العينات المُنجزة" now also labels a column in the trend chart's
-    // screen-reader-only table (Fix 3), so it can match more than once —
-    // find the summary-card occurrence specifically.
-    const summaryCardLabel = screen
-      .getAllByText("العينات المُنجزة")
-      .find((el) => el.closest("article") !== null);
-    expect(summaryCardLabel).toBeDefined();
-    // One sample finished by sara.
-    expect(summaryCardLabel!.closest("article")).toHaveTextContent("1");
+    const nameCell = screen.getAllByText("Sara Q").find((el) => el.closest("tr") !== null)!;
+    const row = nameCell.closest("tr")!;
+    const cells = within(row).getAllByRole("cell");
+    // # | employee | samples | effective | pace | gaps | status
+    expect(cells[0]).toHaveTextContent("1"); // rank
+    expect(cells[2]).toHaveTextContent("1"); // samples finished
   });
 
-  it("shows the working-hours empty message until a single employee is selected", () => {
+  it("keeps the comparison table scoped to the shared date range only — selecting an employee does not collapse it", () => {
     render(
       <PerformanceSection
         users={[SARA]}
@@ -109,12 +106,40 @@ describe("PerformanceSection", () => {
         onRefresh={vi.fn()}
       />
     );
-    expect(screen.getByText("اختر موظفاً واحداً لعرض ساعات عمله اليومية.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("الموظف"), { target: { value: "sara" } });
+    const row = screen.getAllByText("Sara Q").find((el) => el.closest("tr") !== null);
+    expect(row).toBeDefined();
+  });
+
+  it("shows a team-mode working-hours row per employee by default, and switches to a per-day row once an employee is selected", () => {
+    render(
+      <PerformanceSection
+        users={[SARA]}
+        activityEntries={[activityEntry()]}
+        actionEntries={[
+          actionEntry({ id: "act-1", at: "2026-06-01T06:05:00.000Z" }),
+          // A > 60min gap after the first finish classifies as "large" once
+          // a reliable per-employee-month baseline exists (5+ gaps); with
+          // only two finishes here the gap is "unclassified" and drawn as
+          // a large enough span not to matter for this assertion, which
+          // only checks the row label switches — not the tier coloring.
+          actionEntry({ id: "act-2", at: "2026-06-01T08:00:00.000Z" }),
+        ]}
+        isLoading={false}
+        hasWorkspace={true}
+        onRefresh={vi.fn()}
+      />
+    );
+
+    // Team mode: one row labeled with the employee's display name.
+    expect(document.querySelector(".um-perf-hour-row-label")).toHaveTextContent("Sara Q");
 
     fireEvent.change(screen.getByLabelText("الموظف"), { target: { value: "sara" } });
-    expect(
-      screen.queryByText("اختر موظفاً واحداً لعرض ساعات عمله اليومية.")
-    ).not.toBeInTheDocument();
+
+    // Per-employee mode: rows are now labeled by day, not by employee name.
+    const dayLabel = document.querySelector(".um-perf-hour-row-label")!;
+    expect(dayLabel).not.toHaveTextContent("Sara Q");
+    expect(dayLabel.textContent).toMatch(/\d/);
   });
 
   it("calls onRefresh when the refresh button is clicked", () => {

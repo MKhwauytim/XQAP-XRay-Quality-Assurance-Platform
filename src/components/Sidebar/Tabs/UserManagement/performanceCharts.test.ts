@@ -1,14 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { samplesTrendSvg, workingHoursStripSvg } from "./performanceCharts";
+import { averageCount, samplesTrendSvg } from "./performanceCharts";
+
+describe("averageCount", () => {
+  it("returns 0 for an empty list", () => {
+    expect(averageCount([])).toBe(0);
+  });
+
+  it("averages the counts", () => {
+    expect(
+      averageCount([
+        { day: "2026-06-01", count: 2 },
+        { day: "2026-06-02", count: 5 },
+      ])
+    ).toBe(3.5);
+  });
+});
 
 describe("samplesTrendSvg", () => {
   it("falls back to the empty state when there are no points", () => {
     const svg = samplesTrendSvg([], "لا توجد بيانات");
     expect(svg).toContain("لا توجد بيانات");
-    expect(svg).not.toContain("<path");
+    expect(svg).not.toContain("<rect");
   });
 
-  it("draws one line for a set of points and escapes day labels", () => {
+  it("draws one bar per point, escapes day labels, and draws a dashed average line", () => {
     const svg = samplesTrendSvg(
       [
         { day: "2026-06-01", count: 2 },
@@ -16,66 +31,28 @@ describe("samplesTrendSvg", () => {
       ],
       "لا توجد بيانات"
     );
-    expect(svg).toContain("<path");
+    // 2 bars + 1 average-label background rect.
+    const rectCount = (svg.match(/<rect/g) ?? []).length;
+    expect(rectCount).toBe(3);
     expect(svg).toContain("06-01");
     expect(svg).toContain("06-02");
-    expect(svg).not.toContain("#"); // no raw hex — every color is a var(--c-…) token
-  });
-});
-
-describe("workingHoursStripSvg", () => {
-  it("falls back to the empty state when there are no days", () => {
-    const svg = workingHoursStripSvg([], "اختر موظفاً");
-    expect(svg).toContain("اختر موظفاً");
+    expect(svg).toContain("stroke-dasharray");
+    expect(svg).toContain("3.5"); // average of 2 and 5
+    // No raw hex color literal — every colour is a var(--c-…) token. The
+    // gradient's own #um-perf-trend-grad id reference is not a color and is
+    // deliberately excluded from this check.
+    expect(svg).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   });
 
-  it("draws a base bar spanning sign-in to last finish, and a gap overlay for a non-normal gap", () => {
-    const svg = workingHoursStripSvg(
+  it("does not divide by zero when every count is zero", () => {
+    const svg = samplesTrendSvg(
       [
-        {
-          day: "2026-06-01",
-          signInMinute: 6 * 60,
-          lastFinishMinute: 11 * 60,
-          gapSegments: [{ startMinute: 6 * 60 + 20, endMinute: 7 * 60 + 20, tier: "large" }],
-        },
+        { day: "2026-06-01", count: 0 },
+        { day: "2026-06-02", count: 0 },
       ],
-      "اختر موظفاً"
+      "لا توجد بيانات"
     );
-    // Base bar + one non-normal gap overlay = at least two <rect> fills beyond the track background.
-    const rectCount = (svg.match(/<rect/g) ?? []).length;
-    expect(rectCount).toBeGreaterThanOrEqual(3); // track + base bar + gap overlay
-    expect(svg).toContain("2026-06-01");
-  });
-
-  it("does not draw an overlay for a normal-tier gap", () => {
-    const svg = workingHoursStripSvg(
-      [
-        {
-          day: "2026-06-01",
-          signInMinute: 6 * 60,
-          lastFinishMinute: 7 * 60,
-          gapSegments: [{ startMinute: 6 * 60, endMinute: 6 * 60 + 5, tier: "normal" }],
-        },
-      ],
-      "اختر موظفاً"
-    );
-    const rectCount = (svg.match(/<rect/g) ?? []).length;
-    expect(rectCount).toBe(2); // track + base bar only, no gap overlay
-  });
-
-  it("does not draw an overlay for an unclassified-tier gap", () => {
-    const svg = workingHoursStripSvg(
-      [
-        {
-          day: "2026-06-01",
-          signInMinute: 6 * 60,
-          lastFinishMinute: 7 * 60,
-          gapSegments: [{ startMinute: 6 * 60, endMinute: 6 * 60 + 5, tier: "unclassified" }],
-        },
-      ],
-      "اختر موظفاً"
-    );
-    const rectCount = (svg.match(/<rect/g) ?? []).length;
-    expect(rectCount).toBe(2); // track + base bar only, no gap overlay
+    expect(svg).not.toContain("NaN");
+    expect(svg).not.toContain("Infinity");
   });
 });
