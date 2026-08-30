@@ -2993,6 +2993,255 @@ git commit -m "Test (reporting): migrate XSS and source-revisions coverage to po
 
 ---
 
+### Task 11b: Wire sourceRevisions footer/sheet into deck/document/xlsx
+
+**Why this task exists:** discovered during Task 11's review — `PopulationReportInput.sourceRevisions`
+is computed by `TabView.tsx` (Task 10) and accepted by `PopulationReportModel` (Task 4), but none of
+`deck.ts`, `document.ts`, or `xlsx.ts` actually render it. The original design spec's data model
+(§4.1) explicitly required a "footer provenance note, same as today" — matching what
+`sampleReport.ts`/`distributionReport.ts` did via `sourceRevisionsFooterHtml`/`sourceRevisionsSheetAoa`
+(`src/data/reporting/sourceRevisions.ts`, already exists, unchanged by this task). This task wires
+those existing helpers into all three new editions.
+
+**Files:**
+- Modify: `src/data/reporting/executive/deck3/index.ts` (`buildDeckV3Html` gains an optional
+  `footerNote` parameter — this file is shared with the real Executive Report deck, so the change
+  must be additive/backward-compatible, same discipline as Task 7's branding-parameterization fix)
+- Modify: `src/data/reporting/populationReport/deck.ts`
+- Modify: `src/data/reporting/populationReport/document.ts`
+- Modify: `src/data/reporting/populationReport/xlsx.ts`
+- Modify: `src/data/reporting/sourceRevisions.test.ts` (flip the Task 11 canary test to assert the
+  new real behavior instead of the no-op it was documenting)
+
+**Interfaces:**
+- Consumes: `sourceRevisionsFooterHtml(revisions, escFn): string`, `sourceRevisionsSheetAoa(revisions): Array<Array<string|number>>`, `hasSourceRevisions(revisions): boolean`, `SOURCE_REVISIONS_CSS: string`, `SOURCE_REVISIONS_SHEET_NAME_AR: string` — all already exported, unchanged, from `../sourceRevisions`.
+- Modifies (backward-compatible, default empty string reproduces today's exact output):
+  `buildDeckV3Html(slides, monthLabel, brand = {}, footerNote = "")`.
+
+- [ ] **Step 1: Write the failing test for `buildDeckV3Html`'s new parameter**
+
+Append to `src/data/reporting/executive/deck3/deck3.test.ts` (or wherever its existing tests live —
+read the file first to match its structure):
+
+```ts
+import { buildDeckV3Html } from "./index";
+
+describe("buildDeckV3Html footerNote", () => {
+  it("omits any footer markup when footerNote is not passed (backward compatible)", () => {
+    const html = buildDeckV3Html("<section>x</section>", "أغسطس 2026");
+    expect(html).not.toContain("source-revisions");
+  });
+
+  it("appends footerNote after the slides when provided", () => {
+    const html = buildDeckV3Html("<section>x</section>", "أغسطس 2026", {}, '<section class="source-revisions">test-footer</section>');
+    expect(html).toContain("test-footer");
+    expect(html.indexOf("<section>x</section>")).toBeLessThan(html.indexOf("test-footer"));
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `npx vitest run src/data/reporting/executive/deck3/deck3.test.ts`
+Expected: FAIL — `buildDeckV3Html` doesn't accept a fourth argument yet (or accepts it but ignores it).
+
+- [ ] **Step 3: Add the `footerNote` parameter to `buildDeckV3Html`**
+
+In `src/data/reporting/executive/deck3/index.ts`, change the signature and body:
+
+```ts
+export function buildDeckV3Html(
+  slides: string,
+  monthLabel: string,
+  brand: { title?: string; navBrand?: string; toolbarBrand?: string } = {},
+  footerNote: string = ""
+): string {
+  // ...existing labels/title/navBrand/toolbarBrand setup, unchanged...
+  return `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>${esc(title)} — ${esc(monthLabel)}</title>
+<style>${DECK_V3_CSS}${footerNote ? SOURCE_REVISIONS_CSS : ""}</style>
+<script>${DECK_V3_SCALE_SCRIPT}</script>
+</head>
+<body>
+<nav class="deck-nav" id="deck-nav" aria-label="التنقّل بين أقسام العرض">
+  <!-- ...unchanged... -->
+</nav>
+<div class="deck-viewer deck-viewer-v3">
+  <!-- ...unchanged toolbar... -->
+${slides}
+${footerNote}
+</div>
+<!-- ...unchanged slide-nav buttons/script... -->
+</body>
+</html>`;
+}
+```
+
+Add `import { SOURCE_REVISIONS_CSS } from "../sourceRevisions";` to this file's existing imports.
+Keep every other line of the function's body exactly as it is today — only the signature, the
+`<style>` tag, and the line right after `${slides}` change.
+
+- [ ] **Step 4: Run to verify it passes, and confirm the real Executive Report deck is unaffected**
+
+Run: `npx vitest run src/data/reporting/executive/deck3`
+Expected: PASS, including every pre-existing test — `buildExecutiveDeckV3` calls `buildDeckV3Html(slides, monthLabel)` with no third/fourth argument, so `footerNote` defaults to `""` and the `<style>` tag's `${footerNote ? SOURCE_REVISIONS_CSS : ""}` evaluates to nothing extra — byte-identical output to before.
+
+- [ ] **Step 5: Wire the footer into `deck.ts` and `document.ts`, and the sheet into `xlsx.ts`**
+
+In `src/data/reporting/populationReport/deck.ts`, add the import and update `buildPopulationDeck`:
+
+```ts
+import { sourceRevisionsFooterHtml } from "../sourceRevisions";
+// ...
+export async function buildPopulationDeck(
+  input: PopulationReportInput,
+  scope: PopulationReportScope = "both"
+): Promise<string> {
+  const model = computePopulationReportModel(input);
+  const slides = await buildPopulationDeckSlides(model, scope);
+  return buildDeckV3Html(
+    slides,
+    model.monthLabel,
+    { title: "تقرير المجتمع", navBrand: "تقرير المجتمع", toolbarBrand: "تقرير المجتمع" },
+    sourceRevisionsFooterHtml(model.sourceRevisions, esc)
+  );
+}
+```
+
+In `src/data/reporting/populationReport/document.ts`, add the import and update `buildPopulationDocument`:
+
+```ts
+import { sourceRevisionsFooterHtml, SOURCE_REVISIONS_CSS } from "../sourceRevisions";
+// ...
+export async function buildPopulationDocument(
+  input: PopulationReportInput,
+  scope: PopulationReportScope = "both"
+): Promise<string> {
+  const model = computePopulationReportModel(input);
+  const org = { logoUrl: "", orgName: "ضمان جودة الأشعة", lines: [] };
+  const pages: string[] = [
+    docCover({ org, title: "تقرير المجتمع", periodLabel: "الفترة", periodValue: model.monthLabel, metaRows: [] }),
+  ];
+  if (scope !== "sample") pages.push(...(await buildSection1Pages(model)));
+  if (scope !== "population") {
+    pages.push(...(await buildSection2Pages(model)));
+    pages.push(...(await buildSection3Pages(model)));
+  }
+  pages.push(docClosing({ org, title: "نهاية التقرير", closingLine: `تقرير المجتمع — ${model.monthLabel}` }));
+  const footer = sourceRevisionsFooterHtml(model.sourceRevisions, esc);
+
+  return `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8" />
+<title>${esc(model.monthLabel)} — تقرير المجتمع</title>
+<style>${DOCUMENT_V3_CSS}${footer ? SOURCE_REVISIONS_CSS : ""}</style></head>
+<body><div class="docviewer"><aside class="sidebar no-print"><div class="doc-brand">تقرير المجتمع</div><div class="doc-brand-sub">${esc(model.monthLabel)}</div></aside>
+<main class="content">${pages.join("\n")}${footer}</main></div></body></html>`;
+}
+```
+
+(Note the `<title>`/`doc-brand-sub` interpolations above already use `esc(model.monthLabel)` — this
+reflects Task 11's already-merged security fix; don't remove that escaping while making this change.)
+
+In `src/data/reporting/populationReport/xlsx.ts`, add the import and the extra sheet before each
+`XLSX.writeFile` call:
+
+```ts
+import { hasSourceRevisions, sourceRevisionsSheetAoa, SOURCE_REVISIONS_SHEET_NAME_AR } from "../sourceRevisions";
+// ...
+// immediately before the EARLY-RETURN XLSX.writeFile call (the scope === "population" branch):
+if (hasSourceRevisions(input.sourceRevisions)) {
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sourceRevisionsSheetAoa(input.sourceRevisions)), SOURCE_REVISIONS_SHEET_NAME_AR);
+}
+XLSX.writeFile(wb, `تقرير_المجتمع_${input.monthFolderName}.xlsx`);
+return;
+// ... (rest of function unchanged) ...
+// immediately before the FINAL XLSX.writeFile call at the end of the function:
+if (hasSourceRevisions(input.sourceRevisions)) {
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sourceRevisionsSheetAoa(input.sourceRevisions)), SOURCE_REVISIONS_SHEET_NAME_AR);
+}
+XLSX.writeFile(wb, `تقرير_المجتمع_${input.monthFolderName}.xlsx`);
+```
+
+- [ ] **Step 6: Update the tests for `deck.ts`/`document.ts`/`xlsx.ts` to cover the new footer/sheet**
+
+Add one test each:
+
+```ts
+// deck.test.ts — append
+it("includes the source-revisions footer when sourceRevisions is populated", async () => {
+  const html = await buildPopulationDeck({ ...baseInputUsedElsewhereInThisFile, sourceRevisions: { "population.final.json": 3 } });
+  expect(html).toContain("source-revisions");
+  expect(html).toContain("population.final.json");
+});
+
+// document.test.ts — append
+it("includes the source-revisions footer when sourceRevisions is populated", async () => {
+  const html = await buildPopulationDocument({ ...baseInput(), sourceRevisions: { "sample.master.json": 1 } });
+  expect(html).toContain("source-revisions");
+  expect(html).toContain("sample.master.json");
+});
+
+// xlsx.test.ts — append
+it("adds the source-revisions sheet when sourceRevisions is populated", async () => {
+  await buildPopulationXlsx({ ...baseInputUsedElsewhereInThisFile, sourceRevisions: { "population.final.json": 2 } });
+  const wb = (XLSX.writeFile as unknown as { mock: { calls: [unknown][] } }).mock.calls.at(-1)![0] as XLSX.WorkBook;
+  expect(wb.SheetNames).toContain("مراجعات المصادر");
+});
+```
+
+Adapt the exact input-object variable names to whatever each test file's real existing helper is
+named (read the file first) — the point is: construct an input with a non-empty `sourceRevisions`
+map and assert the footer/sheet actually appears, plus re-run each file's EXISTING tests (which use
+no `sourceRevisions` or an empty one) to confirm they still pass with an empty/absent footer.
+
+- [ ] **Step 7: Flip Task 11's canary test in `sourceRevisions.test.ts`**
+
+That test currently asserts `buildPopulationDocument` output is IDENTICAL with and without
+`sourceRevisions` (documenting the no-op). After this task, that assertion is now FALSE — replace it
+with a positive assertion that the footer differs:
+
+```ts
+it("sourceRevisions now renders as a footer (tracked gap from Task 11 closed by Task 11b)", async () => {
+  const withRevisions = await buildPopulationDocument(buildInput({ sourceRevisions: { "population.final.json": 3, "sample.master.json": 1 } }));
+  const withoutRevisions = await buildPopulationDocument(buildInput({ sourceRevisions: undefined }));
+  expect(withRevisions).not.toBe(withoutRevisions);
+  expect(withRevisions).toContain("population.final.json");
+  expect(withoutRevisions).not.toContain("source-revisions");
+});
+```
+
+- [ ] **Step 8: Run the full reporting suite, typecheck, lint**
+
+Run: `npx vitest run src/data/reporting && npm run typecheck && npm run lint`
+Expected: all green, including the untouched Executive Report deck tests (confirms `buildDeckV3Html`'s
+backward compatibility held).
+
+- [ ] **Step 9: Write an edit-log entry**
+
+Run `npm run editlog -- --tier=2 --append "Add (reporting): wire sourceRevisions footer/sheet into population report"`, fill in Why/What-changed, commit alongside the code.
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add src/data/reporting/executive/deck3/index.ts src/data/reporting/executive/deck3/deck3.test.ts \
+  src/data/reporting/populationReport/deck.ts src/data/reporting/populationReport/deck.test.ts \
+  src/data/reporting/populationReport/document.ts src/data/reporting/populationReport/document.test.ts \
+  src/data/reporting/populationReport/xlsx.ts src/data/reporting/populationReport/xlsx.test.ts \
+  src/data/reporting/sourceRevisions.test.ts \
+  src/data/reporting/populationReport/__snapshots__/deck.test.ts.snap \
+  src/data/reporting/populationReport/__snapshots__/document.test.ts.snap
+git commit -m "Add (reporting): wire sourceRevisions footer/sheet into population report"
+```
+
+(Golden snapshots for `deck.test.ts`/`document.test.ts` will need regenerating with `-u` since the
+default-scope output now includes a footer whenever the test fixtures populate `sourceRevisions` —
+eyeball the regenerated snapshots before committing, same discipline as every earlier snapshot task.)
+
+---
+
 ### Task 12: Retire `sampleReport.ts` and `distributionReport.ts`
 
 **Files:**
