@@ -84,18 +84,25 @@ const DECK_V3_SCALE_SCRIPT = `(function(){
   else fit();
 })();`;
 
-export function buildDeckV3Html(slides: string, monthLabel: string): string {
+export function buildDeckV3Html(
+  slides: string,
+  monthLabel: string,
+  brand: { title?: string; navBrand?: string; toolbarBrand?: string } = {},
+): string {
   const labels = getLabels();
   const fullscreenEnter = esc(labels.exec_deck_fullscreen_enter);
   const fullscreenExit = esc(labels.exec_deck_fullscreen_exit);
   const slidePrevLabel = esc(labels.exec_deck_slideshow_prev);
   const slideNextLabel = esc(labels.exec_deck_slideshow_next);
+  const title = brand.title ?? "العرض التنفيذي";
+  const navBrand = brand.navBrand ?? "العرض التنفيذي";
+  const toolbarBrand = brand.toolbarBrand ?? "العرض التنفيذي";
   return `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>العرض التنفيذي — ${esc(monthLabel)}</title>
+<title>${esc(title)} — ${esc(monthLabel)}</title>
 <style>${DECK_V3_CSS}</style>
 <script>${DECK_V3_SCALE_SCRIPT}</script>
 </head>
@@ -103,7 +110,7 @@ export function buildDeckV3Html(slides: string, monthLabel: string): string {
 <nav class="deck-nav" id="deck-nav" aria-label="التنقّل بين أقسام العرض">
   <div class="deck-nav-brand">
     <img src="${ZATCA_LOGO_URL}" alt=""/>
-    <span>العرض التنفيذي</span>
+    <span>${esc(navBrand)}</span>
   </div>
   <div class="deck-nav-progress">
     <div class="deck-nav-progress-bar"><div class="deck-nav-progress-fill" id="deck-nav-fill"></div></div>
@@ -116,7 +123,7 @@ export function buildDeckV3Html(slides: string, monthLabel: string): string {
     <div class="deck-brand">
       <img src="${ZATCA_LOGO_URL}" alt=""/>
       <div>
-        <strong>العرض التنفيذي</strong>
+        <strong>${esc(toolbarBrand)}</strong>
         <span>ضمان جودة الأشعة — ${esc(monthLabel)}</span>
       </div>
     </div>

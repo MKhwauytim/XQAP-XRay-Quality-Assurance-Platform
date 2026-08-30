@@ -17,6 +17,7 @@ import { yieldToMain } from "../../storage/yieldToMain";
 import type { PopulationReportModel, PopulationReportInput } from "./model";
 import { computePopulationReportModel } from "./model";
 import type { PortBreakdown, ResultCounts } from "./types";
+import { STAGE_LABELS } from "./fold";
 
 const ORG: OrgBlock = { logoUrl: "", orgName: "ضمان جودة الأشعة", lines: [] };
 
@@ -83,7 +84,7 @@ export function buildSection1Slides(model: PopulationReportModel, meta: (num: nu
       eyebrow: "تقرير المجتمع",
       title: "المحتويات",
       rows: [
-        { index: 1, title: "المجتمع", description: "المجتمع المستلم والمعالج", topics: "الاستلام، المعالجة، التوزيع حسب المرحلة والمنفذ", pages: "٣" },
+        { index: 1, title: "المجتمع", description: "المجتمع المستلم والمعالج", topics: "الاستلام، المعالجة، التوزيع حسب المرحلة والمنفذ", pages: "٥" },
         { index: 2, title: "العينة", description: "تكوين العينة المسحوبة", topics: "حسب المرحلة والمنفذ", pages: "٢" },
         { index: 3, title: "التوزيع", description: "التوزيع على الموظفين", topics: "حسب المرحلة، المنفذ، وCertScan", pages: "٣" },
       ],
@@ -187,14 +188,6 @@ ${portBreakdownTwoColumn(model.reconciled.byPort)}`;
 }
 
 export { resultRow, RESULT_HEADERS, portBreakdownTwoColumn };
-
-const STAGE_LABELS: Record<string, string> = {
-  first: "المستوى الأول",
-  second: "المستوى الثاني",
-  third: "المستوى الثالث",
-  fourth: "المستوى الرابع",
-  unknown: "غير محدد",
-};
 
 function buildSection2Slides(model: PopulationReportModel, meta: (num: number) => SlideMeta): string[] {
   const slides: string[] = [];
@@ -343,7 +336,11 @@ export async function buildPopulationDeckSlides(model: PopulationReportModel): P
 export async function buildPopulationDeck(input: PopulationReportInput): Promise<string> {
   const model = computePopulationReportModel(input);
   const slides = await buildPopulationDeckSlides(model);
-  return buildDeckV3Html(slides, model.monthLabel);
+  return buildDeckV3Html(slides, model.monthLabel, {
+    title: "تقرير المجتمع",
+    navBrand: "تقرير المجتمع",
+    toolbarBrand: "تقرير المجتمع",
+  });
 }
 
 export async function openPopulationDeck(input: PopulationReportInput): Promise<void> {

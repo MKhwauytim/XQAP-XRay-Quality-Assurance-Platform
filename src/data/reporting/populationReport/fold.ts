@@ -22,7 +22,7 @@ import type {
 // re-derive the key from — passing an already-canonical key like "first"
 // back through it would misclassify to "unknown"). Same pattern
 // sampleReport.ts/distributionReport.ts already use for their own label maps.
-const STAGE_LABELS: Record<string, string> = {
+export const STAGE_LABELS: Record<string, string> = {
   first: "المستوى الأول",
   second: "المستوى الثاني",
   third: "المستوى الثالث",
