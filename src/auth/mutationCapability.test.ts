@@ -197,32 +197,12 @@ describe("getMutationCapability", () => {
       })
     ).toEqual({ allowed: false, reason: "page-not-editable" });
   });
-  it("refuses a feature whose parent page is outside the role's code ceiling, even with an edit row", () => {
-    // Only reachable via a hand-edited users.permissions.json (the UI renders this
-    // cell as a system restriction, not a toggle) -- it must still be refused.
-    // `settings` was widened to every role on 2026-08-27 (see tabCatalog.ts), so
-    // manager is no longer outside its ceiling; `user-management` still excludes
-    // `guest` (the read-only observer role), so that pairing keeps this test's
-    // "ceiling refuses even a tampered edit row" intent alive.
-    const tampered = [
-      ...permissions.filter((p) => !(p.role === "guest" && p.tabId === "user-management")),
-      { role: "guest" as const, tabId: "user-management", access: "edit" as const },
-    ];
-    const tamperedFeatures = [
-      ...featurePermissions.filter(
-        (f) => !(f.role === "guest" && f.featureId === "manage-users")
-      ),
-      { role: "guest" as const, featureId: "manage-users", enabled: true },
-    ];
-    expect(
-      getMutationCapability({
-        role: "guest",
-        featureId: "manage-users",
-        permissions: tampered,
-        featurePermissions: tamperedFeatures,
-        isReadOnly: false,
-        workspaceReady: true,
-      })
-    ).toEqual({ allowed: false, reason: "page-not-editable" });
-  });
+  // The prior version of this test proved a tampered/hand-edited edit row on a
+  // ceiling-excluded role x tab pair (guest x user-management) was still refused.
+  // As of 2026-08-30 no tab or sub-tab ceiling excludes any role any more
+  // (tabCatalog.test.ts's "no tab or sub-tab ceiling excludes any role any more"
+  // pins that invariant), so there is no real ceiling-restricted pair left to
+  // construct such a case from -- `isTabRestrictedForRole`'s check in
+  // `getMutationCapability` above stays in place as defense-in-depth for any
+  // ceiling a future tab might reintroduce, it just has nothing to refuse today.
 });
