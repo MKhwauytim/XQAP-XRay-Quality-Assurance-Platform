@@ -60,7 +60,13 @@ body.deck-fullscreen .slide.deck-slide-active{
   display:flex;
   width:min(calc(100vw - 32px),calc((100dvh - 32px) * 297 / 167));
 }
-body.deck-fullscreen .srev-footer{display:none;}
+/* The footer's real class is .source-revisions (sourceRevisions.ts) — this
+   selector targeted a class that's never emitted (.srev-footer doesn't exist
+   anywhere in the DOM), so the footer stayed a visible flex sibling next to
+   .deck-slide-active in .deck-viewer-v2's fullscreen flex-center, crowding
+   and shifting the active slide off-center with content clipped outside the
+   viewport. Same root cause class as deck3's equivalent fix. */
+body.deck-fullscreen .source-revisions{display:none;}
 body.deck-fullscreen .slide-controls{display:none;}
 body.theme-light .btn-fullscreen{color:#fff;}
 .btn-fullscreen:focus-visible{outline:3px solid var(--gold);outline-offset:3px;}
