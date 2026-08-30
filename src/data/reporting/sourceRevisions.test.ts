@@ -89,18 +89,26 @@ describe("sourceRevisions field on PopulationReportInput (B2)", () => {
     };
   }
 
-  test("the population DOCUMENT builds with sourceRevisions set", async () => {
-    const html = await buildPopulationDocument(buildInput());
-    expect(html).toContain("<!DOCTYPE html>");
+  // Executable canary for the gap described above: asserts the CURRENT no-op
+  // behavior directly (output is byte-identical whether or not sourceRevisions
+  // is populated), rather than a vacuous "it builds" check that would pass
+  // regardless. This will fail the instant someone wires the footer into
+  // document.ts/deck.ts without updating this test — which is correct: at
+  // that point this test needs to be rewritten to assert the new real
+  // behavior instead of the no-op.
+  test("sourceRevisions currently has no observable effect on the rendered document (tracked gap — see comment above)", async () => {
+    const withRevisions = await buildPopulationDocument(
+      buildInput({ sourceRevisions: { "population.final.json": 3, "sample.master.json": 1 } })
+    );
+    const withoutRevisions = await buildPopulationDocument(buildInput({ sourceRevisions: undefined }));
+    expect(withRevisions).toBe(withoutRevisions);
   });
 
-  test("the population DECK builds with sourceRevisions set", async () => {
-    const html = await buildPopulationDeck(buildInput());
-    expect(html).toContain("<!DOCTYPE html>");
-  });
-
-  test("omitting sourceRevisions still builds (backward compatible)", async () => {
-    const html = await buildPopulationDocument(buildInput({ sourceRevisions: undefined }));
-    expect(html).toContain("<!DOCTYPE html>");
+  test("sourceRevisions currently has no observable effect on the rendered deck (tracked gap — see comment above)", async () => {
+    const withRevisions = await buildPopulationDeck(
+      buildInput({ sourceRevisions: { "population.final.json": 3, "sample.master.json": 1 } })
+    );
+    const withoutRevisions = await buildPopulationDeck(buildInput({ sourceRevisions: undefined }));
+    expect(withRevisions).toBe(withoutRevisions);
   });
 });
