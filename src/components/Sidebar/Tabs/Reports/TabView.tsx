@@ -1,6 +1,6 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReportDesignerTab from "../ReportDesigner";
-import { AlertTriangle, BarChart2, Building2, Check, ClipboardList, Database, Download, FileStack, FileText, Filter, FolderOpen, Globe, History, Presentation, Settings2, User, Users, X } from "lucide-react";
+import { AlertTriangle, BarChart2, Building2, Check, Database, Download, FileText, Filter, FolderOpen, Layers, Presentation, Settings2, Users, X } from "lucide-react";
 
 import { loadOrDeriveDistributionCurrentForRead, loadDistributionCurrentRevision, loadDistributionLog } from "../../../../data/distribution/distributionStorage";
 import { loadReplacementLog, loadReferralLog } from "../../../../data/referral/referralStorage";
@@ -44,6 +44,7 @@ import {
 } from "../../../../data/reporting/executive/deckEditionPreference";
 import DeckDesignCustomizer from "./DeckDesignCustomizer";
 import type { ExportManifest } from "../../../../data/powerbiExport/exportTypes";
+import type { PopulationReportScope } from "../../../../data/reporting/populationReport/types";
 import "./Reports.css";
 
 
@@ -66,11 +67,10 @@ function ExcelFormatIcon(): ReactNode {
 }
 
 type ReportType =
-  | "sample" | "sample-xlsx" | "sample-deck"
-  | "distribution" | "distribution-xlsx" | "distribution-deck"
+  | "population-report" | "population-report-xlsx" | "population-report-deck"
   | "executive" | "executive-xlsx" | "executive-deck"
   | "management" | "management-xlsx" | "management-deck";
-type ReportBaseType = "sample" | "distribution" | "executive" | "management";
+type ReportBaseType = "population-report" | "executive" | "management";
 type ReportFormat = "xlsx" | "deck" | "document";
 type ReportsSection = "reports" | "kpi";
 
@@ -207,8 +207,7 @@ function ReportsContent() {
   const [generating, setGenerating] = useState<ReportType | null>(null);
   const [formats, setFormats] = useState<Record<ReportBaseType, ReportFormat>>({
     executive: "document",
-    sample: "document",
-    distribution: "document",
+    "population-report": "document",
     management: "document",
   });
   const [toast, setToast] = useState<{ type: "ok" | "error"; text: string } | null>(null);
@@ -240,6 +239,10 @@ function ReportsContent() {
   const [pbiResult, setPbiResult] = useState<ExportManifest | null>(null);
   const [pbiError, setPbiError] = useState<string | null>(null);
   const [deckEdition, setDeckEdition] = useState<ExecutiveDeckEdition>("v2");
+  // D11 (population-report merge): default "both" — the pre-merge behavior of
+  // exporting sample + distribution content together, unchanged unless the
+  // user deliberately narrows scope via the card's segmented control.
+  const [populationReportScope, setPopulationReportScope] = useState<PopulationReportScope>("both");
 
   useEffect(() => {
     if (!directoryHandle) return;
@@ -609,64 +612,45 @@ function ReportsContent() {
     }
     setGenerating(type);
     try {
-      if (type === "sample" || type === "sample-xlsx" || type === "sample-deck") {
-        const { populationRows, sampleData, manifest, processingSummary } = await loadMonthForEditing(directoryHandle, selectedMonth);
-        if (!sampleData) { showToast("error", "لم يتم العثور على بيانات عينة لهذا الشهر."); return; }
-        const [samplePopRev, sampleMasterRev] = await Promise.all([
+      if (type === "population-report" || type === "population-report-xlsx" || type === "population-report-deck") {
+        const { populationRows, sampleData, distributionCurrent, manifest, processingSummary, riskRawRows, biRawRows } =
+          await loadMonthForEditing(directoryHandle, selectedMonth);
+        if (!sampleData) {
+          showToast("error", "لم يتم العثور على بيانات عينة لهذا الشهر.");
+          return;
+        }
+        const { liveSampleRows } = await import("../../../../data/sampling/sampleStorage");
+        const [populationRev, sampleRev] = await Promise.all([
           loadMonthPopulationFinalRevision(directoryHandle, selectedMonth),
           loadSampleMasterRevision(directoryHandle, selectedMonth),
         ]);
-        const sampleInput = {
+        const input = {
           monthFolderName: selectedMonth,
           manifest,
-          populationRows: (populationRows ?? []) as unknown as PreparedPopulationRow[],
-          sample: sampleData,
-          // R1: granular Risk/BI before-after breakdown, already loaded by
-          // loadMonthForEditing's default scope — read verbatim, never recomputed.
           processingSummary: processingSummary?.summary ?? null,
+          riskRawRowCount: riskRawRows.length,
+          biRawRowCount: processingSummary?.summary?.biProvided ? biRawRows.length : null,
+          populationRows: (populationRows ?? []) as unknown as PreparedPopulationRow[],
+          sampleRows: liveSampleRows(sampleData),
+          distributionEntries: distributionCurrent?.entries ?? [],
+          employeeDisplayNames: buildDisplayNameMap(),
           sourceRevisions: collectRevisions([
-            ["population.final.json", samplePopRev],
-            ["sample.master.json", sampleMasterRev],
+            ["المجتمع", populationRev],
+            ["العينة", sampleRev],
           ]),
         };
-        if (type === "sample-xlsx") {
-          const { buildSampleXlsx } = await import("../../../../data/reporting/sampleReport");
-          await buildSampleXlsx(sampleInput);
+        if (type === "population-report-xlsx") {
+          const { buildPopulationXlsx } = await import("../../../../data/reporting/populationReport");
+          await buildPopulationXlsx(input, populationReportScope);
           showToast("ok", "تم تنزيل ملف Excel.");
-        } else if (type === "sample-deck") {
-          const { openSampleDeck } = await import("../../../../data/reporting/sampleReport");
-          await openSampleDeck(sampleInput);
-          showToast("ok", "تم فتح عرض العينة. استخدم أمر الطباعة للحفظ بصيغة PDF.");
+        } else if (type === "population-report-deck") {
+          const { openPopulationDeck } = await import("../../../../data/reporting/populationReport");
+          await openPopulationDeck(input, populationReportScope);
+          showToast("ok", "تم فتح عرض المجتمع. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         } else {
-          const { openSampleReport } = await import("../../../../data/reporting/sampleReport");
-          await openSampleReport(sampleInput);
-          showToast("ok", "تم فتح تقرير العينة التفصيلي. استخدم أمر الطباعة للحفظ بصيغة PDF.");
-        }
-      } else if (type === "distribution" || type === "distribution-xlsx" || type === "distribution-deck") {
-        const sample = await loadSampleMaster(directoryHandle, selectedMonth);
-        const data = sample ? await loadOrDeriveDistributionCurrentForRead(directoryHandle, selectedMonth, sample.rows) : null;
-        if (!data) { showToast("error", "لم يتم العثور على بيانات توزيع لهذا الشهر."); return; }
-        const names = buildDisplayNameMap();
-        const [distSampleRev, distCurrentRev] = await Promise.all([
-          loadSampleMasterRevision(directoryHandle, selectedMonth),
-          loadDistributionCurrentRevision(directoryHandle, selectedMonth),
-        ]);
-        const distRevisions = collectRevisions([
-          ["sample.master.json", distSampleRev],
-          ["distribution.current.json", distCurrentRev],
-        ]);
-        if (type === "distribution-xlsx") {
-          const { buildDistributionXlsx } = await import("../../../../data/reporting/distributionReport");
-          await buildDistributionXlsx(data, selectedMonth, names, distRevisions);
-          showToast("ok", "تم تنزيل ملف Excel.");
-        } else if (type === "distribution-deck") {
-          const { openDistributionDeck } = await import("../../../../data/reporting/distributionReport");
-          await openDistributionDeck(data, selectedMonth, names, distRevisions);
-          showToast("ok", "تم فتح عرض التوزيع. استخدم أمر الطباعة للحفظ بصيغة PDF.");
-        } else {
-          const { openDistributionDocument } = await import("../../../../data/reporting/distributionReport");
-          await openDistributionDocument(data, selectedMonth, names, distRevisions);
-          showToast("ok", "تم فتح تقرير التوزيع التفصيلي. استخدم أمر الطباعة للحفظ بصيغة PDF.");
+          const { openPopulationDocument } = await import("../../../../data/reporting/populationReport");
+          await openPopulationDocument(input, populationReportScope);
+          showToast("ok", "تم فتح تقرير المجتمع التفصيلي. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         }
       } else if (type === "executive" || type === "executive-xlsx" || type === "executive-deck") {
         const execInput = await loadExecInput();
@@ -742,7 +726,7 @@ function ReportsContent() {
   }
 
   function selectedReportType(baseType: ReportBaseType): ReportType {
-    // Uniform mapping across all four cards: document → base id, deck → `${base}-deck`,
+    // Uniform mapping across all three cards: document → base id, deck → `${base}-deck`,
     // xlsx → `${base}-xlsx`. Executive keeps its existing "executive" document id.
     const format = formats[baseType];
     if (format === "deck") return `${baseType}-deck` as ReportType;
@@ -1015,50 +999,47 @@ function ReportsContent() {
           </div>
         </div>
 
-        {/* Sample */}
+        {/* Population report — merges the former Sample + Distribution cards (D11) */}
         <div className="rh-card">
           <div className="rh-card-accent rh-acc-navy" />
           <div className="rh-card-body">
             <div className="rh-card-top">
-              <div className="rh-icon rh-icon-navy"><Filter size={22} /></div>
+              <div className="rh-icon rh-icon-navy"><Layers size={22} /></div>
               <span className="rh-badge rh-badge-ready">جاهز</span>
             </div>
-            <div className="rh-card-title">تقرير العينة</div>
+            <div className="rh-card-title">تقرير المجتمع</div>
             <p className="rh-card-desc">
-              تفصيل المنافذ والمراحل — بيانات Risk وBI، خام مقابل معالجة، CertScan/NonCertScan، والصفوف المسحوبة للدراسة.
+              من المجتمع المستلم، إلى العينة المسحوبة، إلى التوزيع على الموظفين — سليمة/اشتباه في كل خطوة.
             </p>
             <div className="rh-tags">
-              <span className="rh-tag"><Database size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> Risk + BI</span>
-              <span className="rh-tag"><Globe size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> كل المنافذ</span>
-              <span className="rh-tag"><ClipboardList size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> مراحل</span>
+              <span className="rh-tag"><Database size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> المجتمع</span>
+              <span className="rh-tag"><Filter size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> العينة</span>
+              <span className="rh-tag"><Users size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> التوزيع</span>
               <span className="rh-tag"><Download size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> XLSX</span>
+            </div>
+            <div className="rh-scope-toggle" role="radiogroup" aria-label="نطاق التصدير">
+              {(
+                [
+                  { value: "population" as const, label: "المجتمع فقط" },
+                  { value: "sample" as const, label: "العينة فقط" },
+                  { value: "both" as const, label: "الكل" },
+                ]
+              ).map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={populationReportScope === opt.value}
+                  className={`rh-scope-btn${populationReportScope === opt.value ? " rh-scope-btn-active" : ""}`}
+                  onClick={() => setPopulationReportScope(opt.value)}
+                >
+                  {opt.label}
+                </button>
+              ))}
             </div>
           </div>
           <div className="rh-card-footer">
-            {renderExportControls("sample", "rh-btn-navy")}
-          </div>
-        </div>
-
-        {/* Distribution */}
-        <div className="rh-card">
-          <div className="rh-card-accent rh-acc-navy" />
-          <div className="rh-card-body">
-            <div className="rh-card-top">
-              <div className="rh-icon rh-icon-navy"><Users size={22} /></div>
-              <span className="rh-badge rh-badge-ready">جاهز</span>
-            </div>
-            <div className="rh-card-title">تقرير التوزيع</div>
-            <p className="rh-card-desc">
-              حالة التوزيع لكل موظف مع تفاصيل كل صف — قيد الانتظار، مكتمل، مستبدل. يُستخدم لمتابعة سير العمل اليومي.
-            </p>
-            <div className="rh-tags">
-              <span className="rh-tag"><User size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> حسب الموظف</span>
-              <span className="rh-tag"><History size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> أحداث اللوج</span>
-              <span className="rh-tag"><Download size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> XLSX</span>
-            </div>
-          </div>
-          <div className="rh-card-footer">
-            {renderExportControls("distribution", "rh-btn-navy")}
+            {renderExportControls("population-report", "rh-btn-navy")}
           </div>
         </div>
 
@@ -1144,17 +1125,9 @@ function ReportsContent() {
                 className="rh-quick-btn"
                 disabled={busy || !selectedMonth || !canExportReports}
                 title={exportDisabledTitle()}
-                onClick={() => { void generate("sample"); }}
+                onClick={() => { void generate("population-report"); }}
               >
-                <FileStack size={16} style={{ verticalAlign: "middle" }} /> تقرير العينة
-              </button>
-              <button
-                className="rh-quick-btn"
-                disabled={busy || !selectedMonth || !canExportReports}
-                title={exportDisabledTitle()}
-                onClick={() => { void generate("distribution"); }}
-              >
-                <Users size={16} style={{ verticalAlign: "middle", marginInlineEnd: 5 }} /> تقرير التوزيع
+                <Layers size={16} style={{ verticalAlign: "middle", marginInlineEnd: 5 }} /> تقرير المجتمع
               </button>
             </div>
           </div>

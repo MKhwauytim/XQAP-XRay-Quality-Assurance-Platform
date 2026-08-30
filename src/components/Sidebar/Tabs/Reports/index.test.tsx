@@ -560,15 +560,16 @@ describe("Reports export permission gating (B5)", () => {
     expect(pbiButton).toBeDisabled();
     expect(pbiButton).toHaveAttribute("title", "لا تملك صلاحية تصدير التقارير.");
 
-    // Quick-actions row (shared `generate()` handler).
+    // Quick-actions row (shared `generate()` handler). Two buttons since the
+    // Sample/Distribution cards merged into one تقرير المجتمع card (D11).
     const quickButtons = container.querySelectorAll(".rh-quick-btn");
-    expect(quickButtons.length).toBe(3);
+    expect(quickButtons.length).toBe(2);
     quickButtons.forEach((btn) => {
       expect(btn).toBeDisabled();
       expect(btn).toHaveAttribute("title", "لا تملك صلاحية تصدير التقارير.");
     });
 
-    // Per-card "التصدير" button (renderExportControls — shared by all 4 report cards).
+    // Per-card "التصدير" button (renderExportControls — shared by all 3 report cards).
     const mainExportButton = container.querySelector(".rh-export-controls .rh-btn");
     expect(mainExportButton).toBeDisabled();
     expect(mainExportButton).toHaveAttribute("title", "لا تملك صلاحية تصدير التقارير.");
