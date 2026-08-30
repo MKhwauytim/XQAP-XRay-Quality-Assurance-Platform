@@ -26,27 +26,19 @@ import {
 const MATRIX_ROLES: AuthRole[] = MANAGED_ROLES.map((role) => role.id);
 const ALL_FEATURE_IDS = Object.keys(FEATURE_TAB_LOOKUP);
 
-/** Exactly the role x tab cells the matrix is allowed to present as restricted. */
-const EXPECTED_RESTRICTED: ReadonlyArray<readonly [AuthRole, string]> = [
-  // Ad-hoc import («ارفاق حالات استثنائية»), user management, and the
-  // reports/kpi + reports/report-designer sub-tabs are all grantable to every
-  // operational role, but not to `guest`: it is the read-only observer role, and
-  // none of these pages has anything for a pure viewer to do. (`settings`
-  // already allowed guest and was widened to every operational role too, on
-  // 2026-08-27 -- it now has no restricted cells at all.)
-  ["guest", "population/adhoc-import"],
-  ...[
-    "user-management",
-    "user-management/users",
-    "user-management/page-permissions",
-    "user-management/feature-permissions",
-    "user-management/activity",
-    "user-management/actions",
-    "user-management/performance",
-  ].map((tabId) => ["guest", tabId] as const),
-  ["guest", "reports/kpi"],
-  ["guest", "reports/report-designer"],
-];
+/**
+ * Exactly the role x tab cells the matrix is allowed to present as restricted.
+ *
+ * Every one of these used to hold a `guest`-only entry (ad-hoc import, the six
+ * user-management sub-tabs, reports/kpi, reports/report-designer): each was
+ * widened for the operational roles first, but kept excluding `guest` on the
+ * rationale that it is the read-only observer role. On 2026-08-30 the owner
+ * asked for that pattern to end entirely -- no ceiling should be the reason a
+ * "مقيّد بالنظام" cell shows up in the matrix, `guest` included. This list is
+ * now empty on purpose, and stays a live variable (not deleted) so a future
+ * ceiling re-narrowing shows up here instead of silently landing unnoticed.
+ */
+const EXPECTED_RESTRICTED: ReadonlyArray<readonly [AuthRole, string]> = [];
 
 function key(role: AuthRole, tabId: string): string {
   return `${role}:${tabId}`;
@@ -99,15 +91,6 @@ describe("page permission matrix — every settable cell takes effect", () => {
     }
   });
 
-  it("never honours a matrix row that is outside the code ceiling", () => {
-    // Reachable only via a hand-edited users.permissions.json or a file written
-    // before a ceiling narrowed — it must still be refused, not silently obeyed.
-    for (const [role, tabId] of EXPECTED_RESTRICTED) {
-      const permissions = grantPage(tabId, role, "edit");
-      expect(canRoleAccessTab(permissions, role, tabId), key(role, tabId)).toBe(false);
-    }
-  });
-
   it("reopens reports and archive to employees (previously unreachable ceilings)", () => {
     for (const tabId of ["reports", "reports/reports", "archive"]) {
       expect(isTabRestrictedForRole("employee", tabId), tabId).toBe(false);
@@ -153,22 +136,12 @@ describe("feature permission matrix — every settable toggle takes effect", () 
     }
   });
 
-  it("refuses every feature whose parent page is restricted for the role, even when the toggle is on", () => {
-    for (const role of MATRIX_ROLES) {
-      for (const featureId of ALL_FEATURE_IDS) {
-        const tabId = FEATURE_TAB_LOOKUP[featureId]!;
-        if (!isTabRestrictedForRole(role, tabId)) continue;
-        const result = capability(
-          role,
-          featureId,
-          grantPage(tabId, role, "edit"),
-          grantFeature(featureId, role),
-        );
-        expect(result.allowed, `${key(role, featureId)} must stay refused`).toBe(false);
-        expect(result.reason).toBe("page-not-editable");
-      }
-    }
-  });
+  // The prior version of this test walked every restricted role x feature pair
+  // and proved getMutationCapability refuses it even with the toggle on. As of
+  // 2026-08-30 EXPECTED_RESTRICTED (and therefore isTabRestrictedForRole, for
+  // every role and tab) is empty -- see the comment on EXPECTED_RESTRICTED above
+  // -- so there is no restricted pair left to walk. getMutationCapability's own
+  // ceiling check stays in place as defense-in-depth for a future ceiling.
 
   it("keeps the ad-hoc import features grantable through their new population parent", () => {
     // THE regression this move is most likely to cause: FEATURE_TAB_LOOKUP is derived
@@ -200,7 +173,7 @@ describe("feature permission matrix — every settable toggle takes effect", () 
     expect(Object.values(FEATURE_TAB_LOOKUP)).not.toContain("adhoc-import");
   });
 
-  it("lists the feature cells that stay permanently restricted", () => {
+  it("lists the feature cells that stay permanently restricted — none, as of 2026-08-30", () => {
     const restricted = new Set<string>();
     for (const role of MATRIX_ROLES) {
       for (const featureId of ALL_FEATURE_IDS) {
@@ -209,38 +182,11 @@ describe("feature permission matrix — every settable toggle takes effect", () 
         }
       }
     }
-    // user-management (3 features) x guest only: its ceiling was widened from
-    // ADMIN_ONLY to every operational role on 2026-08-25 -- see tabCatalog.ts.
-    // Nothing else: `settings`'s own ceiling was widened to every role on
-    // 2026-08-27, so its 4 features (edit-interface-labels, view-error-log,
-    // settings.syncInterval, settings.adminAccount) are no longer dead for ANY
-    // managed role and have dropped out of this "restricted" list entirely.
-    //
-    // adhoc-import.ingest/.assign are deliberately NOT here any more: since the
-    // importer became the `population/adhoc-import` sub-tab, both features cascade
-    // off the POPULATION page, which no role is ceiling-restricted from. They stay
-    // off by default (FEATURE_DEFAULTS) and the sub-tab's own ceiling still refuses
-    // to open the page for guest -- but the toggles are no longer permanently
-    // inert, which is what this list means.
-    const featureIds = new Set([...restricted].map((entry) => entry.split(":")[0]));
-    expect([...featureIds].sort()).toEqual(
-      ["edit-permissions", "manage-users", "reset-passwords"].sort(),
-    );
-    // Settings features are no longer restricted for any managed role -- the
-    // whole point of the 2026-08-27 widening.
-    expect(restricted.has("view-error-log:guest")).toBe(false);
-    expect(restricted.has("view-error-log:manager")).toBe(false);
-    expect(restricted.has("view-error-log:employee")).toBe(false);
-    expect(restricted.has("view-error-log:supervisor")).toBe(false);
-    // Reports/archive features are no longer dead for employees.
-    expect(restricted.has("export-reports:employee")).toBe(false);
-    expect(restricted.has("archive.closeMonth:employee")).toBe(false);
-    expect(restricted.has("report-designer.edit:employee")).toBe(false);
-    // User-management features are only dead for guest now, not the other
-    // three managed roles (the whole point of the 2026-08-25 widening).
-    expect(restricted.has("manage-users:guest")).toBe(true);
-    expect(restricted.has("manage-users:employee")).toBe(false);
-    expect(restricted.has("manage-users:supervisor")).toBe(false);
-    expect(restricted.has("manage-users:manager")).toBe(false);
+    // user-management's 3 mutation features (manage-users, reset-passwords,
+    // edit-permissions) x guest were the last permanently-dead cells, per the
+    // 2026-08-25 widening. The owner asked for every "مقيّد بالنظام" cell to go,
+    // guest included (2026-08-30) — see EXPECTED_RESTRICTED above — so this set
+    // is empty now: no feature toggle is permanently inert for any role.
+    expect(restricted.size).toBe(0);
   });
 });
