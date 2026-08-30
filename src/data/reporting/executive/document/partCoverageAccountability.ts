@@ -21,7 +21,7 @@
 //     additive to the existing page sequence (no renumbering of Parts 1-5).
 
 import type { ReportModel } from "../model/reportModel";
-import type { DistributionBucket } from "../../distributionReport";
+import type { DistributionBucket } from "../model/distributionCoverageModel";
 import type { ManagementBucket } from "../../management/managementModel";
 import { fmtNum, fmtPct } from "../primitives";
 import { emptyState, executiveClose, kpi, kpiStrip, noteBox, page, pageHeader, panel } from "./shared";

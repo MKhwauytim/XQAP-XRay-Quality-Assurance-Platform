@@ -301,6 +301,41 @@
 .rh-deck-edition-toggle input{ width:16px;height:16px;cursor:pointer; }
 .rh-deck-edition-toggle input:disabled{ cursor:not-allowed;opacity:.5; }
 
+/* Export-scope segmented control (D11) — same container language as
+   .rh-format-toggle (border/radius/background) but sized for text labels
+   instead of fixed-width icon buttons. */
+.rh-scope-toggle {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--sp-1);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
+  background: var(--c-surface-2);
+  gap: var(--sp-1);
+  align-self: flex-start;
+}
+.rh-scope-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--c-ink-3);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.rh-scope-btn-active {
+  background: var(--c-surface);
+  color: var(--c-navy);
+  box-shadow: 0 1px 5px rgba(6, 36, 74, 0.12);
+}
+
 /* Icon */
 .rh-icon {
   width: 44px;

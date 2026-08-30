@@ -10,8 +10,9 @@ import {
   SOURCE_REVISIONS_SHEET_HEADERS_AR,
 } from "./sourceRevisions";
 import { esc } from "./executive/primitives";
-import { makeRow, makeSampleMaster } from "./reportTestFixtures";
-import { buildSampleDocument, buildSampleDeck } from "./sampleReport";
+import { makeRow } from "./reportTestFixtures";
+import { buildPopulationDocument, buildPopulationDeck } from "./populationReport";
+import type { PopulationReportInput } from "./populationReport/model";
 
 describe("sourceRevisions helper (B2)", () => {
   const revisions = { "sample.master.json": 3, "population.final.json": 7 };
@@ -54,33 +55,51 @@ describe("sourceRevisions helper (B2)", () => {
   });
 });
 
-describe("source revisions appear in sample builder output (B2)", () => {
+// NOTE: originally (Task 11 era) buildPopulationDocument/buildPopulationDeck
+// did NOT render a source-revisions footer — `sourceRevisions` flowed through
+// into `PopulationReportModel` (see populationReport/model.ts) but neither
+// builder read `model.sourceRevisions` anywhere. That tracked gap (the
+// Reports tab's TabView.tsx already computed and passed `sourceRevisions`
+// into the population report input, expecting it to show up somewhere) is
+// closed by Task 11b: both builders now render `sourceRevisionsFooterHtml`
+// via `buildDeckV3Html`'s `footerNote` parameter / document.ts's own footer
+// concatenation. The tests below assert the new real (positive) behavior
+// instead of the old no-op — see git history for the original block.
+describe("sourceRevisions field on PopulationReportInput (B2)", () => {
   const rows = [makeRow("A1", "بري"), makeRow("A2", "بري")];
-  const sample = makeSampleMaster(rows);
-  const input = {
-    monthFolderName: "5-may-2026",
-    manifest: null,
-    populationRows: rows,
-    sample,
-    sourceRevisions: { "sample.master.json": 5, "population.final.json": 9 },
-  };
+  function buildInput(overrides: Partial<PopulationReportInput> = {}): PopulationReportInput {
+    return {
+      monthFolderName: "5-may-2026",
+      manifest: null,
+      processingSummary: null,
+      riskRawRowCount: rows.length,
+      biRawRowCount: null,
+      populationRows: rows,
+      sampleRows: rows,
+      distributionEntries: [],
+      employeeDisplayNames: {},
+      sourceRevisions: { "sample.master.json": 5, "population.final.json": 9 },
+      ...overrides,
+    };
+  }
 
-  test("the sample DOCUMENT prints the source-revision block", async () => {
-    const html = await buildSampleDocument(input);
-    expect(html).toContain(SOURCE_REVISIONS_LABEL_AR);
-    expect(html).toContain("sample.master.json");
-    expect(html).toContain("مراجعة 5");
-    expect(html).toContain("مراجعة 9");
+  test("sourceRevisions now renders as a footer on the document (tracked gap from Task 11 closed by Task 11b)", async () => {
+    const withRevisions = await buildPopulationDocument(
+      buildInput({ sourceRevisions: { "population.final.json": 3, "sample.master.json": 1 } })
+    );
+    const withoutRevisions = await buildPopulationDocument(buildInput({ sourceRevisions: undefined }));
+    expect(withRevisions).not.toBe(withoutRevisions);
+    expect(withRevisions).toContain("population.final.json");
+    expect(withoutRevisions).not.toContain("source-revisions");
   });
 
-  test("the sample DECK prints the source-revision block", async () => {
-    const html = await buildSampleDeck(input);
-    expect(html).toContain(SOURCE_REVISIONS_LABEL_AR);
-    expect(html).toContain("population.final.json");
-  });
-
-  test("omitting sourceRevisions renders no footer (backward compatible)", async () => {
-    const html = await buildSampleDocument({ ...input, sourceRevisions: undefined });
-    expect(html).not.toContain(SOURCE_REVISIONS_LABEL_AR);
+  test("sourceRevisions now renders as a footer on the deck (tracked gap from Task 11 closed by Task 11b)", async () => {
+    const withRevisions = await buildPopulationDeck(
+      buildInput({ sourceRevisions: { "population.final.json": 3, "sample.master.json": 1 } })
+    );
+    const withoutRevisions = await buildPopulationDeck(buildInput({ sourceRevisions: undefined }));
+    expect(withRevisions).not.toBe(withoutRevisions);
+    expect(withRevisions).toContain("population.final.json");
+    expect(withoutRevisions).not.toContain("source-revisions");
   });
 });

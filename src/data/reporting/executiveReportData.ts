@@ -11,6 +11,7 @@ import type {
 import { isRowStudied } from "./executiveReportTypes";
 import { buildPortProfiles, buildStageProfiles } from "./executiveKpiProfiles";
 import { entryDayOf } from "./executive/model/entryDay";
+import { classifyImageResult } from "../population/imageResult";
 
 type SubmittedAnswerInfo = {
   answers: FieldAnswer[];
@@ -128,8 +129,7 @@ export function buildExecutiveReportRows(input: ExecutiveReportInput): Executive
   return populationRows.map((pop): ExecutiveReportRow => {
     const levelOneResult = pop.xrayLevelOneResult;
     const levelTwoResult = pop.xrayLevelTwoResult;
-    const imageResult: "سليمة" | "اشتباه" =
-      levelOneResult === "اشتباه" || levelTwoResult === "اشتباه" ? "اشتباه" : "سليمة";
+    const imageResult = classifyImageResult(levelOneResult, levelTwoResult);
 
     const dist = distMap.get(pop.xrayImageId);
     const answer = answerMap.get(pop.xrayImageId);

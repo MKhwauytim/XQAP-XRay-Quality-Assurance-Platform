@@ -27,11 +27,11 @@ test.describe("report centre", () => {
 
   test("every report card offers its three export formats", async ({ page }) => {
     const ws = workspace(page);
-    for (const title of ["التقرير التنفيذي", "تقرير العينة", "تقرير التوزيع", "تقرير الإدارة"]) {
+    for (const title of ["التقرير التنفيذي", "تقرير المجتمع", "تقرير الإدارة"]) {
       await expect(ws.getByText(title, { exact: true }).first()).toBeVisible();
     }
     const formatGroups = ws.getByRole("group", { name: "صيغة التصدير" });
-    await expect(formatGroups).toHaveCount(4);
+    await expect(formatGroups).toHaveCount(3);
     for (const label of ["عرض تقديمي تفاعلي (HTML)", "بيانات (Excel)", "تقرير تفصيلي تفاعلي (HTML)"]) {
       await expect(formatGroups.first().getByRole("button", { name: label })).toBeEnabled();
     }
@@ -67,7 +67,7 @@ test.describe("report centre", () => {
     expect(errors, errors.join("\n")).toHaveLength(0);
   });
 
-  test("the sample report builds and opens", async ({ page }) => {
+  test("the population report builds and opens", async ({ page }) => {
     const group = workspace(page).getByRole("group", { name: "صيغة التصدير" }).nth(1);
     await group.getByRole("button", { name: "تقرير تفصيلي تفاعلي (HTML)" }).click();
     const popupPromise = page.context().waitForEvent("page");

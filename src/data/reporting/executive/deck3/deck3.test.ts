@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_EXEC_CONFIG } from "../../executiveReportTypes";
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
 import type { PreparedPopulationRow } from "../../../population/populationTypes";
-import { buildExecutiveDeckV3 } from "./index";
+import { buildExecutiveDeckV3, buildDeckV3Html } from "./index";
 
 // Same fixture pattern as deck2.test.ts — a minimal but complete
 // PreparedPopulationRow, overridden per test row.
@@ -119,5 +119,18 @@ describe("buildExecutiveDeckV3", () => {
     );
     expect(html).not.toContain('<img src=x onerror=alert(1)>');
     expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
+  });
+});
+
+describe("buildDeckV3Html footerNote", () => {
+  it("omits any footer markup when footerNote is not passed (backward compatible)", () => {
+    const html = buildDeckV3Html("<section>x</section>", "أغسطس 2026");
+    expect(html).not.toContain("source-revisions");
+  });
+
+  it("appends footerNote after the slides when provided", () => {
+    const html = buildDeckV3Html("<section>x</section>", "أغسطس 2026", {}, '<section class="source-revisions">test-footer</section>');
+    expect(html).toContain("test-footer");
+    expect(html.indexOf("<section>x</section>")).toBeLessThan(html.indexOf("test-footer"));
   });
 });

@@ -34,7 +34,7 @@
 // `briefingRankList`'s `foldRemainder` already uses elsewhere in this deck.
 
 import type { ReportModel } from "../../model/reportModel";
-import type { DistributionBucket } from "../../../distributionReport";
+import type { DistributionBucket } from "../../model/distributionCoverageModel";
 import { esc, fmtNum } from "../../primitives";
 import { icon } from "../../ui/icons";
 import { ledgerIdx, ledgerPortCard, pctCell, v2Slide } from "../slideKit";
