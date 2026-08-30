@@ -28,6 +28,9 @@ describe("buildPopulationXlsx", () => {
     const wb = (XLSX.writeFile as unknown as { mock: { calls: [unknown][] } }).mock.calls[0][0] as XLSX.WorkBook;
     expect(wb.SheetNames).toEqual(
       expect.arrayContaining([
+        "الاستلام",
+        "المخاطر - قبل وبعد",
+        "BI - قبل وبعد",
         "المجتمع - المرحلة",
         "المجتمع - المنفذ",
         "العينة - المرحلة",
@@ -96,7 +99,7 @@ describe("buildPopulationXlsx", () => {
     expect(serialized).not.toContain("مستبدل");
   });
 
-  it("respects scope: population-only produces 2 sheets, sample-only produces 5, both produces 7", async () => {
+  it("respects scope: population-only produces 5 sheets, sample-only produces 5, both produces 10", async () => {
     const populationRows = [makeRow("1", "ميناء جدة", { portType: "بحري" })];
     const sample = makeSampleMaster(populationRows);
     const distribution = makeDistribution([{ id: "1", assignedTo: "user1", status: "completed", row: { ...populationRows[0] } }]);
@@ -114,7 +117,7 @@ describe("buildPopulationXlsx", () => {
 
     await buildPopulationXlsx(input, "population");
     let wb = (XLSX.writeFile as unknown as { mock: { calls: [unknown][] } }).mock.calls.at(-1)![0] as XLSX.WorkBook;
-    expect(wb.SheetNames).toHaveLength(2);
+    expect(wb.SheetNames).toHaveLength(5);
 
     await buildPopulationXlsx(input, "sample");
     wb = (XLSX.writeFile as unknown as { mock: { calls: [unknown][] } }).mock.calls.at(-1)![0] as XLSX.WorkBook;
@@ -122,6 +125,6 @@ describe("buildPopulationXlsx", () => {
 
     await buildPopulationXlsx(input, "both");
     wb = (XLSX.writeFile as unknown as { mock: { calls: [unknown][] } }).mock.calls.at(-1)![0] as XLSX.WorkBook;
-    expect(wb.SheetNames).toHaveLength(7);
+    expect(wb.SheetNames).toHaveLength(10);
   });
 });

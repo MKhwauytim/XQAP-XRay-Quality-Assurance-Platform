@@ -491,6 +491,7 @@ html,body{margin:0;padding:0;background:var(--v3-bg);}
 .docpage.v3.docpage-divider .doc-div-desc{font-size:20px;line-height:1.6;color:rgba(249,248,245,.78);}
 .docpage.v3.docpage-cover{background:var(--v3-cover-navy);color:var(--v3-bg);justify-content:space-between;padding:40mm 20mm;}
 .docpage.v3.docpage-cover .doc-cover-title{font-size:56px;font-weight:700;margin:16px 0;}
+.doc-contents-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px;font-size:20px;}
 @media print {
   .docviewer .sidebar, .docviewer .no-print { display:none; }
   .docpage.v3 { margin:0; }
@@ -509,6 +510,13 @@ html,body{margin:0;padding:0;background:var(--v3-bg);}
   <div>أغسطس 2026</div>
 </div>
 <div class="v3-cover-meta"></div>
+</section>
+<section id="contents" data-title="المحتويات" class="docpage v3">
+<header class="v3-head">
+  <div class="v3-eyebrow"><span>تقرير المجتمع</span></div>
+  <div class="v3-title-row"><h2 class="v3-h2">المحتويات</h2></div>
+</header><ul class="doc-contents-list"><li><strong>المجتمع</strong> — المجتمع المستلم والمعالج</li><li><strong>العينة</strong> — تكوين العينة المسحوبة</li><li><strong>التوزيع</strong> — التوزيع على الموظفين</li></ul>
+<div class="docpage-foot"><span>المحتويات</span><span>00</span></div>
 </section>
 <section class="docpage v3 docpage-divider" data-title="المجتمع">
 <div class="doc-div-ghost">١</div>

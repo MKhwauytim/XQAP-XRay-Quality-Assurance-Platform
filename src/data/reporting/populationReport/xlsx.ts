@@ -33,6 +33,42 @@ export async function buildPopulationXlsx(
   const wb = XLSX.utils.book_new();
 
   if (scope !== "sample") {
+    const receiptRows = [
+      { المصدر: "بيانات المخاطر (Risk)", "إجمالي الصفوف الخام": model.reconciled.riskRawRowCount },
+      { المصدر: "بيانات معلومات الأعمال (BI)", "إجمالي الصفوف الخام": model.reconciled.biRawRowCount ?? "لم يتم التوفير" },
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(receiptRows), "الاستلام");
+
+    const summary = model.reconciled.processingSummary;
+    const riskRows = summary
+      ? [
+          {
+            "الصفوف الأصلية": summary.riskOriginalRows,
+            "معرّفات صحيحة": summary.validRiskIdRows,
+            "معرّفات غير صحيحة": summary.invalidRiskIdRows,
+            "بعد إزالة التكرار": summary.rowsAfterDeduplication,
+            "نتائج غير صحيحة محذوفة": summary.removedInvalidResultRows,
+            "المجتمع النهائي": summary.finalPreparedPopulationRows,
+          },
+        ]
+      : [];
+    if (riskRows.length > 0) {
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(riskRows), "المخاطر - قبل وبعد");
+    }
+
+    const biRows = summary?.biProvided
+      ? summary.biFieldFillSummary.map((f) => ({
+          الحقل: f.fieldName,
+          "فارغ قبل": f.riskEmptyBefore,
+          "تمت التعبئة": f.filledFromBi,
+          "لا يزال فارغًا": f.stillEmptyAfter,
+          "نسبة التعبئة": f.fillPercentage,
+        }))
+      : [];
+    if (biRows.length > 0) {
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(biRows), "BI - قبل وبعد");
+    }
+
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(stageSheetRows(model, "reconciled")), "المجتمع - المرحلة");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(portSheetRows(model, "reconciled")), "المجتمع - المنفذ");
   }

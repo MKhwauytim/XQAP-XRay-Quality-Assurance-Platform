@@ -19,7 +19,7 @@ import { yieldToMain } from "../../storage/yieldToMain";
 import { openReportWindow, writeOrCloseOnFailure } from "../htmlReport";
 import { computePopulationReportModel } from "./model";
 import type { PopulationReportModel, PopulationReportInput } from "./model";
-import { RESULT_HEADERS, resultRow } from "./deck";
+import { RESULT_HEADERS, resultRow, contentsRows } from "./deck";
 import { STAGE_LABELS } from "./fold";
 import type { PortBreakdown, PopulationReportScope } from "./types";
 import { sourceRevisionsFooterHtml, SOURCE_REVISIONS_CSS } from "../sourceRevisions";
@@ -47,6 +47,17 @@ ${docTwoColumn({
     body: docPaginateTable({ headers: RESULT_HEADERS, rows: breakdown.sea.map((p) => resultRow(p.portName, p.counts)), rowsPerPage: PORT_TABLE_ROWS_PER_PAGE })[0],
   },
 })}`,
+  });
+}
+
+function buildContentsPage(scope: PopulationReportScope): string {
+  const rows = contentsRows(scope);
+  const items = rows.map((r) => `<li><strong>${esc(r.title)}</strong> — ${esc(r.description)}</li>`).join("");
+  return docPage({
+    id: "contents",
+    pageNo: "00",
+    title: "المحتويات",
+    body: `${docPageHeader({ eyebrow: "تقرير المجتمع", title: "المحتويات" })}<ul class="doc-contents-list">${items}</ul>`,
   });
 }
 
@@ -226,6 +237,7 @@ export async function buildPopulationDocument(
   const org = { logoUrl: "", orgName: "ضمان جودة الأشعة", lines: [] };
   const pages: string[] = [
     docCover({ org, title: "تقرير المجتمع", periodLabel: "الفترة", periodValue: model.monthLabel, metaRows: [] }),
+    buildContentsPage(scope),
   ];
   if (scope !== "sample") pages.push(...(await buildSection1Pages(model)));
   if (scope !== "population") {

@@ -613,30 +613,34 @@ function ReportsContent() {
     setGenerating(type);
     try {
       if (type === "population-report" || type === "population-report-xlsx" || type === "population-report-deck") {
-        const { populationRows, sampleData, distributionCurrent, manifest, processingSummary, riskRawRows, biRawRows } =
+        const { populationRows, sampleData, distributionCurrent, manifest, processingSummary } =
           await loadMonthForEditing(directoryHandle, selectedMonth);
-        if (!sampleData) {
+        if (!sampleData && populationReportScope !== "population") {
           showToast("error", "لم يتم العثور على بيانات عينة لهذا الشهر.");
           return;
         }
         const { liveSampleRows } = await import("../../../../data/sampling/sampleStorage");
-        const [populationRev, sampleRev] = await Promise.all([
+        const [populationRev, sampleRev, distRev] = await Promise.all([
           loadMonthPopulationFinalRevision(directoryHandle, selectedMonth),
           loadSampleMasterRevision(directoryHandle, selectedMonth),
+          loadDistributionCurrentRevision(directoryHandle, selectedMonth),
         ]);
         const input = {
           monthFolderName: selectedMonth,
           manifest,
           processingSummary: processingSummary?.summary ?? null,
-          riskRawRowCount: riskRawRows.length,
-          biRawRowCount: processingSummary?.summary?.biProvided ? biRawRows.length : null,
+          riskRawRowCount: processingSummary?.summary?.riskOriginalRows ?? manifest?.totalRawRows ?? 0,
+          biRawRowCount: processingSummary?.summary?.biProvided
+            ? processingSummary.summary.biMatchedRows + processingSummary.summary.biUnmatchedRows
+            : null,
           populationRows: (populationRows ?? []) as unknown as PreparedPopulationRow[],
-          sampleRows: liveSampleRows(sampleData),
+          sampleRows: sampleData ? liveSampleRows(sampleData) : [],
           distributionEntries: distributionCurrent?.entries ?? [],
           employeeDisplayNames: buildDisplayNameMap(),
           sourceRevisions: collectRevisions([
             ["population.final.json", populationRev],
             ["sample.master.json", sampleRev],
+            ["distribution.current.json", distRev],
           ]),
         };
         if (type === "population-report-xlsx") {

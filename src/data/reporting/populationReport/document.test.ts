@@ -84,4 +84,31 @@ describe("buildPopulationDocument", () => {
       expect(html).toContain("التوزيع حسب الموظف والمرحلة");
     });
   });
+
+  describe("contents page (Fix 7)", () => {
+    it("includes a contents page listing all three sections for scope='both'", async () => {
+      const html = await buildPopulationDocument(baseInput(), "both");
+      expect(html).toContain('id="contents"');
+      expect(html).toContain("المحتويات");
+      expect(html).toContain("المجتمع المستلم والمعالج");
+      expect(html).toContain("تكوين العينة المسحوبة");
+      expect(html).toContain("التوزيع على الموظفين");
+    });
+
+    it("scope='population' contents page lists only the المجتمع section", async () => {
+      const html = await buildPopulationDocument(baseInput(), "population");
+      expect(html).toContain('id="contents"');
+      expect(html).toContain("المجتمع المستلم والمعالج");
+      expect(html).not.toContain("تكوين العينة المسحوبة");
+      expect(html).not.toContain("التوزيع على الموظفين");
+    });
+
+    it("scope='sample' contents page lists العينة and التوزيع but not المجتمع", async () => {
+      const html = await buildPopulationDocument(baseInput(), "sample");
+      expect(html).toContain('id="contents"');
+      expect(html).not.toContain("المجتمع المستلم والمعالج");
+      expect(html).toContain("تكوين العينة المسحوبة");
+      expect(html).toContain("التوزيع على الموظفين");
+    });
+  });
 });

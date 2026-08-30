@@ -37,9 +37,41 @@ function resultRow(label: string, counts: ResultCounts): TableCell[] {
 
 const RESULT_HEADERS = ["البند", "الإجمالي", "سليمة", "اشتباه"];
 
+// Deck slides render onto a fixed 1920x1080 overflow:hidden canvas
+// (deck3/theme.ts) — unlike document.ts's flowing A4 pages, there is no room
+// to paginate, so any list beyond a small cap must be capped-and-folded into
+// a visible remainder row instead of silently overflowing off-canvas.
+function capWithRemainder<T extends { counts: ResultCounts }>(
+  items: T[],
+  cap: number,
+  labelOf: (item: T) => string,
+  remainderLabel: string
+): Array<{ label: string; counts: ResultCounts }> {
+  if (items.length <= cap) return items.map((item) => ({ label: labelOf(item), counts: item.counts }));
+  const top = items.slice(0, cap);
+  const rest = items.slice(cap);
+  const remainder = rest.reduce(
+    (acc, item) => ({
+      سليمة: acc.سليمة + item.counts.سليمة,
+      اشتباه: acc.اشتباه + item.counts.اشتباه,
+      total: acc.total + item.counts.total,
+    }),
+    { سليمة: 0, اشتباه: 0, total: 0 }
+  );
+  return [
+    ...top.map((item) => ({ label: labelOf(item), counts: item.counts })),
+    { label: `${remainderLabel} (${rest.length})`, counts: remainder },
+  ];
+}
+
+const PORT_CAP = 10;
+const EMPLOYEE_CAP = 12;
+
 function portBreakdownTwoColumn(breakdown: PortBreakdown): string {
-  const padTo = Math.max(breakdown.land.length, breakdown.sea.length);
-  const rowsFor = (ports: PortBreakdown["land"]) => ports.map((p) => resultRow(p.portName, p.counts));
+  const landCapped = capWithRemainder(breakdown.land, PORT_CAP, (p) => p.portName, "أخرى");
+  const seaCapped = capWithRemainder(breakdown.sea, PORT_CAP, (p) => p.portName, "أخرى");
+  const padTo = Math.max(landCapped.length, seaCapped.length);
+  const rowsFor = (ports: Array<{ label: string; counts: ResultCounts }>) => ports.map((p) => resultRow(p.label, p.counts));
   const totalsFor = (ports: PortBreakdown["land"], label: string) => {
     const total = { سليمة: 0, اشتباه: 0, total: 0 };
     for (const p of ports) {
@@ -53,17 +85,17 @@ function portBreakdownTwoColumn(breakdown: PortBreakdown): string {
 ${tintedPanel({
   variant: "land",
   title: "المنافذ البرية",
-  body: dataTable({ headers: RESULT_HEADERS, rows: rowsFor(breakdown.land), totals: totalsFor(breakdown.land, "إجمالي البرية"), padToRows: padTo }),
+  body: dataTable({ headers: RESULT_HEADERS, rows: rowsFor(landCapped), totals: totalsFor(breakdown.land, "إجمالي البرية"), padToRows: padTo }),
 })}
 ${tintedPanel({
   variant: "sea",
   title: "المنافذ البحرية",
-  body: dataTable({ headers: RESULT_HEADERS, rows: rowsFor(breakdown.sea), totals: totalsFor(breakdown.sea, "إجمالي البحرية"), padToRows: padTo }),
+  body: dataTable({ headers: RESULT_HEADERS, rows: rowsFor(seaCapped), totals: totalsFor(breakdown.sea, "إجمالي البحرية"), padToRows: padTo }),
 })}
 </div>`;
 }
 
-function contentsRows(
+export function contentsRows(
   scope: PopulationReportScope
 ): Array<{ index: number; title: string; description: string; topics: string; pages: string }> {
   const rows: Array<{ index: number; title: string; description: string; topics: string; pages: string }> = [];
@@ -263,32 +295,78 @@ ${portBreakdownTwoColumn(model.sample.byPort)}`
 
 function employeeStageTable(model: PopulationReportModel): string {
   const headers = ["الموظف", ...model.distribution.stageKeysPresent.map((k) => STAGE_LABELS[k] ?? k), "الإجمالي"];
-  const rows: TableCell[][] = model.distribution.byEmployeeStage.map((emp) => [
+  const all = model.distribution.byEmployeeStage;
+  const top = all.slice(0, EMPLOYEE_CAP);
+  const rest = all.slice(EMPLOYEE_CAP);
+  const rows: TableCell[][] = top.map((emp) => [
     { html: esc(emp.displayName) },
     ...model.distribution.stageKeysPresent.map((k) => ({ html: fmtNum(emp.stages[k]?.total ?? 0) })),
     { html: fmtNum(emp.total.total), cls: "v-navy" },
   ]);
+  if (rest.length > 0) {
+    const stageTotals: Record<string, number> = {};
+    let grandTotal = 0;
+    for (const emp of rest) {
+      for (const k of model.distribution.stageKeysPresent) {
+        stageTotals[k] = (stageTotals[k] ?? 0) + (emp.stages[k]?.total ?? 0);
+      }
+      grandTotal += emp.total.total;
+    }
+    rows.push([
+      { html: esc(`آخرون (${rest.length})`) },
+      ...model.distribution.stageKeysPresent.map((k) => ({ html: fmtNum(stageTotals[k] ?? 0) })),
+      { html: fmtNum(grandTotal), cls: "v-navy" },
+    ]);
+  }
   return dataTable({ headers, rows });
 }
 
 function employeePortTable(model: PopulationReportModel): string {
   const headers = ["الموظف", "برية", "بحرية", "الإجمالي"];
-  const rows: TableCell[][] = model.distribution.byEmployeePort.map((emp) => [
+  const all = model.distribution.byEmployeePort;
+  const top = all.slice(0, EMPLOYEE_CAP);
+  const rest = all.slice(EMPLOYEE_CAP);
+  const rows: TableCell[][] = top.map((emp) => [
     { html: esc(emp.displayName) },
     { html: fmtNum(emp.ports.land.total) },
     { html: fmtNum(emp.ports.sea.total) },
     { html: fmtNum(emp.total.total), cls: "v-navy" },
   ]);
+  if (rest.length > 0) {
+    const land = rest.reduce((sum, emp) => sum + emp.ports.land.total, 0);
+    const sea = rest.reduce((sum, emp) => sum + emp.ports.sea.total, 0);
+    const total = rest.reduce((sum, emp) => sum + emp.total.total, 0);
+    rows.push([
+      { html: esc(`آخرون (${rest.length})`) },
+      { html: fmtNum(land) },
+      { html: fmtNum(sea) },
+      { html: fmtNum(total), cls: "v-navy" },
+    ]);
+  }
   return dataTable({ headers, rows });
 }
 
 function certScanTable(model: PopulationReportModel): string {
-  const rows: TableCell[][] = model.distribution.certScanByEmployee.map((emp) => [
+  const all = model.distribution.certScanByEmployee;
+  const top = all.slice(0, EMPLOYEE_CAP);
+  const rest = all.slice(EMPLOYEE_CAP);
+  const rows: TableCell[][] = top.map((emp) => [
     { html: esc(emp.displayName) },
     { html: fmtNum(emp.certScanCount), cls: "v-gold" },
     { html: fmtNum(emp.nonCertScanCount) },
     { html: fmtNum(emp.total), cls: "v-navy" },
   ]);
+  if (rest.length > 0) {
+    const certScanCount = rest.reduce((sum, emp) => sum + emp.certScanCount, 0);
+    const nonCertScanCount = rest.reduce((sum, emp) => sum + emp.nonCertScanCount, 0);
+    const total = rest.reduce((sum, emp) => sum + emp.total, 0);
+    rows.push([
+      { html: esc(`آخرون (${rest.length})`) },
+      { html: fmtNum(certScanCount), cls: "v-gold" },
+      { html: fmtNum(nonCertScanCount) },
+      { html: fmtNum(total), cls: "v-navy" },
+    ]);
+  }
   return dataTable({ headers: ["الموظف", "CertScan", "غير CertScan", "الإجمالي"], rows });
 }
 
@@ -348,13 +426,31 @@ export async function buildPopulationDeckSlides(
   const s1End = 2 + section1Count;
   const s2End = s1End + (includeSample ? 3 : 0);
 
-  const meta = (num: number): SlideMeta => ({
-    num,
-    total: totalSlides,
-    sectionKey: num <= s1End ? "s1" : num <= s2End ? "s2" : "s3",
-    sectionLabel: num <= s1End ? "المجتمع" : num <= s2End ? "العينة" : "التوزيع",
-    footText: `تقرير المجتمع — ${model.monthLabel}`,
-  });
+  // Cover/contents (and, for scope="sample", the closing slide too) precede
+  // or follow sections that may not exist in this scope's slide set — label
+  // them with whichever real section is actually adjacent instead of always
+  // assuming Section 1/Section 3, so the nav rail never shows a section link
+  // for content the report doesn't contain (Fix 5).
+  const firstSectionKey = includePopulation ? "s1" : "s2";
+  const firstSectionLabel = includePopulation ? "المجتمع" : "العينة";
+  const lastSectionKey = includeSample ? "s3" : "s1";
+  const lastSectionLabel = includeSample ? "التوزيع" : "المجتمع";
+
+  const meta = (num: number): SlideMeta => {
+    let sectionKey: string;
+    let sectionLabel: string;
+    if (num <= s1End) {
+      sectionKey = firstSectionKey;
+      sectionLabel = firstSectionLabel;
+    } else if (includeSample && num <= s2End) {
+      sectionKey = "s2";
+      sectionLabel = "العينة";
+    } else {
+      sectionKey = lastSectionKey;
+      sectionLabel = lastSectionLabel;
+    }
+    return { num, total: totalSlides, sectionKey, sectionLabel, footText: `تقرير المجتمع — ${model.monthLabel}` };
+  };
 
   const parts: string[] = [];
   parts.push(...buildSection1Slides(model, meta, scope));

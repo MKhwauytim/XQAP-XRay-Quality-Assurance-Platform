@@ -3,6 +3,8 @@ import { buildSection1Slides, buildPopulationDeck, buildPopulationDeckSlides } f
 import { computePopulationReportModel } from "./model";
 import { makeRow, makeManifest, makeProcessingSummary, makeSampleMaster, makeDistribution } from "../reportTestFixtures";
 import type { PopulationReportScope } from "./types";
+import type { DistributionStatus } from "../../distribution/distributionTypes";
+import type { PreparedPopulationRow } from "../../population/populationTypes";
 
 function testModel() {
   return computePopulationReportModel({
@@ -180,5 +182,126 @@ describe("export scope", () => {
         vi.useRealTimers();
       }
     });
+  });
+});
+
+describe("row caps on the fixed-canvas deck (Fix 2)", () => {
+  it("caps port tables at 10 rows with an aggregated remainder instead of silently truncating", async () => {
+    // 15 land ports, port-i has (i+1) "سليمة" rows, so totals are 1..15 and
+    // the sort-by-total-desc order is fully deterministic.
+    const populationRows: PreparedPopulationRow[] = [];
+    for (let i = 0; i < 15; i++) {
+      for (let j = 0; j <= i; j++) {
+        populationRows.push(
+          makeRow(`port${i}-r${j}`, `port-${i}`, {
+            portType: "بري",
+            xrayLevelOneResult: "سليمة",
+            xrayLevelTwoResult: "سليمة",
+          })
+        );
+      }
+    }
+    const model = computePopulationReportModel({
+      monthFolderName: "8-August-2026",
+      manifest: makeManifest(),
+      processingSummary: makeProcessingSummary(),
+      riskRawRowCount: 10,
+      biRawRowCount: 8,
+      populationRows,
+      sampleRows: [],
+      distributionEntries: [],
+      employeeDisplayNames: {},
+    });
+    // top-10 totals are 15,14,...,6 (sum 105); remainder is the 5 smallest
+    // ports (totals 1..5, sum 15). 105 + 15 = 120 = the true grand total.
+    expect(model.reconciled.byPort.land).toHaveLength(15);
+    const trueTotal = model.reconciled.byPort.land.reduce((sum, p) => sum + p.counts.total, 0);
+    expect(trueTotal).toBe(120);
+
+    const html = await buildPopulationDeckSlides(model, "population");
+    expect(html).toContain("أخرى (5)"); // remainder row's label, with count of folded ports
+    // The 5 lowest-total ports (port-0..port-4) are folded away individually...
+    expect(html).not.toContain(">port-0<");
+    expect(html).not.toContain(">port-4<");
+    // ...while the top-10 (port-5..port-14) still render as their own rows.
+    expect(html).toContain(">port-14<");
+    expect(html).toContain(">port-5<");
+  });
+
+  it("caps employee tables at 12 with an aggregated remainder for section 3", async () => {
+    const baseRow = makeRow("base", "ميناء جدة", { portType: "بحري" });
+    const entries = Array.from({ length: 15 }, (_, i) => ({
+      id: `IMG-${i}`,
+      assignedTo: `emp${i}`,
+      status: "completed" as DistributionStatus,
+      row: { ...baseRow, xrayImageId: `IMG-${i}` },
+    }));
+    const distribution = makeDistribution(entries);
+    const employeeDisplayNames = Object.fromEntries(entries.map((e) => [e.assignedTo, `الموظف-${e.assignedTo}`]));
+    const model = computePopulationReportModel({
+      monthFolderName: "8-August-2026",
+      manifest: makeManifest(),
+      processingSummary: makeProcessingSummary(),
+      riskRawRowCount: 10,
+      biRawRowCount: 8,
+      populationRows: [],
+      sampleRows: [],
+      distributionEntries: distribution.entries,
+      employeeDisplayNames,
+    });
+    expect(model.distribution.byEmployeeStage).toHaveLength(15);
+
+    const html = await buildPopulationDeckSlides(model, "sample");
+    // Each of the three Section 3 tables (stage/port/certScan) applies the
+    // same 12-cap + remainder — the remainder label appears at least once
+    // per table, so at least 3 occurrences total.
+    const occurrences = html.split("آخرون (3)").length - 1;
+    expect(occurrences).toBeGreaterThanOrEqual(3);
+    expect(html).toContain("الموظف-emp0");
+    expect(html).toContain("الموظف-emp11");
+    expect(html).not.toContain("الموظف-emp12");
+    expect(html).not.toContain("الموظف-emp14");
+  });
+});
+
+describe("deck section-nav labels per scope (Fix 5)", () => {
+  function scopedModelForNav() {
+    const populationRows = [makeRow("1", "ميناء جدة", { portType: "بحري" })];
+    const sample = makeSampleMaster(populationRows);
+    const distribution = makeDistribution([
+      { id: "1", assignedTo: "user1", status: "completed", row: { ...populationRows[0] } },
+    ]);
+    return computePopulationReportModel({
+      monthFolderName: "8-August-2026",
+      manifest: makeManifest(),
+      processingSummary: makeProcessingSummary(),
+      riskRawRowCount: 10,
+      biRawRowCount: 8,
+      populationRows,
+      sampleRows: sample.rows,
+      distributionEntries: distribution.entries,
+      employeeDisplayNames: { user1: "أحمد" },
+    });
+  }
+
+  it("scope='population' never labels a slide's nav section 'التوزيع'", async () => {
+    const html = await buildPopulationDeckSlides(scopedModelForNav(), "population");
+    expect(html).not.toContain('data-section-label="التوزيع"');
+  });
+
+  it("scope='sample' never labels a slide's nav section 'المجتمع'", async () => {
+    const html = await buildPopulationDeckSlides(scopedModelForNav(), "sample");
+    expect(html).not.toContain('data-section-label="المجتمع"');
+  });
+
+  it("scope='both' keeps today's exact section boundaries (unchanged by the Fix 5 relabel)", async () => {
+    const html = await buildPopulationDeckSlides(scopedModelForNav(), "both");
+    // slides 1-8 -> s1/المجتمع, 9-11 -> s2/العينة, 12-16 -> s3/التوزيع
+    expect(html).toContain('id="v3-slide-1" data-section="s1" data-section-label="المجتمع"');
+    expect(html).toContain('id="v3-slide-8" data-section="s1" data-section-label="المجتمع"');
+    expect(html).toContain('id="v3-slide-9" data-section="s2" data-section-label="العينة"');
+    expect(html).toContain('id="v3-slide-11" data-section="s2" data-section-label="العينة"');
+    expect(html).toContain('id="v3-slide-12" data-section="s3" data-section-label="التوزيع"');
+    expect(html).toContain('id="v3-slide-16" data-section="s3" data-section-label="التوزيع"');
   });
 });

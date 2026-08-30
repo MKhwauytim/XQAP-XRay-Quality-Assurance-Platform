@@ -1564,7 +1564,7 @@ body.deck-fullscreen.deck-controls-visible .deck-slide-counter{opacity:1;pointer
 </div>
 <footer class="v3-page-foot"><span>تقرير المجتمع — أغسطس 2026</span><span class="v3-page-num">08 / 9</span></footer>
 </section>
-<section class="slide v3 v3-closing" id="v3-slide-9" data-section="s3" data-section-label="التوزيع" dir="rtl">
+<section class="slide v3 v3-closing" id="v3-slide-9" data-section="s1" data-section-label="المجتمع" dir="rtl">
 <div class="v3-org">
   <img src="" alt="ضمان جودة الأشعة"/>
   <span class="v3-org-sep"></span>

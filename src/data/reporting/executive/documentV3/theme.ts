@@ -43,6 +43,7 @@ html,body{margin:0;padding:0;background:var(--v3-bg);}
 .docpage.v3.docpage-divider .doc-div-desc{font-size:20px;line-height:1.6;color:rgba(249,248,245,.78);}
 .docpage.v3.docpage-cover{background:var(--v3-cover-navy);color:var(--v3-bg);justify-content:space-between;padding:40mm 20mm;}
 .docpage.v3.docpage-cover .doc-cover-title{font-size:56px;font-weight:700;margin:16px 0;}
+.doc-contents-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px;font-size:20px;}
 @media print {
   .docviewer .sidebar, .docviewer .no-print { display:none; }
   .docpage.v3 { margin:0; }
