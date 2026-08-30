@@ -1253,34 +1253,6 @@
   gap: var(--sp-3);
 }
 
-.um-perf-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: var(--sp-3);
-  margin: var(--sp-3) 0;
-}
-
-.um-perf-card {
-  display: grid;
-  gap: var(--sp-1);
-  padding: var(--sp-3);
-  border: 1px solid var(--app-border);
-  border-radius: var(--r-xl);
-  background: var(--c-surface-2);
-}
-
-.um-perf-card span {
-  color: var(--app-muted);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.um-perf-card strong {
-  color: var(--app-primary);
-  font-size: 20px;
-  font-variant-numeric: tabular-nums;
-}
-
 .um-perf-chart {
   margin: var(--sp-4) 0;
 }
@@ -1305,4 +1277,371 @@
   border: 0;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+.um-perf-range-label {
+  margin-inline-start: auto;
+  align-self: center;
+  font-size: 12px;
+  color: var(--app-muted);
+  direction: ltr;
+  text-align: right;
+}
+
+/* ── Performance evaluation — employee comparison table (centerpiece) ─────── */
+
+.um-perf-compare {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.um-perf-compare-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.um-perf-compare-head h4 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--app-primary);
+}
+
+.um-perf-compare-meta {
+  font-size: 12px;
+  color: var(--app-muted);
+}
+
+.um-perf-compare-meta strong {
+  color: var(--app-primary);
+}
+
+.um-perf-compare-table th:first-child,
+.um-perf-compare-table td:first-child {
+  text-align: center;
+  color: var(--app-muted);
+  font-weight: 700;
+}
+
+.um-perf-compare-row {
+  cursor: pointer;
+}
+
+.um-perf-compare-row.is-selected td {
+  background: var(--c-sky-light);
+}
+
+.um-perf-compare-table td:nth-child(2) {
+  display: grid;
+  gap: 2px;
+}
+
+.um-perf-compare-table td:nth-child(2) strong {
+  color: var(--app-text);
+}
+
+.um-perf-compare-table td:nth-child(2) span {
+  color: var(--app-muted);
+  font-size: 11px;
+}
+
+.um-perf-compare-table td:nth-child(3),
+.um-perf-compare-table td:nth-child(4),
+.um-perf-compare-table td:nth-child(5) {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.um-perf-compare-table td:nth-child(3) {
+  font-weight: 800;
+  color: var(--app-primary);
+}
+
+.um-perf-compare-table td:nth-child(7) {
+  text-align: center;
+}
+
+.um-perf-gap-bar {
+  display: flex;
+  height: 10px;
+  min-width: 130px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--c-surface-2);
+}
+
+.um-perf-gap-seg--normal { background: var(--c-teal-deep); }
+.um-perf-gap-seg--small  { background: var(--c-sky); }
+.um-perf-gap-seg--medium { background: var(--brand-premium); }
+.um-perf-gap-seg--large  { background: var(--c-coral); }
+
+.um-perf-gap-caption {
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: var(--app-muted);
+  white-space: nowrap;
+}
+
+.um-perf-status-chip {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.um-perf-status-chip--above   { background: var(--c-success-bg); color: var(--c-teal-deep); }
+.um-perf-status-chip--within  { background: var(--c-sky-light);  color: var(--c-sky-text); }
+.um-perf-status-chip--below,
+.um-perf-status-chip--warning { background: var(--c-danger-bg);  color: var(--c-danger); }
+
+.um-perf-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  font-size: 11.5px;
+  color: var(--app-muted);
+}
+
+.um-perf-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.um-perf-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.um-perf-legend-dot--normal { background: var(--c-teal-deep); }
+.um-perf-legend-dot--small  { background: var(--c-sky); }
+.um-perf-legend-dot--medium { background: var(--brand-premium); }
+.um-perf-legend-dot--large  { background: var(--c-coral); }
+.um-perf-legend-dot--shift  { background: var(--c-navy-soft); }
+
+.um-perf-legend-note {
+  color: var(--app-muted);
+}
+
+/* ── Performance evaluation — charts row ───────────────────────────────────── */
+
+.um-perf-charts-grid {
+  display: grid;
+  grid-template-columns: 1.7fr 1fr;
+  gap: var(--sp-4);
+}
+
+@media (max-width: 900px) {
+  .um-perf-charts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.um-perf-chart-sub {
+  margin: 0;
+  font-size: 12px;
+  color: var(--app-muted);
+}
+
+.um-perf-trend-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+
+.um-perf-trend-head h4 {
+  margin: 0 0 2px;
+}
+
+.um-perf-trend-avg-badge {
+  font-size: 12px;
+  color: var(--app-muted);
+  white-space: nowrap;
+}
+
+/* ── Performance evaluation — working-hours strip (shift-window timeline) ─── */
+
+.um-perf-hours-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.um-perf-hour-row-label-spacer {
+  width: 108px;
+  flex-shrink: 0;
+}
+
+.um-perf-hour-ticks {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.um-perf-hour-ticks-row {
+  flex: 1;
+  display: flex;
+  justify-content: space-between;
+  font-size: 9.5px;
+  color: var(--app-muted);
+  padding: 0 4px;
+  box-sizing: border-box;
+}
+
+.um-perf-hour-row-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.um-perf-hour-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.um-perf-hour-row-label {
+  width: 100px;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--app-text);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.um-perf-hour-track {
+  position: relative;
+  flex: 1;
+  height: 22px;
+  border-radius: 5px;
+  background: var(--c-navy-soft);
+  overflow: hidden;
+}
+
+.um-perf-hour-track-base {
+  position: absolute;
+  inset: 3px 0;
+  border-radius: 4px;
+  background: var(--c-navy);
+  opacity: 0.35;
+}
+
+.um-perf-hour-seg {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 3px;
+}
+
+.um-perf-hour-seg--small  { background: var(--c-sky); }
+.um-perf-hour-seg--medium { background: var(--brand-premium); }
+.um-perf-hour-seg--large  { background: var(--c-coral); }
+
+/* Reserves space under the label column, which sits physically on the RIGHT
+   in this RTL layout — padding-inline-end would reserve space on the wrong
+   side and collide with the label text. Do not flip this without re-checking
+   the layout in an RTL browser. */
+.um-perf-hour-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-inline-start: 108px;
+}
+
+.um-perf-hour-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.um-perf-hour-chip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.um-perf-hour-chip--small  { background: var(--c-sky-light);   color: var(--c-sky-text); }
+.um-perf-hour-chip--small .um-perf-hour-chip-dot  { background: var(--c-sky); }
+.um-perf-hour-chip--medium { background: var(--c-warning-bg);  color: var(--c-warning); }
+.um-perf-hour-chip--medium .um-perf-hour-chip-dot { background: var(--brand-premium); }
+.um-perf-hour-chip--large  { background: var(--c-danger-bg);   color: var(--c-danger); }
+.um-perf-hour-chip--large .um-perf-hour-chip-dot  { background: var(--c-coral); }
+
+/* ── Performance evaluation — gaps log tier-threshold legend ───────────────── */
+
+.um-perf-tier-legend {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.um-perf-tier-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--c-surface-2);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--app-text);
+}
+
+.um-perf-tier-legend-item .um-perf-legend-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.um-perf-tier-legend-item--normal .um-perf-legend-dot       { background: var(--c-teal-deep); }
+.um-perf-tier-legend-item--small .um-perf-legend-dot        { background: var(--c-sky); }
+.um-perf-tier-legend-item--medium .um-perf-legend-dot       { background: var(--brand-premium); }
+.um-perf-tier-legend-item--large .um-perf-legend-dot        { background: var(--c-coral); }
+.um-perf-tier-legend-item--unclassified .um-perf-legend-dot { background: var(--c-ink-4); }
+.um-perf-tier-legend-item--unclassified                     { color: var(--app-muted); }
+
+.um-perf-tier-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.um-perf-tier-badge--normal       { background: var(--c-success-bg); color: var(--c-teal-deep); }
+.um-perf-tier-badge--small        { background: var(--c-sky-light);  color: var(--c-sky-text); }
+.um-perf-tier-badge--medium       { background: var(--c-warning-bg); color: var(--c-warning); }
+.um-perf-tier-badge--large        { background: var(--c-danger-bg);  color: var(--c-danger); }
+.um-perf-tier-badge--unclassified { background: var(--c-surface-2);  color: var(--app-muted); }
+
+.um-perf-gaps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.um-perf-gaps h4 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--app-primary);
 }

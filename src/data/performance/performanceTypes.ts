@@ -57,6 +57,50 @@ export const GAP_TIER_THRESHOLDS_MS = {
 export const MIN_GAP_SAMPLES_FOR_BASELINE = 5;
 
 /**
+ * Employee-comparison status derivation (`أعلى/ضمن/أدنى من المعدل`), driven
+ * purely by an employee's samples relative to the team average for the same
+ * scope — no metric beyond what the existing aggregates already expose.
+ */
+export const STATUS_ABOVE_AVERAGE_RATIO = 1.15;
+export const STATUS_BELOW_AVERAGE_RATIO = 0.85;
+/** At or above this many "large" gaps in scope, the status escalates regardless of the samples ratio. */
+export const FREQUENT_LARGE_GAPS_MIN_COUNT = 3;
+
+export type EmployeeStatusKind = "above" | "within" | "below";
+
+/** One row of the per-employee comparison table — the تقييم الأداء centerpiece. */
+export type EmployeeComparisonRow = {
+  username: string;
+  displayName: string;
+  /** 1-based rank by samples, descending. */
+  rank: number;
+  samples: number;
+  effectiveMs: number | null;
+  /** This employee's own median gap over the current scope (distinct from the per-month tiering baseline). */
+  paceMs: number | null;
+  gapCounts: Record<GapTier, number>;
+  totalGaps: number;
+  /** Rounded percentage of totalGaps in each tier; may not sum to 100 when unclassified gaps are present. */
+  gapPercents: Record<GapTier, number>;
+  /** Latest day this employee has any recorded activity in scope, or null. */
+  lastActiveDay: string | null;
+  statusKind: EmployeeStatusKind;
+  hasFrequentLargeGaps: boolean;
+};
+
+export type EmployeeComparisonSummary = {
+  /** Sorted by samples, descending. */
+  rows: EmployeeComparisonRow[];
+  teamAvgSamples: number;
+  /** Median of the individual employees' own pace (paceMs), not a median over all gaps pooled together. */
+  teamMedianPaceMs: number | null;
+};
+
+/** The working-hours strip chart plots gaps against the actual shift window, not the full 24h day. */
+export const SHIFT_START_MINUTE = 7 * 60 + 30;
+export const SHIFT_END_MINUTE = 17 * 60 + 30;
+
+/**
  * A recorded session span longer than this is implausible for a single
  * shift and is excluded from sign-in-anchor selection and aggregation — the
  * read-time guard against the pre-Task-1-fix stale-signedInAt bug's
