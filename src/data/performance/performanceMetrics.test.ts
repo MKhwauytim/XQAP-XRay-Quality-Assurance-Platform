@@ -47,7 +47,16 @@ function actionEntry(over: Partial<WorkspaceActionEntry> = {}): WorkspaceActionE
 
 describe("dayKey", () => {
   it("extracts YYYY-MM-DD", () => {
-    expect(dayKey("2026-06-01T23:59:00.000Z")).toBe("2026-06-01");
+    // dayKey buckets by the LOCAL calendar day (see the "local timezone" describe
+    // block below) — this assertion picks a near-midnight UTC timestamp specifically
+    // to prove that, so it must pin TZ itself rather than rely on the runner's
+    // ambient zone (CI runs UTC, but a contributor's machine may not).
+    vi.stubEnv("TZ", "UTC");
+    try {
+      expect(dayKey("2026-06-01T23:59:00.000Z")).toBe("2026-06-01");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
   it("returns empty string for an unparseable timestamp", () => {
     expect(dayKey("not-a-date")).toBe("");
