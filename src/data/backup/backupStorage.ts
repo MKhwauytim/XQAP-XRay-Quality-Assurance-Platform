@@ -1201,7 +1201,7 @@ async function restoreJsonTree(params: {
       // `merge-events` never reaches here: event segments are `.ndjson`,
       // append-only, and never written through the compressing path.
       await copyFileBytes(entry.sourceDir, entry.fileName, entry.targetDir, entry.fileName);
-      return { path: entry.relativePath, cacheDir: null };
+      return { path: entry.relativePath, cacheDir: null, eventsDirName: null };
     }
     if (text === null) {
       // Mirror of the backup side: the restore source is an already-completed,
@@ -1218,7 +1218,7 @@ async function restoreJsonTree(params: {
       const changed = await mergeEventSegment(entry.targetDir, entry.fileName, text, entry.eventsDirName);
       // Only a segment that actually gained lines invalidates the fold cache —
       // a no-op restore must not cost every month a full re-derive.
-      return changed ? { path: entry.relativePath, cacheDir: entry.cacheDir } : null;
+      return changed ? { path: entry.relativePath, cacheDir: entry.cacheDir, eventsDirName: entry.eventsDirName } : null;
     }
 
     if (entry.action === "restore-if-absent" && (await fileExists(entry.targetDir, entry.fileName))) {
@@ -1226,18 +1226,44 @@ async function restoreJsonTree(params: {
     }
 
     await safeWriteJsonText(entry.targetDir, entry.fileName, text);
-    return { path: entry.relativePath, cacheDir: null };
+    return { path: entry.relativePath, cacheDir: null, eventsDirName: null };
   });
 
-  const applied = results.filter((result): result is { path: string; cacheDir: DirectoryHandleLike | null } => result !== null);
+  const applied = results.filter(
+    (result): result is { path: string; cacheDir: DirectoryHandleLike | null; eventsDirName: string | null } =>
+      result !== null
+  );
   params.restored.push(...applied.map((result) => result.path));
 
+  // DISTRIBUTION-SPECIFIC INVALIDATION, SCOPED TO ACTUAL DISTRIBUTION CHANGES.
+  //
+  // `cacheDir` is the PARENT of a `*.events/` directory — and both
+  // `distribution.events/` and `answers.events/` share that same parent
+  // (`getSampleMainDir`'s "1-main" folder), so a restore that changed ONLY
+  // `answers.events/` segments would, without this filter, still add that
+  // shared directory to `cacheDirs` below. `invalidateDistributionCaches` and
+  // `republishRestoredDistributionStamps` are DISTRIBUTION-only side effects
+  // (they delete `distribution.current.json`/`distribution.checkpoint.json`
+  // and re-mint `distribution.log.json`'s write token) — round 3's §8a fix
+  // generalized the cache-directory CAPTURE above to any `*.events/` suffix,
+  // but these two downstream consumers were never re-scoped to match, so an
+  // answers-only restore was silently forcing every client to refold and
+  // re-fetch distribution state it never touched, and broadcasting a
+  // "distribution changed" signal that was not true. Filtering to entries
+  // whose `eventsDirName` is specifically `DISTRIBUTION_EVENTS_DIR` restores
+  // the intended scope: only a restore that actually merged new distribution
+  // segment lines invalidates distribution's own derived cache. Answers has
+  // no persisted checkpoint to invalidate (Stage 2 keeps none — see
+  // `answerStorage.ts`'s module doc) and is picked up independently by the
+  // read-only bounded segment-size signature the sync tick already probes
+  // (§6 of the proposal), so no answers-side equivalent is needed here.
+  //
   // Handle identity is stable per directory across one walk (collectJsonRestoreEntries
   // hands every entry in a directory the same handle object), so a Set dedupes
   // to one invalidation per month rather than one per segment.
   const cacheDirs = new Set<DirectoryHandleLike>();
   for (const result of applied) {
-    if (result.cacheDir) cacheDirs.add(result.cacheDir);
+    if (result.cacheDir && result.eventsDirName === DISTRIBUTION_EVENTS_DIR) cacheDirs.add(result.cacheDir);
   }
   await invalidateDistributionCaches(cacheDirs);
   await republishRestoredDistributionStamps(cacheDirs);
