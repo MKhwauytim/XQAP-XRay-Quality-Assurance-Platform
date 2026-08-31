@@ -204,6 +204,31 @@ function rowStatusClass(
   return undefined;
 }
 
+/**
+ * Whether the immediate-replace flow may open for `entry`: the request's own
+ * owner, still pending (not yet replaced/completed/etc.), and — the UI
+ * safety net — no replacement request already outstanding for it.
+ * `appendReplacementRequest`'s non-recommended branch writes to the referral
+ * store, not a distribution event, so `entry.status` alone stays "pending"
+ * the whole time a request sits in the approval queue; checking
+ * `pendingReplacementIds` here is what actually catches that. Shared by
+ * `openReplacementDialog`'s own guard and the panel's `onReplace` render
+ * condition so the two can never drift apart.
+ */
+function canOpenReplacementDialog(
+  entry: DistributionEntry,
+  username: string,
+  canRequestReplacement: boolean,
+  pendingReplacementIds: Set<string>
+): boolean {
+  return (
+    canRequestReplacement
+    && entry.assignedTo === username
+    && entry.status === "pending"
+    && !pendingReplacementIds.has(entry.xrayImageId)
+  );
+}
+
 type BootSourceDescriptor = { key: string; labelEn: string; labelAr: string };
 
 /**
@@ -1549,10 +1574,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   }
 
   async function openReplacementDialog(entry: DistributionEntry): Promise<void> {
-    if (!canRequestReplacement) {
-      setStatusMsg({ type: "error", text: "لا تملك صلاحية طلب الاستبدال، أو أن مساحة العمل للقراءة فقط." });
-      return;
-    }
+    if (!canRequestReplacement) { setStatusMsg({ type: "error", text: "لا تملك صلاحية طلب الاستبدال، أو أن مساحة العمل للقراءة فقط." }); return; }
+    // pendingReplacementIds, not entry.status — see canOpenReplacementDialog's doc comment.
+    if (pendingReplacementIds.has(entry.xrayImageId)) { setStatusMsg({ type: "error", text: "يوجد طلب استبدال قيد الموافقة لهذه العينة بالفعل." }); return; }
     if (!selMonth) return;
     // Design B step 3: on the mirror fast path `loadData` reads neither
     // `sample.master.json` nor the workspace-wide derivation, so both are
@@ -2148,7 +2172,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                     handleSave(panelEntry.xrayImageId, ans, panelEntry.assignedTo)
                   }
                   onReplace={
-                    canRequestReplacement && panelEntry.assignedTo === username && panelEntry.status === "pending"
+                    canOpenReplacementDialog(panelEntry, username, canRequestReplacement, pendingReplacementIds)
                       ? openReplacementDialog
                       : undefined
                   }

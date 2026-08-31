@@ -722,32 +722,78 @@ export default function DataTable<TRow>({
   const colWidthPct = (c: DataTableCol<TRow>) =>
     `${((getColFr(c) / totalFr) * 100).toFixed(2)}%`;
   const stickyIdSet = useMemo(() => new Set(stickyColumnIds), [stickyColumnIds]);
-  const stickyMeta = useMemo(() => {
-    const meta = new Map<string, { rightPct: number; order: number }>();
-    // Accumulate over EVERY visible column (sticky or not) so a sticky column's
-    // offset reflects its true position from the RTL start edge. Skipping
-    // non-sticky columns here would understate the offset for any sticky
-    // column that isn't adjacent to the previous one, tearing it out of its
-    // table cell and leaving a gap in its place (LOG-04-style visual bug).
-    let cumulativePct = 0;
-    let order = 0;
+
+  // Stacking order only (z-index) -- NOT the offset. See the measured-offset
+  // block below for why the offset itself can no longer be derived from this
+  // percentage model.
+  const stickyOrder = useMemo(() => {
+    const order = new Map<string, number>();
+    let next = 0;
     for (const col of visibleCols) {
-      const colPct = (((colCfg.widths ?? {})[col.id] ?? col.widthFr ?? 1) / totalFr) * 100;
-      if (stickyIdSet.has(col.id)) {
-        meta.set(col.id, { rightPct: cumulativePct, order });
-        order += 1;
-      }
-      cumulativePct += colPct;
+      if (stickyIdSet.has(col.id)) { order.set(col.id, next); next += 1; }
     }
-    return meta;
-  }, [visibleCols, stickyIdSet, totalFr, colCfg.widths]);
+    return order;
+  }, [visibleCols, stickyIdSet]);
+
+  // Measured pixel offsets for sticky columns, keyed by column id.
+  //
+  // This USED to be computed from `colCfg.widths`/`widthFr` as a percentage of
+  // `totalFr` -- correct only if the table's rendered column widths are exactly
+  // proportional to those fr weights. `.dt-table` deliberately uses
+  // `table-layout: auto` (widthFr / manual resize are "preferences", not hard
+  // percentages -- see DataTable.css), so the browser sizes each column by its
+  // CONTENT, and the actual rendered width routinely diverges from the fr-based
+  // percentage. That divergence is invisible while it stays small, but a column
+  // reorder or an added/removed column changes what precedes a sticky column
+  // without changing that sticky column's own fr share -- so the percentage
+  // offset silently goes stale relative to the real DOM, and the sticky column
+  // renders on top of whatever now actually occupies that space (confirmed in a
+  // real Chromium session: two sticky header cells overlapping by 70+ px after
+  // dragging a single column ahead of them).
+  //
+  // The fix measures the ACTUAL rendered width of every visible header cell via
+  // refs and sums real pixels, not fr weights. `useLayoutEffect` (not
+  // `useEffect`) so this runs synchronously after the DOM commits and before
+  // the browser paints -- the user never sees an intermediate wrong offset.
+  const headerCellRefs = useRef(new Map<string, HTMLTableCellElement>());
+  const [stickyOffsetsPx, setStickyOffsetsPx] = useState<Record<string, number>>({});
+
+  function measureStickyOffsets(): void {
+    const next: Record<string, number> = {};
+    let cumulativePx = 0;
+    for (const col of visibleCols) {
+      if (stickyIdSet.has(col.id)) next[col.id] = cumulativePx;
+      cumulativePx += headerCellRefs.current.get(col.id)?.getBoundingClientRect().width ?? 0;
+    }
+    setStickyOffsetsPx(next);
+  }
+
+  // Reordering, adding/removing/hiding a column, or a manual/auto-fit width
+  // change all change what actually precedes a sticky column -- re-measure on
+  // every one of them. `colCfg.widths` covers manual resize and auto-fit;
+  // `visibleCols` covers order/visibility.
+  useLayoutEffect(() => {
+    measureStickyOffsets();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- measureStickyOffsets reads refs, not state/props
+  }, [visibleCols, colCfg.widths]);
+
+  // A pure viewport/container resize can reflow `table-layout: auto` widths
+  // without touching colCfg or visibleCols at all -- catch that case too.
+  useEffect(() => {
+    const el = tableWrapRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => measureStickyOffsets());
+    ro.observe(el);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- measureStickyOffsets reads refs, not state/props
+  }, []);
 
   function getStickyStyle(col: DataTableCol<TRow>, header: boolean): CSSProperties | undefined {
-    const meta = stickyMeta.get(col.id);
-    if (!meta) return undefined;
+    const order = stickyOrder.get(col.id);
+    if (order === undefined) return undefined;
     return {
-      right: `${meta.rightPct.toFixed(2)}%`,
-      zIndex: header ? 8 + meta.order : 3 + meta.order,
+      right: `${(stickyOffsetsPx[col.id] ?? 0).toFixed(2)}px`,
+      zIndex: header ? 8 + order : 3 + order,
     };
   }
 
@@ -959,8 +1005,12 @@ export default function DataTable<TRow>({
                 return (
                   <th
                     key={col.id}
+                    ref={(el) => {
+                      if (el) headerCellRefs.current.set(col.id, el);
+                      else headerCellRefs.current.delete(col.id);
+                    }}
                     scope="col"
-                    className={`dt-th${stickyMeta.has(col.id) ? " dt-sticky-col dt-sticky-head" : ""}${isNumeric ? " dt-th--numeric" : ""}`}
+                    className={`dt-th${stickyOrder.has(col.id) ? " dt-sticky-col dt-sticky-head" : ""}${isNumeric ? " dt-th--numeric" : ""}`}
                     style={{ minWidth: headerMinWidth(col), ...getStickyStyle(col, true) }}
                     draggable
                     onDragStart={() => handleDragStart(col.id)}
@@ -1096,7 +1146,7 @@ export default function DataTable<TRow>({
                       return (
                         <td
                           key={col.id}
-                          className={`dt-td${stickyMeta.has(col.id) ? " dt-sticky-col" : ""}${isNumeric ? " dt-td--numeric" : ""}`}
+                          className={`dt-td${stickyOrder.has(col.id) ? " dt-sticky-col" : ""}${isNumeric ? " dt-td--numeric" : ""}`}
                           style={getStickyStyle(col, false)}
                           title={String(col.accessor(row) ?? "")}
                         >

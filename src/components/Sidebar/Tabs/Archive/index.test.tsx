@@ -82,7 +82,14 @@ vi.mock("../../../../data/integrity/orphanScanLoader", () => ({
   runMonthIntegrityScan: vi.fn(),
 }));
 
+vi.mock("../../../../data/workspace/dataRefreshSignal", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../../data/workspace/dataRefreshSignal")>();
+  return { ...actual, broadcastDataRefresh: vi.fn() };
+});
+
 import ArchiveTab from "./index";
+import { broadcastDataRefresh } from "../../../../data/workspace/dataRefreshSignal";
 import {
   createBackup,
   loadArchiveStatus,
@@ -446,6 +453,37 @@ describe("Archive dialog error paths (item 1)", () => {
     });
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(vi.mocked(reopenMonth)).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Archive restore — cross-tab cache invalidation", () => {
+  it("broadcasts a full manual data-refresh after a successful restore, since a restore rewrites disk directly and bypasses every normal write path", async () => {
+    const historyItem = makeHistoryItem({ folderName: "2026-06-01T08-00-00-manual-ok" });
+    vi.mocked(loadBackupHistory).mockResolvedValue([historyItem]);
+    loginAs("admin");
+
+    renderArchiveTab();
+    fireEvent.click(await screen.findByRole("button", { name: "استعادة" }));
+
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("checkbox"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "متابعة التحقق" }));
+
+    const input = within(dialog).getByPlaceholderText(historyItem.folderName);
+    fireEvent.change(input, { target: { value: historyItem.folderName } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "استعادة الآن" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(restoreBackupSnapshot)).toHaveBeenCalledTimes(1);
+    });
+    // Every OTHER mounted view (distribution, referrals, answers, ...) has no
+    // other way to learn a restore just overwrote its data on disk — a
+    // restore is not a normal write, so nothing bumps an epoch or calls
+    // notifyLocalDataChange for it. "manual" is the same full-discard signal
+    // the admin toolbar's own refresh button sends.
+    await waitFor(() => {
+      expect(vi.mocked(broadcastDataRefresh)).toHaveBeenCalledWith("manual");
+    });
   });
 });
 

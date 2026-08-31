@@ -555,6 +555,38 @@ describe("XrayReferrals pending/resolved row coloring (Task 6)", () => {
     expect(row).toHaveClass("dt-tr--resolved");
     expect(row).not.toHaveClass("dt-tr--pending");
   });
+
+  it("hides the replace button once a replacement request is already outstanding for the row (UI safety net)", async () => {
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedAssignedSample(root, "emp-1");
+
+    // A filed-but-unapproved replacement request lives in the referral store,
+    // not as a distribution event — so `entry.status` stays "pending" even
+    // though a request already sits in the supervisor's queue for this row.
+    // Before this fix, that left the panel's replace button enabled, letting
+    // a second (immediate, "recommended") replace race the pending request.
+    const replacementResult = await appendReplacementRequest(root, MONTH, {
+      requestId: "rep-1",
+      monthFolderName: MONTH,
+      employeeUsername: "emp-1",
+      originalXrayImageId: "IMG-1",
+      replacementXrayImageId: "IMG-2",
+      reason: "blurry",
+      requestedAt: new Date().toISOString(),
+      requestedBy: "emp-1",
+      status: "pending",
+    });
+    if (!replacementResult.ok) throw new Error(`seed replacement failed: ${replacementResult.error}`);
+
+    render(<XrayReferrals directoryHandle={root} />);
+
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getByRole("button", { name: "تقديم الفحص" })).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "طلب استبدال" })).not.toBeInTheDocument();
+  });
 });
 
 describe("XrayReferrals post-success reloads (Bug 1 regression)", () => {

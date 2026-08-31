@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup, act } from "@testing-library/react";
+import { render, screen, within, fireEvent, waitFor, cleanup, act } from "@testing-library/react";
 import AuthGate from "./AuthGate";
 import * as userManagement from "./userManagement";
 import * as authSession from "./authSession";
@@ -268,6 +268,72 @@ describe("AuthGate — bootstrap admin through the normal sign-in form", () => {
     });
     expect(screen.queryByText("authenticated")).not.toBeInTheDocument();
     expect(verify).not.toHaveBeenCalled();
+  });
+});
+
+describe("AuthGate — hidden admin-shortcut modal shares the normal form's lockout", () => {
+  const SEED_USER: userManagement.ManagedLoginUser = {
+    id: "u1", username: "testuser", displayName: "Test", role: "employee",
+    passwordHash: { algorithm: "argon2id", encoded: "x" },
+    isActive: true, hasCertScanLicense: false,
+    createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+  };
+
+  beforeEach(() => {
+    vi.spyOn(userManagement, "getManagedLoginUsers").mockReturnValue([SEED_USER]);
+  });
+
+  function openHiddenAdminModal(): void {
+    fireEvent.keyDown(document, { key: "a", altKey: true });
+    fireEvent.keyDown(document, { key: "t", altKey: true });
+  }
+
+  function submitAdminModal(passcode: string): void {
+    // Scoped to the modal dialog -- the login form behind it stays mounted
+    // and has its own "دخول" submit button and password field.
+    const modal = screen.getByRole("dialog", { name: "دخول مسؤول النظام" });
+    fireEvent.change(within(modal).getByLabelText("رمز مسؤول النظام"), { target: { value: passcode } });
+    fireEvent.click(within(modal).getByRole("button", { name: /دخول|يُرجى الانتظار/ }));
+  }
+
+  it("locks out after 3 wrong passcodes through the modal, same as the normal form", async () => {
+    // verifyPasswordWithLayoutFallback tries up to 2 keyboard-layout candidates
+    // per attempt, so the mock's call count isn't 1:1 with attempts -- assert
+    // on the observable lockout state instead (LOCKOUT_AFTER_ATTEMPTS = 3).
+    const verify = vi.spyOn(passwordCrypto, "verifyPasswordHash").mockResolvedValue(false);
+
+    renderAuthGate();
+    openHiddenAdminModal();
+    const modal = await screen.findByRole("dialog", { name: "دخول مسؤول النظام" });
+
+    for (let i = 0; i < 3; i += 1) {
+      submitAdminModal("wrong");
+      await waitFor(() => expect(verify.mock.calls.length).toBeGreaterThan(i * 2));
+    }
+    const callsAfterThreeAttempts = verify.mock.calls.length;
+
+    // A 4th attempt while locked out must not even check the passcode. Before
+    // this fix, this button had no lockout wiring at all and would happily
+    // call verifyPasswordHash again with no limit.
+    submitAdminModal("wrong-again");
+    await waitFor(() => {
+      expect(within(modal).getByRole("button", { name: /يُرجى الانتظار/ })).toBeDisabled();
+    });
+    expect(verify.mock.calls.length).toBe(callsAfterThreeAttempts);
+  });
+
+  it("still signs in with the correct passcode and resets the shared counter", async () => {
+    const verify = vi.spyOn(passwordCrypto, "verifyPasswordHash").mockResolvedValue(true);
+
+    renderAuthGate();
+    openHiddenAdminModal();
+    expect(await screen.findByRole("dialog", { name: "دخول مسؤول النظام" })).toBeInTheDocument();
+    submitAdminModal("admin");
+
+    await waitFor(() => {
+      expect(screen.getByText("authenticated")).toBeInTheDocument();
+    });
+    expect(verify).toHaveBeenCalledWith("admin", userManagement.resolveAdminPasswordHash());
   });
 });
 
