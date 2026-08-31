@@ -1,0 +1,176 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   قيود المنافذ — per-employee port eligibility modal (Phase 4 matrix).
+   Colours/spacing come from src/index.css + primitives.css tokens only (raw
+   #hex literals are a CI gate failure). RTL is the default.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.prm-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(11, 31, 51, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-5);
+  z-index: var(--z-modal);
+}
+
+.prm-modal {
+  background: var(--c-surface);
+  border-radius: var(--r-xl);
+  box-shadow: var(--sh-lg, var(--sh-sm));
+  width: 100%;
+  max-width: 520px;
+  max-height: min(84vh, 720px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.prm-head {
+  padding: var(--sp-5) var(--sp-5) var(--sp-4);
+  border-bottom: 1px solid var(--c-border);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.prm-head h3 {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-bold);
+  color: var(--c-ink);
+}
+.prm-sub {
+  margin: 3px 0 0;
+  font-size: var(--fs-xs);
+  color: var(--c-ink-3);
+}
+.prm-close {
+  border: none;
+  background: var(--c-surface-2);
+  color: var(--c-ink-3);
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-pill);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.prm-close:hover { background: var(--c-border); color: var(--c-ink); }
+.prm-close:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+.prm-status {
+  margin: var(--sp-4) var(--sp-5) 0;
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  font-size: var(--fs-sm);
+}
+.prm-status.unrestricted {
+  background: var(--c-success-bg);
+  color: var(--c-success);
+  border: 1px solid var(--c-success-border);
+}
+.prm-status.restricted {
+  background: var(--c-sky-light);
+  color: var(--c-sky-text);
+  border: 1px solid var(--c-sky-soft, var(--c-border-2));
+}
+
+.prm-body {
+  overflow-y: auto;
+  padding: var(--sp-4) var(--sp-5);
+  flex: 1 1 auto;
+}
+.prm-empty {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+
+.prm-cat-block + .prm-cat-block { margin-top: var(--sp-4); }
+.prm-cat-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--c-border);
+}
+.prm-cat-head label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  flex: 1;
+  color: var(--c-ink);
+}
+.prm-cat-count {
+  font-size: var(--fs-2xs);
+  color: var(--c-ink-3);
+  font-weight: var(--fw-semibold);
+}
+
+.prm-port-list { list-style: none; margin: 0; padding: 0; }
+.prm-port-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 8px 4px 8px var(--sp-5);
+  border-bottom: 1px solid var(--c-surface-2);
+}
+.prm-port-row:last-child { border-bottom: none; }
+.prm-port-row label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  flex: 1;
+  color: var(--c-ink-2);
+}
+.prm-port-count { font-size: var(--fs-2xs); color: var(--c-ink-4); }
+
+.prm-foot {
+  padding: var(--sp-4) var(--sp-5);
+  border-top: 1px solid var(--c-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.prm-foot-actions { display: flex; gap: 8px; }
+
+.prm-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  padding: 9px 16px;
+  min-height: 38px;
+  font-family: inherit;
+}
+.prm-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.prm-btn-primary {
+  background: var(--sky-gradient, var(--c-sky));
+  border-color: var(--c-sky);
+  color: #FFFFFF;
+}
+.prm-btn-primary:hover { background: var(--c-sky-2); border-color: var(--c-sky-2); }
+.prm-btn-ghost {
+  background: transparent;
+  color: var(--c-ink-2);
+  border-color: var(--c-border-2);
+}
+.prm-btn-ghost:hover { background: var(--c-surface-2); }
+.prm-btn-danger-ghost {
+  background: transparent;
+  color: var(--c-danger);
+  border-color: var(--c-danger-border);
+}
+.prm-btn-danger-ghost:hover { background: var(--c-danger-bg); }

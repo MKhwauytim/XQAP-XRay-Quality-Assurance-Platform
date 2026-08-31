@@ -332,6 +332,34 @@
   color: var(--c-ink-4);
 }
 
+/* Click-through to قيود المنافذ (PortRestrictionsModal). */
+.p4-expert-name-btn {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: start;
+  border-bottom: 1px dashed var(--c-sky-soft, var(--c-border-2));
+}
+.p4-expert-name-btn:hover strong { color: var(--c-sky-2); }
+.p4-expert-name-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+.p4-port-badge {
+  display: inline-flex;
+  align-self: flex-start;
+  margin-top: 3px;
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-bold);
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.p4-port-badge.all { background: var(--c-success-bg); border-color: var(--c-success-border); color: var(--c-success); }
+.p4-port-badge.partial { background: var(--c-sky-light); border-color: var(--c-sky-soft, var(--c-border-2)); color: var(--c-sky-text); }
+.p4-port-badge.none { background: var(--c-danger-bg); border-color: var(--c-danger-border); color: var(--c-danger); }
+
 .p4-matrix-input {
   height: 32px;
   padding: 0 8px;

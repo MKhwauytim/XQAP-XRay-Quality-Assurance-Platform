@@ -570,6 +570,7 @@ export default function PopulationTab() {
     currentRole: sessionRef.current?.role ?? "unknown",
     onDistributionChanged: () => setMonthRefreshKey((k) => k + 1),
     refreshGlobalMonths: refreshMonths,
+    portRestrictions: config.employeePortRestrictions,
   });
 
   const [uploadError, setUploadError] = useState("");
