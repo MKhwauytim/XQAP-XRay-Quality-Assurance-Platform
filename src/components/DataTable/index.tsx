@@ -632,15 +632,38 @@ export default function DataTable<TRow>({
   const bottomPad   = Math.max(0, (pageRows.length - visEnd) * VROW_H);
 
   // Unique values for the currently-open multiselect dropdown.
-  // Computed from the rows currently visible after search and active filters.
+  // Computed from the rows visible after search and every OTHER active column
+  // filter — but never this column's own filter. `filteredRows` already has
+  // the open column's filter applied, so building options from it would show
+  // only the values the CURRENT selection already matches: once a value was
+  // picked, every other value that ever existed in the column would silently
+  // disappear from its own dropdown, making the filter look hardcoded to
+  // whatever was last chosen instead of reflecting the column's real data.
+  // Mirrors the same exclusion BrowseDataView's worker-path filter-preview
+  // already applies (`filtersExceptOpenColumn`).
   const openColOptions = useMemo<string[]>(() => {
     if (!openFilterCol) return [];
     const col = visibleCols.find((c) => c.id === openFilterCol);
     if (!col) return [];
+    const hasOtherFilters = Object.entries(filters).some(
+      ([id, f]) => id !== openFilterCol && !isFilterEmpty(f)
+    );
+    const rowsForOptions = hasOtherFilters
+      ? searchFilteredRows.filter((row) =>
+          visibleCols.every((c) => {
+            if (c.id === openFilterCol) return true;
+            const f = filters[c.id];
+            if (!f || isFilterEmpty(f)) return true;
+            const custom = rowMatchesFilter?.(row, c.id, f);
+            if (custom !== null && custom !== undefined) return custom;
+            return defaultRowMatchesFilter(row, c, f, detectedDates);
+          })
+        )
+      : searchFilteredRows;
     return Array.from(
-      new Set(filteredRows.map((row) => (col.accessor as (r: unknown) => string | null)(row) ?? "").filter(Boolean))
+      new Set(rowsForOptions.map((row) => (col.accessor as (r: unknown) => string | null)(row) ?? "").filter(Boolean))
     ).sort(compareFilterOptions);
-  }, [openFilterCol, visibleCols, filteredRows]);
+  }, [openFilterCol, visibleCols, searchFilteredRows, filters, rowMatchesFilter, detectedDates]);
 
   // Column drag-to-reorder
   function handleDragStart(id: string): void { dragColRef.current = id; }
