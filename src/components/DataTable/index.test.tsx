@@ -105,6 +105,24 @@ describe("DataTable — RTL render + interactions (characterization)", () => {
     expect(screen.getByText("خالد")).toBeInTheDocument();
   });
 
+  it("keeps every other value in a column's own filter dropdown after picking one (regression: options must not collapse to the current selection)", async () => {
+    renderTable();
+    fireEvent.click(screen.getByTitle("تصفية: المنفذ"));
+    const jeddahOption = await screen.findByRole("checkbox", { name: "جدة" });
+    fireEvent.click(jeddahOption);
+    await waitFor(() => expect(screen.queryByText("سالم")).not.toBeInTheDocument());
+
+    // The multiselect menu stays open after a check (so multiple values can be
+    // picked in one pass) — its own filter is now active while it's still open.
+    // "الدمام" must still be offered — it exists in the underlying data, even
+    // though no currently-visible row carries it (the port filter itself
+    // hides all الدمام rows). Building the option list from the already-
+    // filtered rows would silently drop it, making the dropdown look
+    // hardcoded to whatever was last picked.
+    expect(await screen.findByRole("checkbox", { name: "الدمام" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "جدة" })).toBeInTheDocument();
+  });
+
   it("hides a column via the column-visibility picker", async () => {
     renderTable();
     // The note value only appears in a table cell (not in the picker, which shows the label).

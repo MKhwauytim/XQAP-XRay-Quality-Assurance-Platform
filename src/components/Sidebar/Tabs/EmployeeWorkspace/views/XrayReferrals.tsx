@@ -1956,10 +1956,12 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         />
       </PageHeader>
 
+      {/* Scoped to the DataTable's currently filtered rows (not `allEntries`), so
+          export/bulk-reopen act only on what the applied filters show. */}
       <PendingCorrections
         directoryHandle={directoryHandle}
         monthFolderName={selMonth}
-        entries={allEntries}
+        entries={filteredTableEntries}
         answersMap={answersMap}
         template={activeTpl}
         username={username}
