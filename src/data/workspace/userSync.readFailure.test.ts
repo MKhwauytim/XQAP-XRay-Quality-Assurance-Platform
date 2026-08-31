@@ -105,21 +105,24 @@ beforeEach(() => {
 });
 
 describe("syncUserManagementToDisk — an unreadable identity file is not an absent one", () => {
-  it("aborts the cycle on a transient read failure instead of resetting the revision counter", async () => {
+  // `readJsonFile` (fileSystemAccess.ts) now retries a transient NotReadableError
+  // on this exact read — closing the XQ-FS-014/XQ-WS-013 gap where a single SMB
+  // blip on `users.permissions.json`, hit on every 45s sync tick, surfaced with
+  // zero retries even though the same fault class was already retried everywhere
+  // safeWrite.ts reads. A ONE-shot blip is therefore no longer this test's
+  // boundary case — see the "single blip" test below for that regression — but a
+  // PERSISTENT failure (one that outlasts the retry budget) must still abort the
+  // cycle rather than being read as absence and silently resetting the revision
+  // counter, which is what this test now pins.
+  it("aborts the cycle on a PERSISTENT read failure instead of resetting the revision counter", async () => {
     const root = await seedWorkspace();
 
-    // ONE getFile() of users.permissions.json fails with a transient
-    // NotReadableError — the SMB/antivirus window readJsonFile reports as
-    // `read_failed` (it deliberately does NOT fall back to .bak/.tmp for it),
-    // and the very next read succeeds. That single blip is the whole defect:
-    // it is short enough that the WRITE that follows lands perfectly, which is
-    // exactly how a revision-42 file got overwritten as revision 1.
     setSimulatedFaults(root, [
       {
         operation: "getFile",
         name: WORKSPACE_FILE_NAMES.usersPermissions,
         errorName: "NotReadableError",
-        times: 1,
+        times: Number.POSITIVE_INFINITY,
       },
     ]);
 
@@ -133,6 +136,30 @@ describe("syncUserManagementToDisk — an unreadable identity file is not an abs
     expect(onDisk.metadata.createdBy).toBe("founder");
     expect(onDisk.metadata.updatedBy).toBe("founder");
     expect(onDisk.data.users.map((user) => user.username)).toEqual(["settled"]);
+  });
+
+  it("rides out a single transient NotReadableError blip and completes normally (XQ-FS-014/XQ-WS-013 regression)", async () => {
+    const root = await seedWorkspace();
+
+    // ONE getFile() of users.permissions.json fails with a transient
+    // NotReadableError, and the very next read succeeds — the exact shape of
+    // the production log entries this fix targets. This must no longer abort
+    // the sync at all.
+    setSimulatedFaults(root, [
+      {
+        operation: "getFile",
+        name: WORKSPACE_FILE_NAMES.usersPermissions,
+        errorName: "NotReadableError",
+        times: 1,
+      },
+    ]);
+
+    await syncUserManagementToDisk(root, STATE, "admin");
+
+    clearSimulatedFaults(root);
+    const onDisk = await readUsersFile(root);
+    expect(onDisk.metadata.revision).toBe(43);
+    expect(onDisk.data.users.map((user) => user.username)).toEqual(["incoming"]);
   });
 
   it("aborts on a permission-denied read without seeding a replacement file", async () => {

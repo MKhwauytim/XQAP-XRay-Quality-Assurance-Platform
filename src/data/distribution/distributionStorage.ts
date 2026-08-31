@@ -38,7 +38,7 @@ import {
   sortDistributionEventsForFold,
 } from "./distributionEventStore";
 import { dedupeInFlight, workspaceScopeId, bumpWorkspaceEpoch, workspaceEpoch } from "../storage/inFlightReads";
-import { isNotFoundError } from "../storage/transientFileErrors";
+import { isNotFoundError, waitFor } from "../storage/transientFileErrors";
 
 const LOG_FILE = "distribution.log.json";
 const CURRENT_FILE = "distribution.current.json";
@@ -746,6 +746,14 @@ export async function saveDistributionCurrent(
 }
 
 /**
+ * How long to wait before `loadFoldCheckpoint` re-reads a mismatched pair to
+ * decide whether it is worth logging — see `mismatchClearsOnReread`. Sized to
+ * span a typical `saveDistributionCurrent` two-step write (cache commit, then
+ * sidecar commit), not to outlast a genuine divergence.
+ */
+const CHECKPOINT_MISMATCH_REREAD_DELAY_MS = 150;
+
+/**
  * Read the fold-checkpoint for `cached`, from the sidecar when present and from
  * a legacy inline `foldCheckpoint` otherwise (dual-read: workspaces written
  * before v85 still have it inside `distribution.current.json`, and nothing
@@ -758,6 +766,18 @@ export async function saveDistributionCurrent(
  * entries it is being folded onto silently swallows every event in between.
  * Rejecting costs one full refold; accepting loses data. A mismatch is recorded
  * rather than swallowed, since it is not expected on a healthy workspace.
+ *
+ * The fold decision below (return the legacy `cached.foldCheckpoint`, forcing a
+ * full refold) is UNCONDITIONAL on any mismatch and stays that way — nothing in
+ * `mismatchClearsOnReread` ever short-circuits it, and it never sees `cached`
+ * refreshed. That call only decides whether the mismatch is worth a
+ * `logError`: `saveDistributionCurrent` writes the cache and its sidecar as
+ * two separate, non-atomic commits, and a reader landing between them (a
+ * real, observed pattern: 560 of these log lines across 5 days in one
+ * production workspace) sees a same-write-cycle divergence that a fresh
+ * re-read a moment later already resolves. Logging that as an error every
+ * time drowns out the rarer case worth investigating — a checkpoint that is
+ * STILL wrong a beat later, which still logs exactly as before.
  */
 async function loadFoldCheckpoint(
   directoryHandle: DirectoryHandleLike,
@@ -774,14 +794,54 @@ async function loadFoldCheckpoint(
   }
   if (sidecar) {
     if (sidecar.eventSetId !== undefined && sidecar.eventSetId === cached.eventSetId) return sidecar;
-    logError(
-      "distribution:checkpoint-mismatch",
-      new Error(
-        `${monthFolderName}: ${DISTRIBUTION_CHECKPOINT_FILE} eventSetId ${sidecar.eventSetId ?? "<absent>"} does not match ${CURRENT_FILE} ${cached.eventSetId ?? "<absent>"} — refolding`
-      )
-    );
+    const settled = await mismatchClearsOnReread(directoryHandle, monthFolderName, cached.eventSetId);
+    if (!settled) {
+      logError(
+        "distribution:checkpoint-mismatch",
+        new Error(
+          `${monthFolderName}: ${DISTRIBUTION_CHECKPOINT_FILE} eventSetId ${sidecar.eventSetId ?? "<absent>"} does not match ${CURRENT_FILE} ${cached.eventSetId ?? "<absent>"} — refolding`
+        )
+      );
+    }
   }
   return cached.foldCheckpoint;
+}
+
+/**
+ * Is this mismatch against `cachedEventSetId` (the caller's ALREADY-CAPTURED
+ * `cached.eventSetId`, never refreshed here) a passing artifact of
+ * `saveDistributionCurrent`'s two-file, non-atomic write, rather than a
+ * genuine divergence worth an error log entry?
+ *
+ * `saveDistributionCurrent` writes the cache first, the sidecar second, both
+ * stamped with the SAME `eventSetId` per write cycle. A reader whose `cached`
+ * read lands after the cache commit but before the sidecar commit sees a
+ * sidecar that has not caught up YET — not a sidecar that is wrong. Waiting
+ * one short beat and re-reading ONLY the sidecar answers exactly that
+ * question: has it since become the value the caller is already holding?
+ *
+ * Deliberately does NOT re-read `distribution.current.json`: `cached` is
+ * fixed for the rest of this call regardless (the fold decision below is
+ * unconditional either way — see `loadFoldCheckpoint`'s own doc comment), so
+ * the only fact worth re-establishing is whether the sidecar now agrees with
+ * the value already in hand. If `cached` itself is the stale side of a since-
+ * completed LATER write cycle, the sidecar will have moved past it and this
+ * still correctly returns false — the mismatch is logged, exactly as before.
+ */
+async function mismatchClearsOnReread(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  cachedEventSetId: string | undefined
+): Promise<boolean> {
+  if (cachedEventSetId === undefined) return false;
+  await waitFor(CHECKPOINT_MISMATCH_REREAD_DELAY_MS);
+  try {
+    const dir = await getDistributionDir(directoryHandle, monthFolderName, false);
+    const result = await safeReadJson<DistributionFoldCheckpoint>(dir, DISTRIBUTION_CHECKPOINT_FILE);
+    return result.ok && result.value.eventSetId === cachedEventSetId;
+  } catch {
+    return false;
+  }
 }
 
 async function loadDistributionCurrent(
