@@ -621,6 +621,11 @@ export default function AuthGate({ children }: AuthGateProps) {
   }
 
   async function loginAsBootstrapAdmin(): Promise<void> {
+    // Same secret as loginAsEmployee's bootstrap-admin branch, so it shares
+    // that path's lockout: unguarded, this hidden modal was a second way to
+    // brute-force the admin passcode with no attempt limit at all.
+    if (lockoutUntil !== null && Date.now() < lockoutUntil) return;
+
     const isPasscodeValid = await verifyPasswordWithLayoutFallback(
       adminPasscode,
       // The workspace's own admin passcode once one has been set in Settings,
@@ -629,6 +634,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     ) !== null;
 
     if (!isPasscodeValid) {
+      registerFailedAttempt();
       showMessage(codedMessage("XQ-AUTH-003"), "bad");
       return;
     }
@@ -639,6 +645,8 @@ export default function AuthGate({ children }: AuthGateProps) {
 
     setAdminPasscode("");
     setIsAdminModalOpen(false);
+    setFailedAttempts(0);
+    setLockoutUntil(null);
     showMessage("", "");
   }
 
@@ -938,6 +946,7 @@ export default function AuthGate({ children }: AuthGateProps) {
               onChange={(event) => setAdminPasscode(event.target.value)}
               onKeyDown={handleAdminModalKeyDown}
               placeholder={labels.auth_admin_passcode_placeholder}
+              disabled={lockoutUntil !== null && lockoutSecondsLeft > 0}
             />
 
             <div className="auth-modal-actions">
@@ -952,8 +961,11 @@ export default function AuthGate({ children }: AuthGateProps) {
               <button
                 type="button"
                 onClick={() => void loginAsBootstrapAdmin()}
+                disabled={lockoutUntil !== null && lockoutSecondsLeft > 0}
               >
-                دخول
+                {lockoutUntil !== null && lockoutSecondsLeft > 0
+                  ? labels.auth_lockout_wait.replace("{seconds}", String(lockoutSecondsLeft))
+                  : "دخول"}
               </button>
             </div>
           </section>

@@ -38,6 +38,7 @@ import { getUserDataRoot } from "../../../../data/workspace/workspacePaths";
 import type { UsersPermissionsFile } from "../../../../data/workspace/workspaceTypes";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import { useGlobalMonth } from "../../../../data/month/useGlobalMonth";
+import { broadcastDataRefresh } from "../../../../data/workspace/dataRefreshSignal";
 import { formatDateTime, formatNumber } from "../../../../utils/formatting";
 import type { SidebarTabModule } from "../tabTypes";
 import "./Archive.css";
@@ -308,6 +309,18 @@ export default function ArchiveTab() {
           text: `تمت الاستعادة من ${folderName}. تم إنشاء نسخة رجوع قبل الاستعادة: ${result.rollbackFolderName}`,
         });
         await refresh();
+        // A restore overwrites live months directly on disk, bypassing every
+        // normal write path (no writer bumps its epoch, no notifyLocalDataChange
+        // fires) — so every OTHER mounted view (distribution, referrals,
+        // answers, ...) would otherwise keep showing pre-restore state until
+        // the next 45s sync tick, and even that tick's bounded-signature probe
+        // is not guaranteed to catch every family a restore can touch (e.g.
+        // answers.events, which has no persisted checkpoint of its own — see
+        // backupStorage.ts's restore-scope comment). "manual" is the same
+        // full-cache-discard signal the admin toolbar's refresh button sends,
+        // which is the correct scope for the single most consequential
+        // operation in the app.
+        broadcastDataRefresh("manual");
       } else {
         // Item 1: see the matching comment in handleMonthLockConfirm — the
         // restore dialog also stays open on failure and sits under the same
