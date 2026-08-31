@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { PreparedPopulationRow } from "../population/populationTypes";
-import type { EmployeeStageAllocation } from "../population/populationConfig";
+import type { EmployeeStageAllocation, EmployeePortRestriction } from "../population/populationConfig";
 import type { ManagedLoginUser } from "../../auth/userManagement";
 import type { PasswordHashRecord } from "../../auth/passwordCrypto";
 import type { DistributionEntry } from "./distributionTypes";
@@ -25,10 +25,15 @@ function makeUser(
   };
 }
 
-function makeRow(id: string, stage: string, cert: "Certscan" | "NonCertscan"): PreparedPopulationRow {
+function makeRow(
+  id: string,
+  stage: string,
+  cert: "Certscan" | "NonCertscan",
+  portName = "المنفذ"
+): PreparedPopulationRow {
   return {
     xrayImageId: id,
-    portName: "المنفذ",
+    portName,
     certScanStatus: cert,
     stage,
     xrayEntryDate: null,
@@ -366,4 +371,125 @@ test("calculateBulkAssignment counts an already-assigned unmappable row as skipp
   // Already owned — it is not waiting to be distributed, so warning about it
   // would send the operator chasing a row that is fine.
   expect(result.unmapped.count).toBe(0);
+});
+
+// ── Port eligibility ─────────────────────────────────────────────────────
+//
+// An employee can be restricted to a subset of ports. When NO employee has any
+// restriction configured, behavior must be byte-for-byte identical to before
+// this feature existed (every test above this section proves that, since none
+// of them pass `portRestrictions`). These tests cover what changes once a
+// restriction is actually in play.
+
+test("calculateBulkAssignment only assigns a port's rows to employees eligible for that port", () => {
+  const rows = [
+    makeRow("img-jed-1", "SECOND_STAGE", "NonCertscan", "ميناء جدة"),
+    makeRow("img-jed-2", "SECOND_STAGE", "NonCertscan", "ميناء جدة"),
+    makeRow("img-dam-1", "SECOND_STAGE", "NonCertscan", "ميناء الدمام"),
+    makeRow("img-dam-2", "SECOND_STAGE", "NonCertscan", "ميناء الدمام"),
+  ];
+  const allocations: EmployeeStageAllocation[] = [
+    // "open" listed first: with no port filtering, the assignment loop would
+    // hand "open" the first two rows in array order (Jeddah) and "restricted"
+    // the rest (Dammam) — the opposite of what this test checks for — so a
+    // regression that drops port filtering cannot pass by row-order coincidence.
+    { username: "open", stageKey: "second", method: "percentage", value: 50, isActive: true },
+    { username: "restricted", stageKey: "second", method: "percentage", value: 50, isActive: true },
+  ];
+  const employees = [makeUser("restricted", "employee"), makeUser("open", "employee")];
+  const portRestrictions: EmployeePortRestriction[] = [
+    { username: "restricted", restricted: true, enabledPorts: ["ميناء جدة"] },
+  ];
+
+  const result = calculateBulkAssignment({
+    rows,
+    allocations,
+    employees,
+    operatorUsername: "test",
+    portRestrictions,
+  });
+
+  expect(result.errors).toHaveLength(0);
+  const damEvents = result.events.filter((e) => e.xrayImageId.startsWith("img-dam"));
+  expect(damEvents.every((e) => e.assignedTo === "open")).toBe(true);
+  // The restricted employee may still receive Jeddah rows.
+  const jedEvents = result.events.filter((e) => e.xrayImageId.startsWith("img-jed"));
+  expect(jedEvents.length).toBeGreaterThan(0);
+});
+
+test("calculateBulkAssignment reports an error and leaves a port's rows unassigned when nobody is eligible for it", () => {
+  const rows = [
+    makeRow("img-jed-1", "SECOND_STAGE", "NonCertscan", "ميناء جدة"),
+    makeRow("img-dam-1", "SECOND_STAGE", "NonCertscan", "ميناء الدمام"),
+  ];
+  const allocations: EmployeeStageAllocation[] = [
+    { username: "restricted", stageKey: "second", method: "percentage", value: 100, isActive: true },
+  ];
+  const employees = [makeUser("restricted", "employee")];
+  const portRestrictions: EmployeePortRestriction[] = [
+    { username: "restricted", restricted: true, enabledPorts: ["ميناء جدة"] },
+  ];
+
+  const result = calculateBulkAssignment({
+    rows,
+    allocations,
+    employees,
+    operatorUsername: "test",
+    portRestrictions,
+  });
+
+  expect(result.events.map((e) => e.xrayImageId)).toEqual(["img-jed-1"]);
+  expect(result.errors).toHaveLength(1);
+  expect(result.errors[0]).toContain("ميناء الدمام");
+});
+
+test("calculateBulkAssignment applies the CertScan-license rule within each port's eligible group", () => {
+  const rows = [makeRow("img-dam-c1", "SECOND_STAGE", "Certscan", "ميناء الدمام")];
+  const allocations: EmployeeStageAllocation[] = [
+    { username: "licensed-elsewhere", stageKey: "second", method: "percentage", value: 100, isActive: true },
+  ];
+  // Licensed for CertScan, but restricted to a different port than the CertScan row.
+  const employees = [makeUser("licensed-elsewhere", "employee", true)];
+  const portRestrictions: EmployeePortRestriction[] = [
+    { username: "licensed-elsewhere", restricted: true, enabledPorts: ["ميناء جدة"] },
+  ];
+
+  const result = calculateBulkAssignment({
+    rows,
+    allocations,
+    employees,
+    operatorUsername: "test",
+    portRestrictions,
+  });
+
+  expect(result.events).toHaveLength(0);
+  expect(result.errors).toHaveLength(1);
+  expect(result.errors[0]).toContain("ميناء الدمام");
+});
+
+test("calculateBulkAssignment with an empty portRestrictions list behaves exactly like omitting it", () => {
+  const rows = [
+    makeRow("img-1", "SECOND_STAGE", "NonCertscan", "ميناء جدة"),
+    makeRow("img-2", "SECOND_STAGE", "NonCertscan", "ميناء الدمام"),
+  ];
+  const allocations: EmployeeStageAllocation[] = [
+    { username: "emp", stageKey: "second", method: "percentage", value: 100, isActive: true },
+  ];
+  const employees = [makeUser("emp", "employee")];
+
+  const withoutParam = calculateBulkAssignment({ rows, allocations, employees, operatorUsername: "test" });
+  const withEmptyList = calculateBulkAssignment({
+    rows,
+    allocations,
+    employees,
+    operatorUsername: "test",
+    portRestrictions: [],
+  });
+
+  // eventId is a fresh random UUID per call, so compare the meaningful shape
+  // rather than raw event objects.
+  const projection = (events: typeof withoutParam.events) =>
+    events.map((e) => ({ xrayImageId: e.xrayImageId, assignedTo: e.assignedTo, notes: e.notes }));
+  expect(projection(withEmptyList.events)).toEqual(projection(withoutParam.events));
+  expect(withEmptyList.errors).toEqual(withoutParam.errors);
 });

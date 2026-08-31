@@ -29,6 +29,42 @@ describe("DEFAULT_SAMPLING_RULES — no silent floor on new configs", () => {
   });
 });
 
+// New employee-port-restriction field: every existing/legacy config.json on
+// disk predates this key, so a missing key must default to [] (unrestricted
+// for everyone) rather than throwing or dropping other fields.
+describe("PopulationConfig — employeePortRestrictions default", () => {
+  it("defaults to [] on the built-in DEFAULT_POPULATION_CONFIG", () => {
+    expect(DEFAULT_POPULATION_CONFIG.employeePortRestrictions).toEqual([]);
+  });
+
+  it("defaults to [] when loading a legacy config.json that predates the field", async () => {
+    const root = makeRoot();
+    // Simulate a legacy config.json saved before employeePortRestrictions existed.
+    const legacyConfig = { ...DEFAULT_POPULATION_CONFIG } as Record<string, unknown>;
+    delete legacyConfig.employeePortRestrictions;
+    await savePopulationConfig(root, legacyConfig as unknown as typeof DEFAULT_POPULATION_CONFIG);
+
+    const loaded = await loadPopulationConfig(root);
+    expect(loaded.employeePortRestrictions).toEqual([]);
+  });
+
+  it("round-trips a saved employeePortRestrictions list", async () => {
+    const root = makeRoot();
+    const config = {
+      ...DEFAULT_POPULATION_CONFIG,
+      employeePortRestrictions: [
+        { username: "f.otaibi", restricted: true, enabledPorts: ["jeddah_islamic", "dammam"] },
+      ],
+    };
+    await savePopulationConfig(root, config);
+
+    const loaded = await loadPopulationConfig(root);
+    expect(loaded.employeePortRestrictions).toEqual([
+      { username: "f.otaibi", restricted: true, enabledPorts: ["jeddah_islamic", "dammam"] },
+    ]);
+  });
+});
+
 describe("populationConfig — CAS-protected save", () => {
   it("saves and reloads a config", async () => {
     const root = makeRoot();

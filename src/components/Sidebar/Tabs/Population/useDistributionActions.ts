@@ -32,7 +32,9 @@ import { logError, logRejection } from "../../../../data/storage/errorLogger";
 import { userFacingErrorText } from "../../../../data/storage/writeErrorText";
 import { appendWorkspaceAction, recordAction } from "../../../../data/audit/actionLog";
 import { buildAssignedEntryMap, distributionErrorText } from "./populationWorkflowHelpers";
-import { findAssignableEmployee } from "../../../../data/distribution/bulkAssignment";
+import { findAssignableEmployeeForPort } from "../../../../data/distribution/bulkAssignment";
+import { normalizePortName } from "../../../../data/distribution/portEligibility";
+import type { EmployeePortRestriction } from "../../../../data/population/populationConfig";
 import { getManagedLoginUsers } from "../../../../auth/userManagement";
 
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
@@ -90,6 +92,10 @@ export function useDistributionActions(params: {
   /** Owner requirement: bumps the global-month lock-check tick so `isSelectedMonthClosed`
    *  reflects an auto-lock immediately instead of waiting for the 30s TTL/next navigation. */
   refreshGlobalMonths?: () => Promise<void>;
+  /** Per-employee port restrictions (config.employeePortRestrictions), re-checked
+   *  at manual assign/reassign time the same way findAssignableEmployee already
+   *  re-checks active+assignable-role (audit finding 6). Defaults to none. */
+  portRestrictions?: EmployeePortRestriction[];
 }) {
   const {
     directoryHandle,
@@ -102,6 +108,7 @@ export function useDistributionActions(params: {
     currentRole,
     onDistributionChanged,
     refreshGlobalMonths,
+    portRestrictions = [],
   } = params;
 
   const [distributionCurrent, setDistributionCurrent] =
@@ -308,10 +315,13 @@ export function useDistributionActions(params: {
     // race with the account being deactivated mid-session, or any other caller
     // of this handler could still hand in a username that is no longer valid.
     // Re-validate against the live roster right before the durable write --
-    // the same active+assignable-role rule `calculateBulkAssignment` already
-    // enforces for the bulk path.
-    if (!findAssignableEmployee(assignedTo, getManagedLoginUsers())) {
-      setDistributionMessage({ type: "error", text: "الموظف المحدد غير موجود، أو غير نشط، أو لا يملك صلاحية استلام العينات." });
+    // the same active+assignable-role AND port-eligibility rules
+    // `calculateBulkAssignment` already enforces for the bulk path.
+    const assignPortName = normalizePortName(
+      sampleDrawResult?.rows.find((r) => r.xrayImageId === xrayImageId)?.portName ?? null
+    );
+    if (!findAssignableEmployeeForPort(assignedTo, getManagedLoginUsers(), assignPortName, portRestrictions)) {
+      setDistributionMessage({ type: "error", text: "الموظف المحدد غير موجود، أو غير نشط، أو لا يملك صلاحية استلام العينات، أو غير مؤهل لمنفذ هذا الصف." });
       return;
     }
     if (!directoryHandle || !sampleDrawResult) return;
@@ -362,9 +372,12 @@ export function useDistributionActions(params: {
       setDistributionMessage({ type: "error", text: "لا تملك صلاحية إعادة توزيع العينات." });
       return;
     }
-    // Audit finding 6: same live-roster re-validation as handleAssign above.
-    if (!findAssignableEmployee(reassignedTo, getManagedLoginUsers())) {
-      setDistributionMessage({ type: "error", text: "الموظف المحدد غير موجود، أو غير نشط، أو لا يملك صلاحية استلام العينات." });
+    // Audit finding 6: same live-roster + port-eligibility re-validation as handleAssign above.
+    const reassignPortName = normalizePortName(
+      sampleDrawResult?.rows.find((r) => r.xrayImageId === xrayImageId)?.portName ?? null
+    );
+    if (!findAssignableEmployeeForPort(reassignedTo, getManagedLoginUsers(), reassignPortName, portRestrictions)) {
+      setDistributionMessage({ type: "error", text: "الموظف المحدد غير موجود، أو غير نشط، أو لا يملك صلاحية استلام العينات، أو غير مؤهل لمنفذ هذا الصف." });
       return;
     }
     if (!directoryHandle || !sampleDrawResult) return;
