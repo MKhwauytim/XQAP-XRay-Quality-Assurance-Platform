@@ -204,6 +204,31 @@ function rowStatusClass(
   return undefined;
 }
 
+/**
+ * Whether the immediate-replace flow may open for `entry`: the request's own
+ * owner, still pending (not yet replaced/completed/etc.), and — the UI
+ * safety net — no replacement request already outstanding for it.
+ * `appendReplacementRequest`'s non-recommended branch writes to the referral
+ * store, not a distribution event, so `entry.status` alone stays "pending"
+ * the whole time a request sits in the approval queue; checking
+ * `pendingReplacementIds` here is what actually catches that. Shared by
+ * `openReplacementDialog`'s own guard and the panel's `onReplace` render
+ * condition so the two can never drift apart.
+ */
+function canOpenReplacementDialog(
+  entry: DistributionEntry,
+  username: string,
+  canRequestReplacement: boolean,
+  pendingReplacementIds: Set<string>
+): boolean {
+  return (
+    canRequestReplacement
+    && entry.assignedTo === username
+    && entry.status === "pending"
+    && !pendingReplacementIds.has(entry.xrayImageId)
+  );
+}
+
 type BootSourceDescriptor = { key: string; labelEn: string; labelAr: string };
 
 /**
@@ -1549,23 +1574,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   }
 
   async function openReplacementDialog(entry: DistributionEntry): Promise<void> {
-    if (!canRequestReplacement) {
-      setStatusMsg({ type: "error", text: "لا تملك صلاحية طلب الاستبدال، أو أن مساحة العمل للقراءة فقط." });
-      return;
-    }
-    // `appendReplacementRequest` (the non-recommended branch of handleReplace)
-    // writes a pending request to the referral store, not a distribution
-    // event — so `entry.status` stays "pending" even while a replacement
-    // request already sits in the supervisor's approval queue for this exact
-    // row. Without this check, the row's replace button stayed enabled and a
-    // second replace (this time via a "recommended" candidate, which applies
-    // immediately with no approval) could run while the first request was
-    // still outstanding: the row ends up replaced, but the stale request
-    // still sits in the queue pointing at an original that no longer exists.
-    if (pendingReplacementIds.has(entry.xrayImageId)) {
-      setStatusMsg({ type: "error", text: "يوجد طلب استبدال قيد الموافقة لهذه العينة بالفعل." });
-      return;
-    }
+    if (!canRequestReplacement) { setStatusMsg({ type: "error", text: "لا تملك صلاحية طلب الاستبدال، أو أن مساحة العمل للقراءة فقط." }); return; }
+    // pendingReplacementIds, not entry.status — see canOpenReplacementDialog's doc comment.
+    if (pendingReplacementIds.has(entry.xrayImageId)) { setStatusMsg({ type: "error", text: "يوجد طلب استبدال قيد الموافقة لهذه العينة بالفعل." }); return; }
     if (!selMonth) return;
     // Design B step 3: on the mirror fast path `loadData` reads neither
     // `sample.master.json` nor the workspace-wide derivation, so both are
@@ -2161,15 +2172,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                     handleSave(panelEntry.xrayImageId, ans, panelEntry.assignedTo)
                   }
                   onReplace={
-                    canRequestReplacement
-                    && panelEntry.assignedTo === username
-                    && panelEntry.status === "pending"
-                    // UI safety net: hide the button once a replacement
-                    // request is already outstanding for this row, rather
-                    // than letting a second, immediate replace race it —
-                    // see openReplacementDialog's own guard for why status
-                    // alone can't tell these two states apart.
-                    && !pendingReplacementIds.has(panelEntry.xrayImageId)
+                    canOpenReplacementDialog(panelEntry, username, canRequestReplacement, pendingReplacementIds)
                       ? openReplacementDialog
                       : undefined
                   }
