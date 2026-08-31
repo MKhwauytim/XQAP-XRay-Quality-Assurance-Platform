@@ -878,8 +878,6 @@ export default function PopulationTab() {
       worker.postMessage({
         riskFile,
         biFiles,
-        riskSheetPatterns: activeTemplate?.sheetPatterns?.risk,
-        biSheetPatterns: activeTemplate?.sheetPatterns?.bi,
         columnMappings: activeTemplate?.columnMappings,
         biColumnMappings: activeTemplate?.biColumnMappings,
       } satisfies WorkbookWorkerRequest);

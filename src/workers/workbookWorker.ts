@@ -13,13 +13,12 @@ const ctx = globalThis as unknown as {
 const send = (msg: WorkbookWorkerResponse) => ctx.postMessage(msg);
 
 ctx.onmessage = async (ev) => {
-  const { riskFile, biFiles, riskSheetPatterns, biSheetPatterns, columnMappings, biColumnMappings } = ev.data;
+  const { riskFile, biFiles, columnMappings, biColumnMappings } = ev.data;
 
   try {
     const riskResult = await processRiskWorkbook(
       riskFile,
       (stage, percent) => send({ type: "progress", message: `${stage} (${percent}%)` }),
-      riskSheetPatterns,
       columnMappings
     );
 
@@ -33,9 +32,9 @@ ctx.onmessage = async (ev) => {
     const { rows: riskRows, ...riskShell } = riskResult;
     await streamRowsInChunks(riskRows, (chunk) => send({ type: "risk-rows", rows: chunk }));
 
-    // Every BI file is processed with the SAME sheet patterns and column
-    // mappings — they are different populations of one BI dataset, not
-    // differently-shaped sources. The main thread appends the results.
+    // Every BI file is processed with the SAME column mappings — they are
+    // different populations of one BI dataset, not differently-shaped
+    // sources. The main thread appends the results.
     const biResults: BiFileShell[] = [];
     const failedFileNames: string[] = [];
 
@@ -55,7 +54,6 @@ ctx.onmessage = async (ev) => {
         const result = await processBiWorkbook(
           biFile,
           onProgress,
-          biSheetPatterns,
           biColumnMappings ?? columnMappings
         );
         // Same as the risk side: stream this file's rows out and drop them

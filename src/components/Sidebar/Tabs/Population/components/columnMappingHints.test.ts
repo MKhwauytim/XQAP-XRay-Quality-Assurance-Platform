@@ -42,7 +42,6 @@ const SYSTEM_FIELDS: SystemField[] = [
 const TEMPLATE: MappingTemplate = {
   templateId: "test-template",
   name: "قالب اختبار",
-  sheetPatterns: { risk: [], bi: [] },
   columnMappings: {
     xrayImageId: ["XRAY_SCAN_ID"],
     declarationNumber: ["DECL_NO"],

@@ -22,11 +22,12 @@ function normalizeArabicText(value: string): string {
     .toLowerCase();
 }
 
-function detectMovementType(sheetName: string, customPatterns?: string[]): string | null {
-  const normalizedSheetName = normalizeArabicText(sheetName);
-  const patterns = customPatterns && customPatterns.length > 0 ? customPatterns : ["بحري", "بري", "افراد", "عبور"];
+const MOVEMENT_TYPE_PATTERNS = ["بحري", "بري", "افراد", "عبور"];
 
-  for (const pattern of patterns) {
+function detectMovementType(sheetName: string): string | null {
+  const normalizedSheetName = normalizeArabicText(sheetName);
+
+  for (const pattern of MOVEMENT_TYPE_PATTERNS) {
     const normPattern = normalizeArabicText(pattern);
     if (normalizedSheetName.includes(normPattern)) {
       if (normPattern.includes("بحري")) return "بحري";
@@ -75,7 +76,6 @@ function buildZeroXrayIdDiagnostic(
 export async function processRiskWorkbook(
   file: File,
   onProgress?: (stage: string, percent: number) => void,
-  sheetPatterns?: string[],
   columnMappings?: Record<string, string[]>
 ): Promise<RiskWorkbookResult> {
   onProgress?.("بدء قراءة ملف المخاطر...", 0);
@@ -103,7 +103,7 @@ export async function processRiskWorkbook(
   const totalSheets = workbook.SheetNames.length;
   for (let i = 0; i < totalSheets; i++) {
     const sheetName = workbook.SheetNames[i];
-    const movementType = detectMovementType(sheetName, sheetPatterns);
+    const movementType = detectMovementType(sheetName);
 
     onProgress?.(`معالجة الورقة "${sheetName}"...`, Math.round(30 + (i / totalSheets) * 60));
     await yieldToMain();

@@ -63,17 +63,17 @@ function normalizeArabicText(value: string): string {
  * "Source" export column — so an unmatched name is now reported through
  * `unmatchedSheetNames` and the rows are kept.
  */
+const BI_SOURCE_PATTERNS = ["وارد", "صادر"];
+
 function detectBiSourceInfo(
-  sheetName: string,
-  customPatterns?: string[]
+  sheetName: string
 ): { source: string | null; matched: boolean } {
   const normalizedSheetName = normalizeArabicText(sheetName);
-  const patterns = customPatterns && customPatterns.length > 0 ? customPatterns : ["وارد", "صادر"];
 
   const isSea = normalizedSheetName.includes("بحري");
   const isLand = normalizedSheetName.includes("بري");
 
-  for (const pattern of patterns) {
+  for (const pattern of BI_SOURCE_PATTERNS) {
     const normPattern = normalizeArabicText(pattern);
     if (normalizedSheetName.includes(normPattern)) {
       const isInbound = normPattern.includes("وارد");
@@ -144,7 +144,6 @@ function buildZeroXrayIdDiagnostic(
 export async function processBiWorkbook(
   file: File,
   onProgress?: (stage: string, percent: number) => void,
-  sheetPatterns?: string[],
   columnMappings?: Record<string, string[]>
 ): Promise<BiWorkbookResult> {
   onProgress?.("بدء قراءة ملف ذكاء الأعمال...", 0);
@@ -202,7 +201,7 @@ export async function processBiWorkbook(
   const totalSheets = workbook.SheetNames.length;
   for (let i = 0; i < totalSheets; i++) {
     const sheetName = workbook.SheetNames[i];
-    const { source, matched } = detectBiSourceInfo(sheetName, sheetPatterns);
+    const { source, matched } = detectBiSourceInfo(sheetName);
 
     onProgress?.(`معالجة ورقة ذكاء الأعمال "${sheetName}"...`, Math.round(30 + (i / totalSheets) * 60));
     await yieldToMain();

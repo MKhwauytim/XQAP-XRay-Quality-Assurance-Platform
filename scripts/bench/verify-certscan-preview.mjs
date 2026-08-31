@@ -48,7 +48,6 @@ async function run(loader) {
   const riskResult = await processRiskWorkbook(
     riskFile,
     () => {},
-    DEFAULT_MAPPING_TEMPLATE.sheetPatterns.risk,
     DEFAULT_MAPPING_TEMPLATE.columnMappings
   );
 

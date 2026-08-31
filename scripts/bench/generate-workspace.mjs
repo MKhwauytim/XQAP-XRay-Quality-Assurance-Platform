@@ -155,7 +155,6 @@ export async function generateWorkspace(rawArgs = []) {
     const riskResult = await processRiskWorkbook(
       riskFile,
       (stage, pct) => process.stdout.write(`\r  risk: ${stage} (${pct}%)      `),
-      DEFAULT_MAPPING_TEMPLATE.sheetPatterns.risk,
       DEFAULT_MAPPING_TEMPLATE.columnMappings
     );
     console.log(`\n  risk parse: ${(Date.now() - t1) / 1000}s — ${fmt(riskResult.totalOriginalRows)} original rows, ${fmt(riskResult.totalNormalizedRows)} normalized, ${fmt(riskResult.totalExcludedMissingXrayIdCount)} excluded (missing xray id)`);
@@ -166,7 +165,6 @@ export async function generateWorkspace(rawArgs = []) {
     const biResult = await processBiWorkbook(
       biFile,
       (stage, pct) => process.stdout.write(`\r  bi: ${stage} (${pct}%)      `),
-      DEFAULT_MAPPING_TEMPLATE.sheetPatterns.bi,
       DEFAULT_MAPPING_TEMPLATE.biColumnMappings ?? DEFAULT_MAPPING_TEMPLATE.columnMappings
     );
     console.log(`\n  bi parse: ${(Date.now() - t2) / 1000}s — ${fmt(biResult.totalOriginalRows)} original rows, ${fmt(biResult.totalNormalizedRows)} normalized, ${fmt(biResult.totalExcludedMissingXrayIdCount)} excluded (missing xray id)`);

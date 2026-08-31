@@ -240,7 +240,6 @@ export default function MappingSettingsModal({
 
           {controller.activeTab === "sheets" && (
             <WorkbookSheetsSection
-              template={controller.template}
               fields={controller.fieldOptions}
               riskSheetNames={controller.riskSheetNames}
               biSheetNames={controller.biSheetNames}
@@ -249,7 +248,6 @@ export default function MappingSettingsModal({
               onApplyDetected={
                 controller.handleApplyDetectedWorkbookSettings
               }
-              onPatternChange={controller.handleSheetPatternChange}
             />
           )}
 
