@@ -74,7 +74,6 @@ export function useMappingSettingsController({
   const template: MappingTemplate = config.mappingTemplates[0] ?? {
     templateId: "default-template",
     name: "قالب مخصص",
-    sheetPatterns: { risk: [], bi: [] },
     columnMappings: {},
   };
   const stageMappings = config.stageMappings ?? DEFAULT_STAGE_MAPPINGS;
@@ -155,14 +154,6 @@ export function useMappingSettingsController({
 
   const handleApplyDetectedWorkbookSettings = () => {
     updateTemplate({
-      sheetPatterns: {
-        risk:
-          riskSheetNames.length > 0
-            ? riskSheetNames
-            : template.sheetPatterns.risk,
-        bi:
-          biSheetNames.length > 0 ? biSheetNames : template.sheetPatterns.bi,
-      },
       columnMappings: mergeMappingAliases(
         template.columnMappings,
         processingContext?.riskColumnHints,
@@ -188,15 +179,6 @@ export function useMappingSettingsController({
       biColumnMappings: {
         ...template.biColumnMappings,
         [fieldKey]: parseMappingAliases(value),
-      },
-    });
-  };
-
-  const handleSheetPatternChange = (type: "risk" | "bi", value: string) => {
-    updateTemplate({
-      sheetPatterns: {
-        ...template.sheetPatterns,
-        [type]: parseMappingAliases(value),
       },
     });
   };
@@ -454,7 +436,6 @@ export function useMappingSettingsController({
     handleApplyDetectedWorkbookSettings,
     handleMappingChange,
     handleBiMappingChange,
-    handleSheetPatternChange,
     handleStageMappingChange,
     handleResetStageMappings: () =>
       onConfigChange({ ...config, stageMappings: DEFAULT_STAGE_MAPPINGS }),

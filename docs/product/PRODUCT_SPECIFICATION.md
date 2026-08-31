@@ -316,7 +316,7 @@ Four-phase sequential stepper. Phases must be completed in order; each phase unl
 **Behaviour:**
 - File System Access API used when available; falls back to `<input type="file">` dialog
 - File extension validated client-side before passing to worker
-- Risk file parsed for all sheets matching configured sheet-name patterns
+- Risk file parsed for all worksheets in the uploaded file (no sheet-name allowlist — the sheet name only labels the row's movement type/source)
 - BI file parsed separately with its own column mapping
 - Worker emits progress messages displayed in a status toast
 - On completion: uploads transition to Phase 2
@@ -1153,8 +1153,6 @@ This ensures the current view is always consistent with the full event history.
 type WorkbookWorkerRequest = {
   riskFile: File;
   biFile: File | null;
-  riskSheetPatterns?: string[];          // Sheet name patterns to match
-  biSheetPatterns?: string[];            // BI sheet patterns
   columnMappings?: Record<string, string[]>;    // Risk column aliases
   biColumnMappings?: Record<string, string[]>;  // BI column aliases (new, optional)
 };
@@ -1177,7 +1175,7 @@ type WorkbookWorkerRequest = {
 
 **Processing inside worker:**
 - Parse XLSX/XLS binary via `SheetJS (xlsx)` library
-- Match sheets by pattern (regex or substring)
+- Read every worksheet in the file (no sheet-name filtering)
 - Apply column name alias mapping → normalize headers
 - Return raw row arrays (no processing; processing is in main thread Phase 2)
 

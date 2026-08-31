@@ -62,7 +62,7 @@ describe("useMappingSettingsController characterization", () => {
     expect(result.current.activeTab).toBe("processing");
   });
 
-  it("updates Risk, BI, sheet, stage, and required-field mappings", () => {
+  it("updates Risk, BI, stage, and required-field mappings", () => {
     const { result, onConfigChange } = setup();
 
     act(() => result.current.handleMappingChange("xrayImageId", "Risk ID, , Scan ID"));
@@ -72,10 +72,6 @@ describe("useMappingSettingsController characterization", () => {
     act(() => result.current.handleBiMappingChange("xrayImageId", "BI ID, Image ID"));
     expect(latestConfig(onConfigChange).mappingTemplates[0]!.biColumnMappings?.xrayImageId)
       .toEqual(["BI ID", "Image ID"]);
-
-    act(() => result.current.handleSheetPatternChange("risk", "Road, Sea"));
-    expect(latestConfig(onConfigChange).mappingTemplates[0]!.sheetPatterns.risk)
-      .toEqual(["Road", "Sea"]);
 
     act(() => result.current.handleStageMappingChange("first", "FIRST, 1"));
     expect(latestConfig(onConfigChange).stageMappings.first).toEqual(["FIRST", "1"]);
@@ -108,7 +104,6 @@ describe("useMappingSettingsController characterization", () => {
     act(() => result.current.handleApplyDetectedWorkbookSettings());
     const next = latestConfig(onConfigChange).mappingTemplates[0]!;
 
-    expect(next.sheetPatterns).toEqual({ risk: ["Risk 2026"], bi: ["BI 2026"] });
     expect(next.columnMappings.xrayImageId).toContain("Detected Risk ID");
     expect(next.biColumnMappings?.xrayImageId).toContain("Detected BI ID");
     expect(next.columnMappings.xrayImageId).toContain("XRAY_SCAN_ID");

@@ -22,10 +22,6 @@ export type CustomField = {
 export type MappingTemplate = {
   templateId: string;
   name: string;
-  sheetPatterns: {
-    risk: string[];
-    bi: string[];
-  };
   /** Column aliases used when reading the Risk data file. */
   columnMappings: Record<string, string[]>;
   /** Column aliases used when reading the BI data file. Falls back to columnMappings if absent. */
@@ -167,10 +163,6 @@ export const DEFAULT_SYSTEM_FIELDS: SystemField[] = [
 export const DEFAULT_MAPPING_TEMPLATE: MappingTemplate = {
   templateId: "default-template",
   name: "القالب الافتراضي المدمج",
-  sheetPatterns: {
-    risk: ["بحري", "بري", "افراد", "عبور"],
-    bi: ["وارد", "صادر"]
-  },
   columnMappings: {
     xrayImageId: ["معرف الأشعة", "معرف الاشعة", "رقم صورة الأشعة", "رقم صورة الاشعة", "معرف الأشعة", "معرف الاشعة", "XRAY_SCAN_ID"],
     xrayEntryDate: ["تاريخ دخول الأشعة", "تاريخ دخول الاشعة", "تاريخ الاشعة", "تاريخ الأشعة"],
