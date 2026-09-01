@@ -171,12 +171,17 @@ export function PerformanceSection(props: {
     () => computeEmployeeComparison(dateOnlyFiltered, employeeNames),
     [dateOnlyFiltered, employeeNames]
   );
-  const gapsByEmployeeInScope = useMemo(() => {
-    const byEmployee = new Map<string, GapEvent[]>();
+  // Per-employee daily records in scope, preserving the chronological order
+  // computeAllDailyPerformance already sorted them in — used to build one
+  // working-hours row per (employee, day) in team mode below, instead of
+  // flattening every day's gaps onto a single shift-window track (which
+  // made unrelated days' gaps visually overlap at the same time-of-day).
+  const dailyRecordsByEmployeeInScope = useMemo(() => {
+    const byEmployee = new Map<string, DailyPerformance[]>();
     for (const record of dateOnlyFiltered) {
       const bucket = byEmployee.get(record.employee);
-      if (bucket) bucket.push(...record.gaps);
-      else byEmployee.set(record.employee, [...record.gaps]);
+      if (bucket) bucket.push(record);
+      else byEmployee.set(record.employee, [record]);
     }
     return byEmployee;
   }, [dateOnlyFiltered]);
@@ -194,13 +199,28 @@ export function PerformanceSection(props: {
 
   const hourRows: HourChartRow[] = useMemo(() => {
     if (filter.employee === "") {
-      return comparison.rows
-        .filter((row) => row.samples > 0 || row.totalGaps > 0)
-        .map((row) => ({
-          key: row.username,
-          label: row.displayName,
-          segments: buildHourSegments(gapsByEmployeeInScope.get(row.username) ?? [], true),
-        }));
+      const rows: HourChartRow[] = [];
+      for (const row of comparison.rows) {
+        if (row.samples === 0 && row.totalGaps === 0) continue;
+        const dayRows = (dailyRecordsByEmployeeInScope.get(row.username) ?? [])
+          .map((record) => ({ record, segments: buildHourSegments(record.gaps, false) }))
+          .filter((entry) => entry.segments.length > 0);
+        // No notable (small/medium/large) gap on any day in scope — a single
+        // summary row for the employee, same as before this rework, rather
+        // than a wall of empty per-day rows.
+        if (dayRows.length === 0) {
+          rows.push({ key: row.username, label: row.displayName, segments: [] });
+          continue;
+        }
+        for (const { record, segments } of dayRows) {
+          rows.push({
+            key: `${row.username}-${record.day}`,
+            label: `${row.displayName} · ${formatShortDayLabel(record.day)}`,
+            segments,
+          });
+        }
+      }
+      return rows;
     }
     return filtered
       .filter((record) => record.employee === filter.employee)
@@ -209,7 +229,7 @@ export function PerformanceSection(props: {
         label: formatShortDayLabel(record.day),
         segments: buildHourSegments(record.gaps, false),
       }));
-  }, [filter.employee, comparison.rows, gapsByEmployeeInScope, filtered]);
+  }, [filter.employee, comparison.rows, dailyRecordsByEmployeeInScope, filtered]);
 
   const rangeLabel =
     filter.from || filter.to
