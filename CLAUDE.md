@@ -54,6 +54,7 @@ npm run check:vendor         # vendored SheetJS tarball SHA-256 matches vendor/R
 npm run check:bundle-size    # dist/index.html raw/gzip release budget
 npm run count-lines -- --quiet  # whole-repo line count (excludes docs/edit logs/; --with-edit-logs for the old basis)
 npm run editlog -- --tier=2 "…"  # generate a daily edit-log entry skeleton (see above)
+npm run generate:changelog   # regenerate src/data/changelog/latestUpdates.generated.ts (also runs automatically before dev/build/typecheck/test/test:run)
 npm run preview         # Preview the built file
 npm run test:run        # Vitest, 1970 tests / 231 files as of v72.0.0
 npm run test            # Vitest watch mode
@@ -167,6 +168,7 @@ Both previously documented drifts have since been **fixed in code**. **`4-report
 | Feedback | `src/data/feedback/` | User feedback records |
 | Labels | `src/data/labels/` | UI label overrides (`labelsStore.ts`) persisted to `localStorage`; `useLabels()` re-renders on change |
 | Preferences | `src/data/preferences/` | Browse preset storage |
+| Changelog | `src/data/changelog/` | `latestUpdates.generated.ts` — the newest 10 edit-log entries, extracted and bucketed (fix/feature/enhancement/redesign) at build time by `scripts/generate-changelog-data.mjs` for the `changelog` tab; not workspace data, and never reads/writes the user's workspace folder |
 | Global month | `src/data/month/` | App-wide month selection (provider + toolbar selector); sessionStorage key `xray_global_month_v1` |
 | Workspace | `src/data/workspace/` | Directory-handle context/provider, numbered-root path resolution (`workspacePaths.ts`), layout schema detection/migration (`workspaceSchema.ts`: current/legacy/mixed/empty), defaults, demo workspace |
 | Error logger | `src/data/storage/errorLogger.ts` | In-memory ring buffer (last 50 entries) for silent-catch observability; `logError`, `getRecentErrors`, `clearErrors`. Since v116 this is the LOCAL half of a two-tier log only — the durable, fleet-wide, admin-exportable half is `src/data/errorLog/` above. `logError` also accepts an optional `ErrorLogMeta` and exposes `registerErrorSink` so `errorLog/` can install itself without `errorLogger.ts` importing the workspace layer (would cycle through `safeWrite.ts`) |
@@ -199,6 +201,7 @@ Tabs are auto-discovered by `tabRegistry.ts`. Each top-level tab exports a defau
 | `reports` | `Tabs/Reports/` | guest, supervisor, manager, admin | 25 | `reports`, `kpi` (supervisor, manager, admin), `report-designer` (supervisor, manager, admin → `Tabs/ReportDesigner/`) |
 | `archive` | `Tabs/Archive/` | guest, supervisor, manager, admin | 30 | — |
 | `user-management` | `Tabs/UserManagement/` | admin | 40 | `users`, `page-permissions`, `feature-permissions`, `activity`, `actions` |
+| `changelog` | `Tabs/Changelog/` | all (grantable; none granted by default) | 90 | — |
 | `settings` | `Tabs/Settings/` | guest, admin | 95 | — |
 
 `TemplateBuilder`, `ReportDesigner` and `AdhocImport` no longer register standalone tabs — they render inside the sub-tabs noted above. A sub-tab-only component exports a default component and **nothing else**: re-adding a `tabConfig` export resurrects it as a top-level tab, and no test catches that (nothing compares `SIDEBAR_TABS` against `TAB_CATALOG`), so the app would ship a duplicate entry whose permission lookup resolves to `none` for every non-admin.

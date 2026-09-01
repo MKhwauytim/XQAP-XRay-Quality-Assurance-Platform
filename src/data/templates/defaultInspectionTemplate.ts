@@ -46,6 +46,7 @@ export function buildDefaultInspectionTemplate(username: string): TemplateSchema
   const fMismatchReasonsOther = createFieldId();
   const fDeclarationNotes  = createFieldId();
   const fResultValidity    = createFieldId();
+  const fSuspicionType     = createFieldId();
   const fSuspicionLevel    = createFieldId();
   const fSuspicionLocation = createFieldId();
   const fSuspectedTypes    = createFieldId();
@@ -267,11 +268,18 @@ export function buildDefaultInspectionTemplate(username: string): TemplateSchema
         condition: { sourceFieldId: fHasImage, operator: "equals", value: "نعم" }, order: 1,
       },
       {
+        fieldId: fSuspicionType, phaseId: phase3Id, label: "نوع الاشتباه",
+        type: "dropdown", required: false,
+        options: ["اشتباه أمني", "اشتباه جمركي"], placeholder: "",
+        condition: { sourceFieldId: fResultValidity, operator: "equals", value: "اشتباه" },
+        order: 2,
+      },
+      {
         fieldId: fSuspicionLevel, phaseId: phase3Id, label: "تقييم الاشتباه",
         type: "dropdown", required: false,
         options: ["عالي", "متوسط", "منخفض"], placeholder: "",
         condition: { sourceFieldId: fResultValidity, operator: "equals", value: "اشتباه" },
-        order: 2,
+        order: 3,
       },
       {
         fieldId: fSuspicionLocation, phaseId: phase3Id, label: "موقع الاشتباه",
@@ -279,27 +287,27 @@ export function buildDefaultInspectionTemplate(username: string): TemplateSchema
         options: ["الكبينة", "الحمولة", "العجلات", "الإطارات", "الباب الخلفي", "السقف", "الأرضية", "الخزان", "الجانب الأيمن", "الجانب الأيسر"],
         placeholder: "اكتب أو اختر موقع الاشتباه...",
         condition: { sourceFieldId: fResultValidity, operator: "equals", value: "اشتباه" },
-        order: 3,
+        order: 4,
       },
       {
         fieldId: fSuspectedTypes, phaseId: phase3Id, label: "الاصناف المشبوهة",
         type: "textarea", required: false,
         options: [], placeholder: "اذكر الاصناف المشبوهة...",
         condition: { sourceFieldId: fResultValidity, operator: "equals", value: "اشتباه" },
-        order: 4,
+        order: 5,
       },
       {
         fieldId: fSmuggleMethod, phaseId: phase3Id, label: "الية التهريب المحتملة",
         type: "textarea", required: false,
         options: [], placeholder: "اذكر الية التهريب المحتملة...",
         condition: { sourceFieldId: fResultValidity, operator: "equals", value: "اشتباه" },
-        order: 5,
+        order: 6,
       },
       {
         fieldId: fNotes, phaseId: phase3Id, label: "الملاحظات العامة",
         type: "textarea", required: false,
         options: [], placeholder: "أي ملاحظات إضافية...",
-        condition: { sourceFieldId: fHasImage, operator: "equals", value: "نعم" }, order: 6,
+        condition: { sourceFieldId: fHasImage, operator: "equals", value: "نعم" }, order: 7,
       },
     ],
   };

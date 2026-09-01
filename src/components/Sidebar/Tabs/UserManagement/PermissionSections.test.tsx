@@ -82,7 +82,6 @@ describe("user-management permission sections", () => {
       "user-management/page-permissions",
       "user-management/feature-permissions",
       "user-management/activity",
-      "user-management/actions",
       "user-management/performance",
     ]) {
       for (const [roleLabel, role] of [

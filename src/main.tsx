@@ -9,9 +9,12 @@ import { queryClient } from "./data/query/queryClient";
 import { applyUiScaleToDocument } from "./data/preferences/uiScaleStore";
 import { ARABIC_FONT_FACE_CSS } from "./branding/fonts";
 import { SOMAR_SANS_APP_FONT_FACE_CSS } from "./branding/somarFonts";
+import { printConsoleCredit } from "./branding/consoleCredit";
 
 import "./index.css";
 import "./styles/primitives.css";
+
+printConsoleCredit();
 
 // Embed the IBM Plex Sans Arabic @font-face (base64 data-URI woff2) into the app
 // document from the SAME single source the generated reports use, so the UI and

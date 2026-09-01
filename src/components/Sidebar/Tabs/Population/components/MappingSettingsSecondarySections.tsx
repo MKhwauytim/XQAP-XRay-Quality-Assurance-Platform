@@ -6,10 +6,7 @@ import type {
   StageKey,
 } from "../../../../../data/population/populationConfig";
 import { DelimitedListInput } from "./DelimitedListInput";
-import {
-  SHEET_DERIVED_FIELD_KEYS,
-  STAGE_KEY_LABELS as STAGE_LABELS,
-} from "./mappingSettingsConfig";
+import { STAGE_KEY_LABELS as STAGE_LABELS } from "./mappingSettingsConfig";
 
 export function StageMappingsSection({
   stageMappings,
@@ -44,89 +41,6 @@ export function StageMappingsSection({
       >
         استعادة القائمة الافتراضية
       </button>
-    </div>
-  );
-}
-
-export function WorkbookSheetsSection({
-  fields,
-  riskSheetNames,
-  biSheetNames,
-  riskColumnHints,
-  biColumnHints,
-  onApplyDetected,
-}: {
-  fields: Array<{ key: string; label: string }>;
-  riskSheetNames: string[];
-  biSheetNames: string[];
-  riskColumnHints: Record<string, string[]>;
-  biColumnHints: Record<string, string[]>;
-  onApplyDetected: () => void;
-}) {
-  const hasDetectedSheets = riskSheetNames.length > 0 || biSheetNames.length > 0;
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-      <p style={{ fontSize: "13px", color: "var(--population-muted)" }}>
-        تتم قراءة كل أوراق العمل (التبويبات) في الملفات المرفوعة تلقائياً —
-        لا حاجة لتحديد أسماء الأوراق. المطابقة تتم عبر عناوين الأعمدة فقط،
-        كما هو الحال في بقية إعدادات الربط.
-      </p>
-      {hasDetectedSheets ? (
-        <div
-          style={{
-            border: "1px solid #dbeafe",
-            borderRadius: "12px",
-            background: "#eff6ff",
-            padding: "12px",
-            display: "grid",
-            gap: "10px",
-          }}
-        >
-          <strong style={{ color: "#17365d" }}>
-            الأوراق والأعمدة المكتشفة من الملفات المرفوعة
-          </strong>
-          {riskSheetNames.length > 0 && (
-            <p style={{ margin: 0, fontSize: 12, color: "#334155" }}>
-              أوراق المخاطر: {riskSheetNames.join("، ")}
-            </p>
-          )}
-          {biSheetNames.length > 0 && (
-            <p style={{ margin: 0, fontSize: 12, color: "#334155" }}>
-              أوراق BI: {biSheetNames.join("، ")}
-            </p>
-          )}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "10px",
-            }}
-          >
-            <ColumnHints
-              title="أعمدة المخاطر المكتشفة"
-              fields={fields}
-              hints={riskColumnHints}
-            />
-            <ColumnHints
-              title="أعمدة BI المكتشفة"
-              fields={fields}
-              hints={biColumnHints}
-            />
-          </div>
-          <button
-            type="button"
-            className="secondary-action"
-            style={{ justifySelf: "start" }}
-            onClick={onApplyDetected}
-          >
-            تطبيق الأعمدة المكتشفة
-          </button>
-        </div>
-      ) : (
-        <p style={{ fontSize: "13px", color: "var(--population-muted)" }}>
-          ارفع ملفات المخاطر أو BI لعرض الأوراق والأعمدة المكتشفة منها.
-        </p>
-      )}
     </div>
   );
 }
@@ -266,68 +180,5 @@ function MoveButton({
         <ChevronDown size={14} aria-hidden />
       )}
     </button>
-  );
-}
-
-function ColumnHints({
-  title,
-  fields,
-  hints,
-}: {
-  title: string;
-  fields: Array<{ key: string; label: string }>;
-  hints: Record<string, string[]>;
-}) {
-  return (
-    <div
-      style={{
-        background: "#fff",
-        border: "1px solid #dbeafe",
-        borderRadius: "10px",
-        padding: "10px",
-      }}
-    >
-      <strong
-        style={{
-          display: "block",
-          marginBottom: "8px",
-          color: "#1e3a8a",
-          fontSize: 12,
-        }}
-      >
-        {title}
-      </strong>
-      <div style={{ display: "grid", gap: "6px" }}>
-        {fields.map((field) => {
-          const matches = hints[field.key] ?? [];
-          const isSheetDerived = SHEET_DERIVED_FIELD_KEYS.has(field.key);
-          return (
-            <div
-              key={field.key}
-              style={{ display: "grid", gap: "2px", fontSize: 11 }}
-            >
-              <span style={{ color: "#334155", fontWeight: 800 }}>
-                {field.label}
-              </span>
-              <span
-                style={{
-                  color: isSheetDerived
-                    ? "#1d4ed8"
-                    : matches.length > 0
-                      ? "#166534"
-                      : "#b45309",
-                }}
-              >
-                {isSheetDerived
-                  ? "يُشتق تلقائياً من اسم ورقة العمل، وليس من عمود"
-                  : matches.length > 0
-                    ? matches.join("، ")
-                    : "لم يتم العثور على تطابق واضح"}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
   );
 }
