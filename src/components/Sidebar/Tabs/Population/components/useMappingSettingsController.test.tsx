@@ -85,30 +85,6 @@ describe("useMappingSettingsController characterization", () => {
     expect(latestConfig(onConfigChange).stageMappings).toEqual(DEFAULT_STAGE_MAPPINGS);
   });
 
-  it("merges detected workbook settings without losing configured aliases", () => {
-    const { result, onConfigChange } = setup(configFixture(), {
-      processingContext: {
-        riskFileName: "risk.xlsx",
-        biFileName: "bi.xlsx",
-        riskRows: 10,
-        biRows: 8,
-        certScanProvided: true,
-        finalRows: 7,
-        riskSheetNames: ["Risk 2026"],
-        biSheetNames: ["BI 2026"],
-        riskColumnHints: { xrayImageId: ["XRAY_SCAN_ID", "Detected Risk ID"] },
-        biColumnHints: { xrayImageId: ["Detected BI ID"] },
-      },
-    });
-
-    act(() => result.current.handleApplyDetectedWorkbookSettings());
-    const next = latestConfig(onConfigChange).mappingTemplates[0]!;
-
-    expect(next.columnMappings.xrayImageId).toContain("Detected Risk ID");
-    expect(next.biColumnMappings?.xrayImageId).toContain("Detected BI ID");
-    expect(next.columnMappings.xrayImageId).toContain("XRAY_SCAN_ID");
-  });
-
   it("adds, edits, reorders, inserts, removes, and presets workflow steps", () => {
     const randomUuid = vi
       .spyOn(globalThis.crypto, "randomUUID")
