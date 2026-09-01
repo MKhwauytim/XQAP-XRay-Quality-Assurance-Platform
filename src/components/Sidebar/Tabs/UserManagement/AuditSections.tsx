@@ -76,6 +76,7 @@ export function ActivitySection(props: {
     : "لا يوجد مجلد عمل متصل — تُعرض بيانات الجلسة الحالية فقط، وليس سجل الأنشطة الكامل المحفوظ على القرص.";
 
   return <div className="um-section">
+    <h3 className="um-add-form-title">{getLabels().um_activity_tab_label}</h3>
     <div className="um-matrix-desc">{getLabels().um_activity_desc}<strong> {getLabels().um_activity_path}</strong></div>
     <div className="um-activity-toolbar"><button type="button" className="um-add-btn" onClick={props.onRefresh}>تحديث السجل</button><span>{props.isLoading ? "جاري تحميل الأنشطة..." : `${props.entries.length.toLocaleString("ar-SA-u-nu-latn")} سجل`}</span></div>
     <div className="um-activity-summary-grid">

@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, waitFor, cleanup, act, screen } from "@testing-library/react";
+import { render, waitFor, cleanup, act, screen, fireEvent } from "@testing-library/react";
 import UserManagementTab from "./index";
 import * as authSession from "../../../../auth/authSession";
 import * as usePermissionsModule from "../../../../auth/usePermissions";
@@ -48,6 +48,17 @@ function switchSection(subTabId: string) {
   });
 }
 
+/**
+ * "activity" and "actions" used to be two separate rail-routed sub-tabs; they
+ * are now one merged "activity" sub-tab with an inner view toggle (see
+ * TabView.tsx). This drives that toggle the way a user would -- clicking the
+ * button -- rather than the rail's `pop-set-subtab` event, which no longer
+ * carries an "actions" id at all.
+ */
+function clickAuditToggle(label: string) {
+  fireEvent.click(screen.getByRole("button", { name: label }));
+}
+
 // UserManagementTab's default export is now `lazy(() => import("./TabView"))`
 // (N2 tab-level code splitting) -- the first render always suspends (no
 // Suspense ancestor here, mirroring ReportDesigner/TemplateBuilder's own
@@ -86,19 +97,21 @@ describe("UserManagementTab — a sub-tab clicked before the tab mounted", () =>
     const handle = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
     mockWorkspace(handle);
     const readSpy = vi
-      .spyOn(actionLog, "readWorkspaceActions")
+      .spyOn(authActivityLog, "readAuthActivityLog")
       .mockResolvedValue([]);
 
     // The click: recorded by the rail, announced to a listener that does not
     // exist yet. No event is dispatched here at all — that is the point.
-    setSubTabSelection("user-management", "actions");
+    setSubTabSelection("user-management", "activity");
 
     render(<UserManagementTab />);
     await waitForMount();
 
-    // The actions section is the only one that reads the workspace action log.
+    // "activity" (the merged activity/actions page) is the only non-default
+    // section reachable from the rail, and its default inner view reads the
+    // login/session activity log.
     await waitFor(() => expect(readSpy).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText("5-system/audit/actions/", { exact: false })).toBeTruthy();
+    expect(await screen.findByText("5-system/audit/activity/", { exact: false })).toBeTruthy();
   });
 
   it("leaves a tab that owns no such sub-tab on its own default", async () => {
@@ -145,7 +158,7 @@ describe("UserManagementTab — activity/actions section-switch skip-guard", () 
     expect(readSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("does not re-fetch workspace actions when switching back to 'actions' for the same workspace", async () => {
+  it("does not re-fetch workspace actions when switching back to the actions view for the same workspace", async () => {
     mockSession();
     const handle = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
     mockWorkspace(handle);
@@ -155,11 +168,13 @@ describe("UserManagementTab — activity/actions section-switch skip-guard", () 
 
     render(<UserManagementTab />);
     await waitForMount();
-    switchSection("actions");
+    switchSection("activity");
+    clickAuditToggle("سجل الإجراءات");
     await waitFor(() => expect(readSpy).toHaveBeenCalledTimes(1));
 
     switchSection("users");
-    switchSection("actions");
+    switchSection("activity");
+    clickAuditToggle("سجل الإجراءات");
 
     await act(async () => {
       await Promise.resolve();
@@ -178,7 +193,8 @@ describe("UserManagementTab — activity/actions section-switch skip-guard", () 
 
     const { rerender } = render(<UserManagementTab />);
     await waitForMount();
-    switchSection("actions");
+    switchSection("activity");
+    clickAuditToggle("سجل الإجراءات");
     await waitFor(() => expect(readSpy).toHaveBeenCalledTimes(1));
 
     mockWorkspace(handleB);

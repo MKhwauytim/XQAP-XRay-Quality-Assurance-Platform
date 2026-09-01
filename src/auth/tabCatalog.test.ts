@@ -110,7 +110,6 @@ describe("tab catalog", () => {
       "user-management/page-permissions",
       "user-management/feature-permissions",
       "user-management/activity",
-      "user-management/actions",
       "user-management/performance",
     ]) {
       expect(roleCeilingFor(tabId), tabId).toEqual(["guest", "employee", "supervisor", "manager", "admin"]);
