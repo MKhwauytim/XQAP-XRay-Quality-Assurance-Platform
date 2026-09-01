@@ -918,6 +918,7 @@ export const DEFAULT_LABELS = {
    */
   um_actions_path:             "5-system/audit/actions/ (ملف لكل مستخدم، مع قراءة السجل المشترك السابق 5-system/audit/actions.log.json)",
   /** Same, for the Activity sub-tab. */
+  um_activity_tab_label:       "متابعة الأنشطة",
   um_activity_desc:            "تعرض هذه الصفحة سجلات الدخول وساعات العمل المحفوظة داخل مساحة العمل في",
   um_activity_path:            "5-system/audit/activity/ (ملف لكل مستخدم، مع قراءة السجل المشترك السابق 5-system/audit/activity.log.json)",
   um_actions_refresh_btn:      "تحديث السجل",

@@ -63,16 +63,23 @@ import { INITIAL_USER_FORM, type UserFormState } from "./userForm";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type PageSection = "users" | "page-permissions" | "feature-permissions" | "activity" | "actions" | "performance";
+type PageSection = "users" | "page-permissions" | "feature-permissions" | "activity" | "performance";
 
 const KNOWN_USER_MANAGEMENT_SECTIONS = new Set<PageSection>([
   "users",
   "page-permissions",
   "feature-permissions",
   "activity",
-  "actions",
   "performance",
 ]);
+
+/**
+ * Inner view within the merged "activity" sub-tab (2026-09-01): "متابعة
+ * الأنشطة" (login/session activity) and "سجل الإجراءات" (the workspace
+ * action log) used to be two separate sidebar sub-tabs/pages. They are now
+ * one page with a small toggle between the two views -- see AuditSections.tsx.
+ */
+type AuditView = "activity" | "actions";
 
 /** This tab's id in the sidebar rail / sub-tab selection store. */
 const TAB_ID = "user-management";
@@ -150,6 +157,7 @@ export default function UserManagementTab() {
   const [isActivityLoading, setIsActivityLoading] = useState(false);
   const [actionEntries, setActionEntries] = useState<WorkspaceActionEntry[]>([]);
   const [isActionsLoading, setIsActionsLoading] = useState(false);
+  const [auditView, setAuditView] = useState<AuditView>("activity");
 
   const session = readSession();
   const { canMutate } = usePermissions();
@@ -222,7 +230,7 @@ export default function UserManagementTab() {
   }, [section, directoryHandle]);
 
   useEffect(() => {
-    if (section !== "actions" && section !== "performance") return;
+    if (!(section === "activity" && auditView === "actions") && section !== "performance") return;
     if (!directoryHandle) {
       // Nothing to read without a connected workspace -- resolve the flag so
       // it can't stay stuck "loading" from a previous in-flight read whose
@@ -248,7 +256,7 @@ export default function UserManagementTab() {
     return () => {
       cancelled = true;
     };
-  }, [section, directoryHandle]);
+  }, [section, auditView, directoryHandle]);
 
   // ── Derived lists ───────────────────────────────────────────────────────────
 
@@ -705,34 +713,55 @@ export default function UserManagementTab() {
         />
       )}
       {section === "activity" && (
-        <ActivitySection
-          users={state.users}
-          entries={activityEntries}
-          isLoading={isActivityLoading}
-          hasWorkspace={!!directoryHandle}
-          onRefresh={() => {
-            setIsActivityLoading(true);
-            void readAuthActivityLog()
-              .then(setActivityEntries)
-              .catch(logRejection("userManagement:refreshActivityLog"))
-              .finally(() => setIsActivityLoading(false));
-          }}
-        />
-      )}
-      {section === "actions" && (
-        <ActionsSection
-          entries={actionEntries}
-          isLoading={isActionsLoading}
-          hasWorkspace={!!directoryHandle}
-          onRefresh={() => {
-            if (!directoryHandle) return;
-            setIsActionsLoading(true);
-            void readWorkspaceActions(directoryHandle)
-              .then(setActionEntries)
-              .catch(logRejection("userManagement:refreshWorkspaceActions"))
-              .finally(() => setIsActionsLoading(false));
-          }}
-        />
+        <>
+          <div className="um-section">
+            <div className="um-feat-nav">
+              <button
+                type="button"
+                className={`um-feat-tab ${auditView === "activity" ? "active" : ""}`}
+                onClick={() => setAuditView("activity")}
+              >
+                {getLabels().um_activity_tab_label}
+              </button>
+              <button
+                type="button"
+                className={`um-feat-tab ${auditView === "actions" ? "active" : ""}`}
+                onClick={() => setAuditView("actions")}
+              >
+                {getLabels().um_actions_tab_label}
+              </button>
+            </div>
+          </div>
+          {auditView === "activity" ? (
+            <ActivitySection
+              users={state.users}
+              entries={activityEntries}
+              isLoading={isActivityLoading}
+              hasWorkspace={!!directoryHandle}
+              onRefresh={() => {
+                setIsActivityLoading(true);
+                void readAuthActivityLog()
+                  .then(setActivityEntries)
+                  .catch(logRejection("userManagement:refreshActivityLog"))
+                  .finally(() => setIsActivityLoading(false));
+              }}
+            />
+          ) : (
+            <ActionsSection
+              entries={actionEntries}
+              isLoading={isActionsLoading}
+              hasWorkspace={!!directoryHandle}
+              onRefresh={() => {
+                if (!directoryHandle) return;
+                setIsActionsLoading(true);
+                void readWorkspaceActions(directoryHandle)
+                  .then(setActionEntries)
+                  .catch(logRejection("userManagement:refreshWorkspaceActions"))
+                  .finally(() => setIsActionsLoading(false));
+              }}
+            />
+          )}
+        </>
       )}
       {section === "performance" && (
         <PerformanceSection

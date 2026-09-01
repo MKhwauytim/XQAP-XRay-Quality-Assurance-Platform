@@ -70,19 +70,21 @@ export const TAB_CATALOG: readonly TabCatalogEntry[] = [
   // since admin is never a column there (MANAGED_ROLES excludes it -- see
   // userManagement.ts). That widening still excluded `guest` "deliberately" (it
   // mutates other accounts/permissions -- nothing for a viewer to view), but two of
-  // these six sub-tabs (activity, actions) are pure audit-trail reads, exactly what
-  // the read-only-observer role exists for, and the owner asked for every remaining
-  // "مقيّد بالنظام" cell to go regardless. Widened to ALL_ROLES (2026-08-30) across
-  // the board rather than splitting the six by mutate-vs-view, for one matrix rule
-  // admins can reason about instead of two. Widening only makes a row GRANTABLE;
-  // every managed role -- guest included -- still ships "none" by default
-  // (createDefaultPermissions()), so nothing is auto-elevated by this change alone.
+  // these sub-tabs (merged into "activity" below, 2026-09-01) were pure audit-trail
+  // reads, exactly what the read-only-observer role exists for, and the owner asked
+  // for every remaining "مقيّد بالنظام" cell to go regardless. Widened to ALL_ROLES
+  // (2026-08-30) across the board rather than splitting them by mutate-vs-view, for
+  // one matrix rule admins can reason about instead of two. Widening only makes a
+  // row GRANTABLE; every managed role -- guest included -- still ships "none" by
+  // default (createDefaultPermissions()), so nothing is auto-elevated by this change alone.
   { id: "user-management", label: "إدارة المستخدمين", allowedRoles: ALL_ROLES, group: "system" },
   { id: "user-management/users", label: "المستخدمون", parentId: "user-management", allowedRoles: ALL_ROLES },
   { id: "user-management/page-permissions", label: "صلاحيات الصفحات", parentId: "user-management", allowedRoles: ALL_ROLES },
   { id: "user-management/feature-permissions", label: "صلاحيات الميزات", parentId: "user-management", allowedRoles: ALL_ROLES },
-  { id: "user-management/activity", label: "متابعة الأنشطة", parentId: "user-management", allowedRoles: ALL_ROLES },
-  { id: "user-management/actions", label: "سجل الإجراءات", parentId: "user-management", allowedRoles: ALL_ROLES },
+  // "activity" and "actions" were two separate sub-tabs/pages until 2026-09-01, when
+  // they were merged into one page (an inner toggle switches between the two views) --
+  // see AuditSections.tsx. The id/label here now cover both.
+  { id: "user-management/activity", label: "النشاط والإجراءات", parentId: "user-management", allowedRoles: ALL_ROLES },
   { id: "user-management/performance", label: "تقييم الأداء", parentId: "user-management", allowedRoles: ALL_ROLES },
   // Widened from ["guest", "admin"] (2026-08-27): excluding employee/supervisor/
   // manager made the entire settings row a dead "مقيّد بالنظام" block for 3 of
