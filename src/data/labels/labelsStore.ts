@@ -1846,6 +1846,18 @@ export const DEFAULT_LABELS = {
   demo_debug_no_errors:          "لا توجد أخطاء مسجّلة.",
   demo_debug_export_btn:         "تصدير تقرير كامل",
   demo_debug_exporting:          "جارٍ التصدير...",
+
+  // ── سجل التحديثات (Changelog tab) — latest 10 notable edit-log entries,
+  // bucketed at build time (see src/data/changelog/). Titles stay in their
+  // original English/technical wording; only the surrounding chrome is Arabic.
+  changelog_eyebrow:             "آخر تحديثات النظام",
+  changelog_title:               "سجل التحديثات",
+  changelog_subtitle:            "أحدث 10 تحديثات على التطبيق، مصنّفة حسب نوعها.",
+  changelog_bucket_fix:          "إصلاح",
+  changelog_bucket_feature:      "ميزة جديدة",
+  changelog_bucket_enhancement:  "تحسين",
+  changelog_bucket_redesign:     "إعادة تصميم",
+  changelog_empty:               "لا توجد تحديثات مسجَّلة بعد.",
 } as const;
 
 export type LabelKey = keyof typeof DEFAULT_LABELS;

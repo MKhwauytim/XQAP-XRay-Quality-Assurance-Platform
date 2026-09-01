@@ -1,20 +1,26 @@
 {
   "name": "x-ray-quality-app",
   "private": true,
-  "version": "131.3.0",
+  "version": "131.4.0",
   "type": "module",
   "engines": {
     "node": ">=22 <23"
   },
   "scripts": {
+    "predev": "npm run generate:changelog",
     "dev": "vite",
+    "prebuild": "npm run generate:changelog",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "lint:ci": "eslint src e2e playwright.config.ts --max-warnings 0",
+    "pretypecheck": "npm run generate:changelog",
     "typecheck": "tsc -b",
     "preview": "vite preview",
+    "pretest": "npm run generate:changelog",
     "test": "vitest",
+    "pretest:run": "npm run generate:changelog",
     "test:run": "vitest run",
+    "generate:changelog": "node scripts/generate-changelog-data.mjs",
     "check:hex-literals": "node scripts/check-hex-literals.mjs",
     "check:complexity": "eslint src --max-warnings 0 --rule \"complexity: [error, 60]\" --rule \"max-lines-per-function: [error, 1450]\"",
     "check:bundle-size": "node scripts/check-bundle-size.mjs",

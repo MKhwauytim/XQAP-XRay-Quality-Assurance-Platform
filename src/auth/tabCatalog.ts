@@ -92,6 +92,12 @@ export const TAB_CATALOG: readonly TabCatalogEntry[] = [
   // makes the section GRANTABLE; createDefaultPermissions() still ships "none"
   // for every non-admin role on settings, so nothing is auto-elevated by this
   // change alone. `guest` was already allowed and stays allowed -- only widening.
+  // Read-only, informational: the latest 10 notable app updates (see
+  // src/data/changelog/). Ceiling is ALL_ROLES so an admin can grant it to
+  // anyone; createDefaultPermissions() has no explicit row for it, so every
+  // non-admin role defaults to "none" (see getRolePermission's fallback) until
+  // an admin opts a role in.
+  { id: "changelog", label: "سجل التحديثات", allowedRoles: ALL_ROLES, group: "system" },
   { id: "settings", label: "إدارة الإعدادات", allowedRoles: ALL_ROLES, group: "system" },
 ] as const;
 
