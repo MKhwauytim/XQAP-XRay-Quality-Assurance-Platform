@@ -33,9 +33,6 @@ describe("MappingSettingsModal behavior wiring", () => {
           biRows: 2,
           certScanProvided: false,
           finalRows: 2,
-          riskSheetNames: ["Detected Risk"],
-          biSheetNames: ["Detected BI"],
-          riskColumnHints: { xrayImageId: ["Detected ID"] },
         }}
       />,
     );
@@ -64,20 +61,6 @@ describe("MappingSettingsModal behavior wiring", () => {
     expect(onConfigChange).toHaveBeenLastCalledWith(
       expect.objectContaining({
         stageMappings: expect.objectContaining({ first: ["FIRST", "1"] }),
-      }),
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "أوراق العمل (Tabs)" }));
-    fireEvent.click(
-      screen.getByRole("button", { name: "تطبيق الأعمدة المكتشفة" }),
-    );
-    expect(onConfigChange).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        mappingTemplates: expect.arrayContaining([
-          expect.objectContaining({
-            columnMappings: expect.objectContaining({ xrayImageId: expect.arrayContaining(["Detected ID"]) }),
-          }),
-        ]),
       }),
     );
 

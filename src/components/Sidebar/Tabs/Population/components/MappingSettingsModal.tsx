@@ -8,7 +8,6 @@ import { ColumnMappingsSection } from "./ColumnMappingsSection";
 import {
   ExportColumnsSection,
   StageMappingsSection,
-  WorkbookSheetsSection,
 } from "./MappingSettingsSecondarySections";
 import { MappingSettingsTabBar } from "./MappingSettingsTabBar";
 import { ProcessingWorkflowSection } from "./ProcessingWorkflowSection";
@@ -235,19 +234,6 @@ export default function MappingSettingsModal({
               stageMappings={controller.stageMappings}
               onChange={controller.handleStageMappingChange}
               onReset={controller.handleResetStageMappings}
-            />
-          )}
-
-          {controller.activeTab === "sheets" && (
-            <WorkbookSheetsSection
-              fields={controller.fieldOptions}
-              riskSheetNames={controller.riskSheetNames}
-              biSheetNames={controller.biSheetNames}
-              riskColumnHints={processingContext?.riskColumnHints ?? {}}
-              biColumnHints={processingContext?.biColumnHints ?? {}}
-              onApplyDetected={
-                controller.handleApplyDetectedWorkbookSettings
-              }
             />
           )}
 
