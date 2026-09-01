@@ -85,7 +85,7 @@ export function DemoDebugPanel({ onClose }: DemoDebugPanelProps) {
   }
 
   return (
-    <div className="demo-debug-panel" dir="rtl" role="region" aria-label={L.demo_debug_panel_title}>
+    <div className="demo-debug-panel" dir="ltr" role="region" aria-label={L.demo_debug_panel_title}>
       <div className="demo-debug-panel-header">
         <span className="demo-debug-panel-title">
           <Activity size={14} aria-hidden />

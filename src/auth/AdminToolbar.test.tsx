@@ -31,9 +31,9 @@ vi.mock("../components/GlobalMonthSelector/GlobalMonthSelector", () => ({
 }));
 vi.mock("../data/workspace/workspaceSync", () => ({
   runSync: mocks.runSync,
-  // Read by the demo-only DemoDebugPanel (rendered when debug mode is toggled
-  // on for a demo session) — not exercised by the non-demo tests below, but
-  // the module still needs to export something callable.
+  // Read by the admin-only DemoDebugPanel (rendered when debug mode is
+  // toggled on for a real admin session) — not exercised by the non-admin
+  // tests below, but the module still needs to export something callable.
   getSyncIntervalMs: () => 45_000,
   getLastSyncStartedAt: () => 0,
 }));
@@ -159,8 +159,9 @@ describe("AdminToolbar — the manual sync trigger", () => {
   });
 });
 
-describe("AdminToolbar — demo-only debug tools", () => {
+describe("AdminToolbar — admin-only debug tools", () => {
   const demoSession: AuthSession = { ...session, role: "admin", username: "demo", mode: "demo" };
+  const realAdminSession: AuthSession = { ...session, role: "admin", username: "admin" };
 
   afterEach(async () => {
     cleanup();
@@ -174,21 +175,28 @@ describe("AdminToolbar — demo-only debug tools", () => {
     return button;
   }
 
-  it("is not rendered for a non-demo session, even an admin", () => {
+  it("is not rendered for a demo session, even though it carries the admin role", () => {
     render(
-      <AdminToolbar
-        session={{ ...session, role: "admin" }}
-        previewRole={null}
-        onPreviewRoleChange={() => {}}
-        onFeedback={() => {}}
-      />
+      <AdminToolbar session={demoSession} previewRole={null} onPreviewRoleChange={() => {}} onFeedback={() => {}} />
     );
     expect(document.querySelector(".auth-toolbar-debug")).toBeNull();
   });
 
+  it("is not rendered for a non-admin role", () => {
+    renderToolbar();
+    expect(document.querySelector(".auth-toolbar-debug")).toBeNull();
+  });
+
+  it("is rendered for a real admin session", () => {
+    render(
+      <AdminToolbar session={realAdminSession} previewRole={null} onPreviewRoleChange={() => {}} onFeedback={() => {}} />
+    );
+    expect(document.querySelector(".auth-toolbar-debug")).not.toBeNull();
+  });
+
   it("toggles the debug panel and the export button on/off, and the panel's close button toggles it back off", () => {
     render(
-      <AdminToolbar session={demoSession} previewRole={null} onPreviewRoleChange={() => {}} onFeedback={() => {}} />
+      <AdminToolbar session={realAdminSession} previewRole={null} onPreviewRoleChange={() => {}} onFeedback={() => {}} />
     );
 
     expect(document.querySelector(".demo-debug-panel")).toBeNull();
@@ -204,7 +212,22 @@ describe("AdminToolbar — demo-only debug tools", () => {
     expect(document.querySelector(".auth-toolbar-debug-export")).toBeNull();
   });
 
-  it("records a sample for the demo debug panel when a manual refresh runs", async () => {
+  it("records a sample for the debug panel when a manual refresh runs", async () => {
+    mocks.runSync.mockResolvedValue({ ran: true, ok: true, changed: new Set(["distribution"]), broadcast: true });
+    const { getSyncSamples, __clearSyncSamplesForTests } = await import("../data/debug/syncMetrics");
+    __clearSyncSamplesForTests();
+
+    render(
+      <AdminToolbar session={realAdminSession} previewRole={null} onPreviewRoleChange={() => {}} onFeedback={() => {}} />
+    );
+    fireEvent.click(document.querySelector<HTMLButtonElement>(".auth-toolbar-refresh")!);
+
+    await waitFor(() => expect(getSyncSamples()).toHaveLength(1));
+    expect(getSyncSamples()[0]).toMatchObject({ ok: true, ran: true, broadcast: true, changedCount: 1 });
+  });
+
+  it("does not record a sample when a manual refresh runs for a demo session", async () => {
+    const priorCalls = mocks.runSync.mock.calls.length;
     mocks.runSync.mockResolvedValue({ ran: true, ok: true, changed: new Set(["distribution"]), broadcast: true });
     const { getSyncSamples, __clearSyncSamplesForTests } = await import("../data/debug/syncMetrics");
     __clearSyncSamplesForTests();
@@ -214,7 +237,7 @@ describe("AdminToolbar — demo-only debug tools", () => {
     );
     fireEvent.click(document.querySelector<HTMLButtonElement>(".auth-toolbar-refresh")!);
 
-    await waitFor(() => expect(getSyncSamples()).toHaveLength(1));
-    expect(getSyncSamples()[0]).toMatchObject({ ok: true, ran: true, broadcast: true, changedCount: 1 });
+    await waitFor(() => expect(mocks.runSync.mock.calls.length).toBe(priorCalls + 1));
+    expect(getSyncSamples()).toHaveLength(0);
   });
 });

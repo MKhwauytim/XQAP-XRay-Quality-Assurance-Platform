@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v131.5",
+    "date": "2026-09-01",
+    "bucket": "enhancement",
+    "scope": "auth",
+    "title": "move debug tools from demo session to admin, translate to English"
+  },
+  {
     "version": "v131.4",
     "date": "2026-09-01",
     "bucket": "feature",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "backup",
     "title": "broadcast a full data-refresh after a workspace restore"
-  },
-  {
-    "version": "v130.13",
-    "date": "2026-08-31",
-    "bucket": "fix",
-    "scope": "auth",
-    "title": "lock out the hidden bootstrap-admin passcode modal after repeated wrong attempts"
   }
 ];
