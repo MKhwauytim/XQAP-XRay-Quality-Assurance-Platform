@@ -142,6 +142,40 @@ describe("PerformanceSection", () => {
     expect(dayLabel.textContent).toMatch(/\d/);
   });
 
+  it("splits the team-mode working-hours chart into one row per employee per day when multiple days have notable gaps, instead of overlaying every day on one track", () => {
+    // Five 5-minute gaps on day 1 establish a 5-minute monthly baseline
+    // (MIN_GAP_SAMPLES_FOR_BASELINE = 5); the day-2 and day-3 gaps are then
+    // far enough past that baseline to classify as "large" and each should
+    // surface as its own row, not merged into a single per-employee track.
+    const baselineFinishes = ["06:05", "06:10", "06:15", "06:20", "06:25"].map((time, i) =>
+      actionEntry({ id: `base-${i}`, at: `2026-06-01T${time}:00.000Z` })
+    );
+    render(
+      <PerformanceSection
+        users={[SARA]}
+        activityEntries={[
+          activityEntry({ id: "auth-d1", signedInAt: "2026-06-01T06:00:00.000Z", lastSeenAt: "2026-06-01T06:25:00.000Z" }),
+          activityEntry({ id: "auth-d2", signedInAt: "2026-06-02T06:00:00.000Z", lastSeenAt: "2026-06-02T07:15:00.000Z" }),
+          activityEntry({ id: "auth-d3", signedInAt: "2026-06-03T06:00:00.000Z", lastSeenAt: "2026-06-03T07:20:00.000Z" }),
+        ]}
+        actionEntries={[
+          ...baselineFinishes,
+          actionEntry({ id: "d2-finish", at: "2026-06-02T07:15:00.000Z" }),
+          actionEntry({ id: "d3-finish", at: "2026-06-03T07:20:00.000Z" }),
+        ]}
+        isLoading={false}
+        hasWorkspace={true}
+        onRefresh={vi.fn()}
+      />
+    );
+
+    const rowLabels = [...document.querySelectorAll(".um-perf-hour-row-label")].map((el) => el.textContent);
+    const dayRows = rowLabels.filter((text) => text?.startsWith("Sara Q ·"));
+    expect(dayRows.length).toBe(2);
+    expect(new Set(dayRows).size).toBe(2); // two distinct day labels, not the same day twice
+    expect(rowLabels).not.toContain("Sara Q"); // no lumped single row once notable gaps exist
+  });
+
   it("calls onRefresh when the refresh button is clicked", () => {
     const onRefresh = vi.fn();
     render(
