@@ -676,6 +676,7 @@ export const DEMO_FIELD_ID_BY_LABEL: Record<string, string> = {
   "أسباب عدم المطابقة (أخرى)": "mismatchReasonsOther",
   "ملاحظات على البيان الجمركي": "declarationNotes",
   [DEMO_RESULT_FIELD_LABEL]: DEMO_RESULT_FIELD_ID,
+  "نوع الاشتباه": "suspicionType",
   "تقييم الاشتباه": "suspicionLevel",
   "موقع الاشتباه": "suspicionLocation",
   "الاصناف المشبوهة": "suspectedTypes",
@@ -808,6 +809,7 @@ function buildDemoAnswerFields({ qualityResult, isDraft, seq }: SeedAnswerFields
     fields.push(
       { fieldId: "mismatchReasons", value: "وجود أجسام أو مواد غير مذكورة" },
       { fieldId: DEMO_RESULT_FIELD_ID, value: qualityResult },
+      { fieldId: "suspicionType", value: seq % 2 === 0 ? "اشتباه جمركي" : "اشتباه أمني" },
       { fieldId: "suspicionLevel", value: "متوسط" },
       { fieldId: "suspicionLocation", value: "الحمولة" },
       { fieldId: "suspectedTypes", value: "بضائع غير مصرح بها ضمن الحمولة" },

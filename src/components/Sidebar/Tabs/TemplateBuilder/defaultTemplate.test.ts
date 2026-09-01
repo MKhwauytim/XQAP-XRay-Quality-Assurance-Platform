@@ -65,12 +65,24 @@ describe("default inspection template", () => {
   it("keeps the result-quality fields intact as the third phase", () => {
     expect(phaseFields(schema, 2).map((f) => f.label)).toEqual([
       "صحة النتيجة",
+      "نوع الاشتباه",
       "تقييم الاشتباه",
       "موقع الاشتباه",
       "الاصناف المشبوهة",
       "الية التهريب المحتملة",
       "الملاحظات العامة",
     ]);
+  });
+
+  it("asks the suspicion type only when the result is flagged as a suspicion", () => {
+    const validity = fieldIdOf(schema, "صحة النتيجة");
+    const suspicionType = schema.fields.find((f) => f.label === "نوع الاشتباه");
+    expect(suspicionType?.condition).toEqual({
+      sourceFieldId: validity,
+      operator: "equals",
+      value: "اشتباه",
+    });
+    expect(suspicionType?.options).toEqual(["اشتباه أمني", "اشتباه جمركي"]);
   });
 
   it("records both cargo natures and the mismatch reasons as multiselect", () => {
