@@ -34,6 +34,7 @@ import {
   type UserManagementState,
 } from "../../../../auth/userManagement";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
+import { useUnsavedWork } from "../../../../hooks/useUnsavedWork";
 import { getUserWorkspaceFootprint } from "../../../../data/samples/sampleMirrorStorage";
 import { checkUsernameRenameBlocked } from "../../../../auth/usernameRenameGuard";
 import {
@@ -164,6 +165,16 @@ export default function UserManagementTab() {
   const { directoryHandle } = useWorkspace();
   const savingToDiskRef = useRef(false);
   const pendingStateRef = useRef<UserManagementState | null>(null);
+  // Tracks how many saveUsersToDisk() calls have not yet resolved. A page
+  // refresh/close discards the runtime user-management state entirely (it's
+  // an in-memory module variable) and, on reconnect, rebuilds it purely from
+  // whatever `syncUserManagementToDisk` last actually landed on disk. Since
+  // that write is fire-and-forget from persistState's perspective, a refresh
+  // that lands before it completes silently and permanently loses the edit
+  // (e.g. a just-added user) with no error shown anywhere -- the success
+  // toast fires the instant the write is *requested*, not when it lands.
+  const pendingDiskSaveCountRef = useRef(0);
+  const [hasPendingDiskSave, setHasPendingDiskSave] = useState(false);
   // Remembers which directoryHandle each section's data was last successfully
   // loaded for, so switching sections back and forth within one mounted
   // UserManagementTab instance does not re-fetch on every switch -- only on
@@ -287,11 +298,20 @@ export default function UserManagementTab() {
 
   const saveUsersToDisk = useCallback((next: UserManagementState): Promise<void> => {
     if (!directoryHandle) return Promise.resolve();
+    pendingDiskSaveCountRef.current += 1;
+    if (pendingDiskSaveCountRef.current === 1) setHasPendingDiskSave(true);
     return coalesceToLatest(savingToDiskRef, pendingStateRef, async (state) => {
       const actor = readSession()?.username ?? "admin";
       await syncUserManagementToDisk(directoryHandle, state, actor);
-    }, next);
+    }, next).finally(() => {
+      pendingDiskSaveCountRef.current -= 1;
+      if (pendingDiskSaveCountRef.current === 0) setHasPendingDiskSave(false);
+    });
   }, [directoryHandle]);
+
+  // Ask before a reload/close discards a write that hasn't landed on disk yet,
+  // and pin this tab against the tab-mount LRU eviction for the same reason.
+  useUnsavedWork(TAB_ID, hasPendingDiskSave);
 
   const persistState = useCallback(
     (next: UserManagementState): void => {

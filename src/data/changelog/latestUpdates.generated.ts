@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v131.8",
+    "date": "2026-09-01",
+    "bucket": "fix",
+    "scope": "user-management",
+    "title": "guard against losing a newly-added or edited user to a page reload before its disk write lands"
+  },
+  {
     "version": "v131.6",
     "date": "2026-09-01",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": null,
     "title": "column filter dropdowns and pending-reopen now respect real column data / active table filters"
-  },
-  {
-    "version": "v130.15",
-    "date": "2026-08-31",
-    "bucket": "fix",
-    "scope": "distribution",
-    "title": "gate the immediate-replace button behind an outstanding replacement request"
   }
 ];
