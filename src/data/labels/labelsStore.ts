@@ -1815,7 +1815,7 @@ export const DEFAULT_LABELS = {
   adhoc_hist_import_failed:         "تعذّر الاستيراد: {error}",
   adhoc_wizard_step3_title_historical: "المراجعة والاستيراد",
 
-  // ── Demo debug tools panel (AdminToolbar toggle, demo sessions only) ───────
+  // ── Admin debug tools panel (AdminToolbar toggle, real admin sessions only) ─
   demo_debug_panel_title:        "Admin Debug Tools",
   demo_debug_close:              "Close",
   demo_debug_section_connection: "Connection",
@@ -1846,6 +1846,18 @@ export const DEFAULT_LABELS = {
   demo_debug_no_errors:          "No errors recorded.",
   demo_debug_export_btn:         "Export Full Report",
   demo_debug_exporting:          "Exporting...",
+
+  // ── سجل التحديثات (Changelog tab) — latest 10 notable edit-log entries,
+  // bucketed at build time (see src/data/changelog/). Titles stay in their
+  // original English/technical wording; only the surrounding chrome is Arabic.
+  changelog_eyebrow:             "آخر تحديثات النظام",
+  changelog_title:               "سجل التحديثات",
+  changelog_subtitle:            "أحدث 10 تحديثات على التطبيق، مصنّفة حسب نوعها.",
+  changelog_bucket_fix:          "إصلاح",
+  changelog_bucket_feature:      "ميزة جديدة",
+  changelog_bucket_enhancement:  "تحسين",
+  changelog_bucket_redesign:     "إعادة تصميم",
+  changelog_empty:               "لا توجد تحديثات مسجَّلة بعد.",
 } as const;
 
 export type LabelKey = keyof typeof DEFAULT_LABELS;
