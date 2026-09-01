@@ -33,7 +33,7 @@ import { saveTemplate } from "../../../../../data/templates/templateStorage";
 import { saveInspectionTemplateSelection } from "../../../../../data/templates/templateSelectionStorage";
 import type { TemplateSchema } from "../../../../../data/templates/templateTypes";
 import { DEFAULT_LABELS } from "../../../../../data/labels/labelsStore";
-import { broadcastDataRefresh } from "../../../../../data/workspace/dataRefreshSignal";
+import { broadcastDataRefresh, type DataRefreshFamily } from "../../../../../data/workspace/dataRefreshSignal";
 import XrayInspectionResults from "./XrayInspectionResults";
 
 const MONTH = "5-may-2026";
@@ -196,6 +196,44 @@ describe("XrayInspectionResults view-mode toggle (no refetch regression)", () =>
 
     getDirectoryHandleSpy.mockRestore();
     getFileHandleSpy.mockRestore();
+  });
+});
+
+describe("XrayInspectionResults periodic refresh is family-scoped (app-perf pass)", () => {
+  it("ignores a periodic tick that changed only an unrelated family, and reloads on one that changed distribution", async () => {
+    writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await saveSampleMaster(root, MONTH, makeSample([makeRow("IMG-ACTIVE"), makeRow("IMG-NEW")]));
+    const assignResult = await appendDistributionEvents(root, MONTH, [
+      buildAssignEvent({ xrayImageId: "IMG-ACTIVE", assignedTo: "emp-1", eventBy: "admin" }),
+    ]);
+    if (!assignResult.ok) throw new Error(`seed assign failed: ${assignResult.error}`);
+
+    render(<XrayInspectionResults directoryHandle={root} />);
+    await waitFor(() => expect(screen.getAllByText("IMG-ACTIVE").length).toBeGreaterThan(0));
+    expect(screen.queryByText("IMG-NEW")).not.toBeInTheDocument();
+
+    // A second assignment lands (e.g. from another tab/machine) after the initial load.
+    const secondAssign = await appendDistributionEvents(root, MONTH, [
+      buildAssignEvent({ xrayImageId: "IMG-NEW", assignedTo: "emp-1", eventBy: "admin" }),
+    ]);
+    if (!secondAssign.ok) throw new Error(`seed second assign failed: ${secondAssign.error}`);
+
+    // A periodic tick naming only an unrelated family must not reload this view --
+    // IMG-NEW stays hidden even though it now exists on disk.
+    await act(async () => {
+      broadcastDataRefresh({ source: "periodic", changed: new Set<DataRefreshFamily>(["notifications"]) });
+      await Promise.resolve();
+    });
+    expect(screen.queryByText("IMG-NEW")).not.toBeInTheDocument();
+
+    // A periodic tick naming "distribution" must reload and pick up the new row.
+    act(() => {
+      broadcastDataRefresh({ source: "periodic", changed: new Set<DataRefreshFamily>(["distribution"]) });
+    });
+    await waitFor(() => expect(screen.getAllByText("IMG-NEW").length).toBeGreaterThan(0));
   });
 });
 

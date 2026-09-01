@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v131.6",
+    "date": "2026-09-01",
+    "bucket": "fix",
+    "scope": "employee-workspace",
+    "title": "stop the results screen's periodic refresh from re-reading the whole month on every tick"
+  },
+  {
     "version": "v131.5",
     "date": "2026-09-01",
     "bucket": "enhancement",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "distribution",
     "title": "gate the immediate-replace button behind an outstanding replacement request"
-  },
-  {
-    "version": "v130.14",
-    "date": "2026-08-31",
-    "bucket": "fix",
-    "scope": "backup",
-    "title": "broadcast a full data-refresh after a workspace restore"
   }
 ];

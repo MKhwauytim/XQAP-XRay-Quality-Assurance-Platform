@@ -36,7 +36,11 @@ import {
 import type { ReferralRequest, ReplacementRequest } from "../../../../../data/referral/referralTypes";
 import { loadAdminBrowsePreset, loadUserBrowsePreset } from "../../../../../data/preferences/browsePresetStorage";
 import { useColumnPreset } from "../../../../../data/preferences/useColumnPreset";
-import { notifyLocalDataChange, subscribeToDataRefresh } from "../../../../../data/workspace/dataRefreshSignal";
+import {
+  notifyLocalDataChange,
+  subscribeToDataChange,
+  type DataRefreshFamily,
+} from "../../../../../data/workspace/dataRefreshSignal";
 import { loadSampleMaster } from "../../../../../data/sampling/sampleStorage";
 import {
   displayXrayImageId,
@@ -56,6 +60,16 @@ import { formatStageLabel } from "../../../../../data/population/stageHelpers";
 
 const RESULTS_COL_KEY = "xray_inspection_results_cols_v1";
 const REFERRALS_PRESET_KEY = "xray-referrals";
+
+// loadData reads distribution entries/log (movement), referral/replacement
+// requests (audit tabs), and answer files -- so a periodic tick only needs to
+// re-run it when one of those three families actually changed. Same list as
+// useApprovalData.ts's DECISION_REFRESH_FAMILIES, which reads the same data.
+// Unlike the old blanket subscribeToDataRefresh, this stops the every-45s tick
+// from re-parsing the whole month's sample master + distribution + referral/
+// replacement logs (+ every employee's answer file for a supervisor) when
+// nothing in these families moved.
+const RESULTS_REFRESH_FAMILIES: readonly DataRefreshFamily[] = ["requests", "distribution", "answers"];
 
 const SAMPLE_DEFAULT_VISIBLE = [
   "xrayImageId", "movementStatus", "stage", "assignedTo", "movementFrom", "movementTo", "portName",
@@ -343,11 +357,18 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
     return () => window.clearTimeout(timer);
   }, [loadData]);
 
-  // Re-fetch on the app-wide refresh signal (manual toolbar button + 5-minute
-  // auto-refresh) so results/movements recorded elsewhere show up here too. Passed
-  // silently so it never force-collapses a supervisor's currently open quality-note
-  // editor (see the `silent` handling inside loadData above).
-  useEffect(() => subscribeToDataRefresh(() => { void loadData({ silent: true }); }), [loadData]);
+  // Re-fetch on the app-wide refresh signal (manual toolbar button + periodic
+  // sync tick) so results/movements recorded elsewhere show up here too. Family-scoped
+  // (RESULTS_REFRESH_FAMILIES) rather than the blanket subscribeToDataRefresh: a
+  // periodic tick that didn't touch distribution/requests/answers now costs nothing
+  // here instead of re-reading the whole month. A manual refresh still always fires
+  // (subscribeToDataChange's unconditional "manual" semantics). Passed silently so it
+  // never force-collapses a supervisor's currently open quality-note editor (see the
+  // `silent` handling inside loadData above).
+  useEffect(
+    () => subscribeToDataChange(RESULTS_REFRESH_FAMILIES, () => { void loadData({ silent: true }); }),
+    [loadData]
+  );
 
   // Pure filter over the raw audit-log state loadData already fetched — buildAuditRows
   // itself takes `mode` and returns [] outright for "active", so re-deriving this on
