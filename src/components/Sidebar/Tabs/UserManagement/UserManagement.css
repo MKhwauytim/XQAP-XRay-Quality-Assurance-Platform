@@ -1479,7 +1479,7 @@
 }
 
 .um-perf-hour-row-label-spacer {
-  width: 108px;
+  width: 190px;
   flex-shrink: 0;
 }
 
@@ -1512,7 +1512,7 @@
 }
 
 .um-perf-hour-row-label {
-  width: 100px;
+  width: 182px;
   flex-shrink: 0;
   font-size: 11px;
   font-weight: 700;
@@ -1559,7 +1559,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding-inline-start: 108px;
+  padding-inline-start: 190px;
 }
 
 .um-perf-hour-chip {
