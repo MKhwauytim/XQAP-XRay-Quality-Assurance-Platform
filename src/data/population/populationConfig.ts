@@ -22,10 +22,6 @@ export type CustomField = {
 export type MappingTemplate = {
   templateId: string;
   name: string;
-  sheetPatterns: {
-    risk: string[];
-    bi: string[];
-  };
   /** Column aliases used when reading the Risk data file. */
   columnMappings: Record<string, string[]>;
   /** Column aliases used when reading the BI data file. Falls back to columnMappings if absent. */
@@ -103,6 +99,25 @@ export type EmployeeStageAllocation = {
   maxWorkload?: number;
 };
 
+/**
+ * Which ports an employee may receive samples from during distribution
+ * (manual assignment and automatic bulk assignment alike).
+ *
+ * `restricted: false` (or no entry at all for a username) means unrestricted:
+ * every current AND future port is allowed — this is the default for every
+ * employee and keeps every legacy config.json (which predates this field)
+ * behaving exactly as before. `restricted: true` limits the employee to
+ * exactly the ports named in `enabledPorts`; a port added to the population
+ * later is NOT implicitly included, which is why the UI offers an explicit
+ * "remove all restrictions" action rather than expecting an admin to
+ * re-check a newly configured port for every restricted employee.
+ */
+export type EmployeePortRestriction = {
+  username: string;
+  restricted: boolean;
+  enabledPorts: string[];
+};
+
 export type PopulationConfig = {
   systemFields: SystemField[];
   customFields: CustomField[];
@@ -112,6 +127,7 @@ export type PopulationConfig = {
   exportTemplates: ExportTemplate[];
   samplingRules: StageSamplingRule[];
   employeeAllocations: EmployeeStageAllocation[];
+  employeePortRestrictions: EmployeePortRestriction[];
 };
 
 export const MONTHLY_SAMPLE_TARGET = 6500;
@@ -147,10 +163,6 @@ export const DEFAULT_SYSTEM_FIELDS: SystemField[] = [
 export const DEFAULT_MAPPING_TEMPLATE: MappingTemplate = {
   templateId: "default-template",
   name: "القالب الافتراضي المدمج",
-  sheetPatterns: {
-    risk: ["بحري", "بري", "افراد", "عبور"],
-    bi: ["وارد", "صادر"]
-  },
   columnMappings: {
     xrayImageId: ["معرف الأشعة", "معرف الاشعة", "رقم صورة الأشعة", "رقم صورة الاشعة", "معرف الأشعة", "معرف الاشعة", "XRAY_SCAN_ID"],
     xrayEntryDate: ["تاريخ دخول الأشعة", "تاريخ دخول الاشعة", "تاريخ الاشعة", "تاريخ الأشعة"],
@@ -383,7 +395,8 @@ export const DEFAULT_POPULATION_CONFIG: PopulationConfig = {
     }
   ],
   samplingRules: DEFAULT_SAMPLING_RULES,
-  employeeAllocations: []
+  employeeAllocations: [],
+  employeePortRestrictions: []
 };
 
 export async function loadPopulationConfig(
@@ -411,7 +424,8 @@ export async function loadPopulationConfig(
         processingWorkflow: loaded.processingWorkflow || DEFAULT_PROCESSING_WORKFLOW,
         exportTemplates: loaded.exportTemplates || [{ templateId: "default-export", name: "تصدير افتراضي كامل", columns: DEFAULT_EXPORT_COLUMNS }],
         samplingRules: loaded.samplingRules || DEFAULT_SAMPLING_RULES,
-        employeeAllocations: loaded.employeeAllocations || []
+        employeeAllocations: loaded.employeeAllocations || [],
+        employeePortRestrictions: loaded.employeePortRestrictions || []
       };
     }
   } catch (error) {

@@ -1,7 +1,6 @@
 import { ChevronDown, ChevronUp } from "lucide-react";
 import type {
   ExportColumnSetting,
-  MappingTemplate,
   PopulationConfig,
   StageAliasMappings,
   StageKey,
@@ -50,32 +49,29 @@ export function StageMappingsSection({
 }
 
 export function WorkbookSheetsSection({
-  template,
   fields,
   riskSheetNames,
   biSheetNames,
   riskColumnHints,
   biColumnHints,
   onApplyDetected,
-  onPatternChange,
 }: {
-  template: MappingTemplate;
   fields: Array<{ key: string; label: string }>;
   riskSheetNames: string[];
   biSheetNames: string[];
   riskColumnHints: Record<string, string[]>;
   biColumnHints: Record<string, string[]>;
   onApplyDetected: () => void;
-  onPatternChange: (type: "risk" | "bi", value: string) => void;
 }) {
   const hasDetectedSheets = riskSheetNames.length > 0 || biSheetNames.length > 0;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
       <p style={{ fontSize: "13px", color: "var(--population-muted)" }}>
-        تتم قراءة كل أوراق العمل في الملفات المرفوعة. استخدم هذه الأنماط فقط
-        لتصنيف مصدر الورقة ونوع الحركة عند الحاجة.
+        تتم قراءة كل أوراق العمل (التبويبات) في الملفات المرفوعة تلقائياً —
+        لا حاجة لتحديد أسماء الأوراق. المطابقة تتم عبر عناوين الأعمدة فقط،
+        كما هو الحال في بقية إعدادات الربط.
       </p>
-      {hasDetectedSheets && (
+      {hasDetectedSheets ? (
         <div
           style={{
             border: "1px solid #dbeafe",
@@ -123,26 +119,14 @@ export function WorkbookSheetsSection({
             style={{ justifySelf: "start" }}
             onClick={onApplyDetected}
           >
-            تطبيق الأسماء والأعمدة المكتشفة
+            تطبيق الأعمدة المكتشفة
           </button>
         </div>
+      ) : (
+        <p style={{ fontSize: "13px", color: "var(--population-muted)" }}>
+          ارفع ملفات المخاطر أو BI لعرض الأوراق والأعمدة المكتشفة منها.
+        </p>
       )}
-      <label className="save-disk-label">
-        أنماط أسماء أوراق المخاطر (Risk Sheet Patterns)
-        <DelimitedListInput
-          className="save-disk-input"
-          value={template.sheetPatterns.risk}
-          onCommit={(aliases) => onPatternChange("risk", aliases.join(", "))}
-        />
-      </label>
-      <label className="save-disk-label">
-        أنماط أسماء أوراق ذكاء الأعمال (BI Sheet Patterns)
-        <DelimitedListInput
-          className="save-disk-input"
-          value={template.sheetPatterns.bi}
-          onCommit={(aliases) => onPatternChange("bi", aliases.join(", "))}
-        />
-      </label>
     </div>
   );
 }

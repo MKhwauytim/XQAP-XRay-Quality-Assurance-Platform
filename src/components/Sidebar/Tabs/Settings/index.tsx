@@ -232,9 +232,10 @@ export const LABEL_GROUPS: LabelGroup[] = [
   },
   {
     icon:  <History size={18} />,
-    title: "سجل الإجراءات (إدارة المستخدمين)",
+    title: "النشاط والإجراءات (إدارة المستخدمين)",
     keys: [
-      { key: "um_actions_tab_label",   desc: "تسمية تبويب سجل الإجراءات" },
+      { key: "um_activity_tab_label",  desc: "تسمية عرض متابعة الأنشطة" },
+      { key: "um_actions_tab_label",   desc: "تسمية عرض سجل الإجراءات" },
       { key: "um_actions_desc",        desc: "وصف صفحة سجل الإجراءات" },
       { key: "um_actions_refresh_btn", desc: "زر تحديث سجل الإجراءات" },
       { key: "um_actions_loading",     desc: "رسالة تحميل سجل الإجراءات" },

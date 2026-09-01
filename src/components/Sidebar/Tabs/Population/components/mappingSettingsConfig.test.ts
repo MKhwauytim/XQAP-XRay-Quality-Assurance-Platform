@@ -64,7 +64,6 @@ describe("findAliasOverlaps", () => {
         {
           templateId: "t",
           name: "t",
-          sheetPatterns: { risk: [], bi: [] },
           columnMappings: {
             xrayLevelOneResult: ["سليم", "المستوى الأول"],
             xrayLevelTwoResult: ["المستوى الأول"],
@@ -145,7 +144,6 @@ describe("findAliasOverlaps", () => {
         {
           templateId: "t",
           name: "t",
-          sheetPatterns: { risk: [], bi: [] },
           columnMappings: { xrayImageId: ["ID"] },
           biColumnMappings: { xrayImageId: ["ID"] },
         },
@@ -168,7 +166,6 @@ describe("findAliasOverlaps", () => {
         {
           templateId: "t",
           name: "t",
-          sheetPatterns: { risk: [], bi: [] },
           columnMappings: { a: [""], b: [""] },
         },
       ],

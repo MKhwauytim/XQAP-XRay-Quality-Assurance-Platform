@@ -570,6 +570,7 @@ export default function PopulationTab() {
     currentRole: sessionRef.current?.role ?? "unknown",
     onDistributionChanged: () => setMonthRefreshKey((k) => k + 1),
     refreshGlobalMonths: refreshMonths,
+    portRestrictions: config.employeePortRestrictions,
   });
 
   const [uploadError, setUploadError] = useState("");
@@ -877,8 +878,6 @@ export default function PopulationTab() {
       worker.postMessage({
         riskFile,
         biFiles,
-        riskSheetPatterns: activeTemplate?.sheetPatterns?.risk,
-        biSheetPatterns: activeTemplate?.sheetPatterns?.bi,
         columnMappings: activeTemplate?.columnMappings,
         biColumnMappings: activeTemplate?.biColumnMappings,
       } satisfies WorkbookWorkerRequest);

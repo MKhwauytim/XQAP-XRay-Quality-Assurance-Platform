@@ -11,7 +11,6 @@ function compactConfig(): PopulationConfig {
   const config = structuredClone(DEFAULT_POPULATION_CONFIG);
   config.systemFields = config.systemFields.slice(0, 1);
   config.exportTemplates[0]!.columns = config.exportTemplates[0]!.columns.slice(0, 2);
-  config.mappingTemplates[0]!.sheetPatterns = { risk: ["Risk"], bi: ["BI"] };
   return config;
 }
 
@@ -70,13 +69,13 @@ describe("MappingSettingsModal behavior wiring", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "أوراق العمل (Tabs)" }));
     fireEvent.click(
-      screen.getByRole("button", { name: "تطبيق الأسماء والأعمدة المكتشفة" }),
+      screen.getByRole("button", { name: "تطبيق الأعمدة المكتشفة" }),
     );
     expect(onConfigChange).toHaveBeenLastCalledWith(
       expect.objectContaining({
         mappingTemplates: expect.arrayContaining([
           expect.objectContaining({
-            sheetPatterns: { risk: ["Detected Risk"], bi: ["Detected BI"] },
+            columnMappings: expect.objectContaining({ xrayImageId: expect.arrayContaining(["Detected ID"]) }),
           }),
         ]),
       }),

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import type { PreparedPopulationRow } from "../processing/populationProcessingTypes";
 import type { DistributionEntry } from "../../../../../data/distribution/distributionTypes";
+import type { EmployeePortRestriction } from "../../../../../data/population/populationConfig";
+import { isPortEligible, normalizePortName } from "../../../../../data/distribution/portEligibility";
 import { getLabels } from "../../../../../data/labels/labelsStore";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -15,6 +17,8 @@ type DistributionRowProps = {
   row: PreparedPopulationRow;
   entry: DistributionEntry | null;
   employees: Array<{ username: string; displayName: string }>;
+  /** Filters the assign/reassign select to employees eligible for this row's port. Defaults to none (everyone eligible). */
+  portRestrictions?: EmployeePortRestriction[];
   isDisabled: boolean;
   onAssign: (xrayImageId: string, assignedTo: string) => Promise<void>;
   onReassign: (xrayImageId: string, reassignedTo: string) => Promise<void>;
@@ -44,6 +48,7 @@ export default function DistributionRow({
   row,
   entry,
   employees,
+  portRestrictions = [],
   isDisabled,
   onAssign,
   onReassign,
@@ -54,6 +59,10 @@ export default function DistributionRow({
   const L = getLabels();
   const status = entry?.status ?? "unassigned";
   const assignedTo = entry?.assignedTo ?? "";
+  const rowPortName = normalizePortName(row.portName);
+  const eligibleEmployees = employees.filter((emp) =>
+    isPortEligible(emp.username, rowPortName, portRestrictions)
+  );
 
   const expertSelect = (placeholder: string) => (
     <select
@@ -64,7 +73,7 @@ export default function DistributionRow({
       disabled={isDisabled}
     >
       <option value="">{placeholder}</option>
-      {employees.map((emp) => (
+      {eligibleEmployees.map((emp) => (
         <option key={emp.username} value={emp.username}>
           {emp.displayName}
         </option>

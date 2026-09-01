@@ -2,12 +2,14 @@ import { getManagedLoginUsers, subscribeToUserManagementChanges } from "../../..
 import { AlertTriangle, CheckCircle2, ChevronDown, FilePen, Search, Settings2, XCircle } from "lucide-react";
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
 import type { DistributionCurrentData, DistributionEvent } from "../../../../../data/distribution/distributionTypes";
-import type { PopulationConfig, EmployeeStageAllocation } from "../../../../../data/population/populationConfig";
+import type { PopulationConfig, EmployeeStageAllocation, EmployeePortRestriction } from "../../../../../data/population/populationConfig";
 import DistributionRow from "./DistributionRow";
+import PortRestrictionsModal from "./PortRestrictionsModal";
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { getStageKey, formatNumber } from "./helpers";
 import { getLabels } from "../../../../../data/labels/labelsStore";
 import { calculateBulkAssignment, isAssignableSampleRole } from "../../../../../data/distribution/bulkAssignment";
+import { derivePortCatalog } from "../../../../../data/distribution/portEligibility";
 import "./PhaseFourDistribution.css";
 import { hamiltonApportionment } from "../../../../../data/sampling/apportionment";
 
@@ -93,6 +95,8 @@ export default function PhaseFourDistribution({
   const [manualSearch, setManualSearch] = useState("");
   const [manualStatusFilter, setManualStatusFilter] = useState("all");
   const [manualEmployeeFilter, setManualEmployeeFilter] = useState("all");
+  /** Username whose قيود المنافذ modal is open (from clicking their name in the matrix), or null when closed. */
+  const [portModalUsername, setPortModalUsername] = useState<string | null>(null);
 
   const L = getLabels();
 
@@ -117,6 +121,49 @@ export default function PhaseFourDistribution({
   );
 
   const sampleRows = useMemo(() => sampleDrawResult?.rows ?? [], [sampleDrawResult]);
+  const portCatalog = useMemo(() => derivePortCatalog(sampleRows), [sampleRows]);
+
+  const portRestrictionOf = useCallback(
+    (username: string) => config.employeePortRestrictions.find((r) => r.username === username),
+    [config.employeePortRestrictions]
+  );
+
+  const totalPortCount = useMemo(
+    () => portCatalog.reduce((sum, cat) => sum + cat.ports.length, 0),
+    [portCatalog]
+  );
+
+  const portBadgeOf = useCallback(
+    (username: string): { cls: string; text: string } => {
+      const restriction = portRestrictionOf(username);
+      if (!restriction || !restriction.restricted) {
+        return { cls: "all", text: L.p4_ports_badge_all };
+      }
+      if (restriction.enabledPorts.length === 0) {
+        return { cls: "none", text: L.p4_ports_badge_none };
+      }
+      return {
+        cls: "partial",
+        text: fillTemplate(L.p4_ports_badge_partial, {
+          enabled: formatNumber(restriction.enabledPorts.length),
+          total: formatNumber(totalPortCount),
+        }),
+      };
+    },
+    [portRestrictionOf, totalPortCount, L]
+  );
+
+  function handleSavePortRestriction(next: EmployeePortRestriction) {
+    const withoutThisUser = config.employeePortRestrictions.filter((r) => r.username !== next.username);
+    onConfigChange({
+      ...config,
+      // A `restricted: false` save is equivalent to no entry at all (see
+      // EmployeePortRestriction's own comment), so it is dropped rather than
+      // stored — the array only ever carries active restrictions.
+      employeePortRestrictions: next.restricted ? [...withoutThisUser, next] : withoutThisUser,
+    });
+    setPortModalUsername(null);
+  }
 
   // One classification pass instead of four `.filter()` sweeps.
   //
@@ -232,6 +279,7 @@ export default function PhaseFourDistribution({
       month: saveMonth,
       year: saveYear,
       existingEntries: distributionCurrent?.entries,
+      portRestrictions: config.employeePortRestrictions,
     });
 
     const summaryMap: Record<string, { cert: number; normal: number; total: number }> = {};
@@ -256,7 +304,7 @@ export default function PhaseFourDistribution({
     }
 
     return { summaryMap, errors, skipped, newAssignments: events.length };
-  }, [sampleDrawResult, sampleRows, activeAllocations, employees, operatorUsername, config.stageMappings, saveMonth, saveYear, distributionCurrent]);
+  }, [sampleDrawResult, sampleRows, activeAllocations, employees, operatorUsername, config.stageMappings, config.employeePortRestrictions, saveMonth, saveYear, distributionCurrent]);
   // `sampleDrawResult` is already a dependency above, so the snapshot it carries
   // is covered without adding a second entry for the same object.
 
@@ -424,6 +472,7 @@ export default function PhaseFourDistribution({
       month: saveMonth,
       year: saveYear,
       existingEntries: distributionCurrent?.entries,
+      portRestrictions: config.employeePortRestrictions,
     });
 
     const messages: string[] = [];
@@ -653,8 +702,19 @@ export default function PhaseFourDistribution({
                 role="row"
               >
                 <span className="p4-expert">
-                  <strong>{emp.displayName}</strong>
+                  <button
+                    type="button"
+                    className="p4-expert-name-btn"
+                    aria-label={fillTemplate(L.p4_ports_open_button_aria, { expert: emp.displayName })}
+                    onClick={() => setPortModalUsername(emp.username)}
+                  >
+                    <strong>{emp.displayName}</strong>
+                  </button>
                   <code>{emp.username}</code>
+                  {(() => {
+                    const badge = portBadgeOf(emp.username);
+                    return <span className={`p4-port-badge ${badge.cls}`}>{badge.text}</span>;
+                  })()}
                 </span>
 
                 {STAGE_KEYS.map((sk) => {
@@ -843,6 +903,7 @@ export default function PhaseFourDistribution({
                       row={row}
                       entry={entry ?? null}
                       employees={employees}
+                      portRestrictions={config.employeePortRestrictions}
                       isDisabled={!canDistribute || isDistributing}
                       onAssign={onAssign}
                       onReassign={onReassign}
@@ -856,6 +917,20 @@ export default function PhaseFourDistribution({
           </div>
         )}
       </div>
+
+      {portModalUsername && (() => {
+        const emp = employees.find((e) => e.username === portModalUsername);
+        if (!emp) return null;
+        return (
+          <PortRestrictionsModal
+            employee={emp}
+            portCatalog={portCatalog}
+            restriction={portRestrictionOf(portModalUsername)}
+            onSave={handleSavePortRestriction}
+            onClose={() => setPortModalUsername(null)}
+          />
+        );
+      })()}
     </section>
   );
 }

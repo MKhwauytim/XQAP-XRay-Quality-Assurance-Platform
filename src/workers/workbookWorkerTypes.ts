@@ -6,13 +6,11 @@ export type WorkbookWorkerRequest = {
   riskFile: File;
   /**
    * Zero to ten BI files. They are DIFFERENT populations that share the same
-   * sheet patterns and column mappings, so the worker loops the same
-   * `processBiWorkbook` call over the array with identical settings and the
-   * main thread appends the results into one BI population.
+   * column mappings, so the worker loops the same `processBiWorkbook` call
+   * over the array with identical settings and the main thread appends the
+   * results into one BI population.
    */
   biFiles: File[];
-  riskSheetPatterns?: string[];
-  biSheetPatterns?: string[];
   columnMappings?: Record<string, string[]>;
   biColumnMappings?: Record<string, string[]>;
 };

@@ -55,7 +55,7 @@ describe("processBiWorkbook · owner-reported 0-accepted bug (2026-08-12)", () =
       { sheetName: "بري صادر", header: "معرف الأشعة", values: ["202605090023680130"] },
     ]);
 
-    const result = await processBiWorkbook(file, undefined, undefined, {
+    const result = await processBiWorkbook(file, undefined, {
       xrayImageId: ["عمود غير موجود"],
     });
 

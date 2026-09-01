@@ -5,6 +5,41 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v131.3",
+    "date": "2026-09-01",
+    "bucket": "feature",
+    "scope": "changelog",
+    "title": "سجل التحديثات tab — latest 10 updates, generated at build time from edit logs"
+  },
+  {
+    "version": "v131.2",
+    "date": "2026-09-01",
+    "bucket": "enhancement",
+    "scope": "user-management",
+    "title": "merge activity and actions log pages into one"
+  },
+  {
+    "version": "v131.1",
+    "date": "2026-09-01",
+    "bucket": "fix",
+    "scope": "performance",
+    "title": "stop overlaying multiple days' gaps onto one team-mode working-hours row"
+  },
+  {
+    "version": "v131.0",
+    "date": "2026-08-31",
+    "bucket": "enhancement",
+    "scope": "population",
+    "title": "drop obsolete sheet-name-pattern settings from Data Processing Settings"
+  },
+  {
+    "version": "v130.17",
+    "date": "2026-08-31",
+    "bucket": "feature",
+    "scope": "distribution",
+    "title": "restrict sample assignment by port per employee"
+  },
+  {
     "version": "v130.16",
     "date": "2026-08-31",
     "bucket": "fix",
@@ -38,40 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "DataTable",
     "title": "sticky columns overlap after reordering or adding columns"
-  },
-  {
-    "version": "v130.11",
-    "date": "2026-08-30",
-    "bucket": "fix",
-    "scope": "distribution",
-    "title": "stop logging distribution:checkpoint-mismatch for a same-write-cycle race that clears on re-read"
-  },
-  {
-    "version": "v130.10",
-    "date": "2026-08-30",
-    "bucket": "fix",
-    "scope": "storage",
-    "title": "retry a transient NotReadableError when reading users.permissions.json (XQ-FS-014/XQ-WS-013)"
-  },
-  {
-    "version": "v130.7",
-    "date": "2026-08-30",
-    "bucket": "fix",
-    "scope": "reopen",
-    "title": "auto-resolve a stranded pending reopen request when a case is reopened directly"
-  },
-  {
-    "version": "v130.6",
-    "date": "2026-08-30",
-    "bucket": "enhancement",
-    "scope": "performance",
-    "title": "rework تقييم الأداء into a ranked employee comparison table, bar trend with average line, and a shift-window gap timeline"
-  },
-  {
-    "version": "v130.5",
-    "date": "2026-08-30",
-    "bucket": "fix",
-    "scope": "auth",
-    "title": "widen the last guest-excluded page ceilings so admin can grant every page to every role"
   }
 ];

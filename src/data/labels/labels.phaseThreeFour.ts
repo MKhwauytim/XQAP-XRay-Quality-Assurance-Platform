@@ -167,4 +167,23 @@ export const phaseThreeFourLabels = {
     "بانتظار البت في طلب الاستبدال من صفحة اعتماد الطلبات في مساحة العمل.",
   p4_row_no_action: "لا إجراء — النتيجة مسجّلة",
   p4_row_expert_aria: "الخبير المستلم للصف {xrayImageId}",
+
+  // ── المرحلة 4 — قيود المنافذ لكل خبير ────────────────────────────────
+  // Click-through from the expert's name in the allocation matrix opens
+  // PortRestrictionsModal (ports grouped by portType category, with a
+  // per-category master checkbox and a per-port checkbox underneath).
+  p4_ports_open_button_aria: "قيود المنافذ لـ {expert}",
+  p4_ports_badge_all: "كل المنافذ",
+  p4_ports_badge_none: "بدون منافذ",
+  p4_ports_badge_partial: "{enabled} من {total} منفذ",
+  p4_ports_modal_title: "قيود المنافذ — {expert}",
+  p4_ports_modal_subtitle: "حدّد ما يستلمه هذا الخبير من كل منفذ، أو من فئة كاملة.",
+  p4_ports_close_aria: "إغلاق",
+  p4_ports_status_unrestricted:
+    "غير مقيّد — يستلم من جميع المنافذ الحالية، وأي منفذ يُضاف مستقبلاً تلقائياً.",
+  p4_ports_status_restricted: "مقيّد — مفعّل في {enabled} من {total} منفذاً حالياً.",
+  p4_ports_empty_catalog: "لا توجد منافذ في عينة هذا الشهر بعد.",
+  p4_ports_clear_restriction: "إزالة كل القيود",
+  p4_ports_cancel: "إلغاء",
+  p4_ports_save: "حفظ القيود",
 } as const;
