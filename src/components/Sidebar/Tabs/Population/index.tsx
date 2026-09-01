@@ -57,7 +57,6 @@ import PhaseTwoReportAndProcessing from "./components/PhaseTwoReportAndProcessin
 import PhaseThreeSampling from "./components/PhaseThreeSampling";
 import PhaseFourDistribution from "./components/PhaseFourDistribution";
 import MappingSettingsModal from "./components/MappingSettingsModal";
-import { buildColumnHintsFromRows } from "./components/columnMappingHints";
 import {
   loadPopulationConfig,
   savePopulationConfig,
@@ -684,16 +683,6 @@ export default function PopulationTab() {
         ? null
         : uploads.biUploads.map((entry) => entry.file.name).join("، "),
     [uploads.biUploads]
-  );
-
-  const riskColumnHints = useMemo(
-    () => buildColumnHintsFromRows(riskWorkbookResult?.rows ?? [], config),
-    [riskWorkbookResult, config]
-  );
-
-  const biColumnHints = useMemo(
-    () => buildColumnHintsFromRows(biWorkbookResult?.rows ?? [], config),
-    [biWorkbookResult, config]
   );
 
   // W4/W10 (cheap half of the requested upload→process→compare restructure): this
@@ -1573,16 +1562,6 @@ export default function PopulationTab() {
           biRows: biWorkbookResult?.rows.length ?? null,
           certScanProvided: certScanPasteText.trim().length > 0,
           finalRows: populationProcessingResult?.preparedRows.length ?? null,
-          riskSheetNames: [
-            ...(riskWorkbookResult?.sheetSummaries.map((sheet) => sheet.sheetName) ?? []),
-            ...(riskWorkbookResult?.unknownSheetNames ?? [])
-          ],
-          biSheetNames: [
-            ...(biWorkbookResult?.sheetSummaries.map((sheet) => sheet.sheetName) ?? []),
-            ...(biWorkbookResult?.unknownSheetNames ?? [])
-          ],
-          riskColumnHints,
-          biColumnHints
         }}
       />
 

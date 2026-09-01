@@ -19,7 +19,6 @@ import type { MappingSettingsTab } from "./MappingSettingsTabBar";
 import {
   buildAliasFieldGroups,
   findAliasOverlaps,
-  mergeMappingAliases,
   normalizeWorkflowOrders,
   parseMappingAliases,
 } from "./mappingSettingsConfig";
@@ -31,10 +30,6 @@ export type MappingSettingsProcessingContext = {
   biRows: number | null;
   certScanProvided: boolean;
   finalRows: number | null;
-  riskSheetNames?: string[];
-  biSheetNames?: string[];
-  riskColumnHints?: Record<string, string[]>;
-  biColumnHints?: Record<string, string[]>;
 };
 
 type ControllerOptions = {
@@ -139,8 +134,6 @@ export function useMappingSettingsController({
       feeds: ["certscan-match"],
     },
   ];
-  const riskSheetNames = processingContext?.riskSheetNames ?? [];
-  const biSheetNames = processingContext?.biSheetNames ?? [];
   const aliasOverlapWarnings = findAliasOverlaps(buildAliasFieldGroups(config));
 
   const updateTemplate = (patch: Partial<MappingTemplate>) => {
@@ -148,19 +141,6 @@ export function useMappingSettingsController({
       ...config,
       mappingTemplates: config.mappingTemplates.map((item) =>
         item.templateId === template.templateId ? { ...item, ...patch } : item,
-      ),
-    });
-  };
-
-  const handleApplyDetectedWorkbookSettings = () => {
-    updateTemplate({
-      columnMappings: mergeMappingAliases(
-        template.columnMappings,
-        processingContext?.riskColumnHints,
-      ),
-      biColumnMappings: mergeMappingAliases(
-        template.biColumnMappings ?? template.columnMappings,
-        processingContext?.biColumnHints,
       ),
     });
   };
@@ -430,10 +410,7 @@ export function useMappingSettingsController({
     fieldOptions,
     stepKindLabels,
     dataSourceCards,
-    riskSheetNames,
-    biSheetNames,
     aliasOverlapWarnings,
-    handleApplyDetectedWorkbookSettings,
     handleMappingChange,
     handleBiMappingChange,
     handleStageMappingChange,

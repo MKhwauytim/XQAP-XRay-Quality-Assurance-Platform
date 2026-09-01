@@ -5,11 +5,18 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
-    "version": "v131.3",
+    "version": "v131.4",
     "date": "2026-09-01",
     "bucket": "feature",
     "scope": "changelog",
     "title": "سجل التحديثات tab — latest 10 updates, generated at build time from edit logs"
+  },
+  {
+    "version": "v131.3",
+    "date": "2026-09-01",
+    "bucket": "enhancement",
+    "scope": null,
+    "title": "remove أوراق العمل tab, add DevTools console credit, add suspicion-type question"
   },
   {
     "version": "v131.2",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "auth",
     "title": "lock out the hidden bootstrap-admin passcode modal after repeated wrong attempts"
-  },
-  {
-    "version": "v130.12",
-    "date": "2026-08-31",
-    "bucket": "fix",
-    "scope": "DataTable",
-    "title": "sticky columns overlap after reordering or adding columns"
   }
 ];

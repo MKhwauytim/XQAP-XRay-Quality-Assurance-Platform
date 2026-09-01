@@ -21,15 +21,6 @@ export const STAGE_KEY_LABELS: Record<StageKey, string> = {
 const STAGE_KEYS: StageKey[] = ["first", "second", "third", "fourth"];
 
 /**
- * System field keys whose value is derived entirely from the workbook sheet name
- * (`detectMovementType` in `riskDataWorkbook.ts`), never from a column alias. The discovered-
- * columns UI (`ColumnHints` in `MappingSettingsSecondarySections.tsx`) must not report these as
- * "no clear match found" — a column alias can never exist for them, so that warning would
- * describe a structurally impossible match as a user-fixable problem.
- */
-export const SHEET_DERIVED_FIELD_KEYS: ReadonlySet<string> = new Set(["movementType"]);
-
-/**
  * Which kind of thing an alias list is matched against. Aliases only ever compete within one
  * namespace, never across:
  *

@@ -1,12 +1,11 @@
 export type MappingSettingsTab =
-  "mappings" | "processing" | "stages" | "sheets" | "exports";
+  "mappings" | "processing" | "stages" | "exports";
 
 const TABS: Array<{
   id: Exclude<MappingSettingsTab, "processing">;
   label: string;
 }> = [
   { id: "mappings", label: "تطابق الأعمدة والربط" },
-  { id: "sheets", label: "أوراق العمل (Tabs)" },
   { id: "stages", label: "ترجمة المستويات" },
   { id: "exports", label: "أعمدة التصدير" },
 ];
