@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { gotoSim, openTab, sidebar, workspace } from "./helpers/app";
-import { ACTIONS_READY, BROWSE_READY, PROCESS_READY, RESULTS_READY } from "./helpers/sections";
+import { ACTIVITY_READY, BROWSE_READY, PROCESS_READY, RESULTS_READY } from "./helpers/sections";
 
 /**
  * Sub-tab navigation, clicked at full speed.
@@ -25,8 +25,8 @@ const NAV = "تبويبات النظام";
 test("a sub-tab of a lazy tab opens on the first visit, clicked once", async ({ page }) => {
   await gotoSim(page, "admin");
   await openTab(page, "إدارة المستخدمين");
-  await page.getByRole("navigation", { name: NAV }).getByRole("button", { name: "سجل الإجراءات", exact: true }).click();
-  await expect(ACTIONS_READY(page)).toBeVisible();
+  await page.getByRole("navigation", { name: NAV }).getByRole("button", { name: "النشاط والإجراءات", exact: true }).click();
+  await expect(ACTIVITY_READY(page)).toBeVisible();
 });
 
 test("the reports tab opens on the sub-tab that was clicked, not its default", async ({ page }) => {

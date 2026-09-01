@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { gotoSim, openSubTab, openTab, workspace } from "./helpers/app";
-import { ACTIONS_READY, PAGE_MATRIX_READY } from "./helpers/sections";
+import { ACTIONS_READY, ACTIVITY_READY, PAGE_MATRIX_READY } from "./helpers/sections";
 
 /**
  * «سجل الإجراءات» — the CAS-protected action log under
@@ -24,7 +24,12 @@ function log(page: import("@playwright/test").Page) {
 }
 
 async function openActionLog(page: import("@playwright/test").Page): Promise<void> {
-  await openSubTab(page, "إدارة المستخدمين", "سجل الإجراءات", ACTIONS_READY(page));
+  // "متابعة الأنشطة" and "سجل الإجراءات" merged into one sub-tab ("النشاط
+  // والإجراءات") with an inner view toggle -- open it, then switch to the
+  // actions view.
+  await openSubTab(page, "إدارة المستخدمين", "النشاط والإجراءات", ACTIVITY_READY(page));
+  await log(page).getByRole("button", { name: "سجل الإجراءات", exact: true }).click();
+  await expect(ACTIONS_READY(page)).toBeVisible();
   await expect(log(page).getByRole("heading", { name: "سجل الإجراءات" })).toBeVisible();
 }
 

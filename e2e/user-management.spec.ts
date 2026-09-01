@@ -95,7 +95,7 @@ test("the feature matrix is grouped by page and gated on page access", async ({ 
 });
 
 test("the activity view renders", async ({ page }) => {
-  await openSubTab(page, "إدارة المستخدمين", "متابعة الأنشطة", ACTIVITY_READY(page));
+  await openSubTab(page, "إدارة المستخدمين", "النشاط والإجراءات", ACTIVITY_READY(page));
   await expect(workspace(page).getByRole("region", { name: "إدارة المستخدمين" })).toBeVisible();
 });
 
