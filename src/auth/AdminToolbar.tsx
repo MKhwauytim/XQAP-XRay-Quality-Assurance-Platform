@@ -121,10 +121,10 @@ export function AdminToolbar({
       monthFolderName,
       refreshPermissions,
     });
-    // Demo debug tools observe this SAME call's result — never a second
-    // runSync trigger — so a manual refresh's timing shows up in the debug
+    // Debug tools observe this SAME call's result — never a second runSync
+    // trigger — so a manual refresh's timing shows up in the debug
     // panel/report without touching workspaceSync.ts or SyncTick.tsx.
-    if (isDemo) {
+    if (isRealAdmin) {
       recordSyncSample({
         at: Date.now(),
         ok: result.ok,
@@ -137,13 +137,14 @@ export function AdminToolbar({
     setRefreshState(result.ok ? "success" : "failed");
     if (refreshResetTimer.current !== null) window.clearTimeout(refreshResetTimer.current);
     refreshResetTimer.current = window.setTimeout(() => setRefreshState("idle"), 2000);
-  }, [directoryHandle, isDemo, monthFolderName, refreshPermissions, refreshState]);
+  }, [directoryHandle, isRealAdmin, monthFolderName, refreshPermissions, refreshState]);
 
-  // Demo-only debug tools (owner request, 2026-08-27): a toggle that shows a
-  // live diagnostics panel (connection, sync timing, main-thread
+  // Admin-only debug tools (moved off the demo session, 2026-09-01): a toggle
+  // that shows a live diagnostics panel (connection, sync timing, main-thread
   // responsiveness, recent errors) plus an export-to-JSON report button, so a
-  // demo session can be debugged from an artifact instead of a screen-share.
-  // Gated on `isDemo` alone — never rendered for a real session.
+  // session can be debugged from an artifact instead of a screen-share.
+  // Gated on `isRealAdmin` alone — never rendered for a demo session, even
+  // though a demo session also carries the "admin" role.
   const debugEnabled = useDemoDebugEnabled();
   const [isExportingDebug, setIsExportingDebug] = useState(false);
 
@@ -243,7 +244,7 @@ export function AdminToolbar({
             {unreadFeedbackCount > 0 && <span className="auth-toolbar-dot" aria-hidden="true" />}
           </button>
         )}
-        {isDemo && (
+        {isRealAdmin && (
           <>
             <button
               type="button"
@@ -271,7 +272,7 @@ export function AdminToolbar({
         )}
       </div>
 
-      {isDemo && debugEnabled && <DemoDebugPanel onClose={() => setDemoDebugEnabled(false)} />}
+      {isRealAdmin && debugEnabled && <DemoDebugPanel onClose={() => setDemoDebugEnabled(false)} />}
     </div>
   );
 }
