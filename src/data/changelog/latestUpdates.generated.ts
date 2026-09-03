@@ -5,11 +5,25 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
-    "version": "v131.9",
+    "version": "v131.11",
     "date": "2026-09-03",
     "bucket": "enhancement",
     "scope": "changelog",
     "title": "translate displayed entry titles/scopes to Arabic"
+  },
+  {
+    "version": "v131.10",
+    "date": "2026-09-03",
+    "bucket": "fix",
+    "scope": "distribution",
+    "title": "guarantee a port-trapped employee's only reachable capacity instead of splitting it by raw need"
+  },
+  {
+    "version": "v131.9",
+    "date": "2026-09-03",
+    "bucket": "fix",
+    "scope": "distribution",
+    "title": "keep per-employee sample totals equal when port restrictions are active"
   },
   {
     "version": "v131.8",
@@ -59,19 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "performance",
     "title": "stop overlaying multiple days' gaps onto one team-mode working-hours row"
-  },
-  {
-    "version": "v131.0",
-    "date": "2026-08-31",
-    "bucket": "enhancement",
-    "scope": "population",
-    "title": "drop obsolete sheet-name-pattern settings from Data Processing Settings"
-  },
-  {
-    "version": "v130.17",
-    "date": "2026-08-31",
-    "bucket": "feature",
-    "scope": "distribution",
-    "title": "restrict sample assignment by port per employee"
   }
 ];
