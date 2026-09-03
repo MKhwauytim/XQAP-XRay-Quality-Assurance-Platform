@@ -6,6 +6,7 @@ import type { TemplateSchema } from "./templateTypes";
 import {
   deleteTemplate,
   loadTemplate,
+  loadTemplateIncludingDeleted,
   loadTemplateIndex,
   saveTemplate,
 } from "./templateStorage";
@@ -129,5 +130,35 @@ describe("templateStorage", () => {
       expect(backup.value.templateId).toBe("tmpl-a");
     }
     await expect(loadTemplateIndex(root)).resolves.toMatchObject({ templates: [] });
+  });
+
+  it("loadTemplateIncludingDeleted recovers a deleted template's schema from its tombstone", async () => {
+    const root = createMemoryDirectory();
+    await saveTemplate(root, makeTemplate("tmpl-a", "قالب أ"));
+    await deleteTemplate(root, "tmpl-a");
+
+    // The live file is gone -- loadTemplate alone can't see it any more.
+    await expect(loadTemplate(root, "tmpl-a")).resolves.toBeNull();
+
+    // But the answer that was submitted against it can still be resolved.
+    const recovered = await loadTemplateIncludingDeleted(root, "tmpl-a");
+    expect(recovered?.templateId).toBe("tmpl-a");
+    expect(recovered?.templateName).toBe("قالب أ");
+  });
+
+  it("loadTemplateIncludingDeleted returns null for a templateId that never existed", async () => {
+    const root = createMemoryDirectory();
+    await expect(loadTemplateIncludingDeleted(root, "tmpl-never-existed")).resolves.toBeNull();
+  });
+
+  it("loadTemplateIncludingDeleted prefers the live template over its own stale tombstone", async () => {
+    const root = createMemoryDirectory();
+    await saveTemplate(root, makeTemplate("tmpl-a", "قالب أ", 1));
+    await deleteTemplate(root, "tmpl-a");
+    // Re-created under the SAME id with a new name -- the live file must win.
+    await saveTemplate(root, makeTemplate("tmpl-a", "قالب أ المعاد إنشاؤه", 1));
+
+    const recovered = await loadTemplateIncludingDeleted(root, "tmpl-a");
+    expect(recovered?.templateName).toBe("قالب أ المعاد إنشاؤه");
   });
 });

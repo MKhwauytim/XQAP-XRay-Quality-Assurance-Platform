@@ -5,6 +5,48 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v131.20",
+    "date": "2026-09-03",
+    "bucket": "fix",
+    "scope": "templates",
+    "title": "keep answered-under-a-deleted-template results resolvable by question label"
+  },
+  {
+    "version": "v131.19",
+    "date": "2026-09-03",
+    "bucket": "fix",
+    "scope": "e2e",
+    "title": "update employee-queue.spec.ts's case-chip counts for the مستهدف المؤشر redefinition"
+  },
+  {
+    "version": "v131.18",
+    "date": "2026-09-03",
+    "bucket": "redesign",
+    "scope": "employee-workspace",
+    "title": "extract the queue's selection helpers so XrayReferrals clears the max-lines gate again"
+  },
+  {
+    "version": "v131.17",
+    "date": "2026-09-03",
+    "bucket": "enhancement",
+    "scope": "employee-workspace",
+    "title": "مستهدف المؤشر now means 'from the regular population pipeline', not a risk-column read"
+  },
+  {
+    "version": "v131.16",
+    "date": "2026-09-03",
+    "bucket": "fix",
+    "scope": "employee-workspace",
+    "title": "queue الحالة filter no longer misses مستبدلة rows or conflates معلق with مكتملة"
+  },
+  {
+    "version": "v131.15",
+    "date": "2026-09-03",
+    "bucket": "fix",
+    "scope": "executive-deck-v3",
+    "title": "paginate port tables to stop overflow past the slide edge"
+  },
+  {
     "version": "v131.14",
     "date": "2026-09-03",
     "bucket": "fix",
@@ -31,47 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "performance",
     "title": "replace unreadable team-mode working-hours rows with a monthly gaps bar chart"
-  },
-  {
-    "version": "v131.10",
-    "date": "2026-09-03",
-    "bucket": "fix",
-    "scope": "distribution",
-    "title": "guarantee a port-trapped employee's only reachable capacity instead of splitting it by raw need"
-  },
-  {
-    "version": "v131.9",
-    "date": "2026-09-03",
-    "bucket": "fix",
-    "scope": "distribution",
-    "title": "keep per-employee sample totals equal when port restrictions are active"
-  },
-  {
-    "version": "v131.8",
-    "date": "2026-09-01",
-    "bucket": "fix",
-    "scope": "user-management",
-    "title": "guard against losing a newly-added or edited user to a page reload before its disk write lands"
-  },
-  {
-    "version": "v131.6",
-    "date": "2026-09-01",
-    "bucket": "fix",
-    "scope": "employee-workspace",
-    "title": "stop the results screen's periodic refresh from re-reading the whole month on every tick"
-  },
-  {
-    "version": "v131.5",
-    "date": "2026-09-01",
-    "bucket": "enhancement",
-    "scope": "auth",
-    "title": "move debug tools from demo session to admin, translate to English"
-  },
-  {
-    "version": "v131.4",
-    "date": "2026-09-01",
-    "bucket": "feature",
-    "scope": "changelog",
-    "title": "سجل التحديثات tab — latest 10 updates, generated at build time from edit logs"
   }
 ];

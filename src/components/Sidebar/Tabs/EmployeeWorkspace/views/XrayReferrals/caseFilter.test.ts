@@ -1,8 +1,9 @@
 // The case-queue filter's predicate, counts and helper, tested without
 // rendering the page. The component test alongside XrayReferrals.tsx covers the
-// wiring; this covers the rule itself, which is where the interesting edges are
-// (blank vs. unrecognized vs. negative, and the fact that the three buckets
-// overlap rather than partition).
+// wiring; this covers the rule itself — in particular that «مستهدف المؤشر» is
+// the exact complement of «إحالات استثنائية» (every row from the regular
+// population pipeline, regardless of what its own risk-engine column says),
+// so the two buckets now partition «جميع الحالات» exactly.
 
 import { describe, expect, it } from "vitest";
 import type { AdhocDistributionEntry } from "../../../../../../data/adhocImport/adhocImportEmployeeView";
@@ -76,27 +77,20 @@ describe("matchesCaseFilter — «جميع الحالات»", () => {
 });
 
 describe("matchesCaseFilter — «مستهدف المؤشر»", () => {
-  it("accepts an entry whose risk column classifies as affirmative", () => {
-    for (const raw of ["نعم", "مستهدف", "y", "yes", "true", "1", "  YES  "]) {
+  it("accepts every regular-pipeline row regardless of its own risk column value", () => {
+    for (const raw of ["نعم", "لا", "ربما", null, "", "   ", "xyz"]) {
       expect(matchesCaseFilter(entry("A", raw), "risk-targeted")).toBe(true);
     }
   });
 
-  it("rejects an entry whose risk column classifies as negative", () => {
-    for (const raw of ["لا", "غير مستهدف", "n", "no", "false", "0"]) {
-      expect(matchesCaseFilter(entry("A", raw), "risk-targeted")).toBe(false);
-    }
+  it("rejects an ad-hoc-imported row, even one whose risk column reads affirmative", () => {
+    expect(matchesCaseFilter(entry("A", "نعم", "adh-1"), "risk-targeted")).toBe(false);
+    expect(matchesCaseFilter(entry("A", null, "adh-1"), "risk-targeted")).toBe(false);
   });
 
-  it("rejects a BLANK risk column — unknown is never 'targeted'", () => {
-    expect(matchesCaseFilter(entry("A", null), "risk-targeted")).toBe(false);
-    expect(matchesCaseFilter(entry("A", ""), "risk-targeted")).toBe(false);
-    expect(matchesCaseFilter(entry("A", "   "), "risk-targeted")).toBe(false);
-  });
-
-  it("rejects an UNRECOGNIZED risk column value rather than guessing", () => {
-    for (const raw of ["ربما", "xyz", "2", "غير محدد"]) {
-      expect(matchesCaseFilter(entry("A", raw), "risk-targeted")).toBe(false);
+  it("is the exact logical complement of «إحالات استثنائية»", () => {
+    for (const e of [entry("A", "نعم"), entry("B", null, "adh-1"), entry("C", "لا")]) {
+      expect(matchesCaseFilter(e, "risk-targeted")).toBe(!matchesCaseFilter(e, "adhoc"));
     }
   });
 });
@@ -116,8 +110,8 @@ describe("filterCases", () => {
     expect(filterCases(rows, "all")).toBe(rows);
   });
 
-  it("keeps only affirmative-engine rows for «مستهدف المؤشر», blanks and unknowns excluded", () => {
-    expect(filterCases(rows, "risk-targeted").map((e) => e.xrayImageId)).toEqual(["A", "E"]);
+  it("keeps every non-ad-hoc row for «مستهدف المؤشر»", () => {
+    expect(filterCases(rows, "risk-targeted").map((e) => e.xrayImageId)).toEqual(["A", "B", "C", "D"]);
   });
 
   it("keeps only ad-hoc rows for «إحالات استثنائية»", () => {
@@ -140,7 +134,7 @@ describe("countCaseFilters", () => {
       entry("E", "نعم", "adh-1"),
       entry("F", null, "adh-2"),
     ]);
-    expect(counts).toEqual({ all: 6, "risk-targeted": 2, adhoc: 2 });
+    expect(counts).toEqual({ all: 6, "risk-targeted": 4, adhoc: 2 });
   });
 
   it("agrees with filterCases for every bucket — a chip's number is its list's length", () => {
@@ -155,12 +149,9 @@ describe("countCaseFilters", () => {
     expect(countCaseFilters([])).toEqual({ all: 0, "risk-targeted": 0, adhoc: 0 });
   });
 
-  it("does NOT partition the queue — an ad-hoc row can also be engine-targeted", () => {
-    // Documented on purpose: the three counts are three independent lenses, so
-    // «مستهدف المؤشر» + «إحالات استثنائية» may exceed «جميع الحالات».
-    const counts = countCaseFilters([entry("A", "نعم", "adh-1")]);
-    expect(counts.all).toBe(1);
-    expect(counts["risk-targeted"]).toBe(1);
-    expect(counts.adhoc).toBe(1);
+  it("partitions the queue exactly — «مستهدف المؤشر» + «إحالات استثنائية» always equals «جميع الحالات»", () => {
+    const rows = [entry("A", "نعم"), entry("B", null, "adh-1"), entry("C", "لا"), entry("D", "نعم", "adh-2")];
+    const counts = countCaseFilters(rows);
+    expect(counts["risk-targeted"] + counts.adhoc).toBe(counts.all);
   });
 });
