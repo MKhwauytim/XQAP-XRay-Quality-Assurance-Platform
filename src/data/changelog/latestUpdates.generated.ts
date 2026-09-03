@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v131.21",
+    "date": "2026-09-03",
+    "bucket": "fix",
+    "scope": "referral-approval",
+    "title": "stop discarding the diagnostic when a decision write fails"
+  },
+  {
     "version": "v131.20",
     "date": "2026-09-03",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "changelog",
     "title": "translate displayed entry titles/scopes to Arabic"
-  },
-  {
-    "version": "v131.11",
-    "date": "2026-09-03",
-    "bucket": "enhancement",
-    "scope": "performance",
-    "title": "replace unreadable team-mode working-hours rows with a monthly gaps bar chart"
   }
 ];

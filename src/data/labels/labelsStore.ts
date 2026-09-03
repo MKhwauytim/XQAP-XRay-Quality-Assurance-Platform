@@ -431,7 +431,8 @@ export const DEFAULT_LABELS = {
   // Referral approval idempotency (Tier-1 Item C)
   msg_request_already_reviewed: "تمت مراجعة هذا الطلب مسبقاً — تم تحديث القائمة.",
   msg_referral_stale_ownership: "تعذر الاعتماد — بعض العينات لم تعد معيّنة للموظف الطالب: {ids}. حدّث الصفحة وراجع الطلب.",
-  msg_referral_decision_retry:  "تم نقل العينات لكن تعذر حفظ قرار الاعتماد — اضغط اعتماد مرة أخرى لإكمال التسجيل (لن يتكرر النقل).",
+  msg_referral_decision_retry:  "تم نقل العينات لكن تعذر حفظ قرار الاعتماد: {detail} — يمكن الضغط على اعتماد مرة أخرى لإكمال التسجيل دون تكرار النقل، لكن إذا تكرر هذا الخطأ فتواصل مع مسؤول النظام فالمشكلة ليست عابرة.",
+  msg_referral_deny_decision_retry: "تعذر حفظ قرار الرفض: {detail} — أعد المحاولة، وإذا تكرر الخطأ فتواصل مع مسؤول النظام.",
   referral_review_saving:       "جارٍ حفظ القرار…",
 
   // Approval request list — explicit sort-order indicator (the pending queue
