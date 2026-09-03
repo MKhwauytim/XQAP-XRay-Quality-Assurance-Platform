@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v132.0",
+    "date": "2026-09-03",
+    "bucket": "feature",
+    "scope": "history",
+    "title": "rolling last-10 pre-change snapshot history for templates, answers, and distribution admin edits"
+  },
+  {
     "version": "v131.21",
     "date": "2026-09-03",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "executive-deck",
     "title": "stop fullscreen presentation slide from overflowing on zoom/resize"
-  },
-  {
-    "version": "v131.12",
-    "date": "2026-09-03",
-    "bucket": "enhancement",
-    "scope": "changelog",
-    "title": "translate displayed entry titles/scopes to Arabic"
   }
 ];

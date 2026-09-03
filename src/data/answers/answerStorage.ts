@@ -45,6 +45,7 @@ import {
   AnswerFoldError,
   appendAnswerEventSegment,
   foldAnswerEvents,
+  foldSingleItem,
   readAnswerEventDelta,
   type AnswerEvent,
   type AnswerLegacySeed,
@@ -57,6 +58,7 @@ import {
   getSampleMainDir,
   safeWorkspaceFilePart,
 } from "../workspace/workspacePaths";
+import { recordActionHistorySnapshot } from "../history/actionHistory";
 
 export { ANSWER_EVENTS_DIR, ANSWER_EVENT_SEGMENT_SUFFIX };
 
@@ -796,6 +798,23 @@ async function performAnswerWrite(
 
       const event: AnswerEvent = { ...decision.event, eventId, eventAt, answeredBy: username };
       const batch = seedEvent ? [seedEvent, event] : [event];
+      // Pre-change snapshot (owner requirement, 2026-09-03): the item's state
+      // right before this event, kept as a rolling last-10 history per
+      // (month, employee, item) — the answers-family parity fix for the
+      // per-write `.bak` every OTHER data family already gets from
+      // safeWriteJson. Answers moved to this append-only event log (Stage 2 of
+      // the answer-save proposal) and never call safeWriteJson for a real
+      // save/reopen/note anymore, so they silently lost that protection; this
+      // restores an equivalent (a recoverable prior state) for the new model.
+      // Best-effort, never gates the real append below.
+      await recordActionHistorySnapshot<ItemAnswer | null>({
+        directoryHandle,
+        family: "answers",
+        scopeParts: [monthFolderName, username, xrayImageId],
+        actor: event.eventBy,
+        action: `answer:${telemetryAction}`,
+        previousState: previous ?? null,
+      });
       await appendAnswerEventSegment(mainDir, batch, writer);
       reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
       return { done: true, result: { ok: true as const } };
@@ -1071,6 +1090,16 @@ async function performOnBehalfWrite(
         reason,
       };
       const batch = seedEvent ? [seedEvent, onBehalfEvent] : [onBehalfEvent];
+      // Pre-change snapshot — same answers-family history as performAnswerWrite
+      // above, for the on-behalf write path. Best-effort, never gates the append.
+      await recordActionHistorySnapshot<ItemAnswer | null>({
+        directoryHandle,
+        family: "answers",
+        scopeParts: [monthFolderName, assigneeUsername, xrayImageId],
+        actor: author,
+        action: "answer:answer-save-on-behalf",
+        previousState: foldSingleItem(ownBefore, xrayImageId) ?? null,
+      });
       await appendAnswerEventSegment(mainDir, batch, writer);
       reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
 

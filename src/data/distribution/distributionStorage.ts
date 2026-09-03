@@ -8,10 +8,12 @@ import {
 import type {
   DistributionCurrentData,
   DistributionEvent,
+  DistributionEventType,
   DistributionFoldCheckpoint,
   DistributionLog,
   QuotaFacts
 } from "./distributionTypes";
+import { recordActionHistorySnapshot } from "../history/actionHistory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { readEnvelopeRevision, safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { logError, logRejection } from "../storage/errorLogger";
@@ -50,6 +52,13 @@ const CURRENT_FILE = "distribution.current.json";
  * byte offsets point into (see backupStorage's `invalidateDistributionCaches`).
  */
 export const DISTRIBUTION_CHECKPOINT_FILE = "distribution.checkpoint.json";
+
+/** Event types that edit an EXISTING assignment rather than create/complete one — see appendDistributionEvents' pre-change history snapshot. */
+const ADMIN_EDIT_DISTRIBUTION_EVENT_TYPES: ReadonlySet<DistributionEventType> = new Set([
+  "replaced",
+  "reassigned",
+  "reopened",
+]);
 
 export type DistributionWriteProgress =
   | { phase: "events"; completed: number; total: number }
@@ -605,6 +614,33 @@ export async function appendDistributionEvents(
       };
     }
     ids.add(event.eventId);
+  }
+
+  // Pre-change snapshot (owner requirement, 2026-09-03): for an admin/
+  // supervisor edit to an EXISTING assignment — replacement, reassignment,
+  // reopen — record the row's prior events as a rolling last-10 history
+  // before the new event is appended. Deliberately excludes "assigned"
+  // (initial bulk distribution, one event per sample row, far higher volume
+  // and not an edit to anything) and "completed"/"*-requested" (routine
+  // employee/self activity, not an admin mutation of existing state) — gating
+  // on event type keeps this off the hot bulk-assignment path entirely: the
+  // extra `loadDistributionLog` read below only runs when at least one event
+  // in this batch actually needs it.
+  const historyTargets = events.filter((event): event is DistributionEvent & { eventType: DistributionEventType } =>
+    ADMIN_EDIT_DISTRIBUTION_EVENT_TYPES.has(event.eventType)
+  );
+  if (historyTargets.length > 0) {
+    const priorLog = await loadDistributionLog(directoryHandle, monthFolderName);
+    for (const event of historyTargets) {
+      await recordActionHistorySnapshot<DistributionEvent[]>({
+        directoryHandle,
+        family: "distribution",
+        scopeParts: [monthFolderName, event.xrayImageId],
+        actor: event.eventBy,
+        action: `distribution:${event.eventType}`,
+        previousState: priorLog.events.filter((prior) => prior.xrayImageId === event.xrayImageId),
+      });
+    }
   }
 
   // Each event is durable in its own file before the mutable compatibility
