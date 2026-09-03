@@ -53,6 +53,7 @@ export function buildXrayColumns(L: Labels): DataTableCol<DistributionEntry>[] {
     statusOptions: [
       { value: "all",       label: L.status_all },
       { value: "submitted", label: L.status_completed },
+      { value: "on_hold",   label: L.status_on_hold },
       { value: "pending",   label: L.status_pending },
       { value: "replaced",  label: L.status_replaced },
     ],
