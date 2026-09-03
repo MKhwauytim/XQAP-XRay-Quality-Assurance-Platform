@@ -37,7 +37,10 @@ test.describe("reviewer's own queue", () => {
   test("the three case chips carry counts and filter the queue", async ({ page }) => {
     const chips = workspace(page).getByRole("group", { name: "تصفية الحالات" });
     const all = chips.getByRole("button", { name: `جميع الحالات ${REVIEWER.count}` });
-    const engine = chips.getByRole("button", { name: "مستهدف المؤشر 9" });
+    // «مستهدف المؤشر» means "reached the queue through the regular population
+    // pipeline" (every non-ad-hoc row) — with 0 ad-hoc rows in this seed, it
+    // equals the reviewer's full count.
+    const engine = chips.getByRole("button", { name: `مستهدف المؤشر ${REVIEWER.count}` });
     const exceptional = chips.getByRole("button", { name: "حالات استثنائية 0" });
 
     await expect(all).toHaveAttribute("aria-pressed", "true");
@@ -46,7 +49,7 @@ test.describe("reviewer's own queue", () => {
 
     await engine.click();
     await expect(engine).toHaveAttribute("aria-pressed", "true");
-    await expect(workspace(page).getByRole("row")).toHaveCount(9 + 1); // + header row
+    await expect(workspace(page).getByRole("row")).toHaveCount(REVIEWER.count + 1); // + header row
 
     await exceptional.click();
     // No ad-hoc rows in the seed: the chip must say so rather than show a bare header.

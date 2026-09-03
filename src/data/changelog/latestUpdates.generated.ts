@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v131.16",
+    "date": "2026-09-03",
+    "bucket": "fix",
+    "scope": "e2e",
+    "title": "update employee-queue.spec.ts's case-chip counts for the مستهدف المؤشر redefinition"
+  },
+  {
     "version": "v131.15",
     "date": "2026-09-03",
     "bucket": "redesign",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "employee-workspace",
     "title": "stop the results screen's periodic refresh from re-reading the whole month on every tick"
-  },
-  {
-    "version": "v131.5",
-    "date": "2026-09-01",
-    "bucket": "enhancement",
-    "scope": "auth",
-    "title": "move debug tools from demo session to admin, translate to English"
   }
 ];
