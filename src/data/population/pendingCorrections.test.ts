@@ -93,6 +93,39 @@ describe("isPendingReferralEntry", () => {
     const entry = makeEntry("A1", "emp1", "pending");
     expect(isPendingReferralEntry(entry, new Map(), TEMPLATE)).toBe(false);
   });
+
+  describe("templatesById — an answer submitted under a since-swapped template", () => {
+    // Same field/label, but a FRESH fieldId — exactly what Template Builder
+    // mints on every save, even for "the same" question (see
+    // templateAnswerResolution.ts's module doc).
+    const NEW_FIELD_ID = "hasImage-v2";
+    const OLD_TEMPLATE_ID = "t-old";
+    const NEW_TEMPLATE: TemplateSchema = {
+      templateId: "t-new",
+      templateName: "نموذج",
+      version: 2,
+      fields: [
+        { fieldId: NEW_FIELD_ID, label: "هل يوجد صورة", type: "select", options: ["نعم", "لا"], required: true },
+      ],
+    } as unknown as TemplateSchema;
+
+    function noImageAnswerUnderOldTemplate(id: string, assignedTo: string): ItemAnswer {
+      return { ...noImageAnswer(id, assignedTo), templateId: OLD_TEMPLATE_ID, templateVersion: 1 };
+    }
+
+    it("without templatesById, reading against the wrong (fallback) template misses the answer entirely", () => {
+      const entry = makeEntry("A1", "emp1", "pending");
+      const answers = new Map([["A1::emp1", noImageAnswerUnderOldTemplate("A1", "emp1")]]);
+      expect(isPendingReferralEntry(entry, answers, NEW_TEMPLATE)).toBe(false);
+    });
+
+    it("with templatesById, resolves the answer's own (old) template and correctly reports معلقة", () => {
+      const entry = makeEntry("A1", "emp1", "pending");
+      const answers = new Map([["A1::emp1", noImageAnswerUnderOldTemplate("A1", "emp1")]]);
+      const templatesById = new Map([[OLD_TEMPLATE_ID, TEMPLATE], [NEW_TEMPLATE.templateId, NEW_TEMPLATE]]);
+      expect(isPendingReferralEntry(entry, answers, NEW_TEMPLATE, templatesById)).toBe(true);
+    });
+  });
 });
 
 describe("buildPendingExportRows", () => {

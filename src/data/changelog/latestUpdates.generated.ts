@@ -5,11 +5,18 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
-    "version": "v131.21",
+    "version": "v131.22",
     "date": "2026-09-03",
     "bucket": "fix",
     "scope": "referral-approval",
     "title": "stop discarding the diagnostic when a decision write fails"
+  },
+  {
+    "version": "v131.21",
+    "date": "2026-09-03",
+    "bucket": "fix",
+    "scope": "templates",
+    "title": "resolve each answer's own template in the live inspection panel, not just the results table"
   },
   {
     "version": "v131.20",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "executive-deck",
     "title": "stop fullscreen presentation slide from overflowing on zoom/resize"
-  },
-  {
-    "version": "v131.12",
-    "date": "2026-09-03",
-    "bucket": "enhancement",
-    "scope": "changelog",
-    "title": "translate displayed entry titles/scopes to Arabic"
   }
 ];
