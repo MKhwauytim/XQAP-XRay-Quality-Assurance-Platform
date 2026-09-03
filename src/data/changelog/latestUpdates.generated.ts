@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v131.20",
+    "date": "2026-09-03",
+    "bucket": "fix",
+    "scope": "templates",
+    "title": "keep answered-under-a-deleted-template results resolvable by question label"
+  },
+  {
     "version": "v131.19",
     "date": "2026-09-03",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "performance",
     "title": "replace unreadable team-mode working-hours rows with a monthly gaps bar chart"
-  },
-  {
-    "version": "v131.10",
-    "date": "2026-09-03",
-    "bucket": "fix",
-    "scope": "distribution",
-    "title": "guarantee a port-trapped employee's only reachable capacity instead of splitting it by raw need"
   }
 ];
