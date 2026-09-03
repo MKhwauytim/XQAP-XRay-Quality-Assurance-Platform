@@ -31,6 +31,7 @@ import type { DistributionEntry } from "../distribution/distributionTypes";
 import type { ItemAnswer } from "../answers/answerTypes";
 import { isNoImageSubmission } from "../answers/noImageAnswer";
 import type { TemplateSchema } from "../templates/templateTypes";
+import { resolveTemplateForAnswer } from "../templates/templateAnswerResolution";
 import type { EmployeeMirrorRowStub } from "./populationTypes";
 import type { Labels } from "../labels/useLabels";
 
@@ -77,11 +78,17 @@ export const XRAY_IMAGE_ID_HEADER = "رقم الأشعة (لا تعدّل)";
 export function isPendingReferralEntry(
   entry: DistributionEntry,
   answersMap: ReadonlyMap<string, ItemAnswer>,
-  template: TemplateSchema | null
+  template: TemplateSchema | null,
+  /** Optional: every template actually referenced by a loaded answer (see
+   *  `templateAnswerResolution.ts`). Without it, an answer submitted under a
+   *  since-swapped template is read against the WRONG (fallback) template's
+   *  field ids and never recognized as معلقة. */
+  templatesById?: ReadonlyMap<string, TemplateSchema>
 ): boolean {
   if (entry.status === "completed") return false;
   const answer = answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`);
-  return isNoImageSubmission(answer, template);
+  const rowTemplate = templatesById ? resolveTemplateForAnswer(answer, templatesById, template) : template;
+  return isNoImageSubmission(answer, rowTemplate);
 }
 
 export type PendingExportRow = { xrayImageId: string } & Record<CorrectablePopulationField, string>;
@@ -92,10 +99,11 @@ export type PendingExportRow = { xrayImageId: string } & Record<CorrectablePopul
 export function buildPendingExportRows(
   entries: readonly DistributionEntry[],
   answersMap: ReadonlyMap<string, ItemAnswer>,
-  template: TemplateSchema | null
+  template: TemplateSchema | null,
+  templatesById?: ReadonlyMap<string, TemplateSchema>
 ): PendingExportRow[] {
   return entries
-    .filter((entry) => isPendingReferralEntry(entry, answersMap, template))
+    .filter((entry) => isPendingReferralEntry(entry, answersMap, template, templatesById))
     .map((entry) => {
       const row = { xrayImageId: entry.xrayImageId } as PendingExportRow;
       for (const field of CORRECTABLE_POPULATION_FIELDS) {
