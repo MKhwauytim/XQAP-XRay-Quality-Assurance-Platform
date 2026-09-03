@@ -11,6 +11,7 @@
 
 /** Arabic title override, keyed by `ChangelogEntry.version`. */
 export const TITLE_TRANSLATIONS: Record<string, string> = {
+  "v131.9": "ترجمة عناوين ونطاقات التحديثات المعروضة إلى العربية",
   "v131.8":
     "عدم فقدان مستخدم مُضاف أو مُعدَّل حديثًا عند إعادة تحميل الصفحة قبل اكتمال حفظه على القرص",
   "v131.6":
