@@ -180,6 +180,29 @@ export async function loadTemplate(
   }
 }
 
+/**
+ * Like `loadTemplate`, but recovers a deleted template through the tombstone
+ * `deleteTemplate` writes (`{templateId}.deleted.bak.json`) when the live file
+ * is gone. Historical `ItemAnswer.templateId` values are never rewritten when
+ * a template is deleted, so this is what lets an old answer still be resolved
+ * against the template it was actually answered under (see
+ * `templateAnswerResolution.ts`) instead of only the currently active one.
+ */
+export async function loadTemplateIncludingDeleted(
+  directoryHandle: DirectoryHandleLike,
+  templateId: string
+): Promise<TemplateSchema | null> {
+  const live = await loadTemplate(directoryHandle, templateId);
+  if (live) return live;
+  try {
+    const dir = await getTemplatesDir(directoryHandle);
+    const result = await safeReadJson<TemplateSchema>(dir, `${templateId}.deleted.bak.json`);
+    return result.ok && typeof result.value.templateId === "string" ? result.value : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function loadTemplateIndex(
   directoryHandle: DirectoryHandleLike
 ): Promise<TemplateIndex> {

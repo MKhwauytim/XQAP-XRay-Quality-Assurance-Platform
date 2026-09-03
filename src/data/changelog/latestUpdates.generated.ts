@@ -5,11 +5,11 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
-    "version": "v132.0",
+    "version": "v131.20",
     "date": "2026-09-03",
-    "bucket": "feature",
-    "scope": "history",
-    "title": "rolling last-10 pre-change snapshot history for templates, answers, and distribution admin edits"
+    "bucket": "fix",
+    "scope": "templates",
+    "title": "keep answered-under-a-deleted-template results resolvable by question label"
   },
   {
     "version": "v131.19",

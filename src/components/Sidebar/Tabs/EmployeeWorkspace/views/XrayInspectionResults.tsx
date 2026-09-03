@@ -51,7 +51,13 @@ import {
 } from "../../../../../data/adhocImport/adhocImportEmployeeView";
 import { loadTemplate } from "../../../../../data/templates/templateStorage";
 import { loadInspectionTemplateSelection } from "../../../../../data/templates/templateSelectionStorage";
-import { getFieldsForPhase, getTemplatePhases } from "../../../../../data/templates/templateRuntime";
+import {
+  getAnswerValueByLabel,
+  mergeTemplateFields,
+  normalizeFieldLabel,
+  resolveAnswerTemplates,
+  resolveTemplateForAnswer,
+} from "../../../../../data/templates/templateAnswerResolution";
 import type { TemplateField, TemplateSchema } from "../../../../../data/templates/templateTypes";
 import type { DirectoryHandleLike } from "../../../../../data/storage/fileSystemAccess";
 import { useLabels, type Labels } from "../../../../../data/labels/useLabels";
@@ -192,6 +198,12 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
   const [auditReplacementRequests, setAuditReplacementRequests] = useState<ReplacementRequest[]>([]);
   const [viewMode, setViewMode] = useState<ResultsViewMode>("active");
   const [template, setTemplate] = useState<TemplateSchema | null>(null);
+  // Every template actually referenced by a loaded answer, keyed by templateId
+  // (active template included) -- not just the single active selection. A
+  // template swap (Template Builder "delete old, add new") mints fresh field
+  // ids, so an old answer must be rendered against ITS OWN template or its
+  // fields look empty/missing even though the answer is still on disk intact.
+  const [templatesById, setTemplatesById] = useState<Map<string, TemplateSchema>>(new Map());
   const [referralColConfig, setReferralColConfig] = useState<ColConfig | null>(null);
   // P2-2 quality note — expanded-row panel state. Fully independent of the
   // referral/replacement/reopen reviewNotes/DecisionEvent trail; only touches
@@ -241,6 +253,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
       setAuditReferralRequests([]);
       setAuditReplacementRequests([]);
       setTemplate(null);
+      setTemplatesById(new Map());
       setExpandedRowKey(null);
       setQualityNoteError(null);
       setReopenError(null);
@@ -325,8 +338,19 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
         answerByKey.set(`${item.xrayImageId}::${item.answeredBy}`, item);
       }
 
+      // Resolve every template an actually-loaded answer references -- not
+      // just the active one -- so an answer submitted under a since-deleted
+      // or since-replaced template still renders under its own fields (see
+      // templateAnswerResolution.ts).
+      const resolvedTemplates = await resolveAnswerTemplates(
+        directoryHandle,
+        activeTemplate,
+        [...answerByKey.values()]
+      );
+
       if (token !== loadTokenRef.current) return; // superseded by a newer month selection
       setTemplate(activeTemplate);
+      setTemplatesById(resolvedTemplates);
       setRows(entries.map(({ entry, movement }) => ({
         entry,
         movement,
@@ -387,13 +411,8 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
   );
 
   const answerFields = useMemo(
-    () =>
-      template
-        ? getTemplatePhases(template).flatMap((phase) =>
-            getFieldsForPhase(template, phase.phaseId).filter((field) => field.type !== "empty")
-          )
-        : [],
-    [template]
+    () => mergeTemplateFields(templatesById),
+    [templatesById]
   );
 
   const columns = useMemo<DataTableCol<ResultRow>[]>(() => {
@@ -409,17 +428,18 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
       void sortAccessor;
       return {
         ...rest,
-        accessor: (row) => getSampleColumnValue(row, column, template, L),
+        accessor: (row) => getSampleColumnValue(row, column, templatesById, template, L),
       };
     });
 
     const answerColumns = answerFields.map<DataTableCol<ResultRow>>((field) => ({
-      id: `answer:${field.fieldId}`,
+      id: `answer:${normalizeFieldLabel(field.label)}`,
       label: field.label,
       widthFr: Math.max(10, Math.min(18, Math.ceil(field.label.length / 2))),
       filterKind: field.type === "date" ? "date" : "multiselect",
       isDate: field.type === "date",
-      accessor: (row) => formatAnswerValue(field, getAnswerValue(row.answer, field.fieldId)),
+      accessor: (row) =>
+        formatAnswerValue(field, getAnswerValueByLabel(row.answer, field.label, templatesById, template)),
     }));
 
     // P2-2: independent supervisor coaching-note column — never derived from or
@@ -433,7 +453,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
     };
 
     return [...visibleSampleColumns, ...answerColumns, qualityNoteColumn];
-  }, [L, answerFields, referralColConfig, sampleColumns, template]);
+  }, [L, answerFields, referralColConfig, sampleColumns, template, templatesById]);
 
   /**
    * What the table shows before anyone touches its picker: exactly the columns
@@ -445,7 +465,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
   const defaultVisibleColumns = useMemo(
     () => [
       ...defaultVisibleSampleColumnIds(sampleColumns, referralColConfig),
-      ...answerFields.map((field) => `answer:${field.fieldId}`),
+      ...answerFields.map((field) => `answer:${normalizeFieldLabel(field.label)}`),
       "qualityNote",
     ],
     [answerFields, referralColConfig, sampleColumns]
@@ -1082,14 +1102,18 @@ function defaultVisibleSampleColumnIds(
 function getSampleColumnValue(
   row: ResultRow,
   column: DataTableCol<DistributionEntry>,
-  template: TemplateSchema | null,
+  templatesById: ReadonlyMap<string, TemplateSchema>,
+  fallbackTemplate: TemplateSchema | null,
   labels: Labels
 ): string | null {
   if (column.id === "stage") return formatStageLabel(row.entry.row.stage);
   if (column.id === "movementStatus") return getMovementStatusLabel(row.movement.status);
   if (column.id === "movementFrom") return row.movement.from;
   if (column.id === "movementTo") return row.movement.to;
-  if (column.id === "answerStatus") return getAnswerStatusLabel(row.answer, row.entry.status, template, labels);
+  if (column.id === "answerStatus") {
+    const rowTemplate = resolveTemplateForAnswer(row.answer, templatesById, fallbackTemplate);
+    return getAnswerStatusLabel(row.answer, row.entry.status, rowTemplate, labels);
+  }
   if (column.id === "submittedAt") return row.answer?.submittedAt ?? null;
   return column.accessor(row.entry);
 }
@@ -1113,10 +1137,6 @@ function getAnswerStatusLabel(
     return isNoImageSubmission(answer, template) ? labels.status_on_hold : labels.status_completed;
   }
   return labels.status_pending;
-}
-
-function getAnswerValue(answer: ItemAnswer | null, fieldId: string): string | number | boolean | null {
-  return answer?.answers.find((item) => item.fieldId === fieldId)?.value ?? null;
 }
 
 function formatAnswerValue(field: TemplateField, value: string | number | boolean | null): string | null {
