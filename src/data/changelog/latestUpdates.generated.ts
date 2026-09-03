@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v131.9",
+    "date": "2026-09-03",
+    "bucket": "fix",
+    "scope": "executive-deck",
+    "title": "stop fullscreen presentation slide from overflowing on zoom/resize"
+  },
+  {
     "version": "v131.8",
     "date": "2026-09-01",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "distribution",
     "title": "restrict sample assignment by port per employee"
-  },
-  {
-    "version": "v130.16",
-    "date": "2026-08-31",
-    "bucket": "fix",
-    "scope": null,
-    "title": "column filter dropdowns and pending-reopen now respect real column data / active table filters"
   }
 ];

@@ -56,9 +56,34 @@ body.deck-fullscreen.deck-controls-visible .btn-fullscreen{
   opacity:1;pointer-events:auto;
 }
 body.deck-fullscreen .slide{display:none;margin:0;}
-body.deck-fullscreen .slide.deck-slide-active{
+/* Width-only sizing here used to leave \`height\` to whichever OTHER rule won
+   the cascade for that property — usually the base \`.slide{height:630px}\`,
+   but the narrow-viewport \`.slide.v2{height:auto}\` override (further below,
+   \`@media (max-width:1152px)\`) is MORE specific than that base rule and
+   applies any time the fullscreen window's CSS-px width drops under 1152 —
+   an everyday browser zoom level, not just a narrow physical window. With
+   height:auto the slide's real content height (calibrated to fill a fixed
+   630px budget, so it doesn't compress) came out well over 630px while width
+   kept shrinking toward the viewport, so the slide was both too tall
+   (clipped top/bottom by \`body.deck-fullscreen\`'s overflow:hidden, with no
+   scroll to reach it in single-slide mode) and no longer matched its own
+   297:167 aspect ratio. A short-but-wide window (width>=1152, available
+   height<662px) hit the same overflow even without that breakpoint, since
+   width and height were fit against two different constraints instead of
+   one shared ratio. Pinning both box dimensions here (4 classes + element
+   beats \`.slide.v2\`'s 2 classes, so this wins for height too) and scaling
+   the whole fixed 1120×630 design box uniformly via \`--v2-fs-scale\` fits
+   both axes at any zoom level or window size without distortion or clipping.
+   \`--v2-fs-scale\` is computed in JS (DECK_V2_FULLSCREEN_SCALE_SCRIPT,
+   index.ts) rather than in CSS: \`transform:scale()\` needs a unitless
+   <number>, and dividing a length by a plain number stays a length in CSS
+   (the declaration is dropped at parse time) — same reason deck3's
+   \`--v3-scale\` is JS-computed too. */
+body.deck-fullscreen .slide.v2.deck-slide-active{
   display:flex;
-  width:min(calc(100vw - 32px),calc((100dvh - 32px) * 297 / 167));
+  width:1120px;
+  height:630px;
+  transform:scale(var(--v2-fs-scale, 1));
 }
 /* The footer's real class is .source-revisions (sourceRevisions.ts) — this
    selector targeted a class that's never emitted (.srev-footer doesn't exist

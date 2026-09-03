@@ -354,6 +354,26 @@ export const DECK_FULLSCREEN_SCRIPT = `(function(){
   sync();
 })();`;
 
+/**
+ * Computes \`--v2-fs-scale\`, the uniform scale factor theme.ts's
+ * \`body.deck-fullscreen .slide.v2.deck-slide-active\` rule applies to the
+ * fixed 1120×630 design box in single-slide fullscreen mode (see that rule's
+ * own comment for why this can't just be a CSS \`calc()\`/\`min()\` expression).
+ * Deck2-only — deck3 already scales via its own always-on \`--v3-scale\`
+ * script (deck3/index.ts), so this is not exported for reuse there.
+ */
+const DECK_V2_FULLSCREEN_SCALE_SCRIPT = `(function(){
+  var root = document.documentElement;
+  function apply(){
+    var scale = Math.min((window.innerWidth - 32) / 1120, (window.innerHeight - 32) / 630);
+    root.style.setProperty('--v2-fs-scale', String(scale > 0 ? scale : 1));
+  }
+  apply();
+  window.addEventListener('resize', apply);
+  document.addEventListener('fullscreenchange', apply);
+  document.addEventListener('webkitfullscreenchange', apply);
+})();`;
+
 export function buildDeckV2Html(
   slides: string,
   monthLabel: string,
@@ -413,7 +433,7 @@ ${footerNote}
 <button type="button" class="btn-slide-nav btn-slide-prev" id="deck-slide-prev" aria-label="${slidePrevLabel}" title="${slidePrevLabel}">${icon("arrow", 20)}</button>
 <button type="button" class="btn-slide-nav btn-slide-next" id="deck-slide-next" aria-label="${slideNextLabel}" title="${slideNextLabel}">${icon("arrow", 20)}</button>
 <span class="deck-slide-counter" id="deck-slide-counter" dir="ltr"></span>
-<script>${DECK_NAV_SCRIPT}${DECK_TABLE_FILL_SCRIPT}${DECK_FULLSCREEN_SCRIPT}${variantPreview ? DECK_VARIANT_SCRIPT : ""}</script>
+<script>${DECK_NAV_SCRIPT}${DECK_TABLE_FILL_SCRIPT}${DECK_FULLSCREEN_SCRIPT}${DECK_V2_FULLSCREEN_SCALE_SCRIPT}${variantPreview ? DECK_VARIANT_SCRIPT : ""}</script>
 </body>
 </html>`;
 }

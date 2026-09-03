@@ -130,7 +130,7 @@ describe("buildExecutiveDeckV2 — production path (no opts)", () => {
   it("replaces the fullscreen scroll-stack with single-slide presentation CSS", async () => {
     const html = await buildExecutiveDeckV2(input([popRow()]));
     expect(html).toContain("body.deck-fullscreen .slide{display:none;margin:0;}");
-    expect(html).toContain("body.deck-fullscreen .slide.deck-slide-active{");
+    expect(html).toContain("body.deck-fullscreen .slide.v2.deck-slide-active{");
     expect(html).toContain(".btn-slide-nav,.deck-slide-counter{display:none;}");
     expect(html).toContain(".btn-fullscreen-icon-compress{display:none;}");
     expect(html).toMatch(
