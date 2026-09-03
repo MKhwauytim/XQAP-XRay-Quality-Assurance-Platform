@@ -5,6 +5,20 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v131.14",
+    "date": "2026-09-03",
+    "bucket": "fix",
+    "scope": "executive-deck",
+    "title": "fit the on-screen deck to the window and soften its flat card/table surfaces"
+  },
+  {
+    "version": "v131.13",
+    "date": "2026-09-03",
+    "bucket": "fix",
+    "scope": "executive-deck",
+    "title": "stop fullscreen presentation slide from overflowing on zoom/resize"
+  },
+  {
     "version": "v131.12",
     "date": "2026-09-03",
     "bucket": "enhancement",
@@ -59,19 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "changelog",
     "title": "سجل التحديثات tab — latest 10 updates, generated at build time from edit logs"
-  },
-  {
-    "version": "v131.3",
-    "date": "2026-09-01",
-    "bucket": "enhancement",
-    "scope": null,
-    "title": "remove أوراق العمل tab, add DevTools console credit, add suspicion-type question"
-  },
-  {
-    "version": "v131.2",
-    "date": "2026-09-01",
-    "bucket": "enhancement",
-    "scope": "user-management",
-    "title": "merge activity and actions log pages into one"
   }
 ];
