@@ -5,25 +5,39 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
-    "version": "v131.13",
+    "version": "v131.15",
     "date": "2026-09-03",
     "bucket": "redesign",
     "scope": "employee-workspace",
     "title": "extract the queue's selection helpers so XrayReferrals clears the max-lines gate again"
   },
   {
-    "version": "v131.12",
+    "version": "v131.14",
     "date": "2026-09-03",
     "bucket": "enhancement",
     "scope": "employee-workspace",
     "title": "مستهدف المؤشر now means 'from the regular population pipeline', not a risk-column read"
   },
   {
-    "version": "v131.11",
+    "version": "v131.13",
     "date": "2026-09-03",
     "bucket": "fix",
     "scope": "employee-workspace",
     "title": "queue الحالة filter no longer misses مستبدلة rows or conflates معلق with مكتملة"
+  },
+  {
+    "version": "v131.12",
+    "date": "2026-09-03",
+    "bucket": "enhancement",
+    "scope": "changelog",
+    "title": "translate displayed entry titles/scopes to Arabic"
+  },
+  {
+    "version": "v131.11",
+    "date": "2026-09-03",
+    "bucket": "enhancement",
+    "scope": "performance",
+    "title": "replace unreadable team-mode working-hours rows with a monthly gaps bar chart"
   },
   {
     "version": "v131.10",
@@ -59,19 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "auth",
     "title": "move debug tools from demo session to admin, translate to English"
-  },
-  {
-    "version": "v131.4",
-    "date": "2026-09-01",
-    "bucket": "feature",
-    "scope": "changelog",
-    "title": "سجل التحديثات tab — latest 10 updates, generated at build time from edit logs"
-  },
-  {
-    "version": "v131.3",
-    "date": "2026-09-01",
-    "bucket": "enhancement",
-    "scope": null,
-    "title": "remove أوراق العمل tab, add DevTools console credit, add suspicion-type question"
   }
 ];

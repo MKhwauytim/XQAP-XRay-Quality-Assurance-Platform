@@ -10,11 +10,13 @@ import {
   formatDayLabel,
   formatDuration,
   formatClock,
+  formatMonthLabel,
   formatOneDecimal,
   formatShortDayLabel,
   formatTimeOfDay,
 } from "./userManagementFormatters";
 import {
+  aggregateGapsByMonth,
   aggregateSamplesByDay,
   computeAllDailyPerformance,
   computeEmployeeComparison,
@@ -31,7 +33,7 @@ import {
   type GapTier,
   type PerformanceScopeFilter,
 } from "../../../../data/performance/performanceTypes";
-import { averageCount, samplesTrendSvg } from "./performanceCharts";
+import { averageCount, gapsByMonthSvg, samplesTrendSvg, type MonthGapPoint } from "./performanceCharts";
 
 const GAP_TIER_ORDER: readonly GapTier[] = ["normal", "small", "medium", "large", "unclassified"];
 
@@ -171,19 +173,17 @@ export function PerformanceSection(props: {
     () => computeEmployeeComparison(dateOnlyFiltered, employeeNames),
     [dateOnlyFiltered, employeeNames]
   );
-  // Per-employee daily records in scope, preserving the chronological order
-  // computeAllDailyPerformance already sorted them in — used to build one
-  // working-hours row per (employee, day) in team mode below, instead of
-  // flattening every day's gaps onto a single shift-window track (which
-  // made unrelated days' gaps visually overlap at the same time-of-day).
-  const dailyRecordsByEmployeeInScope = useMemo(() => {
-    const byEmployee = new Map<string, DailyPerformance[]>();
-    for (const record of dateOnlyFiltered) {
-      const bucket = byEmployee.get(record.employee);
-      if (bucket) bucket.push(record);
-      else byEmployee.set(record.employee, [record]);
-    }
-    return byEmployee;
+  // Notable-gap duration per calendar month, across every employee in the
+  // shared date range — the team view's working-hours chart. A bar per
+  // month stays readable regardless of how many days a month accumulates,
+  // unlike the old one-row-per-(employee, day) rendering it replaces.
+  const monthGapPoints: MonthGapPoint[] = useMemo(() => {
+    const months = aggregateGapsByMonth(flattenGaps(dateOnlyFiltered));
+    return months.map((m) => ({
+      label: formatMonthLabel(m.month),
+      durationMsByTier: m.durationMsByTier,
+      totalDurationMs: m.totalDurationMs,
+    }));
   }, [dateOnlyFiltered]);
 
   const trendAvg = useMemo(() => averageCount(trendPoints), [trendPoints]);
@@ -197,31 +197,10 @@ export function PerformanceSection(props: {
       ? labels.um_perf_hours_scope_team
       : labels.um_perf_hours_scope_employee.replace("{name}", selectedDisplayName);
 
+  // Per-day working-hours rows — only rendered when one employee is
+  // selected, where a month's worth of rows stays readable.
   const hourRows: HourChartRow[] = useMemo(() => {
-    if (filter.employee === "") {
-      const rows: HourChartRow[] = [];
-      for (const row of comparison.rows) {
-        if (row.samples === 0 && row.totalGaps === 0) continue;
-        const dayRows = (dailyRecordsByEmployeeInScope.get(row.username) ?? [])
-          .map((record) => ({ record, segments: buildHourSegments(record.gaps, false) }))
-          .filter((entry) => entry.segments.length > 0);
-        // No notable (small/medium/large) gap on any day in scope — a single
-        // summary row for the employee, same as before this rework, rather
-        // than a wall of empty per-day rows.
-        if (dayRows.length === 0) {
-          rows.push({ key: row.username, label: row.displayName, segments: [] });
-          continue;
-        }
-        for (const { record, segments } of dayRows) {
-          rows.push({
-            key: `${row.username}-${record.day}`,
-            label: `${row.displayName} · ${formatShortDayLabel(record.day)}`,
-            segments,
-          });
-        }
-      }
-      return rows;
-    }
+    if (filter.employee === "") return [];
     return filtered
       .filter((record) => record.employee === filter.employee)
       .map((record) => ({
@@ -229,7 +208,7 @@ export function PerformanceSection(props: {
         label: formatShortDayLabel(record.day),
         segments: buildHourSegments(record.gaps, false),
       }));
-  }, [filter.employee, comparison.rows, dailyRecordsByEmployeeInScope, filtered]);
+  }, [filter.employee, filtered]);
 
   const rangeLabel =
     filter.from || filter.to
@@ -416,7 +395,43 @@ export function PerformanceSection(props: {
                 <h4>{labels.um_perf_hours_title}</h4>
                 <p className="um-perf-chart-sub">{hoursScopeLabel}</p>
               </div>
-              {hourRows.length === 0 ? (
+              {filter.employee === "" ? (
+                monthGapPoints.length === 0 ? (
+                  <div className="um-empty">{labels.um_perf_hours_empty}</div>
+                ) : (
+                  <>
+                    <div dir="ltr" aria-hidden="true" dangerouslySetInnerHTML={{ __html: gapsByMonthSvg(monthGapPoints, labels.um_perf_hours_empty) }} />
+                    <div className="um-perf-legend">
+                      {(["small", "medium", "large"] as const).map((tier) => (
+                        <span className="um-perf-legend-item" key={tier}>
+                          <span className={`um-perf-legend-dot um-perf-legend-dot--${tier}`} /> {labels[GAP_TIER_LABEL_KEYS[tier]]}
+                        </span>
+                      ))}
+                    </div>
+                    <table className="um-perf-sr-only">
+                      <caption>{labels.um_perf_hours_title}</caption>
+                      <thead>
+                        <tr>
+                          <th>{labels.um_perf_hours_col_month}</th>
+                          <th>{labels[GAP_TIER_LABEL_KEYS.small]}</th>
+                          <th>{labels[GAP_TIER_LABEL_KEYS.medium]}</th>
+                          <th>{labels[GAP_TIER_LABEL_KEYS.large]}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {monthGapPoints.map((point) => (
+                          <tr key={point.label}>
+                            <td>{point.label}</td>
+                            <td>{formatDuration(point.durationMsByTier.small)}</td>
+                            <td>{formatDuration(point.durationMsByTier.medium)}</td>
+                            <td>{formatDuration(point.durationMsByTier.large)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
+                )
+              ) : hourRows.length === 0 ? (
                 <div className="um-empty">{labels.um_perf_hours_empty}</div>
               ) : (
                 <div className="um-perf-hours-body">
@@ -476,7 +491,7 @@ export function PerformanceSection(props: {
                       </tr>
                     </thead>
                     <tbody>
-                      {(filter.employee === "" ? filtered : filtered.filter((d) => d.employee === filter.employee)).map((d) => (
+                      {filtered.filter((d) => d.employee === filter.employee).map((d) => (
                         <tr key={`${d.employee}-${d.day}`}>
                           <td>{d.day}</td>
                           <td>{d.signInAt ? formatDateTime(d.signInAt) : "—"}</td>

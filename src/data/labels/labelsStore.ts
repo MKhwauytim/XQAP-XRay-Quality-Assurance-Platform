@@ -1067,7 +1067,8 @@ export const DEFAULT_LABELS = {
   um_perf_hours_empty:          "لا توجد بيانات كافية لعرض فجوات ساعات العمل ضمن الفترة المحددة.",
   um_perf_hours_col_signin:     "وقت تسجيل الدخول",
   um_perf_hours_col_finish:     "وقت آخر إنجاز",
-  um_perf_hours_scope_team:     "فجوات كل الفريق ضمن دوام العمل (7:30 ص – 5:30 م) — شريط لكل موظف، اختر موظفاً لعرض التفاصيل يومياً",
+  um_perf_hours_col_month:      "الشهر",
+  um_perf_hours_scope_team:     "إجمالي مدة فجوات الفريق شهرياً حسب التصنيف — اختر موظفاً لعرض فجواته يومياً ضمن دوام العمل",
   um_perf_hours_scope_employee: "فجوات {name} ضمن دوام العمل (7:30 ص – 5:30 م) — شريط لكل يوم",
   um_perf_hours_shift_legend:   "مدة الدوام (7:30 ص – 5:30 م)",
 
