@@ -5,18 +5,32 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
-    "version": "v131.10",
+    "version": "v131.12",
     "date": "2026-09-03",
     "bucket": "fix",
     "scope": "executive-deck",
     "title": "fit the on-screen deck to the window and soften its flat card/table surfaces"
   },
   {
-    "version": "v131.9",
+    "version": "v131.11",
     "date": "2026-09-03",
     "bucket": "fix",
     "scope": "executive-deck",
     "title": "stop fullscreen presentation slide from overflowing on zoom/resize"
+  },
+  {
+    "version": "v131.10",
+    "date": "2026-09-03",
+    "bucket": "fix",
+    "scope": "distribution",
+    "title": "guarantee a port-trapped employee's only reachable capacity instead of splitting it by raw need"
+  },
+  {
+    "version": "v131.9",
+    "date": "2026-09-03",
+    "bucket": "fix",
+    "scope": "distribution",
+    "title": "keep per-employee sample totals equal when port restrictions are active"
   },
   {
     "version": "v131.8",
@@ -59,19 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "user-management",
     "title": "merge activity and actions log pages into one"
-  },
-  {
-    "version": "v131.1",
-    "date": "2026-09-01",
-    "bucket": "fix",
-    "scope": "performance",
-    "title": "stop overlaying multiple days' gaps onto one team-mode working-hours row"
-  },
-  {
-    "version": "v131.0",
-    "date": "2026-08-31",
-    "bucket": "enhancement",
-    "scope": "population",
-    "title": "drop obsolete sheet-name-pattern settings from Data Processing Settings"
   }
 ];

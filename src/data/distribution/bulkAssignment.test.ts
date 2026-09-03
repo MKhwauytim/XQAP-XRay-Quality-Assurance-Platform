@@ -493,3 +493,145 @@ test("calculateBulkAssignment with an empty portRestrictions list behaves exactl
   expect(projection(withEmptyList.events)).toEqual(projection(withoutParam.events));
   expect(withEmptyList.errors).toEqual(withoutParam.errors);
 });
+
+test("calculateBulkAssignment keeps every employee's total near their equal percentage even when one is port-restricted", () => {
+  // Four employees at an equal 25% each, four ports of very different sizes.
+  // Employee "d" can only work one (the smallest) port. Before the fix, each
+  // port re-apportioned itself at 100% among only its eligible employees —
+  // "d" then drew a full 25%-of-port share from every port it could reach
+  // while its excluded share from the other ports was never made up
+  // elsewhere, so totals drifted far from 25% each (the bug report: employees
+  // ending up with 1800/2000/2500/1400 instead of equal shares). The fix
+  // tracks one shared remaining-need pool per employee across ports so the
+  // final totals stay anchored to the configured percentage.
+  const ports = [
+    { name: "port-huge", count: 400 },
+    { name: "port-big", count: 300 },
+    { name: "port-medium", count: 200 },
+    { name: "port-small", count: 100 },
+  ];
+  const rows: PreparedPopulationRow[] = ports.flatMap(({ name, count }) =>
+    Array.from({ length: count }, (_, i) => makeRow(`${name}-${i}`, "SECOND_STAGE", "NonCertscan", name))
+  );
+  const allocations: EmployeeStageAllocation[] = ["a", "b", "c", "d"].map((username) => ({
+    username,
+    stageKey: "second",
+    method: "percentage",
+    value: 25,
+    isActive: true,
+  }));
+  const employees = ["a", "b", "c", "d"].map((username) => makeUser(username, "employee"));
+  const portRestrictions: EmployeePortRestriction[] = [
+    { username: "d", restricted: true, enabledPorts: ["port-big", "port-medium", "port-small"] },
+  ];
+
+  const result = calculateBulkAssignment({
+    rows,
+    allocations,
+    employees,
+    operatorUsername: "test",
+    portRestrictions,
+  });
+
+  expect(result.errors).toHaveLength(0);
+  expect(result.events).toHaveLength(1000);
+
+  const totals = new Map<string, number>();
+  for (const e of result.events) totals.set(e.assignedTo, (totals.get(e.assignedTo) ?? 0) + 1);
+
+  // Equal 25% shares of 1000 rows is 250 each. Every employee's total —
+  // including the restricted one — must land close to that, not the wildly
+  // uneven totals the old per-port renormalization produced.
+  for (const username of ["a", "b", "c", "d"]) {
+    expect(totals.get(username) ?? 0).toBeGreaterThanOrEqual(240);
+    expect(totals.get(username) ?? 0).toBeLessThanOrEqual(260);
+  }
+});
+
+test("calculateBulkAssignment guarantees a trapped employee their only reachable port instead of splitting it 'fairly' by need", () => {
+  // "b", "c", "d" at 25% each are only eligible for the 900-row port; "a" is
+  // eligible for BOTH ports. Weighting each port purely by remaining need
+  // (an earlier version of this fix) would split the 100-row port 25/25/25/25
+  // between all four just because their remaining needs still look equal,
+  // handing "a" a quarter of the one port "b"/"c"/"d" don't even reach,
+  // while "a" has 900 other rows available. "a" has nowhere near as much
+  // riding on this port as "b"/"c"/"d" do, so it must be guaranteed to them.
+  const rows: PreparedPopulationRow[] = [
+    ...Array.from({ length: 900 }, (_, i) => makeRow(`big-${i}`, "SECOND_STAGE", "NonCertscan", "port-big")),
+    ...Array.from({ length: 100 }, (_, i) => makeRow(`small-${i}`, "SECOND_STAGE", "NonCertscan", "port-small")),
+  ];
+  const allocations: EmployeeStageAllocation[] = ["a", "b", "c", "d"].map((username) => ({
+    username,
+    stageKey: "second",
+    method: "percentage",
+    value: 25,
+    isActive: true,
+  }));
+  const employees = ["a", "b", "c", "d"].map((username) => makeUser(username, "employee"));
+  const portRestrictions: EmployeePortRestriction[] = [
+    { username: "b", restricted: true, enabledPorts: ["port-big"] },
+    { username: "c", restricted: true, enabledPorts: ["port-big"] },
+    { username: "d", restricted: true, enabledPorts: ["port-small"] },
+  ];
+
+  const result = calculateBulkAssignment({
+    rows,
+    allocations,
+    employees,
+    operatorUsername: "test",
+    portRestrictions,
+  });
+
+  expect(result.errors).toHaveLength(0);
+  expect(result.events).toHaveLength(1000);
+
+  const smallTotals = new Map<string, number>();
+  for (const e of result.events) {
+    if (e.xrayImageId.startsWith("small-")) smallTotals.set(e.assignedTo, (smallTotals.get(e.assignedTo) ?? 0) + 1);
+  }
+  // "d" has no other port at all — it must get the whole 100-row port.
+  expect(smallTotals.get("d")).toBe(100);
+  expect(smallTotals.get("a") ?? 0).toBe(0);
+
+  const totals = new Map<string, number>();
+  for (const e of result.events) totals.set(e.assignedTo, (totals.get(e.assignedTo) ?? 0) + 1);
+  // With "d" capped at 100 (its only reachable capacity), the other 900 rows
+  // split evenly three ways among a/b/c (25% each of the remaining pool).
+  for (const username of ["a", "b", "c"]) {
+    expect(totals.get(username)).toBe(300);
+  }
+});
+
+test("calculateBulkAssignment respects unequal configured percentages, not just an equal split, when restrictions are active", () => {
+  // "a" at 20% / "b" at 80% of 1000 rows → targets 200 / 800. "b" has an
+  // exclusive 700-row port plus a shared 300-row port with "a"; "a" only
+  // reaches the shared port. This is feasible (unlike a 50/50 split of the
+  // shared port, which would overshoot "a"'s 200 target) and should land on
+  // exactly the configured ratio, not default to equal shares anywhere.
+  const rows: PreparedPopulationRow[] = [
+    ...Array.from({ length: 300 }, (_, i) => makeRow(`shared-${i}`, "SECOND_STAGE", "NonCertscan", "port-shared")),
+    ...Array.from({ length: 700 }, (_, i) => makeRow(`excl-${i}`, "SECOND_STAGE", "NonCertscan", "port-exclusive")),
+  ];
+  const allocations: EmployeeStageAllocation[] = [
+    { username: "a", stageKey: "second", method: "percentage", value: 20, isActive: true },
+    { username: "b", stageKey: "second", method: "percentage", value: 80, isActive: true },
+  ];
+  const employees = [makeUser("a", "employee"), makeUser("b", "employee")];
+  const portRestrictions: EmployeePortRestriction[] = [
+    { username: "a", restricted: true, enabledPorts: ["port-shared"] },
+  ];
+
+  const result = calculateBulkAssignment({
+    rows,
+    allocations,
+    employees,
+    operatorUsername: "test",
+    portRestrictions,
+  });
+
+  expect(result.errors).toHaveLength(0);
+  const totals = new Map<string, number>();
+  for (const e of result.events) totals.set(e.assignedTo, (totals.get(e.assignedTo) ?? 0) + 1);
+  expect(totals.get("a")).toBe(200);
+  expect(totals.get("b")).toBe(800);
+});
