@@ -7,10 +7,11 @@
 // filters, so these tests hold four things honest:
 //
 //  1. the DEFAULT is «جميع الحالات» and hides nothing;
-//  2. «مستهدف المؤشر» means the risk engine actually said YES — a blank or an
-//     unrecognized value is "we do not know", and must NOT be shown as targeted
-//     (the same rule the executive deck's risk-engine page enforces, now shared
-//     from src/data/population/riskEngineVerdict.ts);
+//  2. «مستهدف المؤشر» means "reached the queue through the regular monthly
+//     population process off the attached Risk file" — every row that is NOT
+//     an ad-hoc-imported exceptional case, regardless of what its own
+//     risk-engine column says (that column feeds a different feature, the
+//     executive deck's risk-engine agreement page — see riskEngineVerdict.ts);
 //  3. the count on each chip is the length of the list that chip opens, over the
 //     same scope the reader is already in — which, since the oversight scope
 //     control became an employee picker, may be one named employee's queue;
@@ -335,11 +336,11 @@ describe("XrayReferrals case filter — the three chips", () => {
     await renderMixedQueue();
 
     expect(chipCount(L.ew_case_filter_all)).toBe("5");
-    expect(chipCount(L.ew_case_filter_risk_targeted)).toBe("1");
+    expect(chipCount(L.ew_case_filter_risk_targeted)).toBe("4");
     expect(chipCount(L.ew_case_filter_adhoc)).toBe("1");
 
     fireEvent.click(chip(L.ew_case_filter_risk_targeted));
-    await waitFor(() => expect(queueIds(ALL_IDS)).toHaveLength(1));
+    await waitFor(() => expect(queueIds(ALL_IDS)).toHaveLength(4));
 
     fireEvent.click(chip(L.ew_case_filter_adhoc));
     await waitFor(() => expect(queueIds(ALL_IDS)).toHaveLength(1));
@@ -349,17 +350,16 @@ describe("XrayReferrals case filter — the three chips", () => {
     expect(chipCount(L.ew_case_filter_all)).toBe("5");
   });
 
-  it("«مستهدف المؤشر» shows only affirmative-engine rows — blank and unrecognized values are excluded", async () => {
+  it("«مستهدف المؤشر» shows every regular-pipeline row — blank/negative/unrecognized risk-column values included, only the ad-hoc row excluded", async () => {
     await renderMixedQueue();
 
     fireEvent.click(chip(L.ew_case_filter_risk_targeted));
 
-    await waitFor(() => expect(rowFor("IMG-NO")).toBeNull());
-    expect(queueIds(ALL_IDS)).toEqual(["IMG-YES"]);
-    // The correctness core: a blank means "we do not know what the engine said",
-    // never "the engine targeted it" — and neither does an unknown spelling.
-    expect(rowFor("IMG-BLANK")).toBeNull();
-    expect(rowFor("IMG-UNKNOWN")).toBeNull();
+    await waitFor(() => expect(rowFor(ADHOC_SHOWN_ID)).toBeNull());
+    // The correctness core (post owner-correction): membership in the regular
+    // Risk-file-processed population is itself what makes a row "targeted by
+    // the indicator" — the row's own risk-engine column no longer matters.
+    expect(queueIds(ALL_IDS)).toEqual(["IMG-BLANK", "IMG-YES", "IMG-NO", "IMG-UNKNOWN"]);
     expect(chip(L.ew_case_filter_risk_targeted)).toHaveAttribute("aria-pressed", "true");
     expect(chip(L.ew_case_filter_all)).toHaveAttribute("aria-pressed", "false");
   });
@@ -389,44 +389,49 @@ describe("XrayReferrals case filter — composition with the scope picker", () =
   it("filters within the active scope, and the counts follow the scope switch", async () => {
     // supervisor => can("view-all-entries") => the scope picker is rendered,
     // and the view opens on the reader's own rows.
-    writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+    // "malrogi" (not an arbitrary "sup-1") because seedAdhocAssignment below
+    // goes through the real assignment path, which only accepts a username
+    // present in the roster createEmptyUserManagementState() seeds — malrogi
+    // is its default supervisor.
+    writeSession({ role: "supervisor", username: "malrogi", loginAt: new Date().toISOString() });
     writeUserManagementState(createEmptyUserManagementState(), false);
 
     const root = createMemoryDirectory("root");
     await seedMonth(root, [
-      ["IMG-MINE-YES", "نعم", "sup-1"],
-      ["IMG-MINE-NO", "لا", "sup-1"],
-      ["IMG-THEIRS-YES", "نعم", "emp-2"],
-      ["IMG-THEIRS-BLANK", null, "emp-2"],
+      ["IMG-MINE-REGULAR", null, "malrogi"],
+      ["IMG-THEIRS-REGULAR", null, "emp-2"],
     ]);
-    const ids = ["IMG-MINE-YES", "IMG-MINE-NO", "IMG-THEIRS-YES", "IMG-THEIRS-BLANK"];
+    // malrogi's second row is an ad-hoc exceptional case — the one «مستهدف
+    // المؤشر» now excludes, regardless of what any risk column would say.
+    await seedAdhocAssignment(root, "malrogi");
+    const ids = ["IMG-MINE-REGULAR", "IMG-THEIRS-REGULAR", ADHOC_SHOWN_ID];
 
     render(<XrayReferrals directoryHandle={root} />);
-    await waitFor(() => expect(rowFor("IMG-MINE-YES")).not.toBeNull());
+    await waitFor(() => expect(rowFor("IMG-MINE-REGULAR")).not.toBeNull());
 
     // Personal scope: counts describe this reviewer's own two rows only.
     expect(chipCount(L.ew_case_filter_all)).toBe("2");
     expect(chipCount(L.ew_case_filter_risk_targeted)).toBe("1");
 
     fireEvent.click(chip(L.ew_case_filter_risk_targeted));
-    await waitFor(() => expect(rowFor("IMG-MINE-NO")).toBeNull());
-    expect(queueIds(ids)).toEqual(["IMG-MINE-YES"]);
+    await waitFor(() => expect(rowFor(ADHOC_SHOWN_ID)).toBeNull());
+    expect(queueIds(ids)).toEqual(["IMG-MINE-REGULAR"]);
 
     // Widening the scope keeps the chip selected and re-counts over the wider
     // set — the case filter composes with the scope, it does not replace it.
     pickScope(QUEUE_SCOPE_ALL);
-    await waitFor(() => expect(rowFor("IMG-THEIRS-YES")).not.toBeNull());
+    await waitFor(() => expect(rowFor("IMG-THEIRS-REGULAR")).not.toBeNull());
     expect(chip(L.ew_case_filter_risk_targeted)).toHaveAttribute("aria-pressed", "true");
-    expect(queueIds(ids)).toEqual(["IMG-MINE-YES", "IMG-THEIRS-YES"]);
-    expect(chipCount(L.ew_case_filter_all)).toBe("4");
+    expect(queueIds(ids)).toEqual(["IMG-MINE-REGULAR", "IMG-THEIRS-REGULAR"]);
+    expect(chipCount(L.ew_case_filter_all)).toBe("3");
     expect(chipCount(L.ew_case_filter_risk_targeted)).toBe("2");
 
     // …and narrowing to ONE named employee re-counts over just their queue.
     // This is the case the old two-option switcher could not express at all.
     pickScope("emp-2");
-    await waitFor(() => expect(rowFor("IMG-MINE-YES")).toBeNull());
-    expect(queueIds(ids)).toEqual(["IMG-THEIRS-YES"]);
-    expect(chipCount(L.ew_case_filter_all)).toBe("2");
+    await waitFor(() => expect(rowFor("IMG-MINE-REGULAR")).toBeNull());
+    expect(queueIds(ids)).toEqual(["IMG-THEIRS-REGULAR"]);
+    expect(chipCount(L.ew_case_filter_all)).toBe("1");
     expect(chipCount(L.ew_case_filter_risk_targeted)).toBe("1");
   });
 
@@ -526,21 +531,18 @@ describe("XrayReferrals case filter — zero results", () => {
     writeUserManagementState(createEmptyUserManagementState(), false);
 
     const root = createMemoryDirectory("root");
-    // Nothing this employee owns was targeted by the engine.
-    await seedMonth(root, [
-      ["IMG-BLANK", null, "jalgahamdi"],
-      ["IMG-NO", "لا", "jalgahamdi"],
-    ]);
+    // Everything this employee owns is an ad-hoc exceptional case — none of it
+    // reached the queue through the regular population process.
+    await seedAdhocAssignment(root, "jalgahamdi");
 
     render(<XrayReferrals directoryHandle={root} />);
-    await waitFor(() => expect(rowFor("IMG-BLANK")).not.toBeNull());
+    await waitFor(() => expect(rowFor(ADHOC_SHOWN_ID)).not.toBeNull());
 
     expect(chipCount(L.ew_case_filter_risk_targeted)).toBe("0");
     fireEvent.click(chip(L.ew_case_filter_risk_targeted));
 
     await waitFor(() => expect(screen.getByText(L.ew_case_filter_empty)).toBeInTheDocument());
-    expect(rowFor("IMG-BLANK")).toBeNull();
-    expect(rowFor("IMG-NO")).toBeNull();
+    expect(rowFor(ADHOC_SHOWN_ID)).toBeNull();
 
     // And it is only shown while the active chip is the empty one.
     fireEvent.click(chip(L.ew_case_filter_all));
@@ -554,16 +556,13 @@ describe("XrayReferrals case filter — unsaved drafts", () => {
     writeUserManagementState(createEmptyUserManagementState(), false);
 
     const root = createMemoryDirectory("root");
-    // IMG-BLANK is assigned first, so it auto-selects into the panel; it is the
-    // row «مستهدف المؤشر» will exclude.
-    await seedMonth(root, [
-      ["IMG-BLANK", null, "jalgahamdi"],
-      ["IMG-YES", "نعم", "jalgahamdi"],
-    ]);
+    // The only row is an ad-hoc exceptional case, so it auto-selects into the
+    // panel; it is the row «مستهدف المؤشر» will exclude.
+    await seedAdhocAssignment(root, "jalgahamdi");
     await seedDraftableTemplate(root);
 
     render(<XrayReferrals directoryHandle={root} />);
-    await waitFor(() => expect(rowFor("IMG-BLANK")).not.toBeNull());
+    await waitFor(() => expect(rowFor(ADHOC_SHOWN_ID)).not.toBeNull());
 
     const noteInput = (await waitFor(() => screen.getByLabelText("ملاحظة"))) as HTMLInputElement;
     fireEvent.change(noteInput, { target: { value: "مسودة غير محفوظة" } });
@@ -572,9 +571,9 @@ describe("XrayReferrals case filter — unsaved drafts", () => {
     fireEvent.click(chip(L.ew_case_filter_risk_targeted));
 
     // The row has left the queue…
-    await waitFor(() => expect(rowFor("IMG-BLANK")).toBeNull());
+    await waitFor(() => expect(rowFor(ADHOC_SHOWN_ID)).toBeNull());
     // …and the panel is still on it, with the draft intact — the same behaviour
-    // as a supervisor reassigning the row mid-edit, not a swap to IMG-YES.
+    // as a supervisor reassigning the row mid-edit.
     expect((screen.getByLabelText("ملاحظة") as HTMLInputElement).value).toBe("مسودة غير محفوظة");
     expect(screen.getByText(L.ew_draft_retained_notice)).toBeInTheDocument();
   });

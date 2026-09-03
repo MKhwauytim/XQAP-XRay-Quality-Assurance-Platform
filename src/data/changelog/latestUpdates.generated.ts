@@ -5,6 +5,20 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v131.10",
+    "date": "2026-09-03",
+    "bucket": "enhancement",
+    "scope": "employee-workspace",
+    "title": "مستهدف المؤشر now means 'from the regular population pipeline', not a risk-column read"
+  },
+  {
+    "version": "v131.9",
+    "date": "2026-09-03",
+    "bucket": "fix",
+    "scope": "employee-workspace",
+    "title": "queue الحالة filter no longer misses مستبدلة rows or conflates معلق with مكتملة"
+  },
+  {
     "version": "v131.8",
     "date": "2026-09-01",
     "bucket": "fix",
@@ -59,19 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "population",
     "title": "drop obsolete sheet-name-pattern settings from Data Processing Settings"
-  },
-  {
-    "version": "v130.17",
-    "date": "2026-08-31",
-    "bucket": "feature",
-    "scope": "distribution",
-    "title": "restrict sample assignment by port per employee"
-  },
-  {
-    "version": "v130.16",
-    "date": "2026-08-31",
-    "bucket": "fix",
-    "scope": null,
-    "title": "column filter dropdowns and pending-reopen now respect real column data / active table filters"
   }
 ];

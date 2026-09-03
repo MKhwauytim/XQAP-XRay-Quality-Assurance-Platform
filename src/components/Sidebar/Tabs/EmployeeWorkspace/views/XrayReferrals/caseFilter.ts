@@ -7,36 +7,37 @@
 // The three buckets, exactly as the owner defined them:
 //
 //   • "all"           — «جميع الحالات». No filtering. The default.
-//   • "risk-targeted" — «مستهدف المؤشر». The customs risk engine actually said
-//     YES for this image. Read straight off the normal pipeline output:
-//     `DistributionEntry.row` is an `EmployeeMirrorRowStub` and already carries
-//     `targetedByRiskEngine` (it is in `EMPLOYEE_MIRROR_STUB_FIELDS`), so this
-//     costs no extra disk read. The raw value is classified through the SHARED
-//     `engineVerdictOf` — the same vocabulary the executive deck's risk-engine
-//     page uses — so the two can never drift apart.
+//   • "risk-targeted" — «مستهدف المؤشر». Every row that reached this queue
+//     through the regular monthly population process (إدارة بيانات الأشعة ›
+//     معالجة البيانات) off the attached Risk file — i.e. every row that is
+//     NOT an ad-hoc-imported exceptional case. Membership in the Risk file's
+//     processed population is itself what makes a row "targeted by the
+//     indicator"; this is the exact complement of "adhoc" below, not a
+//     per-row column read.
 //
-//     The blank rule matters here as much as it does on that deck page: a blank
-//     or an unrecognized value is «we do not know what the engine said», so it
-//     is NOT counted as targeted. That makes this chip an UNDER-count whenever
-//     the month's risk column is sparsely populated or uses a spelling the
-//     vocabulary has not learned yet — the safe direction, since the opposite
-//     would put un-flagged cases in front of a reviewer as if the engine had
-//     flagged them.
+//     Earlier revisions of this bucket instead read the row's own
+//     `targetedByRiskEngine` value (via the risk-engine-agreement vocabulary
+//     `engineVerdictOf` shares with the executive deck). The owner corrected
+//     that: a blank/unrecognized value in that column is common and does NOT
+//     mean the row is untargeted — every row from the regular pipeline IS the
+//     indicator's target population by construction. `engineVerdictOf` still
+//     exists and is still correct for its own job (the executive deck's
+//     risk-engine agreement/accuracy figures, which genuinely need the real
+//     per-row flag to measure agreement) — it is simply the wrong tool for
+//     this chip.
 //
 //   • "adhoc"         — «حالات استثنائية». Rows assigned through an ad-hoc
-//     import (`src/data/adhocImport/`) instead of the regular monthly sampling
-//     pipeline, identified by `isAdhocEntry`.
+//     import (ارفاق حالات استثنائية, `src/data/adhocImport/`) instead of the
+//     regular monthly sampling pipeline, identified by `isAdhocEntry`.
 //
-// The buckets are deliberately NOT mutually exclusive: an ad-hoc row whose
-// risk column says «نعم» is counted by both chips. They are three independent
-// lenses on one queue, not a partition, so the counts do not sum to `all`.
+// "risk-targeted" and "adhoc" are now an exact partition of "all": every row
+// is exactly one or the other, never both, so their counts sum to `all`.
 //
 // Pure (apart from `useCaseFilter`'s `useState`): same input ⇒ same output.
 
 import { useMemo, useState } from "react";
 import { isAdhocEntry } from "../../../../../../data/adhocImport/adhocImportEmployeeView";
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
-import { engineVerdictOf } from "../../../../../../data/population/riskEngineVerdict";
 
 export type CaseFilter = "all" | "risk-targeted" | "adhoc";
 
@@ -55,9 +56,9 @@ export type CaseFilterCounts = Record<CaseFilter, number>;
 export function matchesCaseFilter(entry: DistributionEntry, filter: CaseFilter): boolean {
   switch (filter) {
     case "risk-targeted":
-      // Strictly "the engine said yes". `null` (blank OR unrecognized) and
-      // "سليمة" both fall out here — see the module header.
-      return engineVerdictOf(entry.row.targetedByRiskEngine) === "اشتباه";
+      // Every non-ad-hoc row — see the module header for why this is not a
+      // read of the row's own risk-engine column.
+      return !isAdhocEntry(entry);
     case "adhoc":
       return isAdhocEntry(entry);
     case "all":
