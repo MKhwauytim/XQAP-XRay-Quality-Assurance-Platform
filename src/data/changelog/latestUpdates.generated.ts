@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v132.0",
+    "date": "2026-09-03",
+    "bucket": "feature",
+    "scope": "history",
+    "title": "rolling last-10 pre-change snapshot history for templates, answers, and distribution admin edits"
+  },
+  {
     "version": "v131.14",
     "date": "2026-09-03",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "auth",
     "title": "move debug tools from demo session to admin, translate to English"
-  },
-  {
-    "version": "v131.4",
-    "date": "2026-09-01",
-    "bucket": "feature",
-    "scope": "changelog",
-    "title": "سجل التحديثات tab — latest 10 updates, generated at build time from edit logs"
   }
 ];
