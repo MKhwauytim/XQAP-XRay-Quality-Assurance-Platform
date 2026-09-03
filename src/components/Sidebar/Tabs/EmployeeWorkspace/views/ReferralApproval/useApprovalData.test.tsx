@@ -17,6 +17,10 @@ import {
   loadRequestLogs,
   updateReferralStatus,
 } from "../../../../../../data/referral/referralStorage";
+import {
+  approveReferral as approveReferralDomain,
+  denyReferral as denyReferralDomain,
+} from "../../../../../../data/referral/approveReferral";
 import type { ReferralRequest, ReopenRequest } from "../../../../../../data/referral/referralTypes";
 import { saveAdhocImportRecord } from "../../../../../../data/adhocImport/adhocImportStorage";
 import { adhocMonthFolderName } from "../../../../../../data/adhocImport/adhocImportTypes";
@@ -39,6 +43,22 @@ import { useApprovalData } from "./useApprovalData";
 vi.mock("../../../../../../data/referral/referralStorage", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../../../../data/referral/referralStorage")>();
   return { ...actual, loadRequestLogs: vi.fn(actual.loadRequestLogs) };
+});
+
+// Decision-write-failure regression tests below stub the whole domain decision
+// out from under the hook, rather than forcing a real corrupt-file read through
+// the real approve/deny pipeline (which additionally needs a valid sample.master
+// and distribution fixtures for approve's ownership/replay checks) — the bug
+// under test lives entirely in how useApprovalData turns an
+// `{ ok: false; code: "decision-failed"; error }` result into a message, not in
+// how that result gets produced.
+vi.mock("../../../../../../data/referral/approveReferral", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../../../../data/referral/approveReferral")>();
+  return {
+    ...actual,
+    approveReferral: vi.fn(actual.approveReferral),
+    denyReferral: vi.fn(actual.denyReferral),
+  };
 });
 
 // Mutable so a test can flip the app-wide selection (or the known-months list)
@@ -236,6 +256,63 @@ describe("useApprovalData deny-flow regressions", () => {
     expect(mayLog.requests[0].status).toBe("denied");
     const aprilLog = await loadReferralLog(root, "4-april-2026");
     expect(aprilLog.requests).toHaveLength(0);
+  });
+});
+
+// Regression: a decision-write failure that is NOT a transient write conflict
+// (e.g. the supervisor's own decisions.json is corrupt on disk — XQ-IO-029,
+// observed in production) used to be flattened to a generic "press approve
+// again" sentence on the approve path, and to a bare unexplained technical
+// string on the deny path. Both discarded or under-explained the one thing
+// that actually tells a reviewer whether retrying can ever work.
+describe("useApprovalData decision-write-failure messaging", () => {
+  const DIAGNOSTIC =
+    "«تعذّرت قراءة ملف موجود، وأُلغيت العملية بدلاً من الكتابة فوق بياناته.» (XQ-IO-029)";
+
+  it("keeps the underlying diagnostic in the approve retry message instead of a bare generic sentence", async () => {
+    setupSupervisor();
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    const req = mockReferral("req-decfail-approve", "4-april-2026");
+    await appendReferralRequest(root, "4-april-2026", req);
+
+    const { result } = renderHook(() => useApprovalData(root));
+    await waitFor(() => expect(result.current.loadState).toBe("ready"));
+    await waitFor(() => expect(result.current.referrals).toHaveLength(1));
+
+    vi.mocked(approveReferralDomain).mockResolvedValueOnce({
+      ok: false,
+      code: "decision-failed",
+      error: DIAGNOSTIC,
+    });
+
+    const outcome = await result.current.approveReferral(req, "note");
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) throw new Error("expected failure");
+    expect(outcome.error).toContain("XQ-IO-029");
+    expect(outcome.error).toContain(DIAGNOSTIC);
+  });
+
+  it("keeps the underlying diagnostic in the deny retry message", async () => {
+    setupSupervisor();
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    const req = mockReferral("req-decfail-deny", "4-april-2026");
+    await appendReferralRequest(root, "4-april-2026", req);
+
+    const { result } = renderHook(() => useApprovalData(root));
+    await waitFor(() => expect(result.current.loadState).toBe("ready"));
+    await waitFor(() => expect(result.current.referrals).toHaveLength(1));
+
+    vi.mocked(denyReferralDomain).mockResolvedValueOnce({
+      ok: false,
+      code: "decision-failed",
+      error: DIAGNOSTIC,
+    });
+
+    const outcome = await result.current.denyReferral(req, "note");
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) throw new Error("expected failure");
+    expect(outcome.error).toContain("XQ-IO-029");
+    expect(outcome.error).toContain(DIAGNOSTIC);
   });
 });
 

@@ -45,7 +45,7 @@ function approvalErrorMsg(result: Exclude<ApprovalResult, { ok: true }>): string
     case "stale-ownership":
       return L.msg_referral_stale_ownership.replace("{ids}", result.staleIds.join("، "));
     case "decision-failed":
-      return L.msg_referral_decision_retry;
+      return L.msg_referral_decision_retry.replace("{detail}", result.error);
     case "dist-failed":
     case "invalid-request":
       return result.error;
@@ -53,9 +53,8 @@ function approvalErrorMsg(result: Exclude<ApprovalResult, { ok: true }>): string
 }
 
 function denyErrorMsg(result: Exclude<DenyResult, { ok: true }>): string {
-  return result.code === "already-reviewed"
-    ? getLabels().msg_request_already_reviewed
-    : result.error;
+  if (result.code === "already-reviewed") return getLabels().msg_request_already_reviewed;
+  return getLabels().msg_referral_deny_decision_retry.replace("{detail}", result.error);
 }
 
 /**
