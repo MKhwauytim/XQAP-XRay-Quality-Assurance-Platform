@@ -72,6 +72,10 @@ import {
   saveInspectionTemplateSelection,
 } from "../../../../../data/templates/templateSelectionStorage";
 import type { TemplateSchema } from "../../../../../data/templates/templateTypes";
+import {
+  resolveAnswerTemplates,
+  resolveTemplateForAnswer,
+} from "../../../../../data/templates/templateAnswerResolution";
 import type { DirectoryHandleLike } from "../../../../../data/storage/fileSystemAccess";
 import DataTable, {
   type CellMeta,
@@ -342,9 +346,14 @@ function createRenderCell(deps: {
   answersMap: Map<string, ItemAnswer>;
   stageMappings: StageAliasMappings | undefined;
   template: TemplateSchema | null;
+  /** Optional: every template actually referenced by a loaded answer — see
+   *  templateAnswerResolution.ts. Resolved per row below, so an answer
+   *  submitted under a since-swapped template still classifies correctly
+   *  instead of reading against the wrong (active) template's field ids. */
+  templatesById?: ReadonlyMap<string, TemplateSchema>;
   labels: Labels;
 }) {
-  const { selectedIds, toggleSelect, answersMap, stageMappings, template, labels: L } = deps;
+  const { selectedIds, toggleSelect, answersMap, stageMappings, template, templatesById, labels: L } = deps;
   return function renderCell(
     col: DataTableCol<DistributionEntry>,
     entry: DistributionEntry,
@@ -389,7 +398,8 @@ function createRenderCell(deps: {
     }
     if (col.id === "answerStatus") {
       const answer = answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`);
-      return <StatusBadge answer={answer} entryStatus={entry.status} template={template} labels={L} />;
+      const rowTemplate = templatesById ? resolveTemplateForAnswer(answer, templatesById, template) : template;
+      return <StatusBadge answer={answer} entryStatus={entry.status} template={rowTemplate} labels={L} />;
     }
     const raw = col.id === "stage"
       ? formatStageLabel(entry.row.stage, stageMappings)
@@ -748,12 +758,13 @@ function computePersonalStats(input: {
   username: string;
   answersMap: Map<string, ItemAnswer>;
   template: TemplateSchema | null;
+  templatesById?: ReadonlyMap<string, TemplateSchema>;
 }): PersonalStats {
-  const { allEntries, entries, scopedEntries, canSeeAll, username, answersMap, template } = input;
+  const { allEntries, entries, scopedEntries, canSeeAll, username, answersMap, template, templatesById } = input;
   const source = canSeeAll
     ? scopedEntries
     : (allEntries.length > 0 ? allEntries : entries).filter((entry) => entry.assignedTo === username);
-  const onHold = source.filter((entry) => isOnHoldEntry(entry, answersMap, template)).length;
+  const onHold = source.filter((entry) => isOnHoldEntry(entry, answersMap, template, templatesById)).length;
   // isStudyCompleted counts a "لا يوجد صورة" submission as completed too — it
   // answers "is this row touched/done in a generic sense" for row styling, not
   // "is this a real completion". Subtracting onHold here is what keeps this
@@ -878,6 +889,14 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const [selTplId, setSelTplId]     = useState("");
   const [activeTpl, setActiveTpl]   = useState<TemplateSchema | null>(null);
   const [answers, setAnswers]       = useState<ItemAnswer[]>([]);
+  // Every template actually referenced by a loaded answer, keyed by templateId
+  // (active template included) -- not just the single active selection. A
+  // template swap (Template Builder "delete old, add new") mints fresh field
+  // ids, so an old answer must be read against ITS OWN template or it looks
+  // empty/miscategorized even though the answer is still on disk intact. See
+  // templateAnswerResolution.ts and XrayInspectionResults.tsx, which already
+  // solved this for the results table.
+  const [templatesById, setTemplatesById] = useState<Map<string, TemplateSchema>>(new Map());
   const [selEntryId, setSelEntryId] = useState<string | null>(null);
   const [statusMsg, setStatusMsg]   = useState<StatusMsg>(null);
   const [stageMappings, setStageMappings] = useState<StageAliasMappings | undefined>(undefined);
@@ -965,6 +984,19 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     }
     return m;
   }, [answers]);
+
+  // Resolve every template an actually-loaded answer references (recovering a
+  // deleted one from its tombstone) so the panel, status badges and the
+  // معلقة/pending helpers below can read each answer against ITS OWN template
+  // instead of always the single active selection. Async (loadTemplateIncludingDeleted
+  // is a disk read), so this runs as an effect rather than inline with answersMap above.
+  useEffect(() => {
+    let cancelled = false;
+    void resolveAnswerTemplates(directoryHandle, activeTpl, answers)
+      .then((map) => { if (!cancelled) setTemplatesById(map); })
+      .catch(logRejection("xrayReferrals:resolveAnswerTemplates"));
+    return () => { cancelled = true; };
+  }, [directoryHandle, activeTpl, answers]);
 
   // O(1) entry lookup by xrayImageId — built once per `entries` change instead
   // of an `entries.find()` per selected id (was O(n×m): every id in a
@@ -1184,8 +1216,8 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   );
 
   const personalStats = useMemo<PersonalStats>(
-    () => computePersonalStats({ allEntries, entries, scopedEntries, canSeeAll, username, answersMap, template: activeTpl }),
-    [allEntries, entries, scopedEntries, canSeeAll, username, answersMap, activeTpl]
+    () => computePersonalStats({ allEntries, entries, scopedEntries, canSeeAll, username, answersMap, template: activeTpl, templatesById }),
+    [allEntries, entries, scopedEntries, canSeeAll, username, answersMap, activeTpl, templatesById]
   );
 
   // Bug (load-token): guards a slow load for a previously-selected month from
@@ -1885,14 +1917,14 @@ export default function XrayReferrals({ directoryHandle }: Props) {
 
   // ── Cell renderer ──────────────────────────────────────────────────────────
 
-  const renderCell = createRenderCell({ selectedIds, toggleSelect, answersMap, stageMappings, template: activeTpl, labels: L });
+  const renderCell = createRenderCell({ selectedIds, toggleSelect, answersMap, stageMappings, template: activeTpl, templatesById, labels: L });
 
   // ── Custom filter override for answerStatus ────────────────────────────────
   // LOG-03: memoized — an unstable identity here makes DataTable's filteredRows
   // memo recompute every render and re-emit onFilteredRowsChange.
   const rowMatchesFilter = useMemo(
-    () => buildAnswerStatusFilter(answersMap, activeTpl),
-    [answersMap, activeTpl]
+    () => buildAnswerStatusFilter(answersMap, activeTpl, templatesById),
+    [answersMap, activeTpl, templatesById]
   );
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -1923,6 +1955,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         entries={filteredTableEntries}
         answersMap={answersMap}
         template={activeTpl}
+        templatesById={templatesById}
         username={username}
         role={role}
         labels={L}
@@ -2108,7 +2141,14 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                 />
                 <SampleDetailPanel
                   entry={panelEntry}
-                  template={activeTpl}
+                  // The template THIS answer was actually submitted under, not
+                  // always the single active selection -- a swapped template
+                  // mints fresh field ids, and rendering an old answer against
+                  // the new template's ids showed the panel as blank even
+                  // though the answer is intact on disk. Falls back to the
+                  // active template when there is no saved answer yet (a
+                  // brand-new study, correctly answered under it).
+                  template={resolveTemplateForAnswer(selAnswer, templatesById, activeTpl)}
                   savedAnswer={selAnswer}
                   readonly={panelAuthoring.readonly}
                   onClose={() => selectEntry(null)}
@@ -2234,6 +2274,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           dateFmt={effectiveColConfig.dateFmt}
           answersMap={answersMap}
           template={activeTpl}
+          templatesById={templatesById}
           currentUser={username}
           busy={reassignBusy}
           error={reassignError}

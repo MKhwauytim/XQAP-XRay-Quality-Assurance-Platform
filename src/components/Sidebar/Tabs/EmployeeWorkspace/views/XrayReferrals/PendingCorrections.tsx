@@ -50,6 +50,9 @@ type Props = {
   entries: readonly DistributionEntry[];
   answersMap: ReadonlyMap<string, ItemAnswer>;
   template: TemplateSchema | null;
+  /** Optional: every template actually referenced by a loaded answer — see
+   *  `isPendingReferralEntry`'s own doc comment for why this matters. */
+  templatesById?: ReadonlyMap<string, TemplateSchema>;
   username: string;
   role: string;
   labels: Labels;
@@ -119,7 +122,7 @@ function ImportPreviewBody({
 }
 
 export default function PendingCorrections({
-  directoryHandle, monthFolderName, entries, answersMap, template,
+  directoryHandle, monthFolderName, entries, answersMap, template, templatesById,
   username, role, labels: L, canManage, onChanged,
 }: Props) {
   const [importOpen, setImportOpen] = useState(false);
@@ -142,7 +145,7 @@ export default function PendingCorrections({
   // is checked first and set synchronously before any await.
   const reopenInFlightRef = useRef(false);
 
-  const pendingCount = entries.filter((entry) => isPendingReferralEntry(entry, answersMap, template)).length;
+  const pendingCount = entries.filter((entry) => isPendingReferralEntry(entry, answersMap, template, templatesById)).length;
 
   useEffect(() => {
     return () => {
@@ -154,7 +157,7 @@ export default function PendingCorrections({
   if (!canManage || !monthFolderName) return null;
 
   function handleExportClick(): void {
-    const rows = buildPendingExportRows(entries, answersMap, template);
+    const rows = buildPendingExportRows(entries, answersMap, template, templatesById);
     if (rows.length === 0) {
       setImportState({ phase: "error", message: L.ew_pending_export_empty });
       setImportOpen(true);
@@ -252,6 +255,7 @@ export default function PendingCorrections({
         entries,
         answersMap,
         template,
+        templatesById,
         reopenedBy: username,
         reopenedByRole: role,
         reason: "إعادة فتح جماعي للحالات المعلقة بعد تصحيح البيانات",

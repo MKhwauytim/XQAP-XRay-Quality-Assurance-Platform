@@ -26,11 +26,24 @@ import type { ItemAnswer } from "../../../../../../data/answers/answerTypes";
 import { isNoImageSubmission } from "../../../../../../data/answers/noImageAnswer";
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
 import type { TemplateSchema } from "../../../../../../data/templates/templateTypes";
+import { resolveTemplateForAnswer } from "../../../../../../data/templates/templateAnswerResolution";
 import type { AnyFilter } from "../../../../../../components/DataTable/utils";
 
+/**
+ * `templatesById` (optional, appended rather than replacing `fallbackTemplate`
+ * to keep every existing call site/test source-compatible) resolves EACH
+ * answer against the template it was actually submitted under
+ * (`templateAnswerResolution.ts`) rather than always reading the single
+ * currently-active template's field ids. Without it, an answer submitted
+ * under a since-swapped template reads its "هل يوجد صورة" gate field under the
+ * WRONG (active-template) fieldId and silently falls through to "مكتملة"
+ * instead of "معلق" — the same class of bug `XrayInspectionResults.tsx` was
+ * already fixed for (see the templateAnswerResolution.ts module doc).
+ */
 export function buildAnswerStatusFilter(
   answersMap: Map<string, ItemAnswer>,
-  template: TemplateSchema | null
+  fallbackTemplate: TemplateSchema | null,
+  templatesById?: ReadonlyMap<string, TemplateSchema>
 ): (entry: DistributionEntry, colId: string, filter: AnyFilter) => boolean | null {
   return (entry, colId, filter) => {
     if (colId !== "answerStatus" || filter.kind !== "status") return null;
@@ -40,7 +53,10 @@ export function buildAnswerStatusFilter(
     if (v === "replaced") return false;
     const answer = answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`);
     if (answer?.status === "submitted") {
-      return isNoImageSubmission(answer, template) ? v === "on_hold" : v === "submitted";
+      const rowTemplate = templatesById
+        ? resolveTemplateForAnswer(answer, templatesById, fallbackTemplate)
+        : fallbackTemplate;
+      return isNoImageSubmission(answer, rowTemplate) ? v === "on_hold" : v === "submitted";
     }
     return v === "pending";
   };
