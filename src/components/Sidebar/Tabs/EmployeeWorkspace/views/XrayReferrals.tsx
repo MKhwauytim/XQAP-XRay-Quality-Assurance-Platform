@@ -78,10 +78,7 @@ import DataTable, {
   type ColConfig,
   type DataTableCol,
 } from "../../../../../components/DataTable";
-import {
-  formatDate,
-  type AnyFilter,
-} from "../../../../../components/DataTable/utils";
+import { formatDate } from "../../../../../components/DataTable/utils";
 import {
   loadAdminBrowsePreset,
   loadUserBrowsePreset,
@@ -128,6 +125,7 @@ import {
   XrQueueToolbarExtras,
 } from "./XrayReferrals/subComponents";
 import { useCaseFilter } from "./XrayReferrals/caseFilter";
+import { buildAnswerStatusFilter } from "./XrayReferrals/answerStatusFilter";
 import QueueSplitResizer from "./XrayReferrals/QueueSplitResizer";
 import PendingCorrections from "./XrayReferrals/PendingCorrections";
 import { DEFAULT_QUEUE_SPLIT } from "../../../../../data/preferences/queueSplitStore";
@@ -329,30 +327,6 @@ function beginAdhocReads(
  */
 function isPopulationReadFailure(lookup: PopulationRowLookupResult): boolean {
   return !lookup.ok && lookup.reason !== "absent";
-}
-
-/**
- * DataTable's `rowMatchesFilter` override for the synthetic "answerStatus"
- * column, whose value lives in the answers map rather than on the entry.
- *
- * Returning null for every other column/filter kind hands that case back to
- * DataTable's own default matching, which is what makes this an override rather
- * than a replacement.
- */
-function buildAnswerStatusFilter(
-  answersMap: Map<string, ItemAnswer>
-): (entry: DistributionEntry, colId: string, filter: AnyFilter) => boolean | null {
-  return (entry, colId, filter) => {
-    if (colId !== "answerStatus" || filter.kind !== "status") return null;
-    const v = filter.value;
-    if (!v || v === "all") return true;
-    if (entry.status === "replaced") return v === "replaced";
-    const answer = answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`);
-    const s = answer?.status;
-    if (v === "submitted") return s === "submitted";
-    if (v === "pending")   return !s || s === "draft";
-    return true;
-  };
 }
 
 /**
@@ -1934,7 +1908,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   // ── Custom filter override for answerStatus ────────────────────────────────
   // LOG-03: memoized — an unstable identity here makes DataTable's filteredRows
   // memo recompute every render and re-emit onFilteredRowsChange.
-  const rowMatchesFilter = useMemo(() => buildAnswerStatusFilter(answersMap), [answersMap]);
+  const rowMatchesFilter = useMemo(
+    () => buildAnswerStatusFilter(answersMap, activeTpl),
+    [answersMap, activeTpl]
+  );
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
