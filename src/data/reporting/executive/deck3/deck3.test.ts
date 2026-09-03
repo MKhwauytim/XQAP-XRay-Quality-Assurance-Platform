@@ -120,6 +120,35 @@ describe("buildExecutiveDeckV3", () => {
     expect(html).not.toContain('<img src=x onerror=alert(1)>');
     expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
   });
+
+  // Bug: the port-distribution table (slide 8) rendered every land/sea port
+  // in one fixed table with no row cap, so a real workspace with more ports
+  // than fit one 1920×1080 slide silently overflowed past the slide's
+  // `overflow:hidden` bottom edge — the trailing ports were simply invisible
+  // (never clipped-but-scrollable, never re-flowed). Fixed by paginating into
+  // `(يتبع)`-titled continuation slides (ROWS_PER_PORT_PAGE, slides.ts).
+  it("splits the port-distribution table into (يتبع) continuation slides when a type has more ports than one page holds", async () => {
+    const manyLandPorts = Array.from({ length: 12 }, (_, i) =>
+      popRow({ xrayImageId: `XR-L${i}`, portName: `منفذ رقم ${i}`, portCode: `PL${i}` }),
+    );
+    const html = await buildExecutiveDeckV3(input(manyLandPorts));
+
+    // 12 land ports at 8/page need 2 pages → 1 extra slide over the fixed 21.
+    const slideCount = (html.match(/class="slide v3/g) ?? []).length;
+    expect(slideCount).toBe(22);
+
+    expect(html).toContain("التوزيع على المنافذ البرية والبحرية (يتبع)");
+    // Every port still appears exactly once — none dropped or duplicated by
+    // the chunking.
+    for (let i = 0; i < 12; i++) {
+      expect((html.match(new RegExp(`منفذ رقم ${i}<`, "g")) ?? []).length).toBe(1);
+    }
+    // The land grand total ("إجمالي البرية") renders once per port table
+    // that has one (the population table here, and the always-single-page
+    // accuracy table) — only on each table's final page, never repeated per
+    // continuation page and never dropped.
+    expect((html.match(/إجمالي البرية/g) ?? []).length).toBe(2);
+  });
 });
 
 describe("buildDeckV3Html footerNote", () => {

@@ -19,12 +19,35 @@ import { ORGANIZATION_PATH, ZATCA_LOGO_URL } from "../../../../branding/organiza
 import {
   coverSlide, closingSlide, contentsSlide, glossarySlide, levelDefinitionSlide,
   kpiBand, sectionDivider, tintedPanel, dataTable, matrixGrid, chartTitleRow,
-  legendRow, impactColumn, slideShell, contentHead,
+  legendRow, impactColumn, slideShell, contentHead, pad2,
   type OrgBlock, type SlideMeta, type TableCell,
 } from "./slideKit";
 import { barChart, groupedBarChart, type ChartBar } from "./chartKit";
 
-const TOTAL = 21;
+/**
+ * Max port rows one `.v3-panel` table page can hold without spilling past the
+ * fixed 1920×1080 slide (measured live in deck-preview.html against a
+ * synthetic 15-land-port fixture, 2026-09-03 — the handoff's own port count
+ * fit inside one page and never surfaced this): available row budget = slide
+ * content height (1080 − 84 top / 56 bottom padding = 940) − `.v3-head`
+ * (122 + 30 margin) − `.v3-page-foot` (60) = 728 for `.v3-two-col`; inside
+ * each panel, padding (24×2) + `.v3-panel-head` (49 + 14 margin) + `thead`
+ * (63) + `tfoot` (67) = 241 fixed overhead, leaving 487 for body rows at the
+ * table's own 58px row height → floor(487/58) = 8. A real workspace with
+ * more land or sea ports than this must split into continuation slides
+ * (`(يتبع)` in the title) rather than silently overflow the slide's
+ * `overflow:hidden` bottom edge.
+ */
+const ROWS_PER_PORT_PAGE = 8;
+
+/** How many `(يتبع)`-chunked pages a land/sea pair of port tables needs. */
+function portPageCount(landCount: number, seaCount: number): number {
+  return Math.max(1, Math.ceil(Math.max(landCount, seaCount) / ROWS_PER_PORT_PAGE));
+}
+
+function chunkAt<T>(rows: T[], page: number): T[] {
+  return rows.slice(page * ROWS_PER_PORT_PAGE, (page + 1) * ROWS_PER_PORT_PAGE);
+}
 const REPORT_NAME = "تقرير ضمان جودة فحص الأشعة";
 const ORG_NAME = "هيئة الزكاة والضريبة والجمارك";
 const CLASSIFICATION = "داخلي — للاستخدام التنفيذي";
@@ -160,11 +183,29 @@ export async function buildDeck3Slides(
     orgName: ORG_NAME,
     lines: [`${ORGANIZATION_PATH[0]} — ${ORGANIZATION_PATH[1]}`, ORGANIZATION_PATH[2]],
   };
-  const meta = (num: number, sectionKey: string, sectionLabel: string): SlideMeta => ({
-    num, total: TOTAL, sectionKey, sectionLabel, footText,
-  });
   const t = model.errorAnalysis.totals;
   const overallStats = accuracyOf(t);
+
+  // Port lists + pagination, computed up front — slides 8 and 11 (population
+  // and accuracy by port) each split into `(يتبع)`-titled continuation pages
+  // when a real workspace has more land or sea ports than ROWS_PER_PORT_PAGE
+  // fits on one slide (see that constant's doc comment). Hoisted here (rather
+  // than left where they used to sit, inline in slides 8/11) because TOTAL —
+  // baked into every slide's `meta.total` footer — has to be known before the
+  // first slide is built.
+  const { land: popLand, sea: popSea } = collectPortStats(model);
+  const portAcc = collectPortAccuracy(model);
+  const landTotals = accuracyOf(sumCounts(portAcc.land.map((p) => p.counts)));
+  const seaTotals = accuracyOf(sumCounts(portAcc.sea.map((p) => p.counts)));
+  const popPages = portPageCount(popLand.length, popSea.length);
+  const accPages = portPageCount(portAcc.land.length, portAcc.sea.length);
+  const TOTAL = 21 + (popPages - 1) + (accPages - 1);
+  const YITBA = " (يتبع)";
+
+  let nextNum = 1;
+  const meta = (sectionKey: string, sectionLabel: string): SlideMeta => ({
+    num: nextNum++, total: TOTAL, sectionKey, sectionLabel, footText,
+  });
 
   // 1 — Cover
   parts.push(coverSlide({
@@ -182,21 +223,28 @@ export async function buildDeck3Slides(
       { label: "القسم", value: ORGANIZATION_PATH[2] },
       { label: "التصنيف", value: CLASSIFICATION, end: true },
     ],
-    meta: meta(1, "cover", "الغلاف"),
+    meta: meta("cover", "الغلاف"),
   }));
 
-  // 2 — Contents
+  // 2 — Contents. Page ranges below section 1 shift with popPages/accPages
+  // (slides 8 and 11's own port-table pagination) — derived from the same
+  // arithmetic that produces TOTAL above, not re-hardcoded per range.
+  const s1End = 7 + popPages;
+  const s2Start = s1End + 1;
+  const s2End = s2Start + 3 + accPages;
+  const s3Start = s2End + 1;
+  const s3End = s3Start + 6;
   parts.push(contentsSlide({
     eyebrow: "التقرير التنفيذي",
     title: "محتويات التقرير",
     rows: [
       { index: 1, title: "المعجم", description: "تعريف مستويات المخاطر الأربعة والمصطلحات المستخدمة في التقرير.", topics: "مستويات المخاطر · مصطلحات العيّنة والنتائج", pages: "ص 03–04" },
       { index: 2, title: "مؤشرات الشهر", description: "خلاصة أرقام الشهر في صفحة واحدة.", topics: "المجتمع · العيّنة · التغطية · الدقة", pages: "ص 05" },
-      { index: 3, title: "القسم الأول — مجتمع الفحص", description: "حجم مجتمع الشهر وتوزيعه على المستويات والمنافذ، والأساس الذي سُحبت منه العيّنة.", topics: "المستويات الأربعة · المنافذ البرية والبحرية", pages: "ص 06–08" },
-      { index: 4, title: "القسم الثاني — نتائج فحص الجودة", description: "دقة النتائج على مستوى الشهر وحسب المنفذ ومستوى المخاطر.", topics: "النتائج العامة · النتائج حسب المنفذ والمستوى", pages: "ص 09–13" },
-      { index: 5, title: "القسم الثالث — التحاليل المتقدمة", description: "مصفوفة النتائج، دقة المستويين، والتوافق مع الفرق الأمنية ومحرك المخاطر، وأثر التحديد والجودة.", topics: "المصفوفة · التوافق · أثر التحديد والجودة", pages: "ص 14–20" },
+      { index: 3, title: "القسم الأول — مجتمع الفحص", description: "حجم مجتمع الشهر وتوزيعه على المستويات والمنافذ، والأساس الذي سُحبت منه العيّنة.", topics: "المستويات الأربعة · المنافذ البرية والبحرية", pages: `ص ${pad2(6)}–${pad2(s1End)}` },
+      { index: 4, title: "القسم الثاني — نتائج فحص الجودة", description: "دقة النتائج على مستوى الشهر وحسب المنفذ ومستوى المخاطر.", topics: "النتائج العامة · النتائج حسب المنفذ والمستوى", pages: `ص ${pad2(s2Start)}–${pad2(s2End)}` },
+      { index: 5, title: "القسم الثالث — التحاليل المتقدمة", description: "مصفوفة النتائج، دقة المستويين، والتوافق مع الفرق الأمنية ومحرك المخاطر، وأثر التحديد والجودة.", topics: "المصفوفة · التوافق · أثر التحديد والجودة", pages: `ص ${pad2(s3Start)}–${pad2(s3End)}` },
     ],
-    meta: meta(2, "contents", "المحتويات"),
+    meta: meta("contents", "المحتويات"),
   }));
 
   await yieldToMain();
@@ -224,7 +272,7 @@ export async function buildDeck3Slides(
         ],
       },
     ],
-    meta: meta(3, "glossary", "المعجم"),
+    meta: meta("glossary", "المعجم"),
   }));
 
   // 4 — Glossary: risk levels. Locked wording — copied verbatim from the
@@ -268,7 +316,7 @@ export async function buildDeck3Slides(
     highlightValue: fmtNum(monthlyTarget),
     highlightTitle: "العيّنة المستهدفة الأساسية شهريًا (صورة)",
     highlightNote: "أوزان المستويات الثاني–الرابع تُسحب من هذا العدد (40% + 30% + 30%)؛ المستوى الأول حصر كامل من مجتمعه خارج هذه الحصة.",
-    meta: meta(4, "glossary", "المعجم"),
+    meta: meta("glossary", "المعجم"),
   }));
 
   await yieldToMain();
@@ -276,7 +324,7 @@ export async function buildDeck3Slides(
   // 5 — Month KPIs (two 3-cell bands; decision-grain accuracy figures come
   // from errorAnalysis.totals so slides 5/10/15 can never disagree)
   {
-    const m = meta(5, "kpis", "مؤشرات الشهر");
+    const m = meta("kpis", "مؤشرات الشهر");
     const missedShare = pct(t.missedSuspicion, t.evaluable);
     const inner = `${contentHead({ eyebrow: "خلاصة الشهر", title: "مؤشرات الشهر", large: true })}
 ${kpiBand([
@@ -300,14 +348,14 @@ ${kpiBand([
     title: "مجتمع الفحص",
     description: "حجم مجتمع الشهر وتوزيعه على مستويات المخاطر والمنافذ، والأساس الذي سُحبت منه العيّنة.",
     footItems: ["مجتمع الفحص والعيّنة حسب المستوى", "التوزيع على المنافذ البرية والبحرية"],
-    meta: meta(6, "s1", EYEBROW_S1),
+    meta: meta("s1", EYEBROW_S1),
   }));
 
   await yieldToMain();
 
   // 7 — Population & sample per risk level (stat column + share-bar rows)
   {
-    const m = meta(7, "s1", EYEBROW_S1);
+    const m = meta("s1", EYEBROW_S1);
     const stages = model.population.byStage;
     const maxPop = Math.max(1, ...stages.map((s) => s.population));
     const rows = stages
@@ -341,10 +389,12 @@ ${kpiBand([
   }
 
   // 8 — Port distribution (land/sea tinted panels, population (sample) cells)
+  // Split into `popPages` `(يتبع)` continuation slides when either column has
+  // more ports than ROWS_PER_PORT_PAGE fits (see that constant's doc
+  // comment) — a real workspace easily has more ports than the handoff's own
+  // 6 sea / 8 land fixture, and an unpaginated table silently overflows past
+  // the slide's `overflow:hidden` bottom edge.
   {
-    const m = meta(8, "s1", EYEBROW_S1);
-    const { land, sea } = collectPortStats(model);
-    const padTo = Math.max(land.length, sea.length);
     const portRows = (ports: PortPopRow[]): TableCell[][] =>
       ports.map((p) => [
         { html: esc(p.name) },
@@ -367,12 +417,20 @@ ${kpiBand([
       return `التغطية ${fmtPct(pct(sample, total))}`;
     };
     const headers = ["المنفذ", "الإجمالي", "سليمة", "اشتباه"];
-    const inner = `${contentHead({ eyebrow: EYEBROW_S1, title: "التوزيع على المنافذ البرية والبحرية", note: "المجتمع والرقم بين قوسين العيّنة المسحوبة — مفصولة إلى سليمة واشتباه" })}
+    for (let page = 0; page < popPages; page++) {
+      const m = meta("s1", EYEBROW_S1);
+      const land = chunkAt(popLand, page);
+      const sea = chunkAt(popSea, page);
+      const padTo = Math.max(land.length, sea.length);
+      const isLast = page === popPages - 1;
+      const title = "التوزيع على المنافذ البرية والبحرية" + (page > 0 ? YITBA : "");
+      const inner = `${contentHead({ eyebrow: EYEBROW_S1, title, note: "المجتمع والرقم بين قوسين العيّنة المسحوبة — مفصولة إلى سليمة واشتباه" })}
 <div class="v3-two-col">
-  ${tintedPanel({ variant: "land", title: "المنافذ البرية", note: coverageNote(land), body: dataTable({ headers, rows: portRows(land), totals: totalsOf("إجمالي البرية", land), padToRows: padTo }) })}
-  ${tintedPanel({ variant: "sea", title: "المنافذ البحرية", note: coverageNote(sea), body: dataTable({ headers, rows: portRows(sea), totals: totalsOf("إجمالي البحرية", sea), padToRows: padTo }) })}
+  ${tintedPanel({ variant: "land", title: "المنافذ البرية", note: coverageNote(popLand), body: dataTable({ headers, rows: portRows(land), totals: isLast ? totalsOf("إجمالي البرية", popLand) : undefined, padToRows: padTo }) })}
+  ${tintedPanel({ variant: "sea", title: "المنافذ البحرية", note: coverageNote(popSea), body: dataTable({ headers, rows: portRows(sea), totals: isLast ? totalsOf("إجمالي البحرية", popSea) : undefined, padToRows: padTo }) })}
 </div>`;
-    parts.push(slideShell(m, "", inner));
+      parts.push(slideShell(m, "", inner));
+    }
   }
 
   await yieldToMain();
@@ -385,12 +443,12 @@ ${kpiBand([
     title: "نتائج فحص الجودة",
     description: "دقة النتائج وتحديد موقع الاشتباه والاشتباهات الفائتة على مستوى الشهر والمنافذ والمستويات.",
     footItems: ["النتائج العامة للشهر", "النتائج حسب المنافذ ومستويات المخاطر"],
-    meta: meta(9, "s2", EYEBROW_S2),
+    meta: meta("s2", EYEBROW_S2),
   }));
 
   // 10 — Overall detection accuracy: three-tile band + per-risk-level table
   {
-    const m = meta(10, "s2", EYEBROW_S2);
+    const m = meta("s2", EYEBROW_S2);
     const stages = orderedStageAccuracy(model);
     const stageRows: TableCell[][] = stages.map((s) => {
       const a = accuracyOf(s.counts);
@@ -426,16 +484,13 @@ ${dataTable({ headers: ["المستوى", "النتائج المُقيَّمة",
 
   await yieldToMain();
 
-  // Shared by slides 11/12/17/18: the per-port accuracy split + pooled
-  // per-type totals (the dashed "متوسط النوع" is the pooled type accuracy,
-  // exactly the totals row of slide 11 — never an average of averages).
-  const portAcc = collectPortAccuracy(model);
-  const landTotals = accuracyOf(sumCounts(portAcc.land.map((p) => p.counts)));
-  const seaTotals = accuracyOf(sumCounts(portAcc.sea.map((p) => p.counts)));
-
-  // 11 — Accuracy per port (three accuracy columns with bracketed counts)
+  // 11 — Accuracy per port (three accuracy columns with bracketed counts).
+  // Same `(يتبع)` pagination as slide 8 — portAcc/landTotals/seaTotals are
+  // shared with slides 12/17/18 (the dashed "متوسط النوع" is the pooled type
+  // accuracy, exactly this slide's own totals row — never an average of
+  // averages), and were hoisted above so accPages/TOTAL could be computed
+  // before the first slide was built.
   {
-    const m = meta(11, "s2", EYEBROW_S2);
     const rowsOf = (ports: PortAccuracyRow[]): TableCell[][] =>
       ports.map((p) => {
         const a = accuracyOf(p.counts);
@@ -452,23 +507,30 @@ ${dataTable({ headers: ["المستوى", "النتائج المُقيَّمة",
       { html: rateCell(a.suspAcc, a.suspResults), cls: "v-red" },
       { html: rateCell(a.overall, a.evaluable), cls: "v-gold" },
     ];
-    const padTo = Math.max(portAcc.land.length, portAcc.sea.length);
     const headers = ["المنفذ", "دقة السليمة", "دقة الاشتباه", "الدقة العامة"];
-    const inner = `${contentHead({
-      eyebrow: EYEBROW_S2,
-      title: "دقة الرصد حسب المنفذ",
-      note: `الأرقام بين قوسين = عدد النتائج المُقيَّمة · المرجع العام ${fmtPct(overallStats.cleanAcc)} / ${fmtPct(overallStats.suspAcc)} / ${fmtPct(overallStats.overall)}`,
-    })}
+    for (let page = 0; page < accPages; page++) {
+      const m = meta("s2", EYEBROW_S2);
+      const land = chunkAt(portAcc.land, page);
+      const sea = chunkAt(portAcc.sea, page);
+      const padTo = Math.max(land.length, sea.length);
+      const isLast = page === accPages - 1;
+      const title = "دقة الرصد حسب المنفذ" + (page > 0 ? YITBA : "");
+      const inner = `${contentHead({
+        eyebrow: EYEBROW_S2,
+        title,
+        note: `الأرقام بين قوسين = عدد النتائج المُقيَّمة · المرجع العام ${fmtPct(overallStats.cleanAcc)} / ${fmtPct(overallStats.suspAcc)} / ${fmtPct(overallStats.overall)}`,
+      })}
 <div class="v3-two-col">
-  ${tintedPanel({ variant: "land", title: "المنافذ البرية", body: dataTable({ headers, rows: rowsOf(portAcc.land), totals: totalsOf("إجمالي البرية", landTotals), firstColWidth: 36, padToRows: padTo }) })}
-  ${tintedPanel({ variant: "sea", title: "المنافذ البحرية", body: dataTable({ headers, rows: rowsOf(portAcc.sea), totals: totalsOf("إجمالي البحرية", seaTotals), firstColWidth: 36, padToRows: padTo }) })}
+  ${tintedPanel({ variant: "land", title: "المنافذ البرية", body: dataTable({ headers, rows: rowsOf(land), totals: isLast ? totalsOf("إجمالي البرية", landTotals) : undefined, firstColWidth: 36, padToRows: padTo }) })}
+  ${tintedPanel({ variant: "sea", title: "المنافذ البحرية", body: dataTable({ headers, rows: rowsOf(sea), totals: isLast ? totalsOf("إجمالي البحرية", seaTotals) : undefined, firstColWidth: 36, padToRows: padTo }) })}
 </div>`;
-    parts.push(slideShell(m, "", inner));
+      parts.push(slideShell(m, "", inner));
+    }
   }
 
   // 12 — Overall accuracy per port, one chart per type (land 6fr / sea 4fr)
   {
-    const m = meta(12, "s2", EYEBROW_S2);
+    const m = meta("s2", EYEBROW_S2);
     const barsOf = (ports: PortAccuracyRow[]): ChartBar[] =>
       ports.map((p) => ({ label: p.name, value: accuracyOf(p.counts).overall }));
     const chartOf = (ports: PortAccuracyRow[], tint: "land" | "sea", avg: number | null) =>
@@ -497,7 +559,7 @@ ${legendRow([
 
   // 13 — Clean/suspicion accuracy per risk level (four mini plots)
   {
-    const m = meta(13, "s2", EYEBROW_S2);
+    const m = meta("s2", EYEBROW_S2);
     const stages = orderedStageAccuracy(model);
     const cols = stages
       .map((s) => {
@@ -545,12 +607,12 @@ ${legendRow([
       "التوافق مع الفرق الأمنية · التوافق مع محرك المخاطر",
       "أثر التحديد · أثر جودة الصورة",
     ],
-    meta: meta(14, "s3", EYEBROW_S3),
+    meta: meta("s3", EYEBROW_S3),
   }));
 
   // 15 — Outcome matrix (errorAnalysis.totals verbatim, never recomputed)
   {
-    const m = meta(15, "s3", EYEBROW_S3);
+    const m = meta("s3", EYEBROW_S3);
     const share = (n: number) => fmtPct(pct(n, t.evaluable));
     const qualityClean = t.correctClean + t.falseSuspicion;
     const qualitySusp = t.missedSuspicion + t.correctSuspicion;
@@ -589,7 +651,7 @@ ${matrixGrid({
   const l1All = accuracyOf(sumCounts(allLevelRows.map((r) => r.l1.counts)));
   const l2All = accuracyOf(sumCounts(allLevelRows.map((r) => r.l2.counts)));
   {
-    const m = meta(16, "s3", EYEBROW_S3);
+    const m = meta("s3", EYEBROW_S3);
     const l1Missed = allLevelRows.reduce((s, r) => s + r.l1.counts.missedSuspicion, 0);
     const l2Missed = allLevelRows.reduce((s, r) => s + r.l2.counts.missedSuspicion, 0);
     const panel = (variant: "land" | "sea", title: string, a: typeof l1All, missed: number) =>
@@ -627,14 +689,13 @@ ${note}`;
   // land chart (the handoff's own trick for unequal port counts).
   {
     const levelPortSlide = (
-      num: number,
       title: string,
       rows: typeof levelRows.land,
       tint: "land" | "sea",
       typeOverall: number | null,
       fixedGroups: boolean,
     ) => {
-      const m = meta(num, "s3", EYEBROW_S3);
+      const m = meta("s3", EYEBROW_S3);
       const l1Type = accuracyOf(sumCounts(rows.map((r) => r.l1.counts)));
       const l2Type = accuracyOf(sumCounts(rows.map((r) => r.l2.counts)));
       const chart = groupedBarChart({
@@ -664,8 +725,8 @@ ${legendRow([
       ], "المقياس من 86% إلى 96%")}`;
       return slideShell(m, "", inner);
     };
-    parts.push(levelPortSlide(17, "دقة المستويين في المنافذ البرية", levelRows.land, "land", landTotals.overall, false));
-    parts.push(levelPortSlide(18, "دقة المستويين في المنافذ البحرية", levelRows.sea, "sea", seaTotals.overall, true));
+    parts.push(levelPortSlide("دقة المستويين في المنافذ البرية", levelRows.land, "land", landTotals.overall, false));
+    parts.push(levelPortSlide("دقة المستويين في المنافذ البحرية", levelRows.sea, "sea", seaTotals.overall, true));
   }
 
   await yieldToMain();
@@ -674,7 +735,7 @@ ${legendRow([
   // + the risk-engine band (an honest presentation fold over the rows'
   // engine verdict vs the screening result, reviewer verdict on the splits).
   {
-    const m = meta(19, "s3", EYEBROW_S3);
+    const m = meta("s3", EYEBROW_S3);
     const matrix = model.resultComparison.crossTeamMatrix;
     const cellOf = (a: string, b: string) =>
       matrix.find((c) => (c.sourceA === a && c.sourceB === b) || (c.sourceA === b && c.sourceB === a));
@@ -787,7 +848,7 @@ ${engineBand}`;
 
   // 20 — Marking + image-quality impact (symmetric split, callouts pinned)
   {
-    const m = meta(20, "s3", EYEBROW_S3);
+    const m = meta("s3", EYEBROW_S3);
     const marking = computeMarkingImpact(model);
     const quality = computeQualityImpactStrata(model.rows);
     const gradient = accuracyGradient(quality.strata);
@@ -867,7 +928,7 @@ ${legendRow([{ dash: "gold", text: `المتوسط العام ${fmtPct(overallSt
       { label: "القسم", value: ORGANIZATION_PATH[2] },
       { label: "التصنيف", value: CLASSIFICATION, end: true },
     ],
-    meta: meta(21, "closing", "ختام العرض"),
+    meta: meta("closing", "ختام العرض"),
   }));
 
   return parts.join("\n");
