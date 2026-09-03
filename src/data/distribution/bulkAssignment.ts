@@ -367,8 +367,46 @@ export function calculateBulkAssignment(params: {
       else rowsByPort.set(portKey, [row]);
     }
 
-    for (const [portKey, portRows] of rowsByPort) {
-      const eligibleAllocs = stageAllocs.filter((a) => isPortEligible(a.username, portKey, portRestrictions));
+    // Each employee's overall target for the WHOLE stage, from their
+    // configured percentage/exact allocation applied to every row in the
+    // stage — not just the rows of one port. Re-apportioning each port
+    // independently at 100% of its eligible employees (the old behavior)
+    // let a restricted employee's excluded share simply vanish from the
+    // total instead of being picked up elsewhere, and let employees who
+    // happened to share fewer ports with others end up over-quota — e.g. a
+    // restricted employee at 25% could land at 3x their target while an
+    // unrestricted colleague fell to a fraction of theirs. Tracking a
+    // shared remaining-need pool across ports keeps every employee's final
+    // total anchored to their configured percentage regardless of how the
+    // stage happens to be split into ports.
+    const remainingNeed = new Map(
+      hamiltonApportionment(
+        stageAllocs.map((a) => ({
+          key: a.username,
+          size: Math.max(0, a.method === "percentage" ? Math.round(a.value * 100) : a.value),
+        })),
+        stageRows.length
+      ).map((q) => [q.key, q.allocated])
+    );
+
+    // Most-constrained ports first (fewest eligible employees), so an
+    // employee with few allowed ports draws against their full remaining
+    // need there before it's diluted across ports they don't even reach —
+    // any port with more eligible employees left afterward absorbs the
+    // rest of the stage's need from everyone else.
+    const portGroups = [...rowsByPort.entries()]
+      .map(([portKey, portRows]) => ({
+        portKey,
+        portRows,
+        eligibleAllocs: stageAllocs.filter((a) => isPortEligible(a.username, portKey, portRestrictions)),
+      }))
+      .sort((a, b) =>
+        a.eligibleAllocs.length !== b.eligibleAllocs.length
+          ? a.eligibleAllocs.length - b.eligibleAllocs.length
+          : a.portKey < b.portKey ? -1 : a.portKey > b.portKey ? 1 : 0
+      );
+
+    for (const { portKey, portRows, eligibleAllocs } of portGroups) {
       if (eligibleAllocs.length === 0) {
         errors.push(
           `لا يوجد موظف مؤهل لاستلام منفذ "${portKey}" في المستوى ${stageKey}. ` +
@@ -377,9 +415,20 @@ export function calculateBulkAssignment(params: {
         continue;
       }
 
+      // Substitute each eligible employee's remaining stage-wide need as an
+      // exact-count weight for this port's apportionment, instead of their
+      // raw percentage — the raw percentage is what re-normalizes to 100%
+      // among however many employees happen to be eligible for this one
+      // port and causes the drift described above.
+      const portAllocs: EmployeeStageAllocation[] = eligibleAllocs.map((a) => ({
+        ...a,
+        method: "exact",
+        value: remainingNeed.get(a.username) ?? 0,
+      }));
+
       const group = assignWithinGroup({
         rows: portRows,
-        stageAllocs: eligibleAllocs,
+        stageAllocs: portAllocs,
         assignableEmployees,
         contextLabel: `${stageKey} - ${portKey}`,
         operatorUsername,
@@ -388,6 +437,10 @@ export function calculateBulkAssignment(params: {
       });
       events.push(...group.events);
       errors.push(...group.errors);
+
+      for (const event of group.events) {
+        remainingNeed.set(event.assignedTo, Math.max(0, (remainingNeed.get(event.assignedTo) ?? 0) - 1));
+      }
     }
   }
 

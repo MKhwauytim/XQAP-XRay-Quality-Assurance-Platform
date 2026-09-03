@@ -493,3 +493,57 @@ test("calculateBulkAssignment with an empty portRestrictions list behaves exactl
   expect(projection(withEmptyList.events)).toEqual(projection(withoutParam.events));
   expect(withEmptyList.errors).toEqual(withoutParam.errors);
 });
+
+test("calculateBulkAssignment keeps every employee's total near their equal percentage even when one is port-restricted", () => {
+  // Four employees at an equal 25% each, four ports of very different sizes.
+  // Employee "d" can only work one (the smallest) port. Before the fix, each
+  // port re-apportioned itself at 100% among only its eligible employees —
+  // "d" then drew a full 25%-of-port share from every port it could reach
+  // while its excluded share from the other ports was never made up
+  // elsewhere, so totals drifted far from 25% each (the bug report: employees
+  // ending up with 1800/2000/2500/1400 instead of equal shares). The fix
+  // tracks one shared remaining-need pool per employee across ports so the
+  // final totals stay anchored to the configured percentage.
+  const ports = [
+    { name: "port-huge", count: 400 },
+    { name: "port-big", count: 300 },
+    { name: "port-medium", count: 200 },
+    { name: "port-small", count: 100 },
+  ];
+  const rows: PreparedPopulationRow[] = ports.flatMap(({ name, count }) =>
+    Array.from({ length: count }, (_, i) => makeRow(`${name}-${i}`, "SECOND_STAGE", "NonCertscan", name))
+  );
+  const allocations: EmployeeStageAllocation[] = ["a", "b", "c", "d"].map((username) => ({
+    username,
+    stageKey: "second",
+    method: "percentage",
+    value: 25,
+    isActive: true,
+  }));
+  const employees = ["a", "b", "c", "d"].map((username) => makeUser(username, "employee"));
+  const portRestrictions: EmployeePortRestriction[] = [
+    { username: "d", restricted: true, enabledPorts: ["port-big", "port-medium", "port-small"] },
+  ];
+
+  const result = calculateBulkAssignment({
+    rows,
+    allocations,
+    employees,
+    operatorUsername: "test",
+    portRestrictions,
+  });
+
+  expect(result.errors).toHaveLength(0);
+  expect(result.events).toHaveLength(1000);
+
+  const totals = new Map<string, number>();
+  for (const e of result.events) totals.set(e.assignedTo, (totals.get(e.assignedTo) ?? 0) + 1);
+
+  // Equal 25% shares of 1000 rows is 250 each. Every employee's total —
+  // including the restricted one — must land close to that, not the wildly
+  // uneven totals the old per-port renormalization produced.
+  for (const username of ["a", "b", "c", "d"]) {
+    expect(totals.get(username) ?? 0).toBeGreaterThanOrEqual(240);
+    expect(totals.get(username) ?? 0).toBeLessThanOrEqual(260);
+  }
+});
