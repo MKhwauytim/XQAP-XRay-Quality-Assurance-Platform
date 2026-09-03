@@ -111,42 +111,40 @@ describe("PerformanceSection", () => {
     expect(row).toBeDefined();
   });
 
-  it("shows a team-mode working-hours row per employee by default, and switches to a per-day row once an employee is selected", () => {
+  it("shows a team-mode monthly gaps bar chart by default, and switches to per-day rows once an employee is selected", () => {
+    // Five 5-minute gaps establish a 5-minute monthly baseline
+    // (MIN_GAP_SAMPLES_FOR_BASELINE = 5), so the trailing ~2h gap classifies
+    // as "large" rather than "unclassified" and shows up in the monthly chart.
+    const baselineFinishes = ["06:05", "06:10", "06:15", "06:20", "06:25"].map((time, i) =>
+      actionEntry({ id: `base-${i}`, at: `2026-06-01T${time}:00.000Z` })
+    );
     render(
       <PerformanceSection
         users={[SARA]}
-        activityEntries={[activityEntry()]}
-        actionEntries={[
-          actionEntry({ id: "act-1", at: "2026-06-01T06:05:00.000Z" }),
-          // A > 60min gap after the first finish classifies as "large" once
-          // a reliable per-employee-month baseline exists (5+ gaps); with
-          // only two finishes here the gap is "unclassified" and drawn as
-          // a large enough span not to matter for this assertion, which
-          // only checks the row label switches — not the tier coloring.
-          actionEntry({ id: "act-2", at: "2026-06-01T08:00:00.000Z" }),
-        ]}
+        activityEntries={[activityEntry({ signedInAt: "2026-06-01T06:00:00.000Z", lastSeenAt: "2026-06-01T06:25:00.000Z" })]}
+        actionEntries={[...baselineFinishes, actionEntry({ id: "large-gap", at: "2026-06-01T08:30:00.000Z" })]}
         isLoading={false}
         hasWorkspace={true}
         onRefresh={vi.fn()}
       />
     );
 
-    // Team mode: one row labeled with the employee's display name.
-    expect(document.querySelector(".um-perf-hour-row-label")).toHaveTextContent("Sara Q");
+    // Team mode: the monthly bar chart (SVG), not per-day/per-employee rows.
+    expect(document.querySelector(".um-perf-chart--hours svg")).toBeInTheDocument();
+    expect(document.querySelector(".um-perf-hour-row-label")).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("الموظف"), { target: { value: "sara" } });
 
-    // Per-employee mode: rows are now labeled by day, not by employee name.
+    // Per-employee mode: back to one row per day.
     const dayLabel = document.querySelector(".um-perf-hour-row-label")!;
     expect(dayLabel).not.toHaveTextContent("Sara Q");
     expect(dayLabel.textContent).toMatch(/\d/);
   });
 
-  it("splits the team-mode working-hours chart into one row per employee per day when multiple days have notable gaps, instead of overlaying every day on one track", () => {
+  it("aggregates every day in a calendar month into a single monthly bar in team mode, instead of one row per employee per day", () => {
     // Five 5-minute gaps on day 1 establish a 5-minute monthly baseline
     // (MIN_GAP_SAMPLES_FOR_BASELINE = 5); the day-2 and day-3 gaps are then
-    // far enough past that baseline to classify as "large" and each should
-    // surface as its own row, not merged into a single per-employee track.
+    // far enough past that baseline to classify as "large".
     const baselineFinishes = ["06:05", "06:10", "06:15", "06:20", "06:25"].map((time, i) =>
       actionEntry({ id: `base-${i}`, at: `2026-06-01T${time}:00.000Z` })
     );
@@ -169,11 +167,12 @@ describe("PerformanceSection", () => {
       />
     );
 
-    const rowLabels = [...document.querySelectorAll(".um-perf-hour-row-label")].map((el) => el.textContent);
-    const dayRows = rowLabels.filter((text) => text?.startsWith("Sara Q ·"));
-    expect(dayRows.length).toBe(2);
-    expect(new Set(dayRows).size).toBe(2); // two distinct day labels, not the same day twice
-    expect(rowLabels).not.toContain("Sara Q"); // no lumped single row once notable gaps exist
+    // No per-day/per-employee rows in team mode — a single month, one bar.
+    expect(document.querySelectorAll(".um-perf-hour-row-label").length).toBe(0);
+    const monthRows = document
+      .querySelector(".um-perf-chart--hours table.um-perf-sr-only")!
+      .querySelectorAll("tbody tr");
+    expect(monthRows.length).toBe(1);
   });
 
   it("calls onRefresh when the refresh button is clicked", () => {

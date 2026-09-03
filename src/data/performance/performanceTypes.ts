@@ -19,6 +19,13 @@ export type GapEvent = {
   tier: GapTier;
 };
 
+/** Total gap duration for one calendar month, split by tier ("normal"/"unclassified" excluded — see aggregateGapsByMonth). */
+export type MonthGapAggregate = {
+  month: string; // YYYY-MM
+  durationMsByTier: Record<"small" | "medium" | "large", number>;
+  totalDurationMs: number;
+};
+
 /** One employee's summary for one calendar day. */
 export type DailyPerformance = {
   employee: string;
