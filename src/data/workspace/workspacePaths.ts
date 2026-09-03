@@ -51,6 +51,14 @@ export const SYSTEM_FOLDER_NAMES = {
    * data that does not warrant them.
    */
   systemErrors: "system-errors",
+  /**
+   * Rolling per-record pre-change snapshot history (owner requirement,
+   * 2026-09-03) — `src/data/history/actionHistory.ts`. Distinct from
+   * `backups` (whole-workspace snapshots) and from safeWrite.ts's single
+   * `.bak` per file (torn-write recovery only, one prior revision, no
+   * history). See that module's doc comment for the full distinction.
+   */
+  history: "history",
 } as const;
 
 export const REPORTS_SUBFOLDERS = {

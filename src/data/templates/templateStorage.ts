@@ -3,6 +3,7 @@ import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
 import { getTemplatesRoot } from "../workspace/workspacePaths";
+import { recordActionHistorySnapshot } from "../history/actionHistory";
 import { clearInspectionTemplateSelectionIfMatches } from "./templateSelectionStorage";
 import type { TemplateIndex, TemplateSchema } from "./templateTypes";
 
@@ -58,10 +59,27 @@ async function updateTemplateIndex(
  * than silently overwriting the other admin's edit.
  */
 async function saveTemplateFile(
+  directoryHandle: DirectoryHandleLike,
   dir: DirectoryHandleLike,
   schema: TemplateSchema
 ): Promise<void> {
   const fileName = `${schema.templateId}.json`;
+
+  // Pre-change snapshot (owner requirement, 2026-09-03): the template as it
+  // stood right before THIS save, kept as a rolling last-10 history so an
+  // admin's edit can be reviewed/rolled back later. Read and recorded ONCE,
+  // outside the CAS retry loop below — a contended save that needs a retry
+  // must not mint a second history entry for the same edit.
+  const beforeSave = await safeReadJson<TemplateSchema>(dir, fileName);
+  await recordActionHistorySnapshot<TemplateSchema>({
+    directoryHandle,
+    family: "templates",
+    scopeParts: [schema.templateId],
+    actor: schema.updatedBy ?? "",
+    action: beforeSave.ok ? "template-edit" : "template-create",
+    previousState: beforeSave.ok ? beforeSave.value : null,
+  });
+
   const outcome = await casLoop<{ ok: true }>(
     async (writeToken) => {
       const existing = await safeReadJson<TemplateSchema>(dir, fileName);
@@ -122,7 +140,7 @@ export async function saveTemplate(
       // Shared per-id doc — two admins on two machines can edit the same
       // template. CAS (revision + _writeToken, verified on read-back) makes a
       // concurrent clobber fail loudly and retry instead of silently winning.
-      await saveTemplateFile(dir, schema);
+      await saveTemplateFile(directoryHandle, dir, schema);
 
       await updateTemplateIndex(dir, (templates) =>
         [

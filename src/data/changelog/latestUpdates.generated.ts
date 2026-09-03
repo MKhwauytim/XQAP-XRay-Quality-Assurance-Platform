@@ -5,11 +5,18 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
-    "version": "v131.22",
+    "version": "v132.1",
     "date": "2026-09-03",
     "bucket": "fix",
     "scope": "referral-approval",
     "title": "stop discarding the diagnostic when a decision write fails"
+  },
+  {
+    "version": "v132.0",
+    "date": "2026-09-03",
+    "bucket": "feature",
+    "scope": "history",
+    "title": "rolling last-10 pre-change snapshot history for templates, answers, and distribution admin edits"
   },
   {
     "version": "v131.21",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "executive-deck",
     "title": "fit the on-screen deck to the window and soften its flat card/table surfaces"
-  },
-  {
-    "version": "v131.13",
-    "date": "2026-09-03",
-    "bucket": "fix",
-    "scope": "executive-deck",
-    "title": "stop fullscreen presentation slide from overflowing on zoom/resize"
   }
 ];
