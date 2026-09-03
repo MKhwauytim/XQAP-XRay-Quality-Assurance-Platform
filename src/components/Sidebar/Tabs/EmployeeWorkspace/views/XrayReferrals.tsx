@@ -126,6 +126,7 @@ import {
 } from "./XrayReferrals/subComponents";
 import { useCaseFilter } from "./XrayReferrals/caseFilter";
 import { buildAnswerStatusFilter } from "./XrayReferrals/answerStatusFilter";
+import { createQueueSelection } from "./XrayReferrals/queueSelection";
 import QueueSplitResizer from "./XrayReferrals/QueueSplitResizer";
 import PendingCorrections from "./XrayReferrals/PendingCorrections";
 import { DEFAULT_QUEUE_SPLIT } from "../../../../../data/preferences/queueSplitStore";
@@ -1774,26 +1775,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   }
 
   // ── Selection helpers ──────────────────────────────────────────────────────
-
-  function toggleSelect(id: string, checked: boolean): void {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (checked) {
-        next.add(id);
-      } else {
-        next.delete(id);
-      }
-      return next;
-    });
-  }
-
-  function selectAll(ids: string[]): void {
-    setSelectedIds(new Set(ids));
-  }
-
-  function clearSelection(): void {
-    setSelectedIds(new Set());
-  }
+  const { toggleSelect, selectAll, clearSelection } = createQueueSelection(setSelectedIds);
 
   // ── Reassignment handler (shared by all three sample-choosing methods) ─────
 

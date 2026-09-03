@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v131.11",
+    "date": "2026-09-03",
+    "bucket": "redesign",
+    "scope": "employee-workspace",
+    "title": "extract the queue's selection helpers so XrayReferrals clears the max-lines gate again"
+  },
+  {
     "version": "v131.10",
     "date": "2026-09-03",
     "bucket": "enhancement",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "performance",
     "title": "stop overlaying multiple days' gaps onto one team-mode working-hours row"
-  },
-  {
-    "version": "v131.0",
-    "date": "2026-08-31",
-    "bucket": "enhancement",
-    "scope": "population",
-    "title": "drop obsolete sheet-name-pattern settings from Data Processing Settings"
   }
 ];
