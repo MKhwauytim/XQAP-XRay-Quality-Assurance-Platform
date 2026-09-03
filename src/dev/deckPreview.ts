@@ -8,24 +8,30 @@
 // reference deck is only built when its toggle is first clicked.
 
 import { buildExecutiveDeckV2 } from "../data/reporting/executive/deck2";
+import { buildExecutiveDeckV3 } from "../data/reporting/executive/deck3";
 import { buildExecutiveDeck } from "../data/reporting/executive/deck";
 import { buildPreviewInput } from "./deckPreviewFixture";
 import type { ExecutiveReportInput } from "../data/reporting/executiveReportTypes";
 
 const frame = document.getElementById("frame") as HTMLIFrameElement;
+const btnV3 = document.getElementById("btn-v3") as HTMLButtonElement;
 const btnV2 = document.getElementById("btn-v2") as HTMLButtonElement;
 const btnV1 = document.getElementById("btn-v1") as HTMLButtonElement;
 
 const LOADING_HTML = `<!DOCTYPE html><html lang="ar" dir="rtl"><body style="margin:0;height:100vh;display:grid;place-items:center;background:#04182c;color:#cfe0f0;font-family:system-ui,sans-serif;font-size:0.95rem">جارٍ بناء العرض…</body></html>`;
 
 let input: ExecutiveReportInput | null = null;
-const cache: { v1?: string; v2?: string } = {};
+const cache: { v1?: string; v2?: string; v3?: string } = {};
 
 // P3-7: buildExecutiveDeckV2 is now async (main-thread-chunked with
 // `await yieldToMain()` breaks) — deckHtml awaits it and caches the resolved
 // string, same as before.
-async function deckHtml(which: "v2" | "v1"): Promise<string> {
+async function deckHtml(which: "v3" | "v2" | "v1"): Promise<string> {
   input ??= buildPreviewInput();
+  if (which === "v3") {
+    cache.v3 ??= await buildExecutiveDeckV3(input, {});
+    return cache.v3;
+  }
   if (which === "v2") {
     // Always request variant-preview mode here: this dev tool's whole purpose
     // is style-variant exploration (see deck2/index.ts's `variantPreview` opt).
@@ -37,7 +43,8 @@ async function deckHtml(which: "v2" | "v1"): Promise<string> {
   return cache.v1;
 }
 
-function show(which: "v2" | "v1"): void {
+function show(which: "v3" | "v2" | "v1"): void {
+  btnV3.classList.toggle("active", which === "v3");
   btnV2.classList.toggle("active", which === "v2");
   btnV1.classList.toggle("active", which === "v1");
   if (cache[which]) {
@@ -46,7 +53,7 @@ function show(which: "v2" | "v1"): void {
   }
   frame.srcdoc = LOADING_HTML;
   // Let the placeholder paint before the (still effectively synchronous for
-  // v1, now chunked for v2) model + deck build.
+  // v1, now chunked for v2/v3) model + deck build.
   setTimeout(() => {
     void (async () => {
       const t0 = performance.now();
@@ -56,6 +63,7 @@ function show(which: "v2" | "v1"): void {
   }, 30);
 }
 
+btnV3.addEventListener("click", () => show("v3"));
 btnV2.addEventListener("click", () => show("v2"));
 btnV1.addEventListener("click", () => show("v1"));
-show("v2");
+show("v3");
