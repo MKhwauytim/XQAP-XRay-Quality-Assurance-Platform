@@ -86,6 +86,11 @@ type EmpInfo = {
   hasCertLicense: boolean;
 };
 
+/** An allocation's raw Hamilton weight: percentage scaled up for apportionment accuracy, or the exact count as-is. */
+function allocWeight(alloc: EmployeeStageAllocation): number {
+  return Math.max(0, alloc.method === "percentage" ? Math.round(alloc.value * 100) : alloc.value);
+}
+
 /**
  * Smart CertScan-first distribution over ONE group of rows (a whole stage, or
  * — once a port restriction is active — one port's rows within a stage):
@@ -122,13 +127,9 @@ function assignWithinGroup(params: {
 
   const empInfos: EmpInfo[] = stageAllocs.map((alloc) => {
     const emp = assignableEmployees.find((e) => e.username === alloc.username);
-    const weight =
-      alloc.method === "percentage"
-        ? Math.round(alloc.value * 100) // scale up for Hamilton accuracy
-        : alloc.value;
     return {
       username: alloc.username,
-      quotaWeight: Math.max(0, weight),
+      quotaWeight: allocWeight(alloc),
       hasCertLicense: emp?.hasCertScanLicense ?? false
     };
   });
@@ -381,19 +382,14 @@ export function calculateBulkAssignment(params: {
     // stage happens to be split into ports.
     const remainingNeed = new Map(
       hamiltonApportionment(
-        stageAllocs.map((a) => ({
-          key: a.username,
-          size: Math.max(0, a.method === "percentage" ? Math.round(a.value * 100) : a.value),
-        })),
+        stageAllocs.map((a) => ({ key: a.username, size: allocWeight(a) })),
         stageRows.length
       ).map((q) => [q.key, q.allocated])
     );
 
-    // Most-constrained ports first (fewest eligible employees), so an
-    // employee with few allowed ports draws against their full remaining
-    // need there before it's diluted across ports they don't even reach —
-    // any port with more eligible employees left afterward absorbs the
-    // rest of the stage's need from everyone else.
+    // Ports are visited most-constrained-first (fewest eligible employees),
+    // purely to fix processing order deterministically — the fairness work
+    // itself is done by the forced/elastic split below, not by this order.
     const portGroups = [...rowsByPort.entries()]
       .map(([portKey, portRows]) => ({
         portKey,
@@ -406,7 +402,8 @@ export function calculateBulkAssignment(params: {
           : a.portKey < b.portKey ? -1 : a.portKey > b.portKey ? 1 : 0
       );
 
-    for (const { portKey, portRows, eligibleAllocs } of portGroups) {
+    for (let i = 0; i < portGroups.length; i++) {
+      const { portKey, portRows, eligibleAllocs } = portGroups[i]!;
       if (eligibleAllocs.length === 0) {
         errors.push(
           `لا يوجد موظف مؤهل لاستلام منفذ "${portKey}" في المستوى ${stageKey}. ` +
@@ -415,16 +412,58 @@ export function calculateBulkAssignment(params: {
         continue;
       }
 
-      // Substitute each eligible employee's remaining stage-wide need as an
-      // exact-count weight for this port's apportionment, instead of their
-      // raw percentage — the raw percentage is what re-normalizes to 100%
-      // among however many employees happen to be eligible for this one
-      // port and causes the drift described above.
-      const portAllocs: EmployeeStageAllocation[] = eligibleAllocs.map((a) => ({
-        ...a,
-        method: "exact",
-        value: remainingNeed.get(a.username) ?? 0,
-      }));
+      // How many rows each eligible employee could still draw from PORTS
+      // NOT YET VISITED (their remaining alternatives to this one). An
+      // employee whose remaining need exceeds that alternative capacity is
+      // "forced" here — this port is their only remaining chance at some
+      // or all of their target, so they must be guaranteed that amount now
+      // rather than sharing this port equally/proportionally with employees
+      // who have plenty of capacity left elsewhere. Without this, weighting
+      // purely by remaining need (as before) can starve an employee who has
+      // few reachable ports: e.g. a big port shared with colleagues who have
+      // other options, plus one small port that is this employee's ONLY
+      // option, splits that small port "fairly" by need and leaves the
+      // employee well under target while the others make it up easily on
+      // the big port.
+      const laterPorts = portGroups.slice(i + 1);
+      const forced = new Map<string, number>();
+      for (const alloc of eligibleAllocs) {
+        const need = remainingNeed.get(alloc.username) ?? 0;
+        const otherCapacity = laterPorts.reduce(
+          (sum, later) => sum + (isPortEligible(alloc.username, later.portKey, portRestrictions) ? later.portRows.length : 0),
+          0
+        );
+        forced.set(alloc.username, Math.max(0, need - otherCapacity));
+      }
+      const totalForced = [...forced.values()].reduce((a, b) => a + b, 0);
+
+      let portAllocs: EmployeeStageAllocation[];
+      if (totalForced >= portRows.length) {
+        // Not even everyone's forced (nowhere-else-to-get-it) need fits in
+        // this port — scale down proportionally to forced urgency.
+        portAllocs = eligibleAllocs.map((a) => ({
+          ...a,
+          method: "exact",
+          value: forced.get(a.username) ?? 0,
+        }));
+      } else {
+        // Guarantee each employee's forced amount, then apportion the rest
+        // of the port by whatever need is left over (need beyond forced).
+        const elasticRows = portRows.length - totalForced;
+        const elasticAlloc = hamiltonApportionment(
+          eligibleAllocs.map((a) => ({
+            key: a.username,
+            size: Math.max(0, (remainingNeed.get(a.username) ?? 0) - (forced.get(a.username) ?? 0)),
+          })),
+          elasticRows
+        );
+        const elasticMap = new Map(elasticAlloc.map((q) => [q.key, q.allocated]));
+        portAllocs = eligibleAllocs.map((a) => ({
+          ...a,
+          method: "exact",
+          value: (forced.get(a.username) ?? 0) + (elasticMap.get(a.username) ?? 0),
+        }));
+      }
 
       const group = assignWithinGroup({
         rows: portRows,
