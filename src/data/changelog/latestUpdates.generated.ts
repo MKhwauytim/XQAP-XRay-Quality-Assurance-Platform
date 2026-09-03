@@ -5,25 +5,39 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
-    "version": "v131.11",
+    "version": "v131.13",
     "date": "2026-09-03",
     "bucket": "redesign",
     "scope": "employee-workspace",
     "title": "extract the queue's selection helpers so XrayReferrals clears the max-lines gate again"
   },
   {
-    "version": "v131.10",
+    "version": "v131.12",
     "date": "2026-09-03",
     "bucket": "enhancement",
     "scope": "employee-workspace",
     "title": "مستهدف المؤشر now means 'from the regular population pipeline', not a risk-column read"
   },
   {
-    "version": "v131.9",
+    "version": "v131.11",
     "date": "2026-09-03",
     "bucket": "fix",
     "scope": "employee-workspace",
     "title": "queue الحالة filter no longer misses مستبدلة rows or conflates معلق with مكتملة"
+  },
+  {
+    "version": "v131.10",
+    "date": "2026-09-03",
+    "bucket": "fix",
+    "scope": "distribution",
+    "title": "guarantee a port-trapped employee's only reachable capacity instead of splitting it by raw need"
+  },
+  {
+    "version": "v131.9",
+    "date": "2026-09-03",
+    "bucket": "fix",
+    "scope": "distribution",
+    "title": "keep per-employee sample totals equal when port restrictions are active"
   },
   {
     "version": "v131.8",
@@ -59,19 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": null,
     "title": "remove أوراق العمل tab, add DevTools console credit, add suspicion-type question"
-  },
-  {
-    "version": "v131.2",
-    "date": "2026-09-01",
-    "bucket": "enhancement",
-    "scope": "user-management",
-    "title": "merge activity and actions log pages into one"
-  },
-  {
-    "version": "v131.1",
-    "date": "2026-09-01",
-    "bucket": "fix",
-    "scope": "performance",
-    "title": "stop overlaying multiple days' gaps onto one team-mode working-hours row"
   }
 ];
