@@ -5,32 +5,46 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
-    "version": "v131.16",
+    "version": "v131.18",
     "date": "2026-09-03",
     "bucket": "fix",
     "scope": "e2e",
     "title": "update employee-queue.spec.ts's case-chip counts for the مستهدف المؤشر redefinition"
   },
   {
-    "version": "v131.15",
+    "version": "v131.17",
     "date": "2026-09-03",
     "bucket": "redesign",
     "scope": "employee-workspace",
     "title": "extract the queue's selection helpers so XrayReferrals clears the max-lines gate again"
   },
   {
-    "version": "v131.14",
+    "version": "v131.16",
     "date": "2026-09-03",
     "bucket": "enhancement",
     "scope": "employee-workspace",
     "title": "مستهدف المؤشر now means 'from the regular population pipeline', not a risk-column read"
   },
   {
-    "version": "v131.13",
+    "version": "v131.15",
     "date": "2026-09-03",
     "bucket": "fix",
     "scope": "employee-workspace",
     "title": "queue الحالة filter no longer misses مستبدلة rows or conflates معلق with مكتملة"
+  },
+  {
+    "version": "v131.14",
+    "date": "2026-09-03",
+    "bucket": "fix",
+    "scope": "executive-deck",
+    "title": "fit the on-screen deck to the window and soften its flat card/table surfaces"
+  },
+  {
+    "version": "v131.13",
+    "date": "2026-09-03",
+    "bucket": "fix",
+    "scope": "executive-deck",
+    "title": "stop fullscreen presentation slide from overflowing on zoom/resize"
   },
   {
     "version": "v131.12",
@@ -59,19 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "distribution",
     "title": "keep per-employee sample totals equal when port restrictions are active"
-  },
-  {
-    "version": "v131.8",
-    "date": "2026-09-01",
-    "bucket": "fix",
-    "scope": "user-management",
-    "title": "guard against losing a newly-added or edited user to a page reload before its disk write lands"
-  },
-  {
-    "version": "v131.6",
-    "date": "2026-09-01",
-    "bucket": "fix",
-    "scope": "employee-workspace",
-    "title": "stop the results screen's periodic refresh from re-reading the whole month on every tick"
   }
 ];
