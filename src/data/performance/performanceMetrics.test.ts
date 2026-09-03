@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AuthActivityLogEntry } from "../../auth/authActivityLog";
 import type { WorkspaceActionEntry } from "../audit/actionLog";
 import {
+  aggregateGapsByMonth,
   aggregateSamplesByDay,
   classifyGapTier,
   computeAllDailyPerformance,
@@ -282,6 +283,46 @@ describe("filterDailyPerformance / flattenGaps / aggregateSamplesByDay / summari
       durationMs: 10 * 60 * 1000,
       tier: "unclassified",
     });
+  });
+});
+
+describe("aggregateGapsByMonth", () => {
+  it("groups gaps by YYYY-MM and sums duration per tier, excluding normal/unclassified", () => {
+    const gaps: GapEvent[] = [
+      gapEvent({ day: "2026-06-01", tier: "small", durationMs: 10 * 60_000 }),
+      gapEvent({ day: "2026-06-15", tier: "small", durationMs: 5 * 60_000 }),
+      gapEvent({ day: "2026-06-20", tier: "medium", durationMs: 40 * 60_000 }),
+      gapEvent({ day: "2026-06-25", tier: "large", durationMs: 90 * 60_000 }),
+      gapEvent({ day: "2026-06-28", tier: "normal", durationMs: 60_000 }),
+      gapEvent({ day: "2026-06-29", tier: "unclassified", durationMs: 60_000 }),
+      gapEvent({ day: "2026-07-01", tier: "small", durationMs: 3 * 60_000 }),
+    ];
+    const months = aggregateGapsByMonth(gaps);
+    expect(months).toEqual([
+      {
+        month: "2026-06",
+        durationMsByTier: { small: 15 * 60_000, medium: 40 * 60_000, large: 90 * 60_000 },
+        totalDurationMs: 145 * 60_000,
+      },
+      {
+        month: "2026-07",
+        durationMsByTier: { small: 3 * 60_000, medium: 0, large: 0 },
+        totalDurationMs: 3 * 60_000,
+      },
+    ]);
+  });
+
+  it("returns an empty array for no gaps", () => {
+    expect(aggregateGapsByMonth([])).toEqual([]);
+  });
+
+  it("sorts months ascending regardless of input order", () => {
+    const gaps: GapEvent[] = [
+      gapEvent({ day: "2026-08-01", tier: "small", durationMs: 60_000 }),
+      gapEvent({ day: "2026-06-01", tier: "small", durationMs: 60_000 }),
+      gapEvent({ day: "2026-07-01", tier: "small", durationMs: 60_000 }),
+    ];
+    expect(aggregateGapsByMonth(gaps).map((m) => m.month)).toEqual(["2026-06", "2026-07", "2026-08"]);
   });
 });
 
