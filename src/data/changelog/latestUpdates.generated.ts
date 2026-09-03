@@ -12,6 +12,13 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "title": "rolling last-10 pre-change snapshot history for templates, answers, and distribution admin edits"
   },
   {
+    "version": "v131.15",
+    "date": "2026-09-03",
+    "bucket": "fix",
+    "scope": "executive-deck-v3",
+    "title": "paginate port tables to stop overflow past the slide edge"
+  },
+  {
     "version": "v131.14",
     "date": "2026-09-03",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "employee-workspace",
     "title": "stop the results screen's periodic refresh from re-reading the whole month on every tick"
-  },
-  {
-    "version": "v131.5",
-    "date": "2026-09-01",
-    "bucket": "enhancement",
-    "scope": "auth",
-    "title": "move debug tools from demo session to admin, translate to English"
   }
 ];
