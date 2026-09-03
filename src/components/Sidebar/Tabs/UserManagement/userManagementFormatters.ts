@@ -51,3 +51,10 @@ export function formatClock(minutesSinceMidnight: number): string {
 export function formatOneDecimal(value: number): string {
   return value.toLocaleString(AR_LOCALE, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 }
+
+/** "YYYY-MM" → Arabic month + year label (e.g. "أغسطس 2026") for the monthly gaps bar chart. */
+export function formatMonthLabel(month: string): string {
+  const date = new Date(`${month}-01T00:00:00`);
+  if (Number.isNaN(date.getTime())) return month;
+  return date.toLocaleDateString(AR_LOCALE, { month: "long", year: "numeric" });
+}

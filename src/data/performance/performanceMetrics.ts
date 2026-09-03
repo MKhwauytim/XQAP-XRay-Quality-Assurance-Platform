@@ -21,6 +21,7 @@ import {
   type EmployeeStatusKind,
   type GapEvent,
   type GapTier,
+  type MonthGapAggregate,
   type PerformanceScopeFilter,
   type PerformanceSummary,
 } from "./performanceTypes";
@@ -258,6 +259,31 @@ export function aggregateSamplesByDay(
   return [...byDay.entries()]
     .map(([day, count]) => ({ day, count }))
     .sort((a, b) => a.day.localeCompare(b.day));
+}
+
+/**
+ * Notable (small/medium/large) gap duration per calendar month — the team
+ * view's "ساعات العمل اليومية" chart plots this instead of one row per
+ * (employee, day), which becomes unreadable as a month accumulates days.
+ * "normal" and "unclassified" gaps are excluded, same convention as
+ * buildHourSegments in PerformanceSection.tsx. Sorted ascending by month.
+ */
+export function aggregateGapsByMonth(gaps: readonly GapEvent[]): MonthGapAggregate[] {
+  const byMonth = new Map<string, Record<"small" | "medium" | "large", number>>();
+  for (const gap of gaps) {
+    if (gap.tier !== "small" && gap.tier !== "medium" && gap.tier !== "large") continue;
+    const month = gap.day.slice(0, 7);
+    const tiers = byMonth.get(month) ?? { small: 0, medium: 0, large: 0 };
+    tiers[gap.tier] += gap.durationMs;
+    byMonth.set(month, tiers);
+  }
+  return [...byMonth.entries()]
+    .map(([month, durationMsByTier]) => ({
+      month,
+      durationMsByTier,
+      totalDurationMs: durationMsByTier.small + durationMsByTier.medium + durationMsByTier.large,
+    }))
+    .sort((a, b) => a.month.localeCompare(b.month));
 }
 
 const EMPTY_TIER_COUNTS: Record<GapTier, number> = {

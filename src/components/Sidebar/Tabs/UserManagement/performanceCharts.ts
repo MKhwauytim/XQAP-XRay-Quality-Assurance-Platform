@@ -22,6 +22,14 @@ const C = {
   gold: "var(--brand-premium)",
   goldBg: "var(--c-warning-bg)",
   sky: "var(--c-sky)",
+  coral: "var(--c-coral)",
+} as const;
+
+/** Same tier→colour mapping as .um-perf-hour-seg--{tier} / .um-perf-legend-dot--{tier} in UserManagement.css — kept in sync manually since the chart is raw SVG, not CSS-styled markup. */
+const TIER_COLOR = {
+  small: C.sky,
+  medium: C.gold,
+  large: C.coral,
 } as const;
 
 function esc(value: string): string {
@@ -116,6 +124,60 @@ export function samplesTrendSvg(points: readonly DayCount[], emptyNote: string):
     `<line x1="${r(plot.left)}" x2="${r(plot.right)}" y1="${r(plot.bottom)}" y2="${r(plot.bottom)}" stroke="${C.border}"/>` +
     bars +
     avgLine +
+    `</svg>`
+  );
+}
+
+export type MonthGapPoint = {
+  /** Pre-formatted display label (e.g. "أغسطس 2026") — this module stays free of date-formatting logic, same as samplesTrendSvg taking raw "day" strings. */
+  label: string;
+  durationMsByTier: Record<"small" | "medium" | "large", number>;
+  totalDurationMs: number;
+};
+
+function formatHours(ms: number): string {
+  return `${Math.round((ms / 3_600_000) * 10) / 10}`;
+}
+
+/**
+ * Notable-gap duration per calendar month, stacked bar per tier (small/
+ * medium/large). Replaces the team view's old per-(employee, day) rows —
+ * this reads as one bar per month regardless of how many days accumulate.
+ */
+export function gapsByMonthSvg(points: readonly MonthGapPoint[], emptyNote: string): string {
+  const w = 760;
+  const h = 300;
+  if (points.length === 0) return emptyState(w, h, emptyNote);
+
+  const plot = { top: 34, right: 730, bottom: 246, left: 30 };
+  const pw = plot.right - plot.left;
+  const barAreaH = plot.bottom - plot.top;
+  const maxTotal = Math.max(1, ...points.map((p) => p.totalDurationMs));
+
+  const slot = pw / points.length;
+  const barW = Math.max(10, Math.min(64, slot * 0.55));
+
+  let bars = "";
+  points.forEach((p, i) => {
+    const slotCenter = plot.right - slot * (i + 0.5);
+    let y = plot.bottom;
+    (["small", "medium", "large"] as const).forEach((tier) => {
+      const durationMs = p.durationMsByTier[tier];
+      if (durationMs <= 0) return;
+      const segH = (durationMs / maxTotal) * barAreaH;
+      y -= segH;
+      bars += `<rect x="${r(slotCenter - barW / 2)}" y="${r(y)}" width="${r(barW)}" height="${r(segH)}" fill="${TIER_COLOR[tier]}"/>`;
+    });
+    const totalTop = plot.bottom - (p.totalDurationMs / maxTotal) * barAreaH;
+    bars +=
+      `<text x="${r(slotCenter)}" y="${r(totalTop - 8)}" text-anchor="middle" font-size="12" font-weight="800" fill="${C.navy}">${esc(formatHours(p.totalDurationMs))}س</text>` +
+      `<text x="${r(slotCenter)}" y="${r(plot.bottom + 18)}" text-anchor="middle" font-size="10" fill="${C.ink3}">${esc(p.label)}</text>`;
+  });
+
+  return (
+    open(w, h, "min-width:480px;height:auto") +
+    `<line x1="${r(plot.left)}" x2="${r(plot.right)}" y1="${r(plot.bottom)}" y2="${r(plot.bottom)}" stroke="${C.border}"/>` +
+    bars +
     `</svg>`
   );
 }
