@@ -5,32 +5,39 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
-    "version": "v131.18",
+    "version": "v131.19",
     "date": "2026-09-03",
     "bucket": "fix",
     "scope": "e2e",
     "title": "update employee-queue.spec.ts's case-chip counts for the مستهدف المؤشر redefinition"
   },
   {
-    "version": "v131.17",
+    "version": "v131.18",
     "date": "2026-09-03",
     "bucket": "redesign",
     "scope": "employee-workspace",
     "title": "extract the queue's selection helpers so XrayReferrals clears the max-lines gate again"
   },
   {
-    "version": "v131.16",
+    "version": "v131.17",
     "date": "2026-09-03",
     "bucket": "enhancement",
     "scope": "employee-workspace",
     "title": "مستهدف المؤشر now means 'from the regular population pipeline', not a risk-column read"
   },
   {
-    "version": "v131.15",
+    "version": "v131.16",
     "date": "2026-09-03",
     "bucket": "fix",
     "scope": "employee-workspace",
     "title": "queue الحالة filter no longer misses مستبدلة rows or conflates معلق with مكتملة"
+  },
+  {
+    "version": "v131.15",
+    "date": "2026-09-03",
+    "bucket": "fix",
+    "scope": "executive-deck-v3",
+    "title": "paginate port tables to stop overflow past the slide edge"
   },
   {
     "version": "v131.14",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "distribution",
     "title": "guarantee a port-trapped employee's only reachable capacity instead of splitting it by raw need"
-  },
-  {
-    "version": "v131.9",
-    "date": "2026-09-03",
-    "bucket": "fix",
-    "scope": "distribution",
-    "title": "keep per-employee sample totals equal when port restrictions are active"
   }
 ];
