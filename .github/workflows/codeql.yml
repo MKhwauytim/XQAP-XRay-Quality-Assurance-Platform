@@ -14,17 +14,32 @@ name: CodeQL
 # Results appear under the repository's Security tab, not as PR comments, so
 # this adds no PR noise. Alerts are surfaced on the PR only when a PR actually
 # introduces one.
-
+#
+# DISABLED (2026-09-03): the `analyze` job's SARIF upload always fails with
+# "Code scanning is not enabled for this repository" — confirmed on every one
+# of ~30 consecutive runs across unrelated PRs. Code scanning for a PRIVATE
+# repository requires GitHub Advanced Security, which is an Enterprise Cloud
+# feature; the repo's current plan doesn't offer an "Enable code scanning"
+# option at all, so this workflow can structurally never turn green. Rather
+# than leave a required-looking check permanently red (training reviewers —
+# human or AI — to explain away every red X as "pre-existing, not mine",
+# which is exactly what happened across several past PRs), automatic triggers
+# are removed. `workflow_dispatch` is kept so it can be re-run by hand to
+# confirm the fix once either (a) the repo moves to a plan with GHAS, or
+# (b) the repo goes public, at which point code scanning is free again and
+# `push`/`pull_request`/`schedule` should be restored below.
+#
+# on:
+#   push:
+#     branches: [main]
+#   pull_request:
+#     branches: [main]
+#   schedule:
+#     # Mondays 04:27 UTC. Off the hour on purpose: scheduled jobs queued at
+#     # :00 wait behind everyone else's cron. A weekly run catches newly
+#     # published queries against unchanged code.
+#     - cron: "27 4 * * 1"
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  schedule:
-    # Mondays 04:27 UTC. Off the hour on purpose: scheduled jobs queued at :00
-    # wait behind everyone else's cron. A weekly run catches newly published
-    # queries against unchanged code.
-    - cron: "27 4 * * 1"
   workflow_dispatch:
 
 permissions:
