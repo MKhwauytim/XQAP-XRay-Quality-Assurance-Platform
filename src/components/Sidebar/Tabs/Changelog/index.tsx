@@ -7,6 +7,7 @@ import { PageHeader } from "../../../PageHeader/PageHeader";
 import { EmptyState } from "../../../StateViews/StateViews";
 import { getLabels } from "../../../../data/labels/labelsStore";
 import { LATEST_UPDATES } from "../../../../data/changelog/latestUpdates.generated";
+import { translateScope, translateTitle } from "../../../../data/changelog/titleTranslations";
 import type { ChangelogBucket, ChangelogEntry } from "../../../../data/changelog/changelogTypes";
 import type { SidebarTabModule } from "../tabTypes";
 import "./Changelog.css";
@@ -50,6 +51,8 @@ function bucketLabel(bucket: ChangelogBucket): string {
 }
 
 function ChangelogRow({ entry }: { entry: ChangelogEntry }) {
+  const scope = translateScope(entry.scope);
+  const title = translateTitle(entry.version, entry.title);
   return (
     <li className="chg-row ui-card">
       <div className="chg-row-top">
@@ -60,7 +63,7 @@ function ChangelogRow({ entry }: { entry: ChangelogEntry }) {
         <span className="chg-version">{entry.version}</span>
       </div>
       <p className="chg-title">
-        {entry.scope && <span className="chg-scope">({entry.scope})</span>} {entry.title}
+        {scope && <span className="chg-scope">({scope})</span>} {title}
       </p>
     </li>
   );
