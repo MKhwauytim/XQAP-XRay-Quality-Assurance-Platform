@@ -85,7 +85,7 @@ synonyms.
 | 24 | `oppositeInspectorResult` | نتيجة المفتش المعاكس / نتيجة التفتيش المعاكس | |
 | 25 | `liveMeansResult` | نتيجة الوسائل الحية | Result from "live means" inspection — i.e. **K9 detection dogs** — giving سليمة or اشتباه. |
 | 26 | `xrayEntryDate` | تاريخ دخول الاشعة / تاريخ الاشعة | |
-| 27 | `targetedByRiskEngine` | مستهدف محرك المخاطر / استهداف محرك مخاطر | |
+| 27 | `targetedByRiskEngine` | مستهدف محرك المخاطر / استهداف محرك مخاطر | Free text off the risk file, with a vocabulary unknown at design time; `engineVerdictOf` (`src/data/population/riskEngineVerdict.ts`) is the single mapping to اشتباه/سليمة, and a blank or unrecognized value maps to `null` ("we do not know"), never to سليمة. **Do not confuse this per-row flag with the employee queue's «مستهدف المؤشر» chip**: since v131.10 that chip means "reached the queue through the regular monthly population process off the Risk file" (the complement of the ad-hoc «حالات استثنائية» chip) and does not read this column at all. Only the executive deck's risk-engine agreement/accuracy pages read the column itself. |
 | 28 | `riskMessage` | رسالة المخاطر | |
 | 29 | `stage` | STAGE / المستوى | |
 | — | `movementType` *(derived from sheet name, not a column)* | — | |

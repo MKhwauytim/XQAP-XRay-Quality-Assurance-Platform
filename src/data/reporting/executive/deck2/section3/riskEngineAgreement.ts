@@ -8,8 +8,8 @@
 // `targetedByRiskEngine` is free text off the risk file, with a vocabulary that
 // is UNKNOWN at design time (see `ExecutiveReportRow.targetedByRiskEngine`'s
 // own doc comment). `engineVerdictOf` — now shared from
-// `src/data/population/riskEngineVerdict.ts`, since the employee case-queue
-// filter applies the same rule — maps it to a سليمة/اشتباه verdict for a
+// `src/data/population/riskEngineVerdict.ts`, which the population layer owns
+// and deck3 also reads — maps it to a سليمة/اشتباه verdict for a
 // small, explicit recognized set; everything else — including every blank —
 // maps to `null` and is excluded from every rate on this page. A blank means
 // "we do not know what the engine said", never "the engine cleared it": if a
@@ -122,11 +122,15 @@ const LEVEL_FOOTNOTE =
 /**
  * Re-exported, not re-implemented. The vocabulary and the mapping now live in
  * `src/data/population/riskEngineVerdict.ts` — the population layer owns
- * `targetedByRiskEngine`, and the employee case-queue filter («مستهدف المؤشر»)
- * applies the exact same rule, so a second copy here would be free to drift the
- * first time a real month teaches one of them a new value. The re-export keeps
- * this module's public surface unchanged for existing importers (its own test
- * imports `engineVerdictOf` from here).
+ * `targetedByRiskEngine`, and deck3's slides apply the exact same rule, so a
+ * second copy here would be free to drift the first time a real month teaches
+ * one of them a new value. The re-export keeps this module's public surface
+ * unchanged for existing importers (its own test imports `engineVerdictOf`
+ * from here).
+ *
+ * The employee queue's «مستهدف المؤشر» chip does NOT use this — it means
+ * "came through the regular population pipeline", not "the engine said yes";
+ * see `riskEngineVerdict.ts`'s header.
  */
 export { engineVerdictOf };
 
