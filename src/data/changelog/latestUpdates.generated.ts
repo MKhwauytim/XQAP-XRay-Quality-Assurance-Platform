@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v131.10",
+    "date": "2026-09-03",
+    "bucket": "fix",
+    "scope": "executive-deck",
+    "title": "fit the on-screen deck to the window and soften its flat card/table surfaces"
+  },
+  {
     "version": "v131.9",
     "date": "2026-09-03",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "population",
     "title": "drop obsolete sheet-name-pattern settings from Data Processing Settings"
-  },
-  {
-    "version": "v130.17",
-    "date": "2026-08-31",
-    "bucket": "feature",
-    "scope": "distribution",
-    "title": "restrict sample assignment by port per employee"
   }
 ];

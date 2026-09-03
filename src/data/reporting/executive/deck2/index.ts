@@ -355,23 +355,53 @@ export const DECK_FULLSCREEN_SCRIPT = `(function(){
 })();`;
 
 /**
- * Computes \`--v2-fs-scale\`, the uniform scale factor theme.ts's
- * \`body.deck-fullscreen .slide.v2.deck-slide-active\` rule applies to the
- * fixed 1120×630 design box in single-slide fullscreen mode (see that rule's
- * own comment for why this can't just be a CSS \`calc()\`/\`min()\` expression).
- * Deck2-only — deck3 already scales via its own always-on \`--v3-scale\`
- * script (deck3/index.ts), so this is not exported for reuse there.
+ * Owns BOTH scale factors theme.ts applies to deck2's fixed 1120×630 slide
+ * design box, so there is exactly one measurement path and one resize
+ * listener for the deck's sizing:
+ *
+ *   \`--v2-fs-scale\` — single-slide fullscreen mode
+ *     (\`body.deck-fullscreen .slide.v2.deck-slide-active\`): fit the whole
+ *     screen, both axes.
+ *   \`--v2-scale\` — the ordinary scrolling view
+ *     (\`body:not(.deck-fullscreen) .deck-viewer-v2 .slide.v2\`): fit the
+ *     viewer's content box AND the visible window height, so a whole slide
+ *     is readable at once on a laptop screen or at any browser zoom level
+ *     instead of the 1:1 design box overflowing the viewport. Capped at 1 —
+ *     the deck is never blown up past its design size, only shrunk to fit.
+ *
+ * Neither can be a CSS \`calc()\`/\`min()\`: \`transform:scale()\` takes a
+ * unitless <number>, and dividing a length by a plain number stays a length
+ * in CSS, so the declaration is dropped at parse time. Same reason deck3's
+ * \`--v3-scale\` is JS-computed (deck3/index.ts) — deck3 has its own copy
+ * because its canvas, chrome measurements and centering correction differ;
+ * this one is deck2's.
  */
-const DECK_V2_FULLSCREEN_SCALE_SCRIPT = `(function(){
+const DECK_V2_SCALE_SCRIPT = `(function(){
   var root = document.documentElement;
-  function apply(){
-    var scale = Math.min((window.innerWidth - 32) / 1120, (window.innerHeight - 32) / 630);
-    root.style.setProperty('--v2-fs-scale', String(scale > 0 ? scale : 1));
+  function set(name, value){ root.style.setProperty(name, String(value > 0 ? value : 1)); }
+  function fit(){
+    set('--v2-fs-scale', Math.min((window.innerWidth - 32) / 1120, (window.innerHeight - 32) / 630));
+    var viewer = document.querySelector('.deck-viewer-v2');
+    if (!viewer) { set('--v2-scale', Math.min(1, (window.innerWidth - 32) / 1120)); return; }
+    var cs = getComputedStyle(viewer);
+    var availWidth = viewer.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+    var toolbar = viewer.querySelector('.deck-toolbar');
+    // The toolbar is sticky at the top of the scroll area, so the height a
+    // slide can actually occupy on screen is the window minus the toolbar
+    // and the viewer's own top padding (plus a small breathing gap).
+    var chrome = (parseFloat(cs.paddingTop) || 0) + (toolbar ? toolbar.getBoundingClientRect().height + 22 : 0) + 24;
+    var availHeight = window.innerHeight - chrome;
+    set('--v2-scale', Math.min(1, availWidth / 1120, availHeight / 630));
   }
-  apply();
-  window.addEventListener('resize', apply);
-  document.addEventListener('fullscreenchange', apply);
-  document.addEventListener('webkitfullscreenchange', apply);
+  fit();
+  window.addEventListener('resize', fit);
+  // Exiting fullscreen restores .deck-viewer-v2's real padding only once
+  // DECK_FULLSCREEN_SCRIPT's own listener has removed body.deck-fullscreen;
+  // measuring on the next frame reads the settled layout either way.
+  function fitAfterFullscreenChange(){ requestAnimationFrame(fit); }
+  document.addEventListener('fullscreenchange', fitAfterFullscreenChange);
+  document.addEventListener('webkitfullscreenchange', fitAfterFullscreenChange);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fit);
 })();`;
 
 export function buildDeckV2Html(
@@ -433,7 +463,7 @@ ${footerNote}
 <button type="button" class="btn-slide-nav btn-slide-prev" id="deck-slide-prev" aria-label="${slidePrevLabel}" title="${slidePrevLabel}">${icon("arrow", 20)}</button>
 <button type="button" class="btn-slide-nav btn-slide-next" id="deck-slide-next" aria-label="${slideNextLabel}" title="${slideNextLabel}">${icon("arrow", 20)}</button>
 <span class="deck-slide-counter" id="deck-slide-counter" dir="ltr"></span>
-<script>${DECK_NAV_SCRIPT}${DECK_TABLE_FILL_SCRIPT}${DECK_FULLSCREEN_SCRIPT}${DECK_V2_FULLSCREEN_SCALE_SCRIPT}${variantPreview ? DECK_VARIANT_SCRIPT : ""}</script>
+<script>${DECK_NAV_SCRIPT}${DECK_TABLE_FILL_SCRIPT}${DECK_FULLSCREEN_SCRIPT}${DECK_V2_SCALE_SCRIPT}${variantPreview ? DECK_VARIANT_SCRIPT : ""}</script>
 </body>
 </html>`;
 }

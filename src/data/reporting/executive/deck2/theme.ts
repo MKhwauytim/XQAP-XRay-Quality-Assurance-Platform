@@ -30,6 +30,63 @@ export const DECK_V2_CSS = `
 .deck-nav-item a:hover{background:rgba(255,255,255,.06);color:#fff;}
 .deck-nav-item.active a{background:rgba(244,180,0,.13);border-color:rgba(244,180,0,.4);color:var(--gold);}
 
+/* ── Fit-to-window sizing for the ordinary scrolling view ─────────────────
+   A slide is a fixed 1120×630 design box whose row budgets and font sizes
+   are calibrated against exactly that canvas (deck/deckTheme.ts's \`.slide\`
+   rule explains why the height can't be aspect-ratio-derived). Rendered 1:1
+   it does not fit an ordinary laptop window: at 1440×900 the slide bottom
+   already lands past the fold once the sticky toolbar and viewer padding are
+   counted, and at 1366×768 or any zoomed-in equivalent you only ever see a
+   fragment of a page — which is what reads as "the report is way too zoomed
+   in". Zooming further crossed \`@media (max-width:1152px)\`, which reflows
+   \`.slide\` to \`height:auto\` single-column: a ~775px-tall stack that is
+   taller still, no longer a slide, and re-typeset at different font sizes.
+   Scaling the whole design box down to whatever the window can show — the
+   same fit-to-window behavior deck3 and this deck's own fullscreen mode
+   already have — keeps a full page visible at every window size and zoom
+   level, with the layout identical to print.
+   \`--v2-scale\` is measured in JS (DECK_V2_SCALE_SCRIPT, index.ts) and
+   capped at 1, so the deck is only ever shrunk to fit, never blown up.
+   Selector notes: \`body:not(.deck-fullscreen)\` keeps this out of the
+   fullscreen rule's way (which needs its own scale and its own centred
+   transform-origin), and \`.slide.v2\` (2 classes) outranks the responsive
+   query's bare \`.slide\` so the reflow branch no longer applies to v2 at
+   any width. Sizing is \`zoom\`, not \`transform:scale()\`: zoom scales the
+   box's LAYOUT size, so the slide keeps centring itself and the page's
+   scroll extent stays honest, where a transform would leave a 1120px-wide
+   layout box (overflowing and mis-centring in this RTL document once the
+   viewer is narrower than the design width) and a 630px hole under every
+   shrunken slide to paper over with negative margins. Screen only — print
+   renders the design box at its true 1:1 size. */
+@media screen{
+  body:not(.deck-fullscreen) .deck-viewer-v2 .slide.v2{
+    width:1120px;
+    height:630px;
+    zoom:var(--v2-scale,1);
+  }
+  /* deck/deckTheme.ts's \`@media (max-width:1152px)\` block reflows slide
+     internals to a single column and re-typesets the headings for a deck
+     that reflows with the viewport. v2 no longer does — it scales — so
+     those overrides would now only mismatch print and overflow the fixed
+     630px box (which clips, silently). Restore the design-canvas values for
+     v2 slides at every width; each selector here matches the specificity of
+     the one it neutralizes plus \`.v2\`, and deck2's CSS is appended after
+     DECK_CSS, so it wins without \`!important\`. */
+  .slide.v2 .slide-split,
+  .slide.v2 .slide-split.wide-left,
+  .slide.v2 .slide-split.even{grid-template-columns:1.05fr .95fr;}
+  .slide.v2 .slide-split.wide-left{grid-template-columns:1.35fr .65fr;}
+  .slide.v2 .slide-split.even{grid-template-columns:1fr 1fr;}
+  .slide.v2 .kpi-band.n3{grid-template-columns:repeat(3,1fr);}
+  .slide.v2 .kpi-band.n4{grid-template-columns:repeat(4,1fr);}
+  .slide.v2 .kpi-band.n5{grid-template-columns:repeat(5,1fr);}
+  .slide.v2 .deck-cards.n2{grid-template-columns:repeat(2,1fr);}
+  .slide.v2 .deck-cards.n3{grid-template-columns:repeat(3,1fr);}
+  .slide.v2 .slide-headline{font-size:2rem;}
+  .slide.v2.title-slide h1{font-size:3rem;}
+  .slide.v2 .hero-number{font-size:5.2rem;}
+}
+
 /* ── Slideshow (single-slide) fullscreen mode ──────────────────────────────
    body.deck-fullscreen now means true one-slide-at-a-time presentation mode
    (DECK_FULLSCREEN_SCRIPT tracks the active index and toggles
@@ -74,13 +131,22 @@ body.deck-fullscreen .slide{display:none;margin:0;}
    beats \`.slide.v2\`'s 2 classes, so this wins for height too) and scaling
    the whole fixed 1120×630 design box uniformly via \`--v2-fs-scale\` fits
    both axes at any zoom level or window size without distortion or clipping.
-   \`--v2-fs-scale\` is computed in JS (DECK_V2_FULLSCREEN_SCALE_SCRIPT,
-   index.ts) rather than in CSS: \`transform:scale()\` needs a unitless
+   \`--v2-fs-scale\` is computed in JS (DECK_V2_SCALE_SCRIPT, index.ts, which
+   also owns the scrolling view's \`--v2-scale\`) rather than in CSS:
+   \`transform:scale()\` needs a unitless
    <number>, and dividing a length by a plain number stays a length in CSS
    (the declaration is dropped at parse time) — same reason deck3's
    \`--v3-scale\` is JS-computed too. */
 body.deck-fullscreen .slide.v2.deck-slide-active{
   display:flex;
+  /* The active slide is a flex ITEM of .deck-viewer-v2's fullscreen
+     flex-centre layout, so the default flex-shrink:1 still squeezed the
+     1120px box down to the container width whenever the CSS-px viewport
+     was narrower than 1120 (deep browser zoom) — width shrank while height
+     stayed on the shared ratio, i.e. the exact distortion the fixed box was
+     pinned to prevent. The scale below is what does the fitting; the box
+     itself must never be resized by layout. */
+  flex:none;
   width:1120px;
   height:630px;
   transform:scale(var(--v2-fs-scale, 1));
@@ -2109,4 +2175,115 @@ body.theme-light .slide.v2-cover .v2-gd-field-value{color:#fff;}
 .v2-gd-sep .v2-gd-panel.cyan .v2-gd-panel-head span{color:#32c5d2;}
 body.theme-light .v2-gd-sep .v2-gd-panel.gold .v2-gd-panel-head span{color:#8a6d1f;}
 body.theme-light .v2-gd-sep .v2-gd-panel.cyan .v2-gd-panel-head span{color:#1f8a94;}
+
+/* ── Depth & surface pass (visual polish, 2026-09-03) ─────────────────────
+   Deck2 was built content-first (see this file's header) and every surface —
+   slide, card, tile, table — ended up drawn the same way: one flat 1px
+   rgba(255,255,255,.13) outline over one flat fill. With nothing separating
+   a container from the things inside it, the page reads as a stack of equal
+   boxes, which is the "blocky" part of the complaint. This block re-tunes
+   DEPTH ONLY: border tone, corner radius, elevation, and a top hairline
+   highlight that gives each surface an edge instead of an outline. It
+   deliberately touches no box metric — paddings, font sizes, row heights and
+   grid templates are all budget-calibrated against the fixed 630px slide,
+   and moving any of them silently clips content via .slide's overflow:hidden.
+   Placed last in DECK_V2_CSS so equal-specificity rules resolve to these. */
+
+/* The slide itself carries the most elevation: it is the sheet of paper. */
+.slide.v2{
+  border-radius:20px;
+  border-color:rgba(255,255,255,.07);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.07),
+    0 24px 60px rgba(0,0,0,.45),
+    0 2px 8px rgba(0,0,0,.3);
+}
+body.theme-light .slide.v2{
+  border-color:#e4e9ef;
+  box-shadow:
+    inset 0 1px 0 #fff,
+    0 20px 48px rgba(10,45,74,.12),
+    0 1px 4px rgba(10,45,74,.08);
+}
+
+/* Contents of the slide sit one step quieter: a thinner outline, softer
+   corners and a shallow drop, so they read as raised panels ON the sheet
+   rather than as more boxes beside it. */
+.slide.v2 .kpi-tile,
+.slide.v2 .deck-card,
+.slide.v2 .deck-agenda-item,
+.slide.v2 .v2-term-card,
+.slide.v2 .v2-level-card,
+.slide.v2 .v2-cover-meta-item,
+.slide.v2 .v2-risk-tile,
+.slide.v2 .v2-num-tile,
+.slide.v2 .v2-toc-card,
+.slide.v2 .v2-src-card,
+.slide.v2 .v2-stage-card,
+.slide.v2 .v2-port-col,
+.slide.v2 .v2-lg-port-card,
+.slide.v2 .v2-lg-cover-card{
+  border-color:rgba(255,255,255,.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.05),
+    0 10px 24px rgba(0,0,0,.2);
+}
+.slide.v2 .kpi-tile{border-radius:18px;}
+.slide.v2 .deck-card,.slide.v2 .deck-agenda-item{border-radius:16px;}
+body.theme-light .slide.v2 .kpi-tile,
+body.theme-light .slide.v2 .deck-card,
+body.theme-light .slide.v2 .deck-agenda-item,
+body.theme-light .slide.v2 .v2-term-card,
+body.theme-light .slide.v2 .v2-level-card,
+body.theme-light .slide.v2 .v2-cover-meta-item,
+body.theme-light .slide.v2 .v2-risk-tile,
+body.theme-light .slide.v2 .v2-num-tile,
+body.theme-light .slide.v2 .v2-toc-card,
+body.theme-light .slide.v2 .v2-src-card,
+body.theme-light .slide.v2 .v2-stage-card,
+body.theme-light .slide.v2 .v2-port-col,
+body.theme-light .slide.v2 .v2-lg-port-card,
+body.theme-light .slide.v2 .v2-lg-cover-card{
+  border-color:#e4e9ef;
+  box-shadow:inset 0 1px 0 #fff,0 8px 18px rgba(10,45,74,.07);
+}
+
+/* Tables: the heaviest "spreadsheet" surface on the deck. Row rules drop to
+   a hairline, the zebra to a whisper, and the header gets a gold underline
+   instead of relying on its fill alone to separate itself. Figures line up
+   in columns via tabular numerals — the one change here that is about
+   reading numbers, not depth. Background fills are left alone: several
+   pages re-tint header/footer cells by section, and overriding them here
+   would silently repaint those. */
+.slide.v2 .deck-table{
+  border-radius:14px;
+  font-variant-numeric:tabular-nums;
+  box-shadow:0 8px 20px rgba(0,0,0,.16);
+}
+.slide.v2 .deck-table th{border-bottom-color:rgba(244,180,0,.32);letter-spacing:.015em;}
+.slide.v2 .deck-table td{border-bottom-color:rgba(255,255,255,.055);}
+.slide.v2 .deck-table tbody tr:nth-child(even){background:rgba(255,255,255,.016);}
+body.theme-light .slide.v2 .deck-table{box-shadow:0 6px 16px rgba(10,45,74,.07);}
+body.theme-light .slide.v2 .deck-table td{border-bottom-color:#e7ecf1;}
+body.theme-light .slide.v2 .deck-table th{border-bottom-color:rgba(138,109,31,.4);}
+
+/* Viewer chrome (screen only — none of it prints). The side rail's active
+   item was a filled gold pill competing with the slide for attention; a
+   gold edge marker plus a tinted ground states the same thing quietly, and
+   is also the convention EXEC_CSS's own .rail-tab.active already uses. */
+@media screen{
+  .deck-nav{background:rgba(2,16,30,.92);border-inline-end-color:rgba(255,255,255,.06);}
+  .deck-nav-item a{border-radius:8px;transition:background .15s ease,color .15s ease,box-shadow .15s ease;}
+  .deck-nav-item.active a{
+    background:rgba(244,180,0,.1);
+    border-color:transparent;
+    box-shadow:inset -3px 0 0 var(--gold);
+  }
+  .deck-viewer-v2 .deck-toolbar{
+    border-radius:18px;
+    border-color:rgba(255,255,255,.07);
+    box-shadow:0 10px 30px rgba(0,0,0,.32);
+  }
+  body.theme-light .deck-viewer-v2 .deck-toolbar{box-shadow:0 8px 24px rgba(10,45,74,.1);}
+}
 `;
