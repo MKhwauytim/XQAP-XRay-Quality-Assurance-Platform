@@ -26,6 +26,10 @@ import { getSystemRoot, SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths"
  * matching action, cheap enough to run on every one of them (one small file
  * write + a bounded prune), capped at ACTION_HISTORY_RETENTION_COUNT entries
  * per record so it cannot grow without bound.
+ *
+ * `loadActionHistory` below is not yet wired into any admin-facing UI — this
+ * lands the write path and the on-disk record first; a review/restore screen
+ * is a natural follow-up, not part of this change.
  */
 export const ACTION_HISTORY_RETENTION_COUNT = 10;
 
