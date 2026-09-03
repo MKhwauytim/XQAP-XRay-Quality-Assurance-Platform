@@ -447,6 +447,76 @@ describe("XrayReferrals background data-refresh vs. an open inspection form", ()
   });
 });
 
+describe("XrayReferrals detail panel vs. a template swap", () => {
+  it("still shows a submitted answer's value after the active template is replaced (regression: 'clicking it shows no information')", async () => {
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedAssignedSample(root, "emp-1");
+
+    // The OLD template — answered under it. Its field is never re-saved, so
+    // `deleteTemplate`'s tombstone is what makes it recoverable below.
+    const oldTemplate: TemplateSchema = {
+      templateId: "tmpl-old",
+      templateName: "القالب القديم",
+      version: 1,
+      createdAt: new Date().toISOString(),
+      createdBy: "admin",
+      updatedAt: new Date().toISOString(),
+      updatedBy: "admin",
+      fields: [{ fieldId: "note-old", label: "ملاحظة", type: "text", required: false, options: [] }],
+    };
+    const savedOld = await saveTemplate(root, oldTemplate);
+    if (!savedOld.ok) throw new Error(`seed old template failed: ${savedOld.error}`);
+
+    const answer: ItemAnswer = {
+      xrayImageId: "IMG-1",
+      templateId: oldTemplate.templateId,
+      templateVersion: 1,
+      answers: [{ fieldId: "note-old", value: "تمت المعاينة بنجاح" }],
+      lastSavedAt: new Date().toISOString(),
+      submittedAt: new Date().toISOString(),
+      answeredBy: "emp-1",
+      status: "submitted",
+    };
+    const upserted = await upsertItemAnswer(root, MONTH, "emp-1", answer);
+    if (!upserted.ok) throw new Error(`seed answer failed: ${upserted.error}`);
+
+    // Template Builder "delete old, add new": a NEW template asking the SAME
+    // worded question, but under a freshly minted fieldId — exactly what a
+    // template save always does, even for an unchanged question.
+    const newTemplate: TemplateSchema = {
+      templateId: "tmpl-new",
+      templateName: "القالب الجديد",
+      version: 1,
+      createdAt: new Date().toISOString(),
+      createdBy: "admin",
+      updatedAt: new Date().toISOString(),
+      updatedBy: "admin",
+      fields: [{ fieldId: "note-new", label: "ملاحظة", type: "text", required: false, options: [] }],
+    };
+    const savedNew = await saveTemplate(root, newTemplate);
+    if (!savedNew.ok) throw new Error(`seed new template failed: ${savedNew.error}`);
+    const savedSelection = await saveInspectionTemplateSelection(root, {
+      templateId: newTemplate.templateId,
+      updatedAt: new Date().toISOString(),
+      updatedBy: "admin",
+    });
+    if (!savedSelection.ok) throw new Error(`seed template selection failed: ${savedSelection.error}`);
+
+    render(<XrayReferrals directoryHandle={root} />);
+
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+
+    // Previously: the panel always rendered against the single active
+    // template (`activeTpl`), so `savedAnswer.answers` keyed by the OLD
+    // fieldId ("note-old") matched nothing in the NEW template's fields and
+    // the read-only view showed nothing at all for this answer.
+    await waitFor(() => expect(screen.getByText("تمت المعاينة بنجاح")).toBeInTheDocument());
+  });
+});
+
 // Locates the <tr> for a given xrayImageId's cell among possibly multiple text
 // matches on the page (the same id can also render inside the detail panel).
 const L = getLabels();

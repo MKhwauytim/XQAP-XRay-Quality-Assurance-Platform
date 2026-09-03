@@ -16,6 +16,7 @@ import {
 } from "../../../../../../data/referral/planReassignment";
 import type { StageAliasMappings } from "../../../../../../data/population/populationConfig";
 import type { TemplateSchema } from "../../../../../../data/templates/templateTypes";
+import { resolveTemplateForAnswer } from "../../../../../../data/templates/templateAnswerResolution";
 import type { ColConfig, DataTableCol } from "../../../../../../components/DataTable";
 import {
   formatDate,
@@ -365,6 +366,7 @@ export function ReassignModal({
   dateFmt,
   answersMap,
   template,
+  templatesById,
   currentUser,
   busy,
   error,
@@ -377,7 +379,12 @@ export function ReassignModal({
   visibleColumns: DataTableCol<DistributionEntry>[];
   dateFmt: Record<string, DateFormatMode>;
   answersMap: Map<string, ItemAnswer>;
+  /** Fallback template — see `templatesById`. */
   template: TemplateSchema | null;
+  /** Optional: every template actually referenced by a loaded answer, so each
+   *  previewed id resolves against the template ITS OWN answer was submitted
+   *  under rather than always the single active template. */
+  templatesById?: ReadonlyMap<string, TemplateSchema>;
   currentUser: string;
   busy: boolean;
   error: string | null;
@@ -498,6 +505,7 @@ export function ReassignModal({
                       dateFmt={dateFmt}
                       answersMap={answersMap}
                       template={template}
+                      templatesById={templatesById}
                     />
                   ) : null}
                 </div>
@@ -648,12 +656,14 @@ export function ReferralSamplePreview({
   dateFmt,
   answersMap,
   template,
+  templatesById,
 }: {
   entry: DistributionEntry;
   visibleColumns: DataTableCol<DistributionEntry>[];
   dateFmt: Record<string, DateFormatMode>;
   answersMap: Map<string, ItemAnswer>;
   template: TemplateSchema | null;
+  templatesById?: ReadonlyMap<string, TemplateSchema>;
 }) {
   const L = useLabels();
   return (
@@ -661,7 +671,7 @@ export function ReferralSamplePreview({
       {visibleColumns.map((column) => (
         <div key={column.id} className="ew-referral-sample-field">
           <span>{column.label}</span>
-          <strong>{getReferralPreviewValue(entry, column, dateFmt, answersMap, template, L)}</strong>
+          <strong>{getReferralPreviewValue(entry, column, dateFmt, answersMap, template, L, templatesById)}</strong>
         </div>
       ))}
     </div>
@@ -674,13 +684,15 @@ export function getReferralPreviewValue(
   dateFmt: Record<string, DateFormatMode>,
   answersMap: Map<string, ItemAnswer>,
   template: TemplateSchema | null,
-  labels: Labels
+  labels: Labels,
+  templatesById?: ReadonlyMap<string, TemplateSchema>
 ): string {
   if (column.id === "answerStatus") {
     if (entry.status === "replaced") return labels.status_replaced;
     const answer = answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`);
     if (answer?.status === "submitted") {
-      return isNoImageSubmission(answer, template) ? labels.status_on_hold : labels.status_completed;
+      const rowTemplate = templatesById ? resolveTemplateForAnswer(answer, templatesById, template) : template;
+      return isNoImageSubmission(answer, rowTemplate) ? labels.status_on_hold : labels.status_completed;
     }
     return labels.status_pending;
   }
@@ -838,11 +850,13 @@ export function isStudyCompleted(
 export function isOnHoldEntry(
   entry: DistributionEntry,
   answersMap: Map<string, ItemAnswer>,
-  template: TemplateSchema | null
+  template: TemplateSchema | null,
+  templatesById?: ReadonlyMap<string, TemplateSchema>
 ): boolean {
   if (entry.status === "completed") return false;
   const answer = answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`);
-  return isNoImageSubmission(answer, template);
+  const rowTemplate = templatesById ? resolveTemplateForAnswer(answer, templatesById, template) : template;
+  return isNoImageSubmission(answer, rowTemplate);
 }
 
 /**

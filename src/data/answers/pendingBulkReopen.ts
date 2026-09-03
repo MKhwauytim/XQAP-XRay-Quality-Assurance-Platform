@@ -36,16 +36,19 @@ export async function bulkReopenPendingItems(params: {
   entries: readonly DistributionEntry[];
   answersMap: ReadonlyMap<string, ItemAnswer>;
   template: TemplateSchema | null;
+  /** Optional: every template actually referenced by a loaded answer — see
+   *  `isPendingReferralEntry`'s own doc comment for why this matters. */
+  templatesById?: ReadonlyMap<string, TemplateSchema>;
   reopenedBy: string;
   reopenedByRole: string;
   reason: string;
 }): Promise<BulkReopenResult> {
   const {
-    directoryHandle, monthFolderName, entries, answersMap, template,
+    directoryHandle, monthFolderName, entries, answersMap, template, templatesById,
     reopenedBy, reopenedByRole, reason,
   } = params;
 
-  const pending = entries.filter((entry) => isPendingReferralEntry(entry, answersMap, template));
+  const pending = entries.filter((entry) => isPendingReferralEntry(entry, answersMap, template, templatesById));
 
   const outcomes: BulkReopenOutcome[] = [];
   // Sequential, not Promise.all: each reopen is its own casLoop write against a
