@@ -273,9 +273,13 @@ export const DEFAULT_LABELS = {
   // Three top-level buckets above the queue table, so an employee can reach
   // the cases that matter without hunting through column filters:
   //   • «جميع الحالات»     — no filtering (the default).
-  //   • «مستهدف المؤشر»    — the customs risk engine actually said "yes" for
-  //     this image. Read through `engineVerdictOf` (riskEngineVerdict.ts): a
-  //     blank or an unrecognized value is "unknown", never "targeted".
+  //   • «مستهدف المؤشر»    — every row that reached the queue through the
+  //     regular monthly population process off the attached Risk file, i.e.
+  //     the exact complement of the ad-hoc chip below. NOT a read of the row's
+  //     own `targetedByRiskEngine` column (`engineVerdictOf` /
+  //     riskEngineVerdict.ts) — that column is a different measure and still
+  //     backs the executive deck's risk-engine agreement page; see the module
+  //     header in XrayReferrals/caseFilter.ts for the owner's correction.
   //   • «حالات استثنائية»  — rows assigned through an ad-hoc import rather
   //     than the regular monthly sampling pipeline. Worded to match the screen
   //     that produces them («ارفاق حالات استثنائية», page_adhoc_import_title) and
