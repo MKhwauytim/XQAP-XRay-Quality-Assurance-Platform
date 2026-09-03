@@ -47,9 +47,16 @@ test.describe("reviewer's own queue", () => {
     await expect(engine).toBeVisible();
     await expect(exceptional).toBeVisible();
 
+    // The table windows/paginates its rows, so with REVIEWER.count this large
+    // "all rows are in the DOM at once" is not a safe assumption — compare
+    // against «جميع الحالات»'s own rendered row count instead of a literal
+    // REVIEWER.count + 1. With 0 ad-hoc rows the two chips are numerically
+    // identical, so they must render identically too.
+    const allRowCount = await workspace(page).getByRole("row").count();
+
     await engine.click();
     await expect(engine).toHaveAttribute("aria-pressed", "true");
-    await expect(workspace(page).getByRole("row")).toHaveCount(REVIEWER.count + 1); // + header row
+    await expect(workspace(page).getByRole("row")).toHaveCount(allRowCount);
 
     await exceptional.click();
     // No ad-hoc rows in the seed: the chip must say so rather than show a bare header.
