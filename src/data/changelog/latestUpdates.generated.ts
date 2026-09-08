@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v133.0",
+    "date": "2026-09-08",
+    "bucket": "fix",
+    "scope": "workspace-reads",
+    "title": "a failed read is no longer presented as empty data"
+  },
+  {
     "version": "v132.1",
     "date": "2026-09-03",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "executive-deck-v3",
     "title": "paginate port tables to stop overflow past the slide edge"
-  },
-  {
-    "version": "v131.14",
-    "date": "2026-09-03",
-    "bucket": "fix",
-    "scope": "executive-deck",
-    "title": "fit the on-screen deck to the window and soften its flat card/table surfaces"
   }
 ];

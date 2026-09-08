@@ -47,6 +47,27 @@ describe("errorLogSink", () => {
     });
   });
 
+  // The sink used to skip only contexts starting with `errorlog:`. `casLoop`
+  // reports its own exhaustion as `casLoop:exhausted(<context>)`, so a failed
+  // error-log write was enqueued as a fresh error destined for the same failing
+  // file — the log joining the storm it was recording. One production day
+  // carried 44 of these.
+  it("never enqueues its own write failures", async () => {
+    const dir = createMemoryDirectory("root");
+    uninstall = installWorkspaceErrorSink({ directoryHandle: dir, username: "alice" });
+
+    logError("casLoop:exhausted(errorLog:userFile)", new Error("share said no"));
+    logError("errorlog:append", new Error("share said no"));
+    expect(__getPendingCountForTests()).toBe(0);
+
+    logError("casLoop:exhausted(answers:employeeFile)", new Error("a real one"));
+    expect(__getPendingCountForTests()).toBe(1);
+
+    await flushErrorLogNow();
+    const all = await readAllWorkspaceErrors(dir);
+    expect(all.map((e) => e.context)).toEqual(["casLoop:exhausted(answers:employeeFile)"]);
+  });
+
   it("batches a burst into ONE write instead of one write per error", async () => {
     const dir = createMemoryDirectory("root");
     uninstall = installWorkspaceErrorSink({ directoryHandle: dir, username: "alice" });
