@@ -46,6 +46,15 @@ export const STORAGE_REGISTRY: readonly StorageEntry[] = [
     lossConsequence: "The split returns to its default; re-drag the divider once.",
   },
   {
+    id: "xray_answer_draft_v1:",
+    layer: "local",
+    prefix: true,
+    purpose:
+      "In-progress inspection answers an employee has typed but not yet saved to the workspace folder, per (month, sample, answering employee).",
+    lossConsequence:
+      "Any answer typed but never successfully submitted is lost and must be re-entered. Saved answers are unaffected — they live in the workspace folder.",
+  },
+  {
     id: "xray_distribution_device_id_v1",
     layer: "local",
     purpose: "Stable per-machine id embedded in distribution event ids.",

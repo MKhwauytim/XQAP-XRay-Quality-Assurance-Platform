@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+
+import { loadAnswerDraft, saveAnswerDraft } from "../../data/answers/answerDraftStore";
 import type { DistributionEntry } from "../../data/distribution/distributionTypes";
 import type { FieldAnswer, ItemAnswer } from "../../data/answers/answerTypes";
 import type { TemplateField, TemplateSchema } from "../../data/templates/templateTypes";
@@ -52,6 +54,18 @@ type Props = {
    */
   onDraftDirty?: () => void;
   /**
+   * Where to persist what the employee types before it is saved, so a failed
+   * save costs a retry instead of the work.
+   *
+   * Omit to keep the old, purely-in-memory behaviour (tests and any surface
+   * with no meaningful identity for the draft). When given, the panel seeds
+   * from any stored draft in preference to `savedAnswer`, writes on every
+   * change, and the CALLER clears it once the answer is genuinely on disk —
+   * the panel cannot know that, since `onSave` resolving does not mean the
+   * write succeeded (XrayReferrals reports failure through its own banner).
+   */
+  draftKey?: string;
+  /**
    * Previous/next sample navigation (design handoff §3), rendered in the header.
    *
    * Purely a request to the caller: this panel never re-points itself. The
@@ -80,12 +94,18 @@ export default function InspectionPanel({
   onReopen,
   onRequestReopen,
   onDraftDirty,
+  draftKey,
   onPrevSample,
   onNextSample,
   hasPrevSample,
   hasNextSample,
 }: Props) {
   const [ans, setAns] = useState<Record<string, string | number | boolean>>(() => {
+    // A stored draft wins over the saved answer. It only exists when a previous
+    // submit did NOT reach disk, so it is by construction the newer of the two,
+    // and it is the work that would otherwise have to be redone.
+    const draft = draftKey ? loadAnswerDraft(draftKey) : null;
+    if (draft) return { ...draft };
     if (!savedAnswer) return {};
     const m: Record<string, string | number | boolean> = {};
     for (const a of savedAnswer.answers) {
@@ -300,7 +320,14 @@ export default function InspectionPanel({
             invalidRequiredIds={invalidRequiredIds}
             onChange={(fieldId, value) => {
               setValidationMsg(null);
-              setAns((prev) => ({ ...prev, [fieldId]: value }));
+              setAns((prev) => {
+                const next = { ...prev, [fieldId]: value };
+                // Written from the event handler, in the same commit as the
+                // state it mirrors — not from an effect, which would land a
+                // render late and lose the last keystroke before an unmount.
+                if (draftKey) saveAnswerDraft(draftKey, next);
+                return next;
+              });
               // Event handler, not an effect: the caller learns about the draft
               // in the same commit the draft is created, with no ordering
               // subtlety and nothing to clean up on unmount.

@@ -770,6 +770,17 @@ async function performAnswerWrite(
   const eventId = crypto.randomUUID();
   const eventAt = nextAnswerEventAt();
   const writer = answerWriterIdentity(directoryHandle, monthFolderName);
+  // ONE snapshot per save, not one per attempt.
+  //
+  // `recordActionHistorySnapshot` below is a WRITE (safeWriteJson plus a prune
+  // of the rolling window) and it sat inside the retry body. On the failure this
+  // path actually hits in production — share contention, XQ-IO-032, the
+  // 14-attempt ladder taking about a minute before it gives up — that aimed up
+  // to fourteen extra writes at the very share that was already too contended to
+  // serve one. Amplification at exactly the wrong moment, and it bought nothing:
+  // the snapshot is explicitly best-effort, never gates the append, and every
+  // attempt records the same pre-change state.
+  let historyRecorded = false;
 
   return casLoop<{ ok: true } | { ok: false; error: string }>(
     async () => {
@@ -808,14 +819,17 @@ async function performAnswerWrite(
       // save/reopen/note anymore, so they silently lost that protection; this
       // restores an equivalent (a recoverable prior state) for the new model.
       // Best-effort, never gates the real append below.
-      await recordActionHistorySnapshot<ItemAnswer | null>({
-        directoryHandle,
-        family: "answers",
-        scopeParts: [monthFolderName, username, xrayImageId],
-        actor: event.eventBy,
-        action: `answer:${telemetryAction}`,
-        previousState: previous ?? null,
-      });
+      if (!historyRecorded) {
+        historyRecorded = true;
+        await recordActionHistorySnapshot<ItemAnswer | null>({
+          directoryHandle,
+          family: "answers",
+          scopeParts: [monthFolderName, username, xrayImageId],
+          actor: event.eventBy,
+          action: `answer:${telemetryAction}`,
+          previousState: previous ?? null,
+        });
+      }
       await appendAnswerEventSegment(mainDir, batch, writer);
       reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
       return { done: true, result: { ok: true as const } };
