@@ -174,7 +174,17 @@ describe("loadAllSupervisorDecisions — concurrency-safe (Task 6)", () => {
     );
   });
 
-  it("skips a corrupt decision file instead of throwing", async () => {
+  // REVERSED, deliberately. This test used to assert the opposite ("skips a
+  // corrupt decision file instead of throwing"), and that skip is the defect:
+  // it directly contradicts `loadSupervisorDecisions`, whose own docblock
+  // explains at length why an unreadable decision file must never be replaced
+  // with an empty one — "every already-approved request silently reverts to
+  // pending and becomes re-approvable". The aggregate read fed the entire
+  // referral/replacement/reopen approval surface, so the skip did that to a
+  // whole supervisor's history, with nothing on screen to say a file had been
+  // dropped. A production workspace ran for over a week with exactly one such
+  // unreadable file (52 XQ-IO-029 entries, 2026-08-31 → 09-08).
+  it("refuses to report an incomplete decision history when a file cannot be read", async () => {
     const root = createMemoryDirectory();
     const month = "5-May-2026";
     await appendDecisionEvent(root, month, "goodsupervisor", {
@@ -191,7 +201,13 @@ describe("loadAllSupervisorDecisions — concurrency-safe (Task 6)", () => {
     await writable.write("{not valid json");
     await writable.close();
 
-    const files = await loadAllSupervisorDecisions(root, month);
-    expect(files.map((f) => f.supervisorUsername)).toEqual(["goodsupervisor"]);
+    await expect(loadAllSupervisorDecisions(root, month)).rejects.toThrow(
+      /badsupervisor\.decisions\.json exists but could not be read/
+    );
+  });
+
+  it("still returns an empty list for a month in which nobody has decided anything", async () => {
+    const root = createMemoryDirectory();
+    await expect(loadAllSupervisorDecisions(root, "5-May-2026")).resolves.toEqual([]);
   });
 });

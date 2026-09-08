@@ -120,3 +120,53 @@ describe("actionLog", () => {
     expect(entries.map((e) => e.target).sort()).toEqual(["a", "b"]);
   });
 });
+
+describe("action log: a failed scan is not an empty history", () => {
+  it("names an unreadable actor file in the error log instead of silently shortening the trail", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    await appendWorkspaceAction(root, makeInput({ actor: "alice" }));
+
+    const dir = await getAuditActionsDir(root, true);
+    const handle = await dir.getFileHandle("bob-deadbe.actions.json", { create: true });
+    const writable = await handle.createWritable!();
+    await writable.write("{ not json");
+    await writable.close();
+
+    clearErrors();
+    const entries = await readWorkspaceActions(root);
+    // alice's entry still shows — one damaged actor file must not hide everyone else.
+    expect(entries.length).toBeGreaterThan(0);
+    // …but the shortfall is no longer invisible.
+    const skipped = getRecentErrors().find((e) => e.context === "audit:read-skipped");
+    expect(skipped?.message).toContain("bob-deadbe.actions.json");
+    expect(skipped?.message).toContain("INCOMPLETE");
+  });
+
+  it("rejects rather than reporting an empty history when the scan cannot be established", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    await appendWorkspaceAction(root, makeInput({ actor: "alice" }));
+
+    // The share stops answering for the audit folder. Resolving with [] here is
+    // what let one failed read blank the actions view for a whole session.
+    const wrap = (dir: DirectoryHandleLike): DirectoryHandleLike =>
+      ({
+        ...dir,
+        kind: "directory",
+        name: dir.name,
+        getFileHandle: (...args: Parameters<DirectoryHandleLike["getFileHandle"]>) =>
+          dir.getFileHandle(...args),
+        getDirectoryHandle: async (name: string, options?: { create?: boolean }) => {
+          if (name === "actions") {
+            const error = new Error(`Simulated NotReadableError for "${name}".`);
+            error.name = "NotReadableError";
+            throw error;
+          }
+          return wrap(await dir.getDirectoryHandle(name, options));
+        },
+      }) as DirectoryHandleLike;
+
+    await expect(readWorkspaceActions(wrap(root))).rejects.toMatchObject({
+      name: "NotReadableError",
+    });
+  });
+});
