@@ -78,6 +78,8 @@ import {
   type JsonMetadata,
 } from "./jsonEnvelope";
 
+import { reportBakRecovery } from "./bakRecoveryReport";
+
 export type SafeReadResult<T> =
   | { ok: true; value: T; recoveredFromBak: boolean; rawText: string }
   | { ok: false; reason: "missing" | "corrupt" };
@@ -2225,11 +2227,7 @@ export async function safeReadJson<T>(
 
   const bak = await readPayload<T>(dir, `${fileName}.bak`);
   if (bak.payload !== null) {
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(
-        new CustomEvent("data:recovered-from-bak", { detail: { fileName } })
-      );
-    }
+    reportBakRecovery(dir.name, fileName, ".bak");
     return {
       ok: true,
       value: bak.payload.value,
@@ -2243,11 +2241,7 @@ export async function safeReadJson<T>(
   // rather than losing the only good copy of the write.
   const tmp = await readPayload<T>(dir, `${fileName}.tmp`);
   if (tmp.payload !== null) {
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(
-        new CustomEvent("data:recovered-from-bak", { detail: { fileName } })
-      );
-    }
+    reportBakRecovery(dir.name, fileName, ".tmp");
     return {
       ok: true,
       value: tmp.payload.value,

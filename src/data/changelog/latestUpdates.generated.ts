@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v134.1",
+    "date": "2026-09-08",
+    "bucket": "fix",
+    "scope": "storage",
+    "title": "record every .bak/.tmp recovery instead of only flashing a banner"
+  },
+  {
     "version": "v134.0",
     "date": "2026-09-08",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "employee-workspace",
     "title": "مستهدف المؤشر now means 'from the regular population pipeline', not a risk-column read"
-  },
-  {
-    "version": "v131.16",
-    "date": "2026-09-03",
-    "bucket": "fix",
-    "scope": "employee-workspace",
-    "title": "queue الحالة filter no longer misses مستبدلة rows or conflates معلق with مكتملة"
   }
 ];

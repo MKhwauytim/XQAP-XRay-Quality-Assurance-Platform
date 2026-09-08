@@ -157,9 +157,15 @@ export function AppContent({ session }: AppContentProps) {
   }, []);
 
   useEffect(() => {
-    const handler = (e: CustomEvent<{ fileName: string }>) => {
+    const handler = (e: CustomEvent<{ fileName: string; source?: string }>) => {
+      // Names the file AND which copy answered. The previous wording said only
+      // "recovered from the backup", which told a user nothing they could act on
+      // or report — a deployment saw this on every sign-in for every user and
+      // could not say which file it was about.
       setBakWarning(
-        getLabels().app_bak_recovered_warning.replace("{fileName}", e.detail.fileName)
+        getLabels()
+          .app_bak_recovered_warning.replace("{fileName}", e.detail.fileName)
+          .replace("{source}", e.detail.source ?? ".bak")
       );
     };
     window.addEventListener("data:recovered-from-bak", handler as EventListener);

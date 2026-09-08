@@ -1,4 +1,5 @@
 import { newReadRetryBudget, readRetryDelayMs, safeWriteJson } from "./safeWrite";
+import { reportBakRecovery, type BakRecoverySource } from "./bakRecoveryReport";
 import {
   codedMessage,
   logCodedError,
@@ -564,12 +565,8 @@ export async function readJsonFile<TFile>(
   if (primary.reason === "missing" || primary.reason === "invalid_json") {
     const recovered = await readFirstRecoverableCopy<TFile>(directoryHandle, fileName);
     if (recovered) {
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(
-          new CustomEvent("data:recovered-from-bak", { detail: { fileName } })
-        );
-      }
-      return recovered;
+      reportBakRecovery(directoryHandle.name, fileName, recovered.source);
+      return recovered.result;
     }
   }
 
@@ -589,13 +586,17 @@ export async function readJsonFile<TFile>(
 async function readFirstRecoverableCopy<TFile>(
   directoryHandle: DirectoryHandleLike,
   fileName: string
-): Promise<ReadJsonResult<NonNullable<TFile>> | null> {
-  for (const suffix of [".bak", ".tmp"]) {
+): Promise<{ result: ReadJsonResult<NonNullable<TFile>>; source: BakRecoverySource } | null> {
+  // Returns WHICH copy answered, not just the content: `.bak` is the previous
+  // committed state and `.tmp` is a staged copy from a commit that never
+  // finished, so an admin repairing the live file needs to know which of the two
+  // they are actually looking at.
+  for (const suffix of [".bak", ".tmp"] as const) {
     const candidate = await readAndParseJsonFile<TFile>(
       directoryHandle,
       `${fileName}${suffix}`
     );
-    if (candidate.ok) return candidate;
+    if (candidate.ok) return { result: candidate, source: suffix };
   }
   return null;
 }
