@@ -26,7 +26,6 @@ import type { PreparedPopulationRow } from "../population/populationTypes";
 import {
   appendDistributionEvents,
   loadDistributionLog,
-  loadOrDeriveDistributionCurrent,
   refreshDistributionCacheAfterWrite,
 } from "../distribution/distributionStorage";
 import { buildReassignEvent, deriveCurrentDistribution } from "../distribution/distributionLog";
@@ -288,11 +287,13 @@ export async function approveReplacement(params: {
     }
 
     // 3. Ownership check on the original sample.
-    const current = await loadOrDeriveDistributionCurrent(
-      directoryHandle,
-      fresh.monthFolderName,
-      sample.rows
-    );
+    // Validate against the event log loaded above (step 2), which is the source
+    // of truth — same reasoning as approveReferral's step 3: distribution.current.json
+    // is only a rebuildable cache and can be stale even when its revision metadata
+    // happens to match (for example after a restored or manually copied workspace,
+    // or a post-write cache refresh that failed silently). Trusting it here made
+    // otherwise-valid replacement approvals fail with a spurious stale-ownership error.
+    const current = deriveCurrentDistribution(distLog, sample.rows);
     const deadEntry = current?.entries.find(
       (entry) =>
         entry.xrayImageId === fresh.originalXrayImageId &&
