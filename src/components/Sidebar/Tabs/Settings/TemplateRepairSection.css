@@ -1,0 +1,121 @@
+/* ── TemplateRepairSection — admin-only repair for unreadable template files ── */
+
+.template-repair-section {
+  margin-top: 24px;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--c-surface);
+}
+
+.template-repair-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 16px;
+  background: var(--c-surface-2);
+  border: none;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--c-text);
+  text-align: right;
+  direction: rtl;
+  transition: background 0.15s;
+}
+
+.template-repair-header:hover {
+  background: var(--c-surface-3);
+}
+
+.template-repair-chevron-open {
+  transform: rotate(-90deg);
+}
+
+.template-repair-badge {
+  margin-inline-start: auto;
+  min-width: 20px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--c-danger);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.template-repair-body {
+  padding: 14px 16px 18px;
+  direction: rtl;
+}
+
+.template-repair-hint {
+  margin: 0 0 12px;
+  font-size: 0.85rem;
+  line-height: 1.7;
+  color: var(--c-text-muted);
+}
+
+.template-repair-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 0.85rem;
+}
+
+.template-repair-notice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 0.83rem;
+  line-height: 1.6;
+}
+
+.template-repair-notice-ok {
+  background: var(--c-success-bg);
+  color: var(--c-success);
+}
+
+.template-repair-notice-info {
+  background: var(--c-surface-2);
+  color: var(--c-text);
+}
+
+.template-repair-notice-error {
+  background: var(--c-danger-bg);
+  color: var(--c-danger);
+}
+
+.template-repair-empty {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--c-text-muted);
+}
+
+.template-repair-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.83rem;
+}
+
+.template-repair-table th,
+.template-repair-table td {
+  padding: 7px 8px;
+  text-align: right;
+  border-bottom: 1px solid var(--c-border);
+  vertical-align: top;
+}
+
+.template-repair-table th {
+  font-weight: 600;
+  color: var(--c-text-muted);
+}
+
+.template-repair-row-damaged td {
+  background: var(--c-danger-bg);
+}

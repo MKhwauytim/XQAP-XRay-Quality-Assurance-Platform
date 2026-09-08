@@ -444,6 +444,46 @@ describe("approveReplacement", () => {
     expect((await loadReplacementLog(root, MONTH)).requests[0]!.status).toBe("approved");
   });
 
+  it("uses the immutable event log rather than a stale current cache for ownership validation", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    await seedReplacement(root);
+    await appendReplacementRequest(root, MONTH, makeReplacementRequest());
+
+    // A stale distribution.current.json (e.g. a restored/copied workspace, or a
+    // post-write cache refresh that failed silently) claims A1 belongs to nobody
+    // real — approveReplacement must derive ownership from the event log instead
+    // of trusting this cache, exactly like approveReferral already does.
+    const log = await loadDistributionLog(root, MONTH);
+    await saveDistributionCurrent(root, MONTH, {
+      monthFolderName: MONTH,
+      deriveVersion: DERIVE_VERSION,
+      logRevision: log.revision,
+      eventSetId: log.eventSetId,
+      derivedAt: new Date().toISOString(),
+      totalAssigned: 2,
+      totalCompleted: 0,
+      totalReplaced: 0,
+      totalPending: 2,
+      entries: [
+        { xrayImageId: "A1", assignedTo: "wrong-owner", status: "pending", replacedById: null, lastEventAt: new Date().toISOString(), row: makeRow("A1") },
+        { xrayImageId: "A2", assignedTo: "wrong-owner", status: "pending", replacedById: null, lastEventAt: new Date().toISOString(), row: makeRow("A2") },
+      ],
+    });
+
+    const result = await approveReplacement({
+      directoryHandle: root, monthFolderName: MONTH, requestId: "rep-1", reviewedBy: "sup1",
+    });
+    expect(result).toEqual({ ok: true, alreadyApplied: false });
+
+    const sample = await loadSampleMaster(root, MONTH);
+    const current = deriveCurrentDistribution(
+      await loadDistributionLog(root, MONTH),
+      (sample?.rows ?? []) as PreparedPopulationRow[]
+    );
+    expect(current.entries.find((e) => e.xrayImageId === "A1")?.status).toBe("replaced");
+    expect((await loadReplacementLog(root, MONTH)).requests[0]!.status).toBe("approved");
+  });
+
   it("replay after a decision-write failure emits zero new events", async () => {
     const root = createMemoryDirectory("root") as DirectoryHandleLike;
     await seedReplacement(root);

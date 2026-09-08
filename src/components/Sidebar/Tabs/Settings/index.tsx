@@ -50,6 +50,7 @@ import { UiScaleSection } from "./UiScaleSection";
 import { ErrorLogSection } from "./ErrorLogSection";
 import { StorageSection } from "./StorageSection";
 import { DecisionRepairSection } from "./DecisionRepairSection";
+import { TemplateRepairSection } from "./TemplateRepairSection";
 import { AboutSection } from "./AboutSection";
 import { usePermissions } from "../../../../auth/usePermissions";
 
@@ -607,6 +608,7 @@ function SettingsPage() {
       <ErrorLogSection />
       <StorageSection />
       <DecisionRepairSection />
+      <TemplateRepairSection />
       <AboutSection />
     </div>
   );
