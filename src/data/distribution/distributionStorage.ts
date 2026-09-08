@@ -1333,12 +1333,57 @@ async function recheckAbsentRowsAgainstMaster(
   };
 }
 
-export async function loadOrDeriveDistributionCurrent(
+/**
+ * The month's distribution could not be READ — which is not the same fact as
+ * the month having no distribution.
+ *
+ * `loadOrDeriveDistributionCurrent` reports both as `null`, and every
+ * queue-rendering caller turns `null` into `?? []`. On the UNC/SMB share this
+ * app runs on, a `NotReadableError` burst therefore painted an employee's
+ * queue — and a supervisor's whole month of results — as an authoritative,
+ * fully-loaded EMPTY list, with no error anywhere on screen. Refreshing the
+ * page brought everything back, because the next read happened to succeed.
+ *
+ * Same principle, and the same remedy, as `PopulationUnreadableError` (T-08):
+ * a caller may state "there is nothing here" only when emptiness is a fact.
+ * See `readOptionalJson` in safeWrite.ts for the policy in its original words.
+ */
+export class DistributionUnreadableError extends Error {
+  readonly monthFolderName: string;
+  constructor(monthFolderName: string, options?: { cause?: unknown }) {
+    super(
+      `The distribution for ${monthFolderName} exists but could not be read.`,
+      options as ErrorOptions
+    );
+    this.name = "DistributionUnreadableError";
+    this.monthFolderName = monthFolderName;
+  }
+}
+
+/**
+ * What one distribution read produced, WITHOUT deciding what it means — the
+ * `SafeReadResult`/`OptionalReadOutcome` shape this codebase already uses for
+ * exactly this distinction.
+ *
+ * `absent` is reserved for the ONE case that is genuinely a fact about the
+ * data: the month's event log is readable and holds no events.
+ */
+export type DistributionCurrentOutcome =
+  | { kind: "ok"; current: DistributionCurrentData }
+  | { kind: "absent" }
+  | { kind: "unavailable"; error: unknown };
+
+/**
+ * The whole load, reporting failure as failure. `loadOrDeriveDistributionCurrent`
+ * below is the unchanged, `null`-returning face of it that every existing
+ * caller keeps using.
+ */
+async function loadOrDeriveDistributionCurrentOutcome(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   sampleRows: PreparedPopulationRow[],
   opts?: LoadOrDeriveDistributionCurrentOptions
-): Promise<DistributionCurrentData | null> {
+): Promise<DistributionCurrentOutcome> {
   const persistCache = opts?.persistCache ?? true;
   const awaitCachePersist = opts?.awaitCachePersist ?? false;
   try {
@@ -1349,7 +1394,14 @@ export async function loadOrDeriveDistributionCurrent(
           "distribution:no-sample-rows",
           new Error(`${monthFolderName}: events exist but sample.master is empty/missing`)
         );
-        return null;
+        // NOT `absent`. Events on disk with no rows to fold them against is the
+        // shape a failed or partial `sample.master.json` read produces at the
+        // caller; folding it would absorb every assignment and report a month
+        // in which nobody was assigned anything.
+        return {
+          kind: "unavailable",
+          error: new DistributionUnreadableError(monthFolderName),
+        };
       }
     }
 
@@ -1385,7 +1437,7 @@ export async function loadOrDeriveDistributionCurrent(
       );
       if (resumed) {
         setDeriveMemo(memoKey, resumed);
-        return resumed;
+        return { kind: "ok", current: resumed };
       }
       // null => a late event was found on THIS read, straight from disk --
       // strictly fresher information than anything the memo could hold, so
@@ -1398,7 +1450,7 @@ export async function loadOrDeriveDistributionCurrent(
       // whether this exact (workspace, month, epoch, row-shape) was already
       // derived earlier in this session.
       const memoHit = getDeriveMemo(memoKey);
-      if (memoHit) return memoHit;
+      if (memoHit) return { kind: "ok", current: memoHit };
     }
 
     const { log, segmentOffsets, legacyEventFileNames } = await loadDistributionLogDetailed(
@@ -1406,7 +1458,9 @@ export async function loadOrDeriveDistributionCurrent(
       monthFolderName
     );
     if (log.events.length === 0) {
-      return null;
+      // The only null this function ever owed to a FACT about the data: the
+      // event log was read successfully and holds nothing.
+      return { kind: "absent" };
     }
 
     // Fast path: cache is valid only if it was produced by the current
@@ -1423,7 +1477,7 @@ export async function loadOrDeriveDistributionCurrent(
       hasQuotaForAssignedEmployees(cached, log)
     ) {
       setDeriveMemo(memoKey, cached);
-      return cached;
+      return { kind: "ok", current: cached };
     }
 
     // Slow path: re-derive and update cache. segmentOffsets/legacyEventFileNames
@@ -1529,13 +1583,37 @@ export async function loadOrDeriveDistributionCurrent(
       if (awaitCachePersist) await write;
     }
 
-    return withRevision;
+    return { kind: "ok", current: withRevision };
   } catch (error) {
     // Unexpected failure (corrupt log, permission loss, …) — expected
     // missing-file cases are handled quietly inside the loaders above.
     logError("distribution:load-or-derive", error);
-    return null;
+    return { kind: "unavailable", error };
   }
+}
+
+/**
+ * The unchanged, `null`-returning face of the load. Every pre-existing caller
+ * keeps this signature and this behaviour: `null` still means "no distribution
+ * to show", failure included.
+ *
+ * Callers that RENDER a queue must not use it — a `null` they turn into `[]` is
+ * how a transient share failure became "0 samples" on screen. Use
+ * `loadOrDeriveDistributionCurrentStrictForRead` there instead.
+ */
+export async function loadOrDeriveDistributionCurrent(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  sampleRows: PreparedPopulationRow[],
+  opts?: LoadOrDeriveDistributionCurrentOptions
+): Promise<DistributionCurrentData | null> {
+  const outcome = await loadOrDeriveDistributionCurrentOutcome(
+    directoryHandle,
+    monthFolderName,
+    sampleRows,
+    opts
+  );
+  return outcome.kind === "ok" ? outcome.current : null;
 }
 
 /**
@@ -1657,13 +1735,56 @@ export function loadDistributionLogForRead(
  *  `distribution.current.json` / sample mirrors back to disk (F3). Write
  *  flows must call `refreshDistributionCacheAfterWrite` explicitly instead
  *  (A6b). */
+export function loadOrDeriveDistributionCurrentOutcomeForRead(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  sampleRows: PreparedPopulationRow[]
+): Promise<DistributionCurrentOutcome> {
+  const key = `${workspaceScopeId(directoryHandle)}|${monthFolderName}|${workspaceEpoch(directoryHandle, monthFolderName)}|dist-current|${sampleRows.length}`;
+  return dedupeInFlight(key, () =>
+    loadOrDeriveDistributionCurrentOutcome(directoryHandle, monthFolderName, sampleRows, {
+      persistCache: false,
+    })
+  );
+}
+
 export function loadOrDeriveDistributionCurrentForRead(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   sampleRows: PreparedPopulationRow[]
 ): Promise<DistributionCurrentData | null> {
-  const key = `${workspaceScopeId(directoryHandle)}|${monthFolderName}|${workspaceEpoch(directoryHandle, monthFolderName)}|dist-current|${sampleRows.length}`;
-  return dedupeInFlight(key, () =>
-    loadOrDeriveDistributionCurrent(directoryHandle, monthFolderName, sampleRows, { persistCache: false })
+  return loadOrDeriveDistributionCurrentOutcomeForRead(
+    directoryHandle,
+    monthFolderName,
+    sampleRows
+  ).then((outcome) => (outcome.kind === "ok" ? outcome.current : null));
+}
+
+/**
+ * The read every QUEUE-RENDERING caller should use: `null` only for a month
+ * that provably has no distribution, and a thrown
+ * {@link DistributionUnreadableError} when the read failed.
+ *
+ * Views already wrap their load in a try/catch that distinguishes a first load
+ * (show the error state, with a retry) from a silent background refresh (log
+ * it, keep what is on screen). Both of those are the right answer to a failed
+ * read; committing an empty list as "ready" never was. Shares the dedupe key —
+ * and therefore the in-flight read — with the `null`-returning sibling above.
+ */
+export async function loadOrDeriveDistributionCurrentStrictForRead(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  sampleRows: PreparedPopulationRow[]
+): Promise<DistributionCurrentData | null> {
+  const outcome = await loadOrDeriveDistributionCurrentOutcomeForRead(
+    directoryHandle,
+    monthFolderName,
+    sampleRows
   );
+  if (outcome.kind === "unavailable") {
+    throw outcome.error instanceof DistributionUnreadableError
+      ? outcome.error
+      : new DistributionUnreadableError(monthFolderName, { cause: outcome.error });
+  }
+  return outcome.kind === "ok" ? outcome.current : null;
 }

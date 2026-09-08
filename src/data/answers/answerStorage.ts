@@ -32,6 +32,7 @@ import { logError } from "../storage/errorLogger";
 import { logCodedError, tagErrorOnce, type ErrorCode } from "../storage/errorCodes";
 import { createSimpleHasher } from "../storage/jsonEnvelope";
 import { listDirectoryEntries } from "../storage/directoryScan";
+import { isNotFoundError } from "../storage/transientFileErrors";
 import { ensureMonthWritable } from "../population/monthLock";
 import { bumpWorkspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
 import { subscribeToDataRefresh } from "../workspace/dataRefreshSignal";
@@ -1294,15 +1295,30 @@ async function listAnswerDirStems(
   monthFolderName: string
 ): Promise<Set<string>> {
   const stems = new Set<string>();
+  let dir: DirectoryHandleLike;
   try {
-    const dir = await getAnswersDir(directoryHandle, monthFolderName);
+    dir = await getAnswersDir(directoryHandle, monthFolderName);
+  } catch (error) {
+    // A month with no answers directory at all is a FACT about the data, and
+    // stays absence. (`getAnswersDir` opens with `create: true`, so this is
+    // reachable only on a workspace that refuses the create.)
+    if (isNotFoundError(error)) return stems;
+    logError("answerStorage:listAnswerDirStems", error);
+    throw error;
+  }
+  try {
     for (const entry of await listDirectoryEntries(dir)) {
       if (entry.kind !== "file") continue;
       const stem = stemOf(entry.name);
       if (stem) stems.add(stem);
     }
   } catch (error) {
+    // Never a PARTIAL set. The stems this returns are the set of employees the
+    // caller will report on, so a listing that died halfway handed a supervisor
+    // a month in which every employee it never reached had simply done no work
+    // — logged, but on screen indistinguishable from the truth.
     logError("answerStorage:listAnswerDirStems", error);
+    throw error;
   }
   return stems;
 }
@@ -1367,8 +1383,15 @@ export async function loadAllEmployeeFiles(
     }
     return files.sort((a, b) => a.username.localeCompare(b.username));
   } catch (err) {
+    // Rethrown, not folded into `[]`. The per-employee `catch` above is the
+    // deliberate isolation policy — one employee's unreadable file must not
+    // abort the scan — and it is unaffected. This outer one is different: it
+    // fires when the SCAN ITSELF could not be established, and returning an
+    // empty array there tells every caller (the results view, the executive
+    // report, the Power BI export, a backup) that nobody answered anything all
+    // month. Callers already handle a rejection; none of them can handle a lie.
     logError("answerStorage:loadAllEmployeeFiles", err instanceof Error ? err : new Error(String(err)));
-    return [];
+    throw err;
   }
 }
 
@@ -1417,10 +1440,12 @@ export async function loadAllEmployeeRequestFiles(
     }
     return files.sort((a, b) => a.username.localeCompare(b.username));
   } catch (err) {
+    // Same reasoning as the sibling above: an unestablished scan is not an
+    // empty set of request queues.
     logError(
       "answerStorage:loadAllEmployeeRequestFiles",
       err instanceof Error ? err : new Error(String(err))
     );
-    return [];
+    throw err;
   }
 }

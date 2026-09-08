@@ -49,6 +49,7 @@ import { SyncIntervalSection } from "./SyncIntervalSection";
 import { UiScaleSection } from "./UiScaleSection";
 import { ErrorLogSection } from "./ErrorLogSection";
 import { StorageSection } from "./StorageSection";
+import { DecisionRepairSection } from "./DecisionRepairSection";
 import { AboutSection } from "./AboutSection";
 import { usePermissions } from "../../../../auth/usePermissions";
 
@@ -605,6 +606,7 @@ function SettingsPage() {
       <SyncIntervalSection />
       <ErrorLogSection />
       <StorageSection />
+      <DecisionRepairSection />
       <AboutSection />
     </div>
   );

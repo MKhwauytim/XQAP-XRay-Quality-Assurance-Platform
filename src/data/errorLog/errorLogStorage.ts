@@ -37,6 +37,19 @@ import type { ErrorLogArchiveFile, PersistedErrorEntry, UserErrorLogFile } from 
 
 const ERRORLOG_INTERNAL_CONTEXT_PREFIX = "errorlog:";
 
+/**
+ * The `casLoop` context tag for the per-user error-log file.
+ *
+ * Exported because the sink has to recognise it. `casLoop` reports its own
+ * exhaustion through `logError` under `casLoop:exhausted(<context>)` — a
+ * context that does NOT start with the internal prefix above, so a failed
+ * error-log write was enqueued as a fresh error to be written to the same
+ * failing file. On a share that was already refusing reads, that turned the
+ * error log into a participant in the storm it was recording (44 such entries
+ * in one production day).
+ */
+export const ERRORLOG_CAS_CONTEXT = "errorLog:userFile";
+
 // Per-user live-log retention cap. When exceeded, the oldest overflow is
 // appended to that user's per-year archive file BEFORE the live log is
 // trimmed — never dropped without archiving. A `let` + test seam so archival
@@ -224,7 +237,7 @@ export async function appendUserErrors(
         },
         // 4 x 50 ms was the shortest ladder in the app and not a ladder at
         // all on a contended SMB entry — see actionLog.ts:497-499.
-        { maxRetries: 6, baseDelayMs: 100, context: "errorLog:userFile", conflictError: "error log append conflict" }
+        { maxRetries: 6, baseDelayMs: 100, context: ERRORLOG_CAS_CONTEXT, conflictError: "error log append conflict" }
       )
     );
     if (!result.ok) {

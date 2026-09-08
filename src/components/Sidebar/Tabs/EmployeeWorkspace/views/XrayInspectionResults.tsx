@@ -26,7 +26,7 @@ import { isNoImageSubmission } from "../../../../../data/answers/noImageAnswer";
 import { reopenSubmittedAnswer } from "../../../../../data/answers/reopenAnswer";
 import {
   loadDistributionLogForRead,
-  loadOrDeriveDistributionCurrentForRead,
+  loadOrDeriveDistributionCurrentStrictForRead,
 } from "../../../../../data/distribution/distributionStorage";
 import type { DistributionEntry, DistributionEvent } from "../../../../../data/distribution/distributionTypes";
 import {
@@ -297,7 +297,11 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
         }),
       ]);
 
-      const distribution = await loadOrDeriveDistributionCurrentForRead(
+      // STRICT on purpose — see the sibling note in XrayReferrals. A failed
+      // read folded into `?? []` below rendered a month in which almost nobody
+      // had answered anything: a supervisor read that off this page as real
+      // work missing, not as a share that had stopped answering.
+      const distribution = await loadOrDeriveDistributionCurrentStrictForRead(
         directoryHandle,
         selectedMonth,
         sampleMaster?.rows ?? []

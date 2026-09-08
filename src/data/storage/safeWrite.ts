@@ -90,7 +90,25 @@ function errorName(error: unknown): string | undefined {
 // a file. Retry that transient condition, but never reinterpret it as a missing
 // file: doing so would allow safeReadJson to return a stale .bak and could make
 // write verification roll a successful commit back to its previous contents.
-const NOT_READABLE_RETRY_DELAYS_MS = [20, 60] as const;
+//
+// The ladder used to be [20, 60] — 80 ms, two retries, the SHORTEST in the app,
+// against ~630 ms for a stale snapshot and ~11 s for a post-write read-back.
+// That ranking was written for the local-disk story in the sentence above (one
+// process swapping one file). Production tells a different one: on the UNC/SMB
+// share this app actually runs on, `NotReadableError` is the dominant transient
+// fault by an order of magnitude — one day's exported error log held 314 of
+// them out of 424 entries, every one of them a ladder that had already run out,
+// spread across every file the app reads (users.permissions.json, the
+// notification file, the sync tick's revision probes, the distribution log).
+// Four clients on one share do not clear an unreadable handle in 80 ms.
+//
+// So it is aligned with SNAPSHOT_STALE_RETRY_DELAYS_MS, its closest sibling:
+// same layer, same "throw the stale interface object away, re-acquire the
+// handle, try again" remedy, and the same reason not to go further — every
+// extra moment inside one attempt is a moment this machine holds a shared file
+// open while N others want it, and the outer casLoop/action retries cover the
+// long tail with genuinely fresh handles. Paid only on the failure path.
+const NOT_READABLE_RETRY_DELAYS_MS = [20, 60, 150, 400] as const;
 
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));

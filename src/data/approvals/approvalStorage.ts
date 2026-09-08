@@ -90,21 +90,39 @@ export async function loadSupervisorDecisions(
   };
 }
 
-/** Read all supervisor decision files for the month (for admin/supervisor aggregation). */
+/**
+ * Read all supervisor decision files for the month (for admin/supervisor aggregation).
+ *
+ * **Throws when any decision file exists but could not be read, and when the
+ * scan itself could not be established.** It used to skip the unreadable file
+ * and swallow a failed scan into `[]`, which is the same defect its own
+ * single-file sibling `loadSupervisorDecisions` documents at length one
+ * function above — only worse, because it is silent: this feeds the whole
+ * referral/replacement/reopen approval surface, so a supervisor whose file
+ * could not be read had every decision they had ever made vanish from the
+ * screen, and every request they had already approved or denied came back as
+ * pending and re-approvable. Nothing on the page said a file had been skipped.
+ *
+ * The two callers (`loadRequestLogs` and the approval views under it) already
+ * distinguish a first load from a background refresh and handle a rejection
+ * correctly; neither can do anything sensible with a silently short answer.
+ *
+ * A month with no approvals directory and no decision files is still `[]` —
+ * that is a fact about the data, and `getApprovalsDir` resolves it without
+ * throwing.
+ */
 export async function loadAllSupervisorDecisions(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
 ): Promise<SupervisorDecisionFile[]> {
-  try {
-    const appDir = await getApprovalsDir(directoryHandle, monthFolderName);
-    const { values } = await readJsonDirectory<SupervisorDecisionFile>(appDir, {
-      suffix: ".decisions.json",
-      onUnreadable: "skip",
-    });
-    return values;
-  } catch {
-    return [];
-  }
+  const appDir = await getApprovalsDir(directoryHandle, monthFolderName);
+  const { values } = await readJsonDirectory<SupervisorDecisionFile>(appDir, {
+    suffix: ".decisions.json",
+    onUnreadable: "throw",
+    unreadableError: (fileName) =>
+      `approvals:${monthFolderName}: ${fileName} exists but could not be read — refusing to report an incomplete decision history.`,
+  });
+  return values;
 }
 
 export async function appendDecisionEvent(

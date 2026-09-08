@@ -29,6 +29,7 @@ import { readOptionalJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
 import { readJsonDirectory } from "../storage/directoryScan";
+import { isNotFoundError } from "../storage/transientFileErrors";
 import { simpleHash } from "../storage/jsonEnvelope";
 import { logError } from "../storage/errorLogger";
 import { getAuditRoot, getAuditActionsDir } from "../workspace/workspacePaths";
@@ -585,22 +586,50 @@ function mergeActionEntries(groups: WorkspaceActionEntry[][]): WorkspaceActionEn
 async function readAllUserLogFiles(
   directoryHandle: DirectoryHandleLike
 ): Promise<WorkspaceActionEntry[][]> {
+  let dir: DirectoryHandleLike;
   try {
-    const dir = await getAuditActionsDir(directoryHandle, false);
-    const { values } = await readJsonDirectory<WorkspaceActionUserLogFile>(dir, {
-      suffix: ACTIONS_FILE_SUFFIX,
-      onUnreadable: "skip",
-    });
-    return values.map((file) => (Array.isArray(file?.entries) ? file.entries : []));
+    dir = await getAuditActionsDir(directoryHandle, false);
   } catch (error) {
+    // A workspace with no `audit/actions/` folder has no per-actor trail. That
+    // is a fact about the data, and stays an empty result.
+    if (isNotFoundError(error)) return [];
     logError("audit:read", error);
-    return [];
+    throw error;
   }
+  // The per-file `skip` stays: one actor's damaged log must not hide everyone
+  // else's, and an audit VIEW is legitimately better off showing what it has.
+  // What changes is that a skip is no longer invisible — the names go to the
+  // error log, so an admin can see that the trail they are reading is short and
+  // by how much, instead of reading a truncated history as a complete one.
+  const { values, fileNames, matchedNames } = await readJsonDirectory<WorkspaceActionUserLogFile>(
+    dir,
+    { suffix: ACTIONS_FILE_SUFFIX, onUnreadable: "skip" }
+  );
+  if (fileNames.length < matchedNames.length) {
+    const skipped = matchedNames.filter((name) => !fileNames.includes(name));
+    logError(
+      "audit:read-skipped",
+      new Error(
+        `${skipped.length} action-log file(s) listed but unreadable — the action history shown is INCOMPLETE: ${skipped.join(", ")}`
+      )
+    );
+  }
+  return values.map((file) => (Array.isArray(file?.entries) ? file.entries : []));
 }
 
 /**
  * Read all recorded actions (newest last): every per-actor file ∪ the LEGACY
- * shared `actions.log.json`. Empty array on any failure.
+ * shared `actions.log.json`.
+ *
+ * **Rejects when the per-actor scan could not be established** (as opposed to
+ * finding nothing). It used to resolve with `[]` there, and the caller in
+ * UserManagement's actions view both rendered that as "no actions have ever
+ * been recorded" AND stamped its `actionsLoadedForRef` cache with it — so one
+ * failed read left the audit history blank for the rest of the session, with
+ * nothing on screen and nothing in the log to say why.
+ *
+ * An individual actor's unreadable file is still skipped rather than fatal (see
+ * `readAllUserLogFiles`), and now names itself in the error log.
  */
 export async function readWorkspaceActions(
   directoryHandle: DirectoryHandleLike
@@ -629,10 +658,19 @@ export async function readWorkspaceActionArchive(
 
   try {
     const dir = await getAuditActionsDir(directoryHandle, false);
-    const { values } = await readJsonDirectory<WorkspaceActionArchiveFile>(dir, {
-      suffix: `.actions.${year}.json`,
-      onUnreadable: "skip",
-    });
+    const { values, fileNames, matchedNames } = await readJsonDirectory<WorkspaceActionArchiveFile>(
+      dir,
+      { suffix: `.actions.${year}.json`, onUnreadable: "skip" }
+    );
+    if (fileNames.length < matchedNames.length) {
+      const skipped = matchedNames.filter((name) => !fileNames.includes(name));
+      logError(
+        "audit:read-archive-skipped",
+        new Error(
+          `${skipped.length} ${year} archive file(s) listed but unreadable — the archive shown is INCOMPLETE: ${skipped.join(", ")}`
+        )
+      );
+    }
     for (const file of values) {
       if (Array.isArray(file?.entries)) groups.push(file.entries);
     }

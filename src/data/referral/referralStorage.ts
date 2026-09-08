@@ -50,13 +50,16 @@ export async function appendReferralRequest(
  * loadReopenLog])` — share a single underlying scan rather than each
  * delegating export independently awaiting its own copy.
  *
- * Failure-domain note: `loadAllEmployeeRequestFiles` and
- * `loadAllSupervisorDecisions` already degrade independently to `[]` on their
- * own read/list failure, and each uses `onUnreadable: "skip"` internally so
- * one corrupt file only drops that file. Calling them once here and reusing
- * the result for all three kinds does not collapse that — the per-file skip
- * behaviour lives inside `readJsonDirectory`, not in how many times the caller
- * invokes these functions.
+ * Failure-domain note (rewritten — the previous text described behaviour that
+ * was itself the bug): neither `loadAllEmployeeRequestFiles` nor
+ * `loadAllSupervisorDecisions` degrades to `[]` any more. A scan that could not
+ * be established, and a decision file that exists but cannot be read, both
+ * REJECT — because a short answer here silently un-decides already-approved
+ * requests across the whole approval surface. Employee request files keep their
+ * per-employee isolation (one employee's unreadable file is skipped and
+ * logged); supervisor decision files do not, since a missing decision is not a
+ * missing row but a reversed outcome. Calling them once here and reusing the
+ * result for all three kinds does not change any of that.
  *
  * Uses the REQUESTS-ONLY fast path (`loadAllEmployeeRequestFiles`, Stage 2 of
  * the answer-save append-only rewrite, §7 Finding 5c) rather than

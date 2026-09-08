@@ -28,7 +28,7 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { type ErrorEntry, registerErrorSink } from "../storage/errorLogger";
 import { isReadOnlyMode } from "../storage/readOnlyMode";
-import { appendUserErrors } from "./errorLogStorage";
+import { appendUserErrors, ERRORLOG_CAS_CONTEXT } from "./errorLogStorage";
 import type { PersistedErrorEntry } from "./errorLogTypes";
 
 const DEFAULT_BATCH_SIZE = 25;
@@ -36,6 +36,19 @@ const DEFAULT_FLUSH_DELAY_MS = 5_000;
 const DEFAULT_MAX_PENDING = 200;
 
 const INTERNAL_CONTEXT_PREFIX = "errorlog:";
+
+/**
+ * True for anything this sink's OWN write path produced. Enqueuing one of those
+ * asks the sink to write a record of its inability to write — on a share that
+ * has stopped answering, a self-feeding loop that grows with every flush.
+ *
+ * Two shapes, because the failure is reported at two layers: `errorlog:*` from
+ * errorLogStorage.ts itself, and `casLoop:exhausted(errorLog:userFile)` from
+ * the casLoop underneath it, which the prefix test alone never matched.
+ */
+function isOwnFailure(context: string): boolean {
+  return context.startsWith(INTERNAL_CONTEXT_PREFIX) || context.includes(ERRORLOG_CAS_CONTEXT);
+}
 
 export type WorkspaceErrorSinkOptions = {
   directoryHandle: DirectoryHandleLike;
@@ -95,7 +108,7 @@ function armFlushTimer(): void {
 
 function enqueue(entry: ErrorEntry): void {
   if (installedOptions === null) return;
-  if (entry.context.startsWith(INTERNAL_CONTEXT_PREFIX)) return;
+  if (isOwnFailure(entry.context)) return;
 
   pending.push(entry);
   if (pending.length > installedOptions.maxPending) {

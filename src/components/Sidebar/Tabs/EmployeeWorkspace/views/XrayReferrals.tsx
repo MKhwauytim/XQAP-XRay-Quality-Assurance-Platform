@@ -20,7 +20,7 @@ import { useUnsavedWork } from "../../../../../hooks/useUnsavedWork";
 import type { FieldAnswer, ItemAnswer } from "../../../../../data/answers/answerTypes";
 import {
   loadOrDeriveDistributionCurrent,
-  loadOrDeriveDistributionCurrentForRead,
+  loadOrDeriveDistributionCurrentStrictForRead,
   readDistributionLogStamp,
 } from "../../../../../data/distribution/distributionStorage";
 import {
@@ -1429,7 +1429,8 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       // the mirror could not answer) ───────────────────────────────────────
       const sample = await loadSampleMaster(directoryHandle, selMonth);
       const sampleRows = (sample?.rows ?? []) as PreparedPopulationRow[];
-      const dist = await loadOrDeriveDistributionCurrentForRead(directoryHandle, selMonth, sampleRows);
+      // STRICT: the `?? []` below would otherwise turn a failed read into an empty queue — see DistributionUnreadableError.
+      const dist = await loadOrDeriveDistributionCurrentStrictForRead(directoryHandle, selMonth, sampleRows);
       const all = [...(dist?.entries ?? personalMirror?.entries ?? []), ...adhocEntries];
 
       // Extract frozen daily quota for the current employee.
@@ -1559,9 +1560,8 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     try {
       const sample = await loadSampleMaster(directoryHandle, selMonth);
       if (!sample) return null;
-      const dist = await loadOrDeriveDistributionCurrentForRead(
-        directoryHandle, selMonth, (sample.rows ?? []) as PreparedPopulationRow[]
-      );
+      // STRICT: this exclusion set must be EVERY employee's rows, so a failed read must not fold to `[]` and offer a row someone owns.
+      const dist = await loadOrDeriveDistributionCurrentStrictForRead(directoryHandle, selMonth, (sample.rows ?? []) as PreparedPopulationRow[]);
       setSampleMaster(sample);
       // Ad-hoc entries live outside this month's derivation, so carry the ones
       // already loaded rather than dropping them from the exclusion set.
