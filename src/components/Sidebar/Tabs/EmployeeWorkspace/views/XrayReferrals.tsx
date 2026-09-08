@@ -12,6 +12,7 @@ import {
   upsertItemAnswer,
   upsertItemAnswerOnBehalf,
 } from "../../../../../data/answers/answerStorage";
+import { answerDraftKey, clearAnswerDraft } from "../../../../../data/answers/answerDraftStore";
 import { reopenSubmittedAnswer } from "../../../../../data/answers/reopenAnswer";
 import { MonthClosedError } from "../../../../../data/population/monthLock";
 import { getLabels } from "../../../../../data/labels/labelsStore";
@@ -535,6 +536,11 @@ function createSaveAnswerHandler(deps: {
         // here (both are React state updates batched into one commit), but it
         // belongs beside the state it invalidates, not at the end of the block.
         setDirtyEntryId(null);
+        // On disk ⇒ the local draft has done its job. Cleared HERE and nowhere
+        // else: `onSave` resolving does not mean the write succeeded (the
+        // failure branch below resolves too), so the panel cannot do this for
+        // itself without throwing away the very work it exists to protect.
+        clearAnswerDraft(answerDraftKey(folder, xrayImageId, forUser));
         setStatusMsg({ type: "ok", text: "تم التقديم." });
         // Tell the OTHER mounted views. Without this a submitted answer stayed
         // invisible to the approval desk, «نتائج فحص الأشعة» and Reports — all
@@ -2169,6 +2175,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                   onNextSample={() => { if (nextNavEntry) navigateToSample(nextNavEntry.xrayImageId); }}
                   hasPrevSample={prevNavEntry !== undefined}
                   hasNextSample={nextNavEntry !== undefined}
+                  draftKey={answerDraftKey(
+                    folderForRow(panelEntry.xrayImageId),
+                    panelEntry.xrayImageId,
+                    panelEntry.assignedTo
+                  )}
                   onSave={(ans) =>
                     handleSave(panelEntry.xrayImageId, ans, panelEntry.assignedTo)
                   }

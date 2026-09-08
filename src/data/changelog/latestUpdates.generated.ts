@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v134.2",
+    "date": "2026-09-08",
+    "bucket": "fix",
+    "scope": "answers",
+    "title": "keep a failed save from costing the employee their work"
+  },
+  {
     "version": "v134.1",
     "date": "2026-09-08",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "redesign",
     "scope": "employee-workspace",
     "title": "extract the queue's selection helpers so XrayReferrals clears the max-lines gate again"
-  },
-  {
-    "version": "v131.17",
-    "date": "2026-09-03",
-    "bucket": "enhancement",
-    "scope": "employee-workspace",
-    "title": "مستهدف المؤشر now means 'from the regular population pipeline', not a risk-column read"
   }
 ];
