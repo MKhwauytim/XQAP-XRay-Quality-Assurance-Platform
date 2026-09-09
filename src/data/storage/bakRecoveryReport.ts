@@ -33,6 +33,22 @@ import { logError } from "./errorLogger";
 /** Which snapshot answered the read. */
 export type BakRecoverySource = ".bak" | ".tmp";
 
+/**
+ * What the LIVE file was doing when the sibling answered — the distinction that
+ * decides what an admin should do about it.
+ *
+ * `"corrupt"`: the live file is present but unreadable. A torn write. Something
+ * must rewrite it, and the recovery is holding the fort meanwhile.
+ *
+ * `"missing"`: the live file is not there at all. Before `safeRemoveJson` that
+ * was assumed to be a torn write too, and the message said so — which is how
+ * the 2026-09-08/09 production log spent eighteen hours reporting a template
+ * that had simply been DELETED as "damaged". A sibling with no live file is
+ * more likely an orphan of a deletion than a torn write, and the message must
+ * not assert damage it has not established.
+ */
+export type BakRecoveryLiveState = "corrupt" | "missing";
+
 const reported = new Set<string>();
 
 /** @internal — test-only. Forget which recoveries have already been reported. */
@@ -47,7 +63,8 @@ export function __resetBakRecoveryReportsForTests(): void {
 export function reportBakRecovery(
   directoryName: string,
   fileName: string,
-  source: BakRecoverySource
+  source: BakRecoverySource,
+  liveState: BakRecoveryLiveState = "corrupt"
 ): void {
   const key = `${directoryName}/${fileName}${source}`;
   if (!reported.has(key)) {
@@ -55,15 +72,19 @@ export function reportBakRecovery(
     logError(
       "storage:bak-recovery",
       new Error(
-        `"${fileName}" in "${directoryName}" could not be read from its live copy and was served from ${fileName}${source} instead. ` +
-          `The live file is damaged and every reader is falling back until something rewrites it.`
+        liveState === "missing"
+          ? `"${fileName}" in "${directoryName}" has no live copy and was served from ${fileName}${source} instead. ` +
+            `Either the live file was lost, or the sibling is an orphan left behind by a deletion — ` +
+            `check the repair panel before assuming damage.`
+          : `"${fileName}" in "${directoryName}" could not be read from its live copy and was served from ${fileName}${source} instead. ` +
+            `The live file is damaged and every reader is falling back until something rewrites it.`
       ),
       { action: fileName }
     );
   }
   if (typeof window !== "undefined") {
     window.dispatchEvent(
-      new CustomEvent("data:recovered-from-bak", { detail: { fileName, source } })
+      new CustomEvent("data:recovered-from-bak", { detail: { fileName, source, liveState } })
     );
   }
 }

@@ -702,6 +702,96 @@ async function writeText(
   );
 }
 
+/**
+ * Delete a `safeWriteJson`-managed name AS A UNIT — the live file and both of
+ * its snapshot siblings (`.bak`, `.tmp`).
+ *
+ * WHY THIS EXISTS. `safeWriteJson` maintains three names for one logical file,
+ * and `safeReadJson` treats them as one: on a plain miss of the live name it
+ * falls through to `.bak`, then `.tmp`, and reports the recovery. That is
+ * correct for a TORN WRITE, which is the only way the live name was ever
+ * supposed to go missing.
+ *
+ * Deletion breaks that assumption. Every delete site in this codebase removed
+ * only the live name and left the siblings behind, so the next read "recovered"
+ * a file the user had deliberately deleted — permanently, because nothing ever
+ * rewrites a file that is supposed to be gone. That is the 2026-09-08/09
+ * production incident: `tmpl-1787457917309-ngm1iq.json` logged
+ * `storage:bak-recovery` on every read, for every user, for over eighteen
+ * hours, with the message "the live file is damaged and every reader is
+ * falling back until something rewrites it". The file was not damaged. It was
+ * deleted, and its orphaned `.bak` kept answering for it.
+ *
+ * ORDER IS PART OF THE CONTRACT: `.tmp`, then `.bak`, then the live name LAST.
+ * An interrupted delete must never land in the live-absent/siblings-present
+ * state that IS this bug. Removing siblings first means an interruption leaves
+ * the live file readable and the delete reporting failure — recoverable, and
+ * honest.
+ *
+ * Each removal rides `retryTransientWrite`, because on the UNC/SMB share this
+ * app runs on a `removeEntry` can fail for reasons that are pure timing: a
+ * `NoModificationAllowedError` because another machine (or an AV scanner) has
+ * the entry open mid-write, a `NotReadableError`, an `InvalidStateError` from a
+ * stale metadata snapshot. Aborting on the first of those would leave exactly
+ * the orphan state this function exists to prevent. See `transientFileErrors.ts`
+ * for why each of those is timing and not damage.
+ *
+ * All three names are attempted regardless of an individual failure — the
+ * result names whatever remains, so a partial delete is a REPORTED state rather
+ * than a silent one. `NotFoundError` on any name is success: it was already
+ * absent.
+ */
+export type SafeRemoveResult = {
+  ok: boolean;
+  /** Names that could not be removed and are still present. Empty when ok. */
+  remaining: string[];
+};
+
+export async function safeRemoveJson(
+  dir: DirectoryHandleLike,
+  fileName: string
+): Promise<SafeRemoveResult> {
+  if (typeof dir.removeEntry !== "function") {
+    return { ok: false, remaining: [fileName] };
+  }
+
+  // Siblings first, live name last. See the doc comment above.
+  const names = [`${fileName}.tmp`, `${fileName}.bak`, fileName];
+  const remaining: string[] = [];
+
+  // Same lock key safeWriteJson uses, so a delete cannot interleave with a
+  // write of the same name within this tab.
+  await withResourceLock(directoryResourceKey(dir, fileName), async () => {
+    for (const name of names) {
+      try {
+        await retryTransientWrite(
+          async () => {
+            try {
+              await dir.removeEntry?.(name);
+            } catch (error) {
+              // Swallow "already absent" INSIDE the retry callback, not
+              // outside it. `retryTransientWrite` classifies NotFoundError as
+              // transient on the write path (correct for a write: the share's
+              // directory listing lags its own contents). For a REMOVE it is
+              // the success case, and letting it reach the ladder made every
+              // delete pay the full backoff — plus a reachability probe — for
+              // the `.tmp` that is absent in the normal case. Measured on the
+              // first run of this module's own ordering test: seven attempts
+              // to remove one file that was never there.
+              if (!isNotFoundError(error)) throw error;
+            }
+          },
+          { context: "safeWrite:safeRemoveJson", dir, fileName: name }
+        );
+      } catch {
+        remaining.push(name);
+      }
+    }
+  });
+
+  return { ok: remaining.length === 0, remaining };
+}
+
 async function removeQuietly(
   dir: DirectoryHandleLike,
   name: string
@@ -2158,6 +2248,19 @@ export type SafeReadJsonOptions = {
    * because those are absence probes by design.
    */
   retryMissing?: boolean;
+  /**
+   * Whether a failed live read may fall through to `{file}.bak` / `{file}.tmp`.
+   * Defaults to `true` — the torn-write recovery every caller has always had.
+   *
+   * Set `false` when the caller has its OWN authoritative answer for "the live
+   * file is not there" and a snapshot sibling would be the wrong answer. The
+   * motivating case is a deleted record whose tombstone the caller is about to
+   * consult: recovering an orphaned `.bak` there resurrects a deletion (see
+   * `safeRemoveJson`). With `false`, the read stops after the live probe and
+   * never calls `reportBakRecovery`, so it also cannot log a recovery for a
+   * file nobody expected to exist.
+   */
+  siblingFallback?: boolean;
 };
 
 /**
@@ -2225,9 +2328,13 @@ export async function safeReadJson<T>(
     };
   }
 
+  if (options?.siblingFallback === false) {
+    return live.found ? { ok: false, reason: "corrupt" } : { ok: false, reason: "missing" };
+  }
+
   const bak = await readPayload<T>(dir, `${fileName}.bak`);
   if (bak.payload !== null) {
-    reportBakRecovery(dir.name, fileName, ".bak");
+    reportBakRecovery(dir.name, fileName, ".bak", live.found ? "corrupt" : "missing");
     return {
       ok: true,
       value: bak.payload.value,
@@ -2241,7 +2348,7 @@ export async function safeReadJson<T>(
   // rather than losing the only good copy of the write.
   const tmp = await readPayload<T>(dir, `${fileName}.tmp`);
   if (tmp.payload !== null) {
-    reportBakRecovery(dir.name, fileName, ".tmp");
+    reportBakRecovery(dir.name, fileName, ".tmp", live.found ? "corrupt" : "missing");
     return {
       ok: true,
       value: tmp.payload.value,

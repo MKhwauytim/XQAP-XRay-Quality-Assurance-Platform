@@ -1,10 +1,14 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { safeReadJson, safeRemoveJson, safeWriteJson } from "../storage/safeWrite";
 import { listDirectoryEntries } from "../storage/directoryScan";
 import { isNotFoundError } from "../storage/transientFileErrors";
 import { logError } from "../storage/errorLogger";
-import { errorCodeOf } from "../storage/errorCodes";
-import { getSystemRoot, SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
+import { errorCodeMeaning, errorCodeOf, logCodedError } from "../storage/errorCodes";
+import {
+  getSystemRoot,
+  SYSTEM_FOLDER_NAMES,
+  WORKSPACE_ROOTS,
+} from "../workspace/workspacePaths";
 
 /**
  * Rolling pre-change snapshot history (owner requirement, 2026-09-03): before
@@ -104,6 +108,73 @@ function snapshotFileName(now: Date): string {
  */
 const knownUnwritableScopePrefixes = new Set<string>();
 
+/**
+ * The longest RELATIVE path (workspace root → file, including the `.tmp.crswap`
+ * suffix Chromium appends while staging) this module will attempt on the share.
+ *
+ * WHY A NUMBER, AND WHY THIS NUMBER. Windows caps a full path at 260
+ * characters. What a workspace has left of that budget depends on how deep its
+ * root sits on the share, which this app cannot see — but the 2026-09-09
+ * production log measures it for the deployment that failed. Every answer save
+ * by two employees, ~50 in three hours, failed on paths like
+ * `5-system/history/answers/{month}/{user}/{xrayImageId}/2026-09-09T09-03-07-106Z-000023.json.tmp`
+ * — 115 characters relative — while every OTHER file the app writes, all under
+ * 94 relative, succeeded in the same session against the same root. 94 is
+ * therefore not a guess: it is the longest relative path that deployment is
+ * known to accept, taken as the budget.
+ *
+ * WHY CHECK BEFORE TOUCHING DISK. The path-length limit is a property of the
+ * name, so the verdict is knowable without asking the share. Discovering it by
+ * trying cost `writeText`'s five-attempt ladder (~630 ms) plus
+ * `classifyNotFound`'s own round-trip probes (a second more) — and the trailing
+ * scope part is a per-record id, so nearly every save minted a never-before-
+ * seen directory and paid it again. `knownUnwritableScopePrefixes` (v134.4)
+ * caches the verdict, but only within one tab: it resets on every page load,
+ * and it can only cache AFTER paying the full cost once. This check is the same
+ * verdict reached for free, every time, and it also stops the `create: true`
+ * directory handles that were minting an empty `{xrayImageId}` folder per save
+ * on the way to a write that could not succeed.
+ *
+ * This is a GUARD, not the fix for the layout. The real remedy is for these
+ * paths to be short enough that no budget is needed — a reshaping of the
+ * history tree that changes what is on disk, and so needs owner sign-off and
+ * its own migration. Until then this makes the failure free and honest instead
+ * of expensive and repeated, and `historyRelativePath` gives that reshaping a
+ * single place to be measured from.
+ */
+export const HISTORY_MAX_RELATIVE_PATH_CHARS = 94;
+
+/** Chromium stages a write as `{name}.crswap`; the staged name is what must fit. */
+const STAGING_SUFFIX = ".tmp.crswap";
+
+/**
+ * The workspace-root-relative path `recordActionHistorySnapshot` would write,
+ * built from the same parts `getHistoryScopeDir` and `snapshotFileName` use.
+ * Exported so a test can assert the budget holds for every family and the
+ * longest id the app can mint, rather than for one hand-picked example.
+ */
+export function historyRelativePath(
+  family: ActionHistoryFamily,
+  scopeParts: readonly string[],
+  fileName: string
+): string {
+  return [
+    WORKSPACE_ROOTS.system,
+    SYSTEM_FOLDER_NAMES.history,
+    family,
+    ...scopeParts.map(sanitizeScopePart),
+    fileName,
+  ].join("/");
+}
+
+/** Families whose over-budget verdict has already been logged this session. */
+const budgetSkipsReported = new Set<string>();
+
+/** @internal — test-only. Forget which over-budget skips were reported. */
+export function __resetActionHistoryBudgetReportsForTests(): void {
+  budgetSkipsReported.clear();
+}
+
 /** @internal — test-only. Forget which scope prefixes were given up on. */
 export function __resetActionHistoryUnwritableScopesForTests(): void {
   knownUnwritableScopePrefixes.clear();
@@ -135,16 +206,45 @@ export async function recordActionHistorySnapshot<T>(params: {
 }): Promise<void> {
   const prefixKey = scopePrefixKey(params.family, params.scopeParts);
   if (knownUnwritableScopePrefixes.has(prefixKey)) return;
+
+  // Budget check BEFORE any handle is opened — see
+  // HISTORY_MAX_RELATIVE_PATH_CHARS. A path that cannot fit is skipped without
+  // a single call to the share: no `create: true` directory minted, no retry
+  // ladder, no cause probes, and one log row per family per session instead of
+  // two per save.
+  // Minted ONCE and reused for the real write below: snapshotFileName advances
+  // the per-tab sequence counter that keeps same-millisecond snapshots in
+  // order, so calling it twice per save would burn a number for nothing.
+  const now = new Date();
+  const plannedName = snapshotFileName(now);
+  const plannedPath = historyRelativePath(params.family, params.scopeParts, plannedName);
+  if (plannedPath.length + STAGING_SUFFIX.length > HISTORY_MAX_RELATIVE_PATH_CHARS) {
+    if (!budgetSkipsReported.has(params.family)) {
+      budgetSkipsReported.add(params.family);
+      logCodedError(
+        "actionHistory:path-budget",
+        "XQ-IO-037",
+        // Numbers and path FIRST: the durable log truncates long messages, and
+        // the actionable part is the measurement, not the catalog prose.
+        new Error(
+          `${plannedPath.length + STAGING_SUFFIX.length} chars vs a ` +
+            `${HISTORY_MAX_RELATIVE_PATH_CHARS} budget for "${plannedPath}" — ` +
+            errorCodeMeaning("XQ-IO-037")
+        )
+      );
+    }
+    return;
+  }
+
   try {
     const dir = await getHistoryScopeDir(params.directoryHandle, params.family, params.scopeParts);
-    const now = new Date();
     const snapshot: ActionHistorySnapshot<T> = {
       snapshotAt: now.toISOString(),
       actor: params.actor.trim() || "unknown",
       action: params.action,
       state: params.previousState,
     };
-    await safeWriteJson(dir, snapshotFileName(now), snapshot);
+    await safeWriteJson(dir, plannedName, snapshot);
     await pruneActionHistory(dir);
   } catch (error) {
     if (isNotFoundError(error) && errorCodeOf(error) === "XQ-IO-034") {
@@ -170,7 +270,10 @@ async function pruneActionHistory(dir: DirectoryHandleLike): Promise<void> {
   if (excess <= 0) return;
   for (const name of names.slice(0, excess)) {
     try {
-      await dir.removeEntry(name);
+      // Pruned snapshots are safeWriteJson-managed, so their `.bak` siblings
+      // must go with them — otherwise loadActionHistory keeps recovering a
+      // snapshot the retention cap already dropped.
+      await safeRemoveJson(dir, name);
     } catch (error) {
       if (!isNotFoundError(error)) {
         logError("actionHistory:prune", error instanceof Error ? error : new Error(String(error)));

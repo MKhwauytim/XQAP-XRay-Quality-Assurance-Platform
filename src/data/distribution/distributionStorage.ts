@@ -15,7 +15,7 @@ import type {
 } from "./distributionTypes";
 import { recordActionHistorySnapshot } from "../history/actionHistory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { readEnvelopeRevision, safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { readEnvelopeRevision, safeReadJson, safeRemoveJson, safeWriteJson } from "../storage/safeWrite";
 import { logError, logRejection } from "../storage/errorLogger";
 import { casLoop } from "../storage/casLoop";
 import { codedMessage, logCodedError, resolveErrorCode } from "../storage/errorCodes";
@@ -1702,11 +1702,10 @@ export async function invalidateDistributionCacheForFieldEdit(
     await ensureMonthWritable(directoryHandle, monthFolderName);
     const dir = await getDistributionDir(directoryHandle, monthFolderName, false);
     if (!dir.removeEntry) return;
-    for (const name of [
-      CURRENT_FILE, `${CURRENT_FILE}.bak`, `${CURRENT_FILE}.tmp`,
-      DISTRIBUTION_CHECKPOINT_FILE, `${DISTRIBUTION_CHECKPOINT_FILE}.bak`, `${DISTRIBUTION_CHECKPOINT_FILE}.tmp`,
-    ]) {
-      await dir.removeEntry(name).catch(() => undefined);
+    // Both caches as units — safeRemoveJson owns the sibling list (and the
+    // siblings-first order) so it cannot drift from what safeWriteJson writes.
+    for (const name of [CURRENT_FILE, DISTRIBUTION_CHECKPOINT_FILE]) {
+      await safeRemoveJson(dir, name).catch(() => undefined);
     }
     bumpWorkspaceEpoch(directoryHandle, monthFolderName);
   } catch (error) {

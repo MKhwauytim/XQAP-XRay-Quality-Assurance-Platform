@@ -565,7 +565,15 @@ export async function readJsonFile<TFile>(
   if (primary.reason === "missing" || primary.reason === "invalid_json") {
     const recovered = await readFirstRecoverableCopy<TFile>(directoryHandle, fileName);
     if (recovered) {
-      reportBakRecovery(directoryHandle.name, fileName, recovered.source);
+      // Keep the two ladders in lockstep: `missing` means the live name was
+      // absent (possibly a deletion orphan), `invalid_json` means it was there
+      // and unreadable (a real torn write). See BakRecoveryLiveState.
+      reportBakRecovery(
+        directoryHandle.name,
+        fileName,
+        recovered.source,
+        primary.reason === "missing" ? "missing" : "corrupt"
+      );
       return recovered.result;
     }
   }
