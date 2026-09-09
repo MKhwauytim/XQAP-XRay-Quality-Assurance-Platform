@@ -101,6 +101,14 @@ export const STORAGE_REGISTRY: readonly StorageEntry[] = [
     purpose: "Handle for the last selected workspace folder.",
     lossConsequence: "The workspace link is lost and the folder must be re-selected. Files on disk are untouched.",
   },
+  {
+    id: "xray_answers_local_mirror_v1",
+    layer: "indexeddb",
+    purpose:
+      "Redundant per-browser backup of an employee's own saved answers (answerLocalMirror.ts), reconciled against the workspace file on load and every 60s. Backup only, never authoritative.",
+    lossConsequence:
+      "No effect on saved data: the workspace file remains the source of truth and this backup is silently rebuilt from it on the next reconciliation.",
+  },
 ] as const;
 
 function matches(entry: StorageEntry, key: string): boolean {

@@ -19,8 +19,10 @@ import {
 import {
   loadAllEmployeeFiles,
   loadEmployeeAnswers,
+  reconcileAnswersWithLocalMirror,
   setItemQualityNote,
 } from "../../../../../data/answers/answerStorage";
+import { countPendingAnswers } from "../../../../../data/answers/answerLocalMirror";
 import type { ItemAnswer } from "../../../../../data/answers/answerTypes";
 import { isNoImageSubmission } from "../../../../../data/answers/noImageAnswer";
 import { reopenSubmittedAnswer } from "../../../../../data/answers/reopenAnswer";
@@ -215,6 +217,12 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
   // a row can be mid-reopen without touching its quality note or vice versa.
   const [reopenBusyKey, setReopenBusyKey] = useState<string | null>(null);
   const [reopenError, setReopenError] = useState<string | null>(null);
+  // How many of THIS employee's own answers are queued in the local
+  // IndexedDB backup because their save never reached the shared folder
+  // (see answerLocalMirror.ts). Refreshed after every reconciliation —
+  // initial load and the 30s tick below — so it reflects the current
+  // outcome of the latest retry rather than a stale count.
+  const [pendingSyncCount, setPendingSyncCount] = useState(0);
 
   useEffect(() => {
     void Promise.all([
@@ -260,6 +268,15 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
       setLoadState("ready");
     }
   }, [selectedMonth]);
+
+  // Reconcile the local IndexedDB backup, then refresh the visible pending
+  // count from it — used both on load and by the 30s retry tick below, so
+  // the count always reflects the outcome of the latest reconciliation
+  // rather than the one before it.
+  const reconcileAndRefreshPendingSyncCount = useCallback(async () => {
+    await reconcileAnswersWithLocalMirror(directoryHandle, selectedMonth, username);
+    setPendingSyncCount(await countPendingAnswers(selectedMonth, username));
+  }, [directoryHandle, selectedMonth, username]);
 
   // Load-token guard (mirrors useApprovalData): a slow load for a previously
   // selected month must not clobber a later selection or the falsy-reset above.
@@ -323,6 +340,15 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
           return entry.status !== "replaced";
         });
 
+      // Reconcile this browser's local IndexedDB backup with the file for the
+      // signed-in employee's OWN answers — never for `canSeeAll` (a supervisor
+      // browsing other employees' answers must not mix another employee's
+      // records into or out of this browser's own local mirror). Fire-and-forget:
+      // best-effort by contract (see answerLocalMirror.ts) and must never delay
+      // or fail this render.
+      if (!canSeeAll) {
+        void reconcileAndRefreshPendingSyncCount();
+      }
       const answerFiles = canSeeAll
         ? await loadAllEmployeeFiles(directoryHandle, selectedMonth)
         : [await loadEmployeeAnswers(directoryHandle, selectedMonth, username)];
@@ -376,7 +402,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
       }
       setLoadState("error");
     }
-  }, [canSeeAll, directoryHandle, selectedMonth, username]);
+  }, [canSeeAll, directoryHandle, reconcileAndRefreshPendingSyncCount, selectedMonth, username]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -384,6 +410,22 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [loadData]);
+
+  // Extra, independent-of-navigation local-backup RETRY tick (owner
+  // requirement, 2026-09-09): every 30s while an employee has their own
+  // results view open, re-run the IndexedDB reconciliation above — mirroring
+  // whatever is currently on disk into this browser's local backup, and
+  // replaying back anything the mirror still has queued as unsynced (a save
+  // that never reached the shared folder — see `markAnswerPendingLocally` in
+  // `answerStorage.ts`) until it succeeds. Skipped entirely for `canSeeAll`
+  // — same reasoning as the loadData call above.
+  useEffect(() => {
+    if (canSeeAll || !selectedMonth) return;
+    const interval = window.setInterval(() => {
+      void reconcileAndRefreshPendingSyncCount();
+    }, 30_000);
+    return () => window.clearInterval(interval);
+  }, [canSeeAll, reconcileAndRefreshPendingSyncCount, selectedMonth]);
 
   // Re-fetch on the app-wide refresh signal (manual toolbar button + periodic
   // sync tick) so results/movements recorded elsewhere show up here too. Family-scoped
@@ -652,6 +694,12 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
         title={L.page_xray_results_title}
         subtitle={L.page_xray_results_subtitle}
       />
+
+      {pendingSyncCount > 0 && (
+        <p className="ew-msg-warn" role="status">
+          {L.ew_answers_pending_sync.replace("{count}", String(pendingSyncCount))}
+        </p>
+      )}
 
       {loadState === "loading" && <LoadingState label={L.xray_results_loading} />}
       {loadState === "error" && <ErrorState description={L.xray_results_error} />}

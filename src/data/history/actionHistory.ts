@@ -3,6 +3,7 @@ import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { listDirectoryEntries } from "../storage/directoryScan";
 import { isNotFoundError } from "../storage/transientFileErrors";
 import { logError } from "../storage/errorLogger";
+import { errorCodeOf } from "../storage/errorCodes";
 import { getSystemRoot, SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
 
 /**
@@ -84,6 +85,35 @@ function snapshotFileName(now: Date): string {
 }
 
 /**
+ * Scope PREFIXES (every `scopeParts` entry except the last) already proven
+ * unwritable this session because the resulting path is too long for the
+ * filesystem (`XQ-IO-034`, see `transientFileErrors.ts`'s `classifyNotFound`).
+ *
+ * The last scope part is typically a per-record id (an `xrayImageId`, an
+ * event key) that differs on every call, so every save an employee makes
+ * would otherwise mint a never-before-seen directory and pay the full cost of
+ * discovering the SAME verdict again: `writeText`'s retry ladder (~630 ms)
+ * plus `classifyNotFound`'s own round-trip probes (over a second more) — pure
+ * added latency on a save that was already going to succeed, since this
+ * write is best-effort and never gates it. A path-length limit is a property
+ * of the shared prefix (how deep the workspace already sits on the share),
+ * not of the one differing record id, so once one record under a prefix has
+ * proven it unwritable, every sibling is written off too — same reasoning as
+ * `bakRecoveryReport.ts`'s "one entry per file per session" cache for a
+ * different permanently-repeating condition.
+ */
+const knownUnwritableScopePrefixes = new Set<string>();
+
+/** @internal — test-only. Forget which scope prefixes were given up on. */
+export function __resetActionHistoryUnwritableScopesForTests(): void {
+  knownUnwritableScopePrefixes.clear();
+}
+
+function scopePrefixKey(family: ActionHistoryFamily, scopeParts: readonly string[]): string {
+  return `${family}/${scopeParts.slice(0, -1).map(sanitizeScopePart).join("/")}`;
+}
+
+/**
  * Record the state a mutation is about to overwrite, then prune this
  * record's history down to the most recent ACTION_HISTORY_RETENTION_COUNT
  * snapshots.
@@ -103,6 +133,8 @@ export async function recordActionHistorySnapshot<T>(params: {
   action: string;
   previousState: T | null;
 }): Promise<void> {
+  const prefixKey = scopePrefixKey(params.family, params.scopeParts);
+  if (knownUnwritableScopePrefixes.has(prefixKey)) return;
   try {
     const dir = await getHistoryScopeDir(params.directoryHandle, params.family, params.scopeParts);
     const now = new Date();
@@ -115,6 +147,12 @@ export async function recordActionHistorySnapshot<T>(params: {
     await safeWriteJson(dir, snapshotFileName(now), snapshot);
     await pruneActionHistory(dir);
   } catch (error) {
+    if (isNotFoundError(error) && errorCodeOf(error) === "XQ-IO-034") {
+      // Permanent for this prefix — see the cache's doc above. Logged once
+      // (below, this call) rather than never again: an admin exporting the
+      // error log still needs to see it happened at least once.
+      knownUnwritableScopePrefixes.add(prefixKey);
+    }
     logError("actionHistory:record", error instanceof Error ? error : new Error(String(error)), {
       action: `${params.family}:${params.action}`,
     });
