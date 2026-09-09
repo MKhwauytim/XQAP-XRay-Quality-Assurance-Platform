@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v135.1",
+    "date": "2026-09-09",
+    "bucket": "fix",
+    "scope": "history",
+    "title": "decide the action-history path-length verdict before touching the share, not after a full retry ladder"
+  },
+  {
     "version": "v135.0",
     "date": "2026-09-09",
     "bucket": "redesign",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "workspace-reads",
     "title": "a failed read is no longer presented as empty data"
-  },
-  {
-    "version": "v132.1",
-    "date": "2026-09-03",
-    "bucket": "fix",
-    "scope": "referral-approval",
-    "title": "stop discarding the diagnostic when a decision write fails"
   }
 ];
