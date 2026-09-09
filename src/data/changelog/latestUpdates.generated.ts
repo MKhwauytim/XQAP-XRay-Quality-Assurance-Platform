@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v135.0",
+    "date": "2026-09-09",
+    "bucket": "redesign",
+    "scope": "storage",
+    "title": "delete a managed JSON name as a unit so an orphaned .bak cannot answer reads forever"
+  },
+  {
     "version": "v134.6",
     "date": "2026-09-09",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "referral-approval",
     "title": "stop discarding the diagnostic when a decision write fails"
-  },
-  {
-    "version": "v132.0",
-    "date": "2026-09-03",
-    "bucket": "feature",
-    "scope": "history",
-    "title": "rolling last-10 pre-change snapshot history for templates, answers, and distribution admin edits"
   }
 ];

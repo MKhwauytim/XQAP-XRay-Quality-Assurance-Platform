@@ -355,6 +355,11 @@ export const ERROR_CODES = {
       "InvalidStateError: the (size, mtime) snapshot cached by a File/writable-stream interface object no longer matched the file on disk when the operation touched the bytes — a concurrent write from another machine on the share, or the Windows SMB metadata cache serving a stale mtime to the snapshot. Every retry re-acquires the handle and takes a FRESH snapshot, so retrying is the correct remedy; this code is reported only once the whole ladder is spent",
     labelKey: "err_io_036_stale_snapshot",
   },
+  "XQ-IO-037": {
+    meaning:
+      "a BEST-EFFORT history snapshot was skipped before it touched the share, because the path it would need is longer than the budget a workspace on this deployment can be relied on to accept. Nothing was retried and nothing was probed: this is the XQ-IO-034 verdict applied in advance rather than rediscovered, at the cost of a full retry ladder, on every save. The action it was documenting succeeded — only its history entry was not written",
+    labelKey: "err_io_037_history_path_budget",
+  },
 
   // ── AUTH: login / session / permissions ──────────────────────────────────
   "XQ-AUTH-001": {
