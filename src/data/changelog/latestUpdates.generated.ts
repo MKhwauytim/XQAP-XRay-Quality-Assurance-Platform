@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v137.0",
+    "date": "2026-09-09",
+    "bucket": "feature",
+    "scope": "integrity",
+    "title": "admin boot self-check that repairs damaged and orphaned workspace files and reports what it did"
+  },
+  {
     "version": "v136.0",
     "date": "2026-09-09",
     "bucket": "redesign",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "storage",
     "title": "record every .bak/.tmp recovery instead of only flashing a banner"
-  },
-  {
-    "version": "v134.0",
-    "date": "2026-09-08",
-    "bucket": "fix",
-    "scope": "approvals",
-    "title": "recover a decision file that cannot be read, and stop reporting failed reads as empty history"
   }
 ];
