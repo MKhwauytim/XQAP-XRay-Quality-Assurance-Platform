@@ -72,6 +72,10 @@ export default defineConfig([
       // source after moving the live file aside.
       'src/data/approvals/decisionFileRecovery.ts',
       'src/data/templates/templateFileRecovery.ts',
+      // Removes exactly ONE orphaned sibling, after copying its bytes to an
+      // archive name. Using safeRemoveJson here would take the live file and
+      // the OTHER sibling with it, which is the opposite of the intent.
+      'src/data/storage/orphanSiblings.ts',
       // Legacy `messages.json` archive-out (feedback migration).
       'src/data/feedback/feedbackStorage.ts',
       '**/*.test.ts',

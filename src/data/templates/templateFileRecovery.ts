@@ -17,6 +17,22 @@
  * on data nobody has verified, is worse than the outage), always archive the
  * damaged bytes rather than delete them, and let an admin trigger the repair
  * explicitly from Settings.
+ *
+ * SCOPE OF THAT RULE, since 2026-09-09. "Never repair silently on read" is
+ * about the READ PATH, and it still holds there without exception — nothing in
+ * this module runs from a read, and `safeReadJson` still never rewrites
+ * anything.
+ *
+ * What changed is that `integrity/bootIntegrityScan.ts` now calls
+ * `recoverTemplateFile` automatically at an ADMIN's sign-in (owner decision,
+ * 2026-09-09), rather than waiting for that admin to find the Settings panel.
+ * That is a real narrowing of the rule and is recorded here so the code and the
+ * doctrine do not disagree: one role, one known moment, and every repair
+ * reported to the admin in a dialog. The objection the rule raises — an
+ * unasked-for repair on unverified data — is answered by that report and by
+ * the archive this module already keeps, not waved away. The production case
+ * that forced it: one damaged template served from its sibling for eighteen
+ * hours, across every user including the admin, with a banner nobody acted on.
  */
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { listDirectoryEntries } from "../storage/directoryScan";

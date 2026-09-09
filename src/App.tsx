@@ -16,7 +16,13 @@ import {
 } from "./auth/userManagement";
 import { hasRequiredSubTabFeature } from "./auth/subTabFeatureGate";
 import Sidebar from "./components/Sidebar/Sidebar";
+import { logError } from "./data/storage/errorLogger";
 import { BootSplashOverlay } from "./components/Sidebar/BootSplashOverlay";
+import { IntegrityReportDialog } from "./components/IntegrityReportDialog/IntegrityReportDialog";
+import {
+  runBootIntegrityScan,
+  type BootIntegrityReport,
+} from "./data/integrity/bootIntegrityScan";
 import { SIDEBAR_TABS } from "./components/Sidebar/Tabs/tabRegistry";
 import { FeedbackWidget } from "./components/FeedbackWidget/FeedbackWidget";
 import { NotificationBanner } from "./components/NotificationBanner/NotificationBanner";
@@ -79,6 +85,7 @@ export function AppContent({ session }: AppContentProps) {
   const [bakWarning, setBakWarning] = useState<string | null>(null);
   const [autoBackupNotice, setAutoBackupNotice] = useState<string | null>(null);
   const [autoBackupRunning, setAutoBackupRunning] = useState(false);
+  const [integrityReport, setIntegrityReport] = useState<BootIntegrityReport | null>(null);
   const autoBackupAttemptKey = `${session.username}:${session.loginAt}:${directoryHandle?.name ?? ""}`;
 
   // Post-login "data source checklist" (bootProgress.ts) is cleared once per
@@ -171,6 +178,44 @@ export function AppContent({ session }: AppContentProps) {
     window.addEventListener("data:recovered-from-bak", handler as EventListener);
     return () => window.removeEventListener("data:recovered-from-bak", handler as EventListener);
   }, []);
+
+  useEffect(() => {
+    // Admin boot self-check (owner requirement, 2026-09-09): scan the workspace
+    // for damaged and orphaned files, repair what can be repaired, and show the
+    // admin exactly what happened.
+    //
+    // ADMIN ONLY, and deliberately narrower than the auto-backup above, which
+    // also runs for managers. This one WRITES REPAIRS to files nobody has
+    // opened yet; that is an admin's call to have made on their behalf, not a
+    // manager's. Demo mode is excluded because its workspace is in-memory and
+    // has nothing real to repair.
+    if (
+      session.role !== "admin" ||
+      session.mode === "demo" ||
+      !directoryHandle ||
+      workspaceStatus !== "ready"
+    ) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const report = await runBootIntegrityScan(directoryHandle);
+        // Only surfaces when there is something to say — a healthy workspace
+        // must not greet an admin with a dialog on every sign-in.
+        if (!cancelled && report.hasFindings) setIntegrityReport(report);
+      } catch (error) {
+        // The self-check must never be able to keep an admin out. runBootIntegrityScan
+        // already swallows per-check failures; this is the backstop for anything
+        // that escapes it.
+        logError(
+          "integrity:boot-scan",
+          error instanceof Error ? error : new Error(String(error))
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [autoBackupAttemptKey, directoryHandle, session.mode, session.role, workspaceStatus]);
 
   useEffect(() => {
     // Auto-backup runs for admin AND manager sessions now -- day-to-day deployments are
@@ -350,6 +395,12 @@ export function AppContent({ session }: AppContentProps) {
             <X size={16} />
           </button>
         </div>
+      )}
+      {integrityReport && (
+        <IntegrityReportDialog
+          report={integrityReport}
+          onDismiss={() => setIntegrityReport(null)}
+        />
       )}
       {(autoBackupNotice || autoBackupRunning) && (
         <div className="app-backup-toast" role="status" dir="rtl">
