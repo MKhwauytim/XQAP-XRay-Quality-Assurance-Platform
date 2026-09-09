@@ -107,6 +107,11 @@ export const ERROR_CODES = {
     labelKey: "err_ws_014_restore_failed",
   },
   "XQ-WS-015": {
+    // Logged ONLY when the query answers "denied" (a persisted browser block),
+    // with the queried value in the Error message so the row is attributable.
+    // "prompt" is the expected cold-start state after a browser restart and is
+    // shown on screen via formatUserError without ever reaching the log --
+    // see the branch in WorkspaceProvider.tsx for the full reasoning.
     meaning: "restore-on-mount: remembered handle's readwrite grant is not 'granted'",
     labelKey: "wsgate_picker_reconnect_msg",
   },

@@ -24,12 +24,14 @@ import {
 } from "./WorkspaceContext";
 import { createDemoWorkspace } from "./demoWorkspace";
 import {
+  errorCodeMeaning,
   errorCodeOf,
   formatUserError,
   logCodedError,
   tagErrorOnce,
   type ErrorCode
 } from "../storage/errorCodes";
+import { getLabels } from "../labels/labelsStore";
 import { logError } from "../storage/errorLogger";
 import { setReadOnlyMode } from "../storage/readOnlyMode";
 import { WORKSPACE_PERMISSION_LOST_EVENT } from "../storage/workspaceWriteAccess";
@@ -235,8 +237,39 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
           setSelectedDirectoryName(persisted.directoryName);
           setPendingReconnect(true);
           setStatus("not_selected");
-          logCodedError("workspace:restore-permission", "XQ-WS-015");
-          setMessage(formatUserError("XQ-WS-015"));
+          // Split by OUTCOME, because the two non-granted answers are opposite
+          // conditions and only one of them is a fault.
+          //
+          // "prompt" is the platform-mandated COLD START. A handle rehydrated
+          // from IndexedDB after a browser restart cannot have its grant
+          // upgraded without a user gesture, and this app is a file:// static
+          // page, so the installed-app persistent-grant path does not apply
+          // either. Logging it recorded a perfectly healthy sign-in as an
+          // error -- which is what the 2026-09-08/09 production reports
+          // actually contain -- and drowned the one state that IS a dead end.
+          // Shown on screen, never logged (the XQ-WS-002 precedent).
+          //
+          // "denied" is a persisted browser BLOCK for this origin (the user
+          // chose "Don't allow", a dismiss-embargo, a site-settings entry, or
+          // the FileSystemWriteBlockedForUrls policy). It matters because
+          // `ensureDirectoryPermission` returns false WITHOUT prompting, so
+          // the reconnect button below can never succeed: clicking it just
+          // yields XQ-WS-009 and redraws the same card. That one is logged --
+          // with the queried value in the message, so a row written after this
+          // change is attributable, unlike the two unconditional production
+          // entries that could not be traced to either state.
+          if (permission === "denied") {
+            logCodedError(
+              "workspace:restore-permission",
+              "XQ-WS-015",
+              new Error(`${errorCodeMeaning("XQ-WS-015")} — queryPermission answered 'denied'`)
+            );
+            setMessage(
+              `${formatUserError("XQ-WS-015")} ${getLabels().wsgate_picker_denied_hint}`
+            );
+          } else {
+            setMessage(formatUserError("XQ-WS-015"));
+          }
           return;
         }
         await applyWorkspaceHandle(persisted.directoryHandle, {

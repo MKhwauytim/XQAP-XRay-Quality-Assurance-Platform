@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import { DEFAULT_LABELS } from "../labels/labelsStore";
+import { clearErrors, getRecentErrors } from "../storage/errorLogger";
 import {
   createEmptyUserManagementState,
   getManagedLoginUsers,
@@ -136,6 +137,9 @@ describe("remembered workspace fallback", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // The error ring is module memory, not localStorage -- test-setup.ts's
+    // storage reset does not touch it, so entries leak between tests.
+    clearErrors();
     mocks.isFileSystemAccessSupported.mockReturnValue(true);
     mocks.ensureDirectoryPermission.mockResolvedValue(true);
     mocks.checkWorkspaceStructure.mockResolvedValue({
@@ -207,6 +211,69 @@ describe("remembered workspace fallback", () => {
     );
     // Falls through to the reconnect button instead of silently auto-restoring.
     expect(screen.getByText("not_selected:true")).toBeInTheDocument();
+  });
+
+  // XQ-WS-015 is the cold-start state, not a fault. Chromium cannot upgrade a
+  // rehydrated handle's grant without a user gesture, so a passive
+  // queryDirectoryPermission answering "prompt" on the very first mount after
+  // a browser restart is the platform behaving exactly as specified. Logging
+  // it made two production workspaces (2026-09-08, 2026-09-09) carry an error
+  // row for a healthy sign-in, and buried the one state that IS a dead end.
+  it("does not record XQ-WS-015 when the remembered grant is 'prompt'", async () => {
+    const handle = createMemoryDirectory("remembered-workspace");
+    mocks.loadLastWorkspace.mockResolvedValue({
+      directoryHandle: handle,
+      directoryName: handle.name,
+      savedAt: new Date().toISOString(),
+    });
+    mocks.queryDirectoryPermission.mockResolvedValue("prompt");
+
+    render(
+      <WorkspaceProvider>
+        <WorkspacePicker><div>connected</div></WorkspacePicker>
+      </WorkspaceProvider>,
+    );
+
+    await screen.findByRole("button", { name: DEFAULT_LABELS.wsgate_reconnect_btn });
+
+    expect(getRecentErrors().filter((entry) => entry.errorCode === "XQ-WS-015")).toHaveLength(0);
+    // The user is still TOLD what to do -- only the durable log row goes away.
+    expect(screen.getByText((text) => text.includes("XQ-WS-015"))).toBeInTheDocument();
+    expect(
+      screen.queryByText((text) => text.includes(DEFAULT_LABELS.wsgate_picker_denied_hint)),
+    ).toBeNull();
+  });
+
+  // "denied" is the opposite case and must stay logged: the browser has a
+  // persisted BLOCK for this origin, so ensureDirectoryPermission returns
+  // false without prompting and the reconnect button can never succeed. The
+  // queried value rides in the message so a post-fix row is attributable.
+  it("records XQ-WS-015 once, attributed, when the remembered grant is 'denied'", async () => {
+    const handle = createMemoryDirectory("remembered-workspace");
+    mocks.loadLastWorkspace.mockResolvedValue({
+      directoryHandle: handle,
+      directoryName: handle.name,
+      savedAt: new Date().toISOString(),
+    });
+    mocks.queryDirectoryPermission.mockResolvedValue("denied");
+
+    render(
+      <WorkspaceProvider>
+        <WorkspacePicker><div>connected</div></WorkspacePicker>
+      </WorkspaceProvider>,
+    );
+
+    await screen.findByRole("button", { name: DEFAULT_LABELS.wsgate_reconnect_btn });
+
+    const hits = getRecentErrors().filter((entry) => entry.errorCode === "XQ-WS-015");
+    expect(hits).toHaveLength(1);
+    expect(hits[0].context).toBe("workspace:restore-permission [XQ-WS-015]");
+    expect(hits[0].message).toContain("'denied'");
+    // A blocked origin needs the remedy on screen, or the reconnect button is
+    // an unexplained loop.
+    expect(
+      screen.getByText((text) => text.includes(DEFAULT_LABELS.wsgate_picker_denied_hint)),
+    ).toBeInTheDocument();
   });
 
   it("shows a reconnect button and requests readwrite access from its click (§S: one grant, not two)", async () => {
