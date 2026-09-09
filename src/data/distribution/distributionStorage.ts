@@ -13,7 +13,6 @@ import type {
   DistributionLog,
   QuotaFacts
 } from "./distributionTypes";
-import { recordActionHistorySnapshot } from "../history/actionHistory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { readEnvelopeRevision, safeReadJson, safeRemoveJson, safeWriteJson } from "../storage/safeWrite";
 import { logError, logRejection } from "../storage/errorLogger";
@@ -53,8 +52,19 @@ const CURRENT_FILE = "distribution.current.json";
  */
 export const DISTRIBUTION_CHECKPOINT_FILE = "distribution.checkpoint.json";
 
-/** Event types that edit an EXISTING assignment rather than create/complete one — see appendDistributionEvents' pre-change history snapshot. */
-const ADMIN_EDIT_DISTRIBUTION_EVENT_TYPES: ReadonlySet<DistributionEventType> = new Set([
+/**
+ * Event types that edit an EXISTING assignment rather than create or complete
+ * one. Deliberately excludes "assigned" (initial bulk distribution — one event
+ * per sample row, far higher volume, and not an edit to anything) and
+ * "completed"/"*-requested" (routine employee activity, not an admin mutation
+ * of existing state).
+ *
+ * Exported for `history/actionHistoryReaders.ts`, which uses it to decide which
+ * events are worth showing as pre-change history. It lived here when this
+ * module wrote that history itself; it stays here, with one definition, now
+ * that the reader derives it.
+ */
+export const ADMIN_EDIT_DISTRIBUTION_EVENT_TYPES: ReadonlySet<DistributionEventType> = new Set([
   "replaced",
   "reassigned",
   "reopened",
@@ -616,32 +626,13 @@ export async function appendDistributionEvents(
     ids.add(event.eventId);
   }
 
-  // Pre-change snapshot (owner requirement, 2026-09-03): for an admin/
-  // supervisor edit to an EXISTING assignment — replacement, reassignment,
-  // reopen — record the row's prior events as a rolling last-10 history
-  // before the new event is appended. Deliberately excludes "assigned"
-  // (initial bulk distribution, one event per sample row, far higher volume
-  // and not an edit to anything) and "completed"/"*-requested" (routine
-  // employee/self activity, not an admin mutation of existing state) — gating
-  // on event type keeps this off the hot bulk-assignment path entirely: the
-  // extra `loadDistributionLog` read below only runs when at least one event
-  // in this batch actually needs it.
-  const historyTargets = events.filter((event): event is DistributionEvent & { eventType: DistributionEventType } =>
-    ADMIN_EDIT_DISTRIBUTION_EVENT_TYPES.has(event.eventType)
-  );
-  if (historyTargets.length > 0) {
-    const priorLog = await loadDistributionLog(directoryHandle, monthFolderName);
-    for (const event of historyTargets) {
-      await recordActionHistorySnapshot<DistributionEvent[]>({
-        directoryHandle,
-        family: "distribution",
-        scopeParts: [monthFolderName, event.xrayImageId],
-        actor: event.eventBy,
-        action: `distribution:${event.eventType}`,
-        previousState: priorLog.events.filter((prior) => prior.xrayImageId === event.xrayImageId),
-      });
-    }
-  }
+  // The pre-change snapshot that used to be written here (owner requirement,
+  // 2026-09-03) is gone, and with it the extra `loadDistributionLog` read that
+  // existed only to feed it. `distribution.events/{eventId}.json` is immutable
+  // by contract, so the prior events for a row are permanently on disk already
+  // — `actionHistoryReaders.ts` derives the same trail from them rather than
+  // copying it into a second, deeper file that could not be written at all on
+  // a workspace deep on the share (XQ-IO-034).
 
   // Each event is durable in its own file before the mutable compatibility
   // projection is updated. Distinct writers therefore do not share a target.

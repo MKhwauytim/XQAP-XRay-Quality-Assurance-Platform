@@ -1,0 +1,113 @@
+.integrity-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay-scrim, rgba(15, 23, 42, 0.55));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  z-index: 1200;
+}
+
+.integrity-dialog {
+  background: var(--surface-1, #fff);
+  color: var(--text-1, #0f172a);
+  border-radius: 12px;
+  border: 1px solid var(--border-1, #e2e8f0);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22);
+  width: min(640px, 100%);
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 1.5rem;
+}
+
+.integrity-dialog__title {
+  margin: 0 0 0.5rem;
+  font-size: 1.15rem;
+}
+
+.integrity-dialog__summary {
+  margin: 0 0 1.25rem;
+  color: var(--text-2, #475569);
+}
+
+.integrity-dialog__group {
+  border-top: 1px solid var(--border-1, #e2e8f0);
+  padding-top: 1rem;
+  margin-bottom: 1rem;
+}
+
+.integrity-dialog__group-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.integrity-dialog__group--attention .integrity-dialog__group-title {
+  color: var(--warn-fg, #92400e);
+}
+
+.integrity-dialog__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.integrity-dialog__item {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 8px;
+  background: var(--surface-2, #f8fafc);
+}
+
+.integrity-dialog__subject {
+  font-weight: 600;
+  /* File names are Latin inside an RTL dialog -- isolate so the direction of
+     the surrounding Arabic cannot reorder them. */
+  unicode-bidi: isolate;
+  direction: ltr;
+  text-align: right;
+  word-break: break-all;
+}
+
+.integrity-dialog__meta,
+.integrity-dialog__detail {
+  font-size: 0.82rem;
+  color: var(--text-2, #475569);
+}
+
+.integrity-dialog__detail {
+  unicode-bidi: isolate;
+  direction: ltr;
+  text-align: right;
+  word-break: break-all;
+}
+
+.integrity-dialog__note {
+  margin: 0.6rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-2, #475569);
+}
+
+.integrity-dialog__actions {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 1.25rem;
+}
+
+.integrity-dialog__dismiss {
+  border: 1px solid var(--border-1, #e2e8f0);
+  background: var(--surface-2, #f8fafc);
+  color: inherit;
+  border-radius: 8px;
+  padding: 0.45rem 1.1rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+.integrity-dialog__dismiss:hover {
+  background: var(--surface-3, #f1f5f9);
+}

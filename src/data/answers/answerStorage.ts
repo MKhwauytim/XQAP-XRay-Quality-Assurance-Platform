@@ -46,7 +46,6 @@ import {
   AnswerFoldError,
   appendAnswerEventSegment,
   foldAnswerEvents,
-  foldSingleItem,
   readAnswerEventDelta,
   type AnswerEvent,
   type AnswerLegacySeed,
@@ -59,7 +58,6 @@ import {
   getSampleMainDir,
   safeWorkspaceFilePart,
 } from "../workspace/workspacePaths";
-import { recordActionHistorySnapshot } from "../history/actionHistory";
 import { loadMirroredAnswers, markAnswerPendingLocally, mirrorAnswerLocally } from "./answerLocalMirror";
 
 export { ANSWER_EVENTS_DIR, ANSWER_EVENT_SEGMENT_SUFFIX };
@@ -370,7 +368,12 @@ function reflectLocalAppendInAnswerEventsCache(
  * partial state; the entry (if any) is left exactly as it was before this
  * call, still safe to resume from on the next successful read.
  */
-async function readAllAnswerEventsForMonth(
+/**
+ * Exported for `history/actionHistoryReaders.ts`, which folds exactly this
+ * input to derive the pre-change trail the deleted answers-history writer used
+ * to copy into its own files. Sharing the reader keeps the two from drifting.
+ */
+export async function readAllAnswerEventsForMonth(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
 ): Promise<AnswerEvent[]> {
@@ -388,7 +391,8 @@ async function readAllAnswerEventsForMonth(
 }
 
 /** Every event this employee is the file-owner of — see `answeredBy` below. */
-function eventsForEmployee(events: readonly AnswerEvent[], username: string): AnswerEvent[] {
+/** Exported alongside `readAllAnswerEventsForMonth` — see its note. */
+export function eventsForEmployee(events: readonly AnswerEvent[], username: string): AnswerEvent[] {
   return events.filter((event) => sameUser(event.answeredBy ?? "", username));
 }
 
@@ -771,17 +775,12 @@ async function performAnswerWrite(
   const eventId = crypto.randomUUID();
   const eventAt = nextAnswerEventAt();
   const writer = answerWriterIdentity(directoryHandle, monthFolderName);
-  // ONE snapshot per save, not one per attempt.
-  //
-  // `recordActionHistorySnapshot` below is a WRITE (safeWriteJson plus a prune
-  // of the rolling window) and it sat inside the retry body. On the failure this
-  // path actually hits in production — share contention, XQ-IO-032, the
-  // 14-attempt ladder taking about a minute before it gives up — that aimed up
-  // to fourteen extra writes at the very share that was already too contended to
-  // serve one. Amplification at exactly the wrong moment, and it bought nothing:
-  // the snapshot is explicitly best-effort, never gates the append, and every
-  // attempt records the same pre-change state.
-  let historyRecorded = false;
+  // No pre-change history write here any more. The state a snapshot would have
+  // copied is already durable in `answers.events/*.ndjson`, which is
+  // append-only and never pruned, so `actionHistoryReaders.ts` derives the same
+  // trail by folding those events instead. That removes a whole-file write from
+  // the hot save path — and with it the deep per-record path that made the
+  // write fail on every save on a workspace deep on the share (XQ-IO-034).
   // The item state to mirror locally once the append succeeds — built from
   // the same in-memory `previous`/`event` the retry body already computed, so
   // mirroring never costs an extra disk read. Set on the LAST attempt only
@@ -839,18 +838,6 @@ async function performAnswerWrite(
       // the answer-save proposal) and never call safeWriteJson for a real
       // save/reopen/note anymore, so they silently lost that protection; this
       // restores an equivalent (a recoverable prior state) for the new model.
-      // Best-effort, never gates the real append below.
-      if (!historyRecorded) {
-        historyRecorded = true;
-        await recordActionHistorySnapshot<ItemAnswer | null>({
-          directoryHandle,
-          family: "answers",
-          scopeParts: [monthFolderName, username, xrayImageId],
-          actor: event.eventBy,
-          action: `answer:${telemetryAction}`,
-          previousState: previous ?? null,
-        });
-      }
       await appendAnswerEventSegment(mainDir, batch, writer);
       reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
       return { done: true, result: { ok: true as const } };
@@ -1192,16 +1179,6 @@ async function performOnBehalfWrite(
         reason,
       };
       const batch = seedEvent ? [seedEvent, onBehalfEvent] : [onBehalfEvent];
-      // Pre-change snapshot — same answers-family history as performAnswerWrite
-      // above, for the on-behalf write path. Best-effort, never gates the append.
-      await recordActionHistorySnapshot<ItemAnswer | null>({
-        directoryHandle,
-        family: "answers",
-        scopeParts: [monthFolderName, assigneeUsername, xrayImageId],
-        actor: author,
-        action: "answer:answer-save-on-behalf",
-        previousState: foldSingleItem(ownBefore, xrayImageId) ?? null,
-      });
       await appendAnswerEventSegment(mainDir, batch, writer);
       reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
 

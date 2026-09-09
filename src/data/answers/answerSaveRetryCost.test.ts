@@ -1,19 +1,29 @@
-// A save that has to retry must not multiply its own writes onto the share.
+// A save must not write anything to the share beyond its own event append.
 //
-// Employees reported ~1 submission in 10 hanging about a minute and then
-// failing. The minute is the casLoop ladder: 14 attempts with linear backoff
-// (~13.6 s of sleeping) plus the per-attempt disk work on a contended share.
-// What made it worse than slow: `recordActionHistorySnapshot` — a safeWriteJson
-// plus a prune of the rolling window — sat INSIDE the retry body, so a failing
-// save aimed up to fourteen extra writes at the share that was already too
-// contended to serve one. It is best-effort by contract and never gates the
-// append, and every attempt records the same pre-change state, so repeating it
-// bought nothing and cost the most at the worst moment.
+// HISTORY. Employees reported ~1 submission in 10 hanging about a minute and
+// then failing. The minute is the casLoop ladder: 14 attempts with linear
+// backoff plus the per-attempt disk work on a contended share. What made it
+// worse than slow was `recordActionHistorySnapshot` — a safeWriteJson plus a
+// prune of a rolling window — sitting INSIDE the retry body, so a failing save
+// aimed up to fourteen extra writes at the share that was already too
+// contended to serve one.
+//
+// v135.1 moved it out of the retry body. This version removes it from the
+// answer path entirely: the pre-change state it copied is already permanent in
+// `answers.events/*.ndjson`, so `actionHistoryReaders.ts` derives the same
+// trail by folding those events. That also retires the deep per-record path
+// (`…/history/answers/{month}/{user}/{xrayImageId}/…`) which, at ~115
+// characters relative, crossed Windows' 260-character cap and made the write
+// fail on EVERY save on a workspace deep on the share — twice per save, ~50
+// times in three hours in the 2026-09-08/09 production log.
+//
+// These tests are the guard that keeps a writer from coming back to this path.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createMemoryDirectory, setSimulatedFaults } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { recordActionHistorySnapshot } from "../history/actionHistory";
+import { clearErrors, getRecentErrors } from "../storage/errorLogger";
 import { loadEmployeeAnswers, upsertItemAnswer } from "./answerStorage";
 import type { ItemAnswer } from "./answerTypes";
 
@@ -43,23 +53,26 @@ let root: DirectoryHandleLike;
 beforeEach(() => {
   root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
   snapshotMock.mockClear();
+  clearErrors();
 });
 
-describe("answer save retry cost", () => {
-  it("records the pre-change snapshot ONCE across a save that exhausts every attempt", async () => {
-    // A segment append that keeps failing, so the casLoop burns all 14 attempts
-    // before giving up — the hang employees reported (measured here at ~13 s of
-    // pure backoff; on a real contended share, where each attempt also pays
-    // safeWrite's inner ladder and the reachability probe, it exceeds two
-    // minutes). Every one of those attempts used to write a history snapshot to
-    // the very share that was failing.
-    //
-    // The fault is a NON-transient error on purpose: the production trigger is
-    // the transient InvalidStateError (XQ-IO-032), but safeWrite's own inner
-    // ladder absorbs that so effectively that reproducing a full casLoop
-    // exhaustion through it takes over two minutes of real time. What is under
-    // test here is the retry body, and any error that reaches casLoop drives it
-    // identically.
+describe("answer save writes no history file", () => {
+  it("records no snapshot on a save that succeeds first time", async () => {
+    const result = await upsertItemAnswer(root, MONTH, "emp-1", makeItem("IMG-1"));
+
+    expect(result.ok).toBe(true);
+    const file = await loadEmployeeAnswers(root, MONTH, "emp-1");
+    expect(file.items.map((i) => i.xrayImageId)).toEqual(["IMG-1"]);
+    expect(snapshotMock).not.toHaveBeenCalled();
+  });
+
+  it("records no snapshot on a save that exhausts every attempt", async () => {
+    // A segment append that keeps failing, so the casLoop burns all 14
+    // attempts. The fault is non-transient on purpose: the production trigger
+    // is the transient InvalidStateError (XQ-IO-032), but safeWrite's own inner
+    // ladder absorbs that so effectively that reproducing a full exhaustion
+    // through it takes minutes of real time, and any error reaching casLoop
+    // drives the retry body identically.
     setSimulatedFaults(root, [
       {
         operation: "createWritable",
@@ -70,16 +83,36 @@ describe("answer save retry cost", () => {
     ]);
 
     const result = await upsertItemAnswer(root, MONTH, "emp-1", makeItem("IMG-1"));
-    expect(result.ok).toBe(false);
 
-    expect(snapshotMock).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(false);
+    expect(snapshotMock).not.toHaveBeenCalled();
   }, 120_000);
 
-  it("still records a snapshot on a save that succeeds first time", async () => {
-    const result = await upsertItemAnswer(root, MONTH, "emp-1", makeItem("IMG-1"));
-    expect(result.ok).toBe(true);
-    const file = await loadEmployeeAnswers(root, MONTH, "emp-1");
-    expect(file.items.map((i) => i.xrayImageId)).toEqual(["IMG-1"]);
-    expect(snapshotMock).toHaveBeenCalledTimes(1);
+  // The literal production symptom, asserted at its source: the answer path
+  // must never so much as OPEN the history tree. Faulting on name length was
+  // the first instinct, but the answer event segments are themselves long
+  // enough to trip it, so the fault masked the thing under test. Asserting on
+  // the tree directly is both simpler and stricter — it fails for ANY history
+  // write reintroduced here, not just one long enough to break.
+  it("never creates the history tree during answer saves", async () => {
+    for (const id of ["IMG-1", "IMG-2", "IMG-3"]) {
+      const result = await upsertItemAnswer(root, MONTH, "emp-1", makeItem(id));
+      expect(result.ok).toBe(true);
+    }
+
+    const systemDir = await root.getDirectoryHandle("5-system", { create: false })
+      .catch(() => null);
+    if (systemDir) {
+      await expect(
+        systemDir.getDirectoryHandle("history", { create: false })
+      ).rejects.toThrow();
+    }
+
+    const noisy = getRecentErrors().filter(
+      (entry) =>
+        entry.context === "actionHistory:record" || entry.context === "safeWrite:writeText"
+    );
+    expect(noisy).toEqual([]);
+    expect(snapshotMock).not.toHaveBeenCalled();
   });
 });

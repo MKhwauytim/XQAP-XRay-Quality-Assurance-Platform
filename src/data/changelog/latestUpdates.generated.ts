@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v136.0",
+    "date": "2026-09-09",
+    "bucket": "redesign",
+    "scope": "history",
+    "title": "derive answers and distribution pre-change history from the event logs instead of copying it"
+  },
+  {
     "version": "v135.1",
     "date": "2026-09-09",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "approvals",
     "title": "recover a decision file that cannot be read, and stop reporting failed reads as empty history"
-  },
-  {
-    "version": "v133.0",
-    "date": "2026-09-08",
-    "bucket": "fix",
-    "scope": "workspace-reads",
-    "title": "a failed read is no longer presented as empty data"
   }
 ];

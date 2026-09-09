@@ -1,9 +1,8 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { safeReadJson, safeRemoveJson, safeWriteJson } from "../storage/safeWrite";
-import { listDirectoryEntries } from "../storage/directoryScan";
-import { isNotFoundError } from "../storage/transientFileErrors";
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { casLoop } from "../storage/casLoop";
 import { logError } from "../storage/errorLogger";
-import { errorCodeMeaning, errorCodeOf, logCodedError } from "../storage/errorCodes";
+import { errorCodeMeaning, logCodedError } from "../storage/errorCodes";
 import {
   getSystemRoot,
   SYSTEM_FOLDER_NAMES,
@@ -11,136 +10,108 @@ import {
 } from "../workspace/workspacePaths";
 
 /**
- * Rolling pre-change snapshot history (owner requirement, 2026-09-03): before
- * an admin/supervisor mutates a template, a distribution assignment
- * (reassignment/replacement/reopen), or an employee's answer, the state it is
- * about to overwrite is captured here so it can be inspected — or manually
- * put back — later.
+ * Pre-change snapshot history for TEMPLATES (owner requirement, 2026-09-03):
+ * before an admin overwrites a template, the state it is about to replace is
+ * captured so it can be inspected — or manually put back — later.
  *
- * Distinct from the two existing snapshot mechanisms in this codebase, which
- * this deliberately does NOT replace:
- *   - `safeWrite.ts`'s single `{file}.bak` is a torn-write recovery copy for
- *     EVERY workspace write, not a history — it holds exactly one prior
- *     revision and exists purely so a crash mid-write has something to roll
- *     back to.
- *   - `src/data/backup/` is a deliberate, whole-workspace snapshot (manual,
- *     scheduled, or pre-restore) — expensive by design (it walks and copies
- *     every JSON file in the workspace) and not meant to run on every edit.
+ * WHY ONLY TEMPLATES. The requirement originally covered answers and
+ * distribution assignments too, and this module wrote a file for each. It
+ * should never have: for those two families the pre-change state is ALREADY on
+ * disk, immutably and permanently, in the logs the app keeps forever —
+ * `answers.events/*.ndjson` (append-only, never pruned) and
+ * `distribution.events/{eventId}.json` (immutable by contract). Folding those
+ * to the point before event N reproduces exactly what a snapshot stored. The
+ * writer was duplicating state the app already had, which is the failure mode
+ * CLAUDE.md's one-place rule exists to prevent.
  *
- * This module is the middle ground: a per-RECORD trail, automatic on every
- * matching action, cheap enough to run on every one of them (one small file
- * write + a bounded prune), capped at ACTION_HISTORY_RETENTION_COUNT entries
- * per record so it cannot grow without bound.
+ * It also cost the requirement its own delivery. Duplicating per-record meant a
+ * per-record DIRECTORY, and the resulting path
+ * (`…/history/answers/{month}/{user}/{xrayImageId}/{36-char timestamp}.json`,
+ * ~115 characters relative) crosses Windows' 260-character cap on a workspace
+ * that already sits deep on the UNC share. On the deployment in the 2026-09-08/09
+ * error log it failed on EVERY answer save, ~50 times in three hours, twice per
+ * save. So the feature the owner asked for was not merely expensive there — it
+ * had never once worked.
  *
- * `loadActionHistory` below is not yet wired into any admin-facing UI — this
- * lands the write path and the on-disk record first; a review/restore screen
- * is a natural follow-up, not part of this change.
+ * `actionHistoryReaders.ts` now serves those two families by folding the event
+ * logs, which is the same information with no second copy and no deep path.
+ * A template save is the one genuine whole-file overwrite with no event log
+ * behind it, so it keeps a real file — and, being one file per record rather
+ * than a directory per record, a short one.
+ *
+ * Distinct from the two other snapshot mechanisms here, which this does NOT
+ * replace: `safeWrite.ts`'s single `{file}.bak` is a torn-write recovery copy
+ * holding exactly one prior revision, and `src/data/backup/` is a deliberate
+ * whole-workspace snapshot.
  */
 export const ACTION_HISTORY_RETENTION_COUNT = 10;
 
+/**
+ * Which families the app can show a pre-change history for. Only `templates`
+ * is FILE-backed; the other two are derived by `actionHistoryReaders.ts`. The
+ * union is kept whole because it still names what a caller can ask to see.
+ */
 export type ActionHistoryFamily = "templates" | "answers" | "distribution";
 
 export type ActionHistorySnapshot<T> = {
   snapshotAt: string;
   actor: string;
   action: string;
-  /** State immediately BEFORE this action. `null` when the record did not exist yet — nothing to roll back to. */
+  /** State immediately BEFORE this action. `null` when the record did not exist yet. */
   state: T | null;
 };
 
-function sanitizeScopePart(value: string): string {
+/**
+ * The stored document. An OBJECT, not a bare `ActionHistorySnapshot[]`,
+ * specifically so `revision` and `_writeToken` have somewhere to live: two
+ * admins on two machines can save the same template inside the CAS verify
+ * window, and without a token to verify on read-back the loser's snapshot is
+ * silently lost — the exact false-positive-revision case `casLoop.ts` exists to
+ * catch. Same shape as `audit/actionLog.ts`'s document for the same reason.
+ */
+export type ActionHistoryDocument<T> = {
+  recordId: string;
+  revision: number;
+  _writeToken: string;
+  /** Newest first, capped at ACTION_HISTORY_RETENTION_COUNT. */
+  snapshots: ActionHistorySnapshot<T>[];
+};
+
+function sanitizeRecordId(value: string): string {
   const cleaned = value.replace(/[\\/:*?"<>|]+/g, "_").replace(/\s+/g, "_").slice(0, 120);
   return cleaned || "_";
 }
 
-async function getHistoryScopeDir(
+/** `5-system/history/{family}/` — one flat directory per family, no nesting. */
+async function getHistoryFamilyDir(
   directoryHandle: DirectoryHandleLike,
-  family: ActionHistoryFamily,
-  scopeParts: readonly string[]
+  family: ActionHistoryFamily
 ): Promise<DirectoryHandleLike> {
   const systemDir = await getSystemRoot(directoryHandle, true);
-  let dir = await systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.history, { create: true });
-  dir = await dir.getDirectoryHandle(family, { create: true });
-  for (const part of scopeParts) {
-    dir = await dir.getDirectoryHandle(sanitizeScopePart(part), { create: true });
-  }
-  return dir;
-}
-
-// Per-tab monotonic counter, not a random suffix: two snapshots minted in the
-// SAME millisecond (a realistic case — a fast admin loop, or this module's
-// own tests) must still sort in the order they were actually taken, or
-// pruning can drop the wrong entry and loadActionHistory can report the
-// wrong one as "newest". A random suffix cannot guarantee that; an
-// ever-increasing counter can, within this tab (the only writer whose
-// relative order this module needs to get right — a genuine cross-machine
-// tie is an ordering call no local counter could resolve consistently
-// anyway, and either order is defensibly "recent").
-let snapshotSequence = 0;
-
-function snapshotFileName(now: Date): string {
-  // ISO-with-millis prefix sorts lexicographically in chronological order, so
-  // pruning can drop "the oldest N" with a plain string sort — no need to
-  // parse the name back into a Date.
-  const iso = now.toISOString().replace(/[:.]/g, "-");
-  snapshotSequence = (snapshotSequence + 1) % 1_000_000;
-  const seq = String(snapshotSequence).padStart(6, "0");
-  return `${iso}-${seq}.json`;
+  const historyDir = await systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.history, {
+    create: true,
+  });
+  return historyDir.getDirectoryHandle(family, { create: true });
 }
 
 /**
- * Scope PREFIXES (every `scopeParts` entry except the last) already proven
- * unwritable this session because the resulting path is too long for the
- * filesystem (`XQ-IO-034`, see `transientFileErrors.ts`'s `classifyNotFound`).
+ * The longest RELATIVE path (workspace root → file, including the
+ * `.tmp.crswap` suffix Chromium appends while staging) this module will
+ * attempt on the share.
  *
- * The last scope part is typically a per-record id (an `xrayImageId`, an
- * event key) that differs on every call, so every save an employee makes
- * would otherwise mint a never-before-seen directory and pay the full cost of
- * discovering the SAME verdict again: `writeText`'s retry ladder (~630 ms)
- * plus `classifyNotFound`'s own round-trip probes (over a second more) — pure
- * added latency on a save that was already going to succeed, since this
- * write is best-effort and never gates it. A path-length limit is a property
- * of the shared prefix (how deep the workspace already sits on the share),
- * not of the one differing record id, so once one record under a prefix has
- * proven it unwritable, every sibling is written off too — same reasoning as
- * `bakRecoveryReport.ts`'s "one entry per file per session" cache for a
- * different permanently-repeating condition.
- */
-const knownUnwritableScopePrefixes = new Set<string>();
-
-/**
- * The longest RELATIVE path (workspace root → file, including the `.tmp.crswap`
- * suffix Chromium appends while staging) this module will attempt on the share.
+ * 94 is measured, not guessed. The 2026-09-09 production log shows paths of
+ * 115 relative characters failing on every answer save, while every other file
+ * the app wrote in the same sessions against the same workspace root — all
+ * under 94 — succeeded. 94 is therefore the longest relative path that
+ * deployment is known to accept.
  *
- * WHY A NUMBER, AND WHY THIS NUMBER. Windows caps a full path at 260
- * characters. What a workspace has left of that budget depends on how deep its
- * root sits on the share, which this app cannot see — but the 2026-09-09
- * production log measures it for the deployment that failed. Every answer save
- * by two employees, ~50 in three hours, failed on paths like
- * `5-system/history/answers/{month}/{user}/{xrayImageId}/2026-09-09T09-03-07-106Z-000023.json.tmp`
- * — 115 characters relative — while every OTHER file the app writes, all under
- * 94 relative, succeeded in the same session against the same root. 94 is
- * therefore not a guess: it is the longest relative path that deployment is
- * known to accept, taken as the budget.
- *
- * WHY CHECK BEFORE TOUCHING DISK. The path-length limit is a property of the
- * name, so the verdict is knowable without asking the share. Discovering it by
- * trying cost `writeText`'s five-attempt ladder (~630 ms) plus
- * `classifyNotFound`'s own round-trip probes (a second more) — and the trailing
- * scope part is a per-record id, so nearly every save minted a never-before-
- * seen directory and paid it again. `knownUnwritableScopePrefixes` (v134.4)
- * caches the verdict, but only within one tab: it resets on every page load,
- * and it can only cache AFTER paying the full cost once. This check is the same
- * verdict reached for free, every time, and it also stops the `create: true`
- * directory handles that were minting an empty `{xrayImageId}` folder per save
- * on the way to a write that could not succeed.
- *
- * This is a GUARD, not the fix for the layout. The real remedy is for these
- * paths to be short enough that no budget is needed — a reshaping of the
- * history tree that changes what is on disk, and so needs owner sign-off and
- * its own migration. Until then this makes the failure free and honest instead
- * of expensive and repeated, and `historyRelativePath` gives that reshaping a
- * single place to be measured from.
+ * With the flat one-file-per-record layout the worst case this module can
+ * produce is `5-system/history/templates/{120-char sanitized id}.json.tmp.crswap`,
+ * and for a real minted template id
+ * (`tmpl-1787457917309-ngm1iq`) it is 68 — comfortably inside the budget. The
+ * check is kept anyway, and kept BEFORE any handle is opened, because it is
+ * the tripwire that makes a future deepening of this tree fail in the test
+ * suite instead of silently on a customer's share.
  */
 export const HISTORY_MAX_RELATIVE_PATH_CHARS = 94;
 
@@ -148,22 +119,16 @@ export const HISTORY_MAX_RELATIVE_PATH_CHARS = 94;
 const STAGING_SUFFIX = ".tmp.crswap";
 
 /**
- * The workspace-root-relative path `recordActionHistorySnapshot` would write,
- * built from the same parts `getHistoryScopeDir` and `snapshotFileName` use.
- * Exported so a test can assert the budget holds for every family and the
- * longest id the app can mint, rather than for one hand-picked example.
+ * The workspace-root-relative path this module would write for `recordId`.
+ * Exported so a test can assert the budget for every family and the longest id
+ * the app can mint, rather than for one hand-picked example.
  */
-export function historyRelativePath(
-  family: ActionHistoryFamily,
-  scopeParts: readonly string[],
-  fileName: string
-): string {
+export function historyRelativePath(family: ActionHistoryFamily, recordId: string): string {
   return [
     WORKSPACE_ROOTS.system,
     SYSTEM_FOLDER_NAMES.history,
     family,
-    ...scopeParts.map(sanitizeScopePart),
-    fileName,
+    `${sanitizeRecordId(recordId)}.json`,
   ].join("/");
 }
 
@@ -175,60 +140,38 @@ export function __resetActionHistoryBudgetReportsForTests(): void {
   budgetSkipsReported.clear();
 }
 
-/** @internal — test-only. Forget which scope prefixes were given up on. */
-export function __resetActionHistoryUnwritableScopesForTests(): void {
-  knownUnwritableScopePrefixes.clear();
-}
-
-function scopePrefixKey(family: ActionHistoryFamily, scopeParts: readonly string[]): string {
-  return `${family}/${scopeParts.slice(0, -1).map(sanitizeScopePart).join("/")}`;
-}
-
 /**
- * Record the state a mutation is about to overwrite, then prune this
- * record's history down to the most recent ACTION_HISTORY_RETENTION_COUNT
- * snapshots.
+ * Record the state a template save is about to overwrite, keeping the most
+ * recent ACTION_HISTORY_RETENTION_COUNT snapshots.
  *
- * Best-effort by design, mirroring `refreshAnswerCacheAfterWrite` /
- * `invalidateDistributionCaches` elsewhere in this codebase: a history write
- * that fails must never fail (or even retry-loop) the real mutation it is
- * documenting. Call this BEFORE the real write, with the state read just
- * before it — a crash between the snapshot and the real write only ever
- * costs the newest history entry, never corrupts the trail or the live data.
+ * Best-effort by design: a history write that fails must never fail — or even
+ * retry-loop — the real save it is documenting. Call this BEFORE the real
+ * write, with the state read just before it; a crash in between costs only the
+ * newest history entry, never the trail or the live data.
  */
 export async function recordActionHistorySnapshot<T>(params: {
   directoryHandle: DirectoryHandleLike;
-  family: ActionHistoryFamily;
-  scopeParts: readonly string[];
+  /** Only `templates` is file-backed — see this module's header. */
+  family: "templates";
+  recordId: string;
   actor: string;
   action: string;
   previousState: T | null;
 }): Promise<void> {
-  const prefixKey = scopePrefixKey(params.family, params.scopeParts);
-  if (knownUnwritableScopePrefixes.has(prefixKey)) return;
-
-  // Budget check BEFORE any handle is opened — see
-  // HISTORY_MAX_RELATIVE_PATH_CHARS. A path that cannot fit is skipped without
-  // a single call to the share: no `create: true` directory minted, no retry
-  // ladder, no cause probes, and one log row per family per session instead of
-  // two per save.
-  // Minted ONCE and reused for the real write below: snapshotFileName advances
-  // the per-tab sequence counter that keeps same-millisecond snapshots in
-  // order, so calling it twice per save would burn a number for nothing.
-  const now = new Date();
-  const plannedName = snapshotFileName(now);
-  const plannedPath = historyRelativePath(params.family, params.scopeParts, plannedName);
-  if (plannedPath.length + STAGING_SUFFIX.length > HISTORY_MAX_RELATIVE_PATH_CHARS) {
+  const relativePath = historyRelativePath(params.family, params.recordId);
+  if (relativePath.length + STAGING_SUFFIX.length > HISTORY_MAX_RELATIVE_PATH_CHARS) {
+    // Decided in memory, before a single call reaches the share: no directory
+    // minted, no retry ladder, no cause probes, and one log row per family per
+    // session rather than two per save. Numbers first — the durable log
+    // truncates, and the measurement is the actionable part.
     if (!budgetSkipsReported.has(params.family)) {
       budgetSkipsReported.add(params.family);
       logCodedError(
         "actionHistory:path-budget",
         "XQ-IO-037",
-        // Numbers and path FIRST: the durable log truncates long messages, and
-        // the actionable part is the measurement, not the catalog prose.
         new Error(
-          `${plannedPath.length + STAGING_SUFFIX.length} chars vs a ` +
-            `${HISTORY_MAX_RELATIVE_PATH_CHARS} budget for "${plannedPath}" — ` +
+          `${relativePath.length + STAGING_SUFFIX.length} chars vs a ` +
+            `${HISTORY_MAX_RELATIVE_PATH_CHARS} budget for "${relativePath}" — ` +
             errorCodeMeaning("XQ-IO-037")
         )
       );
@@ -236,69 +179,73 @@ export async function recordActionHistorySnapshot<T>(params: {
     return;
   }
 
+  const fileName = `${sanitizeRecordId(params.recordId)}.json`;
+
   try {
-    const dir = await getHistoryScopeDir(params.directoryHandle, params.family, params.scopeParts);
+    const dir = await getHistoryFamilyDir(params.directoryHandle, params.family);
     const snapshot: ActionHistorySnapshot<T> = {
-      snapshotAt: now.toISOString(),
+      // Stamped here rather than passed in: the caller has no reason to know
+      // the clock, and every snapshot in one document must be comparable.
+      snapshotAt: new Date().toISOString(),
       actor: params.actor.trim() || "unknown",
       action: params.action,
       state: params.previousState,
     };
-    await safeWriteJson(dir, plannedName, snapshot);
-    await pruneActionHistory(dir);
+
+    await casLoop<{ ok: true }>(
+      async (writeToken) => {
+        const existing = await safeReadJson<ActionHistoryDocument<T>>(dir, fileName);
+        const current = existing.ok ? existing.value : null;
+        const next: ActionHistoryDocument<T> = {
+          recordId: params.recordId,
+          revision: (current?.revision ?? 0) + 1,
+          _writeToken: writeToken,
+          // Newest first, then truncate — pruning is an array slice, so there
+          // is no directory listing and no per-file removal pass.
+          snapshots: [snapshot, ...(current?.snapshots ?? [])].slice(
+            0,
+            ACTION_HISTORY_RETENTION_COUNT
+          ),
+        };
+        await safeWriteJson(dir, fileName, next);
+        const readBack = await safeReadJson<ActionHistoryDocument<T>>(dir, fileName);
+        if (!readBack.ok || readBack.value._writeToken !== writeToken) {
+          return { done: false };
+        }
+        return { done: true, result: { ok: true } };
+      },
+      // Deliberately short. This is best-effort documentation of a save that
+      // has its OWN casLoop; a long ladder here would hammer a share that is
+      // already contended for something that never gates the save.
+      { maxRetries: 2, baseDelayMs: 60 }
+    );
   } catch (error) {
-    if (isNotFoundError(error) && errorCodeOf(error) === "XQ-IO-034") {
-      // Permanent for this prefix — see the cache's doc above. Logged once
-      // (below, this call) rather than never again: an admin exporting the
-      // error log still needs to see it happened at least once.
-      knownUnwritableScopePrefixes.add(prefixKey);
-    }
     logError("actionHistory:record", error instanceof Error ? error : new Error(String(error)), {
       action: `${params.family}:${params.action}`,
     });
   }
 }
 
-async function pruneActionHistory(dir: DirectoryHandleLike): Promise<void> {
-  if (!dir.removeEntry) return;
-  const entries = await listDirectoryEntries(dir);
-  const names = entries
-    .filter((entry) => entry.kind === "file" && entry.name.endsWith(".json"))
-    .map((entry) => entry.name)
-    .sort((a, b) => a.localeCompare(b));
-  const excess = names.length - ACTION_HISTORY_RETENTION_COUNT;
-  if (excess <= 0) return;
-  for (const name of names.slice(0, excess)) {
-    try {
-      // Pruned snapshots are safeWriteJson-managed, so their `.bak` siblings
-      // must go with them — otherwise loadActionHistory keeps recovering a
-      // snapshot the retention cap already dropped.
-      await safeRemoveJson(dir, name);
-    } catch (error) {
-      if (!isNotFoundError(error)) {
-        logError("actionHistory:prune", error instanceof Error ? error : new Error(String(error)));
-      }
-    }
-  }
-}
-
-/** Read back this record's history, newest first — for an admin-facing history/restore view. */
+/**
+ * The template snapshot trail, newest first. Empty when the template has no
+ * history yet, or when the file cannot be read — this is a review surface, not
+ * a correctness input, so an unreadable trail degrades to "nothing to show"
+ * rather than throwing into a save path.
+ */
 export async function loadActionHistory<T>(
   directoryHandle: DirectoryHandleLike,
-  family: ActionHistoryFamily,
-  scopeParts: readonly string[]
+  family: "templates",
+  recordId: string
 ): Promise<ActionHistorySnapshot<T>[]> {
-  const dir = await getHistoryScopeDir(directoryHandle, family, scopeParts);
-  const entries = await listDirectoryEntries(dir);
-  const names = entries
-    .filter((entry) => entry.kind === "file" && entry.name.endsWith(".json"))
-    .map((entry) => entry.name)
-    .sort((a, b) => b.localeCompare(a));
-
-  const snapshots: ActionHistorySnapshot<T>[] = [];
-  for (const name of names) {
-    const result = await safeReadJson<ActionHistorySnapshot<T>>(dir, name);
-    if (result.ok) snapshots.push(result.value);
+  try {
+    const dir = await getHistoryFamilyDir(directoryHandle, family);
+    const result = await safeReadJson<ActionHistoryDocument<T>>(
+      dir,
+      `${sanitizeRecordId(recordId)}.json`
+    );
+    return result.ok ? result.value.snapshots : [];
+  } catch (error) {
+    logError("actionHistory:load", error instanceof Error ? error : new Error(String(error)));
+    return [];
   }
-  return snapshots;
 }
