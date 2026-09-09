@@ -1,12 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { safeWriteJson } from "../storage/safeWrite";
 import {
   ACTION_HISTORY_RETENTION_COUNT,
+  __resetActionHistoryUnwritableScopesForTests,
   loadActionHistory,
   recordActionHistorySnapshot,
 } from "./actionHistory";
+
+vi.mock("../storage/safeWrite", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../storage/safeWrite")>();
+  return { ...actual, safeWriteJson: vi.fn(actual.safeWriteJson) };
+});
+const safeWriteJsonMock = vi.mocked(safeWriteJson);
 
 function makeRoot(): DirectoryHandleLike {
   return createMemoryDirectory("root") as DirectoryHandleLike;
@@ -112,5 +120,70 @@ describe("recordActionHistorySnapshot / loadActionHistory", () => {
         previousState: null,
       })
     ).resolves.toBeUndefined();
+  });
+
+  describe("name-too-long scope prefixes are given up on after the first failure", () => {
+    beforeEach(() => {
+      __resetActionHistoryUnwritableScopesForTests();
+      safeWriteJsonMock.mockClear();
+    });
+
+    it("stops writing to sibling per-record directories under a prefix once one proves name-too-long", async () => {
+      const root = makeRoot();
+      const nameTooLong = new Error("NotFoundError persisted after 5 attempts (cause=name-too-long)");
+      nameTooLong.name = "NotFoundError";
+      (nameTooLong as { xqErrorCode?: string }).xqErrorCode = "XQ-IO-034";
+      safeWriteJsonMock.mockRejectedValueOnce(nameTooLong);
+
+      // Two different xrayImageIds (the last scope part) under the SAME
+      // (month, employee) prefix — real production shape, where every save
+      // mints a brand-new deepest directory.
+      await recordActionHistorySnapshot({
+        directoryHandle: root,
+        family: "answers",
+        scopeParts: ["5-may-2026", "emp1", "XR-1"],
+        actor: "emp1",
+        action: "answer:answer-save",
+        previousState: null,
+      });
+      expect(safeWriteJsonMock).toHaveBeenCalledTimes(1);
+
+      await recordActionHistorySnapshot({
+        directoryHandle: root,
+        family: "answers",
+        scopeParts: ["5-may-2026", "emp1", "XR-2"],
+        actor: "emp1",
+        action: "answer:answer-save",
+        previousState: null,
+      });
+      // The second call's prefix ("answers/5-may-2026/emp1") already proved
+      // unwritable — it must short-circuit before ever calling safeWriteJson
+      // again, rather than re-discovering the same verdict at full cost.
+      expect(safeWriteJsonMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not cache a different, unrelated failure", async () => {
+      const root = makeRoot();
+      safeWriteJsonMock.mockRejectedValueOnce(new Error("boom"));
+      safeWriteJsonMock.mockRejectedValueOnce(new Error("boom"));
+
+      await recordActionHistorySnapshot({
+        directoryHandle: root,
+        family: "answers",
+        scopeParts: ["5-may-2026", "emp1", "XR-1"],
+        actor: "emp1",
+        action: "answer:answer-save",
+        previousState: null,
+      });
+      await recordActionHistorySnapshot({
+        directoryHandle: root,
+        family: "answers",
+        scopeParts: ["5-may-2026", "emp1", "XR-2"],
+        actor: "emp1",
+        action: "answer:answer-save",
+        previousState: null,
+      });
+      expect(safeWriteJsonMock).toHaveBeenCalledTimes(2);
+    });
   });
 });

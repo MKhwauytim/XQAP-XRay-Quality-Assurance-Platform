@@ -5,6 +5,20 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v134.4",
+    "date": "2026-09-09",
+    "bucket": "feature",
+    "scope": "answers",
+    "title": "local IndexedDB backup for saved answers, reconciled on load and every 60s; Fix (history): stop re-discovering the same name-too-long path limit on every save"
+  },
+  {
+    "version": "v134.3",
+    "date": "2026-09-08",
+    "bucket": "fix",
+    "scope": "approvals",
+    "title": "approveReplacement no longer trusts a stale distribution cache; Add (templates): admin repair for template files stuck serving from .bak"
+  },
+  {
     "version": "v134.2",
     "date": "2026-09-08",
     "bucket": "fix",
@@ -59,19 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "templates",
     "title": "keep answered-under-a-deleted-template results resolvable by question label"
-  },
-  {
-    "version": "v131.19",
-    "date": "2026-09-03",
-    "bucket": "fix",
-    "scope": "e2e",
-    "title": "update employee-queue.spec.ts's case-chip counts for the مستهدف المؤشر redefinition"
-  },
-  {
-    "version": "v131.18",
-    "date": "2026-09-03",
-    "bucket": "redesign",
-    "scope": "employee-workspace",
-    "title": "extract the queue's selection helpers so XrayReferrals clears the max-lines gate again"
   }
 ];

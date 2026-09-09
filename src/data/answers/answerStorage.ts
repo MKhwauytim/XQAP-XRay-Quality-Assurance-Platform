@@ -60,6 +60,7 @@ import {
   safeWorkspaceFilePart,
 } from "../workspace/workspacePaths";
 import { recordActionHistorySnapshot } from "../history/actionHistory";
+import { loadMirroredAnswers, mirrorAnswerLocally } from "./answerLocalMirror";
 
 export { ANSWER_EVENTS_DIR, ANSWER_EVENT_SEGMENT_SUFFIX };
 
@@ -781,6 +782,12 @@ async function performAnswerWrite(
   // the snapshot is explicitly best-effort, never gates the append, and every
   // attempt records the same pre-change state.
   let historyRecorded = false;
+  // The item state to mirror locally once the append succeeds — built from
+  // the same in-memory `previous`/`event` the retry body already computed, so
+  // mirroring never costs an extra disk read. Set on the LAST attempt only
+  // (each retry overwrites it), which is exactly the state that ends up
+  // durably appended.
+  let mirrorCandidate: ItemAnswer | null = null;
 
   return casLoop<{ ok: true } | { ok: false; error: string }>(
     async () => {
@@ -810,6 +817,20 @@ async function performAnswerWrite(
 
       const event: AnswerEvent = { ...decision.event, eventId, eventAt, answeredBy: username };
       const batch = seedEvent ? [seedEvent, event] : [event];
+      mirrorCandidate = {
+        xrayImageId: event.xrayImageId ?? xrayImageId,
+        templateId: event.templateId ?? previous?.templateId ?? "",
+        templateVersion: event.templateVersion ?? previous?.templateVersion ?? 1,
+        answers: event.answers ?? previous?.answers ?? [],
+        lastSavedAt: event.lastSavedAt ?? eventAt,
+        submittedAt: event.submittedAt ?? previous?.submittedAt ?? null,
+        answeredBy: username,
+        status: event.status ?? previous?.status ?? "draft",
+        history: previous?.history,
+        valueHistory: previous?.valueHistory,
+        qualityNote: previous?.qualityNote,
+        answeredOnBehalfBy: event.answeredOnBehalfBy,
+      };
       // Pre-change snapshot (owner requirement, 2026-09-03): the item's state
       // right before this event, kept as a rolling last-10 history per
       // (month, employee, item) — the answers-family parity fix for the
@@ -851,9 +872,67 @@ async function performAnswerWrite(
     // save's own success — same contract as distribution's
     // `refreshDistributionCacheAfterWrite` (awaited, wrapped so its own
     // failure can never flip a successful save to a failure).
-    if (result.ok) await refreshAnswerCacheAfterWrite(directoryHandle, monthFolderName);
+    if (result.ok) {
+      await refreshAnswerCacheAfterWrite(directoryHandle, monthFolderName);
+      // Best-effort local backup — built from in-memory state above, so this
+      // never costs an extra read of the file it is backing up.
+      // `mirrorAnswerLocally` never throws (see its own doc comment).
+      if (mirrorCandidate) await mirrorAnswerLocally(monthFolderName, username, mirrorCandidate);
+    }
     return result;
   });
+}
+
+/**
+ * Reconcile this browser's local IndexedDB backup with the workspace file for
+ * one employee's one month — the "sign-in" / periodic side of the local
+ * mirror (see `answerLocalMirror.ts`'s module doc for why this exists and why
+ * it never deletes on either side).
+ *
+ * Two passes, both additive-only:
+ *  1. Any mirrored item that the file either lacks or holds an OLDER
+ *     `lastSavedAt` for is replayed into the file through the normal
+ *     `upsertItemAnswer` path — the same casLoop-protected, conflict-safe
+ *     append every real save goes through, never a raw overwrite.
+ *  2. The file is re-read (picking up anything just replayed) and every one
+ *     of its items is written back into the mirror, so a browser that just
+ *     had an empty/reset IndexedDB ends this call caught back up — restoring
+ *     from an empty mirror only ever ADDS entries, it never removes the
+ *     file's own data.
+ *
+ * Best-effort throughout: called opportunistically (on load, and on a
+ * periodic tick from the UI), never gates rendering the employee's answers.
+ */
+export async function reconcileAnswersWithLocalMirror(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  username: string
+): Promise<void> {
+  try {
+    const [file, mirrored] = await Promise.all([
+      loadEmployeeAnswers(directoryHandle, monthFolderName, username),
+      loadMirroredAnswers(monthFolderName, username),
+    ]);
+
+    const onDiskByImage = new Map(file.items.map((item) => [item.xrayImageId, item]));
+    let replayedAny = false;
+    for (const mirroredItem of mirrored) {
+      const onDisk = onDiskByImage.get(mirroredItem.xrayImageId);
+      const mirrorIsNewer = !onDisk || mirroredItem.lastSavedAt > onDisk.lastSavedAt;
+      if (!mirrorIsNewer) continue;
+      const result = await upsertItemAnswer(directoryHandle, monthFolderName, username, mirroredItem);
+      if (result.ok) replayedAny = true;
+    }
+
+    const finalFile = replayedAny
+      ? await loadEmployeeAnswers(directoryHandle, monthFolderName, username)
+      : file;
+    for (const item of finalFile.items) {
+      await mirrorAnswerLocally(monthFolderName, username, item);
+    }
+  } catch (error) {
+    logError("answers:mirror-reconcile", error instanceof Error ? error : new Error(String(error)));
+  }
 }
 
 /**

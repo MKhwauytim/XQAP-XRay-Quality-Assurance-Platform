@@ -19,6 +19,7 @@ import {
 import {
   loadAllEmployeeFiles,
   loadEmployeeAnswers,
+  reconcileAnswersWithLocalMirror,
   setItemQualityNote,
 } from "../../../../../data/answers/answerStorage";
 import type { ItemAnswer } from "../../../../../data/answers/answerTypes";
@@ -323,6 +324,15 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
           return entry.status !== "replaced";
         });
 
+      // Reconcile this browser's local IndexedDB backup with the file for the
+      // signed-in employee's OWN answers — never for `canSeeAll` (a supervisor
+      // browsing other employees' answers must not mix another employee's
+      // records into or out of this browser's own local mirror). Fire-and-forget:
+      // best-effort by contract (see answerLocalMirror.ts) and must never delay
+      // or fail this render.
+      if (!canSeeAll) {
+        void reconcileAnswersWithLocalMirror(directoryHandle, selectedMonth, username);
+      }
       const answerFiles = canSeeAll
         ? await loadAllEmployeeFiles(directoryHandle, selectedMonth)
         : [await loadEmployeeAnswers(directoryHandle, selectedMonth, username)];
@@ -384,6 +394,21 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [loadData]);
+
+  // Extra, independent-of-navigation local backup tick (owner requirement,
+  // 2026-09-09): every 60s while an employee has their own results view open,
+  // re-run the IndexedDB reconciliation above — mirroring whatever is
+  // currently on disk into this browser's local backup, and replaying back
+  // anything the mirror has that the file doesn't (e.g. a save that reached
+  // the browser but never made it to the shared folder). Skipped entirely for
+  // `canSeeAll` — same reasoning as the loadData call above.
+  useEffect(() => {
+    if (canSeeAll || !selectedMonth) return;
+    const interval = window.setInterval(() => {
+      void reconcileAnswersWithLocalMirror(directoryHandle, selectedMonth, username);
+    }, 60_000);
+    return () => window.clearInterval(interval);
+  }, [canSeeAll, directoryHandle, selectedMonth, username]);
 
   // Re-fetch on the app-wide refresh signal (manual toolbar button + periodic
   // sync tick) so results/movements recorded elsewhere show up here too. Family-scoped
