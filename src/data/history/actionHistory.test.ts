@@ -1,189 +1,139 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
-import { createMemoryDirectory } from "../storage/memoryDirectory";
-import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { safeWriteJson } from "../storage/safeWrite";
 import {
   ACTION_HISTORY_RETENTION_COUNT,
-  __resetActionHistoryUnwritableScopesForTests,
+  __resetActionHistoryBudgetReportsForTests,
   loadActionHistory,
   recordActionHistorySnapshot,
 } from "./actionHistory";
+import {
+  clearOperationLog,
+  createMemoryDirectory,
+  getOperationLog,
+} from "../storage/memoryDirectory";
+import { listDirectoryEntries } from "../storage/directoryScan";
+import { clearErrors } from "../storage/errorLogger";
+import { getSystemRoot, SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
 
-vi.mock("../storage/safeWrite", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../storage/safeWrite")>();
-  return { ...actual, safeWriteJson: vi.fn(actual.safeWriteJson) };
-});
-const safeWriteJsonMock = vi.mocked(safeWriteJson);
+type Template = { templateName: string };
 
-function makeRoot(): DirectoryHandleLike {
-  return createMemoryDirectory("root") as DirectoryHandleLike;
+async function templatesHistoryEntries(root: ReturnType<typeof createMemoryDirectory>) {
+  const systemDir = await getSystemRoot(root, true);
+  const historyDir = await systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.history, {
+    create: true,
+  });
+  const familyDir = await historyDir.getDirectoryHandle("templates", { create: true });
+  return listDirectoryEntries(familyDir);
 }
 
-describe("recordActionHistorySnapshot / loadActionHistory", () => {
-  it("records the previous state and reads it back newest-first", async () => {
-    const root = makeRoot();
-    await recordActionHistorySnapshot({
-      directoryHandle: root,
-      family: "templates",
-      scopeParts: ["tmpl-1"],
-      actor: "admin",
-      action: "template-create",
-      previousState: null,
-    });
-    await recordActionHistorySnapshot({
-      directoryHandle: root,
-      family: "templates",
-      scopeParts: ["tmpl-1"],
-      actor: "admin",
-      action: "template-edit",
-      previousState: { templateId: "tmpl-1", version: 1 },
-    });
+async function record(
+  root: ReturnType<typeof createMemoryDirectory>,
+  recordId: string,
+  previousState: Template | null,
+  action = "template-edit"
+) {
+  await recordActionHistorySnapshot<Template>({
+    directoryHandle: root,
+    family: "templates",
+    recordId,
+    actor: "admin",
+    action,
+    previousState,
+  });
+}
 
-    const history = await loadActionHistory(root, "templates", ["tmpl-1"]);
-    expect(history).toHaveLength(2);
-    expect(history[0]!.action).toBe("template-edit");
-    expect(history[0]!.state).toEqual({ templateId: "tmpl-1", version: 1 });
-    expect(history[1]!.action).toBe("template-create");
-    expect(history[1]!.state).toBeNull();
+describe("template action history", () => {
+  beforeEach(() => {
+    clearErrors();
+    __resetActionHistoryBudgetReportsForTests();
   });
 
-  it("keeps distinct scopes (e.g. different template ids) separate", async () => {
-    const root = makeRoot();
-    await recordActionHistorySnapshot({
-      directoryHandle: root,
-      family: "templates",
-      scopeParts: ["tmpl-a"],
-      actor: "admin",
-      action: "template-edit",
-      previousState: { templateId: "tmpl-a" },
-    });
-    await recordActionHistorySnapshot({
-      directoryHandle: root,
-      family: "templates",
-      scopeParts: ["tmpl-b"],
-      actor: "admin",
-      action: "template-edit",
-      previousState: { templateId: "tmpl-b" },
-    });
-
-    const a = await loadActionHistory(root, "templates", ["tmpl-a"]);
-    const b = await loadActionHistory(root, "templates", ["tmpl-b"]);
-    expect(a).toHaveLength(1);
-    expect(b).toHaveLength(1);
-    expect(a[0]!.state).toEqual({ templateId: "tmpl-a" });
-    expect(b[0]!.state).toEqual({ templateId: "tmpl-b" });
-  });
-
-  it("prunes to the most recent ACTION_HISTORY_RETENTION_COUNT snapshots", async () => {
-    const root = makeRoot();
-    for (let i = 0; i < ACTION_HISTORY_RETENTION_COUNT + 5; i += 1) {
-      await recordActionHistorySnapshot({
-        directoryHandle: root,
-        family: "answers",
-        scopeParts: ["5-may-2026", "emp1", "XR-1"],
-        actor: "emp1",
-        action: "answer:answer-save",
-        previousState: { revision: i },
-      });
+  it("keeps snapshots newest-first and caps them at the retention count", async () => {
+    const root = createMemoryDirectory("workspace");
+    for (let index = 0; index < ACTION_HISTORY_RETENTION_COUNT + 2; index += 1) {
+      await record(root, "tmpl-1", { templateName: `v${index}` });
     }
 
-    const history = await loadActionHistory<{ revision: number }>(root, "answers", [
-      "5-may-2026",
-      "emp1",
-      "XR-1",
-    ]);
-    expect(history).toHaveLength(ACTION_HISTORY_RETENTION_COUNT);
-    // Newest first, and the oldest entries were pruned away.
-    expect(history[0]!.state?.revision).toBe(ACTION_HISTORY_RETENTION_COUNT + 4);
-    expect(history[history.length - 1]!.state?.revision).toBe(5);
+    const snapshots = await loadActionHistory<Template>(root, "templates", "tmpl-1");
+
+    expect(snapshots).toHaveLength(ACTION_HISTORY_RETENTION_COUNT);
+    expect(snapshots[0]!.state).toEqual({ templateName: "v11" });
+    expect(snapshots.at(-1)!.state).toEqual({ templateName: "v2" });
   });
 
-  it("never throws even when the write fails (best-effort)", async () => {
-    const root = makeRoot();
-    // A directory handle whose getDirectoryHandle rejects simulates a
-    // workspace write failure — recordActionHistorySnapshot must swallow it.
-    const brokenSystemDir = {
-      ...root,
-      getDirectoryHandle: async () => {
-        throw new Error("boom");
-      },
-    } as unknown as DirectoryHandleLike;
+  // The layout tripwire. A per-record DIRECTORY is what pushed the path over
+  // Windows' cap and made the whole feature fail on a deep workspace, so
+  // "one FILE per record, no nesting" is the property to defend.
+  it("never nests: one file per record and zero directories", async () => {
+    const root = createMemoryDirectory("workspace");
+    for (let index = 0; index < 12; index += 1) {
+      await record(root, "tmpl-1", { templateName: `v${index}` });
+    }
+    await record(root, "tmpl-2", { templateName: "other" });
 
-    await expect(
-      recordActionHistorySnapshot({
-        directoryHandle: brokenSystemDir,
-        family: "templates",
-        scopeParts: ["tmpl-1"],
-        actor: "admin",
-        action: "template-edit",
-        previousState: null,
-      })
-    ).resolves.toBeUndefined();
+    const entries = await templatesHistoryEntries(root);
+
+    expect(entries.filter((entry) => entry.kind === "directory")).toEqual([]);
+    // Live names only — `.bak`/`.tmp` siblings are safeWriteJson's own
+    // torn-write machinery, present beside every managed file in the app.
+    const liveNames = entries
+      .filter((entry) => entry.kind === "file" && entry.name.endsWith(".json"))
+      .map((entry) => entry.name)
+      .sort();
+    expect(liveNames).toEqual(["tmpl-1.json", "tmpl-2.json"]);
   });
 
-  describe("name-too-long scope prefixes are given up on after the first failure", () => {
-    beforeEach(() => {
-      __resetActionHistoryUnwritableScopesForTests();
-      safeWriteJsonMock.mockClear();
+  it("prunes by rewriting one file, never by listing and removing entries", async () => {
+    const root = createMemoryDirectory("workspace", { trackOperations: true });
+    await record(root, "tmpl-1", { templateName: "v0" });
+    clearOperationLog(root);
+
+    for (let index = 1; index < 12; index += 1) {
+      await record(root, "tmpl-1", { templateName: `v${index}` });
+    }
+
+    // The old layout pruned with a directory listing plus a removeEntry per
+    // dropped snapshot. An array slice removes no snapshot at all — the only
+    // removals left are safeWriteJson clearing its own `.tmp` staging name.
+    const removedSnapshots = getOperationLog(root)
+      .filter((entry) => entry.operation === "removeEntry")
+      .filter((entry) => entry.name.endsWith(".json"));
+    expect(removedSnapshots).toEqual([]);
+  });
+
+  it("records a null previous state for a first-ever save", async () => {
+    const root = createMemoryDirectory("workspace");
+    await record(root, "tmpl-new", null, "template-create");
+
+    const snapshots = await loadActionHistory<Template>(root, "templates", "tmpl-new");
+
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]!.state).toBeNull();
+    expect(snapshots[0]!.action).toBe("template-create");
+    expect(snapshots[0]!.actor).toBe("admin");
+  });
+
+  it("keeps separate records separate", async () => {
+    const root = createMemoryDirectory("workspace");
+    await record(root, "tmpl-a", { templateName: "a" });
+    await record(root, "tmpl-b", { templateName: "b" });
+
+    expect((await loadActionHistory<Template>(root, "templates", "tmpl-a"))[0]!.state)
+      .toEqual({ templateName: "a" });
+    expect((await loadActionHistory<Template>(root, "templates", "tmpl-b"))[0]!.state)
+      .toEqual({ templateName: "b" });
+  });
+
+  it("returns an empty trail for a record with no history", async () => {
+    const root = createMemoryDirectory("workspace");
+    await expect(loadActionHistory(root, "templates", "never-saved")).resolves.toEqual([]);
+  });
+
+  it("never lets a failed history write break the save it documents", async () => {
+    const root = createMemoryDirectory("workspace", {
+      faults: [{ operation: "createWritable", times: Number.POSITIVE_INFINITY }],
     });
 
-    it("stops writing to sibling per-record directories under a prefix once one proves name-too-long", async () => {
-      const root = makeRoot();
-      const nameTooLong = new Error("NotFoundError persisted after 5 attempts (cause=name-too-long)");
-      nameTooLong.name = "NotFoundError";
-      (nameTooLong as { xqErrorCode?: string }).xqErrorCode = "XQ-IO-034";
-      safeWriteJsonMock.mockRejectedValueOnce(nameTooLong);
-
-      // Two different xrayImageIds (the last scope part) under the SAME
-      // (month, employee) prefix — real production shape, where every save
-      // mints a brand-new deepest directory.
-      await recordActionHistorySnapshot({
-        directoryHandle: root,
-        family: "answers",
-        scopeParts: ["5-may-2026", "emp1", "XR-1"],
-        actor: "emp1",
-        action: "answer:answer-save",
-        previousState: null,
-      });
-      expect(safeWriteJsonMock).toHaveBeenCalledTimes(1);
-
-      await recordActionHistorySnapshot({
-        directoryHandle: root,
-        family: "answers",
-        scopeParts: ["5-may-2026", "emp1", "XR-2"],
-        actor: "emp1",
-        action: "answer:answer-save",
-        previousState: null,
-      });
-      // The second call's prefix ("answers/5-may-2026/emp1") already proved
-      // unwritable — it must short-circuit before ever calling safeWriteJson
-      // again, rather than re-discovering the same verdict at full cost.
-      expect(safeWriteJsonMock).toHaveBeenCalledTimes(1);
-    });
-
-    it("does not cache a different, unrelated failure", async () => {
-      const root = makeRoot();
-      safeWriteJsonMock.mockRejectedValueOnce(new Error("boom"));
-      safeWriteJsonMock.mockRejectedValueOnce(new Error("boom"));
-
-      await recordActionHistorySnapshot({
-        directoryHandle: root,
-        family: "answers",
-        scopeParts: ["5-may-2026", "emp1", "XR-1"],
-        actor: "emp1",
-        action: "answer:answer-save",
-        previousState: null,
-      });
-      await recordActionHistorySnapshot({
-        directoryHandle: root,
-        family: "answers",
-        scopeParts: ["5-may-2026", "emp1", "XR-2"],
-        actor: "emp1",
-        action: "answer:answer-save",
-        previousState: null,
-      });
-      expect(safeWriteJsonMock).toHaveBeenCalledTimes(2);
-    });
+    await expect(record(root, "tmpl-1", { templateName: "v0" })).resolves.toBeUndefined();
   });
 });

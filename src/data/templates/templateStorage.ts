@@ -79,7 +79,7 @@ async function saveTemplateFile(
   await recordActionHistorySnapshot<TemplateSchema>({
     directoryHandle,
     family: "templates",
-    scopeParts: [schema.templateId],
+    recordId: schema.templateId,
     actor: schema.updatedBy ?? "",
     action: beforeSave.ok ? "template-edit" : "template-create",
     previousState: beforeSave.ok ? beforeSave.value : null,
