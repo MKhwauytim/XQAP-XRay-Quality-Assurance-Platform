@@ -35,6 +35,15 @@ type MirrorRecord = {
   xrayImageId: string;
   item: ItemAnswer;
   mirroredAt: string;
+  /**
+   * `true` — this item is confirmed present in the workspace file (the
+   * normal case: mirrored right after a successful save, or re-mirrored by
+   * `reconcileAnswersWithLocalMirror` after reading the file).
+   * `false` — the save attempt that produced this item failed to reach the
+   * shared folder; it stays queued here until a retry (the 30s tick in
+   * `XrayInspectionResults.tsx`, or the next reconciliation) succeeds.
+   */
+  synced: boolean;
 };
 
 function mirrorKey(month: string, username: string, xrayImageId: string): string {
@@ -62,15 +71,11 @@ function openMirrorDb(): Promise<IDBDatabase | null> {
   });
 }
 
-/**
- * Best-effort: mirror one answered item locally. Never throws — a failure
- * here (quota exceeded, IndexedDB disabled, a blocked upgrade) only costs the
- * redundant backup copy, never the real save this is layered on top of.
- */
-export async function mirrorAnswerLocally(
+async function putRecord(
   month: string,
   username: string,
-  item: ItemAnswer
+  item: ItemAnswer,
+  synced: boolean
 ): Promise<void> {
   const db = await openMirrorDb();
   if (!db) return;
@@ -84,6 +89,7 @@ export async function mirrorAnswerLocally(
         xrayImageId: item.xrayImageId,
         item,
         mirroredAt: new Date().toISOString(),
+        synced,
       } satisfies MirrorRecord);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
@@ -96,23 +102,64 @@ export async function mirrorAnswerLocally(
   }
 }
 
-/** Every item this browser has ever mirrored for `(month, username)`. Empty on any failure — see module doc: absence is never meaningful here. */
-export async function loadMirroredAnswers(month: string, username: string): Promise<ItemAnswer[]> {
+/**
+ * Best-effort: mirror one answered item locally as CONFIRMED (`synced:
+ * true`) — the item is known to be in the workspace file. Never throws — a
+ * failure here (quota exceeded, IndexedDB disabled, a blocked upgrade) only
+ * costs the redundant backup copy, never the real save this is layered on
+ * top of.
+ */
+export async function mirrorAnswerLocally(
+  month: string,
+  username: string,
+  item: ItemAnswer
+): Promise<void> {
+  await putRecord(month, username, item, true);
+}
+
+/**
+ * Best-effort: queue an answer that FAILED to reach the workspace file
+ * (`synced: false`). It stays here — visible via `countPendingAnswers` and
+ * retried by `reconcileAnswersWithLocalMirror` — until a later save of the
+ * same item succeeds and re-mirrors it as confirmed.
+ */
+export async function markAnswerPendingLocally(
+  month: string,
+  username: string,
+  item: ItemAnswer
+): Promise<void> {
+  await putRecord(month, username, item, false);
+}
+
+async function readAllRecords(): Promise<MirrorRecord[]> {
   const db = await openMirrorDb();
   if (!db) return [];
   try {
-    const all = await new Promise<MirrorRecord[]>((resolve, reject) => {
+    return await new Promise<MirrorRecord[]>((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readonly");
       const request = tx.objectStore(STORE_NAME).getAll();
       request.onsuccess = () => resolve((request.result ?? []) as MirrorRecord[]);
       request.onerror = () => reject(request.error);
     });
-    return all
-      .filter((record) => record.month === month && record.username === username)
-      .map((record) => record.item);
   } catch {
     return [];
   } finally {
     db.close();
   }
+}
+
+/** Every item this browser has ever mirrored for `(month, username)`, synced or still pending. Empty on any failure — see module doc: absence is never meaningful here. */
+export async function loadMirroredAnswers(month: string, username: string): Promise<ItemAnswer[]> {
+  const all = await readAllRecords();
+  return all
+    .filter((record) => record.month === month && record.username === username)
+    .map((record) => record.item);
+}
+
+/** How many of this employee's own answers are still queued (`synced: false`) for this month — the count behind the "not saved yet" UI notice. */
+export async function countPendingAnswers(month: string, username: string): Promise<number> {
+  const all = await readAllRecords();
+  return all.filter(
+    (record) => record.month === month && record.username === username && !record.synced
+  ).length;
 }

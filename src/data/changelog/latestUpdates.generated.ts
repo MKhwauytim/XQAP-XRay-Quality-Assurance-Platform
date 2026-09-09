@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v134.5",
+    "date": "2026-09-09",
+    "bucket": "feature",
+    "scope": "answers",
+    "title": "automatic 30s background retry for a save that never reached the shared folder"
+  },
+  {
     "version": "v134.4",
     "date": "2026-09-09",
     "bucket": "feature",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "templates",
     "title": "resolve each answer's own template in the live inspection panel, not just the results table"
-  },
-  {
-    "version": "v131.20",
-    "date": "2026-09-03",
-    "bucket": "fix",
-    "scope": "templates",
-    "title": "keep answered-under-a-deleted-template results resolvable by question label"
   }
 ];

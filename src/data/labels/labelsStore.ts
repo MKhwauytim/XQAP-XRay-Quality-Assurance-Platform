@@ -367,6 +367,14 @@ export const DEFAULT_LABELS = {
   ew_panel_locked_no_permission:   "هذه العينة مسندة إلى {name}. لا تملك صلاحية الإجابة نيابةً عن الموظفين، لذا يظهر النموذج للاطّلاع فقط.",
   msg_answer_on_behalf_denied:     "لا تملك صلاحية الإجابة نيابةً عن الموظفين، أو أن مساحة العمل للقراءة فقط.",
 
+  // ── Local answer backup / retry (answerLocalMirror.ts, 2026-09-09) ────────
+  // A save that could not reach the shared workspace folder (share down,
+  // permission lost) stays queued in this browser's IndexedDB backup and is
+  // retried automatically every 30s — this is the visible "not saved yet"
+  // signal so nothing silently sits unsynced. `{count}` is how many of this
+  // employee's own answers are still pending.
+  ew_answers_pending_sync:         "{count} إجابة لم تصل إلى مجلد العمل المشترك بعد — تتم إعادة المحاولة تلقائياً كل 30 ثانية.",
+
   // Population — sampling & processing guards
   sample_redraw_blocked: "لا يمكن إعادة سحب العينة بعد بدء التوزيع: يوجد سجل توزيع فعّال لهذا الشهر، وإعادة السحب ستؤدي إلى فقدان التعيينات والإجابات المسجلة.",
 

@@ -60,7 +60,7 @@ import {
   safeWorkspaceFilePart,
 } from "../workspace/workspacePaths";
 import { recordActionHistorySnapshot } from "../history/actionHistory";
-import { loadMirroredAnswers, mirrorAnswerLocally } from "./answerLocalMirror";
+import { loadMirroredAnswers, markAnswerPendingLocally, mirrorAnswerLocally } from "./answerLocalMirror";
 
 export { ANSWER_EVENTS_DIR, ANSWER_EVENT_SEGMENT_SUFFIX };
 
@@ -878,6 +878,14 @@ async function performAnswerWrite(
       // never costs an extra read of the file it is backing up.
       // `mirrorAnswerLocally` never throws (see its own doc comment).
       if (mirrorCandidate) await mirrorAnswerLocally(monthFolderName, username, mirrorCandidate);
+    } else if (mirrorCandidate) {
+      // The append never reached the shared folder (share down, permission
+      // lost, exhausted retries) — queue it in the local backup as PENDING
+      // rather than dropping it, so the 30s retry tick / next reconciliation
+      // in `XrayInspectionResults.tsx` keeps trying until it lands, and the
+      // employee sees a "not saved yet" count instead of a silently lost
+      // answer. `markAnswerPendingLocally` never throws (see its doc comment).
+      await markAnswerPendingLocally(monthFolderName, username, mirrorCandidate);
     }
     return result;
   });

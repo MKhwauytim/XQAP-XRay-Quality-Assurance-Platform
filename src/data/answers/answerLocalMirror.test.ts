@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { loadMirroredAnswers, mirrorAnswerLocally } from "./answerLocalMirror";
+import {
+  countPendingAnswers,
+  loadMirroredAnswers,
+  markAnswerPendingLocally,
+  mirrorAnswerLocally,
+} from "./answerLocalMirror";
 import type { ItemAnswer } from "./answerTypes";
 
 // This suite runs in the default `node` test environment, which has no
@@ -31,5 +36,13 @@ describe("answerLocalMirror (no IndexedDB in this test environment)", () => {
 
   it("loadMirroredAnswers resolves to an empty array rather than throwing or returning null", async () => {
     await expect(loadMirroredAnswers("5-may-2026", "emp1")).resolves.toEqual([]);
+  });
+
+  it("markAnswerPendingLocally never throws", async () => {
+    await expect(markAnswerPendingLocally("5-may-2026", "emp1", item("X1"))).resolves.toBeUndefined();
+  });
+
+  it("countPendingAnswers resolves to 0 rather than throwing", async () => {
+    await expect(countPendingAnswers("5-may-2026", "emp1")).resolves.toBe(0);
   });
 });
