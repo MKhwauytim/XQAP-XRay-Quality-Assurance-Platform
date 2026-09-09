@@ -1,5 +1,10 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import {
+  safeReadJson,
+  safeRemoveJson,
+  safeWriteJson,
+  type SafeReadResult
+} from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
 import { getTemplatesRoot } from "../workspace/workspacePaths";
@@ -192,12 +197,44 @@ export async function loadTemplateIncludingDeleted(
   directoryHandle: DirectoryHandleLike,
   templateId: string
 ): Promise<TemplateSchema | null> {
-  const live = await loadTemplate(directoryHandle, templateId);
-  if (live) return live;
   try {
     const dir = await getTemplatesDir(directoryHandle);
-    const result = await safeReadJson<TemplateSchema>(dir, `${templateId}.deleted.bak.json`);
-    return result.ok && typeof result.value.templateId === "string" ? result.value : null;
+    const asSchema = (result: SafeReadResult<TemplateSchema>): TemplateSchema | null =>
+      result.ok && typeof result.value.templateId === "string" ? result.value : null;
+
+    // STRICT live read first: no `.bak`/`.tmp` fallback, because this function
+    // has its own authoritative answer for "the live file is gone" — the
+    // tombstone — and an orphaned sibling must not pre-empt it. Before this,
+    // a deleted template whose `.bak` survived the delete was resurrected here
+    // at its pre-delete revision, and every such read logged a
+    // `storage:bak-recovery` naming a file that was deliberately removed. That
+    // is the 2026-09-08/09 production incident, reached through
+    // `resolveAnswerTemplates` on every sign-in.
+    const live = await safeReadJson<TemplateSchema>(dir, `${templateId}.json`, {
+      siblingFallback: false,
+    });
+    const liveSchema = asSchema(live);
+    if (liveSchema) return liveSchema;
+
+    // The live file EXISTS but did not parse. That is a torn write, not a
+    // deletion — and the id may since have been re-created (deleting a
+    // template does not reserve its id). Its snapshots hold the CURRENT
+    // template; the tombstone holds a superseded one. So the recovery ladder
+    // wins here, and the tombstone is only the last resort.
+    if (!live.ok && live.reason === "corrupt") {
+      const recovered = asSchema(await safeReadJson<TemplateSchema>(dir, `${templateId}.json`));
+      if (recovered) return recovered;
+    }
+
+    const tombstone = asSchema(
+      await safeReadJson<TemplateSchema>(dir, `${templateId}.deleted.bak.json`)
+    );
+    if (tombstone) return tombstone;
+
+    // No live file and no tombstone: a torn write that lost the live copy
+    // before any delete ever happened. The full ladder is the only thing left,
+    // and a recovery reported here is a genuine one.
+    return asSchema(await safeReadJson<TemplateSchema>(dir, `${templateId}.json`));
   } catch {
     return null;
   }
@@ -257,7 +294,11 @@ export async function deleteTemplate(
       );
 
       if (dir.removeEntry) {
-        await dir.removeEntry(templateFileName);
+        // Live file AND both snapshot siblings, siblings first. Removing only
+        // the live name left `{id}.json.bak` behind, and safeReadJson then
+        // "recovered" the deleted template on every read forever — the
+        // 2026-09-08/09 production incident. See safeRemoveJson.
+        await safeRemoveJson(dir, templateFileName);
       } else {
         await safeWriteJson(dir, templateFileName, {
           deleted: true,

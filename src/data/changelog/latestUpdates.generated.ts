@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v134.6",
+    "date": "2026-09-09",
+    "bucket": "fix",
+    "scope": "workspace",
+    "title": "stop logging XQ-WS-015 for the expected 'prompt' cold-start state"
+  },
+  {
     "version": "v134.5",
     "date": "2026-09-09",
     "bucket": "feature",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "history",
     "title": "rolling last-10 pre-change snapshot history for templates, answers, and distribution admin edits"
-  },
-  {
-    "version": "v131.21",
-    "date": "2026-09-03",
-    "bucket": "fix",
-    "scope": "templates",
-    "title": "resolve each answer's own template in the live inspection panel, not just the results table"
   }
 ];

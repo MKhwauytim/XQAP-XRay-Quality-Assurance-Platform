@@ -10,7 +10,7 @@
  */
 
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { safeReadJson, safeRemoveJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
 import { hashJsonValue } from "../storage/jsonEnvelope";
@@ -199,7 +199,9 @@ export async function rebuildReplacementIndex(
             // simply not referenced by the new manifest, so a leftover file is
             // harmless — but remove it anyway to avoid stale-data confusion.
             try {
-              await dir.removeEntry(fileName);
+              // safeRemoveJson: a bucket file is safeWriteJson-managed, so its
+              // `.bak` would keep answering reads for a bucket that is gone.
+              await safeRemoveJson(dir, fileName);
             } catch {
               // ignore — not referenced by the manifest either way
             }

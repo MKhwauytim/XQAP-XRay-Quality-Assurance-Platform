@@ -40,6 +40,58 @@ export default defineConfig([
     },
   },
   {
+    // ── Raw `removeEntry` is banned outside a short allowlist ───────────────
+    //
+    // `safeWriteJson` maintains THREE names for one logical file (the live
+    // name, `{file}.bak`, `{file}.tmp`) and `safeReadJson` reads them as one:
+    // on a miss of the live name it falls through to the siblings. So removing
+    // only the live name does not delete the record — it leaves an orphan that
+    // answers every subsequent read, forever, while `storage:bak-recovery`
+    // reports the file as "damaged".
+    //
+    // That is not hypothetical. It ran in production for over eighteen hours
+    // across every user (`tmpl-1787457917309-ngm1iq.json`, 2026-09-08/09), and
+    // it had been written by hand at six different call sites — one of which
+    // (`deleteDesign`) even carried a comment explaining the hazard, which is
+    // exactly how a convention that lives only in comments fails.
+    //
+    // `safeRemoveJson` is now the one way to delete a managed name. `lint:ci`
+    // runs with `--max-warnings 0`, so a new raw call fails the PR rather than
+    // shipping a seventh orphan.
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: [
+      // The primitive itself, and the in-memory directory it is tested against.
+      'src/data/storage/safeWrite.ts',
+      'src/data/storage/memoryDirectory.ts',
+      // Probe cleanup: these write and remove their own scratch files, which
+      // are not safeWriteJson-managed and have no siblings.
+      'src/data/storage/transientFileErrors.ts',
+      // Whole FOLDERS and a restore marker, not managed JSON names.
+      'src/data/backup/backupStorage.ts',
+      // Archivers whose whole purpose is to keep the sibling as the recovery
+      // source after moving the live file aside.
+      'src/data/approvals/decisionFileRecovery.ts',
+      'src/data/templates/templateFileRecovery.ts',
+      // Legacy `messages.json` archive-out (feedback migration).
+      'src/data/feedback/feedbackStorage.ts',
+      '**/*.test.ts',
+      '**/*.test.tsx',
+    ],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'CallExpression[callee.property.name="removeEntry"]',
+          message:
+            'Use safeRemoveJson(dir, fileName) from src/data/storage/safeWrite.ts. ' +
+            'A raw removeEntry deletes only the live file and leaves {file}.bak / ' +
+            '{file}.tmp behind, which safeReadJson then serves forever as a ' +
+            '"recovered" copy of a record the user deleted.',
+        },
+      ],
+    },
+  },
+  {
     // Playwright specs: Node-side test code, not app code. The React-specific
     // rule sets above are inapplicable here (there are no components and no
     // Fast Refresh boundary), and the suite runs under Node, so it needs Node

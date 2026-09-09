@@ -1,5 +1,5 @@
 import type { DirectoryHandleLike } from "../../storage/fileSystemAccess";
-import { safeReadJson, safeWriteJson } from "../../storage/safeWrite";
+import { safeReadJson, safeRemoveJson, safeWriteJson } from "../../storage/safeWrite";
 import { casLoop } from "../../storage/casLoop";
 import { withResourceLock } from "../../storage/webLocks";
 import { getReportsRoot, REPORTS_SUBFOLDERS } from "../../workspace/workspacePaths";
@@ -206,17 +206,10 @@ export async function deleteDesign(
       );
 
       if (dir.removeEntry) {
-        await dir.removeEntry(`${reportId}.json`);
-        // safeWriteJson keeps `{file}.bak` (and transiently `{file}.tmp`) beside the
-        // live file, and safeReadJson probes both on a miss — leaving them behind
-        // would resurrect the deleted design at its previous revision.
-        for (const shadow of [`${reportId}.json.bak`, `${reportId}.json.tmp`]) {
-          try {
-            await dir.removeEntry(shadow);
-          } catch {
-            // Best effort: absent shadow files are the normal case.
-          }
-        }
+        // This module already knew leaving the siblings behind would resurrect
+        // the deleted design at its previous revision; safeRemoveJson is that
+        // same rule, made the shared primitive so every delete site gets it.
+        await safeRemoveJson(dir, `${reportId}.json`);
       } else {
         await safeWriteJson(dir, `${reportId}.json`, {
           deleted: true,

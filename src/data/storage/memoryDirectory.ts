@@ -91,7 +91,12 @@ export type SimulatedFault = {
     | "getDirectoryHandle"
     | "getFile"
     | "readFile"
-    | "createWritable";
+    | "createWritable"
+    // A delete can fail for pure timing reasons on the share this app runs on
+    // — another machine or an AV scanner holding the entry open raises
+    // NoModificationAllowedError. `safeRemoveJson` rides the transient ladder
+    // for exactly that, and this is how that is reproduced deterministically.
+    | "removeEntry";
   /**
    * Entry name to match. Omit to match every name. For `getFile` / `readFile` /
    * `createWritable` this is the file handle's own name.
@@ -513,6 +518,7 @@ function makeDirectoryHandle(
       );
     },
     removeEntry: async (entryName: string, options?: { recursive?: boolean }) => {
+      applyFaults(faultState, operationLog, { operation: "removeEntry", name: entryName });
       if (node.files.has(entryName)) {
         node.files.delete(entryName);
         return;

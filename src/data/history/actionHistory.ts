@@ -1,5 +1,5 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { safeReadJson, safeRemoveJson, safeWriteJson } from "../storage/safeWrite";
 import { listDirectoryEntries } from "../storage/directoryScan";
 import { isNotFoundError } from "../storage/transientFileErrors";
 import { logError } from "../storage/errorLogger";
@@ -170,7 +170,10 @@ async function pruneActionHistory(dir: DirectoryHandleLike): Promise<void> {
   if (excess <= 0) return;
   for (const name of names.slice(0, excess)) {
     try {
-      await dir.removeEntry(name);
+      // Pruned snapshots are safeWriteJson-managed, so their `.bak` siblings
+      // must go with them — otherwise loadActionHistory keeps recovering a
+      // snapshot the retention cap already dropped.
+      await safeRemoveJson(dir, name);
     } catch (error) {
       if (!isNotFoundError(error)) {
         logError("actionHistory:prune", error instanceof Error ? error : new Error(String(error)));

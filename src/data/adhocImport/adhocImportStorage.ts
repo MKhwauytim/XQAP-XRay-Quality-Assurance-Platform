@@ -1,5 +1,5 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { safeReadJson, safeRemoveJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
 import { getAdhocImportsDir, getSampleMainDir, getSamplesRoot } from "../workspace/workspacePaths";
@@ -181,7 +181,8 @@ export async function deleteAdhocImportRecord(
   const dir = await getAdhocImportsDir(directoryHandle, false).catch(() => null);
   if (!dir) return;
   if (dir.removeEntry) {
-    await dir.removeEntry(recordFileName(importId)).catch(() => undefined);
+    // Siblings too — an orphaned `.bak` answers reads for the deleted record.
+    await safeRemoveJson(dir, recordFileName(importId)).catch(() => undefined);
   }
   await updateIndex(dir, (entries) => entries.filter((e) => e.importId !== importId));
 }

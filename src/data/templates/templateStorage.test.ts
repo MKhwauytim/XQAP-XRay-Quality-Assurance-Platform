@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { createMemoryDirectory } from "../storage/memoryDirectory";
-import { safeReadJson } from "../storage/safeWrite";
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { listDirectoryEntries } from "../storage/directoryScan";
+import { __resetBakRecoveryReportsForTests } from "../storage/bakRecoveryReport";
+import { clearErrors, getRecentErrors } from "../storage/errorLogger";
+import { getTemplatesRoot } from "../workspace/workspacePaths";
 import type { TemplateSchema } from "./templateTypes";
 import {
   deleteTemplate,
@@ -160,5 +164,92 @@ describe("templateStorage", () => {
 
     const recovered = await loadTemplateIncludingDeleted(root, "tmpl-a");
     expect(recovered?.templateName).toBe("قالب أ المعاد إنشاؤه");
+  });
+});
+
+// The tombstone `deleteTemplate` writes is a TemplateSchema plus a deletion
+// stamp; the stamp is not part of the schema type itself.
+type TombstonedTemplate = TemplateSchema & { deletedAt?: string };
+
+async function templateFileNames(root: ReturnType<typeof createMemoryDirectory>) {
+  const dir = await getTemplatesRoot(root, true);
+  return (await listDirectoryEntries(dir))
+    .filter((entry) => entry.kind === "file")
+    .map((entry) => entry.name);
+}
+
+describe("deleted templates do not linger as .bak orphans (2026-09-08/09 incident)", () => {
+  it("deleteTemplate leaves no .bak/.tmp sibling behind", async () => {
+    const root = createMemoryDirectory("workspace");
+    const schema = makeTemplate("tmpl-orphan", "orphan");
+    // Two saves, so the first revision has been snapshotted to `.bak` — the
+    // state every real template is in by the time anyone deletes it.
+    await saveTemplate(root, schema);
+    await saveTemplate(root, { ...schema, templateName: "revision two" });
+
+    expect(await templateFileNames(root)).toContain("tmpl-orphan.json.bak");
+
+    await deleteTemplate(root, "tmpl-orphan");
+
+    const remaining = await templateFileNames(root);
+    expect(remaining).toContain("tmpl-orphan.deleted.bak.json");
+    expect(remaining).not.toContain("tmpl-orphan.json");
+    expect(remaining).not.toContain("tmpl-orphan.json.bak");
+    expect(remaining).not.toContain("tmpl-orphan.json.tmp");
+  });
+
+  it("resolves a deleted template to its tombstone without logging a bak-recovery", async () => {
+    const root = createMemoryDirectory("workspace");
+    const schema = makeTemplate("tmpl-legacy", "legacy");
+    await saveTemplate(root, schema);
+    await saveTemplate(root, { ...schema, templateName: "revision two" });
+
+    // Reproduce the PRE-FIX production state by hand: a delete that took only
+    // the live name and orphaned the sibling.
+    const dir = await getTemplatesRoot(root, true);
+    await safeWriteJson(dir, "tmpl-legacy.deleted.bak.json", {
+      ...schema,
+      deletedAt: new Date().toISOString(),
+    });
+    await dir.removeEntry?.("tmpl-legacy.json");
+    __resetBakRecoveryReportsForTests();
+    clearErrors();
+
+    const resolved = await loadTemplateIncludingDeleted(root, "tmpl-legacy");
+
+    expect(resolved?.templateId).toBe("tmpl-legacy");
+    expect((resolved as TombstonedTemplate | null)?.deletedAt).toBeTruthy();
+    // The orphan is inert: no row, no banner, on a read that runs at every
+    // sign-in through resolveAnswerTemplates.
+    expect(getRecentErrors().filter((e) => e.context === "storage:bak-recovery")).toHaveLength(0);
+  });
+
+  it("prefers a re-created template's own snapshot over a stale tombstone when the live file is corrupt", async () => {
+    const root = createMemoryDirectory("workspace");
+    const dir = await getTemplatesRoot(root, true);
+
+    // Deleted...
+    await saveTemplate(root, makeTemplate("tmpl-reused", "original"));
+    await deleteTemplate(root, "tmpl-reused");
+    // ...then RE-CREATED under the same id (deleting does not reserve it), and
+    // saved twice so the re-created revision has its own `.bak`.
+    await saveTemplate(root, makeTemplate("tmpl-reused", "re-created"));
+    await saveTemplate(root, makeTemplate("tmpl-reused", "re-created v2", 2));
+
+    // Now the live file tears. Its snapshot holds the CURRENT template; the
+    // tombstone holds the superseded one. Answering from the tombstone would
+    // resolve employees' answers against the wrong questions.
+    const handle = await dir.getFileHandle("tmpl-reused.json");
+    const writable = await handle.createWritable?.();
+    await writable?.write("{ truncated");
+    await writable?.close();
+
+    const resolved = await loadTemplateIncludingDeleted(root, "tmpl-reused");
+
+    // The `.bak` holds the previous revision by construction, so the exact
+    // revision recovered is v1 of the RE-CREATED template. What matters is
+    // which lineage answered: a live-file lineage, never the tombstone.
+    expect(resolved?.templateName).toBe("re-created");
+    expect((resolved as TombstonedTemplate | null)?.deletedAt).toBeFalsy();
   });
 });
