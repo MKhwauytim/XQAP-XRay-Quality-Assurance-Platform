@@ -4,6 +4,11 @@
 // will have stored a different token, making the false-positive revision match detectable.
 
 import { codedMessage, logCodedError, resolveErrorCode, type ErrorCode } from "./errorCodes";
+import {
+  isDeadlineExpired,
+  nextRetryDelayMs,
+  type OperationDeadline,
+} from "./operationDeadline";
 
 const DEFAULT_MAX_RETRIES = 10;
 const DEFAULT_BASE_DELAY_MS = 200;
@@ -123,6 +128,20 @@ export async function casLoop<T>(
      * site can adopt without wiring its own observer.
      */
     context?: string;
+    /**
+     * Total wall-clock budget for the whole loop. Once it is spent no NEW
+     * attempt starts and the loop reports the failure it already has.
+     *
+     * Without one, this loop's attempt count multiplies against every retry
+     * ladder inside `fn` — 14 attempts over safeWriteJson's two ~11 s
+     * verify-readback ladders is ~308 s of sleeping, the "answer save takes 4
+     * minutes" report. See operationDeadline.ts for the full arithmetic.
+     *
+     * An attempt already in flight is never interrupted, so the true worst case
+     * is the deadline plus one attempt. Omitting it keeps the old unbounded
+     * behaviour, so call sites can adopt it individually.
+     */
+    deadline?: OperationDeadline;
   }
 ): Promise<T | { ok: false; error: string }> {
   const max = options?.maxRetries ?? DEFAULT_MAX_RETRIES;
@@ -135,6 +154,11 @@ export async function casLoop<T>(
   let lastCause: unknown;
 
   for (let attempt = 0; attempt < max; attempt++) {
+    // The first attempt always runs — a deadline bounds RETRIES, it never turns
+    // a user's action into a no-op. Later attempts are gated because the
+    // previous one may itself have overrun the whole budget (each carries
+    // safeWriteJson's own multi-second ladders).
+    if (attempt > 0 && isDeadlineExpired(options?.deadline)) break;
     const writeToken = crypto.randomUUID();
     try {
       const r = await fn(writeToken);
@@ -199,7 +223,14 @@ export async function casLoop<T>(
       lastCause = err;
     }
     if (attempt < max - 1) {
-      await sleep(withJitter(baseDelay * (attempt + 1)));
+      // Consult the operation's total budget before sleeping. `null` means it is
+      // spent: stop here and report the failure we already have rather than
+      // sleeping again and re-arming the same race on a share that is already
+      // contended. An attempt in flight is never interrupted — only the
+      // decision to start ANOTHER one is bounded.
+      const delay = nextRetryDelayMs(withJitter(baseDelay * (attempt + 1)), options?.deadline);
+      if (delay === null) break;
+      await sleep(delay);
     }
   }
 

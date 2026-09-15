@@ -17,6 +17,10 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { readEnvelopeRevision, safeReadJson, safeRemoveJson, safeWriteJson } from "../storage/safeWrite";
 import { logError, logRejection } from "../storage/errorLogger";
 import { casLoop } from "../storage/casLoop";
+import {
+  createDeadline,
+  INTERACTIVE_WRITE_DEADLINE_MS,
+} from "../storage/operationDeadline";
 import { codedMessage, logCodedError, resolveErrorCode } from "../storage/errorCodes";
 import { listDirectoryEntries, readAppendOnlyDirectory, readNamedJsonFiles } from "../storage/directoryScan";
 import { ensureMonthWritable } from "../population/monthLock";
@@ -604,12 +608,32 @@ export async function appendDistributionEvent(
  * fresh read, since `distribution.current.json` is a rebuildable cache, not
  * a source of truth.
  */
+export type AppendDistributionEventsResult =
+  | {
+      ok: true;
+      log: DistributionLog;
+      /**
+       * The immutable event files committed, but `distribution.log.json` — the
+       * rebuildable compatibility projection — could not be rewritten (the
+       * contended-share case: `casLoop:exhausted(distribution:events)`).
+       *
+       * The append IS durable and `log` is re-derived from the events, so this
+       * is a success. It is surfaced so a caller can still refresh the derived
+       * cache (which rebuilds from the durable events) and, where it matters,
+       * tell the user their action was saved but the shared view may lag until
+       * the next fold. Never treat it as a failure — doing so is what made
+       * replacement permanently unretryable; see the block that sets it.
+       */
+      projectionDegraded?: true;
+    }
+  | { ok: false; error: string };
+
 export async function appendDistributionEvents(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   events: DistributionEvent[],
   options?: AppendDistributionEventsOptions
-): Promise<{ ok: true; log: DistributionLog } | { ok: false; error: string }> {
+): Promise<AppendDistributionEventsResult> {
   // Month lock gate — before the CAS loop so a closed month rejects loudly.
   await ensureMonthWritable(directoryHandle, monthFolderName);
   if (events.length === 0) {
@@ -729,13 +753,78 @@ export async function appendDistributionEvents(
       }
       return { done: false };
     },
-    { context: "distribution:events", conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ الأحداث بعد عدة محاولات." }
+    {
+      context: "distribution:events",
+      conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ الأحداث بعد عدة محاولات.",
+      // The durable events are already committed by the time this loop runs, so
+      // every second spent here is a user waiting on a REBUILDABLE projection —
+      // and one more second of holding the month's most contended file open.
+      // Bounded: on exhaustion the append is reported as a degraded success and
+      // the next fold rebuilds the projection. See the block below.
+      deadline: createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "distribution:events"),
+    }
   );
   if (result.ok) {
     bumpWorkspaceEpoch(directoryHandle, monthFolderName);
     options?.onProgress?.({ phase: "complete", completed: events.length, total: events.length });
+    return result;
   }
-  return result;
+
+  // The projection could not be updated — but we only reach this line AFTER
+  // `writeDistributionEventBatch` above committed the immutable event files, so
+  // the append itself is durable and the source of truth already carries it.
+  //
+  // Reporting that as `{ ok: false }` is what made طلب استبدال fail
+  // PERMANENTLY on the production share (2026-09-10..14). The caller
+  // (`executeReplacement`) early-returns XQ-DIST-005, which skips
+  // `refreshDistributionCacheAfterWrite`, so the derived cache is never rebuilt
+  // from the events that ARE on disk. The user retries; the fold now sees the
+  // durable `assigned` event, so the row classifies as "taken" and the dead row
+  // as "replaced"; the freshness guard rejects the retry instantly, forever.
+  // The substitution had committed — the user was told it failed and then
+  // forbidden from redoing it.
+  //
+  // `distribution.log.json` is a legacy COMPATIBILITY PROJECTION and
+  // `distribution.current.json` a rebuildable cache (see this module's header
+  // and CLAUDE.md); both are derivable from the events at any time, and the
+  // next fold rebuilds them. A rebuildable derivative failing to update is a
+  // DEGRADED SUCCESS, not a failed append.
+  //
+  // It is reported, never swallowed: the coded entry below reaches the durable
+  // per-user error log and the admin XLSX export, and `projectionDegraded` lets
+  // the caller run its cache refresh (which re-derives from the durable events,
+  // making the assignment visible) instead of aborting.
+  logCodedError(
+    "distribution:projection-degraded",
+    "XQ-IO-032",
+    new Error(
+      `Distribution events for ${monthFolderName} are durable, but the ${LOG_FILE} projection could not be updated: ${result.error}`
+    )
+  );
+  bumpWorkspaceEpoch(directoryHandle, monthFolderName);
+  options?.onProgress?.({ phase: "complete", completed: events.length, total: events.length });
+  // Re-derive from the durable events so the caller receives the true post-append
+  // state rather than the stale projection. This read is itself best-effort: if
+  // the share cannot serve it either, fall back to a log carrying just this
+  // batch — still better than claiming the append did not happen.
+  try {
+    return {
+      ok: true,
+      log: await loadDistributionLog(directoryHandle, monthFolderName),
+      projectionDegraded: true,
+    };
+  } catch {
+    return {
+      ok: true,
+      log: {
+        monthFolderName,
+        revision: 0,
+        eventSetId: distributionEventSetId(events),
+        events: [...events],
+      },
+      projectionDegraded: true,
+    };
+  }
 }
 
 /**

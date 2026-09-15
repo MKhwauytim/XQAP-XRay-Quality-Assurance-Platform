@@ -1,6 +1,10 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
+import {
+  createDeadline,
+  INTERACTIVE_WRITE_DEADLINE_MS,
+} from "../storage/operationDeadline";
 import { withResourceLock } from "../storage/webLocks";
 import { getFeedbackDir, getFeedbackThreadsDir, getLegacyFeedbackDir } from "../workspace/workspacePaths";
 import { listDirectoryEntries, readNamedJsonFiles } from "../storage/directoryScan";
@@ -443,7 +447,16 @@ export async function appendReply(
         }
         return { done: false };
       },
-      { context: "feedback:threadReply", conflictError: "تعذّر حفظ الرد: تعارض في الكتابة بعد عدة محاولات." }
+      {
+        context: "feedback:threadReply",
+        conflictError: "تعذّر حفظ الرد: تعارض في الكتابة بعد عدة محاولات.",
+        // Posting a reply is an interactive click, but this loop took casLoop's
+        // DEFAULT ladder (10 x 200 ms) WITH a delayed verify re-read, nested
+        // over safeWriteJson's own multi-second ladders — minutes of sleeping
+        // before the user is told the reply failed. That is symptom E ("replying
+        // to a ticket takes forever") from the 2026-09-13 reports.
+        deadline: createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "feedback:threadReply"),
+      }
     )
   );
   if (!outcome.ok) {

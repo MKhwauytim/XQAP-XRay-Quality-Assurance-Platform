@@ -28,6 +28,10 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { readOptionalJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
+import {
+  createDeadline,
+  INTERACTIVE_WRITE_DEADLINE_MS,
+} from "../storage/operationDeadline";
 import { logError } from "../storage/errorLogger";
 import { logCodedError, tagErrorOnce, type ErrorCode } from "../storage/errorCodes";
 import { createSimpleHasher } from "../storage/jsonEnvelope";
@@ -626,6 +630,11 @@ async function updateEmployeeRequestsFile(
       context: "answers:requestsFile",
       maxRetries: ANSWER_SAVE_MAX_RETRIES,
       baseDelayMs: ANSWER_SAVE_BASE_DELAY_MS,
+      // One budget for this whole user action. Without it the 14 attempts above
+      // multiply against safeWriteJson's two ~11 s verify-readback ladders —
+      // ~308 s, the "answer save takes 4 minutes" report. See
+      // operationDeadline.ts; the first attempt always runs regardless.
+      deadline: createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "answers:interactive-write"),
       conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ طلبات الموظف بعد عدة محاولات.",
       onExhausted: (cause, code) => {
         logError(`answerStorage:${telemetryAction}`, cause instanceof Error ? cause : new Error(String(cause)), {
@@ -846,6 +855,11 @@ async function performAnswerWrite(
       context: `answers:${telemetryAction}`,
       maxRetries: ANSWER_SAVE_MAX_RETRIES,
       baseDelayMs: ANSWER_SAVE_BASE_DELAY_MS,
+      // One budget for this whole user action. Without it the 14 attempts above
+      // multiply against safeWriteJson's two ~11 s verify-readback ladders —
+      // ~308 s, the "answer save takes 4 minutes" report. See
+      // operationDeadline.ts; the first attempt always runs regardless.
+      deadline: createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "answers:interactive-write"),
       conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ إجابة الموظف بعد عدة محاولات.",
       onExhausted: (cause, code) => {
         logError(`answerStorage:${telemetryAction}`, cause instanceof Error ? cause : new Error(String(cause)), {
@@ -998,6 +1012,11 @@ export async function saveEmployeeAnswers(
       context: "answers:legacySeedWrite",
       maxRetries: ANSWER_SAVE_MAX_RETRIES,
       baseDelayMs: ANSWER_SAVE_BASE_DELAY_MS,
+      // One budget for this whole user action. Without it the 14 attempts above
+      // multiply against safeWriteJson's two ~11 s verify-readback ladders —
+      // ~308 s, the "answer save takes 4 minutes" report. See
+      // operationDeadline.ts; the first attempt always runs regardless.
+      deadline: createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "answers:interactive-write"),
       conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ ملف الموظف بعد عدة محاولات.",
     }
   );
@@ -1224,6 +1243,11 @@ async function performOnBehalfWrite(
       context: "answers:answer-save-on-behalf",
       maxRetries: ANSWER_SAVE_MAX_RETRIES,
       baseDelayMs: ANSWER_SAVE_BASE_DELAY_MS,
+      // One budget for this whole user action. Without it the 14 attempts above
+      // multiply against safeWriteJson's two ~11 s verify-readback ladders —
+      // ~308 s, the "answer save takes 4 minutes" report. See
+      // operationDeadline.ts; the first attempt always runs regardless.
+      deadline: createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "answers:interactive-write"),
       conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ الإجابة نيابةً عن الموظف بعد عدة محاولات.",
       onExhausted: (cause, code) => {
         logError("answerStorage:answer-save-on-behalf", cause instanceof Error ? cause : new Error(String(cause)), {
