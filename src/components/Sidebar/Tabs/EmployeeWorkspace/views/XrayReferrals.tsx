@@ -87,8 +87,6 @@ import { formatDate } from "../../../../../components/DataTable/utils";
 import {
   loadAdminBrowsePreset,
   loadUserBrowsePreset,
-  saveAdminBrowseDatasetPreset,
-  saveUserBrowseDatasetPreset,
 } from "../../../../../data/preferences/browsePresetStorage";
 import {
   appendReplacementRequest,
@@ -112,7 +110,7 @@ import {
   ReassignModal,
   SampleDetailPanel,
   StatusBadge,
-  ReferralStatsStrip,
+  ReferralWorkspaceShell,
   PanelAuthoringNotice,
   resolvePanelAuthoring,
   ReplacementDialog,
@@ -129,6 +127,11 @@ import {
   REFERRALS_PRESET_KEY,
   XrQueueToolbarExtras,
 } from "./XrayReferrals/subComponents";
+import {
+  buildReferralColumnPreset,
+  persistReferralColumnPreset,
+  persistReferralSplitRatio,
+} from "./XrayReferrals/columnPreset";
 import { useCaseFilter } from "./XrayReferrals/caseFilter";
 import { buildAnswerStatusFilter } from "./XrayReferrals/answerStatusFilter";
 import { createQueueSelection } from "./XrayReferrals/queueSelection";
@@ -1043,13 +1046,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   // QueueSplitResizer's commit callback: a privileged drag also pushes to the shared preset, carrying the same column fields onColConfigChange below writes (one preset object per dataset).
   const handleSplitCommit = useCallback((ratio: number) => {
     if (!canConfigureColumns) return;
-    void saveAdminBrowseDatasetPreset(directoryHandle, REFERRALS_PRESET_KEY, {
-      columnOrder:    effectiveColConfig.order,
-      visibleColumns: baseColumns.map((c) => c.id).filter((id) => !effectiveColConfig.hidden.includes(id)),
-      widths:         effectiveColConfig.widths,
-      dateFmt:        effectiveColConfig.dateFmt,
-      layout:         { ratio },
-    });
+    persistReferralSplitRatio({ directoryHandle, config: effectiveColConfig, baseColumns, ratio });
   }, [canConfigureColumns, effectiveColConfig, baseColumns, directoryHandle]);
   const visiblePreviewColumns = useMemo(() => getVisibleReferralColumns(columns, effectiveColConfig, canSeeAll), [columns, effectiveColConfig, canSeeAll]);
 
@@ -2091,18 +2088,12 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               initialColConfig={colPreset}
               onColConfigChange={(cfg) => {
                 setColPreset(cfg);
-                const preset = {
-                  columnOrder:    cfg.order,
-                  visibleColumns: baseColumns.map((c) => c.id).filter((id) => !cfg.hidden.includes(id)),
-                  widths:         cfg.widths,
-                  dateFmt:        cfg.dateFmt,
-                };
-                // Every user persists their own personal layout (isolated).
-                void saveUserBrowseDatasetPreset(directoryHandle, username, REFERRALS_PRESET_KEY, preset);
-                // Admins/permitted users additionally update the shared default.
-                if (canConfigureColumns) {
-                  void saveAdminBrowseDatasetPreset(directoryHandle, REFERRALS_PRESET_KEY, preset);
-                }
+                persistReferralColumnPreset({
+                  directoryHandle,
+                  username,
+                  canConfigureColumns,
+                  preset: buildReferralColumnPreset(cfg, baseColumns),
+                });
               }}
               rowMatchesFilter={rowMatchesFilter}
               onFilteredRowsChange={setFilteredTableEntries}
@@ -2226,33 +2217,25 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         );
 
         return (
-          <div className="ew-ref-workspace">
-            <ReferralStatsStrip
-              stats={personalStats}
-              quota={myQuota}
-              username={username}
-              // Exactly the branch `personalStats` itself takes. Three cases
-              // now, because the picker made "not mine" and "everyone's" two
-              // different things: everyone, one named other employee, or me.
-              scope={
-                !canSeeAll || scopeEmployee === username
-                  ? "own"
-                  : scopeEmployee === QUEUE_SCOPE_ALL ? "all" : "employee"
-              }
-              scopeEmployeeName={pickedScopeName}
-            />
-            {showingRetainedDraft && (
-              <p className="ew-msg-warn" role="status">{L.ew_draft_retained_notice}</p>
-            )}
-            {/* A chip that filters everything out leaves DataTable with zero
-                `rows`, and its own "no results" row only fires when rows exist
-                and the COLUMN filters emptied them — so without this the reader
-                would get a bare header and no explanation. */}
-            {caseFilter.counts[caseFilter.value] === 0 && caseFilter.counts.all > 0 && (
-              <p className="ew-case-filter-empty" role="status">{L.ew_case_filter_empty}</p>
-            )}
-            {tableEl}
-          </div>
+          <ReferralWorkspaceShell
+            stats={personalStats}
+            quota={myQuota}
+            username={username}
+            // Exactly the branch `personalStats` itself takes. Three cases
+            // now, because the picker made "not mine" and "everyone's" two
+            // different things: everyone, one named other employee, or me.
+            scope={
+              !canSeeAll || scopeEmployee === username
+                ? "own"
+                : scopeEmployee === QUEUE_SCOPE_ALL ? "all" : "employee"
+            }
+            scopeEmployeeName={pickedScopeName}
+            showingRetainedDraft={showingRetainedDraft}
+            caseFilterValue={caseFilter.value}
+            caseFilterCounts={caseFilter.counts}
+            labels={L}
+            table={tableEl}
+          />
         );
       })()}
 
