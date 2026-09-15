@@ -1239,3 +1239,60 @@ export function CaseFilterSwitcher({
     </div>
   );
 }
+
+/**
+ * The queue workspace shell: the stats strip, the two status notices, and the
+ * table itself.
+ *
+ * Extracted from `XrayReferrals`'s render for the `max-lines-per-function`
+ * budget (see `columnPreset.ts`'s header for why that budget is respected by
+ * extraction rather than raised). It is purely presentational — every value it
+ * shows is computed by the caller and passed in — so it is also the cheapest
+ * part of that render to lift out: nothing here can change queue behaviour.
+ */
+export function ReferralWorkspaceShell({
+  stats,
+  quota,
+  username,
+  scope,
+  scopeEmployeeName,
+  showingRetainedDraft,
+  caseFilterValue,
+  caseFilterCounts,
+  labels: L,
+  table,
+}: {
+  stats: PersonalStats;
+  quota: PersonalQuota;
+  username: string;
+  scope: "own" | "all" | "employee";
+  scopeEmployeeName: string;
+  showingRetainedDraft: boolean;
+  caseFilterValue: CaseFilter;
+  caseFilterCounts: CaseFilterCounts;
+  labels: Labels;
+  table: React.ReactNode;
+}) {
+  return (
+    <div className="ew-ref-workspace">
+      <ReferralStatsStrip
+        stats={stats}
+        quota={quota}
+        username={username}
+        scope={scope}
+        scopeEmployeeName={scopeEmployeeName}
+      />
+      {showingRetainedDraft && (
+        <p className="ew-msg-warn" role="status">{L.ew_draft_retained_notice}</p>
+      )}
+      {/* A chip that filters everything out leaves DataTable with zero `rows`,
+          and its own "no results" row only fires when rows exist and the COLUMN
+          filters emptied them — so without this the reader would get a bare
+          header and no explanation. */}
+      {caseFilterCounts[caseFilterValue] === 0 && caseFilterCounts.all > 0 && (
+        <p className="ew-case-filter-empty" role="status">{L.ew_case_filter_empty}</p>
+      )}
+      {table}
+    </div>
+  );
+}
