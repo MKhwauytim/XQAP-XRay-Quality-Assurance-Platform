@@ -34,6 +34,7 @@
  * file as one string — reading such a file back is bounded by `JSON.parse`, not
  * by this module.
  */
+import { nextRetryDelayMs, type OperationDeadline } from "./operationDeadline";
 import type { DirectoryHandleLike } from "./fileSystemAccess";
 import { assertWritableMode } from "./readOnlyMode";
 import { logCodedError, taggedError } from "./errorCodes";
@@ -163,6 +164,15 @@ export function readRetryDelayMs(error: unknown, budget: ReadRetryBudget): numbe
 
 type ReadTextOptions = {
   /**
+   * Total wall-clock budget for the USER ACTION this read belongs to. Every
+   * ladder below truncates or abandons its remaining rungs once it is spent.
+   *
+   * Without it each ladder owns an independent budget and they multiply against
+   * the caller's casLoop attempts — see operationDeadline.ts. Omitted, the
+   * ladders behave exactly as before.
+   */
+  deadline?: OperationDeadline;
+  /**
    * Opt-in ONLY. Treats a `NotFoundError` as a transient share-visibility
    * failure and retries it on TRANSIENT_WRITE_RETRY_DELAYS_MS before giving up
    * and returning `null`.
@@ -234,9 +244,22 @@ async function readText(
       return await file.text();
     } catch (error) {
       if (isNotFoundError(error)) {
-        if (missingAttempts < missingRetries) {
+        // The ~11 s verify-readback ladder is the largest sleeper in this module
+        // and runs TWICE per safeWriteJson call. Nested inside a 14-attempt
+        // casLoop that is ~308 s — the four-minute answer save. The ladder is
+        // right for a standalone month save and wrong when nested; the
+        // operation's deadline is what distinguishes the two. `null` means the
+        // budget is spent: stop waiting and report what we already have.
+        const missingDelay =
+          missingAttempts < missingRetries
+            ? nextRetryDelayMs(
+                VERIFY_READBACK_RETRY_DELAYS_MS[missingAttempts]!,
+                options?.deadline
+              )
+            : null;
+        if (missingDelay !== null) {
           lastMissingError = error;
-          await wait(VERIFY_READBACK_RETRY_DELAYS_MS[missingAttempts]!);
+          await wait(missingDelay);
           missingAttempts += 1;
           continue;
         }
@@ -251,7 +274,11 @@ async function readText(
         }
         return null;
       }
-      const retryDelay = readRetryDelayMs(error, retries);
+      // Same budget rule as the not-found ladder above: these NotReadable /
+      // stale-snapshot rungs are also nested inside the caller's casLoop.
+      const ladderDelay = readRetryDelayMs(error, retries);
+      const retryDelay =
+        ladderDelay === null ? null : nextRetryDelayMs(ladderDelay, options?.deadline);
       if (retryDelay !== null) {
         await wait(retryDelay);
         continue;
@@ -346,7 +373,11 @@ async function readContent(
       }
       return { kind: "plain", text: await file.text() };
     } catch (error) {
-      const retryDelay = readRetryDelayMs(error, retries);
+      // Same budget rule as the not-found ladder above: these NotReadable /
+      // stale-snapshot rungs are also nested inside the caller's casLoop.
+      const ladderDelay = readRetryDelayMs(error, retries);
+      const retryDelay =
+        ladderDelay === null ? null : nextRetryDelayMs(ladderDelay, options?.deadline);
       if (retryDelay !== null) {
         await wait(retryDelay);
         continue;
@@ -388,7 +419,11 @@ async function classifyFile(
         ? { kind: "plain" }
         : { kind: "compressed", head: classified.head };
     } catch (error) {
-      const retryDelay = readRetryDelayMs(error, retries);
+      // Same budget rule as the not-found ladder above: these NotReadable /
+      // stale-snapshot rungs are also nested inside the caller's casLoop.
+      const ladderDelay = readRetryDelayMs(error, retries);
+      const retryDelay =
+        ladderDelay === null ? null : nextRetryDelayMs(ladderDelay, options?.deadline);
       if (retryDelay !== null) {
         await wait(retryDelay);
         continue;
@@ -530,9 +565,22 @@ async function openFile(
       return await handle.getFile();
     } catch (error) {
       if (isNotFoundError(error)) {
-        if (missingAttempts < missingRetries) {
+        // The ~11 s verify-readback ladder is the largest sleeper in this module
+        // and runs TWICE per safeWriteJson call. Nested inside a 14-attempt
+        // casLoop that is ~308 s — the four-minute answer save. The ladder is
+        // right for a standalone month save and wrong when nested; the
+        // operation's deadline is what distinguishes the two. `null` means the
+        // budget is spent: stop waiting and report what we already have.
+        const missingDelay =
+          missingAttempts < missingRetries
+            ? nextRetryDelayMs(
+                VERIFY_READBACK_RETRY_DELAYS_MS[missingAttempts]!,
+                options?.deadline
+              )
+            : null;
+        if (missingDelay !== null) {
           lastMissingError = error;
-          await wait(VERIFY_READBACK_RETRY_DELAYS_MS[missingAttempts]!);
+          await wait(missingDelay);
           missingAttempts += 1;
           continue;
         }
@@ -547,7 +595,11 @@ async function openFile(
         }
         return null;
       }
-      const retryDelay = readRetryDelayMs(error, retries);
+      // Same budget rule as the not-found ladder above: these NotReadable /
+      // stale-snapshot rungs are also nested inside the caller's casLoop.
+      const ladderDelay = readRetryDelayMs(error, retries);
+      const retryDelay =
+        ladderDelay === null ? null : nextRetryDelayMs(ladderDelay, options?.deadline);
       if (retryDelay !== null) {
         await wait(retryDelay);
         continue;
@@ -1635,14 +1687,19 @@ async function isRecoverableCompressedFile(
  */
 async function readEnvelopeMetadataTolerant(
   dir: DirectoryHandleLike,
-  fileName: string
+  fileName: string,
+  deadline?: OperationDeadline
 ): Promise<Awaited<ReturnType<typeof readEnvelopeMetadata>>> {
   const retries = newReadRetryBudget();
   for (;;) {
     try {
       return await readEnvelopeMetadata(dir, fileName);
     } catch (error) {
-      const retryDelay = readRetryDelayMs(error, retries);
+      // Same budget rule as the not-found ladder above: these NotReadable /
+      // stale-snapshot rungs are also nested inside the caller's casLoop.
+      const ladderDelay = readRetryDelayMs(error, retries);
+      const retryDelay =
+        ladderDelay === null ? null : nextRetryDelayMs(ladderDelay, deadline);
       if (retryDelay !== null) {
         await wait(retryDelay);
         continue;
@@ -1780,7 +1837,7 @@ async function writeCompressedJson<T>(
   await copyFileBytes(dir, tmpName, dir, fileName);
   reportProgress(onProgress, "verifying-committed");
   if (!(await verifyCompressedFile(dir, fileName, staged))) {
-    if (await rollbackFromBak(dir, fileName)) {
+    if (hasCurrent && (await rollbackFromBak(dir, fileName))) {
       await removeQuietly(dir, tmpName);
       throw taggedError(
         "XQ-IO-011",
@@ -1821,6 +1878,16 @@ export type SafeWriteJsonOptions = {
    * explicitly. Omitted, the table decides — and the table's default is plain.
    */
   policy?: StoragePolicy;
+  /**
+   * Total wall-clock budget for the USER ACTION containing this write. Passed
+   * down to every read-back ladder below, so the ~11 s verify-readback ladder
+   * (which runs twice per call) cannot multiply against the caller's casLoop
+   * attempts into the multi-minute saves reported on 2026-09-13.
+   *
+   * Callers that legitimately take longer (a month save, a rebuild) pass a bulk
+   * budget or none at all. See operationDeadline.ts.
+   */
+  deadline?: OperationDeadline;
 };
 
 function normalizeWriteOptions(
@@ -1858,7 +1925,7 @@ export async function safeWriteJson<T>(
 ): Promise<void> {
   assertWritableMode();
 
-  const { onProgress, policy: policyOverride } = normalizeWriteOptions(options);
+  const { onProgress, policy: policyOverride, deadline } = normalizeWriteOptions(options);
   const compressPolicy = shouldCompress(fileName, value, policyOverride);
   if (compressPolicy) {
     await withWorkspaceWriteAccess(dir, () =>
@@ -1978,7 +2045,7 @@ export async function safeWriteJson<T>(
         liveInfo.fileLength !== stagedInfo.fileLength ||
         !(await verifyStreamedFile(dir, fileName, stagedInfo))
       ) {
-        if (await rollbackFromBak(dir, fileName)) {
+        if (hasCurrent && (await rollbackFromBak(dir, fileName))) {
           await removeQuietly(dir, tmpName);
           throw taggedError(
             "XQ-IO-009",
@@ -2034,7 +2101,7 @@ export async function safeWriteJson<T>(
     reportProgress(onProgress, "staging");
     await writeText(dir, tmpName, serialized);
     reportProgress(onProgress, "verifying-staged");
-    const staged = await readText(dir, tmpName, { retryMissing: true });
+    const staged = await readText(dir, tmpName, { retryMissing: true, deadline });
     // Phase 1.3: byte-exact comparison for every size, not just large files.
     // The old small-file check was `does it parse` — which a *peer's* valid
     // envelope also passes, so a concurrent writer's file could be accepted as
@@ -2050,23 +2117,43 @@ export async function safeWriteJson<T>(
     reportProgress(onProgress, "committing");
     await writeText(dir, fileName, serialized);
     reportProgress(onProgress, "verifying-committed");
-    const verify = await readText(dir, fileName, { retryMissing: true });
+    const verify = await readText(dir, fileName, { retryMissing: true, deadline });
     const verifyOk = verify === serialized;
     if (!verifyOk) {
-      if (await rollbackFromBak(dir, fileName)) {
+      // Roll back ONLY to a snapshot THIS write created (`hasCurrent`, the same
+      // condition that gated step 1). Then the `.bak` is by construction the
+      // immediately-previous good version of the very bytes we just replaced,
+      // and restoring it is the correct undo.
+      //
+      // When we did NOT snapshot — the live file was damaged or absent — the
+      // `.bak` is an older revision belonging to some earlier write, and
+      // restoring it is not an undo at all: it discards the content we just
+      // byte-verified as `.tmp` AND re-establishes the precondition, because the
+      // `.bak` refresh in step 1 is itself gated on the live file being healthy.
+      // The CAS loop above then re-reads that same frozen revision, computes the
+      // same next revision and fails identically, forever. That is the
+      // 2026-09-10..14 `storage:bak-recovery` trap — "the live file is damaged
+      // and every reader is falling back until something rewrites it" — and why
+      // طلب استبدال presented as ALWAYS failing rather than intermittently.
+      //
+      // The promotion path below is the right answer for that case and was
+      // already here; it was simply unreachable while a stale `.bak` existed.
+      if (hasCurrent && (await rollbackFromBak(dir, fileName))) {
         await removeQuietly(dir, tmpName);
         throw taggedError(
           "XQ-IO-009",
           `Safe-write validation failed for ${fileName}; rolled back to previous version.`
         );
       }
-      // No usable .bak (first write, or .bak corrupt): the staged .tmp WAS
-      // verified before commit — promote it instead of losing the data.
-      const staged2 = await readText(dir, tmpName, { retryMissing: true });
+      // No usable .bak (first write, or .bak corrupt), or a .bak this write did
+      // not create: the staged .tmp WAS verified before commit — promote it
+      // instead of losing the data. Promoting also REPAIRS a damaged live file,
+      // which is what clears the bak-recovery banner for every other reader.
+      const staged2 = await readText(dir, tmpName, { retryMissing: true, deadline });
       const staged2Ok = staged2 === serialized;
       if (staged2Ok) {
         await writeText(dir, fileName, staged2 as string);
-        const check = await readText(dir, fileName, { retryMissing: true });
+        const check = await readText(dir, fileName, { retryMissing: true, deadline });
         const checkOk = check === serialized;
         if (checkOk) {
           await removeQuietly(dir, tmpName);
