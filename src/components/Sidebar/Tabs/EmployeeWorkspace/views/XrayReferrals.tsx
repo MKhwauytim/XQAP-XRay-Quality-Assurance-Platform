@@ -6,6 +6,7 @@ import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
 import { ConfirmDialog } from "../../../../../components/ConfirmDialog/ConfirmDialog";
 import { EmptyState, ErrorState, LoadingState } from "../../../../../components/StateViews/StateViews";
 import { logError, logRejection } from "../../../../../data/storage/errorLogger";
+import { resolveErrorCode } from "../../../../../data/storage/errorCodes";
 import { thrownErrorText, userFacingErrorText } from "../../../../../data/storage/writeErrorText";
 import {
   loadEmployeeAnswers,
@@ -547,7 +548,10 @@ function createSaveAnswerHandler(deps: {
       // local mirror) and retried in the background. Say so only when this
       // exact save is really in that queue.
       const queued = await isAnswerQueuedPending(folder, forUser, item);
-      return { ok: false, message: text, queuedForRetry: queued, queuedSavedAt: queued ? item.lastSavedAt : undefined };
+      return { ok: false, message: text, queuedForRetry: queued, queuedSavedAt: queued ? item.lastSavedAt : undefined,
+        // Code for the inline line: carried on the error when there is one, else the
+        // one `formatUserError` already embedded in the Arabic text.
+        errorCode: resolveErrorCode(result.error) ?? result.error.match(/XQ-[A-Z]+-\d+/)?.[0] };
     } catch (error) {
       const text = thrownWriteErrorText(error);
       setStatusMsg({ type: "error", text });

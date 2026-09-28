@@ -266,10 +266,14 @@ export default function InspectionPanel({
   const [wasSubmitted, setWasSubmitted] = useState(isSubmitted);
   if (wasSubmitted !== isSubmitted) {
     setWasSubmitted(isSubmitted);
-    if (wasSubmitted && saveStatus?.kind === "saved") setSaveStatus(null);
+    // Also a stored `queued`: its DERIVED saved (below) is already gone with
+    // the submitted answer, and falling back to "not saved yet" would be false.
+    if (wasSubmitted && (saveStatus?.kind === "saved" || saveStatus?.kind === "queued")) setSaveStatus(null);
   }
   // A queued save that the background replay has since landed shows as saved:
   // the submitted answer in `savedAnswer` is at least as new as the queued one.
+  // A submit from a supervisor or another device can flip it too — intended,
+  // because the item really is submitted.
   const shownStatus =
     saveStatus?.kind === "queued" && saveStatus.savedAt &&
     savedAnswer?.status === "submitted" &&
@@ -312,7 +316,7 @@ export default function InspectionPanel({
         !outcome ? null
           : outcome.ok ? { kind: "saved" }
           : outcome.queuedForRetry
-            ? { kind: "queued", savedAt: outcome.queuedSavedAt ?? null, code: outcome.message.match(/XQ-[A-Z]+-\d+/)?.[0] ?? null }
+            ? { kind: "queued", savedAt: outcome.queuedSavedAt ?? null, code: outcome.errorCode ?? null }
           : { kind: "failed", message: outcome.message }
       );
     } catch {

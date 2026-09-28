@@ -141,4 +141,4 @@ export type EmployeeAnswerFile = {
  */
 export type AnswerSaveOutcome =
   | { ok: true }
-  | { ok: false; message: string; queuedForRetry?: boolean; queuedSavedAt?: string };
+  | { ok: false; message: string; queuedForRetry?: boolean; queuedSavedAt?: string; errorCode?: string };

@@ -645,7 +645,7 @@ describe("InspectionPanel — inline save status (A1)", () => {
   });
 
   it("says the answer is not saved yet and will retry when it was queued", async () => {
-    renderWith(async () => ({ ok: false, message: "تعذّر الحفظ (XQ-IO-038)", queuedForRetry: true }));
+    renderWith(async () => ({ ok: false, message: "تعذّر الحفظ (XQ-IO-038)", queuedForRetry: true, errorCode: "XQ-IO-038" }));
     submit();
     expect(await screen.findByText(DEFAULT_LABELS.ip_save_status_queued_coded.replace("{code}", "XQ-IO-038"))).toBeInTheDocument();
     expect(screen.queryByText(DEFAULT_LABELS.ip_save_status_saved)).toBeNull();
@@ -674,7 +674,7 @@ describe("InspectionPanel — inline save status (A1)", () => {
 
   it("turns a queued line into saved when the replayed answer arrives via savedAnswer", async () => {
     const queuedAt = "2026-08-02T10:00:00.000Z";
-    const onSave = async () => ({ ok: false as const, message: "تعذّر (XQ-IO-038)", queuedForRetry: true, queuedSavedAt: queuedAt });
+    const onSave = async () => ({ ok: false as const, message: "تعذّر (XQ-IO-038)", queuedForRetry: true, queuedSavedAt: queuedAt, errorCode: "XQ-IO-038" });
     const { rerender } = render(<InspectionPanel {...panelProps({ onSave })} />);
     submit();
     expect(await screen.findByText(DEFAULT_LABELS.ip_save_status_queued_coded.replace("{code}", "XQ-IO-038"))).toBeInTheDocument();
@@ -685,6 +685,18 @@ describe("InspectionPanel — inline save status (A1)", () => {
 
     rerender(<InspectionPanel {...panelProps({ onSave, savedAnswer: submittedAnswer(queuedAt) })} />);
     expect(screen.getByText(DEFAULT_LABELS.ip_save_status_saved)).toBeInTheDocument();
+  });
+
+  it("empties the line on reopen after a queued save was derived as saved", async () => {
+    const queuedAt = "2026-08-02T10:00:00.000Z";
+    const onSave = async () => ({ ok: false as const, message: "تعذّر (XQ-IO-038)", queuedForRetry: true, queuedSavedAt: queuedAt, errorCode: "XQ-IO-038" });
+    const { rerender, container } = render(<InspectionPanel {...panelProps({ onSave })} />);
+    submit();
+    await screen.findByText(DEFAULT_LABELS.ip_save_status_queued_coded.replace("{code}", "XQ-IO-038"));
+    rerender(<InspectionPanel {...panelProps({ onSave, savedAnswer: submittedAnswer(queuedAt) })} />);
+    expect(screen.getByText(DEFAULT_LABELS.ip_save_status_saved)).toBeInTheDocument();
+    rerender(<InspectionPanel {...panelProps({ onSave, savedAnswer: null })} />);
+    expect(container.querySelector(".ip-save-status")?.textContent).toBe("");
   });
 
   it("clears a failed line when the employee edits a field again", async () => {
