@@ -13,6 +13,11 @@ import {
   type FeedbackThreadSummary,
 } from "../../data/feedback/feedbackStorage";
 import { canManageFeedback } from "../../data/feedback/feedbackUnread";
+import {
+  indexThreadsById,
+  missingThreadIds,
+  pickFresherThread,
+} from "../../data/feedback/feedbackThreadMerge";
 import { useFeedbackUnread } from "../../data/feedback/useFeedbackUnread";
 import { useWorkspace } from "../../data/workspace/useWorkspace";
 import Pagination from "../Pagination/Pagination";
@@ -75,7 +80,12 @@ export function FeedbackWidget() {
   const session = readSession();
   // Shared with AdminToolbar's trigger (see FeedbackUnreadProvider): one poll,
   // one count, so both dots agree and opening the panel clears both.
-  const { unreadCount, markSeen, reload: reloadUnread } = useFeedbackUnread();
+  const {
+    unreadCount,
+    markSeen,
+    reload: reloadUnread,
+    messages: polledMessages,
+  } = useFeedbackUnread();
   const labels = useLabels();
   const [open, setOpen] = useState(false);
   // The list view holds SUMMARIES only (one index read + one names-only
@@ -274,6 +284,14 @@ export function FeedbackWidget() {
     }
   }
 
+  // A thread body can come from two places: the provider's polled aggregate
+  // (already in memory -- reading it again from disk is pure waste) or this
+  // widget's own page-scoped copy. `threadFor` resolves each id to the fresher
+  // of the two; see feedbackThreadMerge.ts.
+  const polledById = indexThreadsById(polledMessages);
+  const threadFor = (threadId: string): FeedbackMessage | undefined =>
+    pickFresherThread(threadsById[threadId], polledById.get(threadId));
+
   // All three run on SUMMARIES -- status, author and count are index fields, so
   // filtering and paginating costs no thread reads at all.
   const openCount = summaries.filter((s) => s.status === "open").length;
@@ -289,7 +307,8 @@ export function FeedbackWidget() {
   // deliberately carries no reply-recency field (a plain reply must never
   // write the shared index -- see appendReply's doc and the regression test
   // pinning it), so this reads it from whichever thread bodies happen to be
-  // loaded already (`threadsById`, filled by the effect below) and falls back
+  // loaded already (`threadFor` -- the provider's polled copy or this page's
+  // own read) and falls back
   // to `createdAt` for a row not loaded yet. Rows re-sort slightly as bodies
   // stream in -- the same "fills in progressively" shape the reply list itself
   // already has, not a new pattern for this panel.
@@ -299,17 +318,17 @@ export function FeedbackWidget() {
   // below), so a mailbox with far more than one page of tickets still opens
   // only that page's thread files, never the whole history.
   const myByActivity = [...mySummaries].sort((a, b) => {
-    const ta = threadsById[a.threadId];
-    const tb = threadsById[b.threadId];
+    const ta = threadFor(a.threadId);
+    const tb = threadFor(b.threadId);
     const la = ta ? latestActivity(ta) : a.createdAt;
     const lb = tb ? latestActivity(tb) : b.createdAt;
     return lb.localeCompare(la);
   });
   const myFilteredSummaries = myByActivity.filter((s) =>
-    matchesReplyFilter(threadsById[s.threadId], myReplyFilter)
+    matchesReplyFilter(threadFor(s.threadId), myReplyFilter)
   );
   const adminFilteredSummaries = filteredSummaries.filter((s) =>
-    matchesReplyFilter(threadsById[s.threadId], adminReplyFilter)
+    matchesReplyFilter(threadFor(s.threadId), adminReplyFilter)
   );
 
   const safeMyPage = clampPage(myPage, myFilteredSummaries.length);
@@ -327,14 +346,23 @@ export function FeedbackWidget() {
       : pageSlice(myFilteredSummaries, safeMyPage);
 
   const visibleIds = visibleSummaries.map((summary) => summary.threadId);
-  // Stable dependency: the array identity changes on every render, the joined
-  // key does not.
-  const visibleIdsKey = visibleIds.join("|");
+  // Only the ids NEITHER source holds are read from disk, and the effect keys on
+  // that SORTED set -- not on the ordered visible ids. The old ordered key
+  // changed every time the "my messages" list re-sorted by latest activity as
+  // bodies streamed in, which re-read the same page; and it did NOT change when
+  // a reply dropped one thread from `threadsById`, which left that card stuck
+  // on the loading line. A set key has neither failure: re-ordering never
+  // changes it, and a thread that goes missing changes it immediately.
+  //
+  // An id whose file cannot be read stays in the set, so the key does not
+  // change and the read is not retried in a loop; the card keeps its loading
+  // line until the next open or refresh, as before.
+  const missingIdsKey = missingThreadIds(visibleIds, threadsById, polledById).join("|");
 
   useEffect(() => {
-    if (!directoryHandle || !open || visibleIds.length === 0) return;
+    if (!directoryHandle || !open || missingIdsKey === "") return;
     let cancelled = false;
-    loadThreads(directoryHandle, visibleIds)
+    loadThreads(directoryHandle, missingIdsKey.split("|"))
       .then((threads) => {
         if (cancelled) return;
         setThreadsById((prev) => {
@@ -350,8 +378,7 @@ export function FeedbackWidget() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- visibleIdsKey is the stable identity of visibleIds
-  }, [directoryHandle, open, visibleIdsKey]);
+  }, [directoryHandle, open, missingIdsKey]);
 
   // The read-only demo/viewer session reports role "admin" purely to unlock
   // full tab visibility (see AdminToolbar's own isDemo/isRealAdmin split) — it
@@ -560,7 +587,7 @@ export function FeedbackWidget() {
                     </div>
                     <div className="fb-msg-list" style={{ marginTop: 8 }}>
                       {visibleSummaries.map((s) => {
-                        const msg = threadsById[s.threadId];
+                        const msg = threadFor(s.threadId);
                         // The thread file for this row has not arrived yet.
                         if (!msg) return <p key={s.threadId} className="fb-empty">{getLabels().fb_loading}</p>;
                         return (
@@ -596,7 +623,7 @@ export function FeedbackWidget() {
                   <>
                     <div className="fb-msg-list">
                       {visibleSummaries.map((s) => {
-                        const msg = threadsById[s.threadId];
+                        const msg = threadFor(s.threadId);
                         if (!msg) return <p key={s.threadId} className="fb-empty">{getLabels().fb_loading}</p>;
                         return (
                           <MessageCard
