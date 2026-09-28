@@ -5185,7 +5185,7 @@ export type PersonalQuota = { dailyQuota: number; daysRemaining: number; sampleC
 
 Run: `npx vitest run src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals/quotaTile.test.tsx src/components/Sidebar/Tabs/Settings/index.test.tsx`
 Expected: PASS (the Settings reachability test picks the new keys up through its "أخرى" fallback group).
-Then run: `grep -rn "حصة اليوم\|الأيام المتبقية" src --include=*.test.tsx --include=*.test.ts` — Expected: no match (no other test pinned the old strings); if one exists, update it to the new label text.
+Then run: `grep -rn '"حصة اليوم"\|"حصة اليوم (لي)"\|الأيام المتبقية:' src --include=*.test.tsx --include=*.test.ts` — Expected: no match (no other test pinned the old strings); if one exists, update it to the new label text.
 
 - [ ] **Step 6: Tier 2 gates plus complexity**
 
