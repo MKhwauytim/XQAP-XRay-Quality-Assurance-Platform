@@ -2501,7 +2501,12 @@ type ReadPayload<T> = { value: T; rawText: string };
  * head/body boundary or a structurally invalid head line, and collapsing
  * them lost that distinction in every exported log.
  */
-type ReadPayloadFailureStage = "json-parse" | "envelope" | "hash" | "compressed-crc";
+type ReadPayloadFailureStage =
+  | "json-parse"
+  | "envelope"
+  | "hash"
+  | "compressed-crc"
+  | "torn-head";
 
 type ReadPayloadOutcome<T> = {
   found: boolean;
@@ -2580,7 +2585,7 @@ async function readPayload<T>(
       payload: null,
       reportedSize: content.reportedSize,
       bytesRead: content.bytesRead,
-      failureStage: content.reason === "compressed-crc" ? "compressed-crc" : "envelope",
+      failureStage: content.reason,
       contentHash: content.contentHash,
     };
   }
@@ -2648,18 +2653,20 @@ function bakRecoveryEvidence(outcome: ReadPayloadOutcome<unknown>, staleRetries:
 }
 
 /**
- * A failure of a COMPLETE document (it parsed, then failed the hash, the
- * envelope structure or the gzip CRC). Only these may stop the retry ladder
- * early on an identical repeat. A `json-parse` failure is a prefix as far as
- * we can tell — and a persistent stale size view returns the SAME truncated
- * prefix on every read, so identical-twice proves nothing there.
+ * A failure of a COMPLETE document that fully parsed and then failed a
+ * check: the content hash or the envelope structure. Only these may stop the
+ * retry ladder early on an identical repeat.
+ *
+ * Deliberately NOT included: `json-parse`, `compressed-crc` and `torn-head`.
+ * A persistent stale size view returns the SAME truncated bytes on every
+ * read, and a truncated gzip member never reaches JSON.parse — it fails the
+ * stream (`compressed-crc`, whose fingerprint is only the head window and so
+ * repeats identically) or leaves a head line with no body (`torn-head`).
+ * Identical-twice proves nothing for any of them, so they take the full
+ * ladder.
  */
 function isCompleteDocumentFailure(outcome: ReadPayloadOutcome<unknown>): boolean {
-  return (
-    outcome.failureStage === "hash" ||
-    outcome.failureStage === "envelope" ||
-    outcome.failureStage === "compressed-crc"
-  );
+  return outcome.failureStage === "hash" || outcome.failureStage === "envelope";
 }
 
 /** Same (size, content) pair, i.e. this read taught us nothing new. */
@@ -2702,8 +2709,8 @@ export async function safeReadJson<T>(
   //      first comparison has nothing to compare against yet (`previous` is
   //      null), so the loop always takes its first trip around.
   //  (c) from the SECOND invalid read onward, if it is a COMPLETE-document
-  //      failure (hash / envelope / compressed-crc — never json-parse, which
-  //      a persistent stale size view reproduces identically) and IDENTICAL
+  //      failure (hash / envelope only — never json-parse, compressed-crc
+  //      or torn-head, which a persistent stale size view reproduces identically) and IDENTICAL
   //      — same size AND same content fingerprint — to the read immediately
   //      before it, that is a file that read the same twice in a row: a genuinely
   //      stable, corrupt file (same-size garbage included — size alone

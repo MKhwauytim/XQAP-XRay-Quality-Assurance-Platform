@@ -47,6 +47,7 @@ afterEach(() => {
 type ScriptedRead =
   | { kind: "truncate"; size: number }
   | { kind: "text"; text: string }
+  | { kind: "truncateBytes"; size: number }
   | { kind: "throw"; errorName: string };
 
 /**
@@ -90,6 +91,10 @@ function wrapWithScriptedReads(
             return new File([step.text], targetName, { type: "application/json" });
           }
           const real = await handle.getFile();
+          if (step.kind === "truncateBytes") {
+            // Binary-safe (gzip): a byte prefix of the real file.
+            return new File([real.slice(0, step.size)], real.name, { type: real.type });
+          }
           const text = await real.text();
           return new File([text.slice(0, step.size)], real.name, { type: real.type });
         },
@@ -363,6 +368,50 @@ test("N2: a successful read never hashes or re-encodes the payload", async () =>
   const encodeSpy = vi.spyOn(TextEncoder.prototype, "encode");
   try {
     const result = await safeReadJson<{ rows: unknown[] }>(dir, "big.json");
+    expect(result.ok).toBe(true);
+    expect(hashSpy).not.toHaveBeenCalled();
+    expect(encodeSpy).not.toHaveBeenCalled();
+  } finally {
+    hashSpy.mockRestore();
+    encodeSpy.mockRestore();
+  }
+});
+
+const bigCompressiblePayload = () => ({
+  rows: Array.from({ length: 6000 }, (_, i) => ({ i, s: "abc".repeat(12) })),
+});
+
+test("N1 (compressed): a persistent stale TRUNCATED gzip view (identical twice) still gets the full ladder and recovers", async () => {
+  const dir = createMemoryDirectory("stale-size-gz");
+  await safeWriteJson(dir, "distribution.current.json", bigCompressiblePayload());
+  // Guard: this fixture really is stored gzip-compressed.
+  const raw = await (await (await dir.getFileHandle("distribution.current.json")).getFile()).text();
+  expect(raw.slice(0, raw.indexOf("\n")).startsWith("{")).toBe(true);
+  expect(raw.length).toBeGreaterThan(0);
+
+  const { dir: wrapped, getCallCount } = wrapWithScriptedReads(dir, "distribution.current.json", [
+    { kind: "truncateBytes", size: 9000 },
+    { kind: "truncateBytes", size: 9000 },
+  ]);
+  const result = await safeReadJson<{ rows: unknown[] }>(wrapped, "distribution.current.json");
+
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.value.rows).toHaveLength(6000);
+    expect(result.recoveredFromBak).toBe(false);
+  }
+  expect(getCallCount()).toBe(3);
+  expect(getRecentErrors().filter((e) => e.context.startsWith("storage:bak-recovery"))).toHaveLength(0);
+});
+
+test("N2 (compressed): a successful compressed read never hashes or re-encodes the payload", async () => {
+  const dir = createMemoryDirectory("stale-size-gz-n2");
+  await safeWriteJson(dir, "distribution.current.json", bigCompressiblePayload());
+  const jsonEnvelope = await import("./jsonEnvelope");
+  const hashSpy = vi.spyOn(jsonEnvelope, "simpleHash");
+  const encodeSpy = vi.spyOn(TextEncoder.prototype, "encode");
+  try {
+    const result = await safeReadJson<{ rows: unknown[] }>(dir, "distribution.current.json");
     expect(result.ok).toBe(true);
     expect(hashSpy).not.toHaveBeenCalled();
     expect(encodeSpy).not.toHaveBeenCalled();
