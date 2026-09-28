@@ -925,7 +925,12 @@ describe("a stable writer's knownFor treats a LISTED segment as claimed, not jus
     expect(ladderPrefix(delays, VERIFY_READBACK_RETRY_DELAYS_MS.length)).toEqual([
       ...VERIFY_READBACK_RETRY_DELAYS_MS,
     ]);
-    expect(delays.length).toBeLessThanOrEqual(VERIFY_READBACK_RETRY_DELAYS_MS.length + 1);
+    // Round 3: the hop after the unreadable seq0 now re-probes seq1's NotFound on
+    // the FAST ladder (4 rungs, ~630 ms) before trusting it — still no second
+    // patient ladder.
+    expect(delays.length).toBeLessThanOrEqual(
+      VERIFY_READBACK_RETRY_DELAYS_MS.length + 1 + TRANSIENT_WRITE_RETRY_DELAYS_MS.length
+    );
     clearSimulatedFaults(dir);
 
     expect(await readSegmentText(dir, name(0, stableWriter))).toBe(sealedBefore);
@@ -1102,6 +1107,83 @@ describe("N1: a thrown listing never makes an absent segment trustworthy", () =>
     expect(errorCodeOf(failure)).toBe("XQ-IO-038");
     // seq0 + 5 bounded hops, each at most a fast ladder (5 attempts) plus failure-path probes — ~75 observed; a spin toward MAX_SEGMENT_SEQ would be orders of magnitude more.
     expect(getOperationLog(eventsDir).filter((e) => e.operation === "getFileHandle").length).toBeLessThan(100);
+  });
+});
+
+// Round 3 guard: the hop taken because the previous segment was UNREADABLE
+// retries a NotFound on the fast ladder before trusting it, so ONE stale
+// NotFound on another tab's real seq1 (hidden by a stale-but-SUCCESSFUL
+// listing) can no longer get it overwritten.
+async function seedStaleListingScenario(dir: DirectoryHandleLike) {
+  const w = { ...WRITER, stable: true };
+  await appendEventSegment(dir, [event("A")], w, TEST_LOG);
+  const otherLine = `${JSON.stringify({ eventId: "evt-OTHER", eventAt: "2026-08-27T10:00:00.000Z", seq: 999 })}\n`;
+  await writeSegmentText(dir, name(1, w), otherLine);
+  __resetAppendOnlyEventLogMemosForTests();
+  setSimulatedFaults(dir, [
+    { operation: "getFileHandle", name: name(0, w), create: false, errorName: "NotFoundError", times: Number.POSITIVE_INFINITY },
+    { operation: "getFileHandle", name: name(1, w), create: false, errorName: "NotFoundError", times: 1 },
+  ]);
+  return { w, otherLine };
+}
+
+/** Parent whose events-dir listing SUCCEEDS but hides `hidden` for the first `staleCalls` calls. */
+async function withStaleListing(dir: DirectoryHandleLike, hidden: string, staleCalls: number) {
+  const eventsDir = await eventsDirOf(dir);
+  const raw = eventsDir as unknown as { values: () => AsyncGenerator<{ name: string; kind: string }> };
+  const original = raw.values.bind(raw);
+  let calls = 0;
+  const stale = {
+    ...eventsDir,
+    values: () => {
+      calls += 1;
+      if (calls > staleCalls) return original();
+      const inner = original();
+      return (async function* () {
+        for await (const entry of inner) if (entry.name !== hidden) yield entry;
+      })();
+    },
+  } as unknown as DirectoryHandleLike;
+  return { ...dir, getDirectoryHandle: async () => stale } as unknown as DirectoryHandleLike;
+}
+
+describe("round 3: a stale NotFound on an unreadable-hop target is retried before it is trusted", () => {
+  it("stale-but-successful listing hides seq1 (every listing) + seq0 unreadable + one stale NotFound on seq1 — evt-OTHER survives", async () => {
+    const dir = root();
+    const { w } = await seedStaleListingScenario(dir);
+    const parent = await withStaleListing(dir, name(1, w), Number.POSITIVE_INFINITY);
+    const { result } = await withCapturedSleeps(() => appendEventSegment(parent, [event("B")], w, TEST_LOG));
+    expect(result).toBe("verified");
+    clearSimulatedFaults(dir);
+    const text = await readSegmentText(dir, name(1, w));
+    expect(text).toContain("evt-OTHER");
+    expect(text).toContain("evt-B");
+  });
+
+  it("same, but only the DISCOVERY listing is stale (later listings show seq1) — evt-OTHER survives", async () => {
+    const dir = root();
+    const { w } = await seedStaleListingScenario(dir);
+    const parent = await withStaleListing(dir, name(1, w), 1);
+    await withCapturedSleeps(() => appendEventSegment(parent, [event("B")], w, TEST_LOG));
+    clearSimulatedFaults(dir);
+    expect(await readSegmentText(dir, name(1, w))).toContain("evt-OTHER");
+  });
+
+  it("HEALTHY path is unchanged: six stable appends with a reload and a rotation = fixed op and sleep counts", async () => {
+    const dir = root({ trackOperations: true });
+    const w = { ...WRITER, stable: true };
+    const eventsDir = await eventsDirOf(dir);
+    clearOperationLog(eventsDir);
+    const { delays } = await withCapturedSleeps(async () => {
+      for (let i = 0; i < 6; i += 1) {
+        if (i === 3) __resetAppendOnlyEventLogMemosForTests();
+        await appendEventSegment(dir, [bigEvent(`H${i}`), bigEvent(`I${i}`), bigEvent(`J${i}`)], w, TEST_LOG);
+      }
+    });
+    const ops = getOperationLog(eventsDir);
+    expect(await segmentNames(dir)).toEqual([name(0, w), name(1, w), name(2, w)].sort());
+    expect({ total: ops.length, getFileHandle: ops.filter((o) => o.operation === "getFileHandle").length, sleeps: delays.length })
+      .toEqual({ total: 54, getFileHandle: 20, sleeps: 0 });
   });
 });
 

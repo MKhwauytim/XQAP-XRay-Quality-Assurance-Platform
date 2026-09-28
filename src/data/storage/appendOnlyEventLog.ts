@@ -642,7 +642,24 @@ type ExistingSegment = { text: string; reliable: boolean };
  * - neither: absence is trusted (a listing SUCCEEDED without the name, or the
  *   seq is above the highest one a successful listing showed, or non-stable).
  */
-type SegmentClaim = { known: boolean; distrust: boolean };
+type SegmentClaim = {
+  known: boolean;
+  distrust: boolean;
+  /**
+   * Hop-after-unreadable only: retry NotFound on the FAST ladder, then trust
+   * the absence. Set by `asHopClaim` when the previous segment was already
+   * unreadable, so a single stale NotFound on this target (another tab's, or
+   * this tab's pre-reload, segment hidden by a stale but successful listing)
+   * is re-probed (~630 ms worst case, only on an already-anomalous save)
+   * before being believed. Never set on the healthy path.
+   */
+  retryAbsence?: boolean;
+};
+
+/** Mark a claim as belonging to a hop taken because the previous segment was unreadable. */
+function asHopClaim(claim: SegmentClaim): SegmentClaim {
+  return claim.known || claim.distrust ? claim : { ...claim, retryAbsence: true };
+}
 
 async function readExistingSegment(
   eventsDir: DirectoryHandleLike,
@@ -659,7 +676,7 @@ async function readExistingSegment(
     } catch (error) {
       const transient = knownWritten
         ? isTransientWriteError(error)
-        : claim.distrust
+        : claim.distrust || claim.retryAbsence
           ? isNotReadableError(error) || isNotFoundError(error)
           : isNotReadableError(error);
       // Patient ladder only when this session KNOWS it wrote the segment, so
@@ -1103,7 +1120,7 @@ async function ensureReliableRotationTarget(
     existing = await readExistingSegment(
       eventsDir,
       fileName,
-      await knownWrittenFor(fileName, seq),
+      asHopClaim(await knownWrittenFor(fileName, seq)),
       diagnostics,
       deadline
     );
@@ -1317,7 +1334,7 @@ export async function appendEventSegment<TEvent>(
       existing = await readExistingSegment(
         eventsDir,
         fileName,
-        await knownWrittenFor(fileName, seq),
+        asHopClaim(await knownWrittenFor(fileName, seq)),
         diagnostics,
         deadline
       );
@@ -1338,12 +1355,16 @@ export async function appendEventSegment<TEvent>(
     if (seq < MAX_SEGMENT_SEQ && shouldRotate(existing.text, existingBytes, addedBytes, events.length)) {
       seq += 1;
       fileName = segmentFileNameForSeq(base, seq, segmentSuffix);
-      // Read the rotation target too. It is normally absent and this resolves
-      // immediately (an unwritten segment is not in writtenSegmentsThisSession,
-      // so a NotFoundError is taken at face value with no retry ladder) -- but
-      // reading it is what makes "the previous run crashed after writing this
-      // name" and "the directory listing had not caught up yet" non-destructive
-      // instead of an overwrite.
+      // Read the rotation target too — reading it is what makes "the previous
+      // run crashed after writing this name" and "the directory listing had
+      // not caught up yet" non-destructive instead of an overwrite. How its
+      // NotFound is treated depends on the claim: a target a successful
+      // listing did NOT show (the normal case) is taken at face value with no
+      // retry ladder; one the listing shows gets the patient ladder and an
+      // exhausted NotFound is unreliable; one claimed only because the listing
+      // threw gets the fast ladder and is likewise unreliable when exhausted.
+      // (The hop taken after an UNREADABLE segment is stricter still — see
+      // `asHopClaim`.)
       existing = await readExistingSegment(
         eventsDir,
         fileName,
