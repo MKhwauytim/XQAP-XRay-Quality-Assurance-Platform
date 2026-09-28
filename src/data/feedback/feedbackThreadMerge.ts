@@ -1,4 +1,9 @@
-import type { FeedbackMessage } from "./feedbackStorage";
+import {
+  summarizeFeedbackThread,
+  type FeedbackMessage,
+  type FeedbackThread,
+  type FeedbackThreadSummary,
+} from "./feedbackStorage";
 
 /**
  * Two in-memory copies of the same conversation can coexist in the feedback
@@ -70,4 +75,47 @@ export function mergeFeedbackThreads(
     if (fresher) byId.set(thread.id, fresher);
   }
   return [...byId.values()].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
+
+/**
+ * A summary list read from disk, reconciled with what THIS tab already knows.
+ *
+ * A refresh reads the index, then the listing, then lands -- and in between the
+ * user may have submitted a thread or replied/resolved one, each applied to the
+ * list optimistically. Replacing the list wholesale with the (older) read then
+ * silently un-does both: the new thread drops out and the status patch is lost,
+ * although both are durable on disk. So, per thread this tab holds:
+ *  - not in the read list -> it was created (or first seen) after the read
+ *    started: keep it;
+ *  - in the list, but the local copy shows later activity (every reply, and so
+ *    every resolve, stamps a newer `lastActivityAt`), or the same activity with
+ *    a resolved status the row lacks (`resolved` is terminal): the local copy is
+ *    newer, use its summary.
+ * Otherwise the listed row stands, so a change made by ANOTHER user still comes
+ * through. The result keeps `listThreadSummaries`' createdAt-descending order.
+ */
+export function mergeSummariesWithLocalThreads(
+  listed: readonly FeedbackThreadSummary[],
+  local: Readonly<Record<string, FeedbackThread>>
+): FeedbackThreadSummary[] {
+  const localIds = Object.keys(local);
+  if (localIds.length === 0) return [...listed];
+  const listedIds = new Set(listed.map((row) => row.threadId));
+  const merged = listed.map((row) => {
+    const held = local[row.threadId];
+    if (!held) return row;
+    const heldRow = summarizeFeedbackThread(held);
+    const newer =
+      heldRow.lastActivityAt > row.lastActivityAt ||
+      (heldRow.lastActivityAt === row.lastActivityAt &&
+        heldRow.status === "resolved" &&
+        row.status !== "resolved");
+    return newer ? heldRow : row;
+  });
+  for (const id of localIds) {
+    if (!listedIds.has(id)) merged.push(summarizeFeedbackThread(local[id]!));
+  }
+  return merged.length === listed.length
+    ? merged
+    : merged.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
 }

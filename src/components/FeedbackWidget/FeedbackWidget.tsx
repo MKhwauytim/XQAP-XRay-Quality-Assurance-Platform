@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, MessageCircle, X } from "lucide-react";
 import { readSession } from "../../auth/authSession";
 import {
@@ -16,6 +16,7 @@ import {
 import { canManageFeedback } from "../../data/feedback/feedbackUnread";
 import {
   indexThreadsById,
+  mergeSummariesWithLocalThreads,
   missingThreadIds,
   pickFresherThread,
 } from "../../data/feedback/feedbackThreadMerge";
@@ -95,6 +96,12 @@ export function FeedbackWidget() {
   // -- opening the panel no longer reads every conversation on the share.
   const [summaries, setSummaries] = useState<FeedbackThreadSummary[]>([]);
   const [threadsById, setThreadsById] = useState<Record<string, FeedbackThread>>({});
+  // What this tab holds, readable from inside an async `refresh()` that must not
+  // close over a stale render's copy.
+  const threadsByIdRef = useRef(threadsById);
+  useEffect(() => {
+    threadsByIdRef.current = threadsById;
+  }, [threadsById]);
   const [loading, setLoading] = useState(false);
   const [adminTab, setAdminTab] = useState<"new" | "all">("new");
   const [filter, setFilter] = useState<"open" | "resolved" | "all">("open");
@@ -157,7 +164,9 @@ export function FeedbackWidget() {
     // doc for what that cost.
     try {
       const list = await listThreadSummaries(directoryHandle, { repairIndex: true });
-      setSummaries(list);
+      // MERGE with what this tab already applied: a submit/reply/resolve made
+      // while this read was in flight is durable but absent from `list`.
+      setSummaries(mergeSummariesWithLocalThreads(list, threadsByIdRef.current));
     } catch (err) {
       // Leave the last-known list in place; the background reload below still
       // runs and the page effect reads whatever it can. Logged rather than

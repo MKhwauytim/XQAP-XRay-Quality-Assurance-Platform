@@ -46,6 +46,7 @@ vi.mock("../../data/feedback/feedbackStorage", async (importOriginal) => {
 });
 
 const SARA: AuthSession = { username: "sara", role: "employee", loginAt: "2026-09-28T08:00:00.000Z" };
+const ADMIN: AuthSession = { username: "admin", role: "admin", loginAt: "2026-09-28T08:00:00.000Z" };
 
 const EXISTING: FeedbackThread = {
   id: "t20260920100000-aaaaaaaa",
@@ -169,5 +170,100 @@ describe("FeedbackWidget — optimistic submit and reply", () => {
     expect(screen.queryByText(DEFAULT_LABELS.fb_loading)).toBeNull();
     expect(storage.loadThreads.mock.calls.length).toBe(threadReadsBefore);
     expect(storage.listThreadSummaries.mock.calls.length).toBe(summaryReadsBefore);
+  });
+
+  it("keeps the typed text and shows the error when the submit fails", async () => {
+    storage.listThreadSummaries.mockResolvedValue([]);
+    storage.loadFeedback.mockResolvedValue([]);
+    storage.submitFeedback.mockRejectedValue(new Error("تعذّر حفظ الرسالة: تعارض في الكتابة"));
+
+    await renderOpenAndSettle();
+    const box = screen.getByLabelText(DEFAULT_LABELS.fb_message_label) as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "رسالة يجب ألا تضيع" } });
+    fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.fb_submit_btn }));
+
+    expect(await screen.findByText("تعذّر حفظ الرسالة: تعارض في الكتابة")).toBeInTheDocument();
+    // Nothing is lost: the text stays for a retry and no success screen shows.
+    expect((screen.getByLabelText(DEFAULT_LABELS.fb_message_label) as HTMLTextAreaElement).value).toBe(
+      "رسالة يجب ألا تضيع"
+    );
+    expect(screen.queryByText(DEFAULT_LABELS.fb_success_title)).toBeNull();
+  });
+
+  it("a refresh that started before a local submit and resolve does not undo either", async () => {
+    const opened = summaryOf(EXISTING);
+    // Refresh A (the first open) is held on a deferred promise; refresh B (a
+    // close + reopen) lands normally. A is therefore the stale one: it started
+    // before the local changes below and lands after them.
+    let releaseStaleList!: (list: FeedbackThreadSummary[]) => void;
+    storage.listThreadSummaries
+      .mockReturnValueOnce(
+        new Promise<FeedbackThreadSummary[]>((resolve) => {
+          releaseStaleList = resolve;
+        })
+      )
+      .mockResolvedValueOnce([opened]);
+    storage.loadFeedback.mockResolvedValue([EXISTING]);
+    const created: FeedbackThread = {
+      id: "t20260928090000-cccccccc",
+      from: "admin",
+      role: "admin",
+      category: "suggestion",
+      text: "اقتراح لا يجب أن يختفي",
+      timestamp: "2026-09-28T09:00:00.000Z",
+      status: "open",
+      replies: [],
+      revision: 1,
+    };
+    storage.submitFeedback.mockResolvedValue(created);
+    storage.replyToFeedback.mockResolvedValue({
+      ...EXISTING,
+      status: "resolved",
+      replies: [
+        { from: "admin", role: "admin", text: "", timestamp: "2026-09-28T09:05:00.000Z" },
+      ],
+      revision: 2,
+    });
+
+    // The admin's launcher lives in the toolbar: it drives the widget through
+    // the same window event.
+    writeSession(ADMIN);
+    render(
+      <FeedbackUnreadProvider session={ADMIN}>
+        <FeedbackWidget />
+      </FeedbackUnreadProvider>
+    );
+    const toggle = () => act(async () => void window.dispatchEvent(new Event("feedback:toggle")));
+    await toggle(); // open: refresh A starts and is held
+    await waitFor(() => expect(storage.listThreadSummaries).toHaveBeenCalledTimes(1));
+    await toggle(); // close
+    await toggle(); // reopen: refresh B lands
+    await waitFor(() => expect(storage.listThreadSummaries).toHaveBeenCalledTimes(2));
+    await act(async () => {});
+
+    // While A is in flight: resolve the existing thread ...
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(DEFAULT_LABELS.fb_tab_all) }));
+    await screen.findByText("الجهاز لا يعمل");
+    // (The panel's own close button shares the label, so go by class.)
+    fireEvent.click(document.querySelector(".fb-resolve-btn") as HTMLElement);
+    await waitFor(() => expect(storage.replyToFeedback).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByText("الجهاز لا يعمل")).toBeNull());
+
+    // ... and submit a new one.
+    fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.fb_tab_new }));
+    fireEvent.change(screen.getByLabelText(DEFAULT_LABELS.fb_message_label), {
+      target: { value: "اقتراح لا يجب أن يختفي" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.fb_submit_btn }));
+    expect(await screen.findByText(DEFAULT_LABELS.fb_success_title)).toBeInTheDocument();
+
+    // The stale list lands: it knows neither change.
+    await act(async () => {
+      releaseStaleList([opened]);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(DEFAULT_LABELS.fb_tab_all) }));
+    expect(await screen.findByText("اقتراح لا يجب أن يختفي")).toBeInTheDocument();
+    expect(screen.queryByText("الجهاز لا يعمل")).toBeNull();
   });
 });
