@@ -625,11 +625,11 @@ export async function boundedSizeSignature(
   dir: DirectoryHandleLike,
   suffix: string,
   maxStats: number = DEFAULT_SIZE_SIGNATURE_STAT_BUDGET,
-  /** Names left out entirely (neither listed nor probed), e.g. this session's own segments. */
-  exclude?: ReadonlySet<string>
+  /** Names left out entirely (neither listed nor probed), e.g. the caller's own segments. */
+  exclude?: (name: string) => boolean
 ): Promise<string> {
   const listed = await listMatchingFileEntries(dir, suffix);
-  const matched = exclude && exclude.size > 0 ? listed.filter((entry) => !exclude.has(entry.name)) : listed;
+  const matched = exclude ? listed.filter((entry) => !exclude(entry.name)) : listed;
   const names = matched.map((entry) => entry.name);
   const probed = matched.slice(Math.max(0, matched.length - Math.max(0, maxStats)));
   const sizes: (number | null)[] = new Array(probed.length).fill(null);

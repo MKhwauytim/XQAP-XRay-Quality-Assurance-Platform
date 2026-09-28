@@ -618,28 +618,6 @@ export function __resetAppendOnlyEventLogMemosForTests(): void {
   openSegmentSeqByWriter.clear();
 }
 
-/**
- * File names of every segment THIS session has written for one consumer, across
- * every scope. Read-only view of `writtenSegmentsThisSession` for the sync probe
- * (A1): a writer's own appends are already reflected locally, so they must not
- * come back to it as "someone changed the answers".
- *
- * Caveat: a `stable` chain can be shared by another tab of the same browser +
- * user + month; that tab's appends to a file THIS tab also wrote are excluded
- * too. Both tabs belong to one employee, so the only miss is a same-user
- * cross-tab refresh, which the next own read/append reconciles.
- */
-export function segmentNamesWrittenThisSession(consumerNamespace: string): ReadonlySet<string> {
-  const prefix = `${consumerNamespace}|`;
-  const names = new Set<string>();
-  for (const key of writtenSegmentsThisSession) {
-    // Key shape `{namespace}|{scopeId}|{fileName}`; scopeId may contain "|",
-    // file names never do.
-    if (key.startsWith(prefix)) names.add(key.slice(key.lastIndexOf("|") + 1));
-  }
-  return names;
-}
-
 /* ───────────────────────────── the append path ──────────────────────────── */
 
 /**

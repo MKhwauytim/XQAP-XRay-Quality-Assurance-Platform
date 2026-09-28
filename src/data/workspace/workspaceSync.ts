@@ -42,6 +42,8 @@
  */
 import { broadcastDataRefresh, type DataRefreshFamily } from "./dataRefreshSignal";
 import { bumpWorkspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
+import { ownStableAnswerSegmentMatcher } from "../answers/answerSegmentChain";
+import { readRealSession } from "../../auth/authSession";
 import { readDistributionLogStamp } from "../distribution/distributionStorage";
 import {
   DEFAULT_SIZE_SIGNATURE_STAT_BUDGET,
@@ -56,7 +58,6 @@ import {
 import {
   ANSWER_EVENTS_DIR,
   ANSWER_EVENT_SEGMENT_SUFFIX,
-  ownAnswerSegmentNames,
 } from "../answers/answerEventStore";
 import { readEnvelopeRevision } from "../storage/safeWrite";
 import { logError } from "../storage/errorLogger";
@@ -444,18 +445,26 @@ async function safeSegmentsSignature(dir: DirectoryHandleLike | null): Promise<P
 }
 
 /** §6 of the answer-save proposal: read-only, bounded — same primitive and shape as `safeSegmentsSignature` above. */
-async function safeAnswerSegmentsSignature(dir: DirectoryHandleLike | null): Promise<Probed<string>> {
+async function safeAnswerSegmentsSignature(
+  dir: DirectoryHandleLike | null,
+  monthFolderName: string
+): Promise<Probed<string>> {
   if (!dir) return "";
   try {
-    // A1: this session's own appends are already reflected locally (the saving
+    // A11: this user's own appends are already reflected locally (the saving
     // view updated its own state). Signing them made every save come back to
     // its author as a remote change one tick later and triggered the stale
-    // reload that downgraded the row. Other writers' segments still count.
+    // reload that downgraded the row. Matched by the persisted STABLE CHAIN
+    // prefix, not a per-page-load "written" set: the chain outlives a reload,
+    // so the exclusion is identical from the baseline onwards and also covers
+    // rotations written by an earlier page load. Other writers (and other users
+    // of this browser) still count.
+    const actor = readRealSession()?.username;
     return await boundedSizeSignature(
       dir,
       ANSWER_EVENT_SEGMENT_SUFFIX,
       DEFAULT_SIZE_SIGNATURE_STAT_BUDGET,
-      ownAnswerSegmentNames()
+      actor ? ownStableAnswerSegmentMatcher(monthFolderName, actor) : undefined
     );
   } catch (error) {
     logError("workspaceSync:probeAnswerSegments", error);
@@ -578,7 +587,7 @@ async function probeMonth(
       safeSignature(dirs.approvalsDir, DECISIONS_SUFFIX),
       safeRevision(dirs.populationMonthDir, MONTH_MANIFEST_FILE),
       safeSegmentsSignature(dirs.eventsDir),
-      safeAnswerSegmentsSignature(dirs.answersEventsDir),
+      safeAnswerSegmentsSignature(dirs.answersEventsDir, monthFolderName),
       safeFeedbackSignature(dirs.feedbackDir),
     ]);
 

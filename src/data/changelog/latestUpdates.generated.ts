@@ -5,73 +5,73 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
-    "version": "v140.11",
-    "date": "2026-09-28",
-    "bucket": "fix",
-    "scope": "population",
-    "title": "close the manifest-probe gap that could still fool the mandatory archive's retry gate"
-  },
-  {
-    "version": "v140.10",
+    "version": "v142.0",
     "date": "2026-09-28",
     "bucket": "fix",
     "scope": "storage",
-    "title": "read answer/distribution segment tails in parallel"
+    "title": "integrate stable answer chains with blocked-write rotation and the data-loss guard"
   },
   {
-    "version": "v140.9",
+    "version": "v141.0",
+    "date": "2026-09-28",
+    "bucket": "fix",
+    "scope": "audit",
+    "title": "stop per-save whole-file rewrites of the growing action and error logs"
+  },
+  {
+    "version": "v140.26",
+    "date": "2026-09-28",
+    "bucket": "fix",
+    "scope": "storage",
+    "title": "stop false \"damaged file\" reports from stale cached live reads"
+  },
+  {
+    "version": "v140.25",
+    "date": "2026-09-28",
+    "bucket": "fix",
+    "scope": "answers",
+    "title": "an older failed save can never replace a newer pending edit"
+  },
+  {
+    "version": "v140.24",
     "date": "2026-09-28",
     "bucket": "fix",
     "scope": "referrals",
-    "title": "stale reload can no longer downgrade a submitted answer"
+    "title": "a reload reopens the sample the employee was working on; drafts never shadow or outlive a submitted answer wrongly"
   },
   {
-    "version": "v140.8",
+    "version": "v140.23",
     "date": "2026-09-28",
     "bucket": "fix",
-    "scope": "population",
-    "title": "close the transient-NotFound gap on the mandatory population archive"
+    "scope": "referrals",
+    "title": "canonical draft key and visible draft-persistence failure"
   },
   {
-    "version": "v140.7",
+    "version": "v140.22",
     "date": "2026-09-28",
     "bucket": "fix",
-    "scope": "population",
-    "title": "verified/atomic archives and refusal-path coverage for the A2 mandatory backup"
+    "scope": "answers",
+    "title": "unsaved answers are replayed app-wide for every month and ad-hoc import"
   },
   {
-    "version": "v140.6",
-    "date": "2026-09-28",
-    "bucket": "feature",
-    "scope": "population",
-    "title": "keep a superseded copy of population.final.json and the source workbooks before a re-process overwrites them"
-  },
-  {
-    "version": "v140.5",
+    "version": "v140.21",
     "date": "2026-09-28",
     "bucket": "fix",
-    "scope": "population",
-    "title": "scope segment-strictness to the overwrite guard only"
+    "scope": "distribution",
+    "title": "with port restrictions, a stage shortfall is made up in the employee's other stages so monthly totals stay equal"
   },
   {
-    "version": "v140.4",
+    "version": "v140.19",
     "date": "2026-09-28",
     "bucket": "fix",
-    "scope": "population",
-    "title": "thread strict reads through the segment-tail primitive itself"
+    "scope": "feedback",
+    "title": "apply submitted and replied threads optimistically, drop duplicate reloads"
   },
   {
-    "version": "v140.3",
+    "version": "v140.18",
     "date": "2026-09-28",
     "bucket": "fix",
-    "scope": "population",
-    "title": "close two F21 gaps in the overwrite guard's strict answers read"
-  },
-  {
-    "version": "v140.2",
-    "date": "2026-09-28",
-    "bucket": "fix",
-    "scope": "population",
-    "title": "refuse a population overwrite that would orphan a worked sample"
+    "scope": "feedback",
+    "title": "page bodies from the provider's in-memory threads"
   }
 ];

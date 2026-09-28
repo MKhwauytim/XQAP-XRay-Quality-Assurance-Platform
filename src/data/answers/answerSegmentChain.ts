@@ -126,3 +126,27 @@ export function peekStableAnswerChainSegmentBase(monthFolderName: string, actor:
     config.baseNamePrefix
   );
 }
+
+/**
+ * A predicate over segment file names: true for every segment of THIS browser's
+ * stable chain for (month, actor) — seq 0 and each `-n` rotation, from this page
+ * load or any earlier one. The sync probe (A11) uses it to leave the user's own
+ * appends out of the `answers.events` signature: a per-session "written this
+ * page load" set starts empty after a reload, so the first own save would then
+ * change the signature and come back as a remote change. Read-only (never mints
+ * a chain); `undefined` when this browser has no chain for (month, actor), i.e.
+ * nothing on disk can be its own.
+ */
+export function ownStableAnswerSegmentMatcher(
+  monthFolderName: string,
+  actor: string
+): ((name: string) => boolean) | undefined {
+  const base = peekStableAnswerChainSegmentBase(monthFolderName, actor);
+  if (base === undefined) return undefined;
+  const suffix = buildAnswerEventLogConfig(0).segmentSuffix;
+  return (name) => {
+    if (!name.endsWith(suffix)) return false;
+    const stem = name.slice(0, -suffix.length);
+    return stem === base || (stem.startsWith(`${base}-`) && /^[1-9][0-9]{0,5}$/.test(stem.slice(base.length + 1)));
+  };
+}

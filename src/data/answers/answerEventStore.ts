@@ -37,7 +37,6 @@ import {
   isEventOutOfOrder,
   readEventSegmentDelta,
   segmentFileName,
-  segmentNamesWrittenThisSession,
   sortEventsForFold,
 } from "../storage/appendOnlyEventLog";
 import type {
@@ -197,11 +196,6 @@ export function buildAnswerEventLogConfig(nowMs?: number): AppendOnlyEventLogCon
  * that changed mid-session would fragment one writer's chain across names.
  */
 export const ANSWER_EVENT_LOG: AppendOnlyEventLogConfig = buildAnswerEventLogConfig();
-
-/** Answer segments this session wrote — see `segmentNamesWrittenThisSession`. */
-export function ownAnswerSegmentNames(): ReadonlySet<string> {
-  return segmentNamesWrittenThisSession(ANSWER_EVENT_LOG.consumerNamespace);
-}
 
 /** Segment file name for one writer chain — thin adapter, for tests and diagnostics. */
 export function answerSegmentFileName(
