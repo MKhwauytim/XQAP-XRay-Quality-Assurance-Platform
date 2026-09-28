@@ -31,6 +31,7 @@ import {
   setSimulatedFaults,
 } from "./memoryDirectory";
 import { listDirectoryEntries } from "./directoryScan";
+import { errorCodeOf } from "./errorCodes";
 import type { DirectoryHandleLike, FileHandleLike } from "./fileSystemAccess";
 import type { OperationDeadline } from "./operationDeadline";
 import {
@@ -996,6 +997,111 @@ describe("IMPORTANT 1: the single-hop rotation branch must never write over a ta
 
     const events = await loadAll(dir);
     expect(events.map((e) => e.eventId).sort()).toEqual(["evt-B", "evt-OTHER", "evt-SEED"]);
+  });
+});
+
+// N1 (fix round 2, CRITICAL): a THROWN directory listing is no evidence of
+// absence. These pin the two data-loss reproductions the re-review found on
+// 60f00c1 (the `highestReliableSeq` watermark used to turn a thrown listing
+// into a trusted NotFound, so the fast path returned `reliable: true` and the
+// write fully replaced a real segment).
+
+/** A parent dir whose events dir lists successfully `okCalls` times, then always throws. */
+async function withBrokenListing(
+  dir: DirectoryHandleLike,
+  okCalls: number
+): Promise<DirectoryHandleLike> {
+  const eventsDir = await eventsDirOf(dir);
+  const raw = eventsDir as unknown as { values: () => AsyncGenerator<{ name: string; kind: string }> };
+  const original = raw.values.bind(raw);
+  let calls = 0;
+  const broken = {
+    ...eventsDir,
+    values: () => {
+      calls += 1;
+      if (calls <= okCalls) return original();
+      return {
+        [Symbol.asyncIterator]() {
+          return this;
+        },
+        next: () => Promise.reject(new Error("simulated directory listing failure")),
+      } as AsyncGenerator<{ name: string; kind: string }>;
+    },
+  } as unknown as DirectoryHandleLike;
+  return { ...dir, getDirectoryHandle: async () => broken } as unknown as DirectoryHandleLike;
+}
+
+describe("N1: a thrown listing never makes an absent segment trustworthy", () => {
+  it("P1: reload + discovery listing always throws + seq0 NotFound ONCE — evt-A is kept (retried, then appended)", async () => {
+    const dir = root();
+    const w = { ...WRITER, stable: true };
+    await appendEventSegment(dir, [event("A")], w, TEST_LOG);
+    __resetAppendOnlyEventLogMemosForTests();
+    setSimulatedFaults(dir, [
+      { operation: "getFileHandle", name: name(0, w), create: false, errorName: "NotFoundError", times: 1 },
+    ]);
+    const parent = await withBrokenListing(dir, 0);
+    const { result } = await withCapturedSleeps(() => appendEventSegment(parent, [event("B")], w, TEST_LOG));
+    expect(result).toBe("verified");
+    clearSimulatedFaults(dir);
+    expect((await loadAll(dir)).map((e) => e.eventId).sort()).toEqual(["evt-A", "evt-B"]);
+  });
+
+  it("P1 persistent: seq0 NotFound forever — never overwritten; ends in a bounded XQ-IO-038", async () => {
+    const dir = root();
+    const w = { ...WRITER, stable: true };
+    await appendEventSegment(dir, [event("A")], w, TEST_LOG);
+    const before = await readSegmentText(dir, name(0, w));
+    __resetAppendOnlyEventLogMemosForTests();
+    setSimulatedFaults(dir, [
+      { operation: "getFileHandle", name: name(0, w), create: false, errorName: "NotFoundError", times: Number.POSITIVE_INFINITY },
+    ]);
+    const parent = await withBrokenListing(dir, 0);
+    const failure = await withCapturedSleeps(() => appendEventSegment(parent, [event("B")], w, TEST_LOG)).then(
+      () => null,
+      (error: unknown) => error
+    );
+    clearSimulatedFaults(dir);
+    expect(errorCodeOf(failure)).toBe("XQ-IO-038");
+    expect(await readSegmentText(dir, name(0, w))).toBe(before);
+    expect((await loadAll(dir)).map((e) => e.eventId)).toEqual(["evt-A"]);
+  });
+
+  it("P3: seq0 memoised, another tab's evt-OTHER in seq1, listing throws, seq1 gets ONE stale NotFound — seq1 is not overwritten", async () => {
+    const dir = root();
+    const w = { ...WRITER, stable: true };
+    await appendEventSegment(dir, [event("SEED")], w, TEST_LOG);
+    const otherLine = `${JSON.stringify({ eventId: "evt-OTHER", eventAt: "2026-08-27T10:00:00.000Z", seq: 999 })}\n`;
+    await writeSegmentText(dir, name(1, w), otherLine);
+    setSimulatedFaults(dir, [
+      { operation: "getFileHandle", name: name(0, w), create: false, errorName: "NotFoundError", times: Number.POSITIVE_INFINITY },
+      { operation: "getFileHandle", name: name(1, w), create: false, errorName: "NotFoundError", times: 1 },
+    ]);
+    const parent = await withBrokenListing(dir, 0);
+    await withCapturedSleeps(() => appendEventSegment(parent, [event("B")], w, TEST_LOG)).catch(() => undefined);
+    clearSimulatedFaults(dir);
+    expect(await readSegmentText(dir, name(1, w))).toContain("evt-OTHER");
+  });
+
+  it("an always-throwing listing is bounded: XQ-IO-038 after a handful of probes, not a spin toward MAX_SEGMENT_SEQ", async () => {
+    const dir = root({ trackOperations: true });
+    const w = { ...WRITER, stable: true };
+    await appendEventSegment(dir, [event("A")], w, TEST_LOG);
+    __resetAppendOnlyEventLogMemosForTests();
+    setSimulatedFaults(dir, [
+      { operation: "getFileHandle", name: name(0, w), create: false, errorName: "NotFoundError", times: Number.POSITIVE_INFINITY },
+    ]);
+    const eventsDir = await eventsDirOf(dir);
+    clearOperationLog(eventsDir);
+    const parent = await withBrokenListing(dir, 0);
+    const failure = await withCapturedSleeps(() => appendEventSegment(parent, [event("B")], w, TEST_LOG)).then(
+      () => null,
+      (error: unknown) => error
+    );
+    clearSimulatedFaults(dir);
+    expect(errorCodeOf(failure)).toBe("XQ-IO-038");
+    // seq0 + 5 bounded hops, each at most a fast ladder (5 attempts) plus failure-path probes — ~75 observed; a spin toward MAX_SEGMENT_SEQ would be orders of magnitude more.
+    expect(getOperationLog(eventsDir).filter((e) => e.operation === "getFileHandle").length).toBeLessThan(100);
   });
 });
 

@@ -403,23 +403,17 @@ function parseOwnSegmentSeq(name: string, base: string, segmentSuffix: string): 
 }
 
 /**
- * Highest sequence this writer chain already has on disk — how a writer that
- * lost its in-memory position (first append of a session, a workspace switch,
- * a module reload) resumes at the right place instead of overwriting.
+ * Highest sequence this writer chain has on disk, per ONE directory listing —
+ * how a writer that lost its in-memory position (first append of a session, a
+ * workspace switch, a module reload) resumes at the right place.
  *
- * A listing failure resolves to 0 rather than throwing: the append that follows
- * always re-reads the segment it lands on before writing it (see
- * `appendEventSegment`), so the worst case of an under-read listing is
- * appending to an already-full segment, never losing a line.
- */
-/**
- * `listed: true` means the directory listing itself succeeded (even if it
- * found nothing, i.e. `highest` legitimately stays 0) — real, positive
- * evidence of what this writer chain actually has on disk. `listed: false`
- * means the listing itself threw, so `highest` (always 0 in that case) is
- * NOT evidence of anything; the caller must not treat it as a confirmed
- * upper bound. This distinction is what `appendEventSegment`'s
- * `highestReliableSeq` watermark is built from — see its own doc comment.
+ * `listed: true` means the listing itself succeeded (even if it found nothing,
+ * so `highest` legitimately stays 0). `listed: false` means the listing THREW:
+ * `highest` is then a meaningless 0, NOT evidence of anything, and the caller
+ * must never read it as "nothing exists above this" — a thrown listing proves
+ * no absence. `appendEventSegment` builds its `highestReliableSeq` (patience
+ * threshold) and `listedHighestSeq` (the only source of trusted absence above
+ * a seq) from this flag.
  */
 type OwnSeqDiscovery = { highest: number; listed: boolean };
 
@@ -635,19 +629,39 @@ export function __resetAppendOnlyEventLogMemosForTests(): void {
  */
 type ExistingSegment = { text: string; reliable: boolean };
 
+/**
+ * How `readExistingSegment` should treat a name — WHICH LADDER and WHETHER
+ * ABSENCE MAY BE TRUSTED are two separate questions (fix round 2, N1):
+ * - `known`: this chain provably wrote/lists the name -> patient ladder, and an
+ *   exhausted read is never a trusted absence.
+ * - `distrust`: the name is "claimed" only because a directory listing THREW
+ *   (no evidence either way). It gets the FAST ladder (so a broken listing
+ *   cannot spin for minutes) but NotFound is retried on it and, once
+ *   exhausted, is `reliable: false` — a thrown listing never makes an absent
+ *   segment trustworthy, or a stale NotFound would overwrite a real segment.
+ * - neither: absence is trusted (a listing SUCCEEDED without the name, or the
+ *   seq is above the highest one a successful listing showed, or non-stable).
+ */
+type SegmentClaim = { known: boolean; distrust: boolean };
+
 async function readExistingSegment(
   eventsDir: DirectoryHandleLike,
   fileName: string,
-  knownWritten: boolean,
+  claim: SegmentClaim,
   diagnostics: EventLogDiagnostics,
   deadline: OperationDeadline | undefined
 ): Promise<ExistingSegment> {
+  const knownWritten = claim.known;
   for (let attempt = 0; ; attempt += 1) {
     try {
       const existingHandle = await eventsDir.getFileHandle(fileName, { create: false });
       return { text: await (await existingHandle.getFile()).text(), reliable: true };
     } catch (error) {
-      const transient = knownWritten ? isTransientWriteError(error) : isNotReadableError(error);
+      const transient = knownWritten
+        ? isTransientWriteError(error)
+        : claim.distrust
+          ? isNotReadableError(error) || isNotFoundError(error)
+          : isNotReadableError(error);
       // Patient ladder only when this session KNOWS it wrote the segment, so
       // absence is provably a stale view. That case also has teeth: exhausting
       // it falls back to "" and this append then rewrites the file without
@@ -687,7 +701,7 @@ async function readExistingSegment(
       // instead. Only a `NotFoundError` on a name nothing has ever claimed
       // stays a genuine, reliable "no segment yet" observation. Applies to
       // every writer, stable or not — the bug was in the shared mechanics.
-      if (knownWritten || !isNotFoundError(error)) {
+      if (knownWritten || claim.distrust || !isNotFoundError(error)) {
         // Retries exhausted. Fall back to "" (the long-standing behavior for
         // the covered case) rather than hard-failing, because the memo can be
         // stale after a workspace switch — but record it, and record what
@@ -1039,14 +1053,12 @@ function logBlockedSegmentReplace(
  * rotation) ever needs; beyond that the directory itself is unusable and
  * failing fast with a clear error is far better than hanging the save.
  *
- * IMPORTANT 1 fix round: `knownWrittenFor` (in `appendEventSegment`) now
- * fixes the SAME broken-listing scenario at its source — a candidate seq
- * beyond `highestReliableSeq` no longer trusts the listing-failure fallback
- * at all, so it takes the fast ladder and resolves in one hop instead of
- * ever reaching this bound. This constant remains as the backstop for the
- * genuinely pathological case (a share where every read AND every listing is
- * broken, so even `highestReliableSeq`-gated names keep coming back
- * unreliable) rather than the primary defence it originally was.
+ * Fix rounds 1-2: the broken-listing scenario is also bounded at its source —
+ * `knownWrittenFor` gives a listing-failure-only claim the FAST ladder (never
+ * the ~11 s patient one) — but such a claim is DISTRUSTED (an exhausted
+ * NotFound is `reliable: false`), so it ends here, in XQ-IO-038, rather than
+ * ever overwriting. This constant is what bounds that: five hops of a fast
+ * ladder each, not a spin toward `MAX_SEGMENT_SEQ`.
  */
 const MAX_UNRELIABLE_ROTATION_ATTEMPTS = 5;
 
@@ -1068,7 +1080,7 @@ async function ensureReliableRotationTarget(
   seq: number,
   fileName: string,
   existing: ExistingSegment,
-  knownWrittenFor: (name: string, candidateSeq: number) => Promise<boolean>,
+  knownWrittenFor: (name: string, candidateSeq: number) => Promise<SegmentClaim>,
   diagnostics: EventLogDiagnostics,
   deadline: OperationDeadline | undefined
 ): Promise<{ seq: number; fileName: string; existing: ExistingSegment }> {
@@ -1182,36 +1194,26 @@ export async function appendEventSegment<TEvent>(
     }
   };
 
-  // IMPORTANT 1 fix round: the highest seq this call has REAL evidence for —
-  // either this session's own last successful write (`openSegmentSeqByWriter`,
-  // set only after a write actually landed), or a directory listing that
-  // itself succeeded (`discoverHighestOwnSeq`'s `listed: true`), even if it
-  // found nothing (a legitimately empty chain is still evidence "there is
-  // nothing above -1"). `-1` means neither source has anything to offer this
-  // call — every candidate seq is then unconfirmed territory.
-  //
-  // `knownWrittenFor` is what `readExistingSegment` actually receives instead
-  // of `knownFor`'s raw claim: a name `knownFor` only "claims" because ITS OWN
-  // listing threw (no positive evidence) is trusted as `knownWritten` ONLY
-  // when `candidateSeq` is within the watermark above — i.e. some EARLIER,
-  // successful observation already confirmed a chain at least that long
-  // exists, so this specific link plausibly does too, and the patient ladder
-  // (with an eventual `reliable: false` on exhaustion, forcing a rotation) is
-  // the safe answer. A candidate seq BEYOND the watermark has no such backing
-  // — nothing has ever confirmed a file that far out exists — so it is
-  // treated exactly like a genuinely unclaimed name: the FAST ladder, and a
-  // NotFound is trusted as a real, reliable absence. This is what turns the
-  // "a broken listing makes knownFor conservatively claim EVERY name" failure
-  // mode from an ~11 s-per-hop, near-`MAX_SEGMENT_SEQ` spin into an
-  // immediate, correct resolution (see the "listing throws" test), while
-  // still protecting a candidate seq a real observation once vouched for
-  // (IMPORTANT 1's repro: another tab's segment that a real listing already
-  // confirmed exists, but this attempt's read of it happens to fail).
+  // Two watermarks, both -1 when the source has nothing to say:
+  // - `highestReliableSeq`: highest seq we have positive evidence EXISTS (this
+  //   session's own last write, or a successful discovery listing). A
+  //   listing-failure claim at or below it keeps the patient ladder.
+  // - `listedHighestSeq`: highest seq a SUCCESSFUL listing showed. Only above
+  //   it may a listing-failure claim be trusted as absent — a memoised seq is
+  //   no evidence about what another tab wrote above it, and a thrown
+  //   discovery listing is no evidence at all.
+  // Fix round 2 (N1): a listing-failure claim above `highestReliableSeq` and not
+  // provably absent gets the FAST ladder but `distrust` (exhausted NotFound is
+  // unreliable), so a thrown listing can never turn a stale NotFound into a
+  // trusted absence, yet cannot spin for ~11 s per hop either.
   let highestReliableSeq: number;
-  const knownWrittenFor = async (name: string, candidateSeq: number): Promise<boolean> => {
+  let listedHighestSeq = -1;
+  const knownWrittenFor = async (name: string, candidateSeq: number): Promise<SegmentClaim> => {
     const claim = await knownFor(name);
-    if (!claim.claimed) return false;
-    return claim.positiveEvidence || candidateSeq <= highestReliableSeq;
+    if (!claim.claimed) return { known: false, distrust: false };
+    if (claim.positiveEvidence || candidateSeq <= highestReliableSeq) return { known: true, distrust: false };
+    if (listedHighestSeq >= 0 && candidateSeq > listedHighestSeq) return { known: false, distrust: false };
+    return { known: false, distrust: true };
   };
 
   // A read-modify-write full-file rewrite is only race-free against OTHER
@@ -1255,6 +1257,7 @@ export async function appendEventSegment<TEvent>(
       const discovered = await discoverHighestOwnSeq(eventsDir, base, segmentSuffix);
       seq = discovered.highest;
       highestReliableSeq = discovered.listed ? discovered.highest : -1;
+      listedHighestSeq = discovered.listed ? discovered.highest : -1;
     }
     let fileName = segmentFileNameForSeq(base, seq, segmentSuffix);
     let existing = await readExistingSegment(
@@ -1304,19 +1307,10 @@ export async function appendEventSegment<TEvent>(
     // the reviewer's repro: seq0 unreadable, hop to seq1, and seq1 ALSO fails
     // its read while genuinely holding another tab's events) than one reached
     // from `shouldRotate` or a blocked replace, so it needs the same guarantee.
-    // What used to make looping here dangerous — a persistently broken
-    // directory LISTING making `knownFor`'s conservative fallback claim EVERY
-    // candidate name, forcing every one of them through the ~11 s patient
-    // ladder before also coming back unreliable — is fixed at the source now:
-    // `knownWrittenFor` only trusts that conservative "claimed" fallback for a
-    // seq within `highestReliableSeq` (a REAL observation's watermark); beyond
-    // it, a claim backed only by a failed listing is treated as unclaimed, so
-    // the read takes the FAST ladder and a `NotFound` there is a genuine,
-    // quick, reliable absence — see `knownWrittenFor`'s own doc comment. So a
-    // broken listing no longer spins: it degrades to the historically-correct
-    // "one hop, land on empty" outcome by itself, and `ensureReliableRotationTarget`
-    // is still here as the backstop for the case that genuinely needs it (a
-    // seq a real observation vouched for, that keeps failing to read).
+    // A listing that THREW makes `knownFor` claim every name; `knownWrittenFor`
+    // gives such a claim the fast ladder (no ~11 s-per-hop spin) but distrusts
+    // an exhausted NotFound (`reliable: false`), so this loop ends in a bounded
+    // XQ-IO-038 instead of ever writing over a segment it could not read.
     if (!existing.reliable && seq < MAX_SEGMENT_SEQ) {
       seq += 1;
       fileName = segmentFileNameForSeq(base, seq, segmentSuffix);
