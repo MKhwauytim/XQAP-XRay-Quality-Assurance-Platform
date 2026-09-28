@@ -82,16 +82,16 @@ describe("buildPortProfiles", () => {
 });
 
 describe("buildStageProfiles (fallback branch, no sample.stageAllocations)", () => {
-  it("groups by stage in first-seen order with numeric stageKey", () => {
+  it("CHANGED (C1): groups raw aliases by canonical stage key, labels in Arabic, orders first→fourth", () => {
     const rows: ExecutiveReportRow[] = [
-      row({ xrayImageId: "1", stage: "المرحلة الثانية" }),
-      row({ xrayImageId: "2", stage: "المرحلة الأولى" }),
-      row({ xrayImageId: "3", stage: "المرحلة الثانية" }),
+      row({ xrayImageId: "1", stage: "SECOND_STAG" }),
+      row({ xrayImageId: "2", stage: "FIRST_STAGE" }),
+      row({ xrayImageId: "3", stage: "SECOND_STAG" }),
     ];
     const profiles = buildStageProfiles(rows, null);
-    expect(profiles.map((p) => p.stageLabel)).toEqual(["المرحلة الثانية", "المرحلة الأولى"]);
-    expect(profiles.map((p) => p.stageKey)).toEqual(["0", "1"]);
-    expect(profiles[0]!.population).toBe(2);
+    expect(profiles.map((p) => p.stageLabel)).toEqual(["المستوى الأول", "المستوى الثاني"]);
+    expect(profiles.map((p) => p.stageKey)).toEqual(["first", "second"]);
+    expect(profiles[1]!.population).toBe(2);
   });
 
   it("falls back to 'غير محدد' for a null stage", () => {

@@ -27,12 +27,12 @@ describe("computeManagementModel", () => {
 
   it("groups per-stage/level progress (section 1), excluding replaced images", () => {
     const m = computeManagementModel(data(), "6-June-2026", { u1: "أحمد", u2: "سارة" });
-    expect(m.byStage.map((b) => b.key).sort()).toEqual(["المستوى الأول", "المستوى الثاني"]);
-    const lvl1 = m.byStage.find((b) => b.key === "المستوى الأول")!;
+    expect(m.byStage.map((b) => b.label)).toEqual(["المستوى الأول", "المستوى الثاني"]);
+    const lvl1 = m.byStage.find((b) => b.key === "first")!;
     expect(lvl1.employees).toEqual([
       { username: "u1", displayName: "أحمد", assigned: 2, completed: 1, completionRate: 50 },
     ]);
-    const lvl2 = m.byStage.find((b) => b.key === "المستوى الثاني")!;
+    const lvl2 = m.byStage.find((b) => b.key === "second")!;
     // IMG-4 (replaced) is excluded — only IMG-3 (replacement-requested) counts.
     expect(lvl2.totalAssigned).toBe(1);
     expect(lvl2.employees[0]!.username).toBe("u2");

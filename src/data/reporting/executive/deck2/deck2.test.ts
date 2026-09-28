@@ -607,16 +607,15 @@ describe("levelFiguresTable byte-identity characterization — SUPERSEDED 2026-0
 });
 
 describe("slide-risk-stages level-identity resolution — regression for the 2026-07-28 review fix", () => {
-  // A model with a GAP in `stages` in REVERSED, non-canonical order: only
-  // المستوى الرابع (level 4) and المستوى الثاني (level 2) have rows — levels
-  // 1 and 3 are entirely absent — and level 4's rows come FIRST, so
-  // `model.population.byStage` is [المستوى الرابع, المستوى الثاني], array
-  // positions [0, 1]. Position-based indexing (the pre-fix bug) would pair
-  // position 0 with RISK_LEVELS[0]/STAGE_TONES[0] (level 1's gold/def) and
-  // position 1 with RISK_LEVELS[1] (level 2's def) — both wrong, since the
-  // rows are actually levels 4 and 2. Every assertion below checks each row
-  // renders with ITS OWN level's identity, not the position it happens to
-  // occupy in this reversed, gapped array.
+  // A model with a GAP in `stages`: only المستوى الرابع (level 4) and
+  // المستوى الثاني (level 2) have rows — levels 1 and 3 are entirely absent.
+  // Level 4's rows come FIRST in the input, but since C1 (2026-09-28)
+  // `model.population.byStage` is always canonical: [المستوى الثاني,
+  // المستوى الرابع], array positions [0, 1]. Position-based indexing (the
+  // pre-fix bug) would pair position 0 with RISK_LEVELS[0]/STAGE_TONES[0]
+  // (level 1's gold/def) and position 1 with RISK_LEVELS[1] (level 2's) —
+  // both wrong, since the rows are levels 2 and 4. Every assertion below
+  // checks each row renders with ITS OWN level's identity.
   function reversedGapModel() {
     return buildReportModel(
       input([
@@ -629,21 +628,19 @@ describe("slide-risk-stages level-identity resolution — regression for the 202
 
   it("Ledger table: each row's ordinal/tone/وزن العينة match its OWN level, not its array position", () => {
     const model = reversedGapModel();
-    expect(model.population.byStage.map((s) => s.stageLabel)).toEqual(["المستوى الرابع", "المستوى الثاني"]);
+    expect(model.population.byStage.map((s) => s.stageLabel)).toEqual(["المستوى الثاني", "المستوى الرابع"]);
 
     const html = riskStagesSlide(model, 5, 20, true);
     const start = html.indexOf('data-variant-index="1"');
     const end = html.indexOf('data-variant-index="2"');
     const panel1 = html.slice(start, end);
 
-    // Row 1 (array position 0) is المستوى الرابع (level 4): ordinal "4",
-    // tone "coral", 30% weight — NOT level 1's gold/"1"/100% that
+    // Row 2 (array position 1) is المستوى الرابع (level 4): ordinal "4",
+    // tone "coral", 30% weight — NOT level 2's blue/"2"/40% that
     // position-based indexing would have produced.
     expect(panel1).toContain('<span class="v2-level-row-num coral">4</span>');
-    // Row 2 (array position 1) is المستوى الثاني (level 2): ordinal "2",
-    // tone "blue", 40% weight — NOT level 2's OWN identity borrowed
-    // correctly here would coincidentally look unchanged only if the old
-    // code were right; assert it explicitly instead of by omission.
+    // Row 1 (array position 0) is المستوى الثاني (level 2): ordinal "2",
+    // tone "blue", 40% weight — NOT level 1's gold/"1" (positional).
     expect(panel1).toContain('<span class="v2-level-row-num blue">2</span>');
 
     const row1 = panel1.slice(panel1.indexOf("المستوى الرابع") - 200, panel1.indexOf("المستوى الرابع") + 300);
@@ -652,7 +649,7 @@ describe("slide-risk-stages level-identity resolution — regression for the 202
     expect(row2).toContain(">40%<");
   });
 
-  it("Briefing rank list: each row's tone follows its OWN level (display order preserved, never sorted)", () => {
+  it("Briefing rank list: each row's tone follows its OWN level (display order is canonical stage order)", () => {
     const model = reversedGapModel();
     const html = riskStagesSlide(model, 5, 20, true);
     const start = html.indexOf('data-variant-index="2"');
@@ -660,10 +657,10 @@ describe("slide-risk-stages level-identity resolution — regression for the 202
     const panel2 = html.slice(start, end);
 
     const labels = [...panel2.matchAll(/<span class="v2-bf-rank-label">([^<]*)<\/span>/g)].map((m) => m[1]);
-    expect(labels).toEqual(["المستوى الرابع", "المستوى الثاني"]);
+    expect(labels).toEqual(["المستوى الثاني", "المستوى الرابع"]);
     const tones = [...panel2.matchAll(/<span class="v2-bf-rank-num (\w+)">/g)].map((m) => m[1]);
-    // level 4 → coral, level 2 → blue — never each other's / a positional guess.
-    expect(tones).toEqual(["coral", "blue"]);
+    // level 2 → blue, level 4 → coral — never each other's / a positional guess.
+    expect(tones).toEqual(["blue", "coral"]);
 
     // Basis chip reflects the actual number of levels present (2 here), not
     // a hardcoded "أربعة مستويات".

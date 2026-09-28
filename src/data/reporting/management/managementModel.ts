@@ -19,6 +19,12 @@
 // model itself only produces plain data.
 
 import type { DistributionCurrentData, DistributionEvent } from "../../distribution/distributionTypes";
+import {
+  compareStageKeys,
+  getStageKey,
+  stageLabelForKey,
+  type StageAliasMappings,
+} from "../../population/stageHelpers";
 import { formatMonthLabel } from "../shared/reportChrome";
 
 /** Percentage of n over d, or null when the denominator is empty (renders "—"). */
@@ -95,7 +101,12 @@ function groupProgress(
   entries: DistributionCurrentData["entries"],
   keyOf: (e: DistributionCurrentData["entries"][number]) => string,
   nameOf: (u: string) => string,
+  options: { labelOf?: (key: string) => string; compareKeys?: (a: string, b: string) => number } = {},
 ): ManagementBucket[] {
+  // Same bucket contract as distributionCoverageModel.ts's groupEntries:
+  // `compareKeys` (the stage grouping passes compareStageKeys, C1) replaces
+  // the default largest-first order; `labelOf` maps a key to its label.
+  const { labelOf = (key: string) => key, compareKeys } = options;
   const buckets = new Map<string, Map<string, ManagementEmployeeProgress>>();
   for (const e of entries) {
     // A replaced image is no longer "in progress" for its original assignee —
@@ -120,9 +131,11 @@ function groupProgress(
         .sort((a, b) => b.assigned - a.assigned || a.username.localeCompare(b.username));
       const totalAssigned = employees.reduce((s, e) => s + e.assigned, 0);
       const totalCompleted = employees.reduce((s, e) => s + e.completed, 0);
-      return { key, label: key, totalAssigned, totalCompleted, completionRate: ratePct(totalCompleted, totalAssigned), employees };
+      return { key, label: labelOf(key), totalAssigned, totalCompleted, completionRate: ratePct(totalCompleted, totalAssigned), employees };
     })
-    .sort((a, b) => b.totalAssigned - a.totalAssigned || a.key.localeCompare(b.key));
+    .sort((a, b) =>
+      compareKeys ? compareKeys(a.key, b.key) : b.totalAssigned - a.totalAssigned || a.key.localeCompare(b.key),
+    );
 }
 
 export function computeManagementModel(
@@ -131,6 +144,7 @@ export function computeManagementModel(
   employeeDisplayNames: Record<string, string> = {},
   events: DistributionEvent[] = [],
   replacementReasons: Record<string, string> = {},
+  stageMappings?: Partial<StageAliasMappings>,
 ): ManagementModel {
   const nameOf = (u: string): string => employeeDisplayNames[u] ?? u;
 
@@ -172,7 +186,10 @@ export function computeManagementModel(
       requested,
       completionRate: ratePct(data.totalCompleted, data.totalAssigned),
     },
-    byStage: groupProgress(data.entries, (e) => e.row.stage ?? "غير محدد", nameOf),
+    byStage: groupProgress(data.entries, (e) => getStageKey(e.row.stage, stageMappings), nameOf, {
+      labelOf: stageLabelForKey,
+      compareKeys: compareStageKeys,
+    }),
     byPort: groupProgress(data.entries, (e) => e.row.portName ?? "غير محدد", nameOf),
     replacements: {
       total: replacementRecords.length,

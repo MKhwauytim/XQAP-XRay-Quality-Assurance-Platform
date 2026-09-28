@@ -4557,13 +4557,13 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     <div class="slide-subhead">توزيع المجتمع بعد المعالجة على مستويات المخاطر الأربعة، وحصة كل مستوى من العيّنة.</div>
     <div class="slide-body"><div class="v2-risk-layout">
     <div class="v2-prop">
-    <div class="v2-prop-bar"><div class="v2-prop-seg coral" style="width:14.286%"><span class="v2-prop-seg-pct">14%</span></div><div class="v2-prop-seg blue" style="width:42.857%"><span class="v2-prop-seg-pct">43%</span></div><div class="v2-prop-seg gold" style="width:14.286%"><span class="v2-prop-seg-pct">14%</span></div><div class="v2-prop-seg green" style="width:14.286%"><span class="v2-prop-seg-pct">14%</span></div><div class="v2-prop-seg neutral" style="width:14.286%"><span class="v2-prop-seg-pct">14%</span></div></div>
-    <div class="v2-prop-legend"><span class="v2-prop-key coral"><i></i>FORTH_STAGE · 1</span><span class="v2-prop-key blue"><i></i>SECOND_STAG · 3</span><span class="v2-prop-key gold"><i></i>FIRST_STAGE · 1</span><span class="v2-prop-key green"><i></i>3 · 1</span><span class="v2-prop-key neutral"><i></i>LEVEL-X · 1</span></div>
+    <div class="v2-prop-bar"><div class="v2-prop-seg gold" style="width:14.286%"><span class="v2-prop-seg-pct">14%</span></div><div class="v2-prop-seg blue" style="width:42.857%"><span class="v2-prop-seg-pct">43%</span></div><div class="v2-prop-seg green" style="width:14.286%"><span class="v2-prop-seg-pct">14%</span></div><div class="v2-prop-seg coral" style="width:14.286%"><span class="v2-prop-seg-pct">14%</span></div><div class="v2-prop-seg neutral" style="width:14.286%"><span class="v2-prop-seg-pct">14%</span></div></div>
+    <div class="v2-prop-legend"><span class="v2-prop-key gold"><i></i>المستوى الأول · 1</span><span class="v2-prop-key blue"><i></i>المستوى الثاني · 3</span><span class="v2-prop-key green"><i></i>المستوى الثالث · 1</span><span class="v2-prop-key coral"><i></i>المستوى الرابع · 1</span><span class="v2-prop-key neutral"><i></i>غير محدد · 1</span></div>
   </div>
-    <div class="v2-risk-tile-grid"><div class="v2-risk-tile coral">
+    <div class="v2-risk-tile-grid"><div class="v2-risk-tile gold">
         <div class="v2-risk-tile-head">
-          <span class="v2-stage-num">4</span>
-          <span class="v2-risk-tile-titles"><b>FORTH_STAGE</b><small>وزن العينة 30%</small></span>
+          <span class="v2-stage-num">1</span>
+          <span class="v2-risk-tile-titles"><b>المستوى الأول</b><small>وزن العينة 100%</small></span>
           <span class="v2-risk-tile-share"><b>14%</b><small>من المجتمع</small></span>
         </div>
         <div class="v2-risk-tile-main">
@@ -4583,7 +4583,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
       </div><div class="v2-risk-tile blue">
         <div class="v2-risk-tile-head">
           <span class="v2-stage-num">2</span>
-          <span class="v2-risk-tile-titles"><b>SECOND_STAG</b><small>وزن العينة 40%</small></span>
+          <span class="v2-risk-tile-titles"><b>المستوى الثاني</b><small>وزن العينة 40%</small></span>
           <span class="v2-risk-tile-share"><b>43%</b><small>من المجتمع</small></span>
         </div>
         <div class="v2-risk-tile-main">
@@ -4600,10 +4600,10 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
           <span><b>0</b><small>العيّنة</small></span>
           <span class="accent"><b>0.0%</b><small>تغطية العيّنة</small></span>
         </div>
-      </div><div class="v2-risk-tile gold">
+      </div><div class="v2-risk-tile green">
         <div class="v2-risk-tile-head">
-          <span class="v2-stage-num">1</span>
-          <span class="v2-risk-tile-titles"><b>FIRST_STAGE</b><small>وزن العينة 100%</small></span>
+          <span class="v2-stage-num">3</span>
+          <span class="v2-risk-tile-titles"><b>المستوى الثالث</b><small>وزن العينة 30%</small></span>
           <span class="v2-risk-tile-share"><b>14%</b><small>من المجتمع</small></span>
         </div>
         <div class="v2-risk-tile-main">
@@ -4620,10 +4620,10 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
           <span><b>0</b><small>العيّنة</small></span>
           <span class="accent"><b>0.0%</b><small>تغطية العيّنة</small></span>
         </div>
-      </div><div class="v2-risk-tile green">
+      </div><div class="v2-risk-tile coral">
         <div class="v2-risk-tile-head">
-          <span class="v2-stage-num">3</span>
-          <span class="v2-risk-tile-titles"><b>3</b><small>وزن العينة 30%</small></span>
+          <span class="v2-stage-num">4</span>
+          <span class="v2-risk-tile-titles"><b>المستوى الرابع</b><small>وزن العينة 30%</small></span>
           <span class="v2-risk-tile-share"><b>14%</b><small>من المجتمع</small></span>
         </div>
         <div class="v2-risk-tile-main">
@@ -4643,7 +4643,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
       </div><div class="v2-risk-tile neutral">
         <div class="v2-risk-tile-head">
           <span class="v2-stage-num">—</span>
-          <span class="v2-risk-tile-titles"><b>LEVEL-X</b><small>—</small></span>
+          <span class="v2-risk-tile-titles"><b>غير محدد</b><small>—</small></span>
           <span class="v2-risk-tile-share"><b>14%</b><small>من المجتمع</small></span>
         </div>
         <div class="v2-risk-tile-main">
@@ -4775,50 +4775,50 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     </div>
     <div class="slide-headline">مجتمع صور الفحص حسب المستوى والمنفذ لشهر مايو 2026</div>
     <div class="slide-subhead">أعلى 5 منافذ بالحجم لكل مستوى مخاطر، مع إجمالي شامل لجميع المنافذ.</div>
-    <div class="slide-body"><div class="v2-stage-port-grid"><div class="v2-stage-card coral v2-stage-port-card">
-    <div class="v2-stage-head">
-      <span class="v2-stage-num">4</span>
-      <b>FORTH_STAGE</b>
-    </div>
-    <table class="deck-table">
-      <thead><tr><th>المنفذ</th><th>سليمة</th><th>اشتباه</th><th>الإجمالي</th></tr></thead>
-      <tbody><tr><td>منفذ أ</td><td>0</td><td>1</td><td class="v2-bar-cell coral" style="--w:100.0%">1</td></tr><tr class="v2-fill-row" aria-hidden="true"><td colspan="4"></td></tr></tbody>
-      <tfoot><tr><td>الإجمالي</td><td>0</td><td>1</td><td>1</td></tr></tfoot>
-    </table>
-  </div><div class="v2-stage-card blue v2-stage-port-card">
-    <div class="v2-stage-head">
-      <span class="v2-stage-num">2</span>
-      <b>SECOND_STAG</b>
-    </div>
-    <table class="deck-table">
-      <thead><tr><th>المنفذ</th><th>سليمة</th><th>اشتباه</th><th>الإجمالي</th></tr></thead>
-      <tbody><tr><td>منفذ ب</td><td>0</td><td>3</td><td class="v2-bar-cell blue" style="--w:100.0%">3</td></tr><tr class="v2-fill-row" aria-hidden="true"><td colspan="4"></td></tr></tbody>
-      <tfoot><tr><td>الإجمالي</td><td>0</td><td>3</td><td>3</td></tr></tfoot>
-    </table>
-  </div><div class="v2-stage-card gold v2-stage-port-card">
+    <div class="slide-body"><div class="v2-stage-port-grid"><div class="v2-stage-card gold v2-stage-port-card">
     <div class="v2-stage-head">
       <span class="v2-stage-num">1</span>
-      <b>FIRST_STAGE</b>
+      <b>المستوى الأول</b>
     </div>
     <table class="deck-table">
       <thead><tr><th>المنفذ</th><th>سليمة</th><th>اشتباه</th><th>الإجمالي</th></tr></thead>
       <tbody><tr><td>منفذ أ</td><td>0</td><td>1</td><td class="v2-bar-cell gold" style="--w:100.0%">1</td></tr><tr class="v2-fill-row" aria-hidden="true"><td colspan="4"></td></tr></tbody>
       <tfoot><tr><td>الإجمالي</td><td>0</td><td>1</td><td>1</td></tr></tfoot>
     </table>
+  </div><div class="v2-stage-card blue v2-stage-port-card">
+    <div class="v2-stage-head">
+      <span class="v2-stage-num">2</span>
+      <b>المستوى الثاني</b>
+    </div>
+    <table class="deck-table">
+      <thead><tr><th>المنفذ</th><th>سليمة</th><th>اشتباه</th><th>الإجمالي</th></tr></thead>
+      <tbody><tr><td>منفذ ب</td><td>0</td><td>3</td><td class="v2-bar-cell blue" style="--w:100.0%">3</td></tr><tr class="v2-fill-row" aria-hidden="true"><td colspan="4"></td></tr></tbody>
+      <tfoot><tr><td>الإجمالي</td><td>0</td><td>3</td><td>3</td></tr></tfoot>
+    </table>
   </div><div class="v2-stage-card green v2-stage-port-card">
     <div class="v2-stage-head">
       <span class="v2-stage-num">3</span>
-      <b>3</b>
+      <b>المستوى الثالث</b>
     </div>
     <table class="deck-table">
       <thead><tr><th>المنفذ</th><th>سليمة</th><th>اشتباه</th><th>الإجمالي</th></tr></thead>
       <tbody><tr><td>منفذ ب</td><td>0</td><td>1</td><td class="v2-bar-cell green" style="--w:100.0%">1</td></tr><tr class="v2-fill-row" aria-hidden="true"><td colspan="4"></td></tr></tbody>
       <tfoot><tr><td>الإجمالي</td><td>0</td><td>1</td><td>1</td></tr></tfoot>
     </table>
+  </div><div class="v2-stage-card coral v2-stage-port-card">
+    <div class="v2-stage-head">
+      <span class="v2-stage-num">4</span>
+      <b>المستوى الرابع</b>
+    </div>
+    <table class="deck-table">
+      <thead><tr><th>المنفذ</th><th>سليمة</th><th>اشتباه</th><th>الإجمالي</th></tr></thead>
+      <tbody><tr><td>منفذ أ</td><td>0</td><td>1</td><td class="v2-bar-cell coral" style="--w:100.0%">1</td></tr><tr class="v2-fill-row" aria-hidden="true"><td colspan="4"></td></tr></tbody>
+      <tfoot><tr><td>الإجمالي</td><td>0</td><td>1</td><td>1</td></tr></tfoot>
+    </table>
   </div><div class="v2-stage-card neutral v2-stage-port-card">
     <div class="v2-stage-head">
       <span class="v2-stage-num">—</span>
-      <b>LEVEL-X</b>
+      <b>غير محدد</b>
     </div>
     <table class="deck-table">
       <thead><tr><th>المنفذ</th><th>سليمة</th><th>اشتباه</th><th>الإجمالي</th></tr></thead>
@@ -4848,32 +4848,10 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     </div>
     <div class="slide-headline">عيّنة الفحص المسحوبة حسب المستوى والمنفذ لشهر مايو 2026</div>
     <div class="slide-subhead">أعلى 5 منافذ بالحجم لكل مستوى مخاطر، بأرقام العيّنة ونسبة التغطية، مع إجمالي شامل.</div>
-    <div class="slide-body"><div class="v2-stage-port-grid"><div class="v2-stage-card coral v2-stage-port-card">
-    <div class="v2-stage-head">
-      <span class="v2-stage-num">4</span>
-      <b>FORTH_STAGE</b>
-      <span class="v2-stage-port-figure" dir="ltr">0 / 1</span>
-    </div>
-    <table class="deck-table">
-      <thead><tr><th>المنفذ</th><th>مجتمع المرحلة</th><th>العيّنة المستهدفة</th><th>نسبة التغطية</th></tr></thead>
-      <tbody><tr><td>منفذ أ</td><td>1</td><td class="v2-bar-cell coral" style="--w:0.0%">0</td><td>0.0%</td></tr><tr class="v2-fill-row" aria-hidden="true"><td colspan="4"></td></tr></tbody>
-      <tfoot><tr><td>الإجمالي</td><td>1</td><td>0</td><td>0.0%</td></tr></tfoot>
-    </table>
-  </div><div class="v2-stage-card blue v2-stage-port-card">
-    <div class="v2-stage-head">
-      <span class="v2-stage-num">2</span>
-      <b>SECOND_STAG</b>
-      <span class="v2-stage-port-figure" dir="ltr">0 / 3</span>
-    </div>
-    <table class="deck-table">
-      <thead><tr><th>المنفذ</th><th>مجتمع المرحلة</th><th>العيّنة المستهدفة</th><th>نسبة التغطية</th></tr></thead>
-      <tbody><tr><td>منفذ ب</td><td>3</td><td class="v2-bar-cell blue" style="--w:0.0%">0</td><td>0.0%</td></tr><tr class="v2-fill-row" aria-hidden="true"><td colspan="4"></td></tr></tbody>
-      <tfoot><tr><td>الإجمالي</td><td>3</td><td>0</td><td>0.0%</td></tr></tfoot>
-    </table>
-  </div><div class="v2-stage-card gold v2-stage-port-card">
+    <div class="slide-body"><div class="v2-stage-port-grid"><div class="v2-stage-card gold v2-stage-port-card">
     <div class="v2-stage-head">
       <span class="v2-stage-num">1</span>
-      <b>FIRST_STAGE</b>
+      <b>المستوى الأول</b>
       <span class="v2-stage-port-figure" dir="ltr">0 / 1</span>
     </div>
     <table class="deck-table">
@@ -4881,10 +4859,21 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
       <tbody><tr><td>منفذ أ</td><td>1</td><td class="v2-bar-cell gold" style="--w:0.0%">0</td><td>0.0%</td></tr><tr class="v2-fill-row" aria-hidden="true"><td colspan="4"></td></tr></tbody>
       <tfoot><tr><td>الإجمالي</td><td>1</td><td>0</td><td>0.0%</td></tr></tfoot>
     </table>
+  </div><div class="v2-stage-card blue v2-stage-port-card">
+    <div class="v2-stage-head">
+      <span class="v2-stage-num">2</span>
+      <b>المستوى الثاني</b>
+      <span class="v2-stage-port-figure" dir="ltr">0 / 3</span>
+    </div>
+    <table class="deck-table">
+      <thead><tr><th>المنفذ</th><th>مجتمع المرحلة</th><th>العيّنة المستهدفة</th><th>نسبة التغطية</th></tr></thead>
+      <tbody><tr><td>منفذ ب</td><td>3</td><td class="v2-bar-cell blue" style="--w:0.0%">0</td><td>0.0%</td></tr><tr class="v2-fill-row" aria-hidden="true"><td colspan="4"></td></tr></tbody>
+      <tfoot><tr><td>الإجمالي</td><td>3</td><td>0</td><td>0.0%</td></tr></tfoot>
+    </table>
   </div><div class="v2-stage-card green v2-stage-port-card">
     <div class="v2-stage-head">
       <span class="v2-stage-num">3</span>
-      <b>3</b>
+      <b>المستوى الثالث</b>
       <span class="v2-stage-port-figure" dir="ltr">0 / 1</span>
     </div>
     <table class="deck-table">
@@ -4892,10 +4881,21 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
       <tbody><tr><td>منفذ ب</td><td>1</td><td class="v2-bar-cell green" style="--w:0.0%">0</td><td>0.0%</td></tr><tr class="v2-fill-row" aria-hidden="true"><td colspan="4"></td></tr></tbody>
       <tfoot><tr><td>الإجمالي</td><td>1</td><td>0</td><td>0.0%</td></tr></tfoot>
     </table>
+  </div><div class="v2-stage-card coral v2-stage-port-card">
+    <div class="v2-stage-head">
+      <span class="v2-stage-num">4</span>
+      <b>المستوى الرابع</b>
+      <span class="v2-stage-port-figure" dir="ltr">0 / 1</span>
+    </div>
+    <table class="deck-table">
+      <thead><tr><th>المنفذ</th><th>مجتمع المرحلة</th><th>العيّنة المستهدفة</th><th>نسبة التغطية</th></tr></thead>
+      <tbody><tr><td>منفذ أ</td><td>1</td><td class="v2-bar-cell coral" style="--w:0.0%">0</td><td>0.0%</td></tr><tr class="v2-fill-row" aria-hidden="true"><td colspan="4"></td></tr></tbody>
+      <tfoot><tr><td>الإجمالي</td><td>1</td><td>0</td><td>0.0%</td></tr></tfoot>
+    </table>
   </div><div class="v2-stage-card neutral v2-stage-port-card">
     <div class="v2-stage-head">
       <span class="v2-stage-num">—</span>
-      <b>LEVEL-X</b>
+      <b>غير محدد</b>
       <span class="v2-stage-port-figure" dir="ltr">0 / 1</span>
     </div>
     <table class="deck-table">
@@ -5500,7 +5500,7 @@ body.theme-light .v2-acc-fold-row td{color:#607386;}
     <div class="v2-lg-table-card-title">حسب المستوى</div>
     <table class="deck-table">
       <thead><tr><th>البند</th><th>المعيّنة</th><th>المكتملة</th><th>الإنجاز</th></tr></thead>
-      <tbody><tr><td><div class="v2-cov-bucket-name"><span class="v2-lg-idx">1</span>SECOND_STAG</div><div class="v2-cov-emp-line">أعلى مساهم: u2 (2) <span class="v2-cov-emp-rest">+1 آخرون</span></div></td><td>3</td><td>1</td><td>33.3%</td></tr><tr><td><div class="v2-cov-bucket-name"><span class="v2-lg-idx">2</span>3</div><div class="v2-cov-emp-line">أعلى مساهم: u2 (1)</div></td><td>1</td><td>0</td><td>0.0%</td></tr><tr><td><div class="v2-cov-bucket-name"><span class="v2-lg-idx">3</span>FIRST_STAGE</div><div class="v2-cov-emp-line">أعلى مساهم: u1 (1)</div></td><td>1</td><td>0</td><td>0.0%</td></tr><tr><td><div class="v2-cov-bucket-name"><span class="v2-lg-idx">4</span>FORTH_STAGE</div><div class="v2-cov-emp-line">أعلى مساهم: u1 (1)</div></td><td>1</td><td>0</td><td>0.0%</td></tr><tr><td><div class="v2-cov-bucket-name"><span class="v2-lg-idx">5</span>LEVEL-X</div><div class="v2-cov-emp-line">أعلى مساهم: u1 (1)</div></td><td>1</td><td>0</td><td>0.0%</td></tr></tbody>
+      <tbody><tr><td><div class="v2-cov-bucket-name"><span class="v2-lg-idx">1</span>المستوى الأول</div><div class="v2-cov-emp-line">أعلى مساهم: u1 (1)</div></td><td>1</td><td>0</td><td>0.0%</td></tr><tr><td><div class="v2-cov-bucket-name"><span class="v2-lg-idx">2</span>المستوى الثاني</div><div class="v2-cov-emp-line">أعلى مساهم: u2 (2) <span class="v2-cov-emp-rest">+1 آخرون</span></div></td><td>3</td><td>1</td><td>33.3%</td></tr><tr><td><div class="v2-cov-bucket-name"><span class="v2-lg-idx">3</span>المستوى الثالث</div><div class="v2-cov-emp-line">أعلى مساهم: u2 (1)</div></td><td>1</td><td>0</td><td>0.0%</td></tr><tr><td><div class="v2-cov-bucket-name"><span class="v2-lg-idx">4</span>المستوى الرابع</div><div class="v2-cov-emp-line">أعلى مساهم: u1 (1)</div></td><td>1</td><td>0</td><td>0.0%</td></tr><tr><td><div class="v2-cov-bucket-name"><span class="v2-lg-idx">5</span>غير محدد</div><div class="v2-cov-emp-line">أعلى مساهم: u1 (1)</div></td><td>1</td><td>0</td><td>0.0%</td></tr></tbody>
       <tfoot><tr><td>الإجمالي</td><td>7</td><td>1</td><td>14.3%</td></tr></tfoot>
     </table>
   </div>
@@ -6920,28 +6920,28 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
     <h2 class="section-title">المجتمع حسب المستوى والمنفذ</h2>
     <div class="section-subtitle">توزيع الصور على مستويات الدراسة</div>
     <div class="grid grid-4 doc-kpi-strip"><div class="card doc-kpi gold">
-    <div class="doc-kpi-label">FORTH_STAGE</div>
+    <div class="doc-kpi-label">المستوى الأول</div>
     <div class="metric gold">1</div>
     
   </div><div class="card doc-kpi blue">
-    <div class="doc-kpi-label">SECOND_STAG</div>
+    <div class="doc-kpi-label">المستوى الثاني</div>
     <div class="metric blue">3</div>
     
   </div><div class="card doc-kpi slate">
-    <div class="doc-kpi-label">FIRST_STAGE</div>
+    <div class="doc-kpi-label">المستوى الثالث</div>
     <div class="metric slate">1</div>
     
   </div><div class="card doc-kpi coral">
-    <div class="doc-kpi-label">3</div>
+    <div class="doc-kpi-label">المستوى الرابع</div>
     <div class="metric coral">1</div>
     
   </div></div>
     <div class="grid grid-2 page-fill" style="margin-top:14px">
       <div class="card doc-panel"><div class="panel-title doc-panel-title"><span><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 4v15a1 1 0 0 0 1 1h14"/><path d="M9 16v-4"/><path d="M13 16V8"/><path d="M17 16v-6"/></svg></span>حصة المستويات</div><div class="doc-figure" style="--fig-h:210px">
-    <div class="doc-figure-svg"><svg viewBox="0 0 220 200" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" font-family='"Somar","IBM Plex Sans Arabic","Noto Kufi Arabic","Tahoma","Arial",sans-serif' style="direction:ltr"><circle cx="110" cy="57" r="43" fill="none" stroke="var(--line)" stroke-width="14.62"/><path d="M0.617,-43.813A6,6,0,0,1,7.513,-49.746A50.31,50.31,0,0,1,34.209,-36.89A6,6,0,0,1,33.87,-27.799L31.797,-26.146A6,6,0,0,1,24.018,-26.399A35.69,35.69,0,0,0,5.665,-35.238A6,6,0,0,1,0.617,-41.162Z" fill="var(--gold)" transform="translate(110,57)"/><path d="M34.639,-26.835A6,6,0,0,1,43.577,-25.142A50.31,50.31,0,0,1,-14.815,48.079A6,6,0,0,1,-18.454,39.742L-17.304,37.353A6,6,0,0,1,-10.185,34.206A35.69,35.69,0,0,0,31.082,-17.542A6,6,0,0,1,32.566,-25.182Z" fill="var(--blue)" transform="translate(110,57)"/><path d="M-19.566,39.207A6,6,0,0,1,-28.353,41.56A50.31,50.31,0,0,1,-46.827,18.394A6,6,0,0,1,-42.577,10.351L-39.992,9.761A6,6,0,0,1,-33.094,13.364A35.69,35.69,0,0,0,-20.393,29.29A6,6,0,0,1,-18.415,36.818Z" fill="var(--green)" transform="translate(110,57)"/><path d="M-42.852,9.148A6,6,0,0,1,-50.17,3.745A50.31,50.31,0,0,1,-43.577,-25.142A6,6,0,0,1,-34.639,-26.835L-32.566,-25.182A6,6,0,0,1,-31.082,-17.542A35.69,35.69,0,0,0,-35.615,2.319A6,6,0,0,1,-40.267,8.558Z" fill="var(--coral)" transform="translate(110,57)"/><path d="M-33.87,-27.799A6,6,0,0,1,-34.209,-36.89A50.31,50.31,0,0,1,-7.513,-49.746A6,6,0,0,1,-0.617,-43.813L-0.617,-41.162A6,6,0,0,1,-5.665,-35.238A35.69,35.69,0,0,0,-24.018,-26.399A6,6,0,0,1,-31.797,-26.146Z" fill="var(--cyan)" transform="translate(110,57)"/><text x="110" y="57" text-anchor="middle" dominant-baseline="middle" font-size="18" font-weight="800" fill="var(--white)">14%</text><rect x="200" y="122" width="8" height="8" rx="2" fill="var(--gold)"/><text x="196" y="126" text-anchor="end" dominant-baseline="middle" font-size="9" fill="var(--white)">FORTH_STAGE · 14%</text><rect x="200" y="138" width="8" height="8" rx="2" fill="var(--blue)"/><text x="196" y="142" text-anchor="end" dominant-baseline="middle" font-size="9" fill="var(--white)">SECOND_STAG · 43%</text><rect x="200" y="154" width="8" height="8" rx="2" fill="var(--green)"/><text x="196" y="158" text-anchor="end" dominant-baseline="middle" font-size="9" fill="var(--white)">FIRST_STAGE · 14%</text><rect x="200" y="170" width="8" height="8" rx="2" fill="var(--coral)"/><text x="196" y="174" text-anchor="end" dominant-baseline="middle" font-size="9" fill="var(--white)">3 · 14%</text><rect x="200" y="186" width="8" height="8" rx="2" fill="var(--cyan)"/><text x="196" y="190" text-anchor="end" dominant-baseline="middle" font-size="9" fill="var(--white)">LEVEL-X · 14%</text></svg></div>
+    <div class="doc-figure-svg"><svg viewBox="0 0 220 200" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" font-family='"Somar","IBM Plex Sans Arabic","Noto Kufi Arabic","Tahoma","Arial",sans-serif' style="direction:ltr"><circle cx="110" cy="57" r="43" fill="none" stroke="var(--line)" stroke-width="14.62"/><path d="M0.617,-43.813A6,6,0,0,1,7.513,-49.746A50.31,50.31,0,0,1,34.209,-36.89A6,6,0,0,1,33.87,-27.799L31.797,-26.146A6,6,0,0,1,24.018,-26.399A35.69,35.69,0,0,0,5.665,-35.238A6,6,0,0,1,0.617,-41.162Z" fill="var(--gold)" transform="translate(110,57)"/><path d="M34.639,-26.835A6,6,0,0,1,43.577,-25.142A50.31,50.31,0,0,1,-14.815,48.079A6,6,0,0,1,-18.454,39.742L-17.304,37.353A6,6,0,0,1,-10.185,34.206A35.69,35.69,0,0,0,31.082,-17.542A6,6,0,0,1,32.566,-25.182Z" fill="var(--blue)" transform="translate(110,57)"/><path d="M-19.566,39.207A6,6,0,0,1,-28.353,41.56A50.31,50.31,0,0,1,-46.827,18.394A6,6,0,0,1,-42.577,10.351L-39.992,9.761A6,6,0,0,1,-33.094,13.364A35.69,35.69,0,0,0,-20.393,29.29A6,6,0,0,1,-18.415,36.818Z" fill="var(--green)" transform="translate(110,57)"/><path d="M-42.852,9.148A6,6,0,0,1,-50.17,3.745A50.31,50.31,0,0,1,-43.577,-25.142A6,6,0,0,1,-34.639,-26.835L-32.566,-25.182A6,6,0,0,1,-31.082,-17.542A35.69,35.69,0,0,0,-35.615,2.319A6,6,0,0,1,-40.267,8.558Z" fill="var(--coral)" transform="translate(110,57)"/><path d="M-33.87,-27.799A6,6,0,0,1,-34.209,-36.89A50.31,50.31,0,0,1,-7.513,-49.746A6,6,0,0,1,-0.617,-43.813L-0.617,-41.162A6,6,0,0,1,-5.665,-35.238A35.69,35.69,0,0,0,-24.018,-26.399A6,6,0,0,1,-31.797,-26.146Z" fill="var(--cyan)" transform="translate(110,57)"/><text x="110" y="57" text-anchor="middle" dominant-baseline="middle" font-size="18" font-weight="800" fill="var(--white)">14%</text><rect x="200" y="122" width="8" height="8" rx="2" fill="var(--gold)"/><text x="196" y="126" text-anchor="end" dominant-baseline="middle" font-size="9" fill="var(--white)">المستوى الأول · 14%</text><rect x="200" y="138" width="8" height="8" rx="2" fill="var(--blue)"/><text x="196" y="142" text-anchor="end" dominant-baseline="middle" font-size="9" fill="var(--white)">المستوى الثاني · 43%</text><rect x="200" y="154" width="8" height="8" rx="2" fill="var(--green)"/><text x="196" y="158" text-anchor="end" dominant-baseline="middle" font-size="9" fill="var(--white)">المستوى الثالث · 14%</text><rect x="200" y="170" width="8" height="8" rx="2" fill="var(--coral)"/><text x="196" y="174" text-anchor="end" dominant-baseline="middle" font-size="9" fill="var(--white)">المستوى الرابع · 14%</text><rect x="200" y="186" width="8" height="8" rx="2" fill="var(--cyan)"/><text x="196" y="190" text-anchor="end" dominant-baseline="middle" font-size="9" fill="var(--white)">غير محدد · 14%</text></svg></div>
     
   </div></div>
-      <div class="card doc-panel"><div class="panel-title">المستويات والعينة</div><div class="table-wrap"><table><thead><tr><th>المستوى</th><th>المجتمع</th><th>العينة</th><th>التغطية</th></tr></thead><tbody><tr><td>FORTH_STAGE</td><td>1</td><td>0</td><td>0.0%</td></tr><tr><td>SECOND_STAG</td><td>3</td><td>0</td><td>0.0%</td></tr><tr><td>FIRST_STAGE</td><td>1</td><td>0</td><td>0.0%</td></tr><tr><td>3</td><td>1</td><td>0</td><td>0.0%</td></tr><tr><td>LEVEL-X</td><td>1</td><td>0</td><td>0.0%</td></tr></tbody></table></div></div>
+      <div class="card doc-panel"><div class="panel-title">المستويات والعينة</div><div class="table-wrap"><table><thead><tr><th>المستوى</th><th>المجتمع</th><th>العينة</th><th>التغطية</th></tr></thead><tbody><tr><td>المستوى الأول</td><td>1</td><td>0</td><td>0.0%</td></tr><tr><td>المستوى الثاني</td><td>3</td><td>0</td><td>0.0%</td></tr><tr><td>المستوى الثالث</td><td>1</td><td>0</td><td>0.0%</td></tr><tr><td>المستوى الرابع</td><td>1</td><td>0</td><td>0.0%</td></tr><tr><td>غير محدد</td><td>1</td><td>0</td><td>0.0%</td></tr></tbody></table></div></div>
     </div>
     <div class="doc-close">
     <div class="doc-close-line">
@@ -6991,7 +6991,7 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
     <div class="doc-figure-svg"><svg viewBox="0 0 240 160" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" font-family='"Somar","IBM Plex Sans Arabic","Noto Kufi Arabic","Tahoma","Arial",sans-serif' style="direction:ltr"><g transform="translate(120,125)"><path d="M-110.326,0A12.21,12.21,0,0,1,-122.462,-13.553A123.21,123.21,0,0,1,122.462,-13.553A12.21,12.21,0,0,1,110.326,0L110.326,0A12.21,12.21,0,0,1,98.191,-10.867A98.79,98.79,0,0,0,-98.191,-10.867A12.21,12.21,0,0,1,-110.326,0Z" fill="var(--line)"/></g><text x="120" y="119" text-anchor="middle" font-size="24" font-weight="800" fill="var(--white)">0%</text><text x="9" y="156" text-anchor="start" font-size="9" fill="var(--muted)">0%</text><text x="231" y="156" text-anchor="end" font-size="9" fill="var(--muted)">100%</text></svg></div>
     
   </div></div>
-      <div class="card doc-panel"><div class="panel-title">العينة حسب المستوى</div><div class="table-wrap"><table><thead><tr><th>المستوى</th><th>المجتمع</th><th>العينة</th><th>التغطية</th><th>مدروسة</th><th>الإنجاز</th></tr></thead><tbody><tr><td>FORTH_STAGE</td><td>1</td><td>0</td><td>0.0%</td><td>0</td><td>0.0%</td></tr><tr><td>SECOND_STAG</td><td>3</td><td>0</td><td>0.0%</td><td>0</td><td>0.0%</td></tr><tr><td>FIRST_STAGE</td><td>1</td><td>0</td><td>0.0%</td><td>0</td><td>0.0%</td></tr><tr><td>3</td><td>1</td><td>0</td><td>0.0%</td><td>0</td><td>0.0%</td></tr><tr><td>LEVEL-X</td><td>1</td><td>0</td><td>0.0%</td><td>0</td><td>0.0%</td></tr></tbody></table></div></div>
+      <div class="card doc-panel"><div class="panel-title">العينة حسب المستوى</div><div class="table-wrap"><table><thead><tr><th>المستوى</th><th>المجتمع</th><th>العينة</th><th>التغطية</th><th>مدروسة</th><th>الإنجاز</th></tr></thead><tbody><tr><td>المستوى الأول</td><td>1</td><td>0</td><td>0.0%</td><td>0</td><td>0.0%</td></tr><tr><td>المستوى الثاني</td><td>3</td><td>0</td><td>0.0%</td><td>0</td><td>0.0%</td></tr><tr><td>المستوى الثالث</td><td>1</td><td>0</td><td>0.0%</td><td>0</td><td>0.0%</td></tr><tr><td>المستوى الرابع</td><td>1</td><td>0</td><td>0.0%</td><td>0</td><td>0.0%</td></tr><tr><td>غير محدد</td><td>1</td><td>0</td><td>0.0%</td><td>0</td><td>0.0%</td></tr></tbody></table></div></div>
     </div>
     
     <div class="doc-close">
@@ -7820,7 +7820,7 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
     
   </div></div>
     <div class="grid grid-2 page-fill" style="margin-top:14px">
-      <div class="card doc-panel"><div class="panel-title doc-panel-title"><span><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span>حسب المستوى</div><div class="table-wrap"><table><thead><tr><th>المستوى/المنفذ</th><th>المعيّنة</th><th>المكتملة</th><th>الإنجاز</th></tr></thead><tbody><tr><td>SECOND_STAG</td><td>3</td><td>1</td><td>33.3%</td></tr><tr><td>3</td><td>1</td><td>0</td><td>0.0%</td></tr><tr><td>FIRST_STAGE</td><td>1</td><td>0</td><td>0.0%</td></tr><tr><td>FORTH_STAGE</td><td>1</td><td>0</td><td>0.0%</td></tr><tr><td>LEVEL-X</td><td>1</td><td>0</td><td>0.0%</td></tr><tr class="total-row"><td>المجموع</td><td>7</td><td>1</td><td>14.3%</td></tr></tbody></table></div></div>
+      <div class="card doc-panel"><div class="panel-title doc-panel-title"><span><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span>حسب المستوى</div><div class="table-wrap"><table><thead><tr><th>المستوى/المنفذ</th><th>المعيّنة</th><th>المكتملة</th><th>الإنجاز</th></tr></thead><tbody><tr><td>المستوى الأول</td><td>1</td><td>0</td><td>0.0%</td></tr><tr><td>المستوى الثاني</td><td>3</td><td>1</td><td>33.3%</td></tr><tr><td>المستوى الثالث</td><td>1</td><td>0</td><td>0.0%</td></tr><tr><td>المستوى الرابع</td><td>1</td><td>0</td><td>0.0%</td></tr><tr><td>غير محدد</td><td>1</td><td>0</td><td>0.0%</td></tr><tr class="total-row"><td>المجموع</td><td>7</td><td>1</td><td>14.3%</td></tr></tbody></table></div></div>
       <div class="card doc-panel"><div class="panel-title doc-panel-title"><span><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 21V8l7-4 7 4v13"/><path d="M5 21h14"/><path d="M9 21v-6h6v6"/></svg></span>حسب المنفذ</div><div class="table-wrap"><table><thead><tr><th>المستوى/المنفذ</th><th>المعيّنة</th><th>المكتملة</th><th>الإنجاز</th></tr></thead><tbody><tr><td>منفذ ب</td><td>4</td><td>1</td><td>25.0%</td></tr><tr><td>منفذ أ</td><td>3</td><td>0</td><td>0.0%</td></tr><tr class="total-row"><td>المجموع</td><td>7</td><td>1</td><td>14.3%</td></tr></tbody></table></div></div>
     </div>
     <div class="doc-close">
@@ -7979,31 +7979,31 @@ exports[`executive report editions on raw stage aliases — golden (C1 snapshot-
       "الإنجاز%",
     ],
     [
-      "SECOND_STAG",
+      "المستوى الأول",
+      1,
+      0,
+      0,
+    ],
+    [
+      "المستوى الثاني",
       3,
       1,
       33.33,
     ],
     [
-      "3",
+      "المستوى الثالث",
       1,
       0,
       0,
     ],
     [
-      "FIRST_STAGE",
+      "المستوى الرابع",
       1,
       0,
       0,
     ],
     [
-      "FORTH_STAGE",
-      1,
-      0,
-      0,
-    ],
-    [
-      "LEVEL-X",
+      "غير محدد",
       1,
       0,
       0,
@@ -8043,7 +8043,15 @@ exports[`executive report editions on raw stage aliases — golden (C1 snapshot-
       "الإنجاز%",
     ],
     [
-      "SECOND_STAG",
+      "المستوى الأول",
+      "u1",
+      "u1",
+      1,
+      0,
+      0,
+    ],
+    [
+      "المستوى الثاني",
       "u2",
       "u2",
       2,
@@ -8051,7 +8059,7 @@ exports[`executive report editions on raw stage aliases — golden (C1 snapshot-
       0,
     ],
     [
-      "SECOND_STAG",
+      "المستوى الثاني",
       "u1",
       "u1",
       1,
@@ -8059,7 +8067,7 @@ exports[`executive report editions on raw stage aliases — golden (C1 snapshot-
       100,
     ],
     [
-      "3",
+      "المستوى الثالث",
       "u2",
       "u2",
       1,
@@ -8067,7 +8075,7 @@ exports[`executive report editions on raw stage aliases — golden (C1 snapshot-
       0,
     ],
     [
-      "FIRST_STAGE",
+      "المستوى الرابع",
       "u1",
       "u1",
       1,
@@ -8075,15 +8083,7 @@ exports[`executive report editions on raw stage aliases — golden (C1 snapshot-
       0,
     ],
     [
-      "FORTH_STAGE",
-      "u1",
-      "u1",
-      1,
-      0,
-      0,
-    ],
-    [
-      "LEVEL-X",
+      "غير محدد",
       "u1",
       "u1",
       1,
@@ -8138,31 +8138,31 @@ exports[`executive report editions on raw stage aliases — golden (C1 snapshot-
       "الإنجاز%",
     ],
     [
-      "SECOND_STAG",
+      "المستوى الأول",
+      1,
+      0,
+      0,
+    ],
+    [
+      "المستوى الثاني",
       3,
       1,
       33.33,
     ],
     [
-      "3",
+      "المستوى الثالث",
       1,
       0,
       0,
     ],
     [
-      "FIRST_STAGE",
+      "المستوى الرابع",
       1,
       0,
       0,
     ],
     [
-      "FORTH_STAGE",
-      1,
-      0,
-      0,
-    ],
-    [
-      "LEVEL-X",
+      "غير محدد",
       1,
       0,
       0,
@@ -8200,7 +8200,7 @@ exports[`executive report editions on raw stage aliases — golden (C1 snapshot-
       "إنجاز%",
     ],
     [
-      "FORTH_STAGE",
+      "المستوى الأول",
       1,
       0,
       0,
@@ -8208,7 +8208,7 @@ exports[`executive report editions on raw stage aliases — golden (C1 snapshot-
       0,
     ],
     [
-      "SECOND_STAG",
+      "المستوى الثاني",
       3,
       0,
       0,
@@ -8216,7 +8216,7 @@ exports[`executive report editions on raw stage aliases — golden (C1 snapshot-
       0,
     ],
     [
-      "FIRST_STAGE",
+      "المستوى الثالث",
       1,
       0,
       0,
@@ -8224,7 +8224,7 @@ exports[`executive report editions on raw stage aliases — golden (C1 snapshot-
       0,
     ],
     [
-      "3",
+      "المستوى الرابع",
       1,
       0,
       0,
@@ -8232,7 +8232,7 @@ exports[`executive report editions on raw stage aliases — golden (C1 snapshot-
       0,
     ],
     [
-      "LEVEL-X",
+      "غير محدد",
       1,
       0,
       0,

@@ -354,16 +354,15 @@ describe("calculateExecutiveKPIs — golden master", () => {
     ]);
   });
 
-  it("SURPRISE: with no stageAllocations, stage profiles key on the ARRAY INDEX and label with the raw stage value", () => {
-    // executiveKpiProfiles.ts (buildStageProfiles fallback branch) emits
-    // `stageKey: String(index)` and uses the raw `row.stage` string as the
-    // label — so a month whose sample master carries no stageAllocations
-    // produces stage keys ("0", "1", …) that match nothing else in the app and
-    // an un-localized label.
+  it("CHANGED (C1): with no stageAllocations, stage profiles key on the canonical stage key and carry the Arabic label", () => {
+    // executiveKpiProfiles.ts (buildStageProfiles fallback branch) used to
+    // emit `stageKey: String(index)` and the raw `row.stage` text ("1") as
+    // the label. It now groups by getStageKey — "1" is a DEFAULT alias of the
+    // first level — so the key is canonical and the label Arabic.
     expect(kpis.stageProfiles).toEqual([
       {
-        stageKey: "0",
-        stageLabel: "1",
+        stageKey: "first",
+        stageLabel: "المستوى الأول",
         population: 10,
         sampleSize: 6,
         coverage: 60,

@@ -57,7 +57,8 @@ describe("computeDistributionModel", () => {
 
     // All four fixture rows share the same `stage` ("المستوى الثاني"), so byStage collapses to one bucket.
     expect(m.byStage).toHaveLength(1);
-    expect(m.byStage[0]!.key).toBe("المستوى الثاني");
+    expect(m.byStage[0]!.key).toBe("second");
+    expect(m.byStage[0]!.label).toBe("المستوى الثاني");
     expect(m.byStage[0]!.totalAssigned).toBe(4);
     expect(m.byStage[0]!.totalCompleted).toBe(1);
     expect(m.byStage[0]!.completionRate).toBeCloseTo(25, 5);

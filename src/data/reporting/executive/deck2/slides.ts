@@ -16,7 +16,7 @@ import { esc, fmtNum, fmtPct } from "../primitives";
 import { icon } from "../ui/icons";
 import { coverMeshSvg, dividerPatternSvg } from "../ui/generativeArt";
 import { isRankable } from "../model/dataSufficiency";
-import { formatStageLabel, getStageKey } from "../../../population/stageHelpers";
+import { getStageKey } from "../../../population/stageHelpers";
 import { DEFAULT_SAMPLING_RULES } from "../../../population/populationConfig";
 import { ORGANIZATION_PATH, ZATCA_LOGO_URL } from "../../../../branding/organization";
 import type { SourceRevisions } from "../../sourceRevisions";
@@ -2075,13 +2075,13 @@ export function collectStagePortStats(model: ReportModel): Map<string, PortPopRo
   const byStage = new Map<string, Map<string, PortPopRow>>();
   for (const r of model.rows) {
     // Canonicalize: real rows carry the RAW Excel stage alias (e.g. "SECOND_STAG",
-    // "2", "الثاني"), while StageProfile.stageLabel is the canonical Arabic label
-    // frozen at sample-draw time. Raw-key grouping made every card lookup miss on
-    // real data (empty port tables, zero سليمة/اشتباه sums) — the synthetic
-    // preview fixture used canonical labels and masked it. formatStageLabel maps
-    // known aliases to the canonical label and echoes unknown strings unchanged,
-    // so the fallback branch (raw StageProfile labels) still matches too.
-    const stageKey = r.stage ? formatStageLabel(r.stage) : "غير محدد";
+    // "2", "الثاني"), while StageProfile.stageKey is the canonical bucket key
+    // ("first"…"fourth"/"unknown") computed the same way (C1). Keying this map
+    // by getStageKey (never by a label, which for the unmapped bucket is now
+    // the fixed "غير محدد" constant and no longer equal to any particular raw
+    // row's own unmapped text) keeps every lookup below in sync with
+    // `model.population.byStage` — including the unmapped/"unknown" bucket.
+    const stageKey = getStageKey(r.stage, model.stageMappings);
     const portName = r.portName ?? "غير محدد";
     let portMap = byStage.get(stageKey);
     if (!portMap) {
@@ -2212,7 +2212,7 @@ function stagePortCell(
   stage: StageProfile,
   portName: string,
 ): PortPopRow | undefined {
-  return byStage.get(formatStageLabel(stage.stageLabel))?.find((p) => p.name === portName);
+  return byStage.get(stage.stageKey)?.find((p) => p.name === portName);
 }
 
 /** Merges `collectPortStats`'s land+sea `PortPopRow[]` into one list sorted
@@ -2257,7 +2257,7 @@ function stagePortLede(
 ): { stage: StageProfile; port: PortPopRow } | null {
   let best: { stage: StageProfile; port: PortPopRow } | null = null;
   for (const stage of stages) {
-    const top = byStage.get(formatStageLabel(stage.stageLabel))?.[0];
+    const top = byStage.get(stage.stageKey)?.[0];
     if (!top) continue;
     if (best === null || top.total > best.port.total) best = { stage, port: top };
   }
@@ -2379,7 +2379,7 @@ function stagePortPopulationBriefing(
   ]);
   const rankItems: BriefingRankItem[] = stages.map((s) => {
     const idx = levelIndexForStage(s);
-    const top = byStage.get(formatStageLabel(s.stageLabel))?.[0];
+    const top = byStage.get(s.stageKey)?.[0];
     return {
       label: s.stageLabel,
       value: s.population,
@@ -2572,11 +2572,11 @@ export function stagePortPopulationSlide(
   const stages = model.population.byStage;
   const byStage = collectStagePortStats(model);
   const cards = stages
-    .map((s) => stagePortPopulationCard(s, byStage.get(formatStageLabel(s.stageLabel)) ?? []))
+    .map((s) => stagePortPopulationCard(s, byStage.get(s.stageKey) ?? []))
     .join("");
   const body = `<div class="v2-stage-port-grid">${cards}</div>`;
   const ledgerCards = stages
-    .map((s) => stagePortPopulationLedgerCard(s, byStage.get(formatStageLabel(s.stageLabel)) ?? []))
+    .map((s) => stagePortPopulationLedgerCard(s, byStage.get(s.stageKey) ?? []))
     .join("");
   const ledgerBody = `<div class="v2-sys-ledger v2-lg-stage-port-population"><div class="v2-stage-port-grid">${ledgerCards}</div></div>`;
   const briefingBody = stagePortPopulationBriefing(model, stages, byStage);
@@ -2606,11 +2606,11 @@ export function stagePortSampleSlide(
   const stages = model.population.byStage;
   const byStage = collectStagePortStats(model);
   const cards = stages
-    .map((s) => stagePortSampleCard(s, byStage.get(formatStageLabel(s.stageLabel)) ?? []))
+    .map((s) => stagePortSampleCard(s, byStage.get(s.stageKey) ?? []))
     .join("");
   const body = `<div class="v2-stage-port-grid">${cards}</div>`;
   const ledgerCards = stages
-    .map((s) => stagePortSampleLedgerCard(s, byStage.get(formatStageLabel(s.stageLabel)) ?? []))
+    .map((s) => stagePortSampleLedgerCard(s, byStage.get(s.stageKey) ?? []))
     .join("");
   const ledgerBody = `<div class="v2-sys-ledger v2-lg-stage-port-sample"><div class="v2-stage-port-grid">${ledgerCards}</div></div>`;
   const briefingBody = stagePortSampleBriefing(model, stages, byStage);
