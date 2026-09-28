@@ -304,4 +304,56 @@ describe("FeedbackWidget — optimistic submit and reply", () => {
     await act(async () => {});
     expect(screen.queryByText("الجهاز لا يعمل")).toBeNull();
   });
+
+  it("a submit still in flight across a workspace switch stays in its own workspace", async () => {
+    storage.listThreadSummaries.mockResolvedValue([]);
+    storage.loadFeedback.mockResolvedValue([]);
+    const created: FeedbackThread = {
+      id: "t20260928090000-dddddddd",
+      from: "sara",
+      role: "employee",
+      category: "suggestion",
+      text: "خيط من المساحة القديمة",
+      timestamp: "2026-09-28T09:00:00.000Z",
+      status: "open",
+      replies: [],
+      revision: 1,
+    };
+    let finishSubmit!: (thread: FeedbackThread) => void;
+    storage.submitFeedback.mockReturnValue(
+      new Promise<FeedbackThread>((resolve) => {
+        finishSubmit = resolve;
+      })
+    );
+    writeSession(SARA);
+    const tree = () => (
+      <FeedbackUnreadProvider session={SARA}>
+        <FeedbackWidget />
+      </FeedbackUnreadProvider>
+    );
+    const { rerender } = render(tree());
+    fireEvent.click(screen.getByRole("button", { name: /التواصل والاقتراحات|غير مقروءة/ }));
+    await waitFor(() => expect(storage.listThreadSummaries).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByLabelText(DEFAULT_LABELS.fb_message_label), {
+      target: { value: "نص مكتوب" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.fb_submit_btn }));
+    await waitFor(() => expect(storage.submitFeedback).toHaveBeenCalledTimes(1));
+
+    // Switch workspace while the write is still pending; B's refresh lands empty.
+    workspace.handle = { name: "other-workspace" };
+    rerender(tree());
+    await waitFor(() => expect(storage.listThreadSummaries).toHaveBeenCalledTimes(2));
+    await act(async () => {});
+
+    await act(async () => {
+      finishSubmit(created);
+    });
+    await act(async () => {});
+
+    const another = screen.queryByRole("button", { name: DEFAULT_LABELS.fb_success_send_another });
+    if (another) fireEvent.click(another);
+    expect(screen.queryByText("خيط من المساحة القديمة")).toBeNull();
+    expect(screen.queryByText(DEFAULT_LABELS.fb_submit_error_generic)).toBeNull();
+  });
 });

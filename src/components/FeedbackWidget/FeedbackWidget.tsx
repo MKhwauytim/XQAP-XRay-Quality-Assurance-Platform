@@ -203,7 +203,9 @@ export function FeedbackWidget() {
       // swallowed so a failing index read is visible in the durable error log.
       logError("feedbackWidget:listThreadSummaries", err);
     } finally {
-      setLoading(false);
+      // A read dropped because the workspace changed must not end the spinner
+      // of the NEW workspace's refresh, which is still in flight.
+      if (currentHandleRef.current === handle) setLoading(false);
     }
     markSeen();
     void reloadUnread().then(() => markSeen());
@@ -239,13 +241,18 @@ export function FeedbackWidget() {
     if (!directoryHandle || !session || !text.trim()) return;
     setSubmitting(true);
     setSubmitError(null);
+    // The workspace this write belongs to. If the user switches workspace while
+    // it is in flight the write still lands in THIS one; its result must not be
+    // applied to the other workspace's list.
+    const handle = directoryHandle;
     try {
-      const created = await submitFeedback(directoryHandle, {
+      const created = await submitFeedback(handle, {
         from: session.username,
         role: session.role,
         category,
         text: text.trim(),
       });
+      if (currentHandleRef.current !== handle) return;
       setSubmitted(true);
       setText("");
       // Apply the thread the write returned -- no re-read. This used to run
@@ -261,6 +268,7 @@ export function FeedbackWidget() {
       void reloadUnread();
     } catch (err) {
       // B6: never fail silently — a CAS conflict surfaces its Arabic message.
+      if (currentHandleRef.current !== handle) return; // not this workspace's banner
       setSubmitError(err instanceof Error ? err.message : getLabels().fb_submit_error_generic);
     } finally {
       setSubmitting(false);
@@ -273,9 +281,10 @@ export function FeedbackWidget() {
     if (!replyText && !resolve) return;
     setReplying(msgId);
     setSubmitError(null);
+    const handle = directoryHandle; // see handleSubmit
     try {
       const updated = await replyToFeedback(
-        directoryHandle,
+        handle,
         msgId,
         {
           from: session.username,
@@ -285,6 +294,7 @@ export function FeedbackWidget() {
         },
         resolve
       );
+      if (currentHandleRef.current !== handle) return;
       setReplyTexts((prev) => ({ ...prev, [msgId]: "" }));
       // Apply the verified thread the write returned. The old code DELETED the
       // card's body here and relied on a refresh to bring it back -- but the
@@ -301,6 +311,7 @@ export function FeedbackWidget() {
       void reloadUnread();
     } catch (err) {
       // B6: surface a CAS conflict instead of an unhandled rejection.
+      if (currentHandleRef.current !== handle) return;
       setSubmitError(err instanceof Error ? err.message : getLabels().fb_reply_error_generic);
     } finally {
       setReplying(null);
