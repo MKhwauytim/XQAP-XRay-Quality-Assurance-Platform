@@ -6,66 +6,7 @@ import type { PasswordHashRecord } from "../../auth/passwordCrypto";
 import type { DistributionEntry } from "./distributionTypes";
 import { calculateBulkAssignment } from "./bulkAssignment";
 import { EVENT_SCHEMA_VERSION } from "./distributionLog";
-
-function makeUser(
-  username: string,
-  role: ManagedLoginUser["role"] = "employee",
-  hasCertScanLicense = false
-): ManagedLoginUser {
-  return {
-    id: username,
-    username,
-    displayName: username,
-    role,
-    passwordHash: { algorithm: "PBKDF2-SHA256", saltBase64: "s", hashBase64: "h", iterations: 600000 } as PasswordHashRecord,
-    isActive: true,
-    hasCertScanLicense,
-    createdAt: "",
-    updatedAt: ""
-  };
-}
-
-function makeRow(
-  id: string,
-  stage: string,
-  cert: "Certscan" | "NonCertscan",
-  portName = "المنفذ"
-): PreparedPopulationRow {
-  return {
-    xrayImageId: id,
-    portName,
-    certScanStatus: cert,
-    stage,
-    xrayEntryDate: null,
-    portCode: null,
-    portType: null,
-    declarationNumber: null,
-    declarationDate: null,
-    plateOrContainerNumber: null,
-    chassisNumber: null,
-    xrayLevelOneResult: "سليمة",
-    xrayLevelTwoResult: "سليمة",
-    movementType: "LAND",
-    reportNumber: null,
-    targetedByRiskEngine: null,
-    riskMessage: null,
-    levelOneEmployee: null,
-    levelTwoEmployee: null,
-    otherResults: {
-      manual: { result: null, code: null, employeeId: null },
-      opposite: { result: null, code: null, employeeId: null },
-      liveMeans: { result: null, code: null, employeeId: null }
-    },
-    notes: null,
-    certScanSnippet: null,
-    originalCertScanSnippet: null,
-    biEnrichmentStatus: "BI Not Provided",
-    biMatched: false,
-    biFilledFields: [],
-    sourceSheetName: "ورقة",
-    sourceRowNumber: 1
-  };
-}
+import { makeUser, makeRow } from "./bulkAssignmentTestFixtures";
 
 test("calculateBulkAssignment fails if no employees assigned in active stage", () => {
   const rows = [makeRow("img-1", "SECOND_STAGE", "NonCertscan")];
