@@ -29,7 +29,8 @@ import {
   setSimulatedFaults,
 } from "./memoryDirectory";
 import { listDirectoryEntries } from "./directoryScan";
-import type { DirectoryHandleLike } from "./fileSystemAccess";
+import type { DirectoryHandleLike, FileHandleLike } from "./fileSystemAccess";
+import type { OperationDeadline } from "./operationDeadline";
 import {
   TRANSIENT_WRITE_RETRY_DELAYS_MS,
   VERIFY_READBACK_RETRY_DELAYS_MS,
@@ -956,5 +957,140 @@ describe("readEventSegmentDelta strict option", () => {
     const lenient = await readEventSegmentDelta<TestEvent>(dir, {}, TEST_LOG);
     const strict = await readEventSegmentDelta<TestEvent>(dir, {}, TEST_LOG, { strict: true });
     expect(strict).toEqual(lenient);
+  });
+});
+
+/* ───────── F15: verifySegmentSize's guaranteed first retry (A1) ─────────── */
+
+/**
+ * An already-EXPIRED deadline, constructed directly rather than via
+ * `createDeadline` (which requires a positive future budget) — exactly the
+ * shape `nextRetryDelayMs` sees once `INTERACTIVE_WRITE_DEADLINE_MS` has been
+ * spent by casLoop attempts and the inner retry ladders before verification
+ * even starts.
+ */
+function expiredDeadline(): OperationDeadline {
+  return { at: Date.now() - 1, label: "test:F15" };
+}
+
+/**
+ * Installs a fake `getFileHandle` on `eventsDir` that lets the real
+ * pre-append re-read and write through untouched, then intercepts the
+ * post-close VERIFY read-back (`getFileHandle(name, { create: false })`
+ * calls made after the real write's `close()` resolves): the first
+ * `staleReads` matching calls return a `File` one byte SHORTER than what was
+ * actually written — a stale size, not a corrupted write — and every call
+ * after that delegates to the real handle.
+ *
+ * This is deliberately size-tampering, not a `SimulatedFault` error
+ * injection: F15 is about a read that SUCCEEDS with the wrong size (the
+ * "share has not caught up yet" case `verifySegmentSize`'s doc comment
+ * describes), which `memoryDirectory.ts`'s fault vocabulary — throwing —
+ * cannot express.
+ */
+function installStaleSizeReads(
+  eventsDir: DirectoryHandleLike,
+  fileName: string,
+  staleReads: number
+): void {
+  const original = eventsDir.getFileHandle.bind(eventsDir);
+  let wroteOnce = false;
+  let staleReadsLeft = staleReads;
+  (eventsDir as { getFileHandle: DirectoryHandleLike["getFileHandle"] }).getFileHandle = async (
+    entryName: string,
+    options?: { create?: boolean }
+  ) => {
+    const handle = await original(entryName, options);
+    if (entryName !== fileName) return handle;
+    if (options?.create) {
+      // The write call. Let it through untouched, but learn when its
+      // close() resolves — only reads AFTER that point are the post-close
+      // verify this test targets, not the pre-append re-read.
+      const innerCreateWritable = handle.createWritable!.bind(handle);
+      return {
+        ...handle,
+        createWritable: async () => {
+          const writable = await innerCreateWritable();
+          return {
+            write: (data: string) => writable.write(data),
+            close: async () => {
+              await writable.close();
+              wroteOnce = true;
+            },
+          };
+        },
+      };
+    }
+    // A read. Only fake it once the real write has landed and only for the
+    // configured number of calls — the pre-append re-read of a brand-new
+    // segment (before wroteOnce) must see the real NotFoundError, untouched.
+    if (wroteOnce && staleReadsLeft > 0) {
+      staleReadsLeft -= 1;
+      return {
+        ...handle,
+        getFile: async () => {
+          const real = await handle.getFile();
+          const text = await real.text();
+          return new File([text.slice(0, -1)], entryName);
+        },
+      } satisfies FileHandleLike;
+    }
+    return handle;
+  };
+}
+
+describe("F15: verifySegmentSize keeps at least one retry under an expired deadline", () => {
+  it("RED/GREEN target — a stale first read followed by a correct second read still verifies (exactly one retry)", async () => {
+    const dir = root();
+    const eventsDir = await eventsDirOf(dir);
+    const fileName = name();
+    installStaleSizeReads(eventsDir, fileName, 1);
+
+    const { result, delays } = await withCapturedSleeps(() =>
+      appendEventSegment(
+        { ...dir, getDirectoryHandle: async () => eventsDir } as unknown as DirectoryHandleLike,
+        [event("A")],
+        WRITER,
+        TEST_LOG,
+        { deadline: expiredDeadline() }
+      )
+    );
+
+    // Succeeded — the stale first observation did not get reported as a
+    // fatal, unrecoverable size mismatch.
+    expect(result).toBe("verified");
+    // Exactly the guaranteed first retry was taken: one sleep, at the
+    // ladder's own first rung — not zero (which would mean the deadline was
+    // honoured over F15) and not more than one (nothing beyond attempt 0 is
+    // exempt from the deadline).
+    expect(delays).toEqual([VERIFY_READBACK_RETRY_DELAYS_MS[0]]);
+    // The file itself really does hold the one event that was appended.
+    expect(await loadAll({ ...dir, getDirectoryHandle: async () => eventsDir } as unknown as DirectoryHandleLike)).toHaveLength(1);
+  });
+
+  it("companion — two stale reads in a row still fail, but bounded at the guaranteed retry (never more)", async () => {
+    const dir = root();
+    const eventsDir = await eventsDirOf(dir);
+    const fileName = name();
+    // Both the guaranteed attempt-0 read AND attempt 1 (which the expired
+    // deadline should refuse to retry past) come back stale.
+    installStaleSizeReads(eventsDir, fileName, 2);
+
+    const { delays } = await withCapturedSleeps(() =>
+      expect(
+        appendEventSegment(
+          { ...dir, getDirectoryHandle: async () => eventsDir } as unknown as DirectoryHandleLike,
+          [event("A")],
+          WRITER,
+          TEST_LOG,
+          { deadline: expiredDeadline() }
+        )
+      ).rejects.toThrow(/verification failed/)
+    );
+
+    // Bounded: the guaranteed first retry slept once, and the expired
+    // deadline then refused a second — never more than the one guaranteed
+    // rung, however many stale reads keep coming back.
+    expect(delays).toEqual([VERIFY_READBACK_RETRY_DELAYS_MS[0]]);
   });
 });
