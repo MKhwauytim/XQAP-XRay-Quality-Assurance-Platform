@@ -9,6 +9,8 @@ import { loadMonthPopulationFinal, loadMonthForEditing, loadMonthPopulationFinal
 import { useGlobalMonth } from "../../../../data/month/useGlobalMonth";
 import type { SourceRevisions } from "../../../../data/reporting/sourceRevisions";
 import { formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
+import { SampleSnapshotBanner } from "../../../SampleSnapshotBanner/SampleSnapshotBanner";
+import { sampleRowsMissingFromPopulation } from "../../../../data/reporting/executiveReportData";
 import type { PreparedPopulationRow } from "../../../../data/population/populationTypes";
 import { useLabels } from "../../../../data/labels/useLabels";
 import { getLabels } from "../../../../data/labels/labelsStore";
@@ -237,6 +239,7 @@ function ReportsContent() {
   );
   const [pbiExporting, setPbiExporting] = useState(false);
   const [pbiResult, setPbiResult] = useState<ExportManifest | null>(null);
+  const [snapshotRowCount, setSnapshotRowCount] = useState(0);
   const [pbiError, setPbiError] = useState<string | null>(null);
   const [deckEdition, setDeckEdition] = useState<ExecutiveDeckEdition>("v2");
   // D11 (population-report merge): default "both" — the pre-merge behavior of
@@ -313,6 +316,11 @@ function ReportsContent() {
     void loadMonthMeta(false);
   }, [directoryHandle, selectedMonth, loadMonthMeta]);
 
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset the per-month banner when the month changes
+    setSnapshotRowCount(0);
+  }, [selectedMonth]);
+
   // Assemble the executive-report input from disk — the SAME inputs that feed
   // openExecutiveReport / openExecutiveDeckV2 / buildExecutiveXlsx, so the live
   // dashboard and the exported artifacts can never disagree.
@@ -333,6 +341,7 @@ function ReportsContent() {
       loadProcessingSummary(directoryHandle, selectedMonth),
     ]);
     if (!populationFinal) return null;
+    setSnapshotRowCount(sampleRowsMissingFromPopulation(populationFinal.rows as unknown as PreparedPopulationRow[], sample ?? null).length);
     const template = templateSelection?.templateId
       ? await loadTemplate(directoryHandle, templateSelection.templateId)
       : null;
@@ -592,8 +601,9 @@ function ReportsContent() {
     setPbiResult(null);
     setPbiError(null);
     try {
-      const { runPowerBiExport } = await import("../../../../data/powerbiExport/exportManager");
-      const manifest = await runPowerBiExport(directoryHandle, selectedMonth);
+      const { runPowerBiExportDetailed } = await import("../../../../data/powerbiExport/exportManager");
+      const { manifest, snapshotRowCount: exportSnapshotRows } = await runPowerBiExportDetailed(directoryHandle, selectedMonth);
+      setSnapshotRowCount(exportSnapshotRows);
       logExport("power-bi");
       setPbiResult(manifest);
     } catch (err) {
@@ -931,6 +941,7 @@ function ReportsContent() {
           </span>
         </div>
       </div>
+      <SampleSnapshotBanner count={snapshotRowCount} />
 
       {/* B5: a "pending" month has no folder on disk yet, so every export/generate
           control below is disabled — explain why instead of leaving it a silent gap

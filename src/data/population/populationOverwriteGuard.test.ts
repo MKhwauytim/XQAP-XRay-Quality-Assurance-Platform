@@ -325,6 +325,21 @@ describe("saveMonthRun — overwrite guard (A2)", () => {
     expect(result.overwriteBlocked).toBeUndefined();
     expect(await populationIds(root)).toEqual(["A1", "A2", "A3"]);
   });
+
+  test("reports how many sampled ids a permitted overwrite leaves behind", async () => {
+    const root = createMemoryDirectory("root");
+    await seedMonth(root, { distributed: false, answered: false });
+
+    const result = await saveMonthRun({
+      directoryHandle: root,
+      ...baseParams,
+      processedRows: rowsFor(["A1", "Z1"]),
+      confirmedOverwrite: true,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.sampleOrphanCount).toBe(1);
+  });
 });
 
 describe("assessPopulationOverwrite", () => {

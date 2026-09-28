@@ -20,10 +20,12 @@ const POPULATION_HEADERS = [
   "imageResultAccurate", "levelOneAccurate", "levelTwoAccurate", "verificationCategory",
 ];
 
-export async function runPowerBiExport(
+export type PowerBiExportResult = { manifest: ExportManifest; snapshotRowCount: number };
+
+export async function runPowerBiExportDetailed(
   root: DirectoryHandleLike,
   month: string
-): Promise<ExportManifest> {
+): Promise<PowerBiExportResult> {
   const populationData = await loadMonthPopulationFinal(root, month);
   const sample = await loadSampleMaster(root, month);
   // Retired-by-replacement rows are excluded here for the same reason as in the
@@ -45,11 +47,22 @@ export async function runPowerBiExport(
     config: DEFAULT_EXEC_CONFIG,
   });
 
+  // A2: rows rebuilt from the sample snapshot are not population rows —
+  // population.csv stays the population; sample.csv keeps them so their
+  // answers are not lost.
+  const snapshotRowCount = execRows.filter((r) => r.fromSampleSnapshot).length;
   const allRows: Record<string, unknown>[] = execRows.map((r) => r as Record<string, unknown>);
+  const populationRowsOut = snapshotRowCount > 0 ? allRows.filter((r) => r["fromSampleSnapshot"] !== true) : allRows;
   const sampleRowsOut = allRows.filter((r) => r["selectedInSample"] === true);
 
-  return writeCsvExport(root, month, [
-    { fileName: "population.csv", headers: POPULATION_HEADERS, rows: allRows },
+  const manifest = await writeCsvExport(root, month, [
+    { fileName: "population.csv", headers: POPULATION_HEADERS, rows: populationRowsOut },
     { fileName: "sample.csv", headers: POPULATION_HEADERS, rows: sampleRowsOut },
   ]);
+  return { manifest, snapshotRowCount };
+}
+
+/** The manifest alone — the long-standing contract (golden-tested). */
+export async function runPowerBiExport(root: DirectoryHandleLike, month: string): Promise<ExportManifest> {
+  return (await runPowerBiExportDetailed(root, month)).manifest;
 }

@@ -232,6 +232,8 @@ export type SaveMonthRunParams = {
 export type SaveMonthRunResult = {
   ok: true;
   monthFolderName: string;
+  /** A2: live sampled ids the saved population lacks (non-zero only for a sample-without-work month). */
+  sampleOrphanCount: number;
 } | {
   ok: false;
   error: string;
@@ -741,7 +743,7 @@ async function saveMonthRunLocked(
       };
       await safeWriteJson(monthDir, "month.manifest.json", manifest);
 
-      return { ok: true, monthFolderName };
+      return { ok: true, monthFolderName, sampleOrphanCount: assessment.missingCount };
     });
   } catch (error) {
     // Was `error.message` — which destroyed the code every layer below had
