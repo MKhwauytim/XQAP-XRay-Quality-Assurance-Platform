@@ -1510,6 +1510,13 @@ export type SegmentEventsDelta<TEvent> = {
   offsets: Record<string, number>;
   /** Every segment file name seen in this listing. */
   segmentNames: string[];
+  /**
+   * Segments confirmed sealed by this read (S3, see `readSegmentTails`). A caller
+   * that keeps an in-memory offsets cache hands this back as
+   * `options.sealedConfirmed` so a sealed segment is not opened again. Absent
+   * from a persisted checkpoint by design: losing it only costs one re-open.
+   */
+  sealedConfirmedNames: Set<string>;
 };
 
 /**
@@ -1556,7 +1563,7 @@ export async function readEventSegmentDelta<TEvent>(
   parentDir: DirectoryHandleLike,
   knownOffsets: Record<string, number>,
   config: AppendOnlyEventLogConfig,
-  options?: { strict?: boolean }
+  options?: { strict?: boolean; sealedConfirmed?: ReadonlySet<string> }
 ): Promise<SegmentEventsDelta<TEvent>> {
   const strict = options?.strict ?? false;
   let eventsDir: DirectoryHandleLike;
@@ -1568,12 +1575,13 @@ export async function readEventSegmentDelta<TEvent>(
     // it makes a month's whole event history disappear from every fold that
     // reads through here.
     if (!isNotFoundError(error)) throw error;
-    return { events: [], offsets: { ...knownOffsets }, segmentNames: [] };
+    return { events: [], offsets: { ...knownOffsets }, segmentNames: [], sealedConfirmedNames: new Set() };
   }
 
-  const { tailTextByName, sizeByName, matchedNames } = await readSegmentTails(eventsDir, {
+  const { tailTextByName, sizeByName, matchedNames, sealedConfirmedNames } = await readSegmentTails(eventsDir, {
     suffix: config.segmentSuffix,
     knownOffsets,
+    sealedConfirmed: options?.sealedConfirmed,
     // `eventsDir` comes from a raw getDirectoryHandle() (never path-registered),
     // and its name is the same in every month: scope the skip log by the parent.
     scopeKey: directoryResourceKey(parentDir, config.eventsDirName),
@@ -1602,7 +1610,7 @@ export async function readEventSegmentDelta<TEvent>(
   const offsets: Record<string, number> = { ...knownOffsets };
   for (const [name, size] of sizeByName) offsets[name] = size;
 
-  return { events, offsets, segmentNames: matchedNames };
+  return { events, offsets, segmentNames: matchedNames, sealedConfirmedNames };
 }
 
 /* ─────────────────────── event-set digest (fixed, not a parameter) ──────── */

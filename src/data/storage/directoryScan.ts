@@ -664,6 +664,14 @@ export type SegmentTailOptions = {
    * registered path, which a raw `getDirectoryHandle()` result does not have.
    */
   scopeKey?: string;
+  /**
+   * Names a PREVIOUS call confirmed sealed (S3) — normally the previous
+   * result's `sealedConfirmedNames`, carried by the caller next to its offsets.
+   * A name is skipped (no `getFile()`) only when it is in this set, has a known
+   * offset, and a higher-seq sibling of its chain is in this listing. Omitted =
+   * every segment is opened, exactly as before.
+   */
+  sealedConfirmed?: ReadonlySet<string>;
 };
 
 export type SegmentTailResult = {
@@ -676,7 +684,69 @@ export type SegmentTailResult = {
   sizeByName: Map<string, number>;
   /** Every matching file name in the current listing, name-sorted. */
   matchedNames: string[];
+  /**
+   * Names now confirmed sealed: each was read (or already confirmed and
+   * skipped) with a higher-seq sibling of its chain in this listing, so the
+   * read completed after that sibling was first seen. Hand back as
+   * `options.sealedConfirmed` next call. Never contains a name whose read failed.
+   */
+  sealedConfirmedNames: Set<string>;
 };
+
+/**
+ * `{base, seq}` of an append-only segment file name: `{base}{suffix}` is seq 0
+ * (the historical unsuffixed name) and `{base}-{n}{suffix}` is seq n. Returns
+ * null for a name without `suffix`. Purely lexical, so it can misread a seq-0
+ * base that happens to end in `-<digits>`; `sealedSiblingNames` therefore
+ * trusts a chain only when its seq-0 root is also listed.
+ */
+export function parseSegmentName(name: string, suffix: string): { base: string; seq: number } | null {
+  if (!name.endsWith(suffix)) return null;
+  const stem = name.slice(0, -suffix.length);
+  const match = /^(.+)-([1-9][0-9]{0,5})$/.exec(stem);
+  return match ? { base: match[1]!, seq: Number(match[2]) } : { base: stem, seq: 0 };
+}
+
+/**
+ * Names in a listing that have a higher-seq sibling in the same chain.
+ *
+ * A chain is anchored on its seq-0 root: a stem is a chain base only if a
+ * `{stem}-{n}` sibling is also listed, and a `{base}-{n}` name joins a chain
+ * only if `{base}{suffix}` is listed. That resolves the lexical ambiguity in
+ * `parseSegmentName` (a digit-only session id makes a seq-0 name look like
+ * `{base}-{n}`), and errs toward "not a chain", i.e. toward opening the file.
+ */
+function namesWithHigherSibling(names: readonly string[], suffix: string): Set<string> {
+  const listed = new Set(names);
+  const parsed = new Map<string, { base: string; seq: number }>();
+  for (const name of names) {
+    const info = parseSegmentName(name, suffix);
+    if (info) parsed.set(name, info);
+  }
+  // Bases that have a seq>0 sibling with their root present.
+  const rootedBases = new Set<string>();
+  for (const [, info] of parsed) {
+    if (info.seq > 0 && listed.has(`${info.base}${suffix}`)) rootedBases.add(info.base);
+  }
+  const maxSeqByBase = new Map<string, number>();
+  const chainOf = new Map<string, { base: string; seq: number }>();
+  for (const [name, info] of parsed) {
+    const stem = name.slice(0, -suffix.length);
+    const chain = rootedBases.has(stem)
+      ? { base: stem, seq: 0 }
+      : info.seq > 0 && rootedBases.has(info.base)
+        ? info
+        : null;
+    if (!chain) continue;
+    chainOf.set(name, chain);
+    maxSeqByBase.set(chain.base, Math.max(maxSeqByBase.get(chain.base) ?? 0, chain.seq));
+  }
+  const out = new Set<string>();
+  for (const [name, chain] of chainOf) {
+    if (chain.seq < (maxSeqByBase.get(chain.base) ?? 0)) out.add(name);
+  }
+  return out;
+}
 
 /**
  * Read only the bytes appended past each file's previously-known offset, for
@@ -714,6 +784,21 @@ export async function readSegmentTails(
   const vanished: string[] = [];
   const reads: ({ size: number; tail: string | null } | null)[] = new Array(matched.length).fill(null);
 
+  // S3: a name whose chain has a higher-seq sibling in THIS listing is
+  // "superseded". If a previous call confirmed it sealed and we already know its
+  // offset, opening it again can only return nothing new. The confirmation is
+  // earned by an ordinary read taken after the sibling was listed (see
+  // `sealedConfirmedNames`); a never-read superseded name is always opened, which
+  // is what keeps SMB visibility lag (N+1 visible before N's last bytes) safe.
+  const superseded = namesWithHigherSibling(matchedNames, options.suffix);
+  const priorSealed = options.sealedConfirmed;
+  const skipped = new Set<string>();
+  for (const name of matchedNames) {
+    if (superseded.has(name) && priorSealed?.has(name) && options.knownOffsets[name] !== undefined) {
+      skipped.add(name);
+    }
+  }
+
   // Bounded-parallel, like the sized listing and the bounded signature above:
   // on the share every open is a round trip, and a sequential walk made each
   // answer-save attempt pay one per segment in the month (A1). Results are
@@ -722,6 +807,7 @@ export async function readSegmentTails(
   // on one JS thread, so it remains a total across all segments.
   await forEachBounded(matched.length, DIRECTORY_READ_CONCURRENCY, async (index) => {
     const entry = matched[index]!;
+    if (skipped.has(entry.name)) return;
     const knownOffset = options.knownOffsets[entry.name] ?? 0;
     reads[index] = await readListedEntry(
       dir,
@@ -735,8 +821,15 @@ export async function readSegmentTails(
     );
   });
 
+  const sealedConfirmedNames = new Set<string>();
   for (let index = 0; index < matched.length; index += 1) {
     const name = matched[index]!.name;
+    if (skipped.has(name)) {
+      // Carry the known offset forward unchanged; still confirmed sealed.
+      sizeByName.set(name, options.knownOffsets[name]!);
+      sealedConfirmedNames.add(name);
+      continue;
+    }
     const read = reads[index] ?? null;
     if (read === null) {
       // Deliberately no sizeByName entry: callers persist sizeByName as the
@@ -749,11 +842,12 @@ export async function readSegmentTails(
     }
     sizeByName.set(name, read.size);
     if (read.tail !== null) tailTextByName.set(name, read.tail);
+    if (superseded.has(name)) sealedConfirmedNames.add(name);
   }
 
   logVanishedEntries("directoryScan:segment-tails", dir, vanished, options.scopeKey);
 
-  return { tailTextByName, sizeByName, matchedNames };
+  return { tailTextByName, sizeByName, matchedNames, sealedConfirmedNames };
 }
 
 // Module-init side effect: purge the whole cache on manual refresh

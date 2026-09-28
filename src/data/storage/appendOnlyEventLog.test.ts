@@ -1963,7 +1963,7 @@ describe("readEventSegmentDelta", () => {
 
   it("answers an absent events directory with an empty delta, not an error", async () => {
     const delta = await readEventSegmentDelta<TestEvent>(root(), {}, TEST_LOG);
-    expect(delta).toEqual({ events: [], offsets: {}, segmentNames: [] });
+    expect(delta).toEqual({ events: [], offsets: {}, segmentNames: [], sealedConfirmedNames: new Set() });
   });
 
   it("throws rather than inventing an empty history when the directory cannot be OPENED", async () => {

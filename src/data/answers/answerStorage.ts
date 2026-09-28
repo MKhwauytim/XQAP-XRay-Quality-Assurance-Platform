@@ -276,6 +276,10 @@ type AnswerEventsCacheEntry = {
    *  already consumed, per segment file name. Persist verbatim as the next
    *  call's `knownOffsets`. */
   offsets: Record<string, number>;
+  /** Segments a previous read confirmed sealed (a higher-seq chain sibling was
+   *  listed when they were read): the next read skips their `getFile()` and
+   *  carries their offset forward. In-memory only, like the rest of the cache. */
+  sealedConfirmed?: ReadonlySet<string>;
 };
 
 /** WeakMap<workspace root, Map<monthFolderName, entry>> — see the module doc's SCOPING note. */
@@ -402,10 +406,17 @@ export async function readAllAnswerEventsForMonth(
     // which throws EventSegmentUnreadableError — caught here like any other
     // read failure — BEFORE returning a delta, so a skipped/unreadable segment
     // can never reach the cache write below as if it had been read cleanly.
-    const delta = await readAnswerEventDelta(mainDir, cached?.offsets ?? {}, undefined, options);
+    const delta = await readAnswerEventDelta(mainDir, cached?.offsets ?? {}, undefined, {
+      ...options,
+      sealedConfirmed: cached?.sealedConfirmed,
+    });
     const events = cached ? new Map(cached.events) : new Map<string, AnswerEvent>();
     for (const event of delta.events) events.set(event.eventId, event);
-    setAnswerEventsCacheEntry(directoryHandle, monthFolderName, { events, offsets: delta.offsets });
+    setAnswerEventsCacheEntry(directoryHandle, monthFolderName, {
+      events,
+      offsets: delta.offsets,
+      sealedConfirmed: delta.sealedConfirmedNames,
+    });
     return [...events.values()];
   } catch (error) {
     throw tagAndLog(error, "answers:read-segments", "XQ-ANS-004");
