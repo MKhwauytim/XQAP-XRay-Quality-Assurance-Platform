@@ -242,9 +242,9 @@ describe("runPowerBiExport — golden master", () => {
     await runPowerBiExport(root, MONTH);
     expect(await readCsv(root, "sample.csv")).toMatchInlineSnapshot(`
       "xrayImageId,portName,portType,stage,levelOneResult,levelTwoResult,imageResult,selectedInSample,assignedTo,distributionStatus,expertResult,imageAvailable,noImageReason,hasMarking,imageQuality,lowQualityReason,suspicionLevel,suspectedTypes,smuggleMethod,answerStatus,assignedAt,submittedAt,imageResultAccurate,levelOneAccurate,levelTwoAccurate,verificationCategory,fromSampleSnapshot
-      img-1,بري,بري,1,سليمة,سليمة,سليمة,1,emp-a,completed,سليمة,,,,,,,,,submitted,2026-05-06T08:00:00.000Z,2026-05-06T00:00:00.000Z,1,1,1,correct-clean,
-      img-2,بري,بري,1,سليمة,اشتباه,اشتباه,1,emp-a,pending,اشتباه,,,,,,,,,submitted,2026-05-04T08:00:01.000Z,2026-05-06T00:00:00.000Z,1,0,1,correct-suspicious,
-      img-3,بحري,بري,1,سليمة,سليمة,سليمة,1,emp-b,pending,,,,,,,,,,,2026-05-04T08:00:02.000Z,,,,,,"
+      img-1,بري,بري,1,سليمة,سليمة,سليمة,1,emp-a,completed,سليمة,,,,,,,,,submitted,2026-05-06T08:00:00.000Z,2026-05-06T00:00:00.000Z,1,1,1,correct-clean,false
+      img-2,بري,بري,1,سليمة,اشتباه,اشتباه,1,emp-a,pending,اشتباه,,,,,,,,,submitted,2026-05-04T08:00:01.000Z,2026-05-06T00:00:00.000Z,1,0,1,correct-suspicious,false
+      img-3,بحري,بري,1,سليمة,سليمة,سليمة,1,emp-b,pending,,,,,,,,,,,2026-05-04T08:00:02.000Z,,,,,,false"
     `);
   });
 

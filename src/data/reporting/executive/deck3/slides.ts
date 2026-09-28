@@ -12,6 +12,7 @@ import type { ReportModel } from "../model/reportModel";
 import type { KeyedAccuracy } from "../model/aggregates";
 import { collectPortStats, type PortPopRow } from "../deck2/slideKit";
 import { collectLevelAccuracyRows } from "../deck2/section3/levelAccuracy";
+import { populationScopedRows } from "../../executiveReportTypes";
 import { engineVerdictOf } from "../deck2/section3/riskEngineAgreement";
 import { computeMarkingImpact } from "../deck2/section3/markingImpact";
 import { computeQualityImpactStrata, accuracyGradient } from "../deck2/section3/qualityImpact";
@@ -796,7 +797,8 @@ ${legendRow([
     let targeted = 0;
     let engineAgree = 0;
     let upheldEngine = 0;
-    for (const row of model.rows) {
+    // A2: the population fold — never rows rebuilt from the sample snapshot (matches deck2).
+    for (const row of populationScopedRows(model.rows)) {
       if (engineVerdictOf(row.targetedByRiskEngine) !== "اشتباه") continue;
       targeted += 1;
       if (row.imageResult === "اشتباه") engineAgree += 1;

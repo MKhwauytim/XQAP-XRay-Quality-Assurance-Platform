@@ -276,10 +276,16 @@ function ReportsContent() {
   // (the mount/month effect below and the background-refresh subscriber), and
   // only a single shared token can order results across both.
   const monthMetaTokenRef = useRef(0);
+  // The dashboard derives the banner count from its own model (see buildKpiModel),
+  // so the month-load path must not read the population again while it is open.
+  const sectionRef = useRef<ReportsSection>(section);
+  useEffect(() => {
+    sectionRef.current = section;
+  }, [section]);
 
   // A2: revision-keyed cache so the background refresh does not re-read the
   // whole population unless the population or the sample actually changed.
-  const snapshotCountCacheRef = useRef<{ key: string; count: number } | null>(null);
+  const snapshotCountCacheRef = useRef<{ dir: DirectoryHandleLike; key: string; count: number } | null>(null);
   const countSnapshotRows = useCallback(
     async (dir: DirectoryHandleLike, month: string, sample: SampleMasterData | null, token: number): Promise<void> => {
       try {
@@ -290,7 +296,7 @@ function ReportsContent() {
             loadSampleMasterRevision(dir, month),
           ]);
           const key = popRevision !== null && sampleRevision !== null ? `${month}|${popRevision}|${sampleRevision}` : null;
-          if (key !== null && snapshotCountCacheRef.current?.key === key) {
+          if (key !== null && snapshotCountCacheRef.current?.dir === dir && snapshotCountCacheRef.current.key === key) {
             count = snapshotCountCacheRef.current.count;
           } else {
             const population = await loadMonthPopulationFinal(dir, month);
@@ -298,7 +304,7 @@ function ReportsContent() {
             count = population
               ? sampleRowsMissingFromPopulation(population.rows as unknown as PreparedPopulationRow[], sample).length
               : 0;
-            if (key !== null) snapshotCountCacheRef.current = { key, count };
+            if (key !== null) snapshotCountCacheRef.current = { dir, key, count };
           }
         }
         if (token === monthMetaTokenRef.current) setSnapshotRowCount(count);
@@ -331,7 +337,7 @@ function ReportsContent() {
       // A2: the banner count is derived once, here, so it is there on landing and
       // follows every refresh. It runs off the chip path (a slow population read
       // must not delay the chips) and only for a month that has a sample.
-      void countSnapshotRows(directoryHandle, selectedMonth, sample, token);
+      if (sectionRef.current !== "kpi") void countSnapshotRows(directoryHandle, selectedMonth, sample, token);
       setMonthMeta((current) => ({
         folderName: selectedMonth,
         populationCount: manifest?.totalProcessedRows ?? null,
@@ -440,6 +446,9 @@ function ReportsContent() {
       if (token !== kpiBuildTokenRef.current) return;
       setModel(builtModel);
       setModelError(null);
+      // A2: on the dashboard the banner count comes from the model just built —
+      // no second population read.
+      setSnapshotRowCount(builtModel.rows.filter((row) => row.fromSampleSnapshot).length);
       kpiModelBuiltForRef.current = { directoryHandle, month: selectedMonth };
       // §L Tier 2: backfill the studied-count chip from the model we just
       // built instead of a separate loadAllEmployeeFiles read -- only

@@ -94,4 +94,15 @@ describe("disclosure in exports (A2)", () => {
     const clean = await headerOf({ ...orphanInput(), sample: null });
     expect(clean.header).not.toContain(DEFAULT_LABELS.report_sample_snapshot_column);
   });
+
+  it("deck3's risk-engine band counts only population images", async () => {
+    const { buildExecutiveDeckV3 } = await import("./executive/deck3/index");
+    const base = orphanInput();
+    const targeted = (row: (typeof base.populationRows)[number]) => ({ ...row, targetedByRiskEngine: "نعم" });
+    const population = base.populationRows.map((row, i) => (i === 0 ? targeted(row) : row));
+    const orphan = targeted({ ...makePopulationRow("S9", "ميناء جدة"), portType: "منفذ بحري" });
+    const html = await buildExecutiveDeckV3({ ...base, populationRows: population, sample: makeSampleMaster([population[0]!, orphan]) });
+    expect(html).toContain("1 صورة استهدفها المحرك");
+    expect(html).not.toContain("2 صورة استهدفها المحرك");
+  });
 });

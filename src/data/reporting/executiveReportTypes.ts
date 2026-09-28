@@ -94,6 +94,18 @@ export type ExecutiveReportRow = {
 };
 
 /**
+ * A2: the rows that belong to the month's population — every row except those
+ * rebuilt from the sample snapshot (`fromSampleSnapshot`). Population-scoped
+ * figures (denominators, per-port/stage population, land/sea splits) are taken
+ * over these; sample-scoped figures (sample size, studied, accuracy) keep every
+ * row. Returns the SAME array when nothing is flagged, so a month without
+ * orphans is untouched.
+ */
+export function populationScopedRows<T extends { fromSampleSnapshot?: true }>(rows: readonly T[]): readonly T[] {
+  return rows.some((row) => row.fromSampleSnapshot) ? rows.filter((row) => !row.fromSampleSnapshot) : rows;
+}
+
+/**
  * Was this case actually studied? A submitted "لا يوجد صورة" answer is a
  * complete, valid submission by the template's own rules — every other
  * field becomes optional once that's answered — but nothing was actually
@@ -114,18 +126,6 @@ export type ExecutiveReportRow = {
  * "لا", never an unknown one (the same "don't punish a blank as if it were a
  * negative answer" rule `caseFilter.ts` documents for the risk-engine chip).
  */
-/**
- * A2: the rows that belong to the month's population — every row except those
- * rebuilt from the sample snapshot (`fromSampleSnapshot`). Population-scoped
- * figures (denominators, per-port/stage population, land/sea splits) are taken
- * over these; sample-scoped figures (sample size, studied, accuracy) keep every
- * row. Returns the SAME array when nothing is flagged, so a month without
- * orphans is untouched.
- */
-export function populationScopedRows<T extends { fromSampleSnapshot?: true }>(rows: readonly T[]): readonly T[] {
-  return rows.some((row) => row.fromSampleSnapshot) ? rows.filter((row) => !row.fromSampleSnapshot) : rows;
-}
-
 export function isRowStudied(row: Pick<ExecutiveReportRow, "answerStatus" | "imageAvailable">): boolean {
   return row.answerStatus === "submitted" && row.imageAvailable !== false;
 }
