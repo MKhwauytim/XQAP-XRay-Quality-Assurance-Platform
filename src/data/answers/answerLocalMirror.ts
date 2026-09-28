@@ -172,7 +172,11 @@ export async function markAnswerPendingLocally(
  * (T1 fails late, T2 already pending). A blind put would let the older
  * failure replace T2's pending record, leaving T2 only as a draft. Refuses
  * when the existing record (pending OR synced) is strictly newer than the
- * item being queued; an equal or newer item writes and stays pending.
+ * item being queued (an instant comparison, `compareSavedAt`); an equal or
+ * newer item writes and stays pending. T2 supersedes T1 only for CONSECUTIVE
+ * ANSWER SAVES: a reopen or quality-note write is built from the disk-folded
+ * `previous`, not from the last answer save, so for those the refused T1's
+ * answers survive only in the draft store.
  */
 export function shouldQueueMirrorRecord(
   existing: MirroredItemInfo | undefined,
@@ -205,7 +209,8 @@ export type MirroredItemInfo = { synced: boolean; item: ItemAnswer };
  *    returning it, possibly while the real edit is still queued. Landing a
  *    pending item is `shouldConfirmMirrorRecord`'s job (below), never this
  *    one's.
- *  - `existing.item.lastSavedAt >= diskItem.lastSavedAt`: the mirror
+ *  - `existing.item.lastSavedAt` is not before `diskItem.lastSavedAt` (an
+ *    instant comparison, `compareSavedAt`, not string order): the mirror
  *    already holds something at least as new as disk — nothing to refresh,
  *    and never let an OLDER on-disk read win over what the mirror already
  *    has.
@@ -234,8 +239,9 @@ export function shouldRefreshMirrorFromDisk(
  * reach 0 for an item once it went pending).
  *
  * Refuses ONLY when the existing record is a genuinely NEWER pending edit
- * still in flight — `existing.synced === false && existing.item.lastSavedAt
- * > item.lastSavedAt`. Everything else confirms: no existing record, a
+ * still in flight — `existing.synced === false` and `existing.item.lastSavedAt`
+ * is strictly after `item.lastSavedAt` (an instant comparison,
+ * `compareSavedAt`, not string order). Everything else confirms: no existing record, a
  * pending record at the SAME or an OLDER `lastSavedAt` than the incoming
  * item (this call landed it, or it was already there), or an existing
  * synced record that is not newer than the incoming item.
@@ -249,14 +255,14 @@ export function shouldConfirmMirrorRecord(
 }
 
 /**
- * The ONE place a CONFIRMED (`synced: true`) write is issued against an
- * already-open transaction's object store — shared by `mirrorAnswerLocally`
- * and `backfillMirrorFromDisk`, each supplying the decision rule that fits
- * its own contract (`shouldConfirmMirrorRecord` / `shouldRefreshMirrorFromDisk`
- * respectively — fix round 4: two DIFFERENT rules, deliberately, not one
- * shared rule pretending to serve two different questions). Reads the
- * existing record for `item`'s key and only issues a `put` when `shouldWrite`
- * says yes.
+ * The ONE place a guarded write is issued against an already-open
+ * transaction's object store. Three callers, three DIFFERENT rules,
+ * deliberately (not one shared rule pretending to serve three questions):
+ * `mirrorAnswerLocally` (`shouldConfirmMirrorRecord`, writes `synced: true`),
+ * `backfillMirrorFromDisk` (`shouldRefreshMirrorFromDisk`, writes
+ * `synced: true`), and `markAnswerPendingLocally` (`shouldQueueMirrorRecord`,
+ * writes `synced: false` via the `synced` argument). Reads the existing
+ * record for `item`'s key and only issues a `put` when `shouldWrite` says yes.
  */
 function issueGuardedPut(
   store: IDBObjectStore,
