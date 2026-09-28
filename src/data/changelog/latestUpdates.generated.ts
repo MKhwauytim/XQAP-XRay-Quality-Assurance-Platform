@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v140.0",
+    "date": "2026-09-28",
+    "bucket": "fix",
+    "scope": "integrity",
+    "title": "boot self-check no longer flags the deck-preference files in 6-templates as unrecoverable"
+  },
+  {
     "version": "v139.0",
     "date": "2026-09-16",
     "bucket": "enhancement",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "answers",
     "title": "automatic 30s background retry for a save that never reached the shared folder"
-  },
-  {
-    "version": "v134.4",
-    "date": "2026-09-09",
-    "bucket": "feature",
-    "scope": "answers",
-    "title": "local IndexedDB backup for saved answers, reconciled on load and every 60s; Fix (history): stop re-discovering the same name-too-long path limit on every save"
   }
 ];

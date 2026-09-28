@@ -5252,9 +5252,10 @@ grep -rn "STAGE_LABELS_AR\s*[:=]\s*{" src --include=*.ts --include=*.tsx
 grep -rn "certScanPorts" src --include=*.ts --include=*.tsx | grep -v "\.test\."
 grep -rn "computeWorkingDaysForDeadline\|countWorkingDays" src --include=*.ts | grep -v "\.test\."
 grep -n "SAMPLING_ALGORITHM_VERSION" src/data/sampling/sampleTypes.ts
-git diff 0780a9a -- src/data/sampling/sampleTypes.ts src/data/sampling/sampleAlgorithm.ts
+C_START=$(git log --format=%H -1 --grep="Add (stages): shared canonical stage labels")
+git diff "$C_START~1" -- src/data/sampling/sampleTypes.ts src/data/sampling/sampleAlgorithm.ts
 ```
-Expected: `STAGE_LABELS_AR = {` defined only in `src/data/population/stageLabels.ts`; `certScanPorts` in `populationConfig.ts`, `populationProcessingTypes.ts`, `populationProcessor.ts`, `Population/index.tsx`, `MappingSettingsModal.tsx`; `countWorkingDays` defined once in `src/utils/workingDays.ts` and used by `distributionDerivation.ts`; `SAMPLING_ALGORITHM_VERSION` unchanged and `git diff` of the two sampling files empty.
+Expected: `STAGE_LABELS_AR = {` defined only in `src/data/population/stageLabels.ts`; `certScanPorts` in `populationConfig.ts`, `populationProcessingTypes.ts`, `populationProcessor.ts`, `Population/index.tsx`, `MappingSettingsModal.tsx`; `countWorkingDays` defined once in `src/utils/workingDays.ts` and used by `distributionDerivation.ts`; `SAMPLING_ALGORITHM_VERSION` unchanged and `git diff` of the two sampling files since the commit before Task 1 empty.
 
 - [ ] **Step 4: Report**
 
@@ -5266,3 +5267,22 @@ https://claude.ai/code/session_01NU4UP8LM3qkAnTNccmKZEJ
 ```
 
 ---
+
+## Self-Review
+
+**Dry run.** Every task's code in this plan was applied verbatim, in order, to a throwaway worktree of `0780a9a` (with the sed steps and deliberate pin updates exactly as written). Result: `tsc -b` clean; full `vitest run` 499 files / 4569 tests passing; `lint:ci`, `check:complexity` (XrayReferrals still ≤ 1450 lines), `check:hex-literals`, `build` and `check:bundle-size` all green. Each task's "run it to verify it fails" expectation was confirmed against the pre-change code for Tasks 3, 5, 7, 9 and 11. Two additional pins surfaced by the dry run are already folded into their tasks: `deck2.test.ts`'s `reversedGapModel` suite (Task 3, edit f) and `stagePortStats.test.ts`'s unknown-bucket assertion (Task 4).
+
+**Spec coverage (Workstream C).**
+- C1 export `STAGE_LABELS_AR` / `STAGE_KEY_ORDER` / `compareStageKeys` → Task 1 (in `stageLabels.ts`, re-exported by `stageHelpers.ts`).
+- C1 every grouping keys by `getStageKey(stage, workspace stageMappings)`, Arabic, canonical order: `executiveKpiProfiles.ts:185-199` → Task 3; `distributionCoverageModel.ts:98-100,158` → Task 3; `managementModel.ts:94-126,175` → Task 3; `aggregates.ts:413` via `decisionFactTable.ts:126` → Task 3 (fact table deliberately left raw, deviation 6); workspace mappings reach reports → Tasks 3–4 (deviation 1).
+- C1 `sampleStorage.ts:179` → Task 5. Employee table stage cells `subComponents.tsx:47`, `XrayInspectionResults.tsx:91` → Task 7 (deviation 5).
+- C1 duplicate maps deleted/replaced; worker copy → Task 6 (worker imports `stageLabels.ts`; deviation 3, so the "equality test where a copy must remain" becomes the no-copy guard test).
+- C1 deck2 `levelIndexForStage` → Task 4 (resolves from canonical key; deviation 2). Snapshot deck2/document/workbook first → Task 2, reviewed in Tasks 3–4.
+- C1 tests "raw `FIRST_STAGE`/`SECOND_STAG` rows produce Arabic labels in first→fourth order in each model" → Task 3 `stageCanonicalOrder.test.ts` (profiles, allocations, coverage, management, aggregates, model threading) + Task 4 deck2 test.
+- C2 `certScanPorts` in `config.json`, load-default/merge, additive optional `[]` → Task 8. Admin port picker reusing the restriction modal UI → Task 10. Processing union rule → Task 9 (no `SAMPLING_ALGORITHM_VERSION` bump; deviation 7). Filters: queue chip composing with case chips + `certScanStatus` status-filter column in DataTable views → Task 11; Population Browse worker + fallback → Task 12. Tests: flagged port → all CertScan, union with list, unflagged unaffected (Task 9); filter predicates (Tasks 11–12); config round-trip with legacy config (Task 8).
+- C3 `countWorkingDays` in `src/utils/` (one definition) → Task 13. Quota from assignment facts, working days Sun–Thu, deadline last day − 3, start = first `assigned` event, min 1 working day, frozen except on assigned-count change; `deriveEmployeeQuotasWithFacts` → Task 14 (+ `DERIVE_VERSION` 5; deviation 8). Mirror writer → Task 14 (docs + regression test; no logic change needed). Tile strings to label keys → Task 15. Tests: assigned on the 4th / deadline the 28th → 19 working days; unchanged after completions and across days; changes after reassignment; past deadline → floor of 1 (Task 14).
+- Out of scope respected: no preference files moved, no port-partitioned storage, no retroactive CertScan re-flagging, no holiday calendar.
+
+**Placeholder scan.** No "TBD", "TODO", "similar to Task N" or unspecified code. Every edit gives verbatim Before/After or a complete new file; the only non-verbatim steps are the two `sed` commands (Tasks 4 and 14), each followed by an exact expected count.
+
+**Name consistency.** `stageLabels.ts` exports (`STAGE_KEY_ORDER`, `STAGE_COUNT_KEY_ORDER`, `STAGE_LABELS_AR`, `STAGE_UNKNOWN_LABEL`, `isCanonicalStageKey`, `stageLabelForKey`, `compareStageKeys`, `stageLabelRank`) and `stageHelpers.stageBucketLabel` are used with the same names in Tasks 3, 4, 5, 6, 7. `certScanFilter.ts` (`CertScanFilter`, `CERTSCAN_FILTERS`, `CertScanFilterCounts`, `matchesCertScanFilter`, `filterByCertScan`, `countCertScanFilters`, `CERTSCAN_STATUS_COLUMN`, `certScanFilterFromColumnFilters`, `withCertScanFilter`) matches across Tasks 11–12. Label keys `certscan_filter_*` (Task 11, reused by Task 12 and `certScanColumn.ts`), `p2_certscan_ports_*` (Task 10), `ew_quota_tile_*` (Task 15) are each defined once. `computeWorkingDaysForDeadline` / `countWorkingDays` / `DERIVE_VERSION = 5` match across Tasks 13–14 and the Task 16 audit.
