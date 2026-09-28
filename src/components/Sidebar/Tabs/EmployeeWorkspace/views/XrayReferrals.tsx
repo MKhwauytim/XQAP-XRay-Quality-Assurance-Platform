@@ -135,6 +135,7 @@ import {
 import { useCaseFilter } from "./XrayReferrals/caseFilter";
 import { buildAnswerStatusFilter } from "./XrayReferrals/answerStatusFilter";
 import { createQueueSelection } from "./XrayReferrals/queueSelection";
+import { useLocalSubmissionGuard } from "./XrayReferrals/localSubmissions";
 import QueueSplitResizer from "./XrayReferrals/QueueSplitResizer";
 import PendingCorrections from "./XrayReferrals/PendingCorrections";
 import { DEFAULT_QUEUE_SPLIT } from "../../../../../data/preferences/queueSplitStore";
@@ -471,11 +472,13 @@ function createSaveAnswerHandler(deps: {
    *  month-switch guard and the vanished-row draft retention must stop
    *  treating them as work at risk. */
   setDirtyEntryId: (id: string | null) => void;
+  /** A1: remember this successful submit so a stale in-flight reload cannot downgrade it. */
+  recordLocalSubmission: (item: ItemAnswer) => void;
 }) {
   const {
     directoryHandle, folderForRow, username, role, activeTpl, selMonth,
     canSubmitAnswers, canAnswerOnBehalf, setAnswers, setStatusMsg,
-    ownBroadcastRef, setDirtyEntryId,
+    ownBroadcastRef, setDirtyEntryId, recordLocalSubmission,
   } = deps;
   return async function handleSave(
     xrayImageId: string, ans: FieldAnswer[], forUser: string
@@ -531,6 +534,7 @@ function createSaveAnswerHandler(deps: {
               ? { assignee: forUser, templateId: activeTpl.templateId }
               : { templateId: activeTpl.templateId },
           });
+        recordLocalSubmission(item);
         setAnswers((prev) => [
           ...prev.filter((a) => !(a.xrayImageId === xrayImageId && a.answeredBy === forUser)),
           item,
@@ -1214,6 +1218,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   // Bug (load-token): guards a slow load for a previously-selected month from
   // clobbering a later selection — including the truthy→"" empty transition.
   const loadTokenRef = useRef(0);
+  const localSubmissions = useLocalSubmissionGuard();
   // Boot-progress reporting: only the very first data-fetching pass of this
   // component's lifetime reports to the post-login checklist (bootProgress.ts)
   // -- every later call (a real month switch, which also re-runs the mount
@@ -1248,6 +1253,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     // stale older loads, or a truthy→"" selMonth transition would let an in-flight
     // load commit stale rows over the empty-ready state.
     const token = ++loadTokenRef.current;
+    const loadGeneration = localSubmissions.beginLoad();
     if (!selMonth) return;
     // `silent` is set only by the background/manual data-refresh signal below, never
     // by a real month/user change. Flipping loadState to "loading" unmounts the whole
@@ -1367,7 +1373,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         setPendingReplacementIds(pendingReplacementIds);
         setSampleMaster(sample);
         setMyQuota(quota);
-        setAnswers(answerItems);
+        setAnswers(localSubmissions.settle(answerItems, loadGeneration));
         setLoadState("ready");
       };
 
@@ -1478,7 +1484,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       }
       setLoadState("error");
     }
-  }, [directoryHandle, selMonth, username, canSeeAll]);
+  }, [directoryHandle, selMonth, username, canSeeAll, localSubmissions]);
   /* eslint-enable react-hooks/preserve-manual-memoization */
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load; setState fires inside loadData's async callback, not synchronously in the effect body
@@ -1511,6 +1517,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     directoryHandle, folderForRow, username, role, activeTpl, selMonth,
     canSubmitAnswers, canAnswerOnBehalf, setAnswers, setStatusMsg,
     ownBroadcastRef: ownAnswerBroadcastRef, setDirtyEntryId,
+    recordLocalSubmission: localSubmissions.record,
   });
 
   // Both reopen handlers live at module scope (createReopenHandlers, above) to
