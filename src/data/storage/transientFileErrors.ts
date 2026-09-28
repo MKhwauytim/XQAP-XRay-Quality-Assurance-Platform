@@ -2,7 +2,7 @@ import type { DirectoryHandleLike } from "./fileSystemAccess";
 import { logError } from "./errorLogger";
 // Safe direction: errorCodes.ts imports only labelsStore + errorLogger, so it
 // cannot import back into this module and no cycle is possible.
-import { tagError, type ErrorCode } from "./errorCodes";
+import { isSafeBrowsingAbortError, tagError, type ErrorCode } from "./errorCodes";
 // operationDeadline.ts has no imports of its own, so this adds no cycle either.
 import { nextRetryDelayMs, type OperationDeadline } from "./operationDeadline";
 
@@ -143,7 +143,11 @@ export function isTransientWriteError(error: unknown): boolean {
     isNotFoundError(error) ||
     isNotReadableError(error) ||
     isLockContentionError(error) ||
-    isSnapshotStaleError(error)
+    isSnapshotStaleError(error) ||
+    // Chromium's after-write Safe Browsing check failed inside close(); the
+    // destination was never replaced, so re-running the whole write is safe.
+    // Message-gated so the picker's AbortError is not swept in.
+    isSafeBrowsingAbortError(error)
   );
 }
 
