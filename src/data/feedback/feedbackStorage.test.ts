@@ -27,6 +27,7 @@ import {
   migrateLegacyMessages,
   replyToFeedback,
   submitFeedback,
+  summarizeFeedbackThread,
   type FeedbackMessage,
   type FeedbackThread,
 } from "./feedbackStorage";
@@ -774,5 +775,31 @@ describe("feedbackStorage — finalizeLegacyMigration", () => {
     const feedbackDir = await systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.feedback, { create: false });
     await expect(feedbackDir.getFileHandle("messages.json", { create: false })).resolves.toBeDefined();
     await expect(feedbackDir.getFileHandle(FEEDBACK_MESSAGES_ARCHIVED_FILE, { create: false })).rejects.toThrow();
+  });
+});
+
+describe("feedbackStorage — writes return what they wrote (Workstream B)", () => {
+  it("submitFeedback and replyToFeedback return the thread exactly as stored", async () => {
+    const root = makeRoot();
+    const created = await submitFeedback(root, { from: "sara", role: "employee", category: "issue", text: "خطأ" });
+    expect(await loadThread(root, created.id)).toMatchObject({ id: created.id, text: "خطأ", status: "open" });
+
+    const updated = await replyToFeedback(
+      root,
+      created.id,
+      { from: "admin", role: "admin", text: "تم", timestamp: "2026-09-28T10:00:00.000Z" },
+      true
+    );
+    expect(updated.id).toBe(created.id);
+    expect(updated.status).toBe("resolved");
+    expect(updated.replies).toHaveLength(1);
+    expect(updated.revision).toBe((await loadThread(root, created.id))!.revision);
+  });
+
+  it("summarizeFeedbackThread matches the row listThreadSummaries reports", async () => {
+    const root = makeRoot();
+    const created = await createThread(root, { from: "sara", role: "employee", category: "inquiry", text: "سؤال\nتفاصيل" });
+    const [listed] = await listThreadSummaries(root);
+    expect(summarizeFeedbackThread(created)).toEqual(listed);
   });
 });

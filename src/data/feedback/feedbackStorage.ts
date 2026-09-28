@@ -310,6 +310,15 @@ async function updateThreadsIndex(
   }
 }
 
+/**
+ * The index row for `thread` as it stands now -- what `listThreadSummaries`
+ * would report for it. Exported so the widget can apply a thread it just wrote
+ * to its list without re-reading the index.
+ */
+export function summarizeFeedbackThread(thread: FeedbackThread): FeedbackThreadSummary {
+  return summarize(thread, lastActivityOf(thread));
+}
+
 function summarize(thread: FeedbackThread, lastActivityAt: string): FeedbackThreadSummary {
   return {
     threadId: thread.id,
@@ -956,20 +965,29 @@ async function ensureMigrated(dir: DirectoryHandleLike): Promise<void> {
   }
 }
 
-/** Compatibility wrapper — the widget, the sync tests and the unread tests all call this name. */
+/**
+ * Compatibility wrapper — the widget, the sync tests and the unread tests all
+ * call this name. Returns the thread exactly as written so the caller can
+ * apply it optimistically instead of re-reading the feedback directory.
+ */
 export async function submitFeedback(
   dir: DirectoryHandleLike,
   payload: { from: string; role: string; category: FeedbackCategory; text: string }
-): Promise<void> {
-  await createThread(dir, payload);
+): Promise<FeedbackThread> {
+  return createThread(dir, payload);
 }
 
-/** Compatibility wrapper — the widget, the sync tests and the unread tests all call this name. */
+/**
+ * Compatibility wrapper — the widget, the sync tests and the unread tests all
+ * call this name. Returns the verified, just-written thread (it used to be
+ * discarded, which forced the widget to re-read the whole directory to show
+ * the reply it had just posted).
+ */
 export async function replyToFeedback(
   dir: DirectoryHandleLike,
   messageId: string,
   reply: FeedbackReply,
   resolve: boolean
-): Promise<void> {
-  await appendReply(dir, messageId, reply, resolve);
+): Promise<FeedbackThread> {
+  return appendReply(dir, messageId, reply, resolve);
 }
