@@ -12,9 +12,9 @@ import {
   upsertItemAnswer,
   upsertItemAnswerOnBehalf,
 } from "../../../../../data/answers/answerStorage";
-import { clearAnswerDraft } from "../../../../../data/answers/answerDraftStore";
+import { clearAnswerDraftAndLegacy } from "../../../../../data/answers/answerDraftStore";
 import { pickAutoSelectId, readLastOpenSample, rememberLastOpenSample } from "../../../../../data/answers/lastOpenSampleStore";
-import { answerFolderForEntry, panelDraftKey } from "./XrayReferrals/answerRouting";
+import { answerFolderForEntry, legacyPanelDraftKey, panelDraftKey } from "./XrayReferrals/answerRouting";
 import { reopenSubmittedAnswer } from "../../../../../data/answers/reopenAnswer";
 import { MonthClosedError } from "../../../../../data/population/monthLock";
 import { getLabels } from "../../../../../data/labels/labelsStore";
@@ -550,7 +550,7 @@ function createSaveAnswerHandler(deps: {
         // else: `onSave` resolving does not mean the write succeeded (the
         // failure branch below resolves too), so the panel cannot do this for
         // itself without throwing away the very work it exists to protect.
-        clearAnswerDraft(panelDraftKey(entry, selMonth));
+        clearAnswerDraftAndLegacy(panelDraftKey(entry, selMonth), legacyPanelDraftKey(entry, selMonth));
         setStatusMsg({ type: "ok", text: "تم التقديم." });
         // Tell the OTHER mounted views. Without this a submitted answer stayed
         // invisible to the approval desk, «نتائج فحص الأشعة» and Reports — all
@@ -2165,6 +2165,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                   hasPrevSample={prevNavEntry !== undefined}
                   hasNextSample={nextNavEntry !== undefined}
                   draftKey={panelDraftKey(panelEntry, selMonth)}
+                  legacyDraftKey={legacyPanelDraftKey(panelEntry, selMonth)}
                   onSave={(ans) => handleSave(panelEntry, ans)}
                   onReplace={
                     canOpenReplacementDialog(panelEntry, username, canRequestReplacement, pendingReplacementIds)

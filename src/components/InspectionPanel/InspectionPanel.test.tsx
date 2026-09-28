@@ -3,7 +3,12 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, within, cleanup } from "@testing-library/react";
 import InspectionPanel from "./index";
 import { DEFAULT_LABELS } from "../../data/labels/labelsStore";
-import { __resetAnswerDraftHealthForTests } from "../../data/answers/answerDraftStore";
+import {
+  __resetAnswerDraftHealthForTests,
+  isAnswerDraftPersistFailing,
+  loadAnswerDraft,
+  saveAnswerDraft,
+} from "../../data/answers/answerDraftStore";
 import type { DistributionEntry } from "../../data/distribution/distributionTypes";
 import type { FieldAnswer } from "../../data/answers/answerTypes";
 import type { TemplateField, TemplateSchema } from "../../data/templates/templateTypes";
@@ -540,5 +545,75 @@ describe("InspectionPanel — draft that cannot be kept (A1)", () => {
     fireEvent.change(container.querySelector<HTMLInputElement>("#ipf-n1")!, { target: { value: "نص" } });
 
     expect(await screen.findByText(DEFAULT_LABELS.ip_msg_draft_not_persisted)).toBeInTheDocument();
+  });
+
+  it("does not warn on an already-submitted row", () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("full", "QuotaExceededError");
+    });
+    // Fail — and pick this up in the health flag — BEFORE mount, so the
+    // panel's very first render already reflects a true flag (the
+    // subscription's own update is an async queueMicrotask notification a
+    // synchronous assertion right after mount would otherwise race).
+    saveAnswerDraft("xray_answer_draft_v1:probe", { p: "x" });
+    expect(isAnswerDraftPersistFailing()).toBe(true);
+
+    const template = makeTemplate([field({ fieldId: "n1", label: "ملاحظة", type: "text" })]);
+    render(
+      <InspectionPanel
+        entry={{ ...makeEntry(), status: "completed" }}
+        template={template}
+        savedAnswer={{
+          xrayImageId: "IMG-001",
+          templateId: "tpl-1",
+          templateVersion: 1,
+          answers: [{ fieldId: "n1", value: "سابقاً" }],
+          lastSavedAt: "2026-08-01T00:00:00.000Z",
+          submittedAt: "2026-08-01T00:00:00.000Z",
+          answeredBy: "emp1",
+          status: "submitted",
+        }}
+        readonly={false}
+        onClose={() => {}}
+        onSave={async () => {}}
+        draftKey="xray_answer_draft_v1:m::IMG-001::emp1"
+      />
+    );
+
+    expect(screen.queryByText(DEFAULT_LABELS.ip_msg_draft_not_persisted)).toBeNull();
+  });
+});
+
+describe("InspectionPanel — legacy draft key fallback and migration (A1 fix round 1)", () => {
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it("seeds from the legacy key when the canonical key has nothing, then migrates on the next keystroke", () => {
+    const CANONICAL = "xray_answer_draft_v1:adhoc-imp-1::ADHOC-1::emp1";
+    const LEGACY = "xray_answer_draft_v1:5-may-2026::ADHOC-1::emp1";
+    saveAnswerDraft(LEGACY, { n1: "من المفتاح القديم" });
+
+    const template = makeTemplate([field({ fieldId: "n1", label: "ملاحظة", type: "text" })]);
+    const { container } = render(
+      <InspectionPanel
+        entry={makeEntry()}
+        template={template}
+        savedAnswer={null}
+        readonly={false}
+        onClose={() => {}}
+        onSave={async () => {}}
+        draftKey={CANONICAL}
+        legacyDraftKey={LEGACY}
+      />
+    );
+
+    const input = container.querySelector<HTMLInputElement>("#ipf-n1")!;
+    expect(input.value).toBe("من المفتاح القديم");
+
+    fireEvent.change(input, { target: { value: "معدّل" } });
+
+    expect(loadAnswerDraft(LEGACY)).toBeNull();
+    expect(loadAnswerDraft(CANONICAL)).toEqual({ n1: "معدّل" });
   });
 });

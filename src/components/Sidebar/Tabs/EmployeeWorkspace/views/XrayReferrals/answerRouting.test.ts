@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { answerDraftKey } from "../../../../../../data/answers/answerDraftStore";
 import { adhocMonthFolder } from "../../../../../../data/adhocImport/adhocImportModel";
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
-import { answerFolderForEntry, panelDraftKey } from "./answerRouting";
+import { answerFolderForEntry, legacyPanelDraftKey, panelDraftKey } from "./answerRouting";
 
 const base: DistributionEntry = {
   xrayImageId: "IMG-1",
@@ -42,5 +42,26 @@ describe("answer routing is derived from the row itself (A1)", () => {
     const adhoc = { ...base, xrayImageId: "ADHOC-imp-1-XR-9", adhocImportId: "imp-1", adhocFileName: "f.xlsx" } as DistributionEntry;
     expect(answerFolderForEntry(adhoc, "5-may-2026")).toBe(adhocMonthFolder("imp-1"));
     expect(panelDraftKey(adhoc, "6-june-2026")).toBe(answerDraftKey(adhocMonthFolder("imp-1"), "ADHOC-imp-1-XR-9", "emp1"));
+  });
+});
+
+describe("legacyPanelDraftKey (A1 fix round 1)", () => {
+  it("is null for a real (non-ad-hoc) row — its key never diverged", () => {
+    expect(legacyPanelDraftKey(base, "5-may-2026")).toBeNull();
+    expect(legacyPanelDraftKey(base, "")).toBeNull();
+  });
+
+  it("is the old selected-month-keyed draft key for an ad-hoc row", () => {
+    const adhoc = { ...base, xrayImageId: "ADHOC-imp-1-XR-9", adhocImportId: "imp-1", adhocFileName: "f.xlsx" } as DistributionEntry;
+    expect(legacyPanelDraftKey(adhoc, "5-may-2026")).toBe(
+      answerDraftKey("5-may-2026", "ADHOC-imp-1-XR-9", "emp1")
+    );
+    expect(legacyPanelDraftKey(adhoc, "5-may-2026")).not.toBe(panelDraftKey(adhoc, "5-may-2026"));
+  });
+
+  it("still applies when no month is selected at all (selectedMonth === \"\")", () => {
+    const adhoc = { ...base, xrayImageId: "ADHOC-imp-1-XR-9", adhocImportId: "imp-1", adhocFileName: "f.xlsx" } as DistributionEntry;
+    expect(legacyPanelDraftKey(adhoc, "")).toBe(answerDraftKey("", "ADHOC-imp-1-XR-9", "emp1"));
+    expect(legacyPanelDraftKey(adhoc, "")).not.toBe(panelDraftKey(adhoc, ""));
   });
 });

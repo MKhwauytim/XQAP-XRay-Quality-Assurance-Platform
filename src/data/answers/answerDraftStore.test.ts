@@ -14,10 +14,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   answerDraftKey,
   clearAnswerDraft,
+  clearAnswerDraftAndLegacy,
   isAnswerDraftPersistFailing,
   loadAnswerDraft,
+  loadAnswerDraftWithLegacyFallback,
   pruneAnswerDrafts,
   saveAnswerDraft,
+  saveAnswerDraftMigratingLegacy,
   subscribeAnswerDraftHealth,
   __resetAnswerDraftHealthForTests,
 } from "./answerDraftStore";
@@ -109,5 +112,81 @@ describe("draft persistence health (A1)", () => {
     expect(saveAnswerDraft("xray_answer_draft_v1:m::IMG-1::emp1", { note: "x" })).toBe(true);
     expect(isAnswerDraftPersistFailing()).toBe(false);
     stop();
+  });
+});
+
+describe("legacy-key fallback and migration (A1 fix round 1)", () => {
+  const LEGACY_KEY = answerDraftKey("5-may-2026", "ADHOC-imp-1-XR-9", "emp-1");
+  const CANONICAL_KEY = answerDraftKey("adhoc-imp-1", "ADHOC-imp-1-XR-9", "emp-1");
+
+  it("finds a draft saved under the old key when the canonical key has nothing", () => {
+    saveAnswerDraft(LEGACY_KEY, { f1: "old-key-draft" });
+
+    expect(loadAnswerDraftWithLegacyFallback(CANONICAL_KEY, LEGACY_KEY)).toEqual({
+      f1: "old-key-draft",
+    });
+  });
+
+  it("prefers the canonical key when both have something", () => {
+    saveAnswerDraft(LEGACY_KEY, { f1: "old" });
+    saveAnswerDraft(CANONICAL_KEY, { f1: "new" });
+
+    expect(loadAnswerDraftWithLegacyFallback(CANONICAL_KEY, LEGACY_KEY)).toEqual({ f1: "new" });
+  });
+
+  it("returns null when neither key has anything, and tolerates a null legacy key", () => {
+    expect(loadAnswerDraftWithLegacyFallback(CANONICAL_KEY, LEGACY_KEY)).toBeNull();
+    expect(loadAnswerDraftWithLegacyFallback(CANONICAL_KEY, null)).toBeNull();
+  });
+
+  it("migrates a legacy draft onto the canonical key on the first successful write", () => {
+    saveAnswerDraft(LEGACY_KEY, { f1: "old-key-draft" });
+
+    const ok = saveAnswerDraftMigratingLegacy(CANONICAL_KEY, LEGACY_KEY, { f1: "typed" });
+
+    expect(ok).toBe(true);
+    expect(loadAnswerDraft(LEGACY_KEY)).toBeNull();
+    expect(loadAnswerDraft(CANONICAL_KEY)).toEqual({ f1: "typed" });
+  });
+
+  it("leaves the legacy draft alone when the canonical write is refused", () => {
+    saveAnswerDraft(LEGACY_KEY, { f1: "old-key-draft" });
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = () => {
+      throw new Error("QuotaExceededError");
+    };
+    try {
+      const ok = saveAnswerDraftMigratingLegacy(CANONICAL_KEY, LEGACY_KEY, { f1: "typed" });
+      expect(ok).toBe(false);
+    } finally {
+      Storage.prototype.setItem = original;
+    }
+
+    expect(loadAnswerDraft(LEGACY_KEY)).toEqual({ f1: "old-key-draft" });
+  });
+
+  it("clears both the canonical and legacy keys once the answer is genuinely on disk", () => {
+    saveAnswerDraft(LEGACY_KEY, { f1: "old" });
+    saveAnswerDraft(CANONICAL_KEY, { f1: "new" });
+
+    clearAnswerDraftAndLegacy(CANONICAL_KEY, LEGACY_KEY);
+
+    expect(loadAnswerDraft(LEGACY_KEY)).toBeNull();
+    expect(loadAnswerDraft(CANONICAL_KEY)).toBeNull();
+  });
+
+  it("clearAnswerDraftAndLegacy tolerates a null legacy key (the non-ad-hoc case)", () => {
+    saveAnswerDraft(CANONICAL_KEY, { f1: "new" });
+    expect(() => clearAnswerDraftAndLegacy(CANONICAL_KEY, null)).not.toThrow();
+    expect(loadAnswerDraft(CANONICAL_KEY)).toBeNull();
+  });
+
+  it("still finds an old-key draft saved when no month at all was selected (selectedMonth === \"\")", () => {
+    const emptyMonthLegacyKey = answerDraftKey("", "ADHOC-imp-1-XR-9", "emp-1");
+    saveAnswerDraft(emptyMonthLegacyKey, { f1: "no-month-draft" });
+
+    expect(loadAnswerDraftWithLegacyFallback(CANONICAL_KEY, emptyMonthLegacyKey)).toEqual({
+      f1: "no-month-draft",
+    });
   });
 });

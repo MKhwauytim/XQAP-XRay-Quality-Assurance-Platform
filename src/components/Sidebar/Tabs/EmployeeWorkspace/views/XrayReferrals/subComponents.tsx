@@ -599,6 +599,7 @@ export function SampleDetailPanel({
   onRequestReopen,
   onDraftDirty,
   draftKey,
+  legacyDraftKey,
   onPrevSample,
   onNextSample,
   hasPrevSample,
@@ -630,6 +631,8 @@ export function SampleDetailPanel({
   hasNextSample?: boolean;
   /** Forwarded straight through — see InspectionPanel's own docblock. */
   draftKey?: string;
+  /** Forwarded straight through — see InspectionPanel's own docblock (A1 fix round 1). */
+  legacyDraftKey?: string | null;
 }) {
   return (
     <InspectionPanel
@@ -646,6 +649,7 @@ export function SampleDetailPanel({
       onRequestReopen={onRequestReopen}
       onDraftDirty={onDraftDirty}
       draftKey={draftKey}
+      legacyDraftKey={legacyDraftKey}
       onPrevSample={onPrevSample}
       onNextSample={onNextSample}
       hasPrevSample={hasPrevSample}

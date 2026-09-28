@@ -114,7 +114,7 @@ export function isAnswerDraftPersistFailing(): boolean {
 
 /** @internal test-only */
 export function __resetAnswerDraftHealthForTests(): void {
-  draftPersistFailing = false;
+  setDraftPersistFailing(false);
 }
 
 /**
@@ -153,6 +153,49 @@ export function clearAnswerDraft(key: string): void {
   } catch {
     // Nothing to do; a stale draft expires on its own via DRAFT_TTL_MS.
   }
+}
+
+/**
+ * `loadAnswerDraft`, but for a row whose canonical key changed under it (A1
+ * fix round 1: an ad-hoc row's draft used to be keyed on the selected month
+ * rather than its own store). Prefers the canonical key — the only one a
+ * fresh save ever writes under — and only reads `legacyKey` when the
+ * canonical key has nothing, so a draft saved before this fix is still found.
+ */
+export function loadAnswerDraftWithLegacyFallback(
+  canonicalKey: string,
+  legacyKey: string | null
+): AnswerDraftValues | null {
+  const primary = loadAnswerDraft(canonicalKey);
+  if (primary) return primary;
+  return legacyKey ? loadAnswerDraft(legacyKey) : null;
+}
+
+/**
+ * `saveAnswerDraft` under the canonical key, then migrates off `legacyKey`:
+ * once the canonical write has succeeded, a stale legacy copy would only
+ * ever resurrect over it on a later mount, so it is removed. Left alone on a
+ * refused write — the legacy copy is still the only durable copy of the
+ * draft until a canonical write actually lands.
+ */
+export function saveAnswerDraftMigratingLegacy(
+  canonicalKey: string,
+  legacyKey: string | null,
+  values: AnswerDraftValues
+): boolean {
+  const ok = saveAnswerDraft(canonicalKey, values);
+  if (ok && legacyKey) clearAnswerDraft(legacyKey);
+  return ok;
+}
+
+/**
+ * Drop both the canonical key and, if this row has one, its legacy key —
+ * used once an answer is genuinely on disk, so neither copy can resurrect
+ * over the submitted answer on a later mount.
+ */
+export function clearAnswerDraftAndLegacy(canonicalKey: string, legacyKey: string | null): void {
+  clearAnswerDraft(canonicalKey);
+  if (legacyKey) clearAnswerDraft(legacyKey);
 }
 
 /**
