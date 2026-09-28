@@ -747,32 +747,22 @@ function createOpenReassignModal(deps: {
 }
 
 /**
- * The "متابعة العمل" figures. Oversight users in the "الكل" view read the whole
- * workspace; everyone else reads only what is assigned to them. Module-level so
- * the component body stays inside the repo's `max-lines-per-function` budget.
+ * The «متابعة العمل» figures, over EXACTLY the rows the queue table shows: the
+ * picked scope (everyone, one named employee, or the reader's own rows)
+ * narrowed by the active case chip. It used to read the scope BEFORE the chips
+ * (and, for employees, re-filter every row by username), so picking
+ * «حالات استثنائية» changed the table but not the strip — field report
+ * 2026-09-28. The daily-quota tile is not derived here: it is a property of
+ * the whole assignment and stays unfiltered. Module-level so the component
+ * body stays inside the repo's `max-lines-per-function` budget.
  */
 function computePersonalStats(input: {
-  allEntries: DistributionEntry[];
-  entries: DistributionEntry[];
-  /** The picked SCOPE (everyone, or one named employee), before the case-filter
-   *  chips narrow it — "متابعة العمل" answers "how much work is in the queue I
-   *  am looking at", which a temporary view filter must not silently rewrite.
-   *  DELIBERATE consequence of the employee picker: for an oversight user these
-   *  figures follow the picked employee, so the strip reports THAT person's
-   *  workload, not the reader's. That is the point of picking them, and the
-   *  strip is relabelled to name whose numbers they are (ReferralStatsStrip's
-   *  "employee" scope) rather than left claiming "إحصائياتي". */
-  scopedEntries: DistributionEntry[];
-  canSeeAll: boolean;
-  username: string;
+  source: DistributionEntry[];
   answersMap: Map<string, ItemAnswer>;
   template: TemplateSchema | null;
   templatesById?: ReadonlyMap<string, TemplateSchema>;
 }): PersonalStats {
-  const { allEntries, entries, scopedEntries, canSeeAll, username, answersMap, template, templatesById } = input;
-  const source = canSeeAll
-    ? scopedEntries
-    : (allEntries.length > 0 ? allEntries : entries).filter((entry) => entry.assignedTo === username);
+  const { source, answersMap, template, templatesById } = input;
   const onHold = source.filter((entry) => isOnHoldEntry(entry, answersMap, template, templatesById)).length;
   // isStudyCompleted counts a "لا يوجد صورة" submission as completed too — it
   // answers "is this row touched/done in a generic sense" for row styling, not
@@ -1218,10 +1208,8 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     [panelEntry, username, answersMap, canSubmitAnswers, canAnswerOnBehalf]
   );
 
-  const personalStats = useMemo<PersonalStats>(
-    () => computePersonalStats({ allEntries, entries, scopedEntries, canSeeAll, username, answersMap, template: activeTpl, templatesById }),
-    [allEntries, entries, scopedEntries, canSeeAll, username, answersMap, activeTpl, templatesById]
-  );
+  const personalStats = useMemo<PersonalStats>(() => computePersonalStats({ source: displayEntries, answersMap, template: activeTpl, templatesById }),
+    [displayEntries, answersMap, activeTpl, templatesById]);
 
   // Bug (load-token): guards a slow load for a previously-selected month from
   // clobbering a later selection — including the truthy→"" empty transition.

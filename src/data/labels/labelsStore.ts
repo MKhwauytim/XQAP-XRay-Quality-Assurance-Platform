@@ -292,6 +292,11 @@ export const DEFAULT_LABELS = {
   ew_case_filter_adhoc:            "حالات استثنائية",
   ew_case_filter_empty:            "لا توجد حالات ضمن هذه التصفية. اختر «جميع الحالات» للعودة إلى القائمة كاملة.",
 
+  /** Appended to the «متابعة العمل» strip title while a case chip other than «جميع الحالات» is active. */
+  ew_stats_case_suffix:            " — {filter}",
+  ew_stats_case_risk_targeted:     "الحالات المستهدفة",
+  ew_stats_case_adhoc:             "الحالات الاستثنائية",
+
   // ── Pending (معلقة) export / correction re-import / bulk reopen ──────────
   // The three actions the owner asked for on top of the "لا يوجد صورة"
   // (no-image) queue: export every currently-معلقة row's identifying

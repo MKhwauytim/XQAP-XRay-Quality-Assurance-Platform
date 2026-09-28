@@ -578,3 +578,65 @@ describe("XrayReferrals case filter — unsaved drafts", () => {
     expect(screen.getByText(L.ew_draft_retained_notice)).toBeInTheDocument();
   });
 });
+
+/** A figure in the «متابعة العمل» strip. `done` is the first done-tone token, «مكتملة». */
+function statValue(tone: "total" | "done" | "pending"): string {
+  return document.querySelector(`.ew-ref-stat-token--${tone} strong`)?.textContent ?? "";
+}
+
+function stripTitle(): string {
+  return document.querySelector(".ew-ref-stats-title strong")?.textContent ?? "";
+}
+
+describe("XrayReferrals case filter — the «متابعة العمل» strip follows the chips", () => {
+  it("re-counts an employee's strip, and renames it, when a chip is picked", async () => {
+    await renderMixedQueue();
+
+    expect(statValue("total")).toBe("5");
+    expect(statValue("pending")).toBe("5");
+    expect(stripTitle()).toBe("متابعة العمل");
+
+    fireEvent.click(chip(L.ew_case_filter_risk_targeted));
+    await waitFor(() => expect(statValue("total")).toBe("4"));
+    expect(statValue("pending")).toBe("4");
+    expect(stripTitle()).toBe(
+      `متابعة العمل${L.ew_stats_case_suffix.replace("{filter}", L.ew_stats_case_risk_targeted)}`
+    );
+
+    fireEvent.click(chip(L.ew_case_filter_adhoc));
+    await waitFor(() => expect(statValue("total")).toBe("1"));
+    expect(stripTitle()).toBe(
+      `متابعة العمل${L.ew_stats_case_suffix.replace("{filter}", L.ew_stats_case_adhoc)}`
+    );
+
+    fireEvent.click(chip(L.ew_case_filter_all));
+    await waitFor(() => expect(statValue("total")).toBe("5"));
+    expect(stripTitle()).toBe("متابعة العمل");
+  });
+
+  it("re-counts an oversight user's whole-workspace strip when a chip is picked", async () => {
+    writeSession({ role: "supervisor", username: "malrogi", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+    const root = createMemoryDirectory("root");
+    await seedMonth(root, [
+      ["IMG-MINE-REGULAR", null, "malrogi"],
+      ["IMG-THEIRS-REGULAR", null, "emp-2"],
+    ]);
+    await seedAdhocAssignment(root, "malrogi");
+
+    render(<XrayReferrals directoryHandle={root} />);
+    await waitFor(() => expect(rowFor("IMG-MINE-REGULAR")).not.toBeNull());
+    pickScope(QUEUE_SCOPE_ALL);
+    await waitFor(() => expect(rowFor("IMG-THEIRS-REGULAR")).not.toBeNull());
+    expect(statValue("total")).toBe("3");
+
+    fireEvent.click(chip(L.ew_case_filter_adhoc));
+    await waitFor(() => expect(statValue("total")).toBe("1"));
+    expect(stripTitle()).toBe(
+      `متابعة العمل — جميع الموظفين${L.ew_stats_case_suffix.replace("{filter}", L.ew_stats_case_adhoc)}`
+    );
+
+    fireEvent.click(chip(L.ew_case_filter_risk_targeted));
+    await waitFor(() => expect(statValue("total")).toBe("2"));
+  });
+});

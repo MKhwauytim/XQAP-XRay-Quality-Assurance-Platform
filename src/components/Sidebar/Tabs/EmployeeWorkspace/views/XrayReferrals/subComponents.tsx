@@ -746,16 +746,17 @@ export function ReferralStatsStrip({
   username,
   scope = "own",
   scopeEmployeeName = "",
+  caseFilter = "all",
 }: {
   stats: PersonalStats;
   quota: PersonalQuota;
   username: string;
   /**
    * Whose numbers `stats` actually describes. An oversight user switched to the
-   * "الكل" view feeds this strip the WHOLE workspace's entries (see
-   * `personalStats` in XrayReferrals.tsx), so labelling it "إحصائياتي" there
-   * misattributed every figure to the current user. Defaults to "own", which is
-   * what a personal-scope user always sees.
+   * "الكل" view feeds this strip the WHOLE workspace's entries, narrowed by the
+   * active case chip (see `computePersonalStats` in XrayReferrals.tsx), so
+   * labelling it "إحصائياتي" there misattributed every figure to the current
+   * user. Defaults to "own", which is what a personal-scope user always sees.
    *
    * "employee" is the third case the scope picker introduced: the figures belong
    * to one NAMED other employee. It is neither "own" nor "all" — reusing either
@@ -765,6 +766,8 @@ export function ReferralStatsStrip({
   scope?: "own" | "all" | "employee";
   /** Display name behind the figures when `scope` is "employee". */
   scopeEmployeeName?: string;
+  /** The active case chip; the title names it so the reader knows the figures are narrowed. */
+  caseFilter?: CaseFilter;
 }) {
   const isAllScope = scope === "all";
   // True whenever the figures are NOT the reader's own — the quota caveat and
@@ -772,6 +775,12 @@ export function ReferralStatsStrip({
   const isForeignScope = scope !== "own";
   const L = useLabels();
   const named = (key: string): string => key.replace("{name}", scopeEmployeeName);
+  const caseSuffix =
+    caseFilter === "risk-targeted"
+      ? L.ew_stats_case_suffix.replace("{filter}", L.ew_stats_case_risk_targeted)
+      : caseFilter === "adhoc"
+        ? L.ew_stats_case_suffix.replace("{filter}", L.ew_stats_case_adhoc)
+        : "";
   const statsItems = [
     // The daily quota is always the CURRENT user's own frozen quota, never a
     // workspace aggregate, so it is disambiguated rather than relabelled when
@@ -806,6 +815,7 @@ export function ReferralStatsStrip({
           {scope === "employee"
             ? named(L.ew_queue_stats_employee_title)
             : isAllScope ? "متابعة العمل — جميع الموظفين" : "متابعة العمل"}
+          {caseSuffix}
         </strong>
       </div>
 
@@ -1281,6 +1291,7 @@ export function ReferralWorkspaceShell({
         username={username}
         scope={scope}
         scopeEmployeeName={scopeEmployeeName}
+        caseFilter={caseFilterValue}
       />
       {showingRetainedDraft && (
         <p className="ew-msg-warn" role="status">{L.ew_draft_retained_notice}</p>

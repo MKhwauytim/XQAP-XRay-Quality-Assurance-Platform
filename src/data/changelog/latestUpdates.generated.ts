@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v140.1",
+    "date": "2026-09-28",
+    "bucket": "fix",
+    "scope": "referrals",
+    "title": "the «متابعة العمل» strip follows the case-filter chips"
+  },
+  {
     "version": "v140.0",
     "date": "2026-09-28",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "workspace",
     "title": "stop logging XQ-WS-015 for the expected 'prompt' cold-start state"
-  },
-  {
-    "version": "v134.5",
-    "date": "2026-09-09",
-    "bucket": "feature",
-    "scope": "answers",
-    "title": "automatic 30s background retry for a save that never reached the shared folder"
   }
 ];
