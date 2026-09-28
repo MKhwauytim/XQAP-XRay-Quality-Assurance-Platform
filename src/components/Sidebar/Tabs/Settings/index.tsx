@@ -51,6 +51,7 @@ import { ErrorLogSection } from "./ErrorLogSection";
 import { StorageSection } from "./StorageSection";
 import { DecisionRepairSection } from "./DecisionRepairSection";
 import { TemplateRepairSection } from "./TemplateRepairSection";
+import { PopulationRecoverySection } from "./PopulationRecoverySection";
 import { AboutSection } from "./AboutSection";
 import { usePermissions } from "../../../../auth/usePermissions";
 
@@ -609,6 +610,7 @@ function SettingsPage() {
       <StorageSection />
       <DecisionRepairSection />
       <TemplateRepairSection />
+      <PopulationRecoverySection />
       <AboutSection />
     </div>
   );

@@ -11,6 +11,7 @@
 // `cancelled` flag guard exists to defend against. (Originally written against
 // `loadMonthPopulationFinal`, before §L replaced the effect's full-population read with a
 // manifest read — see the "lightweight manifest read" describe block further down.)
+import { DEFAULT_LABELS } from "../../../../data/labels/labelsStore";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
@@ -139,6 +140,7 @@ vi.mock("../../../../data/powerbiExport/exportManager", () => ({
   // spreading a non-tuple `unknown[]` into a zero-arg vi.fn() mock's inferred
   // call signature) without changing any test's observable behavior.
   runPowerBiExport: () => pbiExportMock.impl(),
+  runPowerBiExportDetailed: async () => ({ manifest: await pbiExportMock.impl(), snapshotRowCount: 0 }),
 }));
 
 // §N — the executive report builder (document+xlsx) that index.tsx dynamically
@@ -538,6 +540,61 @@ describe("Reports month-summary chips — lightweight manifest read, no employee
 // tests cover both the render-time gate (`can`, disables/explains) and the
 // handler-time gate (`canMutate`, re-checked defensively even if a control were
 // somehow left enabled), plus the digit-format and pending-month polish items.
+describe("Reports sample-snapshot banner (A2)", () => {
+  it("shows the banner as soon as the month loads when a sampled image is missing from the population", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+    const sampleFixture = {
+      rngSeed: "seed",
+      totalRequested: 2,
+      totalActual: 2,
+      certScanRequested: 0,
+      nonCertScanRequested: 2,
+      certScanActual: 0,
+      nonCertScanActual: 2,
+      portAllocations: [],
+      stageAllocations: [],
+      drawnAt: new Date().toISOString(),
+      drawnBy: "tester",
+      rows: [{ xrayImageId: "img-0" }, { xrayImageId: "img-9" }],
+    } as unknown as SampleMasterData;
+    sampleAnswerSpies.loadSampleMaster.mockResolvedValue(sampleFixture);
+
+    render(<ReportsTab />);
+    await act(async () => {
+      deferredManifestFor("4-april-2026").resolve(mockManifest(1));
+      deferredFor("4-april-2026").resolve(mockPop(1));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        DEFAULT_LABELS.report_sample_snapshot_banner.replace("{count}", "1")
+      );
+    });
+  });
+
+  it("shows no banner when every sampled image is in the population", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+    sampleAnswerSpies.loadSampleMaster.mockResolvedValue({
+      rngSeed: "seed", totalRequested: 1, totalActual: 1, certScanRequested: 0, nonCertScanRequested: 1,
+      certScanActual: 0, nonCertScanActual: 1, portAllocations: [], stageAllocations: [],
+      drawnAt: new Date().toISOString(), drawnBy: "tester", rows: [{ xrayImageId: "img-0" }],
+    } as unknown as SampleMasterData);
+
+    render(<ReportsTab />);
+    await act(async () => {
+      deferredManifestFor("4-april-2026").resolve(mockManifest(1));
+      deferredFor("4-april-2026").resolve(mockPop(1));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(screen.getByText("1 صورة")).toBeInTheDocument());
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
 describe("Reports export permission gating (B5)", () => {
   it("disables every export/generate control and explains why when the role cannot export (can=false)", async () => {
     const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;

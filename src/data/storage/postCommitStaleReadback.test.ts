@@ -16,7 +16,7 @@ import { clearErrors, getRecentErrors } from "./errorLogger";
 import { createMemoryDirectory, getOperationLog, setSimulatedFaults } from "./memoryDirectory";
 import { __resetPostCommitReadbackLogForTests, safeReadJson, safeWriteJson } from "./safeWrite";
 import type { DirectoryHandleLike } from "./fileSystemAccess";
-import { appendReply, createThread, feedbackThreadFileName, loadThread } from "../feedback/feedbackStorage";
+import { appendReply, createThread, flushPendingFeedbackIndexWrites, feedbackThreadFileName, loadThread } from "../feedback/feedbackStorage";
 import { getFeedbackThreadsDir } from "../workspace/workspacePaths";
 import { appendDecisionEvent, loadSupervisorDecisions } from "../approvals/approvalStorage";
 import type { DecisionEvent } from "../approvals/approvalTypes";
@@ -79,6 +79,8 @@ describe("reproduction A: safeWriteJson post-commit read-back throws", () => {
 
     await createThread(root, { from: "u", role: "employee", category: "bug", text: "hello" } as never);
 
+    await flushPendingFeedbackIndexWrites(); // B4: the index write is background
+
     const commits = getOperationLog(root).filter(
       (o) => o.operation === "close" && o.name === "threads.index.json"
     );
@@ -105,6 +107,8 @@ describe("reproduction C: a stale window re-armed by every commit", () => {
     setSimulatedFaults(root, [staleAfterEveryCommit("threads.index.json")]);
 
     await createThread(root, { from: "u", role: "employee", category: "bug", text: "hello" } as never);
+
+    await flushPendingFeedbackIndexWrites(); // B4: the index write is background
 
     const errors = getRecentErrors().map((e) => e.context);
     expect(errors.filter((c) => c.includes("casLoop:exhausted(feedback:threadsIndex)"))).toEqual([]);
@@ -175,6 +179,8 @@ describe("the failing step is visible in the exhaustion log", () => {
     ]);
 
     await createThread(root, { from: "u", role: "employee", category: "issue", text: "x" });
+
+    await flushPendingFeedbackIndexWrites(); // B4: the index write is background
 
     const exhausted = getRecentErrors().filter((e) => e.context.includes("casLoop:exhausted(feedback:threadsIndex)"));
     expect(exhausted).toHaveLength(1);

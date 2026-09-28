@@ -7,8 +7,9 @@ import {
   saveAnswerDraftMigratingLegacy,
   subscribeAnswerDraftHealth,
 } from "../../data/answers/answerDraftStore";
+import { compareSavedAt } from "../../data/answers/savedAt";
 import type { DistributionEntry } from "../../data/distribution/distributionTypes";
-import type { FieldAnswer, ItemAnswer } from "../../data/answers/answerTypes";
+import type { AnswerSaveOutcome, FieldAnswer, ItemAnswer } from "../../data/answers/answerTypes";
 import type { TemplateField, TemplateSchema } from "../../data/templates/templateTypes";
 import {
   getFieldsForPhase,
@@ -30,7 +31,7 @@ type Props = {
   savedAnswer: ItemAnswer | null;
   readonly: boolean;
   onClose: () => void;
-  onSave: (ans: FieldAnswer[]) => Promise<void>;
+  onSave: (ans: FieldAnswer[]) => Promise<AnswerSaveOutcome | void>;
   /** Omit when the current user cannot trigger replacements. */
   onReplace?: (entry: DistributionEntry) => void;
   /** Omit when the current user cannot transfer this sample to another user. */
@@ -154,6 +155,15 @@ export default function InspectionPanel({
     if (draftKey && hasSubmittedAnswer) clearAnswerDraftAndLegacy(draftKey, legacyDraftKey ?? null);
   }, [draftKey, legacyDraftKey, hasSubmittedAnswer]);
   const [validationMsg, setValidationMsg] = useState<string | null>(null);
+  // A1: the outcome of the last submit, shown where the employee clicked — the
+  // page banner alone was easy to miss. A caller resolving `void` carries no
+  // outcome, so nothing is shown for it.
+  const [saveStatus, setSaveStatus] = useState<
+    | { kind: "saving" | "saved" }
+    | { kind: "queued"; savedAt: string | null; code: string | null }
+    | { kind: "failed"; message: string }
+    | null
+  >(null);
   // Guards the async disk write behind the primary action: without it a
   // double-click (or an impatient re-click during a slow workspace write) fires
   // onSave twice concurrently. Every other mutating action in the app tracks a
@@ -250,6 +260,26 @@ export default function InspectionPanel({
   }, [missingRequiredFields, touchedRequiredIds]);
 
   const isSubmitted = isAnswerSubmitted(entry, savedAnswer);
+  // A reopen (submitted -> not submitted) retires a "saved" line. Only that
+  // TRANSITION, so a `saved` outcome that arrives before the parent has
+  // re-rendered with the submitted answer is not cleared early.
+  const [wasSubmitted, setWasSubmitted] = useState(isSubmitted);
+  if (wasSubmitted !== isSubmitted) {
+    setWasSubmitted(isSubmitted);
+    // Also a stored `queued`: its DERIVED saved (below) is already gone with
+    // the submitted answer, and falling back to "not saved yet" would be false.
+    if (wasSubmitted && (saveStatus?.kind === "saved" || saveStatus?.kind === "queued")) setSaveStatus(null);
+  }
+  // A queued save that the background replay has since landed shows as saved:
+  // the submitted answer in `savedAnswer` is at least as new as the queued one.
+  // A submit from a supervisor or another device can flip it too — intended,
+  // because the item really is submitted.
+  const shownStatus =
+    saveStatus?.kind === "queued" && saveStatus.savedAt &&
+    savedAnswer?.status === "submitted" &&
+    compareSavedAt(savedAnswer.lastSavedAt, saveStatus.savedAt) >= 0
+      ? ({ kind: "saved" } as const)
+      : saveStatus;
   const activePhaseIndex = phases.findIndex((phase) => phase.phaseId === safeActivePhaseId);
   const isLastPhase = activePhaseIndex < 0 || activePhaseIndex === phases.length - 1;
   const currentPhaseMissingRequiredFields = useMemo(() => {
@@ -279,9 +309,18 @@ export default function InspectionPanel({
     }
     setValidationMsg(null);
     setSubmitting(true);
+    setSaveStatus({ kind: "saving" });
     try {
-      await onSave(collect());
+      const outcome = await onSave(collect());
+      setSaveStatus(
+        !outcome ? null
+          : outcome.ok ? { kind: "saved" }
+          : outcome.queuedForRetry
+            ? { kind: "queued", savedAt: outcome.queuedSavedAt ?? null, code: outcome.errorCode ?? null }
+          : { kind: "failed", message: outcome.message }
+      );
     } catch {
+      setSaveStatus(null);
       // Defense in depth (B-XQIO032). Every current caller's `onSave`
       // (XrayReferrals' `handleSave`) already catches its own write errors
       // internally and resolves normally, reporting failure through the
@@ -376,6 +415,9 @@ export default function InspectionPanel({
               // in the same commit the draft is created, with no ordering
               // subtlety and nothing to clean up on unmount.
               onDraftDirty?.();
+              // The employee is changing the answer: a failed/queued line
+              // described the previous attempt.
+              setSaveStatus((prev) => (prev?.kind === "failed" || prev?.kind === "queued" ? null : prev));
             }}
           />
         )}
@@ -458,6 +500,17 @@ export default function InspectionPanel({
           it is most useful. The primary submit control stays gated on
           `!readonly`; the secondary actions are gated on being passed at all,
           which is where their permission checks already live. */}
+      {/* Always mounted, only its text changes, so screen readers announce updates. */}
+      <p
+        className={`ip-save-status${shownStatus ? ` ip-save-status--${shownStatus.kind}` : ""}`}
+        aria-live="polite"
+      >
+        {shownStatus?.kind === "failed"
+          ? getLabels().ip_save_status_failed.replace("{message}", shownStatus.message)
+          : shownStatus?.kind === "queued" && shownStatus.code
+            ? getLabels().ip_save_status_queued_coded.replace("{code}", shownStatus.code)
+            : shownStatus ? getLabels()[`ip_save_status_${shownStatus.kind}`] : ""}
+      </p>
       {!isSubmitted && (!readonly || onReplace || onReassign) && (
         <div className="ip-footer">
           {!readonly && validationMsg && <p className="ip-validation-msg">{validationMsg}</p>}

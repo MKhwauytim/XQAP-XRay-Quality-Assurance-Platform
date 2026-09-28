@@ -1,0 +1,12 @@
+.sample-snapshot-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--c-warning-border);
+  border-radius: 8px;
+  background: var(--c-warning-bg);
+  color: var(--c-warning);
+  font-size: 13px;
+}

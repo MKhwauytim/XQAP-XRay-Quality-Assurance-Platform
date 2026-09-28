@@ -4,6 +4,7 @@ import { casLoop, readBackOwnWrite } from "../storage/casLoop";
 import {
   createDeadline,
   INTERACTIVE_WRITE_DEADLINE_MS,
+  type OperationDeadline,
 } from "../storage/operationDeadline";
 import { withResourceLock } from "../storage/webLocks";
 import { getFeedbackDir, getFeedbackThreadsDir, getLegacyFeedbackDir } from "../workspace/workspacePaths";
@@ -250,7 +251,8 @@ export async function loadThreadsIndex(
  */
 async function updateThreadsIndex(
   dir: DirectoryHandleLike,
-  apply: (threads: FeedbackThreadSummary[]) => FeedbackThreadSummary[]
+  apply: (threads: FeedbackThreadSummary[]) => FeedbackThreadSummary[],
+  deadline?: OperationDeadline
 ): Promise<void> {
   const feedbackDir = await getFeedbackDir(dir, true);
   // `:index` suffix keeps this outer lock distinct from safeWriteJson's own
@@ -274,7 +276,8 @@ async function updateThreadsIndex(
         const written = await safeWriteJson<FeedbackThreadsIndex>(
           feedbackDir,
           FEEDBACK_THREADS_INDEX_FILE,
-          updated
+          updated,
+          { deadline }
         );
         // E3b: a commit whose own read-back was stale is verified once by the
         // token read, or accepted if that is inconclusive too — never re-committed.
@@ -302,6 +305,7 @@ async function updateThreadsIndex(
         maxRetries: 3,
         baseDelayMs: 100,
         conflictError: "تعذّر تحديث فهرس الملاحظات: تعارض في الكتابة بعد عدة محاولات.",
+        deadline,
         // The RAW cause, not just the Arabic sentence the catch sites keep. The
         // incident's feedback entries were Arabic-only and could not be tied to
         // a platform condition at all until they were paired with
@@ -318,6 +322,54 @@ async function updateThreadsIndex(
   );
   if (!outcome.ok) {
     throw new Error(outcome.error);
+  }
+}
+
+/**
+ * Index writes started by `createThread` / `appendReply` that have not settled
+ * yet. Only `flushPendingFeedbackIndexWrites` reads this.
+ */
+const pendingIndexWrites = new Set<Promise<void>>();
+
+/**
+ * FIRE-AND-FORGET update of the rebuildable `threads.index.json` after a
+ * create or a status change (Workstream B, 2026-09-28).
+ *
+ * The durable content -- the thread file -- is already written and verified
+ * when this runs, and `listThreadSummaries` reconciles any thread the index
+ * does not know, so nothing the user wrote rides on this write. It used to be
+ * AWAITED, which put a CAS loop on the single most contended feedback file
+ * between the user's click and "sent". A failure is still logged under
+ * `context`, exactly as the awaited version logged it.
+ */
+function scheduleThreadsIndexUpdate(
+  dir: DirectoryHandleLike,
+  apply: (threads: FeedbackThreadSummary[]) => FeedbackThreadSummary[],
+  context: string
+): void {
+  const write: Promise<void> = updateThreadsIndex(
+    dir,
+    apply,
+    createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "feedback:threadsIndex")
+  )
+    .catch((error: unknown) => {
+      logError(context, error);
+    })
+    .finally(() => {
+      pendingIndexWrites.delete(write);
+    });
+  pendingIndexWrites.add(write);
+}
+
+/**
+ * Resolves once every background index write started so far has settled
+ * (including any started while waiting). Never rejects -- failures were
+ * already logged. For tests, and for any caller that must observe the index
+ * after a create or resolve.
+ */
+export async function flushPendingFeedbackIndexWrites(): Promise<void> {
+  while (pendingIndexWrites.size > 0) {
+    await Promise.allSettled([...pendingIndexWrites]);
   }
 }
 
@@ -351,7 +403,7 @@ function summarize(thread: FeedbackThread, lastActivityAt: string): FeedbackThre
  * name. That is the actual contention fix — under the old shared-log design
  * this same operation rewrote a file every other user was also rewriting.
  *
- * The index append runs second and is genuinely best-effort: if it fails after
+ * The index append runs second, in the background (never awaited), and is genuinely best-effort: if it fails after
  * the thread landed, the message IS on disk, and `listThreadSummaries`
  * reconciles it back in on the next read whether or not the index is ever
  * repaired.
@@ -382,16 +434,19 @@ export async function createThread(
   };
 
   const threadsDir = await getFeedbackThreadsDir(dir, true);
-  await safeWriteJson<FeedbackThread>(threadsDir, feedbackThreadFileName(thread.id), thread);
+  await safeWriteJson<FeedbackThread>(threadsDir, feedbackThreadFileName(thread.id), thread, {
+    deadline: createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "feedback:createThread"),
+  });
 
-  try {
-    await updateThreadsIndex(dir, (threads) => [
+  // Background, never awaited -- see scheduleThreadsIndexUpdate.
+  scheduleThreadsIndexUpdate(
+    dir,
+    (threads) => [
       ...threads.filter((summary) => summary.threadId !== thread.id),
       summarize(thread, thread.timestamp),
-    ]);
-  } catch (error) {
-    logError("feedback:createThreadIndex", error);
-  }
+    ],
+    "feedback:createThreadIndex"
+  );
 
   return thread;
 }
@@ -426,6 +481,13 @@ export async function appendReply(
   let statusChanged = false;
   // One identity per CALL (not per attempt): see FeedbackReply.id.
   const storedReply: FeedbackReply = { ...reply, id: reply.id ?? crypto.randomUUID() };
+  // Posting a reply is an interactive click, but this loop took casLoop's
+  // DEFAULT ladder (10 x 200 ms) WITH a delayed verify re-read, nested over
+  // safeWriteJson's own multi-second ladders — minutes of sleeping before the
+  // user is told the reply failed. That is symptom E ("replying to a ticket
+  // takes forever") from the 2026-09-13 reports. The SAME budget bounds the
+  // loop and the read-back ladders inside each write.
+  const deadline = createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "feedback:threadReply");
 
   const outcome = await withResourceLock(`${threadsDir.name}/${fileName}:rmw`, () =>
     casLoop<{ ok: true; thread: FeedbackThread }>(
@@ -454,7 +516,7 @@ export async function appendReply(
           revision: nextRevision,
           _writeToken: writeToken,
         };
-        const written = await safeWriteJson<FeedbackThread>(threadsDir, fileName, updated);
+        const written = await safeWriteJson<FeedbackThread>(threadsDir, fileName, updated, { deadline });
         const verdict = await readBackOwnWrite(
           written,
           () => safeReadJson<FeedbackThread>(threadsDir, fileName),
@@ -487,12 +549,7 @@ export async function appendReply(
       {
         context: "feedback:threadReply",
         conflictError: "تعذّر حفظ الرد: تعارض في الكتابة بعد عدة محاولات.",
-        // Posting a reply is an interactive click, but this loop took casLoop's
-        // DEFAULT ladder (10 x 200 ms) WITH a delayed verify re-read, nested
-        // over safeWriteJson's own multi-second ladders — minutes of sleeping
-        // before the user is told the reply failed. That is symptom E ("replying
-        // to a ticket takes forever") from the 2026-09-13 reports.
-        deadline: createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "feedback:threadReply"),
+        deadline,
       }
     )
   );
@@ -501,29 +558,30 @@ export async function appendReply(
   }
 
   if (statusChanged) {
-    try {
-      await updateThreadsIndex(dir, (threads) =>
+    // The reply AND the status flip are already durable in the thread file,
+    // verified above. This is the same rebuildable-cache write `createThread`
+    // treats as best-effort, and for the same reason: throwing here told the
+    // user their reply had failed AFTER it provably landed — the false-failure
+    // shape of the 2026-08-25 incident — which invites them to send it again.
+    // Since Workstream B it is not even awaited (scheduleThreadsIndexUpdate).
+    //
+    // The cost of losing this write, stated plainly so it is a contract and
+    // not an accident: the panel's summary row can show a stale status chip
+    // until the next successful index write. The repair path does not heal
+    // that, because it only folds in ids the index does not know — it never
+    // re-reads a thread the index already lists. The thread itself is correct
+    // the moment anyone opens it.
+    const nextStatus = outcome.thread.status;
+    scheduleThreadsIndexUpdate(
+      dir,
+      (threads) =>
         threads.map((summary) =>
           summary.threadId === threadId
-            ? { ...summary, status: outcome.thread.status, lastActivityAt: reply.timestamp }
+            ? { ...summary, status: nextStatus, lastActivityAt: reply.timestamp }
             : summary
-        )
-      );
-    } catch (error) {
-      // The reply AND the status flip are already durable in the thread file,
-      // verified above. This is the same rebuildable-cache write `createThread`
-      // treats as best-effort, and for the same reason: throwing here told the
-      // user their reply had failed AFTER it provably landed — the false-failure
-      // shape of the 2026-08-25 incident — which invites them to send it again.
-      //
-      // The cost of losing this write, stated plainly so it is a contract and
-      // not an accident: the panel's summary row can show a stale status chip
-      // until the next successful index write. The repair path does not heal
-      // that, because it only folds in ids the index does not know — it never
-      // re-reads a thread the index already lists. The thread itself is correct
-      // the moment anyone opens it.
-      logError("feedback:statusIndex", error);
-    }
+        ),
+      "feedback:statusIndex"
+    );
   }
 
   return outcome.thread;
