@@ -50,6 +50,13 @@ export type SegmentWriterIdentity = {
   deviceId: string;
   sessionId: string;
   scopeId?: string;
+  /**
+   * True for a chain that outlives the page (answers, A1): its segments may
+   * already exist on disk before this session writes them. See `knownFor` in
+   * `appendEventSegment`. Omitted/false (distribution) keeps the per-session
+   * rules exactly as they were.
+   */
+  stable?: boolean;
 };
 
 /** Contexts and error codes the consumer wants this module's failures reported under. */
@@ -579,10 +586,9 @@ type ExistingSegment = { text: string; reliable: boolean };
 async function readExistingSegment(
   eventsDir: DirectoryHandleLike,
   fileName: string,
-  writtenKey: string,
+  knownWritten: boolean,
   diagnostics: EventLogDiagnostics
 ): Promise<ExistingSegment> {
-  const knownWritten = writtenSegmentsThisSession.has(writtenKey);
   for (let attempt = 0; ; attempt += 1) {
     try {
       const existingHandle = await eventsDir.getFileHandle(fileName, { create: false });
@@ -768,6 +774,23 @@ export async function appendEventSegment<TEvent>(
   const addedBytes = utf8Length(addedText);
   const memoKeyFor = (name: string) => segmentMemoKey(consumerNamespace, writer.scopeId, name);
 
+  // Has THIS chain already written `name`? For a per-session writer only this
+  // session's memo can say so. A stable writer's chain may predate the page (or
+  // be shared with another tab of the same browser, serialised by the lock
+  // below), so a name the directory LISTS is treated as written: a stale
+  // NotFound then takes the patient ladder and rotates away instead of
+  // rewriting the file without its lines. A listing failure is treated as
+  // "written" — the conservative answer.
+  const knownFor = async (name: string): Promise<boolean> => {
+    if (writtenSegmentsThisSession.has(memoKeyFor(name))) return true;
+    if (!writer.stable) return false;
+    try {
+      return (await listDirectoryEntries(eventsDir)).some((entry) => entry.kind === "file" && entry.name === name);
+    } catch {
+      return true;
+    }
+  };
+
   // A read-modify-write full-file rewrite is only race-free against OTHER
   // writer sessions (different deviceId/sessionId, hence a different chain).
   // Within THIS session, two overlapping batch calls (e.g. two independent
@@ -788,7 +811,7 @@ export async function appendEventSegment<TEvent>(
       openSegmentSeqByWriter.get(writerKey) ??
       (await discoverHighestOwnSeq(eventsDir, base, segmentSuffix));
     let fileName = segmentFileNameForSeq(base, seq, segmentSuffix);
-    let existing = await readExistingSegment(eventsDir, fileName, memoKeyFor(fileName), diagnostics);
+    let existing = await readExistingSegment(eventsDir, fileName, await knownFor(fileName), diagnostics);
     let existingBytes = utf8Length(existing.text);
 
     // ROTATE AWAY FROM A SEGMENT WE COULD NOT RE-READ. An unreliable baseline
@@ -810,7 +833,7 @@ export async function appendEventSegment<TEvent>(
     if (!existing.reliable && seq < MAX_SEGMENT_SEQ) {
       seq += 1;
       fileName = segmentFileNameForSeq(base, seq, segmentSuffix);
-      existing = await readExistingSegment(eventsDir, fileName, memoKeyFor(fileName), diagnostics);
+      existing = await readExistingSegment(eventsDir, fileName, await knownFor(fileName), diagnostics);
       existingBytes = utf8Length(existing.text);
     }
 
@@ -823,7 +846,7 @@ export async function appendEventSegment<TEvent>(
       // reading it is what makes "the previous run crashed after writing this
       // name" and "the directory listing had not caught up yet" non-destructive
       // instead of an overwrite.
-      existing = await readExistingSegment(eventsDir, fileName, memoKeyFor(fileName), diagnostics);
+      existing = await readExistingSegment(eventsDir, fileName, await knownFor(fileName), diagnostics);
       existingBytes = utf8Length(existing.text);
     }
 
