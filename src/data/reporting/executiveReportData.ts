@@ -12,6 +12,7 @@ import { isRowStudied } from "./executiveReportTypes";
 import { buildPortProfiles, buildStageProfiles } from "./executiveKpiProfiles";
 import { entryDayOf } from "./executive/model/entryDay";
 import { classifyImageResult } from "../population/imageResult";
+import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { StageAliasMappings } from "../population/stageHelpers";
 
 type SubmittedAnswerInfo = {
@@ -87,6 +88,19 @@ function countReasons(values: Array<string | null>, denominator: number): Execut
     .sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason, "ar"));
 }
 
+/**
+ * A2: live sampled rows whose id is absent from the population — the sample
+ * outlived a re-processed population. Order: the sample's own row order.
+ */
+export function sampleRowsMissingFromPopulation(
+  populationRows: readonly PreparedPopulationRow[],
+  sample: SampleMasterData | null
+): PreparedPopulationRow[] {
+  if (!sample) return [];
+  const populationIds = new Set(populationRows.map((row) => row.xrayImageId));
+  return liveSampleRows(sample).filter((row) => !populationIds.has(row.xrayImageId));
+}
+
 export function buildExecutiveReportRows(input: ExecutiveReportInput): ExecutiveReportRow[] {
   const { populationRows, sample, distribution, employeeFiles, config } = input;
   const fieldIdsByLabel = createFieldResolver(input.template);
@@ -127,7 +141,11 @@ export function buildExecutiveReportRows(input: ExecutiveReportInput): Executive
     }
   }
 
-  return populationRows.map((pop): ExecutiveReportRow => {
+  const snapshotRows = sampleRowsMissingFromPopulation(populationRows, sample);
+  const snapshotIds = new Set(snapshotRows.map((row) => row.xrayImageId));
+  const sourceRows = snapshotRows.length > 0 ? [...populationRows, ...snapshotRows] : populationRows;
+
+  return sourceRows.map((pop): ExecutiveReportRow => {
     const levelOneResult = pop.xrayLevelOneResult;
     const levelTwoResult = pop.xrayLevelTwoResult;
     const imageResult = classifyImageResult(levelOneResult, levelTwoResult);
@@ -208,6 +226,8 @@ export function buildExecutiveReportRows(input: ExecutiveReportInput): Executive
       entryDay: entryDayOf(pop.xrayEntryDate),
       hasReport: (pop.reportNumber ?? "").trim().length > 0,
       targetedByRiskEngine: pop.targetedByRiskEngine ?? null,
+      // Spread only when true, so a month without orphans stays byte-identical.
+      ...(snapshotIds.has(pop.xrayImageId) ? { fromSampleSnapshot: true as const } : {}),
     };
   });
 }
@@ -218,13 +238,16 @@ export function calculateExecutiveKPIs(
   config: ExecutiveReportConfig,
   stageMappings?: Partial<StageAliasMappings>
 ): ExecutiveKPIs {
-  const totalPopulation = rows.length;
+  // A2: rows rebuilt from the sample snapshot are not part of the population;
+  // every population-wide denominator is taken over the population alone.
+  const populationRows = rows.some((r) => r.fromSampleSnapshot) ? rows.filter((r) => !r.fromSampleSnapshot) : rows;
+  const totalPopulation = populationRows.length;
   const totalSample = sample?.totalActual ?? rows.filter((r) => r.selectedInSample).length;
   const sampleCoverage = totalPopulation > 0 ? (totalSample / totalPopulation) * 100 : 0;
 
-  const suspiciousCount = rows.filter((r) => r.imageResult === "اشتباه").length;
-  const cleanCount = rows.filter((r) => r.imageResult === "سليمة").length;
-  const suspicionRate = rows.length > 0 ? (suspiciousCount / rows.length) * 100 : 0;
+  const suspiciousCount = populationRows.filter((r) => r.imageResult === "اشتباه").length;
+  const cleanCount = populationRows.filter((r) => r.imageResult === "سليمة").length;
+  const suspicionRate = populationRows.length > 0 ? (suspiciousCount / populationRows.length) * 100 : 0;
 
   const sampleRows = rows.filter((r) => r.selectedInSample);
   const studiedImages = sampleRows.filter(isRowStudied).length;
@@ -264,8 +287,8 @@ export function calculateExecutiveKPIs(
   const levelTwoAccuracy = validStudied > 0 ? (levelTwoCorrect / validStudied) * 100 : null;
 
   // Level disagreement (whole population, not just studied)
-  const bothLevelsCount = rows.length;
-  const disagreementCount = rows.filter((r) => r.levelOneResult !== r.levelTwoResult).length;
+  const bothLevelsCount = populationRows.length;
+  const disagreementCount = populationRows.filter((r) => r.levelOneResult !== r.levelTwoResult).length;
   const levelDisagreementRate = bothLevelsCount > 0 ? (disagreementCount / bothLevelsCount) * 100 : null;
 
   // L2 correction and regression rates

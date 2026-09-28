@@ -85,6 +85,12 @@ export type ExecutiveReportRow = {
    * like.
    */
   targetedByRiskEngine?: string | null;
+  /**
+   * A2: this row was built from the `sample.master.json` snapshot because its
+   * id is missing from the month's population (the population was re-processed
+   * under the sample). Present only when true; population-wide KPIs exclude it.
+   */
+  fromSampleSnapshot?: true;
 };
 
 /**
