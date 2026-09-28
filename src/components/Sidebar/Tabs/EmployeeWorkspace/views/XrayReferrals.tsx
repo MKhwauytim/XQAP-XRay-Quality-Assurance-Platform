@@ -13,7 +13,7 @@ import {
   upsertItemAnswerOnBehalf,
 } from "../../../../../data/answers/answerStorage";
 import { clearAnswerDraftAndLegacy } from "../../../../../data/answers/answerDraftStore";
-import { pickAutoSelectId, readLastOpenSample, rememberLastOpenSample } from "../../../../../data/answers/lastOpenSampleStore";
+import { forgetLastOpenSample, pickAutoSelectId, readLastOpenSample, rememberLastOpenSample } from "../../../../../data/answers/lastOpenSampleStore";
 import { answerFolderForEntry, legacyPanelDraftKey, panelDraftKey } from "./XrayReferrals/answerRouting";
 import { reopenSubmittedAnswer } from "../../../../../data/answers/reopenAnswer";
 import { MonthClosedError } from "../../../../../data/population/monthLock";
@@ -1147,6 +1147,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   /** True while the panel is showing a row that has left the queue. */
   const showingRetainedDraft = selEntry === null && retainedEntry !== null;
 
+  const restoredForRef = useRef<string | null>(null); // (user, month) key already auto-restored once
   // Auto-select first entry whenever the list changes and nothing is currently selected
   useEffect(() => {
     if (displayEntries.length === 0) return;
@@ -1157,10 +1158,15 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     // above keeps the panel (and the draft) up, with a banner explaining why.
     // The employee stays in control: any explicit navigation still moves on.
     if (selEntryId != null && dirtyEntryId === selEntryId) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- auto-corrects selection when the display list changes; useMemo cannot accumulate user navigation state
-    setSelEntryId(pickAutoSelectId(displayEntries, readLastOpenSample(username, selMonth)));
+    const restoreKey = `${username}|${selMonth}`;
+    const remembered = restoredForRef.current === restoreKey ? null : readLastOpenSample(username, selMonth);
+    restoredForRef.current = restoreKey;
+    setSelEntryId(pickAutoSelectId(displayEntries, remembered));
   }, [displayEntries, selEntryId, dirtyEntryId, username, selMonth]);
-  useEffect(() => { if (selEntryId) rememberLastOpenSample(username, selMonth, selEntryId); }, [username, selMonth, selEntryId]);
+  useEffect(() => { // gated on the restore key above -- avoids writing the old month's id under the new key
+    if (restoredForRef.current !== `${username}|${selMonth}`) return;
+    if (selEntryId) rememberLastOpenSample(username, selMonth, selEntryId);
+  }, [username, selMonth, selEntryId]);
 
   /** Explicit user navigation — the one case where dropping a draft is intended. */
   const selectEntry = useCallback((xrayImageId: string | null): void => {
@@ -2146,7 +2152,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                   template={resolveTemplateForAnswer(selAnswer, templatesById, activeTpl)}
                   savedAnswer={selAnswer}
                   readonly={panelAuthoring.readonly}
-                  onClose={() => selectEntry(null)}
+                  onClose={() => { selectEntry(null); forgetLastOpenSample(username, selMonth); }}
                   // Draft protection (P0): the panel tells us it now holds
                   // unsaved input, so a background refresh that removes this
                   // row keeps it on screen instead of swapping the employee to
