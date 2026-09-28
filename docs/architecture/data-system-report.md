@@ -395,7 +395,7 @@ Both files use `safeWriteJson` / `safeReadJson` and the `JsonEnvelope` schema-ve
 | `sampling.plan.json` | `2-samples/{month}/1-main/` | Documented sampling plan written at draw time next to `sample.master.json` (A1): lot definition (ports, per-stage split), target sample fraction, advisory quality/inspection-level notes, risk-basis share, and the seed + algorithm version the draw binds to. **B4:** also carries an optional `priorMonthAdvisory` (`priorMonthFolderName`, `priorMonthSuspicionRate` = share of the prior month's rows with `xrayLevelTwoResult` = اشتباه, `inspectionRecommendation` = `normal`/`tightened-review` at the >5% threshold). Advisory only — never changes quotas; absent on legacy plans. |
 | `risk.raw.{ISO-ts}.superseded.json` / `bi.raw.{ISO-ts}.superseded.json` | `1-population/{month}/1-raw/` | Immutable-raw archive (A5): the prior raw import, copied verbatim before a re-import overwrites the live `risk.raw.json` / `bi.raw.json`. The new live file records the archived name in `supersedes`. |
 | `population.csv` | `5-system/powerbi-export/{month}/` | All `ExecutiveReportRow` records (UTF-8 BOM CSV, 26 columns). |
-| `sample.csv` | `5-system/powerbi-export/{month}/` | `selectedInSample=true` subset of `population.csv`. |
+| `sample.csv` | `5-system/powerbi-export/{month}/` | `selectedInSample=true` subset of `population.csv`, plus a 27th, last column `fromSampleSnapshot` (`true`/`false`, never blank): `true` marks a sampled image rebuilt from `sample.master.json` because its id is missing from the month's population (A2). `population.csv` never contains such rows. |
 | `README.txt` | `5-system/powerbi-export/{month}/` | Bilingual connection instructions (Arabic + English) for Power BI Desktop. |
 
 ## Data Protection Notes

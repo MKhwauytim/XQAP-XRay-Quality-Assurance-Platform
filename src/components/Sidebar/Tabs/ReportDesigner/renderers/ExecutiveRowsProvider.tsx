@@ -115,7 +115,7 @@ export function ExecutiveRowsProvider({ children }: { children: ReactNode }) {
           {loadError}
         </div>
       )}
-      <SampleSnapshotBanner count={snapshotCount} />
+      <SampleSnapshotBanner count={snapshotCount} variant="designer" />
       {children}
     </ExecutiveRowsContext.Provider>
   );

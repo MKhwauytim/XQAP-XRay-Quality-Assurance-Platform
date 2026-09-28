@@ -2,11 +2,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
-import { DEFAULT_LABELS } from "../../../../../data/labels/labelsStore";
+import { DEFAULT_LABELS, resetAllLabels, setLabel } from "../../../../../data/labels/labelsStore";
 import type { PopulationOverwriteAssessment } from "../../../../../data/population/populationOverwriteGuard";
 import { ReprocessConfirmDialog } from "./ReprocessConfirmDialog";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  resetAllLabels();
+});
 
 function assessment(overrides: Partial<PopulationOverwriteAssessment>): PopulationOverwriteAssessment {
   return {
@@ -60,10 +63,26 @@ describe("ReprocessConfirmDialog", () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it("renders nothing without an assessment", () => {
+  it("renders nothing without an assessment, even when open", () => {
     const { container } = render(
-      <ReprocessConfirmDialog open={false} assessment={null} onConfirm={() => {}} onCancel={() => {}} />
+      <ReprocessConfirmDialog open assessment={null} onConfirm={() => {}} onCancel={() => {}} />
     );
     expect(container.textContent).toBe("");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("joins the example ids with the label-driven separator", () => {
+    setLabel("population_reprocess_examples_separator", "/");
+    render(
+      <ReprocessConfirmDialog
+        open
+        assessment={assessment({ missingCount: 2, missingExamples: ["A1", "A2"], blocked: true })}
+        onConfirm={() => {}}
+        onCancel={() => {}}
+      />
+    );
+    expect(
+      screen.getByText(DEFAULT_LABELS.population_reprocess_missing_examples.replace("{ids}", "A1/A2"))
+    ).toBeInTheDocument();
   });
 });

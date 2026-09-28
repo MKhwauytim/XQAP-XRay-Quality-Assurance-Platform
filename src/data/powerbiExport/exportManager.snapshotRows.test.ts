@@ -40,5 +40,17 @@ describe("runPowerBiExport — sampled ids missing from the population (A2)", ()
     expect(snapshotRowCount).toBe(1);
     expect(manifest.files.find((file) => file.fileName === "population.csv")?.rowCount).toBe(2);
     expect(manifest.files.find((file) => file.fileName === "sample.csv")?.rowCount).toBe(2);
+
+    // The flag is an explicit true/false in the LAST sample.csv column, never blank.
+    const { getSystemRoot, SYSTEM_FOLDER_NAMES } = await import("../workspace/workspacePaths");
+    const sys = await getSystemRoot(root, false);
+    const exportDir = await (await sys.getDirectoryHandle(SYSTEM_FOLDER_NAMES.powerbiExport, { create: false })).getDirectoryHandle(MONTH, { create: false });
+    const csv = await (await (await exportDir.getFileHandle("sample.csv", { create: false })).getFile()).text();
+    const lines = csv.replace(/^\uFEFF/, "").trim().split("\n").map((line) => line.trim());
+    const header = lines[0]!.split(",");
+    expect(header[header.length - 1]).toBe("fromSampleSnapshot");
+    const flagOf = (id: string): string | undefined => lines.find((line) => line.startsWith(`${id},`))?.split(",").pop();
+    expect(flagOf("P1")).toBe("false");
+    expect(flagOf("S9")).toBe("true");
   });
 });

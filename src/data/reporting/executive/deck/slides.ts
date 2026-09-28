@@ -4,6 +4,7 @@
 // no runtime scaling, no emoji. Honesty discipline (§3.7): insufficient-data slides
 // state so plainly rather than showing a weak chart.
 
+import { populationScopedRows } from "../../executiveReportTypes";
 import type { ReportModel } from "../model/reportModel";
 import type { EmployeeByPortLevel, ReviewerAgreementRow } from "../model/aggregates";
 import type { ResultSource } from "../model/decisionFactTable";
@@ -155,8 +156,10 @@ export function execSummarySlide(model: ReportModel, num: number, total: number)
 export function scopeSlide(model: ReportModel, num: number, total: number): string {
   const p = model.population;
   // Population split by port type — land (بري) vs sea (بحري).
-  const sea = model.rows.filter((r) => (r.portType ?? "").includes("بحري")).length;
-  const land = model.rows.filter((r) => {
+  // A2: the population split never counts rows rebuilt from the sample snapshot.
+  const populationRows = populationScopedRows(model.rows);
+  const sea = populationRows.filter((r) => (r.portType ?? "").includes("بحري")).length;
+  const land = populationRows.filter((r) => {
     const t = r.portType ?? "";
     return t.includes("بري") && !t.includes("بحري");
   }).length;

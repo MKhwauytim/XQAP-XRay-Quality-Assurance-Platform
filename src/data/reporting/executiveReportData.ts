@@ -243,7 +243,9 @@ export function calculateExecutiveKPIs(
   const populationRows = rows.some((r) => r.fromSampleSnapshot) ? rows.filter((r) => !r.fromSampleSnapshot) : rows;
   const totalPopulation = populationRows.length;
   const totalSample = sample?.totalActual ?? rows.filter((r) => r.selectedInSample).length;
-  const sampleCoverage = totalPopulation > 0 ? (totalSample / totalPopulation) * 100 : 0;
+  // A2: the coverage numerator counts only sampled images that are in the population.
+  const populationSample = totalSample - (rows.length - populationRows.length);
+  const sampleCoverage = totalPopulation > 0 ? (populationSample / totalPopulation) * 100 : 0;
 
   const suspiciousCount = populationRows.filter((r) => r.imageResult === "اشتباه").length;
   const cleanCount = populationRows.filter((r) => r.imageResult === "سليمة").length;

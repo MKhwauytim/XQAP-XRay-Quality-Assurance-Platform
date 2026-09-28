@@ -988,19 +988,23 @@ export default function PopulationTab() {
     // that sample no longer match the new population — confirm before overwriting.
     const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
     let assessment: PopulationOverwriteAssessment;
+    setIsSavingToDisk(true);
     try {
       assessment = assessPopulationOverwrite(
         await loadPopulationOverwriteImpact(directoryHandle, monthFolderName),
         processingResult.preparedRows as unknown as Array<Record<string, unknown>>
       );
     } catch (error) {
-      // The sample exists but could not be read (v93 contract) — a SAVE-step
-      // failure: keep the processing result, name the real cause, let the
-      // user retry the save.
-      const code = resolveErrorCode(error) ?? "XQ-POP-006";
+      // The month's sample, distribution or answers could not be read, so the
+      // overwrite check cannot run (v93 contract; F21) — a SAVE-step failure:
+      // keep the processing result, name the real cause (XQ-POP-008 when it is
+      // untagged, the same code the data-layer guard uses), let the user retry.
+      const code = resolveErrorCode(error) ?? "XQ-POP-008";
       logCodedError("population:save-precheck", code, error);
       setSaveToDiskMessage({ type: "error", text: codedMessage(code) });
       return;
+    } finally {
+      setIsSavingToDisk(false);
     }
     if (assessment.sampleExists) {
       setPendingReprocessSave({ processingResult, riskResult, monthFolderName, assessment });

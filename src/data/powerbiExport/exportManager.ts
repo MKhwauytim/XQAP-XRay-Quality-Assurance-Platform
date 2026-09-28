@@ -20,6 +20,11 @@ const POPULATION_HEADERS = [
   "imageResultAccurate", "levelOneAccurate", "levelTwoAccurate", "verificationCategory",
 ];
 
+// A2: sample.csv (the file that carries snapshot rows) gets one extra column, at
+// the END, an explicit "true"/"false" (never blank), so a Power BI report can tell a
+// row rebuilt from the sample snapshot from a population row. population.csv never contains such rows, so it is unchanged.
+const SAMPLE_HEADERS = [...POPULATION_HEADERS, "fromSampleSnapshot"];
+
 export type PowerBiExportResult = { manifest: ExportManifest; snapshotRowCount: number };
 
 export async function runPowerBiExportDetailed(
@@ -57,7 +62,7 @@ export async function runPowerBiExportDetailed(
 
   const manifest = await writeCsvExport(root, month, [
     { fileName: "population.csv", headers: POPULATION_HEADERS, rows: populationRowsOut },
-    { fileName: "sample.csv", headers: POPULATION_HEADERS, rows: sampleRowsOut },
+    { fileName: "sample.csv", headers: SAMPLE_HEADERS, rows: sampleRowsOut.map((r) => ({ ...r, fromSampleSnapshot: r["fromSampleSnapshot"] === true ? "true" : "false" })) },
   ]);
   return { manifest, snapshotRowCount };
 }

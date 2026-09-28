@@ -565,7 +565,7 @@ assigned them, and what they answered*.
 | `user-presets/{username}.browse-preset.json` | One user's table column preferences | Column visibility, order, widths | Single-writer carve-out — no CAS, deliberately and documentedly |
 | `user-presets/admin-shared.browse-preset.json` | Shared admin table preferences | Same shape | CAS-protected (genuinely multi-writer) |
 | `powerbi-export/{month}/population.csv` | All executive rows for external BI | 26 columns, UTF-8 BOM, formula-injection escaped | Derived from `buildExecutiveReportRows`. Write-only by design |
-| `powerbi-export/{month}/sample.csv` | The `selectedInSample=true` subset | Same columns | Same build, filtered projection |
+| `powerbi-export/{month}/sample.csv` | The `selectedInSample=true` subset | Same 26 columns plus a 27th, last: `fromSampleSnapshot` (`true`/`false`) — `true` = row rebuilt from the sample snapshot because its id is missing from the population (A2); `population.csv` never contains such rows | Same build, filtered projection |
 | `powerbi-export/{month}/README.txt` | Bilingual connection instructions | Arabic + English Power BI Desktop steps | For humans only |
 
 ---

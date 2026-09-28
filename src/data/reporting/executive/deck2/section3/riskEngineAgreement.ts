@@ -92,7 +92,7 @@
 
 import { getStageKey } from "../../../../population/stageHelpers";
 import { engineVerdictOf } from "../../../../population/riskEngineVerdict";
-import type { ExecutiveReportRow } from "../../../executiveReportTypes";
+import { populationScopedRows, type ExecutiveReportRow } from "../../../executiveReportTypes";
 import type { ReportModel } from "../../model/reportModel";
 import { band, isRankable } from "../../model/dataSufficiency";
 import { esc, fmtNum } from "../../primitives";
@@ -430,7 +430,8 @@ export function riskEngineAgreementSlide(
   total: number,
   variantPreview: boolean,
 ): string {
-  const rows = model.rows;
+  // A2: this page folds the population — never rows rebuilt from the sample snapshot.
+  const rows = populationScopedRows(model.rows);
   const cov = coverageOf(rows);
   const hasUsableVerdict = cov.recognized > 0;
 
