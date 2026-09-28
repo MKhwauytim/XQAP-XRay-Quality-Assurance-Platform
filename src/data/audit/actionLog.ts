@@ -50,14 +50,38 @@ const ACTIONS_LOG_FILE = "actions.log.json";
 const DEFAULT_MAX_ACTION_ENTRIES = 2_000;
 let maxActionEntries = DEFAULT_MAX_ACTION_ENTRIES;
 
+/**
+ * Hysteresis low-water mark (P1). On overflow the live log is trimmed all the
+ * way down to this many entries in ONE archive write, instead of back to
+ * `maxActionEntries` on every single append past the cap. That turns "the
+ * archive is rewritten on every save once an actor is past the cap" into
+ * "rewritten roughly once per `maxActionEntries - lowWaterActionEntries`
+ * appends" — see `docs/architecture` P1 evidence
+ * (`progressive-slowdown.md`, cause #2). `Math.min(lowWater, cap)` below keeps
+ * a test that only overrides the cap (not the low-water mark) behaving
+ * exactly as before: trimmed back to the cap on every overflow.
+ */
+const DEFAULT_LOW_WATER_ACTION_ENTRIES = 1_500;
+let lowWaterActionEntries = DEFAULT_LOW_WATER_ACTION_ENTRIES;
+
 /** @internal — test-only. Lower the live-log cap to exercise archival cheaply. */
 export function __setMaxActionEntriesForTests(limit: number): void {
   maxActionEntries = limit;
 }
 
-/** @internal — test-only. Restore the production cap. */
+/**
+ * @internal — test-only. Set the hysteresis low-water mark independently of
+ * the cap, to exercise batched-archival behaviour (as opposed to the
+ * trim-to-cap-on-every-overflow behaviour a low water mark >= the cap yields).
+ */
+export function __setActionLowWaterMarkForTests(limit: number): void {
+  lowWaterActionEntries = limit;
+}
+
+/** @internal — test-only. Restore the production cap and low-water mark. */
 export function __resetMaxActionEntriesForTests(): void {
   maxActionEntries = DEFAULT_MAX_ACTION_ENTRIES;
+  lowWaterActionEntries = DEFAULT_LOW_WATER_ACTION_ENTRIES;
 }
 
 /** LEGACY workspace-wide per-year archive. Read forever, never written. */
@@ -479,12 +503,17 @@ export async function appendWorkspaceAction(
           at: new Date().toISOString(),
         };
         const combined = [...existing.entries, fullEntry];
-        // A6: archive overflow (oldest first) BEFORE trimming. If archival fails,
-        // keep the full list this write (over cap but never dropped) — the next
-        // append retries archival.
+        // A6 + P1 hysteresis: archive overflow (oldest first) BEFORE trimming,
+        // but trim all the way down to the low-water mark in this one archive
+        // write rather than back to the cap. That amortizes the archive
+        // rewrite over `maxActionEntries - lowWaterActionEntries` appends
+        // instead of paying it on every append once an actor is past the cap.
+        // If archival fails, keep the full list this write (over cap but never
+        // dropped) — the next append retries archival.
         let liveEntries = combined;
         if (combined.length > maxActionEntries) {
-          const overflowCount = combined.length - maxActionEntries;
+          const trimTarget = Math.min(lowWaterActionEntries, maxActionEntries);
+          const overflowCount = combined.length - trimTarget;
           const overflow = combined.slice(0, overflowCount);
           const archived = await archiveOverflow(dir, actor, overflow);
           if (archived) {

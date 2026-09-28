@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { createMemoryDirectory } from "../storage/memoryDirectory";
+import { createMemoryDirectory, getOperationLog } from "../storage/memoryDirectory";
 import { __resetErrorSinkForTests, clearErrors, logError } from "../storage/errorLogger";
 import { __resetErrorContextForTests, setErrorActor } from "../storage/errorContext";
 import { isReadOnlyMode, setReadOnlyMode } from "../storage/readOnlyMode";
@@ -83,6 +83,29 @@ describe("errorLogSink", () => {
     const parsed = JSON.parse(await (await handle.getFile()).text());
     // One flush, one revision — not ten.
     expect(parsed.data.revision).toBe(1);
+  });
+
+  // P1 (progressive-slowdown.md cause #2's requirement #3): a burst well past
+  // the batch threshold must still cost a small constant number of whole-file
+  // rewrites, not one per logged error.
+  it("50 errors logged in a burst cost only a small constant number of file rewrites", async () => {
+    const dir = createMemoryDirectory("root", { trackOperations: true });
+    uninstall = installWorkspaceErrorSink({ directoryHandle: dir, username: "alice" });
+
+    for (let i = 0; i < 50; i++) logError(`ctx-${i}`, new Error(`boom-${i}`));
+    // Settle any auto-triggered flush plus its coalesced follow-up.
+    await flushErrorLogNow();
+    await flushErrorLogNow();
+
+    const all = await readAllWorkspaceErrors(dir);
+    expect(all).toHaveLength(50);
+
+    const liveWrites = getOperationLog(dir).filter(
+      (e) => e.operation === "createWritable" && e.name === errorsFileName("alice")
+    );
+    // Default batchSize is 25, so a synchronous 50-error burst triggers at
+    // most a couple of coalesced flushes — never 50.
+    expect(liveWrites.length).toBeLessThanOrEqual(3);
   });
 
   it("flushes automatically once the batch threshold is reached", async () => {

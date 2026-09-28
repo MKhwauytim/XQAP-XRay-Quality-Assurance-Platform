@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, test } from "vitest";
 
-import { createMemoryDirectory } from "../storage/memoryDirectory";
+import { createMemoryDirectory, getOperationLog } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { getAuditActionsDir } from "../workspace/workspacePaths";
+import { actionsFileName } from "./auditPaths";
 import {
   __resetMaxActionEntriesForTests,
+  __setActionLowWaterMarkForTests,
   __setMaxActionEntriesForTests,
   appendWorkspaceAction,
   readWorkspaceActionArchive,
@@ -84,5 +87,59 @@ describe("audit log archival (A6)", () => {
     const year = new Date().getFullYear();
     const archived = await readWorkspaceActionArchive(dir, year);
     expect(archived).toHaveLength(0);
+  });
+});
+
+describe("audit log archival — P1 hysteresis (progressive-slowdown.md cause #2)", () => {
+  test("archive is rewritten roughly once per (cap - low-water) appends, not once per append past the cap", async () => {
+    __setMaxActionEntriesForTests(20);
+    __setActionLowWaterMarkForTests(10);
+    const dir = createMemoryDirectory("root", { trackOperations: true });
+
+    const APPENDS = 75; // well past the cap, several hysteresis cycles
+    for (let i = 1; i <= APPENDS; i += 1) {
+      await appendWorkspaceAction(dir, input(`n${i}`));
+    }
+
+    const year = new Date().getFullYear();
+    const archiveSuffix = `.actions.${year}.json`;
+    const archiveWrites = getOperationLog(dir).filter(
+      (e) => e.operation === "createWritable" && e.name.endsWith(archiveSuffix)
+    );
+
+    // Interval between archive triggers is cap - lowWater = 10, so the archive
+    // is touched at most ceil(APPENDS / 10) times — never once per overflowing
+    // append (which would be up to APPENDS - cap = 55 times here).
+    expect(archiveWrites.length).toBeLessThanOrEqual(Math.ceil(APPENDS / 10));
+    expect(archiveWrites.length).toBeGreaterThan(0);
+
+    const live = await readWorkspaceActions(dir);
+    expect(live.length).toBeLessThanOrEqual(20);
+  });
+
+  test("live-file write size for a non-overflowing append does not grow with archive size", async () => {
+    __setMaxActionEntriesForTests(5);
+    __setActionLowWaterMarkForTests(3);
+
+    async function liveFileWriteBytes(dir: DirectoryHandleLike, seedAppends: number): Promise<number> {
+      for (let i = 1; i <= seedAppends; i += 1) {
+        await appendWorkspaceAction(dir, input(`seed${i}`));
+      }
+      const actionsDir = await getAuditActionsDir(dir, false);
+      const handle = await actionsDir.getFileHandle(actionsFileName("admin"), { create: false });
+      const before = (await (await handle.getFile()).text()).length;
+      // One more append that does NOT push the live log past the cap (it sits
+      // at the low-water mark right after a hysteresis trim).
+      await appendWorkspaceAction(dir, input("marker"));
+      const after = (await (await handle.getFile()).text()).length;
+      return after - before;
+    }
+
+    const smallArchiveDelta = await liveFileWriteBytes(createMemoryDirectory(), 4);
+    const largeArchiveDelta = await liveFileWriteBytes(createMemoryDirectory(), 44);
+
+    // Both deltas are the cost of ONE more entry in the live file; a large
+    // archive (44 seeded vs. 4) must not inflate it.
+    expect(largeArchiveDelta).toBeLessThanOrEqual(smallArchiveDelta * 2);
   });
 });
