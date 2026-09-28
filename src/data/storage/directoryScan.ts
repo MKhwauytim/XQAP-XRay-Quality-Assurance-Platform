@@ -676,11 +676,18 @@ export async function readSegmentTails(
   // an append decide against state that is missing real events.
   const budget: VanishRetryBudget = { remaining: SEGMENT_TAIL_VANISH_RETRY_BUDGET };
   const vanished: string[] = [];
+  const reads: ({ size: number; tail: string | null } | null)[] = new Array(matched.length).fill(null);
 
-  for (const entry of matched) {
-    const name = entry.name;
-    const knownOffset = options.knownOffsets[name] ?? 0;
-    const read = await readListedEntry(
+  // Bounded-parallel, like the sized listing and the bounded signature above:
+  // on the share every open is a round trip, and a sequential walk made each
+  // answer-save attempt pay one per segment in the month (A1). Results are
+  // committed below in `matched` (name) order, so the output is identical to
+  // the sequential walk; the vanish budget object is shared and decremented
+  // on one JS thread, so it remains a total across all segments.
+  await forEachBounded(matched.length, DIRECTORY_READ_CONCURRENCY, async (index) => {
+    const entry = matched[index]!;
+    const knownOffset = options.knownOffsets[entry.name] ?? 0;
+    reads[index] = await readListedEntry(
       dir,
       entry,
       async (file) => ({
@@ -690,6 +697,11 @@ export async function readSegmentTails(
       }),
       budget
     );
+  });
+
+  for (let index = 0; index < matched.length; index += 1) {
+    const name = matched[index]!.name;
+    const read = reads[index] ?? null;
     if (read === null) {
       // Deliberately no sizeByName entry: callers persist sizeByName as the
       // next call's knownOffsets, and recording a size for a segment whose
