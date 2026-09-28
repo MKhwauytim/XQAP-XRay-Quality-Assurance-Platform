@@ -1,4 +1,9 @@
-import { formatStageLabel } from "../population/stageHelpers";
+import {
+  compareStageKeys,
+  getStageKey,
+  stageLabelForKey,
+  type StageAliasMappings,
+} from "../population/stageHelpers";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type {
   ExecutiveReportConfig,
@@ -156,46 +161,60 @@ export function buildPortProfiles(
     .sort((left, right) => right.population - left.population);
 }
 
+/**
+ * Stage profiles in canonical order (C1): first→fourth, "unknown" last, every
+ * label the Arabic level label — never the raw file alias (`FIRST_STAGE`,
+ * `SECOND_STAG`, …) and never first-seen or count order. `stageMappings` is
+ * the workspace alias table (`ExecutiveReportInput.stageMappings`); omitted,
+ * DEFAULT_STAGE_MAPPINGS applies.
+ */
 export function buildStageProfiles(
   rows: ExecutiveReportRow[],
   sample: SampleMasterData | null,
+  stageMappings?: Partial<StageAliasMappings>,
 ): StageProfile[] {
+  const stageKeyOf = (row: ExecutiveReportRow): string => getStageKey(row.stage, stageMappings);
+
   if (sample?.stageAllocations?.length) {
-    return sample.stageAllocations.map((allocation) => {
-      const studied = rows.filter(
-        (row) =>
-          row.selectedInSample &&
-          isRowStudied(row) &&
-          formatStageLabel(row.stage) === allocation.stageLabel,
-      ).length;
-      return {
-        stageKey: allocation.stageKey,
-        stageLabel: allocation.stageLabel,
-        population: allocation.populationSize,
-        sampleSize: allocation.actualDrawn,
-        coverage:
-          allocation.populationSize > 0
-            ? (allocation.actualDrawn / allocation.populationSize) * 100
-            : 0,
-        studied,
-        completionRate: allocation.actualDrawn > 0 ? (studied / allocation.actualDrawn) * 100 : 0,
-      };
-    });
+    return sample.stageAllocations
+      .map((allocation) => {
+        const studied = rows.filter(
+          (row) =>
+            row.selectedInSample &&
+            isRowStudied(row) &&
+            stageKeyOf(row) === allocation.stageKey,
+        ).length;
+        return {
+          stageKey: allocation.stageKey,
+          // Relabelled from the key: a manual-add allocation written before
+          // C1 carries the raw row text as its label (sampleStorage.ts).
+          stageLabel: stageLabelForKey(allocation.stageKey),
+          population: allocation.populationSize,
+          sampleSize: allocation.actualDrawn,
+          coverage:
+            allocation.populationSize > 0
+              ? (allocation.actualDrawn / allocation.populationSize) * 100
+              : 0,
+          studied,
+          completionRate: allocation.actualDrawn > 0 ? (studied / allocation.actualDrawn) * 100 : 0,
+        };
+      })
+      .sort((left, right) => compareStageKeys(left.stageKey, right.stageKey));
   }
 
-  return [...groupRows(rows, (row) => row.stage ?? "غير محدد")].map(
-    ([stageLabel, stageRows], index) => {
+  return [...groupRows(rows, stageKeyOf)]
+    .sort(([left], [right]) => compareStageKeys(left, right))
+    .map(([stageKey, stageRows]) => {
       const sampled = stageRows.filter((row) => row.selectedInSample);
       const studied = sampled.filter(isRowStudied).length;
       return {
-        stageKey: String(index),
-        stageLabel,
+        stageKey,
+        stageLabel: stageLabelForKey(stageKey),
         population: stageRows.length,
         sampleSize: sampled.length,
         coverage: stageRows.length > 0 ? (sampled.length / stageRows.length) * 100 : 0,
         studied,
         completionRate: sampled.length > 0 ? (studied / sampled.length) * 100 : 0,
       };
-    },
-  );
+    });
 }

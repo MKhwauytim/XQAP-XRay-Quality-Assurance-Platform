@@ -12,6 +12,7 @@ import { isRowStudied } from "./executiveReportTypes";
 import { buildPortProfiles, buildStageProfiles } from "./executiveKpiProfiles";
 import { entryDayOf } from "./executive/model/entryDay";
 import { classifyImageResult } from "../population/imageResult";
+import type { StageAliasMappings } from "../population/stageHelpers";
 
 type SubmittedAnswerInfo = {
   answers: FieldAnswer[];
@@ -214,7 +215,8 @@ export function buildExecutiveReportRows(input: ExecutiveReportInput): Executive
 export function calculateExecutiveKPIs(
   rows: ExecutiveReportRow[],
   sample: SampleMasterData | null,
-  config: ExecutiveReportConfig
+  config: ExecutiveReportConfig,
+  stageMappings?: Partial<StageAliasMappings>
 ): ExecutiveKPIs {
   const totalPopulation = rows.length;
   const totalSample = sample?.totalActual ?? rows.filter((r) => r.selectedInSample).length;
@@ -303,7 +305,7 @@ export function calculateExecutiveKPIs(
   );
 
   const portProfiles = buildPortProfiles(rows, config);
-  const stageProfiles = buildStageProfiles(rows, sample);
+  const stageProfiles = buildStageProfiles(rows, sample, stageMappings);
 
   return {
     totalPopulation,

@@ -6,6 +6,12 @@
 // shared home so retiring that builder doesn't break Executive reporting.
 
 import type { DistributionCurrentData } from "../../../distribution/distributionTypes";
+import {
+  compareStageKeys,
+  getStageKey,
+  stageLabelForKey,
+  type StageAliasMappings,
+} from "../../../population/stageHelpers";
 import { formatMonthLabel } from "../../shared/reportChrome";
 
 /** Percentage of n over d, or null when the denominator is empty (renders "—"). */
@@ -68,13 +74,18 @@ export type DistributionModel = {
 
 /** Group distribution entries into per-key buckets (stage or port), each with
  *  a per-employee breakdown. Bucket order: highest total first (ties → key
- *  ascending, for deterministic output). Employee order within a bucket:
- *  highest assigned first (ties → username ascending). */
+ *  ascending, for deterministic output) unless `options.compareKeys` is given
+ *  — the stage grouping passes `compareStageKeys` (C1: first→fourth, unknown
+ *  last). `options.labelOf` turns a key into its display label (default: the
+ *  key itself). Employee order within a bucket: highest assigned first (ties →
+ *  username ascending). */
 function groupEntries(
   entries: DistributionCurrentData["entries"],
   keyOf: (e: DistributionCurrentData["entries"][number]) => string,
   nameOf: (u: string) => string,
+  options: { labelOf?: (key: string) => string; compareKeys?: (a: string, b: string) => number } = {},
 ): DistributionBucket[] {
+  const { labelOf = (key: string) => key, compareKeys } = options;
   const buckets = new Map<string, Map<string, BucketEmployeeStat>>();
   for (const e of entries) {
     const key = keyOf(e) || "غير محدد";
@@ -95,15 +106,18 @@ function groupEntries(
         .sort((a, b) => b.assigned - a.assigned || a.username.localeCompare(b.username));
       const totalAssigned = employees.reduce((s, e) => s + e.assigned, 0);
       const totalCompleted = employees.reduce((s, e) => s + e.completed, 0);
-      return { key, label: key, totalAssigned, totalCompleted, completionRate: ratePct(totalCompleted, totalAssigned), employees };
+      return { key, label: labelOf(key), totalAssigned, totalCompleted, completionRate: ratePct(totalCompleted, totalAssigned), employees };
     })
-    .sort((a, b) => b.totalAssigned - a.totalAssigned || a.key.localeCompare(b.key));
+    .sort((a, b) =>
+      compareKeys ? compareKeys(a.key, b.key) : b.totalAssigned - a.totalAssigned || a.key.localeCompare(b.key),
+    );
 }
 
 export function computeDistributionModel(
   data: DistributionCurrentData,
   monthFolderName: string,
   employeeDisplayNames: Record<string, string> = {},
+  stageMappings?: Partial<StageAliasMappings>,
 ): DistributionModel {
   const nameOf = (u: string): string => employeeDisplayNames[u] ?? u;
 
@@ -155,7 +169,10 @@ export function computeDistributionModel(
     totalRequested,
     completionRate: ratePct(data.totalCompleted, data.totalAssigned),
     employees,
-    byStage: groupEntries(data.entries, (e) => e.row.stage ?? "غير محدد", nameOf),
+    byStage: groupEntries(data.entries, (e) => getStageKey(e.row.stage, stageMappings), nameOf, {
+      labelOf: stageLabelForKey,
+      compareKeys: compareStageKeys,
+    }),
     byPort: groupEntries(data.entries, (e) => e.row.portName ?? "غير محدد", nameOf),
     highlights,
   };

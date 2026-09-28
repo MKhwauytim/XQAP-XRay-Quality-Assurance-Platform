@@ -170,14 +170,12 @@ function richFourStageModel(): ReportModel {
 /**
  * A GAP fixture — only المستوى الرابع (level 4, small population) and
  * المستوى الثاني (level 2, large population) have any rows; levels 1 and 3
- * are entirely absent from `model.population.byStage`. Level 4's (smaller)
- * rows come FIRST, so `stages` is `[level4, level2]` — array positions
- * [0, 1]. Position-based indexing (the pre-2026-07-28 bug class) would pair
- * position 0 with level 1's tone/ordinal and position 1 with level 2's —
- * both wrong. A magnitude-sort would additionally put level 2 (4 rows)
- * BEFORE level 4 (1 row); this fixture keeps them in encounter order so a
- * "never sorted by size" check has a real divergence to catch, not a
- * coincidence.
+ * are entirely absent from `model.population.byStage`. Level 4's rows come
+ * FIRST in the input, but since C1 (2026-09-28) `byStage` is always in
+ * canonical first→fourth order, so `stages` is `[level2, level4]` — array
+ * positions [0, 1]. Position-based indexing (the pre-2026-07-28 bug class)
+ * would pair position 0 with level 1's tone (gold) and position 1 with level
+ * 2's (blue) — wrong for both level 2 (blue) and level 4 (coral).
  */
 function gapModel(): ReportModel {
   return buildReportModel(
@@ -298,18 +296,16 @@ describe("stage×port Ledger — row/column structural integrity (C1 regression)
 describe("stage×port level-identity resolution — regression for positional (levelIndexForStage) mispairing", () => {
   it("Ledger: each card's tone follows its OWN level, not its array position", () => {
     const model = gapModel();
-    expect(model.population.byStage.map((s) => s.stageLabel)).toEqual(["المستوى الرابع", "المستوى الثاني"]);
+    expect(model.population.byStage.map((s) => s.stageLabel)).toEqual(["المستوى الثاني", "المستوى الرابع"]);
 
     const html = stagePortPopulationSlide(model, 7, 20, true);
     const panel1 = panelSlice(html, 1);
 
-    // Position 0 is level 4: coral, NOT level 1's gold that positional
-    // indexing (array position 0 → STAGE_TONES[0]) would have produced.
+    // Position 1 is level 4: coral, NOT level 2's blue that positional
+    // indexing (array position 1 → STAGE_TONES[1]) would have produced.
     expect(panel1).toContain('class="v2-lg-stage-card v2-stage-port-card coral">');
-    // Position 1 is level 2: blue — asserted explicitly, not assumed correct
-    // by omission (level 2's own tone happens to also sit at STAGE_TONES[1],
-    // so a positional-index bug could coincidentally look right here; the
-    // coral assertion above is what actually catches the bug class).
+    // Position 0 is level 2: blue — NOT level 1's gold (asserted absent
+    // below), which is what positional indexing gives position 0.
     expect(panel1).toContain('class="v2-lg-stage-card v2-stage-port-card blue">');
     expect(panel1).not.toContain('class="v2-lg-stage-card v2-stage-port-card gold">');
 
@@ -318,22 +314,22 @@ describe("stage×port level-identity resolution — regression for positional (l
     expect(panel1).toContain("المستوى الثاني — أعلى 5 من منفذ واحد");
   });
 
-  it("Briefing: rank-row tone follows its OWN level, and display order (never sorted by population size) is preserved", () => {
+  it("Briefing: rank-row tone follows its OWN level, and display order is canonical stage order", () => {
     const model = gapModel();
     const html = stagePortPopulationSlide(model, 7, 20, true);
     const panel2 = panelSlice(html, 2);
 
     expect((panel2.match(/class="v2-bf-rank-row"/g) ?? []).length).toBe(2);
     const labels = [...panel2.matchAll(/<span class="v2-bf-rank-label">([^<]*)<\/span>/g)].map((m) => m[1]);
-    // المستوى الرابع (population 1) comes BEFORE المستوى الثاني (population
-    // 4) — a magnitude sort would reverse this; display/stage order must win.
-    expect(labels).toEqual(["المستوى الرابع", "المستوى الثاني"]);
+    // Canonical stage order (C1): المستوى الثاني before المستوى الرابع,
+    // whatever order the rows arrived in.
+    expect(labels).toEqual(["المستوى الثاني", "المستوى الرابع"]);
 
     const tones = [...panel2.matchAll(/<span class="v2-bf-rank-num (\w+)">/g)].map((m) => m[1]);
-    expect(tones).toEqual(["coral", "blue"]);
+    expect(tones).toEqual(["blue", "coral"]);
 
     const values = [...panel2.matchAll(/<span class="v2-bf-rank-value">([^<]*)<\/span>/g)].map((m) => m[1]);
-    expect(values).toEqual([fmtNum(1), fmtNum(4)]);
+    expect(values).toEqual([fmtNum(4), fmtNum(1)]);
   });
 
   it("Briefing lede tone is PINNED to the page's own assigned tone (gold), never the winning stage's tone (2026-07-28 whole-branch-review fix, B3)", () => {

@@ -7,6 +7,7 @@ import type { EmployeeAnswerFile } from "../answers/answerTypes";
 import type { TemplateSchema } from "../templates/templateTypes";
 import type { DistributionEvent } from "../distribution/distributionTypes";
 import type { SourceRevisions } from "./sourceRevisions";
+import type { StageAliasMappings } from "../population/populationConfig";
 
 export type VerificationCategory =
   | "correct-suspicious"
@@ -325,4 +326,12 @@ export type ExecutiveReportInput = {
    * pointing readers at `processing.summary.json` directly.
    */
   processingSummary?: ProcessingSummaryData | null;
+  /**
+   * The workspace's stage alias table (`config.json` → `stageMappings`),
+   * loaded by the Reports tab (C1). Every stage grouping in the report keys by
+   * `getStageKey(row.stage, stageMappings)` so a custom alias lands in the
+   * same level processing put it in. Optional: callers that omit it classify
+   * against DEFAULT_STAGE_MAPPINGS.
+   */
+  stageMappings?: Partial<StageAliasMappings>;
 };
