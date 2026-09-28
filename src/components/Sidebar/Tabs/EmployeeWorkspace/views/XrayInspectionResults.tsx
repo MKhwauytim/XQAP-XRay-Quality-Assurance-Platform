@@ -19,7 +19,6 @@ import {
 import {
   loadAllEmployeeFiles,
   loadEmployeeAnswers,
-  reconcileAnswersWithLocalMirror,
   setItemQualityNote,
 } from "../../../../../data/answers/answerStorage";
 import { countPendingAnswers } from "../../../../../data/answers/answerLocalMirror";
@@ -269,14 +268,15 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
     }
   }, [selectedMonth]);
 
-  // Reconcile the local IndexedDB backup, then refresh the visible pending
-  // count from it — used both on load and by the 30s retry tick below, so
-  // the count always reflects the outcome of the latest reconciliation
-  // rather than the one before it.
-  const reconcileAndRefreshPendingSyncCount = useCallback(async () => {
-    await reconcileAnswersWithLocalMirror(directoryHandle, selectedMonth, username);
+  // COUNT-ONLY (F14/A1): this view used to both replay pending answers
+  // (`reconcileAnswersWithLocalMirror`, which writes to the workspace file)
+  // and refresh the "not saved yet" count from the outcome. Replay now runs
+  // exclusively through the app-level `PendingAnswerReplayRunner` (mounted
+  // once in AuthGate, covering every page/month/ad-hoc folder with a single
+  // shared in-flight guard) — this view only reads the current pending count.
+  const refreshPendingSyncCount = useCallback(async () => {
     setPendingSyncCount(await countPendingAnswers(selectedMonth, username));
-  }, [directoryHandle, selectedMonth, username]);
+  }, [selectedMonth, username]);
 
   // Load-token guard (mirrors useApprovalData): a slow load for a previously
   // selected month must not clobber a later selection or the falsy-reset above.
@@ -340,14 +340,15 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
           return entry.status !== "replaced";
         });
 
-      // Reconcile this browser's local IndexedDB backup with the file for the
-      // signed-in employee's OWN answers — never for `canSeeAll` (a supervisor
-      // browsing other employees' answers must not mix another employee's
-      // records into or out of this browser's own local mirror). Fire-and-forget:
-      // best-effort by contract (see answerLocalMirror.ts) and must never delay
-      // or fail this render.
+      // Refresh the "not saved yet" count from this browser's local IndexedDB
+      // backup for the signed-in employee's OWN answers — never for
+      // `canSeeAll` (a supervisor browsing other employees' answers has no
+      // own pending queue to show). COUNT-ONLY: the actual replay runs
+      // app-wide via PendingAnswerReplayRunner (see the callback's own doc).
+      // Fire-and-forget: best-effort by contract and must never delay or fail
+      // this render.
       if (!canSeeAll) {
-        void reconcileAndRefreshPendingSyncCount();
+        void refreshPendingSyncCount();
       }
       const answerFiles = canSeeAll
         ? await loadAllEmployeeFiles(directoryHandle, selectedMonth)
@@ -402,7 +403,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
       }
       setLoadState("error");
     }
-  }, [canSeeAll, directoryHandle, reconcileAndRefreshPendingSyncCount, selectedMonth, username]);
+  }, [canSeeAll, directoryHandle, refreshPendingSyncCount, selectedMonth, username]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -411,21 +412,18 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
     return () => window.clearTimeout(timer);
   }, [loadData]);
 
-  // Extra, independent-of-navigation local-backup RETRY tick (owner
-  // requirement, 2026-09-09): every 30s while an employee has their own
-  // results view open, re-run the IndexedDB reconciliation above — mirroring
-  // whatever is currently on disk into this browser's local backup, and
-  // replaying back anything the mirror still has queued as unsynced (a save
-  // that never reached the shared folder — see `markAnswerPendingLocally` in
-  // `answerStorage.ts`) until it succeeds. Skipped entirely for `canSeeAll`
-  // — same reasoning as the loadData call above.
+  // The 30s REPLAY of unsynced answers now runs app-wide
+  // (PendingAnswerReplayRunner, mounted in AuthGate) — for every page, every
+  // month, and every ad-hoc import, not only while this view is open. This
+  // tick only keeps the "not saved yet" count on this view current. Skipped
+  // entirely for `canSeeAll` — same reasoning as the loadData call above.
   useEffect(() => {
     if (canSeeAll || !selectedMonth) return;
     const interval = window.setInterval(() => {
-      void reconcileAndRefreshPendingSyncCount();
+      void refreshPendingSyncCount();
     }, 30_000);
     return () => window.clearInterval(interval);
-  }, [canSeeAll, reconcileAndRefreshPendingSyncCount, selectedMonth]);
+  }, [canSeeAll, refreshPendingSyncCount, selectedMonth]);
 
   // Re-fetch on the app-wide refresh signal (manual toolbar button + periodic
   // sync tick) so results/movements recorded elsewhere show up here too. Family-scoped

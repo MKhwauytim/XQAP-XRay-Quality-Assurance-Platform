@@ -163,3 +163,19 @@ export async function countPendingAnswers(month: string, username: string): Prom
     (record) => record.month === month && record.username === username && !record.synced
   ).length;
 }
+
+/**
+ * Every answer of this user still queued (`synced: false`), across ALL
+ * months and ad-hoc folders — not just the one selected in the UI. A
+ * pending record's `month` is the folder its failed save originally
+ * targeted (a real month folder or an `adhoc-*` synthetic store), so this
+ * is the full set the app-level replay runner (A1) needs to walk.
+ */
+export async function loadPendingAnswerRecords(
+  username: string
+): Promise<Array<{ month: string; item: ItemAnswer }>> {
+  const all = await readAllRecords();
+  return all
+    .filter((record) => record.username === username && !record.synced)
+    .map((record) => ({ month: record.month, item: record.item }));
+}
