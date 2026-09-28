@@ -1816,11 +1816,12 @@ MSG
 
 **Tier:** 2.
 
-**Design:** one shared banner component, fed a count. Reports + KPI: the count comes from `sampleRowsMissingFromPopulation` over the exec input `loadExecInput` already loads (no extra I/O). Report Designer: count of flagged rows `ExecutiveRowsProvider` already builds. Power BI: `runPowerBiExport` returns the count; `population.csv` excludes flagged rows (population-wide file), `sample.csv` includes them. Population save: `saveMonthRun`'s success result carries `sampleOrphanCount` (the Task-3 assessment's `missingCount`, which can be non-zero only for a sample-without-work month) and the Population tab shows a warning when it is non-zero. This is the spec's "integrity check at save and at report time" (the `sampleOrphans` definition of `scanReferentialIntegrity` — sample ids absent from the population — computed from data already in memory rather than by re-reading every family from disk).
+**Design:** one shared banner component, fed a count. Reports + KPI: the count comes from `sampleRowsMissingFromPopulation` over the exec input `loadExecInput` already loads (no extra I/O). Report Designer: count of flagged rows `ExecutiveRowsProvider` already builds. Power BI: a new `runPowerBiExportDetailed` returns `{ manifest, snapshotRowCount }` and `runPowerBiExport` becomes a thin wrapper returning only the manifest (so the golden test's exact-object `toEqual` on the manifest is untouched); `population.csv` excludes flagged rows (population-wide file), `sample.csv` includes them. Population save: `saveMonthRun`'s success result carries `sampleOrphanCount` (the Task-3 assessment's `missingCount`, which can be non-zero only for a sample-without-work month) and the Population tab shows a warning when it is non-zero. This is the spec's "integrity check at save and at report time" (the `sampleOrphans` definition of `scanReferentialIntegrity` — sample ids absent from the population — computed from data already in memory rather than by re-reading every family from disk).
 
 **Files:**
 - Create: `src/components/SampleSnapshotBanner/SampleSnapshotBanner.tsx`, `src/components/SampleSnapshotBanner/SampleSnapshotBanner.css`
 - Modify: `src/data/powerbiExport/exportManager.ts:23-56`
+- Modify: `src/components/Sidebar/Tabs/Reports/index.test.tsx:136-142` (its `exportManager` mock gains the new export)
 - Modify: `src/components/Sidebar/Tabs/Reports/TabView.tsx:239 (state), 320-359 (loadExecInput), 596-597 (pbi), 876 (render)`
 - Modify: `src/components/Sidebar/Tabs/ReportDesigner/renderers/ExecutiveRowsProvider.tsx:50-51, 79-90, 105-110`
 - Modify: `src/data/population/populationStorage.ts` (success arm of `SaveMonthRunResult`; `return { ok: true, monthFolderName }`)
@@ -1833,8 +1834,9 @@ MSG
 - Produces:
   ```ts
   export function SampleSnapshotBanner(props: { count: number }): React.JSX.Element | null;
-  export type PowerBiExportResult = ExportManifest & { snapshotRowCount: number }; // exportManager.ts
-  export async function runPowerBiExport(root, month): Promise<PowerBiExportResult>;
+  export type PowerBiExportResult = { manifest: ExportManifest; snapshotRowCount: number }; // exportManager.ts
+  export async function runPowerBiExportDetailed(root: DirectoryHandleLike, month: string): Promise<PowerBiExportResult>;
+  export async function runPowerBiExport(root: DirectoryHandleLike, month: string): Promise<ExportManifest>; // unchanged signature, now a wrapper
   // SaveMonthRunResult success arm: { ok: true; monthFolderName: string; sampleOrphanCount: number }
   ```
 - Labels: `report_sample_snapshot_banner` (`{count}`), `population_save_sample_orphans_warning` (`{month}`, `{count}`).
@@ -1879,7 +1881,7 @@ import { saveMonthRun } from "../population/populationStorage";
 import { formatMonthFolderName } from "../population/monthFolder";
 import { invalidateMonthLockCache } from "../population/monthLock";
 import { makePopulationRow, makeSampleMaster } from "../population/populationTestFixtures";
-import { runPowerBiExport } from "./exportManager";
+import { runPowerBiExportDetailed } from "./exportManager";
 
 const MONTH = formatMonthFolderName(5, 2026);
 
@@ -1908,11 +1910,11 @@ describe("runPowerBiExport — sampled ids missing from the population (A2)", ()
     const sampled = await saveSampleMaster(root, MONTH, makeSampleMaster([makePopulationRow("P1"), makePopulationRow("S9")]));
     expect(sampled.ok).toBe(true);
 
-    const result = await runPowerBiExport(root, MONTH);
+    const { manifest, snapshotRowCount } = await runPowerBiExportDetailed(root, MONTH);
 
-    expect(result.snapshotRowCount).toBe(1);
-    expect(result.files.find((file) => file.fileName === "population.csv")?.rowCount).toBe(2);
-    expect(result.files.find((file) => file.fileName === "sample.csv")?.rowCount).toBe(2);
+    expect(snapshotRowCount).toBe(1);
+    expect(manifest.files.find((file) => file.fileName === "population.csv")?.rowCount).toBe(2);
+    expect(manifest.files.find((file) => file.fileName === "sample.csv")?.rowCount).toBe(2);
   });
 });
 ```
@@ -1939,7 +1941,7 @@ Append to `src/data/population/populationOverwriteGuard.test.ts`, inside `descri
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `npx vitest run src/components/SampleSnapshotBanner src/data/powerbiExport/exportManager.snapshotRows.test.ts src/data/population/populationOverwriteGuard.test.ts`
-Expected: FAIL — banner module missing; `snapshotRowCount` undefined and `population.csv` has 3 rows; `sampleOrphanCount` undefined.
+Expected: FAIL — banner module missing; `runPowerBiExportDetailed is not a function`; `sampleOrphanCount` undefined.
 
 - [ ] **Step 3: Labels**
 
@@ -1997,7 +1999,7 @@ Create `src/components/SampleSnapshotBanner/SampleSnapshotBanner.css`:
 
 - [ ] **Step 5: Power BI export**
 
-In `exportManager.ts`: add `export type PowerBiExportResult = ExportManifest & { snapshotRowCount: number };`, change the return type to `Promise<PowerBiExportResult>`, and replace from `const allRows: Record<string, unknown>[] = …` to the end of the function with:
+In `exportManager.ts`: add `export type PowerBiExportResult = { manifest: ExportManifest; snapshotRowCount: number };`, rename the existing `export async function runPowerBiExport(` to `export async function runPowerBiExportDetailed(` with return type `Promise<PowerBiExportResult>`, and replace from `const allRows: Record<string, unknown>[] = …` to the end of that function with:
 
 ```ts
   // A2: rows rebuilt from the sample snapshot are not population rows —
@@ -2012,11 +2014,26 @@ In `exportManager.ts`: add `export type PowerBiExportResult = ExportManifest & {
     { fileName: "population.csv", headers: POPULATION_HEADERS, rows: populationRowsOut },
     { fileName: "sample.csv", headers: POPULATION_HEADERS, rows: sampleRowsOut },
   ]);
-  return { ...manifest, snapshotRowCount };
+  return { manifest, snapshotRowCount };
+}
+
+/** The manifest alone — the long-standing contract (golden-tested). */
+export async function runPowerBiExport(root: DirectoryHandleLike, month: string): Promise<ExportManifest> {
+  return (await runPowerBiExportDetailed(root, month)).manifest;
 }
 ```
 
-(`POPULATION_HEADERS` is unchanged, so no CSV gains a column; the golden test stays byte-identical.)
+(`POPULATION_HEADERS` is unchanged, so no CSV gains a column, and `runPowerBiExport` still returns exactly the manifest: the golden test stays byte- and object-identical.)
+
+In `src/components/Sidebar/Tabs/Reports/index.test.tsx`, extend the `exportManager` mock (lines 136-142) so the view's new call resolves:
+
+```ts
+vi.mock("../../../../data/powerbiExport/exportManager", () => ({
+  runPowerBiExport: () => pbiExportMock.impl(),
+  runPowerBiExportDetailed: async () => ({ manifest: await pbiExportMock.impl(), snapshotRowCount: 0 }),
+}));
+```
+(keep the existing comment above `runPowerBiExport`).
 
 - [ ] **Step 6: Reports tab**
 
@@ -2027,13 +2044,24 @@ In `Reports/TabView.tsx`:
   ```ts
     setSnapshotRowCount(sampleRowsMissingFromPopulation(populationFinal.rows as unknown as PreparedPopulationRow[], sample ?? null).length);
   ```
-- in `handlePbiExport`, after `setPbiResult(manifest);` add `setSnapshotRowCount(manifest.snapshotRowCount);`
+- in `handlePbiExport`, replace
+  ```ts
+      const { runPowerBiExport } = await import("../../../../data/powerbiExport/exportManager");
+      const manifest = await runPowerBiExport(directoryHandle, selectedMonth);
+  ```
+  with
+  ```ts
+      const { runPowerBiExportDetailed } = await import("../../../../data/powerbiExport/exportManager");
+      const { manifest, snapshotRowCount: exportSnapshotRows } = await runPowerBiExportDetailed(directoryHandle, selectedMonth);
+      setSnapshotRowCount(exportSnapshotRows);
+  ```
+  (the following `logExport("power-bi"); setPbiResult(manifest);` lines are unchanged).
 - directly after the closing `</div>` of `<div className="rh-header">…</div>` add `<SampleSnapshotBanner count={snapshotRowCount} />`.
 - add a month-reset effect next to the other `selectedMonth` effects: `useEffect(() => { setSnapshotRowCount(0); }, [selectedMonth]);` with the same `// eslint-disable-next-line react-hooks/set-state-in-effect -- reset the per-month banner when the month changes` comment style used in this file.
 
 - [ ] **Step 7: Report Designer**
 
-In `ExecutiveRowsProvider.tsx`: import `SampleSnapshotBanner`; add `const [snapshotCount, setSnapshotCount] = useState(0);` after `loadError`'s state; after `const execRows = buildExecutiveReportRows({ … });` add `if (!cancelled) setSnapshotCount(execRows.filter((row) => row.fromSampleSnapshot).length);`; in the returned JSX, directly after the `{loadError && ( … )}` block add `<SampleSnapshotBanner count={snapshotCount} />`.
+In `ExecutiveRowsProvider.tsx`: add `import { SampleSnapshotBanner } from "../../../../SampleSnapshotBanner/SampleSnapshotBanner";`; add `const [snapshotCount, setSnapshotCount] = useState(0);` after `loadError`'s state; after `const execRows = buildExecutiveReportRows({ … });` add `if (!cancelled) setSnapshotCount(execRows.filter((row) => row.fromSampleSnapshot).length);`; in the returned JSX, directly after the `{loadError && ( … )}` block add `<SampleSnapshotBanner count={snapshotCount} />`.
 
 - [ ] **Step 8: Population save result + warning**
 
@@ -2057,7 +2085,7 @@ In `Population/index.tsx`, inside `if (result.ok) {` replace the `setSaveToDiskM
 
 - [ ] **Step 9: Run the tests to verify they pass**
 
-Run: `npx vitest run src/components/SampleSnapshotBanner src/data/powerbiExport src/data/population/populationOverwriteGuard.test.ts`
+Run: `npx vitest run src/components/SampleSnapshotBanner src/data/powerbiExport src/data/population/populationOverwriteGuard.test.ts src/components/Sidebar/Tabs/Reports`
 Expected: PASS (including `exportManager.golden.test.ts`, unchanged).
 
 - [ ] **Step 10: Gates + complexity**
@@ -2072,7 +2100,7 @@ Run: `npm run editlog -- --tier=2 --append --sync-package "Add (reporting): warn
 - [ ] **Step 12: Commit**
 
 ```bash
-git add src/components/SampleSnapshotBanner src/data/powerbiExport/exportManager.ts src/data/powerbiExport/exportManager.snapshotRows.test.ts src/components/Sidebar/Tabs/Reports/TabView.tsx src/components/Sidebar/Tabs/ReportDesigner/renderers/ExecutiveRowsProvider.tsx src/data/population/populationStorage.ts src/data/population/populationOverwriteGuard.test.ts src/components/Sidebar/Tabs/Population/index.tsx src/data/labels/labelsStore.ts "docs/edit logs" package.json
+git add src/components/SampleSnapshotBanner src/data/powerbiExport/exportManager.ts src/data/powerbiExport/exportManager.snapshotRows.test.ts src/components/Sidebar/Tabs/Reports/TabView.tsx src/components/Sidebar/Tabs/Reports/index.test.tsx src/components/Sidebar/Tabs/ReportDesigner/renderers/ExecutiveRowsProvider.tsx src/data/population/populationStorage.ts src/data/population/populationOverwriteGuard.test.ts src/components/Sidebar/Tabs/Population/index.tsx src/data/labels/labelsStore.ts "docs/edit logs" package.json
 git commit -m "$(cat <<'MSG'
 Add (reporting): sample-snapshot warning banner and save-time orphan warning
 
