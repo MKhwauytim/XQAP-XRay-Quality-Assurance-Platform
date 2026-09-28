@@ -210,6 +210,8 @@ const PINNED_MEANINGS: Record<string, string> = {
     "saving the processed population to disk threw",
   "XQ-POP-008":
     "A2 overwrite guard (saveMonthRunLocked): the month's existing sample/distribution/answers could not be read (strictly) to check whether a population overwrite would orphan them — the save is refused rather than risking a silent orphan, since a read failure must never be read as \"no work\"",
+  "XQ-POP-009":
+    "A2 mandatory archive (archiveBeforeOverwrite, required: true): the verified byte-copy of population.final.json to its *.superseded.json archive threw or failed its read-back verification before the overwrite — the save is refused rather than overwriting the only full copy without a proven-good backup next to it",
   "XQ-DIST-001":
     "a distribution action threw; the raw detail went to the error log",
   "XQ-DIST-002":

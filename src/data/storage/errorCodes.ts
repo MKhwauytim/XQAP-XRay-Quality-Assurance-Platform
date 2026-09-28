@@ -426,6 +426,11 @@ export const ERROR_CODES = {
       "A2 overwrite guard (saveMonthRunLocked): the month's existing sample/distribution/answers could not be read (strictly) to check whether a population overwrite would orphan them — the save is refused rather than risking a silent orphan, since a read failure must never be read as \"no work\"",
     labelKey: "err_pop_008_overwrite_check_unreadable",
   },
+  "XQ-POP-009": {
+    meaning:
+      "A2 mandatory archive (archiveBeforeOverwrite, required: true): the verified byte-copy of population.final.json to its *.superseded.json archive threw or failed its read-back verification before the overwrite — the save is refused rather than overwriting the only full copy without a proven-good backup next to it",
+    labelKey: "err_pop_009_archive_verify_failed",
+  },
 
   // ── DIST: distribution and its event log ─────────────────────────────────
   "XQ-DIST-001": {

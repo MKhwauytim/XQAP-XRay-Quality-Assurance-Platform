@@ -1,4 +1,4 @@
-import { codedMessage, logCodedError, resolveErrorCode } from "../storage/errorCodes";
+import { codedMessage, logCodedError, resolveErrorCode, taggedError } from "../storage/errorCodes";
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
 import {
   safeWriteJson,
@@ -7,10 +7,11 @@ import {
   readEnvelopeRevision,
   readDecodedFileTextOutcome,
   copyFileBytes,
+  copyFileBytesVerified,
+  safeRemoveJson,
   isCompressedFile,
   type SafeWriteProgressPhase,
 } from "../storage/safeWrite";
-import { isNotFoundError } from "../storage/transientFileErrors";
 import { casLoop } from "../storage/casLoop";
 import { mapWithConcurrency } from "../storage/concurrency";
 import { withResourceLock } from "../storage/webLocks";
@@ -316,19 +317,43 @@ export function supersededFileName(liveName: string, stamp: string): string {
 
 /**
  * A2: byte-copy `liveName` aside before it is overwritten. Returns the archive
- * name, or null when there was nothing to archive. A byte copy, like the
- * compressed-raw branch of `archiveExistingRaw`: the archive is the original
- * record, and `safeReadJson`'s dual read opens it whichever framing it has.
+ * name, or null when there was nothing to archive.
  *
- * `required: true` (population.final.json) turns an archive failure into a
- * thrown error, so the caller's save is refused rather than overwriting the
- * only full copy; otherwise failures are logged and the save proceeds.
+ * `required: true` (population.final.json) turns a verification failure into
+ * a thrown, coded (`XQ-POP-009`) error, so the caller's save is refused
+ * rather than overwriting the only full copy with an unverified — possibly
+ * torn or short — archive sitting next to it; otherwise failures are logged
+ * and the save proceeds, matching `archiveExistingRaw`'s existing best-effort
+ * contract for the raw JSON archives.
  *
- * F5: existence is checked through `dir.getFileHandle` guarded by
- * `isNotFoundError` (the storage layer's own classifier for "this entry does
- * not exist" — see `transientFileErrors.ts`), not a raw try/catch on error
- * name; the byte copy itself goes through `copyFileBytes`, the storage
- * layer's own primitive, never a direct read/write pair.
+ * F5 / review fix round 1: this used to probe existence itself via a plain
+ * `dir.getFileHandle(liveName, { create: false })` and then copy with the
+ * unverified `copyFileBytes`. Two bugs followed from that: (1) that probe had
+ * no `retryMissing`, so a transient SMB directory-listing lag on an
+ * ACTUALLY-existing `population.final.json` reported `NotFoundError`, the
+ * function returned `null` ("nothing to archive") even under `required:
+ * true`, and the save proceeded to overwrite the live file with zero backup;
+ * (2) `copyFileBytes` never reads its own output back, so a torn/short copy
+ * (share dropped mid-flush, disk full) counted as a successful archive and
+ * the live file was then overwritten with nothing recoverable next to it.
+ * `copyFileBytesVerified` (`safeWrite.ts`) is the storage layer's own
+ * primitive for exactly this: it never decodes (byte-for-byte, handles a
+ * compressed source correctly), reads the copy back, and compares its size
+ * and a digest against the bytes it read from the source — so a torn copy is
+ * reported, not silently accepted. `source_missing` from it is the ordinary
+ * "no live file yet" case (a first save) and stays `null` under `required`
+ * too — that case has nothing to archive, which is not a failure.
+ *
+ * KNOWN GAP, not fixed here: `copyFileBytesVerified`'s SOURCE read
+ * (`openFile(sourceDir, sourceName)`, no `retryMissing` passed) does not
+ * retry a transient `NotFoundError` on the source the way `copyFileBytes`
+ * does (`{ retryMissing: true }`) — see its definition in `safeWrite.ts`. A
+ * genuine SMB listing-lag NotFound on the source is therefore still reported
+ * as `source_missing` (→ `null`, "nothing to archive") without a retry here.
+ * Fixing that means changing `copyFileBytesVerified` itself, which is a
+ * shared primitive with other existing callers outside this module's scope —
+ * flagged for the storage-layer owner rather than patched inline in this
+ * task.
  */
 export async function archiveBeforeOverwrite(
   dir: DirectoryHandleLike,
@@ -336,23 +361,47 @@ export async function archiveBeforeOverwrite(
   stamp: string,
   options: { required?: boolean } = {}
 ): Promise<string | null> {
-  try {
-    await dir.getFileHandle(liveName, { create: false });
-  } catch (error) {
-    if (isNotFoundError(error)) return null;
-    if (options.required) throw error;
-    logError("population:archive-superseded", error);
-    return null;
-  }
   const archiveName = supersededFileName(liveName, stamp);
+  let outcome;
   try {
-    await copyFileBytes(dir, liveName, dir, archiveName);
-    return archiveName;
+    outcome = await copyFileBytesVerified(dir, liveName, dir, archiveName);
   } catch (error) {
+    // copyFileBytesVerified opens its target via `getFileHandle(..., { create:
+    // true })` before it ever reads the source, so a source read that fails
+    // mid-copy (this catch) still leaves a 0-byte `archiveName` behind. Clean
+    // it up rather than leaving an empty, misleading "archive" next to the
+    // live file — best-effort: a failure here must never mask the original
+    // copy failure above it. `safeRemoveJson`, not a raw `removeEntry`: it is
+    // the storage layer's own delete primitive (lint-enforced everywhere
+    // else in this codebase); its `.tmp`/`.bak` sibling cleanup is a no-op
+    // here (this is a fresh byte-copy target, never a `safeWriteJson`
+    // envelope), but the plain-live-name removal is exactly what is needed.
+    await safeRemoveJson(dir, archiveName).catch(() => {});
+    if (options.required) {
+      throw taggedError(
+        "XQ-POP-009",
+        `Archiving ${liveName} before overwrite threw.`,
+        { cause: error }
+      );
+    }
+    logError("population:archive-superseded", error);
+    return null;
+  }
+  if (outcome.status === "source_missing") return null;
+  if (outcome.status === "verify_failed") {
+    // Same stray-file cleanup as above (see that comment): a verify_failed
+    // outcome still landed whatever bytes it managed to write at
+    // `archiveName` before the read-back proved them wrong.
+    await safeRemoveJson(dir, archiveName).catch(() => {});
+    const error = taggedError(
+      "XQ-POP-009",
+      `Archiving ${liveName} before overwrite failed verification: ${outcome.detail}`
+    );
     if (options.required) throw error;
     logError("population:archive-superseded", error);
     return null;
   }
+  return archiveName;
 }
 
 export async function saveMonthRun(

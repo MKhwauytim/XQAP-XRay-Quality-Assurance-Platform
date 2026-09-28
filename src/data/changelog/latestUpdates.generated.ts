@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v140.7",
+    "date": "2026-09-28",
+    "bucket": "fix",
+    "scope": "population",
+    "title": "verified/atomic archives and refusal-path coverage for the A2 mandatory backup"
+  },
+  {
     "version": "v140.6",
     "date": "2026-09-28",
     "bucket": "feature",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "storage",
     "title": "bound the nested retry budget and stop the damaged-file trap behind the XQ-IO-036 failures"
-  },
-  {
-    "version": "v137.2",
-    "date": "2026-09-15",
-    "bucket": "redesign",
-    "scope": "referrals",
-    "title": "extract the column-preset writers and the queue shell to get back under the complexity budget"
   }
 ];
