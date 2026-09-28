@@ -23,6 +23,7 @@ import { ReadOnlyModeError } from "../storage/readOnlyMode";
 import { answerDraftKey, clearAnswerDraft } from "./answerDraftStore";
 import { backfillMirrorFromDisk, loadPendingAnswerRecords, mirrorAnswerLocally } from "./answerLocalMirror";
 import type { ItemAnswer } from "./answerTypes";
+import { compareSavedAt } from "./savedAt";
 
 export type PendingReplayDeps = {
   loadPending: (username: string) => Promise<Array<{ month: string; item: ItemAnswer }>>;
@@ -235,7 +236,7 @@ async function runReplayPendingAnswers(
 
     for (const item of items) {
       const current = onDisk.get(item.xrayImageId);
-      if (current && current.lastSavedAt >= item.lastSavedAt) {
+      if (current && compareSavedAt(current.lastSavedAt, item.lastSavedAt) >= 0) {
         // The workspace already holds this answer (or a newer one): only the
         // queue entry is stale. The draft is left alone — it may hold edits
         // made after the failed save.

@@ -430,7 +430,9 @@ describe("replayPendingAnswers clears the pending count end-to-end (CRITICAL fix
     // ...but this browser's own local mirror still (wrongly) thinks it's
     // pending -- e.g. the tab crashed right after a successful save but
     // before its own post-success mirror call landed.
-    await answerLocalMirror.markAnswerPendingLocally(MONTH, "emp1", answer("XR-2", "2026-09-28T09:00:00.000Z"));
+    // (Same lastSavedAt as the disk copy: an OLDER failed save can no longer
+    // overwrite a newer record -- see shouldQueueMirrorRecord.)
+    await answerLocalMirror.markAnswerPendingLocally(MONTH, "emp1", answer("XR-2", "2026-09-28T10:00:00.000Z"));
     expect(await answerLocalMirror.countPendingAnswers(MONTH, "emp1")).toBe(1);
 
     const summary = await replayPendingAnswers(root, "emp1");

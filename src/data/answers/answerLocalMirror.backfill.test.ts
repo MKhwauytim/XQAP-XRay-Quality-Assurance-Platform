@@ -212,3 +212,46 @@ describe("mirrorAnswerLocally (CRITICAL, fix round 3, real fake-IDB end-to-end)"
     expect(stored?.item.lastSavedAt).toBe("2026-09-28T11:00:00.000Z");
   });
 });
+
+// Follow-up (16b): an OLDER save that fails late must not replace a NEWER
+// pending edit already queued for the same item.
+describe("markAnswerPendingLocally (older failed save vs newer pending, real fake-IDB)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("pending T2, then mark-pending T1 (older) -> T2 is kept", async () => {
+    const { fakeIndexedDb, table } = createFakeIndexedDb<StoredRecord>();
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+
+    await markAnswerPendingLocally(MONTH, "emp1", item("IMG-6", "2026-09-28T12:00:00.000Z"));
+    await markAnswerPendingLocally(MONTH, "emp1", item("IMG-6", "2026-09-28T10:00:00.000Z"));
+
+    const stored = table.get("5-may-2026::emp1::IMG-6");
+    expect(stored?.synced).toBe(false);
+    expect(stored?.item.lastSavedAt).toBe("2026-09-28T12:00:00.000Z");
+    expect(await countPendingAnswers(MONTH, "emp1")).toBe(1);
+  });
+
+  it("pending T1, then mark-pending T2 (newer) -> T2 replaces it and stays pending", async () => {
+    const { fakeIndexedDb, table } = createFakeIndexedDb<StoredRecord>();
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+
+    await markAnswerPendingLocally(MONTH, "emp1", item("IMG-7", "2026-09-28T10:00:00.000Z"));
+    await markAnswerPendingLocally(MONTH, "emp1", item("IMG-7", "2026-09-28T12:00:00.000Z"));
+
+    const stored = table.get("5-may-2026::emp1::IMG-7");
+    expect(stored?.synced).toBe(false);
+    expect(stored?.item.lastSavedAt).toBe("2026-09-28T12:00:00.000Z");
+  });
+
+  it("an equal-timestamp legacy stamp (no milliseconds) still writes and stays pending", async () => {
+    const { fakeIndexedDb, table } = createFakeIndexedDb<StoredRecord>();
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+
+    await markAnswerPendingLocally(MONTH, "emp1", item("IMG-8", "2026-09-28T10:00:00.000Z"));
+    await markAnswerPendingLocally(MONTH, "emp1", item("IMG-8", "2026-09-28T10:00:00Z"));
+
+    expect(table.get("5-may-2026::emp1::IMG-8")?.synced).toBe(false);
+  });
+});
