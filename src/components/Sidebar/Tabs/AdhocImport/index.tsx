@@ -1282,6 +1282,13 @@ export default function AdhocImportTab() {
             count: String(plan.leftover),
           });
         }
+        // The assignment itself is fully durable (distribution events + this
+        // import's own record) — only the shared index listing failed to
+        // refresh. That is a degraded success, never a failure: surface it as
+        // a distinct warning instead of erroring the whole assign.
+        if (result.indexDegraded) {
+          message += " " + L.adhoc_import_assign_index_degraded;
+        }
         setNotice(message);
         await refreshIndex();
       } catch (err) {

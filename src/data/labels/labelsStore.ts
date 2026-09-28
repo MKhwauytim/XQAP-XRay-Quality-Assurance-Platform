@@ -1325,6 +1325,7 @@ export const DEFAULT_LABELS = {
   adhoc_import_assign_failed:          "تعذّر التعيين: {error}",
   adhoc_import_assign_success:         "تم تعيين {count} صف بنجاح.",
   adhoc_import_assign_skipped:         "({count} صف كان مُعيَّناً بالفعل وتم تجاوزه.)",
+  adhoc_import_assign_index_degraded:  "تنبيه: تم التعيين وحُفظ بنجاح، لكن تعذّر تحديث فهرس قائمة الاستيرادات اليدوية. قد تظهر القائمة بأعداد قديمة مؤقتاً وستُصحَّح تلقائياً عند الحفظ التالي — يمكنك أيضاً تحديث الصفحة الآن.",
   adhoc_import_scope_note:             "لا يُكتب أي شيء داخل مجلد الشهر المعالج الحقيقي (1-population) — بيانات هذا الاستيراد معزولة تماماً عن مجتمع الأشهر الرسمية.",
 
   // ── Ad-hoc import — paste source, mapping workbench, value mapping ──────

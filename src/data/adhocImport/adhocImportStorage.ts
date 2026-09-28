@@ -9,6 +9,7 @@ import { normalizeAdhocRecord, toIndexEntry, toLegacyRecord } from "./adhocRecor
 import { adhocMonthFolder, ADHOC_MONTH_FOLDER_PREFIX, importIdFromAdhocMonthFolder } from "./adhocImportModel";
 import { DISTRIBUTION_EVENTS_DIR } from "../distribution/distributionEventStore";
 import { logError } from "../storage/errorLogger";
+import { logCodedError } from "../storage/errorCodes";
 
 const INDEX_FILE = "adhoc-imports.index.json";
 
@@ -18,6 +19,17 @@ function recordFileName(importId: string): string {
 
 const CORRUPT_INDEX_ERROR =
   "تعذّر تحديث فهرس الاستيراد اليدوي: الفهرس الحالي تالف ولا يمكن قراءته، وتحديثه الآن سيحذف عمليات الاستيراد الأخرى.";
+
+/**
+ * A corrupt index, unlike a transient CAS exhaustion, is a PERMANENT condition
+ * a caller must not paper over: blindly proceeding (or retrying) risks the
+ * data-loss shape `readIndexForUpdate`'s own doc describes below. Kept as its
+ * own class so `saveAdhocRecordDetailed` can tell the two apart — a corrupt
+ * index still throws out of `saveAdhocRecord`/`saveAdhocImportRecord`, while a
+ * CAS exhaustion against an otherwise-healthy index degrades instead (see
+ * `saveAdhocRecordDetailed`'s doc).
+ */
+class AdhocIndexCorruptError extends Error {}
 
 /**
  * The index as the read-modify-write below may start from.
@@ -35,7 +47,7 @@ const CORRUPT_INDEX_ERROR =
 async function readIndexForUpdate(dir: DirectoryHandleLike): Promise<AdhocImportIndex> {
   const indexResult = await safeReadJson<AdhocImportIndex>(dir, INDEX_FILE);
   if (!indexResult.ok && indexResult.reason === "corrupt") {
-    throw new Error(CORRUPT_INDEX_ERROR);
+    throw new AdhocIndexCorruptError(CORRUPT_INDEX_ERROR);
   }
   return indexResult.ok ? indexResult.value : { imports: [] };
 }
@@ -102,6 +114,18 @@ export async function loadAdhocRecord(
   return result.ok ? normalizeAdhocRecord(result.value) : null;
 }
 
+/** Result of {@link saveAdhocRecord} — the saved record, plus whether the shared index refresh degraded. */
+export type SaveAdhocRecordResult = {
+  record: AdhocRecord;
+  /**
+   * `true` when the per-import document above committed (and, for
+   * `assignAdhocPlan`, the durable distribution events before it) but the
+   * shared `adhoc-imports.index.json` LISTING could not be refreshed
+   * afterwards. The save itself is NOT a failure — see the try/catch below.
+   */
+  indexDegraded: boolean;
+};
+
 /**
  * CAS read-modify-write of the per-import `{importId}.json` document, then
  * refreshes its index entry — mirrors `templateStorage.ts`'s
@@ -116,6 +140,37 @@ export async function saveAdhocRecord(
   directoryHandle: DirectoryHandleLike,
   record: AdhocRecord
 ): Promise<AdhocRecord> {
+  return (await saveAdhocRecordDetailed(directoryHandle, record)).record;
+}
+
+/**
+ * `saveAdhocRecord`, reporting a degraded index refresh instead of hiding it.
+ *
+ * The per-import document commit (the CAS loop above) is the durable write —
+ * for `assignAdhocPlan` callers it runs after the distribution events are
+ * already on disk, so by the time this function's `updateIndex` call runs, the
+ * assignment itself is real. `adhoc-imports.index.json` is only a rebuildable
+ * LISTING (`readIndexForUpdate`'s own doc), the ad-hoc counterpart of
+ * `appendDistributionEvents`'s `distribution.log.json` projection (b74f968). A
+ * CAS exhaustion on it used to be thrown out of this function and reported as
+ * a failed save — even though the record (and, from `assignAdhocPlan`, the
+ * assignment) had already committed. That turned a committed ad-hoc assign
+ * into «فشل التعيين», and a retry then found the rows already assigned and
+ * refused (errorlog-2026-09-28 §C, `casLoop:exhausted(adhocImport:index)` +
+ * `AdhocImport.assign`, 09-16 06:09).
+ *
+ * Self-repair needs no dedicated code: this import's own next successful call
+ * re-adds its up-to-date entry (`readIndexForUpdate` always starts from
+ * whatever is on disk right now), and a caller reading the index in the
+ * meantime already falls back to a live folder listing —
+ * `listAdhocStoreImportIds` / `adhocStoreHasDistributionEvents`, used by
+ * `adhocImportEmployeeView.ts`'s `storesToOpen` — so a stale-but-not-yet-
+ * refreshed index entry does not hide the assignment from readers either.
+ */
+export async function saveAdhocRecordDetailed(
+  directoryHandle: DirectoryHandleLike,
+  record: AdhocRecord
+): Promise<SaveAdhocRecordResult> {
   const dir = await getAdhocImportsDir(directoryHandle, true);
   const fileName = recordFileName(record.importId);
 
@@ -140,12 +195,27 @@ export async function saveAdhocRecord(
     throw new Error(outcome.error);
   }
 
-  await updateIndex(dir, (entries) => {
-    const withoutThis = entries.filter((e) => e.importId !== record.importId);
-    return [...withoutThis, toIndexEntry(outcome.saved)];
-  });
+  let indexDegraded = false;
+  try {
+    await updateIndex(dir, (entries) => {
+      const withoutThis = entries.filter((e) => e.importId !== record.importId);
+      return [...withoutThis, toIndexEntry(outcome.saved)];
+    });
+  } catch (error) {
+    // A corrupt index is a permanent, data-loss-risking condition (see
+    // `readIndexForUpdate`'s doc) — it still has to reach the caller as a real
+    // failure, never as a degraded success. Only a transient CAS exhaustion
+    // against an otherwise-healthy index is downgraded.
+    if (error instanceof AdhocIndexCorruptError) throw error;
+    indexDegraded = true;
+    logCodedError(
+      "adhocImport:index-degraded",
+      "XQ-IO-032",
+      error instanceof Error ? error : new Error(String(error))
+    );
+  }
 
-  return outcome.saved;
+  return { record: outcome.saved, indexDegraded };
 }
 
 /**

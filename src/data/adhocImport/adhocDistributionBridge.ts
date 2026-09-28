@@ -45,7 +45,7 @@ import type {
   AdhocRowAssignment,
   PlannedAssignment,
 } from "./adhocImportModel";
-import { loadAdhocRecord, saveAdhocRecord } from "./adhocImportStorage";
+import { loadAdhocRecord, saveAdhocRecordDetailed } from "./adhocImportStorage";
 
 /**
  * A `PreparedPopulationRow` carrying the provenance an ad-hoc row needs and a
@@ -383,7 +383,20 @@ export async function ensureAdhocSampleMaster(
 }
 
 export type AssignAdhocPlanResult =
-  | { ok: true; assignedCount: number; skippedCount: number; record: AdhocRecord }
+  | {
+      ok: true;
+      assignedCount: number;
+      skippedCount: number;
+      record: AdhocRecord;
+      /**
+       * `true` when the assignment itself is fully durable (the distribution
+       * events and this import's own record both committed) but the shared
+       * `adhoc-imports.index.json` listing could not be refreshed — see
+       * `saveAdhocRecordDetailed`. Never a reason to treat this as a failure;
+       * callers should surface a distinct "list may be stale" warning instead.
+       */
+      indexDegraded?: boolean;
+    }
   | { ok: false; error: string };
 
 const NO_ELIGIBLE_ROWS = "لا توجد صفوف صالحة قابلة للتعيين ضمن التحديد.";
@@ -521,9 +534,12 @@ export async function assignAdhocPlan(
     return added === undefined ? row : { ...row, assignments: [...row.assignments, ...added] };
   });
 
-  const saved = await saveAdhocRecord(directoryHandle, { ...fresh, rows: nextRows });
+  const { record: saved, indexDegraded } = await saveAdhocRecordDetailed(directoryHandle, {
+    ...fresh,
+    rows: nextRows,
+  });
 
-  return { ok: true, assignedCount: committed.length, skippedCount, record: saved };
+  return { ok: true, assignedCount: committed.length, skippedCount, record: saved, indexDegraded };
 }
 
 /**
