@@ -215,13 +215,15 @@ export async function appendAnswerEventSegment(
   return appendEventSegment<AnswerEvent>(parentDir, events, writer, config);
 }
 
-/** Read only the lines appended past each segment's already-folded byte offset. */
+/** Read only the lines appended past each segment's already-folded byte offset.
+ *  `options.strict` forwards to `readEventSegmentDelta` — see its doc comment. */
 export async function readAnswerEventDelta(
   parentDir: DirectoryHandleLike,
   knownOffsets: Record<string, number>,
-  config: AppendOnlyEventLogConfig = ANSWER_EVENT_LOG
+  config: AppendOnlyEventLogConfig = ANSWER_EVENT_LOG,
+  options?: { strict?: boolean }
 ): Promise<SegmentEventsDelta<AnswerEvent>> {
-  return readEventSegmentDelta<AnswerEvent>(parentDir, knownOffsets, config);
+  return readEventSegmentDelta<AnswerEvent>(parentDir, knownOffsets, config, options);
 }
 
 /* ───────────────────────── the ONE fold order (§4) ──────────────────────── */

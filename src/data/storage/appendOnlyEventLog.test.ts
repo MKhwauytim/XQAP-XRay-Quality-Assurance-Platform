@@ -39,6 +39,7 @@ import {
   MAX_SEGMENT_SEQ,
   type AppendOnlyEventLogConfig,
   type FoldOrderComparison,
+  EventSegmentUnreadableError,
   __resetAppendOnlyEventLogMemosForTests,
   appendEventSegment,
   buildSegmentBaseName,
@@ -907,5 +908,53 @@ describe("readEventSegmentDelta", () => {
     const dir = root();
     await writeSegmentText(dir, name(0), "{not json}\n");
     await expect(loadAll(dir)).rejects.toThrow(/Cannot parse test event segment/);
+  });
+});
+
+/* ─────────────── strict mode (F21 fix round 2): a listed-but-unreadable
+   segment must not silently vanish for a safety-critical caller ─────────── */
+
+describe("readEventSegmentDelta strict option", () => {
+  it("non-strict (default): a segment that fails every retry is silently excluded, as before", async () => {
+    const dir = root();
+    await appendEventSegment(dir, [event("A")], WRITER, TEST_LOG);
+    const segName = (await segmentNames(dir))[0]!;
+    setSimulatedFaults(dir, [
+      { operation: "getFile", name: segName, errorName: "NotReadableError", times: Number.POSITIVE_INFINITY },
+      { operation: "readFile", name: segName, errorName: "NotReadableError", times: Number.POSITIVE_INFINITY },
+    ]);
+
+    const delta = await readEventSegmentDelta<TestEvent>(dir, {}, TEST_LOG);
+    expect(delta.events).toEqual([]);
+    // Listed (it exists), but no offset recorded for it — the "vanished"
+    // contract readSegmentTails documents: an unread segment must not be
+    // marked consumed, so the next read can still pick it up.
+    expect(delta.segmentNames).toEqual([segName]);
+    expect(delta.offsets[segName]).toBeUndefined();
+  });
+
+  it("strict: throws EventSegmentUnreadableError naming the skipped segment instead of excluding it", async () => {
+    const dir = root();
+    await appendEventSegment(dir, [event("A")], WRITER, TEST_LOG);
+    const segName = (await segmentNames(dir))[0]!;
+    setSimulatedFaults(dir, [
+      { operation: "getFile", name: segName, errorName: "NotReadableError", times: Number.POSITIVE_INFINITY },
+      { operation: "readFile", name: segName, errorName: "NotReadableError", times: Number.POSITIVE_INFINITY },
+    ]);
+
+    const rejection = expect(
+      readEventSegmentDelta<TestEvent>(dir, {}, TEST_LOG, { strict: true })
+    ).rejects;
+    await rejection.toBeInstanceOf(EventSegmentUnreadableError);
+    await rejection.toMatchObject({ segmentNames: [segName] });
+  });
+
+  it("strict: a fully readable segment set behaves exactly like non-strict", async () => {
+    const dir = root();
+    await appendEventSegment(dir, [event("A"), event("B")], WRITER, TEST_LOG);
+
+    const lenient = await readEventSegmentDelta<TestEvent>(dir, {}, TEST_LOG);
+    const strict = await readEventSegmentDelta<TestEvent>(dir, {}, TEST_LOG, { strict: true });
+    expect(strict).toEqual(lenient);
   });
 });

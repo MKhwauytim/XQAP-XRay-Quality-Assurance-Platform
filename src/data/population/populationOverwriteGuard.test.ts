@@ -89,18 +89,44 @@ const DISTRIBUTION_READ_FAULTS = [
   { operation: "getFile" as const, name: "distribution.log.json", errorName: "NotReadableError", times: Number.POSITIVE_INFINITY },
 ];
 
-// The answer event segment READ (readSegmentTails/readListedEntry) treats a
-// persistent NotReadableError on an individual `.ndjson` FILE as a vanished
-// listing entry — retried a few times, then silently excluded with no throw
-// (a deliberate share-flakiness tolerance shared with distribution's own
-// segment reads). Faulting only per-file reads therefore can never reproduce
-// the incident. The `answers.events/` DIRECTORY OPEN has no such leniency —
-// `readEventSegmentDelta` only excuses `NotFoundError` there and rethrows
-// anything else — so THAT is what the real fault surfaces as: a share/
-// permission failure serving the directory listing itself, not one segment
-// file going missing.
 const ANSWER_EVENT_READ_FAULTS = [
   { operation: "getDirectoryHandle" as const, name: "answers.events", errorName: "NotReadableError", times: Number.POSITIVE_INFINITY },
+  { operation: "readFile" as const, nameSuffix: ".ndjson", errorName: "NotReadableError", times: Number.POSITIVE_INFINITY },
+  { operation: "getFile" as const, nameSuffix: ".ndjson", errorName: "NotReadableError", times: Number.POSITIVE_INFINITY },
+];
+
+// F21 fix round 2. The two sets above were themselves under-tested: a
+// re-review on a clean copy of the round-1 commit showed the `.ndjson`
+// portion of each set was INERT — with only an individual segment FILE
+// faulted (no directory-open or compatibility-log fault), the guard's
+// distribution/answers read came back with an empty (but not thrown) result,
+// and `saveMonthRun` happily overwrote a worked month. The cause: the
+// underlying segment-tail read (`readSegmentTails`/`readListedEntry` in
+// `directoryScan.ts`) treats a persistent per-file `NotReadableError` as a
+// "vanished" listing entry — retried a bounded number of times, then
+// silently excluded, by design, for ordinary share flakiness. That tolerance
+// sat BELOW where round 1's `strict` flag on `loadAllEmployeeFiles` could see
+// it: the flag only stopped catching an already-thrown error, but this read
+// never threw one in the first place.
+//
+// Fixed at the source: `readEventSegmentDelta` (`appendOnlyEventLog.ts`) now
+// takes `{ strict: true }` and throws `EventSegmentUnreadableError` when a
+// segment it listed could not be read, and that option is threaded all the
+// way from `loadAllEmployeeFiles({ strict: true })` and
+// `loadOrDeriveDistributionCurrentStrictForRead` down to this exact call.
+// These two sets below are the faithful regression case: ONLY the `.ndjson`
+// segment files are faulted, nothing else — the directory-open /
+// compatibility-log faults above are no longer load-bearing for a throw
+// (each set here is sufficient on its own), and are kept above only because
+// they exercise a genuinely different failure surface (a share/permission
+// failure opening the events directory itself, or a corrupt/unreadable
+// `distribution.log.json`), not as a crutch for this one.
+const DISTRIBUTION_NDJSON_SEGMENT_ONLY_FAULTS = [
+  { operation: "readFile" as const, nameSuffix: ".ndjson", errorName: "NotReadableError", times: Number.POSITIVE_INFINITY },
+  { operation: "getFile" as const, nameSuffix: ".ndjson", errorName: "NotReadableError", times: Number.POSITIVE_INFINITY },
+];
+
+const ANSWER_NDJSON_SEGMENT_ONLY_FAULTS = [
   { operation: "readFile" as const, nameSuffix: ".ndjson", errorName: "NotReadableError", times: Number.POSITIVE_INFINITY },
   { operation: "getFile" as const, nameSuffix: ".ndjson", errorName: "NotReadableError", times: Number.POSITIVE_INFINITY },
 ];
@@ -240,6 +266,54 @@ describe("saveMonthRun — overwrite guard (A2)", () => {
     expect(result.overwriteBlocked).toBeUndefined();
     expect(await populationIds(root)).toEqual(["A1", "A2", "A3"]);
   });
+
+  // F21 fix round 2: the FAITHFUL regression case for finding A — ONLY the
+  // distribution's `.ndjson` segment file is unreadable (no directory-open or
+  // distribution.log.json fault). Before the readEventSegmentDelta strict fix
+  // this test failed: distributionCount came back 0 (the segment silently
+  // "vanished") and the overwrite went through. See the fix report for the
+  // exact swap/revert run that proves it.
+  test("refuses, even with confirmedOverwrite, when a distribution segment (only) is unreadable", async () => {
+    const root = createMemoryDirectory("root");
+    await seedMonth(root, { distributed: true, answered: false });
+    setSimulatedFaults(root, DISTRIBUTION_NDJSON_SEGMENT_ONLY_FAULTS);
+
+    const result = await saveMonthRun({
+      directoryHandle: root,
+      ...baseParams,
+      processedRows: rowsFor(["A1", "B9"]),
+      confirmedOverwrite: true,
+    });
+    setSimulatedFaults(root, []);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.overwriteBlocked).toBeUndefined();
+    expect(await populationIds(root)).toEqual(["A1", "A2", "A3"]);
+  });
+
+  // F21 fix round 2: the FAITHFUL regression case for finding B — ONLY the
+  // answer's `.ndjson` segment file is unreadable (no `answers.events/`
+  // directory-open fault). Before the fix, this is EXACTLY the reviewer's
+  // original repro: answerCount came back 0 and the save went through.
+  test("refuses, even with confirmedOverwrite, when an answer segment (only) is unreadable", async () => {
+    const root = createMemoryDirectory("root");
+    await seedMonth(root, { distributed: false, answered: true });
+    setSimulatedFaults(root, ANSWER_NDJSON_SEGMENT_ONLY_FAULTS);
+
+    const result = await saveMonthRun({
+      directoryHandle: root,
+      ...baseParams,
+      processedRows: rowsFor(["Z1"]),
+      confirmedOverwrite: true,
+    });
+    setSimulatedFaults(root, []);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.overwriteBlocked).toBeUndefined();
+    expect(await populationIds(root)).toEqual(["A1", "A2", "A3"]);
+  });
 });
 
 describe("assessPopulationOverwrite", () => {
@@ -279,6 +353,26 @@ describe("assessPopulationOverwrite", () => {
     const root = createMemoryDirectory("root");
     await seedMonth(root, { distributed: false, answered: true });
     setSimulatedFaults(root, ANSWER_EVENT_READ_FAULTS);
+
+    await expect(loadPopulationOverwriteImpact(root, MONTH)).rejects.toBeTruthy();
+    setSimulatedFaults(root, []);
+  });
+
+  // F21 fix round 2, unit level: the faithful ndjson-segment-only regression
+  // case (see the saveMonthRun-level tests above for the full explanation).
+  test("loadPopulationOverwriteImpact throws when a distribution segment (only) is unreadable", async () => {
+    const root = createMemoryDirectory("root");
+    await seedMonth(root, { distributed: true, answered: false });
+    setSimulatedFaults(root, DISTRIBUTION_NDJSON_SEGMENT_ONLY_FAULTS);
+
+    await expect(loadPopulationOverwriteImpact(root, MONTH)).rejects.toBeTruthy();
+    setSimulatedFaults(root, []);
+  });
+
+  test("loadPopulationOverwriteImpact throws when an answer segment (only) is unreadable", async () => {
+    const root = createMemoryDirectory("root");
+    await seedMonth(root, { distributed: false, answered: true });
+    setSimulatedFaults(root, ANSWER_NDJSON_SEGMENT_ONLY_FAULTS);
 
     await expect(loadPopulationOverwriteImpact(root, MONTH)).rejects.toBeTruthy();
     setSimulatedFaults(root, []);

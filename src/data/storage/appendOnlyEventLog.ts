@@ -876,16 +876,52 @@ export type SegmentEventsDelta<TEvent> = {
 };
 
 /**
+ * Thrown by `readEventSegmentDelta(..., { strict: true })` when one or more
+ * matched segment files were listed but could not be read (the retry-then-
+ * "vanished" tolerance `readSegmentTails` applies for every other caller —
+ * see its own doc comment). A safety-critical caller cannot accept "listed,
+ * unreadable, silently treated as if it never existed": a genuinely vanished
+ * file (renamed, removed) and a persistently unreadable one are indistinguishable
+ * from here, and the lenient default exists precisely to tolerate the SMB-share
+ * flakiness that makes the former common — but a guard that must never miscount
+ * an unreadable segment as "no events in it" needs the other read.
+ */
+export class EventSegmentUnreadableError extends Error {
+  readonly segmentNames: string[];
+  constructor(segmentNames: string[], options?: { cause?: unknown }) {
+    super(
+      `Event segment(s) listed but could not be read: ${segmentNames.join(", ")}`,
+      options as ErrorOptions
+    );
+    this.name = "EventSegmentUnreadableError";
+    this.segmentNames = segmentNames;
+  }
+}
+
+/**
  * Read only the event lines appended past each segment's previously-known
  * byte offset (perf: fold-checkpoint). Passing `{}` reads every segment from
  * the start — the same function serves both a cold (full) read and a warm
  * (incremental) one.
+ *
+ * `options.strict` (default false, every existing caller unaffected): when a
+ * matched segment was listed but its read was skipped as "vanished" (a
+ * persistent `NotReadableError`/`NotFoundError` surviving `readSegmentTails`'
+ * own short retry budget), the lenient default silently excludes it — correct
+ * for ordinary share flakiness, wrong for a caller that must never read
+ * "could not check this segment" as "this segment has no events". Strict mode
+ * throws {@link EventSegmentUnreadableError} instead, and — load-bearing for
+ * callers with their own incremental read cache — does so BEFORE building
+ * `offsets`/`events`, so nothing here ever gets a chance to persist a partial
+ * result as if it were complete.
  */
 export async function readEventSegmentDelta<TEvent>(
   parentDir: DirectoryHandleLike,
   knownOffsets: Record<string, number>,
-  config: AppendOnlyEventLogConfig
+  config: AppendOnlyEventLogConfig,
+  options?: { strict?: boolean }
 ): Promise<SegmentEventsDelta<TEvent>> {
+  const strict = options?.strict ?? false;
   let eventsDir: DirectoryHandleLike;
   try {
     eventsDir = await parentDir.getDirectoryHandle(config.eventsDirName, { create: false });
@@ -902,6 +938,18 @@ export async function readEventSegmentDelta<TEvent>(
     suffix: config.segmentSuffix,
     knownOffsets,
   });
+
+  if (strict) {
+    const skipped = matchedNames.filter((name) => !sizeByName.has(name));
+    if (skipped.length > 0) {
+      // Thrown before any of the reads below, and before the cache-shaped
+      // `offsets`/`events` are built — a caller that persists an incremental
+      // read cache (answerStorage.ts's own doc comment says so explicitly)
+      // must never have a chance to write a checkpoint that silently treats
+      // this segment as "read, found nothing new".
+      throw new EventSegmentUnreadableError(skipped);
+    }
+  }
 
   const events: TEvent[] = [];
   for (const name of matchedNames) {

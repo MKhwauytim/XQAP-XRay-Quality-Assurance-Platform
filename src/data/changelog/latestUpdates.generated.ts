@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v140.4",
+    "date": "2026-09-28",
+    "bucket": "fix",
+    "scope": "population",
+    "title": "thread strict reads through the segment-tail primitive itself"
+  },
+  {
     "version": "v140.3",
     "date": "2026-09-28",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "redesign",
     "scope": "history",
     "title": "derive answers and distribution pre-change history from the event logs instead of copying it"
-  },
-  {
-    "version": "v135.1",
-    "date": "2026-09-09",
-    "bucket": "fix",
-    "scope": "history",
-    "title": "decide the action-history path-length verdict before touching the share, not after a full retry ladder"
   }
 ];

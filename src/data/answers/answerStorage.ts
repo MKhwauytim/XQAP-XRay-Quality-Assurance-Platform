@@ -393,12 +393,17 @@ function reflectLocalAppendInAnswerEventsCache(
  */
 export async function readAllAnswerEventsForMonth(
   directoryHandle: DirectoryHandleLike,
-  monthFolderName: string
+  monthFolderName: string,
+  options?: { strict?: boolean }
 ): Promise<AnswerEvent[]> {
   const mainDir = await getSampleMainDir(directoryHandle, monthFolderName, true);
   try {
     const cached = getAnswerEventsCacheEntry(directoryHandle, monthFolderName);
-    const delta = await readAnswerEventDelta(mainDir, cached?.offsets ?? {});
+    // `options.strict` forwards to `readEventSegmentDelta` (appendOnlyEventLog.ts),
+    // which throws EventSegmentUnreadableError — caught here like any other
+    // read failure — BEFORE returning a delta, so a skipped/unreadable segment
+    // can never reach the cache write below as if it had been read cleanly.
+    const delta = await readAnswerEventDelta(mainDir, cached?.offsets ?? {}, undefined, options);
     const events = cached ? new Map(cached.events) : new Map<string, AnswerEvent>();
     for (const event of delta.events) events.set(event.eventId, event);
     setAnswerEventsCacheEntry(directoryHandle, monthFolderName, { events, offsets: delta.offsets });
@@ -1498,7 +1503,7 @@ export async function loadAllEmployeeFiles(
     const [dirStems, allEvents] = await Promise.all([
       listAnswerDirStems(directoryHandle, monthFolderName),
       strict
-        ? readAllAnswerEventsForMonth(directoryHandle, monthFolderName)
+        ? readAllAnswerEventsForMonth(directoryHandle, monthFolderName, { strict: true })
         : readAllAnswerEventsForMonth(directoryHandle, monthFolderName).catch((error: unknown) => {
             logError("answerStorage:loadAllEmployeeFiles:events", error);
             return [] as AnswerEvent[];
