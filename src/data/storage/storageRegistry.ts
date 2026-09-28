@@ -61,6 +61,13 @@ export const STORAGE_REGISTRY: readonly StorageEntry[] = [
     lossConsequence: "A new id is minted. Past events are unaffected; future ids differ.",
   },
   {
+    id: "xray_answer_segment_chain_v1",
+    layer: "local",
+    purpose:
+      "Creation minute of this browser's answer-segment chain per (month, user), so every page load keeps appending to the same answers.events segment instead of starting a new file.",
+    lossConsequence: "The next save starts a new segment chain. No data at risk — every segment is still read.",
+  },
+  {
     id: "xray_last_login_username_v1",
     layer: "local",
     purpose: "Pre-fills the username field on the sign-in screen.",

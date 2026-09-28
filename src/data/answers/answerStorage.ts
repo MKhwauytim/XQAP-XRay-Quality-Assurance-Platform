@@ -40,10 +40,9 @@ import { isNotFoundError } from "../storage/transientFileErrors";
 import { ensureMonthWritable } from "../population/monthLock";
 import { bumpWorkspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
 import { subscribeToDataRefresh } from "../workspace/dataRefreshSignal";
-import {
-  getDistributionDeviceId,
-  getDistributionSessionId,
-} from "../distribution/distributionEventStore";
+import { getDistributionDeviceId } from "../distribution/distributionEventStore";
+import { stableAnswerChain } from "./answerSegmentChain";
+import type { SegmentWriterIdentity, AppendOnlyEventLogConfig } from "../storage/appendOnlyEventLog";
 import {
   ANSWER_EVENTS_DIR,
   ANSWER_EVENT_SEGMENT_SUFFIX,
@@ -700,21 +699,27 @@ export async function loadEmployeeAnswers(
 /* ───────────────────────────── the event-append write path ──────────────── */
 
 /**
- * `getDistributionDeviceId`/`getDistributionSessionId` are reused as-is
- * rather than minting a second, answers-only device/session id pair: device
- * and session identity are a property of the MACHINE and the APP SESSION, not
- * of which consumer is writing, so both should report — and do report — the
- * same values. What keeps the two consumers' segment chains and module-level
- * writer memos from colliding despite sharing device/session ids is
- * `consumerNamespace` (`"ans"` here vs distribution's `"dist"`), baked into
- * `ANSWER_EVENT_LOG`'s config in `answerEventStore.ts` — see
- * `appendOnlyEventLog.ts`'s `segmentMemoKey` for why that alone is sufficient.
+ * The writer chain for one (month, actor) on this browser — STABLE across page
+ * loads (A1, see answerSegmentChain.ts). `deviceId` is the persisted per-browser
+ * id distribution also uses; `consumerNamespace: "ans"` keeps the two
+ * consumers' module-level memos apart (appendOnlyEventLog's `segmentMemoKey`).
+ * `actor` is whoever writes the event: the employee, or the supervisor
+ * answering on their behalf.
  */
-function answerWriterIdentity(directoryHandle: DirectoryHandleLike, monthFolderName: string) {
+function answerWriterIdentity(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  actor: string
+): { writer: SegmentWriterIdentity; config: AppendOnlyEventLogConfig } {
+  const chain = stableAnswerChain(monthFolderName, actor);
   return {
-    deviceId: getDistributionDeviceId(),
-    sessionId: getDistributionSessionId(),
-    scopeId: `${workspaceScopeId(directoryHandle)}|${monthFolderName}`,
+    writer: {
+      deviceId: getDistributionDeviceId(),
+      sessionId: chain.chainId,
+      scopeId: `${workspaceScopeId(directoryHandle)}|${monthFolderName}`,
+      stable: true,
+    },
+    config: chain.config,
   };
 }
 
@@ -802,7 +807,7 @@ async function performAnswerWrite(
   await ensureMonthWritable(directoryHandle, monthFolderName);
   const eventId = crypto.randomUUID();
   const eventAt = nextAnswerEventAt();
-  const writer = answerWriterIdentity(directoryHandle, monthFolderName);
+  const { writer, config: segmentConfig } = answerWriterIdentity(directoryHandle, monthFolderName, username);
   // No pre-change history write here any more. The state a snapshot would have
   // copied is already durable in `answers.events/*.ndjson`, which is
   // append-only and never pruned, so `actionHistoryReaders.ts` derives the same
@@ -866,7 +871,7 @@ async function performAnswerWrite(
       // the answer-save proposal) and never call safeWriteJson for a real
       // save/reopen/note anymore, so they silently lost that protection; this
       // restores an equivalent (a recoverable prior state) for the new model.
-      await appendAnswerEventSegment(mainDir, batch, writer);
+      await appendAnswerEventSegment(mainDir, batch, writer, segmentConfig);
       reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
       return { done: true, result: { ok: true as const } };
     },
@@ -1179,7 +1184,7 @@ async function performOnBehalfWrite(
   await ensureMonthWritable(directoryHandle, monthFolderName);
   const eventId = crypto.randomUUID();
   const eventAt = nextAnswerEventAt();
-  const writer = answerWriterIdentity(directoryHandle, monthFolderName);
+  const { writer, config: segmentConfig } = answerWriterIdentity(directoryHandle, monthFolderName, author);
   const xrayImageId = item.xrayImageId;
 
   const result = await casLoop<{ ok: true } | { ok: false; error: string }>(
@@ -1217,7 +1222,7 @@ async function performOnBehalfWrite(
         reason,
       };
       const batch = seedEvent ? [seedEvent, onBehalfEvent] : [onBehalfEvent];
-      await appendAnswerEventSegment(mainDir, batch, writer);
+      await appendAnswerEventSegment(mainDir, batch, writer, segmentConfig);
       reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
 
       // CONFIRM (§5): fresh read, same comparator, SINGLE-ITEM scope — the
