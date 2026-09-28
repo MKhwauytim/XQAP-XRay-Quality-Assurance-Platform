@@ -40,12 +40,13 @@ async function fileExists(dir: DirectoryHandleLike, name: string): Promise<boole
   }
 }
 
-/** After EVERY landed close() of `name`, the next 6 reads of it throw InvalidStateError. */
+/** After EVERY landed close() of `name`, the next 6 reads of it throw NotReadableError
+ * (what Chromium actually produces for a stale-snapshot read). */
 function staleAfterEveryCommit(name: string) {
   return {
     operation: "readFile" as const,
     name,
-    errorName: "InvalidStateError",
+    errorName: "NotReadableError",
     times: 6,
     rearmAfterClose: true,
   };
@@ -69,6 +70,22 @@ describe("reproduction A: safeWriteJson post-commit read-back throws", () => {
   it("healthy path is unchanged: resolves undefined", async () => {
     const dir = createMemoryDirectory("e3b-a-healthy");
     await expect(safeWriteJson(dir, "t.json", { v: 1 })).resolves.toBeUndefined();
+  });
+
+  it("a persistent (not just stale) index read-back failure is ACCEPTED: one commit, verify-inconclusive logged, .tmp gone", async () => {
+    const root = createMemoryDirectory("e3b-c-index-accept", { trackOperations: true });
+    await getFeedbackThreadsDir(root, true);
+    setSimulatedFaults(root, [{ ...staleAfterEveryCommit("threads.index.json"), times: 12 }]);
+
+    await createThread(root, { from: "u", role: "employee", category: "bug", text: "hello" } as never);
+
+    const commits = getOperationLog(root).filter(
+      (o) => o.operation === "close" && o.name === "threads.index.json"
+    );
+    expect(commits).toHaveLength(1);
+    const contexts = getRecentErrors().map((e) => e.context);
+    expect(contexts.some((c) => c.startsWith("casLoop:verify-inconclusive(feedback:threadsIndex)"))).toBe(true);
+    expect(contexts.filter((c) => c.includes("casLoop:exhausted"))).toEqual([]);
   });
 
   it("a NON-transient read-back error still throws (only stale/transient is downgraded)", async () => {
@@ -146,5 +163,21 @@ describe("reproduction C: a stale window re-armed by every commit", () => {
     setSimulatedFaults(root, []);
     const loaded = await loadSupervisorDecisions(root, month, "sup");
     expect(loaded.decisionEvents).toHaveLength(2);
+  });
+});
+
+describe("the failing step is visible in the exhaustion log", () => {
+  it("a refused commit (close() swap) is logged step=commit, so the export can tell it from a failed read-back", async () => {
+    const root = createMemoryDirectory("e3b-step");
+    await getFeedbackThreadsDir(root, true);
+    setSimulatedFaults(root, [
+      { operation: "close", name: "threads.index.json", errorName: "InvalidStateError", times: Number.POSITIVE_INFINITY },
+    ]);
+
+    await createThread(root, { from: "u", role: "employee", category: "issue", text: "x" });
+
+    const exhausted = getRecentErrors().filter((e) => e.context.includes("casLoop:exhausted(feedback:threadsIndex)"));
+    expect(exhausted).toHaveLength(1);
+    expect(exhausted[0]!.context).toContain("step=commit");
   });
 });

@@ -157,6 +157,38 @@ export function isCommittedUnverified(result: unknown): result is CommittedUnver
   );
 }
 
+/** Which step of `safeWriteJson` an exception came from. */
+export type WriteStep = "stage" | "commit" | "post-commit-readback";
+
+const WRITE_STEP_PROPERTY = "xqWriteStep";
+
+/**
+ * Tag `error` with the safeWriteJson step that raised it (first tag wins; the
+ * error's identity, name and message are untouched, like `tagError`). Lets
+ * `casLoop:exhausted` say WHETHER the write or only its read-back failed.
+ */
+export function tagWriteStep<T>(error: T, step: WriteStep): T {
+  if (error && typeof error === "object" && writeStepOf(error) === null) {
+    try {
+      Object.defineProperty(error, WRITE_STEP_PROPERTY, {
+        value: step,
+        enumerable: false,
+        configurable: true,
+        writable: true,
+      });
+    } catch {
+      // Frozen or exotic object — the step simply isn't carried.
+    }
+  }
+  return error;
+}
+
+export function writeStepOf(error: unknown): WriteStep | null {
+  if (!error || typeof error !== "object") return null;
+  const step = (error as Record<string, unknown>)[WRITE_STEP_PROPERTY];
+  return step === "stage" || step === "commit" || step === "post-commit-readback" ? step : null;
+}
+
 /** Transient on the WRITE/VERIFY path only — see the module doc above. */
 export function isTransientWriteError(error: unknown): boolean {
   return (

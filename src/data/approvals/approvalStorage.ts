@@ -125,6 +125,18 @@ export async function loadAllSupervisorDecisions(
   return values;
 }
 
+/** The identity of one reviewer decision: request, kind, outcome, reviewer and instant. */
+function isSameDecisionEvent(a: DecisionEvent, b: DecisionEvent): boolean {
+  return (
+    a.requestId === b.requestId &&
+    a.kind === b.kind &&
+    a.status === b.status &&
+    a.reviewedBy === b.reviewedBy &&
+    a.reviewedAt === b.reviewedAt &&
+    a.revokesDecisionAt === b.revokesDecisionAt
+  );
+}
+
 export async function appendDecisionEvent(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
@@ -146,8 +158,15 @@ export async function appendDecisionEvent(
       async (writeToken) => {
         const appDir = await getApprovalsDir(directoryHandle, monthFolderName);
         const current = await loadSupervisorDecisions(directoryHandle, monthFolderName, supervisorUsername);
-        const nextRevision = (current.revision ?? 0) + 1;
         const priorEvents = current.decisionEvents ?? [];
+        // Idempotent by the event's own identity, checked BEFORE the next chain
+        // link is computed: a previous attempt of this call whose commit landed
+        // but could not be read back is already in the file. Write nothing.
+        if (priorEvents.some((candidate) => isSameDecisionEvent(candidate, event))) {
+          bumpWorkspaceEpoch(directoryHandle, monthFolderName);
+          return { done: true, result: { ok: true as const } };
+        }
+        const nextRevision = (current.revision ?? 0) + 1;
         // B5: chain this decision to the immediately-preceding one in the file. The
         // hash is stamped here (from stored state), never trusted from the caller.
         const lastEvent = priorEvents[priorEvents.length - 1];
@@ -162,15 +181,17 @@ export async function appendDecisionEvent(
           lastUpdatedAt: new Date().toISOString(),
         };
         const written = await safeWriteJson(appDir, fileName, updated);
-        // E3b: committed-but-unverified is verified once by the token read, or
-        // accepted when that is inconclusive too; never blindly re-committed.
+        // E3b: a commit whose own read-back was stale is verified once by the
+        // token read; see the verdict handling below for an inconclusive one.
         const verdict = await readBackOwnWrite(
           written,
           () => loadSupervisorDecisions(directoryHandle, monthFolderName, supervisorUsername),
           (verify) => verify.revision === nextRevision && verify._writeToken === writeToken,
           "approvals:decisionEvent"
         );
-        if (verdict !== "not-mine") {
+        // Durable audit history: "unconfirmed" is retried, not accepted (the next
+        // attempt finds the event already present, or writes it).
+        if (verdict === "mine") {
           bumpWorkspaceEpoch(directoryHandle, monthFolderName);
           return {
             done: true,

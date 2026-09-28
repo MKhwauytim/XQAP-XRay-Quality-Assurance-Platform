@@ -4,7 +4,7 @@
 // will have stored a different token, making the false-positive revision match detectable.
 
 import { codedMessage, logCodedError, resolveErrorCode, type ErrorCode } from "./errorCodes";
-import { isCommittedUnverified, isTransientWriteError } from "./transientFileErrors";
+import { isCommittedUnverified, isTransientWriteError, writeStepOf } from "./transientFileErrors";
 import {
   isDeadlineExpired,
   nextRetryDelayMs,
@@ -72,10 +72,13 @@ function isPermissionLostError(error: unknown): boolean {
  * ONCE, with no waiting:
  *   - it returns our token   -> "mine" (verified);
  *   - it returns someone else -> "not-mine" (a real lost race; retry);
- *   - it throws a transient error -> "unconfirmed": the write provably landed
- *     (byte-exact `.tmp` verify + a resolved close()), so we accept it and log
- *     `casLoop:verify-inconclusive` instead of re-committing, which is what
- *     re-armed the same stale window on every retry.
+ *   - it throws a transient error -> "unconfirmed": logged as
+ *     `casLoop:verify-inconclusive`. The write very likely landed (byte-exact
+ *     `.tmp` verify + a resolved close()) but there is no positive evidence.
+ *     The CALLER decides: a rebuildable cache (the feedback threads index)
+ *     accepts it; DURABLE content (feedback replies, decision events) retries,
+ *     and is made idempotent by its own id so the retry either finds its write
+ *     already present (writes nothing) or writes it (no loss, no duplicate).
  * A non-transient error still propagates.
  */
 export async function readBackOwnWrite<V>(
@@ -278,8 +281,13 @@ export async function casLoop<T>(
     // An exception beat us, so this is NOT a write conflict — report what it
     // actually was, with a quotable code, and put the raw detail in the log.
     const code = resolveErrorCode(lastCause) ?? "XQ-IO-032";
+    // Which step of safeWriteJson threw (stage / commit / post-commit read-back),
+    // when known: a refused close() swap (nothing written) and an unreadable
+    // read-back (written) need opposite responses and look identical otherwise.
+    const step = writeStepOf(lastCause);
     logCodedError(
-      options?.context ? `casLoop:exhausted(${options.context})` : "casLoop:exhausted",
+      (options?.context ? `casLoop:exhausted(${options.context})` : "casLoop:exhausted") +
+        (step ? ` step=${step}` : ""),
       code,
       lastCause
     );

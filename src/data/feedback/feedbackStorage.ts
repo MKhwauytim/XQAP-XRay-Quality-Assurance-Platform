@@ -13,6 +13,13 @@ import { logError } from "../storage/errorLogger";
 export type FeedbackCategory = "suggestion" | "issue" | "inquiry";
 
 export interface FeedbackReply {
+  /**
+   * Stable identity of THIS reply, stamped once per `appendReply` call. Makes the
+   * append idempotent across casLoop attempts: an attempt that finds its own id
+   * already in the thread knows the write landed and writes nothing. Optional,
+   * so replies written before it existed still parse.
+   */
+  id?: string;
   from: string;
   role: string;
   text: string;
@@ -417,6 +424,8 @@ export async function appendReply(
   const threadsDir = await getFeedbackThreadsDir(dir, true);
   const fileName = feedbackThreadFileName(threadId);
   let statusChanged = false;
+  // One identity per CALL (not per attempt): see FeedbackReply.id.
+  const storedReply: FeedbackReply = { ...reply, id: reply.id ?? crypto.randomUUID() };
 
   const outcome = await withResourceLock(`${threadsDir.name}/${fileName}:rmw`, () =>
     casLoop<{ ok: true; thread: FeedbackThread }>(
@@ -428,13 +437,20 @@ export async function appendReply(
           throw new Error(`Feedback thread not found: ${threadId}`);
         }
         const current = normalizeThread(existing.value);
+        // Idempotent by reply id: a previous attempt of THIS call whose commit
+        // landed but could not be read back (or was overwritten and re-landed)
+        // is already in the file. Write nothing — re-committing would either
+        // duplicate the reply or re-arm the same unreadable window.
+        if (current.replies.some((candidate) => candidate.id === storedReply.id)) {
+          return { done: true, result: { ok: true as const, thread: current } };
+        }
         const nextRevision = (current.revision ?? 0) + 1;
         const nextStatus = resolve ? "resolved" : current.status;
         statusChanged = nextStatus !== current.status;
         const updated: FeedbackThread = {
           ...current,
           status: nextStatus,
-          replies: [...current.replies, reply],
+          replies: [...current.replies, storedReply],
           revision: nextRevision,
           _writeToken: writeToken,
         };
@@ -448,7 +464,11 @@ export async function appendReply(
             verify.value._writeToken === writeToken,
           "feedback:threadReply"
         );
-        if (verdict !== "not-mine") {
+        // A reply is DURABLE user content: "unconfirmed" is no evidence it is
+        // there, so it is retried (the next attempt finds our reply id and
+        // writes nothing, or writes it) — never accepted blind, unlike the
+        // rebuildable index.
+        if (verdict === "mine") {
           return {
             done: true,
             result: { ok: true as const, thread: updated },
