@@ -116,6 +116,20 @@ const fallbackHeld = new Set<string>();
  * once the callback actually ran. For a background poller that would rather
  * skip one tick than pile up behind (or serialize behind) a slow holder —
  * see `pendingAnswerReplay.ts`'s cross-tab guard.
+ *
+ * Fix round 3: `navigator.locks` existing is not the same as it WORKING —
+ * the Web Locks API can refuse a request outright (a `SecurityError` on an
+ * opaque origin, which `file://` — how this app is routinely opened, see
+ * CLAUDE.md — commonly is) either synchronously (throwing before returning a
+ * promise) or by rejecting the promise it returns. Either way, that refusal
+ * is caught and falls through to the SAME in-memory fallback used when
+ * `navigator.locks` is absent entirely — never left to reject this call (and
+ * with it, the whole caller's pass: `replayPendingAnswers` has no outer
+ * try/catch around this call). The one exception: if the native API had
+ * already invoked OUR callback (`ran` is true) before something failed, the
+ * error is rethrown rather than falling back and running the callback a
+ * SECOND time — that ambiguous case is a genuine failure of the caller's own
+ * work, not a reason to redo it.
  */
 export async function withTryResourceLock<T>(
   resourceName: string,
@@ -125,16 +139,23 @@ export async function withTryResourceLock<T>(
   if (manager) {
     let ran = false;
     let result: T | undefined;
-    await manager.request(
-      `xray:${resourceName}`,
-      { mode: "exclusive", ifAvailable: true },
-      async (lock) => {
-        if (!lock) return; // Not granted immediately -- someone else holds it.
-        ran = true;
-        result = await callback();
-      }
-    );
-    return ran ? { ran: true, result: result as T } : { ran: false };
+    try {
+      await manager.request(
+        `xray:${resourceName}`,
+        { mode: "exclusive", ifAvailable: true },
+        async (lock) => {
+          if (!lock) return; // Not granted immediately -- someone else holds it.
+          ran = true;
+          result = await callback();
+        }
+      );
+      return ran ? { ran: true, result: result as T } : { ran: false };
+    } catch (error) {
+      if (ran) throw error; // our own callback already ran -- surface its failure, never re-run it
+      // The API exists but refused the request itself (sync throw or an
+      // async rejection, before our callback ever ran) -- fall through to
+      // the in-memory fallback below exactly as if it were unavailable.
+    }
   }
 
   if (fallbackHeld.has(resourceName)) return { ran: false };

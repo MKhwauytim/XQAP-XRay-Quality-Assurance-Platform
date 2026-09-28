@@ -123,17 +123,45 @@ async function putRecord(
 
 /**
  * Best-effort: mirror one answered item locally as CONFIRMED (`synced:
- * true`) — the item is known to be in the workspace file. Never throws — a
- * failure here (quota exceeded, IndexedDB disabled, a blocked upgrade) only
- * costs the redundant backup copy, never the real save this is layered on
- * top of.
+ * true`) — the item is known to be in the workspace file (called right
+ * after a real save/replay succeeds, or by `replayPendingAnswers` to mark a
+ * pending item already-on-disk). Never throws — a failure here (quota
+ * exceeded, IndexedDB disabled, a blocked upgrade) only costs the redundant
+ * backup copy, never the real save this is layered on top of.
+ *
+ * CRITICAL (fix round 3): this is a GUARDED write, not a blind `put` — see
+ * `shouldRefreshMirrorFromDisk`'s doc and `issueGuardedConfirmedPut` below.
+ * Without the guard, either of this function's two call sites could clobber
+ * a NEWER `synced: false` record for the same key: an employee re-saving the
+ * same item WHILE a replay pass is running (that re-save itself fails and
+ * gets queued pending with a newer `lastSavedAt`) racing against either (a)
+ * `replayPendingAnswers`'s own `deps.markSynced` call (this function, by
+ * default) confirming the OLDER item it read earlier in the same pass, or
+ * (b) `performAnswerWrite`'s post-success mirror call for some OTHER,
+ * slower write of an older version of the same item finally landing. Either
+ * way, a blind `put` here would silently drop the newer pending edit out of
+ * `loadPendingAnswerRecords` with no trace.
  */
 export async function mirrorAnswerLocally(
   month: string,
   username: string,
   item: ItemAnswer
 ): Promise<void> {
-  await putRecord(month, username, item, true);
+  const db = await openMirrorDb();
+  if (!db) return;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      issueGuardedConfirmedPut(tx.objectStore(STORE_NAME), month, username, item);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  } catch {
+    // Best-effort — see module doc.
+  } finally {
+    db.close();
+  }
 }
 
 /**
@@ -187,14 +215,48 @@ export function shouldRefreshMirrorFromDisk(
 }
 
 /**
+ * The ONE place a CONFIRMED (`synced: true`) write is issued against an
+ * already-open transaction's object store — shared by `mirrorAnswerLocally`
+ * (one item) and `backfillMirrorFromDisk` (a whole month's items in one
+ * transaction) so the guard lives in exactly one place (fix round 3: no
+ * duplicated decision logic between the two callers). Reads the existing
+ * record for `item`'s key, decides with `shouldRefreshMirrorFromDisk`
+ * (its "never overwrite a newer/pending record" contract applies here
+ * identically to landing a real save/replay result as it does to backfilling
+ * from disk — both are "is this incoming item allowed to become the
+ * confirmed record for this key"), and only issues a `put` when it says yes.
+ */
+function issueGuardedConfirmedPut(
+  store: IDBObjectStore,
+  month: string,
+  username: string,
+  item: ItemAnswer
+): void {
+  const key = mirrorKey(month, username, item.xrayImageId);
+  const getRequest = store.get(key);
+  getRequest.onsuccess = () => {
+    const existing = getRequest.result as MirrorRecord | undefined;
+    if (!shouldRefreshMirrorFromDisk(existing, item)) return;
+    store.put({
+      key,
+      month,
+      username,
+      xrayImageId: item.xrayImageId,
+      item,
+      mirroredAt: new Date().toISOString(),
+      synced: true,
+    } satisfies MirrorRecord);
+  };
+}
+
+/**
  * Best-effort: re-mirror a whole month's worth of CURRENT on-disk items as
  * CONFIRMED, one single IndexedDB transaction for the entire batch (never
  * one `openMirrorDb`/transaction per item — this can run on every 30s tick
- * for however many items a month has). Every item is get-then-conditionally-
- * put inside that ONE transaction: read the existing record for its key,
- * decide with `shouldRefreshMirrorFromDisk`, and only issue a `put` when it
- * says yes — never a blind overwrite (see this module's doc and
- * `shouldRefreshMirrorFromDisk`'s own doc for why that was the bug).
+ * for however many items a month has). Every item goes through
+ * `issueGuardedConfirmedPut` inside that ONE transaction — never a blind
+ * overwrite (see this module's doc and `shouldRefreshMirrorFromDisk`'s own
+ * doc for why that was the bug).
  */
 export async function backfillMirrorFromDisk(
   month: string,
@@ -209,21 +271,7 @@ export async function backfillMirrorFromDisk(
       const tx = db.transaction(STORE_NAME, "readwrite");
       const store = tx.objectStore(STORE_NAME);
       for (const item of items) {
-        const key = mirrorKey(month, username, item.xrayImageId);
-        const getRequest = store.get(key);
-        getRequest.onsuccess = () => {
-          const existing = getRequest.result as MirrorRecord | undefined;
-          if (!shouldRefreshMirrorFromDisk(existing, item)) return;
-          store.put({
-            key,
-            month,
-            username,
-            xrayImageId: item.xrayImageId,
-            item,
-            mirroredAt: new Date().toISOString(),
-            synced: true,
-          } satisfies MirrorRecord);
-        };
+        issueGuardedConfirmedPut(store, month, username, item);
       }
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
