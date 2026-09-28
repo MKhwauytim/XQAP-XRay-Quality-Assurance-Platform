@@ -344,27 +344,45 @@ export function supersededFileName(liveName: string, stamp: string): string {
  * "no live file yet" case (a first save) and stays `null` under `required`
  * too — that case has nothing to archive, which is not a failure.
  *
- * KNOWN GAP, not fixed here: `copyFileBytesVerified`'s SOURCE read
- * (`openFile(sourceDir, sourceName)`, no `retryMissing` passed) does not
- * retry a transient `NotFoundError` on the source the way `copyFileBytes`
- * does (`{ retryMissing: true }`) — see its definition in `safeWrite.ts`. A
- * genuine SMB listing-lag NotFound on the source is therefore still reported
- * as `source_missing` (→ `null`, "nothing to archive") without a retry here.
- * Fixing that means changing `copyFileBytesVerified` itself, which is a
- * shared primitive with other existing callers outside this module's scope —
- * flagged for the storage-layer owner rather than patched inline in this
- * task.
+ * Review fix round 2 (F5, finding #1, closed): `copyFileBytesVerified`'s own
+ * SOURCE read used to open the source with no `retryMissing`, so a transient
+ * SMB directory-listing lag on an ACTUALLY-existing `liveName` could still
+ * report `NotFoundError` on the very first attempt and resolve to
+ * `source_missing` — the exact false negative this whole function exists to
+ * rule out, just moved one layer down. `copyFileBytesVerified` now takes an
+ * opt-in `{ retryMissingSource: true }` (default false, so every OTHER
+ * caller is unaffected) that rides the same `retryMissing` ladder
+ * `copyFileBytes`/`openFile` already use for post-write verification reads
+ * (`VERIFY_READBACK_RETRY_DELAYS_MS`, ~11s worst case — see `safeWrite.ts`).
+ * `archiveBeforeOverwrite` passes it for the MANDATORY `population.final.json`
+ * archive only (`saveMonthRunLocked`'s `{ required: true }` call), and only
+ * WHEN a prior save is known to have happened (the caller gates it on
+ * `month.manifest.json` already existing — see the call site's comment):
+ * a genuinely first-ever save of a month has no live file to protect, so
+ * making it pay the same ~11s worst-case ladder for a file that was never
+ * going to be there is not just wasted latency on every new month in
+ * production, it broke several existing tests outright when tried
+ * unconditionally (their own 20s `testTimeout` exceeded — see
+ * task-4-report.md's fix-round-2 section). Only a `NotFoundError` that
+ * survives the whole ladder counts as "genuinely no live file" once this IS
+ * turned on. The best-effort source-workbook archives (`risk.source.*` /
+ * `bi.source*.*`) deliberately do NOT opt in at all: a missed archive of an
+ * uploaded workbook is logged and non-fatal by design (the processed
+ * population itself is what `required: true` protects), and the same latency
+ * tradeoff applies with even less upside.
  */
 export async function archiveBeforeOverwrite(
   dir: DirectoryHandleLike,
   liveName: string,
   stamp: string,
-  options: { required?: boolean } = {}
+  options: { required?: boolean; retryMissingSource?: boolean } = {}
 ): Promise<string | null> {
   const archiveName = supersededFileName(liveName, stamp);
   let outcome;
   try {
-    outcome = await copyFileBytesVerified(dir, liveName, dir, archiveName);
+    outcome = await copyFileBytesVerified(dir, liveName, dir, archiveName, {
+      retryMissingSource: options.retryMissingSource,
+    });
   } catch (error) {
     // copyFileBytesVerified opens its target via `getFileHandle(..., { create:
     // true })` before it ever reads the source, so a source read that fails
@@ -505,9 +523,33 @@ async function saveMonthRunLocked(
       // A2: one stamp per save, shared by every archive this save writes, so
       // the population and the sources it was built from stay pairable.
       const stamp = supersedeStamp(new Date(now));
+      // Fix round 2 (F5 finding #1): whether the mandatory archive below rides
+      // the patient `retryMissingSource` ladder (~11s worst case) depends on
+      // whether a population was ever actually written for this month before.
+      // `month.manifest.json` is written LAST by every prior successful call
+      // to this function ("must be last: it records totals/paths that depend
+      // on every write above having committed" — see the manifest write
+      // below), so its presence is proof `population.final.json` was
+      // committed by a prior run and SHOULD still be there; its absence means
+      // this is this month's first-ever save, which has nothing to protect.
+      // Gating on that — rather than always retrying — matters for more than
+      // latency: unconditionally retrying on EVERY save, including the
+      // ordinary first save of a brand-new month, made every fresh month's
+      // save pay the full ~11s ladder for a file that was never going to
+      // exist, which is not just slow but broke several existing tests
+      // outright (20s `testTimeout` exceeded — see task-4-report.md's
+      // fix-round-2 section for the measured numbers).
+      const priorManifest = await loadMonthManifest(directoryHandle, monthFolderName);
       // Mandatory, and BEFORE anything is overwritten: without this copy a
       // re-process leaves only safeWrite's single `.bak` of the population.
-      await archiveBeforeOverwrite(processedDir, "population.final.json", stamp, { required: true });
+      // `retryMissingSource: priorManifest !== null`: a transient SMB
+      // NotFound on an ACTUALLY-existing population.final.json must never be
+      // read as "nothing to archive" — see archiveBeforeOverwrite's doc
+      // comment for why this is the mandatory call's only opt-in.
+      await archiveBeforeOverwrite(processedDir, "population.final.json", stamp, {
+        required: true,
+        retryMissingSource: priorManifest !== null,
+      });
 
       // Copy source xlsx files and write raw JSON — these four writes target
       // disjoint files with no data dependency on each other, so they run

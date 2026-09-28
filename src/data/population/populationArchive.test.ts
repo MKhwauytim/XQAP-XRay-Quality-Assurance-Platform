@@ -259,4 +259,78 @@ describe("saveMonthRun archives before it overwrites (A2)", () => {
     ];
     expect(allSuperseded).toEqual([]);
   });
+
+  // Fix round 2 (F5 finding #1, closed): a TRANSIENT NotFound opening the
+  // existing population.final.json — the exact SMB directory-listing-lag
+  // symptom the reviewer flagged — must not be read as "nothing to archive".
+  // `retryMissingSource: true` on the mandatory call rides the same
+  // retryMissing ladder copyFileBytes/openFile already use for post-write
+  // verification reads; here it is proven against a fault that fails
+  // `getFileHandle` a few times and then lets it through, which the OLD
+  // (round-1) code — a single unretried attempt — would have silently
+  // resolved to `source_missing` and let the overwrite through with zero
+  // backup.
+  test("a transient NotFound on the existing population.final.json is retried, not treated as absent", async () => {
+    const root = createMemoryDirectory("root");
+    const first = await saveMonthRun({
+      directoryHandle: root,
+      ...baseParams,
+      processedRows: [makePopulationRow("A1") as unknown as Record<string, unknown>],
+    });
+    expect(first.ok).toBe(true);
+
+    // Three failures then success — well inside the retryMissing ladder's
+    // budget (8 rungs), so this resolves in well under a second.
+    setSimulatedFaults(root, [
+      { operation: "getFileHandle", name: "population.final.json", create: false, errorName: "NotFoundError", times: 3 },
+    ]);
+    const second = await saveMonthRun({
+      directoryHandle: root,
+      ...baseParams,
+      processedRows: [makePopulationRow("B1") as unknown as Record<string, unknown>],
+    });
+    setSimulatedFaults(root, []);
+
+    expect(second.ok).toBe(true);
+    const processed = await monthSubdir(root, "2-processed");
+    const archives = (await fileNames(processed)).filter((n) => /^population\.final\..+\.superseded\.json$/.test(n));
+    expect(archives).toHaveLength(1);
+    const archived = await safeReadJson<PopulationFinalData>(processed, archives[0]!);
+    expect(archived.ok && archived.value.rows.map((row) => row["xrayImageId"])).toEqual(["A1"]);
+    const live = await safeReadJson<PopulationFinalData>(processed, "population.final.json");
+    expect(live.ok && live.value.rows.map((row) => row["xrayImageId"])).toEqual(["B1"]);
+  });
+
+  // Fix round 2, the other direction: a genuinely first-ever save of a month
+  // (no `month.manifest.json` yet) has no live population.final.json to
+  // protect, so `retryMissingSource` must stay OFF for it — proving this
+  // stays FAST (no ~11s ladder paid) is the point: `saveMonthRun` unconditionally
+  // turning retryMissingSource on for every save, including this one, is
+  // exactly what broke several unrelated tests' 20s `testTimeout` during
+  // development of this fix (see task-4-report.md's fix-round-2 section) —
+  // this is the regression guard for that. `copyFileBytesVerified`'s own
+  // "a genuinely absent file still resolves to source_missing after
+  // exhausting the ladder WHEN retryMissingSource is on" contract is proven
+  // directly at the storage-layer unit level instead, in
+  // `safeWrite.copyVerifiedRetry.test.ts` — pinning it here too would just
+  // re-pay the same ~11s for no additional coverage.
+  test("a genuinely first-ever save resolves fast, with nothing to archive", async () => {
+    const root = createMemoryDirectory("root");
+    const startedAt = performance.now();
+    const result = await saveMonthRun({
+      directoryHandle: root,
+      ...baseParams,
+      processedRows: [makePopulationRow("A1") as unknown as Record<string, unknown>],
+    });
+    const elapsed = performance.now() - startedAt;
+
+    expect(result.ok).toBe(true);
+    // Comfortably under the retryMissing ladder's first rung — no retry loop
+    // ran at all for the mandatory archive's source probe.
+    expect(elapsed).toBeLessThan(2000);
+    const processed = await monthSubdir(root, "2-processed");
+    expect((await fileNames(processed)).filter((n) => n.includes(".superseded."))).toEqual([]);
+    const live = await safeReadJson<PopulationFinalData>(processed, "population.final.json");
+    expect(live.ok && live.value.rows.map((row) => row["xrayImageId"])).toEqual(["A1"]);
+  });
 });

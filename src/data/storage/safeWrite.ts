@@ -1490,16 +1490,35 @@ export type VerifiedCopyOutcome =
  * answers, a sync client); re-reading it would turn that legitimate change into
  * a phantom corruption report, and would make the check meaningless in the one
  * case it exists for.
+ *
+ * `options.retryMissingSource` — opt-in, default false so every existing
+ * caller is byte-for-byte unchanged. When true, a `NotFoundError` opening the
+ * SOURCE rides the same `retryMissing` ladder `openFile`/`copyFileBytes`
+ * already use for exactly this reason (see `ReadTextOptions.retryMissing`'s
+ * own doc comment): on a UNC/SMB share, a file that was just written can
+ * report `NotFoundError` for a few hundred ms while the client's directory
+ * listing catches up, even though the bytes are already durably on the
+ * server. Without this, a caller for whom "the source turned out to be
+ * missing" and "the source exists but a transient share hiccup made it look
+ * missing" are DIFFERENT outcomes (a mandatory backup that must not silently
+ * skip a live file) has no way to tell them apart — `source_missing` fires
+ * on the very first `NotFoundError`, whether or not the file is really gone.
+ * Only a `NotFoundError` that survives the WHOLE retry ladder still resolves
+ * to `source_missing`; every other caller (retryMissingSource left at its
+ * default) keeps today's "fail fast on the first NotFoundError" behavior.
  */
 export async function copyFileBytesVerified(
   sourceDir: DirectoryHandleLike,
   sourceName: string,
   targetDir: DirectoryHandleLike,
-  targetName: string
+  targetName: string,
+  options?: { retryMissingSource?: boolean }
 ): Promise<VerifiedCopyOutcome> {
   return retryTransientWrite(
     async () => {
-      const file = await openFile(sourceDir, sourceName);
+      const file = await openFile(sourceDir, sourceName, {
+        retryMissing: options?.retryMissingSource,
+      });
       if (file === null) return { status: "source_missing" as const };
 
       const sourceDigest = createByteDigest();

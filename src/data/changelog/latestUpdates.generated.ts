@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v140.8",
+    "date": "2026-09-28",
+    "bucket": "fix",
+    "scope": "population",
+    "title": "close the transient-NotFound gap on the mandatory population archive"
+  },
+  {
     "version": "v140.7",
     "date": "2026-09-28",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "ci",
     "title": "delete the Playwright E2E suite, its workflow, and its toolchain"
-  },
-  {
-    "version": "v138.0",
-    "date": "2026-09-15",
-    "bucket": "fix",
-    "scope": "storage",
-    "title": "bound the nested retry budget and stop the damaged-file trap behind the XQ-IO-036 failures"
   }
 ];
