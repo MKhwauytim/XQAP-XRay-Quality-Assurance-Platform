@@ -20,7 +20,7 @@
 import type { DirectoryHandleLike } from "./fileSystemAccess";
 import { createSimpleHasher } from "./jsonEnvelope";
 import { listDirectoryEntries, readSegmentTails } from "./directoryScan";
-import { withResourceLock } from "./webLocks";
+import { directoryResourceKey, withResourceLock } from "./webLocks";
 import { logCodedError, tagError, taggedError, type ErrorCode } from "./errorCodes";
 import {
   TRANSIENT_WRITE_RETRY_DELAYS_MS,
@@ -937,6 +937,9 @@ export async function readEventSegmentDelta<TEvent>(
   const { tailTextByName, sizeByName, matchedNames } = await readSegmentTails(eventsDir, {
     suffix: config.segmentSuffix,
     knownOffsets,
+    // `eventsDir` comes from a raw getDirectoryHandle() (never path-registered),
+    // and its name is the same in every month: scope the skip log by the parent.
+    scopeKey: directoryResourceKey(parentDir, config.eventsDirName),
   });
 
   if (strict) {

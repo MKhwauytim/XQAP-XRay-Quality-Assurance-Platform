@@ -434,10 +434,17 @@ export function __resetVanishedEntryLogForTests(): void {
   reportedVanishedKeys.clear();
 }
 
-function logVanishedEntries(context: string, dir: DirectoryHandleLike, names: string[]): void {
+function logVanishedEntries(
+  context: string,
+  dir: DirectoryHandleLike,
+  names: string[],
+  scopeKey?: string
+): void {
   const fresh = names.filter((name) => {
-    // Full path when registered: `dir.name` alone is "distribution.events" in every month.
-    const key = `${context}|${directoryResourceKey(dir, name)}`;
+    // `dir.name` alone is "distribution.events" in every month, and a raw
+    // `getDirectoryHandle()` result is not path-registered, so the caller can
+    // supply a scope (the parent month folder's path) that keeps months apart.
+    const key = `${context}|${scopeKey ?? directoryResourceKey(dir, "")}|${dir.name}|${name}`;
     if (reportedVanishedKeys.has(key)) return false;
     reportedVanishedKeys.add(key);
     return true;
@@ -648,6 +655,12 @@ export type SegmentTailOptions = {
   suffix: string;
   /** Byte offset already consumed per file name; a name missing from this map defaults to 0 (read from the start). */
   knownOffsets: Record<string, number>;
+  /**
+   * Optional identity of the directory for the once-per-session skip log (e.g.
+   * the month folder's path). Without it the key falls back to the handle's
+   * registered path, which a raw `getDirectoryHandle()` result does not have.
+   */
+  scopeKey?: string;
 };
 
 export type SegmentTailResult = {
@@ -735,7 +748,7 @@ export async function readSegmentTails(
     if (read.tail !== null) tailTextByName.set(name, read.tail);
   }
 
-  logVanishedEntries("directoryScan:segment-tails", dir, vanished);
+  logVanishedEntries("directoryScan:segment-tails", dir, vanished, options.scopeKey);
 
   return { tailTextByName, sizeByName, matchedNames };
 }
