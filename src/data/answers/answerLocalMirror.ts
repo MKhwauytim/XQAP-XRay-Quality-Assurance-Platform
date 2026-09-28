@@ -371,3 +371,25 @@ export async function loadPendingAnswerRecords(
     .filter((record) => record.username === username && !record.synced)
     .map((record) => ({ month: record.month, item: record.item }));
 }
+
+/**
+ * Is THIS exact save (same month folder, employee, item and `lastSavedAt`)
+ * currently held in the pending queue? Read-only; used only to tell the
+ * employee a failed save will be retried in the background. Empty/false on any
+ * failure — absence is never meaningful here (see module doc).
+ */
+export async function isAnswerQueuedPending(
+  month: string,
+  username: string,
+  item: ItemAnswer
+): Promise<boolean> {
+  const all = await readAllRecords();
+  return all.some(
+    (record) =>
+      record.month === month &&
+      record.username === username &&
+      !record.synced &&
+      record.item.xrayImageId === item.xrayImageId &&
+      record.item.lastSavedAt === item.lastSavedAt
+  );
+}

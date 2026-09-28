@@ -8,7 +8,7 @@ import {
   subscribeAnswerDraftHealth,
 } from "../../data/answers/answerDraftStore";
 import type { DistributionEntry } from "../../data/distribution/distributionTypes";
-import type { FieldAnswer, ItemAnswer } from "../../data/answers/answerTypes";
+import type { AnswerSaveOutcome, FieldAnswer, ItemAnswer } from "../../data/answers/answerTypes";
 import type { TemplateField, TemplateSchema } from "../../data/templates/templateTypes";
 import {
   getFieldsForPhase,
@@ -30,7 +30,7 @@ type Props = {
   savedAnswer: ItemAnswer | null;
   readonly: boolean;
   onClose: () => void;
-  onSave: (ans: FieldAnswer[]) => Promise<void>;
+  onSave: (ans: FieldAnswer[]) => Promise<AnswerSaveOutcome | void>;
   /** Omit when the current user cannot trigger replacements. */
   onReplace?: (entry: DistributionEntry) => void;
   /** Omit when the current user cannot transfer this sample to another user. */
@@ -154,6 +154,12 @@ export default function InspectionPanel({
     if (draftKey && hasSubmittedAnswer) clearAnswerDraftAndLegacy(draftKey, legacyDraftKey ?? null);
   }, [draftKey, legacyDraftKey, hasSubmittedAnswer]);
   const [validationMsg, setValidationMsg] = useState<string | null>(null);
+  // A1: the outcome of the last submit, shown where the employee clicked — the
+  // page banner alone was easy to miss. A caller resolving `void` carries no
+  // outcome, so nothing is shown for it.
+  const [saveStatus, setSaveStatus] = useState<
+    { kind: "saving" | "saved" | "queued" } | { kind: "failed"; message: string } | null
+  >(null);
   // Guards the async disk write behind the primary action: without it a
   // double-click (or an impatient re-click during a slow workspace write) fires
   // onSave twice concurrently. Every other mutating action in the app tracks a
@@ -279,9 +285,17 @@ export default function InspectionPanel({
     }
     setValidationMsg(null);
     setSubmitting(true);
+    setSaveStatus({ kind: "saving" });
     try {
-      await onSave(collect());
+      const outcome = await onSave(collect());
+      setSaveStatus(
+        !outcome ? null
+          : outcome.ok ? { kind: "saved" }
+          : outcome.queuedForRetry ? { kind: "queued" }
+          : { kind: "failed", message: outcome.message }
+      );
     } catch {
+      setSaveStatus(null);
       // Defense in depth (B-XQIO032). Every current caller's `onSave`
       // (XrayReferrals' `handleSave`) already catches its own write errors
       // internally and resolves normally, reporting failure through the
@@ -458,6 +472,15 @@ export default function InspectionPanel({
           it is most useful. The primary submit control stays gated on
           `!readonly`; the secondary actions are gated on being passed at all,
           which is where their permission checks already live. */}
+      {saveStatus && (
+        // Not role="status": the page banner already owns that role, and two
+        // would make every `getByRole("status")` in the view ambiguous.
+        <p className={`ip-save-status ip-save-status--${saveStatus.kind}`} aria-live="polite">
+          {saveStatus.kind === "failed"
+            ? getLabels().ip_save_status_failed.replace("{message}", saveStatus.message)
+            : getLabels()[`ip_save_status_${saveStatus.kind}`]}
+        </p>
+      )}
       {!isSubmitted && (!readonly || onReplace || onReassign) && (
         <div className="ip-footer">
           {!readonly && validationMsg && <p className="ip-validation-msg">{validationMsg}</p>}

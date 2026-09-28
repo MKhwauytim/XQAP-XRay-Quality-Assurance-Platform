@@ -626,6 +626,10 @@ export const DEFAULT_LABELS = {
   // does not guarantee that — shown only if onSave ever rejects outright, so
   // the button never gets stuck with no visible explanation. The entered
   // answer is untouched either way (`ans` is not reset on this path).
+  ip_save_status_saving:         "جارٍ الحفظ…",
+  ip_save_status_saved:          "تم الحفظ ✓",
+  ip_save_status_queued:         "لم يُحفظ بعد — ستُعاد المحاولة تلقائياً. الإجابة محفوظة في هذا المتصفح ولا تُغلق الصفحة قبل ظهور «تم الحفظ».",
+  ip_save_status_failed:         "لم يُحفظ — {message} الإجابة ما زالت هنا، أعد المحاولة بنفس الزر.",
   ip_msg_save_failed_generic:    "تعذّر حفظ الإجابة. الإجابة التي أدخلتها ما زالت موجودة — يمكنك المحاولة مرة أخرى.",
   // A1: shown while the browser refuses to keep the local draft (private mode,
   // full quota, a cleared file:// bucket) — the typed answer is still in the

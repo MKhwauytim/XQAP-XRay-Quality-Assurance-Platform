@@ -131,3 +131,12 @@ export type EmployeeAnswerFile = {
   reopenRequests?: ReopenRequest[];
   lastUpdatedAt?: string;
 };
+
+/**
+ * What one answer submit produced — drives the inspection panel's inline status (A1).
+ * `queuedForRetry` is true only when the write failed but the answer is now held in
+ * this browser's pending queue and the background replay will keep retrying it.
+ */
+export type AnswerSaveOutcome =
+  | { ok: true }
+  | { ok: false; message: string; queuedForRetry?: boolean };

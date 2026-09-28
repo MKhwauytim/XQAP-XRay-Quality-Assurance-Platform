@@ -683,3 +683,22 @@
   color: var(--c-ink-3);
   border: 1px solid var(--c-border);
 }
+
+.ip-save-status {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: var(--fw-bold);
+}
+
+.ip-save-status--saving,
+.ip-save-status--queued {
+  color: var(--c-navy-soft);
+}
+
+.ip-save-status--saved {
+  color: var(--c-success);
+}
+
+.ip-save-status--failed {
+  color: var(--c-danger);
+}

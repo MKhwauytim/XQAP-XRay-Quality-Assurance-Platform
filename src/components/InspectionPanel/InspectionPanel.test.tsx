@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen, fireEvent, within, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, within, cleanup, act } from "@testing-library/react";
 import InspectionPanel from "./index";
 import { DEFAULT_LABELS } from "../../data/labels/labelsStore";
 import {
@@ -10,7 +10,7 @@ import {
   saveAnswerDraft,
 } from "../../data/answers/answerDraftStore";
 import type { DistributionEntry } from "../../data/distribution/distributionTypes";
-import type { FieldAnswer } from "../../data/answers/answerTypes";
+import type { AnswerSaveOutcome, FieldAnswer } from "../../data/answers/answerTypes";
 import type { TemplateField, TemplateSchema } from "../../data/templates/templateTypes";
 
 // `globals: false` in this repo, so RTL's auto-cleanup never registers itself.
@@ -615,5 +615,58 @@ describe("InspectionPanel — legacy draft key fallback and migration (A1 fix ro
 
     expect(loadAnswerDraft(LEGACY)).toBeNull();
     expect(loadAnswerDraft(CANONICAL)).toEqual({ n1: "معدّل" });
+  });
+});
+
+describe("InspectionPanel — inline save status (A1)", () => {
+  const template = makeTemplate([field({ fieldId: "n1", label: "ملاحظة", type: "text", required: false })]);
+
+  function renderWith(onSave: () => Promise<AnswerSaveOutcome | void>) {
+    return render(
+      <InspectionPanel
+        entry={makeEntry()}
+        template={template}
+        savedAnswer={null}
+        readonly={false}
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+  }
+  const submit = () => fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.ip_submit_btn }));
+
+  it("shows saving, then saved, from a successful outcome", async () => {
+    let resolve!: (outcome: AnswerSaveOutcome) => void;
+    renderWith(() => new Promise<AnswerSaveOutcome>((done) => { resolve = done; }));
+    submit();
+    expect(await screen.findByText(DEFAULT_LABELS.ip_save_status_saving)).toBeInTheDocument();
+    await act(async () => { resolve({ ok: true }); });
+    expect(await screen.findByText(DEFAULT_LABELS.ip_save_status_saved)).toBeInTheDocument();
+  });
+
+  it("says the answer is not saved yet and will retry when it was queued", async () => {
+    renderWith(async () => ({ ok: false, message: "تعذّر الحفظ (XQ-IO-038)", queuedForRetry: true }));
+    submit();
+    expect(await screen.findByText(DEFAULT_LABELS.ip_save_status_queued)).toBeInTheDocument();
+    expect(screen.queryByText(DEFAULT_LABELS.ip_save_status_saved)).toBeNull();
+  });
+
+  it("shows the failure message with its code, and keeps submit as the retry", async () => {
+    renderWith(async () => ({ ok: false, message: "تعذّر حفظ البيانات (XQ-IO-038)." }));
+    submit();
+    expect(
+      await screen.findByText(
+        DEFAULT_LABELS.ip_save_status_failed.replace("{message}", "تعذّر حفظ البيانات (XQ-IO-038).")
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: DEFAULT_LABELS.ip_submit_btn })).not.toBeDisabled();
+  });
+
+  it("shows no status for a legacy onSave that resolves nothing", async () => {
+    renderWith(async () => {});
+    submit();
+    await screen.findByRole("button", { name: DEFAULT_LABELS.ip_submit_btn });
+    expect(screen.queryByText(DEFAULT_LABELS.ip_save_status_saved)).toBeNull();
+    expect(screen.queryByText(DEFAULT_LABELS.ip_save_status_saving)).toBeNull();
   });
 });

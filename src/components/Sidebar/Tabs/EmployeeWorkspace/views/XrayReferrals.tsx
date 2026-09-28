@@ -20,7 +20,8 @@ import { MonthClosedError } from "../../../../../data/population/monthLock";
 import { getLabels } from "../../../../../data/labels/labelsStore";
 import { useVisibleUnsavedWorkMonthGuard } from "../../../../../hooks/useVisibleUnsavedWorkMonthGuard";
 import { useUnsavedWork } from "../../../../../hooks/useUnsavedWork";
-import type { FieldAnswer, ItemAnswer } from "../../../../../data/answers/answerTypes";
+import type { AnswerSaveOutcome, FieldAnswer, ItemAnswer } from "../../../../../data/answers/answerTypes";
+import { isAnswerQueuedPending } from "../../../../../data/answers/answerLocalMirror";
 import {
   loadOrDeriveDistributionCurrentStrictForRead,
   readDistributionLogStamp,
@@ -453,23 +454,25 @@ function createSaveAnswerHandler(deps: {
   } = deps;
   return async function handleSave(
     entry: DistributionEntry, ans: FieldAnswer[]
-  ): Promise<void> {
+  ): Promise<AnswerSaveOutcome> {
     const xrayImageId = entry.xrayImageId;
     const forUser = entry.assignedTo;
     if (!canSubmitAnswers) {
-      setStatusMsg({ type: "error", text: "لا تملك صلاحية تقديم الإجابات، أو أن مساحة العمل للقراءة فقط." });
-      return;
+      const text = "لا تملك صلاحية تقديم الإجابات، أو أن مساحة العمل للقراءة فقط.";
+      setStatusMsg({ type: "error", text });
+      return { ok: false, message: text };
     }
     // Handler-boundary check for the on-behalf case, mirroring every other
     // mutating handler here: the panel is already gated at render
     // (resolvePanelAuthoring), but a stale panel must not be able to write.
     if (forUser !== username && !canAnswerOnBehalf) {
-      setStatusMsg({ type: "error", text: getLabels().msg_answer_on_behalf_denied });
-      return;
+      const text = getLabels().msg_answer_on_behalf_denied;
+      setStatusMsg({ type: "error", text });
+      return { ok: false, message: text };
     }
     // No on-disk month selected → the upsert target folder would be "" (writes
     // to the workspace root). Bail before touching disk.
-    if (!activeTpl || !selMonth) return;
+    if (!activeTpl || !selMonth) return { ok: false, message: getLabels().ip_msg_save_failed_generic };
     const now  = new Date().toISOString();
     const item: ItemAnswer = {
       xrayImageId, templateId: activeTpl.templateId, templateVersion: activeTpl.version,
@@ -536,11 +539,18 @@ function createSaveAnswerHandler(deps: {
         } finally {
           ownBroadcastRef.current = false;
         }
-      } else {
-        setStatusMsg({ type: "error", text: userFacingErrorText(result.error, "xrayReferrals:result") });
+        return { ok: true };
       }
+      const text = userFacingErrorText(result.error, "xrayReferrals:result");
+      setStatusMsg({ type: "error", text });
+      // Display only: a failed append is queued by answerStorage (pending
+      // local mirror) and retried in the background. Say so only when this
+      // exact save is really in that queue.
+      return { ok: false, message: text, queuedForRetry: await isAnswerQueuedPending(folder, forUser, item) };
     } catch (error) {
-      setStatusMsg({ type: "error", text: thrownWriteErrorText(error) });
+      const text = thrownWriteErrorText(error);
+      setStatusMsg({ type: "error", text });
+      return { ok: false, message: text };
     }
   };
 }
