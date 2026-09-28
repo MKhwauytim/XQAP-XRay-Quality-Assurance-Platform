@@ -43,6 +43,23 @@ export function readLastOpenSample(username: string, monthFolderName: string): s
   }
 }
 
+/** Explicit close: a deliberately-closed sample must never reopen on a later reload. */
+export function forgetLastOpenSample(username: string, monthFolderName: string): void {
+  const store = sessionStore();
+  if (!store) return;
+  try {
+    const key = `${LAST_OPEN_SAMPLE_KEY_PREFIX}${username}`;
+    const raw = store.getItem(key);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Partial<Stored>;
+    // Only clear it for the month it was recorded under — a close in the
+    // current month must not erase a different month's remembered sample.
+    if (parsed.month === monthFolderName) store.removeItem(key);
+  } catch {
+    // Convenience only.
+  }
+}
+
 /** The remembered sample while it is still in the list, else the first row. */
 export function pickAutoSelectId(
   displayEntries: readonly { xrayImageId: string }[],

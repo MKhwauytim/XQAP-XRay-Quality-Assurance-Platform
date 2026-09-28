@@ -1,6 +1,7 @@
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
 import {
+  clearAnswerDraftAndLegacy,
   isAnswerDraftPersistFailing,
   loadAnswerDraftWithLegacyFallback,
   saveAnswerDraftMigratingLegacy,
@@ -97,6 +98,13 @@ type Props = {
   hasNextSample?: boolean;
 };
 
+/** A submitted answer (or a completed entry) is what the panel shows -- a leftover
+ *  draft must never win over it, seeded or rendered. Showing is NOT deleting: see
+ *  the clear effect in the component. */
+function isAnswerSubmitted(entry: DistributionEntry, savedAnswer: ItemAnswer | null): boolean {
+  return entry.status === "completed" || savedAnswer?.status === "submitted";
+}
+
 export default function InspectionPanel({
   entry,
   template,
@@ -122,7 +130,9 @@ export default function InspectionPanel({
     // and it is the work that would otherwise have to be redone. Falls back to
     // `legacyDraftKey` (A1 fix round 1) for a row whose canonical key changed
     // under it, so a draft saved before that fix is still found.
-    const draft = draftKey
+    // Never seeded for a submitted/completed row (the record of truth is shown).
+    // Only a SUBMITTED answer also deletes the draft -- see the effect below.
+    const draft = draftKey && !isAnswerSubmitted(entry, savedAnswer)
       ? loadAnswerDraftWithLegacyFallback(draftKey, legacyDraftKey ?? null)
       : null;
     if (draft) return { ...draft };
@@ -133,6 +143,16 @@ export default function InspectionPanel({
     }
     return m;
   });
+  // Delete a leftover draft ONLY once a durable submitted answer exists. A row
+  // can be "completed" with no submitted answer (supervisor mark-complete,
+  // ad-hoc import, demo data), and then the local draft is the only copy of the
+  // employee's work -- it must stay in storage (it is merely not seeded, above).
+  // Keyed on the status VALUE, not the entry/answer objects, so a refresh that
+  // hands back new object identities does not re-run it.
+  const hasSubmittedAnswer = savedAnswer?.status === "submitted";
+  useEffect(() => {
+    if (draftKey && hasSubmittedAnswer) clearAnswerDraftAndLegacy(draftKey, legacyDraftKey ?? null);
+  }, [draftKey, legacyDraftKey, hasSubmittedAnswer]);
   const [validationMsg, setValidationMsg] = useState<string | null>(null);
   // Guards the async disk write behind the primary action: without it a
   // double-click (or an impatient re-click during a slow workspace write) fires
@@ -229,7 +249,7 @@ export default function InspectionPanel({
     );
   }, [missingRequiredFields, touchedRequiredIds]);
 
-  const isSubmitted = entry.status === "completed" || savedAnswer?.status === "submitted";
+  const isSubmitted = isAnswerSubmitted(entry, savedAnswer);
   const activePhaseIndex = phases.findIndex((phase) => phase.phaseId === safeActivePhaseId);
   const isLastPhase = activePhaseIndex < 0 || activePhaseIndex === phases.length - 1;
   const currentPhaseMissingRequiredFields = useMemo(() => {
