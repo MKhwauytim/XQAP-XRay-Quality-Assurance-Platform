@@ -233,6 +233,7 @@ async function readText(
   const missingRetries = options?.retryMissing ? VERIFY_READBACK_RETRY_DELAYS_MS.length : 0;
   let missingAttempts = 0;
   const retries = newReadRetryBudget();
+  let staleAfterCommitAttempts = 0;
   let lastMissingError: unknown = null;
   for (;;) {
     try {
@@ -282,6 +283,30 @@ async function readText(
       if (retryDelay !== null) {
         await wait(retryDelay);
         continue;
+      }
+      // `retryMissing` marks a read of a file this caller has just committed:
+      // it provably exists, so a stale (size, mtime) snapshot can only mean the
+      // client's metadata has not caught up -- the same reasoning that gives a
+      // MISSING entry the long verify-readback ladder. The ordinary stale ladder
+      // above is ~630 ms and, when it ran out, the throw made casLoop re-run the
+      // whole attempt with a fresh commit (re-arming the same stale window), so
+      // every retry failed alike while every commit landed (error-log group E3,
+      // `casLoop:exhausted(feedback:threadsIndex) [XQ-IO-036]`). Bounded by the
+      // caller's deadline; once spent, the error is rethrown as before.
+      if (
+        options?.retryMissing &&
+        isSnapshotStaleError(error) &&
+        staleAfterCommitAttempts < VERIFY_READBACK_RETRY_DELAYS_MS.length
+      ) {
+        const patientDelay = nextRetryDelayMs(
+          VERIFY_READBACK_RETRY_DELAYS_MS[staleAfterCommitAttempts]!,
+          options.deadline
+        );
+        if (patientDelay !== null) {
+          staleAfterCommitAttempts += 1;
+          await wait(patientDelay);
+          continue;
+        }
       }
       throw error;
     }
