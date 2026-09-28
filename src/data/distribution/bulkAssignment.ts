@@ -139,6 +139,18 @@ function rebalanceTowardMonthTargets(params: {
  * its owner's POST-rebalance count within that same group — nothing else
  * changes. `eventGroupKey` (eventId → group key) is recorded once per
  * event at generation time, before any rebalance can touch assignment.
+ *
+ * A receiver can end up owning rows in a group it never had its own
+ * `assignWithinGroup` call for (e.g. a cross-stage make-up moves a row into
+ * a stage/port pair the receiver wasn't allocated in at generation time).
+ * Those moved-in rows are always unstamped (see `rebalanceTowardMonthTargets`
+ * above — a stamped event never moves), so this function has nothing to
+ * restamp for the receiver in that group: no event there carries `dailyQuota`
+ * either before or after. `dailyQuota` is a per-group pacing hint, not an
+ * authoritative per-employee total (the event/entry counts are that), so a
+ * consumer reading it must already tolerate an employee holding rows in a
+ * group with no dailyQuota-carrying event at all — this is not a regression
+ * A3 introduces, just a case F10 does not need to (and does not) paper over.
  */
 function restampDailyQuota(
   events: DistributionEvent[],

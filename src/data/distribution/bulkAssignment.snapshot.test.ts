@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { EmployeePortRestriction } from "../population/populationConfig";
+import type { ManagedLoginUser } from "../../auth/userManagement";
 import type { DistributionEntry } from "./distributionTypes";
 import { calculateBulkAssignment, type BulkAssignmentResult } from "./bulkAssignment";
 import { makeUser, row, rows, alloc } from "./bulkAssignmentTestFixtures";
-import type { ManagedLoginUser } from "../../auth/userManagement";
 
 // Titles carry a "[no-restriction]" or "[port-restricted]" tag so a later task
 // can update ONLY the restricted snapshots with `-t "port-restricted" -u`.
