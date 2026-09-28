@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { EmployeeStageAllocation, EmployeePortRestriction } from "../population/populationConfig";
 import type { ManagedLoginUser } from "../../auth/userManagement";
@@ -738,15 +738,23 @@ test("A3 + F10 (fix round 1): the stamped event's dailyQuota is restamped to eac
   const employees = ["a", "b", "c", "d"].map((username) => makeUser(username, "employee"));
   const portRestrictions: EmployeePortRestriction[] = [{ username: "d", restricted: true, enabledPorts: ["port-B"] }];
 
-  // month/year chosen so daysRemaining lands around 31 (comfortably > 0, so
-  // every group's first event carries a dailyQuota/daysRemainingAtAssignment
-  // stamp) AND small enough that ceil(100/days) actually differs from both
-  // ceil(160/days) and ceil(80/days) below — otherwise a coarser days count
-  // could make the stale and restamped quotas collapse to the same integer
-  // and this test would prove nothing even while passing.
-  const result = calculateBulkAssignment({
-    rows, allocations, employees, operatorUsername: "test", portRestrictions, month: 10, year: 2026,
-  });
+  // daysRemaining comes from `new Date()` inside calculateBulkAssignment, so
+  // the clock is pinned (Date only — async timers stay real). From
+  // 2026-09-28 12:00 local to the October 2026 deadline (Oct 28 23:59:59)
+  // is exactly 31 days after ceil, and ceil(100/31)=4, ceil(160/31)=6,
+  // ceil(80/31)=3 are all distinct, so a stale (unrestamped) quota can never
+  // coincide with the restamped one. On the real clock this would drift into
+  // days where the ceilings collapse (e.g. 25, 26, 34-39) or reach 0 (no stamp).
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 8, 28, 12));
+  let result: ReturnType<typeof calculateBulkAssignment>;
+  try {
+    result = calculateBulkAssignment({
+      rows, allocations, employees, operatorUsername: "test", portRestrictions, month: 10, year: 2026,
+    });
+  } finally {
+    vi.useRealTimers();
+  }
 
   expect(result.errors).toHaveLength(0);
 
@@ -762,7 +770,7 @@ test("A3 + F10 (fix round 1): the stamped event's dailyQuota is restamped to eac
   const dStamped = dSecondStageEvents.filter((e) => e.dailyQuota !== undefined);
   expect(dStamped).toHaveLength(1);
   const daysRemaining = dStamped[0]!.daysRemainingAtAssignment!;
-  expect(daysRemaining).toBeGreaterThan(0);
+  expect(daysRemaining).toBe(31);
   expect(dStamped[0]!.dailyQuota).toBe(Math.ceil(160 / daysRemaining));
   expect(dStamped[0]!.dailyQuota).not.toBe(Math.ceil(100 / daysRemaining));
 
