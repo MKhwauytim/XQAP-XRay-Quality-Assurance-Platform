@@ -17,7 +17,7 @@ import { formatDateTime, formatNumber } from "../../../../utils/formatting";
 import { ConfirmDialog } from "../../../ConfirmDialog/ConfirmDialog";
 import "./TemplateRepairSection.css";
 
-type Notice = { kind: "ok" | "error"; text: string };
+type Notice = { kind: "ok" | "info" | "error"; text: string };
 
 function fill(template: string, values: Record<string, string | number>): string {
   return Object.entries(values).reduce((text, [key, value]) => text.split(`{${key}}`).join(String(value)), template);
@@ -47,6 +47,7 @@ export function PopulationRecoverySection() {
   // a month the admin is not looking at, and useGlobalMonth throws outside its
   // provider (the same reasoning DecisionRepairSection documents).
   const [months, setMonths] = useState<MonthFolderInfo[]>([]);
+  const [monthsState, setMonthsState] = useState<"loading" | "ready" | "error">("loading");
   const [month, setMonth] = useState("");
   const [candidates, setCandidates] = useState<PopulationRecoveryCandidate[] | null>(null);
   const [pending, setPending] = useState<PopulationRecoveryCandidate | null>(null);
@@ -56,17 +57,28 @@ export function PopulationRecoverySection() {
   useEffect(() => {
     if (!isOpen || !canView || !directoryHandle) return;
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- show the loading state each time the list is (re)read
+    setMonthsState("loading");
     void listMonthFolders(directoryHandle)
       .then((found) => {
         if (cancelled) return;
         setMonths(found);
+        setMonthsState("ready");
         setMonth((current) => current || (found[found.length - 1]?.folderName ?? ""));
       })
-      .catch((error: unknown) => logError("settings:population-recovery-months", error));
+      .catch((error: unknown) => {
+        logError("settings:population-recovery-months", error);
+        if (cancelled) return;
+        setMonthsState("error");
+        setNotice({
+          kind: "error",
+          text: fill(L.population_recovery_months_failed, { error: error instanceof Error ? error.message : String(error) }),
+        });
+      });
     return () => {
       cancelled = true;
     };
-  }, [isOpen, canView, directoryHandle]);
+  }, [isOpen, canView, directoryHandle, L.population_recovery_months_failed]);
 
   if (!canView) return null;
 
@@ -89,7 +101,13 @@ export function PopulationRecoverySection() {
   }
 
   function describe(result: PopulationRestoreResult): Notice {
-    if (result.ok) return { kind: "ok", text: fill(L.population_recovery_restored, { archived: result.archivedAs ?? "—" }) };
+    if (result.ok) {
+      const restored = fill(L.population_recovery_restored, { archived: result.archivedAs ?? "—" });
+      // Success with a warning: the population is back, a follow-up step is not.
+      return result.warnings?.includes("manifest-sync-failed")
+        ? { kind: "info", text: `${restored} ${L.population_recovery_warning_manifest}` }
+        : { kind: "ok", text: restored };
+    }
     if (result.reason === "blocked") {
       return { kind: "error", text: fill(L.population_recovery_blocked_refused, { missing: result.missingCount }) };
     }
@@ -121,7 +139,8 @@ export function PopulationRecoverySection() {
       {isOpen && (
         <div className="template-repair-body">
           <p className="template-repair-hint">{L.population_recovery_hint}</p>
-          {months.length === 0 && <p className="template-repair-empty">{L.population_recovery_no_month}</p>}
+          {monthsState === "loading" && <p className="template-repair-empty">{L.population_recovery_months_loading}</p>}
+          {monthsState === "ready" && months.length === 0 && <p className="template-repair-empty">{L.population_recovery_no_month}</p>}
           <div className="template-repair-controls">
             <label htmlFor="population-recovery-month">{L.population_recovery_month_label}</label>
             <select

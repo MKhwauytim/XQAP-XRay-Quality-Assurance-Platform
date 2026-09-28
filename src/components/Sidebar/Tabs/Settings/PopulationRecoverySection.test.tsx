@@ -173,4 +173,44 @@ describe("PopulationRecoverySection", () => {
       )
     );
   });
+
+  it("shows a failure notice, not the no-months text, when the month list cannot be read", async () => {
+    recovery.months.mockRejectedValue(new Error("share offline"));
+    render(<PopulationRecoverySection />);
+    fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.population_recovery_title }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent(
+        DEFAULT_LABELS.population_recovery_months_failed.replace("{error}", "share offline")
+      )
+    );
+    expect(screen.queryByText(DEFAULT_LABELS.population_recovery_no_month)).toBeNull();
+  });
+
+  it("shows a loading state while the month list is being read", async () => {
+    recovery.months.mockReturnValue(new Promise(() => {}));
+    render(<PopulationRecoverySection />);
+    fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.population_recovery_title }));
+
+    expect(screen.getByText(DEFAULT_LABELS.population_recovery_months_loading)).toBeInTheDocument();
+    expect(screen.queryByText(DEFAULT_LABELS.population_recovery_no_month)).toBeNull();
+  });
+
+  it("presents a restore that succeeded with a warning as a success plus the warning", async () => {
+    withMonth();
+    recovery.list.mockResolvedValue([ARCHIVE]);
+    recovery.restore.mockResolvedValue({ ok: true, archivedAs: "x.superseded.json", rowCount: 300, warnings: ["manifest-sync-failed"] });
+    render(<PopulationRecoverySection />);
+    await openAndScan();
+    await waitFor(() => expect(screen.getByText("40 / 40")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.population_recovery_restore_btn }));
+    fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.confirm_dialog_default_ok }));
+
+    await waitFor(() => {
+      const status = screen.getByRole("status");
+      expect(status).toHaveTextContent(DEFAULT_LABELS.population_recovery_restored.replace("{archived}", "x.superseded.json"));
+      expect(status).toHaveTextContent(DEFAULT_LABELS.population_recovery_warning_manifest);
+    });
+  });
 });
