@@ -23,6 +23,8 @@ import {
 } from "./workspacePaths";
 import { DISTRIBUTION_EVENTS_DIR } from "../distribution/distributionEventStore";
 import { ANSWER_EVENTS_DIR } from "../answers/answerEventStore";
+import { upsertItemAnswer } from "../answers/answerStorage";
+import type { ItemAnswer } from "../answers/answerTypes";
 import {
   acceptNotification,
   loadNotifications,
@@ -1096,5 +1098,42 @@ describe("runSync — §6 of the answer-save proposal: the answers.events segmen
 
     const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
     expect(changed.size).toBe(0);
+  });
+});
+
+describe("runSync — this session's own answer appends do not report the answers family (A1)", () => {
+  function answer(xrayImageId: string): ItemAnswer {
+    return {
+      xrayImageId,
+      templateId: "tpl",
+      templateVersion: 1,
+      answers: [{ fieldId: "f1", value: "v" }],
+      lastSavedAt: new Date().toISOString(),
+      submittedAt: new Date().toISOString(),
+      answeredBy: "emp1",
+      status: "submitted",
+    };
+  }
+
+  it("stays quiet for an own save, and still reports another writer's segment", async () => {
+    const root = makeRoot();
+    // First save also freezes the legacy shell (answerStorage section 8), so do
+    // it before the baseline: only the event append is under test.
+    expect((await upsertItemAnswer(root, MONTH, "emp1", answer("XR-1"))).ok).toBe(true);
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    expect((await upsertItemAnswer(root, MONTH, "emp1", answer("XR-2"))).ok).toBe(true);
+    const own = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(own.changed.has("answers")).toBe(false);
+
+    const main = await getSampleMainDir(root, MONTH, true);
+    const eventsDir = await main.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: true });
+    await writeRawFile(
+      eventsDir,
+      "zz-ans-otherdev-s9.ndjson",
+      `${JSON.stringify({ eventId: "other-1", eventType: "item-saved", eventAt: "2026-05-01T08:00:00.000Z", eventBy: "emp2", authority: "self", xrayImageId: "XR-9", answers: [], status: "draft", answeredBy: "emp2" })}\n`
+    );
+    const other = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(other.changed.has("answers")).toBe(true);
   });
 });

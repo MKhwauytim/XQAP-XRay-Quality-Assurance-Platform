@@ -44,6 +44,7 @@ import { broadcastDataRefresh, type DataRefreshFamily } from "./dataRefreshSigna
 import { bumpWorkspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
 import { readDistributionLogStamp } from "../distribution/distributionStorage";
 import {
+  DEFAULT_SIZE_SIGNATURE_STAT_BUDGET,
   boundedSizeSignature,
   listDirectoryEntriesWithSize,
   type SizedDirectoryEntry,
@@ -55,6 +56,7 @@ import {
 import {
   ANSWER_EVENTS_DIR,
   ANSWER_EVENT_SEGMENT_SUFFIX,
+  ownAnswerSegmentNames,
 } from "../answers/answerEventStore";
 import { readEnvelopeRevision } from "../storage/safeWrite";
 import { logError } from "../storage/errorLogger";
@@ -445,7 +447,16 @@ async function safeSegmentsSignature(dir: DirectoryHandleLike | null): Promise<P
 async function safeAnswerSegmentsSignature(dir: DirectoryHandleLike | null): Promise<Probed<string>> {
   if (!dir) return "";
   try {
-    return await boundedSizeSignature(dir, ANSWER_EVENT_SEGMENT_SUFFIX);
+    // A1: this session's own appends are already reflected locally (the saving
+    // view updated its own state). Signing them made every save come back to
+    // its author as a remote change one tick later and triggered the stale
+    // reload that downgraded the row. Other writers' segments still count.
+    return await boundedSizeSignature(
+      dir,
+      ANSWER_EVENT_SEGMENT_SUFFIX,
+      DEFAULT_SIZE_SIGNATURE_STAT_BUDGET,
+      ownAnswerSegmentNames()
+    );
   } catch (error) {
     logError("workspaceSync:probeAnswerSegments", error);
     return UNPROBED;
