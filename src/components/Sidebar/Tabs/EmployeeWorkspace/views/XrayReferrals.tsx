@@ -13,6 +13,7 @@ import {
   upsertItemAnswerOnBehalf,
 } from "../../../../../data/answers/answerStorage";
 import { clearAnswerDraft } from "../../../../../data/answers/answerDraftStore";
+import { pickAutoSelectId, readLastOpenSample, rememberLastOpenSample } from "../../../../../data/answers/lastOpenSampleStore";
 import { answerFolderForEntry, panelDraftKey } from "./XrayReferrals/answerRouting";
 import { reopenSubmittedAnswer } from "../../../../../data/answers/reopenAnswer";
 import { MonthClosedError } from "../../../../../data/population/monthLock";
@@ -1157,8 +1158,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     // The employee stays in control: any explicit navigation still moves on.
     if (selEntryId != null && dirtyEntryId === selEntryId) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- auto-corrects selection when the display list changes; useMemo cannot accumulate user navigation state
-    setSelEntryId(displayEntries[0].xrayImageId);
-  }, [displayEntries, selEntryId, dirtyEntryId]);
+    setSelEntryId(pickAutoSelectId(displayEntries, readLastOpenSample(username, selMonth)));
+  }, [displayEntries, selEntryId, dirtyEntryId, username, selMonth]);
+  useEffect(() => { if (selEntryId) rememberLastOpenSample(username, selMonth, selEntryId); }, [username, selMonth, selEntryId]);
 
   /** Explicit user navigation — the one case where dropping a draft is intended. */
   const selectEntry = useCallback((xrayImageId: string | null): void => {
