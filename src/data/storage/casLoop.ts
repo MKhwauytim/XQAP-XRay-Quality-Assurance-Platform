@@ -54,10 +54,43 @@ function verifyDelayMs(): number {
 // access to the workspace, whose only offered remedy (re-pick the folder) is
 // powerless against someone else's open handle. See `isLockContentionError`
 // in transientFileErrors.ts; it now falls through to the retry path below.
-function isPermissionLostError(error: unknown): boolean {
+export function isPermissionLostError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const name = (error as { name?: string }).name;
   return name === "NotAllowedError" || name === "SecurityError";
+}
+
+/**
+ * The terminal `{ ok: false, error }` for a write that failed by THROWING, with
+ * the same classification, logging and `onExhausted` observation `casLoop`
+ * applies when its attempts are exhausted. Exported so a caller that has
+ * deliberately left the retry loop (a single, non-racing append — see
+ * `performAnswerWrite`) reports an identical failure instead of a second,
+ * drifting copy of this mapping.
+ *
+ * A lost folder grant maps to the reconnect message and is not logged, exactly
+ * as inside the loop.
+ */
+export function casFailureFromCause(
+  cause: unknown,
+  options?: { context?: string; onExhausted?: (cause: unknown, code: ErrorCode) => void }
+): { ok: false; error: string } {
+  if (isPermissionLostError(cause)) return { ok: false, error: PERMISSION_LOST_ERROR };
+  // An exception beat us, so this is NOT a write conflict — report what it
+  // actually was, with a quotable code, and put the raw detail in the log.
+  const code = resolveErrorCode(cause) ?? "XQ-IO-032";
+  logCodedError(
+    options?.context ? `casLoop:exhausted(${options.context})` : "casLoop:exhausted",
+    code,
+    cause
+  );
+  try {
+    options?.onExhausted?.(cause, code);
+  } catch {
+    // The observer's own failure is not this write's problem — see the
+    // `onExhausted` option's doc comment on `casLoop`.
+  }
+  return { ok: false, error: codedMessage(code) };
 }
 
 /**
@@ -235,21 +268,7 @@ export async function casLoop<T>(
   }
 
   if (lastCause !== undefined) {
-    // An exception beat us, so this is NOT a write conflict — report what it
-    // actually was, with a quotable code, and put the raw detail in the log.
-    const code = resolveErrorCode(lastCause) ?? "XQ-IO-032";
-    logCodedError(
-      options?.context ? `casLoop:exhausted(${options.context})` : "casLoop:exhausted",
-      code,
-      lastCause
-    );
-    try {
-      options?.onExhausted?.(lastCause, code);
-    } catch {
-      // The observer's own failure is not this write's problem — see the
-      // option's own doc comment above.
-    }
-    return { ok: false, error: codedMessage(code) };
+    return casFailureFromCause(lastCause, options);
   }
   // No exception: every attempt lost the revision race. The caller's Arabic
   // conflict sentence is the right answer here and now survives intact.

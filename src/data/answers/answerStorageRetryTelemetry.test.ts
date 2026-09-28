@@ -30,7 +30,21 @@ type CasLoopOptions = NonNullable<Parameters<typeof CasLoopFn>[1]>;
 const hooks = vi.hoisted(() => ({
   casLoopCalls: [] as Array<{ options?: CasLoopOptions }>,
   logErrorCalls: [] as Array<{ context: string; error: unknown; meta?: { action?: string; errorCode?: string } }>,
+  failAppendWith: null as Error | null,
 }));
+
+// S2: answer saves no longer run under casLoop, so their failure telemetry is
+// driven through a failing append (delegating to the real one otherwise).
+vi.mock("./answerEventStore", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./answerEventStore")>();
+  return {
+    ...actual,
+    appendAnswerEventSegment: async (...args: Parameters<typeof actual.appendAnswerEventSegment>) => {
+      if (hooks.failAppendWith) throw hooks.failAppendWith;
+      return actual.appendAnswerEventSegment(...args);
+    },
+  };
+});
 
 vi.mock("../storage/casLoop", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../storage/casLoop")>();
@@ -93,6 +107,7 @@ function makeItem(overrides?: Partial<ItemAnswer>): ItemAnswer {
 beforeEach(() => {
   hooks.casLoopCalls.length = 0;
   hooks.logErrorCalls.length = 0;
+  hooks.failAppendWith = null;
 });
 
 afterEach(() => {
@@ -100,30 +115,22 @@ afterEach(() => {
 });
 
 describe("updateEmployeeAnswerFile — widened retry ladder (B-XQIO032)", () => {
-  it("passes a wider, explicit ladder than casLoop's shared defaults on an answer save", async () => {
+  it("an answer save (upsert/reopen/note) no longer runs under casLoop at all (S2)", async () => {
     const dir = createMemoryDirectory();
-    const result = await upsertItemAnswer(dir, MONTH, USER, makeItem());
+    const result = await upsertItemAnswer(dir, MONTH, USER, makeItem({ status: "submitted", submittedAt: new Date().toISOString() }));
     expect(result.ok).toBe(true);
-
-    expect(hooks.casLoopCalls).toHaveLength(1);
-    const { options } = hooks.casLoopCalls[0]!;
-    // casLoop's own shared defaults are 10 retries / 200 ms base (casLoop.ts).
-    // This call must override both, not merely equal them.
-    expect(options?.maxRetries).toBe(14);
-    expect(options?.maxRetries).toBeGreaterThan(10);
-    expect(options?.baseDelayMs).toBe(150);
-    expect(typeof options?.onExhausted).toBe("function");
+    expect((await reopenItemAnswer(dir, MONTH, USER, "X1", "supervisor1", "سبب")).ok).toBe(true);
+    expect((await setItemQualityNote(dir, MONTH, USER, "X1", "ملاحظة")).ok).toBe(true);
+    expect(hooks.casLoopCalls).toHaveLength(0);
   });
 
-  it("applies the same widened ladder to every answer-file write path, not just one", async () => {
+  it("every remaining casLoop-protected answer-file write path keeps the widened ladder", async () => {
     const dir = createMemoryDirectory();
     // Seed an item so reopen/quality-note/on-behalf have something to act on.
     await upsertItemAnswer(dir, MONTH, USER, makeItem({ status: "submitted", submittedAt: new Date().toISOString() }));
     hooks.casLoopCalls.length = 0;
 
     await saveEmployeeAnswers(dir, MONTH, USER, [makeItem()]);
-    await reopenItemAnswer(dir, MONTH, USER, "X1", "supervisor1", "سبب");
-    await setItemQualityNote(dir, MONTH, USER, "X1", "ملاحظة");
     await upsertItemAnswerOnBehalf(dir, MONTH, "emp2", makeItem({ xrayImageId: "X2", answeredBy: "emp2" }), "supervisor1");
     await appendReferralToEmployee(dir, MONTH, {
       requestId: "r1",
@@ -158,7 +165,7 @@ describe("updateEmployeeAnswerFile — widened retry ladder (B-XQIO032)", () => 
       status: "pending",
     });
 
-    expect(hooks.casLoopCalls.length).toBeGreaterThanOrEqual(7);
+    expect(hooks.casLoopCalls.length).toBeGreaterThanOrEqual(5);
     for (const call of hooks.casLoopCalls) {
       expect(call.options?.maxRetries).toBe(14);
       expect(call.options?.baseDelayMs).toBe(150);
@@ -166,51 +173,47 @@ describe("updateEmployeeAnswerFile — widened retry ladder (B-XQIO032)", () => 
   });
 });
 
-describe("updateEmployeeAnswerFile — onExhausted telemetry wiring (B-XQIO032)", () => {
-  it("an answer save's onExhausted logs the RAW error under its own page/action context", async () => {
+describe("answer save failure telemetry (B-XQIO032, kept through S2)", () => {
+  it("a failed save logs the RAW error under its own page/action context and reports the coded message", async () => {
     const dir = createMemoryDirectory();
-    await upsertItemAnswer(dir, MONTH, USER, makeItem());
-    const onExhausted = hooks.casLoopCalls.at(-1)!.options!.onExhausted!;
-
     const rawCause = new Error("share went away mid-write");
     rawCause.name = "SomeUnclassifiedTransientError";
-    onExhausted(rawCause, "XQ-IO-032");
+    hooks.failAppendWith = rawCause;
+
+    const result = await upsertItemAnswer(dir, MONTH, USER, makeItem());
+    expect(result.ok).toBe(false);
+    expect((result as { error: string }).error).toContain("XQ-IO-032");
 
     const logged = hooks.logErrorCalls.find((c) => c.context === "answerStorage:answer-save");
     expect(logged).toBeDefined();
-    // The RAW error object itself is what's logged — not a re-derived string —
-    // so `logError`'s own name/message/stack extraction sees the real thing.
+    // The RAW error object itself is logged, so `logError`'s own name/message/stack
+    // extraction sees the real thing.
     expect(logged!.error).toBe(rawCause);
-    expect((logged!.error as Error).message).toBe("share went away mid-write");
     expect(logged!.meta).toEqual({ action: "answer-save", errorCode: "XQ-IO-032" });
   });
 
   it("gives each write path its own action label instead of one generic bucket", async () => {
     const dir = createMemoryDirectory();
     await upsertItemAnswer(dir, MONTH, USER, makeItem({ status: "submitted", submittedAt: new Date().toISOString() }));
-    hooks.casLoopCalls.length = 0;
+    hooks.logErrorCalls.length = 0;
+    hooks.failAppendWith = new Error("boom");
 
-    await reopenItemAnswer(dir, MONTH, USER, "X1", "supervisor1", "سبب");
-    const reopenExhausted = hooks.casLoopCalls.at(-1)!.options!.onExhausted!;
-    reopenExhausted(new Error("boom"), "XQ-IO-018");
-    expect(hooks.logErrorCalls.at(-1)!.context).toBe("answerStorage:answer-reopen");
-    expect(hooks.logErrorCalls.at(-1)!.meta).toEqual({ action: "answer-reopen", errorCode: "XQ-IO-018" });
+    expect((await reopenItemAnswer(dir, MONTH, USER, "X1", "supervisor1", "سبب")).ok).toBe(false);
+    expect(hooks.logErrorCalls.find((c) => c.context === "answerStorage:answer-reopen")?.meta?.action).toBe("answer-reopen");
 
-    await setItemQualityNote(dir, MONTH, USER, "X1", "ملاحظة");
-    const noteExhausted = hooks.casLoopCalls.at(-1)!.options!.onExhausted!;
-    noteExhausted(new Error("boom"), "XQ-IO-018");
-    expect(hooks.logErrorCalls.at(-1)!.context).toBe("answerStorage:quality-note-save");
+    expect((await setItemQualityNote(dir, MONTH, USER, "X1", "ملاحظة")).ok).toBe(false);
+    expect(hooks.logErrorCalls.find((c) => c.context === "answerStorage:quality-note-save")?.meta?.action).toBe("quality-note-save");
   });
 
-  it("does not change what the caller resolves to — additive telemetry only", async () => {
+  it("a lost folder grant maps to the reconnect message and is not logged as an exhaustion", async () => {
     const dir = createMemoryDirectory();
-    const before = await upsertItemAnswer(dir, MONTH, USER, makeItem());
-    expect(before).toEqual({ ok: true });
+    const denied = new Error("denied");
+    denied.name = "NotAllowedError";
+    hooks.failAppendWith = denied;
 
-    const onExhausted = hooks.casLoopCalls.at(-1)!.options!.onExhausted!;
-    const returnValue = onExhausted(new Error("irrelevant"), "XQ-IO-032");
-    // The hook is fire-and-forget from casLoop's perspective (void), and must
-    // never itself become something a caller awaits or branches on.
-    expect(returnValue).toBeUndefined();
+    const result = await upsertItemAnswer(dir, MONTH, USER, makeItem());
+    expect(result.ok).toBe(false);
+    expect((result as { error: string }).error).not.toContain("XQ-IO-032");
+    expect(hooks.logErrorCalls.find((c) => c.context === "answerStorage:answer-save")).toBeUndefined();
   });
 });

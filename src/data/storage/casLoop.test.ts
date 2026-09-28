@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { casLoop } from "./casLoop";
+import { casFailureFromCause, casLoop } from "./casLoop";
 import { createMemoryDirectory } from "./memoryDirectory";
 import { safeReadJson, safeWriteJson } from "./safeWrite";
 
@@ -323,5 +323,31 @@ describe("casLoop — onExhausted hook (B-XQIO032)", () => {
     );
     // Still resolves normally — the observer's own failure is swallowed.
     expect(result).toEqual({ ok: false, error: expect.any(String) });
+  });
+});
+
+describe("casFailureFromCause", () => {
+  it("maps a thrown error to the coded failure, logs it, and notifies onExhausted without changing the result", () => {
+    const seen: unknown[] = [];
+    const cause = new Error("boom");
+    const result = casFailureFromCause(cause, {
+      context: "unit",
+      onExhausted: (c) => {
+        seen.push(c);
+        throw new Error("observer failure must not matter");
+      },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("XQ-");
+    expect(seen).toEqual([cause]);
+  });
+
+  it("maps a lost folder grant to the reconnect message without calling onExhausted", () => {
+    const denied = Object.assign(new Error("x"), { name: "NotAllowedError" });
+    let called = false;
+    const result = casFailureFromCause(denied, { onExhausted: () => { called = true; } });
+    expect(result.ok).toBe(false);
+    expect(called).toBe(false);
+    expect(result.error).not.toContain("XQ-");
   });
 });
