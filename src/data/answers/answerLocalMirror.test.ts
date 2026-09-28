@@ -6,6 +6,7 @@ import {
   loadMirroredAnswers,
   markAnswerPendingLocally,
   mirrorAnswerLocally,
+  shouldConfirmMirrorRecord,
   shouldRefreshMirrorFromDisk,
   type MirroredItemInfo,
 } from "./answerLocalMirror";
@@ -92,5 +93,53 @@ describe("shouldRefreshMirrorFromDisk", () => {
     const existing = record({ synced: true, item: item("X1", "2026-09-05T00:00:00.000Z") });
     const olderDiskItem = item("X1", "2026-09-01T00:00:00.000Z");
     expect(shouldRefreshMirrorFromDisk(existing, olderDiskItem)).toBe(false);
+  });
+});
+
+// CRITICAL fix round 4: `shouldRefreshMirrorFromDisk`'s "never touch a
+// pending record" rule is right for an OPPORTUNISTIC disk read
+// (`backfillMirrorFromDisk`) but wrong for a CONFIRMATION
+// (`mirrorAnswerLocally`, called with authoritative knowledge that `item`
+// really is on disk now) -- fix round 3 wrongly reused the former for the
+// latter, which meant a pending record could never be confirmed at all
+// (countPendingAnswers stuck > 0 forever). `shouldConfirmMirrorRecord` is
+// the corrected, separate rule: it DOES clear a pending record, refusing
+// only when the pending record is itself strictly newer than the incoming
+// confirm.
+describe("shouldConfirmMirrorRecord", () => {
+  function record(overrides?: Partial<MirroredItemInfo>): MirroredItemInfo {
+    return { synced: true, item: item("X1", "2026-09-01T00:00:00.000Z"), ...overrides };
+  }
+
+  it("says yes when there is no existing record at all", () => {
+    expect(shouldConfirmMirrorRecord(undefined, item("X1", "2026-09-01T00:00:00.000Z"))).toBe(true);
+  });
+
+  it("says yes for a pending record confirmed at the SAME lastSavedAt -- clears the pending flag", () => {
+    const existing = record({ synced: false, item: item("X1", "2026-09-01T00:00:00.000Z") });
+    expect(shouldConfirmMirrorRecord(existing, item("X1", "2026-09-01T00:00:00.000Z"))).toBe(true);
+  });
+
+  it("says yes for a pending record confirmed at a NEWER lastSavedAt -- clears the pending flag", () => {
+    const existing = record({ synced: false, item: item("X1", "2026-09-01T00:00:00.000Z") });
+    const newerConfirm = item("X1", "2026-09-05T00:00:00.000Z");
+    expect(shouldConfirmMirrorRecord(existing, newerConfirm)).toBe(true);
+  });
+
+  it("says NO for a pending record when the incoming confirm is OLDER -- the pending record is itself the newer, unsaved edit", () => {
+    const existing = record({ synced: false, item: item("X1", "2026-09-05T00:00:00.000Z") });
+    const olderConfirm = item("X1", "2026-09-01T00:00:00.000Z");
+    expect(shouldConfirmMirrorRecord(existing, olderConfirm)).toBe(false);
+  });
+
+  it("says yes for an already-synced record when the incoming confirm is not older", () => {
+    const existing = record({ synced: true, item: item("X1", "2026-09-01T00:00:00.000Z") });
+    expect(shouldConfirmMirrorRecord(existing, item("X1", "2026-09-01T00:00:00.000Z"))).toBe(true);
+    expect(shouldConfirmMirrorRecord(existing, item("X1", "2026-09-05T00:00:00.000Z"))).toBe(true);
+  });
+
+  it("says NO for an already-synced record when the incoming confirm is OLDER -- never regress it", () => {
+    const existing = record({ synced: true, item: item("X1", "2026-09-05T00:00:00.000Z") });
+    expect(shouldConfirmMirrorRecord(existing, item("X1", "2026-09-01T00:00:00.000Z"))).toBe(false);
   });
 });

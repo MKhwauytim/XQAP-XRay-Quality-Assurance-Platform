@@ -1,8 +1,9 @@
 /* @vitest-environment jsdom */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createMemoryDirectory, setSimulatedFaults } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { createFakeIndexedDb } from "../storage/fakeIndexedDb.testHelper";
 import { safeWriteJson } from "../storage/safeWrite";
 import { getPopulationMonthDir, getSampleMainDir } from "../workspace/workspacePaths";
 import { closeMonth, invalidateMonthLockCache } from "../population/monthLock";
@@ -385,5 +386,57 @@ describe("backfillAnswerMirror (A1 / IMPORTANT 5)", () => {
       expect.arrayContaining([expect.objectContaining({ xrayImageId: "XR-1" })])
     );
     expect(mirrorMock).not.toHaveBeenCalled(); // no per-item mirrorAnswerLocally loop any more
+  });
+});
+
+// CRITICAL (fix round 4): end-to-end proof that a pending item can actually
+// BECOME synced through a real replay pass -- not a mocked/stubbed
+// deps.markSynced, but the real loadPendingAnswerRecords -> upsertItemAnswer
+// -> mirrorAnswerLocally chain, backed by a real (fake) IndexedDB. Fix round
+// 3's bug (shouldRefreshMirrorFromDisk's "never touch a pending record"
+// rule wrongly reused for confirmation) would have made both tests below
+// fail: countPendingAnswers would still read 1 after a successful replay.
+describe("replayPendingAnswers clears the pending count end-to-end (CRITICAL fix round 4)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("through upsertItemAnswer end-to-end, the pending count goes to 0 after a successful replay lands the item", async () => {
+    const { fakeIndexedDb } = createFakeIndexedDb();
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    const root = createMemoryDirectory("root");
+    await seedMonth(root, MONTH);
+
+    await answerLocalMirror.markAnswerPendingLocally(MONTH, "emp1", answer("XR-1"));
+    expect(await answerLocalMirror.countPendingAnswers(MONTH, "emp1")).toBe(1);
+
+    // No injected deps -- the real loadPendingAnswerRecords and the real
+    // mirrorAnswerLocally (through DEFAULT_DEPS), exactly as the app-level
+    // runner calls it.
+    const summary = await replayPendingAnswers(root, "emp1");
+
+    expect(summary.replayed).toBe(1);
+    expect(await answerLocalMirror.countPendingAnswers(MONTH, "emp1")).toBe(0);
+  });
+
+  it("the 'already on disk' branch also clears the pending count", async () => {
+    const { fakeIndexedDb } = createFakeIndexedDb();
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    const root = createMemoryDirectory("root");
+
+    // The item is already successfully saved on disk...
+    expect((await upsertItemAnswer(root, MONTH, "emp1", answer("XR-2", "2026-09-28T10:00:00.000Z"))).ok).toBe(true);
+    __resetAnswerEventsCacheForTests();
+    // ...but this browser's own local mirror still (wrongly) thinks it's
+    // pending -- e.g. the tab crashed right after a successful save but
+    // before its own post-success mirror call landed.
+    await answerLocalMirror.markAnswerPendingLocally(MONTH, "emp1", answer("XR-2", "2026-09-28T09:00:00.000Z"));
+    expect(await answerLocalMirror.countPendingAnswers(MONTH, "emp1")).toBe(1);
+
+    const summary = await replayPendingAnswers(root, "emp1");
+
+    expect(summary.alreadyOnDisk).toBe(1);
+    expect(summary.replayed).toBe(0);
+    expect(await answerLocalMirror.countPendingAnswers(MONTH, "emp1")).toBe(0);
   });
 });

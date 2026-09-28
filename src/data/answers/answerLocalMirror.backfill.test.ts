@@ -1,20 +1,28 @@
 /**
- * CRITICAL (fix round 2, extended fix round 3): `answerLocalMirror.test.ts`'s
- * own note explains why this repo's test environment has no real IndexedDB
- * at all (jsdom doesn't ship it, and there is no `fake-indexeddb`
- * dependency). `shouldRefreshMirrorFromDisk` — the actual decision both
- * `backfillMirrorFromDisk` AND `mirrorAnswerLocally` delegate to (fix round
- * 3: the same guard, reused, not duplicated) — is unit-tested directly and
- * without any IndexedDB in that file. This file additionally stubs a small,
- * self-contained, purpose-built fake `indexedDB` (supporting exactly the
- * operations `answerLocalMirror.ts` uses: `open`/`onupgradeneeded`,
- * `get`/`getAll`/`put` inside one transaction, `oncomplete`) so both guarded
- * write paths get real, end-to-end coverage of the exact scenarios the
- * reviewer asked for, not just the pure function they delegate to.
+ * CRITICAL (fix round 2, extended fix round 3, corrected fix round 4):
+ * `answerLocalMirror.test.ts`'s own note explains why this repo's test
+ * environment has no real IndexedDB at all (jsdom doesn't ship it, and
+ * there is no `fake-indexeddb` dependency). `backfillMirrorFromDisk` and
+ * `mirrorAnswerLocally` now delegate to TWO DIFFERENT pure decision
+ * functions — `shouldRefreshMirrorFromDisk` (backfill: never touches a
+ * pending record) and `shouldConfirmMirrorRecord` (confirmation: DOES clear
+ * a pending record unless it is itself strictly newer than the incoming
+ * confirm) — both unit-tested directly and without any IndexedDB in that
+ * file. Fix round 3 wrongly had `mirrorAnswerLocally` share
+ * `shouldRefreshMirrorFromDisk`'s "never touch a pending record" rule,
+ * which meant a pending item could NEVER be confirmed once queued — the
+ * exact stuck-queue symptom this whole task exists to fix; `countPendingAnswers`
+ * would never reach 0. This file additionally stubs a small, self-contained,
+ * purpose-built fake `indexedDB` (`../storage/fakeIndexedDb.testHelper.ts` —
+ * supporting exactly the operations `answerLocalMirror.ts` uses:
+ * `open`/`onupgradeneeded`, `get`/`getAll`/`put` inside one transaction,
+ * `oncomplete`) so both guarded write paths get real, end-to-end coverage of
+ * the exact scenarios the reviewer asked for, not just the pure functions
+ * they delegate to.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createFakeIndexedDb } from "../storage/fakeIndexedDb";
+import { createFakeIndexedDb } from "../storage/fakeIndexedDb.testHelper";
 import {
   backfillMirrorFromDisk,
   countPendingAnswers,
@@ -110,13 +118,16 @@ describe("backfillMirrorFromDisk (CRITICAL, fix round 2, real fake-IDB end-to-en
   });
 });
 
-// CRITICAL (fix round 3): the SAME guard `backfillMirrorFromDisk` uses also
-// protects `mirrorAnswerLocally` -- the function `replayPendingAnswers`'s
-// `deps.markSynced` calls by default, and `performAnswerWrite`
-// (answerStorage.ts) calls after every successful save. Without it, either
-// caller could clobber a NEWER pending (synced: false) record for the same
-// key -- an employee re-saving the same item WHILE a replay pass or a
-// slower concurrent write is still in flight for an OLDER version of it.
+// CRITICAL (fix round 3, corrected fix round 4): `mirrorAnswerLocally` --
+// the function `replayPendingAnswers`'s `deps.markSynced` calls by default,
+// and `performAnswerWrite` (answerStorage.ts) calls after every successful
+// save -- carries AUTHORITATIVE knowledge that its `item` really is on disk
+// right now, so it uses `shouldConfirmMirrorRecord`, NOT
+// `shouldRefreshMirrorFromDisk`: it DOES clear a pending record when
+// confirming it (that is the entire point of confirming one), refusing only
+// when the existing pending record is itself strictly NEWER than the
+// incoming confirm -- a genuinely newer, still-unsaved edit racing against
+// a stale confirmation of an older version of the same item.
 describe("mirrorAnswerLocally (CRITICAL, fix round 3, real fake-IDB end-to-end)", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -141,6 +152,41 @@ describe("mirrorAnswerLocally (CRITICAL, fix round 3, real fake-IDB end-to-end)"
     const stored = table.get("5-may-2026::emp1::IMG-1");
     expect(stored?.synced).toBe(false);
     expect(stored?.item.lastSavedAt).toBe("2026-09-28T12:00:00.000Z"); // the newer edit, untouched
+  });
+
+  // The three required fix-round-4 scenarios, stated precisely against
+  // `shouldConfirmMirrorRecord`'s boundary: pending at T, confirm at T
+  // (equal) clears it; pending at T, confirm at T' > T clears it; pending
+  // at T', confirm at T < T' (the test above) is refused.
+  it("marking pending at T, then confirming the SAME item (T) clears the pending flag", async () => {
+    const { fakeIndexedDb, table } = createFakeIndexedDb<StoredRecord>();
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+
+    await markAnswerPendingLocally(MONTH, "emp1", item("IMG-4", "2026-09-28T10:00:00.000Z"));
+    expect(await countPendingAnswers(MONTH, "emp1")).toBe(1);
+
+    // replayPendingAnswers landed this EXACT item (or verified it already
+    // matches disk) and confirms it with the SAME lastSavedAt.
+    await mirrorAnswerLocally(MONTH, "emp1", item("IMG-4", "2026-09-28T10:00:00.000Z"));
+
+    expect(await countPendingAnswers(MONTH, "emp1")).toBe(0); // cleared
+    const stored = table.get("5-may-2026::emp1::IMG-4");
+    expect(stored?.synced).toBe(true);
+  });
+
+  it("marking pending at T, then confirming a NEWER item (T' > T) clears the pending flag", async () => {
+    const { fakeIndexedDb, table } = createFakeIndexedDb<StoredRecord>();
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+
+    await markAnswerPendingLocally(MONTH, "emp1", item("IMG-5", "2026-09-28T10:00:00.000Z"));
+    expect(await countPendingAnswers(MONTH, "emp1")).toBe(1);
+
+    await mirrorAnswerLocally(MONTH, "emp1", item("IMG-5", "2026-09-28T11:00:00.000Z"));
+
+    expect(await countPendingAnswers(MONTH, "emp1")).toBe(0); // cleared
+    const stored = table.get("5-may-2026::emp1::IMG-5");
+    expect(stored?.synced).toBe(true);
+    expect(stored?.item.lastSavedAt).toBe("2026-09-28T11:00:00.000Z");
   });
 
   it("marks synced normally when there is no newer (or no) existing record -- the ordinary case", async () => {

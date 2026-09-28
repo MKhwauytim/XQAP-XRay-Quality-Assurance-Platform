@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createMemoryDirectory, setSimulatedFaults } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { createFakeIndexedDb } from "../storage/fakeIndexedDb";
+import { createFakeIndexedDb } from "../storage/fakeIndexedDb.testHelper";
 import * as answerLocalMirror from "./answerLocalMirror";
 import { upsertItemAnswer } from "./answerStorage";
 import type { ItemAnswer } from "./answerTypes";

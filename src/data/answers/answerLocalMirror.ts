@@ -28,19 +28,23 @@ import type { ItemAnswer } from "./answerTypes";
  * since re-landing regardless of sync state would be a hidden background
  * writer into the shared folder with no idea whether that folder had just
  * been restored from a backup. The file's own items are still written INTO
- * the mirror on the other side (`backfillMirrorFromDisk` below, called from
- * `backfillAnswerMirror` in `pendingAnswerReplay.ts` — the non-writing half
- * of what used to be `reconcileAnswersWithLocalMirror`) — but, CRITICAL fix
- * round 2, that direction is no longer a blind overwrite either: it must
- * never clobber a `synced: false` (still-pending, unsaved) mirror entry with
- * whatever happens to be on disk right now. An employee who re-saved an
- * item and that save is itself still queued as pending would otherwise have
- * the OLDER on-disk version silently marked `synced: true` over top of it —
- * `loadPendingAnswerRecords` would then never see that item again, and
- * `replayPendingAnswers` would never land it: a real, unsaved answer lost
- * with no error, no log, nothing. `shouldRefreshMirrorFromDisk` is the one
- * place that decision is made. Nothing already on either side is ever
- * removed by this module.
+ * the mirror on the other side, but through TWO DIFFERENT rules depending on
+ * WHY the write is happening (fix round 4 — conflating them in fix round 3
+ * made a pending record permanently un-confirmable, a stuck-queue bug):
+ *  - `backfillMirrorFromDisk` (called from `backfillAnswerMirror` in
+ *    `pendingAnswerReplay.ts` — the non-writing half of what used to be
+ *    `reconcileAnswersWithLocalMirror`) is an OPPORTUNISTIC read with no
+ *    authoritative knowledge that any one pending item has landed — it must
+ *    NEVER touch a `synced: false` record at all (`shouldRefreshMirrorFromDisk`).
+ *  - `mirrorAnswerLocally` (called right after a real save succeeds, or by
+ *    `replayPendingAnswers` to confirm a pending item it just verified is
+ *    already on disk) carries AUTHORITATIVE knowledge that the item it is
+ *    passing really is now on the workspace file — it MUST be able to clear
+ *    a pending record (`shouldConfirmMirrorRecord`), refusing only when the
+ *    existing pending record is itself strictly NEWER than the item being
+ *    confirmed (a genuinely newer, still-unsaved edit must never be
+ *    regressed by a stale confirmation of an older one).
+ * Nothing already on either side is ever removed by this module.
  */
 
 const DB_NAME = "xray_answers_local_mirror_v1";
@@ -129,18 +133,17 @@ async function putRecord(
  * exceeded, IndexedDB disabled, a blocked upgrade) only costs the redundant
  * backup copy, never the real save this is layered on top of.
  *
- * CRITICAL (fix round 3): this is a GUARDED write, not a blind `put` — see
- * `shouldRefreshMirrorFromDisk`'s doc and `issueGuardedConfirmedPut` below.
- * Without the guard, either of this function's two call sites could clobber
- * a NEWER `synced: false` record for the same key: an employee re-saving the
- * same item WHILE a replay pass is running (that re-save itself fails and
- * gets queued pending with a newer `lastSavedAt`) racing against either (a)
- * `replayPendingAnswers`'s own `deps.markSynced` call (this function, by
- * default) confirming the OLDER item it read earlier in the same pass, or
- * (b) `performAnswerWrite`'s post-success mirror call for some OTHER,
- * slower write of an older version of the same item finally landing. Either
- * way, a blind `put` here would silently drop the newer pending edit out of
- * `loadPendingAnswerRecords` with no trace.
+ * CRITICAL (fix round 3, corrected fix round 4): this is a GUARDED write —
+ * see `shouldConfirmMirrorRecord`'s doc for the CONFIRMATION rule this uses
+ * (deliberately DIFFERENT from `shouldRefreshMirrorFromDisk`'s BACKFILL
+ * rule below — conflating the two in fix round 3 was itself a bug: it made
+ * a pending record permanently un-confirmable, the exact stuck-queue
+ * symptom this whole task exists to fix). Confirming a pending record IS
+ * meant to happen here — an item that was queued pending and then either
+ * lands via replay or turns out to already be on disk MUST be able to clear
+ * its own pending flag. What must never happen is a STALE confirmation
+ * (an older item) winning over a genuinely NEWER pending edit still
+ * in-flight — see `shouldConfirmMirrorRecord`.
  */
 export async function mirrorAnswerLocally(
   month: string,
@@ -152,7 +155,7 @@ export async function mirrorAnswerLocally(
   try {
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readwrite");
-      issueGuardedConfirmedPut(tx.objectStore(STORE_NAME), month, username, item);
+      issueGuardedPut(tx.objectStore(STORE_NAME), month, username, item, shouldConfirmMirrorRecord);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error);
@@ -189,19 +192,23 @@ export async function markAnswerPendingLocally(
 export type MirroredItemInfo = { synced: boolean; item: ItemAnswer };
 
 /**
- * CRITICAL (fix round 2): the one decision `backfillMirrorFromDisk` makes
- * for every item — may the on-disk copy overwrite what is currently
- * mirrored for this key? NO in two cases, both about never losing a real,
- * unsaved answer or regressing a newer mirrored one:
+ * The BACKFILL rule — used ONLY by `backfillMirrorFromDisk` (re-mirroring
+ * whatever the workspace file currently holds, opportunistically, with NO
+ * authoritative knowledge that any particular pending item has actually
+ * landed). May the on-disk copy overwrite what is currently mirrored for
+ * this key? NO in two cases, both about never losing a real, unsaved
+ * answer or regressing a newer mirrored one:
  *  - `existing.synced === false`: this key is a PENDING (still unsaved)
- *    record. Overwriting it with whatever happens to be on disk right now
+ *    record. A plain disk read has no idea whether THIS PARTICULAR pending
+ *    edit has landed — overwriting it on the strength of a disk read alone
  *    would mark it `synced: true` and make `loadPendingAnswerRecords` stop
- *    returning it — `replayPendingAnswers` would never land it again, and
- *    the employee's real edit is gone with no error, no log, nothing.
+ *    returning it, possibly while the real edit is still queued. Landing a
+ *    pending item is `shouldConfirmMirrorRecord`'s job (below), never this
+ *    one's.
  *  - `existing.item.lastSavedAt >= diskItem.lastSavedAt`: the mirror
- *    already holds something at least as new as disk (whether or not it was
- *    ever marked pending) — nothing to refresh, and never let an OLDER
- *    on-disk read win over what the mirror already has.
+ *    already holds something at least as new as disk — nothing to refresh,
+ *    and never let an OLDER on-disk read win over what the mirror already
+ *    has.
  * YES only when there is no existing record for this key at all, or the
  * existing (already-synced) record is strictly older than disk.
  */
@@ -215,28 +222,54 @@ export function shouldRefreshMirrorFromDisk(
 }
 
 /**
+ * The CONFIRMATION rule — used by `mirrorAnswerLocally` (called with
+ * AUTHORITATIVE knowledge that `item`, or something at least as new, really
+ * is on the workspace file right now: a real save just succeeded, or
+ * `replayPendingAnswers` just confirmed this exact pending item is already
+ * on disk). UNLIKE `shouldRefreshMirrorFromDisk`, this rule IS allowed to
+ * clear a pending record — that is the entire point of confirming one, and
+ * a pending record that can never be confirmed is a permanently stuck
+ * queue entry (fix round 4: conflating this with the backfill rule in fix
+ * round 3 was itself exactly that bug — `countPendingAnswers` could never
+ * reach 0 for an item once it went pending).
+ *
+ * Refuses ONLY when the existing record is a genuinely NEWER pending edit
+ * still in flight — `existing.synced === false && existing.item.lastSavedAt
+ * > item.lastSavedAt`. Everything else confirms: no existing record, a
+ * pending record at the SAME or an OLDER `lastSavedAt` than the incoming
+ * item (this call landed it, or it was already there), or an existing
+ * synced record that is not newer than the incoming item.
+ */
+export function shouldConfirmMirrorRecord(
+  existing: MirroredItemInfo | undefined,
+  item: ItemAnswer
+): boolean {
+  if (!existing) return true;
+  return item.lastSavedAt >= existing.item.lastSavedAt;
+}
+
+/**
  * The ONE place a CONFIRMED (`synced: true`) write is issued against an
  * already-open transaction's object store — shared by `mirrorAnswerLocally`
- * (one item) and `backfillMirrorFromDisk` (a whole month's items in one
- * transaction) so the guard lives in exactly one place (fix round 3: no
- * duplicated decision logic between the two callers). Reads the existing
- * record for `item`'s key, decides with `shouldRefreshMirrorFromDisk`
- * (its "never overwrite a newer/pending record" contract applies here
- * identically to landing a real save/replay result as it does to backfilling
- * from disk — both are "is this incoming item allowed to become the
- * confirmed record for this key"), and only issues a `put` when it says yes.
+ * and `backfillMirrorFromDisk`, each supplying the decision rule that fits
+ * its own contract (`shouldConfirmMirrorRecord` / `shouldRefreshMirrorFromDisk`
+ * respectively — fix round 4: two DIFFERENT rules, deliberately, not one
+ * shared rule pretending to serve two different questions). Reads the
+ * existing record for `item`'s key and only issues a `put` when `shouldWrite`
+ * says yes.
  */
-function issueGuardedConfirmedPut(
+function issueGuardedPut(
   store: IDBObjectStore,
   month: string,
   username: string,
-  item: ItemAnswer
+  item: ItemAnswer,
+  shouldWrite: (existing: MirroredItemInfo | undefined, item: ItemAnswer) => boolean
 ): void {
   const key = mirrorKey(month, username, item.xrayImageId);
   const getRequest = store.get(key);
   getRequest.onsuccess = () => {
     const existing = getRequest.result as MirrorRecord | undefined;
-    if (!shouldRefreshMirrorFromDisk(existing, item)) return;
+    if (!shouldWrite(existing, item)) return;
     store.put({
       key,
       month,
@@ -254,9 +287,8 @@ function issueGuardedConfirmedPut(
  * CONFIRMED, one single IndexedDB transaction for the entire batch (never
  * one `openMirrorDb`/transaction per item — this can run on every 30s tick
  * for however many items a month has). Every item goes through
- * `issueGuardedConfirmedPut` inside that ONE transaction — never a blind
- * overwrite (see this module's doc and `shouldRefreshMirrorFromDisk`'s own
- * doc for why that was the bug).
+ * `issueGuardedPut` (with the BACKFILL rule, `shouldRefreshMirrorFromDisk`)
+ * inside that ONE transaction — never a blind overwrite.
  */
 export async function backfillMirrorFromDisk(
   month: string,
@@ -271,7 +303,7 @@ export async function backfillMirrorFromDisk(
       const tx = db.transaction(STORE_NAME, "readwrite");
       const store = tx.objectStore(STORE_NAME);
       for (const item of items) {
-        issueGuardedConfirmedPut(store, month, username, item);
+        issueGuardedPut(store, month, username, item, shouldRefreshMirrorFromDisk);
       }
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
