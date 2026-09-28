@@ -120,6 +120,18 @@ export function isLockContentionError(error: unknown): boolean {
  * `casLoop`, which reported the XQ-IO-032 catch-all — telling four production
  * users their save had failed for an unknown reason while their typed
  * inspection answers were dropped.
+ *
+ * CORRECTION (E1b, 2026-09-28 — see
+ * `.superpowers/sdd/errorlog-2026-09-28/answer-save-invalidstate.md`): the
+ * "retry re-acquires a fresh snapshot" remedy above is correct for the READ
+ * path, but on the append-only event log's segment WRITE, a persistent
+ * `InvalidStateError` on `close()` is not a stale snapshot at all — it is
+ * Chromium collapsing every swap-file→target Move failure (a sharing
+ * violation, denied delete access, delete-pending state) into this same
+ * error. There the target is identical on every retry, so no amount of
+ * patience against it helps; `appendOnlyEventLog.ts`'s `appendEventSegment`
+ * retries that case on a short ladder only, then rotates to a fresh segment
+ * instead of retrying the same blocked target indefinitely.
  */
 export function isSnapshotStaleError(error: unknown): boolean {
   return errorName(error) === "InvalidStateError";

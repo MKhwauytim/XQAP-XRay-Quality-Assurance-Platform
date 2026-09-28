@@ -1619,8 +1619,11 @@ export const DEFAULT_LABELS = {
   // Says what the user should DO, and — just as importantly — what did NOT
   // happen: the file is not damaged and the workspace grant is not lost. The
   // old XQ-IO-032 wording this replaces could say neither, because the cause
-  // was unclassified.
-  err_io_036_stale_snapshot:               "تغيّر الملف على المجلد المشترك أثناء قراءته أو حفظه، فتعذّر إتمام العملية رغم عدة محاولات. الملف سليم ولم يُفقد الوصول إلى مساحة العمل — أعد المحاولة بعد قليل، ويُفضّل ألا يُحفظ الملف نفسه من جهازين في الوقت نفسه.",
+  // was unclassified. Updated 2026-09-28 (E1b) to also cover the close()-path
+  // meaning — "the shared folder refused to replace the file (it may be open
+  // on another computer or lack permission)" — alongside the original
+  // read-path stale-snapshot wording; both raise this same DOM error name.
+  err_io_036_stale_snapshot:               "تغيّر الملف على المجلد المشترك أثناء قراءته، أو رفض المجلد المشترك استبدال الملف (قد يكون مفتوحًا على جهاز آخر أو لا يملك الإذن اللازم) أثناء حفظه، فتعذّر إتمام العملية رغم عدة محاولات. الملف سليم ولم يُفقد الوصول إلى مساحة العمل — أعد المحاولة بعد قليل، ويُفضّل ألا يُحفظ الملف نفسه من جهازين في الوقت نفسه.",
   err_io_037_history_path_budget:          "تعذّر حفظ نسخة السجل السابقة لهذا الإجراء لأن مسار مجلد مساحة العمل طويل جدًا. الإجراء نفسه تم حفظه بنجاح؛ لم يُحفظ سوى سجل التغيير. لتفعيل السجل، انقل مجلد مساحة العمل إلى مسار أقصر (أقرب إلى جذر المجلد المشترك).",
 
   err_auth_006_rehash_failed:          "تعذر تحديث تشفير كلمة المرور، وتم الإبقاء على التشفير السابق.",

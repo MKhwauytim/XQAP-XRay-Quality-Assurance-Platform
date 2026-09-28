@@ -21,7 +21,14 @@ import type { DirectoryHandleLike } from "./fileSystemAccess";
 import { createSimpleHasher } from "./jsonEnvelope";
 import { listDirectoryEntries, readSegmentTails } from "./directoryScan";
 import { withResourceLock } from "./webLocks";
-import { logCodedError, tagError, taggedError, type ErrorCode } from "./errorCodes";
+import { logError } from "./errorLogger";
+import {
+  classifyFileSystemError,
+  logCodedError,
+  tagError,
+  taggedError,
+  type ErrorCode,
+} from "./errorCodes";
 import { nextRetryDelayMs, type OperationDeadline } from "./operationDeadline";
 import {
   TRANSIENT_WRITE_RETRY_DELAYS_MS,
@@ -30,7 +37,6 @@ import {
   isNotReadableError,
   isTransientWriteError,
   logExhaustedNotFound,
-  retryTransientWrite,
   waitFor,
 } from "./transientFileErrors";
 
@@ -610,12 +616,16 @@ async function readExistingSegment(
       const ladder = knownWritten
         ? VERIFY_READBACK_RETRY_DELAYS_MS
         : TRANSIENT_WRITE_RETRY_DELAYS_MS;
+      let deadlineStoppedRetrying = false;
       if (transient && attempt < ladder.length) {
         const delay = nextRetryDelayMs(ladder[attempt]!, deadline);
         if (delay !== null) {
           await waitFor(delay);
           continue;
         }
+        // The ladder had rungs left; we stopped only because the caller's
+        // deadline ran out (E1b, controller addition — defense in depth).
+        deadlineStoppedRetrying = true;
       }
       if (knownWritten && isNotFoundError(error)) {
         // Retries exhausted on a segment this session wrote. Fall back to ""
@@ -630,6 +640,18 @@ async function readExistingSegment(
           attempt + 1,
           error
         );
+        return { text: "", reliable: false };
+      }
+      // Same hazard as the branch above, for the case the ladder-exhaustion
+      // check doesn't cover: a knownWritten segment whose transient re-read
+      // (NotReadableError/InvalidStateError/NoModificationAllowedError, not
+      // NotFoundError) stopped only because the DEADLINE ran out, not because
+      // the ladder itself was exhausted. Falling through to reliable:true here
+      // would read "budget spent" as "this session's own segment legitimately
+      // has no content" and let the append rewrite it without lines that may
+      // still be on the share — the exact hazard this function's own doc
+      // comment (`ExistingSegment`) exists to prevent.
+      if (knownWritten && deadlineStoppedRetrying) {
         return { text: "", reliable: false };
       }
       // No prior content for this writer session yet — start from empty. This
@@ -735,6 +757,159 @@ async function verifySegmentSize(
       );
     }
     await waitFor(delay ?? 0);
+  }
+}
+
+/* ────────────────── rotate away from a blocked replace (E1b) ────────────── */
+
+/**
+ * At most this many attempts against the SAME target when the write step
+ * fails with a non-`NotFoundError` transient error (`InvalidStateError`,
+ * `NoModificationAllowedError`, `NotReadableError`) — i.e. `close()`'s
+ * swap→target replace was refused, or the target briefly couldn't be read.
+ *
+ * This is deliberately much shorter than `VERIFY_READBACK_RETRY_DELAYS_MS`
+ * (the ladder still used for a `NotFoundError` on this same step, and for the
+ * pre-append re-read of a segment this session already wrote). The production
+ * root cause this ladder exists for (see
+ * `.superpowers/sdd/errorlog-2026-09-28/answer-save-invalidstate.md`) is that
+ * EVERY retry — every inner rung, every `casLoop` attempt — targets the exact
+ * same file name, because `seq` only advances on a successful write. When the
+ * share refuses to replace that one file (another machine holding it open
+ * without `FILE_SHARE_DELETE`, a denied delete, a delete-pending state), no
+ * amount of patience against the SAME name helps: ~27 identical failed
+ * `close()` calls were observed over ~34 s in production, and every later save
+ * in the page session failed the same way. One length here — [20] — gives the
+ * ordinary case (a reader briefly holding the file, releasing it within tens
+ * of milliseconds) a real second chance, and then hands off to rotation, which
+ * is the actual fix: a fresh segment has no reader contending for it.
+ */
+const SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS = [20] as const;
+
+/** Which step inside one write attempt threw — for diagnostics only. */
+type SegmentWriteStep = "getFileHandle" | "createWritable" | "write" | "close";
+
+/** A write attempt that exhausted `SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS` on a non-`NotFoundError` transient error. */
+type BlockedSegmentWrite = {
+  step: SegmentWriteStep;
+  attempts: number;
+  error: unknown;
+};
+
+/**
+ * One segment WRITE (create-or-open, `createWritable`, `write`, `close`),
+ * with two independently-ladders retry behaviours depending on how it failed:
+ *
+ * - `NotFoundError` — unrelated to a blocked REPLACE (that always means the
+ *   target already existed); keeps the existing patient
+ *   `VERIFY_READBACK_RETRY_DELAYS_MS` ladder and existing exhaustion handling
+ *   (`logExhaustedNotFound`, then rethrow) untouched.
+ * - Any other transient error (`InvalidStateError`, `NoModificationAllowedError`,
+ *   `NotReadableError`) — the short `SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS`
+ *   ladder. Once that's spent (by rungs OR by the deadline — the caller reacts
+ *   to the failure itself, not to whether the deadline happened to still have
+ *   budget), this returns a `BlockedSegmentWrite` instead of throwing, so the
+ *   caller can decide to rotate rather than have the whole append fail.
+ * - Any non-transient error rethrows immediately, exactly as before.
+ */
+async function writeSegmentOnce(
+  eventsDir: DirectoryHandleLike,
+  fileName: string,
+  content: string,
+  diagnostics: EventLogDiagnostics,
+  deadline: OperationDeadline | undefined
+): Promise<BlockedSegmentWrite | null> {
+  for (let attempt = 0; ; attempt += 1) {
+    let step: SegmentWriteStep = "getFileHandle";
+    try {
+      const handle = await eventsDir.getFileHandle(fileName, { create: true });
+      if (!handle.createWritable) {
+        throw taggedError(diagnostics.cannotWriteCode, `Browser cannot write ${fileName}.`);
+      }
+      step = "createWritable";
+      const writable = await handle.createWritable();
+      step = "write";
+      await writable.write(content);
+      step = "close";
+      await writable.close();
+      return null;
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        // The PATIENT ladder (~11 s), not the short one (~630 ms). Failing
+        // here aborts a whole month save, so there is nothing to be gained by
+        // giving up quickly — the same reasoning the post-close read-back
+        // already applies, which left the write itself as the odd one out.
+        if (attempt < VERIFY_READBACK_RETRY_DELAYS_MS.length) {
+          const delay = nextRetryDelayMs(VERIFY_READBACK_RETRY_DELAYS_MS[attempt]!, deadline);
+          if (delay !== null) {
+            await waitFor(delay);
+            continue;
+          }
+        }
+        await logExhaustedNotFound(diagnostics.writeContext, eventsDir, fileName, attempt + 1, error);
+        throw error;
+      }
+      if (isTransientWriteError(error)) {
+        if (attempt < SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS.length) {
+          const delay = nextRetryDelayMs(
+            SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS[attempt]!,
+            deadline
+          );
+          if (delay !== null) {
+            await waitFor(delay);
+            continue;
+          }
+        }
+        return { step, attempts: attempt + 1, error };
+      }
+      throw error;
+    }
+  }
+}
+
+/**
+ * A write we could not CONFIRM via `close()` — did it land anyway? Chromium's
+ * swap→target `MoveFileEx` is atomic (see the evidence doc cited above), so in
+ * practice the target is either fully replaced or fully untouched. This is a
+ * single, unretried defensive read regardless: if the current size already
+ * matches what THIS write would have produced, the bytes are there and
+ * rotating would append the same batch a second time, in a second file. Any
+ * failure to even read it back answers "no" — the conservative default
+ * everywhere else in this module — and the caller rotates.
+ */
+async function segmentReplaceMayHaveLanded(
+  eventsDir: DirectoryHandleLike,
+  fileName: string,
+  expectedBytes: number
+): Promise<boolean> {
+  try {
+    const handle = await eventsDir.getFileHandle(fileName, { create: false });
+    const file = await handle.getFile();
+    return file.size === expectedBytes;
+  } catch {
+    return false;
+  }
+}
+
+/** Diagnostic for a blocked replace, whether or not it ends up being rotated away from. */
+function logBlockedSegmentReplace(
+  context: string,
+  blocked: BlockedSegmentWrite,
+  fileName: string
+): void {
+  const errorName =
+    blocked.error && typeof blocked.error === "object"
+      ? (blocked.error as { name?: unknown }).name
+      : undefined;
+  const detail = blocked.error instanceof Error ? blocked.error.message : String(blocked.error);
+  const message =
+    `Segment replace refused after ${blocked.attempts} attempt(s) at step "${blocked.step}" ` +
+    `on "${fileName}" (${typeof errorName === "string" ? errorName : "unknown"}): ${detail}`;
+  const code = classifyFileSystemError(blocked.error);
+  if (code) {
+    logCodedError(context, code, new Error(message));
+  } else {
+    logError(context, new Error(message));
   }
 }
 
@@ -853,26 +1028,56 @@ export async function appendEventSegment<TEvent>(
       existingBytes = utf8Length(existing.text);
     }
 
-    const appended = existing.text + addedText;
+    // ROTATE AWAY FROM A SEGMENT WHOSE REPLACE IS REFUSED (E1b). Unlike the
+    // two rotation branches above — which react to a bad PRE-append READ —
+    // this one reacts to the WRITE step itself failing on the target we
+    // already decided to use. `writeSegmentOnce` retries a `NotFoundError` on
+    // its own patient ladder unchanged; it returns (rather than throws) only
+    // once a non-`NotFoundError` transient failure has exhausted the short
+    // `SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS` ladder — i.e. the share is
+    // refusing to replace THIS file specifically. At most one rotation happens
+    // here per call: `rotatedForBlockedReplace` bounds the loop, so a second
+    // blocked target rethrows instead of rotating forever.
+    let rotatedForBlockedReplace = false;
+    for (;;) {
+      const blocked = await writeSegmentOnce(
+        eventsDir,
+        fileName,
+        existing.text + addedText,
+        diagnostics,
+        deadline
+      );
+      if (!blocked) break;
 
-    await retryTransientWrite(
-      async () => {
-        const handle = await eventsDir.getFileHandle(fileName, { create: true });
-        if (!handle.createWritable) {
-          throw taggedError(diagnostics.cannotWriteCode, `Browser cannot write ${fileName}.`);
-        }
-        const writable = await handle.createWritable();
-        await writable.write(appended);
-        await writable.close();
-      },
-      { context: diagnostics.writeContext, dir: eventsDir, fileName },
-      // The PATIENT ladder (~11 s), not the short one (~630 ms). Failing here
-      // aborts a whole month save, so there is nothing to be gained by giving
-      // up quickly — the same reasoning the post-close read-back already
-      // applies, which left the write itself as the odd one out.
-      VERIFY_READBACK_RETRY_DELAYS_MS,
-      deadline
-    );
+      logBlockedSegmentReplace(diagnostics.writeContext, blocked, fileName);
+
+      // `MoveFileEx` is atomic, so in the overwhelming case this reads false —
+      // but a re-read here is what "verify by re-reading size/tail before
+      // rotating" (E1b) means: never rotate away from a write whose bytes are
+      // already sitting in this file, or the batch lands a second time in the
+      // rotated segment too.
+      const alreadyLanded = await segmentReplaceMayHaveLanded(
+        eventsDir,
+        fileName,
+        existingBytes + addedBytes
+      );
+      if (alreadyLanded) break;
+
+      if (rotatedForBlockedReplace || seq >= MAX_SEGMENT_SEQ) {
+        // Never rewrite/overwrite the failed segment: leave it exactly as it
+        // was and let the caller (casLoop) see the real underlying error.
+        throw blocked.error;
+      }
+      rotatedForBlockedReplace = true;
+      seq += 1;
+      fileName = segmentFileNameForSeq(base, seq, segmentSuffix);
+      // Same non-destructive re-read every other rotation branch here does:
+      // an unwritten target normally resolves immediately, and reading it is
+      // what makes a segment left behind by a crashed run non-destructive
+      // instead of an overwrite.
+      existing = await readExistingSegment(eventsDir, fileName, memoKeyFor(fileName), diagnostics, deadline);
+      existingBytes = utf8Length(existing.text);
+    }
     // Recorded before verification, deliberately: the bytes are already on the
     // share at this point, so the next append must continue in THIS segment
     // even if the post-close size check below fails and this call reports an

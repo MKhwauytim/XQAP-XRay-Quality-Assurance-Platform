@@ -96,7 +96,17 @@ export type SimulatedFault = {
     // — another machine or an AV scanner holding the entry open raises
     // NoModificationAllowedError. `safeRemoveJson` rides the transient ladder
     // for exactly that, and this is how that is reproduced deterministically.
-    | "removeEntry";
+    | "removeEntry"
+    // The swap-file→target REPLACE, not the write itself: `createWritable`
+    // faults the OPEN of the writable stream, `close` faults the commit that
+    // follows a SUCCESSFUL `write()`, leaving the target byte-identical to
+    // before (matching `MoveFileEx`'s atomicity — a failed replace never
+    // partially lands). This is how the production XQ-IO-036 root cause is
+    // reproduced: `writable.close()` throwing `InvalidStateError` because the
+    // share refuses to replace one target file, for as many (or as few)
+    // calls as `times` allows. See
+    // `.superpowers/sdd/errorlog-2026-09-28/answer-save-invalidstate.md`.
+    | "close";
   /**
    * Entry name to match. Omit to match every name. For `getFile` / `readFile` /
    * `createWritable` this is the file handle's own name.
@@ -438,6 +448,10 @@ function makeFileHandle(
           chunks.push(toBytes(data));
         },
         close: async () => {
+          // Faulted BEFORE the commit, so a thrown fault leaves `node.files`
+          // untouched — the target is exactly as it was, matching a real
+          // failed swap-file→target Move.
+          applyFaults(faultState, operationLog, { operation: "close", name });
           node.files.set(name, { content: concatBytes(chunks), lastModified: nextMemoryMtime() });
         }
       };

@@ -410,3 +410,37 @@ describe("segment rotation — bytes written per append stay bounded", () => {
     expect(secondHalfPeak).toBeLessThanOrEqual(firstHalfPeak);
   });
 });
+
+/**
+ * E1b (task-E1b-brief item 5d): the same guarantee as
+ * `appendOnlyEventLog.test.ts`'s "E1b: a blocked segment REPLACE rotates
+ * instead of retrying forever" describe block, exercised through
+ * `appendDistributionEventSegment` — proving the fix belongs to the shared
+ * mechanics, not to answers alone.
+ */
+describe("segment rotation — a blocked REPLACE rotates instead of retrying forever", () => {
+  it("rotates to -1 when close() on seq 0 is persistently refused, without losing or duplicating events", async () => {
+    const root = createMemoryDirectory("root");
+    const seq0 = distributionEventSegmentFileName(DEVICE, "s1", 0);
+    const seq1 = distributionEventSegmentFileName(DEVICE, "s1", 1);
+    setSimulatedFaults(root, [
+      { operation: "close", name: seq0, errorName: "InvalidStateError", times: Number.POSITIVE_INFINITY },
+    ]);
+
+    const result = await appendDistributionEventSegment(root, [smallEvent("A")], writer("s1"));
+    expect(result).toBe("verified");
+
+    // Seq 0 was created but never committed; the batch landed in seq 1.
+    expect(await readSegmentText(root, seq0)).toBe("");
+    expect(await readSegmentText(root, seq1)).toContain("evt-A");
+
+    // A second append in the same session goes straight to seq 1 — no more
+    // attempts on the blocked segment.
+    const secondResult = await appendDistributionEventSegment(root, [smallEvent("B")], writer("s1"));
+    expect(secondResult).toBe("verified");
+    clearSimulatedFaults(root);
+
+    const events = await loadDistributionEventSegments(root);
+    expect(events.map((event) => event.eventId).sort()).toEqual(["evt-A", "evt-B"]);
+  });
+});
