@@ -4386,3 +4386,789 @@ MSG
 ```
 
 ---
+
+## Task 13: C3 — `countWorkingDays` utility (Sunday–Thursday)
+
+**Files:**
+- Create: `src/utils/workingDays.ts`
+- Create: `src/utils/workingDays.test.ts`
+
+**Interfaces:**
+- Produces: `WEEKEND_DAYS: ReadonlySet<number>` (= `{5, 6}`, Friday/Saturday by `Date#getDay()`); `isWorkingDay(date: Date): boolean`; `countWorkingDays(start: Date, deadline: Date): number` — local calendar days, both ends inclusive, time of day ignored, 0 when `start` is after `deadline` or either date is invalid. The single definition every C3 consumer imports.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `src/utils/workingDays.test.ts`:
+
+```ts
+// C3: working days are Sunday–Thursday; Friday and Saturday are the weekend.
+// Dates are built with the local-time constructor so the test is independent
+// of the runner's time zone.
+import { describe, expect, it } from "vitest";
+import { WEEKEND_DAYS, countWorkingDays, isWorkingDay } from "./workingDays";
+
+describe("countWorkingDays (C3) — Sunday–Thursday, both ends inclusive", () => {
+  it("treats Friday and Saturday as the weekend", () => {
+    expect([...WEEKEND_DAYS].sort()).toEqual([5, 6]);
+    expect(isWorkingDay(new Date(2026, 4, 1))).toBe(false); // Fri 1 May 2026
+    expect(isWorkingDay(new Date(2026, 4, 2))).toBe(false); // Sat 2 May
+    expect(isWorkingDay(new Date(2026, 4, 3))).toBe(true); // Sun 3 May
+    expect(isWorkingDay(new Date(2026, 4, 7))).toBe(true); // Thu 7 May
+  });
+
+  it("assigned Monday 4 May, deadline Thursday 28 May 2026 → 19 working days", () => {
+    expect(countWorkingDays(new Date(2026, 4, 4), new Date(2026, 4, 28))).toBe(19);
+  });
+
+  it("a full Sunday–Saturday week has 5 working days", () => {
+    expect(countWorkingDays(new Date(2026, 4, 3), new Date(2026, 4, 9))).toBe(5);
+  });
+
+  it("ignores the time of day on both ends", () => {
+    expect(countWorkingDays(new Date(2026, 4, 4, 23, 59), new Date(2026, 4, 4, 0, 1))).toBe(1);
+    expect(countWorkingDays(new Date(2026, 4, 4, 12), new Date(2026, 4, 28, 23, 59, 59))).toBe(19);
+  });
+
+  it("crosses a month boundary (Thu 30 Apr → Sun 3 May = 2)", () => {
+    expect(countWorkingDays(new Date(2026, 3, 30), new Date(2026, 4, 3))).toBe(2);
+  });
+
+  it("is 0 for a weekend-only span or a start after the deadline", () => {
+    expect(countWorkingDays(new Date(2026, 4, 29), new Date(2026, 4, 30))).toBe(0);
+    expect(countWorkingDays(new Date(2026, 4, 30), new Date(2026, 4, 28))).toBe(0);
+  });
+
+  it("is 0 for an invalid date", () => {
+    expect(countWorkingDays(new Date("not-a-date"), new Date(2026, 4, 28))).toBe(0);
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `npx vitest run src/utils/workingDays.test.ts`
+Expected: FAIL — `Failed to resolve import "./workingDays"`.
+
+- [ ] **Step 3: Implement**
+
+Create `src/utils/workingDays.ts`:
+
+```ts
+// Working-day arithmetic for «الحصة اليومية» (C3, 2026-09-28 corrective plan).
+// The weekend is Friday and Saturday; every other day (Sunday–Thursday) is a
+// working day. No holiday calendar (out of scope by owner decision). All
+// arithmetic is on LOCAL calendar days, matching how the quota deadline itself
+// is built (`new Date(year, month - 1, lastDay - 3)` in distributionDerivation.ts).
+
+/** `Date#getDay()` values of the weekend: Friday (5) and Saturday (6). */
+export const WEEKEND_DAYS: ReadonlySet<number> = new Set([5, 6]);
+
+export function isWorkingDay(date: Date): boolean {
+  return !WEEKEND_DAYS.has(date.getDay());
+}
+
+/**
+ * Working days from `start`'s calendar day through `deadline`'s calendar day,
+ * BOTH inclusive; the time of day is ignored. 0 when `start` falls after
+ * `deadline`, or when either date is invalid.
+ */
+export function countWorkingDays(start: Date, deadline: Date): number {
+  if (Number.isNaN(start.getTime()) || Number.isNaN(deadline.getTime())) return 0;
+  const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  const end = new Date(deadline.getFullYear(), deadline.getMonth(), deadline.getDate());
+  let count = 0;
+  while (cursor.getTime() <= end.getTime()) {
+    if (isWorkingDay(cursor)) count += 1;
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return count;
+}
+```
+
+- [ ] **Step 4: Run to verify it passes**
+
+Run: `npx vitest run src/utils/workingDays.test.ts`
+Expected: PASS (7 tests).
+
+- [ ] **Step 5: Tier 2 gates**
+
+Run: `npm run lint && npm run typecheck && npm run test:run`
+
+- [ ] **Step 6: Edit log (tier 2)**
+
+Run: `npm run editlog -- --tier=2 --append --sync-package "Add (utils): countWorkingDays — Sunday to Thursday, Friday/Saturday weekend"`
+- **Why:** The daily quota must count working days only (spec C3); one definition in `src/utils/`.
+- **What changed:** new `src/utils/workingDays.ts` (`WEEKEND_DAYS`, `isWorkingDay`, `countWorkingDays`, local calendar days, inclusive) with tests.
+- **Before/After:** Before: none (new file). After: `countWorkingDays`.
+
+- [ ] **Step 7: Commit**
+
+```bash
+npm run generate:changelog
+git add src/utils/workingDays.ts src/utils/workingDays.test.ts src/data/changelog/latestUpdates.generated.ts "docs/edit logs" package.json
+git commit -m "$(cat <<'MSG'
+Add (utils): countWorkingDays — Sunday to Thursday, Friday/Saturday weekend
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01NU4UP8LM3qkAnTNccmKZEJ
+MSG
+)"
+```
+
+---
+
+## Task 14: C3 — Quota derivation counts working days; `DERIVE_VERSION` 4 → 5
+
+**Files:**
+- Create: `src/data/distribution/dailyQuotaWorkingDays.test.ts`
+- Modify: `src/data/distribution/distributionDerivation.ts` (imports 1-13; add `computeWorkingDaysForDeadline` after `computeDaysRemainingForDeadline` 80-89; `deriveEmployeeQuotasWithFacts` doc 325-347; `assignmentDaysRemaining` 394-403)
+- Modify: `src/data/distribution/distributionLog.ts` (`DERIVE_VERSION` doc + value 24-40)
+- Modify: `src/data/distribution/distributionTypes.ts` (`EmployeeQuota` 38-49)
+- Modify: `src/data/samples/sampleMirrorStorage.ts` (`EmployeeMirrorQuota` 38-42)
+- Modify (deliberate pin updates): `src/data/distribution/distributionDerivation.golden.test.ts` (576-578, 586, 593, 614, 625-629, 715, 876), `src/data/distribution/distributionLog.test.ts` (371-387), `src/data/distribution/distributionStorage.test.ts` (644)
+- Modify (new regression case): `src/data/samples/sampleMirrorStorage.test.ts` (before the test at ~283)
+
+**Interfaces:**
+- Consumes (Task 13): `countWorkingDays(start: Date, deadline: Date): number`.
+- Produces:
+  - `computeWorkingDaysForDeadline(month: number, year: number, fromDate: Date): number` (exported from `distributionDerivation.ts`).
+  - `EmployeeQuota.daysRemainingAtAssignment` now holds WORKING days from the first `assigned` event's calendar day to the deadline (the sample month's last day − 3), inclusive; `dailyQuota = ceil(sampleCount / max(1, that))`. Same field names — no shape change.
+  - `DERIVE_VERSION = 5` (every cached `distribution.current.json` / fold checkpoint refolds once; mirrors are rewritten through their existing `deriveVersion` guard).
+  - `computeDaysRemainingForDeadline` is unchanged (still calendar days; used by `bulkAssignment.ts` to stamp events and as the unparseable-month fallback).
+
+- [ ] **Step 1: Write the failing test**
+
+Create `src/data/distribution/dailyQuotaWorkingDays.test.ts`:
+
+```ts
+// C3: «الحصة اليومية» = ceil(assigned / working days), working days = Sunday–
+// Thursday from the employee's first `assigned` event to the deadline (the
+// sample month's last day − 3), inclusive, minimum 1. Frozen: completing work
+// and the passage of time never move it; only a change in the employee's
+// assigned count does. eventAt instants are 09:00Z so the local calendar day
+// is the same in every time zone from UTC−9 to UTC+14.
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { makeRow } from "../reporting/reportTestFixtures";
+import {
+  computeWorkingDaysForDeadline,
+  deriveEmployeeQuotasWithFacts,
+  foldDistributionEvents,
+} from "./distributionDerivation";
+import type { DistributionEvent } from "./distributionTypes";
+
+const MONTH = "5-May-2026"; // deadline: Thursday 28 May 2026
+const MONDAY_4_MAY = "2026-05-04T09:00:00.000Z";
+
+function evt(
+  eventId: string,
+  eventType: DistributionEvent["eventType"],
+  xrayImageId: string,
+  assignedTo: string,
+  eventAt: string,
+  extra: Partial<DistributionEvent> = {},
+): DistributionEvent {
+  return { eventId, eventSchemaVersion: 1, eventType, xrayImageId, assignedTo, eventAt, eventBy: "admin", ...extra };
+}
+
+function assignAll(count: number, employee: string, eventAt: string): DistributionEvent[] {
+  return Array.from({ length: count }, (_, i) => evt(`a${i}`, "assigned", `img-${i}`, employee, eventAt));
+}
+
+function quotaFor(events: DistributionEvent[], employee: string) {
+  const ids = [...new Set(events.map((event) => event.xrayImageId))];
+  const fold = foldDistributionEvents(events, ids.map((id) => makeRow(id, "بري")), 1);
+  return deriveEmployeeQuotasWithFacts(events, fold.entries, fold, MONTH).quotas?.[employee];
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe("daily quota over working days (C3)", () => {
+  it("computeWorkingDaysForDeadline: Monday 4 May → Thursday 28 May 2026 = 19", () => {
+    expect(computeWorkingDaysForDeadline(5, 2026, new Date(2026, 4, 4, 12))).toBe(19);
+  });
+
+  it("assigned on the 4th, deadline the 28th, weekends excluded → ceil(40 / 19) = 3", () => {
+    expect(quotaFor(assignAll(40, "emp-a", MONDAY_4_MAY), "emp-a")).toMatchObject({
+      sampleCount: 40,
+      daysRemainingAtAssignment: 19,
+      dailyQuota: 3,
+    });
+  });
+
+  it("does not move when items are completed", () => {
+    const completed = Array.from({ length: 10 }, (_, i) =>
+      evt(`c${i}`, "completed", `img-${i}`, "emp-a", "2026-05-10T09:00:00.000Z"),
+    );
+    expect(quotaFor([...assignAll(40, "emp-a", MONDAY_4_MAY), ...completed], "emp-a")).toMatchObject({
+      sampleCount: 40,
+      daysRemainingAtAssignment: 19,
+      dailyQuota: 3,
+    });
+  });
+
+  it("does not move with the passage of time (before, near and after the deadline)", () => {
+    const events = assignAll(40, "emp-a", MONDAY_4_MAY);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-05-05T09:00:00.000Z"));
+    const early = quotaFor(events, "emp-a");
+    vi.setSystemTime(new Date("2026-05-27T09:00:00.000Z"));
+    const late = quotaFor(events, "emp-a");
+    vi.setSystemTime(new Date("2026-06-15T09:00:00.000Z"));
+    const afterDeadline = quotaFor(events, "emp-a");
+    expect(early).toMatchObject({ dailyQuota: 3 });
+    expect(late).toEqual(early);
+    expect(afterDeadline).toEqual(early);
+  });
+
+  it("changes when the assigned count changes (10 reassigned away → ceil(30 / 19) = 2)", () => {
+    const reassigned = Array.from({ length: 10 }, (_, i) =>
+      evt(`r${i}`, "reassigned", `img-${i}`, "emp-a", "2026-05-06T09:00:00.000Z", { reassignedTo: "emp-b" }),
+    );
+    expect(quotaFor([...assignAll(40, "emp-a", MONDAY_4_MAY), ...reassigned], "emp-a")).toMatchObject({
+      sampleCount: 30,
+      daysRemainingAtAssignment: 19,
+      dailyQuota: 2,
+    });
+  });
+
+  it("first assignment after the deadline → floor of one working day (whole assignment per day)", () => {
+    expect(quotaFor(assignAll(5, "emp-a", "2026-05-29T09:00:00.000Z"), "emp-a")).toMatchObject({
+      daysRemainingAtAssignment: 0,
+      dailyQuota: 5,
+    });
+  });
+
+  it("first assignment on the deadline day itself → exactly one working day", () => {
+    expect(quotaFor(assignAll(5, "emp-a", "2026-05-28T09:00:00.000Z"), "emp-a")).toMatchObject({
+      daysRemainingAtAssignment: 1,
+      dailyQuota: 5,
+    });
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `npx vitest run src/data/distribution/dailyQuotaWorkingDays.test.ts`
+Expected: FAIL — `computeWorkingDaysForDeadline is not a function`; the quota cases report calendar days (25 for 4 May, `dailyQuota: 2`).
+
+- [ ] **Step 3: Implement in `distributionDerivation.ts`**
+
+Before:
+```ts
+import { logError } from "../storage/errorLogger";
+```
+After:
+```ts
+import { logError } from "../storage/errorLogger";
+import { countWorkingDays } from "../../utils/workingDays";
+```
+
+Before:
+```ts
+export function computeDaysRemainingForDeadline(
+  month: number,
+  year: number,
+  fromDate = new Date()
+): number {
+  const lastDay = new Date(year, month, 0).getDate();
+  const deadline = new Date(year, month - 1, lastDay - 3, 23, 59, 59);
+  return Math.max(0, Math.ceil((deadline.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24)));
+}
+```
+After:
+```ts
+export function computeDaysRemainingForDeadline(
+  month: number,
+  year: number,
+  fromDate = new Date()
+): number {
+  const lastDay = new Date(year, month, 0).getDate();
+  const deadline = new Date(year, month - 1, lastDay - 3, 23, 59, 59);
+  return Math.max(0, Math.ceil((deadline.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24)));
+}
+
+/**
+ * C3: WORKING days (Sunday–Thursday; Friday/Saturday excluded) from
+ * `fromDate`'s calendar day through the quota deadline — the sample month's
+ * last day − 3 — both inclusive, local time. 0 when `fromDate` is after the
+ * deadline. This, not the calendar count above, is what the daily quota uses
+ * since DERIVE_VERSION 5; the calendar count stays for bulk-assignment event
+ * stamps.
+ */
+export function computeWorkingDaysForDeadline(month: number, year: number, fromDate: Date): number {
+  const lastDay = new Date(year, month, 0).getDate();
+  const deadline = new Date(year, month - 1, lastDay - 3);
+  return countWorkingDays(fromDate, deadline);
+}
+```
+
+Before (last paragraph of `deriveEmployeeQuotasWithFacts`'s doc comment):
+```ts
+ * Known, pre-existing gap left unchanged: an employee who only ever received
+ * rows by reassignment has no `assigned` event, hence no assignment window,
+ * hence no quota row — they own entries but appear in neither `firstAssignments`
+ * nor `quotas`.
+ */
+```
+After:
+```ts
+ * Known, pre-existing gap left unchanged: an employee who only ever received
+ * rows by reassignment has no `assigned` event, hence no assignment window,
+ * hence no quota row — they own entries but appear in neither `firstAssignments`
+ * nor `quotas`.
+ *
+ * C3 (DERIVE_VERSION 5): the window is counted in WORKING days (Sunday–
+ * Thursday) from the first assignment's calendar day to the deadline,
+ * inclusive, floored at 1 in the division. Nothing here reads `now`, so the
+ * value is frozen: completion and the passage of time never move it; only a
+ * change in the employee's live assigned count (`sampleCount`) does.
+ */
+```
+
+Before:
+```ts
+  const firstAssignedAt = new Date(firstAssignment.eventAt);
+  return monthInfo && !Number.isNaN(firstAssignedAt.getTime())
+    ? computeDaysRemainingForDeadline(monthInfo.month, monthInfo.year, firstAssignedAt)
+    : storedQuota?.daysRemainingAtAssignment;
+```
+After:
+```ts
+  const firstAssignedAt = new Date(firstAssignment.eventAt);
+  return monthInfo && !Number.isNaN(firstAssignedAt.getTime())
+    ? computeWorkingDaysForDeadline(monthInfo.month, monthInfo.year, firstAssignedAt)
+    : storedQuota?.daysRemainingAtAssignment;
+```
+
+- [ ] **Step 4: Bump `DERIVE_VERSION` and document the field meaning**
+
+`src/data/distribution/distributionLog.ts` — Before:
+```ts
+ *   is being reinterpreted, only re-validated.
+ */
+export const DERIVE_VERSION = 4;
+```
+After:
+```ts
+ *   is being reinterpreted, only re-validated.
+ * - v5: (C3, 2026-09-28) `quotas[].daysRemainingAtAssignment` counts WORKING
+ *   days (Sunday–Thursday) from the employee's first assignment through the
+ *   deadline, inclusive, instead of calendar days, and `dailyQuota` follows
+ *   from it. Persisted derived output changes, so every v4 snapshot and
+ *   checkpoint refolds once, and employee mirrors pick the new quota up
+ *   through their deriveVersion guard. Folded ENTRIES are unchanged.
+ */
+export const DERIVE_VERSION = 5;
+```
+
+`src/data/distribution/distributionTypes.ts` — Before (inside `EmployeeQuota`):
+```ts
+  sampleCount: number;
+  dailyQuota: number;
+  daysRemainingAtAssignment: number;
+  assignedAt: string;
+};
+```
+After:
+```ts
+  sampleCount: number;
+  /** ceil(sampleCount / max(1, daysRemainingAtAssignment)) — frozen; moves only when sampleCount does (C3). */
+  dailyQuota: number;
+  /**
+   * WORKING days (Sunday–Thursday; Friday/Saturday excluded) from the first
+   * `assigned` event's calendar day through the deadline (the sample month's
+   * last day − 3), both inclusive — since DERIVE_VERSION 5 (C3); calendar
+   * days before that. Name kept: no persisted shape change.
+   */
+  daysRemainingAtAssignment: number;
+  assignedAt: string;
+};
+```
+
+`src/data/samples/sampleMirrorStorage.ts` — Before:
+```ts
+export type EmployeeMirrorQuota = {
+  dailyQuota: number;
+  daysRemainingAtAssignment: number;
+  sampleCount: number;
+};
+```
+After:
+```ts
+export type EmployeeMirrorQuota = {
+  dailyQuota: number;
+  /** Working days (Sun–Thu) in the assignment window since DERIVE_VERSION 5
+   *  (C3) — copied verbatim from the derived quota, never recomputed here. */
+  daysRemainingAtAssignment: number;
+  sampleCount: number;
+};
+```
+(The mirror writer at `sampleMirrorStorage.ts:427-437` needs no logic change: it copies `current.quotas[username]` verbatim, and its same-revision/newer-`deriveVersion` rule is what carries v5 to every employee — pinned in Step 6.)
+
+- [ ] **Step 5: Run the new test to verify it passes**
+
+Run: `npx vitest run src/data/distribution/dailyQuotaWorkingDays.test.ts`
+Expected: PASS (7 tests).
+
+- [ ] **Step 6: Update the calendar-day pins and add the mirror regression case**
+
+Run first: `npx vitest run src/data/distribution/distributionDerivation.golden.test.ts src/data/distribution/distributionLog.test.ts src/data/distribution/distributionStorage.test.ts`
+Expected: FAIL exactly in the assertions below.
+
+`src/data/distribution/distributionDerivation.golden.test.ts`:
+```bash
+sed -i 's/daysRemainingAtAssignment: 28,/daysRemainingAtAssignment: 20,/g; s/daysRemainingAtAssignment: 9,/daysRemainingAtAssignment: 7,/g' src/data/distribution/distributionDerivation.golden.test.ts
+grep -c "daysRemainingAtAssignment: 20," src/data/distribution/distributionDerivation.golden.test.ts   # expect 2
+grep -c "daysRemainingAtAssignment: 7," src/data/distribution/distributionDerivation.golden.test.ts    # expect 3
+```
+Then fix the comments that state the old arithmetic. Before:
+```ts
+    // Deadline for May 2026 = 28 May 23:59:59 (3 days before month end).
+    // emp-a first assigned 1 May 00:00Z → ceil(27d 23:59:59) = 28 days.
+    // emp-b first assigned 20 May 00:00Z → ceil(8d 23:59:59)  = 9 days.
+```
+After:
+```ts
+    // Deadline for May 2026 = Thursday 28 May (3 days before month end).
+    // CHANGED (C3, DERIVE_VERSION 5): WORKING days only — Sunday–Thursday,
+    // both ends inclusive, local calendar day (UTC here; KSA's UTC+3 keeps the
+    // same calendar day for these 00:00Z instants).
+    // emp-a first assigned Fri 1 May → Sun 3 … Thu 28 May = 20 working days.
+    // emp-b first assigned Wed 20 May → 20, 21, 24, 25, 26, 27, 28 = 7.
+```
+Before:
+```ts
+    // ceil(57 / 28) === 3
+```
+After:
+```ts
+    // ceil(57 / 20) === 3 (20 working days, C3)
+```
+Before:
+```ts
+    // The 20 May event wins purely because it appears first in the array, so
+    // the employee's whole quota is computed off the SHORTER window: 9 days
+    // rather than 28. ceil(2/9) === 1 here, but the effect scales.
+```
+After:
+```ts
+    // The 20 May event wins purely because it appears first in the array, so
+    // the employee's whole quota is computed off the SHORTER window: 7 working
+    // days rather than 20. ceil(2/7) === 1 here, but the effect scales.
+```
+
+`src/data/distribution/distributionLog.test.ts` — Before:
+```ts
+test("daily quota is derived from assignment date through three days before month end", () => {
+```
+After:
+```ts
+test("daily quota is derived from assignment date through three days before month end, over working days (C3)", () => {
+```
+Before:
+```ts
+  expect(result.quotas?.emp1?.daysRemainingAtAssignment).toBe(27);
+  expect(result.quotas?.emp1?.dailyQuota).toBe(38);
+```
+After:
+```ts
+  // C3 (DERIVE_VERSION 5): working days only. Monday 1 June → Saturday 27 June
+  // 2026 (June's last day − 3), Friday/Saturday excluded = 19; ceil(1000 / 19)
+  // = 53. computeDaysRemainingForDeadline above still reports CALENDAR days —
+  // it stamps bulk-assignment events and is no longer what the quota uses.
+  expect(result.quotas?.emp1?.daysRemainingAtAssignment).toBe(19);
+  expect(result.quotas?.emp1?.dailyQuota).toBe(53);
+```
+
+`src/data/distribution/distributionStorage.test.ts` — Before:
+```ts
+    expect(DERIVE_VERSION).toBe(4);
+```
+After:
+```ts
+    expect(DERIVE_VERSION).toBe(5);
+```
+
+`src/data/samples/sampleMirrorStorage.test.ts` — insert immediately before `  it("a legacy mirror with NO deriveVersion is rewritten exactly once", async () => {`:
+```ts
+  it("C3: a v4 (calendar-day) mirror at the SAME revision is rewritten with the v5 (working-day) quota", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    invalidateMonthLockCache();
+    await ensurePopulationMonthFolder(root, MONTH_A);
+
+    await syncSampleMirrors(root, MONTH_A, makeCurrentAt(5, 4, [makeMirrorEntry("A1", "pending")], 9));
+    await syncSampleMirrors(root, MONTH_A, makeCurrentAt(5, 5, [makeMirrorEntry("A1", "pending")], 4));
+
+    const mirror = await loadEmployeeSampleMirror(root, MONTH_A, EMP);
+    expect(mirror?.deriveVersion).toBe(5);
+    expect(mirror?.quota?.dailyQuota).toBe(4);
+    expect(mirror?.sourceLogRevision).toBe(5);
+  });
+
+```
+
+Re-run: `npx vitest run src/data/distribution src/data/samples`
+Expected: PASS. Any failure other than a calendar-vs-working-day quota value is a regression — stop and report.
+
+- [ ] **Step 7: Tier 3 gates (derived on-disk values change; cache version bump)**
+
+Run: `npm run lint && npm run typecheck && npm run test:run && npm run check:complexity && npm run check:hex-literals && npm run check:release && npm run check:vendor && npm run build && npm run check:bundle-size`
+(Run `check:release` again after Step 8's `--sync-package`.)
+
+- [ ] **Step 8: Edit log (tier 3)**
+
+Run: `npm run editlog -- --tier=3 --append --sync-package "Fix (distribution): daily quota counts working days (Sun-Thu); DERIVE_VERSION 5"`
+- **Why:** «الحصة اليومية» counted calendar days (`distributionDerivation.ts:363-369` via `computeDaysRemainingForDeadline`), so Fridays/Saturdays inflated the window and the per-day figure was too low (spec C3). Verified: the value was already frozen against completion and time (window from the first `assigned` event, count from live entries); rejected: recomputing from `now` (the spec's owner rule freezes it) and a new persisted field (reusing `daysRemainingAtAssignment` keeps every file's shape).
+- **What changed:** `computeWorkingDaysForDeadline` (Sun–Thu, inclusive, via `countWorkingDays`) feeds `deriveEmployeeQuotasWithFacts`; `DERIVE_VERSION` 4→5; field docs on `EmployeeQuota` / `EmployeeMirrorQuota`; golden pins moved to working-day values.
+- **Migration/rollback:** No shape change. On first load each month's cached `distribution.current.json` / checkpoint (v4) refolds once; employee mirrors at the same log revision are rewritten via the existing `deriveVersion` guard. Rollback = revert; a v4 build treats v5 caches as foreign-version and refolds them back to calendar days.
+- **Before/After:** the `assignmentDaysRemaining` return expression.
+
+- [ ] **Step 9: Commit**
+
+```bash
+npm run generate:changelog
+git add src/data/distribution src/data/samples src/data/changelog/latestUpdates.generated.ts "docs/edit logs" package.json
+git commit -m "$(cat <<'MSG'
+Fix (distribution): daily quota counts working days (Sun-Thu); DERIVE_VERSION 5
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01NU4UP8LM3qkAnTNccmKZEJ
+MSG
+)"
+```
+
+---
+
+## Task 15: C3 — «الحصة اليومية» tile strings move to label keys
+
+**Files:**
+- Create: `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals/quotaTile.test.tsx`
+- Modify: `src/data/labels/labelsStore.ts` (after `ew_queue_stats_employee_scope`, ~357)
+- Modify: `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals/subComponents.tsx` (`ReferralStatsStrip` 778-793)
+- Modify: `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx` (line 166 — the `PersonalQuota` type, OUTSIDE the component; no budget impact)
+
+**Interfaces:**
+- Consumes (Task 14): `PersonalQuota.daysRemaining` now carries working days.
+- Produces label keys: `ew_quota_tile_label`, `ew_quota_tile_label_mine`, `ew_quota_tile_title` (placeholders `{daily}`, `{total}`, `{days}`), `ew_quota_tile_title_none`. `ReferralStatsStrip` renders them; its props are unchanged.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals/quotaTile.test.tsx`:
+
+```tsx
+/* @vitest-environment jsdom */
+// C3: the «الحصة اليومية» tile shows the frozen quota; its strings are label
+// keys (admin-overridable in Settings), and its title names the working-day
+// window instead of "الأيام المتبقية".
+import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { resetLabel, setLabel } from "../../../../../../data/labels/labelsStore";
+import type { PersonalStats } from "../XrayReferrals";
+import { ReferralStatsStrip } from "./subComponents";
+
+const STATS: PersonalStats = {
+  assigned: 40,
+  submitted: 10,
+  onHold: 0,
+  notStarted: 30,
+  replaced: 0,
+  active: 40,
+  completionPct: 25,
+};
+const QUOTA = { dailyQuota: 3, daysRemaining: 19, sampleCount: 40 };
+
+afterEach(() => {
+  cleanup();
+  resetLabel("ew_quota_tile_label");
+});
+
+describe("«الحصة اليومية» tile (C3)", () => {
+  it("shows the daily quota under its label, with the working-day window in the title", () => {
+    const { container } = render(<ReferralStatsStrip stats={STATS} quota={QUOTA} username="emp-1" />);
+    expect(screen.getByText("الحصة اليومية")).toBeInTheDocument();
+    expect(container.querySelector(".ew-ref-stats-title")?.getAttribute("title")).toBe(
+      "الحصة اليومية: 3 صورة / يوم · الحصة: 40 · أيام العمل (الأحد–الخميس): 19",
+    );
+  });
+
+  it("labels the quota as the reader's own under a foreign scope", () => {
+    render(<ReferralStatsStrip stats={STATS} quota={QUOTA} username="sup-1" scope="all" />);
+    expect(screen.getByText("الحصة اليومية (لي)")).toBeInTheDocument();
+  });
+
+  it("uses the no-quota label when there is no quota", () => {
+    const { container } = render(<ReferralStatsStrip stats={STATS} quota={null} username="emp-1" />);
+    expect(container.querySelector(".ew-ref-stats-title")?.getAttribute("title")).toBe(
+      "لا توجد حصة محفوظة لهذا الشهر",
+    );
+  });
+
+  it("reads the tile label from the labels store (admin-overridable)", () => {
+    setLabel("ew_quota_tile_label", "حصتي اليومية");
+    render(<ReferralStatsStrip stats={STATS} quota={QUOTA} username="emp-1" />);
+    expect(screen.getByText("حصتي اليومية")).toBeInTheDocument();
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `npx vitest run src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals/quotaTile.test.tsx`
+Expected: FAIL — the tile still reads «حصة اليوم» and its title says «الأيام المتبقية»; `setLabel("ew_quota_tile_label", …)` has no effect.
+
+- [ ] **Step 3: Label keys**
+
+In `src/data/labels/labelsStore.ts` — Before:
+```ts
+  ew_queue_stats_employee_scope:   "نطاق العرض: {name}",
+```
+After:
+```ts
+  ew_queue_stats_employee_scope:   "نطاق العرض: {name}",
+
+  // «الحصة اليومية» tile in the stats strip (C3). The quota is frozen: working
+  // days (Sunday–Thursday) from the employee's first assignment to the
+  // deadline (the sample month's last day − 3); it moves only when their
+  // assigned count changes. {daily}/{total}/{days} are filled at the call site.
+  ew_quota_tile_label:             "الحصة اليومية",
+  ew_quota_tile_label_mine:        "الحصة اليومية (لي)",
+  ew_quota_tile_title:             "الحصة اليومية: {daily} صورة / يوم · الحصة: {total} · أيام العمل (الأحد–الخميس): {days}",
+  ew_quota_tile_title_none:        "لا توجد حصة محفوظة لهذا الشهر",
+```
+
+- [ ] **Step 4: Use them in `ReferralStatsStrip`**
+
+In `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals/subComponents.tsx` — Before:
+```tsx
+    {
+      label: isForeignScope ? "حصة اليوم (لي)" : "حصة اليوم",
+      value: quota ? quota.dailyQuota.toLocaleString("ar-SA-u-nu-latn") : "—",
+      tone: "quota",
+    },
+```
+After:
+```tsx
+    {
+      label: isForeignScope ? L.ew_quota_tile_label_mine : L.ew_quota_tile_label,
+      value: quota ? quota.dailyQuota.toLocaleString("ar-SA-u-nu-latn") : "—",
+      tone: "quota",
+    },
+```
+Before:
+```tsx
+  const quotaTitle = quota
+    ? `الحصة اليومية: ${quota.dailyQuota.toLocaleString("ar-SA-u-nu-latn")} صورة / يوم · الحصة: ${quota.sampleCount.toLocaleString("ar-SA-u-nu-latn")} · الأيام المتبقية: ${quota.daysRemaining.toLocaleString("ar-SA-u-nu-latn")}`
+    : "لا توجد حصة محفوظة لهذا الشهر";
+```
+After:
+```tsx
+  // C3: `daysRemaining` is the frozen working-day window (Sun–Thu), not a
+  // countdown — hence «أيام العمل», not «الأيام المتبقية».
+  const quotaTitle = quota
+    ? L.ew_quota_tile_title
+        .replace("{daily}", quota.dailyQuota.toLocaleString("ar-SA-u-nu-latn"))
+        .replace("{total}", quota.sampleCount.toLocaleString("ar-SA-u-nu-latn"))
+        .replace("{days}", quota.daysRemaining.toLocaleString("ar-SA-u-nu-latn"))
+    : L.ew_quota_tile_title_none;
+```
+(`const L = useLabels();` is already declared above `statsItems` in this component.)
+
+In `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx` (module scope, outside the component) — Before:
+```ts
+export type PersonalQuota = { dailyQuota: number; daysRemaining: number; sampleCount: number } | null;
+```
+After:
+```ts
+/** `daysRemaining` is the assignment window in WORKING days (Sun–Thu) since
+ *  DERIVE_VERSION 5 (C3) — `EmployeeQuota.daysRemainingAtAssignment`. */
+export type PersonalQuota = { dailyQuota: number; daysRemaining: number; sampleCount: number } | null;
+```
+
+- [ ] **Step 5: Run to verify it passes**
+
+Run: `npx vitest run src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals/quotaTile.test.tsx src/components/Sidebar/Tabs/Settings/index.test.tsx`
+Expected: PASS (the Settings reachability test picks the new keys up through its "أخرى" fallback group).
+Then run: `grep -rn "حصة اليوم\|الأيام المتبقية" src --include=*.test.tsx --include=*.test.ts` — Expected: no match (no other test pinned the old strings); if one exists, update it to the new label text.
+
+- [ ] **Step 6: Tier 2 gates plus complexity**
+
+Run: `npm run lint && npm run typecheck && npm run test:run && npm run check:complexity`
+
+- [ ] **Step 7: Edit log (tier 2)**
+
+Run: `npm run editlog -- --tier=2 --append --sync-package "Fix (employee-workspace): daily quota tile strings as label keys, working-day wording"`
+- **Why:** The tile's strings were hard-coded Arabic (`subComponents.tsx:778-793`) and its title called the frozen window «الأيام المتبقية», which reads as a countdown (spec C3).
+- **What changed:** four `ew_quota_tile_*` label keys; the tile reads «الحصة اليومية» and its title «أيام العمل (الأحد–الخميس)»; `PersonalQuota` documented.
+- **Before/After:** the `quotaTitle` expression.
+
+- [ ] **Step 8: Commit**
+
+```bash
+npm run generate:changelog
+git add src/components/Sidebar/Tabs/EmployeeWorkspace src/data/labels/labelsStore.ts src/data/changelog/latestUpdates.generated.ts "docs/edit logs" package.json
+git commit -m "$(cat <<'MSG'
+Fix (employee-workspace): daily quota tile strings as label keys, working-day wording
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01NU4UP8LM3qkAnTNccmKZEJ
+MSG
+)"
+```
+
+---
+
+## Task 16: Final gate sweep for Workstream C
+
+**Files:**
+- No production changes expected. If a gate fails, fix the cause in the file the failure names (following the owning task's constraints) and record it in an extra tier-2 edit-log entry.
+
+**Interfaces:**
+- Consumes: everything from Tasks 1–15.
+- Produces: a branch whose every CI gate is green and whose `dist/index.html` builds.
+
+- [ ] **Step 1: Confirm the tree and history**
+
+Run: `git status --short && git log --oneline -16`
+Expected: clean tree; the 15 task commits on `claude/beautiful-einstein-y1ouot`.
+
+- [ ] **Step 2: Run the full gate sequence, in order, stopping at the first failure**
+
+```bash
+npm run lint
+npm run lint:ci
+npm run typecheck
+npm run test:run
+npm run check:complexity
+npm run check:hex-literals
+npm run check:release
+npm run check:vendor
+npm run build
+npm run check:bundle-size
+```
+Expected: every command exits 0. `test:run` reports 0 failed and no "snapshots obsolete/written"; `check:release` agrees with the newest edit-log version; `check:bundle-size` stays under its ceiling (compare raw/gzip with the pre-workstream `dist/index.html` if the owner asks — this workstream adds only small modules).
+
+- [ ] **Step 3: Scope audit (spec coverage)**
+
+Run and read the output:
+```bash
+grep -rn "STAGE_LABELS_AR\s*[:=]\s*{" src --include=*.ts --include=*.tsx
+grep -rn "certScanPorts" src --include=*.ts --include=*.tsx | grep -v "\.test\."
+grep -rn "computeWorkingDaysForDeadline\|countWorkingDays" src --include=*.ts | grep -v "\.test\."
+grep -n "SAMPLING_ALGORITHM_VERSION" src/data/sampling/sampleTypes.ts
+git diff 0780a9a -- src/data/sampling/sampleTypes.ts src/data/sampling/sampleAlgorithm.ts
+```
+Expected: `STAGE_LABELS_AR = {` defined only in `src/data/population/stageLabels.ts`; `certScanPorts` in `populationConfig.ts`, `populationProcessingTypes.ts`, `populationProcessor.ts`, `Population/index.tsx`, `MappingSettingsModal.tsx`; `countWorkingDays` defined once in `src/utils/workingDays.ts` and used by `distributionDerivation.ts`; `SAMPLING_ALGORITHM_VERSION` unchanged and `git diff` of the two sampling files empty.
+
+- [ ] **Step 4: Report**
+
+Do not push unless the controller instructs. Report: gate outputs (pass/fail per command), the final `package.json` version, and any fix commit made in this task. If the controller asks for a PR, `npm run build` has already passed in Step 2 (required before pushing, per CLAUDE.md), and the PR description ends with:
+```
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+https://claude.ai/code/session_01NU4UP8LM3qkAnTNccmKZEJ
+```
+
+---
