@@ -1,4 +1,5 @@
 import type { ItemAnswer } from "./answerTypes";
+import { compareSavedAt } from "./savedAt";
 
 /**
  * A local, per-BROWSER redundant copy of an employee's own answers, kept in
@@ -94,37 +95,6 @@ function openMirrorDb(): Promise<IDBDatabase | null> {
   });
 }
 
-async function putRecord(
-  month: string,
-  username: string,
-  item: ItemAnswer,
-  synced: boolean
-): Promise<void> {
-  const db = await openMirrorDb();
-  if (!db) return;
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, "readwrite");
-      tx.objectStore(STORE_NAME).put({
-        key: mirrorKey(month, username, item.xrayImageId),
-        month,
-        username,
-        xrayImageId: item.xrayImageId,
-        item,
-        mirroredAt: new Date().toISOString(),
-        synced,
-      } satisfies MirrorRecord);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error);
-    });
-  } catch {
-    // Best-effort — see module doc.
-  } finally {
-    db.close();
-  }
-}
-
 /**
  * Best-effort: mirror one answered item locally as CONFIRMED (`synced:
  * true`) — the item is known to be in the workspace file (called right
@@ -179,7 +149,37 @@ export async function markAnswerPendingLocally(
   username: string,
   item: ItemAnswer
 ): Promise<void> {
-  await putRecord(month, username, item, false);
+  const db = await openMirrorDb();
+  if (!db) return;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      issueGuardedPut(tx.objectStore(STORE_NAME), month, username, item, shouldQueueMirrorRecord, false);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  } catch {
+    // Best-effort — see module doc.
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * The QUEUE rule — used by `markAnswerPendingLocally`. A save that FAILED may
+ * finish failing AFTER a newer save of the same item was already queued
+ * (T1 fails late, T2 already pending). A blind put would let the older
+ * failure replace T2's pending record, leaving T2 only as a draft. Refuses
+ * when the existing record (pending OR synced) is strictly newer than the
+ * item being queued; an equal or newer item writes and stays pending.
+ */
+export function shouldQueueMirrorRecord(
+  existing: MirroredItemInfo | undefined,
+  item: ItemAnswer
+): boolean {
+  if (!existing) return true;
+  return compareSavedAt(item.lastSavedAt, existing.item.lastSavedAt) >= 0;
 }
 
 /**
@@ -218,7 +218,7 @@ export function shouldRefreshMirrorFromDisk(
 ): boolean {
   if (!existing) return true;
   if (!existing.synced) return false;
-  return diskItem.lastSavedAt > existing.item.lastSavedAt;
+  return compareSavedAt(diskItem.lastSavedAt, existing.item.lastSavedAt) > 0;
 }
 
 /**
@@ -245,7 +245,7 @@ export function shouldConfirmMirrorRecord(
   item: ItemAnswer
 ): boolean {
   if (!existing) return true;
-  return item.lastSavedAt >= existing.item.lastSavedAt;
+  return compareSavedAt(item.lastSavedAt, existing.item.lastSavedAt) >= 0;
 }
 
 /**
@@ -263,7 +263,8 @@ function issueGuardedPut(
   month: string,
   username: string,
   item: ItemAnswer,
-  shouldWrite: (existing: MirroredItemInfo | undefined, item: ItemAnswer) => boolean
+  shouldWrite: (existing: MirroredItemInfo | undefined, item: ItemAnswer) => boolean,
+  synced = true
 ): void {
   const key = mirrorKey(month, username, item.xrayImageId);
   const getRequest = store.get(key);
@@ -277,7 +278,7 @@ function issueGuardedPut(
       xrayImageId: item.xrayImageId,
       item,
       mirroredAt: new Date().toISOString(),
-      synced: true,
+      synced,
     } satisfies MirrorRecord);
   };
 }

@@ -7,6 +7,7 @@ import {
   markAnswerPendingLocally,
   mirrorAnswerLocally,
   shouldConfirmMirrorRecord,
+  shouldQueueMirrorRecord,
   shouldRefreshMirrorFromDisk,
   type MirroredItemInfo,
 } from "./answerLocalMirror";
@@ -141,5 +142,24 @@ describe("shouldConfirmMirrorRecord", () => {
   it("says NO for an already-synced record when the incoming confirm is OLDER -- never regress it", () => {
     const existing = record({ synced: true, item: item("X1", "2026-09-05T00:00:00.000Z") });
     expect(shouldConfirmMirrorRecord(existing, item("X1", "2026-09-01T00:00:00.000Z"))).toBe(false);
+  });
+});
+
+describe("shouldQueueMirrorRecord", () => {
+  const rec = (synced: boolean, at: string): MirroredItemInfo => ({ synced, item: item("X1", at) });
+
+  it("writes when nothing exists", () => {
+    expect(shouldQueueMirrorRecord(undefined, item("X1", "2026-09-01T00:00:00.000Z"))).toBe(true);
+  });
+  it("refuses an OLDER failed save over a newer pending record", () => {
+    expect(shouldQueueMirrorRecord(rec(false, "2026-09-05T00:00:00.000Z"), item("X1", "2026-09-01T00:00:00.000Z"))).toBe(false);
+  });
+  it("writes an equal or newer item over a pending record", () => {
+    expect(shouldQueueMirrorRecord(rec(false, "2026-09-01T00:00:00.000Z"), item("X1", "2026-09-01T00:00:00.000Z"))).toBe(true);
+    expect(shouldQueueMirrorRecord(rec(false, "2026-09-01T00:00:00.000Z"), item("X1", "2026-09-05T00:00:00.000Z"))).toBe(true);
+  });
+  it("compares instants, not strings: a legacy no-ms stamp is not 'newer' than .000 of the same second", () => {
+    expect(shouldConfirmMirrorRecord(rec(false, "2026-09-01T00:00:00Z"), item("X1", "2026-09-01T00:00:00.000Z"))).toBe(true);
+    expect(shouldRefreshMirrorFromDisk(rec(true, "2026-09-01T00:00:00.000Z"), item("X1", "2026-09-01T00:00:00Z"))).toBe(false);
   });
 });
