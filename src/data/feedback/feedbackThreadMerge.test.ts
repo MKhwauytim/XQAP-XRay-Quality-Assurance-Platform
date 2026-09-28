@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import type { FeedbackMessage, FeedbackThread } from "./feedbackStorage";
+import { summarizeFeedbackThread, type FeedbackMessage, type FeedbackThread } from "./feedbackStorage";
 import {
   indexThreadsById,
   mergeFeedbackThreads,
+  mergeSummariesWithLocalThreads,
   missingThreadIds,
   pickFresherThread,
 } from "./feedbackThreadMerge";
@@ -72,5 +73,32 @@ describe("mergeFeedbackThreads", () => {
 
     expect(merged.map((t) => t.id)).toEqual(["t3", "t2", "t1"]);
     expect(merged.find((t) => t.id === "t1")).toBe(localNewer);
+  });
+});
+
+describe("mergeSummariesWithLocalThreads", () => {
+  const OLD = thread({ id: "t-old", timestamp: "2026-09-20T10:00:00.000Z" });
+  const NEW = thread({ id: "t-new", timestamp: "2026-09-28T09:00:00.000Z" });
+
+  it("keeps a locally created thread the listing does not have, newest first", () => {
+    const merged = mergeSummariesWithLocalThreads([summarizeFeedbackThread(OLD)], { "t-new": NEW }, (id) => id === "t-new");
+    expect(merged.map((row) => row.threadId)).toEqual(["t-new", "t-old"]);
+  });
+
+  it("does not resurrect a held thread the listing lacks unless this tab created it since", () => {
+    const merged = mergeSummariesWithLocalThreads([summarizeFeedbackThread(OLD)], { "t-new": NEW });
+    expect(merged.map((row) => row.threadId)).toEqual(["t-old"]);
+  });
+
+  it("uses the local summary when the local thread has later activity", () => {
+    const resolved = thread({ ...OLD, status: "resolved", replies: [REPLY], revision: 2 });
+    const merged = mergeSummariesWithLocalThreads([summarizeFeedbackThread(OLD)], { "t-old": resolved });
+    expect(merged[0]).toMatchObject({ status: "resolved", lastActivityAt: REPLY.timestamp });
+  });
+
+  it("lets a listed row that is newer than the local copy stand", () => {
+    const other = thread({ ...OLD, status: "resolved", replies: [REPLY] });
+    const merged = mergeSummariesWithLocalThreads([summarizeFeedbackThread(other)], { "t-old": OLD });
+    expect(merged[0]).toMatchObject({ status: "resolved" });
   });
 });
