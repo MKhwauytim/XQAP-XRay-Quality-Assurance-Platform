@@ -351,7 +351,8 @@ export function useDistributionActions(params: {
       );
       if (result.ok) {
         await updateMonthStatus(directoryHandle, monthFolderName, "distributed");
-        await refreshDistribution(monthFolderName, result.log);
+        // A partial stand-in log (the durable re-read failed) is never derived from: reload instead.
+        await refreshDistribution(monthFolderName, result.logIsPartial ? undefined : result.log);
         logRowChange(monthFolderName, xrayImageId, { change: "assigned", to: assignedTo });
         setDistributionMessage({ type: "ok", text: "تم التعيين." });
       } else {
@@ -429,7 +430,8 @@ export function useDistributionActions(params: {
         event
       );
       if (result.ok) {
-        await refreshDistribution(monthFolderName, result.log);
+        // A partial stand-in log (the durable re-read failed) is never derived from: reload instead.
+        await refreshDistribution(monthFolderName, result.logIsPartial ? undefined : result.log);
         logRowChange(monthFolderName, xrayImageId, { change: "reassigned", from: fresh.assignedTo, to: reassignedTo });
         setDistributionMessage({ type: "ok", text: "تم إعادة التعيين." });
       } else {
@@ -474,7 +476,8 @@ export function useDistributionActions(params: {
         event
       );
       if (result.ok) {
-        await refreshDistribution(monthFolderName, result.log);
+        // A partial stand-in log (the durable re-read failed) is never derived from: reload instead.
+        await refreshDistribution(monthFolderName, result.logIsPartial ? undefined : result.log);
         logRowChange(monthFolderName, xrayImageId, { change: "completed", from: fresh.assignedTo });
         setDistributionMessage({ type: "ok", text: "تم تعليم الصف كمكتمل." });
       } else {
@@ -521,7 +524,8 @@ export function useDistributionActions(params: {
         event
       );
       if (result.ok) {
-        await refreshDistribution(monthFolderName, result.log);
+        // A partial stand-in log (the durable re-read failed) is never derived from: reload instead.
+        await refreshDistribution(monthFolderName, result.logIsPartial ? undefined : result.log);
         logRowChange(monthFolderName, xrayImageId, { change: "replacement-requested", from: fresh.assignedTo });
         setDistributionMessage({ type: "ok", text: "تم تسجيل طلب الاستبدال." });
       } else {
@@ -592,7 +596,8 @@ export function useDistributionActions(params: {
           details: { events: eventsToAppend.length, staleSkipped },
         });
         setDistributionProgress({ percent: 92, message: "جارٍ بناء ملخص التوزيع النهائي..." });
-        await refreshDistribution(monthFolderName, result.log);
+        // A partial stand-in log (the durable re-read failed) is never derived from: reload instead.
+        await refreshDistribution(monthFolderName, result.logIsPartial ? undefined : result.log);
         // Build per-employee entry lists then write one XLSX per employee (fire-and-forget).
         const assignedMap = buildAssignedEntryMap(eventsToAppend, sampleDrawResult.rows);
         for (const [emp, empEntries] of assignedMap) {

@@ -1744,6 +1744,9 @@ describe("XrayReferrals employee read path (Design B step 3)", () => {
     await saveDistributionCurrent(root, MONTH, {
       ...deriveCurrentDistribution(log, ids.map(makeRow)),
       logRevision: log.revision,
+      // As the production write flow stamps it: a mirror is trusted only for the
+      // event set it was derived from.
+      eventSetId: log.eventSetId,
     });
   }
 

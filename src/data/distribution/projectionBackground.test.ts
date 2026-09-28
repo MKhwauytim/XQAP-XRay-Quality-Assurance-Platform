@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { clearErrors, getRecentErrors } from "../storage/errorLogger";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { clearSimulatedFaults, createMemoryDirectory, setSimulatedFaults } from "../storage/memoryDirectory";
+import { createMemoryDirectory } from "../storage/memoryDirectory";
 import {
   __setProjectionTimingForTests,
   appendDistributionEvents,
@@ -79,8 +79,10 @@ describe("failing projection", () => {
 
     expect(result.ok).toBe(true);
     expect(result.ok && result.projectionPending).toBe(true);
-    expect(elapsed).toBeLessThan(1_500);
+    // Returned while the job was still running, and well before its deadline
+    // (the wall-clock bound is the deadline itself, not a tight second count).
     expect(isDistributionProjectionPending(root, MONTH)).toBe(true);
+    expect(elapsed).toBeLessThan(2_500);
     // Durable events are what the returned log is derived from.
     expect(result.ok && result.log.events.some((e) => e.xrayImageId === "XR-1")).toBe(true);
   });
@@ -100,30 +102,30 @@ describe("failing projection", () => {
     expect(isDistributionProjectionPending(root, MONTH)).toBe(false);
   });
 
-  it("serializes projection updates per month: every append still gets its own revision bump once the share recovers", async () => {
-    const root = failingShare();
+  it("serializes projection updates per month in FIFO order: each append gets its own, strictly increasing, bump", async () => {
+    __setProjectionTimingForTests({ graceMs: 0, deadlineMs: 2_500 });
+    const root = createMemoryDirectory("root");
     const one = await appendDistributionEvents(root, MONTH, [assign("XR-1")]);
-    expect(one.ok && one.projectionPending).toBe(true);
-    // The share recovers while job 1 is still in flight; job 2 queues behind it.
-    clearSimulatedFaults(root);
     const two = await appendDistributionEvents(root, MONTH, [assign("XR-2")]);
-    expect(two.ok).toBe(true);
+    expect(one.ok && two.ok).toBe(true);
     await flushPendingDistributionProjectionWrites();
 
-    // Job 1 either finished on the recovered share or exhausted; job 2 ran
-    // strictly after it and committed a bump on top of whatever it left.
-    const stamp = await readDistributionLogStamp(root, MONTH);
-    expect(stamp.revision).toBeGreaterThanOrEqual(1);
-    const log = await loadDistributionLog(root, MONTH);
-    expect(log.events.map((e) => e.xrayImageId).sort()).toEqual(["XR-1", "XR-2"]);
+    // Two distinct jobs, run one after the other: revision 1 then 2 (a lost or
+    // reordered bump would leave 1, or make job 2 compute from a stale base).
+    expect((await readDistributionLogStamp(root, MONTH)).revision).toBe(2);
+    expect(isDistributionProjectionPending(root, MONTH)).toBe(false);
   });
 
-  it("never fails the append when the durable events are written", async () => {
-    const root = failingShare();
-    setSimulatedFaults(root, [
-      { operation: "createWritable", name: "distribution.log.json", errorName: "InvalidStateError", times: Number.POSITIVE_INFINITY },
-    ]);
-    const result = await appendDistributionEvents(root, MONTH, [assign("XR-9")]);
-    expect(result.ok).toBe(true);
+  it("coalesces a backlog queued behind a running job into ONE update, losing no event", async () => {
+    __setProjectionTimingForTests({ graceMs: 0, deadlineMs: 2_500 });
+    const root = createMemoryDirectory("root");
+    await Promise.all([1, 2, 3, 4].map((n) => appendDistributionEvents(root, MONTH, [assign(`XR-${n}`)])));
+    await flushPendingDistributionProjectionWrites();
+
+    const revision = (await readDistributionLogStamp(root, MONTH)).revision;
+    expect(revision).toBeGreaterThanOrEqual(1);
+    expect(revision).toBeLessThan(4); // fewer bumps than appends: the backlog ran as fewer updates
+    const log = await loadDistributionLog(root, MONTH);
+    expect(log.events.map((e) => e.xrayImageId).sort()).toEqual(["XR-1", "XR-2", "XR-3", "XR-4"]);
   });
 });

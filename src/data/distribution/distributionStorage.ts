@@ -597,7 +597,7 @@ export async function appendDistributionEvent(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   event: DistributionEvent
-): Promise<{ ok: true; log: DistributionLog } | { ok: false; error: string }> {
+): Promise<AppendDistributionEventsResult> {
   return appendDistributionEvents(directoryHandle, monthFolderName, [event]);
 }
 
@@ -638,6 +638,12 @@ export type AppendDistributionEventsResult =
        * `flushPendingDistributionProjectionWrites` for tests.
        */
       projectionPending?: true;
+      /**
+       * `log` is only a best-effort stand-in (the batch alone, `revision: 0`),
+       * because re-reading the durable events failed too. Do not derive or
+       * persist anything from it; reload instead.
+       */
+      logIsPartial?: true;
     }
   | { ok: false; error: string };
 
@@ -714,6 +720,10 @@ export async function appendDistributionEvents(
     };
   }
 
+  // The events are durable NOW: move this tab's epoch so no epoch-keyed memo
+  // (e.g. a reader's "current eventSetId") keeps describing the pre-append set
+  // while the projection job is still in flight.
+  bumpWorkspaceEpoch(directoryHandle, monthFolderName);
   options?.onProgress?.({ phase: "projection", completed: events.length, total: events.length });
 
   // P4: the projection update is queued on its own per-month chain, with its
@@ -755,6 +765,7 @@ export async function appendDistributionEvents(
         eventSetId: distributionEventSetId(events),
         events: [...events],
       },
+      logIsPartial: true,
       ...pendingOrDegraded,
     };
   }
@@ -781,7 +792,16 @@ type ProjectionOutcome =
   | { ok: true; log: DistributionLog }
   | { ok: false; error: string };
 
-type ProjectionChain = { tail: Promise<unknown>; pending: number };
+type QueuedProjection = {
+  events: DistributionEvent[];
+  ids: Set<string>;
+  job: Promise<ProjectionOutcome>;
+  started: boolean;
+};
+type ProjectionChain = { tail: Promise<unknown>; pending: number; queued: QueuedProjection | null };
+
+/** Chains dropped by `__dropProjectionChainsForTests`, still flushed so no job outlives its test. */
+const droppedProjectionTails: Promise<unknown>[] = [];
 
 /** One serialized chain per (workspace, month): the projection file is one target. */
 const projectionChains = new Map<string, ProjectionChain>();
@@ -804,6 +824,12 @@ export function isDistributionProjectionPending(
   return (projectionChains.get(projectionChainKey(directoryHandle, monthFolderName))?.pending ?? 0) > 0;
 }
 
+/** Test-only: forget every queued projection job's bookkeeping, as a closed tab would. */
+export function __dropProjectionChainsForTests(): void {
+  for (const chain of projectionChains.values()) droppedProjectionTails.push(chain.tail);
+  projectionChains.clear();
+}
+
 /**
  * Resolve once every projection update queued so far has settled (test helper,
  * same role as `flushPendingFeedbackIndexWrites`; production code must never
@@ -811,6 +837,7 @@ export function isDistributionProjectionPending(
  */
 export async function flushPendingDistributionProjectionWrites(): Promise<void> {
   for (;;) {
+    await Promise.all(droppedProjectionTails.splice(0));
     const tails = [...projectionChains.values()].map((chain) => chain.tail);
     if (tails.length === 0) return;
     await Promise.all(tails);
@@ -843,12 +870,26 @@ function enqueueProjectionUpdate(
   onProgress: AppendDistributionEventsOptions["onProgress"]
 ): Promise<ProjectionOutcome> {
   const key = projectionChainKey(directoryHandle, monthFolderName);
-  const chain = projectionChains.get(key) ?? { tail: Promise.resolve(), pending: 0 };
+  const chain = projectionChains.get(key) ?? { tail: Promise.resolve(), pending: 0, queued: null };
   projectionChains.set(key, chain);
+  // Coalesce: a job that is queued behind a running one and has not started yet
+  // takes this batch too, so a backlog on a failing share runs as ONE update
+  // (one revision bump) instead of one full deadline per append. Nothing is lost:
+  // the projection carries only the revision/token, and the loader always
+  // re-reads the full durable event set.
+  if (chain.queued && !chain.queued.started) {
+    chain.queued.events.push(...events);
+    for (const id of ids) chain.queued.ids.add(id);
+    return chain.queued.job;
+  }
   chain.pending += 1;
+  const mine: QueuedProjection = { events: [...events], ids: new Set(ids), job: undefined as never, started: false };
+  chain.queued = mine;
   const job: Promise<ProjectionOutcome> = chain.tail.then(async (): Promise<ProjectionOutcome> => {
+    mine.started = true;
+    if (chain.queued === mine) chain.queued = null;
     try {
-      const outcome = await runProjectionUpdate(directoryHandle, monthFolderName, events, ids, onProgress);
+      const outcome = await runProjectionUpdate(directoryHandle, monthFolderName, mine.events, mine.ids, onProgress);
       if (!outcome.ok) {
         // The projection could not be updated — but we only get here AFTER
         // `writeDistributionEventBatch` committed the immutable event files, so
@@ -882,6 +923,7 @@ function enqueueProjectionUpdate(
       bumpWorkspaceEpoch(directoryHandle, monthFolderName);
     }
   });
+  mine.job = job;
   const settle = (): void => {
     chain.pending -= 1;
     if (chain.pending === 0 && projectionChains.get(key) === chain) projectionChains.delete(key);

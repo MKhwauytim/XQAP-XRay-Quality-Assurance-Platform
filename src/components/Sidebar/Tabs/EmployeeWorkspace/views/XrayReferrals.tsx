@@ -24,7 +24,6 @@ import type { FieldAnswer, ItemAnswer } from "../../../../../data/answers/answer
 import {
   loadOrDeriveDistributionCurrent,
   loadOrDeriveDistributionCurrentStrictForRead,
-  isDistributionProjectionPending,
   readDistributionLogStamp,
 } from "../../../../../data/distribution/distributionStorage";
 import {
@@ -58,7 +57,7 @@ import { useGlobalMonth } from "../../../../../data/month/useGlobalMonth";
 import {
   loadSampleMaster,
 } from "../../../../../data/sampling/sampleStorage";
-import { loadEmployeeSampleMirror } from "../../../../../data/samples/sampleMirrorStorage";
+import { isMirrorTrustedForEvents, loadEmployeeSampleMirror } from "../../../../../data/samples/sampleMirrorStorage";
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
 import {
   displayXrayImageId,
@@ -1394,9 +1393,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       // for this employee, and nothing further needs reading. `>=` rather than
       // `===` because a mirror can only ever be ahead of a stamp we read a
       // moment earlier, never legitimately behind-but-correct.
-      // P4: never while this tab's own projection bump is outstanding (stamp behind events).
+      // Revision AND event set (the projection stamp can lag the durable events).
       const mirrorCurrent = !canSeeAll && !!personalMirror && !!logStamp &&
-        personalMirror.sourceLogRevision >= logStamp.revision && !isDistributionProjectionPending(directoryHandle, selMonth);
+        (await isMirrorTrustedForEvents(directoryHandle, selMonth, personalMirror, logStamp.revision));
       // `quota` is OPTIONAL on the mirror by contract (see EmployeeMirrorQuota):
       // a mirror written before that field existed has none, and the reader
       // must fall back to the derived file rather than render "0 per day".
