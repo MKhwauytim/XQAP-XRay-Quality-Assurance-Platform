@@ -62,7 +62,7 @@ import {
   getSampleMainDir,
   safeWorkspaceFilePart,
 } from "../workspace/workspacePaths";
-import { loadMirroredAnswers, markAnswerPendingLocally, mirrorAnswerLocally } from "./answerLocalMirror";
+import { markAnswerPendingLocally, mirrorAnswerLocally } from "./answerLocalMirror";
 
 export { ANSWER_EVENTS_DIR, ANSWER_EVENT_SEGMENT_SUFFIX };
 
@@ -901,8 +901,9 @@ async function performAnswerWrite(
     } else if (mirrorCandidate) {
       // The append never reached the shared folder (share down, permission
       // lost, exhausted retries) — queue it in the local backup as PENDING
-      // rather than dropping it, so the 30s retry tick / next reconciliation
-      // in `XrayInspectionResults.tsx` keeps trying until it lands, and the
+      // rather than dropping it, so the app-level `PendingAnswerReplayRunner`
+      // (`pendingAnswerReplay.ts`, mounted once in AuthGate — not scoped to
+      // any one view or month any more) keeps trying until it lands, and the
       // employee sees a "not saved yet" count instead of a silently lost
       // answer. `markAnswerPendingLocally` never throws (see its doc comment).
       await markAnswerPendingLocally(monthFolderName, username, mirrorCandidate);
@@ -911,57 +912,21 @@ async function performAnswerWrite(
   });
 }
 
-/**
- * Reconcile this browser's local IndexedDB backup with the workspace file for
- * one employee's one month — the "sign-in" / periodic side of the local
- * mirror (see `answerLocalMirror.ts`'s module doc for why this exists and why
- * it never deletes on either side).
- *
- * Two passes, both additive-only:
- *  1. Any mirrored item that the file either lacks or holds an OLDER
- *     `lastSavedAt` for is replayed into the file through the normal
- *     `upsertItemAnswer` path — the same casLoop-protected, conflict-safe
- *     append every real save goes through, never a raw overwrite.
- *  2. The file is re-read (picking up anything just replayed) and every one
- *     of its items is written back into the mirror, so a browser that just
- *     had an empty/reset IndexedDB ends this call caught back up — restoring
- *     from an empty mirror only ever ADDS entries, it never removes the
- *     file's own data.
- *
- * Best-effort throughout: called opportunistically (on load, and on a
- * periodic tick from the UI), never gates rendering the employee's answers.
- */
-export async function reconcileAnswersWithLocalMirror(
-  directoryHandle: DirectoryHandleLike,
-  monthFolderName: string,
-  username: string
-): Promise<void> {
-  try {
-    const [file, mirrored] = await Promise.all([
-      loadEmployeeAnswers(directoryHandle, monthFolderName, username),
-      loadMirroredAnswers(monthFolderName, username),
-    ]);
-
-    const onDiskByImage = new Map(file.items.map((item) => [item.xrayImageId, item]));
-    let replayedAny = false;
-    for (const mirroredItem of mirrored) {
-      const onDisk = onDiskByImage.get(mirroredItem.xrayImageId);
-      const mirrorIsNewer = !onDisk || mirroredItem.lastSavedAt > onDisk.lastSavedAt;
-      if (!mirrorIsNewer) continue;
-      const result = await upsertItemAnswer(directoryHandle, monthFolderName, username, mirroredItem);
-      if (result.ok) replayedAny = true;
-    }
-
-    const finalFile = replayedAny
-      ? await loadEmployeeAnswers(directoryHandle, monthFolderName, username)
-      : file;
-    for (const item of finalFile.items) {
-      await mirrorAnswerLocally(monthFolderName, username, item);
-    }
-  } catch (error) {
-    logError("answers:mirror-reconcile", error instanceof Error ? error : new Error(String(error)));
-  }
-}
+// `reconcileAnswersWithLocalMirror` (the "sign-in"/periodic reconcile that
+// used to live here) was DELETED in the A1 fix round (IMPORTANT 5). Its
+// re-landing pass — replaying every mirrored item that looked newer than
+// disk, regardless of whether it was ever marked pending — was a hidden
+// background WRITER into the shared folder: no lock, no permission gate, and
+// no idea whether the folder it wrote into had just been restored from a
+// backup (Workstream D will make restoring a folder an explicit operation
+// with its own safeguards; a reconciler quietly re-writing into a
+// freshly-restored folder is exactly the surprise that must not exist before
+// then). Landing a genuinely pending answer is `replayPendingAnswers`'s job
+// now (`pendingAnswerReplay.ts`), and it only ever touches items this
+// browser itself marked `synced: false`. The function's other, NON-WRITING
+// half — re-mirroring the file's current items into IndexedDB so the local
+// backup stays current — survives as `backfillAnswerMirror` in
+// `pendingAnswerReplay.ts`.
 
 /**
  * Best-effort post-write refresh, matching distribution's

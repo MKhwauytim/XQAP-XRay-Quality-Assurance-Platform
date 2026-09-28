@@ -10,18 +10,28 @@ import type { ItemAnswer } from "./answerTypes";
  * the shared folder kept failing (name-too-long / share contention). An
  * IndexedDB mirror survives independently of the share, so a save that made
  * it to the browser but not (yet, or ever) to the file can be recovered later
- * by `reconcileAnswersWithLocalMirror` in `answerStorage.ts`.
+ * by `replayPendingAnswers` in `pendingAnswerReplay.ts` (app-level, mounted
+ * once in AuthGate — not scoped to one view or month).
  *
  * **This is a backup, never a source of truth, and never a deletion signal.**
  * The workspace file — reachable by every device, backed by `.bak`, protected
  * by `casLoop` — remains authoritative. IndexedDB can legitimately be empty
  * (a fresh browser profile, a cleared site data, a different machine); an
  * empty or missing mirror means only "nothing to restore from here," never
- * "the employee's answers were deleted." Reconciliation is therefore
- * one-directional-additive in both directions: a mirror entry the file
- * lacks gets replayed INTO the file, and the file's own items get written
- * INTO the mirror — nothing already on either side is ever removed by this
- * module.
+ * "the employee's answers were deleted."
+ *
+ * Reconciliation is one-directional-additive on EACH side separately, but the
+ * two directions are no longer symmetric (A1 fix round, IMPORTANT 5): a
+ * mirror entry the file lacks is replayed INTO the file only when it is still
+ * marked `synced: false` here (`replayPendingAnswers`, keyed off
+ * `loadPendingAnswerRecords`) — a `synced: true` entry is never re-landed,
+ * since re-landing regardless of sync state would be a hidden background
+ * writer into the shared folder with no idea whether that folder had just
+ * been restored from a backup. The file's own items are still written INTO
+ * the mirror on the other side (`backfillAnswerMirror` in
+ * `pendingAnswerReplay.ts`, the non-writing half of what used to be
+ * `reconcileAnswersWithLocalMirror`) — nothing already on either side is ever
+ * removed by this module.
  */
 
 const DB_NAME = "xray_answers_local_mirror_v1";
@@ -38,10 +48,10 @@ type MirrorRecord = {
   /**
    * `true` — this item is confirmed present in the workspace file (the
    * normal case: mirrored right after a successful save, or re-mirrored by
-   * `reconcileAnswersWithLocalMirror` after reading the file).
+   * `backfillAnswerMirror` after reading the file).
    * `false` — the save attempt that produced this item failed to reach the
-   * shared folder; it stays queued here until a retry (the 30s tick in
-   * `XrayInspectionResults.tsx`, or the next reconciliation) succeeds.
+   * shared folder; it stays queued here until `replayPendingAnswers`
+   * (the app-level runner's mount tick, or its 30s tick) lands it.
    */
   synced: boolean;
 };
@@ -120,8 +130,9 @@ export async function mirrorAnswerLocally(
 /**
  * Best-effort: queue an answer that FAILED to reach the workspace file
  * (`synced: false`). It stays here — visible via `countPendingAnswers` and
- * retried by `reconcileAnswersWithLocalMirror` — until a later save of the
- * same item succeeds and re-mirrors it as confirmed.
+ * retried by `replayPendingAnswers` (`pendingAnswerReplay.ts`) — until a
+ * later replay or a later save of the same item succeeds and re-mirrors it
+ * as confirmed.
  */
 export async function markAnswerPendingLocally(
   month: string,

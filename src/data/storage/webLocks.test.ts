@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import type { DirectoryHandleLike } from "./fileSystemAccess";
 import { createMemoryDirectory } from "./memoryDirectory";
-import { directoryPath, directoryResourceKey, withResourceLock } from "./webLocks";
+import { directoryPath, directoryResourceKey, withResourceLock, withTryResourceLock } from "./webLocks";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -112,4 +112,53 @@ test("two files in the same directory still get distinct keys", async () => {
   const dir = await createMemoryDirectory("k").getDirectoryHandle("1-main", { create: true });
   expect(directoryResourceKey(dir, "a.json")).not.toBe(directoryResourceKey(dir, "b.json"));
   expect(directoryPath(dir)).toBe("1-main");
+});
+
+test("withTryResourceLock: a second concurrent call for the same resource is skipped, not queued", async () => {
+  const events: string[] = [];
+  let releaseFirst!: () => void;
+  const gate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+
+  const first = withTryResourceLock("try-res-a", async () => {
+    events.push("first:start");
+    await gate;
+    events.push("first:end");
+    return "first";
+  });
+
+  // Give the first call a tick to actually acquire the lock before the
+  // second one tries -- otherwise both could race for it.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const second = await withTryResourceLock("try-res-a", async () => {
+    events.push("second:ran"); // must never happen while the first is in flight
+    return "second";
+  });
+
+  expect(second).toEqual({ ran: false });
+  releaseFirst();
+  expect(await first).toEqual({ ran: true, result: "first" });
+  expect(events).toEqual(["first:start", "first:end"]);
+});
+
+test("withTryResourceLock: runs normally once the resource is free again", async () => {
+  await withTryResourceLock("try-res-b", async () => "one");
+  const second = await withTryResourceLock("try-res-b", async () => "two");
+  expect(second).toEqual({ ran: true, result: "two" });
+});
+
+test("withTryResourceLock: a distinct resource name is never blocked by an unrelated held one", async () => {
+  let releaseFirst!: () => void;
+  const gate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  const first = withTryResourceLock("try-res-c", async () => {
+    await gate;
+    return "c";
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const other = await withTryResourceLock("try-res-d", async () => "d");
+  expect(other).toEqual({ ran: true, result: "d" });
+
+  releaseFirst();
+  await first;
 });

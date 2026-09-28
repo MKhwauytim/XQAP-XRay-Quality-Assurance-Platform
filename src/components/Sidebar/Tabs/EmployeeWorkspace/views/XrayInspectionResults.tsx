@@ -22,6 +22,7 @@ import {
   setItemQualityNote,
 } from "../../../../../data/answers/answerStorage";
 import { countPendingAnswers } from "../../../../../data/answers/answerLocalMirror";
+import { backfillAnswerMirror } from "../../../../../data/answers/pendingAnswerReplay";
 import type { ItemAnswer } from "../../../../../data/answers/answerTypes";
 import { isNoImageSubmission } from "../../../../../data/answers/noImageAnswer";
 import { reopenSubmittedAnswer } from "../../../../../data/answers/reopenAnswer";
@@ -268,15 +269,25 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
     }
   }, [selectedMonth]);
 
-  // COUNT-ONLY (F14/A1): this view used to both replay pending answers
-  // (`reconcileAnswersWithLocalMirror`, which writes to the workspace file)
-  // and refresh the "not saved yet" count from the outcome. Replay now runs
-  // exclusively through the app-level `PendingAnswerReplayRunner` (mounted
-  // once in AuthGate, covering every page/month/ad-hoc folder with a single
-  // shared in-flight guard) — this view only reads the current pending count.
+  // COUNT-ONLY w.r.t. the SHARED WORKSPACE (F14/A1): this view used to both
+  // replay pending answers (`reconcileAnswersWithLocalMirror`, which wrote
+  // into the workspace file) and refresh the "not saved yet" count from the
+  // outcome. Landing a pending answer now runs exclusively through the
+  // app-level `PendingAnswerReplayRunner` (mounted once in AuthGate,
+  // covering every page/month/ad-hoc folder with a single shared in-flight
+  // guard) — this view never writes to the workspace file any more.
+  //
+  // It still does one NON-WRITING-to-disk thing (IMPORTANT 5, fix round 1):
+  // `backfillAnswerMirror` re-mirrors this employee's CURRENT on-disk items
+  // for the selected month into the browser's own IndexedDB backup — the
+  // half of the old `reconcileAnswersWithLocalMirror` that only ever wrote
+  // to IndexedDB, never to the shared folder, kept here as the natural
+  // "sibling effect" home (this view already reads the selected month's
+  // answers on load/tick) now that the writing half moved to the runner.
   const refreshPendingSyncCount = useCallback(async () => {
+    await backfillAnswerMirror(directoryHandle, selectedMonth, username);
     setPendingSyncCount(await countPendingAnswers(selectedMonth, username));
-  }, [selectedMonth, username]);
+  }, [directoryHandle, selectedMonth, username]);
 
   // Load-token guard (mirrors useApprovalData): a slow load for a previously
   // selected month must not clobber a later selection or the falsy-reset above.
@@ -412,10 +423,11 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
     return () => window.clearTimeout(timer);
   }, [loadData]);
 
-  // The 30s REPLAY of unsynced answers now runs app-wide
+  // The 30s LANDING of unsynced answers now runs app-wide
   // (PendingAnswerReplayRunner, mounted in AuthGate) — for every page, every
   // month, and every ad-hoc import, not only while this view is open. This
-  // tick only keeps the "not saved yet" count on this view current. Skipped
+  // tick only backfills the local mirror and keeps the "not saved yet" count
+  // on this view current (see refreshPendingSyncCount's own doc). Skipped
   // entirely for `canSeeAll` — same reasoning as the loadData call above.
   useEffect(() => {
     if (canSeeAll || !selectedMonth) return;

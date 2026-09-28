@@ -6,13 +6,22 @@
  * failed write targeted (a real month or an `adhoc-*` store), so replaying
  * record-by-record covers every month and every ad-hoc import. Writes go
  * through `upsertItemAnswer` — the same conflict-safe append a real save uses.
+ *
+ * Fix round 1 (reviewer findings) hardened this considerably over the first
+ * cut — see the doc comments below at each guard for what each one prevents.
  */
+import { AnswersUnreadableError, loadAllEmployeeFiles, loadEmployeeAnswers, upsertItemAnswer } from "./answerStorage";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { logError } from "../storage/errorLogger";
 import { notifyLocalDataChange } from "../workspace/dataRefreshSignal";
+import { getSampleMainDir } from "../workspace/workspacePaths";
+import { isNotFoundError } from "../storage/transientFileErrors";
+import { dedupeInFlight, workspaceScopeId } from "../storage/inFlightReads";
+import { withTryResourceLock } from "../storage/webLocks";
+import { MonthClosedError } from "../population/monthLock";
+import { ReadOnlyModeError } from "../storage/readOnlyMode";
 import { answerDraftKey, clearAnswerDraft } from "./answerDraftStore";
 import { loadPendingAnswerRecords, mirrorAnswerLocally } from "./answerLocalMirror";
-import { loadEmployeeAnswers, upsertItemAnswer } from "./answerStorage";
 import type { ItemAnswer } from "./answerTypes";
 
 export type PendingReplayDeps = {
@@ -20,38 +29,128 @@ export type PendingReplayDeps = {
   markSynced: (month: string, username: string, item: ItemAnswer) => Promise<void>;
 };
 
-export type PendingReplaySummary = { replayed: number; alreadyOnDisk: number; failed: number };
+export type PendingReplaySummary = {
+  replayed: number;
+  alreadyOnDisk: number;
+  failed: number;
+  /**
+   * Left pending ON PURPOSE this pass — never logged as an error, because
+   * each cause here is an expected, recurring condition that resolves on
+   * its own (the month reopens, read-only mode ends, the share becomes
+   * reachable again), not a bug: the month is closed (`MonthClosedError`),
+   * the app is in read-only/demo mode (`ReadOnlyModeError`), the month's
+   * `2-samples/{month}/1-main/` folder does not exist yet (replay never
+   * creates it), or the month's event segments could not be read strictly
+   * (`AnswersUnreadableError` — see the "is it already on disk" note below).
+   */
+  cannotLand: number;
+};
+
+const EMPTY_SUMMARY: PendingReplaySummary = { replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 0 };
 
 const DEFAULT_DEPS: PendingReplayDeps = {
   loadPending: loadPendingAnswerRecords,
   markSynced: mirrorAnswerLocally,
 };
 
-/**
- * F14: a single, MODULE-LEVEL in-flight guard, keyed by username, shared by
- * every caller of `replayPendingAnswers` — the app-level runner's mount
- * tick, its 30s interval tick, and any future caller alike. Without it, two
- * overlapping calls for the same user (e.g. the runner's mount-time replay
- * still in flight when its own next tick — or a second runner instance
- * during a remount — starts another) could both read the same pending item
- * as "not yet on disk" and each append it, producing a duplicate answer
- * event. A second caller that arrives while one is running joins the SAME
- * promise instead of starting its own.
- */
-const inFlightReplays = new Map<string, Promise<PendingReplaySummary>>();
+/** `pending-replay:{workspace}:{username}` — shared by the in-tab join and the cross-tab lock below. */
+function replayResourceKey(directoryHandle: DirectoryHandleLike, username: string): string {
+  return `pending-replay:${workspaceScopeId(directoryHandle)}:${username}`;
+}
 
+/**
+ * IMPORTANT 2 (fix round 1): a single, shared in-flight guard, in two parts.
+ *
+ *  1. Same-tab: `dedupeInFlight` (the existing app-wide "join an overlapping
+ *     call for this key" primitive — see `inFlightReads.ts`, already used
+ *     for workspace directory reads) keyed by workspace + username. A
+ *     second call for the same user in the SAME tab while one is running
+ *     joins that SAME promise instead of starting its own.
+ *  2. Cross-tab: the actual work runs inside `withTryResourceLock`, keyed
+ *     `pending-replay:{workspace}:{username}` (Web Locks API where
+ *     available, an in-memory held-set fallback otherwise — see
+ *     `webLocks.ts`). If another tab already holds it, THIS tick is
+ *     SKIPPED — not queued — and returns an all-zero summary; the other
+ *     tab's run is already doing the work. This is deliberately NOT the
+ *     same primitive `dedupeInFlight` uses: Web Locks are the only
+ *     mechanism here that reaches across tabs, and it has no "join and get
+ *     the same result back" mode, only "wait" or "skip" — skip is right for
+ *     a poller that ticks again in 30s anyway.
+ *
+ * Together these are what makes "two replays of the same pending item can
+ * never run concurrently" true across BOTH axes (same tab, cross tab) — not
+ * just a claim about one of them.
+ */
 export async function replayPendingAnswers(
   directoryHandle: DirectoryHandleLike,
   username: string,
   deps: PendingReplayDeps = DEFAULT_DEPS
 ): Promise<PendingReplaySummary> {
-  const existing = inFlightReplays.get(username);
-  if (existing) return existing;
-  const run = runReplayPendingAnswers(directoryHandle, username, deps).finally(() => {
-    inFlightReplays.delete(username);
+  const key = replayResourceKey(directoryHandle, username);
+  return dedupeInFlight(key, async () => {
+    const attempt = await withTryResourceLock(key, () =>
+      runReplayPendingAnswers(directoryHandle, username, deps)
+    );
+    return attempt.ran ? attempt.result : EMPTY_SUMMARY;
   });
-  inFlightReplays.set(username, run);
-  return run;
+}
+
+/**
+ * IMPORTANT 3 (fix round 1): confirm the month's `1-main` sample folder
+ * already exists (`create: false`) BEFORE touching it at all. Replay must
+ * never create a month folder — `performAnswerWrite` (inside
+ * `upsertItemAnswer`) resolves it with `create: true`, so without this
+ * probe a pending record naming a month whose folder was never created (or
+ * was removed) would have its folder silently conjured back into existence
+ * by a background poller. `getSampleMainDir(..., false)` throws
+ * `NotFoundError` the same way whether the month folder itself or just its
+ * `1-main` child is missing (both resolve through the same `create: false`
+ * chain), which is exactly the "does this month have anywhere to land an
+ * answer at all" question.
+ */
+async function sampleMainDirExists(directoryHandle: DirectoryHandleLike, month: string): Promise<boolean> {
+  try {
+    await getSampleMainDir(directoryHandle, month, false);
+    return true;
+  } catch (error) {
+    if (isNotFoundError(error)) return false;
+    // An unexpected error resolving the folder (permission lost, transient
+    // share fault that exhausted its own retries) — conservative default is
+    // "cannot confirm it exists," so this month's items are left pending
+    // rather than risking a write into a folder we could not actually see.
+    logError("answers:pending-replay-probe", error);
+    return false;
+  }
+}
+
+/**
+ * IMPORTANT 1 (fix round 1): whether disk already holds this item (or a
+ * newer one) must be answered with the STRICT read
+ * (`loadAllEmployeeFiles(..., { strict: true })`, which threads
+ * `{ strict: true }` all the way to `readEventSegmentDelta` and throws
+ * `AnswersUnreadableError` — wrapping `EventSegmentUnreadableError` — rather
+ * than silently tolerating an unreadable segment as "no events in it," the
+ * way the plain/lenient read does). The plain read made a skipped segment
+ * look like the item was missing from disk, so a stale local copy (this
+ * pass's `eventAt = now`) would win the fold over a genuinely newer answer
+ * already on disk from another device — a silent regression. On
+ * `AnswersUnreadableError` this month is skipped entirely this pass (every
+ * pending item in it stays pending, counted under `cannotLand`) rather than
+ * risk exactly that.
+ */
+async function loadOnDiskItemsStrict(
+  directoryHandle: DirectoryHandleLike,
+  month: string,
+  username: string
+): Promise<Map<string, ItemAnswer> | null> {
+  try {
+    const files = await loadAllEmployeeFiles(directoryHandle, month, { strict: true });
+    const mine = files.find((file) => file.username === username);
+    return new Map((mine?.items ?? []).map((item) => [item.xrayImageId, item]));
+  } catch (error) {
+    if (error instanceof AnswersUnreadableError) return null;
+    throw error;
+  }
 }
 
 async function runReplayPendingAnswers(
@@ -59,7 +158,7 @@ async function runReplayPendingAnswers(
   username: string,
   deps: PendingReplayDeps
 ): Promise<PendingReplaySummary> {
-  const summary: PendingReplaySummary = { replayed: 0, alreadyOnDisk: 0, failed: 0 };
+  const summary: PendingReplaySummary = { replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 0 };
   const byMonth = new Map<string, ItemAnswer[]>();
   for (const { month, item } of await deps.loadPending(username)) {
     const items = byMonth.get(month);
@@ -69,15 +168,23 @@ async function runReplayPendingAnswers(
 
   for (const month of [...byMonth.keys()].sort((a, b) => a.localeCompare(b))) {
     const items = byMonth.get(month)!;
-    let onDisk: Map<string, ItemAnswer>;
-    try {
-      const file = await loadEmployeeAnswers(directoryHandle, month, username);
-      onDisk = new Map(file.items.map((item) => [item.xrayImageId, item]));
-    } catch (error) {
-      logError("answers:pending-replay-read", error);
-      summary.failed += items.length;
+
+    if (!(await sampleMainDirExists(directoryHandle, month))) {
+      summary.cannotLand += items.length;
       continue;
     }
+
+    const onDisk = await loadOnDiskItemsStrict(directoryHandle, month, username);
+    if (!onDisk) {
+      // AnswersUnreadableError -- see loadOnDiskItemsStrict's doc. No log
+      // here: a persistently flaky share already gets its own error-code
+      // logging from the read path itself; logging again on every 30s tick
+      // for as long as the flakiness lasts is exactly the noise CRITICAL-1
+      // (below) exists to avoid, applied here too.
+      summary.cannotLand += items.length;
+      continue;
+    }
+
     for (const item of items) {
       const current = onDisk.get(item.xrayImageId);
       if (current && current.lastSavedAt >= item.lastSavedAt) {
@@ -88,16 +195,70 @@ async function runReplayPendingAnswers(
         summary.alreadyOnDisk += 1;
         continue;
       }
-      const result = await upsertItemAnswer(directoryHandle, month, username, item);
-      if (result.ok) {
-        clearAnswerDraft(answerDraftKey(month, item.xrayImageId, username));
-        summary.replayed += 1;
-      } else {
-        summary.failed += 1;
+      // CRITICAL 1 (fix round 1): `upsertItemAnswer` THROWS (it does not
+      // reject with `{ ok: false }`) for `MonthClosedError` and
+      // `ReadOnlyModeError` — both raised by `ensureMonthWritable` before
+      // the write is even attempted. An uncaught throw here used to abort
+      // the ENTIRE pass: every month sorted after the offending one (and
+      // every ad-hoc folder, since those sort after real months) never got
+      // a chance to replay, and the same throw repeated on every 30s tick,
+      // landing in the durable per-user error log forever. Each item is now
+      // isolated in its own try/catch so one item's failure can never stop
+      // its neighbours, this month's remaining items, or any other month.
+      try {
+        const result = await upsertItemAnswer(directoryHandle, month, username, item);
+        if (result.ok) {
+          clearAnswerDraft(answerDraftKey(month, item.xrayImageId, username));
+          summary.replayed += 1;
+        } else {
+          summary.failed += 1;
+        }
+      } catch (error) {
+        if (error instanceof MonthClosedError || error instanceof ReadOnlyModeError) {
+          // Expected, recurring, not a bug -- see PendingReplaySummary's doc.
+          summary.cannotLand += 1;
+        } else {
+          logError("answers:pending-replay-write", error);
+          summary.failed += 1;
+        }
       }
     }
   }
 
   if (summary.replayed + summary.alreadyOnDisk > 0) notifyLocalDataChange(["answers"]);
   return summary;
+}
+
+/**
+ * IMPORTANT 5 (fix round 1): the NON-WRITING half of what
+ * `reconcileAnswersWithLocalMirror` (deleted from `answerStorage.ts`) used
+ * to do — re-mirror the workspace file's CURRENT items into this browser's
+ * local IndexedDB backup, so the mirror recovers after a cleared/empty
+ * IndexedDB and stays current as the employee keeps working. Deliberately
+ * drops the other half that function used to do: re-landing every mirrored
+ * item that looked newer than disk back onto the workspace file, regardless
+ * of whether it was ever marked pending. That was a hidden background
+ * WRITER into the shared folder — no lock, no permission gate, and no idea
+ * whether the folder it wrote into had just been restored from a backup
+ * (Workstream D will make restoring a folder an explicit operation with its
+ * own safeguards). Landing a genuinely pending answer is
+ * `replayPendingAnswers`'s job alone now.
+ *
+ * Best-effort, plain (non-strict) read — this is a convenience backup copy,
+ * never the thing standing between a real answer and data loss the way
+ * `replayPendingAnswers`'s own on-disk check must be.
+ */
+export async function backfillAnswerMirror(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  username: string
+): Promise<void> {
+  try {
+    const file = await loadEmployeeAnswers(directoryHandle, monthFolderName, username);
+    for (const item of file.items) {
+      await mirrorAnswerLocally(monthFolderName, username, item);
+    }
+  } catch (error) {
+    logError("answers:mirror-backfill", error);
+  }
 }

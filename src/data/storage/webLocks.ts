@@ -91,3 +91,57 @@ export async function withResourceLock<T>(
     callback as () => Promise<unknown>
   ) as Promise<T>;
 }
+
+type TryLockManagerLike = {
+  request: (
+    name: string,
+    options: { mode: "exclusive"; ifAvailable: true },
+    callback: (lock: unknown) => Promise<unknown>
+  ) => Promise<unknown>;
+};
+
+// Fallback for `withTryResourceLock` when the native Web Locks API is
+// unavailable (non-Chromium, or a test/node environment): an in-memory
+// held-set approximates try-lock semantics. This only protects THIS
+// TAB/REALM, the same limitation `withFallbackLock` above already has for
+// `withResourceLock` — the cross-tab case `withTryResourceLock` exists for
+// IS the native API.
+const fallbackHeld = new Set<string>();
+
+/**
+ * Try-lock variant of `withResourceLock`: if `resourceName` is already held
+ * — by another tab, via the native Web Locks API, or (fallback path) by
+ * this realm — the callback is SKIPPED rather than queued behind the
+ * holder. Returns `{ ran: false }` in that case, `{ ran: true, result }`
+ * once the callback actually ran. For a background poller that would rather
+ * skip one tick than pile up behind (or serialize behind) a slow holder —
+ * see `pendingAnswerReplay.ts`'s cross-tab guard.
+ */
+export async function withTryResourceLock<T>(
+  resourceName: string,
+  callback: () => Promise<T>
+): Promise<{ ran: true; result: T } | { ran: false }> {
+  const manager = getNativeLockManager() as unknown as TryLockManagerLike | null;
+  if (manager) {
+    let ran = false;
+    let result: T | undefined;
+    await manager.request(
+      `xray:${resourceName}`,
+      { mode: "exclusive", ifAvailable: true },
+      async (lock) => {
+        if (!lock) return; // Not granted immediately -- someone else holds it.
+        ran = true;
+        result = await callback();
+      }
+    );
+    return ran ? { ran: true, result: result as T } : { ran: false };
+  }
+
+  if (fallbackHeld.has(resourceName)) return { ran: false };
+  fallbackHeld.add(resourceName);
+  try {
+    return { ran: true, result: await callback() };
+  } finally {
+    fallbackHeld.delete(resourceName);
+  }
+}

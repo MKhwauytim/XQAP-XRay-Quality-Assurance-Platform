@@ -1,14 +1,19 @@
 // A save that never reaches the shared folder must not silently vanish: it
 // should end up queued in the local IndexedDB backup (markAnswerPendingLocally)
-// so the 30s retry tick / next reconciliation in XrayInspectionResults.tsx
-// keeps trying it — see answerLocalMirror.ts's module doc for the full
-// rationale. A save that DOES land is mirrored as confirmed instead.
+// so the app-level PendingAnswerReplayRunner (pendingAnswerReplay.ts) keeps
+// trying it — see answerLocalMirror.ts's module doc for the full rationale.
+// A save that DOES land is mirrored as confirmed instead.
+//
+// `reconcileAnswersWithLocalMirror`'s own replay-a-mirrored-item coverage
+// used to live in this file; that function was deleted (A1 fix round,
+// IMPORTANT 5) — see pendingAnswerReplay.test.ts for `replayPendingAnswers`
+// and `backfillAnswerMirror` instead.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createMemoryDirectory, setSimulatedFaults } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import * as answerLocalMirror from "./answerLocalMirror";
-import { loadEmployeeAnswers, reconcileAnswersWithLocalMirror, upsertItemAnswer } from "./answerStorage";
+import { upsertItemAnswer } from "./answerStorage";
 import type { ItemAnswer } from "./answerTypes";
 
 vi.mock("./answerLocalMirror", async (importOriginal) => {
@@ -22,7 +27,6 @@ vi.mock("./answerLocalMirror", async (importOriginal) => {
 });
 const mirrorMock = vi.mocked(answerLocalMirror.mirrorAnswerLocally);
 const pendingMock = vi.mocked(answerLocalMirror.markAnswerPendingLocally);
-const loadMirroredMock = vi.mocked(answerLocalMirror.loadMirroredAnswers);
 
 const MONTH = "5-may-2026";
 
@@ -45,7 +49,6 @@ beforeEach(() => {
   root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
   mirrorMock.mockClear();
   pendingMock.mockClear();
-  loadMirroredMock.mockClear();
 });
 
 describe("answer save <-> local IndexedDB mirror", () => {
@@ -73,22 +76,6 @@ describe("answer save <-> local IndexedDB mirror", () => {
     expect(result.ok).toBe(true);
 
     expect(mirrorMock).toHaveBeenCalledTimes(1);
-    expect(pendingMock).not.toHaveBeenCalled();
-  });
-
-  it("reconcileAnswersWithLocalMirror replays a mirrored item the file doesn't have yet, then re-mirrors the file as confirmed", async () => {
-    // Simulates: the browser saved IMG-1 into its local backup, but the write
-    // to the shared folder never landed (e.g. this browser crashed, or the
-    // share was unreachable at the time) — so the file has nothing for it yet.
-    loadMirroredMock.mockResolvedValueOnce([makeItem("IMG-1")]);
-
-    await reconcileAnswersWithLocalMirror(root, MONTH, "emp-1");
-
-    const file = await loadEmployeeAnswers(root, MONTH, "emp-1");
-    expect(file.items.map((item) => item.xrayImageId)).toEqual(["IMG-1"]);
-    // The replay's own successful save mirrors it once; reconcile's own
-    // "re-mirror the file's current items" pass mirrors it again.
-    expect(mirrorMock).toHaveBeenCalledTimes(2);
     expect(pendingMock).not.toHaveBeenCalled();
   });
 });
