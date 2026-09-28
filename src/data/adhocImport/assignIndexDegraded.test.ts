@@ -19,6 +19,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createMemoryDirectory, setSimulatedFaults } from "../storage/memoryDirectory";
 import { createWorkspaceStructure } from "../storage/fileSystemAccess";
+import { getAdhocImportsDir } from "../workspace/workspacePaths";
 import { clearErrors, getRecentErrors } from "../storage/errorLogger";
 import { ADHOC_FIELD_CATALOG } from "./adhocFieldCatalog";
 import { adhocMonthFolder } from "./adhocImportModel";
@@ -164,5 +165,165 @@ describe("assignAdhocPlan — a failed index write on a committed assign is not 
     const repairedIndex = await loadAdhocImportIndex(root);
     const repairedEntry = repairedIndex.find((e) => e.importId === "adh-idx-3");
     expect(repairedEntry?.assignedRows).toBeGreaterThan(0);
+  });
+
+  it("re-running the same plan after a degraded assign does not throw and reports ALREADY_ASSIGNED, writing no duplicate event", async () => {
+    clearErrors();
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    const rows = [row("s1:4", "XR-adh-4")];
+    const rec = await saveAdhocRecord(root, record("adh-idx-4", rows));
+    const plan = planAdhocAssignment({
+      rows,
+      mode: "fanout",
+      targets: [{ username: REVIEWERS[0] }],
+      importId: "adh-idx-4",
+    }).plan;
+
+    setSimulatedFaults(root, [
+      { operation: "readFile", name: INDEX_FILE, errorName: "InvalidStateError", times: Number.POSITIVE_INFINITY },
+    ]);
+
+    const first = await assignAdhocPlan(root, rec, plan, "admin");
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+
+    // Same plan, same (now stale) `rec` snapshot — exactly what a caller who
+    // never saw the first call's success (because it used to be reported as a
+    // failure) would retry with.
+    const second = await assignAdhocPlan(root, rec, plan, "admin");
+    expect(second.ok).toBe(false);
+    if (second.ok) return;
+    expect(second.error).toMatch(/معيّنة بالفعل/);
+
+    const monthFolderName = adhocMonthFolder("adh-idx-4");
+    const master = await loadSampleMaster(root, monthFolderName);
+    const current = await loadOrDeriveDistributionCurrent(root, monthFolderName, master?.rows ?? []);
+    // Exactly one entry — the retry appended no duplicate event.
+    expect(current?.entries.filter((e) => e.assignedTo === REVIEWERS[0])).toHaveLength(1);
+  });
+
+  it("exercises the real production shape — the FIRST index read succeeds and only the casLoop's own attempts are exhausted — and still logs casLoop:exhausted(adhocImport:index)", async () => {
+    clearErrors();
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    const rows = [row("s1:5", "XR-adh-5")];
+    const rec = await saveAdhocRecord(root, record("adh-idx-5", rows));
+    const plan = planAdhocAssignment({
+      rows,
+      mode: "fanout",
+      targets: [{ username: REVIEWERS[1] }],
+      importId: "adh-idx-5",
+    }).plan;
+
+    // `updateIndex` reads the index once up front (skip=1 lets that succeed)
+    // before every attempt inside the casLoop — this is what actually produces
+    // the production log line `casLoop:exhausted(adhocImport:index)`, as
+    // opposed to failing on the very first read.
+    setSimulatedFaults(root, [
+      {
+        operation: "readFile",
+        name: INDEX_FILE,
+        errorName: "InvalidStateError",
+        skip: 1,
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+
+    const result = await assignAdhocPlan(root, rec, plan, "admin");
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.indexDegraded).toBe(true);
+    expect(
+      getRecentErrors().some((entry) => entry.context.includes("casLoop:exhausted(adhocImport:index)"))
+    ).toBe(true);
+    expect(
+      getRecentErrors().some((entry) => entry.context.includes("adhocImport:index-degraded"))
+    ).toBe(true);
+  });
+});
+
+describe("assignAdhocPlan — a genuine failure of the DURABLE record write is still reported as a failure", () => {
+  it("rejects (does not report a degraded success) when the per-import record's own CAS write fails, even though the distribution events already committed", async () => {
+    clearErrors();
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    const rows = [row("s1:6", "XR-adh-6")];
+    const rec = await saveAdhocRecord(root, record("adh-idx-6", rows));
+    const plan = planAdhocAssignment({
+      rows,
+      mode: "fanout",
+      targets: [{ username: REVIEWERS[2] }],
+      importId: "adh-idx-6",
+    }).plan;
+
+    // Only the per-import document's own file is unwritable — the shared index
+    // is unaffected. `assignAdhocPlan` appends the distribution events FIRST,
+    // so they are already durable by the time this write is attempted and
+    // fails.
+    setSimulatedFaults(root, [
+      {
+        operation: "createWritable",
+        name: "adh-idx-6.json",
+        errorName: "InvalidStateError",
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+
+    await expect(assignAdhocPlan(root, rec, plan, "admin")).rejects.toThrow();
+
+    // The durable events survive the record write's failure — this is what
+    // makes the record write (unlike the index) a REAL failure to report: a
+    // caller retrying would otherwise silently duplicate or lose bookkeeping
+    // for an assignment that is already on disk.
+    const monthFolderName = adhocMonthFolder("adh-idx-6");
+    const master = await loadSampleMaster(root, monthFolderName);
+    const current = await loadOrDeriveDistributionCurrent(root, monthFolderName, master?.rows ?? []);
+    expect(current?.entries.some((e) => e.assignedTo === REVIEWERS[2])).toBe(true);
+  });
+
+  it("still throws /تالف/ when the shared index itself is corrupt, rather than reporting a degraded success", async () => {
+    clearErrors();
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+    const rows = [row("s1:7", "XR-adh-7")];
+    const rec = await saveAdhocRecord(root, record("adh-idx-7", rows));
+    const plan = planAdhocAssignment({
+      rows,
+      mode: "fanout",
+      targets: [{ username: REVIEWERS[0] }],
+      importId: "adh-idx-7",
+    }).plan;
+
+    const dir = await getAdhocImportsDir(root, false);
+    for (const suffix of ["", ".bak", ".tmp"]) {
+      const handle = await dir.getFileHandle(`${INDEX_FILE}${suffix}`, { create: true });
+      const writable = await handle.createWritable?.();
+      if (!writable) throw new Error("memory directory handle is not writable");
+      await writable.write("{ truncated");
+      await writable.close();
+    }
+
+    await expect(assignAdhocPlan(root, rec, plan, "admin")).rejects.toThrow(/تالف/);
+  });
+});
+
+describe("saveAdhocRecord (plain) — the relaxed index contract is NOT inherited by non-assign callers", () => {
+  it("still throws when the index CAS exhausts on an ordinary save, unlike assignAdhocPlan's saveAdhocRecordDetailed", async () => {
+    // Regression pin for review round 1, finding 1: saveAdhocRecord must keep
+    // throwing on a failed index refresh for every caller EXCEPT
+    // assignAdhocPlan. A NEW import saved while the index cannot be updated
+    // has no distribution events for the folder-listing repair path
+    // (`listAdhocStoreImportIds` / `adhocStoreHasDistributionEvents`) to find,
+    // so silently downgrading this to a success would strand it: "saved", but
+    // absent from the admin list and unrecoverable.
+    clearErrors();
+    const root = createMemoryDirectory();
+    await createWorkspaceStructure(root, "admin");
+
+    setSimulatedFaults(root, [
+      { operation: "readFile", name: INDEX_FILE, errorName: "InvalidStateError", times: Number.POSITIVE_INFINITY },
+    ]);
+
+    await expect(saveAdhocRecord(root, record("adh-idx-8", [row("s1:8", "XR-adh-8")]))).rejects.toThrow();
   });
 });
