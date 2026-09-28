@@ -6,7 +6,7 @@ import { useMemo, useState } from "react";
 import { AlertTriangle, RotateCw } from "lucide-react";
 import { ModalShell } from "../../../../../ModalShell/ModalShell";
 import { readUserManagementState } from "../../../../../../auth/userManagement";
-import type { FieldAnswer, ItemAnswer } from "../../../../../../data/answers/answerTypes";
+import type { AnswerSaveOutcome, FieldAnswer, ItemAnswer } from "../../../../../../data/answers/answerTypes";
 import { isNoImageSubmission } from "../../../../../../data/answers/noImageAnswer";
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
 import { isAssignableSampleRole } from "../../../../../../data/distribution/bulkAssignment";
@@ -610,7 +610,7 @@ export function SampleDetailPanel({
   savedAnswer: ItemAnswer | null;
   readonly: boolean;
   onClose: () => void;
-  onSave: (ans: FieldAnswer[]) => Promise<void>;
+  onSave: (ans: FieldAnswer[]) => Promise<AnswerSaveOutcome | void>;
   onReplace?: (entry: DistributionEntry) => void;
   onReassign?: (entry: DistributionEntry) => void;
   onReopen?: (reason: string) => void;

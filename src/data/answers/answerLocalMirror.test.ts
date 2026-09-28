@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   backfillMirrorFromDisk,
   countPendingAnswers,
+  isPendingRecordForSave,
   loadMirroredAnswers,
   markAnswerPendingLocally,
   mirrorAnswerLocally,
@@ -172,5 +173,30 @@ describe("shouldQueueMirrorRecord", () => {
     expect(shouldQueueMirrorRecord(rec(false, "2026-09-01T00:00:00.000Z"), item("X1", "2026-09-01T00:00:00Z"))).toBe(true);
     expect(shouldQueueMirrorRecord(rec(false, "2026-09-01T00:00:00Z"), item("X1", "2026-09-01T00:00:00.000Z"))).toBe(true);
     expect(shouldQueueMirrorRecord(rec(false, "2026-09-01T00:00:01Z"), item("X1", "2026-09-01T00:00:00.999Z"))).toBe(false);
+  });
+});
+
+describe("isPendingRecordForSave", () => {
+  const saved = item("IMG-1", "2026-09-09T00:00:00.000Z");
+  const record = { month: "5-may-2026", username: "emp1", synced: false, item: saved };
+  const match = (r: typeof record) => isPendingRecordForSave(r, "5-may-2026", "emp1", saved);
+
+  it("matches an unsynced record for exactly this save", () => {
+    expect(match(record)).toBe(true);
+  });
+  it("rejects a different lastSavedAt", () => {
+    expect(match({ ...record, item: item("IMG-1", "2026-09-10T00:00:00.000Z") })).toBe(false);
+  });
+  it("rejects a synced record", () => {
+    expect(match({ ...record, synced: true })).toBe(false);
+  });
+  it("rejects a different month", () => {
+    expect(match({ ...record, month: "6-june-2026" })).toBe(false);
+  });
+  it("rejects a different user", () => {
+    expect(match({ ...record, username: "emp2" })).toBe(false);
+  });
+  it("rejects a different item", () => {
+    expect(match({ ...record, item: item("IMG-2", saved.lastSavedAt) })).toBe(false);
   });
 });
