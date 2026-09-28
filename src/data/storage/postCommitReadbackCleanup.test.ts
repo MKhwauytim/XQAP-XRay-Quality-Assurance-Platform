@@ -12,6 +12,10 @@
  * is left on disk, and the NEXT reader to hit a stale snapshot on the live
  * file gets served that `.tmp` and told "the live file is damaged".
  *
+ * E3b update: the write now RESOLVES committed-but-unverified instead of
+ * throwing (see postCommitStaleReadback.test.ts); the `.tmp` cleanup and the
+ * once-per-file log pinned here are unchanged.
+ *
  * The fix: a thrown post-commit read-back must still best-effort clean up
  * `.tmp` before the error propagates. The write still reports failure to its
  * caller exactly as before (this repro does not touch §B's retry/deadline
@@ -55,7 +59,7 @@ test("a post-commit read-back that throws still removes .tmp, and the live file 
     { operation: "readFile", name: "t.json", errorName: "InvalidStateError", times: Number.POSITIVE_INFINITY },
   ]);
 
-  await expect(safeWriteJson(dir, "t.json", { v: 1 })).rejects.toThrow();
+  await expect(safeWriteJson(dir, "t.json", { v: 1 })).resolves.toMatchObject({ committedUnverified: true });
 
   // The live commit landed — writeText's own close() resolved before the
   // read-back ever ran.
@@ -80,12 +84,15 @@ test("a repeatedly-retried post-commit failure (a casLoop-style outer retry) log
   // whose OWN outer retry loop (casLoop defaults to 10 attempts) calls
   // safeWriteJson again and again, each attempt re-committing and re-hitting
   // the same post-commit read-back fault.
+  // Re-armed by every landed commit (5 reads = exactly one exhausted stale
+  // ladder), so the NEXT attempt's pre-commit read of the live file is clean
+  // and only the post-commit read-back fails — the shape this test is about.
   setSimulatedFaults(dir, [
-    { operation: "readFile", name: "t.json", errorName: "InvalidStateError", times: Number.POSITIVE_INFINITY },
+    { operation: "readFile", name: "t.json", errorName: "InvalidStateError", times: 5, rearmAfterClose: true },
   ]);
 
   for (let attempt = 0; attempt < 4; attempt += 1) {
-    await expect(safeWriteJson(dir, "t.json", { v: attempt })).rejects.toThrow();
+    await expect(safeWriteJson(dir, "t.json", { v: attempt })).resolves.toMatchObject({ committedUnverified: true });
   }
 
   // Four attempts, four throws, four `.tmp` cleanups — but only ONE durable
@@ -105,7 +112,7 @@ test("the once-per-file dedup does not collide across month folders that share a
     setSimulatedFaults(root, [
       { operation: "readFile", name: "t.json", errorName: "InvalidStateError", times: Number.POSITIVE_INFINITY },
     ]);
-    await expect(safeWriteJson(d, "t.json", { v: 1 })).rejects.toThrow();
+    await expect(safeWriteJson(d, "t.json", { v: 1 })).resolves.toMatchObject({ committedUnverified: true });
   }
   const entries = getRecentErrors().filter((e) => e.context.startsWith("safeWrite:post-commit-readback"));
   expect(entries).toHaveLength(2);

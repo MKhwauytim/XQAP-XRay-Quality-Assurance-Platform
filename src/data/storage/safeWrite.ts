@@ -64,6 +64,8 @@ import {
   isNotFoundError,
   isNotReadableError,
   isSnapshotStaleError,
+  isTransientWriteError,
+  type CommittedUnverified,
   logExhaustedNotFound,
   retryTransientWrite,
 } from "./transientFileErrors";
@@ -2014,7 +2016,7 @@ export async function safeWriteJson<T>(
   fileName: string,
   value: T,
   options?: SafeWriteProgressCallback | SafeWriteJsonOptions
-): Promise<void> {
+): Promise<void | CommittedUnverified> {
   assertWritableMode();
 
   const { onProgress, policy: policyOverride, deadline } = normalizeWriteOptions(options);
@@ -2031,8 +2033,8 @@ export async function safeWriteJson<T>(
   const tmpName = `${fileName}.tmp`;
 
   // Lock per directory+file so same-named files in different folders don't contend.
-  await withWorkspaceWriteAccess(dir, () =>
-    withResourceLock(directoryResourceKey(dir, fileName), async () => {
+  return withWorkspaceWriteAccess(dir, () =>
+    withResourceLock(directoryResourceKey(dir, fileName), async (): Promise<void | CommittedUnverified> => {
     const currentRead = await readTextTolerant(dir, fileName);
     const current = currentRead.kind === "text" ? currentRead.text : null;
     const parsedCurrent = parseValidJson(current);
@@ -2230,6 +2232,15 @@ export async function safeWriteJson<T>(
       // discarding it for exactly that reason.
       logPostCommitReadbackFailureOnce(dir, fileName, error);
       await removeQuietly(dir, tmpName);
+      // E3b: the pre-commit `.tmp` verify above was byte-exact and `close()`
+      // resolved, so a TRANSIENT/stale read-back failure is not evidence the
+      // write failed. Reporting it as a failure made casLoop re-commit — which
+      // re-armed the same stale window every attempt (other-groups.md §B,
+      // reproduction C). Report it as committed-but-unverified instead, with no
+      // extra waiting; a non-transient error (lost grant, ...) still throws.
+      if (isTransientWriteError(error)) {
+        return { committedUnverified: true, cause: error };
+      }
       throw error;
     }
     const verifyOk = verify === serialized;

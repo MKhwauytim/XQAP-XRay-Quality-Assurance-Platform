@@ -1,6 +1,6 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
-import { casLoop } from "../storage/casLoop";
+import { casLoop, readBackOwnWrite } from "../storage/casLoop";
 import {
   createDeadline,
   INTERACTIVE_WRITE_DEADLINE_MS,
@@ -264,19 +264,23 @@ async function updateThreadsIndex(
           _writeToken: writeToken,
           threads: apply(current.threads),
         };
-        await safeWriteJson<FeedbackThreadsIndex>(feedbackDir, FEEDBACK_THREADS_INDEX_FILE, updated);
-        const verify = await safeReadJson<FeedbackThreadsIndex>(
+        const written = await safeWriteJson<FeedbackThreadsIndex>(
           feedbackDir,
-          FEEDBACK_THREADS_INDEX_FILE
+          FEEDBACK_THREADS_INDEX_FILE,
+          updated
         );
-        if (
-          verify.ok &&
-          verify.value.revision === nextRevision &&
-          verify.value._writeToken === writeToken
-        ) {
-          return { done: true, result: { ok: true as const } };
-        }
-        return { done: false };
+        // E3b: a commit whose own read-back was stale is verified once by the
+        // token read, or accepted if that is inconclusive too — never re-committed.
+        const verdict = await readBackOwnWrite(
+          written,
+          () => safeReadJson<FeedbackThreadsIndex>(feedbackDir, FEEDBACK_THREADS_INDEX_FILE),
+          (verify) =>
+            verify.ok &&
+            verify.value.revision === nextRevision &&
+            verify.value._writeToken === writeToken,
+          "feedback:threadsIndex"
+        );
+        return verdict === "not-mine" ? { done: false } : { done: true, result: { ok: true as const } };
       },
       {
         context: "feedback:threadsIndex",
@@ -434,13 +438,17 @@ export async function appendReply(
           revision: nextRevision,
           _writeToken: writeToken,
         };
-        await safeWriteJson<FeedbackThread>(threadsDir, fileName, updated);
-        const verify = await safeReadJson<FeedbackThread>(threadsDir, fileName);
-        if (
-          verify.ok &&
-          verify.value.revision === nextRevision &&
-          verify.value._writeToken === writeToken
-        ) {
+        const written = await safeWriteJson<FeedbackThread>(threadsDir, fileName, updated);
+        const verdict = await readBackOwnWrite(
+          written,
+          () => safeReadJson<FeedbackThread>(threadsDir, fileName),
+          (verify) =>
+            verify.ok &&
+            verify.value.revision === nextRevision &&
+            verify.value._writeToken === writeToken,
+          "feedback:threadReply"
+        );
+        if (verdict !== "not-mine") {
           return {
             done: true,
             result: { ok: true as const, thread: updated },

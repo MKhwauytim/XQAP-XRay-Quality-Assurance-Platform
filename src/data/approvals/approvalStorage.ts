@@ -1,6 +1,6 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { readOptionalJson, safeWriteJson } from "../storage/safeWrite";
-import { casLoop } from "../storage/casLoop";
+import { casLoop, readBackOwnWrite } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
 import { simpleHash } from "../storage/jsonEnvelope";
 import { readJsonDirectory } from "../storage/directoryScan";
@@ -161,9 +161,16 @@ export async function appendDecisionEvent(
           decisionEvents: [...priorEvents, chainedEvent],
           lastUpdatedAt: new Date().toISOString(),
         };
-        await safeWriteJson(appDir, fileName, updated);
-        const verify = await loadSupervisorDecisions(directoryHandle, monthFolderName, supervisorUsername);
-        if (verify.revision === nextRevision && verify._writeToken === writeToken) {
+        const written = await safeWriteJson(appDir, fileName, updated);
+        // E3b: committed-but-unverified is verified once by the token read, or
+        // accepted when that is inconclusive too; never blindly re-committed.
+        const verdict = await readBackOwnWrite(
+          written,
+          () => loadSupervisorDecisions(directoryHandle, monthFolderName, supervisorUsername),
+          (verify) => verify.revision === nextRevision && verify._writeToken === writeToken,
+          "approvals:decisionEvent"
+        );
+        if (verdict !== "not-mine") {
           bumpWorkspaceEpoch(directoryHandle, monthFolderName);
           return {
             done: true,

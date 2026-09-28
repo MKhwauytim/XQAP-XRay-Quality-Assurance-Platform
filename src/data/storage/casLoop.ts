@@ -4,6 +4,7 @@
 // will have stored a different token, making the false-positive revision match detectable.
 
 import { codedMessage, logCodedError, resolveErrorCode, type ErrorCode } from "./errorCodes";
+import { isCommittedUnverified, isTransientWriteError } from "./transientFileErrors";
 import {
   isDeadlineExpired,
   nextRetryDelayMs,
@@ -58,6 +59,45 @@ function isPermissionLostError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const name = (error as { name?: string }).name;
   return name === "NotAllowedError" || name === "SecurityError";
+}
+
+/**
+ * The in-attempt token read-back, aware of a `safeWriteJson` that reported
+ * COMMITTED-BUT-UNVERIFIED (E3b).
+ *
+ * `written` is whatever `safeWriteJson` resolved to. On the healthy path
+ * (`undefined`) this is exactly `read()` + `isMine()`, errors propagating as
+ * before. When the commit landed but safeWrite's own read-back hit a stale or
+ * transient error, the caller's token read is the one verification we make —
+ * ONCE, with no waiting:
+ *   - it returns our token   -> "mine" (verified);
+ *   - it returns someone else -> "not-mine" (a real lost race; retry);
+ *   - it throws a transient error -> "unconfirmed": the write provably landed
+ *     (byte-exact `.tmp` verify + a resolved close()), so we accept it and log
+ *     `casLoop:verify-inconclusive` instead of re-committing, which is what
+ *     re-armed the same stale window on every retry.
+ * A non-transient error still propagates.
+ */
+export async function readBackOwnWrite<V>(
+  written: unknown,
+  read: () => Promise<V>,
+  isMine: (value: V) => boolean,
+  context?: string
+): Promise<"mine" | "not-mine" | "unconfirmed"> {
+  if (!isCommittedUnverified(written)) {
+    return isMine(await read()) ? "mine" : "not-mine";
+  }
+  try {
+    return isMine(await read()) ? "mine" : "not-mine";
+  } catch (error) {
+    if (!isTransientWriteError(error)) throw error;
+    logCodedError(
+      context ? `casLoop:verify-inconclusive(${context})` : "casLoop:verify-inconclusive",
+      resolveErrorCode(error) ?? "XQ-IO-032",
+      error
+    );
+    return "unconfirmed";
+  }
 }
 
 /**

@@ -137,6 +137,26 @@ export function isSnapshotStaleError(error: unknown): boolean {
   return errorName(error) === "InvalidStateError";
 }
 
+/**
+ * What `safeWriteJson` resolves to when the COMMIT landed but the post-commit
+ * read-back could not confirm it (E3b). A healthy write still resolves to
+ * `undefined`, so callers that ignore the result are unchanged.
+ *
+ * Only produced when the pre-commit `.tmp` verify was byte-exact AND the
+ * read-back THREW a transient/stale error — never for a content mismatch, which
+ * still rolls back / promotes exactly as before. No waiting is involved: the
+ * result is returned immediately.
+ */
+export type CommittedUnverified = { committedUnverified: true; cause: unknown };
+
+export function isCommittedUnverified(result: unknown): result is CommittedUnverified {
+  return (
+    typeof result === "object" &&
+    result !== null &&
+    (result as { committedUnverified?: unknown }).committedUnverified === true
+  );
+}
+
 /** Transient on the WRITE/VERIFY path only — see the module doc above. */
 export function isTransientWriteError(error: unknown): boolean {
   return (
