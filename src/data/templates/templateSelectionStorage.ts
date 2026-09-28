@@ -4,7 +4,7 @@ import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
 import { getTemplatesRoot } from "../workspace/workspacePaths";
 
-const SELECTION_FILE = "template.selection.json";
+export const TEMPLATE_SELECTION_FILE = "template.selection.json";
 
 export type InspectionTemplateSelection = {
   templateId: string;
@@ -29,7 +29,7 @@ export async function loadInspectionTemplateSelection(
     const dir = await getTemplatesDir(directoryHandle);
     const result = await safeReadJson<InspectionTemplateSelection>(
       dir,
-      SELECTION_FILE
+      TEMPLATE_SELECTION_FILE
     );
     return result.ok ? result.value : null;
   } catch {
@@ -61,7 +61,7 @@ async function casUpdateSelection(
     const outcome = await withResourceLock(`${dir.name}/template-selection:rmw`, () =>
       casLoop<{ ok: true }>(
         async (writeToken) => {
-          const existing = await safeReadJson<InspectionTemplateSelection>(dir, SELECTION_FILE);
+          const existing = await safeReadJson<InspectionTemplateSelection>(dir, TEMPLATE_SELECTION_FILE);
           const next = apply(existing.ok ? existing.value : null);
           // Nothing to change — a no-op must not burn a revision.
           if (next === null) return { done: true, result: { ok: true as const } };
@@ -71,8 +71,8 @@ async function casUpdateSelection(
             revision: nextRevision,
             _writeToken: writeToken,
           };
-          await safeWriteJson(dir, SELECTION_FILE, updated);
-          const verify = await safeReadJson<InspectionTemplateSelection>(dir, SELECTION_FILE);
+          await safeWriteJson(dir, TEMPLATE_SELECTION_FILE, updated);
+          const verify = await safeReadJson<InspectionTemplateSelection>(dir, TEMPLATE_SELECTION_FILE);
           if (
             verify.ok &&
             verify.value.revision === nextRevision &&
@@ -82,7 +82,7 @@ async function casUpdateSelection(
               done: true,
               result: { ok: true as const },
               verify: async () => {
-                const recheck = await safeReadJson<InspectionTemplateSelection>(dir, SELECTION_FILE);
+                const recheck = await safeReadJson<InspectionTemplateSelection>(dir, TEMPLATE_SELECTION_FILE);
                 return (
                   recheck.ok &&
                   recheck.value.revision === nextRevision &&

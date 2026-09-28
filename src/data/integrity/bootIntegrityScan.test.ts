@@ -7,6 +7,8 @@ import { __resetBakRecoveryReportsForTests } from "../storage/bakRecoveryReport"
 import { clearErrors, getRecentErrors } from "../storage/errorLogger";
 import { getTemplatesRoot } from "../workspace/workspacePaths";
 import { runBootIntegrityScan } from "./bootIntegrityScan";
+import { saveDeckEditionPreference } from "../reporting/executive/deckEditionPreference";
+import { saveDeckStyleChoices } from "../reporting/executive/deck2/styleChoices";
 
 const NOW = "2026-09-09T12:00:00.000Z";
 
@@ -46,6 +48,38 @@ describe("admin boot integrity scan", () => {
 
     expect(report.hasFindings).toBe(false);
     expect(report.findings).toEqual([]);
+  });
+
+  // Field report (2026-09-28): the admin boot dialog flagged
+  // executive-deck-edition.json as "unrecoverable" on every sign-in. It is a
+  // healthy preference file that merely lives beside the templates.
+  it("does not report the executive-deck preference files that live in 6-templates", async () => {
+    const root = createMemoryDirectory("workspace");
+    const dir = await getTemplatesRoot(root, true);
+    await safeWriteJson(dir, "tmpl-ok.json", makeTemplate("tmpl-ok", "fine"));
+    expect((await saveDeckEditionPreference(root, "v3", "admin")).ok).toBe(true);
+    expect((await saveDeckStyleChoices(root, { cover: 1 }, "admin")).ok).toBe(true);
+
+    const report = await runBootIntegrityScan(root, { now: NOW });
+
+    expect(report.findings).toEqual([]);
+    expect(report.hasFindings).toBe(false);
+  });
+
+  it("still flags a genuinely torn template next to the preference files", async () => {
+    const root = createMemoryDirectory("workspace");
+    const dir = await getTemplatesRoot(root, true);
+    await safeWriteJson(dir, "tmpl-torn.json", makeTemplate("tmpl-torn", "v1"));
+    expect((await saveDeckEditionPreference(root, "v2", "admin")).ok).toBe(true);
+    const handle = await dir.getFileHandle("tmpl-torn.json", { create: true });
+    const writable = await handle.createWritable!();
+    await writable.write("{ torn");
+    await writable.close();
+
+    const report = await runBootIntegrityScan(root, { now: NOW });
+
+    expect(report.findings.map((finding) => finding.subject)).toEqual(["tmpl-torn.json"]);
+    expect(report.findings[0]!.problem).toBe("damaged");
   });
 
   // The exact production condition: a deleted template whose `.bak` survived
