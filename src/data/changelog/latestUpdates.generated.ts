@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v140.2",
+    "date": "2026-09-28",
+    "bucket": "fix",
+    "scope": "population",
+    "title": "refuse a population overwrite that would orphan a worked sample"
+  },
+  {
     "version": "v140.1",
     "date": "2026-09-28",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "redesign",
     "scope": "storage",
     "title": "delete a managed JSON name as a unit so an orphaned .bak cannot answer reads forever"
-  },
-  {
-    "version": "v134.6",
-    "date": "2026-09-09",
-    "bucket": "fix",
-    "scope": "workspace",
-    "title": "stop logging XQ-WS-015 for the expected 'prompt' cold-start state"
   }
 ];

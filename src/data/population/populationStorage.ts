@@ -28,6 +28,8 @@ import type { CertScanShortfall, SampleMasterData } from "../sampling/sampleType
 import type { DistributionCurrentData } from "../distribution/distributionTypes";
 import { loadOrDeriveDistributionCurrent } from "../distribution/distributionStorage";
 import { loadSampleMaster } from "../sampling/sampleStorage";
+import { assessPopulationOverwrite, loadPopulationOverwriteImpact } from "./populationOverwriteGuard";
+import { getLabels } from "../labels/labelsStore";
 import { loadPopulationConfig } from "./populationConfig";
 import { rebuildReplacementIndex } from "./replacementIndexStorage";
 import type { PreparedPopulationRow } from "./populationTypes";
@@ -228,6 +230,16 @@ export type SaveMonthRunResult = {
   error: string;
   /** Set when the abort was caused by a sample that appeared since the pre-check (TOCTOU). */
   sampleExists?: true;
+  /**
+   * A2: the month has a distribution or answers and the new population lacks
+   * live sampled ids. Refused regardless of `confirmedOverwrite`.
+   */
+  overwriteBlocked?: {
+    missingCount: number;
+    missingExamples: string[];
+    distributionCount: number;
+    answerCount: number;
+  };
 };
 
 async function ensureFolder(
@@ -314,18 +326,41 @@ async function saveMonthRunLocked(
       confirmedOverwrite,
     } = params;
 
+    // A2 overwrite rule (owner decision 2026-09-28), enforced HERE, under the
+    // manifest lock, whatever the caller confirmed: once a month has a
+    // distribution or answers, a population that lacks any live sampled id is
+    // refused — it would orphan that work in every report. A read failure on
+    // the sample/distribution/answers below is never swallowed here: it
+    // propagates out of this function and is caught by saveMonthRunLocked's
+    // outer try/catch (F21) — a month whose work state could not be verified
+    // is refused, never treated as "no work".
+    const impact = await loadPopulationOverwriteImpact(directoryHandle, monthFolderName);
+    const assessment = assessPopulationOverwrite(impact, processedRows);
+    if (assessment.blocked) {
+      return {
+        ok: false,
+        error: getLabels().population_overwrite_blocked_error.replace(
+          "{missing}",
+          String(assessment.missingCount)
+        ),
+        overwriteBlocked: {
+          missingCount: assessment.missingCount,
+          missingExamples: assessment.missingExamples,
+          distributionCount: assessment.distributionCount,
+          answerCount: assessment.answerCount,
+        },
+      };
+    }
+
     // TOCTOU guard: re-check under the lock that no sample was drawn since the
     // caller's pre-check. Overwriting the population while a sample exists would
     // orphan that sample — abort and let the caller confirm.
-    if (!confirmedOverwrite) {
-      const existingSample = await loadSampleMaster(directoryHandle, monthFolderName);
-      if (existingSample) {
-        return {
-          ok: false,
-          error: `يوجد سحب عينة لهذا الشهر (${monthFolderName}) — تأكيد الاستبدال مطلوب قبل إعادة الحفظ.`,
-          sampleExists: true,
-        };
-      }
+    if (!confirmedOverwrite && impact.sampleExists) {
+      return {
+        ok: false,
+        error: `يوجد سحب عينة لهذا الشهر (${monthFolderName}) — تأكيد الاستبدال مطلوب قبل إعادة الحفظ.`,
+        sampleExists: true,
+      };
     }
 
     const now = new Date().toISOString();
