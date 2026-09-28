@@ -1,15 +1,8 @@
 /* @vitest-environment jsdom */
-// (A1 save-outcome suite; fixtures copied from saveBroadcast.)
-// Submitting an answer is a write like any other on this screen, and every
-// other write here announces itself. This one did not, so the approval desk,
-// «نتائج فحص الأشعة» and Reports — all of them mounted behind this sub-tab by
-// the tab-mount LRU — kept showing the row as unanswered until the 45 s sync
-// tick or the manual refresh button came round.
-//
-// The two halves are equally load-bearing:
-//   • the broadcast happens, once, naming "answers" and nothing else;
-//   • this page skips its OWN broadcast (setAnswers already reconciled it),
-//     without the guard getting stuck and swallowing later ones.
+// The inspection panel shows the answer-save outcome inline (A1): saved, not
+// saved yet and queued for background retry, or failed with its XQ code. Each
+// must appear INSIDE the panel next to the submit button, not only in the
+// page-top banner, and a save that is not verified must never clear the draft.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mirrors the sibling XrayReferrals suites: Vitest cannot run a real
@@ -38,6 +31,7 @@ import { saveInspectionTemplateSelection } from "../../../../../data/templates/t
 import type { TemplateSchema } from "../../../../../data/templates/templateTypes";
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import * as answerStorage from "../../../../../data/answers/answerStorage";
+import * as answerDraftStore from "../../../../../data/answers/answerDraftStore";
 import * as answerLocalMirror from "../../../../../data/answers/answerLocalMirror";
 import { DEFAULT_LABELS } from "../../../../../data/labels/labelsStore";
 import XrayReferrals from "./XrayReferrals";
@@ -48,6 +42,10 @@ vi.mock("../../../../../data/answers/answerStorage", async (importOriginal) => (
   ...(await importOriginal<typeof import("../../../../../data/answers/answerStorage")>()),
   upsertItemAnswer: vi.fn(),
 }));
+vi.mock("../../../../../data/answers/answerDraftStore", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../../../data/answers/answerDraftStore")>();
+  return { ...actual, clearAnswerDraftAndLegacy: vi.fn(actual.clearAnswerDraftAndLegacy) };
+});
 vi.mock("../../../../../data/answers/answerLocalMirror", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../../../data/answers/answerLocalMirror")>()),
   isAnswerQueuedPending: vi.fn(),
@@ -167,6 +165,7 @@ async function seedMonth(root: DirectoryHandleLike, seeds: Seed[]): Promise<void
 }
 
 beforeEach(() => {
+  vi.mocked(answerDraftStore.clearAnswerDraftAndLegacy).mockClear();
   vi.stubGlobal("ResizeObserver", ResizeObserverStub);
   setReadOnlyMode(false);
   invalidateMonthLockCache();
@@ -208,6 +207,8 @@ describe("XrayReferrals — inline save outcome next to the panel (A1)", () => {
     vi.mocked(answerStorage.upsertItemAnswer).mockResolvedValue({ ok: true });
     await mountAndSubmit();
     await waitFor(() => expect(inlineStatus(DEFAULT_LABELS.ip_save_status_saved).closest(".ip-panel")).not.toBeNull());
+    // Only a verified save clears the draft.
+    expect(answerDraftStore.clearAnswerDraftAndLegacy).toHaveBeenCalled();
     // The panel's own status is not the page banner.
     expect(within(screen.getByRole("status")).queryByText(DEFAULT_LABELS.ip_save_status_saved)).toBeNull();
   });
@@ -216,10 +217,11 @@ describe("XrayReferrals — inline save outcome next to the panel (A1)", () => {
     vi.mocked(answerStorage.upsertItemAnswer).mockResolvedValue({ ok: false, error: CODED_ERROR });
     vi.mocked(answerLocalMirror.isAnswerQueuedPending).mockResolvedValue(true);
     await mountAndSubmit();
-    await waitFor(() => expect(inlineStatus(DEFAULT_LABELS.ip_save_status_queued).closest(".ip-panel")).not.toBeNull());
-    expect(within(screen.getByRole("status")).queryByText(DEFAULT_LABELS.ip_save_status_queued)).toBeNull();
+    await waitFor(() => expect(inlineStatus(DEFAULT_LABELS.ip_save_status_queued_coded.replace("{code}", "XQ-IO-038")).closest(".ip-panel")).not.toBeNull());
+    expect(within(screen.getByRole("status")).queryByText(DEFAULT_LABELS.ip_save_status_queued_coded.replace("{code}", "XQ-IO-038"))).toBeNull();
     // Not a verified save: no draft is cleared, no success text.
     expect(screen.queryByText("تم التقديم.")).toBeNull();
+    expect(answerDraftStore.clearAnswerDraftAndLegacy).not.toHaveBeenCalled();
   });
 
   it("shows the failure with its XQ code inline, next to the submit button, and keeps the answer", async () => {
@@ -236,5 +238,6 @@ describe("XrayReferrals — inline save outcome next to the panel (A1)", () => {
     expect(panel).toContainElement(line);
     expect(screen.getByRole("status")).not.toContainElement(line);
     expect((screen.getByLabelText("ملاحظة") as HTMLInputElement).value).toBe("تمت المراجعة");
+    expect(answerDraftStore.clearAnswerDraftAndLegacy).not.toHaveBeenCalled();
   });
 });

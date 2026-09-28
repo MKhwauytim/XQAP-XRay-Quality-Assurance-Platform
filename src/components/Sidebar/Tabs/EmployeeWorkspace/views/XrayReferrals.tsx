@@ -546,7 +546,8 @@ function createSaveAnswerHandler(deps: {
       // Display only: a failed append is queued by answerStorage (pending
       // local mirror) and retried in the background. Say so only when this
       // exact save is really in that queue.
-      return { ok: false, message: text, queuedForRetry: await isAnswerQueuedPending(folder, forUser, item) };
+      const queued = await isAnswerQueuedPending(folder, forUser, item);
+      return { ok: false, message: text, queuedForRetry: queued, queuedSavedAt: queued ? item.lastSavedAt : undefined };
     } catch (error) {
       const text = thrownWriteErrorText(error);
       setStatusMsg({ type: "error", text });

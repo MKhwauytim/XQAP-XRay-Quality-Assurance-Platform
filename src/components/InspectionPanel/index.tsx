@@ -7,6 +7,7 @@ import {
   saveAnswerDraftMigratingLegacy,
   subscribeAnswerDraftHealth,
 } from "../../data/answers/answerDraftStore";
+import { compareSavedAt } from "../../data/answers/savedAt";
 import type { DistributionEntry } from "../../data/distribution/distributionTypes";
 import type { AnswerSaveOutcome, FieldAnswer, ItemAnswer } from "../../data/answers/answerTypes";
 import type { TemplateField, TemplateSchema } from "../../data/templates/templateTypes";
@@ -158,7 +159,10 @@ export default function InspectionPanel({
   // page banner alone was easy to miss. A caller resolving `void` carries no
   // outcome, so nothing is shown for it.
   const [saveStatus, setSaveStatus] = useState<
-    { kind: "saving" | "saved" | "queued" } | { kind: "failed"; message: string } | null
+    | { kind: "saving" | "saved" }
+    | { kind: "queued"; savedAt: string | null; code: string | null }
+    | { kind: "failed"; message: string }
+    | null
   >(null);
   // Guards the async disk write behind the primary action: without it a
   // double-click (or an impatient re-click during a slow workspace write) fires
@@ -256,6 +260,22 @@ export default function InspectionPanel({
   }, [missingRequiredFields, touchedRequiredIds]);
 
   const isSubmitted = isAnswerSubmitted(entry, savedAnswer);
+  // A reopen (submitted -> not submitted) retires a "saved" line. Only that
+  // TRANSITION, so a `saved` outcome that arrives before the parent has
+  // re-rendered with the submitted answer is not cleared early.
+  const [wasSubmitted, setWasSubmitted] = useState(isSubmitted);
+  if (wasSubmitted !== isSubmitted) {
+    setWasSubmitted(isSubmitted);
+    if (wasSubmitted && saveStatus?.kind === "saved") setSaveStatus(null);
+  }
+  // A queued save that the background replay has since landed shows as saved:
+  // the submitted answer in `savedAnswer` is at least as new as the queued one.
+  const shownStatus =
+    saveStatus?.kind === "queued" && saveStatus.savedAt &&
+    savedAnswer?.status === "submitted" &&
+    compareSavedAt(savedAnswer.lastSavedAt, saveStatus.savedAt) >= 0
+      ? ({ kind: "saved" } as const)
+      : saveStatus;
   const activePhaseIndex = phases.findIndex((phase) => phase.phaseId === safeActivePhaseId);
   const isLastPhase = activePhaseIndex < 0 || activePhaseIndex === phases.length - 1;
   const currentPhaseMissingRequiredFields = useMemo(() => {
@@ -291,7 +311,8 @@ export default function InspectionPanel({
       setSaveStatus(
         !outcome ? null
           : outcome.ok ? { kind: "saved" }
-          : outcome.queuedForRetry ? { kind: "queued" }
+          : outcome.queuedForRetry
+            ? { kind: "queued", savedAt: outcome.queuedSavedAt ?? null, code: outcome.message.match(/XQ-[A-Z]+-\d+/)?.[0] ?? null }
           : { kind: "failed", message: outcome.message }
       );
     } catch {
@@ -390,6 +411,9 @@ export default function InspectionPanel({
               // in the same commit the draft is created, with no ordering
               // subtlety and nothing to clean up on unmount.
               onDraftDirty?.();
+              // The employee is changing the answer: a failed/queued line
+              // described the previous attempt.
+              setSaveStatus((prev) => (prev?.kind === "failed" || prev?.kind === "queued" ? null : prev));
             }}
           />
         )}
@@ -472,15 +496,17 @@ export default function InspectionPanel({
           it is most useful. The primary submit control stays gated on
           `!readonly`; the secondary actions are gated on being passed at all,
           which is where their permission checks already live. */}
-      {saveStatus && (
-        // Not role="status": the page banner already owns that role, and two
-        // would make every `getByRole("status")` in the view ambiguous.
-        <p className={`ip-save-status ip-save-status--${saveStatus.kind}`} aria-live="polite">
-          {saveStatus.kind === "failed"
-            ? getLabels().ip_save_status_failed.replace("{message}", saveStatus.message)
-            : getLabels()[`ip_save_status_${saveStatus.kind}`]}
-        </p>
-      )}
+      {/* Always mounted, only its text changes, so screen readers announce updates. */}
+      <p
+        className={`ip-save-status${shownStatus ? ` ip-save-status--${shownStatus.kind}` : ""}`}
+        aria-live="polite"
+      >
+        {shownStatus?.kind === "failed"
+          ? getLabels().ip_save_status_failed.replace("{message}", shownStatus.message)
+          : shownStatus?.kind === "queued" && shownStatus.code
+            ? getLabels().ip_save_status_queued_coded.replace("{code}", shownStatus.code)
+            : shownStatus ? getLabels()[`ip_save_status_${shownStatus.kind}`] : ""}
+      </p>
       {!isSubmitted && (!readonly || onReplace || onReassign) && (
         <div className="ip-footer">
           {!readonly && validationMsg && <p className="ip-validation-msg">{validationMsg}</p>}

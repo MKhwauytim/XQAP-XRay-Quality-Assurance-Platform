@@ -702,3 +702,7 @@
 .ip-save-status--failed {
   color: var(--c-danger);
 }
+
+.ip-save-status:empty {
+  margin: 0;
+}

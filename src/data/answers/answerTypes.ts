@@ -135,8 +135,10 @@ export type EmployeeAnswerFile = {
 /**
  * What one answer submit produced — drives the inspection panel's inline status (A1).
  * `queuedForRetry` is true only when the write failed but the answer is now held in
- * this browser's pending queue and the background replay will keep retrying it.
+ * this browser's pending queue and the background replay will keep retrying it;
+ * `queuedSavedAt` is that queued save's `lastSavedAt`, so the panel can tell when the
+ * replay has landed it.
  */
 export type AnswerSaveOutcome =
   | { ok: true }
-  | { ok: false; message: string; queuedForRetry?: boolean };
+  | { ok: false; message: string; queuedForRetry?: boolean; queuedSavedAt?: string };

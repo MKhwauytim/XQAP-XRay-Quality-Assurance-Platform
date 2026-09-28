@@ -384,12 +384,21 @@ export async function isAnswerQueuedPending(
   item: ItemAnswer
 ): Promise<boolean> {
   const all = await readAllRecords();
-  return all.some(
-    (record) =>
-      record.month === month &&
-      record.username === username &&
-      !record.synced &&
-      record.item.xrayImageId === item.xrayImageId &&
-      record.item.lastSavedAt === item.lastSavedAt
+  return all.some((record) => isPendingRecordForSave(record, month, username, item));
+}
+
+/** Pure match rule behind `isAnswerQueuedPending`: an UNSYNCED record for exactly this month, user, item and `lastSavedAt`. */
+export function isPendingRecordForSave(
+  record: { month: string; username: string; synced: boolean; item: ItemAnswer },
+  month: string,
+  username: string,
+  item: ItemAnswer
+): boolean {
+  return (
+    record.month === month &&
+    record.username === username &&
+    !record.synced &&
+    record.item.xrayImageId === item.xrayImageId &&
+    record.item.lastSavedAt === item.lastSavedAt
   );
 }
