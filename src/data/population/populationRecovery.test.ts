@@ -1,4 +1,10 @@
-import { beforeEach, describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
+
+const refreshSpy = vi.hoisted(() => ({ notify: vi.fn() }));
+vi.mock("../workspace/dataRefreshSignal", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../workspace/dataRefreshSignal")>()),
+  notifyLocalDataChange: refreshSpy.notify,
+}));
 
 import { appendDistributionEvents, __clearDeriveMemoForTests } from "../distribution/distributionStorage";
 import { buildAssignEvent } from "../distribution/distributionLog";
@@ -54,6 +60,7 @@ async function seedOverwrittenMonth(root: DirectoryHandleLike): Promise<void> {
 beforeEach(() => {
   invalidateMonthLockCache();
   __clearDeriveMemoForTests();
+  refreshSpy.notify.mockClear();
 });
 
 async function liveBytes(root: DirectoryHandleLike, name = "population.final.json"): Promise<string> {
@@ -243,11 +250,36 @@ describe("population recovery (A2)", () => {
     setSimulatedFaults(root, []);
   });
 
-  test("a month with no processed folder lists no candidates", async () => {
+  test("a month whose processed folder is missing (NotFound) lists no candidates", async () => {
     const root = createMemoryDirectory("root");
     const first = await saveMonthRun({ directoryHandle: root, ...baseParams, processedRows: rowsFor(["A1"]) });
     expect(first.ok).toBe(true);
+    const population = await root.getDirectoryHandle("1-population", { create: false });
+    const monthDir = await population.getDirectoryHandle(MONTH, { create: false });
+    await monthDir.removeEntry?.("2-processed", { recursive: true });
+    await expect(monthDir.getDirectoryHandle("2-processed", { create: false })).rejects.toMatchObject({ name: "NotFoundError" });
     const candidates = await listPopulationRecoveryCandidates(root, MONTH);
     expect(candidates).toEqual([]);
   });
+
+  test("a manifest sync failure after the live write is a success with a warning, and the rebuild and broadcast still run", async () => {
+    const root = createMemoryDirectory("root");
+    await seedOverwrittenMonth(root);
+    const [archive] = await listPopulationRecoveryCandidates(root, MONTH);
+    refreshSpy.notify.mockClear();
+    setSimulatedFaults(root, [
+      { operation: "createWritable", name: "month.manifest.json", errorName: "NoModificationAllowedError", times: Number.POSITIVE_INFINITY },
+    ]);
+
+    const result = await restorePopulationCandidate(root, MONTH, archive!.fileName, "admin");
+    setSimulatedFaults(root, []);
+
+    expect(result).toMatchObject({ ok: true, rowCount: 3, warnings: ["manifest-sync-failed"] });
+    const live = await loadMonthPopulationFinal(root, MONTH);
+    expect((live?.rows ?? []).map((row) => row["xrayImageId"])).toEqual(["A1", "A2", "A3"]);
+    const dir = await processedDir(root);
+    const revision = await readEnvelopeRevision(dir, "population.final.json");
+    expect((await loadReplacementIndexManifest(root, MONTH))?.sourceRevision).toBe(revision);
+    expect(refreshSpy.notify).toHaveBeenCalledWith(["manifest"]);
+  }, 60_000);
 });

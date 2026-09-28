@@ -65,8 +65,11 @@ export class PopulationRecoveryScanError extends Error {
   }
 }
 
+/** The restore succeeded but a follow-up step did not; the population itself is back. */
+export type PopulationRestoreWarning = "manifest-sync-failed";
+
 export type PopulationRestoreResult =
-  | { ok: true; archivedAs: string | null; rowCount: number }
+  | { ok: true; archivedAs: string | null; rowCount: number; warnings?: PopulationRestoreWarning[] }
   | { ok: false; reason: "blocked"; missingCount: number; missingExamples: string[]; distributionCount: number; answerCount: number }
   | { ok: false; reason: "invalid-candidate" | "unreadable" | "guard-unreadable" | "failed"; detail?: string };
 
@@ -213,7 +216,12 @@ async function syncManifestToRestoredPopulation(
   const result = await casLoop<{ ok: true }>(
     async (writeToken) => {
       const current = await safeReadJson<MonthManifestData>(monthDir, "month.manifest.json");
-      if (!current.ok) return { done: true, result: { ok: true as const } };
+      if (!current.ok) {
+        // No readable manifest to update (absent, or unreadable): nothing to keep
+        // in step, but say so rather than treating it as done in silence.
+        logError("population:recovery-manifest-unreadable", new Error(`month.manifest.json not readable: ${current.reason}`));
+        return { done: true, result: { ok: true as const } };
+      }
       const nextRevision = (current.value.revision ?? 0) + 1;
       await safeWriteJson(monthDir, "month.manifest.json", {
         ...current.value,
@@ -290,7 +298,16 @@ export async function restorePopulationCandidate(
           }
         }
         await safeWriteJson(processedDir, LIVE_FILE, candidate);
-        await syncManifestToRestoredPopulation(directoryHandle, monthFolderName, candidate.rows.length);
+        // From here the population IS restored, so nothing below may turn this
+        // into a failure: the manifest sync is best-effort (logged, surfaced as
+        // a warning), like the derived rebuild.
+        const warnings: PopulationRestoreWarning[] = [];
+        try {
+          await syncManifestToRestoredPopulation(directoryHandle, monthFolderName, candidate.rows.length);
+        } catch (error) {
+          logError("population:recovery-manifest-sync", error);
+          warnings.push("manifest-sync-failed");
+        }
         await rebuildPopulationDerivedFiles(
           directoryHandle,
           monthFolderName,
@@ -298,7 +315,9 @@ export async function restorePopulationCandidate(
           candidate.rows as unknown as PreparedPopulationRow[],
           username
         );
-        return { ok: true, archivedAs, rowCount: candidate.rows.length };
+        return warnings.length > 0
+          ? { ok: true, archivedAs, rowCount: candidate.rows.length, warnings }
+          : { ok: true, archivedAs, rowCount: candidate.rows.length };
       } catch (error) {
         logError("population:recovery-restore", error);
         return { ok: false, reason: "failed", detail: error instanceof Error ? error.message : String(error) };
