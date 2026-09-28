@@ -39,13 +39,21 @@ export type PopulationOverwriteAssessment = PopulationOverwriteImpact & {
  * What a population overwrite of this month would put at risk. Throws when the
  * sample exists but cannot be read (`loadSampleMaster`'s v93 contract), and
  * likewise when the month's distribution or answers cannot be read strictly
- * (`loadOrDeriveDistributionCurrentStrictForRead`, and `loadAllEmployeeFiles`
- * called with `{ strict: true }`) — a guard that cannot see whether the month
- * has work must refuse, not silently treat the read failure as "no work"
- * (F21). `loadAllEmployeeFiles`'s LENIENT default folds a failed event-log
- * read, or one employee's unreadable file, into "answered nothing" — exactly
- * the silent-"no answers" outcome F21 forbids here — so this always asks for
- * the strict variant, never the default.
+ * (`loadOrDeriveDistributionCurrentStrictForRead` with `{ strictSegments: true }`,
+ * and `loadAllEmployeeFiles` called with `{ strict: true }`) — a guard that
+ * cannot see whether the month has work must refuse, not silently treat the
+ * read failure as "no work" (F21). `loadAllEmployeeFiles`'s LENIENT default
+ * folds a failed event-log read, or one employee's unreadable file, into
+ * "answered nothing" — exactly the silent-"no answers" outcome F21 forbids
+ * here — so this always asks for the strict variant, never the default.
+ *
+ * `strictSegments: true` (fix round 3, controller ruling 2026-09-28) is
+ * THIS MODULE'S OWN opt-in, and is passed here ONLY — every other caller of
+ * `loadOrDeriveDistributionCurrentStrictForRead` (the employee-facing queue
+ * views) must keep tolerating an ordinary skipped/not-yet-visible segment the
+ * way they always have; see that function's own doc comment for the full
+ * reasoning. This is the one caller for which a skipped segment (not just an
+ * unreadable `distribution.log.json`) must also refuse the save.
  */
 export async function loadPopulationOverwriteImpact(
   directoryHandle: DirectoryHandleLike,
@@ -56,7 +64,9 @@ export async function loadPopulationOverwriteImpact(
     return { sampleExists: false, liveSampledIds: [], distributionCount: 0, answerCount: 0 };
   }
   const [distribution, employeeFiles] = await Promise.all([
-    loadOrDeriveDistributionCurrentStrictForRead(directoryHandle, monthFolderName, sample.rows),
+    loadOrDeriveDistributionCurrentStrictForRead(directoryHandle, monthFolderName, sample.rows, {
+      strictSegments: true,
+    }),
     loadAllEmployeeFiles(directoryHandle, monthFolderName, { strict: true }),
   ]);
   return {

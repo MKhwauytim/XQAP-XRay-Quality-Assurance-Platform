@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v140.5",
+    "date": "2026-09-28",
+    "bucket": "fix",
+    "scope": "population",
+    "title": "scope segment-strictness to the overwrite guard only"
+  },
+  {
     "version": "v140.4",
     "date": "2026-09-28",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "integrity",
     "title": "admin boot self-check that repairs damaged and orphaned workspace files and reports what it did"
-  },
-  {
-    "version": "v136.0",
-    "date": "2026-09-09",
-    "bucket": "redesign",
-    "scope": "history",
-    "title": "derive answers and distribution pre-change history from the event logs instead of copying it"
   }
 ];

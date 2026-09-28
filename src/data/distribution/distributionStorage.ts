@@ -264,7 +264,7 @@ function orderImmutableSources(
 async function readCurrentDistributionSource(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
-  options?: { strict?: boolean }
+  options?: { strictSegments?: boolean }
 ): Promise<Pick<DistributionLogSources, "currentLog" | "immutableEvents"> & CheckpointScanMeta> {
   const directory = await openOptionalDirectory(() =>
     getDistributionDir(directoryHandle, monthFolderName, false)
@@ -311,7 +311,9 @@ async function readCurrentDistributionSource(
   // simplest correct thing for this "give me every event" API — callers that
   // care about avoiding a full re-read on every load use the fold-checkpoint
   // path in loadOrDeriveDistributionCurrent instead.
-  const segmentDelta = await readDistributionEventSegmentDelta(directory, {}, options);
+  const segmentDelta = await readDistributionEventSegmentDelta(directory, {}, {
+    strict: options?.strictSegments ?? false,
+  });
   // Re-sort: the fold is order-sensitive, and a new event with an earlier
   // eventAt than a cached one must still land in the right place -- the
   // cache's own internal order is by-filename, not by-eventAt. Ties keep the
@@ -570,7 +572,7 @@ type DistributionLogLoad = {
 async function loadDistributionLogDetailed(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
-  options?: { strict?: boolean }
+  options?: { strictSegments?: boolean }
 ): Promise<DistributionLogLoad> {
   const current = await readCurrentDistributionSource(directoryHandle, monthFolderName, options);
   const legacyLog = await readLegacyDistributionLog(directoryHandle, monthFolderName);
@@ -1021,7 +1023,7 @@ async function readNewEventsSinceCheckpoint(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   checkpoint: DistributionFoldCheckpoint,
-  options?: { strict?: boolean }
+  options?: { strictSegments?: boolean }
 ): Promise<{ newEvents: DistributionEvent[]; segmentOffsets: Record<string, number>; legacyEventFileNames: string[] } | null> {
   const directory = await openOptionalDirectory(() => getDistributionDir(directoryHandle, monthFolderName, false));
   if (!directory) return null;
@@ -1068,7 +1070,9 @@ async function readNewEventsSinceCheckpoint(
     }
   }
 
-  const segmentDelta = await readDistributionEventSegmentDelta(directory, checkpoint.segmentOffsets, options);
+  const segmentDelta = await readDistributionEventSegmentDelta(directory, checkpoint.segmentOffsets, {
+    strict: options?.strictSegments ?? false,
+  });
 
   // ONE filter, applied to EVERY source (F-2). `knownEventIds` is the set this
   // checkpoint has already folded into `cached`, and the fold is not idempotent
@@ -1119,9 +1123,9 @@ async function tryResumeFromCheckpoint(
   sampleRows: PreparedPopulationRow[],
   persistCache: boolean,
   awaitCachePersist: boolean,
-  strict: boolean
+  strictSegments: boolean
 ): Promise<DistributionCurrentData | null> {
-  const delta = await readNewEventsSinceCheckpoint(directoryHandle, monthFolderName, checkpoint, { strict });
+  const delta = await readNewEventsSinceCheckpoint(directoryHandle, monthFolderName, checkpoint, { strictSegments });
   if (!delta) return cached; // no distribution directory at all — cache stands as-is.
   if (delta.newEvents.length === 0) return cached; // nothing changed since the checkpoint.
 
@@ -1240,12 +1244,21 @@ export type LoadOrDeriveDistributionCurrentOptions = {
    * `readSegmentTails`/`readListedEntry` "vanished" tolerance, see
    * `readEventSegmentDelta`'s doc comment) must abort this read with
    * {@link EventSegmentUnreadableError} instead of silently excluding it.
-   * Defaults to `false`, i.e. today's lenient behaviour, so every existing
-   * caller is unaffected. Set by `loadOrDeriveDistributionCurrentStrictForRead`
-   * only — a queue-rendering or safety-guard caller that must never read "one
-   * segment could not be checked" as "that segment has no events".
+   * Defaults to `false`, i.e. today's lenient behaviour.
+   *
+   * DELIBERATELY NOT set by `loadOrDeriveDistributionCurrentStrictForRead`
+   * itself (fix round 3, controller ruling 2026-09-28): that function's own
+   * "strict" means "strict about a missing/unreadable `distribution.log.json`
+   * or a corrupt event", which every queue-rendering employee view already
+   * relies on — those views must keep tolerating an ordinary "another
+   * machine's segment isn't visible on the share yet" the way they always
+   * have, or Workstream A recreates the exact flaky-employee-view experience
+   * it exists to fix. Only `populationOverwriteGuard.ts` — the one caller for
+   * which a skipped segment must never be read as "no events in it" — opts
+   * into this via `loadOrDeriveDistributionCurrentStrictForRead`'s own
+   * `{ strictSegments: true }` parameter.
    */
-  strict?: boolean;
+  strictSegments?: boolean;
 };
 
 /** Same key shape the dedupeInFlight callers below use (workspaceScopeId |
@@ -1481,7 +1494,7 @@ async function loadOrDeriveDistributionCurrentOutcome(
 ): Promise<DistributionCurrentOutcome> {
   const persistCache = opts?.persistCache ?? true;
   const awaitCachePersist = opts?.awaitCachePersist ?? false;
-  const strict = opts?.strict ?? false;
+  const strictSegments = opts?.strictSegments ?? false;
   try {
     if (sampleRows.length === 0) {
       const stamp = await readDistributionLogStamp(directoryHandle, monthFolderName);
@@ -1529,7 +1542,7 @@ async function loadOrDeriveDistributionCurrentOutcome(
 
     if (canResume) {
       const resumed = await tryResumeFromCheckpoint(
-        directoryHandle, monthFolderName, cached, checkpoint!, sampleRows, persistCache, awaitCachePersist, strict
+        directoryHandle, monthFolderName, cached, checkpoint!, sampleRows, persistCache, awaitCachePersist, strictSegments
       );
       if (resumed) {
         setDeriveMemo(memoKey, resumed);
@@ -1540,15 +1553,15 @@ async function loadOrDeriveDistributionCurrentOutcome(
       // fall through to a full, safe refold WITHOUT consulting the memo
       // (see the branch below, which only checks it when there was no
       // checkpoint to resume from in the first place).
-    } else if (!strict) {
+    } else if (!strictSegments) {
       // A6c: no usable on-disk cache at all (fresh month, or a
       // DERIVE_VERSION bump). Before paying for a full log read, check
       // whether this exact (workspace, month, epoch, row-shape) was already
-      // derived earlier in this session. Skipped in strict mode: the memo may
-      // have been populated by an earlier NON-strict read of the same month
-      // that silently skipped an unreadable segment, and a strict caller must
-      // never be served that result without the read it asked for actually
-      // running.
+      // derived earlier in this session. Skipped when strictSegments: the memo
+      // may have been populated by an earlier lenient read of the same month
+      // that silently skipped an unreadable segment, and a strict-segments
+      // caller must never be served that result without the read it asked for
+      // actually running.
       const memoHit = getDeriveMemo(memoKey);
       if (memoHit) return { kind: "ok", current: memoHit };
     }
@@ -1556,7 +1569,7 @@ async function loadOrDeriveDistributionCurrentOutcome(
     const { log, segmentOffsets, legacyEventFileNames } = await loadDistributionLogDetailed(
       directoryHandle,
       monthFolderName,
-      { strict }
+      { strictSegments }
     );
     if (log.events.length === 0) {
       // The only null this function ever owed to a FACT about the data: the
@@ -1836,24 +1849,26 @@ export function loadDistributionLogForRead(
  *  flows must call `refreshDistributionCacheAfterWrite` explicitly instead
  *  (A6b).
  *
- *  `options.strict` forwards to `loadOrDeriveDistributionCurrentOutcome`'s own
- *  `strict` (see `LoadOrDeriveDistributionCurrentOptions`) and is folded into
- *  the dedupe key: a strict and a lenient reader for the same month must never
- *  share an in-flight promise, since a lenient one that started first would
- *  silently hand the strict caller a result that never attempted the read it
- *  asked for. */
+ *  `options.strictSegments` forwards to `loadOrDeriveDistributionCurrentOutcome`'s
+ *  own `strictSegments` (see `LoadOrDeriveDistributionCurrentOptions` — and its
+ *  doc comment for why this must stay opt-in per caller, not something
+ *  `loadOrDeriveDistributionCurrentStrictForRead` turns on for everyone) and is
+ *  folded into the dedupe key: a strict-segments and a lenient-segments reader
+ *  for the same month must never share an in-flight promise, since the lenient
+ *  one — if it started first — would silently hand the strict-segments caller
+ *  a result that never attempted the read it asked for. */
 export function loadOrDeriveDistributionCurrentOutcomeForRead(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   sampleRows: PreparedPopulationRow[],
-  options?: { strict?: boolean }
+  options?: { strictSegments?: boolean }
 ): Promise<DistributionCurrentOutcome> {
-  const strict = options?.strict ?? false;
-  const key = `${workspaceScopeId(directoryHandle)}|${monthFolderName}|${workspaceEpoch(directoryHandle, monthFolderName)}|dist-current|${sampleRows.length}${strict ? "|strict" : ""}`;
+  const strictSegments = options?.strictSegments ?? false;
+  const key = `${workspaceScopeId(directoryHandle)}|${monthFolderName}|${workspaceEpoch(directoryHandle, monthFolderName)}|dist-current|${sampleRows.length}${strictSegments ? "|strict-segments" : ""}`;
   return dedupeInFlight(key, () =>
     loadOrDeriveDistributionCurrentOutcome(directoryHandle, monthFolderName, sampleRows, {
       persistCache: false,
-      strict,
+      strictSegments,
     })
   );
 }
@@ -1880,22 +1895,36 @@ export function loadOrDeriveDistributionCurrentForRead(
  * it, keep what is on screen). Both of those are the right answer to a failed
  * read; committing an empty list as "ready" never was.
  *
- * Passes `{ strict: true }` — a skipped/unreadable event segment (not just an
- * unreadable `distribution.log.json`) now also raises, through
- * {@link EventSegmentUnreadableError} wrapped below. Its OWN dedupe key (see
- * the outcome function's doc comment) keeps this from ever sharing an
- * in-flight read with the lenient `null`-returning sibling above.
+ * `options.strictSegments` (fix round 3, controller ruling 2026-09-28):
+ * DEFAULTS TO FALSE — this function's own "strict" is, and has always been,
+ * about a missing/unreadable `distribution.log.json` or a corrupt event, NOT
+ * about a single skipped segment. Every existing QUEUE-RENDERING caller
+ * (`XrayInspectionResults.tsx`, `XrayReferrals.tsx`) calls this with no 4th
+ * argument and MUST keep tolerating an ordinary "another machine's segment
+ * isn't visible on the share yet" exactly as it always has — round 2 of this
+ * fix briefly made every skipped segment raise here unconditionally, which
+ * would have shown those employee views an error screen on the first load
+ * after any writer's segment simply hadn't propagated across the share yet,
+ * recreating the flaky-employee-experience bug Workstream A exists to fix.
+ * `populationOverwriteGuard.ts` is the ONE caller that opts in, explicitly,
+ * with `{ strictSegments: true }` — for that caller alone, a skipped segment
+ * (not just an unreadable `distribution.log.json`) also raises, through
+ * {@link EventSegmentUnreadableError} wrapped below. The two are exercised
+ * through the outcome function's OWN dedupe key (see its doc comment), so a
+ * strict-segments and a lenient-segments read of the same month never share
+ * an in-flight promise.
  */
 export async function loadOrDeriveDistributionCurrentStrictForRead(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
-  sampleRows: PreparedPopulationRow[]
+  sampleRows: PreparedPopulationRow[],
+  options?: { strictSegments?: boolean }
 ): Promise<DistributionCurrentData | null> {
   const outcome = await loadOrDeriveDistributionCurrentOutcomeForRead(
     directoryHandle,
     monthFolderName,
     sampleRows,
-    { strict: true }
+    { strictSegments: options?.strictSegments ?? false }
   );
   if (outcome.kind === "unavailable") {
     throw outcome.error instanceof DistributionUnreadableError

@@ -244,10 +244,14 @@ describe("saveMonthRun — overwrite guard (A2)", () => {
   });
 
   // F21, second read site: an unreadable ANSWERS scan (no distribution at
-  // all) must refuse just the same — this is the exact incident the reviewer
-  // reproduced: `loadAllEmployeeFiles`' lenient default folded a failed event
-  // segment read into "answered nothing", so `answerCount` came back 0 and
-  // the guard waved the save through.
+  // all) must refuse just the same. `loadAllEmployeeFiles`' lenient default
+  // folded a failed event segment read into "answered nothing", so
+  // `answerCount` came back 0 and the guard waved the save through — the
+  // ORIGINAL field incident's proximate cause. This particular test's fault
+  // (ANSWER_EVENT_READ_FAULTS, a directory-open fault) is what the round-1
+  // reviewer exchange actually reproduced; the MORE LITERAL reproduction of a
+  // single unreadable `.ndjson` segment, with no directory-open fault, is the
+  // "answer segment (only) is unreadable" test below (finding A, fix round 2).
   test("refuses, even with confirmedOverwrite, when the answers cannot be read", async () => {
     const root = createMemoryDirectory("root");
     await seedMonth(root, { distributed: false, answered: true });
@@ -267,12 +271,19 @@ describe("saveMonthRun — overwrite guard (A2)", () => {
     expect(await populationIds(root)).toEqual(["A1", "A2", "A3"]);
   });
 
-  // F21 fix round 2: the FAITHFUL regression case for finding A — ONLY the
+  // F21 fix round 2: the FAITHFUL regression case for finding B — ONLY the
   // distribution's `.ndjson` segment file is unreadable (no directory-open or
   // distribution.log.json fault). Before the readEventSegmentDelta strict fix
   // this test failed: distributionCount came back 0 (the segment silently
   // "vanished") and the overwrite went through. See the fix report for the
   // exact swap/revert run that proves it.
+  //
+  // Fix round 3 (controller ruling): the guard's own read
+  // (`loadOrDeriveDistributionCurrentStrictForRead(..., { strictSegments: true })`)
+  // is the ONLY caller that treats this as a throw — see
+  // `distributionUnreadable.test.ts`'s "strictSegments stays opt-in per
+  // caller" suite for the sibling proof that a view-path read (no
+  // `strictSegments`) tolerates the very same fault.
   test("refuses, even with confirmedOverwrite, when a distribution segment (only) is unreadable", async () => {
     const root = createMemoryDirectory("root");
     await seedMonth(root, { distributed: true, answered: false });
@@ -292,7 +303,7 @@ describe("saveMonthRun — overwrite guard (A2)", () => {
     expect(await populationIds(root)).toEqual(["A1", "A2", "A3"]);
   });
 
-  // F21 fix round 2: the FAITHFUL regression case for finding B — ONLY the
+  // F21 fix round 2: the FAITHFUL regression case for finding A — ONLY the
   // answer's `.ndjson` segment file is unreadable (no `answers.events/`
   // directory-open fault). Before the fix, this is EXACTLY the reviewer's
   // original repro: answerCount came back 0 and the save went through.
