@@ -1,8 +1,7 @@
 import { ConfirmDialog } from "../../../../ConfirmDialog/ConfirmDialog";
 import { useLabels } from "../../../../../data/labels/useLabels";
+import { formatNumber } from "../../../../../utils/formatting";
 import type { PopulationOverwriteAssessment } from "../../../../../data/population/populationOverwriteGuard";
-
-const count = (value: number): string => value.toLocaleString("ar-SA-u-nu-latn");
 
 /**
  * The re-process confirmation (A2). Shows what the overwrite puts at risk —
@@ -24,9 +23,9 @@ export function ReprocessConfirmDialog({
   const L = useLabels();
   if (!assessment) return null;
   const counts = L.population_reprocess_impact_counts
-    .replace("{answers}", count(assessment.answerCount))
-    .replace("{distribution}", count(assessment.distributionCount))
-    .replace("{missing}", count(assessment.missingCount));
+    .replace("{answers}", formatNumber(assessment.answerCount))
+    .replace("{distribution}", formatNumber(assessment.distributionCount))
+    .replace("{missing}", formatNumber(assessment.missingCount));
   return (
     <ConfirmDialog
       open={open}
@@ -39,7 +38,7 @@ export function ReprocessConfirmDialog({
           <p>{assessment.blocked ? L.population_reprocess_blocked_message : L.population_reprocess_confirm_message}</p>
           <p>{counts}</p>
           {assessment.missingExamples.length > 0 && (
-            <p>{L.population_reprocess_missing_examples.replace("{ids}", assessment.missingExamples.join("، "))}</p>
+            <p>{L.population_reprocess_missing_examples.replace("{ids}", assessment.missingExamples.join(L.population_reprocess_examples_separator))}</p>
           )}
         </>
       }
