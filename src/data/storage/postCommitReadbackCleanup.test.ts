@@ -20,16 +20,18 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 
 import { createMemoryDirectory, setSimulatedFaults } from "./memoryDirectory";
-import { safeReadJson, safeWriteJson } from "./safeWrite";
-import { clearErrors } from "./errorLogger";
+import { __resetPostCommitReadbackLogForTests, safeReadJson, safeWriteJson } from "./safeWrite";
+import { clearErrors, getRecentErrors } from "./errorLogger";
 import type { DirectoryHandleLike } from "./fileSystemAccess";
 
 beforeEach(() => {
   clearErrors();
+  __resetPostCommitReadbackLogForTests();
 });
 
 afterEach(() => {
   clearErrors();
+  __resetPostCommitReadbackLogForTests();
 });
 
 async function fileExists(dir: DirectoryHandleLike, name: string): Promise<boolean> {
@@ -69,4 +71,27 @@ test("a post-commit read-back that throws still removes .tmp, and the live file 
   const result = await safeReadJson<{ v: number }>(dir, "t.json");
   expect(result.ok).toBe(true);
   if (result.ok) expect(result.value.v).toBe(1);
+});
+
+test("a repeatedly-retried post-commit failure (a casLoop-style outer retry) logs only ONCE per file, not once per attempt", async () => {
+  const dir = createMemoryDirectory("post-commit-2");
+
+  // Every commit read-back of t.json fails forever — modelling a caller
+  // whose OWN outer retry loop (casLoop defaults to 10 attempts) calls
+  // safeWriteJson again and again, each attempt re-committing and re-hitting
+  // the same post-commit read-back fault.
+  setSimulatedFaults(dir, [
+    { operation: "readFile", name: "t.json", errorName: "InvalidStateError", times: Number.POSITIVE_INFINITY },
+  ]);
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await expect(safeWriteJson(dir, "t.json", { v: attempt })).rejects.toThrow();
+  }
+
+  // Four attempts, four throws, four `.tmp` cleanups — but only ONE durable
+  // safeWrite:post-commit-readback entry. Logging once per attempt would put
+  // up to ten near-identical rows into one user's error log for what is, from
+  // the operator's point of view, a single degraded write.
+  const entries = getRecentErrors().filter((e) => e.context.startsWith("safeWrite:post-commit-readback"));
+  expect(entries).toHaveLength(1);
 });
