@@ -3,6 +3,8 @@ import { logError } from "./errorLogger";
 // Safe direction: errorCodes.ts imports only labelsStore + errorLogger, so it
 // cannot import back into this module and no cycle is possible.
 import { tagError, type ErrorCode } from "./errorCodes";
+// operationDeadline.ts has no imports of its own, so this adds no cycle either.
+import { nextRetryDelayMs, type OperationDeadline } from "./operationDeadline";
 
 /**
  * Transient File System Access failures, and the one distinction that matters
@@ -503,15 +505,24 @@ export async function retryTransientWrite<T>(
    * `VERIFY_READBACK_RETRY_DELAYS_MS` instead: giving up on THAT in 630 ms buys
    * nothing, since the alternative to waiting is failing the operation.
    */
-  delays: readonly number[] = TRANSIENT_WRITE_RETRY_DELAYS_MS
+  delays: readonly number[] = TRANSIENT_WRITE_RETRY_DELAYS_MS,
+  /**
+   * The user action's total budget (operationDeadline.ts). A retry that would
+   * start after it is spent is not taken — the failure already in hand is
+   * reported instead. Omitted, the ladder runs in full exactly as before.
+   */
+  deadline?: OperationDeadline
 ): Promise<T> {
   for (let attempt = 0; ; attempt += 1) {
     try {
       return await operation();
     } catch (error) {
       if (isTransientWriteError(error) && attempt < delays.length) {
-        await waitFor(delays[attempt]!);
-        continue;
+        const delay = nextRetryDelayMs(delays[attempt]!, deadline);
+        if (delay !== null) {
+          await waitFor(delay);
+          continue;
+        }
       }
       if (isNotFoundError(error) && diagnostics) {
         await logExhaustedNotFound(

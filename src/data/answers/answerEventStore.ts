@@ -22,6 +22,7 @@
 
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import {
+  type AppendEventSegmentOptions,
   type AppendOnlyEventLogConfig,
   type AppendOnlyFoldCheckpoint,
   type CheckpointResumeVerdict,
@@ -210,9 +211,10 @@ export async function appendAnswerEventSegment(
   parentDir: DirectoryHandleLike,
   events: AnswerEvent[],
   writer: SegmentWriterIdentity,
-  config: AppendOnlyEventLogConfig = ANSWER_EVENT_LOG
+  config: AppendOnlyEventLogConfig = ANSWER_EVENT_LOG,
+  options: AppendEventSegmentOptions = {}
 ): Promise<SegmentVerification> {
-  return appendEventSegment<AnswerEvent>(parentDir, events, writer, config);
+  return appendEventSegment<AnswerEvent>(parentDir, events, writer, config, options);
 }
 
 /** Read only the lines appended past each segment's already-folded byte offset.

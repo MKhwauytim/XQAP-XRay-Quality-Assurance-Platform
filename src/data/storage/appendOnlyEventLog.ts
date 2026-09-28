@@ -22,6 +22,7 @@ import { createSimpleHasher } from "./jsonEnvelope";
 import { listDirectoryEntries, readSegmentTails } from "./directoryScan";
 import { withResourceLock } from "./webLocks";
 import { logCodedError, tagError, taggedError, type ErrorCode } from "./errorCodes";
+import { nextRetryDelayMs, type OperationDeadline } from "./operationDeadline";
 import {
   TRANSIENT_WRITE_RETRY_DELAYS_MS,
   VERIFY_READBACK_RETRY_DELAYS_MS,
@@ -50,6 +51,16 @@ export type SegmentWriterIdentity = {
   deviceId: string;
   sessionId: string;
   scopeId?: string;
+};
+
+/** Per-call options for `appendEventSegment`. */
+export type AppendEventSegmentOptions = {
+  /**
+   * The user action's total budget. Every inner ladder (pre-append re-read,
+   * write, post-close verify) stops sleeping once it is spent, so ONE attempt
+   * can no longer outlive the whole action (A1). Omitted: unbounded, as before.
+   */
+  deadline?: OperationDeadline;
 };
 
 /** Contexts and error codes the consumer wants this module's failures reported under. */
@@ -580,7 +591,8 @@ async function readExistingSegment(
   eventsDir: DirectoryHandleLike,
   fileName: string,
   writtenKey: string,
-  diagnostics: EventLogDiagnostics
+  diagnostics: EventLogDiagnostics,
+  deadline: OperationDeadline | undefined
 ): Promise<ExistingSegment> {
   const knownWritten = writtenSegmentsThisSession.has(writtenKey);
   for (let attempt = 0; ; attempt += 1) {
@@ -599,8 +611,11 @@ async function readExistingSegment(
         ? VERIFY_READBACK_RETRY_DELAYS_MS
         : TRANSIENT_WRITE_RETRY_DELAYS_MS;
       if (transient && attempt < ladder.length) {
-        await waitFor(ladder[attempt]!);
-        continue;
+        const delay = nextRetryDelayMs(ladder[attempt]!, deadline);
+        if (delay !== null) {
+          await waitFor(delay);
+          continue;
+        }
       }
       if (knownWritten && isNotFoundError(error)) {
         // Retries exhausted on a segment this session wrote. Fall back to ""
@@ -658,13 +673,22 @@ async function verifySegmentSize(
   expectedBytes: number,
   /** Whether the pre-append re-read observed the file rather than falling back. */
   baselineReliable: boolean,
-  diagnostics: EventLogDiagnostics
+  diagnostics: EventLogDiagnostics,
+  deadline: OperationDeadline | undefined
 ): Promise<SegmentVerification> {
   // The patient ladder: this reads back a segment whose `close()` already
   // resolved, so it provably exists and only the share's view is stale. Giving
   // up in ~630 ms was turning completed month-save writes into reported failures.
   for (let attempt = 0; ; attempt += 1) {
-    const retriesLeft = attempt < VERIFY_READBACK_RETRY_DELAYS_MS.length;
+    const ladderDelay =
+      attempt < VERIFY_READBACK_RETRY_DELAYS_MS.length ? VERIFY_READBACK_RETRY_DELAYS_MS[attempt]! : null;
+    // F15: the very first retry always happens even if the deadline is
+    // already spent by the time we get here, so a merely-STALE size read (SMB
+    // visibility lag) gets one more look instead of being reported as a fatal
+    // mismatch on the strength of a single observation. Only later retries are
+    // gated by the remaining budget.
+    const delay = ladderDelay === null ? null : attempt === 0 ? ladderDelay : nextRetryDelayMs(ladderDelay, deadline);
+    const retriesLeft = delay !== null;
     let observedSize: number;
     try {
       const verifyHandle = await eventsDir.getFileHandle(fileName, { create: false });
@@ -699,7 +723,7 @@ async function verifySegmentSize(
         logCodedError(diagnostics.verifyContext, diagnostics.unverifiedCode, error);
         return "unverified";
       }
-      await waitFor(VERIFY_READBACK_RETRY_DELAYS_MS[attempt]!);
+      await waitFor(delay ?? 0);
       continue;
     }
     if (!retriesLeft) {
@@ -710,7 +734,7 @@ async function verifySegmentSize(
         diagnostics.sizeMismatchCode
       );
     }
-    await waitFor(VERIFY_READBACK_RETRY_DELAYS_MS[attempt]!);
+    await waitFor(delay ?? 0);
   }
 }
 
@@ -757,9 +781,11 @@ export async function appendEventSegment<TEvent>(
   parentDir: DirectoryHandleLike,
   events: TEvent[],
   writer: SegmentWriterIdentity,
-  config: AppendOnlyEventLogConfig
+  config: AppendOnlyEventLogConfig,
+  options: AppendEventSegmentOptions = {}
 ): Promise<SegmentVerification> {
   if (events.length === 0) return "verified";
+  const { deadline } = options;
   const { consumerNamespace, eventsDirName, segmentSuffix, diagnostics } = config;
   const eventsDir = await parentDir.getDirectoryHandle(eventsDirName, { create: true });
   const base = buildSegmentBaseName(writer, segmentSuffix, config.baseNamePrefix);
@@ -788,7 +814,7 @@ export async function appendEventSegment<TEvent>(
       openSegmentSeqByWriter.get(writerKey) ??
       (await discoverHighestOwnSeq(eventsDir, base, segmentSuffix));
     let fileName = segmentFileNameForSeq(base, seq, segmentSuffix);
-    let existing = await readExistingSegment(eventsDir, fileName, memoKeyFor(fileName), diagnostics);
+    let existing = await readExistingSegment(eventsDir, fileName, memoKeyFor(fileName), diagnostics, deadline);
     let existingBytes = utf8Length(existing.text);
 
     // ROTATE AWAY FROM A SEGMENT WE COULD NOT RE-READ. An unreliable baseline
@@ -810,7 +836,7 @@ export async function appendEventSegment<TEvent>(
     if (!existing.reliable && seq < MAX_SEGMENT_SEQ) {
       seq += 1;
       fileName = segmentFileNameForSeq(base, seq, segmentSuffix);
-      existing = await readExistingSegment(eventsDir, fileName, memoKeyFor(fileName), diagnostics);
+      existing = await readExistingSegment(eventsDir, fileName, memoKeyFor(fileName), diagnostics, deadline);
       existingBytes = utf8Length(existing.text);
     }
 
@@ -823,7 +849,7 @@ export async function appendEventSegment<TEvent>(
       // reading it is what makes "the previous run crashed after writing this
       // name" and "the directory listing had not caught up yet" non-destructive
       // instead of an overwrite.
-      existing = await readExistingSegment(eventsDir, fileName, memoKeyFor(fileName), diagnostics);
+      existing = await readExistingSegment(eventsDir, fileName, memoKeyFor(fileName), diagnostics, deadline);
       existingBytes = utf8Length(existing.text);
     }
 
@@ -844,7 +870,8 @@ export async function appendEventSegment<TEvent>(
       // aborts a whole month save, so there is nothing to be gained by giving
       // up quickly — the same reasoning the post-close read-back already
       // applies, which left the write itself as the odd one out.
-      VERIFY_READBACK_RETRY_DELAYS_MS
+      VERIFY_READBACK_RETRY_DELAYS_MS,
+      deadline
     );
     // Recorded before verification, deliberately: the bytes are already on the
     // share at this point, so the next append must continue in THIS segment
@@ -859,7 +886,8 @@ export async function appendEventSegment<TEvent>(
       fileName,
       existingBytes + addedBytes,
       existing.reliable,
-      diagnostics
+      diagnostics,
+      deadline
     );
   });
 }
