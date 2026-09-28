@@ -13,7 +13,11 @@
  * Losing the stored minute (cleared site data, private window) only starts a
  * new chain — every reader folds every segment, so nothing is lost.
  */
-import { segmentFileName, type AppendOnlyEventLogConfig } from "../storage/appendOnlyEventLog";
+import {
+  buildSegmentBaseName,
+  segmentFileNameForSeq,
+  type AppendOnlyEventLogConfig,
+} from "../storage/appendOnlyEventLog";
 import { getDistributionDeviceId } from "../distribution/distributionEventStore";
 import { buildAnswerEventLogConfig } from "./answerEventStore";
 
@@ -67,17 +71,58 @@ export function __resetAnswerSegmentChainMemoForTests(): void {
   createdAtByChain.clear();
 }
 
+/** Shared by every F11 accessor below — the writer identity `buildSegmentBaseName` needs. */
+function stableChainWriter(chain: AnswerSegmentChain): { deviceId: string; sessionId: string } {
+  return { deviceId: getDistributionDeviceId(), sessionId: chain.chainId };
+}
+
 /**
- * F11: this browser's current stable-chain segment name for (month, actor) —
- * the seq-0 file its own writes land in — so the sync probe (Task 11) can
- * exclude its OWN appends by name instead of a per-session heuristic. Reuses
- * the same `deviceId`/`buildSegmentBaseName` logic the writer itself uses
- * (`segmentFileName`), so this can never drift from what actually gets
- * written. Rotation (`-1`, `-2`, …) is rare and each rotated name is still
- * globbed as "this chain's" by any caller matching on the returned base, so a
- * single seq-0 name is enough for identity purposes.
+ * F11: this browser's current stable-chain segment BASE name for
+ * (month, actor) — the prefix shared by every segment this chain has ever
+ * written (seq 0, and any `-1`, `-2`, … rotation), so the sync probe (Task 11)
+ * can exclude ALL of this chain's own appends by prefix-matching real segment
+ * file names against this, instead of a per-session heuristic. Built with the
+ * same `buildSegmentBaseName` call the writer itself uses, so this can never
+ * drift from what actually gets written. MINTS the chain (persists a fresh
+ * creation minute) if none exists yet for this (month, actor) — see
+ * `peekStableAnswerChainSegmentBase` for a variant that does not.
+ */
+export function stableAnswerChainSegmentBase(monthFolderName: string, actor: string, nowMs?: number): string {
+  const chain = stableAnswerChain(monthFolderName, actor, nowMs);
+  return buildSegmentBaseName(stableChainWriter(chain), chain.config.segmentSuffix, chain.config.baseNamePrefix);
+}
+
+/**
+ * F11: this browser's current stable-chain segment FILE name (seq 0 only —
+ * NOT a prefix; see `stableAnswerChainSegmentBase` for one that also matches
+ * rotations) for (month, actor). MINTS the chain if none exists yet, exactly
+ * like `stableAnswerChainSegmentBase`.
  */
 export function stableAnswerChainSegmentName(monthFolderName: string, actor: string, nowMs?: number): string {
   const chain = stableAnswerChain(monthFolderName, actor, nowMs);
-  return segmentFileName(chain.config, { deviceId: getDistributionDeviceId(), sessionId: chain.chainId }, 0);
+  const base = buildSegmentBaseName(stableChainWriter(chain), chain.config.segmentSuffix, chain.config.baseNamePrefix);
+  return segmentFileNameForSeq(base, 0, chain.config.segmentSuffix);
+}
+
+/**
+ * Read-only counterpart of `stableAnswerChainSegmentBase` — for the sync
+ * probe (Task 11), which must be able to ask "what is MY segment prefix for
+ * this (month, actor)?" without the side effect of minting and PERSISTING a
+ * brand-new chain entry for a (month, actor) this browser may never actually
+ * write to. Returns `undefined` when no chain has been created yet (in this
+ * page's memo or in `localStorage`) — in that case there is nothing on disk
+ * for this browser to have written either, so the caller has nothing to
+ * exclude.
+ */
+export function peekStableAnswerChainSegmentBase(monthFolderName: string, actor: string): string | undefined {
+  const key = `${monthFolderName}|${actor}`;
+  const createdAtMs = createdAtByChain.get(key) ?? readStoredChains()[key];
+  if (typeof createdAtMs !== "number" || !Number.isFinite(createdAtMs)) return undefined;
+  const config = buildAnswerEventLogConfig(createdAtMs);
+  const chainId = `chain|${key}`;
+  return buildSegmentBaseName(
+    { deviceId: getDistributionDeviceId(), sessionId: chainId },
+    config.segmentSuffix,
+    config.baseNamePrefix
+  );
 }

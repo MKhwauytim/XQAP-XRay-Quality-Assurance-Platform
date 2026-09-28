@@ -537,6 +537,254 @@ describe("an unreliable baseline forces rotation rather than a blind overwrite",
   });
 });
 
+/* ───────────────────── E1: exhausted ladder ≠ NotFoundError-only ────────── */
+
+describe("E1: an exhausted ladder is unreliable for ANY error, not just NotFoundError", () => {
+  // Production analysis: .superpowers/sdd/errorlog-2026-09-28/unreadable-segments.md.
+  // `readExistingSegment` used to only treat an EXHAUSTED `knownWritten &&
+  // isNotFoundError` as unreliable. A `NotReadableError` or `InvalidStateError`
+  // past the ladder fell through to the "fresh, no segment yet" branch and came
+  // back `reliable: true` with `text: ""` — so the caller happily overwrote an
+  // EXISTING segment with only the new batch, silently truncating everything
+  // already in it. These pin the fix: any exhausted ladder for a `knownWritten`
+  // name, or any non-NotFoundError outcome at all, must come back unreliable
+  // and force a rotation instead of an overwrite.
+
+  it("rotates away (does not overwrite) on an exhausted NotReadableError, same session", async () => {
+    const dir = root();
+    await appendEventSegment(dir, [event("A")], WRITER, TEST_LOG);
+    const sealedBefore = await readSegmentText(dir, name(0));
+
+    setSimulatedFaults(dir, [
+      {
+        operation: "getFileHandle",
+        name: name(0),
+        create: false,
+        errorName: "NotReadableError",
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+
+    const { result } = await withCapturedSleeps(() =>
+      appendEventSegment(dir, [event("B")], WRITER, TEST_LOG)
+    );
+    expect(result).toBe("verified");
+    clearSimulatedFaults(dir);
+
+    expect(await readSegmentText(dir, name(0))).toBe(sealedBefore);
+    expect(await readSegmentText(dir, name(1))).toContain("evt-B");
+    expect((await loadAll(dir)).map((e) => e.eventId).sort()).toEqual(["evt-A", "evt-B"]);
+  });
+
+  it("rotates away on an exhausted InvalidStateError (stale snapshot), same session", async () => {
+    const dir = root();
+    await appendEventSegment(dir, [event("A")], WRITER, TEST_LOG);
+    const sealedBefore = await readSegmentText(dir, name(0));
+
+    setSimulatedFaults(dir, [
+      {
+        operation: "getFileHandle",
+        name: name(0),
+        create: false,
+        errorName: "InvalidStateError",
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+
+    const { result } = await withCapturedSleeps(() =>
+      appendEventSegment(dir, [event("B")], WRITER, TEST_LOG)
+    );
+    expect(result).toBe("verified");
+    clearSimulatedFaults(dir);
+
+    expect(await readSegmentText(dir, name(0))).toBe(sealedBefore);
+    expect(await readSegmentText(dir, name(1))).toContain("evt-B");
+    expect((await loadAll(dir)).map((e) => e.eventId).sort()).toEqual(["evt-A", "evt-B"]);
+  });
+
+  it("applies to a NON-stable, distribution-shaped writer too — the bug lived in the shared mechanics", async () => {
+    // `WRITER` carries no `stable` flag, so every case above already exercises
+    // the non-stable path; this asserts that explicitly and end to end.
+    expect(WRITER).not.toHaveProperty("stable");
+    const dir = root();
+    await appendEventSegment(dir, [event("A")], WRITER, TEST_LOG);
+    setSimulatedFaults(dir, [
+      {
+        operation: "getFileHandle",
+        name: name(0),
+        create: false,
+        errorName: "NotReadableError",
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+    await withCapturedSleeps(() => appendEventSegment(dir, [event("B")], WRITER, TEST_LOG));
+    clearSimulatedFaults(dir);
+    expect((await loadAll(dir)).map((e) => e.eventId).sort()).toEqual(["evt-A", "evt-B"]);
+  });
+
+  it("a STABLE writer across a simulated reload also rotates instead of truncating a month of history", async () => {
+    // The reproduction that made this reachable on an ordinary page reload:
+    // A1's stable chain means the SECOND page load's first append targets a
+    // segment that already holds real content, not an empty fresh one — so
+    // this exact bug is reachable on every reload, not just some rare edge.
+    const dir = root();
+    const stableWriter = { ...WRITER, stable: true };
+    await appendEventSegment(dir, [event("A")], stableWriter, TEST_LOG);
+    const sealedBefore = await readSegmentText(dir, name(0, stableWriter));
+
+    // Simulate a reload: this session's memo forgets it ever wrote name(0).
+    __resetAppendOnlyEventLogMemosForTests();
+
+    setSimulatedFaults(dir, [
+      {
+        operation: "getFileHandle",
+        name: name(0, stableWriter),
+        create: false,
+        errorName: "NotReadableError",
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+
+    const { result } = await withCapturedSleeps(() =>
+      appendEventSegment(dir, [event("B")], stableWriter, TEST_LOG)
+    );
+    expect(result).toBe("verified");
+    clearSimulatedFaults(dir);
+
+    expect(await readSegmentText(dir, name(0, stableWriter))).toBe(sealedBefore);
+    expect(await readSegmentText(dir, name(1, stableWriter))).toContain("evt-B");
+    expect((await loadAll(dir)).map((e) => e.eventId).sort()).toEqual(["evt-A", "evt-B"]);
+  });
+});
+
+/* ───────────── the `stable` writer's core safety property (F2) ──────────── */
+
+describe("a stable writer's knownFor treats a LISTED segment as claimed, not just this session's memo", () => {
+  it("a listed segment with a stale NotFound (post-reload) still takes the patient ladder and rotates", async () => {
+    const dir = root();
+    const stableWriter = { ...WRITER, stable: true };
+    await appendEventSegment(dir, [event("A")], stableWriter, TEST_LOG);
+    const sealedBefore = await readSegmentText(dir, name(0, stableWriter));
+
+    // Reload: the session memo that would normally say "I wrote this" is
+    // gone. Only the directory LISTING (via `knownFor`) can still say so.
+    __resetAppendOnlyEventLogMemosForTests();
+
+    setSimulatedFaults(dir, [
+      {
+        operation: "getFileHandle",
+        name: name(0, stableWriter),
+        create: false,
+        errorName: "NotFoundError",
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+
+    const { result, delays } = await withCapturedSleeps(() =>
+      appendEventSegment(dir, [event("B")], stableWriter, TEST_LOG)
+    );
+    expect(result).toBe("verified");
+    // Proof it was `knownFor`'s LISTING (not a session memo, which was just
+    // cleared) that made this take the patient ladder rather than the fast
+    // one reserved for a genuinely fresh writer.
+    expect(ladderPrefix(delays, VERIFY_READBACK_RETRY_DELAYS_MS.length)).toEqual([
+      ...VERIFY_READBACK_RETRY_DELAYS_MS,
+    ]);
+    clearSimulatedFaults(dir);
+
+    expect(await readSegmentText(dir, name(0, stableWriter))).toBe(sealedBefore);
+    expect(await readSegmentText(dir, name(1, stableWriter))).toContain("evt-B");
+    expect((await loadAll(dir)).map((e) => e.eventId).sort()).toEqual(["evt-A", "evt-B"]);
+  });
+
+  it("a genuinely fresh name for a stable writer still takes the FAST ladder, not the patient one", async () => {
+    // The other side of `knownFor`: being `stable` must not by itself make
+    // every name look claimed — only one the directory actually lists.
+    // Faults ONLY the first target name — see the comment on the equivalent
+    // non-stable test above for why a suffix-wide fault would cascade into
+    // the rotation target too and change what this test is pinning.
+    const stableWriter = { ...WRITER, stable: true };
+    const dir = root({
+      faults: [
+        {
+          operation: "getFileHandle",
+          name: name(0, stableWriter),
+          create: false,
+          errorName: "NotReadableError",
+          times: Number.POSITIVE_INFINITY,
+        },
+      ],
+    });
+
+    const { delays } = await withCapturedSleeps(() =>
+      appendEventSegment(dir, [event("A")], stableWriter, TEST_LOG)
+    );
+
+    expect(ladderPrefix(delays, TRANSIENT_WRITE_RETRY_DELAYS_MS.length)).toEqual([
+      ...TRANSIENT_WRITE_RETRY_DELAYS_MS,
+    ]);
+  });
+
+  it("treats a directory-listing failure inside knownFor as claimed too (conservative default) and still rotates safely", async () => {
+    const dir = root();
+    const stableWriter = { ...WRITER, stable: true };
+    await appendEventSegment(dir, [event("A")], stableWriter, TEST_LOG);
+    const sealedBefore = await readSegmentText(dir, name(0, stableWriter));
+    __resetAppendOnlyEventLogMemosForTests();
+
+    const eventsDir = await eventsDirOf(dir);
+    // First listing call is `discoverHighestOwnSeq` re-establishing `seq`
+    // after the reload above cleared `openSegmentSeqByWriter` too — let that
+    // one succeed normally. Only the SECOND listing call, `knownFor`'s own,
+    // fails — a share hiccup between two nearby calls, not a permanently
+    // broken directory.
+    let listCalls = 0;
+    const rawEventsDir = eventsDir as unknown as { values: () => AsyncGenerator<{ name: string; kind: string }> };
+    const originalValues = rawEventsDir.values.bind(rawEventsDir);
+    const brokenEventsDir = {
+      ...eventsDir,
+      values: () => {
+        listCalls += 1;
+        if (listCalls === 1) return originalValues();
+        // A rejecting async iterator, not a generator — `require-yield` flags
+        // a `function*` with no reachable `yield`, and there is nothing to
+        // yield before this always throws.
+        return {
+          [Symbol.asyncIterator]() {
+            return this;
+          },
+          next: () => Promise.reject(new Error("simulated directory listing failure")),
+        } as AsyncGenerator<{ name: string; kind: string }>;
+      },
+    } as unknown as DirectoryHandleLike;
+
+    setSimulatedFaults(dir, [
+      {
+        operation: "getFileHandle",
+        name: name(0, stableWriter),
+        create: false,
+        errorName: "NotReadableError",
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+
+    const { result } = await withCapturedSleeps(() =>
+      appendEventSegment(
+        { ...dir, getDirectoryHandle: async () => brokenEventsDir } as unknown as DirectoryHandleLike,
+        [event("B")],
+        stableWriter,
+        TEST_LOG
+      )
+    );
+    expect(result).toBe("verified");
+    clearSimulatedFaults(dir);
+
+    expect(await readSegmentText(dir, name(0, stableWriter))).toBe(sealedBefore);
+    expect(await readSegmentText(dir, name(1, stableWriter))).toContain("evt-B");
+    expect((await loadAll(dir)).map((e) => e.eventId).sort()).toEqual(["evt-A", "evt-B"]);
+  });
+});
+
 /* ─────────────────────────── retry-ladder pins ──────────────────────────── */
 
 describe("each path takes the retry ladder it is supposed to take", () => {
@@ -544,11 +792,20 @@ describe("each path takes the retry ladder it is supposed to take", () => {
     // Absence is the expected, correct answer for a session's first append.
     // Taking the ~11 s ladder here would put dead wait in front of the first
     // action of every session — the regression this pin exists to catch.
+    //
+    // Faults ONLY `name(0)` (not every `.ndjson` by suffix, as before E1):
+    // since the fix, an exhausted non-NotFound error is unreliable regardless
+    // of `knownWritten`, so a fault matching every name — including the
+    // rotation target this now-unreliable baseline sends the write to — would
+    // also make THAT read exhaust its own (fast, since it's genuinely
+    // unclaimed) ladder and come back unreliable too, cascading into a
+    // baseline-unreliable post-close verify failure that has nothing to do
+    // with what this test pins (which ladder the FIRST read takes).
     const dir = root({
       faults: [
         {
           operation: "getFileHandle",
-          nameSuffix: SUFFIX,
+          name: name(0),
           create: false,
           errorName: "NotReadableError",
           times: Number.POSITIVE_INFINITY,

@@ -22,6 +22,7 @@ import { createSimpleHasher } from "./jsonEnvelope";
 import { listDirectoryEntries, readSegmentTails } from "./directoryScan";
 import { withResourceLock } from "./webLocks";
 import { logCodedError, tagError, taggedError, type ErrorCode } from "./errorCodes";
+import { logError } from "./errorLogger";
 import {
   TRANSIENT_WRITE_RETRY_DELAYS_MS,
   VERIFY_READBACK_RETRY_DELAYS_MS,
@@ -38,10 +39,22 @@ import {
 /**
  * Who is writing, and where the write is allowed to be memoized to.
  *
- * `deviceId` is a stable per-machine id; `sessionId` is fresh per app session.
- * Together they are the unit of write uniqueness that replaces per-event ids:
- * two machines — or two tabs on the same machine — never share a segment file,
- * so concurrent writers never target the same file.
+ * `deviceId` is a stable per-machine id; `sessionId` is fresh per app session
+ * for a NON-stable writer (distribution) — so two machines, or two tabs on
+ * the same machine, never share a segment file there, and concurrent writers
+ * never target the same file.
+ *
+ * A `stable` writer (answers, A1) breaks that per-tab half of the invariant
+ * on purpose: `sessionId` is the persisted chain id, so two tabs of the SAME
+ * browser + user + month DO share one segment file across the page's whole
+ * lifetime, not just one load. Safety there does not come from file
+ * exclusivity — it comes from `withResourceLock` in `appendEventSegment`
+ * serialising every append to that chain (including across tabs, since Web
+ * Locks are per-origin, not per-tab) plus the under-lock re-read the stable
+ * writer always does before writing (see `knownFor`/`readExistingSegment`):
+ * whichever tab's append runs first reads and preserves the other's lines,
+ * because it never has a stale in-memory view to trust instead of a fresh
+ * read.
  *
  * `scopeId` is the caller's stable workspace+month identity. See
  * `writtenSegmentsThisSession` below for why the memo key needs it.
@@ -608,23 +621,59 @@ async function readExistingSegment(
         await waitFor(ladder[attempt]!);
         continue;
       }
-      if (knownWritten && isNotFoundError(error)) {
-        // Retries exhausted on a segment this session wrote. Fall back to ""
-        // (the long-standing behavior) rather than hard-failing, because the
-        // memo can be stale after a workspace switch — but record it, since
-        // the alternative reading is that this append is about to rewrite the
-        // file without lines that are still on the share.
-        await logExhaustedNotFound(
-          diagnostics.rereadContext,
-          eventsDir,
-          fileName,
-          attempt + 1,
-          error
-        );
+      // E1 (production analysis: .superpowers/sdd/errorlog-2026-09-28/
+      // unreadable-segments.md): this used to only treat an EXHAUSTED
+      // `knownWritten && isNotFoundError` as unreliable. A `NotReadableError`
+      // or `InvalidStateError` past the ladder fell through to the
+      // "fresh, no segment yet" branch below and came back `reliable: true`
+      // — so the caller happily REWROTE an existing segment (whose bytes are
+      // still on the share, just not readable through this error) with only
+      // the new batch, silently truncating everything already in it. With a
+      // stable chain (A1) the first append after every reload targets a
+      // segment that is very likely non-empty, which makes this reachable on
+      // an ordinary reload rather than only on some rare edge case — so any
+      // exhausted ladder for a writer that HAS a prior claim on this name
+      // (knownWritten), or ANY non-`NotFoundError` outcome regardless of
+      // `knownWritten`, must come back unreliable and force a rotation
+      // instead. Only a `NotFoundError` on a name nothing has ever claimed
+      // stays a genuine, reliable "no segment yet" observation. Applies to
+      // every writer, stable or not — the bug was in the shared mechanics.
+      if (knownWritten || !isNotFoundError(error)) {
+        // Retries exhausted. Fall back to "" (the long-standing behavior for
+        // the covered case) rather than hard-failing, because the memo can be
+        // stale after a workspace switch — but record it, and record what
+        // kind of error this was, since the alternative reading is that this
+        // append is about to rewrite the file without lines that are still on
+        // the share. `logExhaustedNotFound` runs its NotFound-specific
+        // directory probe (and its "NotFoundError persisted…" message) only
+        // when the error genuinely IS one; a NotReadableError/InvalidStateError
+        // gets a plain log entry instead — `logError` already records the
+        // DOMException's own `name`, which is the detail that matters here.
+        if (isNotFoundError(error)) {
+          await logExhaustedNotFound(
+            diagnostics.rereadContext,
+            eventsDir,
+            fileName,
+            attempt + 1,
+            error
+          );
+        } else {
+          logError(diagnostics.rereadContext, error);
+        }
         return { text: "", reliable: false };
       }
       // No prior content for this writer session yet — start from empty. This
       // IS an observation: a fresh writer session legitimately has no segment.
+      //
+      // Residual hazard: this still trusts a `NotFoundError` on an unclaimed
+      // name at face value, and for a `stable` writer `knownFor` first trusts
+      // a directory LISTING as proof of "claimed". A listing that is itself
+      // stale (entry not yet visible) combined with a `getFileHandle` that
+      // also still reports `NotFoundError` looks identical to "genuinely
+      // never written" — both paths agree on `reliable: true`. Nothing here
+      // can distinguish that combination from the real fresh-segment case; it
+      // is bounded by the same share-visibility-lag assumption `knownFor`
+      // already accepts.
       return { text: "", reliable: true };
     }
   }
@@ -792,15 +841,26 @@ export async function appendEventSegment<TEvent>(
   };
 
   // A read-modify-write full-file rewrite is only race-free against OTHER
-  // writer sessions (different deviceId/sessionId, hence a different chain).
-  // Within THIS session, two overlapping batch calls (e.g. two independent
-  // UI actions firing close together) would otherwise both read the same
-  // "existing" content and the second write would silently clobber the
-  // first's lines. Lock per writer CHAIN -- not per file name -- so that the
-  // rotation decision and the write it implies are one critical section:
-  // locking per file would let two concurrent appends read the same full
-  // segment, both decide to rotate, and race on `seq + 1`. Distinct chains
-  // (distinct sessions/devices) never contend on this lock.
+  // writer CHAINS (different base name). Within THIS session, two overlapping
+  // batch calls (e.g. two independent UI actions firing close together) would
+  // otherwise both read the same "existing" content and the second write
+  // would silently clobber the first's lines. Lock per writer CHAIN -- not
+  // per file name -- so that the rotation decision and the write it implies
+  // are one critical section: locking per file would let two concurrent
+  // appends read the same full segment, both decide to rotate, and race on
+  // `seq + 1`. For a NON-stable writer, a chain is unique per (deviceId,
+  // sessionId), so distinct sessions/devices never contend on this lock — each
+  // page load is its own chain, hence its own lock name.
+  //
+  // A `stable` writer's chain (answers, A1) is keyed on (deviceId, persisted
+  // chain id) instead, so two tabs of the same browser + user + month
+  // deliberately DO share this lock name — that sharing is exactly what makes
+  // it safe for them to also share one segment file: Web Locks are scoped per
+  // ORIGIN, not per tab/page instance, so the lock still serialises their
+  // appends into one critical section even though each tab is a separate JS
+  // heap with its own `writtenSegmentsThisSession`/`openSegmentSeqByWriter`
+  // memo. See the `stable` field's doc comment on `SegmentWriterIdentity` for
+  // the full argument.
   //
   // The key needs no consumer namespace: it already carries `eventsDirName`,
   // and two consumers sharing a directory SHOULD share the lock (they would be
@@ -827,9 +887,23 @@ export async function appendEventSegment<TEvent>(
     // events remain part of the log — while the batch lands in a fresh
     // segment whose empty baseline is trustworthy. An unconfirmable
     // post-close check on the fresh segment is then benign instead of fatal.
-    // The rotation target can never collide: the memo and
-    // `openSegmentSeqByWriter` advance together, so `seq` is the highest this
-    // session ever wrote, and no other writer shares this chain.
+    // The rotation target can never collide FOR A NON-STABLE WRITER: the memo
+    // and `openSegmentSeqByWriter` advance together, so `seq` is the highest
+    // this session ever wrote, and no other writer shares that chain (it is
+    // unique per page load).
+    //
+    // A `stable` writer's chain CAN be shared by another tab of the same
+    // browser + user + month (see `SegmentWriterIdentity.stable`'s doc
+    // comment), so this tab's `openSegmentSeqByWriter` memo can be behind the
+    // true on-disk state if the other tab has already rotated past it — this
+    // tab simply has not discovered that yet. That is not a collision risk:
+    // the lock above still serialises the two tabs' appends, and every write
+    // re-reads (`readExistingSegment`/`knownFor`) its OWN target `fileName`
+    // immediately before writing it, so whichever tab's append actually runs
+    // sees and preserves whatever the other one already wrote there. Rotating
+    // "one behind" the true state only means this tab's own segment fills up
+    // slightly later than it otherwise would — never that two writers land on
+    // the same rotation target at once.
     if (!existing.reliable && seq < MAX_SEGMENT_SEQ) {
       seq += 1;
       fileName = segmentFileNameForSeq(base, seq, segmentSuffix);
