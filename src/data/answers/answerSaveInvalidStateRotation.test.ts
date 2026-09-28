@@ -214,16 +214,27 @@ describe("R1/R5 (E1b): a persistently replace-blocked answer segment rotates ins
       },
     ]);
 
-    const start = Date.now();
+    clearOperationLog(root);
     const third = await upsertItemAnswer(root, MONTH, USER, makeItem("IMG-3"));
-    const elapsedMs = Date.now() - start;
     expect(third).toMatchObject({ ok: true });
-    // Bounded by the short replace-blocked ladder (SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS
-    // = [20]), not the ~11 s patient one a NotFoundError would take.
-    expect(elapsedMs).toBeLessThan(2_000);
+
+    // Bounded by the SHORT replace-blocked ladder against seq 1
+    // (SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS = [20] — at most one retry
+    // after the first attempt, so at most 2 close() calls), never the ~11 s
+    // patient ladder a NotFoundError would take.
+    const closeAttemptsOnSeqOne = getOperationLog(root).filter(
+      (entry) => entry.operation === "close" && entry.name === seq1
+    ).length;
+    expect(closeAttemptsOnSeqOne).toBeLessThanOrEqual(2);
+    // And seq 0 — already known blocked from the earlier save — is not
+    // retried at all this time either.
+    const writeAttemptsOnSeqZero = getOperationLog(root).filter(
+      (entry) =>
+        (entry.operation === "close" || entry.operation === "createWritable") && entry.name === seq0
+    ).length;
+    expect(writeAttemptsOnSeqZero).toBe(0);
 
     expect(await segmentNames(root)).toEqual(expect.arrayContaining([seq0, seq1, seq2]));
-    expect((await import("../storage/directoryScan")).listDirectoryEntries).toBeDefined();
 
     const file = await loadEmployeeAnswers(root, MONTH, USER);
     expect(file.items.map((item) => item.xrayImageId).sort()).toEqual(["IMG-1", "IMG-2", "IMG-3"]);

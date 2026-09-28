@@ -152,6 +152,18 @@ export type SimulatedFault = {
    * NOT rotate and duplicate the batch into a second file.
    */
   commitBeforeThrow?: boolean;
+  /**
+   * Minor (tail-compare regression): only meaningful together with
+   * `commitBeforeThrow`. When set, the commit writes THIS text instead of
+   * the real bytes this `write()` call was given — modelling a coincidence a
+   * size-only "did it land?" check cannot see through: some OTHER writer's
+   * content lands at the target, of the SAME total byte length this call
+   * would also have produced, but not ending with this call's own bytes.
+   * Without this, `commitBeforeThrow` alone can only ever produce a target
+   * whose tail DOES match (it commits the real content), so it cannot
+   * exercise the branch where a size match must NOT be trusted as "landed".
+   */
+  commitAlienContent?: string;
 };
 
 type FaultState = { faults: SimulatedFault[]; consumed: number[]; skipped: number[] };
@@ -262,8 +274,8 @@ function simulatedError(errorName: string, entryName: string): Error {
 function closeFaultCommitsBeforeThrow(
   faultState: FaultState | null,
   entry: OperationLogEntry
-): boolean {
-  if (!faultState) return false;
+): SimulatedFault | null {
+  if (!faultState) return null;
   for (let index = 0; index < faultState.faults.length; index += 1) {
     const fault = faultState.faults[index]!;
     if (fault.operation !== entry.operation) continue;
@@ -274,9 +286,9 @@ function closeFaultCommitsBeforeThrow(
     if (fault.skip !== undefined && faultState.skipped[index]! < fault.skip) continue;
     const limit = fault.times ?? 1;
     if (faultState.consumed[index]! >= limit) continue;
-    return fault.commitBeforeThrow === true;
+    return fault.commitBeforeThrow === true ? fault : null;
   }
-  return false;
+  return null;
 }
 
 /**
@@ -496,8 +508,15 @@ function makeFileHandle(
           // landed and only the JS promise still rejected, so the commit
           // happens FIRST and the throw follows it — exactly the shape
           // `segmentReplaceMayHaveLanded`'s re-read exists to catch.
-          if (closeFaultCommitsBeforeThrow(faultState, entry)) {
-            node.files.set(name, { content: concatBytes(chunks), lastModified: nextMemoryMtime() });
+          const commitFault = closeFaultCommitsBeforeThrow(faultState, entry);
+          if (commitFault) {
+            // `commitAlienContent`, when set, commits THAT text instead of the
+            // real chunks — modelling a same-size, different-content landing.
+            const content =
+              commitFault.commitAlienContent !== undefined
+                ? toBytes(commitFault.commitAlienContent)
+                : concatBytes(chunks);
+            node.files.set(name, { content, lastModified: nextMemoryMtime() });
             applyFaults(faultState, operationLog, entry);
           } else {
             applyFaults(faultState, operationLog, entry);

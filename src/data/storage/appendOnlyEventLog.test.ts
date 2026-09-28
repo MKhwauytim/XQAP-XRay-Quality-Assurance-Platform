@@ -905,16 +905,97 @@ describe("a stable writer's knownFor treats a LISTED segment as claimed, not jus
       )
     );
     expect(result).toBe("verified");
-    // Proof `knownFor`'s catch resolved to `true` (claimed): the PATIENT
-    // ladder was taken, not the fast one a genuinely-unclaimed name would get.
+    // IMPORTANT-1-fix-round update: `delays` is asserted EXACTLY, not just as
+    // a prefix. Seq 0 (within `highestReliableSeq`, the watermark the FIRST,
+    // successful listing established) correctly takes the PATIENT ladder —
+    // `knownFor`'s catch resolving to `true` there is trusted, since a real
+    // listing once vouched for that name. But the rotation target, seq 1, is
+    // BEYOND that watermark: `knownWrittenFor` no longer trusts a
+    // listing-failure-only claim for it, so it takes the FAST ladder and
+    // resolves as an immediate, reliable absence — contributing ZERO further
+    // delay. A bounded match (not merely "at least the patient ladder")
+    // pins that seq 1 did NOT also burn a second patient ladder, which is
+    // exactly the fix for the ~700 s spin this test used to permit (a
+    // broken listing used to make EVERY candidate name look claimed, forcing
+    // each one through its own ~11 s ladder before also coming back
+    // unreliable).
+    // (The one extra entry allowed is `logExhaustedNotFound`'s single failure-
+    // path probe wait after seq 0's ladder — not a second ladder.)
     expect(ladderPrefix(delays, VERIFY_READBACK_RETRY_DELAYS_MS.length)).toEqual([
       ...VERIFY_READBACK_RETRY_DELAYS_MS,
     ]);
+    expect(delays.length).toBeLessThanOrEqual(VERIFY_READBACK_RETRY_DELAYS_MS.length + 1);
     clearSimulatedFaults(dir);
 
     expect(await readSegmentText(dir, name(0, stableWriter))).toBe(sealedBefore);
     expect(await readSegmentText(dir, name(1, stableWriter))).toContain("evt-B");
     expect((await loadAll(dir)).map((e) => e.eventId).sort()).toEqual(["evt-A", "evt-B"]);
+  });
+});
+
+// IMPORTANT 1 (fix round 1, reviewer's reproduced data-loss finding): the
+// single hop out of "this session's claimed segment came back unreliable"
+// (just above `shouldRotate` in `appendEventSegment`) used to accept
+// whatever the ONE hop's read produced, reliable or not, and write over it
+// regardless. When the hop lands on a name a REAL directory listing already
+// confirmed exists — another tab's already-rotated segment, holding real
+// events — and this attempt's own read of it also fails, the old code wrote
+// straight over those events. Must FAIL against the pre-fix code (temporarily
+// revert the `ensureReliableRotationTarget` call on this hop to reproduce)
+// and PASS after.
+describe("IMPORTANT 1: the single-hop rotation branch must never write over a target a real listing vouched for", () => {
+  it("seq0 AND seq1 both fail their read past the full ladder — seq1 (another tab's real segment) is preserved, batch lands in seq2", async () => {
+    const dir = root();
+    const stableWriter = { ...WRITER, stable: true };
+    // seq0: this writer's own earlier, real segment.
+    await appendEventSegment(dir, [event("SEED")], stableWriter, TEST_LOG);
+    const seq0Before = await readSegmentText(dir, name(0, stableWriter));
+    // seq1: ANOTHER TAB of the same stable chain already rotated here and
+    // wrote a real event — genuinely present on disk, discoverable by a real
+    // directory listing (nothing about the listing itself is faulted below).
+    const otherEvent = { eventId: "evt-OTHER", eventAt: "2026-08-27T10:00:00.000Z", seq: 999 };
+    const seq1Before = `${JSON.stringify(otherEvent)}\n`;
+    await writeSegmentText(dir, name(1, stableWriter), seq1Before);
+
+    // NO reload here, deliberately: this session's memo still says "I wrote
+    // seq0", so the writer STARTS at seq0 (not at the seq1 a fresh listing
+    // would discover), fails to re-read it, and hops to seq1 — the exact
+    // hop the reviewer reproduced. seq1 is claimed via the real listing.
+
+    // Both seq0's and seq1's CONTENT reads fail past the full patient ladder
+    // — a share visibility hiccup on the specific files, not on the listing.
+    setSimulatedFaults(dir, [
+      {
+        operation: "getFileHandle",
+        name: name(0, stableWriter),
+        create: false,
+        errorName: "NotFoundError",
+        times: Number.POSITIVE_INFINITY,
+      },
+      {
+        operation: "getFileHandle",
+        name: name(1, stableWriter),
+        create: false,
+        errorName: "NotFoundError",
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+
+    const { result } = await withCapturedSleeps(() =>
+      appendEventSegment(dir, [event("B")], stableWriter, TEST_LOG)
+    );
+    expect(result).toBe("verified");
+    clearSimulatedFaults(dir);
+
+    // Neither pre-existing segment was touched — both are byte-identical to
+    // before this call, in particular seq1's real "evt-OTHER" line survives.
+    expect(await readSegmentText(dir, name(0, stableWriter))).toBe(seq0Before);
+    expect(await readSegmentText(dir, name(1, stableWriter))).toBe(seq1Before);
+    // The new batch landed one hop further out, in seq2.
+    expect(await readSegmentText(dir, name(2, stableWriter))).toContain("evt-B");
+
+    const events = await loadAll(dir);
+    expect(events.map((e) => e.eventId).sort()).toEqual(["evt-B", "evt-OTHER", "evt-SEED"]);
   });
 });
 
@@ -1216,6 +1297,45 @@ describe("E1b: a blocked segment REPLACE rotates instead of retrying forever", (
     expect(closeAttemptsOnSeqZero).toBeLessThanOrEqual(2);
   });
 
+  // Minor (tail-compare regression): a SAME-SIZE coincidence must not fool
+  // `segmentReplaceMayHaveLanded`'s "did it land anyway?" check — only a tail
+  // that actually ENDS WITH this call's own bytes counts as landed.
+  it("a same-size, different-content commit is NOT treated as landed — still rotates", async () => {
+    const dir = root({ trackOperations: true });
+    const evt = event("A");
+    const addedText = `${JSON.stringify(evt)}\n`;
+    // Same length as addedText (only the id character differs: "A" -> "Z"),
+    // but a genuinely different, independently-parseable event — modelling
+    // some OTHER writer's content landing at this exact name, coincidentally
+    // the same total byte length as what THIS call would have produced.
+    const alienEvt = { ...evt, eventId: "evt-Z" };
+    const alienText = `${JSON.stringify(alienEvt)}\n`;
+    expect(alienText.length).toBe(addedText.length);
+    expect(alienText.endsWith(addedText)).toBe(false);
+
+    setSimulatedFaults(dir, [
+      {
+        operation: "close",
+        name: name(0),
+        errorName: "InvalidStateError",
+        times: Number.POSITIVE_INFINITY,
+        commitBeforeThrow: true,
+        commitAlienContent: alienText,
+      },
+    ]);
+
+    const { result } = await withCapturedSleeps(() => appendEventSegment(dir, [evt], WRITER, TEST_LOG));
+    expect(result).toBe("verified");
+
+    // Rotated — the size-only coincidence at seq 0 was correctly NOT trusted.
+    expect(await segmentNames(dir)).toEqual([name(0), name(1)].sort());
+    expect(await readSegmentText(dir, name(0))).toBe(alienText);
+    expect(await readSegmentText(dir, name(1))).toContain("evt-A");
+
+    const events = await loadAll(dir);
+    expect(events.map((e) => e.eventId).sort()).toEqual(["evt-A", "evt-Z"]);
+  });
+
   it("does not rotate for a NotFoundError on the write step — keeps the existing patient ladder", async () => {
     // A regression guard for the "non-NotFound" qualifier in the brief: this
     // module already has a pinned test for the patient ladder on write
@@ -1266,6 +1386,44 @@ describe("E1b: a blocked segment REPLACE rotates instead of retrying forever", (
     expect(await segmentNames(dir)).toEqual([name(0)]);
     // The PATIENT ladder was used, not the short replace-blocked one.
     expect(ladderPrefix(delays, 5)).toEqual(VERIFY_READBACK_RETRY_DELAYS_MS.slice(0, 5));
+  });
+
+  // IMPORTANT 2 (fix round 1): the `ensureReliableRotationTarget` call in
+  // THIS branch (the E1b blocked-write rotation loop) was untested — removing
+  // it kept the whole 84/84-test file green, because no existing test made
+  // the rotation TARGET a blocked write lands on itself come back unreliable.
+  // This does: seq 0's close() is persistently refused (the ordinary E1b
+  // rotation trigger), AND seq 1 (the target that rotation would normally
+  // land on) cannot even be READ. The guard must skip past seq 1 too, and —
+  // because it is only ever probed with `create: false` — seq 1 must never
+  // be created on disk at all.
+  it("IMPORTANT 2: the E1b rotation ALSO protects its own second target — lands in seq2, seq1 is never created", async () => {
+    const dir = root({ trackOperations: true });
+    setSimulatedFaults(dir, [
+      {
+        operation: "close",
+        name: name(0),
+        errorName: "InvalidStateError",
+        times: Number.POSITIVE_INFINITY,
+      },
+      {
+        operation: "getFileHandle",
+        name: name(1),
+        create: false,
+        errorName: "NotReadableError",
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+
+    const { result } = await withCapturedSleeps(() =>
+      appendEventSegment(dir, [event("A")], WRITER, TEST_LOG)
+    );
+    expect(result).toBe("verified");
+    clearSimulatedFaults(dir);
+
+    expect(await segmentNames(dir)).not.toContain(name(1));
+    expect(await readSegmentText(dir, name(2))).toContain("evt-A");
+    expect((await loadAll(dir)).map((e) => e.eventId)).toEqual(["evt-A"]);
   });
 
   it("throws the real underlying error when there is nowhere left to rotate to", async () => {
@@ -1334,6 +1492,88 @@ describe("E1b: a blocked segment REPLACE rotates instead of retrying forever", (
     clearSimulatedFaults(dir);
     const events = await loadAll(dir);
     expect(events.map((e) => e.eventId).sort()).toEqual(["evt-A", "evt-B"]);
+  });
+});
+
+// R5 (fix round 1): a STORAGE-LEVEL (not answer-level) stable-writer twin of
+// the E1b blocked-replace rotation, across TWO simulated reloads — the first
+// proving the rotation survives a reload with zero further attempts on the
+// now-known-blocked seq 0, the second additionally blocking the ROTATED
+// target (seq "-1") too, so the writer must rotate a SECOND time to seq "-2".
+describe("R5: a STABLE writer's blocked-replace rotation survives a reload, including a second consecutive block", () => {
+  it("seq0 blocked -> reload -> resumes at seq1 with zero further seq0 attempts; seq1 ALSO blocked -> rotates to seq2", async () => {
+    const dir = root({ trackOperations: true });
+    const stableWriter = { ...WRITER, stable: true };
+    const eventsDir = await eventsDirOf(dir);
+
+    await appendEventSegment(dir, [event("A")], stableWriter, TEST_LOG);
+    expect(await segmentNames(dir)).toEqual([name(0, stableWriter)]);
+
+    // seq0's REPLACE is persistently refused from here on — the same shape
+    // as the production incident, on a stable (cross-reload) writer chain.
+    setSimulatedFaults(dir, [
+      {
+        operation: "close",
+        name: name(0, stableWriter),
+        errorName: "InvalidStateError",
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+
+    const { result: secondResult } = await withCapturedSleeps(() =>
+      appendEventSegment(dir, [event("B")], stableWriter, TEST_LOG)
+    );
+    expect(secondResult).toBe("verified");
+    expect(await segmentNames(dir)).toEqual(
+      expect.arrayContaining([name(0, stableWriter), name(1, stableWriter)])
+    );
+
+    // Reload: this tab's in-page memo of "seq0 is blocked, I'm now on seq1"
+    // is gone. Only the (still-live) fault plan and the real files on disk
+    // remain.
+    __resetAppendOnlyEventLogMemosForTests();
+    clearOperationLog(eventsDir);
+
+    const { result: thirdResult } = await withCapturedSleeps(() =>
+      appendEventSegment(dir, [event("C")], stableWriter, TEST_LOG)
+    );
+    expect(thirdResult).toBe("verified");
+    // Zero attempts of any kind against seq0 this time — the stable chain's
+    // directory listing found seq1 already on disk and resumed there.
+    const touchesOnSeqZeroAfterReload = getOperationLog(eventsDir).filter(
+      (entry) => entry.name === name(0, stableWriter)
+    ).length;
+    expect(touchesOnSeqZeroAfterReload).toBe(0);
+    expect(await readSegmentText(dir, name(1, stableWriter))).toContain("evt-C");
+
+    // Second reload. NOW seq1 (the rotation target from the first block) is
+    // ALSO persistently refused — the "-1-blocked" variant.
+    __resetAppendOnlyEventLogMemosForTests();
+    setSimulatedFaults(dir, [
+      {
+        operation: "close",
+        name: name(0, stableWriter),
+        errorName: "InvalidStateError",
+        times: Number.POSITIVE_INFINITY,
+      },
+      {
+        operation: "close",
+        name: name(1, stableWriter),
+        errorName: "InvalidStateError",
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+    clearOperationLog(eventsDir);
+
+    const { result: fourthResult } = await withCapturedSleeps(() =>
+      appendEventSegment(dir, [event("D")], stableWriter, TEST_LOG)
+    );
+    expect(fourthResult).toBe("verified");
+    expect(await readSegmentText(dir, name(2, stableWriter))).toContain("evt-D");
+    clearSimulatedFaults(dir);
+
+    const events = await loadAll(dir);
+    expect(events.map((e) => e.eventId).sort()).toEqual(["evt-A", "evt-B", "evt-C", "evt-D"]);
   });
 });
 

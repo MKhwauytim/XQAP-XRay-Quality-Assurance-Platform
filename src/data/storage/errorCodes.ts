@@ -375,6 +375,11 @@ export const ERROR_CODES = {
       "a BEST-EFFORT history snapshot was skipped before it touched the share, because the path it would need is longer than the budget a workspace on this deployment can be relied on to accept. Nothing was retried and nothing was probed: this is the XQ-IO-034 verdict applied in advance rather than rediscovered, at the cost of a full retry ladder, on every save. The action it was documenting succeeded — only its history entry was not written",
     labelKey: "err_io_037_history_path_budget",
   },
+  "XQ-IO-038": {
+    meaning:
+      "the append-only event log gave up looking for a ROTATION TARGET it could trust. Every candidate segment name it tried, up to a small fixed bound (or the MAX_SEGMENT_SEQ ceiling), came back with an unconfirmed pre-write baseline — it could not prove the target was empty (or already held only what this writer put there), so writing to it risked silently truncating real content. Nothing on disk was touched by this failure: every segment this writer chain has ever sealed is untouched, and the batch that triggered this was never written anywhere. Retrying shortly, after the share's directory listing has had a chance to recover, is the right remedy — this is a listing/visibility problem, not data loss",
+    labelKey: "err_io_038_rotation_target_unconfirmed",
+  },
 
   // ── AUTH: login / session / permissions ──────────────────────────────────
   "XQ-AUTH-001": {
