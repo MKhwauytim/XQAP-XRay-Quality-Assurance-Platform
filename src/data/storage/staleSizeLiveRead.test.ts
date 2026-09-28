@@ -25,7 +25,7 @@
  * comparing consecutive invalid reads' (size, content-hash) — identical twice
  * in a row means "this is not changing," not "not evidence yet."
  */
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { createMemoryDirectory } from "./memoryDirectory";
 import type { DirectoryHandleLike, FileHandleLike } from "./fileSystemAccess";
@@ -179,7 +179,7 @@ test("[40,40] persistent-stale shape (same size, DIFFERENT content each read) st
   expect(getCallCount()).toBe(3);
 });
 
-test("a genuinely stable (identical every read), corrupt live file stops retrying after ONE extra attempt", async () => {
+test("an identical-every-read json-parse-corrupt live file takes the full ladder (3 reads), then falls back", async () => {
   const dir = createMemoryDirectory("stale-size-stable-corrupt");
   await safeWriteJson(dir, "t.json", { v: 1 });
   await safeWriteJson(dir, "t.json", { v: 2 }); // t.json.bak now holds {v:1}
@@ -208,13 +208,11 @@ test("a genuinely stable (identical every read), corrupt live file stops retryin
     expect(result.value.v).toBe(1);
     expect(result.recoveredFromBak).toBe(true);
   }
-  // Exactly 2 calls: the original read plus ONE retry (mandatory — there is
-  // nothing to compare the first invalid read against yet), then the SECOND
-  // read matches the first exactly and the loop stops rather than spending
-  // its full 2-retry budget. This is what keeps a real corrupt file's cost
-  // bounded inside a caller's own retry loop (casLoop defaults to 10
-  // attempts) — see readContract.test.ts's corrupt-base-read case.
-  expect(getCallCount()).toBe(2);
+  // A json-parse failure may be a stale truncated prefix, which repeats
+  // identically, so it gets the full ladder: original read plus both retries.
+  // (The bounded early stop applies to complete-document failures — see the
+  // N1 hash test below and readContract.test.ts's corrupt-base-read case.)
+  expect(getCallCount()).toBe(3);
 
   const bakEntries = getRecentErrors().filter((e) => e.context.startsWith("storage:bak-recovery"));
   expect(bakEntries.length).toBeGreaterThanOrEqual(1);
@@ -309,4 +307,67 @@ test("respects a caller-supplied deadline: stops retrying once the budget is spe
   // No retry spent: the budget was gone before the first wait was even
   // considered.
   expect(getCallCount()).toBe(1);
+});
+
+test("N1: a persistent stale TRUNCATED PREFIX (identical twice, json-parse failure) still gets the full ladder and recovers on the third read", async () => {
+  const dir = createMemoryDirectory("stale-size-n1");
+  await safeWriteJson(dir, "t.json", { v: 3 });
+
+  // The same 40-byte prefix twice: size AND content hash match, but a
+  // prefix that fails JSON.parse is not a complete document, so identical
+  // twice is not evidence of a stable file — a stale size view returns
+  // exactly this. Only hash/envelope/compressed-crc failures (a complete
+  // document that parsed) may stop early.
+  const { dir: wrapped, getCallCount } = wrapWithScriptedReads(dir, "t.json", [
+    { kind: "truncate", size: 40 },
+    { kind: "truncate", size: 40 },
+  ]);
+
+  const result = await safeReadJson<{ v: number }>(wrapped, "t.json");
+
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.value.v).toBe(3);
+    expect(result.recoveredFromBak).toBe(false);
+  }
+  expect(getCallCount()).toBe(3);
+  expect(getRecentErrors().filter((e) => e.context.startsWith("storage:bak-recovery"))).toHaveLength(0);
+});
+
+test("N1: a complete-but-hash-invalid document (identical twice) still stops after ONE retry", async () => {
+  const dir = createMemoryDirectory("stale-size-n1-hash");
+  await safeWriteJson(dir, "t.json", { v: 1 });
+  await safeWriteJson(dir, "t.json", { v: 2 }); // .bak holds {v:1}
+
+  const raw = JSON.parse(await readRaw(dir, "t.json")) as { data: { v: number } };
+  raw.data.v = 999; // hash no longer matches
+  const tampered = JSON.stringify(raw);
+  const { dir: wrapped, getCallCount } = wrapWithScriptedReads(dir, "t.json", [
+    { kind: "text", text: tampered },
+    { kind: "text", text: tampered },
+    { kind: "text", text: tampered },
+  ]);
+
+  const result = await safeReadJson<{ v: number }>(wrapped, "t.json");
+  expect(result.ok).toBe(true);
+  if (result.ok) expect(result.recoveredFromBak).toBe(true);
+  expect(getCallCount()).toBe(2);
+});
+
+test("N2: a successful read never hashes or re-encodes the payload", async () => {
+  const dir = createMemoryDirectory("stale-size-n2");
+  await safeWriteJson(dir, "big.json", { rows: Array.from({ length: 4000 }, (_, i) => ({ i, s: "x".repeat(20) })) });
+
+  const jsonEnvelope = await import("./jsonEnvelope");
+  const hashSpy = vi.spyOn(jsonEnvelope, "simpleHash");
+  const encodeSpy = vi.spyOn(TextEncoder.prototype, "encode");
+  try {
+    const result = await safeReadJson<{ rows: unknown[] }>(dir, "big.json");
+    expect(result.ok).toBe(true);
+    expect(hashSpy).not.toHaveBeenCalled();
+    expect(encodeSpy).not.toHaveBeenCalled();
+  } finally {
+    hashSpy.mockRestore();
+    encodeSpy.mockRestore();
+  }
 });

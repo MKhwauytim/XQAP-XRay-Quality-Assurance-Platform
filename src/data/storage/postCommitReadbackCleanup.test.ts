@@ -95,3 +95,18 @@ test("a repeatedly-retried post-commit failure (a casLoop-style outer retry) log
   const entries = getRecentErrors().filter((e) => e.context.startsWith("safeWrite:post-commit-readback"));
   expect(entries).toHaveLength(1);
 });
+
+test("the once-per-file dedup does not collide across month folders that share a file name", async () => {
+  const root = createMemoryDirectory("post-commit-months");
+  // Same leaf name ("1-main"), different parents: dir.name alone collides.
+  const may = await (await root.getDirectoryHandle("5-May-2026", { create: true })).getDirectoryHandle("1-main", { create: true });
+  const june = await (await root.getDirectoryHandle("6-June-2026", { create: true })).getDirectoryHandle("1-main", { create: true });
+  for (const d of [may, june]) {
+    setSimulatedFaults(root, [
+      { operation: "readFile", name: "t.json", errorName: "InvalidStateError", times: Number.POSITIVE_INFINITY },
+    ]);
+    await expect(safeWriteJson(d, "t.json", { v: 1 })).rejects.toThrow();
+  }
+  const entries = getRecentErrors().filter((e) => e.context.startsWith("safeWrite:post-commit-readback"));
+  expect(entries).toHaveLength(2);
+});

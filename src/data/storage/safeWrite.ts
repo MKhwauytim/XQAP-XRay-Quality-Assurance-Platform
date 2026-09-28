@@ -298,12 +298,12 @@ async function readText(
  * through to `.bak`/`.tmp` for it (as it does for unparseable JSON) and must
  * report `corrupt`, not `missing`.
  */
-// `contentHash` is a cheap (djb2, via `simpleHash`) fingerprint of the bytes
-// THIS attempt actually captured — never a copy of `reportedSize`/`bytesRead`.
-// It exists so two reads of the same nominally-invalid file can be compared:
-// identical hash + identical size means the file read the same twice in a
-// row, which same-size garbage alone cannot show (a torn write can hold
-// steady at one size across attempts while its bytes keep changing).
+// `contentHash`/`bytesRead` exist only on `damaged` (already the failure path).
+// For `plain`/`compressed` they are computed LAZILY in `readPayload`, and only
+// after validation has failed: hashing and re-encoding every successful read
+// cost ~1.35 s and a ~120 MB transient on a 108M-char population.final.json
+// and undid the HASH_VERIFY_SIZE_LIMIT policy. A hash of what a failed read
+// captured lets two reads of a nominally-invalid file be compared.
 //
 // `damaged.reason` tells a torn head/body boundary (`torn-head`, e.g. a write
 // interrupted between the compressed-envelope head line and its gzip body)
@@ -312,15 +312,8 @@ async function readText(
 // conditions that used to collapse into the same generic "damaged" and the
 // same `storage:bak-recovery` "envelope" stage.
 type FileContent =
-  | { kind: "plain"; text: string; reportedSize: number; bytesRead: number; contentHash: string }
-  | {
-      kind: "compressed";
-      head: CompressedHead;
-      bodyText: string;
-      reportedSize: number;
-      bytesRead: number;
-      contentHash: string;
-    }
+  | { kind: "plain"; text: string; reportedSize: number }
+  | { kind: "compressed"; head: CompressedHead; bodyText: string; reportedSize: number }
   | {
       kind: "damaged";
       reason: "torn-head" | "compressed-crc";
@@ -368,13 +361,9 @@ async function readContent(
       }
       if (classified.kind === "compressed") {
         const parts: string[] = [];
-        let decodedBytes = 0;
         try {
           await streamCompressedBody(file, classified.bodyStart, (chunk) => {
             parts.push(chunk);
-            // Actual decoded output, independent of `file.size` (the
-            // COMPRESSED input size) — see the `bytesRead` field's own doc.
-            decodedBytes += new TextEncoder().encode(chunk).length;
           });
         } catch {
           // A rejection means "discard everything received" (see
@@ -389,14 +378,11 @@ async function readContent(
             contentHash: simpleHash(new TextDecoder("utf-8").decode(window)),
           };
         }
-        const bodyText = parts.join("");
         return {
           kind: "compressed",
           head: classified.head,
-          bodyText,
+          bodyText: parts.join(""),
           reportedSize: file.size,
-          bytesRead: decodedBytes,
-          contentHash: simpleHash(bodyText),
         };
       }
       if (file.size <= HEAD_PROBE_BYTES && window.byteLength === file.size) {
@@ -420,30 +406,13 @@ async function readContent(
         // `TextDecoder("utf-8")` matches `Blob.text()`: UTF-8, leading BOM
         // stripped (the default `ignoreBOM: false` removes it).
         const text = new TextDecoder("utf-8").decode(window);
-        return {
-          kind: "plain",
-          text,
-          reportedSize: file.size,
-          bytesRead: window.byteLength,
-          contentHash: simpleHash(text),
-        };
+        return { kind: "plain", text, reportedSize: file.size };
       }
       if (file.size > maxStringLengthForTests) {
         throw stringLengthRangeError(name);
       }
       const text = await file.text();
-      // `bytesRead` is the ENCODED length of what `file.text()` actually
-      // decoded, not a copy of `file.size` — the two normally agree, but this
-      // is a real (if redundant) measurement rather than an assumption, so a
-      // future short/partial `text()` would show up in the evidence line
-      // instead of silently mirroring the snapshot's own claimed size.
-      return {
-        kind: "plain",
-        text,
-        reportedSize: file.size,
-        bytesRead: new TextEncoder().encode(text).length,
-        contentHash: simpleHash(text),
-      };
+      return { kind: "plain", text, reportedSize: file.size };
     } catch (error) {
       // Same budget rule as the not-found ladder above: these NotReadable /
       // stale-snapshot rungs are also nested inside the caller's casLoop.
@@ -947,7 +916,9 @@ function logPostCommitReadbackFailureOnce(
   fileName: string,
   error: unknown
 ): void {
-  const key = `${dir.name}/${fileName}`;
+  // directoryResourceKey includes the directory PATH, so the same file name
+  // under two month folders is two keys (dir.name alone collided).
+  const key = directoryResourceKey(dir, fileName);
   if (loggedPostCommitReadbackFailures.has(key)) return;
   loggedPostCommitReadbackFailures.add(key);
   logCodedError(
@@ -2582,6 +2553,27 @@ async function readPayload<T>(
       contentHash: null,
     };
   }
+  const succeeded = (payload: ReadPayload<T>): ReadPayloadOutcome<T> => ({
+    found: true,
+    payload,
+    reportedSize: content.reportedSize,
+    bytesRead: null,
+    failureStage: null,
+    contentHash: null,
+  });
+  // Evidence is measured HERE, only for a read that already failed
+  // validation — never on the success path (see `FileContent`'s doc).
+  const failed = (
+    failureStage: ReadPayloadFailureStage,
+    captured: string
+  ): ReadPayloadOutcome<T> => ({
+    found: true,
+    payload: null,
+    reportedSize: content.reportedSize,
+    bytesRead: new TextEncoder().encode(captured).length,
+    failureStage,
+    contentHash: simpleHash(captured),
+  });
   if (content.kind === "damaged") {
     return {
       found: true,
@@ -2597,58 +2589,23 @@ async function readPayload<T>(
     // the body's integrity comes from gzip's CRC32 (already checked by the
     // inflate above) rather than from a contentHash it cannot carry.
     if (!validateEnvelopeStructure({ metadata: content.head, data: null })) {
-      return {
-        found: true,
-        payload: null,
-        reportedSize: content.reportedSize,
-        bytesRead: content.bytesRead,
-        failureStage: "envelope",
-        contentHash: content.contentHash,
-      };
+      return failed("envelope", content.bodyText);
     }
     try {
       const data: unknown = JSON.parse(content.bodyText);
-      return {
-        found: true,
-        payload: { value: decodePayloadColumns<T>(data), rawText: content.bodyText },
-        reportedSize: content.reportedSize,
-        bytesRead: content.bytesRead,
-        failureStage: null,
-        contentHash: content.contentHash,
-      };
+      return succeeded({ value: decodePayloadColumns<T>(data), rawText: content.bodyText });
     } catch {
-      return {
-        found: true,
-        payload: null,
-        reportedSize: content.reportedSize,
-        bytesRead: content.bytesRead,
-        failureStage: "json-parse",
-        contentHash: content.contentHash,
-      };
+      return failed("json-parse", content.bodyText);
     }
   }
   const classified = classifyPlainRead(content.text);
   if (classified.parsed === null) {
-    return {
-      found: true,
-      payload: null,
-      reportedSize: content.reportedSize,
-      bytesRead: content.bytesRead,
-      failureStage: classified.stage,
-      contentHash: content.contentHash,
-    };
+    return failed(classified.stage ?? "json-parse", content.text);
   }
-  return {
-    found: true,
-    payload: {
-      value: decodePayloadColumns<T>(unwrap<unknown>(classified.parsed)),
-      rawText: content.text,
-    },
-    reportedSize: content.reportedSize,
-    bytesRead: content.bytesRead,
-    failureStage: null,
-    contentHash: content.contentHash,
-  };
+  return succeeded({
+    value: decodePayloadColumns<T>(unwrap<unknown>(classified.parsed)),
+    rawText: content.text,
+  });
 }
 
 // Applied to a live read that is FOUND but fails validation, before falling
@@ -2690,6 +2647,21 @@ function bakRecoveryEvidence(outcome: ReadPayloadOutcome<unknown>, staleRetries:
   return parts.join(", ");
 }
 
+/**
+ * A failure of a COMPLETE document (it parsed, then failed the hash, the
+ * envelope structure or the gzip CRC). Only these may stop the retry ladder
+ * early on an identical repeat. A `json-parse` failure is a prefix as far as
+ * we can tell — and a persistent stale size view returns the SAME truncated
+ * prefix on every read, so identical-twice proves nothing there.
+ */
+function isCompleteDocumentFailure(outcome: ReadPayloadOutcome<unknown>): boolean {
+  return (
+    outcome.failureStage === "hash" ||
+    outcome.failureStage === "envelope" ||
+    outcome.failureStage === "compressed-crc"
+  );
+}
+
 /** Same (size, content) pair, i.e. this read taught us nothing new. */
 function sameInvalidReadResult<T>(
   a: ReadPayloadOutcome<T>,
@@ -2729,9 +2701,11 @@ export async function safeReadJson<T>(
   //  (b) every other found-but-invalid read gets AT LEAST one retry — the
   //      first comparison has nothing to compare against yet (`previous` is
   //      null), so the loop always takes its first trip around.
-  //  (c) from the SECOND invalid read onward, if it is IDENTICAL — same
-  //      size AND same content fingerprint — to the read immediately before
-  //      it, that is a file that read the same twice in a row: a genuinely
+  //  (c) from the SECOND invalid read onward, if it is a COMPLETE-document
+  //      failure (hash / envelope / compressed-crc — never json-parse, which
+  //      a persistent stale size view reproduces identically) and IDENTICAL
+  //      — same size AND same content fingerprint — to the read immediately
+  //      before it, that is a file that read the same twice in a row: a genuinely
   //      stable, corrupt file (same-size garbage included — size alone
   //      can't tell a torn write that is still changing from one that has
   //      settled). Stop paying further delay and fall through now. This is
@@ -2741,7 +2715,12 @@ export async function safeReadJson<T>(
   let previousInvalid: ReadPayloadOutcome<T> | null = null;
   while (live.found && live.payload === null && staleRetries < LIVE_INVALID_RETRY_DELAYS_MS.length) {
     const isUnconditionallyStale = live.reportedSize === 0;
-    if (!isUnconditionallyStale && previousInvalid !== null && sameInvalidReadResult(previousInvalid, live)) {
+    if (
+      !isUnconditionallyStale &&
+      previousInvalid !== null &&
+      isCompleteDocumentFailure(live) &&
+      sameInvalidReadResult(previousInvalid, live)
+    ) {
       break;
     }
     const delay = nextRetryDelayMs(LIVE_INVALID_RETRY_DELAYS_MS[staleRetries]!, options?.deadline);
