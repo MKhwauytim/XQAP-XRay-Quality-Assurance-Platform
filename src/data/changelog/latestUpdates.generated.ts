@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v139.0",
+    "date": "2026-09-16",
+    "bucket": "enhancement",
+    "scope": "ci",
+    "title": "delete the Playwright E2E suite, its workflow, and its toolchain"
+  },
+  {
     "version": "v138.0",
     "date": "2026-09-15",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "answers",
     "title": "local IndexedDB backup for saved answers, reconciled on load and every 60s; Fix (history): stop re-discovering the same name-too-long path limit on every save"
-  },
-  {
-    "version": "v134.3",
-    "date": "2026-09-08",
-    "bucket": "fix",
-    "scope": "approvals",
-    "title": "approveReplacement no longer trusts a stale distribution cache; Add (templates): admin repair for template files stuck serving from .bak"
   }
 ];
