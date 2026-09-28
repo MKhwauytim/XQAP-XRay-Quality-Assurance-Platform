@@ -5,6 +5,27 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v140.11",
+    "date": "2026-09-28",
+    "bucket": "fix",
+    "scope": "population",
+    "title": "close the manifest-probe gap that could still fool the mandatory archive's retry gate"
+  },
+  {
+    "version": "v140.10",
+    "date": "2026-09-28",
+    "bucket": "fix",
+    "scope": "storage",
+    "title": "read answer/distribution segment tails in parallel"
+  },
+  {
+    "version": "v140.9",
+    "date": "2026-09-28",
+    "bucket": "fix",
+    "scope": "referrals",
+    "title": "stale reload can no longer downgrade a submitted answer"
+  },
+  {
     "version": "v140.8",
     "date": "2026-09-28",
     "bucket": "fix",
@@ -52,26 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "population",
     "title": "refuse a population overwrite that would orphan a worked sample"
-  },
-  {
-    "version": "v140.1",
-    "date": "2026-09-28",
-    "bucket": "fix",
-    "scope": "referrals",
-    "title": "the «متابعة العمل» strip follows the case-filter chips"
-  },
-  {
-    "version": "v140.0",
-    "date": "2026-09-28",
-    "bucket": "fix",
-    "scope": "integrity",
-    "title": "boot self-check no longer flags the deck-preference files in 6-templates as unrecoverable"
-  },
-  {
-    "version": "v139.0",
-    "date": "2026-09-16",
-    "bucket": "enhancement",
-    "scope": "ci",
-    "title": "delete the Playwright E2E suite, its workflow, and its toolchain"
   }
 ];

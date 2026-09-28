@@ -12,6 +12,7 @@ import {
   isCompressedFile,
   type SafeWriteProgressPhase,
 } from "../storage/safeWrite";
+import { isNotFoundError } from "../storage/transientFileErrors";
 import { casLoop } from "../storage/casLoop";
 import { mapWithConcurrency } from "../storage/concurrency";
 import { withResourceLock } from "../storage/webLocks";
@@ -384,12 +385,14 @@ export async function archiveBeforeOverwrite(
       retryMissingSource: options.retryMissingSource,
     });
   } catch (error) {
-    // copyFileBytesVerified opens its target via `getFileHandle(..., { create:
-    // true })` before it ever reads the source, so a source read that fails
-    // mid-copy (this catch) still leaves a 0-byte `archiveName` behind. Clean
-    // it up rather than leaving an empty, misleading "archive" next to the
-    // live file — best-effort: a failure here must never mask the original
-    // copy failure above it. `safeRemoveJson`, not a raw `removeEntry`: it is
+    // copyFileBytesVerified opens the SOURCE first, but once that succeeds it
+    // opens the TARGET (`getFileHandle(..., { create: true })`, which creates
+    // a 0-byte file immediately) BEFORE it reads a single byte of the
+    // source's CONTENT — so a source read that fails mid-copy (this catch)
+    // still leaves that 0-byte `archiveName` behind. Clean it up rather than
+    // leaving an empty, misleading "archive" next to the live file — best-
+    // effort: a failure here must never mask the original copy failure
+    // above it. `safeRemoveJson`, not a raw `removeEntry`: it is
     // the storage layer's own delete primitive (lint-enforced everywhere
     // else in this codebase); its `.tmp`/`.bak` sibling cleanup is a no-op
     // here (this is a fresh byte-copy target, never a `safeWriteJson`
@@ -513,6 +516,24 @@ async function saveMonthRunLocked(
       // Ensure numbered population folder exists
       const populationDir = await getPopulationRoot(directoryHandle, true);
 
+      // Fix round 3 (F5 finding #1, reviewer's minimal sound alternative):
+      // probe whether the MONTH FOLDER already existed BEFORE `ensureFolder`
+      // below creates it (`{ create: true }`) — a cheap, definitive half of
+      // the retryMissingSource decision below. If this folder was already
+      // there, a prior save into it is certain, whatever the manifest probe
+      // (which reads a FILE inside it, and can itself be fooled by the same
+      // kind of transient miss this whole fix exists to rule out) turns up.
+      // Fails SAFE, not fast: anything other than a clean `NotFoundError` —
+      // a transient `NotReadable`, a lagging directory listing — must not be
+      // read as "this month never existed".
+      let monthDirPreexisted: boolean;
+      try {
+        await populationDir.getDirectoryHandle(monthFolderName, { create: false });
+        monthDirPreexisted = true;
+      } catch (error) {
+        monthDirPreexisted = !isNotFoundError(error);
+      }
+
       // Create month folder and subfolders
       const monthDir = await ensureFolder(populationDir, monthFolderName);
       const rawDir = await ensureFolder(monthDir, POPULATION_SUBFOLDERS.raw);
@@ -526,12 +547,6 @@ async function saveMonthRunLocked(
       // Fix round 2 (F5 finding #1): whether the mandatory archive below rides
       // the patient `retryMissingSource` ladder (~11s worst case) depends on
       // whether a population was ever actually written for this month before.
-      // `month.manifest.json` is written LAST by every prior successful call
-      // to this function ("must be last: it records totals/paths that depend
-      // on every write above having committed" — see the manifest write
-      // below), so its presence is proof `population.final.json` was
-      // committed by a prior run and SHOULD still be there; its absence means
-      // this is this month's first-ever save, which has nothing to protect.
       // Gating on that — rather than always retrying — matters for more than
       // latency: unconditionally retrying on EVERY save, including the
       // ordinary first save of a brand-new month, made every fresh month's
@@ -539,16 +554,42 @@ async function saveMonthRunLocked(
       // exist, which is not just slow but broke several existing tests
       // outright (20s `testTimeout` exceeded — see task-4-report.md's
       // fix-round-2 section for the measured numbers).
-      const priorManifest = await loadMonthManifest(directoryHandle, monthFolderName);
+      //
+      // Fix round 3 (F5 finding #1, reopened): gating on
+      // `loadMonthManifest(...) !== null` alone — as round 2 did — could
+      // still be fooled the exact same way finding #1 originally described,
+      // just moved one layer up: `loadMonthManifest` swallows EVERY failure
+      // (a transient NotFound/NotReadable on the manifest file itself, a
+      // lagging `getPopulationMonthDir`, a corrupt manifest) into `null`,
+      // which this call site would then read as "no prior save" — exactly
+      // when an SMB listing lag makes that miss MOST likely to be spurious
+      // and CORRELATED with the very NotFound the mandatory archive is about
+      // to hit on `population.final.json` in the same lagging folder. A
+      // prior save can also legitimately commit `population.final.json`
+      // without ever reaching the manifest write (it is written LAST — a
+      // throw from the `processing.summary.json` write, a failed manifest
+      // write, or a closed tab mid-save all leave a populated
+      // `population.final.json` with no manifest at all), which `!== null`
+      // alone cannot see either way.
+      //
+      // `probeMonthManifestState` (below) is a SEPARATE, tri-state probe
+      // that does NOT touch `loadMonthManifest`'s existing null-on-any-
+      // failure contract (other callers keep exactly today's behavior): it
+      // tells "present" apart from a CLEAN "not_found" apart from "error"
+      // (couldn't tell). `retryMissingSource` below is true unless BOTH the
+      // month folder is confirmed brand-new (`monthDirPreexisted` false) AND
+      // the manifest probe is a clean "not_found" — any other combination
+      // means a prior save is still possible, so it is safer to wait than to
+      // silently skip the archive.
+      const manifestState = await probeMonthManifestState(directoryHandle, monthFolderName);
+      const retryMissingSource = monthDirPreexisted || manifestState !== "not_found";
       // Mandatory, and BEFORE anything is overwritten: without this copy a
       // re-process leaves only safeWrite's single `.bak` of the population.
-      // `retryMissingSource: priorManifest !== null`: a transient SMB
-      // NotFound on an ACTUALLY-existing population.final.json must never be
-      // read as "nothing to archive" — see archiveBeforeOverwrite's doc
-      // comment for why this is the mandatory call's only opt-in.
+      // See archiveBeforeOverwrite's doc comment for why this is the
+      // mandatory call's only opt-in.
       await archiveBeforeOverwrite(processedDir, "population.final.json", stamp, {
         required: true,
-        retryMissingSource: priorManifest !== null,
+        retryMissingSource,
       });
 
       // Copy source xlsx files and write raw JSON — these four writes target
@@ -1228,6 +1269,41 @@ export type MonthEditData = {
 // upcoming opt-in MonthLoadScope needs to fetch only what a screen actually
 // requires. loadMonthForEditing (below) composes all five and must remain
 // byte-identical to its pre-extraction output for every existing caller.
+
+/**
+ * A2 fix round 3 (F5 finding #1): tri-state, ERROR-SAFE probe for whether
+ * `month.manifest.json` exists — deliberately SEPARATE from
+ * {@link loadMonthManifest} below, whose null-on-any-failure contract is
+ * kept exactly as it is for every one of its other callers.
+ *
+ * `"not_found"` is returned ONLY for a clean, confirmed absence (the month
+ * folder itself is missing, or the manifest file inside it is). Every other
+ * outcome — a transient `NotReadable`, a lagging directory open, a corrupt
+ * manifest, or anything this could not otherwise classify — is `"error"`,
+ * because from `saveMonthRunLocked`'s "is a prior save possible" question all
+ * of those mean exactly the same thing: it cannot be ruled out, so treat it
+ * as if it might be there.
+ */
+export type MonthManifestProbeState = "present" | "not_found" | "error";
+
+export async function probeMonthManifestState(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<MonthManifestProbeState> {
+  let monthDir: DirectoryHandleLike;
+  try {
+    monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
+  } catch (error) {
+    return isNotFoundError(error) ? "not_found" : "error";
+  }
+  try {
+    const result = await safeReadJson<MonthManifestData>(monthDir, "month.manifest.json");
+    if (result.ok) return "present";
+    return result.reason === "missing" ? "not_found" : "error";
+  } catch {
+    return "error";
+  }
+}
 
 export async function loadMonthManifest(
   directoryHandle: DirectoryHandleLike,

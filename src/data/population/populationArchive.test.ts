@@ -301,6 +301,89 @@ describe("saveMonthRun archives before it overwrites (A2)", () => {
     expect(live.ok && live.value.rows.map((row) => row["xrayImageId"])).toEqual(["B1"]);
   });
 
+  // Fix round 3, requirement (1): a MANIFEST READ that throws (not a clean
+  // absence) must still be treated as "a prior save is possible" — gating
+  // retryMissingSource on `loadMonthManifest(...) !== null` alone (round 2)
+  // could be fooled the exact same way finding #1 originally described, just
+  // moved one layer up: `loadMonthManifest` swallows a transient read error
+  // into `null`, exactly like the round-1 bug it was meant to fix. Faults
+  // EVERY read of the manifest's content (NotReadableError, 5 times — enough
+  // to exhaust `probeMonthManifestState`'s own retry ladder and throw, but
+  // not so many that it also breaks this save's OWN later manifest write,
+  // which reads the file fresh and is unaffected once the fault budget is
+  // spent) alongside a transient NotFound on population.final.json's own
+  // open — proving the archive still lands despite BOTH.
+  test("a manifest read that throws NotReadableError still lets the mandatory archive retry through a transient NotFound", async () => {
+    const root = createMemoryDirectory("root");
+    const first = await saveMonthRun({
+      directoryHandle: root,
+      ...baseParams,
+      processedRows: [makePopulationRow("A1") as unknown as Record<string, unknown>],
+    });
+    expect(first.ok).toBe(true);
+
+    setSimulatedFaults(root, [
+      { operation: "readFile", name: "month.manifest.json", errorName: "NotReadableError", times: 5 },
+      { operation: "getFileHandle", name: "population.final.json", create: false, errorName: "NotFoundError", times: 3 },
+    ]);
+    const second = await saveMonthRun({
+      directoryHandle: root,
+      ...baseParams,
+      processedRows: [makePopulationRow("B1") as unknown as Record<string, unknown>],
+    });
+    setSimulatedFaults(root, []);
+
+    expect(second.ok).toBe(true);
+    const processed = await monthSubdir(root, "2-processed");
+    const archives = (await fileNames(processed)).filter((n) => /^population\.final\..+\.superseded\.json$/.test(n));
+    expect(archives).toHaveLength(1);
+    const archived = await safeReadJson<PopulationFinalData>(processed, archives[0]!);
+    expect(archived.ok && archived.value.rows.map((row) => row["xrayImageId"])).toEqual(["A1"]);
+    const live = await safeReadJson<PopulationFinalData>(processed, "population.final.json");
+    expect(live.ok && live.value.rows.map((row) => row["xrayImageId"])).toEqual(["B1"]);
+  });
+
+  // Fix round 3, requirement (2): a prior save can commit
+  // population.final.json without ever reaching the manifest write (it is
+  // written LAST — a throw from the processing-summary write, a failed
+  // manifest write, or a closed tab mid-save all leave exactly this shape).
+  // `manifestState` alone would correctly report a clean "not_found" here —
+  // there really is no manifest — but `monthDirPreexisted` (the month folder
+  // itself, which DOES already exist) must still force the retry, or the
+  // real population.final.json sitting right there gets silently skipped.
+  test("population.final.json exists but the manifest never landed (interrupted prior save) — the mandatory archive still retries", async () => {
+    const root = createMemoryDirectory("root");
+    const first = await saveMonthRun({
+      directoryHandle: root,
+      ...baseParams,
+      processedRows: [makePopulationRow("A1") as unknown as Record<string, unknown>],
+    });
+    expect(first.ok).toBe(true);
+
+    const population = await root.getDirectoryHandle("1-population", { create: false });
+    const monthDir = await population.getDirectoryHandle(MONTH, { create: false });
+    await monthDir.removeEntry?.("month.manifest.json");
+
+    setSimulatedFaults(root, [
+      { operation: "getFileHandle", name: "population.final.json", create: false, errorName: "NotFoundError", times: 3 },
+    ]);
+    const second = await saveMonthRun({
+      directoryHandle: root,
+      ...baseParams,
+      processedRows: [makePopulationRow("B1") as unknown as Record<string, unknown>],
+    });
+    setSimulatedFaults(root, []);
+
+    expect(second.ok).toBe(true);
+    const processed = await monthSubdir(root, "2-processed");
+    const archives = (await fileNames(processed)).filter((n) => /^population\.final\..+\.superseded\.json$/.test(n));
+    expect(archives).toHaveLength(1);
+    const archived = await safeReadJson<PopulationFinalData>(processed, archives[0]!);
+    expect(archived.ok && archived.value.rows.map((row) => row["xrayImageId"])).toEqual(["A1"]);
+    const live = await safeReadJson<PopulationFinalData>(processed, "population.final.json");
+    expect(live.ok && live.value.rows.map((row) => row["xrayImageId"])).toEqual(["B1"]);
+  });
+
   // Fix round 2, the other direction: a genuinely first-ever save of a month
   // (no `month.manifest.json` yet) has no live population.final.json to
   // protect, so `retryMissingSource` must stay OFF for it — proving this
@@ -314,6 +397,12 @@ describe("saveMonthRun archives before it overwrites (A2)", () => {
   // directly at the storage-layer unit level instead, in
   // `safeWrite.copyVerifiedRetry.test.ts` — pinning it here too would just
   // re-pay the same ~11s for no additional coverage.
+  //
+  // Fix round 3, requirement (3): a brand-new month — no preexisting month
+  // folder, no manifest, genuinely nothing there — must stay on this fast
+  // path under the new `monthDirPreexisted || manifestState !== "not_found"`
+  // gate too, same as it did under round 2's simpler `priorManifest !== null`
+  // gate. This test already proves exactly that; nothing else needed here.
   test("a genuinely first-ever save resolves fast, with nothing to archive", async () => {
     const root = createMemoryDirectory("root");
     const startedAt = performance.now();
