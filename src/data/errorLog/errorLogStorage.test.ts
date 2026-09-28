@@ -157,6 +157,19 @@ describe("errorLogStorage", () => {
     expect(all.map((e) => e.id)).toEqual(["a"]);
   });
 
+  it("re-sending a batch with the same ids is idempotent in the live file", async () => {
+    const dir = root();
+    const batch = [entry({ id: "same-1" }), entry({ id: "same-2" })];
+    await appendUserErrors(dir, "alice", batch);
+    await appendUserErrors(dir, "alice", batch);
+    const all = await readAllWorkspaceErrors(dir);
+    expect(all.map((e) => e.id).sort()).toEqual(["same-1", "same-2"]);
+    const system = await dir.getDirectoryHandle("5-system", { create: false });
+    const errors = await system.getDirectoryHandle("system-errors", { create: false });
+    const handle = await errors.getFileHandle(errorsFileName("alice"), { create: false });
+    expect(JSON.parse(await (await handle.getFile()).text()).data.entries).toHaveLength(2);
+  });
+
   // P1 hysteresis: mirrors the actionLog
   // pin. Past the cap, the live file used to be trimmed exactly back to the
   // cap on EVERY flush, so the archive was rewritten on every flush forever.

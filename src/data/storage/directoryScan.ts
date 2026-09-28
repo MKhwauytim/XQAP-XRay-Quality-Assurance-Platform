@@ -2,6 +2,7 @@ import type { DirectoryHandleLike, FileHandleLike } from "./fileSystemAccess";
 import { safeReadJson } from "./safeWrite";
 import { subscribeToDataRefresh } from "../workspace/dataRefreshSignal";
 import { logError } from "./errorLogger";
+import { directoryResourceKey } from "./webLocks";
 import {
   TRANSIENT_WRITE_RETRY_DELAYS_MS,
   isNotFoundError,
@@ -435,7 +436,8 @@ export function __resetVanishedEntryLogForTests(): void {
 
 function logVanishedEntries(context: string, dir: DirectoryHandleLike, names: string[]): void {
   const fresh = names.filter((name) => {
-    const key = `${context}|${dir.name}|${name}`;
+    // Full path when registered: `dir.name` alone is "distribution.events" in every month.
+    const key = `${context}|${directoryResourceKey(dir, name)}`;
     if (reportedVanishedKeys.has(key)) return false;
     reportedVanishedKeys.add(key);
     return true;

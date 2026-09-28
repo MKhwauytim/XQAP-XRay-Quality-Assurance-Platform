@@ -40,7 +40,7 @@ const DEFAULT_FLUSH_DELAY_MS = 5_000;
  * (each landing alone in the 5 s window) paid that on nearly every save. The
  * batch threshold, `pagehide` and tab-hidden flushes deliberately bypass it.
  */
-const DEFAULT_MIN_FLUSH_INTERVAL_MS = 300_000;
+const DEFAULT_MIN_FLUSH_INTERVAL_MS = 120_000;
 const DEFAULT_MAX_PENDING = 200;
 
 const INTERNAL_CONTEXT_PREFIX = "errorlog:";
@@ -71,13 +71,20 @@ export type WorkspaceErrorSinkOptions = {
   minFlushIntervalMs?: number;
 };
 
-let pending: ErrorEntry[] = [];
+/**
+ * Queued entries are already PERSISTED-shaped: the id is assigned once, at
+ * enqueue, so a batch that is re-sent after a write that landed but reported
+ * failure carries the same ids and dedups instead of duplicating.
+ */
+let pending: PersistedErrorEntry[] = [];
 let droppedSinceLastFlush = 0;
 let installedOptions: Required<Pick<WorkspaceErrorSinkOptions, "directoryHandle" | "username" | "batchSize" | "flushDelayMs" | "maxPending" | "minFlushIntervalMs">> | null = null;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let inFlightFlush: Promise<void> | null = null;
 let flushAgainAfter = false;
 let lastFlushStartedAt = 0;
+/** After a failed write, the batch-size bypass is suppressed until this time (ms epoch). */
+let retryBackoffUntil = 0;
 
 function createEntryId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -126,14 +133,14 @@ function enqueue(entry: ErrorEntry): void {
   if (installedOptions === null) return;
   if (isOwnFailure(entry.context)) return;
 
-  pending.push(entry);
+  pending.push(toPersisted(entry, installedOptions.username));
   if (pending.length > installedOptions.maxPending) {
     const overflowCount = pending.length - installedOptions.maxPending;
     pending.splice(0, overflowCount);
     droppedSinceLastFlush += overflowCount;
   }
 
-  if (pending.length >= installedOptions.batchSize) {
+  if (pending.length >= installedOptions.batchSize && Date.now() >= retryBackoffUntil) {
     void flushErrorLogNow();
   } else {
     armFlushTimer();
@@ -184,7 +191,7 @@ async function doFlush(): Promise<void> {
 
   if (batch.length === 0 && dropped === 0) return;
 
-  const persisted = batch.map((entry) => toPersisted(entry, options.username));
+  const persisted = batch.slice();
   if (dropped > 0) {
     persisted.unshift({
       id: createEntryId(),
@@ -199,14 +206,19 @@ async function doFlush(): Promise<void> {
 
   lastFlushStartedAt = Date.now();
   const ok = await appendUserErrorsChecked(options.directoryHandle, options.username, persisted);
-  if (!ok && installedOptions === options) {
-    // Never drop on a failed write: put the batch back in front of anything
-    // that arrived meanwhile (bounded by maxPending, oldest dropped and
-    // counted) and retry on the normal throttled timer, not in a tight loop.
-    const restored = batch.concat(pending);
+  if (ok) {
+    retryBackoffUntil = 0;
+  } else if (installedOptions === options) {
+    // Never drop on a failed write: put the SAME persisted entries (same ids,
+    // including any overflow marker) back in front of anything that arrived
+    // meanwhile, bounded by maxPending (oldest dropped and counted). Suppress
+    // the batch-size bypass until the throttled timer fires, otherwise every
+    // new error on a sick share would fire another full failing casLoop.
+    const restored = persisted.concat(pending);
     const over = Math.max(0, restored.length - options.maxPending);
     pending = over > 0 ? restored.slice(over) : restored;
-    droppedSinceLastFlush += dropped + over;
+    droppedSinceLastFlush += over;
+    retryBackoffUntil = Date.now() + options.minFlushIntervalMs;
     armFlushTimer();
   }
 }
@@ -226,6 +238,7 @@ export function installWorkspaceErrorSink(options: WorkspaceErrorSinkOptions): (
     minFlushIntervalMs: options.minFlushIntervalMs ?? DEFAULT_MIN_FLUSH_INTERVAL_MS,
   };
   lastFlushStartedAt = 0;
+  retryBackoffUntil = 0;
 
   registerErrorSink(enqueue);
 

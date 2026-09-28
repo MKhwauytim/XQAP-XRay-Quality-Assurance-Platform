@@ -240,6 +240,21 @@ describe("readSegmentTails when a segment vanishes or is transiently invisible",
     clearSimulatedFaults(dir);
   });
 
+  it("does not suppress the same file name skipped in a different month folder", async () => {
+    const root = createMemoryDirectory("root");
+    const may = await (await root.getDirectoryHandle("5-may", { create: true })).getDirectoryHandle("distribution.events", { create: true });
+    const jun = await (await root.getDirectoryHandle("6-jun", { create: true })).getDirectoryHandle("distribution.events", { create: true });
+    for (const dir of [may, jun]) {
+      await writeRawFile(dir, "devGone-s1.ndjson", "x\n");
+      setSimulatedFaults(dir, [
+        { operation: "getFile", name: "devGone-s1.ndjson", errorName: "NotFoundError", times: Number.POSITIVE_INFINITY },
+      ]);
+      await readSegmentTails(dir, { suffix: ".ndjson", knownOffsets: {} });
+    }
+    const logged = getRecentErrors().filter((entry) => entry.context === "directoryScan:segment-tails");
+    expect(logged).toHaveLength(2);
+  });
+
   it("caps retries with a per-CALL budget, so a whole-directory outage cannot scale the wait with segment count", async () => {
     const dir = createMemoryDirectory("root", { trackOperations: true });
     for (let index = 0; index < 6; index += 1) {

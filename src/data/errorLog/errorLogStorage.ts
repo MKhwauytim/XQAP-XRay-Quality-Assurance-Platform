@@ -234,7 +234,11 @@ export async function appendUserErrorsChecked(
           const dir = await getSystemErrorsDir(directoryHandle, true);
           const existing = await readUserErrorLogFile(directoryHandle, username);
           const nextRevision = (existing.revision ?? 0) + 1;
-          const combined = [...existing.entries, ...batch];
+          // Idempotent by id: a batch that already landed (a write that
+          // committed but whose casLoop reported failure) and is re-sent must
+          // not be appended twice, nor inflate the cap/hysteresis arithmetic.
+          const existingIds = new Set(existing.entries.map((e) => e.id));
+          const combined = [...existing.entries, ...batch.filter((e) => !existingIds.has(e.id))];
           // P1 hysteresis: archive overflow (oldest first) BEFORE trimming,
           // but trim all the way down to the low-water mark in this one
           // archive write rather than back to the cap — see actionLog.ts's
