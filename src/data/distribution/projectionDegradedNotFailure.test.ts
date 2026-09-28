@@ -67,6 +67,16 @@ function shareWithUnwritableProjection(): DirectoryHandleLike {
   });
 }
 
+// The three projection-failure cases below drive the projection's casLoop to
+// exhaustion against a file whose commit always fails, which leaves a 0-byte
+// `distribution.log.json` behind. Every casLoop attempt then reads that 0-byte
+// file through `safeReadJson`'s stale-snapshot ladder (150 + 600 ms), which is
+// deliberately NOT cut short for a 0-byte file: stopping early would fall back
+// to the one-revision-older `.bak` and let a casLoop writer build on a stale base.
+// That bounded, intended cost puts these cases at ~15-25 s, so they get an
+// explicit budget instead of the 20 s default.
+const PROJECTION_EXHAUSTION_TIMEOUT_MS = 60_000;
+
 describe("appendDistributionEvents — a failed projection write is not a failed append", () => {
   it("reports ok when the events are durable but the projection CAS exhausted", async () => {
     root = shareWithUnwritableProjection();
@@ -82,7 +92,7 @@ describe("appendDistributionEvents — a failed projection write is not a failed
     // Pre-fix this was { ok: false, error: <XQ-IO-036 sentence> }, which is what
     // turned a committed substitution into a permanent "استبدال failed".
     expect(result.ok).toBe(true);
-  });
+  }, PROJECTION_EXHAUSTION_TIMEOUT_MS);
 
   it("flags the degradation so the caller can rebuild the cache and the log records it", async () => {
     root = shareWithUnwritableProjection();
@@ -104,7 +114,7 @@ describe("appendDistributionEvents — a failed projection write is not a failed
         entry.context.includes("distribution:projection-degraded")
       )
     ).toBe(true);
-  });
+  }, PROJECTION_EXHAUSTION_TIMEOUT_MS);
 
   it("keeps the appended event durable and readable despite the projection failure", async () => {
     root = shareWithUnwritableProjection();
@@ -122,7 +132,7 @@ describe("appendDistributionEvents — a failed projection write is not a failed
     // returning ok correct rather than merely convenient.
     const log = await loadDistributionLog(root, MONTH);
     expect(log.events.some((event) => event.xrayImageId === "XR-0003")).toBe(true);
-  });
+  }, PROJECTION_EXHAUSTION_TIMEOUT_MS);
 
   it("still reports failure when the DURABLE event write itself fails", async () => {
     // The guard on the change above: only the rebuildable projection is
