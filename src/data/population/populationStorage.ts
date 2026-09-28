@@ -10,6 +10,7 @@ import {
   isCompressedFile,
   type SafeWriteProgressPhase,
 } from "../storage/safeWrite";
+import { isNotFoundError } from "../storage/transientFileErrors";
 import { casLoop } from "../storage/casLoop";
 import { mapWithConcurrency } from "../storage/concurrency";
 import { withResourceLock } from "../storage/webLocks";
@@ -293,6 +294,67 @@ async function archiveExistingRaw(
   }
 }
 
+/**
+ * Filename-safe ISO timestamp — the same stamp shape `archiveExistingRaw`
+ * uses, with a short random suffix appended (F20): two archives written
+ * within the same millisecond (a fast re-save, or two source files archived
+ * back-to-back) must never collide and silently clobber one archive with
+ * another rather than actually preserving both.
+ */
+export function supersedeStamp(now: Date = new Date()): string {
+  const random = crypto.randomUUID().slice(0, 8);
+  return `${now.toISOString().replace(/:/g, "")}-${random}`;
+}
+
+/** `population.final.json` → `population.final.{stamp}.superseded.json`; `risk.source.xlsx` → `risk.source.{stamp}.superseded.xlsx`. */
+export function supersededFileName(liveName: string, stamp: string): string {
+  const dot = liveName.lastIndexOf(".");
+  return dot <= 0
+    ? `${liveName}.${stamp}.superseded`
+    : `${liveName.slice(0, dot)}.${stamp}.superseded${liveName.slice(dot)}`;
+}
+
+/**
+ * A2: byte-copy `liveName` aside before it is overwritten. Returns the archive
+ * name, or null when there was nothing to archive. A byte copy, like the
+ * compressed-raw branch of `archiveExistingRaw`: the archive is the original
+ * record, and `safeReadJson`'s dual read opens it whichever framing it has.
+ *
+ * `required: true` (population.final.json) turns an archive failure into a
+ * thrown error, so the caller's save is refused rather than overwriting the
+ * only full copy; otherwise failures are logged and the save proceeds.
+ *
+ * F5: existence is checked through `dir.getFileHandle` guarded by
+ * `isNotFoundError` (the storage layer's own classifier for "this entry does
+ * not exist" — see `transientFileErrors.ts`), not a raw try/catch on error
+ * name; the byte copy itself goes through `copyFileBytes`, the storage
+ * layer's own primitive, never a direct read/write pair.
+ */
+export async function archiveBeforeOverwrite(
+  dir: DirectoryHandleLike,
+  liveName: string,
+  stamp: string,
+  options: { required?: boolean } = {}
+): Promise<string | null> {
+  try {
+    await dir.getFileHandle(liveName, { create: false });
+  } catch (error) {
+    if (isNotFoundError(error)) return null;
+    if (options.required) throw error;
+    logError("population:archive-superseded", error);
+    return null;
+  }
+  const archiveName = supersededFileName(liveName, stamp);
+  try {
+    await copyFileBytes(dir, liveName, dir, archiveName);
+    return archiveName;
+  } catch (error) {
+    if (options.required) throw error;
+    logError("population:archive-superseded", error);
+    return null;
+  }
+}
+
 export async function saveMonthRun(
   params: SaveMonthRunParams
 ): Promise<SaveMonthRunResult> {
@@ -391,6 +453,13 @@ async function saveMonthRunLocked(
       await ensureFolder(monthDir, "sample");
       await ensureFolder(monthDir, "reports");
 
+      // A2: one stamp per save, shared by every archive this save writes, so
+      // the population and the sources it was built from stay pairable.
+      const stamp = supersedeStamp(new Date(now));
+      // Mandatory, and BEFORE anything is overwritten: without this copy a
+      // re-process leaves only safeWrite's single `.bak` of the population.
+      await archiveBeforeOverwrite(processedDir, "population.final.json", stamp, { required: true });
+
       // Copy source xlsx files and write raw JSON — these four writes target
       // disjoint files with no data dependency on each other, so they run
       // concurrently. Each conditional branch is wrapped in an IIFE so
@@ -401,6 +470,7 @@ async function saveMonthRunLocked(
           if (!params.riskSourceFile) return;
           const buf = await params.riskSourceFile.arrayBuffer();
           const ext = params.riskSourceFile.name.split(".").pop() ?? "xlsx";
+          await archiveBeforeOverwrite(rawDir, `risk.source.${ext}`, stamp);
           await saveBinaryFile(rawDir, `risk.source.${ext}`, buf);
         })(),
         (async () => {
@@ -414,6 +484,7 @@ async function saveMonthRunLocked(
             const buf = await file.arrayBuffer();
             const ext = file.name.split(".").pop() ?? "xlsx";
             const name = single ? `bi.source.${ext}` : `bi.source.${index + 1}.${ext}`;
+            await archiveBeforeOverwrite(rawDir, name, stamp);
             await saveBinaryFile(rawDir, name, buf);
           }
         })(),

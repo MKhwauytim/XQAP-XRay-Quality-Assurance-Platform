@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v140.6",
+    "date": "2026-09-28",
+    "bucket": "feature",
+    "scope": "population",
+    "title": "keep a superseded copy of population.final.json and the source workbooks before a re-process overwrites them"
+  },
+  {
     "version": "v140.5",
     "date": "2026-09-28",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "redesign",
     "scope": "referrals",
     "title": "extract the column-preset writers and the queue shell to get back under the complexity budget"
-  },
-  {
-    "version": "v137.0",
-    "date": "2026-09-09",
-    "bucket": "feature",
-    "scope": "integrity",
-    "title": "admin boot self-check that repairs damaged and orphaned workspace files and reports what it did"
   }
 ];
