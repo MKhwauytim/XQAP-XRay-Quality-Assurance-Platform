@@ -808,6 +808,9 @@ async function performAnswerWrite(
   const eventId = crypto.randomUUID();
   const eventAt = nextAnswerEventAt();
   const { writer, config: segmentConfig } = answerWriterIdentity(directoryHandle, monthFolderName, username);
+  // ONE budget for the whole user action, shared by casLoop (new attempts) and
+  // the append's inner ladders (A1) — see operationDeadline.ts.
+  const deadline = createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "answers:interactive-write");
   // No pre-change history write here any more. The state a snapshot would have
   // copied is already durable in `answers.events/*.ndjson`, which is
   // append-only and never pruned, so `actionHistoryReaders.ts` derives the same
@@ -871,7 +874,7 @@ async function performAnswerWrite(
       // the answer-save proposal) and never call safeWriteJson for a real
       // save/reopen/note anymore, so they silently lost that protection; this
       // restores an equivalent (a recoverable prior state) for the new model.
-      await appendAnswerEventSegment(mainDir, batch, writer, segmentConfig);
+      await appendAnswerEventSegment(mainDir, batch, writer, segmentConfig, { deadline });
       reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
       return { done: true, result: { ok: true as const } };
     },
@@ -883,7 +886,7 @@ async function performAnswerWrite(
       // multiply against safeWriteJson's two ~11 s verify-readback ladders —
       // ~308 s, the "answer save takes 4 minutes" report. See
       // operationDeadline.ts; the first attempt always runs regardless.
-      deadline: createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "answers:interactive-write"),
+      deadline,
       conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ إجابة الموظف بعد عدة محاولات.",
       onExhausted: (cause, code) => {
         logError(`answerStorage:${telemetryAction}`, cause instanceof Error ? cause : new Error(String(cause)), {
@@ -1185,6 +1188,9 @@ async function performOnBehalfWrite(
   const eventId = crypto.randomUUID();
   const eventAt = nextAnswerEventAt();
   const { writer, config: segmentConfig } = answerWriterIdentity(directoryHandle, monthFolderName, author);
+  // ONE budget for the whole user action, shared by casLoop (new attempts) and
+  // the append's inner ladders (A1) — see operationDeadline.ts.
+  const deadline = createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "answers:interactive-write");
   const xrayImageId = item.xrayImageId;
 
   const result = await casLoop<{ ok: true } | { ok: false; error: string }>(
@@ -1222,7 +1228,7 @@ async function performOnBehalfWrite(
         reason,
       };
       const batch = seedEvent ? [seedEvent, onBehalfEvent] : [onBehalfEvent];
-      await appendAnswerEventSegment(mainDir, batch, writer, segmentConfig);
+      await appendAnswerEventSegment(mainDir, batch, writer, segmentConfig, { deadline });
       reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
 
       // CONFIRM (§5): fresh read, same comparator, SINGLE-ITEM scope — the
@@ -1271,7 +1277,7 @@ async function performOnBehalfWrite(
       // multiply against safeWriteJson's two ~11 s verify-readback ladders —
       // ~308 s, the "answer save takes 4 minutes" report. See
       // operationDeadline.ts; the first attempt always runs regardless.
-      deadline: createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "answers:interactive-write"),
+      deadline,
       conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ الإجابة نيابةً عن الموظف بعد عدة محاولات.",
       onExhausted: (cause, code) => {
         logError("answerStorage:answer-save-on-behalf", cause instanceof Error ? cause : new Error(String(cause)), {

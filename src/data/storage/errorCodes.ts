@@ -350,9 +350,24 @@ export const ERROR_CODES = {
   // which was classified NOWHERE, so `resolveErrorCode` returned null and
   // casLoop reported its XQ-IO-032 catch-all. See `isSnapshotStaleError` in
   // transientFileErrors.ts for the mechanism.
+  //
+  // CORRECTED 2026-09-28 (E1b — see
+  // `.superpowers/sdd/errorlog-2026-09-28/answer-save-invalidstate.md`): on a
+  // segment WRITE's `close()`, this is usually NOT a stale (size, mtime)
+  // snapshot. Chromium's swap-file→target Move collapses every OS-level
+  // replace failure — a sharing violation from another open handle, denied
+  // delete access, a delete-pending state — into the SAME InvalidStateError
+  // and sentence, discarding the real Win32 error. The stale-snapshot story
+  // still holds on the READ path (`getFile()` → `file.text()`), where the
+  // remedy below (retry with a fresh handle/snapshot) is correct. On the
+  // write path it is not: the target is the same file on every retry, so
+  // patience against it does nothing. The append-only event log's writer
+  // (`appendOnlyEventLog.ts`) reflects that: a short ladder, then rotation to
+  // a fresh segment, rather than the long patient ladder this code used to
+  // imply was always the fix.
   "XQ-IO-036": {
     meaning:
-      "InvalidStateError: the (size, mtime) snapshot cached by a File/writable-stream interface object no longer matched the file on disk when the operation touched the bytes — a concurrent write from another machine on the share, or the Windows SMB metadata cache serving a stale mtime to the snapshot. Every retry re-acquires the handle and takes a FRESH snapshot, so retrying is the correct remedy; this code is reported only once the whole ladder is spent",
+      "InvalidStateError. R8(c): on a READ (getFile()/file.text()), this means an OS-level file operation failed — most often because the (size, mtime) snapshot cached by a File interface object no longer matched the file on disk (a concurrent write from another machine, or the Windows SMB metadata cache serving a stale mtime), but Chromium collapses other OS-level failures into this same name too, so 'the snapshot changed' is not the only possible cause; retrying with a fresh handle/snapshot is still the correct remedy either way. On a segment WRITE's close(), Chromium maps ANY swap-file→target replace failure to this same name and sentence — the shared folder refused to replace the file (it may be open on another computer or lack permission), not necessarily a stale snapshot — and retrying the SAME target for long does not help; the writer rotates to a fresh segment after a short ladder instead. This code is reported only once the relevant ladder is spent",
     labelKey: "err_io_036_stale_snapshot",
   },
   "XQ-IO-037": {

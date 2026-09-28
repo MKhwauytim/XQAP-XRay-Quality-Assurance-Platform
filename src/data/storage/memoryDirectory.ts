@@ -96,7 +96,17 @@ export type SimulatedFault = {
     // — another machine or an AV scanner holding the entry open raises
     // NoModificationAllowedError. `safeRemoveJson` rides the transient ladder
     // for exactly that, and this is how that is reproduced deterministically.
-    | "removeEntry";
+    | "removeEntry"
+    // The swap-file→target REPLACE, not the write itself: `createWritable`
+    // faults the OPEN of the writable stream, `close` faults the commit that
+    // follows a SUCCESSFUL `write()`, leaving the target byte-identical to
+    // before (matching `MoveFileEx`'s atomicity — a failed replace never
+    // partially lands). This is how the production XQ-IO-036 root cause is
+    // reproduced: `writable.close()` throwing `InvalidStateError` because the
+    // share refuses to replace one target file, for as many (or as few)
+    // calls as `times` allows. See
+    // `.superpowers/sdd/errorlog-2026-09-28/answer-save-invalidstate.md`.
+    | "close";
   /**
    * Entry name to match. Omit to match every name. For `getFile` / `readFile` /
    * `createWritable` this is the file handle's own name.
@@ -131,6 +141,17 @@ export type SimulatedFault = {
    * 1. Use `Number.POSITIVE_INFINITY` for a permanent failure.
    */
   times?: number;
+  /**
+   * R8(a), `operation: "close"` only: commit the write to `node.files` BEFORE
+   * throwing, instead of the default (throw leaves the target byte-identical
+   * to before — modelling `MoveFileEx`'s atomicity). Models the rarer, more
+   * dangerous edge case where the OS-level replace genuinely landed but the
+   * browser/JS promise still rejected (a timeout racing the real completion,
+   * a late error after the rename already happened) — the shape
+   * `segmentReplaceMayHaveLanded`'s re-read exists to catch, so a caller must
+   * NOT rotate and duplicate the batch into a second file.
+   */
+  commitBeforeThrow?: boolean;
 };
 
 type FaultState = { faults: SimulatedFault[]; consumed: number[]; skipped: number[] };
@@ -227,6 +248,35 @@ function simulatedError(errorName: string, entryName: string): Error {
   const error = new Error(`Simulated ${errorName} for "${entryName}".`);
   error.name = errorName;
   return error;
+}
+
+/**
+ * R8(a): a SIDE-EFFECT-FREE peek — does the fault that WOULD fire for this
+ * `close` entry want the commit applied before the throw? Deliberately
+ * mirrors `applyFaults`' own matching order/rules (first matching fault
+ * wins) without consuming any budget itself; the real `applyFaults` call
+ * right after this one (nothing async runs between them) does the actual
+ * consuming and throwing, so this can never see a different verdict than
+ * the throw that follows it.
+ */
+function closeFaultCommitsBeforeThrow(
+  faultState: FaultState | null,
+  entry: OperationLogEntry
+): boolean {
+  if (!faultState) return false;
+  for (let index = 0; index < faultState.faults.length; index += 1) {
+    const fault = faultState.faults[index]!;
+    if (fault.operation !== entry.operation) continue;
+    if (fault.name !== undefined && fault.name !== entry.name) continue;
+    if (fault.nameSuffix !== undefined && !entry.name.endsWith(fault.nameSuffix)) continue;
+    if (fault.create !== undefined && fault.create !== (entry.create ?? false)) continue;
+    if (fault.nameMinLength !== undefined && entry.name.length < fault.nameMinLength) continue;
+    if (fault.skip !== undefined && faultState.skipped[index]! < fault.skip) continue;
+    const limit = fault.times ?? 1;
+    if (faultState.consumed[index]! >= limit) continue;
+    return fault.commitBeforeThrow === true;
+  }
+  return false;
 }
 
 /**
@@ -438,7 +488,21 @@ function makeFileHandle(
           chunks.push(toBytes(data));
         },
         close: async () => {
-          node.files.set(name, { content: concatBytes(chunks), lastModified: nextMemoryMtime() });
+          const entry: OperationLogEntry = { operation: "close", name };
+          // R8(a): the default models a failed swap-file→target Move — faulted
+          // BEFORE the commit, so a thrown fault leaves `node.files` untouched,
+          // the target exactly as it was. A fault with `commitBeforeThrow` is
+          // the rarer, more dangerous opposite: the OS-level replace actually
+          // landed and only the JS promise still rejected, so the commit
+          // happens FIRST and the throw follows it — exactly the shape
+          // `segmentReplaceMayHaveLanded`'s re-read exists to catch.
+          if (closeFaultCommitsBeforeThrow(faultState, entry)) {
+            node.files.set(name, { content: concatBytes(chunks), lastModified: nextMemoryMtime() });
+            applyFaults(faultState, operationLog, entry);
+          } else {
+            applyFaults(faultState, operationLog, entry);
+            node.files.set(name, { content: concatBytes(chunks), lastModified: nextMemoryMtime() });
+          }
         }
       };
     }

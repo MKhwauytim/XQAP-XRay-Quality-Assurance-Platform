@@ -24,12 +24,15 @@ import {
   getRecentErrors,
 } from "./errorLogger";
 import {
+  clearOperationLog,
   clearSimulatedFaults,
   createMemoryDirectory,
+  getOperationLog,
   setSimulatedFaults,
 } from "./memoryDirectory";
 import { listDirectoryEntries } from "./directoryScan";
-import type { DirectoryHandleLike } from "./fileSystemAccess";
+import type { DirectoryHandleLike, FileHandleLike } from "./fileSystemAccess";
+import type { OperationDeadline } from "./operationDeadline";
 import {
   TRANSIENT_WRITE_RETRY_DELAYS_MS,
   VERIFY_READBACK_RETRY_DELAYS_MS,
@@ -655,6 +658,39 @@ describe("E1: an exhausted ladder is unreliable for ANY error, not just NotFound
     expect(await readSegmentText(dir, name(1, stableWriter))).toContain("evt-B");
     expect((await loadAll(dir)).map((e) => e.eventId).sort()).toEqual(["evt-A", "evt-B"]);
   });
+
+  // R7: the reload variant above only exercised NotReadableError. InvalidStateError
+  // (the actual production XQ-IO-036 shape) is a DIFFERENT branch of
+  // `isTransientWriteError` and deserves its own reload-scoped pin.
+  it("a STABLE writer across a simulated reload rotates on an exhausted InvalidStateError too", async () => {
+    const dir = root();
+    const stableWriter = { ...WRITER, stable: true };
+    await appendEventSegment(dir, [event("A")], stableWriter, TEST_LOG);
+    const sealedBefore = await readSegmentText(dir, name(0, stableWriter));
+
+    // Simulate a reload: this session's memo forgets it ever wrote name(0).
+    __resetAppendOnlyEventLogMemosForTests();
+
+    setSimulatedFaults(dir, [
+      {
+        operation: "getFileHandle",
+        name: name(0, stableWriter),
+        create: false,
+        errorName: "InvalidStateError",
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+
+    const { result } = await withCapturedSleeps(() =>
+      appendEventSegment(dir, [event("B")], stableWriter, TEST_LOG)
+    );
+    expect(result).toBe("verified");
+    clearSimulatedFaults(dir);
+
+    expect(await readSegmentText(dir, name(0, stableWriter))).toBe(sealedBefore);
+    expect(await readSegmentText(dir, name(1, stableWriter))).toContain("evt-B");
+    expect((await loadAll(dir)).map((e) => e.eventId).sort()).toEqual(["evt-A", "evt-B"]);
+  });
 });
 
 /* ───────────── the `stable` writer's core safety property (F2) ──────────── */
@@ -758,17 +794,27 @@ describe("a stable writer's knownFor treats a LISTED segment as claimed, not jus
       },
     } as unknown as DirectoryHandleLike;
 
+    // R7: this MUST be NotFoundError, not NotReadableError. `isNotFoundError`
+    // is the only error shape whose unreliable-baseline verdict actually
+    // depends on `knownWritten` (`if (knownWritten || !isNotFoundError(error))`
+    // — for every OTHER error name the `!isNotFoundError` half already makes
+    // the check true regardless of `knownWritten`). So NotFoundError is the
+    // only fault that PINS `knownFor`'s listing-failure catch returning `true`:
+    // if that catch wrongly returned `false` here, `knownWritten` would be
+    // `false`, the short ladder would exhaust, and the check above would
+    // evaluate `false` — falling through to `reliable: true` and silently
+    // OVERWRITING the sealed segment instead of rotating away from it.
     setSimulatedFaults(dir, [
       {
         operation: "getFileHandle",
         name: name(0, stableWriter),
         create: false,
-        errorName: "NotReadableError",
+        errorName: "NotFoundError",
         times: Number.POSITIVE_INFINITY,
       },
     ]);
 
-    const { result } = await withCapturedSleeps(() =>
+    const { result, delays } = await withCapturedSleeps(() =>
       appendEventSegment(
         { ...dir, getDirectoryHandle: async () => brokenEventsDir } as unknown as DirectoryHandleLike,
         [event("B")],
@@ -777,6 +823,11 @@ describe("a stable writer's knownFor treats a LISTED segment as claimed, not jus
       )
     );
     expect(result).toBe("verified");
+    // Proof `knownFor`'s catch resolved to `true` (claimed): the PATIENT
+    // ladder was taken, not the fast one a genuinely-unclaimed name would get.
+    expect(ladderPrefix(delays, VERIFY_READBACK_RETRY_DELAYS_MS.length)).toEqual([
+      ...VERIFY_READBACK_RETRY_DELAYS_MS,
+    ]);
     clearSimulatedFaults(dir);
 
     expect(await readSegmentText(dir, name(0, stableWriter))).toBe(sealedBefore);
@@ -938,6 +989,269 @@ describe("two consumers never observe each other's writer memos", () => {
     const b = await readEventSegmentDelta<TestEvent>(dir, {}, CONSUMER_B);
     expect(a.events.map((e) => e.eventId)).toEqual(["evt-A1"]);
     expect(b.events.map((e) => e.eventId)).toEqual(["evt-B1"]);
+  });
+});
+
+/* ──────── E1b: rotate away from a segment whose replace is refused ──────── */
+//
+// The production root cause (see
+// `.superpowers/sdd/errorlog-2026-09-28/answer-save-invalidstate.md`, R1):
+// `writable.close()` fails with InvalidStateError because the share refuses
+// to replace one target file. Every retry ladder and every casLoop attempt
+// used to retarget the SAME name, so a save made ~27 identical failed closes
+// over ~34 s and every later save in the page session failed the same way.
+
+describe("E1b: a blocked segment REPLACE rotates instead of retrying forever", () => {
+  it("(a) a persistent close fault on seq 0 rotates to -1 within a few attempts, leaving seq 0 untouched", async () => {
+    const dir = root({ trackOperations: true });
+    const eventsDir = await eventsDirOf(dir);
+    setSimulatedFaults(dir, [
+      {
+        operation: "close",
+        name: name(0),
+        errorName: "InvalidStateError",
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+
+    const { result, delays } = await withCapturedSleeps(() =>
+      appendEventSegment(dir, [event("A"), event("B")], WRITER, TEST_LOG)
+    );
+
+    expect(result).toBe("verified");
+    // R8(d): bounded by the SHORT replace-blocked ladder specifically
+    // (SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS has exactly one rung), not
+    // merely "shorter than the ~11 s patient one" — a looser bound would
+    // also pass if this regressed to some OTHER, still-shorter-than-patient
+    // ladder.
+    expect(delays.length).toBeLessThanOrEqual(1);
+
+    // Seq 0 was created (getFileHandle(create: true) always creates the
+    // entry) but never received the batch's bytes — the close() that would
+    // have committed them never succeeded.
+    expect(await readSegmentText(dir, name(0))).toBe("");
+    // The batch landed in the rotated segment instead.
+    expect(await readSegmentText(dir, name(1))).toContain("evt-A");
+    expect(await readSegmentText(dir, name(1))).toContain("evt-B");
+
+    const events = await loadAll(dir);
+    expect(events.map((e) => e.eventId).sort()).toEqual(["evt-A", "evt-B"]);
+
+    // The blocked close() attempts against seq 0 were bounded, not unbounded.
+    const closeAttemptsOnSeqZero = getOperationLog(eventsDir).filter(
+      (entry) => entry.operation === "createWritable" && entry.name === name(0)
+    ).length;
+    expect(closeAttemptsOnSeqZero).toBeLessThanOrEqual(2);
+  });
+
+  it("(b) the next save in the same session goes straight to -1 — no further attempts on the blocked segment", async () => {
+    const dir = root({ trackOperations: true });
+    const eventsDir = await eventsDirOf(dir);
+    setSimulatedFaults(dir, [
+      {
+        operation: "close",
+        name: name(0),
+        errorName: "InvalidStateError",
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+
+    await appendEventSegment(dir, [event("A")], WRITER, TEST_LOG);
+    // Clear the log so this assertion is only about the SECOND save.
+    clearOperationLog(eventsDir);
+
+    await appendEventSegment(dir, [event("B")], WRITER, TEST_LOG);
+
+    // R8(d): no operation of ANY kind touched the blocked segment again — not
+    // just no `create: true` getFileHandle call. A narrower check would miss
+    // e.g. a stray read-only getFileHandle/getFile probe against seq 0.
+    const touchedSeqZero = getOperationLog(eventsDir).some((entry) => entry.name === name(0));
+    expect(touchedSeqZero).toBe(false);
+
+    const events = await loadAll(dir);
+    expect(events.map((e) => e.eventId).sort()).toEqual(["evt-A", "evt-B"]);
+  });
+
+  it("(c) a transient close fault (fails once) still lands exactly once, no duplicate", async () => {
+    const dir = root();
+    setSimulatedFaults(dir, [
+      {
+        operation: "close",
+        name: name(0),
+        errorName: "InvalidStateError",
+        times: 1,
+      },
+    ]);
+
+    const { result } = await withCapturedSleeps(() =>
+      appendEventSegment(dir, [event("A")], WRITER, TEST_LOG)
+    );
+
+    expect(result).toBe("verified");
+    // No rotation was needed — the retry against the SAME target succeeded.
+    expect(await segmentNames(dir)).toEqual([name(0)]);
+    const events = await loadAll(dir);
+    expect(events.map((e) => e.eventId)).toEqual(["evt-A"]);
+  });
+
+  // R8(a): the rarer, more dangerous shape — the OS-level replace genuinely
+  // LANDED (the commit happened) and only the JS promise still rejected. A
+  // caller that rotates blindly here would append the SAME batch a second
+  // time, into a second file — `segmentReplaceMayHaveLanded`'s re-read is
+  // what this pins.
+  it("(a2) a close fault that COMMITS the write before throwing is detected as landed — no rotation, no duplicate", async () => {
+    const dir = root({ trackOperations: true });
+    const eventsDir = await eventsDirOf(dir);
+    setSimulatedFaults(dir, [
+      {
+        operation: "close",
+        name: name(0),
+        errorName: "InvalidStateError",
+        times: Number.POSITIVE_INFINITY,
+        commitBeforeThrow: true,
+      },
+    ]);
+
+    const { result } = await withCapturedSleeps(() =>
+      appendEventSegment(dir, [event("A")], WRITER, TEST_LOG)
+    );
+
+    expect(result).toBe("verified");
+    // No rotation: the batch is already durably in seq 0 (the commit landed
+    // before the throw), so `segmentReplaceMayHaveLanded` must have recognised
+    // that and stopped the rotation loop before it ever created a `-1`.
+    expect(await segmentNames(dir)).toEqual([name(0)]);
+    expect(await readSegmentText(dir, name(0))).toContain("evt-A");
+
+    const events = await loadAll(dir);
+    // Exactly ONE copy — not appended twice into the same file, and not
+    // duplicated into a rotated one either.
+    expect(events.map((e) => e.eventId)).toEqual(["evt-A"]);
+
+    const closeAttemptsOnSeqZero = getOperationLog(eventsDir).filter(
+      (entry) => entry.operation === "close" && entry.name === name(0)
+    ).length;
+    expect(closeAttemptsOnSeqZero).toBeLessThanOrEqual(2);
+  });
+
+  it("does not rotate for a NotFoundError on the write step — keeps the existing patient ladder", async () => {
+    // A regression guard for the "non-NotFound" qualifier in the brief: this
+    // module already has a pinned test for the patient ladder on write
+    // (`gives the segment WRITE the patient ladder, not the fast one`); this
+    // adds the rotation-must-NOT-fire counterpart.
+    const dir = root({
+      faults: [
+        {
+          operation: "createWritable",
+          name: name(0),
+          errorName: "NotFoundError",
+          times: 5,
+        },
+      ],
+    });
+
+    const { result } = await withCapturedSleeps(() =>
+      appendEventSegment(dir, [event("A")], WRITER, TEST_LOG)
+    );
+
+    expect(result).toBe("verified");
+    // Landed in seq 0 itself — no rotation for a NotFoundError.
+    expect(await segmentNames(dir)).toEqual([name(0)]);
+  });
+
+  it("R8(b): does not rotate for a NotReadableError on the write step either — patient ladder, same target", async () => {
+    // NotReadableError typically fires at getFileHandle/createWritable, BEFORE
+    // any replace was attempted — it is not evidence THIS target's replace is
+    // being refused, so it must not trigger rotation away from a perfectly
+    // good segment. It gets the same patient ladder as NotFoundError.
+    const dir = root({
+      faults: [
+        {
+          operation: "createWritable",
+          name: name(0),
+          errorName: "NotReadableError",
+          times: 5,
+        },
+      ],
+    });
+
+    const { result, delays } = await withCapturedSleeps(() =>
+      appendEventSegment(dir, [event("A")], WRITER, TEST_LOG)
+    );
+
+    expect(result).toBe("verified");
+    // Landed in seq 0 itself — no rotation for a NotReadableError.
+    expect(await segmentNames(dir)).toEqual([name(0)]);
+    // The PATIENT ladder was used, not the short replace-blocked one.
+    expect(ladderPrefix(delays, 5)).toEqual(VERIFY_READBACK_RETRY_DELAYS_MS.slice(0, 5));
+  });
+
+  it("throws the real underlying error when there is nowhere left to rotate to", async () => {
+    const dir = root();
+    const base = buildSegmentBaseName(WRITER, SUFFIX);
+    const ceilingName = `${base}-${MAX_SEGMENT_SEQ}${SUFFIX}`;
+    // Seed the writer's chain AT the ceiling — the same setup the existing
+    // "stays FATAL when the baseline was unreliable and the chain cannot
+    // rotate away" test above uses — so `seq` is already at MAX_SEGMENT_SEQ
+    // and there is genuinely nowhere left to rotate to.
+    await writeSegmentText(dir, ceilingName, `${JSON.stringify(event("SEED"))}\n`);
+    __resetAppendOnlyEventLogMemosForTests();
+    await appendEventSegment(dir, [event("A")], WRITER, TEST_LOG);
+    expect(await segmentNames(dir)).toEqual([ceilingName]);
+
+    setSimulatedFaults(dir, [
+      {
+        operation: "close",
+        name: ceilingName,
+        errorName: "InvalidStateError",
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+
+    await expect(
+      withCapturedSleeps(() => appendEventSegment(dir, [event("B")], WRITER, TEST_LOG))
+    ).rejects.toMatchObject({ name: "InvalidStateError" });
+
+    // Never rewrite/overwrite the failed segment: its prior content survives.
+    expect(await readSegmentText(dir, ceilingName)).toContain("evt-SEED");
+    expect(await readSegmentText(dir, ceilingName)).toContain("evt-A");
+    expect(await readSegmentText(dir, ceilingName)).not.toContain("evt-B");
+  });
+
+  it("controller addition #1: a knownWritten segment's re-read that stops on an EXPIRED DEADLINE (not ladder exhaustion) still rotates rather than overwriting", async () => {
+    const dir = root();
+    await appendEventSegment(dir, [event("A")], WRITER, TEST_LOG);
+    const sealedBefore = await readSegmentText(dir, name(0));
+
+    // A single NotReadableError on the pre-append re-read of the segment this
+    // session already wrote (`knownWritten`).
+    setSimulatedFaults(dir, [
+      {
+        operation: "getFileHandle",
+        name: name(0),
+        create: false,
+        errorName: "NotReadableError",
+        times: 1,
+      },
+    ]);
+
+    // The deadline is already spent BEFORE the retry ladder even starts, so
+    // `nextRetryDelayMs` returns null on attempt 0 — the ladder had rungs
+    // left; only the deadline stopped it.
+    const alreadyExpired: OperationDeadline = { at: Date.now() - 1, label: "test:E1b-controller-1" };
+
+    const { result } = await withCapturedSleeps(() =>
+      appendEventSegment(dir, [event("B")], WRITER, TEST_LOG, { deadline: alreadyExpired })
+    );
+
+    expect(result).toBe("verified");
+    // The original segment was NOT rewritten — its prior line survived.
+    expect(await readSegmentText(dir, name(0))).toBe(sealedBefore);
+    // The new batch landed in the rotated segment instead of being lost.
+    expect(await readSegmentText(dir, name(1))).toContain("evt-B");
+    clearSimulatedFaults(dir);
+    const events = await loadAll(dir);
+    expect(events.map((e) => e.eventId).sort()).toEqual(["evt-A", "evt-B"]);
   });
 });
 
@@ -1213,5 +1527,140 @@ describe("readEventSegmentDelta strict option", () => {
     const lenient = await readEventSegmentDelta<TestEvent>(dir, {}, TEST_LOG);
     const strict = await readEventSegmentDelta<TestEvent>(dir, {}, TEST_LOG, { strict: true });
     expect(strict).toEqual(lenient);
+  });
+});
+
+/* ───────── F15: verifySegmentSize's guaranteed first retry (A1) ─────────── */
+
+/**
+ * An already-EXPIRED deadline, constructed directly rather than via
+ * `createDeadline` (which requires a positive future budget) — exactly the
+ * shape `nextRetryDelayMs` sees once `INTERACTIVE_WRITE_DEADLINE_MS` has been
+ * spent by casLoop attempts and the inner retry ladders before verification
+ * even starts.
+ */
+function expiredDeadline(): OperationDeadline {
+  return { at: Date.now() - 1, label: "test:F15" };
+}
+
+/**
+ * Installs a fake `getFileHandle` on `eventsDir` that lets the real
+ * pre-append re-read and write through untouched, then intercepts the
+ * post-close VERIFY read-back (`getFileHandle(name, { create: false })`
+ * calls made after the real write's `close()` resolves): the first
+ * `staleReads` matching calls return a `File` one byte SHORTER than what was
+ * actually written — a stale size, not a corrupted write — and every call
+ * after that delegates to the real handle.
+ *
+ * This is deliberately size-tampering, not a `SimulatedFault` error
+ * injection: F15 is about a read that SUCCEEDS with the wrong size (the
+ * "share has not caught up yet" case `verifySegmentSize`'s doc comment
+ * describes), which `memoryDirectory.ts`'s fault vocabulary — throwing —
+ * cannot express.
+ */
+function installStaleSizeReads(
+  eventsDir: DirectoryHandleLike,
+  fileName: string,
+  staleReads: number
+): void {
+  const original = eventsDir.getFileHandle.bind(eventsDir);
+  let wroteOnce = false;
+  let staleReadsLeft = staleReads;
+  (eventsDir as { getFileHandle: DirectoryHandleLike["getFileHandle"] }).getFileHandle = async (
+    entryName: string,
+    options?: { create?: boolean }
+  ) => {
+    const handle = await original(entryName, options);
+    if (entryName !== fileName) return handle;
+    if (options?.create) {
+      // The write call. Let it through untouched, but learn when its
+      // close() resolves — only reads AFTER that point are the post-close
+      // verify this test targets, not the pre-append re-read.
+      const innerCreateWritable = handle.createWritable!.bind(handle);
+      return {
+        ...handle,
+        createWritable: async () => {
+          const writable = await innerCreateWritable();
+          return {
+            write: (data: string) => writable.write(data),
+            close: async () => {
+              await writable.close();
+              wroteOnce = true;
+            },
+          };
+        },
+      };
+    }
+    // A read. Only fake it once the real write has landed and only for the
+    // configured number of calls — the pre-append re-read of a brand-new
+    // segment (before wroteOnce) must see the real NotFoundError, untouched.
+    if (wroteOnce && staleReadsLeft > 0) {
+      staleReadsLeft -= 1;
+      return {
+        ...handle,
+        getFile: async () => {
+          const real = await handle.getFile();
+          const text = await real.text();
+          return new File([text.slice(0, -1)], entryName);
+        },
+      } satisfies FileHandleLike;
+    }
+    return handle;
+  };
+}
+
+describe("F15: verifySegmentSize keeps at least one retry under an expired deadline", () => {
+  it("RED/GREEN target — a stale first read followed by a correct second read still verifies (exactly one retry)", async () => {
+    const dir = root();
+    const eventsDir = await eventsDirOf(dir);
+    const fileName = name();
+    installStaleSizeReads(eventsDir, fileName, 1);
+
+    const { result, delays } = await withCapturedSleeps(() =>
+      appendEventSegment(
+        { ...dir, getDirectoryHandle: async () => eventsDir } as unknown as DirectoryHandleLike,
+        [event("A")],
+        WRITER,
+        TEST_LOG,
+        { deadline: expiredDeadline() }
+      )
+    );
+
+    // Succeeded — the stale first observation did not get reported as a
+    // fatal, unrecoverable size mismatch.
+    expect(result).toBe("verified");
+    // Exactly the guaranteed first retry was taken: one sleep, at the
+    // ladder's own first rung — not zero (which would mean the deadline was
+    // honoured over F15) and not more than one (nothing beyond attempt 0 is
+    // exempt from the deadline).
+    expect(delays).toEqual([VERIFY_READBACK_RETRY_DELAYS_MS[0]]);
+    // The file itself really does hold the one event that was appended.
+    expect(await loadAll({ ...dir, getDirectoryHandle: async () => eventsDir } as unknown as DirectoryHandleLike)).toHaveLength(1);
+  });
+
+  it("companion — two stale reads in a row still fail, but bounded at the guaranteed retry (never more)", async () => {
+    const dir = root();
+    const eventsDir = await eventsDirOf(dir);
+    const fileName = name();
+    // Both the guaranteed attempt-0 read AND attempt 1 (which the expired
+    // deadline should refuse to retry past) come back stale.
+    installStaleSizeReads(eventsDir, fileName, 2);
+
+    const { delays } = await withCapturedSleeps(() =>
+      expect(
+        appendEventSegment(
+          { ...dir, getDirectoryHandle: async () => eventsDir } as unknown as DirectoryHandleLike,
+          [event("A")],
+          WRITER,
+          TEST_LOG,
+          { deadline: expiredDeadline() }
+        )
+      ).rejects.toThrow(/verification failed/)
+    );
+
+    // Bounded: the guaranteed first retry slept once, and the expired
+    // deadline then refused a second — never more than the one guaranteed
+    // rung, however many stale reads keep coming back.
+    expect(delays).toEqual([VERIFY_READBACK_RETRY_DELAYS_MS[0]]);
   });
 });
