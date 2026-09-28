@@ -11,6 +11,7 @@ import { buildExecutiveReportRows } from "../../../../../data/reporting/executiv
 import { DEFAULT_EXEC_CONFIG } from "../../../../../data/reporting/executiveReportTypes";
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import { logError } from "../../../../../data/storage/errorLogger";
+import { SampleSnapshotBanner } from "../../../../SampleSnapshotBanner/SampleSnapshotBanner";
 import { useLabels } from "../../../../../data/labels/useLabels";
 import {
   EXECUTIVE_ROWS_EMPTY,
@@ -49,12 +50,14 @@ export function ExecutiveRowsProvider({ children }: { children: ReactNode }) {
   const monthFolder = selection.kind === "existing" ? selection.folderName : null;
   const [rows, setRows] = useState<ExecutiveRowsState>(EXECUTIVE_ROWS_LOADING);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [snapshotCount, setSnapshotCount] = useState(0);
 
   useEffect(() => {
     if (!directoryHandle || !monthFolder) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- sync reset so a pending/none selection never shows a previous month's KPIs
       setRows(EXECUTIVE_ROWS_LOADING);
       setLoadError(null);
+      setSnapshotCount(0);
       return;
     }
     const root = directoryHandle;
@@ -62,6 +65,7 @@ export function ExecutiveRowsProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     setRows(EXECUTIVE_ROWS_LOADING);
     setLoadError(null);
+    setSnapshotCount(0);
     void (async () => {
       const [populationData, sample, templateSelection] = await Promise.all([
         loadMonthPopulationFinal(root, month),
@@ -87,6 +91,7 @@ export function ExecutiveRowsProvider({ children }: { children: ReactNode }) {
       });
 
       if (!cancelled) {
+        setSnapshotCount(execRows.filter((row) => row.fromSampleSnapshot).length);
         setRows(toExecutiveRowsState(execRows.map((r) => r as ExecutiveRow)));
       }
     })().catch((error: unknown) => {
@@ -110,6 +115,7 @@ export function ExecutiveRowsProvider({ children }: { children: ReactNode }) {
           {loadError}
         </div>
       )}
+      <SampleSnapshotBanner count={snapshotCount} />
       {children}
     </ExecutiveRowsContext.Provider>
   );

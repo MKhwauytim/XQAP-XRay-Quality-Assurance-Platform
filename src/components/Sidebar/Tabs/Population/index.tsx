@@ -1084,10 +1084,9 @@ export default function PopulationTab() {
 
       if (result.ok) {
         recordAction(directoryHandle, username, sessionRef.current?.role ?? "unknown", "population-saved", { monthFolderName: result.monthFolderName, details: { rows: processingResult.preparedRows.length, removed: processingResult.removedRows.length, duplicates: processingResult.duplicateRows.length, overwrote: confirmedOverwrite } });
-        setSaveToDiskMessage({
-          type: "ok",
-          text: `تم حفظ شهر ${result.monthFolderName} على القرص بنجاح.`
-        });
+        setSaveToDiskMessage(result.sampleOrphanCount > 0
+          ? { type: "error", text: getLabels().population_save_sample_orphans_warning.replace("{month}", result.monthFolderName).replace("{count}", String(result.sampleOrphanCount)) }
+          : { type: "ok", text: `تم حفظ شهر ${result.monthFolderName} على القرص بنجاح.` });
         setMonthRefreshKey((k) => k + 1);
         hasUnsavedSessionWorkRef.current = false;
         void refreshMonths();

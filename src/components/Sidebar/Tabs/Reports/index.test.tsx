@@ -139,6 +139,7 @@ vi.mock("../../../../data/powerbiExport/exportManager", () => ({
   // spreading a non-tuple `unknown[]` into a zero-arg vi.fn() mock's inferred
   // call signature) without changing any test's observable behavior.
   runPowerBiExport: () => pbiExportMock.impl(),
+  runPowerBiExportDetailed: async () => ({ manifest: await pbiExportMock.impl(), snapshotRowCount: 0 }),
 }));
 
 // §N — the executive report builder (document+xlsx) that index.tsx dynamically
