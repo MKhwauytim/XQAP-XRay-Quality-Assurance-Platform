@@ -1,0 +1,300 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`calculateBulkAssignment snapshots > [no-restriction] exact-count allocations 1`] = `
+{
+  "errors": [],
+  "events": [
+    [
+      "x-0000",
+      "b",
+      "تعيين تلقائي",
+      null,
+    ],
+    [
+      "x-0001",
+      "b",
+      "تعيين تلقائي",
+      null,
+    ],
+    [
+      "x-0002",
+      "b",
+      "تعيين تلقائي",
+      null,
+    ],
+    [
+      "x-0003",
+      "b",
+      "تعيين تلقائي",
+      null,
+    ],
+    [
+      "x-0004",
+      "b",
+      "تعيين تلقائي",
+      null,
+    ],
+    [
+      "x-0005",
+      "c",
+      "تعيين تلقائي",
+      null,
+    ],
+    [
+      "x-0006",
+      "c",
+      "تعيين تلقائي",
+      null,
+    ],
+  ],
+  "skipped": 0,
+  "unmapped": {
+    "count": 0,
+    "stages": [],
+  },
+}
+`;
+
+exports[`calculateBulkAssignment snapshots > [no-restriction] re-run skips owned rows 1`] = `
+{
+  "errors": [],
+  "events": [
+    [
+      "r-0002",
+      "b",
+      "تعيين تلقائي",
+      null,
+    ],
+    [
+      "r-0003",
+      "b",
+      "تعيين تلقائي",
+      null,
+    ],
+    [
+      "r-0004",
+      "c",
+      "تعيين تلقائي",
+      null,
+    ],
+    [
+      "r-0005",
+      "c",
+      "تعيين تلقائي",
+      null,
+    ],
+  ],
+  "skipped": 2,
+  "unmapped": {
+    "count": 0,
+    "stages": [],
+  },
+}
+`;
+
+exports[`calculateBulkAssignment snapshots > [no-restriction] two stages with CertScan rows 1`] = `
+{
+  "errors": [],
+  "events": [
+    [
+      "c1",
+      "a",
+      "تعيين تلقائي (CertScan)",
+      null,
+    ],
+    [
+      "c2",
+      "a",
+      "تعيين تلقائي (CertScan)",
+      null,
+    ],
+    [
+      "f-0000",
+      "a",
+      "تعيين تلقائي",
+      null,
+    ],
+    [
+      "f-0001",
+      "a",
+      "تعيين تلقائي",
+      null,
+    ],
+    [
+      "f-0002",
+      "a",
+      "تعيين تلقائي",
+      null,
+    ],
+    [
+      "f-0003",
+      "b",
+      "تعيين تلقائي",
+      null,
+    ],
+    [
+      "f-0004",
+      "b",
+      "تعيين تلقائي",
+      null,
+    ],
+    [
+      "f-0005",
+      "b",
+      "تعيين تلقائي",
+      null,
+    ],
+    [
+      "f-0006",
+      "b",
+      "تعيين تلقائي",
+      null,
+    ],
+    [
+      "f-0007",
+      "b",
+      "تعيين تلقائي",
+      null,
+    ],
+    [
+      "s-0000",
+      "b",
+      "تعيين تلقائي",
+      null,
+    ],
+    [
+      "s-0001",
+      "b",
+      "تعيين تلقائي",
+      null,
+    ],
+    [
+      "s-0002",
+      "b",
+      "تعيين تلقائي",
+      null,
+    ],
+    [
+      "s-0003",
+      "b",
+      "تعيين تلقائي",
+      null,
+    ],
+    [
+      "s-0004",
+      "c",
+      "تعيين تلقائي",
+      null,
+    ],
+    [
+      "s-0005",
+      "c",
+      "تعيين تلقائي",
+      null,
+    ],
+    [
+      "s-0006",
+      "c",
+      "تعيين تلقائي",
+      null,
+    ],
+    [
+      "s-0007",
+      "c",
+      "تعيين تلقائي",
+      null,
+    ],
+    [
+      "s-0008",
+      "c",
+      "تعيين تلقائي",
+      null,
+    ],
+  ],
+  "skipped": 0,
+  "unmapped": {
+    "count": 0,
+    "stages": [],
+  },
+}
+`;
+
+exports[`calculateBulkAssignment snapshots > [port-restricted] cross-stage shortfall 1`] = `
+{
+  "errors": [],
+  "eventCount": 800,
+  "skipped": 0,
+  "totals": {
+    "a": {
+      "port-A": 120,
+      "port-B": 100,
+    },
+    "b": {
+      "port-A": 120,
+      "port-B": 100,
+    },
+    "c": {
+      "port-A": 120,
+      "port-B": 100,
+    },
+    "d": {
+      "port-B": 140,
+    },
+  },
+}
+`;
+
+exports[`calculateBulkAssignment snapshots > [port-restricted] four ports, one employee restricted 1`] = `
+{
+  "errors": [],
+  "eventCount": 1000,
+  "skipped": 0,
+  "totals": {
+    "a": {
+      "port-big": 58,
+      "port-huge": 134,
+      "port-medium": 37,
+      "port-small": 21,
+    },
+    "b": {
+      "port-big": 59,
+      "port-huge": 133,
+      "port-medium": 37,
+      "port-small": 21,
+    },
+    "c": {
+      "port-big": 58,
+      "port-huge": 133,
+      "port-medium": 37,
+      "port-small": 22,
+    },
+    "d": {
+      "port-big": 125,
+      "port-medium": 89,
+      "port-small": 36,
+    },
+  },
+}
+`;
+
+exports[`calculateBulkAssignment snapshots > [port-restricted] trapped employee 1`] = `
+{
+  "errors": [],
+  "eventCount": 1000,
+  "skipped": 0,
+  "totals": {
+    "a": {
+      "port-big": 300,
+    },
+    "b": {
+      "port-big": 300,
+    },
+    "c": {
+      "port-big": 300,
+    },
+    "d": {
+      "port-small": 100,
+    },
+  },
+}
+`;
