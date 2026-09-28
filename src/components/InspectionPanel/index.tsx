@@ -1,6 +1,11 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 
-import { loadAnswerDraft, saveAnswerDraft } from "../../data/answers/answerDraftStore";
+import {
+  isAnswerDraftPersistFailing,
+  loadAnswerDraftWithLegacyFallback,
+  saveAnswerDraftMigratingLegacy,
+  subscribeAnswerDraftHealth,
+} from "../../data/answers/answerDraftStore";
 import type { DistributionEntry } from "../../data/distribution/distributionTypes";
 import type { FieldAnswer, ItemAnswer } from "../../data/answers/answerTypes";
 import type { TemplateField, TemplateSchema } from "../../data/templates/templateTypes";
@@ -66,6 +71,16 @@ type Props = {
    */
   draftKey?: string;
   /**
+   * A1 fix round 1: the key a draft for this row would have been saved under
+   * BEFORE `draftKey` was made canonical (an ad-hoc row's draft used to be
+   * keyed on the selected month rather than its own store). `null`/omitted
+   * when this row has no such divergence. Read only as a fallback when
+   * `draftKey` has nothing, and migrated off (removed) the first time a
+   * write under `draftKey` succeeds — see `answerRouting.ts`'s
+   * `legacyPanelDraftKey`.
+   */
+  legacyDraftKey?: string | null;
+  /**
    * Previous/next sample navigation (design handoff §3), rendered in the header.
    *
    * Purely a request to the caller: this panel never re-points itself. The
@@ -95,6 +110,7 @@ export default function InspectionPanel({
   onRequestReopen,
   onDraftDirty,
   draftKey,
+  legacyDraftKey,
   onPrevSample,
   onNextSample,
   hasPrevSample,
@@ -103,8 +119,12 @@ export default function InspectionPanel({
   const [ans, setAns] = useState<Record<string, string | number | boolean>>(() => {
     // A stored draft wins over the saved answer. It only exists when a previous
     // submit did NOT reach disk, so it is by construction the newer of the two,
-    // and it is the work that would otherwise have to be redone.
-    const draft = draftKey ? loadAnswerDraft(draftKey) : null;
+    // and it is the work that would otherwise have to be redone. Falls back to
+    // `legacyDraftKey` (A1 fix round 1) for a row whose canonical key changed
+    // under it, so a draft saved before that fix is still found.
+    const draft = draftKey
+      ? loadAnswerDraftWithLegacyFallback(draftKey, legacyDraftKey ?? null)
+      : null;
     if (draft) return { ...draft };
     if (!savedAnswer) return {};
     const m: Record<string, string | number | boolean> = {};
@@ -125,6 +145,10 @@ export default function InspectionPanel({
   // "request" = employee self-service reopen request (Batch B, onRequestReopen).
   const [reopenAction, setReopenAction] = useState<null | "direct" | "request">(null);
   const [reopenReason, setReopenReason] = useState("");
+  // A1: whether this browser can currently keep the local draft at all — a
+  // module-level health flag (answerDraftStore.ts) that every mounted panel
+  // subscribes to, so a refused write warns instead of failing silently.
+  const draftPersistFailing = useSyncExternalStore(subscribeAnswerDraftHealth, isAnswerDraftPersistFailing);
 
   const phases = useMemo(() => (template ? getTemplatePhases(template) : []), [template]);
 
@@ -325,7 +349,7 @@ export default function InspectionPanel({
                 // Written from the event handler, in the same commit as the
                 // state it mirrors — not from an effect, which would land a
                 // render late and lose the last keystroke before an unmount.
-                if (draftKey) saveAnswerDraft(draftKey, next);
+                if (draftKey) saveAnswerDraftMigratingLegacy(draftKey, legacyDraftKey ?? null, next);
                 return next;
               });
               // Event handler, not an effect: the caller learns about the draft
@@ -399,6 +423,10 @@ export default function InspectionPanel({
             </>
           )}
         </div>
+      )}
+
+      {draftKey && draftPersistFailing && !readonly && !isSubmitted && (
+        <p className="ip-validation-msg" role="alert">{getLabels().ip_msg_draft_not_persisted}</p>
       )}
 
       {/* The footer used to require `!readonly`, which coupled two unrelated

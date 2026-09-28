@@ -12,7 +12,9 @@ import {
   upsertItemAnswer,
   upsertItemAnswerOnBehalf,
 } from "../../../../../data/answers/answerStorage";
-import { answerDraftKey, clearAnswerDraft } from "../../../../../data/answers/answerDraftStore";
+import { clearAnswerDraftAndLegacy } from "../../../../../data/answers/answerDraftStore";
+import { pickAutoSelectId, readLastOpenSample, rememberLastOpenSample } from "../../../../../data/answers/lastOpenSampleStore";
+import { answerFolderForEntry, legacyPanelDraftKey, panelDraftKey } from "./XrayReferrals/answerRouting";
 import { reopenSubmittedAnswer } from "../../../../../data/answers/reopenAnswer";
 import { MonthClosedError } from "../../../../../data/population/monthLock";
 import { getLabels } from "../../../../../data/labels/labelsStore";
@@ -450,7 +452,6 @@ function thrownWriteErrorText(error: unknown): string {
  */
 function createSaveAnswerHandler(deps: {
   directoryHandle: DirectoryHandleLike;
-  folderForRow: (xrayImageId: string) => string;
   username: string;
   role: string;
   activeTpl: TemplateSchema | null;
@@ -476,13 +477,15 @@ function createSaveAnswerHandler(deps: {
   recordLocalSubmission: (item: ItemAnswer) => void;
 }) {
   const {
-    directoryHandle, folderForRow, username, role, activeTpl, selMonth,
+    directoryHandle, username, role, activeTpl, selMonth,
     canSubmitAnswers, canAnswerOnBehalf, setAnswers, setStatusMsg,
     ownBroadcastRef, setDirtyEntryId, recordLocalSubmission,
   } = deps;
   return async function handleSave(
-    xrayImageId: string, ans: FieldAnswer[], forUser: string
+    entry: DistributionEntry, ans: FieldAnswer[]
   ): Promise<void> {
+    const xrayImageId = entry.xrayImageId;
+    const forUser = entry.assignedTo;
     if (!canSubmitAnswers) {
       setStatusMsg({ type: "error", text: "لا تملك صلاحية تقديم الإجابات، أو أن مساحة العمل للقراءة فقط." });
       return;
@@ -508,7 +511,7 @@ function createSaveAnswerHandler(deps: {
       status: "submitted",
     };
     try {
-      const folder = folderForRow(xrayImageId);
+      const folder = answerFolderForEntry(entry, selMonth);
       const result = forUser === username
         ? await upsertItemAnswer(directoryHandle, folder, forUser, item)
         : await upsertItemAnswerOnBehalf(directoryHandle, folder, forUser, item, username);
@@ -547,7 +550,7 @@ function createSaveAnswerHandler(deps: {
         // else: `onSave` resolving does not mean the write succeeded (the
         // failure branch below resolves too), so the panel cannot do this for
         // itself without throwing away the very work it exists to protect.
-        clearAnswerDraft(answerDraftKey(folder, xrayImageId, forUser));
+        clearAnswerDraftAndLegacy(panelDraftKey(entry, selMonth), legacyPanelDraftKey(entry, selMonth));
         setStatusMsg({ type: "ok", text: "تم التقديم." });
         // Tell the OTHER mounted views. Without this a submitted answer stayed
         // invisible to the approval desk, «نتائج فحص الأشعة» and Reports — all
@@ -1155,8 +1158,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     // The employee stays in control: any explicit navigation still moves on.
     if (selEntryId != null && dirtyEntryId === selEntryId) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- auto-corrects selection when the display list changes; useMemo cannot accumulate user navigation state
-    setSelEntryId(displayEntries[0].xrayImageId);
-  }, [displayEntries, selEntryId, dirtyEntryId]);
+    setSelEntryId(pickAutoSelectId(displayEntries, readLastOpenSample(username, selMonth)));
+  }, [displayEntries, selEntryId, dirtyEntryId, username, selMonth]);
+  useEffect(() => { if (selEntryId) rememberLastOpenSample(username, selMonth, selEntryId); }, [username, selMonth, selEntryId]);
 
   /** Explicit user navigation — the one case where dropping a draft is intended. */
   const selectEntry = useCallback((xrayImageId: string | null): void => {
@@ -1514,10 +1518,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   // below already carries for its own refs.
   // eslint-disable-next-line react-hooks/refs -- see above
   const handleSave = createSaveAnswerHandler({
-    directoryHandle, folderForRow, username, role, activeTpl, selMonth,
+    directoryHandle, username, role, activeTpl, selMonth,
     canSubmitAnswers, canAnswerOnBehalf, setAnswers, setStatusMsg,
-    ownBroadcastRef: ownAnswerBroadcastRef, setDirtyEntryId,
-    recordLocalSubmission: localSubmissions.record,
+    ownBroadcastRef: ownAnswerBroadcastRef, setDirtyEntryId, recordLocalSubmission: localSubmissions.record,
   });
 
   // Both reopen handlers live at module scope (createReopenHandlers, above) to
@@ -2161,14 +2164,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                   onNextSample={() => { if (nextNavEntry) navigateToSample(nextNavEntry.xrayImageId); }}
                   hasPrevSample={prevNavEntry !== undefined}
                   hasNextSample={nextNavEntry !== undefined}
-                  draftKey={answerDraftKey(
-                    folderForRow(panelEntry.xrayImageId),
-                    panelEntry.xrayImageId,
-                    panelEntry.assignedTo
-                  )}
-                  onSave={(ans) =>
-                    handleSave(panelEntry.xrayImageId, ans, panelEntry.assignedTo)
-                  }
+                  draftKey={panelDraftKey(panelEntry, selMonth)}
+                  legacyDraftKey={legacyPanelDraftKey(panelEntry, selMonth)}
+                  onSave={(ans) => handleSave(panelEntry, ans)}
                   onReplace={
                     canOpenReplacementDialog(panelEntry, username, canRequestReplacement, pendingReplacementIds)
                       ? openReplacementDialog

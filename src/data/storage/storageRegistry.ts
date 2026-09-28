@@ -88,6 +88,13 @@ export const STORAGE_REGISTRY: readonly StorageEntry[] = [
     lossConsequence: "The month selection resets. No data at risk.",
   },
   {
+    id: "xray_last_open_sample_v1:",
+    layer: "session",
+    prefix: true,
+    purpose: "The sample each user last had open on «صور الأشعة المحالة», for this tab, so a reload reopens it.",
+    lossConsequence: "After a reload the queue opens its first sample instead. No data at risk.",
+  },
+  {
     id: "xray_error_log_v1",
     layer: "local",
     purpose:

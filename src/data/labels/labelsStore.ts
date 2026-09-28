@@ -627,6 +627,10 @@ export const DEFAULT_LABELS = {
   // the button never gets stuck with no visible explanation. The entered
   // answer is untouched either way (`ans` is not reset on this path).
   ip_msg_save_failed_generic:    "تعذّر حفظ الإجابة. الإجابة التي أدخلتها ما زالت موجودة — يمكنك المحاولة مرة أخرى.",
+  // A1: shown while the browser refuses to keep the local draft (private mode,
+  // full quota, a cleared file:// bucket) — the typed answer is still in the
+  // form, but nothing will restore it after a reload until a save succeeds.
+  ip_msg_draft_not_persisted:    "تعذّر حفظ مسودة الإجابة في هذا المتصفح — لن تبقى الإجابة بعد إعادة تحميل الصفحة. قدّم الإجابة قبل مغادرة الصفحة.",
   ip_no_template_msg:           "اختر نموذجاً لعرض حقول الفحص.",
   ip_no_visible_fields_msg:     "لا توجد حقول ظاهرة في هذه المرحلة.",
   ip_select_placeholder:        "اختر...",
