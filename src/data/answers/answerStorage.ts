@@ -282,6 +282,20 @@ type AnswerEventsCacheEntry = {
 /** WeakMap<workspace root, Map<monthFolderName, entry>> — see the module doc's SCOPING note. */
 let answerEventsCacheByRoot = new WeakMap<DirectoryHandleLike, Map<string, AnswerEventsCacheEntry>>();
 
+/**
+ * Test-only: drop the whole `answers.events/` read cache for every root.
+ * Mirrors `distributionStorage.ts`'s `__clearDeriveMemoForTests` — safe to
+ * drop at any time by the cache's own "SAFE TO DROP" contract above. Needed
+ * by a fault-injection test: without this, a read already cached by an
+ * earlier step in the same test (e.g. the write that seeded the answer)
+ * short-circuits `readAnswerEventDelta` to "nothing new since my last
+ * offset" and never touches disk at all, silently masking the very read
+ * failure the test means to exercise.
+ */
+export function __clearAnswerEventsCacheForTests(): void {
+  answerEventsCacheByRoot = new WeakMap();
+}
+
 function getAnswerEventsCacheEntry(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
@@ -1436,6 +1450,23 @@ function employeeUsernamesFromEvents(events: readonly AnswerEvent[]): Set<string
 }
 
 /**
+ * Thrown by `loadAllEmployeeFiles(..., { strict: true })` when any part of the
+ * scan — the event log, or one employee's item/requests read — could not be
+ * completed. The lenient (default) call folds each of those into "this
+ * employee/month answered nothing"; a strict caller cannot afford that (see
+ * `populationOverwriteGuard.ts`, which must never treat an unreadable answers
+ * scan as "no answers").
+ */
+export class AnswersUnreadableError extends Error {
+  readonly monthFolderName: string;
+  constructor(monthFolderName: string, options?: { cause?: unknown }) {
+    super(`Answers for ${monthFolderName} exist but could not be read.`, options as ErrorOptions);
+    this.name = "AnswersUnreadableError";
+    this.monthFolderName = monthFolderName;
+  }
+}
+
+/**
  * Read all employee answer files for the month (used by supervisor/admin
  * aggregation) — full item state included.
  *
@@ -1447,18 +1478,31 @@ function employeeUsernamesFromEvents(events: readonly AnswerEvent[]): Set<string
  * existing `onUnreadable: "skip"` per-employee isolation: one employee whose
  * legacy file is corrupt, or whose segment chain fails to fold, is skipped and
  * logged rather than aborting the whole scan.
+ *
+ * `options.strict` (default false, every existing caller unaffected) turns
+ * off BOTH lenient folds that made this function's answer wrong for a
+ * safety-critical caller: a failed `readAllAnswerEventsForMonth` used to be
+ * caught and folded into `[]` (reported here), and a per-employee read
+ * failure used to be caught, logged and skipped (reported here too) instead
+ * of aborting the scan. In strict mode neither is swallowed — both raise
+ * {@link AnswersUnreadableError} (wrapping the original cause), same as the
+ * pre-existing "scan itself could not be established" rethrow below.
  */
 export async function loadAllEmployeeFiles(
   directoryHandle: DirectoryHandleLike,
-  monthFolderName: string
+  monthFolderName: string,
+  options?: { strict?: boolean }
 ): Promise<EmployeeAnswerFile[]> {
+  const strict = options?.strict ?? false;
   try {
     const [dirStems, allEvents] = await Promise.all([
       listAnswerDirStems(directoryHandle, monthFolderName),
-      readAllAnswerEventsForMonth(directoryHandle, monthFolderName).catch((error: unknown) => {
-        logError("answerStorage:loadAllEmployeeFiles:events", error);
-        return [] as AnswerEvent[];
-      }),
+      strict
+        ? readAllAnswerEventsForMonth(directoryHandle, monthFolderName)
+        : readAllAnswerEventsForMonth(directoryHandle, monthFolderName).catch((error: unknown) => {
+            logError("answerStorage:loadAllEmployeeFiles:events", error);
+            return [] as AnswerEvent[];
+          }),
     ]);
     const usernames = new Set<string>([...dirStems, ...employeeUsernamesFromEvents(allEvents)]);
 
@@ -1480,6 +1524,7 @@ export async function loadAllEmployeeFiles(
           lastUpdatedAt: requests.lastUpdatedAt,
         });
       } catch (error) {
+        if (strict) throw error;
         logError("answerStorage:loadAllEmployeeFiles:employee", error, { action: username });
       }
     }
@@ -1487,13 +1532,16 @@ export async function loadAllEmployeeFiles(
   } catch (err) {
     // Rethrown, not folded into `[]`. The per-employee `catch` above is the
     // deliberate isolation policy — one employee's unreadable file must not
-    // abort the scan — and it is unaffected. This outer one is different: it
-    // fires when the SCAN ITSELF could not be established, and returning an
-    // empty array there tells every caller (the results view, the executive
-    // report, the Power BI export, a backup) that nobody answered anything all
-    // month. Callers already handle a rejection; none of them can handle a lie.
+    // abort the scan — and it is unaffected in LENIENT mode. This outer one is
+    // different: it fires when the SCAN ITSELF could not be established (or,
+    // in strict mode, when any part of it failed), and returning an empty
+    // array there tells every caller (the results view, the executive report,
+    // the Power BI export, a backup) that nobody answered anything all month.
+    // Callers already handle a rejection; none of them can handle a lie.
     logError("answerStorage:loadAllEmployeeFiles", err instanceof Error ? err : new Error(String(err)));
-    throw err;
+    throw strict && !(err instanceof AnswersUnreadableError)
+      ? new AnswersUnreadableError(monthFolderName, { cause: err })
+      : err;
   }
 }
 

@@ -208,6 +208,8 @@ const PINNED_MEANINGS: Record<string, string> = {
     "a population Web Worker died without sending a reply (error/messageerror) — most likely out of memory on a very large month; without this the caller waits forever",
   "XQ-POP-006":
     "saving the processed population to disk threw",
+  "XQ-POP-008":
+    "A2 overwrite guard (saveMonthRunLocked): the month's existing sample/distribution/answers could not be read (strictly) to check whether a population overwrite would orphan them — the save is refused rather than risking a silent orphan, since a read failure must never be read as \"no work\"",
   "XQ-DIST-001":
     "a distribution action threw; the raw detail went to the error log",
   "XQ-DIST-002":

@@ -28,7 +28,11 @@ import type { CertScanShortfall, SampleMasterData } from "../sampling/sampleType
 import type { DistributionCurrentData } from "../distribution/distributionTypes";
 import { loadOrDeriveDistributionCurrent } from "../distribution/distributionStorage";
 import { loadSampleMaster } from "../sampling/sampleStorage";
-import { assessPopulationOverwrite, loadPopulationOverwriteImpact } from "./populationOverwriteGuard";
+import {
+  assessPopulationOverwrite,
+  loadPopulationOverwriteImpact,
+  type PopulationOverwriteImpact,
+} from "./populationOverwriteGuard";
 import { getLabels } from "../labels/labelsStore";
 import { loadPopulationConfig } from "./populationConfig";
 import { rebuildReplacementIndex } from "./replacementIndexStorage";
@@ -330,11 +334,19 @@ async function saveMonthRunLocked(
     // manifest lock, whatever the caller confirmed: once a month has a
     // distribution or answers, a population that lacks any live sampled id is
     // refused — it would orphan that work in every report. A read failure on
-    // the sample/distribution/answers below is never swallowed here: it
-    // propagates out of this function and is caught by saveMonthRunLocked's
-    // outer try/catch (F21) — a month whose work state could not be verified
-    // is refused, never treated as "no work".
-    const impact = await loadPopulationOverwriteImpact(directoryHandle, monthFolderName);
+    // the sample/distribution/answers below is never swallowed into "no
+    // work" (F21) — it is caught in its OWN try/catch, distinct from the
+    // function-wide one below, so it maps to a dedicated coded refusal
+    // (XQ-POP-008) that tells the admin the check itself could not complete,
+    // rather than falling through to the generic "unexpected error while
+    // saving" (XQ-POP-006) every other failure in this function produces.
+    let impact: PopulationOverwriteImpact;
+    try {
+      impact = await loadPopulationOverwriteImpact(directoryHandle, monthFolderName);
+    } catch (error) {
+      logCodedError("population:overwrite-guard-unreadable", "XQ-POP-008", error);
+      return { ok: false, error: codedMessage("XQ-POP-008") };
+    }
     const assessment = assessPopulationOverwrite(impact, processedRows);
     if (assessment.blocked) {
       return {

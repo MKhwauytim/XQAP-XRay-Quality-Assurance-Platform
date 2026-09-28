@@ -39,9 +39,13 @@ export type PopulationOverwriteAssessment = PopulationOverwriteImpact & {
  * What a population overwrite of this month would put at risk. Throws when the
  * sample exists but cannot be read (`loadSampleMaster`'s v93 contract), and
  * likewise when the month's distribution or answers cannot be read strictly
- * (`loadOrDeriveDistributionCurrentStrictForRead` / `loadAllEmployeeFiles`'s
- * outer rethrow) — a guard that cannot see whether the month has work must
- * refuse, not silently treat the read failure as "no work" (F21).
+ * (`loadOrDeriveDistributionCurrentStrictForRead`, and `loadAllEmployeeFiles`
+ * called with `{ strict: true }`) — a guard that cannot see whether the month
+ * has work must refuse, not silently treat the read failure as "no work"
+ * (F21). `loadAllEmployeeFiles`'s LENIENT default folds a failed event-log
+ * read, or one employee's unreadable file, into "answered nothing" — exactly
+ * the silent-"no answers" outcome F21 forbids here — so this always asks for
+ * the strict variant, never the default.
  */
 export async function loadPopulationOverwriteImpact(
   directoryHandle: DirectoryHandleLike,
@@ -53,7 +57,7 @@ export async function loadPopulationOverwriteImpact(
   }
   const [distribution, employeeFiles] = await Promise.all([
     loadOrDeriveDistributionCurrentStrictForRead(directoryHandle, monthFolderName, sample.rows),
-    loadAllEmployeeFiles(directoryHandle, monthFolderName),
+    loadAllEmployeeFiles(directoryHandle, monthFolderName, { strict: true }),
   ]);
   return {
     sampleExists: true,

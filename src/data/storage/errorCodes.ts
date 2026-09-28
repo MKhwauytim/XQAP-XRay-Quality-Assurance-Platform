@@ -421,6 +421,11 @@ export const ERROR_CODES = {
     meaning: "saving the processed population to disk threw",
     labelKey: "err_pop_006_save_threw",
   },
+  "XQ-POP-008": {
+    meaning:
+      "A2 overwrite guard (saveMonthRunLocked): the month's existing sample/distribution/answers could not be read (strictly) to check whether a population overwrite would orphan them — the save is refused rather than risking a silent orphan, since a read failure must never be read as \"no work\"",
+    labelKey: "err_pop_008_overwrite_check_unreadable",
+  },
 
   // ── DIST: distribution and its event log ─────────────────────────────────
   "XQ-DIST-001": {

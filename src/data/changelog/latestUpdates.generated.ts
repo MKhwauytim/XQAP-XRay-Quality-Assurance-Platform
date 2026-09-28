@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v140.3",
+    "date": "2026-09-28",
+    "bucket": "fix",
+    "scope": "population",
+    "title": "close two F21 gaps in the overwrite guard's strict answers read"
+  },
+  {
     "version": "v140.2",
     "date": "2026-09-28",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "history",
     "title": "decide the action-history path-length verdict before touching the share, not after a full retry ladder"
-  },
-  {
-    "version": "v135.0",
-    "date": "2026-09-09",
-    "bucket": "redesign",
-    "scope": "storage",
-    "title": "delete a managed JSON name as a unit so an orphaned .bak cannot answer reads forever"
   }
 ];
