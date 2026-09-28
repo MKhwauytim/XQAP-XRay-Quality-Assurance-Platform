@@ -8,18 +8,39 @@ import { getPopulationMonthDir, getSampleMainDir } from "../workspace/workspaceP
 import { closeMonth, invalidateMonthLockCache } from "../population/monthLock";
 import type { MonthManifestData } from "../population/monthTypes";
 import { setReadOnlyMode } from "../storage/readOnlyMode";
+import { clearErrors, getRecentErrors } from "../storage/errorLogger";
 import { subscribeToDataChange, type DataRefreshDetail } from "../workspace/dataRefreshSignal";
 import { answerDraftKey, loadAnswerDraft, saveAnswerDraft } from "./answerDraftStore";
 import { __resetAnswerEventsCacheForTests, loadEmployeeAnswers, upsertItemAnswer } from "./answerStorage";
+import * as answerStorage from "./answerStorage";
 import * as answerLocalMirror from "./answerLocalMirror";
 import type { ItemAnswer } from "./answerTypes";
-import { backfillAnswerMirror, replayPendingAnswers } from "./pendingAnswerReplay";
+import {
+  __resetPendingReplayLogDedupeForTests,
+  backfillAnswerMirror,
+  replayPendingAnswers,
+} from "./pendingAnswerReplay";
 
 vi.mock("./answerLocalMirror", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./answerLocalMirror")>();
-  return { ...actual, mirrorAnswerLocally: vi.fn(actual.mirrorAnswerLocally) };
+  return {
+    ...actual,
+    mirrorAnswerLocally: vi.fn(actual.mirrorAnswerLocally),
+    backfillMirrorFromDisk: vi.fn(actual.backfillMirrorFromDisk),
+  };
 });
 const mirrorMock = vi.mocked(answerLocalMirror.mirrorAnswerLocally);
+const backfillMock = vi.mocked(answerLocalMirror.backfillMirrorFromDisk);
+
+// Only used by the log-dedup test below -- wraps the REAL upsertItemAnswer by
+// default (every other test's calls, direct or via replayPendingAnswers,
+// pass straight through), overridden with a throwing implementation for
+// exactly two calls in that one test.
+vi.mock("./answerStorage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./answerStorage")>();
+  return { ...actual, upsertItemAnswer: vi.fn(actual.upsertItemAnswer) };
+});
+const upsertSpy = vi.mocked(answerStorage.upsertItemAnswer);
 
 const MONTH = "5-May-2026";
 const MONTH_EARLY = "1-January-2026"; // sorts before MONTH -- used for the closed-month ordering test
@@ -72,6 +93,10 @@ beforeEach(() => {
   invalidateMonthLockCache();
   setReadOnlyMode(false);
   mirrorMock.mockClear();
+  backfillMock.mockClear();
+  upsertSpy.mockClear();
+  __resetPendingReplayLogDedupeForTests();
+  clearErrors();
 });
 
 describe("replayPendingAnswers (A1)", () => {
@@ -201,6 +226,46 @@ describe("replayPendingAnswers (A1)", () => {
     expect(file.items.filter((item) => item.xrayImageId === "RACE-1")).toHaveLength(1);
   });
 
+  // I2 (fix round 2): the cross-tab lock name must be STABLE across tabs --
+  // keyed on username alone, never on `workspaceScopeId`, which is a
+  // PER-TAB counter minted the first time a given DirectoryHandleLike OBJECT
+  // is seen (inFlightReads.ts). Two tabs open on the same workspace get two
+  // DIFFERENT DirectoryHandleLike objects (the File System Access API hands
+  // out a fresh handle per session), simulated here with two independently
+  // created directories -- if the lock were still keyed off workspaceScopeId
+  // (round 1's bug), these two calls would never collide on it at all.
+  it("two different directoryHandle objects for the SAME user still serialize on the cross-tab lock, not the in-tab join", async () => {
+    const rootA = createMemoryDirectory("root"); // simulates tab A's own handle
+    const rootB = createMemoryDirectory("root"); // simulates tab B's own handle -- different object identity
+    await seedMonth(rootA, MONTH);
+    await seedMonth(rootB, MONTH);
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let loadPendingCalls = 0;
+    const makeDeps = () => ({
+      loadPending: async () => {
+        loadPendingCalls += 1;
+        await gate;
+        return [{ month: MONTH, item: answer("TAB-RACE-1") }];
+      },
+      markSynced: vi.fn(async () => {}),
+    });
+
+    const a = replayPendingAnswers(rootA, "emp1", makeDeps());
+    const b = replayPendingAnswers(rootB, "emp1", makeDeps());
+    release();
+    const [summaryA, summaryB] = await Promise.all([a, b]);
+
+    // Exactly one of the two calls actually did the work -- the cross-tab
+    // lock skipped the other one entirely (its loadPending never ran).
+    expect(loadPendingCalls).toBe(1);
+    const ran = summaryA.replayed > 0 ? summaryA : summaryB;
+    const skipped = ran === summaryA ? summaryB : summaryA;
+    expect(ran).toEqual({ replayed: 1, alreadyOnDisk: 0, failed: 0, cannotLand: 0 });
+    expect(skipped).toEqual({ replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 0 });
+  });
+
   // CRITICAL 1: a month-closed throw for ONE item used to abort the whole
   // pass -- including months sorted after it. MONTH_EARLY sorts before
   // MONTH, so the buggy version never even reached MONTH's item.
@@ -272,16 +337,53 @@ describe("replayPendingAnswers (A1)", () => {
     expect(summary).toEqual({ replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 1 });
     await expect(getSampleMainDir(root, neverSetUp, false)).rejects.toMatchObject({ name: "NotFoundError" });
   });
+
+  // Minor (fix round 2): a persistently failing write must not become a
+  // fresh durable error-log entry on every single 30s tick -- only the
+  // FIRST occurrence per (month, item, error name) is logged; the item
+  // itself keeps being retried every tick regardless.
+  it("logs a non-closed per-item write error only once across repeated ticks for the same item", async () => {
+    const root = createMemoryDirectory("root");
+    await seedMonth(root, MONTH);
+    upsertSpy.mockClear(); // drop seedMonth's own call from the count below
+    upsertSpy.mockImplementationOnce(async () => { throw new Error("boom"); });
+    upsertSpy.mockImplementationOnce(async () => { throw new Error("boom"); });
+    const deps = {
+      loadPending: async () => [{ month: MONTH, item: answer("ERR-1") }],
+      markSynced: vi.fn(async () => {}),
+    };
+
+    const first = await replayPendingAnswers(root, "emp1", deps);
+    const second = await replayPendingAnswers(root, "emp1", deps);
+
+    expect(first).toEqual({ replayed: 0, alreadyOnDisk: 0, failed: 1, cannotLand: 0 });
+    expect(second).toEqual({ replayed: 0, alreadyOnDisk: 0, failed: 1, cannotLand: 0 }); // still retried
+    expect(upsertSpy).toHaveBeenCalledTimes(2); // ...twice
+    const logged = getRecentErrors().filter((entry) => entry.context === "answers:pending-replay-write");
+    expect(logged).toHaveLength(1); // ...but logged only once
+  });
 });
 
 describe("backfillAnswerMirror (A1 / IMPORTANT 5)", () => {
-  it("re-mirrors every item currently on disk, without writing to the workspace file", async () => {
+  // CRITICAL (fix round 2): backfill must delegate to the GUARDED,
+  // batched `backfillMirrorFromDisk` (see answerLocalMirror.test.ts and
+  // answerLocalMirror.backfill.test.ts for its own never-clobber-a-pending-
+  // record coverage) -- never a per-item `mirrorAnswerLocally` loop, which
+  // was an unconditional overwrite.
+  it("delegates to backfillMirrorFromDisk with every item currently on disk, in one call, without writing to the workspace file", async () => {
     const root = createMemoryDirectory("root");
     expect((await upsertItemAnswer(root, MONTH, "emp1", answer("XR-1"))).ok).toBe(true);
-    mirrorMock.mockClear();
+    backfillMock.mockClear();
+    mirrorMock.mockClear(); // drop the successful save's own mirrorAnswerLocally call from the count below
 
     await backfillAnswerMirror(root, MONTH, "emp1");
 
-    expect(mirrorMock).toHaveBeenCalledWith(MONTH, "emp1", expect.objectContaining({ xrayImageId: "XR-1" }));
+    expect(backfillMock).toHaveBeenCalledTimes(1);
+    expect(backfillMock).toHaveBeenCalledWith(
+      MONTH,
+      "emp1",
+      expect.arrayContaining([expect.objectContaining({ xrayImageId: "XR-1" })])
+    );
+    expect(mirrorMock).not.toHaveBeenCalled(); // no per-item mirrorAnswerLocally loop any more
   });
 });

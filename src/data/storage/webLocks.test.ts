@@ -162,3 +162,51 @@ test("withTryResourceLock: a distinct resource name is never blocked by an unrel
   releaseFirst();
   await first;
 });
+
+test("withTryResourceLock: native LockManager -- ifAvailable: true is requested, and a second concurrent request for the same name is skipped while the first is in flight", async () => {
+  let held = false;
+  const request = vi.fn(
+    async (
+      _name: string,
+      _options: { mode: "exclusive"; ifAvailable: true },
+      callback: (lock: unknown) => Promise<unknown>
+    ) => {
+      if (held) return callback(null); // not granted immediately -- mirrors the real API's ifAvailable contract
+      held = true;
+      try {
+        return await callback({ name: _name });
+      } finally {
+        held = false;
+      }
+    }
+  );
+  vi.stubGlobal("navigator", { locks: { request } });
+
+  const events: string[] = [];
+  let releaseFirst!: () => void;
+  const gate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+
+  const first = withTryResourceLock("try-res-native", async () => {
+    events.push("first:start");
+    await gate;
+    events.push("first:end");
+    return "first";
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const second = await withTryResourceLock("try-res-native", async () => {
+    events.push("second:ran"); // must never happen while the first is in flight
+    return "second";
+  });
+
+  expect(second).toEqual({ ran: false });
+  releaseFirst();
+  expect(await first).toEqual({ ran: true, result: "first" });
+  expect(events).toEqual(["first:start", "first:end"]);
+
+  expect(request).toHaveBeenCalledTimes(2);
+  const [firstName, firstOptions] = request.mock.calls[0]!;
+  expect(firstName).toBe("xray:try-res-native");
+  expect(firstOptions).toEqual({ mode: "exclusive", ifAvailable: true });
+});

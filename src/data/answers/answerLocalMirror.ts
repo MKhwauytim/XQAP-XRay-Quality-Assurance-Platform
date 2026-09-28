@@ -28,9 +28,18 @@ import type { ItemAnswer } from "./answerTypes";
  * since re-landing regardless of sync state would be a hidden background
  * writer into the shared folder with no idea whether that folder had just
  * been restored from a backup. The file's own items are still written INTO
- * the mirror on the other side (`backfillAnswerMirror` in
- * `pendingAnswerReplay.ts`, the non-writing half of what used to be
- * `reconcileAnswersWithLocalMirror`) — nothing already on either side is ever
+ * the mirror on the other side (`backfillMirrorFromDisk` below, called from
+ * `backfillAnswerMirror` in `pendingAnswerReplay.ts` — the non-writing half
+ * of what used to be `reconcileAnswersWithLocalMirror`) — but, CRITICAL fix
+ * round 2, that direction is no longer a blind overwrite either: it must
+ * never clobber a `synced: false` (still-pending, unsaved) mirror entry with
+ * whatever happens to be on disk right now. An employee who re-saved an
+ * item and that save is itself still queued as pending would otherwise have
+ * the OLDER on-disk version silently marked `synced: true` over top of it —
+ * `loadPendingAnswerRecords` would then never see that item again, and
+ * `replayPendingAnswers` would never land it: a real, unsaved answer lost
+ * with no error, no log, nothing. `shouldRefreshMirrorFromDisk` is the one
+ * place that decision is made. Nothing already on either side is ever
  * removed by this module.
  */
 
@@ -140,6 +149,91 @@ export async function markAnswerPendingLocally(
   item: ItemAnswer
 ): Promise<void> {
   await putRecord(month, username, item, false);
+}
+
+/**
+ * The narrow shape `shouldRefreshMirrorFromDisk` needs of an existing mirror
+ * record — exported so it can be unit-tested directly, independent of
+ * IndexedDB (this repo's test environment has no IndexedDB at all — see
+ * `answerLocalMirror.test.ts`'s own note — so the actual decision logic has
+ * to be testable on its own, separate from the transaction it runs inside).
+ */
+export type MirroredItemInfo = { synced: boolean; item: ItemAnswer };
+
+/**
+ * CRITICAL (fix round 2): the one decision `backfillMirrorFromDisk` makes
+ * for every item — may the on-disk copy overwrite what is currently
+ * mirrored for this key? NO in two cases, both about never losing a real,
+ * unsaved answer or regressing a newer mirrored one:
+ *  - `existing.synced === false`: this key is a PENDING (still unsaved)
+ *    record. Overwriting it with whatever happens to be on disk right now
+ *    would mark it `synced: true` and make `loadPendingAnswerRecords` stop
+ *    returning it — `replayPendingAnswers` would never land it again, and
+ *    the employee's real edit is gone with no error, no log, nothing.
+ *  - `existing.item.lastSavedAt >= diskItem.lastSavedAt`: the mirror
+ *    already holds something at least as new as disk (whether or not it was
+ *    ever marked pending) — nothing to refresh, and never let an OLDER
+ *    on-disk read win over what the mirror already has.
+ * YES only when there is no existing record for this key at all, or the
+ * existing (already-synced) record is strictly older than disk.
+ */
+export function shouldRefreshMirrorFromDisk(
+  existing: MirroredItemInfo | undefined,
+  diskItem: ItemAnswer
+): boolean {
+  if (!existing) return true;
+  if (!existing.synced) return false;
+  return diskItem.lastSavedAt > existing.item.lastSavedAt;
+}
+
+/**
+ * Best-effort: re-mirror a whole month's worth of CURRENT on-disk items as
+ * CONFIRMED, one single IndexedDB transaction for the entire batch (never
+ * one `openMirrorDb`/transaction per item — this can run on every 30s tick
+ * for however many items a month has). Every item is get-then-conditionally-
+ * put inside that ONE transaction: read the existing record for its key,
+ * decide with `shouldRefreshMirrorFromDisk`, and only issue a `put` when it
+ * says yes — never a blind overwrite (see this module's doc and
+ * `shouldRefreshMirrorFromDisk`'s own doc for why that was the bug).
+ */
+export async function backfillMirrorFromDisk(
+  month: string,
+  username: string,
+  items: readonly ItemAnswer[]
+): Promise<void> {
+  if (items.length === 0) return;
+  const db = await openMirrorDb();
+  if (!db) return;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      const store = tx.objectStore(STORE_NAME);
+      for (const item of items) {
+        const key = mirrorKey(month, username, item.xrayImageId);
+        const getRequest = store.get(key);
+        getRequest.onsuccess = () => {
+          const existing = getRequest.result as MirrorRecord | undefined;
+          if (!shouldRefreshMirrorFromDisk(existing, item)) return;
+          store.put({
+            key,
+            month,
+            username,
+            xrayImageId: item.xrayImageId,
+            item,
+            mirroredAt: new Date().toISOString(),
+            synced: true,
+          } satisfies MirrorRecord);
+        };
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  } catch {
+    // Best-effort — see module doc.
+  } finally {
+    db.close();
+  }
 }
 
 async function readAllRecords(): Promise<MirrorRecord[]> {

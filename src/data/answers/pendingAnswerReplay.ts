@@ -21,7 +21,7 @@ import { withTryResourceLock } from "../storage/webLocks";
 import { MonthClosedError } from "../population/monthLock";
 import { ReadOnlyModeError } from "../storage/readOnlyMode";
 import { answerDraftKey, clearAnswerDraft } from "./answerDraftStore";
-import { loadPendingAnswerRecords, mirrorAnswerLocally } from "./answerLocalMirror";
+import { backfillMirrorFromDisk, loadPendingAnswerRecords, mirrorAnswerLocally } from "./answerLocalMirror";
 import type { ItemAnswer } from "./answerTypes";
 
 export type PendingReplayDeps = {
@@ -48,34 +48,83 @@ export type PendingReplaySummary = {
 
 const EMPTY_SUMMARY: PendingReplaySummary = { replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 0 };
 
+/**
+ * Minor (fix round 2): a per-item write error that is NOT `MonthClosedError`/
+ * `ReadOnlyModeError` (an actual failure, not an expected wait) used to be
+ * logged on every single 30s tick for as long as it kept failing — a
+ * persistently unreachable share, say, turns into a new durable error-log
+ * entry every 30 seconds forever. Logged once per (month, xrayImageId, error
+ * name) for the lifetime of this session instead; the item itself is still
+ * retried every tick (only the LOGGING is deduped, not the retry).
+ */
+const loggedPendingReplayWriteErrors = new Set<string>();
+
+function logPendingReplayWriteErrorOnce(month: string, xrayImageId: string, error: unknown): void {
+  const errorName = error instanceof Error ? error.name : String(error);
+  const key = `${month}::${xrayImageId}::${errorName}`;
+  if (loggedPendingReplayWriteErrors.has(key)) return;
+  loggedPendingReplayWriteErrors.add(key);
+  logError("answers:pending-replay-write", error);
+}
+
+/** @internal test-only — clears the per-session write-error log dedupe set. */
+export function __resetPendingReplayLogDedupeForTests(): void {
+  loggedPendingReplayWriteErrors.clear();
+}
+
 const DEFAULT_DEPS: PendingReplayDeps = {
   loadPending: loadPendingAnswerRecords,
   markSynced: mirrorAnswerLocally,
 };
 
-/** `pending-replay:{workspace}:{username}` — shared by the in-tab join and the cross-tab lock below. */
-function replayResourceKey(directoryHandle: DirectoryHandleLike, username: string): string {
+/**
+ * Same-tab join key: workspace + username. Scoped to the workspace too
+ * (`workspaceScopeId` — a stable id `inFlightReads.ts` mints per directory
+ * handle THIS TAB has seen) so two different workspaces open in one session
+ * never join each other's in-flight run even if a username happened to
+ * match. This is deliberately NOT what the cross-tab lock below uses (see
+ * its own doc for why).
+ */
+function inTabDedupeKey(directoryHandle: DirectoryHandleLike, username: string): string {
   return `pending-replay:${workspaceScopeId(directoryHandle)}:${username}`;
 }
 
 /**
- * IMPORTANT 2 (fix round 1): a single, shared in-flight guard, in two parts.
+ * Cross-tab lock name: username ALONE. Fix round 2 (I2): `workspaceScopeId`
+ * is a PER-TAB counter (`ws1`, `ws2`, …, minted the first time a given
+ * `DirectoryHandleLike` object is seen in `inFlightReads.ts`'s `WeakMap`) —
+ * two different tabs opening the SAME workspace on disk get two DIFFERENT
+ * `DirectoryHandleLike` objects (the File System Access API hands out a new
+ * handle object per `showDirectoryPicker()`/session restore) and therefore
+ * two different scope ids. Using it in the cross-tab lock name meant the
+ * lock was never actually shared across tabs — the id it was meant to keep
+ * distinct is exactly the thing that made two tabs never collide on it. The
+ * lock's whole job is to be the same name in every tab replaying for the
+ * same user, so it drops the workspace scope entirely.
+ */
+function crossTabLockKey(username: string): string {
+  return `pending-replay:${username}`;
+}
+
+/**
+ * IMPORTANT 2 (fix round 1, corrected fix round 2): a single, shared
+ * in-flight guard, in two parts.
  *
  *  1. Same-tab: `dedupeInFlight` (the existing app-wide "join an overlapping
  *     call for this key" primitive — see `inFlightReads.ts`, already used
- *     for workspace directory reads) keyed by workspace + username. A
- *     second call for the same user in the SAME tab while one is running
- *     joins that SAME promise instead of starting its own.
- *  2. Cross-tab: the actual work runs inside `withTryResourceLock`, keyed
- *     `pending-replay:{workspace}:{username}` (Web Locks API where
- *     available, an in-memory held-set fallback otherwise — see
- *     `webLocks.ts`). If another tab already holds it, THIS tick is
- *     SKIPPED — not queued — and returns an all-zero summary; the other
- *     tab's run is already doing the work. This is deliberately NOT the
- *     same primitive `dedupeInFlight` uses: Web Locks are the only
- *     mechanism here that reaches across tabs, and it has no "join and get
- *     the same result back" mode, only "wait" or "skip" — skip is right for
- *     a poller that ticks again in 30s anyway.
+ *     for workspace directory reads), keyed by `inTabDedupeKey` (workspace +
+ *     username). A second call for the same user in the SAME tab while one
+ *     is running joins that SAME promise instead of starting its own.
+ *  2. Cross-tab: the actual work runs inside `withTryResourceLock`, keyed by
+ *     `crossTabLockKey` (username ALONE — see its own doc for why NOT the
+ *     workspace scope) via the Web Locks API where available, an in-memory
+ *     held-set fallback otherwise (`webLocks.ts`). If another tab already
+ *     holds it, THIS tick is SKIPPED — not queued — and returns an all-zero
+ *     summary; the other tab's run is already doing the work. This is
+ *     deliberately NOT the same primitive `dedupeInFlight` uses: Web Locks
+ *     are the only mechanism here that reaches across tabs, and it has no
+ *     "join and get the same result back" mode, only "wait" or "skip" —
+ *     skip is right for a poller that ticks again in 30s anyway.
  *
  * Together these are what makes "two replays of the same pending item can
  * never run concurrently" true across BOTH axes (same tab, cross tab) — not
@@ -86,9 +135,8 @@ export async function replayPendingAnswers(
   username: string,
   deps: PendingReplayDeps = DEFAULT_DEPS
 ): Promise<PendingReplaySummary> {
-  const key = replayResourceKey(directoryHandle, username);
-  return dedupeInFlight(key, async () => {
-    const attempt = await withTryResourceLock(key, () =>
+  return dedupeInFlight(inTabDedupeKey(directoryHandle, username), async () => {
+    const attempt = await withTryResourceLock(crossTabLockKey(username), () =>
       runReplayPendingAnswers(directoryHandle, username, deps)
     );
     return attempt.ran ? attempt.result : EMPTY_SUMMARY;
@@ -218,7 +266,7 @@ async function runReplayPendingAnswers(
           // Expected, recurring, not a bug -- see PendingReplaySummary's doc.
           summary.cannotLand += 1;
         } else {
-          logError("answers:pending-replay-write", error);
+          logPendingReplayWriteErrorOnce(month, item.xrayImageId, error);
           summary.failed += 1;
         }
       }
@@ -247,6 +295,14 @@ async function runReplayPendingAnswers(
  * Best-effort, plain (non-strict) read — this is a convenience backup copy,
  * never the thing standing between a real answer and data loss the way
  * `replayPendingAnswers`'s own on-disk check must be.
+ *
+ * CRITICAL (fix round 2): the actual re-mirroring is `backfillMirrorFromDisk`
+ * (`answerLocalMirror.ts`), NOT a per-item `mirrorAnswerLocally` loop — that
+ * was an unconditional IndexedDB `put`, which would silently overwrite a
+ * still-pending (`synced: false`) mirror entry with whatever the (possibly
+ * OLDER) on-disk copy happens to be, making a real unsaved edit vanish from
+ * `loadPendingAnswerRecords` with no trace. `backfillMirrorFromDisk` never
+ * does that — see its own doc and `shouldRefreshMirrorFromDisk`.
  */
 export async function backfillAnswerMirror(
   directoryHandle: DirectoryHandleLike,
@@ -255,9 +311,7 @@ export async function backfillAnswerMirror(
 ): Promise<void> {
   try {
     const file = await loadEmployeeAnswers(directoryHandle, monthFolderName, username);
-    for (const item of file.items) {
-      await mirrorAnswerLocally(monthFolderName, username, item);
-    }
+    await backfillMirrorFromDisk(monthFolderName, username, file.items);
   } catch (error) {
     logError("answers:mirror-backfill", error);
   }
