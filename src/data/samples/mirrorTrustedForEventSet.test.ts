@@ -29,7 +29,7 @@ import {
 } from "../distribution/distributionStorage";
 import { buildAssignEvent } from "../distribution/distributionLog";
 import { invalidateMonthLockCache } from "../population/monthLock";
-import { getPopulationMonthDir } from "../workspace/workspacePaths";
+import { getPopulationMonthDir, getSampleMainDir } from "../workspace/workspacePaths";
 import type { DistributionCurrentData } from "../distribution/distributionTypes";
 import {
   getUserWorkspaceFootprint,
@@ -106,6 +106,7 @@ describe("a pending append whose projection job fails", () => {
     expect(mirror).not.toBeNull();
     const log = await loadDistributionLog(root, MONTH);
     expect(mirror!.eventSetId).toBe(log.eventSetId);
+    expect(mirror!.scan).toBeDefined();
     expect(await isMirrorTrustedForEvents(root, MONTH, mirror!, log.revision)).toBe(true);
     expect((await getUserWorkspaceFootprint(root, EMP)).activeAssignments[0]?.pendingCount).toBe(1);
   });
@@ -153,6 +154,53 @@ describe("a pending append whose projection job fails", () => {
   });
 });
 
+describe("the trust check is a sizes-only comparison against the recorded scan", () => {
+  async function eventsDirOf(root: DirectoryHandleLike): Promise<DirectoryHandleLike> {
+    const main = await getSampleMainDir(root, MONTH, true);
+    return main.getDirectoryHandle("distribution.events", { create: true });
+  }
+  const trustedNow = async (root: DirectoryHandleLike) => {
+    const mirror = (await loadEmployeeSampleMirror(root, MONTH, EMP))!;
+    // Hold the revision condition fixed so only the scan comparison decides.
+    return isMirrorTrustedForEvents(root, MONTH, mirror, mirror.sourceLogRevision);
+  };
+
+  it("trusted while the listing is unchanged", async () => {
+    expect(await trustedNow(await seededRoot())).toBe(true);
+  });
+
+  it("a segment that GREW is not trusted", async () => {
+    const root = await seededRoot();
+    __setProjectionTimingForTests({ graceMs: 5_000, deadlineMs: 5_000 });
+    await appendDistributionEvents(root, MONTH, [assign("A2")]); // same writer chain: the open segment grows
+    expect(await trustedNow(root)).toBe(false);
+  });
+
+  it("a NEW segment is not trusted", async () => {
+    const root = await seededRoot();
+    const w = await (await (await eventsDirOf(root)).getFileHandle("other-device-x.ndjson", { create: true })).createWritable!();
+    await w.write("");
+    await w.close();
+    expect(await trustedNow(root)).toBe(false);
+  });
+
+  it("a NEW legacy per-event file is not trusted", async () => {
+    const root = await seededRoot();
+    const w = await (await (await eventsDirOf(root)).getFileHandle("legacy-evt.json", { create: true })).createWritable!();
+    await w.write("{}");
+    await w.close();
+    expect(await trustedNow(root)).toBe(false);
+  });
+
+  it("a trusted check reads NO event content", async () => {
+    const root = await seededRoot();
+    setSimulatedFaults(root, [
+      { operation: "readFile", nameSuffix: ".ndjson", errorName: "NotReadableError", times: Number.POSITIVE_INFINITY },
+    ]);
+    expect(await trustedNow(root)).toBe(true);
+  });
+});
+
 describe("mirror stamping and legacy mirrors", () => {
   const current = (eventSetId: string | undefined, entries: DistributionCurrentData["entries"]): DistributionCurrentData =>
     ({
@@ -182,7 +230,8 @@ describe("mirror stamping and legacy mirrors", () => {
   });
 
   it("a legacy mirror without eventSetId is never trusted (re-derived, no migration needed)", async () => {
-    const legacy = { monthFolderName: MONTH, username: EMP, updatedAt: "", sourceLogRevision: 9, entries: [] };
+    // (an older build's mirror has no `scan`, even if it carries an eventSetId)
+    const legacy = { monthFolderName: MONTH, username: EMP, updatedAt: "", sourceLogRevision: 9, eventSetId: "x", entries: [] };
     const root = createMemoryDirectory("root") as DirectoryHandleLike;
     expect(await isMirrorTrustedForEvents(root, MONTH, legacy as never, 1)).toBe(false);
   });

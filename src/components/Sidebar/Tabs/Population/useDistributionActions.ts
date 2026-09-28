@@ -183,6 +183,8 @@ export function useDistributionActions(params: {
       ...deriveCurrentDistribution(log, sampleRows),
       logRevision: log.revision,
       ...(log.eventSetId === undefined ? {} : { eventSetId: log.eventSetId }),
+      // Which event-store scan this derivation is from, so its mirrors can be trusted by a sizes-only listing.
+      ...(log.scanIdentity === undefined ? {} : { scanIdentity: log.scanIdentity }),
     };
     setDistributionCurrent(current);
     await saveDistributionCurrent(directoryHandle, monthFolderName, current);

@@ -1,13 +1,12 @@
 import { tagError } from "../storage/errorCodes";
 import { isNotFoundError } from "../storage/transientFileErrors";
-import type { DistributionCurrentData, DistributionEntry } from "../distribution/distributionTypes";
+import type { DistributionCurrentData, DistributionEntry, EventStoreScanIdentity } from "../distribution/distributionTypes";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { getSampleEmployeeDir, safeWorkspaceFilePart } from "../workspace/workspacePaths";
 import { listDirectoryEntries } from "../storage/directoryScan";
 import { mapWithConcurrency } from "../storage/concurrency";
 import { logError } from "../storage/errorLogger";
-import { workspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
 import { listMonthFolders } from "../population/populationStorage";
 import { isMonthClosed } from "../population/monthLock";
 import { loadEmployeeAnswers } from "../answers/answerStorage";
@@ -21,8 +20,9 @@ import { listAdhocSampleFolders } from "../adhocImport/adhocImportEmployeeView";
 // other's exports inside function bodies, never at module-eval time (P6,
 // 2026-08 — see getUserWorkspaceFootprint's revision cross-check below).
 import {
-  loadDistributionLogForRead,
+  eventStoreMatchesScan,
   loadOrDeriveDistributionCurrent,
+  scanIdentityOf,
   readDistributionLogStamp,
 } from "../distribution/distributionStorage";
 // Same deliberate cycle, same rule: DERIVE_VERSION is a plain number constant
@@ -84,6 +84,13 @@ export type EmployeeSamplesFile = {
    * an error).
    */
   eventSetId?: string;
+  /**
+   * The event-store scan (segment offsets + legacy file set digest) this mirror
+   * was derived from. See `isMirrorTrustedForEvents`. Optional; absent means
+   * "never trusted", so an older mirror is re-derived — it is restamped only by
+   * the next distribution write in its month.
+   */
+  scan?: EventStoreScanIdentity;
   /** Absent on mirrors written before the quota field existed — see EmployeeMirrorQuota. */
   quota?: EmployeeMirrorQuota;
   entries: DistributionEntry[];
@@ -393,6 +400,7 @@ export async function syncSampleMirrors(
   // so it carries this build's semantics.
   const deriveVersion = current.deriveVersion ?? DERIVE_VERSION;
   const eventSetId = current.eventSetId;
+  const scan = scanIdentityOf(current);
   const employeesDir = await getSampleEmployeeDir(directoryHandle, monthFolderName, true);
 
   const entriesByEmployee = new Map<string, DistributionEntry[]>();
@@ -468,6 +476,7 @@ export async function syncSampleMirrors(
         sourceLogRevision,
         deriveVersion,
         ...(eventSetId === undefined ? {} : { eventSetId }),
+        ...(scan === undefined ? {} : { scan }),
         ...(quota
           ? {
               quota: {
@@ -592,50 +601,30 @@ async function staleMirrorPendingCount(
   }
 }
 
-/** Latest current-eventSetId read per (workspace, month), valid for one epoch. */
-const currentEventSetIdMemo = new Map<string, { epoch: number; promise: Promise<string | undefined> }>();
-
-/**
- * The eventSetId of the log as it stands now — one log read per workspace epoch
- * (the epoch moves on every write by this tab and on every change the sync tick
- * detects), so repeated loads between changes cost nothing extra.
- */
-function currentEventSetId(directoryHandle: DirectoryHandleLike, monthFolderName: string): Promise<string | undefined> {
-  const key = `${workspaceScopeId(directoryHandle)}|${monthFolderName}`;
-  const epoch = workspaceEpoch(directoryHandle, monthFolderName);
-  const hit = currentEventSetIdMemo.get(key);
-  if (hit && hit.epoch === epoch) return hit.promise;
-  const promise = loadDistributionLogForRead(directoryHandle, monthFolderName).then((log) => log.eventSetId);
-  currentEventSetIdMemo.set(key, { epoch, promise });
-  promise.catch(() => {
-    if (currentEventSetIdMemo.get(key)?.promise === promise) currentEventSetIdMemo.delete(key);
-  });
-  return promise;
-}
-
 /**
  * May a reader serve `mirror` as the employee's current queue without folding?
- * Only when BOTH hold: its revision is at or above the projection stamp, AND it
- * was derived from the current event set. The second condition is what makes the
- * answer independent of the projection stamp, which lags the durable events
- * whenever the background projection job is pending, failed, or lost with a
- * closed tab. A mirror with no eventSetId (older build) is not trusted; nor is
- * any case where the current event set cannot be read — the caller then takes
- * its authoritative path.
+ * Only when BOTH hold: its revision is at or above the projection stamp, AND the
+ * event store still holds exactly what the mirror was derived from
+ * (`eventStoreMatchesScan`: a sizes-only listing of `distribution.events/`, no
+ * content read — segments are append-only, so an unchanged listing proves no
+ * event has been added). The second condition is what makes the answer
+ * independent of the projection stamp, which lags the durable events whenever the
+ * background projection job is pending, failed, or lost with a closed tab.
+ *
+ * Not trusted: a mirror with no `scan` (older build, or derived from a snapshot
+ * that carried none — it is re-derived, no migration needed), and any case where
+ * the listing fails. No memo: every call lists afresh (one listing plus one size
+ * stat per segment), which is what the irreversible delete-user guard needs.
  */
 export async function isMirrorTrustedForEvents(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
-  mirror: Pick<EmployeeSamplesFile, "sourceLogRevision" | "eventSetId">,
+  mirror: Pick<EmployeeSamplesFile, "sourceLogRevision" | "scan">,
   stampRevision: number
 ): Promise<boolean> {
   if (mirror.sourceLogRevision < stampRevision) return false;
-  if (typeof mirror.eventSetId !== "string") return false;
-  try {
-    return (await currentEventSetId(directoryHandle, monthFolderName)) === mirror.eventSetId;
-  } catch {
-    return false;
-  }
+  if (!mirror.scan) return false;
+  return eventStoreMatchesScan(directoryHandle, monthFolderName, mirror.scan);
 }
 
 export type UserWorkspaceFootprint = {

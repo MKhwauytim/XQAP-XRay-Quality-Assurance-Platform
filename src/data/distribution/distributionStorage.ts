@@ -11,6 +11,7 @@ import type {
   DistributionEventType,
   DistributionFoldCheckpoint,
   DistributionLog,
+  EventStoreScanIdentity,
   QuotaFacts
 } from "./distributionTypes";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
@@ -22,7 +23,8 @@ import {
   INTERACTIVE_WRITE_DEADLINE_MS,
 } from "../storage/operationDeadline";
 import { codedMessage, logCodedError, resolveErrorCode } from "../storage/errorCodes";
-import { listDirectoryEntries, readAppendOnlyDirectory, readNamedJsonFiles } from "../storage/directoryScan";
+import { listDirectoryEntries, listDirectoryEntriesWithSize, readAppendOnlyDirectory, readNamedJsonFiles } from "../storage/directoryScan";
+import { simpleHash } from "../storage/jsonEnvelope";
 import { ensureMonthWritable } from "../population/monthLock";
 import { syncSampleMirrors } from "../samples/sampleMirrorStorage";
 import { loadSampleMaster } from "../sampling/sampleStorage";
@@ -33,6 +35,7 @@ import {
 } from "../workspace/workspacePaths";
 import {
   DISTRIBUTION_EVENTS_DIR,
+  DISTRIBUTION_EVENT_SEGMENT_SUFFIX,
   appendDistributionEventsDurably,
   distributionEventSetId,
   getDistributionDeviceId,
@@ -569,6 +572,68 @@ type DistributionLogLoad = {
  * projection safely — so neither costs a second directory scan on top of the
  * one this already does.
  */
+/** Order-independent digest of the legacy per-event file NAME set (see EventStoreScanIdentity). */
+export function legacyFilesDigest(names: readonly string[]): string {
+  return `${names.length}:${simpleHash([...names].sort().join("\n"))}`;
+}
+
+/**
+ * The event-store scan a derived snapshot was built from, for stamping onto the
+ * mirrors written from it: the snapshot's own `scanIdentity` (set by callers that
+ * derive from a loaded log), else its fold checkpoint's offsets and legacy names.
+ * `undefined` when the snapshot carries neither, so its mirrors are never trusted.
+ */
+export function scanIdentityOf(current: DistributionCurrentData): EventStoreScanIdentity | undefined {
+  if (current.scanIdentity) return current.scanIdentity;
+  const checkpoint = current.foldCheckpoint;
+  if (!checkpoint) return undefined;
+  return {
+    segmentOffsets: checkpoint.segmentOffsets,
+    legacyFilesDigest: legacyFilesDigest(checkpoint.legacyEventFileNames),
+  };
+}
+
+/**
+ * Does the event store still hold EXACTLY the events `identity` was built from?
+ * A sizes-only listing of `distribution.events/` (no content read): trusted iff
+ * the segment set is identical, every segment's size equals its recorded offset
+ * (segments are append-only, so growth is an added event), and the legacy
+ * per-event file set is identical. Anything else, including a listing that
+ * fails, is `false` (the caller re-derives).
+ */
+export async function eventStoreMatchesScan(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  identity: EventStoreScanIdentity
+): Promise<boolean> {
+  try {
+    const directory = await openOptionalDirectory(() => getDistributionDir(directoryHandle, monthFolderName, false));
+    let segments: Array<{ name: string; size: number }> = [];
+    let legacyNames: string[] = [];
+    if (directory) {
+      let eventsDir: DirectoryHandleLike | null = null;
+      try {
+        eventsDir = await directory.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: false });
+      } catch (error) {
+        if (!isNotFoundError(error)) throw error;
+      }
+      if (eventsDir) {
+        segments = await listDirectoryEntriesWithSize(eventsDir, DISTRIBUTION_EVENT_SEGMENT_SUFFIX);
+        legacyNames = (await listDirectoryEntries(eventsDir))
+          .filter((entry) => entry.kind === "file" && entry.name.endsWith(".json"))
+          .map((entry) => entry.name);
+      }
+    }
+    if (legacyFilesDigest(legacyNames) !== identity.legacyFilesDigest) return false;
+    const recorded = Object.entries(identity.segmentOffsets);
+    if (segments.length !== recorded.length) return false;
+    const sizes = new Map(segments.map((segment) => [segment.name, segment.size]));
+    return recorded.every(([name, offset]) => sizes.get(name) === offset);
+  } catch {
+    return false;
+  }
+}
+
 async function loadDistributionLogDetailed(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
@@ -576,7 +641,13 @@ async function loadDistributionLogDetailed(
 ): Promise<DistributionLogLoad> {
   const current = await readCurrentDistributionSource(directoryHandle, monthFolderName, options);
   const legacyLog = await readLegacyDistributionLog(directoryHandle, monthFolderName);
-  const log = mergeDistributionLogSources(monthFolderName, { ...current, legacyLog });
+  const log: DistributionLog = {
+    ...mergeDistributionLogSources(monthFolderName, { ...current, legacyLog }),
+    scanIdentity: {
+      segmentOffsets: current.segmentOffsets,
+      legacyFilesDigest: legacyFilesDigest(current.legacyEventFileNames),
+    },
+  };
   return {
     log,
     currentProjectionEvents: current.currentLog?.events ?? [],
@@ -720,10 +791,6 @@ export async function appendDistributionEvents(
     };
   }
 
-  // The events are durable NOW: move this tab's epoch so no epoch-keyed memo
-  // (e.g. a reader's "current eventSetId") keeps describing the pre-append set
-  // while the projection job is still in flight.
-  bumpWorkspaceEpoch(directoryHandle, monthFolderName);
   options?.onProgress?.({ phase: "projection", completed: events.length, total: events.length });
 
   // P4: the projection update is queued on its own per-month chain, with its
@@ -877,6 +944,8 @@ function enqueueProjectionUpdate(
   // (one revision bump) instead of one full deadline per append. Nothing is lost:
   // the projection carries only the revision/token, and the loader always
   // re-reads the full durable event set.
+  // (A coalesced caller's `onProgress` is not called: the append has already
+  // detached from progress reporting by the time a queued job runs.)
   if (chain.queued && !chain.queued.started) {
     chain.queued.events.push(...events);
     for (const id of ids) chain.queued.ids.add(id);
@@ -983,7 +1052,12 @@ async function runProjectionUpdate(
           // than mutating `updated` itself.
           result: {
             ok: true as const,
-            log: { ...updated, events: mergedEvents, eventSetId: distributionEventSetId(mergedEvents) },
+            log: {
+              ...updated,
+              events: mergedEvents,
+              eventSetId: distributionEventSetId(mergedEvents),
+              ...(existing.scanIdentity ? { scanIdentity: existing.scanIdentity } : {}),
+            },
           },
           // Delayed re-read guards against a concurrent machine that read the
           // same base revision and clobbered our commit after this read-back.
