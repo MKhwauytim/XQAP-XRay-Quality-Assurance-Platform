@@ -1,40 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import type { PreparedPopulationRow } from "../population/populationTypes";
-import type { EmployeePortRestriction, EmployeeStageAllocation } from "../population/populationConfig";
+import type { EmployeePortRestriction } from "../population/populationConfig";
 import type { ManagedLoginUser } from "../../auth/userManagement";
-import type { PasswordHashRecord } from "../../auth/passwordCrypto";
 import type { DistributionEntry } from "./distributionTypes";
-import { makePopulationRow } from "../population/populationTestFixtures";
 import { calculateBulkAssignment, type BulkAssignmentResult } from "./bulkAssignment";
+import { makeUser, row, rows, alloc } from "./bulkAssignmentTestFixtures";
 
 // Titles carry a "[no-restriction]" or "[port-restricted]" tag so a later task
 // can update ONLY the restricted snapshots with `-t "port-restricted" -u`.
 
+/** Local shorthand over the shared `makeUser` — this file only ever needs "employee". */
 function user(username: string, licensed = false): ManagedLoginUser {
-  return {
-    id: username,
-    username,
-    displayName: username,
-    role: "employee",
-    passwordHash: { algorithm: "PBKDF2-SHA256", saltBase64: "s", hashBase64: "h", iterations: 600000 } as PasswordHashRecord,
-    isActive: true,
-    hasCertScanLicense: licensed,
-    createdAt: "",
-    updatedAt: "",
-  };
-}
-
-function row(id: string, stage: string, port: string, cert: "Certscan" | "NonCertscan" = "NonCertscan"): PreparedPopulationRow {
-  return { ...makePopulationRow(id, port), stage, certScanStatus: cert };
-}
-
-function rows(prefix: string, count: number, stage: string, port: string): PreparedPopulationRow[] {
-  return Array.from({ length: count }, (_, i) => row(`${prefix}-${String(i).padStart(4, "0")}`, stage, port));
-}
-
-function alloc(username: string, stageKey: EmployeeStageAllocation["stageKey"], value: number, method: EmployeeStageAllocation["method"] = "percentage"): EmployeeStageAllocation {
-  return { username, stageKey, method, value, isActive: true };
+  return makeUser(username, "employee", licensed);
 }
 
 /** Everything deterministic about a result (event ids / timestamps excluded). */
@@ -47,14 +25,19 @@ function fullProjection(result: BulkAssignmentResult) {
   };
 }
 
-/** Per-employee, per-port totals — for large fixtures. */
+/**
+ * Per-employee, per-stage-and-port totals — for large fixtures. Keyed by
+ * "STAGE/port" (not port alone) so a cross-stage make-up shows up in the
+ * diff as a change to the specific stage/port group the row moved out of and
+ * the one it moved into, not just a same-port count shift.
+ */
 function totalsProjection(result: BulkAssignmentResult, source: PreparedPopulationRow[]) {
-  const portById = new Map(source.map((r) => [r.xrayImageId, r.portName ?? ""]));
+  const groupById = new Map(source.map((r) => [r.xrayImageId, `${r.stage}/${r.portName ?? ""}`]));
   const totals: Record<string, Record<string, number>> = {};
   for (const e of result.events) {
-    const port = portById.get(e.xrayImageId) ?? "";
+    const group = groupById.get(e.xrayImageId) ?? "";
     totals[e.assignedTo] ??= {};
-    totals[e.assignedTo]![port] = (totals[e.assignedTo]![port] ?? 0) + 1;
+    totals[e.assignedTo]![group] = (totals[e.assignedTo]![group] ?? 0) + 1;
   }
   return { totals, errors: result.errors, skipped: result.skipped, eventCount: result.events.length };
 }
@@ -107,6 +90,55 @@ describe("calculateBulkAssignment snapshots", () => {
       operatorUsername: "op",
     });
     expect(fullProjection(result)).toMatchSnapshot();
+  });
+
+  it("[no-restriction] CertScan Case B pushes the licensed employee over their month target", () => {
+    // FIRST_STAGE: 80 CertScan + 20 NonCertscan rows split 50/50 between "a"
+    // (licensed) and "b" (unlicensed). CertScan Case B (certRows > licensed
+    // quota, bulkAssignment.ts ~170-173) gives ALL 80 cert rows to "a" alone,
+    // leaving "b" to take the 20 normal rows — "a" ends up well over their
+    // 50-row share of the stage and "b" well under it, by design (not a
+    // bug). SECOND_STAGE gives both an even, unrelated 20/20 split so the
+    // fixture genuinely spans two stages. With no restriction active, A3's
+    // rebalance must never run: this snapshot has to stay byte-identical
+    // after that change lands, proving the over/under split here is left as
+    // CertScan Case B produces it.
+    const source = [
+      ...Array.from({ length: 80 }, (_, i) => row(`cert-${String(i).padStart(4, "0")}`, "FIRST_STAGE", "P1", "Certscan")),
+      ...rows("norm", 20, "FIRST_STAGE", "P1"),
+      ...rows("s2", 40, "SECOND_STAGE", "P2"),
+    ];
+    const result = calculateBulkAssignment({
+      rows: source,
+      allocations: [alloc("a", "first", 50), alloc("b", "first", 50), alloc("a", "second", 50), alloc("b", "second", 50)],
+      employees: EMPLOYEES,
+      operatorUsername: "op",
+    });
+    expect(totalsProjection(result, source)).toMatchSnapshot();
+  });
+
+  it("[no-restriction] CertScan Case B, all entries restricted:false", () => {
+    // Same shape as the fixture above, but with a portRestrictions array
+    // present where every entry is restricted:false. hasAnyPortRestriction
+    // must still read this as "no restriction active" — the restricted
+    // branch (and A3's rebalance) never runs, so this must match the
+    // unrestricted fixture above group-for-group.
+    const source = [
+      ...Array.from({ length: 80 }, (_, i) => row(`cert-${String(i).padStart(4, "0")}`, "FIRST_STAGE", "P1", "Certscan")),
+      ...rows("norm", 20, "FIRST_STAGE", "P1"),
+      ...rows("s2", 40, "SECOND_STAGE", "P2"),
+    ];
+    const portRestrictions: EmployeePortRestriction[] = [
+      { username: "d", restricted: false, enabledPorts: [] },
+    ];
+    const result = calculateBulkAssignment({
+      rows: source,
+      allocations: [alloc("a", "first", 50), alloc("b", "first", 50), alloc("a", "second", 50), alloc("b", "second", 50)],
+      employees: EMPLOYEES,
+      operatorUsername: "op",
+      portRestrictions,
+    });
+    expect(totalsProjection(result, source)).toMatchSnapshot();
   });
 
   it("[port-restricted] four ports, one employee restricted", () => {

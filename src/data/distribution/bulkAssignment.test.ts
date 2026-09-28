@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { EmployeeStageAllocation, EmployeePortRestriction } from "../population/populationConfig";
 import type { ManagedLoginUser } from "../../auth/userManagement";
@@ -6,66 +6,7 @@ import type { PasswordHashRecord } from "../../auth/passwordCrypto";
 import type { DistributionEntry } from "./distributionTypes";
 import { calculateBulkAssignment } from "./bulkAssignment";
 import { EVENT_SCHEMA_VERSION } from "./distributionLog";
-
-function makeUser(
-  username: string,
-  role: ManagedLoginUser["role"] = "employee",
-  hasCertScanLicense = false
-): ManagedLoginUser {
-  return {
-    id: username,
-    username,
-    displayName: username,
-    role,
-    passwordHash: { algorithm: "PBKDF2-SHA256", saltBase64: "s", hashBase64: "h", iterations: 600000 } as PasswordHashRecord,
-    isActive: true,
-    hasCertScanLicense,
-    createdAt: "",
-    updatedAt: ""
-  };
-}
-
-function makeRow(
-  id: string,
-  stage: string,
-  cert: "Certscan" | "NonCertscan",
-  portName = "المنفذ"
-): PreparedPopulationRow {
-  return {
-    xrayImageId: id,
-    portName,
-    certScanStatus: cert,
-    stage,
-    xrayEntryDate: null,
-    portCode: null,
-    portType: null,
-    declarationNumber: null,
-    declarationDate: null,
-    plateOrContainerNumber: null,
-    chassisNumber: null,
-    xrayLevelOneResult: "سليمة",
-    xrayLevelTwoResult: "سليمة",
-    movementType: "LAND",
-    reportNumber: null,
-    targetedByRiskEngine: null,
-    riskMessage: null,
-    levelOneEmployee: null,
-    levelTwoEmployee: null,
-    otherResults: {
-      manual: { result: null, code: null, employeeId: null },
-      opposite: { result: null, code: null, employeeId: null },
-      liveMeans: { result: null, code: null, employeeId: null }
-    },
-    notes: null,
-    certScanSnippet: null,
-    originalCertScanSnippet: null,
-    biEnrichmentStatus: "BI Not Provided",
-    biMatched: false,
-    biFilledFields: [],
-    sourceSheetName: "ورقة",
-    sourceRowNumber: 1
-  };
-}
+import { makeUser, makeRow } from "./bulkAssignmentTestFixtures";
 
 test("calculateBulkAssignment fails if no employees assigned in active stage", () => {
   const rows = [makeRow("img-1", "SECOND_STAGE", "NonCertscan")];
@@ -634,4 +575,212 @@ test("calculateBulkAssignment respects unequal configured percentages, not just 
   for (const e of result.events) totals.set(e.assignedTo, (totals.get(e.assignedTo) ?? 0) + 1);
   expect(totals.get("a")).toBe(200);
   expect(totals.get("b")).toBe(800);
+});
+
+test("A3: an employee short in one stage because of a port restriction is made up in another stage", () => {
+  const rowsFor = (prefix: string, count: number, stage: string, port: string) =>
+    Array.from({ length: count }, (_, i) => makeRow(`${prefix}-${i}`, stage, "NonCertscan", port));
+  const rows: PreparedPopulationRow[] = [
+    ...rowsFor("s1a", 360, "FIRST_STAGE", "port-A"),
+    ...rowsFor("s1b", 40, "FIRST_STAGE", "port-B"),
+    ...rowsFor("s2b", 400, "SECOND_STAGE", "port-B"),
+  ];
+  const allocations: EmployeeStageAllocation[] = ["a", "b", "c", "d"].flatMap((username) => [
+    { username, stageKey: "first", method: "percentage", value: 25, isActive: true },
+    { username, stageKey: "second", method: "percentage", value: 25, isActive: true },
+  ]);
+  const employees = ["a", "b", "c", "d"].map((username) => makeUser(username, "employee"));
+  const portRestrictions: EmployeePortRestriction[] = [{ username: "d", restricted: true, enabledPorts: ["port-B"] }];
+
+  const result = calculateBulkAssignment({ rows, allocations, employees, operatorUsername: "test", portRestrictions });
+
+  expect(result.errors).toHaveLength(0);
+  expect(result.events).toHaveLength(800);
+  const totals = new Map<string, number>();
+  for (const e of result.events) totals.set(e.assignedTo, (totals.get(e.assignedTo) ?? 0) + 1);
+  for (const username of ["a", "b", "c", "d"]) {
+    expect(Math.abs((totals.get(username) ?? 0) - 200)).toBeLessThanOrEqual(1);
+  }
+  // "d" never receives a port-A row.
+  expect(result.events.filter((e) => e.assignedTo === "d" && e.xrayImageId.startsWith("s1a-"))).toHaveLength(0);
+});
+
+// F9 (controller ruling): a restricted fixture that ALSO has CertScan rows and a
+// mix of licensed/unlicensed employees. Equal totals must hold (±1 rounding)
+// AND CertScan rows must still only ever land on a licensed employee, even
+// after the cross-stage rebalance moves rows between employees.
+test("A3 + F9: cross-stage rebalance keeps CertScan rows on licensed employees only, while equalizing totals", () => {
+  const rowsFor = (prefix: string, count: number, stage: string, port: string, cert: "Certscan" | "NonCertscan" = "NonCertscan") =>
+    Array.from({ length: count }, (_, i) => makeRow(`${prefix}-${i}`, stage, cert, port));
+  const rows: PreparedPopulationRow[] = [
+    ...rowsFor("s1a-cert", 40, "FIRST_STAGE", "port-A", "Certscan"),
+    ...rowsFor("s1a", 320, "FIRST_STAGE", "port-A"),
+    ...rowsFor("s1b", 40, "FIRST_STAGE", "port-B"),
+    ...rowsFor("s2b", 400, "SECOND_STAGE", "port-B"),
+  ];
+  const allocations: EmployeeStageAllocation[] = ["a", "b", "c", "d"].flatMap((username) => [
+    { username, stageKey: "first", method: "percentage", value: 25, isActive: true },
+    { username, stageKey: "second", method: "percentage", value: 25, isActive: true },
+  ]);
+  // Only "a" and "b" hold a CertScan license; "d" (the restricted employee) does not.
+  const employees = [
+    makeUser("a", "employee", true),
+    makeUser("b", "employee", true),
+    makeUser("c", "employee", false),
+    makeUser("d", "employee", false),
+  ];
+  const portRestrictions: EmployeePortRestriction[] = [{ username: "d", restricted: true, enabledPorts: ["port-B"] }];
+
+  const result = calculateBulkAssignment({ rows, allocations, employees, operatorUsername: "test", portRestrictions });
+
+  expect(result.errors).toHaveLength(0);
+  expect(result.events).toHaveLength(800);
+
+  const totals = new Map<string, number>();
+  for (const e of result.events) totals.set(e.assignedTo, (totals.get(e.assignedTo) ?? 0) + 1);
+  for (const username of ["a", "b", "c", "d"]) {
+    expect(Math.abs((totals.get(username) ?? 0) - 200)).toBeLessThanOrEqual(1);
+  }
+
+  const certRowIds = new Set(rows.filter((r) => r.certScanStatus === "Certscan").map((r) => r.xrayImageId));
+  const licensed = new Set(["a", "b"]);
+  for (const event of result.events) {
+    if (certRowIds.has(event.xrayImageId)) {
+      expect(licensed.has(event.assignedTo)).toBe(true);
+    }
+  }
+  // "d" never receives a port-A row (unlicensed + port-restricted).
+  expect(result.events.filter((e) => e.assignedTo === "d" && e.xrayImageId.startsWith("s1a"))).toHaveLength(0);
+});
+
+// F9 review fix (fix round 1): the F9 test above never actually exercises the
+// license clause in `canTake` — its only under-target employee ("d") is
+// port-restricted away from every CertScan-holding port, so the port check
+// in `canTake` already returns false before the license check runs, and
+// `return true || ...` there still passes all assertions (mutation-tested).
+// This fixture instead makes "d" fully port-eligible for the ONE port that
+// holds every CertScan row: SECOND_STAGE only has port-B, and "d" is
+// restricted TO port-B. "a" (the sole licensed employee) is given a quota
+// in that group that exactly matches the CertScan row count, so "a" has
+// ZERO normal rows to donate there — its entire over-target surplus sits in
+// CertScan rows. If the license check were removed, "d"'s shortfall would
+// be filled from those CertScan rows (stage+port checks alone let it
+// through); with the check, the rebalance correctly refuses and "d" is left
+// short instead of receiving CertScan work it isn't licensed for.
+test("A3 + F9 (fix round 1): rebalance never assigns a CertScan row to an unlicensed employee, even when that employee IS port-eligible for the group holding them", () => {
+  const rowsFor = (prefix: string, count: number, stage: string, port: string, cert: "Certscan" | "NonCertscan" = "NonCertscan") =>
+    Array.from({ length: count }, (_, i) => makeRow(`${prefix}-${i}`, stage, cert, port));
+  const rows: PreparedPopulationRow[] = [
+    ...rowsFor("s1a", 360, "FIRST_STAGE", "port-A"),
+    ...rowsFor("s1b", 40, "FIRST_STAGE", "port-B"),
+    ...rowsFor("s2cert", 100, "SECOND_STAGE", "port-B", "Certscan"),
+    ...rowsFor("s2norm", 300, "SECOND_STAGE", "port-B"),
+  ];
+  const allocations: EmployeeStageAllocation[] = ["a", "b", "c", "d"].flatMap((username) => [
+    { username, stageKey: "first", method: "percentage", value: 25, isActive: true },
+    { username, stageKey: "second", method: "percentage", value: 25, isActive: true },
+  ]);
+  // Only "a" holds a CertScan license.
+  const employees = [
+    makeUser("a", "employee", true),
+    makeUser("b", "employee", false),
+    makeUser("c", "employee", false),
+    makeUser("d", "employee", false),
+  ];
+  const portRestrictions: EmployeePortRestriction[] = [{ username: "d", restricted: true, enabledPorts: ["port-B"] }];
+
+  const result = calculateBulkAssignment({ rows, allocations, employees, operatorUsername: "test", portRestrictions });
+
+  expect(result.errors).toHaveLength(0);
+  expect(result.events).toHaveLength(800);
+
+  // The regression guard: no CertScan row is ever assigned to an unlicensed
+  // employee. Every one of the 100 CertScan rows stays with "a".
+  const certRowIds = new Set(rows.filter((r) => r.certScanStatus === "Certscan").map((r) => r.xrayImageId));
+  for (const event of result.events) {
+    if (certRowIds.has(event.xrayImageId)) expect(event.assignedTo).toBe("a");
+  }
+  expect(result.events.filter((e) => certRowIds.has(e.xrayImageId))).toHaveLength(100);
+  expect(result.events.filter((e) => e.assignedTo === "d" && certRowIds.has(e.xrayImageId))).toHaveLength(0);
+
+  // "d"'s FIRST_STAGE shortfall (60, port-A-locked exactly as in the A3 test
+  // above) is made up entirely from "b" and "c"'s SECOND_STAGE normal
+  // surplus (20 each = 40) plus what's left of "a"'s own over-target amount
+  // — but "a" has ZERO normal rows in SECOND_STAGE to give (its whole quota
+  // there is CertScan), so the license clause correctly refuses to hand
+  // "d" any of "a"'s cert rows. "d" ends 20 short of the equal 200 target
+  // as a result: this is the license rule winning over the equal-totals
+  // rule, not a bug.
+  const totals = new Map<string, number>();
+  for (const e of result.events) totals.set(e.assignedTo, (totals.get(e.assignedTo) ?? 0) + 1);
+  expect(totals.get("a")).toBe(220);
+  expect(totals.get("b")).toBe(200);
+  expect(totals.get("c")).toBe(200);
+  expect(totals.get("d")).toBe(180);
+});
+
+// F10 review fix (fix round 1): prove `restampDailyQuota` is load-bearing.
+// Removing it (returning `balanced` unrestamped from `calculateBulkAssignment`)
+// still passes every other bulkAssignment test (mutation-tested) because none
+// of them read `dailyQuota` after a cross-stage rebalance. This test does.
+test("A3 + F10 (fix round 1): the stamped event's dailyQuota is restamped to each employee's post-rebalance group count", () => {
+  const rowsFor = (prefix: string, count: number, stage: string, port: string) =>
+    Array.from({ length: count }, (_, i) => makeRow(`${prefix}-${i}`, stage, "NonCertscan", port));
+  const rows: PreparedPopulationRow[] = [
+    ...rowsFor("s1a", 360, "FIRST_STAGE", "port-A"),
+    ...rowsFor("s1b", 40, "FIRST_STAGE", "port-B"),
+    ...rowsFor("s2b", 400, "SECOND_STAGE", "port-B"),
+  ];
+  const allocations: EmployeeStageAllocation[] = ["a", "b", "c", "d"].flatMap((username) => [
+    { username, stageKey: "first", method: "percentage", value: 25, isActive: true },
+    { username, stageKey: "second", method: "percentage", value: 25, isActive: true },
+  ]);
+  const employees = ["a", "b", "c", "d"].map((username) => makeUser(username, "employee"));
+  const portRestrictions: EmployeePortRestriction[] = [{ username: "d", restricted: true, enabledPorts: ["port-B"] }];
+
+  // daysRemaining comes from `new Date()` inside calculateBulkAssignment, so
+  // the clock is pinned (Date only — async timers stay real). From
+  // 2026-09-28 12:00 local to the October 2026 deadline (Oct 28 23:59:59)
+  // is exactly 31 days after ceil, and ceil(100/31)=4, ceil(160/31)=6,
+  // ceil(80/31)=3 are all distinct, so a stale (unrestamped) quota can never
+  // coincide with the restamped one. On the real clock this would drift into
+  // days where the ceilings collapse (e.g. 25, 26, 34-39) or reach 0 (no stamp).
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 8, 28, 12));
+  let result: ReturnType<typeof calculateBulkAssignment>;
+  try {
+    result = calculateBulkAssignment({
+      rows, allocations, employees, operatorUsername: "test", portRestrictions, month: 10, year: 2026,
+    });
+  } finally {
+    vi.useRealTimers();
+  }
+
+  expect(result.errors).toHaveLength(0);
+
+  // "d"'s SECOND_STAGE/port-B group grows from its pre-rebalance stage
+  // target (100) to 160 once the FIRST_STAGE shortfall is made up there
+  // (same mechanics as the A3 test above). The one stamped event "d" was
+  // given for that group at generation time never moves during rebalance
+  // (`rebalanceTowardMonthTargets` skips stamped events), so if
+  // `restampDailyQuota` did not run, that event's `dailyQuota` would still
+  // reflect the stale pre-rebalance count of 100.
+  const dSecondStageEvents = result.events.filter((e) => e.assignedTo === "d" && e.xrayImageId.startsWith("s2b-"));
+  expect(dSecondStageEvents).toHaveLength(160);
+  const dStamped = dSecondStageEvents.filter((e) => e.dailyQuota !== undefined);
+  expect(dStamped).toHaveLength(1);
+  const daysRemaining = dStamped[0]!.daysRemainingAtAssignment!;
+  expect(daysRemaining).toBe(31);
+  expect(dStamped[0]!.dailyQuota).toBe(Math.ceil(160 / daysRemaining));
+  expect(dStamped[0]!.dailyQuota).not.toBe(Math.ceil(100 / daysRemaining));
+
+  // "a" donated 20 of its 100 SECOND_STAGE/port-B rows to "d" (its share of
+  // the 60 moved); its own surviving stamped event in that same group must
+  // likewise drop to the new count (80), not stay at the stale 100.
+  const aSecondStageEvents = result.events.filter((e) => e.assignedTo === "a" && e.xrayImageId.startsWith("s2b-"));
+  expect(aSecondStageEvents).toHaveLength(80);
+  const aStamped = aSecondStageEvents.filter((e) => e.dailyQuota !== undefined);
+  expect(aStamped).toHaveLength(1);
+  expect(aStamped[0]!.dailyQuota).toBe(Math.ceil(80 / daysRemaining));
+  expect(aStamped[0]!.dailyQuota).not.toBe(Math.ceil(100 / daysRemaining));
 });

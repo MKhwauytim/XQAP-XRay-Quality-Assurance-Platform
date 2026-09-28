@@ -92,6 +92,91 @@ function allocWeight(alloc: EmployeeStageAllocation): number {
 }
 
 /**
+ * A3 (owner decision 2026-09-28): move NEW events from employees above their
+ * month target to employees below it, where the receiver may take the row.
+ * Deterministic: receivers by largest shortfall then username; events from the
+ * last generated backwards, so the make-up comes from the latest stage the
+ * receiver can work and earlier stages keep what the stage pass gave them.
+ * Events carrying the donor's daily-quota stamp never move.
+ */
+function rebalanceTowardMonthTargets(params: {
+  events: DistributionEvent[];
+  targets: ReadonlyMap<string, number>;
+  owned: ReadonlyMap<string, number>;
+  canTake: (username: string, xrayImageId: string) => boolean;
+}): DistributionEvent[] {
+  const events = [...params.events];
+  const totals = new Map<string, number>(params.owned);
+  for (const event of events) totals.set(event.assignedTo, (totals.get(event.assignedTo) ?? 0) + 1);
+  const shortfall = (username: string): number => (params.targets.get(username) ?? 0) - (totals.get(username) ?? 0);
+  const receivers = [...params.targets.keys()]
+    .filter((username) => shortfall(username) > 0)
+    .sort((a, b) => shortfall(b) - shortfall(a) || a.localeCompare(b));
+  for (const receiver of receivers) {
+    for (let index = events.length - 1; index >= 0 && shortfall(receiver) > 0; index -= 1) {
+      const event = events[index]!;
+      const donor = event.assignedTo;
+      if (donor === receiver || shortfall(donor) >= 0) continue;
+      if (event.dailyQuota !== undefined || event.daysRemainingAtAssignment !== undefined) continue;
+      if (!params.canTake(receiver, event.xrayImageId)) continue;
+      events[index] = { ...event, assignedTo: receiver };
+      totals.set(donor, (totals.get(donor) ?? 0) - 1);
+      totals.set(receiver, (totals.get(receiver) ?? 0) + 1);
+    }
+  }
+  return events;
+}
+
+/**
+ * F10 (controller ruling 2026-09-28): the stage/port loop below stamps
+ * `dailyQuota` on one event per employee per group (a stage, or a
+ * stage-port pair once a restriction is active) — see `assignWithinGroup`
+ * step 4. That stamp is computed from the group's own employee counts at
+ * generation time. `rebalanceTowardMonthTargets` never moves a stamped
+ * event itself (see above), but it can move an employee's OTHER events
+ * into or out of that same group, which makes the group count the stamp
+ * was computed from stale. This restamps every already-stamped event with
+ * its owner's POST-rebalance count within that same group — nothing else
+ * changes. `eventGroupKey` (eventId → group key) is recorded once per
+ * event at generation time, before any rebalance can touch assignment.
+ *
+ * A receiver can end up owning rows in a group it never had its own
+ * `assignWithinGroup` call for (e.g. a cross-stage make-up moves a row into
+ * a stage/port pair the receiver wasn't allocated in at generation time).
+ * Those moved-in rows are always unstamped (see `rebalanceTowardMonthTargets`
+ * above — a stamped event never moves), so this function has nothing to
+ * restamp for the receiver in that group: no event there carries `dailyQuota`
+ * either before or after. `dailyQuota` is a per-group pacing hint, not an
+ * authoritative per-employee total (the event/entry counts are that), so a
+ * consumer reading it must already tolerate an employee holding rows in a
+ * group with no dailyQuota-carrying event at all — this is not a regression
+ * A3 introduces, just a case F10 does not need to (and does not) paper over.
+ */
+function restampDailyQuota(
+  events: DistributionEvent[],
+  eventGroupKey: ReadonlyMap<string, string>
+): DistributionEvent[] {
+  const countByEmployeeGroup = new Map<string, number>();
+  for (const event of events) {
+    const groupKey = eventGroupKey.get(event.eventId);
+    if (groupKey === undefined) continue;
+    const key = `${event.assignedTo}\u0000${groupKey}`;
+    countByEmployeeGroup.set(key, (countByEmployeeGroup.get(key) ?? 0) + 1);
+  }
+  return events.map((event) => {
+    if (event.dailyQuota === undefined) return event;
+    const groupKey = eventGroupKey.get(event.eventId);
+    if (groupKey === undefined) return event;
+    const totalForEmployee = countByEmployeeGroup.get(`${event.assignedTo}\u0000${groupKey}`) ?? 0;
+    const daysRemaining = event.daysRemainingAtAssignment;
+    const dailyQuota = (daysRemaining != null && daysRemaining > 0)
+      ? Math.ceil(totalForEmployee / daysRemaining)
+      : undefined;
+    return { ...event, dailyQuota };
+  });
+}
+
+/**
  * Smart CertScan-first distribution over ONE group of rows (a whole stage, or
  * — once a port restriction is active — one port's rows within a stage):
  *
@@ -326,6 +411,15 @@ export function calculateBulkAssignment(params: {
 
   const anyPortRestricted = hasAnyPortRestriction(portRestrictions);
 
+  // A3: month target per employee (sum of their per-stage targets) and who is
+  // allocated in each stage — filled by the restricted branch below only.
+  const monthTargets = new Map<string, number>();
+  const stageUsernames = new Map<string, Set<string>>();
+  // A3/F10: eventId → group key ("stageKey" or "stageKey - portKey"), recorded
+  // at generation time for every event so a post-rebalance restamp can find
+  // each stamped event's original group even after ownership moves.
+  const eventGroupKey = new Map<string, string>();
+
   for (const stageKey of stageKeys) {
     const stageRows = assignableRows.filter((r) => getStageKey(r.stage, stageMappings) === stageKey);
     if (stageRows.length === 0) continue;
@@ -352,6 +446,7 @@ export function calculateBulkAssignment(params: {
       });
       events.push(...group.events);
       errors.push(...group.errors);
+      for (const event of group.events) eventGroupKey.set(event.eventId, stageKey);
       continue;
     }
 
@@ -379,13 +474,20 @@ export function calculateBulkAssignment(params: {
     // unrestricted colleague fell to a fraction of theirs. Tracking a
     // shared remaining-need pool across ports keeps every employee's final
     // total anchored to their configured percentage regardless of how the
-    // stage happens to be split into ports.
-    const remainingNeed = new Map(
+    // stage happens to be split into ports. A3: these per-stage targets are
+    // also summed into `monthTargets` for the cross-stage rebalance after
+    // the loop.
+    const stageTarget = new Map(
       hamiltonApportionment(
         stageAllocs.map((a) => ({ key: a.username, size: allocWeight(a) })),
         stageRows.length
       ).map((q) => [q.key, q.allocated])
     );
+    for (const [username, target] of stageTarget) {
+      monthTargets.set(username, (monthTargets.get(username) ?? 0) + target);
+    }
+    stageUsernames.set(stageKey, new Set(stageAllocs.map((a) => a.username)));
+    const remainingNeed = new Map(stageTarget);
 
     // Ports are visited most-constrained-first (fewest eligible employees),
     // purely to fix processing order deterministically — the fairness work
@@ -479,9 +581,27 @@ export function calculateBulkAssignment(params: {
 
       for (const event of group.events) {
         remainingNeed.set(event.assignedTo, Math.max(0, (remainingNeed.get(event.assignedTo) ?? 0) - 1));
+        eventGroupKey.set(event.eventId, `${stageKey} - ${portKey}`);
       }
     }
   }
 
-  return { events, errors, skipped, unmapped };
+  if (!anyPortRestricted) return { events, errors, skipped, unmapped };
+
+  // A3: bring every employee to their equal month target by moving NEW
+  // events from whoever is above it to whoever is below, restricted to rows
+  // the receiver may actually take (allocated in that stage, port-eligible,
+  // and licensed for a CertScan row).
+  const rowById = new Map(assignableRows.map((r) => [r.xrayImageId, r]));
+  const licensed = new Set(assignableEmployees.filter((e) => e.hasCertScanLicense).map((e) => e.username));
+  const canTake = (username: string, xrayImageId: string): boolean => {
+    const target = rowById.get(xrayImageId);
+    if (!target) return false;
+    if (!stageUsernames.get(getStageKey(target.stage, stageMappings))?.has(username)) return false;
+    if (!isPortEligible(username, normalizePortName(target.portName), portRestrictions)) return false;
+    return target.certScanStatus !== "Certscan" || licensed.has(username);
+  };
+  const balanced = rebalanceTowardMonthTargets({ events, targets: monthTargets, owned: new Map(), canTake });
+  const restamped = restampDailyQuota(balanced, eventGroupKey);
+  return { events: restamped, errors, skipped, unmapped };
 }

@@ -1,5 +1,41 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`calculateBulkAssignment snapshots > [no-restriction] CertScan Case B pushes the licensed employee over their month target 1`] = `
+{
+  "errors": [],
+  "eventCount": 140,
+  "skipped": 0,
+  "totals": {
+    "a": {
+      "FIRST_STAGE/P1": 80,
+      "SECOND_STAGE/P2": 20,
+    },
+    "b": {
+      "FIRST_STAGE/P1": 20,
+      "SECOND_STAGE/P2": 20,
+    },
+  },
+}
+`;
+
+exports[`calculateBulkAssignment snapshots > [no-restriction] CertScan Case B, all entries restricted:false 1`] = `
+{
+  "errors": [],
+  "eventCount": 140,
+  "skipped": 0,
+  "totals": {
+    "a": {
+      "FIRST_STAGE/P1": 80,
+      "SECOND_STAGE/P2": 20,
+    },
+    "b": {
+      "FIRST_STAGE/P1": 20,
+      "SECOND_STAGE/P2": 20,
+    },
+  },
+}
+`;
+
 exports[`calculateBulkAssignment snapshots > [no-restriction] exact-count allocations 1`] = `
 {
   "errors": [],
@@ -226,19 +262,20 @@ exports[`calculateBulkAssignment snapshots > [port-restricted] cross-stage short
   "skipped": 0,
   "totals": {
     "a": {
-      "port-A": 120,
-      "port-B": 100,
+      "FIRST_STAGE/port-A": 120,
+      "SECOND_STAGE/port-B": 80,
     },
     "b": {
-      "port-A": 120,
-      "port-B": 100,
+      "FIRST_STAGE/port-A": 120,
+      "SECOND_STAGE/port-B": 80,
     },
     "c": {
-      "port-A": 120,
-      "port-B": 100,
+      "FIRST_STAGE/port-A": 120,
+      "SECOND_STAGE/port-B": 80,
     },
     "d": {
-      "port-B": 140,
+      "FIRST_STAGE/port-B": 40,
+      "SECOND_STAGE/port-B": 160,
     },
   },
 }
@@ -251,27 +288,27 @@ exports[`calculateBulkAssignment snapshots > [port-restricted] four ports, one e
   "skipped": 0,
   "totals": {
     "a": {
-      "port-big": 58,
-      "port-huge": 134,
-      "port-medium": 37,
-      "port-small": 21,
+      "SECOND_STAGE/port-big": 58,
+      "SECOND_STAGE/port-huge": 134,
+      "SECOND_STAGE/port-medium": 37,
+      "SECOND_STAGE/port-small": 21,
     },
     "b": {
-      "port-big": 59,
-      "port-huge": 133,
-      "port-medium": 37,
-      "port-small": 21,
+      "SECOND_STAGE/port-big": 59,
+      "SECOND_STAGE/port-huge": 133,
+      "SECOND_STAGE/port-medium": 37,
+      "SECOND_STAGE/port-small": 21,
     },
     "c": {
-      "port-big": 58,
-      "port-huge": 133,
-      "port-medium": 37,
-      "port-small": 22,
+      "SECOND_STAGE/port-big": 58,
+      "SECOND_STAGE/port-huge": 133,
+      "SECOND_STAGE/port-medium": 37,
+      "SECOND_STAGE/port-small": 22,
     },
     "d": {
-      "port-big": 125,
-      "port-medium": 89,
-      "port-small": 36,
+      "SECOND_STAGE/port-big": 125,
+      "SECOND_STAGE/port-medium": 89,
+      "SECOND_STAGE/port-small": 36,
     },
   },
 }
@@ -284,16 +321,16 @@ exports[`calculateBulkAssignment snapshots > [port-restricted] trapped employee 
   "skipped": 0,
   "totals": {
     "a": {
-      "port-big": 300,
+      "SECOND_STAGE/port-big": 300,
     },
     "b": {
-      "port-big": 300,
+      "SECOND_STAGE/port-big": 300,
     },
     "c": {
-      "port-big": 300,
+      "SECOND_STAGE/port-big": 300,
     },
     "d": {
-      "port-small": 100,
+      "SECOND_STAGE/port-small": 100,
     },
   },
 }
