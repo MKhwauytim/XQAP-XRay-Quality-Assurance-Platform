@@ -26,6 +26,7 @@ import { ANSWER_EVENTS_DIR } from "../answers/answerEventStore";
 import { upsertItemAnswer, __clearAnswerEventsCacheForTests } from "../answers/answerStorage";
 import { __resetAppendOnlyEventLogMemosForTests } from "../storage/appendOnlyEventLog";
 import { __resetAnswerSegmentChainMemoForTests } from "../answers/answerSegmentChain";
+import { getSealedAnswerSegmentsEpoch } from "../answers/answerSealedSegments";
 import { clearSession, writeSession } from "../../auth/authSession";
 import type { ItemAnswer } from "../answers/answerTypes";
 import {
@@ -1144,8 +1145,19 @@ describe("runSync — this session's own answer appends do not report the answer
       "zz-ans-otherdev-s9.ndjson",
       `${JSON.stringify({ eventId: "other-1", eventType: "item-saved", eventAt: "2026-05-01T08:00:00.000Z", eventBy: "emp2", authority: "self", xrayImageId: "XR-9", answers: [], status: "draft", answeredBy: "emp2" })}\n`
     );
+    const epochBefore = getSealedAnswerSegmentsEpoch();
     const other = await runSync({ directoryHandle: root, monthFolderName: MONTH });
     expect(other.changed.has("answers")).toBe(true);
+    // ...and it makes the answers reader forget which segments it thought were sealed (S3).
+    expect(getSealedAnswerSegmentsEpoch()).toBeGreaterThan(epochBefore);
+  });
+
+  it("a manual refresh also forgets sealed-segment confirmations", async () => {
+    const root = makeRoot();
+    await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    const epochBefore = getSealedAnswerSegmentsEpoch();
+    await runSync({ directoryHandle: root, monthFolderName: MONTH, manual: true });
+    expect(getSealedAnswerSegmentsEpoch()).toBeGreaterThan(epochBefore);
   });
 
   it("after a RELOAD the first own save is still quiet (the stable chain outlives the page)", async () => {

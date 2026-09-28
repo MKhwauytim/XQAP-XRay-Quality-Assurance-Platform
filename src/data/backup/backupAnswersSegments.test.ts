@@ -23,6 +23,8 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { getSampleMainDir } from "../workspace/workspacePaths";
 import { ANSWER_EVENTS_DIR, type AnswerEvent } from "../answers/answerEventStore";
 import { createBackup, restoreBackupSnapshot } from "./backupStorage";
+import { getSealedAnswerSegmentsEpoch } from "../answers/answerSealedSegments";
+import { readAllAnswerEventsForMonth } from "../answers/answerStorage";
 
 const month = { folderName: "5-may-2026", month: 5, year: 2026 };
 
@@ -152,6 +154,31 @@ describe("backup/restore — answers.events segments (Stage 2, round 3's backup 
     const ids = await segmentEventIds(root);
     expect(ids).toEqual(["e01", "e02", "e03", "e04"]);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("a restore that merged answer events drops the answers read cache and every sealed-segment confirmation (S3)", async () => {
+    const root = makeRoot();
+    const eventsDir = await getAnswerEventsDir(root);
+    await writeRaw(eventsDir, "a1-ans-devA-s1.ndjson", toNdjson([answerEvent("e01"), answerEvent("e02")]));
+    const backup = await createBackup(root, [month], "admin", "manual");
+    expect(backup.ok).toBe(true);
+    if (!backup.ok) return;
+
+    // Live loses e02 and this tab caches that state.
+    await writeRaw(eventsDir, "a1-ans-devA-s1.ndjson", toNdjson([answerEvent("e01")]));
+    expect((await readAllAnswerEventsForMonth(root, month.folderName)).map((e) => e.eventId)).toEqual(["e01"]);
+    const epochBefore = getSealedAnswerSegmentsEpoch();
+
+    const restored = await restoreBackupSnapshot({
+      directoryHandle: root,
+      months: [month],
+      backupFolderName: backup.folderName,
+      username: "admin",
+    });
+    expect(restored.ok).toBe(true);
+
+    expect(getSealedAnswerSegmentsEpoch()).toBeGreaterThan(epochBefore);
+    expect((await readAllAnswerEventsForMonth(root, month.folderName)).map((e) => e.eventId).sort()).toEqual(["e01", "e02"]);
   });
 
   it("Fix 2: refuses loudly when one eventId carries CONFLICTING answer content on the two sides", async () => {

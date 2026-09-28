@@ -33,6 +33,7 @@ import {
   INTERACTIVE_WRITE_DEADLINE_MS,
 } from "../storage/operationDeadline";
 import { logError } from "../storage/errorLogger";
+import { SEALED_REVALIDATE_MS, getSealedAnswerSegmentsEpoch } from "./answerSealedSegments";
 import { logCodedError, tagErrorOnce, type ErrorCode } from "../storage/errorCodes";
 import { createSimpleHasher } from "../storage/jsonEnvelope";
 import { listDirectoryEntries } from "../storage/directoryScan";
@@ -280,6 +281,11 @@ type AnswerEventsCacheEntry = {
    *  listed when they were read): the next read skips their `getFile()` and
    *  carries their offset forward. In-memory only, like the rest of the cache. */
   sealedConfirmed?: ReadonlySet<string>;
+  /** Freshness of `sealedConfirmed` — see `answerSealedSegments.ts`. */
+  sealedEpoch?: number;
+  sealedAtMs?: number;
+  /** Names the last SUCCESSFUL listing showed: the writer's floor (`listedSegmentNames`). */
+  listedSegmentNames?: readonly string[];
 };
 
 /** WeakMap<workspace root, Map<monthFolderName, entry>> — see the module doc's SCOPING note. */
@@ -296,7 +302,28 @@ let answerEventsCacheByRoot = new WeakMap<DirectoryHandleLike, Map<string, Answe
  * failure the test means to exercise.
  */
 export function __clearAnswerEventsCacheForTests(): void {
+  clearAnswerEventsCache();
+}
+
+/**
+ * Drop the whole `answers.events/` read cache (every root). Safe at any time by
+ * the cache's own contract — the next read is a full one. For a caller that has
+ * just rewritten segment bytes underneath it (a backup restore that merged
+ * events), where a byte-offset checkpoint may no longer describe the files.
+ */
+export function clearAnswerEventsCache(): void {
   answerEventsCacheByRoot = new WeakMap();
+}
+
+/**
+ * Segment names the most recent successful read of this month listed — the
+ * writer's floor for a stable chain (see `AppendEventSegmentOptions.listedSegmentNames`).
+ */
+function listedAnswerSegmentNames(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): readonly string[] | undefined {
+  return getAnswerEventsCacheEntry(directoryHandle, monthFolderName)?.listedSegmentNames;
 }
 
 function getAnswerEventsCacheEntry(
@@ -406,9 +433,15 @@ export async function readAllAnswerEventsForMonth(
     // which throws EventSegmentUnreadableError — caught here like any other
     // read failure — BEFORE returning a delta, so a skipped/unreadable segment
     // can never reach the cache write below as if it had been read cleanly.
+    const epoch = getSealedAnswerSegmentsEpoch();
+    const nowMs = Date.now();
+    const sealedFresh =
+      cached?.sealedConfirmed !== undefined &&
+      cached.sealedEpoch === epoch &&
+      nowMs - (cached.sealedAtMs ?? 0) < SEALED_REVALIDATE_MS;
     const delta = await readAnswerEventDelta(mainDir, cached?.offsets ?? {}, undefined, {
       ...options,
-      sealedConfirmed: cached?.sealedConfirmed,
+      sealedConfirmed: sealedFresh ? cached.sealedConfirmed : undefined,
     });
     const events = cached ? new Map(cached.events) : new Map<string, AnswerEvent>();
     for (const event of delta.events) events.set(event.eventId, event);
@@ -416,6 +449,12 @@ export async function readAllAnswerEventsForMonth(
       events,
       offsets: delta.offsets,
       sealedConfirmed: delta.sealedConfirmedNames,
+      sealedEpoch: epoch,
+      // A revalidating read (everything re-opened) restarts the interval; a read
+      // that reused the confirmations keeps the ORIGINAL timestamp, so the
+      // window is fixed rather than sliding forever under frequent reads.
+      sealedAtMs: sealedFresh ? cached.sealedAtMs : nowMs,
+      listedSegmentNames: delta.segmentNames,
     });
     return [...events.values()];
   } catch (error) {
@@ -885,7 +924,10 @@ async function performAnswerWrite(
       // the answer-save proposal) and never call safeWriteJson for a real
       // save/reopen/note anymore, so they silently lost that protection; this
       // restores an equivalent (a recoverable prior state) for the new model.
-      await appendAnswerEventSegment(mainDir, batch, writer, segmentConfig, { deadline });
+      await appendAnswerEventSegment(mainDir, batch, writer, segmentConfig, {
+        deadline,
+        listedSegmentNames: listedAnswerSegmentNames(directoryHandle, monthFolderName),
+      });
       reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
       return { done: true, result: { ok: true as const } };
     },
@@ -1204,7 +1246,10 @@ async function performOnBehalfWrite(
         reason,
       };
       const batch = seedEvent ? [seedEvent, onBehalfEvent] : [onBehalfEvent];
-      await appendAnswerEventSegment(mainDir, batch, writer, segmentConfig, { deadline });
+      await appendAnswerEventSegment(mainDir, batch, writer, segmentConfig, {
+        deadline,
+        listedSegmentNames: listedAnswerSegmentNames(directoryHandle, monthFolderName),
+      });
       reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
 
       // CONFIRM (§5): fresh read, same comparator, SINGLE-ITEM scope — the

@@ -43,6 +43,7 @@
 import { broadcastDataRefresh, type DataRefreshFamily } from "./dataRefreshSignal";
 import { bumpWorkspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
 import { ownStableAnswerSegmentMatcher } from "../answers/answerSegmentChain";
+import { invalidateSealedAnswerSegments } from "../answers/answerSealedSegments";
 import { readRealSession } from "../../auth/authSession";
 import { readDistributionLogStamp } from "../distribution/distributionStorage";
 import {
@@ -761,6 +762,10 @@ async function performSync(options: SyncRunOptions, manual: boolean): Promise<Sy
       ok = false;
     }
   }
+
+  // The probe saw someone else's answer segments move: whatever this tab
+  // believes is sealed may have grown, so the sealed-segment shortcut starts over.
+  if (changed.has("answers")) invalidateSealedAnswerSegments();
 
   const broadcast = manual || changed.size > 0;
   if (broadcast) {

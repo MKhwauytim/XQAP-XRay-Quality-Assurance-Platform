@@ -98,6 +98,17 @@ export type AppendEventSegmentOptions = {
    * can no longer outlive the whole action (A1). Omitted: unbounded, as before.
    */
   deadline?: OperationDeadline;
+  /**
+   * File names a SUCCESSFUL listing of the events directory showed a moment ago
+   * (the caller's read of the whole log, taken just before deciding to append).
+   * A `stable` writer never appends below the highest seq of its OWN chain that
+   * appears here: a second tab that rotated, a memo that is behind, or a
+   * discovery listing that threw would otherwise put this batch into a segment
+   * readers already consider sealed (S3) — see `answerStorage.ts`. Costs no I/O:
+   * it only raises the starting seq, and is ignored for non-stable writers
+   * (their chain is unique to this page load) and when it shows nothing higher.
+   */
+  listedSegmentNames?: readonly string[];
 };
 
 /** Contexts and error codes the consumer wants this module's failures reported under. */
@@ -1275,6 +1286,21 @@ export async function appendEventSegment<TEvent>(
       seq = discovered.highest;
       highestReliableSeq = discovered.listed ? discovered.highest : -1;
       listedHighestSeq = discovered.listed ? discovered.highest : -1;
+    }
+    // Never start below the head of this chain as the caller's successful
+    // listing saw it (see `listedSegmentNames`). A listing is positive evidence,
+    // so it raises both watermarks exactly like a successful discovery would.
+    if (writer.stable && options.listedSegmentNames) {
+      let listedHead = -1;
+      for (const listed of options.listedSegmentNames) {
+        const listedSeq = parseOwnSegmentSeq(listed, base, segmentSuffix);
+        if (listedSeq !== null && listedSeq > listedHead) listedHead = listedSeq;
+      }
+      if (listedHead > seq) {
+        seq = listedHead;
+        highestReliableSeq = Math.max(highestReliableSeq, listedHead);
+        listedHighestSeq = Math.max(listedHighestSeq, listedHead);
+      }
     }
     let fileName = segmentFileNameForSeq(base, seq, segmentSuffix);
     let existing = await readExistingSegment(
