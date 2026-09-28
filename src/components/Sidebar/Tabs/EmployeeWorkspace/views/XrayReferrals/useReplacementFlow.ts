@@ -31,12 +31,12 @@ import type { DirectoryHandleLike } from "../../../../../../data/storage/fileSys
 import type { ReplacementDialogState, StatusMsg } from "../XrayReferrals";
 
 /**
- * T-08 -- a lookup MISS is staleness; a failed READ is not.
+ * T-08 — a lookup MISS is staleness; a failed READ is not.
  *
  * `findPopulationRowById` answers `absent` only when the month genuinely has no
  * `population.final.json`. `unreadable`/`worker` mean the row may well be there
  * and this call could not see it, so telling the user "البيانات تغيّرت" would
- * report a data change that never happened -- and send them looking for a row
+ * report a data change that never happened — and send them looking for a row
  * that is fine.
  */
 export function isPopulationReadFailure(lookup: PopulationRowLookupResult): boolean {

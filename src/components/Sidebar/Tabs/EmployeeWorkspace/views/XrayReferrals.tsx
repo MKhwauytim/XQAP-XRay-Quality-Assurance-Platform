@@ -52,6 +52,7 @@ import {
   displayXrayImageId,
   loadAdhocAnswerItems,
   loadAdhocEntriesForEmployeeView,
+  isAdhocEntry,
   type AdhocDistributionEntry,
 } from "../../../../../data/adhocImport/adhocImportEmployeeView";
 import { monthFolderForEntry } from "../../../../../data/adhocImport/adhocImportEmployeeView";
@@ -275,12 +276,6 @@ function referralsBootSources(username: string, canSeeAll: boolean): BootSourceD
     { key: "referrals_answers", labelEn: `${username}.answers.json`, labelAr: "إجاباتي" },
     { key: "referrals_adhoc", labelEn: "adhoc-imports.index.json", labelAr: "الاستيرادات اليدوية" },
   ];
-}
-
-/** True for a row assigned through an ad-hoc import rather than the real
- *  monthly sampling pipeline — see `adhocImportEmployeeView.ts`. */
-function isAdhocEntry(entry: DistributionEntry): entry is AdhocDistributionEntry {
-  return typeof (entry as AdhocDistributionEntry).adhocImportId === "string";
 }
 
 /**

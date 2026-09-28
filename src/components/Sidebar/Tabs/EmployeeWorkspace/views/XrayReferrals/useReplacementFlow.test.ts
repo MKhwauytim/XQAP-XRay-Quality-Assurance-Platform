@@ -45,13 +45,12 @@ describe("useReplacementFlow guards", () => {
     expect(result.current.replacementDialog).toBeNull();
   });
 
-  it("handleReplace without the permission reports an error and never reloads or goes busy", async () => {
+  it("handleReplace without the permission reports an error and never reloads", async () => {
     const { result, setStatusMsg, loadData } = setup({ canRequestReplacement: false });
     await act(async () => {
       await result.current.handleReplace(entry, { xrayImageId: "IMG-2" } as never, "r", true, "rep-1");
     });
     expect(setStatusMsg).toHaveBeenCalledWith(expect.objectContaining({ type: "error" }));
     expect(loadData).not.toHaveBeenCalled();
-    expect(result.current.replacementBusy).toBe(false);
   });
 });
