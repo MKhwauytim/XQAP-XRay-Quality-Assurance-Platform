@@ -2,14 +2,15 @@
 
 Status: approved design (owner, 2026-09-28). Next step: implementation plan via writing-plans.
 
-Nine owner-reported items, root-caused by code reading (file:line evidence below), grouped into
-three workstreams that ship as three separate PRs in priority order:
+Ten owner-reported items, root-caused by code reading (file:line evidence below), grouped into
+four workstreams that ship as four separate PRs in priority order:
 
 | WS | PR | Items | Why this order |
 |----|----|-------|----------------|
 | A — Data safety & correctness | 1 | 2 (submit), 3 (population overwrite), 5 (equal totals), 8 (boot false alarm), 9 (progress bar) | Data/trust is being lost in production today |
-| B — Feedback performance & export | 2 | 1 | Painful but not lossy |
-| C — Report & UI polish | 3 | 4 (stages), 6 (CertScan ports), 7 (daily quota) | Presentation and new capability |
+| D — Selective backup restore | 2 | 10 | Recovery capability; builds on A2's recovery tool |
+| B — Feedback performance & export | 3 | 1 | Painful but not lossy |
+| C — Report & UI polish | 4 | 4 (stages), 6 (CertScan ports), 7 (daily quota) | Presentation and new capability |
 
 Every PR: failing test per root cause first (TDD), snapshot before touching sampling /
 distribution folding / report builders, tier-3 edit-log entry and gates (data-format changes),
@@ -291,6 +292,56 @@ floor of 1 day.
 
 ---
 
+## Workstream D — Selective backup restore (item 10)
+
+**Today.** `restoreBackupSnapshot` (`backupStorage.ts:1778-1860`) restores the whole `json/`
+tree of a backup: `assertBackupComplete` → full `pre-restore` rollback backup → restore
+sentinel (`RESTORE_INPROGRESS_FILE`) → `restoreJsonTree` walk applying `restoreActionFor`
+(`:888-907`: `merge-events` for distribution event segments, `skip-derived` for
+`distribution.current`/checkpoint/employee mirrors, `restore-if-absent` for
+`distribution.log.json`, else `replace`). The only UI is the Archive tab restore dialog
+(`Archive/index.tsx:290`). There is no way to restore one element or one month.
+
+**Owner decision: element × month.**
+- **Element catalog** (`src/data/backup/restoreScope.ts`, one definition): each element maps
+  to backup-relative path predicates resolved through `workspacePaths.ts` names (never
+  hard-coded folder names), with legacy-layout aliases:
+  - *Month-scoped:* Population (`1-population/{month}/`), Sample & distribution
+    (`2-samples/{month}/1-main/`), Answers (the month's answer event segments / per-employee
+    answer files under `2-samples/{month}/`), Referrals & approvals (their month files).
+  - *Workspace-wide:* Templates (`6-templates/`), Users & permissions (`3-user-data/`),
+    Report designs (`4-reports/`), Feedback (`5-system/feedback/`), System settings (the rest
+    of `5-system/` except `backups/`, `audit/`, `locks/`, `system-errors/`).
+  - The exact file-to-element mapping is verified against the real tree during planning; a
+    file matching no element is never restored by a selective restore.
+- **Engine.** `restoreBackupSnapshot` gains an optional `scope?: RestoreScope`
+  (`{ elements: RestoreElementId[]; months: string[] }`); absent = today's full restore
+  (behaviour unchanged, asserted by existing tests). The walk skips any path the scope does
+  not select. Same guarantees as full restore: `assertBackupComplete`, a full `pre-restore`
+  rollback backup, the sentinel, and the same `restoreActionFor` semantics per file.
+- **Preview.** Before confirming, list per element × month the file count found in the
+  backup (and "not present in this backup" for empty selections, which disables confirm).
+- **Dependency safety.**
+  - Population for a month that has a live distribution/answers: run A2's coverage rule
+    (every live sampled id must exist in the backup's population) — blocked otherwise, with
+    the missing count.
+  - Sample & distribution without Answers (or vice-versa): allowed with a warning; after
+    restore, `scanReferentialIntegrity` runs for the affected months and the result is shown.
+  - Derived caches for restored months are rebuilt after restore (distribution current,
+    replacement index), not copied.
+- **UI.** Archive tab restore dialog gets a mode switch «استعادة كاملة / استعادة انتقائية»;
+  selective mode shows element checkboxes and a month multi-select (months present in the
+  backup), the preview, and the dependency warnings. Admin only; strings via label keys.
+- **A2 link.** A2's "restore previous population" backup candidates call this engine with
+  `{ elements: ["population"], months: [month] }` instead of their own copy logic.
+
+**Tests.** Scope absent → identical to full restore; population-only for one month touches
+only that month's population files; merge-events still applied for a sample-only restore;
+blocked population restore on id mismatch; preview counts; rollback backup always created;
+sentinel left on partial failure.
+
+---
+
 ## Out of scope
 
 - Moving preference files out of `6-templates` (A4 fixes the scanner instead).
@@ -303,4 +354,4 @@ floor of 1 day.
 No existing workspace file changes shape. New artifacts are additive: `*.superseded.json`
 archives, optional `resolvedAt`/`resolvedBy`, optional `certScanPorts`. Stable answer segment
 chains write new segments alongside old per-session ones; the fold already reads all segments.
-Rollback = revert the PR; older builds ignore the additive fields and still read all segments.
+Selective restore adds only an optional parameter. Rollback = revert the PR; older builds ignore the additive fields and still read all segments.
