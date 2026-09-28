@@ -19,7 +19,11 @@ import { listAdhocSampleFolders } from "../adhocImport/adhocImportEmployeeView";
 // is a deliberate circular import: safe here because both sides only use the
 // other's exports inside function bodies, never at module-eval time (P6,
 // 2026-08 — see getUserWorkspaceFootprint's revision cross-check below).
-import { loadOrDeriveDistributionCurrent, readDistributionLogStamp } from "../distribution/distributionStorage";
+import {
+  isDistributionProjectionPending,
+  loadOrDeriveDistributionCurrent,
+  readDistributionLogStamp,
+} from "../distribution/distributionStorage";
 // Same deliberate cycle, same rule: DERIVE_VERSION is a plain number constant
 // read inside function bodies only. distributionLog.ts imports nothing from
 // this module, so this edge is acyclic on its own.
@@ -622,7 +626,14 @@ export async function getUserWorkspaceFootprint(
     if (!closed) {
       const mirror = await loadEmployeeSampleMirror(directoryHandle, monthFolderName, username);
       const stamp = await readDistributionLogStamp(directoryHandle, monthFolderName);
-      const mirrorIsStale = mirror !== null && mirror.sourceLogRevision < stamp.revision;
+      // P4: while THIS tab's own projection bump for the month is still
+      // outstanding the stamp is behind the events, so "mirror.rev >= stamp.rev"
+      // proves nothing. Take the authoritative fold (the safe direction for a
+      // guard whose wrong answer is irreversible) instead of waiting.
+      const mirrorIsStale =
+        mirror !== null &&
+        (mirror.sourceLogRevision < stamp.revision ||
+          isDistributionProjectionPending(directoryHandle, monthFolderName));
 
       let pendingCount: number;
       if (mirrorIsStale) {
