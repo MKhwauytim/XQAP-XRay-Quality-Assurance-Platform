@@ -137,6 +137,13 @@ export type SimulatedFault = {
   /** DOMException `name` to throw. Defaults to "NotFoundError". */
   errorName?: string;
   /**
+   * DOMException `message` to throw. Defaults to `Simulated <errorName> for
+   * "<entry>".`. Set it when the code under test classifies on the MESSAGE (an
+   * `AbortError` from Chromium's Safe Browsing check is told apart from the
+   * picker's `AbortError` only by its text).
+   */
+  errorMessage?: string;
+  /**
    * How many matching calls to fail before letting them through. Defaults to
    * 1. Use `Number.POSITIVE_INFINITY` for a permanent failure.
    */
@@ -256,8 +263,8 @@ export function clearOperationLog(dir: DirectoryHandleLike): void {
   if (state) state.entries = [];
 }
 
-function simulatedError(errorName: string, entryName: string): Error {
-  const error = new Error(`Simulated ${errorName} for "${entryName}".`);
+function simulatedError(errorName: string, entryName: string, message?: string): Error {
+  const error = new Error(message ?? `Simulated ${errorName} for "${entryName}".`);
   error.name = errorName;
   return error;
 }
@@ -317,7 +324,7 @@ function applyFaults(
     const limit = fault.times ?? 1;
     if (faultState.consumed[index]! >= limit) continue;
     faultState.consumed[index] += 1;
-    throw simulatedError(fault.errorName ?? "NotFoundError", entry.name);
+    throw simulatedError(fault.errorName ?? "NotFoundError", entry.name, fault.errorMessage);
   }
 }
 
