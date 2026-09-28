@@ -19,6 +19,7 @@ import {
   pickFresherThread,
 } from "../../data/feedback/feedbackThreadMerge";
 import { useFeedbackUnread } from "../../data/feedback/useFeedbackUnread";
+import { logError } from "../../data/storage/errorLogger";
 import { useWorkspace } from "../../data/workspace/useWorkspace";
 import Pagination from "../Pagination/Pagination";
 import { clampPage, pageSlice } from "../../utils/paginationUtils";
@@ -156,9 +157,11 @@ export function FeedbackWidget() {
     try {
       const list = await listThreadSummaries(directoryHandle, { repairIndex: true });
       setSummaries(list);
-    } catch {
+    } catch (err) {
       // Leave the last-known list in place; the background reload below still
-      // runs and the page effect reads whatever it can.
+      // runs and the page effect reads whatever it can. Logged rather than
+      // swallowed so a failing index read is visible in the durable error log.
+      logError("feedbackWidget:listThreadSummaries", err);
     } finally {
       setLoading(false);
     }
