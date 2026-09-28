@@ -512,7 +512,7 @@ MSG
 - Modify: `src/data/reporting/executive/model/distributionCoverageModel.ts` (imports 8-9; `groupEntries` 69-101; `computeDistributionModel` 103-107 and 158)
 - Modify: `src/data/reporting/management/managementModel.ts` (imports 21-22; `groupProgress` 94-126; `computeManagementModel` 128-134 and 175)
 - Modify: `src/data/reporting/executive/model/reportModel.ts` (imports; `ReportModel` end ~170-174; calls at 182-187, 280, 286-292; return end)
-- Modify (deliberate pin updates): `src/data/reporting/executiveKpiProfiles.test.ts` (84-94), `src/data/reporting/executiveKpis.golden.test.ts` (356-366), `src/data/reporting/executive/model/distributionCoverageModel.test.ts` (60), `src/data/reporting/management/managementModel.test.ts` (30-35), `src/data/reporting/executive/deck2/fanoutB3StagePort.test.ts` (170-182, 301, 306-313, 320-335)
+- Modify (deliberate pin updates): `src/data/reporting/executiveKpiProfiles.test.ts` (84-94), `src/data/reporting/executiveKpis.golden.test.ts` (356-366), `src/data/reporting/executive/model/distributionCoverageModel.test.ts` (60), `src/data/reporting/management/managementModel.test.ts` (30-35), `src/data/reporting/executive/deck2/fanoutB3StagePort.test.ts` (170-182, 301, 306-313, 320-335), `src/data/reporting/executive/deck2/deck2.test.ts` (610-619, 632, 638-645, 654, 663-666)
 - Update (reviewed): `src/data/reporting/executive/__snapshots__/stageCanonical.snapshot.test.ts.snap`, and `src/data/reporting/executive/deck2/__snapshots__/deck2.test.ts.snap` / `src/data/reporting/__snapshots__/executiveReport.test.ts.snap` only if they change.
 
 **Interfaces:**
@@ -1150,7 +1150,7 @@ Expected: PASS (7 tests).
 
 - [ ] **Step 11: Update the pins that recorded the old behaviour**
 
-Run first to see them fail: `npx vitest run src/data/reporting/executiveKpiProfiles.test.ts src/data/reporting/executiveKpis.golden.test.ts src/data/reporting/executive/model/distributionCoverageModel.test.ts src/data/reporting/management/managementModel.test.ts src/data/reporting/executive/deck2/fanoutB3StagePort.test.ts`
+Run first to see them fail: `npx vitest run src/data/reporting/executiveKpiProfiles.test.ts src/data/reporting/executiveKpis.golden.test.ts src/data/reporting/executive/model/distributionCoverageModel.test.ts src/data/reporting/management/managementModel.test.ts src/data/reporting/executive/deck2/fanoutB3StagePort.test.ts src/data/reporting/executive/deck2/deck2.test.ts`
 Expected: FAIL in exactly the assertions edited below.
 
 (a) `src/data/reporting/executiveKpiProfiles.test.ts` — Before:
@@ -1326,12 +1326,92 @@ After:
     expect(values).toEqual([fmtNum(4), fmtNum(1)]);
 ```
 
-Re-run the five files. Expected: PASS. If any OTHER assertion in them fails, it must be purely a stage-order/label consequence of this task; if it is anything else, stop and report.
+(f) `src/data/reporting/executive/deck2/deck2.test.ts` — the `reversedGapModel` suite has the same gap fixture. Before:
+```ts
+  // A model with a GAP in `stages` in REVERSED, non-canonical order: only
+  // المستوى الرابع (level 4) and المستوى الثاني (level 2) have rows — levels
+  // 1 and 3 are entirely absent — and level 4's rows come FIRST, so
+  // `model.population.byStage` is [المستوى الرابع, المستوى الثاني], array
+  // positions [0, 1]. Position-based indexing (the pre-fix bug) would pair
+  // position 0 with RISK_LEVELS[0]/STAGE_TONES[0] (level 1's gold/def) and
+  // position 1 with RISK_LEVELS[1] (level 2's def) — both wrong, since the
+  // rows are actually levels 4 and 2. Every assertion below checks each row
+  // renders with ITS OWN level's identity, not the position it happens to
+  // occupy in this reversed, gapped array.
+```
+After:
+```ts
+  // A model with a GAP in `stages`: only المستوى الرابع (level 4) and
+  // المستوى الثاني (level 2) have rows — levels 1 and 3 are entirely absent.
+  // Level 4's rows come FIRST in the input, but since C1 (2026-09-28)
+  // `model.population.byStage` is always canonical: [المستوى الثاني,
+  // المستوى الرابع], array positions [0, 1]. Position-based indexing (the
+  // pre-fix bug) would pair position 0 with RISK_LEVELS[0]/STAGE_TONES[0]
+  // (level 1's gold/def) and position 1 with RISK_LEVELS[1] (level 2's) —
+  // both wrong, since the rows are levels 2 and 4. Every assertion below
+  // checks each row renders with ITS OWN level's identity.
+```
+Before:
+```ts
+    const model = reversedGapModel();
+    expect(model.population.byStage.map((s) => s.stageLabel)).toEqual(["المستوى الرابع", "المستوى الثاني"]);
+```
+After:
+```ts
+    const model = reversedGapModel();
+    expect(model.population.byStage.map((s) => s.stageLabel)).toEqual(["المستوى الثاني", "المستوى الرابع"]);
+```
+Before:
+```ts
+    // Row 1 (array position 0) is المستوى الرابع (level 4): ordinal "4",
+    // tone "coral", 30% weight — NOT level 1's gold/"1"/100% that
+    // position-based indexing would have produced.
+    expect(panel1).toContain('<span class="v2-level-row-num coral">4</span>');
+    // Row 2 (array position 1) is المستوى الثاني (level 2): ordinal "2",
+    // tone "blue", 40% weight — NOT level 2's OWN identity borrowed
+    // correctly here would coincidentally look unchanged only if the old
+    // code were right; assert it explicitly instead of by omission.
+    expect(panel1).toContain('<span class="v2-level-row-num blue">2</span>');
+```
+After:
+```ts
+    // Row 2 (array position 1) is المستوى الرابع (level 4): ordinal "4",
+    // tone "coral", 30% weight — NOT level 2's blue/"2"/40% that
+    // position-based indexing would have produced.
+    expect(panel1).toContain('<span class="v2-level-row-num coral">4</span>');
+    // Row 1 (array position 0) is المستوى الثاني (level 2): ordinal "2",
+    // tone "blue", 40% weight — NOT level 1's gold/"1" (positional).
+    expect(panel1).toContain('<span class="v2-level-row-num blue">2</span>');
+```
+Before:
+```ts
+  it("Briefing rank list: each row's tone follows its OWN level (display order preserved, never sorted)", () => {
+```
+After:
+```ts
+  it("Briefing rank list: each row's tone follows its OWN level (display order is canonical stage order)", () => {
+```
+Before:
+```ts
+    expect(labels).toEqual(["المستوى الرابع", "المستوى الثاني"]);
+    const tones = [...panel2.matchAll(/<span class="v2-bf-rank-num (\w+)">/g)].map((m) => m[1]);
+    // level 4 → coral, level 2 → blue — never each other's / a positional guess.
+    expect(tones).toEqual(["coral", "blue"]);
+```
+After:
+```ts
+    expect(labels).toEqual(["المستوى الثاني", "المستوى الرابع"]);
+    const tones = [...panel2.matchAll(/<span class="v2-bf-rank-num (\w+)">/g)].map((m) => m[1]);
+    // level 2 → blue, level 4 → coral — never each other's / a positional guess.
+    expect(tones).toEqual(["blue", "coral"]);
+```
+
+Re-run the six files. Expected: PASS. If any OTHER assertion in them fails, it must be purely a stage-order/label consequence of this task; if it is anything else, stop and report.
 
 - [ ] **Step 12: Review and update the report snapshots**
 
 Run: `npx vitest run src/data/reporting/executive/stageCanonical.snapshot.test.ts src/data/reporting/executive/deck2/deck2.test.ts src/data/reporting/executiveReport.test.ts`
-Expected: `stageCanonical.snapshot.test.ts` FAILS (stage labels/order changed); the other two may or may not fail.
+Expected: all three `stageCanonical.snapshot.test.ts` snapshots FAIL (stage labels/order changed); the deck2 and document golden snapshots in the other two files are expected to stay green (their fixtures already use Arabic labels in canonical order) — if one fails anyway, review it by the same rule.
 For each failing file, re-run it with `-u` (e.g. `npx vitest run src/data/reporting/executive/stageCanonical.snapshot.test.ts -u`), then inspect `git diff -- '*.snap'`. Accept only if every changed line is a stage label (raw alias → Arabic label / «غير محدد»), a stage key (`"0"`… → `"first"`…) or stage ordering. In the workbook snapshot the `stages` / `coverage` / `accountability` stage rows must now read المستوى الأول … المستوى الرابع then غير محدد, in that order. Row-level data columns that print the source `stage` value may legitimately still show raw aliases. Any other kind of diff: `git checkout -- '*.snap'` and report BLOCKED.
 
 - [ ] **Step 13: Tier 2 gates**
@@ -1368,6 +1448,7 @@ MSG
 - Create: `src/data/reporting/executive/deck2/stageMappingsDeck.test.ts`
 - Modify: `src/data/reporting/executive/deck2/slides.ts` (import line 19; line 653; lines 713-750 `CANONICAL_STAGE_ORDER` + `levelIndexForStage`; `collectStagePortStats` 2074-2111; seven `formatStageLabel(<x>.stageLabel)` lookups at 2215, 2260, 2382, 2575, 2579, 2609, 2613)
 - Modify: `src/components/Sidebar/Tabs/Reports/TabView.tsx` (imports; `loadExecInput` 319-358)
+- Modify (deliberate pin update): `src/data/reporting/executive/deck2/stagePortStats.test.ts` (105-106)
 - Update (reviewed): `src/data/reporting/executive/__snapshots__/stageCanonical.snapshot.test.ts.snap`
 
 **Interfaces:**
@@ -1584,9 +1665,22 @@ After:
 
 Check: `grep -n "formatStageLabel" src/data/reporting/executive/deck2/slides.ts` shows exactly two lines — the import and the `return formatStageLabel(stage.stageLabel);` inside `stagePortKey`; `grep -c "stagePortKey(" …` now prints `8`.
 
+Update the one existing pin that recorded the old unknown-stage bucketing, in `src/data/reporting/executive/deck2/stagePortStats.test.ts` — Before:
+```ts
+    // Unknown aliases stay under their raw string (fallback-branch behavior).
+    expect(byStage.get("قيمة غير معروفة")?.[0]).toMatchObject({ name: "ميناء ج", total: 1 });
+```
+After:
+```ts
+    // CHANGED (C1): unmapped aliases share the one «غير محدد» bucket the
+    // fallback stage profile also uses (they used to stay under their raw
+    // string, which no profile label could ever match).
+    expect(byStage.get("غير محدد")?.[0]).toMatchObject({ name: "ميناء ج", total: 1 });
+```
+
 - [ ] **Step 4: Run the new test to verify it passes**
 
-Run: `npx vitest run src/data/reporting/executive/deck2/stageMappingsDeck.test.ts src/data/reporting/executive/deck2/fanoutB3StagePort.test.ts src/data/reporting/executive/deck2/deck2.test.ts`
+Run: `npx vitest run src/data/reporting/executive/deck2`
 Expected: PASS.
 
 - [ ] **Step 5: Load the workspace alias table in the Reports tab**
@@ -2463,7 +2557,7 @@ After:
 
 - [ ] **Step 4: Workspace mappings in `XrayInspectionResults.tsx`**
 
-Before:
+All edits in this step are in `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayInspectionResults.tsx`. Before:
 ```ts
 import { formatStageLabel } from "../../../../../data/population/stageHelpers";
 ```
@@ -3452,7 +3546,7 @@ Append to `src/components/Sidebar/Tabs/Population/components/PortRestrictionsMod
 
 - [ ] **Step 6: Wire it into `MappingSettingsModal.tsx`**
 
-Before:
+All edits in this step are in `src/components/Sidebar/Tabs/Population/components/MappingSettingsModal.tsx`. Before:
 ```ts
 import { Settings2, X } from "lucide-react";
 ```
@@ -3974,7 +4068,7 @@ export function certScanStatusFilterProps(
 
 - [ ] **Step 8: `subComponents.tsx` — column, `CaseFilterBar`, shell prop**
 
-Before:
+All edits in this step are in `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals/subComponents.tsx`. Before:
 ```ts
 import { CASE_FILTERS, type CaseFilter, type CaseFilterCounts } from "./caseFilter";
 ```
@@ -4060,7 +4154,7 @@ After:
 
 - [ ] **Step 9: `XrayReferrals.tsx` — four in-place line replacements (zero net lines)**
 
-Before:
+All edits in this step are in `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`. Before:
 ```ts
   CaseFilterSwitcher,
 ```
@@ -4095,7 +4189,7 @@ After:
 
 - [ ] **Step 10: `XrayInspectionResults.tsx` — same column props**
 
-Before:
+All edits in this step are in `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayInspectionResults.tsx`. Before:
 ```ts
 import { formatStageLabel } from "../../../../../data/population/stageHelpers";
 ```
@@ -4656,7 +4750,7 @@ Expected: FAIL — `computeWorkingDaysForDeadline is not a function`; the quota 
 
 - [ ] **Step 3: Implement in `distributionDerivation.ts`**
 
-Before:
+All edits in this step are in `src/data/distribution/distributionDerivation.ts`. Before:
 ```ts
 import { logError } from "../storage/errorLogger";
 ```
