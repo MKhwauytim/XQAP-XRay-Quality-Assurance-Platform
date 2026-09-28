@@ -57,7 +57,7 @@ export function PopulationRecoverySection() {
       setNotice(
         result.ok
           ? { kind: "ok", text: L.population_recovery_restored.replace("{archived}", result.archivedAs ?? "—") }
-          : { kind: "error", text: L.population_recovery_failed.replace("{error}", result.detail ?? result.reason) }
+          : { kind: "error", text: L.population_recovery_failed.replace("{error}", ("detail" in result ? result.detail : undefined) ?? result.reason) }
       );
     } catch (error) {
       logError("settings:population-recovery-restore", error);

@@ -41,6 +41,7 @@ const ARCHIVE: PopulationRecoveryCandidate = {
   processedAt: "2026-09-27T08:00:00.000Z",
   coveredSampledIds: 40,
   totalSampledIds: 40,
+  wouldBlock: false,
 };
 
 describe("PopulationRecoverySection", () => {
