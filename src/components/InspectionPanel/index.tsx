@@ -1,6 +1,7 @@
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
 import {
+  clearAnswerDraftAndLegacy,
   isAnswerDraftPersistFailing,
   loadAnswerDraftWithLegacyFallback,
   saveAnswerDraftMigratingLegacy,
@@ -97,6 +98,12 @@ type Props = {
   hasNextSample?: boolean;
 };
 
+/** A submitted answer (or a completed entry) is the record of truth — a leftover
+ *  draft must never win over it, seeded or rendered. */
+function isAnswerSubmitted(entry: DistributionEntry, savedAnswer: ItemAnswer | null): boolean {
+  return entry.status === "completed" || savedAnswer?.status === "submitted";
+}
+
 export default function InspectionPanel({
   entry,
   template,
@@ -122,7 +129,10 @@ export default function InspectionPanel({
     // and it is the work that would otherwise have to be redone. Falls back to
     // `legacyDraftKey` (A1 fix round 1) for a row whose canonical key changed
     // under it, so a draft saved before that fix is still found.
-    const draft = draftKey
+    // Never for a SUBMITTED row, though: any draft still sitting under this key
+    // at that point is stale scratch data, not newer work — see isAnswerSubmitted
+    // and the mount effect below, which clears it.
+    const draft = draftKey && !isAnswerSubmitted(entry, savedAnswer)
       ? loadAnswerDraftWithLegacyFallback(draftKey, legacyDraftKey ?? null)
       : null;
     if (draft) return { ...draft };
@@ -133,6 +143,14 @@ export default function InspectionPanel({
     }
     return m;
   });
+  // A submitted answer is the record of truth (see isAnswerSubmitted / the
+  // seeding above) -- clear out any leftover draft under either key so it can
+  // never resurface, e.g. on a later reopen or a stale-shaped legacy key.
+  useEffect(() => {
+    if (draftKey && isAnswerSubmitted(entry, savedAnswer)) {
+      clearAnswerDraftAndLegacy(draftKey, legacyDraftKey ?? null);
+    }
+  }, [draftKey, legacyDraftKey, entry, savedAnswer]);
   const [validationMsg, setValidationMsg] = useState<string | null>(null);
   // Guards the async disk write behind the primary action: without it a
   // double-click (or an impatient re-click during a slow workspace write) fires
@@ -229,7 +247,7 @@ export default function InspectionPanel({
     );
   }, [missingRequiredFields, touchedRequiredIds]);
 
-  const isSubmitted = entry.status === "completed" || savedAnswer?.status === "submitted";
+  const isSubmitted = isAnswerSubmitted(entry, savedAnswer);
   const activePhaseIndex = phases.findIndex((phase) => phase.phaseId === safeActivePhaseId);
   const isLastPhase = activePhaseIndex < 0 || activePhaseIndex === phases.length - 1;
   const currentPhaseMissingRequiredFields = useMemo(() => {
