@@ -1299,7 +1299,12 @@ export async function appendEventSegment<TEvent>(
       if (listedHead > seq) {
         seq = listedHead;
         highestReliableSeq = Math.max(highestReliableSeq, listedHead);
-        listedHighestSeq = Math.max(listedHighestSeq, listedHead);
+        // `listedHighestSeq` is deliberately NOT raised. It licenses trusting a
+        // NotFound as "absent" for anything above it, and it may only come from
+        // a listing taken INSIDE this lock (discovery). This hint was taken
+        // outside it: another tab of the same chain can rotate to head+1 in
+        // between, and if the in-lock listing then threw, a lagged NotFound on
+        // head+1 would be trusted and that tab's lines overwritten.
       }
     }
     let fileName = segmentFileNameForSeq(base, seq, segmentSuffix);
