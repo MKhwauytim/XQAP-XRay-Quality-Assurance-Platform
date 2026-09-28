@@ -37,7 +37,7 @@
 import { nextRetryDelayMs, type OperationDeadline } from "./operationDeadline";
 import type { DirectoryHandleLike } from "./fileSystemAccess";
 import { assertWritableMode } from "./readOnlyMode";
-import { logCodedError, taggedError } from "./errorCodes";
+import { logCodedError, resolveErrorCode, taggedError, type ErrorCode } from "./errorCodes";
 import {
   COMPRESSED_FORMAT_ID,
   HEAD_PROBE_BYTES,
@@ -298,9 +298,9 @@ async function readText(
  * report `corrupt`, not `missing`.
  */
 type FileContent =
-  | { kind: "plain"; text: string }
-  | { kind: "compressed"; head: CompressedHead; bodyText: string }
-  | { kind: "damaged" };
+  | { kind: "plain"; text: string; reportedSize: number; bytesRead: number }
+  | { kind: "compressed"; head: CompressedHead; bodyText: string; reportedSize: number; bytesRead: number }
+  | { kind: "damaged"; reportedSize: number; bytesRead: number };
 
 /**
  * Format-aware read: opens the file ONCE, classifies it from a bounded head
@@ -331,7 +331,7 @@ async function readContent(
         // head and the body). Reading it as plain would parse the head METADATA
         // and serve it as the payload — a successful-looking read that skips the
         // `.bak` ladder entirely.
-        return { kind: "damaged" };
+        return { kind: "damaged", reportedSize: file.size, bytesRead: window.byteLength };
       }
       if (classified.kind === "compressed") {
         const parts: string[] = [];
@@ -342,9 +342,15 @@ async function readContent(
         } catch {
           // A rejection means "discard everything received" (see
           // streamCompressedBody's contract) — never keep the partial body.
-          return { kind: "damaged" };
+          return { kind: "damaged", reportedSize: file.size, bytesRead: window.byteLength };
         }
-        return { kind: "compressed", head: classified.head, bodyText: parts.join("") };
+        return {
+          kind: "compressed",
+          head: classified.head,
+          bodyText: parts.join(""),
+          reportedSize: file.size,
+          bytesRead: file.size,
+        };
       }
       if (file.size <= HEAD_PROBE_BYTES && window.byteLength === file.size) {
         // The head window already IS the whole file, so decode it rather than
@@ -366,12 +372,18 @@ async function readContent(
         //
         // `TextDecoder("utf-8")` matches `Blob.text()`: UTF-8, leading BOM
         // stripped (the default `ignoreBOM: false` removes it).
-        return { kind: "plain", text: new TextDecoder("utf-8").decode(window) };
+        return {
+          kind: "plain",
+          text: new TextDecoder("utf-8").decode(window),
+          reportedSize: file.size,
+          bytesRead: window.byteLength,
+        };
       }
       if (file.size > maxStringLengthForTests) {
         throw stringLengthRangeError(name);
       }
-      return { kind: "plain", text: await file.text() };
+      const text = await file.text();
+      return { kind: "plain", text, reportedSize: file.size, bytesRead: file.size };
     } catch (error) {
       // Same budget rule as the not-found ladder above: these NotReadable /
       // stale-snapshot rungs are also nested inside the caller's casLoop.
@@ -2136,7 +2148,26 @@ export async function safeWriteJson<T>(
     reportProgress(onProgress, "committing");
     await writeText(dir, fileName, serialized);
     reportProgress(onProgress, "verifying-committed");
-    const verify = await readText(dir, fileName, { retryMissing: true, deadline });
+    let verify: string | null;
+    try {
+      verify = await readText(dir, fileName, { retryMissing: true, deadline });
+    } catch (error) {
+      // The commit above already resolved — `writeText`'s `close()` completed
+      // — so a THROW here (an exhausted stale-snapshot/NotReadable ladder on
+      // OUR OWN just-committed write, see evidence §A/§B) is a stale client
+      // view, not evidence the write failed. Leaving `.tmp` behind after this
+      // point is exactly what let a later reader's stale live-read be served
+      // it and reported as "the live file is damaged" — the live file is
+      // fine. Best-effort clean up before the error propagates; the caller
+      // still sees the same read-back failure it would have seen before.
+      logCodedError(
+        "safeWrite:post-commit-readback",
+        (resolveErrorCode(error) ?? "XQ-IO-036") as ErrorCode,
+        error
+      );
+      await removeQuietly(dir, tmpName);
+      throw error;
+    }
     const verifyOk = verify === serialized;
     if (!verifyOk) {
       // Roll back ONLY to a snapshot THIS write created (`hasCurrent`, the same
@@ -2386,37 +2417,140 @@ export type SafeReadJsonOptions = {
  */
 type ReadPayload<T> = { value: T; rawText: string };
 
+/**
+ * Where a found-but-invalid live read failed, for the `storage:bak-recovery`
+ * evidence line (see evidence §A) — lets an exported log tell a torn write
+ * apart from a stale snapshot after the fact.
+ */
+type ReadPayloadFailureStage = "json-parse" | "envelope" | "hash";
+
+type ReadPayloadOutcome<T> = {
+  found: boolean;
+  payload: ReadPayload<T> | null;
+  /** `File.size` at the moment of the read that produced this outcome, or null when the file was absent. */
+  reportedSize: number | null;
+  /** How many bytes were actually decoded, or null when the file was absent. */
+  bytesRead: number | null;
+  /** Set only when `payload` is null because validation failed (not when the file was simply absent). */
+  failureStage: ReadPayloadFailureStage | null;
+};
+
+/**
+ * Same three checks as {@link parseValidJson}, but also says WHICH one failed
+ * — `parseValidJson` itself stays untouched since it's called from half a
+ * dozen other sites that have no use for the distinction.
+ */
+function classifyPlainRead(text: string): { parsed: unknown | null; stage: ReadPayloadFailureStage | null } {
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    return { parsed: null, stage: "json-parse" };
+  }
+  if (!validateEnvelopeStructure(json)) {
+    return { parsed: null, stage: "envelope" };
+  }
+  if (text.length <= HASH_VERIFY_SIZE_LIMIT && !verifyContentHash(json)) {
+    return { parsed: null, stage: "hash" };
+  }
+  return { parsed: json, stage: null };
+}
+
 async function readPayload<T>(
   dir: DirectoryHandleLike,
   fileName: string,
   options?: ReadTextOptions
-): Promise<{ found: boolean; payload: ReadPayload<T> | null }> {
+): Promise<ReadPayloadOutcome<T>> {
   const content = await readContent(dir, fileName, options);
-  if (content === null) return { found: false, payload: null };
-  if (content.kind === "damaged") return { found: true, payload: null };
+  if (content === null) {
+    return { found: false, payload: null, reportedSize: null, bytesRead: null, failureStage: null };
+  }
+  if (content.kind === "damaged") {
+    return {
+      found: true,
+      payload: null,
+      reportedSize: content.reportedSize,
+      bytesRead: content.bytesRead,
+      failureStage: "envelope",
+    };
+  }
   if (content.kind === "compressed") {
     // The head line IS the envelope metadata; it is validated structurally, and
     // the body's integrity comes from gzip's CRC32 (already checked by the
     // inflate above) rather than from a contentHash it cannot carry.
     if (!validateEnvelopeStructure({ metadata: content.head, data: null })) {
-      return { found: true, payload: null };
+      return {
+        found: true,
+        payload: null,
+        reportedSize: content.reportedSize,
+        bytesRead: content.bytesRead,
+        failureStage: "envelope",
+      };
     }
     try {
       const data: unknown = JSON.parse(content.bodyText);
       return {
         found: true,
         payload: { value: decodePayloadColumns<T>(data), rawText: content.bodyText },
+        reportedSize: content.reportedSize,
+        bytesRead: content.bytesRead,
+        failureStage: null,
       };
     } catch {
-      return { found: true, payload: null };
+      return {
+        found: true,
+        payload: null,
+        reportedSize: content.reportedSize,
+        bytesRead: content.bytesRead,
+        failureStage: "json-parse",
+      };
     }
   }
-  const parsed = parseValidJson(content.text);
-  if (parsed === null) return { found: true, payload: null };
+  const classified = classifyPlainRead(content.text);
+  if (classified.parsed === null) {
+    return {
+      found: true,
+      payload: null,
+      reportedSize: content.reportedSize,
+      bytesRead: content.bytesRead,
+      failureStage: classified.stage,
+    };
+  }
   return {
     found: true,
-    payload: { value: decodePayloadColumns<T>(unwrap<unknown>(parsed)), rawText: content.text },
+    payload: {
+      value: decodePayloadColumns<T>(unwrap<unknown>(classified.parsed)),
+      rawText: content.text,
+    },
+    reportedSize: content.reportedSize,
+    bytesRead: content.bytesRead,
+    failureStage: null,
   };
+}
+
+// Applied to a live read that is FOUND but fails validation, before falling
+// through to `.bak`/`.tmp` — see evidence §A
+// (.superpowers/sdd/errorlog-2026-09-28/other-groups.md). `readContent`'s
+// small-file fast path trusts the `File.size` of whatever snapshot
+// `getFile()` handed it; on a UNC/SMB share that snapshot can be stale (a
+// leftover 0-byte `create:true` entry, or simply an older size than the file
+// that was just written) with NO exception — `slice(0, size)` just decodes to
+// `""` or a truncated prefix. Two retries with a FRESH handle/getFile is
+// enough to let the client's view catch up; a genuinely corrupt file fails
+// identically every time and still falls back exactly as before.
+const LIVE_INVALID_RETRY_DELAYS_MS = [150, 600] as const;
+
+function bakRecoveryEvidence(outcome: ReadPayloadOutcome<unknown>, staleRetries: number): string | undefined {
+  if (!outcome.found) return undefined;
+  const parts = [
+    `snapshot size ${outcome.reportedSize ?? "unknown"} bytes`,
+    `${outcome.bytesRead ?? "unknown"} bytes read`,
+    `failed at ${outcome.failureStage ?? "unknown"}`,
+  ];
+  if (staleRetries > 0) {
+    parts.push(`after ${staleRetries} stale-snapshot ${staleRetries === 1 ? "retry" : "retries"}`);
+  }
+  return parts.join(", ");
 }
 
 export async function safeReadJson<T>(
@@ -2424,7 +2558,34 @@ export async function safeReadJson<T>(
   fileName: string,
   options?: SafeReadJsonOptions
 ): Promise<SafeReadResult<T>> {
-  const live = await readPayload<T>(dir, fileName, { retryMissing: options?.retryMissing });
+  let live = await readPayload<T>(dir, fileName, { retryMissing: options?.retryMissing });
+  let staleRetries = 0;
+  // A live read that is FOUND but fails validation may be looking at a stale
+  // snapshot rather than a genuinely damaged file — see
+  // LIVE_INVALID_RETRY_DELAYS_MS above. Absence (`!live.found`) is unaffected
+  // and stays on the fast path: it already has its own, separate
+  // `retryMissing` ladder, and adding delay to every ordinary "does this
+  // optional file exist" probe would be exactly the regression this module's
+  // own doc warns against.
+  //
+  // Gated on actual EVIDENCE of staleness — a cheap `getFile()` peek (no body
+  // read) reporting a LARGER size than the one this failed read just saw —
+  // not on "found but invalid" alone. Many real callers retry a failed
+  // safeReadJson themselves in a tight loop (casLoop defaults to 10 attempts)
+  // and a genuinely corrupt file is corrupt on every attempt: paying the
+  // retry delay there bought nothing and multiplied into a multi-second stall
+  // (caught by src/data/storage/readContract.test.ts's corrupt-base-read
+  // case). A stale snapshot, by contrast, is by construction a SHORT view of
+  // a file that has already grown to its real size — the peek catches
+  // exactly that and nothing else.
+  while (live.found && live.payload === null && staleRetries < LIVE_INVALID_RETRY_DELAYS_MS.length) {
+    const peekSize = await openFile(dir, fileName).then((file) => file?.size ?? null);
+    const grew = peekSize !== null && live.reportedSize !== null && peekSize > live.reportedSize;
+    if (!grew) break;
+    await wait(LIVE_INVALID_RETRY_DELAYS_MS[staleRetries]!);
+    staleRetries += 1;
+    live = await readPayload<T>(dir, fileName, { retryMissing: options?.retryMissing });
+  }
   if (live.payload !== null) {
     return {
       ok: true,
@@ -2438,9 +2599,11 @@ export async function safeReadJson<T>(
     return live.found ? { ok: false, reason: "corrupt" } : { ok: false, reason: "missing" };
   }
 
+  const evidence = bakRecoveryEvidence(live, staleRetries);
+
   const bak = await readPayload<T>(dir, `${fileName}.bak`);
   if (bak.payload !== null) {
-    reportBakRecovery(dir.name, fileName, ".bak", live.found ? "corrupt" : "missing");
+    reportBakRecovery(dir.name, fileName, ".bak", live.found ? "corrupt" : "missing", evidence);
     return {
       ok: true,
       value: bak.payload.value,
@@ -2454,7 +2617,7 @@ export async function safeReadJson<T>(
   // rather than losing the only good copy of the write.
   const tmp = await readPayload<T>(dir, `${fileName}.tmp`);
   if (tmp.payload !== null) {
-    reportBakRecovery(dir.name, fileName, ".tmp", live.found ? "corrupt" : "missing");
+    reportBakRecovery(dir.name, fileName, ".tmp", live.found ? "corrupt" : "missing", evidence);
     return {
       ok: true,
       value: tmp.payload.value,
