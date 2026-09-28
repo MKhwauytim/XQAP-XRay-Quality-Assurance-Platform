@@ -350,15 +350,35 @@ export const ERROR_CODES = {
   // which was classified NOWHERE, so `resolveErrorCode` returned null and
   // casLoop reported its XQ-IO-032 catch-all. See `isSnapshotStaleError` in
   // transientFileErrors.ts for the mechanism.
+  //
+  // CORRECTED 2026-09-28 (E1b — see
+  // `.superpowers/sdd/errorlog-2026-09-28/answer-save-invalidstate.md`): on a
+  // segment WRITE's `close()`, this is usually NOT a stale (size, mtime)
+  // snapshot. Chromium's swap-file→target Move collapses every OS-level
+  // replace failure — a sharing violation from another open handle, denied
+  // delete access, a delete-pending state — into the SAME InvalidStateError
+  // and sentence, discarding the real Win32 error. The stale-snapshot story
+  // still holds on the READ path (`getFile()` → `file.text()`), where the
+  // remedy below (retry with a fresh handle/snapshot) is correct. On the
+  // write path it is not: the target is the same file on every retry, so
+  // patience against it does nothing. The append-only event log's writer
+  // (`appendOnlyEventLog.ts`) reflects that: a short ladder, then rotation to
+  // a fresh segment, rather than the long patient ladder this code used to
+  // imply was always the fix.
   "XQ-IO-036": {
     meaning:
-      "InvalidStateError: the (size, mtime) snapshot cached by a File/writable-stream interface object no longer matched the file on disk when the operation touched the bytes — a concurrent write from another machine on the share, or the Windows SMB metadata cache serving a stale mtime to the snapshot. Every retry re-acquires the handle and takes a FRESH snapshot, so retrying is the correct remedy; this code is reported only once the whole ladder is spent",
+      "InvalidStateError. R8(c): on a READ (getFile()/file.text()), this means an OS-level file operation failed — most often because the (size, mtime) snapshot cached by a File interface object no longer matched the file on disk (a concurrent write from another machine, or the Windows SMB metadata cache serving a stale mtime), but Chromium collapses other OS-level failures into this same name too, so 'the snapshot changed' is not the only possible cause; retrying with a fresh handle/snapshot is still the correct remedy either way. On a segment WRITE's close(), Chromium maps ANY swap-file→target replace failure to this same name and sentence — the shared folder refused to replace the file (it may be open on another computer or lack permission), not necessarily a stale snapshot — and retrying the SAME target for long does not help; the writer rotates to a fresh segment after a short ladder instead. This code is reported only once the relevant ladder is spent",
     labelKey: "err_io_036_stale_snapshot",
   },
   "XQ-IO-037": {
     meaning:
       "a BEST-EFFORT history snapshot was skipped before it touched the share, because the path it would need is longer than the budget a workspace on this deployment can be relied on to accept. Nothing was retried and nothing was probed: this is the XQ-IO-034 verdict applied in advance rather than rediscovered, at the cost of a full retry ladder, on every save. The action it was documenting succeeded — only its history entry was not written",
     labelKey: "err_io_037_history_path_budget",
+  },
+  "XQ-IO-038": {
+    meaning:
+      "the append-only event log gave up looking for a ROTATION TARGET it could trust. Every candidate segment name it tried, up to a small fixed bound (or the MAX_SEGMENT_SEQ ceiling), came back with an unconfirmed pre-write baseline — it could not prove the target was empty (or already held only what this writer put there), so writing to it risked silently truncating real content. Nothing on disk was touched by this failure: every segment this writer chain has ever sealed is untouched, and the batch that triggered this was never written anywhere. Retrying shortly, after the share's directory listing has had a chance to recover, is the right remedy — this is a listing/visibility problem, not data loss",
+    labelKey: "err_io_038_rotation_target_unconfirmed",
   },
 
   // ── AUTH: login / session / permissions ──────────────────────────────────

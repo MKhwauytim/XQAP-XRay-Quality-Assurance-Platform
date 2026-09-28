@@ -1624,9 +1624,16 @@ export const DEFAULT_LABELS = {
   // Says what the user should DO, and — just as importantly — what did NOT
   // happen: the file is not damaged and the workspace grant is not lost. The
   // old XQ-IO-032 wording this replaces could say neither, because the cause
-  // was unclassified.
-  err_io_036_stale_snapshot:               "تغيّر الملف على المجلد المشترك أثناء قراءته أو حفظه، فتعذّر إتمام العملية رغم عدة محاولات. الملف سليم ولم يُفقد الوصول إلى مساحة العمل — أعد المحاولة بعد قليل، ويُفضّل ألا يُحفظ الملف نفسه من جهازين في الوقت نفسه.",
+  // was unclassified. Updated 2026-09-28 (E1b) to also cover the close()-path
+  // meaning — "the shared folder refused to replace the file (it may be open
+  // on another computer or lack permission)" — alongside the read-path
+  // wording; both raise this same DOM error name. R8(c): the read-path clause
+  // no longer asserts "the file changed" (a stale-snapshot claim this is not
+  // always) — it now says an OS-level file operation failed, which covers the
+  // stale-snapshot case without over-claiming it as the only one.
+  err_io_036_stale_snapshot:               "تعذّرت عملية على مستوى نظام التشغيل أثناء قراءة الملف من المجلد المشترك، أو رفض المجلد المشترك استبدال الملف (قد يكون مفتوحًا على جهاز آخر أو لا يملك الإذن اللازم) أثناء حفظه، فتعذّر إتمام العملية رغم عدة محاولات. الملف سليم ولم يُفقد الوصول إلى مساحة العمل — أعد المحاولة بعد قليل، ويُفضّل ألا يُحفظ الملف نفسه من جهازين في الوقت نفسه.",
   err_io_037_history_path_budget:          "تعذّر حفظ نسخة السجل السابقة لهذا الإجراء لأن مسار مجلد مساحة العمل طويل جدًا. الإجراء نفسه تم حفظه بنجاح؛ لم يُحفظ سوى سجل التغيير. لتفعيل السجل، انقل مجلد مساحة العمل إلى مسار أقصر (أقرب إلى جذر المجلد المشترك).",
+  err_io_038_rotation_target_unconfirmed:  "تعذّر العثور على ملف بديل يمكن الوثوق به لحفظ هذه البيانات بعد عدة محاولات، لأن المجلد المشترك لم يُظهر بثبات ما إذا كانت الملفات المرشّحة فارغة أم لا. لم يُحذف أو يُستبدل أي ملف موجود بسبب هذا الخطأ — لم يُحفظ العنصر الجديد بعد. أعد المحاولة بعد قليل.",
 
   err_auth_006_rehash_failed:          "تعذر تحديث تشفير كلمة المرور، وتم الإبقاء على التشفير السابق.",
   err_auth_007_rehash_persist_failed:  "تعذر حفظ تشفير كلمة المرور المحدّث في مساحة العمل.",
