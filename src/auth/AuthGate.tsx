@@ -69,6 +69,7 @@ import { useLabels } from "../data/labels/useLabels";
 import { getLabels } from "../data/labels/labelsStore";
 import { SyncTick } from "../data/workspace/SyncTick";
 import { WorkspaceErrorSink } from "../data/errorLog/WorkspaceErrorSink";
+import { PendingAnswerReplayRunner } from "../data/answers/PendingAnswerReplayRunner";
 import { SessionActionsContext, type SessionActions } from "./SessionActionsContext";
 
 type AuthGateProps = {
@@ -729,6 +730,11 @@ export default function AuthGate({ children }: AuthGateProps) {
             errors land in the in-memory demo tree and vanish with it. Keyed on
             the REAL username, never the previewed role's identity. */}
         <WorkspaceErrorSink username={session.username} enabled />
+        {/* A1: replays answers that never reached the shared folder, on every
+            page, for every month and ad-hoc import -- not only while «نتائج
+            فحص الأشعة» is mounted. Mounted beside WorkspaceErrorSink for the
+            same reason (needs a ready workspace). Keyed on the REAL user. */}
+        <PendingAnswerReplayRunner username={session.username} enabled />
         {/* The unread-feedback count is read once here and shared by BOTH
             triggers of the feedback widget: the toolbar icon below (real admin)
             and the floating button inside the app tree (everyone else). They sit

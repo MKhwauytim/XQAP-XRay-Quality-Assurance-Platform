@@ -604,3 +604,32 @@ describe("XrayInspectionResults — لا يوجد صورة shows معلق, not �
     expect(screen.queryByRole("button", { name: DEFAULT_LABELS.ew_reopen_case_btn })).not.toBeInTheDocument();
   });
 });
+
+// F14 (A1 fix round 1, Minor item): mounting/loading this view must never
+// write to the shared workspace answers file any more -- landing a pending
+// answer is `PendingAnswerReplayRunner`'s job exclusively now (see
+// pendingAnswerReplay.test.ts and PendingAnswerReplayRunner.test.tsx for its
+// own coverage). This view's on-load/30s-tick work is count + local-mirror
+// backfill only, and the local-mirror backfill never touches the workspace.
+describe("XrayInspectionResults no longer writes on load (F14)", () => {
+  it("mounting and loading the view calls upsertItemAnswer zero times", async () => {
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = await seedActiveEntryWithAnswer();
+    const answerStorage = await import("../../../../../data/answers/answerStorage");
+    const upsertSpy = vi.spyOn(answerStorage, "upsertItemAnswer");
+
+    render(<XrayInspectionResults directoryHandle={root} />);
+    await waitFor(() => expect(screen.getAllByText("IMG-ACTIVE").length).toBeGreaterThan(0));
+
+    // Give any fire-and-forget on-load effect (the local-mirror backfill) a
+    // tick to actually run before asserting on it.
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(upsertSpy).not.toHaveBeenCalled();
+    upsertSpy.mockRestore();
+  });
+});

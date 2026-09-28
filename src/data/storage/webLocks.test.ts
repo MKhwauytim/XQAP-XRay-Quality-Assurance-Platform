@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import type { DirectoryHandleLike } from "./fileSystemAccess";
 import { createMemoryDirectory } from "./memoryDirectory";
-import { directoryPath, directoryResourceKey, withResourceLock } from "./webLocks";
+import { directoryPath, directoryResourceKey, withResourceLock, withTryResourceLock } from "./webLocks";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -112,4 +112,178 @@ test("two files in the same directory still get distinct keys", async () => {
   const dir = await createMemoryDirectory("k").getDirectoryHandle("1-main", { create: true });
   expect(directoryResourceKey(dir, "a.json")).not.toBe(directoryResourceKey(dir, "b.json"));
   expect(directoryPath(dir)).toBe("1-main");
+});
+
+test("withTryResourceLock: a second concurrent call for the same resource is skipped, not queued", async () => {
+  const events: string[] = [];
+  let releaseFirst!: () => void;
+  const gate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+
+  const first = withTryResourceLock("try-res-a", async () => {
+    events.push("first:start");
+    await gate;
+    events.push("first:end");
+    return "first";
+  });
+
+  // Give the first call a tick to actually acquire the lock before the
+  // second one tries -- otherwise both could race for it.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const second = await withTryResourceLock("try-res-a", async () => {
+    events.push("second:ran"); // must never happen while the first is in flight
+    return "second";
+  });
+
+  expect(second).toEqual({ ran: false });
+  releaseFirst();
+  expect(await first).toEqual({ ran: true, result: "first" });
+  expect(events).toEqual(["first:start", "first:end"]);
+});
+
+test("withTryResourceLock: runs normally once the resource is free again", async () => {
+  await withTryResourceLock("try-res-b", async () => "one");
+  const second = await withTryResourceLock("try-res-b", async () => "two");
+  expect(second).toEqual({ ran: true, result: "two" });
+});
+
+test("withTryResourceLock: a distinct resource name is never blocked by an unrelated held one", async () => {
+  let releaseFirst!: () => void;
+  const gate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  const first = withTryResourceLock("try-res-c", async () => {
+    await gate;
+    return "c";
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const other = await withTryResourceLock("try-res-d", async () => "d");
+  expect(other).toEqual({ ran: true, result: "d" });
+
+  releaseFirst();
+  await first;
+});
+
+test("withTryResourceLock: native LockManager -- ifAvailable: true is requested, and a second concurrent request for the same name is skipped while the first is in flight", async () => {
+  let held = false;
+  const request = vi.fn(
+    async (
+      _name: string,
+      _options: { mode: "exclusive"; ifAvailable: true },
+      callback: (lock: unknown) => Promise<unknown>
+    ) => {
+      if (held) return callback(null); // not granted immediately -- mirrors the real API's ifAvailable contract
+      held = true;
+      try {
+        return await callback({ name: _name });
+      } finally {
+        held = false;
+      }
+    }
+  );
+  vi.stubGlobal("navigator", { locks: { request } });
+
+  const events: string[] = [];
+  let releaseFirst!: () => void;
+  const gate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+
+  const first = withTryResourceLock("try-res-native", async () => {
+    events.push("first:start");
+    await gate;
+    events.push("first:end");
+    return "first";
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const second = await withTryResourceLock("try-res-native", async () => {
+    events.push("second:ran"); // must never happen while the first is in flight
+    return "second";
+  });
+
+  expect(second).toEqual({ ran: false });
+  releaseFirst();
+  expect(await first).toEqual({ ran: true, result: "first" });
+  expect(events).toEqual(["first:start", "first:end"]);
+
+  expect(request).toHaveBeenCalledTimes(2);
+  const [firstName, firstOptions] = request.mock.calls[0]!;
+  expect(firstName).toBe("xray:try-res-native");
+  expect(firstOptions).toEqual({ mode: "exclusive", ifAvailable: true });
+});
+
+test("withTryResourceLock: falls back to the in-memory lock when navigator.locks.request THROWS SYNCHRONOUSLY (e.g. SecurityError on an opaque/file:// origin)", async () => {
+  const request = vi.fn(() => {
+    throw new DOMException("Locks are not available in this context.", "SecurityError");
+  });
+  vi.stubGlobal("navigator", { locks: { request } });
+
+  const result = await withTryResourceLock("try-res-sync-throw", async () => "fell back");
+
+  expect(result).toEqual({ ran: true, result: "fell back" });
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
+test("withTryResourceLock: falls back to the in-memory lock when navigator.locks.request REJECTS ASYNCHRONOUSLY", async () => {
+  const request = vi.fn(async () => {
+    throw new DOMException("Locks are not available in this context.", "SecurityError");
+  });
+  vi.stubGlobal("navigator", { locks: { request } });
+
+  const result = await withTryResourceLock("try-res-async-reject", async () => "fell back");
+
+  expect(result).toEqual({ ran: true, result: "fell back" });
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
+test("withTryResourceLock: the in-memory fallback (after a native refusal) still serializes correctly against a concurrent call", async () => {
+  const request = vi.fn(async () => {
+    throw new DOMException("Locks are not available in this context.", "SecurityError");
+  });
+  vi.stubGlobal("navigator", { locks: { request } });
+
+  let releaseFirst!: () => void;
+  const gate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  const events: string[] = [];
+
+  const first = withTryResourceLock("try-res-refused-race", async () => {
+    events.push("first:start");
+    await gate;
+    events.push("first:end");
+    return "first";
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const second = await withTryResourceLock("try-res-refused-race", async () => {
+    events.push("second:ran");
+    return "second";
+  });
+
+  expect(second).toEqual({ ran: false });
+  releaseFirst();
+  expect(await first).toEqual({ ran: true, result: "first" });
+  expect(events).toEqual(["first:start", "first:end"]);
+});
+
+test("withTryResourceLock: rethrows (never falls back and re-runs) when the native API fails AFTER our own callback already ran", async () => {
+  const request = vi.fn(
+    async (
+      _name: string,
+      _options: { mode: "exclusive"; ifAvailable: true },
+      callback: (lock: unknown) => Promise<unknown>
+    ) => {
+      await callback({ name: _name }); // our callback runs and succeeds...
+      throw new Error("some unrelated native bookkeeping failure after the fact");
+    }
+  );
+  vi.stubGlobal("navigator", { locks: { request } });
+
+  let calls = 0;
+  await expect(
+    withTryResourceLock("try-res-post-run-failure", async () => {
+      calls += 1;
+      return "ran once";
+    })
+  ).rejects.toThrow("some unrelated native bookkeeping failure after the fact");
+
+  expect(calls).toBe(1); // never re-invoked via the fallback
 });

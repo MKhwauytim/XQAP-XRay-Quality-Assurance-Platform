@@ -91,3 +91,78 @@ export async function withResourceLock<T>(
     callback as () => Promise<unknown>
   ) as Promise<T>;
 }
+
+type TryLockManagerLike = {
+  request: (
+    name: string,
+    options: { mode: "exclusive"; ifAvailable: true },
+    callback: (lock: unknown) => Promise<unknown>
+  ) => Promise<unknown>;
+};
+
+// Fallback for `withTryResourceLock` when the native Web Locks API is
+// unavailable (non-Chromium, or a test/node environment): an in-memory
+// held-set approximates try-lock semantics. This only protects THIS
+// TAB/REALM, the same limitation `withFallbackLock` above already has for
+// `withResourceLock` — the cross-tab case `withTryResourceLock` exists for
+// IS the native API.
+const fallbackHeld = new Set<string>();
+
+/**
+ * Try-lock variant of `withResourceLock`: if `resourceName` is already held
+ * — by another tab, via the native Web Locks API, or (fallback path) by
+ * this realm — the callback is SKIPPED rather than queued behind the
+ * holder. Returns `{ ran: false }` in that case, `{ ran: true, result }`
+ * once the callback actually ran. For a background poller that would rather
+ * skip one tick than pile up behind (or serialize behind) a slow holder —
+ * see `pendingAnswerReplay.ts`'s cross-tab guard.
+ *
+ * Fix round 3: `navigator.locks` existing is not the same as it WORKING —
+ * the Web Locks API can refuse a request outright (a `SecurityError` on an
+ * opaque origin, which `file://` — how this app is routinely opened, see
+ * CLAUDE.md — commonly is) either synchronously (throwing before returning a
+ * promise) or by rejecting the promise it returns. Either way, that refusal
+ * is caught and falls through to the SAME in-memory fallback used when
+ * `navigator.locks` is absent entirely — never left to reject this call (and
+ * with it, the whole caller's pass: `replayPendingAnswers` has no outer
+ * try/catch around this call). The one exception: if the native API had
+ * already invoked OUR callback (`ran` is true) before something failed, the
+ * error is rethrown rather than falling back and running the callback a
+ * SECOND time — that ambiguous case is a genuine failure of the caller's own
+ * work, not a reason to redo it.
+ */
+export async function withTryResourceLock<T>(
+  resourceName: string,
+  callback: () => Promise<T>
+): Promise<{ ran: true; result: T } | { ran: false }> {
+  const manager = getNativeLockManager() as unknown as TryLockManagerLike | null;
+  if (manager) {
+    let ran = false;
+    let result: T | undefined;
+    try {
+      await manager.request(
+        `xray:${resourceName}`,
+        { mode: "exclusive", ifAvailable: true },
+        async (lock) => {
+          if (!lock) return; // Not granted immediately -- someone else holds it.
+          ran = true;
+          result = await callback();
+        }
+      );
+      return ran ? { ran: true, result: result as T } : { ran: false };
+    } catch (error) {
+      if (ran) throw error; // our own callback already ran -- surface its failure, never re-run it
+      // The API exists but refused the request itself (sync throw or an
+      // async rejection, before our callback ever ran) -- fall through to
+      // the in-memory fallback below exactly as if it were unavailable.
+    }
+  }
+
+  if (fallbackHeld.has(resourceName)) return { ran: false };
+  fallbackHeld.add(resourceName);
+  try {
+    return { ran: true, result: await callback() };
+  } finally {
+    fallbackHeld.delete(resourceName);
+  }
+}
