@@ -1,7 +1,20 @@
 import { DEFAULT_STAGE_MAPPINGS } from "./populationConfig";
 import type { StageKey, StageAliasMappings } from "./populationConfig";
+import { STAGE_KEY_ORDER, STAGE_LABELS_AR, stageLabelForKey } from "./stageLabels";
 
 export type { StageKey, StageAliasMappings };
+// C1: the canonical stage definitions live in stageLabels.ts (worker-safe);
+// re-exported here so existing `stageHelpers` importers keep one entry point.
+export {
+  STAGE_COUNT_KEY_ORDER,
+  STAGE_KEY_ORDER,
+  STAGE_LABELS_AR,
+  STAGE_UNKNOWN_LABEL,
+  compareStageKeys,
+  isCanonicalStageKey,
+  stageLabelForKey,
+  stageLabelRank,
+} from "./stageLabels";
 
 export type StageCounts = {
   first: number;
@@ -16,13 +29,6 @@ export type StageCounts = {
 // covers the mapped/known stages. Consumers that must handle every row
 // (e.g. a partitioned index) need this wider type, not StageKey.
 export type StageCountKey = keyof StageCounts;
-
-const STAGE_LABELS_AR: Record<StageKey, string> = {
-  first: "المستوى الأول",
-  second: "المستوى الثاني",
-  third: "المستوى الثالث",
-  fourth: "المستوى الرابع"
-};
 
 function normalizeStageToken(value: string): string {
   return value
@@ -50,8 +56,6 @@ export function resolveStageMappings(
     ...(stageMappings ?? {})
   };
 }
-
-const STAGE_KEY_ORDER = ["first", "second", "third", "fourth"] as const;
 
 // ── Alias-index memoization (hot path) ──────────────────────────────────────
 // getStageKey used to re-normalize all ~43 constant aliases on EVERY call, so a
@@ -169,4 +173,17 @@ export function formatStageLabel(
   const stageKey = getStageKey(String(stage ?? ""), stageMappings);
   if (stageKey === "unknown") return String(stage ?? "");
   return STAGE_LABELS_AR[stageKey];
+}
+
+/**
+ * The canonical bucket label for a raw stage value (C1): the Arabic level
+ * label for a mapped stage, «غير محدد» for a blank or unmapped one. Unlike
+ * `formatStageLabel`, an unmapped value never echoes its raw text — report
+ * groupings put every unmapped row in ONE bucket, keyed "unknown".
+ */
+export function stageBucketLabel(
+  stage: unknown,
+  stageMappings?: Partial<StageAliasMappings>
+): string {
+  return stageLabelForKey(getStageKey(stage == null ? null : String(stage), stageMappings));
 }
