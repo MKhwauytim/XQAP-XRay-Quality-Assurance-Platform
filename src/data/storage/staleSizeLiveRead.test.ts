@@ -29,7 +29,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { createMemoryDirectory } from "./memoryDirectory";
 import type { DirectoryHandleLike, FileHandleLike } from "./fileSystemAccess";
-import { safeReadJson, safeWriteJson } from "./safeWrite";
+import { COMPRESSED_FORMAT_ID } from "./compressedEnvelope";
+import { isCompressedFile, safeReadJson, safeWriteJson } from "./safeWrite";
 import { clearErrors, getRecentErrors } from "./errorLogger";
 import { __resetBakRecoveryReportsForTests } from "./bakRecoveryReport";
 
@@ -321,7 +322,7 @@ test("N1: a persistent stale TRUNCATED PREFIX (identical twice, json-parse failu
   // The same 40-byte prefix twice: size AND content hash match, but a
   // prefix that fails JSON.parse is not a complete document, so identical
   // twice is not evidence of a stable file — a stale size view returns
-  // exactly this. Only hash/envelope/compressed-crc failures (a complete
+  // exactly this. Only hash/envelope failures (a complete
   // document that parsed) may stop early.
   const { dir: wrapped, getCallCount } = wrapWithScriptedReads(dir, "t.json", [
     { kind: "truncate", size: 40 },
@@ -386,8 +387,10 @@ test("N1 (compressed): a persistent stale TRUNCATED gzip view (identical twice) 
   await safeWriteJson(dir, "distribution.current.json", bigCompressiblePayload());
   // Guard: this fixture really is stored gzip-compressed.
   const raw = await (await (await dir.getFileHandle("distribution.current.json")).getFile()).text();
-  expect(raw.slice(0, raw.indexOf("\n")).startsWith("{")).toBe(true);
-  expect(raw.length).toBeGreaterThan(0);
+  // Real compressed markers: the head line carries the format id, and the
+  // file is recognised as compressed by the module's own classifier.
+  expect(raw.slice(0, raw.indexOf("\n"))).toContain(COMPRESSED_FORMAT_ID);
+  expect(await isCompressedFile(dir, "distribution.current.json")).toBe(true);
 
   const { dir: wrapped, getCallCount } = wrapWithScriptedReads(dir, "distribution.current.json", [
     { kind: "truncateBytes", size: 9000 },
