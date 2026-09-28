@@ -1,0 +1,276 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`answer write path — output snapshot (S2 pin) > fresh employee: seed + save, submit, reopen, note, and the four skip decisions 1`] = `
+{
+  "events": [
+    {
+      "answeredBy": "emp1",
+      "authority": "self",
+      "eventAt": "2026-05-02T10:00:00.000Z",
+      "eventBy": "emp1",
+      "eventId": "E1-seed",
+      "eventType": "migration-seed",
+      "legacyContentHash": "",
+    },
+    {
+      "answeredBy": "emp1",
+      "answers": [
+        {
+          "fieldId": "f1",
+          "value": "v-X1",
+        },
+      ],
+      "authority": "self",
+      "eventAt": "2026-05-02T10:00:00.000Z",
+      "eventBy": "emp1",
+      "eventId": "E1",
+      "eventType": "item-saved",
+      "lastSavedAt": "2026-05-02T00:00:00.000Z",
+      "status": "draft",
+      "submittedAt": null,
+      "templateId": "t1",
+      "templateVersion": 1,
+      "xrayImageId": "X1",
+    },
+    {
+      "answeredBy": "emp1",
+      "answers": [
+        {
+          "fieldId": "f1",
+          "value": "v-X1",
+        },
+      ],
+      "authority": "self",
+      "eventAt": "2026-05-02T10:00:00.001Z",
+      "eventBy": "emp1",
+      "eventId": "E2",
+      "eventType": "item-saved",
+      "lastSavedAt": "2026-05-02T00:00:00.000Z",
+      "status": "submitted",
+      "submittedAt": "2026-05-02T10:00:00.000Z",
+      "templateId": "t1",
+      "templateVersion": 1,
+      "xrayImageId": "X1",
+    },
+    {
+      "answeredBy": "emp1",
+      "authority": "supervisor",
+      "eventAt": "2026-05-02T10:00:00.002Z",
+      "eventBy": "sup1",
+      "eventId": "E3",
+      "eventType": "item-reopened",
+      "reason": "why",
+      "xrayImageId": "X1",
+    },
+    {
+      "answeredBy": "emp1",
+      "authority": "self",
+      "eventAt": "2026-05-02T10:00:00.004Z",
+      "eventBy": "emp1",
+      "eventId": "E4",
+      "eventType": "quality-note-set",
+      "qualityNote": "  note  ",
+      "xrayImageId": "X1",
+    },
+    {
+      "answeredBy": "emp1",
+      "answers": [
+        {
+          "fieldId": "f1",
+          "value": "b",
+        },
+      ],
+      "authority": "self",
+      "eventAt": "2026-05-02T10:00:00.007Z",
+      "eventBy": "emp1",
+      "eventId": "E5",
+      "eventType": "item-saved",
+      "lastSavedAt": "2026-05-02T00:00:00.000Z",
+      "status": "draft",
+      "submittedAt": null,
+      "templateId": "t1",
+      "templateVersion": 1,
+      "xrayImageId": "X2",
+    },
+  ],
+  "items": [
+    {
+      "answeredBy": "emp1",
+      "answeredOnBehalfBy": undefined,
+      "answers": [
+        {
+          "fieldId": "f1",
+          "value": "v-X1",
+        },
+      ],
+      "history": [
+        {
+          "action": "reopened",
+          "at": "2026-05-02T10:00:00.002Z",
+          "by": "sup1",
+          "previousSubmittedAt": "2026-05-02T10:00:00.000Z",
+          "reason": "why",
+        },
+      ],
+      "lastSavedAt": "2026-05-02T00:00:00.000Z",
+      "qualityNote": "note",
+      "status": "draft",
+      "submittedAt": null,
+      "templateId": "t1",
+      "templateVersion": 1,
+      "valueHistory": [
+        {
+          "changedAt": "2026-05-02T10:00:00.001Z",
+          "changedBy": "emp1",
+          "previous": {
+            "answers": [
+              {
+                "fieldId": "f1",
+                "value": "v-X1",
+              },
+            ],
+            "lastSavedAt": "2026-05-02T00:00:00.000Z",
+            "status": "draft",
+            "submittedAt": null,
+          },
+          "reason": "save",
+        },
+      ],
+      "xrayImageId": "X1",
+    },
+    {
+      "answeredBy": "emp1",
+      "answeredOnBehalfBy": undefined,
+      "answers": [
+        {
+          "fieldId": "f1",
+          "value": "b",
+        },
+      ],
+      "history": undefined,
+      "lastSavedAt": "2026-05-02T00:00:00.000Z",
+      "qualityNote": undefined,
+      "status": "draft",
+      "submittedAt": null,
+      "templateId": "t1",
+      "templateVersion": 1,
+      "valueHistory": undefined,
+      "xrayImageId": "X2",
+    },
+  ],
+}
+`;
+
+exports[`answer write path — output snapshot (S2 pin) > legacy seed: a pre-existing legacy file is hashed into the seed and folded with the new events 1`] = `
+{
+  "events": [
+    {
+      "answeredBy": "emp2",
+      "authority": "self",
+      "eventAt": "2026-05-02T10:00:00.008Z",
+      "eventBy": "emp2",
+      "eventId": "E1-seed",
+      "eventType": "migration-seed",
+      "legacyContentHash": "fb14bdeb",
+    },
+    {
+      "answeredBy": "emp2",
+      "answers": [
+        {
+          "fieldId": "f1",
+          "value": "edited",
+        },
+      ],
+      "authority": "self",
+      "eventAt": "2026-05-02T10:00:00.008Z",
+      "eventBy": "emp2",
+      "eventId": "E1",
+      "eventType": "item-saved",
+      "lastSavedAt": "2026-05-02T00:00:00.000Z",
+      "status": "draft",
+      "submittedAt": null,
+      "templateId": "t1",
+      "templateVersion": 1,
+      "xrayImageId": "L2",
+    },
+    {
+      "answeredBy": "emp2",
+      "authority": "supervisor",
+      "eventAt": "2026-05-02T10:00:00.009Z",
+      "eventBy": "sup1",
+      "eventId": "E2",
+      "eventType": "item-reopened",
+      "reason": "fix",
+      "xrayImageId": "L1",
+    },
+  ],
+  "items": [
+    {
+      "answeredBy": "emp2",
+      "answers": [
+        {
+          "fieldId": "f1",
+          "value": "v-L1",
+        },
+      ],
+      "history": [
+        {
+          "action": "reopened",
+          "at": "2026-05-02T10:00:00.009Z",
+          "by": "sup1",
+          "previousSubmittedAt": "2026-05-01T09:00:00.000Z",
+          "reason": "fix",
+        },
+      ],
+      "lastSavedAt": "2026-05-02T00:00:00.000Z",
+      "status": "draft",
+      "submittedAt": null,
+      "templateId": "t1",
+      "templateVersion": 1,
+      "xrayImageId": "L1",
+    },
+    {
+      "answeredBy": "emp2",
+      "answeredOnBehalfBy": undefined,
+      "answers": [
+        {
+          "fieldId": "f1",
+          "value": "edited",
+        },
+      ],
+      "history": undefined,
+      "lastSavedAt": "2026-05-02T00:00:00.000Z",
+      "qualityNote": undefined,
+      "status": "draft",
+      "submittedAt": null,
+      "templateId": "t1",
+      "templateVersion": 1,
+      "valueHistory": [
+        {
+          "changedAt": "2026-05-02T10:00:00.008Z",
+          "changedBy": "emp2",
+          "previous": {
+            "answers": [
+              {
+                "fieldId": "f1",
+                "value": "v-L2",
+              },
+            ],
+            "lastSavedAt": "2026-05-02T00:00:00.000Z",
+            "status": "draft",
+            "submittedAt": null,
+          },
+          "reason": "save",
+        },
+      ],
+      "xrayImageId": "L2",
+    },
+  ],
+}
+`;
+
+exports[`answer write path — output snapshot (S2 pin) > legacy seed: a pre-existing legacy file is hashed into the seed and folded with the new events 2`] = `
+[
+  "emp2.answers.json",
+]
+`;
