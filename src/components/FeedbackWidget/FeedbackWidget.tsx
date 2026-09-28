@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, MessageCircle, X } from "lucide-react";
 import { readSession } from "../../auth/authSession";
 import {
@@ -7,6 +7,7 @@ import {
   loadThreads,
   replyToFeedback,
   submitFeedback,
+  summarizeFeedbackThread,
   type FeedbackCategory,
   type FeedbackMessage,
   type FeedbackThread,
@@ -200,7 +201,7 @@ export function FeedbackWidget() {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      await submitFeedback(directoryHandle, {
+      const created = await submitFeedback(directoryHandle, {
         from: session.username,
         role: session.role,
         category,
@@ -208,7 +209,15 @@ export function FeedbackWidget() {
       });
       setSubmitted(true);
       setText("");
-      void refresh();
+      // Apply the thread the write returned -- no re-read. This used to run
+      // `refresh()` AND `reloadUnread()`, i.e. the index + listing plus TWO
+      // full reads of every thread file, for a change this tab already holds
+      // in full. One provider reload remains, for the unread dot.
+      setThreadsById((prev) => ({ ...prev, [created.id]: created }));
+      setSummaries((prev) => [
+        summarizeFeedbackThread(created),
+        ...prev.filter((summary) => summary.threadId !== created.id),
+      ]);
       void reloadUnread();
     } catch (err) {
       // B6: never fail silently — a CAS conflict surfaces its Arabic message.
@@ -225,7 +234,7 @@ export function FeedbackWidget() {
     setReplying(msgId);
     setSubmitError(null);
     try {
-      await replyToFeedback(
+      const updated = await replyToFeedback(
         directoryHandle,
         msgId,
         {
@@ -237,12 +246,18 @@ export function FeedbackWidget() {
         resolve
       );
       setReplyTexts((prev) => ({ ...prev, [msgId]: "" }));
-      setThreadsById((prev) => {
-        const next = { ...prev };
-        delete next[msgId];
-        return next;
-      });
-      void refresh();
+      // Apply the verified thread the write returned. The old code DELETED the
+      // card's body here and relied on a refresh to bring it back -- but the
+      // page effect did not re-run for an unchanged page, so the card sat on
+      // the loading line until the panel was reopened. Applying the write's
+      // own thread (its bumped revision) also means `pickFresherThread` keeps
+      // preferring it over the provider's next poll until that poll catches up.
+      setThreadsById((prev) => ({ ...prev, [updated.id]: updated }));
+      setSummaries((prev) =>
+        prev.map((summary) =>
+          summary.threadId === updated.id ? { ...summary, status: updated.status } : summary
+        )
+      );
       void reloadUnread();
     } catch (err) {
       // B6: surface a CAS conflict instead of an unhandled rejection.
@@ -291,7 +306,7 @@ export function FeedbackWidget() {
   // (already in memory -- reading it again from disk is pure waste) or this
   // widget's own page-scoped copy. `threadFor` resolves each id to the fresher
   // of the two; see feedbackThreadMerge.ts.
-  const polledById = indexThreadsById(polledMessages);
+  const polledById = useMemo(() => indexThreadsById(polledMessages), [polledMessages]);
   const threadFor = (threadId: string): FeedbackMessage | undefined =>
     pickFresherThread(threadsById[threadId], polledById.get(threadId));
 
@@ -352,10 +367,13 @@ export function FeedbackWidget() {
   // Only the ids NEITHER source holds are read from disk, and the effect keys on
   // that SORTED set -- not on the ordered visible ids. The old ordered key
   // changed every time the "my messages" list re-sorted by latest activity as
-  // bodies streamed in, which re-read the same page; and it did NOT change when
-  // a reply dropped one thread from `threadsById`, which left that card stuck
-  // on the loading line. A set key has neither failure: re-ordering never
-  // changes it, and a thread that goes missing changes it immediately.
+  // bodies streamed in, which re-read the same page. A submit or reply used to
+  // also DELETE that thread from `threadsById` and lean on a refresh to bring
+  // it back, which left the card stuck on the loading line whenever the page
+  // itself didn't change; submit/reply now apply the write's own returned
+  // thread instead, so a thread id never goes missing from `threadsById` once
+  // this tab has written it. A set key still matters for the re-order case:
+  // re-ordering never changes it, so it does not re-trigger the read effect.
   //
   // An id whose file cannot be read stays in the set, so the key does not
   // change and the read is not retried in a loop; the card keeps its loading
