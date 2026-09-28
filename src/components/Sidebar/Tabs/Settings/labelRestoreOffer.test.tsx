@@ -27,6 +27,11 @@ vi.mock("../../../../auth/usePermissions", () => ({
   }),
 }));
 
+// Settings now mounts PopulationRecoverySection (admin), which reads the global month.
+vi.mock("../../../../data/month/useGlobalMonth", () => ({
+  useGlobalMonth: () => ({ selection: { kind: "none" } }),
+}));
+
 function makeWorkspaceValue(overrides: Partial<WorkspaceContextValue>): WorkspaceContextValue {
   return {
     status: "ready",
