@@ -10,6 +10,7 @@
 // Design/CSS is intentionally minimal for now: it reuses the v1 deck theme so the
 // content reads clearly; the dedicated visual pass happens after content approval.
 
+import { getLabels } from "../../../labels/labelsStore";
 import type { ReportModel } from "../model/reportModel";
 import type { StageProfile } from "../../executiveReportTypes";
 import { esc, fmtNum, fmtPct } from "../primitives";
@@ -454,6 +455,12 @@ export function tocSlide(items: TocItem[], num: number, total: number, variantPr
  *  renders a graceful "—" empty state when its metric lacks data
  *  (denominator-gated rates), never a misleading zero. No prior-month I/O —
  *  the deck builders stay pure over one month's input. */
+/** A2: a footnote (with a leading space) when sampled images are shown from the sample snapshot; "" otherwise. */
+function snapshotFootnote(model: ReportModel): string {
+  const count = model.rows.filter((row) => row.fromSampleSnapshot).length;
+  return count > 0 ? ` ${getLabels().report_sample_snapshot_footnote.replace("{count}", fmtNum(count))}` : "";
+}
+
 export function monthInNumbersSlide(model: ReportModel, num: number, total: number, variantPreview: boolean): string {
   const accuracy = model.summary.overallAccuracy;
   const rawTiles: Array<{ tone: string; icon: string; value: string; label: string; sub: string }> = [
@@ -530,7 +537,9 @@ export function monthInNumbersSlide(model: ReportModel, num: number, total: numb
     eyebrow: "لمحة تنفيذية",
     iconName: "chart",
     headline: "مؤشرات الشهر",
-    subhead: "أبرز مؤشرات الشهر، ثم أعلى المنافذ حجمًا — قبل الجداول التفصيلية.",
+    subhead:
+      "أبرز مؤشرات الشهر، ثم أعلى المنافذ حجمًا — قبل الجداول التفصيلية." +
+      snapshotFootnote(model),
     bodyVariants: [body, body, body, body],
     variantPreview,
     num,
@@ -1424,7 +1433,7 @@ export function riskStagesSlide(model: ReportModel, num: number, total: number, 
     eyebrow: "القسم 1 — مجتمع الفحص",
     iconName: "gauge",
     headline: "مجتمع الصور بناءً على المخاطر",
-    subhead: "توزيع المجتمع بعد المعالجة على مستويات المخاطر الأربعة، وحصة كل مستوى من العيّنة.",
+    subhead: "توزيع المجتمع بعد المعالجة على مستويات المخاطر الأربعة، وحصة كل مستوى من العيّنة." + snapshotFootnote(model),
     bodyVariants: [body, ledgerBody, briefingBody, gridBody],
     variantPreview,
     num,
@@ -2093,9 +2102,12 @@ export function collectStagePortStats(model: ReportModel): Map<string, PortPopRo
       cur = { name: portName, total: 0, clean: 0, suspicious: 0, sampleTotal: 0, sampleClean: 0, sampleSuspicious: 0 };
       portMap.set(portName, cur);
     }
-    cur.total += 1;
-    if (r.imageResult === "اشتباه") cur.suspicious += 1;
-    else cur.clean += 1;
+    // A2: a row rebuilt from the sample snapshot is not a population image.
+    if (!r.fromSampleSnapshot) {
+      cur.total += 1;
+      if (r.imageResult === "اشتباه") cur.suspicious += 1;
+      else cur.clean += 1;
+    }
     if (r.selectedInSample) {
       cur.sampleTotal += 1;
       if (r.imageResult === "اشتباه") cur.sampleSuspicious += 1;

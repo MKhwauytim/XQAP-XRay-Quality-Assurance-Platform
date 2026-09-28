@@ -11,7 +11,7 @@ import type {
   PortProfile,
   StageProfile,
 } from "./executiveReportTypes";
-import { isRowStudied } from "./executiveReportTypes";
+import { isRowStudied, populationScopedRows } from "./executiveReportTypes";
 import { aggregateDecisions, buildDecisionRecords, emptyCounts } from "./executive/model/decisionFactTable";
 import type { Counts } from "./executive/model/decisionFactTable";
 
@@ -87,10 +87,14 @@ function buildPortProfile(
   decisionCounts: Counts,
   config: ExecutiveReportConfig,
 ): PortProfile {
-  const population = rows.length;
-  const clean = rows.filter((row) => row.imageResult === "سليمة").length;
-  const suspicious = rows.filter((row) => row.imageResult === "اشتباه").length;
+  // A2: population figures never count rows rebuilt from the sample snapshot;
+  // sample-scoped figures (sampleSize, studied, accuracy) keep every row.
+  const populationRows = populationScopedRows(rows);
+  const population = populationRows.length;
+  const clean = populationRows.filter((row) => row.imageResult === "سليمة").length;
+  const suspicious = populationRows.filter((row) => row.imageResult === "اشتباه").length;
   const sampled = rows.filter((row) => row.selectedInSample);
+  const populationSampled = populationRows === rows ? sampled.length : populationRows.filter((row) => row.selectedInSample).length;
   const studied = sampled.filter(isRowStudied).length;
 
   // Unchanged population-sample-size gate: "do we have enough images with a
@@ -129,7 +133,7 @@ function buildPortProfile(
     suspicious,
     suspicionRate: population > 0 ? (suspicious / population) * 100 : 0,
     sampleSize: sampled.length,
-    coverage: population > 0 ? (sampled.length / population) * 100 : 0,
+    coverage: population > 0 ? (populationSampled / population) * 100 : 0,
     studied,
     completionRate: sampled.length > 0 ? (studied / sampled.length) * 100 : 0,
     accuracyByImage,
@@ -207,12 +211,15 @@ export function buildStageProfiles(
     .map(([stageKey, stageRows]) => {
       const sampled = stageRows.filter((row) => row.selectedInSample);
       const studied = sampled.filter(isRowStudied).length;
+      // A2: population and coverage exclude snapshot rows; sample-scoped fields keep them.
+      const populationRows = populationScopedRows(stageRows);
+      const populationSampled = populationRows.filter((row) => row.selectedInSample).length;
       return {
         stageKey,
         stageLabel: stageLabelForKey(stageKey),
-        population: stageRows.length,
+        population: populationRows.length,
         sampleSize: sampled.length,
-        coverage: stageRows.length > 0 ? (sampled.length / stageRows.length) * 100 : 0,
+        coverage: populationRows.length > 0 ? (populationSampled / populationRows.length) * 100 : 0,
         studied,
         completionRate: sampled.length > 0 ? (studied / sampled.length) * 100 : 0,
       };

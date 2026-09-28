@@ -389,9 +389,12 @@ export function collectPortStats(model: ReportModel): { land: PortPopRow[]; sea:
       };
       map.set(name, cur);
     }
-    cur.total += 1;
-    if (r.imageResult === "اشتباه") cur.suspicious += 1;
-    else cur.clean += 1;
+    // A2: a row rebuilt from the sample snapshot is not a population image.
+    if (!r.fromSampleSnapshot) {
+      cur.total += 1;
+      if (r.imageResult === "اشتباه") cur.suspicious += 1;
+      else cur.clean += 1;
+    }
     if (r.selectedInSample) {
       cur.sampleTotal += 1;
       if (r.imageResult === "اشتباه") cur.sampleSuspicious += 1;
