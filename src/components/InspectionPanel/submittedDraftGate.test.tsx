@@ -8,7 +8,7 @@
 // is the record of truth: no draft may load over it, and any leftover draft
 // under either key must be cleared so it can never resurface.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import InspectionPanel from "./index";
 import {
@@ -137,14 +137,40 @@ describe("a submitted answer is never shadowed by a leftover draft", () => {
     expect(loadAnswerDraft(CANONICAL_KEY)).toBeNull();
   });
 
-  it("also gates on a COMPLETED entry with no submitted answer status set", () => {
-    saveAnswerDraft(CANONICAL_KEY, { notes: "مسودة قديمة" });
+  it("keeps the draft in storage for a COMPLETED entry with no submitted answer", () => {
+    // Supervisor mark-complete / ad-hoc import / demo data: completed with no
+    // durable submitted answer, so the local draft is the ONLY copy of the work.
+    saveAnswerDraft(CANONICAL_KEY, { notes: "عمل الموظف الوحيد" });
+    saveAnswerDraft(LEGACY_KEY, { notes: "نسخة قديمة" });
 
-    renderPanel({ entry: makeEntry("completed"), savedAnswer: draftAnswer("النسخة المحفوظة") });
+    renderPanel({ entry: makeEntry("completed"), savedAnswer: draftAnswer("النسخة المحفوظة"), legacy: true });
 
-    expect(screen.getByText("النسخة المحفوظة")).toBeInTheDocument();
-    expect(screen.queryByText("مسودة قديمة")).not.toBeInTheDocument();
-    expect(loadAnswerDraft(CANONICAL_KEY)).toBeNull();
+    // Not seeded into the view (the read-only view shows the saved record)...
+    expect(screen.queryByText("عمل الموظف الوحيد")).not.toBeInTheDocument();
+    // ...but never deleted.
+    expect(loadAnswerDraft(CANONICAL_KEY)).toEqual({ notes: "عمل الموظف الوحيد" });
+    expect(loadAnswerDraft(LEGACY_KEY)).toEqual({ notes: "نسخة قديمة" });
+  });
+
+  it("keeps the draft when the entry flips to completed mid-edit (45 s refresh)", () => {
+    const view = renderPanel({});
+    fireEvent.change(screen.getByLabelText(/ملاحظات/), { target: { value: "عمل قيد الكتابة" } });
+    expect(loadAnswerDraft(CANONICAL_KEY)).toEqual({ notes: "عمل قيد الكتابة" });
+
+    view.rerender(
+      <InspectionPanel
+        entry={makeEntry("completed")}
+        template={template}
+        savedAnswer={null}
+        readonly={false}
+        onClose={() => {}}
+        onSave={async () => {}}
+        draftKey={CANONICAL_KEY}
+        legacyDraftKey={null}
+      />
+    );
+
+    expect(loadAnswerDraft(CANONICAL_KEY)).toEqual({ notes: "عمل قيد الكتابة" });
   });
 
   it("still restores a draft for an UNSUBMITTED row (no regression)", () => {

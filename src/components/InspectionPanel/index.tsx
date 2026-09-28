@@ -98,8 +98,9 @@ type Props = {
   hasNextSample?: boolean;
 };
 
-/** A submitted answer (or a completed entry) is the record of truth — a leftover
- *  draft must never win over it, seeded or rendered. */
+/** A submitted answer (or a completed entry) is what the panel shows -- a leftover
+ *  draft must never win over it, seeded or rendered. Showing is NOT deleting: see
+ *  the clear effect in the component. */
 function isAnswerSubmitted(entry: DistributionEntry, savedAnswer: ItemAnswer | null): boolean {
   return entry.status === "completed" || savedAnswer?.status === "submitted";
 }
@@ -129,9 +130,8 @@ export default function InspectionPanel({
     // and it is the work that would otherwise have to be redone. Falls back to
     // `legacyDraftKey` (A1 fix round 1) for a row whose canonical key changed
     // under it, so a draft saved before that fix is still found.
-    // Never for a SUBMITTED row, though: any draft still sitting under this key
-    // at that point is stale scratch data, not newer work — see isAnswerSubmitted
-    // and the mount effect below, which clears it.
+    // Never seeded for a submitted/completed row (the record of truth is shown).
+    // Only a SUBMITTED answer also deletes the draft -- see the effect below.
     const draft = draftKey && !isAnswerSubmitted(entry, savedAnswer)
       ? loadAnswerDraftWithLegacyFallback(draftKey, legacyDraftKey ?? null)
       : null;
@@ -143,14 +143,16 @@ export default function InspectionPanel({
     }
     return m;
   });
-  // A submitted answer is the record of truth (see isAnswerSubmitted / the
-  // seeding above) -- clear out any leftover draft under either key so it can
-  // never resurface, e.g. on a later reopen or a stale-shaped legacy key.
+  // Delete a leftover draft ONLY once a durable submitted answer exists. A row
+  // can be "completed" with no submitted answer (supervisor mark-complete,
+  // ad-hoc import, demo data), and then the local draft is the only copy of the
+  // employee's work -- it must stay in storage (it is merely not seeded, above).
+  // Keyed on the status VALUE, not the entry/answer objects, so a refresh that
+  // hands back new object identities does not re-run it.
+  const hasSubmittedAnswer = savedAnswer?.status === "submitted";
   useEffect(() => {
-    if (draftKey && isAnswerSubmitted(entry, savedAnswer)) {
-      clearAnswerDraftAndLegacy(draftKey, legacyDraftKey ?? null);
-    }
-  }, [draftKey, legacyDraftKey, entry, savedAnswer]);
+    if (draftKey && hasSubmittedAnswer) clearAnswerDraftAndLegacy(draftKey, legacyDraftKey ?? null);
+  }, [draftKey, legacyDraftKey, hasSubmittedAnswer]);
   const [validationMsg, setValidationMsg] = useState<string | null>(null);
   // Guards the async disk write behind the primary action: without it a
   // double-click (or an impatient re-click during a slow workspace write) fires
