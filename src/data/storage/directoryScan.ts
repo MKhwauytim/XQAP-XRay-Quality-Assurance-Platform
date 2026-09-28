@@ -2,6 +2,7 @@ import type { DirectoryHandleLike, FileHandleLike } from "./fileSystemAccess";
 import { safeReadJson } from "./safeWrite";
 import { subscribeToDataRefresh } from "../workspace/dataRefreshSignal";
 import { logError } from "./errorLogger";
+import { directoryResourceKey } from "./webLocks";
 import {
   TRANSIENT_WRITE_RETRY_DELAYS_MS,
   isNotFoundError,
@@ -420,15 +421,41 @@ async function readListedEntry<T>(
  * loses sight of every name in it at once, and 200 identical entries would
  * evict the whole 50-entry error ring buffer (errorLogger.ts) that the admin
  * error view reads.
+ *
+ * Also once per SESSION per file: a segment that stays unreadable is re-skipped
+ * on every read (roughly every save), and each logged line is persisted to the
+ * per-user error file, whose whole-file rewrite costs megabytes. Only names not
+ * yet reported in this session are logged; the first occurrence always is.
  */
-function logVanishedEntries(context: string, dir: DirectoryHandleLike, names: string[]): void {
-  if (names.length === 0) return;
+const reportedVanishedKeys = new Set<string>();
+
+/** @internal test-only. Forget which skipped entries were already reported. */
+export function __resetVanishedEntryLogForTests(): void {
+  reportedVanishedKeys.clear();
+}
+
+function logVanishedEntries(
+  context: string,
+  dir: DirectoryHandleLike,
+  names: string[],
+  scopeKey?: string
+): void {
+  const fresh = names.filter((name) => {
+    // `dir.name` alone is "distribution.events" in every month, and a raw
+    // `getDirectoryHandle()` result is not path-registered, so the caller can
+    // supply a scope (the parent month folder's path) that keeps months apart.
+    const key = `${context}|${scopeKey ?? directoryResourceKey(dir, "")}|${dir.name}|${name}`;
+    if (reportedVanishedKeys.has(key)) return false;
+    reportedVanishedKeys.add(key);
+    return true;
+  });
+  if (fresh.length === 0) return;
   logError(
     context,
     new Error(
-      `Skipped ${names.length} listed entr${names.length === 1 ? "y" : "ies"} that could not be ` +
+      `Skipped ${fresh.length} listed entr${fresh.length === 1 ? "y" : "ies"} that could not be ` +
         `opened in "${dir.name}" (present in the listing, NotFound/NotReadable on open — ` +
-        `renamed, removed, or not yet visible on a shared folder): ${names.join(", ")}`
+        `renamed, removed, or not yet visible on a shared folder): ${fresh.join(", ")}`
     )
   );
 }
@@ -628,6 +655,12 @@ export type SegmentTailOptions = {
   suffix: string;
   /** Byte offset already consumed per file name; a name missing from this map defaults to 0 (read from the start). */
   knownOffsets: Record<string, number>;
+  /**
+   * Optional identity of the directory for the once-per-session skip log (e.g.
+   * the month folder's path). Without it the key falls back to the handle's
+   * registered path, which a raw `getDirectoryHandle()` result does not have.
+   */
+  scopeKey?: string;
 };
 
 export type SegmentTailResult = {
@@ -715,7 +748,7 @@ export async function readSegmentTails(
     if (read.tail !== null) tailTextByName.set(name, read.tail);
   }
 
-  logVanishedEntries("directoryScan:segment-tails", dir, vanished);
+  logVanishedEntries("directoryScan:segment-tails", dir, vanished, options.scopeKey);
 
   return { tailTextByName, sizeByName, matchedNames };
 }

@@ -1,10 +1,11 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { createMemoryDirectory, setSimulatedFaults } from "../storage/memoryDirectory";
+import { createMemoryDirectory, getOperationLog, setSimulatedFaults } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { errorsArchiveFileName, errorsFileName } from "./errorLogPaths";
 import type { PersistedErrorEntry } from "./errorLogTypes";
 import {
   __resetMaxErrorEntriesForTests,
+  __setErrorLowWaterMarkForTests,
   __setMaxErrorEntriesForTests,
   appendUserErrors,
   readAllWorkspaceErrors,
@@ -154,5 +155,43 @@ describe("errorLogStorage", () => {
 
     const all = await readAllWorkspaceErrors(dir);
     expect(all.map((e) => e.id)).toEqual(["a"]);
+  });
+
+  it("re-sending a batch with the same ids is idempotent in the live file", async () => {
+    const dir = root();
+    const batch = [entry({ id: "same-1" }), entry({ id: "same-2" })];
+    await appendUserErrors(dir, "alice", batch);
+    await appendUserErrors(dir, "alice", batch);
+    const all = await readAllWorkspaceErrors(dir);
+    expect(all.map((e) => e.id).sort()).toEqual(["same-1", "same-2"]);
+    const system = await dir.getDirectoryHandle("5-system", { create: false });
+    const errors = await system.getDirectoryHandle("system-errors", { create: false });
+    const handle = await errors.getFileHandle(errorsFileName("alice"), { create: false });
+    expect(JSON.parse(await (await handle.getFile()).text()).data.entries).toHaveLength(2);
+  });
+
+  // P1 hysteresis: mirrors the actionLog
+  // pin. Past the cap, the live file used to be trimmed exactly back to the
+  // cap on EVERY flush, so the archive was rewritten on every flush forever.
+  it("archive is rewritten roughly once per (cap - low-water) flushes, not once per flush past the cap", async () => {
+    __setMaxErrorEntriesForTests(20);
+    __setErrorLowWaterMarkForTests(10);
+    const dir = createMemoryDirectory("root", { trackOperations: true });
+
+    const FLUSHES = 75;
+    for (let i = 1; i <= FLUSHES; i += 1) {
+      await appendUserErrors(dir, "alice", [entry({ id: `e${i}` })]);
+    }
+
+    const archiveWrites = getOperationLog(dir).filter(
+      (e) => e.operation === "createWritable" && e.name === errorsArchiveFileName("alice", 2026)
+    );
+    // All seeded entries share `at: "2026-08-24..."`, so every archive lands
+    // in the 2026 file.
+    expect(archiveWrites.length).toBeLessThanOrEqual(Math.ceil(FLUSHES / 10));
+    expect(archiveWrites.length).toBeGreaterThan(0);
+
+    const live = await readAllWorkspaceErrors(dir);
+    expect(live.length).toBeLessThanOrEqual(20);
   });
 });

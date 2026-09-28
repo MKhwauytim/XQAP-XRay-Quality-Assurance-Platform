@@ -53,8 +53,10 @@ describe("actionLog", () => {
   });
 
   // The cap is now PER ACTOR (2,000), not workspace-wide (10,000) — one actor's
-  // volume can no longer evict another's entries.
-  it("caps an actor's own log at 2,000 entries, dropping the oldest", async () => {
+  // volume can no longer evict another's entries. P1: on overflow the live log
+  // is trimmed all the way to the 1,500 low-water mark in one archive write
+  // (hysteresis), not back to the 2,000 cap on every single overflowing append.
+  it("trims an actor's own log to the 1,500 low-water mark on overflow, dropping the oldest", async () => {
     const root = makeRoot();
 
     // Pre-seed the actor's own on-disk file at exactly the cap (building 2,000
@@ -83,10 +85,13 @@ describe("actionLog", () => {
     await appendWorkspaceAction(root, makeInput({ target: "newest" }));
 
     const entries = await readWorkspaceActions(root);
-    expect(entries).toHaveLength(2_000);
-    // Oldest seeded entry dropped; the new entry is last. (Every seeded entry
-    // shares `at`, so the id tie-break is what orders them — hence the padding.)
-    expect(entries[0]!.target).toBe("t-1");
+    // 2,000 seeded + 1 new = 2,001, one over the cap: trimmed to the 1,500
+    // low-water mark, archiving the oldest 501 (t-0..t-500) in one write.
+    expect(entries).toHaveLength(1_500);
+    // Oldest surviving seeded entry is t-501; the new entry is last. (Every
+    // seeded entry shares `at`, so the id tie-break is what orders them —
+    // hence the padding.)
+    expect(entries[0]!.target).toBe("t-501");
     expect(entries[entries.length - 1]!.target).toBe("newest");
   });
 

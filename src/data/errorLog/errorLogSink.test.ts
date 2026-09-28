@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { createMemoryDirectory } from "../storage/memoryDirectory";
+import { createMemoryDirectory, getOperationLog } from "../storage/memoryDirectory";
 import { __resetErrorSinkForTests, clearErrors, logError } from "../storage/errorLogger";
 import { __resetErrorContextForTests, setErrorActor } from "../storage/errorContext";
 import { isReadOnlyMode, setReadOnlyMode } from "../storage/readOnlyMode";
@@ -85,6 +85,80 @@ describe("errorLogSink", () => {
     expect(parsed.data.revision).toBe(1);
   });
 
+  // P1: a burst well past
+  // the batch threshold must still cost a small constant number of whole-file
+  // rewrites, not one per logged error.
+  it("50 errors logged in a burst cost only a small constant number of file rewrites", async () => {
+    const dir = createMemoryDirectory("root", { trackOperations: true });
+    uninstall = installWorkspaceErrorSink({ directoryHandle: dir, username: "alice" });
+
+    for (let i = 0; i < 50; i++) logError(`ctx-${i}`, new Error(`boom-${i}`));
+    // Settle any auto-triggered flush plus its coalesced follow-up.
+    await flushErrorLogNow();
+    await flushErrorLogNow();
+
+    const all = await readAllWorkspaceErrors(dir);
+    expect(all).toHaveLength(50);
+
+    const liveWrites = getOperationLog(dir).filter(
+      (e) => e.operation === "createWritable" && e.name === errorsFileName("alice")
+    );
+    // Default batchSize is 25, so a synchronous 50-error burst triggers at
+    // most a couple of coalesced flushes — never 50.
+    expect(liveWrites.length).toBeLessThanOrEqual(3);
+  });
+
+  async function liveFileRevision(dir: ReturnType<typeof createMemoryDirectory>): Promise<number> {
+    try {
+      const system = await dir.getDirectoryHandle("5-system", { create: false });
+      const errors = await system.getDirectoryHandle("system-errors", { create: false });
+      const handle = await errors.getFileHandle(errorsFileName("alice"), { create: false });
+      return JSON.parse(await (await handle.getFile()).text()).data.revision as number;
+    } catch {
+      return 0;
+    }
+  }
+
+  it("isolated errors 2 minutes apart are coalesced by the minimum flush interval", async () => {
+    vi.useFakeTimers();
+    const dir = createMemoryDirectory("root");
+    uninstall = installWorkspaceErrorSink({
+      directoryHandle: dir, username: "alice", flushDelayMs: 5_000, minFlushIntervalMs: 300_000,
+    });
+
+    for (let i = 0; i < 5; i++) {
+      logError(`ctx-${i}`, new Error(`boom-${i}`));
+      await vi.advanceTimersByTimeAsync(120_000);
+    }
+    // 10 minutes elapsed, 5 isolated errors. Without the interval that was 5
+    // whole-file rewrites; with a 5 min interval it is at most 10 / 5 + 1.
+    const revision = await liveFileRevision(dir);
+    expect(revision).toBeGreaterThan(0);
+    expect(revision).toBeLessThanOrEqual(3);
+    expect(revision).toBeLessThan(5);
+
+    // Nothing is lost: an explicit flush (what pagehide triggers) drains the rest.
+    const drained = flushErrorLogNow();
+    await vi.runAllTimersAsync();
+    await drained;
+    expect(await readAllWorkspaceErrors(dir)).toHaveLength(5);
+    expect(__getPendingCountForTests()).toBe(0);
+  });
+
+  it("keeps a batch queued when the write fails, and delivers it once the disk recovers", async () => {
+    const dir = createMemoryDirectory("root", { initialWritePermission: "denied", writePermissionRequestOutcome: "granted" });
+    uninstall = installWorkspaceErrorSink({ directoryHandle: dir, username: "alice" });
+
+    logError("population:save", new Error("boom"));
+    await flushErrorLogNow();
+    expect(__getPendingCountForTests()).toBe(1);
+
+    await dir.requestPermission?.({ mode: "readwrite" });
+    await flushErrorLogNow();
+    expect(__getPendingCountForTests()).toBe(0);
+    expect(await readAllWorkspaceErrors(dir)).toHaveLength(1);
+  });
+
   it("flushes automatically once the batch threshold is reached", async () => {
     vi.useFakeTimers();
     const dir = createMemoryDirectory("root");
@@ -146,8 +220,9 @@ describe("errorLogSink", () => {
     await flushErrorLogNow();
 
     // The write failed and was logged to the ring buffer, but that log did not
-    // enqueue anything new: a second flush has nothing left to attempt.
-    expect(__getPendingCountForTests()).toBe(0);
+    // enqueue anything new: only the ORIGINAL error stays queued (a failed
+    // flush never drops entries), it does not multiply with each attempt.
+    expect(__getPendingCountForTests()).toBe(1);
   });
 
   it("writes nothing at all in read-only (demo/viewer) mode", async () => {

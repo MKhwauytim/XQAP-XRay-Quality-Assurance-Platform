@@ -57,14 +57,34 @@ export const ERRORLOG_CAS_CONTEXT = "errorLog:userFile";
 const DEFAULT_MAX_ERROR_ENTRIES = 2_000;
 let maxErrorEntries = DEFAULT_MAX_ERROR_ENTRIES;
 
+/**
+ * Hysteresis low-water mark (P1), mirroring `actionLog.ts`. On overflow the
+ * live log is trimmed all the way down to this many entries in ONE archive
+ * write, instead of back to `maxErrorEntries` on every single append past the
+ * cap (that made the archive, which grows all year, get re-read and rewritten
+ * on every flush). `Math.min(lowWater, cap)`
+ * below keeps a test that only overrides the cap behaving exactly as before.
+ */
+const DEFAULT_LOW_WATER_ERROR_ENTRIES = 1_500;
+let lowWaterErrorEntries = DEFAULT_LOW_WATER_ERROR_ENTRIES;
+
 /** @internal — test-only. Lower the live-log cap to exercise archival cheaply. */
 export function __setMaxErrorEntriesForTests(limit: number): void {
   maxErrorEntries = limit;
 }
 
-/** @internal — test-only. Restore the production cap. */
+/**
+ * @internal — test-only. Set the hysteresis low-water mark independently of
+ * the cap, to exercise batched-archival behaviour.
+ */
+export function __setErrorLowWaterMarkForTests(limit: number): void {
+  lowWaterErrorEntries = limit;
+}
+
+/** @internal — test-only. Restore the production cap and low-water mark. */
 export function __resetMaxErrorEntriesForTests(): void {
   maxErrorEntries = DEFAULT_MAX_ERROR_ENTRIES;
+  lowWaterErrorEntries = DEFAULT_LOW_WATER_ERROR_ENTRIES;
 }
 
 function entryYear(entry: PersistedErrorEntry): number {
@@ -183,7 +203,20 @@ export async function appendUserErrors(
   username: string,
   batch: PersistedErrorEntry[]
 ): Promise<void> {
-  if (!directoryHandle || batch.length === 0) return;
+  await appendUserErrorsChecked(directoryHandle, username, batch);
+}
+
+/**
+ * Same contract as `appendUserErrors` (never throws) but reports whether the
+ * batch is durably on disk, so the sink can keep a failed batch queued instead
+ * of losing it. An empty batch or null handle counts as success (nothing to do).
+ */
+export async function appendUserErrorsChecked(
+  directoryHandle: DirectoryHandleLike | null,
+  username: string,
+  batch: PersistedErrorEntry[]
+): Promise<boolean> {
+  if (!directoryHandle || batch.length === 0) return true;
 
   try {
     // Inside the try, not above it — same reasoning as
@@ -201,13 +234,21 @@ export async function appendUserErrors(
           const dir = await getSystemErrorsDir(directoryHandle, true);
           const existing = await readUserErrorLogFile(directoryHandle, username);
           const nextRevision = (existing.revision ?? 0) + 1;
-          const combined = [...existing.entries, ...batch];
-          // Archive overflow (oldest first) BEFORE trimming. If archival
-          // fails, keep the full list this write (over cap but never
-          // dropped) — the next append retries archival.
+          // Idempotent by id: a batch that already landed (a write that
+          // committed but whose casLoop reported failure) and is re-sent must
+          // not be appended twice, nor inflate the cap/hysteresis arithmetic.
+          const existingIds = new Set(existing.entries.map((e) => e.id));
+          const combined = [...existing.entries, ...batch.filter((e) => !existingIds.has(e.id))];
+          // P1 hysteresis: archive overflow (oldest first) BEFORE trimming,
+          // but trim all the way down to the low-water mark in this one
+          // archive write rather than back to the cap — see actionLog.ts's
+          // matching comment. If archival fails, keep the full list this
+          // write (over cap but never dropped) — the next flush retries
+          // archival.
           let liveEntries = combined;
           if (combined.length > maxErrorEntries) {
-            const overflowCount = combined.length - maxErrorEntries;
+            const trimTarget = Math.min(lowWaterErrorEntries, maxErrorEntries);
+            const overflowCount = combined.length - trimTarget;
             const overflow = combined.slice(0, overflowCount);
             const archived = await archiveOverflow(dir, username, overflow);
             if (archived) {
@@ -242,9 +283,12 @@ export async function appendUserErrors(
     );
     if (!result.ok) {
       logError(`${ERRORLOG_INTERNAL_CONTEXT_PREFIX}append`, new Error(result.error));
+      return false;
     }
+    return true;
   } catch (error) {
     logError(`${ERRORLOG_INTERNAL_CONTEXT_PREFIX}append`, error);
+    return false;
   }
 }
 
