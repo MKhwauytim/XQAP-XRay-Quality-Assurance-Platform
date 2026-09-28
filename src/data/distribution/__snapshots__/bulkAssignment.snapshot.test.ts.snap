@@ -263,19 +263,19 @@ exports[`calculateBulkAssignment snapshots > [port-restricted] cross-stage short
   "totals": {
     "a": {
       "FIRST_STAGE/port-A": 120,
-      "SECOND_STAGE/port-B": 100,
+      "SECOND_STAGE/port-B": 80,
     },
     "b": {
       "FIRST_STAGE/port-A": 120,
-      "SECOND_STAGE/port-B": 100,
+      "SECOND_STAGE/port-B": 80,
     },
     "c": {
       "FIRST_STAGE/port-A": 120,
-      "SECOND_STAGE/port-B": 100,
+      "SECOND_STAGE/port-B": 80,
     },
     "d": {
       "FIRST_STAGE/port-B": 40,
-      "SECOND_STAGE/port-B": 100,
+      "SECOND_STAGE/port-B": 160,
     },
   },
 }

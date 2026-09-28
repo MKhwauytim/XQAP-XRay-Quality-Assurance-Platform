@@ -576,3 +576,79 @@ test("calculateBulkAssignment respects unequal configured percentages, not just 
   expect(totals.get("a")).toBe(200);
   expect(totals.get("b")).toBe(800);
 });
+
+test("A3: an employee short in one stage because of a port restriction is made up in another stage", () => {
+  const rowsFor = (prefix: string, count: number, stage: string, port: string) =>
+    Array.from({ length: count }, (_, i) => makeRow(`${prefix}-${i}`, stage, "NonCertscan", port));
+  const rows: PreparedPopulationRow[] = [
+    ...rowsFor("s1a", 360, "FIRST_STAGE", "port-A"),
+    ...rowsFor("s1b", 40, "FIRST_STAGE", "port-B"),
+    ...rowsFor("s2b", 400, "SECOND_STAGE", "port-B"),
+  ];
+  const allocations: EmployeeStageAllocation[] = ["a", "b", "c", "d"].flatMap((username) => [
+    { username, stageKey: "first", method: "percentage", value: 25, isActive: true },
+    { username, stageKey: "second", method: "percentage", value: 25, isActive: true },
+  ]);
+  const employees = ["a", "b", "c", "d"].map((username) => makeUser(username, "employee"));
+  const portRestrictions: EmployeePortRestriction[] = [{ username: "d", restricted: true, enabledPorts: ["port-B"] }];
+
+  const result = calculateBulkAssignment({ rows, allocations, employees, operatorUsername: "test", portRestrictions });
+
+  expect(result.errors).toHaveLength(0);
+  expect(result.events).toHaveLength(800);
+  const totals = new Map<string, number>();
+  for (const e of result.events) totals.set(e.assignedTo, (totals.get(e.assignedTo) ?? 0) + 1);
+  for (const username of ["a", "b", "c", "d"]) {
+    expect(Math.abs((totals.get(username) ?? 0) - 200)).toBeLessThanOrEqual(1);
+  }
+  // "d" never receives a port-A row.
+  expect(result.events.filter((e) => e.assignedTo === "d" && e.xrayImageId.startsWith("s1a-"))).toHaveLength(0);
+});
+
+// F9 (controller ruling): a restricted fixture that ALSO has CertScan rows and a
+// mix of licensed/unlicensed employees. Equal totals must hold (±1 rounding)
+// AND CertScan rows must still only ever land on a licensed employee, even
+// after the cross-stage rebalance moves rows between employees.
+test("A3 + F9: cross-stage rebalance keeps CertScan rows on licensed employees only, while equalizing totals", () => {
+  const rowsFor = (prefix: string, count: number, stage: string, port: string, cert: "Certscan" | "NonCertscan" = "NonCertscan") =>
+    Array.from({ length: count }, (_, i) => makeRow(`${prefix}-${i}`, stage, cert, port));
+  const rows: PreparedPopulationRow[] = [
+    ...rowsFor("s1a-cert", 40, "FIRST_STAGE", "port-A", "Certscan"),
+    ...rowsFor("s1a", 320, "FIRST_STAGE", "port-A"),
+    ...rowsFor("s1b", 40, "FIRST_STAGE", "port-B"),
+    ...rowsFor("s2b", 400, "SECOND_STAGE", "port-B"),
+  ];
+  const allocations: EmployeeStageAllocation[] = ["a", "b", "c", "d"].flatMap((username) => [
+    { username, stageKey: "first", method: "percentage", value: 25, isActive: true },
+    { username, stageKey: "second", method: "percentage", value: 25, isActive: true },
+  ]);
+  // Only "a" and "b" hold a CertScan license; "d" (the restricted employee) does not.
+  const employees = [
+    makeUser("a", "employee", true),
+    makeUser("b", "employee", true),
+    makeUser("c", "employee", false),
+    makeUser("d", "employee", false),
+  ];
+  const portRestrictions: EmployeePortRestriction[] = [{ username: "d", restricted: true, enabledPorts: ["port-B"] }];
+
+  const result = calculateBulkAssignment({ rows, allocations, employees, operatorUsername: "test", portRestrictions });
+
+  expect(result.errors).toHaveLength(0);
+  expect(result.events).toHaveLength(800);
+
+  const totals = new Map<string, number>();
+  for (const e of result.events) totals.set(e.assignedTo, (totals.get(e.assignedTo) ?? 0) + 1);
+  for (const username of ["a", "b", "c", "d"]) {
+    expect(Math.abs((totals.get(username) ?? 0) - 200)).toBeLessThanOrEqual(1);
+  }
+
+  const certRowIds = new Set(rows.filter((r) => r.certScanStatus === "Certscan").map((r) => r.xrayImageId));
+  const licensed = new Set(["a", "b"]);
+  for (const event of result.events) {
+    if (certRowIds.has(event.xrayImageId)) {
+      expect(licensed.has(event.assignedTo)).toBe(true);
+    }
+  }
+  // "d" never receives a port-A row (unlicensed + port-restricted).
+  expect(result.events.filter((e) => e.assignedTo === "d" && e.xrayImageId.startsWith("s1a"))).toHaveLength(0);
+});
