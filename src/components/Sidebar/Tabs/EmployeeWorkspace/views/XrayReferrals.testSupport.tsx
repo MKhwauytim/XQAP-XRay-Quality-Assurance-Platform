@@ -1,4 +1,3 @@
-/* @vitest-environment jsdom */
 // Shared scaffolding for XrayReferrals tests that need a seeded workspace, a
 // rendered view, and a simulated app-wide refresh broadcast — first pulled
 // out here by the A1 stale-reload test (localSubmissions), reused as-is by

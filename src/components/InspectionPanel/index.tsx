@@ -1,6 +1,11 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 
-import { loadAnswerDraft, saveAnswerDraft } from "../../data/answers/answerDraftStore";
+import {
+  isAnswerDraftPersistFailing,
+  loadAnswerDraft,
+  saveAnswerDraft,
+  subscribeAnswerDraftHealth,
+} from "../../data/answers/answerDraftStore";
 import type { DistributionEntry } from "../../data/distribution/distributionTypes";
 import type { FieldAnswer, ItemAnswer } from "../../data/answers/answerTypes";
 import type { TemplateField, TemplateSchema } from "../../data/templates/templateTypes";
@@ -125,6 +130,10 @@ export default function InspectionPanel({
   // "request" = employee self-service reopen request (Batch B, onRequestReopen).
   const [reopenAction, setReopenAction] = useState<null | "direct" | "request">(null);
   const [reopenReason, setReopenReason] = useState("");
+  // A1: whether this browser can currently keep the local draft at all — a
+  // module-level health flag (answerDraftStore.ts) that every mounted panel
+  // subscribes to, so a refused write warns instead of failing silently.
+  const draftPersistFailing = useSyncExternalStore(subscribeAnswerDraftHealth, isAnswerDraftPersistFailing);
 
   const phases = useMemo(() => (template ? getTemplatePhases(template) : []), [template]);
 
@@ -336,6 +345,10 @@ export default function InspectionPanel({
           />
         )}
       </div>
+
+      {draftKey && draftPersistFailing && !readonly && (
+        <p className="ip-validation-msg" role="alert">{getLabels().ip_msg_draft_not_persisted}</p>
+      )}
 
       {isSubmitted && (onReopen || onRequestReopen) && (
         <div className="ip-footer">

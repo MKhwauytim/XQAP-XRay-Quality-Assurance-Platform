@@ -9,20 +9,24 @@
 // remounts it after a failed submit — navigating to another sample and back,
 // the tab-mount LRU, or the page reload an impatient user does after a
 // minute-long hang — takes the work with it.
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   answerDraftKey,
   clearAnswerDraft,
+  isAnswerDraftPersistFailing,
   loadAnswerDraft,
   pruneAnswerDrafts,
   saveAnswerDraft,
+  subscribeAnswerDraftHealth,
+  __resetAnswerDraftHealthForTests,
 } from "./answerDraftStore";
 
 const KEY = answerDraftKey("5-may-2026", "IMG-1", "emp-1");
 
 beforeEach(() => {
   localStorage.clear();
+  __resetAnswerDraftHealthForTests();
 });
 
 describe("answerDraftStore", () => {
@@ -80,5 +84,30 @@ describe("answerDraftStore", () => {
     } finally {
       Storage.prototype.setItem = original;
     }
+  });
+});
+
+describe("draft persistence health (A1)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    __resetAnswerDraftHealthForTests();
+  });
+
+  it("reports a refused write, notifies subscribers, and recovers on the next successful write", async () => {
+    const listener = vi.fn();
+    const stop = subscribeAnswerDraftHealth(listener);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("full", "QuotaExceededError");
+    });
+
+    expect(saveAnswerDraft("xray_answer_draft_v1:m::IMG-1::emp1", { note: "x" })).toBe(false);
+    expect(isAnswerDraftPersistFailing()).toBe(true);
+    await Promise.resolve();
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    vi.restoreAllMocks();
+    expect(saveAnswerDraft("xray_answer_draft_v1:m::IMG-1::emp1", { note: "x" })).toBe(true);
+    expect(isAnswerDraftPersistFailing()).toBe(false);
+    stop();
   });
 });

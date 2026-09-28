@@ -86,22 +86,61 @@ export function loadAnswerDraft(key: string): AnswerDraftValues | null {
   }
 }
 
+let draftPersistFailing = false;
+const draftHealthListeners = new Set<() => void>();
+
+function setDraftPersistFailing(next: boolean): void {
+  if (draftPersistFailing === next) return;
+  draftPersistFailing = next;
+  // Deferred: saveAnswerDraft runs inside a React state updater, and notifying
+  // a subscriber synchronously there would update a component mid-render.
+  queueMicrotask(() => {
+    for (const listener of draftHealthListeners) listener();
+  });
+}
+
+/** Subscribe to "drafts can / cannot currently be kept in this browser". */
+export function subscribeAnswerDraftHealth(listener: () => void): () => void {
+  draftHealthListeners.add(listener);
+  return () => {
+    draftHealthListeners.delete(listener);
+  };
+}
+
+/** True after the last draft write was refused (and until one succeeds). */
+export function isAnswerDraftPersistFailing(): boolean {
+  return draftPersistFailing;
+}
+
+/** @internal test-only */
+export function __resetAnswerDraftHealthForTests(): void {
+  draftPersistFailing = false;
+}
+
 /**
- * Persist the current values. Deliberately silent on failure: a browser that
- * refuses storage (private mode, a full quota, a cleared `file://` bucket) must
- * degrade to the old behaviour, never break the form the employee is typing in.
+ * Persist the current values. Never throws — a browser that refuses storage
+ * (private mode, a full quota, a cleared `file://` bucket) must not break the
+ * form being typed in — but no longer silent either (A1): the result is
+ * returned and the health flag above lets the panel warn that the typed answer
+ * will not survive a reload.
  */
-export function saveAnswerDraft(key: string, values: AnswerDraftValues): void {
+export function saveAnswerDraft(key: string, values: AnswerDraftValues): boolean {
   const store = readStore();
-  if (!store) return;
+  if (!store) {
+    setDraftPersistFailing(true);
+    return false;
+  }
   try {
     if (Object.keys(values).length === 0) {
       store.removeItem(key);
-      return;
+    } else {
+      store.setItem(key, JSON.stringify({ savedAt: Date.now(), values } satisfies StoredDraft));
     }
-    store.setItem(key, JSON.stringify({ savedAt: Date.now(), values } satisfies StoredDraft));
+    setDraftPersistFailing(false);
+    return true;
   } catch {
-    // Intentionally swallowed — see the docblock.
+    setDraftPersistFailing(true);
+    return false;
   }
 }
 

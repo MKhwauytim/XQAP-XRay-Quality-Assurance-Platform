@@ -1,8 +1,9 @@
 /* @vitest-environment jsdom */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, within, cleanup } from "@testing-library/react";
 import InspectionPanel from "./index";
 import { DEFAULT_LABELS } from "../../data/labels/labelsStore";
+import { __resetAnswerDraftHealthForTests } from "../../data/answers/answerDraftStore";
 import type { DistributionEntry } from "../../data/distribution/distributionTypes";
 import type { FieldAnswer } from "../../data/answers/answerTypes";
 import type { TemplateField, TemplateSchema } from "../../data/templates/templateTypes";
@@ -510,5 +511,34 @@ describe("InspectionPanel — multiselect fields", () => {
 
     fireEvent.click(within(group).getByRole("button", { name: "مركبات" }));
     expect(screen.getByLabelText("تفاصيل المركبة")).toBeInTheDocument();
+  });
+});
+
+describe("InspectionPanel — draft that cannot be kept (A1)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    __resetAnswerDraftHealthForTests();
+  });
+
+  it("warns that the typed answer will not survive a reload", async () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("full", "QuotaExceededError");
+    });
+    const template = makeTemplate([field({ fieldId: "n1", label: "ملاحظة", type: "text" })]);
+    const { container } = render(
+      <InspectionPanel
+        entry={makeEntry()}
+        template={template}
+        savedAnswer={null}
+        readonly={false}
+        onClose={() => {}}
+        onSave={async () => {}}
+        draftKey="xray_answer_draft_v1:m::IMG-001::emp1"
+      />
+    );
+
+    fireEvent.change(container.querySelector<HTMLInputElement>("#ipf-n1")!, { target: { value: "نص" } });
+
+    expect(await screen.findByText(DEFAULT_LABELS.ip_msg_draft_not_persisted)).toBeInTheDocument();
   });
 });
