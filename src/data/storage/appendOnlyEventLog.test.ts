@@ -307,6 +307,88 @@ describe("rotation preserves every event exactly once", () => {
     expect(await loadAll(dir)).toHaveLength(11);
   });
 
+  // R2: never write to a ROTATION TARGET whose own pre-write baseline read is
+  // unreliable — this is the size-threshold rotation's own target, not the
+  // "could not re-read my claimed segment" branch above it.
+  it("R2: rotates PAST a rotation target that is itself unreadable, rather than writing over it", async () => {
+    const dir = root();
+    // Fill seq 0 past the cap, exactly like the sibling test above.
+    await appendEventSegment(
+      dir,
+      Array.from({ length: 10 }, (_unused, i) => bigEvent(`BIG-${i}`)),
+      WRITER,
+      TEST_LOG
+    );
+    expect(await segmentNames(dir)).toEqual([name(0)]);
+
+    // The NEXT append's shouldRotate branch will target name(1). Make that
+    // target's own pre-write re-read exhaust as unreliable (NotReadableError,
+    // not NotFoundError — so the E1 rule makes it unreliable regardless of
+    // knownWritten, exactly like a real "this segment briefly cannot be
+    // read" condition on a name nothing has claimed yet).
+    setSimulatedFaults(dir, [
+      {
+        operation: "getFileHandle",
+        name: name(1),
+        create: false,
+        errorName: "NotReadableError",
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+
+    const { result } = await withCapturedSleeps(() =>
+      appendEventSegment(dir, [bigEvent("AFTER")], WRITER, TEST_LOG)
+    );
+    expect(result).toBe("verified");
+    clearSimulatedFaults(dir);
+
+    // R2's guarantee: name(1) was never written over — it was never even
+    // CREATED (only its read was probed, with create:false, and that's all
+    // ensureReliableRotationTarget ever does to a target it rejects) — the
+    // batch landed one hop further, in name(2).
+    expect(await segmentNames(dir)).not.toContain(name(1));
+    expect(await readSegmentText(dir, name(2))).toContain("evt-AFTER");
+    expect(await loadAll(dir)).toHaveLength(11);
+  });
+
+  // R2: bounded — never spins indefinitely (up to MAX_SEGMENT_SEQ) hunting for
+  // a reliable target; gives up after MAX_UNRELIABLE_ROTATION_ATTEMPTS hops.
+  it("R2: gives up (throws) rather than spinning forever when every rotation target is unreadable", async () => {
+    const dir = root();
+    await appendEventSegment(
+      dir,
+      Array.from({ length: 10 }, (_unused, i) => bigEvent(`BIG-${i}`)),
+      WRITER,
+      TEST_LOG
+    );
+    expect(await segmentNames(dir)).toEqual([name(0)]);
+
+    // Every rotation target this append could possibly reach is unreadable —
+    // seq 1 through 7 explicitly (well past MAX_UNRELIABLE_ROTATION_ATTEMPTS),
+    // deliberately NOT seq 0 itself: that name's own re-read must stay
+    // healthy so `shouldRotate` is reached the ordinary way, and this test
+    // exercises the ROTATION TARGET bound, not the earlier single-hop branch.
+    setSimulatedFaults(
+      dir,
+      Array.from({ length: 7 }, (_unused, i) => ({
+        operation: "getFileHandle" as const,
+        name: name(i + 1),
+        create: false,
+        errorName: "NotReadableError",
+        times: Number.POSITIVE_INFINITY,
+      }))
+    );
+
+    await expect(
+      withCapturedSleeps(() => appendEventSegment(dir, [bigEvent("AFTER")], WRITER, TEST_LOG))
+    ).rejects.toThrow(/rotation (ceiling|attempt bound)/);
+    clearSimulatedFaults(dir);
+
+    // Nothing was overwritten: seq 0 still holds exactly its original batch.
+    expect(await segmentNames(dir)).toEqual([name(0)]);
+    expect(await loadAll(dir)).toHaveLength(10);
+  });
+
   it("rotates rather than growing a segment it finds already over the cap on startup", async () => {
     const dir = root();
     const seeded = Array.from({ length: 8 }, (_unused, i) => bigEvent(`SEED-${i}`));
