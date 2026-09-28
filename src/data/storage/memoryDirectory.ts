@@ -171,9 +171,25 @@ export type SimulatedFault = {
    * exercise the branch where a size match must NOT be trusted as "landed".
    */
   commitAlienContent?: string;
+  /**
+   * `operation: "readFile"` only. Models a stale client view that every COMMIT
+   * re-arms: the fault is inert until a `close()` on the SAME name lands, then
+   * the next `times` reads of that name fail, and the budget is refilled by the
+   * next landed close(). This is "our own just-committed write cannot be read
+   * back for a while" (other-groups.md §B, reproduction C), which a plain
+   * `times` budget cannot express because it is not re-armed by each retry's
+   * fresh commit.
+   */
+  rearmAfterClose?: boolean;
 };
 
-type FaultState = { faults: SimulatedFault[]; consumed: number[]; skipped: number[] };
+type FaultState = {
+  faults: SimulatedFault[];
+  consumed: number[];
+  skipped: number[];
+  /** Per fault: has a matching close() armed a `rearmAfterClose` fault. */
+  armed: boolean[];
+};
 type OperationLogState = { entries: OperationLogEntry[] };
 
 export type OperationLogEntry = {
@@ -245,6 +261,7 @@ export function setSimulatedFaults(dir: DirectoryHandleLike, faults: SimulatedFa
   state.faults = faults;
   state.consumed = faults.map(() => 0);
   state.skipped = faults.map(() => 0);
+  state.armed = faults.map(() => false);
 }
 
 /** Test-only: remove every installed fault (equivalent to `setSimulatedFaults(dir, [])`). */
@@ -298,6 +315,18 @@ function closeFaultCommitsBeforeThrow(
   return null;
 }
 
+/** A close() on `name` landed: re-arm every `rearmAfterClose` read fault for it. */
+function rearmReadFaults(faultState: FaultState | null, name: string): void {
+  if (!faultState) return;
+  faultState.faults.forEach((fault, index) => {
+    if (!fault.rearmAfterClose) return;
+    if (fault.name !== undefined && fault.name !== name) return;
+    if (fault.nameSuffix !== undefined && !name.endsWith(fault.nameSuffix)) return;
+    faultState.armed[index] = true;
+    faultState.consumed[index] = 0;
+  });
+}
+
 /**
  * Records the call, then throws if a fault matches and still has budget left.
  * Budget is consumed only when the fault actually fires, so `times: 1` means
@@ -317,6 +346,7 @@ function applyFaults(
     if (fault.nameSuffix !== undefined && !entry.name.endsWith(fault.nameSuffix)) continue;
     if (fault.create !== undefined && fault.create !== (entry.create ?? false)) continue;
     if (fault.nameMinLength !== undefined && entry.name.length < fault.nameMinLength) continue;
+    if (fault.rearmAfterClose && !faultState.armed[index]) continue;
     if (fault.skip !== undefined && faultState.skipped[index]! < fault.skip) {
       faultState.skipped[index] += 1;
       continue;
@@ -528,6 +558,7 @@ function makeFileHandle(
           } else {
             applyFaults(faultState, operationLog, entry);
             node.files.set(name, { content: concatBytes(chunks), lastModified: nextMemoryMtime() });
+            rearmReadFaults(faultState, name);
           }
         }
       };
@@ -697,6 +728,7 @@ export function createMemoryDirectory(
     faults: options.faults ?? [],
     consumed: (options.faults ?? []).map(() => 0),
     skipped: (options.faults ?? []).map(() => 0),
+    armed: (options.faults ?? []).map(() => false),
   };
   const operationLog: OperationLogState | null = options.trackOperations ? { entries: [] } : null;
   return makeDirectoryHandle(name, createNode(), permission, "", readLog, faultState, operationLog);

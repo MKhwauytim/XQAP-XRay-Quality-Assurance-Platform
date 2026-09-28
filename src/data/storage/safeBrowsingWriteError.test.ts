@@ -86,6 +86,27 @@ describe("Safe Browsing AbortError on close()", () => {
     expect(code).not.toBe("XQ-IO-032");
   });
 
+  it("a persistent failure leaves a pre-existing file byte-for-byte unchanged", async () => {
+    const dir = createMemoryDirectory("sb-unchanged");
+    await safeWriteJson(dir, "t.json", { v: 1 });
+    const handle = await dir.getFileHandle("t.json");
+    const before = await (await handle.getFile()).text();
+
+    setSimulatedFaults(dir, [
+      {
+        operation: "close",
+        name: "t.json",
+        errorName: "AbortError",
+        errorMessage: SAFE_BROWSING_MESSAGE,
+        times: Number.POSITIVE_INFINITY,
+      },
+    ]);
+    await expect(safeWriteJson(dir, "t.json", { v: 2 })).rejects.toThrow();
+
+    const after = await (await (await dir.getFileHandle("t.json")).getFile()).text();
+    expect(after).toBe(before);
+  });
+
   it("the user text is Arabic, comes from labelsStore, and tells the user to retry", () => {
     const text = errorCodeMessage("XQ-IO-039");
     expect(text).toBe(getLabels().err_io_039_safe_browsing_check_failed);

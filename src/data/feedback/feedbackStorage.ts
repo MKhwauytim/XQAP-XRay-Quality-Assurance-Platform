@@ -1,6 +1,6 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
-import { casLoop } from "../storage/casLoop";
+import { casLoop, readBackOwnWrite } from "../storage/casLoop";
 import {
   createDeadline,
   INTERACTIVE_WRITE_DEADLINE_MS,
@@ -14,6 +14,13 @@ import { logError } from "../storage/errorLogger";
 export type FeedbackCategory = "suggestion" | "issue" | "inquiry";
 
 export interface FeedbackReply {
+  /**
+   * Stable identity of THIS reply, stamped once per `appendReply` call. Makes the
+   * append idempotent across casLoop attempts: an attempt that finds its own id
+   * already in the thread knows the write landed and writes nothing. Optional,
+   * so replies written before it existed still parse.
+   */
+  id?: string;
   from: string;
   role: string;
   text: string;
@@ -266,21 +273,24 @@ async function updateThreadsIndex(
           _writeToken: writeToken,
           threads: apply(current.threads),
         };
-        await safeWriteJson<FeedbackThreadsIndex>(feedbackDir, FEEDBACK_THREADS_INDEX_FILE, updated, {
-          deadline,
-        });
-        const verify = await safeReadJson<FeedbackThreadsIndex>(
+        const written = await safeWriteJson<FeedbackThreadsIndex>(
           feedbackDir,
-          FEEDBACK_THREADS_INDEX_FILE
+          FEEDBACK_THREADS_INDEX_FILE,
+          updated,
+          { deadline }
         );
-        if (
-          verify.ok &&
-          verify.value.revision === nextRevision &&
-          verify.value._writeToken === writeToken
-        ) {
-          return { done: true, result: { ok: true as const } };
-        }
-        return { done: false };
+        // E3b: a commit whose own read-back was stale is verified once by the
+        // token read, or accepted if that is inconclusive too — never re-committed.
+        const verdict = await readBackOwnWrite(
+          written,
+          () => safeReadJson<FeedbackThreadsIndex>(feedbackDir, FEEDBACK_THREADS_INDEX_FILE),
+          (verify) =>
+            verify.ok &&
+            verify.value.revision === nextRevision &&
+            verify.value._writeToken === writeToken,
+          "feedback:threadsIndex"
+        );
+        return verdict === "not-mine" ? { done: false } : { done: true, result: { ok: true as const } };
       },
       {
         context: "feedback:threadsIndex",
@@ -469,6 +479,8 @@ export async function appendReply(
   const threadsDir = await getFeedbackThreadsDir(dir, true);
   const fileName = feedbackThreadFileName(threadId);
   let statusChanged = false;
+  // One identity per CALL (not per attempt): see FeedbackReply.id.
+  const storedReply: FeedbackReply = { ...reply, id: reply.id ?? crypto.randomUUID() };
   // Posting a reply is an interactive click, but this loop took casLoop's
   // DEFAULT ladder (10 x 200 ms) WITH a delayed verify re-read, nested over
   // safeWriteJson's own multi-second ladders — minutes of sleeping before the
@@ -487,23 +499,38 @@ export async function appendReply(
           throw new Error(`Feedback thread not found: ${threadId}`);
         }
         const current = normalizeThread(existing.value);
+        // Idempotent by reply id: a previous attempt of THIS call whose commit
+        // landed but could not be read back (or was overwritten and re-landed)
+        // is already in the file. Write nothing — re-committing would either
+        // duplicate the reply or re-arm the same unreadable window.
+        if (current.replies.some((candidate) => candidate.id === storedReply.id)) {
+          return { done: true, result: { ok: true as const, thread: current } };
+        }
         const nextRevision = (current.revision ?? 0) + 1;
         const nextStatus = resolve ? "resolved" : current.status;
         statusChanged = nextStatus !== current.status;
         const updated: FeedbackThread = {
           ...current,
           status: nextStatus,
-          replies: [...current.replies, reply],
+          replies: [...current.replies, storedReply],
           revision: nextRevision,
           _writeToken: writeToken,
         };
-        await safeWriteJson<FeedbackThread>(threadsDir, fileName, updated, { deadline });
-        const verify = await safeReadJson<FeedbackThread>(threadsDir, fileName);
-        if (
-          verify.ok &&
-          verify.value.revision === nextRevision &&
-          verify.value._writeToken === writeToken
-        ) {
+        const written = await safeWriteJson<FeedbackThread>(threadsDir, fileName, updated, { deadline });
+        const verdict = await readBackOwnWrite(
+          written,
+          () => safeReadJson<FeedbackThread>(threadsDir, fileName),
+          (verify) =>
+            verify.ok &&
+            verify.value.revision === nextRevision &&
+            verify.value._writeToken === writeToken,
+          "feedback:threadReply"
+        );
+        // A reply is DURABLE user content: "unconfirmed" is no evidence it is
+        // there, so it is retried (the next attempt finds our reply id and
+        // writes nothing, or writes it) — never accepted blind, unlike the
+        // rebuildable index.
+        if (verdict === "mine") {
           return {
             done: true,
             result: { ok: true as const, thread: updated },
