@@ -81,8 +81,13 @@ describe("mergeSummariesWithLocalThreads", () => {
   const NEW = thread({ id: "t-new", timestamp: "2026-09-28T09:00:00.000Z" });
 
   it("keeps a locally created thread the listing does not have, newest first", () => {
-    const merged = mergeSummariesWithLocalThreads([summarizeFeedbackThread(OLD)], { "t-new": NEW });
+    const merged = mergeSummariesWithLocalThreads([summarizeFeedbackThread(OLD)], { "t-new": NEW }, (id) => id === "t-new");
     expect(merged.map((row) => row.threadId)).toEqual(["t-new", "t-old"]);
+  });
+
+  it("does not resurrect a held thread the listing lacks unless this tab created it since", () => {
+    const merged = mergeSummariesWithLocalThreads([summarizeFeedbackThread(OLD)], { "t-new": NEW });
+    expect(merged.map((row) => row.threadId)).toEqual(["t-old"]);
   });
 
   it("uses the local summary when the local thread has later activity", () => {

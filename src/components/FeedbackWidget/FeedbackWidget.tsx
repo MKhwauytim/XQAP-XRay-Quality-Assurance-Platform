@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Check, MessageCircle, X } from "lucide-react";
 import { readSession } from "../../auth/authSession";
 import {
@@ -97,11 +97,34 @@ export function FeedbackWidget() {
   const [summaries, setSummaries] = useState<FeedbackThreadSummary[]>([]);
   const [threadsById, setThreadsById] = useState<Record<string, FeedbackThread>>({});
   // What this tab holds, readable from inside an async `refresh()` that must not
-  // close over a stale render's copy.
+  // close over a stale render's copy. Layout effect, not a passive one: it runs
+  // before any promise continuation can observe the just-committed map.
   const threadsByIdRef = useRef(threadsById);
-  useEffect(() => {
+  useLayoutEffect(() => {
     threadsByIdRef.current = threadsById;
   }, [threadsById]);
+  // Threads THIS tab created (submit), each stamped with a sequence number, and
+  // the sequence a refresh started at: only a thread created AFTER a refresh
+  // began can legitimately be absent from that refresh's read. Anything else the
+  // tab holds but the read lacks is gone from disk and must not be resurrected.
+  const createdSeqRef = useRef(new Map<string, number>());
+  const seqRef = useRef(0);
+  // The workspace this tab currently shows; an async read for another one is
+  // dropped on arrival.
+  const currentHandleRef = useRef(directoryHandle);
+  useLayoutEffect(() => {
+    currentHandleRef.current = directoryHandle;
+    createdSeqRef.current = new Map();
+  }, [directoryHandle]);
+  // A different workspace shares no thread with the previous one: drop every
+  // held thread and summary (state adjusted during render, the documented
+  // pattern for resetting state when an input changes).
+  const [shownHandle, setShownHandle] = useState(directoryHandle);
+  if (shownHandle !== directoryHandle) {
+    setShownHandle(directoryHandle);
+    setSummaries([]);
+    setThreadsById({});
+  }
   const [loading, setLoading] = useState(false);
   const [adminTab, setAdminTab] = useState<"new" | "all">("new");
   const [filter, setFilter] = useState<"open" | "resolved" | "all">("open");
@@ -145,6 +168,8 @@ export function FeedbackWidget() {
   const refresh = useCallback(async () => {
     if (!directoryHandle) return;
     setLoading(true);
+    const startedAtSeq = seqRef.current;
+    const handle = directoryHandle;
     // INDEX FIRST, full read in the BACKGROUND (Workstream B, 2026-09-28).
     // This used to `await reloadUnread()` before anything else -- and that is
     // `loadFeedback`, which opens EVERY thread file in the workspace. So the
@@ -163,10 +188,15 @@ export function FeedbackWidget() {
     // FeedbackUnreadProvider must never ask for it -- see listThreadSummaries'
     // doc for what that cost.
     try {
-      const list = await listThreadSummaries(directoryHandle, { repairIndex: true });
+      const list = await listThreadSummaries(handle, { repairIndex: true });
+      if (currentHandleRef.current !== handle) return; // workspace switched meanwhile
       // MERGE with what this tab already applied: a submit/reply/resolve made
       // while this read was in flight is durable but absent from `list`.
-      setSummaries(mergeSummariesWithLocalThreads(list, threadsByIdRef.current));
+      setSummaries(
+        mergeSummariesWithLocalThreads(list, threadsByIdRef.current, (id) =>
+          (createdSeqRef.current.get(id) ?? 0) > startedAtSeq
+        )
+      );
     } catch (err) {
       // Leave the last-known list in place; the background reload below still
       // runs and the page effect reads whatever it can. Logged rather than
@@ -222,6 +252,7 @@ export function FeedbackWidget() {
       // `refresh()` AND `reloadUnread()`, i.e. the index + listing plus TWO
       // full reads of every thread file, for a change this tab already holds
       // in full. One provider reload remains, for the unread dot.
+      createdSeqRef.current.set(created.id, (seqRef.current += 1));
       setThreadsById((prev) => ({ ...prev, [created.id]: created }));
       setSummaries((prev) => [
         summarizeFeedbackThread(created),

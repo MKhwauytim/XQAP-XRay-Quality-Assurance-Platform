@@ -17,10 +17,10 @@ import type { AuthSession } from "../../auth/authTypes";
 import { clearSession, writeSession } from "../../auth/authSession";
 import { DEFAULT_LABELS, resetAllLabels } from "../../data/labels/labelsStore";
 
-const directoryHandle = { name: "workspace" };
+const workspace = vi.hoisted(() => ({ handle: { name: "workspace" } as { name: string } }));
 
 vi.mock("../../data/workspace/useWorkspace", () => ({
-  useWorkspace: () => ({ directoryHandle, refreshPermissions: () => {} }),
+  useWorkspace: () => ({ directoryHandle: workspace.handle, refreshPermissions: () => {} }),
 }));
 
 const storage = vi.hoisted(() => ({
@@ -88,6 +88,7 @@ async function renderOpenAndSettle() {
 
 describe("FeedbackWidget — optimistic submit and reply", () => {
   beforeEach(() => {
+    workspace.handle = { name: "workspace" };
     clearSession();
     resetAllLabels();
     localStorage.clear();
@@ -264,6 +265,43 @@ describe("FeedbackWidget — optimistic submit and reply", () => {
 
     fireEvent.click(screen.getByRole("button", { name: new RegExp(DEFAULT_LABELS.fb_tab_all) }));
     expect(await screen.findByText("اقتراح لا يجب أن يختفي")).toBeInTheDocument();
+    expect(screen.queryByText("الجهاز لا يعمل")).toBeNull();
+  });
+
+  it("a workspace switch leaves no thread of the previous workspace in the list", async () => {
+    storage.listThreadSummaries.mockResolvedValueOnce([summaryOf(EXISTING)]).mockResolvedValue([]);
+    storage.loadFeedback.mockResolvedValue([]);
+    storage.loadThreads.mockResolvedValue([EXISTING]);
+    writeSession(SARA);
+    const tree = () => (
+      <FeedbackUnreadProvider session={SARA}>
+        <FeedbackWidget />
+      </FeedbackUnreadProvider>
+    );
+    const { rerender } = render(tree());
+    fireEvent.click(screen.getByRole("button", { name: /التواصل والاقتراحات|غير مقروءة/ }));
+    expect(await screen.findByText("الجهاز لا يعمل")).toBeInTheDocument();
+
+    // Another workspace is mounted: its index is empty.
+    workspace.handle = { name: "other-workspace" };
+    rerender(tree());
+    await waitFor(() => expect(storage.listThreadSummaries).toHaveBeenCalledTimes(2));
+    await act(async () => {});
+    expect(screen.queryByText("الجهاز لا يعمل")).toBeNull();
+  });
+
+  it("a thread this tab merely read, and that is gone from disk, does not reappear on refresh", async () => {
+    storage.listThreadSummaries.mockResolvedValueOnce([summaryOf(EXISTING)]).mockResolvedValue([]);
+    storage.loadFeedback.mockResolvedValue([]);
+    storage.loadThreads.mockResolvedValue([EXISTING]);
+    await renderOpenAndSettle();
+    expect(await screen.findByText("الجهاز لا يعمل")).toBeInTheDocument();
+
+    const toggle = () => act(async () => void window.dispatchEvent(new Event("feedback:toggle")));
+    await toggle(); // close
+    await toggle(); // reopen: refresh returns an empty index
+    await waitFor(() => expect(storage.listThreadSummaries).toHaveBeenCalledTimes(2));
+    await act(async () => {});
     expect(screen.queryByText("الجهاز لا يعمل")).toBeNull();
   });
 });

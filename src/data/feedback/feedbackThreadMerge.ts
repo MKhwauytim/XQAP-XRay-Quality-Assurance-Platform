@@ -84,19 +84,25 @@ export function mergeFeedbackThreads(
  * user may have submitted a thread or replied/resolved one, each applied to the
  * list optimistically. Replacing the list wholesale with the (older) read then
  * silently un-does both: the new thread drops out and the status patch is lost,
- * although both are durable on disk. So, per thread this tab holds:
- *  - not in the read list -> it was created (or first seen) after the read
- *    started: keep it;
- *  - in the list, but the local copy shows later activity (every reply, and so
- *    every resolve, stamps a newer `lastActivityAt`), or the same activity with
- *    a resolved status the row lacks (`resolved` is terminal): the local copy is
- *    newer, use its summary.
+ * although both are durable on disk. So:
+ *  - a held thread absent from the read list is ADDED only when
+ *    `createdAfterReadStarted(id)` says this tab created it after the read
+ *    began. Any other held-but-unlisted thread (read earlier, since deleted on
+ *    disk, or from another workspace) is NOT resurrected;
+ *  - a held thread that IS listed uses its local summary when it is newer:
+ *    a later `lastActivityAt`, or the same one with a resolved status the row
+ *    lacks (`resolved` is terminal). Note the INDEX row's `lastActivityAt` only
+ *    moves on create and on a status change -- a plain reply does not touch the
+ *    index -- so the comparison is a heuristic over ISO timestamps written by
+ *    different machines' clocks; it assumes skew smaller than the gap between
+ *    the events, and a lost tie merely shows the listed row until the next read.
  * Otherwise the listed row stands, so a change made by ANOTHER user still comes
  * through. The result keeps `listThreadSummaries`' createdAt-descending order.
  */
 export function mergeSummariesWithLocalThreads(
   listed: readonly FeedbackThreadSummary[],
-  local: Readonly<Record<string, FeedbackThread>>
+  local: Readonly<Record<string, FeedbackThread>>,
+  createdAfterReadStarted: (threadId: string) => boolean = () => false
 ): FeedbackThreadSummary[] {
   const localIds = Object.keys(local);
   if (localIds.length === 0) return [...listed];
@@ -113,7 +119,7 @@ export function mergeSummariesWithLocalThreads(
     return newer ? heldRow : row;
   });
   for (const id of localIds) {
-    if (!listedIds.has(id)) merged.push(summarizeFeedbackThread(local[id]!));
+    if (!listedIds.has(id) && createdAfterReadStarted(id)) merged.push(summarizeFeedbackThread(local[id]!));
   }
   return merged.length === listed.length
     ? merged
