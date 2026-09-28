@@ -296,6 +296,32 @@ describe("AuthGate — hidden admin-shortcut modal shares the normal form's lock
     fireEvent.click(within(modal).getByRole("button", { name: /دخول|يُرجى الانتظار/ }));
   }
 
+  // `loginAsBootstrapAdmin` (AuthGate.tsx) is async and its `void`-called promise
+  // is never handed back to this test, so there is nothing to directly `await`
+  // after `submitAdminModal`. Its one submission still runs a fixed-depth,
+  // timer-free chain of microtasks -- `verifyPasswordWithLayoutFallback`'s
+  // up-to-2-candidate loop, then `registerFailedAttempt()`'s `setState`, then
+  // React's resulting re-render -- with no `setTimeout`/interval of its own.
+  // Node's event loop guarantees every currently-queued microtask drains before
+  // the next macrotask runs, so awaiting a single 0ms `setTimeout` inside `act()`
+  // deterministically lets that whole chain settle before the test moves on,
+  // regardless of real CPU speed. This file used to gate each loop iteration on
+  // `waitFor(() => verify.mock.calls.length > i * 2)` instead: `mock.calls`
+  // updates the instant `verifyPasswordHash` is *called* (synchronously, before
+  // its own promise even resolves), so that condition could already be true on
+  // `waitFor`'s very first (synchronous, zero-delay) check -- and did not wait
+  // for `registerFailedAttempt()` to actually commit. Under load, that let the
+  // loop race ahead and fire attempt N+1 before attempt N had committed, each
+  // handler reading the same stale `failedAttempts` from its own render's
+  // closure -- so the lockout threshold was sometimes never really reached
+  // before the "locked-out" 4th attempt was submitted (observed failure: 8 verify
+  // calls -- 4 full attempts -- instead of the 6 three attempts should produce).
+  async function flushAdminModalAttempt(): Promise<void> {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+
   it("locks out after 3 wrong passcodes through the modal, same as the normal form", async () => {
     // verifyPasswordWithLayoutFallback tries up to 2 keyboard-layout candidates
     // per attempt, so the mock's call count isn't 1:1 with attempts -- assert
@@ -308,17 +334,23 @@ describe("AuthGate — hidden admin-shortcut modal shares the normal form's lock
 
     for (let i = 0; i < 3; i += 1) {
       submitAdminModal("wrong");
-      await waitFor(() => expect(verify.mock.calls.length).toBeGreaterThan(i * 2));
+      await flushAdminModalAttempt();
     }
+
+    // The real, observable production signal that all 3 attempts have
+    // genuinely been registered (not just dispatched) -- the lockout button
+    // state -- rather than an inferred verify-call count.
+    await waitFor(() => {
+      expect(within(modal).getByRole("button", { name: /يُرجى الانتظار/ })).toBeDisabled();
+    });
     const callsAfterThreeAttempts = verify.mock.calls.length;
 
     // A 4th attempt while locked out must not even check the passcode. Before
     // this fix, this button had no lockout wiring at all and would happily
     // call verifyPasswordHash again with no limit.
     submitAdminModal("wrong-again");
-    await waitFor(() => {
-      expect(within(modal).getByRole("button", { name: /يُرجى الانتظار/ })).toBeDisabled();
-    });
+    await flushAdminModalAttempt();
+    expect(within(modal).getByRole("button", { name: /يُرجى الانتظار/ })).toBeDisabled();
     expect(verify.mock.calls.length).toBe(callsAfterThreeAttempts);
   });
 
