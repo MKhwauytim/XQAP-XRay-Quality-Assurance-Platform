@@ -28,11 +28,19 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { type ErrorEntry, registerErrorSink } from "../storage/errorLogger";
 import { isReadOnlyMode } from "../storage/readOnlyMode";
-import { appendUserErrors, ERRORLOG_CAS_CONTEXT } from "./errorLogStorage";
+import { appendUserErrorsChecked, ERRORLOG_CAS_CONTEXT } from "./errorLogStorage";
 import type { PersistedErrorEntry } from "./errorLogTypes";
 
 const DEFAULT_BATCH_SIZE = 25;
 const DEFAULT_FLUSH_DELAY_MS = 5_000;
+/**
+ * Minimum gap between two timer-driven rewrites of the live file. Every flush
+ * is a whole-file read/rewrite (megabytes at ~1,500 entries) on a shared
+ * folder, and a client that logs one isolated warning every minute or two
+ * (each landing alone in the 5 s window) paid that on nearly every save. The
+ * batch threshold, `pagehide` and tab-hidden flushes deliberately bypass it.
+ */
+const DEFAULT_MIN_FLUSH_INTERVAL_MS = 300_000;
 const DEFAULT_MAX_PENDING = 200;
 
 const INTERNAL_CONTEXT_PREFIX = "errorlog:";
@@ -59,14 +67,17 @@ export type WorkspaceErrorSinkOptions = {
   flushDelayMs?: number;
   /** @internal test seam */
   maxPending?: number;
+  /** @internal test seam */
+  minFlushIntervalMs?: number;
 };
 
 let pending: ErrorEntry[] = [];
 let droppedSinceLastFlush = 0;
-let installedOptions: Required<Pick<WorkspaceErrorSinkOptions, "directoryHandle" | "username" | "batchSize" | "flushDelayMs" | "maxPending">> | null = null;
+let installedOptions: Required<Pick<WorkspaceErrorSinkOptions, "directoryHandle" | "username" | "batchSize" | "flushDelayMs" | "maxPending" | "minFlushIntervalMs">> | null = null;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let inFlightFlush: Promise<void> | null = null;
 let flushAgainAfter = false;
+let lastFlushStartedAt = 0;
 
 function createEntryId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -100,10 +111,15 @@ function clearFlushTimer(): void {
 
 function armFlushTimer(): void {
   if (installedOptions === null || flushTimer !== null) return;
+  const sinceLastFlush = Date.now() - lastFlushStartedAt;
+  const delay = Math.max(
+    installedOptions.flushDelayMs,
+    installedOptions.minFlushIntervalMs - sinceLastFlush
+  );
   flushTimer = setTimeout(() => {
     flushTimer = null;
     void flushErrorLogNow();
-  }, installedOptions.flushDelayMs);
+  }, delay);
 }
 
 function enqueue(entry: ErrorEntry): void {
@@ -181,7 +197,18 @@ async function doFlush(): Promise<void> {
     });
   }
 
-  await appendUserErrors(options.directoryHandle, options.username, persisted);
+  lastFlushStartedAt = Date.now();
+  const ok = await appendUserErrorsChecked(options.directoryHandle, options.username, persisted);
+  if (!ok && installedOptions === options) {
+    // Never drop on a failed write: put the batch back in front of anything
+    // that arrived meanwhile (bounded by maxPending, oldest dropped and
+    // counted) and retry on the normal throttled timer, not in a tight loop.
+    const restored = batch.concat(pending);
+    const over = Math.max(0, restored.length - options.maxPending);
+    pending = over > 0 ? restored.slice(over) : restored;
+    droppedSinceLastFlush += dropped + over;
+    armFlushTimer();
+  }
 }
 
 /**
@@ -196,7 +223,9 @@ export function installWorkspaceErrorSink(options: WorkspaceErrorSinkOptions): (
     batchSize: options.batchSize ?? DEFAULT_BATCH_SIZE,
     flushDelayMs: options.flushDelayMs ?? DEFAULT_FLUSH_DELAY_MS,
     maxPending: options.maxPending ?? DEFAULT_MAX_PENDING,
+    minFlushIntervalMs: options.minFlushIntervalMs ?? DEFAULT_MIN_FLUSH_INTERVAL_MS,
   };
+  lastFlushStartedAt = 0;
 
   registerErrorSink(enqueue);
 

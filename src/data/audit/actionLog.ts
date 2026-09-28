@@ -56,8 +56,8 @@ let maxActionEntries = DEFAULT_MAX_ACTION_ENTRIES;
  * `maxActionEntries` on every single append past the cap. That turns "the
  * archive is rewritten on every save once an actor is past the cap" into
  * "rewritten roughly once per `maxActionEntries - lowWaterActionEntries`
- * appends" — see `docs/architecture` P1 evidence
- * (`progressive-slowdown.md`, cause #2). `Math.min(lowWater, cap)` below keeps
+ * appends" (trimming to the cap made the ever-growing archive get re-read and
+ * rewritten on every save). `Math.min(lowWater, cap)` below keeps
  * a test that only overrides the cap (not the low-water mark) behaving
  * exactly as before: trimmed back to the cap on every overflow.
  */

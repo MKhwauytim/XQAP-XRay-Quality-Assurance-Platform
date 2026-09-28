@@ -3,7 +3,8 @@ import { afterEach, describe, expect, test } from "vitest";
 import { createMemoryDirectory, getOperationLog } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { getAuditActionsDir } from "../workspace/workspacePaths";
-import { actionsFileName } from "./auditPaths";
+import { actionsArchiveFileName, actionsFileName } from "./auditPaths";
+import { readOptionalJson, safeWriteJson } from "../storage/safeWrite";
 import {
   __resetMaxActionEntriesForTests,
   __setActionLowWaterMarkForTests,
@@ -90,7 +91,7 @@ describe("audit log archival (A6)", () => {
   });
 });
 
-describe("audit log archival — P1 hysteresis (progressive-slowdown.md cause #2)", () => {
+describe("audit log archival — P1 hysteresis", () => {
   test("archive is rewritten roughly once per (cap - low-water) appends, not once per append past the cap", async () => {
     __setMaxActionEntriesForTests(20);
     __setActionLowWaterMarkForTests(10);
@@ -117,29 +118,116 @@ describe("audit log archival — P1 hysteresis (progressive-slowdown.md cause #2
     expect(live.length).toBeLessThanOrEqual(20);
   });
 
-  test("live-file write size for a non-overflowing append does not grow with archive size", async () => {
-    __setMaxActionEntriesForTests(5);
-    __setActionLowWaterMarkForTests(3);
+  /**
+   * Wrap a directory tree so every `createWritable().write()` is counted: total
+   * bytes written, and the names of every file opened for writing.
+   */
+  function countWrites(dir: DirectoryHandleLike) {
+    const stats = { bytes: 0, opened: [] as string[] };
+    const wrapDir = (d: DirectoryHandleLike): DirectoryHandleLike => ({
+      ...d,
+      kind: "directory",
+      name: d.name,
+      getFileHandle: async (name: string, options?: { create?: boolean }) => {
+        const handle = await d.getFileHandle(name, options);
+        if (!handle.createWritable) return handle;
+        return {
+          ...handle,
+          kind: "file",
+          name: handle.name,
+          getFile: () => handle.getFile(),
+          createWritable: async () => {
+            stats.opened.push(name);
+            const writable = await handle.createWritable!();
+            return {
+              write: async (data: string) => {
+                stats.bytes += new TextEncoder().encode(String(data)).length;
+                await writable.write(data);
+              },
+              close: () => writable.close(),
+            };
+          },
+        };
+      },
+      getDirectoryHandle: async (name: string, options?: { create?: boolean }) =>
+        wrapDir(await d.getDirectoryHandle(name, options)),
+    });
+    return { dir: wrapDir(dir), stats };
+  }
 
-    async function liveFileWriteBytes(dir: DirectoryHandleLike, seedAppends: number): Promise<number> {
-      for (let i = 1; i <= seedAppends; i += 1) {
-        await appendWorkspaceAction(dir, input(`seed${i}`));
-      }
-      const actionsDir = await getAuditActionsDir(dir, false);
-      const handle = await actionsDir.getFileHandle(actionsFileName("admin"), { create: false });
-      const before = (await (await handle.getFile()).text()).length;
-      // One more append that does NOT push the live log past the cap (it sits
-      // at the low-water mark right after a hysteresis trim).
+  /** Seed the live log at exactly `liveCount` entries and the archive with `archiveCount`. */
+  async function seed(liveCount: number, archiveCount: number) {
+    const root = createMemoryDirectory("root");
+    const at = new Date().toISOString();
+    const year = new Date().getFullYear();
+    const make = (prefix: string, i: number) => ({
+      id: `act-${prefix}-${String(i).padStart(6, "0")}`,
+      at,
+      actor: "admin",
+      actorRole: "admin",
+      action: "sample-drawn" as const,
+      monthFolderName: "5-may-2026",
+      target: `${prefix}-${i}`,
+    });
+    const actionsDir = await getAuditActionsDir(root, true);
+    await safeWriteJson(actionsDir, actionsFileName("admin"), {
+      actor: "admin",
+      revision: 1,
+      updatedAt: at,
+      entries: Array.from({ length: liveCount }, (_, i) => make("live", i)),
+    });
+    if (archiveCount > 0) {
+      await safeWriteJson(actionsDir, actionsArchiveFileName("admin", year), {
+        year,
+        revision: 1,
+        updatedAt: at,
+        entries: Array.from({ length: archiveCount }, (_, i) => make("arch", i)),
+      });
+    }
+    return root;
+  }
+
+  async function liveLength(root: DirectoryHandleLike): Promise<number> {
+    const actionsDir = await getAuditActionsDir(root, false);
+    const read = await readOptionalJson<{ entries: unknown[] }>("t", [
+      { directory: async () => actionsDir, fileName: actionsFileName("admin") },
+    ]);
+    return read.kind === "found" ? read.value.entries.length : -1;
+  }
+
+  test("a non-spill append writes the same bytes with no archive as with a huge archive, and never opens the archive", async () => {
+    __setMaxActionEntriesForTests(20);
+    __setActionLowWaterMarkForTests(10);
+    const year = new Date().getFullYear();
+
+    async function measureMarkerAppend(archiveCount: number) {
+      const root = await seed(10, archiveCount); // live sits AT the low-water mark
+      expect(await liveLength(root)).toBe(10); // so the marker (11th) cannot overflow the cap of 20
+      const { dir, stats } = countWrites(root);
       await appendWorkspaceAction(dir, input("marker"));
-      const after = (await (await handle.getFile()).text()).length;
-      return after - before;
+      expect(await liveLength(root)).toBe(11);
+      return stats;
     }
 
-    const smallArchiveDelta = await liveFileWriteBytes(createMemoryDirectory(), 4);
-    const largeArchiveDelta = await liveFileWriteBytes(createMemoryDirectory(), 44);
+    const none = await measureMarkerAppend(0);
+    const huge = await measureMarkerAppend(3_000);
 
-    // Both deltas are the cost of ONE more entry in the live file; a large
-    // archive (44 seeded vs. 4) must not inflate it.
-    expect(largeArchiveDelta).toBeLessThanOrEqual(smallArchiveDelta * 2);
+    expect(none.bytes).toBeGreaterThan(0);
+    // Bytes written per append do not depend on the archive's size.
+    expect(Math.abs(huge.bytes - none.bytes)).toBeLessThanOrEqual(none.bytes * 0.02);
+    // ...because the archive is not even opened for writing.
+    expect(huge.opened.filter((n) => n.includes(`.actions.${year}.json`))).toEqual([]);
+    expect(none.opened.filter((n) => n.includes(`.actions.${year}.json`))).toEqual([]);
+  });
+
+  test("the counter does see the archive being written on a spill append (sanity)", async () => {
+    __setMaxActionEntriesForTests(20);
+    __setActionLowWaterMarkForTests(10);
+    const year = new Date().getFullYear();
+    const root = await seed(20, 3_000); // the next append makes 21 > cap
+    const { dir, stats } = countWrites(root);
+    await appendWorkspaceAction(dir, input("spill"));
+    expect(stats.opened.some((n) => n.includes(`.actions.${year}.json`))).toBe(true);
+    expect(await liveLength(root)).toBe(10);
   });
 });

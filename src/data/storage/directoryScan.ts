@@ -420,15 +420,33 @@ async function readListedEntry<T>(
  * loses sight of every name in it at once, and 200 identical entries would
  * evict the whole 50-entry error ring buffer (errorLogger.ts) that the admin
  * error view reads.
+ *
+ * Also once per SESSION per file: a segment that stays unreadable is re-skipped
+ * on every read (roughly every save), and each logged line is persisted to the
+ * per-user error file, whose whole-file rewrite costs megabytes. Only names not
+ * yet reported in this session are logged; the first occurrence always is.
  */
+const reportedVanishedKeys = new Set<string>();
+
+/** @internal test-only. Forget which skipped entries were already reported. */
+export function __resetVanishedEntryLogForTests(): void {
+  reportedVanishedKeys.clear();
+}
+
 function logVanishedEntries(context: string, dir: DirectoryHandleLike, names: string[]): void {
-  if (names.length === 0) return;
+  const fresh = names.filter((name) => {
+    const key = `${context}|${dir.name}|${name}`;
+    if (reportedVanishedKeys.has(key)) return false;
+    reportedVanishedKeys.add(key);
+    return true;
+  });
+  if (fresh.length === 0) return;
   logError(
     context,
     new Error(
-      `Skipped ${names.length} listed entr${names.length === 1 ? "y" : "ies"} that could not be ` +
+      `Skipped ${fresh.length} listed entr${fresh.length === 1 ? "y" : "ies"} that could not be ` +
         `opened in "${dir.name}" (present in the listing, NotFound/NotReadable on open — ` +
-        `renamed, removed, or not yet visible on a shared folder): ${names.join(", ")}`
+        `renamed, removed, or not yet visible on a shared folder): ${fresh.join(", ")}`
     )
   );
 }

@@ -61,7 +61,8 @@ let maxErrorEntries = DEFAULT_MAX_ERROR_ENTRIES;
  * Hysteresis low-water mark (P1), mirroring `actionLog.ts`. On overflow the
  * live log is trimmed all the way down to this many entries in ONE archive
  * write, instead of back to `maxErrorEntries` on every single append past the
- * cap — see `progressive-slowdown.md` cause #2. `Math.min(lowWater, cap)`
+ * cap (that made the archive, which grows all year, get re-read and rewritten
+ * on every flush). `Math.min(lowWater, cap)`
  * below keeps a test that only overrides the cap behaving exactly as before.
  */
 const DEFAULT_LOW_WATER_ERROR_ENTRIES = 1_500;
@@ -202,7 +203,20 @@ export async function appendUserErrors(
   username: string,
   batch: PersistedErrorEntry[]
 ): Promise<void> {
-  if (!directoryHandle || batch.length === 0) return;
+  await appendUserErrorsChecked(directoryHandle, username, batch);
+}
+
+/**
+ * Same contract as `appendUserErrors` (never throws) but reports whether the
+ * batch is durably on disk, so the sink can keep a failed batch queued instead
+ * of losing it. An empty batch or null handle counts as success (nothing to do).
+ */
+export async function appendUserErrorsChecked(
+  directoryHandle: DirectoryHandleLike | null,
+  username: string,
+  batch: PersistedErrorEntry[]
+): Promise<boolean> {
+  if (!directoryHandle || batch.length === 0) return true;
 
   try {
     // Inside the try, not above it — same reasoning as
@@ -265,9 +279,12 @@ export async function appendUserErrors(
     );
     if (!result.ok) {
       logError(`${ERRORLOG_INTERNAL_CONTEXT_PREFIX}append`, new Error(result.error));
+      return false;
     }
+    return true;
   } catch (error) {
     logError(`${ERRORLOG_INTERNAL_CONTEXT_PREFIX}append`, error);
+    return false;
   }
 }
 

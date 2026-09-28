@@ -28,6 +28,7 @@ import {
 import {
   SEGMENT_TAIL_VANISH_RETRY_BUDGET,
   VANISHED_ENTRY_RETRY_DELAYS_MS,
+  __resetVanishedEntryLogForTests,
   listDirectoryEntriesWithSize,
   readSegmentTails,
 } from "./directoryScan";
@@ -43,6 +44,7 @@ async function writeRawFile(dir: DirectoryHandleLike, name: string, content: str
 
 beforeEach(() => {
   clearErrors();
+  __resetVanishedEntryLogForTests();
 });
 
 describe("listDirectoryEntriesWithSize when an entry vanishes between listing and open", () => {
@@ -208,6 +210,33 @@ describe("readSegmentTails when a segment vanishes or is transiently invisible",
     const logged = getRecentErrors().filter((entry) => entry.context === "directoryScan:segment-tails");
     expect(logged).toHaveLength(1);
     expect(logged[0]!.message).toContain("devGone-s1.ndjson");
+    clearSimulatedFaults(dir);
+  });
+
+  it("logs a persistently skipped segment once per session, not on every read", async () => {
+    const dir = createMemoryDirectory("distribution.events");
+    await writeRawFile(dir, "devA-s1.ndjson", "line-a\n");
+    await writeRawFile(dir, "devGone-s1.ndjson", "line-gone\n");
+    setSimulatedFaults(dir, [
+      { operation: "getFile", name: "devGone-s1.ndjson", errorName: "NotFoundError", times: Number.POSITIVE_INFINITY },
+    ]);
+
+    for (let i = 0; i < 20; i += 1) {
+      await readSegmentTails(dir, { suffix: ".ndjson", knownOffsets: {} });
+    }
+
+    const logged = getRecentErrors().filter((entry) => entry.context === "directoryScan:segment-tails");
+    expect(logged).toHaveLength(1);
+    expect(logged[0]!.message).toContain("devGone-s1.ndjson");
+
+    // A DIFFERENT file going missing later is still reported.
+    await writeRawFile(dir, "devGone2-s1.ndjson", "x\n");
+    setSimulatedFaults(dir, [
+      { operation: "getFile", name: "devGone2-s1.ndjson", errorName: "NotFoundError", times: Number.POSITIVE_INFINITY },
+    ]);
+    await readSegmentTails(dir, { suffix: ".ndjson", knownOffsets: {} });
+    const after = getRecentErrors().filter((entry) => entry.context === "directoryScan:segment-tails");
+    expect(after).toHaveLength(2);
     clearSimulatedFaults(dir);
   });
 

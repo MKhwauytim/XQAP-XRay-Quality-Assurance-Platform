@@ -157,7 +157,7 @@ describe("errorLogStorage", () => {
     expect(all.map((e) => e.id)).toEqual(["a"]);
   });
 
-  // P1 hysteresis (progressive-slowdown.md cause #2): mirrors the actionLog
+  // P1 hysteresis: mirrors the actionLog
   // pin. Past the cap, the live file used to be trimmed exactly back to the
   // cap on EVERY flush, so the archive was rewritten on every flush forever.
   it("archive is rewritten roughly once per (cap - low-water) flushes, not once per flush past the cap", async () => {
@@ -171,7 +171,7 @@ describe("errorLogStorage", () => {
     }
 
     const archiveWrites = getOperationLog(dir).filter(
-      (e) => e.operation === "createWritable" && e.name.endsWith(".errors.2026.json")
+      (e) => e.operation === "createWritable" && e.name === errorsArchiveFileName("alice", 2026)
     );
     // All seeded entries share `at: "2026-08-24..."`, so every archive lands
     // in the 2026 file.
