@@ -45,7 +45,9 @@ import {
   subscribeToDataChange,
   type DataRefreshDetail,
 } from "./dataRefreshSignal";
-import { __clearInFlightForTests } from "../storage/inFlightReads";
+import { __clearInFlightForTests, workspaceEpoch } from "../storage/inFlightReads";
+import { appendDistributionEvents, loadOrDeriveDistributionCurrentForRead } from "../distribution/distributionStorage";
+import { saveSampleMaster } from "../sampling/sampleStorage";
 import {
   getSyncIntervalMs,
   runSync,
@@ -68,6 +70,23 @@ async function writeRawFile(dir: DirectoryHandleLike, name: string, content: str
 }
 
 const MONTH = "5-May-2026";
+
+function makeStoreRow(id: string): Record<string, unknown> {
+  return {
+    xrayImageId: id, portName: "بري", certScanStatus: "NonCertscan", stage: null, xrayEntryDate: null, portCode: null, portType: null,
+    declarationNumber: null, declarationDate: null, plateOrContainerNumber: null, chassisNumber: null, xrayLevelOneResult: "سليمة",
+    xrayLevelTwoResult: "سليمة", movementType: "LAND", reportNumber: null, targetedByRiskEngine: null, riskMessage: null,
+    levelOneEmployee: null, levelTwoEmployee: null,
+    otherResults: { manual: { result: null, code: null, employeeId: null }, opposite: { result: null, code: null, employeeId: null }, liveMeans: { result: null, code: null, employeeId: null } },
+    notes: null, certScanSnippet: null, originalCertScanSnippet: null, biEnrichmentStatus: "BI Not Provided", biMatched: false, biFilledFields: [],
+    sourceSheetName: "بري", sourceRowNumber: 1,
+  };
+}
+function makeStoreSample(rows: unknown[]): Record<string, unknown> {
+  return { rngSeed: "s", totalRequested: rows.length, totalActual: rows.length, certScanRequested: 0, nonCertScanRequested: 0, certScanActual: 0, nonCertScanActual: rows.length, portAllocations: [], stageAllocations: [], drawnAt: new Date().toISOString(), drawnBy: "admin", rows };
+}
+const ADHOC = "adhoc-imp1";
+
 
 function makeRoot(name = "sync-root", trackReads = false): DirectoryHandleLike {
   return createMemoryDirectory(name, { trackReads }) as unknown as DirectoryHandleLike;
@@ -1293,7 +1312,6 @@ describe("runSync — §6 of the answer-save proposal: the answers.events segmen
   });
 
   describe("A9 follow-up: ad-hoc stores are probed", () => {
-    const ADHOC = "adhoc-imp1";
     async function adhocDirs(root: DirectoryHandleLike) {
       const adhocMain = await getSampleMainDir(root, ADHOC, true);
       return {
@@ -1336,6 +1354,7 @@ describe("runSync — §6 of the answer-save proposal: the answers.events segmen
     it("reports a reopen and a quality note written into an ad-hoc store", async () => {
       const root = makeRoot();
       await getSampleMainDir(root, MONTH, true);
+      await adhocDirs(root); // an ASSIGNED store (has distribution.events): only those are probed
       const item = {
         xrayImageId: "XR-1", templateId: "t", templateVersion: 1, answers: [{ fieldId: "f", value: "v" }],
         lastSavedAt: "2026-05-02T00:00:00.000Z", submittedAt: "2026-05-02T00:00:00.000Z", answeredBy: "empA", status: "submitted" as const,
@@ -1346,6 +1365,87 @@ describe("runSync — §6 of the answer-save proposal: the answers.events segmen
       expect((await runSync({ directoryHandle: root, monthFolderName: MONTH })).changed.has("answers")).toBe(true);
       expect((await setItemQualityNote(root, ADHOC, "empA", "XR-1", "note")).ok).toBe(true);
       expect((await runSync({ directoryHandle: root, monthFolderName: MONTH })).changed.has("answers")).toBe(true);
+    });
+
+    async function makeStores(root: DirectoryHandleLike, assigned: number, unassigned: number) {
+      const out: Array<{ id: string; dist: DirectoryHandleLike; ans: DirectoryHandleLike }> = [];
+      for (let i = 0; i < assigned; i += 1) {
+        const main = await getSampleMainDir(root, `adhoc-a${String(i).padStart(2, "0")}`, true);
+        out.push({
+          id: `a${String(i).padStart(2, "0")}`,
+          dist: await main.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: true }),
+          ans: await main.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: true }),
+        });
+      }
+      for (let i = 0; i < unassigned; i += 1) await getSampleMainDir(root, `adhoc-u${String(i).padStart(2, "0")}`, true);
+      return out;
+    }
+    const answersDirOpens = (root: DirectoryHandleLike): number =>
+      getOperationLog(root).filter((e) => e.operation === "getDirectoryHandle" && e.name === ANSWER_EVENTS_DIR).length;
+
+    it("probes only stores that have distribution events (20 stores, 3 assigned)", async () => {
+      const root = createMemoryDirectory("adhoc-20", { trackOperations: true }) as unknown as DirectoryHandleLike;
+      await getSampleMainDir(root, MONTH, true);
+      await makeStores(root, 3, 17);
+      await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline (also discovers which stores are assigned)
+      clearOperationLog(root);
+      await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      // the selected month's own probe opens answers.events once; each PROBED store opens it once
+      expect(answersDirOpens(root)).toBe(1 + 3);
+    });
+
+    it("over the cap: quiet when nothing changed, and a change in a store not probed this tick is noticed within a bounded number of ticks", async () => {
+      const root = makeRoot();
+      await getSampleMainDir(root, MONTH, true);
+      const stores = await makeStores(root, 12, 0); // cap is 8 per tick -> at most 2 ticks to cover all
+      await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      for (let i = 0; i < 4; i += 1) {
+        expect((await runSync({ directoryHandle: root, monthFolderName: MONTH })).changed.size).toBe(0);
+      }
+      await writeRawFile(stores[11]!.dist, "x-dist-dev-s.ndjson", '{"eventId":"a1","type":"assign"}\n');
+      let noticed = 0;
+      for (let tick = 1; tick <= 2 && noticed === 0; tick += 1) {
+        if ((await runSync({ directoryHandle: root, monthFolderName: MONTH })).changed.has("distribution")) noticed = tick;
+      }
+      expect(noticed).toBeGreaterThan(0);
+    });
+
+    it("an ad-hoc answers change reports answers only (never distribution)", async () => {
+      const root = makeRoot();
+      await getSampleMainDir(root, MONTH, true);
+      const stores = await makeStores(root, 2, 0);
+      await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      await writeRawFile(stores[0]!.ans, "x-ans-dev-s.ndjson", onBehalf("o1", "empA"));
+      expect([...(await runSync({ directoryHandle: root, monthFolderName: MONTH })).changed]).toEqual(["answers"]);
+    });
+
+    it("a remote ad-hoc assignment the probe reported (and a manual refresh) is visible to the next read (store epoch bumped)", async () => {
+      const root = makeRoot();
+      await getSampleMainDir(root, MONTH, true);
+      const mk = (id: string) => ({ ...makeStoreRow(id) });
+      const rows = [mk("IMG-A"), mk("IMG-B")];
+      await saveSampleMaster(root, ADHOC, makeStoreSample(rows) as never);
+      expect((await appendDistributionEvents(root, ADHOC, [buildAssignEvent({ xrayImageId: "IMG-A", assignedTo: "emp-a", eventBy: "admin" })])).ok).toBe(true);
+      await loadOrDeriveDistributionCurrentForRead(root, ADHOC, rows as never);
+      await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+      const main = await getSampleMainDir(root, ADHOC, false);
+      const dist = await main.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: false });
+      await writeRawFile(dist, "zz-remote-devR-s1.ndjson", `${JSON.stringify(buildAssignEvent({ xrayImageId: "IMG-B", assignedTo: "emp-a", eventBy: "admin2" }))}\n`);
+      const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      expect(changed.has("distribution")).toBe(true);
+      const second = await loadOrDeriveDistributionCurrentForRead(root, ADHOC, rows as never);
+      expect(second?.entries.map((e) => e.xrayImageId)).toContain("IMG-B");
+    });
+
+    it("a manual run bumps every ad-hoc store's epoch", async () => {
+      const root = makeRoot();
+      await getSampleMainDir(root, MONTH, true);
+      await makeStores(root, 2, 0);
+      await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      const before = workspaceEpoch(root, "adhoc-a00");
+      await runSync({ directoryHandle: root, monthFolderName: MONTH, manual: true });
+      expect(workspaceEpoch(root, "adhoc-a00")).toBeGreaterThan(before);
+      expect(workspaceEpoch(root, "adhoc-a01")).toBeGreaterThan(0);
     });
 
     it("stays quiet when nothing in the ad-hoc stores moved, and costs a bounded number of ops", async () => {

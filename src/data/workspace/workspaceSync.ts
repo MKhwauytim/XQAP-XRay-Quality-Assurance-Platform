@@ -42,7 +42,8 @@
  */
 import { broadcastDataRefresh, type DataRefreshFamily } from "./dataRefreshSignal";
 import { bumpWorkspaceEpoch, workspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
-import { listAdhocStoreImportIds } from "../adhocImport/adhocImportStorage";
+import { ADHOC_IMPORT_INDEX_FILE, adhocStoreHasDistributionEvents, listAdhocStoreImportIds } from "../adhocImport/adhocImportStorage";
+import { mapWithConcurrency } from "../storage/concurrency";
 import { adhocMonthFolder } from "../adhocImport/adhocImportModel";
 import { carryRequestQueuesAcrossEpochBump, markRequestQueueProbeCompleted } from "../answers/answerStorage";
 import { ownStableAnswerSegmentMatcher } from "../answers/answerSegmentChain";
@@ -73,6 +74,7 @@ import { ACK_FILE_SUFFIX } from "../notifications/notificationAckStorage";
 import { FEEDBACK_THREAD_FILE_SUFFIX } from "../feedback/feedbackStorage";
 import {
   getPopulationMonthDir,
+  getAdhocImportsDir,
   getSampleMonthDir,
   getSystemRoot,
   FEEDBACK_SUBFOLDERS,
@@ -314,6 +316,7 @@ export async function refreshSyncIntervalFromDisk(
 /** Test-only: forget every remembered probe baseline and release the guard. */
 export function __resetWorkspaceSyncStateForTests(): void {
   previousProbes.clear();
+  adhocProbeStates.clear();
   inFlight = null;
   lastSyncStartedAt = 0;
   effectiveSyncIntervalMs = DEFAULT_SYNC_INTERVAL_MS;
@@ -469,31 +472,84 @@ const ANSWER_SEGMENT_HEAD_STAT_BUDGET = 64;
 /** The `File`s the last answer-segment probe stat'd, kept for the owners peek of the SAME run (runs are single-flight). */
 let probedAnswerFiles = new Map<string, Blob>();
 
-/** More ad-hoc stores than this are not probed one by one: the signature changes every tick (everyone reloads). */
+/** At most this many ad-hoc stores are probed per tick; more are covered by a rotating slice. */
 const ADHOC_PROBE_MAX_STORES = 8;
+/** Stores probed at once (probe latency must not grow linearly with the store count). */
+const ADHOC_PROBE_CONCURRENCY = 4;
+/** Stores found NOT assigned are re-checked at least this often even if the index did not move. */
+const ADHOC_UNASSIGNED_RECHECK_TICKS = 10;
+
+type AdhocProbeState = {
+  /** import id -> does the store have `1-main/distribution.events` (i.e. was anything ever assigned)? */
+  assigned: Map<string, boolean>;
+  /** Last signatures observed per assigned store; carried for stores not probed this tick. */
+  lastSig: Map<string, { dist: string; answers: string }>;
+  tick: number;
+  lastUnassignedCheckTick: number;
+  indexRevision: number | null;
+};
+const adhocProbeStates = new Map<string, AdhocProbeState>();
 
 /**
  * Ad-hoc stores are synthetic month folders (`2-samples/adhoc-{id}/`) that no other probe
  * watches, yet the employee queue and results view render their rows. One listing of
- * `2-samples/` names the stores; each gets a bounded `distribution.events` and
- * `answers.events` signature (its own stable answer chain excluded, as for the real month).
- * Cost per tick: 1 listing + about 7 ops per store (3 dir opens, 2 listings, plus a stat per
- * chain head). No ad-hoc store: 1 listing. Over the store cap: unknown, reported as changed.
+ * `2-samples/` names the stores; only stores that have `1-main/distribution.events` (something
+ * was assigned; an import that was only SAVED creates a store folder too and never changes)
+ * are probed, each with a bounded `distribution.events` and heads-first `answers.events`
+ * signature (its own stable answer chain excluded, as for the real month).
+ * Over `ADHOC_PROBE_MAX_STORES` assigned stores a rotating slice is probed per tick and the
+ * rest keep their last observed signature, so the combined signature stays STABLE while
+ * nothing changes and a change is noticed within ceil(stores / cap) ticks.
+ * Cost per tick: 1 listing, the ad-hoc index revision (about 3 ops), and per probed store
+ * about 7 ops plus a stat per chain head; probed with bounded parallelism.
  */
 async function probeAdhocStores(
   directoryHandle: DirectoryHandleLike
 ): Promise<{ dist: Probed<string>; answers: Probed<string> }> {
   try {
-    const ids = (await listAdhocStoreImportIds(directoryHandle)).sort();
-    if (ids.length === 0) return { dist: "", answers: "" };
-    if (ids.length > ADHOC_PROBE_MAX_STORES) {
-      const stamp = `overcap:${Date.now()}`;
-      return { dist: stamp, answers: stamp };
+    const scope = workspaceScopeId(directoryHandle);
+    let state = adhocProbeStates.get(scope);
+    if (!state) {
+      state = { assigned: new Map(), lastSig: new Map(), tick: 0, lastUnassignedCheckTick: 0, indexRevision: null };
+      adhocProbeStates.set(scope, state);
     }
+    state.tick += 1;
+    const ids = (await listAdhocStoreImportIds(directoryHandle)).sort();
+    if (ids.length === 0) {
+      state.assigned.clear();
+      state.lastSig.clear();
+      return { dist: "", answers: "" };
+    }
+    const adhocDir = await getAdhocImportsDir(directoryHandle, false).catch(() => null);
+    const indexRevision = adhocDir ? await readEnvelopeRevision(adhocDir, ADHOC_IMPORT_INDEX_FILE).catch(() => null) : null;
+    const recheckUnassigned =
+      indexRevision !== state.indexRevision || state.tick - state.lastUnassignedCheckTick >= ADHOC_UNASSIGNED_RECHECK_TICKS;
+    state.indexRevision = indexRevision;
+    if (recheckUnassigned) state.lastUnassignedCheckTick = state.tick;
+    for (const known of [...state.assigned.keys()]) {
+      if (!ids.includes(known)) {
+        state.assigned.delete(known);
+        state.lastSig.delete(known);
+      }
+    }
+    const toCheck = ids.filter((id) => !state!.assigned.has(id) || (recheckUnassigned && state!.assigned.get(id) === false));
+    await mapWithConcurrency(toCheck, ADHOC_PROBE_CONCURRENCY, async (id) => {
+      state!.assigned.set(id, await adhocStoreHasDistributionEvents(directoryHandle, id));
+    });
+    const assignedIds = ids.filter((id) => state!.assigned.get(id) === true);
+    // A store never observed yet is always probed (once), so the rotation never reports a store's
+    // first signature as a change; after that, at most ADHOC_PROBE_MAX_STORES per tick in rotation.
+    const unobserved = assignedIds.filter((id) => !state!.lastSig.has(id));
+    const rotation =
+      assignedIds.length <= ADHOC_PROBE_MAX_STORES
+        ? assignedIds
+        : Array.from(
+            { length: ADHOC_PROBE_MAX_STORES },
+            (_, i) => assignedIds[((state!.tick * ADHOC_PROBE_MAX_STORES) % assignedIds.length + i) % assignedIds.length]!
+          );
+    const chosen = [...new Set([...unobserved, ...rotation])];
     const actor = readRealSession()?.username;
-    const dist: [string, string][] = [];
-    const answers: [string, string][] = [];
-    for (const id of ids) {
+    await mapWithConcurrency(chosen, ADHOC_PROBE_CONCURRENCY, async (id) => {
       const folder = adhocMonthFolder(id);
       const mainDir = await openOrNull(() => getSampleMonthDir(directoryHandle, folder, false));
       const main = mainDir ? await openOrNull(() => mainDir.getDirectoryHandle(SAMPLE_SUBFOLDERS.main, { create: false })) : null;
@@ -503,10 +559,9 @@ async function probeAdhocStores(
             openOrNull(() => main.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: false })),
           ])
         : [null, null];
-      dist.push([id, distDir ? await boundedSizeSignature(distDir, DISTRIBUTION_EVENT_SEGMENT_SUFFIX) : ""]);
-      answers.push([
-        id,
-        ansDir
+      state!.lastSig.set(id, {
+        dist: distDir ? await boundedSizeSignature(distDir, DISTRIBUTION_EVENT_SEGMENT_SUFFIX) : "",
+        answers: ansDir
           ? await boundedSizeSignature(
               ansDir,
               ANSWER_EVENT_SEGMENT_SUFFIX,
@@ -515,12 +570,34 @@ async function probeAdhocStores(
               true
             )
           : "",
-      ]);
-    }
-    return { dist: JSON.stringify(dist), answers: JSON.stringify(answers) };
+      });
+    });
+    return {
+      dist: JSON.stringify(assignedIds.map((id) => [id, state!.lastSig.get(id)?.dist ?? ""])),
+      answers: JSON.stringify(assignedIds.map((id) => [id, state!.lastSig.get(id)?.answers ?? ""])),
+    };
   } catch (error) {
     logError("workspaceSync:probeAdhocStores", error);
     return { dist: UNPROBED, answers: UNPROBED };
+  }
+}
+
+/** Ids whose entry differs between two ad-hoc signatures (or all ids of `current` when `previous` is unusable). */
+function adhocIdsMoved(previous: string, current: string): string[] {
+  try {
+    const before = new Map(JSON.parse(previous || "[]") as [string, string][]);
+    const after = JSON.parse(current || "[]") as [string, string][];
+    return after.filter(([id, sig]) => before.get(id) !== sig).map(([id]) => id);
+  } catch {
+    return [];
+  }
+}
+
+function adhocIdsOf(signature: string): string[] {
+  try {
+    return (JSON.parse(signature || "[]") as [string, string][]).map(([id]) => id);
+  } catch {
+    return [];
   }
 }
 
@@ -898,6 +975,10 @@ async function probeChangedFamilies(
    * stat budget can size (growth of an unsized head can never name its owner).
    */
   ownersUnknown: boolean;
+  /** Ad-hoc stores whose distribution/answers signature moved, and every probed store id. Their
+   *  epoch-keyed read memos (`workspaceEpoch(root, "adhoc-{id}")`) must be bumped like the month's. */
+  adhocMoved: string[];
+  adhocAll: string[];
 }> {
   const key = probeKey(directoryHandle, monthFolderName);
   const previous = previousProbes.get(key);
@@ -948,7 +1029,20 @@ async function probeChangedFamilies(
     (movedFrom(previous.answersSignature, current.answersSignature, sameValue) ||
       // an ad-hoc store answer change: whose rows it concerns is not classified by the peek
       movedFrom(previous.adhocAnswersSignature, current.adhocAnswersSignature, sameValue));
-  return { changed, sealedInvalidation, movedSegmentPrevSizes, legacyAnswersMoved, ownersUnknown };
+  let adhocMoved: string[] = [];
+  let adhocAll: string[] = [];
+  if (isProbed(current.adhocDistSignature) && isProbed(current.adhocAnswersSignature)) {
+    adhocAll = adhocIdsOf(current.adhocDistSignature);
+    if (previous && isProbed(previous.adhocDistSignature) && isProbed(previous.adhocAnswersSignature)) {
+      adhocMoved = [
+        ...new Set([
+          ...adhocIdsMoved(previous.adhocDistSignature, current.adhocDistSignature),
+          ...adhocIdsMoved(previous.adhocAnswersSignature, current.adhocAnswersSignature),
+        ]),
+      ];
+    }
+  }
+  return { changed, sealedInvalidation, movedSegmentPrevSizes, legacyAnswersMoved, ownersUnknown, adhocMoved, adhocAll };
 }
 
 export type SyncRunOptions = {
@@ -1016,10 +1110,12 @@ async function performSync(options: SyncRunOptions, manual: boolean): Promise<Sy
   let answerOwners: Set<string> | null = null;
   let legacyAnswersMoved = false;
   let ownersUnknown: boolean | undefined;
+  let adhocMoved: string[] = [];
+  let adhocAll: string[] = [];
   if (directoryHandle && monthFolderName) {
     try {
       let movedSegmentPrevSizes: Map<string, number> | null;
-      ({ changed, sealedInvalidation, movedSegmentPrevSizes, legacyAnswersMoved, ownersUnknown } = await probeChangedFamilies(directoryHandle, monthFolderName, systemDir));
+      ({ changed, sealedInvalidation, movedSegmentPrevSizes, legacyAnswersMoved, ownersUnknown, adhocMoved, adhocAll } = await probeChangedFamilies(directoryHandle, monthFolderName, systemDir));
       markRequestQueueProbeCompleted(directoryHandle, monthFolderName);
       if (changed.has("answers") && movedSegmentPrevSizes && !ownersUnknown) {
         answerOwners = await peekAnswerOwners(movedSegmentPrevSizes);
@@ -1059,6 +1155,10 @@ async function performSync(options: SyncRunOptions, manual: boolean): Promise<Sy
       if (!manual && !changed.has("requests")) {
         carryRequestQueuesAcrossEpochBump(directoryHandle, monthFolderName, epochBefore);
       }
+      // Ad-hoc stores are their own "months" with their own epoch-keyed read memos
+      // (derive memo, dir cache): bump the ones that moved (all of them on a manual run) or the
+      // reload this broadcast triggers would be served the pre-change rows.
+      for (const id of manual ? adhocAll : adhocMoved) bumpWorkspaceEpoch(directoryHandle, adhocMonthFolder(id));
     }
     if (manual) {
       broadcastDataRefresh("manual");
