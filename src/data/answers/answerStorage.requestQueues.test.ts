@@ -9,6 +9,7 @@ import {
   clearReadLog,
   createMemoryDirectory,
   getReadLog,
+  setSimulatedFaults,
 } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { bumpWorkspaceEpoch, workspaceEpoch } from "../storage/inFlightReads";
@@ -19,6 +20,7 @@ import {
   appendReferralToEmployee,
   carryRequestQueuesAcrossEpochBump,
   loadAllEmployeeRequestFiles,
+  markRequestQueueProbeCompleted,
 } from "./answerStorage";
 
 const MONTH = "5-May-2026";
@@ -87,6 +89,7 @@ describe("loadAllEmployeeRequestFiles (A10)", () => {
     await seed(root, 4, 0);
     await loadAllEmployeeRequestFiles(root, MONTH);
     // answers-only tick: the sync layer bumps the epoch, then carries the memo across it
+    markRequestQueueProbeCompleted(root, MONTH); // the answers-only tick's probe completes
     const before = workspaceEpoch(root, MONTH);
     bumpWorkspaceEpoch(root, MONTH);
     carryRequestQueuesAcrossEpochBump(root, MONTH, before);
@@ -130,4 +133,40 @@ describe("loadAllEmployeeRequestFiles (A10)", () => {
     expect(max).toBeLessThanOrEqual(4);
     expect(max).toBeGreaterThan(1); // proves the patched handle is exercised and reads do overlap
   });
+
+  it("a transient NotFound on a legacy-only employee's .answers.json is not memoized as 'no requests'", async () => {
+    __clearAnswerEventsCacheForTests();
+    const root = makeRoot();
+    const dir = await getSampleEmployeeDir(root, MONTH, true);
+    await safeWriteJson(dir, "old00.answers.json", {
+      username: "old00", monthFolderName: MONTH, revision: 1, items: [], referralRequests: [{ requestId: "legacy-r1" }],
+    });
+    setSimulatedFaults(root, [{ operation: "getFileHandle", name: "old00.answers.json", errorName: "NotFoundError", times: 1 } as never]);
+    await loadAllEmployeeRequestFiles(root, MONTH);
+    setSimulatedFaults(root, []);
+    bumpWorkspaceEpoch(root, MONTH);
+    const later = await loadAllEmployeeRequestFiles(root, MONTH);
+    const ids = later.find((f) => f.username === "old00")?.referralRequests?.map((r) => r.requestId) ?? [];
+    expect(ids).toContain("legacy-r1");
+  });
+
+  it("a transient per-employee failure is not memoized or carried as a missing queue", async () => {
+    __clearAnswerEventsCacheForTests();
+    const root = makeRoot();
+    const dir = await getSampleEmployeeDir(root, MONTH, true);
+    for (const u of ["alice", "bob"]) {
+      await safeWriteJson(dir, `${u}.requests.json`, { username: u, monthFolderName: MONTH, revision: 1, referralRequests: [{ requestId: `r-${u}` }] });
+    }
+    setSimulatedFaults(root, [{ operation: "getFileHandle", name: "alice.requests.json", errorName: "SecurityError", times: 200 } as never]);
+    const first = await loadAllEmployeeRequestFiles(root, MONTH);
+    expect(first.map((f) => f.username)).toEqual(["bob"]); // isolation as before
+    setSimulatedFaults(root, []);
+    for (let i = 0; i < 3; i += 1) {
+      const before = workspaceEpoch(root, MONTH);
+      bumpWorkspaceEpoch(root, MONTH);
+      carryRequestQueuesAcrossEpochBump(root, MONTH, before);
+    }
+    const later = await loadAllEmployeeRequestFiles(root, MONTH);
+    expect(later.map((f) => f.username)).toContain("alice");
+  }, 60_000);
 });

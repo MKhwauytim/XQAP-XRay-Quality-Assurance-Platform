@@ -42,7 +42,7 @@
  */
 import { broadcastDataRefresh, type DataRefreshFamily } from "./dataRefreshSignal";
 import { bumpWorkspaceEpoch, workspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
-import { carryRequestQueuesAcrossEpochBump } from "../answers/answerStorage";
+import { carryRequestQueuesAcrossEpochBump, markRequestQueueProbeCompleted } from "../answers/answerStorage";
 import { ownStableAnswerSegmentMatcher } from "../answers/answerSegmentChain";
 import {
   invalidateSealedAnswerSegmentNames,
@@ -173,7 +173,7 @@ type Probe = {
    *  deliberately NOT read here, and why it is still the signal for the
    *  single-file manifest/notifications probes). */
   answersSignature: Probed<string>;
-  /** Bounded name+size signature of the per-employee `*.requests.json` files
+  /** Name+size+mtime listing of the per-employee `*.requests.json` files
    *  (referral / replacement / reopen queues). Before the answers family was
    *  split from "requests" nothing probed these directly: a request change was
    *  only ever noticed because an answer-segment change happened to mark
@@ -462,16 +462,6 @@ const ANSWER_SEGMENT_HEAD_STAT_BUDGET = 64;
 /** The `File`s the last answer-segment probe stat'd, kept for the owners peek of the SAME run (runs are single-flight). */
 let probedAnswerFiles = new Map<string, Blob>();
 
-async function safeRequestsFilesSignature(dir: DirectoryHandleLike | null): Promise<Probed<string>> {
-  if (!dir) return "";
-  try {
-    return await boundedSizeSignature(dir, REQUESTS_SUFFIX);
-  } catch (error) {
-    logError("workspaceSync:probeRequestsFiles", error);
-    return UNPROBED;
-  }
-}
-
 /** §6 of the answer-save proposal: read-only, bounded — same primitive and shape as `safeSegmentsSignature` above. */
 async function safeAnswerSegmentsSignature(
   dir: DirectoryHandleLike | null,
@@ -617,7 +607,7 @@ async function probeMonth(
       safeRevision(dirs.notificationsDir, NOTIFICATIONS_FILE),
       safeAcksSignature(dirs.notificationsDir),
       safeSignature(dirs.employeesDir, ANSWERS_SUFFIX),
-      safeRequestsFilesSignature(dirs.employeesDir),
+      safeSignature(dirs.employeesDir, REQUESTS_SUFFIX),
       safeSignature(dirs.approvalsDir, DECISIONS_SUFFIX),
       safeRevision(dirs.populationMonthDir, MONTH_MANIFEST_FILE),
       safeSegmentsSignature(dirs.eventsDir),
@@ -929,6 +919,7 @@ async function performSync(options: SyncRunOptions, manual: boolean): Promise<Sy
     try {
       let movedSegmentPrevSizes: Map<string, number> | null;
       ({ changed, sealedInvalidation, movedSegmentPrevSizes, legacyAnswersMoved } = await probeChangedFamilies(directoryHandle, monthFolderName, systemDir));
+      markRequestQueueProbeCompleted(directoryHandle, monthFolderName);
       if (changed.has("answers") && movedSegmentPrevSizes) {
         answerOwners = await peekAnswerOwners(movedSegmentPrevSizes);
       }

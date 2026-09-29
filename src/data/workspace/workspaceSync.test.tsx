@@ -1225,6 +1225,24 @@ describe("runSync — §6 of the answer-save proposal: the answers.events segmen
     expect(opened).toBeLessThanOrEqual(64);
   });
 
+  it("A10: a request written between the memo read and the baseline probe is not hidden by carried answers-only ticks", async () => {
+    __clearAnswerEventsCacheForTests();
+    const root = makeRoot();
+    const eventsDir = await answerEventsDirFor(root);
+    const answersDir = await getSampleEmployeeDir(root, MONTH, true);
+    await writeRawFile(answersDir, "alice.requests.json", JSON.stringify({ username: "alice", referralRequests: [] }));
+    await writeRawFile(eventsDir, "a1-ans-devA-s1.ndjson", answerSegment(["e01"]));
+    await loadAllEmployeeRequestFiles(root, MONTH); // view mounts BEFORE the first probe
+    await writeRawFile(answersDir, "alice.requests.json", JSON.stringify({ username: "alice", referralRequests: [{ requestId: "r-remote" }] }));
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // silent baseline swallows the change
+    for (const ids of [["e01", "e02"], ["e01", "e02", "e03"]]) {
+      await writeRawFile(eventsDir, "a1-ans-devA-s1.ndjson", answerSegment(ids));
+      expect([...(await runSync({ directoryHandle: root, monthFolderName: MONTH })).changed]).toEqual(["answers"]);
+    }
+    const files = await loadAllEmployeeRequestFiles(root, MONTH);
+    expect(files.find((f) => f.username === "alice")?.referralRequests?.map((r) => r.requestId)).toContain("r-remote");
+  });
+
   it("A9: a per-employee requests file change is reported as requests (it had no probe of its own)", async () => {
     const root = makeRoot();
     const answersDir = await getSampleEmployeeDir(root, MONTH, true);

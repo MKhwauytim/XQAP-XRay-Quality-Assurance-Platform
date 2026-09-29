@@ -376,6 +376,7 @@ export function clearAnswerEventsCache(): void {
   legacySeedMemoByRoot = new WeakMap();
   requestQueuesMemo.clear();
   legacyRequestQueuesMemo.clear();
+  requestProbeGeneration.clear();
 }
 
 /**
@@ -418,6 +419,7 @@ function resetAnswerEventsCache(): void {
   legacySeedMemoByRoot = new WeakMap();
   requestQueuesMemo.clear();
   legacyRequestQueuesMemo.clear();
+  requestProbeGeneration.clear();
 }
 
 /** @internal test-only alias — see `resetAnswerEventsCache`. */
@@ -1871,15 +1873,28 @@ export type EmployeeRequestQueues = Pick<
  * does not force every client to re-read every employee's queue. A failed scan
  * is never stored.
  */
-const requestQueuesMemo = new Map<string, { epoch: number; files: EmployeeRequestQueues[] }>();
-/** Frozen legacy `.answers.json` request arrays, per (root, month, user): read once, like the seed. */
+const requestQueuesMemo = new Map<string, { epoch: number; files: EmployeeRequestQueues[]; probeGen: number }>();
+/** Frozen legacy `.answers.json` request arrays, per (root, month, user): read once, like the seed. Found files only. */
 const legacyRequestQueuesMemo = new Map<string, EmployeeRequestsFile>();
+/** Completed sync probes per (root, month): what makes a memo carry-safe (see `carryRequestQueuesAcrossEpochBump`). */
+const requestProbeGeneration = new Map<string, number>();
 
 function requestQueuesKey(directoryHandle: DirectoryHandleLike, monthFolderName: string): string {
   return `${workspaceScopeId(directoryHandle)}|${monthFolderName}`;
 }
 
-/** See `requestQueuesMemo`: re-key a memo taken at `previousEpoch` to the current one. */
+/** The sync layer calls this when a probe of the month has COMPLETED (baseline included). */
+export function markRequestQueueProbeCompleted(directoryHandle: DirectoryHandleLike, monthFolderName: string): void {
+  const key = requestQueuesKey(directoryHandle, monthFolderName);
+  requestProbeGeneration.set(key, (requestProbeGeneration.get(key) ?? 0) + 1);
+}
+
+/**
+ * See `requestQueuesMemo`: re-key a memo taken at `previousEpoch` to the current one,
+ * but ONLY if the memo was read AFTER the previous probe completed. A request another
+ * machine wrote between an earlier read and a probe is folded into that probe's
+ * baseline and never diffed, so a memo older than the baseline could hide it forever.
+ */
 export function carryRequestQueuesAcrossEpochBump(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
@@ -1887,8 +1902,9 @@ export function carryRequestQueuesAcrossEpochBump(
 ): void {
   const key = requestQueuesKey(directoryHandle, monthFolderName);
   const memo = requestQueuesMemo.get(key);
-  if (memo && memo.epoch === previousEpoch) {
-    requestQueuesMemo.set(key, { ...memo, epoch: workspaceEpoch(directoryHandle, monthFolderName) });
+  const generation = requestProbeGeneration.get(key) ?? 0;
+  if (memo && memo.epoch === previousEpoch && memo.probeGen === generation - 1) {
+    requestQueuesMemo.set(key, { ...memo, epoch: workspaceEpoch(directoryHandle, monthFolderName), probeGen: generation });
   }
 }
 
@@ -1898,8 +1914,10 @@ export async function loadAllEmployeeRequestFiles(
 ): Promise<EmployeeRequestQueues[]> {
   const memoKey = requestQueuesKey(directoryHandle, monthFolderName);
   const epoch = workspaceEpoch(directoryHandle, monthFolderName);
+  const probeGenAtStart = requestProbeGeneration.get(memoKey) ?? 0;
   const memo = requestQueuesMemo.get(memoKey);
   if (memo && memo.epoch === epoch) return [...memo.files];
+  let anyFailed = false;
   try {
     const { stems, withRequestsFile } = await listAnswerDirStemKinds(directoryHandle, monthFolderName);
     // Bounded concurrency (was one employee at a time). A per-employee failure is
@@ -1918,7 +1936,18 @@ export async function loadAllEmployeeRequestFiles(
           if (cached) {
             requests = cached;
           } else {
-            requests = await loadEmployeeRequestsFile(directoryHandle, monthFolderName, username);
+            // The stem came from the LISTING, so the file exists: an absent answer is a
+            // transient share hiccup, never "no requests" (same rule as the seed memo).
+            const legacy = await loadLegacyAnswersFile(directoryHandle, monthFolderName, username);
+            if (legacy === null) throw new Error(`Legacy answers file for ${username} listed but not found.`);
+            requests = {
+              username,
+              monthFolderName,
+              revision: 0,
+              referralRequests: legacy.referralRequests,
+              replacementRequests: legacy.replacementRequests,
+              reopenRequests: legacy.reopenRequests,
+            };
             legacyRequestQueuesMemo.set(legacyKey, requests);
           }
         }
@@ -1931,15 +1960,17 @@ export async function loadAllEmployeeRequestFiles(
         };
       } catch (error) {
         logError("answerStorage:loadAllEmployeeRequestFiles:employee", error, { action: username });
+        anyFailed = true;
         return null;
       }
     });
     const files = loaded
       .filter((entry): entry is EmployeeRequestQueues => entry !== null)
       .sort((a, b) => a.username.localeCompare(b.username));
-    // Store only if the epoch did not move while we read (a write mid-scan must not be memoized stale).
-    if (workspaceEpoch(directoryHandle, monthFolderName) === epoch) {
-      requestQueuesMemo.set(memoKey, { epoch, files });
+    // Store only a COMPLETE scan (a skipped employee would otherwise be a persistent gap) and
+    // only if the epoch did not move while we read (a write mid-scan must not be memoized stale).
+    if (!anyFailed && workspaceEpoch(directoryHandle, monthFolderName) === epoch) {
+      requestQueuesMemo.set(memoKey, { epoch, files, probeGen: probeGenAtStart });
     }
     return [...files];
   } catch (err) {
