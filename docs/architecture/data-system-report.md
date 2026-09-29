@@ -96,13 +96,14 @@ global selection.
 
 | File or Pattern | Typical Location | Purpose |
 | --- | --- | --- |
-| `config.json` | `1-population/` (root, not per-month) | Population processing configuration: system/custom field definitions, column-mapping templates, stage alias mappings, processing workflow presets, export templates, sampling rules, and per-employee stage allocations. |
+| `config.json` | `1-population/` (root, not per-month) | Population processing configuration: system/custom field definitions, column-mapping templates, stage alias mappings, processing workflow presets, export templates, sampling rules, and per-employee stage allocations, plus the optional `certScanPorts: string[]` (C2, additive — a config written before it loads as `[]`, so no migration): ports treated as CertScan as a whole. Processing unions it with the pasted CertScan list on the next run only; an already-drawn sample is never re-flagged, and `SAMPLING_ALGORITHM_VERSION` is unchanged. |
 | `certscan.global.json` | `1-population/` (root, not per-month) | Global CertScan matching reference text shared across all months. |
 | `month.manifest.json` | `1-population/{month}/` | Month metadata: month/year, processed counts, status, operator info. |
 | `risk.raw.json` | `1-population/{month}/1-raw/` or legacy month folder | Imported risk rows. |
 | `bi.raw.json` | `1-population/{month}/1-raw/` or legacy month folder | Imported BI rows when provided. |
 | `population.final.json` | `1-population/{month}/2-processed/` or legacy month folder | Final processed population rows used for sampling and reporting. |
 | `processing.summary.json` | `1-population/{month}/2-processed/` | Processing summary/validation data. |
+| `population.final.{ISO-ts}.superseded.json` | `1-population/{month}/2-processed/` | Mandatory archive (A2): the prior `population.final.json`, copied before a save, a population recovery or a selective backup restore overwrites it. A failed archive refuses the overwrite. Source workbooks are archived best-effort as `risk.source.{ISO-ts}.superseded.{ext}` / `bi.source.{ISO-ts}.superseded.{ext}` in `1-raw/`. Candidates of the Settings «استعادة المجتمع السابق» tool. |
 | `sample.master.json` | `2-samples/{month}/1-main/` | Drawn sample rows and sample configuration/result metadata. |
 | `distribution.events/{eventId}.json` | `2-samples/{month}/1-main/` | Immutable durable assignment event envelopes. |
 | `distribution.log.json` | `2-samples/{month}/1-main/` | Backward-compatible event-log projection. |
@@ -181,6 +182,7 @@ helpers, aborting with a `staleRevision` flag the caller confirms exactly as the
 guard already does — needs a new UI confirmation branch plus tests and belongs in a planned release.
 | `main.samples.json` | `2-samples/{month}/1-main/` | Mirror of all assigned sample entries. |
 | `{username}.samples.json` | `2-samples/{month}/2-employees/` | Per-employee sample mirror. |
+| `answers.events/{creationMinute}-ans-{deviceHash}-{chainHash}[-seq].ndjson` | `2-samples/{month}/…` | Answer event segments. Since A1 the writer chain is stable: one chain per browser × month × user (creation minute persisted in `localStorage` key `xray_answer_segment_chain_v1`) rather than one per page load. Losing the stored minute only starts a new chain; readers fold every segment. |
 | `{username}.answers.json` | `2-samples/{month}/2-employees/` | Employee answers plus referral/replacement requests for that employee. |
 | `{supervisor}.decisions.json` | `2-samples/{month}/3-approvals/` | Supervisor referral/replacement decisions. |
 | `activity.log.json` | `5-system/audit/` | Sign-in and working-hours audit log. |
@@ -275,7 +277,7 @@ Each `population.final.json` row and each sampled `rows[]` item uses the process
 | `events[]` | `eventId`, `eventType`, `xrayImageId`, `assignedTo`, `replacedById`, `reassignedTo`, `eventAt`, `eventBy`, `notes`, `dailyQuota`, `daysRemainingAtAssignment`. |
 | `distribution.current.json` | Rebuildable cache: `monthFolderName`, `logRevision`, `eventSetId`, `derivedAt`, totals for assigned/completed/replaced/pending, `entries[]`, `quotas`. |
 | `entries[]` | `xrayImageId`, `assignedTo`, `status`, `replacedById`, `lastEventAt`, `row`. |
-| `quotas` | Per employee: `username`, `sampleCount`, `dailyQuota`, `daysRemainingAtAssignment`, `assignedAt`. |
+| `quotas` | Per employee: `username`, `sampleCount`, `dailyQuota`, `daysRemainingAtAssignment`, `assignedAt`. Since C3 (`DERIVE_VERSION` 5) `daysRemainingAtAssignment` counts WORKING days (Sunday–Thursday; no holiday calendar) from the first `assigned` event's calendar day to the deadline (last day of the month − 3), inclusive, floored at 1 in the division (`countWorkingDays`, `src/utils/workingDays.ts`); `sampleCount` is the employee's live assigned count. The value is frozen — completions and the passing of time never move it; only a change in the live assigned count does. |
 | `{username}.samples.json` | Employee mirror: `monthFolderName`, `username`, `updatedAt`, `sourceLogRevision`, `entries[]`. |
 | `{username}.answers.json` | `username`, `monthFolderName`, `revision`, `_writeToken`, `lastUpdatedAt`, `items[]`, `referralRequests[]`, `replacementRequests[]`. |
 | `items[]` | `xrayImageId`, `templateId`, `templateVersion`, `answers`, `lastSavedAt`, `submittedAt`, `answeredBy`, `status`. |
@@ -418,3 +420,56 @@ Both files use `safeWriteJson` / `safeReadJson` and the `JsonEnvelope` schema-ve
   single bug in that path could destroy data the backup never had. Restoring browser-storage data
   (users, permissions, custom labels) is a separate, explicit opt-in step offered after a
   successful restore — it is never applied automatically.
+- **Selective restore (Workstream D, admin only):** the Archive restore dialog's
+  «استعادة انتقائية» mode restores chosen **element × month** cells instead of the whole
+  `json/` tree. The element catalog is `src/data/backup/restoreScope.ts` (one definition,
+  numbered and legacy paths): Population, Sample & distribution, Answers, Referrals &
+  approvals (per month), and Population settings, Templates, Users & permissions, Report
+  designs, Feedback, System settings (workspace-wide). Access is admin-only
+  (`session.role === "admin"`, on top of the ordinary restore permission).
+  - **The classifier fails closed.** `classifyBackupPath` answers from the path alone; a path
+    matching no element (including an unknown child of a population month folder) returns
+    `null` and is never restored selectively. `5-system/{backups,audit,locks,system-errors}/`
+    and `restore.inprogress.json` are deliberately unmatched. `restoreBackupSnapshot` takes the
+    optional `scope`; absent, it is the full restore above, unchanged. A selective restore
+    keeps every guarantee of a full one — `assertBackupComplete`, a FULL `pre-restore`
+    rollback backup, the sentinel, and the same per-file `restoreActionFor` semantics (event
+    segments still merge) — and never creates folders for unselected elements.
+  - **Manifest handling.** Scoped walks skip `month.manifest.json` entirely (it carries status,
+    lock and CAS bookkeeping). After a population restore only the population-describing fields
+    (and `totalProcessedRows`) are synced into the live manifest, under `manifestLockKey(month)`
+    (`syncManifestFromBackupPopulation`, `populationRecovery.ts`). The whole backup manifest is
+    written (revision 1, no `_writeToken`) only when the live month folder was confirmed absent
+    BEFORE the restore walk began; a manifest that reads as missing in a month that existed is
+    left untouched and reported as a derived warning.
+  - **Closed months are refused** for every month-scoped element, all selected months checked
+    before anything is touched (`archive_restore_month_closed`).
+  - **Dependency plan** (`selectiveRestore.ts`, re-run from disk by `runSelectiveRestore`, never
+    trusting the dialog's earlier plan): a population restore for a month with a live
+    distribution or answers is refused unless every sampled `xrayImageId` exists in the backup's
+    population (A2's rule, through `assessPopulationOverwrite`). When the same restore also
+    restores Sample & distribution, the A2 coverage check uses the UNION of the live and the
+    backup sampled ids, because restoring a sample merges events rather than removing the
+    distribution/answers already on disk; this can false-block, never false-allow. Sample &
+    distribution without Answers (or the reverse) is allowed with a warning. Before confirming,
+    the dialog previews file counts per element × month (an empty selection disables confirm).
+  - **Archive, never delete.** The live `population.final.json` of every month the backup really
+    replaces is archived as `population.final.{stamp}.superseded.json` (mandatory; a failed
+    archive stops the restore before it starts), so the restore is itself undoable from
+    Settings → «استعادة المجتمع السابق».
+  - **After the walk** the replacement-candidate index, the month aggregate and
+    `distribution.current.json` are rebuilt (never copied) for the months actually restored, and
+    the B3 integrity scan runs for every selected month. A rebuild step that fails does not
+    fail the restore (the data is on disk): it is returned in `derivedWarnings`
+    (`{ month, step: manifest | population-derived | replacement-index | aggregate |
+    distribution-cache, error }`) and shown to the admin.
+  - **Audit.** A successful selective restore records a `backup-restored` action
+    (`selective: true`, `elements`, `months`, `restoredFiles`, `rollbackFolderName`); the full
+    restore records the same type with `rollbackFolderName` and a month count, and the
+    Settings population-recovery restore records it too.
+  - **Population recovery from backups.** A2's recovery tool lists complete backups holding the
+    month's population as `source: "backup"` candidates (`listBackupPopulationCandidates`). Each
+    candidate costs a full population read, so only the newest
+    `BACKUP_POPULATION_CANDIDATE_SCAN_LIMIT` (10) complete backups are scanned; an interrupted
+    backup is never offered. Restoring one goes through this engine with
+    `{ elements: ["population"], months: [month] }`.
