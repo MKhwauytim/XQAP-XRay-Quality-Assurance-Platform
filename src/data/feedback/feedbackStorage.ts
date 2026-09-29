@@ -36,6 +36,17 @@ export interface FeedbackMessage {
   timestamp: string;
   status: "open" | "resolved";
   replies: FeedbackReply[];
+  /**
+   * When and by whom the thread was first resolved (Workstream B, 2026-09-28).
+   * OPTIONAL and ADDITIVE: set by `appendReply` only on the open -> resolved
+   * transition, from the resolving reply. Threads resolved before this field
+   * existed, and legacy `messages.json` entries, simply lack both -- no
+   * migration, because no existing field changes shape. Consumers that need a
+   * value for those (the admin export) approximate it from the last reply and
+   * say so.
+   */
+  resolvedAt?: string;
+  resolvedBy?: string;
 }
 
 /**
@@ -513,6 +524,9 @@ export async function appendReply(
           ...current,
           status: nextStatus,
           replies: [...current.replies, storedReply],
+          // Stamped ONCE, on the transition itself: re-resolving an already
+          // resolved thread keeps the first resolution.
+          ...(statusChanged ? { resolvedAt: storedReply.timestamp, resolvedBy: storedReply.from } : {}),
           revision: nextRevision,
           _writeToken: writeToken,
         };
