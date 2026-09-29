@@ -11,6 +11,7 @@ import { saveSampleMaster } from "../sampling/sampleStorage";
 import { upsertItemAnswer } from "../answers/answerStorage";
 import {
   appendDistributionEvents,
+  flushPendingDistributionPersist,
   loadDistributionLog,
   saveDistributionCurrent,
   __clearDeriveMemoForTests,
@@ -48,14 +49,13 @@ import { loadEmployeeSampleMirror } from "./sampleMirrorStorage";
  *   4. replacement          (executeReplacement) — this one did not refresh at
  *                            all before bug F20 was fixed.
  *
- * Flows 2–4 refresh through `refreshDistributionCacheAfterWrite`, which as of
- * Design B step 1 AWAITS its inner `saveDistributionCurrent`
- * (`awaitCachePersist`, see distributionStorage.ts). The guarantee is
- * therefore SYNCHRONOUS: when the flow's own promise resolves, the mirror on
- * disk is already correct. These assertions used to poll (50 × 5 ms) because
- * the write was fire-and-forget; they now assert ONCE, immediately, which is
- * what makes them a real guard on that synchronicity — restore the
- * fire-and-forget write and every one of them fails.
+ * Flows 2–4 refresh through `refreshDistributionCacheAfterWrite`. As of R1
+ * (lane R) that helper no longer awaits the mirror write: the persist runs on
+ * the per-month background chain and the READER guarantees freshness by
+ * refusing an untrusted mirror (see `isMirrorTrustedForEvents`). The contract
+ * these tests guard is therefore "once the chain has settled, the mirror on
+ * disk is correct" — `expectEmptyMirrorNow` flushes the chain first — not that
+ * the flow's own promise resolves after the write.
  */
 
 const MONTH = "5-May-2026";
@@ -163,6 +163,7 @@ async function expectEmptyMirrorNow(
   root: DirectoryHandleLike,
   username: string
 ): Promise<void> {
+  await flushPendingDistributionPersist();
   const mirror = await loadEmployeeSampleMirror(root, MONTH, username);
   expect(mirror, `mirror for ${username} is missing entirely`).not.toBeNull();
   expect(mirror!.username).toBe(username);

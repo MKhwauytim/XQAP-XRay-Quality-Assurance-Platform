@@ -8,7 +8,7 @@ import {
   appendDistributionEvent,
   appendDistributionEvents,
   loadDistributionLog,
-  saveDistributionCurrent,
+  queueDistributionCurrentPersist,
   type DistributionWriteProgress,
 } from "../../../../data/distribution/distributionStorage";
 import {
@@ -187,7 +187,11 @@ export function useDistributionActions(params: {
       ...(log.scanIdentity === undefined ? {} : { scanIdentity: log.scanIdentity }),
     };
     setDistributionCurrent(current);
-    await saveDistributionCurrent(directoryHandle, monthFolderName, current);
+    // R1: paint from the in-memory derive above and persist the REBUILDABLE
+    // files (cache, checkpoint sidecar, employee mirrors) on the per-month
+    // background chain. The events are already durable; a reader that arrives
+    // before the chain settles sees an untrusted mirror and folds.
+    void queueDistributionCurrentPersist(directoryHandle, monthFolderName, current);
     void autoLockWhenFullyDistributed(monthFolderName, current, sampleRows);
     onDistributionChanged();
   }

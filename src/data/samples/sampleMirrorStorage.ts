@@ -21,6 +21,8 @@ import { listAdhocSampleFolders } from "../adhocImport/adhocImportEmployeeView";
 // 2026-08 — see getUserWorkspaceFootprint's revision cross-check below).
 import {
   eventStoreMatchesScan,
+  isDistributionPersistPending,
+  isDistributionProjectionPending,
   loadOrDeriveDistributionCurrent,
   scanIdentityOf,
   readDistributionLogStamp,
@@ -721,8 +723,16 @@ export async function getUserWorkspaceFootprint(
       // lag the events); it must also be for the CURRENT event set. Otherwise
       // take the authoritative fold — the safe direction for a guard whose wrong
       // answer is irreversible.
+      // While THIS tab still has a derived-cache persist or a projection bump in
+      // flight, the on-disk mirrors lag the durable events -- and a mirror that
+      // does not exist yet (a first-time assignee) would read as zero pending.
+      // Always take the fold then, mirror or no mirror.
+      const writesInFlight =
+        isDistributionPersistPending(directoryHandle, monthFolderName) ||
+        isDistributionProjectionPending(directoryHandle, monthFolderName);
       const mirrorIsStale =
-        mirror !== null && !(await isMirrorTrustedForEvents(directoryHandle, monthFolderName, mirror, stamp.revision));
+        writesInFlight ||
+        (mirror !== null && !(await isMirrorTrustedForEvents(directoryHandle, monthFolderName, mirror, stamp.revision)));
 
       let pendingCount: number;
       if (mirrorIsStale) {

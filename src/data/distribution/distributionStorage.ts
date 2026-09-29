@@ -1120,6 +1120,94 @@ export async function saveDistributionCurrent(
   await syncSampleMirrors(directoryHandle, monthFolderName, current);
 }
 
+// ── Derived-cache persist chain (R1) ───────────────────────────────────────
+
+type QueuedPersist = { current: DistributionCurrentData; started: boolean; job: Promise<void> };
+type PersistChain = { tail: Promise<unknown>; pending: number; queued: QueuedPersist | null };
+
+/** One serialized chain per (workspace, month): the cache, sidecar and mirrors are one target set. */
+const persistChains = new Map<string, PersistChain>();
+
+/**
+ * True while a derived-cache persist (`distribution.current.json`, its
+ * checkpoint sidecar and the employee mirrors) is queued or running for this
+ * month IN THIS TAB. Until it settles, the on-disk mirrors may lag the durable
+ * events, so a caller whose wrong answer is irreversible (the delete-user
+ * guard) must fold from the events instead of trusting -- or finding nothing
+ * in -- a mirror.
+ */
+export function isDistributionPersistPending(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): boolean {
+  return (persistChains.get(projectionChainKey(directoryHandle, monthFolderName))?.pending ?? 0) > 0;
+}
+
+/**
+ * Queue `saveDistributionCurrent` behind any earlier persist for the same month
+ * and return a promise for it. NEVER rejects: a failure is logged as
+ * `distribution:cache-write`, exactly as the fire-and-forget reader path always
+ * did, because everything written here is rebuildable from the immutable events.
+ *
+ * Coalescing: a persist that is queued behind a running one and has not started
+ * takes the NEWER snapshot in place of the one it held, so a burst of clicks
+ * writes the cache and every mirror once, not once per click. A snapshot with
+ * an older `logRevision` never displaces a newer queued one (a slow reader that
+ * derived before the latest append must not roll the queued write backwards).
+ * Nothing is lost by dropping the superseded snapshot: the winner is derived
+ * from a superset of the events and readers verify by `eventSetId`/scan anyway.
+ */
+export function queueDistributionCurrentPersist(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  current: DistributionCurrentData
+): Promise<void> {
+  const key = projectionChainKey(directoryHandle, monthFolderName);
+  const chain = persistChains.get(key) ?? { tail: Promise.resolve(), pending: 0, queued: null };
+  persistChains.set(key, chain);
+  if (chain.queued && !chain.queued.started) {
+    if ((current.logRevision ?? 0) >= (chain.queued.current.logRevision ?? 0)) chain.queued.current = current;
+    return chain.queued.job;
+  }
+  chain.pending += 1;
+  const mine: QueuedPersist = { current, started: false, job: undefined as never };
+  chain.queued = mine;
+  const job: Promise<void> = chain.tail.then(async () => {
+    mine.started = true;
+    if (chain.queued === mine) chain.queued = null;
+    try {
+      await saveDistributionCurrent(directoryHandle, monthFolderName, mine.current);
+    } catch (error) {
+      logRejection("distribution:cache-write")(error);
+    }
+  });
+  mine.job = job;
+  const settle = (): void => {
+    chain.pending -= 1;
+    if (chain.pending === 0 && persistChains.get(key) === chain) persistChains.delete(key);
+  };
+  chain.tail = job.then(settle, settle);
+  return job;
+}
+
+/**
+ * Resolve once every derived-cache persist queued so far (for one month, or all
+ * of them) has settled. For tests and for a flow that genuinely needs the
+ * mirrors current; production click paths must never await it. Never rejects.
+ */
+export async function flushPendingDistributionPersist(
+  directoryHandle?: DirectoryHandleLike,
+  monthFolderName?: string
+): Promise<void> {
+  const only = directoryHandle && monthFolderName ? projectionChainKey(directoryHandle, monthFolderName) : null;
+  for (;;) {
+    const chains = [...persistChains.entries()].filter(([key]) => only === null || key === only);
+    if (chains.length === 0) return;
+    await Promise.all(chains.map(([, chain]) => chain.tail));
+    if (chains.every(([, chain]) => chain.pending === 0)) return;
+  }
+}
+
 /**
  * How long to wait before `loadFoldCheckpoint` re-reads a mismatched pair to
  * decide whether it is worth logging — see `mismatchClearsOnReread`. Sized to
@@ -1450,9 +1538,7 @@ async function tryResumeFromCheckpoint(
   // *what* is written, only whether this function returns before or after the
   // write settles — so no caller that does not opt in becomes newly blocking.
   if (persistCache) {
-    const write = saveDistributionCurrent(directoryHandle, monthFolderName, withRevision).catch(
-      logRejection("distribution:cache-write")
-    );
+    const write = queueDistributionCurrentPersist(directoryHandle, monthFolderName, withRevision);
     if (awaitCachePersist) await write;
   }
   return withRevision;
@@ -1946,9 +2032,7 @@ async function loadOrDeriveDistributionCurrentOutcome(
     // `awaitCachePersist` (Design B, step 1): only the write-path helper opts
     // in — see LoadOrDeriveDistributionCurrentOptions. Same write either way.
     if (persistCache && mayPersist) {
-      const write = saveDistributionCurrent(directoryHandle, monthFolderName, withRevision).catch(
-        logRejection("distribution:cache-write")
-      );
+      const write = queueDistributionCurrentPersist(directoryHandle, monthFolderName, withRevision);
       if (awaitCachePersist) await write;
     }
 
@@ -2004,16 +2088,18 @@ export async function loadOrDeriveDistributionCurrent(
  * `saveDistributionCurrent` (ensureMonthWritable → MonthClosedError) — that
  * is expected, not a bug this helper needs to work around.
  *
- * SYNCHRONOUS BY CONTRACT (Design B, step 1). This helper awaits the cache +
- * mirror write (`awaitCachePersist`), so when it resolves every
- * `{username}.samples.json` for this month has been rewritten — or the failure
- * has been logged. Previously the inner `saveDistributionCurrent` was
- * fire-and-forget on both the checkpoint-resume and full-refold paths, making
- * the guarantee through reopen / referral approval / replacement *eventual*:
- * a view re-reading immediately after one of those flows could paint the
- * pre-refresh mirror. That is not tolerable now that the mirror is the
- * employee's primary read. Only this helper opts in; every read path keeps the
- * old non-blocking behaviour.
+ * BACKGROUND BY CONTRACT (R1; was Design B step 1, "synchronous"). This helper
+ * used to await the cache + mirror write, which put ~150 share operations on
+ * every write flow's click path. The persist now runs on the per-month
+ * background chain (`queueDistributionCurrentPersist`, coalescing), and the
+ * guarantee Design B wanted is provided by the READER instead: an employee view
+ * only serves a mirror when `isMirrorTrustedForEvents` proves it was derived
+ * from exactly the events now on disk (a sizes-only listing of the event
+ * store), and folds otherwise, so a view re-reading immediately paints correct
+ * data from the fold rather than the pre-refresh mirror. The immutable events
+ * are still committed BEFORE any caller reaches this helper. Tests and any
+ * flow that truly needs the mirrors current await
+ * `flushPendingDistributionPersist`.
  *
  * One residual gap, deliberately not closed here: if a concurrent writer has
  * ALREADY persisted a cache carrying this exact log revision, the inner derive
@@ -2030,7 +2116,6 @@ export async function refreshDistributionCacheAfterWrite(
   try {
     await loadOrDeriveDistributionCurrent(directoryHandle, monthFolderName, sampleRows, {
       persistCache: true,
-      awaitCachePersist: true,
     });
   } catch (error) {
     logError("distribution:refresh-after-write", error);
