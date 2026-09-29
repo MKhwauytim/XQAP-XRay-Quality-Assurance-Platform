@@ -5,73 +5,73 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
-    "version": "v150.31",
+    "version": "v150.43",
     "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "distribution",
-    "title": "delete guard fails safe on an unreadable event store; auto-lock decides from fresh state; per-workspace month-lock cache"
+    "scope": "answers",
+    "title": "the answer-segment probe sizes chain heads, not the newest 64 names"
   },
   {
-    "version": "v150.30",
+    "version": "v150.42",
     "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "distribution",
-    "title": "review fixes for the reassign click-path work (delete guard, auto-lock ordering, deterministic index, persist retry)"
+    "scope": "answers",
+    "title": "the per-employee request-queue scan is bounded and memoized, never at the cost of a hidden request"
   },
   {
-    "version": "v150.29",
+    "version": "v150.41",
     "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "distribution",
-    "title": "remember that the legacy distribution log is absent"
+    "scope": "answers",
+    "title": "the ad-hoc probe has no cliff at the store cap and keeps store read memos fresh"
   },
   {
-    "version": "v150.28",
+    "version": "v150.40",
     "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "distribution",
-    "title": "thread one DistributionLogLoad through the interactive append and drop a redundant listing"
+    "scope": "answers",
+    "title": "broadcasts say whose answers changed; the employee queue ignores colleagues' own saves (never at the cost of a missed update)"
   },
   {
-    "version": "v150.27",
+    "version": "v150.39",
     "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "distribution",
-    "title": "keep the log projection off an interactive single-row click"
+    "scope": "answers",
+    "title": "the results view does no share I/O when hidden; polls are jittered, single-flight and fenced per user"
   },
   {
-    "version": "v150.26",
+    "version": "v150.37",
     "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "distribution",
-    "title": "rewrite only the employee sample mirrors whose content changed"
+    "scope": "answers",
+    "title": "keep one IndexedDB connection open and prune old synced mirror records"
   },
   {
-    "version": "v150.25",
+    "version": "v150.36",
     "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "distribution",
-    "title": "persist derived cache, sidecar and mirrors on a background chain instead of the reassign click path"
+    "scope": "answers",
+    "title": "a plain self-save appends without re-reading the whole month (with head probe)"
   },
   {
-    "version": "v150.24",
+    "version": "v150.35",
     "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "population",
-    "title": "read the prior-month advisory only when Phase 3 is visible"
+    "scope": "answers",
+    "title": "a colleague's segment change no longer forgets every sealed confirmation"
   },
   {
-    "version": "v150.23",
+    "version": "v150.34",
     "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "referral",
-    "title": "reload only the decided month after an approval decision"
+    "scope": "answers",
+    "title": "memoize the frozen legacy answers seed per session (never an absent read)"
   },
   {
-    "version": "v150.22",
+    "version": "v150.33",
     "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "referral",
-    "title": "fail fast when the share refuses to replace the requests file"
+    "scope": "answers",
+    "title": "cache month-lock verdict for 5 min, invalidated by the sync probe"
   }
 ];
