@@ -76,10 +76,15 @@ describe("C1 — stage groupings are Arabic and canonically ordered", () => {
         { stageKey: "first", stageLabel: "FIRST_STAGE", populationSize: 1, targetQuota: 1, actualDrawn: 1, certScanDrawn: 0, nonCertScanDrawn: 1 },
       ],
     });
-    const rows = buildExecutiveReportRows({ ...base, sample });
+    // SC-5 (FIRST_STAGE) is answered: its allocation carries the raw label
+    // "FIRST_STAGE", yet the studied count must still attribute it by key.
+    const rows = buildExecutiveReportRows({ ...base, sample }).map((row) =>
+      row.xrayImageId === "SC-5" ? { ...row, answerStatus: "submitted" as const, imageAvailable: true } : row,
+    );
     const profiles = buildStageProfiles(rows, sample);
     expect(profiles.map((p) => p.stageKey)).toEqual(["first", "third"]);
     expect(profiles.map((p) => p.stageLabel)).toEqual(["المستوى الأول", "المستوى الثالث"]);
+    expect(profiles.map((p) => p.studied)).toEqual([1, 0]);
   });
 
   it("honours the workspace stage alias table and exposes it on the model", () => {
