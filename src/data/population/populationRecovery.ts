@@ -298,7 +298,8 @@ export async function syncManifestFromBackupPopulation(
       const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
       const live = await safeReadJson<MonthManifestData>(monthDir, "month.manifest.json");
       if (!live.ok && live.reason === "missing") {
-        const { _writeToken: _dropped, ...restorable } = backupManifest;
+        const restorable = { ...backupManifest };
+        delete restorable._writeToken;
         await safeWriteJson(monthDir, "month.manifest.json", {
           ...restorable,
           totalProcessedRows: restoredRowCount,
