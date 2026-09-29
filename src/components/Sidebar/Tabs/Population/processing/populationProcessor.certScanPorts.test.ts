@@ -4,6 +4,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { processPopulation } from "./populationProcessor";
+import { UNSPECIFIED_PORT } from "../../../../../data/distribution/portEligibility";
 import type { NormalizedRiskRow, RiskWorkbookResult } from "../riskData/riskDataTypes";
 
 function riskRow(xrayImageId: string, portName: string, sourceRowNumber: number): NormalizedRiskRow {
@@ -150,5 +151,23 @@ describe("processPopulation — default output is unchanged by C2", () => {
       expect(asPlainJson(empty)).toEqual(pinned[key]);
     });
   }
+});
+
+// Intentional: rows with no port are grouped under "غير محدد"
+// (normalizePortName), so flagging that name is how an admin marks them.
+describe("processPopulation — the unspecified-port flag (C2)", () => {
+  it("flagging «غير محدد» marks rows whose port is null, and only those", async () => {
+    const nullPortRow = { ...riskRow("88888ZZ22202605040005", "x", 6), portName: null };
+    const result = await processPopulation({
+      riskWorkbookResult: workbook([...ROWS, nullPortRow]),
+      biWorkbookResult: null,
+      certScanPasteText: "",
+      certScanPorts: [UNSPECIFIED_PORT],
+    });
+    const status = statusById(result.preparedRows);
+    expect(status["88888ZZ22202605040005"]).toBe("Certscan");
+    expect(status["55555YY11202605040004"]).toBe("NonCertscan");
+    expect(result.summary.certScanRows).toBe(1);
+  });
 });
 
