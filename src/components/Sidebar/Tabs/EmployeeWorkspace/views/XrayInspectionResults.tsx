@@ -21,8 +21,7 @@ import {
   loadEmployeeAnswers,
   setItemQualityNote,
 } from "../../../../../data/answers/answerStorage";
-import { countPendingAnswers } from "../../../../../data/answers/answerLocalMirror";
-import { backfillAnswerMirror } from "../../../../../data/answers/pendingAnswerReplay";
+import { backfillMirrorFromDisk, countPendingAnswers } from "../../../../../data/answers/answerLocalMirror";
 import type { ItemAnswer } from "../../../../../data/answers/answerTypes";
 import { isNoImageSubmission } from "../../../../../data/answers/noImageAnswer";
 import { reopenSubmittedAnswer } from "../../../../../data/answers/reopenAnswer";
@@ -304,10 +303,15 @@ export default function XrayInspectionResults({ directoryHandle, active = true }
   // to IndexedDB, never to the shared folder, kept here as the natural
   // "sibling effect" home (this view already reads the selected month's
   // answers on load/tick) now that the writing half moved to the runner.
+  //
+  // A8: this callback is LOCAL ONLY (IndexedDB `getAll`); it never reads the
+  // share. It used to run `backfillAnswerMirror` -> `loadEmployeeAnswers` (a
+  // full month segment scan) on every reload and on the 30 s tick, which was
+  // the single largest source of share traffic under team load. The backfill
+  // now reuses the answers `loadData` already holds (see there).
   const refreshPendingSyncCount = useCallback(async () => {
-    await backfillAnswerMirror(directoryHandle, selectedMonth, username);
     setPendingSyncCount(await countPendingAnswers(selectedMonth, username));
-  }, [directoryHandle, selectedMonth, username]);
+  }, [selectedMonth, username]);
 
   // Load-token guard (mirrors useApprovalData): a slow load for a previously
   // selected month must not clobber a later selection or the falsy-reset above.
@@ -371,23 +375,22 @@ export default function XrayInspectionResults({ directoryHandle, active = true }
           return entry.status !== "replaced";
         });
 
-      // Refresh the "not saved yet" count from this browser's local IndexedDB
-      // backup for the signed-in employee's OWN answers — never for
-      // `canSeeAll` (a supervisor browsing other employees' answers has no
-      // own pending queue to show). COUNT-ONLY: the actual replay runs
-      // app-wide via PendingAnswerReplayRunner (see the callback's own doc).
-      // Fire-and-forget: best-effort by contract and must never delay or fail
-      // this render.
-      // Only on a real (non-silent) load: a silent broadcast-driven reload used
-      // to re-run the IndexedDB backfill (a get+put per answer item) and a
-      // getAll of the whole mirror store on every own save. The 30 s tick below
-      // and the show-catch-up keep the count current instead.
-      if (!canSeeAll && (!silent || opts?.refreshPending)) {
-        void refreshPendingSyncCount();
-      }
       const answerFiles = canSeeAll
         ? await loadAllEmployeeFiles(directoryHandle, selectedMonth)
         : [await loadEmployeeAnswers(directoryHandle, selectedMonth, username)];
+      // "Not saved yet" count and IndexedDB backfill for the signed-in employee's
+      // OWN answers (never `canSeeAll`: a supervisor has no own pending queue).
+      // COUNT-ONLY w.r.t. the share: the replay runs app-wide
+      // (PendingAnswerReplayRunner). The backfill re-mirrors the answers just
+      // read (no extra share read) on a real load and on the show catch-up; a
+      // silent reload while visible only re-counts the local queue.
+      if (!canSeeAll && answerFiles[0]) {
+        if (!silent || opts?.refreshPending) {
+          void backfillMirrorFromDisk(selectedMonth, username, answerFiles[0].items).then(() => refreshPendingSyncCount());
+        } else {
+          void refreshPendingSyncCount();
+        }
+      }
       // Ad-hoc rows' answers live in their own `2-samples/adhoc-{importId}/`
       // store (that is where XrayReferrals writes them), so reading the selected
       // month alone showed every ad-hoc row here as unanswered — no result, no
@@ -455,16 +458,47 @@ export default function XrayInspectionResults({ directoryHandle, active = true }
   // entirely for `canSeeAll` — same reasoning as the loadData call above.
   useEffect(() => {
     if (canSeeAll || !selectedMonth) return;
-    const interval = window.setInterval(() => {
-      // Hidden: nobody can see the count; the show-catch-up below refreshes it.
-      if (!visibleRef.current) {
-        staleWhileHiddenRef.current = true;
-        return;
-      }
-      void refreshPendingSyncCount();
-    }, 30_000);
-    return () => window.clearInterval(interval);
+    let timer: number | undefined;
+    let cancelled = false;
+    // +/-20 % jitter so clients that mounted together do not poll in lockstep.
+    const schedule = () => {
+      timer = window.setTimeout(() => {
+        if (cancelled) return;
+        // Hidden: nobody can see the count; the show catch-up refreshes it.
+        if (visibleRef.current) void refreshPendingSyncCount();
+        schedule();
+      }, 30_000 * (0.8 + Math.random() * 0.4));
+    };
+    schedule();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, [canSeeAll, refreshPendingSyncCount, selectedMonth]);
+
+  // At most ONE silent reload in flight; broadcasts arriving meanwhile coalesce
+  // into a single follow-up. Under a saturated share every timer-driven reload
+  // used to queue behind the previous one and pile up without bound.
+  const silentInFlightRef = useRef(false);
+  const silentAgainRef = useRef(false);
+  const runSilentRef = useRef<(refreshPending: boolean) => void>(() => undefined);
+  const runSilentReload = useCallback((refreshPending: boolean) => {
+    if (silentInFlightRef.current) {
+      silentAgainRef.current = true;
+      return;
+    }
+    silentInFlightRef.current = true;
+    void loadData({ silent: true, refreshPending }).finally(() => {
+      silentInFlightRef.current = false;
+      if (silentAgainRef.current) {
+        silentAgainRef.current = false;
+        runSilentRef.current(false);
+      }
+    });
+  }, [loadData]);
+  useEffect(() => {
+    runSilentRef.current = runSilentReload;
+  }, [runSilentReload]);
 
   // Re-fetch on the app-wide refresh signal (manual toolbar button + periodic
   // sync tick) so results/movements recorded elsewhere show up here too. Family-scoped
@@ -486,9 +520,9 @@ export default function XrayInspectionResults({ directoryHandle, active = true }
         staleWhileHiddenRef.current = true;
         return;
       }
-      void loadData({ silent: true });
+      runSilentReload(false);
     }),
-    [loadData]
+    [runSilentReload]
   );
 
   // Keep the ref in step with visibility and run the single catch-up on show.
@@ -498,8 +532,8 @@ export default function XrayInspectionResults({ directoryHandle, active = true }
     visibleRef.current = visible;
     if (!visible || !staleWhileHiddenRef.current) return;
     staleWhileHiddenRef.current = false;
-    void loadData({ silent: true, refreshPending: true });
-  }, [visible, loadData]);
+    runSilentReload(true);
+  }, [visible, runSilentReload]);
 
   // Pure filter over the raw audit-log state loadData already fetched — buildAuditRows
   // itself takes `mode` and returns [] outright for "active", so re-deriving this on

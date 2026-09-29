@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AuthSession } from "../../auth/authTypes";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
@@ -9,7 +9,7 @@ import {
   isNotificationAudienceRole,
   type AppNotification,
 } from "./notificationTypes";
-import { subscribeToDataRefresh } from "../workspace/dataRefreshSignal";
+import { subscribeToDataChange } from "../workspace/dataRefreshSignal";
 
 const POLL_INTERVAL_MS = 60_000;
 
@@ -45,12 +45,29 @@ export function useWorkspaceNotifications(
   // the poll reads HIS ack file rather than fanning out over every employee's.
   const username = session.username;
 
+  // At most one poll in flight per client: a reload requested while one is
+  // running coalesces into a single follow-up. Under a saturated share the
+  // 60 s poll, the focus event and every broadcast used to queue up behind each other.
+  const inFlightRef = useRef(false);
+  const againRef = useRef(false);
   const reload = useCallback(async () => {
     if (!directoryHandle || !audience) return;
+    if (inFlightRef.current) {
+      againRef.current = true;
+      return;
+    }
+    inFlightRef.current = true;
     try {
-      setNotifications(await loadNotifications(directoryHandle, { forUsername: username }));
-    } catch {
-      // Best-effort: a failed poll just leaves the last-known list in place.
+      do {
+        againRef.current = false;
+        try {
+          setNotifications(await loadNotifications(directoryHandle, { forUsername: username }));
+        } catch {
+          // Best-effort: a failed poll just leaves the last-known list in place.
+        }
+      } while (againRef.current);
+    } finally {
+      inFlightRef.current = false;
     }
   }, [directoryHandle, audience, username]);
 
@@ -63,13 +80,27 @@ export function useWorkspaceNotifications(
       .catch(logRejection("workspaceNotifications:loadNotifications"));
     const onFocus = () => void reload();
     window.addEventListener("focus", onFocus);
-    const interval = window.setInterval(() => void reload(), POLL_INTERVAL_MS);
+    // +/-20 % jitter so clients that mounted together do not poll in lockstep.
+    let timer: number | undefined;
+    let cancelled = false;
+    const schedule = () => {
+      timer = window.setTimeout(() => {
+        if (cancelled) return;
+        void reload();
+        schedule();
+      }, POLL_INTERVAL_MS * (0.8 + Math.random() * 0.4));
+    };
+    schedule();
     // Also react instantly to the app-wide refresh signal (manual toolbar
-    // button + the automatic 45s sync run) instead of waiting up to POLL_INTERVAL_MS.
-    const unsubscribeDataRefresh = subscribeToDataRefresh(() => void reload());
+    // button, or a sync tick that saw the notifications family move) instead
+    // of waiting up to POLL_INTERVAL_MS. Family-scoped: an answer save or a
+    // colleague's answer no longer triggers a notifications read; a manual
+    // refresh still always does.
+    const unsubscribeDataRefresh = subscribeToDataChange(["notifications"], () => void reload());
     return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
       window.removeEventListener("focus", onFocus);
-      window.clearInterval(interval);
       unsubscribeDataRefresh();
     };
   }, [audience, directoryHandle, reload, username]);
