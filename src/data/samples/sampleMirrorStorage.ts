@@ -712,7 +712,9 @@ async function staleMirrorPendingCount(
   try {
     const sample = await loadSampleMaster(directoryHandle, monthFolderName);
     if (!sample || sample.rows.length === 0) return 0;
-    const current = await loadOrDeriveDistributionCurrent(directoryHandle, monthFolderName, sample.rows);
+    const current = await loadOrDeriveDistributionCurrent(directoryHandle, monthFolderName, sample.rows, {
+      persistCache: false, // a guard is a read: it must not fan out cache/mirror writes
+    });
     if (!current) return 0;
     return current.entries.filter(
       (e) =>
@@ -799,13 +801,13 @@ export type UserWorkspaceFootprint = {
  * Closed months are skipped for `activeAssignments`: they are frozen history,
  * so a deletion cannot affect anything there.
  *
- * Reads the small per-employee sample mirror (`{username}.samples.json`,
- * kept in sync by `syncSampleMirrors`) rather than the full
- * `distribution.current.json` per month. NB: mirrors sync on
- * `saveDistributionCurrent`, so this can miss an assignment made moments ago
- * in another tab/machine — acceptable for a pre-deletion advisory check;
- * deriving from the full event log per month would be O(months × log size)
- * and is not worth the cost here.
+ * Reads the small per-employee sample mirror (`{username}.samples.json`)
+ * and trusts it only when `isMirrorTrustedForEvents` proves it was derived from
+ * exactly the events now on disk. A mirror that is ABSENT, untrusted, or whose
+ * background persist is still pending is never read as "no work": the guard
+ * folds the event log instead (mirrors are written off the click path since R1,
+ * so an absent mirror is normal for a first-time assignee moments after the
+ * click and must not read as zero).
  *
  * Revision cross-check (P6, 2026-08): a mirror is a rewritten-whole
  * projection stamped with the compat-log `revision` it was derived from
@@ -859,16 +861,20 @@ export async function getUserWorkspaceFootprint(
       // lag the events); it must also be for the CURRENT event set. Otherwise
       // take the authoritative fold — the safe direction for a guard whose wrong
       // answer is irreversible.
-      // While THIS tab still has a derived-cache persist or a projection bump in
-      // flight, the on-disk mirrors lag the durable events -- and a mirror that
-      // does not exist yet (a first-time assignee) would read as zero pending.
-      // Always take the fold then, mirror or no mirror.
+      // A mirror that does not exist is "I could not look", never "zero": the
+      // background persist that would have written it (R1) may have failed, may
+      // never have run (tab closed), or may still be in its window on another
+      // machine, and this is the one caller whose wrong answer is irreversible.
+      // Likewise while THIS tab has a persist or projection bump in flight the
+      // on-disk mirrors lag the durable events. All of those fold from the events;
+      // deletion is rare, so O(months) folds is the right price.
       const writesInFlight =
         isDistributionPersistPending(directoryHandle, monthFolderName) ||
         isDistributionProjectionPending(directoryHandle, monthFolderName);
       const mirrorIsStale =
+        mirror === null ||
         writesInFlight ||
-        (mirror !== null && !(await isMirrorTrustedForEvents(directoryHandle, monthFolderName, mirror, stamp.revision)));
+        !(await isMirrorTrustedForEvents(directoryHandle, monthFolderName, mirror, stamp.revision));
 
       let pendingCount: number;
       if (mirrorIsStale) {

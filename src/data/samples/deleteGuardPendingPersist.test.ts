@@ -75,9 +75,11 @@ describe("delete-user guard while a derived-cache persist is pending", () => {
     ]);
     expect(appended.ok).toBe(true);
     await flushPendingDistributionProjectionWrites();
-    // No mirror exists (nothing persisted yet), and no persist is pending: this is
-    // the pre-existing behaviour the guard has always had for an absent mirror.
-    expect((await getUserWorkspaceFootprint(root, EMP)).activeAssignments).toEqual([]);
+    // No mirror exists (nothing persisted yet) and no persist is pending: the guard
+    // must STILL see the row -- "no mirror" is "I could not look", never "zero".
+    expect((await getUserWorkspaceFootprint(root, EMP)).activeAssignments).toEqual([
+      { monthFolderName: MONTH, pendingCount: 1 },
+    ]);
 
     // Now hold the cache file's lock so a queued persist cannot complete.
     const main = await getSampleMainDir(root, MONTH, true);
