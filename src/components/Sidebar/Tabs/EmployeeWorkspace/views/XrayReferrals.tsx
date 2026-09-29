@@ -60,7 +60,7 @@ import {
   isAdhocEntry,
   type AdhocDistributionEntry,
 } from "../../../../../data/adhocImport/adhocImportEmployeeView";
-import { monthFolderForEntry } from "../../../../../data/adhocImport/adhocImportEmployeeView";
+import { listAdhocSampleFolders, monthFolderForEntry } from "../../../../../data/adhocImport/adhocImportEmployeeView";
 import {
   loadTemplate,
   loadTemplateIndex,
@@ -1499,18 +1499,39 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   // supervisor's on-behalf answer, reopen or quality note on this employee's row
   // names them as an owner (`answersMayConcern`) and still does. Oversight users
   // render everyone's answers and keep reloading on every change.
+  //
+  // Ad-hoc rows are the exception: their assignments and answers live in
+  // `2-samples/adhoc-{id}/` stores that no sync probe watches, so before this
+  // narrowing they only ever reached the queue because it reloaded on EVERY
+  // broadcast. While any ad-hoc store exists the queue therefore keeps reloading
+  // on every periodic broadcast (no owner filtering). The presence check is two
+  // small reads, cached for 5 minutes, and only made when a reload would be skipped.
+  const adhocPresentRef = useRef<{ present: boolean; at: number } | null>(null);
   useEffect(() => subscribeToDataChange(ALL_DATA_REFRESH_FAMILIES, (detail) => {
     if (ownAnswerBroadcastRef.current) return;
-    if (!canSeeAll && detail.source === "periodic") {
-      const touchesQueue =
-        detail.changed.has("distribution") ||
-        detail.changed.has("requests") ||
-        detail.changed.has("manifest") ||
-        answersMayConcern(detail, username);
-      if (!touchesQueue) return;
+    if (canSeeAll || detail.source !== "periodic") {
+      void loadData({ silent: true });
+      return;
     }
-    void loadData({ silent: true });
-  }), [loadData, canSeeAll, username]);
+    const touchesQueue =
+      detail.changed.has("distribution") ||
+      detail.changed.has("requests") ||
+      detail.changed.has("manifest") ||
+      answersMayConcern(detail, username);
+    if (touchesQueue) {
+      void loadData({ silent: true });
+      return;
+    }
+    const cached = adhocPresentRef.current;
+    if (cached && Date.now() - cached.at < 300_000) {
+      if (cached.present) void loadData({ silent: true });
+      return;
+    }
+    void listAdhocSampleFolders(directoryHandle).then((folders) => {
+      adhocPresentRef.current = { present: folders.length > 0, at: Date.now() };
+      if (folders.length > 0) void loadData({ silent: true });
+    });
+  }), [loadData, canSeeAll, username, directoryHandle]);
 
   async function handleTplSelect(id: string): Promise<void> {
     await applyTemplate(id, canSetTemplate);

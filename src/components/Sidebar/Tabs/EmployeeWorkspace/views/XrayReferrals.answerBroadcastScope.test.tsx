@@ -20,6 +20,8 @@ import { createEmptyUserManagementState, writeUserManagementState } from "../../
 import { invalidateMonthLockCache } from "../../../../../data/population/monthLock";
 import { setReadOnlyMode } from "../../../../../data/storage/readOnlyMode";
 import { resetBootProgress } from "../../../../../data/workspace/bootProgress";
+import * as adhocView from "../../../../../data/adhocImport/adhocImportEmployeeView";
+import { runSync } from "../../../../../data/workspace/workspaceSync";
 import * as answerStorage from "../../../../../data/answers/answerStorage";
 import { broadcastDataRefresh, type DataRefreshFamily } from "../../../../../data/workspace/dataRefreshSignal";
 import {
@@ -109,5 +111,48 @@ describe("XrayReferrals employee queue reload scope (A9)", () => {
     act(() => periodic(["answers"], ["emp-b"]));
     await settle();
     expect(reloads()).toBeGreaterThan(0);
+  });
+
+  it("keeps reloading on a colleague's answer while an ad-hoc store exists (no probe watches ad-hoc stores)", async () => {
+    vi.spyOn(adhocView, "listAdhocSampleFolders").mockResolvedValue(["adhoc-imp1"]);
+    const { reloads, settle } = await mount("employee");
+    act(() => periodic(["answers"], ["emp-b"]));
+    await settle();
+    expect(reloads()).toBeGreaterThan(0);
+  });
+
+  it("does not reload for the same colleague answer when there is no ad-hoc store", async () => {
+    vi.spyOn(adhocView, "listAdhocSampleFolders").mockResolvedValue([]);
+    const { reloads, settle } = await mount("employee");
+    act(() => periodic(["answers"], ["emp-b"]));
+    await settle();
+    expect(reloads()).toBe(0);
+  });
+
+  it("end to end: a real on-behalf write reaches this employee's queue through the probe; a colleague's own save does not", async () => {
+    writeSession({ role: "employee", username: "emp-a", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+    const root = createMemoryDirectory("root");
+    await seedXrayReferralsWorkspace(root);
+    const spy = vi.spyOn(answerStorage, "loadEmployeeAnswers");
+    renderXrayReferrals(root);
+    await waitFor(() => expect(screen.getAllByText("IMG-001").length).toBeGreaterThan(0));
+    await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+    const item = (owner: string) => ({
+      xrayImageId: "IMG-001", templateId: "tmpl-stale", templateVersion: 1, answers: [{ fieldId: "note", value: "x" }],
+      lastSavedAt: new Date().toISOString(), submittedAt: null, answeredBy: owner, status: "draft" as const,
+    });
+    // emp-b's FIRST save also freezes their legacy shell (a legacy-file change, owners unknown), so do it before the baseline
+    expect((await answerStorage.upsertItemAnswer(root, XRAY_REFERRALS_TEST_MONTH, "emp-b", item("emp-b"))).ok).toBe(true);
+    await runSync({ directoryHandle: root, monthFolderName: XRAY_REFERRALS_TEST_MONTH }); // baseline
+    // a colleague saves their own work: no reload
+    expect((await answerStorage.upsertItemAnswer(root, XRAY_REFERRALS_TEST_MONTH, "emp-b", item("emp-b"))).ok).toBe(true);
+    spy.mockClear();
+    await act(async () => { await runSync({ directoryHandle: root, monthFolderName: XRAY_REFERRALS_TEST_MONTH }); await new Promise((r) => setTimeout(r, 80)); });
+    expect(spy.mock.calls.length).toBe(0);
+    // a supervisor answers on behalf of emp-a: reload
+    expect((await answerStorage.upsertItemAnswerOnBehalf(root, XRAY_REFERRALS_TEST_MONTH, "emp-a", item("emp-a"), "sup1")).ok).toBe(true);
+    await act(async () => { await runSync({ directoryHandle: root, monthFolderName: XRAY_REFERRALS_TEST_MONTH }); await new Promise((r) => setTimeout(r, 80)); });
+    expect(spy.mock.calls.length).toBeGreaterThan(0);
   });
 });
