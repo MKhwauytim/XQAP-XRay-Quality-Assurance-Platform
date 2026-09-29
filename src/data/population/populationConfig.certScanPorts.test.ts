@@ -44,6 +44,8 @@ describe("PopulationConfig.certScanPorts (C2)", () => {
   it("normalizes a stored value: strings only, no blanks, de-duplicated in first-seen order", () => {
     expect(normalizeCertScanPorts(["منفذ أ", "", "منفذ ب", "منفذ أ", 7, null])).toEqual(["منفذ أ", "منفذ ب"]);
     expect(normalizeCertScanPorts(undefined)).toEqual([]);
+    // Padding is trimmed (a padded name never matches a row) and then de-duplicated.
+    expect(normalizeCertScanPorts([" منفذ أ ", "منفذ أ", "   "])).toEqual(["منفذ أ"]);
     expect(normalizeCertScanPorts("منفذ أ")).toEqual([]);
   });
 });

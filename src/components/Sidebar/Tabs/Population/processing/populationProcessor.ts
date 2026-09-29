@@ -771,7 +771,7 @@ export async function processPopulation(
   onProgress?: (stage: string, percent: number) => void
 ): Promise<PopulationProcessingResult> {
   const { riskWorkbookResult, biWorkbookResult, certScanPasteText } = input;
-  const certScanPortSet = new Set((input.certScanPorts ?? []).map((port) => normalizePortName(port)));
+  const certScanPortSet = new Set((input.certScanPorts ?? []).map((port) => normalizePortName(port.trim())));
 
   onProgress?.("بدء معالجة المجتمع...", 0);
   await yieldToMain();

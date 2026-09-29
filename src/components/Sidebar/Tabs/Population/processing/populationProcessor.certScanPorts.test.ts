@@ -116,4 +116,15 @@ describe("processPopulation — whole-port CertScan flags (C2)", () => {
     expect(statusById(withoutField.preparedRows)["96601PB04202605040001"]).toBe("NonCertscan");
     expect(withoutField.summary.certScanRows).toBe(1);
   });
+
+  it("a flag with surrounding whitespace still matches (processor trims the flag set)", async () => {
+    const result = await processPopulation({
+      riskWorkbookResult: workbook(ROWS),
+      biWorkbookResult: null,
+      certScanPasteText: "",
+      certScanPorts: ["  منفذ ج \t"],
+    });
+    expect(statusById(result.preparedRows)["55555YY11202605040004"]).toBe("Certscan");
+    expect(result.summary.certScanRows).toBe(1);
+  });
 });

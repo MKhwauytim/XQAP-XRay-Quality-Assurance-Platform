@@ -412,8 +412,9 @@ export const DEFAULT_POPULATION_CONFIG: PopulationConfig = {
 };
 
 /**
- * Normalizes a stored `certScanPorts` value (C2): keeps non-empty strings,
- * normalized through `normalizePortName` and de-duplicated in first-seen
+ * Normalizes a stored `certScanPorts` value (C2): keeps non-blank strings,
+ * trimmed (a padded name would never match a row), normalized through
+ * `normalizePortName` and de-duplicated in first-seen
  * order. Anything that is not an array (a legacy config without the field,
  * or a hand-edited file) yields `[]`.
  */
@@ -421,8 +422,10 @@ export function normalizeCertScanPorts(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   const ports = new Set<string>();
   for (const item of value) {
-    if (typeof item !== "string" || item.trim() === "") continue;
-    ports.add(normalizePortName(item));
+    if (typeof item !== "string") continue;
+    const port = item.trim();
+    if (port === "") continue;
+    ports.add(normalizePortName(port));
   }
   return [...ports];
 }
