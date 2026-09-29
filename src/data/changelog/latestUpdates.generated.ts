@@ -5,27 +5,6 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
-    "version": "v142.0",
-    "date": "2026-09-28",
-    "bucket": "fix",
-    "scope": "storage",
-    "title": "integrate stable answer chains with blocked-write rotation and the data-loss guard"
-  },
-  {
-    "version": "v141.0",
-    "date": "2026-09-28",
-    "bucket": "fix",
-    "scope": "audit",
-    "title": "stop per-save whole-file rewrites of the growing action and error logs"
-  },
-  {
-    "version": "v140.26",
-    "date": "2026-09-28",
-    "bucket": "fix",
-    "scope": "storage",
-    "title": "stop false \"damaged file\" reports from stale cached live reads"
-  },
-  {
     "version": "v140.25",
     "date": "2026-09-28",
     "bucket": "fix",
@@ -73,5 +52,26 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "feedback",
     "title": "page bodies from the provider's in-memory threads"
+  },
+  {
+    "version": "v140.17",
+    "date": "2026-09-28",
+    "bucket": "fix",
+    "scope": "feedback",
+    "title": "open the panel from the thread index, full read in the background"
+  },
+  {
+    "version": "v140.16",
+    "date": "2026-09-28",
+    "bucket": "fix",
+    "scope": "reports",
+    "title": "stage groupings use Arabic labels in canonical order"
+  },
+  {
+    "version": "v140.14",
+    "date": "2026-09-28",
+    "bucket": "feature",
+    "scope": "stages",
+    "title": "shared canonical stage labels, order and comparator"
   }
 ];

@@ -19,6 +19,7 @@ import {
   FEEDBACK_MESSAGES_ARCHIVED_FILE,
   FEEDBACK_THREADS_INDEX_FILE,
   finalizeLegacyMigration,
+  flushPendingFeedbackIndexWrites,
   listThreadSummaries,
   loadFeedback,
   loadThread,
@@ -159,6 +160,7 @@ describe("feedbackStorage — per-thread storage", () => {
       text: "سطر أول\nسطر ثانٍ",
     });
 
+    await flushPendingFeedbackIndexWrites();
     const index = await loadThreadsIndex(root);
     expect(index.threads).toHaveLength(1);
     expect(index.threads[0]!.threadId).toBe(thread.id);
@@ -186,6 +188,7 @@ describe("feedbackStorage — per-thread storage", () => {
     expect(written).toContain(`${a.id}.json`);
     expect(written).toContain(`${b.id}.json`);
 
+    await flushPendingFeedbackIndexWrites();
     const index = await loadThreadsIndex(root);
     expect(index.threads.map((t) => t.from).sort()).toEqual(["userA", "userB"]);
   });
@@ -222,6 +225,9 @@ describe("feedbackStorage — per-thread storage", () => {
     const root = makeRoot("root", { trackOperations: true });
     const target = await createThread(root, { from: "sara", role: "employee", category: "issue", text: "خطأ" });
     const other = await createThread(root, { from: "omar", role: "employee", category: "issue", text: "خطأ آخر" });
+    // Both creates' background index writes must land BEFORE the log is
+    // cleared, or they would be mistaken for writes made by the reply.
+    await flushPendingFeedbackIndexWrites();
 
     clearOperationLog(root);
     await appendReply(
@@ -247,6 +253,7 @@ describe("feedbackStorage — per-thread storage", () => {
   it("resolving a thread updates its own file AND its index summary", async () => {
     const root = makeRoot();
     const thread = await createThread(root, { from: "sara", role: "employee", category: "issue", text: "خطأ" });
+    await flushPendingFeedbackIndexWrites();
 
     await appendReply(
       root,
@@ -255,6 +262,7 @@ describe("feedbackStorage — per-thread storage", () => {
       true
     );
 
+    await flushPendingFeedbackIndexWrites();
     expect((await loadThread(root, thread.id))!.status).toBe("resolved");
     const summaries = await listThreadSummaries(root);
     expect(summaries.find((s) => s.threadId === thread.id)!.status).toBe("resolved");
@@ -297,6 +305,7 @@ describe("feedbackStorage — per-thread storage", () => {
   it("listThreadSummaries folds in a thread the index never recorded, and repairs the index", async () => {
     const root = makeRoot();
     const known = await createThread(root, { from: "sara", role: "employee", category: "issue", text: "معروف" });
+    await flushPendingFeedbackIndexWrites();
 
     // Simulate a create whose index write lost the CAS race permanently: the
     // thread file is on disk, the index does not mention it.
@@ -341,6 +350,7 @@ describe("feedbackStorage — per-thread storage", () => {
   it("does not re-attempt a failing index repair on every read", async () => {
     const root = makeRoot();
     const known = await createThread(root, { from: "sara", role: "employee", category: "issue", text: "معروف" });
+    await flushPendingFeedbackIndexWrites();
 
     const orphan: FeedbackThread = {
       id: "t20260824120000-bbbbbbbb",
@@ -408,6 +418,8 @@ describe("feedbackStorage — per-thread storage", () => {
       text: "رسالة",
     });
 
+    // The index write runs in the background; let it meet the fault.
+    await flushPendingFeedbackIndexWrites();
     clearSimulatedFaults(root);
     expect(await loadThread(root, thread.id)).toMatchObject({ id: thread.id, text: "رسالة" });
 
@@ -420,6 +432,7 @@ describe("feedbackStorage — per-thread storage", () => {
   it("never rewrites the index from a reconstruction when the index could not be READ", async () => {
     const root = makeRoot();
     const known = await createThread(root, { from: "sara", role: "employee", category: "issue", text: "معروف" });
+    await flushPendingFeedbackIndexWrites();
 
     const orphan: FeedbackThread = {
       id: "t20260824120000-cccccccc",
@@ -463,6 +476,7 @@ describe("feedbackStorage — per-thread storage", () => {
   it("does not fail a durably-landed reply when only the status index write fails", async () => {
     const root = makeRoot();
     const thread = await createThread(root, { from: "sara", role: "employee", category: "issue", text: "رسالة" });
+    await flushPendingFeedbackIndexWrites();
 
     setSimulatedFaults(root, [
       {
@@ -481,6 +495,7 @@ describe("feedbackStorage — per-thread storage", () => {
       true
     );
 
+    await flushPendingFeedbackIndexWrites();
     // The reply and the status flip are durable in the thread file; only the
     // cache write failed. Telling the user otherwise is the false-failure shape
     // of the incident, and invites a duplicate reply.
@@ -503,6 +518,7 @@ describe("feedbackStorage — per-thread storage", () => {
   it("reports the RAW cause of a failed index write, not only the Arabic sentence", async () => {
     const root = makeRoot();
     await createThread(root, { from: "sara", role: "employee", category: "issue", text: "رسالة" });
+    await flushPendingFeedbackIndexWrites();
 
     setSimulatedFaults(root, [
       {
@@ -515,6 +531,7 @@ describe("feedbackStorage — per-thread storage", () => {
 
     clearErrors();
     await createThread(root, { from: "omar", role: "employee", category: "inquiry", text: "أخرى" });
+    await flushPendingFeedbackIndexWrites();
 
     // The incident's feedback entries carried only the translated Arabic and a
     // minified stack, so they could not be tied to a platform condition at all

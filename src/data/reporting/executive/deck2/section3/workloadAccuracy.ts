@@ -181,7 +181,8 @@ function collectWorkloadRows(model: ReportModel): WorkloadPortRow[] {
   const sea = new Map<string, boolean>();
   for (const r of model.rows) {
     const name = r.portName ?? UNKNOWN_PORT;
-    workload.set(name, (workload.get(name) ?? 0) + 1);
+    // A2: workload is the port's population size — snapshot rows are not in it.
+    if (!r.fromSampleSnapshot) workload.set(name, (workload.get(name) ?? 0) + 1);
     if (!sea.has(name)) sea.set(name, (r.portType ?? "").includes("بحري"));
   }
 

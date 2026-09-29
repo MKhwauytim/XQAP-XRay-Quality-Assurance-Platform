@@ -1,3 +1,4 @@
+import { getLabels } from "../../../labels/labelsStore";
 import * as XLSX from "xlsx";
 
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
@@ -325,6 +326,7 @@ function reviewerName(model: ReportModel, username: string | null): Cell {
  * carries the display name (§3.4). Other-team columns carry result + employee id.
  */
 async function rowSheet(model: ReportModel): Promise<Cell[][]> {
+  const hasSnapshotRows = model.rows.some((r) => r.fromSampleSnapshot);
   const header: Cell[] = [
     "رقم الأشعة", "المنفذ", "المرحلة",
     "م.أول (مفتش)", "م.ثاني (مفتش)", "نتيجة م.أول", "نتيجة م.ثاني", "نتيجة الصورة",
@@ -334,6 +336,8 @@ async function rowSheet(model: ReportModel): Promise<Cell[][]> {
     "سبب انخفاض الجودة", "تقييم الاشتباه", "الأصناف المشبوهة", "آلية التهريب المحتملة",
     "تاريخ التعيين", "تاريخ التسليم",
     "دقيق", "م.أول دقيق", "م.ثاني دقيق", "تصنيف التحقق",
+    // A2: appended only for a month that has snapshot rows, so other months' sheets are unchanged.
+    ...(hasSnapshotRows ? [getLabels().report_sample_snapshot_column] : []),
   ];
 
   const body: Cell[][] = [];
@@ -373,6 +377,7 @@ async function rowSheet(model: ReportModel): Promise<Cell[][]> {
         yesNo(r.levelOneAccurate),
         yesNo(r.levelTwoAccurate),
         text(r.verificationCategory),
+        ...(hasSnapshotRows ? [r.fromSampleSnapshot ? "نعم" : ""] : []),
       ]);
     }
     if (model.rows.length > EXPORT_CHUNK_SIZE) await yieldToMain();

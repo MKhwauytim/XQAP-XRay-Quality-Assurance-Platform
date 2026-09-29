@@ -380,6 +380,18 @@ export const ERROR_CODES = {
       "the append-only event log gave up looking for a ROTATION TARGET it could trust. Every candidate segment name it tried, up to a small fixed bound (or the MAX_SEGMENT_SEQ ceiling), came back with an unconfirmed pre-write baseline — it could not prove the target was empty (or already held only what this writer put there), so writing to it risked silently truncating real content. Nothing on disk was touched by this failure: every segment this writer chain has ever sealed is untouched, and the batch that triggered this was never written anywhere. Retrying shortly, after the share's directory listing has had a chance to recover, is the right remedy — this is a listing/visibility problem, not data loss",
     labelKey: "err_io_038_rotation_target_unconfirmed",
   },
+  // Chromium's after-write Safe Browsing check, run inside
+  // `FileSystemWritableFileStream.close()`, rejects with an `AbortError` while
+  // the network is degraded (error log 2026-09-28, group #26: 7 rows across 4
+  // users, 09-08 09:10-09:44). It fell past `isTransientWriteError` (no retry)
+  // and past `classifyFileSystemError` (no code), so it surfaced as the
+  // XQ-IO-032 catch-all. Recognised by MESSAGE, because the picker's
+  // `AbortError` carries the same name and is not a write failure.
+  "XQ-IO-039": {
+    meaning:
+      "the browser's after-write Safe Browsing check failed on close() (AbortError 'Failed to perform Safe Browsing check.'), typically while the network is degraded. close() never replaced the destination, so nothing was written and retrying is safe. Reported only once the write retry ladder is spent",
+    labelKey: "err_io_039_safe_browsing_check_failed",
+  },
 
   // ── AUTH: login / session / permissions ──────────────────────────────────
   "XQ-AUTH-001": {
@@ -708,11 +720,29 @@ export function errorCodeOf(error: unknown): ErrorCode | null {
 }
 
 /**
+ * Chromium's `AbortError: Failed to perform Safe Browsing check.` from a
+ * writable stream's `close()`. Told apart from the file picker's `AbortError`
+ * ("The user aborted a request.") by message only — the name is shared. Only
+ * ever consulted on the write path (`isTransientWriteError`) and by
+ * `classifyFileSystemError`, so the picker never reaches it.
+ */
+export function isSafeBrowsingAbortError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const { name, message } = error as { name?: unknown; message?: unknown };
+  return (
+    name === "AbortError" &&
+    typeof message === "string" &&
+    /Safe Browsing/i.test(message)
+  );
+}
+
+/**
  * Best-effort classification of an untagged file-system exception by its DOM
  * error name. Used only to enrich reporting — it never changes what counts as
  * an error or how one is handled.
  */
 export function classifyFileSystemError(error: unknown): ErrorCode | null {
+  if (isSafeBrowsingAbortError(error)) return "XQ-IO-039";
   const name =
     error && typeof error === "object"
       ? (error as { name?: unknown }).name

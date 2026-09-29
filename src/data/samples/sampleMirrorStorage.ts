@@ -1,6 +1,6 @@
 import { tagError } from "../storage/errorCodes";
 import { isNotFoundError } from "../storage/transientFileErrors";
-import type { DistributionCurrentData, DistributionEntry } from "../distribution/distributionTypes";
+import type { DistributionCurrentData, DistributionEntry, EventStoreScanIdentity } from "../distribution/distributionTypes";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { getSampleEmployeeDir, safeWorkspaceFilePart } from "../workspace/workspacePaths";
@@ -19,7 +19,12 @@ import { listAdhocSampleFolders } from "../adhocImport/adhocImportEmployeeView";
 // is a deliberate circular import: safe here because both sides only use the
 // other's exports inside function bodies, never at module-eval time (P6,
 // 2026-08 — see getUserWorkspaceFootprint's revision cross-check below).
-import { loadOrDeriveDistributionCurrent, readDistributionLogStamp } from "../distribution/distributionStorage";
+import {
+  eventStoreMatchesScan,
+  loadOrDeriveDistributionCurrent,
+  scanIdentityOf,
+  readDistributionLogStamp,
+} from "../distribution/distributionStorage";
 // Same deliberate cycle, same rule: DERIVE_VERSION is a plain number constant
 // read inside function bodies only. distributionLog.ts imports nothing from
 // this module, so this edge is acyclic on its own.
@@ -63,6 +68,29 @@ export type EmployeeSamplesFile = {
    * pre-versioned derivation, therefore rewritable exactly once).
    */
   deriveVersion?: number;
+  /**
+   * `eventSetId` of the event log this mirror was derived from. The revision
+   * alone cannot prove a mirror current: the projection stamp that carries it
+   * is written AFTER the durable events (and off the click path), so it can lag
+   * the events indefinitely if that write fails. A reader trusts a mirror only
+   * when this matches the CURRENT log's eventSetId (see
+   * `isMirrorTrustedForEvents`).
+   *
+   * OPTIONAL by contract: a mirror written before this field existed has none
+   * and is NOT trusted, so it is re-derived once. That needs no migration — the
+   * mirror is a rebuildable derived cache, never a source of truth (CLAUDE.md's
+   * post-launch migration policy is about changing what business data on disk
+   * means; nothing here is read back as data, and no reader treats absence as
+   * an error).
+   */
+  eventSetId?: string;
+  /**
+   * The event-store scan (segment offsets + legacy file set digest) this mirror
+   * was derived from. See `isMirrorTrustedForEvents`. Optional; absent means
+   * "never trusted", so an older mirror is re-derived — it is restamped only by
+   * the next distribution write in its month.
+   */
+  scan?: EventStoreScanIdentity;
   /** Absent on mirrors written before the quota field existed — see EmployeeMirrorQuota. */
   quota?: EmployeeMirrorQuota;
   entries: DistributionEntry[];
@@ -138,7 +166,7 @@ export type EmployeeMirrorIndexFile = {
    */
   mirrors: Record<
     string,
-    { username: string; sourceLogRevision: number | null; deriveVersion?: number }
+    { username: string; sourceLogRevision: number | null; deriveVersion?: number; eventSetId?: string }
   >;
 };
 
@@ -164,7 +192,9 @@ function isMirrorIndex(value: unknown): value is EmployeeMirrorIndexFile {
       // Absent is legal (legacy index, read as 0); present-but-not-a-number is
       // not — a malformed index is rejected whole and the mirrors are read.
       ((entry as { deriveVersion?: unknown }).deriveVersion === undefined ||
-        typeof (entry as { deriveVersion?: unknown }).deriveVersion === "number")
+        typeof (entry as { deriveVersion?: unknown }).deriveVersion === "number") &&
+      ((entry as { eventSetId?: unknown }).eventSetId === undefined ||
+        typeof (entry as { eventSetId?: unknown }).eventSetId === "string")
   );
 }
 
@@ -206,6 +236,8 @@ type ExistingMirror = {
   username: string;
   sourceLogRevision: number | null;
   deriveVersion: number;
+  /** Absent on a legacy mirror/index entry: never equal to a real event set. */
+  eventSetId?: string;
 };
 
 /** Same read as `readEmployeeMirrorIndex`, against an already-resolved dir. */
@@ -300,7 +332,11 @@ async function readExistingMirrors(
           deriveVersion: index.pendingDeriveVersion ?? 0,
         }
       );
-      byFileName.set(fileName, { username: entry.username, ...stamp });
+      byFileName.set(fileName, {
+        username: entry.username,
+        ...stamp,
+        ...(entry.eventSetId === undefined ? {} : { eventSetId: entry.eventSetId }),
+      });
     }
     return byFileName;
   }
@@ -320,6 +356,7 @@ async function readExistingMirrors(
       // Absent on a mirror written before the field existed → 0.
       deriveVersion:
         typeof result.value.deriveVersion === "number" ? result.value.deriveVersion : 0,
+      eventSetId: typeof result.value.eventSetId === "string" ? result.value.eventSetId : undefined,
     };
   });
   for (const entry of read) {
@@ -328,6 +365,7 @@ async function readExistingMirrors(
         username: entry.username,
         sourceLogRevision: entry.sourceLogRevision,
         deriveVersion: entry.deriveVersion,
+        ...(entry.eventSetId === undefined ? {} : { eventSetId: entry.eventSetId }),
       });
     }
   }
@@ -361,6 +399,8 @@ export async function syncSampleMirrors(
   // deriveVersion !== DERIVE_VERSION), i.e. a hand-built one from this build,
   // so it carries this build's semantics.
   const deriveVersion = current.deriveVersion ?? DERIVE_VERSION;
+  const eventSetId = current.eventSetId;
+  const scan = scanIdentityOf(current);
   const employeesDir = await getSampleEmployeeDir(directoryHandle, monthFolderName, true);
 
   const entriesByEmployee = new Map<string, DistributionEntry[]>();
@@ -416,7 +456,15 @@ export async function syncSampleMirrors(
       const existingRevision = existing?.sourceLogRevision ?? null;
       if (existingRevision !== null) {
         if (existingRevision > sourceLogRevision) return;
-        if (existingRevision === sourceLogRevision && (existing?.deriveVersion ?? 0) >= deriveVersion) {
+        if (
+          existingRevision === sourceLogRevision &&
+          (existing?.deriveVersion ?? 0) >= deriveVersion &&
+          // Equal revision is NOT equal data: the projection stamp can lag the
+          // events (a pending or failed background bump), so a different event
+          // set at the same revision must still be written. A snapshot with no
+          // eventSetId cannot say, and keeps the old skip.
+          (eventSetId === undefined || existing?.eventSetId === eventSetId)
+        ) {
           return; // same data, and their derivation is no older than ours
         }
       }
@@ -427,6 +475,8 @@ export async function syncSampleMirrors(
         updatedAt,
         sourceLogRevision,
         deriveVersion,
+        ...(eventSetId === undefined ? {} : { eventSetId }),
+        ...(scan === undefined ? {} : { scan }),
         ...(quota
           ? {
               quota: {
@@ -438,7 +488,12 @@ export async function syncSampleMirrors(
           : {}),
         entries,
       });
-      finalRevisions.set(fileName, { username, sourceLogRevision, deriveVersion });
+      finalRevisions.set(fileName, {
+        username,
+        sourceLogRevision,
+        deriveVersion,
+        ...(eventSetId === undefined ? {} : { eventSetId }),
+      });
     }
   );
 
@@ -473,6 +528,7 @@ async function writeMirrorIndex(
             username: mirror.username,
             sourceLogRevision: mirror.sourceLogRevision,
             deriveVersion: mirror.deriveVersion,
+            ...(mirror.eventSetId === undefined ? {} : { eventSetId: mirror.eventSetId }),
           },
         ])
       ),
@@ -543,6 +599,32 @@ async function staleMirrorPendingCount(
     logError("sampleMirror:stale-mirror-fallback", error);
     return 0;
   }
+}
+
+/**
+ * May a reader serve `mirror` as the employee's current queue without folding?
+ * Only when BOTH hold: its revision is at or above the projection stamp, AND the
+ * event store still holds exactly what the mirror was derived from
+ * (`eventStoreMatchesScan`: a sizes-only listing of `distribution.events/`, no
+ * content read — segments are append-only, so an unchanged listing proves no
+ * event has been added). The second condition is what makes the answer
+ * independent of the projection stamp, which lags the durable events whenever the
+ * background projection job is pending, failed, or lost with a closed tab.
+ *
+ * Not trusted: a mirror with no `scan` (older build, or derived from a snapshot
+ * that carried none — it is re-derived, no migration needed), and any case where
+ * the listing fails. No memo: every call lists afresh (one listing plus one size
+ * stat per segment), which is what the irreversible delete-user guard needs.
+ */
+export async function isMirrorTrustedForEvents(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  mirror: Pick<EmployeeSamplesFile, "sourceLogRevision" | "scan">,
+  stampRevision: number
+): Promise<boolean> {
+  if (mirror.sourceLogRevision < stampRevision) return false;
+  if (!mirror.scan) return false;
+  return eventStoreMatchesScan(directoryHandle, monthFolderName, mirror.scan);
 }
 
 export type UserWorkspaceFootprint = {
@@ -622,7 +704,12 @@ export async function getUserWorkspaceFootprint(
     if (!closed) {
       const mirror = await loadEmployeeSampleMirror(directoryHandle, monthFolderName, username);
       const stamp = await readDistributionLogStamp(directoryHandle, monthFolderName);
-      const mirrorIsStale = mirror !== null && mirror.sourceLogRevision < stamp.revision;
+      // Revision alone cannot prove the mirror current (the projection stamp can
+      // lag the events); it must also be for the CURRENT event set. Otherwise
+      // take the authoritative fold — the safe direction for a guard whose wrong
+      // answer is irreversible.
+      const mirrorIsStale =
+        mirror !== null && !(await isMirrorTrustedForEvents(directoryHandle, monthFolderName, mirror, stamp.revision));
 
       let pendingCount: number;
       if (mirrorIsStale) {

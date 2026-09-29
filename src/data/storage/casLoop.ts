@@ -4,6 +4,7 @@
 // will have stored a different token, making the false-positive revision match detectable.
 
 import { codedMessage, logCodedError, resolveErrorCode, type ErrorCode } from "./errorCodes";
+import { isCommittedUnverified, isTransientWriteError, writeStepOf } from "./transientFileErrors";
 import {
   isDeadlineExpired,
   nextRetryDelayMs,
@@ -79,8 +80,13 @@ export function casFailureFromCause(
   // An exception beat us, so this is NOT a write conflict — report what it
   // actually was, with a quotable code, and put the raw detail in the log.
   const code = resolveErrorCode(cause) ?? "XQ-IO-032";
+  // Which step of safeWriteJson threw (stage / commit / post-commit read-back),
+  // when known: a refused close() swap (nothing written) and an unreadable
+  // read-back (written) need opposite responses and look identical otherwise.
+  const step = writeStepOf(cause);
   logCodedError(
-    options?.context ? `casLoop:exhausted(${options.context})` : "casLoop:exhausted",
+    (options?.context ? `casLoop:exhausted(${options.context})` : "casLoop:exhausted") +
+      (step ? ` step=${step}` : ""),
     code,
     cause
   );
@@ -91,6 +97,48 @@ export function casFailureFromCause(
     // `onExhausted` option's doc comment on `casLoop`.
   }
   return { ok: false, error: codedMessage(code) };
+}
+
+/**
+ * The in-attempt token read-back, aware of a `safeWriteJson` that reported
+ * COMMITTED-BUT-UNVERIFIED (E3b).
+ *
+ * `written` is whatever `safeWriteJson` resolved to. On the healthy path
+ * (`undefined`) this is exactly `read()` + `isMine()`, errors propagating as
+ * before. When the commit landed but safeWrite's own read-back hit a stale or
+ * transient error, the caller's token read is the one verification we make —
+ * ONCE, with no waiting:
+ *   - it returns our token   -> "mine" (verified);
+ *   - it returns someone else -> "not-mine" (a real lost race; retry);
+ *   - it throws a transient error -> "unconfirmed": logged as
+ *     `casLoop:verify-inconclusive`. The write very likely landed (byte-exact
+ *     `.tmp` verify + a resolved close()) but there is no positive evidence.
+ *     The CALLER decides: a rebuildable cache (the feedback threads index)
+ *     accepts it; DURABLE content (feedback replies, decision events) retries,
+ *     and is made idempotent by its own id so the retry either finds its write
+ *     already present (writes nothing) or writes it (no loss, no duplicate).
+ * A non-transient error still propagates.
+ */
+export async function readBackOwnWrite<V>(
+  written: unknown,
+  read: () => Promise<V>,
+  isMine: (value: V) => boolean,
+  context?: string
+): Promise<"mine" | "not-mine" | "unconfirmed"> {
+  if (!isCommittedUnverified(written)) {
+    return isMine(await read()) ? "mine" : "not-mine";
+  }
+  try {
+    return isMine(await read()) ? "mine" : "not-mine";
+  } catch (error) {
+    if (!isTransientWriteError(error)) throw error;
+    logCodedError(
+      context ? `casLoop:verify-inconclusive(${context})` : "casLoop:verify-inconclusive",
+      resolveErrorCode(error) ?? "XQ-IO-032",
+      error
+    );
+    return "unconfirmed";
+  }
 }
 
 /**

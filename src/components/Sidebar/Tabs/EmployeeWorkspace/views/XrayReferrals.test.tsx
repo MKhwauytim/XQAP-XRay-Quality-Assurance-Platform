@@ -27,7 +27,7 @@ vi.mock("../../../../../workers/populationQueryWorker?worker&inline", async () =
 });
 
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
-import { clearReadLog, createMemoryDirectory, getReadLog } from "../../../../../data/storage/memoryDirectory";
+import { clearReadLog, createMemoryDirectory, getReadLog, setSimulatedFaults } from "../../../../../data/storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../../../../../data/storage/fileSystemAccess";
 import { clearSession, writeSession } from "../../../../../auth/authSession";
 import {
@@ -1744,6 +1744,10 @@ describe("XrayReferrals employee read path (Design B step 3)", () => {
     await saveDistributionCurrent(root, MONTH, {
       ...deriveCurrentDistribution(log, ids.map(makeRow)),
       logRevision: log.revision,
+      // As the production write flow stamps it: a mirror is trusted only for the
+      // event set it was derived from.
+      eventSetId: log.eventSetId,
+      scanIdentity: log.scanIdentity,
     });
   }
 
@@ -1767,6 +1771,26 @@ describe("XrayReferrals employee read path (Design B step 3)", () => {
     // even though every rendering assertion above would still pass.
     expect(reads.filter((p) => p.endsWith("sample.master.json"))).toEqual([]);
     expect(reads.filter((p) => p.endsWith("distribution.current.json"))).toEqual([]);
+  });
+
+  it("trusting the mirror does ZERO content reads of distribution.events/ (sizes-only listing)", async () => {
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root", { trackReads: true });
+    await seedWithMirror(root, "emp-1", ["IMG-1", "IMG-2"]);
+    // Any CONTENT read of an event segment now fails (a size stat via getFile()
+    // does not touch content). If the trust check read the event store it would
+    // fail here, be treated as "not trusted", and fall to the slow path that
+    // reads sample.master.json.
+    setSimulatedFaults(root, [
+      { operation: "readFile", nameSuffix: ".ndjson", errorName: "NotReadableError", times: Number.POSITIVE_INFINITY },
+    ]);
+
+    clearReadLog(root);
+    render(<XrayReferrals directoryHandle={root} />);
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+    expect(getReadLog(root).filter((p) => p.endsWith("sample.master.json"))).toEqual([]);
   });
 
   it("paints a STALE mirror immediately and then re-derives on top of it", async () => {

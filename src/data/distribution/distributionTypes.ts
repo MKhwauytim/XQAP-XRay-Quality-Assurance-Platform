@@ -48,6 +48,19 @@ export type EmployeeQuota = {
   assignedAt: string;
 };
 
+/**
+ * Which part of the append-only event store a derived artifact was built from:
+ * every segment's folded byte offset, and a digest of the legacy per-event file
+ * set. Because segments are append-only, "the store still lists exactly these
+ * segments at exactly these sizes, and the same legacy files" proves no event has
+ * been added since — with a sizes-only listing, no content read. Used to trust an
+ * employee mirror (`isMirrorTrustedForEvents`) without re-reading the event store.
+ */
+export type EventStoreScanIdentity = {
+  segmentOffsets: Record<string, number>;
+  legacyFilesDigest: string;
+};
+
 export type DistributionLog = {
   monthFolderName: string;
   /** Monotonically increasing counter — incremented on every append. Used for CAS conflict detection. */
@@ -62,6 +75,8 @@ export type DistributionLog = {
    * every id — see distributionEventSetIdFromIds.
    */
   eventSetId?: string;
+  /** IN MEMORY ONLY (never written to `distribution.log.json`): the event-store scan this load was built from. */
+  scanIdentity?: EventStoreScanIdentity;
   /**
    * IN MEMORY: every merged event (compatibility projection + immutable event
    * files/segments), which is what every consumer of a loaded `DistributionLog`
@@ -188,6 +203,8 @@ export type DistributionCurrentData = {
   deriveVersion?: number;
   /** Event-set identity used to validate this rebuildable cache. */
   eventSetId?: string;
+  /** Event-store scan this snapshot was derived from; stamped onto employee mirrors. Absent = mirrors derived from it are never trusted. */
+  scanIdentity?: EventStoreScanIdentity;
   /**
    * Identity of the `sampleRows` this snapshot was folded against (v4) — see
    * `sampleRowsFingerprint` in distributionLog.ts. Validated alongside

@@ -2,7 +2,7 @@ import type { DirectoryHandleLike } from "./fileSystemAccess";
 import { logError } from "./errorLogger";
 // Safe direction: errorCodes.ts imports only labelsStore + errorLogger, so it
 // cannot import back into this module and no cycle is possible.
-import { tagError, type ErrorCode } from "./errorCodes";
+import { isSafeBrowsingAbortError, tagError, type ErrorCode } from "./errorCodes";
 // operationDeadline.ts has no imports of its own, so this adds no cycle either.
 import { nextRetryDelayMs, type OperationDeadline } from "./operationDeadline";
 
@@ -137,13 +137,69 @@ export function isSnapshotStaleError(error: unknown): boolean {
   return errorName(error) === "InvalidStateError";
 }
 
+/**
+ * What `safeWriteJson` resolves to when the COMMIT landed but the post-commit
+ * read-back could not confirm it (E3b). A healthy write still resolves to
+ * `undefined`, so callers that ignore the result are unchanged.
+ *
+ * Only produced when the pre-commit `.tmp` verify was byte-exact AND the
+ * read-back THREW a transient/stale error — never for a content mismatch, which
+ * still rolls back / promotes exactly as before. No waiting is involved: the
+ * result is returned immediately.
+ */
+export type CommittedUnverified = { committedUnverified: true; cause: unknown };
+
+export function isCommittedUnverified(result: unknown): result is CommittedUnverified {
+  return (
+    typeof result === "object" &&
+    result !== null &&
+    (result as { committedUnverified?: unknown }).committedUnverified === true
+  );
+}
+
+/** Which step of `safeWriteJson` an exception came from. */
+export type WriteStep = "stage" | "commit" | "post-commit-readback";
+
+const WRITE_STEP_PROPERTY = "xqWriteStep";
+
+/**
+ * Tag `error` with the safeWriteJson step that raised it (first tag wins; the
+ * error's identity, name and message are untouched, like `tagError`). Lets
+ * `casLoop:exhausted` say WHETHER the write or only its read-back failed.
+ */
+export function tagWriteStep<T>(error: T, step: WriteStep): T {
+  if (error && typeof error === "object" && writeStepOf(error) === null) {
+    try {
+      Object.defineProperty(error, WRITE_STEP_PROPERTY, {
+        value: step,
+        enumerable: false,
+        configurable: true,
+        writable: true,
+      });
+    } catch {
+      // Frozen or exotic object — the step simply isn't carried.
+    }
+  }
+  return error;
+}
+
+export function writeStepOf(error: unknown): WriteStep | null {
+  if (!error || typeof error !== "object") return null;
+  const step = (error as Record<string, unknown>)[WRITE_STEP_PROPERTY];
+  return step === "stage" || step === "commit" || step === "post-commit-readback" ? step : null;
+}
+
 /** Transient on the WRITE/VERIFY path only — see the module doc above. */
 export function isTransientWriteError(error: unknown): boolean {
   return (
     isNotFoundError(error) ||
     isNotReadableError(error) ||
     isLockContentionError(error) ||
-    isSnapshotStaleError(error)
+    isSnapshotStaleError(error) ||
+    // Chromium's after-write Safe Browsing check failed inside close(); the
+    // destination was never replaced, so re-running the whole write is safe.
+    // Message-gated so the picker's AbortError is not swept in.
+    isSafeBrowsingAbortError(error)
   );
 }
 
