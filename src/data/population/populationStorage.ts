@@ -54,6 +54,8 @@ import {
   POPULATION_SUBFOLDERS,
 } from "../workspace/workspacePaths";
 
+/** Exported for the selective-restore catalog (`backup/restoreScope.ts`). */
+export const SAMPLING_PROOF_FILE = "sampling-proof.json";
 const CERTSCAN_GLOBAL_FILE = "certscan.global.json";
 
 type DirectoryEntryLike = {
@@ -168,7 +170,7 @@ export async function saveSamplingProof(
   await ensureMonthWritable(directoryHandle, monthFolderName);
   try {
     const sampleDir = await getSampleMainDir(directoryHandle, monthFolderName, true);
-    await safeWriteJson(sampleDir, "sampling-proof.json", proof);
+    await safeWriteJson(sampleDir, SAMPLING_PROOF_FILE, proof);
   } catch (error) {
     // Non-throwing by design: the draw's own record (rngSeed, drawnAt, drawnBy,
     // allocations) is already persisted in sample.master.json, so a lost proof

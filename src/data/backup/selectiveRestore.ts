@@ -24,7 +24,8 @@ import { rebuildPopulationDerivedFiles } from "../population/populationRecovery"
 import { archiveBeforeOverwrite, readMonthPopulationFinal, supersedeStamp } from "../population/populationStorage";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import { discardReplacementIndexManifest } from "../population/replacementIndexStorage";
-import { liveSampleRows, loadSampleMaster } from "../sampling/sampleStorage";
+import { ANSWERS_SUFFIX } from "../answers/answerStorage";
+import { liveSampleRows, loadSampleMaster, SAMPLE_MASTER_FILE } from "../sampling/sampleStorage";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import {
   getPopulationMonthDir,
@@ -41,10 +42,12 @@ import {
   restoreBackupSnapshot,
 } from "./backupStorage";
 import {
+  answersFileEmbedsRequests,
   classifyBackupPath,
   expandRestoreScope,
   isMonthScopedElement,
   RESTORE_ELEMENT_IDS,
+  sameMonthFolder,
   validateRestoreScope,
   type RestoreElementId,
   type RestoreScope,
@@ -103,7 +106,9 @@ export async function previewSelectiveRestore(
   await listRestorablePaths(jsonDir, "", paths);
 
   const cells = new Map<string, RestorePreviewCell>();
-  const months = new Set<string>();
+  // Months are the backup's OWN folder names (first-seen casing), deduped
+  // case-insensitively: `5-May-2026` and `5-may-2026` name one month.
+  const months = new Map<string, string>();
   let unclassifiedCount = 0;
   for (const path of paths) {
     const classified = classifyBackupPath(path);
@@ -112,11 +117,13 @@ export async function previewSelectiveRestore(
       continue;
     }
     if (classified.derived) continue;
-    const key = `${classified.element}|${classified.month ?? ""}`;
-    const cell = cells.get(key) ?? { element: classified.element, month: classified.month, fileCount: 0 };
+    const month =
+      classified.month === null ? null : (months.get(classified.month.toLowerCase()) ?? classified.month);
+    if (month !== null) months.set(month.toLowerCase(), month);
+    const key = `${classified.element}|${(month ?? "").toLowerCase()}`;
+    const cell = cells.get(key) ?? { element: classified.element, month, fileCount: 0 };
     cell.fileCount += 1;
     cells.set(key, cell);
-    if (classified.month !== null) months.add(classified.month);
   }
 
   const orderedCells = [...cells.values()].sort(
@@ -126,7 +133,7 @@ export async function previewSelectiveRestore(
   );
   return {
     backupFolderName,
-    months: [...months].sort(compareMonthFolderNames),
+    months: [...months.values()].sort(compareMonthFolderNames),
     cells: orderedCells,
     unclassifiedCount,
   };
@@ -137,7 +144,12 @@ export function countPreviewFiles(
   element: RestoreElementId,
   month: string | null
 ): number {
-  return preview.cells.find((cell) => cell.element === element && cell.month === month)?.fileCount ?? 0;
+  const match = preview.cells.find(
+    (cell) =>
+      cell.element === element &&
+      (cell.month === null || month === null ? cell.month === month : sameMonthFolder(cell.month, month))
+  );
+  return match?.fileCount ?? 0;
 }
 
 /* ───────────── reading single files out of a backup's json/ mirror ───────────── */
@@ -180,10 +192,10 @@ function backupPopulationCandidates(month: string): string[][] {
 
 function backupSampleCandidates(month: string): string[][] {
   return [
-    [WORKSPACE_ROOTS.samples, month, SAMPLE_SUBFOLDERS.main, "sample.master.json"],
+    [WORKSPACE_ROOTS.samples, month, SAMPLE_SUBFOLDERS.main, SAMPLE_MASTER_FILE],
     ...POPULATION_ROOT_NAMES.flatMap((root) => [
-      [root, month, LEGACY_MONTH_SUBFOLDERS.sample, "sample.master.json"],
-      [root, month, "sample.master.json"],
+      [root, month, LEGACY_MONTH_SUBFOLDERS.sample, SAMPLE_MASTER_FILE],
+      [root, month, SAMPLE_MASTER_FILE],
     ]),
   ];
 }
@@ -200,7 +212,14 @@ export type SelectiveRestoreBlock = {
 };
 
 export type SelectiveRestoreWarning = {
-  kind: "sample-without-answers" | "answers-without-sample";
+  kind:
+    | "sample-without-answers"
+    | "answers-without-sample"
+    // Legacy pre-split answer files embed the referral queues (answersFileEmbedsRequests):
+    // Answers alone also restores them ...
+    | "answers-restore-embedded-requests"
+    // ... and Referrals alone cannot reach queues that only exist inside those files.
+    | "requests-embedded-in-answers";
   month: string;
 };
 
@@ -243,18 +262,21 @@ async function sampledIdsAfterRestore(
 async function populationCoverageBlocks(
   directoryHandle: DirectoryHandleLike,
   backupFolderName: string,
-  scope: RestoreScope
+  scope: RestoreScope,
+  preview: RestorePreview
 ): Promise<SelectiveRestoreBlock[]> {
   if (!scope.elements.includes("population")) return [];
   const jsonDir = await openCompleteBackupJsonDir(directoryHandle, backupFolderName);
   const restoresSample = scope.elements.includes("sampleDistribution");
   const blocks: SelectiveRestoreBlock[] = [];
   for (const month of scope.months) {
-    const backupPopulation = await readFirstInTree<PopulationFinalData>(jsonDir, backupPopulationCandidates(month));
+    // Look the month up under the backup's own folder-name casing.
+    const backupMonth = backupMonthName(preview, month);
+    const backupPopulation = await readFirstInTree<PopulationFinalData>(jsonDir, backupPopulationCandidates(backupMonth));
     // No population.final.json in the backup: the live one is not replaced, so nothing can be orphaned.
     if (backupPopulation.state === "missing") continue;
     const impact = await loadPopulationOverwriteImpact(directoryHandle, month);
-    const liveSampledIds = await sampledIdsAfterRestore(jsonDir, month, restoresSample, impact.liveSampledIds);
+    const liveSampledIds = await sampledIdsAfterRestore(jsonDir, backupMonth, restoresSample, impact.liveSampledIds);
     const newRows =
       backupPopulation.state === "ok" && Array.isArray(backupPopulation.value.rows) ? backupPopulation.value.rows : [];
     const assessment = assessPopulationOverwrite({ ...impact, liveSampledIds }, newRows);
@@ -270,12 +292,56 @@ async function populationCoverageBlocks(
   return blocks;
 }
 
-function dependencyWarnings(scope: RestoreScope): SelectiveRestoreWarning[] {
+/** The backup's own spelling of a month folder (casing), else the name as given. */
+function backupMonthName(preview: RestorePreview, month: string): string {
+  return preview.months.find((candidate) => sameMonthFolder(candidate, month)) ?? month;
+}
+
+/** Whether any of the backup's answer files for this month embeds referral/replacement/reopen queues. */
+async function backupMonthEmbedsRequests(jsonDir: DirectoryHandleLike, month: string): Promise<boolean> {
+  const folders: string[][] = [
+    [WORKSPACE_ROOTS.samples, month, SAMPLE_SUBFOLDERS.employees],
+    ...POPULATION_ROOT_NAMES.map((root) => [root, month, LEGACY_MONTH_SUBFOLDERS.employeeAnswers]),
+  ];
+  for (const segments of folders) {
+    let dir: DirectoryHandleLike = jsonDir;
+    try {
+      for (const segment of segments) dir = await dir.getDirectoryHandle(segment, { create: false });
+    } catch (error) {
+      if (isNotFoundError(error)) continue;
+      throw error;
+    }
+    for (const entry of await listDirectoryEntries(dir)) {
+      if (entry.kind !== "file" || !entry.name.endsWith(ANSWERS_SUFFIX)) continue;
+      const read = await safeReadJson<unknown>(dir, entry.name);
+      if (read.ok && answersFileEmbedsRequests(read.value)) return true;
+    }
+  }
+  return false;
+}
+
+async function dependencyWarnings(
+  directoryHandle: DirectoryHandleLike,
+  backupFolderName: string,
+  scope: RestoreScope,
+  preview: RestorePreview
+): Promise<SelectiveRestoreWarning[]> {
+  const warnings: SelectiveRestoreWarning[] = [];
   const hasSample = scope.elements.includes("sampleDistribution");
   const hasAnswers = scope.elements.includes("answers");
-  if (hasSample === hasAnswers) return [];
-  const kind = hasSample ? "sample-without-answers" : "answers-without-sample";
-  return scope.months.map((month) => ({ kind, month }));
+  if (hasSample !== hasAnswers) {
+    const kind = hasSample ? "sample-without-answers" : "answers-without-sample";
+    warnings.push(...scope.months.map((month) => ({ kind, month }) as const));
+  }
+  const hasRequests = scope.elements.includes("referralsApprovals");
+  if (hasAnswers !== hasRequests) {
+    const jsonDir = await openCompleteBackupJsonDir(directoryHandle, backupFolderName);
+    const kind = hasAnswers ? "answers-restore-embedded-requests" : "requests-embedded-in-answers";
+    for (const month of scope.months) {
+      if (await backupMonthEmbedsRequests(jsonDir, backupMonthName(preview, month))) warnings.push({ kind, month });
+    }
+  }
+  return warnings;
 }
 
 export async function planSelectiveRestore(params: {
@@ -311,7 +377,7 @@ export async function planSelectiveRestore(params: {
     .filter((selection) => selection.fileCount === 0)
     .map(({ element, month }) => ({ element, month }));
   const selectedFileCount = selections.reduce((sum, selection) => sum + selection.fileCount, 0);
-  const blocked = await populationCoverageBlocks(params.directoryHandle, params.backupFolderName, scope);
+  const blocked = await populationCoverageBlocks(params.directoryHandle, params.backupFolderName, scope, preview);
   return {
     scope,
     invalidReason: null,
@@ -319,7 +385,7 @@ export async function planSelectiveRestore(params: {
     selectedFileCount,
     emptySelections,
     blocked,
-    warnings: dependencyWarnings(scope),
+    warnings: await dependencyWarnings(params.directoryHandle, params.backupFolderName, scope, preview),
     canConfirm: selectedFileCount > 0 && emptySelections.length === 0 && blocked.length === 0,
   };
 }

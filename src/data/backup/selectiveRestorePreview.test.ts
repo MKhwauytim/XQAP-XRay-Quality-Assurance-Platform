@@ -77,3 +77,19 @@ describe("previewSelectiveRestore", () => {
     await expect(previewSelectiveRestore(root, TEST_BACKUP)).rejects.toThrow(/غير مكتملة/);
   });
 });
+
+describe("previewSelectiveRestore — month folder casing", () => {
+  it("lists a month once, under the backup's own folder name", async () => {
+    const root = makeRoot();
+    await seedBackup(root, {
+      "1-population/5-May-2026/2-processed/population.final.json": { rows: [] },
+      "2-samples/5-may-2026/1-main/sample.master.json": { rows: [] },
+    });
+
+    const preview = await previewSelectiveRestore(root, TEST_BACKUP);
+
+    expect(preview.months).toEqual(["5-May-2026"]);
+    expect(countPreviewFiles(preview, "population", "5-may-2026")).toBe(1);
+    expect(countPreviewFiles(preview, "sampleDistribution", "5-May-2026")).toBe(1);
+  });
+});

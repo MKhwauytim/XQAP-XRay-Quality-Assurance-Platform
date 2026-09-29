@@ -11,8 +11,18 @@
  *
  * A path matching no element returns `null` and is NEVER restored by a
  * selective restore. Deliberately unmatched: `5-system/{backups,audit,locks,
- * system-errors}/`, the `restore.inprogress.json` sentinel, and anything
- * outside the known roots. The full restore (no scope) never consults this.
+ * system-errors,history,powerbi-export}/` (diagnostics, rolling snapshots and
+ * exports), the `restore.inprogress.json` sentinel, and anything outside the
+ * known roots. The full restore (no scope) never consults this.
+ *
+ * Element names cover what they hold: «نماذج الفحص وتفضيلات العرض» owns
+ * everything under `6-templates/` (including the executive-deck preference
+ * files) and «المستخدمون والصلاحيات والتسميات» everything under `3-user-data/`
+ * (including `labels.snapshot.json`). An ad-hoc import's record
+ * (`5-system/adhoc-imports/{id}.json`) follows its data month `adhoc-{id}`.
+ *
+ * Legacy pre-split `{user}.answers.json` files embed the referral queues; see
+ * `answersFileEmbedsRequests` — content, not path, decides that.
  *
  * `derived: true` marks population artifacts a selective restore REBUILDS
  * rather than copies (the replacement-candidate index and the month
@@ -22,9 +32,18 @@ import type { LabelKey } from "../labels/labelsStore";
 import { ANSWER_EVENTS_DIR } from "../answers/answerEventStore";
 import { ANSWERS_SUFFIX, REQUESTS_SUFFIX } from "../answers/answerStorage";
 import { DISTRIBUTION_EVENTS_DIR } from "../distribution/distributionEventStore";
-import { DISTRIBUTION_CHECKPOINT_FILE } from "../distribution/distributionStorage";
+import {
+  DISTRIBUTION_CHECKPOINT_FILE,
+  DISTRIBUTION_CURRENT_FILE,
+  DISTRIBUTION_LOG_FILE,
+} from "../distribution/distributionStorage";
+import { adhocMonthFolder } from "../adhocImport/adhocImportModel";
+import { ADHOC_IMPORT_INDEX_FILE } from "../adhocImport/adhocImportStorage";
 import { POPULATION_AGGREGATE_FILE } from "../population/populationAggregate";
+import { SAMPLING_PROOF_FILE } from "../population/populationStorage";
 import { REPLACEMENT_INDEX_FOLDER } from "../population/replacementIndexStorage";
+import { SAMPLE_MASTER_FILE } from "../sampling/sampleStorage";
+import { SAMPLING_PLAN_FILE } from "../sampling/samplingPlanStorage";
 import { EMPLOYEE_MIRROR_INDEX_FILE, EMPLOYEE_MIRROR_SUFFIX } from "../samples/sampleMirrorStorage";
 import {
   LEGACY_MONTH_SUBFOLDERS,
@@ -120,12 +139,14 @@ const SYSTEM_CHILDREN_NEVER_RESTORED: ReadonlySet<string> = new Set([
  * mistaken for population data; the owning modules keep their own names private.
  */
 const LEGACY_FLAT_SAMPLE_FILES: ReadonlySet<string> = new Set([
-  "sample.master.json",
-  "sampling.plan.json",
-  "sampling-proof.json",
+  SAMPLE_MASTER_FILE,
+  SAMPLING_PLAN_FILE,
+  SAMPLING_PROOF_FILE,
+  // Pre-`2-samples/` name with no remaining writer or owner constant (it survives
+  // only in comments in populationTypes.ts / distributionTypes.ts).
   "main.samples.json",
-  "distribution.log.json",
-  "distribution.current.json",
+  DISTRIBUTION_LOG_FILE,
+  DISTRIBUTION_CURRENT_FILE,
   DISTRIBUTION_CHECKPOINT_FILE,
 ]);
 
@@ -192,7 +213,24 @@ function classifySystemPath(segments: readonly string[]): BackupPathClass | null
   }
   if (child === SYSTEM_FOLDER_NAMES.feedback) return workspaceWide("feedback");
   if (SYSTEM_CHILDREN_NEVER_RESTORED.has(child)) return null;
+  if (child === SYSTEM_FOLDER_NAMES.adhocImports && segments.length === 3) return classifyAdhocImportFile(segments[2]);
   return workspaceWide("systemSettings");
+}
+
+/**
+ * `5-system/adhoc-imports/{importId}.json` is the import's own record, and its
+ * data lives in `2-samples/adhoc-{importId}/`: the record therefore follows THAT
+ * month (sample & distribution x `adhocMonthFolder(id)`), so restoring an
+ * import's samples never leaves its record behind. The shared
+ * `adhoc-imports.index.json` is only a rebuildable listing (see
+ * adhocImportStorage.ts): it is `derived` — never copied selectively, and
+ * self-repairing on the next ad-hoc write, with readers falling back to a live
+ * `2-samples/` folder listing meanwhile. A FULL restore still copies it.
+ */
+function classifyAdhocImportFile(fileName: string): BackupPathClass {
+  if (fileName === ADHOC_IMPORT_INDEX_FILE) return { element: "systemSettings", month: null, derived: true };
+  if (!fileName.endsWith(".json") || fileName.length === ".json".length) return workspaceWide("systemSettings");
+  return monthScoped("sampleDistribution", adhocMonthFolder(fileName.slice(0, -".json".length)));
 }
 
 /** Classify one backup-relative ("/"-joined) FILE path. */
@@ -211,12 +249,21 @@ export function classifyBackupPath(relativePath: string): BackupPathClass | null
   return null;
 }
 
+/**
+ * Month folder names compare case-insensitively — `parseMonthFolderName`
+ * accepts `5-May-2026` and `5-may-2026` alike, and on the Windows shares this
+ * app runs against the two name one folder.
+ */
+export function sameMonthFolder(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase();
+}
+
 function isSelected(element: RestoreElementId, month: string | null, scope: RestoreScope): boolean {
   if (!scope.elements.includes(element)) return false;
   if (!isMonthScopedElement(element)) return true;
   // A directory ABOVE the month level: reachable when any month is chosen.
   if (month === null) return scope.months.length > 0;
-  return scope.months.includes(month);
+  return scope.months.some((chosen) => sameMonthFolder(chosen, month));
 }
 
 export function isFileInRestoreScope(relativePath: string, scope: RestoreScope): boolean {
@@ -226,8 +273,12 @@ export function isFileInRestoreScope(relativePath: string, scope: RestoreScope):
 }
 
 function candidatesUnderPopulationRoot(segments: readonly string[]): readonly RestoreElementId[] {
-  if (segments.length === 1) return [...MONTH_SCOPED_IDS, "populationSettings"];
-  if (segments.length === 2) return MONTH_SCOPED_IDS;
+  // Only the LEGACY root ever holds sample/answers/approvals children of a
+  // month folder; the numbered `1-population/` holds population data alone, so a
+  // sample-only scope must not create an empty `1-population/{month}/`.
+  const numbered = segments[0] === WORKSPACE_ROOTS.population;
+  if (segments.length === 1) return numbered ? ["population", "populationSettings"] : [...MONTH_SCOPED_IDS, "populationSettings"];
+  if (segments.length === 2) return numbered ? ["population"] : MONTH_SCOPED_IDS;
   if (segments.slice(2).includes(REPLACEMENT_INDEX_FOLDER)) return [];
   return [populationMonthChildElement(segments[2])];
 }
@@ -250,6 +301,7 @@ function candidatesUnderSystemRoot(segments: readonly string[]): readonly Restor
   const child = segments[1];
   if (child === SYSTEM_FOLDER_NAMES.feedback) return ["feedback"];
   if (SYSTEM_CHILDREN_NEVER_RESTORED.has(child)) return [];
+  if (child === SYSTEM_FOLDER_NAMES.adhocImports) return ["sampleDistribution", "systemSettings"];
   return ["systemSettings"];
 }
 
@@ -303,4 +355,25 @@ export function expandRestoreScope(scope: RestoreScope): RestoreScopeCell[] {
     for (const month of scope.months) cells.push({ element: definition.id, month });
   }
   return cells;
+}
+
+/**
+ * Legacy pre-split `{user}.answers.json` files embed the employee's
+ * referral / replacement / reopen queues (answerStorage.ts falls back to them
+ * when no `{user}.requests.json` exists). Such a file belongs to BOTH the
+ * Answers and the Referrals & approvals elements, but that cannot be told from
+ * its PATH — only from its content — so `classifyBackupPath` files every
+ * `*.answers.json` under Answers and the dependency plan
+ * (`selectiveRestore.ts`) reads the backup's answer files with this predicate
+ * and warns when exactly one of the two elements is selected: restoring Answers
+ * alone also overwrites the embedded queues, and restoring Referrals alone does
+ * not restore queues that only exist inside the answers files.
+ */
+export function answersFileEmbedsRequests(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return ["referralRequests", "replacementRequests", "reopenRequests"].some((key) => {
+    const queue = record[key];
+    return Array.isArray(queue) && queue.length > 0;
+  });
 }

@@ -201,3 +201,30 @@ describe("restoreBackupSnapshot — scoped", () => {
     expect(await sentinelExists(root)).toBe(true);
   });
 });
+
+describe("restoreBackupSnapshot — scoped: no folders for what was not picked", () => {
+  it("does not create an empty 1-population/{month}/ for a sample-only scope", async () => {
+    const root = makeRoot();
+    await seedBackup(root, {
+      [`1-population/${M1}/2-processed/population.final.json`]: { rows: [] },
+      [`2-samples/${M1}/1-main/sample.master.json`]: { rows: [] },
+    });
+
+    const result = await restore(root, { elements: ["sampleDistribution"], months: [M1] });
+
+    expect(result.ok).toBe(true);
+    expect(await openDir(root, ["1-population"])).toBeNull();
+    expect(await readJsonAt(root, `2-samples/${M1}/1-main/sample.master.json`)).not.toBeNull();
+  });
+
+  it("matches the month case-insensitively", async () => {
+    const root = makeRoot();
+    await seedBackup(root, { "1-population/5-May-2026/2-processed/population.final.json": { rows: [] } });
+
+    const result = await restore(root, { elements: ["population"], months: ["5-may-2026"] });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.restoredFiles).toEqual(["1-population/5-May-2026/2-processed/population.final.json"]);
+  });
+});

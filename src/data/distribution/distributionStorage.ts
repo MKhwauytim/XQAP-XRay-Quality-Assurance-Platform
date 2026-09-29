@@ -48,8 +48,12 @@ import {
 import { dedupeInFlight, workspaceScopeId, bumpWorkspaceEpoch, workspaceEpoch } from "../storage/inFlightReads";
 import { isNotFoundError, waitFor } from "../storage/transientFileErrors";
 
-const LOG_FILE = "distribution.log.json";
-const CURRENT_FILE = "distribution.current.json";
+/** Exported for the selective-restore catalog (`backup/restoreScope.ts`). */
+export const DISTRIBUTION_LOG_FILE = "distribution.log.json";
+/** Exported for the selective-restore catalog (`backup/restoreScope.ts`). */
+export const DISTRIBUTION_CURRENT_FILE = "distribution.current.json";
+const LOG_FILE = DISTRIBUTION_LOG_FILE;
+const CURRENT_FILE = DISTRIBUTION_CURRENT_FILE;
 /**
  * Fold-checkpoint sidecar (v85). Lives beside `distribution.current.json` in
  * `2-samples/{month}/1-main`. Exported because the backup/restore layer must
