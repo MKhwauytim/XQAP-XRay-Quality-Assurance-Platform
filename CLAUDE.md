@@ -56,7 +56,7 @@ npm run count-lines -- --quiet  # whole-repo line count (excludes docs/edit logs
 npm run editlog -- --tier=2 "…"  # generate a daily edit-log entry skeleton (see above)
 npm run generate:changelog   # regenerate src/data/changelog/latestUpdates.generated.ts (also runs automatically before dev/build/typecheck/test/test:run)
 npm run preview         # Preview the built file
-npm run test:run        # Vitest, 1970 tests / 231 files as of v72.0.0
+npm run test:run        # Vitest, 5190 tests (5163 passed, 27 skipped) / 567 files as of v150.21.0
 npm run test            # Vitest watch mode
 npx vitest run src/data/sampling/sampleAlgorithm.test.ts  # run a single test file
 ```
