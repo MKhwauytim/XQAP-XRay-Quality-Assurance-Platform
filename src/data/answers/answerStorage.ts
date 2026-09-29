@@ -298,6 +298,50 @@ type AnswerEventsCacheEntry = {
 let answerEventsCacheByRoot = new WeakMap<DirectoryHandleLike, Map<string, AnswerEventsCacheEntry>>();
 
 /**
+ * The frozen legacy seed (hash + items) of an employee this tab has already
+ * seen SEEDED, per (root, month, user). `{user}.answers.json` is frozen forever
+ * once a `migration-seed` event exists (only the test/seed-only
+ * `saveEmployeeAnswers` can still write it, and it drops the memo), so re-reading
+ * it on every save cost 4 serial share round trips for an answer that could not
+ * differ. Populated ONLY by `resolveSeed` after a successful read of an already
+ * seeded employee — never from a failed or missing read, so an unreadable
+ * legacy file still throws on the first read of a session (P0-1) and an absent
+ * one is never memoized before the shell is frozen. Dropped together with the
+ * events cache (manual refresh, restore) — same lifetime, same scoping.
+ */
+let legacySeedMemoByRoot = new WeakMap<DirectoryHandleLike, Map<string, AnswerLegacySeed>>();
+
+function legacySeedMemoKey(monthFolderName: string, username: string): string {
+  return `${monthFolderName}\u0000${username.trim().toLowerCase()}`;
+}
+
+function getLegacySeedMemo(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  username: string
+): AnswerLegacySeed | undefined {
+  return legacySeedMemoByRoot.get(directoryHandle)?.get(legacySeedMemoKey(monthFolderName, username));
+}
+
+function setLegacySeedMemo(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  username: string,
+  seed: AnswerLegacySeed
+): void {
+  let perRoot = legacySeedMemoByRoot.get(directoryHandle);
+  if (!perRoot) {
+    perRoot = new Map();
+    legacySeedMemoByRoot.set(directoryHandle, perRoot);
+  }
+  perRoot.set(legacySeedMemoKey(monthFolderName, username), seed);
+}
+
+function dropLegacySeedMemo(directoryHandle: DirectoryHandleLike, monthFolderName: string, username: string): void {
+  legacySeedMemoByRoot.get(directoryHandle)?.delete(legacySeedMemoKey(monthFolderName, username));
+}
+
+/**
  * Test-only: drop the whole `answers.events/` read cache for every root.
  * Mirrors `distributionStorage.ts`'s `__clearDeriveMemoForTests` — safe to
  * drop at any time by the cache's own "SAFE TO DROP" contract above. Needed
@@ -319,6 +363,7 @@ export function __clearAnswerEventsCacheForTests(): void {
  */
 export function clearAnswerEventsCache(): void {
   answerEventsCacheByRoot = new WeakMap();
+  legacySeedMemoByRoot = new WeakMap();
 }
 
 /**
@@ -358,6 +403,7 @@ function setAnswerEventsCacheEntry(
  *  needed, since nothing here requires a targeted per-root clear. */
 function resetAnswerEventsCache(): void {
   answerEventsCacheByRoot = new WeakMap();
+  legacySeedMemoByRoot = new WeakMap();
 }
 
 /** @internal test-only alias — see `resetAnswerEventsCache`. */
@@ -808,12 +854,21 @@ async function resolveSeed(
   eventAt: string
 ): Promise<{ seedEvent: AnswerEvent | null; legacySeed: AnswerLegacySeed }> {
   const alreadySeeded = ownEvents.some((event) => event.eventType === "migration-seed");
+  if (alreadySeeded) {
+    // Frozen once seeded (see `legacySeedMemoByRoot`): after one successful read
+    // this session, every later save reuses it instead of re-reading the share.
+    const memo = getLegacySeedMemo(directoryHandle, monthFolderName, username);
+    if (memo) return { seedEvent: null, legacySeed: memo };
+  }
   const legacy = await loadLegacyAnswersFile(directoryHandle, monthFolderName, username);
   const legacySeed: AnswerLegacySeed = {
     contentHash: legacyContentHashOf(legacy),
     items: legacy?.items ?? [],
   };
-  if (alreadySeeded) return { seedEvent: null, legacySeed };
+  if (alreadySeeded) {
+    setLegacySeedMemo(directoryHandle, monthFolderName, username, legacySeed);
+    return { seedEvent: null, legacySeed };
+  }
 
   if (!legacy) {
     const answersDir = await getAnswersDir(directoryHandle, monthFolderName);
@@ -1109,6 +1164,8 @@ export async function saveEmployeeAnswers(
         }),
       };
       await safeWriteJson(dir, answerFileName(username), updated);
+      // The one legacy writer left: whatever seed this tab memoized is stale now.
+      dropLegacySeedMemo(directoryHandle, monthFolderName, username);
       const verify = await loadLegacyAnswersFile(directoryHandle, monthFolderName, username);
       if (verify?.revision === nextRevision && verify._writeToken === writeToken) {
         bumpWorkspaceEpoch(directoryHandle, monthFolderName);
