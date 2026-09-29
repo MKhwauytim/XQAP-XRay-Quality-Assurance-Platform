@@ -11,11 +11,10 @@ import type {
   SelectiveRestoreWarning,
 } from "../../../../data/backup/selectiveRestore";
 import { formatNumber } from "../../../../utils/formatting";
+import { describeIntegrity, fillTemplate } from "../../../../data/backup/restoreMessages";
 
-/** {var}-placeholder interpolation for label templates (the Archive tab's one copy). */
-export function fillTemplate(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{(\w+)\}/g, (_match, key: string) => vars[key] ?? `{${key}}`);
-}
+// One copy of each helper, shared with the Settings recovery tool.
+export { describeIntegrity, fillTemplate };
 
 export function restoreElementLabel(labels: Labels, element: RestoreElementId): string {
   const definition = RESTORE_ELEMENTS.find((item) => item.id === element);
@@ -54,15 +53,6 @@ export function describeWarning(labels: Labels, warning: SelectiveRestoreWarning
     "requests-embedded-in-answers": labels.archive_restore_warning_requests_embedded,
   };
   return fillTemplate(templates[warning.kind], { month: formatMonthFolderShortLabel(warning.month) });
-}
-
-export function describeIntegrity(labels: Labels, entry: SelectiveRestoreIntegrity): string {
-  const month = formatMonthFolderShortLabel(entry.month);
-  if (!entry.result) return fillTemplate(labels.archive_restore_integrity_failed, { month, error: entry.error ?? "" });
-  if (entry.result.clean) return fillTemplate(labels.archive_restore_integrity_clean, { month });
-  const { answersOrphans, approvalsOrphans, sampleOrphans, distributionOrphans } = entry.result;
-  const count = answersOrphans.length + approvalsOrphans.length + sampleOrphans.length + distributionOrphans.length;
-  return fillTemplate(labels.archive_restore_integrity_orphans, { month, count: formatNumber(count) });
 }
 
 export function describeSelectiveRestoreSuccess(

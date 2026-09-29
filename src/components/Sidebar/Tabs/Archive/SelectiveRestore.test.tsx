@@ -393,4 +393,22 @@ describe("Archive restore dialog — selective mode (Workstream D)", () => {
     });
     expect(vi.mocked(broadcastDataRefresh)).toHaveBeenCalledWith("manual");
   });
+
+  it("shows an unexpected rejection inside the dialog and still refreshes other views", async () => {
+    vi.mocked(runSelectiveRestore).mockRejectedValue(new Error("share vanished"));
+    const dialog = await openSelectiveDialog();
+    pickPopulationForM1(dialog);
+    await within(dialog).findByText(
+      fillTemplate(L.archive_restore_preview_row, { element: L.restore_element_population, month: M1_LABEL, count: formatNumber(3) })
+    );
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: /أفهم أن الاستعادة/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "متابعة التحقق" }));
+    fireEvent.change(within(dialog).getByPlaceholderText(FOLDER), { target: { value: FOLDER } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "استعادة الآن" }));
+
+    await waitFor(() => {
+      expect(within(dialog).getByRole("alert")).toHaveTextContent("share vanished");
+    });
+    expect(vi.mocked(broadcastDataRefresh)).toHaveBeenCalledWith("manual");
+  });
 });

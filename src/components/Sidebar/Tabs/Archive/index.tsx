@@ -390,6 +390,13 @@ export default function ArchiveTab() {
         setMessage({ type: "error", text });
         setDialogError(text);
       }
+    } catch (error) {
+      // Nothing may escape as an unhandled rejection (the caller is fire-and-forget), and after an
+      // unexpected failure live data may have changed: show it and make other views re-read.
+      const text = describeRestoreFailure(getLabels(), error instanceof Error ? error.message : String(error));
+      setMessage({ type: "error", text });
+      setDialogError(text);
+      broadcastDataRefresh("manual");
     } finally {
       setIsBackingUp(false);
     }
