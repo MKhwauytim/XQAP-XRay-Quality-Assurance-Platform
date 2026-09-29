@@ -23,6 +23,7 @@ import {
 import { useFeedbackUnread } from "../../data/feedback/useFeedbackUnread";
 import { logError } from "../../data/storage/errorLogger";
 import { useWorkspace } from "../../data/workspace/useWorkspace";
+import { useFeedbackExport } from "./useFeedbackExport";
 import Pagination from "../Pagination/Pagination";
 import { clampPage, pageSlice } from "../../utils/paginationUtils";
 import { getLabels } from "../../data/labels/labelsStore";
@@ -164,6 +165,12 @@ export function FeedbackWidget() {
   // admin-only controls: a demo session reports role "admin" purely to unlock
   // tab visibility and must never see this button.
   const isRealAdmin = session?.role === "admin" && session?.mode !== "demo";
+  const { isExporting, exportProgress, exportNotice, startExport } = useFeedbackExport({
+    directoryHandle,
+    isRealAdmin,
+    currentHandleRef,
+    threadsByIdRef,
+  });
 
   const refresh = useCallback(async () => {
     if (!directoryHandle) return;
@@ -561,6 +568,32 @@ export function FeedbackWidget() {
                   </button>
                 ))}
               </div>
+              {isRealAdmin && (
+                <div className="fb-export">
+                  <button
+                    type="button"
+                    className="ui-btn ui-btn--primary ui-btn--sm fb-export-btn"
+                    disabled={isExporting}
+                    onClick={() => { void startExport(); }}
+                  >
+                    {exportProgress
+                      ? getLabels()
+                          .fb_export_progress.replace("{done}", String(exportProgress.done))
+                          .replace("{total}", String(exportProgress.total))
+                      : isExporting
+                        ? getLabels().fb_exporting
+                        : getLabels().fb_export_btn}
+                  </button>
+                  {exportNotice && (
+                    <p
+                      className={`fb-export-notice is-${exportNotice.kind}`}
+                      role={exportNotice.kind === "empty" ? "status" : "alert"}
+                    >
+                      {exportNotice.text}
+                    </p>
+                  )}
+                </div>
+              )}
               {isRealAdmin && (
                 <div className="fb-finalize-legacy">
                   <button

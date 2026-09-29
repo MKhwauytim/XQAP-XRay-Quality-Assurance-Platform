@@ -576,7 +576,8 @@ export const DEFAULT_LABELS = {
   // generated workbook's sheet names and column headings (Workstream B).
   fb_export_btn:                "تصدير المحادثات إلى Excel",
   fb_exporting:                 "جارٍ التصدير…",
-  fb_export_reading:            "جارٍ قراءة المحادثات…",
+  fb_export_progress:           "جارٍ قراءة المحادثات… {done} / {total}",
+  fb_export_partial:            "تم التصدير، لكن تعذّرت قراءة {skipped} محادثة (ملف تالف أو غير متاح).",
   fb_export_failed:             "تعذّر تصدير المحادثات — حاول مرة أخرى.",
   fb_export_empty:              "لا توجد محادثات لتصديرها.",
   fb_export_sheet_threads:      "المحادثات",
@@ -596,7 +597,9 @@ export const DEFAULT_LABELS = {
   fb_export_col_author:         "الكاتب",
   fb_export_col_date:           "التاريخ",
   fb_export_col_message_text:   "النص",
-  fb_export_estimated_suffix:   "(تقديري)",
+  fb_export_col_resolved_estimated: "إغلاق تقديري",
+  fb_export_yes:                "نعم",
+  fb_export_no:                 "لا",
 
   // Login screen (AuthGate) — the first screen every user sees
   auth_tagline:                 "منصة فحص صور الأشعة",

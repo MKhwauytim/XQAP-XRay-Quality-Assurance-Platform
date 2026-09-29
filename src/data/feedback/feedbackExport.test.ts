@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import * as XLSX from "xlsx";
 
-import { formatDateTime } from "../../utils/formatting";
+import { formatExportTimestamp } from "../../utils/formatting";
 import { getLabels, type Labels } from "../labels/labelsStore";
 import type { FeedbackThread } from "./feedbackStorage";
 import {
@@ -14,8 +14,11 @@ import {
 } from "./feedbackExport";
 
 const L: Labels = getLabels();
-// Dates come from the app formatter, so expectations use it too (locale/timezone-proof).
-const d = (iso: string) => formatDateTime(iso, "");
+// The export writes LOCAL time. Pin the zone (before any Date is used) so the
+// literals and the snapshot never depend on the machine running the tests.
+process.env.TZ = "Asia/Riyadh";
+
+const d = (iso: string) => formatExportTimestamp(iso, { zone: "local" });
 
 const RESOLVED_WITH_FIELDS: FeedbackThread = {
   id: "t20260920100000-aaaaaaaa",
@@ -75,14 +78,23 @@ describe("feedbackExport — conversations sheet", () => {
       2,
       d("2026-09-22T11:30:00.000Z"),
       "manager1",
+      L.fb_export_no,
       "الجهاز لا يعمل",
     ]);
   });
 
-  it("approximates a legacy thread's resolution from its last reply and marks it estimated", () => {
+  it("writes sortable local-time timestamps (Riyadh = UTC+3), not locale text", () => {
+    const [row] = buildFeedbackThreadRows([RESOLVED_WITH_FIELDS], L);
+    expect(row![5]).toBe("2026-09-20 13:00:00");
+    expect(row![6]).toBe("2026-09-22 14:30:00");
+    expect(row![8]).toBe("2026-09-22 14:30:00");
+  });
+
+  it("approximates a legacy thread's resolution from its last reply and flags it in its own column", () => {
     const [row] = buildFeedbackThreadRows([LEGACY_RESOLVED], L);
-    expect(row![8]).toBe(`${d("2026-01-02T08:15:00.000Z")} ${L.fb_export_estimated_suffix}`);
-    expect(row![9]).toBe(`admin ${L.fb_export_estimated_suffix}`);
+    expect(row![8]).toBe("2026-01-02 11:15:00");
+    expect(row![9]).toBe("admin");
+    expect(row![10]).toBe(L.fb_export_yes);
     expect(row![2]).toBe(L.toolbar_role_supervisor);
   });
 
@@ -93,6 +105,7 @@ describe("feedbackExport — conversations sheet", () => {
     expect(row![7]).toBe(0);
     expect(row![8]).toBe("");
     expect(row![9]).toBe("");
+    expect(row![10]).toBe("");
     expect(row![2]).toBe("custom-role");
   });
 
@@ -164,15 +177,6 @@ describe("feedbackExport — chunked build and workbook", () => {
 });
 
 describe("feedbackExport — snapshot (deterministic by contract)", () => {
-  const originalTz = process.env.TZ;
-  beforeAll(() => {
-    process.env.TZ = "UTC";
-  });
-  afterAll(() => {
-    if (originalTz === undefined) delete process.env.TZ;
-    else process.env.TZ = originalTz;
-  });
-
   it("pins both sheets for resolved-with-fields, legacy-resolved and open threads", async () => {
     const sheets = await buildFeedbackExportSheets([RESOLVED_WITH_FIELDS, LEGACY_RESOLVED, OPEN_NO_REPLY], L);
     expect(sheets).toMatchSnapshot();

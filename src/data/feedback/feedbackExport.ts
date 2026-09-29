@@ -3,13 +3,15 @@
  * sheets (Workstream B, 2026-09-28):
  *
  *  - «المحادثات» — one row per thread: id, sender, role, category, status,
- *    created, last activity, reply count, resolved at/by, original text.
+ *    created, last activity, reply count, resolved at/by, whether that
+ *    resolution is estimated (legacy thread), original text.
  *  - «الرسائل»   — one row per message (the original, then each reply).
  *
- * ZERO EXTRA I/O. The caller passes threads it already holds in memory (the
- * FeedbackUnreadProvider's polled aggregate merged with the widget's own
- * fresher copies — see feedbackThreadMerge.ts), so exporting never re-reads
- * the feedback directory on the share.
+ * PURE, NO I/O. The caller passes the threads to export; the click-time read
+ * that gathers them lives in feedbackExportRead.ts. Every date cell is the
+ * sortable `YYYY-MM-DD HH:mm:ss` text in LOCAL time (matching what the widget
+ * shows) from `formatExportTimestamp` (utils/formatting.ts), so Excel sorts and
+ * filters chronologically.
  *
  * Mechanically the same as `errorLog/errorLogExport.ts`: pure row builders,
  * rows assembled in chunks separated by `yieldToMain()`, then the synchronous
@@ -26,7 +28,7 @@
 
 import * as XLSX from "xlsx";
 
-import { formatDateTime } from "../../utils/formatting";
+import { formatExportTimestamp as formatTimestampAs } from "../../utils/formatting";
 import type { Labels } from "../labels/labelsStore";
 import { yieldToMain } from "../storage/yieldToMain";
 import type { FeedbackCategory, FeedbackMessage } from "./feedbackStorage";
@@ -43,10 +45,10 @@ export type FeedbackExportSheets = {
 
 const EXPORT_CHUNK_SIZE = 500;
 
-/** The app's own date formatter (utils/formatting.ts); an unparseable value is kept verbatim, a missing one is empty. */
-function formatTimestamp(iso: string | null | undefined): string {
-  return formatDateTime(iso, "");
-}
+/** Local time, like the widget shows. */
+const formatExportTimestamp = (value: string | null | undefined) =>
+  formatTimestampAs(value, { zone: "local" });
+
 
 function categoryText(labels: Labels, category: FeedbackCategory): string {
   if (category === "issue") return labels.fb_category_issue;
@@ -79,17 +81,19 @@ function lastActivity(thread: FeedbackMessage): string {
 }
 
 /**
- * Resolved at/by. The stored fields when present; for a thread resolved before
- * they existed, the last reply (resolving always appends one) with the
- * estimated marker, so the file never presents a guess as a record.
+ * Resolved at/by, plus whether the pair is an estimate. The stored fields when
+ * present; for a thread resolved before they existed, the last reply (resolving
+ * always appends one), flagged in its OWN yes/no column so the date and author
+ * cells stay clean for filtering and the file never presents a guess as a record.
  */
-function resolutionCells(labels: Labels, thread: FeedbackMessage): [string, string] {
-  if (thread.status !== "resolved") return ["", ""];
-  if (thread.resolvedAt) return [formatTimestamp(thread.resolvedAt), thread.resolvedBy ?? ""];
+function resolutionCells(labels: Labels, thread: FeedbackMessage): [string, string, string] {
+  if (thread.status !== "resolved") return ["", "", ""];
+  if (thread.resolvedAt) {
+    return [formatExportTimestamp(thread.resolvedAt), thread.resolvedBy ?? "", labels.fb_export_no];
+  }
   const last = thread.replies.at(-1);
-  if (!last) return ["", ""];
-  const mark = labels.fb_export_estimated_suffix;
-  return [`${formatTimestamp(last.timestamp)} ${mark}`, `${last.from} ${mark}`];
+  if (!last) return ["", "", ""];
+  return [formatExportTimestamp(last.timestamp), last.from, labels.fb_export_yes];
 }
 
 export function feedbackThreadHeaders(labels: Labels): string[] {
@@ -104,6 +108,7 @@ export function feedbackThreadHeaders(labels: Labels): string[] {
     labels.fb_export_col_reply_count,
     labels.fb_export_col_resolved_at,
     labels.fb_export_col_resolved_by,
+    labels.fb_export_col_resolved_estimated,
     labels.fb_export_col_text,
   ];
 }
@@ -127,18 +132,19 @@ export function buildFeedbackThreadRows(
   labels: Labels
 ): FeedbackExportRow[] {
   return threads.map((thread) => {
-    const [resolvedAt, resolvedBy] = resolutionCells(labels, thread);
+    const [resolvedAt, resolvedBy, estimated] = resolutionCells(labels, thread);
     return [
       thread.id,
       thread.from,
       roleText(labels, thread.role),
       categoryText(labels, thread.category),
       statusText(labels, thread.status),
-      formatTimestamp(thread.timestamp),
-      formatTimestamp(lastActivity(thread)),
+      formatExportTimestamp(thread.timestamp),
+      formatExportTimestamp(lastActivity(thread)),
       thread.replies.length,
       resolvedAt,
       resolvedBy,
+      estimated,
       thread.text,
     ];
   });
@@ -163,7 +169,7 @@ export function buildFeedbackMessageRows(
       1,
       thread.from,
       roleText(labels, thread.role),
-      formatTimestamp(thread.timestamp),
+      formatExportTimestamp(thread.timestamp),
       thread.text,
     ]);
     thread.replies.forEach((reply, index) => {
@@ -174,7 +180,7 @@ export function buildFeedbackMessageRows(
         index + 2,
         reply.from,
         roleText(labels, reply.role),
-        formatTimestamp(reply.timestamp),
+        formatExportTimestamp(reply.timestamp),
         reply.text,
       ]);
     });
