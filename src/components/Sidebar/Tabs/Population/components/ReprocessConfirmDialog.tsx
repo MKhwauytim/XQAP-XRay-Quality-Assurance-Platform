@@ -7,7 +7,9 @@ import type { PopulationOverwriteAssessment } from "../../../../../data/populati
  * The re-process confirmation (A2). Shows what the overwrite puts at risk —
  * answers, distributed rows, and live sampled ids the new population lacks —
  * and, when the data layer would refuse the save anyway (`blocked`), explains
- * why and offers no way to continue.
+ * why and offers no way to continue. When the new run would flip the CertScan
+ * status of sampled rows (C2), a non-blocking warning says so — the drawn
+ * sample keeps its original split.
  */
 export function ReprocessConfirmDialog({
   open,
@@ -37,6 +39,11 @@ export function ReprocessConfirmDialog({
         <>
           <p>{assessment.blocked ? L.population_reprocess_blocked_message : L.population_reprocess_confirm_message}</p>
           <p>{counts}</p>
+          {!assessment.blocked && assessment.certScanChangedCount > 0 && (
+            <p role="alert">
+              {L.population_reprocess_certscan_warning.replace("{count}", formatNumber(assessment.certScanChangedCount))}
+            </p>
+          )}
           {assessment.missingExamples.length > 0 && (
             <p>{L.population_reprocess_missing_examples.replace("{ids}", assessment.missingExamples.join(L.population_reprocess_examples_separator))}</p>
           )}

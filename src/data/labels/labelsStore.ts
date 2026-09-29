@@ -418,6 +418,7 @@ export const DEFAULT_LABELS = {
   population_reprocess_cancelled: "تم إلغاء الحفظ — بقيت بيانات الشهر السابقة دون تغيير.",
   population_reprocess_impact_counts: "إجابات محفوظة: {answers} · صور موزعة: {distribution} · صور من العينة غير موجودة في المجتمع الجديد: {missing}",
   population_reprocess_missing_examples: "أمثلة على الصور المفقودة: {ids}",
+  population_reprocess_certscan_warning: "سيتغيّر وضع CertScan لـ {count} صورة من العينة؛ تحتفظ العينة المسحوبة بتقسيمها الأصلي.",
   population_reprocess_examples_separator: "، ",
   population_reprocess_blocked_title: "لا يمكن حفظ المجتمع الجديد",
   population_reprocess_blocked_message: "لهذا الشهر توزيع أو إجابات محفوظة، والمجتمع الجديد لا يحتوي بعض صور العينة الحالية. الحفظ سيُخفي هذه الصور وإجاباتها من التقارير، لذلك تم إيقافه. تأكّد أن الملفات تخص الشهر نفسه ثم أعد المعالجة.",

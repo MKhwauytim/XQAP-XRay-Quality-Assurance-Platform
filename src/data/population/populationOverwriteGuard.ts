@@ -24,6 +24,13 @@ export type PopulationOverwriteImpact = {
   sampleExists: boolean;
   /** `liveSampleRows(sample)` ids — retired-by-replacement rows excluded. */
   liveSampledIds: string[];
+  /**
+   * The sample's stored `certScanStatus` per live sampled id (C2). Lets the
+   * re-process dialog warn when the new run would flip a sampled row's
+   * CertScan status while the drawn sample keeps its original split. Optional:
+   * absent means "unknown", and no CertScan warning is raised.
+   */
+  liveSampledCertScan?: Record<string, string>;
   distributionCount: number;
   answerCount: number;
 };
@@ -31,6 +38,12 @@ export type PopulationOverwriteImpact = {
 export type PopulationOverwriteAssessment = PopulationOverwriteImpact & {
   missingCount: number;
   missingExamples: string[];
+  /**
+   * How many live sampled rows also appear in the new rows with a DIFFERENT
+   * `certScanStatus` than the sample stored (C2 — a changed CertScan flag or
+   * pasted list). Advisory only: never blocks the save.
+   */
+  certScanChangedCount: number;
   /** True when the save must be refused whatever the user confirms. */
   blocked: boolean;
 };
@@ -72,9 +85,29 @@ export async function loadPopulationOverwriteImpact(
   return {
     sampleExists: true,
     liveSampledIds: liveSampleRows(sample).map((row) => row.xrayImageId),
+    liveSampledCertScan: Object.fromEntries(
+      liveSampleRows(sample).map((row) => [row.xrayImageId, row.certScanStatus])
+    ),
     distributionCount: distribution?.entries.length ?? 0,
     answerCount: employeeFiles.reduce((total, file) => total + file.items.length, 0),
   };
+}
+
+/** Sampled rows (by id) whose `certScanStatus` differs between the sample and the new rows. */
+function countCertScanChanges(
+  sampled: Record<string, string> | undefined,
+  newRows: ReadonlyArray<Record<string, unknown>>
+): number {
+  if (!sampled) return 0;
+  let changed = 0;
+  for (const row of newRows) {
+    const id = row["xrayImageId"];
+    const status = row["certScanStatus"];
+    if (typeof id !== "string" || typeof status !== "string") continue;
+    const before = Object.hasOwn(sampled, id) ? sampled[id] : undefined;
+    if (before !== undefined && before !== status) changed += 1;
+  }
+  return changed;
 }
 
 /**
@@ -104,6 +137,7 @@ export function assessPopulationOverwrite(
   const hasWork = impact.distributionCount > 0 || impact.answerCount > 0;
   return {
     ...impact,
+    certScanChangedCount: countCertScanChanges(impact.liveSampledCertScan, newRows),
     missingCount: sampleOrphans.length,
     missingExamples: sampleOrphans.slice(0, OVERWRITE_MISSING_EXAMPLE_LIMIT),
     blocked: hasWork && sampleOrphans.length > 0,
