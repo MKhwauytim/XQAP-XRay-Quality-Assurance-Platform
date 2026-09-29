@@ -106,6 +106,13 @@ type AppendDistributionEventsOptions = {
    * it -- see `queueDistributionCacheRebuild`, which re-reads in the background.
    */
   priorLog?: DistributionLog;
+  /**
+   * R4: the full load (log + scan metadata) the caller made immediately before
+   * this append. Implies `priorLog`, and additionally lets the projection job
+   * skip its own full re-read of the event store: it needs only the compatibility
+   * log's revision/token/body, which it still reads fresh on every CAS attempt.
+   */
+  priorLoad?: DistributionLogLoad;
 };
 
 /**
@@ -320,16 +327,15 @@ async function readCurrentDistributionSource(
   }
   // Deliberately unguarded: `onUnreadable: "throw"` above is the whole point,
   // and a listing failure is equally inconclusive. Both propagate.
-  const { values: legacyValues } = await readAppendOnlyDirectory<DistributionEvent>(eventsDir, {
+  const { values: legacyValues, matchedNames: legacyMatchedNames } = await readAppendOnlyDirectory<DistributionEvent>(eventsDir, {
     suffix: ".json",
     onUnreadable: "throw",
     unreadableError: (name) => `Cannot read immutable distribution event: ${name}`,
     scope: { root: directoryHandle, path: `${monthFolderName}/1-main/${DISTRIBUTION_EVENTS_DIR}` },
   });
-  const legacyEventFileNames = (await listDirectoryEntries(eventsDir))
-    .filter((entry) => entry.kind === "file" && entry.name.endsWith(".json"))
-    .map((entry) => entry.name)
-    .sort((a, b) => a.localeCompare(b));
+  // R4: the listing `readAppendOnlyDirectory` just made already IS the legacy
+  // name set (files ending ".json", name-sorted); do not list the directory again.
+  const legacyEventFileNames = legacyMatchedNames;
   // Legacy one-file-per-event immutable files are still read and merged in —
   // never rewritten or deleted, since another machine on an older build may
   // still be writing them (see distributionEventStore.ts). New writes go to
@@ -576,7 +582,7 @@ export async function loadDistributionCurrentRevision(
   }
 }
 
-type DistributionLogLoad = {
+export type DistributionLogLoad = {
   log: DistributionLog;
   /**
    * The events the CURRENT-location `distribution.log.json` actually holds on
@@ -685,6 +691,19 @@ export async function loadDistributionLog(
   monthFolderName: string
 ): Promise<DistributionLog> {
   return (await loadDistributionLogDetailed(directoryHandle, monthFolderName)).log;
+}
+
+/**
+ * The same full read, keeping what `loadDistributionLog` throws away (segment
+ * offsets, immutable ids, projection body). A caller that reads before it writes
+ * hands this to `appendDistributionEvents({ priorLoad })` so the append does not
+ * have to read the whole event store again.
+ */
+export function loadDistributionLogLoad(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<DistributionLogLoad> {
+  return loadDistributionLogDetailed(directoryHandle, monthFolderName);
 }
 
 export async function appendDistributionEvent(
@@ -825,9 +844,10 @@ export async function appendDistributionEvents(
   // projection deadline: the append is reported ok with `projectionPending`,
   // and the queued job settles (and is logged) in the background.
   let detached = false;
+  const priorLog = options?.priorLoad?.log ?? options?.priorLog;
   const job = enqueueProjectionUpdate(directoryHandle, monthFolderName, events, ids, (progress) => {
     if (!detached) options?.onProgress?.(progress);
-  });
+  }, options?.priorLoad);
   const settled = await raceWithGrace(
     job,
     options?.interactive ? projectionTiming.interactiveGraceMs : projectionTiming.graceMs
@@ -845,8 +865,8 @@ export async function appendDistributionEvents(
   const pendingOrDegraded =
     settled === "pending" ? ({ projectionPending: true } as const) : ({ projectionDegraded: true } as const);
   // R3: the caller's own pre-append read plus this batch, when it handed one in.
-  if (options?.priorLog) {
-    return { ok: true, log: logAfterAppend(options.priorLog, events, ids), ...pendingOrDegraded };
+  if (priorLog) {
+    return { ok: true, log: logAfterAppend(priorLog, events, ids), ...pendingOrDegraded };
   }
   try {
     return {
@@ -992,7 +1012,8 @@ function enqueueProjectionUpdate(
   monthFolderName: string,
   events: DistributionEvent[],
   ids: Set<string>,
-  onProgress: AppendDistributionEventsOptions["onProgress"]
+  onProgress: AppendDistributionEventsOptions["onProgress"],
+  priorLoad?: DistributionLogLoad
 ): Promise<ProjectionOutcome> {
   const key = projectionChainKey(directoryHandle, monthFolderName);
   const chain = projectionChains.get(key) ?? { tail: Promise.resolve(), pending: 0, queued: null };
@@ -1016,7 +1037,7 @@ function enqueueProjectionUpdate(
     mine.started = true;
     if (chain.queued === mine) chain.queued = null;
     try {
-      const outcome = await runProjectionUpdate(directoryHandle, monthFolderName, mine.events, mine.ids, onProgress);
+      const outcome = await runProjectionUpdate(directoryHandle, monthFolderName, mine.events, mine.ids, onProgress, priorLoad);
       if (!outcome.ok) {
         // The projection could not be updated — but we only get here AFTER
         // `writeDistributionEventBatch` committed the immutable event files, so
@@ -1060,6 +1081,41 @@ function enqueueProjectionUpdate(
 }
 
 /**
+ * R4: what `runProjectionUpdate` needs from a full read, assembled from the
+ * caller's PRIOR load plus this batch, re-reading only the two small
+ * compatibility-log files (revision, token, body) -- fresh on every CAS attempt,
+ * which is what the cross-machine protocol depends on. The event ids and the
+ * event-set digest come from the prior load plus the batch; an event another
+ * machine appended in the window is absent from them, which is safe: an id
+ * missing from `immutableEventIds` only makes `residualProjectionEvents` KEEP a
+ * projection-body event it could have dropped, and the projection carries no
+ * event list on a modern workspace anyway. No `scanIdentity` is returned.
+ */
+async function projectionBaseFromPriorLoad(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  prior: DistributionLogLoad,
+  events: DistributionEvent[],
+  ids: Set<string>
+): Promise<Pick<DistributionLogLoad, "log" | "currentProjectionEvents" | "immutableEventIds">> {
+  const dir = await openOptionalDirectory(() => getDistributionDir(directoryHandle, monthFolderName, false));
+  const currentLog = await readCompatibilityLog(dir, `Corrupt distribution compatibility log: ${LOG_FILE}`);
+  const legacyLog = await readLegacyDistributionLog(directoryHandle, monthFolderName);
+  const local = logAfterAppend(prior.log, events, ids);
+  const base = normalizeCompatibilityLog(currentLog);
+  const legacy = normalizeCompatibilityLog(legacyLog);
+  return {
+    log: {
+      ...local,
+      revision: Math.max(base.revision, legacy.revision),
+      _writeToken: selectWriteToken(base, legacy),
+    },
+    currentProjectionEvents: currentLog?.events ?? [],
+    immutableEventIds: new Set([...prior.immutableEventIds, ...ids]),
+  };
+}
+
+/**
  * The projection casLoop itself: re-read the log, bump `revision`, stamp a
  * fresh token, write, and verify BOTH on read-back. Unchanged from the version
  * that used to run inline in `appendDistributionEvents`, except that it now has
@@ -1070,7 +1126,8 @@ async function runProjectionUpdate(
   monthFolderName: string,
   events: DistributionEvent[],
   ids: Set<string>,
-  onProgress: AppendDistributionEventsOptions["onProgress"]
+  onProgress: AppendDistributionEventsOptions["onProgress"],
+  priorLoad?: DistributionLogLoad
 ): Promise<ProjectionOutcome> {
   const result = await casLoop<{ ok: true; log: DistributionLog } | { ok: false; error: string }>(
     async (writeToken) => {
@@ -1079,7 +1136,9 @@ async function runProjectionUpdate(
         log: existing,
         currentProjectionEvents,
         immutableEventIds,
-      } = await loadDistributionLogDetailed(directoryHandle, monthFolderName);
+      } = priorLoad
+        ? await projectionBaseFromPriorLoad(directoryHandle, monthFolderName, priorLoad, events, ids)
+        : await loadDistributionLogDetailed(directoryHandle, monthFolderName);
       // Same set the separate readProjectedEventIds read used to fetch — now
       // taken from the load above instead of re-reading the same file.
       const projectedIds = new Set(currentProjectionEvents.map((event) => event.eventId));
