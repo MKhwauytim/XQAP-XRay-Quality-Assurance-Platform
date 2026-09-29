@@ -63,6 +63,12 @@ vi.mock("../../../../data/backup/backupStorage", () => ({
   restoreBackupSnapshot: vi.fn(),
   saveAutoBackupSettings: vi.fn(),
 }));
+vi.mock("../../../../data/backup/selectiveRestore", () => ({
+  previewSelectiveRestore: vi.fn(),
+  planSelectiveRestore: vi.fn(),
+  runSelectiveRestore: vi.fn(),
+}));
+
 
 vi.mock("../../../../data/population/populationStorage", () => ({
   listMonthFolders: vi.fn(),
