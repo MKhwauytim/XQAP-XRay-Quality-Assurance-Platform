@@ -40,7 +40,12 @@ export function hasAnyPortRestriction(restrictions: EmployeePortRestriction[]): 
  * with how many rows currently sit at that port. Used to populate the port
  * restriction picker for the sample currently being distributed.
  */
-export function derivePortCatalog(rows: PreparedPopulationRow[]): PortCatalogCategory[] {
+/** The two fields `derivePortCatalog` reads — satisfied by processed population
+ *  rows and by raw risk-workbook rows alike (C2's CertScan port picker lists
+ *  the ports of whichever the month has loaded). */
+export type PortCatalogRow = Pick<PreparedPopulationRow, "portName" | "portType">;
+
+export function derivePortCatalog(rows: readonly PortCatalogRow[]): PortCatalogCategory[] {
   const categories = new Map<string, Map<string, number>>();
   for (const row of rows) {
     const category = row.portType?.trim() || UNCATEGORIZED_PORT_TYPE;

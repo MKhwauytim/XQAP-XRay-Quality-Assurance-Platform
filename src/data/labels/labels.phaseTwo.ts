@@ -111,4 +111,17 @@ export const phaseTwoLabels = {
   p2_preview_header_level_one:      "المستوى الأول",
   p2_preview_header_level_two:      "المستوى الثاني",
   p2_preview_header_certscan:       "CertScan",
+
+  // ── إعدادات المعالجة · منافذ CertScan الكاملة (C2) ──────────────────────
+  p2_certscan_ports_section_title:  "منافذ CertScan الكاملة",
+  p2_certscan_ports_section_hint:   "كل صورة من منفذ محدَّد هنا تُعامَل كـ CertScan عند المعالجة القادمة، إضافةً إلى الصور المطابقة لقائمة CertScan الملصقة. العينات المسحوبة سابقاً لا تتغير.",
+  p2_certscan_ports_open:           "تحديد المنافذ ({count} محدد)",
+  p2_certscan_ports_title:          "منافذ CertScan الكاملة",
+  p2_certscan_ports_status:         "{count} من {total} منفذ محدَّد كـ CertScan",
+  p2_certscan_ports_empty_catalog:  "ارفع ملف وكالة المخاطر أولاً لعرض منافذ الشهر.",
+  p2_certscan_ports_missing_category: "محددة سابقاً — غير موجودة في ملف هذا الشهر",
+  p2_certscan_ports_clear:          "إلغاء تحديد الكل",
+  p2_certscan_ports_cancel:         "إلغاء",
+  p2_certscan_ports_save:           "حفظ",
+  p2_certscan_ports_close_aria:     "إغلاق نافذة منافذ CertScan",
 } as const;

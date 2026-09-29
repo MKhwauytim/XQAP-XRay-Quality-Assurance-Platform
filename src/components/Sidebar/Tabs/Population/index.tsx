@@ -450,7 +450,7 @@ export default function PopulationTab() {
   }
 
   async function handleConfigChange(newConfig: PopulationConfig) {
-    if (!canConfigureSample) {
+    if (!canConfigureSample || !canMutate("configure-sample")) {
       setProcessingMessage("لا تملك صلاحية تعديل إعدادات المعالجة أو العينة.");
       return;
     }
@@ -1564,6 +1564,8 @@ export default function PopulationTab() {
         onCertScanPasteTextChange={handleCertScanChange}
         sampleSeed={sampleSeed}
         onSampleSeedChange={setSampleSeed}
+        certScanPortRows={riskWorkbookResult?.rows ?? populationProcessingResult?.preparedRows}
+        canEditCertScanPorts={canConfigureSample && canMutate("configure-sample")}
         processingContext={{
           riskFileName: uploads.riskAgencyData.file?.name ?? null,
           biFileName: biFileNamesLabel,
