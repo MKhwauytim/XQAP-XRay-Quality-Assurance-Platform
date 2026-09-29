@@ -1119,7 +1119,7 @@ async function performAnswerWrite(
         // the whole month) -- see `decideFromSeededCache`. Null means "not
         // provably safe": fall through to the full read, exactly as before.
         const cachedDecision = decideFromSeededCache(directoryHandle, monthFolderName, username, xrayImageId, build);
-        if (cachedDecision) return { mainDir, seedEvent: null, ...cachedDecision };
+        if (cachedDecision) return { mainDir, seedEvent: null, blind: true, ...cachedDecision };
       }
       const allEvents = await readAllAnswerEventsForMonth(directoryHandle, monthFolderName);
       const ownEvents = eventsForEmployee(allEvents, username);
@@ -1138,9 +1138,9 @@ async function performAnswerWrite(
         { legacySeed, username, monthFolderName }
       );
       const previous = foldedNow.file.items.find((item) => item.xrayImageId === xrayImageId);
-      return { mainDir, seedEvent, previous, decision: build({ previous }) };
+      return { mainDir, seedEvent, blind: false, previous, decision: build({ previous }) };
     });
-    const { mainDir, seedEvent, previous, decision } = decided;
+    const { mainDir, seedEvent, previous, decision, blind } = decided;
     if ("skip" in decision) return { ok: true as const };
 
     const event: AnswerEvent = { ...decision.event, eventId, eventAt, answeredBy: username };
@@ -1150,6 +1150,8 @@ async function performAnswerWrite(
     await appendAnswerEventSegment(mainDir, batch, writer, segmentConfig, {
       deadline,
       listedSegmentNames: listedAnswerSegmentNames(directoryHandle, monthFolderName),
+      // A blind append has no fresh listing: probe for a head another tab rotated to.
+      probeAheadForHead: blind,
     });
     reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
     return { ok: true as const };

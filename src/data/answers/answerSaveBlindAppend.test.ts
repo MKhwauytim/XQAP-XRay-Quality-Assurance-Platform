@@ -138,7 +138,7 @@ describe("blind append for a plain self save (A5)", () => {
     await warm(root);
     expect((await upsertItemAnswer(root, MONTH, "emp1", item("S1", { status: "submitted", submittedAt: "2026-05-03T00:00:00.000Z" }))).ok).toBe(true);
     clearReadLog(root);
-    // Force a stale cache view: the cache must be re-read from disk, not trusted, for these.
+    // These decide FROM `previous`, so they never take the blind path: they always read the month.
     expect((await reopenItemAnswer(root, MONTH, "emp1", "S1", "sup1", "why")).ok).toBe(true);
     expect(singletonReads(root)).toBeGreaterThan(0);
     clearReadLog(root);
@@ -224,5 +224,29 @@ describe("blind append for a plain self save (A5)", () => {
     const blind = await run(false);
     const full = await run(true);
     expect(blind).toEqual(full);
+  });
+
+  it.each([false, true])("(floor) another tab of the same employee rotated the shared chain: the save lands in the head segment (forceFull=%s)", async (forceFull) => {
+    const root = createMemoryDirectory("floor", { trackReads: true }) as unknown as DirectoryHandleLike;
+    for (const id of ["W1", "W2", "W3"]) expect((await upsertItemAnswer(root, MONTH, "emp1", item(id))).ok).toBe(true);
+    const main = await getSampleMainDir(root, MONTH, true);
+    const events = await main.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: true });
+    const names: string[] = [];
+    for await (const e of (events as unknown as { values(): AsyncIterable<{ kind: string; name: string }> }).values()) {
+      if (e.kind === "file") names.push(e.name);
+    }
+    expect(names).toHaveLength(1);
+    const head = names[0]!.replace(/\.ndjson$/, "-1.ndjson");
+    // Tab B rotated to seq 1 without filling seq 0.
+    await writeRaw(events, head, `${JSON.stringify({
+      eventId: "tabB-1", eventType: "item-saved", eventAt: new Date().toISOString(), eventBy: "emp1",
+      authority: "self", xrayImageId: "B1", answers: [], status: "draft", answeredBy: "emp1",
+      templateId: "t", templateVersion: 1, lastSavedAt: "2026-05-02T00:00:00.000Z", submittedAt: null,
+    })}\n`);
+    if (forceFull) clearAnswerEventsCache();
+    expect((await upsertItemAnswer(root, MONTH, "emp1", item("A-after"))).ok).toBe(true);
+    const text = async (n: string) => (await (await events.getFileHandle(n)).getFile()).text();
+    expect(await text(head)).toContain('"A-after"');
+    expect(await text(names[0]!)).not.toContain('"A-after"');
   });
 });
