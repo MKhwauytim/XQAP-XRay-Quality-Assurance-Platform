@@ -48,6 +48,7 @@ import { EMPLOYEE_MIRROR_INDEX_FILE, EMPLOYEE_MIRROR_SUFFIX } from "../samples/s
 import {
   LEGACY_MONTH_SUBFOLDERS,
   LEGACY_WORKSPACE_ROOTS,
+  POPULATION_SUBFOLDERS,
   SAMPLE_SUBFOLDERS,
   SYSTEM_FOLDER_NAMES,
   WORKSPACE_ROOTS,
@@ -158,28 +159,49 @@ function monthScoped(element: RestoreElementId, month: string, derived = false):
   return { element, month, derived };
 }
 
-/** The element a FIRST-LEVEL child (file or folder) of a population month folder belongs to. */
-function populationMonthChildElement(name: string): RestoreElementId {
-  if (
-    name === LEGACY_MONTH_SUBFOLDERS.sample ||
-    name === DISTRIBUTION_EVENTS_DIR ||
-    LEGACY_FLAT_SAMPLE_FILES.has(name)
-  ) {
-    return "sampleDistribution";
+/** FILE names (by prefix) a population month folder legitimately holds directly. */
+const POPULATION_MONTH_FILE_PREFIXES = ["population.final", "processing.summary", "risk.raw", "bi.raw", "bi.source", "risk.source"];
+/** The month manifest: status, lock and CAS bookkeeping — synced, never copied, by a selective restore. */
+const MONTH_MANIFEST_FILE = "month.manifest.json";
+
+/**
+ * The element a FIRST-LEVEL child of a population month folder belongs to, or
+ * null for a child nothing here knows: an unknown child FAILS CLOSED rather than
+ * being treated as population data (a future or foreign folder must never be
+ * overwritten by a restore the admin scoped to something else).
+ */
+function populationMonthChildElement(name: string, kind: "file" | "directory"): RestoreElementId | null {
+  if (kind === "file") {
+    if (LEGACY_FLAT_SAMPLE_FILES.has(name)) return "sampleDistribution";
+    if (name === MONTH_MANIFEST_FILE || POPULATION_MONTH_FILE_PREFIXES.some((prefix) => name.startsWith(prefix))) {
+      return "population";
+    }
+    return null;
   }
+  if (name === LEGACY_MONTH_SUBFOLDERS.sample || name === DISTRIBUTION_EVENTS_DIR) return "sampleDistribution";
   if (name === LEGACY_MONTH_SUBFOLDERS.employeeAnswers || name === ANSWER_EVENTS_DIR) return "answers";
   if (name === LEGACY_MONTH_SUBFOLDERS.approvals) return "referralsApprovals";
-  return "population";
+  const populationFolders: readonly string[] = [
+    POPULATION_SUBFOLDERS.raw,
+    POPULATION_SUBFOLDERS.processed,
+    LEGACY_MONTH_SUBFOLDERS.raw,
+    LEGACY_MONTH_SUBFOLDERS.processed,
+  ];
+  return populationFolders.includes(name) ? "population" : null;
 }
 
-function classifyPopulationPath(segments: readonly string[]): BackupPathClass {
+function classifyPopulationPath(segments: readonly string[]): BackupPathClass | null {
   if (segments.length === 2) return workspaceWide("populationSettings");
   const month = segments[1];
-  const element = populationMonthChildElement(segments[2]);
+  const isFile = segments.length === 3;
+  const element = populationMonthChildElement(segments[2], isFile ? "file" : "directory");
+  if (element === null) return null;
   const below = segments.slice(2);
   const derived =
     element === "population" &&
-    (below.includes(REPLACEMENT_INDEX_FOLDER) || below[below.length - 1] === POPULATION_AGGREGATE_FILE);
+    (below.includes(REPLACEMENT_INDEX_FOLDER) ||
+      below[below.length - 1] === POPULATION_AGGREGATE_FILE ||
+      (isFile && segments[2] === MONTH_MANIFEST_FILE));
   return monthScoped(element, month, derived);
 }
 
@@ -280,7 +302,8 @@ function candidatesUnderPopulationRoot(segments: readonly string[]): readonly Re
   if (segments.length === 1) return numbered ? ["population", "populationSettings"] : [...MONTH_SCOPED_IDS, "populationSettings"];
   if (segments.length === 2) return numbered ? ["population"] : MONTH_SCOPED_IDS;
   if (segments.slice(2).includes(REPLACEMENT_INDEX_FOLDER)) return [];
-  return [populationMonthChildElement(segments[2])];
+  const child = populationMonthChildElement(segments[2], "directory");
+  return child === null ? [] : [child];
 }
 
 function candidatesUnderSamplesRoot(segments: readonly string[]): readonly RestoreElementId[] {
@@ -297,7 +320,7 @@ function candidatesUnderSamplesRoot(segments: readonly string[]): readonly Resto
 }
 
 function candidatesUnderSystemRoot(segments: readonly string[]): readonly RestoreElementId[] {
-  if (segments.length === 1) return ["feedback", "systemSettings"];
+  if (segments.length === 1) return ["feedback", "systemSettings", "sampleDistribution"];
   const child = segments[1];
   if (child === SYSTEM_FOLDER_NAMES.feedback) return ["feedback"];
   if (SYSTEM_CHILDREN_NEVER_RESTORED.has(child)) return [];

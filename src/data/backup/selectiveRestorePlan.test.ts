@@ -67,12 +67,26 @@ describe("planSelectiveRestore — population coverage (A2 rule)", () => {
     expect(result.canConfirm).toBe(true);
   });
 
-  it("checks against the backup's own sample when Sample & distribution is restored in the same scope", async () => {
+  it("still blocks when Sample & distribution is restored too: live ids with work are merged, not removed", async () => {
     const root = makeRoot();
     await seedLiveMonth(root, { withDistribution: true });
     await seedBackup(root, {
       [POP_M1]: { rows: [{ xrayImageId: "A" }] },
       [`2-samples/${M1}/1-main/sample.master.json`]: { rows: [{ xrayImageId: "A" }] },
+    });
+
+    const result = await plan(root, { elements: ["population", "sampleDistribution"], months: [M1] });
+
+    expect(result.blocked).toEqual([{ month: M1, sampledCount: 2, missingCount: 1, missingExamples: ["B"] }]);
+    expect(result.canConfirm).toBe(false);
+  });
+
+  it("allows it when the backup population covers the live AND the backup sampled ids", async () => {
+    const root = makeRoot();
+    await seedLiveMonth(root, { withDistribution: true });
+    await seedBackup(root, {
+      [POP_M1]: { rows: [{ xrayImageId: "A" }, { xrayImageId: "B" }, { xrayImageId: "C" }] },
+      [`2-samples/${M1}/1-main/sample.master.json`]: { rows: [{ xrayImageId: "C" }] },
     });
 
     const result = await plan(root, { elements: ["population", "sampleDistribution"], months: [M1] });
@@ -173,6 +187,17 @@ describe("planSelectiveRestore — legacy answer files that embed request queues
     await seedBackup(clean, { [LEGACY_ANSWERS]: { items: [], referralRequests: [] } });
     const answersOnly = await plan(clean, { elements: ["answers"], months: [M1] });
     expect(answersOnly.warnings.map((warning) => warning.kind)).toEqual(["answers-without-sample"]);
+  });
+});
+
+describe("planSelectiveRestore — unreadable answer files", () => {
+  it("treats an answers file it cannot read as possibly embedding requests", async () => {
+    const root = makeRoot();
+    await seedBackup(root, {}, { [`2-samples/${M1}/2-employees/employee01.answers.json`]: "{not json" });
+
+    const result = await plan(root, { elements: ["answers"], months: [M1] });
+
+    expect(result.warnings).toContainEqual({ kind: "answers-restore-embedded-requests", month: M1 });
   });
 });
 

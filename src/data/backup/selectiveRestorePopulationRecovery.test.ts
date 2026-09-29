@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { listBackupPopulationCandidates, restorePopulationMonthFromBackup } from "./selectiveRestore";
+import { listPopulationRecoveryCandidates } from "../population/populationRecovery";
+import {
+  BACKUP_POPULATION_CANDIDATE_SCAN_LIMIT,
+  listBackupPopulationCandidates,
+  restorePopulationMonthFromBackup,
+} from "./selectiveRestore";
 import { invalidateMonthLockCache } from "../population/monthLock";
 import { distEvent, M1, M2, makeRoot, ndjson, readJsonAt, seedBackup, TEST_BACKUP, writeJsonAt, writeRawAt } from "./selectiveRestoreTestKit";
 
@@ -101,5 +106,38 @@ describe("restorePopulationMonthFromBackup (A2 recovery tool)", () => {
 
     expect(outcome.ok).toBe(false);
     expect((await readJsonAt<{ source: string }>(root, POP_M1))?.source).toBe("live");
+  });
+
+  it("leaves a superseded local candidate behind, so the restore can be undone from the recovery list", async () => {
+    const root = makeRoot();
+    await writeJsonAt(root, POP_M1, { source: "live", rows: [{ xrayImageId: "A" }] });
+    await seedBackup(root, { [POP_M1]: { source: "backup", rows: [{ xrayImageId: "A" }] } });
+
+    const outcome = await restorePopulationMonthFromBackup({
+      directoryHandle: root,
+      backupFolderName: TEST_BACKUP,
+      month: M1,
+      username: "admin",
+    });
+
+    expect(outcome.ok).toBe(true);
+    const local = await listPopulationRecoveryCandidates(root, M1);
+    expect(local.some((candidate) => candidate.source === "superseded")).toBe(true);
+  });
+
+  it("only considers the newest complete backups (bounded scan)", async () => {
+    const root = makeRoot();
+    const total = BACKUP_POPULATION_CANDIDATE_SCAN_LIMIT + 2;
+    for (let index = 0; index < total; index += 1) {
+      await seedBackup(root, { [POP_M1]: { rows: [] } }, {}, {
+        folderName: `b-${String(index).padStart(2, "0")}`,
+        createdAt: new Date(Date.UTC(2026, 4, 1 + index)).toISOString(),
+      });
+    }
+
+    const candidates = await listBackupPopulationCandidates(root, M1);
+
+    expect(candidates).toHaveLength(BACKUP_POPULATION_CANDIDATE_SCAN_LIMIT);
+    expect(candidates[0]?.fileName).toBe(`b-${String(total - 1).padStart(2, "0")}`);
   });
 });

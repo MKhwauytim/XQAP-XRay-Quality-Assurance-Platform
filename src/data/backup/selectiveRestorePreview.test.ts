@@ -55,7 +55,8 @@ describe("previewSelectiveRestore", () => {
 
     expect(preview.backupFolderName).toBe(TEST_BACKUP);
     expect(preview.months).toEqual([M1, M2, "adhoc-imp1"]);
-    expect(countPreviewFiles(preview, "population", M1)).toBe(2);
+    // month.manifest.json is never copied selectively, so it is not counted.
+    expect(countPreviewFiles(preview, "population", M1)).toBe(1);
     expect(countPreviewFiles(preview, "population", M2)).toBe(1);
     expect(countPreviewFiles(preview, "sampleDistribution", M1)).toBe(2);
     expect(countPreviewFiles(preview, "sampleDistribution", "adhoc-imp1")).toBe(1);

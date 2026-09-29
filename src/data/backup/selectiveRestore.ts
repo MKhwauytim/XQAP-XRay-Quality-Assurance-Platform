@@ -9,6 +9,7 @@ import { listDirectoryEntries } from "../storage/directoryScan";
 import { safeReadJson } from "../storage/safeWrite";
 import { isNotFoundError } from "../storage/transientFileErrors";
 import { logError } from "../storage/errorLogger";
+import { getLabels } from "../labels/labelsStore";
 import {
   invalidateDistributionCacheForFieldEdit,
   refreshDistributionCacheAfterWrite,
@@ -16,19 +17,24 @@ import {
 import type { OrphanScanResult } from "../integrity/orphanScan";
 import { runMonthIntegrityScan } from "../integrity/orphanScanLoader";
 import { parseMonthFolderName, type MonthFolderInfo } from "../population/monthFolder";
-import { ensureMonthWritable, invalidateMonthLockCache } from "../population/monthLock";
-import type { PopulationFinalData } from "../population/monthTypes";
-import { discardPopulationAggregate } from "../population/populationAggregate";
+import { ensureMonthWritable, invalidateMonthLockCache, MonthClosedError } from "../population/monthLock";
+import type { MonthManifestData, PopulationFinalData } from "../population/monthTypes";
+import { discardPopulationAggregate, loadPopulationAggregate } from "../population/populationAggregate";
 import { assessPopulationOverwrite, loadPopulationOverwriteImpact } from "../population/populationOverwriteGuard";
-import { rebuildPopulationDerivedFiles, type PopulationRecoveryCandidate } from "../population/populationRecovery";
+import {
+  rebuildPopulationDerivedFiles,
+  syncManifestFromBackupPopulation,
+  type PopulationRecoveryCandidate,
+} from "../population/populationRecovery";
 import {
   archiveBeforeOverwrite,
   listMonthFolders,
+  loadProcessingSummary,
   readMonthPopulationFinal,
   supersedeStamp,
 } from "../population/populationStorage";
 import type { PreparedPopulationRow } from "../population/populationTypes";
-import { discardReplacementIndexManifest } from "../population/replacementIndexStorage";
+import { discardReplacementIndexManifest, loadReplacementIndexManifest } from "../population/replacementIndexStorage";
 import { ANSWERS_SUFFIX } from "../answers/answerStorage";
 import { liveSampleRows, loadSampleMaster, SAMPLE_MASTER_FILE } from "../sampling/sampleStorage";
 import type { SampleMasterData } from "../sampling/sampleTypes";
@@ -243,9 +249,12 @@ export type SelectiveRestorePlan = {
 };
 
 /**
- * The sampled ids that will be LIVE once the restore lands: the backup's own
- * sample when this restore also puts back Sample & distribution for the month
- * (and the backup has one), otherwise the live ones A2's impact already holds.
+ * The sampled ids the population must cover once the restore lands. When the
+ * same restore also puts back Sample & distribution, this is the UNION of the
+ * live ids and the backup sample's: restoring a sample does not remove the
+ * distribution events and answers already on disk (they are merged, not
+ * replaced), so a live id that has work must stay covered. Checking the backup
+ * sample alone would let anyone bypass A2's rule by adding "sample" to the scope.
  */
 async function sampledIdsAfterRestore(
   jsonDir: DirectoryHandleLike,
@@ -255,9 +264,10 @@ async function sampledIdsAfterRestore(
 ): Promise<string[]> {
   if (!restoresSample) return liveSampledIds;
   const backupSample = await readFirstInTree<SampleMasterData>(jsonDir, backupSampleCandidates(month));
-  return backupSample.state === "ok"
-    ? liveSampleRows(backupSample.value).map((row) => row.xrayImageId)
-    : liveSampledIds;
+  if (backupSample.state !== "ok") return liveSampledIds;
+  const union = new Set(liveSampledIds);
+  for (const row of liveSampleRows(backupSample.value)) union.add(row.xrayImageId);
+  return [...union];
 }
 
 /**
@@ -320,7 +330,8 @@ async function backupMonthEmbedsRequests(jsonDir: DirectoryHandleLike, month: st
     for (const entry of await listDirectoryEntries(dir)) {
       if (entry.kind !== "file" || !entry.name.endsWith(ANSWERS_SUFFIX)) continue;
       const read = await safeReadJson<unknown>(dir, entry.name);
-      if (read.ok && answersFileEmbedsRequests(read.value)) return true;
+      // A file that cannot be read cannot be shown NOT to embed queues: warn.
+      if (!read.ok || answersFileEmbedsRequests(read.value)) return true;
     }
   }
   return false;
@@ -404,10 +415,30 @@ export type SelectiveRestoreIntegrity = {
   error: string | null;
 };
 
+/** A derived cache / manifest step that did not complete after a restore whose data landed. */
+export type SelectiveRestoreDerivedWarning = {
+  month: string;
+  step: "manifest" | "population-derived" | "replacement-index" | "aggregate" | "distribution-cache";
+  error: string;
+};
+
 export type SelectiveRestoreOutcome =
-  | { ok: true; restoredFiles: string[]; rollbackFolderName: string; integrity: SelectiveRestoreIntegrity[] }
+  | {
+      ok: true;
+      restoredFiles: string[];
+      rollbackFolderName: string;
+      integrity: SelectiveRestoreIntegrity[];
+      /** Rebuild steps that failed (the restored data itself is on disk); never empty-by-silence. */
+      derivedWarnings: SelectiveRestoreDerivedWarning[];
+    }
   | { ok: false; reason: "plan-rejected"; plan: SelectiveRestorePlan }
-  | { ok: false; reason: "restore-failed"; error: string };
+  | {
+      ok: false;
+      reason: "restore-failed";
+      error: string;
+      /** Present when the engine had already started: live data may have changed; roll back from this. */
+      rollbackFolderName?: string;
+    };
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -425,46 +456,78 @@ function restoredMonthsFor(restoredFiles: readonly string[], element: RestoreEle
 
 /**
  * The replacement-candidate index and the month aggregate were deliberately
- * NOT copied (restoreScope marks them derived). Rebuild them through Workstream
- * A's `rebuildPopulationDerivedFiles` — the single post-restore rebuild A2
- * exported for D — after clearing what would block or mislead it (see Task 5's
- * note on the monotonic guard). Best-effort: the restored data is already on
- * disk, so a failure here is logged, never reported as a failed restore.
+ * NOT copied (restoreScope marks them derived), and neither was the month
+ * manifest. Sync the manifest's population-describing fields, then rebuild the
+ * derived files through Workstream A's `rebuildPopulationDerivedFiles` — the
+ * single post-restore rebuild A2 exported for D — after clearing what would
+ * block or mislead it (see Task 5's note on the monotonic guard). The restored
+ * data is already on disk, so a failure is never a failed restore, but it is
+ * NEVER silent either: A's rebuild swallows its own errors, so the result is
+ * verified by looking for what it should have produced.
  */
 async function rebuildPopulationDerived(
   directoryHandle: DirectoryHandleLike,
   month: string,
-  username: string
-): Promise<void> {
-  // month.manifest.json (status/lock) may have come back with the population.
+  username: string,
+  backupManifest: Partial<MonthManifestData> | null
+): Promise<SelectiveRestoreDerivedWarning[]> {
+  const warnings: SelectiveRestoreDerivedWarning[] = [];
+  const warn = (step: SelectiveRestoreDerivedWarning["step"], error: unknown): void => {
+    logError(`backup:selective-rebuild-${step}`, error);
+    warnings.push({ month, step, error: errorText(error) });
+  };
   invalidateMonthLockCache(month);
   await discardReplacementIndexManifest(directoryHandle, month);
   await discardPopulationAggregate(directoryHandle, month);
   try {
     const outcome = await readMonthPopulationFinal(directoryHandle, month);
-    if (outcome.status !== "loaded") return;
-    const monthDir = await getPopulationMonthDir(directoryHandle, month, false);
-    const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false });
-    await rebuildPopulationDerivedFiles(
-      directoryHandle,
-      month,
-      processedDir,
-      outcome.value.rows as unknown as PreparedPopulationRow[],
-      username
-    );
+    if (outcome.status !== "loaded") {
+      warn("population-derived", new Error(`population.final.json is ${outcome.status} after the restore`));
+      return warnings;
+    }
+    const rows = outcome.value.rows;
+    if (Array.isArray(rows)) {
+      try {
+        await syncManifestFromBackupPopulation(directoryHandle, month, rows.length, backupManifest);
+      } catch (error) {
+        warn("manifest", error);
+      }
+      const monthDir = await getPopulationMonthDir(directoryHandle, month, false);
+      const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false });
+      await rebuildPopulationDerivedFiles(
+        directoryHandle,
+        month,
+        processedDir,
+        rows as unknown as PreparedPopulationRow[],
+        username
+      );
+    }
+    if ((await loadReplacementIndexManifest(directoryHandle, month)) === null) {
+      warn("replacement-index", new Error("replacement index was not rebuilt"));
+    }
+    if ((await loadProcessingSummary(directoryHandle, month)) !== null) {
+      const aggregate = await loadPopulationAggregate(directoryHandle, month);
+      if (aggregate.status !== "ok") warn("aggregate", new Error(`population aggregate is ${aggregate.status} after the rebuild`));
+    }
   } catch (error) {
-    logError("backup:selective-rebuild-population", error);
+    warn("population-derived", error);
   }
+  return warnings;
 }
 
 /** distribution.current.json + checkpoint + employee mirrors, refolded from the restored events. */
-async function rebuildDistributionDerived(directoryHandle: DirectoryHandleLike, month: string): Promise<void> {
+async function rebuildDistributionDerived(
+  directoryHandle: DirectoryHandleLike,
+  month: string
+): Promise<SelectiveRestoreDerivedWarning[]> {
   try {
     await invalidateDistributionCacheForFieldEdit(directoryHandle, month);
     const sample = await loadSampleMaster(directoryHandle, month);
     await refreshDistributionCacheAfterWrite(directoryHandle, month, sample?.rows ?? []);
+    return [];
   } catch (error) {
     logError("backup:selective-rebuild-distribution", error);
+    return [{ month, step: "distribution-cache", error: errorText(error) }];
   }
 }
 
@@ -513,8 +576,6 @@ async function archiveLivePopulations(
 ): Promise<string | null> {
   for (const month of months) {
     try {
-      // A closed month is immutable until reopened: same gate as A2's recovery tool.
-      await ensureMonthWritable(directoryHandle, month);
       const dir = await findLivePopulationDir(directoryHandle, month);
       if (!dir) continue;
       const archivedAs = await archiveBeforeOverwrite(dir, LIVE_POPULATION_FILE, supersedeStamp(), {
@@ -530,12 +591,64 @@ async function archiveLivePopulations(
   return null;
 }
 
+/** The first selected month that is CLOSED, or null. Closed = immutable until reopened, for every month-scoped element. */
+async function firstClosedMonth(directoryHandle: DirectoryHandleLike, scope: RestoreScope): Promise<string | null> {
+  if (!scope.elements.some((element) => isMonthScopedElement(element))) return null;
+  for (const month of scope.months) {
+    invalidateMonthLockCache(month);
+    try {
+      await ensureMonthWritable(directoryHandle, month);
+    } catch (error) {
+      if (error instanceof MonthClosedError) return month;
+      throw error;
+    }
+  }
+  return null;
+}
+
+/** Selected months for which the BACKUP holds a population.final.json — the only ones the restore replaces. */
+async function monthsBackupReplacesPopulation(
+  jsonDir: DirectoryHandleLike,
+  preview: RestorePreview,
+  months: readonly string[]
+): Promise<string[]> {
+  const replaced: string[] = [];
+  for (const month of months) {
+    const read = await readFirstInTree<PopulationFinalData>(jsonDir, backupPopulationCandidates(backupMonthName(preview, month)));
+    if (read.state !== "missing") replaced.push(month);
+  }
+  return replaced;
+}
+
+async function readBackupManifest(jsonDir: DirectoryHandleLike, month: string): Promise<Partial<MonthManifestData> | null> {
+  const read = await readFirstInTree<MonthManifestData>(
+    jsonDir,
+    POPULATION_ROOT_NAMES.map((root) => [root, month, "month.manifest.json"])
+  );
+  return read.state === "ok" ? read.value : null;
+}
+
+/** After a FAILED walk live data may be half-restored: never leave a stale index or aggregate describing the old population. */
+async function discardPopulationDerivedAfterFailure(
+  directoryHandle: DirectoryHandleLike,
+  months: readonly string[]
+): Promise<void> {
+  for (const month of months) {
+    invalidateMonthLockCache(month);
+    await discardReplacementIndexManifest(directoryHandle, month);
+    await discardPopulationAggregate(directoryHandle, month);
+  }
+}
+
 /**
  * Selective restore, end to end. Re-plans from disk first (never trusts the
- * dialog's earlier plan), then runs the SAME engine as a full restore with a
+ * dialog's earlier plan), refuses closed months (every month-scoped element,
+ * all months checked before anything is touched), archives the live populations
+ * it is about to replace, then runs the SAME engine as a full restore with a
  * scope — assertBackupComplete, full pre-restore rollback backup, sentinel,
- * restoreActionFor semantics — then rebuilds derived caches for the months it
- * actually touched and runs the B3 integrity scan for every selected month.
+ * restoreActionFor semantics — then syncs the manifest, rebuilds derived caches
+ * for the months it actually touched (reporting what failed) and runs the B3
+ * integrity scan for every selected month.
  */
 export async function runSelectiveRestore(params: {
   directoryHandle: DirectoryHandleLike;
@@ -544,47 +657,77 @@ export async function runSelectiveRestore(params: {
   username: string;
   scope: RestoreScope;
 }): Promise<SelectiveRestoreOutcome> {
+  const { directoryHandle, scope } = params;
   let plan: SelectiveRestorePlan;
+  let preview: RestorePreview | null = null;
   try {
-    plan = await planSelectiveRestore({
-      directoryHandle: params.directoryHandle,
-      backupFolderName: params.backupFolderName,
-      scope: params.scope,
-    });
+    if (validateRestoreScope(scope) === null) {
+      preview = await previewSelectiveRestore(directoryHandle, params.backupFolderName);
+    }
+    plan = await planSelectiveRestore({ directoryHandle, backupFolderName: params.backupFolderName, scope, ...(preview ? { preview } : {}) });
   } catch (error) {
     return { ok: false, reason: "restore-failed", error: errorText(error) };
   }
-  if (!plan.canConfirm) return { ok: false, reason: "plan-rejected", plan };
+  if (!plan.canConfirm || !preview) return { ok: false, reason: "plan-rejected", plan };
 
-  // Before ANY mutation (rollback backup, sentinel, walk): archive, never delete.
-  if (params.scope.elements.includes("population")) {
-    const archiveError = await archiveLivePopulations(params.directoryHandle, params.scope.months);
-    if (archiveError) return { ok: false, reason: "restore-failed", error: archiveError };
+  // Before ANY mutation (archive, rollback backup, sentinel, walk).
+  let closedMonth: string | null;
+  try {
+    closedMonth = await firstClosedMonth(directoryHandle, scope);
+  } catch (error) {
+    return { ok: false, reason: "restore-failed", error: errorText(error) };
+  }
+  if (closedMonth) {
+    return { ok: false, reason: "restore-failed", error: getLabels().archive_restore_month_closed.replace("{month}", closedMonth) };
+  }
+
+  let jsonDir: DirectoryHandleLike;
+  try {
+    jsonDir = await openCompleteBackupJsonDir(directoryHandle, params.backupFolderName);
+    // Archive, never delete — only for months whose live population this restore really replaces.
+    if (scope.elements.includes("population")) {
+      const replaced = await monthsBackupReplacesPopulation(jsonDir, preview, scope.months);
+      const archiveError = await archiveLivePopulations(directoryHandle, replaced);
+      if (archiveError) return { ok: false, reason: "restore-failed", error: archiveError };
+    }
+  } catch (error) {
+    return { ok: false, reason: "restore-failed", error: errorText(error) };
   }
 
   const result = await restoreBackupSnapshot({
-    directoryHandle: params.directoryHandle,
+    directoryHandle,
     months: params.months,
     backupFolderName: params.backupFolderName,
     username: params.username,
-    scope: params.scope,
+    scope,
   });
-  if (!result.ok) return { ok: false, reason: "restore-failed", error: result.error };
+  if (!result.ok) {
+    if (result.rollbackFolderName && scope.elements.includes("population")) {
+      await discardPopulationDerivedAfterFailure(directoryHandle, scope.months);
+    }
+    return {
+      ok: false,
+      reason: "restore-failed",
+      error: result.error,
+      ...(result.rollbackFolderName ? { rollbackFolderName: result.rollbackFolderName } : {}),
+    };
+  }
 
+  const derivedWarnings: SelectiveRestoreDerivedWarning[] = [];
   for (const month of restoredMonthsFor(result.restoredFiles, "population")) {
-    await rebuildPopulationDerived(params.directoryHandle, month, params.username);
+    derivedWarnings.push(
+      ...(await rebuildPopulationDerived(directoryHandle, month, params.username, await readBackupManifest(jsonDir, month)))
+    );
   }
   for (const month of restoredMonthsFor(result.restoredFiles, "sampleDistribution")) {
-    await rebuildDistributionDerived(params.directoryHandle, month);
+    derivedWarnings.push(...(await rebuildDistributionDerived(directoryHandle, month)));
   }
 
   const integrity: SelectiveRestoreIntegrity[] = [];
-  const scannedMonths = params.scope.elements.some((element) => isMonthScopedElement(element))
-    ? params.scope.months
-    : [];
+  const scannedMonths = scope.elements.some((element) => isMonthScopedElement(element)) ? scope.months : [];
   for (const month of scannedMonths) {
     try {
-      integrity.push({ month, result: await runMonthIntegrityScan(params.directoryHandle, month), error: null });
+      integrity.push({ month, result: await runMonthIntegrityScan(directoryHandle, month), error: null });
     } catch (error) {
       integrity.push({ month, result: null, error: errorText(error) });
     }
@@ -595,6 +738,7 @@ export async function runSelectiveRestore(params: {
     restoredFiles: result.restoredFiles,
     rollbackFolderName: result.rollbackFolderName,
     integrity,
+    derivedWarnings,
   };
 }
 
@@ -609,8 +753,11 @@ function rowIdSet(rows: ReadonlyArray<Record<string, unknown>>): Set<string> {
   return ids;
 }
 
+/** How many of the newest complete backups the recovery list reads (each is a full population read). */
+export const BACKUP_POPULATION_CANDIDATE_SCAN_LIMIT = 10;
+
 /**
- * Every COMPLETE backup holding a population.final.json for `month`, newest
+ * The newest COMPLETE backups (up to the scan limit) holding a population.final.json for `month`, newest
  * first (loadBackupHistory's order), in A2's own candidate shape with
  * `source: "backup"` and the backup FOLDER as `fileName`. Coverage is counted
  * exactly as A2 counts its local candidates (live sampled ids present in the
@@ -620,11 +767,13 @@ export async function listBackupPopulationCandidates(
   directoryHandle: DirectoryHandleLike,
   month: string
 ): Promise<PopulationRecoveryCandidate[]> {
-  const history = await loadBackupHistory(directoryHandle);
+  // Each considered backup costs a full population read: only the newest few are scanned.
+  const history = (await loadBackupHistory(directoryHandle))
+    .filter((item) => item.status === "complete")
+    .slice(0, BACKUP_POPULATION_CANDIDATE_SCAN_LIMIT);
   const impact = await loadPopulationOverwriteImpact(directoryHandle, month);
   const candidates: PopulationRecoveryCandidate[] = [];
   for (const item of history) {
-    if (item.status !== "complete") continue;
     let jsonDir: DirectoryHandleLike;
     try {
       jsonDir = await openCompleteBackupJsonDir(directoryHandle, item.folderName);

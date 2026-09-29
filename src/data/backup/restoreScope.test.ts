@@ -49,7 +49,8 @@ describe("classifyBackupPath — numbered layout", () => {
   const cases: Array<[string, BackupPathClass]> = [
     ["1-population/config.json", wide("populationSettings")],
     ["1-population/certscan.global.json", wide("populationSettings")],
-    [`1-population/${M1}/month.manifest.json`, monthly("population", M1)],
+    // The month manifest carries status/lock: never copied by a selective restore (synced instead).
+    [`1-population/${M1}/month.manifest.json`, monthly("population", M1, true)],
     [`1-population/${M1}/1-raw/risk.raw.json`, monthly("population", M1)],
     [`1-population/${M1}/1-raw/risk.raw.2026-05-01T00-00-00.superseded.json`, monthly("population", M1)],
     [`1-population/${M1}/2-processed/population.final.json`, monthly("population", M1)],
@@ -95,7 +96,7 @@ describe("classifyBackupPath — numbered layout", () => {
 describe("classifyBackupPath — legacy and mixed layouts", () => {
   const cases: Array<[string, BackupPathClass]> = [
     ["Population/config.json", wide("populationSettings")],
-    [`Population/${M1}/month.manifest.json`, monthly("population", M1)],
+    [`Population/${M1}/month.manifest.json`, monthly("population", M1, true)],
     [`Population/${M1}/raw/risk.raw.json`, monthly("population", M1)],
     [`Population/${M1}/processed/population.final.json`, monthly("population", M1)],
     [`Population/${M1}/population.final.json`, monthly("population", M1)],
@@ -133,6 +134,10 @@ describe("classifyBackupPath — never restored selectively", () => {
     `2-samples/${M1}/stray.json`,
     `2-samples/${M1}/9-other/x.json`,
     `2-samples/${M1}/2-employees/notes.json`,
+    // Unknown children of a population month folder fail closed.
+    `1-population/${M1}/notes.json`,
+    `1-population/${M1}/reports/x.json`,
+    `Population/${M1}/reports/x.json`,
   ])("%s → null", (path) => {
     expect(classifyBackupPath(path)).toBeNull();
   });
@@ -223,7 +228,9 @@ describe("isDirectoryInRestoreScope", () => {
     const scope: RestoreScope = { elements: ["sampleDistribution"], months: [M1] };
     expect(isDirectoryInRestoreScope("1-population", scope)).toBe(false);
     expect(isDirectoryInRestoreScope(`1-population/${M1}`, scope)).toBe(false);
+    expect(isDirectoryInRestoreScope("5-system", scope)).toBe(true);
     expect(isDirectoryInRestoreScope("5-system/adhoc-imports", scope)).toBe(true);
+    expect(isDirectoryInRestoreScope(`1-population/${M1}/reports`, { elements: ["population"], months: [M1] })).toBe(false);
     expect(isDirectoryInRestoreScope("5-system/history", scope)).toBe(false);
     expect(isDirectoryInRestoreScope("5-system/powerbi-export", { elements: ["systemSettings"], months: [] })).toBe(false);
   });
