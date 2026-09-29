@@ -18,6 +18,7 @@ import type {
 } from "./populationProcessingTypes";
 import { normalizeText, normalizeArabicText } from "./textNormalization";
 import { attachLazyRawRow } from "../../../../../data/population/populationTypes";
+import { normalizePortName } from "../../../../../data/distribution/portEligibility";
 
 type PreparedDraftRow = {
   stage: string | null;
@@ -715,13 +716,25 @@ function matchCertScan(params: {
   xrayImageId: string;
   portName: string | null;
   entriesByPopulationPort: Map<string, CertScanEntry[]>;
+  /** C2: the row's port is flagged CertScan as a whole (config.certScanPorts). */
+  portFlagged: boolean;
 }): CertScanMatchResult {
-  const { xrayImageId, portName, entriesByPopulationPort } = params;
+  const { xrayImageId, portName, entriesByPopulationPort, portFlagged } = params;
 
   const portKey = normalizeText(portName);
   const entries = entriesByPopulationPort.get(portKey) ?? [];
 
   const snippetMatch = matchXrayIdAgainstPortEntries(xrayImageId, entries);
+
+  if (!snippetMatch.matched && portFlagged) {
+    // Union rule (C2): a flagged port makes the row CertScan even without a
+    // device-list match. No snippet — nothing in the pasted list matched it.
+    return {
+      certScanStatus: "Certscan",
+      certScanSnippet: null,
+      originalCertScanSnippet: null
+    };
+  }
 
   if (!snippetMatch.matched) {
     return {
@@ -758,6 +771,7 @@ export async function processPopulation(
   onProgress?: (stage: string, percent: number) => void
 ): Promise<PopulationProcessingResult> {
   const { riskWorkbookResult, biWorkbookResult, certScanPasteText } = input;
+  const certScanPortSet = new Set((input.certScanPorts ?? []).map((port) => normalizePortName(port)));
 
   onProgress?.("بدء معالجة المجتمع...", 0);
   await yieldToMain();
@@ -911,7 +925,8 @@ export async function processPopulation(
       const certScanMatch = matchCertScan({
         xrayImageId: enrichment.row.xrayImageId,
         portName: enrichment.row.portName,
-        entriesByPopulationPort: certScanByPort
+        entriesByPopulationPort: certScanByPort,
+        portFlagged: certScanPortSet.has(normalizePortName(enrichment.row.portName))
       });
 
       if (certScanMatch.certScanStatus === "Certscan") {
@@ -1031,7 +1046,8 @@ export async function processPopulation(
       // `certScanPasteText` (empty when nothing was pasted, or when the paste
       // had no rows / unrecognized headers) -- entries.length > 0 means at
       // least one usable CertScan device reference existed for this run.
-      certScanProvided: certScanEntries.length > 0,
+      // C2: flagged ports are a CertScan reference too.
+      certScanProvided: certScanEntries.length > 0 || certScanPortSet.size > 0,
       certScanPercentage:
         finalPreparedPopulationRows === 0
           ? 0

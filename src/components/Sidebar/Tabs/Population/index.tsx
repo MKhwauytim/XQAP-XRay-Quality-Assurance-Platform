@@ -906,7 +906,8 @@ export default function PopulationTab() {
       const result = await processPopulation({
         riskWorkbookResult,
         biWorkbookResult,
-        certScanPasteText
+        certScanPasteText,
+        certScanPorts: config.certScanPorts ?? []
       }, (stage, percent) => {
         setProcessingProgressMessage(stage);
         setProcessingProgressPercent(percent);
@@ -1076,6 +1077,8 @@ export default function PopulationTab() {
           mappingTemplate: config.mappingTemplates[0] ?? null,
           stageMappings: config.stageMappings,
           workflow: config.processingWorkflow,
+          // C2: only present when a port is flagged, so a default config keeps its pre-C2 fingerprint.
+          ...(config.certScanPorts?.length ? { certScanPorts: config.certScanPorts } : {}),
         }),
         sourceFiles: {
           risk: sourceFileMetadata(uploads.riskAgencyData.file),
@@ -1566,7 +1569,7 @@ export default function PopulationTab() {
           biFileName: biFileNamesLabel,
           riskRows: riskWorkbookResult?.rows.length ?? null,
           biRows: biWorkbookResult?.rows.length ?? null,
-          certScanProvided: certScanPasteText.trim().length > 0,
+          certScanProvided: certScanPasteText.trim().length > 0 || (config.certScanPorts?.length ?? 0) > 0,
           finalRows: populationProcessingResult?.preparedRows.length ?? null,
         }}
       />
