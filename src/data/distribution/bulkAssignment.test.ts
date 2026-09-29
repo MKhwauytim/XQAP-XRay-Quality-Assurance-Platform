@@ -818,3 +818,34 @@ test("A3: a re-run with prior ownership balances the unassigned rows toward equa
   expect(fresh.get("a") ?? 0).toBe(0);
   for (const username of ["b", "c", "d"]) expect(fresh.get(username)).toBe(100);
 });
+
+test("A3: reports an employee whose allowed rows cannot reach their target", () => {
+  const rows: PreparedPopulationRow[] = [
+    ...Array.from({ length: 900 }, (_, i) => makeRow(`big-${i}`, "SECOND_STAGE", "NonCertscan", "port-big")),
+    ...Array.from({ length: 100 }, (_, i) => makeRow(`small-${i}`, "SECOND_STAGE", "NonCertscan", "port-small")),
+  ];
+  const allocations: EmployeeStageAllocation[] = ["a", "b", "c", "d"].map((username) => ({
+    username,
+    stageKey: "second",
+    method: "percentage",
+    value: 25,
+    isActive: true,
+  }));
+  const employees = ["a", "b", "c", "d"].map((username) => makeUser(username, "employee"));
+  const portRestrictions: EmployeePortRestriction[] = [{ username: "d", restricted: true, enabledPorts: ["port-small"] }];
+
+  const result = calculateBulkAssignment({ rows, allocations, employees, operatorUsername: "test", portRestrictions });
+
+  expect(result.targetShortfalls).toEqual([{ username: "d", target: 250, allowed: 100 }]);
+});
+
+test("A3: no shortfall report without port restrictions", () => {
+  const rows = [makeRow("img-1", "SECOND_STAGE", "NonCertscan")];
+  const result = calculateBulkAssignment({
+    rows,
+    allocations: [{ username: "emp", stageKey: "second", method: "percentage", value: 100, isActive: true }],
+    employees: [makeUser("emp", "employee")],
+    operatorUsername: "test",
+  });
+  expect(result.targetShortfalls).toEqual([]);
+});
