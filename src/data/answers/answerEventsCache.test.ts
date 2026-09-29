@@ -165,14 +165,16 @@ describe("cache eliminates redundant month-wide re-reads within one tab session"
     const third = await upsertItemAnswer(dir, MONTH, EMPLOYEE, makeItem({ xrayImageId: "X3" }));
     expect(third.ok).toBe(true);
     const thirdCallOps = segmentReadFileOps(dir);
-    // Steady state: still just this tab's own small, constant cost, never the
-    // whole team's history again.
-    expect(thirdCallOps).toBe(2);
+    // Steady state (A5): the save before this one already observed the employee
+    // seeded, so a plain self-save appends without the pre-append month read --
+    // only the append's own unavoidable pre-write re-read of the open segment
+    // remains. Never the whole team's history again.
+    expect(thirdCallOps).toBe(1);
 
     clearOperationLog(dir);
     const fourth = await upsertItemAnswer(dir, MONTH, EMPLOYEE, makeItem({ xrayImageId: "X4" }));
     expect(fourth.ok).toBe(true);
-    expect(segmentReadFileOps(dir)).toBe(2);
+    expect(segmentReadFileOps(dir)).toBe(1);
 
     // And the state is actually correct throughout — nothing was silently
     // dropped by reading incrementally.
@@ -200,9 +202,11 @@ describe("cache eliminates redundant month-wide re-reads within one tab session"
     // nothing) plus a small CONSTANT 2 per later call (calls 2-8: one
     // read-side op the cache makes incremental, one write-side op that always
     // fires on append and is unaffected by this cache either way) =
-    // 20 + 7*2 = 34 — versus the unfixed ~160+ that scales with
+    // 20 + 2 + 6*1 = 28 (A5: from the third call on the employee is known
+    // seeded, so the read-side op is skipped too and only the append's own
+    // pre-write re-read remains) — versus the unfixed ~160+ that scales with
     // (calls * seeded team history).
-    expect(totalOps).toBe(34);
+    expect(totalOps).toBe(28);
   });
 });
 

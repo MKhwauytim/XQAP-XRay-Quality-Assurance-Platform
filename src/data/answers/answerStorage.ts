@@ -933,6 +933,51 @@ async function retryDecisionRead<T>(deadline: OperationDeadline, step: () => Pro
 }
 
 /**
+ * The decision step of a plain self-save WITHOUT reading the month (A5).
+ *
+ * Why it is safe: for `upsertItemAnswer` the decision (`build`) never depends on
+ * `previous` -- it always appends the same `item-saved`; `previous` only feeds
+ * the IndexedDB mirror candidate's history fields. "Seeded" is monotonic (a
+ * `migration-seed` event is never removed), so once this tab has observed the
+ * employee seeded there is no seeding to do. The append itself re-reads its OWN
+ * target segment under the chain lock before rewriting it (E1 guards, unreadable
+ * segments never overwritten) and never depended on the month read, and the
+ * fold orders whatever lands by `(eventAt, authority, eventId)`, so the events
+ * appended -- and the folded state -- are identical to the full-read path.
+ *
+ * Only taken when BOTH facts are in this tab's memory: the memoized frozen
+ * legacy seed (set by `resolveSeed` after a successful read of an already-seeded
+ * employee) AND a cached own `migration-seed` event. A manual refresh or a
+ * restore drops both (`clearAnswerEventsCache`), so the next save reads in full.
+ * Returns null (never throws) whenever either is missing or the cached fold
+ * cannot be built -- the caller then runs the unchanged full path, which reports
+ * any real problem itself. `previous` is folded from the cache, so it can lag a
+ * colleague's very latest event; that only affects the local mirror's history
+ * fields, which `backfillAnswerMirror` refreshes from disk.
+ */
+function decideFromSeededCache(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  username: string,
+  xrayImageId: string,
+  build: (ctx: { previous: ItemAnswer | undefined }) => AnswerWriteDecision
+): { previous: ItemAnswer | undefined; decision: AnswerWriteDecision } | null {
+  const legacySeed = getLegacySeedMemo(directoryHandle, monthFolderName, username);
+  if (!legacySeed) return null;
+  const entry = getAnswerEventsCacheEntry(directoryHandle, monthFolderName);
+  if (!entry) return null;
+  const ownEvents = eventsForEmployee([...entry.events.values()], username);
+  if (!ownEvents.some((event) => event.eventType === "migration-seed")) return null;
+  try {
+    const folded = foldEmployeeEvents(ownEvents, { legacySeed, username, monthFolderName });
+    const previous = folded.file.items.find((item) => item.xrayImageId === xrayImageId);
+    return { previous, decision: build({ previous }) };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Shared append machinery for `upsertItemAnswer`, `reopenItemAnswer` and
  * `setItemQualityNote` — the three writers whose outcome does not depend on
  * winning a race (unlike on-behalf; see `performOnBehalfWrite`). `eventId`/
@@ -954,7 +999,8 @@ async function performAnswerWrite(
   username: string,
   xrayImageId: string,
   build: (ctx: { previous: ItemAnswer | undefined }) => AnswerWriteDecision,
-  telemetryAction: string
+  telemetryAction: string,
+  options: { blindAppendWhenSeeded?: boolean } = {}
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   await ensureMonthWritable(directoryHandle, monthFolderName);
   const eventId = crypto.randomUUID();
@@ -1026,6 +1072,14 @@ async function performAnswerWrite(
       // Resolving the month folder is a share round trip like any other read
       // here; a transient fault on it is retried with the rest of this step.
       const mainDir = await getSampleMainDir(directoryHandle, monthFolderName, true);
+      if (options.blindAppendWhenSeeded) {
+        // A plain self-save by an employee this tab already knows is seeded:
+        // skip the pre-append month read (one getFile per unsealed segment of
+        // the whole month) -- see `decideFromSeededCache`. Null means "not
+        // provably safe": fall through to the full read, exactly as before.
+        const cachedDecision = decideFromSeededCache(directoryHandle, monthFolderName, username, xrayImageId, build);
+        if (cachedDecision) return { mainDir, seedEvent: null, ...cachedDecision };
+      }
       const allEvents = await readAllAnswerEventsForMonth(directoryHandle, monthFolderName);
       const ownEvents = eventsForEmployee(allEvents, username);
 
@@ -1268,7 +1322,10 @@ export async function upsertItemAnswer(
         // attribution through this path — matching the pre-Stage-2 `stripOnBehalf`.
       },
     }),
-    "answer-save"
+    "answer-save",
+    // Only this writer: its decision never reads `previous` (see decideFromSeededCache).
+    // Reopen and quality-note decide FROM `previous`, and on-behalf has its own protocol.
+    { blindAppendWhenSeeded: true }
   );
 }
 
