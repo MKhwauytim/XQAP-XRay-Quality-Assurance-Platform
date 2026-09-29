@@ -21,6 +21,7 @@ import {
   SYSTEM_FOLDER_NAMES,
   __clearWorkspaceDirCacheForTests,
 } from "./workspacePaths";
+import { invalidateMonthLockCache, isMonthClosed } from "../population/monthLock";
 import { DISTRIBUTION_EVENTS_DIR } from "../distribution/distributionEventStore";
 import { ANSWER_EVENTS_DIR } from "../answers/answerEventStore";
 import { upsertItemAnswer, __clearAnswerEventsCacheForTests } from "../answers/answerStorage";
@@ -207,6 +208,40 @@ describe("runSync — change-set probe (§4.2 / A7)", () => {
     const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
 
     expect(changed.has("manifest")).toBe(true);
+  });
+
+  it("A2: a probed manifest change drops the cached month-lock verdict (closed month enforced within one tick)", async () => {
+    const root = makeRoot();
+    const monthDir = await getPopulationMonthDir(root, MONTH, true);
+    await safeWriteJson(monthDir, "month.manifest.json", { monthFolderName: MONTH, status: "distributed" });
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+    invalidateMonthLockCache();
+    expect(await isMonthClosed(root, MONTH)).toBe(false); // primes the (5 min) cache
+
+    // Another machine closes the month.
+    await safeWriteJson(monthDir, "month.manifest.json", { monthFolderName: MONTH, status: "closed" });
+    expect(await isMonthClosed(root, MONTH)).toBe(false); // still cached
+    const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(changed.has("manifest")).toBe(true);
+    expect(await isMonthClosed(root, MONTH)).toBe(true);
+  });
+
+  it("A2: the first probe (baseline) and a manual refresh also drop the cached verdict", async () => {
+    const root = makeRoot();
+    const monthDir = await getPopulationMonthDir(root, MONTH, true);
+    await safeWriteJson(monthDir, "month.manifest.json", { monthFolderName: MONTH, status: "distributed" });
+    invalidateMonthLockCache();
+    expect(await isMonthClosed(root, MONTH)).toBe(false);
+    // Closed by someone else before this tab's first probe: the baseline probe
+    // sees no revision delta, so it must still invalidate.
+    await safeWriteJson(monthDir, "month.manifest.json", { monthFolderName: MONTH, status: "closed" });
+    await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(await isMonthClosed(root, MONTH)).toBe(true);
+
+    // Manual refresh: unconditional.
+    await safeWriteJson(monthDir, "month.manifest.json", { monthFolderName: MONTH, status: "distributed" });
+    await runSync({ directoryHandle: root, monthFolderName: MONTH, manual: true });
+    expect(await isMonthClosed(root, MONTH)).toBe(false);
   });
 
   it("an approvals-dir change is reported as requests only, not answers", async () => {

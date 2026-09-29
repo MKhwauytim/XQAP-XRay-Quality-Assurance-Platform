@@ -76,6 +76,7 @@ import {
 } from "./workspacePaths";
 import { DEFAULT_SYNC_INTERVAL_MS, readSyncIntervalMs } from "./syncSettings";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { invalidateMonthLockCache } from "../population/monthLock";
 
 /** The cadence used until the workspace's own setting has been read (and
  *  whenever there is no workspace, no setting, or an unreadable one). §2's
@@ -683,6 +684,10 @@ async function probeChangedFamilies(
 ): Promise<Set<DataRefreshFamily>> {
   const key = probeKey(directoryHandle, monthFolderName);
   const previous = previousProbes.get(key);
+  // First look at this (workspace, month) this session: the diff below has
+  // nothing to compare against and stays silent, but a month-lock verdict
+  // cached BEFORE this baseline may predate a close made by another machine.
+  if (!previous) invalidateMonthLockCache(monthFolderName);
   const probed = await probeMonth(directoryHandle, monthFolderName, systemDir);
   // Carry BEFORE storing: a family this tick could not read keeps the last value
   // that was actually observed, so the next readable tick diffs against real
@@ -761,6 +766,13 @@ async function performSync(options: SyncRunOptions, manual: boolean): Promise<Sy
       logError("workspaceSync:probe", error);
       ok = false;
     }
+  }
+
+  // The month manifest moved (another machine closed/reopened the month, or a
+  // status advance): the 5-minute month-lock verdict is no longer trustworthy.
+  // A manual refresh drops it unconditionally, like every other cache.
+  if (directoryHandle && monthFolderName && (manual || changed.has("manifest"))) {
+    invalidateMonthLockCache(monthFolderName);
   }
 
   // The probe saw someone else's answer segments move: whatever this tab
