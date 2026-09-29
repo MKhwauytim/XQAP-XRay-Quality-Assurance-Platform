@@ -13,8 +13,18 @@ import type { SamplingPlanPriorMonthAdvisory } from "../../../../data/sampling/s
  * visible, and at most once per (workspace, month) per interval — it can
  * touch the prior month's whole `population.final` on a month processed before
  * the aggregate carried the suspicion rate, on the same share every write uses.
+ * The cache is not invalidated by changes to the prior month's data; the
+ * sampling plan saved on the draw path still reads the advisory fresh.
  */
 export const PRIOR_MONTH_ADVISORY_TTL_MS = 5 * 60_000;
+
+/**
+ * `loadPriorMonthAdvisory` never rejects: a failed read comes back as the
+ * "none" result (`priorMonthFolderName === null`), indistinguishable from a
+ * genuinely first month. A "none" is therefore only remembered briefly, so a
+ * transient read failure cannot hide the advisory for the whole interval.
+ */
+export const PRIOR_MONTH_ADVISORY_NONE_TTL_MS = 15_000;
 
 type CacheEntry = { at: number; advisory: SamplingPlanPriorMonthAdvisory };
 const cache = new Map<string, CacheEntry>();
@@ -36,7 +46,8 @@ export function usePriorMonthAdvisory(
   useEffect(() => {
     if (!enabled || !directoryHandle || key === null) return;
     const fresh = cache.get(key);
-    if (fresh && Date.now() - fresh.at < PRIOR_MONTH_ADVISORY_TTL_MS) {
+    const ttl = fresh?.advisory.priorMonthFolderName === null ? PRIOR_MONTH_ADVISORY_NONE_TTL_MS : PRIOR_MONTH_ADVISORY_TTL_MS;
+    if (fresh && Date.now() - fresh.at < ttl) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- adopting a value read earlier this interval
       setHeld({ key, advisory: fresh.advisory });
       return;
@@ -48,7 +59,8 @@ export function usePriorMonthAdvisory(
         if (!cancelled) setHeld({ key, advisory });
       })
       .catch(() => {
-        // Advisory only — never blocks the draw. Not cached, so the next visit retries.
+        // Not reachable today (the loader swallows its errors) but kept honest:
+        // advisory only, never blocks the draw, not cached.
         if (!cancelled) setHeld(null);
       });
     return () => { cancelled = true; };

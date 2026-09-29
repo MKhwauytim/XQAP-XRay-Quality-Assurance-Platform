@@ -539,7 +539,6 @@ export default function PopulationTab() {
     useState<SampleMasterData | null>(null);
   const [sampleSaveMessage, setSampleSaveMessage] =
     useState<SaveMessage>(null);
-  // B4 switching-rule advisory computed for the currently-selected month.
   // Phase 4 — distribution (state + mutating handlers extracted to
   // useDistributionActions.ts to stay under check:complexity's
   // max-lines-per-function budget; see that file's header comment)

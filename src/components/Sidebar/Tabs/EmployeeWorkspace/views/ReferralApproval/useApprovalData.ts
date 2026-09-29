@@ -79,7 +79,11 @@ const DECISION_REFRESH_FAMILIES: readonly DataRefreshFamily[] = [
 
 type MonthPending = { referrals: ReferralRequest[]; replacements: ReplacementRequest[]; reopens: ReopenRequest[] };
 type RequestLogs = Awaited<ReturnType<typeof loadRequestLogs>>;
+/** Rows of months outside a decision's scope may be this old before a full reload is forced. */
+const APPROVAL_CACHE_MAX_AGE_MS = 60_000;
 type ApprovalLoadCache = {
+  /** When the months in it were last read (a scoped reload keeps the older stamp of what it reused). */
+  at: number;
   directoryHandle: DirectoryHandleLike;
   selMonth: string;
   pending: Map<string, MonthPending>;
@@ -164,12 +168,6 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
     const silent = opts?.silent ?? false;
     if (!silent) setLoadState("loading");
     try {
-      const held = loadCacheRef.current;
-      const cache = held && held.directoryHandle === directoryHandle && held.selMonth === selMonth ? held : null;
-      const scope = opts?.months && cache ? new Set(opts.months) : null;
-      const { referrals: refLog, replacements: repLog, reopens: reoLog } =
-        scope && !scope.has(selMonth) ? cache!.selected.logs : await loadRequestLogs(directoryHandle, selMonth);
-
       // Cross-month pending gap: the reviewer's own global month selector is a
       // browsing convenience (persisted per-tab in sessionStorage, unaffected by
       // other users' work — see authSession's SEC-02 note) with no bearing on
@@ -202,9 +200,25 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
         ...months.map((m) => m.folderName).filter((name) => name !== selMonth),
         ...adhocFolders.filter((name) => name !== selMonth),
       ];
-      // A scoped reload that names no month this view shows falls back to a full one.
-      const fullScope = scope !== null && ![selMonth, ...otherMonths].some((m) => scope.has(m));
-      const reuse = (month: string) => (scope && !fullScope && !scope.has(month) ? cache!.pending.get(month) : undefined);
+      // A scoped reload reuses the last load only when that load is recent and
+      // every month it names is one this view knows by exactly that name;
+      // anything else (unknown or differently spelled month, stale cache)
+      // falls back to a full reload.
+      const held = loadCacheRef.current;
+      const cache =
+        held && held.directoryHandle === directoryHandle && held.selMonth === selMonth &&
+        Date.now() - held.at <= APPROVAL_CACHE_MAX_AGE_MS
+          ? held
+          : null;
+      const known = new Set([selMonth, ...otherMonths]);
+      const scope =
+        opts?.months && cache && opts.months.length > 0 && opts.months.every((m) => known.has(m))
+          ? new Set(opts.months)
+          : null;
+      const reuseSelected = scope !== null && !scope.has(selMonth);
+      const { referrals: refLog, replacements: repLog, reopens: reoLog } =
+        reuseSelected ? cache!.selected.logs : await loadRequestLogs(directoryHandle, selMonth);
+      const reuse = (month: string) => (scope && !scope.has(month) ? cache!.pending.get(month) : undefined);
       const nextPending = new Map<string, MonthPending>();
       const otherMonthPending = await Promise.all(
         otherMonths.map(async (month) => {
@@ -232,12 +246,12 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
       const crossMonthReplacements = otherMonthPending.flatMap((entry) => entry.replacements);
       const crossMonthReopens = otherMonthPending.flatMap((entry) => entry.reopens);
 
-      const reuseSelected = scope !== null && !fullScope && !scope.has(selMonth);
       const detailMap: Record<string, DistributionEntry | PreparedPopulationRow> = reuseSelected
         ? cache!.selected.detailMap
         : await readSampleDetails(directoryHandle, selMonth);
       if (token !== loadTokenRef.current) return; // superseded by a newer month selection
       loadCacheRef.current = {
+        at: scope ? cache!.at : Date.now(),
         directoryHandle,
         selMonth,
         pending: nextPending,

@@ -14,6 +14,7 @@ const loadMock = vi.hoisted(() => vi.fn());
 vi.mock("../../../../data/sampling/switchingRuleAdvisory", () => ({ loadPriorMonthAdvisory: loadMock }));
 
 import {
+  PRIOR_MONTH_ADVISORY_NONE_TTL_MS,
   PRIOR_MONTH_ADVISORY_TTL_MS,
   __resetPriorMonthAdvisoryCacheForTests,
   usePriorMonthAdvisory,
@@ -91,7 +92,31 @@ describe("usePriorMonthAdvisory", () => {
     expect(loadMock).toHaveBeenCalledTimes(2);
   });
 
-  it("a failed read reports no advisory and is not cached", async () => {
+  it("a transient failure (the loader's real 'none' result) is remembered only briefly, not for the whole interval", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const NONE = { priorMonthFolderName: null, priorMonthSuspicionRate: null, inspectionRecommendation: null };
+    loadMock.mockResolvedValueOnce(NONE);
+    const { result, rerender } = renderHook(
+      ({ on }) => usePriorMonthAdvisory(root, "5-may-2026", on),
+      { initialProps: { on: true } }
+    );
+    await vi.waitFor(() => expect(loadMock).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(result.current).toEqual(NONE));
+
+    // Within the short window: served from memory.
+    rerender({ on: false });
+    rerender({ on: true });
+    expect(loadMock).toHaveBeenCalledTimes(1);
+
+    // Past it (but far inside the 5-minute interval): retried, and the real advisory shows.
+    vi.setSystemTime(Date.now() + PRIOR_MONTH_ADVISORY_NONE_TTL_MS + 1000);
+    rerender({ on: false });
+    rerender({ on: true });
+    await vi.waitFor(() => expect(result.current).toEqual(ADVISORY));
+    expect(loadMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("a rejected read (defensive) reports no advisory and is not cached", async () => {
     loadMock.mockRejectedValueOnce(new Error("share offline"));
     const { result, rerender } = renderHook(
       ({ on }) => usePriorMonthAdvisory(root, "5-may-2026", on),

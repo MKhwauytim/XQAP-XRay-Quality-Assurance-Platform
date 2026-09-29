@@ -712,6 +712,56 @@ describe("useApprovalData post-decision reload is scoped to the decided month (D
     await waitFor(() => expect(vi.mocked(loadRequestLogs)).toHaveBeenCalledTimes(3));
   });
 
+  it("a scope naming an unknown month falls back to a full reload", async () => {
+    const { root } = await seedThreeMonths();
+    const { result } = renderHook(() => useApprovalData(root));
+    await waitFor(() => expect(result.current.referrals).toHaveLength(3));
+
+    vi.mocked(loadRequestLogs).mockClear();
+    await act(async () => { await result.current.reload({ silent: true, months: ["9-sep-2030"] }); });
+    expect(vi.mocked(loadRequestLogs).mock.calls.map((c) => c[1]).sort()).toEqual([
+      "4-april-2026", "5-may-2026", "6-june-2026",
+    ]);
+  });
+
+  it("a differently spelled month (case / legacy name) is not trusted and falls back to a full reload", async () => {
+    const { root } = await seedThreeMonths();
+    const { result } = renderHook(() => useApprovalData(root));
+    await waitFor(() => expect(result.current.referrals).toHaveLength(3));
+
+    vi.mocked(loadRequestLogs).mockClear();
+    await act(async () => { await result.current.reload({ silent: true, months: ["5-May-2026"] }); });
+    expect(vi.mocked(loadRequestLogs)).toHaveBeenCalledTimes(3);
+
+    vi.mocked(loadRequestLogs).mockClear();
+    await act(async () => { await result.current.reload({ silent: true, months: ["5-may-2026", "5-May-2026"] }); });
+    expect(vi.mocked(loadRequestLogs)).toHaveBeenCalledTimes(3);
+  });
+
+  it("rows of other months refresh after 60 s: an older cache forces a full reload", async () => {
+    const { root, may } = await seedThreeMonths();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { result } = renderHook(() => useApprovalData(root));
+      await vi.waitFor(() => expect(result.current.referrals).toHaveLength(3));
+
+      // Within the window: scoped.
+      vi.setSystemTime(Date.now() + 30_000);
+      vi.mocked(loadRequestLogs).mockClear();
+      await act(async () => { await result.current.reload({ silent: true, months: ["5-may-2026"] }); });
+      expect(vi.mocked(loadRequestLogs)).toHaveBeenCalledTimes(1);
+
+      // The scoped reload above kept the OLD stamp, so 40 s later the original
+      // load is 70 s old: full.
+      vi.setSystemTime(Date.now() + 40_000);
+      vi.mocked(loadRequestLogs).mockClear();
+      await act(async () => { await result.current.denyReferral(may, "no"); });
+      expect(vi.mocked(loadRequestLogs)).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("a bulk run re-reads each decided month once, not every month", async () => {
     const { root, may, june } = await seedThreeMonths();
     const { result } = renderHook(() => useApprovalData(root));

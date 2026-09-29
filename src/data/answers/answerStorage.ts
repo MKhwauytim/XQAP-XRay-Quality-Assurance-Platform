@@ -671,11 +671,13 @@ async function updateEmployeeRequestsFile(
   const fileName = requestsFileName(username);
   // Q1 (D1 stage 1): a refused swap-to-target replace of THIS file fails fast.
   // safeWriteJson's writeText has already retried the commit on a short
-  // ladder; the target is the same on every casLoop attempt, so a second full
-  // ladder buys nothing — further attempts only burn the 30 s budget
-  // (~490 operations) before ending in the same XQ-IO-036. A refusal that
-  // clears inside the first ladder still succeeds, and a retry from the UI
-  // is idempotent by requestId, so nothing is lost or duplicated.
+  // ladder. A held file usually comes in bursts, so ONE more ladder is allowed
+  // (absorbs a ~1 s burst); after that the target is the same on every casLoop
+  // attempt and further attempts only burn the 30 s budget (~490 operations)
+  // before ending in the same XQ-IO-036. A retry from the UI is idempotent by
+  // requestId, so nothing is lost or duplicated. Read failures
+  // (NotReadableError) and lock contention (NoModificationAllowedError) are
+  // NOT counted here and keep the full casLoop ladder.
   let refusedCommits = 0;
   return casLoop<{ ok: true } | { ok: false; error: string }>(
     async (writeToken) => {
@@ -745,7 +747,7 @@ function isRefusedCommit(error: unknown): boolean {
 }
 
 /** Refused-commit attempts (each already a full writeText ladder) tolerated on the SAME target. */
-const REQUESTS_REFUSED_COMMIT_LIMIT = 1;
+const REQUESTS_REFUSED_COMMIT_LIMIT = 2;
 
 /* ───────────────────────────── loadEmployeeAnswers (§7) ─────────────────── */
 
