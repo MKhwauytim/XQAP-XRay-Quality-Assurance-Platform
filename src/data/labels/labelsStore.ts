@@ -572,6 +572,32 @@ export const DEFAULT_LABELS = {
   fb_finalize_legacy_result_archive_failed: "تم التحقق من جميع الرسائل القديمة، لكن تعذّرت أرشفة الملف القديم على هذا الجهاز.",
   fb_finalize_legacy_error:            "حدث خطأ أثناء محاولة الترحيل — أعد المحاولة.",
 
+  // Feedback export (admin, "all messages" tab) — button/status text AND the
+  // generated workbook's sheet names and column headings (Workstream B).
+  fb_export_btn:                "تصدير المحادثات إلى Excel",
+  fb_exporting:                 "جارٍ التصدير…",
+  fb_export_reading:            "جارٍ قراءة المحادثات…",
+  fb_export_failed:             "تعذّر تصدير المحادثات — حاول مرة أخرى.",
+  fb_export_empty:              "لا توجد محادثات لتصديرها.",
+  fb_export_sheet_threads:      "المحادثات",
+  fb_export_sheet_messages:     "الرسائل",
+  fb_export_col_thread_id:      "رقم المحادثة",
+  fb_export_col_from:           "المرسل",
+  fb_export_col_role:           "الدور",
+  fb_export_col_category:       "النوع",
+  fb_export_col_status:         "الحالة",
+  fb_export_col_created_at:     "تاريخ الإنشاء",
+  fb_export_col_last_activity:  "آخر نشاط",
+  fb_export_col_reply_count:    "عدد الردود",
+  fb_export_col_resolved_at:    "تاريخ الإغلاق",
+  fb_export_col_resolved_by:    "أُغلقت بواسطة",
+  fb_export_col_text:           "النص الأصلي",
+  fb_export_col_sequence:       "التسلسل",
+  fb_export_col_author:         "الكاتب",
+  fb_export_col_date:           "التاريخ",
+  fb_export_col_message_text:   "النص",
+  fb_export_estimated_suffix:   "(تقديري)",
+
   // Login screen (AuthGate) — the first screen every user sees
   auth_tagline:                 "منصة فحص صور الأشعة",
   auth_login_title:             "تسجيل الدخول",
