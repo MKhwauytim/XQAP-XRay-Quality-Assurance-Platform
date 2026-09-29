@@ -11,6 +11,7 @@ import {
   loadDistributionLogLoad,
   type DistributionLogLoad,
   deriveStampedCurrent,
+  loadOrDeriveDistributionCurrent,
   queueDistributionCacheRebuild,
   queueDistributionCurrentPersist,
   type DistributionWriteProgress,
@@ -189,16 +190,31 @@ export function useDistributionActions(params: {
     // files (cache, checkpoint sidecar, employee mirrors) on the per-month
     // background chain. The events are already durable; a reader that arrives
     // before the chain settles sees an untrusted mirror and folds.
-    if (options?.rebuildInBackground) {
-      // R3: `log` was assembled locally (the caller's pre-append read plus its batch),
-      // so it has no event-store scan and a pre-bump revision. Painting from it is
-      // fine; persisting mirrors stamped from it is not. Re-derive from the durable
-      // events in the background instead.
-      void queueDistributionCacheRebuild(directoryHandle, monthFolderName, sampleRows);
-    } else {
-      void queueDistributionCurrentPersist(directoryHandle, monthFolderName, current);
+    const persisted = options?.rebuildInBackground
+      ? // R3: `log` was assembled locally (the caller's pre-append read plus its batch),
+        // so it has no event-store scan and a pre-bump revision. Painting from it is
+        // fine; persisting mirrors stamped from it is not. Re-derive from the durable
+        // events in the background instead.
+        queueDistributionCacheRebuild(directoryHandle, monthFolderName, sampleRows)
+      : queueDistributionCurrentPersist(directoryHandle, monthFolderName, current);
+    // Auto-lock runs only AFTER the persist has settled (a lock closes the month and
+    // the persist's write gate would then refuse the final cache/mirror write), and it
+    // decides from FRESH state re-derived from the durable events, never from the
+    // painted `current`: that one omits an event a colleague appended between this
+    // click's read and its append, and locking on it could close a month with a row
+    // in flight. The cheap check on the painted state gates the extra read.
+    if (isFullyTerminal(current, sampleRows)) {
+      void persisted.then(async () => {
+        try {
+          const fresh = await loadOrDeriveDistributionCurrent(directoryHandle, monthFolderName, sampleRows, {
+            persistCache: false,
+          });
+          if (fresh) await autoLockWhenFullyDistributed(monthFolderName, fresh, sampleRows);
+        } catch (error) {
+          logError("population:auto-lock-month", error);
+        }
+      });
     }
-    void autoLockWhenFullyDistributed(monthFolderName, current, sampleRows);
     onDistributionChanged();
   }
 
@@ -229,16 +245,21 @@ export function useDistributionActions(params: {
    * person manually closing the month (Archive tab / this tab's own admin
    * unlock affordance).
    */
+  function isFullyTerminal(current: DistributionCurrentData, sampleRows: SampleMasterData["rows"]): boolean {
+    return (
+      sampleRows.length > 0 &&
+      current.entries.length >= sampleRows.length &&
+      current.entries.every((entry) => entry.status === "completed" || entry.status === "replaced")
+    );
+  }
+
   async function autoLockWhenFullyDistributed(
     monthFolderName: string,
     current: DistributionCurrentData,
     sampleRows: SampleMasterData["rows"]
   ): Promise<void> {
     if (!directoryHandle) return;
-    if (sampleRows.length === 0 || current.entries.length < sampleRows.length) return;
-    if (!current.entries.every((entry) => entry.status === "completed" || entry.status === "replaced")) {
-      return;
-    }
+    if (!isFullyTerminal(current, sampleRows)) return;
     try {
       if (await isMonthClosed(directoryHandle, monthFolderName)) return;
       const result = await closeMonth(
