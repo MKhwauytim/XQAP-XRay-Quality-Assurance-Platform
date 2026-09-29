@@ -1,3 +1,4 @@
+import { STAGE_LABELS_AR, STAGE_UNKNOWN_LABEL } from "../population/stageLabels";
 import { phaseOneLabels } from "./labels.phaseOne";
 import { phaseTwoLabels } from "./labels.phaseTwo";
 import { phaseThreeFourLabels } from "./labels.phaseThreeFour";
@@ -148,11 +149,12 @@ export const DEFAULT_LABELS = {
   dt_hide_column:            "إخفاء",
 
   // Stage names
-  stage_first:   "المستوى الأول",
-  stage_second:  "المستوى الثاني",
-  stage_third:   "المستوى الثالث",
-  stage_fourth:  "المستوى الرابع",
-  stage_unknown: "غير محدد",
+  // Defaults come from the ONE definition in stageLabels.ts (C1) — never re-typed here.
+  stage_first:   STAGE_LABELS_AR.first,
+  stage_second:  STAGE_LABELS_AR.second,
+  stage_third:   STAGE_LABELS_AR.third,
+  stage_fourth:  STAGE_LABELS_AR.fourth,
+  stage_unknown: STAGE_UNKNOWN_LABEL,
 
   // CertScan
   certscan_name:    "نظام الأشعة المركزية (CertScan)",

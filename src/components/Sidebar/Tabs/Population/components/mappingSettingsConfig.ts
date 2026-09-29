@@ -3,6 +3,7 @@ import type {
   ProcessingWorkflowStep,
   StageKey,
 } from "../../../../../data/population/populationConfig";
+import { STAGE_KEY_ORDER, STAGE_LABELS_AR } from "../../../../../data/population/stageLabels";
 
 export function parseMappingAliases(value: string): string[] {
   return value
@@ -11,14 +12,9 @@ export function parseMappingAliases(value: string): string[] {
     .filter(Boolean);
 }
 
-export const STAGE_KEY_LABELS: Record<StageKey, string> = {
-  first: "المستوى الأول",
-  second: "المستوى الثاني",
-  third: "المستوى الثالث",
-  fourth: "المستوى الرابع",
-};
+export const STAGE_KEY_LABELS: Readonly<Record<StageKey, string>> = STAGE_LABELS_AR;
 
-const STAGE_KEYS: StageKey[] = ["first", "second", "third", "fourth"];
+const STAGE_KEYS: readonly StageKey[] = STAGE_KEY_ORDER;
 
 /**
  * Which kind of thing an alias list is matched against. Aliases only ever compete within one

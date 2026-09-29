@@ -4,6 +4,7 @@
 
 import type { PreparedPopulationRow } from "../data/population/populationTypes";
 import { toEmployeeMirrorRowStub } from "../data/population/populationTypes";
+import { STAGE_KEY_ORDER, STAGE_LABELS_AR } from "../data/population/stageLabels";
 import type {
   DistributionCurrentData,
   DistributionEntry,
@@ -47,7 +48,7 @@ const SEA_PORTS: Array<[string, number]> = [
   ["ميناء رأس الخير", 35],
 ];
 
-const STAGE_KEYS = ["first", "second", "third", "fourth"] as const;
+const STAGE_KEYS = STAGE_KEY_ORDER;
 // RAW Excel aliases, exactly as real processed workspaces store them in
 // row.stage (see DEFAULT_STAGE_MAPPINGS) — NOT the canonical Arabic labels.
 // The fixture previously used canonical labels, which masked a real-data bug:
@@ -61,12 +62,7 @@ const STAGE_RAW_ALIASES: Record<(typeof STAGE_KEYS)[number], string> = {
 };
 // Canonical labels, used only where real data is also canonical (the
 // draw-time StageAllocation records).
-const STAGE_LABELS: Record<(typeof STAGE_KEYS)[number], string> = {
-  first: "المستوى الأول",
-  second: "المستوى الثاني",
-  third: "المستوى الثالث",
-  fourth: "المستوى الرابع",
-};
+const STAGE_LABELS = STAGE_LABELS_AR;
 // Risk-engine stage mix (roughly: most cases low stage, few at the top).
 const STAGE_WEIGHTS = [0.45, 0.3, 0.18, 0.07];
 

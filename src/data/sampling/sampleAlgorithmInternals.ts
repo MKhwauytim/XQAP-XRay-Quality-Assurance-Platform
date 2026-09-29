@@ -1,6 +1,6 @@
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import { stripRawRow } from "../population/populationTypes";
-import { getStageKey, resolveStageMappings } from "../population/stageHelpers";
+import { getStageKey, resolveStageMappings, STAGE_KEY_ORDER, STAGE_LABELS_AR } from "../population/stageHelpers";
 import type { StageAliasMappings, StageSamplingRule } from "../population/populationConfig";
 import { hamiltonApportionment } from "./apportionment";
 import { createRng, drawWithoutReplacement, hashSeedString } from "./rng";
@@ -52,14 +52,9 @@ type StageDraw = {
   shortfalls: CertScanShortfall[];
 };
 
-const STAGE_KEYS: StageKey[] = ["first", "second", "third", "fourth"];
+const STAGE_KEYS: readonly StageKey[] = STAGE_KEY_ORDER;
 const REDISTRIBUTABLE_STAGES: StageKey[] = ["second", "third", "fourth"];
-const STAGE_LABELS: Record<StageKey, string> = {
-  first: "المستوى الأول",
-  second: "المستوى الثاني",
-  third: "المستوى الثالث",
-  fourth: "المستوى الرابع"
-};
+const STAGE_LABELS = STAGE_LABELS_AR;
 
 function emptyCounters(): DrawCounters {
   return { certRequested: 0, nonCertRequested: 0, certActual: 0, nonCertActual: 0 };

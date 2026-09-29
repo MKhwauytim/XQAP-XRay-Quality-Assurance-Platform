@@ -34,6 +34,7 @@ import {
   type FiltersMap,
 } from "./utils";
 import { cycleTableSort, sortRowsBy, type TableSort } from "../../utils/tableSort";
+import { stageLabelRank } from "../../data/population/stageLabels";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -250,16 +251,9 @@ function defaultRowMatchesFilter<TRow>(
   return true;
 }
 
-const STAGE_OPTION_ORDER: Record<string, number> = {
-  "المستوى الأول": 1,
-  "المستوى الثاني": 2,
-  "المستوى الثالث": 3,
-  "المستوى الرابع": 4,
-};
-
 function compareFilterOptions(first: string, second: string): number {
-  const firstStageOrder = STAGE_OPTION_ORDER[first];
-  const secondStageOrder = STAGE_OPTION_ORDER[second];
+  const firstStageOrder = stageLabelRank(first);
+  const secondStageOrder = stageLabelRank(second);
   if (firstStageOrder !== undefined || secondStageOrder !== undefined) {
     return (firstStageOrder ?? Number.MAX_SAFE_INTEGER) - (secondStageOrder ?? Number.MAX_SAFE_INTEGER);
   }
