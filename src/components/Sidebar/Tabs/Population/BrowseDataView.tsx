@@ -34,6 +34,8 @@ import Pagination from "../../../../components/Pagination/Pagination";
 import { AnchoredPopover } from "../../../../components/Popover/AnchoredPopover";
 import { DATA_PAGE_SIZE } from "../../../../utils/paginationUtils";
 import { cycleTableSort } from "../../../../utils/tableSort";
+import CertScanFilterChips from "../../../CertScanFilterChips/CertScanFilterChips";
+import { certScanFilterFromColumnFilters, withCertScanFilter } from "../../../../data/population/certScanFilter";
 import { formatStageLabel } from "./components/helpers";
 import { buildBrowseFilterOptionPreview } from "./browseFilterOptions";
 import {
@@ -1246,6 +1248,17 @@ export default function BrowseDataView({
                 );
               }}
             />
+            {dataset === "population" && (
+              <CertScanFilterChips
+                value={certScanFilterFromColumnFilters(columnFilters)}
+                onChange={(next) => {
+                  setPage(1);
+                  setColumnFilters((current) => withCertScanFilter(current, next));
+                }}
+                groupClassName="bv-certscan-filter"
+                chipClassName="bv-certscan-chip"
+              />
+            )}
             <span className="bv-row-count">
               {queryResult.totalRows.toLocaleString("ar-SA-u-nu-latn")} صف
               {(search || activeFilterCount > 0) && ` من ${total.toLocaleString("ar-SA-u-nu-latn")}`}
