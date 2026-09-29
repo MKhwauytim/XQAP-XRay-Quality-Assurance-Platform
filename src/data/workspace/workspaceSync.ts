@@ -43,7 +43,10 @@
 import { broadcastDataRefresh, type DataRefreshFamily } from "./dataRefreshSignal";
 import { bumpWorkspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
 import { ownStableAnswerSegmentMatcher } from "../answers/answerSegmentChain";
-import { invalidateSealedAnswerSegments } from "../answers/answerSealedSegments";
+import {
+  invalidateSealedAnswerSegmentNames,
+  invalidateSealedAnswerSegments,
+} from "../answers/answerSealedSegments";
 import { readRealSession } from "../../auth/authSession";
 import { readDistributionLogStamp } from "../distribution/distributionStorage";
 import {
@@ -677,11 +680,57 @@ function diffFamilies(previous: Probe | undefined, current: Probe): Set<DataRefr
   return changed;
 }
 
+type ParsedSizeSignature = { names: Set<string>; sizes: Map<string, number> };
+
+/** Inverse of `boundedSizeSignature`'s `JSON.stringify([names, sized])`; null when it is not that shape. */
+function parseSizeSignature(signature: string): ParsedSizeSignature | null {
+  if (signature === "") return { names: new Set(), sizes: new Map() };
+  try {
+    const parsed: unknown = JSON.parse(signature);
+    if (!Array.isArray(parsed) || parsed.length !== 2) return null;
+    const [names, sized] = parsed as [unknown, unknown];
+    if (!Array.isArray(names) || !Array.isArray(sized)) return null;
+    const sizes = new Map<string, number>();
+    for (const entry of sized) {
+      if (!Array.isArray(entry) || typeof entry[0] !== "string" || typeof entry[1] !== "number") return null;
+      sizes.set(entry[0], entry[1]);
+    }
+    return { names: new Set(names.filter((n): n is string => typeof n === "string")), sizes };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The answer-segment names whose signature entry moved between two ticks: a
+ * probed size that changed (a segment that grew), a name that appeared or
+ * vanished, or a name that was listed-but-unprobed before and is probed now
+ * (no baseline to compare against, so treated as possibly moved). Only these can
+ * have grown since the reader confirmed them sealed — every other confirmation
+ * is still good. `null` when either signature cannot be parsed or the set is
+ * implausibly large: the caller falls back to forgetting every confirmation.
+ */
+export function movedAnswerSegmentNames(previous: string, current: string): Set<string> | null {
+  const before = parseSizeSignature(previous);
+  const after = parseSizeSignature(current);
+  if (!before || !after) return null;
+  const moved = new Set<string>();
+  for (const [name, size] of after.sizes) {
+    // Quiet only when it was probed before at the SAME size. A changed size, a
+    // name with no previous size (brand new, or unprobed before) all count as
+    // moved: cheap, and such a name may already have been read by this tab.
+    if (before.sizes.get(name) !== size) moved.add(name);
+  }
+  for (const name of after.names) if (!before.names.has(name)) moved.add(name);
+  for (const name of before.names) if (!after.names.has(name)) moved.add(name);
+  return moved.size > 500 ? null : moved;
+}
+
 async function probeChangedFamilies(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   systemDir: DirectoryHandleLike | null
-): Promise<Set<DataRefreshFamily>> {
+): Promise<{ changed: Set<DataRefreshFamily>; sealedInvalidation: "none" | "all" | ReadonlySet<string> }> {
   const key = probeKey(directoryHandle, monthFolderName);
   const previous = previousProbes.get(key);
   // First look at this (workspace, month) this session: the diff below has
@@ -695,7 +744,21 @@ async function probeChangedFamilies(
   const current = previous ? carryUnprobed(previous, probed) : probed;
   const changed = diffFamilies(previous, current);
   previousProbes.set(key, current);
-  return changed;
+  // Which sealed-segment confirmations the reader must forget. Only a moved
+  // `answers.events` signature can have grown a segment (the legacy answers dir
+  // and the requests families never touch a segment); and only the names that
+  // moved can have grown, so a colleague's activity elsewhere keeps the rest.
+  let sealedInvalidation: "none" | "all" | ReadonlySet<string> = "none";
+  if (
+    previous &&
+    movedFrom(previous.answersEventsSignature, current.answersEventsSignature, sameValue) &&
+    isProbed(previous.answersEventsSignature) &&
+    isProbed(current.answersEventsSignature)
+  ) {
+    sealedInvalidation =
+      movedAnswerSegmentNames(previous.answersEventsSignature, current.answersEventsSignature) ?? "all";
+  }
+  return { changed, sealedInvalidation };
 }
 
 export type SyncRunOptions = {
@@ -759,9 +822,10 @@ async function performSync(options: SyncRunOptions, manual: boolean): Promise<Sy
   }
 
   let changed = new Set<DataRefreshFamily>();
+  let sealedInvalidation: "none" | "all" | ReadonlySet<string> = "none";
   if (directoryHandle && monthFolderName) {
     try {
-      changed = await probeChangedFamilies(directoryHandle, monthFolderName, systemDir);
+      ({ changed, sealedInvalidation } = await probeChangedFamilies(directoryHandle, monthFolderName, systemDir));
     } catch (error) {
       logError("workspaceSync:probe", error);
       ok = false;
@@ -775,9 +839,11 @@ async function performSync(options: SyncRunOptions, manual: boolean): Promise<Sy
     invalidateMonthLockCache(monthFolderName);
   }
 
-  // The probe saw someone else's answer segments move: whatever this tab
-  // believes is sealed may have grown, so the sealed-segment shortcut starts over.
-  if (changed.has("answers")) invalidateSealedAnswerSegments();
+  // The probe saw answer segments move: a segment this tab believes is sealed
+  // may have grown. Forget the confirmation of exactly the names that moved
+  // (all of them only when the probe cannot tell which).
+  if (sealedInvalidation === "all") invalidateSealedAnswerSegments();
+  else if (sealedInvalidation !== "none") invalidateSealedAnswerSegmentNames(sealedInvalidation);
 
   const broadcast = manual || changed.size > 0;
   if (broadcast) {

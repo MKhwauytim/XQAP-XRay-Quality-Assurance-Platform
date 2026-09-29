@@ -7,6 +7,7 @@ import {
   createMemoryDirectory,
   getOperationLog,
   getReadLog,
+  clearReadLog,
   setSimulatedFaults,
 } from "../storage/memoryDirectory";
 import { safeWriteJson } from "../storage/safeWrite";
@@ -24,7 +25,7 @@ import {
 import { invalidateMonthLockCache, isMonthClosed } from "../population/monthLock";
 import { DISTRIBUTION_EVENTS_DIR } from "../distribution/distributionEventStore";
 import { ANSWER_EVENTS_DIR } from "../answers/answerEventStore";
-import { upsertItemAnswer, __clearAnswerEventsCacheForTests } from "../answers/answerStorage";
+import { readAllAnswerEventsForMonth, upsertItemAnswer, __clearAnswerEventsCacheForTests } from "../answers/answerStorage";
 import { __resetAppendOnlyEventLogMemosForTests } from "../storage/appendOnlyEventLog";
 import { __resetAnswerSegmentChainMemoForTests } from "../answers/answerSegmentChain";
 import { getSealedAnswerSegmentsEpoch } from "../answers/answerSealedSegments";
@@ -1183,8 +1184,38 @@ describe("runSync — this session's own answer appends do not report the answer
     const epochBefore = getSealedAnswerSegmentsEpoch();
     const other = await runSync({ directoryHandle: root, monthFolderName: MONTH });
     expect(other.changed.has("answers")).toBe(true);
-    // ...and it makes the answers reader forget which segments it thought were sealed (S3).
-    expect(getSealedAnswerSegmentsEpoch()).toBeGreaterThan(epochBefore);
+    // A4: a colleague's NEW segment unseals nothing, so it must not make the
+    // reader forget every sealed confirmation any more (that made the next save
+    // re-stat every sealed segment of the month).
+    expect(getSealedAnswerSegmentsEpoch()).toBe(epochBefore);
+  });
+
+  it("A4: a probed size change of a segment invalidates exactly that name; a sealed segment that grows is re-opened", async () => {
+    const root = makeRoot("sealed-names", true);
+    const main = await getSampleMainDir(root, MONTH, true);
+    const eventsDir = await main.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: true });
+    const ev = (id: string): string =>
+      `${JSON.stringify({ eventId: id, eventType: "item-saved", eventAt: "2026-05-01T08:00:00.000Z", eventBy: "emp2", authority: "self", xrayImageId: `XR-${id}`, answers: [], status: "draft", answeredBy: "emp2" })}\n`;
+    for (const chain of ["a", "b"]) {
+      await writeRawFile(eventsDir, `ans-dev-${chain}-s${chain}.ndjson`, ev(`${chain}0`));
+      await writeRawFile(eventsDir, `ans-dev-${chain}-s${chain}-1.ndjson`, ev(`${chain}1`));
+    }
+    await readAllAnswerEventsForMonth(root, MONTH);
+    await readAllAnswerEventsForMonth(root, MONTH); // both seq0 confirmed sealed
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    // Bytes land in a confirmed-sealed segment (the late-append hazard).
+    const before = await (await (await eventsDir.getFileHandle("ans-dev-a-sa.ndjson")).getFile()).text();
+    await writeRawFile(eventsDir, "ans-dev-a-sa.ndjson", before + ev("LATE"));
+    const epochBefore = getSealedAnswerSegmentsEpoch();
+    const tick = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(tick.changed.has("answers")).toBe(true);
+    expect(getSealedAnswerSegmentsEpoch()).toBe(epochBefore); // not a wholesale wipe...
+    clearReadLog(root);
+    expect((await readAllAnswerEventsForMonth(root, MONTH)).map((e) => e.eventId)).toContain("LATE"); // ...yet not missed
+    const reads = getReadLog(root);
+    expect(reads.some((e) => e.endsWith("ans-dev-a-sa.ndjson"))).toBe(true);
+    expect(reads.some((e) => e.endsWith("ans-dev-b-sb.ndjson"))).toBe(false); // untouched sealed segment stays skipped
   });
 
   it("a manual refresh also forgets sealed-segment confirmations", async () => {

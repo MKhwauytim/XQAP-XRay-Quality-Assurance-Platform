@@ -36,7 +36,12 @@ import {
   type OperationDeadline,
 } from "../storage/operationDeadline";
 import { logError } from "../storage/errorLogger";
-import { SEALED_REVALIDATE_MS, getSealedAnswerSegmentsEpoch } from "./answerSealedSegments";
+import {
+  SEALED_REVALIDATE_MS,
+  getSealedAnswerSegmentsEpoch,
+  getSealedNamesGeneration,
+  stillSealedNames,
+} from "./answerSealedSegments";
 import { logCodedError, tagErrorOnce, type ErrorCode } from "../storage/errorCodes";
 import { createSimpleHasher } from "../storage/jsonEnvelope";
 import { listDirectoryEntries } from "../storage/directoryScan";
@@ -290,6 +295,8 @@ type AnswerEventsCacheEntry = {
   /** Freshness of `sealedConfirmed` — see `answerSealedSegments.ts`. */
   sealedEpoch?: number;
   sealedAtMs?: number;
+  /** `getSealedNamesGeneration()` taken BEFORE the read that produced `sealedConfirmed`. */
+  sealedNamesGen?: number;
   /** Names the last SUCCESSFUL listing showed: the writer's floor (`listedSegmentNames`). */
   listedSegmentNames?: readonly string[];
 };
@@ -486,6 +493,7 @@ export async function readAllAnswerEventsForMonth(
     // read failure — BEFORE returning a delta, so a skipped/unreadable segment
     // can never reach the cache write below as if it had been read cleanly.
     const epoch = getSealedAnswerSegmentsEpoch();
+    const namesGen = getSealedNamesGeneration();
     const nowMs = Date.now();
     const sealedFresh =
       cached?.sealedConfirmed !== undefined &&
@@ -493,7 +501,9 @@ export async function readAllAnswerEventsForMonth(
       nowMs - (cached.sealedAtMs ?? 0) < SEALED_REVALIDATE_MS;
     const delta = await readAnswerEventDelta(mainDir, cached?.offsets ?? {}, undefined, {
       ...options,
-      sealedConfirmed: sealedFresh ? cached.sealedConfirmed : undefined,
+      // Names the probe saw move since they were confirmed are dropped from the
+      // set (and so re-opened by this read); every other confirmation survives.
+      sealedConfirmed: sealedFresh ? stillSealedNames(cached.sealedConfirmed!, cached.sealedNamesGen ?? 0) : undefined,
     });
     const events = cached ? new Map(cached.events) : new Map<string, AnswerEvent>();
     for (const event of delta.events) events.set(event.eventId, event);
@@ -502,6 +512,7 @@ export async function readAllAnswerEventsForMonth(
       offsets: delta.offsets,
       sealedConfirmed: delta.sealedConfirmedNames,
       sealedEpoch: epoch,
+      sealedNamesGen: namesGen,
       // A revalidating read (everything re-opened) restarts the interval; a read
       // that reused the confirmations keeps the ORIGINAL timestamp, so the
       // window is fixed rather than sliding forever under frequent reads.
