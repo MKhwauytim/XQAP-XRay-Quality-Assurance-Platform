@@ -79,23 +79,15 @@ export type DistributionSummary = {
   totalPending: number;
 };
 
-export function computeDaysRemainingForDeadline(
-  month: number,
-  year: number,
-  fromDate = new Date()
-): number {
-  const lastDay = new Date(year, month, 0).getDate();
-  const deadline = new Date(year, month - 1, lastDay - 3, 23, 59, 59);
-  return Math.max(0, Math.ceil((deadline.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24)));
-}
-
 /**
  * C3: WORKING days (Sunday–Thursday; Friday/Saturday excluded) from
  * `fromDate`'s calendar day through the quota deadline — the sample month's
  * last day − 3 — both inclusive, local time. 0 when `fromDate` is after the
- * deadline. This, not the calendar count above, is what the daily quota uses
- * since DERIVE_VERSION 5; the calendar count stays for the unparseable-month
- * fallback path only.
+ * deadline. This is what the daily quota and the bulk-assignment stamp use
+ * since DERIVE_VERSION 5. When the month folder name is unparseable the
+ * derivation falls back to the stored stamp on the first assignment event
+ * (`daysRemainingAtAssignment`), which is calendar days on events written
+ * before v5 and working days after.
  */
 export function computeWorkingDaysForDeadline(month: number, year: number, fromDate: Date): number {
   const lastDay = new Date(year, month, 0).getDate();

@@ -10,7 +10,6 @@ import {
   buildReopenRequestedEvent,
   buildReplacedEvent,
   buildReplacementRequestedEvent,
-  computeDaysRemainingForDeadline,
   deriveCurrentDistribution,
   sampleRowsFingerprint
 } from "./distributionLog";
@@ -378,14 +377,11 @@ test("daily quota is derived from assignment date through three days before mont
   );
   log.monthFolderName = "6-June-2026";
 
-  expect(computeDaysRemainingForDeadline(6, 2026, new Date("2026-06-01T00:00:00.000Z"))).toBe(27);
-
   const result = deriveCurrentDistribution(log, rows);
   expect(result.quotas?.emp1?.sampleCount).toBe(1000);
   // C3 (DERIVE_VERSION 5): working days only. Monday 1 June → Saturday 27 June
   // 2026 (June's last day − 3), Friday/Saturday excluded = 19; ceil(1000 / 19)
-  // = 53. computeDaysRemainingForDeadline above still reports CALENDAR days —
-  // it is no longer what the quota uses.
+  // = 53 (27 calendar days before C3).
   expect(result.quotas?.emp1?.daysRemainingAtAssignment).toBe(19);
   expect(result.quotas?.emp1?.dailyQuota).toBe(53);
 });

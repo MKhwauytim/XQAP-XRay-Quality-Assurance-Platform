@@ -13,7 +13,7 @@ import {
   summarizeDistribution
 } from "./distributionDerivation";
 
-export { computeDaysRemainingForDeadline, computeWorkingDaysForDeadline } from "./distributionDerivation";
+export { computeWorkingDaysForDeadline } from "./distributionDerivation";
 
 /**
  * Version of the derivation algorithm in deriveCurrentDistribution. Bump when

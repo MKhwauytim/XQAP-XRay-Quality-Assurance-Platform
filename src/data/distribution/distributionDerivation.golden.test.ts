@@ -22,7 +22,7 @@ import {
  * of these values is changing observable behavior and must do so deliberately.
  *
  * Determinism: no Date.now(), no randomness. The only environment coupling is
- * the local timezone, via `computeDaysRemainingForDeadline`'s use of
+ * the local timezone, via `computeWorkingDaysForDeadline`'s use of
  * `new Date(year, month, 0)` — the existing suite already pins that under UTC
  * (`distributionLog.test.ts:375`), so this file follows the same precedent.
  */
