@@ -372,6 +372,15 @@ export const DEFAULT_LABELS = {
   ew_queue_stats_employee_aria:    "إحصائيات الموظف {name}",
   ew_queue_stats_employee_scope:   "نطاق العرض: {name}",
 
+  // «الحصة اليومية» tile in the stats strip (C3). The quota is frozen: working
+  // days (Sunday–Thursday) from the employee's first assignment to the
+  // deadline (the sample month's last day − 3); it moves only when their
+  // assigned count changes. {daily}/{total}/{days} are filled at the call site.
+  ew_quota_tile_label:             "الحصة اليومية",
+  ew_quota_tile_label_mine:        "الحصة اليومية (لي)",
+  ew_quota_tile_title:             "الحصة اليومية: {daily} صورة / يوم · الحصة: {total} · أيام العمل (الأحد–الخميس): {days}",
+  ew_quota_tile_title_none:        "لا توجد حصة محفوظة لهذا الشهر",
+
   // ── Answering on another employee's behalf (`answer-on-behalf`) ───────────
   // The inspection panel used to be flatly read-only on anyone else's row. It
   // is now editable for a holder of the feature, but ONLY while that row is

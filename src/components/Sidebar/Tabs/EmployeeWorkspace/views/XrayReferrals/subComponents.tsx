@@ -803,7 +803,7 @@ export function ReferralStatsStrip({
     // workspace aggregate, so it is disambiguated rather than relabelled when
     // the surrounding figures switch to workspace scope.
     {
-      label: isForeignScope ? "حصة اليوم (لي)" : "حصة اليوم",
+      label: isForeignScope ? L.ew_quota_tile_label_mine : L.ew_quota_tile_label,
       value: quota ? quota.dailyQuota.toLocaleString("ar-SA-u-nu-latn") : "—",
       tone: "quota",
     },
@@ -814,9 +814,14 @@ export function ReferralStatsStrip({
     { label: "المستبدلة \\ المحالة", value: stats.replaced.toLocaleString("ar-SA-u-nu-latn"), tone: "replaced" },
     { label: "نسبة الإنجاز", value: `${stats.completionPct}%`, tone: "done" },
   ];
+  // C3: `daysRemaining` is the frozen working-day window (Sun–Thu), not a
+  // countdown — hence «أيام العمل», not «الأيام المتبقية».
   const quotaTitle = quota
-    ? `الحصة اليومية: ${quota.dailyQuota.toLocaleString("ar-SA-u-nu-latn")} صورة / يوم · الحصة: ${quota.sampleCount.toLocaleString("ar-SA-u-nu-latn")} · الأيام المتبقية: ${quota.daysRemaining.toLocaleString("ar-SA-u-nu-latn")}`
-    : "لا توجد حصة محفوظة لهذا الشهر";
+    ? L.ew_quota_tile_title
+        .replace("{daily}", quota.dailyQuota.toLocaleString("ar-SA-u-nu-latn"))
+        .replace("{total}", quota.sampleCount.toLocaleString("ar-SA-u-nu-latn"))
+        .replace("{days}", quota.daysRemaining.toLocaleString("ar-SA-u-nu-latn"))
+    : L.ew_quota_tile_title_none;
 
   return (
     <section

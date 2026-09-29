@@ -158,6 +158,8 @@ export type PersonalStats = {
   active: number;
   completionPct: number;
 };
+/** `daysRemaining` is the assignment window in WORKING days (Sun–Thu) since
+ *  DERIVE_VERSION 5 (C3) — `EmployeeQuota.daysRemainingAtAssignment`. */
 export type PersonalQuota = { dailyQuota: number; daysRemaining: number; sampleCount: number } | null;
 export type ReplacementDialogState = {
   entry: DistributionEntry;
