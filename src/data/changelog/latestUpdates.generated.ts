@@ -5,73 +5,73 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
-    "version": "v150.7",
+    "version": "v150.20",
     "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "samples",
-    "title": "delete-user guard never reads a failed recount as zero pending"
+    "scope": "backup",
+    "title": "never overwrite an existing live manifest misread as missing"
   },
   {
-    "version": "v150.6",
+    "version": "v150.19",
+    "date": "2026-09-29",
+    "bucket": "fix",
+    "scope": "archive",
+    "title": "restore dialog and recovery tool catch unexpected rejections and show integrity warnings"
+  },
+  {
+    "version": "v150.18",
+    "date": "2026-09-29",
+    "bucket": "fix",
+    "scope": "backup",
+    "title": "selective restore round 3 (unreadable backup manifest, deleted-month manifest, verification, shared wording)"
+  },
+  {
+    "version": "v150.17",
+    "date": "2026-09-29",
+    "bucket": "fix",
+    "scope": "archive",
+    "title": "selective restore UI review fixes (remount race, admin-only backups, warnings, failure handling)"
+  },
+  {
+    "version": "v150.16",
+    "date": "2026-09-29",
+    "bucket": "fix",
+    "scope": "backup",
+    "title": "selective restore engine review fixes (guard bypass, closed months, manifest, derived warnings)"
+  },
+  {
+    "version": "v150.15",
+    "date": "2026-09-29",
+    "bucket": "enhancement",
+    "scope": "population",
+    "title": "population recovery offers backup snapshots through the selective-restore engine"
+  },
+  {
+    "version": "v150.14",
     "date": "2026-09-29",
     "bucket": "feature",
-    "scope": "distribution",
-    "title": "warn when a port restriction leaves an employee short of their equal-share target"
+    "scope": "archive",
+    "title": "selective restore mode in the backup restore dialog"
   },
   {
-    "version": "v150.5",
+    "version": "v150.13",
     "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "distribution",
-    "title": "existing ownership counts toward restricted targets on a re-run"
+    "scope": "backup",
+    "title": "selective-restore catalog review fixes (ad-hoc records, embedded requests, casing, empty folders)"
   },
   {
-    "version": "v150.4",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "distribution",
-    "title": "v4 mirrors are not trusted after DERIVE_VERSION 5; retire calendar-day helper"
-  },
-  {
-    "version": "v150.3",
+    "version": "v150.12",
     "date": "2026-09-29",
     "bucket": "feature",
-    "scope": "distribution",
-    "title": "warn in the preview when a port restriction makes equal totals impossible"
+    "scope": "backup",
+    "title": "run selective restore with derived-cache rebuild and integrity scan"
   },
   {
-    "version": "v150.2",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "distribution",
-    "title": "rows an employee already owns count toward their target on a restricted re-run"
-  },
-  {
-    "version": "v150.1",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "employee-workspace",
-    "title": "daily quota tile strings as label keys, working-day wording"
-  },
-  {
-    "version": "v150.0",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "distribution",
-    "title": "daily quota counts working days (Sun-Thu); DERIVE_VERSION 5"
-  },
-  {
-    "version": "v149.8",
+    "version": "v150.11",
     "date": "2026-09-29",
     "bucket": "feature",
-    "scope": "utils",
-    "title": "countWorkingDays — Sunday to Thursday, Friday/Saturday weekend"
-  },
-  {
-    "version": "v149.7",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "employee-workspace",
-    "title": "the empty-queue notice and stats title reflect the CertScan chip"
+    "scope": "backup",
+    "title": "dependency plan for selective restore (A2 coverage block, warnings)"
   }
 ];
