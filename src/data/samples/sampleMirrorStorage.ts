@@ -23,7 +23,7 @@ import {
   eventStoreMatchesScan,
   isDistributionPersistPending,
   isDistributionProjectionPending,
-  loadOrDeriveDistributionCurrent,
+  loadOrDeriveDistributionCurrentStrictForRead,
   scanIdentityOf,
   readDistributionLogStamp,
 } from "../distribution/distributionStorage";
@@ -704,8 +704,12 @@ async function staleMirrorPendingCount(
   try {
     const sample = await loadSampleMaster(directoryHandle, monthFolderName);
     if (!sample || sample.rows.length === 0) return 0;
-    const current = await loadOrDeriveDistributionCurrent(directoryHandle, monthFolderName, sample.rows, {
-      persistCache: false, // a guard is a read: it must not fan out cache/mirror writes
+    // STRICT read: `null` only for a month whose event log is readable and holds no
+    // events. An unreadable event store THROWS, so it reaches the catch below (mirror
+    // count, or propagate and refuse the delete) instead of reading as zero.
+    // `strictSegments`: a segment that is listed but cannot be read must not read as "no events in it".
+    const current = await loadOrDeriveDistributionCurrentStrictForRead(directoryHandle, monthFolderName, sample.rows, {
+      strictSegments: true,
     });
     if (!current) return 0;
     return current.entries.filter(
