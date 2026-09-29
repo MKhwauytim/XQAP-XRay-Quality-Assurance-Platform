@@ -52,6 +52,7 @@ import { readRealSession } from "../../auth/authSession";
 import { readDistributionLogStamp } from "../distribution/distributionStorage";
 import {
   boundedSizeSignature,
+  countChainHeads,
   listDirectoryEntriesWithSize,
   type SizedDirectoryEntry,
 } from "../storage/directoryScan";
@@ -814,6 +815,14 @@ async function probeChangedFamilies(
   movedSegmentPrevSizes: Map<string, number> | null;
   /** The legacy `.answers.json` listing moved too: whose answers is then unknowable from segments. */
   legacyAnswersMoved: boolean;
+  /**
+   * The moved-name diff cannot be trusted to account for every appended line, so
+   * the owners must be reported as unknown (everyone reloads): a name that was sized
+   * before is still listed but no longer sized (a chain that rotated inside the tick,
+   * its sealed head's last lines unseen), or there are more live chain heads than the
+   * stat budget can size (growth of an unsized head can never name its owner).
+   */
+  ownersUnknown: boolean;
 }> {
   const key = probeKey(directoryHandle, monthFolderName);
   const previous = previousProbes.get(key);
@@ -834,6 +843,7 @@ async function probeChangedFamilies(
   // moved can have grown, so a colleague's activity elsewhere keeps the rest.
   let sealedInvalidation: "none" | "all" | ReadonlySet<string> = "none";
   let movedSegmentPrevSizes: Map<string, number> | null = null;
+  let ownersUnknown = false;
   if (
     previous &&
     movedFrom(previous.answersEventsSignature, current.answersEventsSignature, sameValue) &&
@@ -842,13 +852,24 @@ async function probeChangedFamilies(
   ) {
     const moved = movedAnswerSegmentNames(previous.answersEventsSignature, current.answersEventsSignature);
     sealedInvalidation = moved ?? "all";
+    const before = parseSizeSignature(previous.answersEventsSignature);
+    const after = parseSizeSignature(current.answersEventsSignature);
     if (moved) {
-      const before = parseSizeSignature(previous.answersEventsSignature);
       movedSegmentPrevSizes = new Map([...moved].map((name) => [name, before?.sizes.get(name) ?? 0]));
+    }
+    if (before && after) {
+      for (const name of before.sizes.keys()) {
+        if (after.names.has(name) && !after.sizes.has(name)) ownersUnknown = true;
+      }
+      if (countChainHeads([...after.names], ANSWER_EVENT_SEGMENT_SUFFIX) > ANSWER_SEGMENT_HEAD_STAT_BUDGET) {
+        ownersUnknown = true;
+      }
+    } else {
+      ownersUnknown = true;
     }
   }
   const legacyAnswersMoved = !!previous && movedFrom(previous.answersSignature, current.answersSignature, sameValue);
-  return { changed, sealedInvalidation, movedSegmentPrevSizes, legacyAnswersMoved };
+  return { changed, sealedInvalidation, movedSegmentPrevSizes, legacyAnswersMoved, ownersUnknown };
 }
 
 export type SyncRunOptions = {
@@ -915,12 +936,13 @@ async function performSync(options: SyncRunOptions, manual: boolean): Promise<Sy
   let sealedInvalidation: "none" | "all" | ReadonlySet<string> = "none";
   let answerOwners: Set<string> | null = null;
   let legacyAnswersMoved = false;
+  let ownersUnknown = false;
   if (directoryHandle && monthFolderName) {
     try {
       let movedSegmentPrevSizes: Map<string, number> | null;
-      ({ changed, sealedInvalidation, movedSegmentPrevSizes, legacyAnswersMoved } = await probeChangedFamilies(directoryHandle, monthFolderName, systemDir));
+      ({ changed, sealedInvalidation, movedSegmentPrevSizes, legacyAnswersMoved, ownersUnknown } = await probeChangedFamilies(directoryHandle, monthFolderName, systemDir));
       markRequestQueueProbeCompleted(directoryHandle, monthFolderName);
-      if (changed.has("answers") && movedSegmentPrevSizes) {
+      if (changed.has("answers") && movedSegmentPrevSizes && !ownersUnknown) {
         answerOwners = await peekAnswerOwners(movedSegmentPrevSizes);
       }
     } catch (error) {

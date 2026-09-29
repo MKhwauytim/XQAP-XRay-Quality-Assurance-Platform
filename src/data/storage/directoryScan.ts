@@ -780,6 +780,11 @@ function namesWithHigherSibling(names: readonly string[], suffix: string): Set<s
   return out;
 }
 
+/** How many names in a listing are chain heads (no higher-seq sibling): the segments that can still grow. */
+export function countChainHeads(names: readonly string[], suffix: string): number {
+  return names.length - namesWithHigherSibling(names, suffix).size;
+}
+
 /**
  * Read only the bytes appended past each file's previously-known offset, for
  * GENUINELY append-only, monotonically-growing files (distribution event

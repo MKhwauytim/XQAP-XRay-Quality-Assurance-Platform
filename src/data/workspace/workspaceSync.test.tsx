@@ -41,6 +41,7 @@ import { loadFeedback, replyToFeedback, submitFeedback } from "../feedback/feedb
 import { buildAssignEvent } from "../distribution/distributionLog";
 import {
   ALL_DATA_REFRESH_FAMILIES,
+  answersMayConcern,
   subscribeToDataChange,
   type DataRefreshDetail,
 } from "./dataRefreshSignal";
@@ -1152,6 +1153,54 @@ describe("runSync — §6 of the answer-save proposal: the answers.events segmen
     }
     const owners = details.map((d) => (d.source === "periodic" ? [...(d.answerOwners ?? ["<unknown>"])].sort() : ["manual"]));
     expect(owners).toEqual([["emp1"], ["emp7"]]);
+  });
+
+  const obo = (id: string, owner: string, by = "sup1"): string =>
+    `${JSON.stringify({ eventId: id, eventType: "item-saved", eventAt: "2026-05-01T08:00:00.000Z", eventBy: by, authority: "supervisor", xrayImageId: `XR-${id}`, answers: [], status: "draft", answeredBy: owner, answeredOnBehalfBy: by })}\n`;
+
+  it("A9: a chain that rotates inside one tick never yields a wrong non-null owner set", async () => {
+    const root = makeRoot();
+    const eventsDir = await answerEventsDirFor(root);
+    for (let c = 0; c < 30; c += 1) {
+      const b = `z${String(c).padStart(2, "0")}-ans-dev${c}-s${c}`;
+      await writeRawFile(eventsDir, `${b}.ndjson`, answerSegment([`c${c}a`]));
+      await writeRawFile(eventsDir, `${b}-1.ndjson`, answerSegment([`c${c}b`]));
+      await writeRawFile(eventsDir, `${b}-2.ndjson`, answerSegment([`c${c}c`]));
+    }
+    const sup = "a00-ans-devS-sS";
+    await writeRawFile(eventsDir, `${sup}.ndjson`, obo("s1", "empx"));
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline: sup seq 0 is a sized head
+    const { details, stop } = captureBroadcasts();
+    try {
+      await writeRawFile(eventsDir, `${sup}.ndjson`, obo("s1", "empx") + obo("s2", "empA"));
+      await writeRawFile(eventsDir, `${sup}-1.ndjson`, obo("s3", "empB"));
+      await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    } finally {
+      stop();
+    }
+    expect(details).toHaveLength(1);
+    const d = details[0]!;
+    expect(d.source === "periodic" && answersMayConcern(d, "empA")).toBe(true);
+  });
+
+  it("A9: with more live chain heads than the stat budget the owners are reported unknown", async () => {
+    const root = makeRoot();
+    const eventsDir = await answerEventsDirFor(root);
+    for (let c = 0; c < 70; c += 1) {
+      await writeRawFile(eventsDir, `m${String(c).padStart(3, "0")}-ans-dev${c}-s${c}.ndjson`, answerSegment([`h${c}`]));
+    }
+    await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    const { details, stop } = captureBroadcasts();
+    try {
+      await writeRawFile(eventsDir, "m069-ans-dev69-s69.ndjson", answerSegment(["h69"]) + obo("x1", "empA"));
+      await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    } finally {
+      stop();
+    }
+    expect(details).toHaveLength(1);
+    expect(details[0]!.source === "periodic" && details[0]!.answerOwners).toBeNull();
+    // ...so an employee who is NOT named by the (unattributable) growth still reloads
+    expect(answersMayConcern(details[0]!, "empZ")).toBe(true);
   });
 
   it("A9: an unclassifiable change leaves the owners unknown (null), never a guess", async () => {
