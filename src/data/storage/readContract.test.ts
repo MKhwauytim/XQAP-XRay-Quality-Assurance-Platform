@@ -343,7 +343,9 @@ describe("P0-1 answerStorage: an unreadable answer file never becomes an empty o
     const result = await upsertItemAnswer(root, MONTH, "emp1", makeAnswer("X-new"));
     expect(result.ok).toBe(false);
     await expectUnreadableRejection(loadEmployeeAnswers(root, MONTH, "emp1"));
-  });
+    // The refused save spends its 30 s interactive budget on the retry ladder (15 s on the
+    // untouched base), so the default 20 s limit is one loaded CI run away from flaking.
+  }, 60_000);
 
   it("still returns the empty shell when the employee genuinely has no file", async () => {
     const root = makeRoot();
