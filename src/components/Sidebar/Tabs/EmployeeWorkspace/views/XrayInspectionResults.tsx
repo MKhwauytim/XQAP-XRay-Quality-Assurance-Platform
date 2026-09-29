@@ -68,6 +68,7 @@ import { formatStageLabel } from "../../../../../data/population/stageHelpers";
 import { certScanStatusFilterProps } from "./certScanColumn";
 import type { StageAliasMappings } from "../../../../../data/population/populationConfig";
 import { useWorkspaceStageMappings } from "../../../../../hooks/useWorkspaceStageMappings";
+import { useTabActive } from "../../../../../app/tabActiveContext";
 
 const RESULTS_COL_KEY = "xray_inspection_results_cols_v1";
 const REFERRALS_PRESET_KEY = "xray-referrals";
@@ -168,9 +169,23 @@ type AuditRow = {
 
 type Props = {
   directoryHandle: DirectoryHandleLike;
+  /**
+   * False while the parent keeps this view mounted but hidden (another
+   * sub-tab is on screen). A hidden view does not reload on data-refresh
+   * broadcasts; it remembers it is stale and reloads once when shown.
+   * Combined with `useTabActive()` for the enclosing top-level tab.
+   */
+  active?: boolean;
 };
 
-export default function XrayInspectionResults({ directoryHandle }: Props) {
+export default function XrayInspectionResults({ directoryHandle, active = true }: Props) {
+  const tabActive = useTabActive();
+  const visible = active && tabActive;
+  // Read by the (long-lived) refresh subscription, which must not re-subscribe
+  // on every visibility flip. `staleWhileHidden` records that a broadcast (or
+  // the 30 s pending-count tick) was skipped while hidden.
+  const visibleRef = useRef(visible);
+  const staleWhileHiddenRef = useRef(false);
   const L = useLabels();
   const sampleColumns = useMemo(() => buildSampleColumns(L), [L]);
   const session = readSession();
@@ -297,7 +312,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
   // Load-token guard (mirrors useApprovalData): a slow load for a previously
   // selected month must not clobber a later selection or the falsy-reset above.
   const loadTokenRef = useRef(0);
-  const loadData = useCallback(async (opts?: { silent?: boolean }) => {
+  const loadData = useCallback(async (opts?: { silent?: boolean; refreshPending?: boolean }) => {
     const token = ++loadTokenRef.current;
     if (!selectedMonth) return;
     // `silent` is set only by the background/manual data-refresh signal below, never
@@ -363,7 +378,11 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
       // app-wide via PendingAnswerReplayRunner (see the callback's own doc).
       // Fire-and-forget: best-effort by contract and must never delay or fail
       // this render.
-      if (!canSeeAll) {
+      // Only on a real (non-silent) load: a silent broadcast-driven reload used
+      // to re-run the IndexedDB backfill (a get+put per answer item) and a
+      // getAll of the whole mirror store on every own save. The 30 s tick below
+      // and the show-catch-up keep the count current instead.
+      if (!canSeeAll && (!silent || opts?.refreshPending)) {
         void refreshPendingSyncCount();
       }
       const answerFiles = canSeeAll
@@ -437,6 +456,11 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
   useEffect(() => {
     if (canSeeAll || !selectedMonth) return;
     const interval = window.setInterval(() => {
+      // Hidden: nobody can see the count; the show-catch-up below refreshes it.
+      if (!visibleRef.current) {
+        staleWhileHiddenRef.current = true;
+        return;
+      }
       void refreshPendingSyncCount();
     }, 30_000);
     return () => window.clearInterval(interval);
@@ -450,10 +474,32 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
   // (subscribeToDataChange's unconditional "manual" semantics). Passed silently so it
   // never force-collapses a supervisor's currently open quality-note editor (see the
   // `silent` handling inside loadData above).
+  //
+  // While the view is mounted-but-hidden (another sub-tab, or another top-level
+  // tab, is on screen) the broadcast only marks it stale: the employee's own
+  // answer save echoes through here and used to cost a full month re-read
+  // (~142 ops / ~1.2 MB) for a view nobody could see. The catch-up below runs
+  // the one deferred silent reload when it is shown again.
   useEffect(
-    () => subscribeToDataChange(RESULTS_REFRESH_FAMILIES, () => { void loadData({ silent: true }); }),
+    () => subscribeToDataChange(RESULTS_REFRESH_FAMILIES, () => {
+      if (!visibleRef.current) {
+        staleWhileHiddenRef.current = true;
+        return;
+      }
+      void loadData({ silent: true });
+    }),
     [loadData]
   );
+
+  // Keep the ref in step with visibility and run the single catch-up on show.
+  // Declared AFTER the subscription so a broadcast and a visibility flip that
+  // land in the same commit cannot lose the stale mark.
+  useEffect(() => {
+    visibleRef.current = visible;
+    if (!visible || !staleWhileHiddenRef.current) return;
+    staleWhileHiddenRef.current = false;
+    void loadData({ silent: true, refreshPending: true });
+  }, [visible, loadData]);
 
   // Pure filter over the raw audit-log state loadData already fetched — buildAuditRows
   // itself takes `mode` and returns [] outright for "active", so re-deriving this on

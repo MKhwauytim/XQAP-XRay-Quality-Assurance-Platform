@@ -1,3 +1,4 @@
+import { TabActiveContext } from "./app/tabActiveContext";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, X, LayoutGrid, Menu } from "lucide-react";
 
@@ -476,7 +477,9 @@ export function AppContent({ session }: AppContentProps) {
                     blank an already-loaded sibling tab that's also mounted-hidden. */}
                 <ErrorBoundary>
                   <Suspense fallback={<LoadingState label={labels.app_tab_loading} />}>
-                    <tab.TabComponent />
+                    <TabActiveContext.Provider value={tab.id === activeTabId}>
+                      <tab.TabComponent />
+                    </TabActiveContext.Provider>
                   </Suspense>
                 </ErrorBoundary>
               </div>
