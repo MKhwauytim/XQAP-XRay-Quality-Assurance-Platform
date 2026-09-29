@@ -879,7 +879,10 @@ async function resolveSeed(
     items: legacy?.items ?? [],
   };
   if (alreadySeeded) {
-    setLegacySeedMemo(directoryHandle, monthFolderName, username, legacySeed);
+    // Only a read that FOUND the file may be memoized. An absent answer (`legacy === null`)
+    // from an already-seeded employee is a transient share hiccup, not the truth: memoizing
+    // its empty seed would make every later fold fail its hash check for the whole session.
+    if (legacy !== null) setLegacySeedMemo(directoryHandle, monthFolderName, username, legacySeed);
     return { seedEvent: null, legacySeed };
   }
 

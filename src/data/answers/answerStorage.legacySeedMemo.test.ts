@@ -13,10 +13,12 @@ import {
   setSimulatedFaults,
 } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { getSampleEmployeeDir } from "../workspace/workspacePaths";
 import { broadcastDataRefresh } from "../workspace/dataRefreshSignal";
 import {
   clearAnswerEventsCache,
   __clearAnswerEventsCacheForTests,
+  loadEmployeeAnswers,
   saveEmployeeAnswers,
   upsertItemAnswer,
 } from "./answerStorage";
@@ -121,4 +123,35 @@ describe("legacy seed memo (A3)", () => {
     expect((await upsertItemAnswer(root, MONTH, "emp1", item("A"))).ok).toBe(true);
     expect(legacyReads(root)).toBeGreaterThanOrEqual(1);
   });
+
+  it("a transient NotFound on the legacy file is never memoized as an absent (empty) seed", async () => {
+    const root = makeRoot();
+    expect((await saveEmployeeAnswers(root, MONTH, "emp1", [item("L1"), item("L2")])).ok).toBe(true);
+    expect((await upsertItemAnswer(root, MONTH, "emp1", item("A1"))).ok).toBe(true); // seeds with a non-empty hash
+    clearAnswerEventsCache(); // a fresh session
+    setSimulatedFaults(root, [
+      { operation: "getFileHandle", name: LEGACY, errorName: "NotFoundError", times: 1 } as never,
+    ]);
+    await upsertItemAnswer(root, MONTH, "emp1", item("A2")); // may fail or succeed; must not poison the session
+    setSimulatedFaults(root, []);
+    for (const id of ["A3", "A4"]) expect((await upsertItemAnswer(root, MONTH, "emp1", item(id))).ok).toBe(true);
+    const ids = (await loadEmployeeAnswers(root, MONTH, "emp1")).items.map((i) => i.xrayImageId);
+    for (const id of ["A1", "A3", "A4", "L1", "L2"]) expect(ids).toContain(id);
+  }, 60_000);
+
+  it("after the tab has read the frozen file once, a save succeeds from the memo and all answers survive; views still throw on corruption", async () => {
+    const root = makeRoot();
+    for (let i = 0; i < 20; i += 1) expect((await upsertItemAnswer(root, MONTH, "emp1", item(`X${i}`))).ok).toBe(true);
+    // corrupt the frozen file in place (torn payload, no .bak/.tmp)
+    const answersDir = await getSampleEmployeeDir(root, MONTH, true);
+    const raw = JSON.parse(await (await (await answersDir.getFileHandle(LEGACY)).getFile()).text()) as { metadata: unknown; data: Record<string, unknown> };
+    const w = await (await answersDir.getFileHandle(LEGACY)).createWritable!();
+    await w.write(JSON.stringify({ metadata: raw.metadata, data: { ...raw.data, __torn: true } }));
+    await w.close();
+    for (const n of [`${LEGACY}.bak`, `${LEGACY}.tmp`]) await answersDir.removeEntry?.(n).catch(() => undefined);
+    expect((await upsertItemAnswer(root, MONTH, "emp1", item("X-new"))).ok).toBe(true);
+    // the view path reads the file for real and still reports the damage
+    clearAnswerEventsCache();
+    await expect(loadEmployeeAnswers(root, MONTH, "emp1")).rejects.toThrow();
+  }, 60_000);
 });
