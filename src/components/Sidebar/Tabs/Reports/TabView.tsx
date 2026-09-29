@@ -8,6 +8,7 @@ import { logError, logRejection } from "../../../../data/storage/errorLogger";
 import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
 import type { SampleMasterData } from "../../../../data/sampling/sampleTypes";
 import { loadMonthPopulationFinal, loadMonthForEditing, loadMonthPopulationFinalRevision, loadMonthManifest, loadProcessingSummary } from "../../../../data/population/populationStorage";
+import { loadPopulationConfig } from "../../../../data/population/populationConfig";
 import { useGlobalMonth } from "../../../../data/month/useGlobalMonth";
 import type { SourceRevisions } from "../../../../data/reporting/sourceRevisions";
 import { formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
@@ -369,7 +370,7 @@ function ReportsContent() {
   // dashboard and the exported artifacts can never disagree.
   const loadExecInput = useCallback(async (): Promise<ExecutiveReportInput | null> => {
     if (!directoryHandle || !selectedMonth) return null;
-    const [populationFinal, sample, employeeFiles, templateSelection, popRev, sampleRev, distRev, processingSummary] = await Promise.all([
+    const [populationFinal, sample, employeeFiles, templateSelection, popRev, sampleRev, distRev, processingSummary, populationConfig] = await Promise.all([
       loadMonthPopulationFinal(directoryHandle, selectedMonth),
       loadSampleMaster(directoryHandle, selectedMonth),
       loadAllEmployeeFiles(directoryHandle, selectedMonth),
@@ -382,6 +383,9 @@ function ReportsContent() {
       // `ExecutiveReportInput.processingSummary`'s doc comment). Best-effort —
       // `loadProcessingSummary` already resolves to null on any read failure.
       loadProcessingSummary(directoryHandle, selectedMonth),
+      // C1: the workspace's own stage alias table, so every stage grouping in
+      // the report classifies a custom alias the way processing did.
+      loadPopulationConfig(directoryHandle),
     ]);
     if (!populationFinal) return null;
     const template = templateSelection?.templateId
@@ -406,6 +410,7 @@ function ReportsContent() {
       config: DEFAULT_EXEC_CONFIG,
       sourceRevisions,
       processingSummary,
+      stageMappings: populationConfig.stageMappings,
     };
   }, [directoryHandle, selectedMonth]);
 

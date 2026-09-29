@@ -17,7 +17,7 @@ import { esc, fmtNum, fmtPct } from "../primitives";
 import { icon } from "../ui/icons";
 import { coverMeshSvg, dividerPatternSvg } from "../ui/generativeArt";
 import { isRankable } from "../model/dataSufficiency";
-import { getStageKey } from "../../../population/stageHelpers";
+import { STAGE_KEY_ORDER, getStageKey, isCanonicalStageKey } from "../../../population/stageHelpers";
 import { DEFAULT_SAMPLING_RULES } from "../../../population/populationConfig";
 import { ORGANIZATION_PATH, ZATCA_LOGO_URL } from "../../../../branding/organization";
 import type { SourceRevisions } from "../../sourceRevisions";
@@ -659,7 +659,7 @@ const GLOSSARY_CATEGORIES: GlossaryCategory[] = [
  * (executiveKpiProfiles.ts `buildStageProfiles`).
  */
 const LEVEL_DRAW_WEIGHTS: (number | null)[] = (() => {
-  const order = ["first", "second", "third", "fourth"] as const;
+  const order = STAGE_KEY_ORDER;
   const rules = order.map((key) => DEFAULT_SAMPLING_RULES.find((r) => r.stageKey === key));
   const exactPool = rules.reduce((sum, r) => sum + (r?.method === "exact" ? r.value : 0), 0);
   return rules.map((r) => {
@@ -724,38 +724,33 @@ const RISK_LEVELS: RiskLevel[] = [
  * with zero sample rows is entirely omitted from `byStage` (the production
  * path — `sampleAlgorithmInternals.ts`'s stageAllocations loop `continue`s
  * past `stageRows.length === 0 || target <= 0` — and the no-sample fallback
- * path in `buildStageProfiles`, which groups by whatever raw labels actually
- * appear in the rows) — every level AFTER a skipped one then shifts down one
+ * path in `buildStageProfiles`, which groups by whatever canonical stage keys
+ * actually appear in the rows) — every level AFTER a skipped one then shifts down one
  * array position. `RISK_LEVELS[i]`/`LEVEL_DRAW_WEIGHTS[i]`/`STAGE_TONES[i]`
  * must therefore never be indexed by a stage's loop position; resolve
  * identity via `levelIndexForStage` instead (2026-07-28 review fix).
  */
-const CANONICAL_STAGE_ORDER = ["first", "second", "third", "fourth"] as const;
+const CANONICAL_STAGE_ORDER = STAGE_KEY_ORDER;
 
 /**
  * Resolve `stage` to its 0-based index into `RISK_LEVELS`/`LEVEL_DRAW_WEIGHTS`/
  * `STAGE_TONES` BY IDENTITY, never by the stage's position in the `stages`
  * array it came from (see `CANONICAL_STAGE_ORDER`'s doc comment above).
  *
- * Resolved from `stage.stageLabel` via the same alias-matching `getStageKey`
- * every other stage-classification path in the app uses — NOT from
- * `stage.stageKey` directly: that field is only a reliable canonical key
- * ("first"/"second"/…) on the production path (`buildStageProfiles`'s
- * `sample.stageAllocations` branch); on the no-sample fallback branch it is
- * stamped `String(index)` (a placeholder, never a real level key), which
- * would make identity resolution silently fail for the very fixtures/months
- * that most need it. `stageLabel`, by contrast, is real semantic data on
- * BOTH branches (either `STAGE_LABELS[stageKey]` or the row's own `stage`
- * text), so resolving through it — the same way `formatStageLabel` already
- * does — works uniformly everywhere.
+ * Since C1 (2026-09-28) `buildStageProfiles` stamps a canonical `stageKey`
+ * ("first"…"fourth", or "unknown") on BOTH of its branches, so identity is
+ * read straight from the key — no alias table is needed, which keeps a
+ * workspace's custom stage aliases from falling through to "unknown" here.
+ * A hand-built profile whose key is not canonical (test fixtures, the KPI
+ * test model's "L1"…) still resolves through its label with the default
+ * aliases, as before.
  *
- * Returns -1 for a label `getStageKey` can't map to one of the four levels
- * (legacy/unrecognized wording, or the raw label was never one of the four
- * to begin with). Callers MUST treat -1 as "unknown level" — render "—" and
- * a neutral tone — never fall back to a loop index, which would silently
- * reintroduce the exact bug this helper exists to fix.
+ * Returns -1 for a stage that is not one of the four levels. Callers MUST
+ * treat -1 as "unknown level" — render "—" and a neutral tone — never fall
+ * back to a loop index, which would silently reintroduce the positional bug.
  */
 function levelIndexForStage(stage: StageProfile): number {
+  if (isCanonicalStageKey(stage.stageKey)) return CANONICAL_STAGE_ORDER.indexOf(stage.stageKey);
   const key = getStageKey(stage.stageLabel);
   return CANONICAL_STAGE_ORDER.indexOf(key as (typeof CANONICAL_STAGE_ORDER)[number]);
 }
