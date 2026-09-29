@@ -219,3 +219,35 @@ describe("R2: selective mirror rewrite", () => {
     expect(mirrorWrites(root)).toEqual([]);
   });
 });
+
+describe("R2: deterministic index order", () => {
+  it("writes _index.json keys in employee order even when the content hashes finish out of order", async () => {
+    const { vi } = await import("vitest");
+    const { syncSampleMirrors } = await import("./sampleMirrorStorage");
+    const subtle = globalThis.crypto.subtle;
+    const real = subtle.digest.bind(subtle);
+    let call = 0;
+    // The first hash to start is the last to finish.
+    const spy = vi.spyOn(subtle, "digest").mockImplementation(async (...args: Parameters<typeof real>) => {
+      const mine = call++;
+      await new Promise((r) => setTimeout(r, Math.max(0, 30 - mine * 10)));
+      return real(...args);
+    });
+    try {
+      const root = createMemoryDirectory("root") as DirectoryHandleLike;
+      const entry = (id: string, to: string) => ({
+        xrayImageId: id, assignedTo: to, status: "pending" as const, replacedById: null,
+        lastEventAt: "2026-05-04T00:00:00.000Z", lastEventId: `evt-${id}`, row: {} as never,
+      });
+      await syncSampleMirrors(root, MONTH, {
+        monthFolderName: MONTH, logRevision: 1, deriveVersion: 5, derivedAt: "2026-05-06T00:00:00.000Z",
+        totalAssigned: 3, totalCompleted: 0, totalReplaced: 0, totalPending: 3,
+        entries: [entry("A1", "emp1"), entry("A2", "emp2"), entry("A3", "emp3")],
+      } as never);
+      const index = await readEmployeeMirrorIndex(root, MONTH);
+      expect(Object.keys(index!.mirrors)).toEqual(["emp1.samples.json", "emp2.samples.json", "emp3.samples.json"]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});

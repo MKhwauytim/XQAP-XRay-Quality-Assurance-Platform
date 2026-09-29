@@ -507,9 +507,11 @@ export async function syncSampleMirrors(
       entries,
     };
   };
-  const plans = new Map<string, { username: string; mirror: EmployeeSamplesFile; plan: Plan }>();
-  await Promise.all(
-    [...entriesByEmployee.entries()].map(async ([username, entries]) => {
+  type Planned = { username: string; mirror: EmployeeSamplesFile; plan: Plan };
+  // Collected in `entriesByEmployee` order, NOT in hash-completion order: the order
+  // decides the key order of `_index.json`, which must be deterministic.
+  const planned: Array<[string, Planned]> = await Promise.all(
+    [...entriesByEmployee.entries()].map(async ([username, entries]): Promise<[string, Planned]> => {
       const fileName = employeeSamplesFileName(username);
       // Monotonic guard, ordered (revision, deriveVersion) — the two axes are
       // NOT interchangeable and must be tested in this order:
@@ -530,8 +532,7 @@ export async function syncSampleMirrors(
       const mirror = buildMirror(username, entries);
       if (existingRevision !== null) {
         if (existingRevision > sourceLogRevision) {
-          plans.set(fileName, { username, mirror, plan: { kind: "keep" } });
-          return;
+          return [fileName, { username, mirror, plan: { kind: "keep" } }];
         }
         if (
           existingRevision === sourceLogRevision &&
@@ -542,8 +543,7 @@ export async function syncSampleMirrors(
           // eventSetId cannot say, and keeps the old skip.
           (eventSetId === undefined || existing?.eventSetId === eventSetId)
         ) {
-          plans.set(fileName, { username, mirror, plan: { kind: "keep" } }); // same data, and their derivation is no older than ours
-          return;
+          return [fileName, { username, mirror, plan: { kind: "keep" } }]; // same data, and their derivation is no older than ours
         }
       }
       const contentHash = await mirrorContentHash(mirror);
@@ -558,12 +558,12 @@ export async function syncSampleMirrors(
         existingRevision !== null &&
         existing.deriveVersion === deriveVersion
       ) {
-        plans.set(fileName, { username, mirror, plan: { kind: "restamp", contentHash } });
-        return;
+        return [fileName, { username, mirror, plan: { kind: "restamp", contentHash } }];
       }
-      plans.set(fileName, { username, mirror, plan: { kind: "write", contentHash } });
+      return [fileName, { username, mirror, plan: { kind: "write", contentHash } }];
     })
   );
+  const plans = new Map(planned);
   const writes = [...plans.entries()].filter(([, p]) => p.plan.kind === "write");
 
   // Phase 1 of the index write: mark the projection in flight BEFORE any mirror
@@ -587,27 +587,19 @@ export async function syncSampleMirrors(
   /** File name -> the revision that will be on disk when this run finishes. */
   const finalRevisions = new Map<string, ExistingMirror>(existingMirrors);
 
-  await mapWithConcurrency(writes, MIRROR_WRITE_CONCURRENCY, async ([fileName, { username, mirror, plan }]) => {
+  await mapWithConcurrency(writes, MIRROR_WRITE_CONCURRENCY, async ([fileName, { mirror }]) => {
     await safeWriteJson<EmployeeSamplesFile>(employeesDir, fileName, mirror);
-    finalRevisions.set(fileName, {
-      username,
-      sourceLogRevision,
-      deriveVersion,
-      ...(eventSetId === undefined ? {} : { eventSetId }),
-      ...(plan.kind === "write" && plan.contentHash !== undefined && scan !== undefined
-        ? { contentHash: plan.contentHash, scan }
-        : {}),
-    });
   });
+  // Recorded in plan order (deterministic `_index.json` key order), after the writes.
   for (const [fileName, { username, plan }] of plans) {
-    if (plan.kind !== "restamp" || scan === undefined) continue;
+    if (plan.kind === "keep") continue;
+    if (plan.kind === "restamp" && scan === undefined) continue;
     finalRevisions.set(fileName, {
       username,
       sourceLogRevision,
       deriveVersion,
       ...(eventSetId === undefined ? {} : { eventSetId }),
-      contentHash: plan.contentHash,
-      scan,
+      ...(plan.contentHash !== undefined && scan !== undefined ? { contentHash: plan.contentHash, scan } : {}),
     });
   }
 
