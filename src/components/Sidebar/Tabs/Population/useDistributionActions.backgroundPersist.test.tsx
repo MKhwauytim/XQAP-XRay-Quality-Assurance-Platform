@@ -51,14 +51,18 @@ afterEach(async () => {
 // ── a share whose DERIVED-file writes can be held open, and that logs them ──
 /** Names of the DERIVED files a click may not wait on. */
 const DERIVED = /^(distribution\.current\.json|distribution\.checkpoint\.json|_index\.json|.+\.samples\.json)$/;
-type Gate = { writes: string[]; hold: boolean; waiters: Array<() => void>; release(): void };
+/** The compatibility projection (R3): held separately, so the R1 tests keep meaning what they say. */
+const PROJECTION = /^distribution\.log\.json$/;
+type Gate = { writes: string[]; hold: boolean; holdProjection: boolean; waiters: Array<() => void>; release(): void };
 function makeGate(): Gate {
   const gate: Gate = {
     writes: [],
     hold: false,
+    holdProjection: false,
     waiters: [],
     release() {
       gate.hold = false;
+      gate.holdProjection = false;
       for (const w of gate.waiters.splice(0)) w();
     },
   };
@@ -72,6 +76,8 @@ function gatedFile(fh: FileHandleLike, gate: Gate): FileHandleLike {
       if (DERIVED.test(fh.name)) {
         gate.writes.push(fh.name);
         if (gate.hold) await new Promise<void>((resolve) => gate.waiters.push(resolve));
+      } else if (PROJECTION.test(fh.name) && gate.holdProjection) {
+        await new Promise<void>((resolve) => gate.waiters.push(resolve));
       }
       return create();
     };
@@ -315,5 +321,39 @@ describe("R1: cache, sidecar and mirrors persist off the click path", () => {
     gate.release();
     await flushPersist();
     expect(DS.isDistributionPersistPending(dir, MONTH)).toBe(false);
+  });
+});
+
+describe("R3: the distribution.log.json projection is off the click path", () => {
+  it("a single-row reassign resolves while the projection write is held open, and it still lands once released", async () => {
+    const dir = await setupWorkspace();
+    const hook = renderActions(dir);
+    await distribute(hook);
+    const before = (await DS.readDistributionLogStamp(dir, MONTH)).revision;
+
+    gate.holdProjection = true;
+    let resolved = false;
+    await act(async () => {
+      resolved = await Promise.race([
+        hook.result.current.handleReassign(ROW_IDS[0]!, "hihaloraini").then(() => true),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1_500)),
+      ]);
+    });
+    expect(resolved).toBe(true);
+    // Painted from the in-memory derive of (pre-append log + the event).
+    expect(hook.result.current.distributionCurrent?.entries.find((e) => e.xrayImageId === ROW_IDS[0])?.assignedTo).toBe(
+      "hihaloraini"
+    );
+    expect(DS.isDistributionProjectionPending(dir, MONTH)).toBe(true);
+    expect((await DS.readDistributionLogStamp(dir, MONTH)).revision).toBe(before); // bump not landed yet
+
+    gate.release();
+    await flushPersist();
+    expect((await DS.readDistributionLogStamp(dir, MONTH)).revision).toBe(before + 1); // semantics unchanged
+    // The background rebuild stamped the mirrors from a fresh read: trusted, not merely painted.
+    const stamp = await DS.readDistributionLogStamp(dir, MONTH);
+    const mirror = await loadEmployeeSampleMirror(dir, MONTH, "hihaloraini");
+    expect(mirror!.entries.some((e) => e.xrayImageId === ROW_IDS[0])).toBe(true);
+    expect(await isMirrorTrustedForEvents(dir, MONTH, mirror!, stamp.revision)).toBe(true);
   });
 });
