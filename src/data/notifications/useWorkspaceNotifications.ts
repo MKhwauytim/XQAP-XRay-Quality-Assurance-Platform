@@ -50,37 +50,46 @@ export function useWorkspaceNotifications(
   // 60 s poll, the focus event and every broadcast used to queue up behind each other.
   const inFlightRef = useRef(false);
   const againRef = useRef(false);
+  // Bumped whenever the workspace or user changes. A loop that started under an older
+  // generation may not loop again, clear the shared flags or set state.
+  const generationRef = useRef(0);
   const reload = useCallback(async () => {
     if (!directoryHandle || !audience) return;
     if (inFlightRef.current) {
       againRef.current = true;
       return;
     }
+    const generation = generationRef.current;
     inFlightRef.current = true;
     try {
       do {
         againRef.current = false;
         try {
-          setNotifications(await loadNotifications(directoryHandle, { forUsername: username }));
+          const list = await loadNotifications(directoryHandle, { forUsername: username });
+          if (generation === generationRef.current) setNotifications(list);
         } catch {
           // Best-effort: a failed poll just leaves the last-known list in place.
         }
-      } while (againRef.current);
+      } while (againRef.current && generation === generationRef.current);
     } finally {
-      inFlightRef.current = false;
+      if (generation === generationRef.current) inFlightRef.current = false;
     }
   }, [directoryHandle, audience, username]);
 
   useEffect(() => {
     if (!audience || !directoryHandle) return;
-    // A different workspace or user starts with a clean slate: a reload still in flight
-    // for the OLD closure must not swallow this one's requests.
+    // A different workspace or user starts a NEW generation with a clean slate: the loop
+    // still in flight for the old one is fenced off (see `generationRef`).
+    generationRef.current += 1;
+    const generation = generationRef.current;
     inFlightRef.current = false;
     againRef.current = false;
     // Initial load via promise-chain (not `void reload()`) so setState lands in
     // a `.then` callback, not synchronously in the effect body.
     loadNotifications(directoryHandle, { forUsername: username })
-      .then(setNotifications)
+      .then((list) => {
+        if (generation === generationRef.current) setNotifications(list);
+      })
       .catch(logRejection("workspaceNotifications:loadNotifications"));
     const onFocus = () => void reload();
     window.addEventListener("focus", onFocus);
