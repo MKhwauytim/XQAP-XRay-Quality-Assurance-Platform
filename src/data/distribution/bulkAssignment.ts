@@ -128,6 +128,33 @@ function rebalanceTowardMonthTargets(params: {
 }
 
 /**
+ * A3: live rows each employee already owns, per stage and in total. Owned =
+ * `existingEntries` not `replaced`, located in a stage through the full
+ * `rows` list (the assignable list no longer contains them). Rows in an
+ * unmapped stage are ignored — no target exists for them.
+ */
+function collectOwnedRowsByStage(
+  rows: PreparedPopulationRow[],
+  existingEntries: DistributionEntry[] | undefined,
+  stageMappings: StageAliasMappings | undefined
+): { ownedByStage: Map<string, Map<string, number>>; ownedTotals: Map<string, number> } {
+  const ownedByStage = new Map<string, Map<string, number>>();
+  const ownedTotals = new Map<string, number>();
+  if (!existingEntries || existingEntries.length === 0) return { ownedByStage, ownedTotals };
+  const stageOfRow = new Map(rows.map((r) => [r.xrayImageId, getStageKey(r.stage, stageMappings)]));
+  for (const entry of existingEntries) {
+    if (entry.status === "replaced") continue;
+    const stage = stageOfRow.get(entry.xrayImageId);
+    if (!stage || stage === "unknown") continue;
+    const perStage = ownedByStage.get(stage) ?? new Map<string, number>();
+    perStage.set(entry.assignedTo, (perStage.get(entry.assignedTo) ?? 0) + 1);
+    ownedByStage.set(stage, perStage);
+    ownedTotals.set(entry.assignedTo, (ownedTotals.get(entry.assignedTo) ?? 0) + 1);
+  }
+  return { ownedByStage, ownedTotals };
+}
+
+/**
  * F10 (controller ruling 2026-09-28): the stage/port loop below stamps
  * `dailyQuota` on one event per employee per group (a stage, or a
  * stage-port pair once a restriction is active) — see `assignWithinGroup`
@@ -415,6 +442,11 @@ export function calculateBulkAssignment(params: {
   // allocated in each stage — filled by the restricted branch below only.
   const monthTargets = new Map<string, number>();
   const stageUsernames = new Map<string, Set<string>>();
+  // A3: live rows each employee already owns (per stage and overall) —
+  // restricted mode only, so an unrestricted run stays byte-identical.
+  const { ownedByStage, ownedTotals } = anyPortRestricted
+    ? collectOwnedRowsByStage(rows, existingEntries, stageMappings)
+    : { ownedByStage: new Map<string, Map<string, number>>(), ownedTotals: new Map<string, number>() };
   // A3/F10: eventId → group key ("stageKey" or "stageKey - portKey"), recorded
   // at generation time for every event so a post-rebalance restamp can find
   // each stamped event's original group even after ownership moves.
@@ -477,17 +509,23 @@ export function calculateBulkAssignment(params: {
     // stage happens to be split into ports. A3: these per-stage targets are
     // also summed into `monthTargets` for the cross-stage rebalance after
     // the loop.
+    // A3: the target is over unassigned + already-owned rows of the stage, so
+    // a re-run aims at the same equal totals a first run would have.
+    const ownedInStage = ownedByStage.get(stageKey) ?? new Map<string, number>();
+    const ownedInStageCount = [...ownedInStage.values()].reduce((sum, n) => sum + n, 0);
     const stageTarget = new Map(
       hamiltonApportionment(
         stageAllocs.map((a) => ({ key: a.username, size: allocWeight(a) })),
-        stageRows.length
+        stageRows.length + ownedInStageCount
       ).map((q) => [q.key, q.allocated])
     );
     for (const [username, target] of stageTarget) {
       monthTargets.set(username, (monthTargets.get(username) ?? 0) + target);
     }
     stageUsernames.set(stageKey, new Set(stageAllocs.map((a) => a.username)));
-    const remainingNeed = new Map(stageTarget);
+    const remainingNeed = new Map(
+      [...stageTarget].map(([username, target]) => [username, Math.max(0, target - (ownedInStage.get(username) ?? 0))])
+    );
 
     // Ports are visited most-constrained-first (fewest eligible employees),
     // purely to fix processing order deterministically — the fairness work
@@ -601,7 +639,7 @@ export function calculateBulkAssignment(params: {
     if (!isPortEligible(username, normalizePortName(target.portName), portRestrictions)) return false;
     return target.certScanStatus !== "Certscan" || licensed.has(username);
   };
-  const balanced = rebalanceTowardMonthTargets({ events, targets: monthTargets, owned: new Map(), canTake });
+  const balanced = rebalanceTowardMonthTargets({ events, targets: monthTargets, owned: ownedTotals, canTake });
   const restamped = restampDailyQuota(balanced, eventGroupKey);
   return { events: restamped, errors, skipped, unmapped };
 }

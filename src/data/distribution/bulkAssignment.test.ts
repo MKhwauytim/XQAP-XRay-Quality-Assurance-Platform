@@ -786,3 +786,35 @@ test("A3 + F10 (fix round 1): the stamped event's dailyQuota is restamped to eac
   expect(aStamped[0]!.dailyQuota).toBe(Math.ceil(80 / daysRemaining));
   expect(aStamped[0]!.dailyQuota).not.toBe(Math.ceil(100 / daysRemaining));
 });
+
+test("A3: a re-run with prior ownership balances the unassigned rows toward equal totals", () => {
+  const rows: PreparedPopulationRow[] = Array.from({ length: 400 }, (_, i) =>
+    makeRow(`r-${i}`, "SECOND_STAGE", "NonCertscan", "port-P")
+  );
+  const allocations: EmployeeStageAllocation[] = ["a", "b", "c", "d"].map((username) => ({
+    username,
+    stageKey: "second",
+    method: "percentage",
+    value: 25,
+    isActive: true,
+  }));
+  const employees = ["a", "b", "c", "d"].map((username) => makeUser(username, "employee"));
+  // A restriction that excludes nothing still switches on restricted mode.
+  const portRestrictions: EmployeePortRestriction[] = [{ username: "d", restricted: true, enabledPorts: ["port-P"] }];
+  const existingEntries: DistributionEntry[] = rows.slice(0, 100).map((r) => ({
+    xrayImageId: r.xrayImageId,
+    assignedTo: "a",
+    assignedBy: "test",
+    assignedAt: "2026-09-01T00:00:00.000Z",
+    status: "assigned",
+    row: r,
+  } as unknown as DistributionEntry));
+
+  const result = calculateBulkAssignment({ rows, allocations, employees, operatorUsername: "test", portRestrictions, existingEntries });
+
+  expect(result.skipped).toBe(100);
+  const fresh = new Map<string, number>();
+  for (const e of result.events) fresh.set(e.assignedTo, (fresh.get(e.assignedTo) ?? 0) + 1);
+  expect(fresh.get("a") ?? 0).toBe(0);
+  for (const username of ["b", "c", "d"]) expect(fresh.get(username)).toBe(100);
+});
