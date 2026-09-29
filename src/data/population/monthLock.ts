@@ -64,6 +64,14 @@ export class MonthClosedError extends Error {
 
 let cacheTtlMs = DEFAULT_CACHE_TTL_MS;
 const cache = new Map<string, { closed: boolean; at: number }>();
+/**
+ * Bumped by every invalidation. A read remembers the value it started under and
+ * only caches its verdict if nothing invalidated meanwhile: otherwise a read that
+ * began before `closeMonth`'s commit could finish after the invalidation and
+ * re-cache "open" for the whole TTL, keeping this tab's write gate open on a
+ * month that is now closed.
+ */
+let invalidationGeneration = 0;
 
 /** @internal — test-only. Override the closed-state cache TTL. */
 export function __setMonthLockTtlForTests(ms: number): void {
@@ -77,6 +85,7 @@ export function __resetMonthLockTtlForTests(): void {
 
 /** Drop the cached closed-state for one month (or all months when omitted). */
 export function invalidateMonthLockCache(monthFolderName?: string): void {
+  invalidationGeneration += 1;
   if (monthFolderName === undefined) {
     cache.clear();
   } else {
@@ -122,9 +131,10 @@ export async function isMonthClosed(
   if (hit && now - hit.at < cacheTtlMs) {
     return hit.closed;
   }
+  const generation = invalidationGeneration;
   const manifest = await readManifest(directoryHandle, monthFolderName);
   const closed = manifest?.status === "closed";
-  cache.set(monthFolderName, { closed, at: now });
+  if (generation === invalidationGeneration) cache.set(monthFolderName, { closed, at: now });
   return closed;
 }
 
