@@ -270,7 +270,7 @@ export default function PhaseFourDistribution({
       names: shortfalls
         .map((s) => fillTemplate(L.p4_bulk_target_shortfall_item, {
           name: employees.find((e) => e.username === s.username)?.displayName ?? s.username,
-          allowed: formatNumber(s.allowed),
+          achieved: formatNumber(s.achieved),
           target: formatNumber(s.target),
         }))
         .join("، "),
@@ -474,7 +474,7 @@ export default function PhaseFourDistribution({
       return;
     }
     setBulkError("");
-    const { events, errors, skipped, unmapped, targetShortfalls } = calculateBulkAssignment({
+    const { events, errors, skipped, unmapped } = calculateBulkAssignment({
       rows: sampleRows,
       allocations: activeAllocations,
       employees: getManagedLoginUsers(),
@@ -504,7 +504,7 @@ export default function PhaseFourDistribution({
         : L.p4_bulk_unmapped_warning;
       messages.push(template.replace("{count}", formatNumber(unmapped.count)));
     }
-    if (targetShortfalls.length > 0) messages.push(shortfallText(targetShortfalls));
+    // The shortfall warning is NOT repeated here: the preview alert already shows it.
     if (messages.length > 0) {
       setBulkError(messages.join(" "));
     }

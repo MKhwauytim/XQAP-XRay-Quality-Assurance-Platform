@@ -787,6 +787,20 @@ test("A3 + F10 (fix round 1): the stamped event's dailyQuota is restamped to eac
   expect(aStamped[0]!.dailyQuota).not.toBe(Math.ceil(100 / daysRemaining));
 });
 
+function ownedEntry(row: PreparedPopulationRow, username: string, status: DistributionEntry["status"] = "pending"): DistributionEntry {
+  return { xrayImageId: row.xrayImageId, assignedTo: username, status, row, replacedById: null, lastEventAt: "" };
+}
+
+function equalAllocations(stageKey: EmployeeStageAllocation["stageKey"], usernames: string[]): EmployeeStageAllocation[] {
+  return usernames.map((username) => ({ username, stageKey, method: "percentage", value: 100 / usernames.length, isActive: true }));
+}
+
+function freshCounts(events: { assignedTo: string }[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const e of events) counts.set(e.assignedTo, (counts.get(e.assignedTo) ?? 0) + 1);
+  return counts;
+}
+
 test("A3: a re-run with prior ownership balances the unassigned rows toward equal totals", () => {
   const rows: PreparedPopulationRow[] = Array.from({ length: 400 }, (_, i) =>
     makeRow(`r-${i}`, "SECOND_STAGE", "NonCertscan", "port-P")
@@ -801,14 +815,7 @@ test("A3: a re-run with prior ownership balances the unassigned rows toward equa
   const employees = ["a", "b", "c", "d"].map((username) => makeUser(username, "employee"));
   // A restriction that excludes nothing still switches on restricted mode.
   const portRestrictions: EmployeePortRestriction[] = [{ username: "d", restricted: true, enabledPorts: ["port-P"] }];
-  const existingEntries: DistributionEntry[] = rows.slice(0, 100).map((r) => ({
-    xrayImageId: r.xrayImageId,
-    assignedTo: "a",
-    assignedBy: "test",
-    assignedAt: "2026-09-01T00:00:00.000Z",
-    status: "assigned",
-    row: r,
-  } as unknown as DistributionEntry));
+  const existingEntries = rows.slice(0, 100).map((r) => ownedEntry(r, "a"));
 
   const result = calculateBulkAssignment({ rows, allocations, employees, operatorUsername: "test", portRestrictions, existingEntries });
 
@@ -819,7 +826,7 @@ test("A3: a re-run with prior ownership balances the unassigned rows toward equa
   for (const username of ["b", "c", "d"]) expect(fresh.get(username)).toBe(100);
 });
 
-test("A3: reports an employee whose allowed rows cannot reach their target", () => {
+test("A3: reports an employee whose final total falls short of their target", () => {
   const rows: PreparedPopulationRow[] = [
     ...Array.from({ length: 900 }, (_, i) => makeRow(`big-${i}`, "SECOND_STAGE", "NonCertscan", "port-big")),
     ...Array.from({ length: 100 }, (_, i) => makeRow(`small-${i}`, "SECOND_STAGE", "NonCertscan", "port-small")),
@@ -836,7 +843,7 @@ test("A3: reports an employee whose allowed rows cannot reach their target", () 
 
   const result = calculateBulkAssignment({ rows, allocations, employees, operatorUsername: "test", portRestrictions });
 
-  expect(result.targetShortfalls).toEqual([{ username: "d", target: 250, allowed: 100 }]);
+  expect(result.targetShortfalls).toEqual([{ username: "d", target: 250, achieved: 100 }]);
 });
 
 test("A3: no shortfall report without port restrictions", () => {
@@ -848,4 +855,88 @@ test("A3: no shortfall report without port restrictions", () => {
     operatorUsername: "test",
   });
   expect(result.targetShortfalls).toEqual([]);
+});
+
+test("A3: the cross-stage rebalance counts rows an employee already owns (owned totals reach the rebalance)", () => {
+  const stage1 = Array.from({ length: 100 }, (_, i) => makeRow(`s1-${i}`, "FIRST_STAGE", "NonCertscan", "port-P"));
+  const stage2 = Array.from({ length: 100 }, (_, i) => makeRow(`s2-${i}`, "SECOND_STAGE", "NonCertscan", "port-P"));
+  const users = ["a", "b", "c", "d"];
+  const result = calculateBulkAssignment({
+    rows: [...stage1, ...stage2],
+    allocations: [...equalAllocations("first", users), ...equalAllocations("second", users)],
+    employees: users.map((username) => makeUser(username, "employee")),
+    operatorUsername: "test",
+    portRestrictions: [{ username: "d", restricted: true, enabledPorts: ["port-P"] }],
+    // "a" already owns 40 stage-1 rows from an earlier run.
+    existingEntries: stage1.slice(0, 40).map((r) => ownedEntry(r, "a")),
+  });
+
+  // Month target 200 / 4 = 50 each. "a" owns 40, so only 10 more; b, c, d take 50 new each.
+  const fresh = freshCounts(result.events);
+  expect(fresh.get("a")).toBe(10);
+  for (const username of ["b", "c", "d"]) expect(fresh.get(username)).toBe(50);
+  expect(result.targetShortfalls).toEqual([]);
+});
+
+test("A3: a replaced entry does not count toward its owner's target", () => {
+  const rows = Array.from({ length: 400 }, (_, i) => makeRow(`r-${i}`, "SECOND_STAGE", "NonCertscan", "port-P"));
+  const users = ["a", "b", "c", "d"];
+  const result = calculateBulkAssignment({
+    rows,
+    allocations: equalAllocations("second", users),
+    employees: users.map((username) => makeUser(username, "employee")),
+    operatorUsername: "test",
+    portRestrictions: [{ username: "d", restricted: true, enabledPorts: ["port-P"] }],
+    existingEntries: rows.slice(0, 100).map((r) => ownedEntry(r, "a", "replaced")),
+  });
+
+  // The 100 replaced rows stay skipped but are nobody's: 300 rows over 4 = 75 each, "a" included.
+  expect(result.skipped).toBe(100);
+  const fresh = freshCounts(result.events);
+  for (const username of users) expect(fresh.get(username)).toBe(75);
+});
+
+test("A3: reports everyone left short when one employee already owned more than their target", () => {
+  const rows = Array.from({ length: 400 }, (_, i) => makeRow(`r-${i}`, "SECOND_STAGE", "NonCertscan", "port-P"));
+  const users = ["a", "b", "c", "d"];
+  const result = calculateBulkAssignment({
+    rows,
+    allocations: equalAllocations("second", users),
+    employees: users.map((username) => makeUser(username, "employee")),
+    operatorUsername: "test",
+    portRestrictions: [{ username: "d", restricted: true, enabledPorts: ["port-P"] }],
+    existingEntries: rows.slice(0, 200).map((r) => ownedEntry(r, "a")),
+  });
+
+  // "a" owns 200 against a target of 100, so b, c, d share the remaining 200 rows (67/67/66) and all miss 100.
+  expect(result.targetShortfalls.map((s) => s.username)).toEqual(["b", "c", "d"]);
+  for (const s of result.targetShortfalls) {
+    expect(s.target).toBe(100);
+    expect(s.achieved).toBeLessThan(100);
+  }
+  expect(result.targetShortfalls.reduce((sum, s) => sum + s.achieved, 0)).toBe(200);
+});
+
+test("A3: reports two restricted employees who share one small port", () => {
+  const rows = [
+    ...Array.from({ length: 900 }, (_, i) => makeRow(`big-${i}`, "SECOND_STAGE", "NonCertscan", "port-big")),
+    ...Array.from({ length: 100 }, (_, i) => makeRow(`small-${i}`, "SECOND_STAGE", "NonCertscan", "port-small")),
+  ];
+  const users = ["a", "b", "c", "d", "e"];
+  const result = calculateBulkAssignment({
+    rows,
+    allocations: equalAllocations("second", users),
+    employees: users.map((username) => makeUser(username, "employee")),
+    operatorUsername: "test",
+    portRestrictions: [
+      { username: "d", restricted: true, enabledPorts: ["port-small"] },
+      { username: "e", restricted: true, enabledPorts: ["port-small"] },
+    ],
+  });
+
+  // Each target is 200, but d and e can only split the 100 small-port rows: 50 each. Per-employee capacity (100) would have missed that.
+  expect(result.targetShortfalls).toEqual([
+    { username: "d", target: 200, achieved: 50 },
+    { username: "e", target: 200, achieved: 50 },
+  ]);
 });
