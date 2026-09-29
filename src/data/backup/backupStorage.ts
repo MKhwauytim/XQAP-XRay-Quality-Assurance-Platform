@@ -16,6 +16,13 @@ import {
 } from "../distribution/distributionStorage";
 import type { DistributionCurrentData, DistributionEvent } from "../distribution/distributionTypes";
 import { RESTORE_INPROGRESS_FILE } from "./restoreSentinel";
+import {
+  isDirectoryInRestoreScope,
+  isFileInRestoreScope,
+  validateRestoreScope,
+  type RestoreScope,
+} from "./restoreScope";
+import { getLabels } from "../labels/labelsStore";
 import type { MonthFolderInfo } from "../population/monthFolder";
 import type { MonthManifestData, MonthRawData, PopulationFinalData } from "../population/monthTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
@@ -960,6 +967,12 @@ async function collectJsonRestoreEntries(params: {
   cacheDir: DirectoryHandleLike | null;
   /** Inherited from the `*.events/` directory's own NAME; null everywhere else. */
   eventsDirName: string | null;
+  /**
+   * Workstream D: when non-null, only what the selective-restore catalog
+   * (restoreScope.ts) places inside this scope is walked. A pruned directory is
+   * never created on the target side. `null` is the full restore, unchanged.
+   */
+  scope: RestoreScope | null;
 }): Promise<{ pending: PendingJsonRestore[]; skippedPaths: string[] }> {
   const pending: PendingJsonRestore[] = [];
   const skippedPaths: string[] = [];
@@ -967,6 +980,7 @@ async function collectJsonRestoreEntries(params: {
   for (const entry of await collectEntries(params.sourceDir)) {
     if (entry.kind === "directory") {
       const relativePath = params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name;
+      if (params.scope && !isDirectoryInRestoreScope(relativePath, params.scope)) continue;
       const sourceChild = await tryGetDirectory(params.sourceDir, entry.name);
       if (!sourceChild) {
         skippedPaths.push(relativePath);
@@ -989,6 +1003,7 @@ async function collectJsonRestoreEntries(params: {
         sourcePath: relativePath,
         cacheDir: isEventsDir ? params.targetDir : params.cacheDir,
         eventsDirName: isEventsDir ? entry.name : params.eventsDirName,
+        scope: params.scope,
       });
       pending.push(...nested.pending);
       skippedPaths.push(...nested.skippedPaths);
@@ -996,6 +1011,8 @@ async function collectJsonRestoreEntries(params: {
     }
 
     if (entry.kind !== "file" || !isSnapshotPayloadFile(entry.name)) continue;
+    const fileRelativePath = params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name;
+    if (params.scope && !isFileInRestoreScope(fileRelativePath, params.scope)) continue;
     const action = restoreActionFor(entry.name);
     // Dropped at collection time rather than in the executor: a derived cache is
     // not a restore that "failed", so it must not reach the pending list at all
@@ -1173,6 +1190,8 @@ async function restoreJsonTree(params: {
    *  collectJsonRestoreEntries' skippedPaths (F1) — a subdirectory that could
    *  not be reached during the restore walk. */
   skipped: string[];
+  /** Workstream D — absent means the full restore, byte-for-byte unchanged. */
+  scope?: RestoreScope;
 }): Promise<void> {
   const { pending, skippedPaths } = await collectJsonRestoreEntries({
     sourceDir: params.sourceDir,
@@ -1180,6 +1199,7 @@ async function restoreJsonTree(params: {
     sourcePath: params.sourcePath,
     cacheDir: null,
     eventsDirName: null,
+    scope: params.scope ?? null,
   });
   params.skipped.push(...skippedPaths);
 
@@ -1791,6 +1811,12 @@ export async function restoreBackupSnapshot(params: {
   months: MonthFolderInfo[];
   backupFolderName: string;
   username: string;
+  /**
+   * Workstream D selective restore: only these elements × months are put
+   * back. Absent = the full restore, unchanged. The rollback backup is always
+   * a FULL backup and the sentinel contract is identical either way.
+   */
+  scope?: RestoreScope;
 }): Promise<RestoreResult> {
   try {
     // Restoring is the highest-stakes write in the app (it overwrites the live
@@ -1804,6 +1830,12 @@ export async function restoreBackupSnapshot(params: {
       // merge-events semantics a truncated segment set would be quietly merged
       // in as if it were the full history.
       await assertBackupComplete(sourceBackupDir, params.backupFolderName);
+      // Workstream D: an unusable scope is refused BEFORE the rollback backup
+      // and the sentinel — nothing has been touched, so there is nothing to
+      // roll back and nothing to flag as interrupted.
+      if (params.scope && validateRestoreScope(params.scope) !== null) {
+        return { ok: false, error: getLabels().restore_scope_invalid };
+      }
       const jsonDir = await sourceBackupDir.getDirectoryHandle("json", { create: false });
       const rollback = await createBackup(params.directoryHandle, params.months, params.username, "pre-restore");
       if (!rollback.ok) {
@@ -1832,6 +1864,7 @@ export async function restoreBackupSnapshot(params: {
         sourcePath: "",
         restored,
         skipped,
+        scope: params.scope,
       });
 
       // F1: a subdirectory that collectJsonRestoreEntries could not reach
