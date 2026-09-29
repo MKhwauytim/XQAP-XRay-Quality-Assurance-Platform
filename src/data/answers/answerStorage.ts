@@ -1000,20 +1000,28 @@ async function retryDecisionRead<T>(deadline: OperationDeadline, step: () => Pro
  * colleague's very latest event; that only affects the local mirror's history
  * fields, which `backfillAnswerMirror` refreshes from disk.
  */
-function decideFromSeededCache(
+async function decideFromSeededCache(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   username: string,
   xrayImageId: string,
   build: (ctx: { previous: ItemAnswer | undefined }) => AnswerWriteDecision
-): { previous: ItemAnswer | undefined; decision: AnswerWriteDecision } | null {
-  const legacySeed = getLegacySeedMemo(directoryHandle, monthFolderName, username);
-  if (!legacySeed) return null;
+): Promise<{ previous: ItemAnswer | undefined; decision: AnswerWriteDecision } | null> {
   const entry = getAnswerEventsCacheEntry(directoryHandle, monthFolderName);
   if (!entry) return null;
   const ownEvents = eventsForEmployee([...entry.events.values()], username);
   if (!ownEvents.some((event) => event.eventType === "migration-seed")) return null;
   try {
+    let legacySeed = getLegacySeedMemo(directoryHandle, monthFolderName, username);
+    if (!legacySeed) {
+      // The cache already proves the employee is seeded (typically warmed by the queue
+      // view's own load), so the month need not be re-read; only the frozen legacy seed
+      // is missing. Read it once (4 ops), memoizing only a FOUND file (never absent/failed).
+      const legacy = await loadLegacyAnswersFile(directoryHandle, monthFolderName, username);
+      if (legacy === null) return null;
+      legacySeed = { contentHash: legacyContentHashOf(legacy), items: legacy.items };
+      setLegacySeedMemo(directoryHandle, monthFolderName, username, legacySeed);
+    }
     const folded = foldEmployeeEvents(ownEvents, { legacySeed, username, monthFolderName });
     const previous = folded.file.items.find((item) => item.xrayImageId === xrayImageId);
     return { previous, decision: build({ previous }) };
@@ -1123,7 +1131,7 @@ async function performAnswerWrite(
         // skip the pre-append month read (one getFile per unsealed segment of
         // the whole month) -- see `decideFromSeededCache`. Null means "not
         // provably safe": fall through to the full read, exactly as before.
-        const cachedDecision = decideFromSeededCache(directoryHandle, monthFolderName, username, xrayImageId, build);
+        const cachedDecision = await decideFromSeededCache(directoryHandle, monthFolderName, username, xrayImageId, build);
         if (cachedDecision) return { mainDir, seedEvent: null, blind: true, ...cachedDecision };
       }
       const allEvents = await readAllAnswerEventsForMonth(directoryHandle, monthFolderName);

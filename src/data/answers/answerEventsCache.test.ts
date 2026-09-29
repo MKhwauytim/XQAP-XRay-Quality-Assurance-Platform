@@ -157,8 +157,10 @@ describe("cache eliminates redundant month-wide re-reads within one tab session"
     // only this tab's own segment is touched — once by the cache's own
     // incremental delta read, once by the append's unavoidable pre-write
     // existing-content read (see segmentReadFileOps's doc). Both are O(1),
-    // neither scales with the 5 seeded employees.
-    expect(secondCallOps).toBe(2);
+    // neither scales with the 5 seeded employees. (A5: the first save left a seed
+    // event in the cache, so this save is already a plain self-save and skips the
+    // incremental read too: only the append's own pre-write re-read remains.)
+    expect(secondCallOps).toBe(1);
     expect(secondCallOps).toBeLessThan(firstCallOps);
 
     clearOperationLog(dir);
@@ -202,11 +204,11 @@ describe("cache eliminates redundant month-wide re-reads within one tab session"
     // nothing) plus a small CONSTANT 2 per later call (calls 2-8: one
     // read-side op the cache makes incremental, one write-side op that always
     // fires on append and is unaffected by this cache either way) =
-    // 20 + 2 + 6*1 = 28 (A5: from the third call on the employee is known
+    // 20 + 7*1 = 27 (A5: from the second call on the employee is known
     // seeded, so the read-side op is skipped too and only the append's own
     // pre-write re-read remains) — versus the unfixed ~160+ that scales with
     // (calls * seeded team history).
-    expect(totalOps).toBe(28);
+    expect(totalOps).toBe(27);
   });
 });
 
@@ -290,7 +292,7 @@ describe("a genuinely stale cache is detected, never silently served as current"
     broadcastDataRefresh("periodic");
     clearOperationLog(dir);
     await upsertItemAnswer(dir, MONTH, EMPLOYEE, makeItem({ xrayImageId: "X2" }));
-    expect(segmentReadFileOps(dir)).toBe(2);
+    expect(segmentReadFileOps(dir)).toBe(1);
 
     // An explicit manual refresh (the admin toolbar button) DOES force a full
     // cold re-read on the next call — the one safety valve this cache relies

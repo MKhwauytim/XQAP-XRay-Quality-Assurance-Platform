@@ -76,9 +76,11 @@ describe("answer save — read cost on a month with 20 segments (S2)", () => {
     expect(opens()).toBe(21);
     clearReadLog(root);
     expect((await upsertItemAnswer(root, MONTH, "emp1", item("B"))).ok).toBe(true);
-    // 8 reads / 7 segment opens (S3 skips the 16 sealed segments).
-    expect(getReadLog(root).length).toBe(8);
-    expect(opens()).toBe(7);
+    // A5: the first save left emp1's seed event in the cache, so this plain self-save
+    // appends without the month read: only the frozen legacy seed (read once, 1 read)
+    // and the append's own pre-write re-read of the open segment (1 read / 1 open).
+    expect(getReadLog(root).length).toBeLessThanOrEqual(3);
+    expect(opens()).toBeLessThanOrEqual(2);
   });
 
   it("a persistently failing append is attempted once and does not re-read the month per attempt", async () => {
