@@ -1,6 +1,7 @@
 // C2: a row is CertScan when its port is flagged as a whole
 // (PopulationConfig.certScanPorts) OR its id matches the pasted CertScan
 // device list — a union. Unflagged ports keep today's list-only behaviour.
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { processPopulation } from "./populationProcessor";
 import type { NormalizedRiskRow, RiskWorkbookResult } from "../riskData/riskDataTypes";
@@ -128,3 +129,26 @@ describe("processPopulation — whole-port CertScan flags (C2)", () => {
     expect(result.summary.certScanRows).toBe(1);
   });
 });
+
+// Byte-identity guard: `preC2ProcessingSnapshot.json` is the full
+// processPopulation output for ROWS captured BEFORE certScanPorts existed
+// (empty paste and PASTE). An omitted or empty flag list must reproduce it
+// exactly, so the C2 change can never silently alter default processing.
+describe("processPopulation — default output is unchanged by C2", () => {
+  const pinned = JSON.parse(
+    readFileSync(new URL("./preC2ProcessingSnapshot.json", import.meta.url), "utf8")
+  ) as Record<string, unknown>;
+  const asPlainJson = (value: unknown): unknown => JSON.parse(JSON.stringify(value));
+
+  for (const [key, paste] of [["nopaste", ""], ["paste", PASTE]] as const) {
+    it(`omitted certScanPorts deep-equals [] and both equal the pre-C2 snapshot (${key})`, async () => {
+      const base = { riskWorkbookResult: workbook(ROWS), biWorkbookResult: null, certScanPasteText: paste };
+      const omitted = await processPopulation(base);
+      const empty = await processPopulation({ ...base, certScanPorts: [] });
+      expect(asPlainJson(omitted)).toEqual(asPlainJson(empty));
+      expect(asPlainJson(omitted)).toEqual(pinned[key]);
+      expect(asPlainJson(empty)).toEqual(pinned[key]);
+    });
+  }
+});
+
