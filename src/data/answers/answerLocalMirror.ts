@@ -99,9 +99,9 @@ function openMirrorDb(): Promise<IDBDatabase | null> {
   // Declared before the executor: `open` may throw synchronously (SecurityError,
   // opaque origin, blocked storage) BEFORE `promise` is assigned, and the handlers
   // below reference it.
-  let promise: Promise<IDBDatabase | null> | undefined;
+  const self: { promise?: Promise<IDBDatabase | null> } = {};
   let failedSynchronously = false;
-  promise = new Promise((resolve) => {
+  const promise: Promise<IDBDatabase | null> = new Promise((resolve) => {
     try {
       const request = factory.open(DB_NAME, DB_VERSION);
       request.onupgradeneeded = () => {
@@ -118,17 +118,17 @@ function openMirrorDb(): Promise<IDBDatabase | null> {
           } catch {
             // already closing
           }
-          dropConnection(promise);
+          dropConnection(self.promise);
         };
-        db.onclose = () => dropConnection(promise);
+        db.onclose = () => dropConnection(self.promise);
         resolve(db);
       };
       request.onerror = () => {
-        dropConnection(promise);
+        dropConnection(self.promise);
         resolve(null);
       };
       request.onblocked = () => {
-        dropConnection(promise);
+        dropConnection(self.promise);
         resolve(null);
       };
     } catch {
@@ -137,6 +137,7 @@ function openMirrorDb(): Promise<IDBDatabase | null> {
       resolve(null);
     }
   });
+  self.promise = promise;
   if (!failedSynchronously) connection = { factory, promise };
   return promise;
 }
