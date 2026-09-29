@@ -36,4 +36,25 @@ describe("month lock cache vs an in-flight read", () => {
 
     expect(await isMonthClosed(dir, MONTH)).toBe(true); // must re-read, not serve the stale cached "open"
   });
+
+  it("does not share a cached verdict between two workspaces that have the same month folder name", async () => {
+    const make = async (): Promise<ReturnType<typeof createMemoryDirectory>> => {
+      const d = createMemoryDirectory();
+      await saveMonthRun({
+        directoryHandle: d, month: 5, year: 2026, username: "admin", riskFileName: "r.xlsx", biFileName: null, certScanUsed: false,
+        riskRawRows: [{ id: "A1" }], biRawRows: [], processedRows: [{ xrayImageId: "A1", certScanStatus: "NonCertscan" }],
+        certScanRows: 0, nonCertScanRows: 1,
+      });
+      return d;
+    };
+    const open = await make();
+    const closed = await make();
+    const monthDir = await getPopulationMonthDir(closed, MONTH, false);
+    const manifest = await safeReadJson<MonthManifestData>(monthDir, "month.manifest.json");
+    if (!manifest.ok) throw new Error("no manifest");
+    await safeWriteJson(monthDir, "month.manifest.json", { ...manifest.value, status: "closed" });
+    invalidateMonthLockCache();
+    expect(await isMonthClosed(open, MONTH)).toBe(false);
+    expect(await isMonthClosed(closed, MONTH)).toBe(true);
+  });
 });

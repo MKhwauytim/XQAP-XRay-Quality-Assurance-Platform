@@ -1277,7 +1277,7 @@ export async function saveDistributionCurrent(
 type PersistRequest =
   | { kind: "snapshot"; current: DistributionCurrentData }
   | { kind: "rebuild"; sampleRows: PreparedPopulationRow[] };
-type QueuedPersist = { request: PersistRequest; started: boolean; job: Promise<void> };
+type QueuedPersist = { request: PersistRequest; started: boolean; job: Promise<DistributionCurrentData | null> };
 type PersistChain = { tail: Promise<unknown>; pending: number; queued: QueuedPersist | null };
 
 /** One serialized chain per (workspace, month): the cache, sidecar and mirrors are one target set. */
@@ -1358,7 +1358,7 @@ function enqueuePersist(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   request: PersistRequest
-): Promise<void> {
+): Promise<DistributionCurrentData | null> {
   const key = projectionChainKey(directoryHandle, monthFolderName);
   const chain = persistChains.get(key) ?? { tail: Promise.resolve(), pending: 0, queued: null };
   persistChains.set(key, chain);
@@ -1375,13 +1375,17 @@ function enqueuePersist(
   chain.pending += 1;
   const mine: QueuedPersist = { request, started: false, job: undefined as never };
   chain.queued = mine;
-  const job: Promise<void> = chain.tail.then(async () => {
+  const job: Promise<DistributionCurrentData | null> = chain.tail.then(async () => {
     mine.started = true;
     if (chain.queued === mine) chain.queued = null;
     const req = mine.request;
+    // The snapshot this job derived (or was handed), whether or not the write landed:
+    // callers that must decide from FRESH state (auto-lock) use it instead of re-reading.
+    let derived: DistributionCurrentData | null = req.kind === "snapshot" ? req.current : null;
     const attempt = async (): Promise<void> => {
       const current =
         req.kind === "snapshot" ? req.current : await rebuildCurrentFromEvents(directoryHandle, monthFolderName, req.sampleRows);
+      derived = current;
       if (current) await saveDistributionCurrent(directoryHandle, monthFolderName, current);
     };
     try {
@@ -1402,6 +1406,7 @@ function enqueuePersist(
         }
       }
     }
+    return derived;
   });
   mine.job = job;
   const settle = (): void => {
@@ -1431,7 +1436,7 @@ export function queueDistributionCurrentPersist(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   current: DistributionCurrentData
-): Promise<void> {
+): Promise<DistributionCurrentData | null> {
   return enqueuePersist(directoryHandle, monthFolderName, { kind: "snapshot", current });
 }
 
@@ -1449,7 +1454,7 @@ export function queueDistributionCacheRebuild(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   sampleRows: PreparedPopulationRow[]
-): Promise<void> {
+): Promise<DistributionCurrentData | null> {
   return enqueuePersist(directoryHandle, monthFolderName, { kind: "rebuild", sampleRows });
 }
 

@@ -17,7 +17,7 @@ import {
   flushPendingDistributionPersist,
   flushPendingDistributionProjectionWrites,
 } from "../../../../data/distribution/distributionStorage";
-import { buildReplacementRequestedEvent } from "../../../../data/distribution/distributionLog";
+import { buildCompletedEvent, buildReplacementRequestedEvent } from "../../../../data/distribution/distributionLog";
 import type { SampleMasterData } from "../../../../data/sampling/sampleTypes";
 import { useDistributionActions } from "./useDistributionActions";
 
@@ -118,5 +118,38 @@ describe("auto-lock decides from fresh state", () => {
     await new Promise((r) => setTimeout(r, 300)); // let a (wrong) fire-and-forget lock land
     expect(await isMonthClosed(dir, M)).toBe(false);
     await waitFor(() => expect(result.current.distributionMessage?.type).toBe("ok"));
+  });
+
+  it("locks the month when two people complete the last two rows at once and each painted state misses the other's event", async () => {
+    const { dir, hold } = holdable();
+    await saveMonthRun({
+      directoryHandle: dir, month: 5, year: 2026, username: "admin", riskFileName: "r.xlsx", biFileName: null, certScanUsed: false,
+      riskRawRows: [{ id: "A001" }, { id: "A002" }], biRawRows: [],
+      processedRows: [{ xrayImageId: "A001", certScanStatus: "NonCertscan" }, { xrayImageId: "A002", certScanStatus: "NonCertscan" }],
+      certScanRows: 0, nonCertScanRows: 2,
+    });
+    await saveSampleMaster(dir, M, sample());
+    const { result } = renderHook(() =>
+      useDistributionActions({
+        directoryHandle: dir, sampleDrawResult: sample(), saveMonth: 5, saveYear: 2026, canDistributeSamples: true,
+        canBulkAssign: true, currentUsername: "admin", currentRole: "admin", onDistributionChanged: () => {},
+      })
+    );
+    await act(async () => {
+      await result.current.handleAssign("A001", "jalgahamdi");
+      await result.current.handleAssign("A002", "jalgahamdi");
+    });
+    hold.armed = true;
+    let click!: Promise<void>;
+    await act(async () => {
+      click = result.current.handleMarkComplete("A002");
+      await hold.reached;
+      // The colleague completes A001 after this click's read: this tab's painted state shows A001 pending.
+      await appendDistributionEvents(dir, M, [buildCompletedEvent({ xrayImageId: "A001", assignedTo: "jalgahamdi", eventBy: "colleague" })]);
+      hold.release();
+      await click;
+    });
+    expect(result.current.distributionCurrent?.entries.find((e) => e.xrayImageId === "A001")?.status).toBe("pending"); // painted misses it
+    await waitFor(async () => expect(await isMonthClosed(dir, M)).toBe(true));
   });
 });

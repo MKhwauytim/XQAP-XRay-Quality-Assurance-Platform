@@ -11,7 +11,6 @@ import {
   loadDistributionLogLoad,
   type DistributionLogLoad,
   deriveStampedCurrent,
-  loadOrDeriveDistributionCurrent,
   queueDistributionCacheRebuild,
   queueDistributionCurrentPersist,
   type DistributionWriteProgress,
@@ -199,22 +198,18 @@ export function useDistributionActions(params: {
       : queueDistributionCurrentPersist(directoryHandle, monthFolderName, current);
     // Auto-lock runs only AFTER the persist has settled (a lock closes the month and
     // the persist's write gate would then refuse the final cache/mirror write), and it
-    // decides from FRESH state re-derived from the durable events, never from the
-    // painted `current`: that one omits an event a colleague appended between this
-    // click's read and its append, and locking on it could close a month with a row
-    // in flight. The cheap check on the painted state gates the extra read.
-    if (isFullyTerminal(current, sampleRows)) {
-      void persisted.then(async () => {
-        try {
-          const fresh = await loadOrDeriveDistributionCurrent(directoryHandle, monthFolderName, sampleRows, {
-            persistCache: false,
-          });
-          if (fresh) await autoLockWhenFullyDistributed(monthFolderName, fresh, sampleRows);
-        } catch (error) {
-          logError("population:auto-lock-month", error);
-        }
-      });
-    }
+    // decides from the FRESH state that job derived from the durable events, never from
+    // the painted `current`: that one omits an event a colleague appended between this
+    // click's read and its append, so locking on it could close a month with a row in
+    // flight, and requiring it to look terminal could skip a lock that two simultaneous
+    // last completions both missed.
+    void persisted.then(async (fresh) => {
+      try {
+        if (fresh) await autoLockWhenFullyDistributed(monthFolderName, fresh, sampleRows);
+      } catch (error) {
+        logError("population:auto-lock-month", error);
+      }
+    });
     onDistributionChanged();
   }
 
