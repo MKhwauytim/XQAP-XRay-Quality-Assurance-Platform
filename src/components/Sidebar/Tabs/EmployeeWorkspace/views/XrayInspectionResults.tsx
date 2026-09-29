@@ -65,8 +65,8 @@ import type { DirectoryHandleLike } from "../../../../../data/storage/fileSystem
 import { useLabels, type Labels } from "../../../../../data/labels/useLabels";
 import { useGlobalMonth } from "../../../../../data/month/useGlobalMonth";
 import { formatStageLabel } from "../../../../../data/population/stageHelpers";
-import { loadPopulationConfig } from "../../../../../data/population/populationConfig";
 import type { StageAliasMappings } from "../../../../../data/population/populationConfig";
+import { useWorkspaceStageMappings } from "../../../../../hooks/useWorkspaceStageMappings";
 
 const RESULTS_COL_KEY = "xray_inspection_results_cols_v1";
 const REFERRALS_PRESET_KEY = "xray-referrals";
@@ -225,9 +225,8 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
   // initial load and the 30s tick below — so it reflects the current
   // outcome of the latest retry rather than a stale count.
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
-  // C1: the workspace stage alias table, so a custom alias renders as its
-  // Arabic level label here exactly as it does in the referral queue.
-  const [stageMappings, setStageMappings] = useState<StageAliasMappings | undefined>(undefined);
+  // C1: the workspace stage alias table (shared hook with the referral queue).
+  const stageMappings = useWorkspaceStageMappings(directoryHandle);
 
   useEffect(() => {
     void Promise.all([
@@ -256,12 +255,6 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
       })
       .catch(logRejection("xrayInspectionResults:loadBrowsePresets"));
   }, [directoryHandle, sampleColumns, username]);
-
-  useEffect(() => {
-    void loadPopulationConfig(directoryHandle)
-      .then((config) => setStageMappings(config.stageMappings))
-      .catch(logRejection("xrayInspectionResults:loadPopulationConfig"));
-  }, [directoryHandle]);
 
   // No selected on-disk month (empty workspace or a pending new month) → empty, ready state.
   useEffect(() => {

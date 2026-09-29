@@ -43,7 +43,8 @@ import { submitReassignmentRequests } from "../../../../../data/referral/submitR
 import { isReassignEligible } from "../../../../../data/referral/planReassignment";
 import { appendWorkspaceAction, recordAction } from "../../../../../data/audit/actionLog";
 import type { ReplacementIndexRow } from "../../../../../data/population/replacementIndexTypes";
-import { loadPopulationConfig, type StageAliasMappings } from "../../../../../data/population/populationConfig";
+import type { StageAliasMappings } from "../../../../../data/population/populationConfig";
+import { useWorkspaceStageMappings } from "../../../../../hooks/useWorkspaceStageMappings";
 import { useGlobalMonth } from "../../../../../data/month/useGlobalMonth";
 import {
   loadSampleMaster,
@@ -890,7 +891,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const [templatesById, setTemplatesById] = useState<Map<string, TemplateSchema>>(new Map());
   const [selEntryId, setSelEntryId] = useState<string | null>(null);
   const [statusMsg, setStatusMsg]   = useState<StatusMsg>(null);
-  const [stageMappings, setStageMappings] = useState<StageAliasMappings | undefined>(undefined);
+  const stageMappings = useWorkspaceStageMappings(directoryHandle);
   const [sampleMaster, setSampleMaster] = useState<SampleMasterData | null>(null);
   // Permissioned oversight users pick WHOSE queue they are looking at — a named
   // employee, or everyone (QUEUE_SCOPE_ALL). The page still opens on the
@@ -937,9 +938,6 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         if (selection?.templateId) void applyTemplate(selection.templateId, false);
       })
       .catch(logRejection("xrayReferrals:loadInspectionTemplateSelection"));
-    void loadPopulationConfig(directoryHandle)
-      .then((cfg) => setStageMappings(cfg.stageMappings))
-      .catch(logRejection("xrayReferrals:loadPopulationConfig"));
     void Promise.all([
       loadAdminBrowsePreset(directoryHandle),
       loadUserBrowsePreset(directoryHandle, username),
