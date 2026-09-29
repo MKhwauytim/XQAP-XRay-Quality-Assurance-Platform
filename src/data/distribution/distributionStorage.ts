@@ -48,6 +48,7 @@ import {
 } from "./distributionEventStore";
 import { dedupeInFlight, workspaceScopeId, bumpWorkspaceEpoch, workspaceEpoch } from "../storage/inFlightReads";
 import { isNotFoundError, waitFor } from "../storage/transientFileErrors";
+import { subscribeToDataRefresh } from "../workspace/dataRefreshSignal";
 
 /** Exported for the selective-restore catalog (`backup/restoreScope.ts`). */
 export const DISTRIBUTION_LOG_FILE = "distribution.log.json";
@@ -358,17 +359,43 @@ async function readCurrentDistributionSource(
   return { currentLog, immutableEvents, segmentOffsets: segmentDelta.offsets, legacyEventFileNames };
 }
 
+/**
+ * R5: months whose legacy `1-population/{month}/distribution.log.json` was found
+ * ABSENT. Every full read used to pay three NotFound probes (file, .bak, .tmp)
+ * for a file no writer creates any more. Only a genuine `null` is remembered
+ * (a corrupt file throws, a present one is returned), so "I could not look" is
+ * never memoized. Forgotten on a manual refresh, on a restore's stamp refresh
+ * and on an explicit `invalidateLegacyDistributionLogMemo()`; the accepted gap is
+ * a legacy file created by another machine between those events, which no
+ * current build does.
+ */
+const legacyLogAbsent = new Set<string>();
+
+export function invalidateLegacyDistributionLogMemo(): void {
+  legacyLogAbsent.clear();
+}
+
+if (typeof window !== "undefined") {
+  subscribeToDataRefresh((source) => {
+    if (source === "manual") legacyLogAbsent.clear();
+  });
+}
+
 async function readLegacyDistributionLog(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
 ): Promise<DistributionLog | null> {
+  const memoKey = projectionChainKey(directoryHandle, monthFolderName);
+  if (legacyLogAbsent.has(memoKey)) return null;
   const directory = await openOptionalDirectory(() =>
     getLegacyDistributionDir(directoryHandle, monthFolderName)
   );
-  return readCompatibilityLog(
+  const log = await readCompatibilityLog(
     directory,
     `Corrupt legacy distribution log: ${LOG_FILE}`
   );
+  if (log === null) legacyLogAbsent.add(memoKey);
+  return log;
 }
 
 function normalizeCompatibilityLog(log: DistributionLog | null): DistributionLog {
@@ -531,6 +558,8 @@ export async function refreshDistributionLogWriteToken(
   distributionDir: DirectoryHandleLike
 ): Promise<boolean> {
   const corruptMessage = `Corrupt distribution compatibility log: ${LOG_FILE}`;
+  // A restore may have merged legacy data back: forget "the legacy log is absent" (R5).
+  legacyLogAbsent.clear();
   try {
     const outcome = await casLoop<{ touched: boolean }>(
       async (writeToken) => {
