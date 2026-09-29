@@ -626,12 +626,33 @@ export async function boundedSizeSignature(
   suffix: string,
   maxStats: number = DEFAULT_SIZE_SIGNATURE_STAT_BUDGET,
   /** Names left out entirely (neither listed nor probed), e.g. the caller's own segments. */
-  exclude?: (name: string) => boolean
+  exclude?: (name: string) => boolean,
+  /**
+   * Spend the stat budget on CHAIN HEADS (segments with no higher-seq sibling)
+   * instead of the last `maxStats` names. Only a head can grow, and a stable
+   * chain keeps one head for the whole month, so the newest-by-NAME rule missed
+   * every long-lived chain that sorted before the newest 64 names (a month with
+   * 40 employees' rotated chains): a colleague's answers then never showed up
+   * until a manual refresh. The heads are ~one per chain, not one per segment.
+   */
+  headsOnly = false
 ): Promise<string> {
   const listed = await listMatchingFileEntries(dir, suffix);
   const matched = exclude ? listed.filter((entry) => !exclude(entry.name)) : listed;
   const names = matched.map((entry) => entry.name);
-  const probed = matched.slice(Math.max(0, matched.length - Math.max(0, maxStats)));
+  let probed = matched.slice(Math.max(0, matched.length - Math.max(0, maxStats)));
+  if (headsOnly) {
+    // Heads first (newest names first), then whatever budget is left goes to the
+    // newest non-heads so a sealed segment that grows late is still seen when it can be.
+    const sealed = namesWithHigherSibling(names, suffix);
+    const heads = matched.filter((entry) => !sealed.has(entry.name));
+    const chosenHeads = heads.slice(Math.max(0, heads.length - Math.max(0, maxStats)));
+    const leftover = Math.max(0, maxStats) - chosenHeads.length;
+    const others = matched.filter((entry) => sealed.has(entry.name));
+    const chosenOthers = leftover > 0 ? others.slice(Math.max(0, others.length - leftover)) : [];
+    const chosen = new Set([...chosenHeads, ...chosenOthers].map((entry) => entry.name));
+    probed = matched.filter((entry) => chosen.has(entry.name)); // stays name-sorted: stable across ticks
+  }
   const sizes: (number | null)[] = new Array(probed.length).fill(null);
 
   await forEachBounded(probed.length, DIRECTORY_READ_CONCURRENCY, async (index) => {

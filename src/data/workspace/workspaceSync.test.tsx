@@ -1193,6 +1193,38 @@ describe("runSync — §6 of the answer-save proposal: the answers.events segmen
     expect(fresh[0]!.referralRequests).toHaveLength(1);
   });
 
+  it("A11: growth of a chain head is detected even when it sorts outside the last 64 segment names", async () => {
+    const root = makeRoot();
+    const eventsDir = await answerEventsDirFor(root);
+    // 40 chains x (sealed seq 0 + head seq 1) = 80 names; the oldest chain sorts FIRST.
+    const name = (c: number, seq: number): string => `m${String(c).padStart(2, "0")}-ans-dev${c}-s${c}${seq ? `-${seq}` : ""}.ndjson`;
+    for (let c = 0; c < 40; c += 1) {
+      await writeRawFile(eventsDir, name(c, 0), answerSegment([`c${c}a`]));
+      await writeRawFile(eventsDir, name(c, 1), answerSegment([`c${c}b`]));
+    }
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+    // a colleague appends to the OLDEST chain's head (name sorts before the last 64)
+    await writeRawFile(eventsDir, name(0, 1), answerSegment(["c0b", "c0-new"]));
+    const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(changed.has("answers")).toBe(true);
+    // ...and a later growth of a NEWEST head is still seen, at every tick
+    await writeRawFile(eventsDir, name(39, 1), answerSegment(["c39b", "c39-new"]));
+    expect((await runSync({ directoryHandle: root, monthFolderName: MONTH })).changed.has("answers")).toBe(true);
+  });
+
+  it("A11: the answer-segment probe stays bounded in stats however many segments exist", async () => {
+    const root = makeRoot("probe-bound", true);
+    const eventsDir = await answerEventsDirFor(root);
+    for (let c = 0; c < 150; c += 1) {
+      await writeRawFile(eventsDir, `m${String(c).padStart(3, "0")}-ans-dev${c}-s${c}.ndjson`, answerSegment([`x${c}`]));
+    }
+    await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    clearReadLog(root);
+    await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    const opened = getReadLog(root).filter((e) => e.includes("answers.events") && e.endsWith(".ndjson")).length;
+    expect(opened).toBeLessThanOrEqual(96);
+  });
+
   it("A9: a per-employee requests file change is reported as requests (it had no probe of its own)", async () => {
     const root = makeRoot();
     const answersDir = await getSampleEmployeeDir(root, MONTH, true);

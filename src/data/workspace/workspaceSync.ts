@@ -51,7 +51,6 @@ import {
 import { readRealSession } from "../../auth/authSession";
 import { readDistributionLogStamp } from "../distribution/distributionStorage";
 import {
-  DEFAULT_SIZE_SIGNATURE_STAT_BUDGET,
   boundedSizeSignature,
   listDirectoryEntriesWithSize,
   type SizedDirectoryEntry,
@@ -458,6 +457,9 @@ async function safeSegmentsSignature(dir: DirectoryHandleLike | null): Promise<P
   }
 }
 
+/** Stat budget for the answer-segment probe: one per live chain head (employees x devices), with headroom. */
+const ANSWER_SEGMENT_HEAD_STAT_BUDGET = 96;
+
 async function safeRequestsFilesSignature(dir: DirectoryHandleLike | null): Promise<Probed<string>> {
   if (!dir) return "";
   try {
@@ -487,8 +489,10 @@ async function safeAnswerSegmentsSignature(
     return await boundedSizeSignature(
       dir,
       ANSWER_EVENT_SEGMENT_SUFFIX,
-      DEFAULT_SIZE_SIGNATURE_STAT_BUDGET,
-      actor ? ownStableAnswerSegmentMatcher(monthFolderName, actor) : undefined
+      ANSWER_SEGMENT_HEAD_STAT_BUDGET,
+      actor ? ownStableAnswerSegmentMatcher(monthFolderName, actor) : undefined,
+      // A11: size the chain HEADS, not the newest names (see boundedSizeSignature).
+      true
     );
   } catch (error) {
     logError("workspaceSync:probeAnswerSegments", error);
