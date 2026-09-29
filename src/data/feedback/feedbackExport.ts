@@ -3,13 +3,15 @@
  * sheets (Workstream B, 2026-09-28):
  *
  *  - «المحادثات» — one row per thread: id, sender, role, category, status,
- *    created, last activity, reply count, resolved at/by, original text.
+ *    created, last activity, reply count, resolved at/by, whether that
+ *    resolution is estimated (legacy thread), original text.
  *  - «الرسائل»   — one row per message (the original, then each reply).
  *
  * PURE, NO I/O. The caller passes the threads to export; the click-time read
  * that gathers them lives in feedbackExportRead.ts. Every date cell is the
- * sortable ISO text from `formatExportTimestamp` (utils/formatting.ts), so
- * Excel sorts and filters chronologically.
+ * sortable `YYYY-MM-DD HH:mm:ss` text in LOCAL time (matching what the widget
+ * shows) from `formatExportTimestamp` (utils/formatting.ts), so Excel sorts and
+ * filters chronologically.
  *
  * Mechanically the same as `errorLog/errorLogExport.ts`: pure row builders,
  * rows assembled in chunks separated by `yieldToMain()`, then the synchronous
@@ -26,7 +28,7 @@
 
 import * as XLSX from "xlsx";
 
-import { formatExportTimestamp } from "../../utils/formatting";
+import { formatExportTimestamp as formatTimestampAs } from "../../utils/formatting";
 import type { Labels } from "../labels/labelsStore";
 import { yieldToMain } from "../storage/yieldToMain";
 import type { FeedbackCategory, FeedbackMessage } from "./feedbackStorage";
@@ -42,6 +44,10 @@ export type FeedbackExportSheets = {
 };
 
 const EXPORT_CHUNK_SIZE = 500;
+
+/** Local time, like the widget shows. */
+const formatExportTimestamp = (value: string | null | undefined) =>
+  formatTimestampAs(value, { zone: "local" });
 
 
 function categoryText(labels: Labels, category: FeedbackCategory): string {

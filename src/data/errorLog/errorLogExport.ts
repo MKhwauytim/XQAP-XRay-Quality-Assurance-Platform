@@ -33,7 +33,8 @@ import { flushErrorLogNow } from "./errorLogSink";
 import { readAllWorkspaceErrors, readWorkspaceErrorArchive } from "./errorLogStorage";
 
 export const ERROR_EXPORT_HEADERS = [
-  "الوقت",
+  // The stored instant's own UTC digits (see formatExportTimestamp), so say so.
+  "الوقت (UTC)",
   "المستخدم",
   "الدور",
   "الصفحة",

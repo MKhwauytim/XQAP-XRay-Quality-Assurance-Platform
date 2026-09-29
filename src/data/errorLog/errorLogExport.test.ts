@@ -36,6 +36,7 @@ describe("errorLogExport", () => {
     ]);
 
     expect(rows).toHaveLength(1);
+    expect(ERROR_EXPORT_HEADERS[0]).toBe("الوقت (UTC)");
     expect(rows[0]).toHaveLength(ERROR_EXPORT_HEADERS.length);
     expect(rows[0]).toEqual([
       "2026-08-24 10:30:00",

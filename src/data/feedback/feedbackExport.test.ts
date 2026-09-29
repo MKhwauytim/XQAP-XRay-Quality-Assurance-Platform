@@ -14,7 +14,11 @@ import {
 } from "./feedbackExport";
 
 const L: Labels = getLabels();
-const d = (iso: string) => formatExportTimestamp(iso);
+// The export writes LOCAL time. Pin the zone (before any Date is used) so the
+// literals and the snapshot never depend on the machine running the tests.
+process.env.TZ = "Asia/Riyadh";
+
+const d = (iso: string) => formatExportTimestamp(iso, { zone: "local" });
 
 const RESOLVED_WITH_FIELDS: FeedbackThread = {
   id: "t20260920100000-aaaaaaaa",
@@ -79,16 +83,16 @@ describe("feedbackExport — conversations sheet", () => {
     ]);
   });
 
-  it("writes sortable ISO timestamps, not locale text", () => {
+  it("writes sortable local-time timestamps (Riyadh = UTC+3), not locale text", () => {
     const [row] = buildFeedbackThreadRows([RESOLVED_WITH_FIELDS], L);
-    expect(row![5]).toBe("2026-09-20 10:00:00");
-    expect(row![6]).toBe("2026-09-22 11:30:00");
-    expect(row![8]).toBe("2026-09-22 11:30:00");
+    expect(row![5]).toBe("2026-09-20 13:00:00");
+    expect(row![6]).toBe("2026-09-22 14:30:00");
+    expect(row![8]).toBe("2026-09-22 14:30:00");
   });
 
   it("approximates a legacy thread's resolution from its last reply and flags it in its own column", () => {
     const [row] = buildFeedbackThreadRows([LEGACY_RESOLVED], L);
-    expect(row![8]).toBe("2026-01-02 08:15:00");
+    expect(row![8]).toBe("2026-01-02 11:15:00");
     expect(row![9]).toBe("admin");
     expect(row![10]).toBe(L.fb_export_yes);
     expect(row![2]).toBe(L.toolbar_role_supervisor);
