@@ -47,6 +47,16 @@ export default function SelectiveRestorePanel({
   // overwrite the answer for the admin's newer selection.
   const planTokenRef = useRef(0);
 
+  // A plan still in flight when the panel unmounts (mode switched back, dialog
+  // closed) must never call onSelectionChange later: the parent would arm a
+  // selection for a panel that no longer exists.
+  useEffect(
+    () => () => {
+      planTokenRef.current += 1;
+    },
+    []
+  );
+
   useEffect(() => {
     let cancelled = false;
     previewSelectiveRestore(directoryHandle, backupFolderName).then(

@@ -272,6 +272,7 @@
 }
 
 .arc-msg-ok,
+.arc-msg-warn,
 .arc-msg-error {
   margin: 0 0 14px;
   padding: 11px 14px;
@@ -284,6 +285,12 @@
   border: 1px solid #86efac;
   background: var(--c-success-bg);
   color: #166534;
+}
+
+.arc-msg-warn {
+  border: 1px solid var(--c-warning-border);
+  background: var(--c-warning-bg);
+  color: var(--c-warning);
 }
 
 .arc-msg-error {

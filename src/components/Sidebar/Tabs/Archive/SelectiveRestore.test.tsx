@@ -3,7 +3,7 @@
 // Same mocking strategy as index.test.tsx: the data layer is mocked; auth and
 // permissions are real and driven through a real session.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { clearSession, writeSession } from "../../../../auth/authSession";
@@ -319,5 +319,78 @@ describe("Archive restore dialog — selective mode (Workstream D)", () => {
     expect(
       within(dialog).getByText(fillTemplate(L.archive_restore_warning_requests_embedded, { month: M1_LABEL }))
     ).toBeInTheDocument();
+  });
+
+  it("keeps a late plan from a discarded panel from re-arming the selection (remount race)", async () => {
+    let resolvePlan: (plan: SelectiveRestorePlan) => void = () => {};
+    vi.mocked(planSelectiveRestore).mockImplementation(
+      () => new Promise<SelectiveRestorePlan>((resolve) => { resolvePlan = resolve; })
+    );
+    const dialog = await openSelectiveDialog();
+    pickPopulationForM1(dialog);
+    // Back to full mode unmounts the panel while its plan is still in flight.
+    fireEvent.click(within(dialog).getByRole("radio", { name: L.archive_restore_mode_full }));
+    fireEvent.click(within(dialog).getByRole("radio", { name: L.archive_restore_mode_selective }));
+    await within(dialog).findByRole("checkbox", { name: L.restore_element_population });
+    await act(async () => {
+      resolvePlan(makePlan());
+      await Promise.resolve();
+    });
+
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: /أفهم أن الاستعادة/ }));
+    expect(within(dialog).getByRole("button", { name: "متابعة التحقق" })).toBeDisabled();
+  });
+
+  it("reports rebuild steps that failed as a warning, not as a clean success", async () => {
+    vi.mocked(runSelectiveRestore).mockResolvedValue({
+      ok: true,
+      restoredFiles: ["a"],
+      rollbackFolderName: "rollback-1",
+      integrity: [],
+      derivedWarnings: [{ month: M1, step: "replacement-index", error: "boom" }],
+    });
+    const dialog = await openSelectiveDialog();
+    pickPopulationForM1(dialog);
+    await within(dialog).findByText(
+      fillTemplate(L.archive_restore_preview_row, { element: L.restore_element_population, month: M1_LABEL, count: formatNumber(3) })
+    );
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: /أفهم أن الاستعادة/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "متابعة التحقق" }));
+    fireEvent.change(within(dialog).getByPlaceholderText(FOLDER), { target: { value: FOLDER } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "استعادة الآن" }));
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain(
+        fillTemplate(L.archive_restore_derived_warning, {
+          step: L.archive_restore_derived_step_replacement_index,
+          month: M1_LABEL,
+          error: "boom",
+        })
+      );
+    });
+    expect(document.querySelector(".arc-msg-warn")).not.toBeNull();
+  });
+
+  it("names the rollback folder and still refreshes when a restore fails after it started", async () => {
+    vi.mocked(runSelectiveRestore).mockResolvedValue({
+      ok: false,
+      reason: "restore-failed",
+      error: "boom",
+      rollbackFolderName: "rollback-9",
+    });
+    const dialog = await openSelectiveDialog();
+    pickPopulationForM1(dialog);
+    await within(dialog).findByText(
+      fillTemplate(L.archive_restore_preview_row, { element: L.restore_element_population, month: M1_LABEL, count: formatNumber(3) })
+    );
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: /أفهم أن الاستعادة/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "متابعة التحقق" }));
+    fireEvent.change(within(dialog).getByPlaceholderText(FOLDER), { target: { value: FOLDER } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "استعادة الآن" }));
+
+    await waitFor(() => {
+      expect(within(dialog).getByRole("alert")).toHaveTextContent("rollback-9");
+    });
+    expect(vi.mocked(broadcastDataRefresh)).toHaveBeenCalledWith("manual");
   });
 });
