@@ -5,6 +5,27 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v149.2",
+    "date": "2026-09-29",
+    "bucket": "feature",
+    "scope": "population",
+    "title": "admin picker for whole-port CertScan flags in processing settings"
+  },
+  {
+    "version": "v149.1",
+    "date": "2026-09-29",
+    "bucket": "feature",
+    "scope": "population",
+    "title": "process flagged ports as CertScan (union with the pasted list)"
+  },
+  {
+    "version": "v149.0",
+    "date": "2026-09-29",
+    "bucket": "feature",
+    "scope": "population",
+    "title": "certScanPorts config field for whole-port CertScan flags"
+  },
+  {
     "version": "v148.6",
     "date": "2026-09-29",
     "bucket": "fix",
@@ -52,26 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "feedback",
     "title": "resolvedAt and resolvedBy on resolve"
-  },
-  {
-    "version": "v147.4",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "auth",
-    "title": "every failed passcode attempt counts and overlapping submits are ignored"
-  },
-  {
-    "version": "v147.3",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "a failed reopen or quality note is reported, not queued as a stale answer replay"
-  },
-  {
-    "version": "v147.2",
-    "date": "2026-09-29",
-    "bucket": "enhancement",
-    "scope": "answers",
-    "title": "answer saves no longer run under casLoop; the decision is computed once, the append runs once, and every failure queues the answer"
   }
 ];
