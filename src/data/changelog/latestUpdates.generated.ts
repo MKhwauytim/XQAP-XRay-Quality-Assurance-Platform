@@ -5,6 +5,41 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v149.7",
+    "date": "2026-09-29",
+    "bucket": "fix",
+    "scope": "employee-workspace",
+    "title": "the empty-queue notice and stats title reflect the CertScan chip"
+  },
+  {
+    "version": "v149.6",
+    "date": "2026-09-29",
+    "bucket": "feature",
+    "scope": "population",
+    "title": "warn on re-processing a sampled month when CertScan status would change"
+  },
+  {
+    "version": "v149.5",
+    "date": "2026-09-29",
+    "bucket": "fix",
+    "scope": "population",
+    "title": "harden whole-port CertScan flags (trimmed names, pinned default output, unspecified-port test)"
+  },
+  {
+    "version": "v149.4",
+    "date": "2026-09-29",
+    "bucket": "feature",
+    "scope": "population",
+    "title": "CertScan filter chips in Population Browse"
+  },
+  {
+    "version": "v149.3",
+    "date": "2026-09-29",
+    "bucket": "feature",
+    "scope": "employee-workspace",
+    "title": "CertScan chip and CertScan status filter in the sample queues"
+  },
+  {
     "version": "v149.2",
     "date": "2026-09-29",
     "bucket": "feature",
@@ -38,40 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "redesign",
     "scope": "stages",
     "title": "import the canonical stage labels instead of local copies"
-  },
-  {
-    "version": "v148.4",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "sampling",
-    "title": "manual-add stage allocation uses the Arabic label in canonical order"
-  },
-  {
-    "version": "v148.3",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "deck2",
-    "title": "stage cards resolve level from the canonical stageKey; Reports tab loads workspace stage mappings"
-  },
-  {
-    "version": "v148.2",
-    "date": "2026-09-29",
-    "bucket": "feature",
-    "scope": "feedback",
-    "title": "admin export button in the all-messages tab"
-  },
-  {
-    "version": "v148.1",
-    "date": "2026-09-29",
-    "bucket": "feature",
-    "scope": "feedback",
-    "title": "two-sheet XLSX export builder"
-  },
-  {
-    "version": "v148.0",
-    "date": "2026-09-29",
-    "bucket": "feature",
-    "scope": "feedback",
-    "title": "resolvedAt and resolvedBy on resolve"
   }
 ];
