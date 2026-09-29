@@ -482,9 +482,12 @@ export default function XrayInspectionResults({ directoryHandle, active = true }
   const silentInFlightRef = useRef(false);
   const silentAgainRef = useRef(false);
   const runSilentRef = useRef<(refreshPending: boolean) => void>(() => undefined);
+  const silentAgainPendingRef = useRef(false);
   const runSilentReload = useCallback((refreshPending: boolean) => {
     if (silentInFlightRef.current) {
       silentAgainRef.current = true;
+      // The follow-up carries a pending-count refresh if ANY coalesced request wanted one.
+      if (refreshPending) silentAgainPendingRef.current = true;
       return;
     }
     silentInFlightRef.current = true;
@@ -492,7 +495,14 @@ export default function XrayInspectionResults({ directoryHandle, active = true }
       silentInFlightRef.current = false;
       if (silentAgainRef.current) {
         silentAgainRef.current = false;
-        runSilentRef.current(false);
+        const again = silentAgainPendingRef.current;
+        silentAgainPendingRef.current = false;
+        // Hidden meanwhile: no share reads for a view nobody sees; mark stale for the show catch-up.
+        if (!visibleRef.current) {
+          staleWhileHiddenRef.current = true;
+          return;
+        }
+        runSilentRef.current(again);
       }
     });
   }, [loadData]);

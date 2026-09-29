@@ -992,15 +992,17 @@ async function retryDecisionRead<T>(deadline: OperationDeadline, step: () => Pro
  * fold orders whatever lands by `(eventAt, authority, eventId)`, so the events
  * appended -- and the folded state -- are identical to the full-read path.
  *
- * Only taken when BOTH facts are in this tab's memory: the memoized frozen
- * legacy seed (set by `resolveSeed` after a successful read of an already-seeded
- * employee) AND a cached own `migration-seed` event. A manual refresh or a
- * restore drops both (`clearAnswerEventsCache`), so the next save reads in full.
- * Returns null (never throws) whenever either is missing or the cached fold
- * cannot be built -- the caller then runs the unchanged full path, which reports
- * any real problem itself. `previous` is folded from the cache, so it can lag a
- * colleague's very latest event; that only affects the local mirror's history
- * fields, which `backfillAnswerMirror` refreshes from disk.
+ * Only taken when this tab's events cache holds a `migration-seed` event of the
+ * employee (the queue view's own load usually warmed it). The frozen legacy seed
+ * comes from the session memo (set by `resolveSeed`, or here) or, if absent, is
+ * read ONCE now (4 ops) and memoized only when the file was FOUND. A manual
+ * refresh or a restore drops the cache and the memo (`clearAnswerEventsCache`),
+ * so the next save reads in full. Returns null (never throws) whenever the cache
+ * has no seed, the legacy read is absent/failed, or the cached fold cannot be
+ * built -- the caller then runs the unchanged full path, which reports any real
+ * problem itself. `previous` is folded from the cache, so it can lag a colleague's
+ * very latest event; that only affects the local mirror's history fields (the
+ * backfill overwrites a mirror record only with a strictly NEWER disk item).
  */
 async function decideFromSeededCache(
   directoryHandle: DirectoryHandleLike,

@@ -71,4 +71,18 @@ describe("useWorkspaceNotifications (A8)", () => {
     await drain();
     expect(gate.calls).toBe(1);
   });
+
+  it("a change of user resets the single-flight state: the new user's reload is not coalesced into the old closure", async () => {
+    const { rerender } = renderHook(({ s }) => useWorkspaceNotifications(s, dir), { initialProps: { s: session } });
+    await drain();
+    gate.calls = 0;
+    act(() => broadcastDataRefresh("manual")); // a read for emp1 is now in flight (gate not released)
+    expect(gate.calls).toBe(1);
+    rerender({ s: { ...session, username: "emp2" } as AuthSession }); // new user: initial load must start immediately
+    expect(gate.calls).toBe(2);
+    act(() => broadcastDataRefresh("manual")); // coalesces into the NEW closure, not lost
+    await drain();
+    await drain();
+    expect(gate.calls).toBeGreaterThanOrEqual(3);
+  });
 });

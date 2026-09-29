@@ -73,6 +73,10 @@ export function useWorkspaceNotifications(
 
   useEffect(() => {
     if (!audience || !directoryHandle) return;
+    // A different workspace or user starts with a clean slate: a reload still in flight
+    // for the OLD closure must not swallow this one's requests.
+    inFlightRef.current = false;
+    againRef.current = false;
     // Initial load via promise-chain (not `void reload()`) so setState lands in
     // a `.then` callback, not synchronously in the effect body.
     loadNotifications(directoryHandle, { forUsername: username })
