@@ -90,6 +90,18 @@ describe("daily quota over working days (C3)", () => {
     });
   });
 
+  it("an ADDED second assignment later in the month keeps the window anchored at the first: ceil(newTotal / originalWindow)", () => {
+    const later = Array.from({ length: 20 }, (_, i) =>
+      evt(`b${i}`, "assigned", `img-late-${i}`, "emp-a", "2026-05-20T09:00:00.000Z"),
+    );
+    // 60 rows over the ORIGINAL 19-day window (4 May), not the 7 days left on 20 May: ceil(60 / 19) = 4.
+    expect(quotaFor([...assignAll(40, "emp-a", MONDAY_4_MAY), ...later], "emp-a")).toMatchObject({
+      sampleCount: 60,
+      daysRemainingAtAssignment: 19,
+      dailyQuota: 4,
+    });
+  });
+
   it("first assignment after the deadline → floor of one working day (whole assignment per day)", () => {
     expect(quotaFor(assignAll(5, "emp-a", "2026-05-29T09:00:00.000Z"), "emp-a")).toMatchObject({
       daysRemainingAtAssignment: 0,

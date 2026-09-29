@@ -613,7 +613,9 @@ async function staleMirrorPendingCount(
  * independent of the projection stamp, which lags the durable events whenever the
  * background projection job is pending, failed, or lost with a closed tab.
  *
- * Not trusted: a mirror with no `scan` (older build, or derived from a snapshot
+ * Not trusted: a mirror stamped with an OLDER `deriveVersion` than this build's
+ * (C3: v4 carried calendar-day quotas; serving it would skip the refold), and a
+ * mirror with no `scan` (older build, or derived from a snapshot
  * that carried none — it is re-derived, no migration needed), and any case where
  * the listing fails. No memo: every call lists afresh (one listing plus one size
  * stat per segment), which is what the irreversible delete-user guard needs.
@@ -621,9 +623,10 @@ async function staleMirrorPendingCount(
 export async function isMirrorTrustedForEvents(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
-  mirror: Pick<EmployeeSamplesFile, "sourceLogRevision" | "scan">,
+  mirror: Pick<EmployeeSamplesFile, "sourceLogRevision" | "scan" | "deriveVersion">,
   stampRevision: number
 ): Promise<boolean> {
+  if ((mirror.deriveVersion ?? 0) < DERIVE_VERSION) return false;
   if (mirror.sourceLogRevision < stampRevision) return false;
   if (!mirror.scan) return false;
   return eventStoreMatchesScan(directoryHandle, monthFolderName, mirror.scan);

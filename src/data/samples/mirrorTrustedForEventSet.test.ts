@@ -111,6 +111,16 @@ describe("a pending append whose projection job fails", () => {
     expect((await getUserWorkspaceFootprint(root, EMP)).activeAssignments[0]?.pendingCount).toBe(1);
   });
 
+  it("C3: a mirror stamped with an OLDER deriveVersion is NOT trusted even at the current revision with a matching scan", async () => {
+    const root = await seededRoot();
+    const mirror = await loadEmployeeSampleMirror(root, MONTH, EMP);
+    const log = await loadDistributionLog(root, MONTH);
+    expect(await isMirrorTrustedForEvents(root, MONTH, mirror!, log.revision)).toBe(true);
+    // v4 stamped its quota in calendar days; the reader must refold, not serve it.
+    expect(await isMirrorTrustedForEvents(root, MONTH, { ...mirror!, deriveVersion: 4 }, log.revision)).toBe(false);
+    expect(await isMirrorTrustedForEvents(root, MONTH, { ...mirror!, deriveVersion: undefined }, log.revision)).toBe(false);
+  });
+
   it("the write flow's mirror sync is NOT skipped just because the revision did not move", async () => {
     const root = await seededRoot();
     setSimulatedFaults(root, FAIL_PROJECTION);
