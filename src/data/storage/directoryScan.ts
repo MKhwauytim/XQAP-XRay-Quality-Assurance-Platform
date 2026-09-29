@@ -635,7 +635,10 @@ export async function boundedSizeSignature(
    * 40 employees' rotated chains): a colleague's answers then never showed up
    * until a manual refresh. The heads are ~one per chain, not one per segment.
    */
-  headsOnly = false
+  headsOnly = false,
+  /** Receives the `File` each stat already obtained, so a caller that then needs a few
+   *  tail bytes (the sync probe's owners peek) pays one read instead of a new open. */
+  collectFiles?: Map<string, Blob>
 ): Promise<string> {
   const listed = await listMatchingFileEntries(dir, suffix);
   const matched = exclude ? listed.filter((entry) => !exclude(entry.name)) : listed;
@@ -658,7 +661,15 @@ export async function boundedSizeSignature(
   await forEachBounded(probed.length, DIRECTORY_READ_CONCURRENCY, async (index) => {
     // Same "no retry budget" reasoning as listDirectoryEntriesWithSize: this is
     // a change-detection signature, not data, and it runs on every tick.
-    sizes[index] = await readListedEntry(dir, probed[index]!, async (file) => file.size, null);
+    sizes[index] = await readListedEntry(
+      dir,
+      probed[index]!,
+      async (file) => {
+        collectFiles?.set(probed[index]!.name, file);
+        return file.size;
+      },
+      null
+    );
   });
 
   const sized: [string, number][] = [];

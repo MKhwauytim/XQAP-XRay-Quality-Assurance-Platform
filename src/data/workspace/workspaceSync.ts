@@ -76,7 +76,6 @@ import {
   NOTIFICATIONS_SUBFOLDERS,
   SAMPLE_SUBFOLDERS,
   SYSTEM_FOLDER_NAMES,
-  getSampleMainDir,
 } from "./workspacePaths";
 import { DEFAULT_SYNC_INTERVAL_MS, readSyncIntervalMs } from "./syncSettings";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
@@ -458,7 +457,10 @@ async function safeSegmentsSignature(dir: DirectoryHandleLike | null): Promise<P
 }
 
 /** Stat budget for the answer-segment probe: one per live chain head (employees x devices), with headroom. */
-const ANSWER_SEGMENT_HEAD_STAT_BUDGET = 96;
+const ANSWER_SEGMENT_HEAD_STAT_BUDGET = 64;
+
+/** The `File`s the last answer-segment probe stat'd, kept for the owners peek of the SAME run (runs are single-flight). */
+let probedAnswerFiles = new Map<string, Blob>();
 
 async function safeRequestsFilesSignature(dir: DirectoryHandleLike | null): Promise<Probed<string>> {
   if (!dir) return "";
@@ -486,13 +488,15 @@ async function safeAnswerSegmentsSignature(
     // rotations written by an earlier page load. Other writers (and other users
     // of this browser) still count.
     const actor = readRealSession()?.username;
+    probedAnswerFiles = new Map();
     return await boundedSizeSignature(
       dir,
       ANSWER_EVENT_SEGMENT_SUFFIX,
       ANSWER_SEGMENT_HEAD_STAT_BUDGET,
       actor ? ownStableAnswerSegmentMatcher(monthFolderName, actor) : undefined,
       // A11: size the chain HEADS, not the newest names (see boundedSizeSignature).
-      true
+      true,
+      probedAnswerFiles
     );
   } catch (error) {
     logError("workspaceSync:probeAnswerSegments", error);
@@ -759,7 +763,7 @@ export function movedAnswerSegmentNames(previous: string, current: string): Set<
 }
 
 /** Bounds on the owners peek: a tick never reads more than this to classify a colleague's change. */
-const OWNER_PEEK_MAX_SEGMENTS = 24;
+const OWNER_PEEK_MAX_SEGMENTS = 48;
 const OWNER_PEEK_MAX_BYTES = 256 * 1024;
 
 /**
@@ -771,19 +775,18 @@ const OWNER_PEEK_MAX_BYTES = 256 * 1024;
  * that does not parse. Never throws.
  */
 async function peekAnswerOwners(
-  directoryHandle: DirectoryHandleLike,
-  monthFolderName: string,
   prevSizes: Map<string, number>
 ): Promise<Set<string> | null> {
   if (prevSizes.size === 0 || prevSizes.size > OWNER_PEEK_MAX_SEGMENTS) return null;
   try {
-    const mainDir = await getSampleMainDir(directoryHandle, monthFolderName, false);
-    const eventsDir = await mainDir.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: false });
     const owners = new Set<string>();
     let budget = OWNER_PEEK_MAX_BYTES;
     const results = await Promise.all(
       [...prevSizes].map(async ([name, previousSize]) => {
-        const file = await (await eventsDir.getFileHandle(name, { create: false })).getFile();
+        // The File the probe's own stat already obtained: one read, no new open.
+        // A moved name the probe did not stat (outside its budget) is unknown.
+        const file = probedAnswerFiles.get(name);
+        if (!file) return null;
         if (file.size < previousSize) return null;
         if (file.size === previousSize) return [] as string[];
         budget -= file.size - previousSize;
@@ -927,7 +930,7 @@ async function performSync(options: SyncRunOptions, manual: boolean): Promise<Sy
       let movedSegmentPrevSizes: Map<string, number> | null;
       ({ changed, sealedInvalidation, movedSegmentPrevSizes, legacyAnswersMoved } = await probeChangedFamilies(directoryHandle, monthFolderName, systemDir));
       if (changed.has("answers") && movedSegmentPrevSizes) {
-        answerOwners = await peekAnswerOwners(directoryHandle, monthFolderName, movedSegmentPrevSizes);
+        answerOwners = await peekAnswerOwners(movedSegmentPrevSizes);
       }
     } catch (error) {
       logError("workspaceSync:probe", error);

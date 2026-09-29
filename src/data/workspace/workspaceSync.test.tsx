@@ -1222,7 +1222,7 @@ describe("runSync — §6 of the answer-save proposal: the answers.events segmen
     clearReadLog(root);
     await runSync({ directoryHandle: root, monthFolderName: MONTH });
     const opened = getReadLog(root).filter((e) => e.includes("answers.events") && e.endsWith(".ndjson")).length;
-    expect(opened).toBeLessThanOrEqual(96);
+    expect(opened).toBeLessThanOrEqual(64);
   });
 
   it("A9: a per-employee requests file change is reported as requests (it had no probe of its own)", async () => {
