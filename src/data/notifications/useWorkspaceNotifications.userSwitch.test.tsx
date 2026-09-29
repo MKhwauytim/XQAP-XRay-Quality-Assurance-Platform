@@ -8,18 +8,18 @@ import type { AuthSession } from "../../auth/authTypes";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { broadcastDataRefresh } from "../workspace/dataRefreshSignal";
 
-const gate = vi.hoisted(() => ({ reads: [] as string[], pending: [] as Array<{ user: string; release: () => void }> }));
+const gate = vi.hoisted(() => ({ n: 0, reads: [] as string[], pending: [] as Array<{ user: string; release: () => void }> }));
 vi.mock("./notificationStorage", () => ({
   loadNotifications: (_d: unknown, opts: { forUsername: string }) => {
     gate.reads.push(opts.forUsername);
     return new Promise((resolve) => {
-      gate.pending.push({ user: opts.forUsername, release: () => resolve([{ id: `for-${opts.forUsername}`, message: "m", postedBy: "a", postedAt: "2026-01-01", acceptances: [], audience: "all" }]) });
+      gate.pending.push({ user: opts.forUsername, release: () => resolve([{ id: `for-${opts.forUsername}-${++gate.n}`, message: "m", postedBy: "a", postedAt: "2026-01-01", acceptances: [], audience: "all" }]) });
     });
   },
 }));
 import { useWorkspaceNotifications } from "./useWorkspaceNotifications";
 
-afterEach(() => { cleanup(); gate.reads = []; gate.pending = []; });
+afterEach(() => { cleanup(); gate.reads = []; gate.pending = []; gate.n = 0; });
 const flush = () => act(async () => { for (let i = 0; i < 6; i += 1) await Promise.resolve(); });
 async function releaseFirst(): Promise<void> {
   const p = gate.pending.shift()!;
@@ -37,6 +37,20 @@ it("after a user switch the new user's list is not overwritten by the old user's
   act(() => broadcastDataRefresh("manual")); // coalesced follow-up for emp2
   for (let i = 0; i < 8 && gate.pending.length > 0; i += 1) await releaseFirst();
   await flush();
-  expect((result.current.notifications as Array<{ id: string }>).map((n) => n.id)).toEqual(["for-emp2"]);
+  expect((result.current.notifications as Array<{ id: string }>).every((n) => n.id.startsWith("for-emp2"))).toBe(true);
   expect(gate.reads.slice(2)).not.toContain("emp1"); // nothing after the switch reads the old user
+});
+
+it("an in-flight loop cannot set its list after the deps change to a non-audience role", async () => {
+  const dir = { name: "root" } as unknown as DirectoryHandleLike;
+  const s1 = { role: "employee", username: "emp1", loginAt: new Date().toISOString() } as AuthSession;
+  const { result, rerender } = renderHook(({ s }) => useWorkspaceNotifications(s, dir), { initialProps: { s: s1 } });
+  await releaseFirst(); // initial emp1 load: list = ["for-emp1"]
+  act(() => broadcastDataRefresh("manual")); // a second emp1 read is in flight
+  rerender({ s: { ...s1, role: "admin" } as AuthSession }); // no longer an audience: nothing reloads
+  await releaseFirst(); // the old loop finishes now
+  await flush();
+  expect(gate.pending).toHaveLength(0);
+  expect((result.current.notifications as Array<{ id: string }>).map((n) => n.id)).toEqual(["for-emp1-1"]); // not the old loop's "-2"
+  expect(result.current.unacceptedCount).toBe(0);
 });

@@ -111,6 +111,11 @@ export function useWorkspaceNotifications(
     // refresh still always does.
     const unsubscribeDataRefresh = subscribeToDataChange(["notifications"], () => void reload());
     return () => {
+      // Fence off any loop still in flight for these deps (a change to a null handle or a
+      // non-audience role runs no new effect body, so only the cleanup can do it).
+      generationRef.current += 1;
+      inFlightRef.current = false;
+      againRef.current = false;
       cancelled = true;
       if (timer !== undefined) window.clearTimeout(timer);
       window.removeEventListener("focus", onFocus);
