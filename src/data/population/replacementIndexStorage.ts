@@ -26,7 +26,8 @@ import {
   type ReplacementIndexRow,
 } from "./replacementIndexTypes";
 
-const REPLACEMENT_INDEX_FOLDER = "replacement-index";
+/** Exported for the selective-restore catalog, which rebuilds rather than copies it. */
+export const REPLACEMENT_INDEX_FOLDER = "replacement-index";
 const MANIFEST_FILE = "index.manifest.json";
 
 const ALL_TIERS: readonly CertScanMatchStatus[] = ["Certscan", "NonCertscan"];

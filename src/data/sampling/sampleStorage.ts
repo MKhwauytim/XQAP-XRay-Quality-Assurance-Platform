@@ -6,7 +6,7 @@ import { readEnvelopeRevision, readOptionalJson, safeWriteJson } from "../storag
 import { casLoop } from "../storage/casLoop";
 import { codedMessage, logCodedError, resolveErrorCode } from "../storage/errorCodes";
 import { ensureMonthWritable } from "../population/monthLock";
-import { getPopulationMonthDir, getSampleMainDir } from "../workspace/workspacePaths";
+import { getPopulationMonthDir, getSampleMainDir, LEGACY_MONTH_SUBFOLDERS } from "../workspace/workspacePaths";
 import type { PortAllocation, SampleApproval, SampleMasterData, StageAllocation } from "./sampleTypes";
 
 const SAMPLE_FILE = "sample.master.json";
@@ -24,7 +24,7 @@ async function getLegacySampleDir(
   monthFolderName: string
 ): Promise<DirectoryHandleLike> {
   const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
-  return monthDir.getDirectoryHandle("sample", { create: false });
+  return monthDir.getDirectoryHandle(LEGACY_MONTH_SUBFOLDERS.sample, { create: false });
 }
 
 export async function saveSampleMaster(

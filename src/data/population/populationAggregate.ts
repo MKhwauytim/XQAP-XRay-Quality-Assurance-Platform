@@ -36,7 +36,8 @@ import type { PreparedPopulationRow, ProcessingSummary } from "./populationTypes
 // let the persisted rate silently diverge from the one the advisory computes.
 import { computeSuspicionRate } from "../sampling/samplingPlanStorage";
 
-const AGGREGATE_FILE = "population.aggregate.json";
+/** Exported for the selective-restore catalog, which rebuilds rather than copies it. */
+export const POPULATION_AGGREGATE_FILE = "population.aggregate.json";
 const AGGREGATE_SCHEMA_VERSION = 1;
 const PREVIEW_ROW_COUNT = 10;
 
@@ -130,7 +131,7 @@ export async function savePopulationAggregate(
   try {
     const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, true);
     const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: true });
-    await safeWriteJson(processedDir, AGGREGATE_FILE, aggregate);
+    await safeWriteJson(processedDir, POPULATION_AGGREGATE_FILE, aggregate);
   } catch (error) {
     logError("population:save-aggregate", error);
   }
@@ -167,7 +168,7 @@ export async function loadPopulationAggregate(
   try {
     const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
     const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false });
-    const result = await safeReadJson<PopulationAggregate>(processedDir, AGGREGATE_FILE);
+    const result = await safeReadJson<PopulationAggregate>(processedDir, POPULATION_AGGREGATE_FILE);
     if (!result.ok) {
       return result.reason === "corrupt" ? { status: "corrupt" } : { status: "missing" };
     }

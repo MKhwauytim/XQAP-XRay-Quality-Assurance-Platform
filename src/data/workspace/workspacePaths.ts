@@ -131,6 +131,22 @@ export const LEGACY_WORKSPACE_ROOTS = {
   templates: "templates",
 } as const;
 
+/**
+ * Children of a LEGACY population month folder that predate the numbered
+ * layout (`raw/`/`processed/` before `1-raw/`/`2-processed/`, and the
+ * sample/answers/approvals folders from before `2-samples/{month}/` existed).
+ * Read-only fallbacks — nothing new is ever written under these names. Named
+ * once here so every legacy reader and the selective-restore catalog
+ * (`backup/restoreScope.ts`) agree on them.
+ */
+export const LEGACY_MONTH_SUBFOLDERS = {
+  raw: "raw",
+  processed: "processed",
+  sample: "sample",
+  employeeAnswers: "employee-answers",
+  approvals: "approvals",
+} as const;
+
 /* --------------------------------------------------------------------------
  * Item 1.7 — directory-handle cache
  *

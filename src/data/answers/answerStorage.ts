@@ -63,13 +63,14 @@ import {
   getPopulationMonthDir,
   getSampleEmployeeDir,
   getSampleMainDir,
+  LEGACY_MONTH_SUBFOLDERS,
   safeWorkspaceFilePart,
 } from "../workspace/workspacePaths";
 import { markAnswerPendingLocally, mirrorAnswerLocally } from "./answerLocalMirror";
 
 export { ANSWER_EVENTS_DIR, ANSWER_EVENT_SEGMENT_SUFFIX };
 
-const ANSWERS_FOLDER = "employee-answers";
+const ANSWERS_FOLDER = LEGACY_MONTH_SUBFOLDERS.employeeAnswers;
 
 /**
  * `updateEmployeeRequestsFile`'s own casLoop tuning, carried over unchanged
@@ -97,8 +98,10 @@ async function getLegacyAnswersDir(
   return monthDir.getDirectoryHandle(ANSWERS_FOLDER, { create: false });
 }
 
-const ANSWERS_SUFFIX = ".answers.json";
-const REQUESTS_SUFFIX = ".requests.json";
+/** Exported for the selective-restore catalog (`backup/restoreScope.ts`). */
+export const ANSWERS_SUFFIX = ".answers.json";
+/** Exported for the selective-restore catalog (`backup/restoreScope.ts`). */
+export const REQUESTS_SUFFIX = ".requests.json";
 
 function answerFileName(username: string): string {
   // Strip path-dangerous characters so a crafted username can't escape the
