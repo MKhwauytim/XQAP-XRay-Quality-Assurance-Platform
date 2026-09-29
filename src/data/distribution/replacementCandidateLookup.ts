@@ -13,7 +13,7 @@ import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { DistributionEntry } from "./distributionTypes";
 import type { StageAliasMappings } from "../population/populationConfig";
 import type { PreparedPopulationRow } from "../population/populationTypes";
-import { getStageKey, type StageCountKey } from "../population/stageHelpers";
+import { getStageKey, STAGE_COUNT_KEY_ORDER, type StageCountKey } from "../population/stageHelpers";
 import {
   PopulationUnreadableError,
   loadMonthPopulationFinalRevision,
@@ -35,7 +35,7 @@ import {
   REPLACEMENT_POOL_LIMIT,
 } from "./replacement";
 
-const ALL_STAGE_KEYS: readonly StageCountKey[] = ["first", "second", "third", "fourth", "unknown"];
+const ALL_STAGE_KEYS: readonly StageCountKey[] = STAGE_COUNT_KEY_ORDER;
 
 /**
  * The indexed candidate lookup only ever has the slim `ReplacementIndexRow`

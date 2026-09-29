@@ -4,6 +4,7 @@ import type { PopulationFinalData } from "../data/population/monthTypes";
 import { runPopulationQuery } from "../data/population/populationQuery";
 import { formatMonthFolderShortLabel, parseMonthFolderName } from "../data/population/monthFolder";
 import type { StageAliasMappings } from "../data/population/populationConfig";
+import { STAGE_KEY_ORDER, STAGE_LABELS_AR } from "../data/population/stageLabels";
 import type { PopulationQueryWorkerRequest, PopulationQueryWorkerResponse } from "./populationQueryWorkerTypes";
 
 // This worker never receives a DirectoryHandleLike/FileSystemDirectoryHandle — the
@@ -42,21 +43,15 @@ function formatDisplayValue(value: unknown): string {
 
 // ── Stage-alias display parity (Task 4) ─────────────────────────────────────────
 // Worker-local copy of src/data/population/stageHelpers.ts's normalizeStageToken /
-// getStageKey / STAGE_LABELS_AR logic. NOT imported directly: stageHelpers.ts pulls
-// its DEFAULT_STAGE_MAPPINGS constant from populationConfig.ts, a file whose other
+// getStageKey alias-index logic. NOT imported directly: stageHelpers.ts pulls its
+// DEFAULT_STAGE_MAPPINGS constant from populationConfig.ts, a file whose other
 // exports (safeReadJson, casLoop, withResourceLock, getPopulationRoot) assume a
 // main-thread Window/File-System-Access-API context this DedicatedWorker doesn't
-// have. Duplicating this small, pure slice avoids dragging that dependency graph
-// into the worker bundle -- the same "defined locally per-file rather than shared
-// across tab boundaries" idiom BrowseDataView.tsx already uses for its yieldToMain.
-// Keep in sync with stageHelpers.ts by hand; both are covered by their own tests.
-const WORKER_STAGE_KEYS = ["first", "second", "third", "fourth"] as const;
-const WORKER_STAGE_LABELS_AR: Record<(typeof WORKER_STAGE_KEYS)[number], string> = {
-  first: "المستوى الأول",
-  second: "المستوى الثاني",
-  third: "المستوى الثالث",
-  fourth: "المستوى الرابع",
-};
+// have. Keep that logic in sync with stageHelpers.ts by hand; both are covered by
+// their own tests. The stage KEYS and Arabic LABELS, however, come from the
+// dependency-free stageLabels.ts (C1) -- the one definition, no copy.
+const WORKER_STAGE_KEYS = STAGE_KEY_ORDER;
+const WORKER_STAGE_LABELS_AR = STAGE_LABELS_AR;
 
 function normalizeStageToken(value: string): string {
   return value

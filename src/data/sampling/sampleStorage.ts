@@ -1,5 +1,5 @@
 import type { PreparedPopulationRow } from "../population/populationTypes";
-import { getStageKey } from "../population/stageHelpers";
+import { compareStageKeys, getStageKey, STAGE_LABELS_AR } from "../population/stageHelpers";
 import type { StageAliasMappings } from "../population/stageHelpers";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { readEnvelopeRevision, readOptionalJson, safeWriteJson } from "../storage/safeWrite";
@@ -172,18 +172,21 @@ function adjustStageAllocations(
 
   if (!existing) {
     if (delta < 0) return allocations;
+    // C1: the label comes from the key (never the raw row text) and the new
+    // bucket takes its canonical first→fourth position, exactly like the
+    // allocations the draw itself writes.
     return [
       ...allocations,
       {
         stageKey,
-        stageLabel: row.stage ?? "غير محدد",
+        stageLabel: STAGE_LABELS_AR[stageKey],
         populationSize: 0,
         targetQuota: 0,
         actualDrawn: 1,
         certScanDrawn: isCertScan ? 1 : 0,
         nonCertScanDrawn: isCertScan ? 0 : 1,
       },
-    ];
+    ].sort((left, right) => compareStageKeys(left.stageKey, right.stageKey));
   }
 
   return allocations.map((item) =>

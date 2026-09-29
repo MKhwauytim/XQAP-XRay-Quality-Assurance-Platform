@@ -5,6 +5,62 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v148.6",
+    "date": "2026-09-29",
+    "bucket": "fix",
+    "scope": "employee-workspace",
+    "title": "stage cells always Arabic, workspace aliases in inspection results"
+  },
+  {
+    "version": "v148.5",
+    "date": "2026-09-29",
+    "bucket": "redesign",
+    "scope": "stages",
+    "title": "import the canonical stage labels instead of local copies"
+  },
+  {
+    "version": "v148.4",
+    "date": "2026-09-29",
+    "bucket": "fix",
+    "scope": "sampling",
+    "title": "manual-add stage allocation uses the Arabic label in canonical order"
+  },
+  {
+    "version": "v148.3",
+    "date": "2026-09-29",
+    "bucket": "fix",
+    "scope": "deck2",
+    "title": "stage cards resolve level from the canonical stageKey; Reports tab loads workspace stage mappings"
+  },
+  {
+    "version": "v148.2",
+    "date": "2026-09-29",
+    "bucket": "feature",
+    "scope": "feedback",
+    "title": "admin export button in the all-messages tab"
+  },
+  {
+    "version": "v148.1",
+    "date": "2026-09-29",
+    "bucket": "feature",
+    "scope": "feedback",
+    "title": "two-sheet XLSX export builder"
+  },
+  {
+    "version": "v148.0",
+    "date": "2026-09-29",
+    "bucket": "feature",
+    "scope": "feedback",
+    "title": "resolvedAt and resolvedBy on resolve"
+  },
+  {
+    "version": "v147.4",
+    "date": "2026-09-29",
+    "bucket": "fix",
+    "scope": "auth",
+    "title": "every failed passcode attempt counts and overlapping submits are ignored"
+  },
+  {
     "version": "v147.3",
     "date": "2026-09-29",
     "bucket": "fix",
@@ -17,61 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "answers",
     "title": "answer saves no longer run under casLoop; the decision is computed once, the append runs once, and every failure queues the answer"
-  },
-  {
-    "version": "v147.1",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "sync",
-    "title": "an employee's own answer saves no longer come back as a remote answers change"
-  },
-  {
-    "version": "v147.0",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "storage",
-    "title": "sealed answer segments are no longer opened on every read, and one that grows is never missed"
-  },
-  {
-    "version": "v146.0",
-    "date": "2026-09-28",
-    "bucket": "fix",
-    "scope": "distribution",
-    "title": "take the projection write off the click path; a mirror is trusted by a sizes-only listing of the event store"
-  },
-  {
-    "version": "v145.0",
-    "date": "2026-09-28",
-    "bucket": "fix",
-    "scope": "storage",
-    "title": "a write whose commit landed is not re-committed after an unreadable NotReadable read-back; durable feedback replies and decision events retry idempotently"
-  },
-  {
-    "version": "v144.2",
-    "date": "2026-09-28",
-    "bucket": "fix",
-    "scope": "storage",
-    "title": "retry Chrome's Safe Browsing close() AbortError and give it its own error code"
-  },
-  {
-    "version": "v144.1",
-    "date": "2026-09-28",
-    "bucket": "feature",
-    "scope": "settings",
-    "title": "admin «استعادة المجتمع السابق» section, gated by canMutate, showing sample coverage"
-  },
-  {
-    "version": "v144.0",
-    "date": "2026-09-28",
-    "bucket": "feature",
-    "scope": "population",
-    "title": "recovery engine that restores a previous population.final.json from its superseded archive or .bak, under the same orphan rule as a save"
-  },
-  {
-    "version": "v143.4",
-    "date": "2026-09-28",
-    "bucket": "feature",
-    "scope": "reporting",
-    "title": "warn wherever sampled images are shown from the sample snapshot, at month load and after refreshes, with Designer-specific wording"
   }
 ];

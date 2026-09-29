@@ -17,7 +17,7 @@ import { hashJsonValue } from "../storage/jsonEnvelope";
 import { getPopulationMonthDir, POPULATION_SUBFOLDERS } from "../workspace/workspacePaths";
 import type { CertScanMatchStatus, PreparedPopulationRow } from "./populationTypes";
 import type { StageAliasMappings } from "./populationConfig";
-import { getStageKey, resolveStageMappings, type StageCountKey } from "./stageHelpers";
+import { getStageKey, resolveStageMappings, STAGE_COUNT_KEY_ORDER, type StageCountKey } from "./stageHelpers";
 import {
   REPLACEMENT_INDEX_FORMAT_VERSION,
   toReplacementIndexRow,
@@ -30,7 +30,7 @@ const REPLACEMENT_INDEX_FOLDER = "replacement-index";
 const MANIFEST_FILE = "index.manifest.json";
 
 const ALL_TIERS: readonly CertScanMatchStatus[] = ["Certscan", "NonCertscan"];
-const ALL_STAGE_KEYS: readonly StageCountKey[] = ["first", "second", "third", "fourth", "unknown"];
+const ALL_STAGE_KEYS: readonly StageCountKey[] = STAGE_COUNT_KEY_ORDER;
 
 function indexLockKey(monthFolderName: string): string {
   return `replacement-index/${monthFolderName}:rmw`;

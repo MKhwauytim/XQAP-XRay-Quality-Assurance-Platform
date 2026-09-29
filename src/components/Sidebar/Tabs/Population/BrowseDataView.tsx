@@ -37,6 +37,7 @@ import { cycleTableSort } from "../../../../utils/tableSort";
 import CertScanFilterChips from "../../../CertScanFilterChips/CertScanFilterChips";
 import { certScanFilterFromColumnFilters, withCertScanFilter } from "../../../../data/population/certScanFilter";
 import { getBrowseDisplayValue } from "./browseDisplayValue";
+import { stageLabelRank } from "../../../../data/population/stageLabels";
 import { buildBrowseFilterOptionPreview } from "./browseFilterOptions";
 import {
   runPopulationQuery,
@@ -357,16 +358,9 @@ const BROWSE_DATASETS: Array<{
   }
 ];
 
-const STAGE_FILTER_ORDER: Record<string, number> = {
-  "المستوى الأول": 1,
-  "المستوى الثاني": 2,
-  "المستوى الثالث": 3,
-  "المستوى الرابع": 4
-};
-
 function compareBrowseFilterOptions(first: string, second: string): number {
-  const firstStageOrder = STAGE_FILTER_ORDER[first];
-  const secondStageOrder = STAGE_FILTER_ORDER[second];
+  const firstStageOrder = stageLabelRank(first);
+  const secondStageOrder = stageLabelRank(second);
   if (firstStageOrder !== undefined || secondStageOrder !== undefined) {
     return (firstStageOrder ?? Number.MAX_SAFE_INTEGER) - (secondStageOrder ?? Number.MAX_SAFE_INTEGER);
   }

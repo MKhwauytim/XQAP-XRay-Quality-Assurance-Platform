@@ -95,6 +95,7 @@ describe("collectStagePortStats", () => {
         popRow({ xrayImageId: "3", stage: "SECOND_STAG", portName: "ميناء ب" }),
         popRow({ xrayImageId: "4", stage: "الثاني", portName: "ميناء ب" }),
         popRow({ xrayImageId: "5", stage: "قيمة غير معروفة", portName: "ميناء ج" }),
+        popRow({ xrayImageId: "6", stage: "LEVEL-X", portName: "ميناء ج" }),
       ]),
     );
 
@@ -108,8 +109,11 @@ describe("collectStagePortStats", () => {
     expect(stage2[0]).toMatchObject({ name: "ميناء ب", total: 2 });
 
     // Every unmapped alias collapses into the single "unknown" bucket (C1) —
-    // never its own raw string.
-    expect(byStage.get("unknown")?.[0]).toMatchObject({ name: "ميناء ج", total: 1 });
+    // never its own raw string: two DIFFERENT unmapped raw values share one
+    // bucket and their totals are summed.
+    expect(byStage.get("unknown")).toHaveLength(1);
+    expect(byStage.get("unknown")?.[0]).toMatchObject({ name: "ميناء ج", total: 2 });
+    expect([...byStage.keys()].sort()).toEqual(["first", "second", "unknown"]);
   });
 
   it("sums to the same totals as model.population.byStage (the invariant the design spec requires)", () => {
