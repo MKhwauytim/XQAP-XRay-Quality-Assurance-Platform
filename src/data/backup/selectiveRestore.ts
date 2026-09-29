@@ -8,22 +8,42 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { listDirectoryEntries } from "../storage/directoryScan";
 import { safeReadJson } from "../storage/safeWrite";
 import { isNotFoundError } from "../storage/transientFileErrors";
-import { parseMonthFolderName } from "../population/monthFolder";
+import { logError } from "../storage/errorLogger";
+import {
+  invalidateDistributionCacheForFieldEdit,
+  refreshDistributionCacheAfterWrite,
+} from "../distribution/distributionStorage";
+import type { OrphanScanResult } from "../integrity/orphanScan";
+import { runMonthIntegrityScan } from "../integrity/orphanScanLoader";
+import { parseMonthFolderName, type MonthFolderInfo } from "../population/monthFolder";
+import { invalidateMonthLockCache } from "../population/monthLock";
 import type { PopulationFinalData } from "../population/monthTypes";
+import { discardPopulationAggregate } from "../population/populationAggregate";
 import { assessPopulationOverwrite, loadPopulationOverwriteImpact } from "../population/populationOverwriteGuard";
-import { liveSampleRows } from "../sampling/sampleStorage";
+import { rebuildPopulationDerivedFiles } from "../population/populationRecovery";
+import { archiveBeforeOverwrite, readMonthPopulationFinal, supersedeStamp } from "../population/populationStorage";
+import type { PreparedPopulationRow } from "../population/populationTypes";
+import { discardReplacementIndexManifest } from "../population/replacementIndexStorage";
+import { liveSampleRows, loadSampleMaster } from "../sampling/sampleStorage";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import {
+  getPopulationMonthDir,
   LEGACY_MONTH_SUBFOLDERS,
   LEGACY_WORKSPACE_ROOTS,
   POPULATION_SUBFOLDERS,
   SAMPLE_SUBFOLDERS,
   WORKSPACE_ROOTS,
 } from "../workspace/workspacePaths";
-import { isSnapshotPayloadFile, openCompleteBackupJsonDir, restoreActionFor } from "./backupStorage";
+import {
+  isSnapshotPayloadFile,
+  openCompleteBackupJsonDir,
+  restoreActionFor,
+  restoreBackupSnapshot,
+} from "./backupStorage";
 import {
   classifyBackupPath,
   expandRestoreScope,
+  isMonthScopedElement,
   RESTORE_ELEMENT_IDS,
   validateRestoreScope,
   type RestoreElementId,
@@ -301,5 +321,205 @@ export async function planSelectiveRestore(params: {
     blocked,
     warnings: dependencyWarnings(scope),
     canConfirm: selectedFileCount > 0 && emptySelections.length === 0 && blocked.length === 0,
+  };
+}
+
+/* ───────────── the scoped run ───────────── */
+
+export type SelectiveRestoreIntegrity = {
+  month: string;
+  result: OrphanScanResult | null;
+  error: string | null;
+};
+
+export type SelectiveRestoreOutcome =
+  | { ok: true; restoredFiles: string[]; rollbackFolderName: string; integrity: SelectiveRestoreIntegrity[] }
+  | { ok: false; reason: "plan-rejected"; plan: SelectiveRestorePlan }
+  | { ok: false; reason: "restore-failed"; error: string };
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Months the engine actually wrote files of `element` into — read off its own restoredFiles. */
+function restoredMonthsFor(restoredFiles: readonly string[], element: RestoreElementId): Set<string> {
+  const months = new Set<string>();
+  for (const path of restoredFiles) {
+    const classified = classifyBackupPath(path);
+    if (classified && classified.element === element && classified.month !== null) months.add(classified.month);
+  }
+  return months;
+}
+
+/**
+ * The replacement-candidate index and the month aggregate were deliberately
+ * NOT copied (restoreScope marks them derived). Rebuild them through Workstream
+ * A's `rebuildPopulationDerivedFiles` — the single post-restore rebuild A2
+ * exported for D — after clearing what would block or mislead it (see Task 5's
+ * note on the monotonic guard). Best-effort: the restored data is already on
+ * disk, so a failure here is logged, never reported as a failed restore.
+ */
+async function rebuildPopulationDerived(
+  directoryHandle: DirectoryHandleLike,
+  month: string,
+  username: string
+): Promise<void> {
+  // month.manifest.json (status/lock) may have come back with the population.
+  invalidateMonthLockCache(month);
+  await discardReplacementIndexManifest(directoryHandle, month);
+  await discardPopulationAggregate(directoryHandle, month);
+  try {
+    const outcome = await readMonthPopulationFinal(directoryHandle, month);
+    if (outcome.status !== "loaded") return;
+    const monthDir = await getPopulationMonthDir(directoryHandle, month, false);
+    const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false });
+    await rebuildPopulationDerivedFiles(
+      directoryHandle,
+      month,
+      processedDir,
+      outcome.value.rows as unknown as PreparedPopulationRow[],
+      username
+    );
+  } catch (error) {
+    logError("backup:selective-rebuild-population", error);
+  }
+}
+
+/** distribution.current.json + checkpoint + employee mirrors, refolded from the restored events. */
+async function rebuildDistributionDerived(directoryHandle: DirectoryHandleLike, month: string): Promise<void> {
+  try {
+    await invalidateDistributionCacheForFieldEdit(directoryHandle, month);
+    const sample = await loadSampleMaster(directoryHandle, month);
+    await refreshDistributionCacheAfterWrite(directoryHandle, month, sample?.rows ?? []);
+  } catch (error) {
+    logError("backup:selective-rebuild-distribution", error);
+  }
+}
+
+const LIVE_POPULATION_FILE = "population.final.json";
+
+/**
+ * Where a month's live population.final.json sits: the numbered `2-processed/`,
+ * else the legacy `processed/`, else flat in the month folder (oldest layout).
+ * Null when the month has none (nothing to protect).
+ */
+async function findLivePopulationDir(
+  directoryHandle: DirectoryHandleLike,
+  month: string
+): Promise<DirectoryHandleLike | null> {
+  let monthDir: DirectoryHandleLike;
+  try {
+    monthDir = await getPopulationMonthDir(directoryHandle, month, false);
+  } catch (error) {
+    if (isNotFoundError(error)) return null;
+    throw error;
+  }
+  const candidates: Array<string | null> = [POPULATION_SUBFOLDERS.processed, LEGACY_MONTH_SUBFOLDERS.processed, null];
+  for (const name of candidates) {
+    let dir: DirectoryHandleLike;
+    try {
+      dir = name === null ? monthDir : await monthDir.getDirectoryHandle(name, { create: false });
+    } catch (error) {
+      if (isNotFoundError(error)) continue;
+      throw error;
+    }
+    if ((await listDirectoryEntries(dir)).some((entry) => entry.name === LIVE_POPULATION_FILE)) return dir;
+  }
+  return null;
+}
+
+/**
+ * Population rule (same as A2's recovery): the live population.final.json is
+ * ARCHIVED next to itself (`...superseded.json`, never deleted) before a
+ * restore overwrites it, so the restore can itself be undone from Settings ->
+ * «استعادة المجتمع السابق». Returns an error text when a live file could not be
+ * archived (the restore must then not start), else null.
+ */
+async function archiveLivePopulations(
+  directoryHandle: DirectoryHandleLike,
+  months: readonly string[]
+): Promise<string | null> {
+  for (const month of months) {
+    try {
+      const dir = await findLivePopulationDir(directoryHandle, month);
+      if (!dir) continue;
+      const archivedAs = await archiveBeforeOverwrite(dir, LIVE_POPULATION_FILE, supersedeStamp(), {
+        required: true,
+        retryMissingSource: true,
+      });
+      if (archivedAs === null) return `${month}: ${LIVE_POPULATION_FILE} could not be archived before the restore.`;
+    } catch (error) {
+      logError("backup:selective-archive-population", error);
+      return `${month}: ${errorText(error)}`;
+    }
+  }
+  return null;
+}
+
+/**
+ * Selective restore, end to end. Re-plans from disk first (never trusts the
+ * dialog's earlier plan), then runs the SAME engine as a full restore with a
+ * scope — assertBackupComplete, full pre-restore rollback backup, sentinel,
+ * restoreActionFor semantics — then rebuilds derived caches for the months it
+ * actually touched and runs the B3 integrity scan for every selected month.
+ */
+export async function runSelectiveRestore(params: {
+  directoryHandle: DirectoryHandleLike;
+  months: MonthFolderInfo[];
+  backupFolderName: string;
+  username: string;
+  scope: RestoreScope;
+}): Promise<SelectiveRestoreOutcome> {
+  let plan: SelectiveRestorePlan;
+  try {
+    plan = await planSelectiveRestore({
+      directoryHandle: params.directoryHandle,
+      backupFolderName: params.backupFolderName,
+      scope: params.scope,
+    });
+  } catch (error) {
+    return { ok: false, reason: "restore-failed", error: errorText(error) };
+  }
+  if (!plan.canConfirm) return { ok: false, reason: "plan-rejected", plan };
+
+  // Before ANY mutation (rollback backup, sentinel, walk): archive, never delete.
+  if (params.scope.elements.includes("population")) {
+    const archiveError = await archiveLivePopulations(params.directoryHandle, params.scope.months);
+    if (archiveError) return { ok: false, reason: "restore-failed", error: archiveError };
+  }
+
+  const result = await restoreBackupSnapshot({
+    directoryHandle: params.directoryHandle,
+    months: params.months,
+    backupFolderName: params.backupFolderName,
+    username: params.username,
+    scope: params.scope,
+  });
+  if (!result.ok) return { ok: false, reason: "restore-failed", error: result.error };
+
+  for (const month of restoredMonthsFor(result.restoredFiles, "population")) {
+    await rebuildPopulationDerived(params.directoryHandle, month, params.username);
+  }
+  for (const month of restoredMonthsFor(result.restoredFiles, "sampleDistribution")) {
+    await rebuildDistributionDerived(params.directoryHandle, month);
+  }
+
+  const integrity: SelectiveRestoreIntegrity[] = [];
+  const scannedMonths = params.scope.elements.some((element) => isMonthScopedElement(element))
+    ? params.scope.months
+    : [];
+  for (const month of scannedMonths) {
+    try {
+      integrity.push({ month, result: await runMonthIntegrityScan(params.directoryHandle, month), error: null });
+    } catch (error) {
+      integrity.push({ month, result: null, error: errorText(error) });
+    }
+  }
+
+  return {
+    ok: true,
+    restoredFiles: result.restoredFiles,
+    rollbackFolderName: result.rollbackFolderName,
+    integrity,
   };
 }
