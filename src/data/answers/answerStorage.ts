@@ -40,7 +40,7 @@ import { SEALED_REVALIDATE_MS, getSealedAnswerSegmentsEpoch } from "./answerSeal
 import { logCodedError, tagErrorOnce, type ErrorCode } from "../storage/errorCodes";
 import { createSimpleHasher } from "../storage/jsonEnvelope";
 import { listDirectoryEntries } from "../storage/directoryScan";
-import { isNotFoundError } from "../storage/transientFileErrors";
+import { isNotFoundError, isSnapshotStaleError, writeStepOf } from "../storage/transientFileErrors";
 import { ensureMonthWritable } from "../population/monthLock";
 import { bumpWorkspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
 import { subscribeToDataRefresh } from "../workspace/dataRefreshSignal";
@@ -668,6 +668,17 @@ async function updateEmployeeRequestsFile(
   telemetryAction: string
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   await ensureMonthWritable(directoryHandle, monthFolderName);
+  const fileName = requestsFileName(username);
+  // Q1 (D1 stage 1): a refused swap-to-target replace of THIS file fails fast.
+  // safeWriteJson's writeText has already retried the commit on a short
+  // ladder. A held file usually comes in bursts, so ONE more ladder is allowed
+  // (absorbs a ~1 s burst); after that the target is the same on every casLoop
+  // attempt and further attempts only burn the 30 s budget (~490 operations)
+  // before ending in the same XQ-IO-036. A retry from the UI is idempotent by
+  // requestId, so nothing is lost or duplicated. Read failures
+  // (NotReadableError) and lock contention (NoModificationAllowedError) are
+  // NOT counted here and keep the full casLoop ladder.
+  let refusedCommits = 0;
   return casLoop<{ ok: true } | { ok: false; error: string }>(
     async (writeToken) => {
       const dir = await getAnswersDir(directoryHandle, monthFolderName);
@@ -685,7 +696,12 @@ async function updateEmployeeRequestsFile(
         _writeToken: writeToken,
         lastUpdatedAt: new Date().toISOString(),
       };
-      await safeWriteJson(dir, requestsFileName(username), updated);
+      try {
+        await safeWriteJson(dir, fileName, updated);
+      } catch (error) {
+        if (isRefusedCommit(error)) refusedCommits += 1;
+        throw error;
+      }
       const verify = await loadEmployeeRequestsFile(directoryHandle, monthFolderName, username);
       if (verify.revision === nextRevision && verify._writeToken === writeToken) {
         bumpWorkspaceEpoch(directoryHandle, monthFolderName);
@@ -701,7 +717,8 @@ async function updateEmployeeRequestsFile(
       return { done: false };
     },
     {
-      context: "answers:requestsFile",
+      context: `answers:requestsFile:${fileName}`,
+      abortOn: (cause) => isRefusedCommit(cause) && refusedCommits >= REQUESTS_REFUSED_COMMIT_LIMIT,
       maxRetries: ANSWER_SAVE_MAX_RETRIES,
       baseDelayMs: ANSWER_SAVE_BASE_DELAY_MS,
       // One budget for this whole user action. Without it the 14 attempts above
@@ -711,14 +728,26 @@ async function updateEmployeeRequestsFile(
       deadline: createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "answers:interactive-write"),
       conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ طلبات الموظف بعد عدة محاولات.",
       onExhausted: (cause, code) => {
-        logError(`answerStorage:${telemetryAction}`, cause instanceof Error ? cause : new Error(String(cause)), {
-          action: telemetryAction,
-          errorCode: code,
-        });
+        // Name the step and the target so the log says WHICH file the share
+        // refused to replace (or only failed to read back), not just "requests".
+        const step = writeStepOf(cause);
+        logError(
+          `answerStorage:${telemetryAction}${step ? ` step=${step}` : ""} file=${fileName}`,
+          cause instanceof Error ? cause : new Error(String(cause)),
+          { action: telemetryAction, errorCode: code }
+        );
       },
     }
   );
 }
+
+/** A refused swap-to-target replace of the live file after writeText's own ladder. */
+function isRefusedCommit(error: unknown): boolean {
+  return writeStepOf(error) === "commit" && isSnapshotStaleError(error);
+}
+
+/** Refused-commit attempts (each already a full writeText ladder) tolerated on the SAME target. */
+const REQUESTS_REFUSED_COMMIT_LIMIT = 2;
 
 /* ───────────────────────────── loadEmployeeAnswers (§7) ─────────────────── */
 

@@ -77,6 +77,33 @@ const DECISION_REFRESH_FAMILIES: readonly DataRefreshFamily[] = [
   "answers",
 ];
 
+type MonthPending = { referrals: ReferralRequest[]; replacements: ReplacementRequest[]; reopens: ReopenRequest[] };
+type RequestLogs = Awaited<ReturnType<typeof loadRequestLogs>>;
+/** Rows of months outside a decision's scope may be this old before a full reload is forced. */
+const APPROVAL_CACHE_MAX_AGE_MS = 60_000;
+type ApprovalLoadCache = {
+  /** When the months in it were last read (a scoped reload keeps the older stamp of what it reused). */
+  at: number;
+  directoryHandle: DirectoryHandleLike;
+  selMonth: string;
+  pending: Map<string, MonthPending>;
+  selected: { logs: RequestLogs; detailMap: Record<string, DistributionEntry | PreparedPopulationRow> };
+};
+
+async function readSampleDetails(
+  directoryHandle: DirectoryHandleLike,
+  month: string
+): Promise<Record<string, DistributionEntry | PreparedPopulationRow>> {
+  const detailMap: Record<string, DistributionEntry | PreparedPopulationRow> = {};
+  const sample = await loadSampleMaster(directoryHandle, month);
+  if (sample) {
+    const distribution = await loadOrDeriveDistributionCurrentForRead(directoryHandle, month, sample.rows);
+    for (const row of sample.rows) detailMap[row.xrayImageId] = row;
+    for (const entry of distribution?.entries ?? []) detailMap[entry.xrayImageId] = entry;
+  }
+  return detailMap;
+}
+
 function unexpectedErrorMsg(error: unknown): string {
   if (error instanceof MonthClosedError) return getLabels().msg_month_closed_write_blocked;
   return error instanceof Error ? error.message : "خطأ غير معروف";
@@ -114,6 +141,11 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
   // delivered — see the refresh subscription and `settleAfterDecision` below.
   const ownDecisionBroadcastRef = useRef(false);
 
+  // What the last successful load read, so a decision can re-read only the
+  // month it changed (D6). Valid only for the (directory, selected month) it
+  // was read under; committed after the stale-load token check.
+  const loadCacheRef = useRef<ApprovalLoadCache | null>(null);
+
   // No selected on-disk month → nothing to load; land in the ready/empty state.
   useEffect(() => {
     if (!selMonth) {
@@ -122,7 +154,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
     }
   }, [selMonth]);
 
-  const loadData = useCallback(async (opts?: { silent?: boolean }) => {
+  const loadData = useCallback(async (opts?: { silent?: boolean; months?: readonly string[] }) => {
     // Invalidate any in-flight load first — even the no-month early return must
     // stale older loads, or a truthy→"" selMonth transition would let an in-flight
     // load commit stale rows over the empty-ready state.
@@ -136,9 +168,6 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
     const silent = opts?.silent ?? false;
     if (!silent) setLoadState("loading");
     try {
-      const { referrals: refLog, replacements: repLog, reopens: reoLog } =
-        await loadRequestLogs(directoryHandle, selMonth);
-
       // Cross-month pending gap: the reviewer's own global month selector is a
       // browsing convenience (persisted per-tab in sessionStorage, unaffected by
       // other users' work — see authSession's SEC-02 note) with no bearing on
@@ -171,15 +200,42 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
         ...months.map((m) => m.folderName).filter((name) => name !== selMonth),
         ...adhocFolders.filter((name) => name !== selMonth),
       ];
+      // A scoped reload reuses the last load only when that load is recent and
+      // every month it names is one this view knows by exactly that name;
+      // anything else (unknown or differently spelled month, stale cache)
+      // falls back to a full reload.
+      const held = loadCacheRef.current;
+      const cache =
+        held && held.directoryHandle === directoryHandle && held.selMonth === selMonth &&
+        Date.now() - held.at <= APPROVAL_CACHE_MAX_AGE_MS
+          ? held
+          : null;
+      const known = new Set([selMonth, ...otherMonths]);
+      const scope =
+        opts?.months && cache && opts.months.length > 0 && opts.months.every((m) => known.has(m))
+          ? new Set(opts.months)
+          : null;
+      const reuseSelected = scope !== null && !scope.has(selMonth);
+      const { referrals: refLog, replacements: repLog, reopens: reoLog } =
+        reuseSelected ? cache!.selected.logs : await loadRequestLogs(directoryHandle, selMonth);
+      const reuse = (month: string) => (scope && !scope.has(month) ? cache!.pending.get(month) : undefined);
+      const nextPending = new Map<string, MonthPending>();
       const otherMonthPending = await Promise.all(
         otherMonths.map(async (month) => {
+          const cached = reuse(month);
+          if (cached) {
+            nextPending.set(month, cached);
+            return cached;
+          }
           try {
             const { referrals: r, replacements: p, reopens: o } = await loadRequestLogs(directoryHandle, month);
-            return {
+            const pending = {
               referrals: r.requests.filter((x) => x.status === "pending"),
               replacements: p.requests.filter((x) => x.status === "pending"),
               reopens: o.requests.filter((x) => x.status === "pending"),
             };
+            nextPending.set(month, pending);
+            return pending;
           } catch {
             // One unreadable month must not blank out every other month's queue.
             return { referrals: [], replacements: [], reopens: [] };
@@ -190,14 +246,17 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
       const crossMonthReplacements = otherMonthPending.flatMap((entry) => entry.replacements);
       const crossMonthReopens = otherMonthPending.flatMap((entry) => entry.reopens);
 
-      const sample = await loadSampleMaster(directoryHandle, selMonth);
-      const detailMap: Record<string, DistributionEntry | PreparedPopulationRow> = {};
-      if (sample) {
-        const distribution = await loadOrDeriveDistributionCurrentForRead(directoryHandle, selMonth, sample.rows);
-        for (const row of sample.rows) detailMap[row.xrayImageId] = row;
-        for (const entry of distribution?.entries ?? []) detailMap[entry.xrayImageId] = entry;
-      }
+      const detailMap: Record<string, DistributionEntry | PreparedPopulationRow> = reuseSelected
+        ? cache!.selected.detailMap
+        : await readSampleDetails(directoryHandle, selMonth);
       if (token !== loadTokenRef.current) return; // superseded by a newer month selection
+      loadCacheRef.current = {
+        at: scope ? cache!.at : Date.now(),
+        directoryHandle,
+        selMonth,
+        pending: nextPending,
+        selected: { logs: { referrals: refLog, replacements: repLog, reopens: reoLog }, detailMap },
+      };
 
       const allReferrals = [...refLog.requests, ...crossMonthReferrals];
       const allReplacements = [...repLog.requests, ...crossMonthReplacements];
@@ -278,9 +337,11 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
    * `undoDecisions` pass `{ reload: false }` to each item and call this once
    * when the loop settles.
    */
-  async function settleAfterDecision(opts?: { reload?: boolean }): Promise<void> {
+  async function settleAfterDecision(opts?: { reload?: boolean }, decidedMonths?: readonly string[]): Promise<void> {
     if (!(opts?.reload ?? true)) return;
-    await loadData({ silent: true });
+    // A decision writes into its own request's month only (D6), so only those
+    // months are re-read; every other month's result comes from the last load.
+    await loadData({ silent: true, months: decidedMonths });
     ownDecisionBroadcastRef.current = true;
     try {
       notifyLocalDataChange(DECISION_REFRESH_FAMILIES);
@@ -319,7 +380,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
           target: request.requestId,
           details: { samples: request.xrayImageIds.length, toEmployee: request.toEmployee },
         });
-        await settleAfterDecision(opts);
+        await settleAfterDecision(opts, [request.monthFolderName]);
         return { ok: true };
       }
       return { ok: false, error: approvalErrorMsg(result) };
@@ -346,7 +407,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
           monthFolderName: request.monthFolderName,
           target: request.requestId,
         });
-        await settleAfterDecision(opts);
+        await settleAfterDecision(opts, [request.monthFolderName]);
         return { ok: true };
       }
       return { ok: false, error: denyErrorMsg(result) };
@@ -374,7 +435,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
           target: request.requestId,
           details: { original: request.originalXrayImageId, replacement: request.replacementXrayImageId },
         });
-        await settleAfterDecision(opts);
+        await settleAfterDecision(opts, [request.monthFolderName]);
         return { ok: true };
       }
       return { ok: false, error: approvalErrorMsg(result) };
@@ -401,7 +462,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
           monthFolderName: request.monthFolderName,
           target: request.requestId,
         });
-        await settleAfterDecision(opts);
+        await settleAfterDecision(opts, [request.monthFolderName]);
         return { ok: true };
       }
       return { ok: false, error: denyErrorMsg(result) };
@@ -430,7 +491,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
           target: request.requestId,
           details: { xrayImageId: request.xrayImageId, employee: request.employeeUsername },
         });
-        await settleAfterDecision(opts);
+        await settleAfterDecision(opts, [request.monthFolderName]);
         return { ok: true };
       }
       return { ok: false, error: approvalErrorMsg(result) };
@@ -457,7 +518,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
           monthFolderName: request.monthFolderName,
           target: request.requestId,
         });
-        await settleAfterDecision(opts);
+        await settleAfterDecision(opts, [request.monthFolderName]);
         return { ok: true };
       }
       return { ok: false, error: denyErrorMsg(result) };
@@ -528,7 +589,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
         });
       }
     } finally {
-      await settleAfterDecision();
+      await settleAfterDecision(undefined, selected.map((r) => r.monthFolderName));
     }
     return outcomes;
   }
@@ -571,7 +632,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
         }
       }
     } finally {
-      await settleAfterDecision();
+      await settleAfterDecision(undefined, entries.map((r) => r.monthFolderName));
     }
     return outcomes;
   }
