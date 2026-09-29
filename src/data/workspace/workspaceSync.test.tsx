@@ -7,6 +7,7 @@ import {
   createMemoryDirectory,
   getOperationLog,
   getReadLog,
+  clearReadLog,
   setSimulatedFaults,
 } from "../storage/memoryDirectory";
 import { safeWriteJson } from "../storage/safeWrite";
@@ -21,9 +22,10 @@ import {
   SYSTEM_FOLDER_NAMES,
   __clearWorkspaceDirCacheForTests,
 } from "./workspacePaths";
+import { invalidateMonthLockCache, isMonthClosed } from "../population/monthLock";
 import { DISTRIBUTION_EVENTS_DIR } from "../distribution/distributionEventStore";
 import { ANSWER_EVENTS_DIR } from "../answers/answerEventStore";
-import { upsertItemAnswer, __clearAnswerEventsCacheForTests } from "../answers/answerStorage";
+import { loadAllEmployeeRequestFiles, readAllAnswerEventsForMonth, reopenItemAnswer, setItemQualityNote, upsertItemAnswer, __clearAnswerEventsCacheForTests } from "../answers/answerStorage";
 import { __resetAppendOnlyEventLogMemosForTests } from "../storage/appendOnlyEventLog";
 import { __resetAnswerSegmentChainMemoForTests } from "../answers/answerSegmentChain";
 import { getSealedAnswerSegmentsEpoch } from "../answers/answerSealedSegments";
@@ -39,10 +41,13 @@ import { loadFeedback, replyToFeedback, submitFeedback } from "../feedback/feedb
 import { buildAssignEvent } from "../distribution/distributionLog";
 import {
   ALL_DATA_REFRESH_FAMILIES,
+  answersMayConcern,
   subscribeToDataChange,
   type DataRefreshDetail,
 } from "./dataRefreshSignal";
-import { __clearInFlightForTests } from "../storage/inFlightReads";
+import { __clearInFlightForTests, workspaceEpoch } from "../storage/inFlightReads";
+import { appendDistributionEvents, loadOrDeriveDistributionCurrentForRead } from "../distribution/distributionStorage";
+import { saveSampleMaster } from "../sampling/sampleStorage";
 import {
   getSyncIntervalMs,
   runSync,
@@ -65,6 +70,23 @@ async function writeRawFile(dir: DirectoryHandleLike, name: string, content: str
 }
 
 const MONTH = "5-May-2026";
+
+function makeStoreRow(id: string): Record<string, unknown> {
+  return {
+    xrayImageId: id, portName: "بري", certScanStatus: "NonCertscan", stage: null, xrayEntryDate: null, portCode: null, portType: null,
+    declarationNumber: null, declarationDate: null, plateOrContainerNumber: null, chassisNumber: null, xrayLevelOneResult: "سليمة",
+    xrayLevelTwoResult: "سليمة", movementType: "LAND", reportNumber: null, targetedByRiskEngine: null, riskMessage: null,
+    levelOneEmployee: null, levelTwoEmployee: null,
+    otherResults: { manual: { result: null, code: null, employeeId: null }, opposite: { result: null, code: null, employeeId: null }, liveMeans: { result: null, code: null, employeeId: null } },
+    notes: null, certScanSnippet: null, originalCertScanSnippet: null, biEnrichmentStatus: "BI Not Provided", biMatched: false, biFilledFields: [],
+    sourceSheetName: "بري", sourceRowNumber: 1,
+  };
+}
+function makeStoreSample(rows: unknown[]): Record<string, unknown> {
+  return { rngSeed: "s", totalRequested: rows.length, totalActual: rows.length, certScanRequested: 0, nonCertScanRequested: 0, certScanActual: 0, nonCertScanActual: rows.length, portAllocations: [], stageAllocations: [], drawnAt: new Date().toISOString(), drawnBy: "admin", rows };
+}
+const ADHOC = "adhoc-imp1";
+
 
 function makeRoot(name = "sync-root", trackReads = false): DirectoryHandleLike {
   return createMemoryDirectory(name, { trackReads }) as unknown as DirectoryHandleLike;
@@ -207,6 +229,40 @@ describe("runSync — change-set probe (§4.2 / A7)", () => {
     const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
 
     expect(changed.has("manifest")).toBe(true);
+  });
+
+  it("A2: a probed manifest change drops the cached month-lock verdict (closed month enforced within one tick)", async () => {
+    const root = makeRoot();
+    const monthDir = await getPopulationMonthDir(root, MONTH, true);
+    await safeWriteJson(monthDir, "month.manifest.json", { monthFolderName: MONTH, status: "distributed" });
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+    invalidateMonthLockCache();
+    expect(await isMonthClosed(root, MONTH)).toBe(false); // primes the (5 min) cache
+
+    // Another machine closes the month.
+    await safeWriteJson(monthDir, "month.manifest.json", { monthFolderName: MONTH, status: "closed" });
+    expect(await isMonthClosed(root, MONTH)).toBe(false); // still cached
+    const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(changed.has("manifest")).toBe(true);
+    expect(await isMonthClosed(root, MONTH)).toBe(true);
+  });
+
+  it("A2: the first probe (baseline) and a manual refresh also drop the cached verdict", async () => {
+    const root = makeRoot();
+    const monthDir = await getPopulationMonthDir(root, MONTH, true);
+    await safeWriteJson(monthDir, "month.manifest.json", { monthFolderName: MONTH, status: "distributed" });
+    invalidateMonthLockCache();
+    expect(await isMonthClosed(root, MONTH)).toBe(false);
+    // Closed by someone else before this tab's first probe: the baseline probe
+    // sees no revision delta, so it must still invalidate.
+    await safeWriteJson(monthDir, "month.manifest.json", { monthFolderName: MONTH, status: "closed" });
+    await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(await isMonthClosed(root, MONTH)).toBe(true);
+
+    // Manual refresh: unconditional.
+    await safeWriteJson(monthDir, "month.manifest.json", { monthFolderName: MONTH, status: "distributed" });
+    await runSync({ directoryHandle: root, monthFolderName: MONTH, manual: true });
+    expect(await isMonthClosed(root, MONTH)).toBe(false);
   });
 
   it("an approvals-dir change is reported as requests only, not answers", async () => {
@@ -1077,9 +1133,9 @@ describe("runSync — §6 of the answer-save proposal: the answers.events segmen
     await writeRawFile(eventsDir, "a1-ans-devA-s1.ndjson", answerSegment(["e01", "e02"]));
     const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
 
-    // Ambiguous by construction with the legacy answers-dir signature (Probe's
-    // own doc comment): both "requests" and "answers" are marked, never just one.
-    expect([...changed].sort()).toEqual(["answers", "requests"]);
+    // A9: event segments hold answers only, so this no longer also marks "requests"
+    // (a colleague saving their own answer is not a request change).
+    expect([...changed].sort()).toEqual(["answers"]);
   });
 
   it("reports the answers family when a whole new writer's answer segment appears", async () => {
@@ -1091,7 +1147,340 @@ describe("runSync — §6 of the answer-save proposal: the answers.events segmen
     await writeRawFile(eventsDir, "a1-ans-devB-s9.ndjson", answerSegment(["e02"]));
     const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
 
-    expect([...changed].sort()).toEqual(["answers", "requests"]);
+    expect([...changed].sort()).toEqual(["answers"]);
+  });
+
+  it("A9: the broadcast names whose answers the moved segments gained (owners peek)", async () => {
+    const root = makeRoot();
+    const eventsDir = await answerEventsDirFor(root);
+    await writeRawFile(eventsDir, "a1-ans-devA-s1.ndjson", answerSegment(["e01"]));
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+    const { details, stop } = captureBroadcasts();
+    try {
+      // a colleague's own answer (answeredBy emp1 in the fixture) grows a segment...
+      await writeRawFile(eventsDir, "a1-ans-devA-s1.ndjson", answerSegment(["e01", "e02"]));
+      await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      // ...and a supervisor's on-behalf answer for emp7 lands in a new chain
+      await writeRawFile(
+        eventsDir,
+        "b1-ans-devS-s2.ndjson",
+        `${JSON.stringify({ eventId: "obo1", eventType: "item-saved", eventAt: "2026-05-01T09:00:00.000Z", eventBy: "sup1", authority: "supervisor", xrayImageId: "XR-9", answers: [], status: "draft", answeredBy: "EMP7", answeredOnBehalfBy: "sup1" })}\n`
+      );
+      await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    } finally {
+      stop();
+    }
+    const owners = details.map((d) => (d.source === "periodic" ? [...(d.answerOwners ?? ["<unknown>"])].sort() : ["manual"]));
+    expect(owners).toEqual([["emp1"], ["emp7"]]);
+  });
+
+  const obo = (id: string, owner: string, by = "sup1"): string =>
+    `${JSON.stringify({ eventId: id, eventType: "item-saved", eventAt: "2026-05-01T08:00:00.000Z", eventBy: by, authority: "supervisor", xrayImageId: `XR-${id}`, answers: [], status: "draft", answeredBy: owner, answeredOnBehalfBy: by })}\n`;
+
+  it("A9: a chain that rotates inside one tick never yields a wrong non-null owner set", async () => {
+    const root = makeRoot();
+    const eventsDir = await answerEventsDirFor(root);
+    for (let c = 0; c < 30; c += 1) {
+      const b = `z${String(c).padStart(2, "0")}-ans-dev${c}-s${c}`;
+      await writeRawFile(eventsDir, `${b}.ndjson`, answerSegment([`c${c}a`]));
+      await writeRawFile(eventsDir, `${b}-1.ndjson`, answerSegment([`c${c}b`]));
+      await writeRawFile(eventsDir, `${b}-2.ndjson`, answerSegment([`c${c}c`]));
+    }
+    const sup = "a00-ans-devS-sS";
+    await writeRawFile(eventsDir, `${sup}.ndjson`, obo("s1", "empx"));
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline: sup seq 0 is a sized head
+    const { details, stop } = captureBroadcasts();
+    try {
+      await writeRawFile(eventsDir, `${sup}.ndjson`, obo("s1", "empx") + obo("s2", "empA"));
+      await writeRawFile(eventsDir, `${sup}-1.ndjson`, obo("s3", "empB"));
+      await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    } finally {
+      stop();
+    }
+    expect(details).toHaveLength(1);
+    const d = details[0]!;
+    expect(d.source === "periodic" && answersMayConcern(d, "empA")).toBe(true);
+  });
+
+  it("A9: with more live chain heads than the stat budget the owners are reported unknown", async () => {
+    const root = makeRoot();
+    const eventsDir = await answerEventsDirFor(root);
+    for (let c = 0; c < 70; c += 1) {
+      await writeRawFile(eventsDir, `m${String(c).padStart(3, "0")}-ans-dev${c}-s${c}.ndjson`, answerSegment([`h${c}`]));
+    }
+    await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    const { details, stop } = captureBroadcasts();
+    try {
+      await writeRawFile(eventsDir, "m069-ans-dev69-s69.ndjson", answerSegment(["h69"]) + obo("x1", "empA"));
+      await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    } finally {
+      stop();
+    }
+    expect(details).toHaveLength(1);
+    expect(details[0]!.source === "periodic" && details[0]!.answerOwners).toBeNull();
+    // ...so an employee who is NOT named by the (unattributable) growth still reloads
+    expect(answersMayConcern(details[0]!, "empZ")).toBe(true);
+  });
+
+  it("A9: an unclassifiable change leaves the owners unknown (null), never a guess", async () => {
+    const root = makeRoot();
+    const eventsDir = await answerEventsDirFor(root);
+    await writeRawFile(eventsDir, "a1-ans-devA-s1.ndjson", answerSegment(["e01"]));
+    await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    const { details, stop } = captureBroadcasts();
+    try {
+      await writeRawFile(eventsDir, "a1-ans-devA-s1.ndjson", answerSegment(["e01"]) + "not json\n");
+      await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    } finally {
+      stop();
+    }
+    expect(details).toHaveLength(1);
+    expect(details[0]!.source === "periodic" && details[0]!.answerOwners).toBeNull();
+  });
+
+  it("A10: an answers-only tick keeps every employee's request queues memoized; a requests change does not", async () => {
+    const root = makeRoot("rq-memo", true);
+    const eventsDir = await answerEventsDirFor(root);
+    const answersDir = await getSampleEmployeeDir(root, MONTH, true);
+    await writeRawFile(answersDir, "alice.requests.json", JSON.stringify({ username: "alice", referralRequests: [] }));
+    await writeRawFile(eventsDir, "a1-ans-devA-s1.ndjson", answerSegment(["e01"]));
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+    await loadAllEmployeeRequestFiles(root, MONTH);
+
+    await writeRawFile(eventsDir, "a1-ans-devA-s1.ndjson", answerSegment(["e01", "e02"]));
+    const answersTick = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect([...answersTick.changed]).toEqual(["answers"]);
+    clearReadLog(root);
+    await loadAllEmployeeRequestFiles(root, MONTH);
+    expect(getReadLog(root).length).toBe(0);
+
+    await writeRawFile(answersDir, "alice.requests.json", JSON.stringify({ username: "alice", referralRequests: [{ requestId: "r9" }] }));
+    const requestsTick = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(requestsTick.changed.has("requests")).toBe(true);
+    const fresh = await loadAllEmployeeRequestFiles(root, MONTH);
+    expect(fresh[0]!.referralRequests).toHaveLength(1);
+  });
+
+  it("A11: growth of a chain head is detected even when it sorts outside the last 64 segment names", async () => {
+    const root = makeRoot();
+    const eventsDir = await answerEventsDirFor(root);
+    // 40 chains x (sealed seq 0 + head seq 1) = 80 names; the oldest chain sorts FIRST.
+    const name = (c: number, seq: number): string => `m${String(c).padStart(2, "0")}-ans-dev${c}-s${c}${seq ? `-${seq}` : ""}.ndjson`;
+    for (let c = 0; c < 40; c += 1) {
+      await writeRawFile(eventsDir, name(c, 0), answerSegment([`c${c}a`]));
+      await writeRawFile(eventsDir, name(c, 1), answerSegment([`c${c}b`]));
+    }
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+    // a colleague appends to the OLDEST chain's head (name sorts before the last 64)
+    await writeRawFile(eventsDir, name(0, 1), answerSegment(["c0b", "c0-new"]));
+    const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(changed.has("answers")).toBe(true);
+    // ...and a later growth of a NEWEST head is still seen, at every tick
+    await writeRawFile(eventsDir, name(39, 1), answerSegment(["c39b", "c39-new"]));
+    expect((await runSync({ directoryHandle: root, monthFolderName: MONTH })).changed.has("answers")).toBe(true);
+  });
+
+  it("A11: the answer-segment probe stays bounded in stats however many segments exist", async () => {
+    const root = makeRoot("probe-bound", true);
+    const eventsDir = await answerEventsDirFor(root);
+    for (let c = 0; c < 150; c += 1) {
+      await writeRawFile(eventsDir, `m${String(c).padStart(3, "0")}-ans-dev${c}-s${c}.ndjson`, answerSegment([`x${c}`]));
+    }
+    await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    clearReadLog(root);
+    await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    const opened = getReadLog(root).filter((e) => e.includes("answers.events") && e.endsWith(".ndjson")).length;
+    expect(opened).toBeLessThanOrEqual(64);
+  });
+
+  it("A10: a request written between the memo read and the baseline probe is not hidden by carried answers-only ticks", async () => {
+    __clearAnswerEventsCacheForTests();
+    const root = makeRoot();
+    const eventsDir = await answerEventsDirFor(root);
+    const answersDir = await getSampleEmployeeDir(root, MONTH, true);
+    await writeRawFile(answersDir, "alice.requests.json", JSON.stringify({ username: "alice", referralRequests: [] }));
+    await writeRawFile(eventsDir, "a1-ans-devA-s1.ndjson", answerSegment(["e01"]));
+    await loadAllEmployeeRequestFiles(root, MONTH); // view mounts BEFORE the first probe
+    await writeRawFile(answersDir, "alice.requests.json", JSON.stringify({ username: "alice", referralRequests: [{ requestId: "r-remote" }] }));
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // silent baseline swallows the change
+    for (const ids of [["e01", "e02"], ["e01", "e02", "e03"]]) {
+      await writeRawFile(eventsDir, "a1-ans-devA-s1.ndjson", answerSegment(ids));
+      expect([...(await runSync({ directoryHandle: root, monthFolderName: MONTH })).changed]).toEqual(["answers"]);
+    }
+    const files = await loadAllEmployeeRequestFiles(root, MONTH);
+    expect(files.find((f) => f.username === "alice")?.referralRequests?.map((r) => r.requestId)).toContain("r-remote");
+  });
+
+  describe("A9 follow-up: ad-hoc stores are probed", () => {
+    async function adhocDirs(root: DirectoryHandleLike) {
+      const adhocMain = await getSampleMainDir(root, ADHOC, true);
+      return {
+        dist: await adhocMain.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: true }),
+        ans: await adhocMain.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: true }),
+      };
+    }
+    const onBehalf = (id: string, owner: string): string =>
+      `${JSON.stringify({ eventId: id, eventType: "item-saved", eventAt: "2026-05-01T08:00:00.000Z", eventBy: "sup1", authority: "supervisor", xrayImageId: `XR-${id}`, answers: [], status: "draft", answeredBy: owner, answeredOnBehalfBy: "sup1" })}\n`;
+
+    it("reports a new ad-hoc distribution event as distribution", async () => {
+      const root = makeRoot();
+      await getSampleMainDir(root, MONTH, true);
+      const { dist } = await adhocDirs(root);
+      await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+      await writeRawFile(dist, "x-dist-dev-s.ndjson", '{"eventId":"a1","type":"assign"}\n');
+      const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      expect(changed.has("distribution")).toBe(true);
+    });
+
+    it("reports an on-behalf answer segment in an ad-hoc store as answers with UNKNOWN owners", async () => {
+      const root = makeRoot();
+      await getSampleMainDir(root, MONTH, true);
+      const { ans } = await adhocDirs(root);
+      await writeRawFile(ans, "x-ans-dev-s.ndjson", onBehalf("o0", "empA"));
+      await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+      const { details, stop } = captureBroadcasts();
+      try {
+        await writeRawFile(ans, "x-ans-dev-s.ndjson", onBehalf("o0", "empA") + onBehalf("o1", "empA"));
+        await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      } finally {
+        stop();
+      }
+      expect(details).toHaveLength(1);
+      const d = details[0]!;
+      expect(d.source === "periodic" && d.changed.has("answers")).toBe(true);
+      expect(d.source === "periodic" && d.answerOwners).toBeNull();
+    });
+
+    it("reports a reopen and a quality note written into an ad-hoc store", async () => {
+      const root = makeRoot();
+      await getSampleMainDir(root, MONTH, true);
+      await adhocDirs(root); // an ASSIGNED store (has distribution.events): only those are probed
+      const item = {
+        xrayImageId: "XR-1", templateId: "t", templateVersion: 1, answers: [{ fieldId: "f", value: "v" }],
+        lastSavedAt: "2026-05-02T00:00:00.000Z", submittedAt: "2026-05-02T00:00:00.000Z", answeredBy: "empA", status: "submitted" as const,
+      };
+      expect((await upsertItemAnswer(root, ADHOC, "empA", item)).ok).toBe(true);
+      await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+      expect((await reopenItemAnswer(root, ADHOC, "empA", "XR-1", "sup1", "why")).ok).toBe(true);
+      expect((await runSync({ directoryHandle: root, monthFolderName: MONTH })).changed.has("answers")).toBe(true);
+      expect((await setItemQualityNote(root, ADHOC, "empA", "XR-1", "note")).ok).toBe(true);
+      expect((await runSync({ directoryHandle: root, monthFolderName: MONTH })).changed.has("answers")).toBe(true);
+    });
+
+    async function makeStores(root: DirectoryHandleLike, assigned: number, unassigned: number) {
+      const out: Array<{ id: string; dist: DirectoryHandleLike; ans: DirectoryHandleLike }> = [];
+      for (let i = 0; i < assigned; i += 1) {
+        const main = await getSampleMainDir(root, `adhoc-a${String(i).padStart(2, "0")}`, true);
+        out.push({
+          id: `a${String(i).padStart(2, "0")}`,
+          dist: await main.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: true }),
+          ans: await main.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: true }),
+        });
+      }
+      for (let i = 0; i < unassigned; i += 1) await getSampleMainDir(root, `adhoc-u${String(i).padStart(2, "0")}`, true);
+      return out;
+    }
+    const answersDirOpens = (root: DirectoryHandleLike): number =>
+      getOperationLog(root).filter((e) => e.operation === "getDirectoryHandle" && e.name === ANSWER_EVENTS_DIR).length;
+
+    it("probes only stores that have distribution events (20 stores, 3 assigned)", async () => {
+      const root = createMemoryDirectory("adhoc-20", { trackOperations: true }) as unknown as DirectoryHandleLike;
+      await getSampleMainDir(root, MONTH, true);
+      await makeStores(root, 3, 17);
+      await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline (also discovers which stores are assigned)
+      clearOperationLog(root);
+      await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      // the selected month's own probe opens answers.events once; each PROBED store opens it once
+      expect(answersDirOpens(root)).toBe(1 + 3);
+    });
+
+    it("over the cap: quiet when nothing changed, and a change in a store not probed this tick is noticed within a bounded number of ticks", async () => {
+      const root = makeRoot();
+      await getSampleMainDir(root, MONTH, true);
+      const stores = await makeStores(root, 12, 0); // cap is 8 per tick -> at most 2 ticks to cover all
+      await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      for (let i = 0; i < 4; i += 1) {
+        expect((await runSync({ directoryHandle: root, monthFolderName: MONTH })).changed.size).toBe(0);
+      }
+      await writeRawFile(stores[11]!.dist, "x-dist-dev-s.ndjson", '{"eventId":"a1","type":"assign"}\n');
+      let noticed = 0;
+      for (let tick = 1; tick <= 2 && noticed === 0; tick += 1) {
+        if ((await runSync({ directoryHandle: root, monthFolderName: MONTH })).changed.has("distribution")) noticed = tick;
+      }
+      expect(noticed).toBeGreaterThan(0);
+    });
+
+    it("a persistently failing store does not hide a change in a healthy one", async () => {
+      const root = makeRoot();
+      await getSampleMainDir(root, MONTH, true);
+      const stores = await makeStores(root, 2, 0);
+      await writeRawFile(stores[0]!.ans, "bad-ans-devB-s1.ndjson", '{"eventId":"b"}\n');
+      await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline, healthy
+      setSimulatedFaults(root, [{ operation: "getFile", name: "bad-ans-devB-s1.ndjson", errorName: "SecurityError", times: 1000 } as never]);
+      await writeRawFile(stores[1]!.dist, "x-dist-dev-s.ndjson", '{"eventId":"a1","type":"assign"}\n');
+      const seen: string[][] = [];
+      for (let t = 0; t < 3; t += 1) seen.push([...(await runSync({ directoryHandle: root, monthFolderName: MONTH })).changed]);
+      expect(seen.some((c) => c.includes("distribution"))).toBe(true);
+    });
+
+    it("an ad-hoc answers change reports answers only (never distribution)", async () => {
+      const root = makeRoot();
+      await getSampleMainDir(root, MONTH, true);
+      const stores = await makeStores(root, 2, 0);
+      await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      await writeRawFile(stores[0]!.ans, "x-ans-dev-s.ndjson", onBehalf("o1", "empA"));
+      expect([...(await runSync({ directoryHandle: root, monthFolderName: MONTH })).changed]).toEqual(["answers"]);
+    });
+
+    it("a remote ad-hoc assignment the probe reported (and a manual refresh) is visible to the next read (store epoch bumped)", async () => {
+      const root = makeRoot();
+      await getSampleMainDir(root, MONTH, true);
+      const mk = (id: string) => ({ ...makeStoreRow(id) });
+      const rows = [mk("IMG-A"), mk("IMG-B")];
+      await saveSampleMaster(root, ADHOC, makeStoreSample(rows) as never);
+      expect((await appendDistributionEvents(root, ADHOC, [buildAssignEvent({ xrayImageId: "IMG-A", assignedTo: "emp-a", eventBy: "admin" })])).ok).toBe(true);
+      await loadOrDeriveDistributionCurrentForRead(root, ADHOC, rows as never);
+      await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+      const main = await getSampleMainDir(root, ADHOC, false);
+      const dist = await main.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: false });
+      await writeRawFile(dist, "zz-remote-devR-s1.ndjson", `${JSON.stringify(buildAssignEvent({ xrayImageId: "IMG-B", assignedTo: "emp-a", eventBy: "admin2" }))}\n`);
+      const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      expect(changed.has("distribution")).toBe(true);
+      const second = await loadOrDeriveDistributionCurrentForRead(root, ADHOC, rows as never);
+      expect(second?.entries.map((e) => e.xrayImageId)).toContain("IMG-B");
+    });
+
+    it("a manual run bumps every ad-hoc store's epoch", async () => {
+      const root = makeRoot();
+      await getSampleMainDir(root, MONTH, true);
+      await makeStores(root, 2, 0);
+      await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      const before = workspaceEpoch(root, "adhoc-a00");
+      await runSync({ directoryHandle: root, monthFolderName: MONTH, manual: true });
+      expect(workspaceEpoch(root, "adhoc-a00")).toBeGreaterThan(before);
+      expect(workspaceEpoch(root, "adhoc-a01")).toBeGreaterThan(0);
+    });
+
+    it("stays quiet when nothing in the ad-hoc stores moved, and costs a bounded number of ops", async () => {
+      const root = makeRoot("adhoc-cost", true);
+      await getSampleMainDir(root, MONTH, true);
+      await adhocDirs(root);
+      await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      clearReadLog(root);
+      const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      expect(changed.size).toBe(0);
+      expect(getReadLog(root).filter((e) => e.includes("adhoc-")).length).toBeLessThanOrEqual(12);
+    });
+  });
+
+  it("A9: a per-employee requests file change is reported as requests (it had no probe of its own)", async () => {
+    const root = makeRoot();
+    const answersDir = await getSampleEmployeeDir(root, MONTH, true);
+    await writeRawFile(answersDir, "alice.requests.json", "[]");
+    await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    await writeRawFile(answersDir, "alice.requests.json", '[{"requestId":"r1"}]');
+    const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect([...changed]).toEqual(["requests"]);
   });
 
   it("reports nothing on a tick where the answer segments genuinely did not change", async () => {
@@ -1148,8 +1537,38 @@ describe("runSync — this session's own answer appends do not report the answer
     const epochBefore = getSealedAnswerSegmentsEpoch();
     const other = await runSync({ directoryHandle: root, monthFolderName: MONTH });
     expect(other.changed.has("answers")).toBe(true);
-    // ...and it makes the answers reader forget which segments it thought were sealed (S3).
-    expect(getSealedAnswerSegmentsEpoch()).toBeGreaterThan(epochBefore);
+    // A4: a colleague's NEW segment unseals nothing, so it must not make the
+    // reader forget every sealed confirmation any more (that made the next save
+    // re-stat every sealed segment of the month).
+    expect(getSealedAnswerSegmentsEpoch()).toBe(epochBefore);
+  });
+
+  it("A4: a probed size change of a segment invalidates exactly that name; a sealed segment that grows is re-opened", async () => {
+    const root = makeRoot("sealed-names", true);
+    const main = await getSampleMainDir(root, MONTH, true);
+    const eventsDir = await main.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: true });
+    const ev = (id: string): string =>
+      `${JSON.stringify({ eventId: id, eventType: "item-saved", eventAt: "2026-05-01T08:00:00.000Z", eventBy: "emp2", authority: "self", xrayImageId: `XR-${id}`, answers: [], status: "draft", answeredBy: "emp2" })}\n`;
+    for (const chain of ["a", "b"]) {
+      await writeRawFile(eventsDir, `ans-dev-${chain}-s${chain}.ndjson`, ev(`${chain}0`));
+      await writeRawFile(eventsDir, `ans-dev-${chain}-s${chain}-1.ndjson`, ev(`${chain}1`));
+    }
+    await readAllAnswerEventsForMonth(root, MONTH);
+    await readAllAnswerEventsForMonth(root, MONTH); // both seq0 confirmed sealed
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    // Bytes land in a confirmed-sealed segment (the late-append hazard).
+    const before = await (await (await eventsDir.getFileHandle("ans-dev-a-sa.ndjson")).getFile()).text();
+    await writeRawFile(eventsDir, "ans-dev-a-sa.ndjson", before + ev("LATE"));
+    const epochBefore = getSealedAnswerSegmentsEpoch();
+    const tick = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(tick.changed.has("answers")).toBe(true);
+    expect(getSealedAnswerSegmentsEpoch()).toBe(epochBefore); // not a wholesale wipe...
+    clearReadLog(root);
+    expect((await readAllAnswerEventsForMonth(root, MONTH)).map((e) => e.eventId)).toContain("LATE"); // ...yet not missed
+    const reads = getReadLog(root);
+    expect(reads.some((e) => e.endsWith("ans-dev-a-sa.ndjson"))).toBe(true);
+    expect(reads.some((e) => e.endsWith("ans-dev-b-sb.ndjson"))).toBe(false); // untouched sealed segment stays skipped
   });
 
   it("a manual refresh also forgets sealed-segment confirmations", async () => {

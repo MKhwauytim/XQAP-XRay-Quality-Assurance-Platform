@@ -8,9 +8,13 @@
  * Deliberate design decisions:
  * - FAIL-OPEN on a missing or unreadable manifest: a broken manifest must not
  *   brick all writes. The close state is governance, not security.
- * - 30 s TTL cache per month: another machine's close becomes effective here
- *   within 30 s; every write path re-checks at write time. Acceptable for
- *   governance semantics.
+ * - 5 min TTL cache per month (was 30 s, shorter than a typical save cadence, so
+ *   every answer save paid 4 serial share round trips for the manifest). It is a
+ *   backstop only: `workspaceSync.ts` drops it whenever its 45 s probe sees the
+ *   month manifest's revision move (and on the baseline probe and a manual
+ *   refresh), and `closeMonth`/`reopenMonth`/restore drop it in-tab, so another
+ *   machine's close is enforced here within one sync tick. Every write path
+ *   re-checks at write time. Acceptable for governance semantics.
  * - Demo/viewer read-only mode never throws (writes are no-ops anyway).
  * - `closeMonth`/`reopenMonth` bypass `updateMonthStatus` (whose monotonic rank
  *   guard would refuse the "closed" state and the reopen downgrade), but they
@@ -40,7 +44,7 @@ export function manifestLockKey(monthFolderName: string): string {
 }
 
 const MANIFEST_FILE = "month.manifest.json";
-const DEFAULT_CACHE_TTL_MS = 30_000;
+const DEFAULT_CACHE_TTL_MS = 5 * 60_000;
 
 /**
  * Sentinel `closedBy` value stamped by the automatic post-distribution lock

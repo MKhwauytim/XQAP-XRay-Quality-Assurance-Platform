@@ -27,7 +27,7 @@ import type { DirectoryHandleLike } from "./fileSystemAccess";
 import { readOptionalJson, safeWriteJson } from "./safeWrite";
 import { errorCodeOf } from "./errorCodes";
 
-import { loadEmployeeAnswers, upsertItemAnswer } from "../answers/answerStorage";
+import { clearAnswerEventsCache, loadEmployeeAnswers, upsertItemAnswer } from "../answers/answerStorage";
 import type { ItemAnswer } from "../answers/answerTypes";
 import { appendWorkspaceAction, readWorkspaceActions } from "../audit/actionLog";
 import { actionsFileName } from "../audit/auditPaths";
@@ -308,6 +308,9 @@ describe("P0-1 answerStorage: an unreadable answer file never becomes an empty o
   it("never truncates 20 answers to 1 when the base read THROWS", async () => {
     const root = makeRoot();
     const fileName = await seedTwentyAnswers(root);
+    // A fresh session: the in-tab legacy-seed memo (A3) is populated by a
+    // successful read, so the fault must meet the FIRST read of a session.
+    clearAnswerEventsCache();
 
     makeBaseReadTransientlyUnreadable(root, fileName);
     const result = await upsertItemAnswer(root, MONTH, "emp1", makeAnswer("X-new"));
@@ -333,11 +336,16 @@ describe("P0-1 answerStorage: an unreadable answer file never becomes an empty o
     const fileName = await seedTwentyAnswers(root);
     const answersDir = await getSampleEmployeeDir(root, MONTH, true);
     await corruptInPlace(answersDir, fileName);
+    // A fresh session (see above): the first read of the frozen legacy file
+    // still throws, so the write is refused rather than seeding from nothing.
+    clearAnswerEventsCache();
 
     const result = await upsertItemAnswer(root, MONTH, "emp1", makeAnswer("X-new"));
     expect(result.ok).toBe(false);
     await expectUnreadableRejection(loadEmployeeAnswers(root, MONTH, "emp1"));
-  });
+    // The refused save spends its 30 s interactive budget on the retry ladder (15 s on the
+    // untouched base), so the default 20 s limit is one loaded CI run away from flaking.
+  }, 60_000);
 
   it("still returns the empty shell when the employee genuinely has no file", async () => {
     const root = makeRoot();

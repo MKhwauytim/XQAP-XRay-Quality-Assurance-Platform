@@ -26,6 +26,8 @@ export function createFakeIndexedDb<TRecord extends { key: string }>() {
   const table = new Map<string, TRecord>();
   let storeCreated = false;
   let pendingRequests = 0;
+  let closeCalls = 0;
+  let openCalls = 0;
 
   function makeRequest<T>(work: () => T): {
     result?: T;
@@ -59,6 +61,7 @@ export function createFakeIndexedDb<TRecord extends { key: string }>() {
       get: (key: string) => makeRequest(() => table.get(key)),
       getAll: () => makeRequest(() => [...table.values()]),
       put: (value: TRecord) => makeRequest(() => { table.set(value.key, value); return undefined; }),
+      delete: (key: string) => makeRequest(() => { table.delete(key); return undefined; }),
     };
   }
 
@@ -92,11 +95,15 @@ export function createFakeIndexedDb<TRecord extends { key: string }>() {
     objectStoreNames: { contains: () => storeCreated },
     createObjectStore: () => { storeCreated = true; return objectStore(); },
     transaction,
-    close: () => {},
+    close: () => { closeCalls += 1; },
+    // Handlers the module under test may install; tests call them to simulate the browser.
+    onversionchange: null as (() => void) | null,
+    onclose: null as (() => void) | null,
   };
 
   const fakeIndexedDb = {
     open: (_name: string, _version: number) => {
+      openCalls += 1;
       const request: {
         result?: typeof db;
         onupgradeneeded: (() => void) | null;
@@ -113,5 +120,13 @@ export function createFakeIndexedDb<TRecord extends { key: string }>() {
     },
   };
 
-  return { fakeIndexedDb, table };
+  return {
+    fakeIndexedDb,
+    table,
+    db,
+    /** How many times the module under test called `db.close()`. */
+    getCloseCalls: () => closeCalls,
+    /** How many times it called `indexedDB.open()`. */
+    getOpenCalls: () => openCalls,
+  };
 }

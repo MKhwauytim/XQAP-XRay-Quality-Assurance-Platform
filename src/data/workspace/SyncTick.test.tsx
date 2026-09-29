@@ -64,6 +64,9 @@ describe("SyncTick — the single automatic trigger", () => {
     mocks.lastSyncStartedAt = 0;
     mocks.runSync.mockClear();
     mocks.workspace.refreshPermissions.mockClear();
+    // The interval run is delayed by a random 0-20 % of the cadence (A8 jitter);
+    // pin it to 0 so these tests keep asserting the trigger's contract.
+    vi.spyOn(Math, "random").mockReturnValue(0);
   });
 
   afterEach(() => {
@@ -239,5 +242,19 @@ describe("SyncTick — re-arms at the workspace's configured cadence", () => {
 
     // Exactly one new interval installed for the new cadence.
     expect(setIntervalSpy.mock.calls.filter((call) => call[1] === 60_000)).toHaveLength(1);
+  });
+
+  it("A8: the interval run starts after a random 0-20 % of the cadence, so clients do not probe in lockstep", () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(Math, "random").mockReturnValue(0.5); // 10 % of the cadence
+      render(<SyncTick />);
+      vi.advanceTimersByTime(SYNC_TICK_INTERVAL_MS);
+      expect(mocks.runSync).toHaveBeenCalledTimes(0);
+      vi.advanceTimersByTime(SYNC_TICK_INTERVAL_MS * 0.1 + 1);
+      expect(mocks.runSync).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

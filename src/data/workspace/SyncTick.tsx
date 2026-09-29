@@ -93,7 +93,24 @@ export function SyncTick({ enabled = true }: SyncTickProps): null {
     // the subscription above, off the sync run) clears the in-flight timer and
     // reinstalls it at the new value immediately — the old cadence does not
     // have to elapse one more time first.
-    const intervalId = window.setInterval(tick, intervalMs);
+    // Desynchronise clients that started together (a shared login time, a
+    // morning boot): each interval run starts after a random 0-20 % of the
+    // cadence, so N clients' probes do not all hit the share on the same
+    // second. The cadence itself is unchanged (a run still starts once per
+    // interval); visibility-triggered runs below are not delayed.
+    let pendingJitter: number | undefined;
+    const intervalId = window.setInterval(() => {
+      const delay = Math.floor(Math.random() * 0.2 * intervalMs);
+      if (delay <= 0) {
+        tick();
+        return;
+      }
+      if (pendingJitter !== undefined) window.clearTimeout(pendingJitter);
+      pendingJitter = window.setTimeout(() => {
+        pendingJitter = undefined;
+        tick();
+      }, delay);
+    }, intervalMs);
 
     // Fire one gated run on hidden->visible, coalesced against the last run of
     // EITHER trigger so tab-switch-thrashing cannot issue more than one probe
@@ -108,6 +125,7 @@ export function SyncTick({ enabled = true }: SyncTickProps): null {
 
     return () => {
       window.clearInterval(intervalId);
+      if (pendingJitter !== undefined) window.clearTimeout(pendingJitter);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [enabled, status, directoryHandle, monthFolderName, refreshPermissions, intervalMs]);

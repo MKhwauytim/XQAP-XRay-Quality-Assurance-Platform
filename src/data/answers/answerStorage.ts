@@ -30,19 +30,27 @@ import { readOptionalJson, safeWriteJson } from "../storage/safeWrite";
 import { casFailureFromCause, casLoop, isPermissionLostError, withJitter } from "../storage/casLoop";
 import {
   createDeadline,
+  recordLadderDwell,
+  totalLadderDwellMs,
   INTERACTIVE_WRITE_DEADLINE_MS,
   isDeadlineExpired,
   nextRetryDelayMs,
   type OperationDeadline,
 } from "../storage/operationDeadline";
 import { logError } from "../storage/errorLogger";
-import { SEALED_REVALIDATE_MS, getSealedAnswerSegmentsEpoch } from "./answerSealedSegments";
+import {
+  SEALED_REVALIDATE_MS,
+  getSealedAnswerSegmentsEpoch,
+  getSealedNamesGeneration,
+  stillSealedNames,
+} from "./answerSealedSegments";
 import { logCodedError, tagErrorOnce, type ErrorCode } from "../storage/errorCodes";
 import { createSimpleHasher } from "../storage/jsonEnvelope";
 import { listDirectoryEntries } from "../storage/directoryScan";
 import { isNotFoundError, isSnapshotStaleError, writeStepOf } from "../storage/transientFileErrors";
 import { ensureMonthWritable } from "../population/monthLock";
-import { bumpWorkspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
+import { bumpWorkspaceEpoch, workspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
+import { mapWithConcurrency } from "../storage/concurrency";
 import { subscribeToDataRefresh } from "../workspace/dataRefreshSignal";
 import { getDistributionDeviceId } from "../distribution/distributionEventStore";
 import { stableAnswerChain } from "./answerSegmentChain";
@@ -290,12 +298,58 @@ type AnswerEventsCacheEntry = {
   /** Freshness of `sealedConfirmed` — see `answerSealedSegments.ts`. */
   sealedEpoch?: number;
   sealedAtMs?: number;
+  /** `getSealedNamesGeneration()` taken BEFORE the read that produced `sealedConfirmed`. */
+  sealedNamesGen?: number;
   /** Names the last SUCCESSFUL listing showed: the writer's floor (`listedSegmentNames`). */
   listedSegmentNames?: readonly string[];
 };
 
 /** WeakMap<workspace root, Map<monthFolderName, entry>> — see the module doc's SCOPING note. */
 let answerEventsCacheByRoot = new WeakMap<DirectoryHandleLike, Map<string, AnswerEventsCacheEntry>>();
+
+/**
+ * The frozen legacy seed (hash + items) of an employee this tab has already
+ * seen SEEDED, per (root, month, user). `{user}.answers.json` is frozen forever
+ * once a `migration-seed` event exists (only the test/seed-only
+ * `saveEmployeeAnswers` can still write it, and it drops the memo), so re-reading
+ * it on every save cost 4 serial share round trips for an answer that could not
+ * differ. Populated ONLY by `resolveSeed` after a successful read of an already
+ * seeded employee — never from a failed or missing read, so an unreadable
+ * legacy file still throws on the first read of a session (P0-1) and an absent
+ * one is never memoized before the shell is frozen. Dropped together with the
+ * events cache (manual refresh, restore) — same lifetime, same scoping.
+ */
+let legacySeedMemoByRoot = new WeakMap<DirectoryHandleLike, Map<string, AnswerLegacySeed>>();
+
+function legacySeedMemoKey(monthFolderName: string, username: string): string {
+  return `${monthFolderName}\u0000${username.trim().toLowerCase()}`;
+}
+
+function getLegacySeedMemo(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  username: string
+): AnswerLegacySeed | undefined {
+  return legacySeedMemoByRoot.get(directoryHandle)?.get(legacySeedMemoKey(monthFolderName, username));
+}
+
+function setLegacySeedMemo(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  username: string,
+  seed: AnswerLegacySeed
+): void {
+  let perRoot = legacySeedMemoByRoot.get(directoryHandle);
+  if (!perRoot) {
+    perRoot = new Map();
+    legacySeedMemoByRoot.set(directoryHandle, perRoot);
+  }
+  perRoot.set(legacySeedMemoKey(monthFolderName, username), seed);
+}
+
+function dropLegacySeedMemo(directoryHandle: DirectoryHandleLike, monthFolderName: string, username: string): void {
+  legacySeedMemoByRoot.get(directoryHandle)?.delete(legacySeedMemoKey(monthFolderName, username));
+}
 
 /**
  * Test-only: drop the whole `answers.events/` read cache for every root.
@@ -319,6 +373,10 @@ export function __clearAnswerEventsCacheForTests(): void {
  */
 export function clearAnswerEventsCache(): void {
   answerEventsCacheByRoot = new WeakMap();
+  legacySeedMemoByRoot = new WeakMap();
+  requestQueuesMemo.clear();
+  legacyRequestQueuesMemo.clear();
+  requestProbeGeneration.clear();
 }
 
 /**
@@ -358,6 +416,10 @@ function setAnswerEventsCacheEntry(
  *  needed, since nothing here requires a targeted per-root clear. */
 function resetAnswerEventsCache(): void {
   answerEventsCacheByRoot = new WeakMap();
+  legacySeedMemoByRoot = new WeakMap();
+  requestQueuesMemo.clear();
+  legacyRequestQueuesMemo.clear();
+  requestProbeGeneration.clear();
 }
 
 /** @internal test-only alias — see `resetAnswerEventsCache`. */
@@ -440,6 +502,7 @@ export async function readAllAnswerEventsForMonth(
     // read failure — BEFORE returning a delta, so a skipped/unreadable segment
     // can never reach the cache write below as if it had been read cleanly.
     const epoch = getSealedAnswerSegmentsEpoch();
+    const namesGen = getSealedNamesGeneration();
     const nowMs = Date.now();
     const sealedFresh =
       cached?.sealedConfirmed !== undefined &&
@@ -447,7 +510,9 @@ export async function readAllAnswerEventsForMonth(
       nowMs - (cached.sealedAtMs ?? 0) < SEALED_REVALIDATE_MS;
     const delta = await readAnswerEventDelta(mainDir, cached?.offsets ?? {}, undefined, {
       ...options,
-      sealedConfirmed: sealedFresh ? cached.sealedConfirmed : undefined,
+      // Names the probe saw move since they were confirmed are dropped from the
+      // set (and so re-opened by this read); every other confirmation survives.
+      sealedConfirmed: sealedFresh ? stillSealedNames(cached.sealedConfirmed!, cached.sealedNamesGen ?? 0) : undefined,
     });
     const events = cached ? new Map(cached.events) : new Map<string, AnswerEvent>();
     for (const event of delta.events) events.set(event.eventId, event);
@@ -456,6 +521,7 @@ export async function readAllAnswerEventsForMonth(
       offsets: delta.offsets,
       sealedConfirmed: delta.sealedConfirmedNames,
       sealedEpoch: epoch,
+      sealedNamesGen: namesGen,
       // A revalidating read (everything re-opened) restarts the interval; a read
       // that reused the confirmations keeps the ORIGINAL timestamp, so the
       // window is fixed rather than sliding forever under frequent reads.
@@ -837,12 +903,24 @@ async function resolveSeed(
   eventAt: string
 ): Promise<{ seedEvent: AnswerEvent | null; legacySeed: AnswerLegacySeed }> {
   const alreadySeeded = ownEvents.some((event) => event.eventType === "migration-seed");
+  if (alreadySeeded) {
+    // Frozen once seeded (see `legacySeedMemoByRoot`): after one successful read
+    // this session, every later save reuses it instead of re-reading the share.
+    const memo = getLegacySeedMemo(directoryHandle, monthFolderName, username);
+    if (memo) return { seedEvent: null, legacySeed: memo };
+  }
   const legacy = await loadLegacyAnswersFile(directoryHandle, monthFolderName, username);
   const legacySeed: AnswerLegacySeed = {
     contentHash: legacyContentHashOf(legacy),
     items: legacy?.items ?? [],
   };
-  if (alreadySeeded) return { seedEvent: null, legacySeed };
+  if (alreadySeeded) {
+    // Only a read that FOUND the file may be memoized. An absent answer (`legacy === null`)
+    // from an already-seeded employee is a transient share hiccup, not the truth: memoizing
+    // its empty seed would make every later fold fail its hash check for the whole session.
+    if (legacy !== null) setLegacySeedMemo(directoryHandle, monthFolderName, username, legacySeed);
+    return { seedEvent: null, legacySeed };
+  }
 
   if (!legacy) {
     const answersDir = await getAnswersDir(directoryHandle, monthFolderName);
@@ -867,6 +945,40 @@ type AnswerWriteDecision =
   | { skip: true };
 
 /**
+ * A save whose retry ladders slept at least this long in total writes one
+ * error-log entry (`logLadderDwell`). Below it a save is healthy as far as the
+ * ladders go, and logging every save would only add noise.
+ */
+export const LADDER_DWELL_LOG_THRESHOLD_MS = 1000;
+
+/**
+ * Telemetry only (A7): say WHICH retry ladder a slow save waited on. The sleeps
+ * are accumulated per step on the action's deadline (`recordLadderDwell`); this
+ * turns them into one error-log entry — `outcome`, the total, each step
+ * (`append.reread`, `append.write`, `append.blocked-replace`, `append.verify`,
+ * `decision-read`) and the wall time of the append — for a save that slept at
+ * least the threshold, or any FAILED save that slept at all. No behaviour depends on it.
+ */
+function logLadderDwell(
+  deadline: OperationDeadline,
+  telemetryAction: string,
+  outcome: "ok" | "failed",
+  startedAtMs: number
+): void {
+  const total = totalLadderDwellMs(deadline);
+  if (total < LADDER_DWELL_LOG_THRESHOLD_MS && !(outcome === "failed" && total > 0)) return;
+  const steps = Object.entries(deadline.dwellMs ?? {})
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([step, ms]) => `${step}=${Math.round(ms)}`)
+    .join(" ");
+  logError(
+    `answerStorage:${telemetryAction}:ladder-dwell`,
+    new Error(`ladder dwell outcome=${outcome} total=${Math.round(total)} ${steps} elapsed=${Date.now() - startedAtMs}ms`),
+    { action: telemetryAction }
+  );
+}
+
+/**
  * Re-run the READ side of an answer write (month read, seed resolution, fold,
  * `build`) when it throws — a transient share fault such as a stale-snapshot
  * `InvalidStateError` on the read-back, which the ladder inside the read does
@@ -889,10 +1001,66 @@ async function retryDecisionRead<T>(deadline: OperationDeadline, step: () => Pro
     if (attempt < ANSWER_SAVE_MAX_RETRIES - 1) {
       const delay = nextRetryDelayMs(withJitter(ANSWER_SAVE_BASE_DELAY_MS * (attempt + 1)), deadline);
       if (delay === null) break;
+      recordLadderDwell(deadline, "decision-read", delay);
       await new Promise<void>((resolve) => setTimeout(resolve, delay));
     }
   }
   throw lastError;
+}
+
+/**
+ * The decision step of a plain self-save WITHOUT reading the month (A5).
+ *
+ * Why it is safe: for `upsertItemAnswer` the decision (`build`) never depends on
+ * `previous` -- it always appends the same `item-saved`; `previous` only feeds
+ * the IndexedDB mirror candidate's history fields. "Seeded" is monotonic (a
+ * `migration-seed` event is never removed), so once this tab has observed the
+ * employee seeded there is no seeding to do. The append itself re-reads its OWN
+ * target segment under the chain lock before rewriting it (E1 guards, unreadable
+ * segments never overwritten) and never depended on the month read, and the
+ * fold orders whatever lands by `(eventAt, authority, eventId)`, so the events
+ * appended -- and the folded state -- are identical to the full-read path.
+ *
+ * Only taken when this tab's events cache holds a `migration-seed` event of the
+ * employee (the queue view's own load usually warmed it). The frozen legacy seed
+ * comes from the session memo (set by `resolveSeed`, or here) or, if absent, is
+ * read ONCE now (4 ops) and memoized only when the file was FOUND. A manual
+ * refresh or a restore drops the cache and the memo (`clearAnswerEventsCache`),
+ * so the next save reads in full. Returns null (never throws) whenever the cache
+ * has no seed, the legacy read is absent/failed, or the cached fold cannot be
+ * built -- the caller then runs the unchanged full path, which reports any real
+ * problem itself. `previous` is folded from the cache, so it can lag a colleague's
+ * very latest event; that only affects the local mirror's history fields (the
+ * backfill overwrites a mirror record only with a strictly NEWER disk item).
+ */
+async function decideFromSeededCache(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  username: string,
+  xrayImageId: string,
+  build: (ctx: { previous: ItemAnswer | undefined }) => AnswerWriteDecision
+): Promise<{ previous: ItemAnswer | undefined; decision: AnswerWriteDecision } | null> {
+  const entry = getAnswerEventsCacheEntry(directoryHandle, monthFolderName);
+  if (!entry) return null;
+  const ownEvents = eventsForEmployee([...entry.events.values()], username);
+  if (!ownEvents.some((event) => event.eventType === "migration-seed")) return null;
+  try {
+    let legacySeed = getLegacySeedMemo(directoryHandle, monthFolderName, username);
+    if (!legacySeed) {
+      // The cache already proves the employee is seeded (typically warmed by the queue
+      // view's own load), so the month need not be re-read; only the frozen legacy seed
+      // is missing. Read it once (4 ops), memoizing only a FOUND file (never absent/failed).
+      const legacy = await loadLegacyAnswersFile(directoryHandle, monthFolderName, username);
+      if (legacy === null) return null;
+      legacySeed = { contentHash: legacyContentHashOf(legacy), items: legacy.items };
+      setLegacySeedMemo(directoryHandle, monthFolderName, username, legacySeed);
+    }
+    const folded = foldEmployeeEvents(ownEvents, { legacySeed, username, monthFolderName });
+    const previous = folded.file.items.find((item) => item.xrayImageId === xrayImageId);
+    return { previous, decision: build({ previous }) };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -917,7 +1085,8 @@ async function performAnswerWrite(
   username: string,
   xrayImageId: string,
   build: (ctx: { previous: ItemAnswer | undefined }) => AnswerWriteDecision,
-  telemetryAction: string
+  telemetryAction: string,
+  options: { blindAppendWhenSeeded?: boolean } = {}
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   await ensureMonthWritable(directoryHandle, monthFolderName);
   const eventId = crypto.randomUUID();
@@ -926,6 +1095,7 @@ async function performAnswerWrite(
   // ONE budget for the whole user action, spent by the append's inner ladders
   // (A1) — see operationDeadline.ts.
   const deadline = createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "answers:interactive-write");
+  const startedAtMs = Date.now();
   // No pre-change history write here any more. The state a snapshot would have
   // copied is already durable in `answers.events/*.ndjson`, which is
   // append-only and never pruned, so `actionHistoryReaders.ts` derives the same
@@ -989,6 +1159,14 @@ async function performAnswerWrite(
       // Resolving the month folder is a share round trip like any other read
       // here; a transient fault on it is retried with the rest of this step.
       const mainDir = await getSampleMainDir(directoryHandle, monthFolderName, true);
+      if (options.blindAppendWhenSeeded) {
+        // A plain self-save by an employee this tab already knows is seeded:
+        // skip the pre-append month read (one getFile per unsealed segment of
+        // the whole month) -- see `decideFromSeededCache`. Null means "not
+        // provably safe": fall through to the full read, exactly as before.
+        const cachedDecision = await decideFromSeededCache(directoryHandle, monthFolderName, username, xrayImageId, build);
+        if (cachedDecision) return { mainDir, seedEvent: null, blind: true, ...cachedDecision };
+      }
       const allEvents = await readAllAnswerEventsForMonth(directoryHandle, monthFolderName);
       const ownEvents = eventsForEmployee(allEvents, username);
 
@@ -1006,9 +1184,9 @@ async function performAnswerWrite(
         { legacySeed, username, monthFolderName }
       );
       const previous = foldedNow.file.items.find((item) => item.xrayImageId === xrayImageId);
-      return { mainDir, seedEvent, previous, decision: build({ previous }) };
+      return { mainDir, seedEvent, blind: false, previous, decision: build({ previous }) };
     });
-    const { mainDir, seedEvent, previous, decision } = decided;
+    const { mainDir, seedEvent, previous, decision, blind } = decided;
     if ("skip" in decision) return { ok: true as const };
 
     const event: AnswerEvent = { ...decision.event, eventId, eventAt, answeredBy: username };
@@ -1018,6 +1196,8 @@ async function performAnswerWrite(
     await appendAnswerEventSegment(mainDir, batch, writer, segmentConfig, {
       deadline,
       listedSegmentNames: listedAnswerSegmentNames(directoryHandle, monthFolderName),
+      // A blind append has no fresh listing: probe for a head another tab rotated to.
+      probeAheadForHead: blind,
     });
     reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
     return { ok: true as const };
@@ -1041,6 +1221,7 @@ async function performAnswerWrite(
     return casFailureFromCause(error, { context: `answers:${telemetryAction}`, onExhausted });
   });
   return written.then(async (result) => {
+    logLadderDwell(deadline, telemetryAction, result.ok ? "ok" : "failed", startedAtMs);
     // Cache/derived-state refresh, after the durable append, never gating the
     // save's own success — same contract as distribution's
     // `refreshDistributionCacheAfterWrite` (awaited, wrapped so its own
@@ -1138,6 +1319,8 @@ export async function saveEmployeeAnswers(
         }),
       };
       await safeWriteJson(dir, answerFileName(username), updated);
+      // The one legacy writer left: whatever seed this tab memoized is stale now.
+      dropLegacySeedMemo(directoryHandle, monthFolderName, username);
       const verify = await loadLegacyAnswersFile(directoryHandle, monthFolderName, username);
       if (verify?.revision === nextRevision && verify._writeToken === writeToken) {
         bumpWorkspaceEpoch(directoryHandle, monthFolderName);
@@ -1229,7 +1412,10 @@ export async function upsertItemAnswer(
         // attribution through this path — matching the pre-Stage-2 `stripOnBehalf`.
       },
     }),
-    "answer-save"
+    "answer-save",
+    // Only this writer: its decision never reads `previous` (see decideFromSeededCache).
+    // Reopen and quality-note decide FROM `previous`, and on-behalf has its own protocol.
+    { blindAppendWhenSeeded: true }
   );
 }
 
@@ -1301,6 +1487,7 @@ async function performOnBehalfWrite(
   // ONE budget for the whole user action, shared by casLoop (new attempts) and
   // the append's inner ladders (A1) — see operationDeadline.ts.
   const deadline = createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "answers:interactive-write");
+  const startedAtMs = Date.now();
   const xrayImageId = item.xrayImageId;
 
   const result = await casLoop<{ ok: true } | { ok: false; error: string }>(
@@ -1400,6 +1587,7 @@ async function performOnBehalfWrite(
       },
     }
   );
+  logLadderDwell(deadline, "answer-save-on-behalf", result.ok ? "ok" : "failed", startedAtMs);
   if (result.ok) await refreshAnswerCacheAfterWrite(directoryHandle, monthFolderName);
   return result;
 }
@@ -1539,7 +1727,16 @@ async function listAnswerDirStems(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
 ): Promise<Set<string>> {
+  return (await listAnswerDirStemKinds(directoryHandle, monthFolderName)).stems;
+}
+
+/** Same listing, but also says which stems have a `.requests.json` of their own (from the LISTING, no per-file probe). */
+async function listAnswerDirStemKinds(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<{ stems: Set<string>; withRequestsFile: Set<string> }> {
   const stems = new Set<string>();
+  const withRequestsFile = new Set<string>();
   let dir: DirectoryHandleLike;
   try {
     dir = await getAnswersDir(directoryHandle, monthFolderName);
@@ -1547,7 +1744,7 @@ async function listAnswerDirStems(
     // A month with no answers directory at all is a FACT about the data, and
     // stays absence. (`getAnswersDir` opens with `create: true`, so this is
     // reachable only on a workspace that refuses the create.)
-    if (isNotFoundError(error)) return stems;
+    if (isNotFoundError(error)) return { stems, withRequestsFile };
     logError("answerStorage:listAnswerDirStems", error);
     throw error;
   }
@@ -1556,6 +1753,7 @@ async function listAnswerDirStems(
       if (entry.kind !== "file") continue;
       const stem = stemOf(entry.name);
       if (stem) stems.add(stem);
+      if (stem && entry.name.endsWith(REQUESTS_SUFFIX)) withRequestsFile.add(stem);
     }
   } catch (error) {
     // Never a PARTIAL set. The stems this returns are the set of employees the
@@ -1565,7 +1763,7 @@ async function listAnswerDirStems(
     logError("answerStorage:listAnswerDirStems", error);
     throw error;
   }
-  return stems;
+  return { stems, withRequestsFile };
 }
 
 /** Every distinct employee named by ANY event in the month's flat answer event log. */
@@ -1696,28 +1894,116 @@ export type EmployeeRequestQueues = Pick<
  * ONLY answer segments and no request of any kind contributes nothing this
  * function returns anyway.
  */
+/**
+ * Session memo of `loadAllEmployeeRequestFiles`, per (root, month), valid for one
+ * workspace epoch (A10). Every write of a requests file, every non-manual
+ * broadcast and every manual refresh bumps the epoch, so a hit can only be
+ * served when nothing this tab knows of has moved. The sync layer carries it
+ * across the bump of a tick that saw `answers` change but not `requests`
+ * (`carryRequestQueuesAcrossEpochBump`), so a colleague saving their own answer
+ * does not force every client to re-read every employee's queue. A failed scan
+ * is never stored.
+ */
+const requestQueuesMemo = new Map<string, { epoch: number; files: EmployeeRequestQueues[]; probeGen: number }>();
+/** Frozen legacy `.answers.json` request arrays, per (root, month, user): read once, like the seed. Found files only. */
+const legacyRequestQueuesMemo = new Map<string, EmployeeRequestsFile>();
+/** Completed sync probes per (root, month): what makes a memo carry-safe (see `carryRequestQueuesAcrossEpochBump`). */
+const requestProbeGeneration = new Map<string, number>();
+
+function requestQueuesKey(directoryHandle: DirectoryHandleLike, monthFolderName: string): string {
+  return `${workspaceScopeId(directoryHandle)}|${monthFolderName}`;
+}
+
+/** The sync layer calls this when a probe of the month has COMPLETED (baseline included). */
+export function markRequestQueueProbeCompleted(directoryHandle: DirectoryHandleLike, monthFolderName: string): void {
+  const key = requestQueuesKey(directoryHandle, monthFolderName);
+  requestProbeGeneration.set(key, (requestProbeGeneration.get(key) ?? 0) + 1);
+}
+
+/**
+ * See `requestQueuesMemo`: re-key a memo taken at `previousEpoch` to the current one,
+ * but ONLY if the memo was read AFTER the previous probe completed. A request another
+ * machine wrote between an earlier read and a probe is folded into that probe's
+ * baseline and never diffed, so a memo older than the baseline could hide it forever.
+ */
+export function carryRequestQueuesAcrossEpochBump(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  previousEpoch: number
+): void {
+  const key = requestQueuesKey(directoryHandle, monthFolderName);
+  const memo = requestQueuesMemo.get(key);
+  const generation = requestProbeGeneration.get(key) ?? 0;
+  if (memo && memo.epoch === previousEpoch && memo.probeGen === generation - 1) {
+    requestQueuesMemo.set(key, { ...memo, epoch: workspaceEpoch(directoryHandle, monthFolderName), probeGen: generation });
+  }
+}
+
 export async function loadAllEmployeeRequestFiles(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
 ): Promise<EmployeeRequestQueues[]> {
+  const memoKey = requestQueuesKey(directoryHandle, monthFolderName);
+  const epoch = workspaceEpoch(directoryHandle, monthFolderName);
+  const probeGenAtStart = requestProbeGeneration.get(memoKey) ?? 0;
+  const memo = requestQueuesMemo.get(memoKey);
+  if (memo && memo.epoch === epoch) return [...memo.files];
+  let anyFailed = false;
   try {
-    const stems = await listAnswerDirStems(directoryHandle, monthFolderName);
-    const files: EmployeeRequestQueues[] = [];
-    for (const username of stems) {
+    const { stems, withRequestsFile } = await listAnswerDirStemKinds(directoryHandle, monthFolderName);
+    // Bounded concurrency (was one employee at a time). A per-employee failure is
+    // still isolated (logged, that employee skipped) exactly as before; a failed
+    // LISTING above still throws, never a partial set.
+    const loaded = await mapWithConcurrency([...stems], 4, async (username): Promise<EmployeeRequestQueues | null> => {
       try {
-        const requests = await loadEmployeeRequestsFile(directoryHandle, monthFolderName, username);
-        files.push({
+        let requests: EmployeeRequestsFile;
+        if (withRequestsFile.has(username)) {
+          requests = await loadEmployeeRequestsFile(directoryHandle, monthFolderName, username);
+        } else {
+          // No requests file in the LISTING: the only source is the frozen legacy
+          // `.answers.json` (pre-split data). Read it once per session, not per call.
+          const legacyKey = `${memoKey}|${username}`;
+          const cached = legacyRequestQueuesMemo.get(legacyKey);
+          if (cached) {
+            requests = cached;
+          } else {
+            // The stem came from the LISTING, so the file exists: an absent answer is a
+            // transient share hiccup, never "no requests" (same rule as the seed memo).
+            const legacy = await loadLegacyAnswersFile(directoryHandle, monthFolderName, username);
+            if (legacy === null) throw new Error(`Legacy answers file for ${username} listed but not found.`);
+            requests = {
+              username,
+              monthFolderName,
+              revision: 0,
+              referralRequests: legacy.referralRequests,
+              replacementRequests: legacy.replacementRequests,
+              reopenRequests: legacy.reopenRequests,
+            };
+            legacyRequestQueuesMemo.set(legacyKey, requests);
+          }
+        }
+        return {
           username,
           monthFolderName,
           referralRequests: requests.referralRequests,
           replacementRequests: requests.replacementRequests,
           reopenRequests: requests.reopenRequests,
-        });
+        };
       } catch (error) {
         logError("answerStorage:loadAllEmployeeRequestFiles:employee", error, { action: username });
+        anyFailed = true;
+        return null;
       }
+    });
+    const files = loaded
+      .filter((entry): entry is EmployeeRequestQueues => entry !== null)
+      .sort((a, b) => a.username.localeCompare(b.username));
+    // Store only a COMPLETE scan (a skipped employee would otherwise be a persistent gap) and
+    // only if the epoch did not move while we read (a write mid-scan must not be memoized stale).
+    if (!anyFailed && workspaceEpoch(directoryHandle, monthFolderName) === epoch) {
+      requestQueuesMemo.set(memoKey, { epoch, files, probeGen: probeGenAtStart });
     }
-    return files.sort((a, b) => a.username.localeCompare(b.username));
+    return [...files];
   } catch (err) {
     // Same reasoning as the sibling above: an unestablished scan is not an
     // empty set of request queues.

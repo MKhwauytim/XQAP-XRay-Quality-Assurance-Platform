@@ -157,22 +157,26 @@ describe("cache eliminates redundant month-wide re-reads within one tab session"
     // only this tab's own segment is touched — once by the cache's own
     // incremental delta read, once by the append's unavoidable pre-write
     // existing-content read (see segmentReadFileOps's doc). Both are O(1),
-    // neither scales with the 5 seeded employees.
-    expect(secondCallOps).toBe(2);
+    // neither scales with the 5 seeded employees. (A5: the first save left a seed
+    // event in the cache, so this save is already a plain self-save and skips the
+    // incremental read too: only the append's own pre-write re-read remains.)
+    expect(secondCallOps).toBe(1);
     expect(secondCallOps).toBeLessThan(firstCallOps);
 
     clearOperationLog(dir);
     const third = await upsertItemAnswer(dir, MONTH, EMPLOYEE, makeItem({ xrayImageId: "X3" }));
     expect(third.ok).toBe(true);
     const thirdCallOps = segmentReadFileOps(dir);
-    // Steady state: still just this tab's own small, constant cost, never the
-    // whole team's history again.
-    expect(thirdCallOps).toBe(2);
+    // Steady state (A5): the save before this one already observed the employee
+    // seeded, so a plain self-save appends without the pre-append month read --
+    // only the append's own unavoidable pre-write re-read of the open segment
+    // remains. Never the whole team's history again.
+    expect(thirdCallOps).toBe(1);
 
     clearOperationLog(dir);
     const fourth = await upsertItemAnswer(dir, MONTH, EMPLOYEE, makeItem({ xrayImageId: "X4" }));
     expect(fourth.ok).toBe(true);
-    expect(segmentReadFileOps(dir)).toBe(2);
+    expect(segmentReadFileOps(dir)).toBe(1);
 
     // And the state is actually correct throughout — nothing was silently
     // dropped by reading incrementally.
@@ -200,9 +204,11 @@ describe("cache eliminates redundant month-wide re-reads within one tab session"
     // nothing) plus a small CONSTANT 2 per later call (calls 2-8: one
     // read-side op the cache makes incremental, one write-side op that always
     // fires on append and is unaffected by this cache either way) =
-    // 20 + 7*2 = 34 — versus the unfixed ~160+ that scales with
+    // 20 + 7*1 = 27 (A5: from the second call on the employee is known
+    // seeded, so the read-side op is skipped too and only the append's own
+    // pre-write re-read remains) — versus the unfixed ~160+ that scales with
     // (calls * seeded team history).
-    expect(totalOps).toBe(34);
+    expect(totalOps).toBe(27);
   });
 });
 
@@ -286,7 +292,7 @@ describe("a genuinely stale cache is detected, never silently served as current"
     broadcastDataRefresh("periodic");
     clearOperationLog(dir);
     await upsertItemAnswer(dir, MONTH, EMPLOYEE, makeItem({ xrayImageId: "X2" }));
-    expect(segmentReadFileOps(dir)).toBe(2);
+    expect(segmentReadFileOps(dir)).toBe(1);
 
     // An explicit manual refresh (the admin toolbar button) DOES force a full
     // cold re-read on the next call — the one safety valve this cache relies
