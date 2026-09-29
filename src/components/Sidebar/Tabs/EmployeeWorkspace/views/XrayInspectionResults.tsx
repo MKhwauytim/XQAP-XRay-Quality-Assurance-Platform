@@ -65,6 +65,8 @@ import type { DirectoryHandleLike } from "../../../../../data/storage/fileSystem
 import { useLabels, type Labels } from "../../../../../data/labels/useLabels";
 import { useGlobalMonth } from "../../../../../data/month/useGlobalMonth";
 import { formatStageLabel } from "../../../../../data/population/stageHelpers";
+import type { StageAliasMappings } from "../../../../../data/population/populationConfig";
+import { useWorkspaceStageMappings } from "../../../../../hooks/useWorkspaceStageMappings";
 
 const RESULTS_COL_KEY = "xray_inspection_results_cols_v1";
 const REFERRALS_PRESET_KEY = "xray-referrals";
@@ -88,7 +90,7 @@ function buildSampleColumns(L: Labels): DataTableCol<DistributionEntry>[] {
   return [
     { id: "xrayImageId",            label: L.col_xray_image_id,             widthFr: 20, alwaysVisible: true, filterKind: "text", accessor: (e) => displayXrayImageId(e) },
     { id: "movementStatus",         label: "حركة العينة",                   widthFr: 10, filterKind: "multiselect", accessor: () => null },
-    { id: "stage",                  label: L.col_stage,                     widthFr: 8,  accessor: (e) => e.row.stage },
+    { id: "stage",                  label: L.col_stage,                     widthFr: 8,  accessor: (e) => formatStageLabel(e.row.stage) },
     { id: "assignedTo",             label: L.col_xray_quality_expert,       widthFr: 9,  accessor: (e) => e.assignedTo },
     { id: "movementFrom",           label: "من",                            widthFr: 9,  accessor: () => null },
     { id: "movementTo",             label: "إلى",                           widthFr: 9,  accessor: () => null },
@@ -223,6 +225,8 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
   // initial load and the 30s tick below — so it reflects the current
   // outcome of the latest retry rather than a stale count.
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
+  // C1: the workspace stage alias table (shared hook with the referral queue).
+  const stageMappings = useWorkspaceStageMappings(directoryHandle);
 
   useEffect(() => {
     void Promise.all([
@@ -484,7 +488,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
       void sortAccessor;
       return {
         ...rest,
-        accessor: (row) => getSampleColumnValue(row, column, templatesById, template, L),
+        accessor: (row) => getSampleColumnValue(row, column, templatesById, template, L, stageMappings),
       };
     });
 
@@ -509,7 +513,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
     };
 
     return [...visibleSampleColumns, ...answerColumns, qualityNoteColumn];
-  }, [L, answerFields, referralColConfig, sampleColumns, template, templatesById]);
+  }, [L, answerFields, referralColConfig, sampleColumns, stageMappings, template, templatesById]);
 
   /**
    * What the table shows before anyone touches its picker: exactly the columns
@@ -1166,9 +1170,10 @@ function getSampleColumnValue(
   column: DataTableCol<DistributionEntry>,
   templatesById: ReadonlyMap<string, TemplateSchema>,
   fallbackTemplate: TemplateSchema | null,
-  labels: Labels
+  labels: Labels,
+  stageMappings?: StageAliasMappings
 ): string | null {
-  if (column.id === "stage") return formatStageLabel(row.entry.row.stage);
+  if (column.id === "stage") return formatStageLabel(row.entry.row.stage, stageMappings);
   if (column.id === "movementStatus") return getMovementStatusLabel(row.movement.status);
   if (column.id === "movementFrom") return row.movement.from;
   if (column.id === "movementTo") return row.movement.to;

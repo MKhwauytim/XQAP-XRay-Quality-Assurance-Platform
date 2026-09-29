@@ -25,7 +25,7 @@ const FORMER_COPIES = [
   "data/distribution/replacementCandidateLookup.ts",
   "data/reporting/executive/deck2/slides.ts",
   "dev/deckPreviewFixture.ts",
-  "data/labels/labelsStore.ts",
+  "data/adhocImport/adhocFieldCatalog.ts",
 ];
 
 const LABEL_MAP_ENTRY = /\bfourth\s*:\s*"المستوى الرابع"/;
@@ -49,5 +49,12 @@ describe("labelsStore stage defaults come from stageLabels.ts (C1)", () => {
   it("does not re-type any stage label default", () => {
     const source = readFileSync(path.join(srcRoot, "data/labels/labelsStore.ts"), "utf8");
     expect(source).not.toMatch(/\bstage_(first|second|third|fourth|unknown)\s*:\s*"/);
+  });
+});
+
+describe("stageLabels.ts stays worker-safe (C1)", () => {
+  it("has no non-type import, so the population worker bundle stays lean", () => {
+    const source = readFileSync(path.join(srcRoot, "data/population/stageLabels.ts"), "utf8");
+    expect(source).not.toMatch(/^import\s+(?!type\b)/m);
   });
 });

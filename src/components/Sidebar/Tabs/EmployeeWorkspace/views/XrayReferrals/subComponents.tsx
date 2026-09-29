@@ -44,7 +44,7 @@ export const SELECT_COL_ID = "__select__";
 export function buildXrayColumns(L: Labels): DataTableCol<DistributionEntry>[] {
   return [
   { id: "xrayImageId",            label: L.col_xray_image_id,             widthFr: 20, alwaysVisible: true, filterKind: "text", accessor: (e) => displayXrayImageId(e) },
-  { id: "stage",                  label: L.col_stage,                     widthFr: 8,  accessor: (e) => e.row.stage },
+  { id: "stage",                  label: L.col_stage,                     widthFr: 8,  accessor: (e) => formatStageLabel(e.row.stage) },
   { id: "assignedTo",             label: L.col_xray_quality_expert,       widthFr: 9,  adminOnly: true,     accessor: (e) => e.assignedTo },
   { id: "portName",               label: L.col_port_name,                 widthFr: 13, accessor: (e) => e.row.portName },
   { id: "xrayEntryDate",          label: L.col_xray_entry_date,           widthFr: 11, isDate: true,        accessor: (e) => e.row.xrayEntryDate },
