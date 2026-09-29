@@ -118,9 +118,13 @@ export default function EmployeeWorkspaceTab() {
     () => (directoryHandle ? <ReferralApproval directoryHandle={directoryHandle} /> : null),
     [directoryHandle]
   );
+  // `active` lets the results view skip data-refresh reloads while it is
+  // mounted-but-hidden (every own answer save broadcasts one) and catch up once
+  // when shown. The element only changes when that flag flips.
+  const xrayResultsActive = activeSubTab === SUB_TAB_XRAY_RESULTS;
   const xrayResultsElement = useMemo(
-    () => (directoryHandle ? <XrayInspectionResults directoryHandle={directoryHandle} /> : null),
-    [directoryHandle]
+    () => (directoryHandle ? <XrayInspectionResults directoryHandle={directoryHandle} active={xrayResultsActive} /> : null),
+    [directoryHandle, xrayResultsActive]
   );
   const inspectionFormElement = useMemo(() => <TemplateBuilderTab />, []);
 

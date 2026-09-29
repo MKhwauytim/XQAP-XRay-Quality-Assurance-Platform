@@ -23,6 +23,7 @@ import {
   __dropProjectionChainsForTests,
   __setProjectionTimingForTests,
   appendDistributionEvents,
+  flushPendingDistributionPersist,
   flushPendingDistributionProjectionWrites,
   loadDistributionLog,
   refreshDistributionCacheAfterWrite,
@@ -88,6 +89,7 @@ async function seededRoot(): Promise<DirectoryHandleLike> {
   await saveSampleMaster(root, MONTH, sample([row("A1"), row("A2")]));
   await appendDistributionEvents(root, MONTH, [assign("A1")]);
   await refreshDistributionCacheAfterWrite(root, MONTH, [row("A1"), row("A2")]);
+  await flushPendingDistributionPersist(); // R1: the mirror write is a background job
   return root;
 }
 
@@ -130,6 +132,7 @@ describe("a pending append whose projection job fails", () => {
 
     // What every write flow does right after the append.
     await refreshDistributionCacheAfterWrite(root, MONTH, [row("A1"), row("A2")]);
+    await flushPendingDistributionPersist();
 
     const mirror = await loadEmployeeSampleMirror(root, MONTH, EMP);
     expect(mirror!.entries.map((e) => e.xrayImageId).sort()).toEqual(["A1", "A2"]);

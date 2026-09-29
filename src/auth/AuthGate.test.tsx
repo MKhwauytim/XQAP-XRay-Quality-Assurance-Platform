@@ -731,6 +731,8 @@ describe("AuthGate — permission auto-refresh", () => {
       loginAt: new Date().toISOString(),
     });
     mockReadyWorkspace("auto-refresh-real-session", [NON_SEED_USERNAME]);
+    // SyncTick delays each interval run by a random 0-20 % of the cadence (A8 jitter); pin it to 0.
+    vi.spyOn(Math, "random").mockReturnValue(0);
     const setIntervalSpy = vi.spyOn(window, "setInterval");
 
     renderAuthGate();

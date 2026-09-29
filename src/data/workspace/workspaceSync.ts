@@ -41,14 +41,21 @@
  * genuinely process-wide.
  */
 import { broadcastDataRefresh, type DataRefreshFamily } from "./dataRefreshSignal";
-import { bumpWorkspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
+import { bumpWorkspaceEpoch, workspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
+import { ADHOC_IMPORT_INDEX_FILE, adhocStoreHasDistributionEvents, listAdhocStoreImportIds } from "../adhocImport/adhocImportStorage";
+import { mapWithConcurrency } from "../storage/concurrency";
+import { adhocMonthFolder } from "../adhocImport/adhocImportModel";
+import { carryRequestQueuesAcrossEpochBump, markRequestQueueProbeCompleted } from "../answers/answerStorage";
 import { ownStableAnswerSegmentMatcher } from "../answers/answerSegmentChain";
-import { invalidateSealedAnswerSegments } from "../answers/answerSealedSegments";
+import {
+  invalidateSealedAnswerSegmentNames,
+  invalidateSealedAnswerSegments,
+} from "../answers/answerSealedSegments";
 import { readRealSession } from "../../auth/authSession";
 import { readDistributionLogStamp } from "../distribution/distributionStorage";
 import {
-  DEFAULT_SIZE_SIGNATURE_STAT_BUDGET,
   boundedSizeSignature,
+  countChainHeads,
   listDirectoryEntriesWithSize,
   type SizedDirectoryEntry,
 } from "../storage/directoryScan";
@@ -67,6 +74,7 @@ import { ACK_FILE_SUFFIX } from "../notifications/notificationAckStorage";
 import { FEEDBACK_THREAD_FILE_SUFFIX } from "../feedback/feedbackStorage";
 import {
   getPopulationMonthDir,
+  getAdhocImportsDir,
   getSampleMonthDir,
   getSystemRoot,
   FEEDBACK_SUBFOLDERS,
@@ -76,6 +84,7 @@ import {
 } from "./workspacePaths";
 import { DEFAULT_SYNC_INTERVAL_MS, readSyncIntervalMs } from "./syncSettings";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { invalidateMonthLockCache } from "../population/monthLock";
 
 /** The cadence used until the workspace's own setting has been read (and
  *  whenever there is no workspace, no setting, or an unreadable one). §2's
@@ -91,6 +100,7 @@ export const FOCUS_COALESCE_WINDOW_MS = 10_000;
 const MONTH_MANIFEST_FILE = "month.manifest.json";
 const NOTIFICATIONS_FILE = "notifications.json";
 const ANSWERS_SUFFIX = ".answers.json";
+const REQUESTS_SUFFIX = ".requests.json";
 const DECISIONS_SUFFIX = ".json";
 
 /**
@@ -168,6 +178,16 @@ type Probe = {
    *  deliberately NOT read here, and why it is still the signal for the
    *  single-file manifest/notifications probes). */
   answersSignature: Probed<string>;
+  /** Ad-hoc stores (`2-samples/adhoc-{id}/`, one synthetic month each): bounded signatures of
+   *  every store's `distribution.events` and `answers.events`. No other probe watches them. */
+  adhocDistSignature: Probed<string>;
+  adhocAnswersSignature: Probed<string>;
+  /** Name+size+mtime listing of the per-employee `*.requests.json` files
+   *  (referral / replacement / reopen queues). Before the answers family was
+   *  split from "requests" nothing probed these directly: a request change was
+   *  only ever noticed because an answer-segment change happened to mark
+   *  "requests" too. Now it has its own signal. */
+  requestsFilesSignature: Probed<string>;
   approvalsSignature: Probed<string>;
   manifestRevision: Probed<number | null>;
   /** Bounded name+size signature of `distribution.events/*.ndjson` (see
@@ -296,6 +316,7 @@ export async function refreshSyncIntervalFromDisk(
 /** Test-only: forget every remembered probe baseline and release the guard. */
 export function __resetWorkspaceSyncStateForTests(): void {
   previousProbes.clear();
+  adhocProbeStates.clear();
   inFlight = null;
   lastSyncStartedAt = 0;
   effectiveSyncIntervalMs = DEFAULT_SYNC_INTERVAL_MS;
@@ -445,6 +466,154 @@ async function safeSegmentsSignature(dir: DirectoryHandleLike | null): Promise<P
   }
 }
 
+/** Stat budget for the answer-segment probe: one per live chain head (employees x devices), with headroom. */
+const ANSWER_SEGMENT_HEAD_STAT_BUDGET = 64;
+
+/** The `File`s the last answer-segment probe stat'd, kept for the owners peek of the SAME run (runs are single-flight). */
+let probedAnswerFiles = new Map<string, Blob>();
+
+/** At most this many ad-hoc stores are probed per tick; more are covered by a rotating slice. */
+const ADHOC_PROBE_MAX_STORES = 8;
+/** Stores probed at once (probe latency must not grow linearly with the store count). */
+const ADHOC_PROBE_CONCURRENCY = 4;
+/** Stores found NOT assigned are re-checked at least this often even if the index did not move. */
+const ADHOC_UNASSIGNED_RECHECK_TICKS = 10;
+
+type AdhocProbeState = {
+  /** import id -> does the store have `1-main/distribution.events` (i.e. was anything ever assigned)? */
+  assigned: Map<string, boolean>;
+  /** Last signatures observed per assigned store; carried for stores not probed this tick. */
+  lastSig: Map<string, { dist: string; answers: string }>;
+  tick: number;
+  lastUnassignedCheckTick: number;
+  indexRevision: number | null;
+};
+const adhocProbeStates = new Map<string, AdhocProbeState>();
+
+/**
+ * Ad-hoc stores are synthetic month folders (`2-samples/adhoc-{id}/`) that no other probe
+ * watches, yet the employee queue and results view render their rows. One listing of
+ * `2-samples/` names the stores; only stores that have `1-main/distribution.events` (something
+ * was assigned; an import that was only SAVED creates a store folder too and never changes)
+ * are probed, each with a bounded `distribution.events` and heads-first `answers.events`
+ * signature (its own stable answer chain excluded, as for the real month).
+ * Over `ADHOC_PROBE_MAX_STORES` assigned stores a rotating slice is probed per tick and the
+ * rest keep their last observed signature, so the combined signature stays STABLE while
+ * nothing changes and a change is noticed within ceil(stores / cap) ticks.
+ * Cost per tick: 1 listing, the ad-hoc index revision (about 3 ops), and per probed store
+ * about 7 ops plus a stat per chain head; probed with bounded parallelism.
+ */
+async function probeAdhocStores(
+  directoryHandle: DirectoryHandleLike
+): Promise<{ dist: Probed<string>; answers: Probed<string> }> {
+  try {
+    const scope = workspaceScopeId(directoryHandle);
+    let state = adhocProbeStates.get(scope);
+    if (!state) {
+      state = { assigned: new Map(), lastSig: new Map(), tick: 0, lastUnassignedCheckTick: 0, indexRevision: null };
+      adhocProbeStates.set(scope, state);
+    }
+    state.tick += 1;
+    const ids = (await listAdhocStoreImportIds(directoryHandle)).sort();
+    if (ids.length === 0) {
+      state.assigned.clear();
+      state.lastSig.clear();
+      return { dist: "", answers: "" };
+    }
+    const adhocDir = await getAdhocImportsDir(directoryHandle, false).catch(() => null);
+    const indexRevision = adhocDir ? await readEnvelopeRevision(adhocDir, ADHOC_IMPORT_INDEX_FILE).catch(() => null) : null;
+    const recheckUnassigned =
+      indexRevision !== state.indexRevision || state.tick - state.lastUnassignedCheckTick >= ADHOC_UNASSIGNED_RECHECK_TICKS;
+    state.indexRevision = indexRevision;
+    if (recheckUnassigned) state.lastUnassignedCheckTick = state.tick;
+    for (const known of [...state.assigned.keys()]) {
+      if (!ids.includes(known)) {
+        state.assigned.delete(known);
+        state.lastSig.delete(known);
+      }
+    }
+    const toCheck = ids.filter((id) => !state!.assigned.has(id) || (recheckUnassigned && state!.assigned.get(id) === false));
+    await mapWithConcurrency(toCheck, ADHOC_PROBE_CONCURRENCY, async (id) => {
+      try {
+        state!.assigned.set(id, await adhocStoreHasDistributionEvents(directoryHandle, id));
+      } catch (error) {
+        // Keep whatever is known (unknown stays unknown and is checked again next tick);
+        // one store's failure must never stop the others.
+        logError("workspaceSync:probeAdhocStoreAssigned", error, { action: id });
+      }
+    });
+    const assignedIds = ids.filter((id) => state!.assigned.get(id) === true);
+    // A store never observed yet is always probed (once), so the rotation never reports a store's
+    // first signature as a change; after that, at most ADHOC_PROBE_MAX_STORES per tick in rotation.
+    const unobserved = assignedIds.filter((id) => !state!.lastSig.has(id));
+    const rotation =
+      assignedIds.length <= ADHOC_PROBE_MAX_STORES
+        ? assignedIds
+        : Array.from(
+            { length: ADHOC_PROBE_MAX_STORES },
+            (_, i) => assignedIds[((state!.tick * ADHOC_PROBE_MAX_STORES) % assignedIds.length + i) % assignedIds.length]!
+          );
+    const chosen = [...new Set([...unobserved, ...rotation])];
+    const actor = readRealSession()?.username;
+    await mapWithConcurrency(chosen, ADHOC_PROBE_CONCURRENCY, async (id) => {
+      // Each store is probed in its OWN try/catch: a store that cannot be stat'd on every tick keeps
+      // its last observed signature (carried like an unprobed store) and must not turn the whole
+      // ad-hoc probe UNPROBED, which would hide every other store's changes forever.
+      try {
+        const folder = adhocMonthFolder(id);
+        const mainDir = await openOrNull(() => getSampleMonthDir(directoryHandle, folder, false));
+        const main = mainDir ? await openOrNull(() => mainDir.getDirectoryHandle(SAMPLE_SUBFOLDERS.main, { create: false })) : null;
+        const [distDir, ansDir] = main
+          ? await Promise.all([
+              openOrNull(() => main.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: false })),
+              openOrNull(() => main.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: false })),
+            ])
+          : [null, null];
+        state!.lastSig.set(id, {
+          dist: distDir ? await boundedSizeSignature(distDir, DISTRIBUTION_EVENT_SEGMENT_SUFFIX) : "",
+          answers: ansDir
+            ? await boundedSizeSignature(
+                ansDir,
+                ANSWER_EVENT_SEGMENT_SUFFIX,
+                ANSWER_SEGMENT_HEAD_STAT_BUDGET,
+                actor ? ownStableAnswerSegmentMatcher(folder, actor) : undefined,
+                true
+              )
+            : "",
+        });
+      } catch (error) {
+        logError("workspaceSync:probeAdhocStore", error, { action: id });
+      }
+    });
+    return {
+      dist: JSON.stringify(assignedIds.map((id) => [id, state!.lastSig.get(id)?.dist ?? ""])),
+      answers: JSON.stringify(assignedIds.map((id) => [id, state!.lastSig.get(id)?.answers ?? ""])),
+    };
+  } catch (error) {
+    logError("workspaceSync:probeAdhocStores", error);
+    return { dist: UNPROBED, answers: UNPROBED };
+  }
+}
+
+/** Ids whose entry differs between two ad-hoc signatures (or all ids of `current` when `previous` is unusable). */
+function adhocIdsMoved(previous: string, current: string): string[] {
+  try {
+    const before = new Map(JSON.parse(previous || "[]") as [string, string][]);
+    const after = JSON.parse(current || "[]") as [string, string][];
+    return after.filter(([id, sig]) => before.get(id) !== sig).map(([id]) => id);
+  } catch {
+    return [];
+  }
+}
+
+function adhocIdsOf(signature: string): string[] {
+  try {
+    return (JSON.parse(signature || "[]") as [string, string][]).map(([id]) => id);
+  } catch {
+    return [];
+  }
+}
+
 /** §6 of the answer-save proposal: read-only, bounded — same primitive and shape as `safeSegmentsSignature` above. */
 async function safeAnswerSegmentsSignature(
   dir: DirectoryHandleLike | null,
@@ -461,11 +630,15 @@ async function safeAnswerSegmentsSignature(
     // rotations written by an earlier page load. Other writers (and other users
     // of this browser) still count.
     const actor = readRealSession()?.username;
+    probedAnswerFiles = new Map();
     return await boundedSizeSignature(
       dir,
       ANSWER_EVENT_SEGMENT_SUFFIX,
-      DEFAULT_SIZE_SIGNATURE_STAT_BUDGET,
-      actor ? ownStableAnswerSegmentMatcher(monthFolderName, actor) : undefined
+      ANSWER_SEGMENT_HEAD_STAT_BUDGET,
+      actor ? ownStableAnswerSegmentMatcher(monthFolderName, actor) : undefined,
+      // A11: size the chain HEADS, not the newest names (see boundedSizeSignature).
+      true,
+      probedAnswerFiles
     );
   } catch (error) {
     logError("workspaceSync:probeAnswerSegments", error);
@@ -565,11 +738,13 @@ async function probeMonth(
     notificationsRevision,
     acksSignature,
     answersSignature,
+    requestsFilesSignature,
     approvalsSignature,
     manifestRevision,
     segmentsSignature,
     answersEventsSignature,
     feedbackSignature,
+    adhocSignatures,
   ] =
     await Promise.all([
       readDistributionLogStamp(directoryHandle, monthFolderName, {
@@ -585,11 +760,13 @@ async function probeMonth(
       safeRevision(dirs.notificationsDir, NOTIFICATIONS_FILE),
       safeAcksSignature(dirs.notificationsDir),
       safeSignature(dirs.employeesDir, ANSWERS_SUFFIX),
+      safeSignature(dirs.employeesDir, REQUESTS_SUFFIX),
       safeSignature(dirs.approvalsDir, DECISIONS_SUFFIX),
       safeRevision(dirs.populationMonthDir, MONTH_MANIFEST_FILE),
       safeSegmentsSignature(dirs.eventsDir),
       safeAnswerSegmentsSignature(dirs.answersEventsDir, monthFolderName),
       safeFeedbackSignature(dirs.feedbackDir),
+      probeAdhocStores(directoryHandle),
     ]);
 
   return {
@@ -597,6 +774,9 @@ async function probeMonth(
     notificationsRevision,
     acksSignature,
     answersSignature,
+    adhocDistSignature: adhocSignatures.dist,
+    adhocAnswersSignature: adhocSignatures.answers,
+    requestsFilesSignature,
     approvalsSignature,
     manifestRevision,
     segmentsSignature,
@@ -611,6 +791,9 @@ function carryUnprobed(previous: Probe, current: Probe): Probe {
     notificationsRevision: carry(previous.notificationsRevision, current.notificationsRevision),
     acksSignature: carry(previous.acksSignature, current.acksSignature),
     answersSignature: carry(previous.answersSignature, current.answersSignature),
+    requestsFilesSignature: carry(previous.requestsFilesSignature, current.requestsFilesSignature),
+    adhocDistSignature: carry(previous.adhocDistSignature, current.adhocDistSignature),
+    adhocAnswersSignature: carry(previous.adhocAnswersSignature, current.adhocAnswersSignature),
     approvalsSignature: carry(previous.approvalsSignature, current.approvalsSignature),
     manifestRevision: carry(previous.manifestRevision, current.manifestRevision),
     segmentsSignature: carry(previous.segmentsSignature, current.segmentsSignature),
@@ -649,19 +832,32 @@ function diffFamilies(previous: Probe | undefined, current: Probe): Set<DataRefr
   ) {
     changed.add("notifications");
   }
+  if (movedFrom(previous.answersSignature, current.answersSignature, sameValue)) {
+    // The legacy per-employee `.answers.json` listing stays ambiguous by
+    // construction (a pre-migration item file OR a queue written into it), so
+    // it marks both, as it always did.
+    changed.add("requests");
+    changed.add("answers");
+  }
+  if (movedFrom(previous.requestsFilesSignature, current.requestsFilesSignature, sameValue)) {
+    changed.add("requests");
+  }
+  // Ad-hoc stores: a new assignment/replacement/reopen lands in a store's distribution events,
+  // an on-behalf answer, reopen or quality note in its answer events.
+  if (movedFrom(previous.adhocDistSignature, current.adhocDistSignature, sameValue)) {
+    changed.add("distribution");
+  }
+  if (movedFrom(previous.adhocAnswersSignature, current.adhocAnswersSignature, sameValue)) {
+    changed.add("answers");
+  }
   if (
-    movedFrom(previous.answersSignature, current.answersSignature, sameValue) ||
     // §6 of the answer-save proposal: the item-answer event log's own
-    // freshness signal, independent of the legacy per-employee file
-    // signature above (an employee whose answers now live entirely in
-    // `answers.events/` moves nothing the legacy signature can see).
+    // freshness signal. Event segments hold answers only (requests live in
+    // `.requests.json` / the approvals log, probed above), so this marks
+    // "answers" alone: a colleague saving their own answer no longer looks
+    // like a request change to every subscriber of "requests".
     movedFrom(previous.answersEventsSignature, current.answersEventsSignature, sameValue)
   ) {
-    // Ambiguous by construction (see Probe's doc comment): an answers-dir
-    // size change could be a new referral/replacement/reopen request OR a
-    // changed item answer. Mark both rather than guessing -- the cost is an
-    // extra invalidation on subscribers of one family, never a missed one.
-    changed.add("requests");
     changed.add("answers");
   }
   if (movedFrom(previous.approvalsSignature, current.approvalsSignature, sameValue)) {
@@ -676,13 +872,133 @@ function diffFamilies(previous: Probe | undefined, current: Probe): Set<DataRefr
   return changed;
 }
 
+type ParsedSizeSignature = { names: Set<string>; sizes: Map<string, number> };
+
+/** Inverse of `boundedSizeSignature`'s `JSON.stringify([names, sized])`; null when it is not that shape. */
+function parseSizeSignature(signature: string): ParsedSizeSignature | null {
+  if (signature === "") return { names: new Set(), sizes: new Map() };
+  try {
+    const parsed: unknown = JSON.parse(signature);
+    if (!Array.isArray(parsed) || parsed.length !== 2) return null;
+    const [names, sized] = parsed as [unknown, unknown];
+    if (!Array.isArray(names) || !Array.isArray(sized)) return null;
+    const sizes = new Map<string, number>();
+    for (const entry of sized) {
+      if (!Array.isArray(entry) || typeof entry[0] !== "string" || typeof entry[1] !== "number") return null;
+      sizes.set(entry[0], entry[1]);
+    }
+    return { names: new Set(names.filter((n): n is string => typeof n === "string")), sizes };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The answer-segment names whose signature entry moved between two ticks: a
+ * probed size that changed (a segment that grew), a name that appeared or
+ * vanished, or a name that was listed-but-unprobed before and is probed now
+ * (no baseline to compare against, so treated as possibly moved). Only these can
+ * have grown since the reader confirmed them sealed — every other confirmation
+ * is still good. `null` when either signature cannot be parsed or the set is
+ * implausibly large: the caller falls back to forgetting every confirmation.
+ */
+export function movedAnswerSegmentNames(previous: string, current: string): Set<string> | null {
+  const before = parseSizeSignature(previous);
+  const after = parseSizeSignature(current);
+  if (!before || !after) return null;
+  const moved = new Set<string>();
+  for (const [name, size] of after.sizes) {
+    // Quiet only when it was probed before at the SAME size. A changed size, a
+    // name with no previous size (brand new, or unprobed before) all count as
+    // moved: cheap, and such a name may already have been read by this tab.
+    if (before.sizes.get(name) !== size) moved.add(name);
+  }
+  for (const name of after.names) if (!before.names.has(name)) moved.add(name);
+  for (const name of before.names) if (!after.names.has(name)) moved.add(name);
+  return moved.size > 500 ? null : moved;
+}
+
+/** Bounds on the owners peek: a tick never reads more than this to classify a colleague's change. */
+const OWNER_PEEK_MAX_SEGMENTS = 48;
+const OWNER_PEEK_MAX_BYTES = 256 * 1024;
+
+/**
+ * Whose answers did the moved segments gain? Reads ONLY the bytes appended since
+ * the previous tick (`slice(previousSize)`) of at most `OWNER_PEEK_MAX_SEGMENTS`
+ * segments and collects the lower-cased `answeredBy` of every new event. Returns
+ * null ("unknown -- assume it is yours") for anything it cannot prove: too many
+ * or too large a change, a segment that shrank, an unreadable segment, a line
+ * that does not parse. Never throws.
+ */
+async function peekAnswerOwners(
+  prevSizes: Map<string, number>
+): Promise<Set<string> | null> {
+  if (prevSizes.size === 0 || prevSizes.size > OWNER_PEEK_MAX_SEGMENTS) return null;
+  try {
+    const owners = new Set<string>();
+    let budget = OWNER_PEEK_MAX_BYTES;
+    const results = await Promise.all(
+      [...prevSizes].map(async ([name, previousSize]) => {
+        // The File the probe's own stat already obtained: one read, no new open.
+        // A moved name the probe did not stat (outside its budget) is unknown.
+        const file = probedAnswerFiles.get(name);
+        if (!file) return null;
+        if (file.size < previousSize) return null;
+        if (file.size === previousSize) return [] as string[];
+        budget -= file.size - previousSize;
+        if (budget < 0) return null;
+        const text = await file.slice(previousSize).text();
+        const out: string[] = [];
+        for (const line of text.split("\n")) {
+          if (line.trim() === "") continue;
+          const event = JSON.parse(line) as { answeredBy?: unknown };
+          if (typeof event.answeredBy !== "string") return null;
+          out.push(event.answeredBy.trim().toLowerCase());
+        }
+        return out;
+      })
+    );
+    for (const result of results) {
+      if (result === null) return null;
+      for (const owner of result) owners.add(owner);
+    }
+    return owners;
+  } catch (error) {
+    logError("workspaceSync:peekAnswerOwners", error);
+    return null;
+  }
+}
+
 async function probeChangedFamilies(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   systemDir: DirectoryHandleLike | null
-): Promise<Set<DataRefreshFamily>> {
+): Promise<{
+  changed: Set<DataRefreshFamily>;
+  sealedInvalidation: "none" | "all" | ReadonlySet<string>;
+  /** segment name -> its size at the previous tick (0 when new), for the owners peek; null = unknown. */
+  movedSegmentPrevSizes: Map<string, number> | null;
+  /** The legacy `.answers.json` listing moved too: whose answers is then unknowable from segments. */
+  legacyAnswersMoved: boolean;
+  /**
+   * The moved-name diff cannot be trusted to account for every appended line, so
+   * the owners must be reported as unknown (everyone reloads): a name that was sized
+   * before is still listed but no longer sized (a chain that rotated inside the tick,
+   * its sealed head's last lines unseen), or there are more live chain heads than the
+   * stat budget can size (growth of an unsized head can never name its owner).
+   */
+  ownersUnknown: boolean;
+  /** Ad-hoc stores whose distribution/answers signature moved, and every probed store id. Their
+   *  epoch-keyed read memos (`workspaceEpoch(root, "adhoc-{id}")`) must be bumped like the month's. */
+  adhocMoved: string[];
+  adhocAll: string[];
+}> {
   const key = probeKey(directoryHandle, monthFolderName);
   const previous = previousProbes.get(key);
+  // First look at this (workspace, month) this session: the diff below has
+  // nothing to compare against and stays silent, but a month-lock verdict
+  // cached BEFORE this baseline may predate a close made by another machine.
+  if (!previous) invalidateMonthLockCache(monthFolderName);
   const probed = await probeMonth(directoryHandle, monthFolderName, systemDir);
   // Carry BEFORE storing: a family this tick could not read keeps the last value
   // that was actually observed, so the next readable tick diffs against real
@@ -690,7 +1006,56 @@ async function probeChangedFamilies(
   const current = previous ? carryUnprobed(previous, probed) : probed;
   const changed = diffFamilies(previous, current);
   previousProbes.set(key, current);
-  return changed;
+  // Which sealed-segment confirmations the reader must forget. Only a moved
+  // `answers.events` signature can have grown a segment (the legacy answers dir
+  // and the requests families never touch a segment); and only the names that
+  // moved can have grown, so a colleague's activity elsewhere keeps the rest.
+  let sealedInvalidation: "none" | "all" | ReadonlySet<string> = "none";
+  let movedSegmentPrevSizes: Map<string, number> | null = null;
+  let ownersUnknown = false;
+  if (
+    previous &&
+    movedFrom(previous.answersEventsSignature, current.answersEventsSignature, sameValue) &&
+    isProbed(previous.answersEventsSignature) &&
+    isProbed(current.answersEventsSignature)
+  ) {
+    const moved = movedAnswerSegmentNames(previous.answersEventsSignature, current.answersEventsSignature);
+    sealedInvalidation = moved ?? "all";
+    const before = parseSizeSignature(previous.answersEventsSignature);
+    const after = parseSizeSignature(current.answersEventsSignature);
+    if (moved) {
+      movedSegmentPrevSizes = new Map([...moved].map((name) => [name, before?.sizes.get(name) ?? 0]));
+    }
+    if (before && after) {
+      for (const name of before.sizes.keys()) {
+        if (after.names.has(name) && !after.sizes.has(name)) ownersUnknown = true;
+      }
+      if (countChainHeads([...after.names], ANSWER_EVENT_SEGMENT_SUFFIX) > ANSWER_SEGMENT_HEAD_STAT_BUDGET) {
+        ownersUnknown = true;
+      }
+    } else {
+      ownersUnknown = true;
+    }
+  }
+  const legacyAnswersMoved =
+    !!previous &&
+    (movedFrom(previous.answersSignature, current.answersSignature, sameValue) ||
+      // an ad-hoc store answer change: whose rows it concerns is not classified by the peek
+      movedFrom(previous.adhocAnswersSignature, current.adhocAnswersSignature, sameValue));
+  let adhocMoved: string[] = [];
+  let adhocAll: string[] = [];
+  if (isProbed(current.adhocDistSignature) && isProbed(current.adhocAnswersSignature)) {
+    adhocAll = adhocIdsOf(current.adhocDistSignature);
+    if (previous && isProbed(previous.adhocDistSignature) && isProbed(previous.adhocAnswersSignature)) {
+      adhocMoved = [
+        ...new Set([
+          ...adhocIdsMoved(previous.adhocDistSignature, current.adhocDistSignature),
+          ...adhocIdsMoved(previous.adhocAnswersSignature, current.adhocAnswersSignature),
+        ]),
+      ];
+    }
+  }
+  return { changed, sealedInvalidation, movedSegmentPrevSizes, legacyAnswersMoved, ownersUnknown, adhocMoved, adhocAll };
 }
 
 export type SyncRunOptions = {
@@ -754,18 +1119,38 @@ async function performSync(options: SyncRunOptions, manual: boolean): Promise<Sy
   }
 
   let changed = new Set<DataRefreshFamily>();
+  let sealedInvalidation: "none" | "all" | ReadonlySet<string> = "none";
+  let answerOwners: Set<string> | null = null;
+  let legacyAnswersMoved = false;
+  let ownersUnknown: boolean | undefined;
+  let adhocMoved: string[] = [];
+  let adhocAll: string[] = [];
   if (directoryHandle && monthFolderName) {
     try {
-      changed = await probeChangedFamilies(directoryHandle, monthFolderName, systemDir);
+      let movedSegmentPrevSizes: Map<string, number> | null;
+      ({ changed, sealedInvalidation, movedSegmentPrevSizes, legacyAnswersMoved, ownersUnknown, adhocMoved, adhocAll } = await probeChangedFamilies(directoryHandle, monthFolderName, systemDir));
+      markRequestQueueProbeCompleted(directoryHandle, monthFolderName);
+      if (changed.has("answers") && movedSegmentPrevSizes && !ownersUnknown) {
+        answerOwners = await peekAnswerOwners(movedSegmentPrevSizes);
+      }
     } catch (error) {
       logError("workspaceSync:probe", error);
       ok = false;
     }
   }
 
-  // The probe saw someone else's answer segments move: whatever this tab
-  // believes is sealed may have grown, so the sealed-segment shortcut starts over.
-  if (changed.has("answers")) invalidateSealedAnswerSegments();
+  // The month manifest moved (another machine closed/reopened the month, or a
+  // status advance): the 5-minute month-lock verdict is no longer trustworthy.
+  // A manual refresh drops it unconditionally, like every other cache.
+  if (directoryHandle && monthFolderName && (manual || changed.has("manifest"))) {
+    invalidateMonthLockCache(monthFolderName);
+  }
+
+  // The probe saw answer segments move: a segment this tab believes is sealed
+  // may have grown. Forget the confirmation of exactly the names that moved
+  // (all of them only when the probe cannot tell which).
+  if (sealedInvalidation === "all") invalidateSealedAnswerSegments();
+  else if (sealedInvalidation !== "none") invalidateSealedAnswerSegmentNames(sealedInvalidation);
 
   const broadcast = manual || changed.size > 0;
   if (broadcast) {
@@ -776,12 +1161,28 @@ async function performSync(options: SyncRunOptions, manual: boolean): Promise<Sy
     // this run. A manual run bumps it unconditionally: "discard everything"
     // that still lets a memo answer from cache is not a hard refresh.
     if (directoryHandle && monthFolderName) {
+      const epochBefore = workspaceEpoch(directoryHandle, monthFolderName);
       bumpWorkspaceEpoch(directoryHandle, monthFolderName);
+      // A tick that saw answers/distribution/notifications move but NOT `requests`
+      // leaves every employee's request queue exactly as this tab last read it.
+      if (!manual && !changed.has("requests")) {
+        carryRequestQueuesAcrossEpochBump(directoryHandle, monthFolderName, epochBefore);
+      }
+      // Ad-hoc stores are their own "months" with their own epoch-keyed read memos
+      // (derive memo, dir cache): bump the ones that moved (all of them on a manual run) or the
+      // reload this broadcast triggers would be served the pre-change rows.
+      for (const id of manual ? adhocAll : adhocMoved) bumpWorkspaceEpoch(directoryHandle, adhocMonthFolder(id));
     }
     if (manual) {
       broadcastDataRefresh("manual");
     } else {
-      broadcastDataRefresh({ source: "periodic", changed });
+      // A legacy-file answers change (or a peek that could not classify) leaves the
+      // owners unknown; consumers then assume the change may be theirs.
+      broadcastDataRefresh({
+        source: "periodic",
+        changed,
+        answerOwners: changed.has("answers") && !legacyAnswersMoved ? answerOwners : null,
+      });
     }
   }
 

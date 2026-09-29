@@ -5,73 +5,73 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
-    "version": "v150.20",
+    "version": "v150.43",
     "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "backup",
-    "title": "never overwrite an existing live manifest misread as missing"
+    "scope": "answers",
+    "title": "the answer-segment probe sizes chain heads, not the newest 64 names"
   },
   {
-    "version": "v150.19",
+    "version": "v150.42",
     "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "archive",
-    "title": "restore dialog and recovery tool catch unexpected rejections and show integrity warnings"
+    "scope": "answers",
+    "title": "the per-employee request-queue scan is bounded and memoized, never at the cost of a hidden request"
   },
   {
-    "version": "v150.18",
+    "version": "v150.41",
     "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "backup",
-    "title": "selective restore round 3 (unreadable backup manifest, deleted-month manifest, verification, shared wording)"
+    "scope": "answers",
+    "title": "the ad-hoc probe has no cliff at the store cap and keeps store read memos fresh"
   },
   {
-    "version": "v150.17",
+    "version": "v150.40",
     "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "archive",
-    "title": "selective restore UI review fixes (remount race, admin-only backups, warnings, failure handling)"
+    "scope": "answers",
+    "title": "broadcasts say whose answers changed; the employee queue ignores colleagues' own saves (never at the cost of a missed update)"
   },
   {
-    "version": "v150.16",
+    "version": "v150.39",
     "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "backup",
-    "title": "selective restore engine review fixes (guard bypass, closed months, manifest, derived warnings)"
+    "scope": "answers",
+    "title": "the results view does no share I/O when hidden; polls are jittered, single-flight and fenced per user"
   },
   {
-    "version": "v150.15",
-    "date": "2026-09-29",
-    "bucket": "enhancement",
-    "scope": "population",
-    "title": "population recovery offers backup snapshots through the selective-restore engine"
-  },
-  {
-    "version": "v150.14",
-    "date": "2026-09-29",
-    "bucket": "feature",
-    "scope": "archive",
-    "title": "selective restore mode in the backup restore dialog"
-  },
-  {
-    "version": "v150.13",
+    "version": "v150.37",
     "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "backup",
-    "title": "selective-restore catalog review fixes (ad-hoc records, embedded requests, casing, empty folders)"
+    "scope": "answers",
+    "title": "keep one IndexedDB connection open and prune old synced mirror records"
   },
   {
-    "version": "v150.12",
+    "version": "v150.36",
     "date": "2026-09-29",
-    "bucket": "feature",
-    "scope": "backup",
-    "title": "run selective restore with derived-cache rebuild and integrity scan"
+    "bucket": "fix",
+    "scope": "answers",
+    "title": "a plain self-save appends without re-reading the whole month (with head probe)"
   },
   {
-    "version": "v150.11",
+    "version": "v150.35",
     "date": "2026-09-29",
-    "bucket": "feature",
-    "scope": "backup",
-    "title": "dependency plan for selective restore (A2 coverage block, warnings)"
+    "bucket": "fix",
+    "scope": "answers",
+    "title": "a colleague's segment change no longer forgets every sealed confirmation"
+  },
+  {
+    "version": "v150.34",
+    "date": "2026-09-29",
+    "bucket": "fix",
+    "scope": "answers",
+    "title": "memoize the frozen legacy answers seed per session (never an absent read)"
+  },
+  {
+    "version": "v150.33",
+    "date": "2026-09-29",
+    "bucket": "fix",
+    "scope": "answers",
+    "title": "cache month-lock verdict for 5 min, invalidated by the sync probe"
   }
 ];

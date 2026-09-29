@@ -351,3 +351,49 @@ describe("casFailureFromCause", () => {
     expect(result.error).not.toContain("XQ-");
   });
 });
+
+describe("casLoop — abortOn", () => {
+  const invalidState = () => Object.assign(new Error("replace refused"), { name: "InvalidStateError" });
+
+  it("stops at the first attempt the classifier calls terminal and reports the coded failure once", async () => {
+    let attempts = 0;
+    const seen: unknown[] = [];
+    const result = await casLoop<string>(
+      async () => {
+        attempts += 1;
+        throw invalidState();
+      },
+      { maxRetries: 14, baseDelayMs: 1, abortOn: () => true, onExhausted: (c) => seen.push(c) }
+    );
+    expect(attempts).toBe(1);
+    expect(seen).toHaveLength(1);
+    expect((result as { ok: false; error: string }).error).toContain("XQ-IO-036");
+  });
+
+  it("keeps retrying while the classifier says no, and still succeeds", async () => {
+    let attempts = 0;
+    const result = await casLoop<string>(
+      async () => {
+        attempts += 1;
+        if (attempts < 3) throw invalidState();
+        return { done: true, result: "ok" };
+      },
+      { maxRetries: 14, baseDelayMs: 1, abortOn: () => false }
+    );
+    expect(result).toBe("ok");
+    expect(attempts).toBe(3);
+  });
+
+  it("a throwing classifier is treated as 'not terminal'", async () => {
+    let attempts = 0;
+    const result = await casLoop<string>(
+      async () => {
+        attempts += 1;
+        if (attempts < 2) throw invalidState();
+        return { done: true, result: "ok" };
+      },
+      { maxRetries: 5, baseDelayMs: 1, abortOn: () => { throw new Error("bad"); } }
+    );
+    expect(result).toBe("ok");
+  });
+});

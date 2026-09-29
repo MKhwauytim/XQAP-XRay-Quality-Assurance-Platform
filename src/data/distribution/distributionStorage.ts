@@ -1,6 +1,7 @@
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import {
   DERIVE_VERSION,
+  deriveCurrentDistribution,
   deriveCurrentDistributionIncremental,
   deriveCurrentDistributionWithFacts,
   sampleRowsFingerprint,
@@ -25,7 +26,7 @@ import {
 import { codedMessage, logCodedError, resolveErrorCode } from "../storage/errorCodes";
 import { listDirectoryEntries, listDirectoryEntriesWithSize, readAppendOnlyDirectory, readNamedJsonFiles } from "../storage/directoryScan";
 import { simpleHash } from "../storage/jsonEnvelope";
-import { ensureMonthWritable } from "../population/monthLock";
+import { ensureMonthWritable, MonthClosedError } from "../population/monthLock";
 import { syncSampleMirrors } from "../samples/sampleMirrorStorage";
 import { loadSampleMaster } from "../sampling/sampleStorage";
 import {
@@ -47,6 +48,7 @@ import {
 } from "./distributionEventStore";
 import { dedupeInFlight, workspaceScopeId, bumpWorkspaceEpoch, workspaceEpoch } from "../storage/inFlightReads";
 import { isNotFoundError, waitFor } from "../storage/transientFileErrors";
+import { subscribeToDataRefresh } from "../workspace/dataRefreshSignal";
 
 /** Exported for the selective-restore catalog (`backup/restoreScope.ts`). */
 export const DISTRIBUTION_LOG_FILE = "distribution.log.json";
@@ -87,6 +89,31 @@ export type DistributionWriteProgress =
 
 type AppendDistributionEventsOptions = {
   onProgress?: (progress: DistributionWriteProgress) => void;
+  /**
+   * R3: this append is one interactive click (a single-row assign / reassign /
+   * complete / replacement request), so it must not hold the click for the
+   * `distribution.log.json` projection. The projection is still queued and run
+   * in order on its own per-month chain; the call returns `projectionPending`
+   * after only `projectionTiming.interactiveGraceMs` (0 by default). Bulk and
+   * approval appends leave this unset and keep the longer grace.
+   */
+  interactive?: boolean;
+  /**
+   * The log the caller read (and gated its write on) immediately BEFORE this
+   * append. With it, the pending/degraded result is built from this log plus the
+   * batch instead of re-reading the whole event store. The returned log then has
+   * no `scanIdentity` (the store's byte offsets moved when the batch landed) and
+   * the pre-bump `revision`, so a caller must not persist mirrors stamped from
+   * it -- see `queueDistributionCacheRebuild`, which re-reads in the background.
+   */
+  priorLog?: DistributionLog;
+  /**
+   * R4: the full load (log + scan metadata) the caller made immediately before
+   * this append. Implies `priorLog`, and additionally lets the projection job
+   * skip its own full re-read of the event store: it needs only the compatibility
+   * log's revision/token/body, which it still reads fresh on every CAS attempt.
+   */
+  priorLoad?: DistributionLogLoad;
 };
 
 /**
@@ -301,16 +328,15 @@ async function readCurrentDistributionSource(
   }
   // Deliberately unguarded: `onUnreadable: "throw"` above is the whole point,
   // and a listing failure is equally inconclusive. Both propagate.
-  const { values: legacyValues } = await readAppendOnlyDirectory<DistributionEvent>(eventsDir, {
+  const { values: legacyValues, matchedNames: legacyMatchedNames } = await readAppendOnlyDirectory<DistributionEvent>(eventsDir, {
     suffix: ".json",
     onUnreadable: "throw",
     unreadableError: (name) => `Cannot read immutable distribution event: ${name}`,
     scope: { root: directoryHandle, path: `${monthFolderName}/1-main/${DISTRIBUTION_EVENTS_DIR}` },
   });
-  const legacyEventFileNames = (await listDirectoryEntries(eventsDir))
-    .filter((entry) => entry.kind === "file" && entry.name.endsWith(".json"))
-    .map((entry) => entry.name)
-    .sort((a, b) => a.localeCompare(b));
+  // R4: the listing `readAppendOnlyDirectory` just made already IS the legacy
+  // name set (files ending ".json", name-sorted); do not list the directory again.
+  const legacyEventFileNames = legacyMatchedNames;
   // Legacy one-file-per-event immutable files are still read and merged in —
   // never rewritten or deleted, since another machine on an older build may
   // still be writing them (see distributionEventStore.ts). New writes go to
@@ -333,17 +359,43 @@ async function readCurrentDistributionSource(
   return { currentLog, immutableEvents, segmentOffsets: segmentDelta.offsets, legacyEventFileNames };
 }
 
+/**
+ * R5: months whose legacy `1-population/{month}/distribution.log.json` was found
+ * ABSENT. Every full read used to pay three NotFound probes (file, .bak, .tmp)
+ * for a file no writer creates any more. Only a genuine `null` is remembered
+ * (a corrupt file throws, a present one is returned), so "I could not look" is
+ * never memoized. Forgotten on a manual refresh, on a restore's stamp refresh
+ * and on an explicit `invalidateLegacyDistributionLogMemo()`; the accepted gap is
+ * a legacy file created by another machine between those events, which no
+ * current build does.
+ */
+const legacyLogAbsent = new Set<string>();
+
+export function invalidateLegacyDistributionLogMemo(): void {
+  legacyLogAbsent.clear();
+}
+
+if (typeof window !== "undefined") {
+  subscribeToDataRefresh((source) => {
+    if (source === "manual") legacyLogAbsent.clear();
+  });
+}
+
 async function readLegacyDistributionLog(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
 ): Promise<DistributionLog | null> {
+  const memoKey = projectionChainKey(directoryHandle, monthFolderName);
+  if (legacyLogAbsent.has(memoKey)) return null;
   const directory = await openOptionalDirectory(() =>
     getLegacyDistributionDir(directoryHandle, monthFolderName)
   );
-  return readCompatibilityLog(
+  const log = await readCompatibilityLog(
     directory,
     `Corrupt legacy distribution log: ${LOG_FILE}`
   );
+  if (log === null) legacyLogAbsent.add(memoKey);
+  return log;
 }
 
 function normalizeCompatibilityLog(log: DistributionLog | null): DistributionLog {
@@ -461,16 +513,20 @@ export async function readDistributionLogStamp(
     resolved !== undefined
       ? resolved.currentDir
       : await openOptionalDirectory(() => getDistributionDir(directoryHandle, monthFolderName, false));
-  const legacyDir =
-    resolved !== undefined
-      ? resolved.legacyDir
-      : await openOptionalDirectory(() => getLegacyDistributionDir(directoryHandle, monthFolderName));
+  const legacyDir = resolved !== undefined ? resolved.legacyDir : null; // unresolved: read through the absence memo below
   const currentLog = normalizeCompatibilityLog(
     await readCompatibilityLog(currentDir, `Corrupt distribution compatibility log: ${LOG_FILE}`)
   );
-  const legacyLog = normalizeCompatibilityLog(
-    await readCompatibilityLog(legacyDir, `Corrupt legacy distribution log: ${LOG_FILE}`)
-  );
+  let rawLegacy: DistributionLog | null;
+  if (resolved === undefined) {
+    rawLegacy = await readLegacyDistributionLog(directoryHandle, monthFolderName);
+  } else {
+    // The sync probe reads the legacy location unmemoized every tick; if it finds a log
+    // there, "the legacy log is absent" is no longer true for this month (R5 review).
+    rawLegacy = await readCompatibilityLog(legacyDir, `Corrupt legacy distribution log: ${LOG_FILE}`);
+    if (rawLegacy !== null) legacyLogAbsent.delete(projectionChainKey(directoryHandle, monthFolderName));
+  }
+  const legacyLog = normalizeCompatibilityLog(rawLegacy);
   return {
     revision: Math.max(currentLog.revision, legacyLog.revision),
     writeToken: selectWriteToken(currentLog, legacyLog),
@@ -506,6 +562,8 @@ export async function refreshDistributionLogWriteToken(
   distributionDir: DirectoryHandleLike
 ): Promise<boolean> {
   const corruptMessage = `Corrupt distribution compatibility log: ${LOG_FILE}`;
+  // A restore may have merged legacy data back: forget "the legacy log is absent" (R5).
+  legacyLogAbsent.clear();
   try {
     const outcome = await casLoop<{ touched: boolean }>(
       async (writeToken) => {
@@ -557,7 +615,7 @@ export async function loadDistributionCurrentRevision(
   }
 }
 
-type DistributionLogLoad = {
+export type DistributionLogLoad = {
   log: DistributionLog;
   /**
    * The events the CURRENT-location `distribution.log.json` actually holds on
@@ -668,12 +726,26 @@ export async function loadDistributionLog(
   return (await loadDistributionLogDetailed(directoryHandle, monthFolderName)).log;
 }
 
+/**
+ * The same full read, keeping what `loadDistributionLog` throws away (segment
+ * offsets, immutable ids, projection body). A caller that reads before it writes
+ * hands this to `appendDistributionEvents({ priorLoad })` so the append does not
+ * have to read the whole event store again.
+ */
+export function loadDistributionLogLoad(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<DistributionLogLoad> {
+  return loadDistributionLogDetailed(directoryHandle, monthFolderName);
+}
+
 export async function appendDistributionEvent(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
-  event: DistributionEvent
+  event: DistributionEvent,
+  options?: AppendDistributionEventsOptions
 ): Promise<AppendDistributionEventsResult> {
-  return appendDistributionEvents(directoryHandle, monthFolderName, [event]);
+  return appendDistributionEvents(directoryHandle, monthFolderName, [event], options);
 }
 
 /**
@@ -805,10 +877,14 @@ export async function appendDistributionEvents(
   // projection deadline: the append is reported ok with `projectionPending`,
   // and the queued job settles (and is logged) in the background.
   let detached = false;
+  const priorLog = options?.priorLoad?.log ?? options?.priorLog;
   const job = enqueueProjectionUpdate(directoryHandle, monthFolderName, events, ids, (progress) => {
     if (!detached) options?.onProgress?.(progress);
-  });
-  const settled = await raceWithGrace(job, projectionTiming.graceMs);
+  }, options?.priorLoad);
+  const settled = await raceWithGrace(
+    job,
+    options?.interactive ? projectionTiming.interactiveGraceMs : projectionTiming.graceMs
+  );
   if (settled !== "pending" && settled.ok) {
     options?.onProgress?.({ phase: "complete", completed: events.length, total: events.length });
     return settled;
@@ -821,6 +897,10 @@ export async function appendDistributionEvents(
   // batch — still better than claiming the append did not happen.
   const pendingOrDegraded =
     settled === "pending" ? ({ projectionPending: true } as const) : ({ projectionDegraded: true } as const);
+  // R3: the caller's own pre-append read plus this batch, when it handed one in.
+  if (priorLog) {
+    return { ok: true, log: logAfterAppend(priorLog, events, ids), ...pendingOrDegraded };
+  }
   try {
     return {
       ok: true,
@@ -842,12 +922,34 @@ export async function appendDistributionEvents(
   }
 }
 
+/**
+ * The log an interactive append returns when it was handed the pre-append log:
+ * those events with this batch laid over the end, in batch order (two events
+ * built in the same millisecond cannot be ordered by timestamp). Deliberately
+ * carries NO `scanIdentity`, because the segment byte offsets moved when the
+ * batch landed and the prior scan would misdescribe the store, and keeps the
+ * prior `revision`, because the bump belongs to the projection job that has not
+ * run yet.
+ */
+function logAfterAppend(prior: DistributionLog, events: DistributionEvent[], ids: Set<string>): DistributionLog {
+  const merged = [...prior.events.filter((event) => !ids.has(event.eventId)), ...events];
+  return {
+    monthFolderName: prior.monthFolderName,
+    revision: prior.revision,
+    ...(prior._writeToken === undefined ? {} : { _writeToken: prior._writeToken }),
+    eventSetId: distributionEventSetId(merged),
+    events: merged,
+  };
+}
+
 // ── Projection write chain (P4) ────────────────────────────────────────────
 
 /** Tunables, overridable by tests only (`__setProjectionTimingForTests`). */
 const projectionTiming = {
   /** How long an append waits for its own projection update before returning `projectionPending`. */
   graceMs: 3_000,
+  /** The same wait for an INTERACTIVE single-row append (R3): none. */
+  interactiveGraceMs: 0,
   /** The projection job's OWN deadline, independent of the click. */
   deadlineMs: INTERACTIVE_WRITE_DEADLINE_MS,
 };
@@ -856,6 +958,7 @@ export function __setProjectionTimingForTests(
   timing: Partial<typeof projectionTiming> | null
 ): void {
   projectionTiming.graceMs = timing?.graceMs ?? 3_000;
+  projectionTiming.interactiveGraceMs = timing?.interactiveGraceMs ?? 0;
   projectionTiming.deadlineMs = timing?.deadlineMs ?? INTERACTIVE_WRITE_DEADLINE_MS;
 }
 
@@ -917,6 +1020,10 @@ export async function flushPendingDistributionProjectionWrites(): Promise<void> 
 }
 
 function raceWithGrace(job: Promise<ProjectionOutcome>, graceMs: number): Promise<ProjectionOutcome | "pending"> {
+  // No grace at all (R3, interactive appends): report pending straight away. A
+  // 0 ms timer would still let a fast job finish first, and would put a macrotask
+  // turn on the click for nothing.
+  if (graceMs <= 0) return Promise.resolve("pending");
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve("pending"), graceMs);
     void job.then((outcome) => {
@@ -938,7 +1045,8 @@ function enqueueProjectionUpdate(
   monthFolderName: string,
   events: DistributionEvent[],
   ids: Set<string>,
-  onProgress: AppendDistributionEventsOptions["onProgress"]
+  onProgress: AppendDistributionEventsOptions["onProgress"],
+  priorLoad?: DistributionLogLoad
 ): Promise<ProjectionOutcome> {
   const key = projectionChainKey(directoryHandle, monthFolderName);
   const chain = projectionChains.get(key) ?? { tail: Promise.resolve(), pending: 0, queued: null };
@@ -962,7 +1070,7 @@ function enqueueProjectionUpdate(
     mine.started = true;
     if (chain.queued === mine) chain.queued = null;
     try {
-      const outcome = await runProjectionUpdate(directoryHandle, monthFolderName, mine.events, mine.ids, onProgress);
+      const outcome = await runProjectionUpdate(directoryHandle, monthFolderName, mine.events, mine.ids, onProgress, priorLoad);
       if (!outcome.ok) {
         // The projection could not be updated — but we only get here AFTER
         // `writeDistributionEventBatch` committed the immutable event files, so
@@ -1006,6 +1114,41 @@ function enqueueProjectionUpdate(
 }
 
 /**
+ * R4: what `runProjectionUpdate` needs from a full read, assembled from the
+ * caller's PRIOR load plus this batch, re-reading only the two small
+ * compatibility-log files (revision, token, body) -- fresh on every CAS attempt,
+ * which is what the cross-machine protocol depends on. The event ids and the
+ * event-set digest come from the prior load plus the batch; an event another
+ * machine appended in the window is absent from them, which is safe: an id
+ * missing from `immutableEventIds` only makes `residualProjectionEvents` KEEP a
+ * projection-body event it could have dropped, and the projection carries no
+ * event list on a modern workspace anyway. No `scanIdentity` is returned.
+ */
+async function projectionBaseFromPriorLoad(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  prior: DistributionLogLoad,
+  events: DistributionEvent[],
+  ids: Set<string>
+): Promise<Pick<DistributionLogLoad, "log" | "currentProjectionEvents" | "immutableEventIds">> {
+  const dir = await openOptionalDirectory(() => getDistributionDir(directoryHandle, monthFolderName, false));
+  const currentLog = await readCompatibilityLog(dir, `Corrupt distribution compatibility log: ${LOG_FILE}`);
+  const legacyLog = await readLegacyDistributionLog(directoryHandle, monthFolderName);
+  const local = logAfterAppend(prior.log, events, ids);
+  const base = normalizeCompatibilityLog(currentLog);
+  const legacy = normalizeCompatibilityLog(legacyLog);
+  return {
+    log: {
+      ...local,
+      revision: Math.max(base.revision, legacy.revision),
+      _writeToken: selectWriteToken(base, legacy),
+    },
+    currentProjectionEvents: currentLog?.events ?? [],
+    immutableEventIds: new Set([...prior.immutableEventIds, ...ids]),
+  };
+}
+
+/**
  * The projection casLoop itself: re-read the log, bump `revision`, stamp a
  * fresh token, write, and verify BOTH on read-back. Unchanged from the version
  * that used to run inline in `appendDistributionEvents`, except that it now has
@@ -1016,7 +1159,8 @@ async function runProjectionUpdate(
   monthFolderName: string,
   events: DistributionEvent[],
   ids: Set<string>,
-  onProgress: AppendDistributionEventsOptions["onProgress"]
+  onProgress: AppendDistributionEventsOptions["onProgress"],
+  priorLoad?: DistributionLogLoad
 ): Promise<ProjectionOutcome> {
   const result = await casLoop<{ ok: true; log: DistributionLog } | { ok: false; error: string }>(
     async (writeToken) => {
@@ -1025,7 +1169,9 @@ async function runProjectionUpdate(
         log: existing,
         currentProjectionEvents,
         immutableEventIds,
-      } = await loadDistributionLogDetailed(directoryHandle, monthFolderName);
+      } = priorLoad
+        ? await projectionBaseFromPriorLoad(directoryHandle, monthFolderName, priorLoad, events, ids)
+        : await loadDistributionLogDetailed(directoryHandle, monthFolderName);
       // Same set the separate readProjectedEventIds read used to fetch — now
       // taken from the load above instead of re-reading the same file.
       const projectedIds = new Set(currentProjectionEvents.map((event) => event.eventId));
@@ -1118,6 +1264,228 @@ export async function saveDistributionCurrent(
     await safeWriteJson(dir, DISTRIBUTION_CHECKPOINT_FILE, foldCheckpoint);
   }
   await syncSampleMirrors(directoryHandle, monthFolderName, current);
+}
+
+// ── Derived-cache persist chain (R1) ───────────────────────────────────────
+
+/**
+ * What a queued persist writes: a snapshot the caller already derived, or an
+ * instruction to derive one from the durable events when the job RUNS (R3 --
+ * an interactive click paints from a locally assembled log that has no event-
+ * store scan and a pre-bump revision, so it cannot be persisted as-is).
+ */
+type PersistRequest =
+  | { kind: "snapshot"; current: DistributionCurrentData }
+  | { kind: "rebuild"; sampleRows: PreparedPopulationRow[] };
+type QueuedPersist = { request: PersistRequest; started: boolean; job: Promise<DistributionCurrentData | null> };
+type PersistChain = { tail: Promise<unknown>; pending: number; queued: QueuedPersist | null };
+
+/** One serialized chain per (workspace, month): the cache, sidecar and mirrors are one target set. */
+const persistChains = new Map<string, PersistChain>();
+
+/**
+ * The derived snapshot for `log`, stamped so the next reader can take its fast
+ * path: the four acceptance fields (`deriveVersion` and `sampleRowsFingerprint`
+ * come from the fold; `logRevision`, `eventSetId` from the log) plus the
+ * event-store scan the mirrors are trusted by. Shared by every writer of the
+ * cache so the stamping cannot drift between them.
+ */
+export function deriveStampedCurrent(
+  log: DistributionLog,
+  sampleRows: PreparedPopulationRow[]
+): DistributionCurrentData {
+  return {
+    ...deriveCurrentDistribution(log, sampleRows),
+    logRevision: log.revision,
+    // `eventSetId` is stamped only when the log actually carries one: a legacy
+    // log with no digest must leave the field absent, or the cache would claim
+    // an identity nothing can re-verify.
+    ...(log.eventSetId === undefined ? {} : { eventSetId: log.eventSetId }),
+    // Which event-store scan this derivation is from, so its mirrors can be
+    // trusted by a sizes-only listing.
+    ...(log.scanIdentity === undefined ? {} : { scanIdentity: log.scanIdentity }),
+  };
+}
+
+/**
+ * True while a derived-cache persist (`distribution.current.json`, its
+ * checkpoint sidecar and the employee mirrors) is queued or running for this
+ * month IN THIS TAB. Until it settles, the on-disk mirrors may lag the durable
+ * events, so a caller whose wrong answer is irreversible (the delete-user
+ * guard) must fold from the events instead of trusting -- or finding nothing
+ * in -- a mirror.
+ */
+export function isDistributionPersistPending(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): boolean {
+  return (persistChains.get(projectionChainKey(directoryHandle, monthFolderName))?.pending ?? 0) > 0;
+}
+
+/** Jittered pause before the ONE retry of a failed background persist (R1 review). */
+const persistRetry: { minMs: number; maxMs: number; beforeRetry?: () => void } = { minMs: 1_000, maxMs: 3_000 };
+
+export function __setPersistRetryDelayForTests(
+  config: { minMs: number; maxMs: number; beforeRetry?: () => void } | null
+): void {
+  persistRetry.minMs = config?.minMs ?? 1_000;
+  persistRetry.maxMs = config?.maxMs ?? 3_000;
+  persistRetry.beforeRetry = config?.beforeRetry;
+}
+
+/**
+ * How much of the event store a snapshot was derived from: total segment bytes
+ * (append-only, so monotonic), else the checkpoint's known-event count. Undefined
+ * when the snapshot carries neither (hand-built). Used to order queued snapshots:
+ * `logRevision` cannot, because it lags the events whenever the projection bump
+ * has not landed.
+ */
+function eventCoverage(current: DistributionCurrentData): number | undefined {
+  const offsets = current.scanIdentity?.segmentOffsets ?? current.foldCheckpoint?.segmentOffsets;
+  if (offsets) return Object.values(offsets).reduce((sum, size) => sum + size, 0);
+  return current.foldCheckpoint?.knownEventIds.length;
+}
+
+/** True when `incoming` may take the place of the queued `held` snapshot. */
+function supersedes(incoming: DistributionCurrentData, held: DistributionCurrentData): boolean {
+  const a = eventCoverage(incoming);
+  const b = eventCoverage(held);
+  if (a !== undefined && b !== undefined) return a >= b;
+  return true; // not comparable: the later enqueue wins
+}
+
+function enqueuePersist(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  request: PersistRequest
+): Promise<DistributionCurrentData | null> {
+  const key = projectionChainKey(directoryHandle, monthFolderName);
+  const chain = persistChains.get(key) ?? { tail: Promise.resolve(), pending: 0, queued: null };
+  persistChains.set(key, chain);
+  const queued = chain.queued;
+  if (queued && !queued.started) {
+    const held = queued.request;
+    if (request.kind === "rebuild") {
+      queued.request = request; // derives fresh when it runs, so it supersedes anything queued
+    } else if (held.kind === "snapshot" && supersedes(request.current, held.current)) {
+      queued.request = request;
+    } // else: a queued rebuild already covers this snapshot, or it covers less of the event store than the queued one
+    return queued.job;
+  }
+  chain.pending += 1;
+  const mine: QueuedPersist = { request, started: false, job: undefined as never };
+  chain.queued = mine;
+  const job: Promise<DistributionCurrentData | null> = chain.tail.then(async () => {
+    mine.started = true;
+    if (chain.queued === mine) chain.queued = null;
+    const req = mine.request;
+    // The snapshot this job derived (or was handed), whether or not the write landed:
+    // callers that must decide from FRESH state (auto-lock) use it instead of re-reading.
+    let derived: DistributionCurrentData | null = req.kind === "snapshot" ? req.current : null;
+    const attempt = async (): Promise<void> => {
+      const current =
+        req.kind === "snapshot" ? req.current : await rebuildCurrentFromEvents(directoryHandle, monthFolderName, req.sampleRows);
+      derived = current;
+      if (current) await saveDistributionCurrent(directoryHandle, monthFolderName, current);
+    };
+    try {
+      await attempt();
+    } catch (first) {
+      // Everything here is rebuildable, but nothing else rewrites it until the next
+      // write in the month, so one bounded, jittered retry keeps it healing. A closed
+      // month is permanent, not transient: no retry.
+      if (first instanceof MonthClosedError) {
+        logRejection("distribution:cache-write")(first);
+      } else {
+        await waitFor(persistRetry.minMs + Math.random() * (persistRetry.maxMs - persistRetry.minMs));
+        persistRetry.beforeRetry?.();
+        try {
+          await attempt();
+        } catch (second) {
+          logRejection("distribution:cache-write")(second);
+        }
+      }
+    }
+    return derived;
+  });
+  mine.job = job;
+  const settle = (): void => {
+    chain.pending -= 1;
+    if (chain.pending === 0 && persistChains.get(key) === chain) persistChains.delete(key);
+  };
+  chain.tail = job.then(settle, settle);
+  return job;
+}
+
+/**
+ * Queue `saveDistributionCurrent` behind any earlier persist for the same month
+ * and return a promise for it. NEVER rejects: a failure is logged as
+ * `distribution:cache-write`, exactly as the fire-and-forget reader path always
+ * did, because everything written here is rebuildable from the immutable events.
+ *
+ * Coalescing: a persist that is queued behind a running one and has not started
+ * takes the newer snapshot in place of the one it held, so a burst of clicks
+ * writes the cache and every mirror once, not once per click. "Newer" is ordered
+ * by how much of the event store a snapshot covers (segment bytes, else known
+ * event count) and NOT by `logRevision`, which lags the events while a projection
+ * bump is pending; a snapshot that covers less never displaces one that covers
+ * more, and snapshots that cannot be compared go to the later enqueue. A failed
+ * persist is retried once after a jittered 1-3 s pause, then logged.
+ */
+export function queueDistributionCurrentPersist(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  current: DistributionCurrentData
+): Promise<DistributionCurrentData | null> {
+  return enqueuePersist(directoryHandle, monthFolderName, { kind: "snapshot", current });
+}
+
+/**
+ * Queue a persist that derives its snapshot from the durable events when it
+ * runs (R3). It first lets this month's projection job settle, so the
+ * `logRevision` it stamps is the bumped one, then does the full read + fold +
+ * stamp exactly as a synchronous `refreshDistribution` did -- so the bytes that
+ * land are the same, only off the click path. Coalesces like a snapshot, and a
+ * queued rebuild swallows any snapshot queued behind it (it is fresher by
+ * construction). `sampleRows` are the rows the caller derived against; the
+ * cache's row fingerprint self-heals if they moved meanwhile. Never rejects.
+ */
+export function queueDistributionCacheRebuild(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  sampleRows: PreparedPopulationRow[]
+): Promise<DistributionCurrentData | null> {
+  return enqueuePersist(directoryHandle, monthFolderName, { kind: "rebuild", sampleRows });
+}
+
+async function rebuildCurrentFromEvents(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  sampleRows: PreparedPopulationRow[]
+): Promise<DistributionCurrentData | null> {
+  await projectionChains.get(projectionChainKey(directoryHandle, monthFolderName))?.tail;
+  const log = await loadDistributionLog(directoryHandle, monthFolderName);
+  // Never persist a zeroed derive over real events: it would blank the cache and every mirror.
+  if (sampleRows.length === 0 && log.events.length > 0) return null;
+  return deriveStampedCurrent(log, sampleRows);
+}
+
+/**
+ * Resolve once every derived-cache persist queued so far (for one month, or all
+ * of them) has settled. For tests and for a flow that genuinely needs the
+ * mirrors current; production click paths must never await it. Never rejects.
+ */
+export async function flushPendingDistributionPersist(
+  directoryHandle?: DirectoryHandleLike,
+  monthFolderName?: string
+): Promise<void> {
+  const only = directoryHandle && monthFolderName ? projectionChainKey(directoryHandle, monthFolderName) : null;
+  for (;;) {
+    const chains = [...persistChains.entries()].filter(([key]) => only === null || key === only);
+    if (chains.length === 0) return;
+    await Promise.all(chains.map(([, chain]) => chain.tail));
+    if (chains.every(([, chain]) => chain.pending === 0)) return;
+  }
 }
 
 /**
@@ -1283,13 +1651,10 @@ async function readNewEventsSinceCheckpoint(
   const directory = await openOptionalDirectory(() => getDistributionDir(directoryHandle, monthFolderName, false));
   if (!directory) return null;
 
-  const legacyDir = await openOptionalDirectory(() => getLegacyDistributionDir(directoryHandle, monthFolderName));
   const currentCompatLog = normalizeCompatibilityLog(
     await readCompatibilityLog(directory, `Corrupt distribution compatibility log: ${LOG_FILE}`)
   );
-  const legacyCompatLog = normalizeCompatibilityLog(
-    await readCompatibilityLog(legacyDir, `Corrupt legacy distribution log: ${LOG_FILE}`)
-  );
+  const legacyCompatLog = normalizeCompatibilityLog(await readLegacyDistributionLog(directoryHandle, monthFolderName));
   const compatEvents =
     currentCompatLog.events.length > 0
       ? mergeDistributionEvents(currentCompatLog.events, legacyCompatLog.events)
@@ -1450,9 +1815,7 @@ async function tryResumeFromCheckpoint(
   // *what* is written, only whether this function returns before or after the
   // write settles — so no caller that does not opt in becomes newly blocking.
   if (persistCache) {
-    const write = saveDistributionCurrent(directoryHandle, monthFolderName, withRevision).catch(
-      logRejection("distribution:cache-write")
-    );
+    const write = queueDistributionCurrentPersist(directoryHandle, monthFolderName, withRevision);
     if (awaitCachePersist) await write;
   }
   return withRevision;
@@ -1946,9 +2309,7 @@ async function loadOrDeriveDistributionCurrentOutcome(
     // `awaitCachePersist` (Design B, step 1): only the write-path helper opts
     // in — see LoadOrDeriveDistributionCurrentOptions. Same write either way.
     if (persistCache && mayPersist) {
-      const write = saveDistributionCurrent(directoryHandle, monthFolderName, withRevision).catch(
-        logRejection("distribution:cache-write")
-      );
+      const write = queueDistributionCurrentPersist(directoryHandle, monthFolderName, withRevision);
       if (awaitCachePersist) await write;
     }
 
@@ -2004,16 +2365,18 @@ export async function loadOrDeriveDistributionCurrent(
  * `saveDistributionCurrent` (ensureMonthWritable → MonthClosedError) — that
  * is expected, not a bug this helper needs to work around.
  *
- * SYNCHRONOUS BY CONTRACT (Design B, step 1). This helper awaits the cache +
- * mirror write (`awaitCachePersist`), so when it resolves every
- * `{username}.samples.json` for this month has been rewritten — or the failure
- * has been logged. Previously the inner `saveDistributionCurrent` was
- * fire-and-forget on both the checkpoint-resume and full-refold paths, making
- * the guarantee through reopen / referral approval / replacement *eventual*:
- * a view re-reading immediately after one of those flows could paint the
- * pre-refresh mirror. That is not tolerable now that the mirror is the
- * employee's primary read. Only this helper opts in; every read path keeps the
- * old non-blocking behaviour.
+ * BACKGROUND BY CONTRACT (R1; was Design B step 1, "synchronous"). This helper
+ * used to await the cache + mirror write, which put ~150 share operations on
+ * every write flow's click path. The persist now runs on the per-month
+ * background chain (`queueDistributionCurrentPersist`, coalescing), and the
+ * guarantee Design B wanted is provided by the READER instead: an employee view
+ * only serves a mirror when `isMirrorTrustedForEvents` proves it was derived
+ * from exactly the events now on disk (a sizes-only listing of the event
+ * store), and folds otherwise, so a view re-reading immediately paints correct
+ * data from the fold rather than the pre-refresh mirror. The immutable events
+ * are still committed BEFORE any caller reaches this helper. Tests and any
+ * flow that truly needs the mirrors current await
+ * `flushPendingDistributionPersist`.
  *
  * One residual gap, deliberately not closed here: if a concurrent writer has
  * ALREADY persisted a cache carrying this exact log revision, the inner derive
@@ -2030,7 +2393,6 @@ export async function refreshDistributionCacheAfterWrite(
   try {
     await loadOrDeriveDistributionCurrent(directoryHandle, monthFolderName, sampleRows, {
       persistCache: true,
-      awaitCachePersist: true,
     });
   } catch (error) {
     logError("distribution:refresh-after-write", error);

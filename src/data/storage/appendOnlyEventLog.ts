@@ -29,7 +29,7 @@ import {
   taggedError,
   type ErrorCode,
 } from "./errorCodes";
-import { nextRetryDelayMs, type OperationDeadline } from "./operationDeadline";
+import { nextRetryDelayMs, recordLadderDwell, type OperationDeadline } from "./operationDeadline";
 import {
   TRANSIENT_WRITE_RETRY_DELAYS_MS,
   VERIFY_READBACK_RETRY_DELAYS_MS,
@@ -109,6 +109,15 @@ export type AppendEventSegmentOptions = {
    * (their chain is unique to this page load) and when it shows nothing higher.
    */
   listedSegmentNames?: readonly string[];
+  /**
+   * The caller took NO fresh listing before appending (answers' blind self-save),
+   * so `listedSegmentNames` is only as new as its last full read. For a `stable`
+   * writer, probe upward from the chosen seq under the chain lock (one
+   * `getFileHandle` per hop, NotFound = stop) so a segment another tab of the
+   * same chain rotated to since is found and appended to instead of the
+   * superseded one. Ignored for non-stable writers.
+   */
+  probeAheadForHead?: boolean;
 };
 
 /** Contexts and error codes the consumer wants this module's failures reported under. */
@@ -702,6 +711,7 @@ async function readExistingSegment(
       if (transient && attempt < ladder.length) {
         const delay = nextRetryDelayMs(ladder[attempt]!, deadline);
         if (delay !== null) {
+          recordLadderDwell(deadline, "append.reread", delay);
           await waitFor(delay);
           continue;
         }
@@ -854,6 +864,7 @@ async function verifySegmentSize(
         logCodedError(diagnostics.verifyContext, diagnostics.unverifiedCode, error);
         return "unverified";
       }
+      recordLadderDwell(deadline, "append.verify", delay ?? 0);
       await waitFor(delay ?? 0);
       continue;
     }
@@ -865,6 +876,7 @@ async function verifySegmentSize(
         diagnostics.sizeMismatchCode
       );
     }
+    recordLadderDwell(deadline, "append.verify", delay ?? 0);
     await waitFor(delay ?? 0);
   }
 }
@@ -976,6 +988,7 @@ async function writeSegmentOnce(
         if (attempt < VERIFY_READBACK_RETRY_DELAYS_MS.length) {
           const delay = nextRetryDelayMs(VERIFY_READBACK_RETRY_DELAYS_MS[attempt]!, deadline);
           if (delay !== null) {
+            recordLadderDwell(deadline, "append.write", delay);
             await waitFor(delay);
             continue;
           }
@@ -996,6 +1009,7 @@ async function writeSegmentOnce(
             deadline
           );
           if (delay !== null) {
+            recordLadderDwell(deadline, "append.blocked-replace", delay);
             await waitFor(delay);
             continue;
           }
@@ -1305,6 +1319,25 @@ export async function appendEventSegment<TEvent>(
         // outside it: another tab of the same chain can rotate to head+1 in
         // between, and if the in-lock listing then threw, a lagged NotFound on
         // head+1 would be trusted and that tab's lines overwritten.
+      }
+    }
+    if (writer.stable && options.probeAheadForHead) {
+      for (let hop = 0; seq < MAX_SEGMENT_SEQ && hop < 64; hop += 1) {
+        try {
+          await eventsDir.getFileHandle(segmentFileNameForSeq(base, seq + 1, segmentSuffix), { create: false });
+        } catch (error) {
+          if (isNotFoundError(error)) break;
+          // Cannot tell: fall back to a real listing, as a first append would.
+          const discovered = await discoverHighestOwnSeq(eventsDir, base, segmentSuffix);
+          if (discovered.listed && discovered.highest > seq) {
+            seq = discovered.highest;
+            highestReliableSeq = Math.max(highestReliableSeq, seq);
+          }
+          break;
+        }
+        // Positive evidence that seq + 1 exists: it is (at least) the head.
+        seq += 1;
+        highestReliableSeq = Math.max(highestReliableSeq, seq);
       }
     }
     let fileName = segmentFileNameForSeq(base, seq, segmentSuffix);

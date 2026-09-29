@@ -8,7 +8,11 @@ import {
   appendDistributionEvent,
   appendDistributionEvents,
   loadDistributionLog,
-  saveDistributionCurrent,
+  loadDistributionLogLoad,
+  type DistributionLogLoad,
+  deriveStampedCurrent,
+  queueDistributionCacheRebuild,
+  queueDistributionCurrentPersist,
   type DistributionWriteProgress,
 } from "../../../../data/distribution/distributionStorage";
 import {
@@ -119,7 +123,8 @@ export function useDistributionActions(params: {
 
   async function refreshDistribution(
     monthFolderName: string,
-    preloadedLog?: DistributionLog
+    preloadedLog?: DistributionLog,
+    options?: { rebuildInBackground?: boolean }
   ): Promise<void> {
     if (!directoryHandle) return;
     const log = preloadedLog ?? await loadDistributionLog(directoryHandle, monthFolderName);
@@ -176,19 +181,35 @@ export function useDistributionActions(params: {
     // events exist. A wrong-but-stamped cache would still self-heal on the next
     // event, since the cache is an optimization and never a correctness input.
     //
-    // `eventSetId` is stamped only when the log actually carries one: a legacy
-    // log with no digest must leave the field absent, or the cache would claim
-    // an identity nothing can re-verify.
-    const current: DistributionCurrentData = {
-      ...deriveCurrentDistribution(log, sampleRows),
-      logRevision: log.revision,
-      ...(log.eventSetId === undefined ? {} : { eventSetId: log.eventSetId }),
-      // Which event-store scan this derivation is from, so its mirrors can be trusted by a sizes-only listing.
-      ...(log.scanIdentity === undefined ? {} : { scanIdentity: log.scanIdentity }),
-    };
+    // The stamping itself lives in `deriveStampedCurrent` (distributionStorage), shared
+    // with the background rebuild so the two cannot drift.
+    const current = deriveStampedCurrent(log, sampleRows);
     setDistributionCurrent(current);
-    await saveDistributionCurrent(directoryHandle, monthFolderName, current);
-    void autoLockWhenFullyDistributed(monthFolderName, current, sampleRows);
+    // R1: paint from the in-memory derive above and persist the REBUILDABLE
+    // files (cache, checkpoint sidecar, employee mirrors) on the per-month
+    // background chain. The events are already durable; a reader that arrives
+    // before the chain settles sees an untrusted mirror and folds.
+    const persisted = options?.rebuildInBackground
+      ? // R3: `log` was assembled locally (the caller's pre-append read plus its batch),
+        // so it has no event-store scan and a pre-bump revision. Painting from it is
+        // fine; persisting mirrors stamped from it is not. Re-derive from the durable
+        // events in the background instead.
+        queueDistributionCacheRebuild(directoryHandle, monthFolderName, sampleRows)
+      : queueDistributionCurrentPersist(directoryHandle, monthFolderName, current);
+    // Auto-lock runs only AFTER the persist has settled (a lock closes the month and
+    // the persist's write gate would then refuse the final cache/mirror write), and it
+    // decides from the FRESH state that job derived from the durable events, never from
+    // the painted `current`: that one omits an event a colleague appended between this
+    // click's read and its append, so locking on it could close a month with a row in
+    // flight, and requiring it to look terminal could skip a lock that two simultaneous
+    // last completions both missed.
+    void persisted.then(async (fresh) => {
+      try {
+        if (fresh) await autoLockWhenFullyDistributed(monthFolderName, fresh, sampleRows);
+      } catch (error) {
+        logError("population:auto-lock-month", error);
+      }
+    });
     onDistributionChanged();
   }
 
@@ -219,16 +240,21 @@ export function useDistributionActions(params: {
    * person manually closing the month (Archive tab / this tab's own admin
    * unlock affordance).
    */
+  function isFullyTerminal(current: DistributionCurrentData, sampleRows: SampleMasterData["rows"]): boolean {
+    return (
+      sampleRows.length > 0 &&
+      current.entries.length >= sampleRows.length &&
+      current.entries.every((entry) => entry.status === "completed" || entry.status === "replaced")
+    );
+  }
+
   async function autoLockWhenFullyDistributed(
     monthFolderName: string,
     current: DistributionCurrentData,
     sampleRows: SampleMasterData["rows"]
   ): Promise<void> {
     if (!directoryHandle) return;
-    if (sampleRows.length === 0 || current.entries.length < sampleRows.length) return;
-    if (!current.entries.every((entry) => entry.status === "completed" || entry.status === "replaced")) {
-      return;
-    }
+    if (!isFullyTerminal(current, sampleRows)) return;
     try {
       if (await isMonthClosed(directoryHandle, monthFolderName)) return;
       const result = await closeMonth(
@@ -264,13 +290,16 @@ export function useDistributionActions(params: {
   async function readFreshEntry(
     monthFolderName: string,
     xrayImageId: string
-  ): Promise<{ log: DistributionLog; entry: DistributionEntry | undefined }> {
+  ): Promise<{ log: DistributionLog; load: DistributionLogLoad; entry: DistributionEntry | undefined }> {
     if (!directoryHandle) throw new Error("readFreshEntry: no workspace directory");
-    const log = await loadDistributionLog(directoryHandle, monthFolderName);
-    if (log.events.length === 0) return { log, entry: undefined };
+    // R4: keep the whole load (scan metadata included) so the append that follows
+    // can hand it on instead of re-reading the event store.
+    const load = await loadDistributionLogLoad(directoryHandle, monthFolderName);
+    const log = load.log;
+    if (log.events.length === 0) return { log, load, entry: undefined };
     const master = await loadSampleMaster(directoryHandle, monthFolderName);
     const current = deriveCurrentDistribution(log, master?.rows ?? sampleDrawResult?.rows ?? []);
-    return { log, entry: current.entries.find((entry) => entry.xrayImageId === xrayImageId) };
+    return { log, load, entry: current.entries.find((entry) => entry.xrayImageId === xrayImageId) };
   }
 
   /** Refuse a handler whose target row changed on disk: repaint from the
@@ -337,7 +366,7 @@ export function useDistributionActions(params: {
       // fold's `assigned` handler overwrites `assignedTo` unconditionally —
       // appending blindly silently transfers ownership. An owned row refuses
       // and repaints instead (see readFreshEntry).
-      const { log: freshLog, entry: owned } = await readFreshEntry(monthFolderName, xrayImageId);
+      const { log: freshLog, load: freshLoad, entry: owned } = await readFreshEntry(monthFolderName, xrayImageId);
       if (owned) {
         await refuseChangedRow(
           monthFolderName,
@@ -346,15 +375,18 @@ export function useDistributionActions(params: {
         );
         return;
       }
-      const result = await appendDistributionEvent(
-        directoryHandle,
-        monthFolderName,
-        event
-      );
+      // R3: an interactive click -- do not hold it for the projection, and build the
+      // returned log from the fresh read above plus this event.
+      const result = await appendDistributionEvent(directoryHandle, monthFolderName, event, {
+        interactive: true,
+        priorLoad: freshLoad,
+      });
       if (result.ok) {
         await updateMonthStatus(directoryHandle, monthFolderName, "distributed");
         // A partial stand-in log (the durable re-read failed) is never derived from: reload instead.
-        await refreshDistribution(monthFolderName, result.logIsPartial ? undefined : result.log);
+        await refreshDistribution(monthFolderName, result.logIsPartial ? undefined : result.log, {
+          rebuildInBackground: result.projectionPending === true,
+        });
         logRowChange(monthFolderName, xrayImageId, { change: "assigned", to: assignedTo });
         setDistributionMessage({ type: "ok", text: "تم التعيين." });
       } else {
@@ -405,7 +437,7 @@ export function useDistributionActions(params: {
       // Fresh status gate: the fold DROPS a reassign on a completed/replaced
       // row, but the user was still told "تم إعادة التعيين." for a write that
       // did nothing. A missing entry means the snapshot row no longer exists.
-      const { log: freshLog, entry: fresh } = await readFreshEntry(monthFolderName, xrayImageId);
+      const { log: freshLog, load: freshLoad, entry: fresh } = await readFreshEntry(monthFolderName, xrayImageId);
       if (fresh?.status === "completed") {
         await refuseChangedRow(
           monthFolderName,
@@ -426,14 +458,17 @@ export function useDistributionActions(params: {
         reassignedTo,
         eventBy: currentUsername
       });
-      const result = await appendDistributionEvent(
-        directoryHandle,
-        monthFolderName,
-        event
-      );
+      // R3: an interactive click -- do not hold it for the projection, and build the
+      // returned log from the fresh read above plus this event.
+      const result = await appendDistributionEvent(directoryHandle, monthFolderName, event, {
+        interactive: true,
+        priorLoad: freshLoad,
+      });
       if (result.ok) {
         // A partial stand-in log (the durable re-read failed) is never derived from: reload instead.
-        await refreshDistribution(monthFolderName, result.logIsPartial ? undefined : result.log);
+        await refreshDistribution(monthFolderName, result.logIsPartial ? undefined : result.log, {
+          rebuildInBackground: result.projectionPending === true,
+        });
         logRowChange(monthFolderName, xrayImageId, { change: "reassigned", from: fresh.assignedTo, to: reassignedTo });
         setDistributionMessage({ type: "ok", text: "تم إعادة التعيين." });
       } else {
@@ -462,7 +497,7 @@ export function useDistributionActions(params: {
       // A missing entry means the row was never assigned or no longer exists.
       // `replacement-requested` is deliberately allowed: completing it is a
       // real supervisor decision that supersedes the pending request.
-      const { log: freshLog, entry: fresh } = await readFreshEntry(monthFolderName, xrayImageId);
+      const { log: freshLog, load: freshLoad, entry: fresh } = await readFreshEntry(monthFolderName, xrayImageId);
       if (!fresh || fresh.status === "completed" || fresh.status === "replaced") {
         await refuseChangedRow(monthFolderName, freshLog, getLabels().msg_row_state_changed_on_disk);
         return;
@@ -472,14 +507,17 @@ export function useDistributionActions(params: {
         assignedTo: fresh.assignedTo,
         eventBy: currentUsername
       });
-      const result = await appendDistributionEvent(
-        directoryHandle,
-        monthFolderName,
-        event
-      );
+      // R3: an interactive click -- do not hold it for the projection, and build the
+      // returned log from the fresh read above plus this event.
+      const result = await appendDistributionEvent(directoryHandle, monthFolderName, event, {
+        interactive: true,
+        priorLoad: freshLoad,
+      });
       if (result.ok) {
         // A partial stand-in log (the durable re-read failed) is never derived from: reload instead.
-        await refreshDistribution(monthFolderName, result.logIsPartial ? undefined : result.log);
+        await refreshDistribution(monthFolderName, result.logIsPartial ? undefined : result.log, {
+          rebuildInBackground: result.projectionPending === true,
+        });
         logRowChange(monthFolderName, xrayImageId, { change: "completed", from: fresh.assignedTo });
         setDistributionMessage({ type: "ok", text: "تم تعليم الصف كمكتمل." });
       } else {
@@ -510,7 +548,7 @@ export function useDistributionActions(params: {
       // path and orphaning the submitted answer, and un-arming the month
       // auto-lock. Only a fresh `pending` row may request a replacement (a
       // duplicate request on `replacement-requested` is refused here too).
-      const { log: freshLog, entry: fresh } = await readFreshEntry(monthFolderName, xrayImageId);
+      const { log: freshLog, load: freshLoad, entry: fresh } = await readFreshEntry(monthFolderName, xrayImageId);
       if (fresh?.status !== "pending") {
         await refuseChangedRow(monthFolderName, freshLog, getLabels().msg_row_state_changed_on_disk);
         return;
@@ -520,14 +558,17 @@ export function useDistributionActions(params: {
         assignedTo: fresh.assignedTo,
         eventBy: currentUsername
       });
-      const result = await appendDistributionEvent(
-        directoryHandle,
-        monthFolderName,
-        event
-      );
+      // R3: an interactive click -- do not hold it for the projection, and build the
+      // returned log from the fresh read above plus this event.
+      const result = await appendDistributionEvent(directoryHandle, monthFolderName, event, {
+        interactive: true,
+        priorLoad: freshLoad,
+      });
       if (result.ok) {
         // A partial stand-in log (the durable re-read failed) is never derived from: reload instead.
-        await refreshDistribution(monthFolderName, result.logIsPartial ? undefined : result.log);
+        await refreshDistribution(monthFolderName, result.logIsPartial ? undefined : result.log, {
+          rebuildInBackground: result.projectionPending === true,
+        });
         logRowChange(monthFolderName, xrayImageId, { change: "replacement-requested", from: fresh.assignedTo });
         setDistributionMessage({ type: "ok", text: "تم تسجيل طلب الاستبدال." });
       } else {

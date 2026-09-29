@@ -46,6 +46,13 @@ export type OperationDeadline = {
   readonly at: number;
   /** Diagnostic label naming the user action that owns this budget. */
   readonly label: string;
+  /**
+   * Telemetry only (A7): milliseconds this action has SLEPT inside each named
+   * retry ladder (`recordLadderDwell`). Never read by any retry decision, so it
+   * cannot change behaviour; it exists so a slow-save field report can say which
+   * ladder consumed the time.
+   */
+  readonly dwellMs?: Record<string, number>;
 };
 
 /**
@@ -65,7 +72,23 @@ export const INTERACTIVE_WRITE_DEADLINE_MS = 30_000;
 export const BULK_WRITE_DEADLINE_MS = 120_000;
 
 export function createDeadline(budgetMs: number, label: string): OperationDeadline {
-  return { at: Date.now() + budgetMs, label };
+  return { at: Date.now() + budgetMs, label, dwellMs: {} };
+}
+
+/**
+ * Telemetry (A7): note that this action is about to sleep `ms` in the ladder
+ * named `step`. A no-op without a deadline (or one built without `dwellMs`).
+ */
+export function recordLadderDwell(deadline: OperationDeadline | undefined, step: string, ms: number): void {
+  const dwell = deadline?.dwellMs;
+  if (!dwell || !(ms > 0)) return;
+  dwell[step] = (dwell[step] ?? 0) + ms;
+}
+
+/** Total recorded ladder dwell of an action, in ms. */
+export function totalLadderDwellMs(deadline: OperationDeadline | undefined): number {
+  const dwell = deadline?.dwellMs;
+  return dwell ? Object.values(dwell).reduce((sum, ms) => sum + ms, 0) : 0;
 }
 
 /** True once the budget is spent. A missing deadline is never expired. */

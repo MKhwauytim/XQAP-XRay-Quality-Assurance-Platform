@@ -8,7 +8,7 @@ import { readEnvelopeRevision, safeWriteJson } from "../storage/safeWrite";
 import { getPopulationMonthDir, getSampleMainDir } from "../workspace/workspacePaths";
 import { closeMonth, MonthClosedError } from "../population/monthLock";
 import type { MonthManifestData } from "../population/monthTypes";
-import { loadOrDeriveDistributionCurrent } from "../distribution/distributionStorage";
+import { flushPendingDistributionPersist, loadOrDeriveDistributionCurrent } from "../distribution/distributionStorage";
 import { loadEmployeeSampleMirror } from "../samples/sampleMirrorStorage";
 import {
   createDefaultManagedUsers,
@@ -528,6 +528,8 @@ describe("assignAdhocPlan", () => {
     // independent answers representable at all.
     expect(new Set((current?.entries ?? []).map((e) => e.xrayImageId)).size).toBe(3);
 
+    // The mirror write is a background job (R1): settle it before reading the files.
+    await flushPendingDistributionPersist();
     for (const username of REVIEWERS) {
       const mirror = await loadEmployeeSampleMirror(root, monthFolderName, username);
       expect(mirror?.entries.map((e) => e.assignedTo)).toEqual([username]);

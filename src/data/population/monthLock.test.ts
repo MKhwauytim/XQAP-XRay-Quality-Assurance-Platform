@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
@@ -259,6 +259,29 @@ describe("monthLock", () => {
     __setMonthLockTtlForTests(0);
     await safeWriteJson(monthDir, "month.manifest.json", { ...manifest, status: "distributed" as const });
     expect(await isMonthClosed(root, MONTH)).toBe(false);
+  });
+
+  it("A2: the default TTL is 5 minutes, so an ordinary save cadence does not re-read the manifest", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.parse("2026-05-10T07:00:00.000Z"));
+      const root = makeRoot();
+      await seedManifest(root, "distributed");
+      expect(await isMonthClosed(root, MONTH)).toBe(false);
+
+      const monthDir = await getPopulationMonthDir(root, MONTH, false);
+      const manifest = await readManifest(root);
+      await safeWriteJson(monthDir, "month.manifest.json", { ...manifest, status: "closed" as const });
+
+      // A 40 s save cadence (and up to just under 5 min) is served from cache.
+      vi.setSystemTime(Date.parse("2026-05-10T07:04:50.000Z"));
+      expect(await isMonthClosed(root, MONTH)).toBe(false);
+      // Past the TTL the manifest is re-read.
+      vi.setSystemTime(Date.parse("2026-05-10T07:05:10.000Z"));
+      expect(await isMonthClosed(root, MONTH)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("demo read-only mode never throws from ensureMonthWritable", async () => {

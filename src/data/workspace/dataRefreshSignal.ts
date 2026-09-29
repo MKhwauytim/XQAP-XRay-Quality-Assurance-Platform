@@ -67,7 +67,34 @@ export const ALL_DATA_REFRESH_FAMILIES: readonly DataRefreshFamily[] = [
 
 export type DataRefreshDetail =
   | { source: "manual" }
-  | { source: "periodic"; changed: ReadonlySet<DataRefreshFamily> };
+  | {
+      source: "periodic";
+      changed: ReadonlySet<DataRefreshFamily>;
+      /**
+       * Whose answers the `answers` change touched: the lower-cased `answeredBy`
+       * of every event newly appended to the segments the probe saw move.
+       * `undefined`/`null` means UNKNOWN (a local echo, a bare broadcast, a probe
+       * that could not peek): consumers must then treat the change as possibly
+       * theirs. Only meaningful when `changed` has "answers".
+       */
+      answerOwners?: ReadonlySet<string> | null;
+    };
+
+/**
+ * May an `answers` change in this broadcast concern `username`'s own answers?
+ * True for a manual refresh, an unknown owner set, or an owner set naming them.
+ * Views that only render the signed-in employee's OWN answers use it to skip a
+ * reload caused by a colleague saving their own work; a supervisor's on-behalf
+ * answer, reopen or quality note on this employee's row names them as owner and
+ * still reloads.
+ */
+export function answersMayConcern(detail: DataRefreshDetail, username: string): boolean {
+  if (detail.source === "manual") return true;
+  if (!detail.changed.has("answers")) return false;
+  const owners = detail.answerOwners;
+  if (!owners) return true;
+  return owners.has(username.trim().toLowerCase());
+}
 
 function isDataRefreshDetail(value: unknown): value is DataRefreshDetail {
   return typeof value === "object" && value !== null && "source" in value;
