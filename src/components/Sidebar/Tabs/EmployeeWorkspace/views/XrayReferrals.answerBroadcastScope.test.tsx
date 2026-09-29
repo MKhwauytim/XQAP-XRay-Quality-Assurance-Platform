@@ -142,8 +142,10 @@ describe("XrayReferrals employee queue reload scope (A9)", () => {
       xrayImageId: "IMG-001", templateId: "tmpl-stale", templateVersion: 1, answers: [{ fieldId: "note", value: "x" }],
       lastSavedAt: new Date().toISOString(), submittedAt: null, answeredBy: owner, status: "draft" as const,
     });
-    // emp-b's FIRST save also freezes their legacy shell (a legacy-file change, owners unknown), so do it before the baseline
+    // A first-ever save also freezes the employee's legacy shell (a legacy-file change: owners unknown,
+    // which would short-circuit the owner check and make this test vacuous), so warm BOTH before the baseline.
     expect((await answerStorage.upsertItemAnswer(root, XRAY_REFERRALS_TEST_MONTH, "emp-b", item("emp-b"))).ok).toBe(true);
+    expect((await answerStorage.upsertItemAnswer(root, XRAY_REFERRALS_TEST_MONTH, "emp-a", item("emp-a"))).ok).toBe(true);
     await runSync({ directoryHandle: root, monthFolderName: XRAY_REFERRALS_TEST_MONTH }); // baseline
     // a colleague saves their own work: no reload
     expect((await answerStorage.upsertItemAnswer(root, XRAY_REFERRALS_TEST_MONTH, "emp-b", item("emp-b"))).ok).toBe(true);
