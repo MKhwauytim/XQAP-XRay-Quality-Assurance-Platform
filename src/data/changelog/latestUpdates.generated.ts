@@ -5,73 +5,73 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v150.7",
+    "date": "2026-09-29",
+    "bucket": "fix",
+    "scope": "samples",
+    "title": "delete-user guard never reads a failed recount as zero pending"
+  },
+  {
+    "version": "v150.6",
+    "date": "2026-09-29",
+    "bucket": "feature",
+    "scope": "distribution",
+    "title": "warn when a port restriction leaves an employee short of their equal-share target"
+  },
+  {
+    "version": "v150.5",
+    "date": "2026-09-29",
+    "bucket": "fix",
+    "scope": "distribution",
+    "title": "existing ownership counts toward restricted targets on a re-run"
+  },
+  {
+    "version": "v150.4",
+    "date": "2026-09-29",
+    "bucket": "fix",
+    "scope": "distribution",
+    "title": "v4 mirrors are not trusted after DERIVE_VERSION 5; retire calendar-day helper"
+  },
+  {
+    "version": "v150.3",
+    "date": "2026-09-29",
+    "bucket": "feature",
+    "scope": "distribution",
+    "title": "warn in the preview when a port restriction makes equal totals impossible"
+  },
+  {
+    "version": "v150.2",
+    "date": "2026-09-29",
+    "bucket": "fix",
+    "scope": "distribution",
+    "title": "rows an employee already owns count toward their target on a restricted re-run"
+  },
+  {
+    "version": "v150.1",
+    "date": "2026-09-29",
+    "bucket": "fix",
+    "scope": "employee-workspace",
+    "title": "daily quota tile strings as label keys, working-day wording"
+  },
+  {
+    "version": "v150.0",
+    "date": "2026-09-29",
+    "bucket": "fix",
+    "scope": "distribution",
+    "title": "daily quota counts working days (Sun-Thu); DERIVE_VERSION 5"
+  },
+  {
+    "version": "v149.8",
+    "date": "2026-09-29",
+    "bucket": "feature",
+    "scope": "utils",
+    "title": "countWorkingDays — Sunday to Thursday, Friday/Saturday weekend"
+  },
+  {
     "version": "v149.7",
     "date": "2026-09-29",
     "bucket": "fix",
     "scope": "employee-workspace",
     "title": "the empty-queue notice and stats title reflect the CertScan chip"
-  },
-  {
-    "version": "v149.6",
-    "date": "2026-09-29",
-    "bucket": "feature",
-    "scope": "population",
-    "title": "warn on re-processing a sampled month when CertScan status would change"
-  },
-  {
-    "version": "v149.5",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "population",
-    "title": "harden whole-port CertScan flags (trimmed names, pinned default output, unspecified-port test)"
-  },
-  {
-    "version": "v149.4",
-    "date": "2026-09-29",
-    "bucket": "feature",
-    "scope": "population",
-    "title": "CertScan filter chips in Population Browse"
-  },
-  {
-    "version": "v149.3",
-    "date": "2026-09-29",
-    "bucket": "feature",
-    "scope": "employee-workspace",
-    "title": "CertScan chip and CertScan status filter in the sample queues"
-  },
-  {
-    "version": "v149.2",
-    "date": "2026-09-29",
-    "bucket": "feature",
-    "scope": "population",
-    "title": "admin picker for whole-port CertScan flags in processing settings"
-  },
-  {
-    "version": "v149.1",
-    "date": "2026-09-29",
-    "bucket": "feature",
-    "scope": "population",
-    "title": "process flagged ports as CertScan (union with the pasted list)"
-  },
-  {
-    "version": "v149.0",
-    "date": "2026-09-29",
-    "bucket": "feature",
-    "scope": "population",
-    "title": "certScanPorts config field for whole-port CertScan flags"
-  },
-  {
-    "version": "v148.6",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "employee-workspace",
-    "title": "stage cells always Arabic, workspace aliases in inspection results"
-  },
-  {
-    "version": "v148.5",
-    "date": "2026-09-29",
-    "bucket": "redesign",
-    "scope": "stages",
-    "title": "import the canonical stage labels instead of local copies"
   }
 ];
