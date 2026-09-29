@@ -30,6 +30,8 @@ import { readOptionalJson, safeWriteJson } from "../storage/safeWrite";
 import { casFailureFromCause, casLoop, isPermissionLostError, withJitter } from "../storage/casLoop";
 import {
   createDeadline,
+  recordLadderDwell,
+  totalLadderDwellMs,
   INTERACTIVE_WRITE_DEADLINE_MS,
   isDeadlineExpired,
   nextRetryDelayMs,
@@ -904,6 +906,40 @@ type AnswerWriteDecision =
   | { skip: true };
 
 /**
+ * A save whose retry ladders slept at least this long in total writes one
+ * error-log entry (`logLadderDwell`). Below it a save is healthy as far as the
+ * ladders go, and logging every save would only add noise.
+ */
+export const LADDER_DWELL_LOG_THRESHOLD_MS = 1000;
+
+/**
+ * Telemetry only (A7): say WHICH retry ladder a slow save waited on. The sleeps
+ * are accumulated per step on the action's deadline (`recordLadderDwell`); this
+ * turns them into one error-log entry — `outcome`, the total, each step
+ * (`append.reread`, `append.write`, `append.blocked-replace`, `append.verify`,
+ * `decision-read`) and the wall time of the append — for a save that slept at
+ * least the threshold, or any FAILED save that slept at all. No behaviour depends on it.
+ */
+function logLadderDwell(
+  deadline: OperationDeadline,
+  telemetryAction: string,
+  outcome: "ok" | "failed",
+  startedAtMs: number
+): void {
+  const total = totalLadderDwellMs(deadline);
+  if (total < LADDER_DWELL_LOG_THRESHOLD_MS && !(outcome === "failed" && total > 0)) return;
+  const steps = Object.entries(deadline.dwellMs ?? {})
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([step, ms]) => `${step}=${Math.round(ms)}`)
+    .join(" ");
+  logError(
+    `answerStorage:${telemetryAction}:ladder-dwell`,
+    new Error(`ladder dwell outcome=${outcome} total=${Math.round(total)} ${steps} elapsed=${Date.now() - startedAtMs}ms`),
+    { action: telemetryAction }
+  );
+}
+
+/**
  * Re-run the READ side of an answer write (month read, seed resolution, fold,
  * `build`) when it throws — a transient share fault such as a stale-snapshot
  * `InvalidStateError` on the read-back, which the ladder inside the read does
@@ -926,6 +962,7 @@ async function retryDecisionRead<T>(deadline: OperationDeadline, step: () => Pro
     if (attempt < ANSWER_SAVE_MAX_RETRIES - 1) {
       const delay = nextRetryDelayMs(withJitter(ANSWER_SAVE_BASE_DELAY_MS * (attempt + 1)), deadline);
       if (delay === null) break;
+      recordLadderDwell(deadline, "decision-read", delay);
       await new Promise<void>((resolve) => setTimeout(resolve, delay));
     }
   }
@@ -1009,6 +1046,7 @@ async function performAnswerWrite(
   // ONE budget for the whole user action, spent by the append's inner ladders
   // (A1) — see operationDeadline.ts.
   const deadline = createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "answers:interactive-write");
+  const startedAtMs = Date.now();
   // No pre-change history write here any more. The state a snapshot would have
   // copied is already durable in `answers.events/*.ndjson`, which is
   // append-only and never pruned, so `actionHistoryReaders.ts` derives the same
@@ -1132,6 +1170,7 @@ async function performAnswerWrite(
     return casFailureFromCause(error, { context: `answers:${telemetryAction}`, onExhausted });
   });
   return written.then(async (result) => {
+    logLadderDwell(deadline, telemetryAction, result.ok ? "ok" : "failed", startedAtMs);
     // Cache/derived-state refresh, after the durable append, never gating the
     // save's own success — same contract as distribution's
     // `refreshDistributionCacheAfterWrite` (awaited, wrapped so its own
@@ -1397,6 +1436,7 @@ async function performOnBehalfWrite(
   // ONE budget for the whole user action, shared by casLoop (new attempts) and
   // the append's inner ladders (A1) — see operationDeadline.ts.
   const deadline = createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "answers:interactive-write");
+  const startedAtMs = Date.now();
   const xrayImageId = item.xrayImageId;
 
   const result = await casLoop<{ ok: true } | { ok: false; error: string }>(
@@ -1496,6 +1536,7 @@ async function performOnBehalfWrite(
       },
     }
   );
+  logLadderDwell(deadline, "answer-save-on-behalf", result.ok ? "ok" : "failed", startedAtMs);
   if (result.ok) await refreshAnswerCacheAfterWrite(directoryHandle, monthFolderName);
   return result;
 }
