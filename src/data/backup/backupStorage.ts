@@ -1,7 +1,8 @@
 import * as XLSX from "xlsx";
 
 import type { EmployeeAnswerFile } from "../answers/answerTypes";
-import { loadAllEmployeeFiles } from "../answers/answerStorage";
+import { clearAnswerEventsCache, loadAllEmployeeFiles } from "../answers/answerStorage";
+import { invalidateSealedAnswerSegments } from "../answers/answerSealedSegments";
 import { ANSWER_EVENTS_DIR, type AnswerEvent } from "../answers/answerEventStore";
 import {
   DISTRIBUTION_EVENTS_DIR,
@@ -1267,6 +1268,15 @@ async function restoreJsonTree(params: {
   }
   await invalidateDistributionCaches(cacheDirs);
   await republishRestoredDistributionStamps(cacheDirs);
+
+  // A restore that merged `answers.events/` lines rewrote segment bytes under
+  // this tab's incremental read cache (byte offsets + sealed-segment
+  // confirmations). Both are rebuildable, so drop them: the next read is a full
+  // one and cannot skip a segment the merge just grew.
+  if (applied.some((result) => result.eventsDirName === ANSWER_EVENTS_DIR)) {
+    clearAnswerEventsCache();
+    invalidateSealedAnswerSegments();
+  }
 }
 
 type LocatedJson<T> =

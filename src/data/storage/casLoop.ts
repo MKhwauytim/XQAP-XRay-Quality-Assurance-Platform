@@ -24,7 +24,7 @@ const VERIFY_MAX_DELAY_MS = 180;
 // Terminal failure surfaced to callers when the workspace folder handle has lost
 // its grant (tab backgrounded, permission revoked, folder moved/renamed). Retrying
 // cannot recover it, so casLoop aborts immediately with this distinct message.
-const PERMISSION_LOST_ERROR =
+export const PERMISSION_LOST_ERROR =
   "فقد الوصول إلى مجلد العمل — أعد الاتصال بمساحة العمل.";
 
 function sleep(ms: number): Promise<void> {
@@ -32,7 +32,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 // Add ±50 % random jitter to avoid thundering-herd retries across machines.
-function withJitter(ms: number): number {
+export function withJitter(ms: number): number {
   return ms * (0.5 + Math.random());
 }
 
@@ -55,10 +55,48 @@ function verifyDelayMs(): number {
 // access to the workspace, whose only offered remedy (re-pick the folder) is
 // powerless against someone else's open handle. See `isLockContentionError`
 // in transientFileErrors.ts; it now falls through to the retry path below.
-function isPermissionLostError(error: unknown): boolean {
+export function isPermissionLostError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const name = (error as { name?: string }).name;
   return name === "NotAllowedError" || name === "SecurityError";
+}
+
+/**
+ * The terminal `{ ok: false, error }` for a write that failed by THROWING, with
+ * the same classification, logging and `onExhausted` observation `casLoop`
+ * applies when its attempts are exhausted. Exported so a caller that has
+ * deliberately left the retry loop (a single, non-racing append — see
+ * `performAnswerWrite`) reports an identical failure instead of a second,
+ * drifting copy of this mapping.
+ *
+ * A lost folder grant maps to the reconnect message and is not logged, exactly
+ * as inside the loop.
+ */
+export function casFailureFromCause(
+  cause: unknown,
+  options?: { context?: string; onExhausted?: (cause: unknown, code: ErrorCode) => void }
+): { ok: false; error: string } {
+  if (isPermissionLostError(cause)) return { ok: false, error: PERMISSION_LOST_ERROR };
+  // An exception beat us, so this is NOT a write conflict — report what it
+  // actually was, with a quotable code, and put the raw detail in the log.
+  const code = resolveErrorCode(cause) ?? "XQ-IO-032";
+  // Which step of safeWriteJson threw (stage / commit / post-commit read-back),
+  // when known: a refused close() swap (nothing written) and an unreadable
+  // read-back (written) need opposite responses and look identical otherwise.
+  const step = writeStepOf(cause);
+  logCodedError(
+    (options?.context ? `casLoop:exhausted(${options.context})` : "casLoop:exhausted") +
+      (step ? ` step=${step}` : ""),
+    code,
+    cause
+  );
+  try {
+    options?.onExhausted?.(cause, code);
+  } catch {
+    // The observer's own failure is not this write's problem — see the
+    // `onExhausted` option's doc comment on `casLoop`.
+  }
+  return { ok: false, error: codedMessage(code) };
 }
 
 /**
@@ -278,26 +316,7 @@ export async function casLoop<T>(
   }
 
   if (lastCause !== undefined) {
-    // An exception beat us, so this is NOT a write conflict — report what it
-    // actually was, with a quotable code, and put the raw detail in the log.
-    const code = resolveErrorCode(lastCause) ?? "XQ-IO-032";
-    // Which step of safeWriteJson threw (stage / commit / post-commit read-back),
-    // when known: a refused close() swap (nothing written) and an unreadable
-    // read-back (written) need opposite responses and look identical otherwise.
-    const step = writeStepOf(lastCause);
-    logCodedError(
-      (options?.context ? `casLoop:exhausted(${options.context})` : "casLoop:exhausted") +
-        (step ? ` step=${step}` : ""),
-      code,
-      lastCause
-    );
-    try {
-      options?.onExhausted?.(lastCause, code);
-    } catch {
-      // The observer's own failure is not this write's problem — see the
-      // option's own doc comment above.
-    }
-    return { ok: false, error: codedMessage(code) };
+    return casFailureFromCause(lastCause, options);
   }
   // No exception: every attempt lost the revision race. The caller's Arabic
   // conflict sentence is the right answer here and now survives intact.

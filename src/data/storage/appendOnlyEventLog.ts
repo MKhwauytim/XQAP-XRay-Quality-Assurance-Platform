@@ -98,6 +98,17 @@ export type AppendEventSegmentOptions = {
    * can no longer outlive the whole action (A1). Omitted: unbounded, as before.
    */
   deadline?: OperationDeadline;
+  /**
+   * File names a SUCCESSFUL listing of the events directory showed a moment ago
+   * (the caller's read of the whole log, taken just before deciding to append).
+   * A `stable` writer never appends below the highest seq of its OWN chain that
+   * appears here: a second tab that rotated, a memo that is behind, or a
+   * discovery listing that threw would otherwise put this batch into a segment
+   * readers already consider sealed (S3) — see `answerStorage.ts`. Costs no I/O:
+   * it only raises the starting seq, and is ignored for non-stable writers
+   * (their chain is unique to this page load) and when it shows nothing higher.
+   */
+  listedSegmentNames?: readonly string[];
 };
 
 /** Contexts and error codes the consumer wants this module's failures reported under. */
@@ -1276,6 +1287,26 @@ export async function appendEventSegment<TEvent>(
       highestReliableSeq = discovered.listed ? discovered.highest : -1;
       listedHighestSeq = discovered.listed ? discovered.highest : -1;
     }
+    // Never start below the head of this chain as the caller's successful
+    // listing saw it (see `listedSegmentNames`). A listing is positive evidence,
+    // so it raises both watermarks exactly like a successful discovery would.
+    if (writer.stable && options.listedSegmentNames) {
+      let listedHead = -1;
+      for (const listed of options.listedSegmentNames) {
+        const listedSeq = parseOwnSegmentSeq(listed, base, segmentSuffix);
+        if (listedSeq !== null && listedSeq > listedHead) listedHead = listedSeq;
+      }
+      if (listedHead > seq) {
+        seq = listedHead;
+        highestReliableSeq = Math.max(highestReliableSeq, listedHead);
+        // `listedHighestSeq` is deliberately NOT raised. It licenses trusting a
+        // NotFound as "absent" for anything above it, and it may only come from
+        // a listing taken INSIDE this lock (discovery). This hint was taken
+        // outside it: another tab of the same chain can rotate to head+1 in
+        // between, and if the in-lock listing then threw, a lagged NotFound on
+        // head+1 would be trusted and that tab's lines overwritten.
+      }
+    }
     let fileName = segmentFileNameForSeq(base, seq, segmentSuffix);
     let existing = await readExistingSegment(
       eventsDir,
@@ -1428,7 +1459,7 @@ export async function appendEventSegment<TEvent>(
 
       if (rotatedForBlockedReplace || seq >= MAX_SEGMENT_SEQ) {
         // Never rewrite/overwrite the failed segment: leave it exactly as it
-        // was and let the caller (casLoop) see the real underlying error.
+        // was and let the caller see the real underlying error.
         throw blocked.error;
       }
       rotatedForBlockedReplace = true;
@@ -1488,6 +1519,13 @@ export type SegmentEventsDelta<TEvent> = {
   offsets: Record<string, number>;
   /** Every segment file name seen in this listing. */
   segmentNames: string[];
+  /**
+   * Segments confirmed sealed by this read (S3, see `readSegmentTails`). A caller
+   * that keeps an in-memory offsets cache hands this back as
+   * `options.sealedConfirmed` so a sealed segment is not opened again. Absent
+   * from a persisted checkpoint by design: losing it only costs one re-open.
+   */
+  sealedConfirmedNames: Set<string>;
 };
 
 /**
@@ -1534,7 +1572,7 @@ export async function readEventSegmentDelta<TEvent>(
   parentDir: DirectoryHandleLike,
   knownOffsets: Record<string, number>,
   config: AppendOnlyEventLogConfig,
-  options?: { strict?: boolean }
+  options?: { strict?: boolean; sealedConfirmed?: ReadonlySet<string> }
 ): Promise<SegmentEventsDelta<TEvent>> {
   const strict = options?.strict ?? false;
   let eventsDir: DirectoryHandleLike;
@@ -1546,12 +1584,13 @@ export async function readEventSegmentDelta<TEvent>(
     // it makes a month's whole event history disappear from every fold that
     // reads through here.
     if (!isNotFoundError(error)) throw error;
-    return { events: [], offsets: { ...knownOffsets }, segmentNames: [] };
+    return { events: [], offsets: { ...knownOffsets }, segmentNames: [], sealedConfirmedNames: new Set() };
   }
 
-  const { tailTextByName, sizeByName, matchedNames } = await readSegmentTails(eventsDir, {
+  const { tailTextByName, sizeByName, matchedNames, sealedConfirmedNames } = await readSegmentTails(eventsDir, {
     suffix: config.segmentSuffix,
     knownOffsets,
+    sealedConfirmed: options?.sealedConfirmed,
     // `eventsDir` comes from a raw getDirectoryHandle() (never path-registered),
     // and its name is the same in every month: scope the skip log by the parent.
     scopeKey: directoryResourceKey(parentDir, config.eventsDirName),
@@ -1580,7 +1619,7 @@ export async function readEventSegmentDelta<TEvent>(
   const offsets: Record<string, number> = { ...knownOffsets };
   for (const [name, size] of sizeByName) offsets[name] = size;
 
-  return { events, offsets, segmentNames: matchedNames };
+  return { events, offsets, segmentNames: matchedNames, sealedConfirmedNames };
 }
 
 /* ─────────────────────── event-set digest (fixed, not a parameter) ──────── */

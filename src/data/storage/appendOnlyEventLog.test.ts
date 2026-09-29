@@ -1963,7 +1963,7 @@ describe("readEventSegmentDelta", () => {
 
   it("answers an absent events directory with an empty delta, not an error", async () => {
     const delta = await readEventSegmentDelta<TestEvent>(root(), {}, TEST_LOG);
-    expect(delta).toEqual({ events: [], offsets: {}, segmentNames: [] });
+    expect(delta).toEqual({ events: [], offsets: {}, segmentNames: [], sealedConfirmedNames: new Set() });
   });
 
   it("throws rather than inventing an empty history when the directory cannot be OPENED", async () => {
@@ -2172,5 +2172,65 @@ describe("F15: verifySegmentSize keeps at least one retry under an expired deadl
     // deadline then refused a second — never more than the one guaranteed
     // rung, however many stale reads keep coming back.
     expect(delays).toEqual([VERIFY_READBACK_RETRY_DELAYS_MS[0]]);
+  });
+});
+
+// S3 fix round: a stable writer never appends below the head of its own chain as a
+// caller's successful listing saw it, or readers that already consider the lower
+// segment sealed would skip its late bytes.
+describe("listedSegmentNames: a stable writer never appends below the listed head", () => {
+  const w = { ...WRITER, stable: true };
+  beforeEach(() => __resetAppendOnlyEventLogMemosForTests());
+
+  it("a stale memo (another tab rotated) advances to the listed head instead of writing seq 0", async () => {
+    const dir = root();
+    await appendEventSegment(dir, [event("A")], w, TEST_LOG); // memo: seq 0
+    await writeSegmentText(dir, name(1, w), `${JSON.stringify(event("ROT"))}\n`); // "other tab" rotated
+    const seq0Before = await readSegmentText(dir, name(0, w));
+
+    await appendEventSegment(dir, [event("LATE")], w, TEST_LOG, { listedSegmentNames: [name(0, w), name(1, w)] });
+
+    expect(await readSegmentText(dir, name(0, w))).toBe(seq0Before);
+    const head = await readSegmentText(dir, name(1, w));
+    expect(head).toContain("evt-LATE");
+    expect(head).toContain("evt-ROT"); // the head's existing lines are preserved
+  });
+
+  it("a discovery listing that threw (seq 0 assumed) still lands at the listed head", async () => {
+    const dir = root();
+    await appendEventSegment(dir, [event("A")], w, TEST_LOG);
+    await writeSegmentText(dir, name(1, w), `${JSON.stringify(event("ROT"))}\n`);
+    __resetAppendOnlyEventLogMemosForTests(); // a reload: no memo, discovery must list
+    const parent = await withBrokenListing(dir, 0);
+    await withCapturedSleeps(() =>
+      appendEventSegment(parent, [event("LATE")], w, TEST_LOG, { listedSegmentNames: [name(0, w), name(1, w)] })
+    );
+    expect(await readSegmentText(dir, name(1, w))).toContain("evt-LATE");
+    expect(await readSegmentText(dir, name(0, w))).not.toContain("evt-LATE");
+  });
+
+  it("healthy path: a listing that shows nothing higher costs no extra operations", async () => {
+    const dirA = root({ trackOperations: true });
+    const dirB = root({ trackOperations: true });
+    await appendEventSegment(dirA, [event("A")], w, TEST_LOG);
+    __resetAppendOnlyEventLogMemosForTests(); // the memo is keyed by chain, not by directory
+    await appendEventSegment(dirB, [event("A")], w, TEST_LOG);
+    const opsFor = async (dir: DirectoryHandleLike, listed?: string[]) => {
+      const eventsDir = await eventsDirOf(dir);
+      clearOperationLog(eventsDir);
+      await appendEventSegment(dir, [event("B")], w, TEST_LOG, listed ? { listedSegmentNames: listed } : {});
+      return getOperationLog(eventsDir).length;
+    };
+    const withHint = await opsFor(dirB, [name(0, w)]);
+    __resetAppendOnlyEventLogMemosForTests();
+    await appendEventSegment(dirA, [event("A2")], w, TEST_LOG); // re-establish the memo on dirA's segment
+    expect(withHint).toBe(await opsFor(dirA));
+  });
+
+  it("is ignored for a non-stable writer (its chain is unique to this page load)", async () => {
+    const dir = root();
+    await appendEventSegment(dir, [event("A")], WRITER, TEST_LOG);
+    await appendEventSegment(dir, [event("B")], WRITER, TEST_LOG, { listedSegmentNames: [name(3, WRITER)] });
+    expect(await readSegmentText(dir, name(0, WRITER))).toContain("evt-B");
   });
 });

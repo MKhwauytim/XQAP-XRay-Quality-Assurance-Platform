@@ -223,7 +223,7 @@ export async function readAnswerEventDelta(
   parentDir: DirectoryHandleLike,
   knownOffsets: Record<string, number>,
   config: AppendOnlyEventLogConfig = ANSWER_EVENT_LOG,
-  options?: { strict?: boolean }
+  options?: { strict?: boolean; sealedConfirmed?: ReadonlySet<string> }
 ): Promise<SegmentEventsDelta<AnswerEvent>> {
   return readEventSegmentDelta<AnswerEvent>(parentDir, knownOffsets, config, options);
 }
