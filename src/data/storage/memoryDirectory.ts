@@ -96,7 +96,17 @@ export type SimulatedFault = {
     // — another machine or an AV scanner holding the entry open raises
     // NoModificationAllowedError. `safeRemoveJson` rides the transient ladder
     // for exactly that, and this is how that is reproduced deterministically.
-    | "removeEntry";
+    | "removeEntry"
+    // The swap-file→target REPLACE, not the write itself: `createWritable`
+    // faults the OPEN of the writable stream, `close` faults the commit that
+    // follows a SUCCESSFUL `write()`, leaving the target byte-identical to
+    // before (matching `MoveFileEx`'s atomicity — a failed replace never
+    // partially lands). This is how the production XQ-IO-036 root cause is
+    // reproduced: `writable.close()` throwing `InvalidStateError` because the
+    // share refuses to replace one target file, for as many (or as few)
+    // calls as `times` allows. See
+    // `.superpowers/sdd/errorlog-2026-09-28/answer-save-invalidstate.md`.
+    | "close";
   /**
    * Entry name to match. Omit to match every name. For `getFile` / `readFile` /
    * `createWritable` this is the file handle's own name.
@@ -127,13 +137,59 @@ export type SimulatedFault = {
   /** DOMException `name` to throw. Defaults to "NotFoundError". */
   errorName?: string;
   /**
+   * DOMException `message` to throw. Defaults to `Simulated <errorName> for
+   * "<entry>".`. Set it when the code under test classifies on the MESSAGE (an
+   * `AbortError` from Chromium's Safe Browsing check is told apart from the
+   * picker's `AbortError` only by its text).
+   */
+  errorMessage?: string;
+  /**
    * How many matching calls to fail before letting them through. Defaults to
    * 1. Use `Number.POSITIVE_INFINITY` for a permanent failure.
    */
   times?: number;
+  /**
+   * R8(a), `operation: "close"` only: commit the write to `node.files` BEFORE
+   * throwing, instead of the default (throw leaves the target byte-identical
+   * to before — modelling `MoveFileEx`'s atomicity). Models the rarer, more
+   * dangerous edge case where the OS-level replace genuinely landed but the
+   * browser/JS promise still rejected (a timeout racing the real completion,
+   * a late error after the rename already happened) — the shape
+   * `segmentReplaceMayHaveLanded`'s re-read exists to catch, so a caller must
+   * NOT rotate and duplicate the batch into a second file.
+   */
+  commitBeforeThrow?: boolean;
+  /**
+   * Minor (tail-compare regression): only meaningful together with
+   * `commitBeforeThrow`. When set, the commit writes THIS text instead of
+   * the real bytes this `write()` call was given — modelling a coincidence a
+   * size-only "did it land?" check cannot see through: some OTHER writer's
+   * content lands at the target, of the SAME total byte length this call
+   * would also have produced, but not ending with this call's own bytes.
+   * Without this, `commitBeforeThrow` alone can only ever produce a target
+   * whose tail DOES match (it commits the real content), so it cannot
+   * exercise the branch where a size match must NOT be trusted as "landed".
+   */
+  commitAlienContent?: string;
+  /**
+   * `operation: "readFile"` only. Models a stale client view that every COMMIT
+   * re-arms: the fault is inert until a `close()` on the SAME name lands, then
+   * the next `times` reads of that name fail, and the budget is refilled by the
+   * next landed close(). This is "our own just-committed write cannot be read
+   * back for a while" (other-groups.md §B, reproduction C), which a plain
+   * `times` budget cannot express because it is not re-armed by each retry's
+   * fresh commit.
+   */
+  rearmAfterClose?: boolean;
 };
 
-type FaultState = { faults: SimulatedFault[]; consumed: number[]; skipped: number[] };
+type FaultState = {
+  faults: SimulatedFault[];
+  consumed: number[];
+  skipped: number[];
+  /** Per fault: has a matching close() armed a `rearmAfterClose` fault. */
+  armed: boolean[];
+};
 type OperationLogState = { entries: OperationLogEntry[] };
 
 export type OperationLogEntry = {
@@ -205,6 +261,7 @@ export function setSimulatedFaults(dir: DirectoryHandleLike, faults: SimulatedFa
   state.faults = faults;
   state.consumed = faults.map(() => 0);
   state.skipped = faults.map(() => 0);
+  state.armed = faults.map(() => false);
 }
 
 /** Test-only: remove every installed fault (equivalent to `setSimulatedFaults(dir, [])`). */
@@ -223,10 +280,51 @@ export function clearOperationLog(dir: DirectoryHandleLike): void {
   if (state) state.entries = [];
 }
 
-function simulatedError(errorName: string, entryName: string): Error {
-  const error = new Error(`Simulated ${errorName} for "${entryName}".`);
+function simulatedError(errorName: string, entryName: string, message?: string): Error {
+  const error = new Error(message ?? `Simulated ${errorName} for "${entryName}".`);
   error.name = errorName;
   return error;
+}
+
+/**
+ * R8(a): a SIDE-EFFECT-FREE peek — does the fault that WOULD fire for this
+ * `close` entry want the commit applied before the throw? Deliberately
+ * mirrors `applyFaults`' own matching order/rules (first matching fault
+ * wins) without consuming any budget itself; the real `applyFaults` call
+ * right after this one (nothing async runs between them) does the actual
+ * consuming and throwing, so this can never see a different verdict than
+ * the throw that follows it.
+ */
+function closeFaultCommitsBeforeThrow(
+  faultState: FaultState | null,
+  entry: OperationLogEntry
+): SimulatedFault | null {
+  if (!faultState) return null;
+  for (let index = 0; index < faultState.faults.length; index += 1) {
+    const fault = faultState.faults[index]!;
+    if (fault.operation !== entry.operation) continue;
+    if (fault.name !== undefined && fault.name !== entry.name) continue;
+    if (fault.nameSuffix !== undefined && !entry.name.endsWith(fault.nameSuffix)) continue;
+    if (fault.create !== undefined && fault.create !== (entry.create ?? false)) continue;
+    if (fault.nameMinLength !== undefined && entry.name.length < fault.nameMinLength) continue;
+    if (fault.skip !== undefined && faultState.skipped[index]! < fault.skip) continue;
+    const limit = fault.times ?? 1;
+    if (faultState.consumed[index]! >= limit) continue;
+    return fault.commitBeforeThrow === true ? fault : null;
+  }
+  return null;
+}
+
+/** A close() on `name` landed: re-arm every `rearmAfterClose` read fault for it. */
+function rearmReadFaults(faultState: FaultState | null, name: string): void {
+  if (!faultState) return;
+  faultState.faults.forEach((fault, index) => {
+    if (!fault.rearmAfterClose) return;
+    if (fault.name !== undefined && fault.name !== name) return;
+    if (fault.nameSuffix !== undefined && !name.endsWith(fault.nameSuffix)) return;
+    faultState.armed[index] = true;
+    faultState.consumed[index] = 0;
+  });
 }
 
 /**
@@ -248,6 +346,7 @@ function applyFaults(
     if (fault.nameSuffix !== undefined && !entry.name.endsWith(fault.nameSuffix)) continue;
     if (fault.create !== undefined && fault.create !== (entry.create ?? false)) continue;
     if (fault.nameMinLength !== undefined && entry.name.length < fault.nameMinLength) continue;
+    if (fault.rearmAfterClose && !faultState.armed[index]) continue;
     if (fault.skip !== undefined && faultState.skipped[index]! < fault.skip) {
       faultState.skipped[index] += 1;
       continue;
@@ -255,7 +354,7 @@ function applyFaults(
     const limit = fault.times ?? 1;
     if (faultState.consumed[index]! >= limit) continue;
     faultState.consumed[index] += 1;
-    throw simulatedError(fault.errorName ?? "NotFoundError", entry.name);
+    throw simulatedError(fault.errorName ?? "NotFoundError", entry.name, fault.errorMessage);
   }
 }
 
@@ -438,7 +537,29 @@ function makeFileHandle(
           chunks.push(toBytes(data));
         },
         close: async () => {
-          node.files.set(name, { content: concatBytes(chunks), lastModified: nextMemoryMtime() });
+          const entry: OperationLogEntry = { operation: "close", name };
+          // R8(a): the default models a failed swap-file→target Move — faulted
+          // BEFORE the commit, so a thrown fault leaves `node.files` untouched,
+          // the target exactly as it was. A fault with `commitBeforeThrow` is
+          // the rarer, more dangerous opposite: the OS-level replace actually
+          // landed and only the JS promise still rejected, so the commit
+          // happens FIRST and the throw follows it — exactly the shape
+          // `segmentReplaceMayHaveLanded`'s re-read exists to catch.
+          const commitFault = closeFaultCommitsBeforeThrow(faultState, entry);
+          if (commitFault) {
+            // `commitAlienContent`, when set, commits THAT text instead of the
+            // real chunks — modelling a same-size, different-content landing.
+            const content =
+              commitFault.commitAlienContent !== undefined
+                ? toBytes(commitFault.commitAlienContent)
+                : concatBytes(chunks);
+            node.files.set(name, { content, lastModified: nextMemoryMtime() });
+            applyFaults(faultState, operationLog, entry);
+          } else {
+            applyFaults(faultState, operationLog, entry);
+            node.files.set(name, { content: concatBytes(chunks), lastModified: nextMemoryMtime() });
+            rearmReadFaults(faultState, name);
+          }
         }
       };
     }
@@ -607,6 +728,7 @@ export function createMemoryDirectory(
     faults: options.faults ?? [],
     consumed: (options.faults ?? []).map(() => 0),
     skipped: (options.faults ?? []).map(() => 0),
+    armed: (options.faults ?? []).map(() => false),
   };
   const operationLog: OperationLogState | null = options.trackOperations ? { entries: [] } : null;
   return makeDirectoryHandle(name, createNode(), permission, "", readLog, faultState, operationLog);

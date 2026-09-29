@@ -27,12 +27,16 @@
 
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { readOptionalJson, safeWriteJson } from "../storage/safeWrite";
-import { casLoop } from "../storage/casLoop";
+import { casFailureFromCause, casLoop, isPermissionLostError, withJitter } from "../storage/casLoop";
 import {
   createDeadline,
   INTERACTIVE_WRITE_DEADLINE_MS,
+  isDeadlineExpired,
+  nextRetryDelayMs,
+  type OperationDeadline,
 } from "../storage/operationDeadline";
 import { logError } from "../storage/errorLogger";
+import { SEALED_REVALIDATE_MS, getSealedAnswerSegmentsEpoch } from "./answerSealedSegments";
 import { logCodedError, tagErrorOnce, type ErrorCode } from "../storage/errorCodes";
 import { createSimpleHasher } from "../storage/jsonEnvelope";
 import { listDirectoryEntries } from "../storage/directoryScan";
@@ -40,10 +44,9 @@ import { isNotFoundError } from "../storage/transientFileErrors";
 import { ensureMonthWritable } from "../population/monthLock";
 import { bumpWorkspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
 import { subscribeToDataRefresh } from "../workspace/dataRefreshSignal";
-import {
-  getDistributionDeviceId,
-  getDistributionSessionId,
-} from "../distribution/distributionEventStore";
+import { getDistributionDeviceId } from "../distribution/distributionEventStore";
+import { stableAnswerChain } from "./answerSegmentChain";
+import type { SegmentWriterIdentity, AppendOnlyEventLogConfig } from "../storage/appendOnlyEventLog";
 import {
   ANSWER_EVENTS_DIR,
   ANSWER_EVENT_SEGMENT_SUFFIX,
@@ -60,13 +63,14 @@ import {
   getPopulationMonthDir,
   getSampleEmployeeDir,
   getSampleMainDir,
+  LEGACY_MONTH_SUBFOLDERS,
   safeWorkspaceFilePart,
 } from "../workspace/workspacePaths";
-import { loadMirroredAnswers, markAnswerPendingLocally, mirrorAnswerLocally } from "./answerLocalMirror";
+import { markAnswerPendingLocally, mirrorAnswerLocally } from "./answerLocalMirror";
 
 export { ANSWER_EVENTS_DIR, ANSWER_EVENT_SEGMENT_SUFFIX };
 
-const ANSWERS_FOLDER = "employee-answers";
+const ANSWERS_FOLDER = LEGACY_MONTH_SUBFOLDERS.employeeAnswers;
 
 /**
  * `updateEmployeeRequestsFile`'s own casLoop tuning, carried over unchanged
@@ -94,8 +98,10 @@ async function getLegacyAnswersDir(
   return monthDir.getDirectoryHandle(ANSWERS_FOLDER, { create: false });
 }
 
-const ANSWERS_SUFFIX = ".answers.json";
-const REQUESTS_SUFFIX = ".requests.json";
+/** Exported for the selective-restore catalog (`backup/restoreScope.ts`). */
+export const ANSWERS_SUFFIX = ".answers.json";
+/** Exported for the selective-restore catalog (`backup/restoreScope.ts`). */
+export const REQUESTS_SUFFIX = ".requests.json";
 
 function answerFileName(username: string): string {
   // Strip path-dangerous characters so a crafted username can't escape the
@@ -277,10 +283,54 @@ type AnswerEventsCacheEntry = {
    *  already consumed, per segment file name. Persist verbatim as the next
    *  call's `knownOffsets`. */
   offsets: Record<string, number>;
+  /** Segments a previous read confirmed sealed (a higher-seq chain sibling was
+   *  listed when they were read): the next read skips their `getFile()` and
+   *  carries their offset forward. In-memory only, like the rest of the cache. */
+  sealedConfirmed?: ReadonlySet<string>;
+  /** Freshness of `sealedConfirmed` — see `answerSealedSegments.ts`. */
+  sealedEpoch?: number;
+  sealedAtMs?: number;
+  /** Names the last SUCCESSFUL listing showed: the writer's floor (`listedSegmentNames`). */
+  listedSegmentNames?: readonly string[];
 };
 
 /** WeakMap<workspace root, Map<monthFolderName, entry>> — see the module doc's SCOPING note. */
 let answerEventsCacheByRoot = new WeakMap<DirectoryHandleLike, Map<string, AnswerEventsCacheEntry>>();
+
+/**
+ * Test-only: drop the whole `answers.events/` read cache for every root.
+ * Mirrors `distributionStorage.ts`'s `__clearDeriveMemoForTests` — safe to
+ * drop at any time by the cache's own "SAFE TO DROP" contract above. Needed
+ * by a fault-injection test: without this, a read already cached by an
+ * earlier step in the same test (e.g. the write that seeded the answer)
+ * short-circuits `readAnswerEventDelta` to "nothing new since my last
+ * offset" and never touches disk at all, silently masking the very read
+ * failure the test means to exercise.
+ */
+export function __clearAnswerEventsCacheForTests(): void {
+  clearAnswerEventsCache();
+}
+
+/**
+ * Drop the whole `answers.events/` read cache (every root). Safe at any time by
+ * the cache's own contract — the next read is a full one. For a caller that has
+ * just rewritten segment bytes underneath it (a backup restore that merged
+ * events), where a byte-offset checkpoint may no longer describe the files.
+ */
+export function clearAnswerEventsCache(): void {
+  answerEventsCacheByRoot = new WeakMap();
+}
+
+/**
+ * Segment names the most recent successful read of this month listed — the
+ * writer's floor for a stable chain (see `AppendEventSegmentOptions.listedSegmentNames`).
+ */
+function listedAnswerSegmentNames(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): readonly string[] | undefined {
+  return getAnswerEventsCacheEntry(directoryHandle, monthFolderName)?.listedSegmentNames;
+}
 
 function getAnswerEventsCacheEntry(
   directoryHandle: DirectoryHandleLike,
@@ -379,15 +429,39 @@ function reflectLocalAppendInAnswerEventsCache(
  */
 export async function readAllAnswerEventsForMonth(
   directoryHandle: DirectoryHandleLike,
-  monthFolderName: string
+  monthFolderName: string,
+  options?: { strict?: boolean }
 ): Promise<AnswerEvent[]> {
   const mainDir = await getSampleMainDir(directoryHandle, monthFolderName, true);
   try {
     const cached = getAnswerEventsCacheEntry(directoryHandle, monthFolderName);
-    const delta = await readAnswerEventDelta(mainDir, cached?.offsets ?? {});
+    // `options.strict` forwards to `readEventSegmentDelta` (appendOnlyEventLog.ts),
+    // which throws EventSegmentUnreadableError — caught here like any other
+    // read failure — BEFORE returning a delta, so a skipped/unreadable segment
+    // can never reach the cache write below as if it had been read cleanly.
+    const epoch = getSealedAnswerSegmentsEpoch();
+    const nowMs = Date.now();
+    const sealedFresh =
+      cached?.sealedConfirmed !== undefined &&
+      cached.sealedEpoch === epoch &&
+      nowMs - (cached.sealedAtMs ?? 0) < SEALED_REVALIDATE_MS;
+    const delta = await readAnswerEventDelta(mainDir, cached?.offsets ?? {}, undefined, {
+      ...options,
+      sealedConfirmed: sealedFresh ? cached.sealedConfirmed : undefined,
+    });
     const events = cached ? new Map(cached.events) : new Map<string, AnswerEvent>();
     for (const event of delta.events) events.set(event.eventId, event);
-    setAnswerEventsCacheEntry(directoryHandle, monthFolderName, { events, offsets: delta.offsets });
+    setAnswerEventsCacheEntry(directoryHandle, monthFolderName, {
+      events,
+      offsets: delta.offsets,
+      sealedConfirmed: delta.sealedConfirmedNames,
+      sealedEpoch: epoch,
+      // A revalidating read (everything re-opened) restarts the interval; a read
+      // that reused the confirmations keeps the ORIGINAL timestamp, so the
+      // window is fixed rather than sliding forever under frequent reads.
+      sealedAtMs: sealedFresh ? cached.sealedAtMs : nowMs,
+      listedSegmentNames: delta.segmentNames,
+    });
     return [...events.values()];
   } catch (error) {
     throw tagAndLog(error, "answers:read-segments", "XQ-ANS-004");
@@ -681,21 +755,27 @@ export async function loadEmployeeAnswers(
 /* ───────────────────────────── the event-append write path ──────────────── */
 
 /**
- * `getDistributionDeviceId`/`getDistributionSessionId` are reused as-is
- * rather than minting a second, answers-only device/session id pair: device
- * and session identity are a property of the MACHINE and the APP SESSION, not
- * of which consumer is writing, so both should report — and do report — the
- * same values. What keeps the two consumers' segment chains and module-level
- * writer memos from colliding despite sharing device/session ids is
- * `consumerNamespace` (`"ans"` here vs distribution's `"dist"`), baked into
- * `ANSWER_EVENT_LOG`'s config in `answerEventStore.ts` — see
- * `appendOnlyEventLog.ts`'s `segmentMemoKey` for why that alone is sufficient.
+ * The writer chain for one (month, actor) on this browser — STABLE across page
+ * loads (A1, see answerSegmentChain.ts). `deviceId` is the persisted per-browser
+ * id distribution also uses; `consumerNamespace: "ans"` keeps the two
+ * consumers' module-level memos apart (appendOnlyEventLog's `segmentMemoKey`).
+ * `actor` is whoever writes the event: the employee, or the supervisor
+ * answering on their behalf.
  */
-function answerWriterIdentity(directoryHandle: DirectoryHandleLike, monthFolderName: string) {
+function answerWriterIdentity(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  actor: string
+): { writer: SegmentWriterIdentity; config: AppendOnlyEventLogConfig } {
+  const chain = stableAnswerChain(monthFolderName, actor);
   return {
-    deviceId: getDistributionDeviceId(),
-    sessionId: getDistributionSessionId(),
-    scopeId: `${workspaceScopeId(directoryHandle)}|${monthFolderName}`,
+    writer: {
+      deviceId: getDistributionDeviceId(),
+      sessionId: chain.chainId,
+      scopeId: `${workspaceScopeId(directoryHandle)}|${monthFolderName}`,
+      stable: true,
+    },
+    config: chain.config,
   };
 }
 
@@ -758,12 +838,42 @@ type AnswerWriteDecision =
   | { skip: true };
 
 /**
+ * Re-run the READ side of an answer write (month read, seed resolution, fold,
+ * `build`) when it throws — a transient share fault such as a stale-snapshot
+ * `InvalidStateError` on the read-back, which the ladder inside the read does
+ * not always outlast. Nothing is written by this step (`resolveSeed`'s one-time
+ * empty legacy shell is idempotent and already tolerates a re-run), so a retry
+ * cannot duplicate an event. Same ladder and deadline gating casLoop used
+ * for the whole save; a lost folder grant is terminal and is not retried. The
+ * cache-backed read makes each extra attempt a delta read, not a month re-fold.
+ */
+async function retryDecisionRead<T>(deadline: OperationDeadline, step: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < ANSWER_SAVE_MAX_RETRIES; attempt += 1) {
+    if (attempt > 0 && isDeadlineExpired(deadline)) break;
+    try {
+      return await step();
+    } catch (error) {
+      if (isPermissionLostError(error)) throw error;
+      lastError = error;
+    }
+    if (attempt < ANSWER_SAVE_MAX_RETRIES - 1) {
+      const delay = nextRetryDelayMs(withJitter(ANSWER_SAVE_BASE_DELAY_MS * (attempt + 1)), deadline);
+      if (delay === null) break;
+      await new Promise<void>((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  throw lastError;
+}
+
+/**
  * Shared append machinery for `upsertItemAnswer`, `reopenItemAnswer` and
  * `setItemQualityNote` — the three writers whose outcome does not depend on
  * winning a race (unlike on-behalf; see `performOnBehalfWrite`). `eventId`/
  * `eventAt` are fixed ONCE per call, before entering the retry loop, and reused
- * across every casLoop attempt (§3: a retried append after an ambiguous
- * failure must be a detectable duplicate, not a silent replay with a fresh id).
+ * for the whole call (§3: a re-driven append after an ambiguous failure — the
+ * pending-answer replay — must be a detectable duplicate, not a silent replay
+ * with a fresh id). There is no casLoop here (S2): see the note at the append.
  *
  * `build` sees the item's CURRENT state (freshly folded from the real event
  * log, not a caller-supplied snapshot) and may decline to append at all
@@ -783,22 +893,72 @@ async function performAnswerWrite(
   await ensureMonthWritable(directoryHandle, monthFolderName);
   const eventId = crypto.randomUUID();
   const eventAt = nextAnswerEventAt();
-  const writer = answerWriterIdentity(directoryHandle, monthFolderName);
+  const { writer, config: segmentConfig } = answerWriterIdentity(directoryHandle, monthFolderName, username);
+  // ONE budget for the whole user action, spent by the append's inner ladders
+  // (A1) — see operationDeadline.ts.
+  const deadline = createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "answers:interactive-write");
   // No pre-change history write here any more. The state a snapshot would have
   // copied is already durable in `answers.events/*.ndjson`, which is
   // append-only and never pruned, so `actionHistoryReaders.ts` derives the same
   // trail by folding those events instead. That removes a whole-file write from
   // the hot save path — and with it the deep per-record path that made the
   // write fail on every save on a workspace deep on the share (XQ-IO-034).
-  // The item state to mirror locally once the append succeeds — built from
-  // the same in-memory `previous`/`event` the retry body already computed, so
-  // mirroring never costs an extra disk read. Set on the LAST attempt only
-  // (each retry overwrites it), which is exactly the state that ends up
-  // durably appended.
+  // The item state to mirror locally once the append succeeds (or to queue as
+  // pending if it fails) — built from the in-memory `previous`/`event` the
+  // decision step already computed, so mirroring never costs an extra disk
+  // read. If the decision step itself never succeeds, the failure path builds
+  // it from the caller's answer alone.
   let mirrorCandidate: ItemAnswer | null = null;
 
-  return casLoop<{ ok: true } | { ok: false; error: string }>(
-    async () => {
+  // NO casLoop here (S2). This append targets a writer chain no other machine
+  // can touch (the chain is keyed on this browser's device id), and casLoop has
+  // no revision or token to compare on it: the attempt below always "succeeded"
+  // or threw, so the loop was purely a retry-on-throw that re-read and re-folded
+  // the whole month on every attempt. The decision is computed once, from the
+  // incremental read cache (`retryDecisionRead` re-runs ONLY that read-side
+  // step, and only when it throws — e.g. a stale-snapshot InvalidStateError on
+  // the share), and the append, which owns its own bounded rotate-once ladders
+  // capped by `deadline`, runs exactly once and is never re-decided around.
+  //
+  // The one read-decide-write race left is the same employee saving the same
+  // item from two tabs of one browser (they share the stable chain). casLoop
+  // never protected it either — it re-decided on every attempt from a fresh
+  // read but never compared anything before appending — and it is resolved where
+  // it always was: the per-chain lock serialises the appends within the origin,
+  // and the fold orders the two events by `(eventAt, authority, eventId)`, so
+  // the later save wins. `build` reads `previous` only to skip no-ops
+  // (reopen/note on a missing or non-submitted item), which a duplicate event
+  // could not make harmful.
+  const onExhausted = (cause: unknown, code: ErrorCode): void => {
+    logError(`answerStorage:${telemetryAction}`, cause instanceof Error ? cause : new Error(String(cause)), {
+      action: telemetryAction,
+      errorCode: code,
+    });
+  };
+  // The pending queue replays as an `item-saved` of the candidate, so it is
+  // only correct for a FULL answer save. For a reopen or quality note it would
+  // re-assert the previous (submitted) state with a fresh lastSavedAt — undoing
+  // the reopen — and never replay the note; those failures are reported to the
+  // caller instead. Decided from the event type the builder produced.
+  let pendingEligible = false;
+  const candidateFor = (event: AnswerEvent, previous: ItemAnswer | undefined): ItemAnswer => ({
+    xrayImageId: event.xrayImageId ?? xrayImageId,
+    templateId: event.templateId ?? previous?.templateId ?? "",
+    templateVersion: event.templateVersion ?? previous?.templateVersion ?? 1,
+    answers: event.answers ?? previous?.answers ?? [],
+    lastSavedAt: event.lastSavedAt ?? eventAt,
+    submittedAt: event.submittedAt ?? previous?.submittedAt ?? null,
+    answeredBy: username,
+    status: event.status ?? previous?.status ?? "draft",
+    history: previous?.history,
+    valueHistory: previous?.valueHistory,
+    qualityNote: previous?.qualityNote,
+    answeredOnBehalfBy: event.answeredOnBehalfBy,
+  });
+  const attempt = async (): Promise<{ ok: true }> => {
+    const decided = await retryDecisionRead(deadline, async () => {
+      // Resolving the month folder is a share round trip like any other read
+      // here; a transient fault on it is retried with the rest of this step.
       const mainDir = await getSampleMainDir(directoryHandle, monthFolderName, true);
       const allEvents = await readAllAnswerEventsForMonth(directoryHandle, monthFolderName);
       const ownEvents = eventsForEmployee(allEvents, username);
@@ -817,58 +977,41 @@ async function performAnswerWrite(
         { legacySeed, username, monthFolderName }
       );
       const previous = foldedNow.file.items.find((item) => item.xrayImageId === xrayImageId);
+      return { mainDir, seedEvent, previous, decision: build({ previous }) };
+    });
+    const { mainDir, seedEvent, previous, decision } = decided;
+    if ("skip" in decision) return { ok: true as const };
 
-      const decision = build({ previous });
-      if ("skip" in decision) {
-        return { done: true, result: { ok: true as const } };
+    const event: AnswerEvent = { ...decision.event, eventId, eventAt, answeredBy: username };
+    const batch = seedEvent ? [seedEvent, event] : [event];
+    mirrorCandidate = candidateFor(event, previous);
+    pendingEligible = event.eventType === "item-saved";
+    await appendAnswerEventSegment(mainDir, batch, writer, segmentConfig, {
+      deadline,
+      listedSegmentNames: listedAnswerSegmentNames(directoryHandle, monthFolderName),
+    });
+    reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
+    return { ok: true as const };
+  };
+  const written: Promise<{ ok: true } | { ok: false; error: string }> = attempt().catch((error: unknown) => {
+    // ANY failure after the user's answer is known must queue it for background
+    // replay. If the read side never recovered, no candidate was built from the
+    // folded state; build one from the answer alone (the event carries the whole
+    // item for a save, and a skip decision has nothing to lose).
+    if (!mirrorCandidate) {
+      try {
+        const fallback = build({ previous: undefined });
+        if (!("skip" in fallback)) {
+          mirrorCandidate = candidateFor({ ...fallback.event, eventId, eventAt, answeredBy: username }, undefined);
+          pendingEligible = fallback.event.eventType === "item-saved";
+        }
+      } catch {
+        // `build` is pure over the caller's own data; if it throws there is nothing to queue.
       }
-
-      const event: AnswerEvent = { ...decision.event, eventId, eventAt, answeredBy: username };
-      const batch = seedEvent ? [seedEvent, event] : [event];
-      mirrorCandidate = {
-        xrayImageId: event.xrayImageId ?? xrayImageId,
-        templateId: event.templateId ?? previous?.templateId ?? "",
-        templateVersion: event.templateVersion ?? previous?.templateVersion ?? 1,
-        answers: event.answers ?? previous?.answers ?? [],
-        lastSavedAt: event.lastSavedAt ?? eventAt,
-        submittedAt: event.submittedAt ?? previous?.submittedAt ?? null,
-        answeredBy: username,
-        status: event.status ?? previous?.status ?? "draft",
-        history: previous?.history,
-        valueHistory: previous?.valueHistory,
-        qualityNote: previous?.qualityNote,
-        answeredOnBehalfBy: event.answeredOnBehalfBy,
-      };
-      // Pre-change snapshot (owner requirement, 2026-09-03): the item's state
-      // right before this event, kept as a rolling last-10 history per
-      // (month, employee, item) — the answers-family parity fix for the
-      // per-write `.bak` every OTHER data family already gets from
-      // safeWriteJson. Answers moved to this append-only event log (Stage 2 of
-      // the answer-save proposal) and never call safeWriteJson for a real
-      // save/reopen/note anymore, so they silently lost that protection; this
-      // restores an equivalent (a recoverable prior state) for the new model.
-      await appendAnswerEventSegment(mainDir, batch, writer);
-      reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
-      return { done: true, result: { ok: true as const } };
-    },
-    {
-      context: `answers:${telemetryAction}`,
-      maxRetries: ANSWER_SAVE_MAX_RETRIES,
-      baseDelayMs: ANSWER_SAVE_BASE_DELAY_MS,
-      // One budget for this whole user action. Without it the 14 attempts above
-      // multiply against safeWriteJson's two ~11 s verify-readback ladders —
-      // ~308 s, the "answer save takes 4 minutes" report. See
-      // operationDeadline.ts; the first attempt always runs regardless.
-      deadline: createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "answers:interactive-write"),
-      conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ إجابة الموظف بعد عدة محاولات.",
-      onExhausted: (cause, code) => {
-        logError(`answerStorage:${telemetryAction}`, cause instanceof Error ? cause : new Error(String(cause)), {
-          action: telemetryAction,
-          errorCode: code,
-        });
-      },
     }
-  ).then(async (result) => {
+    return casFailureFromCause(error, { context: `answers:${telemetryAction}`, onExhausted });
+  });
+  return written.then(async (result) => {
     // Cache/derived-state refresh, after the durable append, never gating the
     // save's own success — same contract as distribution's
     // `refreshDistributionCacheAfterWrite` (awaited, wrapped so its own
@@ -879,11 +1022,12 @@ async function performAnswerWrite(
       // never costs an extra read of the file it is backing up.
       // `mirrorAnswerLocally` never throws (see its own doc comment).
       if (mirrorCandidate) await mirrorAnswerLocally(monthFolderName, username, mirrorCandidate);
-    } else if (mirrorCandidate) {
+    } else if (mirrorCandidate && pendingEligible) {
       // The append never reached the shared folder (share down, permission
       // lost, exhausted retries) — queue it in the local backup as PENDING
-      // rather than dropping it, so the 30s retry tick / next reconciliation
-      // in `XrayInspectionResults.tsx` keeps trying until it lands, and the
+      // rather than dropping it, so the app-level `PendingAnswerReplayRunner`
+      // (`pendingAnswerReplay.ts`, mounted once in AuthGate — not scoped to
+      // any one view or month any more) keeps trying until it lands, and the
       // employee sees a "not saved yet" count instead of a silently lost
       // answer. `markAnswerPendingLocally` never throws (see its doc comment).
       await markAnswerPendingLocally(monthFolderName, username, mirrorCandidate);
@@ -892,57 +1036,21 @@ async function performAnswerWrite(
   });
 }
 
-/**
- * Reconcile this browser's local IndexedDB backup with the workspace file for
- * one employee's one month — the "sign-in" / periodic side of the local
- * mirror (see `answerLocalMirror.ts`'s module doc for why this exists and why
- * it never deletes on either side).
- *
- * Two passes, both additive-only:
- *  1. Any mirrored item that the file either lacks or holds an OLDER
- *     `lastSavedAt` for is replayed into the file through the normal
- *     `upsertItemAnswer` path — the same casLoop-protected, conflict-safe
- *     append every real save goes through, never a raw overwrite.
- *  2. The file is re-read (picking up anything just replayed) and every one
- *     of its items is written back into the mirror, so a browser that just
- *     had an empty/reset IndexedDB ends this call caught back up — restoring
- *     from an empty mirror only ever ADDS entries, it never removes the
- *     file's own data.
- *
- * Best-effort throughout: called opportunistically (on load, and on a
- * periodic tick from the UI), never gates rendering the employee's answers.
- */
-export async function reconcileAnswersWithLocalMirror(
-  directoryHandle: DirectoryHandleLike,
-  monthFolderName: string,
-  username: string
-): Promise<void> {
-  try {
-    const [file, mirrored] = await Promise.all([
-      loadEmployeeAnswers(directoryHandle, monthFolderName, username),
-      loadMirroredAnswers(monthFolderName, username),
-    ]);
-
-    const onDiskByImage = new Map(file.items.map((item) => [item.xrayImageId, item]));
-    let replayedAny = false;
-    for (const mirroredItem of mirrored) {
-      const onDisk = onDiskByImage.get(mirroredItem.xrayImageId);
-      const mirrorIsNewer = !onDisk || mirroredItem.lastSavedAt > onDisk.lastSavedAt;
-      if (!mirrorIsNewer) continue;
-      const result = await upsertItemAnswer(directoryHandle, monthFolderName, username, mirroredItem);
-      if (result.ok) replayedAny = true;
-    }
-
-    const finalFile = replayedAny
-      ? await loadEmployeeAnswers(directoryHandle, monthFolderName, username)
-      : file;
-    for (const item of finalFile.items) {
-      await mirrorAnswerLocally(monthFolderName, username, item);
-    }
-  } catch (error) {
-    logError("answers:mirror-reconcile", error instanceof Error ? error : new Error(String(error)));
-  }
-}
+// `reconcileAnswersWithLocalMirror` (the "sign-in"/periodic reconcile that
+// used to live here) was DELETED in the A1 fix round (IMPORTANT 5). Its
+// re-landing pass — replaying every mirrored item that looked newer than
+// disk, regardless of whether it was ever marked pending — was a hidden
+// background WRITER into the shared folder: no lock, no permission gate, and
+// no idea whether the folder it wrote into had just been restored from a
+// backup (Workstream D will make restoring a folder an explicit operation
+// with its own safeguards; a reconciler quietly re-writing into a
+// freshly-restored folder is exactly the surprise that must not exist before
+// then). Landing a genuinely pending answer is `replayPendingAnswers`'s job
+// now (`pendingAnswerReplay.ts`), and it only ever touches items this
+// browser itself marked `synced: false`. The function's other, NON-WRITING
+// half — re-mirroring the file's current items into IndexedDB so the local
+// backup stays current — survives as `backfillAnswerMirror` in
+// `pendingAnswerReplay.ts`.
 
 /**
  * Best-effort post-write refresh, matching distribution's
@@ -1160,7 +1268,10 @@ async function performOnBehalfWrite(
   await ensureMonthWritable(directoryHandle, monthFolderName);
   const eventId = crypto.randomUUID();
   const eventAt = nextAnswerEventAt();
-  const writer = answerWriterIdentity(directoryHandle, monthFolderName);
+  const { writer, config: segmentConfig } = answerWriterIdentity(directoryHandle, monthFolderName, author);
+  // ONE budget for the whole user action, shared by casLoop (new attempts) and
+  // the append's inner ladders (A1) — see operationDeadline.ts.
+  const deadline = createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "answers:interactive-write");
   const xrayImageId = item.xrayImageId;
 
   const result = await casLoop<{ ok: true } | { ok: false; error: string }>(
@@ -1198,7 +1309,10 @@ async function performOnBehalfWrite(
         reason,
       };
       const batch = seedEvent ? [seedEvent, onBehalfEvent] : [onBehalfEvent];
-      await appendAnswerEventSegment(mainDir, batch, writer);
+      await appendAnswerEventSegment(mainDir, batch, writer, segmentConfig, {
+        deadline,
+        listedSegmentNames: listedAnswerSegmentNames(directoryHandle, monthFolderName),
+      });
       reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
 
       // CONFIRM (§5): fresh read, same comparator, SINGLE-ITEM scope — the
@@ -1247,7 +1361,7 @@ async function performOnBehalfWrite(
       // multiply against safeWriteJson's two ~11 s verify-readback ladders —
       // ~308 s, the "answer save takes 4 minutes" report. See
       // operationDeadline.ts; the first attempt always runs regardless.
-      deadline: createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "answers:interactive-write"),
+      deadline,
       conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ الإجابة نيابةً عن الموظف بعد عدة محاولات.",
       onExhausted: (cause, code) => {
         logError("answerStorage:answer-save-on-behalf", cause instanceof Error ? cause : new Error(String(cause)), {
@@ -1436,6 +1550,23 @@ function employeeUsernamesFromEvents(events: readonly AnswerEvent[]): Set<string
 }
 
 /**
+ * Thrown by `loadAllEmployeeFiles(..., { strict: true })` when any part of the
+ * scan — the event log, or one employee's item/requests read — could not be
+ * completed. The lenient (default) call folds each of those into "this
+ * employee/month answered nothing"; a strict caller cannot afford that (see
+ * `populationOverwriteGuard.ts`, which must never treat an unreadable answers
+ * scan as "no answers").
+ */
+export class AnswersUnreadableError extends Error {
+  readonly monthFolderName: string;
+  constructor(monthFolderName: string, options?: { cause?: unknown }) {
+    super(`Answers for ${monthFolderName} exist but could not be read.`, options as ErrorOptions);
+    this.name = "AnswersUnreadableError";
+    this.monthFolderName = monthFolderName;
+  }
+}
+
+/**
  * Read all employee answer files for the month (used by supervisor/admin
  * aggregation) — full item state included.
  *
@@ -1447,18 +1578,31 @@ function employeeUsernamesFromEvents(events: readonly AnswerEvent[]): Set<string
  * existing `onUnreadable: "skip"` per-employee isolation: one employee whose
  * legacy file is corrupt, or whose segment chain fails to fold, is skipped and
  * logged rather than aborting the whole scan.
+ *
+ * `options.strict` (default false, every existing caller unaffected) turns
+ * off BOTH lenient folds that made this function's answer wrong for a
+ * safety-critical caller: a failed `readAllAnswerEventsForMonth` used to be
+ * caught and folded into `[]` (reported here), and a per-employee read
+ * failure used to be caught, logged and skipped (reported here too) instead
+ * of aborting the scan. In strict mode neither is swallowed — both raise
+ * {@link AnswersUnreadableError} (wrapping the original cause), same as the
+ * pre-existing "scan itself could not be established" rethrow below.
  */
 export async function loadAllEmployeeFiles(
   directoryHandle: DirectoryHandleLike,
-  monthFolderName: string
+  monthFolderName: string,
+  options?: { strict?: boolean }
 ): Promise<EmployeeAnswerFile[]> {
+  const strict = options?.strict ?? false;
   try {
     const [dirStems, allEvents] = await Promise.all([
       listAnswerDirStems(directoryHandle, monthFolderName),
-      readAllAnswerEventsForMonth(directoryHandle, monthFolderName).catch((error: unknown) => {
-        logError("answerStorage:loadAllEmployeeFiles:events", error);
-        return [] as AnswerEvent[];
-      }),
+      strict
+        ? readAllAnswerEventsForMonth(directoryHandle, monthFolderName, { strict: true })
+        : readAllAnswerEventsForMonth(directoryHandle, monthFolderName).catch((error: unknown) => {
+            logError("answerStorage:loadAllEmployeeFiles:events", error);
+            return [] as AnswerEvent[];
+          }),
     ]);
     const usernames = new Set<string>([...dirStems, ...employeeUsernamesFromEvents(allEvents)]);
 
@@ -1480,6 +1624,7 @@ export async function loadAllEmployeeFiles(
           lastUpdatedAt: requests.lastUpdatedAt,
         });
       } catch (error) {
+        if (strict) throw error;
         logError("answerStorage:loadAllEmployeeFiles:employee", error, { action: username });
       }
     }
@@ -1487,13 +1632,16 @@ export async function loadAllEmployeeFiles(
   } catch (err) {
     // Rethrown, not folded into `[]`. The per-employee `catch` above is the
     // deliberate isolation policy — one employee's unreadable file must not
-    // abort the scan — and it is unaffected. This outer one is different: it
-    // fires when the SCAN ITSELF could not be established, and returning an
-    // empty array there tells every caller (the results view, the executive
-    // report, the Power BI export, a backup) that nobody answered anything all
-    // month. Callers already handle a rejection; none of them can handle a lie.
+    // abort the scan — and it is unaffected in LENIENT mode. This outer one is
+    // different: it fires when the SCAN ITSELF could not be established (or,
+    // in strict mode, when any part of it failed), and returning an empty
+    // array there tells every caller (the results view, the executive report,
+    // the Power BI export, a backup) that nobody answered anything all month.
+    // Callers already handle a rejection; none of them can handle a lie.
     logError("answerStorage:loadAllEmployeeFiles", err instanceof Error ? err : new Error(String(err)));
-    throw err;
+    throw strict && !(err instanceof AnswersUnreadableError)
+      ? new AnswersUnreadableError(monthFolderName, { cause: err })
+      : err;
   }
 }
 

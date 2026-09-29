@@ -86,22 +86,61 @@ export function loadAnswerDraft(key: string): AnswerDraftValues | null {
   }
 }
 
+let draftPersistFailing = false;
+const draftHealthListeners = new Set<() => void>();
+
+function setDraftPersistFailing(next: boolean): void {
+  if (draftPersistFailing === next) return;
+  draftPersistFailing = next;
+  // Deferred: saveAnswerDraft runs inside a React state updater, and notifying
+  // a subscriber synchronously there would update a component mid-render.
+  queueMicrotask(() => {
+    for (const listener of draftHealthListeners) listener();
+  });
+}
+
+/** Subscribe to "drafts can / cannot currently be kept in this browser". */
+export function subscribeAnswerDraftHealth(listener: () => void): () => void {
+  draftHealthListeners.add(listener);
+  return () => {
+    draftHealthListeners.delete(listener);
+  };
+}
+
+/** True after the last draft write was refused (and until one succeeds). */
+export function isAnswerDraftPersistFailing(): boolean {
+  return draftPersistFailing;
+}
+
+/** @internal test-only */
+export function __resetAnswerDraftHealthForTests(): void {
+  setDraftPersistFailing(false);
+}
+
 /**
- * Persist the current values. Deliberately silent on failure: a browser that
- * refuses storage (private mode, a full quota, a cleared `file://` bucket) must
- * degrade to the old behaviour, never break the form the employee is typing in.
+ * Persist the current values. Never throws — a browser that refuses storage
+ * (private mode, a full quota, a cleared `file://` bucket) must not break the
+ * form being typed in — but no longer silent either (A1): the result is
+ * returned and the health flag above lets the panel warn that the typed answer
+ * will not survive a reload.
  */
-export function saveAnswerDraft(key: string, values: AnswerDraftValues): void {
+export function saveAnswerDraft(key: string, values: AnswerDraftValues): boolean {
   const store = readStore();
-  if (!store) return;
+  if (!store) {
+    setDraftPersistFailing(true);
+    return false;
+  }
   try {
     if (Object.keys(values).length === 0) {
       store.removeItem(key);
-      return;
+    } else {
+      store.setItem(key, JSON.stringify({ savedAt: Date.now(), values } satisfies StoredDraft));
     }
-    store.setItem(key, JSON.stringify({ savedAt: Date.now(), values } satisfies StoredDraft));
+    setDraftPersistFailing(false);
+    return true;
   } catch {
-    // Intentionally swallowed — see the docblock.
+    setDraftPersistFailing(true);
+    return false;
   }
 }
 
@@ -114,6 +153,49 @@ export function clearAnswerDraft(key: string): void {
   } catch {
     // Nothing to do; a stale draft expires on its own via DRAFT_TTL_MS.
   }
+}
+
+/**
+ * `loadAnswerDraft`, but for a row whose canonical key changed under it (A1
+ * fix round 1: an ad-hoc row's draft used to be keyed on the selected month
+ * rather than its own store). Prefers the canonical key — the only one a
+ * fresh save ever writes under — and only reads `legacyKey` when the
+ * canonical key has nothing, so a draft saved before this fix is still found.
+ */
+export function loadAnswerDraftWithLegacyFallback(
+  canonicalKey: string,
+  legacyKey: string | null
+): AnswerDraftValues | null {
+  const primary = loadAnswerDraft(canonicalKey);
+  if (primary) return primary;
+  return legacyKey ? loadAnswerDraft(legacyKey) : null;
+}
+
+/**
+ * `saveAnswerDraft` under the canonical key, then migrates off `legacyKey`:
+ * once the canonical write has succeeded, a stale legacy copy would only
+ * ever resurrect over it on a later mount, so it is removed. Left alone on a
+ * refused write — the legacy copy is still the only durable copy of the
+ * draft until a canonical write actually lands.
+ */
+export function saveAnswerDraftMigratingLegacy(
+  canonicalKey: string,
+  legacyKey: string | null,
+  values: AnswerDraftValues
+): boolean {
+  const ok = saveAnswerDraft(canonicalKey, values);
+  if (ok && legacyKey) clearAnswerDraft(legacyKey);
+  return ok;
+}
+
+/**
+ * Drop both the canonical key and, if this row has one, its legacy key —
+ * used once an answer is genuinely on disk, so neither copy can resurrect
+ * over the submitted answer on a later mount.
+ */
+export function clearAnswerDraftAndLegacy(canonicalKey: string, legacyKey: string | null): void {
+  clearAnswerDraft(canonicalKey);
+  if (legacyKey) clearAnswerDraft(legacyKey);
 }
 
 /**

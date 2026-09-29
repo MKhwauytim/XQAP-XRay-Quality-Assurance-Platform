@@ -1,10 +1,16 @@
 /* @vitest-environment jsdom */
-import { describe, it, expect, afterEach } from "vitest";
-import { render, screen, fireEvent, within, cleanup } from "@testing-library/react";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { render, screen, fireEvent, within, cleanup, act } from "@testing-library/react";
 import InspectionPanel from "./index";
 import { DEFAULT_LABELS } from "../../data/labels/labelsStore";
+import {
+  __resetAnswerDraftHealthForTests,
+  isAnswerDraftPersistFailing,
+  loadAnswerDraft,
+  saveAnswerDraft,
+} from "../../data/answers/answerDraftStore";
 import type { DistributionEntry } from "../../data/distribution/distributionTypes";
-import type { FieldAnswer } from "../../data/answers/answerTypes";
+import type { AnswerSaveOutcome, FieldAnswer, ItemAnswer } from "../../data/answers/answerTypes";
 import type { TemplateField, TemplateSchema } from "../../data/templates/templateTypes";
 
 // `globals: false` in this repo, so RTL's auto-cleanup never registers itself.
@@ -510,5 +516,212 @@ describe("InspectionPanel — multiselect fields", () => {
 
     fireEvent.click(within(group).getByRole("button", { name: "مركبات" }));
     expect(screen.getByLabelText("تفاصيل المركبة")).toBeInTheDocument();
+  });
+});
+
+describe("InspectionPanel — draft that cannot be kept (A1)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    __resetAnswerDraftHealthForTests();
+  });
+
+  it("warns that the typed answer will not survive a reload", async () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("full", "QuotaExceededError");
+    });
+    const template = makeTemplate([field({ fieldId: "n1", label: "ملاحظة", type: "text" })]);
+    const { container } = render(
+      <InspectionPanel
+        entry={makeEntry()}
+        template={template}
+        savedAnswer={null}
+        readonly={false}
+        onClose={() => {}}
+        onSave={async () => {}}
+        draftKey="xray_answer_draft_v1:m::IMG-001::emp1"
+      />
+    );
+
+    fireEvent.change(container.querySelector<HTMLInputElement>("#ipf-n1")!, { target: { value: "نص" } });
+
+    expect(await screen.findByText(DEFAULT_LABELS.ip_msg_draft_not_persisted)).toBeInTheDocument();
+  });
+
+  it("does not warn on an already-submitted row", () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("full", "QuotaExceededError");
+    });
+    // Fail — and pick this up in the health flag — BEFORE mount, so the
+    // panel's very first render already reflects a true flag (the
+    // subscription's own update is an async queueMicrotask notification a
+    // synchronous assertion right after mount would otherwise race).
+    saveAnswerDraft("xray_answer_draft_v1:probe", { p: "x" });
+    expect(isAnswerDraftPersistFailing()).toBe(true);
+
+    const template = makeTemplate([field({ fieldId: "n1", label: "ملاحظة", type: "text" })]);
+    render(
+      <InspectionPanel
+        entry={{ ...makeEntry(), status: "completed" }}
+        template={template}
+        savedAnswer={{
+          xrayImageId: "IMG-001",
+          templateId: "tpl-1",
+          templateVersion: 1,
+          answers: [{ fieldId: "n1", value: "سابقاً" }],
+          lastSavedAt: "2026-08-01T00:00:00.000Z",
+          submittedAt: "2026-08-01T00:00:00.000Z",
+          answeredBy: "emp1",
+          status: "submitted",
+        }}
+        readonly={false}
+        onClose={() => {}}
+        onSave={async () => {}}
+        draftKey="xray_answer_draft_v1:m::IMG-001::emp1"
+      />
+    );
+
+    expect(screen.queryByText(DEFAULT_LABELS.ip_msg_draft_not_persisted)).toBeNull();
+  });
+});
+
+describe("InspectionPanel — legacy draft key fallback and migration (A1 fix round 1)", () => {
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it("seeds from the legacy key when the canonical key has nothing, then migrates on the next keystroke", () => {
+    const CANONICAL = "xray_answer_draft_v1:adhoc-imp-1::ADHOC-1::emp1";
+    const LEGACY = "xray_answer_draft_v1:5-may-2026::ADHOC-1::emp1";
+    saveAnswerDraft(LEGACY, { n1: "من المفتاح القديم" });
+
+    const template = makeTemplate([field({ fieldId: "n1", label: "ملاحظة", type: "text" })]);
+    const { container } = render(
+      <InspectionPanel
+        entry={makeEntry()}
+        template={template}
+        savedAnswer={null}
+        readonly={false}
+        onClose={() => {}}
+        onSave={async () => {}}
+        draftKey={CANONICAL}
+        legacyDraftKey={LEGACY}
+      />
+    );
+
+    const input = container.querySelector<HTMLInputElement>("#ipf-n1")!;
+    expect(input.value).toBe("من المفتاح القديم");
+
+    fireEvent.change(input, { target: { value: "معدّل" } });
+
+    expect(loadAnswerDraft(LEGACY)).toBeNull();
+    expect(loadAnswerDraft(CANONICAL)).toEqual({ n1: "معدّل" });
+  });
+});
+
+describe("InspectionPanel — inline save status (A1)", () => {
+  const template = makeTemplate([field({ fieldId: "n1", label: "ملاحظة", type: "text", required: false })]);
+
+  function renderWith(onSave: () => Promise<AnswerSaveOutcome | void>) {
+    return render(
+      <InspectionPanel
+        entry={makeEntry()}
+        template={template}
+        savedAnswer={null}
+        readonly={false}
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+  }
+  const submit = () => fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.ip_submit_btn }));
+
+  it("shows saving, then saved, from a successful outcome", async () => {
+    let resolve!: (outcome: AnswerSaveOutcome) => void;
+    renderWith(() => new Promise<AnswerSaveOutcome>((done) => { resolve = done; }));
+    submit();
+    expect(await screen.findByText(DEFAULT_LABELS.ip_save_status_saving)).toBeInTheDocument();
+    await act(async () => { resolve({ ok: true }); });
+    expect(await screen.findByText(DEFAULT_LABELS.ip_save_status_saved)).toBeInTheDocument();
+  });
+
+  it("says the answer is not saved yet and will retry when it was queued", async () => {
+    renderWith(async () => ({ ok: false, message: "تعذّر الحفظ (XQ-IO-038)", queuedForRetry: true, errorCode: "XQ-IO-038" }));
+    submit();
+    expect(await screen.findByText(DEFAULT_LABELS.ip_save_status_queued_coded.replace("{code}", "XQ-IO-038"))).toBeInTheDocument();
+    expect(screen.queryByText(DEFAULT_LABELS.ip_save_status_saved)).toBeNull();
+  });
+
+  it("shows the failure message with its code, and keeps submit as the retry", async () => {
+    renderWith(async () => ({ ok: false, message: "تعذّر حفظ البيانات (XQ-IO-038)." }));
+    submit();
+    expect(
+      await screen.findByText(
+        DEFAULT_LABELS.ip_save_status_failed.replace("{message}", "تعذّر حفظ البيانات (XQ-IO-038).")
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: DEFAULT_LABELS.ip_submit_btn })).not.toBeDisabled();
+  });
+
+  const submittedAnswer = (lastSavedAt: string): ItemAnswer => ({
+    xrayImageId: "IMG-001", templateId: "tpl-1", templateVersion: 1,
+    answers: [{ fieldId: "n1", value: "x" }],
+    lastSavedAt, submittedAt: lastSavedAt, answeredBy: "emp1", status: "submitted",
+  });
+  const panelProps = (over: Partial<React.ComponentProps<typeof InspectionPanel>>) => ({
+    entry: makeEntry(), template, savedAnswer: null, readonly: false,
+    onClose: () => {}, onSave: async () => {}, ...over,
+  });
+
+  it("turns a queued line into saved when the replayed answer arrives via savedAnswer", async () => {
+    const queuedAt = "2026-08-02T10:00:00.000Z";
+    const onSave = async () => ({ ok: false as const, message: "تعذّر (XQ-IO-038)", queuedForRetry: true, queuedSavedAt: queuedAt, errorCode: "XQ-IO-038" });
+    const { rerender } = render(<InspectionPanel {...panelProps({ onSave })} />);
+    submit();
+    expect(await screen.findByText(DEFAULT_LABELS.ip_save_status_queued_coded.replace("{code}", "XQ-IO-038"))).toBeInTheDocument();
+
+    // An OLDER submitted answer must not count as the queued one landing.
+    rerender(<InspectionPanel {...panelProps({ onSave, savedAnswer: submittedAnswer("2026-08-02T09:00:00.000Z") })} />);
+    expect(screen.queryByText(DEFAULT_LABELS.ip_save_status_saved)).toBeNull();
+
+    rerender(<InspectionPanel {...panelProps({ onSave, savedAnswer: submittedAnswer(queuedAt) })} />);
+    expect(screen.getByText(DEFAULT_LABELS.ip_save_status_saved)).toBeInTheDocument();
+  });
+
+  it("empties the line on reopen after a queued save was derived as saved", async () => {
+    const queuedAt = "2026-08-02T10:00:00.000Z";
+    const onSave = async () => ({ ok: false as const, message: "تعذّر (XQ-IO-038)", queuedForRetry: true, queuedSavedAt: queuedAt, errorCode: "XQ-IO-038" });
+    const { rerender, container } = render(<InspectionPanel {...panelProps({ onSave })} />);
+    submit();
+    await screen.findByText(DEFAULT_LABELS.ip_save_status_queued_coded.replace("{code}", "XQ-IO-038"));
+    rerender(<InspectionPanel {...panelProps({ onSave, savedAnswer: submittedAnswer(queuedAt) })} />);
+    expect(screen.getByText(DEFAULT_LABELS.ip_save_status_saved)).toBeInTheDocument();
+    rerender(<InspectionPanel {...panelProps({ onSave, savedAnswer: null })} />);
+    expect(container.querySelector(".ip-save-status")?.textContent).toBe("");
+  });
+
+  it("clears a failed line when the employee edits a field again", async () => {
+    renderWith(async () => ({ ok: false, message: "تعذّر الحفظ." }));
+    submit();
+    await screen.findByText(DEFAULT_LABELS.ip_save_status_failed.replace("{message}", "تعذّر الحفظ."));
+    fireEvent.change(screen.getByLabelText("ملاحظة"), { target: { value: "تعديل" } });
+    expect(screen.queryByText(/لم يُحفظ/)).toBeNull();
+  });
+
+  it("clears a saved line when the answer is reopened", async () => {
+    const onSave = async () => ({ ok: true as const });
+    const { rerender } = render(<InspectionPanel {...panelProps({ onSave })} />);
+    submit();
+    rerender(<InspectionPanel {...panelProps({ onSave, savedAnswer: submittedAnswer("2026-08-02T10:00:00.000Z") })} />);
+    expect(await screen.findByText(DEFAULT_LABELS.ip_save_status_saved)).toBeInTheDocument();
+    rerender(<InspectionPanel {...panelProps({ onSave, savedAnswer: null })} />);
+    expect(screen.queryByText(DEFAULT_LABELS.ip_save_status_saved)).toBeNull();
+  });
+
+  it("shows no status for a legacy onSave that resolves nothing", async () => {
+    renderWith(async () => {});
+    submit();
+    await screen.findByRole("button", { name: DEFAULT_LABELS.ip_submit_btn });
+    expect(screen.queryByText(DEFAULT_LABELS.ip_save_status_saved)).toBeNull();
+    expect(screen.queryByText(DEFAULT_LABELS.ip_save_status_saving)).toBeNull();
   });
 });

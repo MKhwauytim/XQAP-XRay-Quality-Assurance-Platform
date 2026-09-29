@@ -4,7 +4,7 @@ import { casLoop } from "../../../storage/casLoop";
 import { withResourceLock } from "../../../storage/webLocks";
 import { getTemplatesRoot } from "../../../workspace/workspacePaths";
 
-const CHOICES_FILE = "deck2.style-choices.json";
+export const DECK_STYLE_CHOICES_FILE = "deck2.style-choices.json";
 
 /** Global (not per-month) admin-chosen variant index (0-3) per deck2 slide
  *  id, persisted to the workspace's templates root — same shape and CAS
@@ -30,7 +30,7 @@ export async function loadDeckStyleChoices(
 ): Promise<DeckStyleChoices | null> {
   try {
     const dir = await getStyleChoicesDir(directoryHandle);
-    const result = await safeReadJson<DeckStyleChoices>(dir, CHOICES_FILE);
+    const result = await safeReadJson<DeckStyleChoices>(dir, DECK_STYLE_CHOICES_FILE);
     return result.ok ? result.value : null;
   } catch {
     return null;
@@ -50,7 +50,7 @@ export async function saveDeckStyleChoices(
     const outcome = await withResourceLock(`${dir.name}/deck2-style-choices:rmw`, () =>
       casLoop<{ ok: true }>(
         async (writeToken) => {
-          const existing = await safeReadJson<DeckStyleChoices>(dir, CHOICES_FILE);
+          const existing = await safeReadJson<DeckStyleChoices>(dir, DECK_STYLE_CHOICES_FILE);
           const nextRevision = (existing.ok ? existing.value.revision ?? 0 : 0) + 1;
           const updated: DeckStyleChoices = {
             choices,
@@ -59,8 +59,8 @@ export async function saveDeckStyleChoices(
             revision: nextRevision,
             _writeToken: writeToken,
           };
-          await safeWriteJson(dir, CHOICES_FILE, updated);
-          const verify = await safeReadJson<DeckStyleChoices>(dir, CHOICES_FILE);
+          await safeWriteJson(dir, DECK_STYLE_CHOICES_FILE, updated);
+          const verify = await safeReadJson<DeckStyleChoices>(dir, DECK_STYLE_CHOICES_FILE);
           if (
             verify.ok &&
             verify.value.revision === nextRevision &&
@@ -70,7 +70,7 @@ export async function saveDeckStyleChoices(
               done: true,
               result: { ok: true as const },
               verify: async () => {
-                const recheck = await safeReadJson<DeckStyleChoices>(dir, CHOICES_FILE);
+                const recheck = await safeReadJson<DeckStyleChoices>(dir, DECK_STYLE_CHOICES_FILE);
                 return (
                   recheck.ok &&
                   recheck.value.revision === nextRevision &&

@@ -5,73 +5,73 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
-    "version": "v138.0",
-    "date": "2026-09-15",
+    "version": "v150.20",
+    "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "storage",
-    "title": "bound the nested retry budget and stop the damaged-file trap behind the XQ-IO-036 failures"
+    "scope": "backup",
+    "title": "never overwrite an existing live manifest misread as missing"
   },
   {
-    "version": "v137.2",
-    "date": "2026-09-15",
-    "bucket": "redesign",
-    "scope": "referrals",
-    "title": "extract the column-preset writers and the queue shell to get back under the complexity budget"
+    "version": "v150.19",
+    "date": "2026-09-29",
+    "bucket": "fix",
+    "scope": "archive",
+    "title": "restore dialog and recovery tool catch unexpected rejections and show integrity warnings"
   },
   {
-    "version": "v137.0",
-    "date": "2026-09-09",
+    "version": "v150.18",
+    "date": "2026-09-29",
+    "bucket": "fix",
+    "scope": "backup",
+    "title": "selective restore round 3 (unreadable backup manifest, deleted-month manifest, verification, shared wording)"
+  },
+  {
+    "version": "v150.17",
+    "date": "2026-09-29",
+    "bucket": "fix",
+    "scope": "archive",
+    "title": "selective restore UI review fixes (remount race, admin-only backups, warnings, failure handling)"
+  },
+  {
+    "version": "v150.16",
+    "date": "2026-09-29",
+    "bucket": "fix",
+    "scope": "backup",
+    "title": "selective restore engine review fixes (guard bypass, closed months, manifest, derived warnings)"
+  },
+  {
+    "version": "v150.15",
+    "date": "2026-09-29",
+    "bucket": "enhancement",
+    "scope": "population",
+    "title": "population recovery offers backup snapshots through the selective-restore engine"
+  },
+  {
+    "version": "v150.14",
+    "date": "2026-09-29",
     "bucket": "feature",
-    "scope": "integrity",
-    "title": "admin boot self-check that repairs damaged and orphaned workspace files and reports what it did"
+    "scope": "archive",
+    "title": "selective restore mode in the backup restore dialog"
   },
   {
-    "version": "v136.0",
-    "date": "2026-09-09",
-    "bucket": "redesign",
-    "scope": "history",
-    "title": "derive answers and distribution pre-change history from the event logs instead of copying it"
-  },
-  {
-    "version": "v135.1",
-    "date": "2026-09-09",
+    "version": "v150.13",
+    "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "history",
-    "title": "decide the action-history path-length verdict before touching the share, not after a full retry ladder"
+    "scope": "backup",
+    "title": "selective-restore catalog review fixes (ad-hoc records, embedded requests, casing, empty folders)"
   },
   {
-    "version": "v135.0",
-    "date": "2026-09-09",
-    "bucket": "redesign",
-    "scope": "storage",
-    "title": "delete a managed JSON name as a unit so an orphaned .bak cannot answer reads forever"
-  },
-  {
-    "version": "v134.6",
-    "date": "2026-09-09",
-    "bucket": "fix",
-    "scope": "workspace",
-    "title": "stop logging XQ-WS-015 for the expected 'prompt' cold-start state"
-  },
-  {
-    "version": "v134.5",
-    "date": "2026-09-09",
+    "version": "v150.12",
+    "date": "2026-09-29",
     "bucket": "feature",
-    "scope": "answers",
-    "title": "automatic 30s background retry for a save that never reached the shared folder"
+    "scope": "backup",
+    "title": "run selective restore with derived-cache rebuild and integrity scan"
   },
   {
-    "version": "v134.4",
-    "date": "2026-09-09",
+    "version": "v150.11",
+    "date": "2026-09-29",
     "bucket": "feature",
-    "scope": "answers",
-    "title": "local IndexedDB backup for saved answers, reconciled on load and every 60s; Fix (history): stop re-discovering the same name-too-long path limit on every save"
-  },
-  {
-    "version": "v134.3",
-    "date": "2026-09-08",
-    "bucket": "fix",
-    "scope": "approvals",
-    "title": "approveReplacement no longer trusts a stale distribution cache; Add (templates): admin repair for template files stuck serving from .bak"
+    "scope": "backup",
+    "title": "dependency plan for selective restore (A2 coverage block, warnings)"
   }
 ];

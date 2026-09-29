@@ -63,12 +63,14 @@ import {
 import { useWorkspace } from "../data/workspace/useWorkspace";
 import { syncUserManagementToDisk } from "../data/workspace/userSync";
 import { codedMessage, logCodedError } from "../data/storage/errorCodes";
+import { logError } from "../data/storage/errorLogger";
 import { LoadingState } from "../components/StateViews/StateViews";
 import { GlobalMonthProvider } from "../data/month/GlobalMonthProvider";
 import { useLabels } from "../data/labels/useLabels";
 import { getLabels } from "../data/labels/labelsStore";
 import { SyncTick } from "../data/workspace/SyncTick";
 import { WorkspaceErrorSink } from "../data/errorLog/WorkspaceErrorSink";
+import { PendingAnswerReplayRunner } from "../data/answers/PendingAnswerReplayRunner";
 import { SessionActionsContext, type SessionActions } from "./SessionActionsContext";
 
 type AuthGateProps = {
@@ -172,7 +174,22 @@ export default function AuthGate({ children }: AuthGateProps) {
     readPreviewRole()
   );
 
-  const [failedAttempts, setFailedAttempts] = useState(0);
+  // Ref-backed (not state): overlapping verifies must each see the true count,
+  // not the stale value captured in their own render's closure (E7).
+  const failedAttemptsRef = useRef(0);
+  // True while a passcode verify is running; a second submit is ignored.
+  const verifyInFlightRef = useRef(false);
+  const [isVerifying, setIsVerifying] = useState(false);
+  // Disabling the focused input during a verify drops focus to <body>; the
+  // input used is refocused once the guard is released and it is enabled again.
+  const refocusRef = useRef<(() => HTMLElement | null) | null>(null);
+  const adminPasscodeInputRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (!isVerifying && refocusRef.current) {
+      refocusRef.current()?.focus();
+      refocusRef.current = null;
+    }
+  }, [isVerifying]);
   const [lockoutUntil, setLockoutUntil] = useState<number | null>(null);
   const [lockoutSecondsLeft, setLockoutSecondsLeft] = useState(0);
 
@@ -411,7 +428,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     setMessage("");
     setMessageType("");
     setLogoutNotice("");
-    setFailedAttempts(0);
+    failedAttemptsRef.current = 0;
     setLockoutUntil(null);
   }, [clearWorkspace]);
 
@@ -499,9 +516,8 @@ export default function AuthGate({ children }: AuthGateProps) {
   }
 
   function registerFailedAttempt(): void {
-    const next = failedAttempts + 1;
-    setFailedAttempts(next);
-    if (next >= LOCKOUT_AFTER_ATTEMPTS) {
+    failedAttemptsRef.current += 1;
+    if (failedAttemptsRef.current >= LOCKOUT_AFTER_ATTEMPTS) {
       setLockoutUntil(Date.now() + LOCKOUT_DURATION_MS);
     }
   }
@@ -512,11 +528,39 @@ export default function AuthGate({ children }: AuthGateProps) {
     setLogoutNotice("");
   }
 
+  // Runs one passcode verification at a time. A submit that arrives while
+  // another is still running (key-repeat Enter, fast clicks) is dropped, so a
+  // wrong guess can never be verified without being counted.
+  async function runGuardedLogin(
+    attempt: () => Promise<void>,
+    refocus: () => HTMLElement | null
+  ): Promise<void> {
+    if (verifyInFlightRef.current) return;
+    verifyInFlightRef.current = true;
+    setIsVerifying(true);
+    refocusRef.current = refocus;
+    try {
+      await attempt();
+    } catch (error) {
+      // A throwing verifier is not a wrong guess: log it, never count it.
+      logError("authGate:verify", error);
+    } finally {
+      verifyInFlightRef.current = false;
+      setIsVerifying(false);
+    }
+  }
+
   async function loginAsEmployee(
     event: FormEvent<HTMLFormElement>
   ): Promise<void> {
     event.preventDefault();
+    await runGuardedLogin(
+      () => performEmployeeLogin(),
+      () => document.getElementById("authPassword")
+    );
+  }
 
+  async function performEmployeeLogin(): Promise<void> {
     if (lockoutUntil !== null && Date.now() < lockoutUntil) return;
 
     const normalizedInput = normalizeUsername(selectedUsername);
@@ -550,7 +594,7 @@ export default function AuthGate({ children }: AuthGateProps) {
       applySession(createSession(ADMIN_ROLE, BOOTSTRAP_ADMIN_USERNAME));
       clearLastLoginUsername();
       setPassword("");
-      setFailedAttempts(0);
+      failedAttemptsRef.current = 0;
       setLockoutUntil(null);
       showMessage(getLabels().auth_msg_login_success, "ok");
       return;
@@ -615,12 +659,19 @@ export default function AuthGate({ children }: AuthGateProps) {
     writeLastLoginUsername(user.username);
 
     setPassword("");
-    setFailedAttempts(0);
+    failedAttemptsRef.current = 0;
     setLockoutUntil(null);
     showMessage(getLabels().auth_msg_login_success, "ok");
   }
 
   async function loginAsBootstrapAdmin(): Promise<void> {
+    await runGuardedLogin(
+      () => performBootstrapAdminLogin(),
+      () => adminPasscodeInputRef.current
+    );
+  }
+
+  async function performBootstrapAdminLogin(): Promise<void> {
     // Same secret as loginAsEmployee's bootstrap-admin branch, so it shares
     // that path's lockout: unguarded, this hidden modal was a second way to
     // brute-force the admin passcode with no attempt limit at all.
@@ -645,7 +696,7 @@ export default function AuthGate({ children }: AuthGateProps) {
 
     setAdminPasscode("");
     setIsAdminModalOpen(false);
-    setFailedAttempts(0);
+    failedAttemptsRef.current = 0;
     setLockoutUntil(null);
     showMessage("", "");
   }
@@ -729,6 +780,11 @@ export default function AuthGate({ children }: AuthGateProps) {
             errors land in the in-memory demo tree and vanish with it. Keyed on
             the REAL username, never the previewed role's identity. */}
         <WorkspaceErrorSink username={session.username} enabled />
+        {/* A1: replays answers that never reached the shared folder, on every
+            page, for every month and ad-hoc import -- not only while «نتائج
+            فحص الأشعة» is mounted. Mounted beside WorkspaceErrorSink for the
+            same reason (needs a ready workspace). Keyed on the REAL user. */}
+        <PendingAnswerReplayRunner username={session.username} enabled />
         {/* The unread-feedback count is read once here and shared by BOTH
             triggers of the feedback widget: the toolbar icon below (real admin)
             and the floating button inside the app tree (everyone else). They sit
@@ -818,6 +874,7 @@ export default function AuthGate({ children }: AuthGateProps) {
                     </span>
                     <input
                       id="authUsername"
+                      disabled={isVerifying}
                       type="text"
                       required
                       autoComplete="username"
@@ -841,6 +898,7 @@ export default function AuthGate({ children }: AuthGateProps) {
                     </span>
                     <input
                       id="authPassword"
+                      disabled={isVerifying}
                       type={isPasswordVisible ? "text" : "password"}
                       required
                       autoComplete="current-password"
@@ -873,7 +931,7 @@ export default function AuthGate({ children }: AuthGateProps) {
                 <button
                   className="auth-submit"
                   type="submit"
-                  disabled={lockoutUntil !== null && lockoutSecondsLeft > 0}
+                  disabled={isVerifying || (lockoutUntil !== null && lockoutSecondsLeft > 0)}
                 >
                   <span>
                     {lockoutUntil !== null && lockoutSecondsLeft > 0
@@ -941,12 +999,13 @@ export default function AuthGate({ children }: AuthGateProps) {
 
             <input
               type="password"
+              ref={adminPasscodeInputRef}
               aria-label={labels.auth_admin_passcode_aria}
               value={adminPasscode}
               onChange={(event) => setAdminPasscode(event.target.value)}
               onKeyDown={handleAdminModalKeyDown}
               placeholder={labels.auth_admin_passcode_placeholder}
-              disabled={lockoutUntil !== null && lockoutSecondsLeft > 0}
+              disabled={isVerifying || (lockoutUntil !== null && lockoutSecondsLeft > 0)}
             />
 
             <div className="auth-modal-actions">
@@ -961,7 +1020,7 @@ export default function AuthGate({ children }: AuthGateProps) {
               <button
                 type="button"
                 onClick={() => void loginAsBootstrapAdmin()}
-                disabled={lockoutUntil !== null && lockoutSecondsLeft > 0}
+                disabled={isVerifying || (lockoutUntil !== null && lockoutSecondsLeft > 0)}
               >
                 {lockoutUntil !== null && lockoutSecondsLeft > 0
                   ? labels.auth_lockout_wait.replace("{seconds}", String(lockoutSecondsLeft))

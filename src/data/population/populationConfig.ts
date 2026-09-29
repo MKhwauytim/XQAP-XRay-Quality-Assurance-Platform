@@ -5,6 +5,7 @@ import { withResourceLock } from "../storage/webLocks";
 import { getPopulationRoot } from "../workspace/workspacePaths";
 import { isNotFoundError } from "../storage/transientFileErrors";
 import { logError } from "../storage/errorLogger";
+import { normalizePortName } from "../distribution/portEligibility";
 
 export type SystemField = {
   key: string;
@@ -128,6 +129,16 @@ export type PopulationConfig = {
   samplingRules: StageSamplingRule[];
   employeeAllocations: EmployeeStageAllocation[];
   employeePortRestrictions: EmployeePortRestriction[];
+  /**
+   * Ports whose EVERY row is processed as CertScan (C2), in addition to rows
+   * matched by the pasted CertScan device list (a union). Port names exactly
+   * as they appear in the population (`normalizePortName`). Applies from the
+   * next processing run only — an already-drawn sample is never re-flagged.
+   *
+   * Additive and optional: a config.json written before this field existed
+   * loads as `[]` (see `loadPopulationConfig`), so no migration is needed.
+   */
+  certScanPorts?: string[];
 };
 
 export const MONTHLY_SAMPLE_TARGET = 6500;
@@ -396,8 +407,28 @@ export const DEFAULT_POPULATION_CONFIG: PopulationConfig = {
   ],
   samplingRules: DEFAULT_SAMPLING_RULES,
   employeeAllocations: [],
-  employeePortRestrictions: []
+  employeePortRestrictions: [],
+  certScanPorts: []
 };
+
+/**
+ * Normalizes a stored `certScanPorts` value (C2): keeps non-blank strings,
+ * trimmed (a padded name would never match a row), normalized through
+ * `normalizePortName` and de-duplicated in first-seen
+ * order. Anything that is not an array (a legacy config without the field,
+ * or a hand-edited file) yields `[]`.
+ */
+export function normalizeCertScanPorts(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const ports = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    const port = item.trim();
+    if (port === "") continue;
+    ports.add(normalizePortName(port));
+  }
+  return [...ports];
+}
 
 export async function loadPopulationConfig(
   directoryHandle: DirectoryHandleLike | null
@@ -425,7 +456,8 @@ export async function loadPopulationConfig(
         exportTemplates: loaded.exportTemplates || [{ templateId: "default-export", name: "تصدير افتراضي كامل", columns: DEFAULT_EXPORT_COLUMNS }],
         samplingRules: loaded.samplingRules || DEFAULT_SAMPLING_RULES,
         employeeAllocations: loaded.employeeAllocations || [],
-        employeePortRestrictions: loaded.employeePortRestrictions || []
+        employeePortRestrictions: loaded.employeePortRestrictions || [],
+        certScanPorts: normalizeCertScanPorts(loaded.certScanPorts)
       };
     }
   } catch (error) {

@@ -64,21 +64,31 @@ export function reportBakRecovery(
   directoryName: string,
   fileName: string,
   source: BakRecoverySource,
-  liveState: BakRecoveryLiveState = "corrupt"
+  liveState: BakRecoveryLiveState = "corrupt",
+  /**
+   * Diagnostic detail from the live read that failed — snapshot size, bytes
+   * actually decoded, and which validation stage rejected it (plus stale-retry
+   * count when the caller retried a found-but-invalid read before falling
+   * back). Appended to the message so an exported log can tell a stale
+   * snapshot apart from real on-disk damage after the fact — see evidence §A
+   * in `.superpowers/sdd/errorlog-2026-09-28/other-groups.md`. Omitted when
+   * there is nothing to add (e.g. `liveState === "missing"`).
+   */
+  evidence?: string
 ): void {
   const key = `${directoryName}/${fileName}${source}`;
   if (!reported.has(key)) {
     reported.add(key);
+    const base =
+      liveState === "missing"
+        ? `"${fileName}" in "${directoryName}" has no live copy and was served from ${fileName}${source} instead. ` +
+          `Either the live file was lost, or the sibling is an orphan left behind by a deletion — ` +
+          `check the repair panel before assuming damage.`
+        : `"${fileName}" in "${directoryName}" could not be read from its live copy and was served from ${fileName}${source} instead. ` +
+          `The live file is damaged and every reader is falling back until something rewrites it.`;
     logError(
       "storage:bak-recovery",
-      new Error(
-        liveState === "missing"
-          ? `"${fileName}" in "${directoryName}" has no live copy and was served from ${fileName}${source} instead. ` +
-            `Either the live file was lost, or the sibling is an orphan left behind by a deletion — ` +
-            `check the repair panel before assuming damage.`
-          : `"${fileName}" in "${directoryName}" could not be read from its live copy and was served from ${fileName}${source} instead. ` +
-            `The live file is damaged and every reader is falling back until something rewrites it.`
-      ),
+      new Error(evidence ? `${base} (${evidence})` : base),
       { action: fileName }
     );
   }

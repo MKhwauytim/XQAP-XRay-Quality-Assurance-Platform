@@ -2,6 +2,7 @@ import type { DirectoryHandleLike, FileHandleLike } from "./fileSystemAccess";
 import { safeReadJson } from "./safeWrite";
 import { subscribeToDataRefresh } from "../workspace/dataRefreshSignal";
 import { logError } from "./errorLogger";
+import { directoryResourceKey } from "./webLocks";
 import {
   TRANSIENT_WRITE_RETRY_DELAYS_MS,
   isNotFoundError,
@@ -420,15 +421,41 @@ async function readListedEntry<T>(
  * loses sight of every name in it at once, and 200 identical entries would
  * evict the whole 50-entry error ring buffer (errorLogger.ts) that the admin
  * error view reads.
+ *
+ * Also once per SESSION per file: a segment that stays unreadable is re-skipped
+ * on every read (roughly every save), and each logged line is persisted to the
+ * per-user error file, whose whole-file rewrite costs megabytes. Only names not
+ * yet reported in this session are logged; the first occurrence always is.
  */
-function logVanishedEntries(context: string, dir: DirectoryHandleLike, names: string[]): void {
-  if (names.length === 0) return;
+const reportedVanishedKeys = new Set<string>();
+
+/** @internal test-only. Forget which skipped entries were already reported. */
+export function __resetVanishedEntryLogForTests(): void {
+  reportedVanishedKeys.clear();
+}
+
+function logVanishedEntries(
+  context: string,
+  dir: DirectoryHandleLike,
+  names: string[],
+  scopeKey?: string
+): void {
+  const fresh = names.filter((name) => {
+    // `dir.name` alone is "distribution.events" in every month, and a raw
+    // `getDirectoryHandle()` result is not path-registered, so the caller can
+    // supply a scope (the parent month folder's path) that keeps months apart.
+    const key = `${context}|${scopeKey ?? directoryResourceKey(dir, "")}|${dir.name}|${name}`;
+    if (reportedVanishedKeys.has(key)) return false;
+    reportedVanishedKeys.add(key);
+    return true;
+  });
+  if (fresh.length === 0) return;
   logError(
     context,
     new Error(
-      `Skipped ${names.length} listed entr${names.length === 1 ? "y" : "ies"} that could not be ` +
+      `Skipped ${fresh.length} listed entr${fresh.length === 1 ? "y" : "ies"} that could not be ` +
         `opened in "${dir.name}" (present in the listing, NotFound/NotReadable on open — ` +
-        `renamed, removed, or not yet visible on a shared folder): ${names.join(", ")}`
+        `renamed, removed, or not yet visible on a shared folder): ${fresh.join(", ")}`
     )
   );
 }
@@ -597,9 +624,12 @@ export const DEFAULT_SIZE_SIGNATURE_STAT_BUDGET = 64;
 export async function boundedSizeSignature(
   dir: DirectoryHandleLike,
   suffix: string,
-  maxStats: number = DEFAULT_SIZE_SIGNATURE_STAT_BUDGET
+  maxStats: number = DEFAULT_SIZE_SIGNATURE_STAT_BUDGET,
+  /** Names left out entirely (neither listed nor probed), e.g. the caller's own segments. */
+  exclude?: (name: string) => boolean
 ): Promise<string> {
-  const matched = await listMatchingFileEntries(dir, suffix);
+  const listed = await listMatchingFileEntries(dir, suffix);
+  const matched = exclude ? listed.filter((entry) => !exclude(entry.name)) : listed;
   const names = matched.map((entry) => entry.name);
   const probed = matched.slice(Math.max(0, matched.length - Math.max(0, maxStats)));
   const sizes: (number | null)[] = new Array(probed.length).fill(null);
@@ -628,6 +658,20 @@ export type SegmentTailOptions = {
   suffix: string;
   /** Byte offset already consumed per file name; a name missing from this map defaults to 0 (read from the start). */
   knownOffsets: Record<string, number>;
+  /**
+   * Optional identity of the directory for the once-per-session skip log (e.g.
+   * the month folder's path). Without it the key falls back to the handle's
+   * registered path, which a raw `getDirectoryHandle()` result does not have.
+   */
+  scopeKey?: string;
+  /**
+   * Names a PREVIOUS call confirmed sealed (S3) — normally the previous
+   * result's `sealedConfirmedNames`, carried by the caller next to its offsets.
+   * A name is skipped (no `getFile()`) only when it is in this set, has a known
+   * offset, and a higher-seq sibling of its chain is in this listing. Omitted =
+   * every segment is opened, exactly as before.
+   */
+  sealedConfirmed?: ReadonlySet<string>;
 };
 
 export type SegmentTailResult = {
@@ -640,7 +684,69 @@ export type SegmentTailResult = {
   sizeByName: Map<string, number>;
   /** Every matching file name in the current listing, name-sorted. */
   matchedNames: string[];
+  /**
+   * Names now confirmed sealed: each was read (or already confirmed and
+   * skipped) with a higher-seq sibling of its chain in this listing, so the
+   * read completed after that sibling was first seen. Hand back as
+   * `options.sealedConfirmed` next call. Never contains a name whose read failed.
+   */
+  sealedConfirmedNames: Set<string>;
 };
+
+/**
+ * `{base, seq}` of an append-only segment file name: `{base}{suffix}` is seq 0
+ * (the historical unsuffixed name) and `{base}-{n}{suffix}` is seq n. Returns
+ * null for a name without `suffix`. Purely lexical, so it can misread a seq-0
+ * base that happens to end in `-<digits>`; `sealedSiblingNames` therefore
+ * trusts a chain only when its seq-0 root is also listed.
+ */
+export function parseSegmentName(name: string, suffix: string): { base: string; seq: number } | null {
+  if (!name.endsWith(suffix)) return null;
+  const stem = name.slice(0, -suffix.length);
+  const match = /^(.+)-([1-9][0-9]{0,5})$/.exec(stem);
+  return match ? { base: match[1]!, seq: Number(match[2]) } : { base: stem, seq: 0 };
+}
+
+/**
+ * Names in a listing that have a higher-seq sibling in the same chain.
+ *
+ * A chain is anchored on its seq-0 root: a stem is a chain base only if a
+ * `{stem}-{n}` sibling is also listed, and a `{base}-{n}` name joins a chain
+ * only if `{base}{suffix}` is listed. That resolves the lexical ambiguity in
+ * `parseSegmentName` (a digit-only session id makes a seq-0 name look like
+ * `{base}-{n}`), and errs toward "not a chain", i.e. toward opening the file.
+ */
+function namesWithHigherSibling(names: readonly string[], suffix: string): Set<string> {
+  const listed = new Set(names);
+  const parsed = new Map<string, { base: string; seq: number }>();
+  for (const name of names) {
+    const info = parseSegmentName(name, suffix);
+    if (info) parsed.set(name, info);
+  }
+  // Bases that have a seq>0 sibling with their root present.
+  const rootedBases = new Set<string>();
+  for (const [, info] of parsed) {
+    if (info.seq > 0 && listed.has(`${info.base}${suffix}`)) rootedBases.add(info.base);
+  }
+  const maxSeqByBase = new Map<string, number>();
+  const chainOf = new Map<string, { base: string; seq: number }>();
+  for (const [name, info] of parsed) {
+    const stem = name.slice(0, -suffix.length);
+    const chain = rootedBases.has(stem)
+      ? { base: stem, seq: 0 }
+      : info.seq > 0 && rootedBases.has(info.base)
+        ? info
+        : null;
+    if (!chain) continue;
+    chainOf.set(name, chain);
+    maxSeqByBase.set(chain.base, Math.max(maxSeqByBase.get(chain.base) ?? 0, chain.seq));
+  }
+  const out = new Set<string>();
+  for (const [name, chain] of chainOf) {
+    if (chain.seq < (maxSeqByBase.get(chain.base) ?? 0)) out.add(name);
+  }
+  return out;
+}
 
 /**
  * Read only the bytes appended past each file's previously-known offset, for
@@ -676,11 +782,34 @@ export async function readSegmentTails(
   // an append decide against state that is missing real events.
   const budget: VanishRetryBudget = { remaining: SEGMENT_TAIL_VANISH_RETRY_BUDGET };
   const vanished: string[] = [];
+  const reads: ({ size: number; tail: string | null } | null)[] = new Array(matched.length).fill(null);
 
-  for (const entry of matched) {
-    const name = entry.name;
-    const knownOffset = options.knownOffsets[name] ?? 0;
-    const read = await readListedEntry(
+  // S3: a name whose chain has a higher-seq sibling in THIS listing is
+  // "superseded". If a previous call confirmed it sealed and we already know its
+  // offset, opening it again can only return nothing new. The confirmation is
+  // earned by an ordinary read taken after the sibling was listed (see
+  // `sealedConfirmedNames`); a never-read superseded name is always opened, which
+  // is what keeps SMB visibility lag (N+1 visible before N's last bytes) safe.
+  const superseded = namesWithHigherSibling(matchedNames, options.suffix);
+  const priorSealed = options.sealedConfirmed;
+  const skipped = new Set<string>();
+  for (const name of matchedNames) {
+    if (superseded.has(name) && priorSealed?.has(name) && options.knownOffsets[name] !== undefined) {
+      skipped.add(name);
+    }
+  }
+
+  // Bounded-parallel, like the sized listing and the bounded signature above:
+  // on the share every open is a round trip, and a sequential walk made each
+  // answer-save attempt pay one per segment in the month (A1). Results are
+  // committed below in `matched` (name) order, so the output is identical to
+  // the sequential walk; the vanish budget object is shared and decremented
+  // on one JS thread, so it remains a total across all segments.
+  await forEachBounded(matched.length, DIRECTORY_READ_CONCURRENCY, async (index) => {
+    const entry = matched[index]!;
+    if (skipped.has(entry.name)) return;
+    const knownOffset = options.knownOffsets[entry.name] ?? 0;
+    reads[index] = await readListedEntry(
       dir,
       entry,
       async (file) => ({
@@ -690,6 +819,18 @@ export async function readSegmentTails(
       }),
       budget
     );
+  });
+
+  const sealedConfirmedNames = new Set<string>();
+  for (let index = 0; index < matched.length; index += 1) {
+    const name = matched[index]!.name;
+    if (skipped.has(name)) {
+      // Carry the known offset forward unchanged; still confirmed sealed.
+      sizeByName.set(name, options.knownOffsets[name]!);
+      sealedConfirmedNames.add(name);
+      continue;
+    }
+    const read = reads[index] ?? null;
     if (read === null) {
       // Deliberately no sizeByName entry: callers persist sizeByName as the
       // next call's knownOffsets, and recording a size for a segment whose
@@ -701,11 +842,12 @@ export async function readSegmentTails(
     }
     sizeByName.set(name, read.size);
     if (read.tail !== null) tailTextByName.set(name, read.tail);
+    if (superseded.has(name)) sealedConfirmedNames.add(name);
   }
 
-  logVanishedEntries("directoryScan:segment-tails", dir, vanished);
+  logVanishedEntries("directoryScan:segment-tails", dir, vanished, options.scopeKey);
 
-  return { tailTextByName, sizeByName, matchedNames };
+  return { tailTextByName, sizeByName, matchedNames, sealedConfirmedNames };
 }
 
 // Module-init side effect: purge the whole cache on manual refresh

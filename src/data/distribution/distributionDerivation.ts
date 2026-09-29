@@ -3,6 +3,7 @@ import { toEmployeeMirrorRowStub } from "../population/populationTypes";
 
 import { parseMonthFolderName } from "../population/monthFolder";
 import { logError } from "../storage/errorLogger";
+import { countWorkingDays } from "../../utils/workingDays";
 import type {
   DistributionEntry,
   DistributionEvent,
@@ -78,14 +79,20 @@ export type DistributionSummary = {
   totalPending: number;
 };
 
-export function computeDaysRemainingForDeadline(
-  month: number,
-  year: number,
-  fromDate = new Date()
-): number {
+/**
+ * C3: WORKING days (Sunday–Thursday; Friday/Saturday excluded) from
+ * `fromDate`'s calendar day through the quota deadline — the sample month's
+ * last day − 3 — both inclusive, local time. 0 when `fromDate` is after the
+ * deadline. This is what the daily quota and the bulk-assignment stamp use
+ * since DERIVE_VERSION 5. When the month folder name is unparseable the
+ * derivation falls back to the stored stamp on the first assignment event
+ * (`daysRemainingAtAssignment`), which is calendar days on events written
+ * before v5 and working days after.
+ */
+export function computeWorkingDaysForDeadline(month: number, year: number, fromDate: Date): number {
   const lastDay = new Date(year, month, 0).getDate();
-  const deadline = new Date(year, month - 1, lastDay - 3, 23, 59, 59);
-  return Math.max(0, Math.ceil((deadline.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24)));
+  const deadline = new Date(year, month - 1, lastDay - 3);
+  return countWorkingDays(fromDate, deadline);
 }
 
 function isUnsupportedEvent(event: DistributionEvent, supportedSchemaVersion: number): boolean {
@@ -344,6 +351,12 @@ export function deriveEmployeeQuotas(
  * rows by reassignment has no `assigned` event, hence no assignment window,
  * hence no quota row — they own entries but appear in neither `firstAssignments`
  * nor `quotas`.
+ *
+ * C3 (DERIVE_VERSION 5): the window is counted in WORKING days (Sunday–
+ * Thursday) from the first assignment's calendar day to the deadline,
+ * inclusive, floored at 1 in the division. Nothing here reads `now`, so the
+ * value is frozen: completion and the passage of time never move it; only a
+ * change in the employee's live assigned count (`sampleCount`) does.
  */
 export function deriveEmployeeQuotasWithFacts(
   events: DistributionEvent[],
@@ -398,7 +411,7 @@ function assignmentDaysRemaining(
 ): number | undefined {
   const firstAssignedAt = new Date(firstAssignment.eventAt);
   return monthInfo && !Number.isNaN(firstAssignedAt.getTime())
-    ? computeDaysRemainingForDeadline(monthInfo.month, monthInfo.year, firstAssignedAt)
+    ? computeWorkingDaysForDeadline(monthInfo.month, monthInfo.year, firstAssignedAt)
     : storedQuota?.daysRemainingAtAssignment;
 }
 

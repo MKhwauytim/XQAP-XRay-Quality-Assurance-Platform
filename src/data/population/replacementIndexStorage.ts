@@ -11,13 +11,15 @@
 
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeRemoveJson, safeWriteJson } from "../storage/safeWrite";
+import { logError } from "../storage/errorLogger";
+import { isNotFoundError } from "../storage/transientFileErrors";
 import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
 import { hashJsonValue } from "../storage/jsonEnvelope";
 import { getPopulationMonthDir, POPULATION_SUBFOLDERS } from "../workspace/workspacePaths";
 import type { CertScanMatchStatus, PreparedPopulationRow } from "./populationTypes";
 import type { StageAliasMappings } from "./populationConfig";
-import { getStageKey, resolveStageMappings, type StageCountKey } from "./stageHelpers";
+import { getStageKey, resolveStageMappings, STAGE_COUNT_KEY_ORDER, type StageCountKey } from "./stageHelpers";
 import {
   REPLACEMENT_INDEX_FORMAT_VERSION,
   toReplacementIndexRow,
@@ -26,11 +28,12 @@ import {
   type ReplacementIndexRow,
 } from "./replacementIndexTypes";
 
-const REPLACEMENT_INDEX_FOLDER = "replacement-index";
+/** Exported for the selective-restore catalog, which rebuilds rather than copies it. */
+export const REPLACEMENT_INDEX_FOLDER = "replacement-index";
 const MANIFEST_FILE = "index.manifest.json";
 
 const ALL_TIERS: readonly CertScanMatchStatus[] = ["Certscan", "NonCertscan"];
-const ALL_STAGE_KEYS: readonly StageCountKey[] = ["first", "second", "third", "fourth", "unknown"];
+const ALL_STAGE_KEYS: readonly StageCountKey[] = STAGE_COUNT_KEY_ORDER;
 
 function indexLockKey(monthFolderName: string): string {
   return `replacement-index/${monthFolderName}:rmw`;
@@ -68,6 +71,27 @@ export async function loadReplacementIndexManifest(
     return result.ok ? result.value : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Drop the published manifest so the NEXT rebuild is not refused by the
+ * monotonic guard. A selective backup restore (Workstream D) puts back an OLDER
+ * population.final.json — a lower envelope revision — than the one the live
+ * index was built from; `isRebuildRedundant` would then read the live manifest
+ * as "a newer index already won" and keep the stale index forever. Without a
+ * manifest the replacement flow uses its existing full-scan fallback until the
+ * rebuild publishes a fresh one. Best-effort: never throws.
+ */
+export async function discardReplacementIndexManifest(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<void> {
+  try {
+    const dir = await getReplacementIndexDir(directoryHandle, monthFolderName, false);
+    await safeRemoveJson(dir, MANIFEST_FILE);
+  } catch (error) {
+    if (!isNotFoundError(error)) logError("population:discard-replacement-index", error);
   }
 }
 

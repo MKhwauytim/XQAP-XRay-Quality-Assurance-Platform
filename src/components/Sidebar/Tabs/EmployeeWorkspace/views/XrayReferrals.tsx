@@ -6,21 +6,24 @@ import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
 import { ConfirmDialog } from "../../../../../components/ConfirmDialog/ConfirmDialog";
 import { EmptyState, ErrorState, LoadingState } from "../../../../../components/StateViews/StateViews";
 import { logError, logRejection } from "../../../../../data/storage/errorLogger";
+import { resolveErrorCode } from "../../../../../data/storage/errorCodes";
 import { thrownErrorText, userFacingErrorText } from "../../../../../data/storage/writeErrorText";
 import {
   loadEmployeeAnswers,
   upsertItemAnswer,
   upsertItemAnswerOnBehalf,
 } from "../../../../../data/answers/answerStorage";
-import { answerDraftKey, clearAnswerDraft } from "../../../../../data/answers/answerDraftStore";
+import { clearAnswerDraftAndLegacy } from "../../../../../data/answers/answerDraftStore";
+import { forgetLastOpenSample, pickAutoSelectId, readLastOpenSample, rememberLastOpenSample } from "../../../../../data/answers/lastOpenSampleStore";
+import { answerFolderForEntry, legacyPanelDraftKey, panelDraftKey } from "./XrayReferrals/answerRouting";
 import { reopenSubmittedAnswer } from "../../../../../data/answers/reopenAnswer";
 import { MonthClosedError } from "../../../../../data/population/monthLock";
 import { getLabels } from "../../../../../data/labels/labelsStore";
 import { useVisibleUnsavedWorkMonthGuard } from "../../../../../hooks/useVisibleUnsavedWorkMonthGuard";
 import { useUnsavedWork } from "../../../../../hooks/useUnsavedWork";
-import type { FieldAnswer, ItemAnswer } from "../../../../../data/answers/answerTypes";
+import type { AnswerSaveOutcome, FieldAnswer, ItemAnswer } from "../../../../../data/answers/answerTypes";
+import { isAnswerQueuedPending } from "../../../../../data/answers/answerLocalMirror";
 import {
-  loadOrDeriveDistributionCurrent,
   loadOrDeriveDistributionCurrentStrictForRead,
   readDistributionLogStamp,
 } from "../../../../../data/distribution/distributionStorage";
@@ -36,31 +39,23 @@ import {
   markBootSourceError,
 } from "../../../../../data/workspace/bootProgress";
 import type { DistributionEntry } from "../../../../../data/distribution/distributionTypes";
-import {
-  classifyReplacementRowAvailability,
-  executeReplacement,
-} from "../../../../../data/distribution/replacement";
 import { submitReassignmentRequests } from "../../../../../data/referral/submitReassignment";
 import { isReassignEligible } from "../../../../../data/referral/planReassignment";
 import { appendWorkspaceAction, recordAction } from "../../../../../data/audit/actionLog";
-import { getReplacementCandidatesIndexed } from "../../../../../data/distribution/replacementCandidateLookup";
-import {
-  findPopulationRowById,
-  type PopulationRowLookupResult,
-} from "../../../../../data/population/populationRowLookup";
-import { PopulationUnreadableError } from "../../../../../data/population/populationStorage";
 import type { ReplacementIndexRow } from "../../../../../data/population/replacementIndexTypes";
-import { loadPopulationConfig, type StageAliasMappings } from "../../../../../data/population/populationConfig";
+import type { StageAliasMappings } from "../../../../../data/population/populationConfig";
+import { useWorkspaceStageMappings } from "../../../../../hooks/useWorkspaceStageMappings";
 import { useGlobalMonth } from "../../../../../data/month/useGlobalMonth";
 import {
   loadSampleMaster,
 } from "../../../../../data/sampling/sampleStorage";
-import { loadEmployeeSampleMirror } from "../../../../../data/samples/sampleMirrorStorage";
+import { isMirrorTrustedForEvents, loadEmployeeSampleMirror } from "../../../../../data/samples/sampleMirrorStorage";
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
 import {
   displayXrayImageId,
   loadAdhocAnswerItems,
   loadAdhocEntriesForEmployeeView,
+  isAdhocEntry,
   type AdhocDistributionEntry,
 } from "../../../../../data/adhocImport/adhocImportEmployeeView";
 import { monthFolderForEntry } from "../../../../../data/adhocImport/adhocImportEmployeeView";
@@ -89,20 +84,18 @@ import {
   loadUserBrowsePreset,
 } from "../../../../../data/preferences/browsePresetStorage";
 import {
-  appendReplacementRequest,
   getPendingReferralIds,
   getPendingReplacementIds,
   loadReferralLog,
   loadReplacementLog,
 } from "../../../../../data/referral/referralStorage";
 import { submitReopenRequest } from "../../../../../data/referral/requestReopen";
-import type { ReplacementRequest } from "../../../../../data/referral/referralTypes";
 import { useLabels } from "../../../../../data/labels/useLabels";
 import type { Labels } from "../../../../../data/labels/labelsStore";
 import { formatStageLabel } from "../../../../../data/population/stageHelpers";
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import {
-  CaseFilterSwitcher,
+  CaseFilterBar,
   QUEUE_SCOPE_ALL,
   buildQueueScopeOptions,
   QueueToolbar,
@@ -135,6 +128,8 @@ import {
 import { useCaseFilter } from "./XrayReferrals/caseFilter";
 import { buildAnswerStatusFilter } from "./XrayReferrals/answerStatusFilter";
 import { createQueueSelection } from "./XrayReferrals/queueSelection";
+import { useLocalSubmissionGuard } from "./XrayReferrals/localSubmissions";
+import { useReplacementFlow } from "./XrayReferrals/useReplacementFlow";
 import QueueSplitResizer from "./XrayReferrals/QueueSplitResizer";
 import PendingCorrections from "./XrayReferrals/PendingCorrections";
 import { DEFAULT_QUEUE_SPLIT } from "../../../../../data/preferences/queueSplitStore";
@@ -148,7 +143,7 @@ const COL_KEY = "xray_ref_cols_v4";
 
 type Props = { directoryHandle: DirectoryHandleLike };
 type LoadState = "idle" | "loading" | "ready" | "error";
-type StatusMsg = { type: "ok" | "error"; text: string } | null;
+export type StatusMsg = { type: "ok" | "error"; text: string } | null;
 // Exported (not just used locally) so the moved ReferralStatsStrip/ReplacementDialog
 // sub-components in ./XrayReferrals/subComponents.tsx can `import type` them back —
 // this component's state shape itself is unchanged.
@@ -163,6 +158,8 @@ export type PersonalStats = {
   active: number;
   completionPct: number;
 };
+/** `daysRemaining` is the assignment window in WORKING days (Sun–Thu) since
+ *  DERIVE_VERSION 5 (C3) — `EmployeeQuota.daysRemainingAtAssignment`. */
 export type PersonalQuota = { dailyQuota: number; daysRemaining: number; sampleCount: number } | null;
 export type ReplacementDialogState = {
   entry: DistributionEntry;
@@ -286,12 +283,6 @@ function referralsBootSources(username: string, canSeeAll: boolean): BootSourceD
   ];
 }
 
-/** True for a row assigned through an ad-hoc import rather than the real
- *  monthly sampling pipeline — see `adhocImportEmployeeView.ts`. */
-function isAdhocEntry(entry: DistributionEntry): entry is AdhocDistributionEntry {
-  return typeof (entry as AdhocDistributionEntry).adhocImportId === "string";
-}
-
 /**
  * Start both ad-hoc reads for the load phase, without awaiting either.
  *
@@ -323,19 +314,6 @@ function beginAdhocReads(
     entries,
     answers: entries.then((list) => loadAdhocAnswerItems(directoryHandle, list)),
   };
-}
-
-/**
- * T-08 — a lookup MISS is staleness; a failed READ is not.
- *
- * `findPopulationRowById` answers `absent` only when the month genuinely has no
- * `population.final.json`. `unreadable`/`worker` mean the row may well be there
- * and this call could not see it, so telling the user "البيانات تغيّرت" would
- * report a data change that never happened — and send them looking for a row
- * that is fine.
- */
-function isPopulationReadFailure(lookup: PopulationRowLookupResult): boolean {
-  return !lookup.ok && lookup.reason !== "absent";
 }
 
 /**
@@ -449,7 +427,6 @@ function thrownWriteErrorText(error: unknown): string {
  */
 function createSaveAnswerHandler(deps: {
   directoryHandle: DirectoryHandleLike;
-  folderForRow: (xrayImageId: string) => string;
   username: string;
   role: string;
   activeTpl: TemplateSchema | null;
@@ -471,29 +448,35 @@ function createSaveAnswerHandler(deps: {
    *  month-switch guard and the vanished-row draft retention must stop
    *  treating them as work at risk. */
   setDirtyEntryId: (id: string | null) => void;
+  /** A1: remember this successful submit so a stale in-flight reload cannot downgrade it. */
+  recordLocalSubmission: (item: ItemAnswer) => void;
 }) {
   const {
-    directoryHandle, folderForRow, username, role, activeTpl, selMonth,
+    directoryHandle, username, role, activeTpl, selMonth,
     canSubmitAnswers, canAnswerOnBehalf, setAnswers, setStatusMsg,
-    ownBroadcastRef, setDirtyEntryId,
+    ownBroadcastRef, setDirtyEntryId, recordLocalSubmission,
   } = deps;
   return async function handleSave(
-    xrayImageId: string, ans: FieldAnswer[], forUser: string
-  ): Promise<void> {
+    entry: DistributionEntry, ans: FieldAnswer[]
+  ): Promise<AnswerSaveOutcome> {
+    const xrayImageId = entry.xrayImageId;
+    const forUser = entry.assignedTo;
     if (!canSubmitAnswers) {
-      setStatusMsg({ type: "error", text: "لا تملك صلاحية تقديم الإجابات، أو أن مساحة العمل للقراءة فقط." });
-      return;
+      const text = "لا تملك صلاحية تقديم الإجابات، أو أن مساحة العمل للقراءة فقط.";
+      setStatusMsg({ type: "error", text });
+      return { ok: false, message: text };
     }
     // Handler-boundary check for the on-behalf case, mirroring every other
     // mutating handler here: the panel is already gated at render
     // (resolvePanelAuthoring), but a stale panel must not be able to write.
     if (forUser !== username && !canAnswerOnBehalf) {
-      setStatusMsg({ type: "error", text: getLabels().msg_answer_on_behalf_denied });
-      return;
+      const text = getLabels().msg_answer_on_behalf_denied;
+      setStatusMsg({ type: "error", text });
+      return { ok: false, message: text };
     }
     // No on-disk month selected → the upsert target folder would be "" (writes
     // to the workspace root). Bail before touching disk.
-    if (!activeTpl || !selMonth) return;
+    if (!activeTpl || !selMonth) return { ok: false, message: getLabels().ip_msg_save_failed_generic };
     const now  = new Date().toISOString();
     const item: ItemAnswer = {
       xrayImageId, templateId: activeTpl.templateId, templateVersion: activeTpl.version,
@@ -505,7 +488,7 @@ function createSaveAnswerHandler(deps: {
       status: "submitted",
     };
     try {
-      const folder = folderForRow(xrayImageId);
+      const folder = answerFolderForEntry(entry, selMonth);
       const result = forUser === username
         ? await upsertItemAnswer(directoryHandle, folder, forUser, item)
         : await upsertItemAnswerOnBehalf(directoryHandle, folder, forUser, item, username);
@@ -531,6 +514,7 @@ function createSaveAnswerHandler(deps: {
               ? { assignee: forUser, templateId: activeTpl.templateId }
               : { templateId: activeTpl.templateId },
           });
+        recordLocalSubmission(item);
         setAnswers((prev) => [
           ...prev.filter((a) => !(a.xrayImageId === xrayImageId && a.answeredBy === forUser)),
           item,
@@ -543,7 +527,7 @@ function createSaveAnswerHandler(deps: {
         // else: `onSave` resolving does not mean the write succeeded (the
         // failure branch below resolves too), so the panel cannot do this for
         // itself without throwing away the very work it exists to protect.
-        clearAnswerDraft(answerDraftKey(folder, xrayImageId, forUser));
+        clearAnswerDraftAndLegacy(panelDraftKey(entry, selMonth), legacyPanelDraftKey(entry, selMonth));
         setStatusMsg({ type: "ok", text: "تم التقديم." });
         // Tell the OTHER mounted views. Without this a submitted answer stayed
         // invisible to the approval desk, «نتائج فحص الأشعة» and Reports — all
@@ -559,11 +543,22 @@ function createSaveAnswerHandler(deps: {
         } finally {
           ownBroadcastRef.current = false;
         }
-      } else {
-        setStatusMsg({ type: "error", text: userFacingErrorText(result.error, "xrayReferrals:result") });
+        return { ok: true };
       }
+      const text = userFacingErrorText(result.error, "xrayReferrals:result");
+      setStatusMsg({ type: "error", text });
+      // Display only: a failed append is queued by answerStorage (pending
+      // local mirror) and retried in the background. Say so only when this
+      // exact save is really in that queue.
+      const queued = await isAnswerQueuedPending(folder, forUser, item);
+      return { ok: false, message: text, queuedForRetry: queued, queuedSavedAt: queued ? item.lastSavedAt : undefined,
+        // Code for the inline line: carried on the error when there is one, else the
+        // one `formatUserError` already embedded in the Arabic text.
+        errorCode: resolveErrorCode(result.error) ?? result.error.match(/XQ-[A-Z]+-\d+/)?.[0] };
     } catch (error) {
-      setStatusMsg({ type: "error", text: thrownWriteErrorText(error) });
+      const text = thrownWriteErrorText(error);
+      setStatusMsg({ type: "error", text });
+      return { ok: false, message: text };
     }
   };
 }
@@ -747,32 +742,22 @@ function createOpenReassignModal(deps: {
 }
 
 /**
- * The "متابعة العمل" figures. Oversight users in the "الكل" view read the whole
- * workspace; everyone else reads only what is assigned to them. Module-level so
- * the component body stays inside the repo's `max-lines-per-function` budget.
+ * The «متابعة العمل» figures, over EXACTLY the rows the queue table shows: the
+ * picked scope (everyone, one named employee, or the reader's own rows)
+ * narrowed by the active case chip and CertScan chip. It used to read the scope BEFORE the chips
+ * (and, for employees, re-filter every row by username), so picking
+ * «حالات استثنائية» changed the table but not the strip — field report
+ * 2026-09-28. The daily-quota tile is not derived here: it is a property of
+ * the whole assignment and stays unfiltered. Module-level so the component
+ * body stays inside the repo's `max-lines-per-function` budget.
  */
 function computePersonalStats(input: {
-  allEntries: DistributionEntry[];
-  entries: DistributionEntry[];
-  /** The picked SCOPE (everyone, or one named employee), before the case-filter
-   *  chips narrow it — "متابعة العمل" answers "how much work is in the queue I
-   *  am looking at", which a temporary view filter must not silently rewrite.
-   *  DELIBERATE consequence of the employee picker: for an oversight user these
-   *  figures follow the picked employee, so the strip reports THAT person's
-   *  workload, not the reader's. That is the point of picking them, and the
-   *  strip is relabelled to name whose numbers they are (ReferralStatsStrip's
-   *  "employee" scope) rather than left claiming "إحصائياتي". */
-  scopedEntries: DistributionEntry[];
-  canSeeAll: boolean;
-  username: string;
+  source: DistributionEntry[];
   answersMap: Map<string, ItemAnswer>;
   template: TemplateSchema | null;
   templatesById?: ReadonlyMap<string, TemplateSchema>;
 }): PersonalStats {
-  const { allEntries, entries, scopedEntries, canSeeAll, username, answersMap, template, templatesById } = input;
-  const source = canSeeAll
-    ? scopedEntries
-    : (allEntries.length > 0 ? allEntries : entries).filter((entry) => entry.assignedTo === username);
+  const { source, answersMap, template, templatesById } = input;
   const onHold = source.filter((entry) => isOnHoldEntry(entry, answersMap, template, templatesById)).length;
   // isStudyCompleted counts a "لا يوجد صورة" submission as completed too — it
   // answers "is this row touched/done in a generic sense" for row styling, not
@@ -908,15 +893,12 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const [templatesById, setTemplatesById] = useState<Map<string, TemplateSchema>>(new Map());
   const [selEntryId, setSelEntryId] = useState<string | null>(null);
   const [statusMsg, setStatusMsg]   = useState<StatusMsg>(null);
-  const [stageMappings, setStageMappings] = useState<StageAliasMappings | undefined>(undefined);
+  const stageMappings = useWorkspaceStageMappings(directoryHandle);
   const [sampleMaster, setSampleMaster] = useState<SampleMasterData | null>(null);
-  const [replacementDialog, setReplacementDialog] = useState<ReplacementDialogState>(null);
-  const [replacementError, setReplacementError] = useState<string | null>(null);
   // Permissioned oversight users pick WHOSE queue they are looking at — a named
   // employee, or everyone (QUEUE_SCOPE_ALL). The page still opens on the
   // reader's own samples, exactly as the old "المحالة لي" default did.
   const [scopeEmployee, setScopeEmployee] = useState<string>(username);
-  const [replacementBusy, setReplacementBusy] = useState(false);
   const [colPreset, setColPreset]     = useState<ColConfig | undefined>(undefined);
   const [sharedSplitRatio, setSharedSplitRatio] = useState<number | undefined>(undefined);
   const [myQuota, setMyQuota]         = useState<PersonalQuota>(null);
@@ -958,9 +940,6 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         if (selection?.templateId) void applyTemplate(selection.templateId, false);
       })
       .catch(logRejection("xrayReferrals:loadInspectionTemplateSelection"));
-    void loadPopulationConfig(directoryHandle)
-      .then((cfg) => setStageMappings(cfg.stageMappings))
-      .catch(logRejection("xrayReferrals:loadPopulationConfig"));
     void Promise.all([
       loadAdminBrowsePreset(directoryHandle),
       loadUserBrowsePreset(directoryHandle, username),
@@ -1150,6 +1129,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   /** True while the panel is showing a row that has left the queue. */
   const showingRetainedDraft = selEntry === null && retainedEntry !== null;
 
+  const restoredForRef = useRef<string | null>(null); // (user, month) key already auto-restored once
   // Auto-select first entry whenever the list changes and nothing is currently selected
   useEffect(() => {
     if (displayEntries.length === 0) return;
@@ -1160,9 +1140,15 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     // above keeps the panel (and the draft) up, with a banner explaining why.
     // The employee stays in control: any explicit navigation still moves on.
     if (selEntryId != null && dirtyEntryId === selEntryId) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- auto-corrects selection when the display list changes; useMemo cannot accumulate user navigation state
-    setSelEntryId(displayEntries[0].xrayImageId);
-  }, [displayEntries, selEntryId, dirtyEntryId]);
+    const restoreKey = `${username}|${selMonth}`;
+    const remembered = restoredForRef.current === restoreKey ? null : readLastOpenSample(username, selMonth);
+    restoredForRef.current = restoreKey;
+    setSelEntryId(pickAutoSelectId(displayEntries, remembered));
+  }, [displayEntries, selEntryId, dirtyEntryId, username, selMonth]);
+  useEffect(() => { // gated on the restore key above -- avoids writing the old month's id under the new key
+    if (restoredForRef.current !== `${username}|${selMonth}`) return;
+    if (selEntryId) rememberLastOpenSample(username, selMonth, selEntryId);
+  }, [username, selMonth, selEntryId]);
 
   /** Explicit user navigation — the one case where dropping a draft is intended. */
   const selectEntry = useCallback((xrayImageId: string | null): void => {
@@ -1218,14 +1204,13 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     [panelEntry, username, answersMap, canSubmitAnswers, canAnswerOnBehalf]
   );
 
-  const personalStats = useMemo<PersonalStats>(
-    () => computePersonalStats({ allEntries, entries, scopedEntries, canSeeAll, username, answersMap, template: activeTpl, templatesById }),
-    [allEntries, entries, scopedEntries, canSeeAll, username, answersMap, activeTpl, templatesById]
-  );
+  const personalStats = useMemo<PersonalStats>(() => computePersonalStats({ source: displayEntries, answersMap, template: activeTpl, templatesById }),
+    [displayEntries, answersMap, activeTpl, templatesById]);
 
   // Bug (load-token): guards a slow load for a previously-selected month from
   // clobbering a later selection — including the truthy→"" empty transition.
   const loadTokenRef = useRef(0);
+  const localSubmissions = useLocalSubmissionGuard();
   // Boot-progress reporting: only the very first data-fetching pass of this
   // component's lifetime reports to the post-login checklist (bootProgress.ts)
   // -- every later call (a real month switch, which also re-runs the mount
@@ -1260,6 +1245,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     // stale older loads, or a truthy→"" selMonth transition would let an in-flight
     // load commit stale rows over the empty-ready state.
     const token = ++loadTokenRef.current;
+    const loadGeneration = localSubmissions.beginLoad();
     if (!selMonth) return;
     // `silent` is set only by the background/manual data-refresh signal below, never
     // by a real month/user change. Flipping loadState to "loading" unmounts the whole
@@ -1379,7 +1365,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         setPendingReplacementIds(pendingReplacementIds);
         setSampleMaster(sample);
         setMyQuota(quota);
-        setAnswers(answerItems);
+        setAnswers(localSubmissions.settle(answerItems, loadGeneration));
         setLoadState("ready");
       };
 
@@ -1389,8 +1375,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       // for this employee, and nothing further needs reading. `>=` rather than
       // `===` because a mirror can only ever be ahead of a stamp we read a
       // moment earlier, never legitimately behind-but-correct.
-      const mirrorCurrent =
-        !canSeeAll && !!personalMirror && !!logStamp && personalMirror.sourceLogRevision >= logStamp.revision;
+      // Revision AND event set (the projection stamp can lag the durable events).
+      const mirrorCurrent = !canSeeAll && !!personalMirror && !!logStamp &&
+        (await isMirrorTrustedForEvents(directoryHandle, selMonth, personalMirror, logStamp.revision));
       // `quota` is OPTIONAL on the mirror by contract (see EmployeeMirrorQuota):
       // a mirror written before that field existed has none, and the reader
       // must fall back to the derived file rather than render "0 per day".
@@ -1490,7 +1477,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       }
       setLoadState("error");
     }
-  }, [directoryHandle, selMonth, username, canSeeAll]);
+  }, [directoryHandle, selMonth, username, canSeeAll, localSubmissions]);
   /* eslint-enable react-hooks/preserve-manual-memoization */
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load; setState fires inside loadData's async callback, not synchronously in the effect body
@@ -1520,9 +1507,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   // below already carries for its own refs.
   // eslint-disable-next-line react-hooks/refs -- see above
   const handleSave = createSaveAnswerHandler({
-    directoryHandle, folderForRow, username, role, activeTpl, selMonth,
+    directoryHandle, username, role, activeTpl, selMonth,
     canSubmitAnswers, canAnswerOnBehalf, setAnswers, setStatusMsg,
-    ownBroadcastRef: ownAnswerBroadcastRef, setDirtyEntryId,
+    ownBroadcastRef: ownAnswerBroadcastRef, setDirtyEntryId, recordLocalSubmission: localSubmissions.record,
   });
 
   // Both reopen handlers live at module scope (createReopenHandlers, above) to
@@ -1547,267 +1534,14 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     reload: loadData,
     ownBroadcastRef: ownAnswerBroadcastRef,
   });
-  /**
-   * The sample master + every-employee entry set the replacement dialog needs.
-   * Returns what `loadData` already put in state when the full read ran, and
-   * pays for it on demand when the mirror fast path skipped it (a null
-   * `sampleMaster` is precisely that signal — the fast path clears it, and the
-   * full path only leaves it null when the month genuinely has no sample, in
-   * which case this correctly returns null and the caller bails as before).
-   */
-  async function ensureReplacementContext(): Promise<
-    { sample: SampleMasterData; entries: DistributionEntry[] } | null
-  > {
-    if (sampleMaster) return { sample: sampleMaster, entries: allEntries };
-    if (!selMonth) return null;
-    try {
-      const sample = await loadSampleMaster(directoryHandle, selMonth);
-      if (!sample) return null;
-      // STRICT: this exclusion set must be EVERY employee's rows, so a failed read must not fold to `[]` and offer a row someone owns.
-      const dist = await loadOrDeriveDistributionCurrentStrictForRead(directoryHandle, selMonth, (sample.rows ?? []) as PreparedPopulationRow[]);
-      setSampleMaster(sample);
-      // Ad-hoc entries live outside this month's derivation, so carry the ones
-      // already loaded rather than dropping them from the exclusion set.
-      const merged = [...(dist?.entries ?? []), ...allEntries.filter(isAdhocEntry)];
-      // BOTH halves must be committed, not just the sample. The short-circuit at
-      // the top of this function pairs a cached `sampleMaster` with component
-      // state `allEntries`; committing only the sample meant every subsequent
-      // open re-paired the fresh sample with the mirror-only entry list, so the
-      // exclusion set silently lost every other employee's rows and the dialog
-      // offered rows they already owned.
-      setAllEntries(merged);
-      return { sample, entries: merged };
-    } catch (error) {
-      logError("xrayReferrals:ensureReplacementContext", error);
-      return null;
-    }
-  }
-
-  async function openReplacementDialog(entry: DistributionEntry): Promise<void> {
-    if (!canRequestReplacement) { setStatusMsg({ type: "error", text: "لا تملك صلاحية طلب الاستبدال، أو أن مساحة العمل للقراءة فقط." }); return; }
-    // pendingReplacementIds, not entry.status — see canOpenReplacementDialog's doc comment.
-    if (pendingReplacementIds.has(entry.xrayImageId)) { setStatusMsg({ type: "error", text: "يوجد طلب استبدال قيد الموافقة لهذه العينة بالفعل." }); return; }
-    if (!selMonth) return;
-    // Design B step 3: on the mirror fast path `loadData` reads neither
-    // `sample.master.json` nor the workspace-wide derivation, so both are
-    // resolved HERE, on demand. They are genuinely needed and cannot be
-    // approximated from the mirror: `sampleMaster` is the drawn-row set the
-    // candidate pool is filtered against, and `allEntries` must be EVERY
-    // employee's entries — an exclusion set built from this employee's mirror
-    // alone would offer rows another employee already owns.
-    const context = await ensureReplacementContext();
-    if (!context) return;
-    // Reads only the matching replacement-index bucket when one exists for
-    // this month, instead of the full population.final.json — falls back to
-    // a full read (and rebuilds the index in the background) for months
-    // processed before this index existed.
-    let candidates: Awaited<ReturnType<typeof getReplacementCandidatesIndexed>>;
-    try {
-      candidates = await getReplacementCandidatesIndexed(
-        directoryHandle, selMonth, entry, context.sample, context.entries, stageMappings, username
-      );
-    } catch (error) {
-      logError("xrayReferrals:getReplacementCandidatesIndexed", error);
-      // T-08: an empty pool would assert "no eligible replacement exists" — a
-      // claim about the data that an unreadable population cannot support.
-      if (error instanceof PopulationUnreadableError) {
-        setStatusMsg({ type: "error", text: getLabels().msg_population_unreadable });
-        return;
-      }
-      candidates = { recommended: [], all: [] }; // dialog will show empty candidates gracefully
-    }
-    setReplacementError(null);
-    setReplacementDialog({
-      entry,
-      ...candidates,
-      // Generated once per dialog open, not per confirm click — see the type's
-      // own doc comment (B-XQIO032 peer finding: this used to be regenerated
-      // inline on every `handleReplace` call, so a retry after a failed write
-      // could never be recognized as a replay by appendReplacementToEmployee's
-      // requestId dedup, and risked writing a duplicate request).
-      requestId: `rep-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    });
-  }
-
-  async function handleReplace(
-    entry: DistributionEntry,
-    replacement: ReplacementIndexRow,
-    reason: string,
-    fromRecommended: boolean,
-    /** `replacementDialog.requestId` — see that type's own doc comment. Passed
-     *  explicitly rather than read from the closure, matching how `entry`
-     *  itself already arrives as a param instead of via `replacementDialog.entry`. */
-    requestId: string
-  ): Promise<void> {
-    if (!canRequestReplacement) {
-      setStatusMsg({ type: "error", text: "لا تملك صلاحية طلب الاستبدال، أو أن مساحة العمل للقراءة فقط." });
-      return;
-    }
-    if (!selMonth || replacementBusy) return;
-
-    setReplacementBusy(true);
-    setReplacementError(null);
-
-    try {
-      if (fromRecommended) {
-        // Freshness re-check (mirror approveReferral): the rendered candidate
-        // list can be seconds stale on a shared folder. Reload the live state
-        // and confirm (a) the dead row is still owned by the same employee and
-        // still replacement-eligible, and (b) the chosen replacement is not
-        // already sampled or owned — otherwise a concurrent action already used
-        // one side and committing would double-assign / orphan.
-        const rowFolder = folderForRow(entry.xrayImageId);
-        const freshSample = await loadSampleMaster(directoryHandle, rowFolder);
-        const freshRows = (freshSample?.rows ?? []) as PreparedPopulationRow[];
-        const freshDist = await loadOrDeriveDistributionCurrent(directoryHandle, rowFolder, freshRows);
-        const STALE_MSG = "البيانات تغيّرت، حدّث الصفحة";
-
-        const freshDead = freshDist?.entries.find((e) => e.xrayImageId === entry.xrayImageId);
-        const deadStillEligible =
-          !!freshDead &&
-          freshDead.assignedTo === entry.assignedTo &&
-          (freshDead.status === "pending" || freshDead.status === "replacement-requested");
-
-        // "resume-partial" (an earlier attempt appended the sample row for this
-        // very substitution and then failed to write the events — XQ-DIST-005)
-        // must pass: retrying with the same candidate is the designed recovery,
-        // and the dialog stays open with the same candidate for exactly that.
-        const replacementTaken =
-          classifyReplacementRowAvailability({
-            replacementXrayImageId: replacement.xrayImageId,
-            deadXrayImageId: entry.xrayImageId,
-            sample: { rows: freshRows, replacedRowIds: freshSample?.replacedRowIds },
-            entries: freshDist?.entries,
-          }) === "taken";
-
-        if (!deadStillEligible || replacementTaken) {
-          setReplacementError(STALE_MSG);
-          setStatusMsg({ type: "error", text: STALE_MSG });
-          await loadData({ silent: true });
-          return;
-        }
-
-        // The candidate list only ever carries the slim replacement-index
-        // projection (see replacementIndexTypes.ts) — the sample master needs
-        // the FULL population row, so resolve it here by id. This is the one
-        // full-population read on the immediate-replace path, and it's paid
-        // for exactly one row (the chosen candidate), never the whole pool.
-        //
-        // The read still happens; the PARSE of it does not happen here (1.12).
-        // Parsing a large month on the main thread is the freeze users report on
-        // this exact click, so the file text goes to the query worker instead and
-        // only the one matching row comes back. A miss and a failure are both
-        // treated as "stale", exactly as the previous inline `.find()` was.
-        const lookup = await findPopulationRowById(directoryHandle, selMonth, replacement.xrayImageId);
-        if (isPopulationReadFailure(lookup)) {
-          const text = getLabels().msg_population_unreadable;
-          setReplacementError(text);
-          setStatusMsg({ type: "error", text });
-          return;
-        }
-        const fullReplacementRow = lookup.ok ? lookup.row ?? undefined : undefined;
-        if (!fullReplacementRow) {
-          setReplacementError(STALE_MSG);
-          setStatusMsg({ type: "error", text: STALE_MSG });
-          await loadData({ silent: true });
-          return;
-        }
-
-        // Immediate replacement — no approval needed.
-        const result = await executeReplacement({
-          directoryHandle,
-          // The same store the freshness re-check above read from. Routed on
-          // `selMonth` this appended a `replaced` event for an ADHOC-* id into a
-          // real month's immutable log (which its fold can never interpret),
-          // appended a real population row to an already-drawn sample master,
-          // and left the ad-hoc row live — the employee owned both.
-          monthFolderName: rowFolder,
-          deadEntry: entry,
-          replacementRow: fullReplacementRow,
-          reason,
-          eventBy: username,
-          stageMappings,
-        });
-        if (!result.ok) {
-          setReplacementError(userFacingErrorText(result.error, "xrayReferrals:replace"));
-          setStatusMsg({ type: "error", text: userFacingErrorText(result.error, "xrayReferrals:result") });
-          return;
-        }
-        if (result.ok) setSampleMaster(result.updatedSample);
-        recordAction(directoryHandle, username, role, "replacement-applied", { monthFolderName: rowFolder, target: entry.xrayImageId, details: { replacement: replacement.xrayImageId, employee: entry.assignedTo, reason } });
-        setReplacementDialog(null);
-        setStatusMsg({ type: "ok", text: "تم استبدال العينة وإسناد البديل." });
-        // Silent: this refresh follows a successful action already reflected in
-        // local state (setSampleMaster/setReplacementDialog above) — it must
-        // update the underlying rows in place, not flash the loading state or
-        // force-close the panel the way the periodic/manual refresh signal would
-        // if it weren't passed { silent: true } either (see loadData's own
-        // docblock further up).
-        await loadData({ silent: true });
-        // Deliberate navigation to the replacement row — the old row's panel is
-        // being closed on purpose, so any draft protection for it is dropped too.
-        selectEntry(replacement.xrayImageId);
-      } else {
-        // Non-recommended — requires supervisor approval.
-        // Store only the id (not the full row) to avoid stale copies.
-        const request: ReplacementRequest = {
-          // Stable across retries of this same confirm click (the dialog's own
-          // requestId, generated once when it opened) — never regenerated here,
-          // so a retry after a failed write is recognized as a replay by
-          // appendReplacementToEmployee's requestId dedup instead of writing a
-          // second request. See ReplacementDialogState's own doc comment.
-          requestId,
-          // Must match the folder the request is appended to (below): every
-          // distribution read/write approveReplacement performs is keyed off
-          // this field, so a record stored in the ad-hoc store while naming the
-          // selected month would apply the replacement to the wrong population.
-          monthFolderName: folderForRow(entry.xrayImageId),
-          employeeUsername: entry.assignedTo,
-          originalXrayImageId: entry.xrayImageId,
-          replacementXrayImageId: replacement.xrayImageId,
-          reason,
-          requestedAt: new Date().toISOString(),
-          requestedBy: username,
-          status: "pending",
-        };
-        const result = await appendReplacementRequest(directoryHandle, folderForRow(entry.xrayImageId), request);
-        if (!result.ok) {
-          setReplacementError(userFacingErrorText(result.error, "xrayReferrals:replace"));
-          setStatusMsg({ type: "error", text: userFacingErrorText(result.error, "xrayReferrals:result") });
-          return;
-        }
-        recordAction(directoryHandle, username, role, "replacement-requested", { monthFolderName: request.monthFolderName, target: request.requestId, details: { original: entry.xrayImageId, replacement: replacement.xrayImageId, employee: entry.assignedTo } });
-        setReplacementDialog(null);
-        setStatusMsg({ type: "ok", text: "تم إرسال طلب الاستبدال — بانتظار موافقة المشرف." });
-        // Silent for the same reason as the recommended-replacement branch above —
-        // this is a background refresh after an already-successful write, not a
-        // month/user change, so it must not flash the loading state or force-close
-        // the currently open inspection panel.
-        await loadData({ silent: true });
-      }
-    } catch (error) {
-      // This block used to be `try { … } finally { … }` with no catch at all.
-      // executeReplacement can throw rather than return `{ ok: false }` — its
-      // month-lock gate and its directory resolution both run outside
-      // appendDistributionEvents' inner try (distributionStorage.ts) — and so
-      // can loadSampleMaster / loadMonthPopulationFinal above. Every one of
-      // those became an unhandled promise rejection that left the user staring
-      // at a dialog with no message and no idea whether the replacement had
-      // been applied. Surface it in Arabic and keep the raw detail in the
-      // admin error log.
-      let text: string;
-      if (error instanceof MonthClosedError) {
-        text = getLabels().msg_month_closed_write_blocked;
-      } else {
-        logError("xrayReferrals:handleReplace", error);
-        text = getLabels().msg_unexpected_write_error;
-      }
-      setReplacementError(text);
-      setStatusMsg({ type: "error", text });
-    } finally {
-      setReplacementBusy(false);
-    }
-  }
+  const {
+    replacementDialog, setReplacementDialog, replacementError, setReplacementError, replacementBusy,
+    openReplacementDialog, handleReplace,
+  } = useReplacementFlow({
+    directoryHandle, username, role, selMonth, canRequestReplacement, sampleMaster, allEntries,
+    pendingReplacementIds, stageMappings, setSampleMaster, setAllEntries, setStatusMsg,
+    folderForRow, loadData, selectEntry,
+  });
 
   // ── Selection helpers ──────────────────────────────────────────────────────
   const { toggleSelect, selectAll, clearSelection } = createQueueSelection(setSelectedIds);
@@ -2105,7 +1839,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               // Neither can bounce a reviewer off an open row: resetToken moves
               // PAGING only, never the selection (`expandedKey`/`selEntryId`
               // are untouched).
-              resetToken={`${selMonth}::${scopeEmployee}::${caseFilter.value}`}
+              resetToken={`${selMonth}::${scopeEmployee}::${caseFilter.value}::${caseFilter.certScan}`}
               exportFileName={`صور الأشعة المحالة - ${selMonth || "كل الأشهر"}.xlsx`}
               expandedKey={selEntryId}
               onRowClick={(e) => selectEntry(e.xrayImageId)}
@@ -2113,7 +1847,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               // Every role that can open this page sees the case chips (an
               // ordinary employee is their primary user); the scope picker
               // stays oversight-only, as before.
-              toolbarStart={<CaseFilterSwitcher value={caseFilter.value} counts={caseFilter.counts} onChange={caseFilter.setValue} />}
+              toolbarStart={<CaseFilterBar state={caseFilter} />}
               toolbarEndExtra={
                 <XrQueueToolbarExtras
                   canSeeAll={canSeeAll}
@@ -2148,7 +1882,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                   template={resolveTemplateForAnswer(selAnswer, templatesById, activeTpl)}
                   savedAnswer={selAnswer}
                   readonly={panelAuthoring.readonly}
-                  onClose={() => selectEntry(null)}
+                  onClose={() => { selectEntry(null); forgetLastOpenSample(username, selMonth); }}
                   // Draft protection (P0): the panel tells us it now holds
                   // unsaved input, so a background refresh that removes this
                   // row keeps it on screen instead of swapping the employee to
@@ -2166,14 +1900,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                   onNextSample={() => { if (nextNavEntry) navigateToSample(nextNavEntry.xrayImageId); }}
                   hasPrevSample={prevNavEntry !== undefined}
                   hasNextSample={nextNavEntry !== undefined}
-                  draftKey={answerDraftKey(
-                    folderForRow(panelEntry.xrayImageId),
-                    panelEntry.xrayImageId,
-                    panelEntry.assignedTo
-                  )}
-                  onSave={(ans) =>
-                    handleSave(panelEntry.xrayImageId, ans, panelEntry.assignedTo)
-                  }
+                  draftKey={panelDraftKey(panelEntry, selMonth)}
+                  legacyDraftKey={legacyPanelDraftKey(panelEntry, selMonth)}
+                  onSave={(ans) => handleSave(panelEntry, ans)}
                   onReplace={
                     canOpenReplacementDialog(panelEntry, username, canRequestReplacement, pendingReplacementIds)
                       ? openReplacementDialog
@@ -2231,8 +1960,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
             }
             scopeEmployeeName={pickedScopeName}
             showingRetainedDraft={showingRetainedDraft}
-            caseFilterValue={caseFilter.value}
-            caseFilterCounts={caseFilter.counts}
+            caseFilter={caseFilter}
             labels={L}
             table={tableEl}
           />

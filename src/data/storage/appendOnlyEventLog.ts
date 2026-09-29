@@ -20,16 +20,25 @@
 import type { DirectoryHandleLike } from "./fileSystemAccess";
 import { createSimpleHasher } from "./jsonEnvelope";
 import { listDirectoryEntries, readSegmentTails } from "./directoryScan";
-import { withResourceLock } from "./webLocks";
-import { logCodedError, tagError, taggedError, type ErrorCode } from "./errorCodes";
+import { directoryResourceKey, withResourceLock } from "./webLocks";
+import { logError } from "./errorLogger";
+import {
+  classifyFileSystemError,
+  logCodedError,
+  tagError,
+  taggedError,
+  type ErrorCode,
+} from "./errorCodes";
+import { nextRetryDelayMs, type OperationDeadline } from "./operationDeadline";
 import {
   TRANSIENT_WRITE_RETRY_DELAYS_MS,
   VERIFY_READBACK_RETRY_DELAYS_MS,
+  isLockContentionError,
   isNotFoundError,
   isNotReadableError,
+  isSnapshotStaleError,
   isTransientWriteError,
   logExhaustedNotFound,
-  retryTransientWrite,
   waitFor,
 } from "./transientFileErrors";
 
@@ -38,10 +47,32 @@ import {
 /**
  * Who is writing, and where the write is allowed to be memoized to.
  *
- * `deviceId` is a stable per-machine id; `sessionId` is fresh per app session.
- * Together they are the unit of write uniqueness that replaces per-event ids:
- * two machines — or two tabs on the same machine — never share a segment file,
- * so concurrent writers never target the same file.
+ * `deviceId` is a stable per-machine id; `sessionId` is fresh per app session
+ * for a NON-stable writer (distribution) — so two machines, or two tabs on
+ * the same machine, never share a segment file there, and concurrent writers
+ * never target the same file.
+ *
+ * A `stable` writer (answers, A1) breaks that per-tab half of the invariant
+ * on purpose: `sessionId` is the persisted chain id, so two tabs of the SAME
+ * browser + user + month DO share one segment file across the page's whole
+ * lifetime, not just one load. Safety there does not come from file
+ * exclusivity — it comes from `withResourceLock` in `appendEventSegment`
+ * serialising every append to that chain (including across tabs, since Web
+ * Locks are per-origin, not per-tab) plus the under-lock re-read the stable
+ * writer always does before writing (see `knownFor`/`readExistingSegment`):
+ * whichever tab's append runs first reads and preserves the other's lines,
+ * because it never has a stale in-memory view to trust instead of a fresh
+ * read.
+ *
+ * R9: this cross-tab argument depends on the REAL `navigator.locks` being
+ * available. `withResourceLock` (`webLocks.ts`) falls back to a per-tab
+ * promise chain when it is not — that fallback serialises only WITHIN one
+ * tab, not across tabs (see its own "serializing within this thread"
+ * comment). On a browser/context without `navigator.locks`, two tabs of the
+ * same stable chain are therefore not actually serialised against each
+ * other by the lock; the under-lock re-read still narrows the window (each
+ * tab still reads immediately before it writes) but cannot, on its own,
+ * rule out both tabs racing to read-then-write in an interleaved order.
  *
  * `scopeId` is the caller's stable workspace+month identity. See
  * `writtenSegmentsThisSession` below for why the memo key needs it.
@@ -50,6 +81,34 @@ export type SegmentWriterIdentity = {
   deviceId: string;
   sessionId: string;
   scopeId?: string;
+  /**
+   * True for a chain that outlives the page (answers, A1): its segments may
+   * already exist on disk before this session writes them. See `knownFor` in
+   * `appendEventSegment`. Omitted/false (distribution) keeps the per-session
+   * rules exactly as they were.
+   */
+  stable?: boolean;
+};
+
+/** Per-call options for `appendEventSegment`. */
+export type AppendEventSegmentOptions = {
+  /**
+   * The user action's total budget. Every inner ladder (pre-append re-read,
+   * write, post-close verify) stops sleeping once it is spent, so ONE attempt
+   * can no longer outlive the whole action (A1). Omitted: unbounded, as before.
+   */
+  deadline?: OperationDeadline;
+  /**
+   * File names a SUCCESSFUL listing of the events directory showed a moment ago
+   * (the caller's read of the whole log, taken just before deciding to append).
+   * A `stable` writer never appends below the highest seq of its OWN chain that
+   * appears here: a second tab that rotated, a memo that is behind, or a
+   * discovery listing that threw would otherwise put this batch into a segment
+   * readers already consider sealed (S3) — see `answerStorage.ts`. Costs no I/O:
+   * it only raises the starting seq, and is ignored for non-stable writers
+   * (their chain is unique to this page load) and when it shows nothing higher.
+   */
+  listedSegmentNames?: readonly string[];
 };
 
 /** Contexts and error codes the consumer wants this module's failures reported under. */
@@ -355,20 +414,25 @@ function parseOwnSegmentSeq(name: string, base: string, segmentSuffix: string): 
 }
 
 /**
- * Highest sequence this writer chain already has on disk — how a writer that
- * lost its in-memory position (first append of a session, a workspace switch,
- * a module reload) resumes at the right place instead of overwriting.
+ * Highest sequence this writer chain has on disk, per ONE directory listing —
+ * how a writer that lost its in-memory position (first append of a session, a
+ * workspace switch, a module reload) resumes at the right place.
  *
- * A listing failure resolves to 0 rather than throwing: the append that follows
- * always re-reads the segment it lands on before writing it (see
- * `appendEventSegment`), so the worst case of an under-read listing is
- * appending to an already-full segment, never losing a line.
+ * `listed: true` means the listing itself succeeded (even if it found nothing,
+ * so `highest` legitimately stays 0). `listed: false` means the listing THREW:
+ * `highest` is then a meaningless 0, NOT evidence of anything, and the caller
+ * must never read it as "nothing exists above this" — a thrown listing proves
+ * no absence. `appendEventSegment` builds its `highestReliableSeq` (patience
+ * threshold) and `listedHighestSeq` (the only source of trusted absence above
+ * a seq) from this flag.
  */
+type OwnSeqDiscovery = { highest: number; listed: boolean };
+
 async function discoverHighestOwnSeq(
   eventsDir: DirectoryHandleLike,
   base: string,
   segmentSuffix: string
-): Promise<number> {
+): Promise<OwnSeqDiscovery> {
   try {
     let highest = 0;
     for (const entry of await listDirectoryEntries(eventsDir)) {
@@ -376,9 +440,9 @@ async function discoverHighestOwnSeq(
       const seq = parseOwnSegmentSeq(entry.name, base, segmentSuffix);
       if (seq !== null && seq > highest) highest = seq;
     }
-    return highest;
+    return { highest, listed: true };
   } catch {
-    return 0;
+    return { highest: 0, listed: false };
   }
 }
 
@@ -576,19 +640,56 @@ export function __resetAppendOnlyEventLogMemosForTests(): void {
  */
 type ExistingSegment = { text: string; reliable: boolean };
 
+/**
+ * How `readExistingSegment` should treat a name — WHICH LADDER and WHETHER
+ * ABSENCE MAY BE TRUSTED are two separate questions (fix round 2, N1):
+ * - `known`: this chain provably wrote/lists the name -> patient ladder, and an
+ *   exhausted read is never a trusted absence.
+ * - `distrust`: the name is "claimed" only because a directory listing THREW
+ *   (no evidence either way). It gets the FAST ladder (so a broken listing
+ *   cannot spin for minutes) but NotFound is retried on it and, once
+ *   exhausted, is `reliable: false` — a thrown listing never makes an absent
+ *   segment trustworthy, or a stale NotFound would overwrite a real segment.
+ * - neither: absence is trusted (a listing SUCCEEDED without the name, or the
+ *   seq is above the highest one a successful listing showed, or non-stable).
+ */
+type SegmentClaim = {
+  known: boolean;
+  distrust: boolean;
+  /**
+   * Hop-after-unreadable only: retry NotFound on the FAST ladder, then trust
+   * the absence. Set by `asHopClaim` when the previous segment was already
+   * unreadable, so a single stale NotFound on this target (another tab's, or
+   * this tab's pre-reload, segment hidden by a stale but successful listing)
+   * is re-probed (~630 ms worst case, only on an already-anomalous save)
+   * before being believed. Never set on the healthy path.
+   */
+  retryAbsence?: boolean;
+};
+
+/** Mark a claim as belonging to a hop taken because the previous segment was unreadable. */
+function asHopClaim(claim: SegmentClaim): SegmentClaim {
+  return claim.known || claim.distrust ? claim : { ...claim, retryAbsence: true };
+}
+
 async function readExistingSegment(
   eventsDir: DirectoryHandleLike,
   fileName: string,
-  writtenKey: string,
-  diagnostics: EventLogDiagnostics
+  claim: SegmentClaim,
+  diagnostics: EventLogDiagnostics,
+  deadline: OperationDeadline | undefined
 ): Promise<ExistingSegment> {
-  const knownWritten = writtenSegmentsThisSession.has(writtenKey);
+  const knownWritten = claim.known;
   for (let attempt = 0; ; attempt += 1) {
     try {
       const existingHandle = await eventsDir.getFileHandle(fileName, { create: false });
       return { text: await (await existingHandle.getFile()).text(), reliable: true };
     } catch (error) {
-      const transient = knownWritten ? isTransientWriteError(error) : isNotReadableError(error);
+      const transient = knownWritten
+        ? isTransientWriteError(error)
+        : claim.distrust || claim.retryAbsence
+          ? isNotReadableError(error) || isNotFoundError(error)
+          : isNotReadableError(error);
       // Patient ladder only when this session KNOWS it wrote the segment, so
       // absence is provably a stale view. That case also has teeth: exhausting
       // it falls back to "" and this append then rewrites the file without
@@ -599,26 +700,71 @@ async function readExistingSegment(
         ? VERIFY_READBACK_RETRY_DELAYS_MS
         : TRANSIENT_WRITE_RETRY_DELAYS_MS;
       if (transient && attempt < ladder.length) {
-        await waitFor(ladder[attempt]!);
-        continue;
+        const delay = nextRetryDelayMs(ladder[attempt]!, deadline);
+        if (delay !== null) {
+          await waitFor(delay);
+          continue;
+        }
+        // The ladder had rungs left; we stopped only because the caller's
+        // deadline ran out. Falls through to the `knownWritten || !isNotFoundError`
+        // check below exactly like a rung-exhausted stop does — R1: that rule
+        // already covers "deadline ran out on a knownWritten segment" (knownWritten
+        // is true, so the check is true regardless of the error), so no separate
+        // deadline-specific branch is needed here.
       }
-      if (knownWritten && isNotFoundError(error)) {
-        // Retries exhausted on a segment this session wrote. Fall back to ""
-        // (the long-standing behavior) rather than hard-failing, because the
-        // memo can be stale after a workspace switch — but record it, since
-        // the alternative reading is that this append is about to rewrite the
-        // file without lines that are still on the share.
-        await logExhaustedNotFound(
-          diagnostics.rereadContext,
-          eventsDir,
-          fileName,
-          attempt + 1,
-          error
-        );
+      // E1 (production analysis: .superpowers/sdd/errorlog-2026-09-28/
+      // unreadable-segments.md): this used to only treat an EXHAUSTED
+      // `knownWritten && isNotFoundError` as unreliable. A `NotReadableError`
+      // or `InvalidStateError` past the ladder fell through to the
+      // "fresh, no segment yet" branch below and came back `reliable: true`
+      // — so the caller happily REWROTE an existing segment (whose bytes are
+      // still on the share, just not readable through this error) with only
+      // the new batch, silently truncating everything already in it. With a
+      // stable chain (A1) the first append after every reload targets a
+      // segment that is very likely non-empty, which makes this reachable on
+      // an ordinary reload rather than only on some rare edge case — so any
+      // exhausted ladder for a writer that HAS a prior claim on this name
+      // (knownWritten), or ANY non-`NotFoundError` outcome regardless of
+      // `knownWritten`, must come back unreliable and force a rotation
+      // instead. Only a `NotFoundError` on a name nothing has ever claimed
+      // stays a genuine, reliable "no segment yet" observation. Applies to
+      // every writer, stable or not — the bug was in the shared mechanics.
+      if (knownWritten || claim.distrust || !isNotFoundError(error)) {
+        // Retries exhausted. Fall back to "" (the long-standing behavior for
+        // the covered case) rather than hard-failing, because the memo can be
+        // stale after a workspace switch — but record it, and record what
+        // kind of error this was, since the alternative reading is that this
+        // append is about to rewrite the file without lines that are still on
+        // the share. `logExhaustedNotFound` runs its NotFound-specific
+        // directory probe (and its "NotFoundError persisted…" message) only
+        // when the error genuinely IS one; a NotReadableError/InvalidStateError
+        // gets a plain log entry instead — `logError` already records the
+        // DOMException's own `name`, which is the detail that matters here.
+        if (isNotFoundError(error)) {
+          await logExhaustedNotFound(
+            diagnostics.rereadContext,
+            eventsDir,
+            fileName,
+            attempt + 1,
+            error
+          );
+        } else {
+          logError(diagnostics.rereadContext, error);
+        }
         return { text: "", reliable: false };
       }
       // No prior content for this writer session yet — start from empty. This
       // IS an observation: a fresh writer session legitimately has no segment.
+      //
+      // Residual hazard: this still trusts a `NotFoundError` on an unclaimed
+      // name at face value, and for a `stable` writer `knownFor` first trusts
+      // a directory LISTING as proof of "claimed". A listing that is itself
+      // stale (entry not yet visible) combined with a `getFileHandle` that
+      // also still reports `NotFoundError` looks identical to "genuinely
+      // never written" — both paths agree on `reliable: true`. Nothing here
+      // can distinguish that combination from the real fresh-segment case; it
+      // is bounded by the same share-visibility-lag assumption `knownFor`
+      // already accepts.
       return { text: "", reliable: true };
     }
   }
@@ -658,13 +804,22 @@ async function verifySegmentSize(
   expectedBytes: number,
   /** Whether the pre-append re-read observed the file rather than falling back. */
   baselineReliable: boolean,
-  diagnostics: EventLogDiagnostics
+  diagnostics: EventLogDiagnostics,
+  deadline: OperationDeadline | undefined
 ): Promise<SegmentVerification> {
   // The patient ladder: this reads back a segment whose `close()` already
   // resolved, so it provably exists and only the share's view is stale. Giving
   // up in ~630 ms was turning completed month-save writes into reported failures.
   for (let attempt = 0; ; attempt += 1) {
-    const retriesLeft = attempt < VERIFY_READBACK_RETRY_DELAYS_MS.length;
+    const ladderDelay =
+      attempt < VERIFY_READBACK_RETRY_DELAYS_MS.length ? VERIFY_READBACK_RETRY_DELAYS_MS[attempt]! : null;
+    // F15: the very first retry always happens even if the deadline is
+    // already spent by the time we get here, so a merely-STALE size read (SMB
+    // visibility lag) gets one more look instead of being reported as a fatal
+    // mismatch on the strength of a single observation. Only later retries are
+    // gated by the remaining budget.
+    const delay = ladderDelay === null ? null : attempt === 0 ? ladderDelay : nextRetryDelayMs(ladderDelay, deadline);
+    const retriesLeft = delay !== null;
     let observedSize: number;
     try {
       const verifyHandle = await eventsDir.getFileHandle(fileName, { create: false });
@@ -699,7 +854,7 @@ async function verifySegmentSize(
         logCodedError(diagnostics.verifyContext, diagnostics.unverifiedCode, error);
         return "unverified";
       }
-      await waitFor(VERIFY_READBACK_RETRY_DELAYS_MS[attempt]!);
+      await waitFor(delay ?? 0);
       continue;
     }
     if (!retriesLeft) {
@@ -710,8 +865,278 @@ async function verifySegmentSize(
         diagnostics.sizeMismatchCode
       );
     }
-    await waitFor(VERIFY_READBACK_RETRY_DELAYS_MS[attempt]!);
+    await waitFor(delay ?? 0);
   }
+}
+
+/* ────────────────── rotate away from a blocked replace (E1b) ────────────── */
+
+/**
+ * At most this many attempts against the SAME target when the write's
+ * `write`/`close` step fails with `InvalidStateError` or
+ * `NoModificationAllowedError` — i.e. `close()`'s swap→target replace was
+ * refused. R8(b): `NotReadableError`, and either of those same two error
+ * names at the earlier `getFileHandle`/`createWritable` steps (before any
+ * replace was even attempted), take the patient ladder instead — see
+ * `writeSegmentOnce`'s own doc comment for why only `write`/`close` counts.
+ *
+ * This is deliberately much shorter than `VERIFY_READBACK_RETRY_DELAYS_MS`
+ * (the ladder still used for a `NotFoundError` on this same step, and for the
+ * pre-append re-read of a segment this session already wrote). The production
+ * root cause this ladder exists for (see
+ * `.superpowers/sdd/errorlog-2026-09-28/answer-save-invalidstate.md`) is that
+ * EVERY retry — every inner rung, every `casLoop` attempt — targets the exact
+ * same file name, because `seq` only advances on a successful write. When the
+ * share refuses to replace that one file (another machine holding it open
+ * without `FILE_SHARE_DELETE`, a denied delete, a delete-pending state), no
+ * amount of patience against the SAME name helps: ~27 identical failed
+ * `close()` calls were observed over ~34 s in production, and every later save
+ * in the page session failed the same way. One length here — [20] — gives the
+ * ordinary case (a reader briefly holding the file, releasing it within tens
+ * of milliseconds) a real second chance, and then hands off to rotation, which
+ * is the actual fix: a fresh segment has no reader contending for it.
+ */
+const SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS = [20] as const;
+
+/** Which step inside one write attempt threw — for diagnostics only. */
+type SegmentWriteStep = "getFileHandle" | "createWritable" | "write" | "close";
+
+/** A write attempt that exhausted `SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS` on a blocked-replace error. */
+type BlockedSegmentWrite = {
+  step: SegmentWriteStep;
+  attempts: number;
+  error: unknown;
+};
+
+/**
+ * One segment WRITE (create-or-open, `createWritable`, `write`, `close`),
+ * with three independently-laddered retry behaviours depending on how it
+ * failed:
+ *
+ * - `NotFoundError` — unrelated to a blocked REPLACE (that always means the
+ *   target already existed); keeps the existing patient
+ *   `VERIFY_READBACK_RETRY_DELAYS_MS` ladder and existing exhaustion handling
+ *   (`logExhaustedNotFound`, then rethrow) untouched.
+ * - `InvalidStateError` / `NoModificationAllowedError` — these are the two
+ *   shapes Chromium actually raises for a REFUSED REPLACE at the `write`/
+ *   `close` step (see `writeSegmentOnce`'s and the module's own evidence-doc
+ *   citations). The short `SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS` ladder.
+ *   Once that's spent (by rungs OR by the deadline — the caller reacts to the
+ *   failure itself, not to whether the deadline happened to still have
+ *   budget), this returns a `BlockedSegmentWrite` instead of throwing, so the
+ *   caller can decide to rotate rather than have the whole append fail.
+ * - R8(b): `NotReadableError` is deliberately EXCLUDED from the rotate-on-
+ *   blocked-replace path, even though it is otherwise a "transient write"
+ *   error (`isTransientWriteError`). It typically surfaces at `getFileHandle`/
+ *   `createWritable` — i.e. before any replace was even attempted — and is
+ *   not evidence that THIS target's replace is being refused, just that it is
+ *   briefly unreadable. Rotating away from it would abandon a perfectly good
+ *   segment on a transient hiccup. It gets the same patient
+ *   `VERIFY_READBACK_RETRY_DELAYS_MS` ladder as `NotFoundError` instead.
+ * - Any other, non-transient error rethrows immediately, exactly as before.
+ */
+async function writeSegmentOnce(
+  eventsDir: DirectoryHandleLike,
+  fileName: string,
+  content: string,
+  diagnostics: EventLogDiagnostics,
+  deadline: OperationDeadline | undefined
+): Promise<BlockedSegmentWrite | null> {
+  for (let attempt = 0; ; attempt += 1) {
+    let step: SegmentWriteStep = "getFileHandle";
+    try {
+      const handle = await eventsDir.getFileHandle(fileName, { create: true });
+      if (!handle.createWritable) {
+        throw taggedError(diagnostics.cannotWriteCode, `Browser cannot write ${fileName}.`);
+      }
+      step = "createWritable";
+      const writable = await handle.createWritable();
+      step = "write";
+      await writable.write(content);
+      step = "close";
+      await writable.close();
+      return null;
+    } catch (error) {
+      // R8(b): only InvalidStateError/NoModificationAllowedError AT THE
+      // write/close STEP — the actual swap→target replace, and the write to
+      // the swap file that feeds it — count as evidence of a REFUSED REPLACE.
+      // The SAME two error names at the earlier getFileHandle/createWritable
+      // steps happen before any replace is even attempted, so they are not
+      // that evidence; NotReadableError at any step isn't either (it
+      // typically fires before a replace was attempted too). All of those
+      // get the patient ladder like NotFoundError, not the short
+      // rotate-on-exhaustion one.
+      const isBlockedReplaceShape = isSnapshotStaleError(error) || isLockContentionError(error);
+      const isBlockedReplaceStep = step === "write" || step === "close";
+      if (isNotFoundError(error) || isNotReadableError(error) || (isBlockedReplaceShape && !isBlockedReplaceStep)) {
+        // The PATIENT ladder (~11 s), not the short one (~630 ms). Failing
+        // here aborts a whole month save, so there is nothing to be gained by
+        // giving up quickly — the same reasoning the post-close read-back
+        // already applies, which left the write itself as the odd one out.
+        if (attempt < VERIFY_READBACK_RETRY_DELAYS_MS.length) {
+          const delay = nextRetryDelayMs(VERIFY_READBACK_RETRY_DELAYS_MS[attempt]!, deadline);
+          if (delay !== null) {
+            await waitFor(delay);
+            continue;
+          }
+        }
+        if (isNotFoundError(error)) {
+          await logExhaustedNotFound(diagnostics.writeContext, eventsDir, fileName, attempt + 1, error);
+        } else {
+          logError(diagnostics.writeContext, error);
+        }
+        throw error;
+      }
+      // R8(b): only the two shapes Chromium actually raises for a REFUSED
+      // REPLACE, AT the write/close step, trigger the short ladder + rotation.
+      if (isBlockedReplaceShape && isBlockedReplaceStep) {
+        if (attempt < SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS.length) {
+          const delay = nextRetryDelayMs(
+            SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS[attempt]!,
+            deadline
+          );
+          if (delay !== null) {
+            await waitFor(delay);
+            continue;
+          }
+        }
+        return { step, attempts: attempt + 1, error };
+      }
+      throw error;
+    }
+  }
+}
+
+/**
+ * A write we could not CONFIRM via `close()` — did it land anyway? Chromium's
+ * swap→target `MoveFileEx` is atomic (see the evidence doc cited above), so in
+ * practice the target is either fully replaced or fully untouched. This is a
+ * single, unretried defensive read regardless: if the current size already
+ * matches what THIS write would have produced, the bytes MIGHT be there —
+ * but R8(a): a size match alone is not proof. Another writer could have
+ * coincidentally produced a file of the same total size (same batch length,
+ * different content) in the same narrow window, and treating that as "landed"
+ * would then rotate away and leave the actual batch unwritten anywhere. So
+ * this also reads the tail and checks it literally ends with the bytes THIS
+ * call was trying to write — not just that the file is the right length.
+ * Any failure to even read it back answers "no" — the conservative default
+ * everywhere else in this module — and the caller rotates.
+ */
+async function segmentReplaceMayHaveLanded(
+  eventsDir: DirectoryHandleLike,
+  fileName: string,
+  expectedBytes: number,
+  addedText: string
+): Promise<boolean> {
+  try {
+    const handle = await eventsDir.getFileHandle(fileName, { create: false });
+    const file = await handle.getFile();
+    if (file.size !== expectedBytes) return false;
+    const text = await file.text();
+    return text.endsWith(addedText);
+  } catch {
+    return false;
+  }
+}
+
+/** Diagnostic for a blocked replace, whether or not it ends up being rotated away from. */
+function logBlockedSegmentReplace(
+  context: string,
+  blocked: BlockedSegmentWrite,
+  fileName: string
+): void {
+  const errorName =
+    blocked.error && typeof blocked.error === "object"
+      ? (blocked.error as { name?: unknown }).name
+      : undefined;
+  const detail = blocked.error instanceof Error ? blocked.error.message : String(blocked.error);
+  const message =
+    `Segment replace refused after ${blocked.attempts} attempt(s) at step "${blocked.step}" ` +
+    `on "${fileName}" (${typeof errorName === "string" ? errorName : "unknown"}): ${detail}`;
+  const code = classifyFileSystemError(blocked.error);
+  if (code) {
+    logCodedError(context, code, new Error(message));
+  } else {
+    logError(context, new Error(message));
+  }
+}
+
+/**
+ * Small, FIXED bound on how many extra rotation hops
+ * `ensureReliableRotationTarget` will take looking for a reliably-readable
+ * target, independent of `MAX_SEGMENT_SEQ`.
+ *
+ * Without this, a `stable` writer whose directory LISTING is itself
+ * persistently broken (`knownFor`'s own conservative "listing failed ->
+ * treat as claimed" fallback, see its doc comment) makes EVERY candidate
+ * name look claimed — including names that were never actually written —
+ * so each one takes the ~11 s patient ladder, exhausts it as a genuine
+ * NotFoundError, and comes back unreliable too. Bounded only by
+ * `MAX_SEGMENT_SEQ` (999,999), that combination spins for the better part
+ * of an hour before finally throwing — reproduced in
+ * `appendOnlyEventLog.test.ts`'s "treats a directory-listing failure inside
+ * knownFor as claimed too" test, which took over 700 s before this bound was
+ * added. A handful of hops is already far more patience than any real,
+ * bounded contention (one blocked file, or a segment or two behind a slow
+ * rotation) ever needs; beyond that the directory itself is unusable and
+ * failing fast with a clear error is far better than hanging the save.
+ *
+ * Fix rounds 1-2: the broken-listing scenario is also bounded at its source —
+ * `knownWrittenFor` gives a listing-failure-only claim the FAST ladder (never
+ * the ~11 s patient one) — but such a claim is DISTRUSTED (an exhausted
+ * NotFound is `reliable: false`), so it ends here, in XQ-IO-038, rather than
+ * ever overwriting. This constant is what bounds that: five hops of a fast
+ * ladder each, not a spin toward `MAX_SEGMENT_SEQ`.
+ */
+const MAX_UNRELIABLE_ROTATION_ATTEMPTS = 5;
+
+/**
+ * R2: never WRITE to a rotation target whose own pre-write baseline read was
+ * unreliable. An unreliable read means "this name's real contents could not
+ * be confirmed" — writing `existing.text + addedText` there anyway (where
+ * `existing.text` is the unreliable fallback `""`) is exactly the truncation
+ * hazard `readExistingSegment`'s own contract exists to prevent, just one
+ * rotation hop later. This keeps rotating forward — bounded by BOTH
+ * `MAX_SEGMENT_SEQ` and, well before that in practice,
+ * `MAX_UNRELIABLE_ROTATION_ATTEMPTS` — until it finds a target it CAN read
+ * reliably, or throws rather than ever landing on an unconfirmed one.
+ */
+async function ensureReliableRotationTarget(
+  eventsDir: DirectoryHandleLike,
+  base: string,
+  segmentSuffix: string,
+  seq: number,
+  fileName: string,
+  existing: ExistingSegment,
+  knownWrittenFor: (name: string, candidateSeq: number) => Promise<SegmentClaim>,
+  diagnostics: EventLogDiagnostics,
+  deadline: OperationDeadline | undefined
+): Promise<{ seq: number; fileName: string; existing: ExistingSegment }> {
+  let attempts = 0;
+  while (!existing.reliable) {
+    if (seq >= MAX_SEGMENT_SEQ || attempts >= MAX_UNRELIABLE_ROTATION_ATTEMPTS) {
+      throw taggedError(
+        "XQ-IO-038",
+        `Refusing to write segment "${fileName}": its pre-write baseline could not be read ` +
+          `reliably, and the rotation ${
+            seq >= MAX_SEGMENT_SEQ
+              ? `ceiling (seq ${MAX_SEGMENT_SEQ})`
+              : `attempt bound (${MAX_UNRELIABLE_ROTATION_ATTEMPTS})`
+          } has been reached. Never overwriting a segment whose existing contents are unconfirmed.`
+      );
+    }
+    attempts += 1;
+    seq += 1;
+    fileName = segmentFileNameForSeq(base, seq, segmentSuffix);
+    existing = await readExistingSegment(
+      eventsDir,
+      fileName,
+      asHopClaim(await knownWrittenFor(fileName, seq)),
+      diagnostics,
+      deadline
+    );
+  }
+  return { seq, fileName, existing };
 }
 
 /**
@@ -757,9 +1182,11 @@ export async function appendEventSegment<TEvent>(
   parentDir: DirectoryHandleLike,
   events: TEvent[],
   writer: SegmentWriterIdentity,
-  config: AppendOnlyEventLogConfig
+  config: AppendOnlyEventLogConfig,
+  options: AppendEventSegmentOptions = {}
 ): Promise<SegmentVerification> {
   if (events.length === 0) return "verified";
+  const { deadline } = options;
   const { consumerNamespace, eventsDirName, segmentSuffix, diagnostics } = config;
   const eventsDir = await parentDir.getDirectoryHandle(eventsDirName, { create: true });
   const base = buildSegmentBaseName(writer, segmentSuffix, config.baseNamePrefix);
@@ -768,27 +1195,126 @@ export async function appendEventSegment<TEvent>(
   const addedBytes = utf8Length(addedText);
   const memoKeyFor = (name: string) => segmentMemoKey(consumerNamespace, writer.scopeId, name);
 
+  // Has THIS chain already written `name`? For a per-session writer only this
+  // session's memo can say so. A stable writer's chain may predate the page (or
+  // be shared with another tab of the same browser, serialised by the lock
+  // below), so a name the directory LISTS is treated as written: a stale
+  // NotFound then takes the patient ladder and rotates away instead of
+  // rewriting the file without its lines. A listing failure is treated as
+  // "written" — the conservative answer, BUT (IMPORTANT 1 fix round) it also
+  // reports whether that "written" verdict is backed by real evidence
+  // (`positiveEvidence`) or is only the conservative fallback for a listing
+  // that itself threw — `knownWrittenFor` below is what turns that into the
+  // final answer `readExistingSegment` receives.
+  const knownFor = async (name: string): Promise<{ claimed: boolean; positiveEvidence: boolean }> => {
+    if (writtenSegmentsThisSession.has(memoKeyFor(name))) return { claimed: true, positiveEvidence: true };
+    if (!writer.stable) return { claimed: false, positiveEvidence: false };
+    try {
+      const found = (await listDirectoryEntries(eventsDir)).some(
+        (entry) => entry.kind === "file" && entry.name === name
+      );
+      // A successful listing is positive evidence EITHER way — "found" is
+      // proof it's claimed, and "not found" is proof (for THIS moment) that
+      // it isn't. Only a THROWN listing carries no evidence at all.
+      return { claimed: found, positiveEvidence: true };
+    } catch {
+      return { claimed: true, positiveEvidence: false };
+    }
+  };
+
+  // Two watermarks, both -1 when the source has nothing to say:
+  // - `highestReliableSeq`: highest seq we have positive evidence EXISTS (this
+  //   session's own last write, or a successful discovery listing). A
+  //   listing-failure claim at or below it keeps the patient ladder.
+  // - `listedHighestSeq`: highest seq a SUCCESSFUL listing showed. Only above
+  //   it may a listing-failure claim be trusted as absent — a memoised seq is
+  //   no evidence about what another tab wrote above it, and a thrown
+  //   discovery listing is no evidence at all.
+  // Fix round 2 (N1): a listing-failure claim above `highestReliableSeq` and not
+  // provably absent gets the FAST ladder but `distrust` (exhausted NotFound is
+  // unreliable), so a thrown listing can never turn a stale NotFound into a
+  // trusted absence, yet cannot spin for ~11 s per hop either.
+  let highestReliableSeq: number;
+  let listedHighestSeq = -1;
+  const knownWrittenFor = async (name: string, candidateSeq: number): Promise<SegmentClaim> => {
+    const claim = await knownFor(name);
+    if (!claim.claimed) return { known: false, distrust: false };
+    if (claim.positiveEvidence || candidateSeq <= highestReliableSeq) return { known: true, distrust: false };
+    if (listedHighestSeq >= 0 && candidateSeq > listedHighestSeq) return { known: false, distrust: false };
+    return { known: false, distrust: true };
+  };
+
   // A read-modify-write full-file rewrite is only race-free against OTHER
-  // writer sessions (different deviceId/sessionId, hence a different chain).
-  // Within THIS session, two overlapping batch calls (e.g. two independent
-  // UI actions firing close together) would otherwise both read the same
-  // "existing" content and the second write would silently clobber the
-  // first's lines. Lock per writer CHAIN -- not per file name -- so that the
-  // rotation decision and the write it implies are one critical section:
-  // locking per file would let two concurrent appends read the same full
-  // segment, both decide to rotate, and race on `seq + 1`. Distinct chains
-  // (distinct sessions/devices) never contend on this lock.
+  // writer CHAINS (different base name). Within THIS session, two overlapping
+  // batch calls (e.g. two independent UI actions firing close together) would
+  // otherwise both read the same "existing" content and the second write
+  // would silently clobber the first's lines. Lock per writer CHAIN -- not
+  // per file name -- so that the rotation decision and the write it implies
+  // are one critical section: locking per file would let two concurrent
+  // appends read the same full segment, both decide to rotate, and race on
+  // `seq + 1`. For a NON-stable writer, a chain is unique per (deviceId,
+  // sessionId), so distinct sessions/devices never contend on this lock — each
+  // page load is its own chain, hence its own lock name.
+  //
+  // A `stable` writer's chain (answers, A1) is keyed on (deviceId, persisted
+  // chain id) instead, so two tabs of the same browser + user + month
+  // deliberately DO share this lock name — that sharing is exactly what makes
+  // it safe for them to also share one segment file: Web Locks are scoped per
+  // ORIGIN, not per tab/page instance, so the lock still serialises their
+  // appends into one critical section even though each tab is a separate JS
+  // heap with its own `writtenSegmentsThisSession`/`openSegmentSeqByWriter`
+  // memo. See the `stable` field's doc comment on `SegmentWriterIdentity` for
+  // the full argument. R9: that cross-tab guarantee holds only when the REAL
+  // `navigator.locks` is present — `withResourceLock`'s no-`navigator.locks`
+  // fallback (`webLocks.ts`) serialises within one tab only, so on such a
+  // browser/context two tabs sharing a stable chain are not actually
+  // serialised against each other by this lock name.
   //
   // The key needs no consumer namespace: it already carries `eventsDirName`,
   // and two consumers sharing a directory SHOULD share the lock (they would be
   // writing the same files), while two consumers with different directories
   // cannot collide.
   return withResourceLock(`${eventsDirName}/${base}`, async () => {
-    let seq =
-      openSegmentSeqByWriter.get(writerKey) ??
-      (await discoverHighestOwnSeq(eventsDir, base, segmentSuffix));
+    const memoizedSeq = openSegmentSeqByWriter.get(writerKey);
+    let seq: number;
+    if (memoizedSeq !== undefined) {
+      // A prior successful write in this session — real evidence.
+      seq = memoizedSeq;
+      highestReliableSeq = memoizedSeq;
+    } else {
+      const discovered = await discoverHighestOwnSeq(eventsDir, base, segmentSuffix);
+      seq = discovered.highest;
+      highestReliableSeq = discovered.listed ? discovered.highest : -1;
+      listedHighestSeq = discovered.listed ? discovered.highest : -1;
+    }
+    // Never start below the head of this chain as the caller's successful
+    // listing saw it (see `listedSegmentNames`). A listing is positive evidence,
+    // so it raises both watermarks exactly like a successful discovery would.
+    if (writer.stable && options.listedSegmentNames) {
+      let listedHead = -1;
+      for (const listed of options.listedSegmentNames) {
+        const listedSeq = parseOwnSegmentSeq(listed, base, segmentSuffix);
+        if (listedSeq !== null && listedSeq > listedHead) listedHead = listedSeq;
+      }
+      if (listedHead > seq) {
+        seq = listedHead;
+        highestReliableSeq = Math.max(highestReliableSeq, listedHead);
+        // `listedHighestSeq` is deliberately NOT raised. It licenses trusting a
+        // NotFound as "absent" for anything above it, and it may only come from
+        // a listing taken INSIDE this lock (discovery). This hint was taken
+        // outside it: another tab of the same chain can rotate to head+1 in
+        // between, and if the in-lock listing then threw, a lagged NotFound on
+        // head+1 would be trusted and that tab's lines overwritten.
+      }
+    }
     let fileName = segmentFileNameForSeq(base, seq, segmentSuffix);
-    let existing = await readExistingSegment(eventsDir, fileName, memoKeyFor(fileName), diagnostics);
+    let existing = await readExistingSegment(
+      eventsDir,
+      fileName,
+      await knownWrittenFor(fileName, seq),
+      diagnostics,
+      deadline
+    );
     let existingBytes = utf8Length(existing.text);
 
     // ROTATE AWAY FROM A SEGMENT WE COULD NOT RE-READ. An unreliable baseline
@@ -804,48 +1330,167 @@ export async function appendEventSegment<TEvent>(
     // events remain part of the log — while the batch lands in a fresh
     // segment whose empty baseline is trustworthy. An unconfirmable
     // post-close check on the fresh segment is then benign instead of fatal.
-    // The rotation target can never collide: the memo and
-    // `openSegmentSeqByWriter` advance together, so `seq` is the highest this
-    // session ever wrote, and no other writer shares this chain.
+    // The rotation target can never collide FOR A NON-STABLE WRITER: the memo
+    // and `openSegmentSeqByWriter` advance together, so `seq` is the highest
+    // this session ever wrote, and no other writer shares that chain (it is
+    // unique per page load).
+    //
+    // A `stable` writer's chain CAN be shared by another tab of the same
+    // browser + user + month (see `SegmentWriterIdentity.stable`'s doc
+    // comment), so this tab's `openSegmentSeqByWriter` memo can be behind the
+    // true on-disk state if the other tab has already rotated past it — this
+    // tab simply has not discovered that yet. That is not a collision risk:
+    // the lock above still serialises the two tabs' appends, and every write
+    // re-reads (`readExistingSegment`/`knownFor`) its OWN target `fileName`
+    // immediately before writing it, so whichever tab's append actually runs
+    // sees and preserves whatever the other one already wrote there. Rotating
+    // "one behind" the true state only means this tab's own segment fills up
+    // slightly later than it otherwise would — never that two writers land on
+    // the same rotation target at once. R9: "the lock above still serialises
+    // the two tabs' appends" assumes the real `navigator.locks` — see the
+    // caveat on the lock-name comment above and on `SegmentWriterIdentity.stable`.
+    // IMPORTANT 1 fix round: this hop now goes through `ensureReliableRotationTarget`
+    // too, exactly like the two branches below — a target reached from HERE is
+    // no less capable of holding real content (e.g. another tab's segment, per
+    // the reviewer's repro: seq0 unreadable, hop to seq1, and seq1 ALSO fails
+    // its read while genuinely holding another tab's events) than one reached
+    // from `shouldRotate` or a blocked replace, so it needs the same guarantee.
+    // A listing that THREW makes `knownFor` claim every name; `knownWrittenFor`
+    // gives such a claim the fast ladder (no ~11 s-per-hop spin) but distrusts
+    // an exhausted NotFound (`reliable: false`), so this loop ends in a bounded
+    // XQ-IO-038 instead of ever writing over a segment it could not read.
     if (!existing.reliable && seq < MAX_SEGMENT_SEQ) {
       seq += 1;
       fileName = segmentFileNameForSeq(base, seq, segmentSuffix);
-      existing = await readExistingSegment(eventsDir, fileName, memoKeyFor(fileName), diagnostics);
+      existing = await readExistingSegment(
+        eventsDir,
+        fileName,
+        asHopClaim(await knownWrittenFor(fileName, seq)),
+        diagnostics,
+        deadline
+      );
+      ({ seq, fileName, existing } = await ensureReliableRotationTarget(
+        eventsDir,
+        base,
+        segmentSuffix,
+        seq,
+        fileName,
+        existing,
+        knownWrittenFor,
+        diagnostics,
+        deadline
+      ));
       existingBytes = utf8Length(existing.text);
     }
 
     if (seq < MAX_SEGMENT_SEQ && shouldRotate(existing.text, existingBytes, addedBytes, events.length)) {
       seq += 1;
       fileName = segmentFileNameForSeq(base, seq, segmentSuffix);
-      // Read the rotation target too. It is normally absent and this resolves
-      // immediately (an unwritten segment is not in writtenSegmentsThisSession,
-      // so a NotFoundError is taken at face value with no retry ladder) -- but
-      // reading it is what makes "the previous run crashed after writing this
-      // name" and "the directory listing had not caught up yet" non-destructive
-      // instead of an overwrite.
-      existing = await readExistingSegment(eventsDir, fileName, memoKeyFor(fileName), diagnostics);
+      // Read the rotation target too — reading it is what makes "the previous
+      // run crashed after writing this name" and "the directory listing had
+      // not caught up yet" non-destructive instead of an overwrite. How its
+      // NotFound is treated depends on the claim: a target a successful
+      // listing did NOT show (the normal case) is taken at face value with no
+      // retry ladder; one the listing shows gets the patient ladder and an
+      // exhausted NotFound is unreliable; one claimed only because the listing
+      // threw gets the fast ladder and is likewise unreliable when exhausted.
+      // (The hop taken after an UNREADABLE segment is stricter still — see
+      // `asHopClaim`.)
+      existing = await readExistingSegment(
+        eventsDir,
+        fileName,
+        await knownWrittenFor(fileName, seq),
+        diagnostics,
+        deadline
+      );
+      // R2: an unreliable read on the rotation target itself must never be
+      // written over — keep rotating (bounded) or throw instead.
+      ({ seq, fileName, existing } = await ensureReliableRotationTarget(
+        eventsDir,
+        base,
+        segmentSuffix,
+        seq,
+        fileName,
+        existing,
+        knownWrittenFor,
+        diagnostics,
+        deadline
+      ));
       existingBytes = utf8Length(existing.text);
     }
 
-    const appended = existing.text + addedText;
+    // ROTATE AWAY FROM A SEGMENT WHOSE REPLACE IS REFUSED (E1b). Unlike the
+    // two rotation branches above — which react to a bad PRE-append READ —
+    // this one reacts to the WRITE step itself failing on the target we
+    // already decided to use. `writeSegmentOnce` retries `NotFoundError` AND
+    // `NotReadableError` on its own patient ladder unchanged (R8(b): neither
+    // is evidence of a refused REPLACE); it returns (rather than throws) only
+    // once `InvalidStateError`/`NoModificationAllowedError` at the `write`/
+    // `close` step specifically has exhausted the short
+    // `SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS` ladder — i.e. the share is
+    // refusing to replace THIS file specifically. At most one rotation happens
+    // here per call: `rotatedForBlockedReplace` bounds the loop, so a second
+    // blocked target rethrows instead of rotating forever.
+    let rotatedForBlockedReplace = false;
+    for (;;) {
+      const blocked = await writeSegmentOnce(
+        eventsDir,
+        fileName,
+        existing.text + addedText,
+        diagnostics,
+        deadline
+      );
+      if (!blocked) break;
 
-    await retryTransientWrite(
-      async () => {
-        const handle = await eventsDir.getFileHandle(fileName, { create: true });
-        if (!handle.createWritable) {
-          throw taggedError(diagnostics.cannotWriteCode, `Browser cannot write ${fileName}.`);
-        }
-        const writable = await handle.createWritable();
-        await writable.write(appended);
-        await writable.close();
-      },
-      { context: diagnostics.writeContext, dir: eventsDir, fileName },
-      // The PATIENT ladder (~11 s), not the short one (~630 ms). Failing here
-      // aborts a whole month save, so there is nothing to be gained by giving
-      // up quickly — the same reasoning the post-close read-back already
-      // applies, which left the write itself as the odd one out.
-      VERIFY_READBACK_RETRY_DELAYS_MS
-    );
+      logBlockedSegmentReplace(diagnostics.writeContext, blocked, fileName);
+
+      // `MoveFileEx` is atomic, so in the overwhelming case this reads false —
+      // but a re-read here is what "verify by re-reading size/tail before
+      // rotating" (E1b) means: never rotate away from a write whose bytes are
+      // already sitting in this file, or the batch lands a second time in the
+      // rotated segment too.
+      const alreadyLanded = await segmentReplaceMayHaveLanded(
+        eventsDir,
+        fileName,
+        existingBytes + addedBytes,
+        addedText
+      );
+      if (alreadyLanded) break;
+
+      if (rotatedForBlockedReplace || seq >= MAX_SEGMENT_SEQ) {
+        // Never rewrite/overwrite the failed segment: leave it exactly as it
+        // was and let the caller see the real underlying error.
+        throw blocked.error;
+      }
+      rotatedForBlockedReplace = true;
+      seq += 1;
+      fileName = segmentFileNameForSeq(base, seq, segmentSuffix);
+      // Same non-destructive re-read every other rotation branch here does:
+      // an unwritten target normally resolves immediately, and reading it is
+      // what makes a segment left behind by a crashed run non-destructive
+      // instead of an overwrite.
+      existing = await readExistingSegment(
+        eventsDir,
+        fileName,
+        await knownWrittenFor(fileName, seq),
+        diagnostics,
+        deadline
+      );
+      // R2: never write to a rotation target we could not read reliably —
+      // keep rotating (bounded) or throw, same as the size-threshold branch.
+      ({ seq, fileName, existing } = await ensureReliableRotationTarget(
+        eventsDir,
+        base,
+        segmentSuffix,
+        seq,
+        fileName,
+        existing,
+        knownWrittenFor,
+        diagnostics,
+        deadline
+      ));
+      existingBytes = utf8Length(existing.text);
+    }
     // Recorded before verification, deliberately: the bytes are already on the
     // share at this point, so the next append must continue in THIS segment
     // even if the post-close size check below fails and this call reports an
@@ -859,7 +1504,8 @@ export async function appendEventSegment<TEvent>(
       fileName,
       existingBytes + addedBytes,
       existing.reliable,
-      diagnostics
+      diagnostics,
+      deadline
     );
   });
 }
@@ -873,19 +1519,62 @@ export type SegmentEventsDelta<TEvent> = {
   offsets: Record<string, number>;
   /** Every segment file name seen in this listing. */
   segmentNames: string[];
+  /**
+   * Segments confirmed sealed by this read (S3, see `readSegmentTails`). A caller
+   * that keeps an in-memory offsets cache hands this back as
+   * `options.sealedConfirmed` so a sealed segment is not opened again. Absent
+   * from a persisted checkpoint by design: losing it only costs one re-open.
+   */
+  sealedConfirmedNames: Set<string>;
 };
+
+/**
+ * Thrown by `readEventSegmentDelta(..., { strict: true })` when one or more
+ * matched segment files were listed but could not be read (the retry-then-
+ * "vanished" tolerance `readSegmentTails` applies for every other caller —
+ * see its own doc comment). A safety-critical caller cannot accept "listed,
+ * unreadable, silently treated as if it never existed": a genuinely vanished
+ * file (renamed, removed) and a persistently unreadable one are indistinguishable
+ * from here, and the lenient default exists precisely to tolerate the SMB-share
+ * flakiness that makes the former common — but a guard that must never miscount
+ * an unreadable segment as "no events in it" needs the other read.
+ */
+export class EventSegmentUnreadableError extends Error {
+  readonly segmentNames: string[];
+  constructor(segmentNames: string[], options?: { cause?: unknown }) {
+    super(
+      `Event segment(s) listed but could not be read: ${segmentNames.join(", ")}`,
+      options as ErrorOptions
+    );
+    this.name = "EventSegmentUnreadableError";
+    this.segmentNames = segmentNames;
+  }
+}
 
 /**
  * Read only the event lines appended past each segment's previously-known
  * byte offset (perf: fold-checkpoint). Passing `{}` reads every segment from
  * the start — the same function serves both a cold (full) read and a warm
  * (incremental) one.
+ *
+ * `options.strict` (default false, every existing caller unaffected): when a
+ * matched segment was listed but its read was skipped as "vanished" (a
+ * persistent `NotReadableError`/`NotFoundError` surviving `readSegmentTails`'
+ * own short retry budget), the lenient default silently excludes it — correct
+ * for ordinary share flakiness, wrong for a caller that must never read
+ * "could not check this segment" as "this segment has no events". Strict mode
+ * throws {@link EventSegmentUnreadableError} instead, and — load-bearing for
+ * callers with their own incremental read cache — does so BEFORE building
+ * `offsets`/`events`, so nothing here ever gets a chance to persist a partial
+ * result as if it were complete.
  */
 export async function readEventSegmentDelta<TEvent>(
   parentDir: DirectoryHandleLike,
   knownOffsets: Record<string, number>,
-  config: AppendOnlyEventLogConfig
+  config: AppendOnlyEventLogConfig,
+  options?: { strict?: boolean; sealedConfirmed?: ReadonlySet<string> }
 ): Promise<SegmentEventsDelta<TEvent>> {
+  const strict = options?.strict ?? false;
   let eventsDir: DirectoryHandleLike;
   try {
     eventsDir = await parentDir.getDirectoryHandle(config.eventsDirName, { create: false });
@@ -895,13 +1584,29 @@ export async function readEventSegmentDelta<TEvent>(
     // it makes a month's whole event history disappear from every fold that
     // reads through here.
     if (!isNotFoundError(error)) throw error;
-    return { events: [], offsets: { ...knownOffsets }, segmentNames: [] };
+    return { events: [], offsets: { ...knownOffsets }, segmentNames: [], sealedConfirmedNames: new Set() };
   }
 
-  const { tailTextByName, sizeByName, matchedNames } = await readSegmentTails(eventsDir, {
+  const { tailTextByName, sizeByName, matchedNames, sealedConfirmedNames } = await readSegmentTails(eventsDir, {
     suffix: config.segmentSuffix,
     knownOffsets,
+    sealedConfirmed: options?.sealedConfirmed,
+    // `eventsDir` comes from a raw getDirectoryHandle() (never path-registered),
+    // and its name is the same in every month: scope the skip log by the parent.
+    scopeKey: directoryResourceKey(parentDir, config.eventsDirName),
   });
+
+  if (strict) {
+    const skipped = matchedNames.filter((name) => !sizeByName.has(name));
+    if (skipped.length > 0) {
+      // Thrown before any of the reads below, and before the cache-shaped
+      // `offsets`/`events` are built — a caller that persists an incremental
+      // read cache (answerStorage.ts's own doc comment says so explicitly)
+      // must never have a chance to write a checkpoint that silently treats
+      // this segment as "read, found nothing new".
+      throw new EventSegmentUnreadableError(skipped);
+    }
+  }
 
   const events: TEvent[] = [];
   for (const name of matchedNames) {
@@ -914,7 +1619,7 @@ export async function readEventSegmentDelta<TEvent>(
   const offsets: Record<string, number> = { ...knownOffsets };
   for (const [name, size] of sizeByName) offsets[name] = size;
 
-  return { events, offsets, segmentNames: matchedNames };
+  return { events, offsets, segmentNames: matchedNames, sealedConfirmedNames };
 }
 
 /* ─────────────────────── event-set digest (fixed, not a parameter) ──────── */

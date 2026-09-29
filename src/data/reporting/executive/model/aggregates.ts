@@ -13,6 +13,12 @@ import type {
   ImageResultComparison,
   ResultSource,
 } from "./decisionFactTable";
+import {
+  compareStageKeys,
+  getStageKey,
+  stageLabelForKey,
+  type StageAliasMappings,
+} from "../../../population/stageHelpers";
 
 /**
  * Folds the decision fact table + image comparisons into the aggregate views the
@@ -405,12 +411,19 @@ function buildByEntryDay(
 export function buildAggregates(
   records: DecisionRecord[],
   comparisons: ImageResultComparison[],
-  config: ExecutiveReportConfig
+  config: ExecutiveReportConfig,
+  stageMappings?: Partial<StageAliasMappings>
 ): Aggregates {
   const entryDay = buildByEntryDay(records, config);
   return {
     byPort: foldBy(records, (r) => r.portName, config),
-    byStage: foldBy(records, (r) => r.stage, config),
+    // C1: bucket by canonical stage key (raw aliases such as FIRST_STAGE /
+    // SECOND_STAG collapse into their level), order first→fourth with
+    // "unknown" last, then expose the Arabic label as `key` — the consumers
+    // (deck3's accuracy table) display `key` verbatim.
+    byStage: foldBy(records, (r) => getStageKey(r.stage, stageMappings), config)
+      .sort((a, b) => compareStageKeys(a.key, b.key))
+      .map((s) => ({ ...s, key: stageLabelForKey(s.key) })),
     byMovement: foldBy(records, (r) => r.movementType, config),
     byPortAndLevel: foldByPortAndLevel(records, config),
     employeeByPortAndLevel: buildEmployeeByPortAndLevel(records, config),

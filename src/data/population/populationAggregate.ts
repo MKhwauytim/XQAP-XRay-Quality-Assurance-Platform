@@ -26,8 +26,9 @@
  */
 
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { safeReadJson, safeRemoveJson, safeWriteJson } from "../storage/safeWrite";
 import { logError } from "../storage/errorLogger";
+import { isNotFoundError } from "../storage/transientFileErrors";
 import { getPopulationMonthDir } from "../workspace/workspacePaths";
 import { POPULATION_SUBFOLDERS } from "../workspace/workspacePaths";
 import type { PreparedPopulationRow, ProcessingSummary } from "./populationTypes";
@@ -36,7 +37,8 @@ import type { PreparedPopulationRow, ProcessingSummary } from "./populationTypes
 // let the persisted rate silently diverge from the one the advisory computes.
 import { computeSuspicionRate } from "../sampling/samplingPlanStorage";
 
-const AGGREGATE_FILE = "population.aggregate.json";
+/** Exported for the selective-restore catalog, which rebuilds rather than copies it. */
+export const POPULATION_AGGREGATE_FILE = "population.aggregate.json";
 const AGGREGATE_SCHEMA_VERSION = 1;
 const PREVIEW_ROW_COUNT = 10;
 
@@ -130,9 +132,29 @@ export async function savePopulationAggregate(
   try {
     const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, true);
     const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: true });
-    await safeWriteJson(processedDir, AGGREGATE_FILE, aggregate);
+    await safeWriteJson(processedDir, POPULATION_AGGREGATE_FILE, aggregate);
   } catch (error) {
     logError("population:save-aggregate", error);
+  }
+}
+
+/**
+ * Remove a month's aggregate so the Population tab shows its explicit
+ * "missing aggregate" recovery prompt instead of stale figures. Used by a
+ * selective backup restore (Workstream D) before the rebuild, so a month whose
+ * backup has no processing summary is not left showing the replaced
+ * population's numbers. Best-effort: never throws.
+ */
+export async function discardPopulationAggregate(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<void> {
+  try {
+    const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
+    const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false });
+    await safeRemoveJson(processedDir, POPULATION_AGGREGATE_FILE);
+  } catch (error) {
+    if (!isNotFoundError(error)) logError("population:discard-aggregate", error);
   }
 }
 
@@ -167,7 +189,7 @@ export async function loadPopulationAggregate(
   try {
     const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
     const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false });
-    const result = await safeReadJson<PopulationAggregate>(processedDir, AGGREGATE_FILE);
+    const result = await safeReadJson<PopulationAggregate>(processedDir, POPULATION_AGGREGATE_FILE);
     if (!result.ok) {
       return result.reason === "corrupt" ? { status: "corrupt" } : { status: "missing" };
     }

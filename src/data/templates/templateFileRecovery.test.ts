@@ -208,3 +208,32 @@ describe("inspectAllTemplateFiles", () => {
     expect(reports.map((r) => r.templateId)).toEqual([TEMPLATE_ID]);
   });
 });
+
+describe("non-template JSON in the templates root", () => {
+  it("classifies readable JSON without a templateId as not-a-template, never corrupt", async () => {
+    const dir = await getTemplatesRoot(root, true);
+    const handle = await dir.getFileHandle("some-preference.json", { create: true });
+    const writable = await handle.createWritable!();
+    await writable.write(JSON.stringify({ edition: "v3" }));
+    await writable.close();
+
+    const report = await inspectTemplateFile(root, "some-preference");
+
+    expect(report.live.kind).toBe("not-a-template");
+    expect(report.needsRepair).toBe(false);
+    expect(report.recoverableFrom).toBeNull();
+  });
+
+  it("leaves not-a-template files out of the full scan", async () => {
+    await saveTemplate(root, makeTemplate());
+    const dir = await getTemplatesRoot(root, true);
+    const handle = await dir.getFileHandle("unknown-prefs.json", { create: true });
+    const writable = await handle.createWritable!();
+    await writable.write(JSON.stringify({ choices: {} }));
+    await writable.close();
+
+    const reports = await inspectAllTemplateFiles(root);
+
+    expect(reports.map((report) => report.templateId)).toEqual([TEMPLATE_ID]);
+  });
+});

@@ -31,7 +31,7 @@ import {
 } from "../../../../data/population/populationStorage";
 import { loadDistributionLog } from "../../../../data/distribution/distributionStorage";
 import { drawSample } from "../../../../data/sampling/sampleAlgorithm";
-import { loadSampleMaster, saveSampleMaster } from "../../../../data/sampling/sampleStorage";
+import { saveSampleMaster } from "../../../../data/sampling/sampleStorage";
 import { buildSamplingPlan, saveSamplingPlan } from "../../../../data/sampling/samplingPlanStorage";
 import type { SamplingPlanPriorMonthAdvisory } from "../../../../data/sampling/samplingPlanStorage";
 import { loadPriorMonthAdvisory } from "../../../../data/sampling/switchingRuleAdvisory";
@@ -72,7 +72,12 @@ import { appendWorkspaceAction, recordAction } from "../../../../data/audit/acti
 import { touchVisitedTabs } from "../../../../app/visitedTabs";
 
 import "./Population.css";
-import { ConfirmDialog } from "../../../../components/ConfirmDialog/ConfirmDialog";
+import {
+  assessPopulationOverwrite,
+  loadPopulationOverwriteImpact,
+  type PopulationOverwriteAssessment,
+} from "../../../../data/population/populationOverwriteGuard";
+import { ReprocessConfirmDialog } from "./components/ReprocessConfirmDialog";
 import BrowseDataView from "./BrowseDataView";
 import AdhocImportView from "../AdhocImport";
 import {
@@ -445,7 +450,7 @@ export default function PopulationTab() {
   }
 
   async function handleConfigChange(newConfig: PopulationConfig) {
-    if (!canConfigureSample) {
+    if (!canConfigureSample || !canMutate("configure-sample")) {
       setProcessingMessage("لا تملك صلاحية تعديل إعدادات المعالجة أو العينة.");
       return;
     }
@@ -531,6 +536,7 @@ export default function PopulationTab() {
     processingResult: PopulationProcessingResult;
     riskResult: RiskWorkbookResult;
     monthFolderName: string;
+    assessment: PopulationOverwriteAssessment;
   } | null>(null);
 
   // Phase 3 — sampling
@@ -900,7 +906,8 @@ export default function PopulationTab() {
       const result = await processPopulation({
         riskWorkbookResult,
         biWorkbookResult,
-        certScanPasteText
+        certScanPasteText,
+        certScanPorts: config.certScanPorts ?? []
       }, (stage, percent) => {
         setProcessingProgressMessage(stage);
         setProcessingProgressPercent(percent);
@@ -981,23 +988,27 @@ export default function PopulationTab() {
     // Guard: re-processing a month that already has a drawn sample would make
     // that sample no longer match the new population — confirm before overwriting.
     const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
-    let existingSample: Awaited<ReturnType<typeof loadSampleMaster>>;
+    let assessment: PopulationOverwriteAssessment;
+    setIsSavingToDisk(true);
     try {
-      existingSample = await loadSampleMaster(directoryHandle, monthFolderName);
+      assessment = assessPopulationOverwrite(
+        await loadPopulationOverwriteImpact(directoryHandle, monthFolderName),
+        processingResult.preparedRows as unknown as Array<Record<string, unknown>>
+      );
     } catch (error) {
-      // loadSampleMaster THROWS when the file exists but could not be read
-      // (v93 contract). Letting that propagate landed in
-      // handleProcessPopulation's catch, which discarded the just-computed
-      // processing result and reported XQ-POP-004 — "processing failed" — for
-      // what was a post-processing disk hiccup. It is a SAVE-step failure:
-      // keep the result, name the real cause, let the user retry the save.
-      const code = resolveErrorCode(error) ?? "XQ-POP-006";
+      // The month's sample, distribution or answers could not be read, so the
+      // overwrite check cannot run (v93 contract; F21) — a SAVE-step failure:
+      // keep the processing result, name the real cause (XQ-POP-008 when it is
+      // untagged, the same code the data-layer guard uses), let the user retry.
+      const code = resolveErrorCode(error) ?? "XQ-POP-008";
       logCodedError("population:save-precheck", code, error);
       setSaveToDiskMessage({ type: "error", text: codedMessage(code) });
       return;
+    } finally {
+      setIsSavingToDisk(false);
     }
-    if (existingSample) {
-      setPendingReprocessSave({ processingResult, riskResult, monthFolderName });
+    if (assessment.sampleExists) {
+      setPendingReprocessSave({ processingResult, riskResult, monthFolderName, assessment });
       return;
     }
 
@@ -1066,6 +1077,8 @@ export default function PopulationTab() {
           mappingTemplate: config.mappingTemplates[0] ?? null,
           stageMappings: config.stageMappings,
           workflow: config.processingWorkflow,
+          // C2: only present when a port is flagged, so a default config keeps its pre-C2 fingerprint.
+          ...(config.certScanPorts?.length ? { certScanPorts: config.certScanPorts } : {}),
         }),
         sourceFiles: {
           risk: sourceFileMetadata(uploads.riskAgencyData.file),
@@ -1078,21 +1091,17 @@ export default function PopulationTab() {
 
       if (result.ok) {
         recordAction(directoryHandle, username, sessionRef.current?.role ?? "unknown", "population-saved", { monthFolderName: result.monthFolderName, details: { rows: processingResult.preparedRows.length, removed: processingResult.removedRows.length, duplicates: processingResult.duplicateRows.length, overwrote: confirmedOverwrite } });
-        setSaveToDiskMessage({
-          type: "ok",
-          text: `تم حفظ شهر ${result.monthFolderName} على القرص بنجاح.`
-        });
+        setSaveToDiskMessage(result.sampleOrphanCount > 0
+          ? { type: "error", text: getLabels().population_save_sample_orphans_warning.replace("{month}", result.monthFolderName).replace("{count}", String(result.sampleOrphanCount)) }
+          : { type: "ok", text: `تم حفظ شهر ${result.monthFolderName} على القرص بنجاح.` });
         setMonthRefreshKey((k) => k + 1);
         hasUnsavedSessionWorkRef.current = false;
         void refreshMonths();
-      } else if (result.sampleExists) {
-        // A sample was drawn between the pre-check and the locked write (TOCTOU):
-        // prompt for explicit overwrite confirmation instead of silently failing.
-        setPendingReprocessSave({
-          processingResult,
-          riskResult,
-          monthFolderName: formatMonthFolderName(saveMonth, saveYear),
-        });
+      } else if (result.sampleExists || result.overwriteBlocked) {
+        // A sample or distribution appeared since the pre-check (TOCTOU), or the
+        // data layer refused the overwrite: re-assess and re-open the dialog,
+        // which shows the refusal (and hides «متابعة») when blocked.
+        void performSaveToDisk(processingResult, riskResult);
       } else {
         logCodedError("population:save-to-disk", "XQ-POP-005", new Error(result.error));
         setSaveToDiskMessage({
@@ -1555,25 +1564,25 @@ export default function PopulationTab() {
         onCertScanPasteTextChange={handleCertScanChange}
         sampleSeed={sampleSeed}
         onSampleSeedChange={setSampleSeed}
+        certScanPortRows={riskWorkbookResult?.rows ?? populationProcessingResult?.preparedRows}
+        canEditCertScanPorts={canConfigureSample && canMutate("configure-sample")}
         processingContext={{
           riskFileName: uploads.riskAgencyData.file?.name ?? null,
           biFileName: biFileNamesLabel,
           riskRows: riskWorkbookResult?.rows.length ?? null,
           biRows: biWorkbookResult?.rows.length ?? null,
-          certScanProvided: certScanPasteText.trim().length > 0,
+          certScanProvided: certScanPasteText.trim().length > 0 || (config.certScanPorts?.length ?? 0) > 0,
           finalRows: populationProcessingResult?.preparedRows.length ?? null,
         }}
       />
 
-      <ConfirmDialog
+      <ReprocessConfirmDialog
         open={pendingReprocessSave !== null && activeSubTab === "process"}
-        danger
-        title={getLabels().population_reprocess_confirm_title}
-        message={getLabels().population_reprocess_confirm_message}
+        assessment={pendingReprocessSave?.assessment ?? null}
         onConfirm={() => {
           const pending = pendingReprocessSave;
           setPendingReprocessSave(null);
-          if (!pending) return;
+          if (!pending || pending.assessment.blocked) return;
           // The month changed under the open dialog — confirming now would
           // write the OLD month's population into the newly selected month.
           if (pending.monthFolderName !== formatMonthFolderName(saveMonth, saveYear)) {

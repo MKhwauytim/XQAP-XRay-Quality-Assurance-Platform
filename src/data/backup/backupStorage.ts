@@ -1,7 +1,8 @@
 import * as XLSX from "xlsx";
 
 import type { EmployeeAnswerFile } from "../answers/answerTypes";
-import { loadAllEmployeeFiles } from "../answers/answerStorage";
+import { clearAnswerEventsCache, loadAllEmployeeFiles } from "../answers/answerStorage";
+import { invalidateSealedAnswerSegments } from "../answers/answerSealedSegments";
 import { ANSWER_EVENTS_DIR, type AnswerEvent } from "../answers/answerEventStore";
 import {
   DISTRIBUTION_EVENTS_DIR,
@@ -15,6 +16,13 @@ import {
 } from "../distribution/distributionStorage";
 import type { DistributionCurrentData, DistributionEvent } from "../distribution/distributionTypes";
 import { RESTORE_INPROGRESS_FILE } from "./restoreSentinel";
+import {
+  isDirectoryInRestoreScope,
+  isFileInRestoreScope,
+  validateRestoreScope,
+  type RestoreScope,
+} from "./restoreScope";
+import { getLabels } from "../labels/labelsStore";
 import type { MonthFolderInfo } from "../population/monthFolder";
 import type { MonthManifestData, MonthRawData, PopulationFinalData } from "../population/monthTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
@@ -39,6 +47,7 @@ import {
   getSampleMainDir,
   getSystemRoot,
   getTemplatesRoot,
+  LEGACY_MONTH_SUBFOLDERS,
   POPULATION_SUBFOLDERS,
   SYSTEM_FOLDER_NAMES,
   WORKSPACE_ROOTS,
@@ -66,6 +75,8 @@ const AUTO_SETTINGS_FILE = "auto-backup-settings.json";
 // purpose-built signal alongside that existing informal one, not a
 // replacement for it.
 const BACKUP_COMPLETE_FILE = "backup.complete.json";
+/** The backup-folder child holding the restorable mirror of the workspace tree. */
+export const BACKUP_JSON_FOLDER = "json";
 /** Derived, rebuildable fold cache — never restored, and dropped when its events change under it. */
 const DISTRIBUTION_CURRENT_FILE = "distribution.current.json";
 // `DISTRIBUTION_CHECKPOINT_FILE` (imported from distributionStorage) is the
@@ -215,7 +226,16 @@ export type CreateBackupOptions = {
 
 export type RestoreResult =
   | { ok: true; restoredFiles: string[]; rollbackFolderName: string }
-  | { ok: false; error: string };
+  | {
+      ok: false;
+      error: string;
+      /**
+       * Set once the destructive walk had STARTED (sentinel written): the pre-restore
+       * rollback backup to roll back from, and a signal that live data may have
+       * changed even though the restore failed.
+       */
+      rollbackFolderName?: string;
+    };
 
 function backupFolderName(now: Date, mode: BackupMode): string {
   const y = now.getFullYear();
@@ -459,7 +479,7 @@ async function collectEntries(dir: DirectoryHandleLike): Promise<DirectoryEntryL
  * restoring a stale `.bak` over a good file is exactly the corruption the safe
  * write layer exists to prevent. Suffix equality keeps all three excluded.
  */
-function isSnapshotPayloadFile(name: string): boolean {
+export function isSnapshotPayloadFile(name: string): boolean {
   return name.endsWith(".json") || isSegmentFile(name);
 }
 
@@ -799,7 +819,7 @@ async function copyAllJsonFiles(
   directoryHandle: DirectoryHandleLike,
   backupDir: DirectoryHandleLike
 ): Promise<CopyWalkResult> {
-  const jsonDir = await ensureDir(backupDir, "json");
+  const jsonDir = await ensureDir(backupDir, BACKUP_JSON_FOLDER);
   const pending = await collectJsonFileEntries({
     sourceDir: directoryHandle,
     targetDir: jsonDir,
@@ -885,9 +905,10 @@ async function copyAllJsonFiles(
  *    mirror is a pure projection of `distribution.current.json`, itself
  *    always rebuilt from the (correctly merged) event log.
  */
-type RestoreAction = "replace" | "merge-events" | "restore-if-absent" | "skip-derived";
+export type RestoreAction = "replace" | "merge-events" | "restore-if-absent" | "skip-derived";
 
-function restoreActionFor(fileName: string): RestoreAction {
+/** Exported for the selective-restore preview, which must count exactly what the walk would restore. */
+export function restoreActionFor(fileName: string): RestoreAction {
   if (fileName.endsWith(DISTRIBUTION_EVENT_SEGMENT_SUFFIX)) return "merge-events";
   if (fileName === DISTRIBUTION_CURRENT_FILE || fileName === DISTRIBUTION_CHECKPOINT_FILE) return "skip-derived";
   // Suffix/exact match, not substring: EMPLOYEE_MIRROR_SUFFIX (".samples.json")
@@ -958,6 +979,12 @@ async function collectJsonRestoreEntries(params: {
   cacheDir: DirectoryHandleLike | null;
   /** Inherited from the `*.events/` directory's own NAME; null everywhere else. */
   eventsDirName: string | null;
+  /**
+   * Workstream D: when non-null, only what the selective-restore catalog
+   * (restoreScope.ts) places inside this scope is walked. A pruned directory is
+   * never created on the target side. `null` is the full restore, unchanged.
+   */
+  scope: RestoreScope | null;
 }): Promise<{ pending: PendingJsonRestore[]; skippedPaths: string[] }> {
   const pending: PendingJsonRestore[] = [];
   const skippedPaths: string[] = [];
@@ -965,6 +992,7 @@ async function collectJsonRestoreEntries(params: {
   for (const entry of await collectEntries(params.sourceDir)) {
     if (entry.kind === "directory") {
       const relativePath = params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name;
+      if (params.scope && !isDirectoryInRestoreScope(relativePath, params.scope)) continue;
       const sourceChild = await tryGetDirectory(params.sourceDir, entry.name);
       if (!sourceChild) {
         skippedPaths.push(relativePath);
@@ -987,6 +1015,7 @@ async function collectJsonRestoreEntries(params: {
         sourcePath: relativePath,
         cacheDir: isEventsDir ? params.targetDir : params.cacheDir,
         eventsDirName: isEventsDir ? entry.name : params.eventsDirName,
+        scope: params.scope,
       });
       pending.push(...nested.pending);
       skippedPaths.push(...nested.skippedPaths);
@@ -994,6 +1023,8 @@ async function collectJsonRestoreEntries(params: {
     }
 
     if (entry.kind !== "file" || !isSnapshotPayloadFile(entry.name)) continue;
+    const fileRelativePath = params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name;
+    if (params.scope && !isFileInRestoreScope(fileRelativePath, params.scope)) continue;
     const action = restoreActionFor(entry.name);
     // Dropped at collection time rather than in the executor: a derived cache is
     // not a restore that "failed", so it must not reach the pending list at all
@@ -1171,6 +1202,8 @@ async function restoreJsonTree(params: {
    *  collectJsonRestoreEntries' skippedPaths (F1) — a subdirectory that could
    *  not be reached during the restore walk. */
   skipped: string[];
+  /** Workstream D — absent means the full restore, byte-for-byte unchanged. */
+  scope?: RestoreScope;
 }): Promise<void> {
   const { pending, skippedPaths } = await collectJsonRestoreEntries({
     sourceDir: params.sourceDir,
@@ -1178,6 +1211,7 @@ async function restoreJsonTree(params: {
     sourcePath: params.sourcePath,
     cacheDir: null,
     eventsDirName: null,
+    scope: params.scope ?? null,
   });
   params.skipped.push(...skippedPaths);
 
@@ -1267,6 +1301,15 @@ async function restoreJsonTree(params: {
   }
   await invalidateDistributionCaches(cacheDirs);
   await republishRestoredDistributionStamps(cacheDirs);
+
+  // A restore that merged `answers.events/` lines rewrote segment bytes under
+  // this tab's incremental read cache (byte offsets + sealed-segment
+  // confirmations). Both are rebuildable, so drop them: the next read is a full
+  // one and cannot skip a segment the merge just grew.
+  if (applied.some((result) => result.eventsDirName === ANSWER_EVENTS_DIR)) {
+    clearAnswerEventsCache();
+    invalidateSealedAnswerSegments();
+  }
 }
 
 type LocatedJson<T> =
@@ -1342,9 +1385,9 @@ async function loadMonthJson<T>(
   // depend on those obsolete names.
   const legacyFolder =
     path[0] === POPULATION_SUBFOLDERS.raw
-      ? "raw"
+      ? LEGACY_MONTH_SUBFOLDERS.raw
       : path[0] === POPULATION_SUBFOLDERS.processed
-        ? "processed"
+        ? LEGACY_MONTH_SUBFOLDERS.processed
         : null;
   if (!legacyFolder) return null;
   const legacy = await readJsonAt<T>(monthDir, [legacyFolder, ...path.slice(1)]);
@@ -1775,12 +1818,35 @@ async function assertBackupComplete(
   }
 }
 
+/**
+ * Open a backup's `json/` mirror for READING, refusing an unfinished backup
+ * exactly as restoreBackupSnapshot does. Creates nothing (getBackupsDir is a
+ * writer's helper and would). Used by the selective-restore preview and plan.
+ */
+export async function openCompleteBackupJsonDir(
+  directoryHandle: DirectoryHandleLike,
+  backupFolderName: string
+): Promise<DirectoryHandleLike> {
+  const systemDir = await getSystemRoot(directoryHandle, false);
+  const backupsDir = await systemDir.getDirectoryHandle(BACKUPS_FOLDER, { create: false });
+  const backupDir = await backupsDir.getDirectoryHandle(backupFolderName, { create: false });
+  await assertBackupComplete(backupDir, backupFolderName);
+  return backupDir.getDirectoryHandle(BACKUP_JSON_FOLDER, { create: false });
+}
+
 export async function restoreBackupSnapshot(params: {
   directoryHandle: DirectoryHandleLike;
   months: MonthFolderInfo[];
   backupFolderName: string;
   username: string;
+  /**
+   * Workstream D selective restore: only these elements × months are put
+   * back. Absent = the full restore, unchanged. The rollback backup is always
+   * a FULL backup and the sentinel contract is identical either way.
+   */
+  scope?: RestoreScope;
 }): Promise<RestoreResult> {
+  let startedRollbackFolder: string | undefined;
   try {
     // Restoring is the highest-stakes write in the app (it overwrites the live
     // workspace) — re-check write access up front rather than discovering the
@@ -1793,7 +1859,13 @@ export async function restoreBackupSnapshot(params: {
       // merge-events semantics a truncated segment set would be quietly merged
       // in as if it were the full history.
       await assertBackupComplete(sourceBackupDir, params.backupFolderName);
-      const jsonDir = await sourceBackupDir.getDirectoryHandle("json", { create: false });
+      // Workstream D: an unusable scope is refused BEFORE the rollback backup
+      // and the sentinel — nothing has been touched, so there is nothing to
+      // roll back and nothing to flag as interrupted.
+      if (params.scope && validateRestoreScope(params.scope) !== null) {
+        return { ok: false, error: getLabels().restore_scope_invalid };
+      }
+      const jsonDir = await sourceBackupDir.getDirectoryHandle(BACKUP_JSON_FOLDER, { create: false });
       const rollback = await createBackup(params.directoryHandle, params.months, params.username, "pre-restore");
       if (!rollback.ok) {
         return { ok: false, error: `تعذر إنشاء نسخة الرجوع قبل الاستعادة: ${rollback.error}` };
@@ -1812,6 +1884,7 @@ export async function restoreBackupSnapshot(params: {
         startedAt: new Date().toISOString(),
         startedBy: params.username,
       });
+      startedRollbackFolder = rollback.folderName;
 
       const restored: string[] = [];
       const skipped: string[] = [];
@@ -1821,6 +1894,7 @@ export async function restoreBackupSnapshot(params: {
         sourcePath: "",
         restored,
         skipped,
+        scope: params.scope,
       });
 
       // F1: a subdirectory that collectJsonRestoreEntries could not reach
@@ -1834,6 +1908,7 @@ export async function restoreBackupSnapshot(params: {
         return {
           ok: false,
           error: `اكتملت الاستعادة جزئياً فقط: تعذر الوصول إلى ${skipped.length} مجلد فرعي داخل نسخة النسخ الاحتياطي أثناء الاستعادة.`,
+          rollbackFolderName: rollback.folderName,
         };
       }
 
@@ -1854,7 +1929,11 @@ export async function restoreBackupSnapshot(params: {
       return { ok: true, restoredFiles: restored, rollbackFolderName: rollback.folderName };
     });
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "Unknown error" };
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+      ...(startedRollbackFolder ? { rollbackFolderName: startedRollbackFolder } : {}),
+    };
   }
 }
 

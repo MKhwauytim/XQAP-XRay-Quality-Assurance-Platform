@@ -11,6 +11,7 @@ import { DEFAULT_POPULATION_CONFIG } from "../../../../../data/population/popula
 import type { PopulationConfig } from "../../../../../data/population/populationConfig";
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
+import { DEFAULT_LABELS } from "../../../../../data/labels/labelsStore";
 
 vi.mock("../../../../../auth/userManagement", () => ({
   getManagedLoginUsers: () => [
@@ -178,5 +179,20 @@ describe("PhaseFourDistribution — port restrictions", () => {
     const jedRow = rows.find((r) => within(r).queryByText("ميناء جدة"));
     const jedSelect = within(jedRow as HTMLElement).getByRole("combobox");
     expect(within(jedSelect).getByText("الموظف الأول")).toBeInTheDocument();
+  });
+
+  it("warns in the preview when a restricted expert cannot reach their share", () => {
+    const config: PopulationConfig = {
+      ...DEFAULT_POPULATION_CONFIG,
+      // A port with no sample rows at all: employee.one can take nothing.
+      employeePortRestrictions: [{ username: "employee.one", restricted: true, enabledPorts: ["ميناء ينبع"] }],
+    };
+    render(<PhaseFourDistribution {...baseProps({ config })} />);
+
+    const expected = DEFAULT_LABELS.p4_bulk_target_shortfall_item
+      .replace("{name}", "الموظف الأول")
+      .replace("{achieved}", "0")
+      .replace("{target}", "1");
+    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes(expected))).toBe(true);
   });
 });

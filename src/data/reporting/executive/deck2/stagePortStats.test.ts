@@ -69,20 +69,25 @@ describe("collectStagePortStats", () => {
     );
 
     const byStage = collectStagePortStats(model);
-    const stage1 = byStage.get("المستوى الأول") ?? [];
+    const stage1 = byStage.get("first") ?? [];
     expect(stage1.map((p) => p.name)).toEqual(["ميناء أ", "ميناء ب"]);
     expect(stage1[0]).toMatchObject({ total: 2, clean: 1, suspicious: 1 });
     expect(stage1[1]).toMatchObject({ total: 1, clean: 1, suspicious: 0 });
 
-    const stage2 = byStage.get("المستوى الثاني") ?? [];
+    const stage2 = byStage.get("second") ?? [];
     expect(stage2).toHaveLength(1);
     expect(stage2[0]).toMatchObject({ name: "ميناء أ", total: 1 });
   });
 
-  it("canonicalizes RAW Excel stage aliases so cards keyed by canonical labels find them (real-data regression)", () => {
+  it("CHANGED (C1): canonicalizes RAW Excel stage aliases so cards keyed by canonical stage keys find them (real-data regression)", () => {
     // Real workspaces store the raw Excel alias in row.stage ("SECOND_STAG",
     // "2", "الثاني", ...), not the canonical label. Raw-key grouping produced
-    // empty port tables and zero سليمة/اشتباه sums in the live deck.
+    // empty port tables and zero سليمة/اشتباه sums in the live deck. Since C1
+    // (2026-09-28), both the model (`StageProfile.stageKey`) and this
+    // collector key on the SAME canonical stage key ("first"…"fourth",
+    // "unknown") via `getStageKey`, never on a label — a label collides for
+    // every unmapped row once `stageLabelForKey("unknown")` became a single
+    // fixed "غير محدد" constant instead of echoing each row's own raw text.
     const model = buildReportModel(
       input([
         popRow({ xrayImageId: "1", stage: "FIRST_STAGE", portName: "ميناء أ" }),
@@ -90,20 +95,25 @@ describe("collectStagePortStats", () => {
         popRow({ xrayImageId: "3", stage: "SECOND_STAG", portName: "ميناء ب" }),
         popRow({ xrayImageId: "4", stage: "الثاني", portName: "ميناء ب" }),
         popRow({ xrayImageId: "5", stage: "قيمة غير معروفة", portName: "ميناء ج" }),
+        popRow({ xrayImageId: "6", stage: "LEVEL-X", portName: "ميناء ج" }),
       ]),
     );
 
     const byStage = collectStagePortStats(model);
-    const stage1 = byStage.get("المستوى الأول") ?? [];
+    const stage1 = byStage.get("first") ?? [];
     expect(stage1).toHaveLength(1);
     expect(stage1[0]).toMatchObject({ name: "ميناء أ", total: 2, clean: 1, suspicious: 1 });
 
-    const stage2 = byStage.get("المستوى الثاني") ?? [];
+    const stage2 = byStage.get("second") ?? [];
     expect(stage2).toHaveLength(1);
     expect(stage2[0]).toMatchObject({ name: "ميناء ب", total: 2 });
 
-    // Unknown aliases stay under their raw string (fallback-branch behavior).
-    expect(byStage.get("قيمة غير معروفة")?.[0]).toMatchObject({ name: "ميناء ج", total: 1 });
+    // Every unmapped alias collapses into the single "unknown" bucket (C1) —
+    // never its own raw string: two DIFFERENT unmapped raw values share one
+    // bucket and their totals are summed.
+    expect(byStage.get("unknown")).toHaveLength(1);
+    expect(byStage.get("unknown")?.[0]).toMatchObject({ name: "ميناء ج", total: 2 });
+    expect([...byStage.keys()].sort()).toEqual(["first", "second", "unknown"]);
   });
 
   it("sums to the same totals as model.population.byStage (the invariant the design spec requires)", () => {
@@ -131,7 +141,7 @@ describe("collectStagePortStats", () => {
     const byStage = collectStagePortStats(model);
 
     for (const stageProfile of model.population.byStage) {
-      const ports = byStage.get(stageProfile.stageLabel) ?? [];
+      const ports = byStage.get(stageProfile.stageKey) ?? [];
       const summedTotal = ports.reduce((sum, p) => sum + p.total, 0);
       const summedSample = ports.reduce((sum, p) => sum + p.sampleTotal, 0);
       expect(summedTotal).toBe(stageProfile.population);
@@ -197,7 +207,7 @@ describe("collectStagePortStats", () => {
 
     // But collectStagePortStats always tallies the real rows it's given, regardless
     // of what the frozen allocation says.
-    const ports = collectStagePortStats(model).get("المستوى الأول") ?? [];
+    const ports = collectStagePortStats(model).get("first") ?? [];
     const summedTotal = ports.reduce((sum, p) => sum + p.total, 0);
     expect(summedTotal).toBe(3);
   });

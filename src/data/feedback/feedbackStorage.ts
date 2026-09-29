@@ -1,9 +1,10 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
-import { casLoop } from "../storage/casLoop";
+import { casLoop, readBackOwnWrite } from "../storage/casLoop";
 import {
   createDeadline,
   INTERACTIVE_WRITE_DEADLINE_MS,
+  type OperationDeadline,
 } from "../storage/operationDeadline";
 import { withResourceLock } from "../storage/webLocks";
 import { getFeedbackDir, getFeedbackThreadsDir, getLegacyFeedbackDir } from "../workspace/workspacePaths";
@@ -13,6 +14,13 @@ import { logError } from "../storage/errorLogger";
 export type FeedbackCategory = "suggestion" | "issue" | "inquiry";
 
 export interface FeedbackReply {
+  /**
+   * Stable identity of THIS reply, stamped once per `appendReply` call. Makes the
+   * append idempotent across casLoop attempts: an attempt that finds its own id
+   * already in the thread knows the write landed and writes nothing. Optional,
+   * so replies written before it existed still parse.
+   */
+  id?: string;
   from: string;
   role: string;
   text: string;
@@ -28,6 +36,18 @@ export interface FeedbackMessage {
   timestamp: string;
   status: "open" | "resolved";
   replies: FeedbackReply[];
+  /**
+   * When and by whom the thread was first resolved (Workstream B, 2026-09-28).
+   * OPTIONAL and ADDITIVE: set by `appendReply` only on the open -> resolved
+   * transition, from the resolving reply. Threads resolved before this field
+   * existed, and legacy `messages.json` entries, simply lack both -- no
+   * migration, because no existing field changes shape. Consumers that need a
+   * value for those (the admin export) approximate it from the last reply and
+   * say so. A future reopen path MUST clear these stamps (or deliberately keep
+   * them and say so): `appendReply` only writes them on open -> resolved.
+   */
+  resolvedAt?: string;
+  resolvedBy?: string;
 }
 
 /**
@@ -243,7 +263,8 @@ export async function loadThreadsIndex(
  */
 async function updateThreadsIndex(
   dir: DirectoryHandleLike,
-  apply: (threads: FeedbackThreadSummary[]) => FeedbackThreadSummary[]
+  apply: (threads: FeedbackThreadSummary[]) => FeedbackThreadSummary[],
+  deadline?: OperationDeadline
 ): Promise<void> {
   const feedbackDir = await getFeedbackDir(dir, true);
   // `:index` suffix keeps this outer lock distinct from safeWriteJson's own
@@ -264,19 +285,24 @@ async function updateThreadsIndex(
           _writeToken: writeToken,
           threads: apply(current.threads),
         };
-        await safeWriteJson<FeedbackThreadsIndex>(feedbackDir, FEEDBACK_THREADS_INDEX_FILE, updated);
-        const verify = await safeReadJson<FeedbackThreadsIndex>(
+        const written = await safeWriteJson<FeedbackThreadsIndex>(
           feedbackDir,
-          FEEDBACK_THREADS_INDEX_FILE
+          FEEDBACK_THREADS_INDEX_FILE,
+          updated,
+          { deadline }
         );
-        if (
-          verify.ok &&
-          verify.value.revision === nextRevision &&
-          verify.value._writeToken === writeToken
-        ) {
-          return { done: true, result: { ok: true as const } };
-        }
-        return { done: false };
+        // E3b: a commit whose own read-back was stale is verified once by the
+        // token read, or accepted if that is inconclusive too — never re-committed.
+        const verdict = await readBackOwnWrite(
+          written,
+          () => safeReadJson<FeedbackThreadsIndex>(feedbackDir, FEEDBACK_THREADS_INDEX_FILE),
+          (verify) =>
+            verify.ok &&
+            verify.value.revision === nextRevision &&
+            verify.value._writeToken === writeToken,
+          "feedback:threadsIndex"
+        );
+        return verdict === "not-mine" ? { done: false } : { done: true, result: { ok: true as const } };
       },
       {
         context: "feedback:threadsIndex",
@@ -291,6 +317,7 @@ async function updateThreadsIndex(
         maxRetries: 3,
         baseDelayMs: 100,
         conflictError: "تعذّر تحديث فهرس الملاحظات: تعارض في الكتابة بعد عدة محاولات.",
+        deadline,
         // The RAW cause, not just the Arabic sentence the catch sites keep. The
         // incident's feedback entries were Arabic-only and could not be tied to
         // a platform condition at all until they were paired with
@@ -308,6 +335,63 @@ async function updateThreadsIndex(
   if (!outcome.ok) {
     throw new Error(outcome.error);
   }
+}
+
+/**
+ * Index writes started by `createThread` / `appendReply` that have not settled
+ * yet. Only `flushPendingFeedbackIndexWrites` reads this.
+ */
+const pendingIndexWrites = new Set<Promise<void>>();
+
+/**
+ * FIRE-AND-FORGET update of the rebuildable `threads.index.json` after a
+ * create or a status change (Workstream B, 2026-09-28).
+ *
+ * The durable content -- the thread file -- is already written and verified
+ * when this runs, and `listThreadSummaries` reconciles any thread the index
+ * does not know, so nothing the user wrote rides on this write. It used to be
+ * AWAITED, which put a CAS loop on the single most contended feedback file
+ * between the user's click and "sent". A failure is still logged under
+ * `context`, exactly as the awaited version logged it.
+ */
+function scheduleThreadsIndexUpdate(
+  dir: DirectoryHandleLike,
+  apply: (threads: FeedbackThreadSummary[]) => FeedbackThreadSummary[],
+  context: string
+): void {
+  const write: Promise<void> = updateThreadsIndex(
+    dir,
+    apply,
+    createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "feedback:threadsIndex")
+  )
+    .catch((error: unknown) => {
+      logError(context, error);
+    })
+    .finally(() => {
+      pendingIndexWrites.delete(write);
+    });
+  pendingIndexWrites.add(write);
+}
+
+/**
+ * Resolves once every background index write started so far has settled
+ * (including any started while waiting). Never rejects -- failures were
+ * already logged. For tests, and for any caller that must observe the index
+ * after a create or resolve.
+ */
+export async function flushPendingFeedbackIndexWrites(): Promise<void> {
+  while (pendingIndexWrites.size > 0) {
+    await Promise.allSettled([...pendingIndexWrites]);
+  }
+}
+
+/**
+ * The index row for `thread` as it stands now -- what `listThreadSummaries`
+ * would report for it. Exported so the widget can apply a thread it just wrote
+ * to its list without re-reading the index.
+ */
+export function summarizeFeedbackThread(thread: FeedbackThread): FeedbackThreadSummary {
+  return summarize(thread, lastActivityOf(thread));
 }
 
 function summarize(thread: FeedbackThread, lastActivityAt: string): FeedbackThreadSummary {
@@ -331,7 +415,7 @@ function summarize(thread: FeedbackThread, lastActivityAt: string): FeedbackThre
  * name. That is the actual contention fix — under the old shared-log design
  * this same operation rewrote a file every other user was also rewriting.
  *
- * The index append runs second and is genuinely best-effort: if it fails after
+ * The index append runs second, in the background (never awaited), and is genuinely best-effort: if it fails after
  * the thread landed, the message IS on disk, and `listThreadSummaries`
  * reconciles it back in on the next read whether or not the index is ever
  * repaired.
@@ -362,16 +446,19 @@ export async function createThread(
   };
 
   const threadsDir = await getFeedbackThreadsDir(dir, true);
-  await safeWriteJson<FeedbackThread>(threadsDir, feedbackThreadFileName(thread.id), thread);
+  await safeWriteJson<FeedbackThread>(threadsDir, feedbackThreadFileName(thread.id), thread, {
+    deadline: createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "feedback:createThread"),
+  });
 
-  try {
-    await updateThreadsIndex(dir, (threads) => [
+  // Background, never awaited -- see scheduleThreadsIndexUpdate.
+  scheduleThreadsIndexUpdate(
+    dir,
+    (threads) => [
       ...threads.filter((summary) => summary.threadId !== thread.id),
       summarize(thread, thread.timestamp),
-    ]);
-  } catch (error) {
-    logError("feedback:createThreadIndex", error);
-  }
+    ],
+    "feedback:createThreadIndex"
+  );
 
   return thread;
 }
@@ -404,6 +491,15 @@ export async function appendReply(
   const threadsDir = await getFeedbackThreadsDir(dir, true);
   const fileName = feedbackThreadFileName(threadId);
   let statusChanged = false;
+  // One identity per CALL (not per attempt): see FeedbackReply.id.
+  const storedReply: FeedbackReply = { ...reply, id: reply.id ?? crypto.randomUUID() };
+  // Posting a reply is an interactive click, but this loop took casLoop's
+  // DEFAULT ladder (10 x 200 ms) WITH a delayed verify re-read, nested over
+  // safeWriteJson's own multi-second ladders — minutes of sleeping before the
+  // user is told the reply failed. That is symptom E ("replying to a ticket
+  // takes forever") from the 2026-09-13 reports. The SAME budget bounds the
+  // loop and the read-back ladders inside each write.
+  const deadline = createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "feedback:threadReply");
 
   const outcome = await withResourceLock(`${threadsDir.name}/${fileName}:rmw`, () =>
     casLoop<{ ok: true; thread: FeedbackThread }>(
@@ -415,23 +511,41 @@ export async function appendReply(
           throw new Error(`Feedback thread not found: ${threadId}`);
         }
         const current = normalizeThread(existing.value);
+        // Idempotent by reply id: a previous attempt of THIS call whose commit
+        // landed but could not be read back (or was overwritten and re-landed)
+        // is already in the file. Write nothing — re-committing would either
+        // duplicate the reply or re-arm the same unreadable window.
+        if (current.replies.some((candidate) => candidate.id === storedReply.id)) {
+          return { done: true, result: { ok: true as const, thread: current } };
+        }
         const nextRevision = (current.revision ?? 0) + 1;
         const nextStatus = resolve ? "resolved" : current.status;
         statusChanged = nextStatus !== current.status;
         const updated: FeedbackThread = {
           ...current,
           status: nextStatus,
-          replies: [...current.replies, reply],
+          replies: [...current.replies, storedReply],
+          // Stamped ONCE, on the transition itself: re-resolving an already
+          // resolved thread keeps the first resolution.
+          ...(statusChanged ? { resolvedAt: storedReply.timestamp, resolvedBy: storedReply.from } : {}),
           revision: nextRevision,
           _writeToken: writeToken,
         };
-        await safeWriteJson<FeedbackThread>(threadsDir, fileName, updated);
-        const verify = await safeReadJson<FeedbackThread>(threadsDir, fileName);
-        if (
-          verify.ok &&
-          verify.value.revision === nextRevision &&
-          verify.value._writeToken === writeToken
-        ) {
+        const written = await safeWriteJson<FeedbackThread>(threadsDir, fileName, updated, { deadline });
+        const verdict = await readBackOwnWrite(
+          written,
+          () => safeReadJson<FeedbackThread>(threadsDir, fileName),
+          (verify) =>
+            verify.ok &&
+            verify.value.revision === nextRevision &&
+            verify.value._writeToken === writeToken,
+          "feedback:threadReply"
+        );
+        // A reply is DURABLE user content: "unconfirmed" is no evidence it is
+        // there, so it is retried (the next attempt finds our reply id and
+        // writes nothing, or writes it) — never accepted blind, unlike the
+        // rebuildable index.
+        if (verdict === "mine") {
           return {
             done: true,
             result: { ok: true as const, thread: updated },
@@ -450,12 +564,7 @@ export async function appendReply(
       {
         context: "feedback:threadReply",
         conflictError: "تعذّر حفظ الرد: تعارض في الكتابة بعد عدة محاولات.",
-        // Posting a reply is an interactive click, but this loop took casLoop's
-        // DEFAULT ladder (10 x 200 ms) WITH a delayed verify re-read, nested
-        // over safeWriteJson's own multi-second ladders — minutes of sleeping
-        // before the user is told the reply failed. That is symptom E ("replying
-        // to a ticket takes forever") from the 2026-09-13 reports.
-        deadline: createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "feedback:threadReply"),
+        deadline,
       }
     )
   );
@@ -464,29 +573,30 @@ export async function appendReply(
   }
 
   if (statusChanged) {
-    try {
-      await updateThreadsIndex(dir, (threads) =>
+    // The reply AND the status flip are already durable in the thread file,
+    // verified above. This is the same rebuildable-cache write `createThread`
+    // treats as best-effort, and for the same reason: throwing here told the
+    // user their reply had failed AFTER it provably landed — the false-failure
+    // shape of the 2026-08-25 incident — which invites them to send it again.
+    // Since Workstream B it is not even awaited (scheduleThreadsIndexUpdate).
+    //
+    // The cost of losing this write, stated plainly so it is a contract and
+    // not an accident: the panel's summary row can show a stale status chip
+    // until the next successful index write. The repair path does not heal
+    // that, because it only folds in ids the index does not know — it never
+    // re-reads a thread the index already lists. The thread itself is correct
+    // the moment anyone opens it.
+    const nextStatus = outcome.thread.status;
+    scheduleThreadsIndexUpdate(
+      dir,
+      (threads) =>
         threads.map((summary) =>
           summary.threadId === threadId
-            ? { ...summary, status: outcome.thread.status, lastActivityAt: reply.timestamp }
+            ? { ...summary, status: nextStatus, lastActivityAt: reply.timestamp }
             : summary
-        )
-      );
-    } catch (error) {
-      // The reply AND the status flip are already durable in the thread file,
-      // verified above. This is the same rebuildable-cache write `createThread`
-      // treats as best-effort, and for the same reason: throwing here told the
-      // user their reply had failed AFTER it provably landed — the false-failure
-      // shape of the 2026-08-25 incident — which invites them to send it again.
-      //
-      // The cost of losing this write, stated plainly so it is a contract and
-      // not an accident: the panel's summary row can show a stale status chip
-      // until the next successful index write. The repair path does not heal
-      // that, because it only folds in ids the index does not know — it never
-      // re-reads a thread the index already lists. The thread itself is correct
-      // the moment anyone opens it.
-      logError("feedback:statusIndex", error);
-    }
+        ),
+      "feedback:statusIndex"
+    );
   }
 
   return outcome.thread;
@@ -956,20 +1066,29 @@ async function ensureMigrated(dir: DirectoryHandleLike): Promise<void> {
   }
 }
 
-/** Compatibility wrapper — the widget, the sync tests and the unread tests all call this name. */
+/**
+ * Compatibility wrapper — the widget, the sync tests and the unread tests all
+ * call this name. Returns the thread exactly as written so the caller can
+ * apply it optimistically instead of re-reading the feedback directory.
+ */
 export async function submitFeedback(
   dir: DirectoryHandleLike,
   payload: { from: string; role: string; category: FeedbackCategory; text: string }
-): Promise<void> {
-  await createThread(dir, payload);
+): Promise<FeedbackThread> {
+  return createThread(dir, payload);
 }
 
-/** Compatibility wrapper — the widget, the sync tests and the unread tests all call this name. */
+/**
+ * Compatibility wrapper — the widget, the sync tests and the unread tests all
+ * call this name. Returns the verified, just-written thread (it used to be
+ * discarded, which forced the widget to re-read the whole directory to show
+ * the reply it had just posted).
+ */
 export async function replyToFeedback(
   dir: DirectoryHandleLike,
   messageId: string,
   reply: FeedbackReply,
   resolve: boolean
-): Promise<void> {
-  await appendReply(dir, messageId, reply, resolve);
+): Promise<FeedbackThread> {
+  return appendReply(dir, messageId, reply, resolve);
 }

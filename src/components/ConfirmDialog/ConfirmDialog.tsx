@@ -23,6 +23,8 @@ type ConfirmDialogProps = {
   cancelLabel?: string;
   /** Red styling for destructive confirms (delete, replace, reset). */
   danger?: boolean;
+  /** Omit the confirm button — for an explanation the user can only dismiss. */
+  hideConfirm?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 };
@@ -34,6 +36,7 @@ export function ConfirmDialog({
   confirmLabel = getLabels().confirm_dialog_default_ok,
   cancelLabel = getLabels().confirm_dialog_default_cancel,
   danger = false,
+  hideConfirm = false,
   onConfirm,
   onCancel
 }: ConfirmDialogProps) {
@@ -75,13 +78,15 @@ export function ConfirmDialog({
           >
             {cancelLabel}
           </button>
-          <button
-            type="button"
-            className="confirm-dialog__btn confirm-dialog__btn--confirm"
-            onClick={onConfirm}
-          >
-            {confirmLabel}
-          </button>
+          {!hideConfirm && (
+            <button
+              type="button"
+              className="confirm-dialog__btn confirm-dialog__btn--confirm"
+              onClick={onConfirm}
+            >
+              {confirmLabel}
+            </button>
+          )}
         </div>
       </section>
     </div>

@@ -420,3 +420,17 @@
   color: var(--c-ink-3);
   line-height: 1.5;
 }
+
+/* Admin export (all-messages tab) — Workstream B */
+.fb-export {
+  padding: 10px 16px 0;
+  flex-shrink: 0;
+}
+.fb-export-notice {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--c-ink-3);
+}
+.fb-export-notice.is-error,
+.fb-export-notice.is-partial { color: var(--c-danger); }

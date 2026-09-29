@@ -6,7 +6,7 @@ import { useMemo, useState } from "react";
 import { AlertTriangle, RotateCw } from "lucide-react";
 import { ModalShell } from "../../../../../ModalShell/ModalShell";
 import { readUserManagementState } from "../../../../../../auth/userManagement";
-import type { FieldAnswer, ItemAnswer } from "../../../../../../data/answers/answerTypes";
+import type { AnswerSaveOutcome, FieldAnswer, ItemAnswer } from "../../../../../../data/answers/answerTypes";
 import { isNoImageSubmission } from "../../../../../../data/answers/noImageAnswer";
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
 import { isAssignableSampleRole } from "../../../../../../data/distribution/bulkAssignment";
@@ -27,7 +27,10 @@ import InspectionPanel from "../../../../../../components/InspectionPanel";
 import Pagination from "../../../../../../components/Pagination/Pagination";
 import { clampPage, pageSlice } from "../../../../../../utils/paginationUtils";
 import { useLabels, type Labels } from "../../../../../../data/labels/useLabels";
-import { CASE_FILTERS, type CaseFilter, type CaseFilterCounts } from "./caseFilter";
+import { CASE_FILTERS, type CaseFilter, type CaseFilterCounts, type CaseFilterState } from "./caseFilter";
+import type { CertScanFilter } from "../../../../../../data/population/certScanFilter";
+import CertScanFilterChips from "../../../../../CertScanFilterChips/CertScanFilterChips";
+import { certScanStatusFilterProps } from "../certScanColumn";
 import { displayXrayImageId } from "../../../../../../data/adhocImport/adhocImportEmployeeView";
 import { formatStageLabel } from "../../../../../../data/population/stageHelpers";
 import type { ReplacementIndexRow } from "../../../../../../data/population/replacementIndexTypes";
@@ -44,7 +47,7 @@ export const SELECT_COL_ID = "__select__";
 export function buildXrayColumns(L: Labels): DataTableCol<DistributionEntry>[] {
   return [
   { id: "xrayImageId",            label: L.col_xray_image_id,             widthFr: 20, alwaysVisible: true, filterKind: "text", accessor: (e) => displayXrayImageId(e) },
-  { id: "stage",                  label: L.col_stage,                     widthFr: 8,  accessor: (e) => e.row.stage },
+  { id: "stage",                  label: L.col_stage,                     widthFr: 8,  accessor: (e) => formatStageLabel(e.row.stage) },
   { id: "assignedTo",             label: L.col_xray_quality_expert,       widthFr: 9,  adminOnly: true,     accessor: (e) => e.assignedTo },
   { id: "portName",               label: L.col_port_name,                 widthFr: 13, accessor: (e) => e.row.portName },
   { id: "xrayEntryDate",          label: L.col_xray_entry_date,           widthFr: 11, isDate: true,        accessor: (e) => e.row.xrayEntryDate },
@@ -63,7 +66,7 @@ export function buildXrayColumns(L: Labels): DataTableCol<DistributionEntry>[] {
   { id: "submittedAt",            label: L.col_expert_observation_date,   widthFr: 13, isDate: true, accessor: () => null },
   { id: "xrayLevelOneResult",     label: L.col_xray_l1_result,            widthFr: 8,  accessor: (e) => e.row.xrayLevelOneResult },
   { id: "xrayLevelTwoResult",     label: L.col_xray_l2_result,            widthFr: 8,  accessor: (e) => e.row.xrayLevelTwoResult },
-  { id: "certScanStatus",         label: L.col_certscan_status,           widthFr: 9,  accessor: (e) => e.row.certScanStatus },
+  { id: "certScanStatus",         label: L.col_certscan_status,           widthFr: 9,  ...certScanStatusFilterProps(L), accessor: (e) => e.row.certScanStatus },
   { id: "declarationNumber",      label: L.col_declaration_number,        widthFr: 11, accessor: (e) => e.row.declarationNumber },
   { id: "declarationDate",        label: L.col_declaration_date,          widthFr: 11, isDate: true,        accessor: (e) => e.row.declarationDate },
   { id: "chassisNumber",          label: L.col_chassis_number,            widthFr: 11, accessor: (e) => e.row.chassisNumber },
@@ -599,6 +602,7 @@ export function SampleDetailPanel({
   onRequestReopen,
   onDraftDirty,
   draftKey,
+  legacyDraftKey,
   onPrevSample,
   onNextSample,
   hasPrevSample,
@@ -609,7 +613,7 @@ export function SampleDetailPanel({
   savedAnswer: ItemAnswer | null;
   readonly: boolean;
   onClose: () => void;
-  onSave: (ans: FieldAnswer[]) => Promise<void>;
+  onSave: (ans: FieldAnswer[]) => Promise<AnswerSaveOutcome | void>;
   onReplace?: (entry: DistributionEntry) => void;
   onReassign?: (entry: DistributionEntry) => void;
   onReopen?: (reason: string) => void;
@@ -630,6 +634,8 @@ export function SampleDetailPanel({
   hasNextSample?: boolean;
   /** Forwarded straight through — see InspectionPanel's own docblock. */
   draftKey?: string;
+  /** Forwarded straight through — see InspectionPanel's own docblock (A1 fix round 1). */
+  legacyDraftKey?: string | null;
 }) {
   return (
     <InspectionPanel
@@ -646,6 +652,7 @@ export function SampleDetailPanel({
       onRequestReopen={onRequestReopen}
       onDraftDirty={onDraftDirty}
       draftKey={draftKey}
+      legacyDraftKey={legacyDraftKey}
       onPrevSample={onPrevSample}
       onNextSample={onNextSample}
       hasPrevSample={hasPrevSample}
@@ -746,16 +753,18 @@ export function ReferralStatsStrip({
   username,
   scope = "own",
   scopeEmployeeName = "",
+  caseFilter = "all",
+  certScan = "any",
 }: {
   stats: PersonalStats;
   quota: PersonalQuota;
   username: string;
   /**
    * Whose numbers `stats` actually describes. An oversight user switched to the
-   * "الكل" view feeds this strip the WHOLE workspace's entries (see
-   * `personalStats` in XrayReferrals.tsx), so labelling it "إحصائياتي" there
-   * misattributed every figure to the current user. Defaults to "own", which is
-   * what a personal-scope user always sees.
+   * "الكل" view feeds this strip the WHOLE workspace's entries, narrowed by the
+   * active case chip (see `computePersonalStats` in XrayReferrals.tsx), so
+   * labelling it "إحصائياتي" there misattributed every figure to the current
+   * user. Defaults to "own", which is what a personal-scope user always sees.
    *
    * "employee" is the third case the scope picker introduced: the figures belong
    * to one NAMED other employee. It is neither "own" nor "all" — reusing either
@@ -765,6 +774,10 @@ export function ReferralStatsStrip({
   scope?: "own" | "all" | "employee";
   /** Display name behind the figures when `scope` is "employee". */
   scopeEmployeeName?: string;
+  /** The active case chip; the title names it so the reader knows the figures are narrowed. */
+  caseFilter?: CaseFilter;
+  /** The active CertScan chip (C2); the title names it too — the figures are narrowed by it. */
+  certScan?: CertScanFilter;
 }) {
   const isAllScope = scope === "all";
   // True whenever the figures are NOT the reader's own — the quota caveat and
@@ -772,12 +785,25 @@ export function ReferralStatsStrip({
   const isForeignScope = scope !== "own";
   const L = useLabels();
   const named = (key: string): string => key.replace("{name}", scopeEmployeeName);
+  const caseSuffix =
+    caseFilter === "risk-targeted"
+      ? L.ew_stats_case_suffix.replace("{filter}", L.ew_stats_case_risk_targeted)
+      : caseFilter === "adhoc"
+        ? L.ew_stats_case_suffix.replace("{filter}", L.ew_stats_case_adhoc)
+        : "";
+  const certScanSuffix =
+    certScan === "any"
+      ? ""
+      : L.ew_stats_case_suffix.replace(
+          "{filter}",
+          certScan === "certscan" ? L.certscan_filter_certscan : L.certscan_filter_noncertscan
+        );
   const statsItems = [
     // The daily quota is always the CURRENT user's own frozen quota, never a
     // workspace aggregate, so it is disambiguated rather than relabelled when
     // the surrounding figures switch to workspace scope.
     {
-      label: isForeignScope ? "حصة اليوم (لي)" : "حصة اليوم",
+      label: isForeignScope ? L.ew_quota_tile_label_mine : L.ew_quota_tile_label,
       value: quota ? quota.dailyQuota.toLocaleString("ar-SA-u-nu-latn") : "—",
       tone: "quota",
     },
@@ -788,9 +814,14 @@ export function ReferralStatsStrip({
     { label: "المستبدلة \\ المحالة", value: stats.replaced.toLocaleString("ar-SA-u-nu-latn"), tone: "replaced" },
     { label: "نسبة الإنجاز", value: `${stats.completionPct}%`, tone: "done" },
   ];
+  // C3: `daysRemaining` is the frozen working-day window (Sun–Thu), not a
+  // countdown — hence «أيام العمل», not «الأيام المتبقية».
   const quotaTitle = quota
-    ? `الحصة اليومية: ${quota.dailyQuota.toLocaleString("ar-SA-u-nu-latn")} صورة / يوم · الحصة: ${quota.sampleCount.toLocaleString("ar-SA-u-nu-latn")} · الأيام المتبقية: ${quota.daysRemaining.toLocaleString("ar-SA-u-nu-latn")}`
-    : "لا توجد حصة محفوظة لهذا الشهر";
+    ? L.ew_quota_tile_title
+        .replace("{daily}", quota.dailyQuota.toLocaleString("ar-SA-u-nu-latn"))
+        .replace("{total}", quota.sampleCount.toLocaleString("ar-SA-u-nu-latn"))
+        .replace("{days}", quota.daysRemaining.toLocaleString("ar-SA-u-nu-latn"))
+    : L.ew_quota_tile_title_none;
 
   return (
     <section
@@ -806,6 +837,7 @@ export function ReferralStatsStrip({
           {scope === "employee"
             ? named(L.ew_queue_stats_employee_title)
             : isAllScope ? "متابعة العمل — جميع الموظفين" : "متابعة العمل"}
+          {caseSuffix}{certScanSuffix}
         </strong>
       </div>
 
@@ -1241,6 +1273,28 @@ export function CaseFilterSwitcher({
 }
 
 /**
+ * The queue's two chip groups side by side (C2): the case chips, then the
+ * CertScan chips, which filter what the case chip already narrowed. Takes the
+ * whole `useCaseFilter` state so the call site in XrayReferrals.tsx stays one
+ * line (that component is at its max-lines-per-function budget).
+ */
+export function CaseFilterBar({ state }: { state: CaseFilterState }) {
+  return (
+    <>
+      <CaseFilterSwitcher value={state.value} counts={state.counts} onChange={state.setValue} />
+      <CertScanFilterChips
+        value={state.certScan}
+        counts={state.certScanCounts}
+        onChange={state.setCertScan}
+        groupClassName="ew-view-switcher ew-case-filter"
+        chipClassName="ew-view-seg"
+        countClassName="ew-case-filter-count"
+      />
+    </>
+  );
+}
+
+/**
  * The queue workspace shell: the stats strip, the two status notices, and the
  * table itself.
  *
@@ -1257,8 +1311,7 @@ export function ReferralWorkspaceShell({
   scope,
   scopeEmployeeName,
   showingRetainedDraft,
-  caseFilterValue,
-  caseFilterCounts,
+  caseFilter,
   labels: L,
   table,
 }: {
@@ -1268,8 +1321,8 @@ export function ReferralWorkspaceShell({
   scope: "own" | "all" | "employee";
   scopeEmployeeName: string;
   showingRetainedDraft: boolean;
-  caseFilterValue: CaseFilter;
-  caseFilterCounts: CaseFilterCounts;
+  /** The queue's chip state: both chips narrow the stats strip and the empty notice. */
+  caseFilter: CaseFilterState;
   labels: Labels;
   table: React.ReactNode;
 }) {
@@ -1281,6 +1334,8 @@ export function ReferralWorkspaceShell({
         username={username}
         scope={scope}
         scopeEmployeeName={scopeEmployeeName}
+        caseFilter={caseFilter.value}
+        certScan={caseFilter.certScan}
       />
       {showingRetainedDraft && (
         <p className="ew-msg-warn" role="status">{L.ew_draft_retained_notice}</p>
@@ -1289,8 +1344,10 @@ export function ReferralWorkspaceShell({
           and its own "no results" row only fires when rows exist and the COLUMN
           filters emptied them — so without this the reader would get a bare
           header and no explanation. */}
-      {caseFilterCounts[caseFilterValue] === 0 && caseFilterCounts.all > 0 && (
-        <p className="ew-case-filter-empty" role="status">{L.ew_case_filter_empty}</p>
+      {caseFilter.entries.length === 0 && caseFilter.counts.all > 0 && (
+        <p className="ew-case-filter-empty" role="status">
+          {caseFilter.certScan === "any" ? L.ew_case_filter_empty : L.ew_case_filter_empty_certscan}
+        </p>
       )}
       {table}
     </div>

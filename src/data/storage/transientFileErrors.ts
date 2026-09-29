@@ -2,7 +2,9 @@ import type { DirectoryHandleLike } from "./fileSystemAccess";
 import { logError } from "./errorLogger";
 // Safe direction: errorCodes.ts imports only labelsStore + errorLogger, so it
 // cannot import back into this module and no cycle is possible.
-import { tagError, type ErrorCode } from "./errorCodes";
+import { isSafeBrowsingAbortError, tagError, type ErrorCode } from "./errorCodes";
+// operationDeadline.ts has no imports of its own, so this adds no cycle either.
+import { nextRetryDelayMs, type OperationDeadline } from "./operationDeadline";
 
 /**
  * Transient File System Access failures, and the one distinction that matters
@@ -118,9 +120,73 @@ export function isLockContentionError(error: unknown): boolean {
  * `casLoop`, which reported the XQ-IO-032 catch-all — telling four production
  * users their save had failed for an unknown reason while their typed
  * inspection answers were dropped.
+ *
+ * CORRECTION (E1b, 2026-09-28 — see
+ * `.superpowers/sdd/errorlog-2026-09-28/answer-save-invalidstate.md`): the
+ * "retry re-acquires a fresh snapshot" remedy above is correct for the READ
+ * path, but on the append-only event log's segment WRITE, a persistent
+ * `InvalidStateError` on `close()` is not a stale snapshot at all — it is
+ * Chromium collapsing every swap-file→target Move failure (a sharing
+ * violation, denied delete access, delete-pending state) into this same
+ * error. There the target is identical on every retry, so no amount of
+ * patience against it helps; `appendOnlyEventLog.ts`'s `appendEventSegment`
+ * retries that case on a short ladder only, then rotates to a fresh segment
+ * instead of retrying the same blocked target indefinitely.
  */
 export function isSnapshotStaleError(error: unknown): boolean {
   return errorName(error) === "InvalidStateError";
+}
+
+/**
+ * What `safeWriteJson` resolves to when the COMMIT landed but the post-commit
+ * read-back could not confirm it (E3b). A healthy write still resolves to
+ * `undefined`, so callers that ignore the result are unchanged.
+ *
+ * Only produced when the pre-commit `.tmp` verify was byte-exact AND the
+ * read-back THREW a transient/stale error — never for a content mismatch, which
+ * still rolls back / promotes exactly as before. No waiting is involved: the
+ * result is returned immediately.
+ */
+export type CommittedUnverified = { committedUnverified: true; cause: unknown };
+
+export function isCommittedUnverified(result: unknown): result is CommittedUnverified {
+  return (
+    typeof result === "object" &&
+    result !== null &&
+    (result as { committedUnverified?: unknown }).committedUnverified === true
+  );
+}
+
+/** Which step of `safeWriteJson` an exception came from. */
+export type WriteStep = "stage" | "commit" | "post-commit-readback";
+
+const WRITE_STEP_PROPERTY = "xqWriteStep";
+
+/**
+ * Tag `error` with the safeWriteJson step that raised it (first tag wins; the
+ * error's identity, name and message are untouched, like `tagError`). Lets
+ * `casLoop:exhausted` say WHETHER the write or only its read-back failed.
+ */
+export function tagWriteStep<T>(error: T, step: WriteStep): T {
+  if (error && typeof error === "object" && writeStepOf(error) === null) {
+    try {
+      Object.defineProperty(error, WRITE_STEP_PROPERTY, {
+        value: step,
+        enumerable: false,
+        configurable: true,
+        writable: true,
+      });
+    } catch {
+      // Frozen or exotic object — the step simply isn't carried.
+    }
+  }
+  return error;
+}
+
+export function writeStepOf(error: unknown): WriteStep | null {
+  if (!error || typeof error !== "object") return null;
+  const step = (error as Record<string, unknown>)[WRITE_STEP_PROPERTY];
+  return step === "stage" || step === "commit" || step === "post-commit-readback" ? step : null;
 }
 
 /** Transient on the WRITE/VERIFY path only — see the module doc above. */
@@ -129,7 +195,11 @@ export function isTransientWriteError(error: unknown): boolean {
     isNotFoundError(error) ||
     isNotReadableError(error) ||
     isLockContentionError(error) ||
-    isSnapshotStaleError(error)
+    isSnapshotStaleError(error) ||
+    // Chromium's after-write Safe Browsing check failed inside close(); the
+    // destination was never replaced, so re-running the whole write is safe.
+    // Message-gated so the picker's AbortError is not swept in.
+    isSafeBrowsingAbortError(error)
   );
 }
 
@@ -503,15 +573,24 @@ export async function retryTransientWrite<T>(
    * `VERIFY_READBACK_RETRY_DELAYS_MS` instead: giving up on THAT in 630 ms buys
    * nothing, since the alternative to waiting is failing the operation.
    */
-  delays: readonly number[] = TRANSIENT_WRITE_RETRY_DELAYS_MS
+  delays: readonly number[] = TRANSIENT_WRITE_RETRY_DELAYS_MS,
+  /**
+   * The user action's total budget (operationDeadline.ts). A retry that would
+   * start after it is spent is not taken — the failure already in hand is
+   * reported instead. Omitted, the ladder runs in full exactly as before.
+   */
+  deadline?: OperationDeadline
 ): Promise<T> {
   for (let attempt = 0; ; attempt += 1) {
     try {
       return await operation();
     } catch (error) {
       if (isTransientWriteError(error) && attempt < delays.length) {
-        await waitFor(delays[attempt]!);
-        continue;
+        const delay = nextRetryDelayMs(delays[attempt]!, deadline);
+        if (delay !== null) {
+          await waitFor(delay);
+          continue;
+        }
       }
       if (isNotFoundError(error) && diagnostics) {
         await logExhaustedNotFound(

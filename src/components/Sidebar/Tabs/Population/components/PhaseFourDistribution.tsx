@@ -7,8 +7,13 @@ import DistributionRow from "./DistributionRow";
 import PortRestrictionsModal from "./PortRestrictionsModal";
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { getStageKey, formatNumber } from "./helpers";
+import { STAGE_KEY_ORDER, STAGE_LABELS_AR } from "../../../../../data/population/stageLabels";
 import { getLabels } from "../../../../../data/labels/labelsStore";
-import { calculateBulkAssignment, isAssignableSampleRole } from "../../../../../data/distribution/bulkAssignment";
+import {
+  calculateBulkAssignment,
+  isAssignableSampleRole,
+  type EmployeeTargetShortfall,
+} from "../../../../../data/distribution/bulkAssignment";
 import { derivePortCatalog } from "../../../../../data/distribution/portEligibility";
 import "./PhaseFourDistribution.css";
 import { hamiltonApportionment } from "../../../../../data/sampling/apportionment";
@@ -42,15 +47,10 @@ type PhaseFourDistributionProps = {
   onApplyBulkAssignment: (events: DistributionEvent[]) => Promise<void>;
 };
 
-const STAGE_KEYS = ["first", "second", "third", "fourth"] as const;
+const STAGE_KEYS = STAGE_KEY_ORDER;
 type StageKey = (typeof STAGE_KEYS)[number];
 
-const STAGE_LABELS: Record<StageKey, string> = {
-  first:  "المستوى الأول",
-  second: "المستوى الثاني",
-  third:  "المستوى الثالث",
-  fourth: "المستوى الرابع"
-};
+const STAGE_LABELS = STAGE_LABELS_AR;
 
 const STATUS_LABELS: Record<string, string> = {
   unassigned: "غير معين",
@@ -263,9 +263,22 @@ export default function PhaseFourDistribution({
     onConfigChange({ ...config, employeeAllocations: updated });
   };
 
+  // A3: one warning line naming every employee the port restrictions leave
+  // short of their equal-share target (allowed rows < target).
+  const shortfallText = (shortfalls: EmployeeTargetShortfall[]): string =>
+    fillTemplate(L.p4_bulk_target_shortfall_warning, {
+      names: shortfalls
+        .map((s) => fillTemplate(L.p4_bulk_target_shortfall_item, {
+          name: employees.find((e) => e.username === s.username)?.displayName ?? s.username,
+          achieved: formatNumber(s.achieved),
+          target: formatNumber(s.target),
+        }))
+        .join("، "),
+    });
+
   const previewData = useMemo(() => {
     if (!sampleDrawResult) return null;
-    const { events, errors, skipped } = calculateBulkAssignment({
+    const { events, errors, skipped, targetShortfalls } = calculateBulkAssignment({
       rows: sampleRows,
       allocations: activeAllocations,
       employees: getManagedLoginUsers(),
@@ -303,7 +316,7 @@ export default function PhaseFourDistribution({
       }
     }
 
-    return { summaryMap, errors, skipped, newAssignments: events.length };
+    return { summaryMap, errors, skipped, newAssignments: events.length, targetShortfalls };
   }, [sampleDrawResult, sampleRows, activeAllocations, employees, operatorUsername, config.stageMappings, config.employeePortRestrictions, saveMonth, saveYear, distributionCurrent]);
   // `sampleDrawResult` is already a dependency above, so the snapshot it carries
   // is covered without adding a second entry for the same object.
@@ -491,6 +504,7 @@ export default function PhaseFourDistribution({
         : L.p4_bulk_unmapped_warning;
       messages.push(template.replace("{count}", formatNumber(unmapped.count)));
     }
+    // The shortfall warning is NOT repeated here: the preview alert already shows it.
     if (messages.length > 0) {
       setBulkError(messages.join(" "));
     }
@@ -629,6 +643,12 @@ export default function PhaseFourDistribution({
           {previewData && previewData.errors.length > 0 && (
             <div className="p4-alert warn dist-err-block" role="alert">
               <AlertTriangle size={14} aria-hidden /> {previewData.errors.join(" | ")}
+            </div>
+          )}
+
+          {previewData && previewData.targetShortfalls.length > 0 && (
+            <div className="p4-alert warn dist-err-block" role="alert">
+              <AlertTriangle size={14} aria-hidden /> {shortfallText(previewData.targetShortfalls)}
             </div>
           )}
 

@@ -27,6 +27,7 @@ import { formatMonthFolderShortLabel } from "../../../population/monthFolder";
 import { computeDistributionModel, type DistributionBucket } from "./distributionCoverageModel";
 import { computeManagementModel } from "../../management/managementModel";
 import type { ManagementBucket, ManagementModel } from "../../management/managementModel";
+import type { StageAliasMappings } from "../../../population/stageHelpers";
 
 /**
  * The single typed analytical artifact (design spec §3.6) — the in-memory
@@ -171,6 +172,11 @@ export type ReportModel = {
   factTable: DecisionRecord[];
   rows: ExecutiveReportRow[];
   kpis: ExecutiveKPIs;
+  /** The workspace stage alias table this model was built with (C1). A
+   *  renderer that re-buckets `rows` by stage (deck2's stage×port pages) must
+   *  use the SAME table, or a custom alias lands in a different bucket than
+   *  `population.byStage`. Undefined = DEFAULT_STAGE_MAPPINGS. */
+  stageMappings?: Partial<StageAliasMappings>;
 };
 
 export function buildReportModel(
@@ -180,11 +186,11 @@ export function buildReportModel(
   const periodId = formatMonthFolderShortLabel(input.monthFolderName);
 
   const rows = buildExecutiveReportRows(input);
-  const kpis = calculateExecutiveKPIs(rows, input.sample, input.config);
+  const kpis = calculateExecutiveKPIs(rows, input.sample, input.config, input.stageMappings);
 
   const factTable = buildDecisionRecords(rows, periodId);
   const comparisons = buildImageComparisons(rows);
-  const aggregates = buildAggregates(factTable, comparisons, input.config);
+  const aggregates = buildAggregates(factTable, comparisons, input.config, input.stageMappings);
 
   // Stamp each record's sufficiency group from its inspector's evaluable count.
   const evaluableByInspector = new Map<string, number>();
@@ -277,7 +283,7 @@ export function buildReportModel(
   // fixed once for this report family).
   const distributionCoverage = dist
     ? (() => {
-        const m = computeDistributionModel(dist, input.monthFolderName, employeeDisplayNames);
+        const m = computeDistributionModel(dist, input.monthFolderName, employeeDisplayNames, input.stageMappings);
         return { byStage: m.byStage, byPort: m.byPort };
       })()
     : null;
@@ -289,6 +295,7 @@ export function buildReportModel(
           employeeDisplayNames,
           input.distributionEvents ?? [],
           input.replacementReasons ?? {},
+          input.stageMappings,
         );
         return { byStage: m.byStage, byPort: m.byPort, replacements: m.replacements, reassignments: m.reassignments };
       })()
@@ -389,5 +396,6 @@ export function buildReportModel(
     factTable,
     rows,
     kpis,
+    stageMappings: input.stageMappings,
   };
 }

@@ -32,12 +32,17 @@
 // ok, and the degradation is reported (so it is visible in the error log and the
 // cache refresh still runs) rather than being silently swallowed.
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { clearErrors, getRecentErrors } from "../storage/errorLogger";
-import { appendDistributionEvents, loadDistributionLog } from "./distributionStorage";
+import {
+  __setProjectionTimingForTests,
+  appendDistributionEvents,
+  flushPendingDistributionProjectionWrites,
+  loadDistributionLog,
+} from "./distributionStorage";
 import { buildAssignEvent } from "./distributionLog";
 
 const MONTH = "5-May-2026";
@@ -46,6 +51,12 @@ let root: DirectoryHandleLike;
 
 beforeEach(() => {
   clearErrors();
+  __setProjectionTimingForTests({ graceMs: 300, deadlineMs: 2_500 });
+});
+
+afterEach(async () => {
+  await flushPendingDistributionProjectionWrites();
+  __setProjectionTimingForTests(null);
 });
 
 /**
@@ -66,6 +77,12 @@ function shareWithUnwritableProjection(): DirectoryHandleLike {
     ],
   });
 }
+
+// P4: the projection update runs on its own background chain with its own
+// deadline, and the append waits at most a short grace for it. The tests shrink
+// both (grace 300 ms, projection deadline 2.5 s) so each case returns in about
+// a second instead of the ~20 s the click used to wait; `afterEach` flushes the
+// chain so no job outlives its test.
 
 describe("appendDistributionEvents — a failed projection write is not a failed append", () => {
   it("reports ok when the events are durable but the projection CAS exhausted", async () => {
@@ -98,7 +115,10 @@ describe("appendDistributionEvents — a failed projection write is not a failed
     expect(result.ok).toBe(true);
     // Degraded, not silent: the caller needs this to know the projection is
     // behind, and it must be in the durable error log for the admin export.
-    expect(result.ok && result.projectionDegraded).toBe(true);
+    // P4: the projection is still settling in the background, so the flag is
+    // "pending" now; the degraded log entry lands when the job settles.
+    expect(result.ok && result.projectionPending).toBe(true);
+    await flushPendingDistributionProjectionWrites();
     expect(
       getRecentErrors().some((entry) =>
         entry.context.includes("distribution:projection-degraded")

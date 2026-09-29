@@ -335,15 +335,20 @@ export type SegmentEventsDelta = GenericSegmentEventsDelta<DistributionEvent>;
  * byte offset (perf: fold-checkpoint). Passing `{}` reads every segment from
  * the start — the same function serves both a cold (full) read and a warm
  * (incremental) one.
+ *
+ * `options.strict` forwards to `readEventSegmentDelta` (appendOnlyEventLog.ts)
+ * — see its doc comment. Default false, every existing caller unaffected.
  */
 export async function readDistributionEventSegmentDelta(
   distributionDir: DirectoryHandleLike,
-  knownOffsets: Record<string, number>
+  knownOffsets: Record<string, number>,
+  options?: { strict?: boolean }
 ): Promise<SegmentEventsDelta> {
   return readEventSegmentDelta<DistributionEvent>(
     distributionDir,
     knownOffsets,
-    DISTRIBUTION_EVENT_LOG
+    DISTRIBUTION_EVENT_LOG,
+    options
   );
 }
 

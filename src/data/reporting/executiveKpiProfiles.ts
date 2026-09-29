@@ -1,4 +1,9 @@
-import { formatStageLabel } from "../population/stageHelpers";
+import {
+  compareStageKeys,
+  getStageKey,
+  stageLabelForKey,
+  type StageAliasMappings,
+} from "../population/stageHelpers";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type {
   ExecutiveReportConfig,
@@ -6,7 +11,7 @@ import type {
   PortProfile,
   StageProfile,
 } from "./executiveReportTypes";
-import { isRowStudied } from "./executiveReportTypes";
+import { isRowStudied, populationScopedRows } from "./executiveReportTypes";
 import { aggregateDecisions, buildDecisionRecords, emptyCounts } from "./executive/model/decisionFactTable";
 import type { Counts } from "./executive/model/decisionFactTable";
 
@@ -82,10 +87,14 @@ function buildPortProfile(
   decisionCounts: Counts,
   config: ExecutiveReportConfig,
 ): PortProfile {
-  const population = rows.length;
-  const clean = rows.filter((row) => row.imageResult === "سليمة").length;
-  const suspicious = rows.filter((row) => row.imageResult === "اشتباه").length;
+  // A2: population figures never count rows rebuilt from the sample snapshot;
+  // sample-scoped figures (sampleSize, studied, accuracy) keep every row.
+  const populationRows = populationScopedRows(rows);
+  const population = populationRows.length;
+  const clean = populationRows.filter((row) => row.imageResult === "سليمة").length;
+  const suspicious = populationRows.filter((row) => row.imageResult === "اشتباه").length;
   const sampled = rows.filter((row) => row.selectedInSample);
+  const populationSampled = populationRows === rows ? sampled.length : populationRows.filter((row) => row.selectedInSample).length;
   const studied = sampled.filter(isRowStudied).length;
 
   // Unchanged population-sample-size gate: "do we have enough images with a
@@ -124,7 +133,7 @@ function buildPortProfile(
     suspicious,
     suspicionRate: population > 0 ? (suspicious / population) * 100 : 0,
     sampleSize: sampled.length,
-    coverage: population > 0 ? (sampled.length / population) * 100 : 0,
+    coverage: population > 0 ? (populationSampled / population) * 100 : 0,
     studied,
     completionRate: sampled.length > 0 ? (studied / sampled.length) * 100 : 0,
     accuracyByImage,
@@ -156,46 +165,63 @@ export function buildPortProfiles(
     .sort((left, right) => right.population - left.population);
 }
 
+/**
+ * Stage profiles in canonical order (C1): first→fourth, "unknown" last, every
+ * label the Arabic level label — never the raw file alias (`FIRST_STAGE`,
+ * `SECOND_STAG`, …) and never first-seen or count order. `stageMappings` is
+ * the workspace alias table (`ExecutiveReportInput.stageMappings`); omitted,
+ * DEFAULT_STAGE_MAPPINGS applies.
+ */
 export function buildStageProfiles(
   rows: ExecutiveReportRow[],
   sample: SampleMasterData | null,
+  stageMappings?: Partial<StageAliasMappings>,
 ): StageProfile[] {
+  const stageKeyOf = (row: ExecutiveReportRow): string => getStageKey(row.stage, stageMappings);
+
   if (sample?.stageAllocations?.length) {
-    return sample.stageAllocations.map((allocation) => {
-      const studied = rows.filter(
-        (row) =>
-          row.selectedInSample &&
-          isRowStudied(row) &&
-          formatStageLabel(row.stage) === allocation.stageLabel,
-      ).length;
-      return {
-        stageKey: allocation.stageKey,
-        stageLabel: allocation.stageLabel,
-        population: allocation.populationSize,
-        sampleSize: allocation.actualDrawn,
-        coverage:
-          allocation.populationSize > 0
-            ? (allocation.actualDrawn / allocation.populationSize) * 100
-            : 0,
-        studied,
-        completionRate: allocation.actualDrawn > 0 ? (studied / allocation.actualDrawn) * 100 : 0,
-      };
-    });
+    return sample.stageAllocations
+      .map((allocation) => {
+        const studied = rows.filter(
+          (row) =>
+            row.selectedInSample &&
+            isRowStudied(row) &&
+            stageKeyOf(row) === allocation.stageKey,
+        ).length;
+        return {
+          stageKey: allocation.stageKey,
+          // Relabelled from the key: a manual-add allocation written before
+          // C1 carries the raw row text as its label (sampleStorage.ts).
+          stageLabel: stageLabelForKey(allocation.stageKey),
+          population: allocation.populationSize,
+          sampleSize: allocation.actualDrawn,
+          coverage:
+            allocation.populationSize > 0
+              ? (allocation.actualDrawn / allocation.populationSize) * 100
+              : 0,
+          studied,
+          completionRate: allocation.actualDrawn > 0 ? (studied / allocation.actualDrawn) * 100 : 0,
+        };
+      })
+      .sort((left, right) => compareStageKeys(left.stageKey, right.stageKey));
   }
 
-  return [...groupRows(rows, (row) => row.stage ?? "غير محدد")].map(
-    ([stageLabel, stageRows], index) => {
+  return [...groupRows(rows, stageKeyOf)]
+    .sort(([left], [right]) => compareStageKeys(left, right))
+    .map(([stageKey, stageRows]) => {
       const sampled = stageRows.filter((row) => row.selectedInSample);
       const studied = sampled.filter(isRowStudied).length;
+      // A2: population and coverage exclude snapshot rows; sample-scoped fields keep them.
+      const populationRows = populationScopedRows(stageRows);
+      const populationSampled = populationRows.filter((row) => row.selectedInSample).length;
       return {
-        stageKey: String(index),
-        stageLabel,
-        population: stageRows.length,
+        stageKey,
+        stageLabel: stageLabelForKey(stageKey),
+        population: populationRows.length,
         sampleSize: sampled.length,
-        coverage: stageRows.length > 0 ? (sampled.length / stageRows.length) * 100 : 0,
+        coverage: populationRows.length > 0 ? (populationSampled / populationRows.length) * 100 : 0,
         studied,
         completionRate: sampled.length > 0 ? (studied / sampled.length) * 100 : 0,
       };
-    },
-  );
+    });
 }

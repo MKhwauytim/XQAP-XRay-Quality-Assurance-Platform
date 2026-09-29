@@ -30,7 +30,7 @@ async function updateTemplateIndex(
 ): Promise<void> {
   const outcome = await casLoop<{ ok: true }>(
     async (writeToken) => {
-      const indexResult = await safeReadJson<TemplateIndex>(dir, INDEX_FILE);
+      const indexResult = await safeReadJson<TemplateIndex>(dir, TEMPLATES_INDEX_FILE);
       const existing: TemplateIndex = indexResult.ok ? indexResult.value : { templates: [] };
       const nextRevision = (existing.revision ?? 0) + 1;
       const updated: TemplateIndex = {
@@ -38,8 +38,8 @@ async function updateTemplateIndex(
         _writeToken: writeToken,
         templates: apply(existing.templates),
       };
-      await safeWriteJson(dir, INDEX_FILE, updated);
-      const verify = await safeReadJson<TemplateIndex>(dir, INDEX_FILE);
+      await safeWriteJson(dir, TEMPLATES_INDEX_FILE, updated);
+      const verify = await safeReadJson<TemplateIndex>(dir, TEMPLATES_INDEX_FILE);
       if (
         verify.ok &&
         verify.value.revision === nextRevision &&
@@ -123,7 +123,7 @@ async function saveTemplateFile(
   }
 }
 
-const INDEX_FILE = "templates.index.json";
+export const TEMPLATES_INDEX_FILE = "templates.index.json";
 
 async function getTemplatesDir(
   directoryHandle: DirectoryHandleLike
@@ -245,7 +245,7 @@ export async function loadTemplateIndex(
 ): Promise<TemplateIndex> {
   try {
     const dir = await getTemplatesDir(directoryHandle);
-    const result = await safeReadJson<TemplateIndex>(dir, INDEX_FILE);
+    const result = await safeReadJson<TemplateIndex>(dir, TEMPLATES_INDEX_FILE);
     return result.ok ? result.value : { templates: [] };
   } catch {
     return { templates: [] };

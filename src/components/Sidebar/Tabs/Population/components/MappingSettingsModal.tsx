@@ -1,4 +1,8 @@
+import { useMemo, useState } from "react";
 import { Settings2, X } from "lucide-react";
+import { derivePortCatalog, type PortCatalogRow } from "../../../../../data/distribution/portEligibility";
+import { useLabels } from "../../../../../data/labels/useLabels";
+import CertScanPortsModal from "./CertScanPortsModal";
 import { ConfirmDialog } from "../../../../ConfirmDialog/ConfirmDialog";
 import { ModalPortal } from "../../../../ModalPortal/ModalPortal";
 import { useFocusTrap } from "../../../../../hooks/useFocusTrap";
@@ -33,6 +37,13 @@ type MappingSettingsModalProps = {
    *  reads this same value — only its edit control moved. */
   sampleSeed?: string;
   onSampleSeedChange?: (seed: string) => void;
+  /** C2: rows whose ports populate the «منافذ CertScan الكاملة» picker (the
+   *  risk workbook's rows, or the processed population's). Optional; without
+   *  it the picker lists only the already-flagged ports. */
+  certScanPortRows?: readonly PortCatalogRow[];
+  /** C2: the caller's `canMutate("configure-sample")`. The picker section is not
+   *  rendered without it, and the save handler re-checks it. Default false. */
+  canEditCertScanPorts?: boolean;
 };
 
 export default function MappingSettingsModal({
@@ -46,6 +57,8 @@ export default function MappingSettingsModal({
   onCertScanPasteTextChange,
   sampleSeed = "",
   onSampleSeedChange,
+  certScanPortRows,
+  canEditCertScanPorts = false,
 }: MappingSettingsModalProps) {
   const controller = useMappingSettingsController({
     isOpen,
@@ -60,6 +73,13 @@ export default function MappingSettingsModal({
   // early return below. No backdrop-click-to-close: this dialog edits mapping
   // settings and a stray backdrop click would discard the user's input.
   const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose, enabled: isOpen });
+
+  const labels = useLabels();
+  const [certScanPortsOpen, setCertScanPortsOpen] = useState(false);
+  const certScanPortCatalog = useMemo(
+    () => (certScanPortsOpen && canEditCertScanPorts ? derivePortCatalog(certScanPortRows ?? []) : []),
+    [certScanPortsOpen, canEditCertScanPorts, certScanPortRows]
+  );
 
   if (!isOpen) return null;
 
@@ -161,6 +181,18 @@ export default function MappingSettingsModal({
                   onDataChange={(value) => onCertScanPasteTextChange?.(value)}
                 />
               </div>
+
+              {canEditCertScanPorts && (
+                <div>
+                  <h3 style={{ margin: "0 0 8px", fontSize: "15px" }}>{labels.p2_certscan_ports_section_title}</h3>
+                  <p style={{ margin: "0 0 10px", fontSize: "12px", color: "var(--population-muted)" }}>
+                    {labels.p2_certscan_ports_section_hint}
+                  </p>
+                  <button type="button" className="proc-export-btn" onClick={() => setCertScanPortsOpen(true)}>
+                    {labels.p2_certscan_ports_open.replace("{count}", String(config.certScanPorts?.length ?? 0))}
+                  </button>
+                </div>
+              )}
 
               <label className="save-disk-label">
                 رمز التوزيع العشوائي - يمكن تعديله لإعادة إنتاج نفس العينة
@@ -282,6 +314,19 @@ export default function MappingSettingsModal({
         }}
         onCancel={() => controller.setPendingRemoval(null)}
       />
+      {certScanPortsOpen && canEditCertScanPorts && (
+        <CertScanPortsModal
+          portCatalog={certScanPortCatalog}
+          selectedPorts={config.certScanPorts ?? []}
+          onClose={() => setCertScanPortsOpen(false)}
+          onSave={(ports) => {
+            // Handler-side gate (the render gate above can be stale by the time the click lands).
+            if (!canEditCertScanPorts) return;
+            onConfigChange({ ...config, certScanPorts: ports });
+            setCertScanPortsOpen(false);
+          }}
+        />
+      )}
     </div>
     </ModalPortal>
   );

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Check, MessageCircle, X } from "lucide-react";
 import { readSession } from "../../auth/authSession";
 import {
@@ -7,14 +7,23 @@ import {
   loadThreads,
   replyToFeedback,
   submitFeedback,
+  summarizeFeedbackThread,
   type FeedbackCategory,
   type FeedbackMessage,
   type FeedbackThread,
   type FeedbackThreadSummary,
 } from "../../data/feedback/feedbackStorage";
 import { canManageFeedback } from "../../data/feedback/feedbackUnread";
+import {
+  indexThreadsById,
+  mergeSummariesWithLocalThreads,
+  missingThreadIds,
+  pickFresherThread,
+} from "../../data/feedback/feedbackThreadMerge";
 import { useFeedbackUnread } from "../../data/feedback/useFeedbackUnread";
+import { logError } from "../../data/storage/errorLogger";
 import { useWorkspace } from "../../data/workspace/useWorkspace";
+import { useFeedbackExport } from "./useFeedbackExport";
 import Pagination from "../Pagination/Pagination";
 import { clampPage, pageSlice } from "../../utils/paginationUtils";
 import { getLabels } from "../../data/labels/labelsStore";
@@ -75,7 +84,12 @@ export function FeedbackWidget() {
   const session = readSession();
   // Shared with AdminToolbar's trigger (see FeedbackUnreadProvider): one poll,
   // one count, so both dots agree and opening the panel clears both.
-  const { unreadCount, markSeen, reload: reloadUnread } = useFeedbackUnread();
+  const {
+    unreadCount,
+    markSeen,
+    reload: reloadUnread,
+    messages: polledMessages,
+  } = useFeedbackUnread();
   const labels = useLabels();
   const [open, setOpen] = useState(false);
   // The list view holds SUMMARIES only (one index read + one names-only
@@ -83,6 +97,35 @@ export function FeedbackWidget() {
   // -- opening the panel no longer reads every conversation on the share.
   const [summaries, setSummaries] = useState<FeedbackThreadSummary[]>([]);
   const [threadsById, setThreadsById] = useState<Record<string, FeedbackThread>>({});
+  // What this tab holds, readable from inside an async `refresh()` that must not
+  // close over a stale render's copy. Layout effect, not a passive one: it runs
+  // before any promise continuation can observe the just-committed map.
+  const threadsByIdRef = useRef(threadsById);
+  useLayoutEffect(() => {
+    threadsByIdRef.current = threadsById;
+  }, [threadsById]);
+  // Threads THIS tab created (submit), each stamped with a sequence number, and
+  // the sequence a refresh started at: only a thread created AFTER a refresh
+  // began can legitimately be absent from that refresh's read. Anything else the
+  // tab holds but the read lacks is gone from disk and must not be resurrected.
+  const createdSeqRef = useRef(new Map<string, number>());
+  const seqRef = useRef(0);
+  // The workspace this tab currently shows; an async read for another one is
+  // dropped on arrival.
+  const currentHandleRef = useRef(directoryHandle);
+  useLayoutEffect(() => {
+    currentHandleRef.current = directoryHandle;
+    createdSeqRef.current = new Map();
+  }, [directoryHandle]);
+  // A different workspace shares no thread with the previous one: drop every
+  // held thread and summary (state adjusted during render, the documented
+  // pattern for resetting state when an input changes).
+  const [shownHandle, setShownHandle] = useState(directoryHandle);
+  if (shownHandle !== directoryHandle) {
+    setShownHandle(directoryHandle);
+    setSummaries([]);
+    setThreadsById({});
+  }
   const [loading, setLoading] = useState(false);
   const [adminTab, setAdminTab] = useState<"new" | "all">("new");
   const [filter, setFilter] = useState<"open" | "resolved" | "all">("open");
@@ -122,29 +165,57 @@ export function FeedbackWidget() {
   // admin-only controls: a demo session reports role "admin" purely to unlock
   // tab visibility and must never see this button.
   const isRealAdmin = session?.role === "admin" && session?.mode !== "demo";
+  const { isExporting, exportProgress, exportNotice, startExport } = useFeedbackExport({
+    directoryHandle,
+    isRealAdmin,
+    currentHandleRef,
+    threadsByIdRef,
+  });
 
   const refresh = useCallback(async () => {
     if (!directoryHandle) return;
     setLoading(true);
-    // SEQUENCED, not Promise.all. Both branches walk the same feedback
-    // directory: `reloadUnread` → `loadFeedback` → `listThreadSummaries`, and
-    // the explicit call below is a second `listThreadSummaries`. Running them
-    // concurrently made one panel open issue two overlapping reconciles of the
-    // same shared file from the same tab — pointless load on the workspace the
-    // 2026-08-25 incident showed is the scarce resource. Sequencing costs a
-    // little panel-open latency, already covered by the spinner.
+    const startedAtSeq = seqRef.current;
+    const handle = directoryHandle;
+    // INDEX FIRST, full read in the BACKGROUND (Workstream B, 2026-09-28).
+    // This used to `await reloadUnread()` before anything else -- and that is
+    // `loadFeedback`, which opens EVERY thread file in the workspace. So the
+    // panel showed its spinner for as long as the whole ticket history took to
+    // read, and the cost grew with every ticket ever filed.
     //
-    // Order matters: the read-only pass runs first, so the repairing pass below
-    // sees an already-migrated, warm state.
-    await reloadUnread();
+    // The list view needs only the summaries (one index read + one names-only
+    // listing), so it renders from those immediately. The provider's full read
+    // still runs -- the unread dot needs every reply's author and timestamp --
+    // but only AFTER the summaries landed, so the two walks of the feedback
+    // directory stay SEQUENCED (never two overlapping reconciles of the same
+    // shared file from one tab), and it no longer gates the first render.
+    //
     // `repairIndex` ONLY here: this runs when a user opens or refreshes the
-    // feedback panel, a deliberate action at human rate. The 60 s background
-    // poll in FeedbackUnreadProvider must never ask for it — see
-    // listThreadSummaries' doc for what that cost.
-    const list = await listThreadSummaries(directoryHandle, { repairIndex: true });
-    setSummaries(list);
-    setLoading(false);
+    // feedback panel, a deliberate action at human rate. The background poll in
+    // FeedbackUnreadProvider must never ask for it -- see listThreadSummaries'
+    // doc for what that cost.
+    try {
+      const list = await listThreadSummaries(handle, { repairIndex: true });
+      if (currentHandleRef.current !== handle) return; // workspace switched meanwhile
+      // MERGE with what this tab already applied: a submit/reply/resolve made
+      // while this read was in flight is durable but absent from `list`.
+      setSummaries(
+        mergeSummariesWithLocalThreads(list, threadsByIdRef.current, (id) =>
+          (createdSeqRef.current.get(id) ?? 0) > startedAtSeq
+        )
+      );
+    } catch (err) {
+      // Leave the last-known list in place; the background reload below still
+      // runs and the page effect reads whatever it can. Logged rather than
+      // swallowed so a failing index read is visible in the durable error log.
+      logError("feedbackWidget:listThreadSummaries", err);
+    } finally {
+      // A read dropped because the workspace changed must not end the spinner
+      // of the NEW workspace's refresh, which is still in flight.
+      if (currentHandleRef.current === handle) setLoading(false);
+    }
     markSeen();
+    void reloadUnread().then(() => markSeen());
   }, [directoryHandle, markSeen, reloadUnread]);
 
   useEffect(() => {
@@ -177,19 +248,34 @@ export function FeedbackWidget() {
     if (!directoryHandle || !session || !text.trim()) return;
     setSubmitting(true);
     setSubmitError(null);
+    // The workspace this write belongs to. If the user switches workspace while
+    // it is in flight the write still lands in THIS one; its result must not be
+    // applied to the other workspace's list.
+    const handle = directoryHandle;
     try {
-      await submitFeedback(directoryHandle, {
+      const created = await submitFeedback(handle, {
         from: session.username,
         role: session.role,
         category,
         text: text.trim(),
       });
+      if (currentHandleRef.current !== handle) return;
       setSubmitted(true);
       setText("");
-      void refresh();
+      // Apply the thread the write returned -- no re-read. This used to run
+      // `refresh()` AND `reloadUnread()`, i.e. the index + listing plus TWO
+      // full reads of every thread file, for a change this tab already holds
+      // in full. One provider reload remains, for the unread dot.
+      createdSeqRef.current.set(created.id, (seqRef.current += 1));
+      setThreadsById((prev) => ({ ...prev, [created.id]: created }));
+      setSummaries((prev) => [
+        summarizeFeedbackThread(created),
+        ...prev.filter((summary) => summary.threadId !== created.id),
+      ]);
       void reloadUnread();
     } catch (err) {
       // B6: never fail silently — a CAS conflict surfaces its Arabic message.
+      if (currentHandleRef.current !== handle) return; // not this workspace's banner
       setSubmitError(err instanceof Error ? err.message : getLabels().fb_submit_error_generic);
     } finally {
       setSubmitting(false);
@@ -202,9 +288,10 @@ export function FeedbackWidget() {
     if (!replyText && !resolve) return;
     setReplying(msgId);
     setSubmitError(null);
+    const handle = directoryHandle; // see handleSubmit
     try {
-      await replyToFeedback(
-        directoryHandle,
+      const updated = await replyToFeedback(
+        handle,
         msgId,
         {
           from: session.username,
@@ -214,16 +301,24 @@ export function FeedbackWidget() {
         },
         resolve
       );
+      if (currentHandleRef.current !== handle) return;
       setReplyTexts((prev) => ({ ...prev, [msgId]: "" }));
-      setThreadsById((prev) => {
-        const next = { ...prev };
-        delete next[msgId];
-        return next;
-      });
-      void refresh();
+      // Apply the verified thread the write returned. The old code DELETED the
+      // card's body here and relied on a refresh to bring it back -- but the
+      // page effect did not re-run for an unchanged page, so the card sat on
+      // the loading line until the panel was reopened. Applying the write's
+      // own thread (its bumped revision) also means `pickFresherThread` keeps
+      // preferring it over the provider's next poll until that poll catches up.
+      setThreadsById((prev) => ({ ...prev, [updated.id]: updated }));
+      setSummaries((prev) =>
+        prev.map((summary) =>
+          summary.threadId === updated.id ? { ...summary, status: updated.status } : summary
+        )
+      );
       void reloadUnread();
     } catch (err) {
       // B6: surface a CAS conflict instead of an unhandled rejection.
+      if (currentHandleRef.current !== handle) return;
       setSubmitError(err instanceof Error ? err.message : getLabels().fb_reply_error_generic);
     } finally {
       setReplying(null);
@@ -265,6 +360,14 @@ export function FeedbackWidget() {
     }
   }
 
+  // A thread body can come from two places: the provider's polled aggregate
+  // (already in memory -- reading it again from disk is pure waste) or this
+  // widget's own page-scoped copy. `threadFor` resolves each id to the fresher
+  // of the two; see feedbackThreadMerge.ts.
+  const polledById = useMemo(() => indexThreadsById(polledMessages), [polledMessages]);
+  const threadFor = (threadId: string): FeedbackMessage | undefined =>
+    pickFresherThread(threadsById[threadId], polledById.get(threadId));
+
   // All three run on SUMMARIES -- status, author and count are index fields, so
   // filtering and paginating costs no thread reads at all.
   const openCount = summaries.filter((s) => s.status === "open").length;
@@ -280,7 +383,8 @@ export function FeedbackWidget() {
   // deliberately carries no reply-recency field (a plain reply must never
   // write the shared index -- see appendReply's doc and the regression test
   // pinning it), so this reads it from whichever thread bodies happen to be
-  // loaded already (`threadsById`, filled by the effect below) and falls back
+  // loaded already (`threadFor` -- the provider's polled copy or this page's
+  // own read) and falls back
   // to `createdAt` for a row not loaded yet. Rows re-sort slightly as bodies
   // stream in -- the same "fills in progressively" shape the reply list itself
   // already has, not a new pattern for this panel.
@@ -290,17 +394,17 @@ export function FeedbackWidget() {
   // below), so a mailbox with far more than one page of tickets still opens
   // only that page's thread files, never the whole history.
   const myByActivity = [...mySummaries].sort((a, b) => {
-    const ta = threadsById[a.threadId];
-    const tb = threadsById[b.threadId];
+    const ta = threadFor(a.threadId);
+    const tb = threadFor(b.threadId);
     const la = ta ? latestActivity(ta) : a.createdAt;
     const lb = tb ? latestActivity(tb) : b.createdAt;
     return lb.localeCompare(la);
   });
   const myFilteredSummaries = myByActivity.filter((s) =>
-    matchesReplyFilter(threadsById[s.threadId], myReplyFilter)
+    matchesReplyFilter(threadFor(s.threadId), myReplyFilter)
   );
   const adminFilteredSummaries = filteredSummaries.filter((s) =>
-    matchesReplyFilter(threadsById[s.threadId], adminReplyFilter)
+    matchesReplyFilter(threadFor(s.threadId), adminReplyFilter)
   );
 
   const safeMyPage = clampPage(myPage, myFilteredSummaries.length);
@@ -318,14 +422,26 @@ export function FeedbackWidget() {
       : pageSlice(myFilteredSummaries, safeMyPage);
 
   const visibleIds = visibleSummaries.map((summary) => summary.threadId);
-  // Stable dependency: the array identity changes on every render, the joined
-  // key does not.
-  const visibleIdsKey = visibleIds.join("|");
+  // Only the ids NEITHER source holds are read from disk, and the effect keys on
+  // that SORTED set -- not on the ordered visible ids. The old ordered key
+  // changed every time the "my messages" list re-sorted by latest activity as
+  // bodies streamed in, which re-read the same page. A submit or reply used to
+  // also DELETE that thread from `threadsById` and lean on a refresh to bring
+  // it back, which left the card stuck on the loading line whenever the page
+  // itself didn't change; submit/reply now apply the write's own returned
+  // thread instead, so a thread id never goes missing from `threadsById` once
+  // this tab has written it. A set key still matters for the re-order case:
+  // re-ordering never changes it, so it does not re-trigger the read effect.
+  //
+  // An id whose file cannot be read stays in the set, so the key does not
+  // change and the read is not retried in a loop; the card keeps its loading
+  // line until the next open or refresh, as before.
+  const missingIdsKey = missingThreadIds(visibleIds, threadsById, polledById).join("|");
 
   useEffect(() => {
-    if (!directoryHandle || !open || visibleIds.length === 0) return;
+    if (!directoryHandle || !open || missingIdsKey === "") return;
     let cancelled = false;
-    loadThreads(directoryHandle, visibleIds)
+    loadThreads(directoryHandle, missingIdsKey.split("|"))
       .then((threads) => {
         if (cancelled) return;
         setThreadsById((prev) => {
@@ -341,8 +457,7 @@ export function FeedbackWidget() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- visibleIdsKey is the stable identity of visibleIds
-  }, [directoryHandle, open, visibleIdsKey]);
+  }, [directoryHandle, open, missingIdsKey]);
 
   // The read-only demo/viewer session reports role "admin" purely to unlock
   // full tab visibility (see AdminToolbar's own isDemo/isRealAdmin split) — it
@@ -454,6 +569,32 @@ export function FeedbackWidget() {
                 ))}
               </div>
               {isRealAdmin && (
+                <div className="fb-export">
+                  <button
+                    type="button"
+                    className="ui-btn ui-btn--primary ui-btn--sm fb-export-btn"
+                    disabled={isExporting}
+                    onClick={() => { void startExport(); }}
+                  >
+                    {exportProgress
+                      ? getLabels()
+                          .fb_export_progress.replace("{done}", String(exportProgress.done))
+                          .replace("{total}", String(exportProgress.total))
+                      : isExporting
+                        ? getLabels().fb_exporting
+                        : getLabels().fb_export_btn}
+                  </button>
+                  {exportNotice && (
+                    <p
+                      className={`fb-export-notice is-${exportNotice.kind}`}
+                      role={exportNotice.kind === "empty" ? "status" : "alert"}
+                    >
+                      {exportNotice.text}
+                    </p>
+                  )}
+                </div>
+              )}
+              {isRealAdmin && (
                 <div className="fb-finalize-legacy">
                   <button
                     type="button"
@@ -551,7 +692,7 @@ export function FeedbackWidget() {
                     </div>
                     <div className="fb-msg-list" style={{ marginTop: 8 }}>
                       {visibleSummaries.map((s) => {
-                        const msg = threadsById[s.threadId];
+                        const msg = threadFor(s.threadId);
                         // The thread file for this row has not arrived yet.
                         if (!msg) return <p key={s.threadId} className="fb-empty">{getLabels().fb_loading}</p>;
                         return (
@@ -587,7 +728,7 @@ export function FeedbackWidget() {
                   <>
                     <div className="fb-msg-list">
                       {visibleSummaries.map((s) => {
-                        const msg = threadsById[s.threadId];
+                        const msg = threadFor(s.threadId);
                         if (!msg) return <p key={s.threadId} className="fb-empty">{getLabels().fb_loading}</p>;
                         return (
                           <MessageCard

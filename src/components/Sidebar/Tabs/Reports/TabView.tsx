@@ -4,11 +4,16 @@ import { AlertTriangle, BarChart2, Building2, Check, Database, Download, FileTex
 
 import { loadOrDeriveDistributionCurrentForRead, loadDistributionCurrentRevision, loadDistributionLog } from "../../../../data/distribution/distributionStorage";
 import { loadReplacementLog, loadReferralLog } from "../../../../data/referral/referralStorage";
-import { logRejection } from "../../../../data/storage/errorLogger";
+import { logError, logRejection } from "../../../../data/storage/errorLogger";
+import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
+import type { SampleMasterData } from "../../../../data/sampling/sampleTypes";
 import { loadMonthPopulationFinal, loadMonthForEditing, loadMonthPopulationFinalRevision, loadMonthManifest, loadProcessingSummary } from "../../../../data/population/populationStorage";
+import { loadPopulationConfig } from "../../../../data/population/populationConfig";
 import { useGlobalMonth } from "../../../../data/month/useGlobalMonth";
 import type { SourceRevisions } from "../../../../data/reporting/sourceRevisions";
 import { formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
+import { SampleSnapshotBanner } from "../../../SampleSnapshotBanner/SampleSnapshotBanner";
+import { sampleRowsMissingFromPopulation } from "../../../../data/reporting/executiveReportData";
 import type { PreparedPopulationRow } from "../../../../data/population/populationTypes";
 import { useLabels } from "../../../../data/labels/useLabels";
 import { getLabels } from "../../../../data/labels/labelsStore";
@@ -237,6 +242,7 @@ function ReportsContent() {
   );
   const [pbiExporting, setPbiExporting] = useState(false);
   const [pbiResult, setPbiResult] = useState<ExportManifest | null>(null);
+  const [snapshotRowCount, setSnapshotRowCount] = useState(0);
   const [pbiError, setPbiError] = useState<string | null>(null);
   const [deckEdition, setDeckEdition] = useState<ExecutiveDeckEdition>("v2");
   // D11 (population-report merge): default "both" — the pre-merge behavior of
@@ -271,6 +277,44 @@ function ReportsContent() {
   // (the mount/month effect below and the background-refresh subscriber), and
   // only a single shared token can order results across both.
   const monthMetaTokenRef = useRef(0);
+  // The dashboard derives the banner count from its own model (see buildKpiModel),
+  // so the month-load path must not read the population again while it is open.
+  const sectionRef = useRef<ReportsSection>(section);
+  useEffect(() => {
+    sectionRef.current = section;
+  }, [section]);
+
+  // A2: revision-keyed cache so the background refresh does not re-read the
+  // whole population unless the population or the sample actually changed.
+  const snapshotCountCacheRef = useRef<{ dir: DirectoryHandleLike; key: string; count: number } | null>(null);
+  const countSnapshotRows = useCallback(
+    async (dir: DirectoryHandleLike, month: string, sample: SampleMasterData | null, token: number): Promise<void> => {
+      try {
+        let count = 0;
+        if (sample) {
+          const [popRevision, sampleRevision] = await Promise.all([
+            loadMonthPopulationFinalRevision(dir, month),
+            loadSampleMasterRevision(dir, month),
+          ]);
+          const key = popRevision !== null && sampleRevision !== null ? `${month}|${popRevision}|${sampleRevision}` : null;
+          if (key !== null && snapshotCountCacheRef.current?.dir === dir && snapshotCountCacheRef.current.key === key) {
+            count = snapshotCountCacheRef.current.count;
+          } else {
+            const population = await loadMonthPopulationFinal(dir, month);
+            // No processed population (e.g. a pending month) means nothing is "missing from" it.
+            count = population
+              ? sampleRowsMissingFromPopulation(population.rows as unknown as PreparedPopulationRow[], sample).length
+              : 0;
+            if (key !== null) snapshotCountCacheRef.current = { dir, key, count };
+          }
+        }
+        if (token === monthMetaTokenRef.current) setSnapshotRowCount(count);
+      } catch (error) {
+        logError("reports:snapshot-row-count", error);
+      }
+    },
+    []
+  );
 
   // Load lightweight meta for the month bar chips (§L Tier 1/2: manifest
   // instead of the full population, no employee-files read at all --
@@ -281,13 +325,20 @@ function ReportsContent() {
   const loadMonthMeta = useCallback(async (silent: boolean): Promise<void> => {
     if (!directoryHandle || !selectedMonth) return;
     const token = ++monthMetaTokenRef.current;
-    if (!silent) setMonthMeta(null);
+    if (!silent) {
+      setMonthMeta(null);
+      setSnapshotRowCount(0);
+    }
     try {
       const [manifest, sample] = await Promise.all([
         loadMonthManifest(directoryHandle, selectedMonth),
         loadSampleMaster(directoryHandle, selectedMonth),
       ]);
       if (token !== monthMetaTokenRef.current) return;
+      // A2: the banner count is derived once, here, so it is there on landing and
+      // follows every refresh. It runs off the chip path (a slow population read
+      // must not delay the chips) and only for a month that has a sample.
+      if (sectionRef.current !== "kpi") void countSnapshotRows(directoryHandle, selectedMonth, sample, token);
       setMonthMeta((current) => ({
         folderName: selectedMonth,
         populationCount: manifest?.totalProcessedRows ?? null,
@@ -301,13 +352,14 @@ function ReportsContent() {
       if (token !== monthMetaTokenRef.current) return;
       setMonthMeta({ folderName: selectedMonth, populationCount: null, sampleCount: null, studiedCount: null });
     }
-  }, [directoryHandle, selectedMonth]);
+  }, [directoryHandle, selectedMonth, countSnapshotRows]);
 
   useEffect(() => {
     if (!directoryHandle || !selectedMonth) {
       monthMetaTokenRef.current += 1;
       // eslint-disable-next-line react-hooks/set-state-in-effect -- sync null-clear when workspace or month is deselected; synchronizes with external workspace state
       setMonthMeta(null);
+      setSnapshotRowCount(0);
       return;
     }
     void loadMonthMeta(false);
@@ -318,7 +370,7 @@ function ReportsContent() {
   // dashboard and the exported artifacts can never disagree.
   const loadExecInput = useCallback(async (): Promise<ExecutiveReportInput | null> => {
     if (!directoryHandle || !selectedMonth) return null;
-    const [populationFinal, sample, employeeFiles, templateSelection, popRev, sampleRev, distRev, processingSummary] = await Promise.all([
+    const [populationFinal, sample, employeeFiles, templateSelection, popRev, sampleRev, distRev, processingSummary, populationConfig] = await Promise.all([
       loadMonthPopulationFinal(directoryHandle, selectedMonth),
       loadSampleMaster(directoryHandle, selectedMonth),
       loadAllEmployeeFiles(directoryHandle, selectedMonth),
@@ -331,6 +383,9 @@ function ReportsContent() {
       // `ExecutiveReportInput.processingSummary`'s doc comment). Best-effort —
       // `loadProcessingSummary` already resolves to null on any read failure.
       loadProcessingSummary(directoryHandle, selectedMonth),
+      // C1: the workspace's own stage alias table, so every stage grouping in
+      // the report classifies a custom alias the way processing did.
+      loadPopulationConfig(directoryHandle),
     ]);
     if (!populationFinal) return null;
     const template = templateSelection?.templateId
@@ -355,6 +410,7 @@ function ReportsContent() {
       config: DEFAULT_EXEC_CONFIG,
       sourceRevisions,
       processingSummary,
+      stageMappings: populationConfig.stageMappings,
     };
   }, [directoryHandle, selectedMonth]);
 
@@ -395,6 +451,9 @@ function ReportsContent() {
       if (token !== kpiBuildTokenRef.current) return;
       setModel(builtModel);
       setModelError(null);
+      // A2: on the dashboard the banner count comes from the model just built —
+      // no second population read.
+      setSnapshotRowCount(builtModel.rows.filter((row) => row.fromSampleSnapshot).length);
       kpiModelBuiltForRef.current = { directoryHandle, month: selectedMonth };
       // §L Tier 2: backfill the studied-count chip from the model we just
       // built instead of a separate loadAllEmployeeFiles read -- only
@@ -931,6 +990,7 @@ function ReportsContent() {
           </span>
         </div>
       </div>
+      <SampleSnapshotBanner count={snapshotRowCount} />
 
       {/* B5: a "pending" month has no folder on disk yet, so every export/generate
           control below is disabled — explain why instead of leaving it a silent gap

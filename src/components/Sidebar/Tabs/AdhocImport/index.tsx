@@ -1282,8 +1282,26 @@ export default function AdhocImportTab() {
             count: String(plan.leftover),
           });
         }
+        // The assignment itself is fully durable (distribution events + this
+        // import's own record) — only the shared index listing failed to
+        // refresh. That is a degraded success, never a failure: surface it as
+        // a distinct warning instead of erroring the whole assign.
+        if (result.indexDegraded) {
+          message += " " + L.adhoc_import_assign_index_degraded;
+        }
         setNotice(message);
-        await refreshIndex();
+        try {
+          await refreshIndex();
+        } catch (refreshError) {
+          // The assign already committed and is already reported above
+          // (indexDegraded's own warning covers exactly "the shared index is
+          // unreadable right now") — a failed LIST refresh here must never
+          // retroactively turn an already-notified, durable assign into the
+          // error banner. Most likely to fire in exactly the moment this
+          // matters: the same share hiccup that degraded the index write can
+          // still be live a moment later when this re-read runs.
+          logError("AdhocImport.assign:refreshIndex", refreshError);
+        }
       } catch (err) {
         logError("AdhocImport.assign", err);
         setError(

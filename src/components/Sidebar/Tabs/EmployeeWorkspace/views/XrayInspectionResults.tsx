@@ -19,10 +19,10 @@ import {
 import {
   loadAllEmployeeFiles,
   loadEmployeeAnswers,
-  reconcileAnswersWithLocalMirror,
   setItemQualityNote,
 } from "../../../../../data/answers/answerStorage";
 import { countPendingAnswers } from "../../../../../data/answers/answerLocalMirror";
+import { backfillAnswerMirror } from "../../../../../data/answers/pendingAnswerReplay";
 import type { ItemAnswer } from "../../../../../data/answers/answerTypes";
 import { isNoImageSubmission } from "../../../../../data/answers/noImageAnswer";
 import { reopenSubmittedAnswer } from "../../../../../data/answers/reopenAnswer";
@@ -65,6 +65,9 @@ import type { DirectoryHandleLike } from "../../../../../data/storage/fileSystem
 import { useLabels, type Labels } from "../../../../../data/labels/useLabels";
 import { useGlobalMonth } from "../../../../../data/month/useGlobalMonth";
 import { formatStageLabel } from "../../../../../data/population/stageHelpers";
+import { certScanStatusFilterProps } from "./certScanColumn";
+import type { StageAliasMappings } from "../../../../../data/population/populationConfig";
+import { useWorkspaceStageMappings } from "../../../../../hooks/useWorkspaceStageMappings";
 
 const RESULTS_COL_KEY = "xray_inspection_results_cols_v1";
 const REFERRALS_PRESET_KEY = "xray-referrals";
@@ -88,7 +91,7 @@ function buildSampleColumns(L: Labels): DataTableCol<DistributionEntry>[] {
   return [
     { id: "xrayImageId",            label: L.col_xray_image_id,             widthFr: 20, alwaysVisible: true, filterKind: "text", accessor: (e) => displayXrayImageId(e) },
     { id: "movementStatus",         label: "حركة العينة",                   widthFr: 10, filterKind: "multiselect", accessor: () => null },
-    { id: "stage",                  label: L.col_stage,                     widthFr: 8,  accessor: (e) => e.row.stage },
+    { id: "stage",                  label: L.col_stage,                     widthFr: 8,  accessor: (e) => formatStageLabel(e.row.stage) },
     { id: "assignedTo",             label: L.col_xray_quality_expert,       widthFr: 9,  accessor: (e) => e.assignedTo },
     { id: "movementFrom",           label: "من",                            widthFr: 9,  accessor: () => null },
     { id: "movementTo",             label: "إلى",                           widthFr: 9,  accessor: () => null },
@@ -107,7 +110,7 @@ function buildSampleColumns(L: Labels): DataTableCol<DistributionEntry>[] {
       accessor: () => null },
     { id: "xrayLevelOneResult",     label: L.col_xray_l1_result,            widthFr: 8,  accessor: (e) => e.row.xrayLevelOneResult },
     { id: "xrayLevelTwoResult",     label: L.col_xray_l2_result,            widthFr: 8,  accessor: (e) => e.row.xrayLevelTwoResult },
-    { id: "certScanStatus",         label: L.col_certscan_status,           widthFr: 9,  accessor: (e) => e.row.certScanStatus },
+    { id: "certScanStatus",         label: L.col_certscan_status,           widthFr: 9,  ...certScanStatusFilterProps(L), accessor: (e) => e.row.certScanStatus },
     { id: "declarationNumber",      label: L.col_declaration_number,        widthFr: 11, accessor: (e) => e.row.declarationNumber },
     { id: "declarationDate",        label: L.col_declaration_date,          widthFr: 11, isDate: true, accessor: (e) => e.row.declarationDate },
     { id: "chassisNumber",          label: L.col_chassis_number,            widthFr: 11, accessor: (e) => e.row.chassisNumber },
@@ -223,6 +226,8 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
   // initial load and the 30s tick below — so it reflects the current
   // outcome of the latest retry rather than a stale count.
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
+  // C1: the workspace stage alias table (shared hook with the referral queue).
+  const stageMappings = useWorkspaceStageMappings(directoryHandle);
 
   useEffect(() => {
     void Promise.all([
@@ -269,12 +274,23 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
     }
   }, [selectedMonth]);
 
-  // Reconcile the local IndexedDB backup, then refresh the visible pending
-  // count from it — used both on load and by the 30s retry tick below, so
-  // the count always reflects the outcome of the latest reconciliation
-  // rather than the one before it.
-  const reconcileAndRefreshPendingSyncCount = useCallback(async () => {
-    await reconcileAnswersWithLocalMirror(directoryHandle, selectedMonth, username);
+  // COUNT-ONLY w.r.t. the SHARED WORKSPACE (F14/A1): this view used to both
+  // replay pending answers (`reconcileAnswersWithLocalMirror`, which wrote
+  // into the workspace file) and refresh the "not saved yet" count from the
+  // outcome. Landing a pending answer now runs exclusively through the
+  // app-level `PendingAnswerReplayRunner` (mounted once in AuthGate,
+  // covering every page/month/ad-hoc folder with a single shared in-flight
+  // guard) — this view never writes to the workspace file any more.
+  //
+  // It still does one NON-WRITING-to-disk thing (IMPORTANT 5, fix round 1):
+  // `backfillAnswerMirror` re-mirrors this employee's CURRENT on-disk items
+  // for the selected month into the browser's own IndexedDB backup — the
+  // half of the old `reconcileAnswersWithLocalMirror` that only ever wrote
+  // to IndexedDB, never to the shared folder, kept here as the natural
+  // "sibling effect" home (this view already reads the selected month's
+  // answers on load/tick) now that the writing half moved to the runner.
+  const refreshPendingSyncCount = useCallback(async () => {
+    await backfillAnswerMirror(directoryHandle, selectedMonth, username);
     setPendingSyncCount(await countPendingAnswers(selectedMonth, username));
   }, [directoryHandle, selectedMonth, username]);
 
@@ -340,14 +356,15 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
           return entry.status !== "replaced";
         });
 
-      // Reconcile this browser's local IndexedDB backup with the file for the
-      // signed-in employee's OWN answers — never for `canSeeAll` (a supervisor
-      // browsing other employees' answers must not mix another employee's
-      // records into or out of this browser's own local mirror). Fire-and-forget:
-      // best-effort by contract (see answerLocalMirror.ts) and must never delay
-      // or fail this render.
+      // Refresh the "not saved yet" count from this browser's local IndexedDB
+      // backup for the signed-in employee's OWN answers — never for
+      // `canSeeAll` (a supervisor browsing other employees' answers has no
+      // own pending queue to show). COUNT-ONLY: the actual replay runs
+      // app-wide via PendingAnswerReplayRunner (see the callback's own doc).
+      // Fire-and-forget: best-effort by contract and must never delay or fail
+      // this render.
       if (!canSeeAll) {
-        void reconcileAndRefreshPendingSyncCount();
+        void refreshPendingSyncCount();
       }
       const answerFiles = canSeeAll
         ? await loadAllEmployeeFiles(directoryHandle, selectedMonth)
@@ -402,7 +419,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
       }
       setLoadState("error");
     }
-  }, [canSeeAll, directoryHandle, reconcileAndRefreshPendingSyncCount, selectedMonth, username]);
+  }, [canSeeAll, directoryHandle, refreshPendingSyncCount, selectedMonth, username]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -411,21 +428,19 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
     return () => window.clearTimeout(timer);
   }, [loadData]);
 
-  // Extra, independent-of-navigation local-backup RETRY tick (owner
-  // requirement, 2026-09-09): every 30s while an employee has their own
-  // results view open, re-run the IndexedDB reconciliation above — mirroring
-  // whatever is currently on disk into this browser's local backup, and
-  // replaying back anything the mirror still has queued as unsynced (a save
-  // that never reached the shared folder — see `markAnswerPendingLocally` in
-  // `answerStorage.ts`) until it succeeds. Skipped entirely for `canSeeAll`
-  // — same reasoning as the loadData call above.
+  // The 30s LANDING of unsynced answers now runs app-wide
+  // (PendingAnswerReplayRunner, mounted in AuthGate) — for every page, every
+  // month, and every ad-hoc import, not only while this view is open. This
+  // tick only backfills the local mirror and keeps the "not saved yet" count
+  // on this view current (see refreshPendingSyncCount's own doc). Skipped
+  // entirely for `canSeeAll` — same reasoning as the loadData call above.
   useEffect(() => {
     if (canSeeAll || !selectedMonth) return;
     const interval = window.setInterval(() => {
-      void reconcileAndRefreshPendingSyncCount();
+      void refreshPendingSyncCount();
     }, 30_000);
     return () => window.clearInterval(interval);
-  }, [canSeeAll, reconcileAndRefreshPendingSyncCount, selectedMonth]);
+  }, [canSeeAll, refreshPendingSyncCount, selectedMonth]);
 
   // Re-fetch on the app-wide refresh signal (manual toolbar button + periodic
   // sync tick) so results/movements recorded elsewhere show up here too. Family-scoped
@@ -474,7 +489,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
       void sortAccessor;
       return {
         ...rest,
-        accessor: (row) => getSampleColumnValue(row, column, templatesById, template, L),
+        accessor: (row) => getSampleColumnValue(row, column, templatesById, template, L, stageMappings),
       };
     });
 
@@ -499,7 +514,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
     };
 
     return [...visibleSampleColumns, ...answerColumns, qualityNoteColumn];
-  }, [L, answerFields, referralColConfig, sampleColumns, template, templatesById]);
+  }, [L, answerFields, referralColConfig, sampleColumns, stageMappings, template, templatesById]);
 
   /**
    * What the table shows before anyone touches its picker: exactly the columns
@@ -1156,9 +1171,10 @@ function getSampleColumnValue(
   column: DataTableCol<DistributionEntry>,
   templatesById: ReadonlyMap<string, TemplateSchema>,
   fallbackTemplate: TemplateSchema | null,
-  labels: Labels
+  labels: Labels,
+  stageMappings?: StageAliasMappings
 ): string | null {
-  if (column.id === "stage") return formatStageLabel(row.entry.row.stage);
+  if (column.id === "stage") return formatStageLabel(row.entry.row.stage, stageMappings);
   if (column.id === "movementStatus") return getMovementStatusLabel(row.movement.status);
   if (column.id === "movementFrom") return row.movement.from;
   if (column.id === "movementTo") return row.movement.to;

@@ -22,6 +22,7 @@
 
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import {
+  type AppendEventSegmentOptions,
   type AppendOnlyEventLogConfig,
   type AppendOnlyFoldCheckpoint,
   type CheckpointResumeVerdict,
@@ -210,18 +211,21 @@ export async function appendAnswerEventSegment(
   parentDir: DirectoryHandleLike,
   events: AnswerEvent[],
   writer: SegmentWriterIdentity,
-  config: AppendOnlyEventLogConfig = ANSWER_EVENT_LOG
+  config: AppendOnlyEventLogConfig = ANSWER_EVENT_LOG,
+  options: AppendEventSegmentOptions = {}
 ): Promise<SegmentVerification> {
-  return appendEventSegment<AnswerEvent>(parentDir, events, writer, config);
+  return appendEventSegment<AnswerEvent>(parentDir, events, writer, config, options);
 }
 
-/** Read only the lines appended past each segment's already-folded byte offset. */
+/** Read only the lines appended past each segment's already-folded byte offset.
+ *  `options.strict` forwards to `readEventSegmentDelta` — see its doc comment. */
 export async function readAnswerEventDelta(
   parentDir: DirectoryHandleLike,
   knownOffsets: Record<string, number>,
-  config: AppendOnlyEventLogConfig = ANSWER_EVENT_LOG
+  config: AppendOnlyEventLogConfig = ANSWER_EVENT_LOG,
+  options?: { strict?: boolean; sealedConfirmed?: ReadonlySet<string> }
 ): Promise<SegmentEventsDelta<AnswerEvent>> {
-  return readEventSegmentDelta<AnswerEvent>(parentDir, knownOffsets, config);
+  return readEventSegmentDelta<AnswerEvent>(parentDir, knownOffsets, config, options);
 }
 
 /* ───────────────────────── the ONE fold order (§4) ──────────────────────── */

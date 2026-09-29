@@ -20,7 +20,8 @@ import { getSampleMainDir } from "../workspace/workspacePaths";
 import type { StageAliasMappings, StageSamplingRule } from "../population/populationConfig";
 import type { CertScanShortfall, SampleMasterData } from "./sampleTypes";
 
-const SAMPLING_PLAN_FILE = "sampling.plan.json";
+/** Exported for the selective-restore catalog (`backup/restoreScope.ts`). */
+export const SAMPLING_PLAN_FILE = "sampling.plan.json";
 
 /** Internal document-schema marker (independent of the JsonEnvelope schemaVersion). */
 export const SAMPLING_PLAN_SCHEMA = 1 as const;

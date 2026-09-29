@@ -280,6 +280,20 @@ describe("syncSampleMirrors derive-version guard (v88 quota refold)", () => {
     expect(mirror?.quota?.dailyQuota).toBe(9);
   });
 
+  it("C3: a v4 (calendar-day) mirror at the SAME revision is rewritten with the v5 (working-day) quota", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    invalidateMonthLockCache();
+    await ensurePopulationMonthFolder(root, MONTH_A);
+
+    await syncSampleMirrors(root, MONTH_A, makeCurrentAt(5, 4, [makeMirrorEntry("A1", "pending")], 9));
+    await syncSampleMirrors(root, MONTH_A, makeCurrentAt(5, 5, [makeMirrorEntry("A1", "pending")], 4));
+
+    const mirror = await loadEmployeeSampleMirror(root, MONTH_A, EMP);
+    expect(mirror?.deriveVersion).toBe(5);
+    expect(mirror?.quota?.dailyQuota).toBe(4);
+    expect(mirror?.sourceLogRevision).toBe(5);
+  });
+
   it("a legacy mirror with NO deriveVersion is rewritten exactly once", async () => {
     const root = createMemoryDirectory("root") as DirectoryHandleLike;
     invalidateMonthLockCache();

@@ -96,13 +96,14 @@ global selection.
 
 | File or Pattern | Typical Location | Purpose |
 | --- | --- | --- |
-| `config.json` | `1-population/` (root, not per-month) | Population processing configuration: system/custom field definitions, column-mapping templates, stage alias mappings, processing workflow presets, export templates, sampling rules, and per-employee stage allocations. |
+| `config.json` | `1-population/` (root, not per-month) | Population processing configuration: system/custom field definitions, column-mapping templates, stage alias mappings, processing workflow presets, export templates, sampling rules, and per-employee stage allocations, plus the optional `certScanPorts: string[]` (C2, additive — a config written before it loads as `[]`, so no migration): ports treated as CertScan as a whole. Processing unions it with the pasted CertScan list on the next run only; an already-drawn sample is never re-flagged, and `SAMPLING_ALGORITHM_VERSION` is unchanged. |
 | `certscan.global.json` | `1-population/` (root, not per-month) | Global CertScan matching reference text shared across all months. |
 | `month.manifest.json` | `1-population/{month}/` | Month metadata: month/year, processed counts, status, operator info. |
 | `risk.raw.json` | `1-population/{month}/1-raw/` or legacy month folder | Imported risk rows. |
 | `bi.raw.json` | `1-population/{month}/1-raw/` or legacy month folder | Imported BI rows when provided. |
 | `population.final.json` | `1-population/{month}/2-processed/` or legacy month folder | Final processed population rows used for sampling and reporting. |
 | `processing.summary.json` | `1-population/{month}/2-processed/` | Processing summary/validation data. |
+| `population.final.{ISO-ts}.superseded.json` | `1-population/{month}/2-processed/` | Mandatory archive (A2): the prior `population.final.json`, copied before a save, a population recovery or a selective backup restore overwrites it. A failed archive refuses the overwrite. Source workbooks are archived best-effort as `risk.source.{ISO-ts}.superseded.{ext}` / `bi.source.{ISO-ts}.superseded.{ext}` in `1-raw/`. Candidates of the Settings «استعادة المجتمع السابق» tool. |
 | `sample.master.json` | `2-samples/{month}/1-main/` | Drawn sample rows and sample configuration/result metadata. |
 | `distribution.events/{eventId}.json` | `2-samples/{month}/1-main/` | Immutable durable assignment event envelopes. |
 | `distribution.log.json` | `2-samples/{month}/1-main/` | Backward-compatible event-log projection. |
@@ -181,6 +182,7 @@ helpers, aborting with a `staleRevision` flag the caller confirms exactly as the
 guard already does — needs a new UI confirmation branch plus tests and belongs in a planned release.
 | `main.samples.json` | `2-samples/{month}/1-main/` | Mirror of all assigned sample entries. |
 | `{username}.samples.json` | `2-samples/{month}/2-employees/` | Per-employee sample mirror. |
+| `answers.events/{creationMinute}-ans-{deviceHash}-{chainHash}[-seq].ndjson` | `2-samples/{month}/…` | Answer event segments. Since A1 the writer chain is stable: one chain per browser × month × user (creation minute persisted in `localStorage` key `xray_answer_segment_chain_v1`) rather than one per page load. Losing the stored minute only starts a new chain; readers fold every segment. |
 | `{username}.answers.json` | `2-samples/{month}/2-employees/` | Employee answers plus referral/replacement requests for that employee. |
 | `{supervisor}.decisions.json` | `2-samples/{month}/3-approvals/` | Supervisor referral/replacement decisions. |
 | `activity.log.json` | `5-system/audit/` | Sign-in and working-hours audit log. |
@@ -275,7 +277,7 @@ Each `population.final.json` row and each sampled `rows[]` item uses the process
 | `events[]` | `eventId`, `eventType`, `xrayImageId`, `assignedTo`, `replacedById`, `reassignedTo`, `eventAt`, `eventBy`, `notes`, `dailyQuota`, `daysRemainingAtAssignment`. |
 | `distribution.current.json` | Rebuildable cache: `monthFolderName`, `logRevision`, `eventSetId`, `derivedAt`, totals for assigned/completed/replaced/pending, `entries[]`, `quotas`. |
 | `entries[]` | `xrayImageId`, `assignedTo`, `status`, `replacedById`, `lastEventAt`, `row`. |
-| `quotas` | Per employee: `username`, `sampleCount`, `dailyQuota`, `daysRemainingAtAssignment`, `assignedAt`. |
+| `quotas` | Per employee: `username`, `sampleCount`, `dailyQuota`, `daysRemainingAtAssignment`, `assignedAt`. Since C3 (`DERIVE_VERSION` 5) `daysRemainingAtAssignment` counts WORKING days (Sunday–Thursday; no holiday calendar) from the first `assigned` event's calendar day to the deadline (last day of the month − 3), inclusive, floored at 1 in the division (`countWorkingDays`, `src/utils/workingDays.ts`); `sampleCount` is the employee's live assigned count. The value is frozen — completions and the passing of time never move it; only a change in the live assigned count does. |
 | `{username}.samples.json` | Employee mirror: `monthFolderName`, `username`, `updatedAt`, `sourceLogRevision`, `entries[]`. |
 | `{username}.answers.json` | `username`, `monthFolderName`, `revision`, `_writeToken`, `lastUpdatedAt`, `items[]`, `referralRequests[]`, `replacementRequests[]`. |
 | `items[]` | `xrayImageId`, `templateId`, `templateVersion`, `answers`, `lastSavedAt`, `submittedAt`, `answeredBy`, `status`. |
@@ -377,8 +379,8 @@ Both files use `safeWriteJson` / `safeReadJson` and the `JsonEnvelope` schema-ve
 | `{templateId}.json` | `6-templates/` | Inspection template schema and fields. |
 | `template.selection.json` | `6-templates/` | Selected active inspection template. |
 | `deck2.style-choices.json` | `6-templates/` | Global (not per-month), admin-set per-slide design-variant choice (0-3) for the executive deck v2's presentation styling — which of each slide's 4 style variants renders in production. Shared, multi-admin file: same CAS contract (`revision` + `_writeToken`, verified on read-back) as `template.selection.json`. |
-| `threads/{threadId}.json` | `5-system/feedback/` | ONE self-contained conversation per file — the original message plus every reply. The durable source of truth for feedback. A new thread's file needs no CAS (its id is freshly minted, so no other writer can target the name); a reply CAS-loops that one file with a delayed verify. Ids are `t{YYYYMMDDHHmmss}-{8 hex}`: short enough for a deep UNC path plus Chromium's `.crswap` sibling, and lexicographically time-ordered so the sync tick's tail-sampled signature watches the newest threads. Migrated legacy threads keep their original UUID id and therefore sort into the oldest region. |
-| `threads.index.json` | `5-system/feedback/` | Lightweight summaries (`threadId`, `from`, `role`, `category`, `status`, `createdAt`, `lastActivityAt`, `preview`) so the widget's list/filter/pagination costs no thread reads. CAS-protected (`revision` + `_writeToken`), same contract as `4-reports/designs/designs.index.json`. Written on thread CREATE and STATUS CHANGE — never on a reply, which is what keeps the one shared file rarely touched. A REBUILDABLE CACHE, not an authority: `listThreadSummaries` reconciles it against a names-only listing of `threads/` on every read, **in memory**, so a create that lost the index race is never lost even if the index is never repaired. Writing the reconciled index BACK is opt-in (`{ repairIndex: true }`), requested only by a user-initiated feedback surface, rate-limited per tab, and skipped entirely when the index could not be READ. Until v122.1 the repair ran unconditionally from the read path, so every signed-in client's 60 s unread poll issued a CAS write to this file from every page in the app — and a repair that failed left the index equally stale, so the storm could not converge. A failed index write also no longer fails `createThread`: the thread file is already durable, and telling the user otherwise invites a duplicate. |
+| `threads/{threadId}.json` | `5-system/feedback/` | ONE self-contained conversation per file — the original message plus every reply. The durable source of truth for feedback. A new thread's file needs no CAS (its id is freshly minted, so no other writer can target the name); a reply CAS-loops that one file with a delayed verify. Ids are `t{YYYYMMDDHHmmss}-{8 hex}`: short enough for a deep UNC path plus Chromium's `.crswap` sibling, and lexicographically time-ordered so the sync tick's tail-sampled signature watches the newest threads. Migrated legacy threads keep their original UUID id and therefore sort into the oldest region. Optional `resolvedAt` / `resolvedBy` (since 2026-09-28) are stamped once, from the resolving reply, on the open → resolved transition; threads resolved earlier simply lack them (additive — no migration). |
+| `threads.index.json` | `5-system/feedback/` | Lightweight summaries (`threadId`, `from`, `role`, `category`, `status`, `createdAt`, `lastActivityAt`, `preview`) so the widget's list/filter/pagination costs no thread reads. CAS-protected (`revision` + `_writeToken`), same contract as `4-reports/designs/designs.index.json`. Written on thread CREATE and STATUS CHANGE — never on a reply, which is what keeps the one shared file rarely touched. A REBUILDABLE CACHE, not an authority: `listThreadSummaries` reconciles it against a names-only listing of `threads/` on every read, **in memory**, so a create that lost the index race is never lost even if the index is never repaired. Writing the reconciled index BACK is opt-in (`{ repairIndex: true }`), requested only by a user-initiated feedback surface, rate-limited per tab, and skipped entirely when the index could not be READ. Until v122.1 the repair ran unconditionally from the read path, so every signed-in client's 60 s unread poll issued a CAS write to this file from every page in the app — and a repair that failed left the index equally stale, so the storm could not converge. A failed index write also no longer fails `createThread`: the thread file is already durable, and telling the user otherwise invites a duplicate. Since 2026-09-28 (Workstream B) the create / status-change index update is not even awaited: the click returns once the thread file is verified, the index write runs in the background under the 30 s interactive deadline, and a failure is still logged (`feedback:createThreadIndex` / `feedback:statusIndex`). |
 | `messages.json` | `5-system/feedback/` | LEGACY, read-only as of v116.0. The pre-v116 shared feedback log — every user's messages and every admin reply in one file, which is what made concurrent writers contend and exhaust the CAS ladder (XQ-IO-032). `migrateLegacyMessages` copies it into `threads/` exactly once, lazily, on the first read by a v116+ client, and then never touches it again on its own — this file is never written, moved, or deleted by the ordinary read path, at either this location or the legacy root-level `feedback/messages.json`. A REAL admin can additionally trigger `finalizeLegacyMigration` (FeedbackWidget's "أرشفة الرسائل القديمة نهائيًا" button, admin "all messages" tab): a deliberate, explicit action that first verifies every legacy message id has a readable thread file, then ARCHIVES this file to `messages.json.migrated` (write-then-remove; never a hard delete) at whichever location(s) held a live copy. Nothing reads the archived name — it is a manual-recovery copy only, not a second fallback path — so a workspace that has been finalized simply has no live `messages.json` left for the lazy migration to find on future reads. |
 | `messages.json.migrated` | `5-system/feedback/` (and/or the legacy root `feedback/`) | Present only after an admin has run `finalizeLegacyMigration`. Byte-identical copy of the retired `messages.json`, kept for manual recovery — nothing in the app reads this name back in. |
 | `admin-shared.browse-preset.json` | `5-system/user-presets/` | Shared/admin table column preferences. |
@@ -395,7 +397,7 @@ Both files use `safeWriteJson` / `safeReadJson` and the `JsonEnvelope` schema-ve
 | `sampling.plan.json` | `2-samples/{month}/1-main/` | Documented sampling plan written at draw time next to `sample.master.json` (A1): lot definition (ports, per-stage split), target sample fraction, advisory quality/inspection-level notes, risk-basis share, and the seed + algorithm version the draw binds to. **B4:** also carries an optional `priorMonthAdvisory` (`priorMonthFolderName`, `priorMonthSuspicionRate` = share of the prior month's rows with `xrayLevelTwoResult` = اشتباه, `inspectionRecommendation` = `normal`/`tightened-review` at the >5% threshold). Advisory only — never changes quotas; absent on legacy plans. |
 | `risk.raw.{ISO-ts}.superseded.json` / `bi.raw.{ISO-ts}.superseded.json` | `1-population/{month}/1-raw/` | Immutable-raw archive (A5): the prior raw import, copied verbatim before a re-import overwrites the live `risk.raw.json` / `bi.raw.json`. The new live file records the archived name in `supersedes`. |
 | `population.csv` | `5-system/powerbi-export/{month}/` | All `ExecutiveReportRow` records (UTF-8 BOM CSV, 26 columns). |
-| `sample.csv` | `5-system/powerbi-export/{month}/` | `selectedInSample=true` subset of `population.csv`. |
+| `sample.csv` | `5-system/powerbi-export/{month}/` | `selectedInSample=true` subset of `population.csv`, plus a 27th, last column `fromSampleSnapshot` (`true`/`false`, never blank): `true` marks a sampled image rebuilt from `sample.master.json` because its id is missing from the month's population (A2). `population.csv` never contains such rows. |
 | `README.txt` | `5-system/powerbi-export/{month}/` | Bilingual connection instructions (Arabic + English) for Power BI Desktop. |
 
 ## Data Protection Notes
@@ -418,3 +420,56 @@ Both files use `safeWriteJson` / `safeReadJson` and the `JsonEnvelope` schema-ve
   single bug in that path could destroy data the backup never had. Restoring browser-storage data
   (users, permissions, custom labels) is a separate, explicit opt-in step offered after a
   successful restore — it is never applied automatically.
+- **Selective restore (Workstream D, admin only):** the Archive restore dialog's
+  «استعادة انتقائية» mode restores chosen **element × month** cells instead of the whole
+  `json/` tree. The element catalog is `src/data/backup/restoreScope.ts` (one definition,
+  numbered and legacy paths): Population, Sample & distribution, Answers, Referrals &
+  approvals (per month), and Population settings, Templates, Users & permissions, Report
+  designs, Feedback, System settings (workspace-wide). Access is admin-only
+  (`session.role === "admin"`, on top of the ordinary restore permission).
+  - **The classifier fails closed.** `classifyBackupPath` answers from the path alone; a path
+    matching no element (including an unknown child of a population month folder) returns
+    `null` and is never restored selectively. `5-system/{backups,audit,locks,system-errors}/`
+    and `restore.inprogress.json` are deliberately unmatched. `restoreBackupSnapshot` takes the
+    optional `scope`; absent, it is the full restore above, unchanged. A selective restore
+    keeps every guarantee of a full one — `assertBackupComplete`, a FULL `pre-restore`
+    rollback backup, the sentinel, and the same per-file `restoreActionFor` semantics (event
+    segments still merge) — and never creates folders for unselected elements.
+  - **Manifest handling.** Scoped walks skip `month.manifest.json` entirely (it carries status,
+    lock and CAS bookkeeping). After a population restore only the population-describing fields
+    (and `totalProcessedRows`) are synced into the live manifest, under `manifestLockKey(month)`
+    (`syncManifestFromBackupPopulation`, `populationRecovery.ts`). The whole backup manifest is
+    written (revision 1, no `_writeToken`) only when the live month folder was confirmed absent
+    BEFORE the restore walk began; a manifest that reads as missing in a month that existed is
+    left untouched and reported as a derived warning.
+  - **Closed months are refused** for every month-scoped element, all selected months checked
+    before anything is touched (`archive_restore_month_closed`).
+  - **Dependency plan** (`selectiveRestore.ts`, re-run from disk by `runSelectiveRestore`, never
+    trusting the dialog's earlier plan): a population restore for a month with a live
+    distribution or answers is refused unless every sampled `xrayImageId` exists in the backup's
+    population (A2's rule, through `assessPopulationOverwrite`). When the same restore also
+    restores Sample & distribution, the A2 coverage check uses the UNION of the live and the
+    backup sampled ids, because restoring a sample merges events rather than removing the
+    distribution/answers already on disk; this can false-block, never false-allow. Sample &
+    distribution without Answers (or the reverse) is allowed with a warning. Before confirming,
+    the dialog previews file counts per element × month (an empty selection disables confirm).
+  - **Archive, never delete.** The live `population.final.json` of every month the backup really
+    replaces is archived as `population.final.{stamp}.superseded.json` (mandatory; a failed
+    archive stops the restore before it starts), so the restore is itself undoable from
+    Settings → «استعادة المجتمع السابق».
+  - **After the walk** the replacement-candidate index, the month aggregate and
+    `distribution.current.json` are rebuilt (never copied) for the months actually restored, and
+    the B3 integrity scan runs for every selected month. A rebuild step that fails does not
+    fail the restore (the data is on disk): it is returned in `derivedWarnings`
+    (`{ month, step: manifest | population-derived | replacement-index | aggregate |
+    distribution-cache, error }`) and shown to the admin.
+  - **Audit.** A successful selective restore records a `backup-restored` action
+    (`selective: true`, `elements`, `months`, `restoredFiles`, `rollbackFolderName`); the full
+    restore records the same type with `rollbackFolderName` and a month count, and the
+    Settings population-recovery restore records it too.
+  - **Population recovery from backups.** A2's recovery tool lists complete backups holding the
+    month's population as `source: "backup"` candidates (`listBackupPopulationCandidates`). Each
+    candidate costs a full population read, so only the newest
+    `BACKUP_POPULATION_CANDIDATE_SCAN_LIMIT` (10) complete backups are scanned; an interrupted
+    backup is never offered. Restoring one goes through this engine with
+    `{ elements: ["population"], months: [month] }`.

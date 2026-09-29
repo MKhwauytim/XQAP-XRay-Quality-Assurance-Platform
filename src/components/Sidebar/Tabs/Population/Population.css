@@ -3719,3 +3719,25 @@ select.save-disk-input {
     flex-wrap: wrap;
   }
 }
+
+/* CertScan chip group in the Browse toolbar (C2). Mirrors the toolbar's
+   button skin (.bv-clear-filters-btn); the active chip takes the primary fill. */
+.bv-certscan-filter {
+  display: inline-flex;
+  gap: var(--sp-1);
+  flex: 0 0 auto;
+}
+.bv-certscan-chip {
+  padding: var(--sp-2) var(--sp-3);
+  border: 1.5px solid var(--p-border);
+  border-radius: 8px;
+  background: var(--c-surface);
+  font-size: 12.5px;
+  color: var(--p-muted);
+  cursor: pointer;
+}
+.bv-certscan-chip.active {
+  border-color: var(--p-primary);
+  background: var(--p-primary);
+  color: var(--c-surface);
+}

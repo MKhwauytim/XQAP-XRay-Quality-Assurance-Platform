@@ -133,7 +133,8 @@ export function collectPortAgreementRows(model: ReportModel): { land: PortAgreem
     const { levelOne, levelTwo, review } = img.results;
 
     // Whole-population axis: the two inspection levels against each other.
-    if (levelOne !== null && levelTwo !== null) {
+    // A2: a snapshot-only image is not in the population, so it stays out of this axis.
+    if (levelOne !== null && levelTwo !== null && !img.fromSampleSnapshot) {
       cur.l1l2Comparable += 1;
       if (levelOne === levelTwo) cur.l1l2Agree += 1;
     }

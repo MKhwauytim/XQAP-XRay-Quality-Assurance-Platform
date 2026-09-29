@@ -79,6 +79,8 @@ export type ImageResultComparison = {
   /** Agreement of each non-review source with the reviewer. Only set when BOTH
    *  that source and the reviewer have a result; otherwise `null` (renders `—`). */
   agreesWithReview: Partial<Record<Exclude<ResultSource, "review">, boolean | null>>;
+  /** A2: built from a sample-snapshot row (id missing from the population). Present only when true. */
+  fromSampleSnapshot?: true;
 };
 
 /**
@@ -327,6 +329,7 @@ export function buildImageComparisons(rows: ExecutiveReportRow[]): ImageResultCo
       portName: row.portName,
       results,
       agreesWithReview,
+      ...(row.fromSampleSnapshot ? { fromSampleSnapshot: true as const } : {}),
     };
   });
 }

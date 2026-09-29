@@ -177,9 +177,13 @@ const PINNED_MEANINGS: Record<string, string> = {
   "XQ-IO-035":
     "NoModificationAllowedError survived every retry: the file stayed locked by another writer (another tab, or another machine on the SMB share) for the whole ladder. This is CONTENTION, not a lost permission grant — repeating the action shortly is the right advice",
   "XQ-IO-036":
-    "InvalidStateError: the (size, mtime) snapshot cached by a File/writable-stream interface object no longer matched the file on disk when the operation touched the bytes — a concurrent write from another machine on the share, or the Windows SMB metadata cache serving a stale mtime to the snapshot. Every retry re-acquires the handle and takes a FRESH snapshot, so retrying is the correct remedy; this code is reported only once the whole ladder is spent",
+    "InvalidStateError. R8(c): on a READ (getFile()/file.text()), this means an OS-level file operation failed — most often because the (size, mtime) snapshot cached by a File interface object no longer matched the file on disk (a concurrent write from another machine, or the Windows SMB metadata cache serving a stale mtime), but Chromium collapses other OS-level failures into this same name too, so 'the snapshot changed' is not the only possible cause; retrying with a fresh handle/snapshot is still the correct remedy either way. On a segment WRITE's close(), Chromium maps ANY swap-file→target replace failure to this same name and sentence — the shared folder refused to replace the file (it may be open on another computer or lack permission), not necessarily a stale snapshot — and retrying the SAME target for long does not help; the writer rotates to a fresh segment after a short ladder instead. This code is reported only once the relevant ladder is spent",
   "XQ-IO-037":
     "a BEST-EFFORT history snapshot was skipped before it touched the share, because the path it would need is longer than the budget a workspace on this deployment can be relied on to accept. Nothing was retried and nothing was probed: this is the XQ-IO-034 verdict applied in advance rather than rediscovered, at the cost of a full retry ladder, on every save. The action it was documenting succeeded — only its history entry was not written",
+  "XQ-IO-038":
+    "the append-only event log gave up looking for a ROTATION TARGET it could trust. Every candidate segment name it tried, up to a small fixed bound (or the MAX_SEGMENT_SEQ ceiling), came back with an unconfirmed pre-write baseline — it could not prove the target was empty (or already held only what this writer put there), so writing to it risked silently truncating real content. Nothing on disk was touched by this failure: every segment this writer chain has ever sealed is untouched, and the batch that triggered this was never written anywhere. Retrying shortly, after the share's directory listing has had a chance to recover, is the right remedy — this is a listing/visibility problem, not data loss",
+  "XQ-IO-039":
+    "the browser's after-write Safe Browsing check failed on close() (AbortError 'Failed to perform Safe Browsing check.'), typically while the network is degraded. close() never replaced the destination, so nothing was written and retrying is safe. Reported only once the write retry ladder is spent",
   "XQ-AUTH-001":
     "login rejected: unknown username or wrong password",
   "XQ-AUTH-002":
@@ -208,6 +212,10 @@ const PINNED_MEANINGS: Record<string, string> = {
     "a population Web Worker died without sending a reply (error/messageerror) — most likely out of memory on a very large month; without this the caller waits forever",
   "XQ-POP-006":
     "saving the processed population to disk threw",
+  "XQ-POP-008":
+    "A2 overwrite guard (saveMonthRunLocked): the month's existing sample/distribution/answers could not be read (strictly) to check whether a population overwrite would orphan them — the save is refused rather than risking a silent orphan, since a read failure must never be read as \"no work\"",
+  "XQ-POP-009":
+    "A2 mandatory archive (archiveBeforeOverwrite, required: true): the verified byte-copy of population.final.json to its *.superseded.json archive threw or failed its read-back verification before the overwrite — the save is refused rather than overwriting the only full copy without a proven-good backup next to it",
   "XQ-DIST-001":
     "a distribution action threw; the raw detail went to the error log",
   "XQ-DIST-002":

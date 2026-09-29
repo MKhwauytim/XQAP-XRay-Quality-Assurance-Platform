@@ -1,4 +1,4 @@
-import { codedMessage, logCodedError, resolveErrorCode } from "../storage/errorCodes";
+import { codedMessage, logCodedError, resolveErrorCode, taggedError } from "../storage/errorCodes";
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
 import {
   safeWriteJson,
@@ -7,9 +7,12 @@ import {
   readEnvelopeRevision,
   readDecodedFileTextOutcome,
   copyFileBytes,
+  copyFileBytesVerified,
+  safeRemoveJson,
   isCompressedFile,
   type SafeWriteProgressPhase,
 } from "../storage/safeWrite";
+import { isNotFoundError } from "../storage/transientFileErrors";
 import { casLoop } from "../storage/casLoop";
 import { mapWithConcurrency } from "../storage/concurrency";
 import { withResourceLock } from "../storage/webLocks";
@@ -24,10 +27,16 @@ import type {
   ProcessingSummaryData,
   SourceFileMetadata,
 } from "./monthTypes";
-import type { CertScanShortfall, SampleMasterData } from "../sampling/sampleTypes";
+import { SAMPLING_PROOF_FILE, type CertScanShortfall, type SampleMasterData } from "../sampling/sampleTypes";
 import type { DistributionCurrentData } from "../distribution/distributionTypes";
 import { loadOrDeriveDistributionCurrent } from "../distribution/distributionStorage";
 import { loadSampleMaster } from "../sampling/sampleStorage";
+import {
+  assessPopulationOverwrite,
+  loadPopulationOverwriteImpact,
+  type PopulationOverwriteImpact,
+} from "./populationOverwriteGuard";
+import { getLabels } from "../labels/labelsStore";
 import { loadPopulationConfig } from "./populationConfig";
 import { rebuildReplacementIndex } from "./replacementIndexStorage";
 import type { PreparedPopulationRow } from "./populationTypes";
@@ -41,6 +50,7 @@ import {
   getPopulationMonthDir,
   getPopulationRoot,
   getSampleMainDir,
+  LEGACY_MONTH_SUBFOLDERS,
   POPULATION_SUBFOLDERS,
 } from "../workspace/workspacePaths";
 
@@ -158,7 +168,7 @@ export async function saveSamplingProof(
   await ensureMonthWritable(directoryHandle, monthFolderName);
   try {
     const sampleDir = await getSampleMainDir(directoryHandle, monthFolderName, true);
-    await safeWriteJson(sampleDir, "sampling-proof.json", proof);
+    await safeWriteJson(sampleDir, SAMPLING_PROOF_FILE, proof);
   } catch (error) {
     // Non-throwing by design: the draw's own record (rngSeed, drawnAt, drawnBy,
     // allocations) is already persisted in sample.master.json, so a lost proof
@@ -223,11 +233,23 @@ export type SaveMonthRunParams = {
 export type SaveMonthRunResult = {
   ok: true;
   monthFolderName: string;
+  /** A2: live sampled ids the saved population lacks (non-zero only for a sample-without-work month). */
+  sampleOrphanCount: number;
 } | {
   ok: false;
   error: string;
   /** Set when the abort was caused by a sample that appeared since the pre-check (TOCTOU). */
   sampleExists?: true;
+  /**
+   * A2: the month has a distribution or answers and the new population lacks
+   * live sampled ids. Refused regardless of `confirmedOverwrite`.
+   */
+  overwriteBlocked?: {
+    missingCount: number;
+    missingExamples: string[];
+    distributionCount: number;
+    answerCount: number;
+  };
 };
 
 async function ensureFolder(
@@ -277,6 +299,135 @@ async function archiveExistingRaw(
   }
 }
 
+/**
+ * Filename-safe ISO timestamp — the same stamp shape `archiveExistingRaw`
+ * uses, with a short random suffix appended (F20): two archives written
+ * within the same millisecond (a fast re-save, or two source files archived
+ * back-to-back) must never collide and silently clobber one archive with
+ * another rather than actually preserving both.
+ */
+export function supersedeStamp(now: Date = new Date()): string {
+  const random = crypto.randomUUID().slice(0, 8);
+  return `${now.toISOString().replace(/:/g, "")}-${random}`;
+}
+
+/** `population.final.json` → `population.final.{stamp}.superseded.json`; `risk.source.xlsx` → `risk.source.{stamp}.superseded.xlsx`. */
+export function supersededFileName(liveName: string, stamp: string): string {
+  const dot = liveName.lastIndexOf(".");
+  return dot <= 0
+    ? `${liveName}.${stamp}.superseded`
+    : `${liveName.slice(0, dot)}.${stamp}.superseded${liveName.slice(dot)}`;
+}
+
+/**
+ * A2: byte-copy `liveName` aside before it is overwritten. Returns the archive
+ * name, or null when there was nothing to archive.
+ *
+ * `required: true` (population.final.json) turns a verification failure into
+ * a thrown, coded (`XQ-POP-009`) error, so the caller's save is refused
+ * rather than overwriting the only full copy with an unverified — possibly
+ * torn or short — archive sitting next to it; otherwise failures are logged
+ * and the save proceeds, matching `archiveExistingRaw`'s existing best-effort
+ * contract for the raw JSON archives.
+ *
+ * F5 / review fix round 1: this used to probe existence itself via a plain
+ * `dir.getFileHandle(liveName, { create: false })` and then copy with the
+ * unverified `copyFileBytes`. Two bugs followed from that: (1) that probe had
+ * no `retryMissing`, so a transient SMB directory-listing lag on an
+ * ACTUALLY-existing `population.final.json` reported `NotFoundError`, the
+ * function returned `null` ("nothing to archive") even under `required:
+ * true`, and the save proceeded to overwrite the live file with zero backup;
+ * (2) `copyFileBytes` never reads its own output back, so a torn/short copy
+ * (share dropped mid-flush, disk full) counted as a successful archive and
+ * the live file was then overwritten with nothing recoverable next to it.
+ * `copyFileBytesVerified` (`safeWrite.ts`) is the storage layer's own
+ * primitive for exactly this: it never decodes (byte-for-byte, handles a
+ * compressed source correctly), reads the copy back, and compares its size
+ * and a digest against the bytes it read from the source — so a torn copy is
+ * reported, not silently accepted. `source_missing` from it is the ordinary
+ * "no live file yet" case (a first save) and stays `null` under `required`
+ * too — that case has nothing to archive, which is not a failure.
+ *
+ * Review fix round 2 (F5, finding #1, closed): `copyFileBytesVerified`'s own
+ * SOURCE read used to open the source with no `retryMissing`, so a transient
+ * SMB directory-listing lag on an ACTUALLY-existing `liveName` could still
+ * report `NotFoundError` on the very first attempt and resolve to
+ * `source_missing` — the exact false negative this whole function exists to
+ * rule out, just moved one layer down. `copyFileBytesVerified` now takes an
+ * opt-in `{ retryMissingSource: true }` (default false, so every OTHER
+ * caller is unaffected) that rides the same `retryMissing` ladder
+ * `copyFileBytes`/`openFile` already use for post-write verification reads
+ * (`VERIFY_READBACK_RETRY_DELAYS_MS`, ~11s worst case — see `safeWrite.ts`).
+ * `archiveBeforeOverwrite` passes it for the MANDATORY `population.final.json`
+ * archive only (`saveMonthRunLocked`'s `{ required: true }` call), and only
+ * WHEN a prior save is known to have happened (the caller gates it on
+ * `month.manifest.json` already existing — see the call site's comment):
+ * a genuinely first-ever save of a month has no live file to protect, so
+ * making it pay the same ~11s worst-case ladder for a file that was never
+ * going to be there is not just wasted latency on every new month in
+ * production, it broke several existing tests outright when tried
+ * unconditionally (their own 20s `testTimeout` exceeded — see
+ * task-4-report.md's fix-round-2 section). Only a `NotFoundError` that
+ * survives the whole ladder counts as "genuinely no live file" once this IS
+ * turned on. The best-effort source-workbook archives (`risk.source.*` /
+ * `bi.source*.*`) deliberately do NOT opt in at all: a missed archive of an
+ * uploaded workbook is logged and non-fatal by design (the processed
+ * population itself is what `required: true` protects), and the same latency
+ * tradeoff applies with even less upside.
+ */
+export async function archiveBeforeOverwrite(
+  dir: DirectoryHandleLike,
+  liveName: string,
+  stamp: string,
+  options: { required?: boolean; retryMissingSource?: boolean } = {}
+): Promise<string | null> {
+  const archiveName = supersededFileName(liveName, stamp);
+  let outcome;
+  try {
+    outcome = await copyFileBytesVerified(dir, liveName, dir, archiveName, {
+      retryMissingSource: options.retryMissingSource,
+    });
+  } catch (error) {
+    // copyFileBytesVerified opens the SOURCE first, but once that succeeds it
+    // opens the TARGET (`getFileHandle(..., { create: true })`, which creates
+    // a 0-byte file immediately) BEFORE it reads a single byte of the
+    // source's CONTENT — so a source read that fails mid-copy (this catch)
+    // still leaves that 0-byte `archiveName` behind. Clean it up rather than
+    // leaving an empty, misleading "archive" next to the live file — best-
+    // effort: a failure here must never mask the original copy failure
+    // above it. `safeRemoveJson`, not a raw `removeEntry`: it is
+    // the storage layer's own delete primitive (lint-enforced everywhere
+    // else in this codebase); its `.tmp`/`.bak` sibling cleanup is a no-op
+    // here (this is a fresh byte-copy target, never a `safeWriteJson`
+    // envelope), but the plain-live-name removal is exactly what is needed.
+    await safeRemoveJson(dir, archiveName).catch(() => {});
+    if (options.required) {
+      throw taggedError(
+        "XQ-POP-009",
+        `Archiving ${liveName} before overwrite threw.`,
+        { cause: error }
+      );
+    }
+    logError("population:archive-superseded", error);
+    return null;
+  }
+  if (outcome.status === "source_missing") return null;
+  if (outcome.status === "verify_failed") {
+    // Same stray-file cleanup as above (see that comment): a verify_failed
+    // outcome still landed whatever bytes it managed to write at
+    // `archiveName` before the read-back proved them wrong.
+    await safeRemoveJson(dir, archiveName).catch(() => {});
+    const error = taggedError(
+      "XQ-POP-009",
+      `Archiving ${liveName} before overwrite failed verification: ${outcome.detail}`
+    );
+    if (options.required) throw error;
+    logError("population:archive-superseded", error);
+    return null;
+  }
+  return archiveName;
+}
+
 export async function saveMonthRun(
   params: SaveMonthRunParams
 ): Promise<SaveMonthRunResult> {
@@ -314,18 +465,49 @@ async function saveMonthRunLocked(
       confirmedOverwrite,
     } = params;
 
+    // A2 overwrite rule (owner decision 2026-09-28), enforced HERE, under the
+    // manifest lock, whatever the caller confirmed: once a month has a
+    // distribution or answers, a population that lacks any live sampled id is
+    // refused — it would orphan that work in every report. A read failure on
+    // the sample/distribution/answers below is never swallowed into "no
+    // work" (F21) — it is caught in its OWN try/catch, distinct from the
+    // function-wide one below, so it maps to a dedicated coded refusal
+    // (XQ-POP-008) that tells the admin the check itself could not complete,
+    // rather than falling through to the generic "unexpected error while
+    // saving" (XQ-POP-006) every other failure in this function produces.
+    let impact: PopulationOverwriteImpact;
+    try {
+      impact = await loadPopulationOverwriteImpact(directoryHandle, monthFolderName);
+    } catch (error) {
+      logCodedError("population:overwrite-guard-unreadable", "XQ-POP-008", error);
+      return { ok: false, error: codedMessage("XQ-POP-008") };
+    }
+    const assessment = assessPopulationOverwrite(impact, processedRows);
+    if (assessment.blocked) {
+      return {
+        ok: false,
+        error: getLabels().population_overwrite_blocked_error.replace(
+          "{missing}",
+          String(assessment.missingCount)
+        ),
+        overwriteBlocked: {
+          missingCount: assessment.missingCount,
+          missingExamples: assessment.missingExamples,
+          distributionCount: assessment.distributionCount,
+          answerCount: assessment.answerCount,
+        },
+      };
+    }
+
     // TOCTOU guard: re-check under the lock that no sample was drawn since the
     // caller's pre-check. Overwriting the population while a sample exists would
     // orphan that sample — abort and let the caller confirm.
-    if (!confirmedOverwrite) {
-      const existingSample = await loadSampleMaster(directoryHandle, monthFolderName);
-      if (existingSample) {
-        return {
-          ok: false,
-          error: `يوجد سحب عينة لهذا الشهر (${monthFolderName}) — تأكيد الاستبدال مطلوب قبل إعادة الحفظ.`,
-          sampleExists: true,
-        };
-      }
+    if (!confirmedOverwrite && impact.sampleExists) {
+      return {
+        ok: false,
+        error: `يوجد سحب عينة لهذا الشهر (${monthFolderName}) — تأكيد الاستبدال مطلوب قبل إعادة الحفظ.`,
+        sampleExists: true,
+      };
     }
 
     const now = new Date().toISOString();
@@ -337,12 +519,81 @@ async function saveMonthRunLocked(
       // Ensure numbered population folder exists
       const populationDir = await getPopulationRoot(directoryHandle, true);
 
+      // Fix round 3 (F5 finding #1, reviewer's minimal sound alternative):
+      // probe whether the MONTH FOLDER already existed BEFORE `ensureFolder`
+      // below creates it (`{ create: true }`) — a cheap, definitive half of
+      // the retryMissingSource decision below. If this folder was already
+      // there, a prior save into it is certain, whatever the manifest probe
+      // (which reads a FILE inside it, and can itself be fooled by the same
+      // kind of transient miss this whole fix exists to rule out) turns up.
+      // Fails SAFE, not fast: anything other than a clean `NotFoundError` —
+      // a transient `NotReadable`, a lagging directory listing — must not be
+      // read as "this month never existed".
+      let monthDirPreexisted: boolean;
+      try {
+        await populationDir.getDirectoryHandle(monthFolderName, { create: false });
+        monthDirPreexisted = true;
+      } catch (error) {
+        monthDirPreexisted = !isNotFoundError(error);
+      }
+
       // Create month folder and subfolders
       const monthDir = await ensureFolder(populationDir, monthFolderName);
       const rawDir = await ensureFolder(monthDir, POPULATION_SUBFOLDERS.raw);
       const processedDir = await ensureFolder(monthDir, POPULATION_SUBFOLDERS.processed);
       await ensureFolder(monthDir, "sample");
       await ensureFolder(monthDir, "reports");
+
+      // A2: one stamp per save, shared by every archive this save writes, so
+      // the population and the sources it was built from stay pairable.
+      const stamp = supersedeStamp(new Date(now));
+      // Fix round 2 (F5 finding #1): whether the mandatory archive below rides
+      // the patient `retryMissingSource` ladder (~11s worst case) depends on
+      // whether a population was ever actually written for this month before.
+      // Gating on that — rather than always retrying — matters for more than
+      // latency: unconditionally retrying on EVERY save, including the
+      // ordinary first save of a brand-new month, made every fresh month's
+      // save pay the full ~11s ladder for a file that was never going to
+      // exist, which is not just slow but broke several existing tests
+      // outright (20s `testTimeout` exceeded — see task-4-report.md's
+      // fix-round-2 section for the measured numbers).
+      //
+      // Fix round 3 (F5 finding #1, reopened): gating on
+      // `loadMonthManifest(...) !== null` alone — as round 2 did — could
+      // still be fooled the exact same way finding #1 originally described,
+      // just moved one layer up: `loadMonthManifest` swallows EVERY failure
+      // (a transient NotFound/NotReadable on the manifest file itself, a
+      // lagging `getPopulationMonthDir`, a corrupt manifest) into `null`,
+      // which this call site would then read as "no prior save" — exactly
+      // when an SMB listing lag makes that miss MOST likely to be spurious
+      // and CORRELATED with the very NotFound the mandatory archive is about
+      // to hit on `population.final.json` in the same lagging folder. A
+      // prior save can also legitimately commit `population.final.json`
+      // without ever reaching the manifest write (it is written LAST — a
+      // throw from the `processing.summary.json` write, a failed manifest
+      // write, or a closed tab mid-save all leave a populated
+      // `population.final.json` with no manifest at all), which `!== null`
+      // alone cannot see either way.
+      //
+      // `probeMonthManifestState` (below) is a SEPARATE, tri-state probe
+      // that does NOT touch `loadMonthManifest`'s existing null-on-any-
+      // failure contract (other callers keep exactly today's behavior): it
+      // tells "present" apart from a CLEAN "not_found" apart from "error"
+      // (couldn't tell). `retryMissingSource` below is true unless BOTH the
+      // month folder is confirmed brand-new (`monthDirPreexisted` false) AND
+      // the manifest probe is a clean "not_found" — any other combination
+      // means a prior save is still possible, so it is safer to wait than to
+      // silently skip the archive.
+      const manifestState = await probeMonthManifestState(directoryHandle, monthFolderName);
+      const retryMissingSource = monthDirPreexisted || manifestState !== "not_found";
+      // Mandatory, and BEFORE anything is overwritten: without this copy a
+      // re-process leaves only safeWrite's single `.bak` of the population.
+      // See archiveBeforeOverwrite's doc comment for why this is the
+      // mandatory call's only opt-in.
+      await archiveBeforeOverwrite(processedDir, "population.final.json", stamp, {
+        required: true,
+        retryMissingSource,
+      });
 
       // Copy source xlsx files and write raw JSON — these four writes target
       // disjoint files with no data dependency on each other, so they run
@@ -354,6 +605,7 @@ async function saveMonthRunLocked(
           if (!params.riskSourceFile) return;
           const buf = await params.riskSourceFile.arrayBuffer();
           const ext = params.riskSourceFile.name.split(".").pop() ?? "xlsx";
+          await archiveBeforeOverwrite(rawDir, `risk.source.${ext}`, stamp);
           await saveBinaryFile(rawDir, `risk.source.${ext}`, buf);
         })(),
         (async () => {
@@ -367,6 +619,7 @@ async function saveMonthRunLocked(
             const buf = await file.arrayBuffer();
             const ext = file.name.split(".").pop() ?? "xlsx";
             const name = single ? `bi.source.${ext}` : `bi.source.${index + 1}.${ext}`;
+            await archiveBeforeOverwrite(rawDir, name, stamp);
             await saveBinaryFile(rawDir, name, buf);
           }
         })(),
@@ -491,7 +744,7 @@ async function saveMonthRunLocked(
       };
       await safeWriteJson(monthDir, "month.manifest.json", manifest);
 
-      return { ok: true, monthFolderName };
+      return { ok: true, monthFolderName, sampleOrphanCount: assessment.missingCount };
     });
   } catch (error) {
     // Was `error.message` — which destroyed the code every layer below had
@@ -631,7 +884,7 @@ async function resolveSampleDir(
     return await getSampleMainDir(directoryHandle, monthFolderName, false);
   } catch {
     try {
-      return await monthDir.getDirectoryHandle("sample", { create: false });
+      return await monthDir.getDirectoryHandle(LEGACY_MONTH_SUBFOLDERS.sample, { create: false });
     } catch {
       return null;
     }
@@ -1019,6 +1272,41 @@ export type MonthEditData = {
 // upcoming opt-in MonthLoadScope needs to fetch only what a screen actually
 // requires. loadMonthForEditing (below) composes all five and must remain
 // byte-identical to its pre-extraction output for every existing caller.
+
+/**
+ * A2 fix round 3 (F5 finding #1): tri-state, ERROR-SAFE probe for whether
+ * `month.manifest.json` exists — deliberately SEPARATE from
+ * {@link loadMonthManifest} below, whose null-on-any-failure contract is
+ * kept exactly as it is for every one of its other callers.
+ *
+ * `"not_found"` is returned ONLY for a clean, confirmed absence (the month
+ * folder itself is missing, or the manifest file inside it is). Every other
+ * outcome — a transient `NotReadable`, a lagging directory open, a corrupt
+ * manifest, or anything this could not otherwise classify — is `"error"`,
+ * because from `saveMonthRunLocked`'s "is a prior save possible" question all
+ * of those mean exactly the same thing: it cannot be ruled out, so treat it
+ * as if it might be there.
+ */
+export type MonthManifestProbeState = "present" | "not_found" | "error";
+
+export async function probeMonthManifestState(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<MonthManifestProbeState> {
+  let monthDir: DirectoryHandleLike;
+  try {
+    monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
+  } catch (error) {
+    return isNotFoundError(error) ? "not_found" : "error";
+  }
+  try {
+    const result = await safeReadJson<MonthManifestData>(monthDir, "month.manifest.json");
+    if (result.ok) return "present";
+    return result.reason === "missing" ? "not_found" : "error";
+  } catch {
+    return "error";
+  }
+}
 
 export async function loadMonthManifest(
   directoryHandle: DirectoryHandleLike,

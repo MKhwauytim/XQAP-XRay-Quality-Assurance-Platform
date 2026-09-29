@@ -37,6 +37,7 @@
  */
 
 import type { AdhocField } from "./adhocImportModel";
+import { STAGE_KEY_ORDER, STAGE_LABELS_AR } from "../population/stageLabels";
 
 /** The two literal values `PreparedPopulationRow.xrayLevelOne/TwoResult` accept. */
 const RESULT_OPTIONS = ["سليمة", "اشتباه"];
@@ -45,18 +46,15 @@ const RESULT_OPTIONS = ["سليمة", "اشتباه"];
 const CERT_SCAN_OPTIONS = ["Certscan", "NonCertscan"];
 
 /**
- * The canonical stage labels `formatStageLabel` emits (`STAGE_LABELS_AR` in
- * `src/data/population/stageHelpers.ts`). The many raw spellings a file may
+ * The canonical stage labels `formatStageLabel` emits, derived from the one
+ * fixed definition in `stageLabels.ts` (C1) in canonical order. Unlike the
+ * mapping aliases, these labels are a constant, not workspace-editable config,
+ * so importing them cannot rewrite an already-saved import's history. The many raw spellings a file may
  * carry (`STAGE_2`, `الثاني`, `2`, …) are `DEFAULT_STAGE_MAPPINGS` aliases and
  * belong in the import's per-value mapping, not here: `options` is what a
  * mapped value must RESOLVE TO, so it holds the canonical four only.
  */
-const STAGE_OPTIONS = [
-  "المستوى الأول",
-  "المستوى الثاني",
-  "المستوى الثالث",
-  "المستوى الرابع",
-];
+const STAGE_OPTIONS: string[] = STAGE_KEY_ORDER.map((key) => STAGE_LABELS_AR[key]);
 
 export const ADHOC_FIELD_CATALOG: AdhocField[] = [
   {

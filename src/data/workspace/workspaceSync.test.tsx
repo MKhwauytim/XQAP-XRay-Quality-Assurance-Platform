@@ -23,6 +23,12 @@ import {
 } from "./workspacePaths";
 import { DISTRIBUTION_EVENTS_DIR } from "../distribution/distributionEventStore";
 import { ANSWER_EVENTS_DIR } from "../answers/answerEventStore";
+import { upsertItemAnswer, __clearAnswerEventsCacheForTests } from "../answers/answerStorage";
+import { __resetAppendOnlyEventLogMemosForTests } from "../storage/appendOnlyEventLog";
+import { __resetAnswerSegmentChainMemoForTests } from "../answers/answerSegmentChain";
+import { getSealedAnswerSegmentsEpoch } from "../answers/answerSealedSegments";
+import { clearSession, writeSession } from "../../auth/authSession";
+import type { ItemAnswer } from "../answers/answerTypes";
 import {
   acceptNotification,
   loadNotifications,
@@ -1096,5 +1102,102 @@ describe("runSync — §6 of the answer-save proposal: the answers.events segmen
 
     const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
     expect(changed.size).toBe(0);
+  });
+});
+
+describe("runSync — this session's own answer appends do not report the answers family (A1)", () => {
+  function answer(xrayImageId: string): ItemAnswer {
+    return {
+      xrayImageId,
+      templateId: "tpl",
+      templateVersion: 1,
+      answers: [{ fieldId: "f1", value: "v" }],
+      lastSavedAt: new Date().toISOString(),
+      submittedAt: new Date().toISOString(),
+      answeredBy: "emp1",
+      status: "submitted",
+    };
+  }
+
+  beforeEach(() => {
+    // Storage is cleared between tests but the chain memo is module-level: reset it
+    // so each test mints its chain into (and reloads it from) the same storage.
+    __resetAnswerSegmentChainMemoForTests();
+    writeSession({ role: "employee", username: "emp1", loginAt: new Date().toISOString() });
+  });
+  afterEach(() => clearSession());
+
+  it("stays quiet for an own save, and still reports another writer's segment", async () => {
+    const root = makeRoot();
+    // First save also freezes the legacy shell (answerStorage section 8), so do
+    // it before the baseline: only the event append is under test.
+    expect((await upsertItemAnswer(root, MONTH, "emp1", answer("XR-1"))).ok).toBe(true);
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    expect((await upsertItemAnswer(root, MONTH, "emp1", answer("XR-2"))).ok).toBe(true);
+    const own = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(own.changed.has("answers")).toBe(false);
+
+    const main = await getSampleMainDir(root, MONTH, true);
+    const eventsDir = await main.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: true });
+    await writeRawFile(
+      eventsDir,
+      "zz-ans-otherdev-s9.ndjson",
+      `${JSON.stringify({ eventId: "other-1", eventType: "item-saved", eventAt: "2026-05-01T08:00:00.000Z", eventBy: "emp2", authority: "self", xrayImageId: "XR-9", answers: [], status: "draft", answeredBy: "emp2" })}\n`
+    );
+    const epochBefore = getSealedAnswerSegmentsEpoch();
+    const other = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(other.changed.has("answers")).toBe(true);
+    // ...and it makes the answers reader forget which segments it thought were sealed (S3).
+    expect(getSealedAnswerSegmentsEpoch()).toBeGreaterThan(epochBefore);
+  });
+
+  it("a manual refresh also forgets sealed-segment confirmations", async () => {
+    const root = makeRoot();
+    await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    const epochBefore = getSealedAnswerSegmentsEpoch();
+    await runSync({ directoryHandle: root, monthFolderName: MONTH, manual: true });
+    expect(getSealedAnswerSegmentsEpoch()).toBeGreaterThan(epochBefore);
+  });
+
+  it("after a RELOAD the first own save is still quiet (the stable chain outlives the page)", async () => {
+    const root = makeRoot();
+    expect((await upsertItemAnswer(root, MONTH, "emp1", answer("XR-1"))).ok).toBe(true);
+    // A page reload: every module-level memo is gone, the persisted chain is not.
+    __resetAppendOnlyEventLogMemosForTests();
+    __resetAnswerSegmentChainMemoForTests();
+    __clearAnswerEventsCacheForTests();
+    __resetWorkspaceSyncStateForTests();
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    expect((await upsertItemAnswer(root, MONTH, "emp1", answer("XR-2"))).ok).toBe(true);
+    const own = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(own.changed.has("answers")).toBe(false);
+  });
+
+  it("a rotation of this user's stable chain from an earlier page load is excluded too", async () => {
+    const root = makeRoot();
+    expect((await upsertItemAnswer(root, MONTH, "emp1", answer("XR-1"))).ok).toBe(true);
+    const main = await getSampleMainDir(root, MONTH, true);
+    const eventsDir = await main.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: true });
+    const names: string[] = [];
+    for await (const handle of (eventsDir as unknown as { values(): AsyncIterable<{ name: string }> }).values()) names.push(handle.name);
+    const seq0 = names.find((n) => n.endsWith(".ndjson"))!;
+    const rotated = seq0.replace(/\.ndjson$/, "-1.ndjson");
+    __resetAppendOnlyEventLogMemosForTests();
+    __resetAnswerSegmentChainMemoForTests();
+    __resetWorkspaceSyncStateForTests();
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+    await writeRawFile(eventsDir, rotated, `${JSON.stringify({ eventId: "rot-1", eventType: "item-saved", eventAt: "2026-05-01T08:00:00.000Z", eventBy: "emp1", authority: "self", xrayImageId: "XR-3", answers: [], status: "draft", answeredBy: "emp1" })}\n`);
+    const result = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(result.changed.has("answers")).toBe(false);
+  });
+
+  it("another user's chain on the same browser is still reported to this user", async () => {
+    const root = makeRoot();
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+    expect((await upsertItemAnswer(root, MONTH, "someone-else", { ...answer("XR-7"), answeredBy: "someone-else" })).ok).toBe(true);
+    const result = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(result.changed.has("answers")).toBe(true);
   });
 });

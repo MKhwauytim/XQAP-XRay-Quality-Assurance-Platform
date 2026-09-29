@@ -42,8 +42,12 @@
  */
 import { broadcastDataRefresh, type DataRefreshFamily } from "./dataRefreshSignal";
 import { bumpWorkspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
+import { ownStableAnswerSegmentMatcher } from "../answers/answerSegmentChain";
+import { invalidateSealedAnswerSegments } from "../answers/answerSealedSegments";
+import { readRealSession } from "../../auth/authSession";
 import { readDistributionLogStamp } from "../distribution/distributionStorage";
 import {
+  DEFAULT_SIZE_SIGNATURE_STAT_BUDGET,
   boundedSizeSignature,
   listDirectoryEntriesWithSize,
   type SizedDirectoryEntry,
@@ -442,10 +446,27 @@ async function safeSegmentsSignature(dir: DirectoryHandleLike | null): Promise<P
 }
 
 /** §6 of the answer-save proposal: read-only, bounded — same primitive and shape as `safeSegmentsSignature` above. */
-async function safeAnswerSegmentsSignature(dir: DirectoryHandleLike | null): Promise<Probed<string>> {
+async function safeAnswerSegmentsSignature(
+  dir: DirectoryHandleLike | null,
+  monthFolderName: string
+): Promise<Probed<string>> {
   if (!dir) return "";
   try {
-    return await boundedSizeSignature(dir, ANSWER_EVENT_SEGMENT_SUFFIX);
+    // A11: this user's own appends are already reflected locally (the saving
+    // view updated its own state). Signing them made every save come back to
+    // its author as a remote change one tick later and triggered the stale
+    // reload that downgraded the row. Matched by the persisted STABLE CHAIN
+    // prefix, not a per-page-load "written" set: the chain outlives a reload,
+    // so the exclusion is identical from the baseline onwards and also covers
+    // rotations written by an earlier page load. Other writers (and other users
+    // of this browser) still count.
+    const actor = readRealSession()?.username;
+    return await boundedSizeSignature(
+      dir,
+      ANSWER_EVENT_SEGMENT_SUFFIX,
+      DEFAULT_SIZE_SIGNATURE_STAT_BUDGET,
+      actor ? ownStableAnswerSegmentMatcher(monthFolderName, actor) : undefined
+    );
   } catch (error) {
     logError("workspaceSync:probeAnswerSegments", error);
     return UNPROBED;
@@ -567,7 +588,7 @@ async function probeMonth(
       safeSignature(dirs.approvalsDir, DECISIONS_SUFFIX),
       safeRevision(dirs.populationMonthDir, MONTH_MANIFEST_FILE),
       safeSegmentsSignature(dirs.eventsDir),
-      safeAnswerSegmentsSignature(dirs.answersEventsDir),
+      safeAnswerSegmentsSignature(dirs.answersEventsDir, monthFolderName),
       safeFeedbackSignature(dirs.feedbackDir),
     ]);
 
@@ -741,6 +762,10 @@ async function performSync(options: SyncRunOptions, manual: boolean): Promise<Sy
       ok = false;
     }
   }
+
+  // The probe saw someone else's answer segments move: whatever this tab
+  // believes is sealed may have grown, so the sealed-segment shortcut starts over.
+  if (changed.has("answers")) invalidateSealedAnswerSegments();
 
   const broadcast = manual || changed.size > 0;
   if (broadcast) {

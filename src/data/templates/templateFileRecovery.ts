@@ -40,12 +40,21 @@ import { copyFileBytes, safeReadJson, safeWriteJson } from "../storage/safeWrite
 import { logError } from "../storage/errorLogger";
 import { getTemplatesRoot } from "../workspace/workspacePaths";
 import type { TemplateSchema } from "./templateTypes";
+import { TEMPLATES_INDEX_FILE } from "./templateStorage";
+import { TEMPLATE_SELECTION_FILE } from "./templateSelectionStorage";
+import { DECK_EDITION_PREFERENCE_FILE } from "../reporting/executive/deckEditionPreference";
+import { DECK_STYLE_CHOICES_FILE } from "../reporting/executive/deck2/styleChoices";
 
 /** What one candidate file (the live name, or its `.bak` / `.tmp` sibling) turned out to be. */
 export type TemplateCandidate =
   | { kind: "absent" }
   /** The share answered; the content is not a usable template file. */
   | { kind: "corrupt" }
+  /**
+   * Readable JSON that is not a template at all (no `templateId`) — e.g. a
+   * preference file another module owns. Not damaged, never repaired.
+   */
+  | { kind: "not-a-template" }
   /** The share did not answer. Says nothing about the file's contents. */
   | { kind: "unavailable"; reason: string }
   | { kind: "readable"; templateName: string; fieldCount: number };
@@ -129,7 +138,19 @@ async function classifyLive(
       healedBySibling: false,
     };
   }
-  if (!isTemplateFile(read.value)) return { candidate: { kind: "corrupt" }, healedBySibling: false };
+  if (!isTemplateFile(read.value)) {
+    // A readable file with no templateId is someone else's JSON, not a torn
+    // template: reporting it as corrupt is what made the boot scan flag the
+    // deck-edition preference as unrecoverable on every admin sign-in.
+    const hasTemplateId =
+      typeof read.value === "object" &&
+      read.value !== null &&
+      typeof (read.value as { templateId?: unknown }).templateId === "string";
+    return {
+      candidate: hasTemplateId ? { kind: "corrupt" } : { kind: "not-a-template" },
+      healedBySibling: false,
+    };
+  }
   if (read.recoveredFromBak) return { candidate: { kind: "corrupt" }, healedBySibling: true };
   return { candidate: describeFile(read.value), healedBySibling: false };
 }
@@ -305,6 +326,24 @@ const TEMPLATE_SUFFIX = ".json";
 const NON_TEMPLATE_SUFFIXES = [".deleted.bak.json", ".bak.json", ".tmp.json"];
 
 /**
+ * Files other modules own in the templates root. Each name is imported from
+ * its owning module (one place, one name); built on first use rather than at
+ * module evaluation so an import cycle can never observe an uninitialised
+ * binding.
+ */
+let nonTemplateFiles: ReadonlySet<string> | null = null;
+
+export function isNonTemplateFile(fileName: string): boolean {
+  nonTemplateFiles ??= new Set([
+    TEMPLATES_INDEX_FILE,
+    TEMPLATE_SELECTION_FILE,
+    DECK_EDITION_PREFERENCE_FILE,
+    DECK_STYLE_CHOICES_FILE,
+  ]);
+  return nonTemplateFiles.has(fileName);
+}
+
+/**
  * Inspect every template file in the workspace.
  *
  * The point of scanning rather than asking for a templateId: an admin sees
@@ -323,8 +362,7 @@ export async function inspectAllTemplateFiles(
       (entry) =>
         entry.kind === "file" &&
         entry.name.endsWith(TEMPLATE_SUFFIX) &&
-        entry.name !== "templates.index.json" &&
-        entry.name !== "template.selection.json" &&
+        !isNonTemplateFile(entry.name) &&
         !NON_TEMPLATE_SUFFIXES.some((suffix) => entry.name.endsWith(suffix))
     )
     .map((entry) => entry.name.slice(0, -TEMPLATE_SUFFIX.length))
@@ -332,7 +370,9 @@ export async function inspectAllTemplateFiles(
 
   const reports: TemplateFileReport[] = [];
   for (const templateId of templateIds) {
-    reports.push(await inspectTemplateFile(directoryHandle, templateId));
+    const report = await inspectTemplateFile(directoryHandle, templateId);
+    // Readable JSON another module owns — not a template, not a finding.
+    if (report.live.kind !== "not-a-template") reports.push(report);
   }
   const severity = (report: TemplateFileReport): number => (report.needsRepair ? 0 : 1);
   return reports.sort((a, b) => severity(a) - severity(b) || a.templateId.localeCompare(b.templateId));

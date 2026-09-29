@@ -296,6 +296,32 @@ describe("AuthGate — hidden admin-shortcut modal shares the normal form's lock
     fireEvent.click(within(modal).getByRole("button", { name: /دخول|يُرجى الانتظار/ }));
   }
 
+  // `loginAsBootstrapAdmin` (AuthGate.tsx) is async and its `void`-called promise
+  // is never handed back to this test, so there is nothing to directly `await`
+  // after `submitAdminModal`. Its one submission still runs a fixed-depth,
+  // timer-free chain of microtasks -- `verifyPasswordWithLayoutFallback`'s
+  // up-to-2-candidate loop, then `registerFailedAttempt()`'s `setState`, then
+  // React's resulting re-render -- with no `setTimeout`/interval of its own.
+  // Node's event loop guarantees every currently-queued microtask drains before
+  // the next macrotask runs, so awaiting a single 0ms `setTimeout` inside `act()`
+  // deterministically lets that whole chain settle before the test moves on,
+  // regardless of real CPU speed. This file used to gate each loop iteration on
+  // `waitFor(() => verify.mock.calls.length > i * 2)` instead: `mock.calls`
+  // updates the instant `verifyPasswordHash` is *called* (synchronously, before
+  // its own promise even resolves), so that condition could already be true on
+  // `waitFor`'s very first (synchronous, zero-delay) check -- and did not wait
+  // for `registerFailedAttempt()` to actually commit. Under load, that let the
+  // loop race ahead and fire attempt N+1 before attempt N had committed, each
+  // handler reading the same stale `failedAttempts` from its own render's
+  // closure -- so the lockout threshold was sometimes never really reached
+  // before the "locked-out" 4th attempt was submitted (observed failure: 8 verify
+  // calls -- 4 full attempts -- instead of the 6 three attempts should produce).
+  async function flushAdminModalAttempt(): Promise<void> {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+
   it("locks out after 3 wrong passcodes through the modal, same as the normal form", async () => {
     // verifyPasswordWithLayoutFallback tries up to 2 keyboard-layout candidates
     // per attempt, so the mock's call count isn't 1:1 with attempts -- assert
@@ -308,17 +334,23 @@ describe("AuthGate — hidden admin-shortcut modal shares the normal form's lock
 
     for (let i = 0; i < 3; i += 1) {
       submitAdminModal("wrong");
-      await waitFor(() => expect(verify.mock.calls.length).toBeGreaterThan(i * 2));
+      await flushAdminModalAttempt();
     }
+
+    // The real, observable production signal that all 3 attempts have
+    // genuinely been registered (not just dispatched) -- the lockout button
+    // state -- rather than an inferred verify-call count.
+    await waitFor(() => {
+      expect(within(modal).getByRole("button", { name: /يُرجى الانتظار/ })).toBeDisabled();
+    });
     const callsAfterThreeAttempts = verify.mock.calls.length;
 
     // A 4th attempt while locked out must not even check the passcode. Before
     // this fix, this button had no lockout wiring at all and would happily
     // call verifyPasswordHash again with no limit.
     submitAdminModal("wrong-again");
-    await waitFor(() => {
-      expect(within(modal).getByRole("button", { name: /يُرجى الانتظار/ })).toBeDisabled();
-    });
+    await flushAdminModalAttempt();
+    expect(within(modal).getByRole("button", { name: /يُرجى الانتظار/ })).toBeDisabled();
     expect(verify.mock.calls.length).toBe(callsAfterThreeAttempts);
   });
 
@@ -785,5 +817,163 @@ describe("AuthGate — permission auto-refresh", () => {
       );
       expect(refreshCall).toBeDefined();
     });
+  });
+});
+
+describe("AuthGate — lockout counts every failed verify and ignores overlapping submits (E7)", () => {
+  const SEED_USER: userManagement.ManagedLoginUser = {
+    id: "u1", username: "testuser", displayName: "Test", role: "employee",
+    passwordHash: { algorithm: "argon2id", encoded: "x" },
+    isActive: true, hasCertScanLicense: false,
+    createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+  };
+
+  beforeEach(() => {
+    vi.spyOn(userManagement, "getManagedLoginUsers").mockReturnValue([SEED_USER]);
+  });
+
+  function openModal(): void {
+    fireEvent.keyDown(document, { key: "a", altKey: true });
+    fireEvent.keyDown(document, { key: "t", altKey: true });
+  }
+
+  async function flush(): Promise<void> {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+
+  function deferredVerify() {
+    const pending: Array<(v: boolean) => void> = [];
+    const spy = vi.spyOn(passwordCrypto, "verifyPasswordHash").mockImplementation(
+      () => new Promise<boolean>((resolve) => { pending.push(resolve); })
+    );
+    return { spy, pending };
+  }
+
+  it("ignores a second submit while a verify is running and disables the controls", async () => {
+    const { spy, pending } = deferredVerify();
+    renderAuthGate();
+    openModal();
+    const modal = await screen.findByRole("dialog", { name: "دخول مسؤول النظام" });
+    const input = within(modal).getByLabelText("رمز مسؤول النظام");
+    fireEvent.change(input, { target: { value: "wrong" } });
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await flush();
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(within(modal).getByRole("button", { name: "دخول" })).toBeDisabled();
+    expect(input).toBeDisabled();
+
+    // Drain the running verify (the layout-fallback may query a 2nd candidate).
+    while (pending.length) {
+      await act(async () => { pending.shift()!(false); });
+      await flush();
+    }
+    expect(within(modal).getByRole("button", { name: "دخول" })).toBeEnabled();
+  });
+
+  it("counts N sequential wrong attempts and locks out exactly at the threshold", async () => {
+    const verify = vi.spyOn(passwordCrypto, "verifyPasswordHash").mockResolvedValue(false);
+    renderAuthGate();
+    openModal();
+    const modal = await screen.findByRole("dialog", { name: "دخول مسؤول النظام" });
+    const input = within(modal).getByLabelText("رمز مسؤول النظام");
+    fireEvent.change(input, { target: { value: "wrong" } });
+
+    for (let i = 0; i < 2; i += 1) {
+      fireEvent.keyDown(input, { key: "Enter" });
+      await flush();
+      expect(within(modal).queryByRole("button", { name: /يُرجى الانتظار/ })).toBeNull();
+    }
+    fireEvent.keyDown(input, { key: "Enter" });
+    await flush();
+    expect(within(modal).getByRole("button", { name: /يُرجى الانتظار/ })).toBeDisabled();
+    // 3 attempts x 2 layout-fallback candidates for "wrong".
+    expect(verify).toHaveBeenCalledTimes(6);
+  });
+
+  it("still logs in with the correct passcode after failures below the threshold", async () => {
+    const verify = vi.spyOn(passwordCrypto, "verifyPasswordHash").mockResolvedValue(false);
+    renderAuthGate();
+    openModal();
+    const modal = await screen.findByRole("dialog", { name: "دخول مسؤول النظام" });
+    const input = within(modal).getByLabelText("رمز مسؤول النظام");
+    fireEvent.change(input, { target: { value: "wrong" } });
+    for (let i = 0; i < 2; i += 1) {
+      fireEvent.keyDown(input, { key: "Enter" });
+      await flush();
+    }
+    verify.mockResolvedValue(true);
+    fireEvent.change(input, { target: { value: "admin" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(screen.getByText("authenticated")).toBeInTheDocument());
+  });
+  it("keeps focus on the modal passcode input after a failed attempt", async () => {
+    vi.spyOn(passwordCrypto, "verifyPasswordHash").mockResolvedValue(false);
+    renderAuthGate();
+    openModal();
+    const modal = await screen.findByRole("dialog", { name: "دخول مسؤول النظام" });
+    const input = within(modal).getByLabelText("رمز مسؤول النظام");
+    fireEvent.change(input, { target: { value: "wrong" } });
+    input.focus();
+    fireEvent.keyDown(input, { key: "Enter" });
+    await flush();
+    expect(input).toBeEnabled();
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("form path: overlapping submits run one verify and disable the controls", async () => {
+    const { spy, pending } = deferredVerify();
+    const { container } = renderAuthGate();
+    const user = await waitFor(() => {
+      const el = container.querySelector<HTMLInputElement>("#authUsername");
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    const pass = container.querySelector<HTMLInputElement>("#authPassword")!;
+    fireEvent.change(user, { target: { value: "admin" } });
+    fireEvent.change(pass, { target: { value: "wrong" } });
+    const form = container.querySelector("form")!;
+    const submit = within(form).getByRole("button", { name: "دخول" });
+
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    await flush();
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(submit).toBeDisabled();
+    expect(user).toBeDisabled();
+    expect(pass).toBeDisabled();
+
+    while (pending.length) {
+      await act(async () => { pending.shift()!(false); });
+      await flush();
+    }
+    expect(pass).toBeEnabled();
+    expect(document.activeElement).toBe(pass);
+  });
+
+  it("releases the guard when the verifier throws, so a later submit verifies again", async () => {
+    const spy = vi.spyOn(passwordCrypto, "verifyPasswordHash")
+      .mockRejectedValue(new Error("boom"));
+    renderAuthGate();
+    openModal();
+    const modal = await screen.findByRole("dialog", { name: "دخول مسؤول النظام" });
+    const input = within(modal).getByLabelText("رمز مسؤول النظام");
+    fireEvent.change(input, { target: { value: "wrong" } });
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    await flush();
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(input).toBeEnabled();
+    expect(within(modal).getByRole("button", { name: "دخول" })).toBeEnabled();
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    await flush();
+    expect(spy).toHaveBeenCalledTimes(2);
   });
 });

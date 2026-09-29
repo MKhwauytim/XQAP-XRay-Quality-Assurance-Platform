@@ -7,6 +7,7 @@ import type { EmployeeAnswerFile } from "../answers/answerTypes";
 import type { TemplateSchema } from "../templates/templateTypes";
 import type { DistributionEvent } from "../distribution/distributionTypes";
 import type { SourceRevisions } from "./sourceRevisions";
+import type { StageAliasMappings } from "../population/populationConfig";
 
 export type VerificationCategory =
   | "correct-suspicious"
@@ -84,7 +85,25 @@ export type ExecutiveReportRow = {
    * like.
    */
   targetedByRiskEngine?: string | null;
+  /**
+   * A2: this row was built from the `sample.master.json` snapshot because its
+   * id is missing from the month's population (the population was re-processed
+   * under the sample). Present only when true; population-wide KPIs exclude it.
+   */
+  fromSampleSnapshot?: true;
 };
+
+/**
+ * A2: the rows that belong to the month's population — every row except those
+ * rebuilt from the sample snapshot (`fromSampleSnapshot`). Population-scoped
+ * figures (denominators, per-port/stage population, land/sea splits) are taken
+ * over these; sample-scoped figures (sample size, studied, accuracy) keep every
+ * row. Returns the SAME array when nothing is flagged, so a month without
+ * orphans is untouched.
+ */
+export function populationScopedRows<T extends { fromSampleSnapshot?: true }>(rows: readonly T[]): readonly T[] {
+  return rows.some((row) => row.fromSampleSnapshot) ? rows.filter((row) => !row.fromSampleSnapshot) : rows;
+}
 
 /**
  * Was this case actually studied? A submitted "لا يوجد صورة" answer is a
@@ -325,4 +344,12 @@ export type ExecutiveReportInput = {
    * pointing readers at `processing.summary.json` directly.
    */
   processingSummary?: ProcessingSummaryData | null;
+  /**
+   * The workspace's stage alias table (`config.json` → `stageMappings`),
+   * loaded by the Reports tab (C1). Every stage grouping in the report keys by
+   * `getStageKey(row.stage, stageMappings)` so a custom alias lands in the
+   * same level processing put it in. Optional: callers that omit it classify
+   * against DEFAULT_STAGE_MAPPINGS.
+   */
+  stageMappings?: Partial<StageAliasMappings>;
 };

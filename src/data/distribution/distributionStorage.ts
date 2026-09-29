@@ -11,6 +11,7 @@ import type {
   DistributionEventType,
   DistributionFoldCheckpoint,
   DistributionLog,
+  EventStoreScanIdentity,
   QuotaFacts
 } from "./distributionTypes";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
@@ -22,7 +23,8 @@ import {
   INTERACTIVE_WRITE_DEADLINE_MS,
 } from "../storage/operationDeadline";
 import { codedMessage, logCodedError, resolveErrorCode } from "../storage/errorCodes";
-import { listDirectoryEntries, readAppendOnlyDirectory, readNamedJsonFiles } from "../storage/directoryScan";
+import { listDirectoryEntries, listDirectoryEntriesWithSize, readAppendOnlyDirectory, readNamedJsonFiles } from "../storage/directoryScan";
+import { simpleHash } from "../storage/jsonEnvelope";
 import { ensureMonthWritable } from "../population/monthLock";
 import { syncSampleMirrors } from "../samples/sampleMirrorStorage";
 import { loadSampleMaster } from "../sampling/sampleStorage";
@@ -33,6 +35,7 @@ import {
 } from "../workspace/workspacePaths";
 import {
   DISTRIBUTION_EVENTS_DIR,
+  DISTRIBUTION_EVENT_SEGMENT_SUFFIX,
   appendDistributionEventsDurably,
   distributionEventSetId,
   getDistributionDeviceId,
@@ -45,8 +48,12 @@ import {
 import { dedupeInFlight, workspaceScopeId, bumpWorkspaceEpoch, workspaceEpoch } from "../storage/inFlightReads";
 import { isNotFoundError, waitFor } from "../storage/transientFileErrors";
 
-const LOG_FILE = "distribution.log.json";
-const CURRENT_FILE = "distribution.current.json";
+/** Exported for the selective-restore catalog (`backup/restoreScope.ts`). */
+export const DISTRIBUTION_LOG_FILE = "distribution.log.json";
+/** Exported for the selective-restore catalog (`backup/restoreScope.ts`). */
+export const DISTRIBUTION_CURRENT_FILE = "distribution.current.json";
+const LOG_FILE = DISTRIBUTION_LOG_FILE;
+const CURRENT_FILE = DISTRIBUTION_CURRENT_FILE;
 /**
  * Fold-checkpoint sidecar (v85). Lives beside `distribution.current.json` in
  * `2-samples/{month}/1-main`. Exported because the backup/restore layer must
@@ -263,7 +270,8 @@ function orderImmutableSources(
 
 async function readCurrentDistributionSource(
   directoryHandle: DirectoryHandleLike,
-  monthFolderName: string
+  monthFolderName: string,
+  options?: { strictSegments?: boolean }
 ): Promise<Pick<DistributionLogSources, "currentLog" | "immutableEvents"> & CheckpointScanMeta> {
   const directory = await openOptionalDirectory(() =>
     getDistributionDir(directoryHandle, monthFolderName, false)
@@ -310,7 +318,9 @@ async function readCurrentDistributionSource(
   // simplest correct thing for this "give me every event" API — callers that
   // care about avoiding a full re-read on every load use the fold-checkpoint
   // path in loadOrDeriveDistributionCurrent instead.
-  const segmentDelta = await readDistributionEventSegmentDelta(directory, {});
+  const segmentDelta = await readDistributionEventSegmentDelta(directory, {}, {
+    strict: options?.strictSegments ?? false,
+  });
   // Re-sort: the fold is order-sensitive, and a new event with an earlier
   // eventAt than a cached one must still land in the right place -- the
   // cache's own internal order is by-filename, not by-eventAt. Ties keep the
@@ -566,13 +576,82 @@ type DistributionLogLoad = {
  * projection safely — so neither costs a second directory scan on top of the
  * one this already does.
  */
+/** Order-independent digest of the legacy per-event file NAME set (see EventStoreScanIdentity). */
+export function legacyFilesDigest(names: readonly string[]): string {
+  return `${names.length}:${simpleHash([...names].sort().join("\n"))}`;
+}
+
+/**
+ * The event-store scan a derived snapshot was built from, for stamping onto the
+ * mirrors written from it: the snapshot's own `scanIdentity` (set by callers that
+ * derive from a loaded log), else its fold checkpoint's offsets and legacy names.
+ * `undefined` when the snapshot carries neither, so its mirrors are never trusted.
+ */
+export function scanIdentityOf(current: DistributionCurrentData): EventStoreScanIdentity | undefined {
+  if (current.scanIdentity) return current.scanIdentity;
+  const checkpoint = current.foldCheckpoint;
+  if (!checkpoint) return undefined;
+  return {
+    segmentOffsets: checkpoint.segmentOffsets,
+    legacyFilesDigest: legacyFilesDigest(checkpoint.legacyEventFileNames),
+  };
+}
+
+/**
+ * Does the event store still hold EXACTLY the events `identity` was built from?
+ * A sizes-only listing of `distribution.events/` (no content read): trusted iff
+ * the segment set is identical, every segment's size equals its recorded offset
+ * (segments are append-only, so growth is an added event), and the legacy
+ * per-event file set is identical. Anything else, including a listing that
+ * fails, is `false` (the caller re-derives).
+ */
+export async function eventStoreMatchesScan(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  identity: EventStoreScanIdentity
+): Promise<boolean> {
+  try {
+    const directory = await openOptionalDirectory(() => getDistributionDir(directoryHandle, monthFolderName, false));
+    let segments: Array<{ name: string; size: number }> = [];
+    let legacyNames: string[] = [];
+    if (directory) {
+      let eventsDir: DirectoryHandleLike | null = null;
+      try {
+        eventsDir = await directory.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: false });
+      } catch (error) {
+        if (!isNotFoundError(error)) throw error;
+      }
+      if (eventsDir) {
+        segments = await listDirectoryEntriesWithSize(eventsDir, DISTRIBUTION_EVENT_SEGMENT_SUFFIX);
+        legacyNames = (await listDirectoryEntries(eventsDir))
+          .filter((entry) => entry.kind === "file" && entry.name.endsWith(".json"))
+          .map((entry) => entry.name);
+      }
+    }
+    if (legacyFilesDigest(legacyNames) !== identity.legacyFilesDigest) return false;
+    const recorded = Object.entries(identity.segmentOffsets);
+    if (segments.length !== recorded.length) return false;
+    const sizes = new Map(segments.map((segment) => [segment.name, segment.size]));
+    return recorded.every(([name, offset]) => sizes.get(name) === offset);
+  } catch {
+    return false;
+  }
+}
+
 async function loadDistributionLogDetailed(
   directoryHandle: DirectoryHandleLike,
-  monthFolderName: string
+  monthFolderName: string,
+  options?: { strictSegments?: boolean }
 ): Promise<DistributionLogLoad> {
-  const current = await readCurrentDistributionSource(directoryHandle, monthFolderName);
+  const current = await readCurrentDistributionSource(directoryHandle, monthFolderName, options);
   const legacyLog = await readLegacyDistributionLog(directoryHandle, monthFolderName);
-  const log = mergeDistributionLogSources(monthFolderName, { ...current, legacyLog });
+  const log: DistributionLog = {
+    ...mergeDistributionLogSources(monthFolderName, { ...current, legacyLog }),
+    scanIdentity: {
+      segmentOffsets: current.segmentOffsets,
+      legacyFilesDigest: legacyFilesDigest(current.legacyEventFileNames),
+    },
+  };
   return {
     log,
     currentProjectionEvents: current.currentLog?.events ?? [],
@@ -593,7 +672,7 @@ export async function appendDistributionEvent(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   event: DistributionEvent
-): Promise<{ ok: true; log: DistributionLog } | { ok: false; error: string }> {
+): Promise<AppendDistributionEventsResult> {
   return appendDistributionEvents(directoryHandle, monthFolderName, [event]);
 }
 
@@ -625,6 +704,21 @@ export type AppendDistributionEventsResult =
        * replacement permanently unretryable; see the block that sets it.
        */
       projectionDegraded?: true;
+      /**
+       * P4: the projection update had not settled within the short grace the
+       * append waits for it, so it is still running (or queued) in the
+       * background under its own deadline. The append IS durable and `log` is
+       * re-derived from the events. A failure is logged as
+       * `distribution:projection-degraded` when it settles — see
+       * `flushPendingDistributionProjectionWrites` for tests.
+       */
+      projectionPending?: true;
+      /**
+       * `log` is only a best-effort stand-in (the batch alone, `revision: 0`),
+       * because re-reading the durable events failed too. Do not derive or
+       * persist anything from it; reload instead.
+       */
+      logIsPartial?: true;
     }
   | { ok: false; error: string };
 
@@ -702,6 +796,228 @@ export async function appendDistributionEvents(
   }
 
   options?.onProgress?.({ phase: "projection", completed: events.length, total: events.length });
+
+  // P4: the projection update is queued on its own per-month chain, with its
+  // own deadline, and the caller waits at most `projectionGraceMs` for it.
+  // On a healthy share it settles inside that grace and the call behaves
+  // exactly as before (same revision, same returned log). On a failing or
+  // very slow one it no longer holds the user's click for the whole
+  // projection deadline: the append is reported ok with `projectionPending`,
+  // and the queued job settles (and is logged) in the background.
+  let detached = false;
+  const job = enqueueProjectionUpdate(directoryHandle, monthFolderName, events, ids, (progress) => {
+    if (!detached) options?.onProgress?.(progress);
+  });
+  const settled = await raceWithGrace(job, projectionTiming.graceMs);
+  if (settled !== "pending" && settled.ok) {
+    options?.onProgress?.({ phase: "complete", completed: events.length, total: events.length });
+    return settled;
+  }
+  detached = true;
+  options?.onProgress?.({ phase: "complete", completed: events.length, total: events.length });
+  // Re-derive from the durable events so the caller receives the true post-append
+  // state rather than the stale projection. This read is itself best-effort: if
+  // the share cannot serve it either, fall back to a log carrying just this
+  // batch — still better than claiming the append did not happen.
+  const pendingOrDegraded =
+    settled === "pending" ? ({ projectionPending: true } as const) : ({ projectionDegraded: true } as const);
+  try {
+    return {
+      ok: true,
+      log: await loadDistributionLog(directoryHandle, monthFolderName),
+      ...pendingOrDegraded,
+    };
+  } catch {
+    return {
+      ok: true,
+      log: {
+        monthFolderName,
+        revision: 0,
+        eventSetId: distributionEventSetId(events),
+        events: [...events],
+      },
+      logIsPartial: true,
+      ...pendingOrDegraded,
+    };
+  }
+}
+
+// ── Projection write chain (P4) ────────────────────────────────────────────
+
+/** Tunables, overridable by tests only (`__setProjectionTimingForTests`). */
+const projectionTiming = {
+  /** How long an append waits for its own projection update before returning `projectionPending`. */
+  graceMs: 3_000,
+  /** The projection job's OWN deadline, independent of the click. */
+  deadlineMs: INTERACTIVE_WRITE_DEADLINE_MS,
+};
+
+export function __setProjectionTimingForTests(
+  timing: Partial<typeof projectionTiming> | null
+): void {
+  projectionTiming.graceMs = timing?.graceMs ?? 3_000;
+  projectionTiming.deadlineMs = timing?.deadlineMs ?? INTERACTIVE_WRITE_DEADLINE_MS;
+}
+
+type ProjectionOutcome =
+  | { ok: true; log: DistributionLog }
+  | { ok: false; error: string };
+
+type QueuedProjection = {
+  events: DistributionEvent[];
+  ids: Set<string>;
+  job: Promise<ProjectionOutcome>;
+  started: boolean;
+};
+type ProjectionChain = { tail: Promise<unknown>; pending: number; queued: QueuedProjection | null };
+
+/** Chains dropped by `__dropProjectionChainsForTests`, still flushed so no job outlives its test. */
+const droppedProjectionTails: Promise<unknown>[] = [];
+
+/** One serialized chain per (workspace, month): the projection file is one target. */
+const projectionChains = new Map<string, ProjectionChain>();
+
+function projectionChainKey(directoryHandle: DirectoryHandleLike, monthFolderName: string): string {
+  return `${workspaceScopeId(directoryHandle)}|${monthFolderName}`;
+}
+
+/**
+ * True while a projection update for this month is queued or running in THIS
+ * tab. `distribution.log.json`'s `revision` is the staleness authority for the
+ * employee sample mirrors, so a reader that decides "this mirror is current"
+ * from that stamp must not trust it while our own bump is still outstanding —
+ * the delete-user guard in particular, whose wrong answer is irreversible.
+ */
+export function isDistributionProjectionPending(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): boolean {
+  return (projectionChains.get(projectionChainKey(directoryHandle, monthFolderName))?.pending ?? 0) > 0;
+}
+
+/** Test-only: forget every queued projection job's bookkeeping, as a closed tab would. */
+export function __dropProjectionChainsForTests(): void {
+  for (const chain of projectionChains.values()) droppedProjectionTails.push(chain.tail);
+  projectionChains.clear();
+}
+
+/**
+ * Resolve once every projection update queued so far has settled (test helper,
+ * same role as `flushPendingFeedbackIndexWrites`; production code must never
+ * await this on a click path). Never rejects.
+ */
+export async function flushPendingDistributionProjectionWrites(): Promise<void> {
+  for (;;) {
+    await Promise.all(droppedProjectionTails.splice(0));
+    const tails = [...projectionChains.values()].map((chain) => chain.tail);
+    if (tails.length === 0) return;
+    await Promise.all(tails);
+    if ([...projectionChains.values()].every((chain) => chain.pending === 0)) return;
+  }
+}
+
+function raceWithGrace(job: Promise<ProjectionOutcome>, graceMs: number): Promise<ProjectionOutcome | "pending"> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve("pending"), graceMs);
+    void job.then((outcome) => {
+      clearTimeout(timer);
+      resolve(outcome);
+    });
+  });
+}
+
+/**
+ * Queue the projection update behind any earlier one for the same month and
+ * return its outcome. NEVER rejects. A failed outcome is logged here — once,
+ * whether or not the caller was still waiting — as
+ * `distribution:projection-degraded`, and the workspace epoch is bumped so
+ * cached reads notice the projection settled.
+ */
+function enqueueProjectionUpdate(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  events: DistributionEvent[],
+  ids: Set<string>,
+  onProgress: AppendDistributionEventsOptions["onProgress"]
+): Promise<ProjectionOutcome> {
+  const key = projectionChainKey(directoryHandle, monthFolderName);
+  const chain = projectionChains.get(key) ?? { tail: Promise.resolve(), pending: 0, queued: null };
+  projectionChains.set(key, chain);
+  // Coalesce: a job that is queued behind a running one and has not started yet
+  // takes this batch too, so a backlog on a failing share runs as ONE update
+  // (one revision bump) instead of one full deadline per append. Nothing is lost:
+  // the projection carries only the revision/token, and the loader always
+  // re-reads the full durable event set.
+  // (A coalesced caller's `onProgress` is not called: the append has already
+  // detached from progress reporting by the time a queued job runs.)
+  if (chain.queued && !chain.queued.started) {
+    chain.queued.events.push(...events);
+    for (const id of ids) chain.queued.ids.add(id);
+    return chain.queued.job;
+  }
+  chain.pending += 1;
+  const mine: QueuedProjection = { events: [...events], ids: new Set(ids), job: undefined as never, started: false };
+  chain.queued = mine;
+  const job: Promise<ProjectionOutcome> = chain.tail.then(async (): Promise<ProjectionOutcome> => {
+    mine.started = true;
+    if (chain.queued === mine) chain.queued = null;
+    try {
+      const outcome = await runProjectionUpdate(directoryHandle, monthFolderName, mine.events, mine.ids, onProgress);
+      if (!outcome.ok) {
+        // The projection could not be updated — but we only get here AFTER
+        // `writeDistributionEventBatch` committed the immutable event files, so
+        // the append itself is durable and the source of truth already carries it.
+        //
+        // Reporting that as `{ ok: false }` is what made طلب استبدال fail
+        // PERMANENTLY on the production share (2026-09-10..14): the caller
+        // (`executeReplacement`) early-returns XQ-DIST-005 on `ok: false`, which
+        // skips `refreshDistributionCacheAfterWrite`, so the derived cache is
+        // never rebuilt from the events that ARE on disk; on the retry the fold
+        // sees the durable `assigned` event, the freshness guard rejects it
+        // instantly, forever. `distribution.log.json` is a legacy COMPATIBILITY
+        // PROJECTION and `distribution.current.json` a rebuildable cache; both
+        // are derivable from the events at any time. A rebuildable derivative
+        // failing to update is a DEGRADED SUCCESS, never a failed append — but
+        // it is reported, never swallowed: this coded entry reaches the durable
+        // per-user error log and the admin XLSX export.
+        logCodedError(
+          "distribution:projection-degraded",
+          "XQ-IO-032",
+          new Error(
+            `Distribution events for ${monthFolderName} are durable, but the ${LOG_FILE} projection could not be updated: ${outcome.error}`
+          )
+        );
+      }
+      return outcome;
+    } catch (error) {
+      logError("distribution:projection-update", error);
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    } finally {
+      bumpWorkspaceEpoch(directoryHandle, monthFolderName);
+    }
+  });
+  mine.job = job;
+  const settle = (): void => {
+    chain.pending -= 1;
+    if (chain.pending === 0 && projectionChains.get(key) === chain) projectionChains.delete(key);
+  };
+  chain.tail = job.then(settle, settle);
+  return job;
+}
+
+/**
+ * The projection casLoop itself: re-read the log, bump `revision`, stamp a
+ * fresh token, write, and verify BOTH on read-back. Unchanged from the version
+ * that used to run inline in `appendDistributionEvents`, except that it now has
+ * its own deadline (started when the job STARTS, not when the click did).
+ */
+async function runProjectionUpdate(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  events: DistributionEvent[],
+  ids: Set<string>,
+  onProgress: AppendDistributionEventsOptions["onProgress"]
+): Promise<ProjectionOutcome> {
   const result = await casLoop<{ ok: true; log: DistributionLog } | { ok: false; error: string }>(
     async (writeToken) => {
       const dir = await getDistributionDir(directoryHandle, monthFolderName);
@@ -740,12 +1056,17 @@ export async function appendDistributionEvents(
           // than mutating `updated` itself.
           result: {
             ok: true as const,
-            log: { ...updated, events: mergedEvents, eventSetId: distributionEventSetId(mergedEvents) },
+            log: {
+              ...updated,
+              events: mergedEvents,
+              eventSetId: distributionEventSetId(mergedEvents),
+              ...(existing.scanIdentity ? { scanIdentity: existing.scanIdentity } : {}),
+            },
           },
           // Delayed re-read guards against a concurrent machine that read the
           // same base revision and clobbered our commit after this read-back.
           verify: async () => {
-            options?.onProgress?.({ phase: "verification", completed: events.length, total: events.length });
+            onProgress?.({ phase: "verification", completed: events.length, total: events.length });
             const recheck = await readDistributionLogStamp(directoryHandle, monthFolderName);
             return recheck.revision === nextRevision && recheck.writeToken === writeToken;
           },
@@ -757,74 +1078,12 @@ export async function appendDistributionEvents(
       context: "distribution:events",
       conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ الأحداث بعد عدة محاولات.",
       // The durable events are already committed by the time this loop runs, so
-      // every second spent here is a user waiting on a REBUILDABLE projection —
-      // and one more second of holding the month's most contended file open.
-      // Bounded: on exhaustion the append is reported as a degraded success and
-      // the next fold rebuilds the projection. See the block below.
-      deadline: createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "distribution:events"),
+      // this only bounds a REBUILDABLE projection — and, since P4, only a
+      // background job's own lifetime, not the user's click.
+      deadline: createDeadline(projectionTiming.deadlineMs, "distribution:events"),
     }
   );
-  if (result.ok) {
-    bumpWorkspaceEpoch(directoryHandle, monthFolderName);
-    options?.onProgress?.({ phase: "complete", completed: events.length, total: events.length });
-    return result;
-  }
-
-  // The projection could not be updated — but we only reach this line AFTER
-  // `writeDistributionEventBatch` above committed the immutable event files, so
-  // the append itself is durable and the source of truth already carries it.
-  //
-  // Reporting that as `{ ok: false }` is what made طلب استبدال fail
-  // PERMANENTLY on the production share (2026-09-10..14). The caller
-  // (`executeReplacement`) early-returns XQ-DIST-005, which skips
-  // `refreshDistributionCacheAfterWrite`, so the derived cache is never rebuilt
-  // from the events that ARE on disk. The user retries; the fold now sees the
-  // durable `assigned` event, so the row classifies as "taken" and the dead row
-  // as "replaced"; the freshness guard rejects the retry instantly, forever.
-  // The substitution had committed — the user was told it failed and then
-  // forbidden from redoing it.
-  //
-  // `distribution.log.json` is a legacy COMPATIBILITY PROJECTION and
-  // `distribution.current.json` a rebuildable cache (see this module's header
-  // and CLAUDE.md); both are derivable from the events at any time, and the
-  // next fold rebuilds them. A rebuildable derivative failing to update is a
-  // DEGRADED SUCCESS, not a failed append.
-  //
-  // It is reported, never swallowed: the coded entry below reaches the durable
-  // per-user error log and the admin XLSX export, and `projectionDegraded` lets
-  // the caller run its cache refresh (which re-derives from the durable events,
-  // making the assignment visible) instead of aborting.
-  logCodedError(
-    "distribution:projection-degraded",
-    "XQ-IO-032",
-    new Error(
-      `Distribution events for ${monthFolderName} are durable, but the ${LOG_FILE} projection could not be updated: ${result.error}`
-    )
-  );
-  bumpWorkspaceEpoch(directoryHandle, monthFolderName);
-  options?.onProgress?.({ phase: "complete", completed: events.length, total: events.length });
-  // Re-derive from the durable events so the caller receives the true post-append
-  // state rather than the stale projection. This read is itself best-effort: if
-  // the share cannot serve it either, fall back to a log carrying just this
-  // batch — still better than claiming the append did not happen.
-  try {
-    return {
-      ok: true,
-      log: await loadDistributionLog(directoryHandle, monthFolderName),
-      projectionDegraded: true,
-    };
-  } catch {
-    return {
-      ok: true,
-      log: {
-        monthFolderName,
-        revision: 0,
-        eventSetId: distributionEventSetId(events),
-        events: [...events],
-      },
-      projectionDegraded: true,
-    };
-  }
+  return result;
 }
 
 /**
@@ -1018,7 +1277,8 @@ function hasQuotaForAssignedEmployees(
 async function readNewEventsSinceCheckpoint(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
-  checkpoint: DistributionFoldCheckpoint
+  checkpoint: DistributionFoldCheckpoint,
+  options?: { strictSegments?: boolean }
 ): Promise<{ newEvents: DistributionEvent[]; segmentOffsets: Record<string, number>; legacyEventFileNames: string[] } | null> {
   const directory = await openOptionalDirectory(() => getDistributionDir(directoryHandle, monthFolderName, false));
   if (!directory) return null;
@@ -1065,7 +1325,9 @@ async function readNewEventsSinceCheckpoint(
     }
   }
 
-  const segmentDelta = await readDistributionEventSegmentDelta(directory, checkpoint.segmentOffsets);
+  const segmentDelta = await readDistributionEventSegmentDelta(directory, checkpoint.segmentOffsets, {
+    strict: options?.strictSegments ?? false,
+  });
 
   // ONE filter, applied to EVERY source (F-2). `knownEventIds` is the set this
   // checkpoint has already folded into `cached`, and the fold is not idempotent
@@ -1115,9 +1377,10 @@ async function tryResumeFromCheckpoint(
   checkpoint: DistributionFoldCheckpoint,
   sampleRows: PreparedPopulationRow[],
   persistCache: boolean,
-  awaitCachePersist: boolean
+  awaitCachePersist: boolean,
+  strictSegments: boolean
 ): Promise<DistributionCurrentData | null> {
-  const delta = await readNewEventsSinceCheckpoint(directoryHandle, monthFolderName, checkpoint);
+  const delta = await readNewEventsSinceCheckpoint(directoryHandle, monthFolderName, checkpoint, { strictSegments });
   if (!delta) return cached; // no distribution directory at all — cache stands as-is.
   if (delta.newEvents.length === 0) return cached; // nothing changed since the checkpoint.
 
@@ -1231,6 +1494,26 @@ export type LoadOrDeriveDistributionCurrentOptions = {
    * read.
    */
   awaitCachePersist?: boolean;
+  /**
+   * Whether a segment file that was listed but could not be read (the
+   * `readSegmentTails`/`readListedEntry` "vanished" tolerance, see
+   * `readEventSegmentDelta`'s doc comment) must abort this read with
+   * {@link EventSegmentUnreadableError} instead of silently excluding it.
+   * Defaults to `false`, i.e. today's lenient behaviour.
+   *
+   * DELIBERATELY NOT set by `loadOrDeriveDistributionCurrentStrictForRead`
+   * itself (fix round 3, controller ruling 2026-09-28): that function's own
+   * "strict" means "strict about a missing/unreadable `distribution.log.json`
+   * or a corrupt event", which every queue-rendering employee view already
+   * relies on — those views must keep tolerating an ordinary "another
+   * machine's segment isn't visible on the share yet" the way they always
+   * have, or Workstream A recreates the exact flaky-employee-view experience
+   * it exists to fix. Only `populationOverwriteGuard.ts` — the one caller for
+   * which a skipped segment must never be read as "no events in it" — opts
+   * into this via `loadOrDeriveDistributionCurrentStrictForRead`'s own
+   * `{ strictSegments: true }` parameter.
+   */
+  strictSegments?: boolean;
 };
 
 /** Same key shape the dedupeInFlight callers below use (workspaceScopeId |
@@ -1466,6 +1749,7 @@ async function loadOrDeriveDistributionCurrentOutcome(
 ): Promise<DistributionCurrentOutcome> {
   const persistCache = opts?.persistCache ?? true;
   const awaitCachePersist = opts?.awaitCachePersist ?? false;
+  const strictSegments = opts?.strictSegments ?? false;
   try {
     if (sampleRows.length === 0) {
       const stamp = await readDistributionLogStamp(directoryHandle, monthFolderName);
@@ -1513,7 +1797,7 @@ async function loadOrDeriveDistributionCurrentOutcome(
 
     if (canResume) {
       const resumed = await tryResumeFromCheckpoint(
-        directoryHandle, monthFolderName, cached, checkpoint!, sampleRows, persistCache, awaitCachePersist
+        directoryHandle, monthFolderName, cached, checkpoint!, sampleRows, persistCache, awaitCachePersist, strictSegments
       );
       if (resumed) {
         setDeriveMemo(memoKey, resumed);
@@ -1524,18 +1808,23 @@ async function loadOrDeriveDistributionCurrentOutcome(
       // fall through to a full, safe refold WITHOUT consulting the memo
       // (see the branch below, which only checks it when there was no
       // checkpoint to resume from in the first place).
-    } else {
+    } else if (!strictSegments) {
       // A6c: no usable on-disk cache at all (fresh month, or a
       // DERIVE_VERSION bump). Before paying for a full log read, check
       // whether this exact (workspace, month, epoch, row-shape) was already
-      // derived earlier in this session.
+      // derived earlier in this session. Skipped when strictSegments: the memo
+      // may have been populated by an earlier lenient read of the same month
+      // that silently skipped an unreadable segment, and a strict-segments
+      // caller must never be served that result without the read it asked for
+      // actually running.
       const memoHit = getDeriveMemo(memoKey);
       if (memoHit) return { kind: "ok", current: memoHit };
     }
 
     const { log, segmentOffsets, legacyEventFileNames } = await loadDistributionLogDetailed(
       directoryHandle,
-      monthFolderName
+      monthFolderName,
+      { strictSegments }
     );
     if (log.events.length === 0) {
       // The only null this function ever owed to a FACT about the data: the
@@ -1813,16 +2102,28 @@ export function loadDistributionLogForRead(
  *  A6a: always passes `{ persistCache: false }` — a read must never write
  *  `distribution.current.json` / sample mirrors back to disk (F3). Write
  *  flows must call `refreshDistributionCacheAfterWrite` explicitly instead
- *  (A6b). */
+ *  (A6b).
+ *
+ *  `options.strictSegments` forwards to `loadOrDeriveDistributionCurrentOutcome`'s
+ *  own `strictSegments` (see `LoadOrDeriveDistributionCurrentOptions` — and its
+ *  doc comment for why this must stay opt-in per caller, not something
+ *  `loadOrDeriveDistributionCurrentStrictForRead` turns on for everyone) and is
+ *  folded into the dedupe key: a strict-segments and a lenient-segments reader
+ *  for the same month must never share an in-flight promise, since the lenient
+ *  one — if it started first — would silently hand the strict-segments caller
+ *  a result that never attempted the read it asked for. */
 export function loadOrDeriveDistributionCurrentOutcomeForRead(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
-  sampleRows: PreparedPopulationRow[]
+  sampleRows: PreparedPopulationRow[],
+  options?: { strictSegments?: boolean }
 ): Promise<DistributionCurrentOutcome> {
-  const key = `${workspaceScopeId(directoryHandle)}|${monthFolderName}|${workspaceEpoch(directoryHandle, monthFolderName)}|dist-current|${sampleRows.length}`;
+  const strictSegments = options?.strictSegments ?? false;
+  const key = `${workspaceScopeId(directoryHandle)}|${monthFolderName}|${workspaceEpoch(directoryHandle, monthFolderName)}|dist-current|${sampleRows.length}${strictSegments ? "|strict-segments" : ""}`;
   return dedupeInFlight(key, () =>
     loadOrDeriveDistributionCurrentOutcome(directoryHandle, monthFolderName, sampleRows, {
       persistCache: false,
+      strictSegments,
     })
   );
 }
@@ -1847,18 +2148,38 @@ export function loadOrDeriveDistributionCurrentForRead(
  * Views already wrap their load in a try/catch that distinguishes a first load
  * (show the error state, with a retry) from a silent background refresh (log
  * it, keep what is on screen). Both of those are the right answer to a failed
- * read; committing an empty list as "ready" never was. Shares the dedupe key —
- * and therefore the in-flight read — with the `null`-returning sibling above.
+ * read; committing an empty list as "ready" never was.
+ *
+ * `options.strictSegments` (fix round 3, controller ruling 2026-09-28):
+ * DEFAULTS TO FALSE — this function's own "strict" is, and has always been,
+ * about a missing/unreadable `distribution.log.json` or a corrupt event, NOT
+ * about a single skipped segment. Every existing QUEUE-RENDERING caller
+ * (`XrayInspectionResults.tsx`, `XrayReferrals.tsx`) calls this with no 4th
+ * argument and MUST keep tolerating an ordinary "another machine's segment
+ * isn't visible on the share yet" exactly as it always has — round 2 of this
+ * fix briefly made every skipped segment raise here unconditionally, which
+ * would have shown those employee views an error screen on the first load
+ * after any writer's segment simply hadn't propagated across the share yet,
+ * recreating the flaky-employee-experience bug Workstream A exists to fix.
+ * `populationOverwriteGuard.ts` is the ONE caller that opts in, explicitly,
+ * with `{ strictSegments: true }` — for that caller alone, a skipped segment
+ * (not just an unreadable `distribution.log.json`) also raises, through
+ * {@link EventSegmentUnreadableError} wrapped below. The two are exercised
+ * through the outcome function's OWN dedupe key (see its doc comment), so a
+ * strict-segments and a lenient-segments read of the same month never share
+ * an in-flight promise.
  */
 export async function loadOrDeriveDistributionCurrentStrictForRead(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
-  sampleRows: PreparedPopulationRow[]
+  sampleRows: PreparedPopulationRow[],
+  options?: { strictSegments?: boolean }
 ): Promise<DistributionCurrentData | null> {
   const outcome = await loadOrDeriveDistributionCurrentOutcomeForRead(
     directoryHandle,
     monthFolderName,
-    sampleRows
+    sampleRows,
+    { strictSegments: options?.strictSegments ?? false }
   );
   if (outcome.kind === "unavailable") {
     throw outcome.error instanceof DistributionUnreadableError

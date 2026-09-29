@@ -11,7 +11,8 @@
 // `cancelled` flag guard exists to defend against. (Originally written against
 // `loadMonthPopulationFinal`, before §L replaced the effect's full-population read with a
 // manifest read — see the "lightweight manifest read" describe block further down.)
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_LABELS } from "../../../../data/labels/labelsStore";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
 import type { MonthManifestData, PopulationFinalData } from "../../../../data/population/monthTypes";
@@ -139,6 +140,7 @@ vi.mock("../../../../data/powerbiExport/exportManager", () => ({
   // spreading a non-tuple `unknown[]` into a zero-arg vi.fn() mock's inferred
   // call signature) without changing any test's observable behavior.
   runPowerBiExport: () => pbiExportMock.impl(),
+  runPowerBiExportDetailed: async () => ({ manifest: await pbiExportMock.impl(), snapshotRowCount: 0 }),
 }));
 
 // §N — the executive report builder (document+xlsx) that index.tsx dynamically
@@ -290,6 +292,24 @@ vi.mock("../ReportDesigner", () => ({
 
 import ReportsTab from "./index";
 
+// `ReportsTab` (this file's default import) is `lazy(() => import("./TabView"))`.
+// React memoizes that factory call, so only the very FIRST render in this whole
+// file/process ever pays the dynamic import()'s transform+eval cost -- every
+// later render just reuses the already-resolved module. That first cost is not
+// bounded by anything under test: it is vite-node cold-transpiling a ~1300-line
+// component that pulls in the KPI dashboard, chart code, xlsx, etc., and was
+// observed to occasionally exceed 5s even with no other load on the machine.
+// Whichever `it()` happens to run first was at the mercy of that variable,
+// unrelated cost inside its own timed `waitFor`s (most visibly the staleness
+// guard below, which used to budget an explicit 5000ms specifically to absorb
+// it and still wasn't always enough). Warming the import here, before any test
+// runs, moves that one-time cost out of every test's timing budget entirely --
+// by the time a test renders `<ReportsTab />`, `import("./TabView")` already
+// has a cached, resolved module to hand back.
+beforeAll(async () => {
+  await import("./TabView");
+});
+
 afterEach(() => {
   cleanup();
   deferreds.clear();
@@ -365,11 +385,12 @@ describe("Reports month-summary chips — staleness guard (I-1)", () => {
     // deleted). So: explicitly wait for the real, lazy-loaded component to mount
     // AND for its April load to genuinely start before touching the month
     // selection — mirrors the awaiting pattern the §T mount-preservation tests use
-    // (`await screen.findByTestId(...)`) to cross this same lazy boundary. A longer
-    // explicit timeout is used here (not the default 1000ms) because crossing the
-    // dynamic import() boundary is the one wait in this file that is not just
-    // waiting on a mocked promise — it is measurably slower and was the source of
-    // this test's observed full-suite flakiness.
+    // (`await screen.findByTestId(...)`) to cross this same lazy boundary. The
+    // file-level `beforeAll` above already warms `import("./TabView")` before any
+    // test runs, so this render itself resolves fast and deterministically; the
+    // longer-than-default timeout here just stays as an ordinary safety margin
+    // for slow CI/parallel-worker machines, the same as any other disk/IO wait
+    // in this suite — it is no longer compensating for the dynamic import itself.
     await waitFor(
       () => {
         expect(populationStorageSpies.loadMonthManifest).toHaveBeenCalledWith(root, "4-april-2026");
@@ -519,6 +540,61 @@ describe("Reports month-summary chips — lightweight manifest read, no employee
 // tests cover both the render-time gate (`can`, disables/explains) and the
 // handler-time gate (`canMutate`, re-checked defensively even if a control were
 // somehow left enabled), plus the digit-format and pending-month polish items.
+describe("Reports sample-snapshot banner (A2)", () => {
+  it("shows the banner as soon as the month loads when a sampled image is missing from the population", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+    const sampleFixture = {
+      rngSeed: "seed",
+      totalRequested: 2,
+      totalActual: 2,
+      certScanRequested: 0,
+      nonCertScanRequested: 2,
+      certScanActual: 0,
+      nonCertScanActual: 2,
+      portAllocations: [],
+      stageAllocations: [],
+      drawnAt: new Date().toISOString(),
+      drawnBy: "tester",
+      rows: [{ xrayImageId: "img-0" }, { xrayImageId: "img-9" }],
+    } as unknown as SampleMasterData;
+    sampleAnswerSpies.loadSampleMaster.mockResolvedValue(sampleFixture);
+
+    render(<ReportsTab />);
+    await act(async () => {
+      deferredManifestFor("4-april-2026").resolve(mockManifest(1));
+      deferredFor("4-april-2026").resolve(mockPop(1));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        DEFAULT_LABELS.report_sample_snapshot_banner.replace("{count}", "1")
+      );
+    });
+  });
+
+  it("shows no banner when every sampled image is in the population", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+    sampleAnswerSpies.loadSampleMaster.mockResolvedValue({
+      rngSeed: "seed", totalRequested: 1, totalActual: 1, certScanRequested: 0, nonCertScanRequested: 1,
+      certScanActual: 0, nonCertScanActual: 1, portAllocations: [], stageAllocations: [],
+      drawnAt: new Date().toISOString(), drawnBy: "tester", rows: [{ xrayImageId: "img-0" }],
+    } as unknown as SampleMasterData);
+
+    render(<ReportsTab />);
+    await act(async () => {
+      deferredManifestFor("4-april-2026").resolve(mockManifest(1));
+      deferredFor("4-april-2026").resolve(mockPop(1));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(screen.getByText("1 صورة")).toBeInTheDocument());
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
 describe("Reports export permission gating (B5)", () => {
   it("disables every export/generate control and explains why when the role cannot export (can=false)", async () => {
     const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;

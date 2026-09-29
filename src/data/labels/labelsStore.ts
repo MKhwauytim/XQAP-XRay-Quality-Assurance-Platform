@@ -1,3 +1,4 @@
+import { STAGE_LABELS_AR, STAGE_UNKNOWN_LABEL } from "../population/stageLabels";
 import { phaseOneLabels } from "./labels.phaseOne";
 import { phaseTwoLabels } from "./labels.phaseTwo";
 import { phaseThreeFourLabels } from "./labels.phaseThreeFour";
@@ -148,11 +149,12 @@ export const DEFAULT_LABELS = {
   dt_hide_column:            "إخفاء",
 
   // Stage names
-  stage_first:   "المستوى الأول",
-  stage_second:  "المستوى الثاني",
-  stage_third:   "المستوى الثالث",
-  stage_fourth:  "المستوى الرابع",
-  stage_unknown: "غير محدد",
+  // Defaults come from the ONE definition in stageLabels.ts (C1) — never re-typed here.
+  stage_first:   STAGE_LABELS_AR.first,
+  stage_second:  STAGE_LABELS_AR.second,
+  stage_third:   STAGE_LABELS_AR.third,
+  stage_fourth:  STAGE_LABELS_AR.fourth,
+  stage_unknown: STAGE_UNKNOWN_LABEL,
 
   // CertScan
   certscan_name:    "نظام الأشعة المركزية (CertScan)",
@@ -291,6 +293,20 @@ export const DEFAULT_LABELS = {
   ew_case_filter_risk_targeted:    "مستهدف المؤشر",
   ew_case_filter_adhoc:            "حالات استثنائية",
   ew_case_filter_empty:            "لا توجد حالات ضمن هذه التصفية. اختر «جميع الحالات» للعودة إلى القائمة كاملة.",
+  ew_case_filter_empty_certscan:   "لا توجد حالات ضمن هذه التصفية. اختر «كل الصور» أو «جميع الحالات» للعودة إلى القائمة كاملة.",
+
+  // ── CertScan chip (C2) — shared by the employee queue and Population Browse.
+  // "CertScan" is the processed row's certScanStatus: its port is flagged as a
+  // CertScan port OR its id matched the pasted CertScan device list.
+  certscan_filter_aria:            "تصفية حسب CertScan",
+  certscan_filter_any:             "كل الصور",
+  certscan_filter_certscan:        "CertScan",
+  certscan_filter_noncertscan:     "غير CertScan",
+
+  /** Appended to the «متابعة العمل» strip title while a case chip other than «جميع الحالات» is active. */
+  ew_stats_case_suffix:            " — {filter}",
+  ew_stats_case_risk_targeted:     "الحالات المستهدفة",
+  ew_stats_case_adhoc:             "الحالات الاستثنائية",
 
   // ── Pending (معلقة) export / correction re-import / bulk reopen ──────────
   // The three actions the owner asked for on top of the "لا يوجد صورة"
@@ -356,6 +372,15 @@ export const DEFAULT_LABELS = {
   ew_queue_stats_employee_aria:    "إحصائيات الموظف {name}",
   ew_queue_stats_employee_scope:   "نطاق العرض: {name}",
 
+  // «الحصة اليومية» tile in the stats strip (C3). The quota is frozen: working
+  // days (Sunday–Thursday) from the employee's first assignment to the
+  // deadline (the sample month's last day − 3); it moves only when their
+  // assigned count changes. {daily}/{total}/{days} are filled at the call site.
+  ew_quota_tile_label:             "الحصة اليومية",
+  ew_quota_tile_label_mine:        "الحصة اليومية (لي)",
+  ew_quota_tile_title:             "الحصة اليومية: {daily} صورة / يوم · الحصة: {total} · أيام العمل (الأحد–الخميس): {days}",
+  ew_quota_tile_title_none:        "لا توجد حصة محفوظة لهذا الشهر",
+
   // ── Answering on another employee's behalf (`answer-on-behalf`) ───────────
   // The inspection panel used to be flatly read-only on anyone else's row. It
   // is now editable for a holder of the feature, but ONLY while that row is
@@ -403,6 +428,19 @@ export const DEFAULT_LABELS = {
   population_reprocess_confirm_title: "إعادة معالجة شهر يحتوي عينة",
   population_reprocess_confirm_message: "توجد عينة مسحوبة لهذا الشهر بالفعل. حفظ نتائج المعالجة الجديدة سيجعل العينة الحالية غير متطابقة مع المجتمع الجديد. هل تريد المتابعة والحفظ؟",
   population_reprocess_cancelled: "تم إلغاء الحفظ — بقيت بيانات الشهر السابقة دون تغيير.",
+  population_reprocess_impact_counts: "إجابات محفوظة: {answers} · صور موزعة: {distribution} · صور من العينة غير موجودة في المجتمع الجديد: {missing}",
+  population_reprocess_missing_examples: "أمثلة على الصور المفقودة: {ids}",
+  population_reprocess_certscan_warning: "سيتغيّر وضع CertScan لـ {count} صورة من العينة؛ تحتفظ العينة المسحوبة بتقسيمها الأصلي.",
+  population_reprocess_examples_separator: "، ",
+  population_reprocess_blocked_title: "لا يمكن حفظ المجتمع الجديد",
+  population_reprocess_blocked_message: "لهذا الشهر توزيع أو إجابات محفوظة، والمجتمع الجديد لا يحتوي بعض صور العينة الحالية. الحفظ سيُخفي هذه الصور وإجاباتها من التقارير، لذلك تم إيقافه. تأكّد أن الملفات تخص الشهر نفسه ثم أعد المعالجة.",
+  population_reprocess_blocked_close: "إغلاق",
+  population_save_sample_orphans_warning: "تم حفظ شهر {month}، لكن {count} من صور العينة غير موجودة في المجتمع الجديد. ستظهر في التقارير من نسخة العينة المحفوظة مع تنبيه.",
+  report_designer_sample_snapshot_banner: "تنبيه: {count} من صور العينة لم تعد موجودة في مجتمع هذا الشهر (أُعيدت معالجة المجتمع). تُحسب بطاقات المؤشرات هنا على هذه الصور أيضاً من نسخة العينة المحفوظة، وقد تختلف أعداد المجتمع فيها عن التقارير.",
+  report_sample_snapshot_footnote: "ملاحظة: {count} من صور العينة لم تعد ضمن مجتمع هذا الشهر (أُعيدت معالجته)؛ تُعرض من نسخة العينة المحفوظة في مؤشرات العينة وتُستثنى من أعداد المجتمع.",
+  report_sample_snapshot_column: "من نسخة العينة",
+  report_sample_snapshot_banner: "تنبيه: {count} من صور العينة لم تعد موجودة في مجتمع هذا الشهر (أُعيدت معالجة المجتمع). تُعرض من نسخة العينة المحفوظة، ولا تدخل في مقامات المجتمع.",
+  population_overwrite_blocked_error: "رُفض الحفظ: {missing} من صور العينة الحالية غير موجودة في المجتمع الجديد، ولهذا الشهر توزيع أو إجابات محفوظة. تأكّد أن الملف يخص الشهر نفسه — بقيت بيانات الشهر السابقة دون تغيير.",
   population_locked_summary_corrupt: "الشهر مُقفل والملخص المحفوظ لهذا الشهر تالف — لا يمكن عرض التقرير دون إعادة معالجة المجتمع بعد إعادة فتح الشهر.",
   population_locked_summary_missing: "الشهر مُقفل ولا يوجد ملخص محفوظ لهذا الشهر (شهر أقدم من هذه الميزة) — لا يمكن عرض التقرير دون إعادة معالجة المجتمع بعد إعادة فتح الشهر.",
   population_locked_report_notice: "الشهر مُقفل — هذا التقرير مبني على الملخص المحفوظ فقط، دون قراءة بيانات المجتمع الكاملة.",
@@ -555,6 +593,35 @@ export const DEFAULT_LABELS = {
   fb_finalize_legacy_result_archive_failed: "تم التحقق من جميع الرسائل القديمة، لكن تعذّرت أرشفة الملف القديم على هذا الجهاز.",
   fb_finalize_legacy_error:            "حدث خطأ أثناء محاولة الترحيل — أعد المحاولة.",
 
+  // Feedback export (admin, "all messages" tab) — button/status text AND the
+  // generated workbook's sheet names and column headings (Workstream B).
+  fb_export_btn:                "تصدير المحادثات إلى Excel",
+  fb_exporting:                 "جارٍ التصدير…",
+  fb_export_progress:           "جارٍ قراءة المحادثات… {done} / {total}",
+  fb_export_partial:            "تم التصدير، لكن تعذّرت قراءة {skipped} محادثة (ملف تالف أو غير متاح).",
+  fb_export_failed:             "تعذّر تصدير المحادثات — حاول مرة أخرى.",
+  fb_export_empty:              "لا توجد محادثات لتصديرها.",
+  fb_export_sheet_threads:      "المحادثات",
+  fb_export_sheet_messages:     "الرسائل",
+  fb_export_col_thread_id:      "رقم المحادثة",
+  fb_export_col_from:           "المرسل",
+  fb_export_col_role:           "الدور",
+  fb_export_col_category:       "النوع",
+  fb_export_col_status:         "الحالة",
+  fb_export_col_created_at:     "تاريخ الإنشاء",
+  fb_export_col_last_activity:  "آخر نشاط",
+  fb_export_col_reply_count:    "عدد الردود",
+  fb_export_col_resolved_at:    "تاريخ الإغلاق",
+  fb_export_col_resolved_by:    "أُغلقت بواسطة",
+  fb_export_col_text:           "النص الأصلي",
+  fb_export_col_sequence:       "التسلسل",
+  fb_export_col_author:         "الكاتب",
+  fb_export_col_date:           "التاريخ",
+  fb_export_col_message_text:   "النص",
+  fb_export_col_resolved_estimated: "إغلاق تقديري",
+  fb_export_yes:                "نعم",
+  fb_export_no:                 "لا",
+
   // Login screen (AuthGate) — the first screen every user sees
   auth_tagline:                 "منصة فحص صور الأشعة",
   auth_login_title:             "تسجيل الدخول",
@@ -621,6 +688,15 @@ export const DEFAULT_LABELS = {
   // the button never gets stuck with no visible explanation. The entered
   // answer is untouched either way (`ans` is not reset on this path).
   ip_msg_save_failed_generic:    "تعذّر حفظ الإجابة. الإجابة التي أدخلتها ما زالت موجودة — يمكنك المحاولة مرة أخرى.",
+  ip_save_status_saving:         "جارٍ الحفظ…",
+  ip_save_status_saved:          "تم الحفظ ✓",
+  ip_save_status_queued:         "لم يُحفظ بعد — ستُعاد المحاولة تلقائياً ويتحدّث هذا السطر عند النجاح.",
+  ip_save_status_queued_coded:   "لم يُحفظ بعد ({code}) — ستُعاد المحاولة تلقائياً ويتحدّث هذا السطر عند النجاح.",
+  ip_save_status_failed:         "لم يُحفظ — {message} الإجابة ما زالت هنا، أعد المحاولة بنفس الزر.",
+  // A1: shown while the browser refuses to keep the local draft (private mode,
+  // full quota, a cleared file:// bucket) — the typed answer is still in the
+  // form, but nothing will restore it after a reload until a save succeeds.
+  ip_msg_draft_not_persisted:    "تعذّر حفظ مسودة الإجابة في هذا المتصفح — لن تبقى الإجابة بعد إعادة تحميل الصفحة. قدّم الإجابة قبل مغادرة الصفحة.",
   ip_no_template_msg:           "اختر نموذجاً لعرض حقول الفحص.",
   ip_no_visible_fields_msg:     "لا توجد حقول ظاهرة في هذه المرحلة.",
   ip_select_placeholder:        "اختر...",
@@ -1319,6 +1395,7 @@ export const DEFAULT_LABELS = {
   adhoc_import_assign_failed:          "تعذّر التعيين: {error}",
   adhoc_import_assign_success:         "تم تعيين {count} صف بنجاح.",
   adhoc_import_assign_skipped:         "({count} صف كان مُعيَّناً بالفعل وتم تجاوزه.)",
+  adhoc_import_assign_index_degraded:  "تنبيه: تم التعيين وحُفظ بنجاح، لكن تعذّر تحديث فهرس قائمة الاستيرادات اليدوية. قد تظهر القائمة بأعداد قديمة مؤقتاً وستُصحَّح تلقائياً عند الحفظ التالي — يمكنك أيضاً تحديث الصفحة الآن.",
   adhoc_import_scope_note:             "لا يُكتب أي شيء داخل مجلد الشهر المعالج الحقيقي (1-population) — بيانات هذا الاستيراد معزولة تماماً عن مجتمع الأشهر الرسمية.",
 
   // ── Ad-hoc import — paste source, mapping workbench, value mapping ──────
@@ -1515,6 +1592,35 @@ export const DEFAULT_LABELS = {
   template_repair_unsupported:      "لا تسمح صلاحية مجلد العمل الحالية بحذف الملفات، فتعذّرت الأرشفة.",
   template_repair_failed:           "تعذّر الإصلاح: {error}",
   template_repair_scan_failed:      "تعذّر فحص ملفات القوالب: {error}",
+  population_recovery_title:        "استعادة المجتمع السابق",
+  population_recovery_hint:         "يعرض النسخ السابقة من مجتمع الشهر المحدد المحفوظة قبل إعادة المعالجة، مع عدد صور العينة الموجودة في كل نسخة. الاستعادة تحفظ النسخة الحالية أولاً ولا تحذف أي ملف.",
+  population_recovery_scan_btn:     "عرض النسخ السابقة",
+  population_recovery_none:         "لا توجد نسخ سابقة لمجتمع هذا الشهر.",
+  population_recovery_no_month:     "لا توجد أشهر محفوظة في مساحة العمل.",
+  population_recovery_col_file:     "النسخة",
+  population_recovery_col_rows:     "عدد الصفوف",
+  population_recovery_col_coverage: "صور العينة الموجودة",
+  population_recovery_source_superseded: "نسخة محفوظة قبل إعادة المعالجة",
+  population_recovery_source_bak:   "النسخة الاحتياطية الأخيرة (.bak)",
+  population_recovery_restore_btn:  "استعادة هذه النسخة",
+  population_recovery_confirm:      "سيُستبدل مجتمع الشهر الحالي بهذه النسخة بعد حفظ النسخة الحالية كنسخة سابقة. استعادة نسخة أقدم تُسقط أي تصحيحات أُجريت على المجتمع بعدها. هل تريد المتابعة؟",
+  population_recovery_confirm_coverage: "صور العينة الموجودة في هذه النسخة: {covered} من {total} (المفقود: {missing}).",
+  population_recovery_blocked_note: "لا يمكن استعادة هذه النسخة: تنقصها {missing} من صور العينة ولهذا الشهر توزيع أو إجابات محفوظة.",
+  population_recovery_blocked_refused: "رُفضت الاستعادة: تنقص هذه النسخة {missing} من صور العينة ولهذا الشهر توزيع أو إجابات محفوظة. بقي مجتمع الشهر دون تغيير.",
+  population_recovery_months_failed: "تعذّرت قراءة قائمة الأشهر: {error}",
+  population_recovery_months_loading: "جارٍ تحميل الأشهر…",
+  population_recovery_warning_manifest: "تنبيه: استُعيد المجتمع، لكن تعذّر تحديث عدد الصفوف في سجل الشهر؛ أعد فتح الشهر أو حدّث البيانات وتحقق من العدد.",
+  population_recovery_scan_failed:  "تعذّر فحص النسخ السابقة: {error}",
+  population_recovery_month_label:  "الشهر",
+  population_recovery_col_processed_at: "تاريخ المعالجة",
+  population_recovery_restored:     "تمت الاستعادة. حُفظت النسخة السابقة باسم {archived}.",
+  population_recovery_failed:       "تعذّرت الاستعادة: {error}",
+  population_recovery_backup_denied:    "استعادة المجتمع من النسخ الاحتياطية متاحة للمشرف العام فقط.",
+  population_recovery_plan_rejected:    "تغيّر محتوى النسخة الاحتياطية أو بيانات الشهر منذ عرض القائمة. أعد عرض النسخ السابقة ثم حاول مجدداً.",
+  population_recovery_backups_failed:   "تعذّر عرض النسخ الاحتياطية، وتظهر النسخ المحلية فقط: {error}",
+  population_recovery_source_backup:    "نسخة احتياطية",
+  population_recovery_backup_restored:  "تمت استعادة المجتمع من النسخة الاحتياطية {folder}. نسخة الرجوع: {rollback}.",
+  population_recovery_backup_blocked:   "لا يمكن استعادة هذه النسخة: {missing} من صور العينة الحالية غير موجودة في مجتمعها، ولهذا الشهر توزيع أو إجابات.",
 
   storage_section_title:               "حالة التخزين في المتصفح",
   storage_quota_label:                 "المساحة المستخدمة",
@@ -1613,9 +1719,17 @@ export const DEFAULT_LABELS = {
   // Says what the user should DO, and — just as importantly — what did NOT
   // happen: the file is not damaged and the workspace grant is not lost. The
   // old XQ-IO-032 wording this replaces could say neither, because the cause
-  // was unclassified.
-  err_io_036_stale_snapshot:               "تغيّر الملف على المجلد المشترك أثناء قراءته أو حفظه، فتعذّر إتمام العملية رغم عدة محاولات. الملف سليم ولم يُفقد الوصول إلى مساحة العمل — أعد المحاولة بعد قليل، ويُفضّل ألا يُحفظ الملف نفسه من جهازين في الوقت نفسه.",
+  // was unclassified. Updated 2026-09-28 (E1b) to also cover the close()-path
+  // meaning — "the shared folder refused to replace the file (it may be open
+  // on another computer or lack permission)" — alongside the read-path
+  // wording; both raise this same DOM error name. R8(c): the read-path clause
+  // no longer asserts "the file changed" (a stale-snapshot claim this is not
+  // always) — it now says an OS-level file operation failed, which covers the
+  // stale-snapshot case without over-claiming it as the only one.
+  err_io_036_stale_snapshot:               "تعذّرت عملية على مستوى نظام التشغيل أثناء قراءة الملف من المجلد المشترك، أو رفض المجلد المشترك استبدال الملف (قد يكون مفتوحًا على جهاز آخر أو لا يملك الإذن اللازم) أثناء حفظه، فتعذّر إتمام العملية رغم عدة محاولات. الملف سليم ولم يُفقد الوصول إلى مساحة العمل — أعد المحاولة بعد قليل، ويُفضّل ألا يُحفظ الملف نفسه من جهازين في الوقت نفسه.",
   err_io_037_history_path_budget:          "تعذّر حفظ نسخة السجل السابقة لهذا الإجراء لأن مسار مجلد مساحة العمل طويل جدًا. الإجراء نفسه تم حفظه بنجاح؛ لم يُحفظ سوى سجل التغيير. لتفعيل السجل، انقل مجلد مساحة العمل إلى مسار أقصر (أقرب إلى جذر المجلد المشترك).",
+  err_io_038_rotation_target_unconfirmed:  "تعذّر العثور على ملف بديل يمكن الوثوق به لحفظ هذه البيانات بعد عدة محاولات، لأن المجلد المشترك لم يُظهر بثبات ما إذا كانت الملفات المرشّحة فارغة أم لا. لم يُحذف أو يُستبدل أي ملف موجود بسبب هذا الخطأ — لم يُحفظ العنصر الجديد بعد. أعد المحاولة بعد قليل.",
+  err_io_039_safe_browsing_check_failed:  "تعذّر إتمام الحفظ لأن الفحص الأمني للمتصفح لم ينجح (غالبًا بسبب ضعف الاتصال بالشبكة مؤقتًا). لم يُغيَّر الملف ولم تُفقد أي بيانات — أعد المحاولة بعد قليل.",
 
   err_auth_006_rehash_failed:          "تعذر تحديث تشفير كلمة المرور، وتم الإبقاء على التشفير السابق.",
   err_auth_007_rehash_persist_failed:  "تعذر حفظ تشفير كلمة المرور المحدّث في مساحة العمل.",
@@ -1627,6 +1741,8 @@ export const DEFAULT_LABELS = {
   err_pop_005_save_returned_error:     "فشل الحفظ: {detail}",
   err_pop_007_worker_died:                 "توقف معالج البيانات أثناء العمل، غالبًا بسبب حجم البيانات الكبير. أعد المحاولة، وإن تكرر الخطأ فقسّم البيانات على شهور أصغر.",
   err_pop_006_save_threw:              "حدث خطأ غير متوقع أثناء الحفظ.",
+  err_pop_008_overwrite_check_unreadable: "تعذّر التحقق من العينة أو التوزيع أو الإجابات المحفوظة لهذا الشهر قبل الحفظ (قراءة غير مكتملة) — رُفض الحفظ تجنبًا لفقدان عمل محفوظ. أعد المحاولة؛ بقيت بيانات الشهر السابقة دون تغيير.",
+  err_pop_009_archive_verify_failed:   "تعذّر إنشاء نسخة احتياطية موثّقة من بيانات المجتمع السابقة قبل الحفظ — رُفض الحفظ تجنبًا لاستبدال البيانات دون نسخة احتياطية سليمة. أعد المحاولة؛ بقيت بيانات الشهر السابقة دون تغيير.",
 
   err_dist_002_duplicate_event_id:     "معرّف حدث مكرر: {eventId}",
   err_dist_003_append_threw:           "تعذر تسجيل أحداث التوزيع.",
@@ -1820,6 +1936,57 @@ export const DEFAULT_LABELS = {
   archive_integrity_category_answers:      "إجابات بلا سجل توزيع حالي",
   archive_integrity_category_approvals:    "طلبات إحالة/استبدال بلا سجل توزيع حالي",
   archive_integrity_show_more:       "و{count} أخرى",
+
+  // Selective backup restore (Workstream D) — element names + engine refusal.
+  restore_element_population:            "المجتمع",
+  restore_element_sample_distribution:   "العينة والتوزيع",
+  restore_element_answers:               "الإجابات",
+  restore_element_referrals_approvals:   "الإحالات والاعتمادات",
+  restore_element_population_settings:   "إعدادات المجتمع",
+  restore_element_templates:             "نماذج الفحص وتفضيلات العرض",
+  restore_element_users_permissions:     "المستخدمون والصلاحيات والتسميات",
+  restore_element_report_designs:        "تصاميم التقارير",
+  restore_element_feedback:              "الملاحظات",
+  restore_element_system_settings:       "إعدادات النظام",
+  restore_scope_invalid:                 "نطاق الاستعادة الانتقائية غير صالح: اختر عنصراً واحداً على الأقل، وشهراً واحداً على الأقل عند اختيار عناصر شهرية.",
+
+  // Archive restore dialog — selective mode (Workstream D).
+  archive_restore_mode_label:                   "نوع الاستعادة",
+  archive_restore_mode_full:                    "استعادة كاملة",
+  archive_restore_mode_selective:               "استعادة انتقائية",
+  archive_restore_selective_intro:              "اختر العناصر والأشهر المراد استعادتها فقط. تُطبَّق ضمانات الاستعادة الكاملة نفسها: نسخة رجوع كاملة قبل البدء وعلامة استعادة جارية.",
+  archive_restore_elements_heading:             "العناصر",
+  archive_restore_months_heading:               "الأشهر الموجودة في النسخة",
+  archive_restore_months_none:                  "لا توجد بيانات شهرية في هذه النسخة.",
+  archive_restore_preview_loading:              "جاري قراءة محتوى النسخة...",
+  archive_restore_preview_error:                "تعذرت قراءة محتوى النسخة: {error}",
+  archive_restore_preview_heading:              "الملفات التي ستُستعاد",
+  archive_restore_preview_row:                  "{element} — {month}: {count} ملف",
+  archive_restore_preview_row_workspace:        "{element}: {count} ملف",
+  archive_restore_not_present:                  "{element} — {month}: غير موجود في هذه النسخة",
+  archive_restore_not_present_workspace:        "{element}: غير موجود في هذه النسخة",
+  archive_restore_blocked_population:           "لا يمكن استعادة المجتمع لشهر {month}: {missing} من أصل {sampled} معرّفاً في العينة غير موجودة في مجتمع النسخة (أمثلة: {examples}). الشهر يحتوي على توزيع أو إجابات، واستعادة هذا المجتمع ستفصلها عن بياناتها.",
+  archive_restore_warning_sample_without_answers: "تنبيه: استعادة العينة والتوزيع لشهر {month} دون الإجابات قد تترك إجابات بلا سجل توزيع. سيُجرى فحص السلامة بعد الاستعادة.",
+  archive_restore_warning_answers_without_sample: "تنبيه: استعادة الإجابات لشهر {month} دون العينة والتوزيع قد تترك إجابات بلا سجل توزيع. سيُجرى فحص السلامة بعد الاستعادة.",
+  archive_restore_warning_answers_embed_requests: "تنبيه: ملفات الإجابات في هذه النسخة لشهر {month} بالصيغة القديمة وتحتوي على طلبات الإحالة والاستبدال وإعادة الفتح داخلها، لذا ستُستعاد هذه الطلبات أيضاً مع الإجابات.",
+  archive_restore_warning_requests_embedded:      "تنبيه: طلبات الإحالة والاستبدال لشهر {month} مخزنة داخل ملفات الإجابات القديمة في هذه النسخة، ولن تُستعاد إلا باختيار الإجابات أيضاً.",
+  archive_restore_unclassified:                   "{count} ملفاً في هذه النسخة خارج نطاق الاستعادة الانتقائية (سجلات التدقيق والأخطاء وما شابهها)؛ لا يعيدها إلا الاستعادة الكاملة.",
+  archive_restore_select_prompt:                "اختر عنصراً واحداً على الأقل، وشهراً واحداً على الأقل للعناصر الشهرية.",
+  archive_restore_planning:                     "جاري التحقق من الاعتماديات...",
+  archive_restore_selective_done:               "تمت الاستعادة الانتقائية من {folder} ({count} ملف). نسخة الرجوع: {rollback}.",
+  archive_restore_integrity_clean:              "فحص السلامة لشهر {month}: لا توجد صفوف يتيمة.",
+  archive_restore_integrity_orphans:            "فحص السلامة لشهر {month}: {count} صفاً يتيماً — راجع قسم فحص السلامة المرجعية.",
+  archive_restore_integrity_failed:             "تعذر فحص السلامة لشهر {month}: {error}",
+  archive_restore_plan_rejected:                "تغيّر محتوى النسخة أو بيانات الشهر منذ المعاينة، ولم يعد الاختيار صالحاً. أعد فتح نافذة الاستعادة.",
+  archive_restore_month_closed:                 "لا يمكن الاستعادة: شهر {month} مغلق. أعد فتح الشهر أولاً ثم كرر الاستعادة. لم يُغيَّر أي شيء.",
+  archive_restore_failed_rollback:              "بدأت الاستعادة قبل أن تفشل، فقد تكون بعض الملفات تغيّرت. للرجوع استخدم نسخة الرجوع: {rollback}.",
+  archive_restore_derived_warning:              "تنبيه: استُعيدت البيانات لكن تعذّرت خطوة «{step}» لشهر {month}: {error}",
+  archive_restore_derived_step_manifest:        "تحديث سجل الشهر",
+  archive_restore_derived_step_population:      "إعادة بناء ملفات المجتمع المشتقة",
+  archive_restore_derived_step_replacement_index: "فهرس مرشحي الاستبدال",
+  archive_restore_derived_step_aggregate:       "ملخص المجتمع",
+  archive_restore_derived_step_distribution:    "ذاكرة التوزيع المؤقتة",
+  archive_restore_failed_prefix:                "فشلت الاستعادة",
 
   // The 2026-08 design-handoff redesign keeps its keys in one file per screen
   // (see ./labels.*.ts). Spread here so they are indistinguishable from the

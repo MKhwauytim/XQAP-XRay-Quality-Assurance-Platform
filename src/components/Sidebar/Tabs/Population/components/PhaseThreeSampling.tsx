@@ -3,6 +3,7 @@ import type { CertScanShortfall, SampleMasterData } from "../../../../../data/sa
 import type { SamplingPlanPriorMonthAdvisory } from "../../../../../data/sampling/samplingPlanStorage";
 import type { PopulationConfig, StageSamplingRule } from "../../../../../data/population/populationConfig";
 import { formatNumber, getStageKey } from "./helpers";
+import { STAGE_LABELS_AR } from "../../../../../data/population/stageLabels";
 import { useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, Info, Lock, RefreshCw, Unlock } from "lucide-react";
 import { usePermissions } from "../../../../../auth/usePermissions";
@@ -61,12 +62,7 @@ function formatPercent(part: number, whole: number): string {
   });
 }
 
-const STAGE_LABELS: Record<string, string> = {
-  first:  "المستوى الأول",
-  second: "المستوى الثاني",
-  third:  "المستوى الثالث",
-  fourth: "المستوى الرابع"
-};
+const STAGE_LABELS: Readonly<Record<string, string>> = STAGE_LABELS_AR;
 
 /**
  * B4: prior-month switching-rule advisory. Since the 2026-08 redesign (`4b`) this is

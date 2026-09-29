@@ -38,6 +38,12 @@
 import { useMemo, useState } from "react";
 import { isAdhocEntry } from "../../../../../../data/adhocImport/adhocImportEmployeeView";
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
+import {
+  countCertScanFilters,
+  filterByCertScan,
+  type CertScanFilter,
+  type CertScanFilterCounts,
+} from "../../../../../../data/population/certScanFilter";
 
 export type CaseFilter = "all" | "risk-targeted" | "adhoc";
 
@@ -90,9 +96,14 @@ export function countCaseFilters(entries: readonly DistributionEntry[]): CaseFil
 export type CaseFilterState = {
   value: CaseFilter;
   setValue: (next: CaseFilter) => void;
-  /** `scopedEntries` narrowed to the active bucket — what the table renders. */
+  /** The CertScan chip (C2). Composes with the case chip: applied AFTER it. */
+  certScan: CertScanFilter;
+  setCertScan: (next: CertScanFilter) => void;
+  /** `scopedEntries` narrowed to the active case bucket AND CertScan chip — what the table renders. */
   entries: DistributionEntry[];
   counts: CaseFilterCounts;
+  /** CertScan chip counts over the case-filtered set, so each number is what clicking that chip shows. */
+  certScanCounts: CertScanFilterCounts;
 };
 
 /**
@@ -107,7 +118,10 @@ export type CaseFilterState = {
  */
 export function useCaseFilter(scopedEntries: DistributionEntry[]): CaseFilterState {
   const [value, setValue] = useState<CaseFilter>("all");
+  const [certScan, setCertScan] = useState<CertScanFilter>("any");
   const counts = useMemo(() => countCaseFilters(scopedEntries), [scopedEntries]);
-  const entries = useMemo(() => filterCases(scopedEntries, value), [scopedEntries, value]);
-  return { value, setValue, entries, counts };
+  const caseEntries = useMemo(() => filterCases(scopedEntries, value), [scopedEntries, value]);
+  const certScanCounts = useMemo(() => countCertScanFilters(caseEntries), [caseEntries]);
+  const entries = useMemo(() => filterByCertScan(caseEntries, certScan), [caseEntries, certScan]);
+  return { value, setValue, certScan, setCertScan, entries, counts, certScanCounts };
 }

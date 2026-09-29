@@ -10,13 +10,14 @@
 // Design/CSS is intentionally minimal for now: it reuses the v1 deck theme so the
 // content reads clearly; the dedicated visual pass happens after content approval.
 
+import { getLabels } from "../../../labels/labelsStore";
 import type { ReportModel } from "../model/reportModel";
 import type { StageProfile } from "../../executiveReportTypes";
 import { esc, fmtNum, fmtPct } from "../primitives";
 import { icon } from "../ui/icons";
 import { coverMeshSvg, dividerPatternSvg } from "../ui/generativeArt";
 import { isRankable } from "../model/dataSufficiency";
-import { formatStageLabel, getStageKey } from "../../../population/stageHelpers";
+import { STAGE_KEY_ORDER, getStageKey, isCanonicalStageKey } from "../../../population/stageHelpers";
 import { DEFAULT_SAMPLING_RULES } from "../../../population/populationConfig";
 import { ORGANIZATION_PATH, ZATCA_LOGO_URL } from "../../../../branding/organization";
 import type { SourceRevisions } from "../../sourceRevisions";
@@ -454,6 +455,12 @@ export function tocSlide(items: TocItem[], num: number, total: number, variantPr
  *  renders a graceful "—" empty state when its metric lacks data
  *  (denominator-gated rates), never a misleading zero. No prior-month I/O —
  *  the deck builders stay pure over one month's input. */
+/** A2: a footnote (with a leading space) when sampled images are shown from the sample snapshot; "" otherwise. */
+function snapshotFootnote(model: ReportModel): string {
+  const count = model.rows.filter((row) => row.fromSampleSnapshot).length;
+  return count > 0 ? ` ${getLabels().report_sample_snapshot_footnote.replace("{count}", fmtNum(count))}` : "";
+}
+
 export function monthInNumbersSlide(model: ReportModel, num: number, total: number, variantPreview: boolean): string {
   const accuracy = model.summary.overallAccuracy;
   const rawTiles: Array<{ tone: string; icon: string; value: string; label: string; sub: string }> = [
@@ -530,7 +537,9 @@ export function monthInNumbersSlide(model: ReportModel, num: number, total: numb
     eyebrow: "لمحة تنفيذية",
     iconName: "chart",
     headline: "مؤشرات الشهر",
-    subhead: "أبرز مؤشرات الشهر، ثم أعلى المنافذ حجمًا — قبل الجداول التفصيلية.",
+    subhead:
+      "أبرز مؤشرات الشهر، ثم أعلى المنافذ حجمًا — قبل الجداول التفصيلية." +
+      snapshotFootnote(model),
     bodyVariants: [body, body, body, body],
     variantPreview,
     num,
@@ -650,7 +659,7 @@ const GLOSSARY_CATEGORIES: GlossaryCategory[] = [
  * (executiveKpiProfiles.ts `buildStageProfiles`).
  */
 const LEVEL_DRAW_WEIGHTS: (number | null)[] = (() => {
-  const order = ["first", "second", "third", "fourth"] as const;
+  const order = STAGE_KEY_ORDER;
   const rules = order.map((key) => DEFAULT_SAMPLING_RULES.find((r) => r.stageKey === key));
   const exactPool = rules.reduce((sum, r) => sum + (r?.method === "exact" ? r.value : 0), 0);
   return rules.map((r) => {
@@ -715,38 +724,33 @@ const RISK_LEVELS: RiskLevel[] = [
  * with zero sample rows is entirely omitted from `byStage` (the production
  * path — `sampleAlgorithmInternals.ts`'s stageAllocations loop `continue`s
  * past `stageRows.length === 0 || target <= 0` — and the no-sample fallback
- * path in `buildStageProfiles`, which groups by whatever raw labels actually
- * appear in the rows) — every level AFTER a skipped one then shifts down one
+ * path in `buildStageProfiles`, which groups by whatever canonical stage keys
+ * actually appear in the rows) — every level AFTER a skipped one then shifts down one
  * array position. `RISK_LEVELS[i]`/`LEVEL_DRAW_WEIGHTS[i]`/`STAGE_TONES[i]`
  * must therefore never be indexed by a stage's loop position; resolve
  * identity via `levelIndexForStage` instead (2026-07-28 review fix).
  */
-const CANONICAL_STAGE_ORDER = ["first", "second", "third", "fourth"] as const;
+const CANONICAL_STAGE_ORDER = STAGE_KEY_ORDER;
 
 /**
  * Resolve `stage` to its 0-based index into `RISK_LEVELS`/`LEVEL_DRAW_WEIGHTS`/
  * `STAGE_TONES` BY IDENTITY, never by the stage's position in the `stages`
  * array it came from (see `CANONICAL_STAGE_ORDER`'s doc comment above).
  *
- * Resolved from `stage.stageLabel` via the same alias-matching `getStageKey`
- * every other stage-classification path in the app uses — NOT from
- * `stage.stageKey` directly: that field is only a reliable canonical key
- * ("first"/"second"/…) on the production path (`buildStageProfiles`'s
- * `sample.stageAllocations` branch); on the no-sample fallback branch it is
- * stamped `String(index)` (a placeholder, never a real level key), which
- * would make identity resolution silently fail for the very fixtures/months
- * that most need it. `stageLabel`, by contrast, is real semantic data on
- * BOTH branches (either `STAGE_LABELS[stageKey]` or the row's own `stage`
- * text), so resolving through it — the same way `formatStageLabel` already
- * does — works uniformly everywhere.
+ * Since C1 (2026-09-28) `buildStageProfiles` stamps a canonical `stageKey`
+ * ("first"…"fourth", or "unknown") on BOTH of its branches, so identity is
+ * read straight from the key — no alias table is needed, which keeps a
+ * workspace's custom stage aliases from falling through to "unknown" here.
+ * A hand-built profile whose key is not canonical (test fixtures, the KPI
+ * test model's "L1"…) still resolves through its label with the default
+ * aliases, as before.
  *
- * Returns -1 for a label `getStageKey` can't map to one of the four levels
- * (legacy/unrecognized wording, or the raw label was never one of the four
- * to begin with). Callers MUST treat -1 as "unknown level" — render "—" and
- * a neutral tone — never fall back to a loop index, which would silently
- * reintroduce the exact bug this helper exists to fix.
+ * Returns -1 for a stage that is not one of the four levels. Callers MUST
+ * treat -1 as "unknown level" — render "—" and a neutral tone — never fall
+ * back to a loop index, which would silently reintroduce the positional bug.
  */
 function levelIndexForStage(stage: StageProfile): number {
+  if (isCanonicalStageKey(stage.stageKey)) return CANONICAL_STAGE_ORDER.indexOf(stage.stageKey);
   const key = getStageKey(stage.stageLabel);
   return CANONICAL_STAGE_ORDER.indexOf(key as (typeof CANONICAL_STAGE_ORDER)[number]);
 }
@@ -1424,7 +1428,7 @@ export function riskStagesSlide(model: ReportModel, num: number, total: number, 
     eyebrow: "القسم 1 — مجتمع الفحص",
     iconName: "gauge",
     headline: "مجتمع الصور بناءً على المخاطر",
-    subhead: "توزيع المجتمع بعد المعالجة على مستويات المخاطر الأربعة، وحصة كل مستوى من العيّنة.",
+    subhead: "توزيع المجتمع بعد المعالجة على مستويات المخاطر الأربعة، وحصة كل مستوى من العيّنة." + snapshotFootnote(model),
     bodyVariants: [body, ledgerBody, briefingBody, gridBody],
     variantPreview,
     num,
@@ -2075,13 +2079,13 @@ export function collectStagePortStats(model: ReportModel): Map<string, PortPopRo
   const byStage = new Map<string, Map<string, PortPopRow>>();
   for (const r of model.rows) {
     // Canonicalize: real rows carry the RAW Excel stage alias (e.g. "SECOND_STAG",
-    // "2", "الثاني"), while StageProfile.stageLabel is the canonical Arabic label
-    // frozen at sample-draw time. Raw-key grouping made every card lookup miss on
-    // real data (empty port tables, zero سليمة/اشتباه sums) — the synthetic
-    // preview fixture used canonical labels and masked it. formatStageLabel maps
-    // known aliases to the canonical label and echoes unknown strings unchanged,
-    // so the fallback branch (raw StageProfile labels) still matches too.
-    const stageKey = r.stage ? formatStageLabel(r.stage) : "غير محدد";
+    // "2", "الثاني"), while StageProfile.stageKey is the canonical bucket key
+    // ("first"…"fourth"/"unknown") computed the same way (C1). Keying this map
+    // by getStageKey (never by a label, which for the unmapped bucket is now
+    // the fixed "غير محدد" constant and no longer equal to any particular raw
+    // row's own unmapped text) keeps every lookup below in sync with
+    // `model.population.byStage` — including the unmapped/"unknown" bucket.
+    const stageKey = getStageKey(r.stage, model.stageMappings);
     const portName = r.portName ?? "غير محدد";
     let portMap = byStage.get(stageKey);
     if (!portMap) {
@@ -2093,9 +2097,12 @@ export function collectStagePortStats(model: ReportModel): Map<string, PortPopRo
       cur = { name: portName, total: 0, clean: 0, suspicious: 0, sampleTotal: 0, sampleClean: 0, sampleSuspicious: 0 };
       portMap.set(portName, cur);
     }
-    cur.total += 1;
-    if (r.imageResult === "اشتباه") cur.suspicious += 1;
-    else cur.clean += 1;
+    // A2: a row rebuilt from the sample snapshot is not a population image.
+    if (!r.fromSampleSnapshot) {
+      cur.total += 1;
+      if (r.imageResult === "اشتباه") cur.suspicious += 1;
+      else cur.clean += 1;
+    }
     if (r.selectedInSample) {
       cur.sampleTotal += 1;
       if (r.imageResult === "اشتباه") cur.sampleSuspicious += 1;
@@ -2212,7 +2219,7 @@ function stagePortCell(
   stage: StageProfile,
   portName: string,
 ): PortPopRow | undefined {
-  return byStage.get(formatStageLabel(stage.stageLabel))?.find((p) => p.name === portName);
+  return byStage.get(stage.stageKey)?.find((p) => p.name === portName);
 }
 
 /** Merges `collectPortStats`'s land+sea `PortPopRow[]` into one list sorted
@@ -2257,7 +2264,7 @@ function stagePortLede(
 ): { stage: StageProfile; port: PortPopRow } | null {
   let best: { stage: StageProfile; port: PortPopRow } | null = null;
   for (const stage of stages) {
-    const top = byStage.get(formatStageLabel(stage.stageLabel))?.[0];
+    const top = byStage.get(stage.stageKey)?.[0];
     if (!top) continue;
     if (best === null || top.total > best.port.total) best = { stage, port: top };
   }
@@ -2379,7 +2386,7 @@ function stagePortPopulationBriefing(
   ]);
   const rankItems: BriefingRankItem[] = stages.map((s) => {
     const idx = levelIndexForStage(s);
-    const top = byStage.get(formatStageLabel(s.stageLabel))?.[0];
+    const top = byStage.get(s.stageKey)?.[0];
     return {
       label: s.stageLabel,
       value: s.population,
@@ -2572,11 +2579,11 @@ export function stagePortPopulationSlide(
   const stages = model.population.byStage;
   const byStage = collectStagePortStats(model);
   const cards = stages
-    .map((s) => stagePortPopulationCard(s, byStage.get(formatStageLabel(s.stageLabel)) ?? []))
+    .map((s) => stagePortPopulationCard(s, byStage.get(s.stageKey) ?? []))
     .join("");
   const body = `<div class="v2-stage-port-grid">${cards}</div>`;
   const ledgerCards = stages
-    .map((s) => stagePortPopulationLedgerCard(s, byStage.get(formatStageLabel(s.stageLabel)) ?? []))
+    .map((s) => stagePortPopulationLedgerCard(s, byStage.get(s.stageKey) ?? []))
     .join("");
   const ledgerBody = `<div class="v2-sys-ledger v2-lg-stage-port-population"><div class="v2-stage-port-grid">${ledgerCards}</div></div>`;
   const briefingBody = stagePortPopulationBriefing(model, stages, byStage);
@@ -2606,11 +2613,11 @@ export function stagePortSampleSlide(
   const stages = model.population.byStage;
   const byStage = collectStagePortStats(model);
   const cards = stages
-    .map((s) => stagePortSampleCard(s, byStage.get(formatStageLabel(s.stageLabel)) ?? []))
+    .map((s) => stagePortSampleCard(s, byStage.get(s.stageKey) ?? []))
     .join("");
   const body = `<div class="v2-stage-port-grid">${cards}</div>`;
   const ledgerCards = stages
-    .map((s) => stagePortSampleLedgerCard(s, byStage.get(formatStageLabel(s.stageLabel)) ?? []))
+    .map((s) => stagePortSampleLedgerCard(s, byStage.get(s.stageKey) ?? []))
     .join("");
   const ledgerBody = `<div class="v2-sys-ledger v2-lg-stage-port-sample"><div class="v2-stage-port-grid">${ledgerCards}</div></div>`;
   const briefingBody = stagePortSampleBriefing(model, stages, byStage);

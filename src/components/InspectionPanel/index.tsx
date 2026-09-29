@@ -1,8 +1,15 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
-import { loadAnswerDraft, saveAnswerDraft } from "../../data/answers/answerDraftStore";
+import {
+  clearAnswerDraftAndLegacy,
+  isAnswerDraftPersistFailing,
+  loadAnswerDraftWithLegacyFallback,
+  saveAnswerDraftMigratingLegacy,
+  subscribeAnswerDraftHealth,
+} from "../../data/answers/answerDraftStore";
+import { compareSavedAt } from "../../data/answers/savedAt";
 import type { DistributionEntry } from "../../data/distribution/distributionTypes";
-import type { FieldAnswer, ItemAnswer } from "../../data/answers/answerTypes";
+import type { AnswerSaveOutcome, FieldAnswer, ItemAnswer } from "../../data/answers/answerTypes";
 import type { TemplateField, TemplateSchema } from "../../data/templates/templateTypes";
 import {
   getFieldsForPhase,
@@ -24,7 +31,7 @@ type Props = {
   savedAnswer: ItemAnswer | null;
   readonly: boolean;
   onClose: () => void;
-  onSave: (ans: FieldAnswer[]) => Promise<void>;
+  onSave: (ans: FieldAnswer[]) => Promise<AnswerSaveOutcome | void>;
   /** Omit when the current user cannot trigger replacements. */
   onReplace?: (entry: DistributionEntry) => void;
   /** Omit when the current user cannot transfer this sample to another user. */
@@ -66,6 +73,16 @@ type Props = {
    */
   draftKey?: string;
   /**
+   * A1 fix round 1: the key a draft for this row would have been saved under
+   * BEFORE `draftKey` was made canonical (an ad-hoc row's draft used to be
+   * keyed on the selected month rather than its own store). `null`/omitted
+   * when this row has no such divergence. Read only as a fallback when
+   * `draftKey` has nothing, and migrated off (removed) the first time a
+   * write under `draftKey` succeeds — see `answerRouting.ts`'s
+   * `legacyPanelDraftKey`.
+   */
+  legacyDraftKey?: string | null;
+  /**
    * Previous/next sample navigation (design handoff §3), rendered in the header.
    *
    * Purely a request to the caller: this panel never re-points itself. The
@@ -82,6 +99,13 @@ type Props = {
   hasNextSample?: boolean;
 };
 
+/** A submitted answer (or a completed entry) is what the panel shows -- a leftover
+ *  draft must never win over it, seeded or rendered. Showing is NOT deleting: see
+ *  the clear effect in the component. */
+function isAnswerSubmitted(entry: DistributionEntry, savedAnswer: ItemAnswer | null): boolean {
+  return entry.status === "completed" || savedAnswer?.status === "submitted";
+}
+
 export default function InspectionPanel({
   entry,
   template,
@@ -95,6 +119,7 @@ export default function InspectionPanel({
   onRequestReopen,
   onDraftDirty,
   draftKey,
+  legacyDraftKey,
   onPrevSample,
   onNextSample,
   hasPrevSample,
@@ -103,8 +128,14 @@ export default function InspectionPanel({
   const [ans, setAns] = useState<Record<string, string | number | boolean>>(() => {
     // A stored draft wins over the saved answer. It only exists when a previous
     // submit did NOT reach disk, so it is by construction the newer of the two,
-    // and it is the work that would otherwise have to be redone.
-    const draft = draftKey ? loadAnswerDraft(draftKey) : null;
+    // and it is the work that would otherwise have to be redone. Falls back to
+    // `legacyDraftKey` (A1 fix round 1) for a row whose canonical key changed
+    // under it, so a draft saved before that fix is still found.
+    // Never seeded for a submitted/completed row (the record of truth is shown).
+    // Only a SUBMITTED answer also deletes the draft -- see the effect below.
+    const draft = draftKey && !isAnswerSubmitted(entry, savedAnswer)
+      ? loadAnswerDraftWithLegacyFallback(draftKey, legacyDraftKey ?? null)
+      : null;
     if (draft) return { ...draft };
     if (!savedAnswer) return {};
     const m: Record<string, string | number | boolean> = {};
@@ -113,7 +144,26 @@ export default function InspectionPanel({
     }
     return m;
   });
+  // Delete a leftover draft ONLY once a durable submitted answer exists. A row
+  // can be "completed" with no submitted answer (supervisor mark-complete,
+  // ad-hoc import, demo data), and then the local draft is the only copy of the
+  // employee's work -- it must stay in storage (it is merely not seeded, above).
+  // Keyed on the status VALUE, not the entry/answer objects, so a refresh that
+  // hands back new object identities does not re-run it.
+  const hasSubmittedAnswer = savedAnswer?.status === "submitted";
+  useEffect(() => {
+    if (draftKey && hasSubmittedAnswer) clearAnswerDraftAndLegacy(draftKey, legacyDraftKey ?? null);
+  }, [draftKey, legacyDraftKey, hasSubmittedAnswer]);
   const [validationMsg, setValidationMsg] = useState<string | null>(null);
+  // A1: the outcome of the last submit, shown where the employee clicked — the
+  // page banner alone was easy to miss. A caller resolving `void` carries no
+  // outcome, so nothing is shown for it.
+  const [saveStatus, setSaveStatus] = useState<
+    | { kind: "saving" | "saved" }
+    | { kind: "queued"; savedAt: string | null; code: string | null }
+    | { kind: "failed"; message: string }
+    | null
+  >(null);
   // Guards the async disk write behind the primary action: without it a
   // double-click (or an impatient re-click during a slow workspace write) fires
   // onSave twice concurrently. Every other mutating action in the app tracks a
@@ -125,6 +175,10 @@ export default function InspectionPanel({
   // "request" = employee self-service reopen request (Batch B, onRequestReopen).
   const [reopenAction, setReopenAction] = useState<null | "direct" | "request">(null);
   const [reopenReason, setReopenReason] = useState("");
+  // A1: whether this browser can currently keep the local draft at all — a
+  // module-level health flag (answerDraftStore.ts) that every mounted panel
+  // subscribes to, so a refused write warns instead of failing silently.
+  const draftPersistFailing = useSyncExternalStore(subscribeAnswerDraftHealth, isAnswerDraftPersistFailing);
 
   const phases = useMemo(() => (template ? getTemplatePhases(template) : []), [template]);
 
@@ -205,7 +259,27 @@ export default function InspectionPanel({
     );
   }, [missingRequiredFields, touchedRequiredIds]);
 
-  const isSubmitted = entry.status === "completed" || savedAnswer?.status === "submitted";
+  const isSubmitted = isAnswerSubmitted(entry, savedAnswer);
+  // A reopen (submitted -> not submitted) retires a "saved" line. Only that
+  // TRANSITION, so a `saved` outcome that arrives before the parent has
+  // re-rendered with the submitted answer is not cleared early.
+  const [wasSubmitted, setWasSubmitted] = useState(isSubmitted);
+  if (wasSubmitted !== isSubmitted) {
+    setWasSubmitted(isSubmitted);
+    // Also a stored `queued`: its DERIVED saved (below) is already gone with
+    // the submitted answer, and falling back to "not saved yet" would be false.
+    if (wasSubmitted && (saveStatus?.kind === "saved" || saveStatus?.kind === "queued")) setSaveStatus(null);
+  }
+  // A queued save that the background replay has since landed shows as saved:
+  // the submitted answer in `savedAnswer` is at least as new as the queued one.
+  // A submit from a supervisor or another device can flip it too — intended,
+  // because the item really is submitted.
+  const shownStatus =
+    saveStatus?.kind === "queued" && saveStatus.savedAt &&
+    savedAnswer?.status === "submitted" &&
+    compareSavedAt(savedAnswer.lastSavedAt, saveStatus.savedAt) >= 0
+      ? ({ kind: "saved" } as const)
+      : saveStatus;
   const activePhaseIndex = phases.findIndex((phase) => phase.phaseId === safeActivePhaseId);
   const isLastPhase = activePhaseIndex < 0 || activePhaseIndex === phases.length - 1;
   const currentPhaseMissingRequiredFields = useMemo(() => {
@@ -235,9 +309,18 @@ export default function InspectionPanel({
     }
     setValidationMsg(null);
     setSubmitting(true);
+    setSaveStatus({ kind: "saving" });
     try {
-      await onSave(collect());
+      const outcome = await onSave(collect());
+      setSaveStatus(
+        !outcome ? null
+          : outcome.ok ? { kind: "saved" }
+          : outcome.queuedForRetry
+            ? { kind: "queued", savedAt: outcome.queuedSavedAt ?? null, code: outcome.errorCode ?? null }
+          : { kind: "failed", message: outcome.message }
+      );
     } catch {
+      setSaveStatus(null);
       // Defense in depth (B-XQIO032). Every current caller's `onSave`
       // (XrayReferrals' `handleSave`) already catches its own write errors
       // internally and resolves normally, reporting failure through the
@@ -325,13 +408,16 @@ export default function InspectionPanel({
                 // Written from the event handler, in the same commit as the
                 // state it mirrors — not from an effect, which would land a
                 // render late and lose the last keystroke before an unmount.
-                if (draftKey) saveAnswerDraft(draftKey, next);
+                if (draftKey) saveAnswerDraftMigratingLegacy(draftKey, legacyDraftKey ?? null, next);
                 return next;
               });
               // Event handler, not an effect: the caller learns about the draft
               // in the same commit the draft is created, with no ordering
               // subtlety and nothing to clean up on unmount.
               onDraftDirty?.();
+              // The employee is changing the answer: a failed/queued line
+              // described the previous attempt.
+              setSaveStatus((prev) => (prev?.kind === "failed" || prev?.kind === "queued" ? null : prev));
             }}
           />
         )}
@@ -401,6 +487,10 @@ export default function InspectionPanel({
         </div>
       )}
 
+      {draftKey && draftPersistFailing && !readonly && !isSubmitted && (
+        <p className="ip-validation-msg" role="alert">{getLabels().ip_msg_draft_not_persisted}</p>
+      )}
+
       {/* The footer used to require `!readonly`, which coupled two unrelated
           things: whether this reader may TYPE an answer, and whether they may
           act on the sample at all. An oversight user looking at another
@@ -410,6 +500,17 @@ export default function InspectionPanel({
           it is most useful. The primary submit control stays gated on
           `!readonly`; the secondary actions are gated on being passed at all,
           which is where their permission checks already live. */}
+      {/* Always mounted, only its text changes, so screen readers announce updates. */}
+      <p
+        className={`ip-save-status${shownStatus ? ` ip-save-status--${shownStatus.kind}` : ""}`}
+        aria-live="polite"
+      >
+        {shownStatus?.kind === "failed"
+          ? getLabels().ip_save_status_failed.replace("{message}", shownStatus.message)
+          : shownStatus?.kind === "queued" && shownStatus.code
+            ? getLabels().ip_save_status_queued_coded.replace("{code}", shownStatus.code)
+            : shownStatus ? getLabels()[`ip_save_status_${shownStatus.kind}`] : ""}
+      </p>
       {!isSubmitted && (!readonly || onReplace || onReassign) && (
         <div className="ip-footer">
           {!readonly && validationMsg && <p className="ip-validation-msg">{validationMsg}</p>}

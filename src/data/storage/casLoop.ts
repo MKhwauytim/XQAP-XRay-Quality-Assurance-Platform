@@ -4,6 +4,7 @@
 // will have stored a different token, making the false-positive revision match detectable.
 
 import { codedMessage, logCodedError, resolveErrorCode, type ErrorCode } from "./errorCodes";
+import { isCommittedUnverified, isTransientWriteError, writeStepOf } from "./transientFileErrors";
 import {
   isDeadlineExpired,
   nextRetryDelayMs,
@@ -23,7 +24,7 @@ const VERIFY_MAX_DELAY_MS = 180;
 // Terminal failure surfaced to callers when the workspace folder handle has lost
 // its grant (tab backgrounded, permission revoked, folder moved/renamed). Retrying
 // cannot recover it, so casLoop aborts immediately with this distinct message.
-const PERMISSION_LOST_ERROR =
+export const PERMISSION_LOST_ERROR =
   "فقد الوصول إلى مجلد العمل — أعد الاتصال بمساحة العمل.";
 
 function sleep(ms: number): Promise<void> {
@@ -31,7 +32,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 // Add ±50 % random jitter to avoid thundering-herd retries across machines.
-function withJitter(ms: number): number {
+export function withJitter(ms: number): number {
   return ms * (0.5 + Math.random());
 }
 
@@ -54,10 +55,90 @@ function verifyDelayMs(): number {
 // access to the workspace, whose only offered remedy (re-pick the folder) is
 // powerless against someone else's open handle. See `isLockContentionError`
 // in transientFileErrors.ts; it now falls through to the retry path below.
-function isPermissionLostError(error: unknown): boolean {
+export function isPermissionLostError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const name = (error as { name?: string }).name;
   return name === "NotAllowedError" || name === "SecurityError";
+}
+
+/**
+ * The terminal `{ ok: false, error }` for a write that failed by THROWING, with
+ * the same classification, logging and `onExhausted` observation `casLoop`
+ * applies when its attempts are exhausted. Exported so a caller that has
+ * deliberately left the retry loop (a single, non-racing append — see
+ * `performAnswerWrite`) reports an identical failure instead of a second,
+ * drifting copy of this mapping.
+ *
+ * A lost folder grant maps to the reconnect message and is not logged, exactly
+ * as inside the loop.
+ */
+export function casFailureFromCause(
+  cause: unknown,
+  options?: { context?: string; onExhausted?: (cause: unknown, code: ErrorCode) => void }
+): { ok: false; error: string } {
+  if (isPermissionLostError(cause)) return { ok: false, error: PERMISSION_LOST_ERROR };
+  // An exception beat us, so this is NOT a write conflict — report what it
+  // actually was, with a quotable code, and put the raw detail in the log.
+  const code = resolveErrorCode(cause) ?? "XQ-IO-032";
+  // Which step of safeWriteJson threw (stage / commit / post-commit read-back),
+  // when known: a refused close() swap (nothing written) and an unreadable
+  // read-back (written) need opposite responses and look identical otherwise.
+  const step = writeStepOf(cause);
+  logCodedError(
+    (options?.context ? `casLoop:exhausted(${options.context})` : "casLoop:exhausted") +
+      (step ? ` step=${step}` : ""),
+    code,
+    cause
+  );
+  try {
+    options?.onExhausted?.(cause, code);
+  } catch {
+    // The observer's own failure is not this write's problem — see the
+    // `onExhausted` option's doc comment on `casLoop`.
+  }
+  return { ok: false, error: codedMessage(code) };
+}
+
+/**
+ * The in-attempt token read-back, aware of a `safeWriteJson` that reported
+ * COMMITTED-BUT-UNVERIFIED (E3b).
+ *
+ * `written` is whatever `safeWriteJson` resolved to. On the healthy path
+ * (`undefined`) this is exactly `read()` + `isMine()`, errors propagating as
+ * before. When the commit landed but safeWrite's own read-back hit a stale or
+ * transient error, the caller's token read is the one verification we make —
+ * ONCE, with no waiting:
+ *   - it returns our token   -> "mine" (verified);
+ *   - it returns someone else -> "not-mine" (a real lost race; retry);
+ *   - it throws a transient error -> "unconfirmed": logged as
+ *     `casLoop:verify-inconclusive`. The write very likely landed (byte-exact
+ *     `.tmp` verify + a resolved close()) but there is no positive evidence.
+ *     The CALLER decides: a rebuildable cache (the feedback threads index)
+ *     accepts it; DURABLE content (feedback replies, decision events) retries,
+ *     and is made idempotent by its own id so the retry either finds its write
+ *     already present (writes nothing) or writes it (no loss, no duplicate).
+ * A non-transient error still propagates.
+ */
+export async function readBackOwnWrite<V>(
+  written: unknown,
+  read: () => Promise<V>,
+  isMine: (value: V) => boolean,
+  context?: string
+): Promise<"mine" | "not-mine" | "unconfirmed"> {
+  if (!isCommittedUnverified(written)) {
+    return isMine(await read()) ? "mine" : "not-mine";
+  }
+  try {
+    return isMine(await read()) ? "mine" : "not-mine";
+  } catch (error) {
+    if (!isTransientWriteError(error)) throw error;
+    logCodedError(
+      context ? `casLoop:verify-inconclusive(${context})` : "casLoop:verify-inconclusive",
+      resolveErrorCode(error) ?? "XQ-IO-032",
+      error
+    );
+    return "unconfirmed";
+  }
 }
 
 /**
@@ -235,21 +316,7 @@ export async function casLoop<T>(
   }
 
   if (lastCause !== undefined) {
-    // An exception beat us, so this is NOT a write conflict — report what it
-    // actually was, with a quotable code, and put the raw detail in the log.
-    const code = resolveErrorCode(lastCause) ?? "XQ-IO-032";
-    logCodedError(
-      options?.context ? `casLoop:exhausted(${options.context})` : "casLoop:exhausted",
-      code,
-      lastCause
-    );
-    try {
-      options?.onExhausted?.(lastCause, code);
-    } catch {
-      // The observer's own failure is not this write's problem — see the
-      // option's own doc comment above.
-    }
-    return { ok: false, error: codedMessage(code) };
+    return casFailureFromCause(lastCause, options);
   }
   // No exception: every attempt lost the revision race. The caller's Arabic
   // conflict sentence is the right answer here and now survives intact.
