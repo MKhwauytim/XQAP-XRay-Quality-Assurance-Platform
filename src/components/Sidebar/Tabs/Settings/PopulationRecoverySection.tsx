@@ -20,7 +20,12 @@ import {
 } from "../../../../data/backup/selectiveRestore";
 import { broadcastDataRefresh } from "../../../../data/workspace/dataRefreshSignal";
 import { recordAction } from "../../../../data/audit/actionLog";
-import { describeDerivedWarning, describeRestoreFailure } from "../../../../data/backup/restoreMessages";
+import {
+  describeDerivedWarning,
+  describeIntegrity,
+  integrityNeedsAttention,
+  withRollbackNote,
+} from "../../../../data/backup/restoreMessages";
 import { formatDateTime, formatNumber } from "../../../../utils/formatting";
 import { ConfirmDialog } from "../../../ConfirmDialog/ConfirmDialog";
 import "./TemplateRepairSection.css";
@@ -173,10 +178,15 @@ export function PopulationRecoverySection() {
         folder: backupFolderName,
         rollback: outcome.rollbackFolderName,
       });
-      if (outcome.derivedWarnings.length === 0) return { kind: "ok", text: restored };
+      const attention = outcome.derivedWarnings.length > 0 || integrityNeedsAttention(outcome.integrity);
+      if (!attention) return { kind: "ok", text: restored };
       return {
         kind: "info",
-        text: [restored, ...outcome.derivedWarnings.map((warning) => describeDerivedWarning(L, warning))].join(" "),
+        text: [
+          restored,
+          ...outcome.integrity.map((entry) => describeIntegrity(L, entry)),
+          ...outcome.derivedWarnings.map((warning) => describeDerivedWarning(L, warning)),
+        ].join(" "),
       };
     }
     if (outcome.reason === "plan-rejected" && outcome.plan.blocked.length > 0) {
@@ -190,7 +200,7 @@ export function PopulationRecoverySection() {
       broadcastDataRefresh("manual");
       return {
         kind: "error",
-        text: describeRestoreFailure(L, fill(L.population_recovery_failed, { error: outcome.error }), outcome.rollbackFolderName),
+        text: withRollbackNote(L, fill(L.population_recovery_failed, { error: outcome.error }), outcome.rollbackFolderName),
       };
     }
     const detail = outcome.reason === "restore-failed" ? outcome.error : L.population_recovery_plan_rejected;

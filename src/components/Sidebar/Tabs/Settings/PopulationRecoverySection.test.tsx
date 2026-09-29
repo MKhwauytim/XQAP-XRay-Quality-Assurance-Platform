@@ -435,4 +435,30 @@ describe("PopulationRecoverySection", () => {
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("rb-4"));
     expect(vi.mocked(broadcastDataRefresh)).toHaveBeenCalledWith("manual");
   });
+
+  it("shows integrity orphans of a backup restore in the warning style", async () => {
+    recovery.list.mockResolvedValue([]);
+    backups.list.mockResolvedValue([BACKUP_ROW]);
+    backups.restore.mockResolvedValue({
+      ok: true, restoredFiles: ["x"], rollbackFolderName: "rb-5", derivedWarnings: [],
+      integrity: [{ month: "5-may-2026", error: null, result: { answersOrphans: ["A"], approvalsOrphans: [], sampleOrphans: [], distributionOrphans: [], clean: false } }],
+    });
+
+    await restoreTheBackupRow();
+
+    await waitFor(() => expect(screen.getByRole("status").className).toContain("template-repair-notice-info"));
+    expect(screen.getByRole("status")).toHaveTextContent("1");
+  });
+
+  it("does not repeat the failure prefix when a failed restore names the rollback folder", async () => {
+    recovery.list.mockResolvedValue([]);
+    backups.list.mockResolvedValue([BACKUP_ROW]);
+    backups.restore.mockResolvedValue({ ok: false, reason: "restore-failed", error: "boom", rollbackFolderName: "rb-6" });
+
+    await restoreTheBackupRow();
+
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("rb-6"));
+    const text = screen.getByRole("status").textContent ?? "";
+    expect(text.split(DEFAULT_LABELS.archive_restore_failed_prefix).length - 1).toBe(0);
+  });
 });

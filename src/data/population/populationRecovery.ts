@@ -289,8 +289,25 @@ export async function syncManifestFromBackupPopulation(
   restoredRowCount: number,
   backupManifest: Partial<MonthManifestData> | null
 ): Promise<void> {
-  await withResourceLock(manifestLockKey(monthFolderName), () =>
-    updateManifestFields(directoryHandle, monthFolderName, () => {
+  await withResourceLock(manifestLockKey(monthFolderName), async () => {
+    // A month with NO live manifest (its folder was deleted) has no lifecycle to
+    // regress: the backup's manifest is the only description of it, so it is
+    // written whole (never the backup's CAS bookkeeping). An unreadable/corrupt
+    // live manifest is NOT "absent" and falls through to the field sync, which reports it.
+    if (backupManifest) {
+      const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
+      const live = await safeReadJson<MonthManifestData>(monthDir, "month.manifest.json");
+      if (!live.ok && live.reason === "missing") {
+        const { _writeToken: _dropped, ...restorable } = backupManifest;
+        await safeWriteJson(monthDir, "month.manifest.json", {
+          ...restorable,
+          totalProcessedRows: restoredRowCount,
+          revision: 1,
+        });
+        return;
+      }
+    }
+    await updateManifestFields(directoryHandle, monthFolderName, () => {
       const changes: Partial<MonthManifestData> = { totalProcessedRows: restoredRowCount };
       if (backupManifest) {
         for (const field of POPULATION_DESCRIBING_MANIFEST_FIELDS) {
@@ -300,8 +317,8 @@ export async function syncManifestFromBackupPopulation(
         changes.processingFingerprint = null;
       }
       return changes;
-    })
-  );
+    });
+  });
 }
 
 export async function restorePopulationCandidate(

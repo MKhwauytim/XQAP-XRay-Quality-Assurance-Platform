@@ -4,9 +4,11 @@
  */
 import type { Labels } from "../labels/labelsStore";
 import { formatMonthFolderShortLabel } from "../population/monthFolder";
+import { formatNumber } from "../../utils/formatting";
 import type { SelectiveRestoreDerivedWarning, SelectiveRestoreIntegrity } from "./selectiveRestore";
 
-function fill(template: string, vars: Record<string, string>): string {
+/** {var}-placeholder interpolation for label templates (the ONE copy; the Archive tab re-exports it). */
+export function fillTemplate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (_match, key: string) => vars[key] ?? `{${key}}`);
 }
 
@@ -18,7 +20,7 @@ export function describeDerivedWarning(labels: Labels, warning: SelectiveRestore
     aggregate: labels.archive_restore_derived_step_aggregate,
     "distribution-cache": labels.archive_restore_derived_step_distribution,
   };
-  return fill(labels.archive_restore_derived_warning, {
+  return fillTemplate(labels.archive_restore_derived_warning, {
     step: steps[warning.step],
     month: formatMonthFolderShortLabel(warning.month),
     error: warning.error,
@@ -30,10 +32,23 @@ export function integrityNeedsAttention(integrity: readonly SelectiveRestoreInte
   return integrity.some((entry) => entry.result === null || !entry.result.clean);
 }
 
-/** A failure text that names the rollback folder when the restore had already started. */
-export function describeRestoreFailure(labels: Labels, reason: string, rollbackFolderName?: string): string {
-  const text = `${labels.archive_restore_failed_prefix}: ${reason}`;
+/** Appends the "restore had started, roll back from X" note to a failure text. */
+export function withRollbackNote(labels: Labels, text: string, rollbackFolderName?: string): string {
   return rollbackFolderName
-    ? `${text} ${fill(labels.archive_restore_failed_rollback, { rollback: rollbackFolderName })}`
+    ? `${text} ${fillTemplate(labels.archive_restore_failed_rollback, { rollback: rollbackFolderName })}`
     : text;
+}
+
+/** The Archive failure text (prefix + reason), naming the rollback folder when the restore had started. */
+export function describeRestoreFailure(labels: Labels, reason: string, rollbackFolderName?: string): string {
+  return withRollbackNote(labels, `${labels.archive_restore_failed_prefix}: ${reason}`, rollbackFolderName);
+}
+
+export function describeIntegrity(labels: Labels, entry: SelectiveRestoreIntegrity): string {
+  const month = formatMonthFolderShortLabel(entry.month);
+  if (!entry.result) return fillTemplate(labels.archive_restore_integrity_failed, { month, error: entry.error ?? "" });
+  if (entry.result.clean) return fillTemplate(labels.archive_restore_integrity_clean, { month });
+  const { answersOrphans, approvalsOrphans, sampleOrphans, distributionOrphans } = entry.result;
+  const count = answersOrphans.length + approvalsOrphans.length + sampleOrphans.length + distributionOrphans.length;
+  return fillTemplate(labels.archive_restore_integrity_orphans, { month, count: formatNumber(count) });
 }
