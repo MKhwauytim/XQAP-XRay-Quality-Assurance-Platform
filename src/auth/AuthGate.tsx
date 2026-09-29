@@ -173,7 +173,12 @@ export default function AuthGate({ children }: AuthGateProps) {
     readPreviewRole()
   );
 
-  const [failedAttempts, setFailedAttempts] = useState(0);
+  // Ref-backed (not state): overlapping verifies must each see the true count,
+  // not the stale value captured in their own render's closure (E7).
+  const failedAttemptsRef = useRef(0);
+  // True while a passcode verify is running; a second submit is ignored.
+  const verifyInFlightRef = useRef(false);
+  const [isVerifying, setIsVerifying] = useState(false);
   const [lockoutUntil, setLockoutUntil] = useState<number | null>(null);
   const [lockoutSecondsLeft, setLockoutSecondsLeft] = useState(0);
 
@@ -412,7 +417,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     setMessage("");
     setMessageType("");
     setLogoutNotice("");
-    setFailedAttempts(0);
+    failedAttemptsRef.current = 0;
     setLockoutUntil(null);
   }, [clearWorkspace]);
 
@@ -500,9 +505,8 @@ export default function AuthGate({ children }: AuthGateProps) {
   }
 
   function registerFailedAttempt(): void {
-    const next = failedAttempts + 1;
-    setFailedAttempts(next);
-    if (next >= LOCKOUT_AFTER_ATTEMPTS) {
+    failedAttemptsRef.current += 1;
+    if (failedAttemptsRef.current >= LOCKOUT_AFTER_ATTEMPTS) {
       setLockoutUntil(Date.now() + LOCKOUT_DURATION_MS);
     }
   }
@@ -513,11 +517,29 @@ export default function AuthGate({ children }: AuthGateProps) {
     setLogoutNotice("");
   }
 
+  // Runs one passcode verification at a time. A submit that arrives while
+  // another is still running (key-repeat Enter, fast clicks) is dropped, so a
+  // wrong guess can never be verified without being counted.
+  async function runGuardedLogin(attempt: () => Promise<void>): Promise<void> {
+    if (verifyInFlightRef.current) return;
+    verifyInFlightRef.current = true;
+    setIsVerifying(true);
+    try {
+      await attempt();
+    } finally {
+      verifyInFlightRef.current = false;
+      setIsVerifying(false);
+    }
+  }
+
   async function loginAsEmployee(
     event: FormEvent<HTMLFormElement>
   ): Promise<void> {
     event.preventDefault();
+    await runGuardedLogin(() => performEmployeeLogin());
+  }
 
+  async function performEmployeeLogin(): Promise<void> {
     if (lockoutUntil !== null && Date.now() < lockoutUntil) return;
 
     const normalizedInput = normalizeUsername(selectedUsername);
@@ -551,7 +573,7 @@ export default function AuthGate({ children }: AuthGateProps) {
       applySession(createSession(ADMIN_ROLE, BOOTSTRAP_ADMIN_USERNAME));
       clearLastLoginUsername();
       setPassword("");
-      setFailedAttempts(0);
+      failedAttemptsRef.current = 0;
       setLockoutUntil(null);
       showMessage(getLabels().auth_msg_login_success, "ok");
       return;
@@ -616,12 +638,16 @@ export default function AuthGate({ children }: AuthGateProps) {
     writeLastLoginUsername(user.username);
 
     setPassword("");
-    setFailedAttempts(0);
+    failedAttemptsRef.current = 0;
     setLockoutUntil(null);
     showMessage(getLabels().auth_msg_login_success, "ok");
   }
 
   async function loginAsBootstrapAdmin(): Promise<void> {
+    await runGuardedLogin(() => performBootstrapAdminLogin());
+  }
+
+  async function performBootstrapAdminLogin(): Promise<void> {
     // Same secret as loginAsEmployee's bootstrap-admin branch, so it shares
     // that path's lockout: unguarded, this hidden modal was a second way to
     // brute-force the admin passcode with no attempt limit at all.
@@ -646,7 +672,7 @@ export default function AuthGate({ children }: AuthGateProps) {
 
     setAdminPasscode("");
     setIsAdminModalOpen(false);
-    setFailedAttempts(0);
+    failedAttemptsRef.current = 0;
     setLockoutUntil(null);
     showMessage("", "");
   }
@@ -824,6 +850,7 @@ export default function AuthGate({ children }: AuthGateProps) {
                     </span>
                     <input
                       id="authUsername"
+                      disabled={isVerifying}
                       type="text"
                       required
                       autoComplete="username"
@@ -847,6 +874,7 @@ export default function AuthGate({ children }: AuthGateProps) {
                     </span>
                     <input
                       id="authPassword"
+                      disabled={isVerifying}
                       type={isPasswordVisible ? "text" : "password"}
                       required
                       autoComplete="current-password"
@@ -879,7 +907,7 @@ export default function AuthGate({ children }: AuthGateProps) {
                 <button
                   className="auth-submit"
                   type="submit"
-                  disabled={lockoutUntil !== null && lockoutSecondsLeft > 0}
+                  disabled={isVerifying || (lockoutUntil !== null && lockoutSecondsLeft > 0)}
                 >
                   <span>
                     {lockoutUntil !== null && lockoutSecondsLeft > 0
@@ -952,7 +980,7 @@ export default function AuthGate({ children }: AuthGateProps) {
               onChange={(event) => setAdminPasscode(event.target.value)}
               onKeyDown={handleAdminModalKeyDown}
               placeholder={labels.auth_admin_passcode_placeholder}
-              disabled={lockoutUntil !== null && lockoutSecondsLeft > 0}
+              disabled={isVerifying || (lockoutUntil !== null && lockoutSecondsLeft > 0)}
             />
 
             <div className="auth-modal-actions">
@@ -967,7 +995,7 @@ export default function AuthGate({ children }: AuthGateProps) {
               <button
                 type="button"
                 onClick={() => void loginAsBootstrapAdmin()}
-                disabled={lockoutUntil !== null && lockoutSecondsLeft > 0}
+                disabled={isVerifying || (lockoutUntil !== null && lockoutSecondsLeft > 0)}
               >
                 {lockoutUntil !== null && lockoutSecondsLeft > 0
                   ? labels.auth_lockout_wait.replace("{seconds}", String(lockoutSecondsLeft))
