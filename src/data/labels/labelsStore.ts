@@ -292,6 +292,14 @@ export const DEFAULT_LABELS = {
   ew_case_filter_adhoc:            "حالات استثنائية",
   ew_case_filter_empty:            "لا توجد حالات ضمن هذه التصفية. اختر «جميع الحالات» للعودة إلى القائمة كاملة.",
 
+  // ── CertScan chip (C2) — shared by the employee queue and Population Browse.
+  // "CertScan" is the processed row's certScanStatus: its port is flagged as a
+  // CertScan port OR its id matched the pasted CertScan device list.
+  certscan_filter_aria:            "تصفية حسب CertScan",
+  certscan_filter_any:             "كل الصور",
+  certscan_filter_certscan:        "CertScan",
+  certscan_filter_noncertscan:     "غير CertScan",
+
   /** Appended to the «متابعة العمل» strip title while a case chip other than «جميع الحالات» is active. */
   ew_stats_case_suffix:            " — {filter}",
   ew_stats_case_risk_targeted:     "الحالات المستهدفة",

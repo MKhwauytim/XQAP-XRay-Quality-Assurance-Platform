@@ -27,7 +27,9 @@ import InspectionPanel from "../../../../../../components/InspectionPanel";
 import Pagination from "../../../../../../components/Pagination/Pagination";
 import { clampPage, pageSlice } from "../../../../../../utils/paginationUtils";
 import { useLabels, type Labels } from "../../../../../../data/labels/useLabels";
-import { CASE_FILTERS, type CaseFilter, type CaseFilterCounts } from "./caseFilter";
+import { CASE_FILTERS, type CaseFilter, type CaseFilterCounts, type CaseFilterState } from "./caseFilter";
+import CertScanFilterChips from "../../../../../CertScanFilterChips/CertScanFilterChips";
+import { certScanStatusFilterProps } from "../certScanColumn";
 import { displayXrayImageId } from "../../../../../../data/adhocImport/adhocImportEmployeeView";
 import { formatStageLabel } from "../../../../../../data/population/stageHelpers";
 import type { ReplacementIndexRow } from "../../../../../../data/population/replacementIndexTypes";
@@ -63,7 +65,7 @@ export function buildXrayColumns(L: Labels): DataTableCol<DistributionEntry>[] {
   { id: "submittedAt",            label: L.col_expert_observation_date,   widthFr: 13, isDate: true, accessor: () => null },
   { id: "xrayLevelOneResult",     label: L.col_xray_l1_result,            widthFr: 8,  accessor: (e) => e.row.xrayLevelOneResult },
   { id: "xrayLevelTwoResult",     label: L.col_xray_l2_result,            widthFr: 8,  accessor: (e) => e.row.xrayLevelTwoResult },
-  { id: "certScanStatus",         label: L.col_certscan_status,           widthFr: 9,  accessor: (e) => e.row.certScanStatus },
+  { id: "certScanStatus",         label: L.col_certscan_status,           widthFr: 9,  ...certScanStatusFilterProps(L), accessor: (e) => e.row.certScanStatus },
   { id: "declarationNumber",      label: L.col_declaration_number,        widthFr: 11, accessor: (e) => e.row.declarationNumber },
   { id: "declarationDate",        label: L.col_declaration_date,          widthFr: 11, isDate: true,        accessor: (e) => e.row.declarationDate },
   { id: "chassisNumber",          label: L.col_chassis_number,            widthFr: 11, accessor: (e) => e.row.chassisNumber },
@@ -1255,6 +1257,28 @@ export function CaseFilterSwitcher({
 }
 
 /**
+ * The queue's two chip groups side by side (C2): the case chips, then the
+ * CertScan chips, which filter what the case chip already narrowed. Takes the
+ * whole `useCaseFilter` state so the call site in XrayReferrals.tsx stays one
+ * line (that component is at its max-lines-per-function budget).
+ */
+export function CaseFilterBar({ state }: { state: CaseFilterState }) {
+  return (
+    <>
+      <CaseFilterSwitcher value={state.value} counts={state.counts} onChange={state.setValue} />
+      <CertScanFilterChips
+        value={state.certScan}
+        counts={state.certScanCounts}
+        onChange={state.setCertScan}
+        groupClassName="ew-view-switcher ew-case-filter"
+        chipClassName="ew-view-seg"
+        countClassName="ew-case-filter-count"
+      />
+    </>
+  );
+}
+
+/**
  * The queue workspace shell: the stats strip, the two status notices, and the
  * table itself.
  *
@@ -1272,6 +1296,7 @@ export function ReferralWorkspaceShell({
   scopeEmployeeName,
   showingRetainedDraft,
   caseFilterValue,
+  caseFilterEmpty,
   caseFilterCounts,
   labels: L,
   table,
@@ -1283,6 +1308,8 @@ export function ReferralWorkspaceShell({
   scopeEmployeeName: string;
   showingRetainedDraft: boolean;
   caseFilterValue: CaseFilter;
+  /** True when the case chip AND the CertScan chip together leave no rows (C2). */
+  caseFilterEmpty: boolean;
   caseFilterCounts: CaseFilterCounts;
   labels: Labels;
   table: React.ReactNode;
@@ -1304,7 +1331,7 @@ export function ReferralWorkspaceShell({
           and its own "no results" row only fires when rows exist and the COLUMN
           filters emptied them — so without this the reader would get a bare
           header and no explanation. */}
-      {caseFilterCounts[caseFilterValue] === 0 && caseFilterCounts.all > 0 && (
+      {caseFilterEmpty && caseFilterCounts.all > 0 && (
         <p className="ew-case-filter-empty" role="status">{L.ew_case_filter_empty}</p>
       )}
       {table}

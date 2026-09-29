@@ -94,7 +94,7 @@ import type { Labels } from "../../../../../data/labels/labelsStore";
 import { formatStageLabel } from "../../../../../data/population/stageHelpers";
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import {
-  CaseFilterSwitcher,
+  CaseFilterBar,
   QUEUE_SCOPE_ALL,
   buildQueueScopeOptions,
   QueueToolbar,
@@ -1839,7 +1839,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               // Neither can bounce a reviewer off an open row: resetToken moves
               // PAGING only, never the selection (`expandedKey`/`selEntryId`
               // are untouched).
-              resetToken={`${selMonth}::${scopeEmployee}::${caseFilter.value}`}
+              resetToken={`${selMonth}::${scopeEmployee}::${caseFilter.value}::${caseFilter.certScan}`}
               exportFileName={`صور الأشعة المحالة - ${selMonth || "كل الأشهر"}.xlsx`}
               expandedKey={selEntryId}
               onRowClick={(e) => selectEntry(e.xrayImageId)}
@@ -1847,7 +1847,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               // Every role that can open this page sees the case chips (an
               // ordinary employee is their primary user); the scope picker
               // stays oversight-only, as before.
-              toolbarStart={<CaseFilterSwitcher value={caseFilter.value} counts={caseFilter.counts} onChange={caseFilter.setValue} />}
+              toolbarStart={<CaseFilterBar state={caseFilter} />}
               toolbarEndExtra={
                 <XrQueueToolbarExtras
                   canSeeAll={canSeeAll}
@@ -1961,6 +1961,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
             scopeEmployeeName={pickedScopeName}
             showingRetainedDraft={showingRetainedDraft}
             caseFilterValue={caseFilter.value}
+            caseFilterEmpty={caseFilter.entries.length === 0}
             caseFilterCounts={caseFilter.counts}
             labels={L}
             table={tableEl}
