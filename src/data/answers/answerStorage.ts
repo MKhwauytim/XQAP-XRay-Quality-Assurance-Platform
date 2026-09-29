@@ -932,6 +932,12 @@ async function performAnswerWrite(
       errorCode: code,
     });
   };
+  // The pending queue replays as an `item-saved` of the candidate, so it is
+  // only correct for a FULL answer save. For a reopen or quality note it would
+  // re-assert the previous (submitted) state with a fresh lastSavedAt — undoing
+  // the reopen — and never replay the note; those failures are reported to the
+  // caller instead. Decided from the event type the builder produced.
+  let pendingEligible = false;
   const candidateFor = (event: AnswerEvent, previous: ItemAnswer | undefined): ItemAnswer => ({
     xrayImageId: event.xrayImageId ?? xrayImageId,
     templateId: event.templateId ?? previous?.templateId ?? "",
@@ -976,6 +982,7 @@ async function performAnswerWrite(
     const event: AnswerEvent = { ...decision.event, eventId, eventAt, answeredBy: username };
     const batch = seedEvent ? [seedEvent, event] : [event];
     mirrorCandidate = candidateFor(event, previous);
+    pendingEligible = event.eventType === "item-saved";
     await appendAnswerEventSegment(mainDir, batch, writer, segmentConfig, {
       deadline,
       listedSegmentNames: listedAnswerSegmentNames(directoryHandle, monthFolderName),
@@ -993,6 +1000,7 @@ async function performAnswerWrite(
         const fallback = build({ previous: undefined });
         if (!("skip" in fallback)) {
           mirrorCandidate = candidateFor({ ...fallback.event, eventId, eventAt, answeredBy: username }, undefined);
+          pendingEligible = fallback.event.eventType === "item-saved";
         }
       } catch {
         // `build` is pure over the caller's own data; if it throws there is nothing to queue.
@@ -1011,7 +1019,7 @@ async function performAnswerWrite(
       // never costs an extra read of the file it is backing up.
       // `mirrorAnswerLocally` never throws (see its own doc comment).
       if (mirrorCandidate) await mirrorAnswerLocally(monthFolderName, username, mirrorCandidate);
-    } else if (mirrorCandidate) {
+    } else if (mirrorCandidate && pendingEligible) {
       // The append never reached the shared folder (share down, permission
       // lost, exhausted retries) — queue it in the local backup as PENDING
       // rather than dropping it, so the app-level `PendingAnswerReplayRunner`
