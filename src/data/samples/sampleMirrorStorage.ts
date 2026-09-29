@@ -577,15 +577,22 @@ export async function loadEmployeeSampleMirror(
  * {@link getUserWorkspaceFootprint}'s revision cross-check: fold the real
  * event log (via the same derivation the rest of the app trusts) rather than
  * serve the mirror's out-of-date `entries`. Best-effort — a month whose
- * sample rows cannot be loaded (or that has no rows at all) has nothing
- * authoritative to fold against, so it falls back to 0 pending rather than
- * throwing and aborting the whole footprint scan; any read failure is logged
- * rather than silently swallowed with no trace.
+ * sample master that is genuinely ABSENT (read successfully as absent, or with
+ * no rows) has nothing to fold against and counts 0. A THROWN read is never
+ * read as zero: the guard treats 0 as "safe to delete", which is irreversible.
+ * The failure is logged and the count falls back to the mirror's own pending
+ * entries (a DERIVE_VERSION bump changes quotas, not statuses); with no mirror
+ * to fall back on the error propagates so the guard refuses to delete.
  */
+function countPendingEntries(entries: ReadonlyArray<{ status: string }>): number {
+  return entries.filter((e) => e.status === "pending" || e.status === "replacement-requested").length;
+}
+
 async function staleMirrorPendingCount(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
-  username: string
+  username: string,
+  mirror: Pick<EmployeeSamplesFile, "entries"> | null
 ): Promise<number> {
   try {
     const sample = await loadSampleMaster(directoryHandle, monthFolderName);
@@ -599,7 +606,8 @@ async function staleMirrorPendingCount(
     ).length;
   } catch (error) {
     logError("sampleMirror:stale-mirror-fallback", error);
-    return 0;
+    if (!mirror) throw error;
+    return countPendingEntries(mirror.entries);
   }
 }
 
@@ -718,7 +726,7 @@ export async function getUserWorkspaceFootprint(
 
       let pendingCount: number;
       if (mirrorIsStale) {
-        pendingCount = await staleMirrorPendingCount(directoryHandle, monthFolderName, username);
+        pendingCount = await staleMirrorPendingCount(directoryHandle, monthFolderName, username, mirror);
       } else {
         pendingCount = (mirror?.entries ?? []).filter(
           (e) => e.status === "pending" || e.status === "replacement-requested"

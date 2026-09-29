@@ -29,7 +29,8 @@ import {
 } from "../distribution/distributionStorage";
 import { buildAssignEvent } from "../distribution/distributionLog";
 import { invalidateMonthLockCache } from "../population/monthLock";
-import { getPopulationMonthDir, getSampleMainDir } from "../workspace/workspacePaths";
+import { safeWriteJson } from "../storage/safeWrite";
+import { getPopulationMonthDir, getSampleEmployeeDir, getSampleMainDir } from "../workspace/workspacePaths";
 import type { DistributionCurrentData } from "../distribution/distributionTypes";
 import {
   getUserWorkspaceFootprint,
@@ -244,5 +245,30 @@ describe("mirror stamping and legacy mirrors", () => {
     const legacy = { monthFolderName: MONTH, username: EMP, updatedAt: "", sourceLogRevision: 9, eventSetId: "x", entries: [] };
     const root = createMemoryDirectory("root") as DirectoryHandleLike;
     expect(await isMirrorTrustedForEvents(root, MONTH, legacy as never, 1)).toBe(false);
+  });
+});
+
+describe("the delete-user guard never reads a failed recount as zero pending", () => {
+  /** A month whose mirror is stale by DERIVE_VERSION (v4) and lists 2 pending entries. */
+  async function rootWithV4Mirror(): Promise<DirectoryHandleLike> {
+    const root = await seededRoot();
+    const mirror = (await loadEmployeeSampleMirror(root, MONTH, EMP))!;
+    const dir = await getSampleEmployeeDir(root, MONTH, true);
+    const pending = (id: string) => ({ ...mirror.entries[0]!, xrayImageId: id, status: "pending" as const });
+    await safeWriteJson(dir, "emp1.samples.json", {
+      ...mirror,
+      deriveVersion: 4,
+      entries: [pending("A1"), pending("A2")],
+    });
+    return root;
+  }
+
+  it("a throwing sample read falls back to the mirror's own pending count (2), not 0", async () => {
+    const root = await rootWithV4Mirror();
+    setSimulatedFaults(root, [
+      { operation: "getFile", name: "sample.master.json", errorName: "InvalidStateError", times: Number.POSITIVE_INFINITY },
+    ]);
+    const footprint = await getUserWorkspaceFootprint(root, EMP);
+    expect(footprint.activeAssignments[0]?.pendingCount).toBe(2);
   });
 });
