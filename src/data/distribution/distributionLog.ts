@@ -13,7 +13,7 @@ import {
   summarizeDistribution
 } from "./distributionDerivation";
 
-export { computeDaysRemainingForDeadline } from "./distributionDerivation";
+export { computeDaysRemainingForDeadline, computeWorkingDaysForDeadline } from "./distributionDerivation";
 
 /**
  * Version of the derivation algorithm in deriveCurrentDistribution. Bump when
@@ -36,8 +36,14 @@ export { computeDaysRemainingForDeadline } from "./distributionDerivation";
  *   rejected cache. The folded ENTRIES a v4 refold produces are identical to
  *   what v3 produced from the same events and rows — no historical derivation
  *   is being reinterpreted, only re-validated.
+ * - v5: (C3, 2026-09-28) `quotas[].daysRemainingAtAssignment` counts WORKING
+ *   days (Sunday–Thursday) from the employee's first assignment through the
+ *   deadline, inclusive, instead of calendar days, and `dailyQuota` follows
+ *   from it. Persisted derived output changes, so every v4 snapshot and
+ *   checkpoint refolds once, and employee mirrors pick the new quota up
+ *   through their deriveVersion guard. Folded ENTRIES are unchanged.
  */
-export const DERIVE_VERSION = 4;
+export const DERIVE_VERSION = 5;
 
 /**
  * Identity of the `sampleRows` a derivation was folded against (v4).

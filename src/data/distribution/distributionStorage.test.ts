@@ -641,7 +641,7 @@ describe("fold-checkpoint persistence (perf: O(new events) instead of O(all even
     // The constant is the versioned contract every workspace's stored caches
     // are stamped against, so pin it: changing it is a deliberate, documented
     // act (one refold per month per workspace on first load), never a drive-by.
-    expect(DERIVE_VERSION).toBe(4);
+    expect(DERIVE_VERSION).toBe(5);
   });
 });
 

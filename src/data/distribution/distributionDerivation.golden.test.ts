@@ -573,9 +573,12 @@ describe("deriveEmployeeQuotasWithFacts — golden master", () => {
     const entries = entriesFor(events);
     const { quotas, facts } = deriveEmployeeQuotasWithFacts(events, entries, new Set(), MONTH);
 
-    // Deadline for May 2026 = 28 May 23:59:59 (3 days before month end).
-    // emp-a first assigned 1 May 00:00Z → ceil(27d 23:59:59) = 28 days.
-    // emp-b first assigned 20 May 00:00Z → ceil(8d 23:59:59)  = 9 days.
+    // Deadline for May 2026 = Thursday 28 May (3 days before month end).
+    // CHANGED (C3, DERIVE_VERSION 5): WORKING days only — Sunday–Thursday,
+    // both ends inclusive, local calendar day (UTC here; KSA's UTC+3 keeps the
+    // same calendar day for these 00:00Z instants).
+    // emp-a first assigned Fri 1 May → Sun 3 … Thu 28 May = 20 working days.
+    // emp-b first assigned Wed 20 May → 20, 21, 24, 25, 26, 27, 28 = 7.
     expect(quotas).toEqual({
       "emp-a": {
         username: "emp-a",
@@ -583,14 +586,14 @@ describe("deriveEmployeeQuotasWithFacts — golden master", () => {
         // SURPRISE: the event's own frozen dailyQuota (999) is ignored whenever
         // the month folder name parses — it is recomputed from scratch here.
         dailyQuota: 1,
-        daysRemainingAtAssignment: 28,
+        daysRemainingAtAssignment: 20,
         assignedAt: "2026-05-01T00:00:00.000Z",
       },
       "emp-b": {
         username: "emp-b",
         sampleCount: 1,
         dailyQuota: 1,
-        daysRemainingAtAssignment: 9,
+        daysRemainingAtAssignment: 7,
         assignedAt: "2026-05-20T00:00:00.000Z",
       },
     });
@@ -611,7 +614,7 @@ describe("deriveEmployeeQuotasWithFacts — golden master", () => {
       evt(`a${i}`, "assigned", `img-${i}`, "emp-a", "2026-05-01T00:00:00.000Z")
     );
     const { quotas } = deriveEmployeeQuotasWithFacts(events, entriesFor(events), new Set(), MONTH);
-    // ceil(57 / 28) === 3
+    // ceil(57 / 20) === 3 (20 working days, C3)
     expect(quotas?.["emp-a"]).toMatchObject({ sampleCount: 57, dailyQuota: 3 });
   });
 
@@ -622,11 +625,11 @@ describe("deriveEmployeeQuotasWithFacts — golden master", () => {
     ];
     const { quotas } = deriveEmployeeQuotasWithFacts(events, entriesFor(events), new Set(), MONTH);
     // The 20 May event wins purely because it appears first in the array, so
-    // the employee's whole quota is computed off the SHORTER window: 9 days
-    // rather than 28. ceil(2/9) === 1 here, but the effect scales.
+    // the employee's whole quota is computed off the SHORTER window: 7 working
+    // days rather than 20. ceil(2/7) === 1 here, but the effect scales.
     expect(quotas?.["emp-a"]).toMatchObject({
       assignedAt: "2026-05-20T00:00:00.000Z",
-      daysRemainingAtAssignment: 9,
+      daysRemainingAtAssignment: 7,
     });
   });
 
@@ -712,7 +715,7 @@ describe("deriveEmployeeQuotasWithFacts — golden master", () => {
     expect(quotas?.["emp-a"]).toMatchObject({
       sampleCount: 1,
       assignedAt: "2026-05-20T00:00:00.000Z",
-      daysRemainingAtAssignment: 9,
+      daysRemainingAtAssignment: 7,
     });
   });
 
@@ -873,7 +876,7 @@ describe("deriveEmployeeQuotasWithFacts — golden master", () => {
     expect(facts.firstAssignments["emp-a"].eventId).toBe("a1");
     expect(quotas?.["emp-a"]).toMatchObject({
       sampleCount: 2,
-      daysRemainingAtAssignment: 28,
+      daysRemainingAtAssignment: 20,
     });
     // The caller's resumeFacts object is not mutated (shallow copies).
     expect(resumeFacts.assignmentCounts).toEqual({ "emp-a": 1 });

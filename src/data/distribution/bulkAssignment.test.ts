@@ -740,11 +740,13 @@ test("A3 + F10 (fix round 1): the stamped event's dailyQuota is restamped to eac
 
   // daysRemaining comes from `new Date()` inside calculateBulkAssignment, so
   // the clock is pinned (Date only — async timers stay real). From
-  // 2026-09-28 12:00 local to the October 2026 deadline (Oct 28 23:59:59)
-  // is exactly 31 days after ceil, and ceil(100/31)=4, ceil(160/31)=6,
-  // ceil(80/31)=3 are all distinct, so a stale (unrestamped) quota can never
-  // coincide with the restamped one. On the real clock this would drift into
-  // days where the ceilings collapse (e.g. 25, 26, 34-39) or reach 0 (no stamp).
+  // 2026-09-28 (Monday) to the October 2026 deadline (Wed 28 Oct) is 23
+  // WORKING days (Sunday–Thursday, both ends inclusive; C3 — it was 31
+  // calendar days before the stamp switched to the same working-day count the
+  // derived quota uses). ceil(100/23)=5, ceil(160/23)=7, ceil(80/23)=4 are
+  // all distinct, so a stale (unrestamped) quota can never coincide with the
+  // restamped one. On the real clock this would drift into days where the
+  // ceilings collapse or reach 0 (no stamp).
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date(2026, 8, 28, 12));
   let result: ReturnType<typeof calculateBulkAssignment>;
@@ -770,7 +772,7 @@ test("A3 + F10 (fix round 1): the stamped event's dailyQuota is restamped to eac
   const dStamped = dSecondStageEvents.filter((e) => e.dailyQuota !== undefined);
   expect(dStamped).toHaveLength(1);
   const daysRemaining = dStamped[0]!.daysRemainingAtAssignment!;
-  expect(daysRemaining).toBe(31);
+  expect(daysRemaining).toBe(23);
   expect(dStamped[0]!.dailyQuota).toBe(Math.ceil(160 / daysRemaining));
   expect(dStamped[0]!.dailyQuota).not.toBe(Math.ceil(100 / daysRemaining));
 

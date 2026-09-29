@@ -43,7 +43,14 @@ export type EmployeeQuota = {
    * P2 — see deriveEmployeeQuotasWithFacts).
    */
   sampleCount: number;
+  /** ceil(sampleCount / max(1, daysRemainingAtAssignment)) — frozen; moves only when sampleCount does (C3). */
   dailyQuota: number;
+  /**
+   * WORKING days (Sunday–Thursday; Friday/Saturday excluded) from the first
+   * `assigned` event's calendar day through the deadline (the sample month's
+   * last day − 3), both inclusive — since DERIVE_VERSION 5 (C3); calendar
+   * days before that. Name kept: no persisted shape change.
+   */
   daysRemainingAtAssignment: number;
   assignedAt: string;
 };
