@@ -41,7 +41,8 @@
  * genuinely process-wide.
  */
 import { broadcastDataRefresh, type DataRefreshFamily } from "./dataRefreshSignal";
-import { bumpWorkspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
+import { bumpWorkspaceEpoch, workspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
+import { carryRequestQueuesAcrossEpochBump } from "../answers/answerStorage";
 import { ownStableAnswerSegmentMatcher } from "../answers/answerSegmentChain";
 import {
   invalidateSealedAnswerSegmentNames,
@@ -952,7 +953,13 @@ async function performSync(options: SyncRunOptions, manual: boolean): Promise<Sy
     // this run. A manual run bumps it unconditionally: "discard everything"
     // that still lets a memo answer from cache is not a hard refresh.
     if (directoryHandle && monthFolderName) {
+      const epochBefore = workspaceEpoch(directoryHandle, monthFolderName);
       bumpWorkspaceEpoch(directoryHandle, monthFolderName);
+      // A tick that saw answers/distribution/notifications move but NOT `requests`
+      // leaves every employee's request queue exactly as this tab last read it.
+      if (!manual && !changed.has("requests")) {
+        carryRequestQueuesAcrossEpochBump(directoryHandle, monthFolderName, epochBefore);
+      }
     }
     if (manual) {
       broadcastDataRefresh("manual");

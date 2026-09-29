@@ -49,7 +49,8 @@ import { createSimpleHasher } from "../storage/jsonEnvelope";
 import { listDirectoryEntries } from "../storage/directoryScan";
 import { isNotFoundError } from "../storage/transientFileErrors";
 import { ensureMonthWritable } from "../population/monthLock";
-import { bumpWorkspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
+import { bumpWorkspaceEpoch, workspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
+import { mapWithConcurrency } from "../storage/concurrency";
 import { subscribeToDataRefresh } from "../workspace/dataRefreshSignal";
 import { getDistributionDeviceId } from "../distribution/distributionEventStore";
 import { stableAnswerChain } from "./answerSegmentChain";
@@ -373,6 +374,8 @@ export function __clearAnswerEventsCacheForTests(): void {
 export function clearAnswerEventsCache(): void {
   answerEventsCacheByRoot = new WeakMap();
   legacySeedMemoByRoot = new WeakMap();
+  requestQueuesMemo.clear();
+  legacyRequestQueuesMemo.clear();
 }
 
 /**
@@ -413,6 +416,8 @@ function setAnswerEventsCacheEntry(
 function resetAnswerEventsCache(): void {
   answerEventsCacheByRoot = new WeakMap();
   legacySeedMemoByRoot = new WeakMap();
+  requestQueuesMemo.clear();
+  legacyRequestQueuesMemo.clear();
 }
 
 /** @internal test-only alias — see `resetAnswerEventsCache`. */
@@ -1681,7 +1686,16 @@ async function listAnswerDirStems(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
 ): Promise<Set<string>> {
+  return (await listAnswerDirStemKinds(directoryHandle, monthFolderName)).stems;
+}
+
+/** Same listing, but also says which stems have a `.requests.json` of their own (from the LISTING, no per-file probe). */
+async function listAnswerDirStemKinds(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<{ stems: Set<string>; withRequestsFile: Set<string> }> {
   const stems = new Set<string>();
+  const withRequestsFile = new Set<string>();
   let dir: DirectoryHandleLike;
   try {
     dir = await getAnswersDir(directoryHandle, monthFolderName);
@@ -1689,7 +1703,7 @@ async function listAnswerDirStems(
     // A month with no answers directory at all is a FACT about the data, and
     // stays absence. (`getAnswersDir` opens with `create: true`, so this is
     // reachable only on a workspace that refuses the create.)
-    if (isNotFoundError(error)) return stems;
+    if (isNotFoundError(error)) return { stems, withRequestsFile };
     logError("answerStorage:listAnswerDirStems", error);
     throw error;
   }
@@ -1698,6 +1712,7 @@ async function listAnswerDirStems(
       if (entry.kind !== "file") continue;
       const stem = stemOf(entry.name);
       if (stem) stems.add(stem);
+      if (stem && entry.name.endsWith(REQUESTS_SUFFIX)) withRequestsFile.add(stem);
     }
   } catch (error) {
     // Never a PARTIAL set. The stems this returns are the set of employees the
@@ -1707,7 +1722,7 @@ async function listAnswerDirStems(
     logError("answerStorage:listAnswerDirStems", error);
     throw error;
   }
-  return stems;
+  return { stems, withRequestsFile };
 }
 
 /** Every distinct employee named by ANY event in the month's flat answer event log. */
@@ -1838,28 +1853,87 @@ export type EmployeeRequestQueues = Pick<
  * ONLY answer segments and no request of any kind contributes nothing this
  * function returns anyway.
  */
+/**
+ * Session memo of `loadAllEmployeeRequestFiles`, per (root, month), valid for one
+ * workspace epoch (A10). Every write of a requests file, every non-manual
+ * broadcast and every manual refresh bumps the epoch, so a hit can only be
+ * served when nothing this tab knows of has moved. The sync layer carries it
+ * across the bump of a tick that saw `answers` change but not `requests`
+ * (`carryRequestQueuesAcrossEpochBump`), so a colleague saving their own answer
+ * does not force every client to re-read every employee's queue. A failed scan
+ * is never stored.
+ */
+const requestQueuesMemo = new Map<string, { epoch: number; files: EmployeeRequestQueues[] }>();
+/** Frozen legacy `.answers.json` request arrays, per (root, month, user): read once, like the seed. */
+const legacyRequestQueuesMemo = new Map<string, EmployeeRequestsFile>();
+
+function requestQueuesKey(directoryHandle: DirectoryHandleLike, monthFolderName: string): string {
+  return `${workspaceScopeId(directoryHandle)}|${monthFolderName}`;
+}
+
+/** See `requestQueuesMemo`: re-key a memo taken at `previousEpoch` to the current one. */
+export function carryRequestQueuesAcrossEpochBump(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  previousEpoch: number
+): void {
+  const key = requestQueuesKey(directoryHandle, monthFolderName);
+  const memo = requestQueuesMemo.get(key);
+  if (memo && memo.epoch === previousEpoch) {
+    requestQueuesMemo.set(key, { ...memo, epoch: workspaceEpoch(directoryHandle, monthFolderName) });
+  }
+}
+
 export async function loadAllEmployeeRequestFiles(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
 ): Promise<EmployeeRequestQueues[]> {
+  const memoKey = requestQueuesKey(directoryHandle, monthFolderName);
+  const epoch = workspaceEpoch(directoryHandle, monthFolderName);
+  const memo = requestQueuesMemo.get(memoKey);
+  if (memo && memo.epoch === epoch) return [...memo.files];
   try {
-    const stems = await listAnswerDirStems(directoryHandle, monthFolderName);
-    const files: EmployeeRequestQueues[] = [];
-    for (const username of stems) {
+    const { stems, withRequestsFile } = await listAnswerDirStemKinds(directoryHandle, monthFolderName);
+    // Bounded concurrency (was one employee at a time). A per-employee failure is
+    // still isolated (logged, that employee skipped) exactly as before; a failed
+    // LISTING above still throws, never a partial set.
+    const loaded = await mapWithConcurrency([...stems], 4, async (username): Promise<EmployeeRequestQueues | null> => {
       try {
-        const requests = await loadEmployeeRequestsFile(directoryHandle, monthFolderName, username);
-        files.push({
+        let requests: EmployeeRequestsFile;
+        if (withRequestsFile.has(username)) {
+          requests = await loadEmployeeRequestsFile(directoryHandle, monthFolderName, username);
+        } else {
+          // No requests file in the LISTING: the only source is the frozen legacy
+          // `.answers.json` (pre-split data). Read it once per session, not per call.
+          const legacyKey = `${memoKey}|${username}`;
+          const cached = legacyRequestQueuesMemo.get(legacyKey);
+          if (cached) {
+            requests = cached;
+          } else {
+            requests = await loadEmployeeRequestsFile(directoryHandle, monthFolderName, username);
+            legacyRequestQueuesMemo.set(legacyKey, requests);
+          }
+        }
+        return {
           username,
           monthFolderName,
           referralRequests: requests.referralRequests,
           replacementRequests: requests.replacementRequests,
           reopenRequests: requests.reopenRequests,
-        });
+        };
       } catch (error) {
         logError("answerStorage:loadAllEmployeeRequestFiles:employee", error, { action: username });
+        return null;
       }
+    });
+    const files = loaded
+      .filter((entry): entry is EmployeeRequestQueues => entry !== null)
+      .sort((a, b) => a.username.localeCompare(b.username));
+    // Store only if the epoch did not move while we read (a write mid-scan must not be memoized stale).
+    if (workspaceEpoch(directoryHandle, monthFolderName) === epoch) {
+      requestQueuesMemo.set(memoKey, { epoch, files });
     }
-    return files.sort((a, b) => a.username.localeCompare(b.username));
+    return [...files];
   } catch (err) {
     // Same reasoning as the sibling above: an unestablished scan is not an
     // empty set of request queues.

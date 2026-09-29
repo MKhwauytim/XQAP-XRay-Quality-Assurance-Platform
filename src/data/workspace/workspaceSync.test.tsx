@@ -25,7 +25,7 @@ import {
 import { invalidateMonthLockCache, isMonthClosed } from "../population/monthLock";
 import { DISTRIBUTION_EVENTS_DIR } from "../distribution/distributionEventStore";
 import { ANSWER_EVENTS_DIR } from "../answers/answerEventStore";
-import { readAllAnswerEventsForMonth, upsertItemAnswer, __clearAnswerEventsCacheForTests } from "../answers/answerStorage";
+import { loadAllEmployeeRequestFiles, readAllAnswerEventsForMonth, upsertItemAnswer, __clearAnswerEventsCacheForTests } from "../answers/answerStorage";
 import { __resetAppendOnlyEventLogMemosForTests } from "../storage/appendOnlyEventLog";
 import { __resetAnswerSegmentChainMemoForTests } from "../answers/answerSegmentChain";
 import { getSealedAnswerSegmentsEpoch } from "../answers/answerSealedSegments";
@@ -1168,6 +1168,29 @@ describe("runSync — §6 of the answer-save proposal: the answers.events segmen
     }
     expect(details).toHaveLength(1);
     expect(details[0]!.source === "periodic" && details[0]!.answerOwners).toBeNull();
+  });
+
+  it("A10: an answers-only tick keeps every employee's request queues memoized; a requests change does not", async () => {
+    const root = makeRoot("rq-memo", true);
+    const eventsDir = await answerEventsDirFor(root);
+    const answersDir = await getSampleEmployeeDir(root, MONTH, true);
+    await writeRawFile(answersDir, "alice.requests.json", JSON.stringify({ username: "alice", referralRequests: [] }));
+    await writeRawFile(eventsDir, "a1-ans-devA-s1.ndjson", answerSegment(["e01"]));
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+    await loadAllEmployeeRequestFiles(root, MONTH);
+
+    await writeRawFile(eventsDir, "a1-ans-devA-s1.ndjson", answerSegment(["e01", "e02"]));
+    const answersTick = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect([...answersTick.changed]).toEqual(["answers"]);
+    clearReadLog(root);
+    await loadAllEmployeeRequestFiles(root, MONTH);
+    expect(getReadLog(root).length).toBe(0);
+
+    await writeRawFile(answersDir, "alice.requests.json", JSON.stringify({ username: "alice", referralRequests: [{ requestId: "r9" }] }));
+    const requestsTick = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect(requestsTick.changed.has("requests")).toBe(true);
+    const fresh = await loadAllEmployeeRequestFiles(root, MONTH);
+    expect(fresh[0]!.referralRequests).toHaveLength(1);
   });
 
   it("A9: a per-employee requests file change is reported as requests (it had no probe of its own)", async () => {
