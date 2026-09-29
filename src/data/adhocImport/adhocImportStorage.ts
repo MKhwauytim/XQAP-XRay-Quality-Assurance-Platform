@@ -11,7 +11,9 @@ import { DISTRIBUTION_EVENTS_DIR } from "../distribution/distributionEventStore"
 import { logError } from "../storage/errorLogger";
 import { logCodedError } from "../storage/errorCodes";
 
-const INDEX_FILE = "adhoc-imports.index.json";
+/** Exported for the selective-restore catalog (`backup/restoreScope.ts`). */
+export const ADHOC_IMPORT_INDEX_FILE = "adhoc-imports.index.json";
+const INDEX_FILE = ADHOC_IMPORT_INDEX_FILE;
 
 function recordFileName(importId: string): string {
   return `${importId}.json`;

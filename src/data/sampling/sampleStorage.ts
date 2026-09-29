@@ -9,7 +9,9 @@ import { ensureMonthWritable } from "../population/monthLock";
 import { getPopulationMonthDir, getSampleMainDir, LEGACY_MONTH_SUBFOLDERS } from "../workspace/workspacePaths";
 import type { PortAllocation, SampleApproval, SampleMasterData, StageAllocation } from "./sampleTypes";
 
-const SAMPLE_FILE = "sample.master.json";
+/** Exported for the selective-restore catalog (`backup/restoreScope.ts`). */
+export const SAMPLE_MASTER_FILE = "sample.master.json";
+const SAMPLE_FILE = SAMPLE_MASTER_FILE;
 
 async function getSampleDir(
   directoryHandle: DirectoryHandleLike,

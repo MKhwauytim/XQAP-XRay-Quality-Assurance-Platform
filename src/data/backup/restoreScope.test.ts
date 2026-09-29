@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { getLabels } from "../labels/labelsStore";
 import {
   classifyBackupPath,
+  answersFileEmbedsRequests,
   expandRestoreScope,
   isDirectoryInRestoreScope,
   isFileInRestoreScope,
@@ -76,8 +77,14 @@ describe("classifyBackupPath — numbered layout", () => {
     ["5-system/feedback/threads.index.json", wide("feedback")],
     ["5-system/notifications/notifications.json", wide("systemSettings")],
     ["5-system/user-presets/admin-shared.browse-preset.json", wide("systemSettings")],
-    ["5-system/adhoc-imports/adhoc-imports.index.json", wide("systemSettings")],
     ["5-system/workspace.schema.json", wide("systemSettings")],
+    // Ad-hoc records follow their imported data (2-samples/adhoc-{id}/), not the system settings.
+    ["5-system/adhoc-imports/imp1.json", monthly("sampleDistribution", "adhoc-imp1")],
+    // The index is a rebuildable listing: never restored selectively.
+    ["5-system/adhoc-imports/adhoc-imports.index.json", { element: "systemSettings", month: null, derived: true }],
+    // Deck preferences sit in 6-templates and label snapshots in 3-user-data: named by the element labels.
+    ["6-templates/deck2.style-choices.json", wide("templates")],
+    ["6-templates/executive-deck-edition.json", wide("templates")],
   ];
 
   it.each(cases)("%s", (path, expected) => {
@@ -117,6 +124,8 @@ describe("classifyBackupPath — never restored selectively", () => {
     "5-system/locks/some.lock.json",
     "5-system/backups/old/backup.manifest.json",
     ".system/audit/activity.log.json",
+    "5-system/history/records/x.json",
+    "5-system/powerbi-export/population.csv.json",
     "5-system/restore.inprogress.json",
     "top-level.json",
     "unknown-root/x.json",
@@ -151,6 +160,19 @@ describe("isFileInRestoreScope", () => {
     const templates: RestoreScope = { elements: ["templates"], months: [] };
     expect(isFileInRestoreScope("6-templates/templates.index.json", templates)).toBe(true);
     expect(isFileInRestoreScope("templates/templates.index.json", templates)).toBe(true);
+  });
+
+  it("matches month folder names case-insensitively, as parseMonthFolderName does", () => {
+    const scope: RestoreScope = { elements: ["population"], months: ["5-may-2026"] };
+    expect(isFileInRestoreScope("1-population/5-May-2026/2-processed/population.final.json", scope)).toBe(true);
+    expect(isFileInRestoreScope("1-population/6-June-2026/2-processed/population.final.json", scope)).toBe(false);
+  });
+
+  it("selects an ad-hoc import record with its month, not with the system settings", () => {
+    expect(isFileInRestoreScope("5-system/adhoc-imports/imp1.json", { elements: ["sampleDistribution"], months: ["adhoc-imp1"] })).toBe(true);
+    expect(isFileInRestoreScope("5-system/adhoc-imports/imp1.json", { elements: ["sampleDistribution"], months: [M1] })).toBe(false);
+    expect(isFileInRestoreScope("5-system/adhoc-imports/imp1.json", { elements: ["systemSettings"], months: [] })).toBe(false);
+    expect(isFileInRestoreScope("5-system/adhoc-imports/adhoc-imports.index.json", { elements: ["systemSettings"], months: [] })).toBe(false);
   });
 
   it("selects nothing month-scoped when no month is chosen", () => {
@@ -197,10 +219,30 @@ describe("isDirectoryInRestoreScope", () => {
     expect(isDirectoryInRestoreScope("1-population", scope)).toBe(false);
   });
 
+  it("does not enter the numbered population root for a sample-only scope (no empty folders)", () => {
+    const scope: RestoreScope = { elements: ["sampleDistribution"], months: [M1] };
+    expect(isDirectoryInRestoreScope("1-population", scope)).toBe(false);
+    expect(isDirectoryInRestoreScope(`1-population/${M1}`, scope)).toBe(false);
+    expect(isDirectoryInRestoreScope("5-system/adhoc-imports", scope)).toBe(true);
+    expect(isDirectoryInRestoreScope("5-system/history", scope)).toBe(false);
+    expect(isDirectoryInRestoreScope("5-system/powerbi-export", { elements: ["systemSettings"], months: [] })).toBe(false);
+  });
+
   it("enters the population root but no month folder for a population-settings scope", () => {
     const scope: RestoreScope = { elements: ["populationSettings"], months: [] };
     expect(isDirectoryInRestoreScope("1-population", scope)).toBe(true);
     expect(isDirectoryInRestoreScope(`1-population/${M1}`, scope)).toBe(false);
+  });
+});
+
+describe("answersFileEmbedsRequests (legacy pre-split answer files)", () => {
+  it("is true only when a request queue is embedded and non-empty", () => {
+    expect(answersFileEmbedsRequests({ items: [], referralRequests: [{ id: "r1" }] })).toBe(true);
+    expect(answersFileEmbedsRequests({ items: [], replacementRequests: [{}] })).toBe(true);
+    expect(answersFileEmbedsRequests({ reopenRequests: [{}] })).toBe(true);
+    expect(answersFileEmbedsRequests({ items: [], referralRequests: [] })).toBe(false);
+    expect(answersFileEmbedsRequests({ items: [] })).toBe(false);
+    expect(answersFileEmbedsRequests(null)).toBe(false);
   });
 });
 

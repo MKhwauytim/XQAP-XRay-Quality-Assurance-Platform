@@ -134,3 +134,59 @@ describe("planSelectiveRestore — selections and warnings", () => {
     expect(result.canConfirm).toBe(false);
   });
 });
+
+describe("planSelectiveRestore — legacy answer files that embed request queues", () => {
+  const LEGACY_ANSWERS = `2-samples/${M1}/2-employees/employee01.answers.json`;
+  const embedding = { items: [], referralRequests: [{ requestId: "r1" }] };
+
+  it("warns that Answers alone also restores the embedded queues", async () => {
+    const root = makeRoot();
+    await seedBackup(root, { [LEGACY_ANSWERS]: embedding });
+
+    const result = await plan(root, { elements: ["answers"], months: [M1] });
+
+    expect(result.warnings).toContainEqual({ kind: "answers-restore-embedded-requests", month: M1 });
+  });
+
+  it("warns that Referrals alone cannot reach queues that live inside the answers files", async () => {
+    const root = makeRoot();
+    await seedBackup(root, {
+      [LEGACY_ANSWERS]: embedding,
+      [`2-samples/${M1}/2-employees/employee02.requests.json`]: { referralRequests: [] },
+    });
+
+    const result = await plan(root, { elements: ["referralsApprovals"], months: [M1] });
+
+    expect(result.warnings).toContainEqual({ kind: "requests-embedded-in-answers", month: M1 });
+  });
+
+  it("stays quiet when both are selected, or the answers file embeds nothing", async () => {
+    const root = makeRoot();
+    await seedBackup(root, {
+      [LEGACY_ANSWERS]: embedding,
+      [`2-samples/${M1}/2-employees/employee01.requests.json`]: { referralRequests: [] },
+    });
+    const both = await plan(root, { elements: ["answers", "referralsApprovals"], months: [M1] });
+    expect(both.warnings.map((warning) => warning.kind)).toEqual(["answers-without-sample"]);
+
+    const clean = makeRoot();
+    await seedBackup(clean, { [LEGACY_ANSWERS]: { items: [], referralRequests: [] } });
+    const answersOnly = await plan(clean, { elements: ["answers"], months: [M1] });
+    expect(answersOnly.warnings.map((warning) => warning.kind)).toEqual(["answers-without-sample"]);
+  });
+});
+
+describe("planSelectiveRestore — month folder casing", () => {
+  it("finds the backup's population when the scope month differs only in case", async () => {
+    const root = makeRoot();
+    await seedBackup(root, {
+      "1-population/5-May-2026/2-processed/population.final.json": { rows: [{ xrayImageId: "A" }] },
+    });
+
+    const result = await plan(root, { elements: ["population"], months: ["5-may-2026"] });
+
+    expect(result.selections).toEqual([{ element: "population", month: "5-may-2026", fileCount: 1 }]);
+    expect(result.emptySelections).toEqual([]);
+    expect(result.canConfirm).toBe(true);
+  });
+});
