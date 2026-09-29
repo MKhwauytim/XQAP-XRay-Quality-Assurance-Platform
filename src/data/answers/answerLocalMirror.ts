@@ -87,7 +87,7 @@ function mirrorKey(month: string, username: string, xrayImageId: string): string
  */
 let connection: { factory: IDBFactory; promise: Promise<IDBDatabase | null> } | null = null;
 
-function dropConnection(promise: Promise<IDBDatabase | null>): void {
+function dropConnection(promise: Promise<IDBDatabase | null> | undefined): void {
   if (connection?.promise === promise) connection = null;
 }
 
@@ -96,7 +96,12 @@ function openMirrorDb(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === "undefined" || indexedDB === null) return Promise.resolve(null);
   if (connection && connection.factory === indexedDB) return connection.promise;
   const factory = indexedDB;
-  const promise: Promise<IDBDatabase | null> = new Promise((resolve) => {
+  // Declared before the executor: `open` may throw synchronously (SecurityError,
+  // opaque origin, blocked storage) BEFORE `promise` is assigned, and the handlers
+  // below reference it.
+  let promise: Promise<IDBDatabase | null> | undefined;
+  let failedSynchronously = false;
+  promise = new Promise((resolve) => {
     try {
       const request = factory.open(DB_NAME, DB_VERSION);
       request.onupgradeneeded = () => {
@@ -127,11 +132,12 @@ function openMirrorDb(): Promise<IDBDatabase | null> {
         resolve(null);
       };
     } catch {
-      dropConnection(promise);
+      // Never cache a failed open: the next call tries again.
+      failedSynchronously = true;
       resolve(null);
     }
   });
-  connection = { factory, promise };
+  if (!failedSynchronously) connection = { factory, promise };
   return promise;
 }
 
@@ -144,7 +150,14 @@ function openMirrorDb(): Promise<IDBDatabase | null> {
 async function withMirrorDb<T>(work: (db: IDBDatabase) => Promise<T>, fallback: T): Promise<T> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const pending = openMirrorDb();
-    const db = await pending;
+    let db: IDBDatabase | null;
+    try {
+      db = await pending;
+    } catch {
+      // The mirror layer never throws (module doc): an open that could not even start is "no mirror".
+      dropConnection(pending);
+      return fallback;
+    }
     if (!db) return fallback;
     try {
       return await work(db);
