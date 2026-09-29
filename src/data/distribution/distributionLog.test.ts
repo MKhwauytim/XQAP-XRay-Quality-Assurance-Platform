@@ -367,7 +367,7 @@ test("events for unknown xrayImageId are ignored", () => {
   expect(result.entries).toHaveLength(0);
 });
 
-test("daily quota is derived from assignment date through three days before month end", () => {
+test("daily quota is derived from assignment date through three days before month end, over working days (C3)", () => {
   const rows = Array.from({ length: 1000 }, (_, index) => makeRow(`A${index + 1}`));
   const log = makeLog(
     rows.map((row, index) => ({
@@ -382,8 +382,12 @@ test("daily quota is derived from assignment date through three days before mont
 
   const result = deriveCurrentDistribution(log, rows);
   expect(result.quotas?.emp1?.sampleCount).toBe(1000);
-  expect(result.quotas?.emp1?.daysRemainingAtAssignment).toBe(27);
-  expect(result.quotas?.emp1?.dailyQuota).toBe(38);
+  // C3 (DERIVE_VERSION 5): working days only. Monday 1 June → Saturday 27 June
+  // 2026 (June's last day − 3), Friday/Saturday excluded = 19; ceil(1000 / 19)
+  // = 53. computeDaysRemainingForDeadline above still reports CALENDAR days —
+  // it is no longer what the quota uses.
+  expect(result.quotas?.emp1?.daysRemainingAtAssignment).toBe(19);
+  expect(result.quotas?.emp1?.dailyQuota).toBe(53);
 });
 
 // ── sampleRowsFingerprint (v4 cache validity) ──────────────────────────────

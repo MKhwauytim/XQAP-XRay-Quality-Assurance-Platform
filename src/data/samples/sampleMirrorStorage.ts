@@ -42,6 +42,8 @@ import { DERIVE_VERSION } from "../distribution/distributionLog";
  */
 export type EmployeeMirrorQuota = {
   dailyQuota: number;
+  /** Working days (Sun–Thu) in the assignment window since DERIVE_VERSION 5
+   *  (C3) — copied verbatim from the derived quota, never recomputed here. */
   daysRemainingAtAssignment: number;
   sampleCount: number;
 };

@@ -4,7 +4,7 @@ import type { ManagedLoginUser } from "../../auth/userManagement";
 import type { DistributionEntry, DistributionEvent } from "./distributionTypes";
 import { getStageKey } from "../population/stageHelpers";
 import { hamiltonApportionment } from "../sampling/apportionment";
-import { buildAssignEvent, computeDaysRemainingForDeadline } from "./distributionLog";
+import { buildAssignEvent, computeWorkingDaysForDeadline } from "./distributionLog";
 import { hasAnyPortRestriction, isPortEligible, normalizePortName } from "./portEligibility";
 
 export function isAssignableSampleRole(user: ManagedLoginUser): boolean {
@@ -304,7 +304,7 @@ function assignWithinGroup(params: {
   let normIdx = 0;
   const now = new Date();
   const daysRemaining = (month != null && year != null)
-    ? computeDaysRemainingForDeadline(month, year, now)
+    ? computeWorkingDaysForDeadline(month, year, now)
     : null;
 
   for (const emp of empInfos) {
