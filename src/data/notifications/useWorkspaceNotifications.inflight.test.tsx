@@ -7,7 +7,7 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 
 import type { AuthSession } from "../../auth/authTypes";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { broadcastDataRefresh, notifyLocalDataChange } from "../workspace/dataRefreshSignal";
+import { broadcastDataRefresh, notifyLocalDataChange, type DataRefreshFamily } from "../workspace/dataRefreshSignal";
 
 const gate = vi.hoisted(() => ({ calls: 0, active: 0, maxActive: 0, releases: [] as Array<() => void> }));
 vi.mock("./notificationStorage", () => ({
@@ -50,7 +50,7 @@ describe("useWorkspaceNotifications (A8)", () => {
     await drain(); // initial load
     gate.calls = 0; gate.maxActive = 0;
     act(() => {
-      for (let i = 0; i < 6; i += 1) broadcastDataRefresh({ source: "periodic", changed: new Set(["notifications"]) });
+      for (let i = 0; i < 6; i += 1) broadcastDataRefresh({ source: "periodic", changed: new Set<DataRefreshFamily>(["notifications"]) });
     });
     await drain();
     await drain();
@@ -64,7 +64,7 @@ describe("useWorkspaceNotifications (A8)", () => {
     await drain();
     gate.calls = 0;
     act(() => notifyLocalDataChange(["answers"]));
-    act(() => broadcastDataRefresh({ source: "periodic", changed: new Set(["answers", "requests"]) }));
+    act(() => broadcastDataRefresh({ source: "periodic", changed: new Set<DataRefreshFamily>(["answers", "requests"]) }));
     await drain();
     expect(gate.calls).toBe(0);
     act(() => broadcastDataRefresh("manual"));
