@@ -46,8 +46,13 @@ const SUPERSEDED_PATTERN = /^population\.final\..+\.superseded\.json$/;
 
 export type PopulationRecoveryCandidate = {
   fileName: string;
-  /** Workstream D extends this with "backup". */
-  source: "superseded" | "bak";
+  /**
+   * "superseded" / "bak": a copy beside the live file (this module restores it).
+   * "backup": a `5-system/backups/{folder}` snapshot — `fileName` is the backup
+   * FOLDER name, listed and restored by Workstream D's scoped engine
+   * (`backup/selectiveRestore.ts`), never by `restorePopulationCandidate`.
+   */
+  source: "superseded" | "bak" | "backup";
   rowCount: number;
   processedAt: string | null;
   /** Live sampled ids present in this candidate. */
