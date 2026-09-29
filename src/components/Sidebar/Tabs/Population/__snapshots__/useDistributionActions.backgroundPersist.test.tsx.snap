@@ -270,19 +270,40 @@ exports[`R1: cache, sidecar and mirrors persist off the click path > after the f
         "username": "jalgahamdi",
         "sourceLogRevision": 3,
         "deriveVersion": 5,
-        "eventSetId":"<x>"
+        "eventSetId":"<x>",
+        "contentHash":"<x>",
+        "scan": {
+          "segmentOffsets": {
+            "<segment>.ndjson": 2902
+          },
+          "legacyFilesDigest":"<x>"
+        }
       },
       "hihaloraini.samples.json": {
         "username": "hihaloraini",
         "sourceLogRevision": 3,
         "deriveVersion": 5,
-        "eventSetId":"<x>"
+        "eventSetId":"<x>",
+        "contentHash":"<x>",
+        "scan": {
+          "segmentOffsets": {
+            "<segment>.ndjson": 2902
+          },
+          "legacyFilesDigest":"<x>"
+        }
       },
       "saalhijji.samples.json": {
         "username": "saalhijji",
         "sourceLogRevision": 3,
         "deriveVersion": 5,
-        "eventSetId":"<x>"
+        "eventSetId":"<x>",
+        "contentHash":"<x>",
+        "scan": {
+          "segmentOffsets": {
+            "<segment>.ndjson": 2902
+          },
+          "legacyFilesDigest":"<x>"
+        }
       }
     }
   }
@@ -291,7 +312,7 @@ exports[`R1: cache, sidecar and mirrors persist off the click path > after the f
   "2-samples/2-employees/hihaloraini.samples.json": "{
   "metadata": {
     "schemaVersion": 1,
-    "revision": 3,
+    "revision": 2,
     "contentHash":"<x>",
     "writtenAt":"<x>"
   },
@@ -299,12 +320,12 @@ exports[`R1: cache, sidecar and mirrors persist off the click path > after the f
     "monthFolderName": "5-may-2026",
     "username": "hihaloraini",
     "updatedAt": "<ts>",
-    "sourceLogRevision": 3,
+    "sourceLogRevision": 2,
     "deriveVersion": 5,
     "eventSetId":"<x>",
     "scan": {
       "segmentOffsets": {
-        "<segment>.ndjson": 2902
+        "<segment>.ndjson": 2670
       },
       "legacyFilesDigest":"<x>"
     },
@@ -414,7 +435,7 @@ exports[`R1: cache, sidecar and mirrors persist off the click path > after the f
   "2-samples/2-employees/saalhijji.samples.json": "{
   "metadata": {
     "schemaVersion": 1,
-    "revision": 3,
+    "revision": 2,
     "contentHash":"<x>",
     "writtenAt":"<x>"
   },
