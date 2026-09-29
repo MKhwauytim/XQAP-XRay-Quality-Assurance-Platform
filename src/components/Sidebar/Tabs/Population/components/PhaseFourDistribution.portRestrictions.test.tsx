@@ -191,7 +191,7 @@ describe("PhaseFourDistribution — port restrictions", () => {
 
     const expected = DEFAULT_LABELS.p4_bulk_target_shortfall_item
       .replace("{name}", "الموظف الأول")
-      .replace("{allowed}", "0")
+      .replace("{achieved}", "0")
       .replace("{target}", "1");
     expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes(expected))).toBe(true);
   });

@@ -70,8 +70,11 @@ export type UnmappedStageReport = {
   stages: string[];
 };
 
-/** A3: an employee who cannot reach their month target — the only case totals stay unequal. */
-export type EmployeeTargetShortfall = { username: string; target: number; allowed: number };
+/**
+ * A3: an employee whose FINAL total (rows already owned + new events, after the
+ * rebalance) is below their month target — the only way totals stay unequal.
+ */
+export type EmployeeTargetShortfall = { username: string; target: number; achieved: number };
 
 export type BulkAssignmentResult = {
   events: DistributionEvent[];
@@ -646,14 +649,16 @@ export function calculateBulkAssignment(params: {
   };
   const balanced = rebalanceTowardMonthTargets({ events, targets: monthTargets, owned: ownedTotals, canTake });
   const restamped = restampDailyQuota(balanced, eventGroupKey);
+  // Measured on the OUTCOME, not on per-employee capacity: that also catches
+  // an employee who already owned more than their target, restricted employees
+  // sharing one small port, and stamped events the rebalance cannot move.
+  const finalTotals = new Map<string, number>(ownedTotals);
+  for (const event of restamped) finalTotals.set(event.assignedTo, (finalTotals.get(event.assignedTo) ?? 0) + 1);
   const targetShortfalls: EmployeeTargetShortfall[] = [];
-  for (const username of [...monthTargets.keys()].sort((a, b) => a.localeCompare(b))) {
+  for (const username of [...monthTargets.keys()].sort((a, c) => a.localeCompare(c))) {
     const target = monthTargets.get(username) ?? 0;
-    let allowed = ownedTotals.get(username) ?? 0;
-    for (const candidate of assignableRows) {
-      if (canTake(username, candidate.xrayImageId)) allowed += 1;
-    }
-    if (allowed < target) targetShortfalls.push({ username, target, allowed });
+    const achieved = finalTotals.get(username) ?? 0;
+    if (achieved < target) targetShortfalls.push({ username, target, achieved });
   }
   return { events: restamped, errors, skipped, unmapped, targetShortfalls };
 }
