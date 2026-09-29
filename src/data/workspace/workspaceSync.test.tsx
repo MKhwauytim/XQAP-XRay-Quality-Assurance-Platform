@@ -1113,9 +1113,9 @@ describe("runSync — §6 of the answer-save proposal: the answers.events segmen
     await writeRawFile(eventsDir, "a1-ans-devA-s1.ndjson", answerSegment(["e01", "e02"]));
     const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
 
-    // Ambiguous by construction with the legacy answers-dir signature (Probe's
-    // own doc comment): both "requests" and "answers" are marked, never just one.
-    expect([...changed].sort()).toEqual(["answers", "requests"]);
+    // A9: event segments hold answers only, so this no longer also marks "requests"
+    // (a colleague saving their own answer is not a request change).
+    expect([...changed].sort()).toEqual(["answers"]);
   });
 
   it("reports the answers family when a whole new writer's answer segment appears", async () => {
@@ -1127,7 +1127,57 @@ describe("runSync — §6 of the answer-save proposal: the answers.events segmen
     await writeRawFile(eventsDir, "a1-ans-devB-s9.ndjson", answerSegment(["e02"]));
     const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
 
-    expect([...changed].sort()).toEqual(["answers", "requests"]);
+    expect([...changed].sort()).toEqual(["answers"]);
+  });
+
+  it("A9: the broadcast names whose answers the moved segments gained (owners peek)", async () => {
+    const root = makeRoot();
+    const eventsDir = await answerEventsDirFor(root);
+    await writeRawFile(eventsDir, "a1-ans-devA-s1.ndjson", answerSegment(["e01"]));
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+    const { details, stop } = captureBroadcasts();
+    try {
+      // a colleague's own answer (answeredBy emp1 in the fixture) grows a segment...
+      await writeRawFile(eventsDir, "a1-ans-devA-s1.ndjson", answerSegment(["e01", "e02"]));
+      await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      // ...and a supervisor's on-behalf answer for emp7 lands in a new chain
+      await writeRawFile(
+        eventsDir,
+        "b1-ans-devS-s2.ndjson",
+        `${JSON.stringify({ eventId: "obo1", eventType: "item-saved", eventAt: "2026-05-01T09:00:00.000Z", eventBy: "sup1", authority: "supervisor", xrayImageId: "XR-9", answers: [], status: "draft", answeredBy: "EMP7", answeredOnBehalfBy: "sup1" })}\n`
+      );
+      await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    } finally {
+      stop();
+    }
+    const owners = details.map((d) => (d.source === "periodic" ? [...(d.answerOwners ?? ["<unknown>"])].sort() : ["manual"]));
+    expect(owners).toEqual([["emp1"], ["emp7"]]);
+  });
+
+  it("A9: an unclassifiable change leaves the owners unknown (null), never a guess", async () => {
+    const root = makeRoot();
+    const eventsDir = await answerEventsDirFor(root);
+    await writeRawFile(eventsDir, "a1-ans-devA-s1.ndjson", answerSegment(["e01"]));
+    await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    const { details, stop } = captureBroadcasts();
+    try {
+      await writeRawFile(eventsDir, "a1-ans-devA-s1.ndjson", answerSegment(["e01"]) + "not json\n");
+      await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    } finally {
+      stop();
+    }
+    expect(details).toHaveLength(1);
+    expect(details[0]!.source === "periodic" && details[0]!.answerOwners).toBeNull();
+  });
+
+  it("A9: a per-employee requests file change is reported as requests (it had no probe of its own)", async () => {
+    const root = makeRoot();
+    const answersDir = await getSampleEmployeeDir(root, MONTH, true);
+    await writeRawFile(answersDir, "alice.requests.json", "[]");
+    await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    await writeRawFile(answersDir, "alice.requests.json", '[{"requestId":"r1"}]');
+    const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    expect([...changed]).toEqual(["requests"]);
   });
 
   it("reports nothing on a tick where the answer segments genuinely did not change", async () => {

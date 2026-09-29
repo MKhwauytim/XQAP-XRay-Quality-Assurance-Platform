@@ -76,6 +76,7 @@ import {
   NOTIFICATIONS_SUBFOLDERS,
   SAMPLE_SUBFOLDERS,
   SYSTEM_FOLDER_NAMES,
+  getSampleMainDir,
 } from "./workspacePaths";
 import { DEFAULT_SYNC_INTERVAL_MS, readSyncIntervalMs } from "./syncSettings";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
@@ -95,6 +96,7 @@ export const FOCUS_COALESCE_WINDOW_MS = 10_000;
 const MONTH_MANIFEST_FILE = "month.manifest.json";
 const NOTIFICATIONS_FILE = "notifications.json";
 const ANSWERS_SUFFIX = ".answers.json";
+const REQUESTS_SUFFIX = ".requests.json";
 const DECISIONS_SUFFIX = ".json";
 
 /**
@@ -172,6 +174,12 @@ type Probe = {
    *  deliberately NOT read here, and why it is still the signal for the
    *  single-file manifest/notifications probes). */
   answersSignature: Probed<string>;
+  /** Bounded name+size signature of the per-employee `*.requests.json` files
+   *  (referral / replacement / reopen queues). Before the answers family was
+   *  split from "requests" nothing probed these directly: a request change was
+   *  only ever noticed because an answer-segment change happened to mark
+   *  "requests" too. Now it has its own signal. */
+  requestsFilesSignature: Probed<string>;
   approvalsSignature: Probed<string>;
   manifestRevision: Probed<number | null>;
   /** Bounded name+size signature of `distribution.events/*.ndjson` (see
@@ -449,6 +457,16 @@ async function safeSegmentsSignature(dir: DirectoryHandleLike | null): Promise<P
   }
 }
 
+async function safeRequestsFilesSignature(dir: DirectoryHandleLike | null): Promise<Probed<string>> {
+  if (!dir) return "";
+  try {
+    return await boundedSizeSignature(dir, REQUESTS_SUFFIX);
+  } catch (error) {
+    logError("workspaceSync:probeRequestsFiles", error);
+    return UNPROBED;
+  }
+}
+
 /** §6 of the answer-save proposal: read-only, bounded — same primitive and shape as `safeSegmentsSignature` above. */
 async function safeAnswerSegmentsSignature(
   dir: DirectoryHandleLike | null,
@@ -569,6 +587,7 @@ async function probeMonth(
     notificationsRevision,
     acksSignature,
     answersSignature,
+    requestsFilesSignature,
     approvalsSignature,
     manifestRevision,
     segmentsSignature,
@@ -589,6 +608,7 @@ async function probeMonth(
       safeRevision(dirs.notificationsDir, NOTIFICATIONS_FILE),
       safeAcksSignature(dirs.notificationsDir),
       safeSignature(dirs.employeesDir, ANSWERS_SUFFIX),
+      safeRequestsFilesSignature(dirs.employeesDir),
       safeSignature(dirs.approvalsDir, DECISIONS_SUFFIX),
       safeRevision(dirs.populationMonthDir, MONTH_MANIFEST_FILE),
       safeSegmentsSignature(dirs.eventsDir),
@@ -601,6 +621,7 @@ async function probeMonth(
     notificationsRevision,
     acksSignature,
     answersSignature,
+    requestsFilesSignature,
     approvalsSignature,
     manifestRevision,
     segmentsSignature,
@@ -615,6 +636,7 @@ function carryUnprobed(previous: Probe, current: Probe): Probe {
     notificationsRevision: carry(previous.notificationsRevision, current.notificationsRevision),
     acksSignature: carry(previous.acksSignature, current.acksSignature),
     answersSignature: carry(previous.answersSignature, current.answersSignature),
+    requestsFilesSignature: carry(previous.requestsFilesSignature, current.requestsFilesSignature),
     approvalsSignature: carry(previous.approvalsSignature, current.approvalsSignature),
     manifestRevision: carry(previous.manifestRevision, current.manifestRevision),
     segmentsSignature: carry(previous.segmentsSignature, current.segmentsSignature),
@@ -653,19 +675,24 @@ function diffFamilies(previous: Probe | undefined, current: Probe): Set<DataRefr
   ) {
     changed.add("notifications");
   }
+  if (movedFrom(previous.answersSignature, current.answersSignature, sameValue)) {
+    // The legacy per-employee `.answers.json` listing stays ambiguous by
+    // construction (a pre-migration item file OR a queue written into it), so
+    // it marks both, as it always did.
+    changed.add("requests");
+    changed.add("answers");
+  }
+  if (movedFrom(previous.requestsFilesSignature, current.requestsFilesSignature, sameValue)) {
+    changed.add("requests");
+  }
   if (
-    movedFrom(previous.answersSignature, current.answersSignature, sameValue) ||
     // §6 of the answer-save proposal: the item-answer event log's own
-    // freshness signal, independent of the legacy per-employee file
-    // signature above (an employee whose answers now live entirely in
-    // `answers.events/` moves nothing the legacy signature can see).
+    // freshness signal. Event segments hold answers only (requests live in
+    // `.requests.json` / the approvals log, probed above), so this marks
+    // "answers" alone: a colleague saving their own answer no longer looks
+    // like a request change to every subscriber of "requests".
     movedFrom(previous.answersEventsSignature, current.answersEventsSignature, sameValue)
   ) {
-    // Ambiguous by construction (see Probe's doc comment): an answers-dir
-    // size change could be a new referral/replacement/reopen request OR a
-    // changed item answer. Mark both rather than guessing -- the cost is an
-    // extra invalidation on subscribers of one family, never a missed one.
-    changed.add("requests");
     changed.add("answers");
   }
   if (movedFrom(previous.approvalsSignature, current.approvalsSignature, sameValue)) {
@@ -726,11 +753,70 @@ export function movedAnswerSegmentNames(previous: string, current: string): Set<
   return moved.size > 500 ? null : moved;
 }
 
+/** Bounds on the owners peek: a tick never reads more than this to classify a colleague's change. */
+const OWNER_PEEK_MAX_SEGMENTS = 24;
+const OWNER_PEEK_MAX_BYTES = 256 * 1024;
+
+/**
+ * Whose answers did the moved segments gain? Reads ONLY the bytes appended since
+ * the previous tick (`slice(previousSize)`) of at most `OWNER_PEEK_MAX_SEGMENTS`
+ * segments and collects the lower-cased `answeredBy` of every new event. Returns
+ * null ("unknown -- assume it is yours") for anything it cannot prove: too many
+ * or too large a change, a segment that shrank, an unreadable segment, a line
+ * that does not parse. Never throws.
+ */
+async function peekAnswerOwners(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  prevSizes: Map<string, number>
+): Promise<Set<string> | null> {
+  if (prevSizes.size === 0 || prevSizes.size > OWNER_PEEK_MAX_SEGMENTS) return null;
+  try {
+    const mainDir = await getSampleMainDir(directoryHandle, monthFolderName, false);
+    const eventsDir = await mainDir.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: false });
+    const owners = new Set<string>();
+    let budget = OWNER_PEEK_MAX_BYTES;
+    const results = await Promise.all(
+      [...prevSizes].map(async ([name, previousSize]) => {
+        const file = await (await eventsDir.getFileHandle(name, { create: false })).getFile();
+        if (file.size < previousSize) return null;
+        if (file.size === previousSize) return [] as string[];
+        budget -= file.size - previousSize;
+        if (budget < 0) return null;
+        const text = await file.slice(previousSize).text();
+        const out: string[] = [];
+        for (const line of text.split("\n")) {
+          if (line.trim() === "") continue;
+          const event = JSON.parse(line) as { answeredBy?: unknown };
+          if (typeof event.answeredBy !== "string") return null;
+          out.push(event.answeredBy.trim().toLowerCase());
+        }
+        return out;
+      })
+    );
+    for (const result of results) {
+      if (result === null) return null;
+      for (const owner of result) owners.add(owner);
+    }
+    return owners;
+  } catch (error) {
+    logError("workspaceSync:peekAnswerOwners", error);
+    return null;
+  }
+}
+
 async function probeChangedFamilies(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   systemDir: DirectoryHandleLike | null
-): Promise<{ changed: Set<DataRefreshFamily>; sealedInvalidation: "none" | "all" | ReadonlySet<string> }> {
+): Promise<{
+  changed: Set<DataRefreshFamily>;
+  sealedInvalidation: "none" | "all" | ReadonlySet<string>;
+  /** segment name -> its size at the previous tick (0 when new), for the owners peek; null = unknown. */
+  movedSegmentPrevSizes: Map<string, number> | null;
+  /** The legacy `.answers.json` listing moved too: whose answers is then unknowable from segments. */
+  legacyAnswersMoved: boolean;
+}> {
   const key = probeKey(directoryHandle, monthFolderName);
   const previous = previousProbes.get(key);
   // First look at this (workspace, month) this session: the diff below has
@@ -749,16 +835,22 @@ async function probeChangedFamilies(
   // and the requests families never touch a segment); and only the names that
   // moved can have grown, so a colleague's activity elsewhere keeps the rest.
   let sealedInvalidation: "none" | "all" | ReadonlySet<string> = "none";
+  let movedSegmentPrevSizes: Map<string, number> | null = null;
   if (
     previous &&
     movedFrom(previous.answersEventsSignature, current.answersEventsSignature, sameValue) &&
     isProbed(previous.answersEventsSignature) &&
     isProbed(current.answersEventsSignature)
   ) {
-    sealedInvalidation =
-      movedAnswerSegmentNames(previous.answersEventsSignature, current.answersEventsSignature) ?? "all";
+    const moved = movedAnswerSegmentNames(previous.answersEventsSignature, current.answersEventsSignature);
+    sealedInvalidation = moved ?? "all";
+    if (moved) {
+      const before = parseSizeSignature(previous.answersEventsSignature);
+      movedSegmentPrevSizes = new Map([...moved].map((name) => [name, before?.sizes.get(name) ?? 0]));
+    }
   }
-  return { changed, sealedInvalidation };
+  const legacyAnswersMoved = !!previous && movedFrom(previous.answersSignature, current.answersSignature, sameValue);
+  return { changed, sealedInvalidation, movedSegmentPrevSizes, legacyAnswersMoved };
 }
 
 export type SyncRunOptions = {
@@ -823,9 +915,15 @@ async function performSync(options: SyncRunOptions, manual: boolean): Promise<Sy
 
   let changed = new Set<DataRefreshFamily>();
   let sealedInvalidation: "none" | "all" | ReadonlySet<string> = "none";
+  let answerOwners: Set<string> | null = null;
+  let legacyAnswersMoved = false;
   if (directoryHandle && monthFolderName) {
     try {
-      ({ changed, sealedInvalidation } = await probeChangedFamilies(directoryHandle, monthFolderName, systemDir));
+      let movedSegmentPrevSizes: Map<string, number> | null;
+      ({ changed, sealedInvalidation, movedSegmentPrevSizes, legacyAnswersMoved } = await probeChangedFamilies(directoryHandle, monthFolderName, systemDir));
+      if (changed.has("answers") && movedSegmentPrevSizes) {
+        answerOwners = await peekAnswerOwners(directoryHandle, monthFolderName, movedSegmentPrevSizes);
+      }
     } catch (error) {
       logError("workspaceSync:probe", error);
       ok = false;
@@ -859,7 +957,13 @@ async function performSync(options: SyncRunOptions, manual: boolean): Promise<Sy
     if (manual) {
       broadcastDataRefresh("manual");
     } else {
-      broadcastDataRefresh({ source: "periodic", changed });
+      // A legacy-file answers change (or a peek that could not classify) leaves the
+      // owners unknown; consumers then assume the change may be theirs.
+      broadcastDataRefresh({
+        source: "periodic",
+        changed,
+        answerOwners: changed.has("answers") && !legacyAnswersMoved ? answerOwners : null,
+      });
     }
   }
 

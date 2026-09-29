@@ -29,7 +29,9 @@ import {
 } from "../../../../../data/distribution/distributionStorage";
 import {
   notifyLocalDataChange,
-  subscribeToDataRefresh,
+  subscribeToDataChange,
+  ALL_DATA_REFRESH_FAMILIES,
+  answersMayConcern,
   type DataRefreshFamily,
 } from "../../../../../data/workspace/dataRefreshSignal";
 import {
@@ -1491,10 +1493,24 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   // view's OWN submit announcement — handleSave's setAnswers already reconciled
   // it (same idiom as useApprovalData.ts's ownDecisionBroadcastRef).
   const ownAnswerBroadcastRef = useRef(false);
-  useEffect(() => subscribeToDataRefresh(() => {
+  // A9: an employee's queue depends on distribution, requests, the month manifest
+  // and THEIR OWN answers. A colleague saving their own answer (the common case at
+  // N >= 3, every tick) is none of those, so it no longer reloads the queue; a
+  // supervisor's on-behalf answer, reopen or quality note on this employee's row
+  // names them as an owner (`answersMayConcern`) and still does. Oversight users
+  // render everyone's answers and keep reloading on every change.
+  useEffect(() => subscribeToDataChange(ALL_DATA_REFRESH_FAMILIES, (detail) => {
     if (ownAnswerBroadcastRef.current) return;
+    if (!canSeeAll && detail.source === "periodic") {
+      const touchesQueue =
+        detail.changed.has("distribution") ||
+        detail.changed.has("requests") ||
+        detail.changed.has("manifest") ||
+        answersMayConcern(detail, username);
+      if (!touchesQueue) return;
+    }
     void loadData({ silent: true });
-  }), [loadData]);
+  }), [loadData, canSeeAll, username]);
 
   async function handleTplSelect(id: string): Promise<void> {
     await applyTemplate(id, canSetTemplate);
