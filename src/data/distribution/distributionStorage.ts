@@ -26,7 +26,7 @@ import {
 import { codedMessage, logCodedError, resolveErrorCode } from "../storage/errorCodes";
 import { listDirectoryEntries, listDirectoryEntriesWithSize, readAppendOnlyDirectory, readNamedJsonFiles } from "../storage/directoryScan";
 import { simpleHash } from "../storage/jsonEnvelope";
-import { ensureMonthWritable } from "../population/monthLock";
+import { ensureMonthWritable, MonthClosedError } from "../population/monthLock";
 import { syncSampleMirrors } from "../samples/sampleMirrorStorage";
 import { loadSampleMaster } from "../sampling/sampleStorage";
 import {
@@ -1317,6 +1317,38 @@ export function isDistributionPersistPending(
   return (persistChains.get(projectionChainKey(directoryHandle, monthFolderName))?.pending ?? 0) > 0;
 }
 
+/** Jittered pause before the ONE retry of a failed background persist (R1 review). */
+const persistRetry: { minMs: number; maxMs: number; beforeRetry?: () => void } = { minMs: 1_000, maxMs: 3_000 };
+
+export function __setPersistRetryDelayForTests(
+  config: { minMs: number; maxMs: number; beforeRetry?: () => void } | null
+): void {
+  persistRetry.minMs = config?.minMs ?? 1_000;
+  persistRetry.maxMs = config?.maxMs ?? 3_000;
+  persistRetry.beforeRetry = config?.beforeRetry;
+}
+
+/**
+ * How much of the event store a snapshot was derived from: total segment bytes
+ * (append-only, so monotonic), else the checkpoint's known-event count. Undefined
+ * when the snapshot carries neither (hand-built). Used to order queued snapshots:
+ * `logRevision` cannot, because it lags the events whenever the projection bump
+ * has not landed.
+ */
+function eventCoverage(current: DistributionCurrentData): number | undefined {
+  const offsets = current.scanIdentity?.segmentOffsets ?? current.foldCheckpoint?.segmentOffsets;
+  if (offsets) return Object.values(offsets).reduce((sum, size) => sum + size, 0);
+  return current.foldCheckpoint?.knownEventIds.length;
+}
+
+/** True when `incoming` may take the place of the queued `held` snapshot. */
+function supersedes(incoming: DistributionCurrentData, held: DistributionCurrentData): boolean {
+  const a = eventCoverage(incoming);
+  const b = eventCoverage(held);
+  if (a !== undefined && b !== undefined) return a >= b;
+  return true; // not comparable: the later enqueue wins
+}
+
 function enqueuePersist(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
@@ -1330,9 +1362,9 @@ function enqueuePersist(
     const held = queued.request;
     if (request.kind === "rebuild") {
       queued.request = request; // derives fresh when it runs, so it supersedes anything queued
-    } else if (held.kind === "snapshot" && (request.current.logRevision ?? 0) >= (held.current.logRevision ?? 0)) {
+    } else if (held.kind === "snapshot" && supersedes(request.current, held.current)) {
       queued.request = request;
-    } // else: a queued rebuild already covers this snapshot, or it is older than the queued one
+    } // else: a queued rebuild already covers this snapshot, or it covers less of the event store than the queued one
     return queued.job;
   }
   chain.pending += 1;
@@ -1341,13 +1373,29 @@ function enqueuePersist(
   const job: Promise<void> = chain.tail.then(async () => {
     mine.started = true;
     if (chain.queued === mine) chain.queued = null;
-    try {
-      const req = mine.request;
+    const req = mine.request;
+    const attempt = async (): Promise<void> => {
       const current =
         req.kind === "snapshot" ? req.current : await rebuildCurrentFromEvents(directoryHandle, monthFolderName, req.sampleRows);
       if (current) await saveDistributionCurrent(directoryHandle, monthFolderName, current);
-    } catch (error) {
-      logRejection("distribution:cache-write")(error);
+    };
+    try {
+      await attempt();
+    } catch (first) {
+      // Everything here is rebuildable, but nothing else rewrites it until the next
+      // write in the month, so one bounded, jittered retry keeps it healing. A closed
+      // month is permanent, not transient: no retry.
+      if (first instanceof MonthClosedError) {
+        logRejection("distribution:cache-write")(first);
+      } else {
+        await waitFor(persistRetry.minMs + Math.random() * (persistRetry.maxMs - persistRetry.minMs));
+        persistRetry.beforeRetry?.();
+        try {
+          await attempt();
+        } catch (second) {
+          logRejection("distribution:cache-write")(second);
+        }
+      }
     }
   });
   mine.job = job;
@@ -1366,12 +1414,13 @@ function enqueuePersist(
  * did, because everything written here is rebuildable from the immutable events.
  *
  * Coalescing: a persist that is queued behind a running one and has not started
- * takes the NEWER snapshot in place of the one it held, so a burst of clicks
- * writes the cache and every mirror once, not once per click. A snapshot with
- * an older `logRevision` never displaces a newer queued one (a slow reader that
- * derived before the latest append must not roll the queued write backwards).
- * Nothing is lost by dropping the superseded snapshot: the winner is derived
- * from a superset of the events and readers verify by `eventSetId`/scan anyway.
+ * takes the newer snapshot in place of the one it held, so a burst of clicks
+ * writes the cache and every mirror once, not once per click. "Newer" is ordered
+ * by how much of the event store a snapshot covers (segment bytes, else known
+ * event count) and NOT by `logRevision`, which lags the events while a projection
+ * bump is pending; a snapshot that covers less never displaces one that covers
+ * more, and snapshots that cannot be compared go to the later enqueue. A failed
+ * persist is retried once after a jittered 1-3 s pause, then logged.
  */
 export function queueDistributionCurrentPersist(
   directoryHandle: DirectoryHandleLike,
