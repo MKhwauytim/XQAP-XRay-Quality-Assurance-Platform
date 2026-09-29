@@ -1410,6 +1410,19 @@ describe("runSync — §6 of the answer-save proposal: the answers.events segmen
       expect(noticed).toBeGreaterThan(0);
     });
 
+    it("a persistently failing store does not hide a change in a healthy one", async () => {
+      const root = makeRoot();
+      await getSampleMainDir(root, MONTH, true);
+      const stores = await makeStores(root, 2, 0);
+      await writeRawFile(stores[0]!.ans, "bad-ans-devB-s1.ndjson", '{"eventId":"b"}\n');
+      await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline, healthy
+      setSimulatedFaults(root, [{ operation: "getFile", name: "bad-ans-devB-s1.ndjson", errorName: "SecurityError", times: 1000 } as never]);
+      await writeRawFile(stores[1]!.dist, "x-dist-dev-s.ndjson", '{"eventId":"a1","type":"assign"}\n');
+      const seen: string[][] = [];
+      for (let t = 0; t < 3; t += 1) seen.push([...(await runSync({ directoryHandle: root, monthFolderName: MONTH })).changed]);
+      expect(seen.some((c) => c.includes("distribution"))).toBe(true);
+    });
+
     it("an ad-hoc answers change reports answers only (never distribution)", async () => {
       const root = makeRoot();
       await getSampleMainDir(root, MONTH, true);

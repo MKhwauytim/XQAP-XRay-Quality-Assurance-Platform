@@ -534,7 +534,13 @@ async function probeAdhocStores(
     }
     const toCheck = ids.filter((id) => !state!.assigned.has(id) || (recheckUnassigned && state!.assigned.get(id) === false));
     await mapWithConcurrency(toCheck, ADHOC_PROBE_CONCURRENCY, async (id) => {
-      state!.assigned.set(id, await adhocStoreHasDistributionEvents(directoryHandle, id));
+      try {
+        state!.assigned.set(id, await adhocStoreHasDistributionEvents(directoryHandle, id));
+      } catch (error) {
+        // Keep whatever is known (unknown stays unknown and is checked again next tick);
+        // one store's failure must never stop the others.
+        logError("workspaceSync:probeAdhocStoreAssigned", error, { action: id });
+      }
     });
     const assignedIds = ids.filter((id) => state!.assigned.get(id) === true);
     // A store never observed yet is always probed (once), so the rotation never reports a store's
@@ -550,27 +556,34 @@ async function probeAdhocStores(
     const chosen = [...new Set([...unobserved, ...rotation])];
     const actor = readRealSession()?.username;
     await mapWithConcurrency(chosen, ADHOC_PROBE_CONCURRENCY, async (id) => {
-      const folder = adhocMonthFolder(id);
-      const mainDir = await openOrNull(() => getSampleMonthDir(directoryHandle, folder, false));
-      const main = mainDir ? await openOrNull(() => mainDir.getDirectoryHandle(SAMPLE_SUBFOLDERS.main, { create: false })) : null;
-      const [distDir, ansDir] = main
-        ? await Promise.all([
-            openOrNull(() => main.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: false })),
-            openOrNull(() => main.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: false })),
-          ])
-        : [null, null];
-      state!.lastSig.set(id, {
-        dist: distDir ? await boundedSizeSignature(distDir, DISTRIBUTION_EVENT_SEGMENT_SUFFIX) : "",
-        answers: ansDir
-          ? await boundedSizeSignature(
-              ansDir,
-              ANSWER_EVENT_SEGMENT_SUFFIX,
-              ANSWER_SEGMENT_HEAD_STAT_BUDGET,
-              actor ? ownStableAnswerSegmentMatcher(folder, actor) : undefined,
-              true
-            )
-          : "",
-      });
+      // Each store is probed in its OWN try/catch: a store that cannot be stat'd on every tick keeps
+      // its last observed signature (carried like an unprobed store) and must not turn the whole
+      // ad-hoc probe UNPROBED, which would hide every other store's changes forever.
+      try {
+        const folder = adhocMonthFolder(id);
+        const mainDir = await openOrNull(() => getSampleMonthDir(directoryHandle, folder, false));
+        const main = mainDir ? await openOrNull(() => mainDir.getDirectoryHandle(SAMPLE_SUBFOLDERS.main, { create: false })) : null;
+        const [distDir, ansDir] = main
+          ? await Promise.all([
+              openOrNull(() => main.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: false })),
+              openOrNull(() => main.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: false })),
+            ])
+          : [null, null];
+        state!.lastSig.set(id, {
+          dist: distDir ? await boundedSizeSignature(distDir, DISTRIBUTION_EVENT_SEGMENT_SUFFIX) : "",
+          answers: ansDir
+            ? await boundedSizeSignature(
+                ansDir,
+                ANSWER_EVENT_SEGMENT_SUFFIX,
+                ANSWER_SEGMENT_HEAD_STAT_BUDGET,
+                actor ? ownStableAnswerSegmentMatcher(folder, actor) : undefined,
+                true
+              )
+            : "",
+        });
+      } catch (error) {
+        logError("workspaceSync:probeAdhocStore", error, { action: id });
+      }
     });
     return {
       dist: JSON.stringify(assignedIds.map((id) => [id, state!.lastSig.get(id)?.dist ?? ""])),
