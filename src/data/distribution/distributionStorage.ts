@@ -513,15 +513,14 @@ export async function readDistributionLogStamp(
     resolved !== undefined
       ? resolved.currentDir
       : await openOptionalDirectory(() => getDistributionDir(directoryHandle, monthFolderName, false));
-  const legacyDir =
-    resolved !== undefined
-      ? resolved.legacyDir
-      : await openOptionalDirectory(() => getLegacyDistributionDir(directoryHandle, monthFolderName));
+  const legacyDir = resolved !== undefined ? resolved.legacyDir : null; // unresolved: read through the absence memo below
   const currentLog = normalizeCompatibilityLog(
     await readCompatibilityLog(currentDir, `Corrupt distribution compatibility log: ${LOG_FILE}`)
   );
   const legacyLog = normalizeCompatibilityLog(
-    await readCompatibilityLog(legacyDir, `Corrupt legacy distribution log: ${LOG_FILE}`)
+    resolved === undefined
+      ? await readLegacyDistributionLog(directoryHandle, monthFolderName)
+      : await readCompatibilityLog(legacyDir, `Corrupt legacy distribution log: ${LOG_FILE}`)
   );
   return {
     revision: Math.max(currentLog.revision, legacyLog.revision),
@@ -1593,13 +1592,10 @@ async function readNewEventsSinceCheckpoint(
   const directory = await openOptionalDirectory(() => getDistributionDir(directoryHandle, monthFolderName, false));
   if (!directory) return null;
 
-  const legacyDir = await openOptionalDirectory(() => getLegacyDistributionDir(directoryHandle, monthFolderName));
   const currentCompatLog = normalizeCompatibilityLog(
     await readCompatibilityLog(directory, `Corrupt distribution compatibility log: ${LOG_FILE}`)
   );
-  const legacyCompatLog = normalizeCompatibilityLog(
-    await readCompatibilityLog(legacyDir, `Corrupt legacy distribution log: ${LOG_FILE}`)
-  );
+  const legacyCompatLog = normalizeCompatibilityLog(await readLegacyDistributionLog(directoryHandle, monthFolderName));
   const compatEvents =
     currentCompatLog.events.length > 0
       ? mergeDistributionEvents(currentCompatLog.events, legacyCompatLog.events)
