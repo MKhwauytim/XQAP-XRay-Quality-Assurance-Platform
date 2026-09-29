@@ -935,7 +935,7 @@ async function performSync(options: SyncRunOptions, manual: boolean): Promise<Sy
   let changed = new Set<DataRefreshFamily>();
   let sealedInvalidation: "none" | "all" | ReadonlySet<string> = "none";
   let answerOwners: Set<string> | null = null;
-  let legacyAnswersMoved = false;
+  let ownersUnknown: boolean | undefined;
   let ownersUnknown = false;
   if (directoryHandle && monthFolderName) {
     try {
