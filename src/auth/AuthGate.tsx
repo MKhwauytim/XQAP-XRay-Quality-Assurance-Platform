@@ -63,6 +63,7 @@ import {
 import { useWorkspace } from "../data/workspace/useWorkspace";
 import { syncUserManagementToDisk } from "../data/workspace/userSync";
 import { codedMessage, logCodedError } from "../data/storage/errorCodes";
+import { logError } from "../data/storage/errorLogger";
 import { LoadingState } from "../components/StateViews/StateViews";
 import { GlobalMonthProvider } from "../data/month/GlobalMonthProvider";
 import { useLabels } from "../data/labels/useLabels";
@@ -179,6 +180,16 @@ export default function AuthGate({ children }: AuthGateProps) {
   // True while a passcode verify is running; a second submit is ignored.
   const verifyInFlightRef = useRef(false);
   const [isVerifying, setIsVerifying] = useState(false);
+  // Disabling the focused input during a verify drops focus to <body>; the
+  // input used is refocused once the guard is released and it is enabled again.
+  const refocusRef = useRef<(() => HTMLElement | null) | null>(null);
+  const adminPasscodeInputRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (!isVerifying && refocusRef.current) {
+      refocusRef.current()?.focus();
+      refocusRef.current = null;
+    }
+  }, [isVerifying]);
   const [lockoutUntil, setLockoutUntil] = useState<number | null>(null);
   const [lockoutSecondsLeft, setLockoutSecondsLeft] = useState(0);
 
@@ -520,12 +531,19 @@ export default function AuthGate({ children }: AuthGateProps) {
   // Runs one passcode verification at a time. A submit that arrives while
   // another is still running (key-repeat Enter, fast clicks) is dropped, so a
   // wrong guess can never be verified without being counted.
-  async function runGuardedLogin(attempt: () => Promise<void>): Promise<void> {
+  async function runGuardedLogin(
+    attempt: () => Promise<void>,
+    refocus: () => HTMLElement | null
+  ): Promise<void> {
     if (verifyInFlightRef.current) return;
     verifyInFlightRef.current = true;
     setIsVerifying(true);
+    refocusRef.current = refocus;
     try {
       await attempt();
+    } catch (error) {
+      // A throwing verifier is not a wrong guess: log it, never count it.
+      logError("authGate:verify", error);
     } finally {
       verifyInFlightRef.current = false;
       setIsVerifying(false);
@@ -536,7 +554,10 @@ export default function AuthGate({ children }: AuthGateProps) {
     event: FormEvent<HTMLFormElement>
   ): Promise<void> {
     event.preventDefault();
-    await runGuardedLogin(() => performEmployeeLogin());
+    await runGuardedLogin(
+      () => performEmployeeLogin(),
+      () => document.getElementById("authPassword")
+    );
   }
 
   async function performEmployeeLogin(): Promise<void> {
@@ -644,7 +665,10 @@ export default function AuthGate({ children }: AuthGateProps) {
   }
 
   async function loginAsBootstrapAdmin(): Promise<void> {
-    await runGuardedLogin(() => performBootstrapAdminLogin());
+    await runGuardedLogin(
+      () => performBootstrapAdminLogin(),
+      () => adminPasscodeInputRef.current
+    );
   }
 
   async function performBootstrapAdminLogin(): Promise<void> {
@@ -975,6 +999,7 @@ export default function AuthGate({ children }: AuthGateProps) {
 
             <input
               type="password"
+              ref={adminPasscodeInputRef}
               aria-label={labels.auth_admin_passcode_aria}
               value={adminPasscode}
               onChange={(event) => setAdminPasscode(event.target.value)}

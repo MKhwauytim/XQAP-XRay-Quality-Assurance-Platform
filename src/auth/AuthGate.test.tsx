@@ -892,7 +892,8 @@ describe("AuthGate — lockout counts every failed verify and ignores overlappin
     fireEvent.keyDown(input, { key: "Enter" });
     await flush();
     expect(within(modal).getByRole("button", { name: /يُرجى الانتظار/ })).toBeDisabled();
-    expect(verify).toHaveBeenCalled();
+    // 3 attempts x 2 layout-fallback candidates for "wrong".
+    expect(verify).toHaveBeenCalledTimes(6);
   });
 
   it("still logs in with the correct passcode after failures below the threshold", async () => {
@@ -910,5 +911,69 @@ describe("AuthGate — lockout counts every failed verify and ignores overlappin
     fireEvent.change(input, { target: { value: "admin" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(screen.getByText("authenticated")).toBeInTheDocument());
+  });
+  it("keeps focus on the modal passcode input after a failed attempt", async () => {
+    vi.spyOn(passwordCrypto, "verifyPasswordHash").mockResolvedValue(false);
+    renderAuthGate();
+    openModal();
+    const modal = await screen.findByRole("dialog", { name: "دخول مسؤول النظام" });
+    const input = within(modal).getByLabelText("رمز مسؤول النظام");
+    fireEvent.change(input, { target: { value: "wrong" } });
+    input.focus();
+    fireEvent.keyDown(input, { key: "Enter" });
+    await flush();
+    expect(input).toBeEnabled();
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("form path: overlapping submits run one verify and disable the controls", async () => {
+    const { spy, pending } = deferredVerify();
+    const { container } = renderAuthGate();
+    const user = await waitFor(() => {
+      const el = container.querySelector<HTMLInputElement>("#authUsername");
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    const pass = container.querySelector<HTMLInputElement>("#authPassword")!;
+    fireEvent.change(user, { target: { value: "admin" } });
+    fireEvent.change(pass, { target: { value: "wrong" } });
+    const form = container.querySelector("form")!;
+    const submit = within(form).getByRole("button", { name: "دخول" });
+
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    await flush();
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(submit).toBeDisabled();
+    expect(user).toBeDisabled();
+    expect(pass).toBeDisabled();
+
+    while (pending.length) {
+      await act(async () => { pending.shift()!(false); });
+      await flush();
+    }
+    expect(pass).toBeEnabled();
+    expect(document.activeElement).toBe(pass);
+  });
+
+  it("releases the guard when the verifier throws, so a later submit verifies again", async () => {
+    const spy = vi.spyOn(passwordCrypto, "verifyPasswordHash")
+      .mockRejectedValue(new Error("boom"));
+    renderAuthGate();
+    openModal();
+    const modal = await screen.findByRole("dialog", { name: "دخول مسؤول النظام" });
+    const input = within(modal).getByLabelText("رمز مسؤول النظام");
+    fireEvent.change(input, { target: { value: "wrong" } });
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    await flush();
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(input).toBeEnabled();
+    expect(within(modal).getByRole("button", { name: "دخول" })).toBeEnabled();
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    await flush();
+    expect(spy).toHaveBeenCalledTimes(2);
   });
 });
