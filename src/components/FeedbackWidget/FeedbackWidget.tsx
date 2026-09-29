@@ -14,11 +14,8 @@ import {
   type FeedbackThreadSummary,
 } from "../../data/feedback/feedbackStorage";
 import { canManageFeedback } from "../../data/feedback/feedbackUnread";
-import { exportFeedbackWorkbook } from "../../data/feedback/feedbackExport";
-import { readAllThreadsForExport } from "../../data/feedback/feedbackExportRead";
 import {
   indexThreadsById,
-  mergeFeedbackThreads,
   mergeSummariesWithLocalThreads,
   missingThreadIds,
   pickFresherThread,
@@ -26,6 +23,7 @@ import {
 import { useFeedbackUnread } from "../../data/feedback/useFeedbackUnread";
 import { logError } from "../../data/storage/errorLogger";
 import { useWorkspace } from "../../data/workspace/useWorkspace";
+import { useFeedbackExport } from "./useFeedbackExport";
 import Pagination from "../Pagination/Pagination";
 import { clampPage, pageSlice } from "../../utils/paginationUtils";
 import { getLabels } from "../../data/labels/labelsStore";
@@ -141,14 +139,6 @@ export function FeedbackWidget() {
   const [finalizing, setFinalizing] = useState(false);
   const [finalizeMessage, setFinalizeMessage] = useState<string | null>(null);
 
-  // Admin-only XLSX export of every conversation (Workstream B). The full read
-  // happens only on click, with progress -- see feedbackExportRead.ts.
-  const [isExporting, setIsExporting] = useState(false);
-  const [exportProgress, setExportProgress] = useState<{ done: number; total: number } | null>(null);
-  const [exportNotice, setExportNotice] = useState<
-    { kind: "error" | "empty" | "partial"; text: string } | null
-  >(null);
-
   // Submit form state
   const [category, setCategory] = useState<FeedbackCategory>("suggestion");
   const [text, setText] = useState("");
@@ -175,6 +165,12 @@ export function FeedbackWidget() {
   // admin-only controls: a demo session reports role "admin" purely to unlock
   // tab visibility and must never see this button.
   const isRealAdmin = session?.role === "admin" && session?.mode !== "demo";
+  const { isExporting, exportProgress, exportNotice, startExport } = useFeedbackExport({
+    directoryHandle,
+    isRealAdmin,
+    currentHandleRef,
+    threadsByIdRef,
+  });
 
   const refresh = useCallback(async () => {
     if (!directoryHandle) return;
@@ -326,45 +322,6 @@ export function FeedbackWidget() {
       setSubmitError(err instanceof Error ? err.message : getLabels().fb_reply_error_generic);
     } finally {
       setReplying(null);
-    }
-  }
-
-  async function handleExport() {
-    // Re-checked at the handler, not only at render (a demo session reports
-    // role "admin" and must never reach the read).
-    if (!isRealAdmin || !directoryHandle || isExporting) return;
-    const handle = directoryHandle;
-    setExportNotice(null);
-    setExportProgress(null);
-    setIsExporting(true);
-    try {
-      const { threads: read, skipped } = await readAllThreadsForExport(handle, {
-        onProgress: (done, total) => {
-          if (currentHandleRef.current === handle) setExportProgress({ done, total });
-        },
-      });
-      // Another workspace was opened while reading: this data is not its data.
-      if (currentHandleRef.current !== handle) return;
-      // A thread this tab wrote or read itself may be fresher than the read.
-      const threads = mergeFeedbackThreads(read, threadsByIdRef.current);
-      const { threadCount } = await exportFeedbackWorkbook(threads, getLabels());
-      // A header-only file is indistinguishable from a broken button -- say so,
-      // same reasoning as ErrorLogSection's export.
-      if (threadCount === 0) setExportNotice({ kind: "empty", text: getLabels().fb_export_empty });
-      else if (skipped > 0) {
-        setExportNotice({
-          kind: "partial",
-          text: getLabels().fb_export_partial.replace("{skipped}", String(skipped)),
-        });
-      }
-    } catch (err) {
-      logError("feedback:export", err);
-      if (currentHandleRef.current === handle) {
-        setExportNotice({ kind: "error", text: getLabels().fb_export_failed });
-      }
-    } finally {
-      setIsExporting(false);
-      setExportProgress(null);
     }
   }
 
@@ -617,7 +574,7 @@ export function FeedbackWidget() {
                     type="button"
                     className="ui-btn ui-btn--primary ui-btn--sm fb-export-btn"
                     disabled={isExporting}
-                    onClick={() => { void handleExport(); }}
+                    onClick={() => { void startExport(); }}
                   >
                     {exportProgress
                       ? getLabels()

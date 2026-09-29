@@ -10,7 +10,7 @@
  *
  * `loadThreads` deliberately SKIPS an unreadable file (one corrupt thread must
  * not blank a page). For an export that would be a silent omission from a file
- * people treat as complete, so the shortfall is counted and returned.
+ * people treat as complete, so the shortfall is returned by id.
  */
 
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
@@ -31,8 +31,8 @@ export type ExportReadOptions = {
 
 export type ExportReadResult = {
   threads: FeedbackMessage[];
-  /** Listed threads whose file could not be read. */
-  skipped: number;
+  /** Ids of listed threads whose file could not be read (the caller may hold a copy). */
+  skippedIds: string[];
 };
 
 export async function readAllThreadsForExport(
@@ -46,7 +46,7 @@ export async function readAllThreadsForExport(
     // `loadFeedback` reads from `messages.json`.
     const legacy = await loadFeedback(dir);
     options.onProgress?.(legacy.length, legacy.length);
-    return { threads: legacy, skipped: 0 };
+    return { threads: legacy, skippedIds: [] };
   }
 
   const ids = summaries.map((summary) => summary.threadId);
@@ -56,5 +56,6 @@ export async function readAllThreadsForExport(
     options.onProgress?.(Math.min(i + chunkSize, ids.length), ids.length);
     if (i + chunkSize < ids.length) await yieldToMain();
   }
-  return { threads, skipped: ids.length - threads.length };
+  const read = new Set(threads.map((thread) => thread.id));
+  return { threads, skippedIds: ids.filter((id) => !read.has(id)) };
 }

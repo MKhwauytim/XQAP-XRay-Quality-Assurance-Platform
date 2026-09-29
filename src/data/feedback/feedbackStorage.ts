@@ -43,7 +43,8 @@ export interface FeedbackMessage {
    * existed, and legacy `messages.json` entries, simply lack both -- no
    * migration, because no existing field changes shape. Consumers that need a
    * value for those (the admin export) approximate it from the last reply and
-   * say so.
+   * say so. A future reopen path MUST clear these stamps (or deliberately keep
+   * them and say so): `appendReply` only writes them on open -> resolved.
    */
   resolvedAt?: string;
   resolvedBy?: string;

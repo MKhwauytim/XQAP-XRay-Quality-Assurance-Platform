@@ -5,73 +5,73 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
-    "version": "v140.25",
-    "date": "2026-09-28",
+    "version": "v147.3",
+    "date": "2026-09-29",
     "bucket": "fix",
     "scope": "answers",
-    "title": "an older failed save can never replace a newer pending edit"
+    "title": "a failed reopen or quality note is reported, not queued as a stale answer replay"
   },
   {
-    "version": "v140.24",
-    "date": "2026-09-28",
-    "bucket": "fix",
-    "scope": "referrals",
-    "title": "a reload reopens the sample the employee was working on; drafts never shadow or outlive a submitted answer wrongly"
-  },
-  {
-    "version": "v140.23",
-    "date": "2026-09-28",
-    "bucket": "fix",
-    "scope": "referrals",
-    "title": "canonical draft key and visible draft-persistence failure"
-  },
-  {
-    "version": "v140.22",
-    "date": "2026-09-28",
-    "bucket": "fix",
+    "version": "v147.2",
+    "date": "2026-09-29",
+    "bucket": "enhancement",
     "scope": "answers",
-    "title": "unsaved answers are replayed app-wide for every month and ad-hoc import"
+    "title": "answer saves no longer run under casLoop; the decision is computed once, the append runs once, and every failure queues the answer"
   },
   {
-    "version": "v140.21",
+    "version": "v147.1",
+    "date": "2026-09-29",
+    "bucket": "fix",
+    "scope": "sync",
+    "title": "an employee's own answer saves no longer come back as a remote answers change"
+  },
+  {
+    "version": "v147.0",
+    "date": "2026-09-29",
+    "bucket": "fix",
+    "scope": "storage",
+    "title": "sealed answer segments are no longer opened on every read, and one that grows is never missed"
+  },
+  {
+    "version": "v146.0",
     "date": "2026-09-28",
     "bucket": "fix",
     "scope": "distribution",
-    "title": "with port restrictions, a stage shortfall is made up in the employee's other stages so monthly totals stay equal"
+    "title": "take the projection write off the click path; a mirror is trusted by a sizes-only listing of the event store"
   },
   {
-    "version": "v140.19",
+    "version": "v145.0",
     "date": "2026-09-28",
     "bucket": "fix",
-    "scope": "feedback",
-    "title": "apply submitted and replied threads optimistically, drop duplicate reloads"
+    "scope": "storage",
+    "title": "a write whose commit landed is not re-committed after an unreadable NotReadable read-back; durable feedback replies and decision events retry idempotently"
   },
   {
-    "version": "v140.18",
+    "version": "v144.2",
     "date": "2026-09-28",
     "bucket": "fix",
-    "scope": "feedback",
-    "title": "page bodies from the provider's in-memory threads"
+    "scope": "storage",
+    "title": "retry Chrome's Safe Browsing close() AbortError and give it its own error code"
   },
   {
-    "version": "v140.17",
-    "date": "2026-09-28",
-    "bucket": "fix",
-    "scope": "feedback",
-    "title": "open the panel from the thread index, full read in the background"
-  },
-  {
-    "version": "v140.16",
-    "date": "2026-09-28",
-    "bucket": "fix",
-    "scope": "reports",
-    "title": "stage groupings use Arabic labels in canonical order"
-  },
-  {
-    "version": "v140.14",
+    "version": "v144.1",
     "date": "2026-09-28",
     "bucket": "feature",
-    "scope": "stages",
-    "title": "shared canonical stage labels, order and comparator"
+    "scope": "settings",
+    "title": "admin «استعادة المجتمع السابق» section, gated by canMutate, showing sample coverage"
+  },
+  {
+    "version": "v144.0",
+    "date": "2026-09-28",
+    "bucket": "feature",
+    "scope": "population",
+    "title": "recovery engine that restores a previous population.final.json from its superseded archive or .bak, under the same orphan rule as a save"
+  },
+  {
+    "version": "v143.4",
+    "date": "2026-09-28",
+    "bucket": "feature",
+    "scope": "reporting",
+    "title": "warn wherever sampled images are shown from the sample snapshot, at month load and after refreshes, with Designer-specific wording"
   }
 ];

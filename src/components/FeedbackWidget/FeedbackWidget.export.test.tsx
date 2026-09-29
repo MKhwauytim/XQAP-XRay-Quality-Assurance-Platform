@@ -38,6 +38,14 @@ vi.mock("../../data/feedback/feedbackStorage", async (importOriginal) => {
   };
 });
 
+const reader = vi.hoisted(() => ({ spy: vi.fn() }));
+
+vi.mock("../../data/feedback/feedbackExportRead", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../data/feedback/feedbackExportRead")>();
+  reader.spy.mockImplementation(actual.readAllThreadsForExport);
+  return { ...actual, readAllThreadsForExport: (...args: Parameters<typeof actual.readAllThreadsForExport>) => reader.spy(...args) };
+});
+
 const exporter = vi.hoisted(() => ({
   run: vi.fn<
     (threads: readonly FeedbackMessage[], labels: Labels) => Promise<{ threadCount: number; messageCount: number }>
@@ -99,6 +107,7 @@ describe("FeedbackWidget — admin export", () => {
     storage.listThreadSummaries.mockReset().mockResolvedValue([SUMMARY]);
     storage.loadThreads.mockReset().mockResolvedValue([]);
     storage.loadFeedback.mockReset().mockResolvedValue([THREAD]);
+    reader.spy.mockClear();
     exporter.run.mockReset().mockResolvedValue({ threadCount: 1, messageCount: 1 });
   });
   afterEach(() => {
@@ -111,9 +120,9 @@ describe("FeedbackWidget — admin export", () => {
   it("reads every thread only when the button is clicked, then exports them", async () => {
     storage.loadThreads.mockImplementation(async (_dir, ids) => (ids.includes(THREAD.id) ? [THREAD] : []));
     await openAllMessages(session("admin"));
+    // Pinned at the source: opening the panel and the all-messages tab never starts the export read.
+    expect(reader.spy).not.toHaveBeenCalled();
     const summaryReadsBeforeClick = storage.listThreadSummaries.mock.calls.length;
-    const exportsBeforeClick = exporter.run.mock.calls.length;
-    expect(exportsBeforeClick).toBe(0);
 
     fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.fb_export_btn }));
 
@@ -121,11 +130,13 @@ describe("FeedbackWidget — admin export", () => {
     const [threads, labels] = exporter.run.mock.calls[0]!;
     expect(threads.map((t) => t.id)).toEqual([THREAD.id]);
     expect(labels.fb_export_sheet_threads).toBe(DEFAULT_LABELS.fb_export_sheet_threads);
+    expect(reader.spy).toHaveBeenCalledTimes(1);
     expect(storage.listThreadSummaries.mock.calls.length).toBe(summaryReadsBeforeClick + 1);
   });
 
   it("does not read the workspace for the export until it is clicked", async () => {
     await openAllMessages(session("admin"));
+    expect(reader.spy).not.toHaveBeenCalled();
     const summaryReads = storage.listThreadSummaries.mock.calls.length;
     const fullReads = storage.loadFeedback.mock.calls.length;
     await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
@@ -152,8 +163,22 @@ describe("FeedbackWidget — admin export", () => {
     storage.loadThreads.mockImplementation(async (_dir, ids) => (ids.includes(THREAD.id) ? [THREAD] : []));
     await openAllMessages(session("admin"));
     fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.fb_export_btn }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("1");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      DEFAULT_LABELS.fb_export_partial.replace("{skipped}", "1")
+    );
     expect(exporter.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not report a skipped thread that this tab already holds", async () => {
+    // The panel page-loads THREAD into local state; the export read then fails on it.
+    storage.loadFeedback.mockResolvedValue([]);
+    storage.loadThreads.mockImplementationOnce(async () => [THREAD]);
+    await openAllMessages(session("admin"));
+    storage.loadThreads.mockImplementation(async () => []);
+    fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.fb_export_btn }));
+    await waitFor(() => expect(exporter.run).toHaveBeenCalledTimes(1));
+    expect(exporter.run.mock.calls[0]![0].map((t) => t.id)).toEqual([THREAD.id]);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("disables the button while the export runs", async () => {

@@ -22,7 +22,7 @@ describe("readAllThreadsForExport", () => {
     const progress = vi.fn();
     const result = await readAllThreadsForExport(root, { chunkSize: 2, onProgress: progress });
     expect(result.threads.map((t) => t.id).sort()).toEqual([...ids].sort());
-    expect(result.skipped).toBe(0);
+    expect(result.skippedIds).toEqual([]);
     expect(progress.mock.calls).toEqual([[2, 5], [4, 5], [5, 5]]);
   });
 
@@ -36,11 +36,11 @@ describe("readAllThreadsForExport", () => {
 
     const result = await readAllThreadsForExport(root, { chunkSize: 10 });
     expect(result.threads).toHaveLength(2);
-    expect(result.skipped).toBe(1);
+    expect(result.skippedIds).toEqual([ids[1]]);
   });
 
   it("returns nothing for a workspace with no feedback", async () => {
     const result = await readAllThreadsForExport(createMemoryDirectory("empty"), {});
-    expect(result).toEqual({ threads: [], skipped: 0 });
+    expect(result).toEqual({ threads: [], skippedIds: [] });
   });
 });

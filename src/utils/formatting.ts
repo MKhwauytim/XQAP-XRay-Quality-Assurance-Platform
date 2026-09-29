@@ -16,3 +16,14 @@ export function formatDateTime(value: string | null | undefined, fallback = "—
     minute: "2-digit",
   });
 }
+
+/**
+ * ISO `YYYY-MM-DD HH:mm:ss` (the instant's own UTC digits) for spreadsheet
+ * exports. Unlike `formatDateTime` (locale text: dd/mm order, RLM marks, ص/م,
+ * possibly a Hijri calendar) this sorts and filters correctly in Excel, and it
+ * does not vary with the ICU build or the machine's timezone. One helper for
+ * every export (error log, feedback).
+ */
+export function formatExportTimestamp(value: string | null | undefined): string {
+  return value ? value.slice(0, 19).replace("T", " ") : "";
+}

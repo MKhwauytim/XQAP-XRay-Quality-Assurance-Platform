@@ -597,7 +597,9 @@ export const DEFAULT_LABELS = {
   fb_export_col_author:         "الكاتب",
   fb_export_col_date:           "التاريخ",
   fb_export_col_message_text:   "النص",
-  fb_export_estimated_suffix:   "(تقديري)",
+  fb_export_col_resolved_estimated: "إغلاق تقديري",
+  fb_export_yes:                "نعم",
+  fb_export_no:                 "لا",
 
   // Login screen (AuthGate) — the first screen every user sees
   auth_tagline:                 "منصة فحص صور الأشعة",

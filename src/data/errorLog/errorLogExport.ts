@@ -25,6 +25,7 @@
 
 import * as XLSX from "xlsx";
 
+import { formatExportTimestamp } from "../../utils/formatting";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { yieldToMain } from "../storage/yieldToMain";
 import type { PersistedErrorEntry } from "./errorLogTypes";
@@ -50,14 +51,10 @@ export const ERROR_EXPORT_HEADERS = [
 
 const EXPORT_CHUNK_SIZE = 1000;
 
-function formatTimestamp(at: string): string {
-  return at.slice(0, 19).replace("T", " ");
-}
-
 /** One `string[]` per entry, in header order. Pure, deterministic, DOM-free. */
 export function buildErrorLogExportRows(entries: readonly PersistedErrorEntry[]): string[][] {
   return entries.map((entry) => [
-    formatTimestamp(entry.at),
+    formatExportTimestamp(entry.at),
     entry.username ?? "",
     entry.role ?? "",
     entry.page ?? "",
