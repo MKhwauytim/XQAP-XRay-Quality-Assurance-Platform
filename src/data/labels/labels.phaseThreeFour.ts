@@ -133,6 +133,8 @@ export const phaseThreeFourLabels = {
   // skipped by bulk assignment. Silent before — the operator read "distributed"
   // as "the whole month is assigned" while these rows stayed unowned.
   p4_bulk_unmapped_warning: "تنبيه: {count} صفاً لم يُوزَّع لأن مستواه غير مطابق لإعدادات المستويات. راجع مطابقة المستويات ثم أعد التوزيع، أو عيّن هذه الصفوف يدوياً.",
+  p4_bulk_target_shortfall_warning: "تنبيه: لن تتساوى الإجماليات — المنافذ والمستويات المسموحة لا تكفي لبلوغ حصة: {names}. عدّل قيود المنافذ أو النسب إن أردت التساوي.",
+  p4_bulk_target_shortfall_item: "{name} (المتاح {allowed} من {target})",
   p4_bulk_unmapped_warning_stages: "تنبيه: {count} صفاً لم يُوزَّع لأن مستواه غير مطابق لإعدادات المستويات ({stages}). راجع مطابقة المستويات ثم أعد التوزيع، أو عيّن هذه الصفوف يدوياً.",
 
   // ── المرحلة 4 — pill switch + المراجعة اليدوية ──────────────────────

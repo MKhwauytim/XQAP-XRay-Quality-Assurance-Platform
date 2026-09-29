@@ -70,11 +70,16 @@ export type UnmappedStageReport = {
   stages: string[];
 };
 
+/** A3: an employee who cannot reach their month target — the only case totals stay unequal. */
+export type EmployeeTargetShortfall = { username: string; target: number; allowed: number };
+
 export type BulkAssignmentResult = {
   events: DistributionEvent[];
   errors: string[];
   skipped: number;
   unmapped: UnmappedStageReport;
+  /** Empty when no port restriction is active (the unrestricted path is unchanged). */
+  targetShortfalls: EmployeeTargetShortfall[];
 };
 
 /** How many distinct stage labels a warning names before it stops listing them. */
@@ -624,7 +629,7 @@ export function calculateBulkAssignment(params: {
     }
   }
 
-  if (!anyPortRestricted) return { events, errors, skipped, unmapped };
+  if (!anyPortRestricted) return { events, errors, skipped, unmapped, targetShortfalls: [] };
 
   // A3: bring every employee to their equal month target by moving NEW
   // events from whoever is above it to whoever is below, restricted to rows
@@ -641,5 +646,14 @@ export function calculateBulkAssignment(params: {
   };
   const balanced = rebalanceTowardMonthTargets({ events, targets: monthTargets, owned: ownedTotals, canTake });
   const restamped = restampDailyQuota(balanced, eventGroupKey);
-  return { events: restamped, errors, skipped, unmapped };
+  const targetShortfalls: EmployeeTargetShortfall[] = [];
+  for (const username of [...monthTargets.keys()].sort((a, b) => a.localeCompare(b))) {
+    const target = monthTargets.get(username) ?? 0;
+    let allowed = ownedTotals.get(username) ?? 0;
+    for (const candidate of assignableRows) {
+      if (canTake(username, candidate.xrayImageId)) allowed += 1;
+    }
+    if (allowed < target) targetShortfalls.push({ username, target, allowed });
+  }
+  return { events: restamped, errors, skipped, unmapped, targetShortfalls };
 }
