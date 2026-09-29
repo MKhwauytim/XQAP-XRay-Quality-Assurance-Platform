@@ -52,6 +52,8 @@ const DB_NAME = "xray_answers_local_mirror_v1";
 const STORE_NAME = "items";
 const DB_VERSION = 1;
 
+export const MIRROR_SYNCED_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
 type MirrorRecord = {
   key: string;
   month: string;
@@ -74,25 +76,93 @@ function mirrorKey(month: string, username: string, xrayImageId: string): string
   return `${month}::${username}::${xrayImageId}`;
 }
 
+/**
+ * ONE connection for the page (A6). `indexedDB.open()` + `close()` on every save
+ * was awaited on the click path and repeated on each 30 s replay tick. The
+ * connection is kept for the life of the page and dropped (so the next call
+ * reopens) when the browser says it is going away: `versionchange` (another tab
+ * upgrading the schema must not be blocked by us), `close` (the browser closed it
+ * abnormally), or a failed open. Keyed on the `indexedDB` factory identity so a
+ * test that swaps the global gets a fresh connection.
+ */
+let connection: { factory: IDBFactory; promise: Promise<IDBDatabase | null> } | null = null;
+
+function dropConnection(promise: Promise<IDBDatabase | null>): void {
+  if (connection?.promise === promise) connection = null;
+}
+
 /** `null` when IndexedDB is unavailable (no browser, disabled, or blocked) — every caller treats that as "no mirror," not an error. */
 function openMirrorDb(): Promise<IDBDatabase | null> {
-  if (typeof indexedDB === "undefined") return Promise.resolve(null);
-  return new Promise((resolve) => {
+  if (typeof indexedDB === "undefined" || indexedDB === null) return Promise.resolve(null);
+  if (connection && connection.factory === indexedDB) return connection.promise;
+  const factory = indexedDB;
+  const promise: Promise<IDBDatabase | null> = new Promise((resolve) => {
     try {
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
+      const request = factory.open(DB_NAME, DB_VERSION);
       request.onupgradeneeded = () => {
         const db = request.result;
         if (!db.objectStoreNames.contains(STORE_NAME)) {
           db.createObjectStore(STORE_NAME, { keyPath: "key" });
         }
       };
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => resolve(null);
-      request.onblocked = () => resolve(null);
+      request.onsuccess = () => {
+        const db = request.result;
+        db.onversionchange = () => {
+          try {
+            db.close();
+          } catch {
+            // already closing
+          }
+          dropConnection(promise);
+        };
+        db.onclose = () => dropConnection(promise);
+        resolve(db);
+      };
+      request.onerror = () => {
+        dropConnection(promise);
+        resolve(null);
+      };
+      request.onblocked = () => {
+        dropConnection(promise);
+        resolve(null);
+      };
     } catch {
+      dropConnection(promise);
       resolve(null);
     }
   });
+  connection = { factory, promise };
+  return promise;
+}
+
+/**
+ * Run `work` against the page's connection. A connection the browser closed
+ * underneath us surfaces as `InvalidStateError` from `transaction()`: drop it
+ * and retry ONCE on a fresh one. Every other failure (and an unavailable
+ * IndexedDB) resolves to `fallback` — the mirror is best-effort, see module doc.
+ */
+async function withMirrorDb<T>(work: (db: IDBDatabase) => Promise<T>, fallback: T): Promise<T> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const pending = openMirrorDb();
+    const db = await pending;
+    if (!db) return fallback;
+    try {
+      return await work(db);
+    } catch (error) {
+      const name = error instanceof Error ? error.name : "";
+      if (attempt === 0 && (name === "InvalidStateError" || name === "TransactionInactiveError")) {
+        dropConnection(pending);
+        try {
+          db.close();
+        } catch {
+          // already closed
+        }
+        continue;
+      }
+      return fallback;
+    }
+  }
+  return fallback;
 }
 
 /**
@@ -120,21 +190,17 @@ export async function mirrorAnswerLocally(
   username: string,
   item: ItemAnswer
 ): Promise<void> {
-  const db = await openMirrorDb();
-  if (!db) return;
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, "readwrite");
-      issueGuardedPut(tx.objectStore(STORE_NAME), month, username, item, shouldConfirmMirrorRecord);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error);
-    });
-  } catch {
-    // Best-effort — see module doc.
-  } finally {
-    db.close();
-  }
+  await withMirrorDb(
+    (db) =>
+      new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, "readwrite");
+        issueGuardedPut(tx.objectStore(STORE_NAME), month, username, item, shouldConfirmMirrorRecord);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      }),
+    undefined
+  );
 }
 
 /**
@@ -149,21 +215,17 @@ export async function markAnswerPendingLocally(
   username: string,
   item: ItemAnswer
 ): Promise<void> {
-  const db = await openMirrorDb();
-  if (!db) return;
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, "readwrite");
-      issueGuardedPut(tx.objectStore(STORE_NAME), month, username, item, shouldQueueMirrorRecord, false);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error);
-    });
-  } catch {
-    // Best-effort — see module doc.
-  } finally {
-    db.close();
-  }
+  await withMirrorDb(
+    (db) =>
+      new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, "readwrite");
+        issueGuardedPut(tx.objectStore(STORE_NAME), month, username, item, shouldQueueMirrorRecord, false);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      }),
+    undefined
+  );
 }
 
 /**
@@ -303,41 +365,69 @@ export async function backfillMirrorFromDisk(
   items: readonly ItemAnswer[]
 ): Promise<void> {
   if (items.length === 0) return;
-  const db = await openMirrorDb();
-  if (!db) return;
+  await withMirrorDb(
+    (db) =>
+      new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, "readwrite");
+        const store = tx.objectStore(STORE_NAME);
+        for (const item of items) {
+          issueGuardedPut(store, month, username, item, shouldRefreshMirrorFromDisk);
+        }
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      }),
+    undefined
+  );
+}
+
+/** Connections whose store has already been scanned for prunable records this page session. */
+const prunedConnections = new WeakSet<IDBDatabase>();
+
+/**
+ * Retention prune (A6): the store used to grow for the life of the browser
+ * profile, and every 30 s replay tick `getAll`s all of it. Once per connection,
+ * off the caller's path, delete records that are BOTH `synced: true` (a copy of
+ * what is confirmed on the share) AND mirrored more than
+ * `MIRROR_SYNCED_RETENTION_MS` ago. A `synced: false` record is never touched,
+ * however old: it is the only copy of an answer that has not reached the share.
+ * The predicate is re-checked against the live record inside the transaction, so
+ * a record re-mirrored (or re-queued) since the scan that picked it is kept.
+ * Best-effort: any failure only means the store is pruned next session.
+ */
+function pruneStaleSyncedRecords(db: IDBDatabase, records: readonly MirrorRecord[]): void {
+  if (prunedConnections.has(db)) return;
+  prunedConnections.add(db);
+  const cutoff = Date.now() - MIRROR_SYNCED_RETENTION_MS;
+  const isStale = (record: MirrorRecord | undefined): boolean =>
+    record !== undefined && record.synced === true && Date.parse(record.mirroredAt) < cutoff;
+  const stale = records.filter(isStale).map((record) => record.key);
+  if (stale.length === 0) return;
   try {
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, "readwrite");
-      const store = tx.objectStore(STORE_NAME);
-      for (const item of items) {
-        issueGuardedPut(store, month, username, item, shouldRefreshMirrorFromDisk);
-      }
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error);
-    });
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    for (const key of stale) {
+      const getRequest = store.get(key);
+      getRequest.onsuccess = () => {
+        if (isStale(getRequest.result as MirrorRecord | undefined)) store.delete(key);
+      };
+    }
   } catch {
-    // Best-effort — see module doc.
-  } finally {
-    db.close();
+    // Best-effort — see above.
   }
 }
 
 async function readAllRecords(): Promise<MirrorRecord[]> {
-  const db = await openMirrorDb();
-  if (!db) return [];
-  try {
-    return await new Promise<MirrorRecord[]>((resolve, reject) => {
+  return withMirrorDb(async (db) => {
+    const records = await new Promise<MirrorRecord[]>((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readonly");
       const request = tx.objectStore(STORE_NAME).getAll();
       request.onsuccess = () => resolve((request.result ?? []) as MirrorRecord[]);
       request.onerror = () => reject(request.error);
     });
-  } catch {
-    return [];
-  } finally {
-    db.close();
-  }
+    pruneStaleSyncedRecords(db, records);
+    return records;
+  }, [] as MirrorRecord[]);
 }
 
 /** Every item this browser has ever mirrored for `(month, username)`, synced or still pending. Empty on any failure — see module doc: absence is never meaningful here. */
