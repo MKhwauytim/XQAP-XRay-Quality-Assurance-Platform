@@ -23,7 +23,7 @@ const VERIFY_MAX_DELAY_MS = 180;
 // Terminal failure surfaced to callers when the workspace folder handle has lost
 // its grant (tab backgrounded, permission revoked, folder moved/renamed). Retrying
 // cannot recover it, so casLoop aborts immediately with this distinct message.
-const PERMISSION_LOST_ERROR =
+export const PERMISSION_LOST_ERROR =
   "فقد الوصول إلى مجلد العمل — أعد الاتصال بمساحة العمل.";
 
 function sleep(ms: number): Promise<void> {
@@ -31,7 +31,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 // Add ±50 % random jitter to avoid thundering-herd retries across machines.
-function withJitter(ms: number): number {
+export function withJitter(ms: number): number {
   return ms * (0.5 + Math.random());
 }
 

@@ -1459,7 +1459,7 @@ export async function appendEventSegment<TEvent>(
 
       if (rotatedForBlockedReplace || seq >= MAX_SEGMENT_SEQ) {
         // Never rewrite/overwrite the failed segment: leave it exactly as it
-        // was and let the caller (casLoop) see the real underlying error.
+        // was and let the caller see the real underlying error.
         throw blocked.error;
       }
       rotatedForBlockedReplace = true;

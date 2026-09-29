@@ -27,7 +27,7 @@
 
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { readOptionalJson, safeWriteJson } from "../storage/safeWrite";
-import { casFailureFromCause, casLoop, isPermissionLostError } from "../storage/casLoop";
+import { casFailureFromCause, casLoop, isPermissionLostError, withJitter } from "../storage/casLoop";
 import {
   createDeadline,
   INTERACTIVE_WRITE_DEADLINE_MS,
@@ -855,7 +855,7 @@ async function retryDecisionRead<T>(deadline: OperationDeadline, step: () => Pro
       lastError = error;
     }
     if (attempt < ANSWER_SAVE_MAX_RETRIES - 1) {
-      const delay = nextRetryDelayMs(ANSWER_SAVE_BASE_DELAY_MS * (attempt + 1) * (0.5 + Math.random()), deadline);
+      const delay = nextRetryDelayMs(withJitter(ANSWER_SAVE_BASE_DELAY_MS * (attempt + 1)), deadline);
       if (delay === null) break;
       await new Promise<void>((resolve) => setTimeout(resolve, delay));
     }
@@ -900,11 +900,11 @@ async function performAnswerWrite(
   // trail by folding those events instead. That removes a whole-file write from
   // the hot save path — and with it the deep per-record path that made the
   // write fail on every save on a workspace deep on the share (XQ-IO-034).
-  // The item state to mirror locally once the append succeeds — built from
-  // the same in-memory `previous`/`event` the retry body already computed, so
-  // mirroring never costs an extra disk read. Set on the LAST attempt only
-  // (each retry overwrites it), which is exactly the state that ends up
-  // durably appended.
+  // The item state to mirror locally once the append succeeds (or to queue as
+  // pending if it fails) — built from the in-memory `previous`/`event` the
+  // decision step already computed, so mirroring never costs an extra disk
+  // read. If the decision step itself never succeeds, the failure path builds
+  // it from the caller's answer alone.
   let mirrorCandidate: ItemAnswer | null = null;
 
   // NO casLoop here (S2). This append targets a writer chain no other machine
@@ -932,9 +932,25 @@ async function performAnswerWrite(
       errorCode: code,
     });
   };
+  const candidateFor = (event: AnswerEvent, previous: ItemAnswer | undefined): ItemAnswer => ({
+    xrayImageId: event.xrayImageId ?? xrayImageId,
+    templateId: event.templateId ?? previous?.templateId ?? "",
+    templateVersion: event.templateVersion ?? previous?.templateVersion ?? 1,
+    answers: event.answers ?? previous?.answers ?? [],
+    lastSavedAt: event.lastSavedAt ?? eventAt,
+    submittedAt: event.submittedAt ?? previous?.submittedAt ?? null,
+    answeredBy: username,
+    status: event.status ?? previous?.status ?? "draft",
+    history: previous?.history,
+    valueHistory: previous?.valueHistory,
+    qualityNote: previous?.qualityNote,
+    answeredOnBehalfBy: event.answeredOnBehalfBy,
+  });
   const attempt = async (): Promise<{ ok: true }> => {
-    const mainDir = await getSampleMainDir(directoryHandle, monthFolderName, true);
     const decided = await retryDecisionRead(deadline, async () => {
+      // Resolving the month folder is a share round trip like any other read
+      // here; a transient fault on it is retried with the rest of this step.
+      const mainDir = await getSampleMainDir(directoryHandle, monthFolderName, true);
       const allEvents = await readAllAnswerEventsForMonth(directoryHandle, monthFolderName);
       const ownEvents = eventsForEmployee(allEvents, username);
 
@@ -952,27 +968,14 @@ async function performAnswerWrite(
         { legacySeed, username, monthFolderName }
       );
       const previous = foldedNow.file.items.find((item) => item.xrayImageId === xrayImageId);
-      return { seedEvent, previous, decision: build({ previous }) };
+      return { mainDir, seedEvent, previous, decision: build({ previous }) };
     });
-    const { seedEvent, previous, decision } = decided;
+    const { mainDir, seedEvent, previous, decision } = decided;
     if ("skip" in decision) return { ok: true as const };
 
     const event: AnswerEvent = { ...decision.event, eventId, eventAt, answeredBy: username };
     const batch = seedEvent ? [seedEvent, event] : [event];
-    mirrorCandidate = {
-      xrayImageId: event.xrayImageId ?? xrayImageId,
-      templateId: event.templateId ?? previous?.templateId ?? "",
-      templateVersion: event.templateVersion ?? previous?.templateVersion ?? 1,
-      answers: event.answers ?? previous?.answers ?? [],
-      lastSavedAt: event.lastSavedAt ?? eventAt,
-      submittedAt: event.submittedAt ?? previous?.submittedAt ?? null,
-      answeredBy: username,
-      status: event.status ?? previous?.status ?? "draft",
-      history: previous?.history,
-      valueHistory: previous?.valueHistory,
-      qualityNote: previous?.qualityNote,
-      answeredOnBehalfBy: event.answeredOnBehalfBy,
-    };
+    mirrorCandidate = candidateFor(event, previous);
     await appendAnswerEventSegment(mainDir, batch, writer, segmentConfig, {
       deadline,
       listedSegmentNames: listedAnswerSegmentNames(directoryHandle, monthFolderName),
@@ -980,9 +983,23 @@ async function performAnswerWrite(
     reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
     return { ok: true as const };
   };
-  const written: Promise<{ ok: true } | { ok: false; error: string }> = attempt().catch((error: unknown) =>
-    casFailureFromCause(error, { context: `answers:${telemetryAction}`, onExhausted })
-  );
+  const written: Promise<{ ok: true } | { ok: false; error: string }> = attempt().catch((error: unknown) => {
+    // ANY failure after the user's answer is known must queue it for background
+    // replay. If the read side never recovered, no candidate was built from the
+    // folded state; build one from the answer alone (the event carries the whole
+    // item for a save, and a skip decision has nothing to lose).
+    if (!mirrorCandidate) {
+      try {
+        const fallback = build({ previous: undefined });
+        if (!("skip" in fallback)) {
+          mirrorCandidate = candidateFor({ ...fallback.event, eventId, eventAt, answeredBy: username }, undefined);
+        }
+      } catch {
+        // `build` is pure over the caller's own data; if it throws there is nothing to queue.
+      }
+    }
+    return casFailureFromCause(error, { context: `answers:${telemetryAction}`, onExhausted });
+  });
   return written.then(async (result) => {
     // Cache/derived-state refresh, after the durable append, never gating the
     // save's own success — same contract as distribution's

@@ -74,6 +74,7 @@ vi.mock("../storage/errorLogger", async (importOriginal) => {
   };
 });
 
+import { PERMISSION_LOST_ERROR } from "../storage/casLoop";
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import {
   appendReferralToEmployee,
@@ -213,7 +214,7 @@ describe("answer save failure telemetry (B-XQIO032, kept through S2)", () => {
 
     const result = await upsertItemAnswer(dir, MONTH, USER, makeItem());
     expect(result.ok).toBe(false);
-    expect((result as { error: string }).error).not.toContain("XQ-IO-032");
+    expect((result as { error: string }).error).toBe(PERMISSION_LOST_ERROR);
     expect(hooks.logErrorCalls.find((c) => c.context === "answerStorage:answer-save")).toBeUndefined();
   });
 });
