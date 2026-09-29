@@ -576,7 +576,8 @@ export const DEFAULT_LABELS = {
   // generated workbook's sheet names and column headings (Workstream B).
   fb_export_btn:                "تصدير المحادثات إلى Excel",
   fb_exporting:                 "جارٍ التصدير…",
-  fb_export_reading:            "جارٍ قراءة المحادثات…",
+  fb_export_progress:           "جارٍ قراءة المحادثات… {done} / {total}",
+  fb_export_partial:            "تم التصدير، لكن تعذّرت قراءة {skipped} محادثة (ملف تالف أو غير متاح).",
   fb_export_failed:             "تعذّر تصدير المحادثات — حاول مرة أخرى.",
   fb_export_empty:              "لا توجد محادثات لتصديرها.",
   fb_export_sheet_threads:      "المحادثات",
