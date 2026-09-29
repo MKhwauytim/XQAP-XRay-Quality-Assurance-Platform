@@ -1,5 +1,5 @@
 /* @vitest-environment jsdom */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { DEFAULT_LABELS } from "../../../../data/labels/labelsStore";
@@ -10,6 +10,11 @@ const recovery = vi.hoisted(() => ({
   list: vi.fn<() => Promise<PopulationRecoveryCandidate[]>>(),
   restore: vi.fn(),
   months: vi.fn(),
+}));
+
+const backups = vi.hoisted(() => ({
+  list: vi.fn<() => Promise<PopulationRecoveryCandidate[]>>(),
+  restore: vi.fn(),
 }));
 
 vi.mock("../../../../auth/usePermissions", () => ({
@@ -31,7 +36,21 @@ vi.mock("../../../../data/population/populationRecovery", () => ({
   restorePopulationCandidate: recovery.restore,
 }));
 
+vi.mock("../../../../data/backup/selectiveRestore", () => ({
+  listBackupPopulationCandidates: backups.list,
+  restorePopulationMonthFromBackup: backups.restore,
+}));
+vi.mock("../../../../data/workspace/dataRefreshSignal", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../../data/workspace/dataRefreshSignal")>();
+  return { ...actual, broadcastDataRefresh: vi.fn() };
+});
+
 import { PopulationRecoverySection } from "./PopulationRecoverySection";
+import { broadcastDataRefresh } from "../../../../data/workspace/dataRefreshSignal";
+
+beforeEach(() => {
+  backups.list.mockResolvedValue([]);
+});
 
 afterEach(() => {
   cleanup();
@@ -40,6 +59,8 @@ afterEach(() => {
   recovery.list.mockReset();
   recovery.restore.mockReset();
   recovery.months.mockReset();
+  backups.list.mockReset();
+  backups.restore.mockReset();
 });
 
 const ARCHIVE: PopulationRecoveryCandidate = {
@@ -212,5 +233,88 @@ describe("PopulationRecoverySection", () => {
       expect(status).toHaveTextContent(DEFAULT_LABELS.population_recovery_restored.replace("{archived}", "x.superseded.json"));
       expect(status).toHaveTextContent(DEFAULT_LABELS.population_recovery_warning_manifest);
     });
+  });
+
+  it("offers backup snapshots and restores one through the selective-restore engine", async () => {
+    const BACKUP: PopulationRecoveryCandidate = {
+      fileName: "2026-09-01T08-00-00-manual-ab12",
+      source: "backup",
+      rowCount: 290,
+      processedAt: null,
+      coveredSampledIds: 40,
+      totalSampledIds: 40,
+      wouldBlock: false,
+    };
+    recovery.list.mockResolvedValue([]);
+    backups.list.mockResolvedValue([BACKUP]);
+    backups.restore.mockResolvedValue({ ok: true, restoredFiles: ["x"], rollbackFolderName: "rb-1", integrity: [] });
+    withMonth();
+    render(<PopulationRecoverySection />);
+
+    await openAndScan();
+    await waitFor(() => expect(screen.getByText("40 / 40")).toBeInTheDocument());
+    expect(screen.getByText(new RegExp(DEFAULT_LABELS.population_recovery_source_backup))).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.population_recovery_restore_btn }));
+    fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.confirm_dialog_default_ok }));
+
+    await waitFor(() =>
+      expect(backups.restore).toHaveBeenCalledWith({
+        directoryHandle: expect.anything(),
+        backupFolderName: BACKUP.fileName,
+        month: "5-may-2026",
+        username: "admin",
+      })
+    );
+    expect(recovery.restore).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent(
+        DEFAULT_LABELS.population_recovery_backup_restored
+          .replace("{folder}", BACKUP.fileName)
+          .replace("{rollback}", "rb-1")
+      )
+    );
+    expect(vi.mocked(broadcastDataRefresh)).toHaveBeenCalledWith("manual");
+  });
+
+  it("explains a backup candidate refused by the coverage rule", async () => {
+    const BACKUP: PopulationRecoveryCandidate = {
+      fileName: "2026-09-01T08-00-00-manual-cd34",
+      source: "backup",
+      rowCount: 10,
+      processedAt: null,
+      coveredSampledIds: 30,
+      totalSampledIds: 40,
+      wouldBlock: false,
+    };
+    recovery.list.mockResolvedValue([]);
+    backups.list.mockResolvedValue([BACKUP]);
+    backups.restore.mockResolvedValue({
+      ok: false,
+      reason: "plan-rejected",
+      plan: {
+        scope: { elements: ["population"], months: ["5-may-2026"] },
+        invalidReason: null,
+        selections: [],
+        selectedFileCount: 1,
+        emptySelections: [],
+        blocked: [{ month: "5-may-2026", sampledCount: 40, missingCount: 10, missingExamples: [] }],
+        warnings: [],
+        canConfirm: false,
+      },
+    });
+    withMonth();
+    render(<PopulationRecoverySection />);
+
+    await openAndScan();
+    await waitFor(() => expect(screen.getByText("30 / 40")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.population_recovery_restore_btn }));
+    fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.confirm_dialog_default_ok }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent(
+        DEFAULT_LABELS.population_recovery_backup_blocked.replace("{missing}", "10")
+      )
+    );
   });
 });

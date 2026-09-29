@@ -16,12 +16,17 @@ import {
 import type { OrphanScanResult } from "../integrity/orphanScan";
 import { runMonthIntegrityScan } from "../integrity/orphanScanLoader";
 import { parseMonthFolderName, type MonthFolderInfo } from "../population/monthFolder";
-import { invalidateMonthLockCache } from "../population/monthLock";
+import { ensureMonthWritable, invalidateMonthLockCache } from "../population/monthLock";
 import type { PopulationFinalData } from "../population/monthTypes";
 import { discardPopulationAggregate } from "../population/populationAggregate";
 import { assessPopulationOverwrite, loadPopulationOverwriteImpact } from "../population/populationOverwriteGuard";
-import { rebuildPopulationDerivedFiles } from "../population/populationRecovery";
-import { archiveBeforeOverwrite, readMonthPopulationFinal, supersedeStamp } from "../population/populationStorage";
+import { rebuildPopulationDerivedFiles, type PopulationRecoveryCandidate } from "../population/populationRecovery";
+import {
+  archiveBeforeOverwrite,
+  listMonthFolders,
+  readMonthPopulationFinal,
+  supersedeStamp,
+} from "../population/populationStorage";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import { discardReplacementIndexManifest } from "../population/replacementIndexStorage";
 import { ANSWERS_SUFFIX } from "../answers/answerStorage";
@@ -37,6 +42,7 @@ import {
 } from "../workspace/workspacePaths";
 import {
   isSnapshotPayloadFile,
+  loadBackupHistory,
   openCompleteBackupJsonDir,
   restoreActionFor,
   restoreBackupSnapshot,
@@ -507,6 +513,8 @@ async function archiveLivePopulations(
 ): Promise<string | null> {
   for (const month of months) {
     try {
+      // A closed month is immutable until reopened: same gate as A2's recovery tool.
+      await ensureMonthWritable(directoryHandle, month);
       const dir = await findLivePopulationDir(directoryHandle, month);
       if (!dir) continue;
       const archivedAs = await archiveBeforeOverwrite(dir, LIVE_POPULATION_FILE, supersedeStamp(), {
@@ -588,4 +596,78 @@ export async function runSelectiveRestore(params: {
     rollbackFolderName: result.rollbackFolderName,
     integrity,
   };
+}
+
+/* ───────────── A2 hand-off: backup snapshots as «استعادة المجتمع السابق» candidates ───────────── */
+
+function rowIdSet(rows: ReadonlyArray<Record<string, unknown>>): Set<string> {
+  const ids = new Set<string>();
+  for (const row of rows) {
+    const id = row["xrayImageId"];
+    if (typeof id === "string") ids.add(id);
+  }
+  return ids;
+}
+
+/**
+ * Every COMPLETE backup holding a population.final.json for `month`, newest
+ * first (loadBackupHistory's order), in A2's own candidate shape with
+ * `source: "backup"` and the backup FOLDER as `fileName`. Coverage is counted
+ * exactly as A2 counts its local candidates (live sampled ids present in the
+ * candidate). An interrupted backup is skipped, never offered.
+ */
+export async function listBackupPopulationCandidates(
+  directoryHandle: DirectoryHandleLike,
+  month: string
+): Promise<PopulationRecoveryCandidate[]> {
+  const history = await loadBackupHistory(directoryHandle);
+  const impact = await loadPopulationOverwriteImpact(directoryHandle, month);
+  const candidates: PopulationRecoveryCandidate[] = [];
+  for (const item of history) {
+    if (item.status !== "complete") continue;
+    let jsonDir: DirectoryHandleLike;
+    try {
+      jsonDir = await openCompleteBackupJsonDir(directoryHandle, item.folderName);
+    } catch (error) {
+      logError("backup:population-candidate-open", error);
+      continue;
+    }
+    const population = await readFirstInTree<PopulationFinalData>(jsonDir, backupPopulationCandidates(month));
+    if (population.state !== "ok" || !Array.isArray(population.value.rows)) continue;
+    const ids = rowIdSet(population.value.rows);
+    candidates.push({
+      fileName: item.folderName,
+      source: "backup",
+      rowCount: population.value.rows.length,
+      processedAt: population.value.processedAt ?? null,
+      coveredSampledIds: impact.liveSampledIds.filter((id) => ids.has(id)).length,
+      totalSampledIds: impact.liveSampledIds.length,
+      // A2's rule, through A's own guard — the same answer restorePopulationCandidate would give.
+      wouldBlock: assessPopulationOverwrite(impact, population.value.rows).blocked,
+    });
+  }
+  return candidates;
+}
+
+/**
+ * A2's restore action for a backup candidate: the scoped engine with
+ * `{ elements: ["population"], months: [month] }` — never a hand copy and never
+ * the whole-workspace restore — so it gets the completeness check, the full
+ * pre-restore rollback backup, the sentinel, A2's coverage block, and A's
+ * derived-file rebuild.
+ */
+export async function restorePopulationMonthFromBackup(params: {
+  directoryHandle: DirectoryHandleLike;
+  backupFolderName: string;
+  month: string;
+  username: string;
+}): Promise<SelectiveRestoreOutcome> {
+  const months = await listMonthFolders(params.directoryHandle);
+  return runSelectiveRestore({
+    directoryHandle: params.directoryHandle,
+    months,
+    backupFolderName: params.backupFolderName,
+    username: params.username,
+    scope: { elements: ["population"], months: [params.month] },
+  });
 }

@@ -13,6 +13,12 @@ import {
   type PopulationRecoveryCandidate,
   type PopulationRestoreResult,
 } from "../../../../data/population/populationRecovery";
+import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
+import {
+  listBackupPopulationCandidates,
+  restorePopulationMonthFromBackup,
+} from "../../../../data/backup/selectiveRestore";
+import { broadcastDataRefresh } from "../../../../data/workspace/dataRefreshSignal";
 import { formatDateTime, formatNumber } from "../../../../utils/formatting";
 import { ConfirmDialog } from "../../../ConfirmDialog/ConfirmDialog";
 import "./TemplateRepairSection.css";
@@ -87,7 +93,12 @@ export function PopulationRecoverySection() {
     setBusy(true);
     if (!options?.keepNotice) setNotice(null);
     try {
-      setCandidates(await listPopulationRecoveryCandidates(directoryHandle, month));
+      // Local copies (A2) first, then backup snapshots (Workstream D), newest first within each.
+      const [local, backups] = await Promise.all([
+        listPopulationRecoveryCandidates(directoryHandle, month),
+        listBackupPopulationCandidates(directoryHandle, month),
+      ]);
+      setCandidates([...local, ...backups]);
     } catch (error) {
       logError("settings:population-recovery-scan", error);
       setCandidates(null);
@@ -114,12 +125,47 @@ export function PopulationRecoverySection() {
     return { kind: "error", text: fill(L.population_recovery_failed, { error: result.detail ?? result.reason }) };
   }
 
+  /** A backup snapshot goes through D's scoped engine, never through restorePopulationCandidate. */
+  async function restoreFromBackup(
+    handle: DirectoryHandleLike,
+    monthFolderName: string,
+    backupFolderName: string
+  ): Promise<Notice> {
+    const outcome = await restorePopulationMonthFromBackup({
+      directoryHandle: handle,
+      backupFolderName,
+      month: monthFolderName,
+      username,
+    });
+    if (outcome.ok) {
+      // A backup restore bypasses every normal write path — same signal the Archive restore sends.
+      broadcastDataRefresh("manual");
+      return {
+        kind: "ok",
+        text: L.population_recovery_backup_restored
+          .replace("{folder}", backupFolderName)
+          .replace("{rollback}", outcome.rollbackFolderName),
+      };
+    }
+    if (outcome.reason === "plan-rejected" && outcome.plan.blocked.length > 0) {
+      return {
+        kind: "error",
+        text: L.population_recovery_backup_blocked.replace("{missing}", String(outcome.plan.blocked[0].missingCount)),
+      };
+    }
+    const detail = outcome.reason === "restore-failed" ? outcome.error : L.archive_restore_plan_rejected;
+    return { kind: "error", text: L.population_recovery_failed.replace("{error}", detail) };
+  }
   async function restore(candidate: PopulationRecoveryCandidate): Promise<void> {
     if (!directoryHandle || !month || !canRestore) return;
     setBusy(true);
     setNotice(null);
     try {
-      setNotice(describe(await restorePopulationCandidate(directoryHandle, month, candidate.fileName, username)));
+      setNotice(
+        candidate.source === "backup"
+          ? await restoreFromBackup(directoryHandle, month, candidate.fileName)
+          : describe(await restorePopulationCandidate(directoryHandle, month, candidate.fileName, username))
+      );
     } catch (error) {
       logError("settings:population-recovery-restore", error);
       setNotice({ kind: "error", text: fill(L.population_recovery_failed, { error: String(error) }) });
@@ -182,9 +228,13 @@ export function PopulationRecoverySection() {
               </thead>
               <tbody>
                 {candidates.map((candidate) => (
-                  <tr key={candidate.fileName} className={candidate.wouldBlock ? "template-repair-row-damaged" : undefined}>
+                  <tr key={`${candidate.source}:${candidate.fileName}`} className={candidate.wouldBlock ? "template-repair-row-damaged" : undefined}>
                     <td title={candidate.fileName}>
-                      {candidate.source === "bak" ? L.population_recovery_source_bak : L.population_recovery_source_superseded}
+                      {candidate.source === "backup"
+                        ? `${L.population_recovery_source_backup} ${candidate.fileName}`
+                        : candidate.source === "bak"
+                          ? L.population_recovery_source_bak
+                          : L.population_recovery_source_superseded}
                     </td>
                     <td>{formatDateTime(candidate.processedAt)}</td>
                     <td>{formatNumber(candidate.rowCount)}</td>

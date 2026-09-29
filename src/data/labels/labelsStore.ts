@@ -1615,6 +1615,9 @@ export const DEFAULT_LABELS = {
   population_recovery_col_processed_at: "تاريخ المعالجة",
   population_recovery_restored:     "تمت الاستعادة. حُفظت النسخة السابقة باسم {archived}.",
   population_recovery_failed:       "تعذّرت الاستعادة: {error}",
+  population_recovery_source_backup:    "نسخة احتياطية",
+  population_recovery_backup_restored:  "تمت استعادة المجتمع من النسخة الاحتياطية {folder}. نسخة الرجوع: {rollback}.",
+  population_recovery_backup_blocked:   "لا يمكن استعادة هذه النسخة: {missing} من صور العينة الحالية غير موجودة في مجتمعها، ولهذا الشهر توزيع أو إجابات.",
 
   storage_section_title:               "حالة التخزين في المتصفح",
   storage_quota_label:                 "المساحة المستخدمة",
