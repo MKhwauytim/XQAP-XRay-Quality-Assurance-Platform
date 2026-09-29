@@ -25,7 +25,7 @@ import {
 import { invalidateMonthLockCache, isMonthClosed } from "../population/monthLock";
 import { DISTRIBUTION_EVENTS_DIR } from "../distribution/distributionEventStore";
 import { ANSWER_EVENTS_DIR } from "../answers/answerEventStore";
-import { loadAllEmployeeRequestFiles, readAllAnswerEventsForMonth, upsertItemAnswer, __clearAnswerEventsCacheForTests } from "../answers/answerStorage";
+import { loadAllEmployeeRequestFiles, readAllAnswerEventsForMonth, reopenItemAnswer, setItemQualityNote, upsertItemAnswer, __clearAnswerEventsCacheForTests } from "../answers/answerStorage";
 import { __resetAppendOnlyEventLogMemosForTests } from "../storage/appendOnlyEventLog";
 import { __resetAnswerSegmentChainMemoForTests } from "../answers/answerSegmentChain";
 import { getSealedAnswerSegmentsEpoch } from "../answers/answerSealedSegments";
@@ -1290,6 +1290,74 @@ describe("runSync — §6 of the answer-save proposal: the answers.events segmen
     }
     const files = await loadAllEmployeeRequestFiles(root, MONTH);
     expect(files.find((f) => f.username === "alice")?.referralRequests?.map((r) => r.requestId)).toContain("r-remote");
+  });
+
+  describe("A9 follow-up: ad-hoc stores are probed", () => {
+    const ADHOC = "adhoc-imp1";
+    async function adhocDirs(root: DirectoryHandleLike) {
+      const adhocMain = await getSampleMainDir(root, ADHOC, true);
+      return {
+        dist: await adhocMain.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: true }),
+        ans: await adhocMain.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: true }),
+      };
+    }
+    const onBehalf = (id: string, owner: string): string =>
+      `${JSON.stringify({ eventId: id, eventType: "item-saved", eventAt: "2026-05-01T08:00:00.000Z", eventBy: "sup1", authority: "supervisor", xrayImageId: `XR-${id}`, answers: [], status: "draft", answeredBy: owner, answeredOnBehalfBy: "sup1" })}\n`;
+
+    it("reports a new ad-hoc distribution event as distribution", async () => {
+      const root = makeRoot();
+      await getSampleMainDir(root, MONTH, true);
+      const { dist } = await adhocDirs(root);
+      await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+      await writeRawFile(dist, "x-dist-dev-s.ndjson", '{"eventId":"a1","type":"assign"}\n');
+      const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      expect(changed.has("distribution")).toBe(true);
+    });
+
+    it("reports an on-behalf answer segment in an ad-hoc store as answers with UNKNOWN owners", async () => {
+      const root = makeRoot();
+      await getSampleMainDir(root, MONTH, true);
+      const { ans } = await adhocDirs(root);
+      await writeRawFile(ans, "x-ans-dev-s.ndjson", onBehalf("o0", "empA"));
+      await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+      const { details, stop } = captureBroadcasts();
+      try {
+        await writeRawFile(ans, "x-ans-dev-s.ndjson", onBehalf("o0", "empA") + onBehalf("o1", "empA"));
+        await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      } finally {
+        stop();
+      }
+      expect(details).toHaveLength(1);
+      const d = details[0]!;
+      expect(d.source === "periodic" && d.changed.has("answers")).toBe(true);
+      expect(d.source === "periodic" && d.answerOwners).toBeNull();
+    });
+
+    it("reports a reopen and a quality note written into an ad-hoc store", async () => {
+      const root = makeRoot();
+      await getSampleMainDir(root, MONTH, true);
+      const item = {
+        xrayImageId: "XR-1", templateId: "t", templateVersion: 1, answers: [{ fieldId: "f", value: "v" }],
+        lastSavedAt: "2026-05-02T00:00:00.000Z", submittedAt: "2026-05-02T00:00:00.000Z", answeredBy: "empA", status: "submitted" as const,
+      };
+      expect((await upsertItemAnswer(root, ADHOC, "empA", item)).ok).toBe(true);
+      await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+      expect((await reopenItemAnswer(root, ADHOC, "empA", "XR-1", "sup1", "why")).ok).toBe(true);
+      expect((await runSync({ directoryHandle: root, monthFolderName: MONTH })).changed.has("answers")).toBe(true);
+      expect((await setItemQualityNote(root, ADHOC, "empA", "XR-1", "note")).ok).toBe(true);
+      expect((await runSync({ directoryHandle: root, monthFolderName: MONTH })).changed.has("answers")).toBe(true);
+    });
+
+    it("stays quiet when nothing in the ad-hoc stores moved, and costs a bounded number of ops", async () => {
+      const root = makeRoot("adhoc-cost", true);
+      await getSampleMainDir(root, MONTH, true);
+      await adhocDirs(root);
+      await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      clearReadLog(root);
+      const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      expect(changed.size).toBe(0);
+      expect(getReadLog(root).filter((e) => e.includes("adhoc-")).length).toBeLessThanOrEqual(12);
+    });
   });
 
   it("A9: a per-employee requests file change is reported as requests (it had no probe of its own)", async () => {

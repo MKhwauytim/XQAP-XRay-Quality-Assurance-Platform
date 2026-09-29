@@ -20,7 +20,6 @@ import { createEmptyUserManagementState, writeUserManagementState } from "../../
 import { invalidateMonthLockCache } from "../../../../../data/population/monthLock";
 import { setReadOnlyMode } from "../../../../../data/storage/readOnlyMode";
 import { resetBootProgress } from "../../../../../data/workspace/bootProgress";
-import * as adhocView from "../../../../../data/adhocImport/adhocImportEmployeeView";
 import { runSync } from "../../../../../data/workspace/workspaceSync";
 import * as answerStorage from "../../../../../data/answers/answerStorage";
 import { broadcastDataRefresh, type DataRefreshFamily } from "../../../../../data/workspace/dataRefreshSignal";
@@ -113,20 +112,18 @@ describe("XrayReferrals employee queue reload scope (A9)", () => {
     expect(reloads()).toBeGreaterThan(0);
   });
 
-  it("keeps reloading on a colleague's answer while an ad-hoc store exists (no probe watches ad-hoc stores)", async () => {
-    vi.spyOn(adhocView, "listAdhocSampleFolders").mockResolvedValue(["adhoc-imp1"]);
-    const { reloads, settle } = await mount("employee");
-    act(() => periodic(["answers"], ["emp-b"]));
-    await settle();
-    expect(reloads()).toBeGreaterThan(0);
-  });
-
-  it("does not reload for the same colleague answer when there is no ad-hoc store", async () => {
-    vi.spyOn(adhocView, "listAdhocSampleFolders").mockResolvedValue([]);
+  it("an ad-hoc store no longer forces reloads for a colleague's own answer (its changes are probed instead)", async () => {
     const { reloads, settle } = await mount("employee");
     act(() => periodic(["answers"], ["emp-b"]));
     await settle();
     expect(reloads()).toBe(0);
+  });
+
+  it("an ad-hoc store change reaches the queue through the probe (distribution / answers with unknown owners)", async () => {
+    const { reloads, settle } = await mount("employee");
+    act(() => periodic(["distribution"]));
+    await settle();
+    expect(reloads()).toBeGreaterThan(0);
   });
 
   it("end to end: a real on-behalf write reaches this employee's queue through the probe; a colleague's own save does not", async () => {

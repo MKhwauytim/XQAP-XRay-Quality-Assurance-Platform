@@ -42,6 +42,8 @@
  */
 import { broadcastDataRefresh, type DataRefreshFamily } from "./dataRefreshSignal";
 import { bumpWorkspaceEpoch, workspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
+import { listAdhocStoreImportIds } from "../adhocImport/adhocImportStorage";
+import { adhocMonthFolder } from "../adhocImport/adhocImportModel";
 import { carryRequestQueuesAcrossEpochBump, markRequestQueueProbeCompleted } from "../answers/answerStorage";
 import { ownStableAnswerSegmentMatcher } from "../answers/answerSegmentChain";
 import {
@@ -174,6 +176,10 @@ type Probe = {
    *  deliberately NOT read here, and why it is still the signal for the
    *  single-file manifest/notifications probes). */
   answersSignature: Probed<string>;
+  /** Ad-hoc stores (`2-samples/adhoc-{id}/`, one synthetic month each): bounded signatures of
+   *  every store's `distribution.events` and `answers.events`. No other probe watches them. */
+  adhocDistSignature: Probed<string>;
+  adhocAnswersSignature: Probed<string>;
   /** Name+size+mtime listing of the per-employee `*.requests.json` files
    *  (referral / replacement / reopen queues). Before the answers family was
    *  split from "requests" nothing probed these directly: a request change was
@@ -463,6 +469,61 @@ const ANSWER_SEGMENT_HEAD_STAT_BUDGET = 64;
 /** The `File`s the last answer-segment probe stat'd, kept for the owners peek of the SAME run (runs are single-flight). */
 let probedAnswerFiles = new Map<string, Blob>();
 
+/** More ad-hoc stores than this are not probed one by one: the signature changes every tick (everyone reloads). */
+const ADHOC_PROBE_MAX_STORES = 8;
+
+/**
+ * Ad-hoc stores are synthetic month folders (`2-samples/adhoc-{id}/`) that no other probe
+ * watches, yet the employee queue and results view render their rows. One listing of
+ * `2-samples/` names the stores; each gets a bounded `distribution.events` and
+ * `answers.events` signature (its own stable answer chain excluded, as for the real month).
+ * Cost per tick: 1 listing + about 7 ops per store (3 dir opens, 2 listings, plus a stat per
+ * chain head). No ad-hoc store: 1 listing. Over the store cap: unknown, reported as changed.
+ */
+async function probeAdhocStores(
+  directoryHandle: DirectoryHandleLike
+): Promise<{ dist: Probed<string>; answers: Probed<string> }> {
+  try {
+    const ids = (await listAdhocStoreImportIds(directoryHandle)).sort();
+    if (ids.length === 0) return { dist: "", answers: "" };
+    if (ids.length > ADHOC_PROBE_MAX_STORES) {
+      const stamp = `overcap:${Date.now()}`;
+      return { dist: stamp, answers: stamp };
+    }
+    const actor = readRealSession()?.username;
+    const dist: [string, string][] = [];
+    const answers: [string, string][] = [];
+    for (const id of ids) {
+      const folder = adhocMonthFolder(id);
+      const mainDir = await openOrNull(() => getSampleMonthDir(directoryHandle, folder, false));
+      const main = mainDir ? await openOrNull(() => mainDir.getDirectoryHandle(SAMPLE_SUBFOLDERS.main, { create: false })) : null;
+      const [distDir, ansDir] = main
+        ? await Promise.all([
+            openOrNull(() => main.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: false })),
+            openOrNull(() => main.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: false })),
+          ])
+        : [null, null];
+      dist.push([id, distDir ? await boundedSizeSignature(distDir, DISTRIBUTION_EVENT_SEGMENT_SUFFIX) : ""]);
+      answers.push([
+        id,
+        ansDir
+          ? await boundedSizeSignature(
+              ansDir,
+              ANSWER_EVENT_SEGMENT_SUFFIX,
+              ANSWER_SEGMENT_HEAD_STAT_BUDGET,
+              actor ? ownStableAnswerSegmentMatcher(folder, actor) : undefined,
+              true
+            )
+          : "",
+      ]);
+    }
+    return { dist: JSON.stringify(dist), answers: JSON.stringify(answers) };
+  } catch (error) {
+    logError("workspaceSync:probeAdhocStores", error);
+    return { dist: UNPROBED, answers: UNPROBED };
+  }
+}
+
 /** §6 of the answer-save proposal: read-only, bounded — same primitive and shape as `safeSegmentsSignature` above. */
 async function safeAnswerSegmentsSignature(
   dir: DirectoryHandleLike | null,
@@ -593,6 +654,7 @@ async function probeMonth(
     segmentsSignature,
     answersEventsSignature,
     feedbackSignature,
+    adhocSignatures,
   ] =
     await Promise.all([
       readDistributionLogStamp(directoryHandle, monthFolderName, {
@@ -614,6 +676,7 @@ async function probeMonth(
       safeSegmentsSignature(dirs.eventsDir),
       safeAnswerSegmentsSignature(dirs.answersEventsDir, monthFolderName),
       safeFeedbackSignature(dirs.feedbackDir),
+      probeAdhocStores(directoryHandle),
     ]);
 
   return {
@@ -621,6 +684,8 @@ async function probeMonth(
     notificationsRevision,
     acksSignature,
     answersSignature,
+    adhocDistSignature: adhocSignatures.dist,
+    adhocAnswersSignature: adhocSignatures.answers,
     requestsFilesSignature,
     approvalsSignature,
     manifestRevision,
@@ -637,6 +702,8 @@ function carryUnprobed(previous: Probe, current: Probe): Probe {
     acksSignature: carry(previous.acksSignature, current.acksSignature),
     answersSignature: carry(previous.answersSignature, current.answersSignature),
     requestsFilesSignature: carry(previous.requestsFilesSignature, current.requestsFilesSignature),
+    adhocDistSignature: carry(previous.adhocDistSignature, current.adhocDistSignature),
+    adhocAnswersSignature: carry(previous.adhocAnswersSignature, current.adhocAnswersSignature),
     approvalsSignature: carry(previous.approvalsSignature, current.approvalsSignature),
     manifestRevision: carry(previous.manifestRevision, current.manifestRevision),
     segmentsSignature: carry(previous.segmentsSignature, current.segmentsSignature),
@@ -684,6 +751,14 @@ function diffFamilies(previous: Probe | undefined, current: Probe): Set<DataRefr
   }
   if (movedFrom(previous.requestsFilesSignature, current.requestsFilesSignature, sameValue)) {
     changed.add("requests");
+  }
+  // Ad-hoc stores: a new assignment/replacement/reopen lands in a store's distribution events,
+  // an on-behalf answer, reopen or quality note in its answer events.
+  if (movedFrom(previous.adhocDistSignature, current.adhocDistSignature, sameValue)) {
+    changed.add("distribution");
+  }
+  if (movedFrom(previous.adhocAnswersSignature, current.adhocAnswersSignature, sameValue)) {
+    changed.add("answers");
   }
   if (
     // §6 of the answer-save proposal: the item-answer event log's own
@@ -868,7 +943,11 @@ async function probeChangedFamilies(
       ownersUnknown = true;
     }
   }
-  const legacyAnswersMoved = !!previous && movedFrom(previous.answersSignature, current.answersSignature, sameValue);
+  const legacyAnswersMoved =
+    !!previous &&
+    (movedFrom(previous.answersSignature, current.answersSignature, sameValue) ||
+      // an ad-hoc store answer change: whose rows it concerns is not classified by the peek
+      movedFrom(previous.adhocAnswersSignature, current.adhocAnswersSignature, sameValue));
   return { changed, sealedInvalidation, movedSegmentPrevSizes, legacyAnswersMoved, ownersUnknown };
 }
 
