@@ -5,7 +5,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { DEFAULT_LABELS } from "../../../../data/labels/labelsStore";
 import type { PopulationRecoveryCandidate } from "../../../../data/population/populationRecovery";
 
-const permissions = vi.hoisted(() => ({ view: true, mutate: true }));
+const permissions = vi.hoisted(() => ({ view: true, mutate: true, role: "admin" }));
+const audit = vi.hoisted(() => ({ record: vi.fn() }));
 const recovery = vi.hoisted(() => ({
   list: vi.fn<() => Promise<PopulationRecoveryCandidate[]>>(),
   restore: vi.fn(),
@@ -19,7 +20,7 @@ const backups = vi.hoisted(() => ({
 
 vi.mock("../../../../auth/usePermissions", () => ({
   usePermissions: () => ({
-    role: "admin",
+    role: permissions.role,
     username: "admin",
     can: () => permissions.view,
     canMutate: () => permissions.mutate,
@@ -40,6 +41,7 @@ vi.mock("../../../../data/backup/selectiveRestore", () => ({
   listBackupPopulationCandidates: backups.list,
   restorePopulationMonthFromBackup: backups.restore,
 }));
+vi.mock("../../../../data/audit/actionLog", () => ({ recordAction: audit.record }));
 vi.mock("../../../../data/workspace/dataRefreshSignal", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../../data/workspace/dataRefreshSignal")>();
   return { ...actual, broadcastDataRefresh: vi.fn() };
@@ -56,6 +58,8 @@ afterEach(() => {
   cleanup();
   permissions.view = true;
   permissions.mutate = true;
+  permissions.role = "admin";
+  audit.record.mockReset();
   recovery.list.mockReset();
   recovery.restore.mockReset();
   recovery.months.mockReset();
@@ -247,7 +251,7 @@ describe("PopulationRecoverySection", () => {
     };
     recovery.list.mockResolvedValue([]);
     backups.list.mockResolvedValue([BACKUP]);
-    backups.restore.mockResolvedValue({ ok: true, restoredFiles: ["x"], rollbackFolderName: "rb-1", integrity: [] });
+    backups.restore.mockResolvedValue({ ok: true, restoredFiles: ["x"], rollbackFolderName: "rb-1", integrity: [], derivedWarnings: [] });
     withMonth();
     render(<PopulationRecoverySection />);
 
@@ -316,5 +320,119 @@ describe("PopulationRecoverySection", () => {
         DEFAULT_LABELS.population_recovery_backup_blocked.replace("{missing}", "10")
       )
     );
+  });
+
+  const BACKUP_ROW: PopulationRecoveryCandidate = {
+    fileName: "2026-09-01T08-00-00-manual-ef56",
+    source: "backup",
+    rowCount: 290,
+    processedAt: null,
+    coveredSampledIds: 40,
+    totalSampledIds: 40,
+    wouldBlock: false,
+  };
+
+  async function restoreTheBackupRow(): Promise<void> {
+    withMonth();
+    render(<PopulationRecoverySection />);
+    await openAndScan();
+    await waitFor(() => expect(screen.getByText("40 / 40")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.population_recovery_restore_btn }));
+    fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.confirm_dialog_default_ok }));
+  }
+
+  it("shows no backup rows to a non-admin who holds the view permission, and never lists backups for them", async () => {
+    permissions.role = "manager";
+    recovery.list.mockResolvedValue([ARCHIVE]);
+    backups.list.mockResolvedValue([BACKUP_ROW]);
+    withMonth();
+    render(<PopulationRecoverySection />);
+    await openAndScan();
+
+    await waitFor(() => expect(screen.getByText("40 / 40")).toBeInTheDocument());
+    expect(screen.queryByText(new RegExp(DEFAULT_LABELS.population_recovery_source_backup))).toBeNull();
+    expect(backups.list).not.toHaveBeenCalled();
+  });
+
+  it("records the backup restore in the action log", async () => {
+    recovery.list.mockResolvedValue([]);
+    backups.list.mockResolvedValue([BACKUP_ROW]);
+    backups.restore.mockResolvedValue({
+      ok: true, restoredFiles: ["x", "y"], rollbackFolderName: "rb-2", integrity: [], derivedWarnings: [],
+    });
+
+    await restoreTheBackupRow();
+
+    await waitFor(() =>
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.anything(), "admin", "admin", "backup-restored",
+        {
+          target: BACKUP_ROW.fileName,
+          details: {
+            selective: true,
+            elements: "population",
+            months: "5-may-2026",
+            source: "population-recovery",
+            rollbackFolderName: "rb-2",
+            restoredFiles: 2,
+          },
+        }
+      )
+    );
+  });
+
+  it("still lists local candidates, with a note, when the backup listing fails", async () => {
+    recovery.list.mockResolvedValue([ARCHIVE]);
+    backups.list.mockRejectedValue(new Error("no backups dir"));
+    withMonth();
+    render(<PopulationRecoverySection />);
+    await openAndScan();
+
+    await waitFor(() => expect(screen.getByText("40 / 40")).toBeInTheDocument());
+    expect(screen.getByRole("status")).toHaveTextContent(
+      DEFAULT_LABELS.population_recovery_backups_failed.replace("{error}", "no backups dir")
+    );
+  });
+
+  it("shows the Settings-specific wording when the plan changed since the scan", async () => {
+    recovery.list.mockResolvedValue([]);
+    backups.list.mockResolvedValue([BACKUP_ROW]);
+    backups.restore.mockResolvedValue({
+      ok: false, reason: "plan-rejected",
+      plan: { scope: { elements: ["population"], months: ["5-may-2026"] }, invalidReason: null, selections: [], selectedFileCount: 0, emptySelections: [], blocked: [], warnings: [], canConfirm: false },
+    });
+
+    await restoreTheBackupRow();
+
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent(
+        DEFAULT_LABELS.population_recovery_failed.replace("{error}", DEFAULT_LABELS.population_recovery_plan_rejected)
+      )
+    );
+  });
+
+  it("reports failed rebuild steps as a warning after a backup restore", async () => {
+    recovery.list.mockResolvedValue([]);
+    backups.list.mockResolvedValue([BACKUP_ROW]);
+    backups.restore.mockResolvedValue({
+      ok: true, restoredFiles: ["x"], rollbackFolderName: "rb-3", integrity: [],
+      derivedWarnings: [{ month: "5-may-2026", step: "aggregate", error: "boom" }],
+    });
+
+    await restoreTheBackupRow();
+
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(DEFAULT_LABELS.archive_restore_derived_step_aggregate));
+    expect(screen.getByRole("status").className).toContain("template-repair-notice-info");
+  });
+
+  it("names the rollback folder and refreshes when the restore fails after it started", async () => {
+    recovery.list.mockResolvedValue([]);
+    backups.list.mockResolvedValue([BACKUP_ROW]);
+    backups.restore.mockResolvedValue({ ok: false, reason: "restore-failed", error: "boom", rollbackFolderName: "rb-4" });
+
+    await restoreTheBackupRow();
+
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("rb-4"));
+    expect(vi.mocked(broadcastDataRefresh)).toHaveBeenCalledWith("manual");
   });
 });

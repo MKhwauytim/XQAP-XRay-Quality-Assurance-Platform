@@ -46,6 +46,11 @@ import type { RestoreScope } from "../../../../data/backup/restoreScope";
 import { runSelectiveRestore } from "../../../../data/backup/selectiveRestore";
 import SelectiveRestorePanel, { type SelectiveRestoreSelection } from "./SelectiveRestorePanel";
 import { describeSelectiveRestoreSuccess, fillTemplate } from "./selectiveRestoreText";
+import {
+  describeDerivedWarning,
+  describeRestoreFailure,
+  integrityNeedsAttention,
+} from "../../../../data/backup/restoreMessages";
 
 export const tabConfig: SidebarTabModule["tabConfig"] = {
   id: "archive",
@@ -104,7 +109,7 @@ export default function ArchiveTab() {
   // Set right after a successful restore — offers the opt-in Item F import step.
   const [justRestored, setJustRestored] = useState(false);
   const [isImportingUsersLabels, setIsImportingUsersLabels] = useState(false);
-  const [message, setMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
+  const [message, setMessage] = useState<{ type: "ok" | "warn" | "error"; text: string } | null>(null);
   const [lockTarget, setLockTarget] = useState<{ folderName: string; mode: "close" | "reopen"; pendingCount: number } | null>(null);
   const [isLocking, setIsLocking] = useState(false);
   // Modal-scoped failure text for RestoreDialog/MonthLockDialog (item 1): kept
@@ -290,9 +295,15 @@ export default function ArchiveTab() {
     const outcome = await runSelectiveRestore({ directoryHandle, months, backupFolderName: folderName, username, scope });
     if (!outcome.ok) {
       const reason = outcome.reason === "plan-rejected" ? getLabels().archive_restore_plan_rejected : outcome.error;
-      const text = `${getLabels().archive_restore_failed_prefix}: ${reason}`;
+      const started = outcome.reason === "restore-failed" ? outcome.rollbackFolderName : undefined;
+      const text = describeRestoreFailure(getLabels(), reason, started);
       setMessage({ type: "error", text });
       setDialogError(text);
+      if (started) {
+        // The walk had begun: live data may have changed, so other views must re-read it.
+        await refresh();
+        broadcastDataRefresh("manual");
+      }
       return;
     }
     recordAction(directoryHandle, username, session?.role ?? "unknown", "backup-restored", {
@@ -308,14 +319,16 @@ export default function ArchiveTab() {
     setRestoreTarget(null);
     // The users/labels import offer only makes sense when 3-user-data came back.
     setJustRestored(scope.elements.includes("usersPermissions"));
+    const success = describeSelectiveRestoreSuccess(getLabels(), {
+      folderName,
+      restoredCount: outcome.restoredFiles.length,
+      rollbackFolderName: outcome.rollbackFolderName,
+      integrity: outcome.integrity,
+    });
+    const derived = outcome.derivedWarnings.map((warning) => describeDerivedWarning(getLabels(), warning));
     setMessage({
-      type: "ok",
-      text: describeSelectiveRestoreSuccess(getLabels(), {
-        folderName,
-        restoredCount: outcome.restoredFiles.length,
-        rollbackFolderName: outcome.rollbackFolderName,
-        integrity: outcome.integrity,
-      }),
+      type: derived.length > 0 || integrityNeedsAttention(outcome.integrity) ? "warn" : "ok",
+      text: [success, ...derived].join(" "),
     });
     await refresh();
     // Same reasoning as the full restore below: a restore bypasses every normal write path.
@@ -529,7 +542,7 @@ export default function ArchiveTab() {
       ) : null}
 
       {message ? (
-        <div className={message.type === "ok" ? "arc-msg-ok" : "arc-msg-error"} role="status">
+        <div className={message.type === "ok" ? "arc-msg-ok" : message.type === "warn" ? "arc-msg-warn" : "arc-msg-error"} role="status">
           {message.text}
         </div>
       ) : null}

@@ -1594,6 +1594,9 @@ export const DEFAULT_LABELS = {
   population_recovery_col_processed_at: "تاريخ المعالجة",
   population_recovery_restored:     "تمت الاستعادة. حُفظت النسخة السابقة باسم {archived}.",
   population_recovery_failed:       "تعذّرت الاستعادة: {error}",
+  population_recovery_backup_denied:    "استعادة المجتمع من النسخ الاحتياطية متاحة للمشرف العام فقط.",
+  population_recovery_plan_rejected:    "تغيّر محتوى النسخة الاحتياطية أو بيانات الشهر منذ عرض القائمة. أعد عرض النسخ السابقة ثم حاول مجدداً.",
+  population_recovery_backups_failed:   "تعذّر عرض النسخ الاحتياطية، وتظهر النسخ المحلية فقط: {error}",
   population_recovery_source_backup:    "نسخة احتياطية",
   population_recovery_backup_restored:  "تمت استعادة المجتمع من النسخة الاحتياطية {folder}. نسخة الرجوع: {rollback}.",
   population_recovery_backup_blocked:   "لا يمكن استعادة هذه النسخة: {missing} من صور العينة الحالية غير موجودة في مجتمعها، ولهذا الشهر توزيع أو إجابات.",
@@ -1955,6 +1958,13 @@ export const DEFAULT_LABELS = {
   archive_restore_integrity_failed:             "تعذر فحص السلامة لشهر {month}: {error}",
   archive_restore_plan_rejected:                "تغيّر محتوى النسخة أو بيانات الشهر منذ المعاينة، ولم يعد الاختيار صالحاً. أعد فتح نافذة الاستعادة.",
   archive_restore_month_closed:                 "لا يمكن الاستعادة: شهر {month} مغلق. أعد فتح الشهر أولاً ثم كرر الاستعادة. لم يُغيَّر أي شيء.",
+  archive_restore_failed_rollback:              "بدأت الاستعادة قبل أن تفشل، فقد تكون بعض الملفات تغيّرت. للرجوع استخدم نسخة الرجوع: {rollback}.",
+  archive_restore_derived_warning:              "تنبيه: استُعيدت البيانات لكن تعذّرت خطوة «{step}» لشهر {month}: {error}",
+  archive_restore_derived_step_manifest:        "تحديث سجل الشهر",
+  archive_restore_derived_step_population:      "إعادة بناء ملفات المجتمع المشتقة",
+  archive_restore_derived_step_replacement_index: "فهرس مرشحي الاستبدال",
+  archive_restore_derived_step_aggregate:       "ملخص المجتمع",
+  archive_restore_derived_step_distribution:    "ذاكرة التوزيع المؤقتة",
   archive_restore_failed_prefix:                "فشلت الاستعادة",
 
   // The 2026-08 design-handoff redesign keeps its keys in one file per screen

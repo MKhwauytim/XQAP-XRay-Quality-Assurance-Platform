@@ -19,6 +19,8 @@ import {
   restorePopulationMonthFromBackup,
 } from "../../../../data/backup/selectiveRestore";
 import { broadcastDataRefresh } from "../../../../data/workspace/dataRefreshSignal";
+import { recordAction } from "../../../../data/audit/actionLog";
+import { describeDerivedWarning, describeRestoreFailure } from "../../../../data/backup/restoreMessages";
 import { formatDateTime, formatNumber } from "../../../../utils/formatting";
 import { ConfirmDialog } from "../../../ConfirmDialog/ConfirmDialog";
 import "./TemplateRepairSection.css";
@@ -43,9 +45,12 @@ const missingOf = (candidate: PopulationRecoveryCandidate): number =>
  * orphan rule under the month lock, so a stale list cannot bypass it.
  */
 export function PopulationRecoverySection() {
-  const { can, canMutate, username } = usePermissions();
+  const { can, canMutate, username, role } = usePermissions();
   const canView = can("view-error-log");
   const canRestore = canMutate("view-error-log");
+  // Backup snapshots hold the WHOLE workspace's history and are restored through
+  // the same engine as the admin-only Archive restore: admin only, at render and in the handler.
+  const canUseBackups = role === "admin" && canMutate("archive.restoreBackup");
   const { directoryHandle } = useWorkspace();
   const L = useLabels();
   const [isOpen, setIsOpen] = useState(false);
@@ -94,11 +99,22 @@ export function PopulationRecoverySection() {
     if (!options?.keepNotice) setNotice(null);
     try {
       // Local copies (A2) first, then backup snapshots (Workstream D), newest first within each.
-      const [local, backups] = await Promise.all([
+      const [local, backups] = await Promise.allSettled([
         listPopulationRecoveryCandidates(directoryHandle, month),
-        listBackupPopulationCandidates(directoryHandle, month),
+        canUseBackups ? listBackupPopulationCandidates(directoryHandle, month) : Promise.resolve([]),
       ]);
-      setCandidates([...local, ...backups]);
+      // A failed LOCAL listing is the scan failing (caught below); a failed backup listing only costs the backup rows.
+      if (local.status === "rejected") throw local.reason;
+      setCandidates([...local.value, ...(backups.status === "fulfilled" ? backups.value : [])]);
+      if (backups.status === "rejected") {
+        logError("settings:population-recovery-backups", backups.reason);
+        setNotice({
+          kind: "info",
+          text: fill(L.population_recovery_backups_failed, {
+            error: backups.reason instanceof Error ? backups.reason.message : String(backups.reason),
+          }),
+        });
+      }
     } catch (error) {
       logError("settings:population-recovery-scan", error);
       setCandidates(null);
@@ -131,6 +147,8 @@ export function PopulationRecoverySection() {
     monthFolderName: string,
     backupFolderName: string
   ): Promise<Notice> {
+    // Handler-level twin of the render gate.
+    if (!canUseBackups) return { kind: "error", text: fill(L.population_recovery_failed, { error: L.population_recovery_backup_denied }) };
     const outcome = await restorePopulationMonthFromBackup({
       directoryHandle: handle,
       backupFolderName,
@@ -138,24 +156,47 @@ export function PopulationRecoverySection() {
       username,
     });
     if (outcome.ok) {
+      recordAction(handle, username, role, "backup-restored", {
+        target: backupFolderName,
+        details: {
+          selective: true,
+          elements: "population",
+          months: monthFolderName,
+          source: "population-recovery",
+          rollbackFolderName: outcome.rollbackFolderName,
+          restoredFiles: outcome.restoredFiles.length,
+        },
+      });
       // A backup restore bypasses every normal write path — same signal the Archive restore sends.
       broadcastDataRefresh("manual");
+      const restored = fill(L.population_recovery_backup_restored, {
+        folder: backupFolderName,
+        rollback: outcome.rollbackFolderName,
+      });
+      if (outcome.derivedWarnings.length === 0) return { kind: "ok", text: restored };
       return {
-        kind: "ok",
-        text: L.population_recovery_backup_restored
-          .replace("{folder}", backupFolderName)
-          .replace("{rollback}", outcome.rollbackFolderName),
+        kind: "info",
+        text: [restored, ...outcome.derivedWarnings.map((warning) => describeDerivedWarning(L, warning))].join(" "),
       };
     }
     if (outcome.reason === "plan-rejected" && outcome.plan.blocked.length > 0) {
       return {
         kind: "error",
-        text: L.population_recovery_backup_blocked.replace("{missing}", String(outcome.plan.blocked[0].missingCount)),
+        text: fill(L.population_recovery_backup_blocked, { missing: outcome.plan.blocked[0].missingCount }),
       };
     }
-    const detail = outcome.reason === "restore-failed" ? outcome.error : L.archive_restore_plan_rejected;
-    return { kind: "error", text: L.population_recovery_failed.replace("{error}", detail) };
+    if (outcome.reason === "restore-failed" && outcome.rollbackFolderName) {
+      // The walk had begun: live data may have changed even though the restore failed.
+      broadcastDataRefresh("manual");
+      return {
+        kind: "error",
+        text: describeRestoreFailure(L, fill(L.population_recovery_failed, { error: outcome.error }), outcome.rollbackFolderName),
+      };
+    }
+    const detail = outcome.reason === "restore-failed" ? outcome.error : L.population_recovery_plan_rejected;
+    return { kind: "error", text: fill(L.population_recovery_failed, { error: detail }) };
   }
+
   async function restore(candidate: PopulationRecoveryCandidate): Promise<void> {
     if (!directoryHandle || !month || !canRestore) return;
     setBusy(true);
