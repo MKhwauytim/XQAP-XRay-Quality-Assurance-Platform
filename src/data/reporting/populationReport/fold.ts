@@ -4,7 +4,12 @@
 // grain (spec §4.3) — one set of helpers, reused with different row sources,
 // rather than re-deriving the fold per section.
 import { classifyImageResult } from "../../population/imageResult";
-import { getStageKey } from "../../population/stageHelpers";
+import {
+  getStageKey,
+  STAGE_COUNT_KEY_ORDER,
+  STAGE_LABELS_AR,
+  STAGE_UNKNOWN_LABEL,
+} from "../../population/stageHelpers";
 import type { PreparedPopulationRow } from "../../population/populationTypes";
 import type { DistributionEntry } from "../../distribution/distributionTypes";
 import type {
@@ -17,20 +22,16 @@ import type {
   EmployeeCertScanRow,
 } from "./types";
 
-// Local label map, not imported from stageHelpers.ts (STAGE_LABELS_AR there is
-// module-private, and formatStageLabel() expects a RAW stage value to
-// re-derive the key from — passing an already-canonical key like "first"
-// back through it would misclassify to "unknown"). Same pattern
-// sampleReport.ts/distributionReport.ts already use for their own label maps.
-export const STAGE_LABELS: Record<string, string> = {
-  first: "المستوى الأول",
-  second: "المستوى الثاني",
-  third: "المستوى الثالث",
-  fourth: "المستوى الرابع",
-  unknown: "غير محدد",
+// Keyed by canonical stage key (formatStageLabel expects a RAW stage value, so
+// it cannot relabel an already-canonical key — "first" would misclassify to
+// "unknown"). Derived from the one canonical definition in stageLabels.ts plus
+// the "unknown" bucket label (C1) — never re-typed.
+export const STAGE_LABELS: Readonly<Record<string, string>> = {
+  ...STAGE_LABELS_AR,
+  unknown: STAGE_UNKNOWN_LABEL,
 };
 
-const STAGE_ORDER = ["first", "second", "third", "fourth", "unknown"];
+const STAGE_ORDER: readonly string[] = STAGE_COUNT_KEY_ORDER;
 
 function emptyCounts(): ResultCounts {
   return { سليمة: 0, اشتباه: 0, total: 0 };

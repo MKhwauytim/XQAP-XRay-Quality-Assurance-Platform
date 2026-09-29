@@ -7,6 +7,7 @@ import DistributionRow from "./DistributionRow";
 import PortRestrictionsModal from "./PortRestrictionsModal";
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { getStageKey, formatNumber } from "./helpers";
+import { STAGE_KEY_ORDER, STAGE_LABELS_AR } from "../../../../../data/population/stageLabels";
 import { getLabels } from "../../../../../data/labels/labelsStore";
 import { calculateBulkAssignment, isAssignableSampleRole } from "../../../../../data/distribution/bulkAssignment";
 import { derivePortCatalog } from "../../../../../data/distribution/portEligibility";
@@ -42,15 +43,10 @@ type PhaseFourDistributionProps = {
   onApplyBulkAssignment: (events: DistributionEvent[]) => Promise<void>;
 };
 
-const STAGE_KEYS = ["first", "second", "third", "fourth"] as const;
+const STAGE_KEYS = STAGE_KEY_ORDER;
 type StageKey = (typeof STAGE_KEYS)[number];
 
-const STAGE_LABELS: Record<StageKey, string> = {
-  first:  "المستوى الأول",
-  second: "المستوى الثاني",
-  third:  "المستوى الثالث",
-  fourth: "المستوى الرابع"
-};
+const STAGE_LABELS = STAGE_LABELS_AR;
 
 const STATUS_LABELS: Record<string, string> = {
   unassigned: "غير معين",
