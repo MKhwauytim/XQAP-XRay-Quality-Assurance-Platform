@@ -24,7 +24,7 @@
  *
  * This lets one submitted attempt be checked against at most four candidate
  * strings instead of one — a factor-4 reduction in an attacker's work, which is
- * nothing against Argon2id (m=19 MiB, t=2) behind a five-attempt lockout. It
+ * nothing against Argon2id (m=19 MiB, t=2) behind a three-attempt lockout. It
  * does NOT widen what counts as a correct password: each candidate is verified
  * against the stored hash in full, and a wrong password stays wrong under every
  * reading. The lockout counts submitted ATTEMPTS, not candidates, so this
