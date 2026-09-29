@@ -5,73 +5,73 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
-    "version": "v150.20",
+    "version": "v150.31",
     "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "backup",
-    "title": "never overwrite an existing live manifest misread as missing"
+    "scope": "distribution",
+    "title": "delete guard fails safe on an unreadable event store; auto-lock decides from fresh state; per-workspace month-lock cache"
   },
   {
-    "version": "v150.19",
+    "version": "v150.30",
     "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "archive",
-    "title": "restore dialog and recovery tool catch unexpected rejections and show integrity warnings"
+    "scope": "distribution",
+    "title": "review fixes for the reassign click-path work (delete guard, auto-lock ordering, deterministic index, persist retry)"
   },
   {
-    "version": "v150.18",
+    "version": "v150.29",
     "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "backup",
-    "title": "selective restore round 3 (unreadable backup manifest, deleted-month manifest, verification, shared wording)"
+    "scope": "distribution",
+    "title": "remember that the legacy distribution log is absent"
   },
   {
-    "version": "v150.17",
+    "version": "v150.28",
     "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "archive",
-    "title": "selective restore UI review fixes (remount race, admin-only backups, warnings, failure handling)"
+    "scope": "distribution",
+    "title": "thread one DistributionLogLoad through the interactive append and drop a redundant listing"
   },
   {
-    "version": "v150.16",
+    "version": "v150.27",
     "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "backup",
-    "title": "selective restore engine review fixes (guard bypass, closed months, manifest, derived warnings)"
+    "scope": "distribution",
+    "title": "keep the log projection off an interactive single-row click"
   },
   {
-    "version": "v150.15",
+    "version": "v150.26",
     "date": "2026-09-29",
-    "bucket": "enhancement",
+    "bucket": "fix",
+    "scope": "distribution",
+    "title": "rewrite only the employee sample mirrors whose content changed"
+  },
+  {
+    "version": "v150.25",
+    "date": "2026-09-29",
+    "bucket": "fix",
+    "scope": "distribution",
+    "title": "persist derived cache, sidecar and mirrors on a background chain instead of the reassign click path"
+  },
+  {
+    "version": "v150.24",
+    "date": "2026-09-29",
+    "bucket": "fix",
     "scope": "population",
-    "title": "population recovery offers backup snapshots through the selective-restore engine"
+    "title": "read the prior-month advisory only when Phase 3 is visible"
   },
   {
-    "version": "v150.14",
-    "date": "2026-09-29",
-    "bucket": "feature",
-    "scope": "archive",
-    "title": "selective restore mode in the backup restore dialog"
-  },
-  {
-    "version": "v150.13",
+    "version": "v150.23",
     "date": "2026-09-29",
     "bucket": "fix",
-    "scope": "backup",
-    "title": "selective-restore catalog review fixes (ad-hoc records, embedded requests, casing, empty folders)"
+    "scope": "referral",
+    "title": "reload only the decided month after an approval decision"
   },
   {
-    "version": "v150.12",
+    "version": "v150.22",
     "date": "2026-09-29",
-    "bucket": "feature",
-    "scope": "backup",
-    "title": "run selective restore with derived-cache rebuild and integrity scan"
-  },
-  {
-    "version": "v150.11",
-    "date": "2026-09-29",
-    "bucket": "feature",
-    "scope": "backup",
-    "title": "dependency plan for selective restore (A2 coverage block, warnings)"
+    "bucket": "fix",
+    "scope": "referral",
+    "title": "fail fast when the share refuses to replace the requests file"
   }
 ];
