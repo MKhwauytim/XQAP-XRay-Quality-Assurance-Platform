@@ -65,6 +65,7 @@ import type { DirectoryHandleLike } from "../../../../../data/storage/fileSystem
 import { useLabels, type Labels } from "../../../../../data/labels/useLabels";
 import { useGlobalMonth } from "../../../../../data/month/useGlobalMonth";
 import { formatStageLabel } from "../../../../../data/population/stageHelpers";
+import { certScanStatusFilterProps } from "./certScanColumn";
 import type { StageAliasMappings } from "../../../../../data/population/populationConfig";
 import { useWorkspaceStageMappings } from "../../../../../hooks/useWorkspaceStageMappings";
 
@@ -109,7 +110,7 @@ function buildSampleColumns(L: Labels): DataTableCol<DistributionEntry>[] {
       accessor: () => null },
     { id: "xrayLevelOneResult",     label: L.col_xray_l1_result,            widthFr: 8,  accessor: (e) => e.row.xrayLevelOneResult },
     { id: "xrayLevelTwoResult",     label: L.col_xray_l2_result,            widthFr: 8,  accessor: (e) => e.row.xrayLevelTwoResult },
-    { id: "certScanStatus",         label: L.col_certscan_status,           widthFr: 9,  accessor: (e) => e.row.certScanStatus },
+    { id: "certScanStatus",         label: L.col_certscan_status,           widthFr: 9,  ...certScanStatusFilterProps(L), accessor: (e) => e.row.certScanStatus },
     { id: "declarationNumber",      label: L.col_declaration_number,        widthFr: 11, accessor: (e) => e.row.declarationNumber },
     { id: "declarationDate",        label: L.col_declaration_date,          widthFr: 11, isDate: true, accessor: (e) => e.row.declarationDate },
     { id: "chassisNumber",          label: L.col_chassis_number,            widthFr: 11, accessor: (e) => e.row.chassisNumber },

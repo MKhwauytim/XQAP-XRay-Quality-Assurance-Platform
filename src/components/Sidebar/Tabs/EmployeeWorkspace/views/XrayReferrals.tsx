@@ -95,7 +95,7 @@ import type { Labels } from "../../../../../data/labels/labelsStore";
 import { formatStageLabel } from "../../../../../data/population/stageHelpers";
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import {
-  CaseFilterSwitcher,
+  CaseFilterBar,
   QUEUE_SCOPE_ALL,
   buildQueueScopeOptions,
   QueueToolbar,
@@ -742,7 +742,7 @@ function createOpenReassignModal(deps: {
 /**
  * The «متابعة العمل» figures, over EXACTLY the rows the queue table shows: the
  * picked scope (everyone, one named employee, or the reader's own rows)
- * narrowed by the active case chip. It used to read the scope BEFORE the chips
+ * narrowed by the active case chip and CertScan chip. It used to read the scope BEFORE the chips
  * (and, for employees, re-filter every row by username), so picking
  * «حالات استثنائية» changed the table but not the strip — field report
  * 2026-09-28. The daily-quota tile is not derived here: it is a property of
@@ -1837,7 +1837,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               // Neither can bounce a reviewer off an open row: resetToken moves
               // PAGING only, never the selection (`expandedKey`/`selEntryId`
               // are untouched).
-              resetToken={`${selMonth}::${scopeEmployee}::${caseFilter.value}`}
+              resetToken={`${selMonth}::${scopeEmployee}::${caseFilter.value}::${caseFilter.certScan}`}
               exportFileName={`صور الأشعة المحالة - ${selMonth || "كل الأشهر"}.xlsx`}
               expandedKey={selEntryId}
               onRowClick={(e) => selectEntry(e.xrayImageId)}
@@ -1845,7 +1845,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               // Every role that can open this page sees the case chips (an
               // ordinary employee is their primary user); the scope picker
               // stays oversight-only, as before.
-              toolbarStart={<CaseFilterSwitcher value={caseFilter.value} counts={caseFilter.counts} onChange={caseFilter.setValue} />}
+              toolbarStart={<CaseFilterBar state={caseFilter} />}
               toolbarEndExtra={
                 <XrQueueToolbarExtras
                   canSeeAll={canSeeAll}
@@ -1958,8 +1958,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
             }
             scopeEmployeeName={pickedScopeName}
             showingRetainedDraft={showingRetainedDraft}
-            caseFilterValue={caseFilter.value}
-            caseFilterCounts={caseFilter.counts}
+            caseFilter={caseFilter}
             labels={L}
             table={tableEl}
           />

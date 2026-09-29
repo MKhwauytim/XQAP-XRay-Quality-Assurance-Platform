@@ -293,6 +293,15 @@ export const DEFAULT_LABELS = {
   ew_case_filter_risk_targeted:    "مستهدف المؤشر",
   ew_case_filter_adhoc:            "حالات استثنائية",
   ew_case_filter_empty:            "لا توجد حالات ضمن هذه التصفية. اختر «جميع الحالات» للعودة إلى القائمة كاملة.",
+  ew_case_filter_empty_certscan:   "لا توجد حالات ضمن هذه التصفية. اختر «كل الصور» أو «جميع الحالات» للعودة إلى القائمة كاملة.",
+
+  // ── CertScan chip (C2) — shared by the employee queue and Population Browse.
+  // "CertScan" is the processed row's certScanStatus: its port is flagged as a
+  // CertScan port OR its id matched the pasted CertScan device list.
+  certscan_filter_aria:            "تصفية حسب CertScan",
+  certscan_filter_any:             "كل الصور",
+  certscan_filter_certscan:        "CertScan",
+  certscan_filter_noncertscan:     "غير CertScan",
 
   /** Appended to the «متابعة العمل» strip title while a case chip other than «جميع الحالات» is active. */
   ew_stats_case_suffix:            " — {filter}",
@@ -412,6 +421,7 @@ export const DEFAULT_LABELS = {
   population_reprocess_cancelled: "تم إلغاء الحفظ — بقيت بيانات الشهر السابقة دون تغيير.",
   population_reprocess_impact_counts: "إجابات محفوظة: {answers} · صور موزعة: {distribution} · صور من العينة غير موجودة في المجتمع الجديد: {missing}",
   population_reprocess_missing_examples: "أمثلة على الصور المفقودة: {ids}",
+  population_reprocess_certscan_warning: "سيتغيّر وضع CertScan لـ {count} صورة من العينة؛ تحتفظ العينة المسحوبة بتقسيمها الأصلي.",
   population_reprocess_examples_separator: "، ",
   population_reprocess_blocked_title: "لا يمكن حفظ المجتمع الجديد",
   population_reprocess_blocked_message: "لهذا الشهر توزيع أو إجابات محفوظة، والمجتمع الجديد لا يحتوي بعض صور العينة الحالية. الحفظ سيُخفي هذه الصور وإجاباتها من التقارير، لذلك تم إيقافه. تأكّد أن الملفات تخص الشهر نفسه ثم أعد المعالجة.",

@@ -1,0 +1,696 @@
+{
+ "nopaste": {
+  "preparedRows": [
+   {
+    "stage": "FIRST_STAGE",
+    "xrayImageId": "96601PB04202605040001",
+    "xrayEntryDate": "2026-05-04",
+    "portCode": "P1",
+    "portType": "بري",
+    "portName": "منفذ أ",
+    "declarationNumber": null,
+    "transitDeclarationNumber": null,
+    "declarationDate": null,
+    "declarationHijriDate": null,
+    "manifestNumber": null,
+    "manifestType": null,
+    "manifestDate": null,
+    "plateOrContainerNumber": null,
+    "chassisNumber": null,
+    "finalDestination": null,
+    "xrayLevelOneResult": "سليمة",
+    "xrayLevelTwoResult": "سليمة",
+    "movementType": "بري",
+    "movementNumber": null,
+    "movementDate": null,
+    "movementHijriDate": null,
+    "reportNumber": null,
+    "entryDate": null,
+    "exitDate": null,
+    "targetedByRiskEngine": null,
+    "riskMessage": null,
+    "certScanStatus": "NonCertscan",
+    "certScanSnippet": null,
+    "originalCertScanSnippet": null,
+    "levelOneEmployee": null,
+    "levelTwoEmployee": null,
+    "otherResults": {
+     "manual": {
+      "result": null,
+      "code": null,
+      "employeeId": null
+     },
+     "opposite": {
+      "result": null,
+      "code": null,
+      "employeeId": null
+     },
+     "liveMeans": {
+      "result": null,
+      "code": null,
+      "employeeId": null
+     }
+    },
+    "notes": null,
+    "biEnrichmentStatus": "BI Not Provided",
+    "biMatched": false,
+    "biFilledFields": [],
+    "sourceSheetName": "بري",
+    "sourceRowNumber": 2
+   },
+   {
+    "stage": "FIRST_STAGE",
+    "xrayImageId": "96601PB04202605040002",
+    "xrayEntryDate": "2026-05-04",
+    "portCode": "P1",
+    "portType": "بري",
+    "portName": "منفذ ب",
+    "declarationNumber": null,
+    "transitDeclarationNumber": null,
+    "declarationDate": null,
+    "declarationHijriDate": null,
+    "manifestNumber": null,
+    "manifestType": null,
+    "manifestDate": null,
+    "plateOrContainerNumber": null,
+    "chassisNumber": null,
+    "finalDestination": null,
+    "xrayLevelOneResult": "سليمة",
+    "xrayLevelTwoResult": "سليمة",
+    "movementType": "بري",
+    "movementNumber": null,
+    "movementDate": null,
+    "movementHijriDate": null,
+    "reportNumber": null,
+    "entryDate": null,
+    "exitDate": null,
+    "targetedByRiskEngine": null,
+    "riskMessage": null,
+    "certScanStatus": "NonCertscan",
+    "certScanSnippet": null,
+    "originalCertScanSnippet": null,
+    "levelOneEmployee": null,
+    "levelTwoEmployee": null,
+    "otherResults": {
+     "manual": {
+      "result": null,
+      "code": null,
+      "employeeId": null
+     },
+     "opposite": {
+      "result": null,
+      "code": null,
+      "employeeId": null
+     },
+     "liveMeans": {
+      "result": null,
+      "code": null,
+      "employeeId": null
+     }
+    },
+    "notes": null,
+    "biEnrichmentStatus": "BI Not Provided",
+    "biMatched": false,
+    "biFilledFields": [],
+    "sourceSheetName": "بري",
+    "sourceRowNumber": 3
+   },
+   {
+    "stage": "FIRST_STAGE",
+    "xrayImageId": "77777XX99202605040003",
+    "xrayEntryDate": "2026-05-04",
+    "portCode": "P1",
+    "portType": "بري",
+    "portName": "منفذ ب",
+    "declarationNumber": null,
+    "transitDeclarationNumber": null,
+    "declarationDate": null,
+    "declarationHijriDate": null,
+    "manifestNumber": null,
+    "manifestType": null,
+    "manifestDate": null,
+    "plateOrContainerNumber": null,
+    "chassisNumber": null,
+    "finalDestination": null,
+    "xrayLevelOneResult": "سليمة",
+    "xrayLevelTwoResult": "سليمة",
+    "movementType": "بري",
+    "movementNumber": null,
+    "movementDate": null,
+    "movementHijriDate": null,
+    "reportNumber": null,
+    "entryDate": null,
+    "exitDate": null,
+    "targetedByRiskEngine": null,
+    "riskMessage": null,
+    "certScanStatus": "NonCertscan",
+    "certScanSnippet": null,
+    "originalCertScanSnippet": null,
+    "levelOneEmployee": null,
+    "levelTwoEmployee": null,
+    "otherResults": {
+     "manual": {
+      "result": null,
+      "code": null,
+      "employeeId": null
+     },
+     "opposite": {
+      "result": null,
+      "code": null,
+      "employeeId": null
+     },
+     "liveMeans": {
+      "result": null,
+      "code": null,
+      "employeeId": null
+     }
+    },
+    "notes": null,
+    "biEnrichmentStatus": "BI Not Provided",
+    "biMatched": false,
+    "biFilledFields": [],
+    "sourceSheetName": "بري",
+    "sourceRowNumber": 4
+   },
+   {
+    "stage": "FIRST_STAGE",
+    "xrayImageId": "55555YY11202605040004",
+    "xrayEntryDate": "2026-05-04",
+    "portCode": "P1",
+    "portType": "بري",
+    "portName": "منفذ ج",
+    "declarationNumber": null,
+    "transitDeclarationNumber": null,
+    "declarationDate": null,
+    "declarationHijriDate": null,
+    "manifestNumber": null,
+    "manifestType": null,
+    "manifestDate": null,
+    "plateOrContainerNumber": null,
+    "chassisNumber": null,
+    "finalDestination": null,
+    "xrayLevelOneResult": "سليمة",
+    "xrayLevelTwoResult": "سليمة",
+    "movementType": "بري",
+    "movementNumber": null,
+    "movementDate": null,
+    "movementHijriDate": null,
+    "reportNumber": null,
+    "entryDate": null,
+    "exitDate": null,
+    "targetedByRiskEngine": null,
+    "riskMessage": null,
+    "certScanStatus": "NonCertscan",
+    "certScanSnippet": null,
+    "originalCertScanSnippet": null,
+    "levelOneEmployee": null,
+    "levelTwoEmployee": null,
+    "otherResults": {
+     "manual": {
+      "result": null,
+      "code": null,
+      "employeeId": null
+     },
+     "opposite": {
+      "result": null,
+      "code": null,
+      "employeeId": null
+     },
+     "liveMeans": {
+      "result": null,
+      "code": null,
+      "employeeId": null
+     }
+    },
+    "notes": null,
+    "biEnrichmentStatus": "BI Not Provided",
+    "biMatched": false,
+    "biFilledFields": [],
+    "sourceSheetName": "بري",
+    "sourceRowNumber": 5
+   }
+  ],
+  "removedRows": [],
+  "duplicateRows": [],
+  "invalidResultRows": [],
+  "summary": {
+   "riskOriginalRows": 4,
+   "validRiskIdRows": 4,
+   "invalidRiskIdRows": 0,
+   "duplicateRiskIdRows": 0,
+   "rowsAfterDeduplication": 4,
+   "removedInvalidResultRows": 0,
+   "finalPreparedPopulationRows": 4,
+   "certScanRows": 0,
+   "nonCertScanRows": 4,
+   "certScanProvided": false,
+   "certScanPercentage": 0,
+   "nonCertScanPercentage": 100,
+   "biProvided": false,
+   "biMatchedRows": 0,
+   "biUnmatchedRows": 0,
+   "biMatchPercentage": 0,
+   "totalBiFilledFields": 0,
+   "biFieldFillSummary": [
+    {
+     "fieldName": "تاريخ دخول الأشعة",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    },
+    {
+     "fieldName": "نوع المنفذ",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    },
+    {
+     "fieldName": "اسم المنفذ",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    },
+    {
+     "fieldName": "رقم البيان",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    },
+    {
+     "fieldName": "تاريخ البيان",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    },
+    {
+     "fieldName": "رقم اللوحة/الحاوية",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    },
+    {
+     "fieldName": "رقم الهيكل",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    },
+    {
+     "fieldName": "نتيجة المستوى الأول للأشعة",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    },
+    {
+     "fieldName": "نتيجة المستوى الثاني للأشعة",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    },
+    {
+     "fieldName": "تاريخ البيان هجري",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    },
+    {
+     "fieldName": "رقم الحركة",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    },
+    {
+     "fieldName": "تاريخ الحركة",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    },
+    {
+     "fieldName": "تاريخ الحركة هجري",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    }
+   ]
+  }
+ },
+ "paste": {
+  "preparedRows": [
+   {
+    "stage": "FIRST_STAGE",
+    "xrayImageId": "96601PB04202605040001",
+    "xrayEntryDate": "2026-05-04",
+    "portCode": "P1",
+    "portType": "بري",
+    "portName": "منفذ أ",
+    "declarationNumber": null,
+    "transitDeclarationNumber": null,
+    "declarationDate": null,
+    "declarationHijriDate": null,
+    "manifestNumber": null,
+    "manifestType": null,
+    "manifestDate": null,
+    "plateOrContainerNumber": null,
+    "chassisNumber": null,
+    "finalDestination": null,
+    "xrayLevelOneResult": "سليمة",
+    "xrayLevelTwoResult": "سليمة",
+    "movementType": "بري",
+    "movementNumber": null,
+    "movementDate": null,
+    "movementHijriDate": null,
+    "reportNumber": null,
+    "entryDate": null,
+    "exitDate": null,
+    "targetedByRiskEngine": null,
+    "riskMessage": null,
+    "certScanStatus": "NonCertscan",
+    "certScanSnippet": null,
+    "originalCertScanSnippet": null,
+    "levelOneEmployee": null,
+    "levelTwoEmployee": null,
+    "otherResults": {
+     "manual": {
+      "result": null,
+      "code": null,
+      "employeeId": null
+     },
+     "opposite": {
+      "result": null,
+      "code": null,
+      "employeeId": null
+     },
+     "liveMeans": {
+      "result": null,
+      "code": null,
+      "employeeId": null
+     }
+    },
+    "notes": null,
+    "biEnrichmentStatus": "BI Not Provided",
+    "biMatched": false,
+    "biFilledFields": [],
+    "sourceSheetName": "بري",
+    "sourceRowNumber": 2
+   },
+   {
+    "stage": "FIRST_STAGE",
+    "xrayImageId": "96601PB04202605040002",
+    "xrayEntryDate": "2026-05-04",
+    "portCode": "P1",
+    "portType": "بري",
+    "portName": "منفذ ب",
+    "declarationNumber": null,
+    "transitDeclarationNumber": null,
+    "declarationDate": null,
+    "declarationHijriDate": null,
+    "manifestNumber": null,
+    "manifestType": null,
+    "manifestDate": null,
+    "plateOrContainerNumber": null,
+    "chassisNumber": null,
+    "finalDestination": null,
+    "xrayLevelOneResult": "سليمة",
+    "xrayLevelTwoResult": "سليمة",
+    "movementType": "بري",
+    "movementNumber": null,
+    "movementDate": null,
+    "movementHijriDate": null,
+    "reportNumber": null,
+    "entryDate": null,
+    "exitDate": null,
+    "targetedByRiskEngine": null,
+    "riskMessage": null,
+    "certScanStatus": "Certscan",
+    "certScanSnippet": "96601PB04",
+    "originalCertScanSnippet": "96601PB04",
+    "levelOneEmployee": null,
+    "levelTwoEmployee": null,
+    "otherResults": {
+     "manual": {
+      "result": null,
+      "code": null,
+      "employeeId": null
+     },
+     "opposite": {
+      "result": null,
+      "code": null,
+      "employeeId": null
+     },
+     "liveMeans": {
+      "result": null,
+      "code": null,
+      "employeeId": null
+     }
+    },
+    "notes": null,
+    "biEnrichmentStatus": "BI Not Provided",
+    "biMatched": false,
+    "biFilledFields": [],
+    "sourceSheetName": "بري",
+    "sourceRowNumber": 3
+   },
+   {
+    "stage": "FIRST_STAGE",
+    "xrayImageId": "77777XX99202605040003",
+    "xrayEntryDate": "2026-05-04",
+    "portCode": "P1",
+    "portType": "بري",
+    "portName": "منفذ ب",
+    "declarationNumber": null,
+    "transitDeclarationNumber": null,
+    "declarationDate": null,
+    "declarationHijriDate": null,
+    "manifestNumber": null,
+    "manifestType": null,
+    "manifestDate": null,
+    "plateOrContainerNumber": null,
+    "chassisNumber": null,
+    "finalDestination": null,
+    "xrayLevelOneResult": "سليمة",
+    "xrayLevelTwoResult": "سليمة",
+    "movementType": "بري",
+    "movementNumber": null,
+    "movementDate": null,
+    "movementHijriDate": null,
+    "reportNumber": null,
+    "entryDate": null,
+    "exitDate": null,
+    "targetedByRiskEngine": null,
+    "riskMessage": null,
+    "certScanStatus": "NonCertscan",
+    "certScanSnippet": null,
+    "originalCertScanSnippet": null,
+    "levelOneEmployee": null,
+    "levelTwoEmployee": null,
+    "otherResults": {
+     "manual": {
+      "result": null,
+      "code": null,
+      "employeeId": null
+     },
+     "opposite": {
+      "result": null,
+      "code": null,
+      "employeeId": null
+     },
+     "liveMeans": {
+      "result": null,
+      "code": null,
+      "employeeId": null
+     }
+    },
+    "notes": null,
+    "biEnrichmentStatus": "BI Not Provided",
+    "biMatched": false,
+    "biFilledFields": [],
+    "sourceSheetName": "بري",
+    "sourceRowNumber": 4
+   },
+   {
+    "stage": "FIRST_STAGE",
+    "xrayImageId": "55555YY11202605040004",
+    "xrayEntryDate": "2026-05-04",
+    "portCode": "P1",
+    "portType": "بري",
+    "portName": "منفذ ج",
+    "declarationNumber": null,
+    "transitDeclarationNumber": null,
+    "declarationDate": null,
+    "declarationHijriDate": null,
+    "manifestNumber": null,
+    "manifestType": null,
+    "manifestDate": null,
+    "plateOrContainerNumber": null,
+    "chassisNumber": null,
+    "finalDestination": null,
+    "xrayLevelOneResult": "سليمة",
+    "xrayLevelTwoResult": "سليمة",
+    "movementType": "بري",
+    "movementNumber": null,
+    "movementDate": null,
+    "movementHijriDate": null,
+    "reportNumber": null,
+    "entryDate": null,
+    "exitDate": null,
+    "targetedByRiskEngine": null,
+    "riskMessage": null,
+    "certScanStatus": "NonCertscan",
+    "certScanSnippet": null,
+    "originalCertScanSnippet": null,
+    "levelOneEmployee": null,
+    "levelTwoEmployee": null,
+    "otherResults": {
+     "manual": {
+      "result": null,
+      "code": null,
+      "employeeId": null
+     },
+     "opposite": {
+      "result": null,
+      "code": null,
+      "employeeId": null
+     },
+     "liveMeans": {
+      "result": null,
+      "code": null,
+      "employeeId": null
+     }
+    },
+    "notes": null,
+    "biEnrichmentStatus": "BI Not Provided",
+    "biMatched": false,
+    "biFilledFields": [],
+    "sourceSheetName": "بري",
+    "sourceRowNumber": 5
+   }
+  ],
+  "removedRows": [],
+  "duplicateRows": [],
+  "invalidResultRows": [],
+  "summary": {
+   "riskOriginalRows": 4,
+   "validRiskIdRows": 4,
+   "invalidRiskIdRows": 0,
+   "duplicateRiskIdRows": 0,
+   "rowsAfterDeduplication": 4,
+   "removedInvalidResultRows": 0,
+   "finalPreparedPopulationRows": 4,
+   "certScanRows": 1,
+   "nonCertScanRows": 3,
+   "certScanProvided": true,
+   "certScanPercentage": 25,
+   "nonCertScanPercentage": 75,
+   "biProvided": false,
+   "biMatchedRows": 0,
+   "biUnmatchedRows": 0,
+   "biMatchPercentage": 0,
+   "totalBiFilledFields": 0,
+   "biFieldFillSummary": [
+    {
+     "fieldName": "تاريخ دخول الأشعة",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    },
+    {
+     "fieldName": "نوع المنفذ",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    },
+    {
+     "fieldName": "اسم المنفذ",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    },
+    {
+     "fieldName": "رقم البيان",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    },
+    {
+     "fieldName": "تاريخ البيان",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    },
+    {
+     "fieldName": "رقم اللوحة/الحاوية",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    },
+    {
+     "fieldName": "رقم الهيكل",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    },
+    {
+     "fieldName": "نتيجة المستوى الأول للأشعة",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    },
+    {
+     "fieldName": "نتيجة المستوى الثاني للأشعة",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    },
+    {
+     "fieldName": "تاريخ البيان هجري",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    },
+    {
+     "fieldName": "رقم الحركة",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    },
+    {
+     "fieldName": "تاريخ الحركة",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    },
+    {
+     "fieldName": "تاريخ الحركة هجري",
+     "riskEmptyBefore": 0,
+     "filledFromBi": 0,
+     "stillEmptyAfter": 0,
+     "fillPercentage": 0
+    }
+   ]
+  }
+ }
+}

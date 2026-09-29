@@ -359,7 +359,8 @@ describe("assessPopulationOverwrite", () => {
     const root = createMemoryDirectory("root");
     await seedMonth(root, { distributed: false, answered: false });
     const impact = await loadPopulationOverwriteImpact(root, MONTH);
-    expect(impact).toEqual({ sampleExists: true, liveSampledIds: ["A1", "A2"], distributionCount: 0, answerCount: 0 });
+    expect(impact).toMatchObject({ sampleExists: true, liveSampledIds: ["A1", "A2"], distributionCount: 0, answerCount: 0 });
+    expect(Object.keys(impact.liveSampledCertScan ?? {})).toEqual(["A1", "A2"]);
     expect(assessPopulationOverwrite(impact, rowsFor(["Z1"])).blocked).toBe(false);
   });
 
@@ -402,5 +403,32 @@ describe("assessPopulationOverwrite", () => {
 
     await expect(loadPopulationOverwriteImpact(root, MONTH)).rejects.toBeTruthy();
     setSimulatedFaults(root, []);
+  });
+});
+
+describe("assessPopulationOverwrite — CertScan status changes (C2)", () => {
+  const impact = {
+    sampleExists: true,
+    liveSampledIds: ["A1", "A2", "A3"],
+    liveSampledCertScan: { A1: "NonCertscan", A2: "Certscan", A3: "NonCertscan" },
+    distributionCount: 0,
+    answerCount: 0,
+  };
+  const rowWith = (id: string, certScanStatus: string) => ({ xrayImageId: id, certScanStatus });
+
+  test("counts only sampled ids whose status differs in the new rows", () => {
+    const assessment = assessPopulationOverwrite(impact, [
+      rowWith("A1", "Certscan"), // flipped
+      rowWith("A2", "Certscan"), // same
+      rowWith("A3", "Certscan"), // flipped
+      rowWith("Z9", "Certscan"), // not sampled: ignored
+    ]);
+    expect(assessment.certScanChangedCount).toBe(2);
+    expect(assessment.blocked).toBe(false);
+  });
+
+  test("is 0 when the impact carries no sampled statuses", () => {
+    const withoutStatuses = { ...impact, liveSampledCertScan: undefined };
+    expect(assessPopulationOverwrite(withoutStatuses, [rowWith("A1", "Certscan")]).certScanChangedCount).toBe(0);
   });
 });

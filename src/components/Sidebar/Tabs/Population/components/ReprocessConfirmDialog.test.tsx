@@ -19,6 +19,7 @@ function assessment(overrides: Partial<PopulationOverwriteAssessment>): Populati
     answerCount: 1,
     missingCount: 0,
     missingExamples: [],
+    certScanChangedCount: 0,
     blocked: false,
     ...overrides,
   };
@@ -84,5 +85,22 @@ describe("ReprocessConfirmDialog", () => {
     expect(
       screen.getByText(DEFAULT_LABELS.population_reprocess_missing_examples.replace("{ids}", "A1/A2"))
     ).toBeInTheDocument();
+  });
+
+  it("warns, without blocking, when sampled rows would change CertScan status (C2)", () => {
+    const onConfirm = vi.fn();
+    render(
+      <ReprocessConfirmDialog open assessment={assessment({ certScanChangedCount: 3 })} onConfirm={onConfirm} onCancel={() => {}} />
+    );
+    expect(
+      screen.getByText(DEFAULT_LABELS.population_reprocess_certscan_warning.replace("{count}", "3"))
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.confirm_dialog_default_ok }));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows no CertScan warning when nothing sampled changes", () => {
+    render(<ReprocessConfirmDialog open assessment={assessment({})} onConfirm={() => {}} onCancel={() => {}} />);
+    expect(screen.queryByText(/سيتغيّر وضع CertScan/)).toBeNull();
   });
 });
