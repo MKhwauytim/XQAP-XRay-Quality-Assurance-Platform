@@ -1931,6 +1931,19 @@ export const DEFAULT_LABELS = {
   archive_integrity_category_approvals:    "طلبات إحالة/استبدال بلا سجل توزيع حالي",
   archive_integrity_show_more:       "و{count} أخرى",
 
+  // Selective backup restore (Workstream D) — element names + engine refusal.
+  restore_element_population:            "المجتمع",
+  restore_element_sample_distribution:   "العينة والتوزيع",
+  restore_element_answers:               "الإجابات",
+  restore_element_referrals_approvals:   "الإحالات والاعتمادات",
+  restore_element_population_settings:   "إعدادات المجتمع",
+  restore_element_templates:             "نماذج الفحص",
+  restore_element_users_permissions:     "المستخدمون والصلاحيات",
+  restore_element_report_designs:        "تصاميم التقارير",
+  restore_element_feedback:              "الملاحظات",
+  restore_element_system_settings:       "إعدادات النظام",
+  restore_scope_invalid:                 "نطاق الاستعادة الانتقائية غير صالح: اختر عنصراً واحداً على الأقل، وشهراً واحداً على الأقل عند اختيار عناصر شهرية.",
+
   // The 2026-08 design-handoff redesign keeps its keys in one file per screen
   // (see ./labels.*.ts). Spread here so they are indistinguishable from the
   // keys defined inline above: same LabelKey union, same Settings-tab override

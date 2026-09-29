@@ -12,7 +12,12 @@ import type {
   DecisionOutcomeEvent,
   SupervisorDecisionFile,
 } from "./approvalTypes";
-import { getPopulationMonthDir, getSampleApprovalsDir, safeWorkspaceFilePart } from "../workspace/workspacePaths";
+import {
+  getPopulationMonthDir,
+  getSampleApprovalsDir,
+  LEGACY_MONTH_SUBFOLDERS,
+  safeWorkspaceFilePart,
+} from "../workspace/workspacePaths";
 
 /**
  * djb2 hash of one decision event (B5). Serialises the event as stored so the chain
@@ -50,7 +55,7 @@ async function getLegacyApprovalsDir(
   monthFolderName: string
 ): Promise<DirectoryHandleLike> {
   const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
-  return monthDir.getDirectoryHandle("approvals", { create: false });
+  return monthDir.getDirectoryHandle(LEGACY_MONTH_SUBFOLDERS.approvals, { create: false });
 }
 
 function decisionFileName(supervisorUsername: string): string {

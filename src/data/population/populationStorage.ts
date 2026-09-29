@@ -50,6 +50,7 @@ import {
   getPopulationMonthDir,
   getPopulationRoot,
   getSampleMainDir,
+  LEGACY_MONTH_SUBFOLDERS,
   POPULATION_SUBFOLDERS,
 } from "../workspace/workspacePaths";
 
@@ -883,7 +884,7 @@ async function resolveSampleDir(
     return await getSampleMainDir(directoryHandle, monthFolderName, false);
   } catch {
     try {
-      return await monthDir.getDirectoryHandle("sample", { create: false });
+      return await monthDir.getDirectoryHandle(LEGACY_MONTH_SUBFOLDERS.sample, { create: false });
     } catch {
       return null;
     }

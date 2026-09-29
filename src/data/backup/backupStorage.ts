@@ -40,6 +40,7 @@ import {
   getSampleMainDir,
   getSystemRoot,
   getTemplatesRoot,
+  LEGACY_MONTH_SUBFOLDERS,
   POPULATION_SUBFOLDERS,
   SYSTEM_FOLDER_NAMES,
   WORKSPACE_ROOTS,
@@ -1352,9 +1353,9 @@ async function loadMonthJson<T>(
   // depend on those obsolete names.
   const legacyFolder =
     path[0] === POPULATION_SUBFOLDERS.raw
-      ? "raw"
+      ? LEGACY_MONTH_SUBFOLDERS.raw
       : path[0] === POPULATION_SUBFOLDERS.processed
-        ? "processed"
+        ? LEGACY_MONTH_SUBFOLDERS.processed
         : null;
   if (!legacyFolder) return null;
   const legacy = await readJsonAt<T>(monthDir, [legacyFolder, ...path.slice(1)]);
