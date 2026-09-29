@@ -287,7 +287,13 @@ export async function syncManifestFromBackupPopulation(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   restoredRowCount: number,
-  backupManifest: Partial<MonthManifestData> | null
+  backupManifest: Partial<MonthManifestData> | null,
+  /**
+   * Evidence gathered BEFORE the restore walk: did the live month folder exist?
+   * Only `false` (a clean NotFound then) permits the whole-manifest write below;
+   * the default fails safe as "existed".
+   */
+  liveMonthExistedBefore = true
 ): Promise<void> {
   await withResourceLock(manifestLockKey(monthFolderName), async () => {
     // A month with NO live manifest (its folder was deleted) has no lifecycle to
@@ -296,7 +302,13 @@ export async function syncManifestFromBackupPopulation(
     // live manifest is NOT "absent" and falls through to the field sync, which reports it.
     if (backupManifest) {
       const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
-      const live = await safeReadJson<MonthManifestData>(monthDir, "month.manifest.json");
+      // retryMissing: a transient NotFound on a share must not read as "no manifest".
+      const live = await safeReadJson<MonthManifestData>(monthDir, "month.manifest.json", { retryMissing: true });
+      if (!live.ok && live.reason === "missing" && liveMonthExistedBefore) {
+        // The folder existed before the restore, so a manifest that reads as missing is
+        // unproven-absent: NEVER overwrite lifecycle fields; report it instead.
+        throw new Error("the live month.manifest.json could not be read; the manifest was left untouched");
+      }
       if (!live.ok && live.reason === "missing") {
         const restorable = { ...backupManifest };
         delete restorable._writeToken;

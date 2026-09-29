@@ -461,6 +461,16 @@ function restoredMonthsFor(restoredFiles: readonly string[], element: RestoreEle
   return months;
 }
 
+/** True unless the live month folder is CLEANLY absent (a clean NotFoundError); any other outcome fails safe as "exists". */
+async function liveMonthFolderExists(directoryHandle: DirectoryHandleLike, month: string): Promise<boolean> {
+  try {
+    await getPopulationMonthDir(directoryHandle, month, false);
+    return true;
+  } catch (error) {
+    return !isNotFoundError(error);
+  }
+}
+
 /** Whether `population.final.json` itself (not just raw files) was restored for the month. */
 function populationFileRestored(restoredFiles: readonly string[], month: string): boolean {
   return restoredFiles.some((path) => {
@@ -494,7 +504,8 @@ async function rebuildPopulationDerived(
   directoryHandle: DirectoryHandleLike,
   month: string,
   username: string,
-  backup: { manifest: Partial<MonthManifestData> | null; error: unknown }
+  backup: { manifest: Partial<MonthManifestData> | null; error: unknown },
+  liveMonthExistedBefore: boolean
 ): Promise<SelectiveRestoreDerivedWarning[]> {
   const warnings: SelectiveRestoreDerivedWarning[] = [];
   const warn = (step: SelectiveRestoreDerivedWarning["step"], error: unknown): void => {
@@ -516,7 +527,7 @@ async function rebuildPopulationDerived(
         warn("manifest", backup.error);
       } else {
         try {
-          await syncManifestFromBackupPopulation(directoryHandle, month, rows.length, backup.manifest);
+          await syncManifestFromBackupPopulation(directoryHandle, month, rows.length, backup.manifest, liveMonthExistedBefore);
         } catch (error) {
           warn("manifest", error);
         }
@@ -720,6 +731,10 @@ export async function runSelectiveRestore(params: {
     return { ok: false, reason: "restore-failed", error: getLabels().archive_restore_month_closed.replace("{month}", formatMonthFolderShortLabel(closedMonth)) };
   }
 
+  // Evidence for "no live manifest" is gathered NOW, before the walk (a read after it can miss transiently).
+  const monthExisted = new Map<string, boolean>();
+  for (const month of scope.months) monthExisted.set(month.toLowerCase(), await liveMonthFolderExists(directoryHandle, month));
+
   let jsonDir: DirectoryHandleLike;
   try {
     jsonDir = await openCompleteBackupJsonDir(directoryHandle, params.backupFolderName);
@@ -757,7 +772,7 @@ export async function runSelectiveRestore(params: {
   for (const month of restoredMonthsFor(result.restoredFiles, "population")) {
     if (!populationFileRestored(result.restoredFiles, month)) continue;
     derivedWarnings.push(
-      ...(await rebuildPopulationDerived(directoryHandle, month, params.username, await readBackupManifest(jsonDir, month)))
+      ...(await rebuildPopulationDerived(directoryHandle, month, params.username, await readBackupManifest(jsonDir, month), monthExisted.get(month.toLowerCase()) ?? true))
     );
   }
   for (const month of restoredMonthsFor(result.restoredFiles, "sampleDistribution")) {

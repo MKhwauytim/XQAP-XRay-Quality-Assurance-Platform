@@ -307,3 +307,79 @@ describe("runSelectiveRestore — aggregate verification", () => {
     expect(outcome.derivedWarnings.some((warning) => warning.step === "aggregate")).toBe(true);
   });
 });
+
+/** After the walk started (population.final.json created), the first reads of the manifest miss like a flaky share. */
+function transientManifestMisses(real: DirectoryHandleLike, state: { armed: boolean; misses: number }, inBackups = false): DirectoryHandleLike {
+  return {
+    ...real,
+    getFileHandle: async (name: string, options?: { create?: boolean }) => {
+      if (!inBackups && options?.create && name === "population.final.json") state.armed = true;
+      if (!inBackups && state.armed && !options?.create && name.startsWith("month.manifest.json") && state.misses < 3) {
+        state.misses += 1;
+        throw Object.assign(new Error("transient"), { name: "NotFoundError" });
+      }
+      return real.getFileHandle(name, options);
+    },
+    getDirectoryHandle: async (name: string, options?: { create?: boolean }) =>
+      transientManifestMisses(await real.getDirectoryHandle(name, options), state, inBackups || name === "backups"),
+  } as DirectoryHandleLike;
+}
+
+describe("runSelectiveRestore — an existing live manifest that reads as missing", () => {
+  it("never overwrites the live status and seed with the backup's after transient NotFound reads", async () => {
+    const root = makeRoot();
+    await writeJsonAt(root, MANIFEST_M1, { monthFolderName: M1, status: "processed-saved", rngSeed: "live-seed" });
+    await writeJsonAt(root, MANIFEST_M1, { monthFolderName: M1, status: "distributed", rngSeed: "live-seed" });
+    await writeJsonAt(root, POP_M1, { rows: [row("A")] });
+    await seedBackup(root, {
+      [POP_M1]: { rows: [row("A")] },
+      [MANIFEST_M1]: { monthFolderName: M1, status: "imported", rngSeed: "backup-seed" },
+    });
+    invalidateMonthLockCache(M1);
+
+    const outcome = await runSelectiveRestore({
+      directoryHandle: transientManifestMisses(root, { armed: false, misses: 0 }),
+      months: [],
+      backupFolderName: TEST_BACKUP,
+      username: "admin",
+      scope: { elements: ["population"], months: [M1] },
+    });
+
+    expect(outcome.ok).toBe(true);
+    const live = await readJsonAt<Record<string, unknown>>(root, MANIFEST_M1);
+    expect(live?.status).toBe("distributed");
+    expect(live?.rngSeed).toBe("live-seed");
+  });
+});
+
+describe("runSelectiveRestore — replacement index revision check", () => {
+  it("warns when a stale index of a NEWER revision survives because its discard failed", async () => {
+    const root = makeRoot();
+    await writeJsonAt(root, `${PROCESSED_M1}/replacement-index/index.manifest.json`, {
+      formatVersion: 1, monthFolderName: M1, sourceRevision: 999, stageMappingsHash: "x", builtAt: "x", builtBy: "x", totalIndexedRows: 0, buckets: [],
+    });
+    await seedBackup(root, { [POP_M1]: { rows: [row("A")] } });
+    const failRemoval = (real: DirectoryHandleLike): DirectoryHandleLike =>
+      ({
+        ...real,
+        removeEntry: async (name: string, options?: { recursive?: boolean }) => {
+          if (name.startsWith("index.manifest.json")) throw new Error("locked");
+          return real.removeEntry?.(name, options);
+        },
+        getDirectoryHandle: async (name: string, options?: { create?: boolean }) =>
+          failRemoval(await real.getDirectoryHandle(name, options)),
+      }) as DirectoryHandleLike;
+
+    const outcome = await runSelectiveRestore({
+      directoryHandle: failRemoval(root),
+      months: [],
+      backupFolderName: TEST_BACKUP,
+      username: "admin",
+      scope: { elements: ["population"], months: [M1] },
+    });
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.derivedWarnings.some((warning) => warning.step === "replacement-index")).toBe(true);
+  });
+});
