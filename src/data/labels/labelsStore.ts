@@ -1954,6 +1954,7 @@ export const DEFAULT_LABELS = {
   archive_restore_integrity_orphans:            "فحص السلامة لشهر {month}: {count} صفاً يتيماً — راجع قسم فحص السلامة المرجعية.",
   archive_restore_integrity_failed:             "تعذر فحص السلامة لشهر {month}: {error}",
   archive_restore_plan_rejected:                "تغيّر محتوى النسخة أو بيانات الشهر منذ المعاينة، ولم يعد الاختيار صالحاً. أعد فتح نافذة الاستعادة.",
+  archive_restore_month_closed:                 "لا يمكن الاستعادة: شهر {month} مغلق. أعد فتح الشهر أولاً ثم كرر الاستعادة. لم يُغيَّر أي شيء.",
   archive_restore_failed_prefix:                "فشلت الاستعادة",
 
   // The 2026-08 design-handoff redesign keeps its keys in one file per screen

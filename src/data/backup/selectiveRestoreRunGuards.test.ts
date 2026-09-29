@@ -1,0 +1,203 @@
+import { describe, expect, it } from "vitest";
+
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { invalidateMonthLockCache } from "../population/monthLock";
+import { loadPopulationAggregate } from "../population/populationAggregate";
+import { loadReplacementIndexManifest } from "../population/replacementIndexStorage";
+import type { RestoreScope } from "./restoreScope";
+import { runSelectiveRestore } from "./selectiveRestore";
+import {
+  backupFolderNames,
+  listNames,
+  M1,
+  makeRoot,
+  openDir,
+  readJsonAt,
+  seedBackup,
+  TEST_BACKUP,
+  writeJsonAt,
+} from "./selectiveRestoreTestKit";
+
+const POP_M1 = `1-population/${M1}/2-processed/population.final.json`;
+const PROCESSED_M1 = `1-population/${M1}/2-processed`;
+const MANIFEST_M1 = `1-population/${M1}/month.manifest.json`;
+
+function run(root: DirectoryHandleLike, scope: RestoreScope) {
+  return runSelectiveRestore({ directoryHandle: root, months: [], backupFolderName: TEST_BACKUP, username: "admin", scope });
+}
+
+function row(id: string): Record<string, unknown> {
+  return { xrayImageId: id, certScanStatus: "NonCertscan", stage: "المرحلة الأولى", portName: "ميناء" };
+}
+
+function failWritesOf(real: DirectoryHandleLike, fileName: string): DirectoryHandleLike {
+  return {
+    ...real,
+    getFileHandle: async (name: string, options?: { create?: boolean }) => {
+      if (options?.create && name === fileName) throw new Error(`Simulated write failure for ${name}`);
+      return real.getFileHandle(name, options);
+    },
+    getDirectoryHandle: async (name: string, options?: { create?: boolean }) =>
+      failWritesOf(await real.getDirectoryHandle(name, options), fileName),
+  };
+}
+
+describe("runSelectiveRestore — closed months (every month-scoped element)", () => {
+  const cases: Array<[string, RestoreScope, string]> = [
+    ["population", { elements: ["population"], months: [M1] }, POP_M1],
+    ["sampleDistribution", { elements: ["sampleDistribution"], months: [M1] }, `2-samples/${M1}/1-main/sample.master.json`],
+    ["answers", { elements: ["answers"], months: [M1] }, `2-samples/${M1}/2-employees/e1.answers.json`],
+    ["referralsApprovals", { elements: ["referralsApprovals"], months: [M1] }, `2-samples/${M1}/2-employees/e1.requests.json`],
+  ];
+
+  it.each(cases)("refuses %s for a closed month and writes nothing", async (_name, scope, path) => {
+    const root = makeRoot();
+    await writeJsonAt(root, MANIFEST_M1, { monthFolderName: M1, status: "closed" });
+    await writeJsonAt(root, path, { source: "live", rows: [], items: [] });
+    await seedBackup(root, { [path]: { source: "backup", rows: [], items: [] } });
+    invalidateMonthLockCache(M1);
+
+    const outcome = await run(root, scope);
+
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok || outcome.reason !== "restore-failed") throw new Error("expected restore-failed");
+    expect(outcome.error).toContain(M1);
+    expect(await backupFolderNames(root)).toEqual([TEST_BACKUP]);
+    expect((await readJsonAt<{ source: string }>(root, path))?.source).toBe("live");
+  });
+
+  it("checks every selected month before touching any", async () => {
+    const root = makeRoot();
+    const M2 = "6-june-2026";
+    await writeJsonAt(root, `1-population/${M2}/month.manifest.json`, { monthFolderName: M2, status: "closed" });
+    await writeJsonAt(root, POP_M1, { source: "live", rows: [row("A")] });
+    await seedBackup(root, {
+      [POP_M1]: { source: "backup", rows: [row("A")] },
+      [`1-population/${M2}/2-processed/population.final.json`]: { rows: [] },
+    });
+    invalidateMonthLockCache(M1);
+    invalidateMonthLockCache(M2);
+
+    const outcome = await run(root, { elements: ["population"], months: [M1, M2] });
+
+    expect(outcome.ok).toBe(false);
+    const processed = await openDir(root, ["1-population", M1, "2-processed"]);
+    expect((await listNames(processed!)).filter((name) => name.includes("superseded"))).toEqual([]);
+    expect((await readJsonAt<{ source: string }>(root, POP_M1))?.source).toBe("live");
+  });
+});
+
+describe("runSelectiveRestore — the month manifest", () => {
+  it("syncs source fields but never restores status, closure, revision or rngSeed", async () => {
+    const root = makeRoot();
+    await writeJsonAt(root, MANIFEST_M1, {
+      monthFolderName: M1,
+      status: "distributed",
+      rngSeed: "live-seed",
+      totalRawRows: 1,
+      totalProcessedRows: 1,
+      processedAt: "2026-06-01T00:00:00.000Z",
+      processingFingerprint: "live-fp",
+    });
+    await writeJsonAt(root, POP_M1, { rows: [row("A")] });
+    await seedBackup(root, {
+      [POP_M1]: { rows: [row("A"), row("B")] },
+      [MANIFEST_M1]: {
+        monthFolderName: M1,
+        status: "closed",
+        statusBeforeClose: "processed-saved",
+        closedAt: "2026-05-30T00:00:00.000Z",
+        closedBy: "someone",
+        rngSeed: "backup-seed",
+        totalRawRows: 9,
+        totalProcessedRows: 2,
+        processedAt: "2026-05-01T00:00:00.000Z",
+        processingFingerprint: "backup-fp",
+        riskFileName: "risk-backup.xlsx",
+      },
+    });
+    invalidateMonthLockCache(M1);
+
+    const outcome = await run(root, { elements: ["population"], months: [M1] });
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.restoredFiles).not.toContain(MANIFEST_M1);
+    const live = await readJsonAt<Record<string, unknown>>(root, MANIFEST_M1);
+    expect(live?.status).toBe("distributed");
+    expect(live?.closedAt).toBeUndefined();
+    expect(live?.statusBeforeClose).toBeUndefined();
+    expect(live?.rngSeed).toBe("live-seed");
+    expect(live?.totalProcessedRows).toBe(2);
+    expect(live?.totalRawRows).toBe(9);
+    expect(live?.processedAt).toBe("2026-05-01T00:00:00.000Z");
+    expect(live?.processingFingerprint).toBe("backup-fp");
+    expect(live?.riskFileName).toBe("risk-backup.xlsx");
+  });
+});
+
+describe("runSelectiveRestore — derived rebuild failures are reported, not silent", () => {
+  it("returns a derivedWarnings entry when the replacement index could not be rebuilt", async () => {
+    const root = makeRoot();
+    // Readable but malformed: no `rows`, so the rebuild has nothing to index.
+    await seedBackup(root, { [POP_M1]: { noRows: true } });
+
+    const outcome = await run(root, { elements: ["population"], months: [M1] });
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.derivedWarnings.some((warning) => warning.month === M1 && warning.step === "replacement-index")).toBe(true);
+  });
+
+  it("has no warnings when everything rebuilt", async () => {
+    const root = makeRoot();
+    await seedBackup(root, { [POP_M1]: { rows: [row("A")] } });
+
+    const outcome = await run(root, { elements: ["population"], months: [M1] });
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.derivedWarnings).toEqual([]);
+  });
+});
+
+describe("runSelectiveRestore — failure after the engine started", () => {
+  it("still discards the stale aggregate and index and names the rollback folder", async () => {
+    const root = makeRoot();
+    await writeJsonAt(root, `${PROCESSED_M1}/replacement-index/index.manifest.json`, {
+      formatVersion: 1, monthFolderName: M1, sourceRevision: 9, stageMappingsHash: "x", builtAt: "x", builtBy: "x", totalIndexedRows: 0, buckets: [],
+    });
+    await writeJsonAt(root, `${PROCESSED_M1}/population.aggregate.json`, {
+      schemaVersion: 1, monthFolderName: M1, computedAt: "x", computedBy: "x", summary: {}, previewRows: [],
+    });
+    await seedBackup(root, { [POP_M1]: { rows: [row("A")] } });
+
+    const outcome = await runSelectiveRestore({
+      directoryHandle: failWritesOf(root, "population.final.json"),
+      months: [],
+      backupFolderName: TEST_BACKUP,
+      username: "admin",
+      scope: { elements: ["population"], months: [M1] },
+    });
+
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok || outcome.reason !== "restore-failed") throw new Error("expected restore-failed");
+    expect(outcome.rollbackFolderName).toContain("pre-restore");
+    expect(await loadReplacementIndexManifest(root, M1)).toBeNull();
+    expect((await loadPopulationAggregate(root, M1)).status).toBe("missing");
+  });
+});
+
+describe("runSelectiveRestore — population archive is only for months the backup replaces", () => {
+  it("does not archive the live population when the backup holds no population.final.json for the month", async () => {
+    const root = makeRoot();
+    await writeJsonAt(root, POP_M1, { source: "live", rows: [row("A")] });
+    await seedBackup(root, { [`1-population/${M1}/1-raw/risk.raw.json`]: { rows: [] } });
+
+    const outcome = await run(root, { elements: ["population"], months: [M1] });
+
+    expect(outcome.ok).toBe(true);
+    const processed = await openDir(root, ["1-population", M1, "2-processed"]);
+    expect((await listNames(processed!)).filter((name) => name.includes("superseded"))).toEqual([]);
+  });
+});

@@ -206,16 +206,14 @@ export async function rebuildPopulationDerivedFiles(
 }
 
 /**
- * Keep `month.manifest.json` describing the population that is now live:
- * `totalProcessedRows` (read by reports) follows the restored rows, and the
- * processing fingerprint is cleared — it fingerprints the run that produced
- * the overwritten file, not this one. Same casLoop protocol as
- * `updateMonthStatus`; no shape change. A month with no manifest is skipped.
+ * casLoop read-modify-write of `month.manifest.json`: `changes(current)` is
+ * merged over the live manifest and the revision is bumped. A month with no
+ * readable manifest is skipped (logged) — nothing to keep in step.
  */
-async function syncManifestToRestoredPopulation(
+async function updateManifestFields(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
-  rowCount: number
+  changes: (current: MonthManifestData) => Partial<MonthManifestData>
 ): Promise<void> {
   const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
   const result = await casLoop<{ ok: true }>(
@@ -230,8 +228,7 @@ async function syncManifestToRestoredPopulation(
       const nextRevision = (current.value.revision ?? 0) + 1;
       await safeWriteJson(monthDir, "month.manifest.json", {
         ...current.value,
-        totalProcessedRows: rowCount,
-        processingFingerprint: null,
+        ...changes(current.value),
         revision: nextRevision,
         _writeToken: writeToken,
       });
@@ -244,6 +241,67 @@ async function syncManifestToRestoredPopulation(
     { context: "population:recovery-manifest", maxRetries: 5, baseDelayMs: 50, conflictError: "manifest recovery update conflict" }
   );
   if (!result.ok) throw new Error(result.error);
+}
+
+/**
+ * Keep `month.manifest.json` describing the population that is now live:
+ * `totalProcessedRows` (read by reports) follows the restored rows, and the
+ * processing fingerprint is cleared — it fingerprints the run that produced
+ * the overwritten file, not this one. Same casLoop protocol as
+ * `updateMonthStatus`; no shape change. A month with no manifest is skipped.
+ */
+async function syncManifestToRestoredPopulation(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  rowCount: number
+): Promise<void> {
+  await updateManifestFields(directoryHandle, monthFolderName, () => ({
+    totalProcessedRows: rowCount,
+    processingFingerprint: null,
+  }));
+}
+
+/** The manifest fields that DESCRIBE a population (a selective backup restore syncs these and nothing else). */
+const POPULATION_DESCRIBING_MANIFEST_FIELDS = [
+  "totalRawRows",
+  "processedAt",
+  "processedBy",
+  "processingFingerprint",
+  "processingSummaryFile",
+  "riskFileName",
+  "biFileName",
+  "sourceFiles",
+] as const;
+
+/**
+ * Workstream D: after a scoped backup restore put `population.final.json` back,
+ * bring the LIVE manifest's population-describing fields in step with the
+ * backup's manifest (`backupManifest`, null when the backup has none), under
+ * the same manifest lock A2's restore holds. Deliberately NEVER touches
+ * `status`, `statusBeforeClose`, `closed*`, `reopened*`, `revision`,
+ * `_writeToken` or `rngSeed`: those belong to the live month's lifecycle, not
+ * to the population, so an older backup can neither regress a month's stage nor
+ * close or reopen it.
+ */
+export async function syncManifestFromBackupPopulation(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  restoredRowCount: number,
+  backupManifest: Partial<MonthManifestData> | null
+): Promise<void> {
+  await withResourceLock(manifestLockKey(monthFolderName), () =>
+    updateManifestFields(directoryHandle, monthFolderName, () => {
+      const changes: Partial<MonthManifestData> = { totalProcessedRows: restoredRowCount };
+      if (backupManifest) {
+        for (const field of POPULATION_DESCRIBING_MANIFEST_FIELDS) {
+          if (field in backupManifest) Object.assign(changes, { [field]: backupManifest[field] });
+        }
+      } else {
+        changes.processingFingerprint = null;
+      }
+      return changes;
+    })
+  );
 }
 
 export async function restorePopulationCandidate(

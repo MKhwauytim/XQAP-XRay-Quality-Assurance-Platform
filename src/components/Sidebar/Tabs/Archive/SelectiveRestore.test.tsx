@@ -159,6 +159,7 @@ beforeEach(() => {
     ok: true,
     restoredFiles: ["a", "b", "c"],
     rollbackFolderName: "rollback-1",
+    derivedWarnings: [],
     integrity: [
       {
         month: M1,

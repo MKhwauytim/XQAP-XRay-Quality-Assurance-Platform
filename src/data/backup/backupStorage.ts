@@ -226,7 +226,16 @@ export type CreateBackupOptions = {
 
 export type RestoreResult =
   | { ok: true; restoredFiles: string[]; rollbackFolderName: string }
-  | { ok: false; error: string };
+  | {
+      ok: false;
+      error: string;
+      /**
+       * Set once the destructive walk had STARTED (sentinel written): the pre-restore
+       * rollback backup to roll back from, and a signal that live data may have
+       * changed even though the restore failed.
+       */
+      rollbackFolderName?: string;
+    };
 
 function backupFolderName(now: Date, mode: BackupMode): string {
   const y = now.getFullYear();
@@ -1837,6 +1846,7 @@ export async function restoreBackupSnapshot(params: {
    */
   scope?: RestoreScope;
 }): Promise<RestoreResult> {
+  let startedRollbackFolder: string | undefined;
   try {
     // Restoring is the highest-stakes write in the app (it overwrites the live
     // workspace) — re-check write access up front rather than discovering the
@@ -1874,6 +1884,7 @@ export async function restoreBackupSnapshot(params: {
         startedAt: new Date().toISOString(),
         startedBy: params.username,
       });
+      startedRollbackFolder = rollback.folderName;
 
       const restored: string[] = [];
       const skipped: string[] = [];
@@ -1897,6 +1908,7 @@ export async function restoreBackupSnapshot(params: {
         return {
           ok: false,
           error: `اكتملت الاستعادة جزئياً فقط: تعذر الوصول إلى ${skipped.length} مجلد فرعي داخل نسخة النسخ الاحتياطي أثناء الاستعادة.`,
+          rollbackFolderName: rollback.folderName,
         };
       }
 
@@ -1917,7 +1929,11 @@ export async function restoreBackupSnapshot(params: {
       return { ok: true, restoredFiles: restored, rollbackFolderName: rollback.folderName };
     });
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "Unknown error" };
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+      ...(startedRollbackFolder ? { rollbackFolderName: startedRollbackFolder } : {}),
+    };
   }
 }
 

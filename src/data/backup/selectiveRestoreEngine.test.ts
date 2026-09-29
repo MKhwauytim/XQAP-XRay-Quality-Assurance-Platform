@@ -4,6 +4,7 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { getLabels } from "../labels/labelsStore";
 import { restoreBackupSnapshot } from "./backupStorage";
 import type { RestoreScope } from "./restoreScope";
+import { countPreviewFiles, previewSelectiveRestore } from "./selectiveRestore";
 import {
   backupFolderNames,
   distEvent,
@@ -94,10 +95,8 @@ describe("restoreBackupSnapshot — scoped", () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect([...result.restoredFiles].sort()).toEqual([
-      `1-population/${M1}/2-processed/population.final.json`,
-      `1-population/${M1}/month.manifest.json`,
-    ]);
+    // The manifest (status, lock) is never restored selectively.
+    expect([...result.restoredFiles].sort()).toEqual([`1-population/${M1}/2-processed/population.final.json`]);
     type Tagged = { source: string };
     expect((await readJsonAt<Tagged>(root, `1-population/${M1}/2-processed/population.final.json`))?.source).toBe("backup");
     expect((await readJsonAt<Tagged>(root, `1-population/${M2}/2-processed/population.final.json`))?.source).toBe("live");
@@ -199,6 +198,29 @@ describe("restoreBackupSnapshot — scoped", () => {
 
     expect(result.ok).toBe(false);
     expect(await sentinelExists(root)).toBe(true);
+  });
+});
+
+describe("restoreBackupSnapshot — scoped: ad-hoc import records", () => {
+  it("restores the record of an ad-hoc import with its sample, and the preview counts what is written", async () => {
+    const root = makeRoot();
+    await seedBackup(root, {
+      "5-system/adhoc-imports/imp1.json": { importId: "imp1" },
+      "5-system/adhoc-imports/adhoc-imports.index.json": { imports: [] },
+      "2-samples/adhoc-imp1/1-main/sample.master.json": { rows: [] },
+    });
+    const scope: RestoreScope = { elements: ["sampleDistribution"], months: ["adhoc-imp1"] };
+
+    const result = await restore(root, scope);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect([...result.restoredFiles].sort()).toEqual([
+      "2-samples/adhoc-imp1/1-main/sample.master.json",
+      "5-system/adhoc-imports/imp1.json",
+    ]);
+    const preview = await previewSelectiveRestore(root, TEST_BACKUP);
+    expect(countPreviewFiles(preview, "sampleDistribution", "adhoc-imp1")).toBe(result.restoredFiles.length);
   });
 });
 
