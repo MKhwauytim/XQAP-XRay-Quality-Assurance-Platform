@@ -40,10 +40,10 @@ import {
 import { adhocMonthFolder } from "../adhocImport/adhocImportModel";
 import { ADHOC_IMPORT_INDEX_FILE } from "../adhocImport/adhocImportStorage";
 import { POPULATION_AGGREGATE_FILE } from "../population/populationAggregate";
-import { SAMPLING_PROOF_FILE } from "../population/populationStorage";
 import { REPLACEMENT_INDEX_FOLDER } from "../population/replacementIndexStorage";
 import { SAMPLE_MASTER_FILE } from "../sampling/sampleStorage";
 import { SAMPLING_PLAN_FILE } from "../sampling/samplingPlanStorage";
+import { SAMPLING_PROOF_FILE } from "../sampling/sampleTypes";
 import { EMPLOYEE_MIRROR_INDEX_FILE, EMPLOYEE_MIRROR_SUFFIX } from "../samples/sampleMirrorStorage";
 import {
   LEGACY_MONTH_SUBFOLDERS,

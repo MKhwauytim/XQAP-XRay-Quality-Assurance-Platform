@@ -8,7 +8,7 @@ import { tabAllowedRoles } from "../../../../auth/tabCatalog";
 import { usePermissions } from "../../../../auth/usePermissions";
 import { ModalShell } from "../../../../components/ModalShell/ModalShell";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
-import { formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
+import { formatMonthFolderShortLabel, type MonthFolderInfo } from "../../../../data/population/monthFolder";
 import {
   createBackup,
   loadArchiveStatus,
@@ -32,7 +32,7 @@ import { runMonthIntegrityScan } from "../../../../data/integrity/orphanScanLoad
 import type { OrphanScanResult } from "../../../../data/integrity/orphanScan";
 import { LoadingState } from "../../../StateViews/StateViews";
 import { importLabelsSnapshot } from "../../../../data/workspace/labelsSnapshot";
-import { readJsonFile, type ReadJsonResult } from "../../../../data/storage/fileSystemAccess";
+import { readJsonFile, type DirectoryHandleLike, type ReadJsonResult } from "../../../../data/storage/fileSystemAccess";
 import { WORKSPACE_FILE_NAMES } from "../../../../data/workspace/workspaceDefaults";
 import { getUserDataRoot } from "../../../../data/workspace/workspacePaths";
 import type { UsersPermissionsFile } from "../../../../data/workspace/workspaceTypes";
@@ -42,6 +42,10 @@ import { broadcastDataRefresh } from "../../../../data/workspace/dataRefreshSign
 import { formatDateTime, formatNumber } from "../../../../utils/formatting";
 import type { SidebarTabModule } from "../tabTypes";
 import "./Archive.css";
+import type { RestoreScope } from "../../../../data/backup/restoreScope";
+import { runSelectiveRestore } from "../../../../data/backup/selectiveRestore";
+import SelectiveRestorePanel, { type SelectiveRestoreSelection } from "./SelectiveRestorePanel";
+import { describeSelectiveRestoreSuccess, fillTemplate } from "./selectiveRestoreText";
 
 export const tabConfig: SidebarTabModule["tabConfig"] = {
   id: "archive",
@@ -70,11 +74,6 @@ function modeLabel(mode: BackupHistoryItem["mode"]): string {
   return "يدوي";
 }
 
-/** {var}-placeholder interpolation — mirrors PhaseThreeSampling.tsx's local helper (no shared utility exists yet). */
-function fillTemplate(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{(\w+)\}/g, (_m, key) => vars[key] ?? `{${key}}`);
-}
-
 export default function ArchiveTab() {
   const { directoryHandle } = useWorkspace();
   const { refreshMonths } = useGlobalMonth();
@@ -90,6 +89,8 @@ export default function ArchiveTab() {
   // there is nothing here to mutate) rather than a feature-permission entry.
   const isSupervisorPlus =
     session?.role === "supervisor" || session?.role === "manager" || session?.role === "admin";
+  // Selective restore is admin-only (Workstream D), on top of canRestoreBackup.
+  const isAdmin = session?.role === "admin";
 
   const [statuses, setStatuses] = useState<MonthArchiveStatus[]>([]);
   const [history, setHistory] = useState<BackupHistoryItem[]>([]);
@@ -280,13 +281,60 @@ export default function ArchiveTab() {
     }
   }
 
-  async function handleRestore(folderName: string): Promise<void> {
+  async function applySelectiveRestore(
+    folderName: string,
+    scope: RestoreScope,
+    months: MonthFolderInfo[]
+  ): Promise<void> {
+    if (!directoryHandle) return;
+    const outcome = await runSelectiveRestore({ directoryHandle, months, backupFolderName: folderName, username, scope });
+    if (!outcome.ok) {
+      const reason = outcome.reason === "plan-rejected" ? getLabels().archive_restore_plan_rejected : outcome.error;
+      const text = `${getLabels().archive_restore_failed_prefix}: ${reason}`;
+      setMessage({ type: "error", text });
+      setDialogError(text);
+      return;
+    }
+    recordAction(directoryHandle, username, session?.role ?? "unknown", "backup-restored", {
+      target: folderName,
+      details: {
+        rollbackFolderName: outcome.rollbackFolderName,
+        selective: true,
+        elements: scope.elements.join(","),
+        months: scope.months.join(","),
+        restoredFiles: outcome.restoredFiles.length,
+      },
+    });
+    setRestoreTarget(null);
+    // The users/labels import offer only makes sense when 3-user-data came back.
+    setJustRestored(scope.elements.includes("usersPermissions"));
+    setMessage({
+      type: "ok",
+      text: describeSelectiveRestoreSuccess(getLabels(), {
+        folderName,
+        restoredCount: outcome.restoredFiles.length,
+        rollbackFolderName: outcome.rollbackFolderName,
+        integrity: outcome.integrity,
+      }),
+    });
+    await refresh();
+    // Same reasoning as the full restore below: a restore bypasses every normal write path.
+    broadcastDataRefresh("manual");
+  }
+
+  async function handleRestore(folderName: string, scope: RestoreScope | null): Promise<void> {
     if (!directoryHandle || !canRestoreBackup) return;
+    // Re-checked here, not only by hiding the mode switch (canMutate at both boundaries).
+    if (scope && !isAdmin) return;
     setIsBackingUp(true);
     setMessage(null);
     setDialogError(null);
     try {
       const months = await queryClient.fetchQuery(monthFoldersQueryOptions(directoryHandle));
+      if (scope) {
+        await applySelectiveRestore(folderName, scope, months);
+        return;
+      }
       const result = await restoreBackupSnapshot({
         directoryHandle,
         months,
@@ -325,7 +373,7 @@ export default function ArchiveTab() {
         // Item 1: see the matching comment in handleMonthLockConfirm — the
         // restore dialog also stays open on failure and sits under the same
         // modal backdrop, so the failure needs its own in-modal rendering.
-        const text = `فشلت الاستعادة: ${result.error}`;
+        const text = `${getLabels().archive_restore_failed_prefix}: ${result.error}`;
         setMessage({ type: "error", text });
         setDialogError(text);
       }
@@ -799,8 +847,10 @@ export default function ArchiveTab() {
           target={restoreTarget}
           busy={isBackingUp}
           error={dialogError}
+          allowSelective={isAdmin}
+          directoryHandle={directoryHandle}
           onClose={() => setRestoreTarget(null)}
-          onConfirm={() => { void handleRestore(restoreTarget.folderName); }}
+          onConfirm={(scope) => { void handleRestore(restoreTarget.folderName, scope); }}
         />
       ) : null}
 
@@ -946,20 +996,35 @@ function RestoreDialog({
   target,
   busy,
   error,
+  allowSelective,
+  directoryHandle,
   onClose,
   onConfirm,
 }: {
   target: BackupHistoryItem;
   busy: boolean;
   error: string | null;
+  /** Selective restore is admin-only (Workstream D). */
+  allowSelective: boolean;
+  directoryHandle: DirectoryHandleLike | null;
   onClose: () => void;
-  onConfirm: () => void;
+  onConfirm: (scope: RestoreScope | null) => void;
 }) {
+  const L = getLabels();
   const [step, setStep] = useState<1 | 2>(1);
+  const [mode, setMode] = useState<"full" | "selective">("full");
+  const [selection, setSelection] = useState<SelectiveRestoreSelection | null>(null);
   const [typedName, setTypedName] = useState("");
   const [checked, setChecked] = useState(false);
-  const canContinue = checked;
-  const canRestore = typedName.trim() === target.folderName && !busy;
+  const canChooseMode = allowSelective && directoryHandle !== null;
+  const selective = canChooseMode && mode === "selective";
+  const canContinue = checked && (!selective || selection !== null);
+  const canRestore = typedName.trim() === target.folderName && !busy && (!selective || selection !== null);
+
+  function chooseMode(next: "full" | "selective"): void {
+    setMode(next);
+    setSelection(null);
+  }
 
   return (
     <ModalShell
@@ -976,14 +1041,53 @@ function RestoreDialog({
 
       {step === 1 ? (
         <>
+          {canChooseMode ? (
+            <fieldset className="arc-restore-mode">
+              <legend>{L.archive_restore_mode_label}</legend>
+              <label className="arc-restore-option">
+                <input
+                  type="radio"
+                  name="arc-restore-mode"
+                  checked={mode === "full"}
+                  onChange={() => chooseMode("full")}
+                />
+                <span>{L.archive_restore_mode_full}</span>
+              </label>
+              <label className="arc-restore-option">
+                <input
+                  type="radio"
+                  name="arc-restore-mode"
+                  checked={mode === "selective"}
+                  onChange={() => chooseMode("selective")}
+                />
+                <span>{L.archive_restore_mode_selective}</span>
+              </label>
+            </fieldset>
+          ) : null}
           <div className="arc-restore-warning">
             <strong>{target.folderName}</strong>
             <p>
               سيتم إنشاء نسخة رجوع من النظام الحالي أولاً، ثم استعادة ملفات JSON من النسخة المحددة.
               يمكنك الرجوع لاحقاً من نسخة الرجوع التي ستظهر في السجل باسم قبل الاستعادة.
             </p>
-            <p>{getLabels().backup_restore_merge_notice}</p>
+            <p>{L.backup_restore_merge_notice}</p>
           </div>
+        </>
+      ) : null}
+
+      {/* Kept mounted (just hidden) across step 2 so "رجوع" returns to the same selection. */}
+      {selective && directoryHandle ? (
+        <div hidden={step !== 1}>
+          <SelectiveRestorePanel
+            directoryHandle={directoryHandle}
+            backupFolderName={target.folderName}
+            onSelectionChange={setSelection}
+          />
+        </div>
+      ) : null}
+
+      {step === 1 ? (
+        <>
           <label className="arc-restore-check">
             <input
               type="checkbox"
@@ -1026,7 +1130,7 @@ function RestoreDialog({
               type="button"
               className="arc-btn-primary arc-btn-danger"
               disabled={!canRestore}
-              onClick={onConfirm}
+              onClick={() => onConfirm(selective ? selection?.scope ?? null : null)}
             >
               {busy ? "جاري الاستعادة..." : "استعادة الآن"}
             </button>

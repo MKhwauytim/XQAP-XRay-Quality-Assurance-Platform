@@ -719,3 +719,59 @@
     align-items: stretch;
   }
 }
+
+/* Workstream D — selective restore */
+.arc-restore-mode,
+.arc-restore-fieldset {
+  margin: 0 18px 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--c-border-2);
+  border-radius: 8px;
+}
+
+.arc-restore-mode legend,
+.arc-restore-fieldset legend {
+  padding: 0 6px;
+  color: var(--c-navy);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.arc-restore-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-block: 4px;
+  margin-inline-end: 16px;
+  color: var(--c-ink-2);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.arc-restore-selective-intro,
+.arc-restore-selective-status {
+  margin: 0 18px 12px;
+  color: var(--c-ink-3);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.arc-restore-plan h4 {
+  margin: 0 18px 8px;
+  color: var(--c-navy);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.arc-restore-plan-list {
+  margin: 0 18px 12px;
+  padding-inline-start: 18px;
+  color: var(--c-ink-2);
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.arc-restore-plan-list li.is-missing {
+  color: var(--c-danger);
+  font-weight: 750;
+}

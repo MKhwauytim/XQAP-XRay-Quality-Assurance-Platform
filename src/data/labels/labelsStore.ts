@@ -1944,6 +1944,36 @@ export const DEFAULT_LABELS = {
   restore_element_system_settings:       "إعدادات النظام",
   restore_scope_invalid:                 "نطاق الاستعادة الانتقائية غير صالح: اختر عنصراً واحداً على الأقل، وشهراً واحداً على الأقل عند اختيار عناصر شهرية.",
 
+  // Archive restore dialog — selective mode (Workstream D).
+  archive_restore_mode_label:                   "نوع الاستعادة",
+  archive_restore_mode_full:                    "استعادة كاملة",
+  archive_restore_mode_selective:               "استعادة انتقائية",
+  archive_restore_selective_intro:              "اختر العناصر والأشهر المراد استعادتها فقط. تُطبَّق ضمانات الاستعادة الكاملة نفسها: نسخة رجوع كاملة قبل البدء وعلامة استعادة جارية.",
+  archive_restore_elements_heading:             "العناصر",
+  archive_restore_months_heading:               "الأشهر الموجودة في النسخة",
+  archive_restore_months_none:                  "لا توجد بيانات شهرية في هذه النسخة.",
+  archive_restore_preview_loading:              "جاري قراءة محتوى النسخة...",
+  archive_restore_preview_error:                "تعذرت قراءة محتوى النسخة: {error}",
+  archive_restore_preview_heading:              "الملفات التي ستُستعاد",
+  archive_restore_preview_row:                  "{element} — {month}: {count} ملف",
+  archive_restore_preview_row_workspace:        "{element}: {count} ملف",
+  archive_restore_not_present:                  "{element} — {month}: غير موجود في هذه النسخة",
+  archive_restore_not_present_workspace:        "{element}: غير موجود في هذه النسخة",
+  archive_restore_blocked_population:           "لا يمكن استعادة المجتمع لشهر {month}: {missing} من أصل {sampled} معرّفاً في العينة غير موجودة في مجتمع النسخة (أمثلة: {examples}). الشهر يحتوي على توزيع أو إجابات، واستعادة هذا المجتمع ستفصلها عن بياناتها.",
+  archive_restore_warning_sample_without_answers: "تنبيه: استعادة العينة والتوزيع لشهر {month} دون الإجابات قد تترك إجابات بلا سجل توزيع. سيُجرى فحص السلامة بعد الاستعادة.",
+  archive_restore_warning_answers_without_sample: "تنبيه: استعادة الإجابات لشهر {month} دون العينة والتوزيع قد تترك إجابات بلا سجل توزيع. سيُجرى فحص السلامة بعد الاستعادة.",
+  archive_restore_warning_answers_embed_requests: "تنبيه: ملفات الإجابات في هذه النسخة لشهر {month} بالصيغة القديمة وتحتوي على طلبات الإحالة والاستبدال وإعادة الفتح داخلها، لذا ستُستعاد هذه الطلبات أيضاً مع الإجابات.",
+  archive_restore_warning_requests_embedded:      "تنبيه: طلبات الإحالة والاستبدال لشهر {month} مخزنة داخل ملفات الإجابات القديمة في هذه النسخة، ولن تُستعاد إلا باختيار الإجابات أيضاً.",
+  archive_restore_unclassified:                   "{count} ملفاً في هذه النسخة خارج نطاق الاستعادة الانتقائية (سجلات التدقيق والأخطاء وما شابهها)؛ لا يعيدها إلا الاستعادة الكاملة.",
+  archive_restore_select_prompt:                "اختر عنصراً واحداً على الأقل، وشهراً واحداً على الأقل للعناصر الشهرية.",
+  archive_restore_planning:                     "جاري التحقق من الاعتماديات...",
+  archive_restore_selective_done:               "تمت الاستعادة الانتقائية من {folder} ({count} ملف). نسخة الرجوع: {rollback}.",
+  archive_restore_integrity_clean:              "فحص السلامة لشهر {month}: لا توجد صفوف يتيمة.",
+  archive_restore_integrity_orphans:            "فحص السلامة لشهر {month}: {count} صفاً يتيماً — راجع قسم فحص السلامة المرجعية.",
+  archive_restore_integrity_failed:             "تعذر فحص السلامة لشهر {month}: {error}",
+  archive_restore_plan_rejected:                "تغيّر محتوى النسخة أو بيانات الشهر منذ المعاينة، ولم يعد الاختيار صالحاً. أعد فتح نافذة الاستعادة.",
+  archive_restore_failed_prefix:                "فشلت الاستعادة",
+
   // The 2026-08 design-handoff redesign keeps its keys in one file per screen
   // (see ./labels.*.ts). Spread here so they are indistinguishable from the
   // keys defined inline above: same LabelKey union, same Settings-tab override

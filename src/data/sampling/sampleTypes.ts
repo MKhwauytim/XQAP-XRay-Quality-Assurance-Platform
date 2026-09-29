@@ -179,3 +179,11 @@ export type SampleMasterData = {
 export type SampleDrawResult =
   | { ok: true; data: SampleMasterData }
   | { ok: false; reason: string };
+
+/**
+ * The draw-proof file beside `sample.master.json` (written by
+ * `population/populationStorage.ts`). Named here, in this dependency-free
+ * module, so the selective-restore catalog (`backup/restoreScope.ts`) can list
+ * it without importing a storage layer.
+ */
+export const SAMPLING_PROOF_FILE = "sampling-proof.json";

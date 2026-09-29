@@ -27,7 +27,7 @@ import type {
   ProcessingSummaryData,
   SourceFileMetadata,
 } from "./monthTypes";
-import type { CertScanShortfall, SampleMasterData } from "../sampling/sampleTypes";
+import { SAMPLING_PROOF_FILE, type CertScanShortfall, type SampleMasterData } from "../sampling/sampleTypes";
 import type { DistributionCurrentData } from "../distribution/distributionTypes";
 import { loadOrDeriveDistributionCurrent } from "../distribution/distributionStorage";
 import { loadSampleMaster } from "../sampling/sampleStorage";
@@ -54,8 +54,6 @@ import {
   POPULATION_SUBFOLDERS,
 } from "../workspace/workspacePaths";
 
-/** Exported for the selective-restore catalog (`backup/restoreScope.ts`). */
-export const SAMPLING_PROOF_FILE = "sampling-proof.json";
 const CERTSCAN_GLOBAL_FILE = "certscan.global.json";
 
 type DirectoryEntryLike = {
