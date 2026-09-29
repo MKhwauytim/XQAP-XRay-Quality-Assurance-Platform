@@ -9,13 +9,14 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { clearOperationLog, createMemoryDirectory, getOperationLog } from "../storage/memoryDirectory";
 import { safeWriteJson } from "../storage/safeWrite";
-import { getPopulationMonthDir } from "../workspace/workspacePaths";
+import { getPopulationMonthDir, getSampleMainDir } from "../workspace/workspacePaths";
 import { broadcastDataRefresh } from "../workspace/dataRefreshSignal";
 import {
   appendDistributionEvents,
   flushPendingDistributionProjectionWrites,
   invalidateLegacyDistributionLogMemo,
   loadDistributionLog,
+  readDistributionLogStamp,
 } from "./distributionStorage";
 import { buildAssignEvent } from "./distributionLog";
 
@@ -76,6 +77,17 @@ describe("legacy distribution log absence memo", () => {
     await plantLegacyLog(root);
     invalidateLegacyDistributionLogMemo(); // seeding memoized the absence before the file appeared
     expect((await loadDistributionLog(root, MONTH)).events.map((e) => e.xrayImageId)).toContain("XR-LEGACY");
+    expect((await loadDistributionLog(root, MONTH)).events.map((e) => e.xrayImageId)).toContain("XR-LEGACY");
+  });
+
+  it("the periodic sync's resolved-path stamp read forgets the memo when it finds a legacy log", async () => {
+    const root = await seeded();
+    await loadDistributionLog(root, MONTH); // memoizes the absence
+    await plantLegacyLog(root); // e.g. a restore on another machine
+    const currentDir = await getSampleMainDir(root, MONTH, false);
+    const legacyDir = await getPopulationMonthDir(root, MONTH, false);
+    const stamp = await readDistributionLogStamp(root, MONTH, { currentDir, legacyDir });
+    expect(stamp.revision).toBe(9);
     expect((await loadDistributionLog(root, MONTH)).events.map((e) => e.xrayImageId)).toContain("XR-LEGACY");
   });
 });

@@ -517,11 +517,16 @@ export async function readDistributionLogStamp(
   const currentLog = normalizeCompatibilityLog(
     await readCompatibilityLog(currentDir, `Corrupt distribution compatibility log: ${LOG_FILE}`)
   );
-  const legacyLog = normalizeCompatibilityLog(
-    resolved === undefined
-      ? await readLegacyDistributionLog(directoryHandle, monthFolderName)
-      : await readCompatibilityLog(legacyDir, `Corrupt legacy distribution log: ${LOG_FILE}`)
-  );
+  let rawLegacy: DistributionLog | null;
+  if (resolved === undefined) {
+    rawLegacy = await readLegacyDistributionLog(directoryHandle, monthFolderName);
+  } else {
+    // The sync probe reads the legacy location unmemoized every tick; if it finds a log
+    // there, "the legacy log is absent" is no longer true for this month (R5 review).
+    rawLegacy = await readCompatibilityLog(legacyDir, `Corrupt legacy distribution log: ${LOG_FILE}`);
+    if (rawLegacy !== null) legacyLogAbsent.delete(projectionChainKey(directoryHandle, monthFolderName));
+  }
+  const legacyLog = normalizeCompatibilityLog(rawLegacy);
   return {
     revision: Math.max(currentLog.revision, legacyLog.revision),
     writeToken: selectWriteToken(currentLog, legacyLog),
