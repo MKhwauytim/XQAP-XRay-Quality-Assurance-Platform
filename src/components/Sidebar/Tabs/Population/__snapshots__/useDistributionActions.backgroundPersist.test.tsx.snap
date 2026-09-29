@@ -1,0 +1,511 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`R1: cache, sidecar and mirrors persist off the click path > after the flush every file the month owns is byte-equal to the synchronous version 1`] = `
+{
+  "2-samples/1-main/distribution.current.json": "{
+  "metadata": {
+    "schemaVersion": 1,
+    "revision": 3,
+    "contentHash":"<x>",
+    "writtenAt":"<x>"
+  },
+  "data": {
+    "monthFolderName": "5-may-2026",
+    "logRevision": 3,
+    "deriveVersion": 5,
+    "sampleRowsFingerprint": "12:6984d11a",
+    "derivedAt": "<ts>",
+    "totalAssigned": 12,
+    "totalCompleted": 0,
+    "totalReplaced": 0,
+    "totalPending": 12,
+    "entries": [
+      {
+        "xrayImageId": "A001",
+        "status": "pending",
+        "assignedTo": "hihaloraini",
+        "replacedById": null,
+        "lastEventAt": "<ts>",
+        "lastEventId": "evt-<uuid1>",
+        "row": {}
+      },
+      {
+        "xrayImageId": "A002",
+        "status": "pending",
+        "assignedTo": "hihaloraini",
+        "replacedById": null,
+        "lastEventAt": "<ts>",
+        "lastEventId": "evt-<uuid2>",
+        "row": {}
+      },
+      {
+        "xrayImageId": "A003",
+        "status": "pending",
+        "assignedTo": "saalhijji",
+        "replacedById": null,
+        "lastEventAt": "<ts>",
+        "lastEventId": "evt-<uuid3>",
+        "row": {}
+      },
+      {
+        "xrayImageId": "A004",
+        "status": "pending",
+        "assignedTo": "saalhijji",
+        "replacedById": null,
+        "lastEventAt": "<ts>",
+        "lastEventId": "evt-<uuid4>",
+        "row": {}
+      },
+      {
+        "xrayImageId": "A005",
+        "status": "pending",
+        "assignedTo": "hihaloraini",
+        "replacedById": null,
+        "lastEventAt": "<ts>",
+        "lastEventId": "evt-<uuid5>",
+        "row": {}
+      },
+      {
+        "xrayImageId": "A006",
+        "status": "pending",
+        "assignedTo": "saalhijji",
+        "replacedById": null,
+        "lastEventAt": "<ts>",
+        "lastEventId": "evt-<uuid6>",
+        "row": {}
+      },
+      {
+        "xrayImageId": "A007",
+        "status": "pending",
+        "assignedTo": "jalgahamdi",
+        "replacedById": null,
+        "lastEventAt": "<ts>",
+        "lastEventId": "evt-<uuid7>",
+        "row": {}
+      },
+      {
+        "xrayImageId": "A008",
+        "status": "pending",
+        "assignedTo": "hihaloraini",
+        "replacedById": null,
+        "lastEventAt": "<ts>",
+        "lastEventId": "evt-<uuid8>",
+        "row": {}
+      },
+      {
+        "xrayImageId": "A009",
+        "status": "pending",
+        "assignedTo": "saalhijji",
+        "replacedById": null,
+        "lastEventAt": "<ts>",
+        "lastEventId": "evt-<uuid9>",
+        "row": {}
+      },
+      {
+        "xrayImageId": "A010",
+        "status": "pending",
+        "assignedTo": "jalgahamdi",
+        "replacedById": null,
+        "lastEventAt": "<ts>",
+        "lastEventId": "evt-<uuid10>",
+        "row": {}
+      },
+      {
+        "xrayImageId": "A011",
+        "status": "pending",
+        "assignedTo": "hihaloraini",
+        "replacedById": null,
+        "lastEventAt": "<ts>",
+        "lastEventId": "evt-<uuid11>",
+        "row": {}
+      },
+      {
+        "xrayImageId": "A012",
+        "status": "pending",
+        "assignedTo": "saalhijji",
+        "replacedById": null,
+        "lastEventAt": "<ts>",
+        "lastEventId": "evt-<uuid12>",
+        "row": {}
+      }
+    ],
+    "quotas": {
+      "jalgahamdi": {
+        "username": "jalgahamdi",
+        "sampleCount": 2,
+        "dailyQuota": 2,
+        "daysRemainingAtAssignment": 0,
+        "assignedAt": "<ts>"
+      },
+      "hihaloraini": {
+        "username": "hihaloraini",
+        "sampleCount": 5,
+        "dailyQuota": 5,
+        "daysRemainingAtAssignment": 0,
+        "assignedAt": "<ts>"
+      },
+      "saalhijji": {
+        "username": "saalhijji",
+        "sampleCount": 5,
+        "dailyQuota": 5,
+        "daysRemainingAtAssignment": 0,
+        "assignedAt": "<ts>"
+      }
+    },
+    "eventSetId":"<x>",
+    "scanIdentity": {
+      "segmentOffsets": {
+        "<segment>.ndjson": 2902
+      },
+      "legacyFilesDigest":"<x>"
+    }
+  }
+}
+",
+  "2-samples/1-main/distribution.events/<segment>.ndjson": "{"eventId":"evt-<uuid1>","eventSchemaVersion":1,"eventType":"assigned","xrayImageId":"A001","assignedTo":"jalgahamdi","eventAt":"<ts>","eventBy":"admin"}
+{"eventId":"evt-<uuid2>","eventSchemaVersion":1,"eventType":"assigned","xrayImageId":"A002","assignedTo":"hihaloraini","eventAt":"<ts>","eventBy":"admin"}
+{"eventId":"evt-<uuid3>","eventSchemaVersion":1,"eventType":"assigned","xrayImageId":"A003","assignedTo":"saalhijji","eventAt":"<ts>","eventBy":"admin"}
+{"eventId":"evt-<uuid4>","eventSchemaVersion":1,"eventType":"assigned","xrayImageId":"A004","assignedTo":"jalgahamdi","eventAt":"<ts>","eventBy":"admin"}
+{"eventId":"evt-<uuid5>","eventSchemaVersion":1,"eventType":"assigned","xrayImageId":"A005","assignedTo":"hihaloraini","eventAt":"<ts>","eventBy":"admin"}
+{"eventId":"evt-<uuid6>","eventSchemaVersion":1,"eventType":"assigned","xrayImageId":"A006","assignedTo":"saalhijji","eventAt":"<ts>","eventBy":"admin"}
+{"eventId":"evt-<uuid7>","eventSchemaVersion":1,"eventType":"assigned","xrayImageId":"A007","assignedTo":"jalgahamdi","eventAt":"<ts>","eventBy":"admin"}
+{"eventId":"evt-<uuid8>","eventSchemaVersion":1,"eventType":"assigned","xrayImageId":"A008","assignedTo":"hihaloraini","eventAt":"<ts>","eventBy":"admin"}
+{"eventId":"evt-<uuid9>","eventSchemaVersion":1,"eventType":"assigned","xrayImageId":"A009","assignedTo":"saalhijji","eventAt":"<ts>","eventBy":"admin"}
+{"eventId":"evt-<uuid10>","eventSchemaVersion":1,"eventType":"assigned","xrayImageId":"A010","assignedTo":"jalgahamdi","eventAt":"<ts>","eventBy":"admin"}
+{"eventId":"evt-<uuid11>","eventSchemaVersion":1,"eventType":"assigned","xrayImageId":"A011","assignedTo":"hihaloraini","eventAt":"<ts>","eventBy":"admin"}
+{"eventId":"evt-<uuid12>","eventSchemaVersion":1,"eventType":"assigned","xrayImageId":"A012","assignedTo":"saalhijji","eventAt":"<ts>","eventBy":"admin"}
+{"eventId":"evt-<uuid13>","eventSchemaVersion":1,"eventType":"reassigned","xrayImageId":"A001","assignedTo":"jalgahamdi","reassignedTo":"hihaloraini","eventAt":"<ts>","eventBy":"admin"}
+{"eventId":"evt-<uuid14>","eventSchemaVersion":1,"eventType":"reassigned","xrayImageId":"A004","assignedTo":"jalgahamdi","reassignedTo":"saalhijji","eventAt":"<ts>","eventBy":"admin"}
+",
+  "2-samples/1-main/distribution.log.json": "{
+  "metadata": {
+    "schemaVersion": 1,
+    "revision": 3,
+    "contentHash":"<x>",
+    "writtenAt":"<x>"
+  },
+  "data": {
+    "monthFolderName": "5-may-2026",
+    "revision": 3,
+    "_writeToken":"<x>",
+    "eventSetId":"<x>",
+    "events": []
+  }
+}
+",
+  "2-samples/1-main/sample.master.json": "{
+  "metadata": {
+    "schemaVersion": 1,
+    "revision": 1,
+    "contentHash":"<x>",
+    "writtenAt":"<x>"
+  },
+  "data": {
+    "drawnAt": "<ts>",
+    "drawnBy": "admin",
+    "rngSeed": "seed",
+    "portAllocations": [],
+    "stageAllocations": [],
+    "totalRequested": 12,
+    "totalActual": 12,
+    "certScanRequested": 0,
+    "nonCertScanRequested": 12,
+    "certScanActual": 0,
+    "nonCertScanActual": 12,
+    "rows": [
+      {
+        "xrayImageId": "A001"
+      },
+      {
+        "xrayImageId": "A002"
+      },
+      {
+        "xrayImageId": "A003"
+      },
+      {
+        "xrayImageId": "A004"
+      },
+      {
+        "xrayImageId": "A005"
+      },
+      {
+        "xrayImageId": "A006"
+      },
+      {
+        "xrayImageId": "A007"
+      },
+      {
+        "xrayImageId": "A008"
+      },
+      {
+        "xrayImageId": "A009"
+      },
+      {
+        "xrayImageId": "A010"
+      },
+      {
+        "xrayImageId": "A011"
+      },
+      {
+        "xrayImageId": "A012"
+      }
+    ]
+  }
+}
+",
+  "2-samples/2-employees/_index.json": "{
+  "metadata": {
+    "schemaVersion": 1,
+    "revision": 6,
+    "contentHash":"<x>",
+    "writtenAt":"<x>"
+  },
+  "data": {
+    "monthFolderName": "5-may-2026",
+    "updatedAt": "<ts>",
+    "pendingRevision": null,
+    "pendingDeriveVersion": null,
+    "mirrors": {
+      "jalgahamdi.samples.json": {
+        "username": "jalgahamdi",
+        "sourceLogRevision": 3,
+        "deriveVersion": 5,
+        "eventSetId":"<x>",
+        "contentHash":"<x>",
+        "scan": {
+          "segmentOffsets": {
+            "<segment>.ndjson": 2902
+          },
+          "legacyFilesDigest":"<x>"
+        }
+      },
+      "hihaloraini.samples.json": {
+        "username": "hihaloraini",
+        "sourceLogRevision": 3,
+        "deriveVersion": 5,
+        "eventSetId":"<x>",
+        "contentHash":"<x>",
+        "scan": {
+          "segmentOffsets": {
+            "<segment>.ndjson": 2902
+          },
+          "legacyFilesDigest":"<x>"
+        }
+      },
+      "saalhijji.samples.json": {
+        "username": "saalhijji",
+        "sourceLogRevision": 3,
+        "deriveVersion": 5,
+        "eventSetId":"<x>",
+        "contentHash":"<x>",
+        "scan": {
+          "segmentOffsets": {
+            "<segment>.ndjson": 2902
+          },
+          "legacyFilesDigest":"<x>"
+        }
+      }
+    }
+  }
+}
+",
+  "2-samples/2-employees/hihaloraini.samples.json": "{
+  "metadata": {
+    "schemaVersion": 1,
+    "revision": 2,
+    "contentHash":"<x>",
+    "writtenAt":"<x>"
+  },
+  "data": {
+    "monthFolderName": "5-may-2026",
+    "username": "hihaloraini",
+    "updatedAt": "<ts>",
+    "sourceLogRevision": 2,
+    "deriveVersion": 5,
+    "eventSetId":"<x>",
+    "scan": {
+      "segmentOffsets": {
+        "<segment>.ndjson": 2670
+      },
+      "legacyFilesDigest":"<x>"
+    },
+    "quota": {
+      "dailyQuota": 5,
+      "daysRemainingAtAssignment": 0,
+      "sampleCount": 5
+    },
+    "entries": [
+      {
+        "xrayImageId": "A001",
+        "status": "pending",
+        "assignedTo": "hihaloraini",
+        "replacedById": null,
+        "lastEventAt": "<ts>",
+        "lastEventId": "evt-<uuid1>",
+        "row": {}
+      },
+      {
+        "xrayImageId": "A002",
+        "status": "pending",
+        "assignedTo": "hihaloraini",
+        "replacedById": null,
+        "lastEventAt": "<ts>",
+        "lastEventId": "evt-<uuid2>",
+        "row": {}
+      },
+      {
+        "xrayImageId": "A005",
+        "status": "pending",
+        "assignedTo": "hihaloraini",
+        "replacedById": null,
+        "lastEventAt": "<ts>",
+        "lastEventId": "evt-<uuid3>",
+        "row": {}
+      },
+      {
+        "xrayImageId": "A008",
+        "status": "pending",
+        "assignedTo": "hihaloraini",
+        "replacedById": null,
+        "lastEventAt": "<ts>",
+        "lastEventId": "evt-<uuid4>",
+        "row": {}
+      },
+      {
+        "xrayImageId": "A011",
+        "status": "pending",
+        "assignedTo": "hihaloraini",
+        "replacedById": null,
+        "lastEventAt": "<ts>",
+        "lastEventId": "evt-<uuid5>",
+        "row": {}
+      }
+    ]
+  }
+}
+",
+  "2-samples/2-employees/jalgahamdi.samples.json": "{
+  "metadata": {
+    "schemaVersion": 1,
+    "revision": 3,
+    "contentHash":"<x>",
+    "writtenAt":"<x>"
+  },
+  "data": {
+    "monthFolderName": "5-may-2026",
+    "username": "jalgahamdi",
+    "updatedAt": "<ts>",
+    "sourceLogRevision": 3,
+    "deriveVersion": 5,
+    "eventSetId":"<x>",
+    "scan": {
+      "segmentOffsets": {
+        "<segment>.ndjson": 2902
+      },
+      "legacyFilesDigest":"<x>"
+    },
+    "quota": {
+      "dailyQuota": 2,
+      "daysRemainingAtAssignment": 0,
+      "sampleCount": 2
+    },
+    "entries": [
+      {
+        "xrayImageId": "A007",
+        "status": "pending",
+        "assignedTo": "jalgahamdi",
+        "replacedById": null,
+        "lastEventAt": "<ts>",
+        "lastEventId": "evt-<uuid1>",
+        "row": {}
+      },
+      {
+        "xrayImageId": "A010",
+        "status": "pending",
+        "assignedTo": "jalgahamdi",
+        "replacedById": null,
+        "lastEventAt": "<ts>",
+        "lastEventId": "evt-<uuid2>",
+        "row": {}
+      }
+    ]
+  }
+}
+",
+  "2-samples/2-employees/saalhijji.samples.json": "{
+  "metadata": {
+    "schemaVersion": 1,
+    "revision": 2,
+    "contentHash":"<x>",
+    "writtenAt":"<x>"
+  },
+  "data": {
+    "monthFolderName": "5-may-2026",
+    "username": "saalhijji",
+    "updatedAt": "<ts>",
+    "sourceLogRevision": 3,
+    "deriveVersion": 5,
+    "eventSetId":"<x>",
+    "scan": {
+      "segmentOffsets": {
+        "<segment>.ndjson": 2902
+      },
+      "legacyFilesDigest":"<x>"
+    },
+    "quota": {
+      "dailyQuota": 5,
+      "daysRemainingAtAssignment": 0,
+      "sampleCount": 5
+    },
+    "entries": [
+      {
+        "xrayImageId": "A003",
+        "status": "pending",
+        "assignedTo": "saalhijji",
+        "replacedById": null,
+        "lastEventAt": "<ts>",
+        "lastEventId": "evt-<uuid1>",
+        "row": {}
+      },
+      {
+        "xrayImageId": "A004",
+        "status": "pending",
+        "assignedTo": "saalhijji",
+        "replacedById": null,
+        "lastEventAt": "<ts>",
+        "lastEventId": "evt-<uuid2>",
+        "row": {}
+      },
+      {
+        "xrayImageId": "A006",
+        "status": "pending",
+        "assignedTo": "saalhijji",
+        "replacedById": null,
+        "lastEventAt": "<ts>",
+        "lastEventId": "evt-<uuid3>",
+        "row": {}
+      },
+      {
+        "xrayImageId": "A009",
+        "status": "pending",
+        "assignedTo": "saalhijji",
+        "replacedById": null,
+        "lastEventAt": "<ts>",
+        "lastEventId": "evt-<uuid4>",
+        "row": {}
+      },
+      {
+        "xrayImageId": "A012",
+        "status": "pending",
+        "assignedTo": "saalhijji",
+        "replacedById": null,
+        "lastEventAt": "<ts>",
+        "lastEventId": "evt-<uuid5>",
+        "row": {}
+      }
+    ]
+  }
+}
+",
+}
+`;

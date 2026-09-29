@@ -19,6 +19,8 @@ import { saveMonthRun } from "../../../../data/population/populationStorage";
 import { loadSampleMaster, saveSampleMaster } from "../../../../data/sampling/sampleStorage";
 import {
   __clearDeriveMemoForTests,
+  flushPendingDistributionPersist,
+  flushPendingDistributionProjectionWrites,
   loadDistributionLog,
   loadOrDeriveDistributionCurrent,
 } from "../../../../data/distribution/distributionStorage";
@@ -112,6 +114,9 @@ describe("useDistributionActions write-path cache stamp", () => {
     await act(async () => {
       await result.current.handleAssign("A001", "hihaloraini");
     });
+    // The projection and the cache/mirror persist are background jobs (R1, R3).
+    await flushPendingDistributionProjectionWrites();
+    await flushPendingDistributionPersist();
 
     const cache = await readCache(dir);
     const log = await loadDistributionLog(dir, MONTH_FOLDER);
@@ -130,6 +135,9 @@ describe("useDistributionActions write-path cache stamp", () => {
     await act(async () => {
       await result.current.handleAssign("A001", "hihaloraini");
     });
+    // The projection and the cache/mirror persist are background jobs (R1, R3).
+    await flushPendingDistributionProjectionWrites();
+    await flushPendingDistributionPersist();
 
     // Marker no fold could produce: if the reader returns it, the snapshot came
     // off disk rather than from a fresh derivation.
@@ -154,6 +162,9 @@ describe("useDistributionActions write-path cache stamp", () => {
     await act(async () => {
       await result.current.handleAssign("A001", "hihaloraini");
     });
+    // The projection and the cache/mirror persist are background jobs (R1, R3).
+    await flushPendingDistributionProjectionWrites();
+    await flushPendingDistributionPersist();
 
     const mainDir = await getSampleMainDir(dir, MONTH_FOLDER, true);
     await safeWriteJson(mainDir, CURRENT_FILE, { ...(await readCache(dir)), totalPending: 999 });

@@ -29,6 +29,7 @@ import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
 import { isReadOnlyMode } from "../storage/readOnlyMode";
+import { workspaceScopeId } from "../storage/inFlightReads";
 import { getPopulationMonthDir } from "../workspace/workspacePaths";
 import type { MonthManifestData } from "./monthTypes";
 
@@ -63,7 +64,18 @@ export class MonthClosedError extends Error {
 }
 
 let cacheTtlMs = DEFAULT_CACHE_TTL_MS;
+/** Keyed by workspace root + month: two workspaces (or a leftover task from another one) can share a month folder name. */
 const cache = new Map<string, { closed: boolean; at: number }>();
+const cacheKey = (directoryHandle: DirectoryHandleLike, monthFolderName: string): string =>
+  `${workspaceScopeId(directoryHandle)}|${monthFolderName}`;
+/**
+ * Bumped by every invalidation. A read remembers the value it started under and
+ * only caches its verdict if nothing invalidated meanwhile: otherwise a read that
+ * began before `closeMonth`'s commit could finish after the invalidation and
+ * re-cache "open" for the whole TTL, keeping this tab's write gate open on a
+ * month that is now closed.
+ */
+let invalidationGeneration = 0;
 
 /** @internal — test-only. Override the closed-state cache TTL. */
 export function __setMonthLockTtlForTests(ms: number): void {
@@ -77,10 +89,11 @@ export function __resetMonthLockTtlForTests(): void {
 
 /** Drop the cached closed-state for one month (or all months when omitted). */
 export function invalidateMonthLockCache(monthFolderName?: string): void {
+  invalidationGeneration += 1;
   if (monthFolderName === undefined) {
     cache.clear();
   } else {
-    cache.delete(monthFolderName);
+    for (const key of [...cache.keys()]) if (key.endsWith(`|${monthFolderName}`)) cache.delete(key);
   }
 }
 
@@ -118,13 +131,15 @@ export async function isMonthClosed(
   monthFolderName: string
 ): Promise<boolean> {
   const now = Date.now();
-  const hit = cache.get(monthFolderName);
+  const key = cacheKey(directoryHandle, monthFolderName);
+  const hit = cache.get(key);
   if (hit && now - hit.at < cacheTtlMs) {
     return hit.closed;
   }
+  const generation = invalidationGeneration;
   const manifest = await readManifest(directoryHandle, monthFolderName);
   const closed = manifest?.status === "closed";
-  cache.set(monthFolderName, { closed, at: now });
+  if (generation === invalidationGeneration) cache.set(key, { closed, at: now });
   return closed;
 }
 
