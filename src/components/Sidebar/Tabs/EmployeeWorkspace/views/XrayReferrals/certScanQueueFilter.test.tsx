@@ -14,7 +14,7 @@ import {
 } from "../../../../../../data/population/certScanFilter";
 import { certScanStatusFilterProps } from "../certScanColumn";
 import { useCaseFilter, type CaseFilterState } from "./caseFilter";
-import { buildXrayColumns, CaseFilterBar } from "./subComponents";
+import { buildXrayColumns, CaseFilterBar, ReferralWorkspaceShell } from "./subComponents";
 
 afterEach(() => cleanup());
 
@@ -97,5 +97,48 @@ describe("certScanStatus DataTable column (C2)", () => {
       filterKind: column.filterKind,
       statusOptions: column.statusOptions,
     });
+  });
+});
+
+describe("ReferralWorkspaceShell — empty notice and stats title follow the CertScan chip (C2)", () => {
+  function shellState(certScan: CaseFilterState["certScan"]): CaseFilterState {
+    return {
+      value: "all",
+      setValue: () => {},
+      certScan,
+      setCertScan: () => {},
+      entries: [],
+      counts: { all: 3, "risk-targeted": 3, adhoc: 0 },
+      certScanCounts: { any: 3, certscan: 0, noncertscan: 3 },
+    };
+  }
+  function renderShell(certScan: CaseFilterState["certScan"]) {
+    render(
+      <ReferralWorkspaceShell
+        stats={{ assigned: 0, submitted: 0, onHold: 0, notStarted: 0, replaced: 0, active: 0 } as never}
+        quota={null}
+        username="emp-1"
+        scope="own"
+        scopeEmployeeName=""
+        showingRetainedDraft={false}
+        caseFilter={shellState(certScan)}
+        labels={DEFAULT_LABELS}
+        table={null}
+      />,
+    );
+  }
+
+  it("names both escape chips when the CertScan chip emptied the queue, and suffixes the stats title", () => {
+    renderShell("certscan");
+    expect(screen.getByText(DEFAULT_LABELS.ew_case_filter_empty_certscan)).toBeInTheDocument();
+    expect(screen.queryByText(DEFAULT_LABELS.ew_case_filter_empty)).toBeNull();
+    expect(
+      screen.getByText((text) => text.includes(DEFAULT_LABELS.ew_stats_case_suffix.replace("{filter}", "CertScan"))),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the original notice when only the case chip is active", () => {
+    renderShell("any");
+    expect(screen.getByText(DEFAULT_LABELS.ew_case_filter_empty)).toBeInTheDocument();
   });
 });

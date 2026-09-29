@@ -36,7 +36,7 @@ import { DATA_PAGE_SIZE } from "../../../../utils/paginationUtils";
 import { cycleTableSort } from "../../../../utils/tableSort";
 import CertScanFilterChips from "../../../CertScanFilterChips/CertScanFilterChips";
 import { certScanFilterFromColumnFilters, withCertScanFilter } from "../../../../data/population/certScanFilter";
-import { formatStageLabel } from "./components/helpers";
+import { getBrowseDisplayValue } from "./browseDisplayValue";
 import { buildBrowseFilterOptionPreview } from "./browseFilterOptions";
 import {
   runPopulationQuery,
@@ -371,50 +371,6 @@ function compareBrowseFilterOptions(first: string, second: string): number {
     return (firstStageOrder ?? Number.MAX_SAFE_INTEGER) - (secondStageOrder ?? Number.MAX_SAFE_INTEGER);
   }
   return first.localeCompare(second, "ar");
-}
-
-function formatMonthFolderLabel(monthFolder: string): string {
-  return formatMonthFolderShortLabel(monthFolder);
-}
-
-function formatBrowseCellValue(value: unknown): string {
-  if (value === null || value === undefined || value === "") {
-    return "—";
-  }
-
-  if (Array.isArray(value)) {
-    return value.map(formatBrowseCellValue).join("، ");
-  }
-
-  if (typeof value === "boolean") {
-    return value ? "نعم" : "لا";
-  }
-
-  return String(value);
-}
-
-// The real (main-thread) display-value formatter — used directly for: per-page cell
-// rendering (both paths, always correct since it's a plain function call over at
-// most DATA_PAGE_SIZE rows), the fallback (non-worker) path's search/filter/sort
-// query, and the fallback path's column-filter dropdown preview. For the
-// worker-backed "population" path, this SAME special-casing is mirrored inside the
-// worker itself (src/workers/populationQueryWorker.ts's getWorkerDisplayValue) since
-// a function can't cross postMessage — see this file's PR/commit notes for the full
-// rationale (Task 4's CRITICAL gap).
-function getBrowseDisplayValue(
-  row: BrowseRow,
-  key: string,
-  stageMappings?: PopulationConfig["stageMappings"]
-): string {
-  if (key === "stage") {
-    return formatStageLabel(row[key], stageMappings);
-  }
-
-  if (key === "_monthFolder") {
-    return formatMonthFolderLabel(String(row[key] ?? ""));
-  }
-
-  return formatBrowseCellValue(row[key]);
 }
 
 function rowMatchesSearch(

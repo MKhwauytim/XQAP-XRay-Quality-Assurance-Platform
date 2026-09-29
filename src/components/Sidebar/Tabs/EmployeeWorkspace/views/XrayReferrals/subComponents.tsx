@@ -28,6 +28,7 @@ import Pagination from "../../../../../../components/Pagination/Pagination";
 import { clampPage, pageSlice } from "../../../../../../utils/paginationUtils";
 import { useLabels, type Labels } from "../../../../../../data/labels/useLabels";
 import { CASE_FILTERS, type CaseFilter, type CaseFilterCounts, type CaseFilterState } from "./caseFilter";
+import type { CertScanFilter } from "../../../../../../data/population/certScanFilter";
 import CertScanFilterChips from "../../../../../CertScanFilterChips/CertScanFilterChips";
 import { certScanStatusFilterProps } from "../certScanColumn";
 import { displayXrayImageId } from "../../../../../../data/adhocImport/adhocImportEmployeeView";
@@ -753,6 +754,7 @@ export function ReferralStatsStrip({
   scope = "own",
   scopeEmployeeName = "",
   caseFilter = "all",
+  certScan = "any",
 }: {
   stats: PersonalStats;
   quota: PersonalQuota;
@@ -774,6 +776,8 @@ export function ReferralStatsStrip({
   scopeEmployeeName?: string;
   /** The active case chip; the title names it so the reader knows the figures are narrowed. */
   caseFilter?: CaseFilter;
+  /** The active CertScan chip (C2); the title names it too — the figures are narrowed by it. */
+  certScan?: CertScanFilter;
 }) {
   const isAllScope = scope === "all";
   // True whenever the figures are NOT the reader's own — the quota caveat and
@@ -787,6 +791,13 @@ export function ReferralStatsStrip({
       : caseFilter === "adhoc"
         ? L.ew_stats_case_suffix.replace("{filter}", L.ew_stats_case_adhoc)
         : "";
+  const certScanSuffix =
+    certScan === "any"
+      ? ""
+      : L.ew_stats_case_suffix.replace(
+          "{filter}",
+          certScan === "certscan" ? L.certscan_filter_certscan : L.certscan_filter_noncertscan
+        );
   const statsItems = [
     // The daily quota is always the CURRENT user's own frozen quota, never a
     // workspace aggregate, so it is disambiguated rather than relabelled when
@@ -821,7 +832,7 @@ export function ReferralStatsStrip({
           {scope === "employee"
             ? named(L.ew_queue_stats_employee_title)
             : isAllScope ? "متابعة العمل — جميع الموظفين" : "متابعة العمل"}
-          {caseSuffix}
+          {caseSuffix}{certScanSuffix}
         </strong>
       </div>
 
@@ -1295,9 +1306,7 @@ export function ReferralWorkspaceShell({
   scope,
   scopeEmployeeName,
   showingRetainedDraft,
-  caseFilterValue,
-  caseFilterEmpty,
-  caseFilterCounts,
+  caseFilter,
   labels: L,
   table,
 }: {
@@ -1307,10 +1316,8 @@ export function ReferralWorkspaceShell({
   scope: "own" | "all" | "employee";
   scopeEmployeeName: string;
   showingRetainedDraft: boolean;
-  caseFilterValue: CaseFilter;
-  /** True when the case chip AND the CertScan chip together leave no rows (C2). */
-  caseFilterEmpty: boolean;
-  caseFilterCounts: CaseFilterCounts;
+  /** The queue's chip state: both chips narrow the stats strip and the empty notice. */
+  caseFilter: CaseFilterState;
   labels: Labels;
   table: React.ReactNode;
 }) {
@@ -1322,7 +1329,8 @@ export function ReferralWorkspaceShell({
         username={username}
         scope={scope}
         scopeEmployeeName={scopeEmployeeName}
-        caseFilter={caseFilterValue}
+        caseFilter={caseFilter.value}
+        certScan={caseFilter.certScan}
       />
       {showingRetainedDraft && (
         <p className="ew-msg-warn" role="status">{L.ew_draft_retained_notice}</p>
@@ -1331,8 +1339,10 @@ export function ReferralWorkspaceShell({
           and its own "no results" row only fires when rows exist and the COLUMN
           filters emptied them — so without this the reader would get a bare
           header and no explanation. */}
-      {caseFilterEmpty && caseFilterCounts.all > 0 && (
-        <p className="ew-case-filter-empty" role="status">{L.ew_case_filter_empty}</p>
+      {caseFilter.entries.length === 0 && caseFilter.counts.all > 0 && (
+        <p className="ew-case-filter-empty" role="status">
+          {caseFilter.certScan === "any" ? L.ew_case_filter_empty : L.ew_case_filter_empty_certscan}
+        </p>
       )}
       {table}
     </div>

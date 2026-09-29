@@ -3,6 +3,7 @@
 // main-thread fallback (runPopulationQuery) filter identically.
 import { describe, expect, it } from "vitest";
 import { createInitialWorkerState, handleWorkerMessage } from "../../workers/populationQueryWorker";
+import { getBrowseDisplayValue } from "../../components/Sidebar/Tabs/Population/browseDisplayValue";
 import { runPopulationQuery, type PopulationQueryParams } from "./populationQuery";
 import {
   CERTSCAN_STATUS_COLUMN,
@@ -74,7 +75,7 @@ describe("CertScan chip ↔ Browse column filters (C2)", () => {
 
   it("fallback path: the same chip over runPopulationQuery returns the same rows", () => {
     const result = runPopulationQuery(ROWS, params(withCertScanFilter({}, "certscan")), (row, key) =>
-      String(row[key] ?? "—"),
+      getBrowseDisplayValue(row as never, key),
     );
     expect(result.pageRows.map((row) => row["xrayImageId"])).toEqual(["1", "3"]);
   });

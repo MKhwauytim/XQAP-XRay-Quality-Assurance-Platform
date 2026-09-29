@@ -76,7 +76,10 @@ export default function MappingSettingsModal({
 
   const labels = useLabels();
   const [certScanPortsOpen, setCertScanPortsOpen] = useState(false);
-  const certScanPortCatalog = useMemo(() => derivePortCatalog(certScanPortRows ?? []), [certScanPortRows]);
+  const certScanPortCatalog = useMemo(
+    () => (certScanPortsOpen && canEditCertScanPorts ? derivePortCatalog(certScanPortRows ?? []) : []),
+    [certScanPortsOpen, canEditCertScanPorts, certScanPortRows]
+  );
 
   if (!isOpen) return null;
 

@@ -741,7 +741,7 @@ function createOpenReassignModal(deps: {
 /**
  * The «متابعة العمل» figures, over EXACTLY the rows the queue table shows: the
  * picked scope (everyone, one named employee, or the reader's own rows)
- * narrowed by the active case chip. It used to read the scope BEFORE the chips
+ * narrowed by the active case chip and CertScan chip. It used to read the scope BEFORE the chips
  * (and, for employees, re-filter every row by username), so picking
  * «حالات استثنائية» changed the table but not the strip — field report
  * 2026-09-28. The daily-quota tile is not derived here: it is a property of
@@ -1960,9 +1960,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
             }
             scopeEmployeeName={pickedScopeName}
             showingRetainedDraft={showingRetainedDraft}
-            caseFilterValue={caseFilter.value}
-            caseFilterEmpty={caseFilter.entries.length === 0}
-            caseFilterCounts={caseFilter.counts}
+            caseFilter={caseFilter}
             labels={L}
             table={tableEl}
           />

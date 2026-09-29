@@ -82,11 +82,12 @@ export async function loadPopulationOverwriteImpact(
     }),
     loadAllEmployeeFiles(directoryHandle, monthFolderName, { strict: true }),
   ]);
+  const liveRows = liveSampleRows(sample);
   return {
     sampleExists: true,
-    liveSampledIds: liveSampleRows(sample).map((row) => row.xrayImageId),
+    liveSampledIds: liveRows.map((row) => row.xrayImageId),
     liveSampledCertScan: Object.fromEntries(
-      liveSampleRows(sample).map((row) => [row.xrayImageId, row.certScanStatus])
+      liveRows.map((row) => [row.xrayImageId, row.certScanStatus])
     ),
     distributionCount: distribution?.entries.length ?? 0,
     answerCount: employeeFiles.reduce((total, file) => total + file.items.length, 0),

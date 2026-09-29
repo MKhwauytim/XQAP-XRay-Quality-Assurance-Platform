@@ -291,6 +291,7 @@ export const DEFAULT_LABELS = {
   ew_case_filter_risk_targeted:    "مستهدف المؤشر",
   ew_case_filter_adhoc:            "حالات استثنائية",
   ew_case_filter_empty:            "لا توجد حالات ضمن هذه التصفية. اختر «جميع الحالات» للعودة إلى القائمة كاملة.",
+  ew_case_filter_empty_certscan:   "لا توجد حالات ضمن هذه التصفية. اختر «كل الصور» أو «جميع الحالات» للعودة إلى القائمة كاملة.",
 
   // ── CertScan chip (C2) — shared by the employee queue and Population Browse.
   // "CertScan" is the processed row's certScanStatus: its port is flagged as a
