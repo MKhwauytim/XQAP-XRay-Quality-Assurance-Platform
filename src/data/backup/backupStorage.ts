@@ -75,6 +75,8 @@ const AUTO_SETTINGS_FILE = "auto-backup-settings.json";
 // purpose-built signal alongside that existing informal one, not a
 // replacement for it.
 const BACKUP_COMPLETE_FILE = "backup.complete.json";
+/** The backup-folder child holding the restorable mirror of the workspace tree. */
+export const BACKUP_JSON_FOLDER = "json";
 /** Derived, rebuildable fold cache — never restored, and dropped when its events change under it. */
 const DISTRIBUTION_CURRENT_FILE = "distribution.current.json";
 // `DISTRIBUTION_CHECKPOINT_FILE` (imported from distributionStorage) is the
@@ -468,7 +470,7 @@ async function collectEntries(dir: DirectoryHandleLike): Promise<DirectoryEntryL
  * restoring a stale `.bak` over a good file is exactly the corruption the safe
  * write layer exists to prevent. Suffix equality keeps all three excluded.
  */
-function isSnapshotPayloadFile(name: string): boolean {
+export function isSnapshotPayloadFile(name: string): boolean {
   return name.endsWith(".json") || isSegmentFile(name);
 }
 
@@ -808,7 +810,7 @@ async function copyAllJsonFiles(
   directoryHandle: DirectoryHandleLike,
   backupDir: DirectoryHandleLike
 ): Promise<CopyWalkResult> {
-  const jsonDir = await ensureDir(backupDir, "json");
+  const jsonDir = await ensureDir(backupDir, BACKUP_JSON_FOLDER);
   const pending = await collectJsonFileEntries({
     sourceDir: directoryHandle,
     targetDir: jsonDir,
@@ -894,9 +896,10 @@ async function copyAllJsonFiles(
  *    mirror is a pure projection of `distribution.current.json`, itself
  *    always rebuilt from the (correctly merged) event log.
  */
-type RestoreAction = "replace" | "merge-events" | "restore-if-absent" | "skip-derived";
+export type RestoreAction = "replace" | "merge-events" | "restore-if-absent" | "skip-derived";
 
-function restoreActionFor(fileName: string): RestoreAction {
+/** Exported for the selective-restore preview, which must count exactly what the walk would restore. */
+export function restoreActionFor(fileName: string): RestoreAction {
   if (fileName.endsWith(DISTRIBUTION_EVENT_SEGMENT_SUFFIX)) return "merge-events";
   if (fileName === DISTRIBUTION_CURRENT_FILE || fileName === DISTRIBUTION_CHECKPOINT_FILE) return "skip-derived";
   // Suffix/exact match, not substring: EMPLOYEE_MIRROR_SUFFIX (".samples.json")
@@ -1806,6 +1809,22 @@ async function assertBackupComplete(
   }
 }
 
+/**
+ * Open a backup's `json/` mirror for READING, refusing an unfinished backup
+ * exactly as restoreBackupSnapshot does. Creates nothing (getBackupsDir is a
+ * writer's helper and would). Used by the selective-restore preview and plan.
+ */
+export async function openCompleteBackupJsonDir(
+  directoryHandle: DirectoryHandleLike,
+  backupFolderName: string
+): Promise<DirectoryHandleLike> {
+  const systemDir = await getSystemRoot(directoryHandle, false);
+  const backupsDir = await systemDir.getDirectoryHandle(BACKUPS_FOLDER, { create: false });
+  const backupDir = await backupsDir.getDirectoryHandle(backupFolderName, { create: false });
+  await assertBackupComplete(backupDir, backupFolderName);
+  return backupDir.getDirectoryHandle(BACKUP_JSON_FOLDER, { create: false });
+}
+
 export async function restoreBackupSnapshot(params: {
   directoryHandle: DirectoryHandleLike;
   months: MonthFolderInfo[];
@@ -1836,7 +1855,7 @@ export async function restoreBackupSnapshot(params: {
       if (params.scope && validateRestoreScope(params.scope) !== null) {
         return { ok: false, error: getLabels().restore_scope_invalid };
       }
-      const jsonDir = await sourceBackupDir.getDirectoryHandle("json", { create: false });
+      const jsonDir = await sourceBackupDir.getDirectoryHandle(BACKUP_JSON_FOLDER, { create: false });
       const rollback = await createBackup(params.directoryHandle, params.months, params.username, "pre-restore");
       if (!rollback.ok) {
         return { ok: false, error: `تعذر إنشاء نسخة الرجوع قبل الاستعادة: ${rollback.error}` };

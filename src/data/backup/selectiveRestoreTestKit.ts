@@ -9,14 +9,12 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { getSystemRoot, SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
+import { BACKUP_JSON_FOLDER } from "./backupStorage";
 import { RESTORE_INPROGRESS_FILE } from "./restoreSentinel";
 
 export const TEST_BACKUP = "2026-05-31T10-00-00-manual-test";
 export const M1 = "5-may-2026";
 export const M2 = "6-june-2026";
-
-/** The backup folder's workspace-mirror child — kept in step with backupStorage. */
-const BACKUP_MIRROR_FOLDER = "json";
 
 export function makeRoot(): DirectoryHandleLike {
   return createMemoryDirectory("root") as DirectoryHandleLike;
@@ -123,7 +121,7 @@ export async function seedBackup(
   const createdAt = options.createdAt ?? "2026-05-31T10:00:00.000Z";
   const systemDir = await getSystemRoot(root, true);
   const backupDir = await dirAt(systemDir, [SYSTEM_FOLDER_NAMES.backups, folderName]);
-  const mirrorDir = await dirAt(backupDir, [BACKUP_MIRROR_FOLDER]);
+  const mirrorDir = await dirAt(backupDir, [BACKUP_JSON_FOLDER]);
   for (const [path, value] of Object.entries(files)) await writeJsonAt(mirrorDir, path, value);
   for (const [path, text] of Object.entries(rawFiles)) await writeRawAt(mirrorDir, path, text);
   await safeWriteJson(backupDir, "backup.manifest.json", {
