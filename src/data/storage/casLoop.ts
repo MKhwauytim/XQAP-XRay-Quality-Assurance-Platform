@@ -223,6 +223,21 @@ export async function casLoop<T>(
      * behaviour, so call sites can adopt it individually.
      */
     deadline?: OperationDeadline;
+    /**
+     * Terminal-failure classifier for a THROWN attempt. When it returns true
+     * the loop stops at once and reports that error exactly as an exhaustion
+     * would (same coded message, same `casLoop:exhausted` log, same
+     * `onExhausted` call) instead of backing off and re-arming the same
+     * failure.
+     *
+     * For failures where retrying the SAME target cannot help — a refused
+     * swap-to-target replace of one whole-file target (XQ-IO-036), which the
+     * inner `retryTransientWrite` ladder has already retried. A caller that
+     * wants "give up on the Nth repeat" keeps its own counter in the closure
+     * it passes as `fn`; this hook only carries the verdict. Must not throw
+     * (a throw is treated as `false`).
+     */
+    abortOn?: (cause: unknown) => boolean;
   }
 ): Promise<T | { ok: false; error: string }> {
   const max = options?.maxRetries ?? DEFAULT_MAX_RETRIES;
@@ -302,6 +317,13 @@ export async function casLoop<T>(
       // English the moment any attempt threw, so a genuine write conflict and
       // an I/O fault were indistinguishable.
       lastCause = err;
+      let terminal = false;
+      try {
+        terminal = options?.abortOn?.(err) === true;
+      } catch {
+        // A misbehaving classifier must not change the outcome.
+      }
+      if (terminal) break;
     }
     if (attempt < max - 1) {
       // Consult the operation's total budget before sleeping. `null` means it is

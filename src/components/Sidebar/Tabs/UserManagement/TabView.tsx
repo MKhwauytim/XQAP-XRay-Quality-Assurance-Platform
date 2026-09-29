@@ -546,7 +546,14 @@ export default function UserManagementTab() {
         // No workspace connected — cannot check assignments; warn and proceed.
         showMsg(L.um_delete_no_workspace_warn, "bad");
       } else {
-        const footprint = await getUserWorkspaceFootprint(directoryHandle, targetUser.username);
+        let footprint: Awaited<ReturnType<typeof getUserWorkspaceFootprint>>;
+        try {
+          footprint = await getUserWorkspaceFootprint(directoryHandle, targetUser.username);
+        } catch {
+          // The guard fails SAFE: an unreadable event store is not "no work", so refuse.
+          showMsg(L.um_delete_check_failed, "bad");
+          return;
+        }
         if (footprint.activeAssignments.length > 0) {
           const lines = footprint.activeAssignments.map((a) =>
             L.um_delete_blocked_month_line

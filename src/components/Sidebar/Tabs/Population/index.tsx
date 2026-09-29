@@ -33,8 +33,8 @@ import { loadDistributionLog } from "../../../../data/distribution/distributionS
 import { drawSample } from "../../../../data/sampling/sampleAlgorithm";
 import { saveSampleMaster } from "../../../../data/sampling/sampleStorage";
 import { buildSamplingPlan, saveSamplingPlan } from "../../../../data/sampling/samplingPlanStorage";
-import type { SamplingPlanPriorMonthAdvisory } from "../../../../data/sampling/samplingPlanStorage";
 import { loadPriorMonthAdvisory } from "../../../../data/sampling/switchingRuleAdvisory";
+import { usePriorMonthAdvisory } from "./usePriorMonthAdvisory";
 import type { SampleMasterData } from "../../../../data/sampling/sampleTypes";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import { useGlobalMonth } from "../../../../data/month/useGlobalMonth";
@@ -503,20 +503,13 @@ export default function PopulationTab() {
   const wizardFolderRef = useRef("");
   wizardFolderRef.current = globalMonth.kind === "none" ? "" : globalMonth.folderName;
 
-  // B4: compute the prior-month switching-rule advisory for the selected month so
-  // it can be surfaced in Phase 3 BEFORE the draw. Advisory only — never blocks.
-  useEffect(() => {
-    if (!directoryHandle) {
-      setPriorMonthAdvisory(null);
-      return;
-    }
-    let cancelled = false;
-    const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
-    loadPriorMonthAdvisory(directoryHandle, monthFolderName)
-      .then((advisory) => { if (!cancelled) setPriorMonthAdvisory(advisory); })
-      .catch(() => { if (!cancelled) setPriorMonthAdvisory(null); });
-    return () => { cancelled = true; };
-  }, [directoryHandle, saveMonth, saveYear, monthRefreshKey]);
+  // B4: prior-month switching-rule advisory for Phase 3 (advisory only). Read
+  // only while Phase 3 is on screen, at most once per month per interval.
+  const priorMonthAdvisory = usePriorMonthAdvisory(
+    directoryHandle,
+    formatMonthFolderName(saveMonth, saveYear),
+    activeSubTab === "process" && currentPhase === 3
+  );
 
   const [isSavingToDisk, setIsSavingToDisk] = useState(false);
   const [saveToDiskMessage, setSaveToDiskMessage] = useState<SaveMessage>(null);
@@ -546,9 +539,6 @@ export default function PopulationTab() {
     useState<SampleMasterData | null>(null);
   const [sampleSaveMessage, setSampleSaveMessage] =
     useState<SaveMessage>(null);
-  // B4 switching-rule advisory computed for the currently-selected month.
-  const [priorMonthAdvisory, setPriorMonthAdvisory] =
-    useState<SamplingPlanPriorMonthAdvisory | null>(null);
   // Phase 4 — distribution (state + mutating handlers extracted to
   // useDistributionActions.ts to stay under check:complexity's
   // max-lines-per-function budget; see that file's header comment)

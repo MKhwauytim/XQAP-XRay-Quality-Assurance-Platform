@@ -1,7 +1,7 @@
 import { tagError } from "../storage/errorCodes";
 import { isNotFoundError } from "../storage/transientFileErrors";
 import type { DistributionCurrentData, DistributionEntry, EventStoreScanIdentity } from "../distribution/distributionTypes";
-import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { stableStringify, type DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { getSampleEmployeeDir, safeWorkspaceFilePart } from "../workspace/workspacePaths";
 import { listDirectoryEntries } from "../storage/directoryScan";
@@ -21,7 +21,9 @@ import { listAdhocSampleFolders } from "../adhocImport/adhocImportEmployeeView";
 // 2026-08 — see getUserWorkspaceFootprint's revision cross-check below).
 import {
   eventStoreMatchesScan,
-  loadOrDeriveDistributionCurrent,
+  isDistributionPersistPending,
+  isDistributionProjectionPending,
+  loadOrDeriveDistributionCurrentStrictForRead,
   scanIdentityOf,
   readDistributionLogStamp,
 } from "../distribution/distributionStorage";
@@ -168,7 +170,24 @@ export type EmployeeMirrorIndexFile = {
    */
   mirrors: Record<
     string,
-    { username: string; sourceLogRevision: number | null; deriveVersion?: number; eventSetId?: string }
+    {
+      username: string;
+      sourceLogRevision: number | null;
+      deriveVersion?: number;
+      eventSetId?: string;
+      /**
+       * SHA-256 of the mirror's CONTENT (entries + quota + username/month, see
+       * `mirrorContentHash`), and the event-store scan that content was derived
+       * from (R2). Together they let a write that did not change this employee's
+       * content skip rewriting the mirror file and restamp only this entry, and
+       * let a reader (`isMirrorTrustedForEvents`) accept the older-stamped file:
+       * the file's own hash must equal `contentHash` and `scan` must still match
+       * the event store. Both optional; absent (an older client wrote the entry)
+       * means "rewrite / do not trust by index".
+       */
+      contentHash?: string;
+      scan?: EventStoreScanIdentity;
+    }
   >;
 };
 
@@ -196,7 +215,11 @@ function isMirrorIndex(value: unknown): value is EmployeeMirrorIndexFile {
       ((entry as { deriveVersion?: unknown }).deriveVersion === undefined ||
         typeof (entry as { deriveVersion?: unknown }).deriveVersion === "number") &&
       ((entry as { eventSetId?: unknown }).eventSetId === undefined ||
-        typeof (entry as { eventSetId?: unknown }).eventSetId === "string")
+        typeof (entry as { eventSetId?: unknown }).eventSetId === "string") &&
+      ((entry as { contentHash?: unknown }).contentHash === undefined ||
+        typeof (entry as { contentHash?: unknown }).contentHash === "string") &&
+      ((entry as { scan?: unknown }).scan === undefined ||
+        (typeof (entry as { scan?: unknown }).scan === "object" && (entry as { scan?: unknown }).scan !== null))
   );
 }
 
@@ -240,7 +263,40 @@ type ExistingMirror = {
   deriveVersion: number;
   /** Absent on a legacy mirror/index entry: never equal to a real event set. */
   eventSetId?: string;
+  /** From the index entry only, and only while no projection is in flight (see `readExistingMirrors`). */
+  contentHash?: string;
+  scan?: EventStoreScanIdentity;
 };
+
+/**
+ * SHA-256 of what a reader actually consumes from a mirror: who it is for, which
+ * month, the frozen quota and the SET of entries (order-insensitive, see below). Key order and undefined-valued keys
+ * must not matter (the file round-trips through JSON), so the payload is
+ * normalized through a JSON round trip and stringified with sorted keys.
+ * `undefined` when no WebCrypto is available: callers then never skip a write
+ * and never trust by index, i.e. they behave exactly as before R2.
+ */
+export async function mirrorContentHash(
+  mirror: Pick<EmployeeSamplesFile, "username" | "monthFolderName" | "quota" | "entries">
+): Promise<string | undefined> {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) return undefined;
+  const payload = JSON.parse(
+    JSON.stringify({
+      monthFolderName: mirror.monthFolderName,
+      username: mirror.username,
+      quota: mirror.quota ?? null,
+      // Order-insensitive: the position of an entry inside a mirror is the fold's
+      // tie-break for events sharing an `eventAt` (batch order when the log comes
+      // back from an append, read order after a reload), so two derivations of
+      // the SAME set of entries legitimately disagree on it. A retained file
+      // keeps whichever order it was last written with.
+      entries: [...mirror.entries].sort((a, b) => (a.xrayImageId < b.xrayImageId ? -1 : a.xrayImageId > b.xrayImageId ? 1 : 0)),
+    })
+  ) as unknown;
+  const digest = await subtle.digest("SHA-256", new TextEncoder().encode(stableStringify(payload)));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 
 /** Same read as `readEmployeeMirrorIndex`, against an already-resolved dir. */
 async function readMirrorIndexIn(
@@ -338,6 +394,11 @@ async function readExistingMirrors(
         username: entry.username,
         ...stamp,
         ...(entry.eventSetId === undefined ? {} : { eventSetId: entry.eventSetId }),
+        // A crashed run may have rewritten mirrors the index never heard of, so
+        // while `pendingRevision` is set the index does not vouch for content.
+        ...(index.pendingRevision === null && entry.contentHash !== undefined && entry.scan !== undefined
+          ? { contentHash: entry.contentHash, scan: entry.scan }
+          : {}),
       });
     }
     return byFileName;
@@ -417,28 +478,40 @@ export async function syncSampleMirrors(
     if (!entriesByEmployee.has(username)) entriesByEmployee.set(username, []);
   }
 
-  // Phase 1 of the index write: mark the projection in flight BEFORE any mirror
-  // is touched, carrying the revisions as they stand right now. A crash between
-  // here and phase 2 therefore leaves an index that over-states rather than
-  // under-states what is on disk — see EmployeeMirrorIndexFile.pendingRevision
-  // for why that direction is the safe one. Best-effort: a failure here must
-  // not stop the mirrors themselves being written, and only costs the next
-  // reader its fast path.
-  await writeMirrorIndex(
-    employeesDir,
-    monthFolderName,
-    existingMirrors,
-    sourceLogRevision,
-    deriveVersion
-  );
-
-  /** File name -> the revision that will be on disk when this run finishes. */
-  const finalRevisions = new Map<string, ExistingMirror>(existingMirrors);
-
-  await mapWithConcurrency(
-    [...entriesByEmployee.entries()],
-    MIRROR_WRITE_CONCURRENCY,
-    async ([username, entries]) => {
+  // Decide, per employee, whether this run must REWRITE the mirror file, may
+  // merely RESTAMP its index entry (R2), or must leave it alone (the monotonic
+  // guard). Pure decision + one hash per employee; no share operations.
+  type Plan =
+    | { kind: "keep" }
+    | { kind: "restamp"; contentHash: string }
+    | { kind: "write"; contentHash: string | undefined };
+  const buildMirror = (username: string, entries: DistributionEntry[]): EmployeeSamplesFile => {
+    const quota = current.quotas?.[username];
+    return {
+      monthFolderName,
+      username,
+      updatedAt,
+      sourceLogRevision,
+      deriveVersion,
+      ...(eventSetId === undefined ? {} : { eventSetId }),
+      ...(scan === undefined ? {} : { scan }),
+      ...(quota
+        ? {
+            quota: {
+              dailyQuota: quota.dailyQuota,
+              daysRemainingAtAssignment: quota.daysRemainingAtAssignment,
+              sampleCount: quota.sampleCount,
+            },
+          }
+        : {}),
+      entries,
+    };
+  };
+  type Planned = { username: string; mirror: EmployeeSamplesFile; plan: Plan };
+  // Collected in `entriesByEmployee` order, NOT in hash-completion order: the order
+  // decides the key order of `_index.json`, which must be deterministic.
+  const planned: Array<[string, Planned]> = await Promise.all(
+    [...entriesByEmployee.entries()].map(async ([username, entries]): Promise<[string, Planned]> => {
       const fileName = employeeSamplesFileName(username);
       // Monotonic guard, ordered (revision, deriveVersion) — the two axes are
       // NOT interchangeable and must be tested in this order:
@@ -456,8 +529,11 @@ export async function syncSampleMirrors(
       //   existing.revision <  ours  → overwrite; we hold newer data.
       const existing = existingMirrors.get(fileName);
       const existingRevision = existing?.sourceLogRevision ?? null;
+      const mirror = buildMirror(username, entries);
       if (existingRevision !== null) {
-        if (existingRevision > sourceLogRevision) return;
+        if (existingRevision > sourceLogRevision) {
+          return [fileName, { username, mirror, plan: { kind: "keep" } }];
+        }
         if (
           existingRevision === sourceLogRevision &&
           (existing?.deriveVersion ?? 0) >= deriveVersion &&
@@ -467,37 +543,65 @@ export async function syncSampleMirrors(
           // eventSetId cannot say, and keeps the old skip.
           (eventSetId === undefined || existing?.eventSetId === eventSetId)
         ) {
-          return; // same data, and their derivation is no older than ours
+          return [fileName, { username, mirror, plan: { kind: "keep" } }]; // same data, and their derivation is no older than ours
         }
       }
-      const quota = current.quotas?.[username];
-      await safeWriteJson<EmployeeSamplesFile>(employeesDir, fileName, {
-        monthFolderName,
-        username,
-        updatedAt,
-        sourceLogRevision,
-        deriveVersion,
-        ...(eventSetId === undefined ? {} : { eventSetId }),
-        ...(scan === undefined ? {} : { scan }),
-        ...(quota
-          ? {
-              quota: {
-                dailyQuota: quota.dailyQuota,
-                daysRemainingAtAssignment: quota.daysRemainingAtAssignment,
-                sampleCount: quota.sampleCount,
-              },
-            }
-          : {}),
-        entries,
-      });
-      finalRevisions.set(fileName, {
-        username,
-        sourceLogRevision,
-        deriveVersion,
-        ...(eventSetId === undefined ? {} : { eventSetId }),
-      });
-    }
+      const contentHash = await mirrorContentHash(mirror);
+      // R2: the revision moved but THIS employee's content did not (their mirror
+      // is byte-for-byte what we would write, apart from the stamps). Keep the
+      // file and restamp only the index entry. Requires the same derivation
+      // version (a version bump must reach the file) and a scan to restamp with.
+      if (
+        contentHash !== undefined &&
+        scan !== undefined &&
+        existing?.contentHash === contentHash &&
+        existingRevision !== null &&
+        existing.deriveVersion === deriveVersion
+      ) {
+        return [fileName, { username, mirror, plan: { kind: "restamp", contentHash } }];
+      }
+      return [fileName, { username, mirror, plan: { kind: "write", contentHash } }];
+    })
   );
+  const plans = new Map(planned);
+  const writes = [...plans.entries()].filter(([, p]) => p.plan.kind === "write");
+
+  // Phase 1 of the index write: mark the projection in flight BEFORE any mirror
+  // is touched, carrying the revisions as they stand right now. A crash between
+  // here and phase 2 therefore leaves an index that over-states rather than
+  // under-states what is on disk — see EmployeeMirrorIndexFile.pendingRevision
+  // for why that direction is the safe one. Best-effort: a failure here must
+  // not stop the mirrors themselves being written, and only costs the next
+  // reader its fast path. Skipped when no mirror file will be touched (R2:
+  // restamp-only runs): there is nothing the index could under-state.
+  if (writes.length > 0) {
+    await writeMirrorIndex(
+      employeesDir,
+      monthFolderName,
+      existingMirrors,
+      sourceLogRevision,
+      deriveVersion
+    );
+  }
+
+  /** File name -> the revision that will be on disk when this run finishes. */
+  const finalRevisions = new Map<string, ExistingMirror>(existingMirrors);
+
+  await mapWithConcurrency(writes, MIRROR_WRITE_CONCURRENCY, async ([fileName, { mirror }]) => {
+    await safeWriteJson<EmployeeSamplesFile>(employeesDir, fileName, mirror);
+  });
+  // Recorded in plan order (deterministic `_index.json` key order), after the writes.
+  for (const [fileName, { username, plan }] of plans) {
+    if (plan.kind === "keep") continue;
+    if (plan.kind === "restamp" && scan === undefined) continue;
+    finalRevisions.set(fileName, {
+      username,
+      sourceLogRevision,
+      deriveVersion,
+      ...(eventSetId === undefined ? {} : { eventSetId }),
+      ...(plan.contentHash !== undefined && scan !== undefined ? { contentHash: plan.contentHash, scan } : {}),
+    });
+  }
 
   // Phase 2: commit the index. `pendingRevision` back to null, revisions now
   // describing what this run actually left on disk (skipped files keep their
@@ -531,6 +635,9 @@ async function writeMirrorIndex(
             sourceLogRevision: mirror.sourceLogRevision,
             deriveVersion: mirror.deriveVersion,
             ...(mirror.eventSetId === undefined ? {} : { eventSetId: mirror.eventSetId }),
+            ...(mirror.contentHash === undefined || mirror.scan === undefined
+              ? {}
+              : { contentHash: mirror.contentHash, scan: mirror.scan }),
           },
         ])
       ),
@@ -597,7 +704,13 @@ async function staleMirrorPendingCount(
   try {
     const sample = await loadSampleMaster(directoryHandle, monthFolderName);
     if (!sample || sample.rows.length === 0) return 0;
-    const current = await loadOrDeriveDistributionCurrent(directoryHandle, monthFolderName, sample.rows);
+    // STRICT read: `null` only for a month whose event log is readable and holds no
+    // events. An unreadable event store THROWS, so it reaches the catch below (mirror
+    // count, or propagate and refuse the delete) instead of reading as zero.
+    // `strictSegments`: a segment that is listed but cannot be read must not read as "no events in it".
+    const current = await loadOrDeriveDistributionCurrentStrictForRead(directoryHandle, monthFolderName, sample.rows, {
+      strictSegments: true,
+    });
     if (!current) return 0;
     return current.entries.filter(
       (e) =>
@@ -621,6 +734,10 @@ async function staleMirrorPendingCount(
  * independent of the projection stamp, which lags the durable events whenever the
  * background projection job is pending, failed, or lost with a closed tab.
  *
+ * R2: a mirror whose content did not change in a later write keeps its old file
+ * (and old stamps); the `_index.json` entry, restamped by that write, vouches for
+ * it instead — see the R2 branch below.
+ *
  * Not trusted: a mirror stamped with an OLDER `deriveVersion` than this build's
  * (C3: v4 carried calendar-day quotas; serving it would skip the refold), and a
  * mirror with no `scan` (older build, or derived from a snapshot
@@ -631,13 +748,32 @@ async function staleMirrorPendingCount(
 export async function isMirrorTrustedForEvents(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
-  mirror: Pick<EmployeeSamplesFile, "sourceLogRevision" | "scan" | "deriveVersion">,
+  mirror: Pick<EmployeeSamplesFile, "sourceLogRevision" | "scan" | "deriveVersion"> &
+    Partial<Pick<EmployeeSamplesFile, "username" | "monthFolderName" | "quota" | "entries">>,
   stampRevision: number
 ): Promise<boolean> {
   if ((mirror.deriveVersion ?? 0) < DERIVE_VERSION) return false;
-  if (mirror.sourceLogRevision < stampRevision) return false;
-  if (!mirror.scan) return false;
-  return eventStoreMatchesScan(directoryHandle, monthFolderName, mirror.scan);
+  // Direct path: the file's own stamp is current.
+  if (mirror.sourceLogRevision >= stampRevision && mirror.scan) {
+    return eventStoreMatchesScan(directoryHandle, monthFolderName, mirror.scan);
+  }
+  // R2 path: a write that did not change this employee's content left the file
+  // alone and restamped only its `_index.json` entry. Trust it only when ALL of:
+  // the index is settled (no projection mid-flight), its entry's derivation
+  // version and revision are current, the FILE's content hash is exactly what
+  // the entry vouches for, and the entry's scan still matches the event store.
+  // Any mismatch is "not trusted": the caller folds.
+  if (mirror.username === undefined || mirror.entries === undefined || mirror.monthFolderName === undefined) return false;
+  const index = await readEmployeeMirrorIndex(directoryHandle, monthFolderName);
+  if (!index || index.pendingRevision !== null) return false;
+  const entry = index.mirrors[employeeSamplesFileName(mirror.username)];
+  if (!entry || entry.contentHash === undefined || entry.scan === undefined) return false;
+  if ((entry.deriveVersion ?? 0) < DERIVE_VERSION) return false;
+  if (entry.sourceLogRevision === null || entry.sourceLogRevision < stampRevision) return false;
+  if ((await mirrorContentHash(mirror as Pick<EmployeeSamplesFile, "username" | "monthFolderName" | "quota" | "entries">)) !== entry.contentHash) {
+    return false;
+  }
+  return eventStoreMatchesScan(directoryHandle, monthFolderName, entry.scan);
 }
 
 export type UserWorkspaceFootprint = {
@@ -661,13 +797,13 @@ export type UserWorkspaceFootprint = {
  * Closed months are skipped for `activeAssignments`: they are frozen history,
  * so a deletion cannot affect anything there.
  *
- * Reads the small per-employee sample mirror (`{username}.samples.json`,
- * kept in sync by `syncSampleMirrors`) rather than the full
- * `distribution.current.json` per month. NB: mirrors sync on
- * `saveDistributionCurrent`, so this can miss an assignment made moments ago
- * in another tab/machine — acceptable for a pre-deletion advisory check;
- * deriving from the full event log per month would be O(months × log size)
- * and is not worth the cost here.
+ * Reads the small per-employee sample mirror (`{username}.samples.json`)
+ * and trusts it only when `isMirrorTrustedForEvents` proves it was derived from
+ * exactly the events now on disk. A mirror that is ABSENT, untrusted, or whose
+ * background persist is still pending is never read as "no work": the guard
+ * folds the event log instead (mirrors are written off the click path since R1,
+ * so an absent mirror is normal for a first-time assignee moments after the
+ * click and must not read as zero).
  *
  * Revision cross-check (P6, 2026-08): a mirror is a rewritten-whole
  * projection stamped with the compat-log `revision` it was derived from
@@ -721,8 +857,20 @@ export async function getUserWorkspaceFootprint(
       // lag the events); it must also be for the CURRENT event set. Otherwise
       // take the authoritative fold — the safe direction for a guard whose wrong
       // answer is irreversible.
+      // A mirror that does not exist is "I could not look", never "zero": the
+      // background persist that would have written it (R1) may have failed, may
+      // never have run (tab closed), or may still be in its window on another
+      // machine, and this is the one caller whose wrong answer is irreversible.
+      // Likewise while THIS tab has a persist or projection bump in flight the
+      // on-disk mirrors lag the durable events. All of those fold from the events;
+      // deletion is rare, so O(months) folds is the right price.
+      const writesInFlight =
+        isDistributionPersistPending(directoryHandle, monthFolderName) ||
+        isDistributionProjectionPending(directoryHandle, monthFolderName);
       const mirrorIsStale =
-        mirror !== null && !(await isMirrorTrustedForEvents(directoryHandle, monthFolderName, mirror, stamp.revision));
+        mirror === null ||
+        writesInFlight ||
+        !(await isMirrorTrustedForEvents(directoryHandle, monthFolderName, mirror, stamp.revision));
 
       let pendingCount: number;
       if (mirrorIsStale) {
