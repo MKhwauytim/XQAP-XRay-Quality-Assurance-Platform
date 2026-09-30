@@ -14,7 +14,7 @@ import { resolveInitialSubTab } from "../../../../app/subTabSelection";
 import { useSubTabSelection } from "../../../../app/useSubTabSelection";
 import { readSession } from "../../../../auth/authSession";
 import { usePermissions } from "../../../../auth/usePermissions";
-import { logRejection } from "../../../../data/storage/errorLogger";
+import { logError, logRejection } from "../../../../data/storage/errorLogger";
 import {
   readAuthActivityLog,
   type AuthActivityLogEntry,
@@ -57,6 +57,7 @@ import {
 } from "./PermissionSections";
 import { ActionsSection, ActivitySection } from "./AuditSections";
 import { PerformanceSection } from "./PerformanceSection";
+import { exportAuditLogs } from "./auditLogExport";
 import {
   UsersSection,
 } from "./UsersSection";
@@ -159,6 +160,8 @@ export default function UserManagementTab() {
   const [actionEntries, setActionEntries] = useState<WorkspaceActionEntry[]>([]);
   const [isActionsLoading, setIsActionsLoading] = useState(false);
   const [auditView, setAuditView] = useState<AuditView>("activity");
+  const [isAuditExporting, setIsAuditExporting] = useState(false);
+  const [auditExportNotice, setAuditExportNotice] = useState<{ kind: "empty" | "error"; text: string } | null>(null);
 
   const session = readSession();
   const { canMutate } = usePermissions();
@@ -183,6 +186,21 @@ export default function UserManagementTab() {
   const actionsLoadedForRef = useRef<DirectoryHandleLike | null | undefined>(undefined);
 
   const canEdit = canMutate("manage-users");
+  async function handleAuditExport() {
+    if (!directoryHandle || isAuditExporting) return;
+    setAuditExportNotice(null);
+    setIsAuditExporting(true);
+    try {
+      const { activityCount, actionCount } = await exportAuditLogs(directoryHandle);
+      if (activityCount + actionCount === 0) setAuditExportNotice({ kind: "empty", text: getLabels().um_audit_export_empty });
+    } catch (err) {
+      logError("userManagement:exportAuditLogs", err);
+      setAuditExportNotice({ kind: "error", text: getLabels().um_audit_export_failed });
+    } finally {
+      setIsAuditExporting(false);
+    }
+  }
+
   const canEditPermissions = canMutate("edit-permissions");
   const canResetPasswords = canMutate("reset-passwords");
 
@@ -757,7 +775,20 @@ export default function UserManagementTab() {
               >
                 {getLabels().um_actions_tab_label}
               </button>
+              {directoryHandle && (
+                <button
+                  type="button"
+                  className="um-add-btn"
+                  onClick={() => { void handleAuditExport(); }}
+                  disabled={isAuditExporting}
+                >
+                  {isAuditExporting ? getLabels().um_audit_exporting : getLabels().um_audit_export_btn}
+                </button>
+              )}
             </div>
+            {auditExportNotice && (
+              <p role={auditExportNotice.kind === "error" ? "alert" : "status"}>{auditExportNotice.text}</p>
+            )}
           </div>
           {auditView === "activity" ? (
             <ActivitySection
