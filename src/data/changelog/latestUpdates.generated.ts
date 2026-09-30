@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v150.44",
+    "date": "2026-09-30",
+    "bucket": "feature",
+    "scope": "user-management",
+    "title": "export all activity and action logs to Excel"
+  },
+  {
     "version": "v150.43",
     "date": "2026-09-29",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "answers",
     "title": "memoize the frozen legacy answers seed per session (never an absent read)"
-  },
-  {
-    "version": "v150.33",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "cache month-lock verdict for 5 min, invalidated by the sync probe"
   }
 ];
