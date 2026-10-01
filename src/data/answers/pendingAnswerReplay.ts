@@ -68,9 +68,37 @@ function logPendingReplayWriteErrorOnce(month: string, xrayImageId: string, erro
   logError("answers:pending-replay-write", error);
 }
 
-/** @internal test-only — clears the per-session write-error log dedupe set. */
+/**
+ * Pending items already found on disk, keyed by user + month + item + the
+ * pending save's `lastSavedAt`, valued with the on-disk copy that was seen.
+ *
+ * `markSynced` is best-effort and swallows every IndexedDB failure, so a PC whose
+ * browser storage is broken keeps the record pending forever. Without this, every
+ * 30 s pass re-read the month, found the answer on disk again and re-announced
+ * it, which reloaded every mounted view every 30 s for as long as the page lived.
+ * A remembered item is counted and its confirmation retried (storage may recover),
+ * but it is neither re-read nor re-announced: the answer is on disk, and the disk
+ * only moves forward. A newer save of the same item has a new `lastSavedAt`, so it
+ * is a different key and is handled normally.
+ */
+const seenOnDisk = new Map<string, ItemAnswer>();
+
+function seenOnDiskKey(username: string, month: string, item: ItemAnswer): string {
+  return `${username}::${month}::${item.xrayImageId}::${item.lastSavedAt}`;
+}
+
+/** Forget remembered items whose pending record is gone (confirmed, or superseded). */
+function pruneSeenOnDisk(username: string, pendingKeys: ReadonlySet<string>): void {
+  const prefix = `${username}::`;
+  for (const key of seenOnDisk.keys()) {
+    if (key.startsWith(prefix) && !pendingKeys.has(key)) seenOnDisk.delete(key);
+  }
+}
+
+/** @internal test-only — clears the per-session write-error log dedupe set and the seen-on-disk memo. */
 export function __resetPendingReplayLogDedupeForTests(): void {
   loggedPendingReplayWriteErrors.clear();
+  seenOnDisk.clear();
 }
 
 const DEFAULT_DEPS: PendingReplayDeps = {
@@ -215,8 +243,28 @@ async function runReplayPendingAnswers(
     else byMonth.set(month, [item]);
   }
 
+  const pendingKeys = new Set<string>();
+  for (const [month, monthItems] of byMonth) {
+    for (const item of monthItems) pendingKeys.add(seenOnDiskKey(username, month, item));
+  }
+  pruneSeenOnDisk(username, pendingKeys);
+  // Announced only for what is NEW this pass: a write that landed, or an item first
+  // seen on disk. A remembered item must never re-announce (see `seenOnDisk`).
+  let announce = false;
+
   for (const month of [...byMonth.keys()].sort((a, b) => a.localeCompare(b))) {
-    const items = byMonth.get(month)!;
+    const allItems = byMonth.get(month)!;
+    const items: ItemAnswer[] = [];
+    for (const item of allItems) {
+      const seen = seenOnDisk.get(seenOnDiskKey(username, month, item));
+      if (!seen) {
+        items.push(item);
+        continue;
+      }
+      await deps.markSynced(month, username, seen); // still retried: storage may have recovered
+      summary.alreadyOnDisk += 1;
+    }
+    if (items.length === 0) continue;
 
     if (!(await sampleMainDirExists(directoryHandle, month))) {
       summary.cannotLand += items.length;
@@ -242,6 +290,8 @@ async function runReplayPendingAnswers(
         // made after the failed save.
         await deps.markSynced(month, username, current);
         summary.alreadyOnDisk += 1;
+        seenOnDisk.set(seenOnDiskKey(username, month, item), current);
+        announce = true;
         continue;
       }
       // CRITICAL 1 (fix round 1): `upsertItemAnswer` THROWS (it does not
@@ -259,6 +309,9 @@ async function runReplayPendingAnswers(
         if (result.ok) {
           clearAnswerDraft(answerDraftKey(month, item.xrayImageId, username));
           summary.replayed += 1;
+          // Already announced by `replayed`; if its pending record then cannot be
+          // cleared, the next pass must not announce it a second time.
+          seenOnDisk.set(seenOnDiskKey(username, month, item), item);
         } else {
           summary.failed += 1;
         }
@@ -274,7 +327,7 @@ async function runReplayPendingAnswers(
     }
   }
 
-  if (summary.replayed + summary.alreadyOnDisk > 0) notifyLocalDataChange(["answers"]);
+  if (summary.replayed > 0 || announce) notifyLocalDataChange(["answers"]);
   return summary;
 }
 
