@@ -147,6 +147,50 @@ describe("replayPendingAnswers (A1)", () => {
     expect(markSynced).toHaveBeenCalledWith(MONTH, "emp1", expect.objectContaining({ xrayImageId: "XR-1" }));
   });
 
+  // A PC whose browser storage cannot record the confirmation (`markSynced` is
+  // best-effort and swallows every IndexedDB failure) keeps the record pending
+  // forever. Every 30 s tick then finds the answer already on disk; announcing
+  // it each time made every mounted view reload every 30 s, indefinitely.
+  it("announces an answer found already on disk once, even when its pending record can never be cleared", async () => {
+    const root = createMemoryDirectory("root");
+    expect((await upsertItemAnswer(root, MONTH, "emp1", answer("XR-1", "2026-09-28T10:00:00.000Z"))).ok).toBe(true);
+    __resetAnswerEventsCacheForTests();
+    const markSynced = vi.fn(async () => {}); // resolves, but the record never leaves the queue
+    const deps = {
+      loadPending: async () => [{ month: MONTH, item: answer("XR-1", "2026-09-28T09:00:00.000Z") }],
+      markSynced,
+    };
+    const seen: DataRefreshDetail[] = [];
+    const stop = subscribeToDataChange(["answers"], (detail) => { seen.push(detail); });
+
+    const first = await replayPendingAnswers(root, "emp1", deps);
+    const second = await replayPendingAnswers(root, "emp1", deps);
+    const third = await replayPendingAnswers(root, "emp1", deps);
+    stop();
+
+    expect([first, second, third].map((s) => s.alreadyOnDisk)).toEqual([1, 1, 1]);
+    expect(seen).toHaveLength(1);
+    expect(markSynced).toHaveBeenCalledTimes(3); // the confirmation is still retried every pass
+  });
+
+  it("announces again when the same item is re-queued with a newer save", async () => {
+    const root = createMemoryDirectory("root");
+    expect((await upsertItemAnswer(root, MONTH, "emp1", answer("XR-1", "2026-09-28T10:00:00.000Z"))).ok).toBe(true);
+    __resetAnswerEventsCacheForTests();
+    const seen: DataRefreshDetail[] = [];
+    const stop = subscribeToDataChange(["answers"], (detail) => { seen.push(detail); });
+    const run = (lastSavedAt: string) => replayPendingAnswers(root, "emp1", {
+      loadPending: async () => [{ month: MONTH, item: answer("XR-1", lastSavedAt) }],
+      markSynced: vi.fn(async () => {}),
+    });
+
+    await run("2026-09-28T09:00:00.000Z");
+    await run("2026-09-28T09:30:00.000Z");
+    stop();
+
+    expect(seen).toHaveLength(2);
+  });
+
   it("does nothing and announces nothing when the queue is empty", async () => {
     const root = createMemoryDirectory("root");
     const seen: DataRefreshDetail[] = [];
