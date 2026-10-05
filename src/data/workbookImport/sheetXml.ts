@@ -18,7 +18,8 @@ export function parseSharedStrings(xml: string): string[] {
 
 export function parseSheetRows(xml: string, shared: string[]): Array<Record<string, string>> {
   const rows: Array<Record<string, string>> = [];
-  for (const rm of xml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
+  for (const rm of xml.matchAll(/<row\b[^>]*?(?:\/>|>([\s\S]*?)<\/row>)/g)) {
+    if (rm[1] === undefined) continue; // self-closing empty row: skip
     const rec: Record<string, string> = {};
     for (const cm of rm[1].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
       const attrs = cm[1], inner = cm[2] ?? "";
