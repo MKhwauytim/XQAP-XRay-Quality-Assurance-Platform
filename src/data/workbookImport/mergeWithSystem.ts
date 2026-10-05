@@ -44,13 +44,21 @@ export function mergeCompletedRows(
     entries.push({ row: w.row, month: w.month });
   }
 
+  // Every id already present is "taken"; a later repeat gets `@month`, then
+  // `@month#2`, `@month#3`... until unique, so a suffixed id can never collide.
+  const taken = new Set(entries.map((e) => e.row.xrayImageId));
   const seen = new Set<string>();
   const rows = entries.map(({ row, month }) => {
     if (!seen.has(row.xrayImageId)) {
       seen.add(row.xrayImageId);
       return row;
     }
-    return { ...row, xrayImageId: `${row.xrayImageId}@${month}` };
+    const base = `${row.xrayImageId}@${month}`;
+    let id = base;
+    for (let n = 2; taken.has(id); n++) id = `${base}#${n}`;
+    taken.add(id);
+    seen.add(id);
+    return { ...row, xrayImageId: id };
   });
 
   return {
@@ -65,15 +73,23 @@ export function mergeCompletedRows(
   };
 }
 
-/** `base` supplies config, template and stageMappings; rows replace the per-month sources. */
+/**
+ * Only the workspace-wide fields (config, template, stageMappings) come from
+ * `base`. Built field-by-field, never spread, so a per-month artefact
+ * (processingSummary, sourceRevisions, distributionEvents, replacementReasons,
+ * or any future one) cannot leak into an all-months report.
+ */
 export function buildComprehensiveInput(rows: ExecutiveReportRow[], base: ExecutiveReportInput): ExecutiveReportInput {
   return {
-    ...base,
     monthFolderName: COMPREHENSIVE_MONTH_LABEL,
     populationRows: [],
     sample: null,
     distribution: null,
     employeeFiles: [],
+    template: base.template,
+    config: base.config,
+    stageMappings: base.stageMappings,
+    processingSummary: null,
     rowsOverride: rows,
   };
 }

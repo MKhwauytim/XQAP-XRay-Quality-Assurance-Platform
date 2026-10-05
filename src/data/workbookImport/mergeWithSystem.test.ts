@@ -55,7 +55,33 @@ describe("mergeCompletedRows", () => {
   });
 });
 
+describe("id suffix uniqueness", () => {
+  it("A, A@m, A (same month) yields three distinct ids, first plain", () => {
+    const { rows } = mergeCompletedRows([], [wb("A", "m"), wb("A@m", "m"), wb("A", "m")]);
+    const ids = rows.map((r) => r.xrayImageId);
+    expect(new Set(ids).size).toBe(3);
+    expect(ids[0]).toBe("A");
+    expect(ids[1]).toBe("A@m");
+  });
+});
+
 describe("buildComprehensiveInput", () => {
+  it("does not leak per-month artefacts from base", () => {
+    const base = {
+      monthFolderName: "x", populationRows: [], sample: null, distribution: null, employeeFiles: [],
+      template: { id: "t" }, config: { c: 1 }, stageMappings: { s: 1 },
+      processingSummary: { p: 1 }, sourceRevisions: { "a.json": 3 },
+      distributionEvents: [{ e: 1 }], replacementReasons: { A: "r" },
+    } as unknown as ExecutiveReportInput;
+    const out = buildComprehensiveInput([], base);
+    expect(out.processingSummary ?? null).toBeNull();
+    expect(out.sourceRevisions).toBeUndefined();
+    expect(out.distributionEvents).toBeUndefined();
+    expect(out.replacementReasons).toBeUndefined();
+    expect(out.config).toBe(base.config);
+    expect(out.template).toBe(base.template);
+    expect(out.stageMappings).toBe(base.stageMappings);
+  });
   it("overrides rows and blanks the per-month sources", () => {
     const base = { monthFolderName: "x", populationRows: [{}], sample: {}, distribution: {}, employeeFiles: [{}], config: { c: 1 }, template: null, stageMappings: [] } as unknown as ExecutiveReportInput;
     const rows = [sys("A")];
