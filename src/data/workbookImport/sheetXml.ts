@@ -1,7 +1,11 @@
 const ENT: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+const codePoint = (g: string, orig: string) => {
+  const n = g[1] === "x" ? parseInt(g.slice(2), 16) : parseInt(g.slice(1), 10);
+  return Number.isInteger(n) && n >= 0 && n <= 0x10ffff ? String.fromCodePoint(n) : orig;
+};
 const decode = (s: string) =>
   s.replace(/&(#x?[0-9a-fA-F]+|[a-z]+);/g, (m, g: string) =>
-    g[0] === "#" ? String.fromCodePoint(g[1] === "x" ? parseInt(g.slice(2), 16) : parseInt(g.slice(1), 10)) : (ENT[g] ?? m));
+    g[0] === "#" ? codePoint(g, m) : (ENT[g] ?? m));
 const textOf = (x: string) => {
   let o = ""; for (const m of x.matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)) o += m[1]; return decode(o);
 };
@@ -25,7 +29,7 @@ export function parseSheetRows(xml: string, shared: string[]): Array<Record<stri
       if (t === "inlineStr") val = textOf(inner);
       else {
         const v = /<v>([\s\S]*?)<\/v>/.exec(inner)?.[1];
-        if (v !== undefined) val = t === "s" ? (shared[Number(v)] ?? "") : decode(v);
+        if (v !== undefined) val = t === "s" ? shared[Number(v)] : decode(v);
       }
       if (val !== undefined && val !== "") rec[col] = val;
     }

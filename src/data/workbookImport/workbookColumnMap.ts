@@ -17,6 +17,7 @@ export const newMappingReport = (): MappingReport => ({
 });
 
 const COMPLETED = "مكتمل";
+const INVALID_ID = "معرف غير صحيح";
 type Result = "سليمة" | "اشتباه";
 type Level = "عالي" | "متوسط" | "منخفض";
 
@@ -53,9 +54,10 @@ export function mapSampleRow(c: Record<string, string>, sheet: string, report: M
   const expert = result(report, "صحة النتيجة", c["صحة النتيجة"]);
   const imageResult = classifyImageResult(l1, l2);
   const img = (c["هل يوجد صورة؟"] ?? "").trim();
-  const imageAvailable = img === "نعم" ? true : img === "" ? null : false;
-  if (img !== "" && img !== "نعم" && img !== "لا" && img !== "معرف غير صحيح") note(report, "هل يوجد صورة؟", img);
+  const imageAvailable = img === "نعم" ? true : img === "لا" || img === INVALID_ID ? false : null;
+  if (img !== "" && imageAvailable === null) note(report, "هل يوجد صورة؟", img);
   const mark = (c["هل يوجد تحديد؟"] ?? "").trim();
+  if (mark !== "" && mark !== "نعم" && mark !== "لا") note(report, "هل يوجد تحديد؟", mark);
   const row: ExecutiveReportRow = {
     xrayImageId: id,
     portCode: text(c["رمز المنفذ"]), portName: text(c["اسم المنفذ"]), portType: text(c["نوع المنفذ"]),
@@ -64,7 +66,7 @@ export function mapSampleRow(c: Record<string, string>, sheet: string, report: M
     levelOneResult: l1, levelTwoResult: l2, imageResult,
     selectedInSample: true, assignedTo: null, distributionStatus: null,
     expertResult: expert, imageAvailable,
-    noImageReason: imageAvailable === false ? (img === "لا" ? "لا توجد صورة" : img) : null,
+    noImageReason: img === INVALID_ID ? img : null,
     hasMarking: mark === "نعم" ? true : mark === "لا" ? false : null,
     imageQuality: level(report, "مستوى جودة الصورة", c["مستوى جودة الصورة"]),
     lowQualityReason: text(c["أسباب انخفاض الجودة"]),

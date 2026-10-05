@@ -37,4 +37,26 @@ describe("mapSampleRow", () => {
     expect(m.row.imageAvailable).toBe(false);
     expect(m.row.noImageReason).toBe("معرف غير صحيح");
   });
+  it("unknown image value is null and counted once", () => {
+    const r = newMappingReport();
+    const m = mapSampleRow({ ...base, "هل يوجد صورة؟": "ربما" }, "S", r)!;
+    expect(m.row.imageAvailable).toBeNull();
+    expect(r.unmappedValues["هل يوجد صورة؟"]["ربما"]).toBe(1);
+  });
+  it("لا gives unavailable with null reason", () => {
+    const m = mapSampleRow({ ...base, "هل يوجد صورة؟": "لا" }, "S", newMappingReport())!;
+    expect(m.row.imageAvailable).toBe(false);
+    expect(m.row.noImageReason).toBeNull();
+  });
+  it("unknown marking value counted", () => {
+    const r = newMappingReport();
+    const m = mapSampleRow({ ...base, "هل يوجد تحديد؟": "ربما" }, "S", r)!;
+    expect(m.row.hasMarking).toBeNull();
+    expect(r.unmappedValues["هل يوجد تحديد؟"]["ربما"]).toBe(1);
+  });
+  it("month-end serials", () => {
+    const mo = (v: string) => mapSampleRow({ ...base, "الشهر": v }, "S", newMappingReport())!.month;
+    expect(mo("46053")).toBe("1-january-2026");
+    expect(mo("46054")).toBe("2-february-2026");
+  });
 });
