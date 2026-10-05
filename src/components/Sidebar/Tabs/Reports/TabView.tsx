@@ -1217,10 +1217,12 @@ export default function ReportsTab() {
     resolveInitialSubTab<string>(
       TAB_ID,
       KNOWN_RAIL_SUB_TABS,
-      !canAccessTab("reports/reports")
-        && !canAccessTab("reports/kpi")
-        && canAccessTab("reports/report-designer")
-        ? "report-designer"
+      !canAccessTab("reports/reports") && !canAccessTab("reports/kpi")
+        ? canAccessTab("reports/report-designer")
+          ? "report-designer"
+          : canAccessTab("reports/comprehensive-executive")
+            ? "comprehensive-executive"
+            : "reports"
         : "reports"
     )
   );
