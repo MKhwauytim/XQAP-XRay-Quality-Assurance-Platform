@@ -5,6 +5,20 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v150.46",
+    "date": "2026-10-05",
+    "bucket": "fix",
+    "scope": "answers",
+    "title": "fold a seedless answer chain with an empty legacy baseline; isolate one assignee's unreadable answers in the oversight queue"
+  },
+  {
+    "version": "v150.45",
+    "date": "2026-10-01",
+    "bucket": "fix",
+    "scope": "answers",
+    "title": "a pending answer already on disk is announced once, not every 30 s"
+  },
+  {
     "version": "v150.44",
     "date": "2026-09-30",
     "bucket": "feature",
@@ -59,19 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "answers",
     "title": "a plain self-save appends without re-reading the whole month (with head probe)"
-  },
-  {
-    "version": "v150.35",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "a colleague's segment change no longer forgets every sealed confirmation"
-  },
-  {
-    "version": "v150.34",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "memoize the frozen legacy answers seed per session (never an absent read)"
   }
 ];
