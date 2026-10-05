@@ -2,6 +2,7 @@
 // Driven from the ReportModel where data-bearing; icons via ui/icons.ts (no emoji).
 
 import { ZATCA_LOGO_URL } from "../../../../branding/organization";
+import { getLabels } from "../../../labels/labelsStore";
 import type { ReportModel } from "../model/reportModel";
 import { esc, fmtNum } from "../primitives";
 import { icon } from "../ui/icons";
@@ -20,6 +21,16 @@ const ZATCA_LOGO = `<span class="zatca-logo" style="display:inline-flex;align-it
     <text x="28" y="22" text-anchor="middle" font-family="Somar,Arial" font-size="11" font-weight="700" fill="#f4b400">زكاة</text>
   </svg>
 </span>`;
+
+/** Population total is only a real figure for the full scope. */
+function populationLine(model: ReportModel): string {
+  return model.scope === "full" ? `<br>إجمالي المجتمع: ${fmtNum(model.population.total)} صورة` : "";
+}
+
+/** Completed-only reports state their scope on the cover. */
+function scopeNote(model: ReportModel): string {
+  return model.scope === "completed-only" ? `<p class="lead">${esc(getLabels().ce_scope_note)}</p>` : "";
+}
 
 export function buildCover(model: ReportModel, issueDate: string): string {
   return `<section class="page cover" id="page-cover" data-title="الغلاف">
@@ -40,7 +51,7 @@ export function buildCover(model: ReportModel, issueDate: string): string {
       <h1>التقرير التنفيذي لضمان جودة الأشعة</h1>
       <div class="subtitle">دقة قرارات المستوى الأول والثاني — تحليل أمني للجودة</div>
       <div class="rule"></div>
-      <p class="lead">فترة التقرير: ${esc(issueDate)}<br>مجتمع الصور محل الدراسة: ${esc(model.summary.periodId)}<br>إجمالي المجتمع: ${fmtNum(model.population.total)} صورة</p>
+      <p class="lead">فترة التقرير: ${esc(issueDate)}<br>مجتمع الصور محل الدراسة: ${esc(model.summary.periodId)}${populationLine(model)}</p>${scopeNote(model)}
       <div class="level-strip">
         <div style="--accent:var(--gold)">المستوى الأول</div>
         <div style="--accent:var(--blue)">المستوى الثاني</div>

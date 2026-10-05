@@ -3,9 +3,9 @@ import { DEFAULT_EXEC_CONFIG } from "../reporting/executiveReportTypes";
 import type { ExecutiveReportInput } from "../reporting/executiveReportTypes";
 import { buildReportModel } from "../reporting/executive/model/reportModel";
 import { buildExecutiveReport } from "../reporting/executive";
-import { buildExecutiveDeckV2 } from "../reporting/executive/deck2";
-import { buildExecutiveDeckV3 } from "../reporting/executive/deck3";
-import { buildExecutiveWorkbookObject } from "../reporting/executive/workbook/workbook";
+import { SHEET_NAMES, buildExecutiveWorkbookObject } from "../reporting/executive/workbook/workbook";
+import { getLabels } from "../labels/labelsStore";
+import * as XLSX from "xlsx";
 import { makeProcessingSummary, makeSampleMaster } from "../reporting/reportTestFixtures";
 import { COMPREHENSIVE_MONTH_LABEL, buildComprehensiveInput, mergeCompletedRows } from "./mergeWithSystem";
 import { mapSampleRow, newMappingReport } from "./workbookColumnMap";
@@ -78,21 +78,40 @@ describe.each(bases)("real builders on a combined input (%s)", (_name, base) => 
     for (const [k, v] of Object.entries(kpis)) if (typeof v === "number") expect(Number.isFinite(v), k).toBe(true);
   });
 
-  it("buildExecutiveReport (document)", async () => {
+  it("buildExecutiveReport (document) omits population/coverage sections and states its scope", async () => {
     const html = await buildExecutiveReport(input, {});
     clean(html);
-  });
-
-  it("buildExecutiveDeckV2", async () => {
-    clean(await buildExecutiveDeckV2(input, {}));
-  });
-
-  it("buildExecutiveDeckV3", async () => {
-    clean(await buildExecutiveDeckV3(input, {}));
+    expect(buildReportModel(input, {}).scope).toBe("completed-only");
+    for (const absent of [
+      "مجتمع الصور في لمحة", "المجتمع حسب المنفذ", "المجتمع حسب المستوى", "العينة والإنجاز",
+      "جودة البيانات والاستبعادات", "التغطية التشغيلية", "المساءلة التشغيلية", "إجمالي المجتمع",
+      "الجزء الأول: النطاق والمنهجية", "الجزء السادس: التغطية والمساءلة التشغيلية", "page-p1", "page-p6", "page-exclusions",
+    ]) expect(html, absent).not.toContain(absent);
+    for (const present of ["الدقة والكشف", "تحليل أنواع الأخطاء", "المنهجية والملاحق", getLabels().ce_scope_note]) {
+      expect(html, present).toContain(present);
+    }
   });
 
   it("buildExecutiveWorkbookObject", async () => {
     const wb = await buildExecutiveWorkbookObject(input, {});
     expect(wb.SheetNames.length).toBeGreaterThan(0);
+    for (const absent of [SHEET_NAMES.coverage, SHEET_NAMES.accountability, SHEET_NAMES.rawRisk, SHEET_NAMES.rawBi, SHEET_NAMES.exclusions]) {
+      expect(wb.SheetNames, absent).not.toContain(absent);
+    }
+    const flat = (name: string) => XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[name], { header: 1 }).flat().map(String);
+    const kpi = flat(SHEET_NAMES.kpi);
+    for (const absent of ["إجمالي المجتمع", "إجمالي العينة", "تغطية المجتمع%", "إنجاز العينة%", "متبقية"]) expect(kpi).not.toContain(absent);
+    expect(kpi).toContain(getLabels().ce_completed_samples);
+    expect(kpi).toContain("دقة المستوى الأول%");
+    for (const sheet of [SHEET_NAMES.ports, SHEET_NAMES.stages]) {
+      const cells = flat(sheet);
+      for (const absent of ["المجتمع", "العينة", "التغطية%", "إنجاز%"]) expect(cells, `${sheet}:${absent}`).not.toContain(absent);
+      expect(cells).toContain(getLabels().ce_completed_samples);
+    }
   });
 });
+
+// Decks are intentionally NOT exercised for completed-only scope: the comprehensive page
+// offers document + workbook only, and deck v2/v3 still render population/coverage
+// framing from the completed-row count. Do not add deck cases here until they honour
+// `model.scope === "completed-only"`.

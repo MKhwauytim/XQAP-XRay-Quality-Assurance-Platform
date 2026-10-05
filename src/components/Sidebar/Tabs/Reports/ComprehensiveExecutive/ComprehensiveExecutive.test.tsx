@@ -82,7 +82,7 @@ function selectFile(): void {
 }
 
 const L = getLabels();
-const buttons = () => [L.ce_generate_doc, L.ce_generate_deck2, L.ce_generate_xlsx].map((n) => screen.getByRole("button", { name: n }));
+const buttons = () => [L.ce_generate_doc, L.ce_generate_xlsx].map((n) => screen.getByRole("button", { name: n }));
 
 beforeEach(() => {
   workers.length = 0;

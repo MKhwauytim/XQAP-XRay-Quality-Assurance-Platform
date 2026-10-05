@@ -13,9 +13,6 @@ import { loadMonthExecInput } from "../../../../../data/reporting/loadMonthExecI
 import { buildExecutiveReportRows } from "../../../../../data/reporting/executiveReportData";
 import { DEFAULT_EXEC_CONFIG } from "../../../../../data/reporting/executiveReportTypes";
 import type { ExecutiveReportInput, ExecutiveReportRow } from "../../../../../data/reporting/executiveReportTypes";
-import { loadDeckEditionPreference } from "../../../../../data/reporting/executive/deckEditionPreference";
-import type { ExecutiveDeckEdition } from "../../../../../data/reporting/executive/deckEditionPreference";
-import { loadDeckStyleChoices } from "../../../../../data/reporting/executive/deck2/styleChoices";
 import {
   COMPREHENSIVE_MONTH_LABEL,
   buildComprehensiveInput,
@@ -32,7 +29,9 @@ const REFRESH_FAMILIES: readonly DataRefreshFamily[] = ["manifest", "distributio
 
 type SystemMonths = { byMonth: Array<{ month: string; rows: ExecutiveReportRow[] }>; base: ExecutiveReportInput | null };
 type SystemState = { status: "loading" } | { status: "error" } | ({ status: "ready" } & SystemMonths);
-type ExportKind = "document" | "deck" | "xlsx";
+// v1 of the comprehensive report is document + workbook only; the decks still show
+// population framing and are a follow-up.
+type ExportKind = "document" | "xlsx";
 
 /** Names are not shown in the combined report (config.showEmployeeNames is false). */
 const NO_NAMES: Record<string, string> = {};
@@ -47,7 +46,6 @@ export default function ComprehensiveExecutive() {
   const { can, getMutationCapability, role, username } = usePermissions();
   const { state: workbook, selectFile, removeFile } = useComprehensiveWorkbook();
   const [system, setSystem] = useState<SystemState>({ status: "loading" });
-  const [deckEdition, setDeckEdition] = useState<ExecutiveDeckEdition>("v2");
   const [exporting, setExporting] = useState<ExportKind | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -90,15 +88,6 @@ export default function ComprehensiveExecutive() {
     () => subscribeToDataChange(REFRESH_FAMILIES, () => { void loadSystem(); }),
     [loadSystem]
   );
-
-  useEffect(() => {
-    if (!directoryHandle) return;
-    let cancelled = false;
-    void loadDeckEditionPreference(directoryHandle).then((pref) => {
-      if (!cancelled && pref) setDeckEdition(pref.edition);
-    });
-    return () => { cancelled = true; };
-  }, [directoryHandle]);
 
   // On a system-load error the workbook alone can still produce a report (fallback base below).
   const systemByMonth = system.status === "ready" ? system.byMonth : NO_MONTHS;
@@ -146,15 +135,6 @@ export default function ComprehensiveExecutive() {
       if (kind === "document") {
         const { openExecutiveReport } = await import("../../../../../data/reporting/executiveReport");
         await openExecutiveReport(input, NO_NAMES);
-      } else if (kind === "deck") {
-        if (deckEdition === "v3") {
-          const { openExecutiveDeckV3 } = await import("../../../../../data/reporting/executive/deck3");
-          await openExecutiveDeckV3(input, NO_NAMES);
-        } else {
-          const saved = await loadDeckStyleChoices(directoryHandle);
-          const { openExecutiveDeckV2 } = await import("../../../../../data/reporting/executive/deck2");
-          await openExecutiveDeckV2(input, NO_NAMES, saved?.choices);
-        }
       } else {
         const { buildExecutiveXlsx } = await import("../../../../../data/reporting/executiveReport");
         await buildExecutiveXlsx(input, NO_NAMES);
@@ -172,7 +152,6 @@ export default function ComprehensiveExecutive() {
   }
 
   const reading = workbook.status === "reading";
-  const deckLabel = deckEdition === "v3" ? labels.ce_generate_deck3 : labels.ce_generate_deck2;
 
   return (
     <section className="page-shell ce-page" dir="rtl" data-testid="comprehensive-executive">
@@ -221,9 +200,6 @@ export default function ComprehensiveExecutive() {
       <div className="ce-row ce-actions">
         <button type="button" className="ce-btn" disabled={exportDisabled} onClick={() => void handleExport("document")}>
           {labels.ce_generate_doc}
-        </button>
-        <button type="button" className="ce-btn" disabled={exportDisabled} onClick={() => void handleExport("deck")}>
-          {deckLabel}
         </button>
         <button type="button" className="ce-btn" disabled={exportDisabled} onClick={() => void handleExport("xlsx")}>
           {labels.ce_generate_xlsx}

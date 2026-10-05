@@ -71,7 +71,14 @@ export async function buildDocumentSlides(model: ReportModel, issueDate: string)
 
   let n = 4;
 
+  // Completed-only reports (comprehensive edition) carry no population, sample
+  // master, distribution or processing summary: Part 1, the exclusions page and
+  // Part 6 would only show figures derived from the completed-row count, so they
+  // are skipped and the TOC/page numbers below are computed over what remains.
+  const full = model.scope === "full";
+
   // ── Part 1 — Scope & Method ──
+  if (full) {
   pages.push(divider({
     id: "page-p1", dataTitle: "غلاف الجزء الأول", partLabel: "الجزء الأول", title: "النطاق والمنهجية",
     subtitle: "حجم المجتمع وتوزيعه، العينة والتغطية، وجودة البيانات.",
@@ -94,6 +101,7 @@ export async function buildDocumentSlides(model: ReportModel, issueDate: string)
   await yieldToMain();
   pages.push(buildDataQualityExclusions(model, pad(n))); tocPart1!.pages.push({ n: pad(n), t: "جودة البيانات والاستبعادات" }); n += 1;
   await yieldToMain();
+  }
 
   // ── Part 2 — Inspection Quality ──
   pages.push(divider({
@@ -171,7 +179,7 @@ export async function buildDocumentSlides(model: ReportModel, issueDate: string)
     toc: [
       { n: pad(n + 1), t: "تحليل أنواع الأخطاء" },
       { n: pad(n + 2), t: "الأولويات والإجراءات" },
-      { n: pad(n + 4), t: "المنهجية والملاحق" },
+      { n: pad(n + (full ? 4 : 3)), t: "المنهجية والملاحق" },
     ],
   }));
   await yieldToMain();
@@ -180,12 +188,15 @@ export async function buildDocumentSlides(model: ReportModel, issueDate: string)
   await yieldToMain();
   pages.push(buildPriorityActions(model, pad(n))); tocPart5!.pages.push({ n: pad(n), t: "الأولويات والإجراءات" }); n += 1;
   await yieldToMain();
-  pages.push(buildExclusions(model, pad(n))); tocPart5!.pages.push({ n: pad(n), t: "الاستبعادات" }); n += 1;
-  await yieldToMain();
+  if (full) {
+    pages.push(buildExclusions(model, pad(n))); tocPart5!.pages.push({ n: pad(n), t: "الاستبعادات" }); n += 1;
+    await yieldToMain();
+  }
   pages.push(buildAppendix(model, pad(n))); tocPart5!.pages.push({ n: pad(n), t: "المنهجية والملاحق" }); n += 1;
   await yieldToMain();
 
   // ── Part 6 — Coverage & Accountability (R4 composite + R5 row listing) ──
+  if (full) {
   pages.push(divider({
     id: "page-p6", dataTitle: "غلاف الجزء السادس", partLabel: "الجزء السادس", title: "التغطية والمساءلة التشغيلية",
     subtitle: "توزيع الإنجاز حسب المستوى/المنفذ، تقدّم الموظفين والاستبدالات، وقوائم الصفوف لكل موظف.",
@@ -211,8 +222,9 @@ export async function buildDocumentSlides(model: ReportModel, issueDate: string)
     const range = empRowsEnd > empRowsStart ? `${pad(empRowsStart)}–${pad(empRowsEnd)}` : pad(empRowsStart);
     tocPart6!.pages.push({ n: range, t: "قوائم الصفوف لكل موظف" });
   }
+  }
 
-  pages[tocSlot] = buildToc(toc);
+  pages[tocSlot] = buildToc(full ? toc : toc.filter((part) => part.pages.length > 0));
 
   return pages.join("\n");
 }

@@ -34,7 +34,17 @@ import type { StageAliasMappings } from "../../../population/stageHelpers";
  * equivalent of the master §14 `report.*.json` files. Built ONCE per generation
  * and passed to every renderer; renderers display, they never recompute.
  */
+/**
+ * What population the figures describe. "completed-only" = built from an
+ * `input.rowsOverride` (the comprehensive report: only completed samples, no
+ * population / sample master), where population totals, sample coverage and
+ * monthly-target figures do NOT exist and must not be rendered. Defined once
+ * here; every edition that suppresses those figures keys off `model.scope`.
+ */
+export type ReportScope = "full" | "completed-only";
+
 export type ReportModel = {
+  scope: ReportScope;
   summary: {
     periodId: string;
     monthFolderName: string;
@@ -305,6 +315,7 @@ export function buildReportModel(
     : null;
 
   return {
+    scope: input.rowsOverride !== undefined ? "completed-only" : "full",
     summary: {
       periodId,
       monthFolderName: input.monthFolderName,
