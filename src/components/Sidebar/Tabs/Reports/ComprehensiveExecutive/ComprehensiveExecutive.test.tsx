@@ -59,6 +59,16 @@ vi.mock("../../../../../data/audit/actionLog", () => ({ recordAction: vi.fn() })
 const storage = vi.hoisted(() => ({ listMonthFolders: vi.fn(async (_h: unknown): Promise<unknown[]> => []) }));
 vi.mock("../../../../../data/population/populationStorage", () => storage);
 
+const monthLoad = vi.hoisted(() => ({
+  loadMonthExecInput: vi.fn(async (_h: unknown, _m: string): Promise<unknown> => null),
+  buildExecutiveReportRows: vi.fn((_input: unknown): unknown[] => []),
+}));
+vi.mock("../../../../../data/reporting/loadMonthExecInput", () => ({ loadMonthExecInput: monthLoad.loadMonthExecInput }));
+vi.mock("../../../../../data/reporting/executiveReportData", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../../../data/reporting/executiveReportData")>()),
+  buildExecutiveReportRows: monthLoad.buildExecutiveReportRows,
+}));
+
 import ComprehensiveExecutive from "./index";
 
 const cells = {
@@ -91,6 +101,10 @@ beforeEach(() => {
   ws.handle = createMemoryDirectory("root");
   openers.openExecutiveReport.mockClear();
   openers.buildExecutiveXlsx.mockClear();
+  monthLoad.loadMonthExecInput.mockReset();
+  monthLoad.loadMonthExecInput.mockImplementation(async () => null);
+  monthLoad.buildExecutiveReportRows.mockReset();
+  monthLoad.buildExecutiveReportRows.mockImplementation(() => []);
   storage.listMonthFolders.mockReset();
   storage.listMonthFolders.mockImplementation(async () => []);
 });
@@ -199,5 +213,53 @@ describe("ComprehensiveExecutive page", () => {
     const [input, names] = openers.openExecutiveReport.mock.calls[0] as unknown as [{ monthFolderName: string }, Record<string, string>];
     expect(input.monthFolderName).toBe(COMPREHENSIVE_MONTH_LABEL);
     expect(names).toEqual({});
+  });
+
+  it("keeps only completed rows per month and passes only template/config/stageMappings from the system base", async () => {
+    const stageMappings = { x: "y" };
+    storage.listMonthFolders.mockImplementation(async () => [{ folderName: "5-May-2026" }]);
+    monthLoad.loadMonthExecInput.mockImplementation(async () => ({
+      populationRows: [{ big: true }], template: null, config: { marker: "cfg" }, stageMappings,
+    }));
+    const row = (id: string, o: Record<string, unknown>) => ({ xrayImageId: id, selectedInSample: true, answerStatus: "submitted", imageAvailable: true, ...o });
+    monthLoad.buildExecutiveReportRows.mockImplementation(() => [
+      row("DONE", {}), row("DRAFT", { answerStatus: "draft" }), row("UNSAMPLED", { selectedInSample: false }),
+    ]);
+    render(<ComprehensiveExecutive />);
+    await waitFor(() => expect(screen.getByTestId("ce-stat-system-completed")).toHaveTextContent("1"));
+    expect(screen.getByTestId("ce-stat-total-rows")).toHaveTextContent("1");
+    fireEvent.click(screen.getByRole("button", { name: L.ce_generate_doc }));
+    await waitFor(() => expect(openers.openExecutiveReport).toHaveBeenCalledTimes(1));
+    const [input] = openers.openExecutiveReport.mock.calls[0] as unknown as [Record<string, unknown>];
+    expect(input.populationRows).toEqual([]);
+    expect(input.config).toEqual({ marker: "cfg" });
+    expect(input.stageMappings).toBe(stageMappings);
+  });
+
+  it("coalesces refresh signals that arrive while a load is in flight into one trailing load", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    storage.listMonthFolders.mockImplementation(async () => { await gate; return []; });
+    render(<ComprehensiveExecutive />);
+    await waitFor(() => expect(storage.listMonthFolders).toHaveBeenCalledTimes(1));
+    act(() => { broadcastDataRefresh("manual"); broadcastDataRefresh("manual"); broadcastDataRefresh("manual"); });
+    expect(storage.listMonthFolders).toHaveBeenCalledTimes(1);
+    release();
+    await waitFor(() => expect(storage.listMonthFolders).toHaveBeenCalledTimes(2));
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(storage.listMonthFolders).toHaveBeenCalledTimes(2);
+  });
+
+  it("generates without a mounted workspace (no audit record) when the workbook has rows", async () => {
+    ws.handle = null;
+    render(<ComprehensiveExecutive />);
+    await screen.findByText(L.ce_empty);
+    selectFile();
+    act(() => workers[0].emit(doneMessage()));
+    await waitFor(() => expect(screen.getByTestId("ce-stat-wb-read")).toHaveTextContent("1"));
+    fireEvent.click(screen.getByRole("button", { name: L.ce_generate_xlsx }));
+    await waitFor(() => expect(openers.buildExecutiveXlsx).toHaveBeenCalledTimes(1));
+    const { recordAction } = await import("../../../../../data/audit/actionLog");
+    expect(recordAction).not.toHaveBeenCalled();
   });
 });

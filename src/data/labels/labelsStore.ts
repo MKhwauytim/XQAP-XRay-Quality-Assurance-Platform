@@ -2129,6 +2129,7 @@ export const DEFAULT_LABELS = {
   ce_stat_wb_read:               "صفوف مقروءة من الملف",
   ce_stat_wb_incomplete:         "صفوف الملف غير المكتملة",
   ce_stat_dup_skipped:           "مكرر (مطابق للنظام: نفس المعرف والشهر)",
+  ce_stat_wb_not_completed:      "مستبعد: صفوف الملف غير المكتملة",
   ce_stat_wb_added:              "صفوف مضافة من الملف",
   ce_stat_skipped_no_id:         "مستبعد: بلا معرف",
   ce_stat_skipped_no_month:      "مستبعد: بلا شهر",

@@ -44,7 +44,10 @@ export function rowsByHeader(rows: Array<Record<string, string>>): Array<Record<
   const hdr = rows[0];
   return rows.slice(1).map((r) => {
     const o: Record<string, string> = {};
-    for (const [col, name] of Object.entries(hdr)) if (r[col] !== undefined) o[name] = r[col];
+    for (const [col, name] of Object.entries(hdr)) {
+      if (name === "__proto__") continue; // never let a header set the prototype
+      if (r[col] !== undefined) o[name] = r[col];
+    }
     return o;
   });
 }

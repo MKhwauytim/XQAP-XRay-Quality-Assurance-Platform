@@ -1,6 +1,7 @@
 import { isRowStudied } from "../reporting/executiveReportTypes";
 import type { ExecutiveReportInput, ExecutiveReportRow } from "../reporting/executiveReportTypes";
 import type { MappedWorkbookRow } from "./workbookColumnMap";
+import { formatMonthFolderName, parseMonthFolderName } from "../population/monthFolder";
 
 /** Month label carried by the comprehensive (all-months) report input. */
 export const COMPREHENSIVE_MONTH_LABEL = "جميع_الأشهر";
@@ -11,9 +12,30 @@ export type MergeStats = {
   workbookRead: number;
   duplicatesSkipped: number;
   workbookAdded: number;
+  /** Workbook rows rejected because they are not completed samples (not submitted / no image). */
+  workbookNotCompleted: number;
 };
 
-const key = (id: string, month: string) => `${id}|${month}`;
+/**
+ * Canonical month key: system folders keep their on-disk spelling (`5-May-2026`)
+ * while workbook months are always lowercase (`5-may-2026`), so both are
+ * re-formatted through the shared month-folder helpers (also folds `05-...`).
+ * Unparseable labels fall back to trim + lowercase.
+ */
+export function normalizeMonthKey(month: string): string {
+  const info = parseMonthFolderName(month.trim());
+  return info ? formatMonthFolderName(info.month, info.year) : month.trim().toLowerCase();
+}
+
+/** The one "completed sample" predicate, shared by the page loader and the merge. */
+export function isCompletedSampleRow(row: ExecutiveReportRow): boolean {
+  return row.selectedInSample && isRowStudied(row);
+}
+
+const key = (id: string, month: string) => `${id}|${normalizeMonthKey(month)}`;
+
+/** The only workspace-wide fields the combined input needs from a month's input. */
+export type ComprehensiveBase = Pick<ExecutiveReportInput, "template" | "config" | "stageMappings">;
 
 /**
  * Merge completed system rows with workbook rows. System wins on the same
@@ -28,7 +50,7 @@ export function mergeCompletedRows(
   const systemKeys = new Set<string>();
   for (const { month, rows } of systemByMonth) {
     for (const row of rows) {
-      if (!row.selectedInSample || !isRowStudied(row)) continue;
+      if (!isCompletedSampleRow(row)) continue;
       entries.push({ row, month });
       systemKeys.add(key(row.xrayImageId, month));
     }
@@ -36,7 +58,12 @@ export function mergeCompletedRows(
   const systemCompleted = entries.length;
 
   let duplicatesSkipped = 0;
+  let workbookNotCompleted = 0;
   for (const w of workbook) {
+    if (!isCompletedSampleRow(w.row)) {
+      workbookNotCompleted++;
+      continue;
+    }
     if (systemKeys.has(key(w.row.xrayImageId, w.month))) {
       duplicatesSkipped++;
       continue;
@@ -68,7 +95,8 @@ export function mergeCompletedRows(
       systemCompleted,
       workbookRead: workbook.length,
       duplicatesSkipped,
-      workbookAdded: workbook.length - duplicatesSkipped,
+      workbookAdded: workbook.length - duplicatesSkipped - workbookNotCompleted,
+      workbookNotCompleted,
     },
   };
 }
@@ -79,7 +107,7 @@ export function mergeCompletedRows(
  * (processingSummary, sourceRevisions, distributionEvents, replacementReasons,
  * or any future one) cannot leak into an all-months report.
  */
-export function buildComprehensiveInput(rows: ExecutiveReportRow[], base: ExecutiveReportInput): ExecutiveReportInput {
+export function buildComprehensiveInput(rows: ExecutiveReportRow[], base: ComprehensiveBase): ExecutiveReportInput {
   return {
     monthFolderName: COMPREHENSIVE_MONTH_LABEL,
     populationRows: [],

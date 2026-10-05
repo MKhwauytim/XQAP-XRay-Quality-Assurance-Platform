@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildComprehensiveInput, COMPREHENSIVE_MONTH_LABEL, mergeCompletedRows } from "./mergeWithSystem";
+import { buildComprehensiveInput, COMPREHENSIVE_MONTH_LABEL, mergeCompletedRows, normalizeMonthKey } from "./mergeWithSystem";
 import { makeRow } from "../reporting/reportTestFixtures";
 import type { ExecutiveReportInput, ExecutiveReportRow } from "../reporting/executiveReportTypes";
 
@@ -30,6 +30,33 @@ describe("mergeCompletedRows", () => {
     expect(rows[0].xrayImageId).toBe("A");
     expect(rows[1].xrayImageId).toBe("A@2-february-2026");
   });
+  it("treats a capitalised system month and a lowercase workbook month as the same month", () => {
+    const { rows, stats } = mergeCompletedRows(
+      [{ month: "5-May-2026", rows: [sys("A")] }],
+      [wb("A", "5-may-2026"), wb("A", "6-june-2026")],
+    );
+    expect(stats.duplicatesSkipped).toBe(1);
+    expect(rows.map((r) => r.xrayImageId)).toEqual(["A", "A@6-june-2026"]);
+  });
+  it("normalizeMonthKey folds case and zero-padded numbers", () => {
+    expect(normalizeMonthKey("5-May-2026")).toBe("5-may-2026");
+    expect(normalizeMonthKey("05-MAY-2026")).toBe("5-may-2026");
+    expect(normalizeMonthKey(" Weird ")).toBe("weird");
+  });
+  it("suffix pass stays deterministic with a capital-letter system month", () => {
+    const run = () =>
+      mergeCompletedRows([{ month: "5-May-2026", rows: [sys("A")] }], [wb("A", "6-june-2026"), wb("A", "7-july-2026")])
+        .rows.map((r) => r.xrayImageId);
+    expect(run()).toEqual(["A", "A@6-june-2026", "A@7-july-2026"]);
+    expect(run()).toEqual(run());
+  });
+  it("rejects non-completed workbook rows and counts them", () => {
+    const bad = { ...wb("Z", "1-january-2026"), row: sys("Z", false) };
+    const { rows, stats } = mergeCompletedRows([], [bad, wb("Y", "1-january-2026")]);
+    expect(rows.map((r) => r.xrayImageId)).toEqual(["Y"]);
+    expect(stats.workbookNotCompleted).toBe(1);
+    expect(stats.workbookAdded).toBe(1);
+  });
   it("drops non-completed system rows", () => {
     const { rows } = mergeCompletedRows([{ month: "1-january-2026", rows: [sys("A", false)] }], []);
     expect(rows).toHaveLength(0);
@@ -47,7 +74,7 @@ describe("mergeCompletedRows", () => {
       ],
       [wb("A", "1-january-2026"), wb("D", "3-march-2026")],
     );
-    expect(stats).toEqual({ systemMonths: 2, systemCompleted: 2, workbookRead: 2, duplicatesSkipped: 1, workbookAdded: 1 });
+    expect(stats).toEqual({ systemMonths: 2, systemCompleted: 2, workbookRead: 2, duplicatesSkipped: 1, workbookAdded: 1, workbookNotCompleted: 0 });
   });
   it("does not dedupe within the workbook: same id+month twice is suffixed and kept", () => {
     const { rows } = mergeCompletedRows([], [wb("A", "m"), wb("A", "m")]);

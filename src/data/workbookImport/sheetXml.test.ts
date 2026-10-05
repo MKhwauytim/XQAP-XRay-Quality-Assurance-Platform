@@ -21,4 +21,10 @@ describe("sheetXml", () => {
   it("leaves out-of-range shared index absent", () => {
     expect(parseSheetRows('<row r="1"><c r="A1" t="s"><v>9</v></c></row>', [])).toEqual([{}]);
   });
+  it("never lets a __proto__ header set the prototype", () => {
+    const rows = [{ A: "__proto__", B: "k" }, { A: "x", B: "y" }];
+    const out = rowsByHeader(rows);
+    expect(Object.getPrototypeOf(out[0])).toBe(Object.prototype);
+    expect(out).toEqual([{ k: "y" }]);
+  });
 });

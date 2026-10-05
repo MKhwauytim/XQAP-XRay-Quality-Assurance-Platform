@@ -12,12 +12,14 @@ import { listMonthFolders } from "../../../../../data/population/populationStora
 import { loadMonthExecInput } from "../../../../../data/reporting/loadMonthExecInput";
 import { buildExecutiveReportRows } from "../../../../../data/reporting/executiveReportData";
 import { DEFAULT_EXEC_CONFIG } from "../../../../../data/reporting/executiveReportTypes";
-import type { ExecutiveReportInput, ExecutiveReportRow } from "../../../../../data/reporting/executiveReportTypes";
+import type { ExecutiveReportRow } from "../../../../../data/reporting/executiveReportTypes";
 import {
   COMPREHENSIVE_MONTH_LABEL,
   buildComprehensiveInput,
+  isCompletedSampleRow,
   mergeCompletedRows,
 } from "../../../../../data/workbookImport/mergeWithSystem";
+import type { ComprehensiveBase } from "../../../../../data/workbookImport/mergeWithSystem";
 import type { MappedWorkbookRow } from "../../../../../data/workbookImport/workbookColumnMap";
 import { recordAction } from "../../../../../data/audit/actionLog";
 import { logError } from "../../../../../data/storage/errorLogger";
@@ -27,7 +29,7 @@ import { useComprehensiveWorkbook } from "./useComprehensiveWorkbook";
 /** Families whose change can alter a month's completed answers (mirrors the Reports hub). */
 const REFRESH_FAMILIES: readonly DataRefreshFamily[] = ["manifest", "distribution", "answers"];
 
-type SystemMonths = { byMonth: Array<{ month: string; rows: ExecutiveReportRow[] }>; base: ExecutiveReportInput | null };
+type SystemMonths = { byMonth: Array<{ month: string; rows: ExecutiveReportRow[] }>; base: ComprehensiveBase | null };
 type SystemState = { status: "loading" } | { status: "error" } | ({ status: "ready" } & SystemMonths);
 // v1 of the comprehensive report is document + workbook only; the decks still show
 // population framing and are a follow-up.
@@ -38,6 +40,24 @@ const NO_NAMES: Record<string, string> = {};
 // Stable empties so the merge memo is not invalidated on every render before data arrives.
 const NO_MONTHS: SystemMonths["byMonth"] = [];
 const NO_ROWS: MappedWorkbookRow[] = [];
+
+/**
+ * Load ONE month and keep only what the combined report needs: its completed
+ * rows and the workspace-wide base. The month's full input (up to ~500k
+ * population rows) goes out of scope on return, so it can be collected before
+ * the next month is read.
+ */
+async function loadCompletedMonth(
+  handle: NonNullable<ReturnType<typeof useWorkspace>["directoryHandle"]>,
+  month: string,
+): Promise<{ rows: ExecutiveReportRow[]; base: ComprehensiveBase } | null> {
+  const input = await loadMonthExecInput(handle, month);
+  if (!input) return null;
+  return {
+    rows: buildExecutiveReportRows(input).filter(isCompletedSampleRow),
+    base: { template: input.template, config: input.config, stageMappings: input.stageMappings },
+  };
+}
 
 /** Sub-tab of the Reports page. Sub-tab only: default export, nothing else. */
 export default function ComprehensiveExecutive() {
@@ -50,6 +70,10 @@ export default function ComprehensiveExecutive() {
   const [exportError, setExportError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const loadRunRef = useRef(0);
+  const busyRef = useRef(false);
+  const queuedRef = useRef(false);
+  const unmountedRef = useRef(false);
+  const latestRunRef = useRef<(() => Promise<void>) | null>(null);
 
   // Reload every month's completed rows. Touches ONLY system state, so a refresh
   // can never clobber a workbook the user has already read.
@@ -62,12 +86,12 @@ export default function ComprehensiveExecutive() {
     try {
       const folders = await listMonthFolders(directoryHandle);
       const byMonth: SystemMonths["byMonth"] = [];
-      let base: ExecutiveReportInput | null = null;
+      let base: ComprehensiveBase | null = null;
       for (const folder of folders) {
-        const input = await loadMonthExecInput(directoryHandle, folder.folderName);
-        if (!input) continue;
-        base ??= input;
-        byMonth.push({ month: folder.folderName, rows: buildExecutiveReportRows(input) });
+        const loaded = await loadCompletedMonth(directoryHandle, folder.folderName);
+        if (!loaded) continue;
+        base ??= loaded.base;
+        byMonth.push({ month: folder.folderName, rows: loaded.rows });
       }
       if (loadRunRef.current === run) setSystem({ status: "ready", byMonth, base });
     } catch (error) {
@@ -76,17 +100,41 @@ export default function ComprehensiveExecutive() {
     }
   }, [directoryHandle]);
 
+  // Coalesce: at most one load runs at a time; any number of requests made while
+  // it runs collapse into exactly one trailing load (using the latest closure).
+  const requestLoad = useCallback((run: () => Promise<void>) => {
+    latestRunRef.current = run;
+    if (busyRef.current) {
+      queuedRef.current = true;
+      return;
+    }
+    busyRef.current = true;
+    void (async () => {
+      try {
+        do {
+          queuedRef.current = false;
+          await latestRunRef.current?.();
+        } while (queuedRef.current && !unmountedRef.current);
+      } finally {
+        busyRef.current = false;
+      }
+    })();
+  }, []);
+
   // A load still in flight at unmount must not set state: invalidate its run token.
-  useEffect(() => () => { loadRunRef.current++; }, []);
+  useEffect(() => {
+    unmountedRef.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a run counter, not a DOM ref; the latest value is the point
+    return () => { unmountedRef.current = true; loadRunRef.current++; };
+  }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial async load; loadSystem only sets state after awaiting disk
-    void loadSystem();
-  }, [loadSystem]);
+    requestLoad(loadSystem);
+  }, [loadSystem, requestLoad]);
 
   useEffect(
-    () => subscribeToDataChange(REFRESH_FAMILIES, () => { void loadSystem(); }),
-    [loadSystem]
+    () => subscribeToDataChange(REFRESH_FAMILIES, () => { requestLoad(loadSystem); }),
+    [loadSystem, requestLoad]
   );
 
   // On a system-load error the workbook alone can still produce a report (fallback base below).
@@ -113,7 +161,7 @@ export default function ComprehensiveExecutive() {
   }
 
   async function handleExport(kind: ExportKind): Promise<void> {
-    if (!directoryHandle || exporting || !hasRows) return;
+    if (exporting || !hasRows) return;
     const capability: MutationCapability = getMutationCapability("export-reports");
     if (!capability.allowed) {
       setExportError(capability.reason === "read-only-mode" ? labels.msg_export_read_only_demo : labels.msg_export_not_permitted);
@@ -122,12 +170,7 @@ export default function ComprehensiveExecutive() {
     setExportError(null);
     setExporting(kind);
     try {
-      const base: ExecutiveReportInput = (system.status === "ready" ? system.base : null) ?? {
-        monthFolderName: COMPREHENSIVE_MONTH_LABEL,
-        populationRows: [],
-        sample: null,
-        distribution: null,
-        employeeFiles: [],
+      const base: ComprehensiveBase = (system.status === "ready" ? system.base : null) ?? {
         template: null,
         config: DEFAULT_EXEC_CONFIG,
       };
@@ -139,10 +182,13 @@ export default function ComprehensiveExecutive() {
         const { buildExecutiveXlsx } = await import("../../../../../data/reporting/executiveReport");
         await buildExecutiveXlsx(input, NO_NAMES);
       }
-      recordAction(directoryHandle, username, role, "report-generated", {
-        monthFolderName: COMPREHENSIVE_MONTH_LABEL,
-        details: { kind: `comprehensive-${kind}` },
-      });
+      // The audit trail lives in the workspace; with none mounted there is nowhere to write it.
+      if (directoryHandle) {
+        recordAction(directoryHandle, username, role, "report-generated", {
+          monthFolderName: COMPREHENSIVE_MONTH_LABEL,
+          details: { kind: `comprehensive-${kind}` },
+        });
+      }
     } catch (error) {
       logError("comprehensive-executive:generate", error);
       setExportError(labels.ce_generate_failed);
