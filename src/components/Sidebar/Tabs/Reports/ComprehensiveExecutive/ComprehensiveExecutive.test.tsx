@@ -56,6 +56,9 @@ const openers = vi.hoisted(() => ({ openExecutiveReport: vi.fn(async () => {}), 
 vi.mock("../../../../../data/reporting/executiveReport", () => openers);
 vi.mock("../../../../../data/audit/actionLog", () => ({ recordAction: vi.fn() }));
 
+const storage = vi.hoisted(() => ({ listMonthFolders: vi.fn(async (_h: unknown): Promise<unknown[]> => []) }));
+vi.mock("../../../../../data/population/populationStorage", () => storage);
+
 import ComprehensiveExecutive from "./index";
 
 const cells = {
@@ -88,6 +91,8 @@ beforeEach(() => {
   ws.handle = createMemoryDirectory("root");
   openers.openExecutiveReport.mockClear();
   openers.buildExecutiveXlsx.mockClear();
+  storage.listMonthFolders.mockReset();
+  storage.listMonthFolders.mockImplementation(async () => []);
 });
 afterEach(cleanup);
 
@@ -135,10 +140,24 @@ describe("ComprehensiveExecutive page", () => {
     selectFile();
     act(() => workers[0].emit(doneMessage()));
     await waitFor(() => expect(screen.getByTestId("ce-stat-wb-read")).toHaveTextContent("1"));
+    const before = storage.listMonthFolders.mock.calls.length;
     act(() => broadcastDataRefresh("manual"));
+    await waitFor(() => expect(storage.listMonthFolders.mock.calls.length).toBe(before + 1));
     await act(async () => { await Promise.resolve(); });
     expect(screen.getByTestId("ce-stat-wb-read")).toHaveTextContent("1");
     expect(screen.getByText("study.xlsx")).toBeInTheDocument();
+  });
+
+  it("keeps workbook stats and generation when the system load fails, and shows the error", async () => {
+    storage.listMonthFolders.mockImplementation(async () => { throw new Error("disk"); });
+    render(<ComprehensiveExecutive />);
+    expect(await screen.findByText(L.ce_system_load_failed)).toBeInTheDocument();
+    for (const b of buttons()) expect(b).toBeDisabled();
+    selectFile();
+    act(() => workers[0].emit(doneMessage()));
+    await waitFor(() => expect(screen.getByTestId("ce-stat-wb-read")).toHaveTextContent("1"));
+    expect(screen.getByText(L.ce_system_load_failed)).toBeInTheDocument();
+    for (const b of buttons()) expect(b).toBeEnabled();
   });
 
   it("ignores a stale result from a removed file", async () => {

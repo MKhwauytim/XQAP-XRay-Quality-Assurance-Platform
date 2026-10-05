@@ -78,6 +78,9 @@ export default function ComprehensiveExecutive() {
     }
   }, [directoryHandle]);
 
+  // A load still in flight at unmount must not set state: invalidate its run token.
+  useEffect(() => () => { loadRunRef.current++; }, []);
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initial async load; loadSystem only sets state after awaiting disk
     void loadSystem();
@@ -97,6 +100,7 @@ export default function ComprehensiveExecutive() {
     return () => { cancelled = true; };
   }, [directoryHandle]);
 
+  // On a system-load error the workbook alone can still produce a report (fallback base below).
   const systemByMonth = system.status === "ready" ? system.byMonth : NO_MONTHS;
   const workbookRows = workbook.status === "read" ? workbook.rows : NO_ROWS;
   const merged = useMemo(() => mergeCompletedRows(systemByMonth, workbookRows), [systemByMonth, workbookRows]);
@@ -106,7 +110,7 @@ export default function ComprehensiveExecutive() {
   // authoritative mutation capability again in the handler.
   const canExportReports = can("export-reports");
   const hasRows = merged.rows.length > 0;
-  const exportDisabled = !canExportReports || !hasRows || exporting !== null || system.status !== "ready";
+  const exportDisabled = !canExportReports || !hasRows || exporting !== null || system.status === "loading";
 
   function handleFileChange(ev: ChangeEvent<HTMLInputElement>): void {
     const file = ev.target.files?.[0];
@@ -209,10 +213,10 @@ export default function ComprehensiveExecutive() {
       {system.status === "loading" && <p className="ce-status" role="status">{labels.ce_load_system}</p>}
       {system.status === "error" && <p className="ce-error" role="alert">{labels.ce_system_load_failed}</p>}
 
-      {system.status === "ready" && (
+      {system.status !== "loading" && (
         <StatsPanel labels={labels} stats={merged.stats} totalRows={merged.rows.length} report={report} />
       )}
-      {system.status === "ready" && !hasRows && <p className="ce-empty" role="status">{labels.ce_empty}</p>}
+      {system.status !== "loading" && !hasRows && <p className="ce-empty" role="status">{labels.ce_empty}</p>}
 
       <div className="ce-row ce-actions">
         <button type="button" className="ce-btn" disabled={exportDisabled} onClick={() => void handleExport("document")}>
