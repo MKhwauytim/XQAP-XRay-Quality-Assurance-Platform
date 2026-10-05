@@ -9,8 +9,8 @@ describe("sheetXml", () => {
   });
   const hdr = '<row r="1"><c r="A1" t="inlineStr"><is><t>h</t></is></c><c r="B1" t="inlineStr"><is><t>k</t></is></c></row>';
   it("skips self-closing rows and cells", () => {
-    const xml = `<sheetData>${hdr}<row r="2" spans="1:2"/><row r="3"><c r="A3"><v>7</v></c><c r="B3"/></row></sheetData>`;
-    expect(rowsByHeader(parseSheetRows(xml, []))).toEqual([{ h: "7" }]);
+    const xml = `<sheetData>${hdr}<row r="2" spans="1:2"/><row r="3"><c r="A3"><v>7</v></c><c r="B3"/></row><row r="4"><c r="A4"><v>8</v></c></row></sheetData>`;
+    expect(rowsByHeader(parseSheetRows(xml, []))).toEqual([{ h: "7" }, { h: "8" }]);
   });
   it("reads rich-text shared strings", () => {
     expect(parseSharedStrings('<sst><si><r><t>ab</t></r><r><t xml:space="preserve"> c</t></r></si></sst>')).toEqual(["ab c"]);
