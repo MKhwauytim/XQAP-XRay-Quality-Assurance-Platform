@@ -283,6 +283,12 @@ vi.mock("../../../../data/answers/answerStorage", async (importOriginal) => {
 // the real designer's own effects/dependencies.
 const reportDesignerMountCount = vi.hoisted(() => ({ count: 0 }));
 
+// The real comprehensive page is covered by ComprehensiveExecutive.test.tsx; here only its
+// mount/visibility behaviour inside the Reports wrapper matters.
+vi.mock("./ComprehensiveExecutive", () => ({
+  default: () => <div data-testid="comprehensive-executive-stub" />,
+}));
+
 vi.mock("../ReportDesigner", () => ({
   default: () => {
     reportDesignerMountCount.count += 1;

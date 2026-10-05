@@ -1,0 +1,22 @@
+/* Comprehensive executive report page (Reports sub-tab). Tokens only. */
+.ce-page { direction: rtl; font-family: var(--font-sans); color: var(--c-ink); display: flex; flex-direction: column; gap: var(--sp-4); }
+.ce-card { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-lg); box-shadow: var(--sh-xs); padding: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-3); }
+.ce-card-title { font-size: 16px; font-weight: 800; color: var(--c-navy); margin: 0; }
+.ce-card-subtitle { font-size: 14px; font-weight: 800; color: var(--c-navy); margin: 0; }
+.ce-hint { margin: 0; font-size: 13.5px; font-weight: 700; color: var(--c-ink-3); }
+.ce-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.ce-file-name { font-size: 13px; color: var(--c-ink); }
+.ce-status { margin: 0; font-size: 13px; color: var(--c-ink-3); }
+.ce-error { margin: 0; padding: var(--sp-3) var(--sp-4); font-size: 13px; font-weight: 700; color: var(--c-danger-text); background: var(--c-danger-bg); border-radius: var(--r-sm); }
+.ce-empty { margin: 0; padding: var(--sp-8) var(--sp-6); text-align: center; font-size: 14px; color: var(--c-ink-3); background: var(--c-surface); border: 1.5px dashed var(--c-border); border-radius: var(--r-lg); }
+.ce-stats { margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: var(--sp-3); }
+.ce-stat { background: var(--c-surface-2); border-radius: var(--r-sm); padding: var(--sp-3) var(--sp-4); }
+.ce-stat-label { font-size: 12px; color: var(--c-ink-3); }
+.ce-stat-value { margin: 0; font-size: 20px; font-weight: 800; color: var(--c-navy); }
+.ce-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ce-table th, .ce-table td { text-align: right; padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--c-border); }
+.ce-table th { color: var(--c-ink-3); font-weight: 800; }
+.ce-actions { margin-top: var(--sp-2); }
+.ce-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 120px; height: 44px; padding: 0 var(--sp-5); border: none; border-radius: var(--r-sm); background: var(--c-primary); color: var(--c-surface); font-family: inherit; font-size: 13px; font-weight: 800; cursor: pointer; }
+.ce-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.ce-btn-secondary { background: var(--c-surface-2); color: var(--c-navy); border: 1px solid var(--c-border); height: 36px; }
