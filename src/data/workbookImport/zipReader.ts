@@ -1,4 +1,24 @@
-export type ZipEntry = { name: string; method: number; compressedSize: number; localOffset: number };
+export type ZipEntry = { name: string; method: number; compressedSize: number; uncompressedSize: number; localOffset: number };
+
+/** V8's max string length is ~512 MiB and real sample sheets are ~30 MB. */
+export const MAX_ENTRY_UNCOMPRESSED_BYTES = 400 * 1024 * 1024;
+
+/** Reject an entry whose declared decompressed size is over the cap, before inflating. */
+export function assertEntrySize(entry: Pick<ZipEntry, "uncompressedSize">): void {
+  if (entry.uncompressedSize > MAX_ENTRY_UNCOMPRESSED_BYTES) throw new Error("XQ-WB-ZIP: entry too large");
+}
+
+/** Pass-through stream that errors once more than `cap` bytes have flowed (guards a lying header). */
+export function createSizeCapStream(cap: number = MAX_ENTRY_UNCOMPRESSED_BYTES): TransformStream<Uint8Array, Uint8Array> {
+  let total = 0;
+  return new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      total += chunk.byteLength;
+      if (total > cap) throw new Error("XQ-WB-ZIP: entry too large");
+      controller.enqueue(chunk);
+    },
+  });
+}
 
 const u16 = (v: DataView, o: number) => v.getUint16(o, true);
 const u32 = (v: DataView, o: number) => v.getUint32(o, true);
@@ -26,9 +46,10 @@ export async function readZipDirectory(file: Blob): Promise<Map<string, ZipEntry
     if (p + 46 + nameLen + extraLen + commentLen > dir.byteLength) throw new Error("XQ-WB-ZIP: central directory shorter than declared");
     const name = dec.decode(new Uint8Array(dir.buffer, dir.byteOffset + p + 46, nameLen));
     const compressedSize = u32(dir, p + 20);
+    const uncompressedSize = u32(dir, p + 24);
     const localOffset = u32(dir, p + 42);
-    if (compressedSize === 0xffffffff || localOffset === 0xffffffff) throw new Error("XQ-WB-ZIP: zip64 not supported");
-    out.set(name, { name, method: u16(dir, p + 10), compressedSize, localOffset });
+    if (compressedSize === 0xffffffff || uncompressedSize === 0xffffffff || localOffset === 0xffffffff) throw new Error("XQ-WB-ZIP: zip64 not supported");
+    out.set(name, { name, method: u16(dir, p + 10), compressedSize, uncompressedSize, localOffset });
     p += 46 + nameLen + extraLen + commentLen;
   }
   if (out.size !== count) throw new Error("XQ-WB-ZIP: central directory shorter than declared");
@@ -36,6 +57,7 @@ export async function readZipDirectory(file: Blob): Promise<Map<string, ZipEntry
 }
 
 export async function readZipEntryText(file: Blob, entry: ZipEntry): Promise<string> {
+  assertEntrySize(entry);
   const head = new DataView(await file.slice(entry.localOffset, entry.localOffset + 30).arrayBuffer());
   if (head.byteLength !== 30) throw new Error("XQ-WB-ZIP: truncated entry");
   if (u32(head, 0) !== 0x04034b50) throw new Error("XQ-WB-ZIP: bad local header");
@@ -45,9 +67,13 @@ export async function readZipEntryText(file: Blob, entry: ZipEntry): Promise<str
   if (entry.method === 0) return body.text();
   if (entry.method !== 8) throw new Error(`XQ-WB-ZIP: unsupported method ${entry.method}`);
   try {
-    const stream = body.stream().pipeThrough(new DecompressionStream("deflate-raw"));
-    return new Response(stream).text();
+    const stream = body
+      .stream()
+      .pipeThrough(new DecompressionStream("deflate-raw"))
+      .pipeThrough(createSizeCapStream());
+    return await new Response(stream).text();
   } catch (err) {
+    if (err instanceof Error && err.message.startsWith("XQ-WB-ZIP: entry too large")) throw err;
     throw new Error(
       `XQ-WB-ZIP: inflate failed (${err instanceof Error ? err.message : String(err)})`,
       { cause: err }
