@@ -540,6 +540,21 @@ export function eventsForEmployee(events: readonly AnswerEvent[], username: stri
   return events.filter((event) => sameUser(event.answeredBy ?? "", username));
 }
 
+/** (month, user) chains already reported as repaired this session — one log line each, not one per read. */
+const seedlessChainsReported = new Set<string>();
+
+function noteSeedlessChainRepaired(username: string, monthFolderName: string): void {
+  const key = `${monthFolderName}|${username}`;
+  if (seedlessChainsReported.has(key)) return;
+  seedlessChainsReported.add(key);
+  logError(
+    "answers:fold:seedless-chain-repaired",
+    new Error(
+      `${monthFolderName}/${username}: answer events have no migration-seed but the legacy snapshot is empty — folded from an empty baseline`
+    )
+  );
+}
+
 /**
  * Fold `AnswerFoldError` (§8/§10's "events with no migration-seed" and "seed
  * hash mismatch" failures) into a coded, logged error before it propagates —
@@ -553,6 +568,17 @@ function foldEmployeeEvents(
   try {
     return foldAnswerEvents(events, options);
   } catch (error) {
+    if (
+      error instanceof AnswerFoldError &&
+      error.reason === "missing-migration-seed" &&
+      options?.legacySeed?.contentHash === ""
+    ) {
+      // The employee's frozen legacy snapshot is empty, so the missing marker
+      // could only ever have seeded nothing: the baseline is provably empty and
+      // there is nothing to guess. (A non-empty snapshot stays a hard refusal.)
+      noteSeedlessChainRepaired(options.username ?? "", options.monthFolderName ?? "");
+      return foldAnswerEvents(events, { ...options, requireMigrationSeed: false });
+    }
     if (error instanceof AnswerFoldError) {
       // Discriminated on `error.reason` (a real field on `AnswerFoldError`,
       // set at each of its two throw sites) rather than matching on message

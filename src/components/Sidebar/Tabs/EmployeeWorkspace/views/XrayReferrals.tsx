@@ -1436,15 +1436,23 @@ export default function XrayReferrals({ directoryHandle }: Props) {
 
       // Real-month answers, plus the ad-hoc stores' own (see adhocAnswersPromise):
       // every row's answers are read from the store that row's writes go to.
+      // Oversight reads every assignee: one employee's unreadable answer chain
+      // must not blank the whole queue (it did — XQ-ANS-005). The failure is
+      // isolated per employee, logged, and surfaced below by name.
+      const unreadableAssignees: string[] = [];
       const answerItems = canSeeAll
         ? [
             ...(
               await Promise.all(
                 [...new Set(all.map((e) => e.assignedTo))].map((u) =>
-                  loadEmployeeAnswers(directoryHandle, selMonth, u)
+                  loadEmployeeAnswers(directoryHandle, selMonth, u).catch((err: unknown) => {
+                    logError("xrayReferrals:loadEmployeeAnswers", err, { action: u });
+                    unreadableAssignees.push(u);
+                    return null;
+                  })
                 )
               )
-            ).flatMap((f) => f.items),
+            ).flatMap((f) => f?.items ?? []),
             ...adhocAnswerItems,
           ]
         : [...ownAnswerFile!.items, ...adhocAnswerItems];
@@ -1459,6 +1467,12 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       if (token !== loadTokenRef.current) return; // superseded by a newer month selection
 
       commit(all, quota, sample, answerItems);
+      if (unreadableAssignees.length > 0) {
+        setStatusMsg({
+          type: "error",
+          text: getLabels().ew_answers_partial_load.replace("{users}", unreadableAssignees.join("، ")),
+        });
+      }
     } catch (err) {
       // Boot reporting FIRST, mirroring the success path above (DEFECT 8) and
       // regardless of the token: the newer pass never re-registers these keys,

@@ -2019,6 +2019,7 @@ export const DEFAULT_LABELS = {
   ew_row_select_blocked_aria:  "لا يمكن إسناد {id} — مكتملة أو مستبدلة",
   /** Retry action on the queue's load-failure state. */
   ew_load_retry_btn:           "إعادة المحاولة",
+  ew_answers_partial_load:     "تعذر قراءة إجابات: {users}. عُرضت بقية البيانات، وقد تظهر عينات هؤلاء الموظفين دون إجاباتها. أبلغ مسؤول النظام.",
 
   // ── Ad-hoc import — historical (already-answered) study back-fill ──────────
   // APPEND-ONLY BLOCK. The `kind: "historical"` path through the existing
