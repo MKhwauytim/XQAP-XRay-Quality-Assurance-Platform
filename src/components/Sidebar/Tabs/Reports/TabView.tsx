@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReportDesignerTab from "../ReportDesigner";
 import { AlertTriangle, BarChart2, Building2, Check, Database, Download, FileText, Filter, FolderOpen, Layers, Presentation, Settings2, Users, X } from "lucide-react";
 
@@ -86,7 +86,10 @@ const KNOWN_RAIL_SUB_TABS: ReadonlySet<string> = new Set<string>([
   "reports",
   "kpi",
   "report-designer",
+  "comprehensive-executive",
 ]);
+
+const ComprehensiveExecutiveTab = lazy(() => import("./ComprehensiveExecutive"));
 
 /**
  * The change families that actually invalidate what this tab shows: the month
@@ -1231,6 +1234,10 @@ export default function ReportsTab() {
   // an effect) per React's "adjusting state during render" pattern, guarded
   // so it only ever setState once (avoids react-hooks/set-state-in-effect
   // and the extra effect-driven render pass a useEffect version would add).
+  const [visitedComprehensive, setVisitedComprehensive] = useState(activeSubTab === "comprehensive-executive");
+  if (activeSubTab === "comprehensive-executive" && !visitedComprehensive) {
+    setVisitedComprehensive(true);
+  }
   const [visitedReportDesigner, setVisitedReportDesigner] = useState(activeSubTab === "report-designer");
   if (activeSubTab === "report-designer" && !visitedReportDesigner) {
     setVisitedReportDesigner(true);
@@ -1259,11 +1266,25 @@ export default function ReportsTab() {
     [labels]
   );
 
+  const comprehensiveElement = useMemo(
+    () => (
+      <TabGuard tabId="reports/comprehensive-executive">
+        <Suspense fallback={<LoadingState label={labels.app_tab_loading} />}>
+          <ComprehensiveExecutiveTab />
+        </Suspense>
+      </TabGuard>
+    ),
+    [labels]
+  );
+
   return (
     <>
-      <div hidden={activeSubTab === "report-designer"}>
+      <div hidden={activeSubTab === "report-designer" || activeSubTab === "comprehensive-executive"}>
         <ReportsContent />
       </div>
+      {visitedComprehensive && (
+        <div hidden={activeSubTab !== "comprehensive-executive"}>{comprehensiveElement}</div>
+      )}
       {visitedReportDesigner && (
         <div hidden={activeSubTab !== "report-designer"}>{reportDesignerElement}</div>
       )}

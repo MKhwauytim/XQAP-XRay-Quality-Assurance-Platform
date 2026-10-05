@@ -14,6 +14,7 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
     { id: "reports", label: "التقارير" },
     { id: "kpi", label: "مؤشرات الأداء", allowedRoles: tabAllowedRoles("reports/kpi") },
     { id: "report-designer", label: "مصمم التقارير", allowedRoles: tabAllowedRoles("reports/report-designer") },
+    { id: "comprehensive-executive", label: "تقرير تنفيذي شامل", allowedRoles: tabAllowedRoles("reports/comprehensive-executive") },
   ],
 };
 

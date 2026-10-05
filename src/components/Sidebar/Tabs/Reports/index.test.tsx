@@ -1145,6 +1145,32 @@ describe("Reports sub-tab mount preservation (§T)", () => {
     expect(reportDesignerMountCount.count).toBe(1);
   });
 
+  it("mounts the comprehensive-executive sub-tab on first visit and keeps it mounted, hidden", async () => {
+    render(<ReportsTab />);
+    await waitFor(() => expect(document.querySelector(".rh-page")).toBeTruthy());
+    expect(screen.queryByTestId("comprehensive-executive-stub")).not.toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("sidebar-subtab-changed", {
+          detail: { parentTabId: "reports", subTabId: "comprehensive-executive" },
+        })
+      );
+    });
+    const stub = await screen.findByTestId("comprehensive-executive-stub");
+    expect(stub.closest("[hidden]")).toBeNull();
+    expect(document.querySelector(".rh-page")?.closest("[hidden]")).not.toBeNull();
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("sidebar-subtab-changed", {
+          detail: { parentTabId: "reports", subTabId: "reports" },
+        })
+      );
+    });
+    expect(screen.getByTestId("comprehensive-executive-stub").closest("[hidden]")).not.toBeNull();
+  });
+
   it("does not mount Report Designer before it has ever been visited", () => {
     reportDesignerMountCount.count = 0;
     render(<ReportsTab />);
