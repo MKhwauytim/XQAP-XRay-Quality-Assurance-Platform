@@ -2,15 +2,15 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type React
 import ReportDesignerTab from "../ReportDesigner";
 import { AlertTriangle, BarChart2, Building2, Check, Database, Download, FileText, Filter, FolderOpen, Layers, Presentation, Settings2, Users, X } from "lucide-react";
 
-import { loadOrDeriveDistributionCurrentForRead, loadDistributionCurrentRevision, loadDistributionLog } from "../../../../data/distribution/distributionStorage";
+import { loadDistributionCurrentRevision, loadDistributionLog } from "../../../../data/distribution/distributionStorage";
 import { loadReplacementLog, loadReferralLog } from "../../../../data/referral/referralStorage";
 import { logError, logRejection } from "../../../../data/storage/errorLogger";
 import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
 import type { SampleMasterData } from "../../../../data/sampling/sampleTypes";
-import { loadMonthPopulationFinal, loadMonthForEditing, loadMonthPopulationFinalRevision, loadMonthManifest, loadProcessingSummary } from "../../../../data/population/populationStorage";
-import { loadPopulationConfig } from "../../../../data/population/populationConfig";
+import { loadMonthPopulationFinal, loadMonthForEditing, loadMonthPopulationFinalRevision, loadMonthManifest } from "../../../../data/population/populationStorage";
 import { useGlobalMonth } from "../../../../data/month/useGlobalMonth";
-import type { SourceRevisions } from "../../../../data/reporting/sourceRevisions";
+import { collectRevisions } from "../../../../data/reporting/sourceRevisions";
+import { loadMonthExecInput } from "../../../../data/reporting/loadMonthExecInput";
 import { formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
 import { SampleSnapshotBanner } from "../../../SampleSnapshotBanner/SampleSnapshotBanner";
 import { sampleRowsMissingFromPopulation } from "../../../../data/reporting/executiveReportData";
@@ -20,7 +20,6 @@ import { getLabels } from "../../../../data/labels/labelsStore";
 import { buildReportModel } from "../../../../data/reporting/executive/model/reportModel";
 import type { ReportModel } from "../../../../data/reporting/executive/model/reportModel";
 import KpiDashboard from "./KpiDashboard";
-import { DEFAULT_EXEC_CONFIG } from "../../../../data/reporting/executiveReportTypes";
 import type { ExecutiveReportInput } from "../../../../data/reporting/executiveReportTypes";
 import { getManagedLoginUsers } from "../../../../auth/userManagement";
 import { usePermissions } from "../../../../auth/usePermissions";
@@ -29,9 +28,6 @@ import { TabGuard } from "../../../PermissionGuard";
 import { isElementOnScreen } from "../../../../utils/viewVisibility";
 import { LoadingState } from "../../../StateViews/StateViews";
 import { loadSampleMaster, loadSampleMasterRevision } from "../../../../data/sampling/sampleStorage";
-import { loadAllEmployeeFiles } from "../../../../data/answers/answerStorage";
-import { loadTemplate } from "../../../../data/templates/templateStorage";
-import { loadInspectionTemplateSelection } from "../../../../data/templates/templateSelectionStorage";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import {
   subscribeToDataChange,
@@ -136,15 +132,6 @@ function buildDisplayNameMap(): Record<string, string> {
   const map: Record<string, string> = {};
   for (const u of getManagedLoginUsers()) map[u.username] = u.displayName || u.username;
   return map;
-}
-
-/** B2: fold (fileName → revision|null) pairs into a SourceRevisions map, dropping absent files. */
-function collectRevisions(pairs: Array<[string, number | null]>): SourceRevisions {
-  const out: SourceRevisions = {};
-  for (const [file, rev] of pairs) {
-    if (rev !== null) out[file] = rev;
-  }
-  return out;
 }
 
 // Inner component that holds all the existing Reports state and logic.
@@ -370,48 +357,7 @@ function ReportsContent() {
   // dashboard and the exported artifacts can never disagree.
   const loadExecInput = useCallback(async (): Promise<ExecutiveReportInput | null> => {
     if (!directoryHandle || !selectedMonth) return null;
-    const [populationFinal, sample, employeeFiles, templateSelection, popRev, sampleRev, distRev, processingSummary, populationConfig] = await Promise.all([
-      loadMonthPopulationFinal(directoryHandle, selectedMonth),
-      loadSampleMaster(directoryHandle, selectedMonth),
-      loadAllEmployeeFiles(directoryHandle, selectedMonth),
-      loadInspectionTemplateSelection(directoryHandle),
-      loadMonthPopulationFinalRevision(directoryHandle, selectedMonth),
-      loadSampleMasterRevision(directoryHandle, selectedMonth),
-      loadDistributionCurrentRevision(directoryHandle, selectedMonth),
-      // Feeds the executive workbook's "الصفوف المستبعدة" sheet with the real
-      // dropped-row list instead of a placeholder note (see
-      // `ExecutiveReportInput.processingSummary`'s doc comment). Best-effort —
-      // `loadProcessingSummary` already resolves to null on any read failure.
-      loadProcessingSummary(directoryHandle, selectedMonth),
-      // C1: the workspace's own stage alias table, so every stage grouping in
-      // the report classifies a custom alias the way processing did.
-      loadPopulationConfig(directoryHandle),
-    ]);
-    if (!populationFinal) return null;
-    const template = templateSelection?.templateId
-      ? await loadTemplate(directoryHandle, templateSelection.templateId)
-      : null;
-    const distribution = sample
-      ? await loadOrDeriveDistributionCurrentForRead(directoryHandle, selectedMonth, sample.rows)
-      : null;
-    // B2: cite the exact source-file revisions this report was built from.
-    const sourceRevisions = collectRevisions([
-      ["population.final.json", popRev],
-      ["sample.master.json", sampleRev],
-      ["distribution.current.json", distRev],
-    ]);
-    return {
-      monthFolderName: selectedMonth,
-      populationRows: populationFinal.rows as unknown as PreparedPopulationRow[],
-      sample: sample ?? null,
-      distribution: distribution ?? null,
-      employeeFiles,
-      template,
-      config: DEFAULT_EXEC_CONFIG,
-      sourceRevisions,
-      processingSummary,
-      stageMappings: populationConfig.stageMappings,
-    };
+    return loadMonthExecInput(directoryHandle, selectedMonth);
   }, [directoryHandle, selectedMonth]);
 
   // Latest-wins guard for the model build -- same reasoning as
