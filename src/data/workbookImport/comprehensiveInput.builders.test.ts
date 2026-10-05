@@ -29,7 +29,7 @@ function workbookRows(): MappedWorkbookRow[] {
   const cases = [
     mk({}),
     mk({ "معرف الأشعة": "A2", "المستوى": "FIRST_STAGE", "نتيجة المستوى الأول": "سليمة", "صحة النتيجة": "" }),
-    mk({ "معرف الأشعة": "A3", "المستوى": "SECOND_STAGE", "نتيجة المستوى الأول": "سليمة", "صحة النتيجة": "اشتباه", "هل يوجد صورة؟": "نعم", "اسم المنفذ": "منفذ ب", "نوع المنفذ": "منفذ بري", "رمز المنفذ": "10" }),
+    mk({ "معرف الأشعة": "A3", "المستوى": "SECOND_STAGE", "هل يوجد صورة؟": "نعم", "اسم المنفذ": "منفذ ب", "نوع المنفذ": "منفذ بري", "رمز المنفذ": "10" }),
     mk({ "معرف الأشعة": "A4", "المستوى": "THIRD_STAGE", "هل يوجد صورة؟": "", "مستوى جودة الصورة": "منخفض", "نتيجة المستوى الثاني": "اشتباه", "صحة النتيجة": "اشتباه" }),
     // Same id, a different month: must survive as its own row.
     mk({ "معرف الأشعة": "A1", "الشهر": "46054", "نتيجة المستوى الأول": "سليمة", "مستوى جودة الصورة": "متوسط" }),
@@ -115,3 +115,45 @@ describe.each(bases)("real builders on a combined input (%s)", (_name, base) => 
 // offers document + workbook only, and deck v2/v3 still render population/coverage
 // framing from the completed-row count. Do not add deck cases here until they honour
 // `model.scope === "completed-only"`.
+
+/**
+ * Completed-only scope must never print a population / coverage / target FIGURE, in
+ * either narrative branch: (a) no finding fires -> the fallback line; (b) findings fire.
+ */
+describe("completed-only scope states no population figure", () => {
+  const missed = mk({ "معرف الأشعة": "M1", "نتيجة المستوى الأول": "سليمة", "نتيجة المستوى الثاني": "سليمة", "صحة النتيجة": "اشتباه" });
+  const toInput = (extra: Array<Record<string, string>>) => {
+    const report = newMappingReport();
+    const rows = [...workbookRows(), ...extra.map((c) => mapSampleRow(c, "Q1", report)).filter((m): m is MappedWorkbookRow => m !== null)];
+    return buildComprehensiveInput(mergeCompletedRows([], rows).rows, fallbackBase);
+  };
+  const fixtures: Array<[string, ExecutiveReportInput]> = [
+    ["no findings fire", toInput([])],
+    ["findings fire", toInput([missed, missed, missed, missed, missed, missed])],
+  ];
+  // A population/coverage/target word directly followed by a number (either digit script).
+  const FIGURE = /(المجتمع|مجتمع|التغطية|المستهدف|الهدف|المتبقي[ةه]?)[^<\d٠-٩]{0,12}[\d٠-٩]/;
+  const text = (html: string) => html.replace(/<style[\s\S]*?<\/style>/g, " ").replace(/<script[\s\S]*?<\/script>/g, " ").replace(/<[^>]+>/g, " ");
+
+  it("fallback narrative uses the completed-samples wording when no finding fires", () => {
+    const [findings, actions] = [buildReportModel(fixtures[0][1], {}).summary.findings, buildReportModel(fixtures[0][1], {}).actions];
+    const expected = getLabels().ce_narrative_completed_total.replace("{n}", "6");
+    expect(findings).toEqual([expected]);
+    expect(actions).toEqual([expected]);
+    expect(expected).not.toContain("المجتمع");
+  });
+  it("some finding does fire in the second fixture", () => {
+    const f = buildReportModel(fixtures[1][1], {}).summary.findings;
+    expect(f.join(" ")).not.toContain(getLabels().ce_narrative_completed_total.split("{n}")[0]);
+  });
+
+  it.each(fixtures)("document and workbook text carry no figure-bearing population phrase (%s)", async (_n, input) => {
+    const html = text(await buildExecutiveReport(input, {}));
+    expect(html).not.toMatch(FIGURE);
+    const wb = await buildExecutiveWorkbookObject(input, {});
+    for (const name of wb.SheetNames) {
+      const cells = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[name], { header: 1 }).flat().map(String);
+      for (const c of cells) expect(c, `${name}: ${c}`).not.toMatch(FIGURE);
+    }
+  });
+});

@@ -1,3 +1,4 @@
+import { getLabels } from "../labels/labelsStore";
 import { liveSampleRows } from "../sampling/sampleStorage";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { FieldAnswer } from "../answers/answerTypes";
@@ -394,7 +395,8 @@ export function calculateExecutiveKPIs(
 
 export function generateNarrativeFindings(
   kpis: ExecutiveKPIs,
-  config: ExecutiveReportConfig
+  config: ExecutiveReportConfig,
+  completedOnly = false
 ): string[] {
   const findings: string[] = [];
 
@@ -432,7 +434,10 @@ export function generateNarrativeFindings(
     );
   }
 
-  if (findings.length === 0) {
+  if (findings.length === 0 && completedOnly) {
+    // Completed-only scope has no population: never print a population figure here.
+    findings.push(getLabels().ce_narrative_completed_total.replace("{n}", fmtNum(kpis.totalSample)));
+  } else if (findings.length === 0) {
     findings.push(
       `تم استلام وتحليل بيانات الشهر. إجمالي المجتمع ${fmtNum(kpis.totalPopulation)} صورة، تم اختيار عينة ${fmtNum(kpis.totalSample)} صورة للدراسة.`
     );

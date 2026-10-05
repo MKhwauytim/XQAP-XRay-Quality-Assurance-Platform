@@ -319,7 +319,7 @@ export function buildReportModel(
     summary: {
       periodId,
       monthFolderName: input.monthFolderName,
-      findings: generateNarrativeFindings(kpis, input.config),
+      findings: generateNarrativeFindings(kpis, input.config, input.rowsOverride !== undefined),
       overallAccuracy: kpis.overallAccuracy,
       detectionRate: kpis.suspiciousDetectionRateByImage,
       missedSuspicionRate: kpis.missedSuspicionRateByImage,
@@ -389,7 +389,7 @@ export function buildReportModel(
       byPort: aggregates.errorTypeByPort,
       totals: errorTotals,
     },
-    actions: generateNarrativeFindings(kpis, input.config),
+    actions: generateNarrativeFindings(kpis, input.config, input.rowsOverride !== undefined),
     exclusions: {
       note: "الصفوف المستبعدة موثّقة في تقرير معالجة المجتمع (processing.summary.json).",
     },
