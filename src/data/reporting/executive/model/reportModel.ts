@@ -266,12 +266,15 @@ export function buildReportModel(
   // required base file — every population row originates from it. BI is the
   // optional supporting file; its presence is detected from the enrichment
   // flags the processor stamped on the rows.
-  const biMatchedCount = input.populationRows.filter((r) => r.biMatched).length;
+  // With `rowsOverride` the populationRows are not the row source, so BI
+  // presence is undetectable: reuse the "BI not provided" state.
+  const biMatchedCount = input.rowsOverride ? 0 : input.populationRows.filter((r) => r.biMatched).length;
   const dataSources = {
     riskRowCount: input.populationRows.length,
     biProvided:
-      biMatchedCount > 0 ||
-      input.populationRows.some((r) => r.biEnrichmentStatus !== "BI Not Provided"),
+      !input.rowsOverride &&
+      (biMatchedCount > 0 ||
+        input.populationRows.some((r) => r.biEnrichmentStatus !== "BI Not Provided")),
     biMatchedCount,
   };
 

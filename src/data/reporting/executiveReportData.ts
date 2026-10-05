@@ -101,7 +101,33 @@ export function sampleRowsMissingFromPopulation(
   return liveSampleRows(sample).filter((row) => !populationIds.has(row.xrayImageId));
 }
 
+type ResultValue = "سليمة" | "اشتباه";
+
+/** Expert-vs-system accuracy flags + verification category for one row (§9 truth table). */
+export function deriveRowAccuracy(
+  levelOne: ResultValue,
+  levelTwo: ResultValue,
+  imageResult: ResultValue,
+  expert: ResultValue | null
+): Pick<ExecutiveReportRow, "imageResultAccurate" | "levelOneAccurate" | "levelTwoAccurate" | "verificationCategory"> {
+  if (expert === null) {
+    return { imageResultAccurate: null, levelOneAccurate: null, levelTwoAccurate: null, verificationCategory: null };
+  }
+  let verificationCategory: ExecutiveReportRow["verificationCategory"];
+  if (imageResult === "اشتباه" && expert === "اشتباه") verificationCategory = "correct-suspicious";
+  else if (imageResult === "سليمة" && expert === "سليمة") verificationCategory = "correct-clean";
+  else if (imageResult === "اشتباه" && expert === "سليمة") verificationCategory = "excess-suspicious";
+  else verificationCategory = "missed-suspicious";
+  return {
+    imageResultAccurate: imageResult === expert,
+    levelOneAccurate: levelOne === expert,
+    levelTwoAccurate: levelTwo === expert,
+    verificationCategory,
+  };
+}
+
 export function buildExecutiveReportRows(input: ExecutiveReportInput): ExecutiveReportRow[] {
+  if (input.rowsOverride) return input.rowsOverride;
   const { populationRows, sample, distribution, employeeFiles, config } = input;
   const fieldIdsByLabel = createFieldResolver(input.template);
   const fieldMap = config.fieldMappings;
@@ -168,21 +194,8 @@ export function buildExecutiveReportRows(input: ExecutiveReportInput): Executive
     const suspectedTypes = asText(answerValue(answers, fieldIdsByLabel, fieldMap.suspectedTypesLabel));
     const smuggleMethod = asText(answerValue(answers, fieldIdsByLabel, fieldMap.smuggleMethodLabel));
 
-    let imageResultAccurate: boolean | null = null;
-    let levelOneAccurate: boolean | null = null;
-    let levelTwoAccurate: boolean | null = null;
-    let verificationCategory: ExecutiveReportRow["verificationCategory"] = null;
-
-    if (expertResult !== null) {
-      imageResultAccurate = imageResult === expertResult;
-      levelOneAccurate = levelOneResult === expertResult;
-      levelTwoAccurate = levelTwoResult === expertResult;
-
-      if (imageResult === "اشتباه" && expertResult === "اشتباه") verificationCategory = "correct-suspicious";
-      else if (imageResult === "سليمة" && expertResult === "سليمة") verificationCategory = "correct-clean";
-      else if (imageResult === "اشتباه" && expertResult === "سليمة") verificationCategory = "excess-suspicious";
-      else verificationCategory = "missed-suspicious";
-    }
+    const { imageResultAccurate, levelOneAccurate, levelTwoAccurate, verificationCategory } =
+      deriveRowAccuracy(levelOneResult, levelTwoResult, imageResult, expertResult);
 
     return {
       xrayImageId: pop.xrayImageId,
