@@ -755,6 +755,10 @@ export const DEFAULT_LABELS = {
   exec_deck_fullscreen_exit:  "إنهاء ملء الشاشة",
   exec_deck_slideshow_prev:   "الشريحة السابقة",
   exec_deck_slideshow_next:   "الشريحة التالية",
+  exec_print_select_all:      "تحديد كل الصفحات",
+  exec_print_select_none:     "إلغاء تحديد الكل",
+  exec_print_include_page:    "تضمين هذه الصفحة عند الطباعة",
+  exec_print_selected_hint:   "الصفحات المضمّنة في الطباعة",
 
   // Overview view
   ov_chart_trend:         "تطور المجتمع والعينة والإنجاز عبر الأشهر",

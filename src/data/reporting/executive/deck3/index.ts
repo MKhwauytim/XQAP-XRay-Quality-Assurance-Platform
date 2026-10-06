@@ -16,6 +16,7 @@ import { formatMonthFolderShortLabel } from "../../../population/monthFolder";
 import { getLabels } from "../../../labels/labelsStore";
 import { ZATCA_LOGO_URL } from "../../../../branding/organization";
 import { esc } from "../primitives";
+import { PRINT_SELECT_CSS, PRINT_SELECT_SCRIPT, printSelectBarHtml } from "../printSelection";
 import { SOURCE_REVISIONS_CSS } from "../../sourceRevisions";
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
 
@@ -119,7 +120,7 @@ export function buildDeckV3Html(
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>${esc(title)} — ${esc(monthLabel)}</title>
-<style>${DECK_V3_CSS}${footerNote ? SOURCE_REVISIONS_CSS : ""}</style>
+<style>${DECK_V3_CSS}${footerNote ? SOURCE_REVISIONS_CSS : ""}${PRINT_SELECT_CSS}</style>
 <script>${DECK_V3_SCALE_SCRIPT}</script>
 </head>
 <body>
@@ -144,6 +145,7 @@ export function buildDeckV3Html(
       </div>
     </div>
     <div class="deck-toolbar-actions">
+      ${printSelectBarHtml()}
       <button class="btn btn-fullscreen" id="deck-fullscreen-button" type="button" aria-pressed="false" aria-label="${fullscreenEnter}" title="${fullscreenEnter}" data-enter-label="${fullscreenEnter}" data-exit-label="${fullscreenExit}"><span class="btn-fullscreen-icon btn-fullscreen-icon-expand">${icon("expand", 15)}</span><span class="btn-fullscreen-icon btn-fullscreen-icon-compress">${icon("compress", 15)}</span></button>
       <button class="btn" onclick="window.print()" title="اختر «حفظ كـ PDF» من المتصفح عند الطباعة، وليس «Microsoft Print to PDF»، لضمان الحجم والجودة الصحيحين">طباعة / PDF</button>
     </div>
@@ -153,7 +155,7 @@ ${slides}${footerNote ? `\n${footerNote}` : ""}
 <button type="button" class="btn-slide-nav btn-slide-prev" id="deck-slide-prev" aria-label="${slidePrevLabel}" title="${slidePrevLabel}">${icon("arrow", 20)}</button>
 <button type="button" class="btn-slide-nav btn-slide-next" id="deck-slide-next" aria-label="${slideNextLabel}" title="${slideNextLabel}">${icon("arrow", 20)}</button>
 <span class="deck-slide-counter" id="deck-slide-counter" dir="ltr"></span>
-<script>${DECK_NAV_SCRIPT}${DECK_FULLSCREEN_SCRIPT}</script>
+<script>${DECK_NAV_SCRIPT}${DECK_FULLSCREEN_SCRIPT}${PRINT_SELECT_SCRIPT}</script>
 </body>
 </html>`;
 }
