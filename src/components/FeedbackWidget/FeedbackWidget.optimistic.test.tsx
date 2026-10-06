@@ -45,8 +45,8 @@ vi.mock("../../data/feedback/feedbackStorage", async (importOriginal) => {
   };
 });
 
-const SARA: AuthSession = { username: "sara", role: "employee", loginAt: "2026-09-28T08:00:00.000Z" };
-const ADMIN: AuthSession = { username: "admin", role: "admin", loginAt: "2026-09-28T08:00:00.000Z" };
+const SARA: AuthSession = { username: "sara", role: "employee", loginAt: new Date().toISOString() };
+const ADMIN: AuthSession = { username: "admin", role: "admin", loginAt: new Date().toISOString() };
 
 const EXISTING: FeedbackThread = {
   id: "t20260920100000-aaaaaaaa",

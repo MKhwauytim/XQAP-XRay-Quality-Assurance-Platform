@@ -42,10 +42,10 @@ vi.mock("../../data/feedback/feedbackStorage", async (importOriginal) => {
   };
 });
 
-const SARA: AuthSession = { username: "sara", role: "employee", loginAt: "2026-09-28T08:00:00.000Z" };
+const SARA: AuthSession = { username: "sara", role: "employee", loginAt: new Date().toISOString() };
 
 function session(username: string, role: AuthSession["role"]): AuthSession {
-  return { username, role, loginAt: "2026-09-28T08:00:00.000Z" };
+  return { username, role, loginAt: new Date().toISOString() };
 }
 
 const OLDER_BUT_ANSWERED: FeedbackThread = {

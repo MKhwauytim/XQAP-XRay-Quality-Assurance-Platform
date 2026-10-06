@@ -89,8 +89,11 @@ export function mapSampleRow(c: Record<string, string>, sheet: string, report: M
   const expert = result(report, "صحة النتيجة", c["صحة النتيجة"]);
   const imageResult = classifyImageResult(l1, l2);
   const img = (c["هل يوجد صورة؟"] ?? "").trim();
-  const imageAvailable = img === "نعم" ? true : img === "لا" || img === INVALID_ID ? false : null;
-  if (img !== "" && imageAvailable === null) note(report, "هل يوجد صورة؟", img);
+  // Workbook rows are completed samples whatever the image column says: «لا» /
+  // invalid id is recorded as the reason but never leaves the row out of the studied set.
+  const imageAvailable = img === "نعم" ? true : null;
+  const noImage = img === "لا" || img === INVALID_ID;
+  if (img !== "" && img !== "نعم" && !noImage) note(report, "هل يوجد صورة؟", img);
   const mark = (c["هل يوجد تحديد؟"] ?? "").trim();
   if (mark !== "" && mark !== "نعم" && mark !== "لا") note(report, "هل يوجد تحديد؟", mark);
   const row: ExecutiveReportRow = {
