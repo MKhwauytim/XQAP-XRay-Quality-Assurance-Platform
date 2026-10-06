@@ -293,7 +293,7 @@ export async function buildDeck3Slides(
   const accPages = portPageCount(portAcc.land.length, portAcc.sea.length);
   // Section 1 = its divider + the per-level slide + `popPages` port pages.
   const sectionOnePages = 2 + popPages;
-  const TOTAL = 21 + (popPages - 1) + (accPages - 1) - (co ? sectionOnePages : 0);
+  const TOTAL = 23 + (popPages - 1) + (accPages - 1) - (co ? sectionOnePages : 0);
   const YITBA = " (يتبع)";
 
   let nextNum = 1;
@@ -329,7 +329,7 @@ export async function buildDeck3Slides(
   const s2Start = co ? 6 : s1End + 1;
   const s2End = s2Start + 3 + accPages;
   const s3Start = s2End + 1;
-  const s3End = s3Start + 6;
+  const s3End = s3Start + 8;
   parts.push(contentsSlide({
     eyebrow: "التقرير التنفيذي",
     title: "محتويات التقرير",
@@ -942,9 +942,10 @@ ${legendRow([
   <div class="v3-engine-bar">${seg(engineAgree, "navy", `اتفاق ${fmtNum(engineAgree)}`)}${seg(upheldEngine, "red", fmtNum(upheldEngine))}${seg(engineRest, "neutral", fmtNum(engineRest))}</div>
 </div>`;
 
+    const agreeTitle = "التوافق مع الفرق الأمنية ومحرك المخاطر";
     const inner = `${contentHead({
       eyebrow: eyebrowS3,
-      title: "التوافق مع الفرق الأمنية ومحرك المخاطر",
+      title: agreeTitle,
       note: `${fmtNum(imagesTotal)} صور مشتركة — توافق المستوى الأول ${fmtPct(l1Pooled)} · الثاني ${fmtPct(l2Pooled)}`,
     })}
 <div class="v3-agree-grid">
@@ -960,9 +961,17 @@ ${legendRow([
     ${chartTitleRow({ title: "التفصيل — الأرقام بين قوسين عدد الصور المتوافقة" })}
     ${dataTable({ headers: ["الفريق", "الصور", "المستوى الأول", "المستوى الثاني", "الكلي"], rows: teamRows, totals: teamTotals, firstColWidth: 26 })}
   </div>
-</div>
-${engineBand}`;
+</div>`;
     parts.push(slideShell(m, "", inner));
+    // Page 2 (يتبع): the risk-engine band on its own slide so neither page overflows.
+    const m2 = meta("s3", eyebrowS3);
+    const inner2 = `${contentHead({
+      eyebrow: eyebrowS3,
+      title: agreeTitle + YITBA,
+      note: `${fmtNum(imagesTotal)} صور مشتركة — توافق المستوى الأول ${fmtPct(l1Pooled)} · الثاني ${fmtPct(l2Pooled)}`,
+    })}
+${engineBand}`;
+    parts.push(slideShell(m2, "", inner2));
   }
 
   await yieldToMain();
@@ -1012,13 +1021,9 @@ ${engineBand}`;
     const high = qualityStrata[0];
     const low = qualityStrata[qualityStrata.length - 1];
 
-    const inner = `${contentHead({
-      eyebrow: eyebrowS3,
-      title: "أثر التحديد وجودة الصورة على الدقة",
-      note: `عاملان تشغيليان يُفسّران معظم تفاوت الدقة — المتوسط العام ${fmtPct(overallStats.overall)}`,
-    })}
-<div class="v3-impact-grid">
-  ${impactColumn({
+    const impactTitle = "أثر التحديد وجودة الصورة على الدقة";
+    const impactNote = `عاملان تشغيليان يُفسّران معظم تفاوت الدقة — المتوسط العام ${fmtPct(overallStats.overall)}`;
+    const markingCol = `${impactColumn({
       title: "أثر وجود التحديد",
       note: `${fmtNum(marking.present.n)} مقابل ${fmtNum(marking.absent.n)} نتيجة`,
       chartHtml: markingChart,
@@ -1027,8 +1032,8 @@ ${engineBand}`;
         markingDelta === null
           ? "لا يمكن حساب الفرق — إحدى المجموعتين دون حد الكفاية الإحصائية."
           : `فرق في الدقة العامة (${fmtPct(marking.present.accuracy)} مقابل ${fmtPct(marking.absent.accuracy)}).`,
-    })}
-  ${impactColumn({
+    })}`;
+    const qualityCol = `${impactColumn({
       title: "أثر جودة الصورة",
       note: `${fmtNum(qualityTotal)} نتيجة على ${fmtNum(qualityStrata.length)} فئات جودة`,
       chartHtml: qualityChart,
@@ -1037,10 +1042,18 @@ ${engineBand}`;
         gradient === null || !high || !low
           ? "لا يمكن حساب الفرق — إحدى فئات الجودة دون حد الكفاية الإحصائية."
           : `فرق بين الصور ${high.level}ة الجودة (${fmtPct(high.accuracy)}) و${low.level}ة الجودة (${fmtPct(low.accuracy)}) — معالجة جودة الالتقاط ترفع الدقة قبل أي تدريب.`,
-    })}
-</div>
-${legendRow([{ dash: "gold", text: `المتوسط العام ${fmtPct(overallStats.overall)}` }], scaleCaption(impactAxis))}`;
+    })}`;
+    const impactLegend = legendRow([{ dash: "gold", text: `المتوسط العام ${fmtPct(overallStats.overall)}` }], scaleCaption(impactAxis));
+    // Two pages — marking, then (يتبع) image quality — one chart each, full width.
+    const inner = `${contentHead({ eyebrow: eyebrowS3, title: impactTitle, note: impactNote })}
+<div class="v3-impact-grid v3-impact-single">${markingCol}</div>
+${impactLegend}`;
     parts.push(slideShell(m, "", inner));
+    const m2 = meta("s3", eyebrowS3);
+    const inner2 = `${contentHead({ eyebrow: eyebrowS3, title: impactTitle + YITBA, note: impactNote })}
+<div class="v3-impact-grid v3-impact-single">${qualityCol}</div>
+${impactLegend}`;
+    parts.push(slideShell(m2, "", inner2));
   }
 
   // 21 — Closing
