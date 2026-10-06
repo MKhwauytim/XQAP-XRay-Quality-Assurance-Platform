@@ -18,6 +18,7 @@ import { SECTION_THREE_CSS } from "./section3";
 // convention as section 3 — see that import's own comment above.
 import { SECTION_FOUR_CSS } from "./section4";
 import { esc } from "../primitives";
+import { PRINT_SELECT_CSS, PRINT_SELECT_SCRIPT, printSelectBarHtml } from "../printSelection";
 import { icon } from "../ui/icons";
 import { openReportWindow, writeOrCloseOnFailure } from "../../htmlReport";
 import { SOURCE_REVISIONS_CSS, sourceRevisionsFooterHtml } from "../../sourceRevisions";
@@ -421,7 +422,7 @@ export function buildDeckV2Html(
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>العرض التنفيذي — ${esc(monthLabel)}</title>
-<style>${ARABIC_FONT_FACE_CSS}${DECK_CSS}${DECK_V2_CSS}${SECTION_THREE_CSS}${SECTION_FOUR_CSS}${SOURCE_REVISIONS_CSS}</style>
+<style>${ARABIC_FONT_FACE_CSS}${DECK_CSS}${DECK_V2_CSS}${SECTION_THREE_CSS}${SECTION_FOUR_CSS}${SOURCE_REVISIONS_CSS}${PRINT_SELECT_CSS}</style>
 </head>
 <body>
 <nav class="deck-nav" id="deck-nav" aria-label="التنقّل بين أقسام العرض">
@@ -445,6 +446,7 @@ export function buildDeckV2Html(
       </div>
     </div>
     <div class="deck-toolbar-actions">
+      ${printSelectBarHtml()}
       <label class="theme-toggle" title="التبديل بين الوضع الفاتح والداكن" dir="ltr">
         <input type="checkbox" onchange="document.body.classList.toggle('theme-light', this.checked)"/>
         <span class="theme-toggle-track">
@@ -463,7 +465,7 @@ ${footerNote}
 <button type="button" class="btn-slide-nav btn-slide-prev" id="deck-slide-prev" aria-label="${slidePrevLabel}" title="${slidePrevLabel}">${icon("arrow", 20)}</button>
 <button type="button" class="btn-slide-nav btn-slide-next" id="deck-slide-next" aria-label="${slideNextLabel}" title="${slideNextLabel}">${icon("arrow", 20)}</button>
 <span class="deck-slide-counter" id="deck-slide-counter" dir="ltr"></span>
-<script>${DECK_NAV_SCRIPT}${DECK_TABLE_FILL_SCRIPT}${DECK_FULLSCREEN_SCRIPT}${DECK_V2_SCALE_SCRIPT}${variantPreview ? DECK_VARIANT_SCRIPT : ""}</script>
+<script>${DECK_NAV_SCRIPT}${DECK_TABLE_FILL_SCRIPT}${DECK_FULLSCREEN_SCRIPT}${DECK_V2_SCALE_SCRIPT}${PRINT_SELECT_SCRIPT}${variantPreview ? DECK_VARIANT_SCRIPT : ""}</script>
 </body>
 </html>`;
 }
