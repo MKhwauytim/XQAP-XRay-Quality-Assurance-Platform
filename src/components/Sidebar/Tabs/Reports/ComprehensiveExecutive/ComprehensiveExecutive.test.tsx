@@ -263,3 +263,88 @@ describe("ComprehensiveExecutive page", () => {
     expect(recordAction).not.toHaveBeenCalled();
   });
 });
+
+describe("ComprehensiveExecutive data-source switch", () => {
+  const radio = (name: string) => screen.getByRole("radio", { name });
+  const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+
+  it("defaults to Excel + app data, in a named radiogroup, and loads the system months", async () => {
+    render(<ComprehensiveExecutive />);
+    expect(screen.getByRole("radiogroup", { name: L.ce_source_title })).toBeInTheDocument();
+    expect(radio(L.ce_source_app_excel)).toBeChecked();
+    expect(radio(L.ce_source_excel_only)).not.toBeChecked();
+    await screen.findByText(L.ce_empty);
+    expect(storage.listMonthFolders).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("ce-stat-system-months")).toBeInTheDocument();
+  });
+
+  it("Excel only: no system loads (even on refresh), file required, then workbook-only stats", async () => {
+    render(<ComprehensiveExecutive />);
+    await screen.findByText(L.ce_empty);
+    const loads = storage.listMonthFolders.mock.calls.length;
+    fireEvent.click(radio(L.ce_source_excel_only));
+    expect(await screen.findByText(L.ce_source_excel_only_hint)).toBeInTheDocument();
+    expect(screen.queryByText(L.ce_empty)).toBeNull();
+    for (const b of buttons()) expect(b).toBeDisabled();
+    act(() => broadcastDataRefresh("manual"));
+    await flush();
+    expect(storage.listMonthFolders).toHaveBeenCalledTimes(loads);
+
+    selectFile();
+    act(() => workers[0].emit(doneMessage()));
+    await waitFor(() => expect(screen.getByTestId("ce-stat-wb-read")).toHaveTextContent("1"));
+    expect(screen.getByTestId("ce-stat-total-rows")).toHaveTextContent("1");
+    expect(screen.queryByTestId("ce-stat-system-months")).toBeNull();
+    expect(screen.queryByTestId("ce-stat-system-completed")).toBeNull();
+    expect(screen.queryByTestId("ce-stat-dup-skipped")).toBeNull();
+    expect(screen.getByTestId("ce-stats-mode")).toHaveTextContent(L.ce_source_excel_only);
+    expect(screen.queryByTestId("ce-excel-only-hint")).toBeNull();
+    for (const b of buttons()) expect(b).toBeEnabled();
+    expect(storage.listMonthFolders).toHaveBeenCalledTimes(loads);
+  });
+
+  it("switching to Excel only and back keeps the workbook and reloads the system months", async () => {
+    render(<ComprehensiveExecutive />);
+    await screen.findByText(L.ce_empty);
+    selectFile();
+    act(() => workers[0].emit(doneMessage()));
+    await waitFor(() => expect(screen.getByTestId("ce-stat-wb-read")).toHaveTextContent("1"));
+    const loads = storage.listMonthFolders.mock.calls.length;
+
+    fireEvent.click(radio(L.ce_source_excel_only));
+    await flush();
+    expect(screen.getByText("study.xlsx")).toBeInTheDocument();
+    expect(screen.getByTestId("ce-stat-wb-read")).toHaveTextContent("1");
+
+    fireEvent.click(radio(L.ce_source_app_excel));
+    await waitFor(() => expect(storage.listMonthFolders).toHaveBeenCalledTimes(loads + 1));
+    await waitFor(() => expect(screen.getByTestId("ce-stat-system-months")).toBeInTheDocument());
+    expect(screen.getByTestId("ce-stat-wb-read")).toHaveTextContent("1");
+    expect(screen.getByText("study.xlsx")).toBeInTheDocument();
+    expect(workers).toHaveLength(1);
+  });
+
+  it("a mode switch during an in-flight load does not let the stale result win", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let call = 0;
+    storage.listMonthFolders.mockImplementation(async () => {
+      call++;
+      if (call === 1) { await gate; return [{ folderName: "5-May-2026" }]; }
+      return [];
+    });
+    monthLoad.loadMonthExecInput.mockImplementation(async () => ({ template: null, config: {}, stageMappings: undefined }));
+    monthLoad.buildExecutiveReportRows.mockImplementation(() => [
+      { xrayImageId: "STALE", selectedInSample: true, answerStatus: "submitted", imageAvailable: true },
+    ]);
+    render(<ComprehensiveExecutive />);
+    await waitFor(() => expect(call).toBe(1));
+    fireEvent.click(radio(L.ce_source_excel_only));
+    fireEvent.click(radio(L.ce_source_app_excel));
+    release();
+    await waitFor(() => expect(call).toBe(2));
+    await waitFor(() => expect(screen.getByTestId("ce-stat-system-months")).toHaveTextContent("0"));
+    expect(screen.getByTestId("ce-stat-system-completed")).toHaveTextContent("0");
+    expect(screen.getByText(L.ce_empty)).toBeInTheDocument();
+  });
+});

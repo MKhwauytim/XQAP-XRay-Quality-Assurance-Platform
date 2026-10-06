@@ -24,6 +24,9 @@ import type { MappedWorkbookRow } from "../../../../../data/workbookImport/workb
 import { recordAction } from "../../../../../data/audit/actionLog";
 import { logError } from "../../../../../data/storage/errorLogger";
 import { StatsPanel } from "./StatsPanel";
+import { SourceModeSwitch } from "./SourceModeSwitch";
+import { DEFAULT_SOURCE_MODE } from "./sourceMode";
+import type { ComprehensiveSourceMode } from "./sourceMode";
 import { useComprehensiveWorkbook } from "./useComprehensiveWorkbook";
 
 /** Families whose change can alter a month's completed answers (mirrors the Reports hub). */
@@ -65,6 +68,8 @@ export default function ComprehensiveExecutive() {
   const { directoryHandle } = useWorkspace();
   const { can, getMutationCapability, role, username } = usePermissions();
   const { state: workbook, selectFile, removeFile } = useComprehensiveWorkbook();
+  const [mode, setMode] = useState<ComprehensiveSourceMode>(DEFAULT_SOURCE_MODE);
+  const excelOnly = mode === "excel-only";
   const [system, setSystem] = useState<SystemState>({ status: "loading" });
   const [exporting, setExporting] = useState<ExportKind | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -128,17 +133,29 @@ export default function ComprehensiveExecutive() {
     return () => { unmountedRef.current = true; loadRunRef.current++; };
   }, []);
 
+  // System months are only read in "app+excel" mode; switching back re-runs this effect.
   useEffect(() => {
-    requestLoad(loadSystem);
-  }, [loadSystem, requestLoad]);
+    if (!excelOnly) requestLoad(loadSystem);
+  }, [excelOnly, loadSystem, requestLoad]);
 
-  useEffect(
-    () => subscribeToDataChange(REFRESH_FAMILIES, () => { requestLoad(loadSystem); }),
-    [loadSystem, requestLoad]
-  );
+  useEffect(() => {
+    if (excelOnly) return undefined;
+    return subscribeToDataChange(REFRESH_FAMILIES, () => { requestLoad(loadSystem); });
+  }, [excelOnly, loadSystem, requestLoad]);
+
+  // Changing mode drops any stored system rows (releases memory) and invalidates
+  // an in-flight load so its stale result cannot win. The workbook is untouched.
+  function handleModeChange(next: ComprehensiveSourceMode): void {
+    if (next === mode) return;
+    loadRunRef.current++;
+    setSystem({ status: "loading" });
+    setMode(next);
+  }
 
   // On a system-load error the workbook alone can still produce a report (fallback base below).
-  const systemByMonth = system.status === "ready" ? system.byMonth : NO_MONTHS;
+  const systemByMonth = !excelOnly && system.status === "ready" ? system.byMonth : NO_MONTHS;
+  const systemLoading = !excelOnly && system.status === "loading";
+  const systemFailed = !excelOnly && system.status === "error";
   const workbookRows = workbook.status === "read" ? workbook.rows : NO_ROWS;
   const merged = useMemo(() => mergeCompletedRows(systemByMonth, workbookRows), [systemByMonth, workbookRows]);
   const report = workbook.status === "read" ? workbook.report : null;
@@ -147,7 +164,7 @@ export default function ComprehensiveExecutive() {
   // authoritative mutation capability again in the handler.
   const canExportReports = can("export-reports");
   const hasRows = merged.rows.length > 0;
-  const exportDisabled = !canExportReports || !hasRows || exporting !== null || system.status === "loading";
+  const exportDisabled = !canExportReports || !hasRows || exporting !== null || systemLoading;
 
   function handleFileChange(ev: ChangeEvent<HTMLInputElement>): void {
     const file = ev.target.files?.[0];
@@ -170,7 +187,7 @@ export default function ComprehensiveExecutive() {
     setExportError(null);
     setExporting(kind);
     try {
-      const base: ComprehensiveBase = (system.status === "ready" ? system.base : null) ?? {
+      const base: ComprehensiveBase = (!excelOnly && system.status === "ready" ? system.base : null) ?? {
         template: null,
         config: DEFAULT_EXEC_CONFIG,
       };
@@ -198,13 +215,16 @@ export default function ComprehensiveExecutive() {
   }
 
   const reading = workbook.status === "reading";
+  const needsFile = excelOnly && workbook.status !== "read" && !reading;
 
   return (
     <section className="page-shell ce-page" dir="rtl" data-testid="comprehensive-executive">
       <PageHeader eyebrow={labels.ce_eyebrow} title={labels.ce_title} subtitle={labels.ce_subtitle} />
 
+      <SourceModeSwitch labels={labels} mode={mode} onChange={handleModeChange} />
+
       <div className="ce-card">
-        <p className="ce-hint">{labels.ce_upload_hint}</p>
+        <p className="ce-hint">{excelOnly ? labels.ce_upload_hint_required : labels.ce_upload_hint}</p>
         <div className="ce-row">
           <input
             ref={fileInputRef}
@@ -235,13 +255,14 @@ export default function ComprehensiveExecutive() {
         )}
       </div>
 
-      {system.status === "loading" && <p className="ce-status" role="status">{labels.ce_load_system}</p>}
-      {system.status === "error" && <p className="ce-error" role="alert">{labels.ce_system_load_failed}</p>}
+      {systemLoading && <p className="ce-status" role="status">{labels.ce_load_system}</p>}
+      {systemFailed && <p className="ce-error" role="alert">{labels.ce_system_load_failed}</p>}
 
-      {system.status !== "loading" && (
-        <StatsPanel labels={labels} stats={merged.stats} totalRows={merged.rows.length} report={report} />
+      {!systemLoading && (
+        <StatsPanel labels={labels} stats={merged.stats} totalRows={merged.rows.length} report={report} mode={mode} />
       )}
-      {system.status !== "loading" && !hasRows && <p className="ce-empty" role="status">{labels.ce_empty}</p>}
+      {needsFile && <p className="ce-empty" role="status" data-testid="ce-excel-only-hint">{labels.ce_source_excel_only_hint}</p>}
+      {!systemLoading && !hasRows && !needsFile && <p className="ce-empty" role="status">{labels.ce_empty}</p>}
 
       <div className="ce-row ce-actions">
         <button type="button" className="ce-btn" disabled={exportDisabled} onClick={() => void handleExport("document")}>

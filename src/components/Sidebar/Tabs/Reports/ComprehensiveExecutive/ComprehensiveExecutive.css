@@ -20,3 +20,4 @@
 .ce-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 120px; height: 44px; padding: 0 var(--sp-5); border: none; border-radius: var(--r-sm); background: var(--c-primary); color: var(--c-surface); font-family: inherit; font-size: 13px; font-weight: 800; cursor: pointer; }
 .ce-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .ce-btn-secondary { background: var(--c-surface-2); color: var(--c-navy); border: 1px solid var(--c-border); height: 36px; }
+.ce-radio { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: 13.5px; font-weight: 700; color: var(--c-ink); cursor: pointer; }

@@ -1,12 +1,14 @@
 import type { MergeStats } from "../../../../../data/workbookImport/mergeWithSystem";
 import type { MappingReport } from "../../../../../data/workbookImport/workbookColumnMap";
 import type { Labels } from "../../../../../data/labels/labelsStore";
+import type { ComprehensiveSourceMode } from "./sourceMode";
 
 interface StatsPanelProps {
   labels: Labels;
   stats: MergeStats;
   totalRows: number;
   report: MappingReport | null;
+  mode: ComprehensiveSourceMode;
 }
 
 function Stat({ label, value, testId }: { label: string; value: number; testId: string }) {
@@ -19,7 +21,9 @@ function Stat({ label, value, testId }: { label: string; value: number; testId: 
 }
 
 /** Merge statistics, the workbook mapping counters, and the unknown-values table. */
-export function StatsPanel({ labels, stats, totalRows, report }: StatsPanelProps) {
+export function StatsPanel({ labels, stats, totalRows, report, mode }: StatsPanelProps) {
+  const withSystem = mode === "app+excel";
+  const modeLabel = withSystem ? labels.ce_source_app_excel : labels.ce_source_excel_only;
   const unmapped: Array<{ column: string; value: string; count: number }> = [];
   if (report) {
     for (const [column, values] of Object.entries(report.unmappedValues)) {
@@ -29,12 +33,13 @@ export function StatsPanel({ labels, stats, totalRows, report }: StatsPanelProps
   return (
     <section className="ce-card" aria-label={labels.ce_stats_title}>
       <h2 className="ce-card-title">{labels.ce_stats_title}</h2>
+      <p className="ce-status" data-testid="ce-stats-mode">{labels.ce_stats_mode.replace("{mode}", modeLabel)}</p>
       <dl className="ce-stats">
-        <Stat label={labels.ce_stat_system_months} value={stats.systemMonths} testId="ce-stat-system-months" />
-        <Stat label={labels.ce_stat_system_completed} value={stats.systemCompleted} testId="ce-stat-system-completed" />
+        {withSystem && <Stat label={labels.ce_stat_system_months} value={stats.systemMonths} testId="ce-stat-system-months" />}
+        {withSystem && <Stat label={labels.ce_stat_system_completed} value={stats.systemCompleted} testId="ce-stat-system-completed" />}
         <Stat label={labels.ce_stat_wb_read} value={stats.workbookRead} testId="ce-stat-wb-read" />
         {report && <Stat label={labels.ce_stat_wb_incomplete} value={report.incomplete} testId="ce-stat-wb-incomplete" />}
-        <Stat label={labels.ce_stat_dup_skipped} value={stats.duplicatesSkipped} testId="ce-stat-dup-skipped" />
+        {withSystem && <Stat label={labels.ce_stat_dup_skipped} value={stats.duplicatesSkipped} testId="ce-stat-dup-skipped" />}
         <Stat label={labels.ce_stat_wb_not_completed} value={stats.workbookNotCompleted} testId="ce-stat-wb-not-completed" />
         <Stat label={labels.ce_stat_wb_added} value={stats.workbookAdded} testId="ce-stat-wb-added" />
         {report && <Stat label={labels.ce_stat_skipped_no_id} value={report.skippedNoId} testId="ce-stat-skipped-no-id" />}
