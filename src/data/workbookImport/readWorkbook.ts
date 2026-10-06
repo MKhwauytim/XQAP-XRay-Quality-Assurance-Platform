@@ -1,9 +1,10 @@
 import { readZipDirectory, readZipEntryText } from "./zipReader";
 import { parseSharedStrings, parseSheetRows, rowsByHeader } from "./sheetXml";
-import { mapSampleRow, newMappingReport, type MappedWorkbookRow, type MappingReport } from "./workbookColumnMap";
+import { canonicalHeader, mapSampleRow, newMappingReport, type MappedWorkbookRow, type MappingReport } from "./workbookColumnMap";
 
 const REQUIRED = ["معرف الأشعة", "الشهر", "نتيجة المستوى الأول", "نتيجة المستوى الثاني", "الاكتمال"];
-const SAMPLE_SHEET = /^Q\d_Sample$/;
+/** `Q1_Sample` (merged layout) or `SJAN`…`SDEC` (examined-sample layout). */
+const SAMPLE_SHEET = /^(?:Q\d_Sample|S(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC))$/;
 
 export async function readComprehensiveWorkbook(
   file: Blob,
@@ -25,7 +26,7 @@ export async function readComprehensiveWorkbook(
     const path = rid ? target.get(rid) : undefined;
     if (name && path && SAMPLE_SHEET.test(name)) sheets.push({ name, path });
   }
-  if (sheets.length === 0) throw new Error("XQ-WB-NOSAMPLE: no Q*_Sample sheet found");
+  if (sheets.length === 0) throw new Error("XQ-WB-NOSAMPLE: no sample sheet found (Q*_Sample or S<MON>)");
   const ssEntry = dir.get("xl/sharedStrings.xml");
   const shared = ssEntry ? parseSharedStrings(await readZipEntryText(file, ssEntry)) : [];
   const report = newMappingReport();
@@ -34,12 +35,15 @@ export async function readComprehensiveWorkbook(
     const { name, path } = sheets[i];
     onProgress?.({ sheet: name, done: i, total: sheets.length });
     const raw = parseSheetRows(await readZipEntryText(file, need(path)), shared);
-    const headers = new Set(Object.values(raw[0] ?? {}));
-    const missing = REQUIRED.filter((h) => !headers.has(h));
+    const hdr = Object.fromEntries(Object.entries(raw[0] ?? {}).map(([col, h]) => [col, canonicalHeader(h)]));
+    const headers = new Set(Object.values(hdr));
+    // No «الاكتمال» column: the sheet lists examined samples only, so each row is a completed sample.
+    const examined = !headers.has("الاكتمال") && Object.values(raw[0] ?? {}).includes("شهر الفحص");
+    const missing = REQUIRED.filter((h) => !headers.has(h) && !(examined && h === "الاكتمال"));
     if (missing.length) throw new Error(`XQ-WB-COLUMNS: ${name} missing ${missing.join("، ")}`);
-    const data = rowsByHeader(raw);
+    const data = rowsByHeader([hdr, ...raw.slice(1)]);
     report.sheetsRead.push({ name, rows: data.length });
-    for (const cells of data) { const m = mapSampleRow(cells, name, report); if (m) rows.push(m); }
+    for (const cells of data) { const m = mapSampleRow(cells, name, report, { examined }); if (m) rows.push(m); }
   }
   onProgress?.({ sheet: "", done: sheets.length, total: sheets.length });
   return { rows, report };
