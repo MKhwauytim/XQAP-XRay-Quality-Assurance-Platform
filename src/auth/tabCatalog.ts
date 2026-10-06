@@ -64,6 +64,7 @@ export const TAB_CATALOG: readonly TabCatalogEntry[] = [
   // so nothing is auto-elevated by this change alone.
   { id: "reports/kpi", label: "مؤشرات الأداء", parentId: "reports", allowedRoles: ALL_ROLES },
   { id: "reports/report-designer", label: "مصمم التقارير", parentId: "reports", allowedRoles: ALL_ROLES },
+  { id: "reports/comprehensive-executive", label: "تقرير تنفيذي شامل", parentId: "reports", allowedRoles: ALL_ROLES },
   { id: "archive", label: "إدارة الأرشيف", allowedRoles: ALL_ROLES, group: "analysis" },
   // Widened ADMIN_ONLY -> OPERATIONAL_ROLES (2026-08-25): an admin-only ceiling made
   // the entire section a dead "مقيّد بالنظام" block in the page-permissions matrix,

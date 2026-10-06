@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v151.0",
+    "date": "2026-10-05",
+    "bucket": "feature",
+    "scope": "reports",
+    "title": "comprehensive executive report (completed samples; system + optional workbook)"
+  },
+  {
     "version": "v150.46",
     "date": "2026-10-05",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "answers",
     "title": "keep one IndexedDB connection open and prune old synced mirror records"
-  },
-  {
-    "version": "v150.36",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "a plain self-save appends without re-reading the whole month (with head probe)"
   }
 ];

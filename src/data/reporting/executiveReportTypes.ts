@@ -305,6 +305,8 @@ export type ExecutiveReportInput = {
   employeeFiles: EmployeeAnswerFile[];
   template: TemplateSchema | null;
   config: ExecutiveReportConfig;
+  /** Pre-built rows (comprehensive report); skips derivation. */
+  rowsOverride?: ExecutiveReportRow[];
   /**
    * Report-to-revision linkage (B2): source file name → `JsonEnvelope.metadata.revision`
    * captured at load time. Optional — legacy callers omit it and the footer renders nothing.

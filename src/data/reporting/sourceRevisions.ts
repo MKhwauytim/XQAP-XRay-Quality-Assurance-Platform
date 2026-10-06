@@ -14,6 +14,15 @@
 
 export type SourceRevisions = Record<string, number>;
 
+/** B2: fold (fileName → revision|null) pairs into a SourceRevisions map, dropping absent files. */
+export function collectRevisions(pairs: Array<[string, number | null]>): SourceRevisions {
+  const out: SourceRevisions = {};
+  for (const [file, rev] of pairs) {
+    if (rev !== null) out[file] = rev;
+  }
+  return out;
+}
+
 /** Arabic heading for the source-revision block (shared across all editions). */
 export const SOURCE_REVISIONS_LABEL_AR = "مراجعات ملفات المصدر";
 

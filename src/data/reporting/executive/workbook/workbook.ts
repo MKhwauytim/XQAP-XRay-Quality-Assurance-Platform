@@ -160,13 +160,17 @@ export const SHEET_NAMES = {
 
 // ─── Sheet builders ───────────────────────────────────────────────────────────
 
-function kpiSheet(model: ReportModel): Cell[][] {
+/**
+ * The population / sample / coverage / completion block. Absent for a
+ * completed-only model: there is no population or sample master behind it, and
+ * "completion" would be a tautology over rows that are all already completed.
+ */
+function kpiScopeRows(model: ReportModel): Cell[][] {
   const k = model.kpis;
+  if (model.scope === "completed-only") {
+    return [[getLabels().ce_completed_samples, k.totalPopulation], ["مدروسة", k.studiedImages], []];
+  }
   return [
-    ["مؤشر", "القيمة"],
-    ["الشهر", model.summary.monthFolderName],
-    ["الفترة", model.summary.periodId],
-    [],
     ["إجمالي المجتمع", k.totalPopulation],
     ["إجمالي العينة", k.totalSample],
     ["تغطية المجتمع%", pct(k.sampleCoverage)],
@@ -174,6 +178,17 @@ function kpiSheet(model: ReportModel): Cell[][] {
     ["متبقية", k.remainingImages],
     ["إنجاز العينة%", pct(k.completionRate)],
     [],
+  ];
+}
+
+function kpiSheet(model: ReportModel): Cell[][] {
+  const k = model.kpis;
+  return [
+    ["مؤشر", "القيمة"],
+    ["الشهر", model.summary.monthFolderName],
+    ["الفترة", model.summary.periodId],
+    [],
+    ...kpiScopeRows(model),
     ["سليمة", k.cleanCount],
     ["اشتباه", k.suspiciousCount],
     ["نسبة الاشتباه%", pct(k.suspicionRate)],
@@ -232,25 +247,32 @@ function portSheet(model: ReportModel): Cell[][] {
     levelByPort.set(entry.portName, cur);
   }
 
+  const completedOnly = model.scope === "completed-only";
   return [
-    [
-      "المنفذ", "المجتمع", "سليمة", "اشتباه", "نسبة الاشتباه%", "العينة", "التغطية%",
-      "مدروسة", "إنجاز%", "دقة%", "اكتشاف الاشتباه%", "اشتباه فائت%",
-      "دقة م.أول%", "دقة م.ثاني%", "التصنيف",
-    ],
+    completedOnly
+      ? [
+          "المنفذ", getLabels().ce_completed_samples, "سليمة", "اشتباه", "نسبة الاشتباه%",
+          "مدروسة", "دقة%", "اكتشاف الاشتباه%", "اشتباه فائت%",
+          "دقة م.أول%", "دقة م.ثاني%", "التصنيف",
+        ]
+      : [
+          "المنفذ", "المجتمع", "سليمة", "اشتباه", "نسبة الاشتباه%", "العينة", "التغطية%",
+          "مدروسة", "إنجاز%", "دقة%", "اكتشاف الاشتباه%", "اشتباه فائت%",
+          "دقة م.أول%", "دقة م.ثاني%", "التصنيف",
+        ],
     ...model.population.byPort.map((p) => {
       const dec = decisionByPort.get(p.portName);
       const lvl = levelByPort.get(p.portName);
+      const sampleCols: Cell[] = completedOnly
+        ? [p.studied]
+        : [p.sampleSize, pct(p.coverage), p.studied, pct(p.completionRate)];
       return [
         text(p.portName),
         p.population,
         p.clean,
         p.suspicious,
         pct(p.suspicionRate),
-        p.sampleSize,
-        pct(p.coverage),
-        p.studied,
-        pct(p.completionRate),
+        ...sampleCols,
         pct(dec?.accuracyByDecision ?? null),
         pct(dec?.detectionRate ?? null),
         pct(dec?.missedSuspicionRateByDecision ?? null),
@@ -263,6 +285,12 @@ function portSheet(model: ReportModel): Cell[][] {
 }
 
 function stageSheet(model: ReportModel): Cell[][] {
+  if (model.scope === "completed-only") {
+    return [
+      ["المرحلة", getLabels().ce_completed_samples, "مدروسة"],
+      ...model.population.byStage.map((s) => [text(s.stageLabel), s.population, s.studied]),
+    ];
+  }
   return [
     ["المرحلة", "المجتمع", "العينة", "التغطية%", "مدروسة", "إنجاز%"],
     ...model.population.byStage.map((s) => [
@@ -819,10 +847,14 @@ export async function buildExecutiveWorkbookObject(
   append(SHEET_NAMES.resultQuality, resultQualitySheet(model));
   append(SHEET_NAMES.rows, await rowSheet(model));
 
-  // Raw → analytical chain (§7).
-  append(SHEET_NAMES.rawRisk, await rawRiskSheet(input.populationRows));
-  append(SHEET_NAMES.rawBi, await rawBiSheet(input.populationRows));
-  append(SHEET_NAMES.exclusions, exclusionsSheet(input.processingSummary));
+  // Raw → analytical chain (§7). The raw population and exclusion sheets do
+  // not exist for a completed-only model (no population behind it).
+  const full = model.scope === "full";
+  if (full) {
+    append(SHEET_NAMES.rawRisk, await rawRiskSheet(input.populationRows));
+    append(SHEET_NAMES.rawBi, await rawBiSheet(input.populationRows));
+    append(SHEET_NAMES.exclusions, exclusionsSheet(input.processingSummary));
+  }
   append(SHEET_NAMES.factTable, factTableSheet(model));
   append(SHEET_NAMES.resultComparison, await resultComparisonSheet(model, popById));
   append(SHEET_NAMES.employeeByPort, employeeByPortSheet(model));
@@ -831,8 +863,10 @@ export async function buildExecutiveWorkbookObject(
 
   // Part 6 (R4) — operational coverage/accountability, mirroring the HTML's
   // "التغطية والمساءلة التشغيلية" section (previously absent from the workbook).
-  append(SHEET_NAMES.coverage, coverageSheet(model));
-  append(SHEET_NAMES.accountability, accountabilitySheet(model));
+  if (full) {
+    append(SHEET_NAMES.coverage, coverageSheet(model));
+    append(SHEET_NAMES.accountability, accountabilitySheet(model));
+  }
 
   // B2: report-to-revision linkage — cite the exact source-file revisions used.
   if (hasSourceRevisions(input.sourceRevisions)) {

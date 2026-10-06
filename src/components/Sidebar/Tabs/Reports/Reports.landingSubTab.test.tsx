@@ -106,4 +106,15 @@ describe("Reports — landing sub-tab follows the permission matrix", () => {
     const reportsNav = await screen.findByRole("tab", { name: "التقارير" });
     expect(reportsNav).toHaveAttribute("aria-selected", "true");
   });
+
+  it("lands on the comprehensive executive report when it is the only permitted sub-tab", async () => {
+    renderWith(["reports/comprehensive-executive"]);
+    expect(await screen.findByTestId("comprehensive-executive")).toBeVisible();
+    expect(screen.queryByRole("tab", { name: "التقارير" })).toBeNull();
+  });
+
+  it("prefers the report designer over the comprehensive report when both are the only grants", async () => {
+    renderWith(["reports/report-designer", "reports/comprehensive-executive"]);
+    expect(await screen.findByTestId("report-designer")).toBeInTheDocument();
+  });
 });

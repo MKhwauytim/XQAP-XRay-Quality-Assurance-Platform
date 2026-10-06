@@ -34,7 +34,17 @@ import type { StageAliasMappings } from "../../../population/stageHelpers";
  * equivalent of the master §14 `report.*.json` files. Built ONCE per generation
  * and passed to every renderer; renderers display, they never recompute.
  */
+/**
+ * What population the figures describe. "completed-only" = built from an
+ * `input.rowsOverride` (the comprehensive report: only completed samples, no
+ * population / sample master), where population totals, sample coverage and
+ * monthly-target figures do NOT exist and must not be rendered. Defined once
+ * here; every edition that suppresses those figures keys off `model.scope`.
+ */
+export type ReportScope = "full" | "completed-only";
+
 export type ReportModel = {
+  scope: ReportScope;
   summary: {
     periodId: string;
     monthFolderName: string;
@@ -266,12 +276,15 @@ export function buildReportModel(
   // required base file — every population row originates from it. BI is the
   // optional supporting file; its presence is detected from the enrichment
   // flags the processor stamped on the rows.
-  const biMatchedCount = input.populationRows.filter((r) => r.biMatched).length;
+  // With `rowsOverride` the populationRows are not the row source, so BI
+  // presence is undetectable: reuse the "BI not provided" state.
+  const biMatchedCount = input.rowsOverride ? 0 : input.populationRows.filter((r) => r.biMatched).length;
   const dataSources = {
     riskRowCount: input.populationRows.length,
     biProvided:
-      biMatchedCount > 0 ||
-      input.populationRows.some((r) => r.biEnrichmentStatus !== "BI Not Provided"),
+      !input.rowsOverride &&
+      (biMatchedCount > 0 ||
+        input.populationRows.some((r) => r.biEnrichmentStatus !== "BI Not Provided")),
     biMatchedCount,
   };
 
@@ -302,10 +315,11 @@ export function buildReportModel(
     : null;
 
   return {
+    scope: input.rowsOverride !== undefined ? "completed-only" : "full",
     summary: {
       periodId,
       monthFolderName: input.monthFolderName,
-      findings: generateNarrativeFindings(kpis, input.config),
+      findings: generateNarrativeFindings(kpis, input.config, input.rowsOverride !== undefined),
       overallAccuracy: kpis.overallAccuracy,
       detectionRate: kpis.suspiciousDetectionRateByImage,
       missedSuspicionRate: kpis.missedSuspicionRateByImage,
@@ -375,7 +389,7 @@ export function buildReportModel(
       byPort: aggregates.errorTypeByPort,
       totals: errorTotals,
     },
-    actions: generateNarrativeFindings(kpis, input.config),
+    actions: generateNarrativeFindings(kpis, input.config, input.rowsOverride !== undefined),
     exclusions: {
       note: "الصفوف المستبعدة موثّقة في تقرير معالجة المجتمع (processing.summary.json).",
     },
