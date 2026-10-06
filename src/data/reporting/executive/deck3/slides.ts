@@ -172,6 +172,85 @@ const LEVEL_TONES = ["gold", "blue", "green-soft", "red"] as const;
 
 // ── The deck ────────────────────────────────────────────────────────────────
 
+/** Scope-dependent wording and figures for deck3 — one object per scope, so the
+ *  slide assembly reads `copy.x` instead of branching on the scope at every use. */
+type Deck3Copy = {
+  eyebrowS2: string;
+  eyebrowS3: string;
+  kpiTitle: string;
+  kpiEyebrow: string;
+  coverKicker: string;
+  coverPeriodLabel: string;
+  weightLines: readonly [string, string, string, string];
+  highlightValue: string;
+  highlightTitle: string;
+  highlightNote: string;
+  s2Ghost: string;
+  s2Kicker: string;
+  s2Description: string;
+  s2FootLead: string;
+  s3Ghost: string;
+  s3Kicker: string;
+  levelsChartNote: string;
+  engineEmpty: string;
+  closingLine: string;
+};
+
+function deck3Copy(completedOnly: boolean, monthlyTarget: number, completedTotal: string): Deck3Copy {
+  if (completedOnly) {
+    const ceLabels = getLabels();
+    return {
+      eyebrowS2: "القسم الأول — نتائج فحص الجودة",
+      eyebrowS3: "القسم الثاني — التحاليل المتقدمة",
+      kpiTitle: "المؤشرات الرئيسية",
+      kpiEyebrow: "خلاصة التقرير",
+      coverKicker: "عرض تنفيذي · تقرير شامل",
+      coverPeriodLabel: "فترة الدراسة",
+      // No draw weights or monthly target behind completed-only rows.
+      weightLines: ["", "", "", ""],
+      highlightValue: completedTotal,
+      highlightTitle: ceLabels.ce_completed_samples,
+      highlightNote: ceLabels.ce_scope_note,
+      s2Ghost: "01",
+      s2Kicker: "القسم الأول",
+      s2Description: "دقة النتائج وتحديد موقع الاشتباه والاشتباهات الفائتة على مستوى التقرير والمنافذ والمستويات.",
+      s2FootLead: "النتائج العامة",
+      s3Ghost: "02",
+      s3Kicker: "القسم الثاني",
+      levelsChartNote: "الأعمدة بنفس أرقام صفحة دقة الرصد العامة — الخطان المتقطعان متوسطا التقرير",
+      engineEmpty: "لا توجد صور مستهدفة من محرك المخاطر في العيّنات المكتملة.",
+      closingLine: "نرحّب بالملاحظات والأسئلة على نتائج التقرير.",
+    };
+  }
+  const fixedShare = (weight: number) => fmtNum(Math.round(monthlyTarget * weight));
+  return {
+    eyebrowS2: EYEBROW_S2,
+    eyebrowS3: EYEBROW_S3,
+    kpiTitle: "مؤشرات الشهر",
+    kpiEyebrow: "خلاصة الشهر",
+    coverKicker: "عرض تنفيذي · تقرير شهري",
+    coverPeriodLabel: "فترة الدراسة (عيّنة شهر)",
+    weightLines: [
+      "وزن السحب: 100% — حصر كامل لمجتمع المستوى",
+      `وزن السحب: 40% من حصة العدد الثابت — ${fixedShare(0.4)} صورة`,
+      `وزن السحب: 30% من حصة العدد الثابت — ${fixedShare(0.3)} صورة`,
+      `وزن السحب: 30% من حصة العدد الثابت — ${fixedShare(0.3)} صورة`,
+    ],
+    highlightValue: fmtNum(monthlyTarget),
+    highlightTitle: "العيّنة المستهدفة الأساسية شهريًا (صورة)",
+    highlightNote: "أوزان المستويات الثاني–الرابع تُسحب من هذا العدد (40% + 30% + 30%)؛ المستوى الأول حصر كامل من مجتمعه خارج هذه الحصة.",
+    s2Ghost: "02",
+    s2Kicker: "القسم الثاني",
+    s2Description: "دقة النتائج وتحديد موقع الاشتباه والاشتباهات الفائتة على مستوى الشهر والمنافذ والمستويات.",
+    s2FootLead: "النتائج العامة للشهر",
+    s3Ghost: "03",
+    s3Kicker: "القسم الثالث",
+    levelsChartNote: "الأعمدة بنفس أرقام صفحة دقة الرصد العامة — الخطان المتقطعان متوسطا الشهر",
+    engineEmpty: "لا توجد صور مستهدفة من محرك المخاطر في عيّنة هذا الشهر.",
+    closingLine: "نرحّب بالملاحظات والأسئلة على نتائج الشهر والتقرير.",
+  };
+}
+
 export async function buildDeck3Slides(
   model: ReportModel,
   monthLabel: string,
@@ -196,9 +275,8 @@ export async function buildDeck3Slides(
   const co = model.scope === "completed-only";
   const ceLabels = getLabels();
   const completedTotal = fmtNum(model.sample.studied);
-  const eyebrowS2 = co ? "القسم الأول — نتائج فحص الجودة" : EYEBROW_S2;
-  const eyebrowS3 = co ? "القسم الثاني — التحاليل المتقدمة" : EYEBROW_S3;
-  const kpiTitle = co ? "المؤشرات الرئيسية" : "مؤشرات الشهر";
+  const copy = deck3Copy(co, monthlyTarget, completedTotal);
+  const { eyebrowS2, eyebrowS3, kpiTitle } = copy;
 
   // Port lists + pagination, computed up front — slides 8 and 11 (population
   // and accuracy by port) each split into `(يتبع)`-titled continuation pages
@@ -226,9 +304,9 @@ export async function buildDeck3Slides(
   // 1 — Cover
   parts.push(coverSlide({
     org,
-    kicker: co ? "عرض تنفيذي · تقرير شامل" : "عرض تنفيذي · تقرير شهري",
+    kicker: copy.coverKicker,
     title: REPORT_NAME,
-    periodLabel: co ? "فترة الدراسة" : "فترة الدراسة (عيّنة شهر)",
+    periodLabel: copy.coverPeriodLabel,
     periodValue: monthLabel,
     metaRows: [
       // The scope note itself is on the KPI and risk-level slides; it is too long for a cover cell.
@@ -303,7 +381,6 @@ export async function buildDeck3Slides(
   // handoff's own HTML (slide 4). Do not paraphrase or shorten. Only the
   // fixed-count figures are live: they derive from the real monthlyTarget
   // (40/30/30%), NOT the handoff's placeholder 6,250.
-  const fixedShare = (weight: number) => fmtNum(Math.round(monthlyTarget * weight));
   parts.push(levelDefinitionSlide({
     eyebrow: "المعجم",
     title: "مستويات المخاطر",
@@ -312,34 +389,34 @@ export async function buildDeck3Slides(
         title: "المستوى الأول",
         definition: "الصور التي تم الاشتباه بها في الأشعة من قبل المستوى الأول أو الثاني، دون مؤشرات من الفرق الأمنية الأخرى ودون استهداف من محرك المخاطر.",
         measures: "انفراد الفحص بالاشتباه دون مؤشرات أخرى.",
-        weightLine: co ? "" : "وزن السحب: 100% — حصر كامل لمجتمع المستوى",
+        weightLine: copy.weightLines[0],
         tone: "gold",
       },
       {
         title: "المستوى الثاني",
         definition: "الصور التي استهدفها محرك المخاطر، ولم يتم الاشتباه بها من قبل المستوى الأول والثاني.",
         measures: "ما يلتقطه محرك المخاطر ولا يُلتقط من قبل أخصائي الوسائل الآلية.",
-        weightLine: co ? "" : `وزن السحب: 40% من حصة العدد الثابت — ${fixedShare(0.4)} صورة`,
+        weightLine: copy.weightLines[1],
         tone: "blue",
       },
       {
         title: "المستوى الثالث",
         definition: "الصور التي لم يتم الاشتباه بها من قبل المستويين أو أحدهما، وتم الاشتباه بها من قبل أحد الفرق الأمنية الأخرى.",
         measures: "ما تلتقطه الفرق الأمنية الأخرى ولا يلتقطه الفحص.",
-        weightLine: co ? "" : `وزن السحب: 30% من حصة العدد الثابت — ${fixedShare(0.3)} صورة`,
+        weightLine: copy.weightLines[2],
         tone: "green-soft",
       },
       {
         title: "المستوى الرابع",
         definition: "الصور التي تحتوي على ضبط أمني أو اجتازت الأشعة من جهات خارجية دون اكتشاف الاشتباه من المسؤولين.",
         measures: "ما ثبت فواته بضبط أمني أو باكتشاف خارجي.",
-        weightLine: co ? "" : `وزن السحب: 30% من حصة العدد الثابت — ${fixedShare(0.3)} صورة`,
+        weightLine: copy.weightLines[3],
         tone: "red",
       },
     ],
-    highlightValue: co ? completedTotal : fmtNum(monthlyTarget),
-    highlightTitle: co ? ceLabels.ce_completed_samples : "العيّنة المستهدفة الأساسية شهريًا (صورة)",
-    highlightNote: co ? ceLabels.ce_scope_note : "أوزان المستويات الثاني–الرابع تُسحب من هذا العدد (40% + 30% + 30%)؛ المستوى الأول حصر كامل من مجتمعه خارج هذه الحصة.",
+    highlightValue: copy.highlightValue,
+    highlightTitle: copy.highlightTitle,
+    highlightNote: copy.highlightNote,
     meta: meta("glossary", "المعجم"),
   }));
 
@@ -350,7 +427,7 @@ export async function buildDeck3Slides(
   {
     const m = meta("kpis", kpiTitle);
     const missedShare = pct(t.missedSuspicion, t.evaluable);
-    const inner = `${contentHead({ eyebrow: co ? "خلاصة التقرير" : "خلاصة الشهر", title: kpiTitle, large: true })}
+    const inner = `${contentHead({ eyebrow: copy.kpiEyebrow, title: kpiTitle, large: true })}
 ${kpiBand(co ? [
       { label: ceLabels.ce_completed_samples, value: completedTotal, sub: ceLabels.ce_scope_note },
       { label: "الاشتباه الصحيح", value: fmtNum(t.correctSuspicion), valueTone: "green", sub: "نتائج اشتباه أكّدها أخصائي الجودة" },
@@ -470,13 +547,11 @@ ${kpiBand([
   // 9 — Section 2 divider
   parts.push(sectionDivider({
     eyebrow: footText,
-    ghost: co ? "01" : "02",
-    kicker: co ? "القسم الأول" : "القسم الثاني",
+    ghost: copy.s2Ghost,
+    kicker: copy.s2Kicker,
     title: "نتائج فحص الجودة",
-    description: co
-      ? "دقة النتائج وتحديد موقع الاشتباه والاشتباهات الفائتة على مستوى التقرير والمنافذ والمستويات."
-      : "دقة النتائج وتحديد موقع الاشتباه والاشتباهات الفائتة على مستوى الشهر والمنافذ والمستويات.",
-    footItems: [co ? "النتائج العامة" : "النتائج العامة للشهر", "النتائج حسب المنافذ ومستويات المخاطر"],
+    description: copy.s2Description,
+    footItems: [copy.s2FootLead, "النتائج حسب المنافذ ومستويات المخاطر"],
     meta: meta("s2", eyebrowS2),
   }));
 
@@ -615,9 +690,7 @@ ${legendRow([
     const inner = `${contentHead({
       eyebrow: eyebrowS2,
       title: "الدقتان حسب مستويات المخاطر",
-      note: co
-        ? "الأعمدة بنفس أرقام صفحة دقة الرصد العامة — الخطان المتقطعان متوسطا التقرير"
-        : "الأعمدة بنفس أرقام صفحة دقة الرصد العامة — الخطان المتقطعان متوسطا الشهر",
+      note: copy.levelsChartNote,
     })}
 <div class="v3-levels-chart-grid">${cols}</div>
 ${legendRow([
@@ -634,8 +707,8 @@ ${legendRow([
   // 14 — Section 3 divider
   parts.push(sectionDivider({
     eyebrow: footText,
-    ghost: co ? "02" : "03",
-    kicker: co ? "القسم الثاني" : "القسم الثالث",
+    ghost: copy.s3Ghost,
+    kicker: copy.s3Kicker,
     title: "التحاليل المتقدمة",
     description: "ما وراء النسب: مصفوفة النتائج، دقة المستويات، والتوافق مع الفرق الأمنية ومحرك المخاطر، وأثر التحديد وجودة الصورة.",
     footItems: [
@@ -847,7 +920,7 @@ ${legendRow([
         : `<div class="v3-engine-seg v3-tone-${tone}" style="width:${((n / targeted) * 100).toFixed(2)}%"><span>${label}</span></div>`;
     const engineBand =
       targeted === 0
-        ? `<div class="v3-engine-band"><div class="v3-engine-head"><b>التوافق مع محرك المخاطر</b><span>${co ? "لا توجد صور مستهدفة من محرك المخاطر في العيّنات المكتملة." : "لا توجد صور مستهدفة من محرك المخاطر في عيّنة هذا الشهر."}</span></div></div>`
+        ? `<div class="v3-engine-band"><div class="v3-engine-head"><b>التوافق مع محرك المخاطر</b><span>${copy.engineEmpty}</span></div></div>`
         : `<div class="v3-engine-band">
   <div class="v3-engine-head"><b>التوافق مع محرك المخاطر</b><span>${fmtNum(targeted)} صورة استهدفها المحرك — توافق ${fmtPct(pct(engineAgree, targeted))}</span></div>
   <div class="v3-engine-stats">
@@ -959,7 +1032,7 @@ ${legendRow([{ dash: "gold", text: `المتوسط العام ${fmtPct(overallSt
     org: { ...org, lines: [ORGANIZATION_PATH[1]] },
     kicker: "ختام العرض",
     title: "شكراً",
-    closingLine: co ? "نرحّب بالملاحظات والأسئلة على نتائج التقرير." : "نرحّب بالملاحظات والأسئلة على نتائج الشهر والتقرير.",
+    closingLine: copy.closingLine,
     metaRows: [
       { label: "فترة التقرير", value: monthLabel },
       { label: "القسم", value: ORGANIZATION_PATH[2] },

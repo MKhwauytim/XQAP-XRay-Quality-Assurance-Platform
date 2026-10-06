@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v151.4",
+    "date": "2026-10-06",
+    "bucket": "redesign",
+    "scope": "reports",
+    "title": "deck3 scope wording moved to deck3Copy() to stay under the complexity gate"
+  },
+  {
     "version": "v151.3",
     "date": "2026-10-06",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "answers",
     "title": "the per-employee request-queue scan is bounded and memoized, never at the cost of a hidden request"
-  },
-  {
-    "version": "v150.41",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "the ad-hoc probe has no cliff at the store cap and keeps store read memos fresh"
   }
 ];
