@@ -89,7 +89,7 @@ function threadFileReads(root: DirectoryHandleLike): string[] {
     .map((path) => path.slice(path.lastIndexOf("/") + 1, -".json".length));
 }
 
-const SARA: AuthSession = { username: "sara", role: "employee", loginAt: "2026-09-28T08:00:00.000Z" };
+const SARA: AuthSession = { username: "sara", role: "employee", loginAt: new Date().toISOString() };
 
 describe("FeedbackWidget — open renders from the index before any full read", () => {
   beforeEach(() => {

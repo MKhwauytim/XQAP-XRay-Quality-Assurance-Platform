@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v151.3",
+    "date": "2026-10-06",
+    "bucket": "fix",
+    "scope": "tests",
+    "title": "FeedbackWidget test sessions no longer expire with the calendar"
+  },
+  {
     "version": "v151.2",
     "date": "2026-10-06",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "answers",
     "title": "the ad-hoc probe has no cliff at the store cap and keeps store read memos fresh"
-  },
-  {
-    "version": "v150.40",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "broadcasts say whose answers changed; the employee queue ignores colleagues' own saves (never at the cost of a missed update)"
   }
 ];

@@ -80,7 +80,7 @@ const SUMMARY: FeedbackThreadSummary = {
 };
 
 function session(role: AuthSession["role"], mode?: "demo"): AuthSession {
-  return { username: "boss", role, loginAt: "2026-09-28T08:00:00.000Z", ...(mode ? { mode } : {}) };
+  return { username: "boss", role, loginAt: new Date().toISOString(), ...(mode ? { mode } : {}) };
 }
 
 async function openAllMessages(as: AuthSession) {
