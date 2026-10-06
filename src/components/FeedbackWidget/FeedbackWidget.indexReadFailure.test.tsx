@@ -41,7 +41,7 @@ vi.mock("../../data/storage/errorLogger", async (importOriginal) => {
   };
 });
 
-const SARA: AuthSession = { username: "sara", role: "employee", loginAt: "2026-09-28T08:00:00.000Z" };
+const SARA: AuthSession = { username: "sara", role: "employee", loginAt: new Date().toISOString() };
 
 function openPanel() {
   fireEvent.click(screen.getByRole("button", { name: /التواصل والاقتراحات|غير مقروءة/ }));

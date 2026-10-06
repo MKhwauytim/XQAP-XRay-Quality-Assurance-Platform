@@ -3,8 +3,11 @@ import { DEFAULT_EXEC_CONFIG } from "../reporting/executiveReportTypes";
 import type { ExecutiveReportInput } from "../reporting/executiveReportTypes";
 import { buildReportModel } from "../reporting/executive/model/reportModel";
 import { buildExecutiveReport } from "../reporting/executive";
+import { buildExecutiveDeckV2 } from "../reporting/executive/deck2";
+import { buildExecutiveDeckV3 } from "../reporting/executive/deck3";
 import { SHEET_NAMES, buildExecutiveWorkbookObject } from "../reporting/executive/workbook/workbook";
 import { getLabels } from "../labels/labelsStore";
+import { formatMonthShortLabel } from "../population/monthFolder";
 import * as XLSX from "xlsx";
 import { makeProcessingSummary, makeSampleMaster } from "../reporting/reportTestFixtures";
 import { COMPREHENSIVE_MONTH_LABEL, buildComprehensiveInput, mergeCompletedRows } from "./mergeWithSystem";
@@ -56,7 +59,7 @@ const bases: Array<[string, ExecutiveReportInput]> = [["system base", systemBase
 
 describe.each(bases)("real builders on a combined input (%s)", (_name, base) => {
   const merged = mergeCompletedRows([], workbookRows());
-  const input = buildComprehensiveInput(merged.rows, base);
+  const input = buildComprehensiveInput(merged.rows, base, merged.period);
 
   const clean = (html: string) => {
     expect(html.length).toBeGreaterThan(1000);
@@ -92,6 +95,71 @@ describe.each(bases)("real builders on a combined input (%s)", (_name, base) => 
     }
   });
 
+  it("buildExecutiveDeckV2 omits population/coverage sections and states its scope", async () => {
+    const html = await buildExecutiveDeckV2(input, {});
+    clean(html);
+    for (const absent of [
+      "القسم الأول — مجتمع الفحص", "القسم الرابع — التغطية والمساءلة التشغيلية",
+      'data-section="section1"', 'data-section="section4"',
+      "تغطية العيّنة", "إجمالي مجتمع الصور", "فترة الدراسة (عيّنة شهر)", "صورة مسجّلة هذا الشهر",
+    ]) expect(html, absent).not.toContain(absent);
+    for (const present of ['data-section="section2"', getLabels().ce_scope_note, getLabels().ce_completed_samples]) {
+      expect(html, present).toContain(present);
+    }
+  });
+
+  it("deck v2 renumbers the remaining sections from 1 and drops the population tab from the side rail", async () => {
+    const html = await buildExecutiveDeckV2(input, {});
+    for (const present of [
+      "القسم الأول — نتائج فحص الجودة", "القسم الثاني — التحاليل المتقدمة",
+      'data-section-label="القسم 1 — نتائج فحص الجودة"', 'data-section-label="القسم 2 — التحاليل المتقدمة"',
+      '<div class="v2-sep-eyebrow">القسم 1</div>', '<div class="v2-sep-eyebrow">القسم 2</div>',
+    ]) expect(html, present).toContain(present);
+    for (const absent of [
+      "القسم الثاني — نتائج فحص الجودة", "القسم الثالث — التحاليل المتقدمة",
+      '<div class="v2-rail-tab">مجتمع الفحص</div>', '<div class="v2-rail-tab active">مجتمع الفحص</div>',
+    ]) expect(html, absent).not.toContain(absent);
+    // Visible text and attributes only (the theme CSS carries «القسم 3 · …» comments).
+    const markup = html.replace(/<style[\s\S]*?<\/style>/g, " ");
+    for (const absent of ["القسم 3", "القسم 4"]) expect(markup, absent).not.toContain(absent);
+    expect(html).toContain('<div class="v2-rail-tab active">نتائج فحص الجودة</div>');
+  });
+
+  it("buildExecutiveDeckV3 omits the population section and target figures, renumbers, and states its scope", async () => {
+    const html = await buildExecutiveDeckV3(input, {});
+    clean(html);
+    for (const absent of [
+      "القسم الأول — مجتمع الفحص", "مجتمع الفحص والعيّنة حسب المستوى", "التوزيع على المنافذ البرية والبحرية",
+      "إجمالي المجتمع", "العيّنة المسحوبة", "العيّنة المستهدفة الأساسية شهريًا", "وزن السحب",
+      "القسم الثالث", "مؤشرات الشهر", "عيّنة هذا الشهر", "نتائج الشهر", "فترة الدراسة (عيّنة شهر)",
+    ]) expect(html, absent).not.toContain(absent);
+    for (const present of [
+      "القسم الأول — نتائج فحص الجودة", "القسم الثاني — التحاليل المتقدمة",
+      getLabels().ce_scope_note, getLabels().ce_completed_samples,
+    ]) expect(html, present).toContain(present);
+    // Every slide's footer total matches the real slide count.
+    const slides = html.match(/<section class="slide v3/g) ?? [];
+    const totals = new Set([...html.matchAll(/v3-page-num">\d+ \/ (\d+)</g)].map((m) => m[1]));
+    expect([...totals]).toEqual([String(slides.length)]);
+  });
+
+  it("every edition states the samples' study period instead of the all-months placeholder", async () => {
+    // Fixture months: Excel serials 46023 (Jan 2026) and 46054 (Feb 2026).
+    const label = getLabels().ce_period_range.replace("{from}", formatMonthShortLabel(1, 2026)).replace("{to}", formatMonthShortLabel(2, 2026));
+    expect(input.periodLabel).toBe(label);
+    const visible = (html: string) => html.replace(/<style[\s\S]*?<\/style>/g, " ").replace(/<script[\s\S]*?<\/script>/g, " ");
+    for (const [name, html] of [
+      ["document", await buildExecutiveReport(input, {})],
+      ["deck v2", await buildExecutiveDeckV2(input, {})],
+      ["deck v3", await buildExecutiveDeckV3(input, {})],
+    ] as const) {
+      expect(html, name).toContain(label);
+      expect(visible(html), name).not.toContain(COMPREHENSIVE_MONTH_LABEL);
+    }
+    const wb = await buildExecutiveWorkbookObject(input, {});
+    expect(XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[SHEET_NAMES.kpi], { header: 1 }).flat().map(String)).toContain(label);
+  });
+
   it("buildExecutiveWorkbookObject", async () => {
     const wb = await buildExecutiveWorkbookObject(input, {});
     expect(wb.SheetNames.length).toBeGreaterThan(0);
@@ -111,10 +179,8 @@ describe.each(bases)("real builders on a combined input (%s)", (_name, base) => 
   });
 });
 
-// Decks are intentionally NOT exercised for completed-only scope: the comprehensive page
-// offers document + workbook only, and deck v2/v3 still render population/coverage
-// framing from the completed-row count. Do not add deck cases here until they honour
-// `model.scope === "completed-only"`.
+// Deck v2 and v3 both honour `model.scope === "completed-only"`; the comprehensive page
+// opens whichever edition the workspace has chosen.
 
 /**
  * Completed-only scope must never print a population / coverage / target FIGURE, in
@@ -147,9 +213,13 @@ describe("completed-only scope states no population figure", () => {
     expect(f.join(" ")).not.toContain(getLabels().ce_narrative_completed_total.split("{n}")[0]);
   });
 
-  it.each(fixtures)("document and workbook text carry no figure-bearing population phrase (%s)", async (_n, input) => {
+  it.each(fixtures)("document, deck v2 and workbook text carry no figure-bearing population phrase (%s)", async (_n, input) => {
     const html = text(await buildExecutiveReport(input, {}));
     expect(html).not.toMatch(FIGURE);
+    const deck = text(await buildExecutiveDeckV2(input, {}));
+    expect(deck).not.toMatch(FIGURE);
+    const deck3 = text(await buildExecutiveDeckV3(input, {}));
+    expect(deck3).not.toMatch(FIGURE);
     const wb = await buildExecutiveWorkbookObject(input, {});
     for (const name of wb.SheetNames) {
       const cells = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[name], { header: 1 }).flat().map(String);

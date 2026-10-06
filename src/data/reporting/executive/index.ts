@@ -24,7 +24,7 @@ export async function buildExecutiveReport(
   const slides = await buildDocumentSlides(model, formatIssueDate());
   return buildViewerHtml(
     slides,
-    formatMonthFolderShortLabel(input.monthFolderName),
+    input.periodLabel ?? formatMonthFolderShortLabel(input.monthFolderName),
     sourceRevisionsFooterHtml(input.sourceRevisions, esc),
   );
 }

@@ -28,6 +28,11 @@ import {
   BASE_ROWS_PER_PAGE,
   MARKING_TARGET,
   NAV_SECTIONS,
+  SECTION_ORDINALS,
+  getActiveOmittedSections,
+  navSectionLabel,
+  sectionNumber,
+  setActiveOmittedSections,
   STAGE_TONES,
   badgeIcon,
   barCell,
@@ -137,15 +142,21 @@ export function coverSlide(
     </div>`;
   // Asymmetric hero: giant month lockup + title on the start side, stacked
   // issue-metadata column on the end side, gold rule system between them.
+  // Completed-only (comprehensive report): no single month and no population /
+  // sample / coverage figures exist, so the cover states the scope and the
+  // completed-sample count instead, and every style slot renders this body
+  // (the three alternates below are built around those scope figures).
+  const completedOnly = model.scope === "completed-only";
+  const ceLabels = getLabels();
   const coverBody = `<div class="v2-cover-grid">
       <div class="v2-cover-hero">
-        <div class="v2-cover-kicker"><span class="v2-cover-kicker-dot"></span>عرض تنفيذي · تقرير شهري</div>
+        <div class="v2-cover-kicker"><span class="v2-cover-kicker-dot"></span>${completedOnly ? "عرض تنفيذي · تقرير شامل" : "عرض تنفيذي · تقرير شهري"}</div>
         <h1 class="v2-cover-title">تقرير ضمان جودة<br/>فحص الأشعة</h1>
         <div class="v2-cover-rule"></div>
         <div class="v2-cover-lockup">
-          <span class="v2-cover-lockup-label">فترة الدراسة (عيّنة شهر)</span>
-          <span class="v2-cover-lockup-period">${esc(model.summary.periodId)}</span>
-        </div>
+          <span class="v2-cover-lockup-label">${completedOnly ? esc(ceLabels.ce_completed_samples) : "فترة الدراسة (عيّنة شهر)"}</span>
+          <span class="v2-cover-lockup-period">${completedOnly ? fmtNum(model.sample.studied) : esc(model.summary.periodId)}</span>
+        </div>${completedOnly ? `\n        <p class="v2-cover-scope" style="margin:4px 0 0;max-width:34em;font-size:0.92rem;line-height:1.6;color:rgba(255,255,255,.82)">${esc(ceLabels.ce_scope_note)}</p>` : ""}
         <div class="v2-cover-badge"><span>${icon("shield", 13)}</span>داخلي — للاستخدام التنفيذي</div>
       </div>
       <div class="v2-cover-meta-col">${meta}</div>
@@ -244,8 +255,12 @@ export function coverSlide(
       ])}
     </div>`;
 
-  const body = renderVariants("slide-cover", [coverBody, ledgerBody, briefingBody, gridBody], variantPreview);
-  return `<section class="slide v2 title-slide v2-cover" id="slide-cover" data-title="الغلاف" data-section="cover" data-section-label="${esc(NAV_SECTIONS.cover)}">
+  const body = renderVariants(
+    "slide-cover",
+    completedOnly ? [coverBody, coverBody, coverBody, coverBody] : [coverBody, ledgerBody, briefingBody, gridBody],
+    variantPreview,
+  );
+  return `<section class="slide v2 title-slide v2-cover" id="slide-cover" data-title="الغلاف" data-section="cover" data-section-label="${esc(navSectionLabel("cover"))}">
     ${slideControls("slide-cover", variantPreview)}
     ${meshLayer}
     <div class="slide-art" aria-hidden="true"></div>
@@ -1125,7 +1140,10 @@ export function sectionSeparatorSlide(opts: {
   total: number;
   variantPreview: boolean;
 }): string {
-  const { sectionNo, sectionKey, iconName, title, blurb, tone, seedBase, num, total, variantPreview } = opts;
+  const { sectionKey, iconName, title, blurb, tone, seedBase, num, total, variantPreview } = opts;
+  // The shown number follows the sections actually in the deck (renumbered when
+  // the completed-only scope omits some); the slide id keeps the fixed number.
+  const sectionNo = sectionNumber(sectionKey) ?? opts.sectionNo;
   // Seeded geometric pattern overlay, tinted to the section tone at very low
   // opacity (CSS-controlled) so it never touches headline contrast. Seed =
   // month key + section id → deterministic per report.
@@ -1199,9 +1217,9 @@ export function sectionSeparatorSlide(opts: {
     ]),
   })}</div>`;
 
-  const body = renderVariants(`slide-sep-${sectionNo}`, [sepBody, ledgerBody, briefingBody, gridBody], variantPreview);
-  return `<section class="slide v2 v2-sep-slide ${esc(tone)}" id="slide-sep-${sectionNo}" data-title="${esc(title)}" data-section="${sectionKey}" data-section-label="${esc(NAV_SECTIONS[sectionKey])}">
-  ${slideControls(`slide-sep-${sectionNo}`, variantPreview)}
+  const body = renderVariants(`slide-sep-${opts.sectionNo}`, [sepBody, ledgerBody, briefingBody, gridBody], variantPreview);
+  return `<section class="slide v2 v2-sep-slide ${esc(tone)}" id="slide-sep-${opts.sectionNo}" data-title="${esc(title)}" data-section="${sectionKey}" data-section-label="${esc(navSectionLabel(sectionKey))}">
+  ${slideControls(`slide-sep-${opts.sectionNo}`, variantPreview)}
   ${sideRail(sectionKey)}
   <div class="v2-sep-bg" aria-hidden="true"></div>
   ${patternLayer}
@@ -3513,7 +3531,18 @@ export function closingSlide(
   // the risk-agency base file (always, every row originates from it) and the
   // optional BI supporting file, detected from the processor's row flags.
   const src = model.dataSources;
-  const sourcesBlock = `<div class="v2-src-grid">
+  const completedOnly = model.scope === "completed-only";
+  const ceLabels = getLabels();
+  // Completed-only: the rows are completed samples across months, not one
+  // month's risk-agency upload, so the per-month source cards do not apply.
+  const sourcesBlock = completedOnly
+    ? `<div class="v2-src-grid">
+    <div class="v2-src-card gold">
+      <div class="v2-src-head">${badgeIcon("layers", 15)}<b>${esc(ceLabels.ce_completed_samples)}</b><span class="v2-src-tag">المصدر الأساسي</span></div>
+      <p>${fmtNum(model.sample.studied)} صورة — ${esc(ceLabels.ce_scope_note)}</p>
+    </div>
+  </div>`
+    : `<div class="v2-src-grid">
     <div class="v2-src-card gold">
       <div class="v2-src-head">${badgeIcon("layers", 15)}<b>بيانات وكالة المخاطر</b><span class="v2-src-tag">المصدر الأساسي</span></div>
       <p>${fmtNum(src.riskRowCount)} صورة مسجّلة هذا الشهر</p>
@@ -3560,7 +3589,7 @@ export function closingSlide(
     iconName: "shield",
     headline: "مصدر البيانات والاعتماد",
     subhead: "تتبّع نسخة البيانات، والتصنيف، والجهة المُصدِرة.",
-    bodyVariants: [body, ledgerBody, briefingBody, gridBody],
+    bodyVariants: completedOnly ? [body, body, body, body] : [body, ledgerBody, briefingBody, gridBody],
     variantPreview,
     num,
     total,
@@ -3589,13 +3618,44 @@ export async function buildDeckV2Slides(
   sourceRevisions?: SourceRevisions,
   seedBase = "",
 ): Promise<string> {
+  // Completed-only scope (comprehensive report): there is no population, sample
+  // master or distribution behind the rows, so section 1 (population) and
+  // section 4 (coverage/accountability) are omitted entirely. The remaining
+  // sections are renumbered from 1 — separators, TOC, nav labels and side rail
+  // all read the same omitted-set, so they agree.
+  const previous = getActiveOmittedSections();
+  setActiveOmittedSections(model.scope === "full" ? [] : ["section1", "section4"]);
+  try {
+    return await assembleDeckV2Slides(model, generatedAt, variantPreview, sourceRevisions, seedBase);
+  } finally {
+    setActiveOmittedSections(previous);
+  }
+}
+
+/** TOC title for a content section: «القسم <ordinal> — <name>», numbered over the sections in the deck. */
+function sectionTocTitle(key: NavSectionKey, name: string): string {
+  const n = sectionNumber(key);
+  return `القسم ${n === null ? "" : SECTION_ORDINALS[n - 1]} — ${name}`;
+}
+
+async function assembleDeckV2Slides(
+  model: ReportModel,
+  generatedAt: Date,
+  variantPreview: boolean,
+  sourceRevisions: SourceRevisions | undefined,
+  seedBase: string,
+): Promise<string> {
   const glossaryBuilders = glossarySlideBuilders(variantPreview); // levels page + terms page
 
   // (The section-2 opener funnel was removed with the separator's side column —
   // separators now carry only the section number, name, and تعريف.)
 
+  // Omitted sections (see buildDeckV2Slides) contribute zero pages and zero TOC
+  // rows; the page ranges below are computed over what remains.
+  const full = model.scope === "full";
+
   // Section 1 — مجتمع الفحص: separator + risk stages + port tables (1..N pages).
-  const sectionOne: SlideBuilder[] = [
+  const sectionOne: SlideBuilder[] = !full ? [] : [
     (num, total) =>
       sectionSeparatorSlide({
         sectionNo: 1,
@@ -3648,7 +3708,7 @@ export async function buildDeckV2Slides(
   // this section's builder list is never empty (its pages render an honest
   // empty state instead of being omitted when no distribution exists yet —
   // see coverage.ts/accountability.ts), so its TOC row below is unconditional.
-  const sectionFour: SlideBuilder[] = sectionFourBuilders(model, variantPreview);
+  const sectionFour: SlideBuilder[] = full ? sectionFourBuilders(model, variantPreview) : [];
 
   // Page order: cover(1) · toc(2) · [month-in-numbers(3) — currently hidden,
   // see SHOW_MONTH_NUMBERS_SLIDE] · glossary(N) · section 1 · section 2 ·
@@ -3703,17 +3763,21 @@ export async function buildDeckV2Slides(
       figure: fmtNum(GLOSSARY_CATEGORIES.reduce((s, c) => s + c.terms.length, 0)),
       figureLabel: "مصطلح",
     },
+    ...(sectionOne.length > 0
+      ? [
+          {
+            title: sectionTocTitle("section1", "مجتمع الفحص"),
+            goal: "التعريف بمجتمع الصور وتوزيعه بحسب المخاطر والمنافذ، وأساس سحب العيّنة.",
+            range: `${pad(sectionOneStart)}–${pad(sectionOneEnd)}`,
+            iconName: "layers",
+            tone: "green",
+            figure: fmtNum(model.sample.total),
+            figureLabel: "عيّنة",
+          },
+        ]
+      : []),
     {
-      title: "القسم الأول — مجتمع الفحص",
-      goal: "التعريف بمجتمع الصور وتوزيعه بحسب المخاطر والمنافذ، وأساس سحب العيّنة.",
-      range: `${pad(sectionOneStart)}–${pad(sectionOneEnd)}`,
-      iconName: "layers",
-      tone: "green",
-      figure: fmtNum(model.sample.total),
-      figureLabel: "عيّنة",
-    },
-    {
-      title: "القسم الثاني — نتائج فحص الجودة",
+      title: sectionTocTitle("section2", "نتائج فحص الجودة"),
       goal: "جودة الصور المفحوصة، ودقة قرارات الفحص بين الاشتباه والسليمة، لكل منفذ.",
       range: `${pad(sectionTwoStart)}–${pad(sectionTwoEnd)}`,
       iconName: "gauge",
@@ -3728,7 +3792,7 @@ export async function buildDeckV2Slides(
     ...(sectionThree.length > 0
       ? [
           {
-            title: "القسم الثالث — التحاليل المتقدمة",
+            title: sectionTocTitle("section3", "التحاليل المتقدمة"),
             goal: "تحاليل معمّقة تُكمل قراءة نتائج الجودة والدقة.",
             range:
               sectionThreeEnd > sectionThreeStart
@@ -3741,20 +3805,25 @@ export async function buildDeckV2Slides(
           },
         ]
       : []),
-    // Unconditional (unlike section 3's row above): section 4's builder list
-    // is never empty — see the `sectionFour` declaration's doc comment.
-    {
-      title: "القسم الرابع — التغطية والمساءلة التشغيلية",
-      goal: "من وُزِّعت عليه العيّنة، ومدى إنجازه، وأسباب الاستبدال، وعدد إعادة التعيين.",
-      range:
-        sectionFourEnd > sectionFourStart
-          ? `${pad(sectionFourStart)}–${pad(sectionFourEnd)}`
-          : pad(sectionFourStart),
-      iconName: "layers",
-      tone: "blue",
-      figure: fmtNum(sectionFour.length),
-      figureLabel: "صفحة",
-    },
+    // Section 4's builder list is never empty for the full scope (see the
+    // `sectionFour` declaration's doc comment); it is empty only when the
+    // completed-only scope omits the section, and then it gets no TOC row.
+    ...(sectionFour.length > 0
+      ? [
+          {
+            title: sectionTocTitle("section4", "التغطية والمساءلة التشغيلية"),
+            goal: "من وُزِّعت عليه العيّنة، ومدى إنجازه، وأسباب الاستبدال، وعدد إعادة التعيين.",
+            range:
+              sectionFourEnd > sectionFourStart
+                ? `${pad(sectionFourStart)}–${pad(sectionFourEnd)}`
+                : pad(sectionFourStart),
+            iconName: "layers",
+            tone: "blue",
+            figure: fmtNum(sectionFour.length),
+            figureLabel: "صفحة",
+          },
+        ]
+      : []),
   ];
 
   const slides: string[] = [

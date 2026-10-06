@@ -538,7 +538,7 @@ export async function buildExecutiveDeckV2(
       );
       return buildDeckV2Html(
         slides,
-        formatMonthFolderShortLabel(input.monthFolderName),
+        input.periodLabel ?? formatMonthFolderShortLabel(input.monthFolderName),
         variantPreview,
         sourceRevisionsFooterHtml(input.sourceRevisions, esc),
       );
