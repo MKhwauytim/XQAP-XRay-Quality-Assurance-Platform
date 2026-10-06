@@ -3,6 +3,7 @@ import { DEFAULT_EXEC_CONFIG } from "../reporting/executiveReportTypes";
 import type { ExecutiveReportInput } from "../reporting/executiveReportTypes";
 import { buildReportModel } from "../reporting/executive/model/reportModel";
 import { buildExecutiveReport } from "../reporting/executive";
+import { buildExecutiveDeckV2 } from "../reporting/executive/deck2";
 import { SHEET_NAMES, buildExecutiveWorkbookObject } from "../reporting/executive/workbook/workbook";
 import { getLabels } from "../labels/labelsStore";
 import * as XLSX from "xlsx";
@@ -92,6 +93,19 @@ describe.each(bases)("real builders on a combined input (%s)", (_name, base) => 
     }
   });
 
+  it("buildExecutiveDeckV2 omits population/coverage sections and states its scope", async () => {
+    const html = await buildExecutiveDeckV2(input, {});
+    clean(html);
+    for (const absent of [
+      "القسم الأول — مجتمع الفحص", "القسم الرابع — التغطية والمساءلة التشغيلية",
+      'data-section="section1"', 'data-section="section4"',
+      "تغطية العيّنة", "إجمالي مجتمع الصور", "فترة الدراسة (عيّنة شهر)", "صورة مسجّلة هذا الشهر",
+    ]) expect(html, absent).not.toContain(absent);
+    for (const present of ["القسم الثاني — نتائج فحص الجودة", 'data-section="section2"', getLabels().ce_scope_note, getLabels().ce_completed_samples]) {
+      expect(html, present).toContain(present);
+    }
+  });
+
   it("buildExecutiveWorkbookObject", async () => {
     const wb = await buildExecutiveWorkbookObject(input, {});
     expect(wb.SheetNames.length).toBeGreaterThan(0);
@@ -111,10 +125,8 @@ describe.each(bases)("real builders on a combined input (%s)", (_name, base) => 
   });
 });
 
-// Decks are intentionally NOT exercised for completed-only scope: the comprehensive page
-// offers document + workbook only, and deck v2/v3 still render population/coverage
-// framing from the completed-row count. Do not add deck cases here until they honour
-// `model.scope === "completed-only"`.
+// Deck v2 honours `model.scope === "completed-only"` (it is what the comprehensive page
+// opens). Deck v3 does not yet and is not offered there — do not add v3 cases until it does.
 
 /**
  * Completed-only scope must never print a population / coverage / target FIGURE, in
@@ -147,9 +159,11 @@ describe("completed-only scope states no population figure", () => {
     expect(f.join(" ")).not.toContain(getLabels().ce_narrative_completed_total.split("{n}")[0]);
   });
 
-  it.each(fixtures)("document and workbook text carry no figure-bearing population phrase (%s)", async (_n, input) => {
+  it.each(fixtures)("document, deck v2 and workbook text carry no figure-bearing population phrase (%s)", async (_n, input) => {
     const html = text(await buildExecutiveReport(input, {}));
     expect(html).not.toMatch(FIGURE);
+    const deck = text(await buildExecutiveDeckV2(input, {}));
+    expect(deck).not.toMatch(FIGURE);
     const wb = await buildExecutiveWorkbookObject(input, {});
     for (const name of wb.SheetNames) {
       const cells = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[name], { header: 1 }).flat().map(String);

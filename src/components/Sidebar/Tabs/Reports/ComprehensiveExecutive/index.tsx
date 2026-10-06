@@ -28,15 +28,16 @@ import { SourceModeSwitch } from "./SourceModeSwitch";
 import { DEFAULT_SOURCE_MODE } from "./sourceMode";
 import type { ComprehensiveSourceMode } from "./sourceMode";
 import { useComprehensiveWorkbook } from "./useComprehensiveWorkbook";
+import { loadDeckStyleChoices } from "../../../../../data/reporting/executive/deck2/styleChoices";
 
 /** Families whose change can alter a month's completed answers (mirrors the Reports hub). */
 const REFRESH_FAMILIES: readonly DataRefreshFamily[] = ["manifest", "distribution", "answers"];
 
 type SystemMonths = { byMonth: Array<{ month: string; rows: ExecutiveReportRow[] }>; base: ComprehensiveBase | null };
 type SystemState = { status: "loading" } | { status: "error" } | ({ status: "ready" } & SystemMonths);
-// v1 of the comprehensive report is document + workbook only; the decks still show
-// population framing and are a follow-up.
-type ExportKind = "document" | "xlsx";
+// The executive deck (v2, the live default) honours the completed-only scope: it drops
+// the population and coverage sections. Deck v3 does not yet, so it is not offered here.
+type ExportKind = "deck" | "xlsx";
 
 /** Names are not shown in the combined report (config.showEmployeeNames is false). */
 const NO_NAMES: Record<string, string> = {};
@@ -192,9 +193,11 @@ export default function ComprehensiveExecutive() {
         config: DEFAULT_EXEC_CONFIG,
       };
       const input = buildComprehensiveInput(merged.rows, base);
-      if (kind === "document") {
-        const { openExecutiveReport } = await import("../../../../../data/reporting/executiveReport");
-        await openExecutiveReport(input, NO_NAMES);
+      if (kind === "deck") {
+        // Same saved slide styles the Reports tab's deck uses; none without a workspace.
+        const saved = directoryHandle ? await loadDeckStyleChoices(directoryHandle) : null;
+        const { openExecutiveDeckV2 } = await import("../../../../../data/reporting/executive/deck2");
+        await openExecutiveDeckV2(input, NO_NAMES, saved?.choices);
       } else {
         const { buildExecutiveXlsx } = await import("../../../../../data/reporting/executiveReport");
         await buildExecutiveXlsx(input, NO_NAMES);
@@ -265,8 +268,8 @@ export default function ComprehensiveExecutive() {
       {!systemLoading && !hasRows && !needsFile && <p className="ce-empty" role="status">{labels.ce_empty}</p>}
 
       <div className="ce-row ce-actions">
-        <button type="button" className="ce-btn" disabled={exportDisabled} onClick={() => void handleExport("document")}>
-          {labels.ce_generate_doc}
+        <button type="button" className="ce-btn" disabled={exportDisabled} onClick={() => void handleExport("deck")}>
+          {labels.ce_generate_deck}
         </button>
         <button type="button" className="ce-btn" disabled={exportDisabled} onClick={() => void handleExport("xlsx")}>
           {labels.ce_generate_xlsx}

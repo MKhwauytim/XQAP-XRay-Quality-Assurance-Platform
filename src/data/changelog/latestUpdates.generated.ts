@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v151.1",
+    "date": "2026-10-06",
+    "bucket": "fix",
+    "scope": "reports",
+    "title": "comprehensive report opens the executive deck, not the detailed document"
+  },
+  {
     "version": "v151.0",
     "date": "2026-10-05",
     "bucket": "feature",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "answers",
     "title": "the results view does no share I/O when hidden; polls are jittered, single-flight and fenced per user"
-  },
-  {
-    "version": "v150.37",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "keep one IndexedDB connection open and prune old synced mirror records"
   }
 ];

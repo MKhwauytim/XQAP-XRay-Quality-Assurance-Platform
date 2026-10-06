@@ -2136,7 +2136,7 @@ export const DEFAULT_LABELS = {
   ce_stat_skipped_bad_result:    "مستبعد: نتيجة غير صالحة",
   ce_stat_total_rows:            "إجمالي صفوف التقرير",
   ce_empty:                      "لا توجد عينات مكتملة لإنشاء التقرير",
-  ce_generate_doc:               "التقرير التفصيلي",
+  ce_generate_deck:              "التقرير التنفيذي",
   ce_narrative_completed_total:  "تم استلام وتحليل بيانات العينات المكتملة. إجمالي العينات المكتملة {n} صورة.",
   ce_scope_note:                 "تقرير للعينات المكتملة فقط — لا يتضمن بيانات المجتمع أو نسب التغطية",
   ce_completed_samples:          "عينات مكتملة",
