@@ -17,6 +17,39 @@ export const newMappingReport = (): MappingReport => ({
 });
 
 const COMPLETED = "مكتمل";
+
+/**
+ * Header spellings used by the examined-sample layout (the «بناءً على فترة العينة»
+ * workbook: S<MON> sheets) mapped to the canonical names this module reads.
+ */
+export const HEADER_ALIASES: Record<string, string> = {
+  "رقم صورة الاشعة": "معرف الأشعة",
+  "شهر الفحص": "الشهر",
+  "نتيجة المستوى الأول للاشعة": "نتيجة المستوى الأول",
+  "نتيجة المستوى الاول": "نتيجة المستوى الأول",
+  "نتيجة المستوى الثاني للاشعة": "نتيجة المستوى الثاني",
+};
+export const canonicalHeader = (h: string): string => HEADER_ALIASES[h.trim()] ?? h;
+
+/** Per-sheet options: `examined` = the sheet lists only examined samples and has no «الاكتمال» column. */
+export type MapOptions = { examined?: boolean };
+
+const EXCEL_EPOCH_UTC = Date.UTC(1899, 11, 30);
+/** Year of an Excel date serial, or null when the cell is not a plausible serial. */
+function yearOfSerial(raw: string | undefined): number | null {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1 || n > 80000) return null;
+  return new Date(EXCEL_EPOCH_UTC + Math.floor(n) * 86_400_000).getUTCFullYear();
+}
+/** The examined layout stores a bare month number (1–12); the year comes from the expert-review date. */
+function resolveMonth(c: Record<string, string>, examined: boolean): string | null {
+  const raw = (c["الشهر"] ?? "").trim();
+  if (examined && /^(?:[1-9]|1[0-2])$/.test(raw)) {
+    const year = yearOfSerial(c["تاريخ رصد الخبير"]);
+    return year === null ? null : parseStudyMonth(`${raw}-${year}`);
+  }
+  return parseStudyMonth(c["الشهر"]);
+}
 const INVALID_ID = "معرف غير صحيح";
 type Result = "سليمة" | "اشتباه";
 type Level = "عالي" | "متوسط" | "منخفض";
@@ -29,6 +62,7 @@ function result(r: MappingReport, col: string, v: string | undefined): Result | 
   const s = v?.trim() ?? "";
   if (s === "") return null;
   if (s === "سليمة" || s === "اشتباه") return s;
+  if (s === "سليمه") return "سليمة"; // common ه/ة spelling variant
   note(r, col, s);
   return null;
 }
@@ -41,12 +75,13 @@ function level(r: MappingReport, col: string, v: string | undefined): Level | nu
 }
 const text = (v: string | undefined) => (v?.trim() ? v.trim() : null);
 
-export function mapSampleRow(c: Record<string, string>, sheet: string, report: MappingReport): MappedWorkbookRow | null {
+export function mapSampleRow(c: Record<string, string>, sheet: string, report: MappingReport, opts: MapOptions = {}): MappedWorkbookRow | null {
   report.totalRows++;
-  if ((c["الاكتمال"] ?? "").trim() !== COMPLETED) { report.incomplete++; return null; }
+  const examined = opts.examined === true;
+  if (!examined && (c["الاكتمال"] ?? "").trim() !== COMPLETED) { report.incomplete++; return null; }
   const id = text(c["معرف الأشعة"]);
   if (!id) { report.skippedNoId++; return null; }
-  const month = parseStudyMonth(c["الشهر"]);
+  const month = resolveMonth(c, examined);
   if (!month) { report.skippedNoMonth++; return null; }
   const l1 = result(report, "نتيجة المستوى الأول", c["نتيجة المستوى الأول"]);
   const l2 = result(report, "نتيجة المستوى الثاني", c["نتيجة المستوى الثاني"]);
@@ -54,8 +89,11 @@ export function mapSampleRow(c: Record<string, string>, sheet: string, report: M
   const expert = result(report, "صحة النتيجة", c["صحة النتيجة"]);
   const imageResult = classifyImageResult(l1, l2);
   const img = (c["هل يوجد صورة؟"] ?? "").trim();
-  const imageAvailable = img === "نعم" ? true : img === "لا" || img === INVALID_ID ? false : null;
-  if (img !== "" && imageAvailable === null) note(report, "هل يوجد صورة؟", img);
+  // Workbook rows are completed samples whatever the image column says: «لا» /
+  // invalid id is recorded as the reason but never leaves the row out of the studied set.
+  const imageAvailable = img === "نعم" ? true : null;
+  const noImage = img === "لا" || img === INVALID_ID;
+  if (img !== "" && img !== "نعم" && !noImage) note(report, "هل يوجد صورة؟", img);
   const mark = (c["هل يوجد تحديد؟"] ?? "").trim();
   if (mark !== "" && mark !== "نعم" && mark !== "لا") note(report, "هل يوجد تحديد؟", mark);
   const row: ExecutiveReportRow = {

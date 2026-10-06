@@ -23,8 +23,35 @@ export type ChartBar = {
 export type ChartReference = { value: number; label?: string; tone?: RefTone };
 
 export function scalePct(value: number, min: number, max: number): number {
+  if (!(max > min) || !Number.isFinite(value)) return 0;
   const pct = ((value - min) / (max - min)) * 100;
   return Math.max(0, Math.min(100, pct));
+}
+
+export type ChartAxis = { min: number; max: number };
+
+/**
+ * The handoff fixes each chart's axis (e.g. 86–98%) to the demo data. Real
+ * data routinely falls outside it, and `scalePct` clamps: a value under `min`
+ * rendered as a zero-height bar (no bar, no label) and one over `max` as a
+ * full-height bar. Widen the axis just enough that every value keeps a visible
+ * bar and label; an axis the data already fits is returned unchanged.
+ */
+export function fitAxis(values: ReadonlyArray<number | null | undefined>, min: number, max: number): ChartAxis {
+  const top = max > min ? max : min + 1;
+  const finite = values.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+  if (!finite.length) return { min, max: top };
+  const lo = Math.min(...finite);
+  const hi = Math.max(...finite);
+  const span = top - min;
+  const fittedMin = lo < min + 0.1 * span ? Math.max(0, Math.floor((lo - 0.2 * span) / 5) * 5) : min;
+  const fittedMax = hi > top ? (hi <= 100 ? 100 : Math.ceil(hi / 5) * 5) : top;
+  return { min: Math.min(fittedMin, min), max: fittedMax };
+}
+
+/** The "scale from X to Y" legend caption for an axis. */
+export function scaleCaption(axis: ChartAxis): string {
+  return `المقياس من ${axis.min}% إلى ${axis.max}%`;
 }
 
 function defaultFormat(v: number): string {

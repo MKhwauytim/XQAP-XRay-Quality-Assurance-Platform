@@ -24,7 +24,7 @@ import {
   legendRow, impactColumn, slideShell, contentHead, pad2,
   type OrgBlock, type SlideMeta, type TableCell,
 } from "./slideKit";
-import { barChart, groupedBarChart, type ChartBar } from "./chartKit";
+import { barChart, fitAxis, groupedBarChart, scaleCaption, type ChartBar } from "./chartKit";
 
 /**
  * Max port rows one `.v3-panel` table page can hold without spilling past the
@@ -293,7 +293,7 @@ export async function buildDeck3Slides(
   const accPages = portPageCount(portAcc.land.length, portAcc.sea.length);
   // Section 1 = its divider + the per-level slide + `popPages` port pages.
   const sectionOnePages = 2 + popPages;
-  const TOTAL = 21 + (popPages - 1) + (accPages - 1) - (co ? sectionOnePages : 0);
+  const TOTAL = 23 + (popPages - 1) + (accPages - 1) - (co ? sectionOnePages : 0);
   const YITBA = " (يتبع)";
 
   let nextNum = 1;
@@ -329,7 +329,7 @@ export async function buildDeck3Slides(
   const s2Start = co ? 6 : s1End + 1;
   const s2End = s2Start + 3 + accPages;
   const s3Start = s2End + 1;
-  const s3End = s3Start + 6;
+  const s3End = s3Start + 8;
   parts.push(contentsSlide({
     eyebrow: "التقرير التنفيذي",
     title: "محتويات التقرير",
@@ -642,10 +642,11 @@ ${dataTable({ headers: ["المستوى", "النتائج المُقيَّمة",
     const m = meta("s2", eyebrowS2);
     const barsOf = (ports: PortAccuracyRow[]): ChartBar[] =>
       ports.map((p) => ({ label: p.name, value: accuracyOf(p.counts).overall }));
+    const portAxis = fitAxis([...barsOf(portAcc.land), ...barsOf(portAcc.sea)].map((b) => b.value), 86, 98);
     const chartOf = (ports: PortAccuracyRow[], tint: "land" | "sea", avg: number | null) =>
       barChart({
         bars: barsOf(ports),
-        min: 86, max: 98, tint,
+        ...portAxis, tint,
         defaultTone: tint === "land" ? "gold" : "blue",
         references: avg === null ? [] : [{ value: avg, label: `المتوسط ${fmtPct(avg)}`, tone: tint === "land" ? "gold-dark" : "blue-dark" }],
       });
@@ -662,7 +663,7 @@ ${legendRow([
       { swatch: "gold", text: "دقة المنفذ البري" },
       { swatch: "blue", text: "دقة المنفذ البحري" },
       { dash: "muted", text: "متوسط النوع" },
-    ], "المقياس من 86% إلى 98%")}`;
+    ], scaleCaption(portAxis))}`;
     parts.push(slideShell(m, "", inner));
   }
 
@@ -670,6 +671,14 @@ ${legendRow([
   {
     const m = meta("s2", eyebrowS2);
     const stages = orderedStageAccuracy(model);
+    const levelAxis = fitAxis(
+      stages.flatMap((s) => {
+        const a = accuracyOf(s.counts);
+        return [a.cleanAcc, a.suspAcc];
+      }),
+      60,
+      100,
+    );
     const cols = stages
       .map((s) => {
         const a = accuracyOf(s.counts);
@@ -678,7 +687,7 @@ ${legendRow([
             { label: "", value: a.cleanAcc, tone: "green" },
             { label: "", value: a.suspAcc, tone: "red" },
           ],
-          min: 60, max: 100, plotHeight: 440, barMaxWidth: 88, gap: 22, pad: 26, hideCats: true,
+          ...levelAxis, plotHeight: 440, barMaxWidth: 88, gap: 22, pad: 26, hideCats: true,
           references: [
             ...(overallStats.cleanAcc === null ? [] : [{ value: overallStats.cleanAcc, tone: "avg-green" as const }]),
             ...(overallStats.suspAcc === null ? [] : [{ value: overallStats.suspAcc, tone: "avg-red" as const }]),
@@ -698,7 +707,7 @@ ${legendRow([
       { swatch: "red", text: "دقة الاشتباه" },
       { dash: "avg-green", text: `متوسط السليمة ${fmtPct(overallStats.cleanAcc)}` },
       { dash: "avg-red", text: `متوسط الاشتباه ${fmtPct(overallStats.suspAcc)}` },
-    ], "المقياس من 60% إلى 100%")}`;
+    ], scaleCaption(levelAxis))}`;
     parts.push(slideShell(m, "", inner));
   }
 
@@ -807,6 +816,7 @@ ${note}`;
       const m = meta("s3", eyebrowS3);
       const l1Type = accuracyOf(sumCounts(rows.map((r) => r.l1.counts)));
       const l2Type = accuracyOf(sumCounts(rows.map((r) => r.l2.counts)));
+      const levelPortAxis = fitAxis(rows.flatMap((r) => [r.l1.accuracy, r.l2.accuracy]), 86, 96);
       const chart = groupedBarChart({
         groups: rows.map((r) => {
           const portOverall = accuracyOf(sumCounts([r.l1.counts, r.l2.counts])).overall;
@@ -817,7 +827,7 @@ ${note}`;
             b: { label: "المستوى الثاني", value: r.l2.accuracy },
           };
         }),
-        min: 86, max: 96, tint,
+        ...levelPortAxis, tint,
         groupWidthPct: fixedGroups ? 16.2 : undefined,
         references: typeOverall === null ? [] : [{ value: typeOverall, tone: "muted" }],
       });
@@ -831,7 +841,7 @@ ${chartTitleRow({ title: "الدقة العامة لكل مستوى في كل م
 ${legendRow([
         { swatch: "gold", text: `المستوى الأول — متوسط ${fmtPct(l1Type.overall)}` },
         { swatch: "blue", text: `المستوى الثاني — متوسط ${fmtPct(l2Type.overall)}` },
-      ], "المقياس من 86% إلى 96%")}`;
+      ], scaleCaption(levelPortAxis))}`;
       return slideShell(m, "", inner);
     };
     parts.push(levelPortSlide("دقة المستويين في المنافذ البرية", levelRows.land, "land", landTotals.overall, false));
@@ -868,6 +878,7 @@ ${legendRow([
     const l1Pooled = pct(sum((x) => x.l1Agree), sum((x) => x.l1Comparable));
     const l2Pooled = pct(sum((x) => x.l2Agree), sum((x) => x.l2Comparable));
     const pooled = pct(sum((x) => x.l1Agree + x.l2Agree), sum((x) => x.l1Comparable + x.l2Comparable));
+    const teamAxis = fitAxis(teams.flatMap((t) => [t.l1Rate, t.l2Rate]), 50, 85);
     const teamCharts = teams
       .map((team) => {
         const chart = barChart({
@@ -875,7 +886,7 @@ ${legendRow([
             { label: "", value: team.l1Rate, tone: "gold" },
             { label: "", value: team.l2Rate, tone: "blue" },
           ],
-          min: 50, max: 85, barMaxWidth: 78, gap: 14, pad: 18, hideCats: true,
+          ...teamAxis, barMaxWidth: 78, gap: 14, pad: 18, hideCats: true,
           references: pooled === null ? [] : [{ value: pooled, tone: "gold-dark" }],
         });
         return `<div class="v3-team">${chart}<div class="v3-cat">${team.label}</div></div>`;
@@ -931,9 +942,10 @@ ${legendRow([
   <div class="v3-engine-bar">${seg(engineAgree, "navy", `اتفاق ${fmtNum(engineAgree)}`)}${seg(upheldEngine, "red", fmtNum(upheldEngine))}${seg(engineRest, "neutral", fmtNum(engineRest))}</div>
 </div>`;
 
+    const agreeTitle = "التوافق مع الفرق الأمنية ومحرك المخاطر";
     const inner = `${contentHead({
       eyebrow: eyebrowS3,
-      title: "التوافق مع الفرق الأمنية ومحرك المخاطر",
+      title: agreeTitle,
       note: `${fmtNum(imagesTotal)} صور مشتركة — توافق المستوى الأول ${fmtPct(l1Pooled)} · الثاني ${fmtPct(l2Pooled)}`,
     })}
 <div class="v3-agree-grid">
@@ -943,15 +955,23 @@ ${legendRow([
     ${legendRow([
       { swatch: "gold", text: "المستوى الأول" },
       { swatch: "blue", text: "المستوى الثاني" },
-    ], "المقياس من 50% إلى 85%")}
+    ], scaleCaption(teamAxis))}
   </div>
   <div class="v3-agree-col">
     ${chartTitleRow({ title: "التفصيل — الأرقام بين قوسين عدد الصور المتوافقة" })}
     ${dataTable({ headers: ["الفريق", "الصور", "المستوى الأول", "المستوى الثاني", "الكلي"], rows: teamRows, totals: teamTotals, firstColWidth: 26 })}
   </div>
-</div>
-${engineBand}`;
+</div>`;
     parts.push(slideShell(m, "", inner));
+    // Page 2 (يتبع): the risk-engine band on its own slide so neither page overflows.
+    const m2 = meta("s3", eyebrowS3);
+    const inner2 = `${contentHead({
+      eyebrow: eyebrowS3,
+      title: agreeTitle + YITBA,
+      note: `${fmtNum(imagesTotal)} صور مشتركة — توافق المستوى الأول ${fmtPct(l1Pooled)} · الثاني ${fmtPct(l2Pooled)}`,
+    })}
+${engineBand}`;
+    parts.push(slideShell(m2, "", inner2));
   }
 
   await yieldToMain();
@@ -971,12 +991,17 @@ ${engineBand}`;
       marking.present.accuracy !== null && marking.absent.accuracy !== null
         ? marking.present.accuracy - marking.absent.accuracy
         : null;
+    const impactAxis = fitAxis(
+      [marking.present.accuracy, marking.absent.accuracy, ...quality.strata.map((s) => s.accuracy)],
+      70,
+      100,
+    );
     const markingChart = barChart({
       bars: [
         { label: "مع تحديد الموقع", sublabel: `${fmtNum(marking.present.n)} نتيجة`, value: marking.present.accuracy, tone: "green" },
         { label: "دون تحديد", sublabel: `${fmtNum(marking.absent.n)} نتيجة`, value: marking.absent.accuracy, tone: "red" },
       ],
-      min: 70, max: 100, barMaxWidth: 120, gap: 34, pad: 44,
+      ...impactAxis, barMaxWidth: 120, gap: 34, pad: 44,
       references: overallRef,
     });
 
@@ -989,20 +1014,16 @@ ${engineBand}`;
         value: s.accuracy,
         tone: qualityTones[Math.min(i, qualityTones.length - 1)],
       })),
-      min: 70, max: 100, barMaxWidth: 120, gap: 34, pad: 44,
+      ...impactAxis, barMaxWidth: 120, gap: 34, pad: 44,
       references: overallRef,
     });
     const qualityTotal = qualityStrata.reduce((s, x) => s + x.n, 0);
     const high = qualityStrata[0];
     const low = qualityStrata[qualityStrata.length - 1];
 
-    const inner = `${contentHead({
-      eyebrow: eyebrowS3,
-      title: "أثر التحديد وجودة الصورة على الدقة",
-      note: `عاملان تشغيليان يُفسّران معظم تفاوت الدقة — المتوسط العام ${fmtPct(overallStats.overall)}`,
-    })}
-<div class="v3-impact-grid">
-  ${impactColumn({
+    const impactTitle = "أثر التحديد وجودة الصورة على الدقة";
+    const impactNote = `عاملان تشغيليان يُفسّران معظم تفاوت الدقة — المتوسط العام ${fmtPct(overallStats.overall)}`;
+    const markingCol = `${impactColumn({
       title: "أثر وجود التحديد",
       note: `${fmtNum(marking.present.n)} مقابل ${fmtNum(marking.absent.n)} نتيجة`,
       chartHtml: markingChart,
@@ -1011,8 +1032,8 @@ ${engineBand}`;
         markingDelta === null
           ? "لا يمكن حساب الفرق — إحدى المجموعتين دون حد الكفاية الإحصائية."
           : `فرق في الدقة العامة (${fmtPct(marking.present.accuracy)} مقابل ${fmtPct(marking.absent.accuracy)}).`,
-    })}
-  ${impactColumn({
+    })}`;
+    const qualityCol = `${impactColumn({
       title: "أثر جودة الصورة",
       note: `${fmtNum(qualityTotal)} نتيجة على ${fmtNum(qualityStrata.length)} فئات جودة`,
       chartHtml: qualityChart,
@@ -1021,10 +1042,18 @@ ${engineBand}`;
         gradient === null || !high || !low
           ? "لا يمكن حساب الفرق — إحدى فئات الجودة دون حد الكفاية الإحصائية."
           : `فرق بين الصور ${high.level}ة الجودة (${fmtPct(high.accuracy)}) و${low.level}ة الجودة (${fmtPct(low.accuracy)}) — معالجة جودة الالتقاط ترفع الدقة قبل أي تدريب.`,
-    })}
-</div>
-${legendRow([{ dash: "gold", text: `المتوسط العام ${fmtPct(overallStats.overall)}` }], "المقياس من 70% إلى 100%")}`;
+    })}`;
+    const impactLegend = legendRow([{ dash: "gold", text: `المتوسط العام ${fmtPct(overallStats.overall)}` }], scaleCaption(impactAxis));
+    // Two pages — marking, then (يتبع) image quality — one chart each, full width.
+    const inner = `${contentHead({ eyebrow: eyebrowS3, title: impactTitle, note: impactNote })}
+<div class="v3-impact-grid v3-impact-single">${markingCol}</div>
+${impactLegend}`;
     parts.push(slideShell(m, "", inner));
+    const m2 = meta("s3", eyebrowS3);
+    const inner2 = `${contentHead({ eyebrow: eyebrowS3, title: impactTitle + YITBA, note: impactNote })}
+<div class="v3-impact-grid v3-impact-single">${qualityCol}</div>
+${impactLegend}`;
+    parts.push(slideShell(m2, "", inner2));
   }
 
   // 21 — Closing

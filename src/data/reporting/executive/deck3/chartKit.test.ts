@@ -1,6 +1,39 @@
 // src/data/reporting/executive/deck3/chartKit.test.ts
 import { describe, expect, it } from "vitest";
-import { scalePct, barChart, groupedBarChart } from "./chartKit";
+import { scalePct, barChart, groupedBarChart, fitAxis, scaleCaption } from "./chartKit";
+
+describe("fitAxis", () => {
+  it("keeps the handoff axis when every value sits comfortably inside it", () => {
+    expect(fitAxis([88, 91.5, 95], 86, 98)).toEqual({ min: 86, max: 98 });
+  });
+  it("lowers min so a value below the axis still gets a visible, labelled bar", () => {
+    const axis = fitAxis([72.4, 91, null], 86, 98);
+    expect(axis.min).toBeLessThan(72.4);
+    expect(scalePct(72.4, axis.min, axis.max)).toBeGreaterThan(8);
+  });
+  it("lowers min when a value sits on or just above the floor (zero-height bar)", () => {
+    const axis = fitAxis([86, 90], 86, 98);
+    expect(scalePct(86, axis.min, axis.max)).toBeGreaterThan(8);
+  });
+  it("raises max to 100 when a value exceeds the axis ceiling", () => {
+    expect(fitAxis([99.5, 90], 86, 98).max).toBe(100);
+  });
+  it("never returns a degenerate range, even with no values", () => {
+    const a = fitAxis([], 86, 98);
+    expect(a.max).toBeGreaterThan(a.min);
+    const b = fitAxis([0, 0], 0, 0);
+    expect(b.max).toBeGreaterThan(b.min);
+  });
+  it("scaleCaption states the effective axis", () => {
+    expect(scaleCaption({ min: 65, max: 100 })).toBe("المقياس من 65% إلى 100%");
+  });
+});
+
+describe("scalePct degenerate range", () => {
+  it("never yields NaN when max equals min", () => {
+    expect(Number.isFinite(scalePct(5, 5, 5))).toBe(true);
+  });
+});
 
 describe("scalePct", () => {
   it("maps the midpoint to 50%", () => {
