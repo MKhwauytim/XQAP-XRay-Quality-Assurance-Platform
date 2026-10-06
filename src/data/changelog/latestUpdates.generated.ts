@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v151.2",
+    "date": "2026-10-06",
+    "bucket": "fix",
+    "scope": "reports",
+    "title": "comprehensive report renumbers sections, drops the population rail tab, supports deck v3, and states its study period"
+  },
+  {
     "version": "v151.1",
     "date": "2026-10-06",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "answers",
     "title": "broadcasts say whose answers changed; the employee queue ignores colleagues' own saves (never at the cost of a missed update)"
-  },
-  {
-    "version": "v150.39",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "the results view does no share I/O when hidden; polls are jittered, single-flight and fenced per user"
   }
 ];

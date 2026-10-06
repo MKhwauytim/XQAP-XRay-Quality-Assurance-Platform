@@ -28,6 +28,11 @@ import {
   BASE_ROWS_PER_PAGE,
   MARKING_TARGET,
   NAV_SECTIONS,
+  SECTION_ORDINALS,
+  getActiveOmittedSections,
+  navSectionLabel,
+  sectionNumber,
+  setActiveOmittedSections,
   STAGE_TONES,
   badgeIcon,
   barCell,
@@ -255,7 +260,7 @@ export function coverSlide(
     completedOnly ? [coverBody, coverBody, coverBody, coverBody] : [coverBody, ledgerBody, briefingBody, gridBody],
     variantPreview,
   );
-  return `<section class="slide v2 title-slide v2-cover" id="slide-cover" data-title="الغلاف" data-section="cover" data-section-label="${esc(NAV_SECTIONS.cover)}">
+  return `<section class="slide v2 title-slide v2-cover" id="slide-cover" data-title="الغلاف" data-section="cover" data-section-label="${esc(navSectionLabel("cover"))}">
     ${slideControls("slide-cover", variantPreview)}
     ${meshLayer}
     <div class="slide-art" aria-hidden="true"></div>
@@ -1135,7 +1140,10 @@ export function sectionSeparatorSlide(opts: {
   total: number;
   variantPreview: boolean;
 }): string {
-  const { sectionNo, sectionKey, iconName, title, blurb, tone, seedBase, num, total, variantPreview } = opts;
+  const { sectionKey, iconName, title, blurb, tone, seedBase, num, total, variantPreview } = opts;
+  // The shown number follows the sections actually in the deck (renumbered when
+  // the completed-only scope omits some); the slide id keeps the fixed number.
+  const sectionNo = sectionNumber(sectionKey) ?? opts.sectionNo;
   // Seeded geometric pattern overlay, tinted to the section tone at very low
   // opacity (CSS-controlled) so it never touches headline contrast. Seed =
   // month key + section id → deterministic per report.
@@ -1209,9 +1217,9 @@ export function sectionSeparatorSlide(opts: {
     ]),
   })}</div>`;
 
-  const body = renderVariants(`slide-sep-${sectionNo}`, [sepBody, ledgerBody, briefingBody, gridBody], variantPreview);
-  return `<section class="slide v2 v2-sep-slide ${esc(tone)}" id="slide-sep-${sectionNo}" data-title="${esc(title)}" data-section="${sectionKey}" data-section-label="${esc(NAV_SECTIONS[sectionKey])}">
-  ${slideControls(`slide-sep-${sectionNo}`, variantPreview)}
+  const body = renderVariants(`slide-sep-${opts.sectionNo}`, [sepBody, ledgerBody, briefingBody, gridBody], variantPreview);
+  return `<section class="slide v2 v2-sep-slide ${esc(tone)}" id="slide-sep-${opts.sectionNo}" data-title="${esc(title)}" data-section="${sectionKey}" data-section-label="${esc(navSectionLabel(sectionKey))}">
+  ${slideControls(`slide-sep-${opts.sectionNo}`, variantPreview)}
   ${sideRail(sectionKey)}
   <div class="v2-sep-bg" aria-hidden="true"></div>
   ${patternLayer}
@@ -3610,16 +3618,40 @@ export async function buildDeckV2Slides(
   sourceRevisions?: SourceRevisions,
   seedBase = "",
 ): Promise<string> {
+  // Completed-only scope (comprehensive report): there is no population, sample
+  // master or distribution behind the rows, so section 1 (population) and
+  // section 4 (coverage/accountability) are omitted entirely. The remaining
+  // sections are renumbered from 1 — separators, TOC, nav labels and side rail
+  // all read the same omitted-set, so they agree.
+  const previous = getActiveOmittedSections();
+  setActiveOmittedSections(model.scope === "full" ? [] : ["section1", "section4"]);
+  try {
+    return await assembleDeckV2Slides(model, generatedAt, variantPreview, sourceRevisions, seedBase);
+  } finally {
+    setActiveOmittedSections(previous);
+  }
+}
+
+/** TOC title for a content section: «القسم <ordinal> — <name>», numbered over the sections in the deck. */
+function sectionTocTitle(key: NavSectionKey, name: string): string {
+  const n = sectionNumber(key);
+  return `القسم ${n === null ? "" : SECTION_ORDINALS[n - 1]} — ${name}`;
+}
+
+async function assembleDeckV2Slides(
+  model: ReportModel,
+  generatedAt: Date,
+  variantPreview: boolean,
+  sourceRevisions: SourceRevisions | undefined,
+  seedBase: string,
+): Promise<string> {
   const glossaryBuilders = glossarySlideBuilders(variantPreview); // levels page + terms page
 
   // (The section-2 opener funnel was removed with the separator's side column —
   // separators now carry only the section number, name, and تعريف.)
 
-  // Completed-only scope (comprehensive report): there is no population, sample
-  // master or distribution behind the rows, so section 1 (population) and
-  // section 4 (coverage/accountability) are omitted entirely — zero pages, zero
-  // TOC rows — and the page ranges below are computed over what remains.
-  // Section numbers stay as-is so the separators, nav labels and side rail agree.
+  // Omitted sections (see buildDeckV2Slides) contribute zero pages and zero TOC
+  // rows; the page ranges below are computed over what remains.
   const full = model.scope === "full";
 
   // Section 1 — مجتمع الفحص: separator + risk stages + port tables (1..N pages).
@@ -3734,7 +3766,7 @@ export async function buildDeckV2Slides(
     ...(sectionOne.length > 0
       ? [
           {
-            title: "القسم الأول — مجتمع الفحص",
+            title: sectionTocTitle("section1", "مجتمع الفحص"),
             goal: "التعريف بمجتمع الصور وتوزيعه بحسب المخاطر والمنافذ، وأساس سحب العيّنة.",
             range: `${pad(sectionOneStart)}–${pad(sectionOneEnd)}`,
             iconName: "layers",
@@ -3745,7 +3777,7 @@ export async function buildDeckV2Slides(
         ]
       : []),
     {
-      title: "القسم الثاني — نتائج فحص الجودة",
+      title: sectionTocTitle("section2", "نتائج فحص الجودة"),
       goal: "جودة الصور المفحوصة، ودقة قرارات الفحص بين الاشتباه والسليمة، لكل منفذ.",
       range: `${pad(sectionTwoStart)}–${pad(sectionTwoEnd)}`,
       iconName: "gauge",
@@ -3760,7 +3792,7 @@ export async function buildDeckV2Slides(
     ...(sectionThree.length > 0
       ? [
           {
-            title: "القسم الثالث — التحاليل المتقدمة",
+            title: sectionTocTitle("section3", "التحاليل المتقدمة"),
             goal: "تحاليل معمّقة تُكمل قراءة نتائج الجودة والدقة.",
             range:
               sectionThreeEnd > sectionThreeStart
@@ -3779,7 +3811,7 @@ export async function buildDeckV2Slides(
     ...(sectionFour.length > 0
       ? [
           {
-            title: "القسم الرابع — التغطية والمساءلة التشغيلية",
+            title: sectionTocTitle("section4", "التغطية والمساءلة التشغيلية"),
             goal: "من وُزِّعت عليه العيّنة، ومدى إنجازه، وأسباب الاستبدال، وعدد إعادة التعيين.",
             range:
               sectionFourEnd > sectionFourStart

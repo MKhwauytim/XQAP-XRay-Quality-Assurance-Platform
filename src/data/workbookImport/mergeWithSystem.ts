@@ -1,7 +1,8 @@
 import { isRowStudied } from "../reporting/executiveReportTypes";
 import type { ExecutiveReportInput, ExecutiveReportRow } from "../reporting/executiveReportTypes";
 import type { MappedWorkbookRow } from "./workbookColumnMap";
-import { formatMonthFolderName, parseMonthFolderName } from "../population/monthFolder";
+import { formatMonthFolderName, formatMonthShortLabel, parseMonthFolderName } from "../population/monthFolder";
+import { getLabels } from "../labels/labelsStore";
 
 /** Month label carried by the comprehensive (all-months) report input. */
 export const COMPREHENSIVE_MONTH_LABEL = "جميع_الأشهر";
@@ -32,6 +33,37 @@ export function isCompletedSampleRow(row: ExecutiveReportRow): boolean {
   return row.selectedInSample && isRowStudied(row);
 }
 
+/** Earliest and latest study month (normalized folder names) among the completed samples. */
+export type ComprehensivePeriod = { from: string; to: string };
+
+function monthOrdinal(month: string): number | null {
+  const info = parseMonthFolderName(normalizeMonthKey(month));
+  return info ? info.year * 12 + (info.month - 1) : null;
+}
+
+function studyPeriod(months: Iterable<string>): ComprehensivePeriod | null {
+  let from: { ord: number; key: string } | null = null;
+  let to: { ord: number; key: string } | null = null;
+  for (const month of months) {
+    const ord = monthOrdinal(month);
+    if (ord === null) continue;
+    const key = normalizeMonthKey(month);
+    if (!from || ord < from.ord) from = { ord, key };
+    if (!to || ord > to.ord) to = { ord, key };
+  }
+  return from && to ? { from: from.key, to: to.key } : null;
+}
+
+/** «من يناير 2026 إلى سبتمبر 2026», or the single month when both ends agree. */
+export function formatComprehensivePeriod(period: ComprehensivePeriod): string {
+  const label = (key: string) => {
+    const info = parseMonthFolderName(key);
+    return info ? formatMonthShortLabel(info.month, info.year) : key;
+  };
+  if (period.from === period.to) return label(period.from);
+  return getLabels().ce_period_range.replace("{from}", label(period.from)).replace("{to}", label(period.to));
+}
+
 const key = (id: string, month: string) => `${id}|${normalizeMonthKey(month)}`;
 
 /** The only workspace-wide fields the combined input needs from a month's input. */
@@ -45,7 +77,7 @@ export type ComprehensiveBase = Pick<ExecutiveReportInput, "template" | "config"
 export function mergeCompletedRows(
   systemByMonth: Array<{ month: string; rows: ExecutiveReportRow[] }>,
   workbook: MappedWorkbookRow[],
-): { rows: ExecutiveReportRow[]; stats: MergeStats } {
+): { rows: ExecutiveReportRow[]; stats: MergeStats; period: ComprehensivePeriod | null } {
   const entries: Array<{ row: ExecutiveReportRow; month: string }> = [];
   const systemKeys = new Set<string>();
   for (const { month, rows } of systemByMonth) {
@@ -90,6 +122,7 @@ export function mergeCompletedRows(
 
   return {
     rows,
+    period: studyPeriod(entries.map((e) => e.month)),
     stats: {
       systemMonths: systemByMonth.length,
       systemCompleted,
@@ -107,9 +140,14 @@ export function mergeCompletedRows(
  * (processingSummary, sourceRevisions, distributionEvents, replacementReasons,
  * or any future one) cannot leak into an all-months report.
  */
-export function buildComprehensiveInput(rows: ExecutiveReportRow[], base: ComprehensiveBase): ExecutiveReportInput {
+export function buildComprehensiveInput(
+  rows: ExecutiveReportRow[],
+  base: ComprehensiveBase,
+  period: ComprehensivePeriod | null = null,
+): ExecutiveReportInput {
   return {
     monthFolderName: COMPREHENSIVE_MONTH_LABEL,
+    ...(period ? { periodLabel: formatComprehensivePeriod(period) } : {}),
     populationRows: [],
     sample: null,
     distribution: null,

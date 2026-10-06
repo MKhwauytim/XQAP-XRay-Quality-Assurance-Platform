@@ -17,6 +17,7 @@ import {
   COMPREHENSIVE_MONTH_LABEL,
   buildComprehensiveInput,
   isCompletedSampleRow,
+  formatComprehensivePeriod,
   mergeCompletedRows,
 } from "../../../../../data/workbookImport/mergeWithSystem";
 import type { ComprehensiveBase } from "../../../../../data/workbookImport/mergeWithSystem";
@@ -29,14 +30,16 @@ import { DEFAULT_SOURCE_MODE } from "./sourceMode";
 import type { ComprehensiveSourceMode } from "./sourceMode";
 import { useComprehensiveWorkbook } from "./useComprehensiveWorkbook";
 import { loadDeckStyleChoices } from "../../../../../data/reporting/executive/deck2/styleChoices";
+import { loadDeckEditionPreference } from "../../../../../data/reporting/executive/deckEditionPreference";
+import type { ExecutiveDeckEdition } from "../../../../../data/reporting/executive/deckEditionPreference";
 
 /** Families whose change can alter a month's completed answers (mirrors the Reports hub). */
 const REFRESH_FAMILIES: readonly DataRefreshFamily[] = ["manifest", "distribution", "answers"];
 
 type SystemMonths = { byMonth: Array<{ month: string; rows: ExecutiveReportRow[] }>; base: ComprehensiveBase | null };
 type SystemState = { status: "loading" } | { status: "error" } | ({ status: "ready" } & SystemMonths);
-// The executive deck (v2, the live default) honours the completed-only scope: it drops
-// the population and coverage sections. Deck v3 does not yet, so it is not offered here.
+// The executive deck (v2 or v3, whichever edition the workspace chose — same rule as the
+// Reports tab) honours the completed-only scope: it drops the population/coverage sections.
 type ExportKind = "deck" | "xlsx";
 
 /** Names are not shown in the combined report (config.showEmployeeNames is false). */
@@ -73,6 +76,7 @@ export default function ComprehensiveExecutive() {
   const excelOnly = mode === "excel-only";
   const [system, setSystem] = useState<SystemState>({ status: "loading" });
   const [exporting, setExporting] = useState<ExportKind | null>(null);
+  const [deckEdition, setDeckEdition] = useState<ExecutiveDeckEdition>("v2");
   const [exportError, setExportError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const loadRunRef = useRef(0);
@@ -144,6 +148,17 @@ export default function ComprehensiveExecutive() {
     return subscribeToDataChange(REFRESH_FAMILIES, () => { requestLoad(loadSystem); });
   }, [excelOnly, loadSystem, requestLoad]);
 
+  // The workspace's chosen deck edition (same global preference the Reports tab reads);
+  // v2 when none is recorded or no workspace is mounted.
+  useEffect(() => {
+    if (!directoryHandle) return undefined;
+    let cancelled = false;
+    void loadDeckEditionPreference(directoryHandle).then((pref) => {
+      if (!cancelled && pref) setDeckEdition(pref.edition);
+    });
+    return () => { cancelled = true; };
+  }, [directoryHandle]);
+
   // Changing mode drops any stored system rows (releases memory) and invalidates
   // an in-flight load so its stale result cannot win. The workbook is untouched.
   function handleModeChange(next: ComprehensiveSourceMode): void {
@@ -192,8 +207,11 @@ export default function ComprehensiveExecutive() {
         template: null,
         config: DEFAULT_EXEC_CONFIG,
       };
-      const input = buildComprehensiveInput(merged.rows, base);
-      if (kind === "deck") {
+      const input = buildComprehensiveInput(merged.rows, base, merged.period);
+      if (kind === "deck" && deckEdition === "v3") {
+        const { openExecutiveDeckV3 } = await import("../../../../../data/reporting/executive/deck3");
+        await openExecutiveDeckV3(input, NO_NAMES);
+      } else if (kind === "deck") {
         // Same saved slide styles the Reports tab's deck uses; none without a workspace.
         const saved = directoryHandle ? await loadDeckStyleChoices(directoryHandle) : null;
         const { openExecutiveDeckV2 } = await import("../../../../../data/reporting/executive/deck2");
@@ -263,6 +281,11 @@ export default function ComprehensiveExecutive() {
 
       {!systemLoading && (
         <StatsPanel labels={labels} stats={merged.stats} totalRows={merged.rows.length} report={report} mode={mode} />
+      )}
+      {!systemLoading && merged.period && (
+        <p className="ce-status" data-testid="ce-period">
+          {labels.ce_period_title}: {formatComprehensivePeriod(merged.period)}
+        </p>
       )}
       {needsFile && <p className="ce-empty" role="status" data-testid="ce-excel-only-hint">{labels.ce_source_excel_only_hint}</p>}
       {!systemLoading && !hasRows && !needsFile && <p className="ce-empty" role="status">{labels.ce_empty}</p>}

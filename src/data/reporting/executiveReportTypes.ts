@@ -299,6 +299,13 @@ export const DEFAULT_EXEC_CONFIG: ExecutiveReportConfig = {
 
 export type ExecutiveReportInput = {
   monthFolderName: string;
+  /**
+   * Display label for the study period, used instead of the month folder's
+   * label wherever a report prints its period. Set only by the comprehensive
+   * report (the earliest-to-latest month of its completed samples); absent for
+   * a regular single-month report, whose output is unchanged.
+   */
+  periodLabel?: string;
   populationRows: PreparedPopulationRow[];
   sample: SampleMasterData | null;
   distribution: DistributionCurrentData | null;

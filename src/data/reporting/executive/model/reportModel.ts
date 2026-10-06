@@ -193,7 +193,7 @@ export function buildReportModel(
   input: ExecutiveReportInput,
   employeeDisplayNames: Record<string, string> = {}
 ): ReportModel {
-  const periodId = formatMonthFolderShortLabel(input.monthFolderName);
+  const periodId = input.periodLabel ?? formatMonthFolderShortLabel(input.monthFolderName);
 
   const rows = buildExecutiveReportRows(input);
   const kpis = calculateExecutiveKPIs(rows, input.sample, input.config, input.stageMappings);

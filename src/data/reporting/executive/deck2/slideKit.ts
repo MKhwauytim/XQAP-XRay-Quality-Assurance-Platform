@@ -202,6 +202,57 @@ export const NAV_SECTIONS = {
 } as const;
 export type NavSectionKey = keyof typeof NAV_SECTIONS;
 
+/** The four content sections in deck order, with their bare names. */
+const CONTENT_SECTIONS: ReadonlyArray<readonly [NavSectionKey, string]> = [
+  ["section1", "مجتمع الفحص"],
+  ["section2", "نتائج فحص الجودة"],
+  ["section3", "التحاليل المتقدمة"],
+  ["section4", "التغطية والمساءلة التشغيلية"],
+];
+
+/** Arabic ordinals for the TOC's «القسم الأول …» titles. */
+export const SECTION_ORDINALS = ["الأول", "الثاني", "الثالث", "الرابع"] as const;
+
+/**
+ * Content sections omitted from the deck currently being built (the
+ * completed-only scope drops section 1 and section 4). Module-level for the
+ * same reason as `activeStyleChoices` below: the side rail and the nav labels
+ * are rendered by every slide through `v2Slide`, and threading a parameter
+ * through every builder would touch all of them. Set and reset by
+ * `buildDeckV2Slides` only, which runs inside `buildExecutiveDeckV2`'s build
+ * lock, so concurrent builds cannot interleave. Empty = full deck, and every
+ * helper below then returns exactly the pre-existing output.
+ */
+let activeOmittedSections: ReadonlySet<NavSectionKey> = new Set();
+
+export function setActiveOmittedSections(keys: Iterable<NavSectionKey>): void {
+  activeOmittedSections = new Set(keys);
+}
+
+export function getActiveOmittedSections(): ReadonlySet<NavSectionKey> {
+  return activeOmittedSections;
+}
+
+/** 1-based display number of a content section among the sections actually in
+ *  the deck; null for a non-content key or an omitted section. */
+export function sectionNumber(key: NavSectionKey): number | null {
+  let n = 0;
+  for (const [k] of CONTENT_SECTIONS) {
+    if (activeOmittedSections.has(k)) continue;
+    n += 1;
+    if (k === key) return n;
+  }
+  return null;
+}
+
+/** `data-section-label` for a slide: NAV_SECTIONS, renumbered when sections are omitted. */
+export function navSectionLabel(key: NavSectionKey): string {
+  if (activeOmittedSections.size === 0) return NAV_SECTIONS[key];
+  const entry = CONTENT_SECTIONS.find(([k]) => k === key);
+  const n = sectionNumber(key);
+  return entry && n !== null ? `القسم ${n} — ${entry[1]}` : NAV_SECTIONS[key];
+}
+
 /**
  * Printed side tab rail (per the user's reference mockups): a vertical
  * report-title strip plus one rotated tab per section, running down every
@@ -220,6 +271,7 @@ export function sideRail(active: NavSectionKey): string {
   return `<div class="v2-rail" aria-hidden="true">
     <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
     ${tabs
+      .filter((t) => !activeOmittedSections.has(t.key))
       .map((t) => `<div class="v2-rail-tab${t.key === active ? " active" : ""}">${esc(t.label)}</div>`)
       .join("")}
   </div>`;
@@ -341,13 +393,13 @@ export function v2Slide(opts: {
 }): string {
   const cls = `slide v2${opts.slideClass ? " " + opts.slideClass : ""}`;
   const body = renderVariants(opts.id, opts.bodyVariants, opts.variantPreview);
-  return `<section class="${cls}" id="${esc(opts.id)}" data-title="${esc(opts.title)}" data-section="${opts.section}" data-section-label="${esc(NAV_SECTIONS[opts.section])}">
+  return `<section class="${cls}" id="${esc(opts.id)}" data-title="${esc(opts.title)}" data-section="${opts.section}" data-section-label="${esc(navSectionLabel(opts.section))}">
   ${slideControls(opts.id, opts.variantPreview)}
   ${sideRail(opts.section)}
   <div class="slide-inner">
     <div class="slide-eyebrow">
       <span class="slide-eyebrow-icon">${icon(opts.iconName, 16)}</span>
-      <span>${esc(opts.eyebrow)}</span>
+      <span>${esc(opts.eyebrow === NAV_SECTIONS[opts.section] ? navSectionLabel(opts.section) : opts.eyebrow)}</span>
     </div>
     <div class="slide-headline">${esc(opts.headline)}</div>
     ${opts.subhead ? `<div class="slide-subhead">${esc(opts.subhead)}</div>` : ""}
