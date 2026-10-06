@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildComprehensiveInput, COMPREHENSIVE_MONTH_LABEL, mergeCompletedRows, normalizeMonthKey } from "./mergeWithSystem";
+import { formatMonthShortLabel } from "../population/monthFolder";
+import { getLabels } from "../labels/labelsStore";
 import { makeRow } from "../reporting/reportTestFixtures";
 import type { ExecutiveReportInput, ExecutiveReportRow } from "../reporting/executiveReportTypes";
 
@@ -120,5 +122,31 @@ describe("buildComprehensiveInput", () => {
     expect(out.distribution).toBeNull();
     expect(out.employeeFiles).toEqual([]);
     expect(out.config).toBe(base.config);
+  });
+});
+
+describe("study period (earliest to latest month of the completed samples)", () => {
+  it("spans system and workbook months, ignoring rows that are not completed", () => {
+    const notDone = { row: sys("X", false), month: "12-december-2026", sheet: "Q1_Sample" };
+    const { period } = mergeCompletedRows(
+      [{ month: "1-January-2026", rows: [sys("A")] }],
+      [wb("B", "3-march-2025"), wb("C", "7-july-2025"), notDone],
+    );
+    expect(period).toEqual({ from: "3-march-2025", to: "1-january-2026" });
+  });
+  it("is null when there are no completed rows", () => {
+    expect(mergeCompletedRows([], []).period).toBeNull();
+  });
+  it("labels a range as «من … إلى …», a single month alone, and no period as unset", () => {
+    const base = { config: {}, template: null } as unknown as ExecutiveReportInput;
+    const range = buildComprehensiveInput([], base, { from: "3-march-2025", to: "1-january-2026" });
+    expect(range.periodLabel).toBe(
+      getLabels().ce_period_range.replace("{from}", formatMonthShortLabel(3, 2025)).replace("{to}", formatMonthShortLabel(1, 2026)),
+    );
+    expect(range.monthFolderName).toBe(COMPREHENSIVE_MONTH_LABEL);
+    const single = buildComprehensiveInput([], base, { from: "1-january-2026", to: "1-january-2026" });
+    expect(single.periodLabel).toBe(formatMonthShortLabel(1, 2026));
+    expect(buildComprehensiveInput([], base, null).periodLabel).toBeUndefined();
+    expect(buildComprehensiveInput([], base).periodLabel).toBeUndefined();
   });
 });

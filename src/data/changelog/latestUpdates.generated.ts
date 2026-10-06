@@ -5,6 +5,34 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v151.4",
+    "date": "2026-10-06",
+    "bucket": "redesign",
+    "scope": "reports",
+    "title": "deck3 scope wording moved to deck3Copy() to stay under the complexity gate"
+  },
+  {
+    "version": "v151.3",
+    "date": "2026-10-06",
+    "bucket": "fix",
+    "scope": "tests",
+    "title": "FeedbackWidget test sessions no longer expire with the calendar"
+  },
+  {
+    "version": "v151.2",
+    "date": "2026-10-06",
+    "bucket": "fix",
+    "scope": "reports",
+    "title": "comprehensive report renumbers sections, drops the population rail tab, supports deck v3, and states its study period"
+  },
+  {
+    "version": "v151.1",
+    "date": "2026-10-06",
+    "bucket": "fix",
+    "scope": "reports",
+    "title": "comprehensive report opens the executive deck, not the detailed document"
+  },
+  {
     "version": "v151.0",
     "date": "2026-10-05",
     "bucket": "feature",
@@ -45,33 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "answers",
     "title": "the per-employee request-queue scan is bounded and memoized, never at the cost of a hidden request"
-  },
-  {
-    "version": "v150.41",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "the ad-hoc probe has no cliff at the store cap and keeps store read memos fresh"
-  },
-  {
-    "version": "v150.40",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "broadcasts say whose answers changed; the employee queue ignores colleagues' own saves (never at the cost of a missed update)"
-  },
-  {
-    "version": "v150.39",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "the results view does no share I/O when hidden; polls are jittered, single-flight and fenced per user"
-  },
-  {
-    "version": "v150.37",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "keep one IndexedDB connection open and prune old synced mirror records"
   }
 ];

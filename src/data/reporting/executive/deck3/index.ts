@@ -163,7 +163,7 @@ export async function buildExecutiveDeckV3(
   employeeDisplayNames: Record<string, string> = {},
 ): Promise<string> {
   const model = buildReportModel(input, employeeDisplayNames);
-  const monthLabel = formatMonthFolderShortLabel(input.monthFolderName);
+  const monthLabel = input.periodLabel ?? formatMonthFolderShortLabel(input.monthFolderName);
   const slides = await buildDeck3Slides(model, monthLabel, input.config.monthlyTarget);
   return buildDeckV3Html(slides, monthLabel);
 }

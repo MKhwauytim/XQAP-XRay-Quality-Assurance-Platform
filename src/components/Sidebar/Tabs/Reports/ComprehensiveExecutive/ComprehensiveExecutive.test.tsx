@@ -1,4 +1,5 @@
 /* @vitest-environment jsdom */
+import { formatMonthShortLabel } from "../../../../../data/population/monthFolder";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryDirectory } from "../../../../../data/storage/memoryDirectory";
@@ -54,6 +55,14 @@ vi.mock("../../../../../data/workspace/useWorkspace", () => ({
 
 const openers = vi.hoisted(() => ({ openExecutiveReport: vi.fn(async () => {}), buildExecutiveXlsx: vi.fn(async () => {}) }));
 vi.mock("../../../../../data/reporting/executiveReport", () => openers);
+const deck = vi.hoisted(() => ({ openExecutiveDeckV2: vi.fn(async (..._a: unknown[]) => {}) }));
+vi.mock("../../../../../data/reporting/executive/deck2", () => deck);
+const styles = vi.hoisted(() => ({ loadDeckStyleChoices: vi.fn(async (_h: unknown): Promise<unknown> => null) }));
+vi.mock("../../../../../data/reporting/executive/deck2/styleChoices", () => styles);
+const deck3 = vi.hoisted(() => ({ openExecutiveDeckV3: vi.fn(async (..._a: unknown[]) => {}) }));
+vi.mock("../../../../../data/reporting/executive/deck3", () => deck3);
+const edition = vi.hoisted(() => ({ loadDeckEditionPreference: vi.fn(async (_h: unknown): Promise<unknown> => null) }));
+vi.mock("../../../../../data/reporting/executive/deckEditionPreference", () => edition);
 vi.mock("../../../../../data/audit/actionLog", () => ({ recordAction: vi.fn() }));
 
 const storage = vi.hoisted(() => ({ listMonthFolders: vi.fn(async (_h: unknown): Promise<unknown[]> => []) }));
@@ -92,7 +101,7 @@ function selectFile(): void {
 }
 
 const L = getLabels();
-const buttons = () => [L.ce_generate_doc, L.ce_generate_xlsx].map((n) => screen.getByRole("button", { name: n }));
+const buttons = () => [L.ce_generate_deck, L.ce_generate_xlsx].map((n) => screen.getByRole("button", { name: n }));
 
 beforeEach(() => {
   workers.length = 0;
@@ -100,6 +109,12 @@ beforeEach(() => {
   perms.capabilityAllowed = true;
   ws.handle = createMemoryDirectory("root");
   openers.openExecutiveReport.mockClear();
+  deck.openExecutiveDeckV2.mockClear();
+  styles.loadDeckStyleChoices.mockReset();
+  styles.loadDeckStyleChoices.mockImplementation(async () => null);
+  deck3.openExecutiveDeckV3.mockClear();
+  edition.loadDeckEditionPreference.mockReset();
+  edition.loadDeckEditionPreference.mockImplementation(async () => null);
   openers.buildExecutiveXlsx.mockClear();
   monthLoad.loadMonthExecInput.mockReset();
   monthLoad.loadMonthExecInput.mockImplementation(async () => null);
@@ -195,7 +210,7 @@ describe("ComprehensiveExecutive page", () => {
     for (const b of buttons()) expect(b).toBeDisabled();
   });
 
-  it("generates the document from the combined input, and the handler re-checks the mutation capability", async () => {
+  it("generates the executive deck (not the detailed document) from the combined input, and the handler re-checks the mutation capability", async () => {
     render(<ComprehensiveExecutive />);
     await screen.findByText(L.ce_empty);
     selectFile();
@@ -203,16 +218,59 @@ describe("ComprehensiveExecutive page", () => {
     await waitFor(() => expect(screen.getByTestId("ce-stat-wb-read")).toHaveTextContent("1"));
 
     perms.capabilityAllowed = false;
-    fireEvent.click(screen.getByRole("button", { name: L.ce_generate_doc }));
+    fireEvent.click(screen.getByRole("button", { name: L.ce_generate_deck }));
     expect(await screen.findByText(L.msg_export_not_permitted)).toBeInTheDocument();
-    expect(openers.openExecutiveReport).not.toHaveBeenCalled();
+    expect(deck.openExecutiveDeckV2).not.toHaveBeenCalled();
 
     perms.capabilityAllowed = true;
-    fireEvent.click(screen.getByRole("button", { name: L.ce_generate_doc }));
-    await waitFor(() => expect(openers.openExecutiveReport).toHaveBeenCalledTimes(1));
-    const [input, names] = openers.openExecutiveReport.mock.calls[0] as unknown as [{ monthFolderName: string }, Record<string, string>];
+    fireEvent.click(screen.getByRole("button", { name: L.ce_generate_deck }));
+    await waitFor(() => expect(deck.openExecutiveDeckV2).toHaveBeenCalledTimes(1));
+    const [input, names] = deck.openExecutiveDeckV2.mock.calls[0] as unknown as [{ monthFolderName: string }, Record<string, string>];
     expect(input.monthFolderName).toBe(COMPREHENSIVE_MONTH_LABEL);
     expect(names).toEqual({});
+    expect(openers.openExecutiveReport).not.toHaveBeenCalled();
+  });
+
+  it("opens deck v3 when the workspace's chosen edition is v3", async () => {
+    edition.loadDeckEditionPreference.mockImplementation(async () => ({ edition: "v3" }));
+    render(<ComprehensiveExecutive />);
+    await screen.findByText(L.ce_empty);
+    selectFile();
+    act(() => workers[0].emit(doneMessage()));
+    await waitFor(() => expect(screen.getByTestId("ce-stat-wb-read")).toHaveTextContent("1"));
+    await waitFor(() => expect(edition.loadDeckEditionPreference).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: L.ce_generate_deck }));
+    await waitFor(() => expect(deck3.openExecutiveDeckV3).toHaveBeenCalledTimes(1));
+    const [input] = deck3.openExecutiveDeckV3.mock.calls[0] as unknown as [{ monthFolderName: string }];
+    expect(input.monthFolderName).toBe(COMPREHENSIVE_MONTH_LABEL);
+    expect(deck.openExecutiveDeckV2).not.toHaveBeenCalled();
+  });
+
+  it("shows the samples' study period and passes it to the report", async () => {
+    render(<ComprehensiveExecutive />);
+    await screen.findByText(L.ce_empty);
+    expect(screen.queryByTestId("ce-period")).toBeNull();
+    selectFile();
+    act(() => workers[0].emit(doneMessage()));
+    // The fixture row's الشهر is Excel serial 46023 = January 2026.
+    const jan = formatMonthShortLabel(1, 2026);
+    await waitFor(() => expect(screen.getByTestId("ce-period")).toHaveTextContent(jan));
+    fireEvent.click(screen.getByRole("button", { name: L.ce_generate_deck }));
+    await waitFor(() => expect(deck.openExecutiveDeckV2).toHaveBeenCalledTimes(1));
+    const [input] = deck.openExecutiveDeckV2.mock.calls[0] as unknown as [{ periodLabel?: string }];
+    expect(input.periodLabel).toBe(jan);
+  });
+
+  it("applies the workspace's saved deck style choices", async () => {
+    styles.loadDeckStyleChoices.mockImplementation(async () => ({ choices: { "slide-cover": 2 } }));
+    render(<ComprehensiveExecutive />);
+    await screen.findByText(L.ce_empty);
+    selectFile();
+    act(() => workers[0].emit(doneMessage()));
+    await waitFor(() => expect(screen.getByTestId("ce-stat-wb-read")).toHaveTextContent("1"));
+    fireEvent.click(screen.getByRole("button", { name: L.ce_generate_deck }));
+    await waitFor(() => expect(deck.openExecutiveDeckV2).toHaveBeenCalledTimes(1));
+    expect(deck.openExecutiveDeckV2.mock.calls[0][2]).toEqual({ "slide-cover": 2 });
   });
 
   it("keeps only completed rows per month and passes only template/config/stageMappings from the system base", async () => {
@@ -228,9 +286,9 @@ describe("ComprehensiveExecutive page", () => {
     render(<ComprehensiveExecutive />);
     await waitFor(() => expect(screen.getByTestId("ce-stat-system-completed")).toHaveTextContent("1"));
     expect(screen.getByTestId("ce-stat-total-rows")).toHaveTextContent("1");
-    fireEvent.click(screen.getByRole("button", { name: L.ce_generate_doc }));
-    await waitFor(() => expect(openers.openExecutiveReport).toHaveBeenCalledTimes(1));
-    const [input] = openers.openExecutiveReport.mock.calls[0] as unknown as [Record<string, unknown>];
+    fireEvent.click(screen.getByRole("button", { name: L.ce_generate_deck }));
+    await waitFor(() => expect(deck.openExecutiveDeckV2).toHaveBeenCalledTimes(1));
+    const [input] = deck.openExecutiveDeckV2.mock.calls[0] as unknown as [Record<string, unknown>];
     expect(input.populationRows).toEqual([]);
     expect(input.config).toEqual({ marker: "cfg" });
     expect(input.stageMappings).toBe(stageMappings);
