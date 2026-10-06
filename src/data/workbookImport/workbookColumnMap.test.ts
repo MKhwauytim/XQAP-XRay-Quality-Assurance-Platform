@@ -32,9 +32,9 @@ describe("mapSampleRow", () => {
     expect([r.skippedNoId, r.skippedNoMonth, r.skippedBadResult]).toEqual([1, 1, 1]);
     expect(r.unmappedValues["نتيجة المستوى الأول"]["؟"]).toBe(1);
   });
-  it("maps invalid image id to unavailable with reason", () => {
+  it("invalid image id keeps the reason but the row still counts as studied", () => {
     const m = mapSampleRow({ ...base, "هل يوجد صورة؟": "معرف غير صحيح" }, "S", newMappingReport())!;
-    expect(m.row.imageAvailable).toBe(false);
+    expect(m.row.imageAvailable).toBeNull();
     expect(m.row.noImageReason).toBe("معرف غير صحيح");
   });
   it("unknown image value is null and counted once", () => {
@@ -43,9 +43,9 @@ describe("mapSampleRow", () => {
     expect(m.row.imageAvailable).toBeNull();
     expect(r.unmappedValues["هل يوجد صورة؟"]["ربما"]).toBe(1);
   });
-  it("لا gives unavailable with null reason", () => {
+  it("لا still counts as studied (imageAvailable null, no reason)", () => {
     const m = mapSampleRow({ ...base, "هل يوجد صورة؟": "لا" }, "S", newMappingReport())!;
-    expect(m.row.imageAvailable).toBe(false);
+    expect(m.row.imageAvailable).toBeNull();
     expect(m.row.noImageReason).toBeNull();
   });
   it("unknown marking value counted", () => {
