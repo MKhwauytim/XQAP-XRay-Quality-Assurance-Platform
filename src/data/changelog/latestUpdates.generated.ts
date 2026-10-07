@@ -19,6 +19,27 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "title": "editable static text in the executive deck, saved as named presets"
   },
   {
+    "version": "v151.11",
+    "date": "2026-10-07",
+    "bucket": "fix",
+    "scope": "deck3",
+    "title": "keep every sample row (56,468) with an «other results» class; empty agreement slides collapse"
+  },
+  {
+    "version": "v151.10",
+    "date": "2026-10-07",
+    "bucket": "feature",
+    "scope": "deck3",
+    "title": "population totals section from the workbook; one port-accuracy slide per port type"
+  },
+  {
+    "version": "v151.9",
+    "date": "2026-10-07",
+    "bucket": "fix",
+    "scope": "deck3",
+    "title": "charts fit with many ports; Add: follow-up workbook enrichment for the comprehensive report"
+  },
+  {
     "version": "v151.8",
     "date": "2026-10-06",
     "bucket": "feature",
@@ -52,26 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "redesign",
     "scope": "reports",
     "title": "deck3 scope wording moved to deck3Copy() to stay under the complexity gate"
-  },
-  {
-    "version": "v151.3",
-    "date": "2026-10-06",
-    "bucket": "fix",
-    "scope": "tests",
-    "title": "FeedbackWidget test sessions no longer expire with the calendar"
-  },
-  {
-    "version": "v151.2",
-    "date": "2026-10-06",
-    "bucket": "fix",
-    "scope": "reports",
-    "title": "comprehensive report renumbers sections, drops the population rail tab, supports deck v3, and states its study period"
-  },
-  {
-    "version": "v151.1",
-    "date": "2026-10-06",
-    "bucket": "fix",
-    "scope": "reports",
-    "title": "comprehensive report opens the executive deck, not the detailed document"
   }
 ];

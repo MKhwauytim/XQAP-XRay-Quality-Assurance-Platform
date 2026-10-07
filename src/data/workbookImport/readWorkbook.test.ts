@@ -36,11 +36,15 @@ describe("readComprehensiveWorkbook", () => {
         JAN: [["x"], ["y"]],
       });
       const { rows, report } = await readComprehensiveWorkbook(f);
-      expect(rows.map((r) => [r.row.xrayImageId, r.month])).toEqual([["X1","1-january-2026"],["X2","6-june-2026"]]);
+      expect(rows.map((r) => [r.row.xrayImageId, r.month])).toEqual([["X1","1-january-2026"],["X2","6-june-2026"],["X3","6-june-2026"]]);
       expect(rows[1].row.levelOneResult).toBe("سليمة");
       expect(report.sheetsRead.map((s) => s.name)).toEqual(["SJAN","SJUN"]);
       expect(report.incomplete).toBe(0);
-      expect(report.skippedBadResult).toBe(1);
+      // X3's L2 is «0»: kept as an «other» result (never dropped), not scored.
+      expect(report.skippedBadResult).toBe(0);
+      expect(report.otherResultRows).toBe(1);
+      expect(rows[2].row.levelTwoOther).toBe("0");
+      expect(rows[2].row.levelOneOther).toBeUndefined();
     });
     it("skips a row whose exam month has no derivable year", async () => {
       const f = wbBlob({ SJAN: [HA, ["FIRST_STAGE","X1","منفذ بحري","ميناء","اشتباه","سليمة","","سليمة","1"]] });

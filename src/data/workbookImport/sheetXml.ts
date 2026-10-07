@@ -16,8 +16,9 @@ export function parseSharedStrings(xml: string): string[] {
   return out;
 }
 
-export function parseSheetRows(xml: string, shared: string[]): Array<Record<string, string>> {
-  const rows: Array<Record<string, string>> = [];
+/** Calls `onRow` for every non-empty row, in order, without retaining them (large population sheets). */
+export function forEachSheetRow(xml: string, shared: string[], onRow: (rec: Record<string, string>, index: number) => void): void {
+  let index = 0;
   for (const rm of xml.matchAll(/<row\b[^>]*?(?:\/>|>([\s\S]*?)<\/row>)/g)) {
     if (rm[1] === undefined) continue; // self-closing empty row: skip
     const rec: Record<string, string> = {};
@@ -34,8 +35,13 @@ export function parseSheetRows(xml: string, shared: string[]): Array<Record<stri
       }
       if (val !== undefined && val !== "") rec[col] = val;
     }
-    rows.push(rec);
+    onRow(rec, index++);
   }
+}
+
+export function parseSheetRows(xml: string, shared: string[]): Array<Record<string, string>> {
+  const rows: Array<Record<string, string>> = [];
+  forEachSheetRow(xml, shared, (rec) => rows.push(rec));
   return rows;
 }
 

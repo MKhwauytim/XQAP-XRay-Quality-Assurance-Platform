@@ -4,6 +4,7 @@ import type {
   ComprehensiveWorkerMessage,
   ComprehensiveWorkerRequest,
 } from "../../../../../workers/comprehensiveWorkbookWorkerTypes";
+import type { PopulationSummary } from "../../../../../data/reporting/executiveReportTypes";
 import type { MappedWorkbookRow, MappingReport } from "../../../../../data/workbookImport/workbookColumnMap";
 import { logError } from "../../../../../data/storage/errorLogger";
 
@@ -15,7 +16,7 @@ export type WorkbookErrorCode = "NOSAMPLE" | "COLUMNS" | "ZIP" | "UNKNOWN";
 export type WorkbookState =
   | { status: "none" }
   | { status: "reading"; fileName: string; sheet: string | null }
-  | { status: "read"; fileName: string; rows: MappedWorkbookRow[]; report: MappingReport }
+  | { status: "read"; fileName: string; rows: MappedWorkbookRow[]; report: MappingReport; populationSummary: PopulationSummary | null }
   | { status: "error"; fileName: string; code: WorkbookErrorCode };
 
 const KNOWN_CODES: Record<string, WorkbookErrorCode> = {
@@ -35,7 +36,7 @@ export function toWorkbookErrorCode(code: string): WorkbookErrorCode {
  */
 export function useComprehensiveWorkbook(): {
   state: WorkbookState;
-  selectFile: (file: File) => void;
+  selectFiles: (files: File[]) => void;
   removeFile: () => void;
 } {
   const [state, setState] = useState<WorkbookState>({ status: "none" });
@@ -53,10 +54,11 @@ export function useComprehensiveWorkbook(): {
     setState({ status: "none" });
   }, [stop]);
 
-  const selectFile = useCallback((file: File) => {
+  const selectFiles = useCallback((files: File[]) => {
     const run = ++runRef.current;
+    const fileName = files.map((f) => f.name).join(" + ");
     stop();
-    setState({ status: "reading", fileName: file.name, sheet: null });
+    setState({ status: "reading", fileName, sheet: null });
 
     const worker = new ComprehensiveWorkbookWorker();
     let watchdog: number | undefined;
@@ -70,7 +72,7 @@ export function useComprehensiveWorkbook(): {
     };
     const fail = (code: WorkbookErrorCode) => {
       finish();
-      if (runRef.current === run) setState({ status: "error", fileName: file.name, code });
+      if (runRef.current === run) setState({ status: "error", fileName, code });
     };
     const armWatchdog = () => {
       if (watchdog !== undefined) window.clearTimeout(watchdog);
@@ -84,10 +86,10 @@ export function useComprehensiveWorkbook(): {
       const msg = ev.data;
       armWatchdog();
       if (msg.type === "progress") {
-        setState({ status: "reading", fileName: file.name, sheet: msg.sheet });
+        setState({ status: "reading", fileName, sheet: msg.sheet });
       } else if (msg.type === "done") {
         finish();
-        setState({ status: "read", fileName: file.name, rows: msg.rows, report: msg.report });
+        setState({ status: "read", fileName, rows: msg.rows, report: msg.report, populationSummary: msg.populationSummary ?? null });
       } else {
         logError("comprehensive-executive:workbook-read", new Error(`${msg.code}: ${msg.message}`));
         fail(toWorkbookErrorCode(msg.code));
@@ -103,10 +105,10 @@ export function useComprehensiveWorkbook(): {
     worker.addEventListener("error", onFail);
     worker.addEventListener("messageerror", onFail);
     armWatchdog();
-    worker.postMessage({ file } satisfies ComprehensiveWorkerRequest);
+    worker.postMessage({ files } satisfies ComprehensiveWorkerRequest);
   }, [stop]);
 
   useEffect(() => stop, [stop]);
 
-  return { state, selectFile, removeFile };
+  return { state, selectFiles, removeFile };
 }

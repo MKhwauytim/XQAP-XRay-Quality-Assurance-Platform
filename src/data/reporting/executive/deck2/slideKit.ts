@@ -423,6 +423,8 @@ export type PortPopRow = {
   sampleTotal: number;
   sampleClean: number;
   sampleSuspicious: number;
+  /** Population rows whose result is neither سليمة nor اشتباه (summary-backed reports only). */
+  other?: number;
 };
 
 export function collectPortStats(model: ReportModel): { land: PortPopRow[]; sea: PortPopRow[] } {
@@ -453,6 +455,20 @@ export function collectPortStats(model: ReportModel): { land: PortPopRow[]; sea:
       cur.sampleTotal += 1;
       if (r.imageResult === "اشتباه") cur.sampleSuspicious += 1;
       else cur.sampleClean += 1;
+    }
+  }
+  // Comprehensive report with a workbook population: the population side comes
+  // from its totals; the sample side stays what the completed rows gave above.
+  const summary = model.population.summary;
+  if (model.population.fromSummary && summary) {
+    for (const p of map.values()) { p.total = 0; p.clean = 0; p.suspicious = 0; p.other = 0; }
+    for (const sp of summary.byPort) {
+      let cur = map.get(sp.name);
+      if (!cur) {
+        cur = { name: sp.name, total: 0, clean: 0, suspicious: 0, sampleTotal: 0, sampleClean: 0, sampleSuspicious: 0, sea: (sp.portType ?? "").includes("بحري") };
+        map.set(sp.name, cur);
+      }
+      cur.total = sp.total; cur.clean = sp.clean; cur.suspicious = sp.suspicious; cur.other = sp.other;
     }
   }
   const all = [...map.values()].sort((a, b) => b.total - a.total);
