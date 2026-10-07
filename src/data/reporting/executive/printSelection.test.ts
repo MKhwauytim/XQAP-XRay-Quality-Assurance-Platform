@@ -102,4 +102,20 @@ describe("print selection", () => {
       Object.defineProperty(window, "localStorage", real);
     }
   });
+
+  it("renumbers the included slides' counters while printing (no gap for a toggled-off page) and restores them after", () => {
+    document.title = "تقرير ترقيم";
+    document.body.innerHTML = `<div>${printSelectBarHtml()}</div>${[1, 2, 3, 4]
+      .map((n) => `<section class="slide" id="s${n}"><footer><span class="v3-page-num">0${n} / 4</span></footer></section>`)
+      .join("")}`;
+    run();
+    const boxes = Array.from(document.querySelectorAll<HTMLInputElement>(".slide-print-toggle input"));
+    boxes[1].checked = false; // page 2 toggled off
+    boxes[1].dispatchEvent(new Event("change"));
+    const nums = () => Array.from(document.querySelectorAll(".v3-page-num")).map((e) => e.textContent);
+    window.dispatchEvent(new Event("beforeprint"));
+    expect([nums()[0], nums()[2], nums()[3]]).toEqual(["01 / 3", "02 / 3", "03 / 3"]);
+    window.dispatchEvent(new Event("afterprint"));
+    expect(nums()).toEqual(["01 / 4", "02 / 4", "03 / 4", "04 / 4"]);
+  });
 });

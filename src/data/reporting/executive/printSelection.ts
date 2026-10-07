@@ -8,8 +8,10 @@
 // the rest get one injected at load by the script. The selection is
 // optionally persisted per report in localStorage (every access try/caught).
 //
-// Page numbers/TOC are baked into the slides at build time, so a printout
-// with excluded pages shows gaps in the "NN / total" counter — by design.
+// Page numbers are baked into the slides at build time; while printing, the
+// script renumbers the INCLUDED slides' "NN / total" counters (deck3's
+// `.v3-page-num`) 1..N and restores the originals afterwards, so a printout
+// with excluded pages has no gaps. (Contents-page ranges stay as built.)
 import { getLabels } from "../../labels/labelsStore";
 import { esc } from "./primitives";
 
@@ -101,5 +103,24 @@ export const PRINT_SELECT_SCRIPT = `(function(){
   var none = document.getElementById('ps-none');
   if (all) all.addEventListener('click', function(){ setAll(true); });
   if (none) none.addEventListener('click', function(){ setAll(false); });
+  // Printing: number the included slides consecutively (no gaps for toggled-off pages); restore afterwards.
+  function renumber(){
+    var included = slides.filter(function(s){ return !s.hasAttribute('data-print-off'); });
+    included.forEach(function(s, i){
+      var el = s.querySelector('.v3-page-num');
+      if (!el) return;
+      if (el.getAttribute('data-orig') === null) el.setAttribute('data-orig', el.textContent);
+      var n = i + 1;
+      el.textContent = (n < 10 ? '0' : '') + n + ' / ' + included.length;
+    });
+  }
+  function restore(){
+    slides.forEach(function(s){
+      var el = s.querySelector('.v3-page-num');
+      if (el && el.getAttribute('data-orig') !== null) { el.textContent = el.getAttribute('data-orig'); el.removeAttribute('data-orig'); }
+    });
+  }
+  window.addEventListener('beforeprint', renumber);
+  window.addEventListener('afterprint', restore);
   sync();
 })();`;

@@ -2,6 +2,7 @@ import type {
   ExecutiveKPIs,
   ExecutiveReportInput,
   ExecutiveReportRow,
+  PopulationSummary,
   PortProfile,
   StageProfile,
 } from "../../executiveReportTypes";
@@ -21,6 +22,7 @@ import { buildAggregates } from "./aggregates";
 import type { Aggregates } from "./aggregates";
 import { buildReviewerKpis } from "./reviewerKpis";
 import type { ReviewerKpiModel, ReviewerReferralInput } from "./reviewerKpis";
+import { applyPopulationSummary } from "./populationSummaryKpis";
 import { band } from "./dataSufficiency";
 import type { DataSufficiencyBand } from "./dataSufficiency";
 import { formatMonthFolderShortLabel } from "../../../population/monthFolder";
@@ -62,6 +64,11 @@ export type ReportModel = {
     suspicionRate: number;
     byPort: PortProfile[];
     byStage: StageProfile[];
+    /** Set only when the figures above come from a workbook's population totals (comprehensive report). */
+    fromSummary?: true;
+    /** Population rows whose L1/L2 result is neither سليمة nor اشتباه (summary-backed reports only). */
+    other?: number;
+    summary?: PopulationSummary;
   };
   sample: {
     total: number;
@@ -196,7 +203,11 @@ export function buildReportModel(
   const periodId = input.periodLabel ?? formatMonthFolderShortLabel(input.monthFolderName);
 
   const rows = buildExecutiveReportRows(input);
-  const kpis = calculateExecutiveKPIs(rows, input.sample, input.config, input.stageMappings);
+  const baseKpis = calculateExecutiveKPIs(rows, input.sample, input.config, input.stageMappings);
+  // Comprehensive report: its rows are completed samples only, so the population
+  // figures come from the workbook's population totals when it carried them.
+  const populationSummary = input.rowsOverride !== undefined ? (input.populationSummary ?? null) : null;
+  const kpis = populationSummary ? applyPopulationSummary(baseKpis, populationSummary, input.stageMappings) : baseKpis;
 
   const factTable = buildDecisionRecords(rows, periodId);
   const comparisons = buildImageComparisons(rows);
@@ -333,6 +344,13 @@ export function buildReportModel(
       suspicionRate: kpis.suspicionRate,
       byPort: kpis.portProfiles,
       byStage: kpis.stageProfiles,
+      ...(populationSummary
+        ? {
+            fromSummary: true as const,
+            other: Object.values(populationSummary.byStage).reduce((s, b) => s + b.other, 0),
+            summary: populationSummary,
+          }
+        : {}),
     },
     sample: {
       total: kpis.totalSample,

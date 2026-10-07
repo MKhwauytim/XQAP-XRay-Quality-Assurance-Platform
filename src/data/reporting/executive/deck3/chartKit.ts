@@ -73,6 +73,10 @@ function refLinesHtml(references: ChartReference[] | undefined, min: number, max
     .join("");
 }
 
+/** Above this many bars (or groups) a chart switches to the dense layout (smaller labels/gaps). */
+const DENSE_BAR_COUNT = 6;
+const DENSE_GROUP_COUNT = 8;
+
 function cellHtml(
   bar: ChartBar,
   min: number,
@@ -112,16 +116,18 @@ export function barChart(opts: {
   hideCats?: boolean;
 }): string {
   const fmt = opts.valueFormat ?? defaultFormat;
-  const gap = opts.gap ?? 20;
-  const pad = opts.pad ?? 20;
+  const dense = opts.bars.length > DENSE_BAR_COUNT;
+  const gap = dense ? Math.min(opts.gap ?? 20, 6) : (opts.gap ?? 20);
+  const pad = dense ? Math.min(opts.pad ?? 20, 8) : (opts.pad ?? 20);
   const maxWidth = opts.barMaxWidth ?? 92;
+  const dcls = dense ? " v3-dense" : "";
   const tint = opts.tint && opts.tint !== "panel" ? ` ${opts.tint}` : "";
   const sizing = opts.plotHeight ? ` style="height:${opts.plotHeight}px"` : "";
   const grow = opts.plotHeight ? "" : " grow";
   const rowStyle = ` style="gap:${gap}px;padding:0 ${pad}px"`;
   const bars = opts.bars.map((b) => cellHtml(b, opts.min, opts.max, maxWidth, opts.defaultTone ?? "gold", fmt)).join("");
-  const cats = opts.hideCats ? "" : `<div class="v3-cats"${rowStyle}>${opts.bars.map((b) => catHtml(b.label, b.sublabel, "")).join("")}</div>`;
-  return `<div class="v3-plot${tint}${grow}"${sizing}><div class="v3-bars"${rowStyle}>${bars}</div>${refLinesHtml(opts.references, opts.min, opts.max)}</div>${cats}`;
+  const cats = opts.hideCats ? "" : `<div class="v3-cats${dcls}"${rowStyle}>${opts.bars.map((b) => catHtml(b.label, b.sublabel, "")).join("")}</div>`;
+  return `<div class="v3-plot${tint}${grow}${dcls}"${sizing}><div class="v3-bars"${rowStyle}>${bars}</div>${refLinesHtml(opts.references, opts.min, opts.max)}</div>${cats}`;
 }
 
 export function groupedBarChart(opts: {
@@ -143,9 +149,11 @@ export function groupedBarChart(opts: {
   valueFormat?: (v: number) => string;
 }): string {
   const fmt = opts.valueFormat ?? defaultFormat;
-  const gap = opts.gap ?? 26;
-  const pad = opts.pad ?? 22;
+  const dense = opts.groups.length > DENSE_GROUP_COUNT;
+  const gap = dense ? Math.min(opts.gap ?? 26, 8) : (opts.gap ?? 26);
+  const pad = dense ? Math.min(opts.pad ?? 22, 8) : (opts.pad ?? 22);
   const maxWidth = opts.barMaxWidth ?? 96;
+  const dcls = dense ? " v3-dense" : "";
   const toneA = opts.toneA ?? "gold";
   const toneB = opts.toneB ?? "blue";
   const tint = opts.tint && opts.tint !== "panel" ? ` ${opts.tint}` : "";
@@ -161,5 +169,5 @@ export function groupedBarChart(opts: {
     )
     .join("");
   const cats = opts.groups.map((g) => catHtml(g.label, g.sublabel, flexStyle)).join("");
-  return `<div class="v3-plot${tint}${grow}"${sizing}><div class="v3-bars${center}"${rowStyle}>${groups}</div>${refLinesHtml(opts.references, opts.min, opts.max)}</div><div class="v3-cats${center}"${rowStyle}>${cats}</div>`;
+  return `<div class="v3-plot${tint}${grow}${dcls}"${sizing}><div class="v3-bars${center}"${rowStyle}>${groups}</div>${refLinesHtml(opts.references, opts.min, opts.max)}</div><div class="v3-cats${center}${dcls}"${rowStyle}>${cats}</div>`;
 }

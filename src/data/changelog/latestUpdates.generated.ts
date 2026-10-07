@@ -5,6 +5,55 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v151.11",
+    "date": "2026-10-07",
+    "bucket": "fix",
+    "scope": "deck3",
+    "title": "keep every sample row (56,468) with an «other results» class; empty agreement slides collapse"
+  },
+  {
+    "version": "v151.10",
+    "date": "2026-10-07",
+    "bucket": "feature",
+    "scope": "deck3",
+    "title": "population totals section from the workbook; one port-accuracy slide per port type"
+  },
+  {
+    "version": "v151.9",
+    "date": "2026-10-07",
+    "bucket": "fix",
+    "scope": "deck3",
+    "title": "charts fit with many ports; Add: follow-up workbook enrichment for the comprehensive report"
+  },
+  {
+    "version": "v151.8",
+    "date": "2026-10-06",
+    "bucket": "feature",
+    "scope": "reports",
+    "title": "per-page print on/off toggles, select all/none and saved selection in the executive HTML decks (v2, v3)"
+  },
+  {
+    "version": "v151.7",
+    "date": "2026-10-06",
+    "bucket": "fix",
+    "scope": "deck3",
+    "title": "split the last two visual slides into two (يتبع) pages each"
+  },
+  {
+    "version": "v151.6",
+    "date": "2026-10-06",
+    "bucket": "fix",
+    "scope": "deck3",
+    "title": "chart axes widen to fit real data so low/high values keep a visible bar and label"
+  },
+  {
+    "version": "v151.5",
+    "date": "2026-10-06",
+    "bucket": "fix",
+    "scope": "workbookImport",
+    "title": "read the examined-sample layout (SJAN…SDEC) of the comprehensive report workbook"
+  },
+  {
     "version": "v151.4",
     "date": "2026-10-06",
     "bucket": "redesign",
@@ -24,54 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "reports",
     "title": "comprehensive report renumbers sections, drops the population rail tab, supports deck v3, and states its study period"
-  },
-  {
-    "version": "v151.1",
-    "date": "2026-10-06",
-    "bucket": "fix",
-    "scope": "reports",
-    "title": "comprehensive report opens the executive deck, not the detailed document"
-  },
-  {
-    "version": "v151.0",
-    "date": "2026-10-05",
-    "bucket": "feature",
-    "scope": "reports",
-    "title": "comprehensive executive report (completed samples; system + optional workbook)"
-  },
-  {
-    "version": "v150.46",
-    "date": "2026-10-05",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "fold a seedless answer chain with an empty legacy baseline; isolate one assignee's unreadable answers in the oversight queue"
-  },
-  {
-    "version": "v150.45",
-    "date": "2026-10-01",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "a pending answer already on disk is announced once, not every 30 s"
-  },
-  {
-    "version": "v150.44",
-    "date": "2026-09-30",
-    "bucket": "feature",
-    "scope": "user-management",
-    "title": "export all activity and action logs to Excel"
-  },
-  {
-    "version": "v150.43",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "the answer-segment probe sizes chain heads, not the newest 64 names"
-  },
-  {
-    "version": "v150.42",
-    "date": "2026-09-29",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "the per-employee request-queue scan is bounded and memoized, never at the cost of a hidden request"
   }
 ];

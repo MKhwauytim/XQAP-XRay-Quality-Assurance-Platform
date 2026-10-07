@@ -71,7 +71,7 @@ export default function ComprehensiveExecutive() {
   const labels = useLabels();
   const { directoryHandle } = useWorkspace();
   const { can, getMutationCapability, role, username } = usePermissions();
-  const { state: workbook, selectFile, removeFile } = useComprehensiveWorkbook();
+  const { state: workbook, selectFiles, removeFile } = useComprehensiveWorkbook();
   const [mode, setMode] = useState<ComprehensiveSourceMode>(DEFAULT_SOURCE_MODE);
   const excelOnly = mode === "excel-only";
   const [system, setSystem] = useState<SystemState>({ status: "loading" });
@@ -183,9 +183,9 @@ export default function ComprehensiveExecutive() {
   const exportDisabled = !canExportReports || !hasRows || exporting !== null || systemLoading;
 
   function handleFileChange(ev: ChangeEvent<HTMLInputElement>): void {
-    const file = ev.target.files?.[0];
+    const files = Array.from(ev.target.files ?? []);
     ev.target.value = "";
-    if (file) selectFile(file);
+    if (files.length > 0) selectFiles(files);
   }
 
   function handleRemove(): void {
@@ -207,7 +207,7 @@ export default function ComprehensiveExecutive() {
         template: null,
         config: DEFAULT_EXEC_CONFIG,
       };
-      const input = buildComprehensiveInput(merged.rows, base, merged.period);
+      const input = buildComprehensiveInput(merged.rows, base, merged.period, workbook.status === "read" ? workbook.populationSummary : null);
       if (kind === "deck" && deckEdition === "v3") {
         const { openExecutiveDeckV3 } = await import("../../../../../data/reporting/executive/deck3");
         await openExecutiveDeckV3(input, NO_NAMES);
@@ -251,6 +251,7 @@ export default function ComprehensiveExecutive() {
             ref={fileInputRef}
             type="file"
             accept=".xlsx"
+            multiple
             className="ce-file-input"
             aria-label={labels.ce_choose_file}
             data-testid="ce-file-input"

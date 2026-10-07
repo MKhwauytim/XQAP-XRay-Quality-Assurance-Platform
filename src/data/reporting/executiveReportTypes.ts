@@ -64,6 +64,14 @@ export type ExecutiveReportRow = {
   verificationCategory: VerificationCategory | null;
   /** Non-L1/L2 corroborating result sources, bridged from the population row. */
   otherResults: OtherResultsPanel;
+  /**
+   * Set (to the raw file value) when that level's result is neither سليمة nor اشتباه
+   * (a numeric code, a blank…). The row still counts as a sample; its decision at that
+   * level is simply not evaluable. `levelXResult` then holds a neutral placeholder and
+   * must not be read as the employee's answer.
+   */
+  levelOneOther?: string;
+  levelTwoOther?: string;
   /** Level notes (ملاحظة المستويات) carried for traceability. */
   notes: string | null;
   /**
@@ -297,6 +305,31 @@ export const DEFAULT_EXEC_CONFIG: ExecutiveReportConfig = {
   showEmployeeNames: false,
 };
 
+/** Result tally of one population slice: clean / suspicious by the image-result OR rule, everything else `other`. */
+export type PopulationBucket = { total: number; clean: number; suspicious: number; other: number };
+
+/**
+ * Totals-only summary of the risk population carried by a workbook (the monthly
+ * `JAN`…`DEC` sheets of the examined-sample workbook), summed across months.
+ * No rows are kept: the comprehensive report is built from completed samples
+ * alone, so this is the only place its population figures can come from.
+ * `other` counts rows whose L1/L2 result is neither سليمة nor اشتباه (numeric
+ * codes, blanks…), never folded into either of the two.
+ */
+export type PopulationSummary = {
+  total: number;
+  /** Key = the raw stage text of the file; consumers canonicalise it with `getStageKey`. */
+  byStage: Record<string, PopulationBucket>;
+  byPort: Array<PopulationBucket & { name: string; portType: string | null }>;
+  levelOne: { clean: number; suspicious: number; other: number };
+  levelTwo: { clean: number; suspicious: number; other: number };
+  /** The same L1 / L2 tallies per stage (raw stage text, like `byStage`), so each level of the report can show its own answers. */
+  byStageLevels: Record<string, { levelOne: { clean: number; suspicious: number; other: number }; levelTwo: { clean: number; suspicious: number; other: number } }>;
+  /** Raw non-standard result values with their counts, per level. */
+  otherValues: { levelOne: Record<string, number>; levelTwo: Record<string, number> };
+  sheets: Array<{ name: string; rows: number }>;
+};
+
 export type ExecutiveReportInput = {
   monthFolderName: string;
   /**
@@ -314,6 +347,8 @@ export type ExecutiveReportInput = {
   config: ExecutiveReportConfig;
   /** Pre-built rows (comprehensive report); skips derivation. */
   rowsOverride?: ExecutiveReportRow[];
+  /** Population totals for a `rowsOverride` report (comprehensive report); see {@link PopulationSummary}. */
+  populationSummary?: PopulationSummary | null;
   /**
    * Report-to-revision linkage (B2): source file name → `JsonEnvelope.metadata.revision`
    * captured at load time. Optional — legacy callers omit it and the footer renders nothing.

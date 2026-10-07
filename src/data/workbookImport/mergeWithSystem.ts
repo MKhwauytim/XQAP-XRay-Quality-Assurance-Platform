@@ -1,5 +1,5 @@
 import { isRowStudied } from "../reporting/executiveReportTypes";
-import type { ExecutiveReportInput, ExecutiveReportRow } from "../reporting/executiveReportTypes";
+import type { ExecutiveReportInput, ExecutiveReportRow, PopulationSummary } from "../reporting/executiveReportTypes";
 import type { MappedWorkbookRow } from "./workbookColumnMap";
 import { formatMonthFolderName, formatMonthShortLabel, parseMonthFolderName } from "../population/monthFolder";
 import { getLabels } from "../labels/labelsStore";
@@ -144,6 +144,7 @@ export function buildComprehensiveInput(
   rows: ExecutiveReportRow[],
   base: ComprehensiveBase,
   period: ComprehensivePeriod | null = null,
+  populationSummary: PopulationSummary | null = null,
 ): ExecutiveReportInput {
   return {
     monthFolderName: COMPREHENSIVE_MONTH_LABEL,
@@ -157,5 +158,6 @@ export function buildComprehensiveInput(
     stageMappings: base.stageMappings,
     processingSummary: null,
     rowsOverride: rows,
+    ...(populationSummary ? { populationSummary } : {}),
   };
 }
