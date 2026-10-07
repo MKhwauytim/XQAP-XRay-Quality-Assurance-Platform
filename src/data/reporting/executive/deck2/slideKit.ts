@@ -18,6 +18,7 @@
 import type { ReportModel } from "../model/reportModel";
 import { esc, fmtNum, fmtPct } from "../primitives";
 import { icon } from "../ui/icons";
+import { editAttr } from "./textEdit";
 
 // ── In-cell visuals (pure background — never change row height/padding/font) ──
 export type CellTone = "gold" | "blue" | "green" | "coral" | "neutral";
@@ -269,10 +270,10 @@ export function sideRail(active: NavSectionKey): string {
     { key: "section3", label: "التحاليل المتقدمة" },
   ];
   return `<div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-title"${editAttr("التقرير التنفيذي لضمان جودة الأشعة")}>التقرير التنفيذي لضمان جودة الأشعة</div>
     ${tabs
       .filter((t) => !activeOmittedSections.has(t.key))
-      .map((t) => `<div class="v2-rail-tab${t.key === active ? " active" : ""}">${esc(t.label)}</div>`)
+      .map((t) => `<div class="v2-rail-tab${t.key === active ? " active" : ""}"${editAttr(t.label)}>${esc(t.label)}</div>`)
       .join("")}
   </div>`;
 }
@@ -393,16 +394,17 @@ export function v2Slide(opts: {
 }): string {
   const cls = `slide v2${opts.slideClass ? " " + opts.slideClass : ""}`;
   const body = renderVariants(opts.id, opts.bodyVariants, opts.variantPreview);
+  const eyebrowText = opts.eyebrow === NAV_SECTIONS[opts.section] ? navSectionLabel(opts.section) : opts.eyebrow;
   return `<section class="${cls}" id="${esc(opts.id)}" data-title="${esc(opts.title)}" data-section="${opts.section}" data-section-label="${esc(navSectionLabel(opts.section))}">
   ${slideControls(opts.id, opts.variantPreview)}
   ${sideRail(opts.section)}
   <div class="slide-inner">
     <div class="slide-eyebrow">
       <span class="slide-eyebrow-icon">${icon(opts.iconName, 16)}</span>
-      <span>${esc(opts.eyebrow === NAV_SECTIONS[opts.section] ? navSectionLabel(opts.section) : opts.eyebrow)}</span>
+      <span${editAttr(eyebrowText)}>${esc(eyebrowText)}</span>
     </div>
-    <div class="slide-headline">${esc(opts.headline)}</div>
-    ${opts.subhead ? `<div class="slide-subhead">${esc(opts.subhead)}</div>` : ""}
+    <div class="slide-headline"${editAttr(opts.headline)}>${esc(opts.headline)}</div>
+    ${opts.subhead ? `<div class="slide-subhead"${editAttr(opts.subhead)}>${esc(opts.subhead)}</div>` : ""}
     <div class="slide-body">${body}</div>
   </div>
   ${pageFoot(opts.num, opts.total)}
@@ -609,7 +611,7 @@ export function ledgerTableCard(opts: {
 }): string {
   const cls = opts.cardClass ?? "v2-lg-table-card";
   const titleHtml = opts.title
-    ? `\n    <div class="v2-lg-table-card-title">${esc(opts.title)}</div>`
+    ? `\n    <div class="v2-lg-table-card-title"${editAttr(opts.title)}>${esc(opts.title)}</div>`
     : "";
   return `<div class="${cls}">${titleHtml}
     <table class="deck-table">

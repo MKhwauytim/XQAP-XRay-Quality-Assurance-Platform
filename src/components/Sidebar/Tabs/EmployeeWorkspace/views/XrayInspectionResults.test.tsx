@@ -169,7 +169,7 @@ describe("XrayInspectionResults view-mode toggle (no refetch regression)", () =>
     const replacementResult = await appendReplacementRequest(root, MONTH, replacement);
     if (!replacementResult.ok) throw new Error(`seed replacement failed: ${replacementResult.error}`);
 
-    render(<XrayInspectionResults directoryHandle={root} />);
+    render(<XrayInspectionResults directoryHandle={root} initialTab="results" />);
 
     await waitFor(() => expect(screen.getAllByText("IMG-ACTIVE").length).toBeGreaterThan(0));
 
@@ -211,7 +211,7 @@ describe("XrayInspectionResults periodic refresh is family-scoped (app-perf pass
     ]);
     if (!assignResult.ok) throw new Error(`seed assign failed: ${assignResult.error}`);
 
-    render(<XrayInspectionResults directoryHandle={root} />);
+    render(<XrayInspectionResults directoryHandle={root} initialTab="results" />);
     await waitFor(() => expect(screen.getAllByText("IMG-ACTIVE").length).toBeGreaterThan(0));
     expect(screen.queryByText("IMG-NEW")).not.toBeInTheDocument();
 
@@ -273,7 +273,7 @@ describe("XrayInspectionResults quality note (P2-2)", () => {
     writeUserManagementState(createEmptyUserManagementState(), false);
 
     const root = await seedActiveEntryWithAnswer();
-    render(<XrayInspectionResults directoryHandle={root} />);
+    render(<XrayInspectionResults directoryHandle={root} initialTab="results" />);
 
     await waitFor(() => expect(screen.getAllByText("IMG-ACTIVE").length).toBeGreaterThan(0));
 
@@ -303,7 +303,7 @@ describe("XrayInspectionResults quality note (P2-2)", () => {
     writeUserManagementState(createEmptyUserManagementState(), false);
 
     const root = await seedActiveEntryWithAnswer();
-    render(<XrayInspectionResults directoryHandle={root} />);
+    render(<XrayInspectionResults directoryHandle={root} initialTab="results" />);
 
     await waitFor(() => expect(screen.getAllByText("IMG-ACTIVE").length).toBeGreaterThan(0));
 
@@ -326,7 +326,7 @@ describe("XrayInspectionResults background data-refresh vs. an open quality-note
     writeUserManagementState(createEmptyUserManagementState(), false);
 
     const root = await seedActiveEntryWithAnswer();
-    render(<XrayInspectionResults directoryHandle={root} />);
+    render(<XrayInspectionResults directoryHandle={root} initialTab="results" />);
 
     await waitFor(() => expect(screen.getAllByText("IMG-ACTIVE").length).toBeGreaterThan(0));
 
@@ -427,7 +427,7 @@ describe("XrayInspectionResults — ad-hoc import visibility (THE GAP fix)", () 
 
     const root = await seedAdhocAssignmentForResults();
 
-    render(<XrayInspectionResults directoryHandle={root} />);
+    render(<XrayInspectionResults directoryHandle={root} initialTab="results" />);
 
     await waitFor(() => expect(screen.getAllByText("IMG-ACTIVE").length).toBeGreaterThan(0));
     await waitFor(() => expect(screen.getAllByText(ADHOC_SHOWN_XRAY_ID).length).toBeGreaterThan(0));
@@ -452,7 +452,7 @@ describe("XrayInspectionResults — ad-hoc import visibility (THE GAP fix)", () 
     }));
     if (!answered.ok) throw new Error(`seed ad-hoc answer failed: ${answered.error}`);
 
-    render(<XrayInspectionResults directoryHandle={root} />);
+    render(<XrayInspectionResults directoryHandle={root} initialTab="results" />);
 
     await waitFor(() => expect(screen.getAllByText(ADHOC_SHOWN_XRAY_ID).length).toBeGreaterThan(0));
     // The real month's row is unanswered, so exactly one row may read "completed".
@@ -481,7 +481,7 @@ describe("XrayInspectionResults — ad-hoc import visibility (THE GAP fix)", () 
     }));
     if (!answered.ok) throw new Error(`seed ad-hoc answer failed: ${answered.error}`);
 
-    const { unmount } = render(<XrayInspectionResults directoryHandle={root} />);
+    const { unmount } = render(<XrayInspectionResults directoryHandle={root} initialTab="results" />);
     await waitFor(() => expect(screen.getAllByText(ADHOC_SHOWN_XRAY_ID).length).toBeGreaterThan(0));
 
     fireEvent.click(screen.getByRole("row", { name: new RegExp(ADHOC_SHOWN_XRAY_ID) }));
@@ -503,7 +503,7 @@ describe("XrayInspectionResults — ad-hoc import visibility (THE GAP fix)", () 
     // Read-back through the view itself: a remount re-reads from disk, which is
     // exactly where the lost note used to disappear.
     unmount();
-    render(<XrayInspectionResults directoryHandle={root} />);
+    render(<XrayInspectionResults directoryHandle={root} initialTab="results" />);
     await waitFor(() => expect(screen.getAllByText(ADHOC_SHOWN_XRAY_ID).length).toBeGreaterThan(0));
     await waitFor(() =>
       expect(screen.getAllByText("ملاحظة على صف الاستيراد اليدوي").length).toBeGreaterThan(0)
@@ -561,7 +561,7 @@ describe("XrayInspectionResults — لا يوجد صورة shows معلق, not �
     writeUserManagementState(createEmptyUserManagementState(), false);
 
     const root = await seedActiveEntryWithNoImageAnswer();
-    render(<XrayInspectionResults directoryHandle={root} />);
+    render(<XrayInspectionResults directoryHandle={root} initialTab="results" />);
 
     await waitFor(() => expect(screen.getAllByText("IMG-ACTIVE").length).toBeGreaterThan(0));
     await waitFor(() => expect(screen.getAllByText(DEFAULT_LABELS.status_on_hold).length).toBeGreaterThan(0));
@@ -573,7 +573,7 @@ describe("XrayInspectionResults — لا يوجد صورة shows معلق, not �
     writeUserManagementState(createEmptyUserManagementState(), false);
 
     const root = await seedActiveEntryWithNoImageAnswer();
-    render(<XrayInspectionResults directoryHandle={root} />);
+    render(<XrayInspectionResults directoryHandle={root} initialTab="results" />);
 
     await waitFor(() => expect(screen.getAllByText("IMG-ACTIVE").length).toBeGreaterThan(0));
     fireEvent.click(screen.getByRole("row", { name: /IMG-ACTIVE/ }));
@@ -595,7 +595,7 @@ describe("XrayInspectionResults — لا يوجد صورة shows معلق, not �
     writeUserManagementState(createEmptyUserManagementState(), false);
 
     const root = await seedActiveEntryWithNoImageAnswer();
-    render(<XrayInspectionResults directoryHandle={root} />);
+    render(<XrayInspectionResults directoryHandle={root} initialTab="results" />);
 
     await waitFor(() => expect(screen.getAllByText("IMG-ACTIVE").length).toBeGreaterThan(0));
     fireEvent.click(screen.getByRole("row", { name: /IMG-ACTIVE/ }));
@@ -620,7 +620,7 @@ describe("XrayInspectionResults no longer writes on load (F14)", () => {
     const answerStorage = await import("../../../../../data/answers/answerStorage");
     const upsertSpy = vi.spyOn(answerStorage, "upsertItemAnswer");
 
-    render(<XrayInspectionResults directoryHandle={root} />);
+    render(<XrayInspectionResults directoryHandle={root} initialTab="results" />);
     await waitFor(() => expect(screen.getAllByText("IMG-ACTIVE").length).toBeGreaterThan(0));
 
     // Give any fire-and-forget on-load effect (the local-mirror backfill) a

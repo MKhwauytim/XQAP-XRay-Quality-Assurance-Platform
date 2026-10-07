@@ -1,0 +1,524 @@
+/* Results page — «المتابعة والمواعيد» tab. Tokens only (no raw hex). */
+
+.trk {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+.trk-tabs {
+  display: flex;
+  gap: var(--sp-1);
+  border-bottom: 2px solid var(--c-border);
+}
+
+.trk-tab {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--c-ink-3);
+  padding: var(--sp-3) var(--sp-5);
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+  cursor: pointer;
+}
+
+.trk-tab[aria-selected="true"] {
+  font-weight: 700;
+  color: var(--c-primary);
+  border-bottom-color: var(--c-primary);
+}
+
+.trk-tab:focus-visible,
+.trk-btn:focus-visible,
+.trk-cell:focus-visible,
+.trk-select:focus-visible,
+.trk-input:focus-visible {
+  outline: 2px solid var(--c-primary);
+  outline-offset: 2px;
+}
+
+.trk-card {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-xl);
+  padding: var(--sp-5);
+}
+
+/* ── Deadline card ─────────────────────────────────────────── */
+
+.trk-deadline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-5);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.trk-deadline-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 260px;
+}
+
+.trk-eyebrow {
+  font-size: var(--fs-sm);
+  color: var(--c-ink-3);
+  font-weight: 500;
+}
+
+.trk-deadline-date {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.trk-badge {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  border-radius: var(--r-pill);
+  padding: 3px var(--sp-3);
+}
+
+.trk-badge--default {
+  color: var(--c-success);
+  background: var(--c-success-bg);
+}
+
+.trk-badge--custom {
+  color: var(--c-warning-text);
+  background: var(--c-warning-bg);
+}
+
+.trk-note {
+  font-size: var(--fs-sm);
+  color: var(--c-ink-3);
+  line-height: 1.6;
+}
+
+.trk-deadline-side {
+  display: flex;
+  gap: var(--sp-5);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.trk-days-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.trk-days-left strong {
+  font-size: var(--fs-2xl);
+  color: var(--c-primary);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.trk-edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  align-items: flex-start;
+}
+
+.trk-edit-row {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.trk-btn {
+  appearance: none;
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  border: 1px solid var(--c-border-2);
+  background: var(--c-surface);
+  color: var(--c-ink);
+  border-radius: var(--r-md);
+  padding: var(--sp-2) var(--sp-4);
+  min-height: 40px;
+  cursor: pointer;
+}
+
+.trk-btn--primary {
+  background: var(--c-primary);
+  border-color: var(--c-primary);
+  color: var(--c-surface);
+}
+
+.trk-btn[disabled] {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.trk-link {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--c-primary);
+  text-decoration: underline;
+  cursor: pointer;
+  padding: var(--sp-1) 0;
+}
+
+.trk-input,
+.trk-select {
+  font: inherit;
+  font-size: var(--fs-sm);
+  border: 1px solid var(--c-border-2);
+  border-radius: var(--r-md);
+  padding: var(--sp-2) var(--sp-3);
+  min-height: 40px;
+  box-sizing: border-box;
+  background: var(--c-surface);
+  color: var(--c-ink);
+}
+
+.trk-error {
+  font-size: var(--fs-sm);
+  color: var(--c-danger-text);
+  font-weight: 600;
+}
+
+.trk-readonly {
+  font-size: var(--fs-sm);
+  color: var(--c-ink-3);
+  background: var(--c-surface-2);
+  border-radius: var(--r-md);
+  padding: var(--sp-2) var(--sp-3);
+  max-width: 220px;
+  line-height: 1.6;
+}
+
+/* ── Summary ───────────────────────────────────────────────── */
+
+.trk-summary-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.trk-summary-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.trk-h {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 700;
+}
+
+.trk-chip {
+  appearance: none;
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--c-primary-dark);
+  background: var(--c-sky-soft);
+  border: 1px solid var(--c-primary);
+  border-radius: var(--r-pill);
+  padding: var(--sp-1) var(--sp-3);
+  min-height: 34px;
+  cursor: pointer;
+}
+
+.trk-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--c-ink-3);
+}
+
+.trk-tiles {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+
+@media (max-width: 1100px) {
+  .trk-tiles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .trk-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.trk-tile {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.trk-tile-label {
+  font-size: var(--fs-sm);
+  color: var(--c-ink-3);
+  font-weight: 500;
+}
+
+.trk-tile-value {
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.trk-tile-value--completed { color: var(--c-success); }
+.trk-tile-value--hold { color: var(--c-warning-text); }
+.trk-tile-value--accent { color: var(--c-primary); }
+
+.trk-tile-note {
+  font-size: var(--fs-xs);
+  color: var(--c-ink-3);
+  line-height: 1.5;
+}
+
+/* ── Calendar ──────────────────────────────────────────────── */
+
+.trk-cal-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+
+.trk-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+  font-size: var(--fs-xs);
+  color: var(--c-ink-3);
+  align-items: center;
+}
+
+.trk-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.trk-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  box-sizing: border-box;
+}
+
+.trk-swatch--completed { background: var(--c-success); }
+.trk-swatch--hold { background: var(--c-warning); }
+.trk-swatch--today { border: 2px solid var(--c-navy); }
+.trk-swatch--deadline { border: 2px solid var(--c-warning); }
+
+.trk-cal-scroll {
+  overflow-x: auto;
+}
+
+.trk-cal {
+  min-width: 760px;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.trk-weekday {
+  text-align: center;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--c-ink-3);
+  padding: var(--sp-1) 0;
+}
+
+.trk-cell {
+  appearance: none;
+  font: inherit;
+  color: var(--c-ink);
+  text-align: right;
+  min-height: 104px;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  background: var(--c-surface);
+  padding: var(--sp-2) var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.trk-cell[disabled] {
+  cursor: default;
+}
+
+.trk-cell--blank {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.trk-cell--weekend { background: var(--c-surface-2); }
+.trk-cell--after { background: var(--c-bg); }
+.trk-cell--today { border: 2px solid var(--c-navy); }
+.trk-cell--deadline { border: 2px solid var(--c-warning); }
+.trk-cell--selected {
+  background: var(--c-sky-soft);
+  box-shadow: 0 0 0 3px var(--c-primary);
+}
+
+.trk-cell-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.trk-cell-day {
+  font-size: var(--fs-md);
+  font-weight: 700;
+}
+
+.trk-cell-tag {
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: var(--c-warning-text);
+}
+
+.trk-cell-weekend {
+  margin-top: auto;
+  font-size: var(--fs-xs);
+  color: var(--c-ink-3);
+}
+
+.trk-cell-counts {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.trk-cell-line {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.trk-cell-line--completed { color: var(--c-success); }
+.trk-cell-line--hold { color: var(--c-warning-text); }
+
+.trk-cell-line--target {
+  font-weight: 500;
+  color: var(--c-ink-3);
+  border-top: 1px dashed var(--c-border);
+  padding-top: 3px;
+}
+
+.trk-hint {
+  font-size: var(--fs-xs);
+  color: var(--c-ink-3);
+  line-height: 1.7;
+  margin-top: var(--sp-3);
+}
+
+/* ── Employee table ────────────────────────────────────────── */
+
+.trk-table-wrap {
+  overflow-x: auto;
+}
+
+.trk-table {
+  width: 100%;
+  min-width: 880px;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.trk-table th {
+  text-align: right;
+  font-weight: 600;
+  color: var(--c-ink-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 2px solid var(--c-border);
+}
+
+.trk-table td {
+  padding: var(--sp-3);
+  border-bottom: 1px solid var(--c-border);
+  font-variant-numeric: tabular-nums;
+}
+
+.trk-table td.trk-name { font-weight: 600; }
+.trk-table td.trk-hold { color: var(--c-warning-text); font-weight: 600; }
+
+.trk-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 110px;
+}
+
+.trk-bar-track {
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--c-surface-3);
+  overflow: hidden;
+}
+
+.trk-bar-fill {
+  display: block;
+  height: 6px;
+  background: var(--c-primary);
+}
+
+.trk-avg {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-weight: 700;
+}
+
+.trk-avg--ok { color: var(--c-success-strong); }
+.trk-avg--low { color: var(--c-warning-text); }
+
+.trk-avg-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.trk-muted {
+  color: var(--c-ink-3);
+}

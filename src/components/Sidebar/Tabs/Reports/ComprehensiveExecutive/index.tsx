@@ -30,6 +30,7 @@ import { DEFAULT_SOURCE_MODE } from "./sourceMode";
 import type { ComprehensiveSourceMode } from "./sourceMode";
 import { useComprehensiveWorkbook } from "./useComprehensiveWorkbook";
 import { loadDeckStyleChoices } from "../../../../../data/reporting/executive/deck2/styleChoices";
+import { resolveActiveTextPreset } from "../../../../../data/preferences/deckTextPresetPreference";
 import { loadDeckEditionPreference } from "../../../../../data/reporting/executive/deckEditionPreference";
 import type { ExecutiveDeckEdition } from "../../../../../data/reporting/executive/deckEditionPreference";
 
@@ -214,8 +215,9 @@ export default function ComprehensiveExecutive() {
       } else if (kind === "deck") {
         // Same saved slide styles the Reports tab's deck uses; none without a workspace.
         const saved = directoryHandle ? await loadDeckStyleChoices(directoryHandle) : null;
+        const textPreset = await resolveActiveTextPreset(directoryHandle);
         const { openExecutiveDeckV2 } = await import("../../../../../data/reporting/executive/deck2");
-        await openExecutiveDeckV2(input, NO_NAMES, saved?.choices);
+        await openExecutiveDeckV2(input, NO_NAMES, saved?.choices, textPreset);
       } else {
         const { buildExecutiveXlsx } = await import("../../../../../data/reporting/executiveReport");
         await buildExecutiveXlsx(input, NO_NAMES);

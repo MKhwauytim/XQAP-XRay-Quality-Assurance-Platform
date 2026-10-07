@@ -5,6 +5,20 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v153.0",
+    "date": "2026-10-07",
+    "bucket": "feature",
+    "scope": "results",
+    "title": "«المتابعة والمواعيد» default tab — admin-settable deadline, quota, calendar, per-employee averages"
+  },
+  {
+    "version": "v152.0",
+    "date": "2026-10-07",
+    "bucket": "feature",
+    "scope": "deck2",
+    "title": "editable static text in the executive deck, saved as named presets"
+  },
+  {
     "version": "v151.11",
     "date": "2026-10-07",
     "bucket": "fix",
@@ -59,19 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "redesign",
     "scope": "reports",
     "title": "deck3 scope wording moved to deck3Copy() to stay under the complexity gate"
-  },
-  {
-    "version": "v151.3",
-    "date": "2026-10-06",
-    "bucket": "fix",
-    "scope": "tests",
-    "title": "FeedbackWidget test sessions no longer expire with the calendar"
-  },
-  {
-    "version": "v151.2",
-    "date": "2026-10-06",
-    "bucket": "fix",
-    "scope": "reports",
-    "title": "comprehensive report renumbers sections, drops the population rail tab, supports deck v3, and states its study period"
   }
 ];

@@ -3,7 +3,7 @@ import { toEmployeeMirrorRowStub } from "../population/populationTypes";
 
 import { parseMonthFolderName } from "../population/monthFolder";
 import { logError } from "../storage/errorLogger";
-import { countWorkingDays } from "../../utils/workingDays";
+import { countWorkingDays, defaultQuotaDeadline } from "../../utils/workingDays";
 import type {
   DistributionEntry,
   DistributionEvent,
@@ -90,9 +90,7 @@ export type DistributionSummary = {
  * before v5 and working days after.
  */
 export function computeWorkingDaysForDeadline(month: number, year: number, fromDate: Date): number {
-  const lastDay = new Date(year, month, 0).getDate();
-  const deadline = new Date(year, month - 1, lastDay - 3);
-  return countWorkingDays(fromDate, deadline);
+  return countWorkingDays(fromDate, defaultQuotaDeadline(year, month));
 }
 
 function isUnsupportedEvent(event: DistributionEvent, supportedSchemaVersion: number): boolean {

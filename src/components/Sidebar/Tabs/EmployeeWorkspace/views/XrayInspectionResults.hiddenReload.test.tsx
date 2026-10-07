@@ -105,7 +105,7 @@ describe("XrayInspectionResults hidden-view reload gating", () => {
     const loadSpy = vi.spyOn(sampleStorage, "loadSampleMaster");
     const backfillSpy = vi.spyOn(mirrorBackfill, "backfillAnswerMirror");
 
-    const ui = (active: boolean) => <XrayInspectionResults directoryHandle={root} active={active} />;
+    const ui = (active: boolean) => <XrayInspectionResults directoryHandle={root} active={active} initialTab="results" />;
     const { rerender } = render(ui(true));
     await waitFor(() => expect(screen.getAllByText("IMG-A").length).toBeGreaterThan(0));
     await flush();
@@ -138,7 +138,7 @@ describe("XrayInspectionResults hidden-view reload gating", () => {
   it("does not reload on show when nothing broadcast while it was hidden", async () => {
     const root = await seed();
     const loadSpy = vi.spyOn(sampleStorage, "loadSampleMaster");
-    const ui = (active: boolean) => <XrayInspectionResults directoryHandle={root} active={active} />;
+    const ui = (active: boolean) => <XrayInspectionResults directoryHandle={root} active={active} initialTab="results" />;
     const { rerender } = render(ui(true));
     await waitFor(() => expect(screen.getAllByText("IMG-A").length).toBeGreaterThan(0));
     await flush();
@@ -154,7 +154,7 @@ describe("XrayInspectionResults hidden-view reload gating", () => {
     const loadSpy = vi.spyOn(sampleStorage, "loadSampleMaster");
     const ui = (tabActive: boolean) => (
       <TabActiveContext.Provider value={tabActive}>
-        <XrayInspectionResults directoryHandle={root} />
+        <XrayInspectionResults directoryHandle={root} initialTab="results" />
       </TabActiveContext.Provider>
     );
     const { rerender } = render(ui(true));
@@ -173,7 +173,7 @@ describe("XrayInspectionResults hidden-view reload gating", () => {
   it("still reloads on a broadcast while visible (behaviour unchanged)", async () => {
     const root = await seed();
     const loadSpy = vi.spyOn(sampleStorage, "loadSampleMaster");
-    render(<XrayInspectionResults directoryHandle={root} />);
+    render(<XrayInspectionResults directoryHandle={root} initialTab="results" />);
     await waitFor(() => expect(screen.getAllByText("IMG-A").length).toBeGreaterThan(0));
     await flush();
     loadSpy.mockClear();
@@ -188,7 +188,7 @@ describe("XrayInspectionResults hidden-view reload gating", () => {
     const answersSpy = vi.spyOn(answerStorage, "loadEmployeeAnswers");
     const fileSpy = vi.spyOn(root, "getFileHandle");
     const dirSpy = vi.spyOn(root, "getDirectoryHandle");
-    const ui = (active: boolean) => <XrayInspectionResults directoryHandle={root} active={active} />;
+    const ui = (active: boolean) => <XrayInspectionResults directoryHandle={root} active={active} initialTab="results" />;
     vi.useFakeTimers({ toFake: ["setTimeout", "setInterval", "clearTimeout", "clearInterval"] });
     const { rerender } = render(ui(true));
     // let the mount load (setTimeout 0 + real async I/O) settle under fake timers
@@ -224,7 +224,7 @@ describe("XrayInspectionResults hidden-view reload gating", () => {
   it("A8: a burst of broadcasts while a silent reload is in flight coalesces to at most one follow-up", async () => {
     const root = await seed();
     const loadSpy = vi.spyOn(sampleStorage, "loadSampleMaster");
-    render(<XrayInspectionResults directoryHandle={root} />);
+    render(<XrayInspectionResults directoryHandle={root} initialTab="results" />);
     await waitFor(() => expect(screen.getAllByText("IMG-A").length).toBeGreaterThan(0));
     await flush();
     loadSpy.mockClear();

@@ -4,6 +4,17 @@
 // arithmetic is on LOCAL calendar days, matching how the quota deadline itself
 // is built (`new Date(year, month - 1, lastDay - 3)` in distributionDerivation.ts).
 
+/**
+ * The default quota deadline for a sample month: its last day − 3, local time.
+ * Single source for distribution (`computeWorkingDaysForDeadline`) and the
+ * results tracking tab, whose admin override is stored separately.
+ * `month` is 1–12.
+ */
+export function defaultQuotaDeadline(year: number, month: number): Date {
+  const lastDay = new Date(year, month, 0).getDate();
+  return new Date(year, month - 1, lastDay - 3);
+}
+
 /** `Date#getDay()` values of the weekend: Friday (5) and Saturday (6). */
 export const WEEKEND_DAYS: ReadonlySet<number> = new Set([5, 6]);
 

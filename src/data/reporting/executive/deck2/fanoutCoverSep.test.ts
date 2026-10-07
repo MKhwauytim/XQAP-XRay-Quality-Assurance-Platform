@@ -148,7 +148,7 @@ describe("slide-cover fan-out — Ledger/Briefing/Grid (2026-07-28 fan-out plan 
     `      <div class="v2-cover-grid">\n` +
     `      <div class="v2-cover-hero">\n` +
     `        <div class="v2-cover-kicker"><span class="v2-cover-kicker-dot"></span>عرض تنفيذي · تقرير شهري</div>\n` +
-    `        <h1 class="v2-cover-title">تقرير ضمان جودة<br/>فحص الأشعة</h1>\n` +
+    `        <h1 class="v2-cover-title" data-edit="تقرير ضمان جودة&#10;فحص الأشعة">تقرير ضمان جودة<br/>فحص الأشعة</h1>\n` +
     `        <div class="v2-cover-rule"></div>\n` +
     `        <div class="v2-cover-lockup">\n` +
     `          <span class="v2-cover-lockup-label">فترة الدراسة (عيّنة شهر)</span>\n` +
@@ -272,8 +272,8 @@ describe("slide-sep-1/2/3 fan-out — Ledger/Briefing/Grid (2026-07-28 fan-out p
     `    \n` +
     `  </div>\n` +
     `  <div class="v2-rail" aria-hidden="true">\n` +
-    `    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>\n` +
-    `    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab active">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab">التحاليل المتقدمة</div>\n` +
+    `    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>\n` +
+    `    <div class="v2-rail-tab" data-edit="المعجم">المعجم</div><div class="v2-rail-tab active" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>\n` +
     `  </div>\n` +
     `  <div class="v2-sep-bg" aria-hidden="true"></div>\n` +
     `  <div class="v2-sep-pattern" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" width="320" height="180"><rect x="1" y="23" width="10" height="10" rx="2" transform="rotate(54 6 28)" fill="#f4b400" fill-opacity="0.22"/><rect x="101" y="88" width="17" height="17" rx="2" transform="rotate(14 109.5 96.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="98" y="23" width="26" height="26" rx="2" transform="rotate(71 111 36)" fill="#f4b400" fill-opacity="0.22"/><rect x="136" y="139" width="9" height="9" rx="2" transform="rotate(63 140.5 143.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="223" y="81" width="28" height="28" rx="2" transform="rotate(69 237 95)" fill="#f4b400" fill-opacity="0.22"/><rect x="58" y="163" width="28" height="28" rx="2" transform="rotate(29 72 177)" fill="#f4b400" fill-opacity="0.22"/><rect x="123" y="40" width="32" height="32" rx="2" transform="rotate(40 139 56)" fill="#f4b400" fill-opacity="0.22"/><rect x="291" y="102" width="21" height="21" rx="2" transform="rotate(26 301.5 112.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="51" y="113" width="11" height="11" rx="2" transform="rotate(60 56.5 118.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="126" y="67" width="27" height="27" rx="2" transform="rotate(86 139.5 80.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="211" y="107" width="18" height="18" rx="2" transform="rotate(74 220 116)" fill="#f4b400" fill-opacity="0.22"/><rect x="28" y="96" width="22" height="22" rx="2" transform="rotate(71 39 107)" fill="#f4b400" fill-opacity="0.22"/><rect x="78" y="148" width="16" height="16" rx="2" transform="rotate(57 86 156)" fill="#f4b400" fill-opacity="0.22"/><rect x="274" y="179" width="20" height="20" rx="2" transform="rotate(41 284 189)" fill="#f4b400" fill-opacity="0.22"/><rect x="19" y="11" width="13" height="13" rx="2" transform="rotate(9 25.5 17.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="72" y="67" width="26" height="26" rx="2" transform="rotate(11 85 80)" fill="#f4b400" fill-opacity="0.22"/><rect x="274" y="21" width="16" height="16" rx="2" transform="rotate(49 282 29)" fill="#f4b400" fill-opacity="0.22"/><rect x="300" y="35" width="17" height="17" rx="2" transform="rotate(32 308.5 43.5)" fill="#f4b400" fill-opacity="0.22"/></svg></div>\n` +
@@ -296,9 +296,9 @@ describe("slide-sep-1/2/3 fan-out — Ledger/Briefing/Grid (2026-07-28 fan-out p
     `      <div class="v2-sep-lockup">\n` +
     `        <span class="v2-sep-badge"><svg viewBox="0 0 24 24" width="30" height="30" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span>\n` +
     `        <div class="v2-sep-eyebrow">القسم 1</div>\n` +
-    `        <h2>مجتمع الفحص</h2>\n` +
+    `        <h2 data-edit="مجتمع الفحص">مجتمع الفحص</h2>\n` +
     `        <div class="v2-sep-rule"></div>\n` +
-    `        <p>التعريف بمجتمع الصور لهذا الشهر.</p>\n` +
+    `        <p data-edit="التعريف بمجتمع الصور لهذا الشهر.">التعريف بمجتمع الصور لهذا الشهر.</p>\n` +
     `      </div>\n` +
     `    </div>\n` +
     `  </div>\n` +
