@@ -40,6 +40,12 @@ export const STORAGE_REGISTRY: readonly StorageEntry[] = [
     lossConsequence: "The interface returns to 100%; re-set it from Settings in one drag.",
   },
   {
+    id: "xray_deck2_text_preset_v1",
+    layer: "local",
+    purpose: "Which saved executive-deck text preset opens by default on this browser.",
+    lossConsequence: "The deck opens with the default wording; pick the preset again in Reports.",
+  },
+  {
     id: "xray_queue_split_v1",
     layer: "local",
     purpose: "Width split between the queue and the inspection panel on «صور الأشعة المحالة».",

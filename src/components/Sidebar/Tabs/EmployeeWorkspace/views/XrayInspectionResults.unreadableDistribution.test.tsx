@@ -162,7 +162,7 @@ describe("XrayInspectionResults — an unreadable distribution is not an empty m
     strictReadMock.mockRejectedValue(new DistributionUnreadableError(MONTH));
     const root = await seedWorkspace();
 
-    render(<XrayInspectionResults directoryHandle={root} />);
+    render(<XrayInspectionResults directoryHandle={root} initialTab="results" />);
 
     await screen.findByText(DEFAULT_LABELS.xray_results_error);
     expect(screen.queryByText("IMG-1")).not.toBeInTheDocument();
@@ -171,7 +171,7 @@ describe("XrayInspectionResults — an unreadable distribution is not an empty m
   it("still renders the month's rows when the read succeeds", async () => {
     const root = await seedWorkspace();
 
-    render(<XrayInspectionResults directoryHandle={root} />);
+    render(<XrayInspectionResults directoryHandle={root} initialTab="results" />);
 
     await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0), {
       timeout: 4000,

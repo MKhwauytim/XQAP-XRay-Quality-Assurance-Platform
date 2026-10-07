@@ -96,7 +96,7 @@ describe("XrayInspectionResults — stage labels use the workspace alias table (
     ]);
     if (!assigned.ok) throw new Error(`seed assign failed: ${assigned.error}`);
 
-    render(<XrayInspectionResults directoryHandle={root} />);
+    render(<XrayInspectionResults directoryHandle={root} initialTab="results" />);
 
     await waitFor(() => expect(screen.getAllByText("IMG-S2").length).toBeGreaterThan(0));
     await waitFor(() => expect(screen.queryAllByText("X2-CUSTOM")).toHaveLength(0));

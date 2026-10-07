@@ -15,6 +15,7 @@ import type { ReportModel } from "../model/reportModel";
 import type { StageProfile } from "../../executiveReportTypes";
 import { esc, fmtNum, fmtPct } from "../primitives";
 import { icon } from "../ui/icons";
+import { editAttr } from "./textEdit";
 import { coverMeshSvg, dividerPatternSvg } from "../ui/generativeArt";
 import { isRankable } from "../model/dataSufficiency";
 import { STAGE_KEY_ORDER, getStageKey, isCanonicalStageKey } from "../../../population/stageHelpers";
@@ -77,6 +78,9 @@ export { NAV_SECTIONS };
 export type { NavSectionKey };
 
 const ARABIC_MONTHS = ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"];
+
+/** Cover title — `\n` stands for the `<br/>` (the editor's override key). */
+const COVER_TITLE = "تقرير ضمان جودة\nفحص الأشعة";
 
 function formatDate(d: Date): string {
   return `${d.getDate()} ${ARABIC_MONTHS[d.getMonth()]} ${d.getFullYear()}`;
@@ -151,7 +155,7 @@ export function coverSlide(
   const coverBody = `<div class="v2-cover-grid">
       <div class="v2-cover-hero">
         <div class="v2-cover-kicker"><span class="v2-cover-kicker-dot"></span>${completedOnly ? "عرض تنفيذي · تقرير شامل" : "عرض تنفيذي · تقرير شهري"}</div>
-        <h1 class="v2-cover-title">تقرير ضمان جودة<br/>فحص الأشعة</h1>
+        <h1 class="v2-cover-title"${editAttr(COVER_TITLE)}>تقرير ضمان جودة<br/>فحص الأشعة</h1>
         <div class="v2-cover-rule"></div>
         <div class="v2-cover-lockup">
           <span class="v2-cover-lockup-label">${completedOnly ? esc(ceLabels.ce_completed_samples) : "فترة الدراسة (عيّنة شهر)"}</span>
@@ -192,7 +196,7 @@ export function coverSlide(
   const ledgerFootnote = `<tr class="v2-lg-footnote"><td colspan="3">داخلي — للاستخدام التنفيذي</td></tr>`;
   const ledgerBody = `<div class="v2-sys-ledger v2-lg-cover">
       <div class="v2-lg-cover-hero">
-        <h1 class="v2-cover-title">تقرير ضمان جودة<br/>فحص الأشعة</h1>
+        <h1 class="v2-cover-title"${editAttr(COVER_TITLE)}>تقرير ضمان جودة<br/>فحص الأشعة</h1>
         <div class="v2-lg-cover-rule"></div>
         <div class="v2-cover-lockup">
           <span class="v2-cover-lockup-label">فترة الدراسة (عيّنة شهر)</span>
@@ -217,7 +221,7 @@ export function coverSlide(
   // `briefingRankList` — nothing on a cover is honestly rankable.
   const briefingBody = `<div class="v2-sys-brief v2-bf-cover">
       <div class="v2-cover-kicker"><span class="v2-cover-kicker-dot"></span>عرض تنفيذي · تقرير شهري</div>
-      <h1 class="v2-cover-title">تقرير ضمان جودة<br/>فحص الأشعة</h1>
+      <h1 class="v2-cover-title"${editAttr(COVER_TITLE)}>تقرير ضمان جودة<br/>فحص الأشعة</h1>
       <div class="v2-cover-rule"></div>
       ${briefingLede({
         figure: popTotal,
@@ -241,7 +245,7 @@ export function coverSlide(
   // stays the cover's own dark-page white (not the "always navy" rule
   // metricMatrix's filled cells follow — these cells are unfilled).
   const gridBody = `<div class="v2-sys-grid v2-gd-cover">
-      <h1 class="v2-cover-title">تقرير ضمان جودة<br/>فحص الأشعة</h1>
+      <h1 class="v2-cover-title"${editAttr(COVER_TITLE)}>تقرير ضمان جودة<br/>فحص الأشعة</h1>
       <div class="v2-gd-cover-rule"></div>
       ${gridFieldCells([
         { label: "فترة الدراسة", value: periodId },
@@ -318,8 +322,8 @@ function tocCard(it: TocItem, i: number, tintPct: number | null): string {
   return `<div class="v2-toc-card ${esc(it.tone)}">
         <div class="v2-toc-num">${pad(i + 1)}</div>
         <div class="v2-toc-main">
-          <h4><span class="v2-toc-icon">${icon(it.iconName, 16)}</span>${esc(it.title)}</h4>
-          <p>${esc(it.goal)}</p>
+          <h4><span class="v2-toc-icon">${icon(it.iconName, 16)}</span><span${editAttr(it.title)}>${esc(it.title)}</span></h4>
+          <p${editAttr(it.goal)}>${esc(it.goal)}</p>
         </div>
         <div class="v2-toc-side"${sideStyle}>
           <div class="v2-toc-figure">${esc(it.figure)}</div>
@@ -1160,9 +1164,9 @@ export function sectionSeparatorSlide(opts: {
       <div class="v2-sep-lockup">
         <span class="v2-sep-badge">${icon(iconName, 30)}</span>
         <div class="v2-sep-eyebrow">القسم ${esc(String(sectionNo))}</div>
-        <h2>${esc(title)}</h2>
+        <h2${editAttr(title)}>${esc(title)}</h2>
         <div class="v2-sep-rule"></div>
-        <p>${esc(blurb)}</p>
+        <p${editAttr(blurb)}>${esc(blurb)}</p>
       </div>
     </div>`;
 
@@ -1180,11 +1184,11 @@ export function sectionSeparatorSlide(opts: {
   const ledgerBody = `<div class="v2-sys-ledger v2-lg-sep">
       <div class="v2-lg-sep-rule"></div>
       <div class="v2-lg-sep-head">${ledgerIdx(sectionNo - 1)}<span class="v2-lg-sep-eyebrow">القسم</span></div>
-      <h2 class="v2-lg-sep-title">${esc(title)}</h2>
+      <h2 class="v2-lg-sep-title"${editAttr(title)}>${esc(title)}</h2>
       <div class="v2-lg-sep-rule"></div>
       <div class="v2-lg-sep-def-line">
         <span class="v2-lg-sep-key">التعريف</span>
-        <p class="v2-lg-sep-def">${esc(blurb)}</p>
+        <p class="v2-lg-sep-def"${editAttr(blurb)}>${esc(blurb)}</p>
       </div>
       <div class="v2-lg-sep-rule"></div>
     </div>`;

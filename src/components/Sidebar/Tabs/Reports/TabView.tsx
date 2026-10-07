@@ -44,6 +44,8 @@ import {
   type ExecutiveDeckEdition,
 } from "../../../../data/reporting/executive/deckEditionPreference";
 import DeckDesignCustomizer from "./DeckDesignCustomizer";
+import DeckTextPresetPicker from "./DeckTextPresetPicker";
+import { resolveActiveTextPreset } from "../../../../data/preferences/deckTextPresetPreference";
 import type { ExportManifest } from "../../../../data/powerbiExport/exportTypes";
 import type { PopulationReportScope } from "../../../../data/reporting/populationReport/types";
 import "./Reports.css";
@@ -553,8 +555,9 @@ function ReportsContent() {
           await openExecutiveDeckV3(execInput, names);
         } else {
           const saved = directoryHandle ? await loadDeckStyleChoices(directoryHandle) : null;
+          const textPreset = await resolveActiveTextPreset(directoryHandle);
           const { openExecutiveDeckV2 } = await import("../../../../data/reporting/executive/deck2");
-          await openExecutiveDeckV2(execInput, names, saved?.choices);
+          await openExecutiveDeckV2(execInput, names, saved?.choices, textPreset);
         }
         logExport("executive-deck");
         showToast("ok", "تم فتح العرض التنفيذي.");
@@ -678,8 +681,9 @@ function ReportsContent() {
             await openExecutiveDeckV3(execInput, names);
           } else {
             const saved = directoryHandle ? await loadDeckStyleChoices(directoryHandle) : null;
+            const textPreset = await resolveActiveTextPreset(directoryHandle);
             const { openExecutiveDeckV2 } = await import("../../../../data/reporting/executive/deck2");
-            await openExecutiveDeckV2(execInput, names, saved?.choices);
+            await openExecutiveDeckV2(execInput, names, saved?.choices, textPreset);
           }
           showToast("ok", "تم فتح العرض التنفيذي. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         } else {
@@ -996,6 +1000,14 @@ function ReportsContent() {
               />
               <span>التصميم الجديد</span>
             </label>
+            {deckEdition === "v2" ? (
+              <DeckTextPresetPicker
+                directoryHandle={directoryHandle ?? null}
+                canSave={canExportReports}
+                username={username ?? "admin"}
+                onError={(text) => showToast("error", text)}
+              />
+            ) : null}
             <div className="rh-card-title">التقرير التنفيذي</div>
             <p className="rh-card-desc">
               ثلاث صيغ من نفس التحليل: عرض تنفيذي بالشرائح للاجتماعات، وتقرير تفصيلي كامل
