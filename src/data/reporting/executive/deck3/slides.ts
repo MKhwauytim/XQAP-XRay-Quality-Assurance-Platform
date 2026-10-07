@@ -6,6 +6,7 @@
 // definitions, level definitions, section descriptions) is the handoff's own
 // locked wording, hardcoded the same way deck2 hardcodes its one-off slide
 // copy.
+import { getStageKey } from "../../../population/stageHelpers";
 import { yieldToMain } from "../../../storage/yieldToMain";
 import { esc, fmtNum, fmtPct } from "../primitives";
 import type { ReportModel } from "../model/reportModel";
@@ -70,7 +71,9 @@ function rateCell(rate: number | null, count: number): string {
 }
 
 /** "21,480 (1,031)" — population figure with its bracketed sample figure. */
-function popCell(population: number, sample: number): string {
+function popCell(population: number, sample: number, stacked = false): string {
+  // Stacked (5-column port tables of a summary-backed report): the sample figure sits under the population one.
+  if (stacked) return `${fmtNum(population)}<br><span class="v3-sub v3-sub-sm">(${fmtNum(sample)})</span>`;
   return `${fmtNum(population)}<span class="v3-sub"> (${fmtNum(sample)})</span>`;
 }
 
@@ -196,12 +199,12 @@ type Deck3Copy = {
   closingLine: string;
 };
 
-function deck3Copy(completedOnly: boolean, monthlyTarget: number, completedTotal: string): Deck3Copy {
+function deck3Copy(completedOnly: boolean, monthlyTarget: number, completedTotal: string, withPopulation = false): Deck3Copy {
   if (completedOnly) {
     const ceLabels = getLabels();
     return {
-      eyebrowS2: "القسم الأول — نتائج فحص الجودة",
-      eyebrowS3: "القسم الثاني — التحاليل المتقدمة",
+      eyebrowS2: withPopulation ? EYEBROW_S2 : "القسم الأول — نتائج فحص الجودة",
+      eyebrowS3: withPopulation ? EYEBROW_S3 : "القسم الثاني — التحاليل المتقدمة",
       kpiTitle: "المؤشرات الرئيسية",
       kpiEyebrow: "خلاصة التقرير",
       coverKicker: "عرض تنفيذي · تقرير شامل",
@@ -209,14 +212,14 @@ function deck3Copy(completedOnly: boolean, monthlyTarget: number, completedTotal
       // No draw weights or monthly target behind completed-only rows.
       weightLines: ["", "", "", ""],
       highlightValue: completedTotal,
-      highlightTitle: ceLabels.ce_completed_samples,
-      highlightNote: ceLabels.ce_scope_note,
-      s2Ghost: "01",
-      s2Kicker: "القسم الأول",
+      highlightTitle: withPopulation ? "العيّنة المفحوصة" : ceLabels.ce_completed_samples,
+      highlightNote: withPopulation ? "العيّنة المفحوصة في الفترة؛ المجتمع مجموع أشهرها من أوراق الملف." : ceLabels.ce_scope_note,
+      s2Ghost: withPopulation ? "02" : "01",
+      s2Kicker: withPopulation ? "القسم الثاني" : "القسم الأول",
       s2Description: "دقة النتائج وتحديد موقع الاشتباه والاشتباهات الفائتة على مستوى التقرير والمنافذ والمستويات.",
       s2FootLead: "النتائج العامة",
-      s3Ghost: "02",
-      s3Kicker: "القسم الثاني",
+      s3Ghost: withPopulation ? "03" : "02",
+      s3Kicker: withPopulation ? "القسم الثالث" : "القسم الثاني",
       levelsChartNote: "الأعمدة بنفس أرقام صفحة دقة الرصد العامة — الخطان المتقطعان متوسطا التقرير",
       engineEmpty: "لا توجد صور مستهدفة من محرك المخاطر في العيّنات المكتملة.",
       closingLine: "نرحّب بالملاحظات والأسئلة على نتائج التقرير.",
@@ -266,6 +269,10 @@ export async function buildDeck3Slides(
   };
   const t = model.errorAnalysis.totals;
   const overallStats = accuracyOf(t);
+  // Rows whose L1/L2 result is neither سليمة nor اشتباه: counted in the sample, never scored.
+  const otherL1 = model.rows.filter((r) => r.levelOneOther !== undefined).length;
+  const otherL2 = model.rows.filter((r) => r.levelTwoOther !== undefined).length;
+  const otherResultsNote = otherL1 + otherL2 > 0 ? ` — نتائج أخرى غير مُقيَّمة: المستوى الأول ${fmtNum(otherL1)} · الثاني ${fmtNum(otherL2)}` : "";
 
   // Completed-only scope (comprehensive report): no population, sample master
   // or monthly target lies behind the rows, so section 1 (population) is
@@ -273,9 +280,13 @@ export async function buildDeck3Slides(
   // and risk-level slides state the completed-sample count instead of
   // population / sample / coverage / target figures. Full scope is unchanged.
   const co = model.scope === "completed-only";
+  // A comprehensive report whose workbook carried the risk population: section 1 (population) is shown
+  // from those totals, so the deck is structured like the full scope (numbering, contents, KPI band).
+  const withPop = co && model.population.fromSummary === true;
+  const coNoPop = co && !withPop;
   const ceLabels = getLabels();
   const completedTotal = fmtNum(model.sample.studied);
-  const copy = deck3Copy(co, monthlyTarget, completedTotal);
+  const copy = deck3Copy(co, monthlyTarget, completedTotal, withPop);
   const { eyebrowS2, eyebrowS3, kpiTitle } = copy;
 
   // Port lists + pagination, computed up front — slides 8 and 11 (population
@@ -292,8 +303,18 @@ export async function buildDeck3Slides(
   const popPages = portPageCount(popLand.length, popSea.length);
   const accPages = portPageCount(portAcc.land.length, portAcc.sea.length);
   // Section 1 = its divider + the per-level slide + `popPages` port pages.
+  // No other-team results and no risk-engine targeting on the sampled images (e.g. the examined-sample workbook
+  // carries none): the two agreement slides would be empty charts, so they collapse into one explanatory slide.
+  const agreementEmpty =
+    model.resultComparison.crossTeamMatrix
+      .filter((c) => [c.sourceA, c.sourceB].some((s) => s === "manual" || s === "opposite" || s === "liveMeans"))
+      .every((c) => (c.comparable ?? 0) === 0) &&
+    !populationScopedRows(model.rows).some((r) => engineVerdictOf(r.targetedByRiskEngine) === "اشتباه");
+  // The population-results slide (L1/L2 results across the population) exists only for a summary-backed comprehensive report.
+  const popResultsPages = withPop ? 1 : 0;
   const sectionOnePages = 2 + popPages;
-  const TOTAL = 23 + (popPages - 1) + (accPages - 1) - (co ? sectionOnePages : 0);
+  // +1: the per-port accuracy chart is one slide per port type (land, then sea).
+  const TOTAL = 24 + (popPages - 1) + (accPages - 1) + popResultsPages - (coNoPop ? sectionOnePages : 0) - (agreementEmpty ? 1 : 0);
   const YITBA = " (يتبع)";
 
   let nextNum = 1;
@@ -310,7 +331,7 @@ export async function buildDeck3Slides(
     periodValue: monthLabel,
     metaRows: [
       // The scope note itself is on the KPI and risk-level slides; it is too long for a cover cell.
-      ...(co ? [{ label: ceLabels.ce_completed_samples, value: completedTotal }] : []),
+      ...(co ? [{ label: withPop ? "العيّنة المفحوصة" : ceLabels.ce_completed_samples, value: completedTotal }] : []),
       {
         label: "تاريخ التقرير",
         value: now.toLocaleDateString("ar-u-ca-gregory-nu-latn", { day: "numeric", month: "long", year: "numeric" }),
@@ -325,24 +346,24 @@ export async function buildDeck3Slides(
   // 2 — Contents. Page ranges below section 1 shift with popPages/accPages
   // (slides 8 and 11's own port-table pagination) — derived from the same
   // arithmetic that produces TOTAL above, not re-hardcoded per range.
-  const s1End = 7 + popPages;
-  const s2Start = co ? 6 : s1End + 1;
-  const s2End = s2Start + 3 + accPages;
+  const s1End = 7 + popPages + popResultsPages;
+  const s2Start = coNoPop ? 6 : s1End + 1;
+  const s2End = s2Start + 4 + accPages;
   const s3Start = s2End + 1;
-  const s3End = s3Start + 8;
+  const s3End = s3Start + 8 - (agreementEmpty ? 1 : 0);
   parts.push(contentsSlide({
     eyebrow: "التقرير التنفيذي",
     title: "محتويات التقرير",
-    rows: co ? [
+    rows: coNoPop ? [
       { index: 1, title: "المعجم", description: "تعريف مستويات المخاطر الأربعة والمصطلحات المستخدمة في التقرير.", topics: "مستويات المخاطر · مصطلحات العيّنة والنتائج", pages: "ص 03–04" },
       { index: 2, title: kpiTitle, description: "خلاصة أرقام العيّنات المكتملة في صفحة واحدة.", topics: "العيّنات المكتملة · الدقة", pages: "ص 05" },
       { index: 3, title: eyebrowS2, description: "دقة النتائج على مستوى التقرير وحسب المنفذ ومستوى المخاطر.", topics: "النتائج العامة · النتائج حسب المنفذ والمستوى", pages: `ص ${pad2(s2Start)}–${pad2(s2End)}` },
       { index: 4, title: eyebrowS3, description: "مصفوفة النتائج، دقة المستويين، والتوافق مع الفرق الأمنية ومحرك المخاطر، وأثر التحديد والجودة.", topics: "المصفوفة · التوافق · أثر التحديد والجودة", pages: `ص ${pad2(s3Start)}–${pad2(s3End)}` },
     ] : [
       { index: 1, title: "المعجم", description: "تعريف مستويات المخاطر الأربعة والمصطلحات المستخدمة في التقرير.", topics: "مستويات المخاطر · مصطلحات العيّنة والنتائج", pages: "ص 03–04" },
-      { index: 2, title: "مؤشرات الشهر", description: "خلاصة أرقام الشهر في صفحة واحدة.", topics: "المجتمع · العيّنة · التغطية · الدقة", pages: "ص 05" },
-      { index: 3, title: "القسم الأول — مجتمع الفحص", description: "حجم مجتمع الشهر وتوزيعه على المستويات والمنافذ، والأساس الذي سُحبت منه العيّنة.", topics: "المستويات الأربعة · المنافذ البرية والبحرية", pages: `ص ${pad2(6)}–${pad2(s1End)}` },
-      { index: 4, title: "القسم الثاني — نتائج فحص الجودة", description: "دقة النتائج على مستوى الشهر وحسب المنفذ ومستوى المخاطر.", topics: "النتائج العامة · النتائج حسب المنفذ والمستوى", pages: `ص ${pad2(s2Start)}–${pad2(s2End)}` },
+      { index: 2, title: withPop ? kpiTitle : "مؤشرات الشهر", description: withPop ? "خلاصة أرقام الفترة في صفحة واحدة." : "خلاصة أرقام الشهر في صفحة واحدة.", topics: "المجتمع · العيّنة · التغطية · الدقة", pages: "ص 05" },
+      { index: 3, title: "القسم الأول — مجتمع الفحص", description: withPop ? "حجم مجتمع الفترة وتوزيعه على المستويات والمنافذ ونتائج المستويين." : "حجم مجتمع الشهر وتوزيعه على المستويات والمنافذ، والأساس الذي سُحبت منه العيّنة.", topics: withPop ? "المستويات · النتائج · المنافذ" : "المستويات الأربعة · المنافذ البرية والبحرية", pages: `ص ${pad2(6)}–${pad2(s1End)}` },
+      { index: 4, title: "القسم الثاني — نتائج فحص الجودة", description: withPop ? "دقة النتائج على مستوى الفترة وحسب المنفذ ومستوى المخاطر." : "دقة النتائج على مستوى الشهر وحسب المنفذ ومستوى المخاطر.", topics: "النتائج العامة · النتائج حسب المنفذ والمستوى", pages: `ص ${pad2(s2Start)}–${pad2(s2End)}` },
       { index: 5, title: "القسم الثالث — التحاليل المتقدمة", description: "مصفوفة النتائج، دقة المستويين، والتوافق مع الفرق الأمنية ومحرك المخاطر، وأثر التحديد والجودة.", topics: "المصفوفة · التوافق · أثر التحديد والجودة", pages: `ص ${pad2(s3Start)}–${pad2(s3End)}` },
     ],
     meta: meta("contents", "المحتويات"),
@@ -362,7 +383,7 @@ export async function buildDeck3Slides(
           { term: "مجتمع الفحص", definition: "صور أشعة الشهر المصنَّفة إلى مستويات المخاطر الأربعة المعتمدة من وكالة تحليل المخاطر." },
           { term: "العيّنة", definition: "الصور المسحوبة للدراسة وفق وزن سحب محدَّد مسبقًا لكل مستوى، مع اختيار عشوائي داخل حصة المستوى الواحد." },
           // Coverage is not reported for the completed-only scope, so its term is not defined there.
-          ...(co ? [] : [{ term: "التغطية", definition: "نسبة حجم العيّنة المسحوبة إلى حجم المجتمع؛ مقياس حجم لا يدل على تمثيل العيّنة للمجتمع." }]),
+          ...(coNoPop ? [] : [{ term: "التغطية", definition: "نسبة حجم العيّنة المسحوبة إلى حجم المجتمع؛ مقياس حجم لا يدل على تمثيل العيّنة للمجتمع." }]),
         ],
       },
       {
@@ -428,13 +449,13 @@ export async function buildDeck3Slides(
     const m = meta("kpis", kpiTitle);
     const missedShare = pct(t.missedSuspicion, t.evaluable);
     const inner = `${contentHead({ eyebrow: copy.kpiEyebrow, title: kpiTitle, large: true })}
-${kpiBand(co ? [
+${kpiBand(coNoPop ? [
       { label: ceLabels.ce_completed_samples, value: completedTotal, sub: ceLabels.ce_scope_note },
       { label: "الاشتباه الصحيح", value: fmtNum(t.correctSuspicion), valueTone: "green", sub: "نتائج اشتباه أكّدها أخصائي الجودة" },
       { label: "الاشتباه الخاطئ", value: fmtNum(t.falseSuspicion), valueTone: "gold", sub: "نتائج اشتباه رأى أخصائي الجودة أنها سليمة" },
     ] : [
       { label: "مجتمع الفحص", value: fmtNum(model.population.total), sub: "مجتمع الصور الواردة من وكالة تحليل المخاطر" },
-      { label: "العيّنة المسحوبة", value: fmtNum(model.sample.total), sub: "صورة موزّعة على أخصائيي الجودة" },
+      { label: withPop ? "العيّنة المفحوصة" : "العيّنة المسحوبة", value: fmtNum(model.sample.total), sub: withPop ? "صورة مكتملة الفحص في التقرير" : "صورة موزّعة على أخصائيي الجودة" },
       { label: "التغطية", value: fmtPct(model.sample.coverage ?? null), valueTone: "gold", sub: "نسبة العينة من المجتمع" },
     ], "top")}
 ${kpiBand([
@@ -445,16 +466,16 @@ ${kpiBand([
     parts.push(slideShell(m, "", inner));
   }
 
-  // 6–8 — Section 1 (population); omitted for the completed-only scope.
-  if (!co) {
+  // 6–8 — Section 1 (population); omitted for the completed-only scope unless the workbook carried its population.
+  if (!coNoPop) {
   // 6 — Section 1 divider
   parts.push(sectionDivider({
     eyebrow: footText,
     ghost: "01",
     kicker: "القسم الأول",
     title: "مجتمع الفحص",
-    description: "حجم مجتمع الشهر وتوزيعه على مستويات المخاطر والمنافذ، والأساس الذي سُحبت منه العيّنة.",
-    footItems: ["مجتمع الفحص والعيّنة حسب المستوى", "التوزيع على المنافذ البرية والبحرية"],
+    description: withPop ? "حجم مجتمع الفترة (مجموع الأشهر) وتوزيعه على مستويات المخاطر والمنافذ ونتائج المستويين، والأساس الذي سُحبت منه العيّنة." : "حجم مجتمع الشهر وتوزيعه على مستويات المخاطر والمنافذ، والأساس الذي سُحبت منه العيّنة.",
+    footItems: withPop ? ["مجتمع الفحص والعيّنة حسب المستوى", "نتائج المستوى الأول والثاني في المجتمع", "التوزيع على المنافذ البرية والبحرية"] : ["مجتمع الفحص والعيّنة حسب المستوى", "التوزيع على المنافذ البرية والبحرية"],
     meta: meta("s1", EYEBROW_S1),
   }));
 
@@ -475,7 +496,7 @@ ${kpiBand([
   <div class="v3-pop-bar"><i class="v3-tone-${tone}" style="width:${width.toFixed(1)}%"></i></div>
   <span class="num">${fmtNum(s.population)}</span>
   <span class="num strong">${fmtNum(s.sampleSize)}</span>
-  <span class="method${census ? " census" : ""}">${census ? "حصر كامل" : "عدد ثابت"}</span>
+  <span class="method${census ? " census" : ""}">${withPop ? `تغطية ${fmtPct(s.coverage)}` : census ? "حصر كامل" : "عدد ثابت"}</span>
 </div>`;
       })
       .join("\n");
@@ -484,14 +505,57 @@ ${kpiBand([
   <div class="v3-pop-stats">
     <div class="v3-pop-stat"><span>إجمالي المجتمع</span><b>${fmtNum(model.population.total)}</b></div>
     <div class="v3-pop-stat"><span>إجمالي العيّنة</span><b>${fmtNum(model.sample.total)}</b></div>
-    <div class="v3-pop-stat"><span>التغطية الكلية</span><b class="v3-ink-gold">${fmtPct(model.sample.coverage ?? null)}</b></div>
+    <div class="v3-pop-stat"><span>التغطية الكلية</span><b class="v3-ink-gold">${fmtPct(model.sample.coverage ?? null)}</b></div>${withPop ? `
+    <div class="v3-pop-stat"><span>مجتمع بنتائج أخرى</span><b>${fmtNum(model.population.other ?? 0)}</b></div>` : ""}
   </div>
   <div class="v3-pop-table">
-    <div class="v3-pop-hrow"><span>المستوى</span><span>المجتمع</span><span>العدد</span><span>العيّنة</span><span>أسلوب السحب</span></div>
+    <div class="v3-pop-hrow"><span>المستوى</span><span>المجتمع</span><span>العدد</span><span>العيّنة</span><span>${withPop ? "التغطية" : "أسلوب السحب"}</span></div>
     ${rows}
-    <p class="v3-pop-note">الاختيار عشوائي داخل حصة كل مستوى؛ ولا يعكس حجم الحصة أهمية المستوى — لكل مستوى هدف كشف مختلف.</p>
+    <p class="v3-pop-note">${withPop ? "التغطية = العيّنة المفحوصة ÷ مجتمع المستوى؛ ولا يعكس حجم المستوى أهميته — لكل مستوى هدف كشف مختلف." : "الاختيار عشوائي داخل حصة كل مستوى؛ ولا يعكس حجم الحصة أهمية المستوى — لكل مستوى هدف كشف مختلف."}</p>
   </div>
 </div>`;
+    parts.push(slideShell(m, "", inner));
+  }
+
+  // 7b — L1/L2 results across the population (comprehensive report with a workbook population only).
+  // «نتائج أخرى» = a result that is neither سليمة nor اشتباه; it is shown, never folded into either.
+  if (withPop && model.population.summary) {
+    const s = model.population.summary;
+    const m = meta("s1", EYEBROW_S1);
+    // One row per level (المستوى) — the same four rows as the previous page — with that level's own L1 and L2 answers.
+    // Each cell: the count with its share of the level's images beneath it.
+    type Tally = { clean: number; suspicious: number; other: number };
+    const zero = (): Tally => ({ clean: 0, suspicious: 0, other: 0 });
+    const perStage = new Map<string, { n: number; l1: Tally; l2: Tally }>();
+    for (const [raw, lv] of Object.entries(s.byStageLevels)) {
+      const key = getStageKey(raw);
+      const cur = perStage.get(key) ?? { n: 0, l1: zero(), l2: zero() };
+      for (const k of ["clean", "suspicious", "other"] as const) { cur.l1[k] += lv.levelOne[k]; cur.l2[k] += lv.levelTwo[k]; }
+      cur.n += lv.levelOne.clean + lv.levelOne.suspicious + lv.levelOne.other;
+      perStage.set(key, cur);
+    }
+    const cell = (n: number, of: number) => `${fmtNum(n)}<br><span class="v3-sub v3-sub-sm">(${fmtPct(pct(n, of))})</span>`;
+    const rowFor = (label: string, n: number, l1: Tally, l2: Tally): TableCell[] => [
+      { html: label },
+      { html: cell(l1.clean, n), cls: "v-green" },
+      { html: cell(l1.suspicious, n), cls: "v-red" },
+      { html: cell(l1.other, n), cls: "v-gold" },
+      { html: cell(l2.clean, n), cls: "v-green" },
+      { html: cell(l2.suspicious, n), cls: "v-red" },
+      { html: cell(l2.other, n), cls: "v-gold" },
+      { html: fmtNum(n), cls: "v-navy" },
+    ];
+    const stageRows = model.population.byStage.map((st) => {
+      const cur = perStage.get(st.stageKey) ?? { n: 0, l1: zero(), l2: zero() };
+      return rowFor(st.stageLabel, cur.n, cur.l1, cur.l2);
+    });
+    const inner = `${contentHead({ eyebrow: EYEBROW_S1, title: "نتائج المستويين في المجتمع", note: `${fmtNum(s.total)} صورة — مجموع أشهر الفترة · إجابات المستوى الأول والثاني لكل مستوى` })}
+${dataTable({
+      headers: ["المستوى", "الأول: سليمة", "الأول: اشتباه", "الأول: أخرى", "الثاني: سليمة", "الثاني: اشتباه", "الثاني: أخرى", "الإجمالي"],
+      rows: stageRows,
+      totals: rowFor("الإجمالي", s.total, s.levelOne, s.levelTwo),
+      firstColWidth: 26,
+    })}`;
     parts.push(slideShell(m, "", inner));
   }
 
@@ -505,17 +569,19 @@ ${kpiBand([
     const portRows = (ports: PortPopRow[]): TableCell[][] =>
       ports.map((p) => [
         { html: esc(p.name) },
-        { html: popCell(p.total, p.sampleTotal), cls: "v-navy" },
-        { html: popCell(p.clean, p.sampleClean), cls: "v-green" },
-        { html: popCell(p.suspicious, p.sampleSuspicious), cls: "v-red" },
+        { html: popCell(p.total, p.sampleTotal, withPop), cls: "v-navy" },
+        { html: popCell(p.clean, p.sampleClean, withPop), cls: "v-green" },
+        { html: popCell(p.suspicious, p.sampleSuspicious, withPop), cls: "v-red" },
+        ...(withPop ? [{ html: fmtNum(p.other ?? 0), cls: "v-gold" }] : []),
       ]);
     const totalsOf = (label: string, ports: PortPopRow[]): TableCell[] => {
       const sum = (f: (p: PortPopRow) => number) => ports.reduce((s, p) => s + f(p), 0);
       return [
         { html: label },
-        { html: popCell(sum((p) => p.total), sum((p) => p.sampleTotal)), cls: "v-navy" },
-        { html: popCell(sum((p) => p.clean), sum((p) => p.sampleClean)), cls: "v-green" },
-        { html: popCell(sum((p) => p.suspicious), sum((p) => p.sampleSuspicious)), cls: "v-red" },
+        { html: popCell(sum((p) => p.total), sum((p) => p.sampleTotal), withPop), cls: "v-navy" },
+        { html: popCell(sum((p) => p.clean), sum((p) => p.sampleClean), withPop), cls: "v-green" },
+        { html: popCell(sum((p) => p.suspicious), sum((p) => p.sampleSuspicious), withPop), cls: "v-red" },
+        ...(withPop ? [{ html: fmtNum(sum((p) => p.other ?? 0)), cls: "v-gold" }] : []),
       ];
     };
     const coverageNote = (ports: PortPopRow[]) => {
@@ -523,7 +589,7 @@ ${kpiBand([
       const sample = ports.reduce((s, p) => s + p.sampleTotal, 0);
       return `التغطية ${fmtPct(pct(sample, total))}`;
     };
-    const headers = ["المنفذ", "الإجمالي", "سليمة", "اشتباه"];
+    const headers = withPop ? ["المنفذ", "الإجمالي", "سليمة", "اشتباه", "نتائج أخرى"] : ["المنفذ", "الإجمالي", "سليمة", "اشتباه"];
     for (let page = 0; page < popPages; page++) {
       const m = meta("s1", EYEBROW_S1);
       const land = chunkAt(popLand, page);
@@ -579,7 +645,7 @@ ${kpiBand([
     const inner = `${contentHead({
       eyebrow: eyebrowS2,
       title: "دقة الرصد العامة",
-      note: `${fmtNum(t.evaluable)} نتيجة مُقيَّمة — ${fmtNum(overallStats.cleanResults)} نتيجة سليمة و${fmtNum(overallStats.suspResults)} نتيجة اشتباه`,
+      note: `${fmtNum(t.evaluable)} نتيجة مُقيَّمة — ${fmtNum(overallStats.cleanResults)} نتيجة سليمة و${fmtNum(overallStats.suspResults)} نتيجة اشتباه${otherResultsNote}`,
     })}
 ${kpiBand([
       { label: "دقة الرصد العامة", value: fmtPct(overallStats.overall), sub: "مرجّحة على مجموع النتائج المُقيَّمة" },
@@ -637,34 +703,35 @@ ${dataTable({ headers: ["المستوى", "النتائج المُقيَّمة",
     }
   }
 
-  // 12 — Overall accuracy per port, one chart per type (land 6fr / sea 4fr)
+  // 12 — Overall accuracy per port: one slide per port type (land, then sea) so each chart has the full width
+  // and a 17-port land chart never squeezes the sea chart.
   {
-    const m = meta("s2", eyebrowS2);
     const barsOf = (ports: PortAccuracyRow[]): ChartBar[] =>
       ports.map((p) => ({ label: p.name, value: accuracyOf(p.counts).overall }));
     const portAxis = fitAxis([...barsOf(portAcc.land), ...barsOf(portAcc.sea)].map((b) => b.value), 86, 98);
-    const chartOf = (ports: PortAccuracyRow[], tint: "land" | "sea", avg: number | null) =>
-      barChart({
+    for (const kind of ["land", "sea"] as const) {
+      const m = meta("s2", eyebrowS2);
+      const isLand = kind === "land";
+      const ports = isLand ? portAcc.land : portAcc.sea;
+      const avg = isLand ? landTotals.overall : seaTotals.overall;
+      const chart = barChart({
         bars: barsOf(ports),
-        ...portAxis, tint,
-        defaultTone: tint === "land" ? "gold" : "blue",
-        references: avg === null ? [] : [{ value: avg, label: `المتوسط ${fmtPct(avg)}`, tone: tint === "land" ? "gold-dark" : "blue-dark" }],
+        ...portAxis, tint: kind,
+        defaultTone: isLand ? "gold" : "blue",
+        references: avg === null ? [] : [{ value: avg, label: `المتوسط ${fmtPct(avg)}`, tone: isLand ? "gold-dark" : "blue-dark" }],
       });
-    const inner = `${contentHead({
-      eyebrow: eyebrowS2,
-      title: "الدقة العامة حسب المنفذ",
-      note: `متوسط البرية ${fmtPct(landTotals.overall)} · متوسط البحرية ${fmtPct(seaTotals.overall)}`,
-    })}
-<div class="v3-ports-chart-grid">
-  <div class="v3-chart-col">${chartTitleRow({ title: "المنافذ البرية", dot: "land" })}${chartOf(portAcc.land, "land", landTotals.overall)}</div>
-  <div class="v3-chart-col">${chartTitleRow({ title: "المنافذ البحرية", dot: "sea" })}${chartOf(portAcc.sea, "sea", seaTotals.overall)}</div>
-</div>
+      const inner = `${contentHead({
+        eyebrow: eyebrowS2,
+        title: isLand ? "الدقة العامة حسب المنفذ — المنافذ البرية" : "الدقة العامة حسب المنفذ — المنافذ البحرية",
+        note: `${fmtNum(ports.length)} ${isLand ? "منافذ برية" : "منافذ بحرية"} — متوسط النوع ${fmtPct(avg)}`,
+      })}
+<div class="v3-single-chart">${chartTitleRow({ title: isLand ? "المنافذ البرية" : "المنافذ البحرية", dot: kind })}${chart}</div>
 ${legendRow([
-      { swatch: "gold", text: "دقة المنفذ البري" },
-      { swatch: "blue", text: "دقة المنفذ البحري" },
-      { dash: "muted", text: "متوسط النوع" },
-    ], scaleCaption(portAxis))}`;
-    parts.push(slideShell(m, "", inner));
+        isLand ? { swatch: "gold", text: "دقة المنفذ البري" } : { swatch: "blue", text: "دقة المنفذ البحري" },
+        { dash: "muted", text: "متوسط النوع" },
+      ], scaleCaption(portAxis))}`;
+      parts.push(slideShell(m, "", inner));
+    }
   }
 
   // 13 — Clean/suspicion accuracy per risk level (four mini plots)
@@ -772,7 +839,7 @@ ${matrixGrid({
     const m = meta("s3", eyebrowS3);
     const l1Missed = allLevelRows.reduce((s, r) => s + r.l1.counts.missedSuspicion, 0);
     const l2Missed = allLevelRows.reduce((s, r) => s + r.l2.counts.missedSuspicion, 0);
-    const panel = (variant: "land" | "sea", title: string, a: typeof l1All, missed: number) =>
+    const panel = (variant: "land" | "sea", title: string, a: typeof l1All, missed: number, other: number) =>
       tintedPanel({
         variant, title, padLg: true,
         body: `<div class="v3-cmp-rows">
@@ -781,6 +848,7 @@ ${matrixGrid({
   <div class="v3-cmp-row"><span>دقة الاشتباه</span><b class="v-red">${fmtPct(a.suspAcc)}</b></div>
   <div class="v3-cmp-row"><span>الدقة العامة</span><b>${fmtPct(a.overall)}</b></div>
   <div class="v3-cmp-row"><span>اشتباهات فائتة</span><b>${fmtNum(missed)} نتيجة</b></div>
+  <div class="v3-cmp-row"><span>نتائج أخرى (غير مُقيَّمة)</span><b>${fmtNum(other)}</b></div>
 </div>`,
       });
     const note =
@@ -793,8 +861,8 @@ ${matrixGrid({
       note: "لكل صورة نتيجتان مستقلّتان — نتيجة لكل مستوى",
     })}
 <div class="v3-two-col">
-  ${panel("land", "المستوى الأول", l1All, l1Missed)}
-  ${panel("sea", "المستوى الثاني", l2All, l2Missed)}
+  ${panel("land", "المستوى الأول", l1All, l1Missed, otherL1)}
+  ${panel("sea", "المستوى الثاني", l2All, l2Missed, otherL2)}
 </div>
 ${note}`;
     parts.push(slideShell(m, "", inner));
@@ -828,7 +896,8 @@ ${note}`;
           };
         }),
         ...levelPortAxis, tint,
-        groupWidthPct: fixedGroups ? 16.2 : undefined,
+        // 16.2% slices only fit ≤ 6 groups (6 × 16.2% ≈ 97% of the plot); more ports share the width evenly.
+        groupWidthPct: fixedGroups && rows.length <= 6 ? 16.2 : undefined,
         references: typeOverall === null ? [] : [{ value: typeOverall, tone: "muted" }],
       });
       const inner = `${contentHead({
@@ -853,7 +922,15 @@ ${legendRow([
   // 19 — Agreement with security teams (crossTeamMatrix: L1/L2 vs each team)
   // + the risk-engine band (an honest presentation fold over the rows'
   // engine verdict vs the screening result, reviewer verdict on the splits).
-  {
+  if (agreementEmpty) {
+    const m = meta("s3", eyebrowS3);
+    parts.push(slideShell(m, "", `${contentHead({
+      eyebrow: eyebrowS3,
+      title: "التوافق مع الفرق الأمنية ومحرك المخاطر",
+      note: "لا توجد بيانات لهذا التحليل في الملف",
+    })}
+<p class="v3-note" style="margin-top:40px;font-size:30px;line-height:1.9">لا تتضمن أوراق العيّنة نتائج المعاين أو التفتيش المعاكس أو الوسائل الحية، ولا استهداف محرك المخاطر لصور العيّنة؛ لذلك لا يمكن حساب نسب التوافق مع هذه الجهات دون اختلاق أرقام. تظهر هذه الصفحة تلقائيًا عند توفّر تلك البيانات في الملف.</p>`));
+  } else {
     const m = meta("s3", eyebrowS3);
     const matrix = model.resultComparison.crossTeamMatrix;
     const cellOf = (a: string, b: string) =>

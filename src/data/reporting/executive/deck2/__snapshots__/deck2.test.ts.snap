@@ -5777,6 +5777,25 @@ body.deck-fullscreen .slide-controls{display:none!important;}
   var none = document.getElementById('ps-none');
   if (all) all.addEventListener('click', function(){ setAll(true); });
   if (none) none.addEventListener('click', function(){ setAll(false); });
+  // Printing: number the included slides consecutively (no gaps for toggled-off pages); restore afterwards.
+  function renumber(){
+    var included = slides.filter(function(s){ return !s.hasAttribute('data-print-off'); });
+    included.forEach(function(s, i){
+      var el = s.querySelector('.v3-page-num');
+      if (!el) return;
+      if (el.getAttribute('data-orig') === null) el.setAttribute('data-orig', el.textContent);
+      var n = i + 1;
+      el.textContent = (n < 10 ? '0' : '') + n + ' / ' + included.length;
+    });
+  }
+  function restore(){
+    slides.forEach(function(s){
+      var el = s.querySelector('.v3-page-num');
+      if (el && el.getAttribute('data-orig') !== null) { el.textContent = el.getAttribute('data-orig'); el.removeAttribute('data-orig'); }
+    });
+  }
+  window.addEventListener('beforeprint', renumber);
+  window.addEventListener('afterprint', restore);
   sync();
 })();</script>
 </body>

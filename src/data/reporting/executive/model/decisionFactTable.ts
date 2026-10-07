@@ -47,6 +47,8 @@ export type DecisionRecord = {
   /** Master §9 evaluability rule: image exists + reviewer result + employee
    *  decision + employee id are all present. */
   decisionEvaluable: boolean;
+  /** The decision's result is neither سليمة nor اشتباه (see `ExecutiveReportRow.levelOneOther`): never scored. */
+  decisionOther?: true;
   outcomeClass: OutcomeClass;
   /** App user who recorded the review (assignedTo). Workload context only — never
    *  treated as inspector accuracy. */
@@ -113,7 +115,9 @@ function buildLevelRecord(
   // Master §9 evaluability: image exists + reviewer result + employee decision +
   // employee id all present. `employeeDecision` is always present (L1/L2 gated at
   // population entry), so it never blocks evaluability here.
+  const decisionOther = (isLevelOne ? row.levelOneOther : row.levelTwoOther) !== undefined;
   const decisionEvaluable =
+    !decisionOther &&
     row.imageAvailable === true &&
     studyReviewResult !== null &&
     inspectorId !== null;
@@ -135,7 +139,8 @@ function buildLevelRecord(
     imageQuality: row.imageQuality,
     reviewCompleted,
     decisionEvaluable,
-    outcomeClass: classifyOutcome(employeeDecision, studyReviewResult),
+    ...(decisionOther ? { decisionOther: true as const } : {}),
+    outcomeClass: decisionOther ? null : classifyOutcome(employeeDecision, studyReviewResult),
     reviewerId: row.assignedTo,
     assignedAt: row.assignedAt,
     completedAt: row.submittedAt,
@@ -261,7 +266,8 @@ function collapseToImageRecords(records: DecisionRecord[]): DecisionRecord[] {
     combined.push({
       ...base,
       employeeDecision,
-      outcomeClass: classifyOutcome(employeeDecision, base.studyReviewResult),
+      // An image with an unscored ("other") level has no reliable combined verdict.
+      outcomeClass: l1?.decisionOther || l2?.decisionOther ? null : classifyOutcome(employeeDecision, base.studyReviewResult),
     });
   }
   return combined;

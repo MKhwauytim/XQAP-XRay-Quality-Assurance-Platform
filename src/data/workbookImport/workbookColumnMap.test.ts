@@ -24,12 +24,16 @@ describe("mapSampleRow", () => {
     expect(mapSampleRow({ ...base, "الاكتمال": "" }, "Q1_Sample", r)).toBeNull();
     expect(r.incomplete).toBe(1);
   });
-  it("counts missing id / month / level result", () => {
+  it("counts missing id / month; a non-standard level result is kept as «other», not dropped", () => {
     const r = newMappingReport();
     mapSampleRow({ ...base, "معرف الأشعة": "" }, "S", r);
     mapSampleRow({ ...base, "الشهر": "" }, "S", r);
-    mapSampleRow({ ...base, "نتيجة المستوى الأول": "؟" }, "S", r);
-    expect([r.skippedNoId, r.skippedNoMonth, r.skippedBadResult]).toEqual([1, 1, 1]);
+    const kept = mapSampleRow({ ...base, "نتيجة المستوى الأول": "؟" }, "S", r)!;
+    expect([r.skippedNoId, r.skippedNoMonth, r.skippedBadResult]).toEqual([1, 1, 0]);
+    expect(r.otherResultRows).toBe(1);
+    expect(kept.row.levelOneOther).toBe("؟");
+    expect(kept.row.levelTwoOther).toBeUndefined();
+    expect(kept.row.levelOneAccurate).toBeNull();
     expect(r.unmappedValues["نتيجة المستوى الأول"]["؟"]).toBe(1);
   });
   it("invalid image id keeps the reason but the row still counts as studied", () => {

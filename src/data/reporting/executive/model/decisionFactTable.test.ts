@@ -73,4 +73,18 @@ describe("buildDecisionRecords — reviewCompleted", () => {
     );
     expect(l1!.reviewCompleted).toBe(false);
   });
+
+  it("never scores a level whose result is neither سليمة nor اشتباه (levelOneOther), yet keeps the other level", () => {
+    const records = buildDecisionRecords(
+      [row({ levelOneOther: "11", imageAvailable: true, expertResult: "اشتباه", levelOneResult: "سليمة", levelTwoResult: "اشتباه" })],
+      "p1"
+    );
+    const l1 = records.find((r) => r.decisionLevel === "LEVEL_1")!;
+    const l2 = records.find((r) => r.decisionLevel === "LEVEL_2")!;
+    expect(l1.decisionOther).toBe(true);
+    expect(l1.outcomeClass).toBeNull();
+    expect(l1.decisionEvaluable).toBe(false);
+    expect(l2.decisionOther).toBeUndefined();
+    expect(l2.outcomeClass).toBe("correct-suspicion");
+  });
 });
