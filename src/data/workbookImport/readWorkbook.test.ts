@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as XLSX from "xlsx";
-import { readComprehensiveWorkbook } from "./readWorkbook";
+import { readComprehensiveWorkbook, readComprehensiveWorkbooks } from "./readWorkbook";
 
 const H = ["الربع","الشهر","المستوى","معرف الأشعة","نتيجة المستوى الأول","نتيجة المستوى الثاني","صحة النتيجة","الاكتمال"];
 function wbBlob(sheets: Record<string, string[][]>): Blob {
@@ -18,6 +18,16 @@ describe("readComprehensiveWorkbook", () => {
     expect(rows.map((r) => r.row.xrayImageId)).toEqual(["A1"]);
     expect(report.sheetsRead.map((s) => s.name)).toEqual(["Q1_Sample"]);
     expect(report.incomplete).toBe(1);
+  });
+  it("requireFollowUp: a lone sample workbook is rejected, sample + follow-up workbooks are accepted", async () => {
+    const sample = wbBlob({ SJAN: [["المستوى","رقم صورة الاشعة","نتيجة المستوى الأول للاشعة","نتيجة المستوى الثاني للاشعة","تاريخ رصد الخبير","صحة النتيجة","شهر الفحص"], ["FIRST_STAGE","X1","سليمة","سليمة","46042","سليمة","1"]] });
+    const followUp = wbBlob({ "1-Jan": [["رقم صورة الاشعة", "هل يوجد تحديد ؟"], ["X1", "نعم"]] });
+    await expect(readComprehensiveWorkbooks([sample], undefined, { requireFollowUp: true })).rejects.toThrow("XQ-WB-NOFOLLOWUP");
+    await expect(readComprehensiveWorkbooks([followUp], undefined, { requireFollowUp: true })).rejects.toThrow("XQ-WB-NOSAMPLE");
+    const { rows, report } = await readComprehensiveWorkbooks([sample, followUp], undefined, { requireFollowUp: true });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].row.hasMarking).toBe(true);
+    expect(report.followUpMatched).toBe(1);
   });
   it("errors when no sample sheet", async () => {
     await expect(readComprehensiveWorkbook(wbBlob({ Q1_Pop: [["x"]] }))).rejects.toThrow("XQ-WB-NOSAMPLE");

@@ -139,6 +139,8 @@ export async function readComprehensiveWorkbook(
 export async function readComprehensiveWorkbooks(
   files: Blob[],
   onProgress?: (p: { sheet: string; done: number; total: number }) => void,
+  /** The report page needs both workbooks: reject when the follow-up workbook («متابعة أعمال الفحص») is missing. */
+  opts: { requireFollowUp?: boolean } = {},
 ): Promise<{ rows: MappedWorkbookRow[]; report: MappingReport; populationSummary: PopulationSummary | null }> {
   const report = newMappingReport();
   let primary: OpenWorkbook | null = null;
@@ -150,6 +152,7 @@ export async function readComprehensiveWorkbooks(
     if (fu.sheets.length > 0) followUpWb ??= fu;
   }
   if (!primary) throw new Error("XQ-WB-NOSAMPLE: no sample sheet found (Q*_Sample or S<MON>)");
+  if (opts.requireFollowUp && !followUpWb) throw new Error("XQ-WB-NOFOLLOWUP: the follow-up workbook (1-Jan…12-Dec sheets) was not provided");
   const followUp = followUpWb ? await readFollowUp(followUpWb, report) : null;
   const sheets = primary.sheets;
   const shared = await sharedStringsOf(primary);
