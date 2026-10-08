@@ -362,6 +362,11 @@
 }
 .rh-badge-main  { background: var(--c-sky); color: var(--c-surface); }
 .rh-badge-ready { background: var(--c-sky-light); color: var(--c-navy); }
+.rh-badge-maintenance { background: var(--c-border, #d9dde3); color: var(--c-ink-3, #5d6b7a); }
+
+/* Paused report cards: greyed and inert (the export buttons are also disabled). */
+.rh-card-maintenance { filter: grayscale(1); opacity: 0.6; pointer-events: none; user-select: none; }
+.rh-card-maintenance .rh-badge-maintenance { opacity: 1; }
 
 /* Title & desc */
 .rh-card-title {

@@ -29,17 +29,16 @@ import { SourceModeSwitch } from "./SourceModeSwitch";
 import { DEFAULT_SOURCE_MODE } from "./sourceMode";
 import type { ComprehensiveSourceMode } from "./sourceMode";
 import { useComprehensiveWorkbook } from "./useComprehensiveWorkbook";
-import { loadDeckStyleChoices } from "../../../../../data/reporting/executive/deck2/styleChoices";
-import { loadDeckEditionPreference } from "../../../../../data/reporting/executive/deckEditionPreference";
-import type { ExecutiveDeckEdition } from "../../../../../data/reporting/executive/deckEditionPreference";
+import { loadDeckTextTemplates, saveDeckTextTemplate } from "../../../../../data/reporting/executive/deck3/textTemplates";
+import type { DeckTextEntries, DeckTextTemplate } from "../../../../../data/reporting/executive/deck3/textEdit";
 
 /** Families whose change can alter a month's completed answers (mirrors the Reports hub). */
 const REFRESH_FAMILIES: readonly DataRefreshFamily[] = ["manifest", "distribution", "answers"];
 
 type SystemMonths = { byMonth: Array<{ month: string; rows: ExecutiveReportRow[] }>; base: ComprehensiveBase | null };
 type SystemState = { status: "loading" } | { status: "error" } | ({ status: "ready" } & SystemMonths);
-// The executive deck (v2 or v3, whichever edition the workspace chose — same rule as the
-// Reports tab) honours the completed-only scope: it drops the population/coverage sections.
+// The executive deck (v3, the only edition) honours the completed-only scope: it drops the
+// population/coverage sections.
 type ExportKind = "deck" | "xlsx";
 
 /** Names are not shown in the combined report (config.showEmployeeNames is false). */
@@ -76,7 +75,9 @@ export default function ComprehensiveExecutive() {
   const excelOnly = mode === "excel-only";
   const [system, setSystem] = useState<SystemState>({ status: "loading" });
   const [exporting, setExporting] = useState<ExportKind | null>(null);
-  const [deckEdition, setDeckEdition] = useState<ExecutiveDeckEdition>("v2");
+  const [templates, setTemplates] = useState<DeckTextTemplate[]>([]);
+  const [templateId, setTemplateId] = useState("");
+  const [templateNotice, setTemplateNotice] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const loadRunRef = useRef(0);
@@ -148,16 +149,31 @@ export default function ComprehensiveExecutive() {
     return subscribeToDataChange(REFRESH_FAMILIES, () => { requestLoad(loadSystem); });
   }, [excelOnly, loadSystem, requestLoad]);
 
-  // The workspace's chosen deck edition (same global preference the Reports tab reads);
-  // v2 when none is recorded or no workspace is mounted.
+  // Saved text templates (edits made in the deck viewer and kept via «حفظ كقالب»).
   useEffect(() => {
     if (!directoryHandle) return undefined;
     let cancelled = false;
-    void loadDeckEditionPreference(directoryHandle).then((pref) => {
-      if (!cancelled && pref) setDeckEdition(pref.edition);
+    void loadDeckTextTemplates(directoryHandle).then((list) => {
+      if (!cancelled) setTemplates(list);
     });
     return () => { cancelled = true; };
   }, [directoryHandle]);
+
+  // «حفظ كقالب» from an open deck viewer lands here. The mutation capability is
+  // re-checked at the handler boundary, same as every other persistent action.
+  const handleSaveTemplate = useCallback(
+    async (name: string, entries: DeckTextEntries): Promise<{ ok: true } | { ok: false; error: string }> => {
+      if (!directoryHandle) return { ok: false, error: labels.ce_template_save_failed };
+      if (!getMutationCapability("export-reports").allowed) return { ok: false, error: labels.ce_template_save_not_permitted };
+      const saved = await saveDeckTextTemplate(directoryHandle, name, entries, username ?? "");
+      if (!saved.ok) return saved;
+      setTemplates(await loadDeckTextTemplates(directoryHandle));
+      setTemplateId(saved.template.id);
+      setTemplateNotice(labels.ce_template_saved.replace("{name}", saved.template.name));
+      return { ok: true };
+    },
+    [directoryHandle, getMutationCapability, labels, username],
+  );
 
   // Changing mode drops any stored system rows (releases memory) and invalidates
   // an in-flight load so its stale result cannot win. The workbook is untouched.
@@ -208,14 +224,14 @@ export default function ComprehensiveExecutive() {
         config: DEFAULT_EXEC_CONFIG,
       };
       const input = buildComprehensiveInput(merged.rows, base, merged.period, workbook.status === "read" ? workbook.populationSummary : null);
-      if (kind === "deck" && deckEdition === "v3") {
+      if (kind === "deck") {
         const { openExecutiveDeckV3 } = await import("../../../../../data/reporting/executive/deck3");
-        await openExecutiveDeckV3(input, NO_NAMES);
-      } else if (kind === "deck") {
-        // Same saved slide styles the Reports tab's deck uses; none without a workspace.
-        const saved = directoryHandle ? await loadDeckStyleChoices(directoryHandle) : null;
-        const { openExecutiveDeckV2 } = await import("../../../../../data/reporting/executive/deck2");
-        await openExecutiveDeckV2(input, NO_NAMES, saved?.choices);
+        const chosen = templates.find((t) => t.id === templateId);
+        await openExecutiveDeckV3(input, NO_NAMES, {
+          textTemplate: chosen?.entries ?? null,
+          // A workspace is where templates live; without one the viewer offers a file download instead.
+          onSaveTemplate: directoryHandle ? handleSaveTemplate : undefined,
+        });
       } else {
         const { buildExecutiveXlsx } = await import("../../../../../data/reporting/executiveReport");
         await buildExecutiveXlsx(input, NO_NAMES);
@@ -290,6 +306,23 @@ export default function ComprehensiveExecutive() {
       )}
       {needsFile && <p className="ce-empty" role="status" data-testid="ce-excel-only-hint">{labels.ce_source_excel_only_hint}</p>}
       {!systemLoading && !hasRows && !needsFile && <p className="ce-empty" role="status">{labels.ce_empty}</p>}
+
+      {templates.length > 0 && (
+        <div className="ce-row">
+          <label className="ce-hint" htmlFor="ce-template-select">{labels.ce_template_label}</label>
+          <select
+            id="ce-template-select"
+            className="ce-select"
+            data-testid="ce-template-select"
+            value={templateId}
+            onChange={(ev) => { setTemplateId(ev.target.value); setTemplateNotice(null); }}
+          >
+            <option value="">{labels.ce_template_none}</option>
+            {templates.map((t) => (<option key={t.id} value={t.id}>{t.name}</option>))}
+          </select>
+        </div>
+      )}
+      {templateNotice && <p className="ce-status" role="status" data-testid="ce-template-notice">{templateNotice}</p>}
 
       <div className="ce-row ce-actions">
         <button type="button" className="ce-btn" disabled={exportDisabled} onClick={() => void handleExport("deck")}>

@@ -10,6 +10,8 @@ afterEach(cleanup);
 
 const labels = getLabels();
 
+const onExport = vi.fn();
+
 function renderDashboard(model = makeReportModel()) {
   return render(
     <KpiDashboard
@@ -18,11 +20,9 @@ function renderDashboard(model = makeReportModel()) {
       resolveName={(username) => (username === "u1" ? "المراجع الأول" : username)}
       exporting={null}
       canExportReports
-      isAdmin={false}
       exportDisabledTitle={undefined}
       exportsDisabled={false}
-      onExport={vi.fn()}
-      onOpenCustomizer={vi.fn()}
+      onExport={onExport}
     />
   );
 }
@@ -145,5 +145,17 @@ describe("KpiDashboard — honesty discipline", () => {
     fireEvent.click(screen.getByRole("tab", { name: labels.kpi_tab_ports }));
     const detail = container.querySelector(".kpi-port-detail") as HTMLElement;
     expect(detail.textContent).not.toContain("0.0%");
+  });
+});
+
+describe("KpiDashboard — executive exports", () => {
+  it("offers only the deck and Excel (no document) and reports which was clicked", () => {
+    onExport.mockClear();
+    const { container } = renderDashboard();
+    const buttons = Array.from(container.querySelectorAll(".kpi-actions button"));
+    expect(buttons).toHaveLength(2);
+    fireEvent.click(buttons[0]);
+    fireEvent.click(buttons[1]);
+    expect(onExport.mock.calls).toEqual([["deck"], ["xlsx"]]);
   });
 });

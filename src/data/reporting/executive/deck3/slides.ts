@@ -53,7 +53,10 @@ function chunkAt<T>(rows: T[], page: number): T[] {
 }
 const REPORT_NAME = "تقرير ضمان جودة فحص الأشعة";
 const ORG_NAME = "هيئة الزكاة والضريبة والجمارك";
-const CLASSIFICATION = "داخلي — للاستخدام التنفيذي";
+const CLASSIFICATION = "سري";
+/** Deck-local cover wording (the shared ORGANIZATION_PATH is left as-is: deck2 and other surfaces still read it). */
+const LEGAL_SECTOR = `قطاع ${ORGANIZATION_PATH[0]}`;
+const DEPARTMENT = "إدارة الرقابة على الامتثال للمنافذ الجمركية";
 
 const EYEBROW_S1 = "القسم الأول — مجتمع الفحص";
 const EYEBROW_S2 = "القسم الثاني — نتائج فحص الجودة";
@@ -265,7 +268,7 @@ export async function buildDeck3Slides(
   const org: OrgBlock = {
     logoUrl: ZATCA_LOGO_URL,
     orgName: ORG_NAME,
-    lines: [`${ORGANIZATION_PATH[0]} — ${ORGANIZATION_PATH[1]}`, ORGANIZATION_PATH[2]],
+    lines: [`${LEGAL_SECTOR} - ${ORGANIZATION_PATH[1]}`, DEPARTMENT],
   };
   const t = model.errorAnalysis.totals;
   const overallStats = accuracyOf(t);
@@ -337,7 +340,7 @@ export async function buildDeck3Slides(
         value: now.toLocaleDateString("ar-u-ca-gregory-nu-latn", { day: "numeric", month: "long", year: "numeric" }),
       },
       { label: "الإدارة", value: ORGANIZATION_PATH[1] },
-      { label: "القسم", value: ORGANIZATION_PATH[2] },
+      { label: "القسم", value: DEPARTMENT },
       { label: "التصنيف", value: CLASSIFICATION, end: true },
     ],
     meta: meta("cover", "الغلاف"),
@@ -355,16 +358,16 @@ export async function buildDeck3Slides(
     eyebrow: "التقرير التنفيذي",
     title: "محتويات التقرير",
     rows: coNoPop ? [
-      { index: 1, title: "المعجم", description: "تعريف مستويات المخاطر الأربعة والمصطلحات المستخدمة في التقرير.", topics: "مستويات المخاطر · مصطلحات العيّنة والنتائج", pages: "ص 03–04" },
-      { index: 2, title: kpiTitle, description: "خلاصة أرقام العيّنات المكتملة في صفحة واحدة.", topics: "العيّنات المكتملة · الدقة", pages: "ص 05" },
-      { index: 3, title: eyebrowS2, description: "دقة النتائج على مستوى التقرير وحسب المنفذ ومستوى المخاطر.", topics: "النتائج العامة · النتائج حسب المنفذ والمستوى", pages: `ص ${pad2(s2Start)}–${pad2(s2End)}` },
-      { index: 4, title: eyebrowS3, description: "مصفوفة النتائج، دقة المستويين، والتوافق مع الفرق الأمنية ومحرك المخاطر، وأثر التحديد والجودة.", topics: "المصفوفة · التوافق · أثر التحديد والجودة", pages: `ص ${pad2(s3Start)}–${pad2(s3End)}` },
+      { index: 1, title: "المعجم", description: "تعريف مستويات المخاطر الأربعة والمصطلحات المستخدمة في التقرير.", pages: "ص 03–04" },
+      { index: 2, title: kpiTitle, description: "خلاصة أرقام العيّنات المكتملة في صفحة واحدة.", pages: "ص 05" },
+      { index: 3, title: eyebrowS2, description: "دقة النتائج على مستوى التقرير وحسب المنفذ ومستوى المخاطر.", pages: `ص ${pad2(s2Start)}–${pad2(s2End)}` },
+      { index: 4, title: eyebrowS3, description: "مصفوفة النتائج، دقة المستويين، والتوافق مع الفرق الأمنية ومحرك المخاطر، وأثر التحديد والجودة.", pages: `ص ${pad2(s3Start)}–${pad2(s3End)}` },
     ] : [
-      { index: 1, title: "المعجم", description: "تعريف مستويات المخاطر الأربعة والمصطلحات المستخدمة في التقرير.", topics: "مستويات المخاطر · مصطلحات العيّنة والنتائج", pages: "ص 03–04" },
-      { index: 2, title: withPop ? kpiTitle : "مؤشرات الشهر", description: withPop ? "خلاصة أرقام الفترة في صفحة واحدة." : "خلاصة أرقام الشهر في صفحة واحدة.", topics: "المجتمع · العيّنة · التغطية · الدقة", pages: "ص 05" },
-      { index: 3, title: "القسم الأول — مجتمع الفحص", description: withPop ? "حجم مجتمع الفترة وتوزيعه على المستويات والمنافذ ونتائج المستويين." : "حجم مجتمع الشهر وتوزيعه على المستويات والمنافذ، والأساس الذي سُحبت منه العيّنة.", topics: withPop ? "المستويات · النتائج · المنافذ" : "المستويات الأربعة · المنافذ البرية والبحرية", pages: `ص ${pad2(6)}–${pad2(s1End)}` },
-      { index: 4, title: "القسم الثاني — نتائج فحص الجودة", description: withPop ? "دقة النتائج على مستوى الفترة وحسب المنفذ ومستوى المخاطر." : "دقة النتائج على مستوى الشهر وحسب المنفذ ومستوى المخاطر.", topics: "النتائج العامة · النتائج حسب المنفذ والمستوى", pages: `ص ${pad2(s2Start)}–${pad2(s2End)}` },
-      { index: 5, title: "القسم الثالث — التحاليل المتقدمة", description: "مصفوفة النتائج، دقة المستويين، والتوافق مع الفرق الأمنية ومحرك المخاطر، وأثر التحديد والجودة.", topics: "المصفوفة · التوافق · أثر التحديد والجودة", pages: `ص ${pad2(s3Start)}–${pad2(s3End)}` },
+      { index: 1, title: "المعجم", description: "تعريف مستويات المخاطر الأربعة والمصطلحات المستخدمة في التقرير.", pages: "ص 03–04" },
+      { index: 2, title: withPop ? kpiTitle : "مؤشرات الشهر", description: withPop ? "خلاصة أرقام الفترة في صفحة واحدة." : "خلاصة أرقام الشهر في صفحة واحدة.", pages: "ص 05" },
+      { index: 3, title: "القسم الأول — مجتمع الفحص", description: withPop ? "حجم مجتمع الفترة وتوزيعه على المستويات والمنافذ ونتائج المستويين." : "حجم مجتمع الشهر وتوزيعه على المستويات والمنافذ، والأساس الذي سُحبت منه العيّنة.", pages: `ص ${pad2(6)}–${pad2(s1End)}` },
+      { index: 4, title: "القسم الثاني — نتائج فحص الجودة", description: withPop ? "دقة النتائج على مستوى الفترة وحسب المنفذ ومستوى المخاطر." : "دقة النتائج على مستوى الشهر وحسب المنفذ ومستوى المخاطر.", pages: `ص ${pad2(s2Start)}–${pad2(s2End)}` },
+      { index: 5, title: "القسم الثالث — التحاليل المتقدمة", description: "مصفوفة النتائج، دقة المستويين، والتوافق مع الفرق الأمنية ومحرك المخاطر، وأثر التحديد والجودة.", pages: `ص ${pad2(s3Start)}–${pad2(s3End)}` },
     ],
     meta: meta("contents", "المحتويات"),
   }));
@@ -1141,7 +1144,7 @@ ${impactLegend}`;
     closingLine: copy.closingLine,
     metaRows: [
       { label: "فترة التقرير", value: monthLabel },
-      { label: "القسم", value: ORGANIZATION_PATH[2] },
+      { label: "القسم", value: DEPARTMENT },
       { label: "التصنيف", value: CLASSIFICATION, end: true },
     ],
     meta: meta("closing", "ختام العرض"),
