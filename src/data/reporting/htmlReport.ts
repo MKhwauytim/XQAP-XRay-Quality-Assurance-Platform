@@ -25,9 +25,9 @@
  * ready. Callers that build HTML synchronously should keep using
  * `openOrDownload`, unchanged.
  */
-export function openReportWindow(): Window | null {
+export function openReportWindow(options: { keepOpener?: boolean } = {}): Window | null {
   const reportWindow = window.open("", "_blank");
-  if (reportWindow) {
+  if (reportWindow && !options.keepOpener) {
     try {
       reportWindow.opener = null;
     } catch {

@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReportDesignerTab from "../ReportDesigner";
-import { AlertTriangle, BarChart2, Building2, Check, Database, Download, FileText, Filter, FolderOpen, Layers, Presentation, Settings2, Users, X } from "lucide-react";
+import { AlertTriangle, BarChart2, Building2, Check, Database, Download, FileText, Filter, FolderOpen, Layers, Presentation, Users, X } from "lucide-react";
 
 import { loadDistributionCurrentRevision, loadDistributionLog } from "../../../../data/distribution/distributionStorage";
 import { loadReplacementLog, loadReferralLog } from "../../../../data/referral/referralStorage";
@@ -35,17 +35,9 @@ import {
 } from "../../../../data/workspace/dataRefreshSignal";
 import { resolveInitialSubTab } from "../../../../app/subTabSelection";
 import { useSubTabSelection } from "../../../../app/useSubTabSelection";
-import { readSession } from "../../../../auth/authSession";
 import { recordAction } from "../../../../data/audit/actionLog";
-import { loadDeckStyleChoices } from "../../../../data/reporting/executive/deck2/styleChoices";
-import {
-  loadDeckEditionPreference,
-  saveDeckEditionPreference,
-  type ExecutiveDeckEdition,
-} from "../../../../data/reporting/executive/deckEditionPreference";
-import DeckDesignCustomizer from "./DeckDesignCustomizer";
-import DeckTextPresetPicker from "./DeckTextPresetPicker";
-import { resolveActiveTextPreset } from "../../../../data/preferences/deckTextPresetPreference";
+import { loadDeckTextTemplates, saveDeckTextTemplate } from "../../../../data/reporting/executive/deck3/textTemplates";
+import type { DeckTextEntries, DeckTextTemplate } from "../../../../data/reporting/executive/deck3/textEdit";
 import type { ExportManifest } from "../../../../data/powerbiExport/exportTypes";
 import type { PopulationReportScope } from "../../../../data/reporting/populationReport/types";
 import "./Reports.css";
@@ -70,10 +62,17 @@ function ExcelFormatIcon(): ReactNode {
 }
 
 type ReportType =
+  | "executive-xlsx" | "executive-deck"
   | "population-report" | "population-report-xlsx" | "population-report-deck"
-  | "executive" | "executive-xlsx" | "executive-deck"
   | "management" | "management-xlsx" | "management-deck";
-type ReportBaseType = "population-report" | "executive" | "management";
+type ReportBaseType = "executive" | "population-report" | "management";
+
+/** The report hub is paused except the executive report: every other card renders
+ *  greyed out with «تحت الصيانة» and its export controls stay disabled. The
+ *  generators below are kept (not deleted) so lifting this flag restores them.
+ *  The executive report offers the deck (always the new deck3 design) and Excel —
+ *  no document edition. */
+const REPORTS_UNDER_MAINTENANCE = true;
 type ReportFormat = "xlsx" | "deck" | "document";
 type ReportsSection = "reports" | "kpi";
 
@@ -142,7 +141,7 @@ function buildDisplayNameMap(): Record<string, string> {
 // Inner component that holds all the existing Reports state and logic.
 function ReportsContent() {
   const { directoryHandle } = useWorkspace();
-  const { can, canMutate, getMutationCapability, canAccessTab, role, username } = usePermissions();
+  const { can, getMutationCapability, canAccessTab, role, username } = usePermissions();
   const labels = useLabels();
 
   const { selection: globalMonth } = useGlobalMonth();
@@ -181,8 +180,6 @@ function ReportsContent() {
   // reason "read-only-mode" -- a distinct case from "you don't have this permission"
   // that deserves its own message (exportBlockedMessage below).
   const canExportReports = can("export-reports");
-  const isAdmin = readSession()?.role === "admin";
-  const [customizerOpen, setCustomizerOpen] = useState(false);
   const [monthMeta, setMonthMeta] = useState<MonthMeta | null>(null);
   // T-15a: land on the first section this role may actually view, not on a
   // hard-coded "reports". `reports/reports` and `reports/kpi` are independent
@@ -202,8 +199,10 @@ function ReportsContent() {
     )
   );
   const [generating, setGenerating] = useState<ReportType | null>(null);
+  const [deckTemplates, setDeckTemplates] = useState<DeckTextTemplate[]>([]);
+  const [deckTemplateId, setDeckTemplateId] = useState("");
   const [formats, setFormats] = useState<Record<ReportBaseType, ReportFormat>>({
-    executive: "document",
+    executive: "deck",
     "population-report": "document",
     management: "document",
   });
@@ -222,7 +221,6 @@ function ReportsContent() {
   // `!directoryHandle || !selectedMonth` branch explicitly sets it back to
   // null.
   const kpiModelBuiltForRef = useRef<{ directoryHandle: typeof directoryHandle; month: string } | null>(null);
-  const [exporting, setExporting] = useState<"document" | "deck" | "xlsx" | null>(null);
   // Stable username -> display-name resolver for the KPI dashboard. Rebuilt only
   // when the model is (a managed-user rename lands with the next model build), so
   // the dashboard's useMemo derivations -- which walk `model.rows`, up to the full
@@ -236,17 +234,16 @@ function ReportsContent() {
   const [pbiResult, setPbiResult] = useState<ExportManifest | null>(null);
   const [snapshotRowCount, setSnapshotRowCount] = useState(0);
   const [pbiError, setPbiError] = useState<string | null>(null);
-  const [deckEdition, setDeckEdition] = useState<ExecutiveDeckEdition>("v2");
   // D11 (population-report merge): default "both" — the pre-merge behavior of
   // exporting sample + distribution content together, unchanged unless the
   // user deliberately narrows scope via the card's segmented control.
   const [populationReportScope, setPopulationReportScope] = useState<PopulationReportScope>("both");
 
   useEffect(() => {
-    if (!directoryHandle) return;
+    if (!directoryHandle) return undefined;
     let cancelled = false;
-    void loadDeckEditionPreference(directoryHandle).then((pref) => {
-      if (!cancelled && pref) setDeckEdition(pref.edition);
+    void loadDeckTextTemplates(directoryHandle).then((list) => {
+      if (!cancelled) setDeckTemplates(list);
     });
     return () => { cancelled = true; };
   }, [directoryHandle]);
@@ -516,82 +513,6 @@ function ReportsContent() {
     setTimeout(() => setToast(null), 5000);
   }
 
-  function handleToggleDeckEdition(): void {
-    const next: ExecutiveDeckEdition = deckEdition === "v3" ? "v2" : "v3";
-    setDeckEdition(next); // reflects immediately for the next export/preview, regardless of save outcome
-    if (!directoryHandle) return;
-    const capability = getMutationCapability("export-reports");
-    if (!capability.allowed) {
-      showToast("error", exportBlockedMessage(capability.reason));
-      return;
-    }
-    const session = readSession();
-    void saveDeckEditionPreference(directoryHandle, next, session?.username ?? "admin").then((result) => {
-      if (!result.ok) showToast("error", result.error);
-    });
-  }
-
-  // Dashboard export actions — reuse the assembled exec input for all three.
-  async function handleExport(kind: "document" | "deck" | "xlsx"): Promise<void> {
-    if (!directoryHandle || !selectedMonth || exporting) return;
-    const capability = getMutationCapability("export-reports");
-    if (!capability.allowed) {
-      showToast("error", exportBlockedMessage(capability.reason));
-      return;
-    }
-    setExporting(kind);
-    try {
-      const execInput = await loadExecInput();
-      if (!execInput) { showToast("error", "لم يتم العثور على بيانات المجتمع. يجب معالجة المجتمع أولاً."); return; }
-      const names = buildDisplayNameMap();
-      if (kind === "document") {
-        const { openExecutiveReport } = await import("../../../../data/reporting/executiveReport");
-        await openExecutiveReport(execInput, names);
-        logExport("executive-document");
-        showToast("ok", "تم فتح التقرير التفصيلي.");
-      } else if (kind === "deck") {
-        if (deckEdition === "v3") {
-          const { openExecutiveDeckV3 } = await import("../../../../data/reporting/executive/deck3");
-          await openExecutiveDeckV3(execInput, names);
-        } else {
-          const saved = directoryHandle ? await loadDeckStyleChoices(directoryHandle) : null;
-          const textPreset = await resolveActiveTextPreset(directoryHandle);
-          const { openExecutiveDeckV2 } = await import("../../../../data/reporting/executive/deck2");
-          await openExecutiveDeckV2(execInput, names, saved?.choices, textPreset);
-        }
-        logExport("executive-deck");
-        showToast("ok", "تم فتح العرض التنفيذي.");
-      } else {
-        const { buildExecutiveXlsx } = await import("../../../../data/reporting/executiveReport");
-        await buildExecutiveXlsx(execInput, names);
-        logExport("executive-xlsx");
-        showToast("ok", "تم تنزيل بيانات التقرير (Excel).");
-      }
-    } catch {
-      showToast("error", "حدث خطأ أثناء توليد التقرير.");
-    } finally {
-      setExporting(null);
-    }
-  }
-
-  // P0 perf fix: this used to `await loadExecInput()` (full population +
-  // sample + distribution + all employee files) before ever opening the
-  // dialog, which is why opening the customizer measured ~30 minutes on the
-  // owner's 500k-row / ~9,000-sample workspace. The dialog itself only
-  // presents style *choices* -- it doesn't need real month data to render
-  // those -- so opening is now synchronous and the heavy load is deferred
-  // into DeckDesignCustomizer, behind an explicit user-triggered preview
-  // action (see that component).
-  function handleOpenCustomizer(): void {
-    if (!directoryHandle || !selectedMonth) return;
-    const capability = getMutationCapability("export-reports");
-    if (!capability.allowed) {
-      showToast("error", exportBlockedMessage(capability.reason));
-      return;
-    }
-    setCustomizerOpen(true);
-  }
-
   async function handlePbiExport() {
     if (!directoryHandle || !selectedMonth) return;
     const capability = getMutationCapability("export-reports");
@@ -612,6 +533,21 @@ function ReportsContent() {
     } finally {
       setPbiExporting(false);
     }
+  }
+
+  // «حفظ كقالب» from an open deck viewer; the capability is re-checked here, at the handler.
+  async function handleSaveDeckTemplate(
+    name: string,
+    entries: DeckTextEntries,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (!directoryHandle) return { ok: false, error: labels.ce_template_save_failed };
+    const capability = getMutationCapability("export-reports");
+    if (!capability.allowed) return { ok: false, error: exportBlockedMessage(capability.reason) };
+    const saved = await saveDeckTextTemplate(directoryHandle, name, entries, username ?? "");
+    if (!saved.ok) return saved;
+    setDeckTemplates(await loadDeckTextTemplates(directoryHandle));
+    setDeckTemplateId(saved.template.id);
+    return { ok: true };
   }
 
   async function generate(type: ReportType): Promise<void> {
@@ -667,7 +603,7 @@ function ReportsContent() {
           await openPopulationDocument(input, populationReportScope);
           showToast("ok", "تم فتح تقرير المجتمع التفصيلي. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         }
-      } else if (type === "executive" || type === "executive-xlsx" || type === "executive-deck") {
+      } else if (type === "executive-xlsx" || type === "executive-deck") {
         const execInput = await loadExecInput();
         if (!execInput) { showToast("error", "لم يتم العثور على بيانات المجتمع. يجب معالجة المجتمع أولاً."); return; }
         const names = buildDisplayNameMap();
@@ -675,21 +611,14 @@ function ReportsContent() {
           const { buildExecutiveXlsx } = await import("../../../../data/reporting/executiveReport");
           await buildExecutiveXlsx(execInput, names);
           showToast("ok", "تم تنزيل ملف بيانات التقرير (Excel).");
-        } else if (type === "executive-deck") {
-          if (deckEdition === "v3") {
-            const { openExecutiveDeckV3 } = await import("../../../../data/reporting/executive/deck3");
-            await openExecutiveDeckV3(execInput, names);
-          } else {
-            const saved = directoryHandle ? await loadDeckStyleChoices(directoryHandle) : null;
-            const textPreset = await resolveActiveTextPreset(directoryHandle);
-            const { openExecutiveDeckV2 } = await import("../../../../data/reporting/executive/deck2");
-            await openExecutiveDeckV2(execInput, names, saved?.choices, textPreset);
-          }
-          showToast("ok", "تم فتح العرض التنفيذي. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         } else {
-          const { openExecutiveReport } = await import("../../../../data/reporting/executiveReport");
-          await openExecutiveReport(execInput, names);
-          showToast("ok", "تم فتح التقرير التفصيلي. استخدم أمر الطباعة للحفظ بصيغة PDF.");
+          const { openExecutiveDeckV3 } = await import("../../../../data/reporting/executive/deck3");
+          const chosen = deckTemplates.find((t) => t.id === deckTemplateId);
+          await openExecutiveDeckV3(execInput, names, {
+            textTemplate: chosen?.entries ?? null,
+            onSaveTemplate: handleSaveDeckTemplate,
+          });
+          showToast("ok", "تم فتح العرض التنفيذي. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         }
       } else if (type === "management" || type === "management-xlsx" || type === "management-deck") {
         const baseInput = await loadExecInput();
@@ -742,8 +671,8 @@ function ReportsContent() {
   }
 
   function selectedReportType(baseType: ReportBaseType): ReportType {
-    // Uniform mapping across all three cards: document → base id, deck → `${base}-deck`,
-    // xlsx → `${base}-xlsx`. Executive keeps its existing "executive" document id.
+    // Uniform mapping across the cards: document → base id, deck → `${base}-deck`,
+    // xlsx → `${base}-xlsx`.
     const format = formats[baseType];
     if (format === "deck") return `${baseType}-deck` as ReportType;
     if (format === "xlsx") return `${baseType}-xlsx` as ReportType;
@@ -766,11 +695,20 @@ function ReportsContent() {
     return undefined;
   }
 
+  /** Every card except the executive one is paused while REPORTS_UNDER_MAINTENANCE is set. */
+  const isPaused = (base: ReportBaseType | "power-bi"): boolean => REPORTS_UNDER_MAINTENANCE && base !== "executive";
+  const cardClassFor = (base: ReportBaseType | "power-bi"): string => (isPaused(base) ? "rh-card rh-card-maintenance" : "rh-card");
+  /** A paused card's status badge reads «تحت الصيانة» instead of its own. */
+  const statusBadge = (base: ReportBaseType | "power-bi", ready: ReactNode): ReactNode =>
+    isPaused(base) ? <span className="rh-badge rh-badge-maintenance">{labels.report_maintenance}</span> : ready;
+
   function renderExportControls(baseType: ReportBaseType, toneClass: string): ReactNode {
     const selectedType = selectedReportType(baseType);
     const isBusy = generating === selectedType;
     // Every card now offers the same three formats (audit / Wave 3 rework).
-    const availableFormats: ReportFormat[] = ["deck", "xlsx", "document"];
+    // The executive report has no document edition.
+    const availableFormats: ReportFormat[] = baseType === "executive" ? ["deck", "xlsx"] : ["deck", "xlsx", "document"];
+    const paused = isPaused(baseType);
     const formatTitle = (f: ReportFormat): string =>
       f === "xlsx" ? "بيانات (Excel)"
       : f === "deck" ? "عرض تقديمي تفاعلي (HTML)"
@@ -780,8 +718,8 @@ function ReportsContent() {
         <button
           type="button"
           className={`rh-btn ${toneClass}`}
-          disabled={busy || !selectedMonth || !canExportReports}
-          title={exportDisabledTitle()}
+          disabled={paused || busy || !selectedMonth || !canExportReports}
+          title={paused ? labels.report_maintenance : exportDisabledTitle()}
           onClick={() => { void generate(selectedType); }}
         >
           {isBusy ? <span className="rh-spinner" /> : null}
@@ -795,6 +733,7 @@ function ReportsContent() {
               className={formats[baseType] === format ? "active" : ""}
               title={formatTitle(format)}
               aria-label={formatTitle(format)}
+              disabled={paused}
               onClick={() => setFormats((prev) => ({ ...prev, [baseType]: format }))}
             >
               {format === "xlsx" ? <ExcelFormatIcon /> : format === "deck" ? <PresentationFormatIcon /> : <FileText size={17} strokeWidth={2.2} />}
@@ -863,13 +802,11 @@ function ReportsContent() {
             : formatMonthFolderShortLabel(globalMonth.folderName)
         }
         resolveName={resolveReviewerName}
-        exporting={exporting}
+        exporting={generating === "executive-deck" ? "deck" : generating === "executive-xlsx" ? "xlsx" : null}
         canExportReports={canExportReports}
-        isAdmin={isAdmin}
         exportDisabledTitle={exportDisabledTitle()}
         exportsDisabled={!selectedMonth}
-        onExport={(kind) => { void handleExport(kind); }}
-        onOpenCustomizer={() => { handleOpenCustomizer(); }}
+        onExport={(kind) => { void generate(kind === "deck" ? "executive-deck" : "executive-xlsx"); }}
       />
     );
   }
@@ -969,55 +906,37 @@ function ReportsContent() {
           {/* ── Cards grid ──────────────────────────────── */}
           <div className="rh-grid">
 
-        {/* Executive — featured */}
+        {/* Executive — the one live report: deck (new design) + Excel, no document edition */}
         <div className="rh-card rh-card-featured">
           <div className="rh-card-accent rh-acc-teal" />
           <div className="rh-card-body">
             <div className="rh-card-top">
               <div className="rh-icon rh-icon-teal"><BarChart2 size={22} /></div>
-              <div className="rh-card-top-left">
-                <span className="rh-badge rh-badge-main">الرئيسي</span>
-                {isAdmin ? (
-                  <button
-                    type="button"
-                    className="rh-card-customize-btn"
-                    disabled={busy || !selectedMonth || !canExportReports}
-                    title="تخصيص تصميم العرض التنفيذي (للمدير فقط)"
-                    aria-label="تخصيص التصميم"
-                    onClick={() => { handleOpenCustomizer(); }}
-                  >
-                    <Settings2 size={15} strokeWidth={2} />
-                  </button>
-                ) : null}
-              </div>
+              <span className="rh-badge rh-badge-main">الرئيسي</span>
             </div>
-            <label className="rh-deck-edition-toggle">
-              <input
-                type="checkbox"
-                checked={deckEdition === "v3"}
-                onChange={handleToggleDeckEdition}
-                disabled={!selectedMonth}
-              />
-              <span>التصميم الجديد</span>
-            </label>
-            {deckEdition === "v2" ? (
-              <DeckTextPresetPicker
-                directoryHandle={directoryHandle ?? null}
-                canSave={canExportReports}
-                username={username ?? "admin"}
-                onError={(text) => showToast("error", text)}
-              />
-            ) : null}
             <div className="rh-card-title">التقرير التنفيذي</div>
             <p className="rh-card-desc">
-              ثلاث صيغ من نفس التحليل: عرض تنفيذي بالشرائح للاجتماعات، وتقرير تفصيلي كامل
-              للسجل، وملف Excel ببيانات التقرير الخام والمعالجة. اختر الصيغة من الأيقونات.
+              صيغتان من نفس التحليل: عرض تنفيذي بالشرائح للاجتماعات (قابل للتعديل ويُحفظ كقالب)،
+              وملف Excel ببيانات التقرير الخام والمعالجة. اختر الصيغة من الأيقونات.
             </p>
             <div className="rh-tags">
               <span className="rh-tag"><Presentation size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> عرض تقديمي</span>
-              <span className="rh-tag"><FileText size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> تقرير تفصيلي</span>
               <span className="rh-tag"><Download size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> Excel</span>
             </div>
+            {deckTemplates.length > 0 && formats.executive === "deck" ? (
+              <div className="rh-scope-toggle">
+                <label htmlFor="rh-deck-template">{labels.ce_template_label}</label>
+                <select
+                  id="rh-deck-template"
+                  data-testid="rh-deck-template"
+                  value={deckTemplateId}
+                  onChange={(ev) => setDeckTemplateId(ev.target.value)}
+                >
+                  <option value="">{labels.ce_template_none}</option>
+                  {deckTemplates.map((t) => (<option key={t.id} value={t.id}>{t.name}</option>))}
+                </select>
+              </div>
+            ) : null}
           </div>
           <div className="rh-card-footer">
             {renderExportControls("executive", "rh-btn-teal")}
@@ -1025,12 +944,12 @@ function ReportsContent() {
         </div>
 
         {/* Population report — merges the former Sample + Distribution cards (D11) */}
-        <div className="rh-card">
+        <div className={cardClassFor("population-report")}>
           <div className="rh-card-accent rh-acc-navy" />
           <div className="rh-card-body">
             <div className="rh-card-top">
               <div className="rh-icon rh-icon-navy"><Layers size={22} /></div>
-              <span className="rh-badge rh-badge-ready">جاهز</span>
+              {statusBadge("population-report", <span className="rh-badge rh-badge-ready">جاهز</span>)}
             </div>
             <div className="rh-card-title">تقرير المجتمع</div>
             <p className="rh-card-desc">
@@ -1055,6 +974,7 @@ function ReportsContent() {
                   type="button"
                   role="radio"
                   aria-checked={populationReportScope === opt.value}
+                  disabled={isPaused("population-report")}
                   className={`rh-scope-btn${populationReportScope === opt.value ? " rh-scope-btn-active" : ""}`}
                   onClick={() => setPopulationReportScope(opt.value)}
                 >
@@ -1069,12 +989,12 @@ function ReportsContent() {
         </div>
 
         {/* Management report — live (C2) */}
-        <div className="rh-card">
+        <div className={cardClassFor("management")}>
           <div className="rh-card-accent rh-acc-purple" />
           <div className="rh-card-body">
             <div className="rh-card-top">
               <div className="rh-icon rh-icon-purple"><Building2 size={22} /></div>
-              <span className="rh-badge rh-badge-ready">{labels.mgmt_card_badge_ready}</span>
+              {statusBadge("management", <span className="rh-badge rh-badge-ready">{labels.mgmt_card_badge_ready}</span>)}
             </div>
             <div className="rh-card-title">{labels.mgmt_report_title}</div>
             <p className="rh-card-desc">{labels.mgmt_card_desc}</p>
@@ -1090,12 +1010,12 @@ function ReportsContent() {
         </div>
 
         {/* Power BI / CSV export */}
-        <div className="rh-card">
+        <div className={cardClassFor("power-bi")}>
           <div className="rh-card-accent rh-acc-indigo" />
           <div className="rh-card-body">
             <div className="rh-card-top">
               <div className="rh-icon rh-icon-indigo"><BarChart2 size={22} /></div>
-              <span className="rh-badge rh-badge-ready">جاهز</span>
+              {statusBadge("power-bi", <span className="rh-badge rh-badge-ready">جاهز</span>)}
             </div>
             <div className="rh-card-title">تصدير Power BI / CSV</div>
             <p className="rh-card-desc">
@@ -1122,8 +1042,8 @@ function ReportsContent() {
               <button
                 className="rh-btn rh-btn-indigo"
                 onClick={() => void handlePbiExport()}
-                disabled={!selectedMonth || pbiExporting || !directoryHandle || !canExportReports}
-                title={exportDisabledTitle()}
+                disabled={isPaused("power-bi") || !selectedMonth || pbiExporting || !directoryHandle || !canExportReports}
+                title={isPaused("power-bi") ? labels.report_maintenance : exportDisabledTitle()}
                 type="button"
               >
                 {pbiExporting ? <span className="rh-spinner" /> : null}
@@ -1132,29 +1052,6 @@ function ReportsContent() {
             </div>
           </div>
         </div>
-          </div>
-
-          {/* ── Quick actions ───────────────────────────── */}
-          <div className="rh-quick">
-            <span className="rh-quick-label">إجراءات سريعة</span>
-            <div className="rh-quick-actions">
-              <button
-                className="rh-quick-btn"
-                disabled={busy || !selectedMonth || !canExportReports}
-                title={exportDisabledTitle()}
-                onClick={() => { void generate("executive"); }}
-              >
-                <BarChart2 size={16} style={{ verticalAlign: "middle", marginInlineEnd: 5 }} /> التقرير التنفيذي
-              </button>
-              <button
-                className="rh-quick-btn"
-                disabled={busy || !selectedMonth || !canExportReports}
-                title={exportDisabledTitle()}
-                onClick={() => { void generate("population-report"); }}
-              >
-                <Layers size={16} style={{ verticalAlign: "middle", marginInlineEnd: 5 }} /> تقرير المجتمع
-              </button>
-            </div>
           </div>
 
           {/* ── Power BI export result (shown below grid after export) ── */}
@@ -1202,15 +1099,6 @@ function ReportsContent() {
         </>
       )}
     </section>
-    {customizerOpen && directoryHandle ? (
-      <DeckDesignCustomizer
-        loadExecInput={loadExecInput}
-        buildDisplayNameMap={buildDisplayNameMap}
-        directoryHandle={directoryHandle}
-        canMutate={canMutate}
-        onClose={() => setCustomizerOpen(false)}
-      />
-    ) : null}
     </>
   );
 }

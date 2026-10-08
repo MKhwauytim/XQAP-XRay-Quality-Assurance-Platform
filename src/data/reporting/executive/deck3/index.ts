@@ -18,6 +18,16 @@ import { ZATCA_LOGO_URL } from "../../../../branding/organization";
 import { esc } from "../primitives";
 import { PRINT_SELECT_CSS, PRINT_SELECT_SCRIPT, printSelectBarHtml } from "../printSelection";
 import { SOURCE_REVISIONS_CSS } from "../../sourceRevisions";
+import {
+  DECK_TEXT_EDIT_CSS,
+  DECK_TEXT_EDIT_SCRIPT,
+  DECK_TEXT_TEMPLATE_MESSAGE,
+  DECK_TEXT_TEMPLATE_REPLY,
+  sanitizeEntries,
+  textEditBarHtml,
+  textEditDataHtml,
+} from "./textEdit";
+import type { DeckTextEntries } from "./textEdit";
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
 
 /**
@@ -105,7 +115,11 @@ export function buildDeckV3Html(
   monthLabel: string,
   brand: { title?: string; navBrand?: string; toolbarBrand?: string } = {},
   footerNote: string = "",
+  /** `undefined` → a plain, non-editable deck (population report). Any other value —
+   *  including `null` for "no template" — turns the in-viewer text editor on. */
+  textTemplate?: DeckTextEntries | null,
 ): string {
+  const editable = textTemplate !== undefined;
   const labels = getLabels();
   const fullscreenEnter = esc(labels.exec_deck_fullscreen_enter);
   const fullscreenExit = esc(labels.exec_deck_fullscreen_exit);
@@ -120,7 +134,7 @@ export function buildDeckV3Html(
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>${esc(title)} — ${esc(monthLabel)}</title>
-<style>${DECK_V3_CSS}${footerNote ? SOURCE_REVISIONS_CSS : ""}${PRINT_SELECT_CSS}</style>
+<style>${DECK_V3_CSS}${footerNote ? SOURCE_REVISIONS_CSS : ""}${PRINT_SELECT_CSS}${editable ? DECK_TEXT_EDIT_CSS : ""}</style>
 <script>${DECK_V3_SCALE_SCRIPT}</script>
 </head>
 <body>
@@ -145,7 +159,8 @@ export function buildDeckV3Html(
       </div>
     </div>
     <div class="deck-toolbar-actions">
-      ${printSelectBarHtml()}
+${editable ? `      ${textEditBarHtml()}
+` : ""}      ${printSelectBarHtml()}
       <button class="btn btn-fullscreen" id="deck-fullscreen-button" type="button" aria-pressed="false" aria-label="${fullscreenEnter}" title="${fullscreenEnter}" data-enter-label="${fullscreenEnter}" data-exit-label="${fullscreenExit}"><span class="btn-fullscreen-icon btn-fullscreen-icon-expand">${icon("expand", 15)}</span><span class="btn-fullscreen-icon btn-fullscreen-icon-compress">${icon("compress", 15)}</span></button>
       <button class="btn" onclick="window.print()" title="اختر «حفظ كـ PDF» من المتصفح عند الطباعة، وليس «Microsoft Print to PDF»، لضمان الحجم والجودة الصحيحين">طباعة / PDF</button>
     </div>
@@ -155,29 +170,67 @@ ${slides}${footerNote ? `\n${footerNote}` : ""}
 <button type="button" class="btn-slide-nav btn-slide-prev" id="deck-slide-prev" aria-label="${slidePrevLabel}" title="${slidePrevLabel}">${icon("arrow", 20)}</button>
 <button type="button" class="btn-slide-nav btn-slide-next" id="deck-slide-next" aria-label="${slideNextLabel}" title="${slideNextLabel}">${icon("arrow", 20)}</button>
 <span class="deck-slide-counter" id="deck-slide-counter" dir="ltr"></span>
-<script>${DECK_NAV_SCRIPT}${DECK_FULLSCREEN_SCRIPT}${PRINT_SELECT_SCRIPT}</script>
+${editable ? `${textEditDataHtml(textTemplate)}
+` : ""}<script>${DECK_NAV_SCRIPT}${DECK_FULLSCREEN_SCRIPT}${PRINT_SELECT_SCRIPT}${editable ? DECK_TEXT_EDIT_SCRIPT : ""}</script>
 </body>
 </html>`;
 }
 
+export type DeckV3Options = {
+  /** Saved text edits (a template's entries) re-applied to the generated deck. */
+  textTemplate?: DeckTextEntries | null;
+  /** Receives «حفظ كقالب» from the open viewer; absent → the viewer downloads the template as a file. */
+  onSaveTemplate?: (
+    name: string,
+    entries: DeckTextEntries,
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
+};
+
 export async function buildExecutiveDeckV3(
   input: ExecutiveReportInput,
   employeeDisplayNames: Record<string, string> = {},
+  options: Pick<DeckV3Options, "textTemplate"> = {},
 ): Promise<string> {
   const model = buildReportModel(input, employeeDisplayNames);
   const monthLabel = input.periodLabel ?? formatMonthFolderShortLabel(input.monthFolderName);
   const slides = await buildDeck3Slides(model, monthLabel, input.config.monthlyTarget);
-  return buildDeckV3Html(slides, monthLabel);
+  return buildDeckV3Html(slides, monthLabel, {}, "", options.textTemplate ?? null);
+}
+
+/** Routes the viewer's save-as-template message to `onSave` and answers it. Only the window we opened is trusted. */
+function attachTemplateSaveBridge(win: Window, onSave: NonNullable<DeckV3Options["onSaveTemplate"]>): void {
+  const handler = (event: MessageEvent): void => {
+    if (event.source !== win) return;
+    const data = event.data as { type?: unknown; name?: unknown; entries?: unknown } | null;
+    if (!data || data.type !== DECK_TEXT_TEMPLATE_MESSAGE || typeof data.name !== "string") return;
+    void onSave(data.name, sanitizeEntries(data.entries)).then((result) => {
+      try {
+        win.postMessage({ type: DECK_TEXT_TEMPLATE_REPLY, ok: result.ok, error: result.ok ? undefined : result.error }, "*");
+      } catch {
+        // The viewer was closed between the request and the reply.
+      }
+    });
+  };
+  window.addEventListener("message", handler);
+  const timer = window.setInterval(() => {
+    if (win.closed) {
+      window.removeEventListener("message", handler);
+      window.clearInterval(timer);
+    }
+  }, 2000);
 }
 
 export async function openExecutiveDeckV3(
   input: ExecutiveReportInput,
   employeeDisplayNames: Record<string, string> = {},
+  options: DeckV3Options = {},
 ): Promise<void> {
-  const reportWindow = openReportWindow();
+  // Keep window.opener only when there is someone to save a template to.
+  const reportWindow = openReportWindow({ keepOpener: Boolean(options.onSaveTemplate) });
+  if (reportWindow && options.onSaveTemplate) attachTemplateSaveBridge(reportWindow, options.onSaveTemplate);
   await writeOrCloseOnFailure(
     reportWindow,
-    () => buildExecutiveDeckV3(input, employeeDisplayNames),
+    () => buildExecutiveDeckV3(input, employeeDisplayNames, { textTemplate: options.textTemplate }),
     `العرض_التنفيذي_${input.monthFolderName}.html`,
   );
 }

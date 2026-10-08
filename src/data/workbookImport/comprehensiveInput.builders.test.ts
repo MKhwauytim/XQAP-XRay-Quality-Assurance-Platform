@@ -146,7 +146,7 @@ describe.each(bases)("real builders on a combined input (%s)", (_name, base) => 
 
   it("every edition states the samples' study period instead of the all-months placeholder", async () => {
     // Fixture months: Excel serials 46023 (Jan 2026) and 46054 (Feb 2026).
-    const label = getLabels().ce_period_range.replace("{from}", formatMonthShortLabel(1, 2026)).replace("{to}", formatMonthShortLabel(2, 2026));
+    const label = getLabels().ce_period_range.replace("{from}", `1 ${formatMonthShortLabel(1, 2026)}`).replace("{to}", `28 ${formatMonthShortLabel(2, 2026)}`);
     expect(input.periodLabel).toBe(label);
     const visible = (html: string) => html.replace(/<style[\s\S]*?<\/style>/g, " ").replace(/<script[\s\S]*?<\/script>/g, " ");
     for (const [name, html] of [

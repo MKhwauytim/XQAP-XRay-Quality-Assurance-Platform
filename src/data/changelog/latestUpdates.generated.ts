@@ -5,6 +5,20 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v153.2",
+    "date": "2026-10-08",
+    "bucket": "enhancement",
+    "scope": "deck3",
+    "title": "cover wording, classification, period with days, empty contents topics column"
+  },
+  {
+    "version": "v153.1",
+    "date": "2026-10-07",
+    "bucket": "enhancement",
+    "scope": "reports",
+    "title": "pause report hub as تحت الصيانة, drop old executive report, make comprehensive deck3 editable with saved text templates"
+  },
+  {
     "version": "v153.0",
     "date": "2026-10-07",
     "bucket": "feature",
@@ -59,19 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "deck3",
     "title": "chart axes widen to fit real data so low/high values keep a visible bar and label"
-  },
-  {
-    "version": "v151.5",
-    "date": "2026-10-06",
-    "bucket": "fix",
-    "scope": "workbookImport",
-    "title": "read the examined-sample layout (SJAN…SDEC) of the comprehensive report workbook"
-  },
-  {
-    "version": "v151.4",
-    "date": "2026-10-06",
-    "bucket": "redesign",
-    "scope": "reports",
-    "title": "deck3 scope wording moved to deck3Copy() to stay under the complexity gate"
   }
 ];

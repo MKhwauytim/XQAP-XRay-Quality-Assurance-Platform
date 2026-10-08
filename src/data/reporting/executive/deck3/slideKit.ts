@@ -121,7 +121,7 @@ ${coverMetaRow(opts.metaRows)}`,
 export function contentsSlide(opts: {
   eyebrow: string;
   title: string;
-  rows: Array<{ index: number; title: string; description: string; topics: string; pages: string }>;
+  rows: Array<{ index: number; title: string; description: string; topics?: string; pages: string }>;
   meta: SlideMeta;
 }): string {
   const rows = opts.rows
@@ -129,7 +129,7 @@ export function contentsSlide(opts: {
       (r) => `<div class="v3-toc-row">
   <span class="v3-toc-index">${pad2(r.index)}</span>
   <div class="v3-toc-main"><b>${esc(r.title)}</b><span>${esc(r.description)}</span></div>
-  <span class="v3-toc-topics">${esc(r.topics)}</span>
+  <span class="v3-toc-topics">${esc(r.topics ?? "")}</span>
   <span class="v3-toc-pages">${esc(r.pages)}</span>
 </div>`,
     )

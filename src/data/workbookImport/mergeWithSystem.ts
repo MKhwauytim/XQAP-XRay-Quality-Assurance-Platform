@@ -54,14 +54,15 @@ function studyPeriod(months: Iterable<string>): ComprehensivePeriod | null {
   return from && to ? { from: from.key, to: to.key } : null;
 }
 
-/** «من يناير 2026 إلى سبتمبر 2026», or the single month when both ends agree. */
+/** «من 1 يناير 2026 إلى 30 سبتمبر 2026»: the first day of the earliest month to the last day of the latest. */
 export function formatComprehensivePeriod(period: ComprehensivePeriod): string {
-  const label = (key: string) => {
+  const label = (key: string, edge: "start" | "end") => {
     const info = parseMonthFolderName(key);
-    return info ? formatMonthShortLabel(info.month, info.year) : key;
+    if (!info) return key;
+    const day = edge === "start" ? 1 : new Date(Date.UTC(info.year, info.month, 0)).getUTCDate();
+    return `${day} ${formatMonthShortLabel(info.month, info.year)}`;
   };
-  if (period.from === period.to) return label(period.from);
-  return getLabels().ce_period_range.replace("{from}", label(period.from)).replace("{to}", label(period.to));
+  return getLabels().ce_period_range.replace("{from}", label(period.from, "start")).replace("{to}", label(period.to, "end"));
 }
 
 const key = (id: string, month: string) => `${id}|${normalizeMonthKey(month)}`;
