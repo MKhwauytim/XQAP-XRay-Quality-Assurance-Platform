@@ -844,3 +844,7 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* Paused export actions: greyed, with the maintenance note beside them. */
+.kpi-actions-maintenance { filter: grayscale(1); opacity: 0.6; }
+.kpi-actions-maintenance .kpi-maintenance-note { font-size: 12px; font-weight: 800; align-self: center; }

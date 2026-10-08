@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactElement } from "react";
-import { BarChart2, Download, FileText, Settings2 } from "lucide-react";
+import { BarChart2, Download } from "lucide-react";
 
 import { useLabels } from "../../../../data/labels/useLabels";
 import type { Labels } from "../../../../data/labels/labelsStore";
@@ -32,8 +32,8 @@ import "./KpiDashboard.css";
  * renders «—» via `fmtPct`, never 0%.
  */
 
+export type ExportKind = "deck" | "xlsx";
 export type KpiSection = "overview" | "ports" | "reviewers";
-export type ExportKind = "document" | "deck" | "xlsx";
 
 type Props = {
   model: ReportModel;
@@ -42,12 +42,10 @@ type Props = {
   resolveName: (username: string) => string;
   exporting: ExportKind | null;
   canExportReports: boolean;
-  isAdmin: boolean;
   /** Explanation for a disabled export control; `undefined` when enabled. */
   exportDisabledTitle: string | undefined;
   exportsDisabled: boolean;
   onExport: (kind: ExportKind) => void;
-  onOpenCustomizer: () => void;
 };
 
 const SOURCE_LABEL_KEYS = {
@@ -114,11 +112,9 @@ export default function KpiDashboard(props: Props): ReactElement {
     resolveName,
     exporting,
     canExportReports,
-    isAdmin,
     exportDisabledTitle,
     exportsDisabled,
     onExport,
-    onOpenCustomizer,
   } = props;
   const labels = useLabels();
   const [section, setSection] = useState<KpiSection>("overview");
@@ -196,7 +192,6 @@ export default function KpiDashboard(props: Props): ReactElement {
     ? `${labels[`kpi_cal_month_${calendar.month}` as keyof Labels]} ${fmtCount(calendar.year)}`
     : "";
 
-  const exportBusy = exporting !== null;
 
   function renderTab(id: KpiSection, text: string): ReactElement {
     return (
@@ -229,19 +224,8 @@ export default function KpiDashboard(props: Props): ReactElement {
         <div className="kpi-actions" role="group" aria-label={labels.kpi_exports_aria}>
           <button
             type="button"
-            className="kpi-btn kpi-btn-sky"
-            disabled={exportBusy || exportsDisabled || !canExportReports}
-            title={exportDisabledTitle}
-            aria-label={labels.kpi_export_document_aria}
-            onClick={() => onExport("document")}
-          >
-            {exporting === "document" ? <span className="kpi-spinner" /> : <FileText size={14} strokeWidth={2} />}
-            {labels.kpi_export_document}
-          </button>
-          <button
-            type="button"
             className="kpi-btn kpi-btn-navy"
-            disabled={exportBusy || exportsDisabled || !canExportReports}
+            disabled={exporting !== null || exportsDisabled || !canExportReports}
             title={exportDisabledTitle}
             aria-label={labels.kpi_export_deck_aria}
             onClick={() => onExport("deck")}
@@ -252,7 +236,7 @@ export default function KpiDashboard(props: Props): ReactElement {
           <button
             type="button"
             className="kpi-btn kpi-btn-plain"
-            disabled={exportBusy || exportsDisabled || !canExportReports}
+            disabled={exporting !== null || exportsDisabled || !canExportReports}
             title={exportDisabledTitle}
             aria-label={labels.kpi_export_xlsx_aria}
             onClick={() => onExport("xlsx")}
@@ -260,18 +244,6 @@ export default function KpiDashboard(props: Props): ReactElement {
             {exporting === "xlsx" ? <span className="kpi-spinner" /> : <Download size={14} strokeWidth={2} />}
             {labels.kpi_export_xlsx}
           </button>
-          {isAdmin ? (
-            <button
-              type="button"
-              className="kpi-btn kpi-btn-plain"
-              disabled={exportBusy || exportsDisabled || !canExportReports}
-              title={labels.kpi_export_customize_title}
-              onClick={onOpenCustomizer}
-            >
-              <Settings2 size={14} strokeWidth={2} />
-              {labels.kpi_export_customize}
-            </button>
-          ) : null}
         </div>
       </div>
 

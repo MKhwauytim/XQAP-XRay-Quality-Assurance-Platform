@@ -137,15 +137,17 @@ describe("study period (earliest to latest month of the completed samples)", () 
   it("is null when there are no completed rows", () => {
     expect(mergeCompletedRows([], []).period).toBeNull();
   });
-  it("labels a range as «من … إلى …», a single month alone, and no period as unset", () => {
+  it("labels a range as «من … إلى …», a single month as its first-to-last day, and no period as unset", () => {
     const base = { config: {}, template: null } as unknown as ExecutiveReportInput;
     const range = buildComprehensiveInput([], base, { from: "3-march-2025", to: "1-january-2026" });
     expect(range.periodLabel).toBe(
-      getLabels().ce_period_range.replace("{from}", formatMonthShortLabel(3, 2025)).replace("{to}", formatMonthShortLabel(1, 2026)),
+      getLabels().ce_period_range.replace("{from}", `1 ${formatMonthShortLabel(3, 2025)}`).replace("{to}", `31 ${formatMonthShortLabel(1, 2026)}`),
     );
     expect(range.monthFolderName).toBe(COMPREHENSIVE_MONTH_LABEL);
     const single = buildComprehensiveInput([], base, { from: "1-january-2026", to: "1-january-2026" });
-    expect(single.periodLabel).toBe(formatMonthShortLabel(1, 2026));
+    expect(single.periodLabel).toBe(
+      getLabels().ce_period_range.replace("{from}", `1 ${formatMonthShortLabel(1, 2026)}`).replace("{to}", `31 ${formatMonthShortLabel(1, 2026)}`),
+    );
     expect(buildComprehensiveInput([], base, null).periodLabel).toBeUndefined();
     expect(buildComprehensiveInput([], base).periodLabel).toBeUndefined();
   });
