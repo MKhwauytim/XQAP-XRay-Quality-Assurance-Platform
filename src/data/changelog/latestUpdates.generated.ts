@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v153.4",
+    "date": "2026-10-08",
+    "bucket": "fix",
+    "scope": "daily tracking",
+    "title": "rename tab to المتابعة اليومية and follow the month the work is dated in"
+  },
+  {
     "version": "v153.3",
     "date": "2026-10-08",
     "bucket": "enhancement",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "reports",
     "title": "per-page print on/off toggles, select all/none and saved selection in the executive HTML decks (v2, v3)"
-  },
-  {
-    "version": "v151.7",
-    "date": "2026-10-06",
-    "bucket": "fix",
-    "scope": "deck3",
-    "title": "split the last two visual slides into two (يتبع) pages each"
   }
 ];

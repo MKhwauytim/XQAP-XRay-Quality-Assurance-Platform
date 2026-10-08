@@ -9,6 +9,7 @@ import {
   isWorkDay,
   monthTotals,
   quotaOnDay,
+  resolveTrackingMonthFolder,
   type TrackingRow,
 } from "./deadlineTracking";
 
@@ -218,5 +219,26 @@ describe("day selectors", () => {
       rows: [], assignedAtByUser: {}, year: YEAR, month: MONTH, deadline: DEADLINE, today: new Date(2026, 9, 29),
     });
     expect(monthTotals(late, []).daysLeft).toBe(0);
+  });
+});
+
+describe("resolveTrackingMonthFolder", () => {
+  const done = (doneAt: string): TrackingRow => ({ assignedTo: "a", state: "completed", doneAt });
+  const pending: TrackingRow = { assignedTo: "a", state: "pending", doneAt: null };
+
+  it("keeps the sample month when today falls inside it", () => {
+    expect(resolveTrackingMonthFolder("10-october-2026", [pending], TODAY)).toBe("10-october-2026");
+  });
+
+  it("keeps the sample month when finished work is dated inside it", () => {
+    expect(resolveTrackingMonthFolder("1-january-2026", [done("2026-01-12T09:00:00")], TODAY)).toBe("1-january-2026");
+  });
+
+  it("follows the work when a January sample is finished in October", () => {
+    expect(resolveTrackingMonthFolder("1-january-2026", [done("2026-10-05T09:00:00"), pending], TODAY)).toBe("10-october-2026");
+  });
+
+  it("falls back to today's month when nothing is finished yet", () => {
+    expect(resolveTrackingMonthFolder("1-january-2026", [pending], TODAY)).toBe("10-october-2026");
   });
 });
