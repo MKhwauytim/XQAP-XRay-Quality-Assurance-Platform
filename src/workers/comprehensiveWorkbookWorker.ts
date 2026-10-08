@@ -7,7 +7,7 @@ const ctx = globalThis as unknown as {
 };
 ctx.onmessage = async (ev) => {
   try {
-    const { rows, report, populationSummary } = await readComprehensiveWorkbooks(ev.data.files, (p) => ctx.postMessage({ type: "progress", ...p }));
+    const { rows, report, populationSummary } = await readComprehensiveWorkbooks(ev.data.files, (p) => ctx.postMessage({ type: "progress", ...p }), { requireFollowUp: ev.data.requireFollowUp });
     ctx.postMessage({ type: "done", rows, report, populationSummary });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

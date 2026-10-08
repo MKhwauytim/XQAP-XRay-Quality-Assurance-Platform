@@ -11,7 +11,7 @@ import { logError } from "../../../../../data/storage/errorLogger";
 /** Same silence-based watchdog as Population's workbook import: re-armed on every worker message. */
 const SILENCE_LIMIT_MS = 180_000;
 
-export type WorkbookErrorCode = "NOSAMPLE" | "COLUMNS" | "ZIP" | "UNKNOWN";
+export type WorkbookErrorCode = "NOSAMPLE" | "NOFOLLOWUP" | "COLUMNS" | "ZIP" | "UNKNOWN";
 
 export type WorkbookState =
   | { status: "none" }
@@ -21,6 +21,7 @@ export type WorkbookState =
 
 const KNOWN_CODES: Record<string, WorkbookErrorCode> = {
   "XQ-WB-NOSAMPLE": "NOSAMPLE",
+  "XQ-WB-NOFOLLOWUP": "NOFOLLOWUP",
   "XQ-WB-COLUMNS": "COLUMNS",
   "XQ-WB-ZIP": "ZIP",
 };
@@ -105,7 +106,8 @@ export function useComprehensiveWorkbook(): {
     worker.addEventListener("error", onFail);
     worker.addEventListener("messageerror", onFail);
     armWatchdog();
-    worker.postMessage({ files } satisfies ComprehensiveWorkerRequest);
+    // The report is built from BOTH workbooks (sample + follow-up); a lone file is rejected with a clear message.
+    worker.postMessage({ files, requireFollowUp: true } satisfies ComprehensiveWorkerRequest);
   }, [stop]);
 
   useEffect(() => stop, [stop]);

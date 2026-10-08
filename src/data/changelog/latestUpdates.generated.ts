@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v153.1",
+    "date": "2026-10-08",
+    "bucket": "enhancement",
+    "scope": "comprehensive report",
+    "title": "uploading both workbooks (sample + follow-up) is required"
+  },
+  {
     "version": "v153.0",
     "date": "2026-10-07",
     "bucket": "feature",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "workbookImport",
     "title": "read the examined-sample layout (SJAN…SDEC) of the comprehensive report workbook"
-  },
-  {
-    "version": "v151.4",
-    "date": "2026-10-06",
-    "bucket": "redesign",
-    "scope": "reports",
-    "title": "deck3 scope wording moved to deck3Copy() to stay under the complexity gate"
   }
 ];
