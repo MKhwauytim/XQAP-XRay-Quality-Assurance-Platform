@@ -16,6 +16,7 @@ import type { ItemAnswer } from "../answers/answerTypes";
 import { isNoImageSubmission } from "../answers/noImageAnswer";
 import type { TemplateSchema } from "../templates/templateTypes";
 import { countWorkingDays, isWorkingDay } from "../../utils/workingDays";
+import { formatMonthFolderName, parseMonthFolderName } from "../population/monthFolder";
 
 export type AnswerState = "completed" | "hold" | "pending" | "replaced";
 
@@ -89,6 +90,36 @@ export type TrackingInput = {
   deadline: Date;
   today: Date;
 };
+
+/**
+ * The month the tracking calendar should show. Normally the selected sample's
+ * month, but a sample attached to a month other than the one the work is
+ * happening in (e.g. a January sample reviewed in October) would show an empty
+ * calendar and zero averages, since every finished row is dated outside it.
+ * So: keep the sample's month when today falls in it or any finished row is
+ * dated inside it; otherwise follow the work — the month of the latest finished
+ * row, or today's month when nothing is finished yet.
+ */
+export function resolveTrackingMonthFolder(
+  monthFolder: string,
+  rows: readonly TrackingRow[],
+  today: Date,
+): string {
+  const info = parseMonthFolderName(monthFolder);
+  if (!info) return monthFolder;
+  if (today.getFullYear() === info.year && today.getMonth() === info.month - 1) return monthFolder;
+  let latest = -Infinity;
+  for (const row of rows) {
+    if (row.state === "pending" || !row.doneAt) continue;
+    const d = new Date(row.doneAt);
+    const ms = d.getTime();
+    if (Number.isNaN(ms)) continue;
+    if (d.getFullYear() === info.year && d.getMonth() === info.month - 1) return monthFolder;
+    if (ms > latest) latest = ms;
+  }
+  const anchor = Number.isFinite(latest) ? new Date(latest) : today;
+  return formatMonthFolderName(anchor.getMonth() + 1, anchor.getFullYear());
+}
 
 function dateAt(year: number, month: number, day: number): Date {
   return new Date(year, month - 1, day);

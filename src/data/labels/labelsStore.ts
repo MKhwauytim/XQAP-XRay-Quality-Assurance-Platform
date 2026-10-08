@@ -2183,9 +2183,9 @@ export const DEFAULT_LABELS = {
   ce_error_ZIP:                  "تعذّر فتح الملف — قد يكون تالفاً أو بصيغة غير مدعومة.",
   ce_error_UNKNOWN:              "تعذّرت قراءة الملف بسبب خطأ غير متوقع.",
 
-  // APPEND-ONLY BLOCK — results-page «المتابعة والمواعيد» tab (deadline, daily
+  // APPEND-ONLY BLOCK — results-page «المتابعة اليومية» tab (deadline, daily
   // quota, calendar, per-employee averages). `{x}` tokens are replaced by the view.
-  tracking_tab_title:            "المتابعة والمواعيد",
+  tracking_tab_title:            "المتابعة اليومية",
   tracking_tab_results:          "النتائج",
   tracking_tabs_aria:            "أقسام صفحة نتائج الفحص",
   tracking_no_data:              "لا توجد عيّنة موزّعة لهذا الشهر بعد.",

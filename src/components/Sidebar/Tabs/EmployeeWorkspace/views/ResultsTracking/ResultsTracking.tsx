@@ -9,6 +9,7 @@ import {
   isWorkDay,
   monthTotals,
   quotaOnDay,
+  resolveTrackingMonthFolder,
   type EmployeeTracking,
   type TrackingRow,
 } from "../../../../../../data/tracking/deadlineTracking";
@@ -63,9 +64,17 @@ type TableRow = {
 };
 
 export default function ResultsTracking({
-  monthFolder, rows, assignedAtByUser, directoryHandle, canEditDeadline, username, now,
+  monthFolder: sampleMonthFolder, rows, assignedAtByUser, directoryHandle, canEditDeadline, username, now,
 }: Props) {
   const L = useLabels();
+  const clock = now ?? new Date();
+  const dayStart = new Date(clock.getFullYear(), clock.getMonth(), clock.getDate()).getTime();
+  // The calendar follows the month the work is actually dated in, so a sample
+  // attached to another month (January sample, October work) is not all zeros.
+  const monthFolder = useMemo(
+    () => resolveTrackingMonthFolder(sampleMonthFolder, rows, new Date(dayStart)),
+    [sampleMonthFolder, rows, dayStart],
+  );
   const info = parseMonthFolderName(monthFolder);
   const [override, setOverride] = useState<MonthDeadlineOverride | null>(null);
   const [emp, setEmp] = useState("all");
@@ -83,8 +92,6 @@ export default function ResultsTracking({
     return () => { cancelled = true; };
   }, [directoryHandle, monthFolder]);
 
-  const clock = now ?? new Date();
-  const dayStart = new Date(clock.getFullYear(), clock.getMonth(), clock.getDate()).getTime();
   const resolved = useMemo(
     () => (info ? resolveDeadline(info.year, info.month, override) : null),
     [info, override],
