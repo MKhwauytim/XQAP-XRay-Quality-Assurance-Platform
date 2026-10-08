@@ -117,12 +117,13 @@ describe.each(bases)("real builders on a combined input (%s)", (_name, base) => 
     ]) expect(html, present).toContain(present);
     for (const absent of [
       "القسم الثاني — نتائج فحص الجودة", "القسم الثالث — التحاليل المتقدمة",
-      '<div class="v2-rail-tab">مجتمع الفحص</div>', '<div class="v2-rail-tab active">مجتمع الفحص</div>',
+      '<div class="v2-rail-tab" data-edit="مجتمع الفحص">مجتمع الفحص</div>',
+      '<div class="v2-rail-tab active" data-edit="مجتمع الفحص">مجتمع الفحص</div>',
     ]) expect(html, absent).not.toContain(absent);
     // Visible text and attributes only (the theme CSS carries «القسم 3 · …» comments).
     const markup = html.replace(/<style[\s\S]*?<\/style>/g, " ");
     for (const absent of ["القسم 3", "القسم 4"]) expect(markup, absent).not.toContain(absent);
-    expect(html).toContain('<div class="v2-rail-tab active">نتائج فحص الجودة</div>');
+    expect(html).toContain('<div class="v2-rail-tab active" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div>');
   });
 
   it("buildExecutiveDeckV3 omits the population section and target figures, renumbers, and states its scope", async () => {

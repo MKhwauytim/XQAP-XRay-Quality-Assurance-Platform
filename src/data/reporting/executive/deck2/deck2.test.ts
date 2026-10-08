@@ -814,8 +814,8 @@ describe("portPopulationSlideBuilders — Ledger/Briefing/Grid design systems (2
     `    \n` +
     `  </div>\n` +
     `  <div class="v2-rail" aria-hidden="true">\n` +
-    `    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>\n` +
-    `    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab active">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab">التحاليل المتقدمة</div>\n` +
+    `    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>\n` +
+    `    <div class="v2-rail-tab" data-edit="المعجم">المعجم</div><div class="v2-rail-tab active" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>\n` +
     `  </div>\n` +
     `  <div class="slide-inner">\n` +
     `    <div class="slide-eyebrow">\n` +
@@ -823,7 +823,7 @@ describe("portPopulationSlideBuilders — Ledger/Briefing/Grid design systems (2
     `      <span>القسم 1 — مجتمع الفحص</span>\n` +
     `    </div>\n` +
     `    <div class="slide-headline">مجتمع صور الفحص لشهر مايو 2026</div>\n` +
-    `    <div class="slide-subhead">منهجية التصنيف: تُصنَّف الصورة اشتباهًا إذا كانت نتيجة المستوى الأول أو الثاني اشتباهًا، وفي غير ذلك تُصنَّف سليمة.</div>\n` +
+    `    <div class="slide-subhead" data-edit="منهجية التصنيف: تُصنَّف الصورة اشتباهًا إذا كانت نتيجة المستوى الأول أو الثاني اشتباهًا، وفي غير ذلك تُصنَّف سليمة.">منهجية التصنيف: تُصنَّف الصورة اشتباهًا إذا كانت نتيجة المستوى الأول أو الثاني اشتباهًا، وفي غير ذلك تُصنَّف سليمة.</div>\n` +
     `    <div class="slide-body"><div class="v2-port-split"><div class="v2-port-col land">\n` +
     `    <div class="v2-port-col-head">\n` +
     `      <span class="v2-port-col-icon"><span style="display:inline-flex;transform:translate(2.1%,-8.5%)"><svg viewBox="0 0 24 24" width="26" height="26" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M2 16V8a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v8"/><path d="M14 11h4l3 3v2h-2.2"/><circle cx="7" cy="17.5" r="1.7"/><circle cx="16.8" cy="17.5" r="1.7"/><path d="M8.7 17.5h6.4"/><path d="M2 16h3.3"/></svg></span></span>\n` +
@@ -1037,14 +1037,14 @@ describe("P0 primitives — characterization: slide-port-population-1 Ledger/Bri
   // gridPanel) must not change a single byte of this already-shipped exemplar page.
   const EXPECTED_PANEL1_LEDGER =
     `data-variant-index="1"><div class="v2-sys-ledger v2-lg-port-population"><div class="v2-lg-split"><div class="v2-lg-port-card">
-    <div class="v2-lg-table-card-title">المنافذ البرية</div>
+    <div class="v2-lg-table-card-title" data-edit="المنافذ البرية">المنافذ البرية</div>
     <table class="deck-table">
       <thead><tr><th>المنفذ</th><th>الصور</th><th>سليمة</th><th>اشتباه</th></tr></thead>
       <tbody><tr><td><span class="v2-lg-idx">1</span>منفذ أ</td><td class="v2-bar-cell green" style="--w:100.0%">1</td><td>1</td><td>0</td></tr></tbody>
       <tfoot><tr><td>الإجمالي</td><td>1</td><td>1</td><td>0</td></tr></tfoot>
     </table>
   </div><div class="v2-lg-port-card">
-    <div class="v2-lg-table-card-title">المنافذ البحرية</div>
+    <div class="v2-lg-table-card-title" data-edit="المنافذ البحرية">المنافذ البحرية</div>
     <table class="deck-table">
       <thead><tr><th>المنفذ</th><th>الصور</th><th>سليمة</th><th>اشتباه</th></tr></thead>
       <tbody><tr><td><span class="v2-lg-idx">1</span>منفذ ب</td><td class="v2-bar-cell blue" style="--w:100.0%">1</td><td>0</td><td>1</td></tr></tbody>

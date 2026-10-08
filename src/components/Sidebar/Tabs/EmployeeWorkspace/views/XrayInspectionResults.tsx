@@ -23,7 +23,6 @@ import {
 } from "../../../../../data/answers/answerStorage";
 import { backfillMirrorFromDisk, countPendingAnswers } from "../../../../../data/answers/answerLocalMirror";
 import type { ItemAnswer } from "../../../../../data/answers/answerTypes";
-import { isNoImageSubmission } from "../../../../../data/answers/noImageAnswer";
 import { reopenSubmittedAnswer } from "../../../../../data/answers/reopenAnswer";
 import {
   loadDistributionLogForRead,
@@ -65,6 +64,8 @@ import { useLabels, type Labels } from "../../../../../data/labels/useLabels";
 import { useGlobalMonth } from "../../../../../data/month/useGlobalMonth";
 import { formatStageLabel } from "../../../../../data/population/stageHelpers";
 import { certScanStatusFilterProps } from "./certScanColumn";
+import ResultsTracking from "./ResultsTracking/ResultsTracking";
+import { classifyAnswerState, type TrackingRow } from "../../../../../data/tracking/deadlineTracking";
 import type { StageAliasMappings } from "../../../../../data/population/populationConfig";
 import { useWorkspaceStageMappings } from "../../../../../hooks/useWorkspaceStageMappings";
 import { useTabActive } from "../../../../../app/tabActiveContext";
@@ -175,9 +176,11 @@ type Props = {
    * Combined with `useTabActive()` for the enclosing top-level tab.
    */
   active?: boolean;
+  /** Which page tab opens first. The landing tab is «المتابعة والمواعيد»; tests and deep links can open the table. */
+  initialTab?: "tracking" | "results";
 };
 
-export default function XrayInspectionResults({ directoryHandle, active = true }: Props) {
+export default function XrayInspectionResults({ directoryHandle, active = true, initialTab = "tracking" }: Props) {
   const tabActive = useTabActive();
   const visible = active && tabActive;
   // Read by the (long-lived) refresh subscription, which must not re-subscribe
@@ -191,7 +194,7 @@ export default function XrayInspectionResults({ directoryHandle, active = true }
   const username = session?.username ?? "";
   // usePermissions() already subscribes to permission-matrix changes internally,
   // so canSeeAll re-renders on change without a manual subscribe/forceUpdate block.
-  const { can, canMutate } = usePermissions();
+  const { can, canMutate, role } = usePermissions();
   const canSeeAll = can("view-all-entries");
   // P2-2 quality note: gated on the same capability tier as approval decisions
   // (approve-referrals/approve-replacements — supervisor+manager+admin only) and
@@ -216,6 +219,13 @@ export default function XrayInspectionResults({ directoryHandle, active = true }
   const [auditReferralRequests, setAuditReferralRequests] = useState<ReferralRequest[]>([]);
   const [auditReplacementRequests, setAuditReplacementRequests] = useState<ReplacementRequest[]>([]);
   const [viewMode, setViewMode] = useState<ResultsViewMode>("active");
+  // Page tabs: «المتابعة والمواعيد» is the landing tab for anyone who can see
+  // the whole team; the results table is the second tab. A viewer limited to
+  // their own rows has no team to track, so they only get the table.
+  const [pageTab, setPageTab] = useState<"tracking" | "results">(initialTab);
+  const activeTab = canSeeAll ? pageTab : "results";
+  // username → ISO time of their first assignment, from the derived quotas.
+  const [assignedAtByUser, setAssignedAtByUser] = useState<Record<string, string>>({});
   const [template, setTemplate] = useState<TemplateSchema | null>(null);
   // Every template actually referenced by a loaded answer, keyed by templateId
   // (active template included) -- not just the single active selection. A
@@ -276,6 +286,7 @@ export default function XrayInspectionResults({ directoryHandle, active = true }
     if (!selectedMonth) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- sync empty-state reset when no month folder is selected
       setRows([]);
+      setAssignedAtByUser({});
       setAuditEvents([]);
       setAuditReferralRequests([]);
       setAuditReplacementRequests([]);
@@ -425,6 +436,9 @@ export default function XrayInspectionResults({ directoryHandle, active = true }
         movement,
         answer: answerByKey.get(`${entry.xrayImageId}::${entry.assignedTo}`) ?? null,
       })));
+      setAssignedAtByUser(Object.fromEntries(
+        Object.entries(distribution?.quotas ?? {}).map(([user, quota]) => [user, quota.assignedAt]),
+      ));
       setAuditEvents(log.events);
       setAuditReferralRequests(referralLog.requests);
       setAuditReplacementRequests(replacementLog.requests);
@@ -560,6 +574,24 @@ export default function XrayInspectionResults({ directoryHandle, active = true }
       }),
     [auditEvents, auditReferralRequests, auditReplacementRequests, canSeeAll, username, viewMode]
   );
+
+  // The tracking tab counts the SELECTED MONTH's sample only: ad-hoc imports
+  // live in synthetic months of their own and would inflate its totals.
+  const trackingRows = useMemo<TrackingRow[]>(() => {
+    const out: TrackingRow[] = [];
+    for (const row of rows) {
+      if (isAdhocEntry(row.entry)) continue;
+      const rowTemplate = resolveTemplateForAnswer(row.answer, templatesById, template);
+      const state = classifyAnswerState(row.entry.status, row.answer, rowTemplate);
+      if (state === "replaced") continue;
+      out.push({
+        assignedTo: row.entry.assignedTo,
+        state,
+        doneAt: state === "pending" ? null : row.answer?.submittedAt ?? row.entry.lastEventAt ?? null,
+      });
+    }
+    return out;
+  }, [rows, template, templatesById]);
 
   const answerFields = useMemo(
     () => mergeTemplateFields(templatesById),
@@ -806,6 +838,29 @@ export default function XrayInspectionResults({ directoryHandle, active = true }
         </p>
       )}
 
+      {canSeeAll && (
+        <div className="trk-tabs" role="tablist" aria-label={L.tracking_tabs_aria}>
+          <button
+            type="button"
+            role="tab"
+            className="trk-tab"
+            aria-selected={activeTab === "tracking"}
+            onClick={() => setPageTab("tracking")}
+          >
+            {L.tracking_tab_title}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            className="trk-tab"
+            aria-selected={activeTab === "results"}
+            onClick={() => setPageTab("results")}
+          >
+            {L.tracking_tab_results}
+          </button>
+        </div>
+      )}
+
       {loadState === "loading" && <LoadingState label={L.xray_results_loading} />}
       {loadState === "error" && <ErrorState description={L.xray_results_error} />}
       {loadState === "ready" && months.length === 0 && (
@@ -815,14 +870,26 @@ export default function XrayInspectionResults({ directoryHandle, active = true }
           description="ابدأ بمعالجة شهر وسحب عينته من تبويب معالجة المجتمع."
         />
       )}
-      {loadState === "ready" && months.length > 0 && viewMode === "active" && rows.length === 0 && (
+      {activeTab === "tracking" && loadState === "ready" && months.length > 0 && selectedMonth && (
+        <ResultsTracking
+          key={selectedMonth}
+          monthFolder={selectedMonth}
+          rows={trackingRows}
+          assignedAtByUser={assignedAtByUser}
+          directoryHandle={directoryHandle}
+          canEditDeadline={role === "admin"}
+          username={username}
+        />
+      )}
+
+      {activeTab === "results" && loadState === "ready" && months.length > 0 && viewMode === "active" && rows.length === 0 && (
         <EmptyState title={L.xray_results_no_rows} />
       )}
-      {loadState === "ready" && months.length > 0 && viewMode !== "active" && auditRows.length === 0 && (
+      {activeTab === "results" && loadState === "ready" && months.length > 0 && viewMode !== "active" && auditRows.length === 0 && (
         <EmptyState title="لا توجد سجلات تاريخية لهذا النوع في الشهر المحدد" />
       )}
 
-      {loadState === "ready" && months.length > 0 && viewMode === "active" && (
+      {activeTab === "results" && loadState === "ready" && months.length > 0 && viewMode === "active" && (
         <DataTable<ResultRow>
           columns={columns}
           rows={rows}
@@ -871,7 +938,7 @@ export default function XrayInspectionResults({ directoryHandle, active = true }
           )}
         />
       )}
-      {loadState === "ready" && months.length > 0 && viewMode !== "active" && (
+      {activeTab === "results" && loadState === "ready" && months.length > 0 && viewMode !== "active" && (
         <DataTable<AuditRow>
           columns={auditColumns}
           rows={auditRows}
@@ -1289,11 +1356,10 @@ function getAnswerStatusLabel(
   template: TemplateSchema | null,
   labels: Labels
 ): string {
-  if (entryStatus === "completed") return labels.status_completed;
-  if (entryStatus === "replaced") return labels.status_replaced;
-  if (answer?.status === "submitted") {
-    return isNoImageSubmission(answer, template) ? labels.status_on_hold : labels.status_completed;
-  }
+  const state = classifyAnswerState(entryStatus, answer, template);
+  if (state === "completed") return labels.status_completed;
+  if (state === "replaced") return labels.status_replaced;
+  if (state === "hold") return labels.status_on_hold;
   return labels.status_pending;
 }
 

@@ -4176,6 +4176,18 @@ body.deck-fullscreen .slide-controls{display:none!important;}
   .ps-bar,.slide-controls{display:none!important;}
   .slide[data-print-off]{display:none!important;}
 }
+
+.te-bar{display:inline-flex;align-items:center;gap:6px;}
+.te-bar .btn{white-space:nowrap;}
+.te-bar .te-more{display:none;gap:6px;}
+body.te-on .te-bar .te-more{display:inline-flex;}
+body.te-on [data-edit]{outline:1.5px dashed rgba(201,162,74,.85);outline-offset:3px;cursor:text;}
+body.te-on [data-edit]:focus{outline:2px solid var(--gold,#c9a24a);background:rgba(201,162,74,.12);}
+.te-toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:9999;padding:8px 16px;border-radius:8px;background:#122;color:#fff;font-size:.85rem;box-shadow:0 4px 18px rgba(0,0,0,.35);}
+@media print{
+  .te-bar,.te-toast{display:none!important;}
+  body.te-on [data-edit]{outline:none!important;background:none!important;}
+}
 </style>
 </head>
 <body>
@@ -4200,6 +4212,13 @@ body.deck-fullscreen .slide-controls{display:none!important;}
       </div>
     </div>
     <div class="deck-toolbar-actions">
+      <span class="te-bar" id="te-bar" data-preset="">
+      <button class="btn" type="button" id="te-toggle" aria-pressed="false" title="تعديل النصوص الثابتة فقط — الأرقام والبيانات مقفلة">تحرير النص</button>
+      <span class="te-more">
+        <button class="btn" type="button" id="te-save">حفظ كإعداد مسبق</button>
+        <button class="btn" type="button" id="te-reset">استعادة الأصل</button>
+      </span>
+    </span>
       <span class="ps-bar" id="ps-bar" data-title="تضمين هذه الصفحة عند الطباعة">
       <button class="btn" type="button" id="ps-all">تحديد كل الصفحات</button>
       <button class="btn" type="button" id="ps-none">إلغاء تحديد الكل</button>
@@ -4251,7 +4270,7 @@ body.deck-fullscreen .slide-controls{display:none!important;}
       <div class="v2-cover-grid">
       <div class="v2-cover-hero">
         <div class="v2-cover-kicker"><span class="v2-cover-kicker-dot"></span>عرض تنفيذي · تقرير شهري</div>
-        <h1 class="v2-cover-title">تقرير ضمان جودة<br/>فحص الأشعة</h1>
+        <h1 class="v2-cover-title" data-edit="تقرير ضمان جودة&#10;فحص الأشعة">تقرير ضمان جودة<br/>فحص الأشعة</h1>
         <div class="v2-cover-rule"></div>
         <div class="v2-cover-lockup">
           <span class="v2-cover-lockup-label">فترة الدراسة (عيّنة شهر)</span>
@@ -4296,21 +4315,21 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     
   </div>
   <div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab">التحاليل المتقدمة</div>
+    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab" data-edit="المعجم">المعجم</div><div class="v2-rail-tab" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>
   </div>
   <div class="slide-inner">
     <div class="slide-eyebrow">
       <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span>
-      <span>المحتويات</span>
+      <span data-edit="المحتويات">المحتويات</span>
     </div>
-    <div class="slide-headline">محتويات التقرير</div>
-    <div class="slide-subhead">أقسام التقرير والهدف من كل قسم، ونطاق صفحاته.</div>
+    <div class="slide-headline" data-edit="محتويات التقرير">محتويات التقرير</div>
+    <div class="slide-subhead" data-edit="أقسام التقرير والهدف من كل قسم، ونطاق صفحاته.">أقسام التقرير والهدف من كل قسم، ونطاق صفحاته.</div>
     <div class="slide-body"><div class="v2-toc-grid"><div class="v2-toc-card blue">
         <div class="v2-toc-num">01</div>
         <div class="v2-toc-main">
-          <h4><span class="v2-toc-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M7 3h7l4 4v14H7V3z"/><path d="M14 3v4h4"/><path d="M9.5 13h5"/><path d="M9.5 16.5h5"/></svg></span>المعجم</h4>
-          <p>توحيد المصطلحات الرئيسية قبل قراءة النتائج.</p>
+          <h4><span class="v2-toc-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M7 3h7l4 4v14H7V3z"/><path d="M14 3v4h4"/><path d="M9.5 13h5"/><path d="M9.5 16.5h5"/></svg></span><span data-edit="المعجم">المعجم</span></h4>
+          <p data-edit="توحيد المصطلحات الرئيسية قبل قراءة النتائج.">توحيد المصطلحات الرئيسية قبل قراءة النتائج.</p>
         </div>
         <div class="v2-toc-side">
           <div class="v2-toc-figure">5</div>
@@ -4320,8 +4339,8 @@ body.deck-fullscreen .slide-controls{display:none!important;}
       </div><div class="v2-toc-card green">
         <div class="v2-toc-num">02</div>
         <div class="v2-toc-main">
-          <h4><span class="v2-toc-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span>القسم الأول — مجتمع الفحص</h4>
-          <p>التعريف بمجتمع الصور وتوزيعه بحسب المخاطر والمنافذ، وأساس سحب العيّنة.</p>
+          <h4><span class="v2-toc-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span><span data-edit="القسم الأول — مجتمع الفحص">القسم الأول — مجتمع الفحص</span></h4>
+          <p data-edit="التعريف بمجتمع الصور وتوزيعه بحسب المخاطر والمنافذ، وأساس سحب العيّنة.">التعريف بمجتمع الصور وتوزيعه بحسب المخاطر والمنافذ، وأساس سحب العيّنة.</p>
         </div>
         <div class="v2-toc-side">
           <div class="v2-toc-figure">0</div>
@@ -4331,8 +4350,8 @@ body.deck-fullscreen .slide-controls{display:none!important;}
       </div><div class="v2-toc-card coral">
         <div class="v2-toc-num">03</div>
         <div class="v2-toc-main">
-          <h4><span class="v2-toc-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-5"/><circle cx="12" cy="18" r="1.2"/></svg></span>القسم الثاني — نتائج فحص الجودة</h4>
-          <p>جودة الصور المفحوصة، ودقة قرارات الفحص بين الاشتباه والسليمة، لكل منفذ.</p>
+          <h4><span class="v2-toc-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-5"/><circle cx="12" cy="18" r="1.2"/></svg></span><span data-edit="القسم الثاني — نتائج فحص الجودة">القسم الثاني — نتائج فحص الجودة</span></h4>
+          <p data-edit="جودة الصور المفحوصة، ودقة قرارات الفحص بين الاشتباه والسليمة، لكل منفذ.">جودة الصور المفحوصة، ودقة قرارات الفحص بين الاشتباه والسليمة، لكل منفذ.</p>
         </div>
         <div class="v2-toc-side">
           <div class="v2-toc-figure">—</div>
@@ -4342,8 +4361,8 @@ body.deck-fullscreen .slide-controls{display:none!important;}
       </div><div class="v2-toc-card purple">
         <div class="v2-toc-num">04</div>
         <div class="v2-toc-main">
-          <h4><span class="v2-toc-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 4v15a1 1 0 0 0 1 1h14"/><path d="M9 16v-4"/><path d="M13 16V8"/><path d="M17 16v-6"/></svg></span>القسم الثالث — التحاليل المتقدمة</h4>
-          <p>تحاليل معمّقة تُكمل قراءة نتائج الجودة والدقة.</p>
+          <h4><span class="v2-toc-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 4v15a1 1 0 0 0 1 1h14"/><path d="M9 16v-4"/><path d="M13 16V8"/><path d="M17 16v-6"/></svg></span><span data-edit="القسم الثالث — التحاليل المتقدمة">القسم الثالث — التحاليل المتقدمة</span></h4>
+          <p data-edit="تحاليل معمّقة تُكمل قراءة نتائج الجودة والدقة.">تحاليل معمّقة تُكمل قراءة نتائج الجودة والدقة.</p>
         </div>
         <div class="v2-toc-side">
           <div class="v2-toc-figure">9</div>
@@ -4353,8 +4372,8 @@ body.deck-fullscreen .slide-controls{display:none!important;}
       </div><div class="v2-toc-card blue">
         <div class="v2-toc-num">05</div>
         <div class="v2-toc-main">
-          <h4><span class="v2-toc-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span>القسم الرابع — التغطية والمساءلة التشغيلية</h4>
-          <p>من وُزِّعت عليه العيّنة، ومدى إنجازه، وأسباب الاستبدال، وعدد إعادة التعيين.</p>
+          <h4><span class="v2-toc-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span><span data-edit="القسم الرابع — التغطية والمساءلة التشغيلية">القسم الرابع — التغطية والمساءلة التشغيلية</span></h4>
+          <p data-edit="من وُزِّعت عليه العيّنة، ومدى إنجازه، وأسباب الاستبدال، وعدد إعادة التعيين.">من وُزِّعت عليه العيّنة، ومدى إنجازه، وأسباب الاستبدال، وعدد إعادة التعيين.</p>
         </div>
         <div class="v2-toc-side">
           <div class="v2-toc-figure">3</div>
@@ -4374,16 +4393,16 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     
   </div>
   <div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    <div class="v2-rail-tab active">المعجم</div><div class="v2-rail-tab">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab">التحاليل المتقدمة</div>
+    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab active" data-edit="المعجم">المعجم</div><div class="v2-rail-tab" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>
   </div>
   <div class="slide-inner">
     <div class="slide-eyebrow">
       <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span>
-      <span>المعجم</span>
+      <span data-edit="المعجم">المعجم</span>
     </div>
-    <div class="slide-headline">المعجم — مستويات المخاطر</div>
-    <div class="slide-subhead">أربعة مستويات لكل منها تعريفه وغرضه؛ تصنيفٌ للحالات لا ترتيبٌ لخطورتها.</div>
+    <div class="slide-headline" data-edit="المعجم — مستويات المخاطر">المعجم — مستويات المخاطر</div>
+    <div class="slide-subhead" data-edit="أربعة مستويات لكل منها تعريفه وغرضه؛ تصنيفٌ للحالات لا ترتيبٌ لخطورتها.">أربعة مستويات لكل منها تعريفه وغرضه؛ تصنيفٌ للحالات لا ترتيبٌ لخطورتها.</div>
     <div class="slide-body"><div class="v2-level-grid"><div class="v2-level-card gold">
     <div class="v2-level-head">
       <span class="v2-level-icon"><svg viewBox="0 0 24 24" width="24" height="24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 3l7 3v5c0 4.2-2.9 7.4-7 8.5C7.9 18.4 5 15.2 5 11V6l7-3z"/></svg></span>
@@ -4461,16 +4480,16 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     
   </div>
   <div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    <div class="v2-rail-tab active">المعجم</div><div class="v2-rail-tab">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab">التحاليل المتقدمة</div>
+    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab active" data-edit="المعجم">المعجم</div><div class="v2-rail-tab" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>
   </div>
   <div class="slide-inner">
     <div class="slide-eyebrow">
       <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M7 3h7l4 4v14H7V3z"/><path d="M14 3v4h4"/><path d="M9.5 13h5"/><path d="M9.5 16.5h5"/></svg></span>
-      <span>المعجم</span>
+      <span data-edit="المعجم">المعجم</span>
     </div>
-    <div class="slide-headline">المعجم — المصطلحات الرئيسية</div>
-    <div class="slide-subhead">توحيد المصطلحات قبل قراءة النتائج.</div>
+    <div class="slide-headline" data-edit="المعجم — المصطلحات الرئيسية">المعجم — المصطلحات الرئيسية</div>
+    <div class="slide-subhead" data-edit="توحيد المصطلحات قبل قراءة النتائج.">توحيد المصطلحات قبل قراءة النتائج.</div>
     <div class="slide-body"><div class="v2-term-section"><div class="v2-term-band gold">
     <div class="v2-term-band-head">
       <span class="v2-term-band-chip"><svg viewBox="0 0 24 24" width="14" height="14" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg><b>مصطلحات المجتمع والعيّنة</b></span>
@@ -4526,8 +4545,8 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     
   </div>
   <div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab active">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab">التحاليل المتقدمة</div>
+    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab" data-edit="المعجم">المعجم</div><div class="v2-rail-tab active" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>
   </div>
   <div class="v2-sep-bg" aria-hidden="true"></div>
   <div class="v2-sep-pattern" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" width="320" height="180"><rect x="112" y="107" width="17" height="17" rx="2" transform="rotate(39 120.5 115.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="40" y="84" width="17" height="17" rx="2" transform="rotate(51 48.5 92.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="119" y="132" width="13" height="13" rx="2" transform="rotate(59 125.5 138.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="318" y="44" width="22" height="22" rx="2" transform="rotate(87 329 55)" fill="#f4b400" fill-opacity="0.22"/><rect x="253" y="76" width="23" height="23" rx="2" transform="rotate(47 264.5 87.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="39" y="160" width="18" height="18" rx="2" transform="rotate(41 48 169)" fill="#f4b400" fill-opacity="0.22"/><rect x="295" y="53" width="24" height="24" rx="2" transform="rotate(16 307 65)" fill="#f4b400" fill-opacity="0.22"/><rect x="154" y="46" width="30" height="30" rx="2" transform="rotate(47 169 61)" fill="#f4b400" fill-opacity="0.22"/><rect x="145" y="176" width="12" height="12" rx="2" transform="rotate(53 151 182)" fill="#f4b400" fill-opacity="0.22"/><rect x="309" y="26" width="18" height="18" rx="2" transform="rotate(51 318 35)" fill="#f4b400" fill-opacity="0.22"/><rect x="277" y="163" width="30" height="30" rx="2" transform="rotate(74 292 178)" fill="#f4b400" fill-opacity="0.22"/><rect x="212" y="165" width="11" height="11" rx="2" transform="rotate(78 217.5 170.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="243" y="64" width="26" height="26" rx="2" transform="rotate(86 256 77)" fill="#f4b400" fill-opacity="0.22"/><rect x="103" y="58" width="10" height="10" rx="2" transform="rotate(33 108 63)" fill="#f4b400" fill-opacity="0.22"/><rect x="125" y="163" width="28" height="28" rx="2" transform="rotate(53 139 177)" fill="#f4b400" fill-opacity="0.22"/><rect x="304" y="23" width="16" height="16" rx="2" transform="rotate(85 312 31)" fill="#f4b400" fill-opacity="0.22"/><rect x="84" y="97" width="26" height="26" rx="2" transform="rotate(77 97 110)" fill="#f4b400" fill-opacity="0.22"/><rect x="136" y="94" width="30" height="30" rx="2" transform="rotate(11 151 109)" fill="#f4b400" fill-opacity="0.22"/></svg></div>
@@ -4550,9 +4569,9 @@ body.deck-fullscreen .slide-controls{display:none!important;}
       <div class="v2-sep-lockup">
         <span class="v2-sep-badge"><svg viewBox="0 0 24 24" width="30" height="30" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span>
         <div class="v2-sep-eyebrow">القسم 1</div>
-        <h2>مجتمع الفحص</h2>
+        <h2 data-edit="مجتمع الفحص">مجتمع الفحص</h2>
         <div class="v2-sep-rule"></div>
-        <p>التعريف بمجتمع الصور لهذا الشهر: حجمه، توزيعه على مستويات المخاطر، وتوزيعه على المنافذ البرية والبحرية، وهو الأساس الذي سُحبت منه العيّنة.</p>
+        <p data-edit="التعريف بمجتمع الصور لهذا الشهر: حجمه، توزيعه على مستويات المخاطر، وتوزيعه على المنافذ البرية والبحرية، وهو الأساس الذي سُحبت منه العيّنة.">التعريف بمجتمع الصور لهذا الشهر: حجمه، توزيعه على مستويات المخاطر، وتوزيعه على المنافذ البرية والبحرية، وهو الأساس الذي سُحبت منه العيّنة.</p>
       </div>
     </div>
   </div>
@@ -4567,16 +4586,16 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     
   </div>
   <div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab active">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab">التحاليل المتقدمة</div>
+    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab" data-edit="المعجم">المعجم</div><div class="v2-rail-tab active" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>
   </div>
   <div class="slide-inner">
     <div class="slide-eyebrow">
       <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-5"/><circle cx="12" cy="18" r="1.2"/></svg></span>
       <span>القسم 1 — مجتمع الفحص</span>
     </div>
-    <div class="slide-headline">مجتمع الصور بناءً على المخاطر</div>
-    <div class="slide-subhead">توزيع المجتمع بعد المعالجة على مستويات المخاطر الأربعة، وحصة كل مستوى من العيّنة.</div>
+    <div class="slide-headline" data-edit="مجتمع الصور بناءً على المخاطر">مجتمع الصور بناءً على المخاطر</div>
+    <div class="slide-subhead" data-edit="توزيع المجتمع بعد المعالجة على مستويات المخاطر الأربعة، وحصة كل مستوى من العيّنة.">توزيع المجتمع بعد المعالجة على مستويات المخاطر الأربعة، وحصة كل مستوى من العيّنة.</div>
     <div class="slide-body"><div class="v2-risk-layout">
     <div class="v2-prop">
     <div class="v2-prop-bar"><div class="v2-prop-seg gold" style="width:50.000%"><span class="v2-prop-seg-pct">50%</span></div><div class="v2-prop-seg blue" style="width:50.000%"><span class="v2-prop-seg-pct">50%</span></div></div>
@@ -4641,8 +4660,8 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     
   </div>
   <div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab active">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab">التحاليل المتقدمة</div>
+    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab" data-edit="المعجم">المعجم</div><div class="v2-rail-tab active" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>
   </div>
   <div class="slide-inner">
     <div class="slide-eyebrow">
@@ -4650,7 +4669,7 @@ body.deck-fullscreen .slide-controls{display:none!important;}
       <span>القسم 1 — مجتمع الفحص</span>
     </div>
     <div class="slide-headline">مجتمع صور الفحص لشهر مايو 2026</div>
-    <div class="slide-subhead">منهجية التصنيف: تُصنَّف الصورة اشتباهًا إذا كانت نتيجة المستوى الأول أو الثاني اشتباهًا، وفي غير ذلك تُصنَّف سليمة.</div>
+    <div class="slide-subhead" data-edit="منهجية التصنيف: تُصنَّف الصورة اشتباهًا إذا كانت نتيجة المستوى الأول أو الثاني اشتباهًا، وفي غير ذلك تُصنَّف سليمة.">منهجية التصنيف: تُصنَّف الصورة اشتباهًا إذا كانت نتيجة المستوى الأول أو الثاني اشتباهًا، وفي غير ذلك تُصنَّف سليمة.</div>
     <div class="slide-body"><div class="v2-port-split"><div class="v2-port-col land">
     <div class="v2-port-col-head">
       <span class="v2-port-col-icon"><span style="display:inline-flex;transform:translate(2.1%,-8.5%)"><svg viewBox="0 0 24 24" width="26" height="26" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M2 16V8a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v8"/><path d="M14 11h4l3 3v2h-2.2"/><circle cx="7" cy="17.5" r="1.7"/><circle cx="16.8" cy="17.5" r="1.7"/><path d="M8.7 17.5h6.4"/><path d="M2 16h3.3"/></svg></span></span>
@@ -4684,8 +4703,8 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     
   </div>
   <div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab active">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab">التحاليل المتقدمة</div>
+    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab" data-edit="المعجم">المعجم</div><div class="v2-rail-tab active" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>
   </div>
   <div class="slide-inner">
     <div class="slide-eyebrow">
@@ -4693,7 +4712,7 @@ body.deck-fullscreen .slide-controls{display:none!important;}
       <span>القسم 1 — مجتمع الفحص</span>
     </div>
     <div class="slide-headline">عيّنة الفحص المسحوبة لشهر مايو 2026</div>
-    <div class="slide-subhead">الصفحة نفسها بأرقام العيّنة: كل رقم عيّنة وتحته أساسه من المجتمع، مع نسبة التغطية.</div>
+    <div class="slide-subhead" data-edit="الصفحة نفسها بأرقام العيّنة: كل رقم عيّنة وتحته أساسه من المجتمع، مع نسبة التغطية.">الصفحة نفسها بأرقام العيّنة: كل رقم عيّنة وتحته أساسه من المجتمع، مع نسبة التغطية.</div>
     <div class="slide-body"><div class="v2-port-split"><div class="v2-port-col land sample-mode">
     <div class="v2-port-col-head">
       <span class="v2-port-col-icon"><span style="display:inline-flex;transform:translate(2.1%,-8.5%)"><svg viewBox="0 0 24 24" width="26" height="26" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M2 16V8a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v8"/><path d="M14 11h4l3 3v2h-2.2"/><circle cx="7" cy="17.5" r="1.7"/><circle cx="16.8" cy="17.5" r="1.7"/><path d="M8.7 17.5h6.4"/><path d="M2 16h3.3"/></svg></span></span>
@@ -4727,8 +4746,8 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     
   </div>
   <div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab active">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab">التحاليل المتقدمة</div>
+    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab" data-edit="المعجم">المعجم</div><div class="v2-rail-tab active" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>
   </div>
   <div class="slide-inner">
     <div class="slide-eyebrow">
@@ -4770,8 +4789,8 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     
   </div>
   <div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab active">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab">التحاليل المتقدمة</div>
+    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab" data-edit="المعجم">المعجم</div><div class="v2-rail-tab active" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>
   </div>
   <div class="slide-inner">
     <div class="slide-eyebrow">
@@ -4815,8 +4834,8 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     
   </div>
   <div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab">مجتمع الفحص</div><div class="v2-rail-tab active">نتائج فحص الجودة</div><div class="v2-rail-tab">التحاليل المتقدمة</div>
+    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab" data-edit="المعجم">المعجم</div><div class="v2-rail-tab" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab active" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>
   </div>
   <div class="v2-sep-bg" aria-hidden="true"></div>
   <div class="v2-sep-pattern" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" width="320" height="180"><rect x="294" y="103" width="15" height="15" rx="2" transform="rotate(1 301.5 110.5)" fill="#32c5d2" fill-opacity="0.22"/><rect x="197" y="77" width="17" height="17" rx="2" transform="rotate(45 205.5 85.5)" fill="#32c5d2" fill-opacity="0.22"/><rect x="25" y="21" width="12" height="12" rx="2" transform="rotate(54 31 27)" fill="#32c5d2" fill-opacity="0.22"/><rect x="5" y="25" width="21" height="21" rx="2" transform="rotate(48 15.5 35.5)" fill="#32c5d2" fill-opacity="0.22"/><rect x="50" y="25" width="15" height="15" rx="2" transform="rotate(38 57.5 32.5)" fill="#32c5d2" fill-opacity="0.22"/><rect x="307" y="78" width="28" height="28" rx="2" transform="rotate(1 321 92)" fill="#32c5d2" fill-opacity="0.22"/><rect x="84" y="9" width="22" height="22" rx="2" transform="rotate(73 95 20)" fill="#32c5d2" fill-opacity="0.22"/><rect x="125" y="60" width="12" height="12" rx="2" transform="rotate(47 131 66)" fill="#32c5d2" fill-opacity="0.22"/><rect x="279" y="14" width="13" height="13" rx="2" transform="rotate(19 285.5 20.5)" fill="#32c5d2" fill-opacity="0.22"/><rect x="219" y="11" width="25" height="25" rx="2" transform="rotate(16 231.5 23.5)" fill="#32c5d2" fill-opacity="0.22"/><rect x="211" y="35" width="12" height="12" rx="2" transform="rotate(78 217 41)" fill="#32c5d2" fill-opacity="0.22"/><rect x="229" y="125" width="29" height="29" rx="2" transform="rotate(38 243.5 139.5)" fill="#32c5d2" fill-opacity="0.22"/><rect x="85" y="3" width="28" height="28" rx="2" transform="rotate(82 99 17)" fill="#32c5d2" fill-opacity="0.22"/><rect x="26" y="89" width="21" height="21" rx="2" transform="rotate(30 36.5 99.5)" fill="#32c5d2" fill-opacity="0.22"/><rect x="268" y="96" width="29" height="29" rx="2" transform="rotate(13 282.5 110.5)" fill="#32c5d2" fill-opacity="0.22"/><rect x="267" y="73" width="14" height="14" rx="2" transform="rotate(55 274 80)" fill="#32c5d2" fill-opacity="0.22"/><rect x="73" y="131" width="8" height="8" rx="2" transform="rotate(39 77 135)" fill="#32c5d2" fill-opacity="0.22"/><rect x="163" y="131" width="12" height="12" rx="2" transform="rotate(44 169 137)" fill="#32c5d2" fill-opacity="0.22"/></svg></div>
@@ -4839,9 +4858,9 @@ body.deck-fullscreen .slide-controls{display:none!important;}
       <div class="v2-sep-lockup">
         <span class="v2-sep-badge"><svg viewBox="0 0 24 24" width="30" height="30" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-5"/><circle cx="12" cy="18" r="1.2"/></svg></span>
         <div class="v2-sep-eyebrow">القسم 2</div>
-        <h2>نتائج فحص الجودة</h2>
+        <h2 data-edit="نتائج فحص الجودة">نتائج فحص الجودة</h2>
         <div class="v2-sep-rule"></div>
-        <p>جودة الصور المفحوصة في كل منفذ (التوفّر والتحديد والجودة المقبولة)، ودقة قرارات الفحص بين الاشتباه والسليمة.</p>
+        <p data-edit="جودة الصور المفحوصة في كل منفذ (التوفّر والتحديد والجودة المقبولة)، ودقة قرارات الفحص بين الاشتباه والسليمة.">جودة الصور المفحوصة في كل منفذ (التوفّر والتحديد والجودة المقبولة)، ودقة قرارات الفحص بين الاشتباه والسليمة.</p>
       </div>
     </div>
   </div>
@@ -4856,16 +4875,16 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     
   </div>
   <div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab">مجتمع الفحص</div><div class="v2-rail-tab active">نتائج فحص الجودة</div><div class="v2-rail-tab">التحاليل المتقدمة</div>
+    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab" data-edit="المعجم">المعجم</div><div class="v2-rail-tab" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab active" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>
   </div>
   <div class="slide-inner">
     <div class="slide-eyebrow">
       <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3"/><path d="M16 4h3a1 1 0 0 1 1 1v3"/><path d="M20 16v3a1 1 0 0 1-1 1h-3"/><path d="M8 20H5a1 1 0 0 1-1-1v-3"/><path d="M4 12h16"/></svg></span>
       <span>القسم 2 — نتائج فحص الجودة</span>
     </div>
-    <div class="slide-headline">نتائج جودة الصور في المنافذ</div>
-    <div class="slide-subhead">توزيع مستويات جودة الصورة (عالي / متوسط / منخفض) ونسبة وجود التحديد في كل منفذ.</div>
+    <div class="slide-headline" data-edit="نتائج جودة الصور في المنافذ">نتائج جودة الصور في المنافذ</div>
+    <div class="slide-subhead" data-edit="توزيع مستويات جودة الصورة (عالي / متوسط / منخفض) ونسبة وجود التحديد في كل منفذ.">توزيع مستويات جودة الصورة (عالي / متوسط / منخفض) ونسبة وجود التحديد في كل منفذ.</div>
     <div class="slide-body"><div class="v2-port-split"><div class="v2-port-col land">
     <div class="v2-port-col-head">
       <span class="v2-port-col-icon"><span style="display:inline-flex;transform:translate(2.1%,-8.5%)"><svg viewBox="0 0 24 24" width="26" height="26" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M2 16V8a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v8"/><path d="M14 11h4l3 3v2h-2.2"/><circle cx="7" cy="17.5" r="1.7"/><circle cx="16.8" cy="17.5" r="1.7"/><path d="M8.7 17.5h6.4"/><path d="M2 16h3.3"/></svg></span></span>
@@ -4899,16 +4918,16 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     
   </div>
   <div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab">مجتمع الفحص</div><div class="v2-rail-tab active">نتائج فحص الجودة</div><div class="v2-rail-tab">التحاليل المتقدمة</div>
+    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab" data-edit="المعجم">المعجم</div><div class="v2-rail-tab" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab active" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>
   </div>
   <div class="slide-inner">
     <div class="slide-eyebrow">
       <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-5"/><circle cx="12" cy="18" r="1.2"/></svg></span>
       <span>القسم 2 — نتائج فحص الجودة</span>
     </div>
-    <div class="slide-headline">نتائج دقة نتائج المنافذ (اشتباه / سليمة)</div>
-    <div class="slide-subhead">الدقة العامة، ودقة اكتشاف الاشتباه، ودقة تأكيد السليمة.</div>
+    <div class="slide-headline" data-edit="نتائج دقة نتائج المنافذ (اشتباه / سليمة)">نتائج دقة نتائج المنافذ (اشتباه / سليمة)</div>
+    <div class="slide-subhead" data-edit="الدقة العامة، ودقة اكتشاف الاشتباه، ودقة تأكيد السليمة.">الدقة العامة، ودقة اكتشاف الاشتباه، ودقة تأكيد السليمة.</div>
     <div class="slide-body"><div class="v2-port-split"><div class="v2-port-col land">
     <div class="v2-port-col-head">
       <span class="v2-port-col-icon"><span style="display:inline-flex;transform:translate(2.1%,-8.5%)"><svg viewBox="0 0 24 24" width="26" height="26" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M2 16V8a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v8"/><path d="M14 11h4l3 3v2h-2.2"/><circle cx="7" cy="17.5" r="1.7"/><circle cx="16.8" cy="17.5" r="1.7"/><path d="M8.7 17.5h6.4"/><path d="M2 16h3.3"/></svg></span></span>
@@ -4942,8 +4961,8 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     
   </div>
   <div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab active">التحاليل المتقدمة</div>
+    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab" data-edit="المعجم">المعجم</div><div class="v2-rail-tab" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab active" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>
   </div>
   <div class="v2-sep-bg" aria-hidden="true"></div>
   <div class="v2-sep-pattern" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" width="320" height="180"><rect x="86" y="118" width="22" height="22" rx="2" transform="rotate(37 97 129)" fill="#f4b400" fill-opacity="0.22"/><rect x="48" y="174" width="18" height="18" rx="2" transform="rotate(40 57 183)" fill="#f4b400" fill-opacity="0.22"/><rect x="51" y="122" width="15" height="15" rx="2" transform="rotate(21 58.5 129.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="215" y="112" width="11" height="11" rx="2" transform="rotate(65 220.5 117.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="156" y="167" width="18" height="18" rx="2" transform="rotate(23 165 176)" fill="#f4b400" fill-opacity="0.22"/><rect x="269" y="106" width="24" height="24" rx="2" transform="rotate(7 281 118)" fill="#f4b400" fill-opacity="0.22"/><rect x="175" y="125" width="10" height="10" rx="2" transform="rotate(39 180 130)" fill="#f4b400" fill-opacity="0.22"/><rect x="265" y="119" width="14" height="14" rx="2" transform="rotate(36 272 126)" fill="#f4b400" fill-opacity="0.22"/><rect x="291" y="99" width="21" height="21" rx="2" transform="rotate(69 301.5 109.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="142" y="52" width="26" height="26" rx="2" transform="rotate(0 155 65)" fill="#f4b400" fill-opacity="0.22"/><rect x="81" y="179" width="14" height="14" rx="2" transform="rotate(12 88 186)" fill="#f4b400" fill-opacity="0.22"/><rect x="277" y="45" width="24" height="24" rx="2" transform="rotate(72 289 57)" fill="#f4b400" fill-opacity="0.22"/><rect x="101" y="165" width="28" height="28" rx="2" transform="rotate(27 115 179)" fill="#f4b400" fill-opacity="0.22"/><rect x="259" y="105" width="19" height="19" rx="2" transform="rotate(82 268.5 114.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="224" y="3" width="25" height="25" rx="2" transform="rotate(66 236.5 15.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="47" y="126" width="25" height="25" rx="2" transform="rotate(38 59.5 138.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="100" y="163" width="29" height="29" rx="2" transform="rotate(27 114.5 177.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="183" y="109" width="29" height="29" rx="2" transform="rotate(78 197.5 123.5)" fill="#f4b400" fill-opacity="0.22"/></svg></div>
@@ -4966,9 +4985,9 @@ body.deck-fullscreen .slide-controls{display:none!important;}
       <div class="v2-sep-lockup">
         <span class="v2-sep-badge"><svg viewBox="0 0 24 24" width="30" height="30" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 4v15a1 1 0 0 0 1 1h14"/><path d="M9 16v-4"/><path d="M13 16V8"/><path d="M17 16v-6"/></svg></span>
         <div class="v2-sep-eyebrow">القسم 3</div>
-        <h2>التحاليل المتقدمة</h2>
+        <h2 data-edit="التحاليل المتقدمة">التحاليل المتقدمة</h2>
         <div class="v2-sep-rule"></div>
-        <p>قراءة أعمق للأرقام: علاقة حجم العمل بالدقة، ودقة كل مستوى فحص، وتوافق النتائج بين المصادر، وأثر التحديد وجودة الصورة على الدقة.</p>
+        <p data-edit="قراءة أعمق للأرقام: علاقة حجم العمل بالدقة، ودقة كل مستوى فحص، وتوافق النتائج بين المصادر، وأثر التحديد وجودة الصورة على الدقة.">قراءة أعمق للأرقام: علاقة حجم العمل بالدقة، ودقة كل مستوى فحص، وتوافق النتائج بين المصادر، وأثر التحديد وجودة الصورة على الدقة.</p>
       </div>
     </div>
   </div>
@@ -4983,16 +5002,16 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     
   </div>
   <div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab active">التحاليل المتقدمة</div>
+    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab" data-edit="المعجم">المعجم</div><div class="v2-rail-tab" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab active" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>
   </div>
   <div class="slide-inner">
     <div class="slide-eyebrow">
       <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 4v15a1 1 0 0 0 1 1h14"/><path d="M9 16v-4"/><path d="M13 16V8"/><path d="M17 16v-6"/></svg></span>
       <span>القسم 3 — التحاليل المتقدمة</span>
     </div>
-    <div class="slide-headline">الاتجاه اليومي للدقة</div>
-    <div class="slide-subhead">دقة القرارات اليومية عبر أيام الشهر، مع نطاقات ضبط إحصائية لكل من دقة السليمة ودقة الاشتباه.</div>
+    <div class="slide-headline" data-edit="الاتجاه اليومي للدقة">الاتجاه اليومي للدقة</div>
+    <div class="slide-subhead" data-edit="دقة القرارات اليومية عبر أيام الشهر، مع نطاقات ضبط إحصائية لكل من دقة السليمة ودقة الاشتباه.">دقة القرارات اليومية عبر أيام الشهر، مع نطاقات ضبط إحصائية لكل من دقة السليمة ودقة الاشتباه.</div>
     <div class="slide-body"><div class="v2-dt-layout">
           <div class="v2-dt-share">
     <div class="v2-dt-share-figure"><b><span class="insuff">—</span></b><span>نسبة القرارات المؤرخة</span></div>
@@ -5017,16 +5036,16 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     
   </div>
   <div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab active">التحاليل المتقدمة</div>
+    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab" data-edit="المعجم">المعجم</div><div class="v2-rail-tab" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab active" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>
   </div>
   <div class="slide-inner">
     <div class="slide-eyebrow">
       <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l9 16H3l9-16z"/><path d="M12 10v4"/><path d="M12 17.5v.5"/></svg></span>
       <span>القسم 3 — التحاليل المتقدمة</span>
     </div>
-    <div class="slide-headline">مصفوفة نتائج الفحص</div>
-    <div class="slide-subhead">أربع نتائج فحص محتملة لكل قرار مستوى، إجمالاً وحسب المنفذ — قرار فريق الفحص مقابل قرار المراجع.</div>
+    <div class="slide-headline" data-edit="مصفوفة نتائج الفحص">مصفوفة نتائج الفحص</div>
+    <div class="slide-subhead" data-edit="أربع نتائج فحص محتملة لكل قرار مستوى، إجمالاً وحسب المنفذ — قرار فريق الفحص مقابل قرار المراجع.">أربع نتائج فحص محتملة لكل قرار مستوى، إجمالاً وحسب المنفذ — قرار فريق الفحص مقابل قرار المراجع.</div>
     <div class="slide-body"><div class="v2-om-layout">
     <div class="v2-om-top">
       <div class="v2-om-matrix">
@@ -5064,7 +5083,7 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     </div>
     <div class="v2-om-ports">
     <div class="v2-lg-port-card compact om-ports-card">
-    <div class="v2-lg-table-card-title">حسب المنفذ</div>
+    <div class="v2-lg-table-card-title" data-edit="حسب المنفذ">حسب المنفذ</div>
     <table class="deck-table">
       <thead><tr><th>المنفذ</th><th>العيّنة</th><th>اشتباه فائت</th><th>نسبة الاشتباه الفائت</th><th>الدقة الإجمالية</th></tr></thead>
       <tbody><tr><td colspan="5"><span class="insuff">لا توجد بيانات منافذ لهذا الشهر.</span></td></tr></tbody>
@@ -5085,16 +5104,16 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     
   </div>
   <div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab active">التحاليل المتقدمة</div>
+    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab" data-edit="المعجم">المعجم</div><div class="v2-rail-tab" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab active" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>
   </div>
   <div class="slide-inner">
     <div class="slide-eyebrow">
       <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span>
       <span>القسم 3 — التحاليل المتقدمة</span>
     </div>
-    <div class="slide-headline">دقة إجابات المستوى الأول والثاني</div>
-    <div class="slide-subhead">مقارنة قرار كل مستوى بنتيجة المراجع، لكل منفذ.</div>
+    <div class="slide-headline" data-edit="دقة إجابات المستوى الأول والثاني">دقة إجابات المستوى الأول والثاني</div>
+    <div class="slide-subhead" data-edit="مقارنة قرار كل مستوى بنتيجة المراجع، لكل منفذ.">مقارنة قرار كل مستوى بنتيجة المراجع، لكل منفذ.</div>
     <div class="slide-body"><div class="v2-lvlacc-empty">
     <span class="v2-lvlacc-empty-icon"><svg viewBox="0 0 24 24" width="26" height="26" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span>
     <b>لا توجد إجابات مُعتمدة بعد لقياس الدقة</b>
@@ -5112,16 +5131,16 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     
   </div>
   <div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab active">التحاليل المتقدمة</div>
+    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab" data-edit="المعجم">المعجم</div><div class="v2-rail-tab" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab active" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>
   </div>
   <div class="slide-inner">
     <div class="slide-eyebrow">
       <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3"/><path d="M16 4h3a1 1 0 0 1 1 1v3"/><path d="M20 16v3a1 1 0 0 1-1 1h-3"/><path d="M8 20H5a1 1 0 0 1-1-1v-3"/><path d="M4 12h16"/></svg></span>
       <span>القسم 3 — التحاليل المتقدمة</span>
     </div>
-    <div class="slide-headline">توافق النتائج بين المستويات والمصادر</div>
-    <div class="slide-subhead">نسبة تطابق النتيجة بين كل مصدرين، ومقارنة كل مصدر بنتيجة المراجع.</div>
+    <div class="slide-headline" data-edit="توافق النتائج بين المستويات والمصادر">توافق النتائج بين المستويات والمصادر</div>
+    <div class="slide-subhead" data-edit="نسبة تطابق النتيجة بين كل مصدرين، ومقارنة كل مصدر بنتيجة المراجع.">نسبة تطابق النتيجة بين كل مصدرين، ومقارنة كل مصدر بنتيجة المراجع.</div>
     <div class="slide-body"><div class="s3sa">
     <div class="v2-port-split s3sa-split">
       <div class="v2-port-col summary s3sa-col">
@@ -5183,16 +5202,16 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     
   </div>
   <div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab active">التحاليل المتقدمة</div>
+    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab" data-edit="المعجم">المعجم</div><div class="v2-rail-tab" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab active" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>
   </div>
   <div class="slide-inner">
     <div class="slide-eyebrow">
       <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 3l7 3v5c0 4.2-2.9 7.4-7 8.5C7.9 18.4 5 15.2 5 11V6l7-3z"/></svg></span>
       <span>القسم 3 — التحاليل المتقدمة</span>
     </div>
-    <div class="slide-headline">توافق نتائج الفحص مع محرك المخاطر</div>
-    <div class="slide-subhead">كيف تقارن قرارات فحص الأشعة باستهداف محرك مخاطر الجمارك، وماذا وجد المراجع عند الاختلاف.</div>
+    <div class="slide-headline" data-edit="توافق نتائج الفحص مع محرك المخاطر">توافق نتائج الفحص مع محرك المخاطر</div>
+    <div class="slide-subhead" data-edit="كيف تقارن قرارات فحص الأشعة باستهداف محرك مخاطر الجمارك، وماذا وجد المراجع عند الاختلاف.">كيف تقارن قرارات فحص الأشعة باستهداف محرك مخاطر الجمارك، وماذا وجد المراجع عند الاختلاف.</div>
     <div class="slide-body"><div class="v2-re-layout">
     <div class="v2-re-empty">
     <span class="v2-re-empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 3l7 3v5c0 4.2-2.9 7.4-7 8.5C7.9 18.4 5 15.2 5 11V6l7-3z"/></svg></span>
@@ -5222,16 +5241,16 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     
   </div>
   <div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab active">التحاليل المتقدمة</div>
+    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab" data-edit="المعجم">المعجم</div><div class="v2-rail-tab" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab active" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>
   </div>
   <div class="slide-inner">
     <div class="slide-eyebrow">
       <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 21V8l7-4 7 4v13"/><path d="M5 21h14"/><path d="M9 21v-6h6v6"/></svg></span>
       <span>القسم 3 — التحاليل المتقدمة</span>
     </div>
-    <div class="slide-headline">توافق المستويات حسب المنفذ</div>
-    <div class="slide-subhead">نسبة اتفاق المستوى الأول والثاني على النتيجة في كل منفذ، ومطابقة كل مستوى لنتيجة المراجع.</div>
+    <div class="slide-headline" data-edit="توافق المستويات حسب المنفذ">توافق المستويات حسب المنفذ</div>
+    <div class="slide-subhead" data-edit="نسبة اتفاق المستوى الأول والثاني على النتيجة في كل منفذ، ومطابقة كل مستوى لنتيجة المراجع.">نسبة اتفاق المستوى الأول والثاني على النتيجة في كل منفذ، ومطابقة كل مستوى لنتيجة المراجع.</div>
     <div class="slide-body"><div class="v2-agree-wrap">
     <div class="v2-port-split v2-agree-split"><div class="v2-port-col land green">
     <div class="v2-port-col-head">
@@ -5268,16 +5287,16 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     
   </div>
   <div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab active">التحاليل المتقدمة</div>
+    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab" data-edit="المعجم">المعجم</div><div class="v2-rail-tab" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab active" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>
   </div>
   <div class="slide-inner">
     <div class="slide-eyebrow">
       <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></svg></span>
       <span>القسم 3 — التحاليل المتقدمة</span>
     </div>
-    <div class="slide-headline">أثر وجود التحديد على الدقة</div>
-    <div class="slide-subhead">مقارنة دقة القرارات في الصور التي يوجد بها تحديد مقابل التي لا يوجد بها.</div>
+    <div class="slide-headline" data-edit="أثر وجود التحديد على الدقة">أثر وجود التحديد على الدقة</div>
+    <div class="slide-subhead" data-edit="مقارنة دقة القرارات في الصور التي يوجد بها تحديد مقابل التي لا يوجد بها.">مقارنة دقة القرارات في الصور التي يوجد بها تحديد مقابل التي لا يوجد بها.</div>
     <div class="slide-body"><div class="v2-risk-layout v2-mark-layout">
     <div class="v2-mark-empty">
     <span class="v2-mark-empty-icon"><svg viewBox="0 0 24 24" width="24" height="24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></svg></span>
@@ -5306,16 +5325,16 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     
   </div>
   <div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab active">التحاليل المتقدمة</div>
+    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab" data-edit="المعجم">المعجم</div><div class="v2-rail-tab" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab active" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>
   </div>
   <div class="slide-inner">
     <div class="slide-eyebrow">
       <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-5"/><circle cx="12" cy="18" r="1.2"/></svg></span>
       <span>القسم 3 — التحاليل المتقدمة</span>
     </div>
-    <div class="slide-headline">أثر جودة الصورة على الدقة</div>
-    <div class="slide-subhead">دقة القرارات حسب مستوى جودة الصورة: عالي، متوسط، منخفض.</div>
+    <div class="slide-headline" data-edit="أثر جودة الصورة على الدقة">أثر جودة الصورة على الدقة</div>
+    <div class="slide-subhead" data-edit="دقة القرارات حسب مستوى جودة الصورة: عالي، متوسط، منخفض.">دقة القرارات حسب مستوى جودة الصورة: عالي، متوسط، منخفض.</div>
     <div class="slide-body"><div class="v2-risk-layout v2-qi">
     <div class="v2-qi-empty">
     <span class="v2-qi-empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l9 16H3l9-16z"/><path d="M12 10v4"/><path d="M12 17.5v.5"/></svg></span>
@@ -5343,8 +5362,8 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     
   </div>
   <div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab">التحاليل المتقدمة</div>
+    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab" data-edit="المعجم">المعجم</div><div class="v2-rail-tab" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>
   </div>
   <div class="v2-sep-bg" aria-hidden="true"></div>
   <div class="v2-sep-pattern" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" width="320" height="180"><rect x="112" y="72" width="25" height="25" rx="2" transform="rotate(26 124.5 84.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="189" y="112" width="12" height="12" rx="2" transform="rotate(12 195 118)" fill="#f4b400" fill-opacity="0.22"/><rect x="55" y="135" width="10" height="10" rx="2" transform="rotate(12 60 140)" fill="#f4b400" fill-opacity="0.22"/><rect x="319" y="140" width="25" height="25" rx="2" transform="rotate(59 331.5 152.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="234" y="125" width="21" height="21" rx="2" transform="rotate(67 244.5 135.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="213" y="143" width="28" height="28" rx="2" transform="rotate(78 227 157)" fill="#f4b400" fill-opacity="0.22"/><rect x="309" y="84" width="21" height="21" rx="2" transform="rotate(18 319.5 94.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="55" y="48" width="16" height="16" rx="2" transform="rotate(18 63 56)" fill="#f4b400" fill-opacity="0.22"/><rect x="270" y="119" width="10" height="10" rx="2" transform="rotate(12 275 124)" fill="#f4b400" fill-opacity="0.22"/><rect x="68" y="73" width="11" height="11" rx="2" transform="rotate(66 73.5 78.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="175" y="164" width="18" height="18" rx="2" transform="rotate(84 184 173)" fill="#f4b400" fill-opacity="0.22"/><rect x="275" y="85" width="31" height="31" rx="2" transform="rotate(67 290.5 100.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="100" y="145" width="16" height="16" rx="2" transform="rotate(29 108 153)" fill="#f4b400" fill-opacity="0.22"/><rect x="14" y="149" width="19" height="19" rx="2" transform="rotate(40 23.5 158.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="5" y="114" width="28" height="28" rx="2" transform="rotate(65 19 128)" fill="#f4b400" fill-opacity="0.22"/><rect x="38" y="1" width="21" height="21" rx="2" transform="rotate(43 48.5 11.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="135" y="74" width="9" height="9" rx="2" transform="rotate(27 139.5 78.5)" fill="#f4b400" fill-opacity="0.22"/><rect x="94" y="11" width="21" height="21" rx="2" transform="rotate(11 104.5 21.5)" fill="#f4b400" fill-opacity="0.22"/></svg></div>
@@ -5367,9 +5386,9 @@ body.deck-fullscreen .slide-controls{display:none!important;}
       <div class="v2-sep-lockup">
         <span class="v2-sep-badge"><svg viewBox="0 0 24 24" width="30" height="30" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span>
         <div class="v2-sep-eyebrow">القسم 4</div>
-        <h2>التغطية والمساءلة التشغيلية</h2>
+        <h2 data-edit="التغطية والمساءلة التشغيلية">التغطية والمساءلة التشغيلية</h2>
         <div class="v2-sep-rule"></div>
-        <p>من وُزِّعت عليه العيّنة، وما مدى إنجازه: التغطية حسب المستوى والمنفذ، وتقدّم كل موظف، وأسباب الاستبدال، وعدد إعادة التعيين.</p>
+        <p data-edit="من وُزِّعت عليه العيّنة، وما مدى إنجازه: التغطية حسب المستوى والمنفذ، وتقدّم كل موظف، وأسباب الاستبدال، وعدد إعادة التعيين.">من وُزِّعت عليه العيّنة، وما مدى إنجازه: التغطية حسب المستوى والمنفذ، وتقدّم كل موظف، وأسباب الاستبدال، وعدد إعادة التعيين.</p>
       </div>
     </div>
   </div>
@@ -5384,15 +5403,15 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     
   </div>
   <div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab">التحاليل المتقدمة</div>
+    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab" data-edit="المعجم">المعجم</div><div class="v2-rail-tab" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>
   </div>
   <div class="slide-inner">
     <div class="slide-eyebrow">
       <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span>
       <span>القسم 4 — التغطية والمساءلة التشغيلية</span>
     </div>
-    <div class="slide-headline">التغطية التشغيلية</div>
+    <div class="slide-headline" data-edit="التغطية التشغيلية">التغطية التشغيلية</div>
     <div class="slide-subhead">توزيع العيّنة وإنجازها حسب المستوى والمنفذ، مع أعلى مساهم لكل بند — من تقرير التوزيع (R2)، بلا إعادة احتساب.</div>
     <div class="slide-body"><div class="v2-cov-empty">
     <span class="v2-cov-empty-icon"><svg viewBox="0 0 24 24" width="24" height="24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span>
@@ -5411,15 +5430,15 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     
   </div>
   <div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab">التحاليل المتقدمة</div>
+    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab" data-edit="المعجم">المعجم</div><div class="v2-rail-tab" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>
   </div>
   <div class="slide-inner">
     <div class="slide-eyebrow">
       <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></svg></span>
       <span>القسم 4 — التغطية والمساءلة التشغيلية</span>
     </div>
-    <div class="slide-headline">المساءلة التشغيلية</div>
+    <div class="slide-headline" data-edit="المساءلة التشغيلية">المساءلة التشغيلية</div>
     <div class="slide-subhead">تقدّم الموظفين، أسباب الاستبدال، وعدد إعادة التعيين — من تقرير الإدارة (R3)، بلا إعادة احتساب.</div>
     <div class="slide-body"><div class="v2-cov-empty">
     <span class="v2-cov-empty-icon"><svg viewBox="0 0 24 24" width="24" height="24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></svg></span>
@@ -5438,16 +5457,16 @@ body.deck-fullscreen .slide-controls{display:none!important;}
     
   </div>
   <div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab">التحاليل المتقدمة</div>
+    <div class="v2-rail-title" data-edit="التقرير التنفيذي لضمان جودة الأشعة">التقرير التنفيذي لضمان جودة الأشعة</div>
+    <div class="v2-rail-tab" data-edit="المعجم">المعجم</div><div class="v2-rail-tab" data-edit="مجتمع الفحص">مجتمع الفحص</div><div class="v2-rail-tab" data-edit="نتائج فحص الجودة">نتائج فحص الجودة</div><div class="v2-rail-tab" data-edit="التحاليل المتقدمة">التحاليل المتقدمة</div>
   </div>
   <div class="slide-inner">
     <div class="slide-eyebrow">
       <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 3l7 3v5c0 4.2-2.9 7.4-7 8.5C7.9 18.4 5 15.2 5 11V6l7-3z"/></svg></span>
-      <span>خاتمة</span>
+      <span data-edit="خاتمة">خاتمة</span>
     </div>
-    <div class="slide-headline">مصدر البيانات والاعتماد</div>
-    <div class="slide-subhead">تتبّع نسخة البيانات، والتصنيف، والجهة المُصدِرة.</div>
+    <div class="slide-headline" data-edit="مصدر البيانات والاعتماد">مصدر البيانات والاعتماد</div>
+    <div class="slide-subhead" data-edit="تتبّع نسخة البيانات، والتصنيف، والجهة المُصدِرة.">تتبّع نسخة البيانات، والتصنيف، والجهة المُصدِرة.</div>
     <div class="slide-body"><div class="v2-closing">
       <div class="v2-closing-main">
         <div class="v2-closing-icon"><svg viewBox="0 0 24 24" width="26" height="26" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M7 3h7l4 4v14H7V3z"/><path d="M14 3v4h4"/><path d="M9.5 13h5"/><path d="M9.5 16.5h5"/></svg></div>
@@ -5487,6 +5506,7 @@ body.deck-fullscreen .slide-controls{display:none!important;}
 <button type="button" class="btn-slide-nav btn-slide-prev" id="deck-slide-prev" aria-label="الشريحة السابقة" title="الشريحة السابقة"><svg viewBox="0 0 24 24" width="20" height="20" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/></svg></button>
 <button type="button" class="btn-slide-nav btn-slide-next" id="deck-slide-next" aria-label="الشريحة التالية" title="الشريحة التالية"><svg viewBox="0 0 24 24" width="20" height="20" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/></svg></button>
 <span class="deck-slide-counter" id="deck-slide-counter" dir="ltr"></span>
+<script type="application/json" id="deck-text-overrides">{}</script>
 <script>(function(){
   var slides = Array.prototype.slice.call(document.querySelectorAll('.slide[data-section]'));
   if (!slides.length) return;
@@ -5797,6 +5817,108 @@ body.deck-fullscreen .slide-controls{display:none!important;}
   window.addEventListener('beforeprint', renumber);
   window.addEventListener('afterprint', restore);
   sync();
+})();(function(){
+  var CHANNEL = 'xray-deck2-text-presets';
+  var DIGITS = /[0-9\\u0660-\\u0669\\u06F0-\\u06F9]/;
+  var els = Array.prototype.slice.call(document.querySelectorAll('[data-edit]'));
+  var toggle = document.getElementById('te-toggle');
+  var bar = document.getElementById('te-bar');
+  var overrides = {};
+  try {
+    var node = document.getElementById('deck-text-overrides');
+    if (node) overrides = JSON.parse(node.textContent || '{}') || {};
+  } catch (e) {}
+  function setText(el, text){
+    while (el.firstChild) el.removeChild(el.firstChild);
+    String(text).split('\\n').forEach(function(part, i){
+      if (i) el.appendChild(document.createElement('br'));
+      el.appendChild(document.createTextNode(part));
+    });
+  }
+  function readText(el){
+    return (el.innerText || el.textContent || '').replace(/\\u00a0/g, ' ').replace(/\\r/g, '').trim();
+  }
+  function applyAll(map){
+    els.forEach(function(el){
+      var key = el.getAttribute('data-edit');
+      setText(el, Object.prototype.hasOwnProperty.call(map, key) ? map[key] : key);
+    });
+  }
+  applyAll(overrides);
+  if (!toggle || !bar) return;
+
+  function toast(msg){
+    var t = document.createElement('div');
+    t.className = 'te-toast';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(function(){ if (t.parentNode) t.parentNode.removeChild(t); }, 3200);
+  }
+  function collect(){
+    var out = {};
+    els.forEach(function(el){
+      var key = el.getAttribute('data-edit');
+      var now = readText(el);
+      if (now && now !== key && !DIGITS.test(now)) out[key] = now;
+    });
+    return out;
+  }
+  function setEditing(on){
+    document.body.classList.toggle('te-on', on);
+    toggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+    els.forEach(function(el){
+      if (on) el.setAttribute('contenteditable', 'plaintext-only');
+      else el.removeAttribute('contenteditable');
+    });
+  }
+  // One edit applies to every identical string in the deck.
+  els.forEach(function(el){
+    el.addEventListener('blur', function(){
+      var key = el.getAttribute('data-edit');
+      var now = readText(el);
+      if (!now || DIGITS.test(now)) { setText(el, overrides[key] || key); return; }
+      els.forEach(function(other){
+        if (other !== el && other.getAttribute('data-edit') === key) setText(other, now);
+      });
+    });
+    el.addEventListener('keydown', function(e){ if (e.key === 'Escape') el.blur(); });
+  });
+  toggle.addEventListener('click', function(){ setEditing(!document.body.classList.contains('te-on')); });
+
+  var reset = document.getElementById('te-reset');
+  if (reset) reset.addEventListener('click', function(){ applyAll({}); });
+
+  function downloadPreset(name, map){
+    var blob = new Blob([JSON.stringify({ name: name, overrides: map }, null, 2)], { type: 'application/json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'deck-text-preset-' + name + '.json';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  }
+  var save = document.getElementById('te-save');
+  if (save) save.addEventListener('click', function(){
+    var map = collect();
+    if (!Object.keys(map).length) { toast('لا توجد تعديلات للحفظ'); return; }
+    var name = (window.prompt('اسم الإعداد المسبق:', bar.getAttribute('data-preset') || '') || '').trim();
+    if (!name) return;
+    var done = false;
+    var ch = null;
+    try { ch = new BroadcastChannel(CHANNEL); } catch (e) {}
+    function finish(msg){ if (done) return; done = true; if (ch) ch.close(); toast(msg); }
+    if (!ch) { downloadPreset(name, map); finish('تعذّر الاتصال بالتطبيق — تم تنزيل الإعداد كملف'); return; }
+    ch.onmessage = function(e){
+      var d = e.data || {};
+      if (d.type !== 'deck2-text-preset-result' || d.name !== name) return;
+      if (d.ok) { bar.setAttribute('data-preset', name); finish('تم حفظ الإعداد «' + name + '»'); }
+      else { downloadPreset(name, map); finish('تعذّر الحفظ في مساحة العمل: ' + (d.error || '') + ' — تم تنزيل الإعداد كملف'); }
+    };
+    ch.postMessage({ type: 'deck2-text-preset-save', name: name, overrides: map });
+    setTimeout(function(){
+      if (done) return;
+      downloadPreset(name, map);
+      finish('التطبيق غير متاح للحفظ — تم تنزيل الإعداد كملف');
+    }, 2500);
+  });
 })();</script>
 </body>
 </html>"
