@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v153.3",
+    "date": "2026-10-08",
+    "bucket": "enhancement",
+    "scope": "comprehensive report",
+    "title": "uploading both workbooks (sample + follow-up) is required"
+  },
+  {
     "version": "v153.2",
     "date": "2026-10-08",
     "bucket": "enhancement",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "deck3",
     "title": "split the last two visual slides into two (يتبع) pages each"
-  },
-  {
-    "version": "v151.6",
-    "date": "2026-10-06",
-    "bucket": "fix",
-    "scope": "deck3",
-    "title": "chart axes widen to fit real data so low/high values keep a visible bar and label"
   }
 ];
