@@ -108,17 +108,31 @@ export function resolveTrackingMonthFolder(
   const info = parseMonthFolderName(monthFolder);
   if (!info) return monthFolder;
   if (today.getFullYear() === info.year && today.getMonth() === info.month - 1) return monthFolder;
-  let latest = -Infinity;
+  // Tally finished rows per calendar month. A single stray row dated inside the
+  // sample's month must not pin the calendar there while the real work sits in
+  // another month (that leaves every day at 0), so the busiest month wins and
+  // ties go to the later one.
+  const perMonth = new Map<number, number>();
   for (const row of rows) {
     if (row.state === "pending" || !row.doneAt) continue;
     const d = new Date(row.doneAt);
-    const ms = d.getTime();
-    if (Number.isNaN(ms)) continue;
-    if (d.getFullYear() === info.year && d.getMonth() === info.month - 1) return monthFolder;
-    if (ms > latest) latest = ms;
+    if (Number.isNaN(d.getTime())) continue;
+    const key = d.getFullYear() * 12 + d.getMonth();
+    perMonth.set(key, (perMonth.get(key) ?? 0) + 1);
   }
-  const anchor = Number.isFinite(latest) ? new Date(latest) : today;
-  return formatMonthFolderName(anchor.getMonth() + 1, anchor.getFullYear());
+  let best = -1;
+  let bestCount = 0;
+  for (const [key, count] of perMonth) {
+    if (count > bestCount || (count === bestCount && key > best)) {
+      best = key;
+      bestCount = count;
+    }
+  }
+  if (best < 0) return formatMonthFolderName(today.getMonth() + 1, today.getFullYear());
+  const bestYear = Math.floor(best / 12);
+  const bestMonth = (best % 12) + 1;
+  if (bestYear === info.year && bestMonth === info.month) return monthFolder;
+  return formatMonthFolderName(bestMonth, bestYear);
 }
 
 function dateAt(year: number, month: number, day: number): Date {

@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v153.5",
+    "date": "2026-10-11",
+    "bucket": "fix",
+    "scope": "daily tracking",
+    "title": "follow the busiest finished-work month, not any stray row in the sample month"
+  },
+  {
     "version": "v153.4",
     "date": "2026-10-08",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "deck3",
     "title": "charts fit with many ports; Add: follow-up workbook enrichment for the comprehensive report"
-  },
-  {
-    "version": "v151.8",
-    "date": "2026-10-06",
-    "bucket": "feature",
-    "scope": "reports",
-    "title": "per-page print on/off toggles, select all/none and saved selection in the executive HTML decks (v2, v3)"
   }
 ];

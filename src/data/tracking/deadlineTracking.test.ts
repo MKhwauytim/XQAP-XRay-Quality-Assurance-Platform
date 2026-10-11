@@ -238,6 +238,11 @@ describe("resolveTrackingMonthFolder", () => {
     expect(resolveTrackingMonthFolder("1-january-2026", [done("2026-10-05T09:00:00"), pending], TODAY)).toBe("10-october-2026");
   });
 
+  it("follows the busiest month when a stray row is dated inside the sample month", () => {
+    const mixed = [done("2026-01-12T09:00:00"), done("2026-10-05T09:00:00"), done("2026-10-06T09:00:00")];
+    expect(resolveTrackingMonthFolder("1-january-2026", mixed, TODAY)).toBe("10-october-2026");
+  });
+
   it("falls back to today's month when nothing is finished yet", () => {
     expect(resolveTrackingMonthFolder("1-january-2026", [pending], TODAY)).toBe("10-october-2026");
   });
