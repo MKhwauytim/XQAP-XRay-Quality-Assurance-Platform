@@ -126,10 +126,10 @@ export function contentsSlide(opts: {
 }): string {
   const rows = opts.rows
     .map(
-      (r) => `<div class="v3-toc-row">
+      (r) => `<div class="v3-toc-row${r.topics ? "" : " no-topics"}">
   <span class="v3-toc-index">${pad2(r.index)}</span>
-  <div class="v3-toc-main"><b>${esc(r.title)}</b><span>${esc(r.description)}</span></div>
-  <span class="v3-toc-topics">${esc(r.topics ?? "")}</span>
+  <div class="v3-toc-main"><b>${esc(r.title)}</b><span>${esc(r.description)}</span></div>${r.topics ? `
+  <span class="v3-toc-topics">${esc(r.topics)}</span>` : ""}
   <span class="v3-toc-pages">${esc(r.pages)}</span>
 </div>`,
     )
@@ -193,7 +193,7 @@ export function levelDefinitionSlide(opts: {
     "",
     `${contentHead({ eyebrow: opts.eyebrow, title: opts.title })}
 <div class="v3-levels">${cols}</div>
-<div class="v3-callout"><b>${esc(opts.highlightValue)}</b><span class="v3-callout-lines"><b>${esc(opts.highlightTitle)}</b><span>${esc(opts.highlightNote)}</span></span></div>`,
+${opts.highlightTitle ? `<div class="v3-callout"><b>${esc(opts.highlightValue)}</b><span class="v3-callout-lines"><b>${esc(opts.highlightTitle)}</b><span>${esc(opts.highlightNote)}</span></span></div>` : ""}`,
   );
 }
 
@@ -205,21 +205,78 @@ export type KpiCell = {
   valueTone?: "navy" | "gold" | "green" | "red";
   aside?: string;
   sub?: string;
+  /** A second, smaller figure sharing this cell (own label, value and aside). */
+  extra?: { label: string; value: string; valueTone?: "navy" | "gold" | "green" | "red"; aside?: string; sub?: string };
 };
 
 export function kpiBand(cells: KpiCell[], variant: "top" | "bottom" | "solo", compact = false): string {
   const cellsHtml = cells
     .map((c) => {
-      const aside = c.aside ? `<span class="v3-kpi-aside">${esc(c.aside)}</span>` : "";
-      const sub = c.sub ? `<span class="v3-kpi-sub">${esc(c.sub)}</span>` : "";
+      const body = (f: { label: string; value: string; valueTone?: string; aside?: string; sub?: string }) =>
+        `<span class="v3-kpi-label">${esc(f.label)}</span>
+  <div class="v3-kpi-row"><span class="v3-kpi-value v3-ink-${f.valueTone ?? "navy"}">${esc(f.value)}</span>${f.aside ? `<span class="v3-kpi-aside">${esc(f.aside)}</span>` : ""}</div>
+  ${f.sub ? `<span class="v3-kpi-sub">${esc(f.sub)}</span>` : ""}`;
+      // Two figures sharing one cell sit side by side, each with its own description.
+      if (c.extra) return `<div class="v3-kpi-cell v3-kpi-pair"><div class="v3-kpi-half">${body(c)}</div><div class="v3-kpi-half">${body(c.extra)}</div></div>`;
       return `<div class="v3-kpi-cell">
-  <span class="v3-kpi-label">${esc(c.label)}</span>
-  <div class="v3-kpi-row"><span class="v3-kpi-value v3-ink-${c.valueTone ?? "navy"}">${esc(c.value)}</span>${aside}</div>
-  ${sub}
+  ${body(c)}
 </div>`;
     })
     .join("");
-  return `<div class="v3-kpi-band ${variant}${compact ? " compact" : ""}">${cellsHtml}</div>`;
+  const hasPair = cells.some((c) => c.extra);
+  return `<div class="v3-kpi-band ${variant}${compact ? " compact" : ""}${hasPair ? " has-pair" : ""}">${cellsHtml}</div>`;
+}
+
+// ── Quality matrix ──────────────────────────────────────────────────────────
+
+export type QualityTone = "red" | "gold" | "green";
+
+export type QualityCell = {
+  tone: QualityTone;
+  /** Big figure (معدل الاتفاق العام) and the answers it is out of. */
+  value: string;
+  caption: string;
+  /** 0–100 fill of the agreement track; null draws an empty track. */
+  fill: number | null;
+  stats: Array<{ label: string; value: string; share: string }>;
+};
+
+export type QualityRow = { label: string; variant: "all" | "land" | "sea"; cells: QualityCell[] };
+
+/**
+ * One page holding the three image-quality levels as columns and the port groups (all / land / sea) as rows.
+ * Each cell: the agreement rate with a track, and the two error counts side by side beneath it.
+ */
+export function qualityMatrix(headers: Array<{ label: string; tone: QualityTone }>, rows: QualityRow[]): string {
+  const head = `<div class="v3-qm-head"><span></span>${headers.map((h) => `<span class="${h.tone}">${esc(h.label)}</span>`).join("")}</div>`;
+  const body = rows
+    .map((r) => `<div class="v3-qm-row ${r.variant}">
+  <span class="v3-qm-rowlabel">${esc(r.label)}</span>
+${r.cells.map((c) => `  <div class="v3-qm-cell">
+    <b class="v3-qm-big v3-ink-${c.tone}">${esc(c.value)}</b>
+    <span class="v3-qm-cap">${esc(c.caption)}</span>
+    <div class="v3-q-track"><i class="${c.tone}" style="width:${c.fill === null ? 0 : Math.max(0, Math.min(100, c.fill)).toFixed(1)}%"></i></div>
+    <div class="v3-qm-stats">${c.stats.map((s) => `<div class="v3-qm-stat"><span>${esc(s.label)}</span><b>${esc(s.value)}</b><small>${esc(s.share)}</small></div>`).join("")}</div>
+  </div>`).join("\n")}
+</div>`)
+    .join("\n");
+  return `<div class="v3-qm">${head}\n${body}</div>`;
+}
+
+// ── Statements (الإفادات) ───────────────────────────────────────────────────
+
+export type StatementItem = { text: string; tag: string; tone: "red" | "gold" | "none" };
+
+/** Numbered statement rows; the text and the priority tag are separate leaves so the viewer can edit each. */
+export function statementList(items: StatementItem[], startAt = 0): string {
+  const rows = items
+    .map((it, i) => `<div class="v3-st-row">
+  <span class="v3-st-num">${pad2(startAt + i + 1)}</span>
+  <span class="v3-st-text">${esc(it.text)}</span>${it.tag ? `
+  <span class="v3-st-tag ${it.tone}">${esc(it.tag)}</span>` : ""}
+</div>`)
+    .join("\n");
+  return `<div class="v3-st-list">${rows}</div>`;
 }
 
 // ── Section dividers ────────────────────────────────────────────────────────
@@ -268,14 +325,30 @@ export function dataTable(opts: {
   headers: string[];
   rows: TableCell[][];
   totals?: TableCell[];
-  firstColWidth?: 26 | 28 | 36;
+  firstColWidth?: 14 | 26 | 28 | 36;
+  /** Smaller single-line column headers (many columns sharing one slide). */
+  compactHeaders?: boolean;
   /** Pad the body with empty rows up to this count so sibling panels align
    *  (the handoff does this with literal &nbsp; rows). */
   padToRows?: number;
+  /** Fixed body-row height in px (shrinks long lists to fit one slide). */
+  rowPx?: number;
+  /** 0-based column index (or indexes) that start a new column group: a vertical separator line is drawn before each. */
+  groupStart?: number | number[];
+  /** "lg": few rows that should fill the slide (bigger text and rows, wide second column for a bar). */
+  size?: "lg";
+  /** Optional header row above the column headers: one label per column span (`group` draws the separator before it). */
+  topHeader?: Array<{ label: string; span: number; group?: boolean }>;
 }): string {
   const widthCls = opts.firstColWidth && opts.firstColWidth !== 28 ? ` first-${opts.firstColWidth}` : "";
-  const head = opts.headers.map((h) => `<th>${esc(h)}</th>`).join("");
-  const tr = (cells: TableCell[]) => `<tr>${cells.map((c) => `<td${c.cls ? ` class="${c.cls}"` : ""}>${c.html}</td>`).join("")}</tr>`;
+  const starts = opts.groupStart === undefined ? [] : Array.isArray(opts.groupStart) ? opts.groupStart : [opts.groupStart];
+  const grp = (i: number) => (starts.includes(i) ? "grp" : "");
+  const head = opts.headers.map((h, i) => `<th${grp(i) ? ` class="${grp(i)}"` : ""}>${esc(h)}</th>`).join("");
+  const tr = (cells: TableCell[]) =>
+    `<tr>${cells.map((c, i) => {
+      const cls = [c.cls, grp(i)].filter(Boolean).join(" ");
+      return `<td${cls ? ` class="${cls}"` : ""}>${c.html}</td>`;
+    }).join("")}</tr>`;
   const bodyRows = opts.rows.map(tr);
   if (opts.padToRows) {
     while (bodyRows.length < opts.padToRows) {
@@ -283,7 +356,11 @@ export function dataTable(opts: {
     }
   }
   const foot = opts.totals ? `<tfoot>${tr(opts.totals)}</tfoot>` : "";
-  return `<table class="v3-table${widthCls}"><thead><tr>${head}</tr></thead><tbody>${bodyRows.join("")}</tbody>${foot}</table>`;
+  const rowStyle = opts.rowPx ? ` style="--row-h:${Math.round(opts.rowPx)}px"` : "";
+  const top = opts.topHeader
+    ? `<tr class="v3-th-top">${opts.topHeader.map((h) => `<th colspan="${h.span}"${h.group ? ' class="grp"' : ""}>${esc(h.label)}</th>`).join("")}</tr>`
+    : "";
+  return `<table class="v3-table${widthCls}${opts.size === "lg" ? " lg" : ""}${opts.compactHeaders ? " compact-h" : ""}"${rowStyle}><thead>${top}<tr>${head}</tr></thead><tbody>${bodyRows.join("")}</tbody>${foot}</table>`;
 }
 
 // ── Confusion matrix ────────────────────────────────────────────────────────

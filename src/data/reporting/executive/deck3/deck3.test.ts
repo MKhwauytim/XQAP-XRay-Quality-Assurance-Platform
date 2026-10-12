@@ -41,7 +41,7 @@ function input(populationRows: PreparedPopulationRow[]): ExecutiveReportInput {
 }
 
 describe("buildExecutiveDeckV3", () => {
-  it("renders exactly 24 slides in the handoff's fixed order (the per-port chart is one slide per port type)", async () => {
+  it("renders exactly 24 slides in the fixed order (every per-port page is one slide per port type)", async () => {
     const html = await buildExecutiveDeckV3(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
     const slideCount = (html.match(/class="slide v3/g) ?? []).length;
     expect(slideCount).toBe(24);
@@ -61,7 +61,8 @@ describe("buildExecutiveDeckV3", () => {
     const html = await buildExecutiveDeckV3(input([popRow()]));
     const sectioned = (html.match(/data-section=/g) ?? []).length;
     expect(sectioned).toBe(24);
-    expect(html).toContain('data-section-label="القسم الثالث — التحاليل المتقدمة"');
+    expect(html).toContain('data-section-label="القسم الثالث - الإفادات"');
+    expect(html).not.toContain("—");
   });
 
   it("renders the three dark section dividers (the invisible-divider regression)", async () => {
@@ -75,7 +76,7 @@ describe("buildExecutiveDeckV3", () => {
 
   it("uses locked terminology verbatim", async () => {
     const html = await buildExecutiveDeckV3(input([popRow()]));
-    expect(html).toContain("نتائج الوسائل الآلية");
+    expect(html).toContain("الاشتباهات الفائتة");
     expect(html).toContain("نسبة تحديد موقع الاشتباه");
     expect(html).toContain("دقة السليمة");
     expect(html).toContain("دقة الاشتباه");
@@ -105,18 +106,18 @@ describe("buildExecutiveDeckV3", () => {
   it("numbers content slides NN / 24 and leaves covers and dividers uncounted", async () => {
     const html = await buildExecutiveDeckV3(input([popRow()]));
     // Content slides carry zero-padded counters…
-    for (const n of [2, 3, 4, 5, 7, 8, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 23]) {
+    for (const n of [2, 3, 4, 5, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23]) {
       expect(html).toContain(`>${String(n).padStart(2, "0")} / 24<`);
     }
-    // …while covers (1, 24) and dividers (6, 9, 15) don't, per the handoff.
-    for (const n of [1, 6, 9, 15, 24]) {
+    // …while covers (1, 24) and dividers (6, 9, 20) don't, per the handoff.
+    for (const n of [1, 6, 9, 20, 24]) {
       expect(html).not.toContain(`>${String(n).padStart(2, "0")} / 24<`);
     }
   });
 
   it("splits the last two visual slides into two (يتبع) pages each", async () => {
     const html = await buildExecutiveDeckV3(input([popRow()]));
-    for (const t of ["التوافق مع الفرق الأمنية ومحرك المخاطر", "أثر التحديد وجودة الصورة على الدقة"]) {
+    for (const t of ["التوافق مع الفرق الأمنية ومحرك المخاطر"]) {
       expect(html.split(t).length - 1).toBeGreaterThanOrEqual(2);
       expect(html.split(t + " (يتبع)").length - 1).toBeGreaterThanOrEqual(1);
     }
@@ -128,6 +129,8 @@ describe("buildExecutiveDeckV3", () => {
     expect((html.match(/class="slide v3/g) ?? []).length).toBe(23);
     expect(html).toContain("لا توجد بيانات لهذا التحليل في الملف");
     expect(html).toContain(">02 / 23<");
+    // Section 3 always carries a blank page to write statements on.
+    expect(html).toContain("اكتب الإفادة هنا…");
   });
 
   it("escapes data-derived strings (port names) in the slides", async () => {
@@ -144,19 +147,19 @@ describe("buildExecutiveDeckV3", () => {
   // `overflow:hidden` bottom edge — the trailing ports were simply invisible
   // (never clipped-but-scrollable, never re-flowed). Fixed by paginating into
   // `(يتبع)`-titled continuation slides (ROWS_PER_PORT_PAGE, slides.ts).
-  it("splits the port-distribution table into (يتبع) continuation slides when a type has more ports than one page holds", async () => {
+  it("lists every port of a type on ONE page (no (يتبع) continuation) however many ports it has", async () => {
     const manyLandPorts = Array.from({ length: 12 }, (_, i) =>
       popRow({ xrayImageId: `XR-L${i}`, portName: `منفذ رقم ${i}`, portCode: `PL${i}` }),
     );
     const html = await buildExecutiveDeckV3(input(manyLandPorts));
 
-    // 12 land ports at 8/page need 2 pages → 1 extra slide over the fixed 24.
+    // 12 land ports stay on one page: the slide count is unchanged from the fixed 24.
     const slideCount = (html.match(/class="slide v3/g) ?? []).length;
-    expect(slideCount).toBe(25);
+    expect(slideCount).toBe(24);
 
-    expect(html).toContain("التوزيع على المنافذ البرية والبحرية (يتبع)");
-    // Every port still appears exactly once — none dropped or duplicated by
-    // the chunking.
+    expect(html).toContain("التوزيع على المنافذ البرية");
+    expect(html).not.toContain("التوزيع على المنافذ البرية (يتبع)");
+    // Every port appears exactly once — none dropped or duplicated.
     for (let i = 0; i < 12; i++) {
       expect((html.match(new RegExp(`منفذ رقم ${i}<`, "g")) ?? []).length).toBe(1);
     }
@@ -164,7 +167,8 @@ describe("buildExecutiveDeckV3", () => {
     // that has one (the population table here, and the always-single-page
     // accuracy table) — only on each table's final page, never repeated per
     // continuation page and never dropped.
-    expect((html.match(/إجمالي البرية/g) ?? []).length).toBe(2);
+    // Population, port results, level-per-port, marking follow-up and the quality page each carry one total row.
+    expect((html.match(/إجمالي البرية/g) ?? []).length).toBe(5);
   });
 });
 

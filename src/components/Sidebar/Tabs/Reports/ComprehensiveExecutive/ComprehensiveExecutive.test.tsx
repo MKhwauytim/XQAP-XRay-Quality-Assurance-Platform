@@ -55,6 +55,8 @@ vi.mock("../../../../../data/workspace/useWorkspace", () => ({
 
 const openers = vi.hoisted(() => ({ openExecutiveReport: vi.fn(async () => {}), buildExecutiveXlsx: vi.fn(async () => {}) }));
 vi.mock("../../../../../data/reporting/executiveReport", () => openers);
+// The xlsx button exports the raw data (one row per studied image) through the workbook module.
+vi.mock("../../../../../data/reporting/executive/workbook/workbook", () => ({ buildExecutiveRawWorkbook: openers.buildExecutiveXlsx }));
 const deck3 = vi.hoisted(() => ({ openExecutiveDeckV3: vi.fn(async (..._a: unknown[]) => {}) }));
 vi.mock("../../../../../data/reporting/executive/deck3", () => deck3);
 const tpl = vi.hoisted(() => ({

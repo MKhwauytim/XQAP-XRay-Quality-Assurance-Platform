@@ -39,7 +39,7 @@ type SystemMonths = { byMonth: Array<{ month: string; rows: ExecutiveReportRow[]
 type SystemState = { status: "loading" } | { status: "error" } | ({ status: "ready" } & SystemMonths);
 // The executive deck (v3, the only edition) honours the completed-only scope: it drops the
 // population/coverage sections.
-type ExportKind = "deck" | "xlsx";
+type ExportKind = "deck" | "xlsx" | "both";
 
 /** Names are not shown in the combined report (config.showEmployeeNames is false). */
 const NO_NAMES: Record<string, string> = {};
@@ -224,7 +224,8 @@ export default function ComprehensiveExecutive() {
         config: DEFAULT_EXEC_CONFIG,
       };
       const input = buildComprehensiveInput(merged.rows, base, merged.period, workbook.status === "read" ? workbook.populationSummary : null);
-      if (kind === "deck") {
+      // "both": the report first (opening its window needs the click's user gesture), then the data workbook.
+      if (kind === "deck" || kind === "both") {
         const { openExecutiveDeckV3 } = await import("../../../../../data/reporting/executive/deck3");
         const chosen = templates.find((t) => t.id === templateId);
         await openExecutiveDeckV3(input, NO_NAMES, {
@@ -232,9 +233,15 @@ export default function ComprehensiveExecutive() {
           // A workspace is where templates live; without one the viewer offers a file download instead.
           onSaveTemplate: directoryHandle ? handleSaveTemplate : undefined,
         });
-      } else {
-        const { buildExecutiveXlsx } = await import("../../../../../data/reporting/executiveReport");
-        await buildExecutiveXlsx(input, NO_NAMES);
+      }
+      if (kind === "xlsx" || kind === "both") {
+        // Raw data only (one row per studied image), not the aggregate tables the report pages already show.
+        const { buildExecutiveRawWorkbook } = await import("../../../../../data/reporting/executive/workbook/workbook");
+        await buildExecutiveRawWorkbook(input, NO_NAMES);
+      }
+      if (kind === "both") {
+        const { downloadStatementsWorkbook } = await import("../../../../../data/reporting/executive/deck3/statements");
+        downloadStatementsWorkbook(input, input.periodLabel ?? "");
       }
       // The audit trail lives in the workspace; with none mounted there is nowhere to write it.
       if (directoryHandle) {
@@ -325,10 +332,13 @@ export default function ComprehensiveExecutive() {
       {templateNotice && <p className="ce-status" role="status" data-testid="ce-template-notice">{templateNotice}</p>}
 
       <div className="ce-row ce-actions">
-        <button type="button" className="ce-btn" disabled={exportDisabled} onClick={() => void handleExport("deck")}>
+        <button type="button" className="ce-btn" disabled={exportDisabled} onClick={() => void handleExport("both")}>
+          {labels.ce_generate_both}
+        </button>
+        <button type="button" className="ce-btn ce-btn-secondary" disabled={exportDisabled} onClick={() => void handleExport("deck")}>
           {labels.ce_generate_deck}
         </button>
-        <button type="button" className="ce-btn" disabled={exportDisabled} onClick={() => void handleExport("xlsx")}>
+        <button type="button" className="ce-btn ce-btn-secondary" disabled={exportDisabled} onClick={() => void handleExport("xlsx")}>
           {labels.ce_generate_xlsx}
         </button>
       </div>

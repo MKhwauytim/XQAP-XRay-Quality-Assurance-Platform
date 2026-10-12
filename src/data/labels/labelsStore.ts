@@ -2166,6 +2166,7 @@ export const DEFAULT_LABELS = {
   ce_scope_note:                 "تقرير للعينات المكتملة فقط — لا يتضمن بيانات المجتمع أو نسب التغطية",
   ce_completed_samples:          "عينات مكتملة",
   ce_generate_xlsx:              "بيانات التقرير (Excel)",
+  ce_generate_both:              "إنشاء التقرير وملف البيانات (Excel)",
   ce_generate_failed:            "حدث خطأ أثناء توليد التقرير.",
   ce_source_title:               "مصدر البيانات",
   ce_source_app_excel:           "ملف Excel + بيانات التطبيق",

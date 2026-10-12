@@ -15,6 +15,7 @@ import {
   hasSourceRevisions,
 } from "../../sourceRevisions";
 import { yieldToMain } from "../../../storage/yieldToMain";
+import { buildDeckSupportSheets } from "../deck3/supportData";
 
 // Population-scale sheet builders (rowSheet, rawRiskSheet, resultComparisonSheet)
 // chunk their row-array construction with a main-thread yield between chunks
@@ -839,6 +840,10 @@ export async function buildExecutiveWorkbookObject(
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), name);
   };
 
+  // Page-level supporting data for the executive deck: an index plus one sheet per report page, placed first.
+  // The raw per-image and per-answer sheets further down are the source behind every one of them.
+  for (const sheet of buildDeckSupportSheets(model)) append(sheet.name, sheet.aoa);
+
   // Processed / aggregate sheets (ported from the legacy builder, now from ReportModel).
   append(SHEET_NAMES.kpi, kpiSheet(model));
   append(SHEET_NAMES.ports, portSheet(model));
@@ -881,6 +886,29 @@ export async function buildExecutiveWorkbookObject(
 }
 
 /**
+ * The raw data only: one row per studied image with every field the report was generated from,
+ * and no aggregate tables. Used by the comprehensive-report page.
+ */
+export async function buildExecutiveRawWorkbookObject(
+  input: ExecutiveReportInput,
+  employeeDisplayNames: Record<string, string> = {}
+): Promise<XLSX.WorkBook> {
+  const model = buildReportModel(input, employeeDisplayNames);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(await rowSheet(model)), SHEET_NAMES.rows);
+  return wb;
+}
+
+/** Build and download the raw-data workbook (`.xlsx`). */
+export async function buildExecutiveRawWorkbook(
+  input: ExecutiveReportInput,
+  employeeDisplayNames: Record<string, string> = {}
+): Promise<void> {
+  const wb = await buildExecutiveRawWorkbookObject(input, employeeDisplayNames);
+  XLSX.writeFile(wb, `بيانات_التقرير_الخام_${input.monthFolderName}.xlsx`, { compression: true });
+}
+
+/**
  * Build and download the executive workbook (`.xlsx`). Replaces the legacy
  * `buildExecutiveXlsx`; the Reports tab calls through the re-exported name.
  */
@@ -889,5 +917,6 @@ export async function buildExecutiveWorkbook(
   employeeDisplayNames: Record<string, string> = {}
 ): Promise<void> {
   const wb = await buildExecutiveWorkbookObject(input, employeeDisplayNames);
-  XLSX.writeFile(wb, `التقرير_التنفيذي_${input.monthFolderName}.xlsx`);
+  // `compression`: SheetJS writes the zip uncompressed by default, which made the per-row sheets hundreds of MB.
+  XLSX.writeFile(wb, `التقرير_التنفيذي_${input.monthFolderName}.xlsx`, { compression: true });
 }

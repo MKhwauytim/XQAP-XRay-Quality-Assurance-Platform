@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v153.7",
+    "date": "2026-10-12",
+    "bucket": "enhancement",
+    "scope": "executive report",
+    "title": "deck3 rework merged, marking/quality split into own pages, port typo guard"
+  },
+  {
     "version": "v153.6",
     "date": "2026-10-12",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "deck3",
     "title": "keep every sample row (56,468) with an «other results» class; empty agreement slides collapse"
-  },
-  {
-    "version": "v151.10",
-    "date": "2026-10-07",
-    "bucket": "feature",
-    "scope": "deck3",
-    "title": "population totals section from the workbook; one port-accuracy slide per port type"
   }
 ];

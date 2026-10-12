@@ -124,11 +124,31 @@ function bigInput(n: number): ExecutiveReportInput {
 describe("buildExecutiveWorkbook", () => {
   it("builds and contains every expected sheet", async () => {
     const wb = await buildExecutiveWorkbookObject(seededInput());
-    const expected = Object.values(SHEET_NAMES);
+    // The deck's page-level supporting sheets (an index plus one per report page) come first.
+    const deckSheets = [
+      "فهرس بيانات التقرير", "المؤشرات الرئيسية", "المجتمع حسب المستوى", "المجتمع حسب المنفذ", "نسبة التوائم حسب المستوى",
+      "المستوى الأول والثاني", "نتائج الأداء حسب المنفذ", "دقة المستويين حسب المنفذ", "التحديد والجودة حسب المنفذ", "نسبة التوائم حسب الجودة",
+    ];
+    const expected = [...deckSheets, ...Object.values(SHEET_NAMES)];
     for (const name of expected) {
       expect(wb.SheetNames, `missing sheet ${name}`).toContain(name);
     }
     expect(wb.SheetNames).toHaveLength(expected.length);
+    expect(wb.SheetNames[0]).toBe("فهرس بيانات التقرير");
+  });
+
+  it("the deck support sheets add up: level rows sum to the total row, and the index lists every page sheet", async () => {
+    const wb = await buildExecutiveWorkbookObject(seededInput());
+    const rows = readSheet(wb, "نسبة التوائم حسب المستوى") as Array<Array<string | number>>;
+    const body = rows.slice(1, -1);
+    const total = rows[rows.length - 1];
+    for (const col of [1, 2, 3, 4, 5]) {
+      expect(body.reduce((s, r) => s + Number(r[col] ?? 0), 0), `column ${col}`).toBe(Number(total[col]));
+    }
+    const index = (readSheet(wb, "فهرس بيانات التقرير") as Array<Array<string>>).map((r) => r[0]);
+    for (const name of ["المؤشرات الرئيسية", "نتائج الأداء حسب المنفذ", "نسبة التوائم حسب الجودة"]) {
+      expect(index).toContain(name);
+    }
   });
 
   it("emits two decision-fact-table rows per population row (L1 + L2)", async () => {
