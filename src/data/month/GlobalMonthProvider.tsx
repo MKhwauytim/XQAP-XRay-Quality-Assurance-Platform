@@ -10,6 +10,7 @@ import { logError } from "../storage/errorLogger";
 // provider started using Query.
 import { queryClient } from "../query/queryClient";
 import { monthFoldersQueryOptions, invalidateMonthFolders } from "../query/monthFoldersQuery";
+import { subscribeToDataChange } from "../workspace/dataRefreshSignal";
 import { isMonthClosed } from "../population/monthLock";
 import { formatMonthFolderName, type MonthFolderInfo } from "../population/monthFolder";
 import { GlobalMonthContext, type MonthChangeGuard } from "./GlobalMonthContext";
@@ -26,6 +27,10 @@ function readStoredFolderName(): string | null {
   } catch {
     return null;
   }
+}
+
+function sameFolderSet(a: MonthFolderInfo[], b: MonthFolderInfo[]): boolean {
+  return a.length === b.length && a.every((entry, index) => entry.folderName === b[index]!.folderName);
 }
 
 function persistSelection(selection: GlobalMonthSelection): void {
@@ -143,9 +148,12 @@ export function GlobalMonthProvider({ children }: { children: ReactNode }) {
       // performs, rather than being served stale data by `staleTime: Infinity`.
       await invalidateMonthFolders(queryClient, directoryHandle);
       const list = await queryClient.fetchQuery(monthFoldersQueryOptions(directoryHandle));
-      setMonths(list);
+      // Keep the old array when the folder set is unchanged so the focus /
+      // sync-driven refresh below never re-renders every month consumer.
+      setMonths((prev) => (sameFolderSet(prev, list) ? prev : list));
       setSelection((prev) => {
         const next = reconcileSelection(list, prev);
+        if (next === prev) return prev;
         persistSelection(next);
         return next;
       });
@@ -155,6 +163,29 @@ export function GlobalMonthProvider({ children }: { children: ReactNode }) {
       // wiping the picker.
       logError("globalMonth:refreshMonths", error);
     }
+  }, [directoryHandle]);
+
+  // The month list is read once per workspace and cached with an infinite
+  // staleTime; nothing re-lists it afterwards, so a month folder removed (or
+  // added) by hand on disk stayed in the picker -- and stayed SELECTED, with
+  // the previous data still on screen -- until a full page reload. Re-list when
+  // the user asks for a refresh, when a manifest moved, and when the tab
+  // regains focus (the moment they come back from deleting folders in Explorer).
+  const refreshMonthsRef = useRef(refreshMonths);
+  // eslint-disable-next-line react-hooks/refs -- latest-callback ref, reassigned every render
+  refreshMonthsRef.current = refreshMonths;
+  useEffect(() => {
+    if (!directoryHandle) return;
+    const refresh = () => { void refreshMonthsRef.current(); };
+    const onVisible = () => { if (document.visibilityState === "visible") refresh(); };
+    const unsubscribe = subscribeToDataChange(["manifest"], refresh);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      unsubscribe();
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [directoryHandle]);
 
   const registerMonthChangeGuard = useCallback((guard: MonthChangeGuard) => {

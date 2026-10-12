@@ -116,6 +116,19 @@ describe("GlobalMonthProvider", () => {
     expect(result.current.months).toHaveLength(2);
   });
 
+  it("drops a month folder deleted by hand on disk when the window regains focus", async () => {
+    const root = await makeWorkspace(["4-april-2026", "5-may-2026"]);
+    const { result } = renderHook(() => useGlobalMonth(), { wrapper: makeWrapper(root) });
+    await waitFor(() => expect(result.current.months).toHaveLength(2));
+    expect(result.current.selection).toMatchObject({ folderName: "5-may-2026" });
+    const population = await root.getDirectoryHandle("1-population");
+    expect(population.removeEntry).toBeDefined();
+    await population.removeEntry?.("5-may-2026", { recursive: true });
+    act(() => { window.dispatchEvent(new Event("focus")); });
+    await waitFor(() => expect(result.current.months).toHaveLength(1));
+    expect(result.current.selection).toMatchObject({ kind: "existing", folderName: "4-april-2026" });
+  });
+
   it("selection is none without a workspace", async () => {
     const { result } = renderHook(() => useGlobalMonth(), { wrapper: makeWrapper(null) });
     expect(result.current.selection.kind).toBe("none");
