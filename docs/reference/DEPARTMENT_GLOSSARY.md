@@ -22,21 +22,27 @@ The Arabic slide text is the **final, authoritative wording** — the "Domain ow
 column is a plain-language gloss for our own comprehension, checked against that text, not a
 replacement for it.
 
-| Level | Arabic definition (verbatim from the slide — final) | Domain owner's understanding (2026-07-29) |
-|---|---|---|
-| المستوى الأول | الحالات التي تم الاشتباه بها في الأشعة من قبل المستوى الأول أو الثاني، دون مؤشرات من الفرق الأمنية الأخرى ودون محجرات مخاطر. | L1 and L2 suspected the shipment (ارسالية), and no other team suspected it and there was no risk-engine indicator. |
-| المستوى الثاني | الحالات التي تشمل محجرات مخاطر، ولم يتم الاشتباه بها من قبل المستوى الأول والثاني. | There was a risk-engine indicator, but L1 and L2 didn't suspect it. |
-| المستوى الثالث | الحالات التي لم يتم الاشتباه بها من قبل المستويين أو أحدهما، وتم الاشتباه بها من قبل أحد الفرق الأمنية الأخرى. | L1/L2 didn't suspect it, but another team did. |
-| المستوى الرابع | الحالات التي تحتوي على ضبط أمني أو اجتازت الأشعة من جهات خارجية دون اكتشاف الاشتباه من المسؤولين. | L1 and L2 didn't suspect it, and it made it across the border into the Kingdom — another authority later caught the smuggler and filed a محضر ضبط (seizure/apprehension report). |
+> **Superseded 2026-10-12.** The wording below replaces the 2026-07-29 handoff wording (the earlier
+> table described Level 2 as the risk-engine level, Level 3 as the other-teams level and Level 4 as
+> the seizure level). The domain owner supplied the department's official slide — *scope* and
+> *determinants* per level — and it is what the executive report's glossary page now prints.
 
-**Level 1 connects directly to stored data** (corrected 2026-07-29 — not Level 4, see below): the
-**رقم المحضر** column (`NormalizedRiskRow.reportNumber` / `hasReport`, see
-[`DATA_DICTIONARY.md`](DATA_DICTIONARY.md#risk-data-columns-normalizedriskrow)) is the محضر ضبط
-associated with a Level-1 case — L1/L2 (our X-ray screening levels) raised the suspicion. (The
-exact confirmation/seizure process afterward is outside this app's own review scope — our own
-team's part is the document/image study described below, not a physical inspection.) A Level-4
-case, by contrast, is one L1/L2 never suspected at all — any seizure there happens outside the
-department's own screening/report trail entirely, caught by another authority.
+| Level | Subtitle | Scope — «نطاق المستوى (بري – بحري)», verbatim | Determinants — «المحددات» |
+|---|---|---|---|
+| المستوى الأول | حالات الضبط المؤكدة | يعني بالحالات التي تتضمن محاضر ضبط أمنية وجمركية وحالات التجاوز المُبلغ عنها من جهات خارجية ولم يتم الاشتباه بها من قبل كلا المستويين أو أحدهم. | محاضر الضبط الأمنية والجمركية · حالات التجاوز المبلغ عنها من جهات خارجية · عدم الاشتباه من كلا المستويين أو أحدهم |
+| المستوى الثاني | حالات الاشتباه المؤكدة | يعني بالحالات التي تتضمن عدم الاشتباه من قبل كلا المستويين أو أحدهم، وتم الاشتباه بها من أحد الفرق الأمنية الأخرى (الوسائل الحية، أو المعاينة، أو التفتيش الأمني، أو التفتيش المعاكس). | عدم الاشتباه من كلا المستويين أو أحدهم · الاشتباه من أحد الفرق الأمنية الأخرى |
+| المستوى الثالث | حالات عدم الاشتباه على أساس المخاطر | يعني بالحالات التي تتضمن محرك مخاطر ولم يتم الاشتباه بها من المستوى الأول والثاني. | وجود مؤشر مخاطر على الإرسالية · عدم الاشتباه من كلا المستويين |
+| المستوى الرابع | حالات الاشتباه غير المؤكدة | يعني بالحالات التي تم الاشتباه بها من قبل المستوى الأول أو الثاني في الأشعة ولم يتم الاشتباه بها من قبل أي من الفرق الأمنية ولا يوجد عليها محرك مخاطر، وذلك لأكبر ثلاث منافذ في المنافذ البحرية والبرية حسب حجم الإرساليات. | لم يتم الاشتباه بها من كامل الفرق الأمنية · لا يوجد عليها مؤشر مخاطر · أكبر ثلاث منافذ حسب حجم الإرساليات |
+
+**How the data agrees (checked on the Jan–Aug 2026 workbook, executive report page 8, «مصفوفة النتائج»):**
+Level 3 is 99.9% سليمة–سليمة (not suspected by L1/L2); Level 4 has no سليمة–سليمة rows at all and
+18.5% اشتباه–اشتباه (it requires L1 or L2 to have suspected); Level 1 is mostly not suspected by
+L1/L2. The earlier claim that a Level-1 case is one where L1/L2 raised the suspicion, and that a
+Level-4 case is one they never suspected, was the **reverse** of the official definition and of the
+data — do not reintroduce it. The **رقم المحضر** column (`NormalizedRiskRow.reportNumber` /
+`hasReport`, see [`DATA_DICTIONARY.md`](DATA_DICTIONARY.md#risk-data-columns-normalizedriskrow))
+is the محضر ضبط behind a Level-1 case; the exact confirmation/seizure process afterward is outside
+this app's own review scope.
 
 **How this maps to the data:** this is the scenario the risk sheet's `stage` column
 (`المستوى`/`STAGE` → `NormalizedRiskRow.stage`, see [`DATA_DICTIONARY.md`](DATA_DICTIONARY.md#risk-data-columns-normalizedriskrow))

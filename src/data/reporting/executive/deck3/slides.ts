@@ -104,7 +104,7 @@ const RESULT_ACCURACY_DEFINITION = "الحالات التي تم الاتفاق 
 const MISSED_SUSPICION_DEFINITION = "نتيجة أخصائي الوسائل الآلية بأن الإرسالية سليمة ورأي أخصائي ضمان جودة الأشعة بأنها اشتباه.";
 /** How معدل الاتفاق العام is calculated (one line, no worked weights). */
 const AGREEMENT_FORMULA_NOTE = "معدل الاتفاق العام = (دقة السليمة × وزن السليمة) + (دقة الاشتباه × وزن الاشتباه)";
-const FALSE_SUSPICION_DEFINITION = "نتيجة أخصائي الوسائل الآلية بأن الإرسالية اشتباه، ورأى أخصائي الجودة أنها سليمة.";
+const FALSE_SUSPICION_DEFINITION = "نتيجة أخصائي الوسائل الآلية بأن الإرسالية اشتباه، ورأى أخصائي ضمان جودة الأشعة أنها سليمة.";
 
 /** "21,480 (1,031)" — population figure with its bracketed sample figure. */
 function popCell(population: number, sample: number, stacked = false): string {
@@ -555,18 +555,18 @@ export async function buildDeck3Slides(
         dotTone: "gold",
         title: "مصطلحات المجتمع والعيّنة",
         terms: [
-          { term: "مجتمع الفحص", definition: "صور أشعة الشهر المصنَّفة إلى مستويات المخاطر الأربعة المعتمدة من وكالة تحليل المخاطر." },
-          { term: "العيّنة", definition: "الصور المسحوبة للدراسة وفق وزن سحب محدَّد مسبقًا لكل مستوى، مع اختيار عشوائي داخل حصة المستوى الواحد." },
+          { term: "مجتمع الفحص", definition: withPop ? "صور أشعة فترة التقرير المصنَّفة إلى مستويات المخاطر الأربعة المعتمدة من وكالة تحليل المخاطر." : "صور أشعة الشهر المصنَّفة إلى مستويات المخاطر الأربعة المعتمدة من وكالة تحليل المخاطر." },
+          { term: "العيّنة", definition: withPop ? "الصور المفحوصة خلال الفترة: المستوى الأول بالكامل، وبقية المستويات بعدد ثابت شهريًا، باختيار عشوائي داخل المستوى." : co ? "الصور التي اكتمل فحصها من قبل أخصائي ضمان جودة الأشعة وتشملها أرقام التقرير." : "الصور المسحوبة للدراسة وفق وزن سحب محدَّد مسبقًا لكل مستوى، مع اختيار عشوائي داخل حصة المستوى الواحد." },
           // Coverage is not reported for the completed-only scope, so its term is not defined there.
-          ...(coNoPop ? [] : [{ term: "التغطية الرقابية", definition: withPop ? "نسبة حجم العيّنة المستخرجة إلى المستهدف؛ مقياس حجم لا يدل على تمثيل العيّنة للمجتمع." : "نسبة حجم العيّنة المسحوبة إلى حجم المجتمع؛ مقياس حجم لا يدل على تمثيل العيّنة للمجتمع." }]),
+          ...(coNoPop ? [] : [{ term: "التغطية الرقابية", definition: withPop ? "نسبة حجم العيّنة المفحوصة إلى المستهدف؛ مقياس حجم لا يدل على تمثيل العيّنة للمجتمع." : "نسبة حجم العيّنة المسحوبة إلى حجم المجتمع؛ مقياس حجم لا يدل على تمثيل العيّنة للمجتمع." }]),
         ],
       },
       {
         dotTone: "red",
         title: "مصطلحات النتائج والجودة",
         terms: [
-          { term: "الإجابة", definition: "نتيجة فحص مستوى واحد (الأول أو الثاني) لصورة واحدة؛ لكل صورة إجابتان، وتُحسب أرقام الدقة والاشتباهات على الإجابات لا على الصور." },
-          { term: "الاشتباه الخاطئ", definition: "نتيجة أخصائي الوسائل الآلية بأن الإرسالية اشتباه، ورأى أخصائي الجودة أنها سليمة." },
+          { term: "الإجابة", definition: "نتيجة فحص مستوى واحد (الأول أو الثاني) لصورة واحدة، فلكل صورة إجابتان؛ وتُحسب عليها أرقام الدقة والاشتباهات، أما التحديد والجودة فعلى الصور." },
+          { term: "الاشتباه الخاطئ", definition: "نتيجة أخصائي الوسائل الآلية بأن الإرسالية اشتباه، ورأى أخصائي ضمان جودة الأشعة أنها سليمة." },
           { term: "الاشتباه الفائت", definition: "نتيجة أخصائي الوسائل الآلية بأن الإرسالية سليمة ورأي أخصائي ضمان جودة الأشعة بأنها اشتباه." },
         ],
       },
@@ -574,39 +574,42 @@ export async function buildDeck3Slides(
     meta: meta("glossary", "المعجم"),
   }));
 
-  // 4 — Glossary: risk levels. Locked wording — copied verbatim from the
-  // handoff's own HTML (slide 4). Do not paraphrase or shorten. Only the
-  // fixed-count figures are live: they derive from the real monthlyTarget
-  // (40/30/30%), NOT the handoff's placeholder 6,250.
+  // 4 — Glossary: risk levels. The department's OFFICIAL wording (scope + determinants per level, as given by the
+  // domain owner 2026-10-12; the earlier handoff wording is superseded — see docs/reference/DEPARTMENT_GLOSSARY.md).
+  // Do not paraphrase. The levels are four scenarios, not a severity ranking.
   parts.push(levelDefinitionSlide({
     eyebrow: "المعجم",
     title: "مستويات المخاطر",
     levels: [
       {
         title: "المستوى الأول",
-        definition: "الصور التي تم الاشتباه بها في الأشعة من قبل المستوى الأول أو الثاني، دون مؤشرات من الفرق الأمنية الأخرى ودون استهداف من محرك المخاطر.",
-        measures: "انفراد الفحص بالاشتباه دون مؤشرات أخرى.",
+        subtitle: "حالات الضبط المؤكدة",
+        definition: "يعني بالحالات التي تتضمن محاضر ضبط أمنية وجمركية وحالات التجاوز المُبلغ عنها من جهات خارجية ولم يتم الاشتباه بها من قبل كلا المستويين أو أحدهم.",
+        determinants: ["محاضر الضبط الأمنية والجمركية", "حالات التجاوز المبلغ عنها من جهات خارجية", "عدم الاشتباه من كلا المستويين أو أحدهم"],
         weightLine: copy.weightLines[0],
         tone: "gold",
       },
       {
         title: "المستوى الثاني",
-        definition: "الصور التي استهدفها محرك المخاطر، ولم يتم الاشتباه بها من قبل المستوى الأول والثاني.",
-        measures: "ما يلتقطه محرك المخاطر ولا يُلتقط من قبل أخصائي الوسائل الآلية.",
+        subtitle: "حالات الاشتباه المؤكدة",
+        definition: "يعني بالحالات التي تتضمن عدم الاشتباه من قبل كلا المستويين أو أحدهم، وتم الاشتباه بها من أحد الفرق الأمنية الأخرى (الوسائل الحية، أو المعاينة، أو التفتيش الأمني، أو التفتيش المعاكس).",
+        determinants: ["عدم الاشتباه من كلا المستويين أو أحدهم", "الاشتباه من أحد الفرق الأمنية الأخرى"],
         weightLine: copy.weightLines[1],
         tone: "blue",
       },
       {
         title: "المستوى الثالث",
-        definition: "الصور التي لم يتم الاشتباه بها من قبل المستويين أو أحدهما، وتم الاشتباه بها من قبل أحد الفرق الأمنية الأخرى.",
-        measures: "ما تلتقطه الفرق الأمنية الأخرى ولا يلتقطه الفحص.",
+        subtitle: "حالات عدم الاشتباه على أساس المخاطر",
+        definition: "يعني بالحالات التي تتضمن محرك مخاطر ولم يتم الاشتباه بها من المستوى الأول والثاني.",
+        determinants: ["وجود مؤشر مخاطر على الإرسالية", "عدم الاشتباه من كلا المستويين"],
         weightLine: copy.weightLines[2],
         tone: "green-soft",
       },
       {
         title: "المستوى الرابع",
-        definition: "الصور التي تحتوي على ضبط أمني أو اجتازت الأشعة من جهات خارجية دون اكتشاف الاشتباه من المسؤولين.",
-        measures: "ما ثبت فواته بضبط أمني أو باكتشاف خارجي.",
+        subtitle: "حالات الاشتباه غير المؤكدة",
+        definition: "يعني بالحالات التي تم الاشتباه بها من قبل المستوى الأول أو الثاني في الأشعة ولم يتم الاشتباه بها من قبل أي من الفرق الأمنية ولا يوجد عليها محرك مخاطر، وذلك لأكبر ثلاث منافذ في المنافذ البحرية والبرية حسب حجم الإرساليات.",
+        determinants: ["لم يتم الاشتباه بها من كامل الفرق الأمنية", "لا يوجد عليها مؤشر مخاطر", "أكبر ثلاث منافذ حسب حجم الإرساليات"],
         weightLine: copy.weightLines[3],
         tone: "red",
       },
@@ -639,7 +642,7 @@ ${kpiBand(coNoPop ? [
     ] : [
       { label: "مجتمع الفحص", value: "100%", aside: `${fmtNum(model.population.total)} صورة`, sub: "مجتمع الصور الواردة من وكالة تحليل المخاطر" },
       { label: withPop ? "العيّنة المفحوصة" : "العيّنة المسحوبة", value: fmtPct(pct(model.sample.total, model.population.total)), aside: `${fmtNum(model.sample.total)} من ${fmtNum(model.population.total)} صورة`, sub: withPop ? "صورة مكتملة الفحص في التقرير" : "صورة موزّعة على أخصائيي الجودة" },
-      { label: "التغطية الرقابية", value: fmtPct(model.sample.coverage ?? null), valueTone: "gold", aside: coverageNumbers, sub: withPop ? "نسبة العيّنة من المستهدف" : "نسبة العينة من المجتمع" },
+      { label: "التغطية الرقابية الإجمالية", value: fmtPct(model.sample.coverage ?? null), valueTone: "gold", aside: coverageNumbers, sub: withPop ? "نسبة العيّنة من المستهدف" : "نسبة العينة من المجتمع" },
     ], "top")}
 ${kpiBand([
       { label: "نسبة التوائم", value: fmtPct(overallStats.overall), valueTone: "green", aside: `${fmtNum(t.correctClean + t.correctSuspicion)} من ${fmtNum(t.evaluable)} إجابة مفحوصة`, sub: RESULT_ACCURACY_DEFINITION },
