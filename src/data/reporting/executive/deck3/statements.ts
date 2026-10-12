@@ -10,10 +10,9 @@ import { fmtNum, fmtPct } from "../primitives";
 import type { ReportModel } from "../model/reportModel";
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
 import { buildReportModel } from "../model/reportModel";
-import { aggregateDecisions, buildDecisionRecords } from "../model/decisionFactTable";
 import { collectLevelAccuracyRows } from "../deck2/section3/levelAccuracy";
 import {
-  accuracyOf, collectPortAccuracy, collectPortMarkingOnly, collectPortQuality, sumCounts,
+  accuracyOf, collectPortAccuracy, collectPortMarkingOnly, collectPortQuality, collectQualityImageOutcomes, sumCounts,
   type FourCounts, type Statement, type StatementPriority,
 } from "./slides";
 
@@ -143,15 +142,16 @@ export function buildStatements(model: ReportModel): Statement[] {
   }
 
   // ── Image quality ↔ agreement (an association: quality is self-reported, so no cause is claimed) ──────────────
-  const byQ = aggregateDecisions(buildDecisionRecords(model.rows, "quality"), "decision", (r) => r.imageQuality);
-  const q = (k: string): FourCounts => byQ.get(k) ?? { correctClean: 0, correctSuspicion: 0, missedSuspicion: 0, falseSuspicion: 0 };
+  // Same image-level fold as the quality-by-agreement page, so the statement and the page agree.
+  const byQ = collectQualityImageOutcomes(model);
+  const q = (k: string): FourCounts => byQ.get(`all|${k}`) ?? { correctClean: 0, correctSuspicion: 0, missedSuspicion: 0, falseSuspicion: 0 };
   const qLow = accuracyOf(q("منخفض"));
   const qHigh = accuracyOf(q("عالي"));
   if (qLow.evaluable > 0 && qHigh.evaluable > 0 && qLow.overall !== null && qHigh.overall !== null && qHigh.overall - qLow.overall >= 5) {
     add({
       priority: "متوسطة", topic: "جودة الصورة",
       text: "تدنّي جودة الصورة يؤدي إلى اشتباهات خاطئة أو اشتباهات فائتة بمعدل أكبر من الصور ذات الجودة العالية.",
-      basis: `منخفضة ${fmtPct(qLow.overall)} من ${fmtNum(qLow.evaluable)} إجابة | عالية ${fmtPct(qHigh.overall)} من ${fmtNum(qHigh.evaluable)} إجابة`, page: "نسبة التوائم حسب جودة الصورة",
+      basis: `منخفضة ${fmtPct(qLow.overall)} من ${fmtNum(qLow.evaluable)} صورة | عالية ${fmtPct(qHigh.overall)} من ${fmtNum(qHigh.evaluable)} صورة`, page: "نسبة التوائم حسب جودة الصورة",
     });
   }
 
