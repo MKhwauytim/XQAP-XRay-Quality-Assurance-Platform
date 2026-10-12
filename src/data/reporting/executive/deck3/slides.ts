@@ -1119,7 +1119,6 @@ ${legendRow([
     parts.push(slideShell(meta("s3", eyebrowS3), "", `${contentHead({
       eyebrow: eyebrowS3,
       title: isBlank ? "إفادات إضافية" : "أهم الإفادات من نتائج التقرير" + (p > 0 ? YITBA : ""),
-      note: isBlank ? "اضغط «تعديل النص» أعلى الصفحة ثم اكتب الإفادة في أي سطر." : "مستخلصة من أرقام التقرير بقواعد ثابتة، ويمكن تعديل أي نص منها.",
     })}
 ${statementList(items, isBlank ? 0 : p * STATEMENTS_PER_PAGE)}`));
   }
