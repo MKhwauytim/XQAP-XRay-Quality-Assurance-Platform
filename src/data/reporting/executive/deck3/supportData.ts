@@ -19,7 +19,7 @@ export type SupportSheet = { name: string; page: string; about: string; aoa: Sup
 const p1 = (v: number | null): SupportCell => (v === null ? "" : Math.round(v * 10) / 10);
 const n = (v: number | null | undefined): SupportCell => v ?? "";
 
-const FOUR_HEAD = ["الإجابات المدروسة", "سليمة صحيحة", "اشتباه صحيح", "الاشتباهات الفائتة", "الاشتباهات الخاطئة"];
+const FOUR_HEAD = ["الإجابات المفحوصة", "سليمة صحيحة", "اشتباه صحيح", "الاشتباهات الفائتة", "الاشتباهات الخاطئة"];
 const RATE_HEAD = ["نسبة التوائم العامة %", "دقة السليمة %", "دقة الاشتباه %", "الفائتة % من إجابات السليمة", "الخاطئة % من إجابات الاشتباه"];
 
 /** Counts of one group of answers → the five count cells. */
@@ -48,8 +48,8 @@ export function buildDeckSupportSheets(model: ReportModel): SupportSheet[] {
     ["مجتمع الفحص", model.population.total, "صورة", "كل صور المجتمع في الفترة"],
     ["العيّنة المفحوصة", model.sample.total, "صورة", "الصور المكتملة الفحص في التقرير"],
     ["التغطية الرقابية", p1(model.sample.coverage ?? null), "%", model.population.fromSummary ? "العيّنة المفحوصة ÷ المستهدف (المستوى الأول 100% من مجتمعه، والمستويات الأخرى عدد ثابت شهريًا × أشهر التقرير)" : "العيّنة المفحوصة ÷ مجتمع الفحص"],
-    ["الإجابات المدروسة", overall.evaluable, "إجابة", "لكل صورة إجابتان: المستوى الأول والثاني"],
-    ["نسبة التوائم العامة", p1(overall.overall), "%", "الإجابات المتفق عليها ÷ الإجابات المدروسة"],
+    ["الإجابات المفحوصة", overall.evaluable, "إجابة", "لكل صورة إجابتان: المستوى الأول والثاني"],
+    ["نسبة التوائم العامة", p1(overall.overall), "%", "الإجابات المتفق عليها ÷ الإجابات المفحوصة"],
     ["الاشتباهات الفائتة", totals.missedSuspicion, "إجابة", "نتيجة سليمة ورأي الجودة اشتباه"],
     ["الاشتباهات الفائتة % من إجابات السليمة", p1(pct(totals.missedSuspicion, overall.cleanResults)), "%", "الفائتة ÷ إجابات السليمة"],
     ["الاشتباهات الخاطئة", totals.falseSuspicion, "إجابة", "نتيجة اشتباه ورأي الجودة سليمة"],
@@ -88,6 +88,27 @@ export function buildDeckSupportSheets(model: ReportModel): SupportSheet[] {
       }),
       row("الإجمالي", summary.total, summary.levelOne, summary.levelTwo),
     ]);
+
+    // مصفوفة النتائج (top table of page 8): images per L1 × L2 result combination, first word = level 1's result.
+    if (Object.values(summary.byStageLevels).every((lv) => lv.pairs !== undefined)) {
+      type Pairs = NonNullable<(typeof summary.byStageLevels)[string]["pairs"]>;
+      const zeroPairs = (): Pairs => ({ cleanClean: 0, suspClean: 0, cleanSusp: 0, suspSusp: 0, other: 0 });
+      const pairsByStage = new Map<string, Pairs>();
+      for (const [raw, lv] of Object.entries(summary.byStageLevels)) {
+        const key = getStageKey(raw);
+        const cur = pairsByStage.get(key) ?? zeroPairs();
+        for (const k of Object.keys(cur) as Array<keyof Pairs>) cur[k] += lv.pairs?.[k] ?? 0;
+        pairsByStage.set(key, cur);
+      }
+      const pairRow = (label: string, c: Pairs): SupportCell[] => [label, c.cleanClean + c.suspClean + c.cleanSusp + c.suspSusp + c.other, c.cleanClean, c.suspClean, c.cleanSusp, c.suspSusp, c.other];
+      const sum = zeroPairs();
+      for (const c of pairsByStage.values()) for (const k of Object.keys(sum) as Array<keyof Pairs>) sum[k] += c[k];
+      add("مصفوفة النتائج", "نتائج المستويين في المجتمع", "عدد الصور في كل تركيبة من نتيجة المستوى الأول ونتيجة المستوى الثاني (الكلمة الأولى = المستوى الأول).", [
+        ["المستوى", "الإجمالي (صورة)", "سليمة – سليمة", "اشتباه – سليمة", "سليمة – اشتباه", "اشتباه – اشتباه", "أخرى"],
+        ...model.population.byStage.map((st): SupportCell[] => pairRow(st.stageLabel, pairsByStage.get(st.stageKey) ?? zeroPairs())),
+        pairRow("الإجمالي", sum),
+      ]);
+    }
   }
 
   // ── Population by port (pages 9–10) ────────────────────────────────────────
@@ -103,7 +124,7 @@ export function buildDeckSupportSheets(model: ReportModel): SupportSheet[] {
 
   // ── Result agreement by level (page "نسبة التوائم") ─────────────────────────
   const stages = orderedStageAccuracy(model);
-  add("نسبة التوائم حسب المستوى", "نسبة التوائم", "الإجابات المدروسة ونسبة التوائم والاشتباهات الفائتة والخاطئة لكل مستوى مخاطر.", [
+  add("نسبة التوائم حسب المستوى", "نسبة التوائم", "الإجابات المفحوصة ونسبة التوائم والاشتباهات الفائتة والخاطئة لكل مستوى مخاطر.", [
     ["المستوى", ...FOUR_HEAD, ...RATE_HEAD],
     ...stages.map((s): SupportCell[] => [s.label, ...fourCells(s.counts), ...rateCells(s.counts)]),
     ["الإجمالي", ...fourCells(totals), ...rateCells(totals)],
@@ -117,7 +138,7 @@ export function buildDeckSupportSheets(model: ReportModel): SupportSheet[] {
   const otherL1 = model.rows.filter((r) => r.levelOneOther !== undefined).length;
   const otherL2 = model.rows.filter((r) => r.levelTwoOther !== undefined).length;
   add("المستوى الأول والثاني", "دقة إجابات المستوى الأول والثاني", "إجابات كل مستوى مقابل رأي أخصائي الجودة، لكل المنافذ.", [
-    ["المستوى", ...FOUR_HEAD, ...RATE_HEAD, "نتائج أخرى (غير مدروسة)"],
+    ["المستوى", ...FOUR_HEAD, ...RATE_HEAD, "نتائج أخرى (غير مفحوصة)"],
     ["المستوى الأول", ...fourCells(l1), ...rateCells(l1), otherL1],
     ["المستوى الثاني", ...fourCells(l2), ...rateCells(l2), otherL2],
   ]);
@@ -193,7 +214,7 @@ export function buildDeckSupportSheets(model: ReportModel): SupportSheet[] {
     aoa: [
       ["الورقة", "صفحة التقرير", "ما تحتويه"],
       ...sheets.map((s): SupportCell[] => [s.name, s.page, s.about]),
-      ["بيانات الصور", "كل الصفحات", "صف لكل صورة مدروسة: المنفذ والمستوى والنتائج والتحديد والجودة (المصدر الخام لكل الأرقام)."],
+      ["بيانات الصور", "كل الصفحات", "صف لكل صورة مفحوصة: المنفذ والمستوى والنتائج والتحديد والجودة (المصدر الخام لكل الأرقام)."],
       ["جدول القرارات", "كل صفحات الإجابات", "صف لكل إجابة (مستوى أول وثانٍ لكل صورة) مع نتيجتها مقابل رأي الجودة."],
     ],
   };

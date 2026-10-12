@@ -229,8 +229,29 @@ body{background:var(--v3-navy);font-family:"Somar","IBM Plex Sans Arabic","Tahom
 .v3-pop-row .method.census{color:var(--v3-gold);font-weight:500;}
 .v3-pop-note{margin:26px 0 0;font-size:24px;color:var(--v3-muted);line-height:1.6;}
 .v3-pop-note p{margin:0;font-weight:600;color:var(--v3-text);}
+.v3-sub-title{margin:10px 0 4px;font-size:26px;font-weight:700;color:var(--v3-navy);display:flex;align-items:baseline;gap:18px;}
+.v3-sub-title small{font-size:20px;font-weight:400;color:var(--v3-muted);}
 .v3-pop-bullets{margin:8px 0 0;padding-inline-start:34px;list-style:disc;}
 .v3-pop-bullets li{margin:2px 0;}
+/* Observations and recommendations table: same border system as every table (2px navy frame, 1px hairlines), figures on their own row. */
+.v3-obs{width:100%;border-collapse:collapse;table-layout:fixed;}
+.v3-obs th{font-size:25px;color:var(--v3-muted);font-weight:500;text-align:right;padding:10px 0 10px 14px;border-top:2px solid var(--v3-navy);border-bottom:1px solid var(--v3-hair);}
+.v3-obs th:nth-child(1){width:7%;}
+.v3-obs th:nth-child(2){width:55%;}
+.v3-obs th:nth-child(3){width:38%;}
+.v3-obs td{vertical-align:top;padding:14px 0 14px 18px;border-bottom:1px solid var(--v3-hair);}
+.v3-obs td+td{border-inline-start:1px solid var(--v3-hair);padding-inline-start:22px;}
+.v3-obs tbody tr:last-child td{border-bottom:2px solid var(--v3-navy);}
+.v3-obs-num{font-size:38px;font-weight:700;line-height:1.2;}
+.v3-obs-num.red{color:var(--v3-red);}
+.v3-obs-num.gold{color:var(--v3-gold);}
+.v3-obs-num.navy{color:var(--v3-navy);}
+.v3-obs-text{display:block;font-size:26px;line-height:1.5;color:var(--v3-navy);}
+.v3-obs-rec .v3-obs-text{color:var(--v3-text);}
+.v3-obs-figs{display:flex;flex-wrap:wrap;gap:8px 30px;margin-top:10px;padding-top:9px;border-top:1px solid var(--v3-hair);}
+.v3-fig{display:flex;flex-direction:column;gap:1px;}
+.v3-fig small{font-size:19px;color:var(--v3-muted);}
+.v3-fig b{font-size:27px;font-weight:700;color:var(--v3-navy);line-height:1.1;}
 /* Population table: every header on ONE line (the narrow coverage column used to wrap to two). */
 .v3-pop-table .v3-table th{white-space:nowrap;}
 /* Coverage progress: bar in the level colour, full = target reached, flag = finished. */
@@ -300,13 +321,6 @@ body{background:var(--v3-navy);font-family:"Somar","IBM Plex Sans Arabic","Tahom
 .v3-qm-stat small{font-size:17px;color:var(--v3-muted);}
 .v3-table.first-14 th:first-child{width:14%;}
 .v3-table.compact-h th,.v3-table.compact-h[style*="--row-h"] th{white-space:nowrap;font-size:17px;padding-inline:0 6px;}
-.v3-st-list{display:flex;flex-direction:column;border-top:2px solid var(--v3-navy);}
-.v3-st-row{display:grid;grid-template-columns:80px 1fr 140px;gap:24px;align-items:center;min-height:112px;padding:10px 0;border-bottom:1px solid var(--v3-hair);}
-.v3-st-num{font-size:40px;font-weight:700;color:var(--v3-gold);}
-.v3-st-text{font-size:28px;line-height:1.5;color:var(--v3-navy);}
-.v3-st-tag{justify-self:end;font-size:22px;font-weight:700;padding:6px 18px;border:2px solid var(--v3-hair);color:var(--v3-muted);}
-.v3-st-tag.red{border-color:var(--v3-red);color:var(--v3-red);}
-.v3-st-tag.gold{border-color:var(--v3-gold);color:var(--v3-gold-dark);}
 .v3-formula-note{font-size:21px;line-height:1.5;margin-top:10px;}
 .v3-table[style*="--row-h"] th{font-size:21px;line-height:1.15;padding:6px 0 6px 14px;white-space:nowrap;}
 .v3-table[style*="--row-h"] td{line-height:1.1;}
@@ -325,7 +339,6 @@ body{background:var(--v3-navy);font-family:"Somar","IBM Plex Sans Arabic","Tahom
    rule on the column headers, and lists/grids/matrices get the closing rule their top rule already implied. */
 .v3-table:not(:has(tfoot)) tbody tr:last-child td{border-bottom:2px solid var(--v3-navy);}
 .v3-table .v3-th-top + tr th{border-top:1px solid var(--v3-hair);}
-.v3-st-row:last-child{border-bottom:2px solid var(--v3-navy);}
 .v3-gloss-grid{border-bottom:2px solid var(--v3-navy);}
 .v3-pop-stats{border-bottom:2px solid var(--v3-navy);}
 .v3-qm{border-bottom:2px solid var(--v3-navy);}

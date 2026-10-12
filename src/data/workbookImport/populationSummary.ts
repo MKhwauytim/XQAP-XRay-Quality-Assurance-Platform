@@ -17,6 +17,17 @@ type PortAcc = PopulationBucket & { name: string; portType: string | null };
 const UNKNOWN_PORT = "غير محدد";
 const JAN_CODES: Record<string, Level> = { "1": "clean", "2": "suspicious" };
 
+/** Joint level-1 × level-2 result counts: the FIRST word is level 1's result, the second level 2's (`suspClean` = L1 اشتباه, L2 سليمة). */
+export type ResultPairs = { cleanClean: number; suspClean: number; cleanSusp: number; suspSusp: number; other: number };
+const emptyPairs = (): ResultPairs => ({ cleanClean: 0, suspClean: 0, cleanSusp: 0, suspSusp: 0, other: 0 });
+function pairKey(a: Level, b: Level): keyof ResultPairs {
+  if (a === "clean" && b === "clean") return "cleanClean";
+  if (a === "suspicious" && b === "clean") return "suspClean";
+  if (a === "clean" && b === "suspicious") return "cleanSusp";
+  if (a === "suspicious" && b === "suspicious") return "suspSusp";
+  return "other";
+}
+
 export type PopulationFold = {
   add(cells: Record<string, string>, numericCodes: boolean): void;
   finish(sheets: Array<{ name: string; rows: number }>): PopulationSummary;
@@ -47,7 +58,7 @@ export function createPopulationFold(): PopulationFold {
   let total = 0;
   const byStage = new Map<string, PopulationBucket>();
   const byPort = new Map<string, PortAcc>();
-  const byStageLevels = new Map<string, { levelOne: Record<Level, number>; levelTwo: Record<Level, number> }>();
+  const byStageLevels = new Map<string, { levelOne: Record<Level, number>; levelTwo: Record<Level, number>; pairs: ResultPairs }>();
   const levelOne = { clean: 0, suspicious: 0, other: 0 };
   const levelTwo = { clean: 0, suspicious: 0, other: 0 };
   const otherValues = { levelOne: {} as Record<string, number>, levelTwo: {} as Record<string, number> };
@@ -62,9 +73,10 @@ export function createPopulationFold(): PopulationFold {
       levelOne[a.level]++;
       levelTwo[b.level]++;
       let sl = byStageLevels.get(stage);
-      if (!sl) byStageLevels.set(stage, (sl = { levelOne: { clean: 0, suspicious: 0, other: 0 }, levelTwo: { clean: 0, suspicious: 0, other: 0 } }));
+      if (!sl) byStageLevels.set(stage, (sl = { levelOne: { clean: 0, suspicious: 0, other: 0 }, levelTwo: { clean: 0, suspicious: 0, other: 0 }, pairs: emptyPairs() }));
       sl.levelOne[a.level]++;
       sl.levelTwo[b.level]++;
+      sl.pairs[pairKey(a.level, b.level)]++;
       if (a.label !== null) otherValues.levelOne[a.label] = (otherValues.levelOne[a.label] ?? 0) + 1;
       if (b.label !== null) otherValues.levelTwo[b.label] = (otherValues.levelTwo[b.label] ?? 0) + 1;
       const img = imageLevel(a.level, b.level);

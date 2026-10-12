@@ -1,10 +1,12 @@
-// الإفادات: the report's key statements, drafted from its own results by fixed rules (no model, no guessing).
+// الملاحظات والتوصيات: the report's key observations and the recommendation for each, drafted from its own results by
+// fixed rules (no model, no guessing).
 //
-// Each statement is an OBSERVATION and what it means, written the way an analyst reads the report ("image quality at
-// port X is below the other ports, which may weaken prohibited-item detection"), not a restated figure. Port
-// statements compare a port with the REST of its own type (land / sea) — a port's own volume never props up the average
-// it is judged against. The figures behind a statement live in `basis` (second sheet of the statements workbook), so
-// every statement can still be checked, and the deck text stays editable prose.
+// Each OBSERVATION says what stands out and what it means, the way an analyst reads the report ("image quality at port X
+// is below the other ports, which may weaken prohibited-item detection"). Port observations compare a port with the REST
+// of its own type (land / sea) — a port's own volume never props up the average it is judged against. The numbers
+// behind an observation are kept apart from its sentence as `figures` (shown as a separate labelled row under it, and
+// on the second sheet of the workbook), so the text stays readable and every observation can still be checked. The
+// RECOMMENDATION is a drafted starting point for the owner to edit.
 import * as XLSX from "xlsx";
 import { fmtNum, fmtPct } from "../primitives";
 import type { ReportModel } from "../model/reportModel";
@@ -13,12 +15,12 @@ import { buildReportModel } from "../model/reportModel";
 import { collectLevelAccuracyRows } from "../deck2/section3/levelAccuracy";
 import {
   accuracyOf, collectPortAccuracy, collectPortMarkingOnly, collectPortQuality, collectQualityImageOutcomes, sumCounts,
-  type FourCounts, type Statement, type StatementPriority,
+  type FourCounts, type Statement, type StatementFigure, type StatementPriority,
 } from "./slides";
 
-/** A group with fewer answers than this is too thin to name in a statement. */
+/** A group with fewer answers than this is too thin to name in an observation. */
 const MIN_BASE = 1000;
-/** Per-category cap on named ports, and on the whole list — a statement list nobody reads helps nobody. */
+/** Per-category cap on named ports, and on the whole list — a list nobody reads helps nobody. */
 const MAX_PORTS_PER_TOPIC = 2;
 const MAX_STATEMENTS = 15;
 const ORDER: Record<StatementPriority, number> = { "عالية": 0, "متوسطة": 1, "للعلم": 2 };
@@ -51,8 +53,9 @@ export function findOutliers(stats: PortShare[], direction: "low" | "high", minD
 
 export function buildStatements(model: ReportModel): Statement[] {
   const out: Statement[] = [];
-  const add = (s: { priority: StatementPriority; topic: string; text: string; basis: string; page: string }) =>
-    out.push({ ...s, plain: s.text });
+  const F = (label: string, value: string): StatementFigure => ({ label, value });
+  const add = (s: { priority: StatementPriority; topic: string; text: string; recommendation: string; figures: StatementFigure[]; page: string }) =>
+    out.push({ ...s, plain: s.text, basis: s.figures.map((f) => `${f.label}: ${f.value}`).join(" | ") });
   const t = model.errorAnalysis.totals;
   const all = accuracyOf(t);
   if (all.evaluable === 0) return out;
@@ -68,7 +71,9 @@ export function buildStatements(model: ReportModel): Statement[] {
     add({
       priority: "متوسطة", topic: "المنافذ",
       text: `التوافق في المنافذ ${lowName} أقل من المنافذ ${highName}، فالتحسين فيها أكبر أثرًا على دقة النتائج.`,
-      basis: `البرية ${fmtPct(land.overall)} من ${fmtNum(land.evaluable)} | البحرية ${fmtPct(sea.overall)} من ${fmtNum(sea.evaluable)}`, page: "نتائج الأداء للمنافذ",
+      recommendation: `إعطاء المنافذ ${lowName} أولوية في خطة التحسين: مراجعة معايير الاشتباه وتدريب الفاحصين فيها.`,
+      figures: [F("معدل الاتفاق · المنافذ البرية", fmtPct(land.overall)), F("معدل الاتفاق · المنافذ البحرية", fmtPct(sea.overall)), F("الإجابات المفحوصة", fmtNum(land.evaluable + sea.evaluable))],
+      page: "نتائج الأداء للمنافذ",
     });
   }
 
@@ -82,7 +87,9 @@ export function buildStatements(model: ReportModel): Statement[] {
     add({
       priority: o.gap <= -20 ? "عالية" : "متوسطة", topic: "جودة الصورة",
       text: `جودة الصور الملتقطة في منفذ ${o.name} أقل من باقي ${groupLabel(o.sea)}، مما قد يسبب ضعفًا في جودة كشف المواد الممنوعة.`,
-      basis: `${o.name}: صور عالية الجودة ${fmtPct(o.share)} من ${fmtNum(o.den)} صورة، مقابل ${fmtPct(o.othersShare)} في باقي ${groupLabel(o.sea)}`, page: "جودة الصور المقيّمة",
+      recommendation: `مراجعة جهاز الأشعة وإعدادات التصوير في منفذ ${o.name}، ومتابعة جودة الصور شهريًا حتى تقترب من باقي ${groupLabel(o.sea)}.`,
+      figures: [F(`صور عالية الجودة · ${o.name}`, fmtPct(o.share)), F(`صور عالية الجودة · باقي ${groupLabel(o.sea)}`, fmtPct(o.othersShare)), F(`صور ${o.name} المفحوصة`, fmtNum(o.den))],
+      page: "جودة الصور المفحوصة",
     });
   }
 
@@ -91,7 +98,9 @@ export function buildStatements(model: ReportModel): Statement[] {
     add({
       priority: o.gap >= 20 ? "عالية" : "متوسطة", topic: "الاشتباهات الفائتة",
       text: `نسبة الاشتباهات الفائتة في منفذ ${o.name} أعلى من متوسط باقي ${groupLabel(o.sea)}.`,
-      basis: `${o.name}: ${fmtPct(o.share)} من ${fmtNum(o.den)} إجابة سليمة، مقابل ${fmtPct(o.othersShare)} في باقي ${groupLabel(o.sea)}`, page: "نتائج الأداء للمنافذ",
+      recommendation: `مراجعة الإرساليات المصنّفة سليمة في منفذ ${o.name}، وتكثيف المراجعة الدورية لنتائج المستوى الأول والثاني فيه.`,
+      figures: [F(`الاشتباهات الفائتة · ${o.name}`, fmtPct(o.share)), F(`الاشتباهات الفائتة · باقي ${groupLabel(o.sea)}`, fmtPct(o.othersShare)), F(`إجابات السليمة في ${o.name}`, fmtNum(o.den))],
+      page: "نتائج الأداء للمنافذ",
     });
   }
 
@@ -100,7 +109,9 @@ export function buildStatements(model: ReportModel): Statement[] {
     add({
       priority: "متوسطة", topic: "الاشتباهات الخاطئة",
       text: `تكثر الاشتباهات الخاطئة في منفذ ${o.name} مقارنة بباقي ${groupLabel(o.sea)}.`,
-      basis: `${o.name}: ${fmtPct(o.share)} من ${fmtNum(o.den)} إجابة اشتباه، مقابل ${fmtPct(o.othersShare)} في باقي ${groupLabel(o.sea)}`, page: "نتائج الأداء للمنافذ",
+      recommendation: `مراجعة معايير الاشتباه في منفذ ${o.name} لتقليل الاشتباهات غير المستحقة وما يترتب عليها من فحص إضافي.`,
+      figures: [F(`الاشتباهات الخاطئة · ${o.name}`, fmtPct(o.share)), F(`الاشتباهات الخاطئة · باقي ${groupLabel(o.sea)}`, fmtPct(o.othersShare)), F(`إجابات الاشتباه في ${o.name}`, fmtNum(o.den))],
+      page: "نتائج الأداء للمنافذ",
     });
   }
 
@@ -116,14 +127,18 @@ export function buildStatements(model: ReportModel): Statement[] {
     add({
       priority: unmarkedShare >= 50 ? "عالية" : "متوسطة", topic: "تحديد موقع الاشتباه",
       text: `${unmarkedShare >= 50 ? "أكثر من نصف" : "نسبة كبيرة من"} صور الاشتباه لا يُحدَّد فيها موقع الاشتباه، مما يضعف تحديد وفحص الاشتباه من قبل الوسائل الحية.`,
-      basis: `${fmtNum(markTotal.den - markTotal.num)} صورة (${fmtPct(unmarkedShare)}) من ${fmtNum(markTotal.den)} صورة اشتباه دون تحديد`, page: "هل يوجد تحديد؟",
+      recommendation: "إلزام الفاحصين بتحديد موقع الاشتباه على الصورة عند الاشتباه، وقياس الالتزام شهريًا.",
+      figures: [F("صور اشتباه بلا تحديد", fmtPct(unmarkedShare)), F("العدد", `${fmtNum(markTotal.den - markTotal.num)} من ${fmtNum(markTotal.den)}`)],
+      page: "هل يوجد تحديد؟",
     });
   }
   for (const o of findOutliers(markStats, "low", 100, 15).slice(0, MAX_PORTS_PER_TOPIC)) {
     add({
       priority: o.gap <= -25 ? "عالية" : "متوسطة", topic: "تحديد موقع الاشتباه",
       text: `تحديد موقع الاشتباه في منفذ ${o.name} أضعف منه في باقي ${groupLabel(o.sea)}، مما يؤدي إلى وجود صعوبة في تحديد الاشتباه والتأكد منه من قبل الوسائل الحية.`,
-      basis: `${o.name}: بتحديد ${fmtPct(o.share)} من ${fmtNum(o.den)} صورة اشتباه، مقابل ${fmtPct(o.othersShare)} في باقي ${groupLabel(o.sea)}`, page: "هل يوجد تحديد؟",
+      recommendation: `متابعة التزام الفاحصين بتحديد موقع الاشتباه في منفذ ${o.name}، وتوجيه غير الملتزمين منهم.`,
+      figures: [F(`صور بتحديد · ${o.name}`, fmtPct(o.share)), F(`صور بتحديد · باقي ${groupLabel(o.sea)}`, fmtPct(o.othersShare)), F(`صور اشتباه ${o.name}`, fmtNum(o.den))],
+      page: "هل يوجد تحديد؟",
     });
   }
 
@@ -136,13 +151,15 @@ export function buildStatements(model: ReportModel): Statement[] {
     const [lowN, highN] = l1.overall < l2.overall ? ["الأول", "الثاني"] : ["الثاني", "الأول"];
     add({
       priority: "للعلم", topic: "المستويان",
-      text: `إجابات المستوى ${lowN} أقل توافقًا مع رأي أخصائي الجودة من إجابات المستوى ${highN}.`,
-      basis: `الأول ${fmtPct(l1.overall)} من ${fmtNum(l1.evaluable)} | الثاني ${fmtPct(l2.overall)} من ${fmtNum(l2.evaluable)}`, page: "دقة إجابات المستوى الأول والثاني",
+      text: `إجابات المستوى ${lowN} أقل توافقًا مع رأي أخصائي ضمان جودة الأشعة من إجابات المستوى ${highN}.`,
+      recommendation: `مراجعة أداء المستوى ${lowN} وتوحيد معايير الاشتباه بين المستويين.`,
+      figures: [F("معدل الاتفاق · المستوى الأول", fmtPct(l1.overall)), F("معدل الاتفاق · المستوى الثاني", fmtPct(l2.overall)), F("إجابات كل مستوى", fmtNum(l1.evaluable))],
+      page: "دقة إجابات المستوى الأول والثاني",
     });
   }
 
   // ── Image quality ↔ agreement (an association: quality is self-reported, so no cause is claimed) ──────────────
-  // Same image-level fold as the quality-by-agreement page, so the statement and the page agree.
+  // Same image-level fold as the quality-by-agreement page, so the observation and the page agree.
   const byQ = collectQualityImageOutcomes(model);
   const q = (k: string): FourCounts => byQ.get(`all|${k}`) ?? { correctClean: 0, correctSuspicion: 0, missedSuspicion: 0, falseSuspicion: 0 };
   const qLow = accuracyOf(q("منخفض"));
@@ -151,7 +168,9 @@ export function buildStatements(model: ReportModel): Statement[] {
     add({
       priority: "متوسطة", topic: "جودة الصورة",
       text: "تدنّي جودة الصورة يؤدي إلى اشتباهات خاطئة أو اشتباهات فائتة بمعدل أكبر من الصور ذات الجودة العالية.",
-      basis: `منخفضة ${fmtPct(qLow.overall)} من ${fmtNum(qLow.evaluable)} صورة | عالية ${fmtPct(qHigh.overall)} من ${fmtNum(qHigh.evaluable)} صورة`, page: "نسبة التوائم حسب جودة الصورة",
+      recommendation: "معالجة أسباب تدنّي جودة الصور (التصوير والجهاز) كخطوة أولى لتحسين دقة القرار.",
+      figures: [F("اشتباهات خاطئة أو فائتة · جودة منخفضة", fmtPct(100 - qLow.overall)), F("اشتباهات خاطئة أو فائتة · جودة عالية", fmtPct(100 - qHigh.overall)), F("الصور منخفضة الجودة", fmtNum(qLow.evaluable))],
+      page: "نسبة التوائم حسب جودة الصورة",
     });
   }
 
@@ -162,31 +181,31 @@ export function buildStatements(model: ReportModel): Statement[] {
     .slice(0, MAX_STATEMENTS);
 }
 
-/** The statements as a workbook: sheet 1 in words only (no figures), sheet 2 the figures each statement rests on. */
+/** The observations and recommendations as a workbook: sheet 1 the table as the report shows it, sheet 2 the figures behind each observation. */
 export function buildStatementsWorkbook(statements: Statement[], periodLabel: string): XLSX.WorkBook {
   const wb = XLSX.utils.book_new();
   const aoa: Array<Array<string | number>> = [
-    [`الإفادات المهمة المستخلصة من نتائج التقرير - ${periodLabel}`],
+    [`الملاحظات والتوصيات المستخلصة من نتائج التقرير - ${periodLabel}`],
     [],
-    ["الأولوية", "الموضوع", "الإفادة", "صفحة التقرير"],
-    ...statements.map((s): Array<string | number> => [s.priority, s.topic, s.plain, s.page]),
+    ["#", "الملاحظة", "التوصية", "الأولوية", "صفحة التقرير"],
+    ...statements.map((s, i): Array<string | number> => [i + 1, s.plain, s.recommendation, s.priority, s.page]),
   ];
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"] = [{ wch: 10 }, { wch: 22 }, { wch: 110 }, { wch: 40 }];
-  XLSX.utils.book_append_sheet(wb, ws, "الإفادات المهمة");
+  ws["!cols"] = [{ wch: 5 }, { wch: 90 }, { wch: 70 }, { wch: 10 }, { wch: 40 }];
+  XLSX.utils.book_append_sheet(wb, ws, "الملاحظات والتوصيات");
   const basis = XLSX.utils.aoa_to_sheet([
-    ["الأساس الرقمي للإفادات"],
+    ["الأرقام التي تستند إليها الملاحظات"],
     [],
-    ["الموضوع", "الإفادة", "الأرقام التي تستند إليها", "صفحة التقرير"],
-    ...statements.map((s): Array<string | number> => [s.topic, s.plain, s.basis, s.page]),
+    ["#", "الملاحظة", "الرقم", "القيمة"],
+    ...statements.flatMap((s, i): Array<Array<string | number>> => s.figures.map((f) => [i + 1, s.plain, f.label, f.value])),
   ]);
-  basis["!cols"] = [{ wch: 22 }, { wch: 90 }, { wch: 80 }, { wch: 40 }];
-  XLSX.utils.book_append_sheet(wb, basis, "الأساس الرقمي");
+  basis["!cols"] = [{ wch: 5 }, { wch: 90 }, { wch: 50 }, { wch: 22 }];
+  XLSX.utils.book_append_sheet(wb, basis, "الأرقام");
   return wb;
 }
 
-/** Build and download the statements workbook for a report input (browser). */
+/** Build and download the observations workbook for a report input (browser). */
 export function downloadStatementsWorkbook(input: ExecutiveReportInput, periodLabel: string): void {
   const model = buildReportModel(input, {});
-  XLSX.writeFile(buildStatementsWorkbook(buildStatements(model), periodLabel), `الإفادات_المهمة_${periodLabel}.xlsx`, { compression: true });
+  XLSX.writeFile(buildStatementsWorkbook(buildStatements(model), periodLabel), `الملاحظات_والتوصيات_${periodLabel}.xlsx`, { compression: true });
 }

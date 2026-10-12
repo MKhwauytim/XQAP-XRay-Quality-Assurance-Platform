@@ -326,7 +326,7 @@ export type PopulationSummary = {
   levelOne: { clean: number; suspicious: number; other: number };
   levelTwo: { clean: number; suspicious: number; other: number };
   /** The same L1 / L2 tallies per stage (raw stage text, like `byStage`), so each level of the report can show its own answers. */
-  byStageLevels: Record<string, { levelOne: { clean: number; suspicious: number; other: number }; levelTwo: { clean: number; suspicious: number; other: number } }>;
+  byStageLevels: Record<string, { levelOne: { clean: number; suspicious: number; other: number }; levelTwo: { clean: number; suspicious: number; other: number }; /** Joint L1 × L2 results (first word = level 1). Absent in summaries built before it existed. */ pairs?: { cleanClean: number; suspClean: number; cleanSusp: number; suspSusp: number; other: number } }>;
   /** Raw non-standard result values with their counts, per level. */
   otherValues: { levelOne: Record<string, number>; levelTwo: Record<string, number> };
   sheets: Array<{ name: string; rows: number }>;

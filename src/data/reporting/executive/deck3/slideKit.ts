@@ -267,20 +267,28 @@ ${r.cells.map((c) => `  <div class="v3-qm-cell">
   return `<div class="v3-qm">${head}\n${body}</div>`;
 }
 
-// ── Statements (الإفادات) ───────────────────────────────────────────────────
+// ── Observations and recommendations (الملاحظات والتوصيات) ─────────────────────────────────────────────
 
-export type StatementItem = { text: string; tag: string; tone: "red" | "gold" | "none" };
+export type ObservationFigure = { label: string; value: string };
+export type ObservationRow = {
+  number: string;
+  tone: "red" | "gold" | "navy";
+  observation: string;
+  /** The numbers behind the observation, shown as a separate labelled row under its sentence. */
+  figures: ObservationFigure[];
+  recommendation: string;
+};
 
-/** Numbered statement rows; the text and the priority tag are separate leaves so the viewer can edit each. */
-export function statementList(items: StatementItem[], startAt = 0): string {
-  const rows = items
-    .map((it, i) => `<div class="v3-st-row">
-  <span class="v3-st-num">${pad2(startAt + i + 1)}</span>
-  <span class="v3-st-text">${esc(it.text)}</span>${it.tag ? `
-  <span class="v3-st-tag ${it.tone}">${esc(it.tag)}</span>` : ""}
-</div>`)
+/** The table # | الملاحظة | التوصية. Every text, figure label and value is its own leaf so the viewer can edit each. */
+export function observationsTable(rows: ObservationRow[]): string {
+  const body = rows
+    .map((r) => `<tr>
+  <td class="v3-obs-num ${r.tone}">${esc(r.number)}</td>
+  <td class="v3-obs-main"><span class="v3-obs-text">${esc(r.observation)}</span>${r.figures.length ? `<div class="v3-obs-figs">${r.figures.map((f) => `<span class="v3-fig"><small>${esc(f.label)}</small><b>${esc(f.value)}</b></span>`).join("")}</div>` : ""}</td>
+  <td class="v3-obs-rec"><span class="v3-obs-text">${esc(r.recommendation)}</span></td>
+</tr>`)
     .join("\n");
-  return `<div class="v3-st-list">${rows}</div>`;
+  return `<table class="v3-obs"><thead><tr><th>#</th><th>الملاحظة</th><th>التوصية</th></tr></thead><tbody>${body}</tbody></table>`;
 }
 
 // ── Section dividers ────────────────────────────────────────────────────────
