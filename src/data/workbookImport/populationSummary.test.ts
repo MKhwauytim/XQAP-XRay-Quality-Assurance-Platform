@@ -47,6 +47,19 @@ describe("createPopulationFold", () => {
     expect(other.finish([]).levelOne.other).toBe(1);
   });
 
+  it("counts the joint level-1 × level-2 results per stage (first word = level 1)", () => {
+    const fold = createPopulationFold();
+    const add = (id: string, l1: string, l2: string) => fold.add(row({ "معرف الأشعة": id, "نتيجة المستوى الأول": l1, "نتيجة المستوى الثاني": l2 }), false);
+    add("A1", "سليمة", "سليمة");
+    add("A2", "سليمة", "سليمة");
+    add("A3", "اشتباه", "سليمة");
+    add("A4", "سليمة", "اشتباه");
+    add("A5", "اشتباه", "اشتباه");
+    add("A6", "1", "سليمة");
+    const [pairs] = Object.values(fold.finish([]).byStageLevels).map((v) => v.pairs);
+    expect(pairs).toEqual({ cleanClean: 2, suspClean: 1, cleanSusp: 1, suspSusp: 1, other: 1 });
+  });
+
   it("skips rows without an image id or a stage, and labels blanks «فارغ»", () => {
     const fold = createPopulationFold();
     fold.add(row({ "معرف الأشعة": "" }), false);

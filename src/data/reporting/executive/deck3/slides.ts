@@ -21,7 +21,7 @@ import { ORGANIZATION_PATH, ZATCA_LOGO_URL } from "../../../../branding/organiza
 import {
   coverSlide, closingSlide, contentsSlide, glossarySlide, levelDefinitionSlide,
   kpiBand, sectionDivider, tintedPanel, dataTable, chartTitleRow,
-  legendRow, slideShell, contentHead, pad2, qualityMatrix, statementList,
+  legendRow, slideShell, contentHead, pad2, qualityMatrix, observationsTable, type ObservationRow,
   type OrgBlock, type SlideMeta, type TableCell, type QualityCell, type QualityRow,
 } from "./slideKit";
 import { barChart, fitAxis, scaleCaption } from "./chartKit";
@@ -59,13 +59,29 @@ const DEPARTMENT = "إدارة الرقابة على الامتثال للمنا
 
 const EYEBROW_S1 = "القسم الأول - مجتمع الفحص والعيّنة";
 const EYEBROW_S2 = "القسم الثاني — نتائج فحص الجودة";
-const EYEBROW_S3 = "القسم الثالث - الإفادات";
+const EYEBROW_S3 = "القسم الثالث - الملاحظات والتوصيات";
 
 export type StatementPriority = "عالية" | "متوسطة" | "للعلم";
 /** A key statement drafted from the report's results (see statements.ts); `basis` and `page` trace its figures. */
-export type Statement = { priority: StatementPriority; topic: string; text: string; /** Same statement in words only, no figures. */ plain: string; basis: string; page: string };
-const STATEMENTS_PER_PAGE = 5;
-const STATEMENT_PLACEHOLDER = "اكتب الإفادة هنا…";
+export type StatementFigure = { label: string; value: string };
+export type Statement = {
+  priority: StatementPriority;
+  topic: string;
+  /** The observation, a sentence with no numbers in it. */
+  text: string;
+  /** Same observation in words only (kept for the workbook). */
+  plain: string;
+  /** The recommendation drafted for it. */
+  recommendation: string;
+  /** The numbers behind the observation, kept apart from its sentence. */
+  figures: StatementFigure[];
+  /** The same figures as one line, for traceability. */
+  basis: string;
+  page: string;
+};
+const STATEMENTS_PER_PAGE = 3;
+const OBSERVATION_PLACEHOLDER = "اكتب الملاحظة هنا…";
+const RECOMMENDATION_PLACEHOLDER = "اكتب التوصية هنا…";
 
 // ── Presentation-layer rate helpers ─────────────────────────────────────────
 
@@ -327,7 +343,7 @@ function deck3Copy(completedOnly: boolean, monthlyTarget: number, completedTotal
     const ceLabels = getLabels();
     return {
       eyebrowS2: withPopulation ? EYEBROW_S2 : "القسم الأول — نتائج فحص الجودة",
-      eyebrowS3: withPopulation ? EYEBROW_S3 : "القسم الثاني - الإفادات",
+      eyebrowS3: withPopulation ? EYEBROW_S3 : "القسم الثاني - الملاحظات والتوصيات",
       kpiTitle: "المؤشرات الرئيسية",
       kpiEyebrow: "خلاصة التقرير",
       coverKicker: "عرض تنفيذي · تقرير شامل",
@@ -423,7 +439,7 @@ export async function buildDeck3Slides(
     s2: !co
       ? "دقة النتائج على مستوى الشهر وحسب المنفذ ومستوى المخاطر."
       : withPop ? "دقة النتائج على مستوى الفترة وحسب المنفذ ومستوى المخاطر." : "دقة النتائج على مستوى التقرير وحسب المنفذ ومستوى المخاطر.",
-    s3: "أهم الإفادات المستخلصة من نتائج التقرير، ومساحة لكتابة إفادات إضافية، والتوافق مع الفرق الأمنية ومحرك المخاطر.",
+    s3: "أهم الملاحظات والتوصيات المستخلصة من نتائج التقرير، ومساحة لإضافة ملاحظات وتوصيات، والتوافق مع الفرق الأمنية ومحرك المخاطر.",
   };
 
   // Port lists + pagination, computed up front — slides 8 and 11 (population
@@ -622,7 +638,7 @@ ${kpiBand(coNoPop ? [
       { label: "التغطية الرقابية", value: fmtPct(model.sample.coverage ?? null), valueTone: "gold", sub: withPop ? "نسبة العيّنة من المستهدف" : "نسبة العينة من المجتمع" },
     ], "top")}
 ${kpiBand([
-      { label: "نسبة التوائم", value: fmtPct(overallStats.overall), valueTone: "green", aside: `من ${fmtNum(t.evaluable)} إجابة مدروسة`, sub: RESULT_ACCURACY_DEFINITION },
+      { label: "نسبة التوائم", value: fmtPct(overallStats.overall), valueTone: "green", aside: `من ${fmtNum(t.evaluable)} إجابة مفحوصة`, sub: RESULT_ACCURACY_DEFINITION },
       { label: "نسبة تحديد موقع الاشتباه", value: fmtPct(model.imageQuality.markingRate), valueTone: "red", sub: "التزام الفاحصين بتحديد مواقع الاشتباه" },
       { label: "الاشتباهات الفائتة", value: fmtNum(t.missedSuspicion), aside: missedShare === null ? undefined : `${fmtPct(missedShare)} من إجابات السليمة`, sub: MISSED_SUSPICION_DEFINITION,
         extra: { label: "الاشتباهات الخاطئة", value: fmtNum(t.falseSuspicion), valueTone: "gold", aside: falseShare === null ? undefined : `${fmtPct(falseShare)} من إجابات الاشتباه`, sub: FALSE_SUSPICION_DEFINITION } },
@@ -729,7 +745,44 @@ ${kpiBand([
       const cur = perStage.get(st.stageKey) ?? { n: 0, l1: zero(), l2: zero() };
       return rowFor(st.stageLabel, cur.n, cur.l1, cur.l2);
     });
+    // مصفوفة النتائج: how many images fall in each L1 × L2 combination (first word = level 1's result, second = level 2's), per risk level.
+    type Pairs = NonNullable<(typeof s.byStageLevels)[string]["pairs"]>;
+    const zeroPairs = (): Pairs => ({ cleanClean: 0, suspClean: 0, cleanSusp: 0, suspSusp: 0, other: 0 });
+    const pairsByStage = new Map<string, Pairs>();
+    for (const [raw, lv] of Object.entries(s.byStageLevels)) {
+      const key = getStageKey(raw);
+      const cur = pairsByStage.get(key) ?? zeroPairs();
+      for (const k of Object.keys(cur) as Array<keyof Pairs>) cur[k] += lv.pairs?.[k] ?? 0;
+      pairsByStage.set(key, cur);
+    }
+    const hasPairs = Object.values(s.byStageLevels).every((lv) => lv.pairs !== undefined);
+    const pairCells = (label: string, p: Pairs): TableCell[] => {
+      const n = p.cleanClean + p.suspClean + p.cleanSusp + p.suspSusp + p.other;
+      const c = (v: number) => countRateCell(v, pct(v, n));
+      return [
+        { html: label },
+        { html: fmtNum(n), cls: "v-navy" },
+        { html: c(p.cleanClean), cls: "v-green" },
+        { html: c(p.suspClean), cls: "v-gold" },
+        { html: c(p.cleanSusp), cls: "v-gold" },
+        { html: c(p.suspSusp), cls: "v-red" },
+        { html: c(p.other), cls: "v-muted" },
+      ];
+    };
+    const sumPairs = [...pairsByStage.values()].reduce((a, p) => { for (const k of Object.keys(a) as Array<keyof Pairs>) a[k] += p[k]; return a; }, zeroPairs());
+    const matrixHtml = hasPairs
+      ? `<h3 class="v3-sub-title">مصفوفة النتائج <small>الكلمة الأولى = نتيجة المستوى الأول، والثانية = نتيجة المستوى الثاني</small></h3>
+${dataTable({
+          headers: ["المستوى", "الإجمالي", "سليمة – سليمة", "اشتباه – سليمة", "سليمة – اشتباه", "اشتباه – اشتباه", "أخرى"],
+          rows: model.population.byStage.map((st) => pairCells(st.stageLabel, pairsByStage.get(st.stageKey) ?? zeroPairs())),
+          totals: pairCells("الإجمالي", sumPairs),
+          firstColWidth: 26,
+          rowPx: 32,
+        })}
+<h3 class="v3-sub-title">نتائج كل مستوى</h3>`
+      : "";
     const inner = `${contentHead({ eyebrow: EYEBROW_S1, title: "نتائج المستويين في المجتمع", note: `${fmtNum(s.total)} صورة — مجموع أشهر الفترة · إجابات المستوى الأول والثاني لكل مستوى` })}
+${matrixHtml}
 ${dataTable({
       headers: ["المستوى", "الإجمالي", "الأول", "الثاني", "الأول", "الثاني", "الأول", "الثاني"],
       topHeader: [{ label: "", span: 2 }, { label: "سليمة", span: 2, group: true }, { label: "اشتباه", span: 2, group: true }, { label: "أخرى", span: 2, group: true }],
@@ -737,6 +790,7 @@ ${dataTable({
       rows: stageRows,
       totals: rowFor("الإجمالي", s.total, s.levelOne, s.levelTwo),
       firstColWidth: 26,
+      ...(hasPairs ? { rowPx: 36 } : {}),
     })}`;
     parts.push(slideShell(m, "", inner));
   }
@@ -828,8 +882,8 @@ ${kpiBand([
       { label: "الاشتباهات الفائتة", value: fmtNum(t.missedSuspicion), valueTone: "red", aside: `${fmtPct(pct(t.missedSuspicion, overallStats.cleanResults))} من إجابات السليمة`, sub: MISSED_SUSPICION_DEFINITION },
       { label: "الاشتباهات الخاطئة", value: fmtNum(t.falseSuspicion), valueTone: "gold", aside: `${fmtPct(pct(t.falseSuspicion, overallStats.suspResults))} من إجابات الاشتباه`, sub: FALSE_SUSPICION_DEFINITION },
     ], "solo", true)}
-<div class="v3-note" style="margin-top:18px;font-weight:700;color:var(--v3-navy);">الإجابات حسب مستويات المخاطر — النسبة بين قوسين من الإجابات المدروسة في كل مستوى</div>
-${dataTable({ headers: ["المستوى", "الإجابات المدروسة", "نسبة التوائم العامة", "الاشتباهات الفائتة", "الاشتباهات الخاطئة"], topHeader: [{ label: "", span: 2 }, { label: "النسبة", span: 1, group: true }, { label: "الأخطاء", span: 2, group: true }], groupStart: [2, 3], rows: stageRows, totals })}`;
+<div class="v3-note" style="margin-top:18px;font-weight:700;color:var(--v3-navy);">الإجابات حسب مستويات المخاطر — النسبة بين قوسين من الإجابات المفحوصة في كل مستوى</div>
+${dataTable({ headers: ["المستوى", "الإجابات المفحوصة", "نسبة التوائم العامة", "الاشتباهات الفائتة", "الاشتباهات الخاطئة"], topHeader: [{ label: "", span: 2 }, { label: "النسبة", span: 1, group: true }, { label: "الأخطاء", span: 2, group: true }], groupStart: [2, 3], rows: stageRows, totals })}`;
     parts.push(slideShell(m, "", inner));
   }
 
@@ -884,12 +938,12 @@ ${dataTable({ headers: ["المستوى", "الإجابات المدروسة", "
       tintedPanel({
         variant, title, padLg: true,
         body: `<div class="v3-cmp-rows">
-  <div class="v3-cmp-row"><span>الإجابات المدروسة</span><b>${fmtNum(a.evaluable)}</b></div>
+  <div class="v3-cmp-row"><span>الإجابات المفحوصة</span><b>${fmtNum(a.evaluable)}</b></div>
   <div class="v3-cmp-row"><span>دقة السليمة</span><b class="v-green">${fmtPct(a.cleanAcc)}</b></div>
   <div class="v3-cmp-row"><span>دقة الاشتباه</span><b class="v-red">${fmtPct(a.suspAcc)}</b></div>
   <div class="v3-cmp-row"><span>الدقة العامة</span><b>${fmtPct(a.overall)}</b></div>
   <div class="v3-cmp-row"><span>اشتباهات فائتة</span><b>${fmtNum(missed)} إجابة</b></div>
-  <div class="v3-cmp-row"><span>نتائج أخرى (غير مدروسة)</span><b>${fmtNum(other)}</b></div>
+  <div class="v3-cmp-row"><span>نتائج أخرى (غير مفحوصة)</span><b>${fmtNum(other)}</b></div>
 </div>`,
       });
     const inner = `${contentHead({
@@ -1012,7 +1066,7 @@ ${dataTable({ headers: ["المستوى", "الإجابات المدروسة", "
       { html: countRateCell(c.marked, pct(c.marked, c.images)), cls: "v-green" },
       { html: countRateCell(c.unmarked, pct(c.unmarked, c.images)), cls: "v-red" },
     ];
-    const headers = ["المنفذ", "صور الاشتباه المدروسة", "صور بتحديد", "صور بدون تحديد"];
+    const headers = ["المنفذ", "صور الاشتباه المفحوصة", "صور بتحديد", "صور بدون تحديد"];
     const sumOf = (list: MarkingOnlyCounts[]): MarkingOnlyCounts =>
       list.reduce((a, c) => ({ images: a.images + c.images, marked: a.marked + c.marked, unmarked: a.unmarked + c.unmarked }), { images: 0, marked: 0, unmarked: 0 });
     const groups = accGroups.length > 0 ? accGroups : [{ variant: "land" as const, panelTitle: "المنافذ البرية", totalLabel: "إجمالي البرية", ports: portAcc.land }];
@@ -1041,7 +1095,7 @@ ${dataTable({ headers: ["المستوى", "الإجابات المدروسة", "
       { html: countRateCell(c.mid, pct(c.mid, c.images)), cls: "v-gold" },
       { html: countRateCell(c.high, pct(c.high, c.images)), cls: "v-green" },
     ];
-    const headers = ["المنفذ", "الصور المقيّمة", "جودة منخفضة", "جودة متوسطة", "جودة عالية"];
+    const headers = ["المنفذ", "الصور المفحوصة", "جودة منخفضة", "جودة متوسطة", "جودة عالية"];
     const qualityShown = accGroups.length > 0 ? accGroups : [{ variant: "land" as const, title: "للمنافذ البرية", panelTitle: "المنافذ البرية", totalLabel: "إجمالي البرية", ports: portAcc.land }];
     for (const g of qualityShown) {
       const m = meta("s2", eyebrowS2);
@@ -1049,7 +1103,7 @@ ${dataTable({ headers: ["المستوى", "الإجابات المدروسة", "
         .map((p) => ({ name: p.name, c: quality.get(p.name) ?? emptyQuality() }))
         .sort((a, b) => b.c.images - a.c.images || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
       const total = sumQuality(rows.map((r) => r.c));
-      const inner = `${contentHead({ eyebrow: eyebrowS2, title: `جودة الصور المقيّمة ${g.title}` })}
+      const inner = `${contentHead({ eyebrow: eyebrowS2, title: `جودة الصور المفحوصة ${g.title}` })}
 <div class="v3-two-col" style="grid-template-columns:1fr">
   ${tintedPanel({ variant: g.variant, title: g.panelTitle, body: dataTable({ headers, rows: rows.map((r) => cellsOf(esc(r.name), r.c)), totals: cellsOf(g.totalLabel, total, "v-navy"), firstColWidth: 26, rowPx: portRowPx(rows.length, 0) }) })}
 </div>`;
@@ -1102,25 +1156,31 @@ ${qualityMatrix(levels.map((l) => ({ label: l.label, tone: l.tone })), rows)}`;
     eyebrow: footText,
     ghost: copy.s3Ghost,
     kicker: copy.s3Kicker,
-    title: "الإفادات",
+    title: "الملاحظات والتوصيات",
     description: sectionDesc.s3,
     footItems: [],
     meta: meta("s3", eyebrowS3),
   }));
 
-  // Statements drafted from the results (fixed rules), five per page, each editable in the viewer; then one page of
-  // blank lines to write further statements. Empty text leaves are skipped by the editor, so the blanks carry a prompt.
+  // Observations drafted from the results (fixed rules), three per page as a table # | الملاحظة | التوصية with the numbers behind each
+  // observation on their own row; each text is editable in the viewer. A last page of blank rows is left to write more.
   for (let p = 0; p < statementPages; p++) {
     const chunk = statements.slice(p * STATEMENTS_PER_PAGE, (p + 1) * STATEMENTS_PER_PAGE);
     const isBlank = p === statementPages - 1;
-    const items = isBlank
-      ? Array.from({ length: STATEMENTS_PER_PAGE }, () => ({ text: STATEMENT_PLACEHOLDER, tag: "", tone: "none" as const }))
-      : chunk.map((s) => ({ text: s.text, tag: s.priority, tone: s.priority === "عالية" ? "red" as const : s.priority === "متوسطة" ? "gold" as const : "none" as const }));
+    const rows: ObservationRow[] = isBlank
+      ? Array.from({ length: STATEMENTS_PER_PAGE }, () => ({ number: "", tone: "navy" as const, observation: OBSERVATION_PLACEHOLDER, figures: [], recommendation: RECOMMENDATION_PLACEHOLDER }))
+      : chunk.map((s, i) => ({
+          number: pad2(p * STATEMENTS_PER_PAGE + i + 1),
+          tone: s.priority === "عالية" ? "red" as const : s.priority === "متوسطة" ? "gold" as const : "navy" as const,
+          observation: s.text,
+          figures: s.figures,
+          recommendation: s.recommendation,
+        }));
     parts.push(slideShell(meta("s3", eyebrowS3), "", `${contentHead({
       eyebrow: eyebrowS3,
-      title: isBlank ? "إفادات إضافية" : "أهم الإفادات من نتائج التقرير" + (p > 0 ? YITBA : ""),
+      title: isBlank ? "ملاحظات وتوصيات إضافية" : "أهم الملاحظات والتوصيات" + (p > 0 ? YITBA : ""),
     })}
-${statementList(items, isBlank ? 0 : p * STATEMENTS_PER_PAGE)}`));
+${observationsTable(rows)}`));
   }
 
 

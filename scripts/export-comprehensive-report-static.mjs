@@ -58,7 +58,7 @@ try {
   const xlsxPath = outPath.replace(/\.html$/i, "") + "-data.xlsx";
   const buf = (XLSX.write ?? XLSX.default.write)(book, { type: "buffer", bookType: "xlsx", compression: true });
   writeFileSync(xlsxPath, buf);
-  // The important statements (الإفادات) drafted from the report's results, as a separate small workbook.
+  // The observations and recommendations (الملاحظات والتوصيات) drafted from the report's results, as a separate small workbook.
   const { buildStatements, buildStatementsWorkbook } = await server.ssrLoadModule("/src/data/reporting/executive/deck3/statements.ts");
   const { buildReportModel } = await server.ssrLoadModule("/src/data/reporting/executive/model/reportModel.ts");
   const statements = buildStatements(buildReportModel(input, {}));

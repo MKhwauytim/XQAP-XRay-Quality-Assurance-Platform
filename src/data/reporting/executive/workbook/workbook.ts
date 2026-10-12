@@ -169,13 +169,13 @@ export const SHEET_NAMES = {
 function kpiScopeRows(model: ReportModel): Cell[][] {
   const k = model.kpis;
   if (model.scope === "completed-only") {
-    return [[getLabels().ce_completed_samples, k.totalPopulation], ["مدروسة", k.studiedImages], []];
+    return [[getLabels().ce_completed_samples, k.totalPopulation], ["مفحوصة", k.studiedImages], []];
   }
   return [
     ["إجمالي المجتمع", k.totalPopulation],
     ["إجمالي العينة", k.totalSample],
     ["تغطية المجتمع%", pct(k.sampleCoverage)],
-    ["مدروسة", k.studiedImages],
+    ["مفحوصة", k.studiedImages],
     ["متبقية", k.remainingImages],
     ["إنجاز العينة%", pct(k.completionRate)],
     [],
@@ -253,12 +253,12 @@ function portSheet(model: ReportModel): Cell[][] {
     completedOnly
       ? [
           "المنفذ", getLabels().ce_completed_samples, "سليمة", "اشتباه", "نسبة الاشتباه%",
-          "مدروسة", "دقة%", "اكتشاف الاشتباه%", "اشتباه فائت%",
+          "مفحوصة", "دقة%", "اكتشاف الاشتباه%", "اشتباه فائت%",
           "دقة م.أول%", "دقة م.ثاني%", "التصنيف",
         ]
       : [
           "المنفذ", "المجتمع", "سليمة", "اشتباه", "نسبة الاشتباه%", "العينة", "التغطية%",
-          "مدروسة", "إنجاز%", "دقة%", "اكتشاف الاشتباه%", "اشتباه فائت%",
+          "مفحوصة", "إنجاز%", "دقة%", "اكتشاف الاشتباه%", "اشتباه فائت%",
           "دقة م.أول%", "دقة م.ثاني%", "التصنيف",
         ],
     ...model.population.byPort.map((p) => {
@@ -288,12 +288,12 @@ function portSheet(model: ReportModel): Cell[][] {
 function stageSheet(model: ReportModel): Cell[][] {
   if (model.scope === "completed-only") {
     return [
-      ["المرحلة", getLabels().ce_completed_samples, "مدروسة"],
+      ["المرحلة", getLabels().ce_completed_samples, "مفحوصة"],
       ...model.population.byStage.map((s) => [text(s.stageLabel), s.population, s.studied]),
     ];
   }
   return [
-    ["المرحلة", "المجتمع", "العينة", "التغطية%", "مدروسة", "إنجاز%"],
+    ["المرحلة", "المجتمع", "العينة", "التغطية%", "مفحوصة", "إنجاز%"],
     ...model.population.byStage.map((s) => [
       text(s.stageLabel),
       s.population,

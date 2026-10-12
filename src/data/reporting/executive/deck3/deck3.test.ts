@@ -61,7 +61,7 @@ describe("buildExecutiveDeckV3", () => {
     const html = await buildExecutiveDeckV3(input([popRow()]));
     const sectioned = (html.match(/data-section=/g) ?? []).length;
     expect(sectioned).toBe(23);
-    expect(html).toContain('data-section-label="القسم الثالث - الإفادات"');
+    expect(html).toContain('data-section-label="القسم الثالث - الملاحظات والتوصيات"');
     expect(html).not.toContain("—");
   });
 
@@ -130,7 +130,7 @@ describe("buildExecutiveDeckV3", () => {
     expect(html).toContain("لا توجد بيانات لهذا التحليل في الملف");
     expect(html).toContain(">02 / 22<");
     // Section 3 always carries a blank page to write statements on.
-    expect(html).toContain("اكتب الإفادة هنا…");
+    expect(html).toContain("اكتب الملاحظة هنا…");
   });
 
   it("escapes data-derived strings (port names) in the slides", async () => {

@@ -135,7 +135,7 @@ describe.each(bases)("real builders on a combined input (%s)", (_name, base) => 
       "القسم الثالث", "مؤشرات الشهر", "عيّنة هذا الشهر", "نتائج الشهر", "فترة الدراسة (عيّنة شهر)",
     ]) expect(html, absent).not.toContain(absent);
     for (const present of [
-      "القسم الأول - نتائج فحص الجودة", "القسم الثاني - الإفادات",
+      "القسم الأول - نتائج فحص الجودة", "القسم الثاني - الملاحظات والتوصيات",
       getLabels().ce_scope_note, getLabels().ce_completed_samples,
     ]) expect(html, present).toContain(present.replaceAll("—", "-")); // deck3 prints a plain hyphen, never an em dash
     // Every slide's footer total matches the real slide count.
