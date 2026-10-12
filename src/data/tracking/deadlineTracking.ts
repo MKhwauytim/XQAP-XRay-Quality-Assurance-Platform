@@ -16,6 +16,7 @@ import type { ItemAnswer } from "../answers/answerTypes";
 import { isNoImageSubmission } from "../answers/noImageAnswer";
 import type { TemplateSchema } from "../templates/templateTypes";
 import { countWorkingDays, isWorkingDay } from "../../utils/workingDays";
+import { formatMonthFolderName, parseMonthFolderName } from "../population/monthFolder";
 
 export type AnswerState = "completed" | "hold" | "pending" | "replaced";
 
@@ -89,6 +90,50 @@ export type TrackingInput = {
   deadline: Date;
   today: Date;
 };
+
+/**
+ * The month the tracking calendar should show. Normally the selected sample's
+ * month, but a sample attached to a month other than the one the work is
+ * happening in (e.g. a January sample reviewed in October) would show an empty
+ * calendar and zero averages, since every finished row is dated outside it.
+ * So: keep the sample's month when today falls in it or any finished row is
+ * dated inside it; otherwise follow the work — the month of the latest finished
+ * row, or today's month when nothing is finished yet.
+ */
+export function resolveTrackingMonthFolder(
+  monthFolder: string,
+  rows: readonly TrackingRow[],
+  today: Date,
+): string {
+  const info = parseMonthFolderName(monthFolder);
+  if (!info) return monthFolder;
+  if (today.getFullYear() === info.year && today.getMonth() === info.month - 1) return monthFolder;
+  // Tally finished rows per calendar month. A single stray row dated inside the
+  // sample's month must not pin the calendar there while the real work sits in
+  // another month (that leaves every day at 0), so the busiest month wins and
+  // ties go to the later one.
+  const perMonth = new Map<number, number>();
+  for (const row of rows) {
+    if (row.state === "pending" || !row.doneAt) continue;
+    const d = new Date(row.doneAt);
+    if (Number.isNaN(d.getTime())) continue;
+    const key = d.getFullYear() * 12 + d.getMonth();
+    perMonth.set(key, (perMonth.get(key) ?? 0) + 1);
+  }
+  let best = -1;
+  let bestCount = 0;
+  for (const [key, count] of perMonth) {
+    if (count > bestCount || (count === bestCount && key > best)) {
+      best = key;
+      bestCount = count;
+    }
+  }
+  if (best < 0) return formatMonthFolderName(today.getMonth() + 1, today.getFullYear());
+  const bestYear = Math.floor(best / 12);
+  const bestMonth = (best % 12) + 1;
+  if (bestYear === info.year && bestMonth === info.month) return monthFolder;
+  return formatMonthFolderName(bestMonth, bestYear);
+}
 
 function dateAt(year: number, month: number, day: number): Date {
   return new Date(year, month - 1, day);

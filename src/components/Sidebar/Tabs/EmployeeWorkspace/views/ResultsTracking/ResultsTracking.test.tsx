@@ -109,6 +109,23 @@ describe("ResultsTracking", () => {
     expect(quotaTile).toContain("خارج فترة العمل");
   });
 
+  it("a January sample reviewed in October still shows the October work on the calendar", () => {
+    const { container } = render(
+      <ResultsTracking
+        monthFolder="1-january-2026"
+        rows={DATA}
+        assignedAtByUser={{ emp1: "2026-10-01T08:00:00" }}
+        directoryHandle={createMemoryDirectory()}
+        canEditDeadline={false}
+        username="admin"
+        now={NOW}
+      />,
+    );
+    const cells = container.querySelectorAll<HTMLButtonElement>(".trk-cell");
+    expect(cells[LEAD + 5 - 1].textContent).toContain("6");
+    expect(cells[LEAD + 14 - 1].className).toContain("trk-cell--today");
+  });
+
   it("marks today and the deadline day on the calendar", () => {
     const { cell } = mount(true);
     expect(cell(14).className).toContain("trk-cell--today");

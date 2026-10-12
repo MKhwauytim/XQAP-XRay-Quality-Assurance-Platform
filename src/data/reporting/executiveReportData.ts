@@ -13,6 +13,7 @@ import { isRowStudied } from "./executiveReportTypes";
 import { buildPortProfiles, buildStageProfiles } from "./executiveKpiProfiles";
 import { entryDayOf } from "./executive/model/entryDay";
 import { classifyImageResult } from "../population/imageResult";
+import { canonicalizePortNames } from "./portNameCanonical";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { StageAliasMappings } from "../population/stageHelpers";
 
@@ -127,7 +128,23 @@ export function deriveRowAccuracy(
   };
 }
 
+/**
+ * «هل يوجد تحديد» is only asked about an image that carries a suspicion at
+ * level 1 or 2 (there is nothing to mark on a clean image). A "no" recorded on
+ * an image with no suspicion is therefore not a missed marking, so the field
+ * is blanked outside that scope and every marking figure — KPI rate, per-port
+ * rate, the marking-impact page — is taken over suspicious images only.
+ */
+function scopeMarkingToSuspicion(rows: ExecutiveReportRow[]): ExecutiveReportRow[] {
+  if (!rows.some((r) => typeof r.hasMarking === "boolean" && r.imageResult !== "اشتباه")) return rows;
+  return rows.map((r) => (typeof r.hasMarking === "boolean" && r.imageResult !== "اشتباه" ? { ...r, hasMarking: null } : r));
+}
+
 export function buildExecutiveReportRows(input: ExecutiveReportInput): ExecutiveReportRow[] {
+  return canonicalizePortNames(scopeMarkingToSuspicion(buildRawExecutiveReportRows(input)));
+}
+
+function buildRawExecutiveReportRows(input: ExecutiveReportInput): ExecutiveReportRow[] {
   if (input.rowsOverride) return input.rowsOverride;
   const { populationRows, sample, distribution, employeeFiles, config } = input;
   const fieldIdsByLabel = createFieldResolver(input.template);

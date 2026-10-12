@@ -5,6 +5,27 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v153.6",
+    "date": "2026-10-12",
+    "bucket": "fix",
+    "scope": "executive report",
+    "title": "scope «هل يوجد تحديد» to اشتباه images and canonicalize port-name spellings"
+  },
+  {
+    "version": "v153.5",
+    "date": "2026-10-11",
+    "bucket": "fix",
+    "scope": "daily tracking",
+    "title": "follow the busiest finished-work month, not any stray row in the sample month"
+  },
+  {
+    "version": "v153.4",
+    "date": "2026-10-08",
+    "bucket": "fix",
+    "scope": "daily tracking",
+    "title": "rename tab to المتابعة اليومية and follow the month the work is dated in"
+  },
+  {
     "version": "v153.3",
     "date": "2026-10-08",
     "bucket": "enhancement",
@@ -52,26 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "deck3",
     "title": "population totals section from the workbook; one port-accuracy slide per port type"
-  },
-  {
-    "version": "v151.9",
-    "date": "2026-10-07",
-    "bucket": "fix",
-    "scope": "deck3",
-    "title": "charts fit with many ports; Add: follow-up workbook enrichment for the comprehensive report"
-  },
-  {
-    "version": "v151.8",
-    "date": "2026-10-06",
-    "bucket": "feature",
-    "scope": "reports",
-    "title": "per-page print on/off toggles, select all/none and saved selection in the executive HTML decks (v2, v3)"
-  },
-  {
-    "version": "v151.7",
-    "date": "2026-10-06",
-    "bucket": "fix",
-    "scope": "deck3",
-    "title": "split the last two visual slides into two (يتبع) pages each"
   }
 ];
