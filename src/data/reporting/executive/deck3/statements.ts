@@ -68,7 +68,7 @@ export function buildStatements(model: ReportModel): Statement[] {
     const [lowName, highName] = land.overall < sea.overall ? ["البرية", "البحرية"] : ["البحرية", "البرية"];
     add({
       priority: "متوسطة", topic: "المنافذ",
-      text: `التوافق في المنافذ ${lowName} أقل منه في المنافذ ${highName}، فالتحسين فيها أكبر أثرًا على دقة النتائج.`,
+      text: `التوافق في المنافذ ${lowName} أقل من المنافذ ${highName}، فالتحسين فيها أكبر أثرًا على دقة النتائج.`,
       basis: `البرية ${fmtPct(land.overall)} من ${fmtNum(land.evaluable)} | البحرية ${fmtPct(sea.overall)} من ${fmtNum(sea.evaluable)}`, page: "نتائج الأداء للمنافذ",
     });
   }
@@ -100,7 +100,7 @@ export function buildStatements(model: ReportModel): Statement[] {
   for (const o of findOutliers(falseStats, "high", 300, 10).slice(0, MAX_PORTS_PER_TOPIC)) {
     add({
       priority: "متوسطة", topic: "الاشتباهات الخاطئة",
-      text: `تكثر الاشتباهات الخاطئة في منفذ ${o.name} مقارنة بباقي ${groupLabel(o.sea)}، وهذا يعني كلفة تشغيلية في فحص إرساليات سليمة.`,
+      text: `تكثر الاشتباهات الخاطئة في منفذ ${o.name} مقارنة بباقي ${groupLabel(o.sea)}.`,
       basis: `${o.name}: ${fmtPct(o.share)} من ${fmtNum(o.den)} إجابة اشتباه، مقابل ${fmtPct(o.othersShare)} في باقي ${groupLabel(o.sea)}`, page: "نتائج الأداء للمنافذ",
     });
   }
@@ -150,7 +150,7 @@ export function buildStatements(model: ReportModel): Statement[] {
   if (qLow.evaluable > 0 && qHigh.evaluable > 0 && qLow.overall !== null && qHigh.overall !== null && qHigh.overall - qLow.overall >= 5) {
     add({
       priority: "متوسطة", topic: "جودة الصورة",
-      text: `يرتبط تدنّي جودة الصورة بانخفاض التوافق في النتيجة، فتحسين جودة التصوير ينعكس على دقة القرار${qLow.evaluable < MIN_BASE ? "؛ وعدد الصور منخفضة الجودة صغير فيُقرأ ذلك بحذر" : ""}.`,
+      text: "تدنّي جودة الصورة يؤدي إلى اشتباهات خاطئة أو اشتباهات فائتة بمعدل أكبر من الصور ذات الجودة العالية.",
       basis: `منخفضة ${fmtPct(qLow.overall)} من ${fmtNum(qLow.evaluable)} إجابة | عالية ${fmtPct(qHigh.overall)} من ${fmtNum(qHigh.evaluable)} إجابة`, page: "نسبة التوائم حسب جودة الصورة",
     });
   }
