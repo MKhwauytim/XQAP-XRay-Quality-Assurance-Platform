@@ -228,6 +228,18 @@ body{background:var(--v3-navy);font-family:"Somar","IBM Plex Sans Arabic","Tahom
 .v3-pop-row .method{font-size:24px;color:var(--v3-muted);}
 .v3-pop-row .method.census{color:var(--v3-gold);font-weight:500;}
 .v3-pop-note{margin:26px 0 0;font-size:24px;color:var(--v3-muted);line-height:1.6;}
+.v3-pop-note p{margin:0;font-weight:600;color:var(--v3-text);}
+.v3-pop-bullets{margin:8px 0 0;padding-inline-start:34px;list-style:disc;}
+.v3-pop-bullets li{margin:2px 0;}
+/* Population table: every header on ONE line (the narrow coverage column used to wrap to two). */
+.v3-pop-table .v3-table th{white-space:nowrap;}
+/* Coverage progress: bar in the level colour, full = target reached, flag = finished. */
+.v3-cov{display:flex;align-items:center;gap:14px;}
+.v3-cov .v3-pop-bar{flex:1;position:relative;}
+.v3-cov .v3-pop-bar::after{content:"";position:absolute;inset-block:-7px;inset-inline-end:0;width:3px;background:var(--v3-navy);}
+.v3-cov-flag{flex:none;width:36px;height:36px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;}
+.v3-cov-flag.done{background:var(--v3-green);color:#fff;}
+.v3-cov-flag.open{border:3px solid var(--v3-hair);}
 
 /* ── Land/sea tinted panels + tables (slides 8, 11, 16) ───────────────────── */
 .v3-two-col{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:48px;align-content:start;}
