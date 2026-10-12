@@ -123,7 +123,7 @@ export function buildStatements(model: ReportModel): Statement[] {
   for (const o of findOutliers(markStats, "low", 100, 15).slice(0, MAX_PORTS_PER_TOPIC)) {
     add({
       priority: o.gap <= -25 ? "عالية" : "متوسطة", topic: "تحديد موقع الاشتباه",
-      text: `تحديد موقع الاشتباه في منفذ ${o.name} أضعف منه في باقي ${groupLabel(o.sea)}، مما يصعّب على المراجعين التحقق من الصور.`,
+      text: `تحديد موقع الاشتباه في منفذ ${o.name} أضعف منه في باقي ${groupLabel(o.sea)}، مما يؤدي إلى وجود صعوبة في تحديد الاشتباه والتأكد منه من قبل الوسائل الحية.`,
       basis: `${o.name}: بتحديد ${fmtPct(o.share)} من ${fmtNum(o.den)} صورة اشتباه، مقابل ${fmtPct(o.othersShare)} في باقي ${groupLabel(o.sea)}`, page: "هل يوجد تحديد؟",
     });
   }
