@@ -24,7 +24,7 @@ function row(
     declarationDate: null,
     plateOrContainerNumber: null,
     chassisNumber: null,
-    xrayLevelOneResult: "سليمة",
+    xrayLevelOneResult: "اشتباه",
     xrayLevelTwoResult: "سليمة",
     movementType: null,
     reportNumber: null,

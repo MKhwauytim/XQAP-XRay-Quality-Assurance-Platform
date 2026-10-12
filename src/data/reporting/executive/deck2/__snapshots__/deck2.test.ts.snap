@@ -5296,7 +5296,7 @@ body.te-on [data-edit]:focus{outline:2px solid var(--gold,#c9a24a);background:rg
       <span>القسم 3 — التحاليل المتقدمة</span>
     </div>
     <div class="slide-headline" data-edit="أثر وجود التحديد على الدقة">أثر وجود التحديد على الدقة</div>
-    <div class="slide-subhead" data-edit="مقارنة دقة القرارات في الصور التي يوجد بها تحديد مقابل التي لا يوجد بها.">مقارنة دقة القرارات في الصور التي يوجد بها تحديد مقابل التي لا يوجد بها.</div>
+    <div class="slide-subhead" data-edit="مقارنة دقة القرارات في صور الاشتباه (المستوى الأول أو الثاني) التي يوجد بها تحديد مقابل التي لا يوجد بها.">مقارنة دقة القرارات في صور الاشتباه (المستوى الأول أو الثاني) التي يوجد بها تحديد مقابل التي لا يوجد بها.</div>
     <div class="slide-body"><div class="v2-risk-layout v2-mark-layout">
     <div class="v2-mark-empty">
     <span class="v2-mark-empty-icon"><svg viewBox="0 0 24 24" width="24" height="24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></svg></span>
@@ -5308,7 +5308,7 @@ body.te-on [data-edit]:focus{outline:2px solid var(--gold,#c9a24a);background:rg
     <span>مقارنة وصفية بين مجموعتين غير متكافئتين؛ لا تُثبت أثرًا سببيًا للتحديد.</span>
   </div>
     <div class="v2-totals-band">
-    <div class="v2-totals-item"><span class="v2-totals-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span><span><b>0</b><small>إجمالي الصور المُقيَّمة</small></span></div>
+    <div class="v2-totals-item"><span class="v2-totals-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span><span><b>0</b><small>صور الاشتباه المُقيَّمة</small></span></div>
     <div class="v2-totals-item"><span class="v2-totals-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></svg></span><span><b>0</b><small>صور لها سجل لحالة التحديد</small></span></div>
     <div class="v2-totals-item"><span class="v2-totals-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M7 3h7l4 4v14H7V3z"/><path d="M14 3v4h4"/><path d="M9.5 13h5"/><path d="M9.5 16.5h5"/></svg></span><span><b>0</b><small>صور بلا سجل لحالة التحديد</small></span></div>
   </div>

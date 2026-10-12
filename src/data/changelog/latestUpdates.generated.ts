@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v153.6",
+    "date": "2026-10-12",
+    "bucket": "fix",
+    "scope": "executive report",
+    "title": "scope «هل يوجد تحديد» to اشتباه images and canonicalize port-name spellings"
+  },
+  {
     "version": "v153.5",
     "date": "2026-10-11",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "deck3",
     "title": "population totals section from the workbook; one port-accuracy slide per port type"
-  },
-  {
-    "version": "v151.9",
-    "date": "2026-10-07",
-    "bucket": "fix",
-    "scope": "deck3",
-    "title": "charts fit with many ports; Add: follow-up workbook enrichment for the comprehensive report"
   }
 ];
