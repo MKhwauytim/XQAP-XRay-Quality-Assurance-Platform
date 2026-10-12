@@ -269,6 +269,8 @@ export function orderedStageAccuracy(model: ReportModel): Array<{ label: string;
     }));
 }
 
+/** A check mark for the «finished» flag on a coverage bar. */
+const CHECK_SVG = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 const LEVEL_TONES = ["gold", "blue", "green-soft", "red"] as const;
 
 // ── The deck ────────────────────────────────────────────────────────────────
@@ -630,15 +632,31 @@ ${kpiBand([
         const tone = LEVEL_TONES[i % LEVEL_TONES.length];
         const census = s.population > 0 && s.sampleSize >= s.population;
         const width = Math.max(2, (s.population / maxPop) * 100);
+        // Summary-backed report: the bar is the level's progress to its target (full = 100% of target) and a flag says whether it is finished.
+        const done = s.coverage >= 100;
+        const progress = `<div class="v3-cov"><div class="v3-pop-bar"><i class="v3-tone-${tone}" style="width:${Math.max(2, Math.min(100, s.coverage)).toFixed(1)}%"></i></div><span class="v3-cov-flag ${done ? "done" : "open"}" role="img" aria-label="${done ? "اكتمل المستهدف" : "لم يكتمل المستهدف"}">${done ? CHECK_SVG : ""}</span></div>`;
         return [
           { html: esc(s.stageLabel) },
-          { html: `<div class="v3-pop-bar"><i class="v3-tone-${tone}" style="width:${width.toFixed(1)}%"></i></div>` },
+          { html: withPop ? progress : `<div class="v3-pop-bar"><i class="v3-tone-${tone}" style="width:${width.toFixed(1)}%"></i></div>` },
           { html: fmtNum(s.population), cls: "v-muted" },
           ...(withPop ? [{ html: fmtNum(s.target ?? s.population), cls: "v-gold" }] : []),
           { html: fmtNum(s.sampleSize), cls: "v-navy" },
           { html: withPop ? fmtPct(s.coverage) : census ? "حصر كامل" : "عدد ثابت", cls: census ? "v-green" : "v-gold" },
         ] as TableCell[];
       });
+    // Footnote: how coverage is measured, then one bullet per level with its target.
+    const monthsPhrase = (n: number) => (n === 1 ? "شهر واحد" : n === 2 ? "شهرين" : n >= 3 && n <= 10 ? `${n} أشهر` : `${n} شهرًا`);
+    const levelLines = stages
+      .filter((s) => s.target !== undefined)
+      .map((s) => {
+        const monthly = STAGE_SAMPLE_TARGETS[s.stageKey as keyof typeof STAGE_SAMPLE_TARGETS];
+        return typeof monthly === "number"
+          ? `${esc(s.stageLabel)}: ${fmtNum(monthly)} صورة شهريًا × ${monthsPhrase(Math.round((s.target ?? 0) / monthly))} = ${fmtNum(s.target ?? 0)} صورة`
+          : `${esc(s.stageLabel)}: 100% من مجتمعه = ${fmtNum(s.target ?? s.population)} صورة`;
+      });
+    const popNote = withPop
+      ? `<div class="v3-pop-note"><p>التغطية الرقابية = العيّنة المفحوصة ÷ المستهدف.</p><ul class="v3-pop-bullets">${levelLines.map((l) => `<li>${l}</li>`).join("")}</ul></div>`
+      : `<p class="v3-pop-note">الاختيار عشوائي داخل حصة كل مستوى؛ ولا يعكس حجم الحصة أهمية المستوى — لكل مستوى هدف مختلف.</p>`;
     const inner = `${contentHead({ eyebrow: EYEBROW_S1, title: "مجتمع الفحص والعيّنة حسب المستوى", large: true })}
 <div class="v3-pop-grid">
   <div class="v3-pop-stats">
@@ -649,7 +667,8 @@ ${kpiBand([
   </div>
   <div class="v3-pop-table">
     ${dataTable({ headers: withPop ? ["المستوى", "", "المجتمع", "المستهدف", "العيّنة", "التغطية الرقابية"] : ["المستوى", "", "المجتمع", "العيّنة", "أسلوب السحب"], rows, groupStart: 2, firstColWidth: 26, size: "lg" })}
-    <p class="v3-pop-note">${withPop ? `التغطية الرقابية = العيّنة المفحوصة ÷ المستهدف. المستوى الأول 100% من مجتمعه، وبقية المستويات عدد ثابت شهريًا (${fmtNum(STAGE_SAMPLE_TARGETS.second ?? 0)} للثاني و${fmtNum(STAGE_SAMPLE_TARGETS.third ?? 0)} للثالث و${fmtNum(STAGE_SAMPLE_TARGETS.fourth ?? 0)} للرابع) × عدد أشهر التقرير.` : "الاختيار عشوائي داخل حصة كل مستوى؛ ولا يعكس حجم الحصة أهمية المستوى — لكل مستوى هدف مختلف."}</p>
+    ${popNote}
+
   </div>
 </div>`;
     parts.push(slideShell(m, "", inner));
