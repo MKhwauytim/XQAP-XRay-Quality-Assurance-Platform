@@ -16,16 +16,15 @@ import { collectPortStats, type PortPopRow } from "../deck2/slideKit";
 import { collectLevelAccuracyRows } from "../deck2/section3/levelAccuracy";
 import { populationScopedRows } from "../../executiveReportTypes";
 import { engineVerdictOf } from "../deck2/section3/riskEngineAgreement";
-import { computeMarkingImpact } from "../deck2/section3/markingImpact";
-import { computeQualityImpactStrata, accuracyGradient } from "../deck2/section3/qualityImpact";
 import { ORGANIZATION_PATH, ZATCA_LOGO_URL } from "../../../../branding/organization";
 import {
   coverSlide, closingSlide, contentsSlide, glossarySlide, levelDefinitionSlide,
-  kpiBand, sectionDivider, tintedPanel, dataTable, matrixGrid, chartTitleRow,
-  legendRow, impactColumn, slideShell, contentHead, pad2,
-  type OrgBlock, type SlideMeta, type TableCell,
+  kpiBand, sectionDivider, tintedPanel, dataTable, chartTitleRow,
+  legendRow, slideShell, contentHead, pad2, qualityMatrix, statementList,
+  type OrgBlock, type SlideMeta, type TableCell, type QualityCell, type QualityRow,
 } from "./slideKit";
-import { barChart, fitAxis, groupedBarChart, scaleCaption, type ChartBar } from "./chartKit";
+import { aggregateDecisions, buildDecisionRecords } from "../model/decisionFactTable";
+import { barChart, fitAxis, scaleCaption } from "./chartKit";
 
 /**
  * Max port rows one `.v3-panel` table page can hold without spilling past the
@@ -36,21 +35,21 @@ import { barChart, fitAxis, groupedBarChart, scaleCaption, type ChartBar } from 
  * (122 + 30 margin) − `.v3-page-foot` (60) = 728 for `.v3-two-col`; inside
  * each panel, padding (24×2) + `.v3-panel-head` (49 + 14 margin) + `thead`
  * (63) + `tfoot` (67) = 241 fixed overhead, leaving 487 for body rows at the
- * table's own 58px row height → floor(487/58) = 8. A real workspace with
- * more land or sea ports than this must split into continuation slides
- * (`(يتبع)` in the title) rather than silently overflow the slide's
- * `overflow:hidden` bottom edge.
+ * table's own 58px row height. The port tables are one full-width page per
+ * port type listing every port, so instead of splitting into `(يتبع)`
+ * continuation slides the rows shrink (`portRowPx`) to fit that body budget
+ * rather than silently overflow the slide's `overflow:hidden` bottom edge.
  */
-const ROWS_PER_PORT_PAGE = 8;
-
-/** How many `(يتبع)`-chunked pages a land/sea pair of port tables needs. */
-function portPageCount(landCount: number, seaCount: number): number {
-  return Math.max(1, Math.ceil(Math.max(landCount, seaCount) / ROWS_PER_PORT_PAGE));
+const PORT_BODY_BUDGET_PX = 487;
+/** Height the one-line weighted-agreement formula note takes under a port table. */
+const FORMULA_NOTE_PX = 40;
+/** The group-label header row above a port table's column headers. */
+const TOP_HEADER_PX = 40;
+/** Body-row height (px) that fits `n` port rows in the budget: 56px max, 24px floor. */
+function portRowPx(n: number, reservedPx = 0): number {
+  return Math.max(24, Math.min(56, Math.floor((PORT_BODY_BUDGET_PX - reservedPx) / Math.max(1, n))));
 }
 
-function chunkAt<T>(rows: T[], page: number): T[] {
-  return rows.slice(page * ROWS_PER_PORT_PAGE, (page + 1) * ROWS_PER_PORT_PAGE);
-}
 const REPORT_NAME = "تقرير ضمان جودة فحص الأشعة";
 const ORG_NAME = "هيئة الزكاة والضريبة والجمارك";
 const CLASSIFICATION = "سري";
@@ -58,13 +57,19 @@ const CLASSIFICATION = "سري";
 const LEGAL_SECTOR = `قطاع ${ORGANIZATION_PATH[0]}`;
 const DEPARTMENT = "إدارة الرقابة على الامتثال للمنافذ الجمركية";
 
-const EYEBROW_S1 = "القسم الأول — مجتمع الفحص";
+const EYEBROW_S1 = "القسم الأول - مجتمع الفحص والعيّنة";
 const EYEBROW_S2 = "القسم الثاني — نتائج فحص الجودة";
-const EYEBROW_S3 = "القسم الثالث — التحاليل المتقدمة";
+const EYEBROW_S3 = "القسم الثالث - الإفادات";
+
+export type StatementPriority = "عالية" | "متوسطة" | "للعلم";
+/** A key statement drafted from the report's results (see statements.ts); `basis` and `page` trace its figures. */
+export type Statement = { priority: StatementPriority; topic: string; text: string; /** Same statement in words only, no figures. */ plain: string; basis: string; page: string };
+const STATEMENTS_PER_PAGE = 5;
+const STATEMENT_PLACEHOLDER = "اكتب الإفادة هنا…";
 
 // ── Presentation-layer rate helpers ─────────────────────────────────────────
 
-function pct(n: number, d: number): number | null {
+export function pct(n: number, d: number): number | null {
   return d > 0 ? (n / d) * 100 : null;
 }
 
@@ -73,6 +78,18 @@ function rateCell(rate: number | null, count: number): string {
   return `${fmtPct(rate)}<span class="v3-sub"> (${fmtNum(count)})</span>`;
 }
 
+/** "22,514 (27.9%)" — a count with its bracketed share. */
+function countRateCell(count: number, rate: number | null): string {
+  return `${fmtNum(count)}<span class="v3-sub"> (${fmtPct(rate)})</span>`;
+}
+
+// One definition per measure, shared by every page that shows it so the wording can never drift.
+const RESULT_ACCURACY_DEFINITION = "الحالات التي تم الاتفاق على نتيجتها بين الوسائل الآلية وأخصائي ضمان الجودة";
+const MISSED_SUSPICION_DEFINITION = "نتيجة أخصائي الوسائل الآلية بأن الإرسالية سليمة ورأي أخصائي ضمان الجودة بأنها اشتباه.";
+/** How معدل الاتفاق العام is calculated (one line, no worked weights). */
+const AGREEMENT_FORMULA_NOTE = "معدل الاتفاق العام = (دقة السليمة × وزن السليمة) + (دقة الاشتباه × وزن الاشتباه)";
+const FALSE_SUSPICION_DEFINITION = "نتيجة أخصائي الوسائل الآلية بأن الإرسالية اشتباه، ورأى أخصائي الجودة أنها سليمة.";
+
 /** "21,480 (1,031)" — population figure with its bracketed sample figure. */
 function popCell(population: number, sample: number, stacked = false): string {
   // Stacked (5-column port tables of a summary-backed report): the sample figure sits under the population one.
@@ -80,9 +97,9 @@ function popCell(population: number, sample: number, stacked = false): string {
   return `${fmtNum(population)}<span class="v3-sub"> (${fmtNum(sample)})</span>`;
 }
 
-type FourCounts = { correctClean: number; correctSuspicion: number; missedSuspicion: number; falseSuspicion: number };
+export type FourCounts = { correctClean: number; correctSuspicion: number; missedSuspicion: number; falseSuspicion: number };
 
-function accuracyOf(c: FourCounts): {
+export function accuracyOf(c: FourCounts): {
   evaluable: number;
   cleanResults: number;
   suspResults: number;
@@ -103,7 +120,7 @@ function accuracyOf(c: FourCounts): {
   };
 }
 
-function sumCounts(all: FourCounts[]): FourCounts {
+export function sumCounts(all: FourCounts[]): FourCounts {
   return all.reduce(
     (acc, c) => ({
       correctClean: acc.correctClean + c.correctClean,
@@ -122,11 +139,11 @@ function byEvaluableDesc<T extends { evaluable: number; name: string }>(a: T, b:
   return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
 }
 
-type PortAccuracyRow = { name: string; sea: boolean; counts: FourCounts; evaluable: number };
+export type PortAccuracyRow = { name: string; sea: boolean; counts: FourCounts; evaluable: number };
 
 /** model.portAccuracy (the shared decision-combined per-port fold) split into
  *  land/sea using the rows' own portType — mirrors collectPortStats's rule. */
-function collectPortAccuracy(model: ReportModel): { land: PortAccuracyRow[]; sea: PortAccuracyRow[] } {
+export function collectPortAccuracy(model: ReportModel): { land: PortAccuracyRow[]; sea: PortAccuracyRow[] } {
   const seaByPort = new Map<string, boolean>();
   for (const r of model.rows) {
     const name = r.portName ?? "غير محدد";
@@ -147,9 +164,45 @@ function collectPortAccuracy(model: ReportModel): { land: PortAccuracyRow[]; sea
   return { land: all.filter((p) => !p.sea), sea: all.filter((p) => p.sea) };
 }
 
+/** Suspicion images per port: how many, how many carry a marking («هل يوجد تحديد؟» = نعم), and their image quality. */
+export type MarkingCounts = { images: number; marked: number; unmarked: number; low: number; mid: number; high: number; unstudied: number };
+
+export const emptyMarking = (): MarkingCounts => ({ images: 0, marked: 0, unmarked: 0, low: 0, mid: 0, high: 0, unstudied: 0 });
+
+/**
+ * Marking follow-up per port, counted on IMAGES (one report row = one image). The workbook records the marking
+ * on the image and not per level, so no level split is made. Base = images whose result is اشتباه.
+ * `images` counts only images with BOTH answers («هل يوجد تحديد؟» and the quality level), so marked + unmarked
+ * and low + medium + high each add up to it; the rest are `unstudied` (shown in the page footer).
+ */
+export function collectPortMarking(model: ReportModel): Map<string, MarkingCounts> {
+  const byPort = new Map<string, MarkingCounts>();
+  for (const r of model.rows) {
+    if (r.imageResult !== "اشتباه") continue;
+    const key = r.portName ?? "غير محدد";
+    const c = byPort.get(key) ?? emptyMarking();
+    byPort.set(key, c);
+    if (r.hasMarking === null || r.imageQuality === null) { c.unstudied++; continue; }
+    c.images++;
+    if (r.hasMarking === true) c.marked++;
+    else c.unmarked++;
+    if (r.imageQuality === "منخفض") c.low++;
+    else if (r.imageQuality === "متوسط") c.mid++;
+    else if (r.imageQuality === "عالي") c.high++;
+  }
+  return byPort;
+}
+
+export function sumMarking(list: MarkingCounts[]): MarkingCounts {
+  return list.reduce((a, c) => ({
+    images: a.images + c.images, marked: a.marked + c.marked, unmarked: a.unmarked + c.unmarked,
+    low: a.low + c.low, mid: a.mid + c.mid, high: a.high + c.high, unstudied: a.unstudied + c.unstudied,
+  }), emptyMarking());
+}
+
 /** model.stageAccuracy ordered by the population profile's stage order, so
  *  the accuracy table lists levels 1→4 the way every other slide does. */
-function orderedStageAccuracy(model: ReportModel): Array<{ label: string; counts: FourCounts; evaluable: number }> {
+export function orderedStageAccuracy(model: ReportModel): Array<{ label: string; counts: FourCounts; evaluable: number }> {
   const order = model.population.byStage.map((s) => s.stageLabel);
   const indexOf = (key: string) => {
     const i = order.indexOf(key);
@@ -207,7 +260,7 @@ function deck3Copy(completedOnly: boolean, monthlyTarget: number, completedTotal
     const ceLabels = getLabels();
     return {
       eyebrowS2: withPopulation ? EYEBROW_S2 : "القسم الأول — نتائج فحص الجودة",
-      eyebrowS3: withPopulation ? EYEBROW_S3 : "القسم الثاني — التحاليل المتقدمة",
+      eyebrowS3: withPopulation ? EYEBROW_S3 : "القسم الثاني - الإفادات",
       kpiTitle: "المؤشرات الرئيسية",
       kpiEyebrow: "خلاصة التقرير",
       coverKicker: "عرض تنفيذي · تقرير شامل",
@@ -215,8 +268,9 @@ function deck3Copy(completedOnly: boolean, monthlyTarget: number, completedTotal
       // No draw weights or monthly target behind completed-only rows.
       weightLines: ["", "", "", ""],
       highlightValue: completedTotal,
-      highlightTitle: withPopulation ? "العيّنة المفحوصة" : ceLabels.ce_completed_samples,
-      highlightNote: withPopulation ? "العيّنة المفحوصة في الفترة؛ المجتمع مجموع أشهرها من أوراق الملف." : ceLabels.ce_scope_note,
+      // Empty title → the level-definitions slide omits the callout entirely.
+      highlightTitle: withPopulation ? "" : ceLabels.ce_completed_samples,
+      highlightNote: withPopulation ? "" : ceLabels.ce_scope_note,
       s2Ghost: withPopulation ? "02" : "01",
       s2Kicker: withPopulation ? "القسم الثاني" : "القسم الأول",
       s2Description: "دقة النتائج وتحديد موقع الاشتباه والاشتباهات الفائتة على مستوى التقرير والمنافذ والمستويات.",
@@ -262,8 +316,12 @@ export async function buildDeck3Slides(
   monthLabel: string,
   monthlyTarget: number,
   now: Date = new Date(),
+  /** Statements for section 3 (built by statements.ts, which imports this file — so they are passed in). */
+  statements: Statement[] = [],
 ): Promise<string> {
   const parts: string[] = [];
+  // Statement pages (five per page) plus one blank page to write on.
+  const statementPages = Math.ceil(statements.length / STATEMENTS_PER_PAGE) + 1;
   const footText = `${REPORT_NAME} · ${monthLabel}`;
   const org: OrgBlock = {
     logoUrl: ZATCA_LOGO_URL,
@@ -275,7 +333,6 @@ export async function buildDeck3Slides(
   // Rows whose L1/L2 result is neither سليمة nor اشتباه: counted in the sample, never scored.
   const otherL1 = model.rows.filter((r) => r.levelOneOther !== undefined).length;
   const otherL2 = model.rows.filter((r) => r.levelTwoOther !== undefined).length;
-  const otherResultsNote = otherL1 + otherL2 > 0 ? ` — نتائج أخرى غير مُقيَّمة: المستوى الأول ${fmtNum(otherL1)} · الثاني ${fmtNum(otherL2)}` : "";
 
   // Completed-only scope (comprehensive report): no population, sample master
   // or monthly target lies behind the rows, so section 1 (population) is
@@ -291,6 +348,16 @@ export async function buildDeck3Slides(
   const completedTotal = fmtNum(model.sample.studied);
   const copy = deck3Copy(co, monthlyTarget, completedTotal, withPop);
   const { eyebrowS2, eyebrowS3, kpiTitle } = copy;
+  // One description per section, shared by the contents page and the section divider so they can never differ.
+  const sectionDesc = {
+    s1: withPop
+      ? "حجم مجتمع الفترة وتوزيعه على أساس مستويات المخاطر والمنفذ ونتائج المستوى الأول والثاني."
+      : "حجم مجتمع الشهر وتوزيعه على المستويات والمنافذ، والأساس الذي سُحبت منه العيّنة.",
+    s2: !co
+      ? "دقة النتائج على مستوى الشهر وحسب المنفذ ومستوى المخاطر."
+      : withPop ? "دقة النتائج على مستوى الفترة وحسب المنفذ ومستوى المخاطر." : "دقة النتائج على مستوى التقرير وحسب المنفذ ومستوى المخاطر.",
+    s3: "أهم الإفادات المستخلصة من نتائج التقرير، ومساحة لكتابة إفادات إضافية، والتوافق مع الفرق الأمنية ومحرك المخاطر.",
+  };
 
   // Port lists + pagination, computed up front — slides 8 and 11 (population
   // and accuracy by port) each split into `(يتبع)`-titled continuation pages
@@ -301,10 +368,26 @@ export async function buildDeck3Slides(
   // first slide is built.
   const { land: popLand, sea: popSea } = collectPortStats(model);
   const portAcc = collectPortAccuracy(model);
-  const landTotals = accuracyOf(sumCounts(portAcc.land.map((p) => p.counts)));
-  const seaTotals = accuracyOf(sumCounts(portAcc.sea.map((p) => p.counts)));
-  const popPages = portPageCount(popLand.length, popSea.length);
-  const accPages = portPageCount(portAcc.land.length, portAcc.sea.length);
+  // Population by port: one full-width page per port type (land, sea) listing ALL of its ports, never `(يتبع)` chunks.
+  const popPortGroups = ([
+    { variant: "land", title: "المنافذ البرية", totalLabel: "إجمالي البرية", ports: popLand },
+    { variant: "sea", title: "المنافذ البحرية", totalLabel: "إجمالي البحرية", ports: popSea },
+  ] as const).filter((g) => g.ports.length > 0);
+  const popPages = Math.max(1, popPortGroups.length);
+  // Accuracy by port: one full-width page per port type (land, sea) listing ALL of its ports, never `(يتبع)` chunks.
+  const accGroups = ([
+    { variant: "land", title: "للمنافذ البرية", panelTitle: "المنافذ البرية", totalLabel: "إجمالي البرية", ports: portAcc.land },
+    { variant: "sea", title: "للمنافذ البحرية", panelTitle: "المنافذ البحرية", totalLabel: "إجمالي البحرية", ports: portAcc.sea },
+  ] as const).filter((g) => g.ports.length > 0);
+  const accPages = Math.max(1, accGroups.length);
+  // Level 1/2 accuracy per port, one table page per port type (same grouping rule as accGroups).
+  const levelRows = collectLevelAccuracyRows(model);
+  const levelGroups = ([
+    { variant: "land", panelTitle: "المنافذ البرية", totalLabel: "إجمالي البرية", rows: levelRows.land },
+    { variant: "sea", panelTitle: "المنافذ البحرية", totalLabel: "إجمالي البحرية", rows: levelRows.sea },
+  ] as const).filter((g) => g.rows.length > 0);
+  const levelPages = Math.max(1, levelGroups.length);
+  const levelShown = levelGroups.length > 0 ? levelGroups : [{ variant: "land" as const, panelTitle: "المنافذ البرية", totalLabel: "إجمالي البرية", rows: levelRows.land }];
   // Section 1 = its divider + the per-level slide + `popPages` port pages.
   // No other-team results and no risk-engine targeting on the sampled images (e.g. the examined-sample workbook
   // carries none): the two agreement slides would be empty charts, so they collapse into one explanatory slide.
@@ -317,7 +400,11 @@ export async function buildDeck3Slides(
   const popResultsPages = withPop ? 1 : 0;
   const sectionOnePages = 2 + popPages;
   // +1: the per-port accuracy chart is one slide per port type (land, then sea).
-  const TOTAL = 24 + (popPages - 1) + (accPages - 1) + popResultsPages - (coNoPop ? sectionOnePages : 0) - (agreementEmpty ? 1 : 0);
+  // `+ accPages`: one marking-follow-up page per port type, right after the port-results pages.
+  // `- 2 + (levelPages - 2)`: the two per-port bar charts are gone and the level-per-port pages are now tables, one per port type.
+  // `- 2` (last): the two marking/quality impact pages were removed (the quality-by-port-type page replaces them).
+  // `statementPages`: the section-3 statement pages (generated + one blank) sit between its divider and the agreement page.
+  const TOTAL = 23 + statementPages + (popPages - 1) + (accPages - 1) + accPages - 2 + (levelPages - 2) + popResultsPages - (coNoPop ? sectionOnePages : 0) - (agreementEmpty ? 1 : 0);
   const YITBA = " (يتبع)";
 
   let nextNum = 1;
@@ -351,23 +438,23 @@ export async function buildDeck3Slides(
   // arithmetic that produces TOTAL above, not re-hardcoded per range.
   const s1End = 7 + popPages + popResultsPages;
   const s2Start = coNoPop ? 6 : s1End + 1;
-  const s2End = s2Start + 4 + accPages;
+  const s2End = s2Start + 5 + 2 * accPages + levelPages;
   const s3Start = s2End + 1;
-  const s3End = s3Start + 8 - (agreementEmpty ? 1 : 0);
+  const s3End = s3Start + 2 + statementPages - (agreementEmpty ? 1 : 0);
   parts.push(contentsSlide({
     eyebrow: "التقرير التنفيذي",
     title: "محتويات التقرير",
     rows: coNoPop ? [
-      { index: 1, title: "المعجم", description: "تعريف مستويات المخاطر الأربعة والمصطلحات المستخدمة في التقرير.", pages: "ص 03–04" },
+      { index: 1, title: "المعجم", description: "تعريف مستويات المخاطر والمصطلحات المستخدمة في التقرير.", pages: "ص 03–04" },
       { index: 2, title: kpiTitle, description: "خلاصة أرقام العيّنات المكتملة في صفحة واحدة.", pages: "ص 05" },
-      { index: 3, title: eyebrowS2, description: "دقة النتائج على مستوى التقرير وحسب المنفذ ومستوى المخاطر.", pages: `ص ${pad2(s2Start)}–${pad2(s2End)}` },
-      { index: 4, title: eyebrowS3, description: "مصفوفة النتائج، دقة المستويين، والتوافق مع الفرق الأمنية ومحرك المخاطر، وأثر التحديد والجودة.", pages: `ص ${pad2(s3Start)}–${pad2(s3End)}` },
+      { index: 3, title: eyebrowS2, description: sectionDesc.s2, pages: `ص ${pad2(s2Start)}–${pad2(s2End)}` },
+      { index: 4, title: eyebrowS3, description: sectionDesc.s3, pages: `ص ${pad2(s3Start)}–${pad2(s3End)}` },
     ] : [
-      { index: 1, title: "المعجم", description: "تعريف مستويات المخاطر الأربعة والمصطلحات المستخدمة في التقرير.", pages: "ص 03–04" },
-      { index: 2, title: withPop ? kpiTitle : "مؤشرات الشهر", description: withPop ? "خلاصة أرقام الفترة في صفحة واحدة." : "خلاصة أرقام الشهر في صفحة واحدة.", pages: "ص 05" },
-      { index: 3, title: "القسم الأول — مجتمع الفحص", description: withPop ? "حجم مجتمع الفترة وتوزيعه على المستويات والمنافذ ونتائج المستويين." : "حجم مجتمع الشهر وتوزيعه على المستويات والمنافذ، والأساس الذي سُحبت منه العيّنة.", pages: `ص ${pad2(6)}–${pad2(s1End)}` },
-      { index: 4, title: "القسم الثاني — نتائج فحص الجودة", description: withPop ? "دقة النتائج على مستوى الفترة وحسب المنفذ ومستوى المخاطر." : "دقة النتائج على مستوى الشهر وحسب المنفذ ومستوى المخاطر.", pages: `ص ${pad2(s2Start)}–${pad2(s2End)}` },
-      { index: 5, title: "القسم الثالث — التحاليل المتقدمة", description: "مصفوفة النتائج، دقة المستويين، والتوافق مع الفرق الأمنية ومحرك المخاطر، وأثر التحديد والجودة.", pages: `ص ${pad2(s3Start)}–${pad2(s3End)}` },
+      { index: 1, title: "المعجم", description: "تعريف مستويات المخاطر والمصطلحات المستخدمة في التقرير.", pages: "ص 03–04" },
+      { index: 2, title: withPop ? kpiTitle : "مؤشرات الشهر", description: withPop ? "نتائج الأداء بالأرقام خلال فترة التقرير" : "خلاصة أرقام الشهر في صفحة واحدة.", pages: "ص 05" },
+      { index: 3, title: EYEBROW_S1, description: sectionDesc.s1, pages: `ص ${pad2(6)}–${pad2(s1End)}` },
+      { index: 4, title: "القسم الثاني — نتائج فحص الجودة", description: sectionDesc.s2, pages: `ص ${pad2(s2Start)}–${pad2(s2End)}` },
+      { index: 5, title: EYEBROW_S3, description: sectionDesc.s3, pages: `ص ${pad2(s3Start)}–${pad2(s3End)}` },
     ],
     meta: meta("contents", "المحتويات"),
   }));
@@ -386,15 +473,16 @@ export async function buildDeck3Slides(
           { term: "مجتمع الفحص", definition: "صور أشعة الشهر المصنَّفة إلى مستويات المخاطر الأربعة المعتمدة من وكالة تحليل المخاطر." },
           { term: "العيّنة", definition: "الصور المسحوبة للدراسة وفق وزن سحب محدَّد مسبقًا لكل مستوى، مع اختيار عشوائي داخل حصة المستوى الواحد." },
           // Coverage is not reported for the completed-only scope, so its term is not defined there.
-          ...(coNoPop ? [] : [{ term: "التغطية", definition: "نسبة حجم العيّنة المسحوبة إلى حجم المجتمع؛ مقياس حجم لا يدل على تمثيل العيّنة للمجتمع." }]),
+          ...(coNoPop ? [] : [{ term: "التغطية الرقابية", definition: "نسبة حجم العيّنة المسحوبة إلى حجم المجتمع؛ مقياس حجم لا يدل على تمثيل العيّنة للمجتمع." }]),
         ],
       },
       {
         dotTone: "red",
         title: "مصطلحات النتائج والجودة",
         terms: [
+          { term: "الإجابة", definition: "نتيجة فحص مستوى واحد (الأول أو الثاني) لصورة واحدة؛ لكل صورة إجابتان، وتُحسب أرقام الدقة والاشتباهات على الإجابات لا على الصور." },
           { term: "الاشتباه الخاطئ", definition: "نتيجة أخصائي الوسائل الآلية بأن الإرسالية اشتباه، ورأى أخصائي الجودة أنها سليمة." },
-          { term: "الاشتباه الفائت", definition: "نتيجة مستوى واحد رأى الصورة سليمة ورأى أخصائي الجودة أنها اشتباه؛ ولكل صورة نتيجتان يُقيَّمان مستقلّين." },
+          { term: "الاشتباه الفائت", definition: "نتيجة أخصائي الوسائل الآلية بأن الإرسالية سليمة ورأي أخصائي ضمان الجودة بأنها اشتباه." },
         ],
       },
     ],
@@ -450,7 +538,9 @@ export async function buildDeck3Slides(
   // from errorAnalysis.totals so slides 5/10/15 can never disagree)
   {
     const m = meta("kpis", kpiTitle);
-    const missedShare = pct(t.missedSuspicion, t.evaluable);
+    // Each rate uses the denominator its label names: a missed suspicion is a سليمة result, a false one an اشتباه result.
+    const missedShare = pct(t.missedSuspicion, overallStats.cleanResults);
+    const falseShare = pct(t.falseSuspicion, overallStats.suspResults);
     const inner = `${contentHead({ eyebrow: copy.kpiEyebrow, title: kpiTitle, large: true })}
 ${kpiBand(coNoPop ? [
       { label: ceLabels.ce_completed_samples, value: completedTotal, sub: ceLabels.ce_scope_note },
@@ -459,12 +549,13 @@ ${kpiBand(coNoPop ? [
     ] : [
       { label: "مجتمع الفحص", value: fmtNum(model.population.total), sub: "مجتمع الصور الواردة من وكالة تحليل المخاطر" },
       { label: withPop ? "العيّنة المفحوصة" : "العيّنة المسحوبة", value: fmtNum(model.sample.total), sub: withPop ? "صورة مكتملة الفحص في التقرير" : "صورة موزّعة على أخصائيي الجودة" },
-      { label: "التغطية", value: fmtPct(model.sample.coverage ?? null), valueTone: "gold", sub: "نسبة العينة من المجتمع" },
+      { label: "التغطية الرقابية", value: fmtPct(model.sample.coverage ?? null), valueTone: "gold", sub: "نسبة العينة من المجتمع" },
     ], "top")}
 ${kpiBand([
-      { label: "دقة النتيجة", value: fmtPct(overallStats.overall), valueTone: "green", sub: `من ${fmtNum(t.evaluable)} نتيجة مُقيَّمة` },
+      { label: "نسبة التوائم", value: fmtPct(overallStats.overall), valueTone: "green", aside: `من ${fmtNum(t.evaluable)} إجابة مدروسة`, sub: RESULT_ACCURACY_DEFINITION },
       { label: "نسبة تحديد موقع الاشتباه", value: fmtPct(model.imageQuality.markingRate), valueTone: "red", sub: "التزام الفاحصين بتحديد مواضع الاشتباه" },
-      { label: "الاشتباهات الفائتة", value: fmtNum(t.missedSuspicion), aside: missedShare === null ? undefined : `${fmtPct(missedShare)} من النتائج`, sub: "صور رأى فيها خبير جودة الأشعة كونها اشتباه لم يرصد من الوسائل الآلية" },
+      { label: "الاشتباهات الفائتة", value: fmtNum(t.missedSuspicion), aside: missedShare === null ? undefined : `${fmtPct(missedShare)} من إجابات السليمة`, sub: MISSED_SUSPICION_DEFINITION,
+        extra: { label: "الاشتباهات الخاطئة", value: fmtNum(t.falseSuspicion), valueTone: "gold", aside: falseShare === null ? undefined : `${fmtPct(falseShare)} من إجابات الاشتباه`, sub: FALSE_SUSPICION_DEFINITION } },
     ], "bottom")}`;
     parts.push(slideShell(m, "", inner));
   }
@@ -476,9 +567,9 @@ ${kpiBand([
     eyebrow: footText,
     ghost: "01",
     kicker: "القسم الأول",
-    title: "مجتمع الفحص",
-    description: withPop ? "حجم مجتمع الفترة (مجموع الأشهر) وتوزيعه على مستويات المخاطر والمنافذ ونتائج المستويين، والأساس الذي سُحبت منه العيّنة." : "حجم مجتمع الشهر وتوزيعه على مستويات المخاطر والمنافذ، والأساس الذي سُحبت منه العيّنة.",
-    footItems: withPop ? ["مجتمع الفحص والعيّنة حسب المستوى", "نتائج المستوى الأول والثاني في المجتمع", "التوزيع على المنافذ البرية والبحرية"] : ["مجتمع الفحص والعيّنة حسب المستوى", "التوزيع على المنافذ البرية والبحرية"],
+    title: "مجتمع الفحص والعيّنة",
+    description: sectionDesc.s1,
+    footItems: [],
     meta: meta("s1", EYEBROW_S1),
   }));
 
@@ -494,27 +585,24 @@ ${kpiBand([
         const tone = LEVEL_TONES[i % LEVEL_TONES.length];
         const census = s.population > 0 && s.sampleSize >= s.population;
         const width = Math.max(2, (s.population / maxPop) * 100);
-        return `<div class="v3-pop-row">
-  <span class="name">${esc(s.stageLabel)}</span>
-  <div class="v3-pop-bar"><i class="v3-tone-${tone}" style="width:${width.toFixed(1)}%"></i></div>
-  <span class="num">${fmtNum(s.population)}</span>
-  <span class="num strong">${fmtNum(s.sampleSize)}</span>
-  <span class="method${census ? " census" : ""}">${withPop ? `تغطية ${fmtPct(s.coverage)}` : census ? "حصر كامل" : "عدد ثابت"}</span>
-</div>`;
-      })
-      .join("\n");
+        return [
+          { html: esc(s.stageLabel) },
+          { html: `<div class="v3-pop-bar"><i class="v3-tone-${tone}" style="width:${width.toFixed(1)}%"></i></div>` },
+          { html: fmtNum(s.population), cls: "v-muted" },
+          { html: fmtNum(s.sampleSize), cls: "v-navy" },
+          { html: withPop ? fmtPct(s.coverage) : census ? "حصر كامل" : "عدد ثابت", cls: census ? "v-green" : "v-gold" },
+        ] as TableCell[];
+      });
     const inner = `${contentHead({ eyebrow: EYEBROW_S1, title: "مجتمع الفحص والعيّنة حسب المستوى", large: true })}
 <div class="v3-pop-grid">
   <div class="v3-pop-stats">
     <div class="v3-pop-stat"><span>إجمالي المجتمع</span><b>${fmtNum(model.population.total)}</b></div>
     <div class="v3-pop-stat"><span>إجمالي العيّنة</span><b>${fmtNum(model.sample.total)}</b></div>
-    <div class="v3-pop-stat"><span>التغطية الكلية</span><b class="v3-ink-gold">${fmtPct(model.sample.coverage ?? null)}</b></div>${withPop ? `
-    <div class="v3-pop-stat"><span>مجتمع بنتائج أخرى</span><b>${fmtNum(model.population.other ?? 0)}</b></div>` : ""}
+    <div class="v3-pop-stat"><span>التغطية الرقابية الكلية</span><b class="v3-ink-gold">${fmtPct(model.sample.coverage ?? null)}</b></div>
   </div>
   <div class="v3-pop-table">
-    <div class="v3-pop-hrow"><span>المستوى</span><span>المجتمع</span><span>العدد</span><span>العيّنة</span><span>${withPop ? "التغطية" : "أسلوب السحب"}</span></div>
-    ${rows}
-    <p class="v3-pop-note">${withPop ? "التغطية = العيّنة المفحوصة ÷ مجتمع المستوى؛ ولا يعكس حجم المستوى أهميته — لكل مستوى هدف كشف مختلف." : "الاختيار عشوائي داخل حصة كل مستوى؛ ولا يعكس حجم الحصة أهمية المستوى — لكل مستوى هدف كشف مختلف."}</p>
+    ${dataTable({ headers: ["المستوى", "", "المجتمع", "العيّنة", withPop ? "التغطية الرقابية" : "أسلوب السحب"], rows, groupStart: 2, firstColWidth: 26, size: "lg" })}
+    <p class="v3-pop-note">${withPop ? "التغطية الرقابية = العيّنة المفحوصة ÷ مجتمع المستوى؛ ولا يعكس حجم المستوى أهميته — لكل مستوى هدف مختلف." : "الاختيار عشوائي داخل حصة كل مستوى؛ ولا يعكس حجم الحصة أهمية المستوى — لكل مستوى هدف مختلف."}</p>
   </div>
 </div>`;
     parts.push(slideShell(m, "", inner));
@@ -540,13 +628,13 @@ ${kpiBand([
     const cell = (n: number, of: number) => `${fmtNum(n)}<br><span class="v3-sub v3-sub-sm">(${fmtPct(pct(n, of))})</span>`;
     const rowFor = (label: string, n: number, l1: Tally, l2: Tally): TableCell[] => [
       { html: label },
-      { html: cell(l1.clean, n), cls: "v-green" },
-      { html: cell(l1.suspicious, n), cls: "v-red" },
-      { html: cell(l1.other, n), cls: "v-gold" },
-      { html: cell(l2.clean, n), cls: "v-green" },
-      { html: cell(l2.suspicious, n), cls: "v-red" },
-      { html: cell(l2.other, n), cls: "v-gold" },
       { html: fmtNum(n), cls: "v-navy" },
+      { html: cell(l1.clean, n), cls: "v-green" },
+      { html: cell(l2.clean, n), cls: "v-green" },
+      { html: cell(l1.suspicious, n), cls: "v-red" },
+      { html: cell(l2.suspicious, n), cls: "v-red" },
+      { html: cell(l1.other, n), cls: "v-gold" },
+      { html: cell(l2.other, n), cls: "v-gold" },
     ];
     const stageRows = model.population.byStage.map((st) => {
       const cur = perStage.get(st.stageKey) ?? { n: 0, l1: zero(), l2: zero() };
@@ -554,7 +642,9 @@ ${kpiBand([
     });
     const inner = `${contentHead({ eyebrow: EYEBROW_S1, title: "نتائج المستويين في المجتمع", note: `${fmtNum(s.total)} صورة — مجموع أشهر الفترة · إجابات المستوى الأول والثاني لكل مستوى` })}
 ${dataTable({
-      headers: ["المستوى", "الأول: سليمة", "الأول: اشتباه", "الأول: أخرى", "الثاني: سليمة", "الثاني: اشتباه", "الثاني: أخرى", "الإجمالي"],
+      headers: ["المستوى", "الإجمالي", "الأول", "الثاني", "الأول", "الثاني", "الأول", "الثاني"],
+      topHeader: [{ label: "", span: 2 }, { label: "سليمة", span: 2, group: true }, { label: "اشتباه", span: 2, group: true }, { label: "أخرى", span: 2, group: true }],
+      groupStart: [2, 4, 6],
       rows: stageRows,
       totals: rowFor("الإجمالي", s.total, s.levelOne, s.levelTwo),
       firstColWidth: 26,
@@ -572,38 +662,33 @@ ${dataTable({
     const portRows = (ports: PortPopRow[]): TableCell[][] =>
       ports.map((p) => [
         { html: esc(p.name) },
-        { html: popCell(p.total, p.sampleTotal, withPop), cls: "v-navy" },
-        { html: popCell(p.clean, p.sampleClean, withPop), cls: "v-green" },
-        { html: popCell(p.suspicious, p.sampleSuspicious, withPop), cls: "v-red" },
+        { html: popCell(p.total, p.sampleTotal), cls: "v-navy" },
+        { html: popCell(p.clean, p.sampleClean), cls: "v-green" },
+        { html: popCell(p.suspicious, p.sampleSuspicious), cls: "v-red" },
         ...(withPop ? [{ html: fmtNum(p.other ?? 0), cls: "v-gold" }] : []),
       ]);
     const totalsOf = (label: string, ports: PortPopRow[]): TableCell[] => {
       const sum = (f: (p: PortPopRow) => number) => ports.reduce((s, p) => s + f(p), 0);
       return [
         { html: label },
-        { html: popCell(sum((p) => p.total), sum((p) => p.sampleTotal), withPop), cls: "v-navy" },
-        { html: popCell(sum((p) => p.clean), sum((p) => p.sampleClean), withPop), cls: "v-green" },
-        { html: popCell(sum((p) => p.suspicious), sum((p) => p.sampleSuspicious), withPop), cls: "v-red" },
+        { html: popCell(sum((p) => p.total), sum((p) => p.sampleTotal)), cls: "v-navy" },
+        { html: popCell(sum((p) => p.clean), sum((p) => p.sampleClean)), cls: "v-green" },
+        { html: popCell(sum((p) => p.suspicious), sum((p) => p.sampleSuspicious)), cls: "v-red" },
         ...(withPop ? [{ html: fmtNum(sum((p) => p.other ?? 0)), cls: "v-gold" }] : []),
       ];
     };
     const coverageNote = (ports: PortPopRow[]) => {
       const total = ports.reduce((s, p) => s + p.total, 0);
       const sample = ports.reduce((s, p) => s + p.sampleTotal, 0);
-      return `التغطية ${fmtPct(pct(sample, total))}`;
+      return `التغطية الرقابية ${fmtPct(pct(sample, total))}`;
     };
     const headers = withPop ? ["المنفذ", "الإجمالي", "سليمة", "اشتباه", "نتائج أخرى"] : ["المنفذ", "الإجمالي", "سليمة", "اشتباه"];
-    for (let page = 0; page < popPages; page++) {
+    const groups = popPortGroups.length > 0 ? popPortGroups : [{ variant: "land" as const, title: "المنافذ البرية", totalLabel: "إجمالي البرية", ports: popLand }];
+    for (const g of groups) {
       const m = meta("s1", EYEBROW_S1);
-      const land = chunkAt(popLand, page);
-      const sea = chunkAt(popSea, page);
-      const padTo = Math.max(land.length, sea.length);
-      const isLast = page === popPages - 1;
-      const title = "التوزيع على المنافذ البرية والبحرية" + (page > 0 ? YITBA : "");
-      const inner = `${contentHead({ eyebrow: EYEBROW_S1, title, note: "المجتمع والرقم بين قوسين العيّنة المسحوبة — مفصولة إلى سليمة واشتباه" })}
-<div class="v3-two-col">
-  ${tintedPanel({ variant: "land", title: "المنافذ البرية", note: coverageNote(popLand), body: dataTable({ headers, rows: portRows(land), totals: isLast ? totalsOf("إجمالي البرية", popLand) : undefined, padToRows: padTo }) })}
-  ${tintedPanel({ variant: "sea", title: "المنافذ البحرية", note: coverageNote(popSea), body: dataTable({ headers, rows: portRows(sea), totals: isLast ? totalsOf("إجمالي البحرية", popSea) : undefined, padToRows: padTo }) })}
+      const inner = `${contentHead({ eyebrow: EYEBROW_S1, title: `التوزيع على ${g.title}`, note: "المجتمع والرقم بين قوسين العيّنة المسحوبة، مفصولة إلى سليمة واشتباه" })}
+<div class="v3-two-col" style="grid-template-columns:1fr">
+  ${tintedPanel({ variant: g.variant, title: g.title, note: coverageNote(g.ports), body: dataTable({ headers, rows: portRows(g.ports), totals: totalsOf(g.totalLabel, g.ports), topHeader: [{ label: "", span: 2 }, { label: "حسب النتيجة", span: withPop ? 3 : 2, group: true }], groupStart: 2, rowPx: portRowPx(g.ports.length, TOP_HEADER_PX) }) })}
 </div>`;
       parts.push(slideShell(m, "", inner));
     }
@@ -619,8 +704,8 @@ ${dataTable({
     ghost: copy.s2Ghost,
     kicker: copy.s2Kicker,
     title: "نتائج فحص الجودة",
-    description: copy.s2Description,
-    footItems: [copy.s2FootLead, "النتائج حسب المنافذ ومستويات المخاطر"],
+    description: sectionDesc.s2,
+    footItems: [],
     meta: meta("s2", eyebrowS2),
   }));
 
@@ -633,32 +718,32 @@ ${dataTable({
       return [
         { html: esc(s.label) },
         { html: fmtNum(s.evaluable), cls: "v-muted" },
-        { html: rateCell(a.cleanAcc, a.cleanResults), cls: "v-green" },
-        { html: rateCell(a.suspAcc, a.suspResults), cls: "v-red" },
-        { html: rateCell(a.overall, s.evaluable), cls: "v-navy" },
+        { html: fmtPct(a.overall), cls: "v-navy" },
+        { html: countRateCell(s.counts.missedSuspicion, pct(s.counts.missedSuspicion, s.evaluable)), cls: "v-red" },
+        { html: countRateCell(s.counts.falseSuspicion, pct(s.counts.falseSuspicion, s.evaluable)), cls: "v-gold" },
       ];
     });
     const totals: TableCell[] = [
       { html: "الإجمالي" },
       { html: fmtNum(t.evaluable), cls: "v-navy" },
-      { html: rateCell(overallStats.cleanAcc, overallStats.cleanResults), cls: "v-green" },
-      { html: rateCell(overallStats.suspAcc, overallStats.suspResults), cls: "v-red" },
-      { html: rateCell(overallStats.overall, t.evaluable), cls: "v-gold" },
+      { html: fmtPct(overallStats.overall), cls: "v-gold" },
+      { html: countRateCell(t.missedSuspicion, pct(t.missedSuspicion, t.evaluable)), cls: "v-red" },
+      { html: countRateCell(t.falseSuspicion, pct(t.falseSuspicion, t.evaluable)), cls: "v-gold" },
     ];
     const inner = `${contentHead({
       eyebrow: eyebrowS2,
-      title: "دقة الرصد العامة",
-      note: `${fmtNum(t.evaluable)} نتيجة مُقيَّمة — ${fmtNum(overallStats.cleanResults)} نتيجة سليمة و${fmtNum(overallStats.suspResults)} نتيجة اشتباه${otherResultsNote}`,
+      title: "نسبة التوائم",
     })}
 ${kpiBand([
-      { label: "دقة الرصد العامة", value: fmtPct(overallStats.overall), sub: "مرجّحة على مجموع النتائج المُقيَّمة" },
-      { label: "دقة السليمة", value: fmtPct(overallStats.cleanAcc), valueTone: "green", sub: `من ${fmtNum(overallStats.cleanResults)} نتيجة سليمة — ${fmtNum(t.missedSuspicion)} منها كانت اشتباهًا فائتًا` },
-      { label: "دقة الاشتباه", value: fmtPct(overallStats.suspAcc), valueTone: "red", sub: `من ${fmtNum(overallStats.suspResults)} نتيجة اشتباه — ${fmtNum(t.falseSuspicion)} منها كانت اشتباهًا خاطئًا` },
+      { label: "نسبة التوائم العامة", value: fmtPct(overallStats.overall), sub: RESULT_ACCURACY_DEFINITION },
+      { label: "الاشتباهات الفائتة", value: fmtNum(t.missedSuspicion), valueTone: "red", aside: `${fmtPct(pct(t.missedSuspicion, overallStats.cleanResults))} من إجابات السليمة`, sub: MISSED_SUSPICION_DEFINITION },
+      { label: "الاشتباهات الخاطئة", value: fmtNum(t.falseSuspicion), valueTone: "gold", aside: `${fmtPct(pct(t.falseSuspicion, overallStats.suspResults))} من إجابات الاشتباه`, sub: FALSE_SUSPICION_DEFINITION },
     ], "solo", true)}
-<div class="v3-note" style="margin-top:18px;font-weight:700;color:var(--v3-navy);">الدقتان حسب مستويات المخاطر — الأرقام بين قوسين عدد النتائج المُقيَّمة</div>
-${dataTable({ headers: ["المستوى", "النتائج المُقيَّمة", "دقة السليمة", "دقة الاشتباه", "الدقة العامة"], rows: stageRows, totals })}`;
+<div class="v3-note" style="margin-top:18px;font-weight:700;color:var(--v3-navy);">الإجابات حسب مستويات المخاطر — النسبة بين قوسين من الإجابات المدروسة في كل مستوى</div>
+${dataTable({ headers: ["المستوى", "الإجابات المدروسة", "نسبة التوائم العامة", "الاشتباهات الفائتة", "الاشتباهات الخاطئة"], topHeader: [{ label: "", span: 2 }, { label: "النسبة", span: 1, group: true }, { label: "الأخطاء", span: 2, group: true }], groupStart: [2, 3], rows: stageRows, totals })}`;
     parts.push(slideShell(m, "", inner));
   }
+
 
   await yieldToMain();
 
@@ -669,72 +754,210 @@ ${dataTable({ headers: ["المستوى", "النتائج المُقيَّمة",
   // averages), and were hoisted above so accPages/TOTAL could be computed
   // before the first slide was built.
   {
-    const rowsOf = (ports: PortAccuracyRow[]): TableCell[][] =>
-      ports.map((p) => {
-        const a = accuracyOf(p.counts);
-        return [
-          { html: esc(p.name) },
-          { html: rateCell(a.cleanAcc, a.cleanResults), cls: "v-green" },
-          { html: rateCell(a.suspAcc, a.suspResults), cls: "v-red" },
-          { html: rateCell(a.overall, a.evaluable), cls: "v-navy" },
-        ];
-      });
-    const totalsOf = (label: string, a: ReturnType<typeof accuracyOf>): TableCell[] => [
-      { html: label },
-      { html: rateCell(a.cleanAcc, a.cleanResults), cls: "v-green" },
-      { html: rateCell(a.suspAcc, a.suspResults), cls: "v-red" },
-      { html: rateCell(a.overall, a.evaluable), cls: "v-gold" },
-    ];
-    const headers = ["المنفذ", "دقة السليمة", "دقة الاشتباه", "الدقة العامة"];
-    for (let page = 0; page < accPages; page++) {
+    // One full-width page per port type (busiest port first), each listing ALL of its ports.
+    const cellsOf = (label: string, c: FourCounts, tone?: string): TableCell[] => {
+      const a = accuracyOf(c);
+      return [
+        { html: label },
+        { html: fmtNum(a.evaluable), cls: tone ?? "v-muted" },
+        { html: fmtPct(a.overall), cls: "v-navy" },
+        { html: fmtPct(a.cleanAcc), cls: "v-green" },
+        { html: fmtPct(a.suspAcc), cls: "v-green" },
+        { html: fmtPct(pct(c.missedSuspicion, a.cleanResults)), cls: "v-red" },
+        { html: fmtPct(pct(c.falseSuspicion, a.suspResults)), cls: "v-gold" },
+      ];
+    };
+    const headers = ["المنفذ", "إجمالي الإجابات", "معدل الاتفاق العام", "دقة السليمة", "دقة الاشتباه", "الاشتباهات الفائتة", "الاشتباهات الخاطئة"];
+    const accShown = accGroups.length > 0 ? accGroups : [{ variant: "land" as const, title: "للمنافذ البرية", panelTitle: "المنافذ البرية", totalLabel: "إجمالي البرية", ports: portAcc.land }];
+    for (const g of accShown) {
       const m = meta("s2", eyebrowS2);
-      const land = chunkAt(portAcc.land, page);
-      const sea = chunkAt(portAcc.sea, page);
-      const padTo = Math.max(land.length, sea.length);
-      const isLast = page === accPages - 1;
-      const title = "دقة الرصد حسب المنفذ" + (page > 0 ? YITBA : "");
       const inner = `${contentHead({
         eyebrow: eyebrowS2,
-        title,
-        note: `الأرقام بين قوسين = عدد النتائج المُقيَّمة · المرجع العام ${fmtPct(overallStats.cleanAcc)} / ${fmtPct(overallStats.suspAcc)} / ${fmtPct(overallStats.overall)}`,
+        title: `نتائج الأداء ${g.title}`,
       })}
-<div class="v3-two-col">
-  ${tintedPanel({ variant: "land", title: "المنافذ البرية", body: dataTable({ headers, rows: rowsOf(land), totals: isLast ? totalsOf("إجمالي البرية", landTotals) : undefined, firstColWidth: 36, padToRows: padTo }) })}
-  ${tintedPanel({ variant: "sea", title: "المنافذ البحرية", body: dataTable({ headers, rows: rowsOf(sea), totals: isLast ? totalsOf("إجمالي البحرية", seaTotals) : undefined, firstColWidth: 36, padToRows: padTo }) })}
-</div>`;
+<div class="v3-two-col" style="grid-template-columns:1fr">
+  ${tintedPanel({ variant: g.variant, title: g.panelTitle, body: dataTable({ headers, rows: g.ports.map((p) => cellsOf(esc(p.name), p.counts)), totals: cellsOf(g.totalLabel, sumCounts(g.ports.map((p) => p.counts)), "v-navy"), firstColWidth: 26, topHeader: [{ label: "", span: 1 }, { label: "النتيجة العامة", span: 2 }, { label: "الدقة", span: 2, group: true }, { label: "الأخطاء", span: 2, group: true }], groupStart: [3, 5], rowPx: portRowPx(g.ports.length, FORMULA_NOTE_PX + TOP_HEADER_PX) }) })}
+</div>
+<p class="v3-note v3-formula-note">${AGREEMENT_FORMULA_NOTE}</p>`;
       parts.push(slideShell(m, "", inner));
     }
   }
 
-  // 12 — Overall accuracy per port: one slide per port type (land, then sea) so each chart has the full width
-  // and a 17-port land chart never squeezes the sea chart.
+  // Level 1 vs Level 2 answers — sits right under the overall result accuracy (section 2) (all ports pooled, five metric rows each)
+  const allLevelRows = [...levelRows.land, ...levelRows.sea];
+  const l1All = accuracyOf(sumCounts(allLevelRows.map((r) => r.l1.counts)));
+  const l2All = accuracyOf(sumCounts(allLevelRows.map((r) => r.l2.counts)));
   {
-    const barsOf = (ports: PortAccuracyRow[]): ChartBar[] =>
-      ports.map((p) => ({ label: p.name, value: accuracyOf(p.counts).overall }));
-    const portAxis = fitAxis([...barsOf(portAcc.land), ...barsOf(portAcc.sea)].map((b) => b.value), 86, 98);
-    for (const kind of ["land", "sea"] as const) {
-      const m = meta("s2", eyebrowS2);
-      const isLand = kind === "land";
-      const ports = isLand ? portAcc.land : portAcc.sea;
-      const avg = isLand ? landTotals.overall : seaTotals.overall;
-      const chart = barChart({
-        bars: barsOf(ports),
-        ...portAxis, tint: kind,
-        defaultTone: isLand ? "gold" : "blue",
-        references: avg === null ? [] : [{ value: avg, label: `المتوسط ${fmtPct(avg)}`, tone: isLand ? "gold-dark" : "blue-dark" }],
+    const m = meta("s2", eyebrowS2);
+    const l1Missed = allLevelRows.reduce((s, r) => s + r.l1.counts.missedSuspicion, 0);
+    const l2Missed = allLevelRows.reduce((s, r) => s + r.l2.counts.missedSuspicion, 0);
+    const panel = (variant: "land" | "sea", title: string, a: typeof l1All, missed: number, other: number) =>
+      tintedPanel({
+        variant, title, padLg: true,
+        body: `<div class="v3-cmp-rows">
+  <div class="v3-cmp-row"><span>الإجابات المدروسة</span><b>${fmtNum(a.evaluable)}</b></div>
+  <div class="v3-cmp-row"><span>دقة السليمة</span><b class="v-green">${fmtPct(a.cleanAcc)}</b></div>
+  <div class="v3-cmp-row"><span>دقة الاشتباه</span><b class="v-red">${fmtPct(a.suspAcc)}</b></div>
+  <div class="v3-cmp-row"><span>الدقة العامة</span><b>${fmtPct(a.overall)}</b></div>
+  <div class="v3-cmp-row"><span>اشتباهات فائتة</span><b>${fmtNum(missed)} إجابة</b></div>
+  <div class="v3-cmp-row"><span>نتائج أخرى (غير مدروسة)</span><b>${fmtNum(other)}</b></div>
+</div>`,
       });
+    const note =
+      l1All.overall !== null && l2All.overall !== null && l1All.suspAcc !== null && l2All.suspAcc !== null
+        ? `<p class="v3-note">فرق الدقة العامة بين المستويين ${fmtPct(Math.abs(l1All.overall - l2All.overall))} (${fmtPct(l1All.overall)} مقابل ${fmtPct(l2All.overall)})، وفرق دقة الاشتباه ${fmtPct(Math.abs(l1All.suspAcc - l2All.suspAcc))} (${fmtPct(l1All.suspAcc)} مقابل ${fmtPct(l2All.suspAcc)}).</p>`
+        : "";
+    const inner = `${contentHead({
+      eyebrow: eyebrowS2,
+      title: "دقة إجابات المستوى الأول والثاني",
+      note: "لكل صورة إجابتان مستقلّتان — إجابة لكل مستوى",
+    })}
+<div class="v3-two-col">
+  ${panel("land", "المستوى الأول", l1All, l1Missed, otherL1)}
+  ${panel("sea", "المستوى الثاني", l2All, l2Missed, otherL2)}
+</div>
+${note}`;
+    parts.push(slideShell(m, "", inner));
+  }
+
+  // 11a — Level 1 vs Level 2 per port, as tables (one full-width page per port type), right under the
+  // port-results pages. Same metrics as those pages, once per level.
+  {
+    const cellsOf = (label: string, c1: FourCounts, c2: FourCounts, tone?: string): TableCell[] => {
+      const part = (c: FourCounts): TableCell[] => {
+        const a = accuracyOf(c);
+        return [
+          { html: fmtNum(a.evaluable), cls: tone ?? "v-muted" },
+          { html: fmtPct(a.overall), cls: "v-navy" },
+          { html: fmtPct(a.cleanAcc), cls: "v-green" },
+          { html: fmtPct(a.suspAcc), cls: "v-green" },
+          { html: fmtPct(pct(c.missedSuspicion, a.cleanResults)), cls: "v-red" },
+          { html: fmtPct(pct(c.falseSuspicion, a.suspResults)), cls: "v-gold" },
+        ];
+      };
+      return [{ html: label }, ...part(c1), ...part(c2)];
+    };
+    // Twelve data columns share the slide, so each header must stay on ONE line: short names, same terms as elsewhere.
+    const sub = ["الإجابات", "الاتفاق العام", "دقة السليمة", "دقة الاشتباه", "اشتباه فائت", "اشتباه خاطئ"];
+    const headers = ["المنفذ", ...sub, ...sub];
+    const topHeader = [{ label: "", span: 1 }, { label: "المستوى الأول", span: 6 }, { label: "المستوى الثاني", span: 6, group: true }];
+    const answers = (c: FourCounts) => c.correctClean + c.correctSuspicion + c.missedSuspicion + c.falseSuspicion;
+    for (const g of levelShown) {
+      const m = meta("s2", eyebrowS2);
+      const rows = [...g.rows].sort((a, b) =>
+        answers(b.l1.counts) + answers(b.l2.counts) - answers(a.l1.counts) - answers(a.l2.counts)
+        || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
       const inner = `${contentHead({
         eyebrow: eyebrowS2,
-        title: isLand ? "الدقة العامة حسب المنفذ — المنافذ البرية" : "الدقة العامة حسب المنفذ — المنافذ البحرية",
-        note: `${fmtNum(ports.length)} ${isLand ? "منافذ برية" : "منافذ بحرية"} — متوسط النوع ${fmtPct(avg)}`,
+        title: `دقة المستويين في ${g.panelTitle}`,
       })}
-<div class="v3-single-chart">${chartTitleRow({ title: isLand ? "المنافذ البرية" : "المنافذ البحرية", dot: kind })}${chart}</div>
-${legendRow([
-        isLand ? { swatch: "gold", text: "دقة المنفذ البري" } : { swatch: "blue", text: "دقة المنفذ البحري" },
-        { dash: "muted", text: "متوسط النوع" },
-      ], scaleCaption(portAxis))}`;
+<div class="v3-two-col" style="grid-template-columns:1fr">
+  ${tintedPanel({ variant: g.variant, title: g.panelTitle, body: dataTable({ headers, topHeader, rows: rows.map((r) => cellsOf(esc(r.name), r.l1.counts, r.l2.counts)), totals: cellsOf(g.totalLabel, sumCounts(rows.map((r) => r.l1.counts)), sumCounts(rows.map((r) => r.l2.counts)), "v-navy"), firstColWidth: 14, compactHeaders: true, groupStart: [2, 7, 8], rowPx: portRowPx(rows.length, 40 + FORMULA_NOTE_PX) }) })}
+</div>
+<p class="v3-note v3-formula-note">${AGREEMENT_FORMULA_NOTE}</p>`;
       parts.push(slideShell(m, "", inner));
     }
+  }
+
+  // 11b0 — Land vs sea summary of the marking / image-quality follow-up (same two-panel look as the level-answers page).
+  {
+    const m = meta("s2", eyebrowS2);
+    const marking = collectPortMarking(model);
+    const totalOf = (ports: PortAccuracyRow[]) => sumMarking(ports.map((p) => marking.get(p.name) ?? emptyMarking()));
+    const panel = (variant: "land" | "sea", title: string, c: MarkingCounts) =>
+      tintedPanel({
+        variant, title, padLg: true,
+        body: `<div class="v3-cmp-rows">
+  <div class="v3-cmp-row"><span>عدد صور الأشعة</span><b>${fmtNum(c.images)}</b></div>
+  <div class="v3-cmp-row"><span>صور بتحديد</span><b class="v-green">${fmtNum(c.marked)}</b></div>
+  <div class="v3-cmp-row"><span>صور بدون تحديد</span><b class="v-red">${fmtNum(c.unmarked)}</b></div>
+  <div class="v3-cmp-row"><span>جودة منخفضة</span><b class="v-red">${fmtNum(c.low)}</b></div>
+  <div class="v3-cmp-row"><span>جودة متوسطة</span><b class="v-gold">${fmtNum(c.mid)}</b></div>
+  <div class="v3-cmp-row"><span>جودة عالية</span><b class="v-green">${fmtNum(c.high)}</b></div>
+</div>`,
+      });
+    const land = totalOf(portAcc.land);
+    const sea = totalOf(portAcc.sea);
+    const inner = `${contentHead({ eyebrow: eyebrowS2, title: "متابعة تحديد موقع الاشتباه وجودة الصور" })}
+<div class="v3-two-col">
+  ${panel("land", "المنافذ البرية", land)}
+  ${panel("sea", "المنافذ البحرية", sea)}
+</div>`;
+    parts.push(slideShell(m, "", inner));
+  }
+
+  // 11b — Suspicion-marking follow-up per port, same layout as the port-results pages above
+  // (one full-width page per port type, busiest first).
+  {
+    const marking = collectPortMarking(model);
+    const cellsOf = (label: string, c: MarkingCounts, tone?: string): TableCell[] => [
+      { html: label },
+      { html: fmtNum(c.images), cls: tone ?? "v-muted" },
+      { html: fmtNum(c.marked), cls: "v-green" },
+      { html: fmtNum(c.unmarked), cls: "v-red" },
+      { html: fmtNum(c.low), cls: "v-red" },
+      { html: fmtNum(c.mid), cls: "v-gold" },
+      { html: fmtNum(c.high), cls: "v-green" },
+    ];
+    const headers = ["المنفذ", "عدد صور الأشعة", "صور بتحديد", "صور بدون تحديد", "جودة منخفضة", "جودة متوسطة", "جودة عالية"];
+    const markShown = accGroups.length > 0 ? accGroups : [{ variant: "land" as const, title: "للمنافذ البرية", panelTitle: "المنافذ البرية", totalLabel: "إجمالي البرية", ports: portAcc.land }];
+    for (const g of markShown) {
+      const m = meta("s2", eyebrowS2);
+      const rows = g.ports
+        .map((p) => ({ name: p.name, c: marking.get(p.name) ?? emptyMarking() }))
+        .sort((a, b) => b.c.images - a.c.images || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+      const total = sumMarking(rows.map((r) => r.c));
+      const inner = `${contentHead({
+        eyebrow: eyebrowS2,
+        title: `متابعة تحديد موقع الاشتباه وجودة الصور ${g.title}`,
+      })}
+<div class="v3-two-col" style="grid-template-columns:1fr">
+  ${tintedPanel({ variant: g.variant, title: g.panelTitle, body: dataTable({ headers, rows: rows.map((r) => cellsOf(esc(r.name), r.c)), totals: cellsOf(g.totalLabel, total, "v-navy"), firstColWidth: 26, topHeader: [{ label: "", span: 2 }, { label: "التحديد", span: 2, group: true }, { label: "جودة الصورة", span: 3, group: true }], groupStart: [2, 4], rowPx: portRowPx(rows.length, FORMULA_NOTE_PX + TOP_HEADER_PX) }) })}
+</div>
+<p class="v3-note v3-formula-note">عدد صور الأشعة يشمل الصور التي أُجيب فيها عن التحديد والجودة فقط. الصور التي لم تُدرس جودتها أو تحديدها: ${fmtNum(total.unstudied)} صورة.</p>`;
+      parts.push(slideShell(m, "", inner));
+    }
+  }
+
+  // 11c — Agreement and the two error counts by image quality (low → high), on ANSWERS from the shared decision fold,
+  // all on ONE page: quality levels as columns, rows for all ports / land / sea.
+  {
+    const m = meta("s2", eyebrowS2);
+    const records = buildDecisionRecords(model.rows, "quality");
+    const kindOf = (r: { portType: string | null }) => ((r.portType ?? "").includes("بحري") ? "sea" : "land");
+    const byQuality = aggregateDecisions(records, "decision", (r) => `all|${r.imageQuality}`);
+    const byKindQuality = aggregateDecisions(records, "decision", (r) => `${kindOf(r)}|${r.imageQuality}`);
+    const levels = [
+      { key: "منخفض", label: "جودة منخفضة", tone: "red" },
+      { key: "متوسط", label: "جودة متوسطة", tone: "gold" },
+      { key: "عالي", label: "جودة عالية", tone: "green" },
+    ] as const;
+    const groupRows: Array<{ label: string; variant: "all" | "land" | "sea" }> = [
+      { label: "جميع المنافذ", variant: "all" },
+      ...accGroups.map((g) => ({ label: g.panelTitle, variant: g.variant })),
+    ];
+    const rows: QualityRow[] = groupRows.map((g) => ({
+      label: g.label,
+      variant: g.variant,
+      cells: levels.map((level): QualityCell => {
+        const c = (g.variant === "all" ? byQuality : byKindQuality).get(`${g.variant}|${level.key}`);
+        const four: FourCounts = c ?? { correctClean: 0, correctSuspicion: 0, missedSuspicion: 0, falseSuspicion: 0 };
+        const a = accuracyOf(four);
+        return {
+          tone: level.tone,
+          value: fmtPct(a.overall),
+          caption: `معدل الاتفاق العام · من ${fmtNum(a.evaluable)} إجابة`,
+          fill: a.overall,
+          stats: [
+            { label: "الاشتباهات الفائتة", value: fmtNum(four.missedSuspicion), share: `${fmtPct(pct(four.missedSuspicion, a.evaluable))} من الإجابات` },
+            { label: "الاشتباهات الخاطئة", value: fmtNum(four.falseSuspicion), share: `${fmtPct(pct(four.falseSuspicion, a.evaluable))} من الإجابات` },
+          ],
+        };
+      }),
+    }));
+    const inner = `${contentHead({ eyebrow: eyebrowS2, title: "نسبة التوائم حسب جودة الصورة" })}
+${qualityMatrix(levels.map((l) => ({ label: l.label, tone: l.tone })), rows)}`;
+    parts.push(slideShell(m, "", inner));
   }
 
   // 13 — Clean/suspicion accuracy per risk level (four mini plots)
@@ -763,13 +986,12 @@ ${legendRow([
             ...(overallStats.suspAcc === null ? [] : [{ value: overallStats.suspAcc, tone: "avg-red" as const }]),
           ],
         });
-        return `<div class="v3-chart-col">${chart}<div class="v3-level-cap"><b>${esc(s.label)}</b><span>الدقة العامة ${fmtPct(a.overall)} · ${fmtNum(s.evaluable)} نتيجة</span></div></div>`;
+        return `<div class="v3-chart-col">${chart}<div class="v3-level-cap"><b>${esc(s.label)}</b><span>الدقة العامة ${fmtPct(a.overall)} · ${fmtNum(s.evaluable)} إجابة</span></div></div>`;
       })
       .join("\n");
     const inner = `${contentHead({
       eyebrow: eyebrowS2,
       title: "الدقتان حسب مستويات المخاطر",
-      note: copy.levelsChartNote,
     })}
 <div class="v3-levels-chart-grid">${cols}</div>
 ${legendRow([
@@ -788,137 +1010,28 @@ ${legendRow([
     eyebrow: footText,
     ghost: copy.s3Ghost,
     kicker: copy.s3Kicker,
-    title: "التحاليل المتقدمة",
-    description: "ما وراء النسب: مصفوفة النتائج، دقة المستويات، والتوافق مع الفرق الأمنية ومحرك المخاطر، وأثر التحديد وجودة الصورة.",
-    footItems: [
-      "مصفوفة نتائج الوسائل الآلية · دقة إجابات المستويين",
-      "التوافق مع الفرق الأمنية · التوافق مع محرك المخاطر",
-      "أثر التحديد · أثر جودة الصورة",
-    ],
+    title: "الإفادات",
+    description: sectionDesc.s3,
+    footItems: [],
     meta: meta("s3", eyebrowS3),
   }));
 
-  // 15 — Outcome matrix (errorAnalysis.totals verbatim, never recomputed)
-  {
-    const m = meta("s3", eyebrowS3);
-    const share = (n: number) => fmtPct(pct(n, t.evaluable));
-    const qualityClean = t.correctClean + t.falseSuspicion;
-    const qualitySusp = t.missedSuspicion + t.correctSuspicion;
-    const inner = `${contentHead({
+  // Statements drafted from the results (fixed rules), five per page, each editable in the viewer; then one page of
+  // blank lines to write further statements. Empty text leaves are skipped by the editor, so the blanks carry a prompt.
+  for (let p = 0; p < statementPages; p++) {
+    const chunk = statements.slice(p * STATEMENTS_PER_PAGE, (p + 1) * STATEMENTS_PER_PAGE);
+    const isBlank = p === statementPages - 1;
+    const items = isBlank
+      ? Array.from({ length: STATEMENTS_PER_PAGE }, () => ({ text: STATEMENT_PLACEHOLDER, tag: "", tone: "none" as const }))
+      : chunk.map((s) => ({ text: s.text, tag: s.priority, tone: s.priority === "عالية" ? "red" as const : s.priority === "متوسطة" ? "gold" as const : "none" as const }));
+    parts.push(slideShell(meta("s3", eyebrowS3), "", `${contentHead({
       eyebrow: eyebrowS3,
-      title: "مصفوفة نتائج الوسائل الآلية",
-      note: `${fmtNum(t.evaluable)} نتيجة مُقيَّمة — نتيجة الفحص مقابل رأي أخصائي الجودة`,
+      title: isBlank ? "إفادات إضافية" : "أهم الإفادات من نتائج التقرير" + (p > 0 ? YITBA : ""),
+      note: isBlank ? "اضغط «تعديل النص» أعلى الصفحة ثم اكتب الإفادة في أي سطر." : "مستخلصة من أرقام التقرير بقواعد ثابتة، ويمكن تعديل أي نص منها.",
     })}
-${matrixGrid({
-      colHeads: ["رأي الجودة: سليم", "رأي الجودة: اشتباه"],
-      rowLabels: ["نتيجة الوسائل الآلية: سليم", "نتيجة الوسائل الآلية: اشتباه"],
-      cells: [
-        { value: fmtNum(t.correctClean), caption: `توافق على السليم · ${share(t.correctClean)} من النتائج`, tone: "pos" },
-        { value: fmtNum(t.missedSuspicion), caption: `اشتباه فائت · ${share(t.missedSuspicion)} من النتائج`, tone: "neg" },
-        { value: fmtNum(t.falseSuspicion), caption: `اشتباه خاطئ · ${share(t.falseSuspicion)} من النتائج`, tone: "neg" },
-        { value: fmtNum(t.correctSuspicion), caption: `توافق على الاشتباه · ${share(t.correctSuspicion)} من النتائج`, tone: "pos" },
-      ],
-      rowSides: [
-        { label: "دقة السليمة", value: fmtPct(overallStats.cleanAcc), sub: fmtNum(overallStats.cleanResults) },
-        { label: "دقة الاشتباه", value: fmtPct(overallStats.suspAcc), sub: fmtNum(overallStats.suspResults) },
-      ],
-      totalsLabel: "الإجمالي",
-      colTotals: [
-        { label: "رأي الجودة: سليم", value: fmtNum(qualityClean), sub: "" },
-        { label: "رأي الجودة: اشتباه", value: fmtNum(qualitySusp), sub: "" },
-      ],
-      grandTotal: { label: "التوافق الكلي", value: fmtPct(overallStats.overall), sub: fmtNum(t.evaluable), gold: true },
-    })}
-<p class="v3-note">الخطأان غير متكافئين في الأثر: ${fmtNum(t.falseSuspicion)} اشتباهًا خاطئًا تعني كلفة تشغيلية، و${fmtNum(t.missedSuspicion)} اشتباهًا فائتًا تعني مخاطرة أمنية مباشرة.</p>`;
-    parts.push(slideShell(m, "", inner));
+${statementList(items, isBlank ? 0 : p * STATEMENTS_PER_PAGE)}`));
   }
 
-  // 16 — Level 1 vs Level 2 answers (all ports pooled, five metric rows each)
-  const levelRows = collectLevelAccuracyRows(model);
-  const allLevelRows = [...levelRows.land, ...levelRows.sea];
-  const l1All = accuracyOf(sumCounts(allLevelRows.map((r) => r.l1.counts)));
-  const l2All = accuracyOf(sumCounts(allLevelRows.map((r) => r.l2.counts)));
-  {
-    const m = meta("s3", eyebrowS3);
-    const l1Missed = allLevelRows.reduce((s, r) => s + r.l1.counts.missedSuspicion, 0);
-    const l2Missed = allLevelRows.reduce((s, r) => s + r.l2.counts.missedSuspicion, 0);
-    const panel = (variant: "land" | "sea", title: string, a: typeof l1All, missed: number, other: number) =>
-      tintedPanel({
-        variant, title, padLg: true,
-        body: `<div class="v3-cmp-rows">
-  <div class="v3-cmp-row"><span>النتائج المُقيَّمة</span><b>${fmtNum(a.evaluable)}</b></div>
-  <div class="v3-cmp-row"><span>دقة السليمة</span><b class="v-green">${fmtPct(a.cleanAcc)}</b></div>
-  <div class="v3-cmp-row"><span>دقة الاشتباه</span><b class="v-red">${fmtPct(a.suspAcc)}</b></div>
-  <div class="v3-cmp-row"><span>الدقة العامة</span><b>${fmtPct(a.overall)}</b></div>
-  <div class="v3-cmp-row"><span>اشتباهات فائتة</span><b>${fmtNum(missed)} نتيجة</b></div>
-  <div class="v3-cmp-row"><span>نتائج أخرى (غير مُقيَّمة)</span><b>${fmtNum(other)}</b></div>
-</div>`,
-      });
-    const note =
-      l1All.overall !== null && l2All.overall !== null && l1All.suspAcc !== null && l2All.suspAcc !== null
-        ? `<p class="v3-note">فرق الدقة العامة بين المستويين ${fmtPct(Math.abs(l1All.overall - l2All.overall))} (${fmtPct(l1All.overall)} مقابل ${fmtPct(l2All.overall)})، وفرق دقة الاشتباه ${fmtPct(Math.abs(l1All.suspAcc - l2All.suspAcc))} (${fmtPct(l1All.suspAcc)} مقابل ${fmtPct(l2All.suspAcc)}).</p>`
-        : "";
-    const inner = `${contentHead({
-      eyebrow: eyebrowS3,
-      title: "دقة إجابات المستوى الأول والثاني",
-      note: "لكل صورة نتيجتان مستقلّتان — نتيجة لكل مستوى",
-    })}
-<div class="v3-two-col">
-  ${panel("land", "المستوى الأول", l1All, l1Missed, otherL1)}
-  ${panel("sea", "المستوى الثاني", l2All, l2Missed, otherL2)}
-</div>
-${note}`;
-    parts.push(slideShell(m, "", inner));
-  }
-
-  await yieldToMain();
-
-  // 17/18 — Level 1/2 accuracy per port, land then sea. The sea chart pins
-  // each group to a fixed 16.2% slice so its bar width/spacing matches the
-  // land chart (the handoff's own trick for unequal port counts).
-  {
-    const levelPortSlide = (
-      title: string,
-      rows: typeof levelRows.land,
-      tint: "land" | "sea",
-      typeOverall: number | null,
-      fixedGroups: boolean,
-    ) => {
-      const m = meta("s3", eyebrowS3);
-      const l1Type = accuracyOf(sumCounts(rows.map((r) => r.l1.counts)));
-      const l2Type = accuracyOf(sumCounts(rows.map((r) => r.l2.counts)));
-      const levelPortAxis = fitAxis(rows.flatMap((r) => [r.l1.accuracy, r.l2.accuracy]), 86, 96);
-      const chart = groupedBarChart({
-        groups: rows.map((r) => {
-          const portOverall = accuracyOf(sumCounts([r.l1.counts, r.l2.counts])).overall;
-          return {
-            label: r.name,
-            sublabel: `العامة ${fmtPct(portOverall)}`,
-            a: { label: "المستوى الأول", value: r.l1.accuracy },
-            b: { label: "المستوى الثاني", value: r.l2.accuracy },
-          };
-        }),
-        ...levelPortAxis, tint,
-        // 16.2% slices only fit ≤ 6 groups (6 × 16.2% ≈ 97% of the plot); more ports share the width evenly.
-        groupWidthPct: fixedGroups && rows.length <= 6 ? 16.2 : undefined,
-        references: typeOverall === null ? [] : [{ value: typeOverall, tone: "muted" }],
-      });
-      const inner = `${contentHead({
-        eyebrow: eyebrowS3,
-        title,
-        note: `${fmtNum(rows.length)} ${tint === "land" ? "منافذ برية" : "منافذ بحرية"} — متوسط النوع ${fmtPct(typeOverall)}`,
-      })}
-${chartTitleRow({ title: "الدقة العامة لكل مستوى في كل منفذ", asideDash: { tone: "muted", text: `متوسط النوع ${fmtPct(typeOverall)}` } })}
-<div class="v3-single-chart">${chart}</div>
-${legendRow([
-        { swatch: "gold", text: `المستوى الأول — متوسط ${fmtPct(l1Type.overall)}` },
-        { swatch: "blue", text: `المستوى الثاني — متوسط ${fmtPct(l2Type.overall)}` },
-      ], scaleCaption(levelPortAxis))}`;
-      return slideShell(m, "", inner);
-    };
-    parts.push(levelPortSlide("دقة المستويين في المنافذ البرية", levelRows.land, "land", landTotals.overall, false));
-    parts.push(levelPortSlide("دقة المستويين في المنافذ البحرية", levelRows.sea, "sea", seaTotals.overall, true));
-  }
 
   await yieldToMain();
 
@@ -1039,7 +1152,7 @@ ${legendRow([
   </div>
   <div class="v3-agree-col">
     ${chartTitleRow({ title: "التفصيل — الأرقام بين قوسين عدد الصور المتوافقة" })}
-    ${dataTable({ headers: ["الفريق", "الصور", "المستوى الأول", "المستوى الثاني", "الكلي"], rows: teamRows, totals: teamTotals, firstColWidth: 26 })}
+    ${dataTable({ headers: ["الفريق", "الصور", "المستوى الأول", "المستوى الثاني", "الكلي"], rows: teamRows, totals: teamTotals, firstColWidth: 26, topHeader: [{ label: "", span: 2 }, { label: "التوافق", span: 3, group: true }], groupStart: 2 })}
   </div>
 </div>`;
     parts.push(slideShell(m, "", inner));
@@ -1055,86 +1168,6 @@ ${engineBand}`;
   }
 
   await yieldToMain();
-
-  // 20 — Marking + image-quality impact (symmetric split, callouts pinned)
-  {
-    const m = meta("s3", eyebrowS3);
-    const marking = computeMarkingImpact(model);
-    const quality = computeQualityImpactStrata(model.rows);
-    const gradient = accuracyGradient(quality.strata);
-    const overallRef =
-      overallStats.overall === null
-        ? []
-        : [{ value: overallStats.overall, tone: "gold" as const }];
-
-    const markingDelta =
-      marking.present.accuracy !== null && marking.absent.accuracy !== null
-        ? marking.present.accuracy - marking.absent.accuracy
-        : null;
-    const impactAxis = fitAxis(
-      [marking.present.accuracy, marking.absent.accuracy, ...quality.strata.map((s) => s.accuracy)],
-      70,
-      100,
-    );
-    const markingChart = barChart({
-      bars: [
-        { label: "مع تحديد الموقع", sublabel: `${fmtNum(marking.present.n)} نتيجة`, value: marking.present.accuracy, tone: "green" },
-        { label: "دون تحديد", sublabel: `${fmtNum(marking.absent.n)} نتيجة`, value: marking.absent.accuracy, tone: "red" },
-      ],
-      ...impactAxis, barMaxWidth: 120, gap: 34, pad: 44,
-      references: overallRef,
-    });
-
-    const qualityStrata = quality.strata;
-    const qualityTones = ["green", "gold", "red"] as const;
-    const qualityChart = barChart({
-      bars: qualityStrata.map((s, i) => ({
-        label: `جودة ${s.level}`,
-        sublabel: `${fmtNum(s.n)} نتيجة`,
-        value: s.accuracy,
-        tone: qualityTones[Math.min(i, qualityTones.length - 1)],
-      })),
-      ...impactAxis, barMaxWidth: 120, gap: 34, pad: 44,
-      references: overallRef,
-    });
-    const qualityTotal = qualityStrata.reduce((s, x) => s + x.n, 0);
-    const high = qualityStrata[0];
-    const low = qualityStrata[qualityStrata.length - 1];
-
-    const impactTitle = "أثر التحديد وجودة الصورة على الدقة";
-    const impactNote = `عاملان تشغيليان يُفسّران معظم تفاوت الدقة — المتوسط العام ${fmtPct(overallStats.overall)}`;
-    const markingCol = `${impactColumn({
-      title: "أثر وجود التحديد",
-      note: `${fmtNum(marking.present.n)} مقابل ${fmtNum(marking.absent.n)} نتيجة`,
-      chartHtml: markingChart,
-      calloutValue: markingDelta === null ? "—" : `${markingDelta >= 0 ? "+" : "−"}${Math.abs(markingDelta).toFixed(1)}%`,
-      calloutText:
-        markingDelta === null
-          ? "لا يمكن حساب الفرق — إحدى المجموعتين دون حد الكفاية الإحصائية."
-          : `فرق في الدقة العامة (${fmtPct(marking.present.accuracy)} مقابل ${fmtPct(marking.absent.accuracy)}).`,
-    })}`;
-    const qualityCol = `${impactColumn({
-      title: "أثر جودة الصورة",
-      note: `${fmtNum(qualityTotal)} نتيجة على ${fmtNum(qualityStrata.length)} فئات جودة`,
-      chartHtml: qualityChart,
-      calloutValue: gradient === null ? "—" : `−${Math.abs(gradient).toFixed(1)}%`,
-      calloutText:
-        gradient === null || !high || !low
-          ? "لا يمكن حساب الفرق — إحدى فئات الجودة دون حد الكفاية الإحصائية."
-          : `فرق بين الصور ${high.level}ة الجودة (${fmtPct(high.accuracy)}) و${low.level}ة الجودة (${fmtPct(low.accuracy)}) — معالجة جودة الالتقاط ترفع الدقة قبل أي تدريب.`,
-    })}`;
-    const impactLegend = legendRow([{ dash: "gold", text: `المتوسط العام ${fmtPct(overallStats.overall)}` }], scaleCaption(impactAxis));
-    // Two pages — marking, then (يتبع) image quality — one chart each, full width.
-    const inner = `${contentHead({ eyebrow: eyebrowS3, title: impactTitle, note: impactNote })}
-<div class="v3-impact-grid v3-impact-single">${markingCol}</div>
-${impactLegend}`;
-    parts.push(slideShell(m, "", inner));
-    const m2 = meta("s3", eyebrowS3);
-    const inner2 = `${contentHead({ eyebrow: eyebrowS3, title: impactTitle + YITBA, note: impactNote })}
-<div class="v3-impact-grid v3-impact-single">${qualityCol}</div>
-${impactLegend}`;
-    parts.push(slideShell(m2, "", inner2));
-  }
 
   // 21 — Closing
   parts.push(closingSlide({

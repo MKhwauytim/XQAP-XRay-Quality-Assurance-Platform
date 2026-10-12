@@ -8,6 +8,7 @@
 // review identically — only the slide design differs (theme.ts).
 import { buildReportModel } from "../model/reportModel";
 import { buildDeck3Slides } from "./slides";
+import { buildStatements } from "./statements";
 import { DECK_V3_CSS } from "./theme";
 import { icon } from "../ui/icons";
 import { DECK_NAV_SCRIPT, DECK_FULLSCREEN_SCRIPT } from "../deck2";
@@ -119,6 +120,21 @@ export function buildDeckV3Html(
    *  including `null` for "no template" — turns the in-viewer text editor on. */
   textTemplate?: DeckTextEntries | null,
 ): string {
+  return withShortDashes(buildDeckV3HtmlRaw(slides, monthLabel, brand, footerNote, textTemplate));
+}
+
+/** Report copy uses a plain hyphen, never the long em dash (U+2014); the en dash in page ranges is untouched. */
+function withShortDashes(html: string): string {
+  return html.replace(/—/g, "-");
+}
+
+function buildDeckV3HtmlRaw(
+  slides: string,
+  monthLabel: string,
+  brand: { title?: string; navBrand?: string; toolbarBrand?: string },
+  footerNote: string,
+  textTemplate?: DeckTextEntries | null,
+): string {
   const editable = textTemplate !== undefined;
   const labels = getLabels();
   const fullscreenEnter = esc(labels.exec_deck_fullscreen_enter);
@@ -193,7 +209,7 @@ export async function buildExecutiveDeckV3(
 ): Promise<string> {
   const model = buildReportModel(input, employeeDisplayNames);
   const monthLabel = input.periodLabel ?? formatMonthFolderShortLabel(input.monthFolderName);
-  const slides = await buildDeck3Slides(model, monthLabel, input.config.monthlyTarget);
+  const slides = await buildDeck3Slides(model, monthLabel, input.config.monthlyTarget, new Date(), buildStatements(model));
   return buildDeckV3Html(slides, monthLabel, {}, "", options.textTemplate ?? null);
 }
 
