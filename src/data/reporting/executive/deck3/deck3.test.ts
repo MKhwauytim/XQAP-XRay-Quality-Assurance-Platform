@@ -41,10 +41,10 @@ function input(populationRows: PreparedPopulationRow[]): ExecutiveReportInput {
 }
 
 describe("buildExecutiveDeckV3", () => {
-  it("renders exactly 24 slides in the fixed order (every per-port page is one slide per port type)", async () => {
+  it("renders exactly 23 slides in the fixed order (every per-port page is one slide per port type)", async () => {
     const html = await buildExecutiveDeckV3(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
     const slideCount = (html.match(/class="slide v3/g) ?? []).length;
-    expect(slideCount).toBe(24);
+    expect(slideCount).toBe(23);
   });
 
   it("carries the deck2 viewer chrome: side nav, toolbar, print/PDF, fullscreen", async () => {
@@ -60,7 +60,7 @@ describe("buildExecutiveDeckV3", () => {
   it("gives every slide the section hooks the nav script reads", async () => {
     const html = await buildExecutiveDeckV3(input([popRow()]));
     const sectioned = (html.match(/data-section=/g) ?? []).length;
-    expect(sectioned).toBe(24);
+    expect(sectioned).toBe(23);
     expect(html).toContain('data-section-label="القسم الثالث - الإفادات"');
     expect(html).not.toContain("—");
   });
@@ -103,15 +103,15 @@ describe("buildExecutiveDeckV3", () => {
     expect(html).toContain("#10304f");
   });
 
-  it("numbers content slides NN / 24 and leaves covers and dividers uncounted", async () => {
+  it("numbers content slides NN / 23 and leaves covers and dividers uncounted", async () => {
     const html = await buildExecutiveDeckV3(input([popRow()]));
     // Content slides carry zero-padded counters…
-    for (const n of [2, 3, 4, 5, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23]) {
-      expect(html).toContain(`>${String(n).padStart(2, "0")} / 24<`);
+    for (const n of [2, 3, 4, 5, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21, 22]) {
+      expect(html).toContain(`>${String(n).padStart(2, "0")} / 23<`);
     }
-    // …while covers (1, 24) and dividers (6, 9, 20) don't, per the handoff.
-    for (const n of [1, 6, 9, 20, 24]) {
-      expect(html).not.toContain(`>${String(n).padStart(2, "0")} / 24<`);
+    // …while covers (1, 23) and dividers (6, 9, 19) don't, per the handoff.
+    for (const n of [1, 6, 9, 19, 23]) {
+      expect(html).not.toContain(`>${String(n).padStart(2, "0")} / 23<`);
     }
   });
 
@@ -126,9 +126,9 @@ describe("buildExecutiveDeckV3", () => {
   it("collapses the empty security-team agreement analysis into one explanatory slide (no empty charts)", async () => {
     const bare = { manual: { result: null, code: null, employeeId: null }, opposite: { result: null, code: null, employeeId: null }, liveMeans: { result: null, code: null, employeeId: null } };
     const html = await buildExecutiveDeckV3(input([popRow({ otherResults: bare })]));
-    expect((html.match(/class="slide v3/g) ?? []).length).toBe(23);
+    expect((html.match(/class="slide v3/g) ?? []).length).toBe(22);
     expect(html).toContain("لا توجد بيانات لهذا التحليل في الملف");
-    expect(html).toContain(">02 / 23<");
+    expect(html).toContain(">02 / 22<");
     // Section 3 always carries a blank page to write statements on.
     expect(html).toContain("اكتب الإفادة هنا…");
   });
@@ -153,9 +153,9 @@ describe("buildExecutiveDeckV3", () => {
     );
     const html = await buildExecutiveDeckV3(input(manyLandPorts));
 
-    // 12 land ports stay on one page: the slide count is unchanged from the fixed 24.
+    // 12 land ports stay on one page: the slide count is unchanged from the fixed 23.
     const slideCount = (html.match(/class="slide v3/g) ?? []).length;
-    expect(slideCount).toBe(24);
+    expect(slideCount).toBe(23);
 
     expect(html).toContain("التوزيع على المنافذ البرية");
     expect(html).not.toContain("التوزيع على المنافذ البرية (يتبع)");
