@@ -596,7 +596,7 @@ ${kpiBand(coNoPop ? [
     ], "top")}
 ${kpiBand([
       { label: "نسبة التوائم", value: fmtPct(overallStats.overall), valueTone: "green", aside: `من ${fmtNum(t.evaluable)} إجابة مدروسة`, sub: RESULT_ACCURACY_DEFINITION },
-      { label: "نسبة تحديد موقع الاشتباه", value: fmtPct(model.imageQuality.markingRate), valueTone: "red", sub: "التزام الفاحصين بتحديد مواضع الاشتباه" },
+      { label: "نسبة تحديد موقع الاشتباه", value: fmtPct(model.imageQuality.markingRate), valueTone: "red", sub: "التزام الفاحصين بتحديد مواقع الاشتباه" },
       { label: "الاشتباهات الفائتة", value: fmtNum(t.missedSuspicion), aside: missedShare === null ? undefined : `${fmtPct(missedShare)} من إجابات السليمة`, sub: MISSED_SUSPICION_DEFINITION,
         extra: { label: "الاشتباهات الخاطئة", value: fmtNum(t.falseSuspicion), valueTone: "gold", aside: falseShare === null ? undefined : `${fmtPct(falseShare)} من إجابات الاشتباه`, sub: FALSE_SUSPICION_DEFINITION } },
     ], "bottom")}`;

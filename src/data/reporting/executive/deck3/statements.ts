@@ -13,7 +13,7 @@ import { buildReportModel } from "../model/reportModel";
 import { aggregateDecisions, buildDecisionRecords } from "../model/decisionFactTable";
 import { collectLevelAccuracyRows } from "../deck2/section3/levelAccuracy";
 import {
-  accuracyOf, collectPortAccuracy, collectPortMarkingOnly, collectPortQuality, orderedStageAccuracy, pct, sumCounts,
+  accuracyOf, collectPortAccuracy, collectPortMarkingOnly, collectPortQuality, sumCounts,
   type FourCounts, type Statement, type StatementPriority,
 } from "./slides";
 
@@ -61,46 +61,6 @@ export function buildStatements(model: ReportModel): Statement[] {
   const portAcc = collectPortAccuracy(model);
   const portRows = [...portAcc.land, ...portAcc.sea];
 
-  // ── Overall picture ───────────────────────────────────────────────────────────────────────────────────────────
-  const missedShare = pct(t.missedSuspicion, all.cleanResults);
-  add({
-    priority: (missedShare ?? 0) >= 20 ? "عالية" : "متوسطة", topic: "الاشتباهات الفائتة",
-    text: "تُصنَّف إرساليات مشتبه بها على أنها سليمة بالوسائل الآلية ثم يرى أخصائي ضمان الجودة أنها اشتباه، وهذه أعلى الحالات أثرًا أمنيًا لأنها قد تعبر دون ضبط.",
-    basis: `${fmtNum(t.missedSuspicion)} إجابة (${fmtPct(missedShare)}) من ${fmtNum(all.cleanResults)} إجابة سليمة`, page: "نسبة التوائم",
-  });
-  const falseShare = pct(t.falseSuspicion, all.suspResults);
-  if ((falseShare ?? 0) >= 20) {
-    add({
-      priority: "متوسطة", topic: "الاشتباهات الخاطئة",
-      text: "يُعدّ جزء كبير من الاشتباهات بالوسائل الآلية سليمًا عند مراجعة أخصائي الجودة، وهذا يعني كلفة تشغيلية في فحص إرساليات لا تستحق الاشتباه.",
-      basis: `${fmtNum(t.falseSuspicion)} إجابة (${fmtPct(falseShare)}) من ${fmtNum(all.suspResults)} إجابة اشتباه`, page: "نسبة التوائم",
-    });
-  }
-
-  // ── Risk levels ───────────────────────────────────────────────────────────────────────────────────────────────
-  const stages = orderedStageAccuracy(model).map((s) => ({ label: s.label, a: accuracyOf(s.counts), c: s.counts })).filter((s) => s.a.evaluable >= MIN_BASE && s.a.overall !== null);
-  if (stages.length > 1) {
-    const byAgree = [...stages].sort((x, y) => (x.a.overall ?? 0) - (y.a.overall ?? 0));
-    const lo = byAgree[0];
-    const byMissed = [...stages].filter((s) => s.a.cleanResults > 0).sort((x, y) => (pct(y.c.missedSuspicion, y.a.cleanResults) ?? 0) - (pct(x.c.missedSuspicion, x.a.cleanResults) ?? 0));
-    const hiMissed = byMissed[0];
-    const sameLevel = hiMissed !== undefined && hiMissed.label === lo.label;
-    add({
-      priority: (lo.a.overall ?? 100) < 60 ? "عالية" : "متوسطة", topic: "مستويات المخاطر",
-      text: sameLevel
-        ? `${lo.label} هو الأضعف توافقًا بين مستويات المخاطر وهو الأكثر في الاشتباهات الفائتة، مما يجعله أولى المستويات بالمراجعة وإعادة ضبط معايير الاستهداف فيه.`
-        : `${lo.label} هو الأضعف توافقًا بين مستويات المخاطر، ويستحق مراجعة معايير الاستهداف فيه.`,
-      basis: stages.map((s) => `${s.label}: ${fmtPct(s.a.overall)} من ${fmtNum(s.a.evaluable)} إجابة`).join(" | "), page: "الدقتان حسب مستويات المخاطر",
-    });
-    if (hiMissed && !sameLevel) {
-      add({
-        priority: (pct(hiMissed.c.missedSuspicion, hiMissed.a.cleanResults) ?? 0) >= 40 ? "عالية" : "متوسطة", topic: "مستويات المخاطر",
-        text: `${hiMissed.label} هو الأكثر في الاشتباهات الفائتة، أي أن إرساليات سليمة بحسب الوسائل الآلية فيه تحمل اشتباهًا فعليًا بنسبة أعلى من بقية المستويات.`,
-        basis: `${hiMissed.label}: ${fmtNum(hiMissed.c.missedSuspicion)} من ${fmtNum(hiMissed.a.cleanResults)} إجابة سليمة`, page: "الدقتان حسب مستويات المخاطر",
-      });
-    }
-  }
-
   // ── Land vs sea ───────────────────────────────────────────────────────────────────────────────────────────────
   const land = accuracyOf(sumCounts(portAcc.land.map((p) => p.counts)));
   const sea = accuracyOf(sumCounts(portAcc.sea.map((p) => p.counts)));
@@ -131,7 +91,7 @@ export function buildStatements(model: ReportModel): Statement[] {
   for (const o of findOutliers(missedStats, "high", 500, 10).slice(0, MAX_PORTS_PER_TOPIC)) {
     add({
       priority: o.gap >= 20 ? "عالية" : "متوسطة", topic: "الاشتباهات الفائتة",
-      text: `ترتفع الاشتباهات الفائتة في منفذ ${o.name} عن باقي ${groupLabel(o.sea)}، أي أن إرساليات مشتبهًا بها تُعدّ سليمة فيه وقد تعبر دون ضبط.`,
+      text: `نسبة الاشتباهات الفائتة في منفذ ${o.name} أعلى من متوسط باقي ${groupLabel(o.sea)}.`,
       basis: `${o.name}: ${fmtPct(o.share)} من ${fmtNum(o.den)} إجابة سليمة، مقابل ${fmtPct(o.othersShare)} في باقي ${groupLabel(o.sea)}`, page: "نتائج الأداء للمنافذ",
     });
   }
@@ -142,15 +102,6 @@ export function buildStatements(model: ReportModel): Statement[] {
       priority: "متوسطة", topic: "الاشتباهات الخاطئة",
       text: `تكثر الاشتباهات الخاطئة في منفذ ${o.name} مقارنة بباقي ${groupLabel(o.sea)}، وهذا يعني كلفة تشغيلية في فحص إرساليات سليمة.`,
       basis: `${o.name}: ${fmtPct(o.share)} من ${fmtNum(o.den)} إجابة اشتباه، مقابل ${fmtPct(o.othersShare)} في باقي ${groupLabel(o.sea)}`, page: "نتائج الأداء للمنافذ",
-    });
-  }
-
-  const agreeStats: PortShare[] = portRows.map((p) => ({ name: p.name, sea: p.sea, num: p.counts.correctClean + p.counts.correctSuspicion, den: p.evaluable }));
-  for (const o of findOutliers(agreeStats, "low", MIN_BASE, 8).slice(0, MAX_PORTS_PER_TOPIC)) {
-    add({
-      priority: o.gap <= -15 ? "عالية" : "متوسطة", topic: "المنافذ",
-      text: `التوافق بين نتيجة الوسائل الآلية ورأي أخصائي الجودة في منفذ ${o.name} أدنى من باقي ${groupLabel(o.sea)}، ويستدعي مراجعة آلية الفحص فيه.`,
-      basis: `${o.name}: ${fmtPct(o.share)} من ${fmtNum(o.den)} إجابة، مقابل ${fmtPct(o.othersShare)} في باقي ${groupLabel(o.sea)}`, page: "نتائج الأداء للمنافذ",
     });
   }
 
@@ -165,14 +116,14 @@ export function buildStatements(model: ReportModel): Statement[] {
   if (unmarkedShare !== null && unmarkedShare >= 25) {
     add({
       priority: unmarkedShare >= 50 ? "عالية" : "متوسطة", topic: "تحديد موقع الاشتباه",
-      text: `${unmarkedShare >= 50 ? "أكثر من نصف" : "نسبة كبيرة من"} صور الاشتباه لا يُحدَّد فيها موضع الاشتباه، مما يضعف إمكانية مراجعة الصور والتحقق من القرار.`,
+      text: `${unmarkedShare >= 50 ? "أكثر من نصف" : "نسبة كبيرة من"} صور الاشتباه لا يُحدَّد فيها موقع الاشتباه، مما يضعف تحديد وفحص الاشتباه من قبل الوسائل الحية.`,
       basis: `${fmtNum(markTotal.den - markTotal.num)} صورة (${fmtPct(unmarkedShare)}) من ${fmtNum(markTotal.den)} صورة اشتباه دون تحديد`, page: "هل يوجد تحديد؟",
     });
   }
   for (const o of findOutliers(markStats, "low", 100, 15).slice(0, MAX_PORTS_PER_TOPIC)) {
     add({
       priority: o.gap <= -25 ? "عالية" : "متوسطة", topic: "تحديد موقع الاشتباه",
-      text: `تحديد موضع الاشتباه في منفذ ${o.name} أضعف منه في باقي ${groupLabel(o.sea)}، مما يصعّب على المراجعين التحقق من الصور.`,
+      text: `تحديد موقع الاشتباه في منفذ ${o.name} أضعف منه في باقي ${groupLabel(o.sea)}، مما يصعّب على المراجعين التحقق من الصور.`,
       basis: `${o.name}: بتحديد ${fmtPct(o.share)} من ${fmtNum(o.den)} صورة اشتباه، مقابل ${fmtPct(o.othersShare)} في باقي ${groupLabel(o.sea)}`, page: "هل يوجد تحديد؟",
     });
   }
