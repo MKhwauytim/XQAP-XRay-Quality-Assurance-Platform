@@ -140,7 +140,11 @@ body{background:var(--v3-navy);font-family:"Somar","IBM Plex Sans Arabic","Tahom
 .v3-level-col:last-child{border-inline-end:none;padding-inline-end:0;}
 .v3-level-chip{width:44px;height:5px;}
 .v3-level-col h3{margin:0;font-size:34px;font-weight:700;color:var(--v3-navy);}
-.v3-level-def{font-size:26px;line-height:1.65;color:var(--v3-text);}
+.v3-level-sub{font-size:23px;font-weight:600;}
+.v3-level-col .cap{font-size:20px;color:var(--v3-muted);}
+.v3-level-def{font-size:22px;line-height:1.5;color:var(--v3-text);}
+.v3-level-dets{margin:0;padding-inline-start:26px;font-size:22px;line-height:1.4;font-weight:500;color:var(--v3-navy);}
+.v3-level-dets li{margin:2px 0;}
 .v3-level-foot{margin-top:auto;display:flex;flex-direction:column;gap:8px;}
 .v3-level-foot .cap{font-size:24px;color:var(--v3-muted);}
 .v3-level-foot .measures{font-size:25px;font-weight:500;color:var(--v3-navy);}
@@ -1289,7 +1293,11 @@ body{background:var(--v3-navy);font-family:"Somar","IBM Plex Sans Arabic","Tahom
 .v3-level-col:last-child{border-inline-end:none;padding-inline-end:0;}
 .v3-level-chip{width:44px;height:5px;}
 .v3-level-col h3{margin:0;font-size:34px;font-weight:700;color:var(--v3-navy);}
-.v3-level-def{font-size:26px;line-height:1.65;color:var(--v3-text);}
+.v3-level-sub{font-size:23px;font-weight:600;}
+.v3-level-col .cap{font-size:20px;color:var(--v3-muted);}
+.v3-level-def{font-size:22px;line-height:1.5;color:var(--v3-text);}
+.v3-level-dets{margin:0;padding-inline-start:26px;font-size:22px;line-height:1.4;font-weight:500;color:var(--v3-navy);}
+.v3-level-dets li{margin:2px 0;}
 .v3-level-foot{margin-top:auto;display:flex;flex-direction:column;gap:8px;}
 .v3-level-foot .cap{font-size:24px;color:var(--v3-muted);}
 .v3-level-foot .measures{font-size:25px;font-weight:500;color:var(--v3-navy);}

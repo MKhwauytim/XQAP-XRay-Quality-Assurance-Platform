@@ -172,7 +172,7 @@ export type LevelTone = "gold" | "blue" | "green-soft" | "red";
 export function levelDefinitionSlide(opts: {
   eyebrow: string;
   title: string;
-  levels: Array<{ title: string; definition: string; measures: string; weightLine: string; tone: LevelTone }>;
+  levels: Array<{ title: string; /** e.g. «حالات الضبط المؤكدة» */ subtitle: string; definition: string; /** The criteria that place a case in the level. */ determinants: string[]; weightLine: string; tone: LevelTone }>;
   highlightValue: string;
   highlightTitle: string;
   highlightNote: string;
@@ -183,11 +183,13 @@ export function levelDefinitionSlide(opts: {
       (l) => `<div class="v3-level-col">
   <span class="v3-level-chip v3-tone-${l.tone}"></span>
   <h3>${esc(l.title)}</h3>
+  <span class="v3-level-sub v3-ink-${l.tone}">${esc(l.subtitle)}</span>
+  <span class="cap">نطاق المستوى (بري – بحري)</span>
   <span class="v3-level-def">${esc(l.definition)}</span>
   <div class="v3-level-foot">
-    <span class="cap">ما يقيسه</span>
-    <span class="measures">${esc(l.measures)}</span>
-    <span class="v3-level-weight v3-ink-${l.tone}">${esc(l.weightLine)}</span>
+    <span class="cap">المحددات</span>
+    <ul class="v3-level-dets">${l.determinants.map((d) => `<li>${esc(d)}</li>`).join("")}</ul>${l.weightLine ? `
+    <span class="v3-level-weight v3-ink-${l.tone}">${esc(l.weightLine)}</span>` : ""}
   </div>
 </div>`,
     )

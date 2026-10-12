@@ -5,73 +5,73 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
-    "version": "v153.7",
+    "version": "v153.22",
     "date": "2026-10-12",
     "bucket": "enhancement",
     "scope": "executive report",
-    "title": "deck3 rework merged, marking/quality split into own pages, port typo guard"
+    "title": "recommendations reworded in plain, practical language"
   },
   {
-    "version": "v153.6",
+    "version": "v153.21",
     "date": "2026-10-12",
-    "bucket": "fix",
+    "bucket": "enhancement",
     "scope": "executive report",
-    "title": "scope «هل يوجد تحديد» to اشتباه images and canonicalize port-name spellings"
+    "title": "KPI page in percentages with numbers under, port shares, نتائج خاطئة"
   },
   {
-    "version": "v153.5",
-    "date": "2026-10-11",
-    "bucket": "fix",
-    "scope": "daily tracking",
-    "title": "follow the busiest finished-work month, not any stray row in the sample month"
-  },
-  {
-    "version": "v153.4",
-    "date": "2026-10-08",
-    "bucket": "fix",
-    "scope": "daily tracking",
-    "title": "rename tab to المتابعة اليومية and follow the month the work is dated in"
-  },
-  {
-    "version": "v153.3",
-    "date": "2026-10-08",
+    "version": "v153.20",
+    "date": "2026-10-12",
     "bucket": "enhancement",
-    "scope": "comprehensive report",
-    "title": "uploading both workbooks (sample + follow-up) is required"
+    "scope": "executive report",
+    "title": "remove per-port marking pages, KPI aside under number, support workbook matches every page"
   },
   {
-    "version": "v153.2",
-    "date": "2026-10-08",
+    "version": "v153.19",
+    "date": "2026-10-12",
     "bucket": "enhancement",
-    "scope": "deck3",
-    "title": "cover wording, classification, period with days, empty contents topics column"
+    "scope": "executive report",
+    "title": "observations-and-recommendations table, page 8 results matrix, المفحوصة wording"
   },
   {
-    "version": "v153.1",
-    "date": "2026-10-07",
+    "version": "v153.18",
+    "date": "2026-10-12",
     "bucket": "enhancement",
-    "scope": "reports",
-    "title": "pause report hub as تحت الصيانة, drop old executive report, make comprehensive deck3 editable with saved text templates"
+    "scope": "executive report",
+    "title": "quality-by-agreement page counts images; one border system for all tables"
   },
   {
-    "version": "v153.0",
-    "date": "2026-10-07",
-    "bucket": "feature",
-    "scope": "results",
-    "title": "«المتابعة والمواعيد» default tab — admin-settable deadline, quota, calendar, per-employee averages"
+    "version": "v153.17",
+    "date": "2026-10-12",
+    "bucket": "enhancement",
+    "scope": "executive report",
+    "title": "page 7 coverage progress bar, one-line header, per-level target bullets"
   },
   {
-    "version": "v152.0",
-    "date": "2026-10-07",
-    "bucket": "feature",
-    "scope": "deck2",
-    "title": "editable static text in the executive deck, saved as named presets"
+    "version": "v153.16",
+    "date": "2026-10-12",
+    "bucket": "enhancement",
+    "scope": null,
+    "title": "risk-level accuracy page and the contents-page eyebrow"
   },
   {
-    "version": "v151.11",
-    "date": "2026-10-07",
-    "bucket": "fix",
-    "scope": "deck3",
-    "title": "keep every sample row (56,468) with an «other results» class; empty agreement slides collapse"
+    "version": "v153.15",
+    "date": "2026-10-12",
+    "bucket": "enhancement",
+    "scope": "executive report",
+    "title": "sample targets and target-based coverage, neutral all-ports panel, ضمان جودة الأشعة wording"
+  },
+  {
+    "version": "v153.14",
+    "date": "2026-10-12",
+    "bucket": "enhancement",
+    "scope": "executive report",
+    "title": "remove the two guidance notes from the statements pages"
+  },
+  {
+    "version": "v153.13",
+    "date": "2026-10-12",
+    "bucket": "enhancement",
+    "scope": "executive report",
+    "title": "reword land-vs-sea, false-suspicion and image-quality statements"
   }
 ];
