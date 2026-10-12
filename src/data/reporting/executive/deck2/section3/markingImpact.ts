@@ -178,6 +178,18 @@ export function outcomeShare(s: MarkStratum, key: keyof MarkStratum["outcomes"])
 }
 
 /**
+ * The images «هل يوجد تحديد» applies to: evaluated (a verdict was recorded) AND
+ * carrying اشتباه at level 1 or 2. A marking is only drawn where an inspector
+ * saw something, so a clean image is out of scope for this page — counting it
+ * as "no marking" would pad the لا يوجد arm with images that never could have
+ * had one. Row building already blanks `hasMarking` outside this scope; the
+ * filter here keeps the page correct for any other row source too.
+ */
+function markingScopeRows(model: ReportModel): ExecutiveReportRow[] {
+  return model.rows.filter((r) => r.verificationCategory !== null && r.imageResult === "اشتباه");
+}
+
+/**
  * Reproduces the two `foldStratum` calls `markingImpactSlide` used to run
  * inline (same filtering, same label/caption/tone literals), plus the
  * `unknown`/`recorded` counts it derives around them — so deck3 can reuse
@@ -189,7 +201,7 @@ export function computeMarkingImpact(model: ReportModel): {
   unknown: number;
   recorded: number;
 } {
-  const evaluated = model.rows.filter((r) => r.verificationCategory !== null);
+  const evaluated = markingScopeRows(model);
   const present = foldStratum(
     evaluated.filter((r) => r.hasMarking === true),
     "يوجد تحديد",
@@ -567,7 +579,7 @@ export function markingImpactSlide(
   // Evaluated = the reviewer recorded a verdict for the image. Rows without a
   // verdict carry no accuracy signal at all and are out of scope for every
   // figure on this page (including the "no marking record" count).
-  const evaluated = model.rows.filter((r) => r.verificationCategory !== null);
+  const evaluated = markingScopeRows(model);
   const { present, absent, unknown, recorded } = computeMarkingImpact(model);
 
   const compare = `<div class="v2-mark-compare">
@@ -589,7 +601,7 @@ export function markingImpactSlide(
   </div>`;
 
   const totals = `<div class="v2-totals-band">
-    <div class="v2-totals-item"><span class="v2-totals-icon">${icon("layers", 16)}</span><span><b>${fmtNum(evaluated.length)}</b><small>إجمالي الصور المُقيَّمة</small></span></div>
+    <div class="v2-totals-item"><span class="v2-totals-icon">${icon("layers", 16)}</span><span><b>${fmtNum(evaluated.length)}</b><small>صور الاشتباه المُقيَّمة</small></span></div>
     <div class="v2-totals-item"><span class="v2-totals-icon">${icon("flag", 16)}</span><span><b>${fmtNum(recorded)}</b><small>صور لها سجل لحالة التحديد</small></span></div>
     <div class="v2-totals-item"><span class="v2-totals-icon">${icon("document", 16)}</span><span><b>${fmtNum(unknown)}</b><small>صور بلا سجل لحالة التحديد</small></span></div>
   </div>`;
@@ -599,7 +611,7 @@ export function markingImpactSlide(
   // in the right position (lede → support → rank, 2026-07-28 fix, B1) instead
   // of the hand-rolled div appended after the rank list.
   const supportStrip = briefingSupport([
-    { iconName: "layers", value: fmtNum(evaluated.length), label: "إجمالي الصور المُقيَّمة" },
+    { iconName: "layers", value: fmtNum(evaluated.length), label: "صور الاشتباه المُقيَّمة" },
     { iconName: "flag", value: fmtNum(recorded), label: "صور لها سجل لحالة التحديد" },
     { iconName: "document", value: fmtNum(unknown), label: "صور بلا سجل لحالة التحديد" },
   ]);
@@ -642,7 +654,7 @@ export function markingImpactSlide(
     eyebrow: "القسم 3 — التحاليل المتقدمة",
     iconName: "flag",
     headline: "أثر وجود التحديد على الدقة",
-    subhead: "مقارنة دقة القرارات في الصور التي يوجد بها تحديد مقابل التي لا يوجد بها.",
+    subhead: "مقارنة دقة القرارات في صور الاشتباه (المستوى الأول أو الثاني) التي يوجد بها تحديد مقابل التي لا يوجد بها.",
     bodyVariants: [body, ledgerBody, briefingBody, gridBody],
     variantPreview,
     num,

@@ -71,7 +71,7 @@ function reportRow(overrides: Partial<ExecutiveReportRow> = {}): ExecutiveReport
     levelTwoEmployeeId: null,
     levelOneResult: "سليمة",
     levelTwoResult: "سليمة",
-    imageResult: "سليمة",
+    imageResult: "اشتباه",
     selectedInSample: true,
     assignedTo: null,
     distributionStatus: null,
@@ -174,7 +174,7 @@ describe("markingImpactSlide — slide shell", () => {
     expect(html).toContain('data-section="section3"');
     expect(html).toContain('data-title="أثر وجود التحديد على الدقة"');
     expect(html).toContain("القسم 3 — التحاليل المتقدمة");
-    expect(html).toContain("مقارنة دقة القرارات في الصور التي يوجد بها تحديد مقابل التي لا يوجد بها.");
+    expect(html).toContain("مقارنة دقة القرارات في صور الاشتباه (المستوى الأول أو الثاني) التي يوجد بها تحديد مقابل التي لا يوجد بها.");
     expect(html).toContain("12 / 24");
   });
 
@@ -233,7 +233,7 @@ describe("markingImpactSlide — no marking record at all", () => {
 
   it("reports the markUnknown count as images with no marking record", () => {
     // 12 evaluated rows, all of them unrecorded; the two unevaluated rows are excluded.
-    expect(html).toContain("<b>12</b><small>إجمالي الصور المُقيَّمة</small>");
+    expect(html).toContain("<b>12</b><small>صور الاشتباه المُقيَّمة</small>");
     expect(html).toContain("<b>0</b><small>صور لها سجل لحالة التحديد</small>");
     expect(html).toContain("<b>12</b><small>صور بلا سجل لحالة التحديد</small>");
   });
@@ -321,7 +321,7 @@ describe("markingImpactSlide — both strata populated", () => {
   });
 
   it("reports the totals band including the markUnknown count", () => {
-    expect(html).toContain("<b>43</b><small>إجمالي الصور المُقيَّمة</small>");
+    expect(html).toContain("<b>43</b><small>صور الاشتباه المُقيَّمة</small>");
     expect(html).toContain("<b>40</b><small>صور لها سجل لحالة التحديد</small>");
     expect(html).toContain("<b>3</b><small>صور بلا سجل لحالة التحديد</small>");
   });
@@ -581,7 +581,7 @@ describe("markingImpactSlide — Briefing (fan-out)", () => {
     const totalsBandCount = [...preview.matchAll(/<div class="v2-totals-band">/g)].length;
     // One in slot 0, one reused verbatim in Briefing, one reused verbatim in Grid.
     expect(totalsBandCount).toBe(3);
-    expect(preview).toContain("<b>40</b><small>إجمالي الصور المُقيَّمة</small>");
+    expect(preview).toContain("<b>40</b><small>صور الاشتباه المُقيَّمة</small>");
   });
 });
 
