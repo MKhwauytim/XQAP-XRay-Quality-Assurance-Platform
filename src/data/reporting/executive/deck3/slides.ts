@@ -485,11 +485,10 @@ export async function buildDeck3Slides(
   const popResultsPages = withPop ? 1 : 0;
   const sectionOnePages = 2 + popPages;
   // +1: the per-port accuracy chart is one slide per port type (land, then sea).
-  // `+ accPages`: one marking-follow-up page per port type, right after the port-results pages.
   // `- 2 + (levelPages - 2)`: the two per-port bar charts are gone and the level-per-port pages are now tables, one per port type.
   // `- 2` (last): the two marking/quality impact pages were removed (the quality-by-port-type page replaces them).
   // `statementPages`: the section-3 statement pages (generated + one blank) sit between its divider and the agreement page.
-  const TOTAL = 22 + statementPages + (popPages - 1) + (accPages - 1) + accPages - 2 + (levelPages - 2) + popResultsPages + markQualityPages - (coNoPop ? sectionOnePages : 0) - (agreementEmpty ? 1 : 0);
+  const TOTAL = 22 + statementPages + (popPages - 1) + (accPages - 1) - 2 + (levelPages - 2) + popResultsPages + markQualityPages - (coNoPop ? sectionOnePages : 0) - (agreementEmpty ? 1 : 0);
   const YITBA = " (يتبع)";
 
   let nextNum = 1;
@@ -523,7 +522,7 @@ export async function buildDeck3Slides(
   // arithmetic that produces TOTAL above, not re-hardcoded per range.
   const s1End = 7 + popPages + popResultsPages;
   const s2Start = coNoPop ? 6 : s1End + 1;
-  const s2End = s2Start + 4 + 2 * accPages + levelPages + markQualityPages;
+  const s2End = s2Start + 4 + accPages + levelPages + markQualityPages;
   const s3Start = s2End + 1;
   const s3End = s3Start + 2 + statementPages - (agreementEmpty ? 1 : 0);
   parts.push(contentsSlide({
@@ -943,7 +942,7 @@ ${dataTable({ headers: ["المستوى", "الإجابات المفحوصة", "
   <div class="v3-cmp-row"><span>دقة الاشتباه</span><b class="v-red">${fmtPct(a.suspAcc)}</b></div>
   <div class="v3-cmp-row"><span>الدقة العامة</span><b>${fmtPct(a.overall)}</b></div>
   <div class="v3-cmp-row"><span>اشتباهات فائتة</span><b>${fmtNum(missed)} إجابة</b></div>
-  <div class="v3-cmp-row"><span>نتائج أخرى (غير مفحوصة)</span><b>${fmtNum(other)}</b></div>
+  <div class="v3-cmp-row"><span>نتائج أخرى (غير قابلة للتقييم)</span><b>${fmtNum(other)}</b></div>
 </div>`,
       });
     const inner = `${contentHead({
@@ -1022,38 +1021,6 @@ ${dataTable({ headers: ["المستوى", "الإجابات المفحوصة", "
   ${panel("sea", "المنافذ البحرية", sea)}
 </div>`;
     parts.push(slideShell(m, "", inner));
-  }
-
-  // 11b — Suspicion-marking follow-up per port, same layout as the port-results pages above
-  // (one full-width page per port type, busiest first).
-  {
-    const marking = collectPortMarking(model);
-    const cellsOf = (label: string, c: MarkingCounts, tone?: string): TableCell[] => [
-      { html: label },
-      { html: fmtNum(c.images), cls: tone ?? "v-muted" },
-      { html: fmtNum(c.marked), cls: "v-green" },
-      { html: fmtNum(c.unmarked), cls: "v-red" },
-      { html: fmtNum(c.low), cls: "v-red" },
-      { html: fmtNum(c.mid), cls: "v-gold" },
-      { html: fmtNum(c.high), cls: "v-green" },
-    ];
-    const headers = ["المنفذ", "عدد صور الأشعة", "صور بتحديد", "صور بدون تحديد", "جودة منخفضة", "جودة متوسطة", "جودة عالية"];
-    const markShown = accGroups.length > 0 ? accGroups : [{ variant: "land" as const, title: "للمنافذ البرية", panelTitle: "المنافذ البرية", totalLabel: "إجمالي البرية", ports: portAcc.land }];
-    for (const g of markShown) {
-      const m = meta("s2", eyebrowS2);
-      const rows = g.ports
-        .map((p) => ({ name: p.name, c: marking.get(p.name) ?? emptyMarking() }))
-        .sort((a, b) => b.c.images - a.c.images || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-      const total = sumMarking(rows.map((r) => r.c));
-      const inner = `${contentHead({
-        eyebrow: eyebrowS2,
-        title: `متابعة تحديد موقع الاشتباه وجودة الصور ${g.title}`,
-      })}
-<div class="v3-two-col" style="grid-template-columns:1fr">
-  ${tintedPanel({ variant: g.variant, title: g.panelTitle, body: dataTable({ headers, rows: rows.map((r) => cellsOf(esc(r.name), r.c)), totals: cellsOf(g.totalLabel, total, "v-navy"), firstColWidth: 26, topHeader: [{ label: "", span: 2 }, { label: "التحديد", span: 2, group: true }, { label: "جودة الصورة", span: 3, group: true }], groupStart: [2, 4], rowPx: portRowPx(rows.length, FORMULA_NOTE_PX + TOP_HEADER_PX) }) })}
-</div>`;
-      parts.push(slideShell(m, "", inner));
-    }
   }
 
   // 11b+ — «هل يوجد تحديد»: its own page. It applies only to suspicion images (L1 or L2 = اشتباه), so the base is those images alone.
