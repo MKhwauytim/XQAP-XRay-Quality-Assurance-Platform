@@ -179,21 +179,21 @@ body{background:var(--v3-navy);font-family:"Somar","IBM Plex Sans Arabic","Tahom
 .v3-kpi-band.top{border-top:2px solid var(--v3-navy);border-bottom:1px solid var(--v3-hair);}
 .v3-kpi-band.bottom{border-bottom:2px solid var(--v3-navy);}
 .v3-kpi-band.solo{border-top:2px solid var(--v3-navy);border-bottom:2px solid var(--v3-navy);}
-.v3-kpi-cell{display:flex;flex-direction:column;gap:14px;padding:44px 40px;border-inline-end:1px solid var(--v3-hair);}
+.v3-kpi-cell{display:flex;flex-direction:column;gap:8px;padding:26px 40px;border-inline-end:1px solid var(--v3-hair);}
 .v3-kpi-band.compact .v3-kpi-cell{padding:10px 36px;gap:6px;}
 .v3-kpi-cell:first-child{padding-inline-start:0;}
 .v3-kpi-cell:last-child{border-inline-end:none;padding-inline-end:0;}
 .v3-kpi-label{font-size:28px;color:var(--v3-muted);}
 .v3-kpi-band.compact .v3-kpi-label{font-size:27px;font-weight:500;}
-.v3-kpi-row{display:flex;flex-direction:column;align-items:flex-start;gap:6px;}
+.v3-kpi-row{display:flex;flex-direction:column;align-items:flex-start;gap:2px;}
 .v3-kpi-value{font-size:96px;font-weight:700;color:var(--v3-navy);line-height:1;}
 .v3-kpi-band.bottom .v3-kpi-value{font-size:76px;}
 .v3-kpi-band.compact .v3-kpi-value{font-size:56px;}
 .v3-kpi-band.compact .v3-kpi-row{gap:2px;}
 .v3-kpi-band.compact .v3-kpi-sub{font-size:23px;line-height:1.45;}
-.v3-kpi-band.has-pair{grid-template-columns:1fr 1fr 2fr;}
+.v3-kpi-band.has-pair{grid-template-columns:1fr 2fr 1fr;}
 .v3-kpi-pair{flex-direction:row;gap:0;padding-block:0;}
-.v3-kpi-half{flex:1;display:flex;flex-direction:column;gap:14px;padding:44px 28px;}
+.v3-kpi-half{flex:1;display:flex;flex-direction:column;gap:8px;padding:26px 28px;}
 .v3-kpi-half + .v3-kpi-half{border-inline-start:1px solid var(--v3-hair);}
 .v3-kpi-half:first-child{padding-inline-start:0;}
 .v3-kpi-half:last-child{padding-inline-end:0;}
