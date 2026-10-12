@@ -274,7 +274,7 @@ body{background:var(--v3-navy);font-family:"Somar","IBM Plex Sans Arabic","Tahom
 .v3-table.lg th:nth-child(2){width:24%;}
 .v3-table.lg td:first-child{font-weight:700;color:var(--v3-navy);font-size:30px;}
 .v3-table.lg .v3-pop-bar{height:22px;}
-.v3-qm{display:flex;flex-direction:column;gap:10px;}
+.v3-qm{display:flex;flex-direction:column;gap:8px;}
 .v3-qm-head,.v3-qm-row{display:grid;grid-template-columns:170px repeat(3,1fr);gap:10px;}
 .v3-qm-head span{font-size:28px;font-weight:700;color:var(--v3-navy);padding:4px 20px;border-top:6px solid var(--v3-hair);}
 .v3-qm-head span.red{border-top-color:var(--v3-red);}
@@ -319,6 +319,16 @@ body{background:var(--v3-navy);font-family:"Somar","IBM Plex Sans Arabic","Tahom
 .v3-table td.v-blue{color:var(--v3-blue-dark);font-weight:500;}
 .v3-table td.v-muted{color:var(--v3-muted);font-weight:400;}
 .v3-table tfoot td{font-weight:700;height:auto;padding:12px 0 12px 14px;border-bottom:2px solid var(--v3-navy);}
+/* ── One border system for every table-like block ───────────────────────────────────────────────────────────
+   2px navy = the frame (top rule + closing rule) and column-group splits; 1px hairline = rows and the header separator.
+   Tables without a totals row now close with the same navy rule, a group header row no longer stacks a second navy
+   rule on the column headers, and lists/grids/matrices get the closing rule their top rule already implied. */
+.v3-table:not(:has(tfoot)) tbody tr:last-child td{border-bottom:2px solid var(--v3-navy);}
+.v3-table .v3-th-top + tr th{border-top:1px solid var(--v3-hair);}
+.v3-st-row:last-child{border-bottom:2px solid var(--v3-navy);}
+.v3-gloss-grid{border-bottom:2px solid var(--v3-navy);}
+.v3-pop-stats{border-bottom:2px solid var(--v3-navy);}
+.v3-qm{border-bottom:2px solid var(--v3-navy);}
 .v3-table tfoot td:first-child{color:var(--v3-navy);}
 .v3-table tfoot td[class]{font-weight:700;}
 .v3-sub{font-size:24px;font-weight:400;color:var(--v3-muted);}

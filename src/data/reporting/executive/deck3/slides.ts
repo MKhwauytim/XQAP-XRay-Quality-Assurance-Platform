@@ -24,7 +24,6 @@ import {
   legendRow, slideShell, contentHead, pad2, qualityMatrix, statementList,
   type OrgBlock, type SlideMeta, type TableCell, type QualityCell, type QualityRow,
 } from "./slideKit";
-import { aggregateDecisions, buildDecisionRecords } from "../model/decisionFactTable";
 import { barChart, fitAxis, scaleCaption } from "./chartKit";
 
 /**
@@ -233,6 +232,30 @@ export function collectPortMarkingOnly(model: ReportModel): Map<string, MarkingO
     else c.unmarked++;
   }
   return byPort;
+}
+
+/**
+ * Verification outcome per image-quality group, counted on IMAGES: one count per image, from its combined L1/L2 result
+ * against the specialist's (`verificationCategory`). Keys are `all|<quality>`, `land|<quality>` and `sea|<quality>`.
+ * The page and the statement that read quality against agreement both use this one fold, so they can never disagree.
+ */
+export function collectQualityImageOutcomes(model: ReportModel): Map<string, FourCounts> {
+  const out = new Map<string, FourCounts>();
+  const bump = (key: string, c: NonNullable<ReportModel["rows"][number]["verificationCategory"]>) => {
+    const t = out.get(key) ?? { correctClean: 0, correctSuspicion: 0, missedSuspicion: 0, falseSuspicion: 0 };
+    out.set(key, t);
+    if (c === "correct-clean") t.correctClean++;
+    else if (c === "correct-suspicious") t.correctSuspicion++;
+    else if (c === "missed-suspicious") t.missedSuspicion++;
+    else t.falseSuspicion++;
+  };
+  for (const r of model.rows) {
+    if (r.verificationCategory === null || r.imageQuality === null) continue;
+    const kind = (r.portType ?? "").includes("بحري") ? "sea" : "land";
+    bump(`all|${r.imageQuality}`, r.verificationCategory);
+    bump(`${kind}|${r.imageQuality}`, r.verificationCategory);
+  }
+  return out;
 }
 
 export function sumMarking(list: MarkingCounts[]): MarkingCounts {
@@ -1038,10 +1061,7 @@ ${dataTable({ headers: ["المستوى", "الإجابات المدروسة", "
   // all on ONE page: quality levels as columns, rows for all ports / land / sea.
   {
     const m = meta("s2", eyebrowS2);
-    const records = buildDecisionRecords(model.rows, "quality");
-    const kindOf = (r: { portType: string | null }) => ((r.portType ?? "").includes("بحري") ? "sea" : "land");
-    const byQuality = aggregateDecisions(records, "decision", (r) => `all|${r.imageQuality}`);
-    const byKindQuality = aggregateDecisions(records, "decision", (r) => `${kindOf(r)}|${r.imageQuality}`);
+    const byQualityImages = collectQualityImageOutcomes(model);
     const levels = [
       { key: "منخفض", label: "جودة منخفضة", tone: "red" },
       { key: "متوسط", label: "جودة متوسطة", tone: "gold" },
@@ -1055,17 +1075,17 @@ ${dataTable({ headers: ["المستوى", "الإجابات المدروسة", "
       label: g.label,
       variant: g.variant,
       cells: levels.map((level): QualityCell => {
-        const c = (g.variant === "all" ? byQuality : byKindQuality).get(`${g.variant}|${level.key}`);
+        const c = byQualityImages.get(`${g.variant}|${level.key}`);
         const four: FourCounts = c ?? { correctClean: 0, correctSuspicion: 0, missedSuspicion: 0, falseSuspicion: 0 };
         const a = accuracyOf(four);
         return {
           tone: level.tone,
           value: fmtPct(a.overall),
-          caption: `معدل الاتفاق العام · من ${fmtNum(a.evaluable)} إجابة`,
+          caption: `معدل الاتفاق العام · من ${fmtNum(a.evaluable)} صورة`,
           fill: a.overall,
           stats: [
-            { label: "الاشتباهات الفائتة", value: fmtNum(four.missedSuspicion), share: `${fmtPct(pct(four.missedSuspicion, a.evaluable))} من الإجابات` },
-            { label: "الاشتباهات الخاطئة", value: fmtNum(four.falseSuspicion), share: `${fmtPct(pct(four.falseSuspicion, a.evaluable))} من الإجابات` },
+            { label: "الاشتباهات الفائتة", value: fmtNum(four.missedSuspicion), share: `${fmtPct(pct(four.missedSuspicion, a.evaluable))} من الصور` },
+            { label: "الاشتباهات الخاطئة", value: fmtNum(four.falseSuspicion), share: `${fmtPct(pct(four.falseSuspicion, a.evaluable))} من الصور` },
           ],
         };
       }),
