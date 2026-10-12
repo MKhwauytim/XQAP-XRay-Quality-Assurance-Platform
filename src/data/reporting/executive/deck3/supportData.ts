@@ -60,14 +60,21 @@ export function buildDeckSupportSheets(model: ReportModel, opts: { hasDecisionTa
     ["المؤشر", "القيمة", "الوحدة", "كيف يُحسب"],
     ["مجتمع الفحص", model.population.total, "صورة", "كل صور المجتمع في الفترة"],
     ["العيّنة المفحوصة", model.sample.total, "صورة", "الصور المكتملة الفحص في التقرير"],
+    ["العيّنة المفحوصة % من المجتمع", p1(pct(model.sample.total, model.population.total)), "%", "العيّنة المفحوصة ÷ مجتمع الفحص"],
+    ["إجمالي المستهدف", model.population.byStage.reduce((a, s) => a + (s.target ?? s.population), 0), "صورة", "مجموع مستهدفات المستويات (الأول 100% من مجتمعه، والباقي عدد ثابت شهريًا × أشهر التقرير)"],
     ["التغطية الرقابية", p1(model.sample.coverage ?? null), "%", model.population.fromSummary ? "العيّنة المفحوصة ÷ المستهدف (المستوى الأول 100% من مجتمعه، والمستويات الأخرى عدد ثابت شهريًا × أشهر التقرير)" : "العيّنة المفحوصة ÷ مجتمع الفحص"],
     ["الإجابات المفحوصة", overall.evaluable, "إجابة", "لكل صورة إجابتان: المستوى الأول والثاني"],
+    ["الإجابات المتفق عليها", totals.correctClean + totals.correctSuspicion, "إجابة", "سليمة صحيحة + اشتباه صحيح"],
+    ["إجابات السليمة", overall.cleanResults, "إجابة", "المقام: نتيجة الوسائل الآلية سليمة"],
+    ["إجابات الاشتباه", overall.suspResults, "إجابة", "المقام: نتيجة الوسائل الآلية اشتباه"],
     ["نسبة التوائم العامة", p1(overall.overall), "%", "الإجابات المتفق عليها ÷ الإجابات المفحوصة"],
     ["الاشتباهات الفائتة", totals.missedSuspicion, "إجابة", "نتيجة سليمة ورأي الجودة اشتباه"],
     ["الاشتباهات الفائتة % من إجابات السليمة", p1(pct(totals.missedSuspicion, overall.cleanResults)), "%", "الفائتة ÷ إجابات السليمة"],
     ["الاشتباهات الخاطئة", totals.falseSuspicion, "إجابة", "نتيجة اشتباه ورأي الجودة سليمة"],
     ["الاشتباهات الخاطئة % من إجابات الاشتباه", p1(pct(totals.falseSuspicion, overall.suspResults)), "%", "الخاطئة ÷ إجابات الاشتباه"],
     ["نسبة تحديد موقع الاشتباه", p1(model.imageQuality.markingRate), "%", "الصور المجاب عن التحديد فيها وعليها تحديد"],
+    ["صور الاشتباه بتحديد", model.kpis.markingPresentCount, "صورة", "عليها تحديد"],
+    ["صور الاشتباه المجاب عن تحديدها", model.kpis.markingPresentCount + model.kpis.markingMissingCount, "صورة", "المقام: عليها تحديد أو بدونه"],
   ]);
 
   // ── Population by level (page 7) ───────────────────────────────────────────
@@ -138,14 +145,14 @@ export function buildDeckSupportSheets(model: ReportModel, opts: { hasDecisionTa
   const popPorts = collectPortStats(model);
   type PopPort = (typeof popPorts.land)[number];
   const popRow = (kind: string, p: PopPort): SupportCell[] => [
-    kind, p.name, p.total, p.sampleTotal, p1(pct(p.sampleTotal, p.total)), p.clean, p.sampleClean, p.suspicious, p.sampleSuspicious, n(p.other),
+    kind, p.name, p.total, p.sampleTotal, p1(pct(p.sampleTotal, p.total)), p.clean, p.sampleClean, p1(pct(p.clean, p.total)), p.suspicious, p.sampleSuspicious, p1(pct(p.suspicious, p.total)), n(p.other),
   ];
   const popTotal = (kind: string, label: string, ports: PopPort[]): SupportCell[] => {
     const sum = (f: (p: PopPort) => number): number => ports.reduce((a, p) => a + f(p), 0);
-    return [kind, label, sum((p) => p.total), sum((p) => p.sampleTotal), p1(pct(sum((p) => p.sampleTotal), sum((p) => p.total))), sum((p) => p.clean), sum((p) => p.sampleClean), sum((p) => p.suspicious), sum((p) => p.sampleSuspicious), sum((p) => p.other ?? 0)];
+    return [kind, label, sum((p) => p.total), sum((p) => p.sampleTotal), p1(pct(sum((p) => p.sampleTotal), sum((p) => p.total))), sum((p) => p.clean), sum((p) => p.sampleClean), p1(pct(sum((p) => p.clean), sum((p) => p.total))), sum((p) => p.suspicious), sum((p) => p.sampleSuspicious), p1(pct(sum((p) => p.suspicious), sum((p) => p.total))), sum((p) => p.other ?? 0)];
   };
   add("المجتمع حسب المنفذ", "التوزيع على المنافذ البرية / البحرية", "المجتمع والعيّنة لكل منفذ، مفصولة إلى سليمة واشتباه وأخرى.", [
-    ["نوع المنفذ", "المنفذ", "المجتمع", "العيّنة", "نسبة العيّنة من المجتمع %", "سليمة (مجتمع)", "سليمة (عيّنة)", "اشتباه (مجتمع)", "اشتباه (عيّنة)", "أخرى (مجتمع)"],
+    ["نوع المنفذ", "المنفذ", "المجتمع", "العيّنة", "نسبة العيّنة من المجتمع %", "سليمة (مجتمع)", "سليمة (عيّنة)", "نسبة السليمة %", "اشتباه (مجتمع)", "اشتباه (عيّنة)", "نسبة الاشتباه %", "أخرى (مجتمع)"],
     ...popPorts.land.map((p) => popRow("بري", p)),
     popTotal("بري", "إجمالي البرية", popPorts.land),
     ...popPorts.sea.map((p) => popRow("بحري", p)),

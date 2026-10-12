@@ -626,21 +626,26 @@ export async function buildDeck3Slides(
     // Each rate uses the denominator its label names: a missed suspicion is a سليمة result, a false one an اشتباه result.
     const missedShare = pct(t.missedSuspicion, overallStats.cleanResults);
     const falseShare = pct(t.falseSuspicion, overallStats.suspResults);
+    // Coverage numbers: against the target when the report has one (summary-backed), against the population otherwise.
+    const targeted = model.population.byStage.filter((s) => s.target !== undefined);
+    const coverageNumbers = withPop && targeted.length > 0
+      ? `${fmtNum(targeted.reduce((a, s) => a + s.sampleSize, 0))} من ${fmtNum(targeted.reduce((a, s) => a + (s.target ?? 0), 0))} صورة مستهدفة`
+      : `${fmtNum(model.sample.total)} من ${fmtNum(model.population.total)} صورة`;
     const inner = `${contentHead({ eyebrow: copy.kpiEyebrow, title: kpiTitle, large: true })}
 ${kpiBand(coNoPop ? [
       { label: ceLabels.ce_completed_samples, value: completedTotal, sub: ceLabels.ce_scope_note },
       { label: "الاشتباه الصحيح", value: fmtNum(t.correctSuspicion), valueTone: "green", sub: "نتائج اشتباه أكّدها أخصائي الجودة" },
       { label: "الاشتباه الخاطئ", value: fmtNum(t.falseSuspicion), valueTone: "gold", sub: "نتائج اشتباه رأى أخصائي الجودة أنها سليمة" },
     ] : [
-      { label: "مجتمع الفحص", value: fmtNum(model.population.total), sub: "مجتمع الصور الواردة من وكالة تحليل المخاطر" },
-      { label: withPop ? "العيّنة المفحوصة" : "العيّنة المسحوبة", value: fmtNum(model.sample.total), sub: withPop ? "صورة مكتملة الفحص في التقرير" : "صورة موزّعة على أخصائيي الجودة" },
-      { label: "التغطية الرقابية", value: fmtPct(model.sample.coverage ?? null), valueTone: "gold", sub: withPop ? "نسبة العيّنة من المستهدف" : "نسبة العينة من المجتمع" },
+      { label: "مجتمع الفحص", value: "100%", aside: `${fmtNum(model.population.total)} صورة`, sub: "مجتمع الصور الواردة من وكالة تحليل المخاطر" },
+      { label: withPop ? "العيّنة المفحوصة" : "العيّنة المسحوبة", value: fmtPct(pct(model.sample.total, model.population.total)), aside: `${fmtNum(model.sample.total)} من ${fmtNum(model.population.total)} صورة`, sub: withPop ? "صورة مكتملة الفحص في التقرير" : "صورة موزّعة على أخصائيي الجودة" },
+      { label: "التغطية الرقابية", value: fmtPct(model.sample.coverage ?? null), valueTone: "gold", aside: coverageNumbers, sub: withPop ? "نسبة العيّنة من المستهدف" : "نسبة العينة من المجتمع" },
     ], "top")}
 ${kpiBand([
-      { label: "نسبة التوائم", value: fmtPct(overallStats.overall), valueTone: "green", aside: `من ${fmtNum(t.evaluable)} إجابة مفحوصة`, sub: RESULT_ACCURACY_DEFINITION },
-      { label: "نسبة تحديد موقع الاشتباه", value: fmtPct(model.imageQuality.markingRate), valueTone: "red", sub: "التزام الفاحصين بتحديد مواقع الاشتباه" },
-      { label: "الاشتباهات الفائتة", value: fmtNum(t.missedSuspicion), aside: missedShare === null ? undefined : `${fmtPct(missedShare)} من إجابات السليمة`, sub: MISSED_SUSPICION_DEFINITION,
-        extra: { label: "الاشتباهات الخاطئة", value: fmtNum(t.falseSuspicion), valueTone: "gold", aside: falseShare === null ? undefined : `${fmtPct(falseShare)} من إجابات الاشتباه`, sub: FALSE_SUSPICION_DEFINITION } },
+      { label: "نسبة التوائم", value: fmtPct(overallStats.overall), valueTone: "green", aside: `${fmtNum(t.correctClean + t.correctSuspicion)} من ${fmtNum(t.evaluable)} إجابة مفحوصة`, sub: RESULT_ACCURACY_DEFINITION },
+      { label: "الاشتباهات الفائتة", value: fmtPct(missedShare), aside: `${fmtNum(t.missedSuspicion)} من ${fmtNum(overallStats.cleanResults)} إجابة سليمة`, sub: MISSED_SUSPICION_DEFINITION,
+        extra: { label: "الاشتباهات الخاطئة", value: fmtPct(falseShare), valueTone: "gold", aside: `${fmtNum(t.falseSuspicion)} من ${fmtNum(overallStats.suspResults)} إجابة اشتباه`, sub: FALSE_SUSPICION_DEFINITION } },
+      { label: "نسبة تحديد موقع الاشتباه", value: fmtPct(model.imageQuality.markingRate), valueTone: "red", aside: `${fmtNum(model.kpis.markingPresentCount)} من ${fmtNum(model.kpis.markingPresentCount + model.kpis.markingMissingCount)} صورة اشتباه`, sub: "التزام الفاحصين بتحديد مواقع الاشتباه" },
     ], "bottom")}`;
     parts.push(slideShell(m, "", inner));
   }
@@ -806,7 +811,9 @@ ${dataTable({
         { html: esc(p.name) },
         { html: popCell(p.total, p.sampleTotal), cls: "v-navy" },
         { html: popCell(p.clean, p.sampleClean), cls: "v-green" },
+        { html: fmtPct(pct(p.clean, p.total)), cls: "v-green" },
         { html: popCell(p.suspicious, p.sampleSuspicious), cls: "v-red" },
+        { html: fmtPct(pct(p.suspicious, p.total)), cls: "v-red" },
         ...(withPop ? [{ html: fmtNum(p.other ?? 0), cls: "v-gold" }] : []),
       ]);
     const totalsOf = (label: string, ports: PortPopRow[]): TableCell[] => {
@@ -815,7 +822,9 @@ ${dataTable({
         { html: label },
         { html: popCell(sum((p) => p.total), sum((p) => p.sampleTotal)), cls: "v-navy" },
         { html: popCell(sum((p) => p.clean), sum((p) => p.sampleClean)), cls: "v-green" },
+        { html: fmtPct(pct(sum((p) => p.clean), sum((p) => p.total))), cls: "v-green" },
         { html: popCell(sum((p) => p.suspicious), sum((p) => p.sampleSuspicious)), cls: "v-red" },
+        { html: fmtPct(pct(sum((p) => p.suspicious), sum((p) => p.total))), cls: "v-red" },
         ...(withPop ? [{ html: fmtNum(sum((p) => p.other ?? 0)), cls: "v-gold" }] : []),
       ];
     };
@@ -824,13 +833,13 @@ ${dataTable({
       const sample = ports.reduce((s, p) => s + p.sampleTotal, 0);
       return `${withPop ? "نسبة العيّنة من المجتمع" : "التغطية الرقابية"} ${fmtPct(pct(sample, total))}`;
     };
-    const headers = withPop ? ["المنفذ", "إجمالي الصور", "سليمة", "اشتباه", "نتائج أخرى"] : ["المنفذ", "إجمالي الصور", "سليمة", "اشتباه"];
+    const headers = withPop ? ["المنفذ", "إجمالي الصور", "سليمة", "نسبة السليمة", "اشتباه", "نسبة الاشتباه", "نتائج أخرى"] : ["المنفذ", "إجمالي الصور", "سليمة", "نسبة السليمة", "اشتباه", "نسبة الاشتباه"];
     const groups = popPortGroups.length > 0 ? popPortGroups : [{ variant: "land" as const, title: "المنافذ البرية", totalLabel: "إجمالي البرية", ports: popLand }];
     for (const g of groups) {
       const m = meta("s1", EYEBROW_S1);
       const inner = `${contentHead({ eyebrow: EYEBROW_S1, title: `التوزيع على ${g.title}`, note: "المجتمع والرقم بين قوسين العيّنة المسحوبة، مفصولة إلى سليمة واشتباه" })}
 <div class="v3-two-col" style="grid-template-columns:1fr">
-  ${tintedPanel({ variant: g.variant, title: g.title, note: coverageNote(g.ports), body: dataTable({ headers, rows: portRows(g.ports), totals: totalsOf(g.totalLabel, g.ports), topHeader: [{ label: "", span: 2 }, { label: "حسب النتيجة", span: withPop ? 3 : 2, group: true }], groupStart: 2, rowPx: portRowPx(g.ports.length, TOP_HEADER_PX) }) })}
+  ${tintedPanel({ variant: g.variant, title: g.title, note: coverageNote(g.ports), body: dataTable({ headers, rows: portRows(g.ports), totals: totalsOf(g.totalLabel, g.ports), topHeader: [{ label: "", span: 2 }, { label: "حسب النتيجة", span: withPop ? 5 : 4, group: true }], groupStart: 2, rowPx: portRowPx(g.ports.length, TOP_HEADER_PX) }) })}
 </div>`;
       parts.push(slideShell(m, "", inner));
     }
@@ -882,7 +891,7 @@ ${kpiBand([
       { label: "الاشتباهات الخاطئة", value: fmtNum(t.falseSuspicion), valueTone: "gold", aside: `${fmtPct(pct(t.falseSuspicion, overallStats.suspResults))} من إجابات الاشتباه`, sub: FALSE_SUSPICION_DEFINITION },
     ], "solo", true)}
 <div class="v3-note" style="margin-top:18px;font-weight:700;color:var(--v3-navy);">الإجابات حسب مستويات المخاطر — النسبة بين قوسين من الإجابات المفحوصة في كل مستوى</div>
-${dataTable({ headers: ["المستوى", "الإجابات المفحوصة", "نسبة التوائم العامة", "الاشتباهات الفائتة", "الاشتباهات الخاطئة"], topHeader: [{ label: "", span: 2 }, { label: "النسبة", span: 1, group: true }, { label: "الأخطاء", span: 2, group: true }], groupStart: [2, 3], rows: stageRows, totals })}`;
+${dataTable({ headers: ["المستوى", "الإجابات المفحوصة", "نسبة التوائم العامة", "الاشتباهات الفائتة", "الاشتباهات الخاطئة"], topHeader: [{ label: "", span: 2 }, { label: "النسبة", span: 1, group: true }, { label: "نتائج خاطئة", span: 2, group: true }], groupStart: [2, 3], rows: stageRows, totals })}`;
     parts.push(slideShell(m, "", inner));
   }
 
