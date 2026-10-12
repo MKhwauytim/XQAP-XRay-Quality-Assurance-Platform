@@ -45,19 +45,15 @@ try {
   writeFileSync(outPath, html, "utf8");
   console.log(`report written: ${outPath}\n  ${merged.rows.length} rows · ${(html.length / 1024 / 1024).toFixed(2)} MB`);
 
-  // The same report as an .xlsx: one sheet per report page plus the raw per-image and per-answer sheets behind them.
-  const { buildExecutiveWorkbookObject } = await server.ssrLoadModule("/src/data/reporting/executive/workbook/workbook.ts");
+  // The report's data workbook (what the app's xlsx button exports): one sheet per report page, then the raw per-image rows behind them.
   const XLSX = await server.ssrLoadModule("xlsx");
   const { buildExecutiveRawWorkbookObject } = await server.ssrLoadModule("/src/data/reporting/executive/workbook/workbook.ts");
   const rawBook = await buildExecutiveRawWorkbookObject(input, {});
-  const rawPath = outPath.replace(/\.html$/i, "") + "-raw.xlsx";
+  const rawPath = outPath.replace(/\.html$/i, "") + "-data.xlsx";
   const rawBuf = (XLSX.write ?? XLSX.default.write)(rawBook, { type: "buffer", bookType: "xlsx", compression: true });
   writeFileSync(rawPath, rawBuf);
-  console.log(`raw data written: ${rawPath}\n  ${(rawBuf.length / 1024 / 1024).toFixed(1)} MB`);
-  const book = await buildExecutiveWorkbookObject(input, {});
-  const xlsxPath = outPath.replace(/\.html$/i, "") + "-data.xlsx";
-  const buf = (XLSX.write ?? XLSX.default.write)(book, { type: "buffer", bookType: "xlsx", compression: true });
-  writeFileSync(xlsxPath, buf);
+  console.log(`data workbook written: ${rawPath}
+  ${rawBook.SheetNames.length} sheets · ${(rawBuf.length / 1024 / 1024).toFixed(1)} MB`);
   // The observations and recommendations (الملاحظات والتوصيات) drafted from the report's results, as a separate small workbook.
   const { buildStatements, buildStatementsWorkbook } = await server.ssrLoadModule("/src/data/reporting/executive/deck3/statements.ts");
   const { buildReportModel } = await server.ssrLoadModule("/src/data/reporting/executive/model/reportModel.ts");
@@ -72,7 +68,6 @@ try {
   const supportPath = outPath.replace(/\.html$/i, "") + "-support.xlsx";
   writeFileSync(supportPath, (XLSX.write ?? XLSX.default.write)(supportBook, { type: "buffer", bookType: "xlsx", compression: true }));
   console.log(`support data written: ${supportPath}\n  ${supportBook.SheetNames.length} sheets`);
-  console.log(`workbook written: ${xlsxPath}\n  ${book.SheetNames.length} sheets · ${(buf.length / 1024 / 1024).toFixed(1)} MB`);
 } finally {
   await server.close();
 }

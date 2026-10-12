@@ -886,8 +886,9 @@ export async function buildExecutiveWorkbookObject(
 }
 
 /**
- * The raw data only: one row per studied image with every field the report was generated from,
- * and no aggregate tables. Used by the comprehensive-report page.
+ * The comprehensive report's workbook: the page-level supporting sheets first (an index plus one sheet per report page,
+ * built from the same helpers the slides use), then the raw data they are computed from — one row per studied image with
+ * every field the report was generated from. Used by the comprehensive-report page.
  */
 export async function buildExecutiveRawWorkbookObject(
   input: ExecutiveReportInput,
@@ -895,6 +896,7 @@ export async function buildExecutiveRawWorkbookObject(
 ): Promise<XLSX.WorkBook> {
   const model = buildReportModel(input, employeeDisplayNames);
   const wb = XLSX.utils.book_new();
+  for (const sheet of buildDeckSupportSheets(model, { hasDecisionTable: false })) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheet.aoa), sheet.name);
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(await rowSheet(model)), SHEET_NAMES.rows);
   return wb;
 }
