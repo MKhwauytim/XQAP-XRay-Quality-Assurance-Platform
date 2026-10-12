@@ -963,11 +963,10 @@ ${dataTable({ headers: ["المستوى", "الإجابات المدروسة", "
     const cellsOf = (label: string, c: MarkingOnlyCounts, tone?: string): TableCell[] => [
       { html: label },
       { html: fmtNum(c.images), cls: tone ?? "v-muted" },
-      { html: fmtNum(c.marked), cls: "v-green" },
-      { html: fmtNum(c.unmarked), cls: "v-red" },
-      { html: fmtPct(pct(c.marked, c.images)), cls: "v-green" },
+      { html: countRateCell(c.marked, pct(c.marked, c.images)), cls: "v-green" },
+      { html: countRateCell(c.unmarked, pct(c.unmarked, c.images)), cls: "v-red" },
     ];
-    const headers = ["المنفذ", "صور الاشتباه المدروسة", "صور بتحديد", "صور بدون تحديد", "نسبة التحديد"];
+    const headers = ["المنفذ", "صور الاشتباه المدروسة", "صور بتحديد", "صور بدون تحديد"];
     const sumOf = (list: MarkingOnlyCounts[]): MarkingOnlyCounts =>
       list.reduce((a, c) => ({ images: a.images + c.images, marked: a.marked + c.marked, unmarked: a.unmarked + c.unmarked }), { images: 0, marked: 0, unmarked: 0 });
     const groups = accGroups.length > 0 ? accGroups : [{ variant: "land" as const, panelTitle: "المنافذ البرية", totalLabel: "إجمالي البرية", ports: portAcc.land }];
@@ -992,13 +991,11 @@ ${dataTable({ headers: ["المستوى", "الإجابات المدروسة", "
     const cellsOf = (label: string, c: QualityCounts, tone?: string): TableCell[] => [
       { html: label },
       { html: fmtNum(c.images), cls: tone ?? "v-muted" },
-      { html: fmtNum(c.low), cls: "v-red" },
-      { html: fmtNum(c.mid), cls: "v-gold" },
-      { html: fmtNum(c.high), cls: "v-green" },
-      { html: fmtPct(pct(c.low, c.images)), cls: "v-red" },
-      { html: fmtPct(pct(c.high, c.images)), cls: "v-green" },
+      { html: countRateCell(c.low, pct(c.low, c.images)), cls: "v-red" },
+      { html: countRateCell(c.mid, pct(c.mid, c.images)), cls: "v-gold" },
+      { html: countRateCell(c.high, pct(c.high, c.images)), cls: "v-green" },
     ];
-    const headers = ["المنفذ", "الصور المقيّمة", "جودة منخفضة", "جودة متوسطة", "جودة عالية", "نسبة المنخفضة", "نسبة العالية"];
+    const headers = ["المنفذ", "الصور المقيّمة", "جودة منخفضة", "جودة متوسطة", "جودة عالية"];
     const qualityShown = accGroups.length > 0 ? accGroups : [{ variant: "land" as const, title: "للمنافذ البرية", panelTitle: "المنافذ البرية", totalLabel: "إجمالي البرية", ports: portAcc.land }];
     for (const g of qualityShown) {
       const m = meta("s2", eyebrowS2);
