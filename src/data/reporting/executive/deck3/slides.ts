@@ -448,7 +448,7 @@ export async function buildDeck3Slides(
   // `- 2 + (levelPages - 2)`: the two per-port bar charts are gone and the level-per-port pages are now tables, one per port type.
   // `- 2` (last): the two marking/quality impact pages were removed (the quality-by-port-type page replaces them).
   // `statementPages`: the section-3 statement pages (generated + one blank) sit between its divider and the agreement page.
-  const TOTAL = 23 + statementPages + (popPages - 1) + (accPages - 1) + accPages - 2 + (levelPages - 2) + popResultsPages + markQualityPages - (coNoPop ? sectionOnePages : 0) - (agreementEmpty ? 1 : 0);
+  const TOTAL = 22 + statementPages + (popPages - 1) + (accPages - 1) + accPages - 2 + (levelPages - 2) + popResultsPages + markQualityPages - (coNoPop ? sectionOnePages : 0) - (agreementEmpty ? 1 : 0);
   const YITBA = " (يتبع)";
 
   let nextNum = 1;
@@ -482,11 +482,12 @@ export async function buildDeck3Slides(
   // arithmetic that produces TOTAL above, not re-hardcoded per range.
   const s1End = 7 + popPages + popResultsPages;
   const s2Start = coNoPop ? 6 : s1End + 1;
-  const s2End = s2Start + 5 + 2 * accPages + levelPages + markQualityPages;
+  const s2End = s2Start + 4 + 2 * accPages + levelPages + markQualityPages;
   const s3Start = s2End + 1;
   const s3End = s3Start + 2 + statementPages - (agreementEmpty ? 1 : 0);
   parts.push(contentsSlide({
     eyebrow: "التقرير التنفيذي",
+    hideEyebrow: true,
     title: "محتويات التقرير",
     rows: coNoPop ? [
       { index: 1, title: "المعجم", description: "تعريف مستويات المخاطر والمصطلحات المستخدمة في التقرير.", pages: "ص 03–04" },
@@ -1052,49 +1053,6 @@ ${dataTable({ headers: ["المستوى", "الإجابات المدروسة", "
     }));
     const inner = `${contentHead({ eyebrow: eyebrowS2, title: "نسبة التوائم حسب جودة الصورة" })}
 ${qualityMatrix(levels.map((l) => ({ label: l.label, tone: l.tone })), rows)}`;
-    parts.push(slideShell(m, "", inner));
-  }
-
-  // 13 — Clean/suspicion accuracy per risk level (four mini plots)
-  {
-    const m = meta("s2", eyebrowS2);
-    const stages = orderedStageAccuracy(model);
-    const levelAxis = fitAxis(
-      stages.flatMap((s) => {
-        const a = accuracyOf(s.counts);
-        return [a.cleanAcc, a.suspAcc];
-      }),
-      60,
-      100,
-    );
-    const cols = stages
-      .map((s) => {
-        const a = accuracyOf(s.counts);
-        const chart = barChart({
-          bars: [
-            { label: "", value: a.cleanAcc, tone: "green" },
-            { label: "", value: a.suspAcc, tone: "red" },
-          ],
-          ...levelAxis, plotHeight: 440, barMaxWidth: 88, gap: 22, pad: 26, hideCats: true,
-          references: [
-            ...(overallStats.cleanAcc === null ? [] : [{ value: overallStats.cleanAcc, tone: "avg-green" as const }]),
-            ...(overallStats.suspAcc === null ? [] : [{ value: overallStats.suspAcc, tone: "avg-red" as const }]),
-          ],
-        });
-        return `<div class="v3-chart-col">${chart}<div class="v3-level-cap"><b>${esc(s.label)}</b><span>الدقة العامة ${fmtPct(a.overall)} · ${fmtNum(s.evaluable)} إجابة</span></div></div>`;
-      })
-      .join("\n");
-    const inner = `${contentHead({
-      eyebrow: eyebrowS2,
-      title: "الدقتان حسب مستويات المخاطر",
-    })}
-<div class="v3-levels-chart-grid">${cols}</div>
-${legendRow([
-      { swatch: "green", text: "دقة السليمة" },
-      { swatch: "red", text: "دقة الاشتباه" },
-      { dash: "avg-green", text: `متوسط السليمة ${fmtPct(overallStats.cleanAcc)}` },
-      { dash: "avg-red", text: `متوسط الاشتباه ${fmtPct(overallStats.suspAcc)}` },
-    ], scaleCaption(levelAxis))}`;
     parts.push(slideShell(m, "", inner));
   }
 

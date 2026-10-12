@@ -43,11 +43,13 @@ ${pageFoot(meta)}
 
 /** Content-slide header: gold eyebrow dash+label, H2, optional muted note at
  *  the title row's far end. */
-export function contentHead(opts: { eyebrow: string; title: string; note?: string; large?: boolean }): string {
+export function contentHead(opts: { eyebrow: string; title: string; note?: string; large?: boolean; hideEyebrow?: boolean }): string {
   const note = opts.note ? `<span class="v3-head-note">${esc(opts.note)}</span>` : "";
+  // `hideEyebrow` (contents page only) leaves out the gold rule and its text box; an empty eyebrow still renders them.
+  const eyebrow = opts.hideEyebrow ? "" : `  <div class="v3-eyebrow"><span>${esc(opts.eyebrow)}</span></div>
+`;
   return `<header class="v3-head">
-  <div class="v3-eyebrow"><span>${esc(opts.eyebrow)}</span></div>
-  <div class="v3-title-row"><h2 class="v3-h2${opts.large ? " lg" : ""}">${esc(opts.title)}</h2>${note}</div>
+${eyebrow}  <div class="v3-title-row"><h2 class="v3-h2${opts.large ? " lg" : ""}">${esc(opts.title)}</h2>${note}</div>
 </header>`;
 }
 
@@ -120,6 +122,8 @@ ${coverMetaRow(opts.metaRows)}`,
 
 export function contentsSlide(opts: {
   eyebrow: string;
+  /** Executive report only: leave out the eyebrow (its gold rule and text box). */
+  hideEyebrow?: boolean;
   title: string;
   rows: Array<{ index: number; title: string; description: string; topics?: string; pages: string }>;
   meta: SlideMeta;
@@ -134,7 +138,7 @@ export function contentsSlide(opts: {
 </div>`,
     )
     .join("\n");
-  return slideShell(opts.meta, "", `${contentHead({ eyebrow: opts.eyebrow, title: opts.title, large: true })}<div class="v3-toc">${rows}</div>`);
+  return slideShell(opts.meta, "", `${contentHead({ eyebrow: opts.eyebrow, title: opts.title, large: true, hideEyebrow: opts.hideEyebrow })}<div class="v3-toc">${rows}</div>`);
 }
 
 // ── Glossary ────────────────────────────────────────────────────────────────
