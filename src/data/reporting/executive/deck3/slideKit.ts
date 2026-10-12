@@ -311,7 +311,7 @@ export function sectionDivider(opts: {
 
 /** A tinted land/sea panel (5px top rule + dot title) holding arbitrary
  *  content — usually a `v3-table`. */
-export function tintedPanel(opts: { variant: "land" | "sea"; title: string; note?: string; padLg?: boolean; body: string }): string {
+export function tintedPanel(opts: { variant: "land" | "sea" | "all"; title: string; note?: string; padLg?: boolean; body: string }): string {
   const note = opts.note ? `<span class="v3-panel-note">${esc(opts.note)}</span>` : "";
   return `<div class="v3-panel ${opts.variant}${opts.padLg ? " pad-lg" : ""}">
   <div class="v3-panel-head"><span class="v3-panel-title">${esc(opts.title)}</span>${note}</div>

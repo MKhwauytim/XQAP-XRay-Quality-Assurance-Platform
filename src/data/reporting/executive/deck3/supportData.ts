@@ -47,7 +47,7 @@ export function buildDeckSupportSheets(model: ReportModel): SupportSheet[] {
     ["المؤشر", "القيمة", "الوحدة", "كيف يُحسب"],
     ["مجتمع الفحص", model.population.total, "صورة", "كل صور المجتمع في الفترة"],
     ["العيّنة المفحوصة", model.sample.total, "صورة", "الصور المكتملة الفحص في التقرير"],
-    ["التغطية الرقابية", p1(model.sample.coverage ?? null), "%", "العيّنة المفحوصة ÷ مجتمع الفحص"],
+    ["التغطية الرقابية", p1(model.sample.coverage ?? null), "%", model.population.fromSummary ? "العيّنة المفحوصة ÷ المستهدف (المستوى الأول 100% من مجتمعه، والمستويات الأخرى عدد ثابت شهريًا × أشهر التقرير)" : "العيّنة المفحوصة ÷ مجتمع الفحص"],
     ["الإجابات المدروسة", overall.evaluable, "إجابة", "لكل صورة إجابتان: المستوى الأول والثاني"],
     ["نسبة التوائم العامة", p1(overall.overall), "%", "الإجابات المتفق عليها ÷ الإجابات المدروسة"],
     ["الاشتباهات الفائتة", totals.missedSuspicion, "إجابة", "نتيجة سليمة ورأي الجودة اشتباه"],
@@ -59,9 +59,9 @@ export function buildDeckSupportSheets(model: ReportModel): SupportSheet[] {
 
   // ── Population by level (page 7) ───────────────────────────────────────────
   add("المجتمع حسب المستوى", "مجتمع الفحص والعيّنة حسب المستوى", "حجم المجتمع والعيّنة والتغطية لكل مستوى.", [
-    ["المستوى", "المجتمع (صورة)", "العيّنة (صورة)", "التغطية الرقابية %"],
-    ...model.population.byStage.map((s): SupportCell[] => [s.stageLabel, s.population, s.sampleSize, p1(s.coverage ?? null)]),
-    ["الإجمالي", model.population.total, model.sample.total, p1(model.sample.coverage ?? null)],
+    ["المستوى", "المجتمع (صورة)", "المستهدف (صورة)", "العيّنة (صورة)", "التغطية الرقابية %"],
+    ...model.population.byStage.map((s): SupportCell[] => [s.stageLabel, s.population, s.target ?? s.population, s.sampleSize, p1(s.coverage ?? null)]),
+    ["الإجمالي", model.population.total, model.population.byStage.reduce((a, s) => a + (s.target ?? s.population), 0), model.sample.total, p1(model.sample.coverage ?? null)],
   ]);
 
   // ── L1/L2 results across the population (page 8; workbook-backed reports only) ──
