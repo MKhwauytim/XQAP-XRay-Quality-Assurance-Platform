@@ -9,7 +9,7 @@
  *     spacing and the «منفذ» prefix never make two ports different.
  *  2. Typo clustering — a name within ONE edit (swapped, dropped, added or
  *     changed letter) of a clearly more common name is that name's typo. Guarded
- *     so two real ports can't merge: both names ≥ 5 letters, and the typo must
+ *     so two real ports can't merge: both names ≥ 5 letters after the port-type word, and the typo must
  *     be at most a fifth as frequent as the name it joins.
  *  3. Curated aliases — typos too common for layer 2 to trust.
  *
@@ -39,6 +39,9 @@ const PORT_ALIASES: Record<string, string> = {
 };
 
 const MIN_TYPO_LENGTH = 5;
+
+/** The distinguishing part of a name: «ميناء أ» / «ميناء ب» are two ports, not a typo, so the port-type word does not count toward the length guard. */
+const coreOf = (key: string): string => key.replace(/^(ميناء|مطار|جسر|محافظه) /, "");
 const TYPO_FREQUENCY_RATIO = 5;
 
 /** True when `a` and `b` differ by exactly one insert / delete / substitute / adjacent swap. */
@@ -79,8 +82,8 @@ export function buildPortNameMap(rawNames: Iterable<string | null>): Map<string,
         : roots.find(
             (r) =>
               PORT_ALIASES[r] === undefined &&
-              key.length >= MIN_TYPO_LENGTH &&
-              r.length >= MIN_TYPO_LENGTH &&
+              coreOf(key).length >= MIN_TYPO_LENGTH &&
+              coreOf(r).length >= MIN_TYPO_LENGTH &&
               n * TYPO_FREQUENCY_RATIO <= total(byKey.get(r)!) &&
               withinOneEdit(key, r),
           );

@@ -193,6 +193,47 @@ export function collectPortMarking(model: ReportModel): Map<string, MarkingCount
   return byPort;
 }
 
+/** Image-quality follow-up per port. Unlike marking, quality applies to EVERY evaluated image, whatever its L1/L2 result. */
+export type QualityCounts = { images: number; low: number; mid: number; high: number };
+
+export const emptyQuality = (): QualityCounts => ({ images: 0, low: 0, mid: 0, high: 0 });
+
+export function collectPortQuality(model: ReportModel): Map<string, QualityCounts> {
+  const byPort = new Map<string, QualityCounts>();
+  for (const r of model.rows) {
+    if (r.imageQuality === null) continue;
+    const key = r.portName ?? "غير محدد";
+    const c = byPort.get(key) ?? emptyQuality();
+    byPort.set(key, c);
+    c.images++;
+    if (r.imageQuality === "منخفض") c.low++;
+    else if (r.imageQuality === "متوسط") c.mid++;
+    else c.high++;
+  }
+  return byPort;
+}
+
+export function sumQuality(list: QualityCounts[]): QualityCounts {
+  return list.reduce((a, c) => ({ images: a.images + c.images, low: a.low + c.low, mid: a.mid + c.mid, high: a.high + c.high }), emptyQuality());
+}
+
+/** «هل يوجد تحديد؟» per port, on suspicion images only (L1 or L2 = اشتباه): a marking is only drawn where something was seen. */
+export type MarkingOnlyCounts = { images: number; marked: number; unmarked: number };
+
+export function collectPortMarkingOnly(model: ReportModel): Map<string, MarkingOnlyCounts> {
+  const byPort = new Map<string, MarkingOnlyCounts>();
+  for (const r of model.rows) {
+    if (r.imageResult !== "اشتباه" || r.hasMarking === null) continue;
+    const key = r.portName ?? "غير محدد";
+    const c = byPort.get(key) ?? { images: 0, marked: 0, unmarked: 0 };
+    byPort.set(key, c);
+    c.images++;
+    if (r.hasMarking) c.marked++;
+    else c.unmarked++;
+  }
+  return byPort;
+}
+
 export function sumMarking(list: MarkingCounts[]): MarkingCounts {
   return list.reduce((a, c) => ({
     images: a.images + c.images, marked: a.marked + c.marked, unmarked: a.unmarked + c.unmarked,
@@ -380,6 +421,8 @@ export async function buildDeck3Slides(
     { variant: "sea", title: "للمنافذ البحرية", panelTitle: "المنافذ البحرية", totalLabel: "إجمالي البحرية", ports: portAcc.sea },
   ] as const).filter((g) => g.ports.length > 0);
   const accPages = Math.max(1, accGroups.length);
+  // Standalone follow-up pages after the combined marking/quality ones: one «هل يوجد تحديد» page, then one image-quality page per port type.
+  const markQualityPages = 1 + accPages;
   // Level 1/2 accuracy per port, one table page per port type (same grouping rule as accGroups).
   const levelRows = collectLevelAccuracyRows(model);
   const levelGroups = ([
@@ -404,7 +447,7 @@ export async function buildDeck3Slides(
   // `- 2 + (levelPages - 2)`: the two per-port bar charts are gone and the level-per-port pages are now tables, one per port type.
   // `- 2` (last): the two marking/quality impact pages were removed (the quality-by-port-type page replaces them).
   // `statementPages`: the section-3 statement pages (generated + one blank) sit between its divider and the agreement page.
-  const TOTAL = 23 + statementPages + (popPages - 1) + (accPages - 1) + accPages - 2 + (levelPages - 2) + popResultsPages - (coNoPop ? sectionOnePages : 0) - (agreementEmpty ? 1 : 0);
+  const TOTAL = 23 + statementPages + (popPages - 1) + (accPages - 1) + accPages - 2 + (levelPages - 2) + popResultsPages + markQualityPages - (coNoPop ? sectionOnePages : 0) - (agreementEmpty ? 1 : 0);
   const YITBA = " (يتبع)";
 
   let nextNum = 1;
@@ -438,7 +481,7 @@ export async function buildDeck3Slides(
   // arithmetic that produces TOTAL above, not re-hardcoded per range.
   const s1End = 7 + popPages + popResultsPages;
   const s2Start = coNoPop ? 6 : s1End + 1;
-  const s2End = s2Start + 5 + 2 * accPages + levelPages;
+  const s2End = s2Start + 5 + 2 * accPages + levelPages + markQualityPages;
   const s3Start = s2End + 1;
   const s3End = s3Start + 2 + statementPages - (agreementEmpty ? 1 : 0);
   parts.push(contentsSlide({
@@ -803,10 +846,6 @@ ${dataTable({ headers: ["المستوى", "الإجابات المدروسة", "
   <div class="v3-cmp-row"><span>نتائج أخرى (غير مدروسة)</span><b>${fmtNum(other)}</b></div>
 </div>`,
       });
-    const note =
-      l1All.overall !== null && l2All.overall !== null && l1All.suspAcc !== null && l2All.suspAcc !== null
-        ? `<p class="v3-note">فرق الدقة العامة بين المستويين ${fmtPct(Math.abs(l1All.overall - l2All.overall))} (${fmtPct(l1All.overall)} مقابل ${fmtPct(l2All.overall)})، وفرق دقة الاشتباه ${fmtPct(Math.abs(l1All.suspAcc - l2All.suspAcc))} (${fmtPct(l1All.suspAcc)} مقابل ${fmtPct(l2All.suspAcc)}).</p>`
-        : "";
     const inner = `${contentHead({
       eyebrow: eyebrowS2,
       title: "دقة إجابات المستوى الأول والثاني",
@@ -815,8 +854,7 @@ ${dataTable({ headers: ["المستوى", "الإجابات المدروسة", "
 <div class="v3-two-col">
   ${panel("land", "المستوى الأول", l1All, l1Missed, otherL1)}
   ${panel("sea", "المستوى الثاني", l2All, l2Missed, otherL2)}
-</div>
-${note}`;
+</div>`;
     parts.push(slideShell(m, "", inner));
   }
 
@@ -913,8 +951,65 @@ ${note}`;
       })}
 <div class="v3-two-col" style="grid-template-columns:1fr">
   ${tintedPanel({ variant: g.variant, title: g.panelTitle, body: dataTable({ headers, rows: rows.map((r) => cellsOf(esc(r.name), r.c)), totals: cellsOf(g.totalLabel, total, "v-navy"), firstColWidth: 26, topHeader: [{ label: "", span: 2 }, { label: "التحديد", span: 2, group: true }, { label: "جودة الصورة", span: 3, group: true }], groupStart: [2, 4], rowPx: portRowPx(rows.length, FORMULA_NOTE_PX + TOP_HEADER_PX) }) })}
-</div>
-<p class="v3-note v3-formula-note">عدد صور الأشعة يشمل الصور التي أُجيب فيها عن التحديد والجودة فقط. الصور التي لم تُدرس جودتها أو تحديدها: ${fmtNum(total.unstudied)} صورة.</p>`;
+</div>`;
+      parts.push(slideShell(m, "", inner));
+    }
+  }
+
+  // 11b+ — «هل يوجد تحديد»: its own page. It applies only to suspicion images (L1 or L2 = اشتباه), so the base is those images alone.
+  {
+    const m = meta("s2", eyebrowS2);
+    const marking = collectPortMarkingOnly(model);
+    const cellsOf = (label: string, c: MarkingOnlyCounts, tone?: string): TableCell[] => [
+      { html: label },
+      { html: fmtNum(c.images), cls: tone ?? "v-muted" },
+      { html: fmtNum(c.marked), cls: "v-green" },
+      { html: fmtNum(c.unmarked), cls: "v-red" },
+      { html: fmtPct(pct(c.marked, c.images)), cls: "v-green" },
+    ];
+    const headers = ["المنفذ", "صور الاشتباه المدروسة", "صور بتحديد", "صور بدون تحديد", "نسبة التحديد"];
+    const sumOf = (list: MarkingOnlyCounts[]): MarkingOnlyCounts =>
+      list.reduce((a, c) => ({ images: a.images + c.images, marked: a.marked + c.marked, unmarked: a.unmarked + c.unmarked }), { images: 0, marked: 0, unmarked: 0 });
+    const groups = accGroups.length > 0 ? accGroups : [{ variant: "land" as const, panelTitle: "المنافذ البرية", totalLabel: "إجمالي البرية", ports: portAcc.land }];
+    const rows = groups
+      .flatMap((g) => g.ports.map((p) => ({ name: p.name, c: marking.get(p.name) ?? { images: 0, marked: 0, unmarked: 0 } })))
+      .sort((a, b) => b.c.images - a.c.images || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    const total = sumOf(rows.map((r) => r.c));
+    const inner = `${contentHead({
+      eyebrow: eyebrowS2,
+      title: "هل يوجد تحديد؟",
+      note: "يُسأل عن التحديد في الصور التي فيها اشتباه عند المستوى الأول أو الثاني فقط",
+    })}
+<div class="v3-two-col" style="grid-template-columns:1fr">
+  ${tintedPanel({ variant: "land", title: "جميع المنافذ", body: dataTable({ headers, rows: rows.map((r) => cellsOf(esc(r.name), r.c)), totals: cellsOf("الإجمالي", total, "v-navy"), firstColWidth: 28, rowPx: portRowPx(rows.length, 0) }) })}
+</div>`;
+    parts.push(slideShell(m, "", inner));
+  }
+
+  // 11b++ — Image quality of the evaluated images, one page per port type. Quality applies to every evaluated image.
+  {
+    const quality = collectPortQuality(model);
+    const cellsOf = (label: string, c: QualityCounts, tone?: string): TableCell[] => [
+      { html: label },
+      { html: fmtNum(c.images), cls: tone ?? "v-muted" },
+      { html: fmtNum(c.low), cls: "v-red" },
+      { html: fmtNum(c.mid), cls: "v-gold" },
+      { html: fmtNum(c.high), cls: "v-green" },
+      { html: fmtPct(pct(c.low, c.images)), cls: "v-red" },
+      { html: fmtPct(pct(c.high, c.images)), cls: "v-green" },
+    ];
+    const headers = ["المنفذ", "الصور المقيّمة", "جودة منخفضة", "جودة متوسطة", "جودة عالية", "نسبة المنخفضة", "نسبة العالية"];
+    const qualityShown = accGroups.length > 0 ? accGroups : [{ variant: "land" as const, title: "للمنافذ البرية", panelTitle: "المنافذ البرية", totalLabel: "إجمالي البرية", ports: portAcc.land }];
+    for (const g of qualityShown) {
+      const m = meta("s2", eyebrowS2);
+      const rows = g.ports
+        .map((p) => ({ name: p.name, c: quality.get(p.name) ?? emptyQuality() }))
+        .sort((a, b) => b.c.images - a.c.images || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+      const total = sumQuality(rows.map((r) => r.c));
+      const inner = `${contentHead({ eyebrow: eyebrowS2, title: `جودة الصور المقيّمة ${g.title}` })}
+<div class="v3-two-col" style="grid-template-columns:1fr">
+  ${tintedPanel({ variant: g.variant, title: g.panelTitle, body: dataTable({ headers, rows: rows.map((r) => cellsOf(esc(r.name), r.c)), totals: cellsOf(g.totalLabel, total, "v-navy"), firstColWidth: 26, rowPx: portRowPx(rows.length, 0) }) })}
+</div>`;
       parts.push(slideShell(m, "", inner));
     }
   }
