@@ -241,6 +241,10 @@ body{background:var(--v3-navy);font-family:"Somar","IBM Plex Sans Arabic","Tahom
 .v3-panel.land .v3-panel-title::before{background:var(--v3-gold);}
 .v3-panel.sea .v3-panel-title{color:var(--v3-blue-dark);}
 .v3-panel.sea .v3-panel-title::before{background:var(--v3-blue);}
+/* All ports together (neither land nor sea): neutral navy, so it never reads as the land colour. */
+.v3-panel.all{background:var(--v3-panel);border-top:5px solid var(--v3-navy);}
+.v3-panel.all .v3-panel-title{color:var(--v3-navy);}
+.v3-panel.all .v3-panel-title::before{background:var(--v3-navy);}
 .v3-panel-note{font-size:24px;color:var(--v3-muted);}
 .v3-table{width:100%;border-collapse:collapse;table-layout:fixed;}
 .v3-table th{font-size:25px;color:var(--v3-muted);font-weight:500;text-align:right;padding:10px 0 10px 14px;border-top:2px solid var(--v3-navy);border-bottom:1px solid var(--v3-hair);}

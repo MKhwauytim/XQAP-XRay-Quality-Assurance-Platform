@@ -7,6 +7,7 @@
 // locked wording, hardcoded the same way deck2 hardcodes its one-off slide
 // copy.
 import { getStageKey } from "../../../population/stageHelpers";
+import { STAGE_SAMPLE_TARGETS } from "../../../population/populationConfig";
 import { yieldToMain } from "../../../storage/yieldToMain";
 import { esc, fmtNum, fmtPct } from "../primitives";
 import type { ReportModel } from "../model/reportModel";
@@ -84,8 +85,8 @@ function countRateCell(count: number, rate: number | null): string {
 }
 
 // One definition per measure, shared by every page that shows it so the wording can never drift.
-const RESULT_ACCURACY_DEFINITION = "الحالات التي تم الاتفاق على نتيجتها بين الوسائل الآلية وأخصائي ضمان الجودة";
-const MISSED_SUSPICION_DEFINITION = "نتيجة أخصائي الوسائل الآلية بأن الإرسالية سليمة ورأي أخصائي ضمان الجودة بأنها اشتباه.";
+const RESULT_ACCURACY_DEFINITION = "الحالات التي تم الاتفاق على نتيجتها بين الوسائل الآلية وأخصائي ضمان جودة الأشعة";
+const MISSED_SUSPICION_DEFINITION = "نتيجة أخصائي الوسائل الآلية بأن الإرسالية سليمة ورأي أخصائي ضمان جودة الأشعة بأنها اشتباه.";
 /** How معدل الاتفاق العام is calculated (one line, no worked weights). */
 const AGREEMENT_FORMULA_NOTE = "معدل الاتفاق العام = (دقة السليمة × وزن السليمة) + (دقة الاشتباه × وزن الاشتباه)";
 const FALSE_SUSPICION_DEFINITION = "نتيجة أخصائي الوسائل الآلية بأن الإرسالية اشتباه، ورأى أخصائي الجودة أنها سليمة.";
@@ -516,7 +517,7 @@ export async function buildDeck3Slides(
           { term: "مجتمع الفحص", definition: "صور أشعة الشهر المصنَّفة إلى مستويات المخاطر الأربعة المعتمدة من وكالة تحليل المخاطر." },
           { term: "العيّنة", definition: "الصور المسحوبة للدراسة وفق وزن سحب محدَّد مسبقًا لكل مستوى، مع اختيار عشوائي داخل حصة المستوى الواحد." },
           // Coverage is not reported for the completed-only scope, so its term is not defined there.
-          ...(coNoPop ? [] : [{ term: "التغطية الرقابية", definition: "نسبة حجم العيّنة المسحوبة إلى حجم المجتمع؛ مقياس حجم لا يدل على تمثيل العيّنة للمجتمع." }]),
+          ...(coNoPop ? [] : [{ term: "التغطية الرقابية", definition: withPop ? "نسبة حجم العيّنة المستخرجة إلى المستهدف؛ مقياس حجم لا يدل على تمثيل العيّنة للمجتمع." : "نسبة حجم العيّنة المسحوبة إلى حجم المجتمع؛ مقياس حجم لا يدل على تمثيل العيّنة للمجتمع." }]),
         ],
       },
       {
@@ -525,7 +526,7 @@ export async function buildDeck3Slides(
         terms: [
           { term: "الإجابة", definition: "نتيجة فحص مستوى واحد (الأول أو الثاني) لصورة واحدة؛ لكل صورة إجابتان، وتُحسب أرقام الدقة والاشتباهات على الإجابات لا على الصور." },
           { term: "الاشتباه الخاطئ", definition: "نتيجة أخصائي الوسائل الآلية بأن الإرسالية اشتباه، ورأى أخصائي الجودة أنها سليمة." },
-          { term: "الاشتباه الفائت", definition: "نتيجة أخصائي الوسائل الآلية بأن الإرسالية سليمة ورأي أخصائي ضمان الجودة بأنها اشتباه." },
+          { term: "الاشتباه الفائت", definition: "نتيجة أخصائي الوسائل الآلية بأن الإرسالية سليمة ورأي أخصائي ضمان جودة الأشعة بأنها اشتباه." },
         ],
       },
     ],
@@ -592,7 +593,7 @@ ${kpiBand(coNoPop ? [
     ] : [
       { label: "مجتمع الفحص", value: fmtNum(model.population.total), sub: "مجتمع الصور الواردة من وكالة تحليل المخاطر" },
       { label: withPop ? "العيّنة المفحوصة" : "العيّنة المسحوبة", value: fmtNum(model.sample.total), sub: withPop ? "صورة مكتملة الفحص في التقرير" : "صورة موزّعة على أخصائيي الجودة" },
-      { label: "التغطية الرقابية", value: fmtPct(model.sample.coverage ?? null), valueTone: "gold", sub: "نسبة العينة من المجتمع" },
+      { label: "التغطية الرقابية", value: fmtPct(model.sample.coverage ?? null), valueTone: "gold", sub: withPop ? "نسبة العيّنة من المستهدف" : "نسبة العينة من المجتمع" },
     ], "top")}
 ${kpiBand([
       { label: "نسبة التوائم", value: fmtPct(overallStats.overall), valueTone: "green", aside: `من ${fmtNum(t.evaluable)} إجابة مدروسة`, sub: RESULT_ACCURACY_DEFINITION },
@@ -632,6 +633,7 @@ ${kpiBand([
           { html: esc(s.stageLabel) },
           { html: `<div class="v3-pop-bar"><i class="v3-tone-${tone}" style="width:${width.toFixed(1)}%"></i></div>` },
           { html: fmtNum(s.population), cls: "v-muted" },
+          ...(withPop ? [{ html: fmtNum(s.target ?? s.population), cls: "v-gold" }] : []),
           { html: fmtNum(s.sampleSize), cls: "v-navy" },
           { html: withPop ? fmtPct(s.coverage) : census ? "حصر كامل" : "عدد ثابت", cls: census ? "v-green" : "v-gold" },
         ] as TableCell[];
@@ -640,12 +642,13 @@ ${kpiBand([
 <div class="v3-pop-grid">
   <div class="v3-pop-stats">
     <div class="v3-pop-stat"><span>إجمالي المجتمع</span><b>${fmtNum(model.population.total)}</b></div>
+    ${withPop ? `<div class="v3-pop-stat"><span>إجمالي المستهدف</span><b>${fmtNum(stages.reduce((a, s) => a + (s.target ?? s.population), 0))}</b></div>` : ""}
     <div class="v3-pop-stat"><span>إجمالي العيّنة</span><b>${fmtNum(model.sample.total)}</b></div>
     <div class="v3-pop-stat"><span>التغطية الرقابية الكلية</span><b class="v3-ink-gold">${fmtPct(model.sample.coverage ?? null)}</b></div>
   </div>
   <div class="v3-pop-table">
-    ${dataTable({ headers: ["المستوى", "", "المجتمع", "العيّنة", withPop ? "التغطية الرقابية" : "أسلوب السحب"], rows, groupStart: 2, firstColWidth: 26, size: "lg" })}
-    <p class="v3-pop-note">${withPop ? "التغطية الرقابية = العيّنة المفحوصة ÷ مجتمع المستوى؛ ولا يعكس حجم المستوى أهميته — لكل مستوى هدف مختلف." : "الاختيار عشوائي داخل حصة كل مستوى؛ ولا يعكس حجم الحصة أهمية المستوى — لكل مستوى هدف مختلف."}</p>
+    ${dataTable({ headers: withPop ? ["المستوى", "", "المجتمع", "المستهدف", "العيّنة", "التغطية الرقابية"] : ["المستوى", "", "المجتمع", "العيّنة", "أسلوب السحب"], rows, groupStart: 2, firstColWidth: 26, size: "lg" })}
+    <p class="v3-pop-note">${withPop ? `التغطية الرقابية = العيّنة المفحوصة ÷ المستهدف. المستوى الأول 100% من مجتمعه، وبقية المستويات عدد ثابت شهريًا (${fmtNum(STAGE_SAMPLE_TARGETS.second ?? 0)} للثاني و${fmtNum(STAGE_SAMPLE_TARGETS.third ?? 0)} للثالث و${fmtNum(STAGE_SAMPLE_TARGETS.fourth ?? 0)} للرابع) × عدد أشهر التقرير.` : "الاختيار عشوائي داخل حصة كل مستوى؛ ولا يعكس حجم الحصة أهمية المستوى — لكل مستوى هدف مختلف."}</p>
   </div>
 </div>`;
     parts.push(slideShell(m, "", inner));
@@ -723,9 +726,9 @@ ${dataTable({
     const coverageNote = (ports: PortPopRow[]) => {
       const total = ports.reduce((s, p) => s + p.total, 0);
       const sample = ports.reduce((s, p) => s + p.sampleTotal, 0);
-      return `التغطية الرقابية ${fmtPct(pct(sample, total))}`;
+      return `${withPop ? "نسبة العيّنة من المجتمع" : "التغطية الرقابية"} ${fmtPct(pct(sample, total))}`;
     };
-    const headers = withPop ? ["المنفذ", "الإجمالي", "سليمة", "اشتباه", "نتائج أخرى"] : ["المنفذ", "الإجمالي", "سليمة", "اشتباه"];
+    const headers = withPop ? ["المنفذ", "إجمالي الصور", "سليمة", "اشتباه", "نتائج أخرى"] : ["المنفذ", "إجمالي الصور", "سليمة", "اشتباه"];
     const groups = popPortGroups.length > 0 ? popPortGroups : [{ variant: "land" as const, title: "المنافذ البرية", totalLabel: "إجمالي البرية", ports: popLand }];
     for (const g of groups) {
       const m = meta("s1", EYEBROW_S1);
@@ -980,7 +983,7 @@ ${dataTable({ headers: ["المستوى", "الإجابات المدروسة", "
       note: "يُسأل عن التحديد في الصور التي فيها اشتباه عند المستوى الأول أو الثاني فقط",
     })}
 <div class="v3-two-col" style="grid-template-columns:1fr">
-  ${tintedPanel({ variant: "land", title: "جميع المنافذ", body: dataTable({ headers, rows: rows.map((r) => cellsOf(esc(r.name), r.c)), totals: cellsOf("الإجمالي", total, "v-navy"), firstColWidth: 28, rowPx: portRowPx(rows.length, 0) }) })}
+  ${tintedPanel({ variant: "all", title: "جميع المنافذ", body: dataTable({ headers, rows: rows.map((r) => cellsOf(esc(r.name), r.c)), totals: cellsOf("الإجمالي", total, "v-navy"), firstColWidth: 28, rowPx: portRowPx(rows.length, 0) }) })}
 </div>`;
     parts.push(slideShell(m, "", inner));
   }

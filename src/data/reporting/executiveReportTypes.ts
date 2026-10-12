@@ -181,6 +181,8 @@ export type StageProfile = {
   population: number;
   sampleSize: number;
   coverage: number;
+  /** Sample target for the report period (comprehensive report only): the whole population for level 1, the fixed monthly count × months for levels 2-4. `coverage` is then sample ÷ target. */
+  target?: number;
   studied: number;
   completionRate: number;
 };

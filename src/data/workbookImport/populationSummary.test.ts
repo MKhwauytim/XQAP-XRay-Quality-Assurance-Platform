@@ -76,9 +76,31 @@ describe("applyPopulationSummary", () => {
     expect(out.totalPopulation).toBe(9);
     expect(out.cleanCount).toBe(8);
     expect(out.suspiciousCount).toBe(1);
-    expect(out.sampleCoverage).toBeCloseTo((4 / 9) * 100);
-    expect(out.stageProfiles[0]).toMatchObject({ population: 9, sampleSize: 4, studied: 4 });
+    // One month, level 3: the target is its fixed monthly 1,875, so coverage is sample ÷ target, not sample ÷ population.
+    expect(out.sampleCoverage).toBeCloseTo((4 / 1875) * 100);
+    expect(out.stageProfiles[0]).toMatchObject({ population: 9, sampleSize: 4, studied: 4, target: 1875 });
     expect(out.portProfiles[0]).toMatchObject({ portName: "البطحاء", population: 9, clean: 8, suspicious: 1, status: "stable", accuracyByImage: 75 });
+  });
+
+  it("measures coverage against the target: level 1 is a census, levels 2-4 a fixed monthly count × the months in the report", () => {
+    const fold = createPopulationFold();
+    for (let i = 0; i < 10; i++) fold.add(row({ "معرف الأشعة": `A${i}`, "المستوى": "FIRST_STAGE" }), false);
+    for (let i = 0; i < 5; i++) fold.add(row({ "معرف الأشعة": `B${i}`, "المستوى": "SECOND_STAG" }), false);
+    const sheets = [{ name: "JAN", rows: 8 }, { name: "FEB", rows: 7 }];
+    const base = {
+      totalPopulation: 15, totalSample: 2500, sampleCoverage: 0, suspiciousCount: 0, cleanCount: 15, suspicionRate: 0,
+      stageProfiles: [
+        { stageKey: "first", stageLabel: "المستوى الأول", population: 10, sampleSize: 10, coverage: 0, studied: 10, completionRate: 100 },
+        { stageKey: "second", stageLabel: "المستوى الثاني", population: 5, sampleSize: 2490, coverage: 0, studied: 2490, completionRate: 100 },
+      ],
+      portProfiles: [],
+    } as unknown as ExecutiveKPIs;
+    const out = applyPopulationSummary(base, fold.finish(sheets));
+    const [first, second] = out.stageProfiles;
+    expect(first).toMatchObject({ stageKey: "first", target: 10, coverage: 100 });
+    expect(second).toMatchObject({ stageKey: "second", target: 5000 });
+    expect(second.coverage).toBeCloseTo((2490 / 5000) * 100);
+    expect(out.sampleCoverage).toBeCloseTo(((10 + 2490) / (10 + 5000)) * 100);
   });
 
   it("adds ports and stages the sample never touched, with no sample figures", () => {

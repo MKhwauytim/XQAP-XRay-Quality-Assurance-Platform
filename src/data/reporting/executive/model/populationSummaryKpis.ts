@@ -1,3 +1,4 @@
+import { STAGE_SAMPLE_TARGETS } from "../../../population/populationConfig";
 import { compareStageKeys, getStageKey, stageLabelForKey, type StageAliasMappings } from "../../../population/stageHelpers";
 import type {
   ExecutiveKPIs,
@@ -14,6 +15,21 @@ import type {
  * figure (sample size, studied, accuracy, status) is left exactly as the rows
  * produced it. Pure; never mutates its inputs.
  */
+/** Sample target of one level for the report period; undefined when the level has no defined target. */
+function stageTarget(stageKey: string, population: number, months: number): number | undefined {
+  if (stageKey === "first") return population;
+  const monthly = STAGE_SAMPLE_TARGETS[stageKey as keyof typeof STAGE_SAMPLE_TARGETS];
+  return typeof monthly === "number" ? monthly * months : undefined;
+}
+
+/** Samples taken over targets set, across the levels that have a target; the plain sample ÷ population share when none does. */
+function overallCoverage(stages: StageProfile[], totalSample: number, totalPopulation: number): number {
+  const withTarget = stages.filter((s) => s.target !== undefined);
+  const target = withTarget.reduce((a, s) => a + (s.target ?? 0), 0);
+  if (target > 0) return (withTarget.reduce((a, s) => a + s.sampleSize, 0) / target) * 100;
+  return totalPopulation > 0 ? (totalSample / totalPopulation) * 100 : 0;
+}
+
 export function applyPopulationSummary(
   kpis: ExecutiveKPIs,
   summary: PopulationSummary,
@@ -37,10 +53,15 @@ export function applyPopulationSummary(
       stageByKey.set(key, { stageKey: key, stageLabel: stageLabelForKey(key), population: 0, sampleSize: 0, coverage: 0, studied: 0, completionRate: 0 });
     }
   }
+  // Months the report covers = the workbook's population sheets (one per month).
+  const months = Math.max(1, summary.sheets.length);
   const stageProfiles = [...stageByKey.values()]
     .map((s): StageProfile => {
       const population = stageBuckets.get(s.stageKey) ?? 0;
-      return { ...s, population, coverage: population > 0 ? (s.sampleSize / population) * 100 : 0 };
+      const target = stageTarget(s.stageKey, population, months);
+      // Coverage is measured against the TARGET: level 1 is a full census of its population, levels 2-4 a fixed monthly count.
+      const coverage = target !== undefined && target > 0 ? (s.sampleSize / target) * 100 : population > 0 ? (s.sampleSize / population) * 100 : 0;
+      return { ...s, population, coverage, ...(target !== undefined ? { target } : {}) };
     })
     .sort((a, b) => compareStageKeys(a.stageKey, b.stageKey));
 
@@ -76,7 +97,7 @@ export function applyPopulationSummary(
     cleanCount: clean,
     suspiciousCount: suspicious,
     suspicionRate: total > 0 ? (suspicious / total) * 100 : 0,
-    sampleCoverage: total > 0 ? (kpis.totalSample / total) * 100 : 0,
+    sampleCoverage: overallCoverage(stageProfiles, kpis.totalSample, total),
     stageProfiles,
     portProfiles,
   };
