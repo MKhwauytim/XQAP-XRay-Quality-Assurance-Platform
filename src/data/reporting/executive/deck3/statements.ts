@@ -71,7 +71,7 @@ export function buildStatements(model: ReportModel): Statement[] {
     add({
       priority: "متوسطة", topic: "المنافذ",
       text: `التوافق في المنافذ ${lowName} أقل من المنافذ ${highName}، فالتحسين فيها أكبر أثرًا على دقة النتائج.`,
-      recommendation: `إعطاء المنافذ ${lowName} أولوية في خطة التحسين: مراجعة معايير الاشتباه وتدريب الفاحصين فيها.`,
+      recommendation: `إعطاء المنافذ ${lowName} أولوية في المتابعة، والتأكد من تطبيق معايير الاشتباه بنفس الطريقة لدى الفاحصين فيها بشكل دوري.`,
       figures: [F("معدل الاتفاق · المنافذ البرية", fmtPct(land.overall)), F("معدل الاتفاق · المنافذ البحرية", fmtPct(sea.overall)), F("الإجابات المفحوصة", fmtNum(land.evaluable + sea.evaluable))],
       page: "نتائج الأداء للمنافذ",
     });
@@ -87,7 +87,7 @@ export function buildStatements(model: ReportModel): Statement[] {
     add({
       priority: o.gap <= -20 ? "عالية" : "متوسطة", topic: "جودة الصورة",
       text: `جودة الصور الملتقطة في منفذ ${o.name} أقل من باقي ${groupLabel(o.sea)}، مما قد يسبب ضعفًا في جودة كشف المواد الممنوعة.`,
-      recommendation: `مراجعة جهاز الأشعة وإعدادات التصوير في منفذ ${o.name}، ومتابعة جودة الصور شهريًا حتى تقترب من باقي ${groupLabel(o.sea)}.`,
+      recommendation: `التأكد من جودة التقاط جهاز الأشعة للصور في منفذ ${o.name}، ومتابعة عدة حالات للتأكد من جودة الجهاز مقارنةً بباقي أجهزة ${groupLabel(o.sea)} بشكل شهري.`,
       figures: [F(`صور عالية الجودة · ${o.name}`, fmtPct(o.share)), F(`صور عالية الجودة · باقي ${groupLabel(o.sea)}`, fmtPct(o.othersShare)), F(`صور ${o.name} المفحوصة`, fmtNum(o.den))],
       page: "جودة الصور المفحوصة",
     });
@@ -98,7 +98,7 @@ export function buildStatements(model: ReportModel): Statement[] {
     add({
       priority: o.gap >= 20 ? "عالية" : "متوسطة", topic: "الاشتباهات الفائتة",
       text: `نسبة الاشتباهات الفائتة في منفذ ${o.name} أعلى من متوسط باقي ${groupLabel(o.sea)}.`,
-      recommendation: `مراجعة الإرساليات المصنّفة سليمة في منفذ ${o.name}، وتكثيف المراجعة الدورية لنتائج المستوى الأول والثاني فيه.`,
+      recommendation: `مراجعة عدة حالات مصنّفة سليمة في منفذ ${o.name} للتأكد من عدم وجود اشتباهات لم تُكتشف، ومقارنة النتائج بباقي ${groupLabel(o.sea)} بشكل شهري.`,
       figures: [F(`الاشتباهات الفائتة · ${o.name}`, fmtPct(o.share)), F(`الاشتباهات الفائتة · باقي ${groupLabel(o.sea)}`, fmtPct(o.othersShare)), F(`إجابات السليمة في ${o.name}`, fmtNum(o.den))],
       page: "نتائج الأداء للمنافذ",
     });
@@ -109,7 +109,7 @@ export function buildStatements(model: ReportModel): Statement[] {
     add({
       priority: "متوسطة", topic: "الاشتباهات الخاطئة",
       text: `تكثر الاشتباهات الخاطئة في منفذ ${o.name} مقارنة بباقي ${groupLabel(o.sea)}.`,
-      recommendation: `مراجعة معايير الاشتباه في منفذ ${o.name} لتقليل الاشتباهات غير المستحقة وما يترتب عليها من فحص إضافي.`,
+      recommendation: `مراجعة عدة حالات اشتباه في منفذ ${o.name} للتأكد من استحقاقها، وتوضيح معايير الاشتباه للفاحصين لتقليل الاشتباهات غير المستحقة.`,
       figures: [F(`الاشتباهات الخاطئة · ${o.name}`, fmtPct(o.share)), F(`الاشتباهات الخاطئة · باقي ${groupLabel(o.sea)}`, fmtPct(o.othersShare)), F(`إجابات الاشتباه في ${o.name}`, fmtNum(o.den))],
       page: "نتائج الأداء للمنافذ",
     });
@@ -127,7 +127,7 @@ export function buildStatements(model: ReportModel): Statement[] {
     add({
       priority: unmarkedShare >= 50 ? "عالية" : "متوسطة", topic: "تحديد موقع الاشتباه",
       text: `${unmarkedShare >= 50 ? "أكثر من نصف" : "نسبة كبيرة من"} صور الاشتباه لا يُحدَّد فيها موقع الاشتباه، مما يضعف تحديد وفحص الاشتباه من قبل الوسائل الحية.`,
-      recommendation: "إلزام الفاحصين بتحديد موقع الاشتباه على الصورة عند الاشتباه، وقياس الالتزام شهريًا.",
+      recommendation: "التأكد من التزام الفاحصين بتحديد موقع الاشتباه على الصورة عند الاشتباه، ومتابعة نسبة الالتزام بشكل شهري.",
       figures: [F("صور اشتباه بلا تحديد", fmtPct(unmarkedShare)), F("العدد", `${fmtNum(markTotal.den - markTotal.num)} من ${fmtNum(markTotal.den)}`)],
       page: "هل يوجد تحديد؟",
     });
@@ -136,7 +136,7 @@ export function buildStatements(model: ReportModel): Statement[] {
     add({
       priority: o.gap <= -25 ? "عالية" : "متوسطة", topic: "تحديد موقع الاشتباه",
       text: `تحديد موقع الاشتباه في منفذ ${o.name} أضعف منه في باقي ${groupLabel(o.sea)}، مما يؤدي إلى وجود صعوبة في تحديد الاشتباه والتأكد منه من قبل الوسائل الحية.`,
-      recommendation: `متابعة التزام الفاحصين بتحديد موقع الاشتباه في منفذ ${o.name}، وتوجيه غير الملتزمين منهم.`,
+      recommendation: `التأكد من التزام الفاحصين في منفذ ${o.name} بتحديد موقع الاشتباه، ومتابعة نسبة الالتزام مقارنةً بباقي ${groupLabel(o.sea)} بشكل شهري.`,
       figures: [F(`صور بتحديد · ${o.name}`, fmtPct(o.share)), F(`صور بتحديد · باقي ${groupLabel(o.sea)}`, fmtPct(o.othersShare)), F(`صور اشتباه ${o.name}`, fmtNum(o.den))],
       page: "هل يوجد تحديد؟",
     });
@@ -152,7 +152,7 @@ export function buildStatements(model: ReportModel): Statement[] {
     add({
       priority: "للعلم", topic: "المستويان",
       text: `إجابات المستوى ${lowN} أقل توافقًا مع رأي أخصائي ضمان جودة الأشعة من إجابات المستوى ${highN}.`,
-      recommendation: `مراجعة أداء المستوى ${lowN} وتوحيد معايير الاشتباه بين المستويين.`,
+      recommendation: `مراجعة عدة حالات من المستوى ${lowN} للتأكد من تطبيق معايير الاشتباه بنفس الطريقة المتبعة في المستوى الآخر.`,
       figures: [F("معدل الاتفاق · المستوى الأول", fmtPct(l1.overall)), F("معدل الاتفاق · المستوى الثاني", fmtPct(l2.overall)), F("إجابات كل مستوى", fmtNum(l1.evaluable))],
       page: "دقة إجابات المستوى الأول والثاني",
     });
@@ -168,7 +168,7 @@ export function buildStatements(model: ReportModel): Statement[] {
     add({
       priority: "متوسطة", topic: "جودة الصورة",
       text: "تدنّي جودة الصورة يؤدي إلى اشتباهات خاطئة أو اشتباهات فائتة بمعدل أكبر من الصور ذات الجودة العالية.",
-      recommendation: "معالجة أسباب تدنّي جودة الصور (التصوير والجهاز) كخطوة أولى لتحسين دقة القرار.",
+      recommendation: "التأكد من جودة التقاط أجهزة الأشعة للصور، ومتابعة الحالات ذات الجودة المنخفضة بشكل شهري لتحسين دقة القرار.",
       figures: [F("اشتباهات خاطئة أو فائتة · جودة منخفضة", fmtPct(100 - qLow.overall)), F("اشتباهات خاطئة أو فائتة · جودة عالية", fmtPct(100 - qHigh.overall)), F("الصور منخفضة الجودة", fmtNum(qLow.evaluable))],
       page: "نسبة التوائم حسب جودة الصورة",
     });
