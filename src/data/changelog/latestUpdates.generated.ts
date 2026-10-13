@@ -14,6 +14,13 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
   {
     "version": "v153.24",
     "date": "2026-10-13",
+    "bucket": "redesign",
+    "scope": "executive report",
+    "title": "split buildDeck3Slides into helpers to pass the complexity budget"
+  },
+  {
+    "version": "v153.24",
+    "date": "2026-10-13",
     "bucket": "fix",
     "scope": "answers",
     "title": "stop the save-failure spiral on flaky shares — retry refused replace before rotating, two-name extension probe, dead-segment registry, 256 KiB segments"
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "executive report",
     "title": "page 7 coverage progress bar, one-line header, per-level target bullets"
-  },
-  {
-    "version": "v153.16",
-    "date": "2026-10-12",
-    "bucket": "enhancement",
-    "scope": null,
-    "title": "risk-level accuracy page and the contents-page eyebrow"
   }
 ];
