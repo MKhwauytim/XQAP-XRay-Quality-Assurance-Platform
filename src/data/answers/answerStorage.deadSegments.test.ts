@@ -4,6 +4,7 @@ import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemA
 import { getSampleMainDir } from "../workspace/workspacePaths";
 import { ANSWER_EVENTS_DIR } from "./answerEventStore";
 import { __clearAnswerEventsCacheForTests, loadAllEmployeeFiles } from "./answerStorage";
+import { EventSegmentUnreadableError } from "../storage/appendOnlyEventLog";
 import { DEAD_SEGMENT_MIN_AGE_MS, DEAD_SEGMENT_MIN_SCANS, clearDeadSegmentRegistry } from "../storage/deadSegmentRegistry";
 
 const MONTH = "5-May-2026";
@@ -62,7 +63,10 @@ describe("strict reads vs a persistently unopenable colleague segment", () => {
 
     for (let i = 0; i < DEAD_SEGMENT_MIN_SCANS; i += 1) {
       __clearAnswerEventsCacheForTests();
-      await expect(loadAllEmployeeFiles(dir, MONTH, { strict: true })).rejects.toThrow();
+      const err = await loadAllEmployeeFiles(dir, MONTH, { strict: true }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect((err as { cause?: unknown }).cause).toBeInstanceOf(EventSegmentUnreadableError);
+      expect(((err as { cause?: Error }).cause as EventSegmentUnreadableError).segmentNames).toEqual([DEAD]);
       now += Math.ceil(DEAD_SEGMENT_MIN_AGE_MS / (DEAD_SEGMENT_MIN_SCANS - 1));
     }
     __clearAnswerEventsCacheForTests();

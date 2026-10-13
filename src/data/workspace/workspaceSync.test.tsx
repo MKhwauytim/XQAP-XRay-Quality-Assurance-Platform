@@ -11,6 +11,13 @@ import {
   setSimulatedFaults,
 } from "../storage/memoryDirectory";
 import { safeWriteJson } from "../storage/safeWrite";
+import {
+  DEAD_SEGMENT_MIN_AGE_MS,
+  DEAD_SEGMENT_MIN_SCANS,
+  clearDeadSegmentRegistry,
+  isConfirmedDead,
+  recordUnopenableSegment,
+} from "../storage/deadSegmentRegistry";
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
 import {
   getPopulationMonthDir,
@@ -132,6 +139,29 @@ beforeEach(() => {
 afterEach(() => {
   __resetWorkspaceSyncStateForTests();
   vi.restoreAllMocks();
+});
+
+describe("runSync — dead-segment registry", () => {
+  it("a manual run clears the registry; an automatic run leaves it", async () => {
+    const root = makeRoot();
+    const now = Date.now();
+    const seed = (): void => {
+      clearDeadSegmentRegistry();
+      for (let i = 0; i < DEAD_SEGMENT_MIN_SCANS; i += 1) {
+        recordUnopenableSegment("scope-x", "gone.ndjson", now - DEAD_SEGMENT_MIN_AGE_MS - 1000 + i);
+      }
+      expect(isConfirmedDead("scope-x", "gone.ndjson", now)).toBe(true);
+    };
+    try {
+      seed();
+      await runSync({ directoryHandle: root, monthFolderName: MONTH });
+      expect(isConfirmedDead("scope-x", "gone.ndjson", now)).toBe(true);
+      await runSync({ directoryHandle: root, monthFolderName: MONTH, manual: true });
+      expect(isConfirmedDead("scope-x", "gone.ndjson", now)).toBe(false);
+    } finally {
+      clearDeadSegmentRegistry();
+    }
+  });
 });
 
 describe("runSync — change-set probe (§4.2 / A7)", () => {

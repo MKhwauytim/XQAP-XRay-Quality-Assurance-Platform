@@ -443,28 +443,39 @@ export function __resetVanishedEntryLogForTests(): void {
   reportedVanishedKeys.clear();
 }
 
+/**
+ * One-time line per (scope, name) for segments the dead-segment registry has
+ * confirmed. Returns the names reported by this call.
+ */
+function logConfirmedDead(
+  context: string,
+  dir: DirectoryHandleLike,
+  names: readonly string[],
+  scopeKey: string
+): string[] {
+  const confirmed = names.filter((name) => isConfirmedDead(scopeKey, name) && markDeadLoggedOnce(scopeKey, name));
+  if (confirmed.length === 0) return confirmed;
+  logError(
+    context,
+    new Error(
+      `${confirmed.length} listed entr${confirmed.length === 1 ? "y" : "ies"} in "${dir.name}" ` +
+        `could not be opened on ${DEAD_SEGMENT_MIN_SCANS}+ scans over ${DEAD_SEGMENT_MIN_AGE_MS / 60000} min — ` +
+        `treated as unreadable for this session (a manual refresh re-checks): ${confirmed.join(", ")}`
+    )
+  );
+  return confirmed;
+}
+
 function logVanishedEntries(
   context: string,
   dir: DirectoryHandleLike,
   names: string[],
   scopeKey?: string
 ): void {
-  // A name the dead-segment registry has just confirmed gets its own one-time
-  // line (even if the vanished-entry de-dupe already reported it earlier); the
-  // rest keep today's message and de-dupe.
-  const justConfirmed = scopeKey
-    ? names.filter((name) => isConfirmedDead(scopeKey, name) && markDeadLoggedOnce(scopeKey, name))
-    : [];
-  if (justConfirmed.length > 0) {
-    logError(
-      context,
-      new Error(
-        `${justConfirmed.length} listed entr${justConfirmed.length === 1 ? "y" : "ies"} in "${dir.name}" ` +
-          `could not be opened on ${DEAD_SEGMENT_MIN_SCANS}+ scans over ${DEAD_SEGMENT_MIN_AGE_MS / 60000} min — ` +
-          `treated as unreadable for this session (a manual refresh re-checks): ${justConfirmed.join(", ")}`
-      )
-    );
-  }
+  // Names the registry confirmed dead during THIS scan's own failed opens (the
+  // failure count was the limiting condition). Names that crossed the age gate
+  // between scans are reported at the top of `readSegmentTails` instead.
+  const justConfirmed = scopeKey ? logConfirmedDead(context, dir, names, scopeKey) : [];
   const confirmedSet = new Set(justConfirmed);
   const fresh = names.filter((name) => {
     if (confirmedSet.has(name)) return false;
@@ -842,6 +853,11 @@ export async function readSegmentTails(
   const matchedNames = matched.map((entry) => entry.name);
   // Confirmed-dead segments are neither opened nor charged against the vanish budget.
   const dead = options.scopeKey ? confirmedDeadNames(options.scopeKey) : new Set<string>();
+  // A name that crossed the age gate BETWEEN scans is already dead here, so it
+  // is never opened and never reaches `vanished`: report it now (once).
+  if (options.scopeKey && dead.size > 0) {
+    logConfirmedDead("directoryScan:segment-tails", dir, [...dead], options.scopeKey);
+  }
 
   const tailTextByName = new Map<string, string>();
   const sizeByName = new Map<string, number>();
