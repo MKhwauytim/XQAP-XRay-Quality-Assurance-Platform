@@ -214,6 +214,11 @@ async function sampleMainDirExists(directoryHandle: DirectoryHandleLike, month: 
  * `AnswersUnreadableError` this month is skipped entirely this pass (every
  * pending item in it stays pending, counted under `cannotLand`) rather than
  * risk exactly that.
+ *
+ * `tolerateConfirmedDead` is passed HERE ONLY: a segment the dead-segment
+ * registry has confirmed unopenable no longer blocks the whole month's replay
+ * forever (it froze replay for a day, 2026-10-12). Every other strict caller
+ * keeps throwing on it.
  */
 async function loadOnDiskItemsStrict(
   directoryHandle: DirectoryHandleLike,
@@ -221,7 +226,7 @@ async function loadOnDiskItemsStrict(
   username: string
 ): Promise<Map<string, ItemAnswer> | null> {
   try {
-    const files = await loadAllEmployeeFiles(directoryHandle, month, { strict: true });
+    const files = await loadAllEmployeeFiles(directoryHandle, month, { strict: true, tolerateConfirmedDead: true });
     const mine = files.find((file) => file.username === username);
     return new Map((mine?.items ?? []).map((item) => [item.xrayImageId, item]));
   } catch (error) {
