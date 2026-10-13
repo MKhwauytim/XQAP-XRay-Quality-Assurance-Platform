@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v153.26",
+    "date": "2026-10-13",
+    "bucket": "enhancement",
+    "scope": "deck3",
+    "title": "align level determinants, drop two captions, empty pages print-off by default"
+  },
+  {
     "version": "v153.25",
     "date": "2026-10-13",
     "bucket": "enhancement",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "executive report",
     "title": "quality-by-agreement page counts images; one border system for all tables"
-  },
-  {
-    "version": "v153.17",
-    "date": "2026-10-12",
-    "bucket": "enhancement",
-    "scope": "executive report",
-    "title": "page 7 coverage progress bar, one-line header, per-level target bullets"
   }
 ];

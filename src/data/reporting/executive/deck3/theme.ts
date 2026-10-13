@@ -141,8 +141,9 @@ body{background:var(--v3-navy);font-family:"Somar","IBM Plex Sans Arabic","Tahom
 .v3-gloss-cell p{margin:0;font-size:26px;line-height:1.7;color:var(--v3-text);}
 
 /* ── Risk levels (slide 4) ────────────────────────────────────────────────── */
-.v3-levels{flex:1;display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-top:2px solid var(--v3-navy);border-bottom:2px solid var(--v3-navy);}
-.v3-level-col{display:flex;flex-direction:column;gap:14px;padding:24px 32px;border-inline-end:1px solid var(--v3-hair);}
+.v3-levels{flex:1;display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:auto auto auto auto 1fr;column-gap:0;row-gap:14px;border-top:2px solid var(--v3-navy);border-bottom:2px solid var(--v3-navy);}
+/* Each column spans the parent's five rows via subgrid, so the definition and «المحددات» blocks start at the same height in every column. */
+.v3-level-col{display:grid;grid-row:span 5;grid-template-rows:subgrid;padding:24px 32px;border-inline-end:1px solid var(--v3-hair);}
 .v3-level-col:first-child{padding-inline-start:0;}
 .v3-level-col:last-child{border-inline-end:none;padding-inline-end:0;}
 .v3-level-chip{width:44px;height:5px;}
@@ -152,7 +153,7 @@ body{background:var(--v3-navy);font-family:"Somar","IBM Plex Sans Arabic","Tahom
 .v3-level-def{font-size:22px;line-height:1.5;color:var(--v3-text);}
 .v3-level-dets{margin:0;padding-inline-start:26px;font-size:22px;line-height:1.4;font-weight:500;color:var(--v3-navy);}
 .v3-level-dets li{margin:2px 0;}
-.v3-level-foot{margin-top:auto;display:flex;flex-direction:column;gap:8px;}
+.v3-level-foot{align-self:start;display:flex;flex-direction:column;gap:8px;}
 .v3-level-foot .cap{font-size:24px;color:var(--v3-muted);}
 .v3-level-foot .measures{font-size:25px;font-weight:500;color:var(--v3-navy);}
 .v3-level-weight{font-size:24px;font-weight:500;padding-top:10px;border-top:1px solid var(--v3-hair);}

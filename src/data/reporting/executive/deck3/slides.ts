@@ -10,6 +10,7 @@ import { getStageKey } from "../../../population/stageHelpers";
 import { STAGE_SAMPLE_TARGETS } from "../../../population/populationConfig";
 import { yieldToMain } from "../../../storage/yieldToMain";
 import { esc, fmtNum, fmtPct } from "../primitives";
+import { PRINT_DEFAULT_OFF_CLASS } from "../printSelection";
 import type { ReportModel } from "../model/reportModel";
 import { getLabels } from "../../../labels/labelsStore";
 import type { KeyedAccuracy } from "../model/aggregates";
@@ -1062,7 +1063,6 @@ ${dataTable({ headers: ["المستوى", "الإجابات المفحوصة", "
     const inner = `${contentHead({
       eyebrow: eyebrowS2,
       title: "هل يوجد تحديد؟",
-      note: "يُسأل عن التحديد في الصور التي فيها اشتباه عند المستوى الأول أو الثاني فقط",
     })}
 <div class="v3-two-col" style="grid-template-columns:1fr">
   ${tintedPanel({ variant: "all", title: "جميع المنافذ", body: dataTable({ headers, rows: rows.map((r) => cellsOf(esc(r.name), r.c)), totals: cellsOf("الإجمالي", total, "v-navy"), firstColWidth: 28, rowPx: portRowPx(rows.length, 0) }) })}
@@ -1161,7 +1161,8 @@ ${qualityMatrix(levels.map((l) => ({ label: l.label, tone: l.tone })), rows)}`;
           figures: s.figures,
           recommendation: s.recommendation,
         }));
-    parts.push(slideShell(meta("s3", eyebrowS3), "", `${contentHead({
+    // The blank page starts switched off for printing; typing into it switches it back on (printSelection.ts).
+    parts.push(slideShell(meta("s3", eyebrowS3), isBlank ? PRINT_DEFAULT_OFF_CLASS : "", `${contentHead({
       eyebrow: eyebrowS3,
       title: isBlank ? "ملاحظات وتوصيات إضافية" : "أهم الملاحظات والتوصيات" + (p > 0 ? YITBA : ""),
     })}
@@ -1176,7 +1177,7 @@ ${observationsTable(rows)}`));
   // engine verdict vs the screening result, reviewer verdict on the splits).
   if (agreementEmpty) {
     const m = meta("s3", eyebrowS3);
-    parts.push(slideShell(m, "", `${contentHead({
+    parts.push(slideShell(m, PRINT_DEFAULT_OFF_CLASS, `${contentHead({
       eyebrow: eyebrowS3,
       title: "التوافق مع الفرق الأمنية ومحرك المخاطر",
       note: "لا توجد بيانات لهذا التحليل في الملف",
