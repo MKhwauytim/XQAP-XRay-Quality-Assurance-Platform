@@ -55,12 +55,10 @@ import { isMirrorTrustedForEvents, loadEmployeeSampleMirror } from "../../../../
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
 import {
   displayXrayImageId,
-  loadAdhocAnswerItems,
-  loadAdhocEntriesForEmployeeView,
   isAdhocEntry,
-  type AdhocDistributionEntry,
 } from "../../../../../data/adhocImport/adhocImportEmployeeView";
 import { monthFolderForEntry } from "../../../../../data/adhocImport/adhocImportEmployeeView";
+import { beginAdhocReads } from "./adhocReads";
 import {
   loadTemplate,
   loadTemplateIndex,
@@ -283,39 +281,6 @@ function referralsBootSources(username: string, canSeeAll: boolean): BootSourceD
     { key: "referrals_answers", labelEn: `${username}.answers.json`, labelAr: "إجاباتي" },
     { key: "referrals_adhoc", labelEn: "adhoc-imports.index.json", labelAr: "الاستيرادات اليدوية" },
   ];
-}
-
-/**
- * Start both ad-hoc reads for the load phase, without awaiting either.
- *
- * THE GAP fix: ad-hoc-imported assignments live in a synthetic
- * `2-samples/adhoc-{importId}/` folder, never the selected month's own
- * sample.master.json, so they are merged in alongside an employee's real
- * assignments. Their ANSWERS live there too — handleSave routes an ad-hoc row's
- * write through folderForRow, so reading answers for the selected month alone
- * never found them and every ad-hoc row came back unanswered after a reload.
- *
- * The answers read is CHAINED off the entries read (it needs their stores)
- * rather than awaited separately, so it still overlaps the rest of the load
- * phase. Entries degrade to [] on any failure; see adhocImportEmployeeView.ts's
- * docblock for the cost bound. Lives outside the component only to keep
- * `XrayReferrals` inside the max-lines-per-function budget.
- */
-function beginAdhocReads(
-  directoryHandle: DirectoryHandleLike,
-  username: string,
-  canSeeAll: boolean
-): { entries: Promise<AdhocDistributionEntry[]>; answers: Promise<ItemAnswer[]> } {
-  const entries = loadAdhocEntriesForEmployeeView(directoryHandle, username, canSeeAll).catch(
-    (err) => {
-      logError("xrayReferrals:loadAdhocEntries", err);
-      return [] as AdhocDistributionEntry[];
-    }
-  );
-  return {
-    entries,
-    answers: entries.then((list) => loadAdhocAnswerItems(directoryHandle, list)),
-  };
 }
 
 /**
@@ -1309,7 +1274,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       // here. population.final.json is not loaded here either; it is loaded
       // lazily only when the replacement dialog opens.
       const { entries: adhocEntriesPromise, answers: adhocAnswersPromise } =
-        beginAdhocReads(directoryHandle, username, canSeeAll);
+        beginAdhocReads(directoryHandle, username, canSeeAll, selMonth);
       const [
         referralLog,
         replacementLog,

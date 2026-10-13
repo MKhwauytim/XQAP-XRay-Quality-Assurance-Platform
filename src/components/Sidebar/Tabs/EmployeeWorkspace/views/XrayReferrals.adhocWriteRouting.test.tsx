@@ -235,6 +235,7 @@ function makeAdhocRecord(importId: string, rows: AdhocImportRow[]): AdhocImportR
     importedBy: "admin",
     importedAt: "2026-08-07T10:00:00.000Z",
     status: "open",
+    monthBinding: { kind: "month", monthFolderName: MONTH },
     rows,
   };
 }

@@ -354,7 +354,7 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
         // `2-samples/adhoc-{importId}/` folder, never the selected month's own
         // sample.master.json — merged in below so an employee's results view
         // includes them. Degrades to [] on any failure.
-        loadAdhocEntriesForEmployeeView(directoryHandle, username, canSeeAll).catch((err) => {
+        loadAdhocEntriesForEmployeeView(directoryHandle, username, canSeeAll, selectedMonth).catch((err) => {
           logError("xrayInspectionResults:loadAdhocEntries", err);
           return [];
         }),

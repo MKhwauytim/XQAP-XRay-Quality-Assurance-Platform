@@ -215,6 +215,7 @@ async function seedAdhocAssignment(root: DirectoryHandleLike, employee: string):
     importedBy: "admin",
     importedAt: "2026-08-07T10:00:00.000Z",
     status: "open",
+    monthBinding: { kind: "month", monthFolderName: MONTH },
     rows: [row],
   };
   await ensureAdhocSampleMaster(root, record);

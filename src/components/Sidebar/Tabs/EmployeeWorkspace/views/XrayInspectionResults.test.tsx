@@ -384,6 +384,9 @@ async function seedAdhocAssignmentForResults(): Promise<ReturnType<typeof create
     const record = {
       importId: "adh-1",
       fileName: "adh-1.xlsx",
+      // Bound to the selected month: a scoped (month-selected) view only opens
+      // imports linked to that month, so an isolated import would be skipped.
+      monthBinding: { kind: "month" as const, monthFolderName: MONTH },
       importedBy: "admin",
       importedAt: new Date().toISOString(),
       status: "open" as const,
