@@ -18,15 +18,17 @@ import type {
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { readEnvelopeRevision, safeReadJson, safeRemoveJson, safeWriteJson } from "../storage/safeWrite";
 import { logError, logRejection } from "../storage/errorLogger";
+import { isReadOnlyMode } from "../storage/readOnlyMode";
 import { casLoop } from "../storage/casLoop";
 import {
   createDeadline,
   INTERACTIVE_WRITE_DEADLINE_MS,
 } from "../storage/operationDeadline";
 import { codedMessage, logCodedError, resolveErrorCode } from "../storage/errorCodes";
-import { listDirectoryEntries, listDirectoryEntriesWithSize, readAppendOnlyDirectory, readNamedJsonFiles } from "../storage/directoryScan";
+import { listDirectoryEntries, listSizedAndNamedEntries, readAppendOnlyDirectory, readNamedJsonFiles } from "../storage/directoryScan";
 import { simpleHash } from "../storage/jsonEnvelope";
-import { ensureMonthWritable, MonthClosedError } from "../population/monthLock";
+import { directoryResourceKey } from "../storage/webLocks";
+import { ensureMonthWritable, isMonthClosed, MonthClosedError } from "../population/monthLock";
 import { syncSampleMirrors } from "../samples/sampleMirrorStorage";
 import { loadSampleMaster } from "../sampling/sampleStorage";
 import {
@@ -680,10 +682,18 @@ export async function eventStoreMatchesScan(
         if (!isNotFoundError(error)) throw error;
       }
       if (eventsDir) {
-        segments = await listDirectoryEntriesWithSize(eventsDir, DISTRIBUTION_EVENT_SEGMENT_SUFFIX);
-        legacyNames = (await listDirectoryEntries(eventsDir))
-          .filter((entry) => entry.kind === "file" && entry.name.endsWith(".json"))
-          .map((entry) => entry.name);
+        // One enumeration: segments are sized, legacy per-event files are only
+        // counted by name (never opened).
+        const listing = await listSizedAndNamedEntries(
+          eventsDir,
+          DISTRIBUTION_EVENT_SEGMENT_SUFFIX,
+          ".json",
+          // Same scope readEventSegmentDelta gives readSegmentTails, so a name the
+          // registry confirmed dead is skipped here too (it has no recorded offset).
+          directoryResourceKey(directory, DISTRIBUTION_EVENTS_DIR)
+        );
+        segments = listing.sized;
+        legacyNames = listing.names;
       }
     }
     if (legacyFilesDigest(legacyNames) !== identity.legacyFilesDigest) return false;
@@ -1280,6 +1290,9 @@ type PersistRequest =
 type QueuedPersist = { request: PersistRequest; started: boolean; job: Promise<DistributionCurrentData | null> };
 type PersistChain = { tail: Promise<unknown>; pending: number; queued: QueuedPersist | null };
 
+/** Persist jobs whose write failed for good (after the one retry, or a closed month), keyed by the job promise {@link enqueuePersist} returned. */
+const persistFailures = new WeakMap<Promise<unknown>, unknown>();
+
 /** One serialized chain per (workspace, month): the cache, sidecar and mirrors are one target set. */
 const persistChains = new Map<string, PersistChain>();
 
@@ -1386,7 +1399,28 @@ function enqueuePersist(
       const current =
         req.kind === "snapshot" ? req.current : await rebuildCurrentFromEvents(directoryHandle, monthFolderName, req.sampleRows);
       derived = current;
-      if (current) await saveDistributionCurrent(directoryHandle, monthFolderName, current);
+      if (!current) return;
+      // Never replace a cache that already covers at least as much of the event
+      // store with an older snapshot (a read-side fold derived at t0 can reach
+      // the chain after a write-path persist of newer events). Strictly greater
+      // only: equal coverage is rewritten, so a retry never mistakes the staged
+      // .tmp of its own failed first attempt (which safeReadJson recovers) for
+      // a cache that already landed.
+      if (req.kind === "snapshot") {
+        const onDisk = await loadDistributionCurrent(directoryHandle, monthFolderName);
+        // The cache file carries no checkpoint (it lives in the sidecar), so
+        // read coverage from the sidecar bound to it.
+        const onDiskCheckpoint = onDisk ? await loadFoldCheckpoint(directoryHandle, monthFolderName, onDisk) : undefined;
+        const have = onDisk ? eventCoverage({ ...onDisk, foldCheckpoint: onDiskCheckpoint }) : undefined;
+        const want = eventCoverage(current);
+        if (
+          onDisk && have !== undefined && want !== undefined &&
+          have > want
+        ) {
+          return;
+        }
+      }
+      await saveDistributionCurrent(directoryHandle, monthFolderName, current);
     };
     try {
       await attempt();
@@ -1395,6 +1429,7 @@ function enqueuePersist(
       // write in the month, so one bounded, jittered retry keeps it healing. A closed
       // month is permanent, not transient: no retry.
       if (first instanceof MonthClosedError) {
+        persistFailures.set(job, first);
         logRejection("distribution:cache-write")(first);
       } else {
         await waitFor(persistRetry.minMs + Math.random() * (persistRetry.maxMs - persistRetry.minMs));
@@ -1402,6 +1437,7 @@ function enqueuePersist(
         try {
           await attempt();
         } catch (second) {
+          persistFailures.set(job, second);
           logRejection("distribution:cache-write")(second);
         }
       }
@@ -2095,7 +2131,19 @@ export class DistributionUnreadableError extends Error {
  * data: the month's event log is readable and holds no events.
  */
 export type DistributionCurrentOutcome =
-  | { kind: "ok"; current: DistributionCurrentData }
+  | {
+      kind: "ok";
+      current: DistributionCurrentData;
+      /** Where `current` came from: `cache` = served as-is from disk;
+       *  `memo` = this session's derive memo; `checkpoint` = resumed from the
+       *  fold checkpoint; `fold` = a full refold of the event log. */
+      source: "cache" | "memo" | "checkpoint" | "fold";
+      /** Set on a `fold` the absent-row guard refused to persist. */
+      displayOnly?: true;
+      /** `checkpoint` only: the resume folded at least one event newer than
+       *  the on-disk cache, so that cache is now stale. */
+      resumedWithNewEvents?: true;
+    }
   | { kind: "absent" }
   | { kind: "unavailable"; error: unknown };
 
@@ -2164,7 +2212,11 @@ async function loadOrDeriveDistributionCurrentOutcome(
       );
       if (resumed) {
         setDeriveMemo(memoKey, resumed);
-        return { kind: "ok", current: resumed };
+        // tryResumeFromCheckpoint hands back `cached` itself when nothing new
+        // was folded, and a fresh object when it folded at least one event.
+        return resumed === cached
+          ? { kind: "ok", current: resumed, source: "checkpoint" }
+          : { kind: "ok", current: resumed, source: "checkpoint", resumedWithNewEvents: true };
       }
       // null => a late event was found on THIS read, straight from disk --
       // strictly fresher information than anything the memo could hold, so
@@ -2181,7 +2233,7 @@ async function loadOrDeriveDistributionCurrentOutcome(
       // caller must never be served that result without the read it asked for
       // actually running.
       const memoHit = getDeriveMemo(memoKey);
-      if (memoHit) return { kind: "ok", current: memoHit };
+      if (memoHit) return { kind: "ok", current: memoHit, source: "memo" };
     }
 
     const { log, segmentOffsets, legacyEventFileNames } = await loadDistributionLogDetailed(
@@ -2209,7 +2261,7 @@ async function loadOrDeriveDistributionCurrentOutcome(
       hasQuotaForAssignedEmployees(cached, log)
     ) {
       setDeriveMemo(memoKey, cached);
-      return { kind: "ok", current: cached };
+      return { kind: "ok", current: cached, source: "cache" };
     }
 
     // Slow path: re-derive and update cache. segmentOffsets/legacyEventFileNames
@@ -2313,7 +2365,9 @@ async function loadOrDeriveDistributionCurrentOutcome(
       if (awaitCachePersist) await write;
     }
 
-    return { kind: "ok", current: withRevision };
+    return mayPersist
+      ? { kind: "ok", current: withRevision, source: "fold" }
+      : { kind: "ok", current: withRevision, source: "fold", displayOnly: true };
   } catch (error) {
     // Unexpected failure (corrupt log, permission loss, …) — expected
     // missing-file cases are handled quietly inside the loaders above.
@@ -2455,6 +2509,14 @@ export function loadDistributionLogForRead(
   return dedupeInFlight(key, () => loadDistributionLog(directoryHandle, monthFolderName));
 }
 
+/** (workspace, month) pairs whose read-side persist was skipped as closed and
+ *  already logged this session — one line each, not one per mount. */
+const readFoldPersistClosedMonthLogged = new Set<string>();
+
+export function __resetReadFoldPersistClosedMonthLogForTests(): void {
+  readFoldPersistClosedMonthLogged.clear();
+}
+
 /** Deduped sibling of loadOrDeriveDistributionCurrent for READ-ONLY call
  *  sites only. Never use this for a fresh-read-before-write correctness
  *  check. All callers should pass sampleRows sourced from the same
@@ -2464,7 +2526,15 @@ export function loadDistributionLogForRead(
  *  A6a: always passes `{ persistCache: false }` — a read must never write
  *  `distribution.current.json` / sample mirrors back to disk (F3). Write
  *  flows must call `refreshDistributionCacheAfterWrite` explicitly instead
- *  (A6b).
+ *  (A6b). The ONE opt-in exception is `options.persistAfterReadFold`, used by
+ *  the two queue-rendering employee views (XrayReferrals, XrayInspectionResults)
+ *  so a refold is not repeated on every mount: after a read that left the
+ *  on-disk cache stale (a full `fold`, or a `checkpoint` resume that folded at
+ *  least one new event; never display-only) the result is queued for
+ *  persistence WITHOUT being awaited — the read returns at once and a failure
+ *  is only logged, so it can never fail or delay the read. Skipped in a
+ *  read-only session and on a closed month (logged once per workspace+month
+ *  per session). It is part of the dedupe key.
  *
  *  `options.strictSegments` forwards to `loadOrDeriveDistributionCurrentOutcome`'s
  *  own `strictSegments` (see `LoadOrDeriveDistributionCurrentOptions` — and its
@@ -2478,16 +2548,52 @@ export function loadOrDeriveDistributionCurrentOutcomeForRead(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   sampleRows: PreparedPopulationRow[],
-  options?: { strictSegments?: boolean }
+  options?: { strictSegments?: boolean; persistAfterReadFold?: boolean }
 ): Promise<DistributionCurrentOutcome> {
   const strictSegments = options?.strictSegments ?? false;
-  const key = `${workspaceScopeId(directoryHandle)}|${monthFolderName}|${workspaceEpoch(directoryHandle, monthFolderName)}|dist-current|${sampleRows.length}${strictSegments ? "|strict-segments" : ""}`;
-  return dedupeInFlight(key, () =>
-    loadOrDeriveDistributionCurrentOutcome(directoryHandle, monthFolderName, sampleRows, {
+  const persistAfterReadFold = options?.persistAfterReadFold ?? false;
+  const key = `${workspaceScopeId(directoryHandle)}|${monthFolderName}|${workspaceEpoch(directoryHandle, monthFolderName)}|dist-current|${sampleRows.length}${strictSegments ? "|strict-segments" : ""}${persistAfterReadFold ? "|persist" : ""}`;
+  return dedupeInFlight(key, async () => {
+    const outcome = await loadOrDeriveDistributionCurrentOutcome(directoryHandle, monthFolderName, sampleRows, {
       persistCache: false,
       strictSegments,
-    })
-  );
+    });
+    // Persist when the on-disk cache is now stale: a full refold, or a
+    // checkpoint resume that folded at least one newer event (the field case
+    // after a failed write-path persist). Never in a read-only session (the
+    // write path is gated by canMutate, and a blocked write retries after a
+    // 1-3 s sleep), and never on a closed month (the write would be refused on
+    // every mount; checked through monthLock's TTL cache, logged once).
+    const staleOnDisk =
+      outcome.kind === "ok" &&
+      !outcome.displayOnly &&
+      (outcome.source === "fold" || (outcome.source === "checkpoint" && outcome.resumedWithNewEvents === true));
+    if (persistAfterReadFold && staleOnDisk && !isReadOnlyMode()) {
+      if (await isMonthClosed(directoryHandle, monthFolderName)) {
+        const onceKey = `${workspaceScopeId(directoryHandle)}|${monthFolderName}`;
+        if (!readFoldPersistClosedMonthLogged.has(onceKey)) {
+          readFoldPersistClosedMonthLogged.add(onceKey);
+          logError(
+            "distribution:persist-after-read-fold:month-closed",
+            new MonthClosedError(monthFolderName)
+          );
+        }
+        return outcome;
+      }
+      // NOT awaited: the view renders from `outcome` now; the cache, sidecar
+      // and mirror writes (and any retry sleep) run behind it on the month's
+      // persist chain. enqueuePersist never rejects; a failed write is
+      // reported through `persistFailures` (and logged as
+      // distribution:cache-write there) — re-logged here under this context.
+      const write = queueDistributionCurrentPersist(directoryHandle, monthFolderName, outcome.current);
+      void write.then(() => {
+        if (persistFailures.has(write)) {
+          logError("distribution:persist-after-read-fold", persistFailures.get(write));
+        }
+      });
+    }
+    return outcome;
+  });
 }
 
 export function loadOrDeriveDistributionCurrentForRead(
@@ -2535,13 +2641,16 @@ export async function loadOrDeriveDistributionCurrentStrictForRead(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   sampleRows: PreparedPopulationRow[],
-  options?: { strictSegments?: boolean }
+  options?: { strictSegments?: boolean; persistAfterReadFold?: boolean }
 ): Promise<DistributionCurrentData | null> {
   const outcome = await loadOrDeriveDistributionCurrentOutcomeForRead(
     directoryHandle,
     monthFolderName,
     sampleRows,
-    { strictSegments: options?.strictSegments ?? false }
+    {
+      strictSegments: options?.strictSegments ?? false,
+      persistAfterReadFold: options?.persistAfterReadFold ?? false,
+    }
   );
   if (outcome.kind === "unavailable") {
     throw outcome.error instanceof DistributionUnreadableError

@@ -231,35 +231,46 @@ describe("adhocImportEmployeeView month filter", () => {
     return root;
   }
 
-  it("opens only the imports linked to the requested month", async () => {
+  it("opens the imports linked to the requested month, plus the unlinked one, and never another month's", async () => {
     const root = await seedThreeImports();
 
     const entries = await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false, MAY);
-    expect(entries.map((e) => e.xrayImageId)).toEqual(["ADHOC-adh-may-XR-MAY"]);
+    expect(entries.map((e) => e.xrayImageId).sort()).toEqual(["ADHOC-adh-iso-XR-ISO", "ADHOC-adh-may-XR-MAY"]);
 
     const june = await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false, JUNE);
-    expect(june.map((e) => e.xrayImageId)).toEqual(["ADHOC-adh-june-XR-JUNE"]);
+    expect(june.map((e) => e.xrayImageId).sort()).toEqual(["ADHOC-adh-iso-XR-ISO", "ADHOC-adh-june-XR-JUNE"]);
   });
 
-  it("excludes an isolated import from every month scope, and includes it when unscoped", async () => {
+  it("opens the month-linked and unlinked stores, and skips an import linked only to another month", async () => {
     const root = await seedThreeImports();
 
     const scoped = await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false, MAY);
-    expect(scoped.some((e) => e.adhocImportId === "adh-iso")).toBe(false);
+    expect(scoped.map((e) => e.adhocImportId).sort()).toEqual(["adh-iso", "adh-may"]);
+    expect(scoped.some((e) => e.adhocImportId === "adh-june")).toBe(false);
+  });
+
+  it("never month-excludes an isolated import: it is visible in every month scope, and when unscoped", async () => {
+    const root = await seedThreeImports();
+
+    for (const month of [MAY, JUNE, "1-january-2026"]) {
+      const scoped = await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false, month);
+      expect(scoped.some((e) => e.adhocImportId === "adh-iso")).toBe(true);
+    }
 
     const unscoped = await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false);
     expect(unscoped.map((e) => e.adhocImportId).sort()).toEqual(["adh-iso", "adh-june", "adh-may"]);
   });
 
-  it("answers [] for a month no import links to, without opening anything", async () => {
+  it("answers only the isolated import for a month no import links to, without opening the other-month stores", async () => {
     const root = await seedThreeImports();
-    expect(await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false, "1-january-2026")).toEqual([]);
+    const entries = await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false, "1-january-2026");
+    expect(entries.map((e) => e.adhocImportId)).toEqual(["adh-iso"]);
   });
 
   it("scopes listAdhocSampleFolders the same way, so employee-authored records are looked for in the right stores", async () => {
     const root = await seedThreeImports();
 
-    expect(await listAdhocSampleFolders(root, MAY)).toEqual(["adhoc-adh-may"]);
+    expect((await listAdhocSampleFolders(root, MAY)).sort()).toEqual(["adhoc-adh-iso", "adhoc-adh-may"]);
     expect((await listAdhocSampleFolders(root)).sort()).toEqual([
       "adhoc-adh-iso",
       "adhoc-adh-june",
@@ -267,7 +278,7 @@ describe("adhocImportEmployeeView month filter", () => {
     ]);
   });
 
-  it("treats a legacy index entry with no linkedMonths as isolated under a month scope", async () => {
+  it("keeps a legacy index entry with no linkedMonths visible under a month scope (no linked month, never excluded)", async () => {
     const root = createMemoryDirectory();
     await createWorkspaceStructure(root, "admin");
     // A record saved before month binding existed: v1 shape, no binding at all.
@@ -275,7 +286,7 @@ describe("adhocImportEmployeeView month filter", () => {
     await ensureAdhocSampleMaster(root, record);
     expect((await assignAdhocRowsToEmployee(root, record, ["s1:2"], "jalgahamdi", "admin")).ok).toBe(true);
 
-    expect(await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false, MAY)).toEqual([]);
+    expect(await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false, MAY)).toHaveLength(1);
     expect(await loadAdhocEntriesForEmployeeView(root, "jalgahamdi", false)).toHaveLength(1);
   });
 });

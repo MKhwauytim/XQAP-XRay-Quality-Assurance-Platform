@@ -55,12 +55,10 @@ import { isMirrorTrustedForEvents, loadEmployeeSampleMirror } from "../../../../
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
 import {
   displayXrayImageId,
-  loadAdhocAnswerItems,
-  loadAdhocEntriesForEmployeeView,
   isAdhocEntry,
-  type AdhocDistributionEntry,
 } from "../../../../../data/adhocImport/adhocImportEmployeeView";
 import { monthFolderForEntry } from "../../../../../data/adhocImport/adhocImportEmployeeView";
+import { beginAdhocReads } from "./adhocReads";
 import {
   loadTemplate,
   loadTemplateIndex,
@@ -283,39 +281,6 @@ function referralsBootSources(username: string, canSeeAll: boolean): BootSourceD
     { key: "referrals_answers", labelEn: `${username}.answers.json`, labelAr: "إجاباتي" },
     { key: "referrals_adhoc", labelEn: "adhoc-imports.index.json", labelAr: "الاستيرادات اليدوية" },
   ];
-}
-
-/**
- * Start both ad-hoc reads for the load phase, without awaiting either.
- *
- * THE GAP fix: ad-hoc-imported assignments live in a synthetic
- * `2-samples/adhoc-{importId}/` folder, never the selected month's own
- * sample.master.json, so they are merged in alongside an employee's real
- * assignments. Their ANSWERS live there too — handleSave routes an ad-hoc row's
- * write through folderForRow, so reading answers for the selected month alone
- * never found them and every ad-hoc row came back unanswered after a reload.
- *
- * The answers read is CHAINED off the entries read (it needs their stores)
- * rather than awaited separately, so it still overlaps the rest of the load
- * phase. Entries degrade to [] on any failure; see adhocImportEmployeeView.ts's
- * docblock for the cost bound. Lives outside the component only to keep
- * `XrayReferrals` inside the max-lines-per-function budget.
- */
-function beginAdhocReads(
-  directoryHandle: DirectoryHandleLike,
-  username: string,
-  canSeeAll: boolean
-): { entries: Promise<AdhocDistributionEntry[]>; answers: Promise<ItemAnswer[]> } {
-  const entries = loadAdhocEntriesForEmployeeView(directoryHandle, username, canSeeAll).catch(
-    (err) => {
-      logError("xrayReferrals:loadAdhocEntries", err);
-      return [] as AdhocDistributionEntry[];
-    }
-  );
-  return {
-    entries,
-    answers: entries.then((list) => loadAdhocAnswerItems(directoryHandle, list)),
-  };
 }
 
 /**
@@ -1308,8 +1273,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       // the month) and the workspace-wide derivation are deliberately not in
       // here. population.final.json is not loaded here either; it is loaded
       // lazily only when the replacement dialog opens.
+      // A personal-scope user's pending ids come only from their OWN requests
+      // (fromEmployee / employeeUsername === username), so one queue file is enough.
+      const scopeOpts = { scopeToUser: canSeeAll ? undefined : username };
       const { entries: adhocEntriesPromise, answers: adhocAnswersPromise } =
-        beginAdhocReads(directoryHandle, username, canSeeAll);
+        beginAdhocReads(directoryHandle, username, canSeeAll, selMonth);
       const [
         referralLog,
         replacementLog,
@@ -1320,8 +1288,8 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         ownAnswerFile,
       ] =
         await Promise.all([
-          loadReferralLog(directoryHandle, selMonth),
-          loadReplacementLog(directoryHandle, selMonth),
+          loadReferralLog(directoryHandle, selMonth, scopeOpts),
+          loadReplacementLog(directoryHandle, selMonth, scopeOpts),
           adhocEntriesPromise,
           adhocAnswersPromise,
           // Oversight (canSeeAll) is UNCHANGED and never reads a mirror:
@@ -1422,7 +1390,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       const sample = await loadSampleMaster(directoryHandle, selMonth);
       const sampleRows = (sample?.rows ?? []) as PreparedPopulationRow[];
       // STRICT: the `?? []` below would otherwise turn a failed read into an empty queue — see DistributionUnreadableError.
-      const dist = await loadOrDeriveDistributionCurrentStrictForRead(directoryHandle, selMonth, sampleRows);
+      const dist = await loadOrDeriveDistributionCurrentStrictForRead(directoryHandle, selMonth, sampleRows, {
+        persistAfterReadFold: true,
+      });
       const all = [...(dist?.entries ?? personalMirror?.entries ?? []), ...adhocEntries];
 
       // Extract frozen daily quota for the current employee.

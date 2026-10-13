@@ -89,7 +89,7 @@ type AdhocStoreTarget = { importId: string; fileName: string };
  *
  * The index half is unchanged and is still the fast path. `linkedMonths` is on
  * the INDEX precisely so a month-scoped read costs one small file: an import
- * bound to another month, or to none, is skipped without ever opening its
+ * bound to another month is skipped without ever opening its
  * `sample.master.json` or its derived distribution cache. On a workspace with
  * dozens of historical study imports that is the difference between one file
  * read and dozens per month switch. Omitting `monthFolderName` keeps the
@@ -118,7 +118,8 @@ type AdhocStoreTarget = { importId: string; fileName: string };
  * repair path must not quietly undo it. Only stores the index cannot vouch for
  * (`assignedRows: 0`, or no entry at all) are added back, because for those
  * "which month" has no trustworthy answer either and showing the work beats
- * losing it.
+ * losing it. An import with NO linked months is never month-excluded: it has no
+ * month to be bound to, and hiding it would hide real assignments in every month.
  */
 async function storesToOpen(
   directoryHandle: DirectoryHandleLike,
@@ -131,9 +132,8 @@ async function storesToOpen(
 
   for (const entry of index) {
     if (entry.assignedRows <= 0) continue;
-    if (monthFolderName !== undefined && !(entry.linkedMonths ?? []).includes(monthFolderName)) {
-      continue;
-    }
+    const linked = entry.linkedMonths ?? [];
+    if (monthFolderName !== undefined && linked.length > 0 && !linked.includes(monthFolderName)) continue;
     targets.push({ importId: entry.importId, fileName: entry.fileName });
     taken.add(entry.importId);
   }

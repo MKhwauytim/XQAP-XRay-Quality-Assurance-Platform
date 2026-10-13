@@ -5,11 +5,25 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v153.25",
+    "date": "2026-10-13",
+    "bucket": "enhancement",
+    "scope": "employee-workspace",
+    "title": "month load reads only the employee's own files — scoped ad-hoc probe, own request queue, one-pass mirror trust check, read-fold cache persist, Results mirror fast path"
+  },
+  {
+    "version": "v153.24",
+    "date": "2026-10-13",
+    "bucket": "redesign",
+    "scope": "executive report",
+    "title": "split buildDeck3Slides into helpers to pass the complexity budget"
+  },
+  {
     "version": "v153.24",
     "date": "2026-10-13",
     "bucket": "fix",
     "scope": "answers",
-    "title": "stop the save-failure spiral on flaky shares — retry refused replace before rotating, two-name extension probe, dead-segment registry, 1 MB segments"
+    "title": "stop the save-failure spiral on flaky shares — retry refused replace before rotating, two-name extension probe, dead-segment registry, 256 KiB segments"
   },
   {
     "version": "v153.23",
@@ -59,19 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "executive report",
     "title": "page 7 coverage progress bar, one-line header, per-level target bullets"
-  },
-  {
-    "version": "v153.16",
-    "date": "2026-10-12",
-    "bucket": "enhancement",
-    "scope": null,
-    "title": "risk-level accuracy page and the contents-page eyebrow"
-  },
-  {
-    "version": "v153.15",
-    "date": "2026-10-12",
-    "bucket": "enhancement",
-    "scope": "executive report",
-    "title": "sample targets and target-based coverage, neutral all-ports panel, ضمان جودة الأشعة wording"
   }
 ];

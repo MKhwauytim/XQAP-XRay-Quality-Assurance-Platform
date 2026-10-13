@@ -1990,39 +1990,11 @@ export async function loadAllEmployeeRequestFiles(
     // LISTING above still throws, never a partial set.
     const loaded = await mapWithConcurrency([...stems], 4, async (username): Promise<EmployeeRequestQueues | null> => {
       try {
-        let requests: EmployeeRequestsFile;
-        if (withRequestsFile.has(username)) {
-          requests = await loadEmployeeRequestsFile(directoryHandle, monthFolderName, username);
-        } else {
-          // No requests file in the LISTING: the only source is the frozen legacy
-          // `.answers.json` (pre-split data). Read it once per session, not per call.
-          const legacyKey = `${memoKey}|${username}`;
-          const cached = legacyRequestQueuesMemo.get(legacyKey);
-          if (cached) {
-            requests = cached;
-          } else {
-            // The stem came from the LISTING, so the file exists: an absent answer is a
-            // transient share hiccup, never "no requests" (same rule as the seed memo).
-            const legacy = await loadLegacyAnswersFile(directoryHandle, monthFolderName, username);
-            if (legacy === null) throw new Error(`Legacy answers file for ${username} listed but not found.`);
-            requests = {
-              username,
-              monthFolderName,
-              revision: 0,
-              referralRequests: legacy.referralRequests,
-              replacementRequests: legacy.replacementRequests,
-              reopenRequests: legacy.reopenRequests,
-            };
-            legacyRequestQueuesMemo.set(legacyKey, requests);
-          }
-        }
-        return {
-          username,
-          monthFolderName,
-          referralRequests: requests.referralRequests,
-          replacementRequests: requests.replacementRequests,
-          reopenRequests: requests.reopenRequests,
-        };
+        // The stem came from the LISTING, so a file exists: an absent answer is a
+        // transient share hiccup, never "no requests" (same rule as the seed memo).
+        const queues = await loadEmployeeRequestQueues(directoryHandle, monthFolderName, username, !withRequestsFile.has(username));
+        if (queues === null) throw new Error(`Legacy answers file for ${username} listed but not found.`);
+        return queues;
       } catch (error) {
         logError("answerStorage:loadAllEmployeeRequestFiles:employee", error, { action: username });
         anyFailed = true;
@@ -2047,4 +2019,53 @@ export async function loadAllEmployeeRequestFiles(
     );
     throw err;
   }
+}
+
+/**
+ * One employee's request queues -- the `scopeToUser` fast path for
+ * `loadRequestLogs`, and the single per-user reader the all-user scan uses.
+ * Reads `{user}.requests.json` only (skipped when `knownNoRequestsFile`, i.e. the
+ * directory listing already showed there is none); if absent, falls back to the
+ * frozen legacy `{user}.answers.json` arrays, memoised per session in
+ * `legacyRequestQueuesMemo` (found files only). `null` when neither file exists.
+ */
+export async function loadEmployeeRequestQueues(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  username: string,
+  knownNoRequestsFile = false
+): Promise<EmployeeRequestQueues | null> {
+  let requests: EmployeeRequestsFile | undefined;
+  if (!knownNoRequestsFile) {
+    const read = await readOptionalJson<EmployeeRequestsFile>(
+      `answers:requests:${monthFolderName}/${username}`,
+      [{ directory: () => getAnswersDir(directoryHandle, monthFolderName), fileName: requestsFileName(username) }],
+      { fallThroughOnMissingFile: false }
+    );
+    if (read.kind === "found") requests = read.value;
+  }
+  if (!requests) {
+    const legacyKey = `${requestQueuesKey(directoryHandle, monthFolderName)}|${username}`;
+    requests = legacyRequestQueuesMemo.get(legacyKey);
+    if (!requests) {
+      const legacy = await loadLegacyAnswersFile(directoryHandle, monthFolderName, username);
+      if (legacy === null) return null;
+      requests = {
+        username,
+        monthFolderName,
+        revision: 0,
+        referralRequests: legacy.referralRequests,
+        replacementRequests: legacy.replacementRequests,
+        reopenRequests: legacy.reopenRequests,
+      };
+      legacyRequestQueuesMemo.set(legacyKey, requests);
+    }
+  }
+  return {
+    username,
+    monthFolderName,
+    referralRequests: requests.referralRequests,
+    replacementRequests: requests.replacementRequests,
+    reopenRequests: requests.reopenRequests,
+  };
 }

@@ -1,9 +1,11 @@
+import { logError } from "../storage/errorLogger";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import {
   appendReferralToEmployee,
   appendReopenToEmployee,
   appendReplacementToEmployee,
   loadAllEmployeeRequestFiles,
+  loadEmployeeRequestQueues,
   type EmployeeRequestQueues,
 } from "../answers/answerStorage";
 import {
@@ -70,14 +72,33 @@ export async function appendReferralRequest(
  * scan's cost drop instead of growing to a full per-employee event-log fold it
  * never used.
  */
+/**
+ * `scopeToUser`: read only that employee's request queue (decisions stay
+ * all-supervisor, since any supervisor may decide this user's request). Omit for
+ * the full-population scan used by supervisors and oversight views.
+ */
+export type RequestLogOptions = { scopeToUser?: string };
+
 export async function loadRequestLogs(
   directoryHandle: DirectoryHandleLike,
-  monthFolderName: string
+  monthFolderName: string,
+  options?: RequestLogOptions
 ): Promise<{ referrals: ReferralLog; replacements: ReplacementLog; reopens: ReopenLog }> {
-  const key = `${workspaceScopeId(directoryHandle)}|${monthFolderName}|${workspaceEpoch(directoryHandle, monthFolderName)}|request-logs`;
+  const scope = options?.scopeToUser;
+  const key = `${workspaceScopeId(directoryHandle)}|${monthFolderName}|${workspaceEpoch(directoryHandle, monthFolderName)}|request-logs|user:${scope ?? "*"}`;
   return dedupeInFlight(key, async () => {
     const [empFiles, allDecisions] = await Promise.all([
-      loadAllEmployeeRequestFiles(directoryHandle, monthFolderName),
+      scope === undefined
+        ? loadAllEmployeeRequestFiles(directoryHandle, monthFolderName)
+        : loadEmployeeRequestQueues(directoryHandle, monthFolderName, scope).then(
+            (q) => (q ? [q] : []),
+            // Same rule as the all-user scan: an unreadable OWN queue file is logged and
+            // skipped, never a reason to reject the whole log (decisions still load).
+            (error: unknown) => {
+              logError("answerStorage:loadEmployeeRequestQueues", error, { action: scope });
+              return [] as EmployeeRequestQueues[];
+            }
+          ),
       loadAllSupervisorDecisions(directoryHandle, monthFolderName),
     ]);
 
@@ -122,9 +143,10 @@ function buildLog<TRequest extends { requestId: string }>(
  */
 export async function loadReferralLog(
   directoryHandle: DirectoryHandleLike,
-  monthFolderName: string
+  monthFolderName: string,
+  options?: RequestLogOptions
 ): Promise<ReferralLog> {
-  const { referrals } = await loadRequestLogs(directoryHandle, monthFolderName);
+  const { referrals } = await loadRequestLogs(directoryHandle, monthFolderName, options);
   return referrals;
 }
 
@@ -188,9 +210,10 @@ export async function appendReplacementRequest(
  */
 export async function loadReplacementLog(
   directoryHandle: DirectoryHandleLike,
-  monthFolderName: string
+  monthFolderName: string,
+  options?: RequestLogOptions
 ): Promise<ReplacementLog> {
-  const { replacements } = await loadRequestLogs(directoryHandle, monthFolderName);
+  const { replacements } = await loadRequestLogs(directoryHandle, monthFolderName, options);
   return replacements;
 }
 
@@ -231,9 +254,10 @@ export async function appendReopenRequest(
  */
 export async function loadReopenLog(
   directoryHandle: DirectoryHandleLike,
-  monthFolderName: string
+  monthFolderName: string,
+  options?: RequestLogOptions
 ): Promise<ReopenLog> {
-  const { reopens } = await loadRequestLogs(directoryHandle, monthFolderName);
+  const { reopens } = await loadRequestLogs(directoryHandle, monthFolderName, options);
   return reopens;
 }
 

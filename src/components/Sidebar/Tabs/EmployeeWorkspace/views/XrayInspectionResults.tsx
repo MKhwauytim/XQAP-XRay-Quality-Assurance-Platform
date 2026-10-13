@@ -27,6 +27,7 @@ import { reopenSubmittedAnswer } from "../../../../../data/answers/reopenAnswer"
 import {
   loadDistributionLogForRead,
   loadOrDeriveDistributionCurrentStrictForRead,
+  readDistributionLogStamp,
 } from "../../../../../data/distribution/distributionStorage";
 import type { DistributionEntry, DistributionEvent } from "../../../../../data/distribution/distributionTypes";
 import {
@@ -42,6 +43,7 @@ import {
   type DataRefreshFamily,
 } from "../../../../../data/workspace/dataRefreshSignal";
 import { loadSampleMaster } from "../../../../../data/sampling/sampleStorage";
+import { isMirrorTrustedForEvents, loadEmployeeSampleMirror } from "../../../../../data/samples/sampleMirrorStorage";
 import {
   displayXrayImageId,
   loadAdhocAnswerItems,
@@ -345,8 +347,7 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
       setReopenError(null);
     }
     try {
-      const [sampleMaster, selection, referralLog, replacementLog, adhocEntries] = await Promise.all([
-        loadSampleMaster(directoryHandle, selectedMonth),
+      const [selection, referralLog, replacementLog, adhocEntries, personalMirror, logStamp] = await Promise.all([
         loadInspectionTemplateSelection(directoryHandle),
         loadReferralLog(directoryHandle, selectedMonth),
         loadReplacementLog(directoryHandle, selectedMonth),
@@ -354,29 +355,58 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
         // `2-samples/adhoc-{importId}/` folder, never the selected month's own
         // sample.master.json — merged in below so an employee's results view
         // includes them. Degrades to [] on any failure.
-        loadAdhocEntriesForEmployeeView(directoryHandle, username, canSeeAll).catch((err) => {
+        loadAdhocEntriesForEmployeeView(directoryHandle, username, canSeeAll, selectedMonth).catch((err) => {
           logError("xrayInspectionResults:loadAdhocEntries", err);
           return [];
         }),
+        // Personal scope only: the per-employee mirror replaces the whole-month
+        // sample master + distribution derivation when it is current.
+        canSeeAll
+          ? null
+          : loadEmployeeSampleMirror(directoryHandle, selectedMonth, username).catch((err) => {
+              // A corrupt/unreadable cache file must fall back to the full path.
+              logError("xrayInspectionResults:loadEmployeeSampleMirror", err);
+              return null;
+            }),
+        canSeeAll
+          ? null
+          : readDistributionLogStamp(directoryHandle, selectedMonth).catch((err) => {
+              logError("xrayInspectionResults:readDistributionLogStamp", err);
+              return null;
+            }),
       ]);
 
-      // STRICT on purpose — see the sibling note in XrayReferrals. A failed
-      // read folded into `?? []` below rendered a month in which almost nobody
-      // had answered anything: a supervisor read that off this page as real
-      // work missing, not as a share that had stopped answering.
-      const distribution = await loadOrDeriveDistributionCurrentStrictForRead(
-        directoryHandle,
-        selectedMonth,
-        sampleMaster?.rows ?? []
-      );
+      // Revision AND event set, same test as XrayReferrals. `assignedAtByUser`
+      // (the only quota consumer) feeds the oversight-only tracking tab, so the
+      // mirror path needs no quota and leaves that state untouched.
       const log = await loadDistributionLogForRead(directoryHandle, selectedMonth);
-
+      const mirrorTrusted = !canSeeAll && !!personalMirror && !!logStamp &&
+        !hasMovementTouching(log.events, username) &&
+        (await isMirrorTrustedForEvents(directoryHandle, selectedMonth, personalMirror, logStamp.revision));
+      let distribution: Awaited<ReturnType<typeof loadOrDeriveDistributionCurrentStrictForRead>> | null = null;
+      let distributionEntries: DistributionEntry[];
+      if (mirrorTrusted) {
+        distributionEntries = personalMirror!.entries;
+      } else {
+        const sampleMaster = await loadSampleMaster(directoryHandle, selectedMonth);
+        // STRICT on purpose — see the sibling note in XrayReferrals. A failed
+        // read folded into `?? []` below rendered a month in which almost nobody
+        // had answered anything: a supervisor read that off this page as real
+        // work missing, not as a share that had stopped answering.
+        distribution = await loadOrDeriveDistributionCurrentStrictForRead(
+          directoryHandle,
+          selectedMonth,
+          sampleMaster?.rows ?? [],
+          { persistAfterReadFold: true }
+        );
+        distributionEntries = distribution?.entries ?? [];
+      }
       const activeTemplate = selection?.templateId
         ? await loadTemplate(directoryHandle, selection.templateId)
         : null;
 
       const movementById = buildMovementMap(log.events);
-      const entries = [...(distribution?.entries ?? []), ...adhocEntries]
+      const entries = [...distributionEntries, ...adhocEntries]
         .map((entry) => ({
           entry,
           movement: buildMovementInfo(entry, movementById.get(entry.xrayImageId)),
@@ -436,9 +466,11 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
         movement,
         answer: answerByKey.get(`${entry.xrayImageId}::${entry.assignedTo}`) ?? null,
       })));
-      setAssignedAtByUser(Object.fromEntries(
-        Object.entries(distribution?.quotas ?? {}).map(([user, quota]) => [user, quota.assignedAt]),
-      ));
+      if (distribution) {
+        setAssignedAtByUser(Object.fromEntries(
+          Object.entries(distribution.quotas ?? {}).map(([user, quota]) => [user, quota.assignedAt]),
+        ));
+      }
       setAuditEvents(log.events);
       setAuditReferralRequests(referralLog.requests);
       setAuditReplacementRequests(replacementLog.requests);
@@ -1368,6 +1400,17 @@ function formatAnswerValue(field: TemplateField, value: string | number | boolea
   if (typeof value === "boolean") return value ? "نعم" : "لا";
   if (field.type === "date") return String(value);
   return String(value);
+}
+
+/** Results shows rows the user was moved away from/to (see isVisibleToUser), but the
+ *  mirror holds only entries currently assigned to them -- unlike XrayReferrals, which
+ *  lists current assignments only. Mirrors buildMovementMap/buildMovementInfo's from/to. */
+function hasMovementTouching(events: DistributionEvent[], username: string): boolean {
+  return events.some(
+    (event) =>
+      event.eventType === "reassigned" &&
+      (event.assignedTo === username || event.reassignedTo === username)
+  );
 }
 
 function buildMovementMap(events: DistributionEvent[]): Map<string, DistributionEvent> {
