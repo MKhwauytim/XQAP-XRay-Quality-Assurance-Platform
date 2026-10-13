@@ -1,6 +1,8 @@
 // Opt-in persistence of distribution.current.json after a READ-side fold
 // (`persistAfterReadFold`). Default reads stay A6a: a read never writes.
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import { setReadOnlyMode } from "../storage/readOnlyMode";
 
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import { saveSampleMaster } from "../sampling/sampleStorage";
@@ -13,6 +15,7 @@ import {
   appendDistributionEvents,
   loadOrDeriveDistributionCurrentOutcomeForRead,
   loadOrDeriveDistributionCurrentStrictForRead,
+  queueDistributionCurrentPersist,
 } from "./distributionStorage";
 
 const MONTH = "5-may-2026";
@@ -106,6 +109,9 @@ describe("persistAfterReadFold", () => {
   beforeEach(() => {
     __clearDeriveMemoForTests();
   });
+  afterEach(() => {
+    setReadOnlyMode(false);
+  });
 
   it("default: a read-side fold writes nothing", async () => {
     const { root, rows } = await seed();
@@ -133,5 +139,51 @@ describe("persistAfterReadFold", () => {
     });
     expect(outcome.kind === "ok" && outcome.source).not.toBe("fold");
     expect(await cacheStamp(root)).toBe(before);
+  });
+
+  it("read-only session: no write attempted and no retry stall", async () => {
+    const { root, rows } = await seed();
+    setReadOnlyMode(true);
+    const started = Date.now();
+    const dist = await loadOrDeriveDistributionCurrentStrictForRead(root, MONTH, rows, {
+      persistAfterReadFold: true,
+    });
+    expect(dist?.entries.length).toBe(2);
+    expect(Date.now() - started).toBeLessThan(900); // the persist retry sleeps >= 1 s
+    expect(await loadCachedEntryCount(root)).toBeNull();
+  });
+
+  it("a memo-served read with the flag writes nothing", async () => {
+    const { root, rows } = await seed();
+    await loadOrDeriveDistributionCurrentStrictForRead(root, MONTH, rows); // folds + memoizes, no write
+    const outcome = await loadOrDeriveDistributionCurrentOutcomeForRead(root, MONTH, rows, {
+      persistAfterReadFold: true,
+    });
+    expect(outcome.kind === "ok" && outcome.source).toBe("memo");
+    expect(await loadCachedEntryCount(root)).toBeNull();
+  });
+
+  it("never replaces a cache that covers more of the event store with a staler snapshot", async () => {
+    const root = createMemoryDirectory("root");
+    const rows = [makeRow("IMG-1"), makeRow("IMG-2")];
+    await saveSampleMaster(root, MONTH, makeSample(rows));
+    await appendDistributionEvents(root, MONTH, [
+      buildAssignEvent({ xrayImageId: "IMG-1", assignedTo: "emp-1", eventBy: "admin" }),
+    ]);
+    __clearDeriveMemoForTests();
+    const stale = await loadOrDeriveDistributionCurrentOutcomeForRead(root, MONTH, rows);
+    if (stale.kind !== "ok") throw new Error("stale read failed");
+    await appendDistributionEvents(root, MONTH, [
+      buildAssignEvent({ xrayImageId: "IMG-2", assignedTo: "emp-2", eventBy: "admin" }),
+    ]);
+    __clearDeriveMemoForTests();
+    await loadOrDeriveDistributionCurrentStrictForRead(root, MONTH, rows, { persistAfterReadFold: true });
+    expect(await loadCachedEntryCount(root)).toBe(2);
+    const before = await cacheStamp(root);
+
+    await queueDistributionCurrentPersist(root, MONTH, stale.current);
+
+    expect(await cacheStamp(root)).toBe(before);
+    expect(await loadCachedEntryCount(root)).toBe(2);
   });
 });

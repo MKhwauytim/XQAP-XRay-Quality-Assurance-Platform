@@ -239,6 +239,9 @@ describe("XrayReferrals — submit broadcasts a data refresh", () => {
       // mirror read is the reload evidence.
       expect(getReadLog(root).some((path) => path.includes("emp-a.samples.json"))).toBe(true);
     });
+
+    // Pins the mirror fast path, not merely "some reload happened".
+    expect(getReadLog(root).some((path) => path.includes("sample.master.json"))).toBe(false);
   });
 });
 

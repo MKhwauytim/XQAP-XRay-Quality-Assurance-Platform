@@ -18,6 +18,7 @@ import type {
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { readEnvelopeRevision, safeReadJson, safeRemoveJson, safeWriteJson } from "../storage/safeWrite";
 import { logError, logRejection } from "../storage/errorLogger";
+import { isReadOnlyMode } from "../storage/readOnlyMode";
 import { casLoop } from "../storage/casLoop";
 import {
   createDeadline,
@@ -1281,6 +1282,9 @@ type PersistRequest =
 type QueuedPersist = { request: PersistRequest; started: boolean; job: Promise<DistributionCurrentData | null> };
 type PersistChain = { tail: Promise<unknown>; pending: number; queued: QueuedPersist | null };
 
+/** Persist jobs whose write failed for good (after the one retry, or a closed month), keyed by the job promise {@link enqueuePersist} returned. */
+const persistFailures = new WeakMap<Promise<unknown>, unknown>();
+
 /** One serialized chain per (workspace, month): the cache, sidecar and mirrors are one target set. */
 const persistChains = new Map<string, PersistChain>();
 
@@ -1387,7 +1391,28 @@ function enqueuePersist(
       const current =
         req.kind === "snapshot" ? req.current : await rebuildCurrentFromEvents(directoryHandle, monthFolderName, req.sampleRows);
       derived = current;
-      if (current) await saveDistributionCurrent(directoryHandle, monthFolderName, current);
+      if (!current) return;
+      // Never replace a cache that already covers at least as much of the event
+      // store with an older snapshot (a read-side fold derived at t0 can reach
+      // the chain after a write-path persist of newer events). Strictly greater
+      // only: equal coverage is rewritten, so a retry never mistakes the staged
+      // .tmp of its own failed first attempt (which safeReadJson recovers) for
+      // a cache that already landed.
+      if (req.kind === "snapshot") {
+        const onDisk = await loadDistributionCurrent(directoryHandle, monthFolderName);
+        // The cache file carries no checkpoint (it lives in the sidecar), so
+        // read coverage from the sidecar bound to it.
+        const onDiskCheckpoint = onDisk ? await loadFoldCheckpoint(directoryHandle, monthFolderName, onDisk) : undefined;
+        const have = onDisk ? eventCoverage({ ...onDisk, foldCheckpoint: onDiskCheckpoint }) : undefined;
+        const want = eventCoverage(current);
+        if (
+          onDisk && have !== undefined && want !== undefined &&
+          have > want
+        ) {
+          return;
+        }
+      }
+      await saveDistributionCurrent(directoryHandle, monthFolderName, current);
     };
     try {
       await attempt();
@@ -1396,6 +1421,7 @@ function enqueuePersist(
       // write in the month, so one bounded, jittered retry keeps it healing. A closed
       // month is permanent, not transient: no retry.
       if (first instanceof MonthClosedError) {
+        persistFailures.set(job, first);
         logRejection("distribution:cache-write")(first);
       } else {
         await waitFor(persistRetry.minMs + Math.random() * (persistRetry.maxMs - persistRetry.minMs));
@@ -1403,6 +1429,7 @@ function enqueuePersist(
         try {
           await attempt();
         } catch (second) {
+          persistFailures.set(job, second);
           logRejection("distribution:cache-write")(second);
         }
       }
@@ -2099,10 +2126,10 @@ export type DistributionCurrentOutcome =
   | {
       kind: "ok";
       current: DistributionCurrentData;
-      /** Where `current` came from: `cache` = served as-is (disk cache, or this
-       *  session's derive memo); `checkpoint` = resumed from the fold
-       *  checkpoint; `fold` = a full refold of the event log. */
-      source: "cache" | "checkpoint" | "fold";
+      /** Where `current` came from: `cache` = served as-is from disk;
+       *  `memo` = this session's derive memo; `checkpoint` = resumed from the
+       *  fold checkpoint; `fold` = a full refold of the event log. */
+      source: "cache" | "memo" | "checkpoint" | "fold";
       /** Set on a `fold` the absent-row guard refused to persist. */
       displayOnly?: true;
     }
@@ -2191,7 +2218,7 @@ async function loadOrDeriveDistributionCurrentOutcome(
       // caller must never be served that result without the read it asked for
       // actually running.
       const memoHit = getDeriveMemo(memoKey);
-      if (memoHit) return { kind: "ok", current: memoHit, source: "cache" };
+      if (memoHit) return { kind: "ok", current: memoHit, source: "memo" };
     }
 
     const { log, segmentOffsets, legacyEventFileNames } = await loadDistributionLogDetailed(
@@ -2505,11 +2532,18 @@ export function loadOrDeriveDistributionCurrentOutcomeForRead(
       persistCache: false,
       strictSegments,
     });
-    if (persistAfterReadFold && outcome.kind === "ok" && outcome.source === "fold" && !outcome.displayOnly) {
-      try {
-        await queueDistributionCurrentPersist(directoryHandle, monthFolderName, outcome.current);
-      } catch (error) {
-        logError("distribution:persist-after-read-fold", error);
+    // Not in a read-only session: the write path is gated by canMutate, and a
+    // blocked write would be retried after a 1-3 s sleep while this is awaited.
+    if (
+      persistAfterReadFold && outcome.kind === "ok" && outcome.source === "fold" &&
+      !outcome.displayOnly && !isReadOnlyMode()
+    ) {
+      // enqueuePersist never rejects; a failed write is reported through
+      // `persistFailures` (and logged as distribution:cache-write there).
+      const write = queueDistributionCurrentPersist(directoryHandle, monthFolderName, outcome.current);
+      await write;
+      if (persistFailures.has(write)) {
+        logError("distribution:persist-after-read-fold", persistFailures.get(write));
       }
     }
     return outcome;
