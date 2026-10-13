@@ -74,6 +74,7 @@ import {
   LEGACY_MONTH_SUBFOLDERS,
   safeWorkspaceFilePart,
 } from "../workspace/workspacePaths";
+import { timeAnswerStep } from "./answerTimings";
 import { markAnswerPendingLocally, mirrorAnswerLocally } from "./answerLocalMirror";
 import type { OutboxIdentity } from "./answerLocalMirror";
 
@@ -514,12 +515,12 @@ export async function readAllAnswerEventsForMonth(
       cached?.sealedConfirmed !== undefined &&
       cached.sealedEpoch === epoch &&
       nowMs - (cached.sealedAtMs ?? 0) < SEALED_REVALIDATE_MS;
-    const delta = await readAnswerEventDelta(mainDir, cached?.offsets ?? {}, undefined, {
+    const delta = await timeAnswerStep("load.openSegments", () => readAnswerEventDelta(mainDir, cached?.offsets ?? {}, undefined, {
       ...options,
       // Names the probe saw move since they were confirmed are dropped from the
       // set (and so re-opened by this read); every other confirmation survives.
       sealedConfirmed: sealedFresh ? stillSealedNames(cached.sealedConfirmed!, cached.sealedNamesGen ?? 0) : undefined,
-    });
+    }), { cachedEvents: cached?.events.size ?? 0 });
     const events = cached ? new Map(cached.events) : new Map<string, AnswerEvent>();
     for (const event of delta.events) events.set(event.eventId, event);
     setAnswerEventsCacheEntry(directoryHandle, monthFolderName, {
@@ -682,7 +683,11 @@ async function loadEmployeeItemState(
     contentHash: legacyContentHashOf(legacy),
     items: legacy?.items ?? [],
   };
-  const result = foldEmployeeEvents(ownEvents, { legacySeed, username, monthFolderName });
+  const result = await timeAnswerStep(
+    "load.fold",
+    async () => foldEmployeeEvents(ownEvents, { legacySeed, username, monthFolderName }),
+    { events: ownEvents.length },
+  );
   // Compatibility overlay for `saveEmployeeAnswers` (§11: explicitly stays on
   // the legacy whole-array-replace path, test/seed-only). That path can write
   // an item straight into `.answers.json` for an employee who ALSO has
@@ -1187,7 +1192,7 @@ async function performAnswerWrite(
     answeredOnBehalfBy: event.answeredOnBehalfBy,
   });
   const attempt = async (): Promise<{ ok: true }> => {
-    const decided = await retryDecisionRead(deadline, async () => {
+    const decided = await timeAnswerStep("submit.decide", () => retryDecisionRead(deadline, async () => {
       // Resolving the month folder is a share round trip like any other read
       // here; a transient fault on it is retried with the rest of this step.
       const mainDir = await getSampleMainDir(directoryHandle, monthFolderName, true);
@@ -1217,7 +1222,7 @@ async function performAnswerWrite(
       );
       const previous = foldedNow.file.items.find((item) => item.xrayImageId === xrayImageId);
       return { mainDir, seedEvent, blind: false, previous, decision: build({ previous }) };
-    });
+    }));
     const { mainDir, seedEvent, previous, decision, blind } = decided;
     if ("skip" in decision) return { ok: true as const };
 
@@ -1225,12 +1230,12 @@ async function performAnswerWrite(
     const batch = seedEvent ? [seedEvent, event] : [event];
     mirrorCandidate = candidateFor(event, previous);
     pendingEligible = event.eventType === "item-saved";
-    await appendAnswerEventSegment(mainDir, batch, writer, segmentConfig, {
+    await timeAnswerStep("submit.append", () => appendAnswerEventSegment(mainDir, batch, writer, segmentConfig, {
       deadline,
       listedSegmentNames: listedAnswerSegmentNames(directoryHandle, monthFolderName),
       // A blind append has no fresh listing: probe for a head another tab rotated to.
       probeAheadForHead: blind,
-    });
+    }), { events: batch.length });
     reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
     return { ok: true as const };
   };

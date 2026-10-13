@@ -338,6 +338,42 @@ describe("StorageSection - Task 7: clearing is refused while answers are unsent"
   });
 });
 
+describe("StorageSection - Task 8: timings download", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("downloads the timings report as answer-timings-<date>.json", async () => {
+    Object.defineProperty(navigator, "storage", {
+      value: { persisted: async () => true },
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, "indexedDB", {
+      value: { databases: async () => [] },
+      configurable: true,
+    });
+    const createUrl = vi.fn(() => "blob:timings");
+    const revokeUrl = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", { value: createUrl, configurable: true });
+    Object.defineProperty(URL, "revokeObjectURL", { value: revokeUrl, configurable: true });
+    let downloaded = "";
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        downloaded = this.download;
+      });
+
+    render(<StorageSection />);
+    (await screen.findByRole("button", { name: DEFAULT_LABELS.settings_timings_download })).click();
+
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+    expect(downloaded).toMatch(/^answer-timings-\d{4}-\d{2}-\d{2}\.json$/);
+    expect(createUrl).toHaveBeenCalledTimes(1);
+    expect(revokeUrl).toHaveBeenCalledWith("blob:timings");
+  });
+});
+
 describe("StorageSection - Finding 2: persistence state reflects a reload, not just this tab's runtime state", () => {
   afterEach(() => {
     cleanup();

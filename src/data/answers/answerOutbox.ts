@@ -3,6 +3,7 @@ import { logError } from "../storage/errorLogger";
 import { requestStoragePersistence } from "../storage/storageRegistry";
 import { queueAnswerForLanding } from "./answerLocalMirror";
 import { mintAnswerEventIdentity } from "./answerStorage";
+import { timeAnswerStep } from "./answerTimings";
 import { replayPendingAnswers } from "./pendingAnswerReplay";
 import type { ItemAnswer } from "./answerTypes";
 
@@ -30,7 +31,7 @@ export type LocalFirstOutcome = { stored: boolean };
 
 /** Durable in this browser, nothing awaited on the share. `stored:false` ⇒ caller must use the synchronous write. */
 export async function submitAnswerLocalFirst(month: string, username: string, item: ItemAnswer): Promise<LocalFirstOutcome> {
-  const stored = await queueAnswerForLanding(month, username, item, mintAnswerEventIdentity());
+  const stored = await timeAnswerStep("submit.localWrite", () => queueAnswerForLanding(month, username, item, mintAnswerEventIdentity()));
   if (stored) void requestStoragePersistence();
   return { stored };
 }

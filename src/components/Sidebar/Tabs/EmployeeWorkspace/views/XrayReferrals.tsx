@@ -14,6 +14,7 @@ import {
   upsertItemAnswer,
   upsertItemAnswerOnBehalf,
 } from "../../../../../data/answers/answerStorage";
+import { timeAnswerStep } from "../../../../../data/answers/answerTimings";
 import { getAnswerSubmitMode, requestAnswerFlush, submitAnswerLocalFirst } from "../../../../../data/answers/answerOutbox";
 import { clearAnswerDraftAndLegacy } from "../../../../../data/answers/answerDraftStore";
 import { forgetLastOpenSample, pickAutoSelectId, readLastOpenSample, rememberLastOpenSample } from "../../../../../data/answers/lastOpenSampleStore";
@@ -1333,7 +1334,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         ownAnswerFile,
         pendingItems,
       ] =
-        await Promise.all([
+        await timeAnswerStep("load.phase2", () => Promise.all([
           loadReferralLog(directoryHandle, selMonth, scopeOpts),
           loadReplacementLog(directoryHandle, selMonth, scopeOpts),
           adhocEntriesPromise,
@@ -1354,7 +1355,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           // This employee's submitted-but-unsent answers (local IndexedDB). Must
           // never fail the load: absence just means "nothing to overlay".
           canSeeAll ? [] : loadPendingAnswerItems(selMonth, username).catch((): ItemAnswer[] => []),
-        ]);
+        ]));
 
       // Both helpers already scope to `username` (fromEmployee / employeeUsername),
       // so the previous `canSeeAll ? new Set() : …` short-circuit bought nothing
@@ -1436,11 +1437,14 @@ export default function XrayReferrals({ directoryHandle }: Props) {
 
       // ── Phase 3: the full read (oversight always; personal scope only when
       // the mirror could not answer) ───────────────────────────────────────
-      const sample = await loadSampleMaster(directoryHandle, selMonth);
-      const sampleRows = (sample?.rows ?? []) as PreparedPopulationRow[];
-      // STRICT: the `?? []` below would otherwise turn a failed read into an empty queue — see DistributionUnreadableError.
-      const dist = await loadOrDeriveDistributionCurrentStrictForRead(directoryHandle, selMonth, sampleRows, {
-        persistAfterReadFold: true,
+      const { sample, dist } = await timeAnswerStep("load.phase3", async () => {
+        const sampleMaster = await loadSampleMaster(directoryHandle, selMonth);
+        const sampleRows = (sampleMaster?.rows ?? []) as PreparedPopulationRow[];
+        // STRICT: the `?? []` below would otherwise turn a failed read into an empty queue — see DistributionUnreadableError.
+        const derived = await loadOrDeriveDistributionCurrentStrictForRead(directoryHandle, selMonth, sampleRows, {
+          persistAfterReadFold: true,
+        });
+        return { sample: sampleMaster, dist: derived };
       });
       const all = [...(dist?.entries ?? personalMirror?.entries ?? []), ...adhocEntries];
 
@@ -1459,7 +1463,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       // must not blank the whole queue (it did — XQ-ANS-005). The failure is
       // isolated per employee, logged, and surfaced below by name.
       const unreadableAssignees: string[] = [];
-      const answerItems = canSeeAll
+      const answerItems = await timeAnswerStep("load.answers", async () => canSeeAll
         ? [
             ...(
               await Promise.all(
@@ -1474,7 +1478,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
             ).flatMap((f) => f?.items ?? []),
             ...adhocAnswerItems,
           ]
-        : [...ownAnswerFile!.items, ...adhocAnswerItems];
+        : [...ownAnswerFile!.items, ...adhocAnswerItems]);
 
       // Boot reporting FIRST, then the staleness check (DEFECT 8). The previous
       // order -- bail on a stale token before touching bootProgress -- assumed a

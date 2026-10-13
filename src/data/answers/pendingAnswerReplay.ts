@@ -29,6 +29,7 @@ import {
 } from "./answerLocalMirror";
 import type { ItemAnswer } from "./answerTypes";
 import { compareSavedAt } from "./savedAt";
+import { timeAnswerStep } from "./answerTimings";
 
 export type PendingReplayDeps = {
   loadPending: (username: string) => Promise<Array<{ month: string; item: ItemAnswer; identity?: OutboxIdentity }>>;
@@ -266,7 +267,7 @@ async function landOne(
   // isolated in its own try/catch so one item's failure can never stop
   // its neighbours, this month's remaining items, or any other month.
   try {
-    const result = await upsertItemAnswer(directoryHandle, month, username, item, identity);
+    const result = await timeAnswerStep("flush.item", () => upsertItemAnswer(directoryHandle, month, username, item, identity));
     if (result.ok) {
       clearAnswerDraft(answerDraftKey(month, item.xrayImageId, username));
       summary.replayed += 1;
@@ -312,6 +313,29 @@ async function runReplayPendingAnswers(
 
   for (const month of [...byMonth.keys()].sort((a, b) => a.localeCompare(b))) {
     const allEntries = byMonth.get(month)!;
+    const announced = await timeAnswerStep(
+      "flush.month",
+      () => replayOneMonth(directoryHandle, username, deps, month, allEntries, summary),
+      { items: allEntries.length },
+    );
+    if (announced) announce = true;
+  }
+
+  if (summary.replayed > 0 || announce) notifyLocalDataChange(["answers"]);
+  return summary;
+}
+
+/** One month's pass of `runReplayPendingAnswers`; resolves true when something on disk is newly announced. */
+async function replayOneMonth(
+  directoryHandle: DirectoryHandleLike,
+  username: string,
+  deps: PendingReplayDeps,
+  month: string,
+  allEntries: PendingEntry[],
+  summary: PendingReplaySummary
+): Promise<boolean> {
+  let announce = false;
+  {
     const entries: PendingEntry[] = [];
     for (const entry of allEntries) {
       const seen = seenOnDisk.get(seenOnDiskKey(username, month, entry.item));
@@ -322,11 +346,11 @@ async function runReplayPendingAnswers(
       await deps.markSynced(month, username, seen); // still retried: storage may have recovered
       summary.alreadyOnDisk += 1;
     }
-    if (entries.length === 0) continue;
+    if (entries.length === 0) return announce;
 
     if (!(await sampleMainDirExists(directoryHandle, month))) {
       summary.cannotLand += entries.length;
-      continue;
+      return announce;
     }
 
     // Identity-bearing entries (the local-first outbox) are landed directly:
@@ -338,7 +362,7 @@ async function runReplayPendingAnswers(
       if (entry.identity) await landOne(directoryHandle, month, username, entry, summary);
       else legacy.push(entry);
     }
-    if (legacy.length === 0) continue;
+    if (legacy.length === 0) return announce;
 
     const onDisk = await loadOnDiskItemsStrict(directoryHandle, month, username);
     if (!onDisk) {
@@ -348,7 +372,7 @@ async function runReplayPendingAnswers(
       // for as long as the flakiness lasts is exactly the noise CRITICAL-1
       // (see `landOne`) exists to avoid, applied here too.
       summary.cannotLand += legacy.length;
-      continue;
+      return announce;
     }
 
     for (const entry of legacy) {
@@ -367,9 +391,7 @@ async function runReplayPendingAnswers(
       await landOne(directoryHandle, month, username, entry, summary);
     }
   }
-
-  if (summary.replayed > 0 || announce) notifyLocalDataChange(["answers"]);
-  return summary;
+  return announce;
 }
 
 /**
