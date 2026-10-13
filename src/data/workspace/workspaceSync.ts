@@ -85,6 +85,7 @@ import {
 import { DEFAULT_SYNC_INTERVAL_MS, readSyncIntervalMs } from "./syncSettings";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { invalidateMonthLockCache } from "../population/monthLock";
+import { clearDeadSegmentRegistry } from "../storage/deadSegmentRegistry";
 
 /** The cadence used until the workspace's own setting has been read (and
  *  whenever there is no workspace, no setting, or an unreadable one). §2's
@@ -1174,6 +1175,8 @@ async function performSync(options: SyncRunOptions, manual: boolean): Promise<Sy
       for (const id of manual ? adhocAll : adhocMoved) bumpWorkspaceEpoch(directoryHandle, adhocMonthFolder(id));
     }
     if (manual) {
+      // A user-initiated refresh is the one way to re-check segments the registry gave up on.
+      clearDeadSegmentRegistry();
       broadcastDataRefresh("manual");
     } else {
       // A legacy-file answers change (or a peek that could not classify) leaves the

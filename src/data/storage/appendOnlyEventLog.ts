@@ -1567,6 +1567,12 @@ export type SegmentEventsDelta<TEvent> = {
    * from a persisted checkpoint by design: losing it only costs one re-open.
    */
   sealedConfirmedNames: Set<string>;
+  /**
+   * Segments the dead-segment registry has confirmed unopenable: listed in
+   * `segmentNames`, not read, and given no offset (a later successful open reads
+   * them from byte 0). Excluded from the strict-mode throw.
+   */
+  unreadableNames: string[];
 };
 
 /**
@@ -1625,10 +1631,10 @@ export async function readEventSegmentDelta<TEvent>(
     // it makes a month's whole event history disappear from every fold that
     // reads through here.
     if (!isNotFoundError(error)) throw error;
-    return { events: [], offsets: { ...knownOffsets }, segmentNames: [], sealedConfirmedNames: new Set() };
+    return { events: [], offsets: { ...knownOffsets }, segmentNames: [], sealedConfirmedNames: new Set(), unreadableNames: [] };
   }
 
-  const { tailTextByName, sizeByName, matchedNames, sealedConfirmedNames } = await readSegmentTails(eventsDir, {
+  const { tailTextByName, sizeByName, matchedNames, sealedConfirmedNames, deadNames } = await readSegmentTails(eventsDir, {
     suffix: config.segmentSuffix,
     knownOffsets,
     sealedConfirmed: options?.sealedConfirmed,
@@ -1638,15 +1644,20 @@ export async function readEventSegmentDelta<TEvent>(
   });
 
   if (strict) {
-    const skipped = matchedNames.filter((name) => !sizeByName.has(name));
-    if (skipped.length > 0) {
-      // Thrown before any of the reads below, and before the cache-shaped
-      // `offsets`/`events` are built — a caller that persists an incremental
-      // read cache (answerStorage.ts's own doc comment says so explicitly)
-      // must never have a chance to write a checkpoint that silently treats
-      // this segment as "read, found nothing new".
-      throw new EventSegmentUnreadableError(skipped);
-    }
+    // A name the registry has confirmed dead (DEAD_SEGMENT_MIN_SCANS failed opens
+    // over DEAD_SEGMENT_MIN_AGE_MS) is excluded on purpose. Strict mode exists so a
+    // caller never checkpoints "read, found nothing" over a segment it could not
+    // open — and that protection is intact: the dead name gets NO offset below, so
+    // a later successful open reads it from byte 0. What strict mode must not do
+    // is fail every read of the month forever because one colleague's file is
+    // quarantined; that froze the pending-answer replay for a day (2026-10-12).
+    const skipped = matchedNames.filter((name) => !sizeByName.has(name) && !deadNames.has(name));
+    // Thrown before any of the reads below, and before the cache-shaped
+    // `offsets`/`events` are built — a caller that persists an incremental
+    // read cache (answerStorage.ts's own doc comment says so explicitly)
+    // must never have a chance to write a checkpoint that silently treats
+    // this segment as "read, found nothing new".
+    if (skipped.length > 0) throw new EventSegmentUnreadableError(skipped);
   }
 
   const events: TEvent[] = [];
@@ -1660,7 +1671,7 @@ export async function readEventSegmentDelta<TEvent>(
   const offsets: Record<string, number> = { ...knownOffsets };
   for (const [name, size] of sizeByName) offsets[name] = size;
 
-  return { events, offsets, segmentNames: matchedNames, sealedConfirmedNames };
+  return { events, offsets, segmentNames: matchedNames, sealedConfirmedNames, unreadableNames: [...deadNames] };
 }
 
 /* ─────────────────────── event-set digest (fixed, not a parameter) ──────── */
