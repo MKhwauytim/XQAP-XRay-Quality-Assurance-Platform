@@ -54,6 +54,13 @@ const DB_VERSION = 1;
 
 export const MIRROR_SYNCED_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
+/**
+ * The identity of the answer event minted when an answer was submitted
+ * locally-first. Carried on the queued record so the later landing on the
+ * share reuses it, which makes a repeated landing fold to a single event.
+ */
+export type OutboxIdentity = { eventId: string; eventAt: string };
+
 type MirrorRecord = {
   key: string;
   month: string;
@@ -70,6 +77,11 @@ type MirrorRecord = {
    * (the app-level runner's mount tick, or its 30s tick) lands it.
    */
   synced: boolean;
+  /**
+   * Set only on records queued by `queueAnswerForLanding`; confirm and
+   * backfill puts omit it, so a confirmed record drops its identity.
+   */
+  identity?: OutboxIdentity;
 };
 
 function mirrorKey(month: string, username: string, xrayImageId: string): string {
@@ -243,6 +255,35 @@ export async function markAnswerPendingLocally(
 }
 
 /**
+ * Durably queue a submitted answer (`synced: false`) together with the event
+ * identity it will be landed under. Unlike the best-effort writers above this
+ * is the outbox's source of truth for an unsent answer, so it waits for a
+ * strict-durability commit and reports it: `true` only when the transaction
+ * committed, `false` when IndexedDB is unavailable or the write failed (the
+ * caller must then fall back to writing the share directly). Uses the QUEUE
+ * rule: a re-submit of the same image replaces the earlier unsent one, an older
+ * one never replaces a newer one.
+ */
+export async function queueAnswerForLanding(
+  month: string,
+  username: string,
+  item: ItemAnswer,
+  identity: OutboxIdentity
+): Promise<boolean> {
+  return withMirrorDb(
+    (db) =>
+      new Promise<boolean>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, "readwrite", { durability: "strict" });
+        issueGuardedPut(tx.objectStore(STORE_NAME), month, username, item, shouldQueueMirrorRecord, false, identity);
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      }),
+    false
+  );
+}
+
+/**
  * The QUEUE rule — used by `markAnswerPendingLocally`. A save that FAILED may
  * finish failing AFTER a newer save of the same item was already queued
  * (T1 fails late, T2 already pending). A blind put would let the older
@@ -346,7 +387,8 @@ function issueGuardedPut(
   username: string,
   item: ItemAnswer,
   shouldWrite: (existing: MirroredItemInfo | undefined, item: ItemAnswer) => boolean,
-  synced = true
+  synced = true,
+  identity?: OutboxIdentity
 ): void {
   const key = mirrorKey(month, username, item.xrayImageId);
   const getRequest = store.get(key);
@@ -361,6 +403,7 @@ function issueGuardedPut(
       item,
       mirroredAt: new Date().toISOString(),
       synced,
+      ...(identity ? { identity } : {}),
     } satisfies MirrorRecord);
   };
 }
@@ -469,11 +512,29 @@ export async function countPendingAnswers(month: string, username: string): Prom
  */
 export async function loadPendingAnswerRecords(
   username: string
-): Promise<Array<{ month: string; item: ItemAnswer }>> {
+): Promise<Array<{ month: string; item: ItemAnswer; identity?: OutboxIdentity }>> {
   const all = await readAllRecords();
   return all
     .filter((record) => record.username === username && !record.synced)
-    .map((record) => ({ month: record.month, item: record.item }));
+    .map((record) => ({
+      month: record.month,
+      item: record.item,
+      ...(record.identity ? { identity: record.identity } : {}),
+    }));
+}
+
+/** The still-unsent (`synced: false`) items of one month for one employee — what the UI overlays on top of what the share holds. */
+export async function loadPendingAnswerItems(month: string, username: string): Promise<ItemAnswer[]> {
+  const all = await readAllRecords();
+  return all
+    .filter((record) => record.month === month && record.username === username && !record.synced)
+    .map((record) => record.item);
+}
+
+/** How many answers are still unsent across ALL months and ad-hoc folders; every user's when `username` is omitted. */
+export async function countUnsentAnswers(username?: string): Promise<number> {
+  const all = await readAllRecords();
+  return all.filter((record) => !record.synced && (username === undefined || record.username === username)).length;
 }
 
 /**
