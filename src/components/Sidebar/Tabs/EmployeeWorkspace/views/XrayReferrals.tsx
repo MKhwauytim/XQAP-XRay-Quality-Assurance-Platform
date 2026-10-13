@@ -1390,7 +1390,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       const sample = await loadSampleMaster(directoryHandle, selMonth);
       const sampleRows = (sample?.rows ?? []) as PreparedPopulationRow[];
       // STRICT: the `?? []` below would otherwise turn a failed read into an empty queue — see DistributionUnreadableError.
-      const dist = await loadOrDeriveDistributionCurrentStrictForRead(directoryHandle, selMonth, sampleRows);
+      const dist = await loadOrDeriveDistributionCurrentStrictForRead(directoryHandle, selMonth, sampleRows, {
+        persistAfterReadFold: true,
+      });
       const all = [...(dist?.entries ?? personalMirror?.entries ?? []), ...adhocEntries];
 
       // Extract frozen daily quota for the current employee.

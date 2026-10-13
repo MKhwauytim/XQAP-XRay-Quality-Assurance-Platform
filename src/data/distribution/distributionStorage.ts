@@ -2096,7 +2096,16 @@ export class DistributionUnreadableError extends Error {
  * data: the month's event log is readable and holds no events.
  */
 export type DistributionCurrentOutcome =
-  | { kind: "ok"; current: DistributionCurrentData }
+  | {
+      kind: "ok";
+      current: DistributionCurrentData;
+      /** Where `current` came from: `cache` = served as-is (disk cache, or this
+       *  session's derive memo); `checkpoint` = resumed from the fold
+       *  checkpoint; `fold` = a full refold of the event log. */
+      source: "cache" | "checkpoint" | "fold";
+      /** Set on a `fold` the absent-row guard refused to persist. */
+      displayOnly?: true;
+    }
   | { kind: "absent" }
   | { kind: "unavailable"; error: unknown };
 
@@ -2165,7 +2174,7 @@ async function loadOrDeriveDistributionCurrentOutcome(
       );
       if (resumed) {
         setDeriveMemo(memoKey, resumed);
-        return { kind: "ok", current: resumed };
+        return { kind: "ok", current: resumed, source: "checkpoint" };
       }
       // null => a late event was found on THIS read, straight from disk --
       // strictly fresher information than anything the memo could hold, so
@@ -2182,7 +2191,7 @@ async function loadOrDeriveDistributionCurrentOutcome(
       // caller must never be served that result without the read it asked for
       // actually running.
       const memoHit = getDeriveMemo(memoKey);
-      if (memoHit) return { kind: "ok", current: memoHit };
+      if (memoHit) return { kind: "ok", current: memoHit, source: "cache" };
     }
 
     const { log, segmentOffsets, legacyEventFileNames } = await loadDistributionLogDetailed(
@@ -2210,7 +2219,7 @@ async function loadOrDeriveDistributionCurrentOutcome(
       hasQuotaForAssignedEmployees(cached, log)
     ) {
       setDeriveMemo(memoKey, cached);
-      return { kind: "ok", current: cached };
+      return { kind: "ok", current: cached, source: "cache" };
     }
 
     // Slow path: re-derive and update cache. segmentOffsets/legacyEventFileNames
@@ -2314,7 +2323,9 @@ async function loadOrDeriveDistributionCurrentOutcome(
       if (awaitCachePersist) await write;
     }
 
-    return { kind: "ok", current: withRevision };
+    return mayPersist
+      ? { kind: "ok", current: withRevision, source: "fold" }
+      : { kind: "ok", current: withRevision, source: "fold", displayOnly: true };
   } catch (error) {
     // Unexpected failure (corrupt log, permission loss, …) — expected
     // missing-file cases are handled quietly inside the loaders above.
@@ -2465,7 +2476,12 @@ export function loadDistributionLogForRead(
  *  A6a: always passes `{ persistCache: false }` — a read must never write
  *  `distribution.current.json` / sample mirrors back to disk (F3). Write
  *  flows must call `refreshDistributionCacheAfterWrite` explicitly instead
- *  (A6b).
+ *  (A6b). The ONE opt-in exception is `options.persistAfterReadFold`, used by
+ *  the two queue-rendering employee views (XrayReferrals, XrayInspectionResults)
+ *  so a refold is not repeated on every mount: after a read that actually
+ *  folded the log (`source === "fold"`, not display-only) the result is
+ *  persisted, awaited, with any failure swallowed (logged) so it can never
+ *  fail the read. It is part of the dedupe key.
  *
  *  `options.strictSegments` forwards to `loadOrDeriveDistributionCurrentOutcome`'s
  *  own `strictSegments` (see `LoadOrDeriveDistributionCurrentOptions` — and its
@@ -2479,16 +2495,25 @@ export function loadOrDeriveDistributionCurrentOutcomeForRead(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   sampleRows: PreparedPopulationRow[],
-  options?: { strictSegments?: boolean }
+  options?: { strictSegments?: boolean; persistAfterReadFold?: boolean }
 ): Promise<DistributionCurrentOutcome> {
   const strictSegments = options?.strictSegments ?? false;
-  const key = `${workspaceScopeId(directoryHandle)}|${monthFolderName}|${workspaceEpoch(directoryHandle, monthFolderName)}|dist-current|${sampleRows.length}${strictSegments ? "|strict-segments" : ""}`;
-  return dedupeInFlight(key, () =>
-    loadOrDeriveDistributionCurrentOutcome(directoryHandle, monthFolderName, sampleRows, {
+  const persistAfterReadFold = options?.persistAfterReadFold ?? false;
+  const key = `${workspaceScopeId(directoryHandle)}|${monthFolderName}|${workspaceEpoch(directoryHandle, monthFolderName)}|dist-current|${sampleRows.length}${strictSegments ? "|strict-segments" : ""}${persistAfterReadFold ? "|persist" : ""}`;
+  return dedupeInFlight(key, async () => {
+    const outcome = await loadOrDeriveDistributionCurrentOutcome(directoryHandle, monthFolderName, sampleRows, {
       persistCache: false,
       strictSegments,
-    })
-  );
+    });
+    if (persistAfterReadFold && outcome.kind === "ok" && outcome.source === "fold" && !outcome.displayOnly) {
+      try {
+        await queueDistributionCurrentPersist(directoryHandle, monthFolderName, outcome.current);
+      } catch (error) {
+        logError("distribution:persist-after-read-fold", error);
+      }
+    }
+    return outcome;
+  });
 }
 
 export function loadOrDeriveDistributionCurrentForRead(
@@ -2536,13 +2561,16 @@ export async function loadOrDeriveDistributionCurrentStrictForRead(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   sampleRows: PreparedPopulationRow[],
-  options?: { strictSegments?: boolean }
+  options?: { strictSegments?: boolean; persistAfterReadFold?: boolean }
 ): Promise<DistributionCurrentData | null> {
   const outcome = await loadOrDeriveDistributionCurrentOutcomeForRead(
     directoryHandle,
     monthFolderName,
     sampleRows,
-    { strictSegments: options?.strictSegments ?? false }
+    {
+      strictSegments: options?.strictSegments ?? false,
+      persistAfterReadFold: options?.persistAfterReadFold ?? false,
+    }
   );
   if (outcome.kind === "unavailable") {
     throw outcome.error instanceof DistributionUnreadableError

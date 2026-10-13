@@ -233,7 +233,11 @@ describe("XrayReferrals — submit broadcasts a data refresh", () => {
     clearReadLog(root);
     broadcastDataRefresh("manual");
     await waitFor(() => {
-      expect(getReadLog(root).some((path) => path.includes("sample.master.json"))).toBe(true);
+      // The first load folded the log and persisted the cache + this employee's
+      // mirror (persistAfterReadFold), so the reload is now served from the
+      // mirror and no longer touches sample.master.json: the per-employee
+      // mirror read is the reload evidence.
+      expect(getReadLog(root).some((path) => path.includes("emp-a.samples.json"))).toBe(true);
     });
   });
 });

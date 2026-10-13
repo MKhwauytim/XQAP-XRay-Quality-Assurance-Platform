@@ -367,7 +367,8 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
       const distribution = await loadOrDeriveDistributionCurrentStrictForRead(
         directoryHandle,
         selectedMonth,
-        sampleMaster?.rows ?? []
+        sampleMaster?.rows ?? [],
+        { persistAfterReadFold: true }
       );
       const log = await loadDistributionLogForRead(directoryHandle, selectedMonth);
 
