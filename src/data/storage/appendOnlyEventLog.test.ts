@@ -92,8 +92,8 @@ const TEST_LOG: AppendOnlyEventLogConfig = {
 
 const WRITER = { deviceId: "device-a", sessionId: "session-a", scopeId: "scope-1" };
 
-/** ~20 KB per line, so a handful of appends crosses the 128 KiB cap. */
-const FILLER = "x".repeat(20_000);
+/** ~1/5 of the cap per line, so a handful of appends crosses MAX_OPEN_SEGMENT_BYTES. */
+const FILLER = "x".repeat(Math.ceil(MAX_OPEN_SEGMENT_BYTES / 5));
 
 let nextSeq = 0;
 
@@ -1178,7 +1178,10 @@ describe("round 3: a stale NotFound on an unreadable-hop target is retried befor
     const { delays } = await withCapturedSleeps(async () => {
       for (let i = 0; i < 6; i += 1) {
         if (i === 3) __resetAppendOnlyEventLogMemosForTests();
-        await appendEventSegment(dir, [bigEvent(`H${i}`), bigEvent(`I${i}`), bigEvent(`J${i}`)], w, TEST_LOG);
+        // Batch = 3 × 15% of the cap: two batches fit a segment, a third rotates,
+        // the same batch-to-cap ratio the pinned op counts below were measured at.
+        const sized = (id: string) => ({ ...event(id), filler: "x".repeat(Math.floor(MAX_OPEN_SEGMENT_BYTES * 0.15)) });
+        await appendEventSegment(dir, [sized(`H${i}`), sized(`I${i}`), sized(`J${i}`)], w, TEST_LOG);
       }
     });
     const ops = getOperationLog(eventsDir);

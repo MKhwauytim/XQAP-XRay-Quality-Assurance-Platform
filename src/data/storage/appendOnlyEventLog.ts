@@ -183,32 +183,28 @@ export type AppendOnlyEventLogConfig = {
  * and MAX bytes, so the long-run average settles at ~MAX/2 no matter how many
  * events the session goes on to write.
  *
- * Why 128 KiB, and not the smaller/larger values also on the table:
+ * Why 1 MiB / 10,000 lines (raised from 128 KiB / 2,000):
  *
- * - The share cost of one append is `fixed round trips + payload`. Chromium's
- *   `createWritable` is swap-file based: open, write, close, atomic rename,
- *   plus this module's own post-close `verifySegmentSize` open — on the order
- *   of 20–40 ms of fixed latency on the UNC/SMB share this app is deployed to.
- *   128 KiB of payload at even a pessimistic 10 MB/s is ~13 ms, i.e. already a
- *   minority of the per-append cost. Halving the cap to 64 KiB would shave only
- *   a few ms off an append while doubling the file count, so the write side has
- *   clearly hit diminishing returns by here.
+ * - 1 MB ≈ 3,000–5,000 answer events. On an SMB share one 1 MB read is far
+ *   cheaper than eight 128 KB opens — each open is a round trip, bytes stream.
+ *   Field evidence 2026-10-12: ~2,000 segments in one month folder.
  * - Every extra segment costs the READ side a `getFile()` round trip per fold
- *   (`readSegmentTails` opens each matched name), and that cost is paid by every
- *   client on every fold, forever — segments are never merged. At ~258 bytes per
- *   event line (measured on a realistic event with an Arabic `notes` field),
- *   128 KiB holds ~500 events, so a 9,000-event month adds ~18 files. Raising
- *   the cap to 256 KiB would halve that but double both the worst-case single
- *   append and the amount of content sitting in one crash-exposed rewrite.
+ *   (`readSegmentTails` opens each matched name), paid by every client on every
+ *   fold, forever — segments are never merged. The old 128 KiB cap produced
+ *   ~2,000 files in one folder; the new cap cuts that by roughly 8x.
+ * - The cost of the larger cap is a larger worst-case single append and a
+ *   larger crash-exposed rewrite. At 1 MiB the append still streams in one
+ *   round trip's worth of fixed latency plus payload, so the trade favours
+ *   fewer files.
  *
  * The line cap is a second, cheap bound for the degenerate shape the byte cap
- * cannot see: it only binds when the average line is under ~65 bytes, which no
+ * cannot see: it only binds when the average line is under ~105 bytes, which no
  * real distribution event reaches. It is belt-and-braces against a future, much
  * smaller event shape making a segment expensive to parse and dedupe rather
  * than expensive to transfer — not a threshold expected to fire today.
  */
-export const MAX_OPEN_SEGMENT_BYTES = 131_072;
-export const MAX_OPEN_SEGMENT_LINES = 2_000;
+export const MAX_OPEN_SEGMENT_BYTES = 1_048_576;
+export const MAX_OPEN_SEGMENT_LINES = 10_000;
 
 /**
  * Upper bound on the rotation counter. A writer that somehow reached this would
