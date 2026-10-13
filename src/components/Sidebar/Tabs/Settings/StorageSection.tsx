@@ -8,6 +8,8 @@ import {
 } from "../../../../data/storage/storageRegistry";
 import { isFileOrigin } from "../../../../data/workspace/originDetection";
 import { logError } from "../../../../data/storage/errorLogger";
+import { countUnsentAnswers } from "../../../../data/answers/answerLocalMirror";
+import { answerTimingsToJson } from "../../../../data/answers/answerTimings";
 import { useLabels } from "../../../../data/labels/useLabels";
 import { usePermissions } from "../../../../auth/usePermissions";
 import { ConfirmDialog } from "../../../ConfirmDialog/ConfirmDialog";
@@ -29,6 +31,19 @@ function persistenceLabelKey(state: PersistenceState) {
   return "storage_persistence_denied" as const;
 }
 
+/** Same blob+anchor download pattern as `data/debug/demoDebugReport.ts`'s `downloadJson`. */
+function downloadAnswerTimings(): void {
+  const blob = new Blob([answerTimingsToJson()], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `answer-timings-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+}
+
 export function StorageSection() {
   const labels = useLabels();
   // Finding 3: the reset wipes the session (signs everyone out), all label
@@ -46,6 +61,7 @@ export function StorageSection() {
   const [foreignDbs, setForeignDbs] = useState<string[]>([]);
   const [persistence, setPersistence] = useState<PersistenceState>(getPersistenceState());
   const [resetFailed, setResetFailed] = useState(false);
+  const [resetBlockedUnsent, setResetBlockedUnsent] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -102,6 +118,21 @@ export function StorageSection() {
     if (!canReset) return;
     setShowResetConfirm(false);
     setResetFailed(false);
+    setResetBlockedUnsent(false);
+    // Answers saved on this device but not yet written to the shared folder
+    // live only in the local mirror; clearing storage would discard them.
+    // If the mirror cannot be read, fail closed: refuse rather than risk loss.
+    let unsent: number;
+    try {
+      unsent = await countUnsentAnswers();
+    } catch (error) {
+      logError("StorageSection.handleReset.countUnsent", error);
+      unsent = 1;
+    }
+    if (unsent > 0) {
+      setResetBlockedUnsent(true);
+      return;
+    }
     try {
       await clearOwnedStorage();
     } catch (error) {
@@ -166,6 +197,12 @@ export function StorageSection() {
         </p>
       )}
 
+      {resetBlockedUnsent && (
+        <p className="storage-reset-error" role="alert">
+          {labels.settings_storage_clear_blocked_unsent}
+        </p>
+      )}
+
       <button
         type="button"
         onClick={() => {
@@ -180,6 +217,10 @@ export function StorageSection() {
         title={!canReset ? labels.storage_reset_denied_title : undefined}
       >
         {labels.storage_reset_button}
+      </button>
+
+      <button type="button" onClick={downloadAnswerTimings}>
+        {labels.settings_timings_download}
       </button>
 
       <ConfirmDialog

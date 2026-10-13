@@ -5,25 +5,39 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
-    "version": "v153.28",
+    "version": "v153.30",
     "date": "2026-10-13",
     "bucket": "enhancement",
     "scope": "deck3",
     "title": "bake the saved text template into the defaults, drop the s3 contents tail, lower «المحددات»"
   },
   {
-    "version": "v153.27",
+    "version": "v153.29",
     "date": "2026-10-13",
     "bucket": "enhancement",
     "scope": "report import",
     "title": "rows only from the examined-sample workbook; follow-up and بعد التعديل enrich by id, «نعم» + same exam month first"
   },
   {
-    "version": "v153.26",
+    "version": "v153.28",
     "date": "2026-10-13",
     "bucket": "enhancement",
     "scope": "deck3",
     "title": "align level determinants, drop two captions, empty pages print-off by default"
+  },
+  {
+    "version": "v153.27",
+    "date": "2026-10-13",
+    "bucket": "feature",
+    "scope": "integrity",
+    "title": "admin boot scan heals live files from a verified .tmp/.bak"
+  },
+  {
+    "version": "v153.26",
+    "date": "2026-10-13",
+    "bucket": "feature",
+    "scope": "answers",
+    "title": "local-first submit outbox, sync-interval replay, unsent-answer banner and timings"
   },
   {
     "version": "v153.25",
@@ -59,19 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "executive report",
     "title": "recommendations reworded in plain, practical language"
-  },
-  {
-    "version": "v153.21",
-    "date": "2026-10-12",
-    "bucket": "enhancement",
-    "scope": "executive report",
-    "title": "KPI page in percentages with numbers under, port shares, نتائج خاطئة"
-  },
-  {
-    "version": "v153.20",
-    "date": "2026-10-12",
-    "bucket": "enhancement",
-    "scope": "executive report",
-    "title": "remove per-port marking pages, KPI aside under number, support workbook matches every page"
   }
 ];

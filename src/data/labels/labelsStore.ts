@@ -398,7 +398,11 @@ export const DEFAULT_LABELS = {
   // retried automatically every 30s — this is the visible "not saved yet"
   // signal so nothing silently sits unsynced. `{count}` is how many of this
   // employee's own answers are still pending.
-  ew_answers_pending_sync:         "{count} إجابة لم تصل إلى مجلد العمل المشترك بعد — تتم إعادة المحاولة تلقائياً كل 30 ثانية.",
+  ew_answers_pending_sync:         "{count} إجابة محفوظة على هذا الجهاز ولم تصل إلى مجلد العمل المشترك بعد — تُرسل تلقائيًا.",
+  ew_answer_saved_locally:         "تم الحفظ على هذا الجهاز، وسيُرسل إلى مجلد العمل تلقائيًا.",
+  ew_answers_send_now:             "إرسال الآن",
+  settings_storage_clear_blocked_unsent: "لديك إجابات لم تُرسل بعد إلى مجلد العمل. أرسلها أولًا ثم أعد المحاولة.",
+  settings_timings_download:       "تنزيل سجل التوقيت",
 
   // Population — sampling & processing guards
   sample_redraw_blocked: "لا يمكن إعادة سحب العينة بعد بدء التوزيع: يوجد سجل توزيع فعّال لهذا الشهر، وإعادة السحب ستؤدي إلى فقدان التعيينات والإجابات المسجلة.",
@@ -845,8 +849,8 @@ export const DEFAULT_LABELS = {
 
   // ── App shell — C6 (Batch 2) label coverage audit ──
   app_demo_banner:           "الوضع التجريبي — بيانات وهمية في الذاكرة: كل التعديلات تعمل فعلياً لكنها لا تُحفظ على الجهاز وتزول عند تسجيل الخروج",
-  app_bak_recovered_warning: "تعذّرت قراءة النسخة الأصلية من الملف \"{fileName}\"، وتم عرضه من النسخة \"{source}\" — قد تكون البيانات غير مكتملة. النسخة الأصلية لا تزال تالفة وسيتكرر هذا التنبيه حتى تُعاد كتابتها؛ يُرجى إبلاغ مسؤول النظام باسم الملف.",
-  app_close_aria:            "إغلاق",
+  app_bak_recovered_warning: "تعذّرت قراءة النسخة الأصلية من الملف \"{fileName}\"، وتم عرضه من النسخة \"{source}\" — قد تكون البيانات غير مكتملة. النسخة الأصلية لا تزال تالفة، وسيُصلحها مسؤول النظام تلقائيًا عند تسجيل دخوله التالي.",
+  app_bak_recovered_warning_admin: "تعذّرت قراءة النسخة الأصلية من الملف \"{fileName}\"، وتم عرضه من النسخة \"{source}\" — قد تكون البيانات غير مكتملة. النسخة الأصلية لا تزال تالفة وسيتكرر هذا التنبيه حتى تُعاد كتابتها؛ تعذّر الإصلاح التلقائي، راجع سجل الأخطاء باسم الملف.",  app_close_aria:            "إغلاق",
   app_auto_backup_running:   "جاري إنشاء النسخة الاحتياطية التلقائية...",
   app_auto_backup_done:      "تم إنشاء النسخة الاحتياطية التلقائية: {folderName}",
   app_auto_backup_failed:    "تعذر إنشاء النسخة الاحتياطية التلقائية: {error}",
@@ -1098,6 +1102,7 @@ export const DEFAULT_LABELS = {
   um_action_type_sync_interval_changed:      "تغيير فترة المزامنة",
   um_action_type_admin_account_changed:      "تعديل حساب المدير",
   um_action_type_report_generated:           "توليد تقرير أو تصدير",
+  um_action_type_file_auto_healed:           "إصلاح ملف تالف تلقائيًا",
 
   // ── Actions viewer — filter bar ──
   um_actions_group_users:         "المستخدمون والصلاحيات",

@@ -180,7 +180,8 @@ export type WorkspaceActionType =
   | "label-override-changed"
   | "sync-interval-changed"
   | "admin-account-changed"
-  | "report-generated";
+  | "report-generated"
+  | "file-auto-healed";
 
 /**
  * Every `WorkspaceActionType`, in union order — the canonical enumeration.
@@ -244,6 +245,7 @@ export const ALL_ACTION_TYPES: readonly WorkspaceActionType[] = [
   "sync-interval-changed",
   "admin-account-changed",
   "report-generated",
+  "file-auto-healed",
 ];
 
 /**

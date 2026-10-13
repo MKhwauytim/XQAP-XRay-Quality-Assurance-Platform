@@ -22,8 +22,10 @@ import { BootSplashOverlay } from "./components/Sidebar/BootSplashOverlay";
 import { IntegrityReportDialog } from "./components/IntegrityReportDialog/IntegrityReportDialog";
 import {
   runBootIntegrityScan,
+  shouldRunBootIntegrityScan,
   type BootIntegrityReport,
 } from "./data/integrity/bootIntegrityScan";
+import { BAK_RECOVERY_HEALED_EVENT } from "./data/storage/bakRecoveryReport";
 import { SIDEBAR_TABS } from "./components/Sidebar/Tabs/tabRegistry";
 import { FeedbackWidget } from "./components/FeedbackWidget/FeedbackWidget";
 import { NotificationBanner } from "./components/NotificationBanner/NotificationBanner";
@@ -84,6 +86,7 @@ export function AppContent({ session }: AppContentProps) {
     () => readUserManagementState().featurePermissions
   );
   const [bakWarning, setBakWarning] = useState<string | null>(null);
+  const bakWarningFileRef = useRef<string | null>(null);
   const [autoBackupNotice, setAutoBackupNotice] = useState<string | null>(null);
   const [autoBackupRunning, setAutoBackupRunning] = useState(false);
   const [integrityReport, setIntegrityReport] = useState<BootIntegrityReport | null>(null);
@@ -170,14 +173,36 @@ export function AppContent({ session }: AppContentProps) {
       // "recovered from the backup", which told a user nothing they could act on
       // or report — a deployment saw this on every sign-in for every user and
       // could not say which file it was about.
+      // Only an admin session repairs (boot integrity scan), so only an admin
+      // is told the automatic repair did not clear it; everyone else is told
+      // the admin will repair it at their next sign-in.
+      const labels = getLabels();
+      const template =
+        session.role === "admin"
+          ? labels.app_bak_recovered_warning_admin
+          : labels.app_bak_recovered_warning;
+      bakWarningFileRef.current = e.detail.fileName;
       setBakWarning(
-        getLabels()
-          .app_bak_recovered_warning.replace("{fileName}", e.detail.fileName)
+        template
+          .replace("{fileName}", e.detail.fileName)
           .replace("{source}", e.detail.source ?? ".bak")
       );
     };
     window.addEventListener("data:recovered-from-bak", handler as EventListener);
     return () => window.removeEventListener("data:recovered-from-bak", handler as EventListener);
+  }, [session.role]);
+
+  useEffect(() => {
+    // The admin boot scan rewrote this file's live copy: the banner about it is
+    // stale. Only dismiss the banner that is actually about THIS file.
+    const handler = (e: CustomEvent<{ fileName: string }>) => {
+      if (bakWarningFileRef.current === e.detail.fileName) {
+        bakWarningFileRef.current = null;
+        setBakWarning(null);
+      }
+    };
+    window.addEventListener(BAK_RECOVERY_HEALED_EVENT, handler as EventListener);
+    return () => window.removeEventListener(BAK_RECOVERY_HEALED_EVENT, handler as EventListener);
   }, []);
 
   useEffect(() => {
@@ -191,15 +216,23 @@ export function AppContent({ session }: AppContentProps) {
     // manager's. Demo mode is excluded because its workspace is in-memory and
     // has nothing real to repair.
     if (
-      session.role !== "admin" ||
-      session.mode === "demo" ||
       !directoryHandle ||
-      workspaceStatus !== "ready"
+      !shouldRunBootIntegrityScan({
+        role: session.role,
+        mode: session.mode,
+        hasWorkspace: true,
+        workspaceReady: workspaceStatus === "ready",
+      })
     ) return;
     let cancelled = false;
     void (async () => {
       try {
-        const report = await runBootIntegrityScan(directoryHandle);
+        // `siblingHeal` (admin-only, like the whole scan): rewrite live files
+        // that fail integrity from a verified .tmp/.bak, archive the damaged
+        // bytes, and log it. Never run from a read path or a non-admin session.
+        const report = await runBootIntegrityScan(directoryHandle, {
+          siblingHeal: { actor: session.username },
+        });
         // Only surfaces when there is something to say — a healthy workspace
         // must not greet an admin with a dialog on every sign-in.
         if (!cancelled && report.hasFindings) setIntegrityReport(report);
@@ -216,7 +249,7 @@ export function AppContent({ session }: AppContentProps) {
     return () => {
       cancelled = true;
     };
-  }, [autoBackupAttemptKey, directoryHandle, session.mode, session.role, workspaceStatus]);
+  }, [autoBackupAttemptKey, directoryHandle, session.mode, session.role, session.username, workspaceStatus]);
 
   useEffect(() => {
     // Auto-backup runs for admin AND manager sessions now -- day-to-day deployments are
