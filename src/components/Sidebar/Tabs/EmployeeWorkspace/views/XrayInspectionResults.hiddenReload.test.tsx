@@ -19,6 +19,7 @@ import type { PreparedPopulationRow } from "../../../../../data/population/popul
 import { notifyLocalDataChange, broadcastDataRefresh, type DataRefreshFamily } from "../../../../../data/workspace/dataRefreshSignal";
 import { TabActiveContext } from "../../../../../app/tabActiveContext";
 import * as sampleStorage from "../../../../../data/sampling/sampleStorage";
+import * as mirrorStorage from "../../../../../data/samples/sampleMirrorStorage";
 import * as answerStorage from "../../../../../data/answers/answerStorage";
 import * as mirrorBackfill from "../../../../../data/answers/pendingAnswerReplay";
 import XrayInspectionResults from "./XrayInspectionResults";
@@ -215,7 +216,9 @@ describe("XrayInspectionResults hidden-view reload gating", () => {
     } finally {
       vi.useRealTimers();
     }
-    const loadSpy = vi.spyOn(sampleStorage, "loadSampleMaster");
+    // Own-scope: the seeded mirror is current, so a reload reads it instead of
+    // the sample master (Task 10) -- the mirror read is the per-load marker.
+    const loadSpy = vi.spyOn(mirrorStorage, "loadEmployeeSampleMirror");
     rerender(ui(true));
     await flush();
     expect(loadSpy).toHaveBeenCalledTimes(1); // exactly one catch-up
