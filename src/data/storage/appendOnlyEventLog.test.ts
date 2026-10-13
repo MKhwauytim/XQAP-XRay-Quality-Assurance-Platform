@@ -450,9 +450,12 @@ describe("rotation preserves every event exactly once", () => {
 
   it("loses no event and writes none twice when the rotation write fails outright", async () => {
     const dir = root();
-    for (let i = 0; i < 6; i += 1) {
+    // Four events fill seg 0 (~210 KB each); the fifth is the one that rotates.
+    for (let i = 0; i < 4; i += 1) {
       await appendEventSegment(dir, [bigEvent(`IMG-${i}`)], WRITER, TEST_LOG);
     }
+    // Guard the arithmetic: exactly one segment exists, so the next append must rotate.
+    expect(await segmentNames(dir)).toEqual([name(0)]);
     const sealedBefore = await readSegmentText(dir, name(0));
 
     // The rotation target refuses to be created, permanently — the closest
@@ -479,8 +482,8 @@ describe("rotation preserves every event exactly once", () => {
     // Retrying the same batch lands it exactly once.
     await appendEventSegment(dir, [bigEvent("CRASH")], WRITER, TEST_LOG);
     const events = await loadAll(dir);
-    expect(events).toHaveLength(7);
-    expect(new Set(events.map((e) => e.eventId)).size).toBe(7);
+    expect(events).toHaveLength(5);
+    expect(new Set(events.map((e) => e.eventId)).size).toBe(5);
   });
 });
 
@@ -1175,12 +1178,12 @@ describe("round 3: a stale NotFound on an unreadable-hop target is retried befor
     const w = { ...WRITER, stable: true };
     const eventsDir = await eventsDirOf(dir);
     clearOperationLog(eventsDir);
+    // Batch = 3 × 15% of the cap: two batches fit a segment, a third rotates,
+    // the same batch-to-cap ratio the pinned op counts below were measured at.
+    const sized = (id: string) => ({ ...event(id), filler: "x".repeat(Math.floor(MAX_OPEN_SEGMENT_BYTES * 0.15)) });
     const { delays } = await withCapturedSleeps(async () => {
       for (let i = 0; i < 6; i += 1) {
         if (i === 3) __resetAppendOnlyEventLogMemosForTests();
-        // Batch = 3 × 15% of the cap: two batches fit a segment, a third rotates,
-        // the same batch-to-cap ratio the pinned op counts below were measured at.
-        const sized = (id: string) => ({ ...event(id), filler: "x".repeat(Math.floor(MAX_OPEN_SEGMENT_BYTES * 0.15)) });
         await appendEventSegment(dir, [sized(`H${i}`), sized(`I${i}`), sized(`J${i}`)], w, TEST_LOG);
       }
     });

@@ -208,7 +208,7 @@ export const MAX_OPEN_SEGMENT_LINES = 10_000;
 
 /**
  * Upper bound on the rotation counter. A writer that somehow reached this would
- * have written ~128 GiB in one session; the cap exists so a corrupt/hostile
+ * have written ~1 TiB in one session (999,999 segments × 1 MiB); the cap exists so a corrupt/hostile
  * name can never be parsed into an unbounded number, not because it is
  * reachable.
  */

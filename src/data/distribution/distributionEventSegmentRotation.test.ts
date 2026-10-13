@@ -237,9 +237,12 @@ describe("segment rotation — reader offsets", () => {
 describe("segment rotation — crash and resume", () => {
   it("loses no events and writes none twice when the rotation write fails outright", async () => {
     const root = createMemoryDirectory("root");
-    for (let i = 0; i < 6; i += 1) {
+    // Four events fill seg 0 (~210 KB each); the fifth is the one that rotates.
+    for (let i = 0; i < 4; i += 1) {
       await appendDistributionEventSegment(root, [bigEvent(`IMG-${i}`)], writer("s1"));
     }
+    // Guard the arithmetic: exactly one segment exists, so the next append must rotate.
+    expect(await segmentNames(root)).toEqual([distributionEventSegmentFileName(DEVICE, "s1")]);
     const sealedBefore = await readSegmentText(root, distributionEventSegmentFileName(DEVICE, "s1"));
 
     // The rotation target refuses to be created, permanently — the closest
@@ -264,8 +267,8 @@ describe("segment rotation — crash and resume", () => {
     // Retrying the same batch lands it exactly once.
     await appendDistributionEventSegment(root, [bigEvent("IMG-CRASH")], writer("s1"));
     const events = await loadDistributionEventSegments(root);
-    expect(events).toHaveLength(7);
-    expect(new Set(events.map((event) => event.eventId)).size).toBe(7);
+    expect(events).toHaveLength(5);
+    expect(new Set(events.map((event) => event.eventId)).size).toBe(5);
   });
 
   it("resumes in the right segment after the writer loses its in-memory position", async () => {

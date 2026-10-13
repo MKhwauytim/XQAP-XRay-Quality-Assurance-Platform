@@ -114,7 +114,8 @@ describe("segment names are short enough for a deep UNC path", () => {
 
 describe("chunkEventsForSegmentAppends", () => {
   it("bounds every chunk by bytes and by lines, preserving order", () => {
-    // One event over the line cap, so the line bound is the one that splits.
+    // One event over the line cap. At ~250 B per event the byte cap splits first,
+    // so this exercises chunking generally; the line bound is not what splits here.
     const events = assignEvents(MAX_OPEN_SEGMENT_LINES + 1);
     const chunks = chunkEventsForSegmentAppends(events);
     expect(chunks.length).toBeGreaterThan(1);
