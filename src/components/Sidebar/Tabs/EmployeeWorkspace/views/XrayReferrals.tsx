@@ -13,6 +13,7 @@ import {
   upsertItemAnswer,
   upsertItemAnswerOnBehalf,
 } from "../../../../../data/answers/answerStorage";
+import { getAnswerSubmitMode, requestAnswerFlush, submitAnswerLocalFirst } from "../../../../../data/answers/answerOutbox";
 import { clearAnswerDraftAndLegacy } from "../../../../../data/answers/answerDraftStore";
 import { forgetLastOpenSample, pickAutoSelectId, readLastOpenSample, rememberLastOpenSample } from "../../../../../data/answers/lastOpenSampleStore";
 import { answerFolderForEntry, legacyPanelDraftKey, panelDraftKey } from "./XrayReferrals/answerRouting";
@@ -379,6 +380,29 @@ function thrownWriteErrorText(error: unknown): string {
 }
 
 /**
+ * The write behind a submit. A self-answer in `outbox` mode lands on this
+ * device first and the share write happens in the background
+ * (`requestAnswerFlush`); if browser storage is unavailable it falls back to
+ * the synchronous share write, never a false "saved". Sync mode and answering
+ * on someone else's behalf keep the direct write.
+ */
+async function submitAnswer(
+  directoryHandle: DirectoryHandleLike, folder: string, forUser: string, username: string, item: ItemAnswer,
+): Promise<{ result: { ok: true } | { ok: false; error: string }; savedLocallyOnly: boolean }> {
+  if (forUser !== username) {
+    return { result: await upsertItemAnswerOnBehalf(directoryHandle, folder, forUser, item, username), savedLocallyOnly: false };
+  }
+  if (getAnswerSubmitMode() === "outbox") {
+    const outcome = await submitAnswerLocalFirst(folder, forUser, item);
+    if (outcome.stored) {
+      requestAnswerFlush(directoryHandle, username);
+      return { result: { ok: true }, savedLocallyOnly: true };
+    }
+  }
+  return { result: await upsertItemAnswer(directoryHandle, folder, forUser, item), savedLocallyOnly: false };
+}
+
+/**
  * The inspection panel's "submit answers" write.
  *
  * Two write paths, chosen by WHOSE assignment this is. A self-answer goes
@@ -391,8 +415,11 @@ function thrownWriteErrorText(error: unknown): string {
  * apart.
  *
  * Module-level for the same budget reason as `createReopenHandlers` below.
+ *
+ * @internal Exported only so the local-first branch can be tested directly.
  */
-function createSaveAnswerHandler(deps: {
+// eslint-disable-next-line react-refresh/only-export-components -- test seam, not a component export
+export function createSaveAnswerHandler(deps: {
   directoryHandle: DirectoryHandleLike;
   username: string;
   role: string;
@@ -456,9 +483,7 @@ function createSaveAnswerHandler(deps: {
     };
     try {
       const folder = answerFolderForEntry(entry, selMonth);
-      const result = forUser === username
-        ? await upsertItemAnswer(directoryHandle, folder, forUser, item)
-        : await upsertItemAnswerOnBehalf(directoryHandle, folder, forUser, item, username);
+      const { result, savedLocallyOnly } = await submitAnswer(directoryHandle, folder, forUser, username, item);
       if (result.ok) {
         // AFTER the write, inside its ok branch. An on-behalf submission is a
         // distinct action type rather than a flag on the ordinary one so it can
@@ -495,7 +520,7 @@ function createSaveAnswerHandler(deps: {
         // failure branch below resolves too), so the panel cannot do this for
         // itself without throwing away the very work it exists to protect.
         clearAnswerDraftAndLegacy(panelDraftKey(entry, selMonth), legacyPanelDraftKey(entry, selMonth));
-        setStatusMsg({ type: "ok", text: "تم التقديم." });
+        setStatusMsg({ type: "ok", text: savedLocallyOnly ? getLabels().ew_answer_saved_locally : "تم التقديم." });
         // Tell the OTHER mounted views. Without this a submitted answer stayed
         // invisible to the approval desk, «نتائج فحص الأشعة» and Reports — all
         // kept mounted beside this one by the tab-mount LRU — until the 45 s
