@@ -510,7 +510,7 @@ ${dataTable({
       })}
 <h3 class="v3-sub-title">نتائج كل مستوى</h3>`
     : "";
-  return `${contentHead({ eyebrow: EYEBROW_S1, title: "نتائج المستويين في المجتمع", note: `${fmtNum(s.total)} صورة — مجموع أشهر الفترة · إجابات المستوى الأول والثاني لكل مستوى` })}
+  return `${contentHead({ eyebrow: EYEBROW_S1, title: "نتائج المستويين في المجتمع" })}
 ${matrixHtml}
 ${dataTable({
     headers: ["المستوى", "الإجمالي", "الأول", "الثاني", "الأول", "الثاني", "الأول", "الثاني"],

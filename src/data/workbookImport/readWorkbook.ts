@@ -51,41 +51,75 @@ async function sharedStringsOf(wb: OpenWorkbook): Promise<string[]> {
   return ssEntry ? parseSharedStrings(await readZipEntryText(wb.file, ssEntry)) : [];
 }
 
-/** image id → the follow-up answer fields (non-blank only), merged across the follow-up sheets. */
-export type FollowUpIndex = Map<string, Record<string, string>>;
+const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+/** Exam month (1–12) from a sheet name: `SFEB` / `FEB` (sample sheets) or `2-Feb` (follow-up sheets); null otherwise. */
+function examMonthOfSheet(name: string | undefined): number | null {
+  const s = (name ?? "").trim().toUpperCase();
+  const lead = /^(\d{1,2})-/.exec(s);
+  if (lead) return Number(lead[1]);
+  const i = MONTHS.indexOf(s.replace(/^S/, ""));
+  return i >= 0 ? i + 1 : null;
+}
 
-async function readFollowUp(wb: OpenWorkbook, report: MappingReport): Promise<FollowUpIndex> {
+/**
+ * One enrichment record for an image: the answer fields (non-blank only) from one row of an enrichment
+ * workbook, the exam month that row belongs to, and whether it says the image exists («هل يوجد صورة؟» = نعم).
+ */
+type FollowUpRecord = { fields: Record<string, string>; month: number | null; imageYes: boolean };
+/** image id → every enrichment record for it, across all enrichment workbooks and sheets, in reading order. */
+export type FollowUpIndex = Map<string, FollowUpRecord[]>;
+
+async function readFollowUp(wb: OpenWorkbook, report: MappingReport, index: FollowUpIndex): Promise<void> {
   const shared = await sharedStringsOf(wb);
-  const index: FollowUpIndex = new Map();
   for (const { name, path } of wb.sheets) {
     const raw = parseSheetRows(await readZipEntryText(wb.file, wb.need(path)), shared);
     const hdr = Object.fromEntries(Object.entries(raw[0] ?? {}).map(([col, h]) => [col, canonicalHeader(h)]));
     const data = rowsByHeader([hdr, ...raw.slice(1)]);
     (report.followUpSheets ??= []).push({ name, rows: data.length });
+    const sheetMonth = examMonthOfSheet(name);
     for (const cells of data) {
       const id = cells["معرف الأشعة"]?.trim();
       if (!id) continue;
-      const rec = index.get(id) ?? {};
+      const fields: Record<string, string> = {};
       for (const f of FOLLOW_UP_FIELDS) {
         const v = cells[f];
         // The follow-up sheets carry pivot tables beside the data whose header repeats «هل يوجد صورة؟»; only real statuses count.
         if (f === "هل يوجد صورة؟" && v !== undefined && !IMAGE_STATUSES.has(v.trim())) continue;
-        if (v !== undefined && v.trim() !== "" && rec[f] === undefined) rec[f] = v;
+        if (v !== undefined && v.trim() !== "") fields[f] = v;
       }
       const verdict = cells["صحة النتيجة"];
-      if (verdict !== undefined && verdict.trim() !== "" && rec[FOLLOW_UP_VERDICT] === undefined) rec[FOLLOW_UP_VERDICT] = verdict;
-      index.set(id, rec);
+      if (verdict !== undefined && verdict.trim() !== "") fields[FOLLOW_UP_VERDICT] = verdict;
+      if (Object.keys(fields).length === 0) continue;
+      // `Q*_Sample` rows name the sample sheet they came from («الشيت المصدر» = SFEB…), which is the exam month.
+      const month = sheetMonth ?? examMonthOfSheet(cells["الشيت المصدر"]);
+      const list = index.get(id) ?? [];
+      list.push({ fields, month, imageYes: (fields["هل يوجد صورة؟"] ?? "").trim() === "نعم" });
+      index.set(id, list);
     }
   }
-  return index;
 }
 
-/** Fill the sample row's blank answer columns from the follow-up index; the sample workbook's own values always win. */
-function withFollowUp(cells: Record<string, string>, index: FollowUpIndex | null, report: MappingReport): Record<string, string> {
+/**
+ * The one record an image's answers are taken from. An image can appear 3–4 times across the enrichment
+ * workbooks; the owner's rule is: take the record that says the image exists («نعم»), from the same exam
+ * month as the sample row. Ranking: نعم + same month › نعم › same month › first seen. Fields are never mixed
+ * across records, so a «لا» row cannot leak its answers into a «نعم» row's.
+ */
+function pickRecord(list: FollowUpRecord[], month: number | null, report: MappingReport): FollowUpRecord {
+  const sameMonth = (r: FollowUpRecord) => month !== null && r.month === month;
+  const best = list.find((r) => r.imageYes && sameMonth(r)) ?? list.find((r) => r.imageYes) ?? list.find(sameMonth) ?? list[0];
+  if (list.length > 1) report.followUpMultiple = (report.followUpMultiple ?? 0) + 1;
+  if (month !== null && best.month !== null && best.month !== month) report.followUpOtherMonth = (report.followUpOtherMonth ?? 0) + 1;
+  return best;
+}
+
+/** Fill the sample row's blank answer columns from its chosen enrichment record; the sample workbook's own values always win. */
+function withFollowUp(cells: Record<string, string>, index: FollowUpIndex | null, report: MappingReport, sampleMonth: number | null): Record<string, string> {
   if (!index) return cells;
-  const rec = index.get((cells["معرف الأشعة"] ?? "").trim());
-  if (!rec) { report.followUpUnmatched = (report.followUpUnmatched ?? 0) + 1; return cells; }
+  const list = index.get((cells["معرف الأشعة"] ?? "").trim());
+  if (!list || list.length === 0) { report.followUpUnmatched = (report.followUpUnmatched ?? 0) + 1; return cells; }
   report.followUpMatched = (report.followUpMatched ?? 0) + 1;
+  const rec = pickRecord(list, sampleMonth, report).fields;
   const out = { ...cells };
   for (const f of FOLLOW_UP_FIELDS) {
     if ((out[f] ?? "").trim() === "" && rec[f] !== undefined) out[f] = rec[f];
@@ -143,17 +177,28 @@ export async function readComprehensiveWorkbooks(
   opts: { requireFollowUp?: boolean } = {},
 ): Promise<{ rows: MappedWorkbookRow[]; report: MappingReport; populationSummary: PopulationSummary | null }> {
   const report = newMappingReport();
-  let primary: OpenWorkbook | null = null;
-  let followUpWb: OpenWorkbook | null = null;
+  // The report's rows come ONLY from the examined-sample workbook («بناءً على فترة العينة», S<MON> sheets).
+  // Every other workbook only enriches those rows by image id: the follow-up workbook (1-Jan…12-Dec) and the
+  // merged workbook («بعد التعديل», Q*_Sample). A Q*_Sample workbook is the primary only when no S<MON> one was given.
+  const examinedWbs: OpenWorkbook[] = [];
+  const merged: OpenWorkbook[] = [];
+  const enrichment: OpenWorkbook[] = [];
   for (const f of files) {
     const sample = await openWorkbook(f, SAMPLE_SHEET);
-    if (sample.sheets.length > 0) { primary ??= sample; continue; }
+    if (sample.sheets.some((s) => s.name.startsWith("S"))) { examinedWbs.push(sample); continue; }
+    if (sample.sheets.length > 0) { merged.push(sample); continue; }
     const fu = await openWorkbook(f, FOLLOW_UP_SHEET);
-    if (fu.sheets.length > 0) followUpWb ??= fu;
+    if (fu.sheets.length > 0) enrichment.push(fu);
   }
+  const primary = examinedWbs[0] ?? merged[0] ?? null;
   if (!primary) throw new Error("XQ-WB-NOSAMPLE: no sample sheet found (Q*_Sample or S<MON>)");
-  if (opts.requireFollowUp && !followUpWb) throw new Error("XQ-WB-NOFOLLOWUP: the follow-up workbook (1-Jan…12-Dec sheets) was not provided");
-  const followUp = followUpWb ? await readFollowUp(followUpWb, report) : null;
+  enrichment.push(...examinedWbs.slice(1), ...merged.filter((wb) => wb !== primary));
+  if (opts.requireFollowUp && enrichment.length === 0) throw new Error("XQ-WB-NOFOLLOWUP: the follow-up workbook (1-Jan…12-Dec sheets) was not provided");
+  let followUp: FollowUpIndex | null = null;
+  if (enrichment.length > 0) {
+    followUp = new Map();
+    for (const wb of enrichment) await readFollowUp(wb, report, followUp);
+  }
   const sheets = primary.sheets;
   const shared = await sharedStringsOf(primary);
   const rows: MappedWorkbookRow[] = [];
@@ -169,7 +214,14 @@ export async function readComprehensiveWorkbooks(
     if (missing.length) throw new Error(`XQ-WB-COLUMNS: ${name} missing ${missing.join("، ")}`);
     const data = rowsByHeader([hdr, ...raw.slice(1)]);
     report.sheetsRead.push({ name, rows: data.length });
-    for (const cells of data) { const m = mapSampleRow(withFollowUp(cells, followUp, report), name, report, { examined }); if (m) rows.push(m); }
+    const sheetMonth = examMonthOfSheet(name);
+    for (const cells of data) {
+      // Exam month: the S<MON> sheet, else the row's bare month number («شهر الفحص»).
+      const raw = (cells["الشهر"] ?? "").trim();
+      const month = sheetMonth ?? (/^(?:[1-9]|1[0-2])$/.test(raw) ? Number(raw) : null);
+      const m = mapSampleRow(withFollowUp(cells, followUp, report, month), name, report, { examined });
+      if (m) rows.push(m);
+    }
   }
   // The same workbook also carries the risk population (JAN…DEC) the samples were drawn from.
   const popWb = await openWorkbook(primary.file, POPULATION_SHEET);

@@ -29,6 +29,23 @@ describe("readComprehensiveWorkbook", () => {
     expect(rows[0].row.hasMarking).toBe(true);
     expect(report.followUpMatched).toBe(1);
   });
+  it("rows come only from the S<MON> workbook; a Q*_Sample workbook only enriches; «نعم» + same exam month wins", async () => {
+    const sample = wbBlob({ SFEB: [["المستوى","رقم صورة الاشعة","نتيجة المستوى الأول للاشعة","نتيجة المستوى الثاني للاشعة","تاريخ رصد الخبير","صحة النتيجة","شهر الفحص"],
+      ["FIRST_STAGE","X1","سليمة","سليمة","46055","سليمة","2"],
+      ["FIRST_STAGE","X2","سليمة","سليمة","46055","سليمة","2"]] });
+    const HF = ["رقم صورة الاشعة", "هل يوجد صورة ؟", "هل يوجد تحديد ؟", "مستوى جودة الصورة"];
+    // X1: «لا» in Feb, «نعم» in Jan (other month), «نعم» in Feb → the Feb «نعم» record (marking لا, quality منخفض).
+    const followUp = wbBlob({ "1-Jan": [HF, ["X1", "نعم", "نعم", "عالي"]], "2-Feb": [HF, ["X1", "لا", "", ""]] });
+    const after = wbBlob({ Q1_Sample: [[...H, "الشيت المصدر", "هل يوجد صورة؟", "هل يوجد تحديد؟", "مستوى جودة الصورة"],
+      ["Q1","46023","FIRST_STAGE","X1","سليمة","سليمة","سليمة","مكتمل","SFEB","نعم","لا","منخفض"],
+      ["Q1","46023","FIRST_STAGE","Z9","سليمة","سليمة","سليمة","مكتمل","SFEB","نعم","لا","عالي"]] });
+    const { rows, report } = await readComprehensiveWorkbooks([after, sample, followUp], undefined, { requireFollowUp: true });
+    expect(rows.map((r) => r.row.xrayImageId)).toEqual(["X1", "X2"]); // Z9 (enrichment-only) never becomes a row
+    expect(rows[0].row.hasMarking).toBe(false);
+    expect(rows[0].row.imageQuality).toBe("منخفض");
+    expect(report.followUpMultiple).toBe(1);
+    expect(report.followUpUnmatched).toBe(1);
+  });
   it("errors when no sample sheet", async () => {
     await expect(readComprehensiveWorkbook(wbBlob({ Q1_Pop: [["x"]] }))).rejects.toThrow("XQ-WB-NOSAMPLE");
   });

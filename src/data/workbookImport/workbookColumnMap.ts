@@ -14,6 +14,10 @@ export type MappingReport = {
   followUpSheets?: { name: string; rows: number }[];
   followUpMatched?: number;
   followUpUnmatched?: number;
+  /** Sample images with more than one enrichment record (one is chosen: «نعم» + same exam month first). */
+  followUpMultiple?: number;
+  /** Sample images whose chosen enrichment record is from a different exam month (no same-month record qualified). */
+  followUpOtherMonth?: number;
 };
 export type MappedWorkbookRow = { row: ExecutiveReportRow; month: string; sheet: string };
 

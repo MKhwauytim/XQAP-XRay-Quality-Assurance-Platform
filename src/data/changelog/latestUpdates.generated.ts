@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v153.27",
+    "date": "2026-10-13",
+    "bucket": "enhancement",
+    "scope": "report import",
+    "title": "rows only from the examined-sample workbook; follow-up and بعد التعديل enrich by id, «نعم» + same exam month first"
+  },
+  {
     "version": "v153.26",
     "date": "2026-10-13",
     "bucket": "enhancement",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "executive report",
     "title": "observations-and-recommendations table, page 8 results matrix, المفحوصة wording"
-  },
-  {
-    "version": "v153.18",
-    "date": "2026-10-12",
-    "bucket": "enhancement",
-    "scope": "executive report",
-    "title": "quality-by-agreement page counts images; one border system for all tables"
   }
 ];
