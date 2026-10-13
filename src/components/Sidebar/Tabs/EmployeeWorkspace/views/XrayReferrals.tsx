@@ -1273,6 +1273,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       // the month) and the workspace-wide derivation are deliberately not in
       // here. population.final.json is not loaded here either; it is loaded
       // lazily only when the replacement dialog opens.
+      // A personal-scope user's pending ids come only from their OWN requests
+      // (fromEmployee / employeeUsername === username), so one queue file is enough.
+      const scopeOpts = { scopeToUser: canSeeAll ? undefined : username };
       const { entries: adhocEntriesPromise, answers: adhocAnswersPromise } =
         beginAdhocReads(directoryHandle, username, canSeeAll, selMonth);
       const [
@@ -1285,8 +1288,8 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         ownAnswerFile,
       ] =
         await Promise.all([
-          loadReferralLog(directoryHandle, selMonth),
-          loadReplacementLog(directoryHandle, selMonth),
+          loadReferralLog(directoryHandle, selMonth, scopeOpts),
+          loadReplacementLog(directoryHandle, selMonth, scopeOpts),
           adhocEntriesPromise,
           adhocAnswersPromise,
           // Oversight (canSeeAll) is UNCHANGED and never reads a mirror:

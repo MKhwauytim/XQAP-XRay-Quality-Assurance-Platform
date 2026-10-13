@@ -2040,3 +2040,26 @@ export async function loadAllEmployeeRequestFiles(
     throw err;
   }
 }
+
+/**
+ * One employee's request queues -- the `scopeToUser` fast path for
+ * `loadRequestLogs`. Opens only `{user}.requests.json`, falling back to the
+ * frozen legacy `{user}.answers.json` arrays (both handled by
+ * `loadEmployeeRequestsFile`, which returns an empty file rather than throwing
+ * when neither exists). Never lists the directory and never touches another
+ * employee's files.
+ */
+export async function loadEmployeeRequestQueues(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  username: string
+): Promise<EmployeeRequestQueues> {
+  const requests = await loadEmployeeRequestsFile(directoryHandle, monthFolderName, username);
+  return {
+    username,
+    monthFolderName,
+    referralRequests: requests.referralRequests,
+    replacementRequests: requests.replacementRequests,
+    reopenRequests: requests.reopenRequests,
+  };
+}
