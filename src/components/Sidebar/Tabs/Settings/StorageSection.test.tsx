@@ -19,6 +19,13 @@ vi.mock("../../../../auth/usePermissions", () => ({
   }),
 }));
 
+// Task 7: clearing browser storage is refused while answers are unsent. The
+// default is 0 so every pre-existing describe block keeps its old behaviour.
+const unsentMock = vi.hoisted(() => ({ count: 0 }));
+vi.mock("../../../../data/answers/answerLocalMirror", () => ({
+  countUnsentAnswers: async () => unsentMock.count,
+}));
+
 // File-wide default so every describe block below (which each define their
 // own navigator.storage/indexedDB setup) doesn't also have to remember to
 // reset this.
@@ -269,6 +276,65 @@ describe("StorageSection - Finding 3: reset is capability-gated", () => {
     await vi.waitFor(() => {
       expect(localStorage.getItem("xray_auth_session_v1")).toBeNull();
     });
+  });
+});
+
+describe("StorageSection - Task 7: clearing is refused while answers are unsent", () => {
+  beforeEach(() => {
+    Object.defineProperty(navigator, "storage", {
+      value: { estimate: async () => ({ usage: 1, quota: 2 }), persisted: async () => true },
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, "indexedDB", {
+      value: { databases: async () => [] },
+      configurable: true,
+    });
+    permissionsMock.canMutate = true;
+  });
+
+  afterEach(() => {
+    cleanup();
+    unsentMock.count = 0;
+    vi.restoreAllMocks();
+  });
+
+  it("does not clear storage and shows the blocked message when unsent answers exist", async () => {
+    unsentMock.count = 2;
+    const clearSpy = vi.spyOn(storageRegistry, "clearOwnedStorage");
+    localStorage.setItem("xray_auth_session_v1", "session-token");
+    render(<StorageSection />);
+    (
+      await screen.findByRole("button", { name: DEFAULT_LABELS.storage_reset_button })
+    ).click();
+    (
+      await screen.findByRole("button", { name: DEFAULT_LABELS.confirm_dialog_default_ok })
+    ).click();
+
+    expect(
+      await screen.findByText(DEFAULT_LABELS.settings_storage_clear_blocked_unsent)
+    ).toBeInTheDocument();
+    expect(clearSpy).not.toHaveBeenCalled();
+    expect(localStorage.getItem("xray_auth_session_v1")).toBe("session-token");
+  });
+
+  it("runs the existing clear behaviour when no unsent answers exist", async () => {
+    unsentMock.count = 0;
+    const clearSpy = vi.spyOn(storageRegistry, "clearOwnedStorage");
+    localStorage.setItem("xray_auth_session_v1", "session-token");
+    render(<StorageSection />);
+    (
+      await screen.findByRole("button", { name: DEFAULT_LABELS.storage_reset_button })
+    ).click();
+    (
+      await screen.findByRole("button", { name: DEFAULT_LABELS.confirm_dialog_default_ok })
+    ).click();
+
+    await vi.waitFor(() => {
+      expect(clearSpy).toHaveBeenCalledTimes(1);
+    });
+    expect(
+      screen.queryByText(DEFAULT_LABELS.settings_storage_clear_blocked_unsent)
+    ).not.toBeInTheDocument();
   });
 });
 

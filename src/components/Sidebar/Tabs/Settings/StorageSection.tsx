@@ -8,6 +8,7 @@ import {
 } from "../../../../data/storage/storageRegistry";
 import { isFileOrigin } from "../../../../data/workspace/originDetection";
 import { logError } from "../../../../data/storage/errorLogger";
+import { countUnsentAnswers } from "../../../../data/answers/answerLocalMirror";
 import { useLabels } from "../../../../data/labels/useLabels";
 import { usePermissions } from "../../../../auth/usePermissions";
 import { ConfirmDialog } from "../../../ConfirmDialog/ConfirmDialog";
@@ -46,6 +47,7 @@ export function StorageSection() {
   const [foreignDbs, setForeignDbs] = useState<string[]>([]);
   const [persistence, setPersistence] = useState<PersistenceState>(getPersistenceState());
   const [resetFailed, setResetFailed] = useState(false);
+  const [resetBlockedUnsent, setResetBlockedUnsent] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -102,6 +104,21 @@ export function StorageSection() {
     if (!canReset) return;
     setShowResetConfirm(false);
     setResetFailed(false);
+    setResetBlockedUnsent(false);
+    // Answers saved on this device but not yet written to the shared folder
+    // live only in the local mirror; clearing storage would discard them.
+    // If the mirror cannot be read, fail closed: refuse rather than risk loss.
+    let unsent: number;
+    try {
+      unsent = await countUnsentAnswers();
+    } catch (error) {
+      logError("StorageSection.handleReset.countUnsent", error);
+      unsent = 1;
+    }
+    if (unsent > 0) {
+      setResetBlockedUnsent(true);
+      return;
+    }
     try {
       await clearOwnedStorage();
     } catch (error) {
@@ -163,6 +180,12 @@ export function StorageSection() {
       {resetFailed && (
         <p className="storage-reset-error" role="alert">
           {labels.storage_reset_partial_failure}
+        </p>
+      )}
+
+      {resetBlockedUnsent && (
+        <p className="storage-reset-error" role="alert">
+          {labels.settings_storage_clear_blocked_unsent}
         </p>
       )}
 
