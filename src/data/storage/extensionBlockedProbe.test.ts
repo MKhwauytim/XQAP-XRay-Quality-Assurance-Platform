@@ -107,10 +107,12 @@ describe("the survival re-probe needs two consecutive failures, not one", () => 
     // A real remover has already taken the file; looking again finds it just as
     // gone, so the permanent verdict stands and the user gets the exclusion
     // advice they actually need.
-    const { dir, lookups } = blipsOnLookups(createMemoryDirectory(), ".ndjson", [2, 3]);
+    // The verdict now needs two distinct probe names to vanish. Lookups 1-3 are
+    // probe `-a` (instant, survival, re-look); 4-6 are probe `-b`.
+    const { dir, lookups } = blipsOnLookups(createMemoryDirectory(), ".ndjson", [2, 3, 5, 6]);
 
     await expect(classifyNotFound(dir, "e-1.ndjson")).resolves.toBe("extension-blocked");
-    expect(lookups()).toBe(3);
+    expect(lookups()).toBe(6);
   }, 15_000);
 });
 

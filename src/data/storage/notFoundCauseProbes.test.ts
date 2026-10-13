@@ -101,11 +101,20 @@ describe("classifyNotFound — something removes the file a moment later", () =>
       faults: [
         {
           operation: "getFileHandle",
-          name: ".fs-extension-probe.ndjson",
+          name: ".fs-extension-probe-a.ndjson",
           create: false,
           // Let the immediate read-back through; fail every later look. That is
           // an async quarantine, and the old instant-only probe called this
           // folder healthy.
+          skip: 1,
+          errorName: "NotFoundError",
+          times: Number.POSITIVE_INFINITY,
+        },
+        {
+          // The verdict needs a second distinct name to vanish too.
+          operation: "getFileHandle",
+          name: ".fs-extension-probe-b.ndjson",
+          create: false,
           skip: 1,
           errorName: "NotFoundError",
           times: Number.POSITIVE_INFINITY,

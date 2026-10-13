@@ -474,12 +474,24 @@ export async function classifyNotFound(
   // help: the fix is an exclusion rule on the folder.
   const extension = fileName ? extensionOf(fileName) : "";
   if (extension && extension !== ".tmp") {
-    const survived = await probeRoundTrip(
+    // Two DISTINCT names, in sequence. A remover that targets the extension
+    // takes both; a stale listing or a momentary NotReadable on one name does
+    // not repeat on a different name. One flake used to produce a permanent
+    // XQ-IO-033 ("antivirus is removing .ndjson") on a share that creates and
+    // keeps .ndjson files fine — confirmed by hand on 2026-10-13.
+    const firstSurvived = await probeRoundTrip(
       dir,
-      `.fs-extension-probe${extension}`,
+      `.fs-extension-probe-a${extension}`,
       PROBE_SURVIVAL_WAIT_MS
     );
-    if (!survived) return "extension-blocked";
+    if (!firstSurvived) {
+      const secondSurvived = await probeRoundTrip(
+        dir,
+        `.fs-extension-probe-b${extension}`,
+        PROBE_SURVIVAL_WAIT_MS
+      );
+      return secondSurvived ? "unknown" : "extension-blocked";
+    }
   }
 
   // Extension is fine and the folder is writable — the remaining per-name
