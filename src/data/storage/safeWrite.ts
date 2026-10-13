@@ -2703,6 +2703,34 @@ function sameInvalidReadResult<T>(
   );
 }
 
+/**
+ * What ONE exact file name holds, judged by the same validation `safeReadJson`
+ * applies to its live read (envelope structure, content hash, gzip CRC) — but
+ * with NO `.bak`/`.tmp` fallback, no stale-snapshot retry ladder and no
+ * `data:recovered-from-bak` report. For a caller that has to know whether a
+ * specific file, sibling or not, is itself sound before deciding what to do
+ * (the admin boot sibling-heal). Never writes.
+ */
+export type InspectedJsonFile<T> = {
+  found: boolean;
+  valid: boolean;
+  value: T | null;
+  failureStage: string | null;
+};
+
+export async function inspectJsonFile<T>(
+  dir: DirectoryHandleLike,
+  fileName: string
+): Promise<InspectedJsonFile<T>> {
+  const outcome = await readPayload<T>(dir, fileName);
+  return {
+    found: outcome.found,
+    valid: outcome.payload !== null,
+    value: outcome.payload ? outcome.payload.value : null,
+    failureStage: outcome.failureStage,
+  };
+}
+
 export async function safeReadJson<T>(
   dir: DirectoryHandleLike,
   fileName: string,

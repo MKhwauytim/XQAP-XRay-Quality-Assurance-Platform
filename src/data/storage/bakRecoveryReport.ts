@@ -49,6 +49,23 @@ export type BakRecoverySource = ".bak" | ".tmp";
  */
 export type BakRecoveryLiveState = "corrupt" | "missing";
 
+/** Window event: the admin boot scan rewrote this file's live copy from a verified sibling. */
+export const BAK_RECOVERY_HEALED_EVENT = "data:bak-recovery-healed";
+
+/**
+ * Tell the UI that a file previously reported through {@link reportBakRecovery}
+ * has been repaired, so the banner for it can be dismissed. Also forgets the
+ * dedupe key so a LATER recurrence of the damage is logged again.
+ */
+export function reportBakRecoveryHealed(fileName: string): void {
+  for (const key of [...reported]) {
+    if (key.includes(`/${fileName}.`)) reported.delete(key);
+  }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(BAK_RECOVERY_HEALED_EVENT, { detail: { fileName } }));
+  }
+}
+
 const reported = new Set<string>();
 
 /** @internal — test-only. Forget which recoveries have already been reported. */

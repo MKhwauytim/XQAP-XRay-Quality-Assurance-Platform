@@ -76,6 +76,7 @@ export const ACTION_TYPE_LABEL_KEYS: Record<WorkspaceActionType, LabelKey> = {
   "sync-interval-changed": "um_action_type_sync_interval_changed",
   "admin-account-changed": "um_action_type_admin_account_changed",
   "report-generated": "um_action_type_report_generated",
+  "file-auto-healed": "um_action_type_file_auto_healed",
 };
 
 export type ActionTypeGroup = {
@@ -177,6 +178,7 @@ export const ACTION_TYPE_GROUPS: readonly ActionTypeGroup[] = [
       "sync-interval-changed",
       "admin-account-changed",
       "report-generated",
+      "file-auto-healed",
     ],
   },
 ];

@@ -1,10 +1,17 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { logError } from "../storage/errorLogger";
+import { listDirectoryEntries } from "../storage/directoryScan";
+import { reportBakRecoveryHealed } from "../storage/bakRecoveryReport";
+import { appendWorkspaceAction } from "../audit/actionLog";
 import {
   archiveOrphanSibling,
   findOrphanSiblings,
 } from "../storage/orphanSiblings";
 import {
+  getAuditActionsDir,
+  getAuditActivityDir,
+  getAuditRoot,
+  getFeedbackThreadsDir,
   getReportsRoot,
   getSystemRoot,
   getTemplatesRoot,
@@ -14,6 +21,7 @@ import {
   inspectAllTemplateFiles,
   recoverTemplateFile,
 } from "../templates/templateFileRecovery";
+import { healFileFromSibling, type SiblingHealResult } from "./siblingHeal";
 
 /**
  * The admin boot self-check: find broken workspace files, repair what can be
@@ -106,13 +114,17 @@ const ORPHAN_SWEEP_ROOTS: ReadonlyArray<{
  */
 export async function runBootIntegrityScan(
   directoryHandle: DirectoryHandleLike,
-  options: { now?: string } = {}
+  options: { now?: string; siblingHeal?: SiblingHealScanOptions } = {}
 ): Promise<BootIntegrityReport> {
   const timestamp = options.now ?? new Date().toISOString();
   const findings: IntegrityFinding[] = [];
 
   await repairDamagedTemplates(directoryHandle, findings);
   await archiveOrphanedSiblings(directoryHandle, findings, timestamp);
+  // Opt-in: only the admin sign-in path passes `siblingHeal`.
+  if (options.siblingHeal) {
+    await healDamagedFromSiblings(directoryHandle, findings, options.siblingHeal);
+  }
 
   const repairedCount = findings.filter((item) => item.outcome === "repaired").length;
   const needsAttentionCount = findings.filter(
@@ -187,6 +199,175 @@ async function repairDamagedTemplates(
         detail: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+}
+
+/**
+ * The single gate for running the boot scan at all. Admin only, never demo (an
+ * in-memory workspace has nothing real to repair), and only with a mounted,
+ * ready workspace. `App.tsx` calls this; it exists as a function so the "a
+ * non-admin never triggers a repair" rule has a test that does not need to
+ * render the whole app.
+ */
+export function shouldRunBootIntegrityScan(input: {
+  role: string;
+  mode: string | undefined;
+  hasWorkspace: boolean;
+  workspaceReady: boolean;
+}): boolean {
+  return (
+    input.role === "admin" &&
+    input.mode !== "demo" &&
+    input.hasWorkspace &&
+    input.workspaceReady
+  );
+}
+
+/** Who the sibling heal is acting for, so the action log can attribute it. */
+export type SiblingHealScanOptions = {
+  actor: string;
+  /** Injected clock (epoch ms) for the `.tmp` freshness window; tests only. */
+  nowMs?: number;
+};
+
+/**
+ * Workspace JSON families the sibling heal examines. Resolved through
+ * `workspacePaths.ts`, non-recursive, one directory each.
+ *
+ * INCLUDED: feedback threads (the reported case), 3-user-data, the top level of
+ * 5-system (notifications, presets and other shared state), and the three audit
+ * directories.
+ *
+ * EXCLUDED, on purpose: templates, decisions and population (each has its own
+ * recovery module with domain checks); `threads.index.json` and
+ * `distribution.current.json` (rebuildable caches — healing them from an old
+ * sibling would be worse than rebuilding); `5-system/system-errors` (the
+ * durable error log is appended to by this very scan's `logError` calls, so
+ * rewriting it mid-scan would race our own writer); the legacy
+ * `feedback/messages.json` (read-only by contract).
+ */
+const SIBLING_HEAL_FAMILIES: ReadonlyArray<{
+  label: string;
+  open: (dir: DirectoryHandleLike) => Promise<DirectoryHandleLike>;
+}> = [
+  { label: "5-system/feedback/threads", open: (dir) => getFeedbackThreadsDir(dir, false) },
+  { label: "3-user-data", open: (dir) => getUserDataRoot(dir, false) },
+  { label: "5-system", open: (dir) => getSystemRoot(dir, false) },
+  { label: "5-system/audit", open: (dir) => getAuditRoot(dir, false) },
+  { label: "5-system/audit/actions", open: (dir) => getAuditActionsDir(dir, false) },
+  { label: "5-system/audit/activity", open: (dir) => getAuditActivityDir(dir, false) },
+];
+
+/** Rebuildable caches that must never be healed from a sibling. */
+const SIBLING_HEAL_EXCLUDED_NAMES: ReadonlySet<string> = new Set([
+  "threads.index.json",
+  "distribution.current.json",
+]);
+
+/**
+ * SMB cost bound: per directory, at most this many files are opened. Only live
+ * `.json` names that have a `.tmp` or `.bak` beside them are candidates, `.tmp`
+ * holders first (a leftover `.tmp` is the strongest sign of a failed commit).
+ */
+export const SIBLING_HEAL_MAX_FILES_PER_DIR = 400;
+
+/** Candidate live names in one directory listing: have a sibling, are not excluded. */
+export function pickSiblingHealCandidates(entryNames: readonly string[]): string[] {
+  const names = new Set(entryNames);
+  const withTmp: string[] = [];
+  const withBakOnly: string[] = [];
+  for (const name of [...names].sort()) {
+    if (!name.endsWith(".json") || SIBLING_HEAL_EXCLUDED_NAMES.has(name)) continue;
+    if (names.has(`${name}.tmp`)) withTmp.push(name);
+    else if (names.has(`${name}.bak`)) withBakOnly.push(name);
+  }
+  return [...withTmp, ...withBakOnly].slice(0, SIBLING_HEAL_MAX_FILES_PER_DIR);
+}
+
+async function healDamagedFromSiblings(
+  directoryHandle: DirectoryHandleLike,
+  findings: IntegrityFinding[],
+  options: SiblingHealScanOptions
+): Promise<void> {
+  const healed: Array<{ location: string; result: Extract<SiblingHealResult, { status: "healed" }> }> = [];
+
+  for (const family of SIBLING_HEAL_FAMILIES) {
+    let dir: DirectoryHandleLike;
+    try {
+      dir = await family.open(directoryHandle);
+    } catch {
+      continue; // a folder this workspace never created is not a fault
+    }
+    let names: string[];
+    try {
+      const entries = await listDirectoryEntries(dir);
+      names = pickSiblingHealCandidates(
+        entries.filter((entry) => entry.kind === "file").map((entry) => entry.name)
+      );
+    } catch (error) {
+      findings.push({
+        location: family.label,
+        subject: family.label,
+        problem: "damaged",
+        outcome: "could-not-check",
+        detail: error instanceof Error ? error.message : String(error),
+      });
+      continue;
+    }
+
+    for (const fileName of names) {
+      const result = await healFileFromSibling(dir, fileName, {
+        location: family.label,
+        nowMs: options.nowMs,
+      });
+      if (result.status === "healed") {
+        healed.push({ location: family.label, result });
+        findings.push({
+          location: family.label,
+          subject: fileName,
+          problem: "damaged",
+          outcome: "repaired",
+          detail: `restored from ${fileName}${result.source}; original archived as ${result.archivedAs}`,
+        });
+        // The yellow "served from a copy" banner is now stale for this file.
+        reportBakRecoveryHealed(fileName);
+      } else if (result.status === "failed") {
+        findings.push({
+          location: family.label,
+          subject: fileName,
+          problem: "damaged",
+          outcome: "needs-attention",
+          detail: result.error,
+        });
+      } else if (result.reason === "no-valid-sibling" || result.reason === "sibling-older") {
+        findings.push({
+          location: family.label,
+          subject: fileName,
+          problem: "damaged",
+          outcome: "needs-attention",
+          detail: result.reason,
+        });
+      }
+      // Every other skip (fresh .tmp, share not answering, read-only, ...) is
+      // already in the durable error log and is not a to-do for the admin.
+    }
+  }
+
+  // Action-log entries last, so the audit directories are not being rewritten
+  // while the scan above is still walking them.
+  for (const { location, result } of healed) {
+    await appendWorkspaceAction(directoryHandle, {
+      actor: options.actor,
+      actorRole: "admin",
+      action: "file-auto-healed",
+      target: result.fileName,
+      details: {
+        location,
+        source: result.source,
+        archivedAs: result.archivedAs,
+        revision: result.revision,
+      },
+    });
   }
 }
 
