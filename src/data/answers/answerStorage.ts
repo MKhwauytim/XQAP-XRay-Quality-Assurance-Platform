@@ -75,6 +75,7 @@ import {
   safeWorkspaceFilePart,
 } from "../workspace/workspacePaths";
 import { markAnswerPendingLocally, mirrorAnswerLocally } from "./answerLocalMirror";
+import type { OutboxIdentity } from "./answerLocalMirror";
 
 export { ANSWER_EVENTS_DIR, ANSWER_EVENT_SEGMENT_SUFFIX };
 
@@ -170,6 +171,11 @@ function nextAnswerEventAt(): string {
   const ms = now > lastIssuedAnswerEventAtMs ? now : lastIssuedAnswerEventAtMs + 1;
   lastIssuedAnswerEventAtMs = ms;
   return new Date(ms).toISOString();
+}
+
+/** The identity an answer event will carry, fixed at SUBMIT time so a later (possibly repeated) landing is idempotent. */
+export function mintAnswerEventIdentity(): OutboxIdentity {
+  return { eventId: crypto.randomUUID(), eventAt: nextAnswerEventAt() };
 }
 
 /** @internal test-only — forget the monotonic floor so a fresh test starts from the real clock. */
@@ -1112,11 +1118,11 @@ async function performAnswerWrite(
   xrayImageId: string,
   build: (ctx: { previous: ItemAnswer | undefined }) => AnswerWriteDecision,
   telemetryAction: string,
-  options: { blindAppendWhenSeeded?: boolean } = {}
+  options: { blindAppendWhenSeeded?: boolean; identity?: OutboxIdentity } = {}
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   await ensureMonthWritable(directoryHandle, monthFolderName);
-  const eventId = crypto.randomUUID();
-  const eventAt = nextAnswerEventAt();
+  const eventId = options.identity?.eventId ?? crypto.randomUUID();
+  const eventAt = options.identity?.eventAt ?? nextAnswerEventAt();
   const { writer, config: segmentConfig } = answerWriterIdentity(directoryHandle, monthFolderName, username);
   // ONE budget for the whole user action, spent by the append's inner ladders
   // (A1) — see operationDeadline.ts.
@@ -1414,7 +1420,8 @@ export async function upsertItemAnswer(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   username: string,
-  item: ItemAnswer
+  item: ItemAnswer,
+  identity?: OutboxIdentity
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   return performAnswerWrite(
     directoryHandle,
@@ -1441,7 +1448,7 @@ export async function upsertItemAnswer(
     "answer-save",
     // Only this writer: its decision never reads `previous` (see decideFromSeededCache).
     // Reopen and quality-note decide FROM `previous`, and on-behalf has its own protocol.
-    { blindAppendWhenSeeded: true }
+    { blindAppendWhenSeeded: true, identity }
   );
 }
 
