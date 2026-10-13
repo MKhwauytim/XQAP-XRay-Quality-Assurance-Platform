@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, expect, it } from "vitest";
 
-import { createMemoryDirectory } from "../storage/memoryDirectory";
+import { createMemoryDirectory, getReadLog } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { getSampleMainDir } from "../workspace/workspacePaths";
 import { DISTRIBUTION_EVENTS_DIR, DISTRIBUTION_EVENT_SEGMENT_SUFFIX } from "./distributionEventStore";
@@ -11,6 +11,7 @@ const MONTH = "5-May-2026";
 const SEGMENT_NAME = `a-dist-x${DISTRIBUTION_EVENT_SEGMENT_SUFFIX}`;
 const LEGACY_NAME = "legacy-1.json";
 const SEGMENT_TEXT = '{"event":"one"}\n';
+const SEGMENT_BYTES = new TextEncoder().encode(SEGMENT_TEXT).byteLength;
 
 /**
  * Wraps a directory handle so that every enumeration of `distribution.events/`
@@ -57,18 +58,59 @@ async function seedEventStore(root: DirectoryHandleLike): Promise<void> {
   await writeText(eventsDir, LEGACY_NAME, "{}");
 }
 
+const MATCHING_IDENTITY = {
+  segmentOffsets: { [SEGMENT_NAME]: SEGMENT_BYTES },
+  legacyFilesDigest: legacyFilesDigest([LEGACY_NAME]),
+};
+
 describe("eventStoreMatchesScan enumeration", () => {
   it("lists distribution.events/ exactly once and trusts a matching identity", async () => {
-    const root = createMemoryDirectory();
+    const root = createMemoryDirectory("root", { trackReads: true });
+    await seedEventStore(root);
+    const counted = countEventsEnumerations(root);
+
+    const matches = await eventStoreMatchesScan(counted.root, MONTH, MATCHING_IDENTITY);
+
+    expect(matches).toBe(true);
+    expect(counted.count()).toBe(1);
+  });
+
+  it("never opens the legacy .json entry (names only)", async () => {
+    const root = createMemoryDirectory("root", { trackReads: true });
+    await seedEventStore(root);
+
+    await eventStoreMatchesScan(root, MONTH, MATCHING_IDENTITY);
+
+    const reads = getReadLog(root);
+    expect(reads.some((path) => path.endsWith(LEGACY_NAME))).toBe(false);
+    expect(reads.some((path) => path.endsWith(SEGMENT_NAME))).toBe(true);
+  });
+
+  it("returns false when a segment offset does not match its size", async () => {
+    const root = createMemoryDirectory("root", { trackReads: true });
     await seedEventStore(root);
     const counted = countEventsEnumerations(root);
 
     const matches = await eventStoreMatchesScan(counted.root, MONTH, {
-      segmentOffsets: { [SEGMENT_NAME]: new TextEncoder().encode(SEGMENT_TEXT).byteLength },
-      legacyFilesDigest: legacyFilesDigest([LEGACY_NAME]),
+      ...MATCHING_IDENTITY,
+      segmentOffsets: { [SEGMENT_NAME]: SEGMENT_BYTES + 1 },
     });
 
-    expect(matches).toBe(true);
+    expect(matches).toBe(false);
+    expect(counted.count()).toBe(1);
+  });
+
+  it("returns false when an extra legacy .json file appears", async () => {
+    const root = createMemoryDirectory("root", { trackReads: true });
+    await seedEventStore(root);
+    const monthMain = await getSampleMainDir(root, MONTH, true);
+    const eventsDir = await monthMain.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: false });
+    await writeText(eventsDir, "legacy-2.json", "{}");
+    const counted = countEventsEnumerations(root);
+
+    const matches = await eventStoreMatchesScan(counted.root, MONTH, MATCHING_IDENTITY);
+
+    expect(matches).toBe(false);
     expect(counted.count()).toBe(1);
   });
 });

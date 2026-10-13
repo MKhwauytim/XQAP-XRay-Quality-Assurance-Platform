@@ -374,18 +374,22 @@ type MatchedFileEntry = { name: string; handle: FileHandleLike | null };
  * APIs that yield bare `{name, kind}` records (older shims, hand-written test
  * doubles) still work — `handle` is simply `null` and the by-name open is used.
  */
-async function listMatchingFileEntries(
-  dir: DirectoryHandleLike,
-  suffix?: string
-): Promise<MatchedFileEntry[]> {
+async function listFileEntriesOnce(dir: DirectoryHandleLike): Promise<MatchedFileEntry[]> {
   const iterable = rawEntries(dir);
   if (!iterable) return [];
-  const matched: MatchedFileEntry[] = [];
+  const all: MatchedFileEntry[] = [];
   for await (const entry of iterable) {
-    if (entry.kind !== "file" || (suffix !== undefined && !entry.name.endsWith(suffix))) continue;
-    matched.push({ name: entry.name, handle: asFileHandle(entry) });
+    if (entry.kind !== "file") continue;
+    all.push({ name: entry.name, handle: asFileHandle(entry) });
   }
-  return matched.sort((a, b) => a.name.localeCompare(b.name));
+  return all.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+async function listMatchingFileEntries(
+  dir: DirectoryHandleLike,
+  suffix: string
+): Promise<MatchedFileEntry[]> {
+  return (await listFileEntriesOnce(dir)).filter((entry) => entry.name.endsWith(suffix));
 }
 
 /**
@@ -577,9 +581,39 @@ async function forEachBounded(
  */
 export async function listDirectoryEntriesWithSize(
   dir: DirectoryHandleLike,
-  suffix?: string
+  suffix: string
 ): Promise<SizedDirectoryEntry[]> {
-  const matched = await listMatchingFileEntries(dir, suffix);
+  return sizeMatchedEntries(dir, await listMatchingFileEntries(dir, suffix));
+}
+
+/**
+ * One enumeration of `dir`, two kinds of entry: names ending in `sizedSuffix`
+ * are sized exactly as `listDirectoryEntriesWithSize` sizes them (one
+ * `getFile()` each); names ending in `nameOnlySuffix` are returned by name only
+ * and are never opened. Use it when some files need a change-detection size and
+ * others only need to be counted, so the bulk of a directory is not paid for
+ * per-file round trips it does not need.
+ */
+export async function listSizedAndNamedEntries(
+  dir: DirectoryHandleLike,
+  sizedSuffix: string,
+  nameOnlySuffix: string
+): Promise<{ sized: SizedDirectoryEntry[]; names: string[] }> {
+  const all = await listFileEntriesOnce(dir);
+  const sized = await sizeMatchedEntries(
+    dir,
+    all.filter((entry) => entry.name.endsWith(sizedSuffix))
+  );
+  const names = all
+    .filter((entry) => entry.name.endsWith(nameOnlySuffix))
+    .map((entry) => entry.name);
+  return { sized, names };
+}
+
+async function sizeMatchedEntries(
+  dir: DirectoryHandleLike,
+  matched: MatchedFileEntry[]
+): Promise<SizedDirectoryEntry[]> {
   const slots: (SizedDirectoryEntry | null)[] = new Array(matched.length).fill(null);
 
   await forEachBounded(matched.length, DIRECTORY_READ_CONCURRENCY, async (index) => {

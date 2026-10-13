@@ -24,7 +24,7 @@ import {
   INTERACTIVE_WRITE_DEADLINE_MS,
 } from "../storage/operationDeadline";
 import { codedMessage, logCodedError, resolveErrorCode } from "../storage/errorCodes";
-import { listDirectoryEntries, listDirectoryEntriesWithSize, readAppendOnlyDirectory, readNamedJsonFiles } from "../storage/directoryScan";
+import { listDirectoryEntries, listSizedAndNamedEntries, readAppendOnlyDirectory, readNamedJsonFiles } from "../storage/directoryScan";
 import { simpleHash } from "../storage/jsonEnvelope";
 import { ensureMonthWritable, MonthClosedError } from "../population/monthLock";
 import { syncSampleMirrors } from "../samples/sampleMirrorStorage";
@@ -680,10 +680,11 @@ export async function eventStoreMatchesScan(
         if (!isNotFoundError(error)) throw error;
       }
       if (eventsDir) {
-        // One enumeration serves both the segment sizes and the legacy names.
-        const entries = await listDirectoryEntriesWithSize(eventsDir);
-        segments = entries.filter((entry) => entry.name.endsWith(DISTRIBUTION_EVENT_SEGMENT_SUFFIX));
-        legacyNames = entries.filter((entry) => entry.name.endsWith(".json")).map((entry) => entry.name);
+        // One enumeration: segments are sized, legacy per-event files are only
+        // counted by name (never opened).
+        const listing = await listSizedAndNamedEntries(eventsDir, DISTRIBUTION_EVENT_SEGMENT_SUFFIX, ".json");
+        segments = listing.sized;
+        legacyNames = listing.names;
       }
     }
     if (legacyFilesDigest(legacyNames) !== identity.legacyFilesDigest) return false;
