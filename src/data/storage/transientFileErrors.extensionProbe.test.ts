@@ -32,10 +32,22 @@ function withVanishing(dir: DirectoryHandleLike, vanish: (name: string) => boole
 }
 
 describe("classifyNotFound: extension verdict needs two names", () => {
-  it("one vanishing probe name, sibling survives → 'unknown'", async () => {
+  it("one vanishing probe name, sibling survives → falls through; short name (no length probe) → 'unknown'", async () => {
     const root = createMemoryDirectory("probe1") as unknown as DirectoryHandleLike;
     const dir = withVanishing(root, (n) => n === ".fs-extension-probe-a.ndjson");
+    // 21 chars: below the length-probe threshold, so the fallthrough ends at 'unknown'.
     expect(await classifyNotFound(dir, "x-ans-dev-sess.ndjson")).toBe("unknown");
+  }, 15_000);
+
+  it("one vanishing probe name, sibling survives, ≥24-char name whose length probe fails → 'name-too-long'", async () => {
+    const root = createMemoryDirectory("probe1b") as unknown as DirectoryHandleLike;
+    const dir = withVanishing(
+      root,
+      (n) => n === ".fs-extension-probe-a.ndjson" || n.startsWith(".fs-len-probe")
+    );
+    const longName = "x-ans-device-01-session-0001.ndjson";
+    expect(longName.length).toBeGreaterThanOrEqual(24);
+    expect(await classifyNotFound(dir, longName)).toBe("name-too-long");
   }, 15_000);
 
   it("both probe names vanish → 'extension-blocked'", async () => {

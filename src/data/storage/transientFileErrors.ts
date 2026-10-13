@@ -472,6 +472,7 @@ export async function classifyNotFound(
   // write-then-read-back round trip. If `.tmp` survives and `.ndjson` does not,
   // the cause is the extension, not the share, and no amount of retrying will
   // help: the fix is an exclusion rule on the folder.
+  let extensionVerdictUnclear = false;
   const extension = fileName ? extensionOf(fileName) : "";
   if (extension && extension !== ".tmp") {
     // Two DISTINCT names, in sequence. A remover that targets the extension
@@ -490,7 +491,11 @@ export async function classifyNotFound(
         `.fs-extension-probe-b${extension}`,
         PROBE_SURVIVAL_WAIT_MS
       );
-      return secondSurvived ? "unknown" : "extension-blocked";
+      if (!secondSurvived) return "extension-blocked";
+      // One flake, one survivor: no extension verdict. Do NOT return yet — fall
+      // through to the length probe so a flaky first probe cannot hide a
+      // too-long-path diagnosis. Only if that also clears is the answer `unknown`.
+      extensionVerdictUnclear = true;
     }
   }
 
@@ -506,7 +511,7 @@ export async function classifyNotFound(
     }
   }
 
-  return "directory-writable";
+  return extensionVerdictUnclear ? "unknown" : "directory-writable";
 }
 
 /** The user-facing code implied by each probed cause. */

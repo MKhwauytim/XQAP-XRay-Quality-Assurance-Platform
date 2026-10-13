@@ -492,7 +492,7 @@ function reflectLocalAppendInAnswerEventsCache(
 export async function readAllAnswerEventsForMonth(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
-  options?: { strict?: boolean }
+  options?: { strict?: boolean; tolerateConfirmedDead?: boolean }
 ): Promise<AnswerEvent[]> {
   const mainDir = await getSampleMainDir(directoryHandle, monthFolderName, true);
   try {
@@ -1840,18 +1840,26 @@ export class AnswersUnreadableError extends Error {
  * of aborting the scan. In strict mode neither is swallowed — both raise
  * {@link AnswersUnreadableError} (wrapping the original cause), same as the
  * pre-existing "scan itself could not be established" rethrow below.
+ *
+ * `options.tolerateConfirmedDead` (strict only) forwards to
+ * `readEventSegmentDelta`: a segment the dead-segment registry has confirmed
+ * unopenable is skipped instead of throwing. Only the pending-answer replay
+ * passes it; the population-overwrite guard must keep refusing.
  */
 export async function loadAllEmployeeFiles(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
-  options?: { strict?: boolean }
+  options?: { strict?: boolean; tolerateConfirmedDead?: boolean }
 ): Promise<EmployeeAnswerFile[]> {
   const strict = options?.strict ?? false;
   try {
     const [dirStems, allEvents] = await Promise.all([
       listAnswerDirStems(directoryHandle, monthFolderName),
       strict
-        ? readAllAnswerEventsForMonth(directoryHandle, monthFolderName, { strict: true })
+        ? readAllAnswerEventsForMonth(directoryHandle, monthFolderName, {
+            strict: true,
+            tolerateConfirmedDead: options?.tolerateConfirmedDead ?? false,
+          })
         : readAllAnswerEventsForMonth(directoryHandle, monthFolderName).catch((error: unknown) => {
             logError("answerStorage:loadAllEmployeeFiles:events", error);
             return [] as AnswerEvent[];

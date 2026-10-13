@@ -183,32 +183,35 @@ export type AppendOnlyEventLogConfig = {
  * and MAX bytes, so the long-run average settles at ~MAX/2 no matter how many
  * events the session goes on to write.
  *
- * Why 1 MiB / 10,000 lines (raised from 128 KiB / 2,000):
+ * Why 256 KiB / 4,000 lines (raised from 128 KiB / 2,000):
  *
- * - 1 MB ≈ 3,000–5,000 answer events. On an SMB share one 1 MB read is far
- *   cheaper than eight 128 KB opens — each open is a round trip, bytes stream.
- *   Field evidence 2026-10-12: ~2,000 segments in one month folder.
+ * The cap is a trade between file count and bytes-per-save, and both sides are
+ * real costs:
+ *
  * - Every extra segment costs the READ side a `getFile()` round trip per fold
  *   (`readSegmentTails` opens each matched name), paid by every client on every
- *   fold, forever — segments are never merged. The old 128 KiB cap produced
- *   ~2,000 files in one folder; the new cap cuts that by roughly 8x.
- * - The cost of the larger cap is a larger worst-case single append and a
- *   larger crash-exposed rewrite. At 1 MiB the append still streams in one
- *   round trip's worth of fixed latency plus payload, so the trade favours
- *   fewer files.
+ *   fold, forever — segments are never merged today. Field evidence 2026-10-13:
+ *   ~2,000 segments in one month folder under the old 128 KiB cap.
+ * - Every append rewrites the WHOLE open segment, so a larger cap raises the
+ *   average bytes pushed per save (~cap/2) and the crash-exposed rewrite.
+ *
+ * 256 KiB halves the file count against 128 KiB while only doubling the
+ * average upload (a 1 MiB cap would have made it 8x). It is a bounded,
+ * unmeasured compromise — no share measurement of either cost exists — held
+ * until Plan 2's compaction removes the file-count problem at its root.
  *
  * The line cap is a second, cheap bound for the degenerate shape the byte cap
- * cannot see: it only binds when the average line is under ~105 bytes, which no
+ * cannot see: it only binds when the average line is under ~66 bytes, which no
  * real distribution event reaches. It is belt-and-braces against a future, much
  * smaller event shape making a segment expensive to parse and dedupe rather
  * than expensive to transfer — not a threshold expected to fire today.
  */
-export const MAX_OPEN_SEGMENT_BYTES = 1_048_576;
-export const MAX_OPEN_SEGMENT_LINES = 10_000;
+export const MAX_OPEN_SEGMENT_BYTES = 262_144;
+export const MAX_OPEN_SEGMENT_LINES = 4_000;
 
 /**
  * Upper bound on the rotation counter. A writer that somehow reached this would
- * have written ~1 TiB in one session (999,999 segments × 1 MiB); the cap exists so a corrupt/hostile
+ * have written ~256 GiB in one session (999,999 segments × 256 KiB); the cap exists so a corrupt/hostile
  * name can never be parsed into an unbounded number, not because it is
  * reachable.
  */
@@ -1566,7 +1569,8 @@ export type SegmentEventsDelta<TEvent> = {
   /**
    * Segments the dead-segment registry has confirmed unopenable: listed in
    * `segmentNames`, not read, and given no offset (a later successful open reads
-   * them from byte 0). Excluded from the strict-mode throw.
+   * them from byte 0). Excluded from the strict-mode throw only when the caller
+   * passed `tolerateConfirmedDead`; otherwise a strict read throws on them.
    */
   unreadableNames: string[];
 };
@@ -1610,14 +1614,23 @@ export class EventSegmentUnreadableError extends Error {
  * callers with their own incremental read cache — does so BEFORE building
  * `offsets`/`events`, so nothing here ever gets a chance to persist a partial
  * result as if it were complete.
+ *
+ * `options.tolerateConfirmedDead` (default false, only meaningful with
+ * `strict`): a segment the dead-segment registry has confirmed unopenable is
+ * reported in `unreadableNames` instead of throwing. Opt-in for the
+ * pending-answer replay only; without it a confirmed-dead name throws
+ * {@link EventSegmentUnreadableError} like any other unreadable segment, so
+ * strict guards (population overwrite, distribution strict reads)
+ * keep refusing when they cannot see a segment.
  */
 export async function readEventSegmentDelta<TEvent>(
   parentDir: DirectoryHandleLike,
   knownOffsets: Record<string, number>,
   config: AppendOnlyEventLogConfig,
-  options?: { strict?: boolean; sealedConfirmed?: ReadonlySet<string> }
+  options?: { strict?: boolean; tolerateConfirmedDead?: boolean; sealedConfirmed?: ReadonlySet<string> }
 ): Promise<SegmentEventsDelta<TEvent>> {
   const strict = options?.strict ?? false;
+  const tolerateConfirmedDead = options?.tolerateConfirmedDead ?? false;
   let eventsDir: DirectoryHandleLike;
   try {
     eventsDir = await parentDir.getDirectoryHandle(config.eventsDirName, { create: false });
@@ -1641,13 +1654,19 @@ export async function readEventSegmentDelta<TEvent>(
 
   if (strict) {
     // A name the registry has confirmed dead (DEAD_SEGMENT_MIN_SCANS failed opens
-    // over DEAD_SEGMENT_MIN_AGE_MS) is excluded on purpose. Strict mode exists so a
-    // caller never checkpoints "read, found nothing" over a segment it could not
-    // open — and that protection is intact: the dead name gets NO offset below, so
-    // a later successful open reads it from byte 0. What strict mode must not do
-    // is fail every read of the month forever because one colleague's file is
-    // quarantined; that froze the pending-answer replay for a day (2026-10-12).
-    const skipped = matchedNames.filter((name) => !sizeByName.has(name) && !deadNames.has(name));
+    // over DEAD_SEGMENT_MIN_AGE_MS) is excluded ONLY when the caller opts in with
+    // `tolerateConfirmedDead`. The one caller that does is the pending-answer
+    // replay: it must not fail every read of the month forever because one
+    // colleague's file is quarantined (that froze the replay for a day,
+    // 2026-10-12), and its "read, found nothing" protection stays intact because
+    // the dead name gets NO offset below, so a later successful open reads it
+    // from byte 0. Every other strict caller — the population-overwrite guard
+    // (save, recovery, selective restore), distribution's strict segment readers — is a guard that
+    // cannot see whether the month has work in that segment, so it must still
+    // refuse: a confirmed-dead name throws exactly like any other unreadable one.
+    const skipped = matchedNames.filter(
+      (name) => !sizeByName.has(name) && !(tolerateConfirmedDead && deadNames.has(name))
+    );
     // Thrown before any of the reads below, and before the cache-shaped
     // `offsets`/`events` are built — a caller that persists an incremental
     // read cache (answerStorage.ts's own doc comment says so explicitly)
