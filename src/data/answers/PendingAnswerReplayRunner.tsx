@@ -1,7 +1,9 @@
 /**
  * Headless, mounted once under the workspace (AuthGate, beside
  * WorkspaceErrorSink): replays this user's pending answers at sign-in and
- * every 30 s while the tab is visible, on every page — not only while
+ * on the app sync interval (`getSyncIntervalMs()`, restarted when an admin
+ * changes it) while the tab is visible, and immediately when the browser
+ * comes back `online` or the tab becomes visible again, on every page — not only while
  * «نتائج فحص الأشعة» is open, and not only for the currently selected month
  * (a pending record's own `month` field, a real month or an `adhoc-*`
  * folder, is what `replayPendingAnswers` walks — see its module doc). Also
@@ -39,7 +41,7 @@
  * `canReplay` flips from false to true (e.g. permissions finish loading)
  * rather than needing a special case for "the gate started out false."
  * `isReadOnlyMode()` has no such subscription/re-render mechanism at all, so
- * it is still re-checked directly inside `tick()` on every 30s firing, not
+ * it is still re-checked directly inside `tick()` on every firing, not
  * only through the (possibly stale-by-then) captured `canReplay` boolean.
  */
 import { useEffect } from "react";
@@ -49,9 +51,8 @@ import { usePermissions } from "../../auth/usePermissions";
 import { isReadOnlyMode } from "../storage/readOnlyMode";
 import { logError } from "../storage/errorLogger";
 import { pruneAnswerDrafts } from "./answerDraftStore";
+import { getSyncIntervalMs, subscribeToSyncInterval } from "../workspace/workspaceSync";
 import { replayPendingAnswers } from "./pendingAnswerReplay";
-
-export const PENDING_REPLAY_INTERVAL_MS = 30_000;
 
 /** The feature id the answer-save UI itself gates on (`XrayReferrals.tsx`). */
 const SUBMIT_ANSWERS_FEATURE_ID = "submit-answers";
@@ -75,9 +76,12 @@ export function PendingAnswerReplayRunner({
   useEffect(() => {
     if (!enabled || status !== "ready" || !directoryHandle || !canReplay) return;
     let disposed = false;
-    const tick = (): void => {
+    // `force` is set by the `online` / became-visible triggers, which are
+    // themselves the "user is looking / network is back" signal, so they must
+    // not be swallowed by the hidden-tab early return meant for the timer.
+    const tick = (force = false): void => {
       if (disposed) return;
-      if (typeof document !== "undefined" && document.hidden) return;
+      if (!force && typeof document !== "undefined" && document.hidden) return;
       // isReadOnlyMode() is a bare module flag with no React subscription --
       // unlike a permission-matrix change (which re-renders this component
       // via usePermissions' own subscription and so refreshes `canReplay`),
@@ -88,11 +92,24 @@ export function PendingAnswerReplayRunner({
         logError("answers:pending-replay", error);
       });
     };
+    const onOnline = (): void => tick(true);
+    const onVisibility = (): void => {
+      if (document.visibilityState === "visible") tick(true);
+    };
+    let interval = window.setInterval(() => tick(), getSyncIntervalMs());
+    const stopWatchingInterval = subscribeToSyncInterval((intervalMs) => {
+      window.clearInterval(interval);
+      interval = window.setInterval(() => tick(), intervalMs);
+    });
+    window.addEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVisibility);
     tick();
-    const interval = window.setInterval(tick, PENDING_REPLAY_INTERVAL_MS);
     return () => {
       disposed = true;
       window.clearInterval(interval);
+      stopWatchingInterval();
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [enabled, status, directoryHandle, username, canReplay]);
 

@@ -29,10 +29,29 @@ vi.mock("../../auth/usePermissions", () => ({
   usePermissions: () => ({ canMutate: (featureId: string) => canMutate(featureId) }),
 }));
 vi.mock("../storage/readOnlyMode", () => ({ isReadOnlyMode }));
+// The runner's cadence is the app sync interval; a controllable stand-in
+// (value + subscribers) so the tests can change it mid-flight.
+const syncInterval = vi.hoisted(() => ({
+  value: 30_000,
+  listeners: new Set<(ms: number) => void>(),
+}));
+vi.mock("../workspace/workspaceSync", () => ({
+  getSyncIntervalMs: () => syncInterval.value,
+  subscribeToSyncInterval: (listener: (ms: number) => void) => {
+    syncInterval.listeners.add(listener);
+    return () => {
+      syncInterval.listeners.delete(listener);
+    };
+  },
+}));
 
-import { PENDING_REPLAY_INTERVAL_MS, PendingAnswerReplayRunner } from "./PendingAnswerReplayRunner";
+import { PendingAnswerReplayRunner } from "./PendingAnswerReplayRunner";
+
+const PENDING_REPLAY_INTERVAL_MS = 30_000;
 
 beforeEach(() => {
+  syncInterval.value = PENDING_REPLAY_INTERVAL_MS;
+  syncInterval.listeners.clear();
   vi.useFakeTimers();
   replay.mockClear();
   prune.mockClear();
@@ -130,5 +149,67 @@ describe("PendingAnswerReplayRunner", () => {
       await vi.advanceTimersByTimeAsync(PENDING_REPLAY_INTERVAL_MS);
     });
     expect(replay).toHaveBeenCalledTimes(2);
+  });
+
+  it("follows getSyncIntervalMs() at start and restarts when the interval changes", async () => {
+    syncInterval.value = 10_000;
+    render(<PendingAnswerReplayRunner username="emp1" />);
+    expect(replay).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(replay).toHaveBeenCalledTimes(2);
+
+    act(() => {
+      syncInterval.value = 60_000;
+      for (const listener of [...syncInterval.listeners]) listener(60_000);
+    });
+    replay.mockClear();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(replay).not.toHaveBeenCalled(); // the old 10 s cadence is gone
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(replay).toHaveBeenCalledTimes(1);
+  });
+
+  it("replays immediately when the browser comes back online", async () => {
+    render(<PendingAnswerReplayRunner username="emp1" />);
+    replay.mockClear();
+    act(() => {
+      window.dispatchEvent(new Event("online"));
+    });
+    expect(replay).toHaveBeenCalledTimes(1);
+  });
+
+  it("replays when the tab becomes visible, and ignores the hidden state", () => {
+    render(<PendingAnswerReplayRunner username="emp1" />);
+    replay.mockClear();
+    const visibility = vi.spyOn(document, "visibilityState", "get");
+    visibility.mockReturnValue("hidden");
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(replay).not.toHaveBeenCalled();
+    visibility.mockReturnValue("visible");
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(replay).toHaveBeenCalledTimes(1);
+    visibility.mockRestore();
+  });
+
+  it("removes its listeners and subscription on unmount", () => {
+    const { unmount } = render(<PendingAnswerReplayRunner username="emp1" />);
+    expect(syncInterval.listeners.size).toBe(1);
+    unmount();
+    expect(syncInterval.listeners.size).toBe(0);
+    replay.mockClear();
+    window.dispatchEvent(new Event("online"));
+    expect(replay).not.toHaveBeenCalled();
   });
 });

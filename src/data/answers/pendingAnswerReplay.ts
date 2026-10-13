@@ -21,12 +21,17 @@ import { withTryResourceLock } from "../storage/webLocks";
 import { MonthClosedError } from "../population/monthLock";
 import { ReadOnlyModeError } from "../storage/readOnlyMode";
 import { answerDraftKey, clearAnswerDraft } from "./answerDraftStore";
-import { backfillMirrorFromDisk, loadPendingAnswerRecords, mirrorAnswerLocally } from "./answerLocalMirror";
+import {
+  backfillMirrorFromDisk,
+  loadPendingAnswerRecords,
+  mirrorAnswerLocally,
+  type OutboxIdentity,
+} from "./answerLocalMirror";
 import type { ItemAnswer } from "./answerTypes";
 import { compareSavedAt } from "./savedAt";
 
 export type PendingReplayDeps = {
-  loadPending: (username: string) => Promise<Array<{ month: string; item: ItemAnswer }>>;
+  loadPending: (username: string) => Promise<Array<{ month: string; item: ItemAnswer; identity?: OutboxIdentity }>>;
   markSynced: (month: string, username: string, item: ItemAnswer) => Promise<void>;
 };
 
@@ -235,22 +240,70 @@ async function loadOnDiskItemsStrict(
   }
 }
 
+type PendingEntry = { item: ItemAnswer; identity?: OutboxIdentity };
+
+/**
+ * Land ONE pending item through `upsertItemAnswer` (passing its queued event
+ * identity, if any, so a repeated landing folds once). Isolated in its own
+ * try/catch so one item's failure never stops its neighbours -- see CRITICAL 1
+ * inside. Updates `summary` (and the seen-on-disk memo) in place.
+ */
+async function landOne(
+  directoryHandle: DirectoryHandleLike,
+  month: string,
+  username: string,
+  { item, identity }: PendingEntry,
+  summary: PendingReplaySummary
+): Promise<void> {
+  // CRITICAL 1 (fix round 1): `upsertItemAnswer` THROWS (it does not
+  // reject with `{ ok: false }`) for `MonthClosedError` and
+  // `ReadOnlyModeError` — both raised by `ensureMonthWritable` before
+  // the write is even attempted. An uncaught throw here used to abort
+  // the ENTIRE pass: every month sorted after the offending one (and
+  // every ad-hoc folder, since those sort after real months) never got
+  // a chance to replay, and the same throw repeated on every tick,
+  // landing in the durable per-user error log forever. Each item is now
+  // isolated in its own try/catch so one item's failure can never stop
+  // its neighbours, this month's remaining items, or any other month.
+  try {
+    const result = await upsertItemAnswer(directoryHandle, month, username, item, identity);
+    if (result.ok) {
+      clearAnswerDraft(answerDraftKey(month, item.xrayImageId, username));
+      summary.replayed += 1;
+      // Already announced by `replayed`; if its pending record then cannot be
+      // cleared, the next pass must not announce it a second time.
+      seenOnDisk.set(seenOnDiskKey(username, month, item), item);
+    } else {
+      summary.failed += 1;
+    }
+  } catch (error) {
+    if (error instanceof MonthClosedError || error instanceof ReadOnlyModeError) {
+      // Expected, recurring, not a bug -- see PendingReplaySummary's doc.
+      summary.cannotLand += 1;
+    } else {
+      logPendingReplayWriteErrorOnce(month, item.xrayImageId, error);
+      summary.failed += 1;
+    }
+  }
+}
+
 async function runReplayPendingAnswers(
   directoryHandle: DirectoryHandleLike,
   username: string,
   deps: PendingReplayDeps
 ): Promise<PendingReplaySummary> {
   const summary: PendingReplaySummary = { replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 0 };
-  const byMonth = new Map<string, ItemAnswer[]>();
-  for (const { month, item } of await deps.loadPending(username)) {
-    const items = byMonth.get(month);
-    if (items) items.push(item);
-    else byMonth.set(month, [item]);
+  const byMonth = new Map<string, PendingEntry[]>();
+  for (const { month, item, identity } of await deps.loadPending(username)) {
+    const entries = byMonth.get(month);
+    const entry: PendingEntry = identity ? { item, identity } : { item };
+    if (entries) entries.push(entry);
+    else byMonth.set(month, [entry]);
   }
 
   const pendingKeys = new Set<string>();
-  for (const [month, monthItems] of byMonth) {
-    for (const item of monthItems) pendingKeys.add(seenOnDiskKey(username, month, item));
+  for (const [month, monthEntries] of byMonth) {
+    for (const { item } of monthEntries) pendingKeys.add(seenOnDiskKey(username, month, item));
   }
   pruneSeenOnDisk(username, pendingKeys);
   // Announced only for what is NEW this pass: a write that landed, or an item first
@@ -258,36 +311,48 @@ async function runReplayPendingAnswers(
   let announce = false;
 
   for (const month of [...byMonth.keys()].sort((a, b) => a.localeCompare(b))) {
-    const allItems = byMonth.get(month)!;
-    const items: ItemAnswer[] = [];
-    for (const item of allItems) {
-      const seen = seenOnDisk.get(seenOnDiskKey(username, month, item));
+    const allEntries = byMonth.get(month)!;
+    const entries: PendingEntry[] = [];
+    for (const entry of allEntries) {
+      const seen = seenOnDisk.get(seenOnDiskKey(username, month, entry.item));
       if (!seen) {
-        items.push(item);
+        entries.push(entry);
         continue;
       }
       await deps.markSynced(month, username, seen); // still retried: storage may have recovered
       summary.alreadyOnDisk += 1;
     }
-    if (items.length === 0) continue;
+    if (entries.length === 0) continue;
 
     if (!(await sampleMainDirExists(directoryHandle, month))) {
-      summary.cannotLand += items.length;
+      summary.cannotLand += entries.length;
       continue;
     }
+
+    // Identity-bearing entries (the local-first outbox) are landed directly:
+    // their event identity makes a repeated landing a no-op for the fold, so
+    // the strict all-employee pre-read -- the expensive part on a slow share --
+    // is not needed for them.
+    const legacy: PendingEntry[] = [];
+    for (const entry of entries) {
+      if (entry.identity) await landOne(directoryHandle, month, username, entry, summary);
+      else legacy.push(entry);
+    }
+    if (legacy.length === 0) continue;
 
     const onDisk = await loadOnDiskItemsStrict(directoryHandle, month, username);
     if (!onDisk) {
       // AnswersUnreadableError -- see loadOnDiskItemsStrict's doc. No log
       // here: a persistently flaky share already gets its own error-code
-      // logging from the read path itself; logging again on every 30s tick
+      // logging from the read path itself; logging again on every tick
       // for as long as the flakiness lasts is exactly the noise CRITICAL-1
-      // (below) exists to avoid, applied here too.
-      summary.cannotLand += items.length;
+      // (see `landOne`) exists to avoid, applied here too.
+      summary.cannotLand += legacy.length;
       continue;
     }
 
-    for (const item of items) {
+    for (const entry of legacy) {
+      const { item } = entry;
       const current = onDisk.get(item.xrayImageId);
       if (current && compareSavedAt(current.lastSavedAt, item.lastSavedAt) >= 0) {
         // The workspace already holds this answer (or a newer one): only the
@@ -299,36 +364,7 @@ async function runReplayPendingAnswers(
         announce = true;
         continue;
       }
-      // CRITICAL 1 (fix round 1): `upsertItemAnswer` THROWS (it does not
-      // reject with `{ ok: false }`) for `MonthClosedError` and
-      // `ReadOnlyModeError` — both raised by `ensureMonthWritable` before
-      // the write is even attempted. An uncaught throw here used to abort
-      // the ENTIRE pass: every month sorted after the offending one (and
-      // every ad-hoc folder, since those sort after real months) never got
-      // a chance to replay, and the same throw repeated on every 30s tick,
-      // landing in the durable per-user error log forever. Each item is now
-      // isolated in its own try/catch so one item's failure can never stop
-      // its neighbours, this month's remaining items, or any other month.
-      try {
-        const result = await upsertItemAnswer(directoryHandle, month, username, item);
-        if (result.ok) {
-          clearAnswerDraft(answerDraftKey(month, item.xrayImageId, username));
-          summary.replayed += 1;
-          // Already announced by `replayed`; if its pending record then cannot be
-          // cleared, the next pass must not announce it a second time.
-          seenOnDisk.set(seenOnDiskKey(username, month, item), item);
-        } else {
-          summary.failed += 1;
-        }
-      } catch (error) {
-        if (error instanceof MonthClosedError || error instanceof ReadOnlyModeError) {
-          // Expected, recurring, not a bug -- see PendingReplaySummary's doc.
-          summary.cannotLand += 1;
-        } else {
-          logPendingReplayWriteErrorOnce(month, item.xrayImageId, error);
-          summary.failed += 1;
-        }
-      }
+      await landOne(directoryHandle, month, username, entry, summary);
     }
   }
 
