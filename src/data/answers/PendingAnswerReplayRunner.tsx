@@ -53,6 +53,8 @@ import { logError } from "../storage/errorLogger";
 import { pruneAnswerDrafts } from "./answerDraftStore";
 import { getSyncIntervalMs, subscribeToSyncInterval } from "../workspace/workspaceSync";
 import { replayPendingAnswers } from "./pendingAnswerReplay";
+import { usePendingAnswerCount } from "./usePendingAnswerCount";
+import { useUnloadGuard } from "../../hooks/useUnloadGuard";
 
 /** The feature id the answer-save UI itself gates on (`XrayReferrals.tsx`). */
 const SUBMIT_ANSWERS_FEATURE_ID = "submit-answers";
@@ -68,6 +70,11 @@ export function PendingAnswerReplayRunner({
   const { directoryHandle, status } = useWorkspace();
   const { canMutate } = usePermissions();
   const canReplay = !isReadOnlyMode() && canMutate(SUBMIT_ANSWERS_FEATURE_ID);
+
+  // Closing/reloading the tab with answers still unsent would lose nothing
+  // (they live in IndexedDB) but would delay landing; ask the browser to confirm.
+  const unsent = usePendingAnswerCount({ username });
+  useUnloadGuard(unsent > 0);
 
   useEffect(() => {
     pruneAnswerDrafts();

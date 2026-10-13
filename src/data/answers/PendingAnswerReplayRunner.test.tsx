@@ -45,6 +45,11 @@ vi.mock("../workspace/workspaceSync", () => ({
   },
 }));
 
+// The unload guard follows the unsent count; a controllable stand-in so the
+// test does not need IndexedDB.
+const unsentCount = vi.hoisted(() => ({ value: 0 }));
+vi.mock("./usePendingAnswerCount", () => ({ usePendingAnswerCount: () => unsentCount.value }));
+
 import { PendingAnswerReplayRunner } from "./PendingAnswerReplayRunner";
 
 const PENDING_REPLAY_INTERVAL_MS = 30_000;
@@ -52,6 +57,7 @@ const PENDING_REPLAY_INTERVAL_MS = 30_000;
 beforeEach(() => {
   syncInterval.value = PENDING_REPLAY_INTERVAL_MS;
   syncInterval.listeners.clear();
+  unsentCount.value = 0;
   vi.useFakeTimers();
   replay.mockClear();
   prune.mockClear();
@@ -201,6 +207,24 @@ describe("PendingAnswerReplayRunner", () => {
     });
     expect(replay).toHaveBeenCalledTimes(1);
     visibility.mockRestore();
+  });
+
+  it("installs the beforeunload guard only while answers are unsent", () => {
+    const probe = (): boolean => {
+      const event = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    const { rerender } = render(<PendingAnswerReplayRunner username="emp1" />);
+    expect(probe()).toBe(false);
+
+    unsentCount.value = 2;
+    rerender(<PendingAnswerReplayRunner username="emp1" />);
+    expect(probe()).toBe(true);
+
+    unsentCount.value = 0;
+    rerender(<PendingAnswerReplayRunner username="emp1" />);
+    expect(probe()).toBe(false);
   });
 
   it("removes its listeners and subscription on unmount", () => {

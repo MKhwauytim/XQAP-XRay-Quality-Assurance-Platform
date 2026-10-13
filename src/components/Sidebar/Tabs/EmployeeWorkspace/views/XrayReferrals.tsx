@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactElement } from "react";
 import { CalendarOff, X } from "lucide-react";
 import { readSession } from "../../../../../auth/authSession";
 import { usePermissions } from "../../../../../auth/usePermissions";
@@ -23,7 +24,9 @@ import { getLabels } from "../../../../../data/labels/labelsStore";
 import { useVisibleUnsavedWorkMonthGuard } from "../../../../../hooks/useVisibleUnsavedWorkMonthGuard";
 import { useUnsavedWork } from "../../../../../hooks/useUnsavedWork";
 import type { AnswerSaveOutcome, FieldAnswer, ItemAnswer } from "../../../../../data/answers/answerTypes";
-import { isAnswerQueuedPending } from "../../../../../data/answers/answerLocalMirror";
+import { isAnswerQueuedPending, loadPendingAnswerItems } from "../../../../../data/answers/answerLocalMirror";
+import { overlayPendingAnswers } from "../../../../../data/answers/overlayPendingAnswers";
+import { usePendingAnswerCount } from "../../../../../data/answers/usePendingAnswerCount";
 import {
   loadOrDeriveDistributionCurrentStrictForRead,
   readDistributionLogStamp,
@@ -140,9 +143,26 @@ import "./XrayReferrals/XrayReferrals.css";
 
 const COL_KEY = "xray_ref_cols_v4";
 
+/** «N answers not yet sent» notice with a "send now" action; renders nothing at 0. */
+function PendingAnswersBanner({ directoryHandle, username, month }: {
+  directoryHandle: DirectoryHandleLike; username: string; month: string;
+}): ReactElement | null {
+  const L = useLabels();
+  const unsent = usePendingAnswerCount({ username, month });
+  if (unsent <= 0) return null;
+  return (
+    <p className="ew-msg-warn" role="status" dir="rtl">
+      {L.ew_answers_pending_sync.replace("{count}", String(unsent))}{" "}
+      <button type="button" onClick={() => requestAnswerFlush(directoryHandle, username, { immediate: true })}>
+        {L.ew_answers_send_now}
+      </button>
+    </p>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
-type Props = { directoryHandle: DirectoryHandleLike };
+type Props ={ directoryHandle: DirectoryHandleLike };
 type LoadState = "idle" | "loading" | "ready" | "error";
 export type StatusMsg = { type: "ok" | "error"; text: string } | null;
 // Exported (not just used locally) so the moved ReferralStatsStrip/ReplacementDialog
@@ -1311,6 +1331,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         personalMirror,
         logStamp,
         ownAnswerFile,
+        pendingItems,
       ] =
         await Promise.all([
           loadReferralLog(directoryHandle, selMonth, scopeOpts),
@@ -1330,6 +1351,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                 return null;
               }),
           canSeeAll ? null : loadEmployeeAnswers(directoryHandle, selMonth, username),
+          // This employee's submitted-but-unsent answers (local IndexedDB). Must
+          // never fail the load: absence just means "nothing to overlay".
+          canSeeAll ? [] : loadPendingAnswerItems(selMonth, username).catch((): ItemAnswer[] => []),
         ]);
 
       // Both helpers already scope to `username` (fromEmployee / employeeUsername),
@@ -1360,7 +1384,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         setPendingReplacementIds(pendingReplacementIds);
         setSampleMaster(sample);
         setMyQuota(quota);
-        setAnswers(localSubmissions.settle(answerItems, loadGeneration));
+        setAnswers(localSubmissions.settle(overlayPendingAnswers(answerItems, pendingItems), loadGeneration));
         setLoadState("ready");
       };
 
@@ -1712,6 +1736,8 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           onReloadTemplate={() => { if (selTplId) void applyTemplate(selTplId, false); }}
         />
       </PageHeader>
+
+      {!canSeeAll && <PendingAnswersBanner directoryHandle={directoryHandle} username={username} month={selMonth} />}
 
       {/* Scoped to the DataTable's currently filtered rows (not `allEntries`), so
           export/bulk-reopen act only on what the applied filters show. */}
