@@ -1,6 +1,5 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { logError } from "../storage/errorLogger";
-import { wrap } from "../storage/jsonEnvelope";
 import { isReadOnlyMode } from "../storage/readOnlyMode";
 import { directoryResourceKey, withResourceLock } from "../storage/webLocks";
 import { withWorkspaceWriteAccess } from "../storage/workspaceWriteAccess";
@@ -8,7 +7,6 @@ import {
   copyFileBytes,
   inspectJsonFile,
   readEnvelopeRevision,
-  safeWriteJson,
 } from "../storage/safeWrite";
 
 /**
@@ -35,6 +33,8 @@ import {
  *    from the live name (or its `.bak`) is refused.
  *  - A `.tmp` modified within {@link FRESH_TMP_WINDOW_MS} may be another
  *    machine's in-progress write; the whole file is left alone.
+ *  - The verified sibling's exact bytes are promoted (no re-wrap), then the live
+ *    file is re-validated against the sibling's content and revision.
  *  - The damaged live bytes are copied to `{file}.unreadable-{UTC ts}` BEFORE
  *    anything is replaced; nothing is ever deleted. (If the in-place rewrite is
  *    refused by the share, the live entry is removed only after that archive
@@ -282,11 +282,12 @@ async function heal(
       // Archive FIRST. If this throws nothing has changed.
       await copyFileBytes(dir, fileName, dir, archivedAs);
 
-      // wrap(value, revision) continues the sibling's revision (+1) rather than
-      // restarting at 1, so a casLoop reader never sees the file go backwards.
-      const envelope = wrap(candidate.value, revision);
+      // Promote the VERIFIED sibling's exact bytes. Never re-wrap the parsed
+      // value: some families use the self-hashed / string-schemaVersion
+      // compatibility shape, and wrap() would change or double-wrap it.
+      const siblingName = `${fileName}${candidate.source}`;
       try {
-        await safeWriteJson(dir, fileName, envelope);
+        await copyFileBytes(dir, siblingName, dir, fileName);
       } catch (firstError) {
         // The share may refuse an in-place replace of the damaged entry (the
         // trigger for this feature). The bytes are archived, so removing the
@@ -301,18 +302,23 @@ async function heal(
           // reasoning as the allowlisted decisionFileRecovery.ts).
           // eslint-disable-next-line no-restricted-syntax
           await dir.removeEntry(fileName);
-          await safeWriteJson(dir, fileName, envelope);
+          await copyFileBytes(dir, siblingName, dir, fileName);
         } catch (secondError) {
           return { status: "failed", fileName, error: messageOf(secondError), archivedAs };
         }
       }
 
       const verified = await inspectJsonFile<unknown>(dir, fileName);
-      if (!verified.valid) {
+      const verifiedRevision = await readEnvelopeRevision(dir, fileName);
+      if (
+        !verified.valid ||
+        JSON.stringify(verified.value) !== JSON.stringify(candidate.value) ||
+        (candidate.revision !== null && verifiedRevision !== candidate.revision)
+      ) {
         return {
           status: "failed",
           fileName,
-          error: "live file still invalid after rewrite",
+          error: "live file does not match the sibling after promotion",
           archivedAs,
         };
       }
@@ -321,7 +327,7 @@ async function heal(
         fileName,
         source: candidate.source,
         archivedAs,
-        revision: revision + 1,
+        revision,
       } as SiblingHealResult;
     })
   );

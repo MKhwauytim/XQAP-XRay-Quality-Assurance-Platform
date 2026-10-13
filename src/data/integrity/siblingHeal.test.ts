@@ -88,11 +88,31 @@ describe("healFileFromSibling", () => {
     expect(read.ok && read.recoveredFromBak === false).toBe(true);
     expect(read.ok && read.value.messages).toHaveLength(2);
     // The revision continues past the sibling's; it never restarts at 1.
-    // wrap(x, 4) is revision 5, so the healed file is revision 6.
-    expect(await readEnvelopeRevision(dir, THREAD)).toBe(6);
+    // wrap(x, 4) is revision 5; the sibling's bytes are promoted unchanged.
+    expect(await readEnvelopeRevision(dir, THREAD)).toBe(5);
+    expect(result.revision).toBe(5);
+    expect(await readRaw(dir, THREAD)).toBe(await readRaw(dir, `${THREAD}.tmp`));
     const logs = healLogs();
     expect(logs).toHaveLength(1);
     expect(logs[0]!.message).toContain(THREAD);
+  });
+
+  it("promotes a self-hashed / string-schemaVersion sibling byte-for-byte", async () => {
+    const dir = createMemoryDirectory("users");
+    const sibling = JSON.stringify({
+      metadata: { schemaVersion: "workspace-2", revision: 3, hash: "sha256:abc" },
+      data: { users: ["a"] },
+    });
+    await writeRaw(dir, "users.permissions.json", BROKEN);
+    await writeRaw(dir, "users.permissions.json.tmp", sibling);
+
+    const result = await healFileFromSibling(dir, "users.permissions.json", {
+      nowMs: AGED(),
+      recheckDelayMs: 0,
+    });
+
+    expect(result.status).toBe("healed");
+    expect(await readRaw(dir, "users.permissions.json")).toBe(sibling);
   });
 
   it("heals from .bak when there is no .tmp", async () => {
