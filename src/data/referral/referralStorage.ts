@@ -1,3 +1,4 @@
+import { logError } from "../storage/errorLogger";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import {
   appendReferralToEmployee,
@@ -89,7 +90,15 @@ export async function loadRequestLogs(
     const [empFiles, allDecisions] = await Promise.all([
       scope === undefined
         ? loadAllEmployeeRequestFiles(directoryHandle, monthFolderName)
-        : loadEmployeeRequestQueues(directoryHandle, monthFolderName, scope).then((q) => [q]),
+        : loadEmployeeRequestQueues(directoryHandle, monthFolderName, scope).then(
+            (q) => (q ? [q] : []),
+            // Same rule as the all-user scan: an unreadable OWN queue file is logged and
+            // skipped, never a reason to reject the whole log (decisions still load).
+            (error: unknown) => {
+              logError("answerStorage:loadEmployeeRequestQueues", error, { action: scope });
+              return [] as EmployeeRequestQueues[];
+            }
+          ),
       loadAllSupervisorDecisions(directoryHandle, monthFolderName),
     ]);
 

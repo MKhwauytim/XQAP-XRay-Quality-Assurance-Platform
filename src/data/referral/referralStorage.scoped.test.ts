@@ -44,7 +44,7 @@ describe("loadRequestLogs scoped to one user", () => {
   });
 
   it("falls back to legacy {user}.answers.json when no requests file exists", async () => {
-    const root = createMemoryDirectory("scoped-legacy") as unknown as DirectoryHandleLike;
+    const root = createMemoryDirectory("scoped-legacy", { trackReads: true }) as unknown as DirectoryHandleLike;
     const dir = await getSampleEmployeeDir(root, MONTH, true);
     const legacy = {
       username: "emp9",
@@ -58,11 +58,30 @@ describe("loadRequestLogs scoped to one user", () => {
     await safeWriteJson(dir, "emp9.answers.json", legacy);
     const scoped = await loadRequestLogs(root, MONTH, { scopeToUser: "emp9" });
     expect(scoped.referrals.requests.map((r) => r.requestId)).toEqual(["r-legacy"]);
+
+    // Same epoch: the legacy file is frozen and memoised, so a second load must not re-read it.
+    clearReadLog(root);
+    const again = await loadRequestLogs(root, MONTH, { scopeToUser: "emp9" });
+    expect(again.referrals.requests.map((r) => r.requestId)).toEqual(["r-legacy"]);
+    expect(getReadLog(root).filter((p) => p.endsWith("emp9.answers.json"))).toEqual([]);
   });
 
   it("yields an empty log for a user with no files", async () => {
     const root = createMemoryDirectory("scoped-none") as unknown as DirectoryHandleLike;
     const scoped = await loadRequestLogs(root, MONTH, { scopeToUser: "nobody" });
     expect(scoped.referrals.requests).toEqual([]);
+  });
+
+  it("treats a corrupt own requests file as empty instead of rejecting", async () => {
+    const root = createMemoryDirectory("scoped-corrupt") as unknown as DirectoryHandleLike;
+    const dir = await getSampleEmployeeDir(root, MONTH, true);
+    const handle = await dir.getFileHandle("emp5.requests.json", { create: true });
+    const writable = await handle.createWritable!();
+    await writable.write("{not json");
+    await writable.close();
+    const scoped = await loadRequestLogs(root, MONTH, { scopeToUser: "emp5" });
+    expect(scoped.referrals.requests).toEqual([]);
+    expect(scoped.replacements.requests).toEqual([]);
+    expect(scoped.reopens.requests).toEqual([]);
   });
 });
