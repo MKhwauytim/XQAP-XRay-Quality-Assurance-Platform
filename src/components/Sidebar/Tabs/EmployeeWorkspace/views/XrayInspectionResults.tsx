@@ -361,7 +361,13 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
         }),
         // Personal scope only: the per-employee mirror replaces the whole-month
         // sample master + distribution derivation when it is current.
-        canSeeAll ? null : loadEmployeeSampleMirror(directoryHandle, selectedMonth, username),
+        canSeeAll
+          ? null
+          : loadEmployeeSampleMirror(directoryHandle, selectedMonth, username).catch((err) => {
+              // A corrupt/unreadable cache file must fall back to the full path.
+              logError("xrayInspectionResults:loadEmployeeSampleMirror", err);
+              return null;
+            }),
         canSeeAll
           ? null
           : readDistributionLogStamp(directoryHandle, selectedMonth).catch((err) => {
@@ -373,7 +379,9 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
       // Revision AND event set, same test as XrayReferrals. `assignedAtByUser`
       // (the only quota consumer) feeds the oversight-only tracking tab, so the
       // mirror path needs no quota and leaves that state untouched.
+      const log = await loadDistributionLogForRead(directoryHandle, selectedMonth);
       const mirrorTrusted = !canSeeAll && !!personalMirror && !!logStamp &&
+        !hasMovementTouching(log.events, username) &&
         (await isMirrorTrustedForEvents(directoryHandle, selectedMonth, personalMirror, logStamp.revision));
       let distribution: Awaited<ReturnType<typeof loadOrDeriveDistributionCurrentStrictForRead>> | null = null;
       let distributionEntries: DistributionEntry[];
@@ -393,8 +401,6 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
         );
         distributionEntries = distribution?.entries ?? [];
       }
-      const log = await loadDistributionLogForRead(directoryHandle, selectedMonth);
-
       const activeTemplate = selection?.templateId
         ? await loadTemplate(directoryHandle, selection.templateId)
         : null;
@@ -1394,6 +1400,17 @@ function formatAnswerValue(field: TemplateField, value: string | number | boolea
   if (typeof value === "boolean") return value ? "نعم" : "لا";
   if (field.type === "date") return String(value);
   return String(value);
+}
+
+/** Results shows rows the user was moved away from/to (see isVisibleToUser), but the
+ *  mirror holds only entries currently assigned to them -- unlike XrayReferrals, which
+ *  lists current assignments only. Mirrors buildMovementMap/buildMovementInfo's from/to. */
+function hasMovementTouching(events: DistributionEvent[], username: string): boolean {
+  return events.some(
+    (event) =>
+      event.eventType === "reassigned" &&
+      (event.assignedTo === username || event.reassignedTo === username)
+  );
 }
 
 function buildMovementMap(events: DistributionEvent[]): Map<string, DistributionEvent> {

@@ -10,7 +10,7 @@ import { createEmptyUserManagementState, writeUserManagementState } from "../../
 import { saveSampleMaster } from "../../../../../data/sampling/sampleStorage";
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
 import { appendDistributionEvents } from "../../../../../data/distribution/distributionStorage";
-import { buildAssignEvent } from "../../../../../data/distribution/distributionLog";
+import { buildAssignEvent, buildReassignEvent } from "../../../../../data/distribution/distributionLog";
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import * as sampleStorage from "../../../../../data/sampling/sampleStorage";
 import * as mirrorStorage from "../../../../../data/samples/sampleMirrorStorage";
@@ -88,12 +88,12 @@ async function seed(role: "employee" | "supervisor") {
   return root;
 }
 
-/** A mirror whose two entries carry ids that exist nowhere else on disk. */
+/** A mirror projected from the derived distribution (emp-1's current entries). */
 async function mirrorOf(root: DirectoryHandleLike) {
   const full = await distributionStorage.loadOrDeriveDistributionCurrentStrictForRead(
     root, MONTH, makeSample([makeRow("IMG-A"), makeRow("IMG-B")]).rows
   );
-  const entries = (full?.entries ?? []).map((e, i) => ({ ...e, xrayImageId: `MIR-${i + 1}` }));
+  const entries = full?.entries ?? [];
   expect(entries).toHaveLength(2);
   return {
     monthFolderName: MONTH, username: "emp-1", updatedAt: "", sourceLogRevision: 5, deriveVersion: 99,
@@ -117,8 +117,8 @@ describe("XrayInspectionResults mirror fast path", () => {
     const { masterSpy, deriveSpy } = spies(true, mirror);
     masterSpy.mockClear(); deriveSpy.mockClear();
     render(<XrayInspectionResults directoryHandle={root} initialTab="results" />);
-    await waitFor(() => expect(screen.getAllByText("MIR-1").length).toBeGreaterThan(0));
-    expect(screen.getAllByText("MIR-2").length).toBeGreaterThan(0);
+    await waitFor(() => expect(screen.getAllByText("IMG-A").length).toBeGreaterThan(0));
+    for (const e of mirror!.entries) expect(screen.getAllByText(e.xrayImageId).length).toBeGreaterThan(0);
     expect(masterSpy).not.toHaveBeenCalled();
     expect(deriveSpy).not.toHaveBeenCalled();
   });
@@ -132,6 +132,31 @@ describe("XrayInspectionResults mirror fast path", () => {
     await waitFor(() => expect(screen.getAllByText("IMG-A").length).toBeGreaterThan(0));
     expect(masterSpy).toHaveBeenCalledTimes(1);
     expect(deriveSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("trusted mirror but user has a reassignment: full path keeps the moved-away row", async () => {
+    const root = await seed("employee");
+    const mirror = await mirrorOf(root);
+    const moved = await appendDistributionEvents(root, MONTH, [
+      buildReassignEvent({ xrayImageId: "IMG-A", assignedTo: "emp-1", reassignedTo: "emp-2", eventBy: "admin" }),
+    ]);
+    if (!moved.ok) throw new Error(moved.error);
+    const { masterSpy } = spies(true, mirror);
+    masterSpy.mockClear();
+    render(<XrayInspectionResults directoryHandle={root} initialTab="results" />);
+    await waitFor(() => expect(screen.getAllByText("IMG-A").length).toBeGreaterThan(0));
+    expect(masterSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("mirror loader rejects: falls back to the full path", async () => {
+    const root = await seed("employee");
+    const mirror = await mirrorOf(root);
+    const { mirrorSpy, masterSpy } = spies(true, mirror);
+    mirrorSpy.mockRejectedValue(new Error("corrupt mirror"));
+    masterSpy.mockClear();
+    render(<XrayInspectionResults directoryHandle={root} initialTab="results" />);
+    await waitFor(() => expect(screen.getAllByText("IMG-A").length).toBeGreaterThan(0));
+    expect(masterSpy).toHaveBeenCalledTimes(1);
   });
 
   it("canSeeAll: never reads the mirror, uses the full path", async () => {
