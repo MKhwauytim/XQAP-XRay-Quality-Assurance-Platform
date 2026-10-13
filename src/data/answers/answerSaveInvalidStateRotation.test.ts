@@ -34,7 +34,11 @@ import {
 } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { clearErrors } from "../storage/errorLogger";
-import { __resetAppendOnlyEventLogMemosForTests, segmentFileNameForSeq } from "../storage/appendOnlyEventLog";
+import {
+  __resetAppendOnlyEventLogMemosForTests,
+  SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS,
+  segmentFileNameForSeq,
+} from "../storage/appendOnlyEventLog";
 import { __resetDistributionSessionIdForTests } from "../distribution/distributionEventStore";
 import { ANSWER_EVENTS_DIR, ANSWER_EVENT_SEGMENT_SUFFIX } from "./answerEventStore";
 import {
@@ -225,7 +229,9 @@ describe("R1/R5 (E1b): a persistently replace-blocked answer segment rotates ins
     const closeAttemptsOnSeqOne = getOperationLog(root).filter(
       (entry) => entry.operation === "close" && entry.name === seq1
     ).length;
-    expect(closeAttemptsOnSeqOne).toBeLessThanOrEqual(2);
+    expect(closeAttemptsOnSeqOne).toBeLessThanOrEqual(
+      SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS.length + 1
+    );
     // And seq 0 — already known blocked from the earlier save — is not
     // retried at all this time either.
     const writeAttemptsOnSeqZero = getOperationLog(root).filter(

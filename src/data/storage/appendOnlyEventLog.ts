@@ -907,8 +907,15 @@ async function verifySegmentSize(
  * ordinary case (a reader briefly holding the file, releasing it within tens
  * of milliseconds) a real second chance, and then hands off to rotation, which
  * is the actual fix: a fresh segment has no reader contending for it.
+ *
+ * 2026-10-13: widened from [20]. Field logs from a workspace on an SMB share
+ * showed ~70 rotations in two days, each after a single 20 ms retry, while the
+ * same share accepted the replace a few hundred ms later. Rotation stays the
+ * last resort (the one-rotation bound in appendEventSegment is unchanged); it
+ * just no longer fires on the first hiccup. ~4.2 s worst case per append, well
+ * inside INTERACTIVE_WRITE_DEADLINE_MS (30 s).
  */
-const SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS = [20] as const;
+export const SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS = [20, 200, 1000, 3000] as const;
 
 /** Which step inside one write attempt threw — for diagnostics only. */
 type SegmentWriteStep = "getFileHandle" | "createWritable" | "write" | "close";
@@ -1066,7 +1073,8 @@ function logBlockedSegmentReplace(
   const detail = blocked.error instanceof Error ? blocked.error.message : String(blocked.error);
   const message =
     `Segment replace refused after ${blocked.attempts} attempt(s) at step "${blocked.step}" ` +
-    `on "${fileName}" (${typeof errorName === "string" ? errorName : "unknown"}): ${detail}`;
+    `on "${fileName}" (${typeof errorName === "string" ? errorName : "unknown"}): ${detail}` +
+    ` rotationReason=blocked-replace`;
   const code = classifyFileSystemError(blocked.error);
   if (code) {
     logCodedError(context, code, new Error(message));

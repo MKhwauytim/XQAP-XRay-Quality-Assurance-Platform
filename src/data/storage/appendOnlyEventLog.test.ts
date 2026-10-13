@@ -41,6 +41,7 @@ import {
 import {
   MAX_OPEN_SEGMENT_BYTES,
   MAX_SEGMENT_SEQ,
+  SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS,
   type AppendOnlyEventLogConfig,
   type FoldOrderComparison,
   EventSegmentUnreadableError,
@@ -1371,11 +1372,11 @@ describe("E1b: a blocked segment REPLACE rotates instead of retrying forever", (
 
     expect(result).toBe("verified");
     // R8(d): bounded by the SHORT replace-blocked ladder specifically
-    // (SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS has exactly one rung), not
+    // (SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS), not
     // merely "shorter than the ~11 s patient one" — a looser bound would
     // also pass if this regressed to some OTHER, still-shorter-than-patient
     // ladder.
-    expect(delays.length).toBeLessThanOrEqual(1);
+    expect(delays.length).toBeLessThanOrEqual(SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS.length);
 
     // Seq 0 was created (getFileHandle(create: true) always creates the
     // entry) but never received the batch's bytes — the close() that would
@@ -1392,7 +1393,7 @@ describe("E1b: a blocked segment REPLACE rotates instead of retrying forever", (
     const closeAttemptsOnSeqZero = getOperationLog(eventsDir).filter(
       (entry) => entry.operation === "createWritable" && entry.name === name(0)
     ).length;
-    expect(closeAttemptsOnSeqZero).toBeLessThanOrEqual(2);
+    expect(closeAttemptsOnSeqZero).toBeLessThanOrEqual(SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS.length + 1);
   });
 
   it("(b) the next save in the same session goes straight to -1 — no further attempts on the blocked segment", async () => {
@@ -1482,7 +1483,7 @@ describe("E1b: a blocked segment REPLACE rotates instead of retrying forever", (
     const closeAttemptsOnSeqZero = getOperationLog(eventsDir).filter(
       (entry) => entry.operation === "close" && entry.name === name(0)
     ).length;
-    expect(closeAttemptsOnSeqZero).toBeLessThanOrEqual(2);
+    expect(closeAttemptsOnSeqZero).toBeLessThanOrEqual(SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS.length + 1);
   });
 
   // Minor (tail-compare regression): a SAME-SIZE coincidence must not fool
