@@ -680,10 +680,10 @@ export async function eventStoreMatchesScan(
         if (!isNotFoundError(error)) throw error;
       }
       if (eventsDir) {
-        segments = await listDirectoryEntriesWithSize(eventsDir, DISTRIBUTION_EVENT_SEGMENT_SUFFIX);
-        legacyNames = (await listDirectoryEntries(eventsDir))
-          .filter((entry) => entry.kind === "file" && entry.name.endsWith(".json"))
-          .map((entry) => entry.name);
+        // One enumeration serves both the segment sizes and the legacy names.
+        const entries = await listDirectoryEntriesWithSize(eventsDir);
+        segments = entries.filter((entry) => entry.name.endsWith(DISTRIBUTION_EVENT_SEGMENT_SUFFIX));
+        legacyNames = entries.filter((entry) => entry.name.endsWith(".json")).map((entry) => entry.name);
       }
     }
     if (legacyFilesDigest(legacyNames) !== identity.legacyFilesDigest) return false;

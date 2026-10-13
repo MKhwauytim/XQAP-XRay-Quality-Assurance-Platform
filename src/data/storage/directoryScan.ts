@@ -376,13 +376,13 @@ type MatchedFileEntry = { name: string; handle: FileHandleLike | null };
  */
 async function listMatchingFileEntries(
   dir: DirectoryHandleLike,
-  suffix: string
+  suffix?: string
 ): Promise<MatchedFileEntry[]> {
   const iterable = rawEntries(dir);
   if (!iterable) return [];
   const matched: MatchedFileEntry[] = [];
   for await (const entry of iterable) {
-    if (entry.kind !== "file" || !entry.name.endsWith(suffix)) continue;
+    if (entry.kind !== "file" || (suffix !== undefined && !entry.name.endsWith(suffix))) continue;
     matched.push({ name: entry.name, handle: asFileHandle(entry) });
   }
   return matched.sort((a, b) => a.name.localeCompare(b.name));
@@ -577,7 +577,7 @@ async function forEachBounded(
  */
 export async function listDirectoryEntriesWithSize(
   dir: DirectoryHandleLike,
-  suffix: string
+  suffix?: string
 ): Promise<SizedDirectoryEntry[]> {
   const matched = await listMatchingFileEntries(dir, suffix);
   const slots: (SizedDirectoryEntry | null)[] = new Array(matched.length).fill(null);
