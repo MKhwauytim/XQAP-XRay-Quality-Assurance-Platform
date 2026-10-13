@@ -184,7 +184,6 @@ export function levelDefinitionSlide(opts: {
   <span class="v3-level-chip v3-tone-${l.tone}"></span>
   <h3>${esc(l.title)}</h3>
   <span class="v3-level-sub v3-ink-${l.tone}">${esc(l.subtitle)}</span>
-  <span class="cap">نطاق المستوى (بري – بحري)</span>
   <span class="v3-level-def">${esc(l.definition)}</span>
   <div class="v3-level-foot">
     <span class="cap">المحددات</span>
