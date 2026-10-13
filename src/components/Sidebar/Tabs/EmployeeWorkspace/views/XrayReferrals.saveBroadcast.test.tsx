@@ -27,7 +27,10 @@ import { clearSession, writeSession } from "../../../../../auth/authSession";
 import { createEmptyUserManagementState, writeUserManagementState } from "../../../../../auth/userManagement";
 import { saveSampleMaster } from "../../../../../data/sampling/sampleStorage";
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
-import { appendDistributionEvents } from "../../../../../data/distribution/distributionStorage";
+import {
+  appendDistributionEvents,
+  flushPendingDistributionPersist,
+} from "../../../../../data/distribution/distributionStorage";
 import { buildAssignEvent } from "../../../../../data/distribution/distributionLog";
 import { invalidateMonthLockCache } from "../../../../../data/population/monthLock";
 import { setReadOnlyMode } from "../../../../../data/storage/readOnlyMode";
@@ -215,6 +218,9 @@ describe("XrayReferrals — submit broadcasts a data refresh", () => {
 
     render(<XrayReferrals directoryHandle={root} />);
     await waitFor(() => expect(screen.getAllByText("IMG-001").length).toBeGreaterThan(0));
+    // The first load's cache + mirror persist runs behind the read (not
+    // awaited); drain it so its reads/writes land before the logs below.
+    await flushPendingDistributionPersist();
 
     const note = (await waitFor(() => screen.getByLabelText("ملاحظة"))) as HTMLInputElement;
     fireEvent.change(note, { target: { value: "تمت المراجعة" } });
@@ -230,6 +236,8 @@ describe("XrayReferrals — submit broadcasts a data refresh", () => {
 
     // …and the guard is not sticky. An EXTERNAL refresh landing afterwards must
     // still reload this view, or one submit would deafen the page for good.
+    // Drain again: the mirror must exist before the reload is expected to use it.
+    await flushPendingDistributionPersist();
     clearReadLog(root);
     broadcastDataRefresh("manual");
     await waitFor(() => {

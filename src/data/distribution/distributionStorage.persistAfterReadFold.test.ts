@@ -1,18 +1,25 @@
 // Opt-in persistence of distribution.current.json after a READ-side fold
 // (`persistAfterReadFold`). Default reads stay A6a: a read never writes.
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setReadOnlyMode } from "../storage/readOnlyMode";
 
-import { createMemoryDirectory } from "../storage/memoryDirectory";
+import { clearOperationLog, createMemoryDirectory, getOperationLog } from "../storage/memoryDirectory";
+import { clearErrors, getRecentErrors } from "../storage/errorLogger";
+import { safeWriteJson } from "../storage/safeWrite";
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { saveSampleMaster } from "../sampling/sampleStorage";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { PreparedPopulationRow } from "../population/populationTypes";
-import { getSampleMainDir } from "../workspace/workspacePaths";
+import type { MonthManifestData } from "../population/monthTypes";
+import { closeMonth, invalidateMonthLockCache } from "../population/monthLock";
+import { getPopulationMonthDir, getSampleMainDir } from "../workspace/workspacePaths";
 import { buildAssignEvent } from "./distributionLog";
 import {
   __clearDeriveMemoForTests,
+  __resetReadFoldPersistClosedMonthLogForTests,
   appendDistributionEvents,
+  flushPendingDistributionPersist,
   loadOrDeriveDistributionCurrentOutcomeForRead,
   loadOrDeriveDistributionCurrentStrictForRead,
   queueDistributionCurrentPersist,
@@ -74,9 +81,21 @@ function makeSample(rows: PreparedPopulationRow[]): SampleMasterData {
   };
 }
 
-async function seed() {
-  const root = createMemoryDirectory("root");
-  const rows = [makeRow("IMG-1"), makeRow("IMG-2")];
+async function writeOpenManifest(root: DirectoryHandleLike, month: string): Promise<void> {
+  const monthDir = await getPopulationMonthDir(root, month, true);
+  const manifest: MonthManifestData = {
+    monthFolderName: month, month: 5, year: 2026,
+    processedAt: new Date().toISOString(), processedBy: "admin",
+    riskFileName: null, biFileName: null, certScanUsed: false,
+    templateVersion: null, rngSeed: null, totalRawRows: 0, totalProcessedRows: 2,
+    status: "distributed",
+  };
+  await safeWriteJson(monthDir, "month.manifest.json", manifest);
+}
+
+async function seed(options: { trackOperations?: boolean; extraRows?: string[] } = {}) {
+  const root = createMemoryDirectory("root", { trackOperations: options.trackOperations ?? false });
+  const rows = [makeRow("IMG-1"), makeRow("IMG-2"), ...(options.extraRows ?? []).map(makeRow)];
   const saved = await saveSampleMaster(root, MONTH, makeSample(rows));
   if (!saved.ok) throw new Error("seed sample failed");
   const appended = await appendDistributionEvents(root, MONTH, [
@@ -105,52 +124,122 @@ async function cacheStamp(root: ReturnType<typeof createMemoryDirectory>): Promi
   return `${file.lastModified}|${await file.text()}`;
 }
 
+
 describe("persistAfterReadFold", () => {
   beforeEach(() => {
     __clearDeriveMemoForTests();
+    __resetReadFoldPersistClosedMonthLogForTests();
+    invalidateMonthLockCache();
+    clearErrors();
   });
-  afterEach(() => {
+  afterEach(async () => {
     setReadOnlyMode(false);
+    vi.restoreAllMocks();
+    await flushPendingDistributionPersist();
   });
 
   it("default: a read-side fold writes nothing", async () => {
     const { root, rows } = await seed();
     const dist = await loadOrDeriveDistributionCurrentStrictForRead(root, MONTH, rows);
     expect(dist?.entries.length).toBe(2);
+    await flushPendingDistributionPersist(root, MONTH);
     expect(await loadCachedEntryCount(root)).toBeNull();
   });
 
-  it("opt-in: a read-side fold persists distribution.current.json", async () => {
+  it("opt-in: a read-side fold persists distribution.current.json (behind the read, not awaited by it)", async () => {
     const { root, rows } = await seed();
     const dist = await loadOrDeriveDistributionCurrentStrictForRead(root, MONTH, rows, {
       persistAfterReadFold: true,
     });
     expect(dist?.entries.length).toBe(2);
+    await flushPendingDistributionPersist(root, MONTH);
     expect(await loadCachedEntryCount(root)).toBe(dist?.entries.length);
+  });
+
+  it("opt-in: a checkpoint resume that folded a newer event persists an updated cache", async () => {
+    const { root, rows } = await seed({ extraRows: ["IMG-3"] });
+    await loadOrDeriveDistributionCurrentStrictForRead(root, MONTH, rows, { persistAfterReadFold: true });
+    await flushPendingDistributionPersist(root, MONTH);
+    expect(await loadCachedEntryCount(root)).toBe(2);
+
+    // A newer event lands; the on-disk cache + checkpoint are now one event behind.
+    const appended = await appendDistributionEvents(root, MONTH, [
+      buildAssignEvent({ xrayImageId: "IMG-3", assignedTo: "emp-1", eventBy: "admin" }),
+    ]);
+    if (!appended.ok) throw new Error("append failed");
+    await flushPendingDistributionPersist(root, MONTH);
+    expect(await loadCachedEntryCount(root)).toBe(2);
+    __clearDeriveMemoForTests();
+
+    const outcome = await loadOrDeriveDistributionCurrentOutcomeForRead(root, MONTH, rows, {
+      persistAfterReadFold: true,
+    });
+    expect(outcome.kind).toBe("ok");
+    if (outcome.kind !== "ok") return;
+    expect(outcome.source).toBe("checkpoint");
+    expect(outcome.resumedWithNewEvents).toBe(true);
+    expect(outcome.current.entries.length).toBe(3);
+    await flushPendingDistributionPersist(root, MONTH);
+    expect(await loadCachedEntryCount(root)).toBe(3);
   });
 
   it("opt-in: a read served from an existing cache performs no write", async () => {
     const { root, rows } = await seed();
     await loadOrDeriveDistributionCurrentStrictForRead(root, MONTH, rows, { persistAfterReadFold: true });
+    await flushPendingDistributionPersist(root, MONTH);
     const before = await cacheStamp(root);
     __clearDeriveMemoForTests();
     const outcome = await loadOrDeriveDistributionCurrentOutcomeForRead(root, MONTH, rows, {
       persistAfterReadFold: true,
     });
-    expect(outcome.kind === "ok" && outcome.source).not.toBe("fold");
+    expect(outcome.kind).toBe("ok");
+    if (outcome.kind !== "ok") return;
+    expect(outcome.source).not.toBe("fold");
+    await flushPendingDistributionPersist(root, MONTH);
     expect(await cacheStamp(root)).toBe(before);
   });
 
-  it("read-only session: no write attempted and no retry stall", async () => {
-    const { root, rows } = await seed();
+  it("read-only session: no write attempted and no retry sleep scheduled", async () => {
+    const { root, rows } = await seed({ trackOperations: true });
     setReadOnlyMode(true);
-    const started = Date.now();
+    clearOperationLog(root);
+    const timeoutSpy = vi.spyOn(globalThis, "setTimeout");
     const dist = await loadOrDeriveDistributionCurrentStrictForRead(root, MONTH, rows, {
       persistAfterReadFold: true,
     });
     expect(dist?.entries.length).toBe(2);
-    expect(Date.now() - started).toBeLessThan(900); // the persist retry sleeps >= 1 s
+    await flushPendingDistributionPersist(root, MONTH);
+    // The persist retry sleeps >= 1 s; none was scheduled.
+    const longSleeps = timeoutSpy.mock.calls.filter(([, ms]) => typeof ms === "number" && ms >= 1000);
+    expect(longSleeps).toEqual([]);
+    const writes = getOperationLog(root).filter((entry) => entry.operation === "createWritable");
+    expect(writes).toEqual([]);
     expect(await loadCachedEntryCount(root)).toBeNull();
+  });
+
+  it("closed month: no write attempt, one log line across two reads", async () => {
+    const { root, rows } = await seed({ trackOperations: true });
+    await writeOpenManifest(root, MONTH);
+    const closed = await closeMonth(root, MONTH, "admin");
+    expect(closed).toEqual({ ok: true });
+    clearOperationLog(root);
+    clearErrors();
+
+    for (let i = 0; i < 2; i += 1) {
+      __clearDeriveMemoForTests();
+      const outcome = await loadOrDeriveDistributionCurrentOutcomeForRead(root, MONTH, rows, {
+        persistAfterReadFold: true,
+      });
+      expect(outcome.kind === "ok" && outcome.source).toBe("fold");
+      await flushPendingDistributionPersist(root, MONTH);
+    }
+
+    expect(getOperationLog(root).filter((entry) => entry.operation === "createWritable")).toEqual([]);
+    expect(await loadCachedEntryCount(root)).toBeNull();
+    const lines = getRecentErrors().filter(
+      (entry) => entry.context === "distribution:persist-after-read-fold:month-closed"
+    );
+    expect(lines).toHaveLength(1);
   });
 
   it("a memo-served read with the flag writes nothing", async () => {
@@ -160,6 +249,7 @@ describe("persistAfterReadFold", () => {
       persistAfterReadFold: true,
     });
     expect(outcome.kind === "ok" && outcome.source).toBe("memo");
+    await flushPendingDistributionPersist(root, MONTH);
     expect(await loadCachedEntryCount(root)).toBeNull();
   });
 
@@ -178,6 +268,7 @@ describe("persistAfterReadFold", () => {
     ]);
     __clearDeriveMemoForTests();
     await loadOrDeriveDistributionCurrentStrictForRead(root, MONTH, rows, { persistAfterReadFold: true });
+    await flushPendingDistributionPersist(root, MONTH);
     expect(await loadCachedEntryCount(root)).toBe(2);
     const before = await cacheStamp(root);
 

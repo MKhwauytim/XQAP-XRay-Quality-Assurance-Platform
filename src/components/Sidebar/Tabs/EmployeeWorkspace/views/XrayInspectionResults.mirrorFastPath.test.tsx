@@ -2,7 +2,7 @@
 // Task 10: personal-scope Results serves a trusted sample mirror instead of
 // reading the whole sample master + deriving the distribution.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { createMemoryDirectory } from "../../../../../data/storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../../../../../data/storage/fileSystemAccess";
 import { clearSession, writeSession } from "../../../../../auth/authSession";
@@ -146,6 +146,12 @@ describe("XrayInspectionResults mirror fast path", () => {
     render(<XrayInspectionResults directoryHandle={root} initialTab="results" />);
     await waitFor(() => expect(screen.getAllByText("IMG-A").length).toBeGreaterThan(0));
     expect(masterSpy).toHaveBeenCalledTimes(1);
+    // The moved-away row carries its movement label (getMovementStatusLabel("reassigned")),
+    // in IMG-A's own row — not just somewhere on the page.
+    const row = screen.getAllByText("IMG-A").map((cell) => cell.closest("tr")).find((tr) => tr !== null);
+    expect(row).toBeTruthy();
+    expect(within(row as HTMLElement).getByText("محالة/منقولة")).toBeInTheDocument();
+    expect(within(row as HTMLElement).getAllByText("emp-2").length).toBeGreaterThan(0);
   });
 
   it("mirror loader rejects: falls back to the full path", async () => {

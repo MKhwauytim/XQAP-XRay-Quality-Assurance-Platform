@@ -27,7 +27,8 @@ import {
 import { codedMessage, logCodedError, resolveErrorCode } from "../storage/errorCodes";
 import { listDirectoryEntries, listSizedAndNamedEntries, readAppendOnlyDirectory, readNamedJsonFiles } from "../storage/directoryScan";
 import { simpleHash } from "../storage/jsonEnvelope";
-import { ensureMonthWritable, MonthClosedError } from "../population/monthLock";
+import { directoryResourceKey } from "../storage/webLocks";
+import { ensureMonthWritable, isMonthClosed, MonthClosedError } from "../population/monthLock";
 import { syncSampleMirrors } from "../samples/sampleMirrorStorage";
 import { loadSampleMaster } from "../sampling/sampleStorage";
 import {
@@ -683,7 +684,14 @@ export async function eventStoreMatchesScan(
       if (eventsDir) {
         // One enumeration: segments are sized, legacy per-event files are only
         // counted by name (never opened).
-        const listing = await listSizedAndNamedEntries(eventsDir, DISTRIBUTION_EVENT_SEGMENT_SUFFIX, ".json");
+        const listing = await listSizedAndNamedEntries(
+          eventsDir,
+          DISTRIBUTION_EVENT_SEGMENT_SUFFIX,
+          ".json",
+          // Same scope readEventSegmentDelta gives readSegmentTails, so a name the
+          // registry confirmed dead is skipped here too (it has no recorded offset).
+          directoryResourceKey(directory, DISTRIBUTION_EVENTS_DIR)
+        );
         segments = listing.sized;
         legacyNames = listing.names;
       }
@@ -2132,6 +2140,9 @@ export type DistributionCurrentOutcome =
       source: "cache" | "memo" | "checkpoint" | "fold";
       /** Set on a `fold` the absent-row guard refused to persist. */
       displayOnly?: true;
+      /** `checkpoint` only: the resume folded at least one event newer than
+       *  the on-disk cache, so that cache is now stale. */
+      resumedWithNewEvents?: true;
     }
   | { kind: "absent" }
   | { kind: "unavailable"; error: unknown };
@@ -2201,7 +2212,11 @@ async function loadOrDeriveDistributionCurrentOutcome(
       );
       if (resumed) {
         setDeriveMemo(memoKey, resumed);
-        return { kind: "ok", current: resumed, source: "checkpoint" };
+        // tryResumeFromCheckpoint hands back `cached` itself when nothing new
+        // was folded, and a fresh object when it folded at least one event.
+        return resumed === cached
+          ? { kind: "ok", current: resumed, source: "checkpoint" }
+          : { kind: "ok", current: resumed, source: "checkpoint", resumedWithNewEvents: true };
       }
       // null => a late event was found on THIS read, straight from disk --
       // strictly fresher information than anything the memo could hold, so
@@ -2494,6 +2509,14 @@ export function loadDistributionLogForRead(
   return dedupeInFlight(key, () => loadDistributionLog(directoryHandle, monthFolderName));
 }
 
+/** (workspace, month) pairs whose read-side persist was skipped as closed and
+ *  already logged this session — one line each, not one per mount. */
+const readFoldPersistClosedMonthLogged = new Set<string>();
+
+export function __resetReadFoldPersistClosedMonthLogForTests(): void {
+  readFoldPersistClosedMonthLogged.clear();
+}
+
 /** Deduped sibling of loadOrDeriveDistributionCurrent for READ-ONLY call
  *  sites only. Never use this for a fresh-read-before-write correctness
  *  check. All callers should pass sampleRows sourced from the same
@@ -2505,10 +2528,13 @@ export function loadDistributionLogForRead(
  *  flows must call `refreshDistributionCacheAfterWrite` explicitly instead
  *  (A6b). The ONE opt-in exception is `options.persistAfterReadFold`, used by
  *  the two queue-rendering employee views (XrayReferrals, XrayInspectionResults)
- *  so a refold is not repeated on every mount: after a read that actually
- *  folded the log (`source === "fold"`, not display-only) the result is
- *  persisted, awaited, with any failure swallowed (logged) so it can never
- *  fail the read. It is part of the dedupe key.
+ *  so a refold is not repeated on every mount: after a read that left the
+ *  on-disk cache stale (a full `fold`, or a `checkpoint` resume that folded at
+ *  least one new event; never display-only) the result is queued for
+ *  persistence WITHOUT being awaited — the read returns at once and a failure
+ *  is only logged, so it can never fail or delay the read. Skipped in a
+ *  read-only session and on a closed month (logged once per workspace+month
+ *  per session). It is part of the dedupe key.
  *
  *  `options.strictSegments` forwards to `loadOrDeriveDistributionCurrentOutcome`'s
  *  own `strictSegments` (see `LoadOrDeriveDistributionCurrentOptions` — and its
@@ -2532,19 +2558,39 @@ export function loadOrDeriveDistributionCurrentOutcomeForRead(
       persistCache: false,
       strictSegments,
     });
-    // Not in a read-only session: the write path is gated by canMutate, and a
-    // blocked write would be retried after a 1-3 s sleep while this is awaited.
-    if (
-      persistAfterReadFold && outcome.kind === "ok" && outcome.source === "fold" &&
-      !outcome.displayOnly && !isReadOnlyMode()
-    ) {
-      // enqueuePersist never rejects; a failed write is reported through
-      // `persistFailures` (and logged as distribution:cache-write there).
-      const write = queueDistributionCurrentPersist(directoryHandle, monthFolderName, outcome.current);
-      await write;
-      if (persistFailures.has(write)) {
-        logError("distribution:persist-after-read-fold", persistFailures.get(write));
+    // Persist when the on-disk cache is now stale: a full refold, or a
+    // checkpoint resume that folded at least one newer event (the field case
+    // after a failed write-path persist). Never in a read-only session (the
+    // write path is gated by canMutate, and a blocked write retries after a
+    // 1-3 s sleep), and never on a closed month (the write would be refused on
+    // every mount; checked through monthLock's TTL cache, logged once).
+    const staleOnDisk =
+      outcome.kind === "ok" &&
+      !outcome.displayOnly &&
+      (outcome.source === "fold" || (outcome.source === "checkpoint" && outcome.resumedWithNewEvents === true));
+    if (persistAfterReadFold && staleOnDisk && !isReadOnlyMode()) {
+      if (await isMonthClosed(directoryHandle, monthFolderName)) {
+        const onceKey = `${workspaceScopeId(directoryHandle)}|${monthFolderName}`;
+        if (!readFoldPersistClosedMonthLogged.has(onceKey)) {
+          readFoldPersistClosedMonthLogged.add(onceKey);
+          logError(
+            "distribution:persist-after-read-fold:month-closed",
+            new MonthClosedError(monthFolderName)
+          );
+        }
+        return outcome;
       }
+      // NOT awaited: the view renders from `outcome` now; the cache, sidecar
+      // and mirror writes (and any retry sleep) run behind it on the month's
+      // persist chain. enqueuePersist never rejects; a failed write is
+      // reported through `persistFailures` (and logged as
+      // distribution:cache-write there) — re-logged here under this context.
+      const write = queueDistributionCurrentPersist(directoryHandle, monthFolderName, outcome.current);
+      void write.then(() => {
+        if (persistFailures.has(write)) {
+          logError("distribution:persist-after-read-fold", persistFailures.get(write));
+        }
+      });
     }
     return outcome;
   });
