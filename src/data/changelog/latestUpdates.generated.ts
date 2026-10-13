@@ -5,6 +5,20 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v153.24",
+    "date": "2026-10-13",
+    "bucket": "fix",
+    "scope": "answers",
+    "title": "stop the save-failure spiral on flaky shares — retry refused replace before rotating, two-name extension probe, dead-segment registry, 1 MB segments"
+  },
+  {
+    "version": "v153.23",
+    "date": "2026-10-12",
+    "bucket": "fix",
+    "scope": "executive report",
+    "title": "official risk-level definitions and corrected glossary terms"
+  },
+  {
     "version": "v153.22",
     "date": "2026-10-12",
     "bucket": "enhancement",
@@ -59,19 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "executive report",
     "title": "sample targets and target-based coverage, neutral all-ports panel, ضمان جودة الأشعة wording"
-  },
-  {
-    "version": "v153.14",
-    "date": "2026-10-12",
-    "bucket": "enhancement",
-    "scope": "executive report",
-    "title": "remove the two guidance notes from the statements pages"
-  },
-  {
-    "version": "v153.13",
-    "date": "2026-10-12",
-    "bucket": "enhancement",
-    "scope": "executive report",
-    "title": "reword land-vs-sea, false-suspicion and image-quality statements"
   }
 ];
