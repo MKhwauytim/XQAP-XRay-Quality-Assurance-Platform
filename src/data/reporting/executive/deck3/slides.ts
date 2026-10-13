@@ -56,7 +56,7 @@ const ORG_NAME = "هيئة الزكاة والضريبة والجمارك";
 const CLASSIFICATION = "سري";
 /** Deck-local cover wording (the shared ORGANIZATION_PATH is left as-is: deck2 and other surfaces still read it). */
 const LEGAL_SECTOR = `قطاع ${ORGANIZATION_PATH[0]}`;
-const DEPARTMENT = "إدارة الرقابة على الامتثال للمنافذ الجمركية";
+const DEPARTMENT = "إدارة الرقابة على الامتثال في المنافذ الجمركية";
 
 const EYEBROW_S1 = "القسم الأول - مجتمع الفحص والعيّنة";
 const EYEBROW_S2 = "القسم الثاني — نتائج فحص الجودة";
@@ -347,8 +347,8 @@ function deck3Copy(completedOnly: boolean, monthlyTarget: number, completedTotal
       eyebrowS3: withPopulation ? EYEBROW_S3 : "القسم الثاني - الملاحظات والتوصيات",
       kpiTitle: "المؤشرات الرئيسية",
       kpiEyebrow: "خلاصة التقرير",
-      coverKicker: "عرض تنفيذي · تقرير شامل",
-      coverPeriodLabel: "فترة الدراسة",
+      coverKicker: "موجز الأداء الدوري",
+      coverPeriodLabel: "فترة الفحص",
       // No draw weights or monthly target behind completed-only rows.
       weightLines: ["", "", "", ""],
       highlightValue: completedTotal,
@@ -567,8 +567,8 @@ export async function buildDeck3Slides(
       : "حجم مجتمع الشهر وتوزيعه على المستويات والمنافذ، والأساس الذي سُحبت منه العيّنة.",
     s2: !co
       ? "دقة النتائج على مستوى الشهر وحسب المنفذ ومستوى المخاطر."
-      : withPop ? "دقة النتائج على مستوى الفترة وحسب المنفذ ومستوى المخاطر." : "دقة النتائج على مستوى التقرير وحسب المنفذ ومستوى المخاطر.",
-    s3: "أهم الملاحظات والتوصيات المستخلصة من نتائج التقرير، ومساحة لإضافة ملاحظات وتوصيات، والتوافق مع الفرق الأمنية ومحرك المخاطر.",
+      : withPop ? "دقة النتائج على مستوى الفترة وعلى أساس المنفذ ومستويات المخاطر." : "دقة النتائج على مستوى التقرير وحسب المنفذ ومستوى المخاطر.",
+    s3: "أهم الملاحظات والتوصيات المستخلصة من نتائج التقرير.",
   };
 
   // Port lists + pagination, computed up front — slides 8 and 11 (population
@@ -847,7 +847,7 @@ ${kpiBand([
     const groups = popPortGroups.length > 0 ? popPortGroups : [{ variant: "land" as const, title: "المنافذ البرية", totalLabel: "إجمالي البرية", ports: popLand }];
     for (const g of groups) {
       const m = meta("s1", EYEBROW_S1);
-      const inner = `${contentHead({ eyebrow: EYEBROW_S1, title: `التوزيع على ${g.title}`, note: "المجتمع والرقم بين قوسين العيّنة المسحوبة، مفصولة إلى سليمة واشتباه" })}
+      const inner = `${contentHead({ eyebrow: EYEBROW_S1, title: `التوزيع على ${g.title}`, note: "تشير الأرقام بين القوسين إلى حجم العينة، علمًا أن الأرقام أدناه تمثل الإجابات الصادرة على الصورة" })}
 <div class="v3-two-col" style="grid-template-columns:1fr">
   ${tintedPanel({ variant: g.variant, title: g.title, note: coverageNote(g.ports), body: dataTable({ headers, rows: portRows(g.ports), totals: totalsOf(g.totalLabel, g.ports), topHeader: [{ label: "", span: 2 }, { label: "حسب النتيجة", span: withPop ? 5 : 4, group: true }], groupStart: 2, rowPx: portRowPx(g.ports.length, TOP_HEADER_PX) }) })}
 </div>`;
@@ -893,15 +893,15 @@ ${kpiBand([
     ];
     const inner = `${contentHead({
       eyebrow: eyebrowS2,
-      title: "نسبة التوائم",
+      title: "معدل الاتفاق العام",
     })}
 ${kpiBand([
-      { label: "نسبة التوائم العامة", value: fmtPct(overallStats.overall), sub: RESULT_ACCURACY_DEFINITION },
+      { label: "معدل الاتفاق العام", value: fmtPct(overallStats.overall), sub: RESULT_ACCURACY_DEFINITION },
       { label: "الاشتباهات الفائتة", value: fmtNum(t.missedSuspicion), valueTone: "red", aside: `${fmtPct(pct(t.missedSuspicion, overallStats.cleanResults))} من إجابات السليمة`, sub: MISSED_SUSPICION_DEFINITION },
       { label: "الاشتباهات الخاطئة", value: fmtNum(t.falseSuspicion), valueTone: "gold", aside: `${fmtPct(pct(t.falseSuspicion, overallStats.suspResults))} من إجابات الاشتباه`, sub: FALSE_SUSPICION_DEFINITION },
     ], "solo", true)}
 <div class="v3-note" style="margin-top:18px;font-weight:700;color:var(--v3-navy);">الإجابات حسب مستويات المخاطر — النسبة بين قوسين من الإجابات المفحوصة في كل مستوى</div>
-${dataTable({ headers: ["المستوى", "الإجابات المفحوصة", "نسبة التوائم العامة", "الاشتباهات الفائتة", "الاشتباهات الخاطئة"], topHeader: [{ label: "", span: 2 }, { label: "النسبة", span: 1, group: true }, { label: "نتائج خاطئة", span: 2, group: true }], groupStart: [2, 3], rows: stageRows, totals })}`;
+${dataTable({ headers: ["المستوى", "الإجابات المفحوصة", "معدل الاتفاق العام", "الاشتباهات الفائتة", "الاشتباهات الخاطئة"], topHeader: [{ label: "", span: 2 }, { label: "النسبة", span: 1, group: true }, { label: "نتائج خاطئة", span: 2, group: true }], groupStart: [2, 3], rows: stageRows, totals })}`;
     parts.push(slideShell(m, "", inner));
   }
 
@@ -937,7 +937,7 @@ ${dataTable({ headers: ["المستوى", "الإجابات المفحوصة", "
         title: `نتائج الأداء ${g.title}`,
       })}
 <div class="v3-two-col" style="grid-template-columns:1fr">
-  ${tintedPanel({ variant: g.variant, title: g.panelTitle, body: dataTable({ headers, rows: g.ports.map((p) => cellsOf(esc(p.name), p.counts)), totals: cellsOf(g.totalLabel, sumCounts(g.ports.map((p) => p.counts)), "v-navy"), firstColWidth: 26, topHeader: [{ label: "", span: 1 }, { label: "النتيجة العامة", span: 2 }, { label: "الدقة", span: 2, group: true }, { label: "الأخطاء", span: 2, group: true }], groupStart: [3, 5], rowPx: portRowPx(g.ports.length, FORMULA_NOTE_PX + TOP_HEADER_PX) }) })}
+  ${tintedPanel({ variant: g.variant, title: g.panelTitle, body: dataTable({ headers, rows: g.ports.map((p) => cellsOf(esc(p.name), p.counts)), totals: cellsOf(g.totalLabel, sumCounts(g.ports.map((p) => p.counts)), "v-navy"), firstColWidth: 26, topHeader: [{ label: "", span: 1 }, { label: "النتيجة العامة", span: 2 }, { label: "الدقة", span: 2, group: true }, { label: "النتائج الخاطئة", span: 2, group: true }], groupStart: [3, 5], rowPx: portRowPx(g.ports.length, FORMULA_NOTE_PX + TOP_HEADER_PX) }) })}
 </div>
 <p class="v3-note v3-formula-note">${AGREEMENT_FORMULA_NOTE}</p>`;
       parts.push(slideShell(m, "", inner));

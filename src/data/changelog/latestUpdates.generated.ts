@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v153.28",
+    "date": "2026-10-13",
+    "bucket": "enhancement",
+    "scope": "deck3",
+    "title": "bake the saved text template into the defaults, drop the s3 contents tail, lower «المحددات»"
+  },
+  {
     "version": "v153.27",
     "date": "2026-10-13",
     "bucket": "enhancement",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "executive report",
     "title": "remove per-port marking pages, KPI aside under number, support workbook matches every page"
-  },
-  {
-    "version": "v153.19",
-    "date": "2026-10-12",
-    "bucket": "enhancement",
-    "scope": "executive report",
-    "title": "observations-and-recommendations table, page 8 results matrix, المفحوصة wording"
   }
 ];

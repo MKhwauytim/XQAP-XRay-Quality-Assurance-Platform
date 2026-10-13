@@ -153,7 +153,7 @@ body{background:var(--v3-navy);font-family:"Somar","IBM Plex Sans Arabic","Tahom
 .v3-level-def{font-size:22px;line-height:1.5;color:var(--v3-text);}
 .v3-level-dets{margin:0;padding-inline-start:26px;font-size:22px;line-height:1.4;font-weight:500;color:var(--v3-navy);}
 .v3-level-dets li{margin:2px 0;}
-.v3-level-foot{align-self:start;display:flex;flex-direction:column;gap:8px;}
+.v3-level-foot{align-self:start;margin-top:26px;display:flex;flex-direction:column;gap:8px;}
 .v3-level-foot .cap{font-size:24px;color:var(--v3-muted);}
 .v3-level-foot .measures{font-size:25px;font-weight:500;color:var(--v3-navy);}
 .v3-level-weight{font-size:24px;font-weight:500;padding-top:10px;border-top:1px solid var(--v3-hair);}
