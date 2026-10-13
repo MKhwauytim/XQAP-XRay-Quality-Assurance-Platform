@@ -394,6 +394,134 @@ function deck3Copy(completedOnly: boolean, monthlyTarget: number, completedTotal
   };
 }
 
+/** Slide 7 body: population & sample per risk level (extracted from buildDeck3Slides; pure). */
+function populationByLevelInner(model: ReportModel, withPop: boolean): string {
+  const stages = model.population.byStage;
+  const maxPop = Math.max(1, ...stages.map((s) => s.population));
+  const rows = stages
+    .map((s, i) => {
+      const tone = LEVEL_TONES[i % LEVEL_TONES.length];
+      const census = s.population > 0 && s.sampleSize >= s.population;
+      const width = Math.max(2, (s.population / maxPop) * 100);
+      // Summary-backed report: the bar is the level's progress to its target (full = 100% of target) and a flag says whether it is finished.
+      const done = s.coverage >= 100;
+      const progress = `<div class="v3-cov"><div class="v3-pop-bar"><i class="v3-tone-${tone}" style="width:${Math.max(2, Math.min(100, s.coverage)).toFixed(1)}%"></i></div><span class="v3-cov-flag ${done ? "done" : "open"}" role="img" aria-label="${done ? "اكتمل المستهدف" : "لم يكتمل المستهدف"}">${done ? CHECK_SVG : ""}</span></div>`;
+      return [
+        { html: esc(s.stageLabel) },
+        { html: withPop ? progress : `<div class="v3-pop-bar"><i class="v3-tone-${tone}" style="width:${width.toFixed(1)}%"></i></div>` },
+        { html: fmtNum(s.population), cls: "v-muted" },
+        ...(withPop ? [{ html: fmtNum(s.target ?? s.population), cls: "v-gold" }] : []),
+        { html: fmtNum(s.sampleSize), cls: "v-navy" },
+        { html: withPop ? fmtPct(s.coverage) : census ? "حصر كامل" : "عدد ثابت", cls: census ? "v-green" : "v-gold" },
+      ] as TableCell[];
+    });
+  // Footnote: how coverage is measured, then one bullet per level with its target.
+  const monthsPhrase = (n: number) => (n === 1 ? "شهر واحد" : n === 2 ? "شهرين" : n >= 3 && n <= 10 ? `${n} أشهر` : `${n} شهرًا`);
+  const levelLines = stages
+    .filter((s) => s.target !== undefined)
+    .map((s) => {
+      const monthly = STAGE_SAMPLE_TARGETS[s.stageKey as keyof typeof STAGE_SAMPLE_TARGETS];
+      return typeof monthly === "number"
+        ? `${esc(s.stageLabel)}: ${fmtNum(monthly)} صورة شهريًا × ${monthsPhrase(Math.round((s.target ?? 0) / monthly))} = ${fmtNum(s.target ?? 0)} صورة`
+        : `${esc(s.stageLabel)}: 100% من مجتمعه = ${fmtNum(s.target ?? s.population)} صورة`;
+    });
+  const popNote = withPop
+    ? `<div class="v3-pop-note"><p>التغطية الرقابية = العيّنة المفحوصة ÷ المستهدف.</p><ul class="v3-pop-bullets">${levelLines.map((l) => `<li>${l}</li>`).join("")}</ul></div>`
+    : `<p class="v3-pop-note">الاختيار عشوائي داخل حصة كل مستوى؛ ولا يعكس حجم الحصة أهمية المستوى — لكل مستوى هدف مختلف.</p>`;
+  return `${contentHead({ eyebrow: EYEBROW_S1, title: "مجتمع الفحص والعيّنة حسب المستوى", large: true })}
+<div class="v3-pop-grid">
+<div class="v3-pop-stats">
+  <div class="v3-pop-stat"><span>إجمالي المجتمع</span><b>${fmtNum(model.population.total)}</b></div>
+  ${withPop ? `<div class="v3-pop-stat"><span>إجمالي المستهدف</span><b>${fmtNum(stages.reduce((a, s) => a + (s.target ?? s.population), 0))}</b></div>` : ""}
+  <div class="v3-pop-stat"><span>إجمالي العيّنة</span><b>${fmtNum(model.sample.total)}</b></div>
+  <div class="v3-pop-stat"><span>التغطية الرقابية الكلية</span><b class="v3-ink-gold">${fmtPct(model.sample.coverage ?? null)}</b></div>
+</div>
+<div class="v3-pop-table">
+  ${dataTable({ headers: withPop ? ["المستوى", "", "المجتمع", "المستهدف", "العيّنة", "التغطية الرقابية"] : ["المستوى", "", "المجتمع", "العيّنة", "أسلوب السحب"], rows, groupStart: 2, firstColWidth: 26, size: "lg" })}
+  ${popNote}
+
+</div>
+</div>`;
+}
+
+/** Slide 7b body: L1/L2 results across the population (extracted from buildDeck3Slides; pure). */
+function populationResultsInner(model: ReportModel, s: NonNullable<ReportModel["population"]["summary"]>): string {
+  // One row per level (المستوى) — the same four rows as the previous page — with that level's own L1 and L2 answers.
+  // Each cell: the count with its share of the level's images beneath it.
+  type Tally = { clean: number; suspicious: number; other: number };
+  const zero = (): Tally => ({ clean: 0, suspicious: 0, other: 0 });
+  const perStage = new Map<string, { n: number; l1: Tally; l2: Tally }>();
+  for (const [raw, lv] of Object.entries(s.byStageLevels)) {
+    const key = getStageKey(raw);
+    const cur = perStage.get(key) ?? { n: 0, l1: zero(), l2: zero() };
+    for (const k of ["clean", "suspicious", "other"] as const) { cur.l1[k] += lv.levelOne[k]; cur.l2[k] += lv.levelTwo[k]; }
+    cur.n += lv.levelOne.clean + lv.levelOne.suspicious + lv.levelOne.other;
+    perStage.set(key, cur);
+  }
+  const cell = (n: number, of: number) => `${fmtNum(n)}<br><span class="v3-sub v3-sub-sm">(${fmtPct(pct(n, of))})</span>`;
+  const rowFor = (label: string, n: number, l1: Tally, l2: Tally): TableCell[] => [
+    { html: label },
+    { html: fmtNum(n), cls: "v-navy" },
+    { html: cell(l1.clean, n), cls: "v-green" },
+    { html: cell(l2.clean, n), cls: "v-green" },
+    { html: cell(l1.suspicious, n), cls: "v-red" },
+    { html: cell(l2.suspicious, n), cls: "v-red" },
+    { html: cell(l1.other, n), cls: "v-gold" },
+    { html: cell(l2.other, n), cls: "v-gold" },
+  ];
+  const stageRows = model.population.byStage.map((st) => {
+    const cur = perStage.get(st.stageKey) ?? { n: 0, l1: zero(), l2: zero() };
+    return rowFor(st.stageLabel, cur.n, cur.l1, cur.l2);
+  });
+  // مصفوفة النتائج: how many images fall in each L1 × L2 combination (first word = level 1's result, second = level 2's), per risk level.
+  type Pairs = NonNullable<(typeof s.byStageLevels)[string]["pairs"]>;
+  const zeroPairs = (): Pairs => ({ cleanClean: 0, suspClean: 0, cleanSusp: 0, suspSusp: 0, other: 0 });
+  const pairsByStage = new Map<string, Pairs>();
+  for (const [raw, lv] of Object.entries(s.byStageLevels)) {
+    const key = getStageKey(raw);
+    const cur = pairsByStage.get(key) ?? zeroPairs();
+    for (const k of Object.keys(cur) as Array<keyof Pairs>) cur[k] += lv.pairs?.[k] ?? 0;
+    pairsByStage.set(key, cur);
+  }
+  const hasPairs = Object.values(s.byStageLevels).every((lv) => lv.pairs !== undefined);
+  const pairCells = (label: string, p: Pairs): TableCell[] => {
+    const n = p.cleanClean + p.suspClean + p.cleanSusp + p.suspSusp + p.other;
+    const c = (v: number) => countRateCell(v, pct(v, n));
+    return [
+      { html: label },
+      { html: fmtNum(n), cls: "v-navy" },
+      { html: c(p.cleanClean), cls: "v-green" },
+      { html: c(p.suspClean), cls: "v-gold" },
+      { html: c(p.cleanSusp), cls: "v-gold" },
+      { html: c(p.suspSusp), cls: "v-red" },
+      { html: c(p.other), cls: "v-muted" },
+    ];
+  };
+  const sumPairs = [...pairsByStage.values()].reduce((a, p) => { for (const k of Object.keys(a) as Array<keyof Pairs>) a[k] += p[k]; return a; }, zeroPairs());
+  const matrixHtml = hasPairs
+    ? `<h3 class="v3-sub-title">مصفوفة النتائج <small>الكلمة الأولى = نتيجة المستوى الأول، والثانية = نتيجة المستوى الثاني</small></h3>
+${dataTable({
+        headers: ["المستوى", "الإجمالي", "سليمة – سليمة", "اشتباه – سليمة", "سليمة – اشتباه", "اشتباه – اشتباه", "أخرى"],
+        rows: model.population.byStage.map((st) => pairCells(st.stageLabel, pairsByStage.get(st.stageKey) ?? zeroPairs())),
+        totals: pairCells("الإجمالي", sumPairs),
+        firstColWidth: 26,
+        rowPx: 32,
+      })}
+<h3 class="v3-sub-title">نتائج كل مستوى</h3>`
+    : "";
+  return `${contentHead({ eyebrow: EYEBROW_S1, title: "نتائج المستويين في المجتمع", note: `${fmtNum(s.total)} صورة — مجموع أشهر الفترة · إجابات المستوى الأول والثاني لكل مستوى` })}
+${matrixHtml}
+${dataTable({
+    headers: ["المستوى", "الإجمالي", "الأول", "الثاني", "الأول", "الثاني", "الأول", "الثاني"],
+    topHeader: [{ label: "", span: 2 }, { label: "سليمة", span: 2, group: true }, { label: "اشتباه", span: 2, group: true }, { label: "أخرى", span: 2, group: true }],
+    groupStart: [2, 4, 6],
+    rows: stageRows,
+    totals: rowFor("الإجمالي", s.total, s.levelOne, s.levelTwo),
+    firstColWidth: 26,
+    ...(hasPairs ? { rowPx: 36 } : {}),
+  })}`;
+}
+
 export async function buildDeck3Slides(
   model: ReportModel,
   monthLabel: string,
@@ -670,136 +798,14 @@ ${kpiBand([
 
   // 7 — Population & sample per risk level (stat column + share-bar rows)
   {
-    const m = meta("s1", EYEBROW_S1);
-    const stages = model.population.byStage;
-    const maxPop = Math.max(1, ...stages.map((s) => s.population));
-    const rows = stages
-      .map((s, i) => {
-        const tone = LEVEL_TONES[i % LEVEL_TONES.length];
-        const census = s.population > 0 && s.sampleSize >= s.population;
-        const width = Math.max(2, (s.population / maxPop) * 100);
-        // Summary-backed report: the bar is the level's progress to its target (full = 100% of target) and a flag says whether it is finished.
-        const done = s.coverage >= 100;
-        const progress = `<div class="v3-cov"><div class="v3-pop-bar"><i class="v3-tone-${tone}" style="width:${Math.max(2, Math.min(100, s.coverage)).toFixed(1)}%"></i></div><span class="v3-cov-flag ${done ? "done" : "open"}" role="img" aria-label="${done ? "اكتمل المستهدف" : "لم يكتمل المستهدف"}">${done ? CHECK_SVG : ""}</span></div>`;
-        return [
-          { html: esc(s.stageLabel) },
-          { html: withPop ? progress : `<div class="v3-pop-bar"><i class="v3-tone-${tone}" style="width:${width.toFixed(1)}%"></i></div>` },
-          { html: fmtNum(s.population), cls: "v-muted" },
-          ...(withPop ? [{ html: fmtNum(s.target ?? s.population), cls: "v-gold" }] : []),
-          { html: fmtNum(s.sampleSize), cls: "v-navy" },
-          { html: withPop ? fmtPct(s.coverage) : census ? "حصر كامل" : "عدد ثابت", cls: census ? "v-green" : "v-gold" },
-        ] as TableCell[];
-      });
-    // Footnote: how coverage is measured, then one bullet per level with its target.
-    const monthsPhrase = (n: number) => (n === 1 ? "شهر واحد" : n === 2 ? "شهرين" : n >= 3 && n <= 10 ? `${n} أشهر` : `${n} شهرًا`);
-    const levelLines = stages
-      .filter((s) => s.target !== undefined)
-      .map((s) => {
-        const monthly = STAGE_SAMPLE_TARGETS[s.stageKey as keyof typeof STAGE_SAMPLE_TARGETS];
-        return typeof monthly === "number"
-          ? `${esc(s.stageLabel)}: ${fmtNum(monthly)} صورة شهريًا × ${monthsPhrase(Math.round((s.target ?? 0) / monthly))} = ${fmtNum(s.target ?? 0)} صورة`
-          : `${esc(s.stageLabel)}: 100% من مجتمعه = ${fmtNum(s.target ?? s.population)} صورة`;
-      });
-    const popNote = withPop
-      ? `<div class="v3-pop-note"><p>التغطية الرقابية = العيّنة المفحوصة ÷ المستهدف.</p><ul class="v3-pop-bullets">${levelLines.map((l) => `<li>${l}</li>`).join("")}</ul></div>`
-      : `<p class="v3-pop-note">الاختيار عشوائي داخل حصة كل مستوى؛ ولا يعكس حجم الحصة أهمية المستوى — لكل مستوى هدف مختلف.</p>`;
-    const inner = `${contentHead({ eyebrow: EYEBROW_S1, title: "مجتمع الفحص والعيّنة حسب المستوى", large: true })}
-<div class="v3-pop-grid">
-  <div class="v3-pop-stats">
-    <div class="v3-pop-stat"><span>إجمالي المجتمع</span><b>${fmtNum(model.population.total)}</b></div>
-    ${withPop ? `<div class="v3-pop-stat"><span>إجمالي المستهدف</span><b>${fmtNum(stages.reduce((a, s) => a + (s.target ?? s.population), 0))}</b></div>` : ""}
-    <div class="v3-pop-stat"><span>إجمالي العيّنة</span><b>${fmtNum(model.sample.total)}</b></div>
-    <div class="v3-pop-stat"><span>التغطية الرقابية الكلية</span><b class="v3-ink-gold">${fmtPct(model.sample.coverage ?? null)}</b></div>
-  </div>
-  <div class="v3-pop-table">
-    ${dataTable({ headers: withPop ? ["المستوى", "", "المجتمع", "المستهدف", "العيّنة", "التغطية الرقابية"] : ["المستوى", "", "المجتمع", "العيّنة", "أسلوب السحب"], rows, groupStart: 2, firstColWidth: 26, size: "lg" })}
-    ${popNote}
-
-  </div>
-</div>`;
-    parts.push(slideShell(m, "", inner));
+    parts.push(slideShell(meta("s1", EYEBROW_S1), "", populationByLevelInner(model, withPop)));
   }
 
   // 7b — L1/L2 results across the population (comprehensive report with a workbook population only).
   // «نتائج أخرى» = a result that is neither سليمة nor اشتباه; it is shown, never folded into either.
   if (withPop && model.population.summary) {
     const s = model.population.summary;
-    const m = meta("s1", EYEBROW_S1);
-    // One row per level (المستوى) — the same four rows as the previous page — with that level's own L1 and L2 answers.
-    // Each cell: the count with its share of the level's images beneath it.
-    type Tally = { clean: number; suspicious: number; other: number };
-    const zero = (): Tally => ({ clean: 0, suspicious: 0, other: 0 });
-    const perStage = new Map<string, { n: number; l1: Tally; l2: Tally }>();
-    for (const [raw, lv] of Object.entries(s.byStageLevels)) {
-      const key = getStageKey(raw);
-      const cur = perStage.get(key) ?? { n: 0, l1: zero(), l2: zero() };
-      for (const k of ["clean", "suspicious", "other"] as const) { cur.l1[k] += lv.levelOne[k]; cur.l2[k] += lv.levelTwo[k]; }
-      cur.n += lv.levelOne.clean + lv.levelOne.suspicious + lv.levelOne.other;
-      perStage.set(key, cur);
-    }
-    const cell = (n: number, of: number) => `${fmtNum(n)}<br><span class="v3-sub v3-sub-sm">(${fmtPct(pct(n, of))})</span>`;
-    const rowFor = (label: string, n: number, l1: Tally, l2: Tally): TableCell[] => [
-      { html: label },
-      { html: fmtNum(n), cls: "v-navy" },
-      { html: cell(l1.clean, n), cls: "v-green" },
-      { html: cell(l2.clean, n), cls: "v-green" },
-      { html: cell(l1.suspicious, n), cls: "v-red" },
-      { html: cell(l2.suspicious, n), cls: "v-red" },
-      { html: cell(l1.other, n), cls: "v-gold" },
-      { html: cell(l2.other, n), cls: "v-gold" },
-    ];
-    const stageRows = model.population.byStage.map((st) => {
-      const cur = perStage.get(st.stageKey) ?? { n: 0, l1: zero(), l2: zero() };
-      return rowFor(st.stageLabel, cur.n, cur.l1, cur.l2);
-    });
-    // مصفوفة النتائج: how many images fall in each L1 × L2 combination (first word = level 1's result, second = level 2's), per risk level.
-    type Pairs = NonNullable<(typeof s.byStageLevels)[string]["pairs"]>;
-    const zeroPairs = (): Pairs => ({ cleanClean: 0, suspClean: 0, cleanSusp: 0, suspSusp: 0, other: 0 });
-    const pairsByStage = new Map<string, Pairs>();
-    for (const [raw, lv] of Object.entries(s.byStageLevels)) {
-      const key = getStageKey(raw);
-      const cur = pairsByStage.get(key) ?? zeroPairs();
-      for (const k of Object.keys(cur) as Array<keyof Pairs>) cur[k] += lv.pairs?.[k] ?? 0;
-      pairsByStage.set(key, cur);
-    }
-    const hasPairs = Object.values(s.byStageLevels).every((lv) => lv.pairs !== undefined);
-    const pairCells = (label: string, p: Pairs): TableCell[] => {
-      const n = p.cleanClean + p.suspClean + p.cleanSusp + p.suspSusp + p.other;
-      const c = (v: number) => countRateCell(v, pct(v, n));
-      return [
-        { html: label },
-        { html: fmtNum(n), cls: "v-navy" },
-        { html: c(p.cleanClean), cls: "v-green" },
-        { html: c(p.suspClean), cls: "v-gold" },
-        { html: c(p.cleanSusp), cls: "v-gold" },
-        { html: c(p.suspSusp), cls: "v-red" },
-        { html: c(p.other), cls: "v-muted" },
-      ];
-    };
-    const sumPairs = [...pairsByStage.values()].reduce((a, p) => { for (const k of Object.keys(a) as Array<keyof Pairs>) a[k] += p[k]; return a; }, zeroPairs());
-    const matrixHtml = hasPairs
-      ? `<h3 class="v3-sub-title">مصفوفة النتائج <small>الكلمة الأولى = نتيجة المستوى الأول، والثانية = نتيجة المستوى الثاني</small></h3>
-${dataTable({
-          headers: ["المستوى", "الإجمالي", "سليمة – سليمة", "اشتباه – سليمة", "سليمة – اشتباه", "اشتباه – اشتباه", "أخرى"],
-          rows: model.population.byStage.map((st) => pairCells(st.stageLabel, pairsByStage.get(st.stageKey) ?? zeroPairs())),
-          totals: pairCells("الإجمالي", sumPairs),
-          firstColWidth: 26,
-          rowPx: 32,
-        })}
-<h3 class="v3-sub-title">نتائج كل مستوى</h3>`
-      : "";
-    const inner = `${contentHead({ eyebrow: EYEBROW_S1, title: "نتائج المستويين في المجتمع", note: `${fmtNum(s.total)} صورة — مجموع أشهر الفترة · إجابات المستوى الأول والثاني لكل مستوى` })}
-${matrixHtml}
-${dataTable({
-      headers: ["المستوى", "الإجمالي", "الأول", "الثاني", "الأول", "الثاني", "الأول", "الثاني"],
-      topHeader: [{ label: "", span: 2 }, { label: "سليمة", span: 2, group: true }, { label: "اشتباه", span: 2, group: true }, { label: "أخرى", span: 2, group: true }],
-      groupStart: [2, 4, 6],
-      rows: stageRows,
-      totals: rowFor("الإجمالي", s.total, s.levelOne, s.levelTwo),
-      firstColWidth: 26,
-      ...(hasPairs ? { rowPx: 36 } : {}),
-    })}`;
-    parts.push(slideShell(m, "", inner));
+    parts.push(slideShell(meta("s1", EYEBROW_S1), "", populationResultsInner(model, s)));
   }
 
   // 8 — Port distribution (land/sea tinted panels, population (sample) cells)

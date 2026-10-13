@@ -4,6 +4,15 @@ import { subscribeToDataRefresh } from "../workspace/dataRefreshSignal";
 import { logError } from "./errorLogger";
 import { directoryResourceKey } from "./webLocks";
 import {
+  DEAD_SEGMENT_MIN_AGE_MS,
+  DEAD_SEGMENT_MIN_SCANS,
+  confirmedDeadNames,
+  isConfirmedDead,
+  markDeadLoggedOnce,
+  recordOpenableSegment,
+  recordUnopenableSegment,
+} from "./deadSegmentRegistry";
+import {
   TRANSIENT_WRITE_RETRY_DELAYS_MS,
   isNotFoundError,
   isNotReadableError,
@@ -434,13 +443,42 @@ export function __resetVanishedEntryLogForTests(): void {
   reportedVanishedKeys.clear();
 }
 
+/**
+ * One-time line per (scope, name) for segments the dead-segment registry has
+ * confirmed. Returns the names reported by this call.
+ */
+function logConfirmedDead(
+  context: string,
+  dir: DirectoryHandleLike,
+  names: readonly string[],
+  scopeKey: string
+): string[] {
+  const confirmed = names.filter((name) => isConfirmedDead(scopeKey, name) && markDeadLoggedOnce(scopeKey, name));
+  if (confirmed.length === 0) return confirmed;
+  logError(
+    context,
+    new Error(
+      `${confirmed.length} listed entr${confirmed.length === 1 ? "y" : "ies"} in "${dir.name}" ` +
+        `could not be opened on ${DEAD_SEGMENT_MIN_SCANS}+ scans over ${DEAD_SEGMENT_MIN_AGE_MS / 60000} min — ` +
+        `treated as unreadable for this session (a manual refresh re-checks): ${confirmed.join(", ")}`
+    )
+  );
+  return confirmed;
+}
+
 function logVanishedEntries(
   context: string,
   dir: DirectoryHandleLike,
   names: string[],
   scopeKey?: string
 ): void {
+  // Names the registry confirmed dead during THIS scan's own failed opens (the
+  // failure count was the limiting condition). Names that crossed the age gate
+  // between scans are reported at the top of `readSegmentTails` instead.
+  const justConfirmed = scopeKey ? logConfirmedDead(context, dir, names, scopeKey) : [];
+  const confirmedSet = new Set(justConfirmed);
   const fresh = names.filter((name) => {
+    if (confirmedSet.has(name)) return false;
     // `dir.name` alone is "distribution.events" in every month, and a raw
     // `getDirectoryHandle()` result is not path-registered, so the caller can
     // supply a scope (the parent month folder's path) that keeps months apart.
@@ -717,6 +755,12 @@ export type SegmentTailResult = {
   /** Every matching file name in the current listing, name-sorted. */
   matchedNames: string[];
   /**
+   * Names the dead-segment registry has confirmed unopenable (see
+   * deadSegmentRegistry.ts). They were NOT opened, have no `sizeByName` entry,
+   * and stay in `matchedNames`. Empty when no `scopeKey` was supplied.
+   */
+  deadNames: Set<string>;
+  /**
    * Names now confirmed sealed: each was read (or already confirmed and
    * skipped) with a higher-seq sibling of its chain in this listing, so the
    * read completed after that sibling was first seen. Hand back as
@@ -807,6 +851,13 @@ export async function readSegmentTails(
 ): Promise<SegmentTailResult> {
   const matched = await listMatchingFileEntries(dir, options.suffix);
   const matchedNames = matched.map((entry) => entry.name);
+  // Confirmed-dead segments are neither opened nor charged against the vanish budget.
+  const dead = options.scopeKey ? confirmedDeadNames(options.scopeKey) : new Set<string>();
+  // A name that crossed the age gate BETWEEN scans is already dead here, so it
+  // is never opened and never reaches `vanished`: report it now (once).
+  if (options.scopeKey && dead.size > 0) {
+    logConfirmedDead("directoryScan:segment-tails", dir, [...dead], options.scopeKey);
+  }
 
   const tailTextByName = new Map<string, string>();
   const sizeByName = new Map<string, number>();
@@ -844,7 +895,7 @@ export async function readSegmentTails(
   // on one JS thread, so it remains a total across all segments.
   await forEachBounded(matched.length, DIRECTORY_READ_CONCURRENCY, async (index) => {
     const entry = matched[index]!;
-    if (skipped.has(entry.name)) return;
+    if (skipped.has(entry.name) || dead.has(entry.name)) return;
     const knownOffset = options.knownOffsets[entry.name] ?? 0;
     reads[index] = await readListedEntry(
       dir,
@@ -861,6 +912,7 @@ export async function readSegmentTails(
   const sealedConfirmedNames = new Set<string>();
   for (let index = 0; index < matched.length; index += 1) {
     const name = matched[index]!.name;
+    if (dead.has(name)) continue;
     if (skipped.has(name)) {
       // Carry the known offset forward unchanged; still confirmed sealed.
       sizeByName.set(name, options.knownOffsets[name]!);
@@ -875,8 +927,10 @@ export async function readSegmentTails(
       // Leaving it out keeps the caller's existing offset for this name, so the
       // next read picks the segment up exactly where it left off.
       vanished.push(name);
+      if (options.scopeKey) recordUnopenableSegment(options.scopeKey, name);
       continue;
     }
+    if (options.scopeKey) recordOpenableSegment(options.scopeKey, name);
     sizeByName.set(name, read.size);
     if (read.tail !== null) tailTextByName.set(name, read.tail);
     if (superseded.has(name)) sealedConfirmedNames.add(name);
@@ -884,7 +938,7 @@ export async function readSegmentTails(
 
   logVanishedEntries("directoryScan:segment-tails", dir, vanished, options.scopeKey);
 
-  return { tailTextByName, sizeByName, matchedNames, sealedConfirmedNames };
+  return { tailTextByName, sizeByName, matchedNames, sealedConfirmedNames, deadNames: dead };
 }
 
 // Module-init side effect: purge the whole cache on manual refresh

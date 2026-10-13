@@ -183,36 +183,35 @@ export type AppendOnlyEventLogConfig = {
  * and MAX bytes, so the long-run average settles at ~MAX/2 no matter how many
  * events the session goes on to write.
  *
- * Why 128 KiB, and not the smaller/larger values also on the table:
+ * Why 256 KiB / 4,000 lines (raised from 128 KiB / 2,000):
  *
- * - The share cost of one append is `fixed round trips + payload`. Chromium's
- *   `createWritable` is swap-file based: open, write, close, atomic rename,
- *   plus this module's own post-close `verifySegmentSize` open — on the order
- *   of 20–40 ms of fixed latency on the UNC/SMB share this app is deployed to.
- *   128 KiB of payload at even a pessimistic 10 MB/s is ~13 ms, i.e. already a
- *   minority of the per-append cost. Halving the cap to 64 KiB would shave only
- *   a few ms off an append while doubling the file count, so the write side has
- *   clearly hit diminishing returns by here.
+ * The cap is a trade between file count and bytes-per-save, and both sides are
+ * real costs:
+ *
  * - Every extra segment costs the READ side a `getFile()` round trip per fold
- *   (`readSegmentTails` opens each matched name), and that cost is paid by every
- *   client on every fold, forever — segments are never merged. At ~258 bytes per
- *   event line (measured on a realistic event with an Arabic `notes` field),
- *   128 KiB holds ~500 events, so a 9,000-event month adds ~18 files. Raising
- *   the cap to 256 KiB would halve that but double both the worst-case single
- *   append and the amount of content sitting in one crash-exposed rewrite.
+ *   (`readSegmentTails` opens each matched name), paid by every client on every
+ *   fold, forever — segments are never merged today. Field evidence 2026-10-13:
+ *   ~2,000 segments in one month folder under the old 128 KiB cap.
+ * - Every append rewrites the WHOLE open segment, so a larger cap raises the
+ *   average bytes pushed per save (~cap/2) and the crash-exposed rewrite.
+ *
+ * 256 KiB halves the file count against 128 KiB while only doubling the
+ * average upload (a 1 MiB cap would have made it 8x). It is a bounded,
+ * unmeasured compromise — no share measurement of either cost exists — held
+ * until Plan 2's compaction removes the file-count problem at its root.
  *
  * The line cap is a second, cheap bound for the degenerate shape the byte cap
- * cannot see: it only binds when the average line is under ~65 bytes, which no
+ * cannot see: it only binds when the average line is under ~66 bytes, which no
  * real distribution event reaches. It is belt-and-braces against a future, much
  * smaller event shape making a segment expensive to parse and dedupe rather
  * than expensive to transfer — not a threshold expected to fire today.
  */
-export const MAX_OPEN_SEGMENT_BYTES = 131_072;
-export const MAX_OPEN_SEGMENT_LINES = 2_000;
+export const MAX_OPEN_SEGMENT_BYTES = 262_144;
+export const MAX_OPEN_SEGMENT_LINES = 4_000;
 
 /**
  * Upper bound on the rotation counter. A writer that somehow reached this would
- * have written ~128 GiB in one session; the cap exists so a corrupt/hostile
+ * have written ~256 GiB in one session (999,999 segments × 256 KiB); the cap exists so a corrupt/hostile
  * name can never be parsed into an unbounded number, not because it is
  * reachable.
  */
@@ -907,8 +906,15 @@ async function verifySegmentSize(
  * ordinary case (a reader briefly holding the file, releasing it within tens
  * of milliseconds) a real second chance, and then hands off to rotation, which
  * is the actual fix: a fresh segment has no reader contending for it.
+ *
+ * 2026-10-13: widened from [20]. Field logs from a workspace on an SMB share
+ * showed ~70 rotations in two days, each after a single 20 ms retry, while the
+ * same share accepted the replace a few hundred ms later. Rotation stays the
+ * last resort (the one-rotation bound in appendEventSegment is unchanged); it
+ * just no longer fires on the first hiccup. ~4.2 s worst case per append, well
+ * inside INTERACTIVE_WRITE_DEADLINE_MS (30 s).
  */
-const SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS = [20] as const;
+export const SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS = [20, 200, 1000, 3000] as const;
 
 /** Which step inside one write attempt threw — for diagnostics only. */
 type SegmentWriteStep = "getFileHandle" | "createWritable" | "write" | "close";
@@ -1066,7 +1072,8 @@ function logBlockedSegmentReplace(
   const detail = blocked.error instanceof Error ? blocked.error.message : String(blocked.error);
   const message =
     `Segment replace refused after ${blocked.attempts} attempt(s) at step "${blocked.step}" ` +
-    `on "${fileName}" (${typeof errorName === "string" ? errorName : "unknown"}): ${detail}`;
+    `on "${fileName}" (${typeof errorName === "string" ? errorName : "unknown"}): ${detail}` +
+    ` rotationReason=blocked-replace`;
   const code = classifyFileSystemError(blocked.error);
   if (code) {
     logCodedError(context, code, new Error(message));
@@ -1559,6 +1566,13 @@ export type SegmentEventsDelta<TEvent> = {
    * from a persisted checkpoint by design: losing it only costs one re-open.
    */
   sealedConfirmedNames: Set<string>;
+  /**
+   * Segments the dead-segment registry has confirmed unopenable: listed in
+   * `segmentNames`, not read, and given no offset (a later successful open reads
+   * them from byte 0). Excluded from the strict-mode throw only when the caller
+   * passed `tolerateConfirmedDead`; otherwise a strict read throws on them.
+   */
+  unreadableNames: string[];
 };
 
 /**
@@ -1600,14 +1614,23 @@ export class EventSegmentUnreadableError extends Error {
  * callers with their own incremental read cache — does so BEFORE building
  * `offsets`/`events`, so nothing here ever gets a chance to persist a partial
  * result as if it were complete.
+ *
+ * `options.tolerateConfirmedDead` (default false, only meaningful with
+ * `strict`): a segment the dead-segment registry has confirmed unopenable is
+ * reported in `unreadableNames` instead of throwing. Opt-in for the
+ * pending-answer replay only; without it a confirmed-dead name throws
+ * {@link EventSegmentUnreadableError} like any other unreadable segment, so
+ * strict guards (population overwrite, distribution strict reads)
+ * keep refusing when they cannot see a segment.
  */
 export async function readEventSegmentDelta<TEvent>(
   parentDir: DirectoryHandleLike,
   knownOffsets: Record<string, number>,
   config: AppendOnlyEventLogConfig,
-  options?: { strict?: boolean; sealedConfirmed?: ReadonlySet<string> }
+  options?: { strict?: boolean; tolerateConfirmedDead?: boolean; sealedConfirmed?: ReadonlySet<string> }
 ): Promise<SegmentEventsDelta<TEvent>> {
   const strict = options?.strict ?? false;
+  const tolerateConfirmedDead = options?.tolerateConfirmedDead ?? false;
   let eventsDir: DirectoryHandleLike;
   try {
     eventsDir = await parentDir.getDirectoryHandle(config.eventsDirName, { create: false });
@@ -1617,10 +1640,10 @@ export async function readEventSegmentDelta<TEvent>(
     // it makes a month's whole event history disappear from every fold that
     // reads through here.
     if (!isNotFoundError(error)) throw error;
-    return { events: [], offsets: { ...knownOffsets }, segmentNames: [], sealedConfirmedNames: new Set() };
+    return { events: [], offsets: { ...knownOffsets }, segmentNames: [], sealedConfirmedNames: new Set(), unreadableNames: [] };
   }
 
-  const { tailTextByName, sizeByName, matchedNames, sealedConfirmedNames } = await readSegmentTails(eventsDir, {
+  const { tailTextByName, sizeByName, matchedNames, sealedConfirmedNames, deadNames } = await readSegmentTails(eventsDir, {
     suffix: config.segmentSuffix,
     knownOffsets,
     sealedConfirmed: options?.sealedConfirmed,
@@ -1630,15 +1653,26 @@ export async function readEventSegmentDelta<TEvent>(
   });
 
   if (strict) {
-    const skipped = matchedNames.filter((name) => !sizeByName.has(name));
-    if (skipped.length > 0) {
-      // Thrown before any of the reads below, and before the cache-shaped
-      // `offsets`/`events` are built — a caller that persists an incremental
-      // read cache (answerStorage.ts's own doc comment says so explicitly)
-      // must never have a chance to write a checkpoint that silently treats
-      // this segment as "read, found nothing new".
-      throw new EventSegmentUnreadableError(skipped);
-    }
+    // A name the registry has confirmed dead (DEAD_SEGMENT_MIN_SCANS failed opens
+    // over DEAD_SEGMENT_MIN_AGE_MS) is excluded ONLY when the caller opts in with
+    // `tolerateConfirmedDead`. The one caller that does is the pending-answer
+    // replay: it must not fail every read of the month forever because one
+    // colleague's file is quarantined (that froze the replay for a day,
+    // 2026-10-12), and its "read, found nothing" protection stays intact because
+    // the dead name gets NO offset below, so a later successful open reads it
+    // from byte 0. Every other strict caller — the population-overwrite guard
+    // (save, recovery, selective restore), distribution's strict segment readers — is a guard that
+    // cannot see whether the month has work in that segment, so it must still
+    // refuse: a confirmed-dead name throws exactly like any other unreadable one.
+    const skipped = matchedNames.filter(
+      (name) => !sizeByName.has(name) && !(tolerateConfirmedDead && deadNames.has(name))
+    );
+    // Thrown before any of the reads below, and before the cache-shaped
+    // `offsets`/`events` are built — a caller that persists an incremental
+    // read cache (answerStorage.ts's own doc comment says so explicitly)
+    // must never have a chance to write a checkpoint that silently treats
+    // this segment as "read, found nothing new".
+    if (skipped.length > 0) throw new EventSegmentUnreadableError(skipped);
   }
 
   const events: TEvent[] = [];
@@ -1652,7 +1686,7 @@ export async function readEventSegmentDelta<TEvent>(
   const offsets: Record<string, number> = { ...knownOffsets };
   for (const [name, size] of sizeByName) offsets[name] = size;
 
-  return { events, offsets, segmentNames: matchedNames, sealedConfirmedNames };
+  return { events, offsets, segmentNames: matchedNames, sealedConfirmedNames, unreadableNames: [...deadNames] };
 }
 
 /* ─────────────────────── event-set digest (fixed, not a parameter) ──────── */

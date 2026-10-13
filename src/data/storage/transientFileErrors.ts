@@ -472,14 +472,31 @@ export async function classifyNotFound(
   // write-then-read-back round trip. If `.tmp` survives and `.ndjson` does not,
   // the cause is the extension, not the share, and no amount of retrying will
   // help: the fix is an exclusion rule on the folder.
+  let extensionVerdictUnclear = false;
   const extension = fileName ? extensionOf(fileName) : "";
   if (extension && extension !== ".tmp") {
-    const survived = await probeRoundTrip(
+    // Two DISTINCT names, in sequence. A remover that targets the extension
+    // takes both; a stale listing or a momentary NotReadable on one name does
+    // not repeat on a different name. One flake used to produce a permanent
+    // XQ-IO-033 ("antivirus is removing .ndjson") on a share that creates and
+    // keeps .ndjson files fine — confirmed by hand on 2026-10-13.
+    const firstSurvived = await probeRoundTrip(
       dir,
-      `.fs-extension-probe${extension}`,
+      `.fs-extension-probe-a${extension}`,
       PROBE_SURVIVAL_WAIT_MS
     );
-    if (!survived) return "extension-blocked";
+    if (!firstSurvived) {
+      const secondSurvived = await probeRoundTrip(
+        dir,
+        `.fs-extension-probe-b${extension}`,
+        PROBE_SURVIVAL_WAIT_MS
+      );
+      if (!secondSurvived) return "extension-blocked";
+      // One flake, one survivor: no extension verdict. Do NOT return yet — fall
+      // through to the length probe so a flaky first probe cannot hide a
+      // too-long-path diagnosis. Only if that also clears is the answer `unknown`.
+      extensionVerdictUnclear = true;
+    }
   }
 
   // Extension is fine and the folder is writable — the remaining per-name
@@ -494,7 +511,7 @@ export async function classifyNotFound(
     }
   }
 
-  return "directory-writable";
+  return extensionVerdictUnclear ? "unknown" : "directory-writable";
 }
 
 /** The user-facing code implied by each probed cause. */

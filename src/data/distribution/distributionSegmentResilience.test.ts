@@ -114,7 +114,9 @@ describe("segment names are short enough for a deep UNC path", () => {
 
 describe("chunkEventsForSegmentAppends", () => {
   it("bounds every chunk by bytes and by lines, preserving order", () => {
-    const events = assignEvents(4_000);
+    // One event over the line cap. At ~250 B per event the byte cap splits first,
+    // so this exercises chunking generally; the line bound is not what splits here.
+    const events = assignEvents(MAX_OPEN_SEGMENT_LINES + 1);
     const chunks = chunkEventsForSegmentAppends(events);
     expect(chunks.length).toBeGreaterThan(1);
     for (const chunk of chunks) {
@@ -139,11 +141,12 @@ describe("chunkEventsForSegmentAppends", () => {
 });
 
 describe("a whole-month batch never becomes one giant write", () => {
-  it("writes a 3,000-event batch as bounded segments and reads every event back", async () => {
+  it("writes a batch over the line cap as bounded segments and reads every event back", async () => {
     const root = createMemoryDirectory("root");
+    const count = MAX_OPEN_SEGMENT_LINES + 1;
 
     await expect(
-      appendDistributionEventsDurably(root, assignEvents(3_000), { writer: writer() })
+      appendDistributionEventsDurably(root, assignEvents(count), { writer: writer() })
     ).resolves.toBe("verified");
 
     const files = await segmentFiles(root);
@@ -154,7 +157,7 @@ describe("a whole-month batch never becomes one giant write", () => {
       expect(file.size).toBeLessThanOrEqual(MAX_OPEN_SEGMENT_BYTES);
     }
     const events = await loadDistributionEventSegments(root);
-    expect(events).toHaveLength(3_000);
+    expect(events).toHaveLength(count);
   });
 });
 

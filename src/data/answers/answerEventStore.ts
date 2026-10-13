@@ -218,12 +218,13 @@ export async function appendAnswerEventSegment(
 }
 
 /** Read only the lines appended past each segment's already-folded byte offset.
- *  `options.strict` forwards to `readEventSegmentDelta` — see its doc comment. */
+ *  `options.strict` / `options.tolerateConfirmedDead` forward to
+ *  `readEventSegmentDelta` — see its doc comment. */
 export async function readAnswerEventDelta(
   parentDir: DirectoryHandleLike,
   knownOffsets: Record<string, number>,
   config: AppendOnlyEventLogConfig = ANSWER_EVENT_LOG,
-  options?: { strict?: boolean; sealedConfirmed?: ReadonlySet<string> }
+  options?: { strict?: boolean; tolerateConfirmedDead?: boolean; sealedConfirmed?: ReadonlySet<string> }
 ): Promise<SegmentEventsDelta<AnswerEvent>> {
   return readEventSegmentDelta<AnswerEvent>(parentDir, knownOffsets, config, options);
 }

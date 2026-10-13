@@ -41,6 +41,7 @@ import {
 import {
   MAX_OPEN_SEGMENT_BYTES,
   MAX_SEGMENT_SEQ,
+  SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS,
   type AppendOnlyEventLogConfig,
   type FoldOrderComparison,
   EventSegmentUnreadableError,
@@ -91,8 +92,8 @@ const TEST_LOG: AppendOnlyEventLogConfig = {
 
 const WRITER = { deviceId: "device-a", sessionId: "session-a", scopeId: "scope-1" };
 
-/** ~20 KB per line, so a handful of appends crosses the 128 KiB cap. */
-const FILLER = "x".repeat(20_000);
+/** ~1/5 of the cap per line, so a handful of appends crosses MAX_OPEN_SEGMENT_BYTES. */
+const FILLER = "x".repeat(Math.ceil(MAX_OPEN_SEGMENT_BYTES / 5));
 
 let nextSeq = 0;
 
@@ -449,9 +450,12 @@ describe("rotation preserves every event exactly once", () => {
 
   it("loses no event and writes none twice when the rotation write fails outright", async () => {
     const dir = root();
-    for (let i = 0; i < 6; i += 1) {
+    // Four events fill seg 0 (~210 KB each); the fifth is the one that rotates.
+    for (let i = 0; i < 4; i += 1) {
       await appendEventSegment(dir, [bigEvent(`IMG-${i}`)], WRITER, TEST_LOG);
     }
+    // Guard the arithmetic: exactly one segment exists, so the next append must rotate.
+    expect(await segmentNames(dir)).toEqual([name(0)]);
     const sealedBefore = await readSegmentText(dir, name(0));
 
     // The rotation target refuses to be created, permanently — the closest
@@ -478,8 +482,8 @@ describe("rotation preserves every event exactly once", () => {
     // Retrying the same batch lands it exactly once.
     await appendEventSegment(dir, [bigEvent("CRASH")], WRITER, TEST_LOG);
     const events = await loadAll(dir);
-    expect(events).toHaveLength(7);
-    expect(new Set(events.map((e) => e.eventId)).size).toBe(7);
+    expect(events).toHaveLength(5);
+    expect(new Set(events.map((e) => e.eventId)).size).toBe(5);
   });
 });
 
@@ -1174,10 +1178,13 @@ describe("round 3: a stale NotFound on an unreadable-hop target is retried befor
     const w = { ...WRITER, stable: true };
     const eventsDir = await eventsDirOf(dir);
     clearOperationLog(eventsDir);
+    // Batch = 3 × 15% of the cap: two batches fit a segment, a third rotates,
+    // the same batch-to-cap ratio the pinned op counts below were measured at.
+    const sized = (id: string) => ({ ...event(id), filler: "x".repeat(Math.floor(MAX_OPEN_SEGMENT_BYTES * 0.15)) });
     const { delays } = await withCapturedSleeps(async () => {
       for (let i = 0; i < 6; i += 1) {
         if (i === 3) __resetAppendOnlyEventLogMemosForTests();
-        await appendEventSegment(dir, [bigEvent(`H${i}`), bigEvent(`I${i}`), bigEvent(`J${i}`)], w, TEST_LOG);
+        await appendEventSegment(dir, [sized(`H${i}`), sized(`I${i}`), sized(`J${i}`)], w, TEST_LOG);
       }
     });
     const ops = getOperationLog(eventsDir);
@@ -1371,11 +1378,11 @@ describe("E1b: a blocked segment REPLACE rotates instead of retrying forever", (
 
     expect(result).toBe("verified");
     // R8(d): bounded by the SHORT replace-blocked ladder specifically
-    // (SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS has exactly one rung), not
+    // (SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS), not
     // merely "shorter than the ~11 s patient one" — a looser bound would
     // also pass if this regressed to some OTHER, still-shorter-than-patient
     // ladder.
-    expect(delays.length).toBeLessThanOrEqual(1);
+    expect(delays.length).toBeLessThanOrEqual(SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS.length);
 
     // Seq 0 was created (getFileHandle(create: true) always creates the
     // entry) but never received the batch's bytes — the close() that would
@@ -1392,7 +1399,7 @@ describe("E1b: a blocked segment REPLACE rotates instead of retrying forever", (
     const closeAttemptsOnSeqZero = getOperationLog(eventsDir).filter(
       (entry) => entry.operation === "createWritable" && entry.name === name(0)
     ).length;
-    expect(closeAttemptsOnSeqZero).toBeLessThanOrEqual(2);
+    expect(closeAttemptsOnSeqZero).toBeLessThanOrEqual(SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS.length + 1);
   });
 
   it("(b) the next save in the same session goes straight to -1 — no further attempts on the blocked segment", async () => {
@@ -1482,7 +1489,7 @@ describe("E1b: a blocked segment REPLACE rotates instead of retrying forever", (
     const closeAttemptsOnSeqZero = getOperationLog(eventsDir).filter(
       (entry) => entry.operation === "close" && entry.name === name(0)
     ).length;
-    expect(closeAttemptsOnSeqZero).toBeLessThanOrEqual(2);
+    expect(closeAttemptsOnSeqZero).toBeLessThanOrEqual(SEGMENT_REPLACE_BLOCKED_RETRY_DELAYS_MS.length + 1);
   });
 
   // Minor (tail-compare regression): a SAME-SIZE coincidence must not fool
@@ -1963,7 +1970,7 @@ describe("readEventSegmentDelta", () => {
 
   it("answers an absent events directory with an empty delta, not an error", async () => {
     const delta = await readEventSegmentDelta<TestEvent>(root(), {}, TEST_LOG);
-    expect(delta).toEqual({ events: [], offsets: {}, segmentNames: [], sealedConfirmedNames: new Set() });
+    expect(delta).toEqual({ events: [], offsets: {}, segmentNames: [], sealedConfirmedNames: new Set(), unreadableNames: [] });
   });
 
   it("throws rather than inventing an empty history when the directory cannot be OPENED", async () => {
