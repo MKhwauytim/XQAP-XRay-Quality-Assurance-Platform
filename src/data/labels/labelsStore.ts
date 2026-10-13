@@ -398,7 +398,11 @@ export const DEFAULT_LABELS = {
   // retried automatically every 30s — this is the visible "not saved yet"
   // signal so nothing silently sits unsynced. `{count}` is how many of this
   // employee's own answers are still pending.
-  ew_answers_pending_sync:         "{count} إجابة لم تصل إلى مجلد العمل المشترك بعد — تتم إعادة المحاولة تلقائياً كل 30 ثانية.",
+  ew_answers_pending_sync:         "{count} إجابة محفوظة على هذا الجهاز ولم تصل إلى مجلد العمل المشترك بعد — تُرسل تلقائيًا.",
+  ew_answer_saved_locally:         "تم الحفظ على هذا الجهاز، وسيُرسل إلى مجلد العمل تلقائيًا.",
+  ew_answers_send_now:             "إرسال الآن",
+  settings_storage_clear_blocked_unsent: "لديك إجابات لم تُرسل بعد إلى مجلد العمل. أرسلها أولًا ثم أعد المحاولة.",
+  settings_timings_download:       "تنزيل سجل التوقيت",
 
   // Population — sampling & processing guards
   sample_redraw_blocked: "لا يمكن إعادة سحب العينة بعد بدء التوزيع: يوجد سجل توزيع فعّال لهذا الشهر، وإعادة السحب ستؤدي إلى فقدان التعيينات والإجابات المسجلة.",

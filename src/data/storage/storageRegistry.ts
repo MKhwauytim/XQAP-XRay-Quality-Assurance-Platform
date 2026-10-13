@@ -125,9 +125,15 @@ export const STORAGE_REGISTRY: readonly StorageEntry[] = [
     id: "xray_answers_local_mirror_v1",
     layer: "indexeddb",
     purpose:
-      "Redundant per-browser backup of an employee's own saved answers (answerLocalMirror.ts), reconciled against the workspace file on load and every 60s. Backup only, never authoritative.",
+      "Per-browser queue and backup of an employee's answers (answerLocalMirror.ts). Answers submitted here are held until they reach the workspace folder.",
     lossConsequence:
-      "No effect on saved data: the workspace file remains the source of truth and this backup is silently rebuilt from it on the next reconciliation.",
+      "Answers marked unsent are LOST if this is cleared before they reach the workspace folder; sent answers are unaffected (the workspace file is authoritative).",
+  },
+  {
+    id: "xray_answer_submit_mode_v1",
+    layer: "local",
+    purpose: "Rollback switch for answer submission: unset/outbox = save on this device first, sync = write to the shared folder before confirming.",
+    lossConsequence: "Submission returns to the default (save on this device first). No data at risk.",
   },
 ] as const;
 
