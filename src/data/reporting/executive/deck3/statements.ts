@@ -2,8 +2,8 @@
 // fixed rules (no model, no guessing).
 //
 // Each OBSERVATION says what stands out and what it means, the way an analyst reads the report ("image quality at port X
-// is below the other ports, which may weaken prohibited-item detection"). Port observations compare a port with the REST
-// of its own type (land / sea) — a port's own volume never props up the average it is judged against. The numbers
+// is below the other ports, which may weaken prohibited-item detection"). Port observations compare a port with ONE fixed
+// baseline per port type: the pooled figure of every land (or sea) port, the same «إجمالي» the report tables show. The numbers
 // behind an observation are kept apart from its sentence as `figures` (shown as a separate labelled row under it, and
 // on the second sheet of the workbook), so the text stays readable and every observation can still be checked. The
 // RECOMMENDATION is a drafted starting point for the owner to edit.
@@ -26,27 +26,32 @@ const MAX_STATEMENTS = 15;
 const ORDER: Record<StatementPriority, number> = { "عالية": 0, "متوسطة": 1, "للعلم": 2 };
 
 export type PortShare = { name: string; sea: boolean; num: number; den: number };
-export type PortOutlier = { name: string; sea: boolean; share: number; othersShare: number; gap: number; den: number };
+export type PortOutlier = { name: string; sea: boolean; share: number; baseShare: number; gap: number; den: number };
 
 const groupLabel = (sea: boolean) => (sea ? "المنافذ البحرية" : "المنافذ البرية");
+/** The baseline's short name in a figure label — the same «إجمالي» wording the report's port tables use for their totals row. */
+const totalLabel = (sea: boolean) => (sea ? "إجمالي البحرية" : "إجمالي البرية");
 
 /**
- * Ports whose share differs from the REST of their type by at least `minGap` points, in the stated direction.
- * Compared with the other ports of the same type that clear `minDen`; when there are none, with every other port.
- * Biggest gap first.
+ * Ports whose share differs from their type's BASELINE by at least `minGap` points, in the stated direction.
+ * The baseline is ONE fixed figure per port type: the pooled share of every port of that type (the same «إجمالي»
+ * the report's port tables show). It does not change with the port being judged, so every observation on the same
+ * measure quotes the same comparison number. Only ports with at least `minDen` cases are judged. Biggest gap first.
  */
 export function findOutliers(stats: PortShare[], direction: "low" | "high", minDen: number, minGap: number): PortOutlier[] {
-  const eligible = stats.filter((s) => s.den >= minDen);
+  const baseline = (sea: boolean) => {
+    const group = stats.filter((s) => s.sea === sea);
+    const den = group.reduce((a, s) => a + s.den, 0);
+    return den === 0 ? null : (group.reduce((a, s) => a + s.num, 0) / den) * 100;
+  };
+  const base = { land: baseline(false), sea: baseline(true) };
   const out: PortOutlier[] = [];
-  for (const s of eligible) {
-    let others = eligible.filter((o) => o.name !== s.name && o.sea === s.sea);
-    if (others.reduce((a, o) => a + o.den, 0) < minDen) others = eligible.filter((o) => o.name !== s.name);
-    const den = others.reduce((a, o) => a + o.den, 0);
-    if (den === 0) continue;
+  for (const s of stats) {
+    const baseShare = s.sea ? base.sea : base.land;
+    if (s.den < minDen || baseShare === null) continue;
     const share = (s.num / s.den) * 100;
-    const othersShare = (others.reduce((a, o) => a + o.num, 0) / den) * 100;
-    const gap = share - othersShare;
-    if (direction === "low" ? gap <= -minGap : gap >= minGap) out.push({ name: s.name, sea: s.sea, share, othersShare, gap, den: s.den });
+    const gap = share - baseShare;
+    if (direction === "low" ? gap <= -minGap : gap >= minGap) out.push({ name: s.name, sea: s.sea, share, baseShare, gap, den: s.den });
   }
   return out.sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap) || (a.name < b.name ? -1 : 1));
 }
@@ -72,7 +77,7 @@ export function buildStatements(model: ReportModel): Statement[] {
       priority: "متوسطة", topic: "المنافذ",
       text: `التوافق في المنافذ ${lowName} أقل من المنافذ ${highName}، فالتحسين فيها أكبر أثرًا على دقة النتائج.`,
       recommendation: `إعطاء المنافذ ${lowName} أولوية في المتابعة، والتأكد من تطبيق معايير الاشتباه بنفس الطريقة لدى الفاحصين فيها بشكل دوري.`,
-      figures: [F("معدل الاتفاق · المنافذ البرية", fmtPct(land.overall)), F("معدل الاتفاق · المنافذ البحرية", fmtPct(sea.overall)), F("الإجابات المفحوصة", fmtNum(land.evaluable + sea.evaluable))],
+      figures: [F("الاتفاق · البرية", fmtPct(land.overall)), F("الاتفاق · البحرية", fmtPct(sea.overall)), F("الإجابات المفحوصة", fmtNum(land.evaluable + sea.evaluable))],
       page: "نتائج الأداء للمنافذ",
     });
   }
@@ -86,9 +91,9 @@ export function buildStatements(model: ReportModel): Statement[] {
   for (const o of findOutliers(qualityStats, "low", 300, 10).slice(0, MAX_PORTS_PER_TOPIC)) {
     add({
       priority: o.gap <= -20 ? "عالية" : "متوسطة", topic: "جودة الصورة",
-      text: `جودة الصور الملتقطة في منفذ ${o.name} أقل من باقي ${groupLabel(o.sea)}، مما قد يسبب ضعفًا في جودة كشف المواد الممنوعة.`,
-      recommendation: `التأكد من جودة التقاط جهاز الأشعة للصور في منفذ ${o.name}، ومتابعة عدة حالات للتأكد من جودة الجهاز مقارنةً بباقي أجهزة ${groupLabel(o.sea)} بشكل شهري.`,
-      figures: [F(`صور عالية الجودة · ${o.name}`, fmtPct(o.share)), F(`صور عالية الجودة · باقي ${groupLabel(o.sea)}`, fmtPct(o.othersShare)), F(`صور ${o.name} المفحوصة`, fmtNum(o.den))],
+      text: `جودة الصور الملتقطة في منفذ ${o.name} أقل من إجمالي ${groupLabel(o.sea)}، مما قد يسبب ضعفًا في جودة كشف المواد الممنوعة.`,
+      recommendation: `التأكد من جودة التقاط جهاز الأشعة للصور في منفذ ${o.name}، ومتابعة عدة حالات للتأكد من جودة الجهاز مقارنةً بإجمالي ${groupLabel(o.sea)} بشكل شهري.`,
+      figures: [F(`عالية الجودة · ${o.name}`, fmtPct(o.share)), F(`عالية الجودة · ${totalLabel(o.sea)}`, fmtPct(o.baseShare)), F("صور مفحوصة", fmtNum(o.den))],
       page: "جودة الصور المفحوصة",
     });
   }
@@ -97,9 +102,9 @@ export function buildStatements(model: ReportModel): Statement[] {
   for (const o of findOutliers(missedStats, "high", 500, 10).slice(0, MAX_PORTS_PER_TOPIC)) {
     add({
       priority: o.gap >= 20 ? "عالية" : "متوسطة", topic: "الاشتباهات الفائتة",
-      text: `نسبة الاشتباهات الفائتة في منفذ ${o.name} أعلى من متوسط باقي ${groupLabel(o.sea)}.`,
-      recommendation: `مراجعة عدة حالات مصنّفة سليمة في منفذ ${o.name} للتأكد من عدم وجود اشتباهات لم تُكتشف، ومقارنة النتائج بباقي ${groupLabel(o.sea)} بشكل شهري.`,
-      figures: [F(`الاشتباهات الفائتة · ${o.name}`, fmtPct(o.share)), F(`الاشتباهات الفائتة · باقي ${groupLabel(o.sea)}`, fmtPct(o.othersShare)), F(`إجابات السليمة في ${o.name}`, fmtNum(o.den))],
+      text: `نسبة الاشتباهات الفائتة في منفذ ${o.name} أعلى من إجمالي ${groupLabel(o.sea)}.`,
+      recommendation: `مراجعة عدة حالات مصنّفة سليمة في منفذ ${o.name} للتأكد من عدم وجود اشتباهات لم تُكتشف، ومقارنة النتائج بإجمالي ${groupLabel(o.sea)} بشكل شهري.`,
+      figures: [F(`فائتة · ${o.name}`, fmtPct(o.share)), F(`فائتة · ${totalLabel(o.sea)}`, fmtPct(o.baseShare)), F("إجابات السليمة", fmtNum(o.den))],
       page: "نتائج الأداء للمنافذ",
     });
   }
@@ -108,9 +113,9 @@ export function buildStatements(model: ReportModel): Statement[] {
   for (const o of findOutliers(falseStats, "high", 300, 10).slice(0, MAX_PORTS_PER_TOPIC)) {
     add({
       priority: "متوسطة", topic: "الاشتباهات الخاطئة",
-      text: `تكثر الاشتباهات الخاطئة في منفذ ${o.name} مقارنة بباقي ${groupLabel(o.sea)}.`,
+      text: `تكثر الاشتباهات الخاطئة في منفذ ${o.name} مقارنة بإجمالي ${groupLabel(o.sea)}.`,
       recommendation: `مراجعة عدة حالات اشتباه في منفذ ${o.name} للتأكد من استحقاقها، وتوضيح معايير الاشتباه للفاحصين لتقليل الاشتباهات غير المستحقة.`,
-      figures: [F(`الاشتباهات الخاطئة · ${o.name}`, fmtPct(o.share)), F(`الاشتباهات الخاطئة · باقي ${groupLabel(o.sea)}`, fmtPct(o.othersShare)), F(`إجابات الاشتباه في ${o.name}`, fmtNum(o.den))],
+      figures: [F(`خاطئة · ${o.name}`, fmtPct(o.share)), F(`خاطئة · ${totalLabel(o.sea)}`, fmtPct(o.baseShare)), F("إجابات الاشتباه", fmtNum(o.den))],
       page: "نتائج الأداء للمنافذ",
     });
   }
@@ -135,9 +140,9 @@ export function buildStatements(model: ReportModel): Statement[] {
   for (const o of findOutliers(markStats, "low", 100, 15).slice(0, MAX_PORTS_PER_TOPIC)) {
     add({
       priority: o.gap <= -25 ? "عالية" : "متوسطة", topic: "تحديد موقع الاشتباه",
-      text: `تحديد موقع الاشتباه في منفذ ${o.name} أضعف منه في باقي ${groupLabel(o.sea)}، مما يؤدي إلى وجود صعوبة في تحديد الاشتباه والتأكد منه من قبل الوسائل الحية.`,
-      recommendation: `التأكد من التزام الفاحصين في منفذ ${o.name} بتحديد موقع الاشتباه، ومتابعة نسبة الالتزام مقارنةً بباقي ${groupLabel(o.sea)} بشكل شهري.`,
-      figures: [F(`صور بتحديد · ${o.name}`, fmtPct(o.share)), F(`صور بتحديد · باقي ${groupLabel(o.sea)}`, fmtPct(o.othersShare)), F(`صور اشتباه ${o.name}`, fmtNum(o.den))],
+      text: `تحديد موقع الاشتباه في منفذ ${o.name} أضعف منه في إجمالي ${groupLabel(o.sea)}، مما يؤدي إلى وجود صعوبة في تحديد الاشتباه والتأكد منه من قبل الوسائل الحية.`,
+      recommendation: `التأكد من التزام الفاحصين في منفذ ${o.name} بتحديد موقع الاشتباه، ومتابعة نسبة الالتزام مقارنةً بإجمالي ${groupLabel(o.sea)} بشكل شهري.`,
+      figures: [F(`بتحديد · ${o.name}`, fmtPct(o.share)), F(`بتحديد · ${totalLabel(o.sea)}`, fmtPct(o.baseShare)), F("صور الاشتباه", fmtNum(o.den))],
       page: "هل يوجد تحديد؟",
     });
   }
@@ -153,7 +158,7 @@ export function buildStatements(model: ReportModel): Statement[] {
       priority: "للعلم", topic: "المستويان",
       text: `إجابات المستوى ${lowN} أقل توافقًا مع رأي أخصائي ضمان جودة الأشعة من إجابات المستوى ${highN}.`,
       recommendation: `مراجعة عدة حالات من المستوى ${lowN} للتأكد من تطبيق معايير الاشتباه بنفس الطريقة المتبعة في المستوى الآخر.`,
-      figures: [F("معدل الاتفاق · المستوى الأول", fmtPct(l1.overall)), F("معدل الاتفاق · المستوى الثاني", fmtPct(l2.overall)), F("إجابات كل مستوى", fmtNum(l1.evaluable))],
+      figures: [F("الاتفاق · المستوى الأول", fmtPct(l1.overall)), F("الاتفاق · المستوى الثاني", fmtPct(l2.overall)), F("معدل الاتفاق العام", fmtPct(accuracyOf(sumCounts(lvAll.flatMap((r) => [r.l1.counts, r.l2.counts]))).overall))],
       page: "دقة إجابات المستوى الأول والثاني",
     });
   }
@@ -169,7 +174,7 @@ export function buildStatements(model: ReportModel): Statement[] {
       priority: "متوسطة", topic: "جودة الصورة",
       text: "تدنّي جودة الصورة يؤدي إلى اشتباهات خاطئة أو اشتباهات فائتة بمعدل أكبر من الصور ذات الجودة العالية.",
       recommendation: "التأكد من جودة التقاط أجهزة الأشعة للصور، ومتابعة الحالات ذات الجودة المنخفضة بشكل شهري لتحسين دقة القرار.",
-      figures: [F("اشتباهات خاطئة أو فائتة · جودة منخفضة", fmtPct(100 - qLow.overall)), F("اشتباهات خاطئة أو فائتة · جودة عالية", fmtPct(100 - qHigh.overall)), F("الصور منخفضة الجودة", fmtNum(qLow.evaluable))],
+      figures: [F("خاطئة أو فائتة · منخفضة", fmtPct(100 - qLow.overall)), F("خاطئة أو فائتة · عالية", fmtPct(100 - qHigh.overall)), F("صور منخفضة الجودة", fmtNum(qLow.evaluable))],
       page: "نسبة التوائم حسب جودة الصورة",
     });
   }

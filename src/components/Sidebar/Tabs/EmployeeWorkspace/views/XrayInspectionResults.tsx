@@ -21,7 +21,8 @@ import {
   loadEmployeeAnswers,
   setItemQualityNote,
 } from "../../../../../data/answers/answerStorage";
-import { backfillMirrorFromDisk, countPendingAnswers } from "../../../../../data/answers/answerLocalMirror";
+import { backfillMirrorFromDisk } from "../../../../../data/answers/answerLocalMirror";
+import { usePendingAnswerCount } from "../../../../../data/answers/usePendingAnswerCount";
 import type { ItemAnswer } from "../../../../../data/answers/answerTypes";
 import { reopenSubmittedAnswer } from "../../../../../data/answers/reopenAnswer";
 import {
@@ -251,7 +252,9 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
   // (see answerLocalMirror.ts). Refreshed after every reconciliation —
   // initial load and the 30s tick below — so it reflects the current
   // outcome of the latest retry rather than a stale count.
-  const [pendingSyncCount, setPendingSyncCount] = useState(0);
+  // The shared hook owns the count now (local IndexedDB only); oversight has no own queue.
+  const unsentCount = usePendingAnswerCount({ username, month: selectedMonth });
+  const pendingSyncCount = canSeeAll ? 0 : unsentCount;
   // C1: the workspace stage alias table (shared hook with the referral queue).
   const stageMappings = useWorkspaceStageMappings(directoryHandle);
 
@@ -317,14 +320,9 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
   // "sibling effect" home (this view already reads the selected month's
   // answers on load/tick) now that the writing half moved to the runner.
   //
-  // A8: this callback is LOCAL ONLY (IndexedDB `getAll`); it never reads the
-  // share. It used to run `backfillAnswerMirror` -> `loadEmployeeAnswers` (a
-  // full month segment scan) on every reload and on the 30 s tick, which was
-  // the single largest source of share traffic under team load. The backfill
-  // now reuses the answers `loadData` already holds (see there).
-  const refreshPendingSyncCount = useCallback(async () => {
-    setPendingSyncCount(await countPendingAnswers(selectedMonth, username));
-  }, [selectedMonth, username]);
+  // A8: the count itself is LOCAL ONLY (IndexedDB), owned by
+  // `usePendingAnswerCount` above. The backfill reuses the answers `loadData`
+  // already holds (no extra share read).
 
   // Load-token guard (mirrors useApprovalData): a slow load for a previously
   // selected month must not clobber a later selection or the falsy-reset above.
@@ -427,9 +425,7 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
       // silent reload while visible only re-counts the local queue.
       if (!canSeeAll && answerFiles[0]) {
         if (!silent || opts?.refreshPending) {
-          void backfillMirrorFromDisk(selectedMonth, username, answerFiles[0].items).then(() => refreshPendingSyncCount());
-        } else {
-          void refreshPendingSyncCount();
+          void backfillMirrorFromDisk(selectedMonth, username, answerFiles[0].items);
         }
       }
       // Ad-hoc rows' answers live in their own `2-samples/adhoc-{importId}/`
@@ -487,7 +483,7 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
       }
       setLoadState("error");
     }
-  }, [canSeeAll, directoryHandle, refreshPendingSyncCount, selectedMonth, username]);
+  }, [canSeeAll, directoryHandle, selectedMonth, username]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -496,31 +492,9 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
     return () => window.clearTimeout(timer);
   }, [loadData]);
 
-  // The 30s LANDING of unsynced answers now runs app-wide
-  // (PendingAnswerReplayRunner, mounted in AuthGate) — for every page, every
-  // month, and every ad-hoc import, not only while this view is open. This
-  // tick only backfills the local mirror and keeps the "not saved yet" count
-  // on this view current (see refreshPendingSyncCount's own doc). Skipped
-  // entirely for `canSeeAll` — same reasoning as the loadData call above.
-  useEffect(() => {
-    if (canSeeAll || !selectedMonth) return;
-    let timer: number | undefined;
-    let cancelled = false;
-    // +/-20 % jitter so clients that mounted together do not poll in lockstep.
-    const schedule = () => {
-      timer = window.setTimeout(() => {
-        if (cancelled) return;
-        // Hidden: nobody can see the count; the show catch-up refreshes it.
-        if (visibleRef.current) void refreshPendingSyncCount();
-        schedule();
-      }, 30_000 * (0.8 + Math.random() * 0.4));
-    };
-    schedule();
-    return () => {
-      cancelled = true;
-      if (timer !== undefined) window.clearTimeout(timer);
-    };
-  }, [canSeeAll, refreshPendingSyncCount, selectedMonth]);
+  // Landing of unsynced answers runs app-wide (PendingAnswerReplayRunner,
+  // mounted in AuthGate); the "not saved yet" count on this view is kept
+  // current by `usePendingAnswerCount` (mount, data-refresh, 10 s poll).
 
   // At most ONE silent reload in flight; broadcasts arriving meanwhile coalesce
   // into a single follow-up. Under a saturated share every timer-driven reload

@@ -15,6 +15,9 @@
 import { getLabels } from "../../labels/labelsStore";
 import { esc } from "./primitives";
 
+/** Slide class: the page starts excluded from printing (empty pages), until the viewer switches it on or types into it. */
+export const PRINT_DEFAULT_OFF_CLASS = "print-default-off";
+
 export const PRINT_SELECT_CSS = `
 .ps-bar{display:inline-flex;align-items:center;gap:6px;}
 .ps-bar .btn{white-space:nowrap;}
@@ -52,6 +55,7 @@ export const PRINT_SELECT_SCRIPT = `(function(){
   var boxes = slides.map(function(slide){
     var box = slide.querySelector('.slide-print-toggle input');
     if (box) return box;
+    var defaultOn = !slide.classList.contains('${PRINT_DEFAULT_OFF_CLASS}');
     var wrap = document.createElement('div');
     wrap.className = 'slide-controls';
     var label = document.createElement('label');
@@ -59,7 +63,7 @@ export const PRINT_SELECT_SCRIPT = `(function(){
     label.title = title;
     box = document.createElement('input');
     box.type = 'checkbox';
-    box.checked = true;
+    box.checked = defaultOn;
     var track = document.createElement('span');
     track.className = 'slide-print-toggle-track';
     var thumb = document.createElement('span');
@@ -80,12 +84,12 @@ export const PRINT_SELECT_SCRIPT = `(function(){
     var count = document.getElementById('ps-count');
     if (count) count.textContent = on + ' / ' + boxes.length;
   }
+  // Once saved, the stored list replaces the built-in defaults (so a default-off page switched on stays on).
   function save(){
     try {
       var offIdx = [];
       boxes.forEach(function(box, i){ if (!box.checked) offIdx.push(i); });
-      if (offIdx.length) localStorage.setItem(key, JSON.stringify(offIdx));
-      else localStorage.removeItem(key);
+      localStorage.setItem(key, JSON.stringify(offIdx));
     } catch (e) {}
   }
   function setAll(value){
@@ -93,11 +97,16 @@ export const PRINT_SELECT_SCRIPT = `(function(){
     sync(); save();
   }
   try {
-    var saved = JSON.parse(localStorage.getItem(key) || '[]');
-    if (Array.isArray(saved)) saved.forEach(function(i){ if (boxes[i]) boxes[i].checked = false; });
+    var raw = localStorage.getItem(key);
+    var saved = raw === null ? null : JSON.parse(raw);
+    if (Array.isArray(saved)) boxes.forEach(function(box, i){ box.checked = saved.indexOf(i) < 0; });
   } catch (e) {}
-  boxes.forEach(function(box){
+  boxes.forEach(function(box, i){
     box.addEventListener('change', function(){ sync(); save(); });
+    // A default-off (empty) page the viewer writes into is switched on.
+    if (slides[i].classList.contains('${PRINT_DEFAULT_OFF_CLASS}')) {
+      slides[i].addEventListener('input', function(){ if (!box.checked) { box.checked = true; sync(); save(); } });
+    }
   });
   var all = document.getElementById('ps-all');
   var none = document.getElementById('ps-none');

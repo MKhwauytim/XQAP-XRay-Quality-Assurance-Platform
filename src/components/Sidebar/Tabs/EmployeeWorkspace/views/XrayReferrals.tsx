@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactElement } from "react";
 import { CalendarOff, X } from "lucide-react";
 import { readSession } from "../../../../../auth/authSession";
 import { usePermissions } from "../../../../../auth/usePermissions";
@@ -13,6 +14,8 @@ import {
   upsertItemAnswer,
   upsertItemAnswerOnBehalf,
 } from "../../../../../data/answers/answerStorage";
+import { timeAnswerStep } from "../../../../../data/answers/answerTimings";
+import { getAnswerSubmitMode, requestAnswerFlush, submitAnswerLocalFirst } from "../../../../../data/answers/answerOutbox";
 import { clearAnswerDraftAndLegacy } from "../../../../../data/answers/answerDraftStore";
 import { forgetLastOpenSample, pickAutoSelectId, readLastOpenSample, rememberLastOpenSample } from "../../../../../data/answers/lastOpenSampleStore";
 import { answerFolderForEntry, legacyPanelDraftKey, panelDraftKey } from "./XrayReferrals/answerRouting";
@@ -22,7 +25,9 @@ import { getLabels } from "../../../../../data/labels/labelsStore";
 import { useVisibleUnsavedWorkMonthGuard } from "../../../../../hooks/useVisibleUnsavedWorkMonthGuard";
 import { useUnsavedWork } from "../../../../../hooks/useUnsavedWork";
 import type { AnswerSaveOutcome, FieldAnswer, ItemAnswer } from "../../../../../data/answers/answerTypes";
-import { isAnswerQueuedPending } from "../../../../../data/answers/answerLocalMirror";
+import { isAnswerQueuedPending, loadPendingAnswerItems } from "../../../../../data/answers/answerLocalMirror";
+import { overlayPendingAnswers } from "../../../../../data/answers/overlayPendingAnswers";
+import { usePendingAnswerCount } from "../../../../../data/answers/usePendingAnswerCount";
 import {
   loadOrDeriveDistributionCurrentStrictForRead,
   readDistributionLogStamp,
@@ -139,9 +144,26 @@ import "./XrayReferrals/XrayReferrals.css";
 
 const COL_KEY = "xray_ref_cols_v4";
 
+/** «N answers not yet sent» notice with a "send now" action; renders nothing at 0. */
+function PendingAnswersBanner({ directoryHandle, username, month }: {
+  directoryHandle: DirectoryHandleLike; username: string; month: string;
+}): ReactElement | null {
+  const L = useLabels();
+  const unsent = usePendingAnswerCount({ username, month });
+  if (unsent <= 0) return null;
+  return (
+    <p className="ew-msg-warn" role="status" dir="rtl">
+      {L.ew_answers_pending_sync.replace("{count}", String(unsent))}{" "}
+      <button type="button" onClick={() => requestAnswerFlush(directoryHandle, username, { immediate: true })}>
+        {L.ew_answers_send_now}
+      </button>
+    </p>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
-type Props = { directoryHandle: DirectoryHandleLike };
+type Props ={ directoryHandle: DirectoryHandleLike };
 type LoadState = "idle" | "loading" | "ready" | "error";
 export type StatusMsg = { type: "ok" | "error"; text: string } | null;
 // Exported (not just used locally) so the moved ReferralStatsStrip/ReplacementDialog
@@ -379,6 +401,29 @@ function thrownWriteErrorText(error: unknown): string {
 }
 
 /**
+ * The write behind a submit. A self-answer in `outbox` mode lands on this
+ * device first and the share write happens in the background
+ * (`requestAnswerFlush`); if browser storage is unavailable it falls back to
+ * the synchronous share write, never a false "saved". Sync mode and answering
+ * on someone else's behalf keep the direct write.
+ */
+async function submitAnswer(
+  directoryHandle: DirectoryHandleLike, folder: string, forUser: string, username: string, item: ItemAnswer,
+): Promise<{ result: { ok: true } | { ok: false; error: string }; savedLocallyOnly: boolean }> {
+  if (forUser !== username) {
+    return { result: await upsertItemAnswerOnBehalf(directoryHandle, folder, forUser, item, username), savedLocallyOnly: false };
+  }
+  if (getAnswerSubmitMode() === "outbox") {
+    const outcome = await submitAnswerLocalFirst(folder, forUser, item);
+    if (outcome.stored) {
+      requestAnswerFlush(directoryHandle, username);
+      return { result: { ok: true }, savedLocallyOnly: true };
+    }
+  }
+  return { result: await upsertItemAnswer(directoryHandle, folder, forUser, item), savedLocallyOnly: false };
+}
+
+/**
  * The inspection panel's "submit answers" write.
  *
  * Two write paths, chosen by WHOSE assignment this is. A self-answer goes
@@ -391,8 +436,11 @@ function thrownWriteErrorText(error: unknown): string {
  * apart.
  *
  * Module-level for the same budget reason as `createReopenHandlers` below.
+ *
+ * @internal Exported only so the local-first branch can be tested directly.
  */
-function createSaveAnswerHandler(deps: {
+// eslint-disable-next-line react-refresh/only-export-components -- test seam, not a component export
+export function createSaveAnswerHandler(deps: {
   directoryHandle: DirectoryHandleLike;
   username: string;
   role: string;
@@ -456,9 +504,7 @@ function createSaveAnswerHandler(deps: {
     };
     try {
       const folder = answerFolderForEntry(entry, selMonth);
-      const result = forUser === username
-        ? await upsertItemAnswer(directoryHandle, folder, forUser, item)
-        : await upsertItemAnswerOnBehalf(directoryHandle, folder, forUser, item, username);
+      const { result, savedLocallyOnly } = await submitAnswer(directoryHandle, folder, forUser, username, item);
       if (result.ok) {
         // AFTER the write, inside its ok branch. An on-behalf submission is a
         // distinct action type rather than a flag on the ordinary one so it can
@@ -495,7 +541,7 @@ function createSaveAnswerHandler(deps: {
         // failure branch below resolves too), so the panel cannot do this for
         // itself without throwing away the very work it exists to protect.
         clearAnswerDraftAndLegacy(panelDraftKey(entry, selMonth), legacyPanelDraftKey(entry, selMonth));
-        setStatusMsg({ type: "ok", text: "تم التقديم." });
+        setStatusMsg({ type: "ok", text: savedLocallyOnly ? getLabels().ew_answer_saved_locally : "تم التقديم." });
         // Tell the OTHER mounted views. Without this a submitted answer stayed
         // invisible to the approval desk, «نتائج فحص الأشعة» and Reports — all
         // kept mounted beside this one by the tab-mount LRU — until the 45 s
@@ -1286,8 +1332,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         personalMirror,
         logStamp,
         ownAnswerFile,
+        pendingItems,
       ] =
-        await Promise.all([
+        await timeAnswerStep("load.phase2", () => Promise.all([
           loadReferralLog(directoryHandle, selMonth, scopeOpts),
           loadReplacementLog(directoryHandle, selMonth, scopeOpts),
           adhocEntriesPromise,
@@ -1305,7 +1352,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                 return null;
               }),
           canSeeAll ? null : loadEmployeeAnswers(directoryHandle, selMonth, username),
-        ]);
+          // This employee's submitted-but-unsent answers (local IndexedDB). Must
+          // never fail the load: absence just means "nothing to overlay".
+          canSeeAll ? [] : loadPendingAnswerItems(selMonth, username).catch((): ItemAnswer[] => []),
+        ]));
 
       // Both helpers already scope to `username` (fromEmployee / employeeUsername),
       // so the previous `canSeeAll ? new Set() : …` short-circuit bought nothing
@@ -1335,7 +1385,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         setPendingReplacementIds(pendingReplacementIds);
         setSampleMaster(sample);
         setMyQuota(quota);
-        setAnswers(localSubmissions.settle(answerItems, loadGeneration));
+        setAnswers(localSubmissions.settle(overlayPendingAnswers(answerItems, pendingItems), loadGeneration));
         setLoadState("ready");
       };
 
@@ -1387,11 +1437,14 @@ export default function XrayReferrals({ directoryHandle }: Props) {
 
       // ── Phase 3: the full read (oversight always; personal scope only when
       // the mirror could not answer) ───────────────────────────────────────
-      const sample = await loadSampleMaster(directoryHandle, selMonth);
-      const sampleRows = (sample?.rows ?? []) as PreparedPopulationRow[];
-      // STRICT: the `?? []` below would otherwise turn a failed read into an empty queue — see DistributionUnreadableError.
-      const dist = await loadOrDeriveDistributionCurrentStrictForRead(directoryHandle, selMonth, sampleRows, {
-        persistAfterReadFold: true,
+      const { sample, dist } = await timeAnswerStep("load.phase3", async () => {
+        const sampleMaster = await loadSampleMaster(directoryHandle, selMonth);
+        const sampleRows = (sampleMaster?.rows ?? []) as PreparedPopulationRow[];
+        // STRICT: the `?? []` below would otherwise turn a failed read into an empty queue — see DistributionUnreadableError.
+        const derived = await loadOrDeriveDistributionCurrentStrictForRead(directoryHandle, selMonth, sampleRows, {
+          persistAfterReadFold: true,
+        });
+        return { sample: sampleMaster, dist: derived };
       });
       const all = [...(dist?.entries ?? personalMirror?.entries ?? []), ...adhocEntries];
 
@@ -1410,7 +1463,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       // must not blank the whole queue (it did — XQ-ANS-005). The failure is
       // isolated per employee, logged, and surfaced below by name.
       const unreadableAssignees: string[] = [];
-      const answerItems = canSeeAll
+      const answerItems = await timeAnswerStep("load.answers", async () => canSeeAll
         ? [
             ...(
               await Promise.all(
@@ -1425,7 +1478,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
             ).flatMap((f) => f?.items ?? []),
             ...adhocAnswerItems,
           ]
-        : [...ownAnswerFile!.items, ...adhocAnswerItems];
+        : [...ownAnswerFile!.items, ...adhocAnswerItems]);
 
       // Boot reporting FIRST, then the staleness check (DEFECT 8). The previous
       // order -- bail on a stale token before touching bootProgress -- assumed a
@@ -1687,6 +1740,8 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           onReloadTemplate={() => { if (selTplId) void applyTemplate(selTplId, false); }}
         />
       </PageHeader>
+
+      {!canSeeAll && <PendingAnswersBanner directoryHandle={directoryHandle} username={username} month={selMonth} />}
 
       {/* Scoped to the DataTable's currently filtered rows (not `allEntries`), so
           export/bulk-reopen act only on what the applied filters show. */}

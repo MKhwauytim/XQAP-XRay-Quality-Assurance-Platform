@@ -39,9 +39,14 @@ const backfillMock = vi.mocked(answerLocalMirror.backfillMirrorFromDisk);
 // exactly two calls in that one test.
 vi.mock("./answerStorage", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./answerStorage")>();
-  return { ...actual, upsertItemAnswer: vi.fn(actual.upsertItemAnswer) };
+  return {
+    ...actual,
+    upsertItemAnswer: vi.fn(actual.upsertItemAnswer),
+    loadAllEmployeeFiles: vi.fn(actual.loadAllEmployeeFiles),
+  };
 });
 const upsertSpy = vi.mocked(answerStorage.upsertItemAnswer);
+const loadAllSpy = vi.mocked(answerStorage.loadAllEmployeeFiles);
 
 const MONTH = "5-May-2026";
 const MONTH_EARLY = "1-January-2026"; // sorts before MONTH -- used for the closed-month ordering test
@@ -96,6 +101,7 @@ beforeEach(() => {
   mirrorMock.mockClear();
   backfillMock.mockClear();
   upsertSpy.mockClear();
+  loadAllSpy.mockClear();
   __resetPendingReplayLogDedupeForTests();
   clearErrors();
 });
@@ -484,5 +490,69 @@ describe("replayPendingAnswers clears the pending count end-to-end (CRITICAL fix
     expect(summary.alreadyOnDisk).toBe(1);
     expect(summary.replayed).toBe(0);
     expect(await answerLocalMirror.countPendingAnswers(MONTH, "emp1")).toBe(0);
+  });
+});
+
+describe("replayPendingAnswers — identity-bearing items (outbox)", () => {
+  const identity = { eventId: "11111111-1111-4111-8111-111111111111", eventAt: "2026-09-28T10:00:05.000Z" };
+  const noopSync = () => vi.fn(async () => {});
+
+  it("lands an item with an identity without the strict all-employee read", async () => {
+    const root = createMemoryDirectory("root");
+    await seedMonth(root, MONTH);
+    loadAllSpy.mockClear();
+    upsertSpy.mockClear();
+
+    const summary = await replayPendingAnswers(root, "emp1", {
+      loadPending: async () => [{ month: MONTH, item: answer("XR-1"), identity }],
+      markSynced: noopSync(),
+    });
+
+    expect(summary).toEqual({ replayed: 1, alreadyOnDisk: 0, failed: 0, cannotLand: 0 });
+    expect(loadAllSpy).not.toHaveBeenCalled();
+    expect(upsertSpy).toHaveBeenCalledTimes(1);
+    expect(upsertSpy.mock.calls[0]?.[3]).toMatchObject({ xrayImageId: "XR-1" });
+    expect(upsertSpy.mock.calls[0]?.[4]).toEqual(identity);
+  });
+
+  it("an item without an identity still takes the strict pre-read path", async () => {
+    const root = createMemoryDirectory("root");
+    await seedMonth(root, MONTH);
+    loadAllSpy.mockClear();
+
+    const summary = await replayPendingAnswers(root, "emp1", {
+      loadPending: async () => [{ month: MONTH, item: answer("XR-1") }],
+      markSynced: noopSync(),
+    });
+
+    expect(summary.replayed).toBe(1);
+    expect(loadAllSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("landing the same identity-bearing item twice (two tabs) folds to one item", async () => {
+    const root = createMemoryDirectory("root");
+    await seedMonth(root, MONTH);
+    const deps = {
+      loadPending: async () => [{ month: MONTH, item: answer("XR-1"), identity }],
+      markSynced: noopSync(),
+    };
+
+    await replayPendingAnswers(root, "emp1", deps);
+    __resetPendingReplayLogDedupeForTests(); // the second "tab" has no memory of the first
+    __resetAnswerEventsCacheForTests();
+    await replayPendingAnswers(root, "emp1", deps);
+
+    const items = (await loadEmployeeAnswers(root, MONTH, "emp1")).items.filter((i) => i.xrayImageId === "XR-1");
+    expect(items).toHaveLength(1);
+  });
+
+  it("an identity-bearing item still waits when the month folder does not exist", async () => {
+    const root = createMemoryDirectory("root");
+    const summary = await replayPendingAnswers(root, "emp1", {
+      loadPending: async () => [{ month: MONTH, item: answer("XR-1"), identity }],
+      markSynced: noopSync(),
+    });
+    expect(summary).toEqual({ replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 1 });
+    expect(upsertSpy).not.toHaveBeenCalled();
   });
 });

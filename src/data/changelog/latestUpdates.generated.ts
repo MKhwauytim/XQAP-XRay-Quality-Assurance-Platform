@@ -5,6 +5,55 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v153.32",
+    "date": "2026-10-14",
+    "bucket": "fix",
+    "scope": "statements",
+    "title": "observation figures on one line — short labels, single-row grid; level observation shows the weighted معدل الاتفاق العام"
+  },
+  {
+    "version": "v153.31",
+    "date": "2026-10-14",
+    "bucket": "enhancement",
+    "scope": "statements",
+    "title": "compare each port with one fixed baseline per port type (إجمالي), not the rest of its type"
+  },
+  {
+    "version": "v153.30",
+    "date": "2026-10-13",
+    "bucket": "enhancement",
+    "scope": "deck3",
+    "title": "bake the saved text template into the defaults, drop the s3 contents tail, lower «المحددات»"
+  },
+  {
+    "version": "v153.29",
+    "date": "2026-10-13",
+    "bucket": "enhancement",
+    "scope": "report import",
+    "title": "rows only from the examined-sample workbook; follow-up and بعد التعديل enrich by id, «نعم» + same exam month first"
+  },
+  {
+    "version": "v153.28",
+    "date": "2026-10-13",
+    "bucket": "enhancement",
+    "scope": "deck3",
+    "title": "align level determinants, drop two captions, empty pages print-off by default"
+  },
+  {
+    "version": "v153.27",
+    "date": "2026-10-13",
+    "bucket": "feature",
+    "scope": "integrity",
+    "title": "admin boot scan heals live files from a verified .tmp/.bak"
+  },
+  {
+    "version": "v153.26",
+    "date": "2026-10-13",
+    "bucket": "feature",
+    "scope": "answers",
+    "title": "local-first submit outbox, sync-interval replay, unsent-answer banner and timings"
+  },
+  {
     "version": "v153.25",
     "date": "2026-10-13",
     "bucket": "enhancement",
@@ -24,54 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "answers",
     "title": "stop the save-failure spiral on flaky shares — retry refused replace before rotating, two-name extension probe, dead-segment registry, 256 KiB segments"
-  },
-  {
-    "version": "v153.23",
-    "date": "2026-10-12",
-    "bucket": "fix",
-    "scope": "executive report",
-    "title": "official risk-level definitions and corrected glossary terms"
-  },
-  {
-    "version": "v153.22",
-    "date": "2026-10-12",
-    "bucket": "enhancement",
-    "scope": "executive report",
-    "title": "recommendations reworded in plain, practical language"
-  },
-  {
-    "version": "v153.21",
-    "date": "2026-10-12",
-    "bucket": "enhancement",
-    "scope": "executive report",
-    "title": "KPI page in percentages with numbers under, port shares, نتائج خاطئة"
-  },
-  {
-    "version": "v153.20",
-    "date": "2026-10-12",
-    "bucket": "enhancement",
-    "scope": "executive report",
-    "title": "remove per-port marking pages, KPI aside under number, support workbook matches every page"
-  },
-  {
-    "version": "v153.19",
-    "date": "2026-10-12",
-    "bucket": "enhancement",
-    "scope": "executive report",
-    "title": "observations-and-recommendations table, page 8 results matrix, المفحوصة wording"
-  },
-  {
-    "version": "v153.18",
-    "date": "2026-10-12",
-    "bucket": "enhancement",
-    "scope": "executive report",
-    "title": "quality-by-agreement page counts images; one border system for all tables"
-  },
-  {
-    "version": "v153.17",
-    "date": "2026-10-12",
-    "bucket": "enhancement",
-    "scope": "executive report",
-    "title": "page 7 coverage progress bar, one-line header, per-level target bullets"
   }
 ];

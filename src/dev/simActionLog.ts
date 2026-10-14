@@ -305,6 +305,8 @@ function notificationSpecs(): SimActionSpec[] {
     { actor: "mkhuwaytim", action: "notification-edited", target: "sim-notif-003", noMonth: true,
       details: { target: "all", audience: 7, chars: 150 } },
     { actor: "admin", action: "notification-deleted", target: "sim-notif-003", noMonth: true },
+    { actor: "admin", action: "file-auto-healed", target: "thread-sim-001.json", noMonth: true,
+      details: { location: "5-system/feedback/threads", source: ".tmp", revision: 6 } },
   ];
 }
 
