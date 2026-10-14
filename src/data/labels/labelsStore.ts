@@ -856,6 +856,17 @@ export const DEFAULT_LABELS = {
   // Answers layout v2 (spec 2026-10-13 §6) — saves during an admin migration.
   answers_migration_save_deferred:  "يجري الآن ترحيل ملفات الإجابات لهذا الشهر. حُفظت إجابتك على هذا الجهاز وستُرفع تلقائيًا بعد انتهاء الترحيل.",
   answers_migration_action_blocked: "يجري الآن ترحيل ملفات الإجابات لهذا الشهر. أعد المحاولة بعد انتهاء الترحيل.",
+  answers_layout_migration_title:      "ترحيل ملفات الإجابات إلى التخطيط الجديد",
+  answers_layout_migration_body:       "يحتوي {monthCount} من الأشهر على ملفات إجابات بالتخطيط القديم. سيُنقل كل منها إلى مجلد خاص بكل موظف لتسريع التحميل. لن يُحذف أي ملف؛ تُنقل الملفات القديمة إلى أرشيف داخل المجلد نفسه.",
+  answers_layout_migration_month_row:  "{month}: {segments} ملفًا، {assignees} موظفًا، المدة التقديرية {minutes} دقيقة",
+  answers_layout_migration_incomplete: "ترحيل غير مكتمل",
+  answers_layout_migration_confirm:    "بدء الترحيل",
+  answers_layout_migration_later:      "لاحقًا",
+  answers_layout_migration_close:      "إغلاق",
+  answers_layout_migration_running:    "جارٍ ترحيل {month} ({done} من {total})…",
+  answers_layout_migration_done:       "اكتمل ترحيل ملفات الإجابات.",
+  answers_layout_migration_busy:       "ترحيل {month} قيد التنفيذ من جهاز آخر. أعد المحاولة لاحقًا.",
+  answers_layout_migration_failed:     "تعذّر إكمال ترحيل {month}. يمكن إعادة المحاولة بأمان.",
   app_auto_backup_failed:    "تعذر إنشاء النسخة الاحتياطية التلقائية: {error}",
   app_unknown_error:         "خطأ غير معروف",
   app_restore_interrupted_warning:
