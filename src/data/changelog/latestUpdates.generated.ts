@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v154.0",
+    "date": "2026-10-14",
+    "bucket": "feature",
+    "scope": "answers",
+    "title": "per-assignee answer folders, admin-offered migration with archived originals, automatic compaction (v154.0)"
+  },
+  {
     "version": "v153.33",
     "date": "2026-10-14",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "employee-workspace",
     "title": "month load reads only the employee's own files — scoped ad-hoc probe, own request queue, one-pass mirror trust check, read-fold cache persist, Results mirror fast path"
-  },
-  {
-    "version": "v153.24",
-    "date": "2026-10-13",
-    "bucket": "redesign",
-    "scope": "executive report",
-    "title": "split buildDeck3Slides into helpers to pass the complexity budget"
   }
 ];

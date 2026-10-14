@@ -52,10 +52,14 @@ import {
   invalidateSealedAnswerSegments,
 } from "../answers/answerSealedSegments";
 import { readRealSession } from "../../auth/authSession";
+import { isOwnAnswerFolderHead, readAnswerFolderHeads } from "../answers/v2/answerFolderHeads";
 import { readDistributionLogStamp } from "../distribution/distributionStorage";
 import {
   boundedSizeSignature,
+  chainHeadsSizeSignature,
   countChainHeads,
+  DIRECTORY_READ_CONCURRENCY,
+  listDirectoryEntries,
   listDirectoryEntriesWithSize,
   type SizedDirectoryEntry,
 } from "../storage/directoryScan";
@@ -81,11 +85,14 @@ import {
   NOTIFICATIONS_SUBFOLDERS,
   SAMPLE_SUBFOLDERS,
   SYSTEM_FOLDER_NAMES,
+  answerAssigneeFolderName,
+  getAnswerEventsLayout,
+  isAnswerAssigneeFolderName,
 } from "./workspacePaths";
 import { DEFAULT_SYNC_INTERVAL_MS, readSyncIntervalMs } from "./syncSettings";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { invalidateMonthLockCache } from "../population/monthLock";
-import { clearDeadSegmentRegistry } from "../storage/deadSegmentRegistry";
+import { requestDeadSegmentRecheck } from "../storage/deadSegmentRegistry";
 
 /** The cadence used until the workspace's own setting has been read (and
  *  whenever there is no workspace, no setting, or an unreadable one). §2's
@@ -573,7 +580,9 @@ async function probeAdhocStores(
         state!.lastSig.set(id, {
           dist: distDir ? await boundedSizeSignature(distDir, DISTRIBUTION_EVENT_SEGMENT_SUFFIX) : "",
           answers: ansDir
-            ? await boundedSizeSignature(
+            ? (await getAnswerEventsLayout(directoryHandle, folder)) === "v2"
+              ? await answerFoldersSignature(ansDir, folder, workspaceScopeId(directoryHandle))
+              : await boundedSizeSignature(
                 ansDir,
                 ANSWER_EVENT_SEGMENT_SUFFIX,
                 ANSWER_SEGMENT_HEAD_STAT_BUDGET,
@@ -615,13 +624,173 @@ function adhocIdsOf(signature: string): string[] {
   }
 }
 
+const V2_ANSWERS_SIGNATURE_PREFIX = "v2:";
+/** Per assignee folder: a v2 folder holds few live segments (compaction archives the rest), so a small head budget covers it. */
+const ANSWER_FOLDER_HEAD_STAT_BUDGET = 8;
+/**
+ * Backstop rotation length, in sync ticks: every MARKED folder's chain heads are
+ * re-stat'd once per this many ticks (45 s each, so 7.5 min), `ceil(marked / N)`
+ * folders per tick. It only matters when an append landed without its marker
+ * touch (the touch is best-effort, or a pre-marker v154 build wrote it).
+ */
+export const ANSWER_FOLDER_BACKSTOP_TICKS = 10;
+
+type AnswerFolderProbeState = {
+  tick: number;
+  /** Last chain-heads signature per marked folder (refreshed on rotation or on a marker change). */
+  heads: Map<string, string>;
+  /** Last other-writer marker list per folder. */
+  markers: Map<string, string>;
+};
+const answerFolderProbeState = new Map<string, AnswerFolderProbeState>();
+
+export function __resetAnswerFolderProbeStateForTests(): void {
+  answerFolderProbeState.clear();
+}
+
+function probeStateFor(key: string): AnswerFolderProbeState {
+  let state = answerFolderProbeState.get(key);
+  if (!state) {
+    state = { tick: 0, heads: new Map(), markers: new Map() };
+    answerFolderProbeState.set(key, state);
+  }
+  return state;
+}
+
+function backstopRotation(marked: readonly string[], tick: number): Set<string> {
+  if (marked.length === 0) return new Set();
+  const share = Math.ceil(marked.length / ANSWER_FOLDER_BACKSTOP_TICKS);
+  return new Set(Array.from({ length: Math.min(share, marked.length) }, (_, i) => marked[(tick * share + i) % marked.length]!));
+}
+
+/** The `employee` role's own assignee folder name; null when the username cannot be a folder. */
+function employeeOwnAnswerFolder(username: string): string | null {
+  try {
+    return answerAssigneeFolderName(username);
+  } catch {
+    return null;
+  }
+}
+
+/** `[folder]` when it exists (one open, no listing), else `[]`. */
+async function presentAnswerFolder(eventsDir: DirectoryHandleLike, folder: string): Promise<string[]> {
+  try {
+    await eventsDir.getDirectoryHandle(folder, { create: false });
+    return [folder];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Layout v2 (spec §5): one change signature per assignee folder, cheap in the
+ * steady state (v154.0 review: the first version opened and stat'd EVERY
+ * folder on every tick, per client).
+ *
+ *  - An `employee` session signs ONLY its own folder (`answerAssigneeFolderName`
+ *    of the username): one open instead of the listing, and the `_heads/`
+ *    markers of that folder alone — an on-behalf save into it by a supervisor
+ *    is a marker under the same folder key, so it is still seen; every other
+ *    user's folder is never opened. Reassignment and replacement reach the
+ *    employee through the distribution probe (`safeSegmentsSignature`), which
+ *    is role-independent. Supervisor, manager, admin and guest (who read
+ *    reports over every folder) keep the full listing.
+ *  - ONE listing of `_heads/` (see `answerFolderHeads.ts`) names every folder an
+ *    append touched: a new marker name = a change, visible on the next tick.
+ *    This client's own markers are left out (A11: an own save is not remote).
+ *  - A folder with NO marker (only ever written before markers existed) is
+ *    signed by the full per-folder scan, exactly as before.
+ *  - Backstop: a marked folder's chain HEADS are re-stat'd in rotation
+ *    (`ANSWER_FOLDER_BACKSTOP_TICKS`) and whenever its markers move. Heads only:
+ *    compaction archives sealed segments and touches no marker, so it is never
+ *    a change; an append without its marker (failed touch) is seen within one
+ *    rotation.
+ *
+ * `archive/`, `snapshot.json` and the reserved children are never signed. The
+ * owners of a change are the folders whose entry moved (`movedAnswerFolders`).
+ */
+export async function answerFoldersSignature(eventsDir: DirectoryHandleLike, monthFolderName: string, scope = ""): Promise<string> {
+  const session = readRealSession();
+  const actor = session?.username;
+  const exclude = actor ? ownStableAnswerSegmentMatcher(monthFolderName, actor) : undefined;
+  const ownFolder = session?.role === "employee" && actor ? employeeOwnAnswerFolder(actor) : null;
+  const folders = ownFolder !== null
+    ? await presentAnswerFolder(eventsDir, ownFolder)
+    : (await listDirectoryEntries(eventsDir))
+        .filter((entry) => entry.kind === "directory" && isAnswerAssigneeFolderName(entry.name))
+        .map((entry) => entry.name)
+        .sort();
+  const markers = await readAnswerFolderHeads(eventsDir);
+  const state = probeStateFor(`${scope}|${monthFolderName}`);
+  const marked = folders.filter((folder) => (markers?.get(folder)?.length ?? 0) > 0);
+  const rotation = backstopRotation(marked, state.tick);
+  state.tick += 1;
+  const openFolder = (folder: string) => eventsDir.getDirectoryHandle(folder, { create: false });
+  const entries = await mapWithConcurrency(folders, DIRECTORY_READ_CONCURRENCY, async (folder) => {
+    const names = markers?.get(folder) ?? [];
+    if (names.length === 0) {
+      return [folder, await boundedSizeSignature(await openFolder(folder), ANSWER_EVENT_SEGMENT_SUFFIX, ANSWER_FOLDER_HEAD_STAT_BUDGET, exclude, true)] as const;
+    }
+    const others = JSON.stringify(names.filter((name) => !isOwnAnswerFolderHead(name, actor)));
+    if (rotation.has(folder) || !state.heads.has(folder) || state.markers.get(folder) !== others) {
+      state.heads.set(folder, await chainHeadsSizeSignature(await openFolder(folder), ANSWER_EVENT_SEGMENT_SUFFIX, ANSWER_FOLDER_HEAD_STAT_BUDGET, exclude));
+      state.markers.set(folder, others);
+    }
+    return [folder, `m:${others}|${state.heads.get(folder) ?? ""}`] as const;
+  });
+  const live = new Set(marked);
+  for (const folder of [...state.heads.keys()]) {
+    if (!live.has(folder)) {
+      state.heads.delete(folder);
+      state.markers.delete(folder);
+    }
+  }
+  return `${V2_ANSWERS_SIGNATURE_PREFIX}${JSON.stringify(entries)}`;
+}
+
+/** Folders whose entry differs; null unless BOTH signatures are v2 (a v1->v2 flip = owners unknown). */
+export function movedAnswerFolders(previous: string, current: string): Set<string> | null {
+  if (!previous.startsWith(V2_ANSWERS_SIGNATURE_PREFIX) || !current.startsWith(V2_ANSWERS_SIGNATURE_PREFIX)) return null;
+  try {
+    const before = new Map(JSON.parse(previous.slice(V2_ANSWERS_SIGNATURE_PREFIX.length)) as Array<[string, string]>);
+    const after = new Map(JSON.parse(current.slice(V2_ANSWERS_SIGNATURE_PREFIX.length)) as Array<[string, string]>);
+    const moved = new Set<string>();
+    for (const [folder, signature] of after) if (before.get(folder) !== signature) moved.add(folder);
+    for (const folder of before.keys()) if (!after.has(folder)) moved.add(folder);
+    return moved;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The owners (lower-cased usernames) of moved v2 folders. A folder name the
+ * sanitizer left intact IS the username; a hash-suffixed one (review finding 9)
+ * is not invertible without reading it, so the owners are then unknown (null).
+ */
+function ownersOfMovedFolders(folders: ReadonlySet<string>): Set<string> | null {
+  for (const folder of folders) {
+    try {
+      if (answerAssigneeFolderName(folder) !== folder) return null;
+    } catch {
+      return null;
+    }
+  }
+  return new Set(folders);
+}
+
 /** §6 of the answer-save proposal: read-only, bounded — same primitive and shape as `safeSegmentsSignature` above. */
 async function safeAnswerSegmentsSignature(
   dir: DirectoryHandleLike | null,
-  monthFolderName: string
+  monthFolderName: string,
+  directoryHandle: DirectoryHandleLike
 ): Promise<Probed<string>> {
   if (!dir) return "";
   try {
+    if ((await getAnswerEventsLayout(directoryHandle, monthFolderName)) === "v2") {
+      probedAnswerFiles = new Map();
+      return await answerFoldersSignature(dir, monthFolderName, workspaceScopeId(directoryHandle));
+    }
     // A11: this user's own appends are already reflected locally (the saving
     // view updated its own state). Signing them made every save come back to
     // its author as a remote change one tick later and triggered the stale
@@ -765,7 +934,7 @@ async function probeMonth(
       safeSignature(dirs.approvalsDir, DECISIONS_SUFFIX),
       safeRevision(dirs.populationMonthDir, MONTH_MANIFEST_FILE),
       safeSegmentsSignature(dirs.eventsDir),
-      safeAnswerSegmentsSignature(dirs.answersEventsDir, monthFolderName),
+      safeAnswerSegmentsSignature(dirs.answersEventsDir, monthFolderName, directoryHandle),
       safeFeedbackSignature(dirs.feedbackDir),
       probeAdhocStores(directoryHandle),
     ]);
@@ -979,6 +1148,8 @@ async function probeChangedFamilies(
   sealedInvalidation: "none" | "all" | ReadonlySet<string>;
   /** segment name -> its size at the previous tick (0 when new), for the owners peek; null = unknown. */
   movedSegmentPrevSizes: Map<string, number> | null;
+  /** Layout v2: owners of the assignee folders that moved; null = not v2 on both ticks, or unknown. */
+  v2Owners: Set<string> | null;
   /** The legacy `.answers.json` listing moved too: whose answers is then unknowable from segments. */
   legacyAnswersMoved: boolean;
   /**
@@ -1014,7 +1185,16 @@ async function probeChangedFamilies(
   let sealedInvalidation: "none" | "all" | ReadonlySet<string> = "none";
   let movedSegmentPrevSizes: Map<string, number> | null = null;
   let ownersUnknown = false;
+  // Layout v2: owners are the folders whose signature moved; no flat sealed-segment
+  // confirmations exist to forget and no peek is needed.
+  const movedFolders =
+    previous && isProbed(previous.answersEventsSignature) && isProbed(current.answersEventsSignature)
+      ? movedAnswerFolders(previous.answersEventsSignature, current.answersEventsSignature)
+      : null;
+  const v2Owners = movedFolders ? ownersOfMovedFolders(movedFolders) : null;
+  if (movedFolders && !v2Owners) ownersUnknown = true;
   if (
+    !movedFolders &&
     previous &&
     movedFrom(previous.answersEventsSignature, current.answersEventsSignature, sameValue) &&
     isProbed(previous.answersEventsSignature) &&
@@ -1056,7 +1236,7 @@ async function probeChangedFamilies(
       ];
     }
   }
-  return { changed, sealedInvalidation, movedSegmentPrevSizes, legacyAnswersMoved, ownersUnknown, adhocMoved, adhocAll };
+  return { changed, sealedInvalidation, movedSegmentPrevSizes, v2Owners, legacyAnswersMoved, ownersUnknown, adhocMoved, adhocAll };
 }
 
 export type SyncRunOptions = {
@@ -1129,9 +1309,12 @@ async function performSync(options: SyncRunOptions, manual: boolean): Promise<Sy
   if (directoryHandle && monthFolderName) {
     try {
       let movedSegmentPrevSizes: Map<string, number> | null;
-      ({ changed, sealedInvalidation, movedSegmentPrevSizes, legacyAnswersMoved, ownersUnknown, adhocMoved, adhocAll } = await probeChangedFamilies(directoryHandle, monthFolderName, systemDir));
+      let v2Owners: Set<string> | null;
+      ({ changed, sealedInvalidation, movedSegmentPrevSizes, v2Owners, legacyAnswersMoved, ownersUnknown, adhocMoved, adhocAll } = await probeChangedFamilies(directoryHandle, monthFolderName, systemDir));
       markRequestQueueProbeCompleted(directoryHandle, monthFolderName);
-      if (changed.has("answers") && movedSegmentPrevSizes && !ownersUnknown) {
+      if (changed.has("answers") && v2Owners) {
+        answerOwners = v2Owners;
+      } else if (changed.has("answers") && movedSegmentPrevSizes && !ownersUnknown) {
         answerOwners = await peekAnswerOwners(movedSegmentPrevSizes);
       }
     } catch (error) {
@@ -1176,7 +1359,9 @@ async function performSync(options: SyncRunOptions, manual: boolean): Promise<Sy
     }
     if (manual) {
       // A user-initiated refresh is the one way to re-check segments the registry gave up on.
-      clearDeadSegmentRegistry();
+      // It re-opens them once but KEEPS their evidence: clearing it restarted the
+      // 5-minute window, so a user refreshing more often never got the replay through.
+      requestDeadSegmentRecheck();
       broadcastDataRefresh("manual");
     } else {
       // A legacy-file answers change (or a peek that could not classify) leaves the

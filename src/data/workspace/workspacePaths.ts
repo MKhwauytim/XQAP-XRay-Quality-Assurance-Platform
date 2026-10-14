@@ -1,8 +1,10 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { dedupeInFlight, workspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
 import { isNotFoundError } from "../storage/transientFileErrors";
+import { registerQuietRecoveryFileName } from "../storage/bakRecoveryReport";
 import { registerDirectoryPath } from "../storage/webLocks";
 import { subscribeToDataRefresh } from "./dataRefreshSignal";
+import { hashSeedString } from "../sampling/rng";
 
 export const WORKSPACE_ROOTS = {
   population: "1-population",
@@ -23,6 +25,67 @@ export const SAMPLE_SUBFOLDERS = {
   employees: "2-employees",
   approvals: "3-approvals",
 } as const;
+
+/**
+ * `2-samples/{month}/1-main/answers.events/` and its layout-v2 children
+ * (spec 2026-10-13 §4). THE one definition — `answerEventStore.ts` re-exports
+ * `ANSWER_EVENTS_DIR` from `root`.
+ *
+ * - `layoutMarker`: present = the month is v2 (per-assignee). Written LAST by
+ *   the migration; its presence is the commit point.
+ * - `migrationLock`: an admin migration is running (or crashed) — writers defer.
+ * - `archiveV1`: flat v1 segments, moved untouched by the migration.
+ * - `quarantine`: v1 lines the migration could not attribute or parse.
+ * - `assigneeArchive` / `assigneeSnapshot`: per-assignee children.
+ */
+export const ANSWER_EVENTS_FOLDERS = {
+  root: "answers.events",
+  layoutMarker: "_layout.json",
+  migrationLock: "_migration.lock.json",
+  archiveV1: "_archive-v1",
+  quarantine: "_quarantine",
+  assigneeArchive: "archive",
+  assigneeSnapshot: "snapshot.json",
+  /** Derived change markers for the sync probe (`answerFolderHeads.ts`); never user data. */
+  heads: "_heads",
+} as const;
+
+// Round 7: the migration lock's `.tmp` fallback is routine on a contended share, not damage.
+registerQuietRecoveryFileName(ANSWER_EVENTS_FOLDERS.migrationLock);
+
+const RESERVED_ANSWER_EVENTS_CHILDREN: ReadonlySet<string> = new Set<string>([
+  ANSWER_EVENTS_FOLDERS.archiveV1,
+  ANSWER_EVENTS_FOLDERS.quarantine,
+  ANSWER_EVENTS_FOLDERS.heads,
+]);
+
+/**
+ * The `{assignee}` folder for a username. Lowercased because every answers
+ * comparison is case-insensitive (`sameUser`), so `Emp1` saving and `emp1`
+ * answered on behalf must land in ONE folder.
+ */
+export function answerAssigneeFolderName(assignee: string): string {
+  const canonical = assignee.trim().toLowerCase();
+  const name = safeWorkspaceFilePart(canonical);
+  if (name === "" || name === "." || RESERVED_ANSWER_EVENTS_CHILDREN.has(name)) {
+    throw new Error(`Invalid answer assignee "${assignee}": not usable as a folder name`);
+  }
+  // Review finding 9: sanitizing is lossy (`a/b` and `a_b` both give `a_b`,
+  // `a..b` and `a.b` both give `a.b`), and two users sharing a folder would
+  // fold each other's answers. A name the sanitizer leaves untouched keeps its
+  // exact folder — every folder already written for such names stays valid —
+  // while a name it CHANGED gets a deterministic hash of the canonical name.
+  // `~` also forces the suffix, so a plain name can never spell a suffixed one.
+  if (name === canonical && !canonical.includes(ANSWER_ASSIGNEE_HASH_SEPARATOR)) return name;
+  return `${name}${ANSWER_ASSIGNEE_HASH_SEPARATOR}${hashSeedString(canonical).toString(36)}`;
+}
+
+const ANSWER_ASSIGNEE_HASH_SEPARATOR = "~";
+
+/** True for a listed `answers.events/` child directory that is an assignee folder. */
+export function isAnswerAssigneeFolderName(name: string): boolean {
+  return name !== "" && !name.startsWith(".") && !RESERVED_ANSWER_EVENTS_CHILDREN.has(name);
+}
 
 export const SYSTEM_FOLDER_NAMES = {
   locks: "locks",
@@ -285,7 +348,10 @@ export function __clearWorkspaceDirCacheForTests(): void {
 // not change every 45 seconds.
 if (typeof window !== "undefined") {
   subscribeToDataRefresh((source) => {
-    if (source === "manual") invalidateWorkspaceDirCache();
+    if (source === "manual") {
+      invalidateWorkspaceDirCache();
+      invalidateAnswerEventsLayout();
+    }
   });
 }
 
@@ -515,6 +581,236 @@ export async function getSampleApprovalsDir(
   create = true
 ): Promise<DirectoryHandleLike> {
   return getSampleSubDir(directoryHandle, monthFolderName, SAMPLE_SUBFOLDERS.approvals, create);
+}
+
+function sampleMainPath(monthFolderName: string): string {
+  return `${WORKSPACE_ROOTS.samples}/${monthFolderName}/${SAMPLE_SUBFOLDERS.main}`;
+}
+
+function answerEventsPath(monthFolderName: string): string {
+  return `${sampleMainPath(monthFolderName)}/${ANSWER_EVENTS_FOLDERS.root}`;
+}
+
+/** `2-samples/{month}/1-main/answers.events/`. */
+export async function getAnswerEventsDir(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  create = false
+): Promise<DirectoryHandleLike> {
+  return getChildDir(
+    directoryHandle,
+    sampleMainPath(monthFolderName),
+    () => getSampleMainDir(directoryHandle, monthFolderName, create),
+    ANSWER_EVENTS_FOLDERS.root,
+    create,
+    monthFolderName
+  );
+}
+
+/** `answers.events/{assignee}/` — live segments + `snapshot.json`. */
+export async function getAssigneeAnswerEventsDir(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  assignee: string,
+  create = false
+): Promise<DirectoryHandleLike> {
+  return getChildDir(
+    directoryHandle,
+    answerEventsPath(monthFolderName),
+    () => getAnswerEventsDir(directoryHandle, monthFolderName, create),
+    answerAssigneeFolderName(assignee),
+    create,
+    monthFolderName
+  );
+}
+
+/** `answers.events/{assignee}/archive/` — segments folded into the snapshot. */
+export async function getAssigneeArchiveDir(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  assignee: string,
+  create = false
+): Promise<DirectoryHandleLike> {
+  return getChildDir(
+    directoryHandle,
+    `${answerEventsPath(monthFolderName)}/${answerAssigneeFolderName(assignee)}`,
+    () => getAssigneeAnswerEventsDir(directoryHandle, monthFolderName, assignee, create),
+    ANSWER_EVENTS_FOLDERS.assigneeArchive,
+    create,
+    monthFolderName
+  );
+}
+
+/** `answers.events/_archive-v1/` — flat v1 segments, moved untouched. */
+export async function getAnswerArchiveV1Dir(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  create = false
+): Promise<DirectoryHandleLike> {
+  return getChildDir(
+    directoryHandle,
+    answerEventsPath(monthFolderName),
+    () => getAnswerEventsDir(directoryHandle, monthFolderName, create),
+    ANSWER_EVENTS_FOLDERS.archiveV1,
+    create,
+    monthFolderName
+  );
+}
+
+/** `answers.events/_quarantine/` — v1 lines the migration could not attribute or parse. */
+export async function getAnswerQuarantineDir(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  create = false
+): Promise<DirectoryHandleLike> {
+  return getChildDir(
+    directoryHandle,
+    answerEventsPath(monthFolderName),
+    () => getAnswerEventsDir(directoryHandle, monthFolderName, create),
+    ANSWER_EVENTS_FOLDERS.quarantine,
+    create,
+    monthFolderName
+  );
+}
+
+export type AnswerEventsLayout = "absent" | "v1" | "v1-migrating" | "v2";
+
+/** A migration lock whose last heartbeat is older than this is abandoned (taken over by a rerun; ignored by the layout probe). */
+export const MIGRATION_LOCK_STALE_MS = 30 * 60 * 1000;
+
+/**
+ * Months this tab has SEEN as v2, per workspace root. Monotone on purpose: the
+ * layout only moves forward (rollback is a manual, reload-requiring operation —
+ * see data-system-report.md), so one transient NotFound on `_layout.json` from a
+ * lagging SMB listing can never flip a v2 month back to the flat reader, which
+ * would show an employee an empty month. Every OTHER verdict is re-probed on
+ * every call (three handle opens in parallel, one round trip): a stale "v1"
+ * would send a save into the flat folder after the admin committed v2.
+ */
+let answerLayoutV2ByRoot = new WeakMap<DirectoryHandleLike, Set<string>>();
+
+export function noteAnswerEventsLayoutV2(directoryHandle: DirectoryHandleLike, monthFolderName: string): void {
+  let months = answerLayoutV2ByRoot.get(directoryHandle);
+  if (!months) {
+    months = new Set();
+    answerLayoutV2ByRoot.set(directoryHandle, months);
+  }
+  months.add(monthFolderName);
+}
+
+export function invalidateAnswerEventsLayout(directoryHandle?: DirectoryHandleLike, monthFolderName?: string): void {
+  if (!directoryHandle) {
+    answerLayoutV2ByRoot = new WeakMap();
+    return;
+  }
+  if (monthFolderName === undefined) answerLayoutV2ByRoot.delete(directoryHandle);
+  else answerLayoutV2ByRoot.get(directoryHandle)?.delete(monthFolderName);
+}
+
+async function entryExists(open: () => Promise<unknown>): Promise<boolean> {
+  try {
+    await open();
+    return true;
+  } catch (error) {
+    // "I could not look" is not "it is not there" — same rule as getRoot.
+    if (isNotFoundError(error)) return false;
+    throw error;
+  }
+}
+
+export async function getAnswerEventsLayout(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<AnswerEventsLayout> {
+  if (answerLayoutV2ByRoot.get(directoryHandle)?.has(monthFolderName)) return "v2";
+  let eventsDir: DirectoryHandleLike;
+  try {
+    eventsDir = await getAnswerEventsDir(directoryHandle, monthFolderName, false);
+  } catch (error) {
+    if (isNotFoundError(error)) return "absent";
+    throw error;
+  }
+  const [marker, lockFresh, archiveHoldsFiles] = await Promise.all([
+    entryExists(() => eventsDir.getFileHandle(ANSWER_EVENTS_FOLDERS.layoutMarker, { create: false })),
+    isMigrationLockFresh(eventsDir),
+    archiveV1HoldsEntries(eventsDir),
+  ]);
+  if (marker) {
+    noteAnswerEventsLayoutV2(directoryHandle, monthFolderName);
+    return "v2";
+  }
+  // v154.0 review finding 2: an ABANDONED run (stale lock, nothing moved yet)
+  // must not freeze every write for the month until an admin reruns. Only a
+  // live lock, or flat segments already moved into _archive-v1/ (invisible to
+  // a plain v1 read), keep the month v1-migrating -- and the probe re-offers
+  // that second case as "incomplete".
+  return lockFresh || archiveHoldsFiles ? "v1-migrating" : "v1";
+}
+
+/**
+ * Freshness of `_migration.lock.json`, measured like the migration measures it:
+ * the later of `startedAt`/`heartbeatAt`, else the file's own lastModified.
+ * Absent = not fresh. Any read failure other than NotFound counts as FRESH --
+ * "I could not look" must not unblock writers during a live run.
+ */
+async function isMigrationLockFresh(eventsDir: DirectoryHandleLike): Promise<boolean> {
+  let file: File;
+  try {
+    file = await (await eventsDir.getFileHandle(ANSWER_EVENTS_FOLDERS.migrationLock, { create: false })).getFile();
+  } catch (error) {
+    if (isNotFoundError(error)) return false;
+    return true;
+  }
+  return Date.now() - (await migrationLockLastSeenMs(eventsDir, file)) < MIGRATION_LOCK_STALE_MS;
+}
+
+/**
+ * Round 7 field report: every v154 client called this on every save and every
+ * sync probe, and each call OPENED the lock's content -- so during a run the
+ * lock was almost always open on some machine, and the share refused the
+ * migration's replace-in-place heartbeat. The content is now parsed once per
+ * (size, lastModified) -- metadata from getFile(), which does not open the file
+ * -- and reused until the lock is rewritten (one open per heartbeat, ~30 s).
+ */
+const lockLastSeenByDir = new WeakMap<DirectoryHandleLike, { size: number; lastModified: number; lastSeenMs: number }>();
+
+async function migrationLockLastSeenMs(eventsDir: DirectoryHandleLike, file: File): Promise<number> {
+  const cached = lockLastSeenByDir.get(eventsDir);
+  if (cached && cached.size === file.size && cached.lastModified === file.lastModified && file.lastModified > 0) return cached.lastSeenMs;
+  let lastSeenMs = file.lastModified || 0;
+  try {
+    const parsed = JSON.parse(await file.text()) as { data?: { startedAt?: string; heartbeatAt?: string }; startedAt?: string; heartbeatAt?: string };
+    const lock = parsed?.data ?? parsed;
+    const fromContent = Math.max(Date.parse(lock?.startedAt ?? "") || 0, Date.parse(lock?.heartbeatAt ?? "") || 0);
+    if (fromContent > 0) lastSeenMs = fromContent;
+  } catch {
+    // Unparseable (torn write) or unreadable mid-replace: fall back to the file's own timestamp, uncached.
+    return lastSeenMs;
+  }
+  lockLastSeenByDir.set(eventsDir, { size: file.size, lastModified: file.lastModified, lastSeenMs });
+  return lastSeenMs;
+}
+
+/** True when `_archive-v1/` exists and holds at least one entry. A non-NotFound open error propagates (same rule as entryExists). */
+async function archiveV1HoldsEntries(eventsDir: DirectoryHandleLike): Promise<boolean> {
+  let archive: DirectoryHandleLike;
+  try {
+    archive = await eventsDir.getDirectoryHandle(ANSWER_EVENTS_FOLDERS.archiveV1, { create: false });
+  } catch (error) {
+    if (isNotFoundError(error)) return false;
+    throw error;
+  }
+  const iterable = archive as DirectoryHandleLike & {
+    values?: () => AsyncIterable<unknown>;
+    entries?: () => AsyncIterable<unknown>;
+  };
+  const source = iterable.values?.() ?? iterable.entries?.();
+  if (!source) return true;
+  for await (const entry of source) {
+    void entry;
+    return true;
+  }
+  return false;
 }
 
 export async function getUserDataRoot(

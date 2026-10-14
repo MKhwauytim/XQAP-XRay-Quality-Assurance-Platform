@@ -119,9 +119,7 @@ import {
   buildDefaultColConfig,
   loadLocalColConfig,
   getVisibleReferralColumns,
-  pct,
   isStudyCompleted,
-  isOnHoldEntry,
   REFERRALS_PRESET_KEY,
   XrQueueToolbarExtras,
 } from "./XrayReferrals/subComponents";
@@ -130,6 +128,7 @@ import {
   persistReferralColumnPreset,
   persistReferralSplitRatio,
 } from "./XrayReferrals/columnPreset";
+import { computePersonalStats } from "./XrayReferrals/personalStats";
 import { useCaseFilter } from "./XrayReferrals/caseFilter";
 import { buildAnswerStatusFilter } from "./XrayReferrals/answerStatusFilter";
 import { createQueueSelection } from "./XrayReferrals/queueSelection";
@@ -179,6 +178,9 @@ export type PersonalStats = {
   replaced: number;
   active: number;
   completionPct: number;
+  /** «المنجز اليوم»: rows finished today (local day), by the tracking tab's
+   *  «مكتملة في هذا اليوم» rule — hold excluded. */
+  completedToday: number;
 };
 /** `daysRemaining` is the assignment window in WORKING days (Sun–Thu) since
  *  DERIVE_VERSION 5 (C3) — `EmployeeQuota.daysRemainingAtAssignment`. */
@@ -752,42 +754,6 @@ function createOpenReassignModal(deps: {
       sourceRequestId: `bulk-reassign-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     });
   }
-}
-
-/**
- * The «متابعة العمل» figures, over EXACTLY the rows the queue table shows: the
- * picked scope (everyone, one named employee, or the reader's own rows)
- * narrowed by the active case chip and CertScan chip. It used to read the scope BEFORE the chips
- * (and, for employees, re-filter every row by username), so picking
- * «حالات استثنائية» changed the table but not the strip — field report
- * 2026-09-28. The daily-quota tile is not derived here: it is a property of
- * the whole assignment and stays unfiltered. Module-level so the component
- * body stays inside the repo's `max-lines-per-function` budget.
- */
-function computePersonalStats(input: {
-  source: DistributionEntry[];
-  answersMap: Map<string, ItemAnswer>;
-  template: TemplateSchema | null;
-  templatesById?: ReadonlyMap<string, TemplateSchema>;
-}): PersonalStats {
-  const { source, answersMap, template, templatesById } = input;
-  const onHold = source.filter((entry) => isOnHoldEntry(entry, answersMap, template, templatesById)).length;
-  // isStudyCompleted counts a "لا يوجد صورة" submission as completed too — it
-  // answers "is this row touched/done in a generic sense" for row styling, not
-  // "is this a real completion". Subtracting onHold here is what keeps this
-  // strip's "مكتملة" figure from double-counting them.
-  const submitted = source.filter((entry) => isStudyCompleted(entry, answersMap)).length - onHold;
-  const replaced = source.filter((entry) => entry.status === "replaced").length;
-  const notStarted = Math.max(0, source.length - submitted - onHold - replaced);
-  return {
-    assigned: source.length,
-    submitted,
-    onHold,
-    notStarted,
-    replaced,
-    active: Math.max(0, source.length - replaced),
-    completionPct: pct(submitted, source.length),
-  };
 }
 
 /**

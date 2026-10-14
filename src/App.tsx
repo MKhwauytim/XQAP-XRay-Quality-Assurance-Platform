@@ -20,6 +20,7 @@ import Sidebar from "./components/Sidebar/Sidebar";
 import { logError } from "./data/storage/errorLogger";
 import { BootSplashOverlay } from "./components/Sidebar/BootSplashOverlay";
 import { IntegrityReportDialog } from "./components/IntegrityReportDialog/IntegrityReportDialog";
+import { AnswersLayoutMigrationPrompt } from "./components/AnswersLayoutMigrationPrompt/AnswersLayoutMigrationPrompt";
 import {
   runBootIntegrityScan,
   shouldRunBootIntegrityScan,
@@ -436,6 +437,14 @@ export function AppContent({ session }: AppContentProps) {
           onDismiss={() => setIntegrityReport(null)}
         />
       )}
+      {/* Admin-only offer to migrate months' answers to the per-assignee layout
+          (spec 2026-10-13 §6). Waits while the boot integrity report is open. */}
+      <AnswersLayoutMigrationPrompt
+        session={session}
+        directoryHandle={directoryHandle}
+        workspaceReady={workspaceStatus === "ready"}
+        holdWhile={integrityReport !== null}
+      />
       {(autoBackupNotice || autoBackupRunning) && (
         <div className="app-backup-toast" role="status" dir="rtl">
           <span>{autoBackupRunning ? labels.app_auto_backup_running : autoBackupNotice}</span>

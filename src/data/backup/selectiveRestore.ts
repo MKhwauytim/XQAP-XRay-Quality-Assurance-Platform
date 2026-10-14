@@ -437,6 +437,8 @@ export type SelectiveRestoreOutcome =
       integrity: SelectiveRestoreIntegrity[];
       /** Rebuild steps that failed (the restored data itself is on disk); never empty-by-silence. */
       derivedWarnings: SelectiveRestoreDerivedWarning[];
+      /** Passed through from `RestoreResult`: `{month}/{assigneeFolder}` whose v2 answer snapshot was not rebuilt. */
+      answerSnapshotRebuildFailures?: string[];
     }
   | { ok: false; reason: "plan-rejected"; plan: SelectiveRestorePlan }
   | {
@@ -795,6 +797,7 @@ export async function runSelectiveRestore(params: {
     rollbackFolderName: result.rollbackFolderName,
     integrity,
     derivedWarnings,
+    ...(result.answerSnapshotRebuildFailures?.length ? { answerSnapshotRebuildFailures: result.answerSnapshotRebuildFailures } : {}),
   };
 }
 

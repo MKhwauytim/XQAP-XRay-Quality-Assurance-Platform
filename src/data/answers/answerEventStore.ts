@@ -21,6 +21,7 @@
 // how answers are stored.
 
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { ANSWER_EVENTS_FOLDERS } from "../workspace/workspacePaths";
 import {
   type AppendEventSegmentOptions,
   type AppendOnlyEventLogConfig,
@@ -130,8 +131,8 @@ export const ANSWER_EVENT_SCHEMA_VERSION = 1;
 
 /* ──────────────────────────── storage binding ───────────────────────────── */
 
-/** Child of `2-samples/{month}/` that holds every employee's segments (§3: ONE flat per-month directory). */
-export const ANSWER_EVENTS_DIR = "answers.events";
+/** Child of `2-samples/{month}/1-main/` that holds the answer segments — defined once in workspacePaths. */
+export const ANSWER_EVENTS_DIR = ANSWER_EVENTS_FOLDERS.root;
 export const ANSWER_EVENT_SEGMENT_SUFFIX = ".ndjson";
 
 /**

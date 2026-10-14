@@ -47,6 +47,12 @@ export type FileHandleLike = {
   name: string;
   getFile: () => Promise<File>;
   createWritable?: () => Promise<WritableFileStreamLike>;
+  /**
+   * `FileSystemHandle.move(destination, newName?)` — not available on every
+   * Chromium build / file system. Feature-detect, and verify the result:
+   * `moveFileVerified` falls back to copy → verify → remove.
+   */
+  move?: (destination: DirectoryHandleLike, newName?: string) => Promise<void>;
   queryPermission?: (descriptor?: {
     mode?: FileSystemPermissionMode;
   }) => Promise<FileSystemPermissionState>;

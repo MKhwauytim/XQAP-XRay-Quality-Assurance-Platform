@@ -93,6 +93,8 @@ and path** — keep it in sync. Summary:
   {month}/1-main/   sample.master.json, distribution.events/{eventId}.json (immutable),
                     distribution.log.json (compatibility projection),
                     distribution.current.json (derived cache), main.samples.json
+                    answers.events/ — v2: _layout.json, {assignee}/snapshot.json + live segments
+                    + archive/, _archive-v1/ (v1 originals); v1 months: flat segments
   {month}/…        per-employee sample mirrors, answers, referral/replacement, approvals
 3-user-data/       workspace user/permission files (when initialized via workspace defaults)
 4-reports/         designs/ — Report Designer designs.index.json + {reportId}.json

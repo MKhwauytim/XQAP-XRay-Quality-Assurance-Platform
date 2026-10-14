@@ -16,6 +16,7 @@ const STATS: PersonalStats = {
   replaced: 0,
   active: 40,
   completionPct: 25,
+  completedToday: 2,
 };
 const QUOTA = { dailyQuota: 3, daysRemaining: 19, sampleCount: 40 };
 
@@ -43,6 +44,19 @@ describe("«الحصة اليومية» tile (C3)", () => {
     expect(container.querySelector(".ew-ref-stats-title")?.getAttribute("title")).toBe(
       "لا توجد حصة محفوظة لهذا الشهر",
     );
+  });
+
+  it("shows «المنجز اليوم» with done / daily quota in its title under own scope", () => {
+    render(<ReferralStatsStrip stats={STATS} quota={QUOTA} username="emp-1" />);
+    const tile = screen.getByText("المنجز اليوم").closest(".ew-ref-stat-token");
+    expect(tile?.querySelector("strong")?.textContent).toBe("2");
+    expect(tile?.getAttribute("title")).toBe("المنجز اليوم: 2 / الحصة اليومية: 3");
+  });
+
+  it("does not compare a team «المنجز اليوم» against the reader's own quota", () => {
+    render(<ReferralStatsStrip stats={STATS} quota={QUOTA} username="sup-1" scope="all" />);
+    const tile = screen.getByText("المنجز اليوم").closest(".ew-ref-stat-token");
+    expect(tile?.getAttribute("title")).toBe("المنجز اليوم: 2");
   });
 
   it("reads the tile label from the labels store (admin-overridable)", () => {

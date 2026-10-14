@@ -1,0 +1,15 @@
+/* Technical detail under a failed migration: small, monospace, left-to-right. */
+.answers-migration__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.5rem;
+  font-size: 0.8em;
+  text-align: left;
+  opacity: 0.8;
+}
+
+.answers-migration__detail code {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  overflow-wrap: anywhere;
+}

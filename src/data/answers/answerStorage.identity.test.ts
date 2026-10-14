@@ -15,12 +15,19 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import {
   loadEmployeeAnswers,
   mintAnswerEventIdentity,
-  readAllAnswerEventsForMonth,
   upsertItemAnswer,
 } from "./answerStorage";
 import type { ItemAnswer } from "./answerTypes";
+import type { AnswerEvent } from "./answerEventStore";
+import { readAllAssigneeEvents } from "./v2/assigneeEventReader";
+
 
 const MONTH = "5-may-2026";
+
+/** A new month is layout v2: u1's events live in its own assignee folder (archive + live). */
+async function u1Events(dir: DirectoryHandleLike): Promise<AnswerEvent[]> {
+  return (await readAllAssigneeEvents(dir, MONTH, "u1")).events;
+}
 
 function setup(): DirectoryHandleLike {
   return createMemoryDirectory("root") as unknown as DirectoryHandleLike;
@@ -47,7 +54,7 @@ describe("upsertItemAnswer with a fixed identity", () => {
     expect((await upsertItemAnswer(dir, MONTH, "u1", item, identity)).ok).toBe(true);
     expect((await upsertItemAnswer(dir, MONTH, "u1", item, identity)).ok).toBe(true);
 
-    const events = await readAllAnswerEventsForMonth(dir, MONTH);
+    const events = await u1Events(dir);
     expect(events.filter((e) => e.eventId === identity.eventId)).toHaveLength(1);
     const file = await loadEmployeeAnswers(dir, MONTH, "u1");
     expect(file.items.filter((i) => i.xrayImageId === "IMG-1")).toHaveLength(1);
@@ -60,7 +67,7 @@ describe("upsertItemAnswer with a fixed identity", () => {
     await upsertItemAnswer(dir, MONTH, "u1", item, identity);
     await upsertItemAnswer(dir, MONTH, "u1", item, identity);
 
-    const seeds = (await readAllAnswerEventsForMonth(dir, MONTH)).filter(
+    const seeds = (await u1Events(dir)).filter(
       (e) => e.eventType === "migration-seed"
     );
     expect(seeds.map((s) => s.eventId)).toEqual([`${identity.eventId}-seed`]);
@@ -70,7 +77,7 @@ describe("upsertItemAnswer with a fixed identity", () => {
     const dir = setup();
     const identity = { eventId: "fixed-id", eventAt: "2026-10-13T08:00:00.000Z" };
     await upsertItemAnswer(dir, MONTH, "u1", makeSubmittedItem("IMG-2", "u1", identity.eventAt), identity);
-    const ev = (await readAllAnswerEventsForMonth(dir, MONTH)).find((e) => e.eventId === "fixed-id");
+    const ev = (await u1Events(dir)).find((e) => e.eventId === "fixed-id");
     expect(ev?.eventAt).toBe("2026-10-13T08:00:00.000Z");
   });
 

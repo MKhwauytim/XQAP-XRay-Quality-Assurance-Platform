@@ -29,6 +29,7 @@
  * aggregate) — see selectiveRestore.ts.
  */
 import type { LabelKey } from "../labels/labelsStore";
+import { isDerivedAnswerEventsFile } from "../answers/v2/answerRestoreSupport";
 import { ANSWER_EVENTS_DIR } from "../answers/answerEventStore";
 import { ANSWERS_SUFFIX, REQUESTS_SUFFIX } from "../answers/answerStorage";
 import { DISTRIBUTION_EVENTS_DIR } from "../distribution/distributionEventStore";
@@ -219,7 +220,10 @@ function classifySamplesPath(segments: readonly string[]): BackupPathClass | nul
   const month = segments[1];
   const sub = segments[2];
   if (sub === SAMPLE_SUBFOLDERS.main) {
-    return monthScoped(segments[3] === ANSWER_EVENTS_DIR ? "answers" : "sampleDistribution", month);
+    if (segments[3] !== ANSWER_EVENTS_DIR) return monthScoped("sampleDistribution", month);
+    // Layout v2: per-assignee snapshot.json and the migration lock are derived --
+    // a restore rebuilds the snapshot from the merged segments, never copies it.
+    return monthScoped("answers", month, segments.length > 4 && isDerivedAnswerEventsFile(segments[segments.length - 1]!));
   }
   if (sub === SAMPLE_SUBFOLDERS.employees) {
     return segments.length === 4 ? classifyEmployeeFile(segments[3], month) : null;

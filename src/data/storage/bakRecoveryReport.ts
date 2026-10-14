@@ -68,6 +68,23 @@ export function reportBakRecoveryHealed(fileName: string): void {
 
 const reported = new Set<string>();
 
+/**
+ * Bookkeeping files whose sibling recovery is EXPECTED and must never raise the
+ * user-facing banner (round 7: the answers migration lock is rewritten every
+ * ~30 s on a share that often refuses the replace, so a reader landing on its
+ * `.tmp` is routine, not damage). Still logged durably, once.
+ */
+const quietFileNames = new Set<string>();
+
+export function registerQuietRecoveryFileName(fileName: string): void {
+  quietFileNames.add(fileName);
+}
+
+/** True for a file registered via {@link registerQuietRecoveryFileName}. */
+export function isQuietRecoveryFileName(fileName: string): boolean {
+  return quietFileNames.has(fileName);
+}
+
 /** @internal — test-only. Forget which recoveries have already been reported. */
 export function __resetBakRecoveryReportsForTests(): void {
   reported.clear();
@@ -109,7 +126,7 @@ export function reportBakRecovery(
       { action: fileName }
     );
   }
-  if (typeof window !== "undefined") {
+  if (typeof window !== "undefined" && !quietFileNames.has(fileName)) {
     window.dispatchEvent(
       new CustomEvent("data:recovered-from-bak", { detail: { fileName, source, liveState } })
     );

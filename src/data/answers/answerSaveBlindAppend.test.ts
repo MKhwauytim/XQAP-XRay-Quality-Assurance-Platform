@@ -4,7 +4,7 @@
 // and the append re-reads its OWN target segment under the chain lock anyway.
 // Everything that DOES depend on the read keeps it: the first-ever event (seeding),
 // on-behalf, reopen, quality note, and any save after a cache drop (restore/refresh).
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
 
 import { clearReadLog, createMemoryDirectory, getReadLog } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
@@ -21,6 +21,11 @@ import {
   upsertItemAnswerOnBehalf,
 } from "./answerStorage";
 import type { ItemAnswer } from "./answerTypes";
+import { __pinNewAnswerMonthsToV1ForTests } from "./v2/answerEventsLayout";
+
+/// Pinned to v1 on purpose: this suite tests the v1 FLAT-layout mechanics (flat answers.events/ segments, readAllAnswerEventsForMonth), still live for v1 and v1-migrating months. v2 equivalents: answerV2Fanout.test.ts, v2/*.test.ts.
+beforeEach(() => __pinNewAnswerMonthsToV1ForTests(true));
+afterEach(() => __pinNewAnswerMonthsToV1ForTests(false));
 
 vi.mock("./answerLocalMirror", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./answerLocalMirror")>();

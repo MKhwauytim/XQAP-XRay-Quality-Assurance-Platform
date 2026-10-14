@@ -15,6 +15,7 @@ import {
   DEAD_SEGMENT_MIN_AGE_MS,
   DEAD_SEGMENT_MIN_SCANS,
   clearDeadSegmentRegistry,
+  confirmedDeadNames,
   isConfirmedDead,
   recordUnopenableSegment,
 } from "../storage/deadSegmentRegistry";
@@ -23,6 +24,7 @@ import {
   getPopulationMonthDir,
   getSampleApprovalsDir,
   getSampleEmployeeDir,
+  getAssigneeAnswerEventsDir,
   getSampleMainDir,
   getSystemRoot,
   NOTIFICATIONS_SUBFOLDERS,
@@ -68,6 +70,7 @@ import {
   saveSyncIntervalMs,
   WORKSPACE_SETTINGS_FILE,
 } from "./syncSettings";
+
 
 async function writeRawFile(dir: DirectoryHandleLike, name: string, content: string): Promise<void> {
   const handle: FileHandleLike = await dir.getFileHandle(name, { create: true });
@@ -142,7 +145,7 @@ afterEach(() => {
 });
 
 describe("runSync — dead-segment registry", () => {
-  it("a manual run clears the registry; an automatic run leaves it", async () => {
+  it("a manual run re-opens dead segments once but keeps their evidence; an automatic run leaves it", async () => {
     const root = makeRoot();
     const now = Date.now();
     const seed = (): void => {
@@ -156,8 +159,13 @@ describe("runSync — dead-segment registry", () => {
       seed();
       await runSync({ directoryHandle: root, monthFolderName: MONTH });
       expect(isConfirmedDead("scope-x", "gone.ndjson", now)).toBe(true);
+      expect(confirmedDeadNames("scope-x", now)).toEqual(new Set(["gone.ndjson"]));
       await runSync({ directoryHandle: root, monthFolderName: MONTH, manual: true });
-      expect(isConfirmedDead("scope-x", "gone.ndjson", now)).toBe(false);
+      // Evidence survives (clearing it restarted the 5-minute window on every refresh)...
+      expect(isConfirmedDead("scope-x", "gone.ndjson", now)).toBe(true);
+      // ...but the next scan of the scope re-opens the name once.
+      expect(confirmedDeadNames("scope-x", now)).toEqual(new Set());
+      expect(confirmedDeadNames("scope-x", now)).toEqual(new Set(["gone.ndjson"]));
     } finally {
       clearDeadSegmentRegistry();
     }
@@ -1557,12 +1565,22 @@ describe("runSync — this session's own answer appends do not report the answer
     const own = await runSync({ directoryHandle: root, monthFolderName: MONTH });
     expect(own.changed.has("answers")).toBe(false);
 
-    const main = await getSampleMainDir(root, MONTH, true);
-    const eventsDir = await main.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: true });
+    // A new month is layout v2: another EMPLOYEE's segment lands in its own
+    // assignee folder, which an employee session never probes (employee scope).
+    const emp2Dir = await getAssigneeAnswerEventsDir(root, MONTH, "emp2", true);
     await writeRawFile(
-      eventsDir,
+      emp2Dir,
       "zz-ans-otherdev-s9.ndjson",
       `${JSON.stringify({ eventId: "other-1", eventType: "item-saved", eventAt: "2026-05-01T08:00:00.000Z", eventBy: "emp2", authority: "self", xrayImageId: "XR-9", answers: [], status: "draft", answeredBy: "emp2" })}\n`
+    );
+    expect((await runSync({ directoryHandle: root, monthFolderName: MONTH })).changed.has("answers")).toBe(false);
+
+    // A supervisor's on-behalf segment in MY folder is another writer's change and is reported.
+    const emp1Dir = await getAssigneeAnswerEventsDir(root, MONTH, "emp1", true);
+    await writeRawFile(
+      emp1Dir,
+      "zz-ans-supdev-s9.ndjson",
+      `${JSON.stringify({ eventId: "other-2", eventType: "item-saved", eventAt: "2026-05-01T08:00:00.000Z", eventBy: "sup1", authority: "on-behalf", xrayImageId: "XR-9", answers: [], status: "draft", answeredBy: "emp1" })}\n`
     );
     const epochBefore = getSealedAnswerSegmentsEpoch();
     const other = await runSync({ directoryHandle: root, monthFolderName: MONTH });
@@ -1627,8 +1645,8 @@ describe("runSync — this session's own answer appends do not report the answer
   it("a rotation of this user's stable chain from an earlier page load is excluded too", async () => {
     const root = makeRoot();
     expect((await upsertItemAnswer(root, MONTH, "emp1", answer("XR-1"))).ok).toBe(true);
-    const main = await getSampleMainDir(root, MONTH, true);
-    const eventsDir = await main.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: true });
+    // Layout v2: this user's chain lives in its own assignee folder.
+    const eventsDir = await getAssigneeAnswerEventsDir(root, MONTH, "emp1", true);
     const names: string[] = [];
     for await (const handle of (eventsDir as unknown as { values(): AsyncIterable<{ name: string }> }).values()) names.push(handle.name);
     const seq0 = names.find((n) => n.endsWith(".ndjson"))!;

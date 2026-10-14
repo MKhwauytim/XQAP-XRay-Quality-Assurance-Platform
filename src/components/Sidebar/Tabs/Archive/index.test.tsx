@@ -38,6 +38,9 @@ import type { AuthRole } from "../../../../auth/authTypes";
 import { createMemoryDirectory } from "../../../../data/storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
 import { getLabels } from "../../../../data/labels/labelsStore";
+import { fillTemplate } from "../../../../data/backup/restoreMessages";
+import { formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
+import { formatNumber } from "../../../../utils/formatting";
 import type {
   AutoBackupSettings,
   BackupHistoryItem,
@@ -490,6 +493,51 @@ describe("Archive restore — cross-tab cache invalidation", () => {
     await waitFor(() => {
       expect(vi.mocked(broadcastDataRefresh)).toHaveBeenCalledWith("manual");
     });
+  });
+});
+
+describe("Archive restore — answer snapshot rebuild failures (v154.0)", () => {
+  it("shows a warning naming every assignee whose v2 snapshot could not be rebuilt", async () => {
+    const historyItem = makeHistoryItem({ folderName: "2026-06-01T08-00-00-manual-ok" });
+    vi.mocked(loadBackupHistory).mockResolvedValue([historyItem]);
+    vi.mocked(restoreBackupSnapshot).mockResolvedValue({
+      ok: true,
+      restoredFiles: ["x"],
+      rollbackFolderName: "rollback-1",
+      answerSnapshotRebuildFailures: ["5-may-2026/emp1", "5-may-2026/emp2"],
+    });
+    loginAs("admin");
+
+    renderArchiveTab();
+    fireEvent.click(await screen.findByRole("button", { name: "استعادة" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("checkbox"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "متابعة التحقق" }));
+    fireEvent.change(within(dialog).getByPlaceholderText(historyItem.folderName), { target: { value: historyItem.folderName } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "استعادة الآن" }));
+
+    const month = formatMonthFolderShortLabel("5-may-2026");
+    const list = ["emp1", "emp2"].map((assignee) => fillTemplate(L.archive_restore_snapshot_rebuild_item, { assignee, month })).join("، ");
+    const expected = fillTemplate(L.archive_restore_snapshot_rebuild_warning, { count: formatNumber(2), list });
+    const status = await screen.findByText((_, element) => element?.getAttribute("role") === "status" && (element.textContent ?? "").includes(expected));
+    expect(status.className).toBe("arc-msg-warn");
+  });
+
+  it("stays a plain success when every snapshot rebuilt", async () => {
+    const historyItem = makeHistoryItem({ folderName: "2026-06-01T08-00-00-manual-ok" });
+    vi.mocked(loadBackupHistory).mockResolvedValue([historyItem]);
+    loginAs("admin");
+
+    renderArchiveTab();
+    fireEvent.click(await screen.findByRole("button", { name: "استعادة" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("checkbox"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "متابعة التحقق" }));
+    fireEvent.change(within(dialog).getByPlaceholderText(historyItem.folderName), { target: { value: historyItem.folderName } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "استعادة الآن" }));
+
+    await waitFor(() => expect(document.querySelector(".arc-msg-ok")).not.toBeNull());
+    expect(document.body.textContent).not.toContain(L.archive_restore_snapshot_rebuild_warning.slice(0, 10));
   });
 });
 

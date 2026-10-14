@@ -1546,6 +1546,32 @@ export type VerifiedCopyOutcome =
   | { status: "verify_failed"; detail: string };
 
 /**
+ * Byte digest of a file this call JUST wrote and closed, from a fresh
+ * `getFile()`. v154.0 round 6: on the share the first `File` handed out after
+ * our own commit can carry a stale (size, mtime) snapshot, and touching its
+ * bytes throws Chrome's `InvalidStateError`. Re-copying would only commit
+ * again (and re-stale the snapshot), so the cure is to re-open on the
+ * SNAPSHOT_STALE ladder, rethrowing only once it is spent.
+ */
+async function digestFreshFile(dir: DirectoryHandleLike, name: string): Promise<{ size: number; digest: string } | null> {
+  for (let stale = 0; ; stale += 1) {
+    try {
+      const file = await openFile(dir, name, { retryMissing: true });
+      if (file === null) return null;
+      const digest = createByteDigest();
+      for (let offset = 0; offset < file.size; offset += BYTE_COPY_SLICE_BYTES) {
+        const end = Math.min(offset + BYTE_COPY_SLICE_BYTES, file.size);
+        digest.update(new Uint8Array(await file.slice(offset, end).arrayBuffer()));
+      }
+      return { size: file.size, digest: digest.digest() };
+    } catch (error) {
+      if (!isSnapshotStaleError(error) || stale >= SNAPSHOT_STALE_RETRY_DELAYS_MS.length) throw error;
+      await wait(SNAPSHOT_STALE_RETRY_DELAYS_MS[stale]!);
+    }
+  }
+}
+
+/**
  * Byte-for-byte copy that then PROVES the copy is what was written.
  *
  * Two properties this has and {@link copyFileBytes} does not:
@@ -1621,7 +1647,7 @@ export async function copyFileBytesVerified(
       // `retryMissing`: the file provably exists — this call just wrote and
       // closed it — so a NotFoundError here is a lagging SMB directory
       // listing, not an absence.
-      const copy = await openFile(targetDir, targetName, { retryMissing: true });
+      const copy = await digestFreshFile(targetDir, targetName);
       if (copy === null) {
         return {
           status: "verify_failed" as const,
@@ -1634,12 +1660,7 @@ export async function copyFileBytesVerified(
           detail: `حجم النسخة ${copy.size} بايت بدل ${bytesRead} بايت (${targetName}).`,
         };
       }
-      const copyDigest = createByteDigest();
-      for (let offset = 0; offset < copy.size; offset += BYTE_COPY_SLICE_BYTES) {
-        const end = Math.min(offset + BYTE_COPY_SLICE_BYTES, copy.size);
-        copyDigest.update(new Uint8Array(await copy.slice(offset, end).arrayBuffer()));
-      }
-      if (copyDigest.digest() !== sourceDigest.digest()) {
+      if (copy.digest !== sourceDigest.digest()) {
         return {
           status: "verify_failed" as const,
           detail: `محتوى النسخة لا يطابق المصدر (${targetName}).`,

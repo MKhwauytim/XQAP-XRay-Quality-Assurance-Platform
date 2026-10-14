@@ -36,6 +36,7 @@ import { DEFAULT_LABELS } from "../../../../../data/labels/labelsStore";
 import { broadcastDataRefresh, type DataRefreshFamily } from "../../../../../data/workspace/dataRefreshSignal";
 import XrayInspectionResults from "./XrayInspectionResults";
 
+
 const MONTH = "5-may-2026";
 
 vi.mock("../../../../../data/month/useGlobalMonth", () => ({

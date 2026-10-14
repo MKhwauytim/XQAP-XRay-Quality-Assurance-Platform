@@ -8,6 +8,8 @@ import { getSampleMainDir } from "../workspace/workspacePaths";
 import { ANSWER_EVENTS_DIR } from "./answerEventStore";
 import { __clearAnswerEventsCacheForTests, upsertItemAnswer } from "./answerStorage";
 import type { ItemAnswer } from "./answerTypes";
+import { makeV2Month, writeAssigneeSegment, seedEvent as v2Seed, savedEvent } from "./v2/v2TestFixtures";
+import { __clearWorkspaceDirCacheForTests, invalidateAnswerEventsLayout } from "../workspace/workspacePaths";
 
 const hooks = vi.hoisted(() => ({ failAppend: false, appendCalls: 0 }));
 vi.mock("./answerEventStore", async (importOriginal) => {
@@ -94,4 +96,31 @@ describe("answer save — read cost on a month with 20 segments (S2)", () => {
     // the month and re-opened the open segments); now one attempt, 22 reads.
     expect(getReadLog(root).length).toBe(22);
   }, 60_000);
+});
+
+describe("answer save — read cost on a v2 month (spec §10)", () => {
+  beforeEach(() => {
+    __clearAnswerEventsCacheForTests();
+    __clearWorkspaceDirCacheForTests();
+    invalidateAnswerEventsLayout();
+    hooks.failAppend = false;
+    hooks.appendCalls = 0;
+  });
+
+  it("cold save opens only the saver's own folder; warm save ≤ 3 reads", async () => {
+    const root = createMemoryDirectory("cost-v2", { trackReads: true }) as unknown as DirectoryHandleLike;
+    await makeV2Month(root, MONTH);
+    for (let other = 0; other < 4; other += 1) {
+      for (let seq = 0; seq < 5; seq += 1) {
+        const assignee = `other${other}`;
+        await writeAssigneeSegment(root, assignee, `ans-dev0000${other}-abcde${other}${seq ? `-${seq}` : ""}.ndjson`, seq === 0 ? [v2Seed(assignee)] : [savedEvent(`${assignee}-${seq}`, seq, {}, assignee)], MONTH);
+      }
+    }
+    clearReadLog(root);
+    expect((await upsertItemAnswer(root, MONTH, "emp1", item("A"))).ok).toBe(true);
+    expect(getReadLog(root).filter((path) => path.includes("/other"))).toEqual([]);
+    clearReadLog(root);
+    expect((await upsertItemAnswer(root, MONTH, "emp1", item("B"))).ok).toBe(true);
+    expect(getReadLog(root).length).toBeLessThanOrEqual(3);
+  });
 });

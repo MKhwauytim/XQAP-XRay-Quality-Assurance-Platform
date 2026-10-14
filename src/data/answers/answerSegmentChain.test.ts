@@ -1,5 +1,5 @@
 /* @vitest-environment jsdom */
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, afterEach } from "vitest";
 
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
@@ -16,6 +16,11 @@ import {
   stableAnswerChainSegmentName,
 } from "./answerSegmentChain";
 import type { ItemAnswer } from "./answerTypes";
+import { __pinNewAnswerMonthsToV1ForTests } from "./v2/answerEventsLayout";
+
+/// Pinned to v1 on purpose: this suite tests the v1 FLAT-layout mechanics (flat answers.events/ segments, readAllAnswerEventsForMonth), still live for v1 and v1-migrating months. v2 equivalents: answerV2Fanout.test.ts, v2/*.test.ts.
+beforeEach(() => __pinNewAnswerMonthsToV1ForTests(true));
+afterEach(() => __pinNewAnswerMonthsToV1ForTests(false));
 
 const MONTH = "5-May-2026";
 

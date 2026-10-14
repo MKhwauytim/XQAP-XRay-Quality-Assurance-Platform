@@ -30,6 +30,7 @@ import {
   renderXrayReferrals,
 } from "./XrayReferrals.testSupport";
 
+
 vi.mock("../../../../../data/month/useGlobalMonth", () => ({
   useGlobalMonth: () => ({
     months: [{ month: 5, year: 2026, folderName: XRAY_REFERRALS_TEST_MONTH }],

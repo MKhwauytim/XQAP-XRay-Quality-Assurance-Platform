@@ -798,7 +798,15 @@ export function ReferralStatsStrip({
           "{filter}",
           certScan === "certscan" ? L.certscan_filter_certscan : L.certscan_filter_noncertscan
         );
-  const statsItems = [
+  const doneToday = stats.completedToday.toLocaleString("ar-SA-u-nu-latn");
+  // Compared against the quota only when both describe the reader: a team or
+  // other-employee count over the reader's own quota would be meaningless.
+  const doneTodayTitle = quota && !isForeignScope
+    ? L.ew_done_today_tile_title
+        .replace("{done}", doneToday)
+        .replace("{daily}", quota.dailyQuota.toLocaleString("ar-SA-u-nu-latn"))
+    : L.ew_done_today_tile_title_plain.replace("{done}", doneToday);
+  const statsItems: { label: string; value: string; tone: string; title?: string }[] = [
     // The daily quota is always the CURRENT user's own frozen quota, never a
     // workspace aggregate, so it is disambiguated rather than relabelled when
     // the surrounding figures switch to workspace scope.
@@ -807,6 +815,7 @@ export function ReferralStatsStrip({
       value: quota ? quota.dailyQuota.toLocaleString("ar-SA-u-nu-latn") : "—",
       tone: "quota",
     },
+    { label: L.ew_done_today_tile_label, value: doneToday, tone: "done", title: doneTodayTitle },
     { label: "الإجمالي", value: stats.assigned.toLocaleString("ar-SA-u-nu-latn"), tone: "total" },
     { label: "مكتملة", value: stats.submitted.toLocaleString("ar-SA-u-nu-latn"), tone: "done" },
     { label: "معلقة", value: stats.onHold.toLocaleString("ar-SA-u-nu-latn"), tone: "hold" },
@@ -843,7 +852,7 @@ export function ReferralStatsStrip({
 
       <div className="ew-ref-stats-inline">
         {statsItems.map((item) => (
-          <span key={item.label} className={`ew-ref-stat-token ew-ref-stat-token--${item.tone}`}>
+          <span key={item.label} className={`ew-ref-stat-token ew-ref-stat-token--${item.tone}`} title={item.title}>
             <em>{item.label}</em>
             <strong>{item.value}</strong>
           </span>

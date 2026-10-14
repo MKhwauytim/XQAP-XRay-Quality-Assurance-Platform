@@ -108,6 +108,15 @@ export const STORAGE_REGISTRY: readonly StorageEntry[] = [
     lossConsequence: "After a reload the queue opens its first sample instead. No data at risk.",
   },
   {
+    id: "xray_dead_segments_v1:",
+    layer: "session",
+    prefix: true,
+    purpose:
+      "Per directory scope (suffix = workspace-relative events folder path): evidence of answer/distribution segment files that are listed but cannot be opened (failure count, first/last failure time), for this tab, so a reload or manual refresh does not restart the 5-minute window before the pending-answer replay may skip them (deadSegmentRegistry.ts).",
+    lossConsequence:
+      "The 5-minute dead-segment window restarts; a strict replay blocked by an unopenable colleague segment waits that long again. No data at risk.",
+  },
+  {
     id: "xray_error_log_v1",
     layer: "local",
     purpose:

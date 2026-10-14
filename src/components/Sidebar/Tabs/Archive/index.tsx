@@ -45,7 +45,7 @@ import "./Archive.css";
 import type { RestoreScope } from "../../../../data/backup/restoreScope";
 import { runSelectiveRestore } from "../../../../data/backup/selectiveRestore";
 import SelectiveRestorePanel, { type SelectiveRestoreSelection } from "./SelectiveRestorePanel";
-import { describeSelectiveRestoreSuccess, fillTemplate } from "./selectiveRestoreText";
+import { describeSelectiveRestoreSuccess, describeSnapshotRebuildFailures, fillTemplate } from "./selectiveRestoreText";
 import {
   describeDerivedWarning,
   describeRestoreFailure,
@@ -326,6 +326,8 @@ export default function ArchiveTab() {
       integrity: outcome.integrity,
     });
     const derived = outcome.derivedWarnings.map((warning) => describeDerivedWarning(getLabels(), warning));
+    const snapshotWarning = describeSnapshotRebuildFailures(getLabels(), outcome.answerSnapshotRebuildFailures);
+    if (snapshotWarning) derived.push(snapshotWarning);
     setMessage({
       type: derived.length > 0 || integrityNeedsAttention(outcome.integrity) ? "warn" : "ok",
       text: [success, ...derived].join(" "),
@@ -365,9 +367,12 @@ export default function ArchiveTab() {
         });
         setRestoreTarget(null);
         setJustRestored(true);
+        // v154.0: segments restored but a v2 answer snapshot was not rebuilt -- name who, never a silent success.
+        const snapshotWarning = describeSnapshotRebuildFailures(getLabels(), result.answerSnapshotRebuildFailures);
+        const done = `تمت الاستعادة من ${folderName}. تم إنشاء نسخة رجوع قبل الاستعادة: ${result.rollbackFolderName}`;
         setMessage({
-          type: "ok",
-          text: `تمت الاستعادة من ${folderName}. تم إنشاء نسخة رجوع قبل الاستعادة: ${result.rollbackFolderName}`,
+          type: snapshotWarning ? "warn" : "ok",
+          text: snapshotWarning ? `${done} ${snapshotWarning}` : done,
         });
         await refresh();
         // A restore overwrites live months directly on disk, bypassing every

@@ -341,6 +341,34 @@ describe("Archive restore dialog — selective mode (Workstream D)", () => {
     expect(within(dialog).getByRole("button", { name: "متابعة التحقق" })).toBeDisabled();
   });
 
+  it("lists the assignees whose answer snapshot could not be rebuilt after a selective restore", async () => {
+    vi.mocked(runSelectiveRestore).mockResolvedValue({
+      ok: true,
+      restoredFiles: ["a"],
+      rollbackFolderName: "rollback-1",
+      integrity: [],
+      derivedWarnings: [],
+      answerSnapshotRebuildFailures: [`${M1}/emp7`],
+    });
+    const dialog = await openSelectiveDialog();
+    pickPopulationForM1(dialog);
+    await within(dialog).findByText(
+      fillTemplate(L.archive_restore_preview_row, { element: L.restore_element_population, month: M1_LABEL, count: formatNumber(3) })
+    );
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: /أفهم أن الاستعادة/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "متابعة التحقق" }));
+    fireEvent.change(within(dialog).getByPlaceholderText(FOLDER), { target: { value: FOLDER } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "استعادة الآن" }));
+
+    const list = fillTemplate(L.archive_restore_snapshot_rebuild_item, { assignee: "emp7", month: M1_LABEL });
+    await waitFor(() => {
+      expect(document.body.textContent).toContain(
+        fillTemplate(L.archive_restore_snapshot_rebuild_warning, { count: formatNumber(1), list })
+      );
+    });
+    expect(document.querySelector(".arc-msg-warn")).not.toBeNull();
+  });
+
   it("reports rebuild steps that failed as a warning, not as a clean success", async () => {
     vi.mocked(runSelectiveRestore).mockResolvedValue({
       ok: true,

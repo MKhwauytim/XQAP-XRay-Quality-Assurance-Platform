@@ -68,7 +68,7 @@ import { useGlobalMonth } from "../../../../../data/month/useGlobalMonth";
 import { formatStageLabel } from "../../../../../data/population/stageHelpers";
 import { certScanStatusFilterProps } from "./certScanColumn";
 import ResultsTracking from "./ResultsTracking/ResultsTracking";
-import { classifyAnswerState, type TrackingRow } from "../../../../../data/tracking/deadlineTracking";
+import { classifyAnswerState, trackingDoneAt, type TrackingRow } from "../../../../../data/tracking/deadlineTracking";
 import type { StageAliasMappings } from "../../../../../data/population/populationConfig";
 import { useWorkspaceStageMappings } from "../../../../../hooks/useWorkspaceStageMappings";
 import { useTabActive } from "../../../../../app/tabActiveContext";
@@ -593,7 +593,7 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
       out.push({
         assignedTo: row.entry.assignedTo,
         state,
-        doneAt: state === "pending" ? null : row.answer?.submittedAt ?? row.entry.lastEventAt ?? null,
+        doneAt: trackingDoneAt(state, row.answer, row.entry.lastEventAt),
       });
     }
     return out;

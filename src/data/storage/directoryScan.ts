@@ -16,6 +16,8 @@ import {
   TRANSIENT_WRITE_RETRY_DELAYS_MS,
   isNotFoundError,
   isNotReadableError,
+  isSnapshotStaleError,
+  SNAPSHOT_STALE_RETRY_DELAYS_MS,
   waitFor,
 } from "./transientFileErrors";
 
@@ -411,11 +413,25 @@ async function readListedEntry<T>(
   budget: VanishRetryBudget | null
 ): Promise<T | null> {
   let handle = entry.handle;
+  let staleRetries = 0;
   for (let attempt = 0; ; attempt += 1) {
     try {
       handle ??= await dir.getFileHandle(entry.name, { create: false });
       return await read(await handle.getFile());
     } catch (error) {
+      // v154.0 round 6: Chrome's stale-snapshot InvalidStateError (the File's
+      // cached (size, mtime) no longer matches disk — on the share, typically
+      // right after a write of this same name). A FRESH getFile() is the cure,
+      // so re-open by name on its own short ladder. Not charged to the vanish
+      // budget and never resolved to null: exhausted, it still throws, because
+      // the file exists and a strict caller must not fold it as "no events".
+      if (isSnapshotStaleError(error)) {
+        if (staleRetries >= SNAPSHOT_STALE_RETRY_DELAYS_MS.length) throw error;
+        handle = null;
+        await waitFor(SNAPSHOT_STALE_RETRY_DELAYS_MS[staleRetries++]!);
+        attempt -= 1;
+        continue;
+      }
       if (!isNotFoundError(error) && !isNotReadableError(error)) throw error;
       const canRetry =
         budget !== null &&
@@ -770,6 +786,31 @@ export async function boundedSizeSignature(
   return JSON.stringify([names, sized]);
 }
 
+/**
+ * Like `boundedSizeSignature(..., headsOnly)` but signs ONLY the chain heads
+ * (names and sizes). Sealed segments are left out entirely, so moving them
+ * elsewhere (answers compaction archives only non-head segments) never changes
+ * the signature, while any append (which grows or rotates a head) does.
+ */
+export async function chainHeadsSizeSignature(
+  dir: DirectoryHandleLike,
+  suffix: string,
+  maxStats: number,
+  exclude?: (name: string) => boolean
+): Promise<string> {
+  const listed = await listMatchingFileEntries(dir, suffix);
+  const matched = exclude ? listed.filter((entry) => !exclude(entry.name)) : listed;
+  const sealed = namesWithHigherSibling(matched.map((entry) => entry.name), suffix);
+  const heads = matched.filter((entry) => !sealed.has(entry.name));
+  const probed = heads.slice(Math.max(0, heads.length - Math.max(0, maxStats)));
+  const sizes: (number | null)[] = new Array(probed.length).fill(null);
+  await forEachBounded(probed.length, DIRECTORY_READ_CONCURRENCY, async (index) => {
+    sizes[index] = await readListedEntry(dir, probed[index]!, async (file) => file.size, null);
+  });
+  const sized = probed.flatMap((entry, index) => (sizes[index] === null ? [] : [[entry.name, sizes[index]] as const]));
+  return JSON.stringify([heads.map((entry) => entry.name), sized]);
+}
+
 export type SegmentTailOptions = {
   suffix: string;
   /** Byte offset already consumed per file name; a name missing from this map defaults to 0 (read from the start). */
@@ -899,6 +940,10 @@ export async function readSegmentTails(
   const matchedNames = matched.map((entry) => entry.name);
   // Confirmed-dead segments are neither opened nor charged against the vanish budget.
   const dead = options.scopeKey ? confirmedDeadNames(options.scopeKey) : new Set<string>();
+  const scopeKey = options.scopeKey;
+  const recheckedDead = new Set(
+    scopeKey ? matchedNames.filter((name) => !dead.has(name) && isConfirmedDead(scopeKey, name)) : []
+  );
   // A name that crossed the age gate BETWEEN scans is already dead here, so it
   // is never opened and never reaches `vanished`: report it now (once).
   if (options.scopeKey && dead.size > 0) {
@@ -984,7 +1029,10 @@ export async function readSegmentTails(
 
   logVanishedEntries("directoryScan:segment-tails", dir, vanished, options.scopeKey);
 
-  return { tailTextByName, sizeByName, matchedNames, sealedConfirmedNames, deadNames: dead };
+  // A recheck scan (see requestDeadSegmentRecheck) opened names that were already
+  // confirmed dead before it; one that failed again is still dead, reported as such.
+  const deadNames = recheckedDead.size > 0 ? new Set([...dead, ...vanished.filter((name) => recheckedDead.has(name))]) : dead;
+  return { tailTextByName, sizeByName, matchedNames, sealedConfirmedNames, deadNames };
 }
 
 // Module-init side effect: purge the whole cache on manual refresh
