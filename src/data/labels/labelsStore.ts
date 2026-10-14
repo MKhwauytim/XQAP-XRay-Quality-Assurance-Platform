@@ -380,6 +380,9 @@ export const DEFAULT_LABELS = {
   ew_quota_tile_label_mine:        "الحصة اليومية (لي)",
   ew_quota_tile_title:             "الحصة اليومية: {daily} صورة / يوم · الحصة: {total} · أيام العمل (الأحد–الخميس): {days}",
   ew_quota_tile_title_none:        "لا توجد حصة محفوظة لهذا الشهر",
+  ew_done_today_tile_label:        "المنجز اليوم",
+  ew_done_today_tile_title:        "المنجز اليوم: {done} / الحصة اليومية: {daily}",
+  ew_done_today_tile_title_plain:  "المنجز اليوم: {done}",
 
   // ── Answering on another employee's behalf (`answer-on-behalf`) ───────────
   // The inspection panel used to be flatly read-only on anyone else's row. It

@@ -115,7 +115,7 @@ describe("ReferralWorkspaceShell — empty notice and stats title follow the Cer
   function renderShell(certScan: CaseFilterState["certScan"]) {
     render(
       <ReferralWorkspaceShell
-        stats={{ assigned: 0, submitted: 0, onHold: 0, notStarted: 0, replaced: 0, active: 0 } as never}
+        stats={{ assigned: 0, submitted: 0, onHold: 0, notStarted: 0, replaced: 0, active: 0, completedToday: 0 } as never}
         quota={null}
         username="emp-1"
         scope="own"

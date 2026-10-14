@@ -45,6 +45,38 @@ export type TrackingRow = {
   doneAt: string | null;
 };
 
+/**
+ * The one copy of "when was this row finished": the answer's `submittedAt`,
+ * else the entry's last event (a supervisor completion has no answer stamp).
+ * Shared by the tracking tab and the queue stats strip's «المنجز اليوم».
+ */
+export function trackingDoneAt(
+  state: Exclude<AnswerState, "replaced">,
+  answer: ItemAnswer | null | undefined,
+  entryLastEventAt: string | null | undefined,
+): string | null {
+  if (state === "pending") return null;
+  return answer?.submittedAt ?? entryLastEventAt ?? null;
+}
+
+/**
+ * «مكتملة في هذا اليوم» for one local calendar day: rows in state "completed"
+ * (hold excluded, as in `dayTotals`) whose `doneAt` falls on `day`'s local date.
+ */
+export function countCompletedOnDay(
+  rows: readonly Pick<TrackingRow, "state" | "doneAt">[],
+  day: Date,
+): number {
+  let n = 0;
+  for (const row of rows) {
+    if (row.state !== "completed" || !row.doneAt) continue;
+    const d = new Date(row.doneAt);
+    if (Number.isNaN(d.getTime())) continue;
+    if (d.getFullYear() === day.getFullYear() && d.getMonth() === day.getMonth() && d.getDate() === day.getDate()) n += 1;
+  }
+  return n;
+}
+
 export type DayCount = { completed: number; hold: number };
 
 export type EmployeeTracking = {
