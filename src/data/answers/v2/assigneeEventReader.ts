@@ -232,3 +232,43 @@ export async function listAssigneeFolders(root: DirectoryHandleLike, month: stri
     .map((entry) => entry.name)
     .sort();
 }
+
+/**
+ * The username an assignee folder belongs to, for a folder no `2-employees/`
+ * stem accounts for (Task 10 fan-out). A folder name the sanitizer left intact
+ * IS the canonical username; a hash-suffixed one (review finding 9) is not
+ * invertible, so the owner is read from the folder's own content — the
+ * snapshot's `assignee`, else the first event's `answeredBy` — and accepted only
+ * when it maps back to exactly this folder. Null when nothing names an owner.
+ */
+export async function resolveAssigneeFolderOwner(
+  root: DirectoryHandleLike,
+  month: string,
+  folder: string,
+  options: { strict?: boolean; tolerateConfirmedDead?: boolean } = {}
+): Promise<string | null> {
+  const mapsHere = (candidate: string | undefined): candidate is string => {
+    if (!candidate || candidate.trim() === "") return false;
+    try {
+      return answerAssigneeFolderName(candidate) === folder;
+    } catch {
+      return false;
+    }
+  };
+  if (mapsHere(folder)) return folder;
+  const eventsDir = await getAnswerEventsDir(root, month, false);
+  const folderDir = await eventsDir.getDirectoryHandle(folder, { create: false });
+  try {
+    const snap = await readAnswerSnapshot(folderDir);
+    if (snap.kind !== "absent" && mapsHere(snap.snapshot.assignee)) return snap.snapshot.assignee;
+  } catch (error) {
+    if (!(error instanceof AnswerSnapshotCorruptError)) throw error;
+  }
+  const config = { ...ANSWER_EVENT_LOG, eventsDirName: folder };
+  const [live, archive] = await Promise.all([
+    readAnswerEventDelta(eventsDir, {}, config, options),
+    readAnswerEventDelta(folderDir, {}, assigneeArchiveConfig(), options),
+  ]);
+  for (const event of [...live.events, ...archive.events]) if (mapsHere(event.answeredBy)) return event.answeredBy!;
+  return null;
+}

@@ -10,6 +10,8 @@ import {
   type AnswerEvent,
 } from "../answers/answerEventStore";
 import type { ItemAnswer } from "../answers/answerTypes";
+import { readAllAssigneeEvents } from "../answers/v2/assigneeEventReader";
+import { getAnswerEventsLayout } from "../workspace/workspacePaths";
 import {
   ADMIN_EDIT_DISTRIBUTION_EVENT_TYPES,
   loadDistributionLog,
@@ -62,8 +64,11 @@ export async function loadAnswerActionHistory(
   xrayImageId: string
 ): Promise<ActionHistorySnapshot<ItemAnswer | null>[]> {
   try {
-    const allEvents = await readAllAnswerEventsForMonth(directoryHandle, monthFolderName);
-    const ownEvents = eventsForEmployee(allEvents, username);
+    // v2: the assignee's own folder, archive/ included (compaction moves folded
+    // segments there, never deletes them), so the trail stays complete.
+    const ownEvents = (await getAnswerEventsLayout(directoryHandle, monthFolderName)) === "v2"
+      ? (await readAllAssigneeEvents(directoryHandle, monthFolderName, username)).events
+      : eventsForEmployee(await readAllAnswerEventsForMonth(directoryHandle, monthFolderName), username);
     // `migration-seed` carries no xrayImageId and seeds the fold for every
     // item, so it must stay in the input even though it is not itself a
     // change to THIS item (and so is not emitted as a history entry below).

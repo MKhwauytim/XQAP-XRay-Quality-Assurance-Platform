@@ -46,7 +46,7 @@ import {
 } from "./answerSealedSegments";
 import { logCodedError, tagErrorOnce, type ErrorCode } from "../storage/errorCodes";
 import { createSimpleHasher } from "../storage/jsonEnvelope";
-import { listDirectoryEntries } from "../storage/directoryScan";
+import { DIRECTORY_READ_CONCURRENCY, listDirectoryEntries } from "../storage/directoryScan";
 import { isNotFoundError, isSnapshotStaleError, writeStepOf } from "../storage/transientFileErrors";
 import { ensureMonthWritable } from "../population/monthLock";
 import { bumpWorkspaceEpoch, workspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
@@ -68,7 +68,8 @@ import {
 } from "./answerEventStore";
 import type { EmployeeAnswerFile, ItemAnswer } from "./answerTypes";
 import type { ReferralRequest, ReopenRequest, ReplacementRequest } from "../referral/referralTypes";
-import { isV1OffsetKey, v1OffsetKey } from "./v2/answerSnapshot";
+import { foldSnapshotPlusDelta, isV1OffsetKey, v1OffsetKey, type AnswerSnapshot } from "./v2/answerSnapshot";
+import type { SnapshotStat } from "./v2/answerSnapshotStore";
 import {
   ANSWER_EVENTS_FOLDERS,
   answerAssigneeFolderName,
@@ -82,7 +83,13 @@ import {
 } from "../workspace/workspacePaths";
 import { getLabels } from "../labels/labelsStore";
 import { timeAnswerStep } from "./answerTimings";
-import { readAssigneeState, type AssigneeReadOptions } from "./v2/assigneeEventReader";
+import {
+  listAssigneeFolders,
+  readAssigneeState,
+  resolveAssigneeFolderOwner,
+  type AssigneeReadOptions,
+  type AssigneeReadResult,
+} from "./v2/assigneeEventReader";
 import { maybeScheduleCompaction } from "./compaction/compactAssignee";
 import { ensureAnswerEventsLayoutForWrite } from "./v2/answerEventsLayout";
 import { markAnswerPendingLocally, mirrorAnswerLocally, queueAnswerForLanding } from "./answerLocalMirror";
@@ -319,6 +326,25 @@ type AnswerEventsCacheEntry = {
   sealedNamesGen?: number;
   /** Names the last SUCCESSFUL listing showed: the writer's floor (`listedSegmentNames`). */
   listedSegmentNames?: readonly string[];
+  /**
+   * Layout v2 only: per-assignee read state, keyed by assignee FOLDER name, so
+   * one month entry holds every assignee this tab read. Each assignee keeps its
+   * own byte offsets (bare live-segment names) — deliberately NOT mixed into
+   * `offsets` above, whose bare keys are the v1 flat folder's segment names.
+   */
+  assignees?: Map<string, AssigneeCacheState>;
+};
+
+/** One assignee's in-tab v2 read state (Task 10). Raw events + a parsed snapshot only — never a fold. */
+type AssigneeCacheState = {
+  snapshot: AnswerSnapshot | null;
+  snapshotStat: SnapshotStat | null;
+  /** Events read past the snapshot's offsets, minus any the snapshot already folds. */
+  delta: Map<string, AnswerEvent>;
+  /** Bytes consumed per live segment (bare name in `answers.events/{folder}/`). */
+  offsets: Record<string, number>;
+  listedSegmentNames: readonly string[];
+  seeded: boolean;
 };
 
 /** WeakMap<workspace root, Map<monthFolderName, entry>> — see the module doc's SCOPING note. */
@@ -488,6 +514,92 @@ function reflectLocalAppendInAnswerEventsCache(
   const entry = getAnswerEventsCacheEntry(directoryHandle, monthFolderName);
   if (!entry) return;
   for (const event of appended) entry.events.set(event.eventId, event);
+}
+
+/* ─────────────── layout v2: per-assignee slice of the same cache ─────────── */
+
+function getAssigneeCacheState(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  assignee: string
+): AssigneeCacheState | undefined {
+  return getAnswerEventsCacheEntry(directoryHandle, monthFolderName)?.assignees?.get(answerAssigneeFolderName(assignee));
+}
+
+/** What a v2 read may resume from: this tab's offsets, raw delta and parsed snapshot for the assignee. */
+function cachedAssigneeReadOptions(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  assignee: string
+): Pick<AssigneeReadOptions, "knownOffsets" | "cachedDelta" | "cachedSnapshot"> {
+  const state = getAssigneeCacheState(directoryHandle, monthFolderName, assignee);
+  if (!state) return {};
+  return {
+    knownOffsets: { ...state.offsets },
+    cachedDelta: [...state.delta.values()],
+    cachedSnapshot: state.snapshot && state.snapshotStat ? { stat: state.snapshotStat, snapshot: state.snapshot } : null,
+  };
+}
+
+/**
+ * Record a SUCCESSFUL v2 read (a failed one throws before reaching here, so the
+ * cache is never poisoned — same contract as the v1 month cache). A rebuild's
+ * events include `archive/`, which the live offsets do not describe, so a
+ * rebuild drops the assignee's state and the next read starts cold.
+ */
+function storeAssigneeRead(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  assignee: string,
+  read: AssigneeReadResult
+): void {
+  const folder = answerAssigneeFolderName(assignee);
+  const entry = getAnswerEventsCacheEntry(directoryHandle, monthFolderName) ?? { events: new Map<string, AnswerEvent>(), offsets: {} };
+  const assignees = new Map(entry.assignees ?? []);
+  if (read.rebuilt) {
+    assignees.delete(folder);
+  } else {
+    const folded = new Set(read.snapshot?.foldedEventIds ?? []);
+    assignees.set(folder, {
+      snapshot: read.snapshot,
+      snapshotStat: read.snapshotStat,
+      delta: new Map(read.deltaEvents.filter((event) => !folded.has(event.eventId)).map((event) => [event.eventId, event])),
+      offsets: { ...read.liveOffsets },
+      listedSegmentNames: read.liveSegmentNames,
+      seeded: read.result.seeded,
+    });
+  }
+  setAnswerEventsCacheEntry(directoryHandle, monthFolderName, { ...entry, assignees });
+}
+
+/** This tab's own v2 append, reflected without a read (offsets untouched — the next read re-reads and dedups). */
+function reflectLocalAppendInAssigneeCache(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  assignee: string,
+  appended: readonly AnswerEvent[]
+): void {
+  const state = getAssigneeCacheState(directoryHandle, monthFolderName, assignee);
+  if (!state) return;
+  for (const event of appended) {
+    state.delta.set(event.eventId, event);
+    if (event.eventType === "migration-seed") state.seeded = true;
+  }
+}
+
+/** `readAssigneeState` through the in-tab cache, storing the result. */
+async function readAssigneeStateCached(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  assignee: string,
+  extra: { strict?: boolean; tolerateConfirmedDead?: boolean } = {}
+): Promise<AssigneeReadResult> {
+  const read = await readAssigneeState(directoryHandle, monthFolderName, assignee, {
+    ...v2ReadOptions(directoryHandle, monthFolderName, assignee, extra),
+    ...cachedAssigneeReadOptions(directoryHandle, monthFolderName, assignee),
+  });
+  storeAssigneeRead(directoryHandle, monthFolderName, assignee, read);
+  return read;
 }
 
 /**
@@ -733,7 +845,7 @@ async function loadEmployeeItemStateV2(
   username: string,
   extra: { strict?: boolean; tolerateConfirmedDead?: boolean } = {}
 ): Promise<EmployeeItemState> {
-  const read = await readAssigneeState(directoryHandle, monthFolderName, username, v2ReadOptions(directoryHandle, monthFolderName, username, extra));
+  const read = await readAssigneeStateCached(directoryHandle, monthFolderName, username, extra);
   // Spec §7: the employee's own browser compacts its own folder, after a successful load.
   // Fire-and-forget: the scheduler gates (owner, rate, closed month) and never rejects.
   void maybeScheduleCompaction(directoryHandle, monthFolderName, username, read, {
@@ -1289,6 +1401,46 @@ async function decideV1Write(
   return { parentDir, appendConfig: config, writer, listedNames: listedAnswerSegmentNames(directoryHandle, monthFolderName), seedEvent, blind: false, previous, decision: build({ previous }) };
 }
 
+/**
+ * v2 counterpart of `decideFromSeededCache` (A5): a plain self-save by an
+ * assignee this tab's per-assignee cache already holds SEEDED decides from the
+ * cached snapshot + delta, skipping the folder read. Same safety argument (the
+ * save's event never depends on `previous`, "seeded" is monotonic, the append
+ * re-reads its own target segment under the chain lock and probes ahead for a
+ * rotated head). Never throws: null whenever the cache has no
+ * seeded state, the frozen legacy seed (snapshot, session memo, or one read of
+ * a FOUND file) is unavailable, or the cached fold is not resumable — the
+ * caller then takes the full read.
+ */
+async function decideFromAssigneeCache(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  assignee: string,
+  xrayImageId: string,
+  build: WriteBuild
+): Promise<Pick<DecidedWrite, "previous" | "decision" | "listedNames"> | null> {
+  const state = getAssigneeCacheState(directoryHandle, monthFolderName, assignee);
+  if (!state?.seeded) return null;
+  try {
+    let legacySeed = state.snapshot?.legacySeed ?? getLegacySeedMemo(directoryHandle, monthFolderName, assignee);
+    if (!legacySeed) {
+      // Same as v1: read the frozen legacy seed once, memoizing only a FOUND file.
+      const legacy = await loadLegacyAnswersFile(directoryHandle, monthFolderName, assignee);
+      if (legacy === null) return null;
+      legacySeed = { contentHash: legacyContentHashOf(legacy), items: legacy.items };
+      setLegacySeedMemo(directoryHandle, monthFolderName, assignee, legacySeed);
+    }
+    const folded = foldSnapshotPlusDelta(state.snapshot, [...state.delta.values()], {
+      legacySeed, username: assignee, monthFolderName, foldFn: foldEmployeeEvents,
+    });
+    if (folded.kind === "late") return null;
+    const previous = folded.result.file.items.find((item) => item.xrayImageId === xrayImageId);
+    return { previous, decision: build({ previous }), listedNames: state.listedSegmentNames };
+  } catch {
+    return null;
+  }
+}
+
 async function decideV2Write(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
@@ -1297,10 +1449,16 @@ async function decideV2Write(
   xrayImageId: string,
   eventId: string,
   eventAt: string,
-  build: WriteBuild
+  build: WriteBuild,
+  blindAppendWhenSeeded: boolean
 ): Promise<DecidedWrite> {
   const target = await assigneeAppendTarget(directoryHandle, monthFolderName, assignee, actor);
-  const state = await readAssigneeState(directoryHandle, monthFolderName, assignee, v2ReadOptions(directoryHandle, monthFolderName, assignee));
+  if (blindAppendWhenSeeded) {
+    // A5 parity on v2: see `decideFromAssigneeCache`. Null = not provably safe, read in full.
+    const cached = await decideFromAssigneeCache(directoryHandle, monthFolderName, assignee, xrayImageId, build);
+    if (cached) return { ...target, seedEvent: null, blind: true, ...cached };
+  }
+  const state = await readAssigneeStateCached(directoryHandle, monthFolderName, assignee);
   // The snapshot carries the frozen legacy seed: memoize it so resolveSeed does not re-read the file.
   if (state.result.seeded) setLegacySeedMemo(directoryHandle, monthFolderName, assignee, state.legacySeed);
   const { seedEvent } = await resolveSeed(directoryHandle, monthFolderName, assignee, state.result.seeded, eventId, eventAt);
@@ -1409,7 +1567,7 @@ async function performAnswerWrite(
     if (layout === "v1-migrating") throw new AnswersMigrationInProgressError();
     const decided = await timeAnswerStep("submit.decide", () => retryDecisionRead(deadline, () =>
       layout === "v2"
-        ? decideV2Write(directoryHandle, monthFolderName, username, username, xrayImageId, eventId, eventAt, build)
+        ? decideV2Write(directoryHandle, monthFolderName, username, username, xrayImageId, eventId, eventAt, build, options.blindAppendWhenSeeded ?? false)
         : decideV1Write(directoryHandle, monthFolderName, username, xrayImageId, eventId, eventAt, build, options.blindAppendWhenSeeded ?? false)
     ));
     if ("skip" in decided.decision) return { ok: true as const };
@@ -1430,8 +1588,8 @@ async function performAnswerWrite(
       // A blind append has no fresh listing: probe for a head another tab rotated to.
       probeAheadForHead: decided.blind,
     }), { events: batch.length });
-    // The month-wide flat cache only describes v1; a v2 read is per assignee.
-    if (layout !== "v2") reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
+    if (layout === "v2") reflectLocalAppendInAssigneeCache(directoryHandle, monthFolderName, username, batch);
+    else reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
     return { ok: true as const };
   };
   const written: Promise<{ ok: true } | { ok: false; error: string }> = attempt().catch((error: unknown) => {
@@ -1719,15 +1877,16 @@ async function appendOnBehalfV2(
   event: AnswerEvent, deadline: OperationDeadline
 ): Promise<{ refused: boolean }> {
   const target = await assigneeAppendTarget(directoryHandle, monthFolderName, assigneeUsername, author);
-  const before = await readAssigneeState(directoryHandle, monthFolderName, assigneeUsername, v2ReadOptions(directoryHandle, monthFolderName, assigneeUsername));
+  const before = await readAssigneeStateCached(directoryHandle, monthFolderName, assigneeUsername);
   const { seedEvent } = await resolveSeed(directoryHandle, monthFolderName, assigneeUsername, before.result.seeded, event.eventId, event.eventAt);
   await appendAnswerEventSegment(target.parentDir, seedEvent ? [seedEvent, event] : [event], target.writer, target.appendConfig, {
     deadline,
     listedSegmentNames: before.liveSegmentNames,
   });
+  reflectLocalAppendInAssigneeCache(directoryHandle, monthFolderName, assigneeUsername, seedEvent ? [seedEvent, event] : [event]);
   // CONFIRM (§5): a fresh event is never folded into the snapshot inside the
   // compaction quiet window, so a refusal of it is in this read's refusals.
-  const after = await readAssigneeState(directoryHandle, monthFolderName, assigneeUsername, v2ReadOptions(directoryHandle, monthFolderName, assigneeUsername));
+  const after = await readAssigneeStateCached(directoryHandle, monthFolderName, assigneeUsername);
   return { refused: after.result.refusals.some((refusal) => refusal.eventId === event.eventId) };
 }
 
@@ -2088,6 +2247,10 @@ export async function loadAllEmployeeFiles(
 ): Promise<EmployeeAnswerFile[]> {
   const strict = options?.strict ?? false;
   try {
+    // v2 months keep no flat month log: fan out per assignee folder instead.
+    if ((await getAnswerEventsLayout(directoryHandle, monthFolderName)) === "v2") {
+      return await loadAllEmployeeFilesV2(directoryHandle, monthFolderName, strict, options?.tolerateConfirmedDead ?? false);
+    }
     const [dirStems, allEvents] = await Promise.all([
       listAnswerDirStems(directoryHandle, monthFolderName),
       strict
@@ -2139,6 +2302,89 @@ export async function loadAllEmployeeFiles(
       ? new AnswersUnreadableError(monthFolderName, { cause: err })
       : err;
   }
+}
+
+/**
+ * The v2 candidate set: `2-employees/` stems plus every assignee folder, keyed
+ * by folder so a stem and its own folder are one employee. A folder no stem
+ * accounts for is attributed to the username its own content names
+ * (`resolveAssigneeFolderOwner`); an unattributable folder is an unreadable
+ * employee — skipped (logged) when lenient, a refusal when strict.
+ */
+async function listV2Employees(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  strict: boolean,
+  tolerateConfirmedDead: boolean
+): Promise<string[]> {
+  const [dirStems, folders] = await Promise.all([
+    listAnswerDirStems(directoryHandle, monthFolderName),
+    listAssigneeFolders(directoryHandle, monthFolderName),
+  ]);
+  const byFolder = new Map<string, string>();
+  for (const stem of dirStems) {
+    let key: string;
+    try {
+      key = answerAssigneeFolderName(stem);
+    } catch {
+      key = ` ${stem}`; // not a valid assignee: legacy-only, still reported
+    }
+    if (!byFolder.has(key)) byFolder.set(key, stem);
+  }
+  const orphans = folders.filter((folder) => !byFolder.has(folder));
+  const owners = await mapWithConcurrency(orphans, DIRECTORY_READ_CONCURRENCY, async (folder) => {
+    const owner = await resolveAssigneeFolderOwner(directoryHandle, monthFolderName, folder, { strict, tolerateConfirmedDead });
+    if (owner === null) {
+      const error = new Error(`answers.events/${folder}: no snapshot or event names its assignee`);
+      if (strict) throw error;
+      logError("answerStorage:loadAllEmployeeFiles:unattributed-folder", error, { action: folder });
+    }
+    return owner;
+  });
+  for (let index = 0; index < orphans.length; index += 1) {
+    const owner = owners[index];
+    if (owner) byFolder.set(orphans[index]!, owner);
+  }
+  return [...byFolder.values()];
+}
+
+/**
+ * v2 fan-out (spec §5): enumerate, then read each assignee's OWN folder
+ * (snapshot + live delta, through the in-tab cache), concurrency 8. Same
+ * strict/lenient contract as the v1 scan: lenient skips (and logs) one
+ * unreadable employee; strict throws (wrapped in AnswersUnreadableError by the
+ * caller); a failed enumeration always throws.
+ */
+async function loadAllEmployeeFilesV2(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  strict: boolean,
+  tolerateConfirmedDead: boolean
+): Promise<EmployeeAnswerFile[]> {
+  const usernames = await listV2Employees(directoryHandle, monthFolderName, strict, tolerateConfirmedDead);
+  const files = await mapWithConcurrency(usernames, DIRECTORY_READ_CONCURRENCY, async (username): Promise<EmployeeAnswerFile | null> => {
+    try {
+      const [itemState, requests] = await Promise.all([
+        loadEmployeeItemStateV2(directoryHandle, monthFolderName, username, strict ? { strict, tolerateConfirmedDead } : {}),
+        loadEmployeeRequestsFile(directoryHandle, monthFolderName, username),
+      ]);
+      return {
+        username,
+        monthFolderName,
+        revision: requests.revision ?? 0,
+        items: itemState.items,
+        referralRequests: requests.referralRequests,
+        replacementRequests: requests.replacementRequests,
+        reopenRequests: requests.reopenRequests,
+        lastUpdatedAt: requests.lastUpdatedAt,
+      };
+    } catch (error) {
+      if (strict) throw error;
+      logError("answerStorage:loadAllEmployeeFiles:employee", error, { action: username });
+      return null;
+    }
+  });
+  return files.filter((file): file is EmployeeAnswerFile => file !== null).sort((a, b) => a.username.localeCompare(b.username));
 }
 
 /** The subset of `EmployeeAnswerFile` the requests-only fast path below returns. */
