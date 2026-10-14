@@ -70,11 +70,13 @@ import type { ReferralRequest, ReopenRequest, ReplacementRequest } from "../refe
 import {
   getPopulationMonthDir,
   getSampleEmployeeDir,
+  getAnswerEventsLayout,
   getSampleMainDir,
   LEGACY_MONTH_SUBFOLDERS,
   safeWorkspaceFilePart,
 } from "../workspace/workspacePaths";
 import { timeAnswerStep } from "./answerTimings";
+import { readAssigneeState, type AssigneeReadOptions } from "./v2/assigneeEventReader";
 import { markAnswerPendingLocally, mirrorAnswerLocally } from "./answerLocalMirror";
 import type { OutboxIdentity } from "./answerLocalMirror";
 
@@ -568,7 +570,7 @@ function noteSeedlessChainRepaired(username: string, monthFolderName: string): v
  * `XQ-ANS-005` / `XQ-ANS-006` respectively, matched on the exact message shape
  * `answerEventStore.ts`'s `foldAnswerEvents` throws today.
  */
-function foldEmployeeEvents(
+export function foldEmployeeEvents(
   events: readonly AnswerEvent[],
   options: Parameters<typeof foldAnswerEvents>[1]
 ): ReturnType<typeof foldAnswerEvents> {
@@ -651,6 +653,50 @@ function legacyContentHashOf(legacy: EmployeeAnswerFile | null): string {
   return legacy && legacy.items.length > 0 ? hashLegacyAnswerItems(legacy.items) : "";
 }
 
+/** The frozen legacy seed (hash + items) for one employee — P0-1: throws on an unreadable file. */
+export async function loadLegacyAnswerSeed(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  username: string
+): Promise<AnswerLegacySeed> {
+  const legacy = await loadLegacyAnswersFile(directoryHandle, monthFolderName, username);
+  return { contentHash: legacyContentHashOf(legacy), items: legacy?.items ?? [] };
+}
+
+/** `readAssigneeState` options every answerStorage v2 caller shares. */
+function v2ReadOptions(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  username: string,
+  extra: { strict?: boolean; tolerateConfirmedDead?: boolean } = {}
+): AssigneeReadOptions {
+  return {
+    foldFn: foldEmployeeEvents,
+    loadLegacySeed: () => loadLegacyAnswerSeed(directoryHandle, monthFolderName, username),
+    ...extra,
+  };
+}
+
+/** v1's compatibility overlay (see loadEmployeeItemState), from the snapshot's frozen legacy items. */
+function withLegacyOnlyItems(folded: readonly ItemAnswer[], legacyItems: readonly ItemAnswer[]): ItemAnswer[] {
+  const foldedIds = new Set(folded.map((item) => item.xrayImageId));
+  const legacyOnly = legacyItems.filter((item) => !foldedIds.has(item.xrayImageId));
+  return legacyOnly.length > 0 ? [...folded, ...legacyOnly] : [...folded];
+}
+
+async function loadEmployeeItemStateV2(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  username: string,
+  extra: { strict?: boolean; tolerateConfirmedDead?: boolean } = {}
+): Promise<EmployeeItemState> {
+  const read = await readAssigneeState(directoryHandle, monthFolderName, username, v2ReadOptions(directoryHandle, monthFolderName, username, extra));
+  const items = read.snapshot || read.deltaEvents.length > 0
+    ? withLegacyOnlyItems(read.result.file.items, read.legacySeed.items)
+    : read.result.file.items;
+  return { items, seeded: read.result.seeded };
+}
+
 /* ───────────────────────── item-state read (segments + legacy) ──────────── */
 
 type EmployeeItemState = { items: ItemAnswer[]; seeded: boolean };
@@ -672,6 +718,9 @@ async function loadEmployeeItemState(
   username: string,
   allEvents?: readonly AnswerEvent[]
 ): Promise<EmployeeItemState> {
+  if (!allEvents && (await getAnswerEventsLayout(directoryHandle, monthFolderName)) === "v2") {
+    return loadEmployeeItemStateV2(directoryHandle, monthFolderName, username);
+  }
   const events = allEvents ?? (await readAllAnswerEventsForMonth(directoryHandle, monthFolderName));
   const ownEvents = eventsForEmployee(events, username);
   if (ownEvents.length === 0) {
