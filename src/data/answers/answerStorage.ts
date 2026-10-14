@@ -68,6 +68,8 @@ import {
 import type { EmployeeAnswerFile, ItemAnswer } from "./answerTypes";
 import type { ReferralRequest, ReopenRequest, ReplacementRequest } from "../referral/referralTypes";
 import {
+  answerAssigneeFolderName,
+  getAnswerEventsDir,
   getPopulationMonthDir,
   getSampleEmployeeDir,
   getAnswerEventsLayout,
@@ -75,9 +77,11 @@ import {
   LEGACY_MONTH_SUBFOLDERS,
   safeWorkspaceFilePart,
 } from "../workspace/workspacePaths";
+import { getLabels } from "../labels/labelsStore";
 import { timeAnswerStep } from "./answerTimings";
 import { readAssigneeState, type AssigneeReadOptions } from "./v2/assigneeEventReader";
-import { markAnswerPendingLocally, mirrorAnswerLocally } from "./answerLocalMirror";
+import { ensureAnswerEventsLayoutForWrite } from "./v2/answerEventsLayout";
+import { markAnswerPendingLocally, mirrorAnswerLocally, queueAnswerForLanding } from "./answerLocalMirror";
 import type { OutboxIdentity } from "./answerLocalMirror";
 
 export { ANSWER_EVENTS_DIR, ANSWER_EVENT_SEGMENT_SUFFIX };
@@ -946,17 +950,23 @@ export async function loadEmployeeAnswers(
 function answerWriterIdentity(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
-  actor: string
+  actor: string,
+  assigneeFolder?: string
 ): { writer: SegmentWriterIdentity; config: AppendOnlyEventLogConfig } {
   const chain = stableAnswerChain(monthFolderName, actor);
+  const scope = `${workspaceScopeId(directoryHandle)}|${monthFolderName}`;
   return {
     writer: {
       deviceId: getDistributionDeviceId(),
       sessionId: chain.chainId,
-      scopeId: `${workspaceScopeId(directoryHandle)}|${monthFolderName}`,
+      // v2: the SAME chain base appears in every assignee folder this actor
+      // writes into (on-behalf). The module-level seq/written memos are keyed on
+      // scopeId, so without the folder in it the second folder would resume at
+      // the first folder's seq and take the ~11 s patient ladder (Review Focus 3).
+      scopeId: assigneeFolder ? `${scope}|${assigneeFolder}` : scope,
       stable: true,
     },
-    config: chain.config,
+    config: assigneeFolder ? { ...chain.config, eventsDirName: assigneeFolder } : chain.config,
   };
 }
 
@@ -984,11 +994,10 @@ async function resolveSeed(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   username: string,
-  ownEvents: readonly AnswerEvent[],
+  alreadySeeded: boolean,
   eventId: string,
   eventAt: string
 ): Promise<{ seedEvent: AnswerEvent | null; legacySeed: AnswerLegacySeed }> {
-  const alreadySeeded = ownEvents.some((event) => event.eventType === "migration-seed");
   if (alreadySeeded) {
     // Frozen once seeded (see `legacySeedMemoByRoot`): after one successful read
     // this session, every later save reuses it instead of re-reading the share.
@@ -1149,6 +1158,98 @@ async function decideFromSeededCache(
   }
 }
 
+/** Everything the append needs, whichever layout decided it. */
+type DecidedWrite = {
+  parentDir: DirectoryHandleLike;
+  appendConfig: AppendOnlyEventLogConfig;
+  writer: SegmentWriterIdentity;
+  listedNames: readonly string[] | undefined;
+  seedEvent: AnswerEvent | null;
+  blind: boolean;
+  previous: ItemAnswer | undefined;
+  decision: AnswerWriteDecision;
+};
+
+type WriteBuild = (ctx: { previous: ItemAnswer | undefined }) => AnswerWriteDecision;
+
+/**
+ * Thrown inside a write attempt when the month is mid-migration (`v1-migrating`):
+ * the flat folder is being moved, so nothing may be appended until the admin's
+ * migration commits (spec §6). Caught by `performAnswerWrite`, which defers the
+ * save to the local pending queue / outbox.
+ */
+class AnswersMigrationInProgressError extends Error {
+  constructor() {
+    super("answers layout migration in progress");
+    this.name = "AnswersMigrationInProgressError";
+  }
+}
+
+/** v2: every append — self-save or on-behalf — lands in the ASSIGNEE's folder. */
+async function assigneeAppendTarget(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  assignee: string,
+  actor: string
+): Promise<Pick<DecidedWrite, "parentDir" | "appendConfig" | "writer">> {
+  const parentDir = await getAnswerEventsDir(directoryHandle, monthFolderName, true);
+  const { writer, config } = answerWriterIdentity(directoryHandle, monthFolderName, actor, answerAssigneeFolderName(assignee));
+  return { parentDir, appendConfig: config, writer };
+}
+
+async function decideV1Write(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  username: string,
+  xrayImageId: string,
+  eventId: string,
+  eventAt: string,
+  build: WriteBuild,
+  blindAppendWhenSeeded: boolean
+): Promise<DecidedWrite> {
+  // Resolving the month folder is a share round trip like any other read
+  // here; a transient fault on it is retried with the rest of this step.
+  const parentDir = await getSampleMainDir(directoryHandle, monthFolderName, true);
+  const { writer, config } = answerWriterIdentity(directoryHandle, monthFolderName, username);
+  if (blindAppendWhenSeeded) {
+    // A plain self-save by an employee this tab already knows is seeded:
+    // skip the pre-append month read (one getFile per unsealed segment of
+    // the whole month) -- see `decideFromSeededCache`. Null means "not
+    // provably safe": fall through to the full read, exactly as before.
+    const cachedDecision = await decideFromSeededCache(directoryHandle, monthFolderName, username, xrayImageId, build);
+    if (cachedDecision) {
+      return { parentDir, appendConfig: config, writer, listedNames: listedAnswerSegmentNames(directoryHandle, monthFolderName), seedEvent: null, blind: true, ...cachedDecision };
+    }
+  }
+  const allEvents = await readAllAnswerEventsForMonth(directoryHandle, monthFolderName);
+  const ownEvents = eventsForEmployee(allEvents, username);
+  const { seedEvent, legacySeed } = await resolveSeed(
+    directoryHandle, monthFolderName, username, ownEvents.some((event) => event.eventType === "migration-seed"), eventId, eventAt
+  );
+  const foldedNow = foldEmployeeEvents(seedEvent ? [...ownEvents, seedEvent] : ownEvents, { legacySeed, username, monthFolderName });
+  const previous = foldedNow.file.items.find((item) => item.xrayImageId === xrayImageId);
+  return { parentDir, appendConfig: config, writer, listedNames: listedAnswerSegmentNames(directoryHandle, monthFolderName), seedEvent, blind: false, previous, decision: build({ previous }) };
+}
+
+async function decideV2Write(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  assignee: string,
+  actor: string,
+  xrayImageId: string,
+  eventId: string,
+  eventAt: string,
+  build: WriteBuild
+): Promise<DecidedWrite> {
+  const target = await assigneeAppendTarget(directoryHandle, monthFolderName, assignee, actor);
+  const state = await readAssigneeState(directoryHandle, monthFolderName, assignee, v2ReadOptions(directoryHandle, monthFolderName, assignee));
+  // The snapshot carries the frozen legacy seed: memoize it so resolveSeed does not re-read the file.
+  if (state.result.seeded) setLegacySeedMemo(directoryHandle, monthFolderName, assignee, state.legacySeed);
+  const { seedEvent } = await resolveSeed(directoryHandle, monthFolderName, assignee, state.result.seeded, eventId, eventAt);
+  const previous = state.result.file.items.find((item) => item.xrayImageId === xrayImageId);
+  return { ...target, listedNames: state.liveSegmentNames, seedEvent, blind: false, previous, decision: build({ previous }) };
+}
+
 /**
  * Shared append machinery for `upsertItemAnswer`, `reopenItemAnswer` and
  * `setItemQualityNote` — the three writers whose outcome does not depend on
@@ -1177,7 +1278,6 @@ async function performAnswerWrite(
   await ensureMonthWritable(directoryHandle, monthFolderName);
   const eventId = options.identity?.eventId ?? crypto.randomUUID();
   const eventAt = options.identity?.eventAt ?? nextAnswerEventAt();
-  const { writer, config: segmentConfig } = answerWriterIdentity(directoryHandle, monthFolderName, username);
   // ONE budget for the whole user action, spent by the append's inner ladders
   // (A1) — see operationDeadline.ts.
   const deadline = createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "answers:interactive-write");
@@ -1226,6 +1326,8 @@ async function performAnswerWrite(
   // the reopen — and never replay the note; those failures are reported to the
   // caller instead. Decided from the event type the builder produced.
   let pendingEligible = false;
+  // Set when the month is mid-migration: the save is deferred (never appended).
+  let migrationDeferred = false;
   const candidateFor = (event: AnswerEvent, previous: ItemAnswer | undefined): ItemAnswer => ({
     xrayImageId: event.xrayImageId ?? xrayImageId,
     templateId: event.templateId ?? previous?.templateId ?? "",
@@ -1241,51 +1343,31 @@ async function performAnswerWrite(
     answeredOnBehalfBy: event.answeredOnBehalfBy,
   });
   const attempt = async (): Promise<{ ok: true }> => {
-    const decided = await timeAnswerStep("submit.decide", () => retryDecisionRead(deadline, async () => {
-      // Resolving the month folder is a share round trip like any other read
-      // here; a transient fault on it is retried with the rest of this step.
-      const mainDir = await getSampleMainDir(directoryHandle, monthFolderName, true);
-      if (options.blindAppendWhenSeeded) {
-        // A plain self-save by an employee this tab already knows is seeded:
-        // skip the pre-append month read (one getFile per unsealed segment of
-        // the whole month) -- see `decideFromSeededCache`. Null means "not
-        // provably safe": fall through to the full read, exactly as before.
-        const cachedDecision = await decideFromSeededCache(directoryHandle, monthFolderName, username, xrayImageId, build);
-        if (cachedDecision) return { mainDir, seedEvent: null, blind: true, ...cachedDecision };
-      }
-      const allEvents = await readAllAnswerEventsForMonth(directoryHandle, monthFolderName);
-      const ownEvents = eventsForEmployee(allEvents, username);
+    // Probed fresh per write (v2 is cached monotone): a brand-new month is
+    // stamped v2 here before its first append; a month mid-migration defers.
+    const layout = await retryDecisionRead(deadline, () =>
+      ensureAnswerEventsLayoutForWrite(directoryHandle, monthFolderName, username)
+    );
+    if (layout === "v1-migrating") throw new AnswersMigrationInProgressError();
+    const decided = await timeAnswerStep("submit.decide", () => retryDecisionRead(deadline, () =>
+      layout === "v2"
+        ? decideV2Write(directoryHandle, monthFolderName, username, username, xrayImageId, eventId, eventAt, build)
+        : decideV1Write(directoryHandle, monthFolderName, username, xrayImageId, eventId, eventAt, build, options.blindAppendWhenSeeded ?? false)
+    ));
+    if ("skip" in decided.decision) return { ok: true as const };
 
-      const { seedEvent, legacySeed } = await resolveSeed(
-        directoryHandle,
-        monthFolderName,
-        username,
-        ownEvents,
-        eventId,
-        eventAt
-      );
-
-      const foldedNow = foldEmployeeEvents(
-        seedEvent ? [...ownEvents, seedEvent] : ownEvents,
-        { legacySeed, username, monthFolderName }
-      );
-      const previous = foldedNow.file.items.find((item) => item.xrayImageId === xrayImageId);
-      return { mainDir, seedEvent, blind: false, previous, decision: build({ previous }) };
-    }));
-    const { mainDir, seedEvent, previous, decision, blind } = decided;
-    if ("skip" in decision) return { ok: true as const };
-
-    const event: AnswerEvent = { ...decision.event, eventId, eventAt, answeredBy: username };
-    const batch = seedEvent ? [seedEvent, event] : [event];
-    mirrorCandidate = candidateFor(event, previous);
+    const event: AnswerEvent = { ...decided.decision.event, eventId, eventAt, answeredBy: username };
+    const batch = decided.seedEvent ? [decided.seedEvent, event] : [event];
+    mirrorCandidate = candidateFor(event, decided.previous);
     pendingEligible = event.eventType === "item-saved";
-    await timeAnswerStep("submit.append", () => appendAnswerEventSegment(mainDir, batch, writer, segmentConfig, {
+    await timeAnswerStep("submit.append", () => appendAnswerEventSegment(decided.parentDir, batch, decided.writer, decided.appendConfig, {
       deadline,
-      listedSegmentNames: listedAnswerSegmentNames(directoryHandle, monthFolderName),
+      listedSegmentNames: decided.listedNames,
       // A blind append has no fresh listing: probe for a head another tab rotated to.
-      probeAheadForHead: blind,
+      probeAheadForHead: decided.blind,
     }), { events: batch.length });
-    reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
+    // The month-wide flat cache only describes v1; a v2 read is per assignee.
+    if (layout !== "v2") reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
     return { ok: true as const };
   };
   const written: Promise<{ ok: true } | { ok: false; error: string }> = attempt().catch((error: unknown) => {
@@ -1303,6 +1385,14 @@ async function performAnswerWrite(
       } catch {
         // `build` is pure over the caller's own data; if it throws there is nothing to queue.
       }
+    }
+    if (error instanceof AnswersMigrationInProgressError) {
+      migrationDeferred = true;
+      const labels = getLabels();
+      return {
+        ok: false as const,
+        error: mirrorCandidate && pendingEligible ? labels.answers_migration_save_deferred : labels.answers_migration_action_blocked,
+      };
     }
     return casFailureFromCause(error, { context: `answers:${telemetryAction}`, onExhausted });
   });
@@ -1326,7 +1416,16 @@ async function performAnswerWrite(
       // any one view or month any more) keeps trying until it lands, and the
       // employee sees a "not saved yet" count instead of a silently lost
       // answer. `markAnswerPendingLocally` never throws (see its doc comment).
-      await markAnswerPendingLocally(monthFolderName, username, mirrorCandidate);
+      //
+      // A save deferred by an in-progress layout migration that came from the
+      // outbox keeps its queued event identity, so its eventual landing after
+      // the migration folds once (`queueAnswerForLanding`); otherwise (or if
+      // IndexedDB refuses) it is queued exactly like any other failed save.
+      const requeued =
+        migrationDeferred && options.identity
+          ? await queueAnswerForLanding(monthFolderName, username, mirrorCandidate, options.identity)
+          : false;
+      if (!requeued) await markAnswerPendingLocally(monthFolderName, username, mirrorCandidate);
     }
     return result;
   });
@@ -1539,6 +1638,70 @@ export async function upsertItemAnswerOnBehalf(
   return performOnBehalfWrite(directoryHandle, monthFolderName, assigneeUsername, item, author, reason);
 }
 
+function buildOnBehalfEvent(
+  eventId: string, eventAt: string, author: string, assigneeUsername: string, item: ItemAnswer, reason: string
+): AnswerEvent {
+  return {
+    eventId, eventType: "item-saved", eventAt, eventBy: author, authority: "supervisor",
+    xrayImageId: item.xrayImageId, answers: item.answers, status: item.status, submittedAt: item.submittedAt,
+    templateId: item.templateId, templateVersion: item.templateVersion, lastSavedAt: item.lastSavedAt,
+    answeredBy: assigneeUsername, answeredOnBehalfBy: author, reason,
+  };
+}
+
+/** v2 on-behalf: append into the ASSIGNEE's folder, then confirm from a fresh per-assignee read. */
+async function appendOnBehalfV2(
+  directoryHandle: DirectoryHandleLike, monthFolderName: string, assigneeUsername: string, author: string,
+  event: AnswerEvent, deadline: OperationDeadline
+): Promise<{ refused: boolean }> {
+  const target = await assigneeAppendTarget(directoryHandle, monthFolderName, assigneeUsername, author);
+  const before = await readAssigneeState(directoryHandle, monthFolderName, assigneeUsername, v2ReadOptions(directoryHandle, monthFolderName, assigneeUsername));
+  const { seedEvent } = await resolveSeed(directoryHandle, monthFolderName, assigneeUsername, before.result.seeded, event.eventId, event.eventAt);
+  await appendAnswerEventSegment(target.parentDir, seedEvent ? [seedEvent, event] : [event], target.writer, target.appendConfig, {
+    deadline,
+    listedSegmentNames: before.liveSegmentNames,
+  });
+  // CONFIRM (§5): a fresh event is never folded into the snapshot inside the
+  // compaction quiet window, so a refusal of it is in this read's refusals.
+  const after = await readAssigneeState(directoryHandle, monthFolderName, assigneeUsername, v2ReadOptions(directoryHandle, monthFolderName, assigneeUsername));
+  return { refused: after.result.refusals.some((refusal) => refusal.eventId === event.eventId) };
+}
+
+/** v1 on-behalf: today's flat append + single-item confirm, unchanged. */
+async function appendOnBehalfV1(
+  directoryHandle: DirectoryHandleLike, monthFolderName: string, assigneeUsername: string, author: string,
+  event: AnswerEvent, deadline: OperationDeadline
+): Promise<{ refused: boolean }> {
+  const mainDir = await getSampleMainDir(directoryHandle, monthFolderName, true);
+  const { writer, config } = answerWriterIdentity(directoryHandle, monthFolderName, author);
+  const ownBefore = eventsForEmployee(await readAllAnswerEventsForMonth(directoryHandle, monthFolderName), assigneeUsername);
+  // `legacySeed` from `resolveSeed` is not used here — the confirm step
+  // below re-derives it fresh from a post-append read.
+  const { seedEvent } = await resolveSeed(directoryHandle, monthFolderName, assigneeUsername, ownBefore.some((e) => e.eventType === "migration-seed"), event.eventId, event.eventAt);
+  const batch = seedEvent ? [seedEvent, event] : [event];
+  await appendAnswerEventSegment(mainDir, batch, writer, config, { deadline, listedSegmentNames: listedAnswerSegmentNames(directoryHandle, monthFolderName) });
+  reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
+  // CONFIRM (§5): fresh read, same comparator, SINGLE-ITEM scope — the
+  // exact slice `foldSingleItem` narrows to (migration-seed events plus
+  // this one `xrayImageId`'s own), replicated inline rather than calling
+  // it directly because `foldSingleItem` returns only the folded
+  // `ItemAnswer`, not the `refusals` list this confirmation needs to know
+  // whether THIS eventId specifically won or lost. `requireMigrationSeed:
+  // false` matches `foldSingleItem`'s own default for the same reason it
+  // documents: this call is confirming its own just-appended event
+  // against a slice it narrowed itself, not reading a whole chain.
+  const ownAfter = eventsForEmployee(await readAllAnswerEventsForMonth(directoryHandle, monthFolderName), assigneeUsername);
+  const scopedToItem = ownAfter.filter((c) => c.eventType === "migration-seed" || c.xrayImageId === event.xrayImageId);
+  const legacyForConfirm = await loadLegacyAnswersFile(directoryHandle, monthFolderName, assigneeUsername);
+  const confirmed = foldEmployeeEvents(scopedToItem, {
+    legacySeed: { contentHash: legacyContentHashOf(legacyForConfirm), items: (legacyForConfirm?.items ?? []).filter((i) => i.xrayImageId === event.xrayImageId) },
+    username: assigneeUsername,
+    monthFolderName,
+    requireMigrationSeed: false,
+  });
+  return { refused: confirmed.refusals.some((refusal) => refusal.eventId === event.eventId) };
+}
+
 /**
  * §5's append-then-confirm on-behalf write.
  *
@@ -1570,80 +1733,23 @@ async function performOnBehalfWrite(
   await ensureMonthWritable(directoryHandle, monthFolderName);
   const eventId = crypto.randomUUID();
   const eventAt = nextAnswerEventAt();
-  const { writer, config: segmentConfig } = answerWriterIdentity(directoryHandle, monthFolderName, author);
   // ONE budget for the whole user action, shared by casLoop (new attempts) and
   // the append's inner ladders (A1) — see operationDeadline.ts.
   const deadline = createDeadline(INTERACTIVE_WRITE_DEADLINE_MS, "answers:interactive-write");
   const startedAtMs = Date.now();
-  const xrayImageId = item.xrayImageId;
 
   const result = await casLoop<{ ok: true } | { ok: false; error: string }>(
     async () => {
-      const mainDir = await getSampleMainDir(directoryHandle, monthFolderName, true);
-      const beforeEvents = await readAllAnswerEventsForMonth(directoryHandle, monthFolderName);
-      const ownBefore = eventsForEmployee(beforeEvents, assigneeUsername);
-      // `legacySeed` from `resolveSeed` is not used here — the confirm step
-      // below re-derives it fresh (`confirmSeed`) from a post-append read, so
-      // the pre-append copy would only be a stale duplicate.
-      const { seedEvent } = await resolveSeed(
-        directoryHandle,
-        monthFolderName,
-        assigneeUsername,
-        ownBefore,
-        eventId,
-        eventAt
-      );
-
-      const onBehalfEvent: AnswerEvent = {
-        eventId,
-        eventType: "item-saved",
-        eventAt,
-        eventBy: author,
-        authority: "supervisor",
-        xrayImageId,
-        answers: item.answers,
-        status: item.status,
-        submittedAt: item.submittedAt,
-        templateId: item.templateId,
-        templateVersion: item.templateVersion,
-        lastSavedAt: item.lastSavedAt,
-        answeredBy: assigneeUsername,
-        answeredOnBehalfBy: author,
-        reason,
-      };
-      const batch = seedEvent ? [seedEvent, onBehalfEvent] : [onBehalfEvent];
-      await appendAnswerEventSegment(mainDir, batch, writer, segmentConfig, {
-        deadline,
-        listedSegmentNames: listedAnswerSegmentNames(directoryHandle, monthFolderName),
-      });
-      reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
-
-      // CONFIRM (§5): fresh read, same comparator, SINGLE-ITEM scope — the
-      // exact slice `foldSingleItem` narrows to (migration-seed events plus
-      // this one `xrayImageId`'s own), replicated inline rather than calling
-      // it directly because `foldSingleItem` returns only the folded
-      // `ItemAnswer`, not the `refusals` list this confirmation needs to know
-      // whether THIS eventId specifically won or lost. `requireMigrationSeed:
-      // false` matches `foldSingleItem`'s own default for the same reason it
-      // documents: this call is confirming its own just-appended event
-      // against a slice it narrowed itself, not reading a whole chain.
-      const afterEvents = await readAllAnswerEventsForMonth(directoryHandle, monthFolderName);
-      const ownAfter = eventsForEmployee(afterEvents, assigneeUsername);
-      const scopedToItem = ownAfter.filter(
-        (candidate) => candidate.eventType === "migration-seed" || candidate.xrayImageId === xrayImageId
-      );
-      const legacyForConfirm = await loadLegacyAnswersFile(directoryHandle, monthFolderName, assigneeUsername);
-      const confirmSeed: AnswerLegacySeed = {
-        contentHash: legacyContentHashOf(legacyForConfirm),
-        items: (legacyForConfirm?.items ?? []).filter((item) => item.xrayImageId === xrayImageId),
-      };
-      const confirmed = foldEmployeeEvents(scopedToItem, {
-        legacySeed: confirmSeed,
-        username: assigneeUsername,
-        monthFolderName,
-        requireMigrationSeed: false,
-      });
-      const refused = confirmed.refusals.some((refusal) => refusal.eventId === eventId);
+      const layout = await ensureAnswerEventsLayoutForWrite(directoryHandle, monthFolderName, author);
+      // An on-behalf save is never queued locally (it races the assignee by
+      // design), so during a migration it is refused with a retry-later message.
+      if (layout === "v1-migrating") {
+        return { done: true, result: { ok: false as const, error: getLabels().answers_migration_action_blocked } };
+      }
+      const event = buildOnBehalfEvent(eventId, eventAt, author, assigneeUsername, item, reason);
+      const { refused } = layout === "v2"
+        ? await appendOnBehalfV2(directoryHandle, monthFolderName, assigneeUsername, author, event, deadline)
+        : await appendOnBehalfV1(directoryHandle, monthFolderName, assigneeUsername, author, event, deadline);
       if (refused) {
         return {
           done: true,

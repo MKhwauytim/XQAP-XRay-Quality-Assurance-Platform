@@ -4,7 +4,7 @@
 // accumulated per step on the action's deadline, and a save whose total ladder dwell
 // reaches LADDER_DWELL_LOG_THRESHOLD_MS writes one error-log entry naming each step.
 // No behaviour change: the sleeps themselves are exactly what they were.
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, afterEach } from "vitest";
 
 import { clearErrors, getRecentErrors } from "../storage/errorLogger";
 import { createMemoryDirectory, setSimulatedFaults } from "../storage/memoryDirectory";
@@ -12,6 +12,11 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { createDeadline, nextRetryDelayMs, recordLadderDwell, totalLadderDwellMs } from "../storage/operationDeadline";
 import { __clearAnswerEventsCacheForTests, upsertItemAnswer } from "./answerStorage";
 import type { ItemAnswer } from "./answerTypes";
+import { __pinNewAnswerMonthsToV1ForTests } from "./v2/answerEventsLayout";
+
+// This suite pins the v1 flat answers layout for months it creates (layout v2: brand-new months start per-assignee).
+beforeEach(() => __pinNewAnswerMonthsToV1ForTests(true));
+afterEach(() => __pinNewAnswerMonthsToV1ForTests(false));
 
 const MONTH = "5-May-2026";
 

@@ -853,6 +853,9 @@ export const DEFAULT_LABELS = {
   app_bak_recovered_warning_admin: "تعذّرت قراءة النسخة الأصلية من الملف \"{fileName}\"، وتم عرضه من النسخة \"{source}\" — قد تكون البيانات غير مكتملة. النسخة الأصلية لا تزال تالفة وسيتكرر هذا التنبيه حتى تُعاد كتابتها؛ تعذّر الإصلاح التلقائي، راجع سجل الأخطاء باسم الملف.",  app_close_aria:            "إغلاق",
   app_auto_backup_running:   "جاري إنشاء النسخة الاحتياطية التلقائية...",
   app_auto_backup_done:      "تم إنشاء النسخة الاحتياطية التلقائية: {folderName}",
+  // Answers layout v2 (spec 2026-10-13 §6) — saves during an admin migration.
+  answers_migration_save_deferred:  "يجري الآن ترحيل ملفات الإجابات لهذا الشهر. حُفظت إجابتك على هذا الجهاز وستُرفع تلقائيًا بعد انتهاء الترحيل.",
+  answers_migration_action_blocked: "يجري الآن ترحيل ملفات الإجابات لهذا الشهر. أعد المحاولة بعد انتهاء الترحيل.",
   app_auto_backup_failed:    "تعذر إنشاء النسخة الاحتياطية التلقائية: {error}",
   app_unknown_error:         "خطأ غير معروف",
   app_restore_interrupted_warning:

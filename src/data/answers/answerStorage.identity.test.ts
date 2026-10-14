@@ -8,7 +8,7 @@
 // landing finds the employee already seeded (`alreadySeeded`) and builds no seed
 // at all. No change to `resolveSeed` was needed; the seed assertions below pin
 // that behaviour.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
 
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
@@ -19,6 +19,11 @@ import {
   upsertItemAnswer,
 } from "./answerStorage";
 import type { ItemAnswer } from "./answerTypes";
+import { __pinNewAnswerMonthsToV1ForTests } from "./v2/answerEventsLayout";
+
+// This suite pins the v1 flat answers layout for months it creates (layout v2: brand-new months start per-assignee).
+beforeEach(() => __pinNewAnswerMonthsToV1ForTests(true));
+afterEach(() => __pinNewAnswerMonthsToV1ForTests(false));
 
 const MONTH = "5-may-2026";
 

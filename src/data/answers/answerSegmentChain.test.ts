@@ -1,5 +1,5 @@
 /* @vitest-environment jsdom */
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, afterEach } from "vitest";
 
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
@@ -16,6 +16,11 @@ import {
   stableAnswerChainSegmentName,
 } from "./answerSegmentChain";
 import type { ItemAnswer } from "./answerTypes";
+import { __pinNewAnswerMonthsToV1ForTests } from "./v2/answerEventsLayout";
+
+// This suite pins the v1 flat answers layout for months it creates (layout v2: brand-new months start per-assignee).
+beforeEach(() => __pinNewAnswerMonthsToV1ForTests(true));
+afterEach(() => __pinNewAnswerMonthsToV1ForTests(false));
 
 const MONTH = "5-May-2026";
 

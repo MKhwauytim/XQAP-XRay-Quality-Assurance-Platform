@@ -16,7 +16,7 @@
  *     this file adds new coverage, it does not replace
  *     `answerStorageStage2.test.ts`'s own P0-1 case.
  */
-import { describe, test, expect, beforeEach } from "vitest";
+import { describe, test, expect, beforeEach, afterEach } from "vitest";
 
 import { createMemoryDirectory, getOperationLog, clearOperationLog } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
@@ -34,6 +34,11 @@ import {
   upsertItemAnswer,
 } from "./answerStorage";
 import type { ItemAnswer } from "./answerTypes";
+import { __pinNewAnswerMonthsToV1ForTests } from "./v2/answerEventsLayout";
+
+// This suite pins the v1 flat answers layout for months it creates (layout v2: brand-new months start per-assignee).
+beforeEach(() => __pinNewAnswerMonthsToV1ForTests(true));
+afterEach(() => __pinNewAnswerMonthsToV1ForTests(false));
 
 const MONTH = "5-may-2026";
 const EMPLOYEE = "emp1";

@@ -4,7 +4,7 @@
 // Once this tab has read it successfully for a seeded employee, the seed
 // (hash + items) is memoized per (root, month, user). The FIRST read is
 // unchanged: an unreadable legacy file still throws (P0-1) and never memoizes.
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, afterEach } from "vitest";
 
 import {
   clearReadLog,
@@ -23,6 +23,11 @@ import {
   upsertItemAnswer,
 } from "./answerStorage";
 import type { ItemAnswer } from "./answerTypes";
+import { __pinNewAnswerMonthsToV1ForTests } from "./v2/answerEventsLayout";
+
+// This suite pins the v1 flat answers layout for months it creates (layout v2: brand-new months start per-assignee).
+beforeEach(() => __pinNewAnswerMonthsToV1ForTests(true));
+afterEach(() => __pinNewAnswerMonthsToV1ForTests(false));
 
 const MONTH = "5-May-2026";
 const LEGACY = "emp1.answers.json";

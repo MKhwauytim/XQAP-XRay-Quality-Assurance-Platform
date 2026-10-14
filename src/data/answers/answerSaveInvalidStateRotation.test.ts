@@ -24,7 +24,7 @@
 // deliberately clears the IN-PAGE memo but not `localStorage` — exactly what a
 // real page reload does — so the chain must survive across it the same way a
 // real reload does, which only a real `localStorage` (jsdom) can exercise.
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, afterEach } from "vitest";
 
 import {
   createMemoryDirectory,
@@ -54,6 +54,11 @@ import {
 import { listDirectoryEntries } from "../storage/directoryScan";
 import { getSampleMainDir } from "../workspace/workspacePaths";
 import type { ItemAnswer } from "./answerTypes";
+import { __pinNewAnswerMonthsToV1ForTests } from "./v2/answerEventsLayout";
+
+// This suite pins the v1 flat answers layout for months it creates (layout v2: brand-new months start per-assignee).
+beforeEach(() => __pinNewAnswerMonthsToV1ForTests(true));
+afterEach(() => __pinNewAnswerMonthsToV1ForTests(false));
 
 const MONTH = "5-may-2026";
 const USER = "emp-1";

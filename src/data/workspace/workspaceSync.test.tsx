@@ -68,6 +68,11 @@ import {
   saveSyncIntervalMs,
   WORKSPACE_SETTINGS_FILE,
 } from "./syncSettings";
+import { __pinNewAnswerMonthsToV1ForTests } from "../answers/v2/answerEventsLayout";
+
+// This suite pins the v1 flat answers layout for months it creates (layout v2: brand-new months start per-assignee).
+beforeEach(() => __pinNewAnswerMonthsToV1ForTests(true));
+afterEach(() => __pinNewAnswerMonthsToV1ForTests(false));
 
 async function writeRawFile(dir: DirectoryHandleLike, name: string, content: string): Promise<void> {
   const handle: FileHandleLike = await dir.getFileHandle(name, { create: true });

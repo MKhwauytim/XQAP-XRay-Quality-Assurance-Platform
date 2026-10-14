@@ -12,6 +12,11 @@ import {
 } from "./answerStorage";
 import { SEALED_REVALIDATE_MS, invalidateSealedAnswerSegments } from "./answerSealedSegments";
 import type { ItemAnswer } from "./answerTypes";
+import { __pinNewAnswerMonthsToV1ForTests } from "./v2/answerEventsLayout";
+
+// This suite pins the v1 flat answers layout for months it creates (layout v2: brand-new months start per-assignee).
+beforeEach(() => __pinNewAnswerMonthsToV1ForTests(true));
+afterEach(() => __pinNewAnswerMonthsToV1ForTests(false));
 
 const MONTH = "5-May-2026";
 

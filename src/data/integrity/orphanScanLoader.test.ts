@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
 
 import { upsertItemAnswer } from "../answers/answerStorage";
 import { appendReferralRequest } from "../referral/referralStorage";
@@ -18,6 +18,11 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { getPopulationMonthDir, getSampleMainDir } from "../workspace/workspacePaths";
 
 import { runMonthIntegrityScan } from "./orphanScanLoader";
+import { __pinNewAnswerMonthsToV1ForTests } from "../answers/v2/answerEventsLayout";
+
+// This suite pins the v1 flat answers layout for months it creates (layout v2: brand-new months start per-assignee).
+beforeEach(() => __pinNewAnswerMonthsToV1ForTests(true));
+afterEach(() => __pinNewAnswerMonthsToV1ForTests(false));
 
 const MONTH = "5-May-2026";
 
