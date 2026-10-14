@@ -38,7 +38,10 @@ async function probeMonth(root: DirectoryHandleLike, month: string): Promise<Mon
   const layout = await getAnswerEventsLayout(root, month);
   if (layout === "absent") return null;
   const marker = layout === "v2" ? await readAnswerEventsLayoutMarker(root, month) : null;
-  const unmovable = new Set(marker?.unmovable ?? []);
+  // Folded-but-stuck segments are not re-offered; UNFOLDED ones (whose events
+  // no v2 reader sees) are, for as long as they are still in the flat folder.
+  const unfolded = new Set(marker?.unfolded ?? []);
+  const unmovable = new Set((marker?.unmovable ?? []).filter((name) => !unfolded.has(name)));
   const flatSegments = (await listDirectoryEntries(await getAnswerEventsDir(root, month, false))).filter(
     (entry) => entry.kind === "file" && entry.name.endsWith(ANSWER_EVENT_SEGMENT_SUFFIX) && !unmovable.has(entry.name)
   ).length;

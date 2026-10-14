@@ -867,6 +867,8 @@ export const DEFAULT_LABELS = {
   answers_layout_migration_done:       "اكتمل ترحيل ملفات الإجابات.",
   answers_layout_migration_busy:       "ترحيل {month} قيد التنفيذ من جهاز آخر. أعد المحاولة لاحقًا.",
   answers_layout_migration_failed:     "تعذّر إكمال ترحيل {month}. يمكن إعادة المحاولة بأمان.",
+  answers_layout_migration_unfolded:   "{month}: تعذّرت قراءة الملفات التالية فلم تُنقل إجاباتها بعد، ولن تظهر حتى يُعاد الترحيل (سيُعرض عليك مجددًا، ولم يُحذف أي ملف): {names}",
+  answers_layout_migration_unmovable:  "{month}: نُقلت إجابات الملفات التالية لكن تعذّر أرشفتها فبقيت في مكانها (لم يُحذف أي ملف): {names}",
   app_auto_backup_failed:    "تعذر إنشاء النسخة الاحتياطية التلقائية: {error}",
   app_unknown_error:         "خطأ غير معروف",
   app_restore_interrupted_warning:

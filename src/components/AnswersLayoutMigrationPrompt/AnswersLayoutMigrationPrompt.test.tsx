@@ -37,6 +37,17 @@ describe("AnswersLayoutMigrationPrompt", () => {
     await screen.findByText(getLabels().answers_layout_migration_done);
   });
 
+  it("names unfolded and unmovable segments in the done text instead of reporting a clean success (review finding 3)", async () => {
+    mocks.migrate.mockResolvedValue({ status: "migrated", marker: {}, quarantinedLines: 0, unfolded: ["dead-a.ndjson"], unmovable: ["dead-a.ndjson", "stuck-b.ndjson"] });
+    renderWith(<AnswersLayoutMigrationPrompt session={admin} directoryHandle={createMemoryDirectory("ui5")} workspaceReady />);
+    await screen.findByText(/2000/);
+    fireEvent.click(screen.getByRole("button", { name: getLabels().answers_layout_migration_confirm }));
+    const status = await screen.findByRole("status");
+    await waitFor(() => expect(status.textContent).toContain("dead-a.ndjson"));
+    expect(status.textContent).toContain("stuck-b.ndjson");
+    expect(status.textContent).not.toContain(getLabels().answers_layout_migration_done);
+  });
+
   it("never probes or prompts for a non-admin", async () => {
     renderWith(<AnswersLayoutMigrationPrompt session={{ ...admin, role: "employee", username: "emp1" }} directoryHandle={createMemoryDirectory("ui2")} workspaceReady />);
     await new Promise((resolve) => setTimeout(resolve, 20));

@@ -21,6 +21,12 @@ export type AnswerEventsLayoutMarker = {
   flatSegmentsArchived: number;
   assignees: number;
   unmovable: string[];
+  /**
+   * Subset of `unmovable` whose events were never folded into an assignee
+   * folder (unopenable, or landed after the last listing). Optional: markers
+   * written before this field existed carry none (treated as all folded).
+   */
+  unfolded?: string[];
   origin: "migration" | "new-month";
 };
 

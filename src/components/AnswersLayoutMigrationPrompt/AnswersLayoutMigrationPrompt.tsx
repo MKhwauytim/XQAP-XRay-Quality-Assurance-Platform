@@ -33,6 +33,16 @@ function fill(template: string, values: Record<string, string | number>): string
   return Object.entries(values).reduce((text, [key, value]) => text.split(`{${key}}`).join(String(value)), template);
 }
 
+/** Review finding 3: a migration that left segments behind must say which, never report a clean success. */
+function leftoverProblems(labels: ReturnType<typeof useLabels>, month: string, unfolded: readonly string[], unmovable: readonly string[]): string[] {
+  const unfoldedSet = new Set(unfolded);
+  const stuck = unmovable.filter((name) => !unfoldedSet.has(name));
+  const out: string[] = [];
+  if (unfolded.length > 0) out.push(fill(labels.answers_layout_migration_unfolded, { month, names: unfolded.join("، ") }));
+  if (stuck.length > 0) out.push(fill(labels.answers_layout_migration_unmovable, { month, names: stuck.join("، ") }));
+  return out;
+}
+
 export function AnswersLayoutMigrationPrompt({ session, directoryHandle, workspaceReady, holdWhile = false }: Props) {
   const labels = useLabels();
   const queryClient = useQueryClient();
@@ -68,6 +78,7 @@ export function AnswersLayoutMigrationPrompt({ session, directoryHandle, workspa
       try {
         const result = await migrateMonthToPerAssignee(directoryHandle, need.monthFolderName, { actor: session.username });
         if (result.status === "locked-elsewhere") problems.push(fill(labels.answers_layout_migration_busy, { month: need.monthFolderName }));
+        if (result.status === "migrated") problems.push(...leftoverProblems(labels, need.monthFolderName, result.unfolded ?? [], result.unmovable ?? []));
       } catch (error) {
         logError("answersMigrationPrompt:migrate", error, { action: need.monthFolderName });
         problems.push(fill(labels.answers_layout_migration_failed, { month: need.monthFolderName }));

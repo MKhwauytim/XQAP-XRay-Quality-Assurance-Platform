@@ -173,6 +173,42 @@ describe("migrateMonthToPerAssignee (spec §6)", () => {
     expect(unwrap<{ unmovable: string[] }>(JSON.parse(markerText)).unmovable).toContain("dead-ans-devd-sesd.ndjson");
   }, 60_000);
 
+  it("an unopenable segment is surfaced as UNFOLDED in the result and marker, and a re-run folds it once it opens (review finding 3)", async () => {
+    const { root } = await v1Fixture("dead-rerun");
+    const events = await getAnswerEventsDir(root, MONTH, false);
+    const dead = "dead-ans-devd-sesd.ndjson";
+    await writeText(events, dead, encodeEventLine(savedEvent("dead", 1, { xrayImageId: "X-dead" })));
+    setSimulatedFaults(root, [{ operation: "getFile", name: dead, errorName: "NotReadableError", times: 10_000 }]);
+    const first = await migrateMonthToPerAssignee(root, MONTH, { actor: "admin" });
+    if (first.status !== "migrated") throw new Error(first.status);
+    expect(first.unfolded).toEqual([dead]);
+    expect(first.marker.unfolded).toEqual([dead]);
+    setSimulatedFaults(root, []);
+    resetCaches();
+    const second = await migrateMonthToPerAssignee(root, MONTH, { actor: "admin" });
+    if (second.status !== "migrated") throw new Error(second.status);
+    expect(second.unfolded).toEqual([]);
+    expect(second.marker.unmovable).toEqual([]);
+    resetCaches();
+    expect((await loadEmployeeAnswers(root, MONTH, "emp1")).items.some((i) => i.xrayImageId === "X-dead")).toBe(true);
+    expect(await fileNames(events)).toEqual([]);
+  }, 60_000);
+
+  it("a flat segment landing right after the marker is written is recorded as unfolded (review finding 4)", async () => {
+    const { root } = await v1Fixture("post-marker");
+    const events = await getAnswerEventsDir(root, MONTH, false);
+    const late = "late-ans-devl-sesl.ndjson";
+    const result = await migrateMonthToPerAssignee(root, MONTH, {
+      actor: "admin",
+      onProgress: async ({ phase }) => {
+        if (phase === "verify") await writeText(events, late, encodeEventLine(savedEvent("late", 900, { xrayImageId: "X-late" })));
+      },
+    });
+    if (result.status !== "migrated") throw new Error(result.status);
+    expect(result.unfolded).toEqual([late]);
+    expect(unwrap<{ unfolded?: string[] }>(JSON.parse(await readText(events, ANSWER_EVENTS_FOLDERS.layoutMarker))).unfolded).toEqual([late]);
+  }, 30_000);
+
   it("a v2 month with flat stragglers (e.g. a v1 backup restored into it) migrates just those", async () => {
     const { root } = await v1Fixture("v2stragglers");
     await migrateMonthToPerAssignee(root, MONTH, { actor: "admin" });

@@ -32,4 +32,15 @@ describe("probeAnswerLayoutMigrations", () => {
     const needs = await probeAnswerLayoutMigrations(root, ["1-jan-2026", "2-feb-2026"]);
     expect(needs.map((n) => [n.monthFolderName, n.kind])).toEqual([["1-jan-2026", "incomplete"], ["2-feb-2026", "stragglers"]]);
   });
+
+  it("re-offers a v2 month whose UNFOLDED segments are still flat, but not one whose unmovable segments were folded (review finding 3)", async () => {
+    const root = createMemoryDirectory("probe3");
+    for (const [month, unfolded] of [["1-jan-2026", ["dead.ndjson"]], ["2-feb-2026", []]] as const) {
+      const events = await getAnswerEventsDir(root, month, true);
+      await writeText(events, ANSWER_EVENTS_FOLDERS.layoutMarker, JSON.stringify({ layout: "per-assignee", schemaVersion: 1, migratedAt: "x", migratedBy: "a", flatSegmentsArchived: 0, assignees: 0, unmovable: ["dead.ndjson"], unfolded, origin: "migration" }));
+      await writeText(events, "dead.ndjson", encodeEventLine(savedEvent("d", 1)));
+    }
+    const needs = await probeAnswerLayoutMigrations(root, ["1-jan-2026", "2-feb-2026"]);
+    expect(needs.map((n) => [n.monthFolderName, n.kind, n.flatSegments])).toEqual([["1-jan-2026", "stragglers", 1]]);
+  });
 });

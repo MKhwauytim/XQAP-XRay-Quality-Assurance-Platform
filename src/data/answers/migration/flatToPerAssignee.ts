@@ -45,7 +45,7 @@ export const MIGRATION_LOCK_STALE_MS = 30 * 60 * 1000;
 export const MIGRATION_MS_PER_SEGMENT_ESTIMATE = 150;
 const MAX_STRAGGLER_PASSES = 3;
 
-export type MigrationPhase = "lock" | "read" | "archive" | "snapshot" | "move" | "stragglers" | "commit";
+export type MigrationPhase = "lock" | "read" | "archive" | "snapshot" | "move" | "stragglers" | "commit" | "verify";
 export type MigrationProgress = { phase: MigrationPhase; done: number; total: number };
 export type MigrateMonthOptions = {
   actor: string;
@@ -53,7 +53,19 @@ export type MigrateMonthOptions = {
   onProgress?: (progress: MigrationProgress) => void | Promise<void>;
 };
 export type MigrateMonthResult =
-  | { status: "migrated"; marker: AnswerEventsLayoutMarker; quarantinedLines: number }
+  | {
+      status: "migrated";
+      marker: AnswerEventsLayoutMarker;
+      quarantinedLines: number;
+      /** Flat segments still in place (folded-but-stuck AND unfolded). Mirrors marker.unmovable. */
+      unmovable: string[];
+      /**
+       * Flat segments whose events are NOT in any assignee folder (could not be
+       * opened, or landed after the last listing). Invisible to v2 readers until
+       * a re-run folds them; the probe re-offers the month while they exist.
+       */
+      unfolded: string[];
+    }
   | { status: "nothing-to-do" }
   | { status: "locked-elsewhere"; by: string; startedAt: string };
 
@@ -192,7 +204,19 @@ async function writeQuarantine(root: DirectoryHandleLike, month: string, eventsD
   for (const chunk of chunkEventsForSegmentAppends(records)) await appendEventSegment(eventsDir, chunk, writer, config);
 }
 
-type MigrationState = { processed: Map<string, number>; unmovable: Set<string>; moved: number; quarantinedLines: number };
+/**
+ * `unmovable`: every flat segment left in place. `unfolded`: the subset whose
+ * events never reached an assignee folder. `foldedStuck`: prior runs'
+ * unmovable-but-folded names (not re-read, so not in `processed`).
+ */
+type MigrationState = {
+  processed: Map<string, number>;
+  unmovable: Set<string>;
+  unfolded: Set<string>;
+  foldedStuck: ReadonlySet<string>;
+  moved: number;
+  quarantinedLines: number;
+};
 
 async function migratePass(
   root: DirectoryHandleLike,
@@ -208,7 +232,10 @@ async function migratePass(
   const fresh: { name: string; bytes: number; text: string }[] = [];
   for (const read of reads) {
     if (read.status === "missing") continue;
-    if (read.status === "unopenable") state.unmovable.add(read.name);
+    if (read.status === "unopenable") {
+      state.unmovable.add(read.name);
+      state.unfolded.add(read.name);
+    }
     else if (state.processed.get(read.name) === read.bytes) state.unmovable.add(read.name); // folded, but its move keeps failing
     else fresh.push(read);
   }
@@ -246,6 +273,31 @@ async function migratePass(
   }
 }
 
+async function fileSizeOrNull(dir: DirectoryHandleLike, name: string): Promise<number | null> {
+  try {
+    return (await (await dir.getFileHandle(name, { create: false })).getFile()).size;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Classify flat segments still present: folded (this run read exactly these
+ * bytes, or a prior run recorded it folded-but-stuck) vs UNFOLDED (never read,
+ * unopenable, or grew after it was read). Unfolded must never be hidden.
+ */
+async function classifyLeftovers(eventsDir: DirectoryHandleLike, names: readonly string[], state: MigrationState): Promise<void> {
+  for (const name of names) {
+    state.unmovable.add(name);
+    if (state.unfolded.has(name)) continue;
+    const processedBytes = state.processed.get(name);
+    const folded = processedBytes !== undefined
+      ? (await fileSizeOrNull(eventsDir, name)) === processedBytes
+      : state.foldedStuck.has(name);
+    if (!folded) state.unfolded.add(name);
+  }
+}
+
 export async function migrateMonthToPerAssignee(
   root: DirectoryHandleLike,
   month: string,
@@ -256,7 +308,12 @@ export async function migrateMonthToPerAssignee(
   if (layout === "absent") return { status: "nothing-to-do" };
   const eventsDir = await getAnswerEventsDir(root, month, false);
   const prior = layout === "v2" ? await readAnswerEventsLayoutMarker(root, month) : null;
-  const state: MigrationState = { processed: new Map(), unmovable: new Set(prior?.unmovable ?? []), moved: 0, quarantinedLines: 0 };
+  // A prior run's UNFOLDED segments are retried (finding 3); only its
+  // folded-but-stuck ones are skipped. Re-folding an event is harmless: the
+  // fold drops a duplicate eventId.
+  const priorUnfolded = new Set(prior?.unfolded ?? []);
+  const foldedStuck = new Set((prior?.unmovable ?? []).filter((name) => !priorUnfolded.has(name)));
+  const state: MigrationState = { processed: new Map(), unmovable: new Set(foldedStuck), unfolded: new Set(), foldedStuck, moved: 0, quarantinedLines: 0 };
   let names = (await listFlatSegmentNames(eventsDir)).filter((name) => !state.unmovable.has(name));
   if (layout === "v2" && names.length === 0) return { status: "nothing-to-do" };
 
@@ -270,10 +327,10 @@ export async function migrateMonthToPerAssignee(
     await migratePass(root, month, eventsDir, archiveV1Dir, names, state, options, now);
     names = (await listFlatSegmentNames(eventsDir)).filter((name) => !state.unmovable.has(name));
   }
-  for (const name of names) state.unmovable.add(name);
+  await classifyLeftovers(eventsDir, names, state);
 
   await options.onProgress?.({ phase: "commit", done: 0, total: 1 });
-  const marker: AnswerEventsLayoutMarker = {
+  let marker: AnswerEventsLayoutMarker = {
     layout: "per-assignee",
     schemaVersion: 1,
     migratedAt: new Date(now()).toISOString(),
@@ -281,12 +338,23 @@ export async function migrateMonthToPerAssignee(
     flatSegmentsArchived: (prior?.flatSegmentsArchived ?? 0) + state.moved,
     assignees: (await listAssigneeFolders(root, month)).length,
     unmovable: [...state.unmovable].sort(),
+    unfolded: [...state.unfolded].sort(),
     origin: prior?.origin ?? "migration",
   };
   await writeAnswerEventsLayoutMarker(eventsDir, marker);
+  // A writer that decided v1 before the marker can still land a flat segment
+  // right after it (finding 4). One more listing: record any such straggler as
+  // unfolded so the result names it and the probe re-offers the month.
+  await options.onProgress?.({ phase: "verify", done: 0, total: 1 });
+  const unfoldedBefore = state.unfolded.size;
+  await classifyLeftovers(eventsDir, await listFlatSegmentNames(eventsDir), state);
+  if (state.unfolded.size !== unfoldedBefore) {
+    marker = { ...marker, unmovable: [...state.unmovable].sort(), unfolded: [...state.unfolded].sort() };
+    await writeAnswerEventsLayoutMarker(eventsDir, marker);
+  }
   await safeRemoveJson(eventsDir, ANSWER_EVENTS_FOLDERS.migrationLock);
   noteAnswerEventsLayoutV2(root, month);
   bumpWorkspaceEpoch(root, month);
   clearAnswerEventsCache();
-  return { status: "migrated", marker, quarantinedLines: state.quarantinedLines };
+  return { status: "migrated", marker, quarantinedLines: state.quarantinedLines, unmovable: marker.unmovable, unfolded: marker.unfolded ?? [] };
 }
