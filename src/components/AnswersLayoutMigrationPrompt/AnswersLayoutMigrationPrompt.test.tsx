@@ -24,7 +24,7 @@ const admin: AuthSession = { role: "admin", username: "admin", loginAt: "2026-10
 describe("AnswersLayoutMigrationPrompt", () => {
   afterEach(cleanup);
   beforeEach(() => {
-    mocks.probe.mockReset().mockResolvedValue([{ monthFolderName: "5-may-2026", kind: "flat", flatSegments: 2000, assignees: 12, estimateMs: 300_000 }]);
+    mocks.probe.mockReset().mockResolvedValue([{ monthFolderName: "5-may-2026", kind: "flat", flatSegments: 2000, archivedSegments: 0, assignees: 12, estimateMs: 300_000 }]);
     mocks.migrate.mockReset().mockResolvedValue({ status: "migrated", marker: {}, quarantinedLines: 0 });
   });
 
@@ -164,5 +164,49 @@ describe("AnswersLayoutMigrationPrompt", () => {
     fireEvent.click(screen.getByRole("button", { name: getLabels().answers_layout_migration_later }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(mocks.migrate).not.toHaveBeenCalled();
+  });
+  describe("round 7: leftover / silent migration locks", () => {
+    const lock = (over: Record<string, unknown>) => ({ status: "locked-elsewhere", by: "admin", startedAt: "2026-10-14T08:00:00.000Z", lastSeenAt: new Date(Date.now() - 10 * 60_000).toISOString(), self: true, takeoverAllowed: true, token: "old-run", ...over });
+
+    it("the admin's OWN leftover lock is never reported as another device: it offers to continue, then resumes with that token", async () => {
+      mocks.migrate.mockResolvedValueOnce(lock({})).mockResolvedValueOnce({ status: "migrated", marker: {}, quarantinedLines: 0 });
+      renderWith(<AnswersLayoutMigrationPrompt session={admin} directoryHandle={createMemoryDirectory("ui-own")} workspaceReady />);
+      await screen.findByText(/2000/);
+      fireEvent.click(screen.getByRole("button", { name: getLabels().answers_layout_migration_confirm }));
+      fireEvent.click(await screen.findByRole("button", { name: getLabels().answers_layout_migration_takeover_confirm }));
+      await waitFor(() => expect(mocks.migrate).toHaveBeenLastCalledWith(expect.anything(), "5-may-2026", expect.objectContaining({ takeOverLockToken: "old-run" })));
+      await screen.findByText(getLabels().answers_layout_migration_done);
+    });
+
+    it("another device's LIVE lock names who and since when, and offers no takeover", async () => {
+      mocks.migrate.mockResolvedValue(lock({ by: "admin2", self: false, takeoverAllowed: false, lastSeenAt: new Date().toISOString() }));
+      renderWith(<AnswersLayoutMigrationPrompt session={admin} directoryHandle={createMemoryDirectory("ui-live")} workspaceReady />);
+      await screen.findByText(/2000/);
+      fireEvent.click(screen.getByRole("button", { name: getLabels().answers_layout_migration_confirm }));
+      const status = await screen.findByRole("status");
+      await waitFor(() => expect(status.textContent).toContain("admin2"));
+      expect(screen.queryByRole("button", { name: getLabels().answers_layout_migration_takeover_confirm })).toBeNull();
+      expect(mocks.migrate).toHaveBeenCalledTimes(1);
+    });
+
+    it("another device's SILENT lock offers a confirmed takeover", async () => {
+      mocks.migrate.mockResolvedValueOnce(lock({ by: "admin2", self: false })).mockResolvedValueOnce({ status: "migrated", marker: {}, quarantinedLines: 0 });
+      renderWith(<AnswersLayoutMigrationPrompt session={admin} directoryHandle={createMemoryDirectory("ui-silent")} workspaceReady />);
+      await screen.findByText(/2000/);
+      fireEvent.click(screen.getByRole("button", { name: getLabels().answers_layout_migration_confirm }));
+      expect((await screen.findByText(/admin2/)).textContent).toContain("10");
+      fireEvent.click(screen.getByRole("button", { name: getLabels().answers_layout_migration_takeover_confirm }));
+      await waitFor(() => expect(mocks.migrate).toHaveBeenLastCalledWith(expect.anything(), "5-may-2026", expect.objectContaining({ takeOverLockToken: "old-run" })));
+    });
+
+    it("an incomplete month is labelled as a resume with remaining/total and a Continue button", async () => {
+      mocks.probe.mockResolvedValue([{ monthFolderName: "1-january-2026", kind: "incomplete", flatSegments: 7, archivedSegments: 13, assignees: 4, estimateMs: 1_000 }]);
+      renderWith(<AnswersLayoutMigrationPrompt session={admin} directoryHandle={createMemoryDirectory("ui-resume")} workspaceReady />);
+      const row = await screen.findByText(/1-january-2026/);
+      expect(row.textContent).toContain("استكمال الترحيل");
+      expect(row.textContent).toContain("7");
+      expect(row.textContent).toContain("20");
+      expect(screen.getByRole("button", { name: getLabels().answers_layout_migration_resume_confirm })).toBeTruthy();
+    });
   });
 });

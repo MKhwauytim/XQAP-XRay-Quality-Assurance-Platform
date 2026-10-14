@@ -36,6 +36,8 @@ type Phase =
   | { kind: "running"; text: string }
   /** Option C: unreadable flat segments found before the first write — the admin decides. */
   | { kind: "ask"; month: string; names: readonly string[]; resolve: (decision: UnreadableDecision) => void }
+  /** Round 7: a fresh lock is this admin's own, from this device (an earlier run that died) — take it over? */
+  | { kind: "takeover"; text: string; resolve: (takeOver: boolean) => void }
   | { kind: "done"; text: string; details: readonly string[] };
 
 /** UI updates from the per-file progress callback, at most ~4 per second (a phase change always shows at once). */
@@ -81,6 +83,13 @@ function fill(template: string, values: Record<string, string | number>): string
   return Object.entries(values).reduce((text, [key, value]) => text.split(`{${key}}`).join(String(value)), template);
 }
 
+/** Placeholders for the lock-holder messages: who, since when, and how long the heartbeat has been silent. */
+function lockValues(month: string, held: { by: string; startedAt: string; lastSeenAt: string }): Record<string, string | number> {
+  const at = (iso: string) => (Number.isNaN(Date.parse(iso)) ? iso : new Date(iso).toLocaleString("ar"));
+  const age = Math.max(0, Math.round((Date.now() - (Date.parse(held.lastSeenAt) || Date.now())) / 60_000));
+  return { month, by: held.by, startedAt: at(held.startedAt), age };
+}
+
 /** Review finding 3: a migration that left segments behind must say which, never report a clean success. */
 function leftoverProblems(labels: ReturnType<typeof useLabels>, month: string, unfolded: readonly string[], unmovable: readonly string[]): string[] {
   const unfoldedSet = new Set(unfolded);
@@ -98,7 +107,7 @@ export function AnswersLayoutMigrationPrompt({ session, directoryHandle, workspa
   const [needs, setNeeds] = useState<MonthMigrationNeed[]>([]);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const probedFor = useRef<string | null>(null);
-  useLeaveGuard(phase.kind === "running" || phase.kind === "ask");
+  useLeaveGuard(phase.kind === "running" || phase.kind === "ask" || phase.kind === "takeover");
   const eligible = session.role === "admin" && session.mode !== "demo" && directoryHandle !== null && workspaceReady;
   const sessionKey = `${session.username}:${session.loginAt}:${directoryHandle?.name ?? ""}`;
 
@@ -132,7 +141,8 @@ export function AnswersLayoutMigrationPrompt({ session, directoryHandle, workspa
         setPhase((current) => (current.kind === "running" ? { kind: "running", text: runningText } : current));
       });
       try {
-        const result = await migrateMonthToPerAssignee(directoryHandle, need.monthFolderName, {
+        const runOnce = (takeOverLockToken?: string) => migrateMonthToPerAssignee(directoryHandle, need.monthFolderName, {
+          takeOverLockToken,
           actor: session.username,
           onProgress,
           // Asked after the read-only phase, before the first write: "postpone" moves nothing.
@@ -149,8 +159,20 @@ export function AnswersLayoutMigrationPrompt({ session, directoryHandle, workspa
               });
             }),
         });
+        let result = await runOnce();
+        if (result.status === "locked-elsewhere" && result.takeoverAllowed) {
+          const held = result;
+          const takeOver = await new Promise<boolean>((resolve) => {
+            const template = held.self ? labels.answers_layout_migration_takeover_ask : labels.answers_layout_migration_takeover_other_ask;
+            setPhase({ kind: "takeover", text: fill(template, lockValues(need.monthFolderName, held)), resolve: (yes) => {
+              setPhase({ kind: "running", text: runningText });
+              resolve(yes);
+            } });
+          });
+          if (takeOver) result = await runOnce(held.token);
+        }
         if (result.status === "postponed") problems.push(fill(labels.answers_layout_migration_postponed, { month: need.monthFolderName }));
-        if (result.status === "locked-elsewhere") problems.push(fill(labels.answers_layout_migration_busy, { month: need.monthFolderName }));
+        if (result.status === "locked-elsewhere") problems.push(fill(labels.answers_layout_migration_busy, lockValues(need.monthFolderName, result)));
         if (result.status === "migrated") problems.push(...leftoverProblems(labels, need.monthFolderName, result.unfolded ?? [], result.unmovable ?? []));
       } catch (error) {
         logError("answersMigrationPrompt:migrate", error, { action: need.monthFolderName });
@@ -180,6 +202,19 @@ export function AnswersLayoutMigrationPrompt({ session, directoryHandle, workspa
       />
     );
   }
+  if (phase.kind === "takeover") {
+    return (
+      <ConfirmDialog
+        open
+        title={labels.answers_layout_migration_title}
+        message={<p dir="rtl">{phase.text}</p>}
+        confirmLabel={labels.answers_layout_migration_takeover_confirm}
+        cancelLabel={labels.answers_layout_migration_later}
+        onConfirm={() => phase.resolve(true)}
+        onCancel={() => phase.resolve(false)}
+      />
+    );
+  }
   const minutes = (ms: number) => Math.max(1, Math.ceil(ms / 60_000));
   const message: ReactNode =
     phase.kind === "prompt" ? (
@@ -188,8 +223,10 @@ export function AnswersLayoutMigrationPrompt({ session, directoryHandle, workspa
         <ul>
           {needs.map((need) => (
             <li key={need.monthFolderName}>
-              {fill(labels.answers_layout_migration_month_row, { month: need.monthFolderName, segments: need.flatSegments, assignees: need.assignees, minutes: minutes(need.estimateMs) })}
-              {need.kind !== "flat" ? ` — ${labels.answers_layout_migration_incomplete}` : null}
+              {need.kind === "incomplete"
+                ? fill(labels.answers_layout_migration_resume_row, { month: need.monthFolderName, n: need.flatSegments, total: need.flatSegments + need.archivedSegments, assignees: need.assignees, minutes: minutes(need.estimateMs) })
+                : fill(labels.answers_layout_migration_month_row, { month: need.monthFolderName, segments: need.flatSegments, assignees: need.assignees, minutes: minutes(need.estimateMs) })}
+              {need.kind === "stragglers" ? ` — ${labels.answers_layout_migration_incomplete}` : null}
             </li>
           ))}
         </ul>
@@ -211,7 +248,7 @@ export function AnswersLayoutMigrationPrompt({ session, directoryHandle, workspa
       open
       title={labels.answers_layout_migration_title}
       message={message}
-      confirmLabel={labels.answers_layout_migration_confirm}
+      confirmLabel={needs.length > 0 && needs.every((need) => need.kind === "incomplete") ? labels.answers_layout_migration_resume_confirm : labels.answers_layout_migration_confirm}
       cancelLabel={phase.kind === "prompt" ? labels.answers_layout_migration_later : labels.answers_layout_migration_close}
       hideConfirm={phase.kind !== "prompt"}
       onConfirm={() => void runMigration()}

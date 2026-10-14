@@ -25,6 +25,7 @@ import { logError } from "../../storage/errorLogger";
 import { bumpWorkspaceEpoch, workspaceScopeId } from "../../storage/inFlightReads";
 import { unwrap, wrap, type JsonEnvelope } from "../../storage/jsonEnvelope";
 import { moveFileVerified } from "../../storage/moveFileVerified";
+import { isNotFoundError } from "../../storage/transientFileErrors";
 import { readFileTextWithRetry, safeReadJson, safeRemoveJson, safeWriteJson } from "../../storage/safeWrite";
 import { getDistributionDeviceId } from "../../distribution/distributionEventStore";
 import {
@@ -68,6 +69,14 @@ export type MigrateMonthOptions = {
    * Never asked on a v2 straggler re-run, where nothing new is hidden.
    */
   onUnreadable?: (names: readonly string[]) => Promise<UnreadableDecision>;
+  /**
+   * Round 7: take over the FRESH lock carrying exactly this run token (from a
+   * prior `locked-elsewhere` result with `takeoverAllowed`), after the admin
+   * confirmed. Honoured only while that lock is still this admin's own from
+   * this device, or its heartbeat is silent for MIGRATION_LOCK_SILENT_MS. A
+   * different token (someone else took the lock since) is never taken.
+   */
+  takeOverLockToken?: string;
 };
 export type MigrateMonthResult =
   | {
@@ -84,7 +93,12 @@ export type MigrateMonthResult =
       unfolded: string[];
     }
   | { status: "nothing-to-do" }
-  | { status: "locked-elsewhere"; by: string; startedAt: string }
+  /**
+   * `self`: the lock is this admin's own, from this device (never "another device").
+   * `takeoverAllowed`: self, or the holder's heartbeat is silent for MIGRATION_LOCK_SILENT_MS;
+   * pass `token` back as `takeOverLockToken` after the admin confirms.
+   */
+  | { status: "locked-elsewhere"; by: string; startedAt: string; lastSeenAt: string; self: boolean; takeoverAllowed: boolean; token: string }
   /** Option C: unreadable flat segments and the admin postponed — nothing was moved or written. */
   | { status: "postponed"; unreadable: string[] };
 
@@ -98,7 +112,36 @@ type AssigneeGroup = { assignee: string; events: AnswerEvent[]; segments: Map<st
  * cannot (review finding 6). Freshness is measured from `heartbeatAt` (falling
  * back to `startedAt` for locks written before it existed).
  */
-type MigrationLock = { by: string; deviceId: string; startedAt: string; heartbeatAt?: string; token: string; revision: number; _writeToken?: string };
+type MigrationLock = { by: string; deviceId: string; startedAt: string; heartbeatAt?: string; token: string; revision: number; abandoned?: boolean; _writeToken?: string };
+
+/**
+ * Run tokens of runs that ENDED in this tab (success or failure). A lock that
+ * still carries one of these, because its removal failed on the share, is
+ * known-dead and may be taken over at once by the same admin on this device
+ * (round 7: the owner's retry was otherwise blocked for 30 minutes).
+ */
+const endedRunTokens = new Set<string>();
+
+/** @internal tests: a fresh page (another tab) has no memory of ended runs. */
+export function __forgetEndedMigrationRunsForTests(): void {
+  endedRunTokens.clear();
+}
+
+/** Thrown when the lock file itself cannot be written (acquisition exhausted its retries). */
+export class MigrationLockWriteError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message, cause === undefined ? undefined : { cause });
+    this.name = "MigrationLockWriteError";
+  }
+}
+
+/** Thrown when no heartbeat landed for half the stale window: the lock is about to look abandoned. */
+export class MigrationLockHeartbeatError extends Error {
+  constructor(cause?: unknown) {
+    super("answers migration lock heartbeat kept failing", cause === undefined ? undefined : { cause });
+    this.name = "MigrationLockHeartbeatError";
+  }
+}
 
 function lockLastSeenMs(lock: MigrationLock): number {
   return Math.max(Date.parse(lock.startedAt) || 0, Date.parse(lock.heartbeatAt ?? "") || 0);
@@ -147,37 +190,75 @@ export function groupFlatSegmentLines(
   return { groups, quarantined };
 }
 
+type LockVerdict = { ok: true } | { ok: false; by: string; startedAt: string; lastSeenAt: string; self: boolean; takeoverAllowed: boolean; token: string };
+
+/**
+ * A holder whose heartbeat (every <= MIGRATION_LOCK_HEARTBEAT_MS while it runs)
+ * has been silent this long has almost certainly died: an admin may take its
+ * lock over after confirming, instead of waiting MIGRATION_LOCK_STALE_MS.
+ */
+export const MIGRATION_LOCK_SILENT_MS = 3 * 60 * 1000;
+
+/**
+ * May this run take over a FRESH lock it does not own? Silently: only this
+ * admin's own lock from this device whose run is known to have ended (in this
+ * tab, or marked `abandoned` by its failed release). After the admin confirmed
+ * that exact token: their own lock, or anyone's whose heartbeat is silent for
+ * MIGRATION_LOCK_SILENT_MS. A live holder's lock is never taken (finding 6).
+ */
+function isOwnLock(held: MigrationLock, actor: string, deviceId: string): boolean {
+  return held.by === actor && held.deviceId === deviceId;
+}
+
+function mayTakeOverLock(held: MigrationLock, actor: string, deviceId: string, nowMs: number, confirmedToken: string | undefined): boolean {
+  const own = isOwnLock(held, actor, deviceId);
+  if (own && (held.abandoned === true || endedRunTokens.has(held.token))) return true;
+  if (confirmedToken !== held.token) return false;
+  return own || nowMs - lockLastSeenMs(held) >= MIGRATION_LOCK_SILENT_MS;
+}
+
 async function acquireMigrationLock(
   eventsDir: DirectoryHandleLike,
   actor: string,
   nowMs: number,
-  runToken: string
-): Promise<{ ok: true } | { ok: false; by: string; startedAt: string }> {
+  runToken: string,
+  takeOverLockToken: string | undefined
+): Promise<LockVerdict> {
   const name = ANSWER_EVENTS_FOLDERS.migrationLock;
   const deviceId = getDistributionDeviceId();
-  const outcome = await casLoop<{ ok: true } | { ok: false; by: string; startedAt: string }>(
+  let lastCause: unknown;
+  const outcome = await casLoop<LockVerdict>(
     async (writeToken) => {
       const existing = await safeReadJson<JsonEnvelope<MigrationLock>>(eventsDir, name);
       const held = existing.ok ? unwrap<MigrationLock>(existing.value) : null;
       const fresh = held !== null && nowMs - lockLastSeenMs(held) < MIGRATION_LOCK_STALE_MS;
-      if (held && fresh && held.token !== runToken) {
-        return { done: true, result: { ok: false, by: held.by, startedAt: held.startedAt } };
+      if (held && fresh && held.token !== runToken && !mayTakeOverLock(held, actor, deviceId, nowMs, takeOverLockToken)) {
+        const self = isOwnLock(held, actor, deviceId);
+        const lastSeenMs = lockLastSeenMs(held);
+        return { done: true, result: { ok: false, by: held.by, startedAt: held.startedAt, lastSeenAt: new Date(lastSeenMs).toISOString(), self, takeoverAllowed: self || nowMs - lastSeenMs >= MIGRATION_LOCK_SILENT_MS, token: held.token } };
       }
       const previousRevision = held?.revision ?? 0;
       const nowIso = new Date(nowMs).toISOString();
       const next: MigrationLock = { by: actor, deviceId, startedAt: nowIso, heartbeatAt: nowIso, token: runToken, revision: previousRevision + 1, _writeToken: writeToken };
-      const written = await safeWriteJson(eventsDir, name, wrap(next, previousRevision));
-      const verdict = await readBackOwnWrite(
-        written,
-        () => safeReadJson<JsonEnvelope<MigrationLock>>(eventsDir, name),
-        (verify) => verify.ok && unwrap<MigrationLock>(verify.value)._writeToken === writeToken,
-        "answers:migration-lock"
-      );
-      return verdict === "not-mine" ? { done: false } : { done: true, result: { ok: true } };
+      try {
+        const written = await safeWriteJson(eventsDir, name, wrap(next, previousRevision));
+        const verdict = await readBackOwnWrite(
+          written,
+          () => safeReadJson<JsonEnvelope<MigrationLock>>(eventsDir, name),
+          (verify) => verify.ok && unwrap<MigrationLock>(verify.value)._writeToken === writeToken,
+          "answers:migration-lock"
+        );
+        return verdict === "not-mine" ? { done: false } : { done: true, result: { ok: true } };
+      } catch (error) {
+        lastCause = error;
+        throw error;
+      }
     },
     { context: "answers:migration-lock", maxRetries: 3, baseDelayMs: 150 }
   );
-  if ("error" in outcome) throw new Error(outcome.error);
+  // Round 7 field report: this used to be a plain `new Error(text)`, which the
+  // migration dialog could only show as "unexpected error".
+  if ("error" in outcome) throw new MigrationLockWriteError(outcome.error, lastCause);
   return outcome;
 }
 
@@ -190,29 +271,63 @@ class MigrationLockLostError extends Error {
 
 /**
  * Refreshes `heartbeatAt` on our lock (throttled by MIGRATION_LOCK_HEARTBEAT_MS
- * unless `force`). Throws MigrationLockLostError when the lock is gone or now
- * carries another run's token — a stale takeover happened, so this run must not
- * keep moving files or commit.
+ * unless `force`). Throws MigrationLockLostError only when the lock is
+ * VERIFIABLY gone or carries another run's token — a stale takeover happened,
+ * so this run must not keep moving files or commit.
+ *
+ * Round 7 field report: a heartbeat whose REPLACE the share refused (the lock
+ * is read by every v154 client's layout probe, so it is often open elsewhere)
+ * used to abort the whole month mid-archive. A failed read or write is now
+ * logged and retried on the next progress step; the run gives up
+ * (MigrationLockHeartbeatError) only once no heartbeat has landed for half of
+ * MIGRATION_LOCK_STALE_MS, i.e. well before another admin could see the lock
+ * as abandoned and take it over.
  */
 function createLockHeartbeat(eventsDir: DirectoryHandleLike, runToken: string, now: () => number) {
-  let lastBeatMs = now();
+  let lastAttemptMs = now();
+  let lastLandedMs = lastAttemptMs;
   return async (force = false): Promise<void> => {
     const nowMs = now();
-    if (!force && nowMs - lastBeatMs < MIGRATION_LOCK_HEARTBEAT_MS) return;
-    const read = await safeReadJson<JsonEnvelope<MigrationLock>>(eventsDir, ANSWER_EVENTS_FOLDERS.migrationLock);
-    const held = read.ok ? unwrap<MigrationLock>(read.value) : null;
-    if (!held || held.token !== runToken) throw new MigrationLockLostError(held?.by ?? null);
-    const next: MigrationLock = { ...held, heartbeatAt: new Date(nowMs).toISOString(), revision: held.revision + 1 };
-    await safeWriteJson(eventsDir, ANSWER_EVENTS_FOLDERS.migrationLock, wrap(next, held.revision));
-    lastBeatMs = nowMs;
+    if (!force && nowMs - lastAttemptMs < MIGRATION_LOCK_HEARTBEAT_MS) return;
+    lastAttemptMs = nowMs;
+    let failure: unknown;
+    try {
+      const read = await safeReadJson<JsonEnvelope<MigrationLock>>(eventsDir, ANSWER_EVENTS_FOLDERS.migrationLock);
+      if (!read.ok && read.reason === "missing") throw new MigrationLockLostError(null);
+      if (read.ok) {
+        const held = unwrap<MigrationLock>(read.value);
+        if (held.token !== runToken) throw new MigrationLockLostError(held.by);
+        const next: MigrationLock = { ...held, heartbeatAt: new Date(nowMs).toISOString(), revision: held.revision + 1 };
+        await safeWriteJson(eventsDir, ANSWER_EVENTS_FOLDERS.migrationLock, wrap(next, held.revision));
+        lastLandedMs = nowMs;
+        return;
+      }
+      failure = new Error("answers migration lock unreadable (corrupt)");
+    } catch (error) {
+      if (error instanceof MigrationLockLostError) throw error;
+      failure = error;
+    }
+    logError("answers:migration-lock-heartbeat", failure);
+    if (nowMs - lastLandedMs > MIGRATION_LOCK_STALE_MS / 2) throw new MigrationLockHeartbeatError(failure);
   };
 }
 
-/** Best-effort: drop the lock after a failed run, but only if it is still ours. */
+/**
+ * Best-effort, never throws: drop the lock if it is still ours (siblings first,
+ * see safeRemoveJson). When the share refuses the delete, try to mark it
+ * `abandoned` so this admin can take it over at once from another tab; either
+ * way the run token is remembered as ended in this tab.
+ */
 async function releaseLockIfOurs(eventsDir: DirectoryHandleLike, runToken: string): Promise<void> {
+  endedRunTokens.add(runToken);
   try {
     const read = await safeReadJson<JsonEnvelope<MigrationLock>>(eventsDir, ANSWER_EVENTS_FOLDERS.migrationLock);
-    if (read.ok && unwrap<MigrationLock>(read.value).token === runToken) await safeRemoveJson(eventsDir, ANSWER_EVENTS_FOLDERS.migrationLock);
+    if (!read.ok) return;
+    const held = unwrap<MigrationLock>(read.value);
+    if (held.token !== runToken) return;
+    const removed = await safeRemoveJson(eventsDir, ANSWER_EVENTS_FOLDERS.migrationLock);
+    if (removed.ok || !removed.remaining.includes(ANSWER_EVENTS_FOLDERS.migrationLock)) return;
+    await safeWriteJson(eventsDir, ANSWER_EVENTS_FOLDERS.migrationLock, wrap({ ...held, abandoned: true, revision: held.revision + 1 }, held.revision));
   } catch (error) {
     logError("answers:migration-lock-release", error);
   }
@@ -263,18 +378,71 @@ function migrationWriter(root: DirectoryHandleLike, month: string, folder: strin
   };
 }
 
+/**
+ * Round 7 (resume): parsed lines already present in `{parent}/{child}/`. A
+ * rerun after a crash re-reads every flat segment still in place (it must, to
+ * move it with a verified byte count), but appends only what an earlier run
+ * did not already write -- so reruns never grow an assignee's archive or the
+ * quarantine. A missing folder is "nothing written yet"; any other read
+ * failure propagates (never mistake "could not look" for "empty").
+ */
+async function readWrittenLines(parent: DirectoryHandleLike, child: string): Promise<unknown[]> {
+  let dir: DirectoryHandleLike;
+  try {
+    dir = await parent.getDirectoryHandle(child, { create: false });
+  } catch (error) {
+    if (isNotFoundError(error)) return [];
+    throw error;
+  }
+  const out: unknown[] = [];
+  for (const entry of await listDirectoryEntries(dir)) {
+    if (entry.kind !== "file" || !entry.name.endsWith(ANSWER_EVENT_SEGMENT_SUFFIX)) continue;
+    const text = await readFileTextWithRetry(dir, entry.name);
+    for (const raw of (text ?? "").split("\n")) {
+      if (raw.length === 0) continue;
+      try {
+        out.push(JSON.parse(raw));
+      } catch {
+        // A torn tail line is not "written"; its event is appended again.
+      }
+    }
+  }
+  return out;
+}
+
+function eventIdOf(value: unknown): string | null {
+  const id = (value as { eventId?: unknown } | null)?.eventId;
+  return typeof id === "string" && id !== "" ? id : null;
+}
+
 async function appendToAssigneeArchive(root: DirectoryHandleLike, month: string, folder: string, group: AssigneeGroup): Promise<void> {
   const assigneeDir = await getAssigneeAnswerEventsDir(root, month, group.assignee, true);
+  const written = new Set((await readWrittenLines(assigneeDir, ANSWER_EVENTS_FOLDERS.assigneeArchive)).map(eventIdOf).filter((id): id is string => id !== null));
+  const pending = group.events.filter((event) => {
+    const id = eventIdOf(event);
+    if (id === null) return true;
+    if (written.has(id)) return false;
+    written.add(id);
+    return true;
+  });
+  if (pending.length === 0) return;
   const { writer, config } = migrationWriter(root, month, folder, "v1merge");
-  for (const chunk of chunkEventsForSegmentAppends(sortAnswerEventsForFold([...group.events]))) {
+  for (const chunk of chunkEventsForSegmentAppends(sortAnswerEventsForFold(pending))) {
     await appendEventSegment<AnswerEvent>(assigneeDir, chunk, writer, config);
   }
 }
 
 /** Quarantined lines are wrapped as JSON records (the raw text is kept verbatim in `raw`; the original segment itself is archived untouched in `_archive-v1/`). */
 async function writeQuarantine(root: DirectoryHandleLike, month: string, eventsDir: DirectoryHandleLike, lines: readonly QuarantinedLine[], nowIso: string): Promise<void> {
+  const key = (segment: unknown, line: unknown, raw: unknown) => JSON.stringify([segment, line, raw]);
+  const written = new Set((await readWrittenLines(eventsDir, ANSWER_EVENTS_FOLDERS.quarantine)).map((record) => {
+    const r = record as { quarantinedFrom?: unknown; line?: unknown; raw?: unknown } | null;
+    return key(r?.quarantinedFrom, r?.line, r?.raw);
+  }));
+  const pending = lines.filter((line) => !written.has(key(line.segment, line.line, line.raw)));
+  if (pending.length === 0) return;
   const { writer, config } = migrationWriter(root, month, ANSWER_EVENTS_FOLDERS.quarantine, "quarant");
-  const records = lines.map((line) => ({ quarantinedFrom: line.segment, line: line.line, reason: line.reason, raw: line.raw, quarantinedAt: nowIso }));
+  const records = pending.map((line) => ({ quarantinedFrom: line.segment, line: line.line, reason: line.reason, raw: line.raw, quarantinedAt: nowIso }));
   for (const chunk of chunkEventsForSegmentAppends(records)) await appendEventSegment(eventsDir, chunk, writer, config);
 }
 
@@ -463,8 +631,12 @@ export async function migrateMonthToPerAssignee(
 
   await options.onProgress?.({ phase: "lock", done: 0, total: 1 });
   const runToken = crypto.randomUUID();
-  const lock = await acquireMigrationLock(eventsDir, options.actor, now(), runToken);
-  if (!lock.ok) return { status: "locked-elsewhere", by: lock.by, startedAt: lock.startedAt };
+  const lock = await acquireMigrationLock(eventsDir, options.actor, now(), runToken, options.takeOverLockToken);
+  if (!lock.ok) {
+    const { ok: _ok, ...held } = lock;
+    void _ok;
+    return { status: "locked-elsewhere", ...held };
+  }
   const heartbeat = createLockHeartbeat(eventsDir, runToken, now);
   // Every progress step doubles as the lock heartbeat (finding 6).
   const beatingOptions: MigrateMonthOptions = {
@@ -477,7 +649,9 @@ export async function migrateMonthToPerAssignee(
   try {
     const result = await runLockedMigration(root, month, eventsDir, prior, state, names, beatingOptions, now, heartbeat);
     // Postponed = nothing moved: drop our lock so the month reads as plain v1 again at once.
-    if (result.status === "postponed") await releaseLockIfOurs(eventsDir, runToken);
+    // Migrated: `_layout.json` is authoritative from here (getAnswerEventsLayout checks it
+    // first), so a lock the share refuses to delete can no longer fail or block the month.
+    await releaseLockIfOurs(eventsDir, runToken);
     return result;
   } catch (error) {
     // The month stays v1-migrating if `_archive-v1/` holds moved files, so writers keep
@@ -544,7 +718,6 @@ async function runLockedMigration(
     marker = { ...marker, unmovable: [...state.unmovable].sort(), unfolded: [...state.unfolded].sort() };
     await writeAnswerEventsLayoutMarker(eventsDir, marker);
   }
-  await safeRemoveJson(eventsDir, ANSWER_EVENTS_FOLDERS.migrationLock);
   noteAnswerEventsLayoutV2(root, month);
   bumpWorkspaceEpoch(root, month);
   clearAnswerEventsCache();

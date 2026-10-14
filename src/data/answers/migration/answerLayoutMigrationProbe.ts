@@ -4,7 +4,7 @@ import { mapWithConcurrency } from "../../storage/concurrency";
 import { listDirectoryEntries } from "../../storage/directoryScan";
 import { logError } from "../../storage/errorLogger";
 import { isNotFoundError } from "../../storage/transientFileErrors";
-import { getAnswerEventsDir, getAnswerEventsLayout, getSampleEmployeeDir } from "../../workspace/workspacePaths";
+import { getAnswerArchiveV1Dir, getAnswerEventsDir, getAnswerEventsLayout, getSampleEmployeeDir } from "../../workspace/workspacePaths";
 import { ANSWER_EVENT_SEGMENT_SUFFIX } from "../answerEventStore";
 import { ANSWERS_SUFFIX, REQUESTS_SUFFIX } from "../answerStorage";
 import { readAnswerEventsLayoutMarker } from "../v2/answerEventsLayout";
@@ -14,6 +14,8 @@ export type MonthMigrationNeed = {
   monthFolderName: string;
   kind: "flat" | "incomplete" | "stragglers";
   flatSegments: number;
+  /** Round 7 resume: segments an earlier run already archived into `_archive-v1/` (0 unless incomplete). */
+  archivedSegments: number;
   assignees: number;
   estimateMs: number;
 };
@@ -34,6 +36,17 @@ async function countAssigneeStems(root: DirectoryHandleLike, month: string): Pro
   }
 }
 
+async function countArchivedSegments(root: DirectoryHandleLike, month: string): Promise<number> {
+  try {
+    return (await listDirectoryEntries(await getAnswerArchiveV1Dir(root, month, false))).filter(
+      (entry) => entry.kind === "file" && entry.name.endsWith(ANSWER_EVENT_SEGMENT_SUFFIX)
+    ).length;
+  } catch (error) {
+    if (isNotFoundError(error)) return 0;
+    throw error;
+  }
+}
+
 async function probeMonth(root: DirectoryHandleLike, month: string): Promise<MonthMigrationNeed | null> {
   const layout = await getAnswerEventsLayout(root, month);
   if (layout === "absent") return null;
@@ -48,7 +61,8 @@ async function probeMonth(root: DirectoryHandleLike, month: string): Promise<Mon
   const kind: MonthMigrationNeed["kind"] | null =
     layout === "v1-migrating" ? "incomplete" : flatSegments === 0 ? null : layout === "v2" ? "stragglers" : "flat";
   if (!kind) return null;
-  return { monthFolderName: month, kind, flatSegments, assignees: await countAssigneeStems(root, month), estimateMs: flatSegments * MIGRATION_MS_PER_SEGMENT_ESTIMATE };
+  const archivedSegments = kind === "incomplete" ? await countArchivedSegments(root, month) : 0;
+  return { monthFolderName: month, kind, flatSegments, archivedSegments, assignees: await countAssigneeStems(root, month), estimateMs: flatSegments * MIGRATION_MS_PER_SEGMENT_ESTIMATE };
 }
 
 /** Which months an admin should be offered the migration for. One listing per month; never writes. */

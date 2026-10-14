@@ -1,6 +1,7 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { dedupeInFlight, workspaceEpoch, workspaceScopeId } from "../storage/inFlightReads";
 import { isNotFoundError } from "../storage/transientFileErrors";
+import { registerQuietRecoveryFileName } from "../storage/bakRecoveryReport";
 import { registerDirectoryPath } from "../storage/webLocks";
 import { subscribeToDataRefresh } from "./dataRefreshSignal";
 import { hashSeedString } from "../sampling/rng";
@@ -48,6 +49,9 @@ export const ANSWER_EVENTS_FOLDERS = {
   /** Derived change markers for the sync probe (`answerFolderHeads.ts`); never user data. */
   heads: "_heads",
 } as const;
+
+// Round 7: the migration lock's `.tmp` fallback is routine on a contended share, not damage.
+registerQuietRecoveryFileName(ANSWER_EVENTS_FOLDERS.migrationLock);
 
 const RESERVED_ANSWER_EVENTS_CHILDREN: ReadonlySet<string> = new Set<string>([
   ANSWER_EVENTS_FOLDERS.archiveV1,
@@ -757,6 +761,22 @@ async function isMigrationLockFresh(eventsDir: DirectoryHandleLike): Promise<boo
     if (isNotFoundError(error)) return false;
     return true;
   }
+  return Date.now() - (await migrationLockLastSeenMs(eventsDir, file)) < MIGRATION_LOCK_STALE_MS;
+}
+
+/**
+ * Round 7 field report: every v154 client called this on every save and every
+ * sync probe, and each call OPENED the lock's content -- so during a run the
+ * lock was almost always open on some machine, and the share refused the
+ * migration's replace-in-place heartbeat. The content is now parsed once per
+ * (size, lastModified) -- metadata from getFile(), which does not open the file
+ * -- and reused until the lock is rewritten (one open per heartbeat, ~30 s).
+ */
+const lockLastSeenByDir = new WeakMap<DirectoryHandleLike, { size: number; lastModified: number; lastSeenMs: number }>();
+
+async function migrationLockLastSeenMs(eventsDir: DirectoryHandleLike, file: File): Promise<number> {
+  const cached = lockLastSeenByDir.get(eventsDir);
+  if (cached && cached.size === file.size && cached.lastModified === file.lastModified && file.lastModified > 0) return cached.lastSeenMs;
   let lastSeenMs = file.lastModified || 0;
   try {
     const parsed = JSON.parse(await file.text()) as { data?: { startedAt?: string; heartbeatAt?: string }; startedAt?: string; heartbeatAt?: string };
@@ -764,9 +784,11 @@ async function isMigrationLockFresh(eventsDir: DirectoryHandleLike): Promise<boo
     const fromContent = Math.max(Date.parse(lock?.startedAt ?? "") || 0, Date.parse(lock?.heartbeatAt ?? "") || 0);
     if (fromContent > 0) lastSeenMs = fromContent;
   } catch {
-    // Unparseable (torn write): fall back to the file's own timestamp.
+    // Unparseable (torn write) or unreadable mid-replace: fall back to the file's own timestamp, uncached.
+    return lastSeenMs;
   }
-  return Date.now() - lastSeenMs < MIGRATION_LOCK_STALE_MS;
+  lockLastSeenByDir.set(eventsDir, { size: file.size, lastModified: file.lastModified, lastSeenMs });
+  return lastSeenMs;
 }
 
 /** True when `_archive-v1/` exists and holds at least one entry. A non-NotFound open error propagates (same rule as entryExists). */

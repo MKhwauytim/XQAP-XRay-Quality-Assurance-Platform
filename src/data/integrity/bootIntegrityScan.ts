@@ -1,4 +1,5 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { isQuietRecoveryFileName } from "../storage/bakRecoveryReport";
 import { logError } from "../storage/errorLogger";
 import { listDirectoryEntries } from "../storage/directoryScan";
 import { reportBakRecoveryHealed } from "../storage/bakRecoveryReport";
@@ -277,7 +278,7 @@ export function pickSiblingHealCandidates(entryNames: readonly string[]): string
   const withTmp: string[] = [];
   const withBakOnly: string[] = [];
   for (const name of [...names].sort()) {
-    if (!name.endsWith(".json") || SIBLING_HEAL_EXCLUDED_NAMES.has(name)) continue;
+    if (!name.endsWith(".json") || SIBLING_HEAL_EXCLUDED_NAMES.has(name) || isQuietRecoveryFileName(name)) continue;
     if (names.has(`${name}.tmp`)) withTmp.push(name);
     else if (names.has(`${name}.bak`)) withBakOnly.push(name);
   }

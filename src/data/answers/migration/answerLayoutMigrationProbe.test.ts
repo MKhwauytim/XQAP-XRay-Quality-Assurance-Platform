@@ -20,7 +20,7 @@ describe("probeAnswerLayoutMigrations", () => {
     await writeText(employees, "emp2.requests.json", "{}");
     await makeV2Month(root, "2-feb-2026");
     const needs = await probeAnswerLayoutMigrations(root, ["1-jan-2026", "2-feb-2026", "3-mar-2026"]);
-    expect(needs).toEqual([{ monthFolderName: "1-jan-2026", kind: "flat", flatSegments: 2, assignees: 2, estimateMs: 300 }]);
+    expect(needs).toEqual([{ monthFolderName: "1-jan-2026", kind: "flat", flatSegments: 2, archivedSegments: 0, assignees: 2, estimateMs: 300 }]);
   });
 
   it("reports an incomplete migration and v2 stragglers (minus unmovable)", async () => {
