@@ -1237,7 +1237,10 @@ class AnswersMigrationInProgressError extends Error {
  * save through the same path a save that found the lock takes.
  */
 async function assertStillV1BeforeFlatAppend(directoryHandle: DirectoryHandleLike, monthFolderName: string): Promise<void> {
-  if ((await getAnswerEventsLayout(directoryHandle, monthFolderName)) !== "v1") throw new AnswersMigrationInProgressError();
+  // `absent` only happens for a month pinned to v1 with no answers.events/ yet
+  // (the flat append creates it); no migration can be running there.
+  const layout = await getAnswerEventsLayout(directoryHandle, monthFolderName);
+  if (layout !== "v1" && layout !== "absent") throw new AnswersMigrationInProgressError();
 }
 
 /** v2: every append — self-save or on-behalf — lands in the ASSIGNEE's folder. */
