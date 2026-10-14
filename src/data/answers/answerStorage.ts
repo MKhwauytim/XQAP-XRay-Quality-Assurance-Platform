@@ -58,6 +58,7 @@ import type { SegmentWriterIdentity, AppendOnlyEventLogConfig } from "../storage
 import {
   ANSWER_EVENTS_DIR,
   ANSWER_EVENT_SEGMENT_SUFFIX,
+  ANSWER_EVENT_LOG,
   AnswerFoldError,
   appendAnswerEventSegment,
   foldAnswerEvents,
@@ -67,7 +68,9 @@ import {
 } from "./answerEventStore";
 import type { EmployeeAnswerFile, ItemAnswer } from "./answerTypes";
 import type { ReferralRequest, ReopenRequest, ReplacementRequest } from "../referral/referralTypes";
+import { isV1OffsetKey, v1OffsetKey } from "./v2/answerSnapshot";
 import {
+  ANSWER_EVENTS_FOLDERS,
   answerAssigneeFolderName,
   getAnswerEventsDir,
   getPopulationMonthDir,
@@ -497,7 +500,26 @@ function reflectLocalAppendInAnswerEventsCache(
  * partial state; the entry (if any) is left exactly as it was before this
  * call, still safe to resume from on the next successful read.
  */
+/** `_archive-v1/` of a `v1-migrating` month, read like the flat folder (absent folder = nothing). */
+async function readArchiveV1Delta(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  known: Record<string, number>,
+  options?: { strict?: boolean; tolerateConfirmedDead?: boolean }
+): Promise<{ events: AnswerEvent[]; offsets: Record<string, number> } | null> {
+  let eventsDir: DirectoryHandleLike;
+  try {
+    eventsDir = await getAnswerEventsDir(directoryHandle, monthFolderName, false);
+  } catch (error) {
+    if (isNotFoundError(error)) return null;
+    throw error;
+  }
+  return readAnswerEventDelta(eventsDir, known, { ...ANSWER_EVENT_LOG, eventsDirName: ANSWER_EVENTS_FOLDERS.archiveV1 }, options);
+}
+
 /**
+ * v1 and v1-migrating months only. A v2 month reads per assignee (Task 4/10).
+ *
  * Exported for `history/actionHistoryReaders.ts`, which folds exactly this
  * input to derive the pre-change trail the deleted answers-history writer used
  * to copy into its own files. Sharing the reader keeps the two from drifting.
@@ -521,17 +543,33 @@ export async function readAllAnswerEventsForMonth(
       cached?.sealedConfirmed !== undefined &&
       cached.sealedEpoch === epoch &&
       nowMs - (cached.sealedAtMs ?? 0) < SEALED_REVALIDATE_MS;
-    const delta = await timeAnswerStep("load.openSegments", () => readAnswerEventDelta(mainDir, cached?.offsets ?? {}, undefined, {
+    // Cached offsets of `_archive-v1/` segments carry the `v1OffsetKey` prefix.
+    const flatKnown: Record<string, number> = {};
+    const archiveKnown: Record<string, number> = {};
+    for (const [key, value] of Object.entries(cached?.offsets ?? {})) {
+      if (isV1OffsetKey(key)) archiveKnown[key.slice(ANSWER_EVENTS_FOLDERS.archiveV1.length + 1)] = value;
+      else flatKnown[key] = value;
+    }
+    const delta = await timeAnswerStep("load.openSegments", () => readAnswerEventDelta(mainDir, flatKnown, undefined, {
       ...options,
       // Names the probe saw move since they were confirmed are dropped from the
       // set (and so re-opened by this read); every other confirmation survives.
       sealedConfirmed: sealedFresh ? stillSealedNames(cached.sealedConfirmed!, cached.sealedNamesGen ?? 0) : undefined,
     }), { cachedEvents: cached?.events.size ?? 0 });
+    // A migration that crashed after moving segments into `_archive-v1/` leaves
+    // the month v1 (`v1-migrating`): those segments' answers must stay visible
+    // (Review Focus 4) until an admin re-runs the migration.
+    const archived = (await getAnswerEventsLayout(directoryHandle, monthFolderName)) === "v1-migrating"
+      ? await readArchiveV1Delta(directoryHandle, monthFolderName, archiveKnown, options)
+      : null;
     const events = cached ? new Map(cached.events) : new Map<string, AnswerEvent>();
     for (const event of delta.events) events.set(event.eventId, event);
+    for (const event of archived?.events ?? []) events.set(event.eventId, event);
+    const offsets: Record<string, number> = { ...delta.offsets };
+    for (const [name, value] of Object.entries(archived?.offsets ?? {})) offsets[v1OffsetKey(name)] = value;
     setAnswerEventsCacheEntry(directoryHandle, monthFolderName, {
       events,
-      offsets: delta.offsets,
+      offsets,
       sealedConfirmed: delta.sealedConfirmedNames,
       sealedEpoch: epoch,
       sealedNamesGen: namesGen,
