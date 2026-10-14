@@ -5,6 +5,7 @@ import { clearAnswerEventsCache, foldEmployeeEvents, loadAllEmployeeFiles, loadL
 import {
   answerEventsRestoreAction,
   canRestoreAnswerLayoutMarker,
+  recordRestoredFlatAnswerSegments,
   resolveAnswerSegmentMergeDir,
   restoredAnswerAssignees,
 } from "../answers/v2/answerRestoreSupport";
@@ -236,7 +237,17 @@ export type CreateBackupOptions = {
 };
 
 export type RestoreResult =
-  | { ok: true; restoredFiles: string[]; rollbackFolderName: string }
+  | {
+      ok: true;
+      restoredFiles: string[];
+      rollbackFolderName: string;
+      /**
+       * `{month}/{assigneeFolder}` whose layout-v2 snapshot could not be rebuilt
+       * after the restore (v154.0 review finding 7). The segments ARE restored;
+       * the stale snapshot stays until the next compaction/rebuild succeeds.
+       */
+      answerSnapshotRebuildFailures?: string[];
+    }
   | {
       ok: false;
       error: string;
@@ -1214,6 +1225,8 @@ async function restoreJsonTree(params: {
    *  collectJsonRestoreEntries' skippedPaths (F1) — a subdirectory that could
    *  not be reached during the restore walk. */
   skipped: string[];
+  /** Out-param, same convention: `{month}/{folder}` whose v2 answer snapshot rebuild failed. */
+  snapshotRebuildFailures?: string[];
   /** Workstream D — absent means the full restore, byte-for-byte unchanged. */
   scope?: RestoreScope;
 }): Promise<void> {
@@ -1337,7 +1350,14 @@ async function restoreJsonTree(params: {
     clearAnswerEventsCache();
     invalidateSealedAnswerSegments();
     invalidateAnswerEventsLayout();
-    await rebuildRestoredAnswerSnapshots(params.targetDir, applied.map((result) => result.path));
+    const restoredPaths = applied.map((result) => result.path);
+    try {
+      await recordRestoredFlatAnswerSegments(params.targetDir, restoredPaths);
+    } catch (error) {
+      logError("backup:restore:answer-flat-segments", error);
+    }
+    const failures = await rebuildRestoredAnswerSnapshots(params.targetDir, restoredPaths);
+    params.snapshotRebuildFailures?.push(...failures);
   }
 }
 
@@ -1348,10 +1368,12 @@ function isAnswerLayoutMarkerPath(path: string): boolean {
 /**
  * v2: `snapshot.json` is skip-derived, so every assignee whose segments the
  * restore merged gets its snapshot refolded from archive + live. A failure is
- * logged, not thrown: the segments are already restored, and a stale snapshot
- * is still covered by the reader's own snapshot-vs-segments checks.
+ * logged and RETURNED (surfaced in the restore result), not thrown: the
+ * segments are already restored, and a stale snapshot is still covered by the
+ * reader's own snapshot-vs-segments checks.
  */
-async function rebuildRestoredAnswerSnapshots(root: DirectoryHandleLike, paths: readonly string[]): Promise<void> {
+async function rebuildRestoredAnswerSnapshots(root: DirectoryHandleLike, paths: readonly string[]): Promise<string[]> {
+  const failures: string[] = [];
   for (const { month, folder } of restoredAnswerAssignees(paths)) {
     try {
       if ((await getAnswerEventsLayout(root, month)) !== "v2") continue;
@@ -1364,8 +1386,10 @@ async function rebuildRestoredAnswerSnapshots(root: DirectoryHandleLike, paths: 
       });
     } catch (error) {
       logError("backup:restore:answer-snapshot-rebuild", error, { action: `${month}/${folder}` });
+      failures.push(`${month}/${folder}`);
     }
   }
+  return failures;
 }
 
 type LocatedJson<T> =
@@ -1944,12 +1968,14 @@ export async function restoreBackupSnapshot(params: {
 
       const restored: string[] = [];
       const skipped: string[] = [];
+      const snapshotRebuildFailures: string[] = [];
       await restoreJsonTree({
         sourceDir: jsonDir,
         targetDir: params.directoryHandle,
         sourcePath: "",
         restored,
         skipped,
+        snapshotRebuildFailures,
         scope: params.scope,
       });
 
@@ -1982,7 +2008,12 @@ export async function restoreBackupSnapshot(params: {
         }
       }
 
-      return { ok: true, restoredFiles: restored, rollbackFolderName: rollback.folderName };
+      return {
+        ok: true,
+        restoredFiles: restored,
+        rollbackFolderName: rollback.folderName,
+        ...(snapshotRebuildFailures.length > 0 ? { answerSnapshotRebuildFailures: snapshotRebuildFailures } : {}),
+      };
     });
   } catch (error) {
     return {

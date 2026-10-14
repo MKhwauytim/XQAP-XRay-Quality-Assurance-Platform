@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createMemoryDirectory, clearReadLog, getReadLog } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { __resetAppendOnlyEventLogMemosForTests } from "../storage/appendOnlyEventLog";
-import { __clearWorkspaceDirCacheForTests, getAnswerEventsDir, invalidateAnswerEventsLayout } from "../workspace/workspacePaths";
+import { __clearWorkspaceDirCacheForTests, getAnswerEventsDir, getSampleEmployeeDir, invalidateAnswerEventsLayout } from "../workspace/workspacePaths";
 import {
   __clearAnswerEventsCacheForTests,
   AnswersUnreadableError,
@@ -98,6 +98,17 @@ describe("v2 fan-out readers", () => {
       ["a/b", ["X-e1"]],
       ["plain", ["X-e2"]],
     ]);
+  });
+
+  it("a sanitized 2-employees stem (a_b, from a/b) and the real a/b~hash folder are ONE employee (v154.0 review finding 5)", async () => {
+    const root = createMemoryDirectory("stem-dedupe");
+    await makeV2Month(root, MONTH);
+    expect((await upsertItemAnswer(root, MONTH, "a/b", item("AB", "a/b"))).ok).toBe(true);
+    const employees = await getSampleEmployeeDir(root, MONTH, true);
+    await writeText(employees, "a_b.answers.json", JSON.stringify({ username: "a/b", monthFolderName: MONTH, revision: 0, items: [] }));
+    reset();
+    const all = await loadAllEmployeeFiles(root, MONTH);
+    expect(all.map((f) => [f.username, f.items.map((i) => i.xrayImageId)])).toEqual([["a/b", ["AB"]]]);
   });
 
   it("a folder whose owner cannot be determined is skipped leniently and refused strictly", async () => {

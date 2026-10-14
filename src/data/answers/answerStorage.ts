@@ -2341,9 +2341,19 @@ async function listV2Employees(
     }
     return owner;
   });
+  const folderSet = new Set(folders);
   for (let index = 0; index < orphans.length; index += 1) {
     const owner = owners[index];
-    if (owner) byFolder.set(orphans[index]!, owner);
+    if (!owner) continue;
+    // v154.0 review finding 5: `a/b`'s 2-employees files are stemmed `a_b`
+    // (lossy sanitizer) while its folder is `a_b~hash`. A stem whose OWN folder
+    // does not exist and whose file name is this owner's is the same person --
+    // drop it, or the fan-out reports them twice (once with no events).
+    const ownerStem = safeWorkspaceFilePart(owner).toLowerCase();
+    for (const [key, stem] of byFolder) {
+      if (!folderSet.has(key) && stem.toLowerCase() === ownerStem) byFolder.delete(key);
+    }
+    byFolder.set(orphans[index]!, owner);
   }
   return [...byFolder.values()];
 }

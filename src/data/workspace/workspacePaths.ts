@@ -668,6 +668,9 @@ export async function getAnswerQuarantineDir(
 
 export type AnswerEventsLayout = "absent" | "v1" | "v1-migrating" | "v2";
 
+/** A migration lock whose last heartbeat is older than this is abandoned (taken over by a rerun; ignored by the layout probe). */
+export const MIGRATION_LOCK_STALE_MS = 30 * 60 * 1000;
+
 /**
  * Months this tab has SEEN as v2, per workspace root. Monotone on purpose: the
  * layout only moves forward (rollback is a manual, reload-requiring operation —
@@ -720,16 +723,69 @@ export async function getAnswerEventsLayout(
     if (isNotFoundError(error)) return "absent";
     throw error;
   }
-  const [marker, lock, archive] = await Promise.all([
+  const [marker, lockFresh, archiveHoldsFiles] = await Promise.all([
     entryExists(() => eventsDir.getFileHandle(ANSWER_EVENTS_FOLDERS.layoutMarker, { create: false })),
-    entryExists(() => eventsDir.getFileHandle(ANSWER_EVENTS_FOLDERS.migrationLock, { create: false })),
-    entryExists(() => eventsDir.getDirectoryHandle(ANSWER_EVENTS_FOLDERS.archiveV1, { create: false })),
+    isMigrationLockFresh(eventsDir),
+    archiveV1HoldsEntries(eventsDir),
   ]);
   if (marker) {
     noteAnswerEventsLayoutV2(directoryHandle, monthFolderName);
     return "v2";
   }
-  return lock || archive ? "v1-migrating" : "v1";
+  // v154.0 review finding 2: an ABANDONED run (stale lock, nothing moved yet)
+  // must not freeze every write for the month until an admin reruns. Only a
+  // live lock, or flat segments already moved into _archive-v1/ (invisible to
+  // a plain v1 read), keep the month v1-migrating -- and the probe re-offers
+  // that second case as "incomplete".
+  return lockFresh || archiveHoldsFiles ? "v1-migrating" : "v1";
+}
+
+/**
+ * Freshness of `_migration.lock.json`, measured like the migration measures it:
+ * the later of `startedAt`/`heartbeatAt`, else the file's own lastModified.
+ * Absent = not fresh. Any read failure other than NotFound counts as FRESH --
+ * "I could not look" must not unblock writers during a live run.
+ */
+async function isMigrationLockFresh(eventsDir: DirectoryHandleLike): Promise<boolean> {
+  let file: File;
+  try {
+    file = await (await eventsDir.getFileHandle(ANSWER_EVENTS_FOLDERS.migrationLock, { create: false })).getFile();
+  } catch (error) {
+    if (isNotFoundError(error)) return false;
+    return true;
+  }
+  let lastSeenMs = file.lastModified || 0;
+  try {
+    const parsed = JSON.parse(await file.text()) as { data?: { startedAt?: string; heartbeatAt?: string }; startedAt?: string; heartbeatAt?: string };
+    const lock = parsed?.data ?? parsed;
+    const fromContent = Math.max(Date.parse(lock?.startedAt ?? "") || 0, Date.parse(lock?.heartbeatAt ?? "") || 0);
+    if (fromContent > 0) lastSeenMs = fromContent;
+  } catch {
+    // Unparseable (torn write): fall back to the file's own timestamp.
+  }
+  return Date.now() - lastSeenMs < MIGRATION_LOCK_STALE_MS;
+}
+
+/** True when `_archive-v1/` exists and holds at least one entry. A non-NotFound open error propagates (same rule as entryExists). */
+async function archiveV1HoldsEntries(eventsDir: DirectoryHandleLike): Promise<boolean> {
+  let archive: DirectoryHandleLike;
+  try {
+    archive = await eventsDir.getDirectoryHandle(ANSWER_EVENTS_FOLDERS.archiveV1, { create: false });
+  } catch (error) {
+    if (isNotFoundError(error)) return false;
+    throw error;
+  }
+  const iterable = archive as DirectoryHandleLike & {
+    values?: () => AsyncIterable<unknown>;
+    entries?: () => AsyncIterable<unknown>;
+  };
+  const source = iterable.values?.() ?? iterable.entries?.();
+  if (!source) return true;
+  for await (const entry of source) {
+    void entry;
+    return true;
+  }
+  return false;
 }
 
 export async function getUserDataRoot(

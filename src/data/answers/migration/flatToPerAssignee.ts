@@ -6,8 +6,8 @@
 // archives every original (moves to `_archive-v1/`), never deletes.
 //
 // Crash-safe by construction: `_layout.json` (the commit point) is written
-// LAST. Before it exists the month is v1 (`v1-migrating` while the lock or
-// `_archive-v1/` exists): v1 readers read flat + `_archive-v1/`, writers defer.
+// LAST. Before it exists the month is v1 (`v1-migrating` while the lock is
+// fresh or `_archive-v1/` holds moved files): v1 readers read flat + `_archive-v1/`, writers defer.
 import type { DirectoryHandleLike } from "../../storage/fileSystemAccess";
 import {
   appendEventSegment,
@@ -32,8 +32,11 @@ import {
   getAnswerEventsDir,
   getAnswerEventsLayout,
   getAssigneeAnswerEventsDir,
+  MIGRATION_LOCK_STALE_MS,
   noteAnswerEventsLayoutV2,
 } from "../../workspace/workspacePaths";
+
+export { MIGRATION_LOCK_STALE_MS };
 import { ANSWER_EVENT_LOG, ANSWER_EVENT_SEGMENT_SUFFIX, sortAnswerEventsForFold, type AnswerEvent } from "../answerEventStore";
 import { clearAnswerEventsCache, foldEmployeeEvents, loadLegacyAnswerSeed } from "../answerStorage";
 import { v1OffsetKey } from "../v2/answerSnapshot";
@@ -41,7 +44,6 @@ import { readAnswerEventsLayoutMarker, writeAnswerEventsLayoutMarker, type Answe
 import { listAssigneeFolders } from "../v2/assigneeEventReader";
 import { rebuildAndPersistAssigneeSnapshot } from "../v2/rebuildAssigneeSnapshot";
 
-export const MIGRATION_LOCK_STALE_MS = 30 * 60 * 1000;
 /** Minimum spacing between lock heartbeats (progress steps can number in the thousands). */
 export const MIGRATION_LOCK_HEARTBEAT_MS = 30 * 1000;
 export const MIGRATION_MS_PER_SEGMENT_ESTIMATE = 150;
@@ -108,7 +110,12 @@ export function groupFlatSegmentLines(
         return;
       }
       const event = parsed as AnswerEvent;
-      const owner = (event.answeredBy ?? "").trim() || (event.eventBy ?? "").trim();
+      // answeredBy ONLY (v154.0 review finding 6): v1's eventsForEmployee matched
+      // nothing else, so an event without it was invisible to every v1 reader.
+      // Falling back to eventBy would surface it in e.g. a supervisor's folder;
+      // instead it is quarantined (archived verbatim, never deleted). Every
+      // production writer sets answeredBy (performAnswerWrite, on-behalf, seed).
+      const owner = (event.answeredBy ?? "").trim();
       let folder: string;
       try {
         folder = answerAssigneeFolderName(owner);
@@ -117,7 +124,7 @@ export function groupFlatSegmentLines(
         return;
       }
       const group = groups.get(folder) ?? { assignee: owner, events: [], segments: new Map<string, number>() };
-      group.events.push(event.answeredBy ? event : { ...event, answeredBy: owner });
+      group.events.push(event);
       group.segments.set(segment.name, segment.bytes);
       groups.set(folder, group);
     });
@@ -274,7 +281,7 @@ async function migratePass(
   root: DirectoryHandleLike,
   month: string,
   eventsDir: DirectoryHandleLike,
-  archiveV1Dir: DirectoryHandleLike,
+  archiveV1Dir: () => Promise<DirectoryHandleLike>,
   names: readonly string[],
   state: MigrationState,
   options: MigrateMonthOptions,
@@ -318,7 +325,7 @@ async function migratePass(
   for (const segment of fresh) state.processed.set(segment.name, segment.bytes);
   done = 0;
   for (const segment of fresh) {
-    const outcome = await moveFileVerified(eventsDir, segment.name, archiveV1Dir, segment.bytes);
+    const outcome = await moveFileVerified(eventsDir, segment.name, await archiveV1Dir(), segment.bytes);
     if (outcome.status === "moved") state.moved += 1;
     done += 1;
     await options.onProgress?.({ phase: "move", done, total: fresh.length });
@@ -385,7 +392,7 @@ export async function migrateMonthToPerAssignee(
   try {
     return await runLockedMigration(root, month, eventsDir, prior, state, names, beatingOptions, now, heartbeat);
   } catch (error) {
-    // The month stays v1-migrating (`_archive-v1/` exists), so writers keep
+    // The month stays v1-migrating if `_archive-v1/` holds moved files, so writers keep
     // deferring; dropping OUR lock just lets a retry start without waiting 30 min.
     await releaseLockIfOurs(eventsDir, runToken);
     throw error;
@@ -404,7 +411,11 @@ async function runLockedMigration(
   heartbeat: (force?: boolean) => Promise<void>
 ): Promise<MigrateMonthResult> {
   let names = initialNames;
-  const archiveV1Dir = await getAnswerArchiveV1Dir(root, month, true);
+  // Created LAZILY at the first move (v154.0 review finding 2): a run that dies
+  // before moving anything must not leave an `_archive-v1/` that reads as
+  // v1-migrating and blocks every write for the month.
+  let archiveV1: DirectoryHandleLike | null = null;
+  const archiveV1Dir = async (): Promise<DirectoryHandleLike> => (archiveV1 ??= await getAnswerArchiveV1Dir(root, month, true));
 
   for (let pass = 0; pass < MAX_STRAGGLER_PASSES && names.length > 0; pass += 1) {
     if (pass > 0) await options.onProgress?.({ phase: "stragglers", done: pass, total: MAX_STRAGGLER_PASSES - 1 });

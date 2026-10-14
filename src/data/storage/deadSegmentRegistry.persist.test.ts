@@ -191,6 +191,28 @@ describe("dead-segment registry persistence (per tab, sessionStorage)", () => {
     expect(outcomes.slice(4)).toEqual(["ok", "ok", "ok", "ok"]);
   });
 
+  it("a page load re-opens hydrated dead names once: a healed segment is read on the first scan and its entry dropped (v154.0 review finding 4)", async () => {
+    const raw = createMemoryDirectory("healed") as unknown as DirectoryHandleLike;
+    const main = await getSampleMainDir(raw, MONTH, true);
+    const events = await main.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: true });
+    await writeRaw(events, "aaa-ans-dev1-s1.ndjson", line("e1", "emp1"));
+    const [healed] = [...DEAD];
+    await writeRaw(events, healed!, line("healed-1", "emp2"));
+    const deadRoot = withDead(raw, new Set([healed!]));
+    for (let i = 0; i < DEAD_SEGMENT_MIN_SCANS; i += 1) {
+      __clearAnswerEventsCacheForTests();
+      await loadAllEmployeeFiles(deadRoot, MONTH).catch(() => undefined);
+      now += DEAD_SEGMENT_MIN_AGE_MS;
+    }
+    const scope = __deadSegmentScopesForTests()[0]!;
+    expect(isConfirmedDead(scope, healed!)).toBe(true);
+    reload(); // evidence hydrates from sessionStorage; the file now opens
+    const files = await loadAllEmployeeFiles(raw, MONTH);
+    expect(files.flatMap((f) => f.items.map((i) => i.xrayImageId))).toContain("XR-healed-1");
+    expect(isConfirmedDead(scope, healed!)).toBe(false);
+    expect(storage.length).toBe(0);
+  });
+
   it("v2: each assignee folder and its archive is its own scope", async () => {
     const raw = createMemoryDirectory("v2dead") as unknown as DirectoryHandleLike;
     await makeV2Month(raw, MONTH);

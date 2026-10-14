@@ -15,7 +15,8 @@
  * that never gets past the gate (field cause, 2026-10-13). For the same reason a
  * manual refresh no longer clears it: `requestDeadSegmentRecheck` makes the next
  * scan of each scope re-open its dead names ONCE, and only a successful open
- * (`recordOpenableSegment`) drops an entry.
+ * (`recordOpenableSegment`) drops an entry. Each page load also re-opens the
+ * hydrated names once (first scan of the scope), keeping their evidence.
  *
  * Scope keys are workspace-relative directory paths (`directoryResourceKey`), not
  * workspace-qualified: no stable workspace identity exists without a disk read.
@@ -96,7 +97,13 @@ function bucket(scopeKey: string): Bucket {
   let b = registry.get(scopeKey);
   if (!b) {
     // Generation 0: a scope first touched after a recheck request is re-checked too.
-    b = { entries: hydrate(scopeKey), recheckGeneration: 0 };
+    // Evidence HYDRATED from sessionStorage arms one recheck per page load
+    // (generation -1, v154.0 review finding 4): the first scan re-opens those
+    // names, so a segment that healed while the tab was away is read at once
+    // instead of staying hidden until a manual refresh or the 24 h expiry. The
+    // evidence itself is kept, so a name that still fails is dead again immediately.
+    const entries = hydrate(scopeKey);
+    b = { entries, recheckGeneration: entries.size > 0 ? -1 : 0 };
     registry.set(scopeKey, b);
   }
   return b;

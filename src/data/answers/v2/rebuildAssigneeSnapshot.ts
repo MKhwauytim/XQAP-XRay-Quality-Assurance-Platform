@@ -4,6 +4,12 @@
 // write it as the snapshot, CAS against whatever revision is there. Used by the
 // migration (with the v1 offset keys), by a restore that merged segments, and
 // by compaction when a late event forces a full refold.
+//
+// STRICT read, never `tolerateConfirmedDead` (v154.0 review finding 1): the
+// written snapshot is authoritative and archive/ is not re-read afterwards, so
+// a segment that cannot be opened aborts the write (EventSegmentUnreadableError)
+// instead of being folded as "no events". Callers log; the existing snapshot
+// stays untouched.
 import type { DirectoryHandleLike } from "../../storage/fileSystemAccess";
 import { getAssigneeAnswerEventsDir } from "../../workspace/workspacePaths";
 import type { AnswerLegacySeed } from "../answerEventStore";
@@ -32,7 +38,7 @@ export async function rebuildAndPersistAssigneeSnapshot(
   const assigneeDir = await getAssigneeAnswerEventsDir(root, month, assignee, true);
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const current = await currentRevisionAndV1Keys(assigneeDir);
-    const rebuilt = await rebuildAssigneeState(root, month, assignee, { loadLegacySeed: deps.loadLegacySeed, foldFn: deps.foldFn });
+    const rebuilt = await rebuildAssigneeState(root, month, assignee, { loadLegacySeed: deps.loadLegacySeed, foldFn: deps.foldFn, strict: true });
     if (rebuilt.deltaEvents.length === 0) return { status: "no-events" };
     const draft = snapshotDraftFromFold(rebuilt.result, {
       assignee,

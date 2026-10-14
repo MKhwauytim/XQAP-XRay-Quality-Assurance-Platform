@@ -8,7 +8,8 @@ import type { RestoreAction } from "../../backup/backupStorage";
 import type { DirectoryHandleLike } from "../../storage/fileSystemAccess";
 import { listDirectoryEntries } from "../../storage/directoryScan";
 import { isNotFoundError } from "../../storage/transientFileErrors";
-import { ANSWER_EVENTS_FOLDERS, isAnswerAssigneeFolderName } from "../../workspace/workspacePaths";
+import { ANSWER_EVENTS_FOLDERS, getAnswerEventsDir, getAnswerEventsLayout, isAnswerAssigneeFolderName } from "../../workspace/workspacePaths";
+import { readAnswerEventsLayoutMarker, writeAnswerEventsLayoutMarker } from "./answerEventsLayout";
 
 const SEGMENT_SUFFIX = ".ndjson";
 
@@ -107,4 +108,38 @@ export async function resolveAnswerSegmentMergeDir(
 export async function canRestoreAnswerLayoutMarker(eventsDir: DirectoryHandleLike): Promise<boolean> {
   const entries = await listDirectoryEntries(eventsDir);
   return !entries.some((entry) => entry.kind === "file" && entry.name.endsWith(SEGMENT_SUFFIX));
+}
+
+/**
+ * v154.0 review finding 7: a restore that (re)creates or grows a FLAT segment
+ * in a v2 month puts events where no v2 reader looks. Record each such segment
+ * in the marker's `unfolded` (and `unmovable`, of which `unfolded` is a subset)
+ * so the admin probe re-offers the month and the next migration run folds it --
+ * even when the marker had listed that name as folded-but-stuck. Returns the
+ * `{month}/{segment}` names recorded. Never moves or rewrites a segment.
+ */
+export async function recordRestoredFlatAnswerSegments(root: DirectoryHandleLike, paths: readonly string[]): Promise<string[]> {
+  const byMonth = new Map<string, Set<string>>();
+  for (const path of paths) {
+    const below = belowEventsRoot(path);
+    if (!below || !below.month || below.parts.length !== 1 || !below.parts[0]!.endsWith(SEGMENT_SUFFIX)) continue;
+    const names = byMonth.get(below.month) ?? new Set<string>();
+    names.add(below.parts[0]!);
+    byMonth.set(below.month, names);
+  }
+  const recorded: string[] = [];
+  for (const [month, names] of byMonth) {
+    if ((await getAnswerEventsLayout(root, month)) !== "v2") continue;
+    const marker = await readAnswerEventsLayoutMarker(root, month);
+    if (!marker) continue;
+    const eventsDir = await getAnswerEventsDir(root, month, false);
+    const flat: string[] = [];
+    for (const name of names) if (await hasFile(eventsDir, name)) flat.push(name);
+    if (flat.length === 0) continue;
+    const unfolded = new Set([...(marker.unfolded ?? []), ...flat]);
+    const unmovable = new Set([...marker.unmovable, ...flat]);
+    await writeAnswerEventsLayoutMarker(eventsDir, { ...marker, unmovable: [...unmovable].sort(), unfolded: [...unfolded].sort() });
+    recorded.push(...flat.map((name) => `${month}/${name}`));
+  }
+  return recorded;
 }

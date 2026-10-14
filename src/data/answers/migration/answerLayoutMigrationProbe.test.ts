@@ -26,7 +26,8 @@ describe("probeAnswerLayoutMigrations", () => {
   it("reports an incomplete migration and v2 stragglers (minus unmovable)", async () => {
     const root = createMemoryDirectory("probe2");
     const crashed = await getAnswerEventsDir(root, "1-jan-2026", true);
-    await crashed.getDirectoryHandle(ANSWER_EVENTS_FOLDERS.archiveV1, { create: true });
+    // A crashed run that already MOVED a segment (an empty _archive-v1/ no longer counts, v154.0 review finding 2).
+    await writeText(await crashed.getDirectoryHandle(ANSWER_EVENTS_FOLDERS.archiveV1, { create: true }), "moved.ndjson", encodeEventLine(savedEvent("m", 1)));
     await makeV2Month(root, "2-feb-2026");
     await writeText(await getAnswerEventsDir(root, "2-feb-2026"), "late.ndjson", encodeEventLine(savedEvent("l", 1)));
     const needs = await probeAnswerLayoutMigrations(root, ["1-jan-2026", "2-feb-2026"]);

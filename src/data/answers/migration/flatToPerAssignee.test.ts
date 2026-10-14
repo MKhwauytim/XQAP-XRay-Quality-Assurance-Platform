@@ -66,12 +66,14 @@ async function snapshotOfAll(root: DirectoryHandleLike) {
 }
 
 describe("groupFlatSegmentLines", () => {
-  it("groups by answeredBy, falls back to eventBy, quarantines the rest", () => {
+  it("groups by answeredBy only; an event with just eventBy is quarantined, never attributed (v154.0 review finding 6)", () => {
     const ok = encodeEventLine(savedEvent("a", 1));
     const noAssignee = JSON.stringify({ eventId: "n", eventType: "item-saved", eventAt: "x" });
-    const { groups, quarantined } = groupFlatSegmentLines([{ name: "s.ndjson", bytes: 1, text: `${ok}{bad\n${noAssignee}\nnull\n` }]);
+    const eventByOnly = { ...savedEvent("s", 2, { eventBy: "sup1" }) };
+    delete (eventByOnly as { answeredBy?: string }).answeredBy;
+    const { groups, quarantined } = groupFlatSegmentLines([{ name: "s.ndjson", bytes: 1, text: `${ok}{bad\n${noAssignee}\nnull\n${encodeEventLine(eventByOnly)}` }]);
     expect([...groups.keys()]).toEqual(["emp1"]);
-    expect(quarantined.map((q) => q.reason)).toEqual(["unparseable", "no-assignee", "unparseable"]);
+    expect(quarantined.map((q) => q.reason)).toEqual(["unparseable", "no-assignee", "unparseable", "no-assignee"]);
   });
 });
 
@@ -92,7 +94,8 @@ describe("migrateMonthToPerAssignee (spec §6)", () => {
     const before = await snapshotOfAll(root);
     await writeBadSegment(root, flatTexts);
     const result = await migrateMonthToPerAssignee(root, MONTH, { actor: "admin" });
-    expect(result).toMatchObject({ status: "migrated", quarantinedLines: 1 });
+    // The bad line AND the orphan line (no answeredBy) are quarantined.
+    expect(result).toMatchObject({ status: "migrated", quarantinedLines: 2 });
     resetCaches();
     expect(await getAnswerEventsLayout(root, MONTH)).toBe("v2");
     const events = await getAnswerEventsDir(root, MONTH, false);
@@ -105,8 +108,10 @@ describe("migrateMonthToPerAssignee (spec §6)", () => {
     // The bad segment's parseable neighbour line (X8) is kept; only the bad line is quarantined.
     expect({ ...after, emp1: after.emp1.filter((i) => i.xrayImageId !== "X8") }).toEqual(before);
     expect(after.emp1.some((i) => i.xrayImageId === "X8")).toBe(true);
-    // spec §6 step 2: an event with no answeredBy is attributed to its eventBy
-    expect((await loadEmployeeAnswers(root, MONTH, "emp2")).items.some((i) => i.xrayImageId === "X9")).toBe(true);
+    // v154.0 review finding 6: an event with no answeredBy was invisible to every
+    // v1 reader (eventsForEmployee matches answeredBy only), so it is quarantined
+    // (archived) instead of surfacing in its eventBy's folder.
+    expect((await loadEmployeeAnswers(root, MONTH, "emp2")).items.some((i) => i.xrayImageId === "X9")).toBe(false);
   });
 
   const phases: MigrationPhase[] = ["read", "archive", "snapshot", "move", "commit"];
@@ -129,9 +134,13 @@ describe("migrateMonthToPerAssignee (spec §6)", () => {
       resetCaches();
       const events = await getAnswerEventsDir(root, MONTH, false);
       await expect(events.getFileHandle(ANSWER_EVENTS_FOLDERS.layoutMarker)).rejects.toMatchObject({ name: "NotFoundError" });
-      expect(await getAnswerEventsLayout(root, MONTH)).toBe("v1-migrating");
+      // Before the first move nothing sits in _archive-v1/ (created lazily) and
+      // our lock was released, so the month is plain v1 and writes proceed
+      // (v154.0 review finding 2); after a move it stays v1-migrating.
+      const nothingMoved = phase === "read" || phase === "archive" || phase === "snapshot";
+      expect(await getAnswerEventsLayout(root, MONTH)).toBe(nothingMoved ? "v1" : "v1-migrating");
       expect(await snapshotOfAll(root)).toEqual(before);
-      expect((await upsertItemAnswer(root, MONTH, "emp1", item("deferred"))).ok).toBe(false);
+      if (!nothingMoved) expect((await upsertItemAnswer(root, MONTH, "emp1", item("deferred"))).ok).toBe(false);
       expect((await migrateMonthToPerAssignee(root, MONTH, { actor: "admin" })).status).toBe("migrated");
       expect(await snapshotOfAll(root)).toEqual(before);
     }, 30_000);

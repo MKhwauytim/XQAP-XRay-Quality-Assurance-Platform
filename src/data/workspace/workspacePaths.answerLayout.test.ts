@@ -69,7 +69,10 @@ describe("answer events layout v2 — paths and detector", () => {
     await touch(events, ANSWER_EVENTS_FOLDERS.migrationLock);
     expect(await getAnswerEventsLayout(root, MONTH)).toBe("v1-migrating");
     await events.removeEntry!(ANSWER_EVENTS_FOLDERS.migrationLock);
-    await events.getDirectoryHandle(ANSWER_EVENTS_FOLDERS.archiveV1, { create: true });
+    const archiveV1 = await events.getDirectoryHandle(ANSWER_EVENTS_FOLDERS.archiveV1, { create: true });
+    // An EMPTY _archive-v1/ no longer counts (v154.0 review finding 2); moved files do.
+    expect(await getAnswerEventsLayout(root, MONTH)).toBe("v1");
+    await touch(archiveV1, "moved.ndjson");
     expect(await getAnswerEventsLayout(root, MONTH)).toBe("v1-migrating");
     await touch(events, ANSWER_EVENTS_FOLDERS.layoutMarker);
     expect(await getAnswerEventsLayout(root, MONTH)).toBe("v2");

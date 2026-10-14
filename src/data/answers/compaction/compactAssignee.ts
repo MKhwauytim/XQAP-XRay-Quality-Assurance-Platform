@@ -143,7 +143,9 @@ export async function compactAssignee(root: DirectoryHandleLike, month: string, 
     for (const tail of tails) offsets[tail.name] = tail.foldedThrough;
   } else {
     // Late event or untrusted snapshot: refold everything (archive + live).
-    const rebuilt = await rebuildAssigneeState(root, month, assignee, { loadLegacySeed: deps.loadLegacySeed, foldFn: deps.foldFn });
+    // Strict (review finding 1): an unopenable segment throws before the
+    // snapshot write, so it is never persisted as "no events".
+    const rebuilt = await rebuildAssigneeState(root, month, assignee, { loadLegacySeed: deps.loadLegacySeed, foldFn: deps.foldFn, strict: true });
     result = rebuilt.result;
     offsets = { ...v1Keys(current.snapshot), ...rebuilt.archiveOffsets, ...rebuilt.liveOffsets };
   }
