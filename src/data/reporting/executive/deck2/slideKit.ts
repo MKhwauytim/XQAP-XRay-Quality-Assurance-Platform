@@ -19,6 +19,7 @@ import type { ReportModel } from "../model/reportModel";
 import { esc, fmtNum, fmtPct } from "../primitives";
 import { icon } from "../ui/icons";
 import { editAttr } from "./textEdit";
+import { resolvePortKinds } from "../portKind";
 
 // ── In-cell visuals (pure background — never change row height/padding/font) ──
 export type CellTone = "gold" | "blue" | "green" | "coral" | "neutral";
@@ -427,8 +428,10 @@ export type PortPopRow = {
   other?: number;
 };
 
-export function collectPortStats(model: ReportModel): { land: PortPopRow[]; sea: PortPopRow[] } {
-  const map = new Map<string, PortPopRow & { sea: boolean }>();
+export function collectPortStats(model: ReportModel): { land: PortPopRow[]; sea: PortPopRow[]; unknown: PortPopRow[] } {
+  // Land/sea: the shared majority-of-non-blank-type rule (portKind.ts), never the first row seen.
+  const kinds = resolvePortKinds(model.rows);
+  const map = new Map<string, PortPopRow>();
   for (const r of model.rows) {
     const name = r.portName ?? "غير محدد";
     let cur = map.get(name);
@@ -441,7 +444,6 @@ export function collectPortStats(model: ReportModel): { land: PortPopRow[]; sea:
         sampleTotal: 0,
         sampleClean: 0,
         sampleSuspicious: 0,
-        sea: (r.portType ?? "").includes("بحري"),
       };
       map.set(name, cur);
     }
@@ -465,14 +467,17 @@ export function collectPortStats(model: ReportModel): { land: PortPopRow[]; sea:
     for (const sp of summary.byPort) {
       let cur = map.get(sp.name);
       if (!cur) {
-        cur = { name: sp.name, total: 0, clean: 0, suspicious: 0, sampleTotal: 0, sampleClean: 0, sampleSuspicious: 0, sea: (sp.portType ?? "").includes("بحري") };
+        cur = { name: sp.name, total: 0, clean: 0, suspicious: 0, sampleTotal: 0, sampleClean: 0, sampleSuspicious: 0 };
         map.set(sp.name, cur);
       }
+      // A port the rows cannot type takes the population summary's own type, through the same rule.
+      if ((kinds.get(sp.name) ?? "unknown") === "unknown") kinds.set(sp.name, resolvePortKinds([{ portName: sp.name, portType: sp.portType }]).get(sp.name) ?? "unknown");
       cur.total = sp.total; cur.clean = sp.clean; cur.suspicious = sp.suspicious; cur.other = sp.other;
     }
   }
   const all = [...map.values()].sort((a, b) => b.total - a.total);
-  return { land: all.filter((p) => !p.sea), sea: all.filter((p) => p.sea) };
+  const kindOf = (p: PortPopRow) => kinds.get(p.name) ?? "unknown";
+  return { land: all.filter((p) => kindOf(p) === "land"), sea: all.filter((p) => kindOf(p) === "sea"), unknown: all.filter((p) => kindOf(p) === "unknown") };
 }
 
 /** A stacked cell: the sample figure (big) over its population base (small). */

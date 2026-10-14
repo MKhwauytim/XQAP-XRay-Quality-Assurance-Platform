@@ -19,6 +19,11 @@ describe("mapSampleRow", () => {
     expect(m.row.answerStatus).toBe("submitted");
     expect(r.completed).toBe(1);
   });
+  it("maps image quality «عادي» to «متوسط» (owner decision), and only for image quality", () => {
+    const m = mapSampleRow({ ...base, "مستوى جودة الصورة": "عادي", "تقييم الاشتباه": "عادي" }, "S", newMappingReport())!;
+    expect(m.row.imageQuality).toBe("متوسط");
+    expect(m.row.suspicionLevel).toBeNull();
+  });
   it("counts incomplete without mapping", () => {
     const r = newMappingReport();
     expect(mapSampleRow({ ...base, "الاكتمال": "" }, "Q1_Sample", r)).toBeNull();

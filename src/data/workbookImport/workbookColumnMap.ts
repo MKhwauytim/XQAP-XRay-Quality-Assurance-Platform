@@ -100,6 +100,10 @@ function level(r: MappingReport, col: string, v: string | undefined): Level | nu
   note(r, col, s);
   return null;
 }
+/** Image quality only: the owner confirmed «عادي» (normal) means «متوسط». Not applied to any other level field. */
+function qualityLevel(r: MappingReport, col: string, v: string | undefined): Level | null {
+  return v?.trim() === "عادي" ? "متوسط" : level(r, col, v);
+}
 const text = (v: string | undefined) => (v?.trim() ? v.trim() : null);
 
 export function mapSampleRow(c: Record<string, string>, sheet: string, report: MappingReport, opts: MapOptions = {}): MappedWorkbookRow | null {
@@ -138,7 +142,7 @@ export function mapSampleRow(c: Record<string, string>, sheet: string, report: M
     expertResult: expert, imageAvailable,
     noImageReason: img === INVALID_ID ? img : null,
     hasMarking: mark === "نعم" ? true : mark === "لا" ? false : null,
-    imageQuality: level(report, "مستوى جودة الصورة", c["مستوى جودة الصورة"]),
+    imageQuality: qualityLevel(report, "مستوى جودة الصورة", c["مستوى جودة الصورة"]),
     lowQualityReason: text(c["أسباب انخفاض الجودة"]),
     suspicionLevel: level(report, "تقييم الاشتباه", c["تقييم الاشتباه"]),
     suspectedTypes: text(c["الاصناف المشبوهة"]), smuggleMethod: text(c["الية التهريب المحتملة"]),
