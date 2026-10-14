@@ -14,7 +14,7 @@ import { SEALED_REVALIDATE_MS, invalidateSealedAnswerSegments } from "./answerSe
 import type { ItemAnswer } from "./answerTypes";
 import { __pinNewAnswerMonthsToV1ForTests } from "./v2/answerEventsLayout";
 
-// This suite pins the v1 flat answers layout for months it creates (layout v2: brand-new months start per-assignee).
+/// Pinned to v1 on purpose: this suite tests the v1 FLAT-layout mechanics (flat answers.events/ segments, readAllAnswerEventsForMonth), still live for v1 and v1-migrating months. v2 equivalents: answerV2Fanout.test.ts, v2/*.test.ts.
 beforeEach(() => __pinNewAnswerMonthsToV1ForTests(true));
 afterEach(() => __pinNewAnswerMonthsToV1ForTests(false));
 

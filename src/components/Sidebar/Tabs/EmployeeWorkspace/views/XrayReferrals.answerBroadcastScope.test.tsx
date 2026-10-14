@@ -31,7 +31,7 @@ import {
 } from "./XrayReferrals.testSupport";
 import { __pinNewAnswerMonthsToV1ForTests } from "../../../../../data/answers/v2/answerEventsLayout";
 
-// This suite pins the v1 flat answers layout for months it creates (layout v2: brand-new months start per-assignee).
+/// Pinned to v1 until Plan 2 Task 11: the workspaceSync answers probe still watches only the flat answers.events/ folder.
 beforeEach(() => __pinNewAnswerMonthsToV1ForTests(true));
 afterEach(() => __pinNewAnswerMonthsToV1ForTests(false));
 

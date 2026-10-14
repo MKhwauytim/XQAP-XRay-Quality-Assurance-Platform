@@ -15,12 +15,12 @@
  *    concurrent self-save
  *  - the blank-author refusal guard writing nothing
  */
-import { describe, expect, test, beforeEach, afterEach } from "vitest";
+import { describe, expect, test } from "vitest";
 
 import { createMemoryDirectory, getOperationLog, clearOperationLog } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeWriteJson } from "../storage/safeWrite";
-import { getSampleEmployeeDir, getSampleMainDir } from "../workspace/workspacePaths";
+import { getAssigneeAnswerEventsDir, getSampleEmployeeDir, getSampleMainDir } from "../workspace/workspacePaths";
 import { ANSWER_EVENTS_DIR, appendAnswerEventSegment, type AnswerEvent } from "./answerEventStore";
 import {
   appendReferralToEmployee,
@@ -32,11 +32,7 @@ import {
 } from "./answerStorage";
 import type { EmployeeAnswerFile, ItemAnswer } from "./answerTypes";
 import type { ReferralRequest } from "../referral/referralTypes";
-import { __pinNewAnswerMonthsToV1ForTests } from "./v2/answerEventsLayout";
 
-// This suite pins the v1 flat answers layout for months it creates (layout v2: brand-new months start per-assignee).
-beforeEach(() => __pinNewAnswerMonthsToV1ForTests(true));
-afterEach(() => __pinNewAnswerMonthsToV1ForTests(false));
 
 const MONTH = "5-may-2026";
 const ASSIGNEE = "emp1";
@@ -334,8 +330,8 @@ describe("XQ-ANS-004: an unreadable answers.events segment is never silently tre
     const dir = createMemoryDirectory();
     await upsertItemAnswer(dir, MONTH, ASSIGNEE, makeItem());
 
-    const mainDir = await getSampleMainDir(dir, MONTH, true);
-    const eventsDir = await mainDir.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: true });
+    // A new month is layout v2: the employee's segments live in their own assignee folder.
+    const eventsDir = await getAssigneeAnswerEventsDir(dir, MONTH, ASSIGNEE, false);
     // Corrupt every segment file directly — write malformed NDJSON.
     const values = (eventsDir as DirectoryHandleLike & {
       values: () => AsyncIterable<{ name: string; kind: string }>;

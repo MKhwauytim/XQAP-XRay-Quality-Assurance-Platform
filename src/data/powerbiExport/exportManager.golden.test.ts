@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
@@ -15,11 +15,7 @@ import { upsertItemAnswer } from "../answers/answerStorage";
 import type { ItemAnswer } from "../answers/answerTypes";
 import { runPowerBiExport } from "./exportManager";
 import type { ExportManifest } from "./exportTypes";
-import { __pinNewAnswerMonthsToV1ForTests } from "../answers/v2/answerEventsLayout";
 
-// This suite pins the v1 flat answers layout for months it creates (layout v2: brand-new months start per-assignee).
-beforeEach(() => __pinNewAnswerMonthsToV1ForTests(true));
-afterEach(() => __pinNewAnswerMonthsToV1ForTests(false));
 
 /**
  * GOLDEN MASTER (Slice 0) — `runPowerBiExport`.

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test, afterEach } from "vitest";
+import { beforeEach, describe, expect, test } from "vitest";
 
 import { createMemoryDirectory, setSimulatedFaults } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
@@ -15,11 +15,7 @@ import {
   assessPopulationOverwrite,
   loadPopulationOverwriteImpact,
 } from "./populationOverwriteGuard";
-import { __pinNewAnswerMonthsToV1ForTests } from "../answers/v2/answerEventsLayout";
 
-// This suite pins the v1 flat answers layout for months it creates (layout v2: brand-new months start per-assignee).
-beforeEach(() => __pinNewAnswerMonthsToV1ForTests(true));
-afterEach(() => __pinNewAnswerMonthsToV1ForTests(false));
 
 const MONTH = formatMonthFolderName(5, 2026);
 
