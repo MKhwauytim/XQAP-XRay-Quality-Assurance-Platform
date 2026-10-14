@@ -83,6 +83,7 @@ import {
 import { getLabels } from "../labels/labelsStore";
 import { timeAnswerStep } from "./answerTimings";
 import { readAssigneeState, type AssigneeReadOptions } from "./v2/assigneeEventReader";
+import { maybeScheduleCompaction } from "./compaction/compactAssignee";
 import { ensureAnswerEventsLayoutForWrite } from "./v2/answerEventsLayout";
 import { markAnswerPendingLocally, mirrorAnswerLocally, queueAnswerForLanding } from "./answerLocalMirror";
 import type { OutboxIdentity } from "./answerLocalMirror";
@@ -733,6 +734,12 @@ async function loadEmployeeItemStateV2(
   extra: { strict?: boolean; tolerateConfirmedDead?: boolean } = {}
 ): Promise<EmployeeItemState> {
   const read = await readAssigneeState(directoryHandle, monthFolderName, username, v2ReadOptions(directoryHandle, monthFolderName, username, extra));
+  // Spec §7: the employee's own browser compacts its own folder, after a successful load.
+  // Fire-and-forget: the scheduler gates (owner, rate, closed month) and never rejects.
+  void maybeScheduleCompaction(directoryHandle, monthFolderName, username, read, {
+    loadLegacySeed: () => loadLegacyAnswerSeed(directoryHandle, monthFolderName, username),
+    foldFn: foldEmployeeEvents,
+  });
   const items = read.snapshot || read.deltaEvents.length > 0
     ? withLegacyOnlyItems(read.result.file.items, read.legacySeed.items)
     : read.result.file.items;
