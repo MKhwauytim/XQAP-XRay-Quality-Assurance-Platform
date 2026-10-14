@@ -1230,6 +1230,16 @@ class AnswersMigrationInProgressError extends Error {
   }
 }
 
+/**
+ * Fresh layout re-probe immediately before a v1 FLAT append. Throws
+ * AnswersMigrationInProgressError when the month is no longer plain v1 (a
+ * migration took the lock, or already committed v2), so the caller defers the
+ * save through the same path a save that found the lock takes.
+ */
+async function assertStillV1BeforeFlatAppend(directoryHandle: DirectoryHandleLike, monthFolderName: string): Promise<void> {
+  if ((await getAnswerEventsLayout(directoryHandle, monthFolderName)) !== "v1") throw new AnswersMigrationInProgressError();
+}
+
 /** v2: every append — self-save or on-behalf — lands in the ASSIGNEE's folder. */
 async function assigneeAppendTarget(
   directoryHandle: DirectoryHandleLike,
@@ -1405,6 +1415,12 @@ async function performAnswerWrite(
     const batch = decided.seedEvent ? [decided.seedEvent, event] : [event];
     mirrorCandidate = candidateFor(event, decided.previous);
     pendingEligible = event.eventType === "item-saved";
+    // The v1 decide step reads the whole month (slow on the share); an admin
+    // migration may have started — or committed — since the layout probe
+    // above. Re-check right before the flat append and defer exactly like a
+    // save that found the lock (review finding 4): a flat append landing after
+    // the migration's last listing would be invisible to every v2 reader.
+    if (layout === "v1") await assertStillV1BeforeFlatAppend(directoryHandle, monthFolderName);
     await timeAnswerStep("submit.append", () => appendAnswerEventSegment(decided.parentDir, batch, decided.writer, decided.appendConfig, {
       deadline,
       listedSegmentNames: decided.listedNames,
@@ -1724,6 +1740,10 @@ async function appendOnBehalfV1(
   // below re-derives it fresh from a post-append read.
   const { seedEvent } = await resolveSeed(directoryHandle, monthFolderName, assigneeUsername, ownBefore.some((e) => e.eventType === "migration-seed"), event.eventId, event.eventAt);
   const batch = seedEvent ? [seedEvent, event] : [event];
+  // Same decide-then-append race as performAnswerWrite (review finding 4): the
+  // throw makes the casLoop re-probe the layout and refuse (v1-migrating) or
+  // route to the assignee folder (v2) instead of appending flat.
+  await assertStillV1BeforeFlatAppend(directoryHandle, monthFolderName);
   await appendAnswerEventSegment(mainDir, batch, writer, config, { deadline, listedSegmentNames: listedAnswerSegmentNames(directoryHandle, monthFolderName) });
   reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
   // CONFIRM (§5): fresh read, same comparator, SINGLE-ITEM scope — the

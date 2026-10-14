@@ -1,6 +1,7 @@
 // src/data/answers/answerV2Routing.test.ts
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryDirectory } from "../storage/memoryDirectory";
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { __resetAppendOnlyEventLogMemosForTests } from "../storage/appendOnlyEventLog";
 import { __clearWorkspaceDirCacheForTests, ANSWER_EVENTS_FOLDERS, getAnswerEventsDir, getAssigneeAnswerEventsDir, invalidateAnswerEventsLayout } from "../workspace/workspacePaths";
 import { __clearAnswerEventsCacheForTests, loadEmployeeAnswers, upsertItemAnswer, upsertItemAnswerOnBehalf } from "./answerStorage";
@@ -23,6 +24,38 @@ const MONTH = "5-may-2026";
 
 function item(id: string, answeredBy = "emp1", status: ItemAnswer["status"] = "draft"): ItemAnswer {
   return { xrayImageId: id, templateId: "t", templateVersion: 1, answers: [{ fieldId: "f", value: id }], lastSavedAt: "2026-05-02T00:00:00.000Z", submittedAt: null, answeredBy, status };
+}
+
+/** A v1 month whose first answers.events/ listing (the v1 decide-read) races an admin migration taking its lock. */
+async function racingMigrationRoot(name: string): Promise<{ root: DirectoryHandleLike; realEvents: DirectoryHandleLike; isArmed: () => boolean }> {
+  const real = createMemoryDirectory(name);
+  await makeV1Month(real, MONTH);
+  const realEvents = await getAnswerEventsDir(real, MONTH, false);
+  let armed = true;
+  // The first listing of answers.events/ happens in the v1 decide step (the
+  // month read); an admin migration acquires its lock right then.
+  const wrap = (dir: DirectoryHandleLike): DirectoryHandleLike => new Proxy(dir, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver) as unknown;
+      if (prop === "getDirectoryHandle") {
+        return async (child: string, opts?: { create?: boolean }) => wrap(await target.getDirectoryHandle(child, opts));
+      }
+      if (prop === "values" && target.name === "answers.events" && typeof value === "function") {
+        return () => {
+          const iterate = async function* () {
+            if (armed) {
+              armed = false;
+              await writeText(realEvents, ANSWER_EVENTS_FOLDERS.migrationLock, "{}");
+            }
+            yield* (value as () => AsyncIterable<unknown>).call(target);
+          };
+          return iterate();
+        };
+      }
+      return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+    },
+  });
+  return { root: wrap(real), realEvents, isArmed: () => armed };
 }
 
 describe("layout v2 writer routing (spec §4, §10)", () => {
@@ -100,4 +133,21 @@ describe("layout v2 writer routing (spec §4, §10)", () => {
     expect(await fileNames(events)).toEqual([]);
     expect((await upsertItemAnswerOnBehalf(root, MONTH, "emp1", item("G"), "sup1", "r")).ok).toBe(false);
   });
+
+  it("a migration that starts between the v1 decide-read and the append defers the save instead of appending flat (review finding 4)", async () => {
+    const { root, realEvents, isArmed } = await racingMigrationRoot("race");
+    const result = await upsertItemAnswer(root, MONTH, "emp1", item("R"));
+    expect(isArmed()).toBe(false);
+    expect(result.ok).toBe(false);
+    expect(pending.calls).toEqual([[MONTH, "emp1", "R"]]);
+    expect(await fileNames(realEvents)).toEqual([]);
+  });
+
+  it("the same race on a v1 ON-BEHALF save refuses instead of appending flat (review finding 4)", async () => {
+    const { root, realEvents, isArmed } = await racingMigrationRoot("race-ob");
+    const result = await upsertItemAnswerOnBehalf(root, MONTH, "emp1", item("S"), "sup1", "r");
+    expect(isArmed()).toBe(false);
+    expect(result.ok).toBe(false);
+    expect(await fileNames(realEvents)).toEqual([]);
+  }, 30_000);
 });
