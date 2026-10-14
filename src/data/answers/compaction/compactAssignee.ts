@@ -35,7 +35,7 @@ export function shouldCompact(input: { liveSegmentCount: number; snapshot: Answe
   return !(input.nowMs - last < COMPACTION_MAX_AGE_MS);
 }
 
-/** Longest prefix of COMPLETE lines whose eventAt is older than the cutoff. A torn last line is never folded. */
+/** Longest prefix of COMPLETE, parseable lines whose eventAt is older than the cutoff. A torn or corrupt line is never folded. */
 export function foldablePrefix(tail: string, cutoffMs: number): { events: AnswerEvent[]; prefixBytes: number } {
   const events: AnswerEvent[] = [];
   let prefixBytes = 0;
@@ -45,8 +45,16 @@ export function foldablePrefix(tail: string, cutoffMs: number): { events: Answer
     if (end === -1) break;
     const line = tail.slice(start, end);
     if (line.length > 0) {
-      const event = JSON.parse(line) as AnswerEvent; // a corrupt line throws, exactly like the reader
-      if (!(Date.parse(event.eventAt) < cutoffMs)) break;
+      // A corrupt line ends the prefix (it and everything after stay unfolded and
+      // live, for the reader to surface) — throwing here would block this
+      // folder's compaction forever over one bad line.
+      let event: AnswerEvent;
+      try {
+        event = JSON.parse(line) as AnswerEvent;
+      } catch {
+        break;
+      }
+      if (!event || typeof event.eventAt !== "string" || !(Date.parse(event.eventAt) < cutoffMs)) break;
       events.push(event);
     }
     prefixBytes += utf8Length(tail.slice(start, end + 1));

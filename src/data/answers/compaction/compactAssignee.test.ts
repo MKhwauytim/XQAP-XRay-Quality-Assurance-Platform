@@ -50,6 +50,17 @@ describe("pure helpers", () => {
     expect(prefixBytes).toBe(new TextEncoder().encode(`${old}\n`).length);
   });
 
+  it("foldablePrefix stops at an unparseable line instead of throwing (one corrupt line must not block compaction forever)", () => {
+    const old = JSON.stringify(savedEvent("o", 1));
+    const { events, prefixBytes } = foldablePrefix(`${old}
+{not json
+${old}
+`, LATER);
+    expect(events.map((e) => e.eventId)).toEqual(["o"]);
+    expect(prefixBytes).toBe(new TextEncoder().encode(`${old}
+`).length);
+  });
+
   it("never selects a writer's head", () => {
     const listing = [`${A}.ndjson`, `${A}-1.ndjson`, `${A}-2.ndjson`, `${B}.ndjson`].map((name) => ({ name, size: 10, lastModified: 0 }));
     const offsets = Object.fromEntries(listing.map((e) => [e.name, 10]));
