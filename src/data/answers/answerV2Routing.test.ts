@@ -134,6 +134,14 @@ describe("layout v2 writer routing (spec §4, §10)", () => {
     expect((await upsertItemAnswerOnBehalf(root, MONTH, "emp1", item("G"), "sup1", "r")).ok).toBe(false);
   });
 
+  it("usernames that sanitize to the same text (a/b vs a_b) keep separate folders and never see each other's answers (review finding 9)", async () => {
+    const root = createMemoryDirectory("collide");
+    expect((await upsertItemAnswer(root, MONTH, "a/b", item("SLASH", "a/b"))).ok).toBe(true);
+    expect((await upsertItemAnswer(root, MONTH, "a_b", item("UNDERSCORE", "a_b"))).ok).toBe(true);
+    expect((await loadEmployeeAnswers(root, MONTH, "a/b")).items.map((i) => i.xrayImageId)).toEqual(["SLASH"]);
+    expect((await loadEmployeeAnswers(root, MONTH, "a_b")).items.map((i) => i.xrayImageId)).toEqual(["UNDERSCORE"]);
+  });
+
   it("a migration that starts between the v1 decide-read and the append defers the save instead of appending flat (review finding 4)", async () => {
     const { root, realEvents, isArmed } = await racingMigrationRoot("race");
     const result = await upsertItemAnswer(root, MONTH, "emp1", item("R"));

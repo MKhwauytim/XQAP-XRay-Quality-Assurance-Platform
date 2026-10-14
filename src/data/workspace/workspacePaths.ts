@@ -3,6 +3,7 @@ import { dedupeInFlight, workspaceEpoch, workspaceScopeId } from "../storage/inF
 import { isNotFoundError } from "../storage/transientFileErrors";
 import { registerDirectoryPath } from "../storage/webLocks";
 import { subscribeToDataRefresh } from "./dataRefreshSignal";
+import { hashSeedString } from "../sampling/rng";
 
 export const WORKSPACE_ROOTS = {
   population: "1-population",
@@ -57,12 +58,22 @@ const RESERVED_ANSWER_EVENTS_CHILDREN: ReadonlySet<string> = new Set<string>([
  * answered on behalf must land in ONE folder.
  */
 export function answerAssigneeFolderName(assignee: string): string {
-  const name = safeWorkspaceFilePart(assignee.trim().toLowerCase());
+  const canonical = assignee.trim().toLowerCase();
+  const name = safeWorkspaceFilePart(canonical);
   if (name === "" || name === "." || RESERVED_ANSWER_EVENTS_CHILDREN.has(name)) {
     throw new Error(`Invalid answer assignee "${assignee}": not usable as a folder name`);
   }
-  return name;
+  // Review finding 9: sanitizing is lossy (`a/b` and `a_b` both give `a_b`,
+  // `a..b` and `a.b` both give `a.b`), and two users sharing a folder would
+  // fold each other's answers. A name the sanitizer leaves untouched keeps its
+  // exact folder — every folder already written for such names stays valid —
+  // while a name it CHANGED gets a deterministic hash of the canonical name.
+  // `~` also forces the suffix, so a plain name can never spell a suffixed one.
+  if (name === canonical && !canonical.includes(ANSWER_ASSIGNEE_HASH_SEPARATOR)) return name;
+  return `${name}${ANSWER_ASSIGNEE_HASH_SEPARATOR}${hashSeedString(canonical).toString(36)}`;
 }
+
+const ANSWER_ASSIGNEE_HASH_SEPARATOR = "~";
 
 /** True for a listed `answers.events/` child directory that is an assignee folder. */
 export function isAnswerAssigneeFolderName(name: string): boolean {

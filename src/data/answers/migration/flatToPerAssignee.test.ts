@@ -75,6 +75,15 @@ describe("groupFlatSegmentLines", () => {
   });
 });
 
+describe("groupFlatSegmentLines folder collisions (review finding 9)", () => {
+  it("a/b and a_b (same sanitized text) become two groups in two folders; Emp1/emp1 stay one", () => {
+    const lines = [savedEvent("s", 1, {}, "a/b"), savedEvent("u", 2, {}, "a_b"), savedEvent("e1", 3, {}, "Emp1"), savedEvent("e2", 4, {}, "emp1")];
+    const { groups } = groupFlatSegmentLines([{ name: "s.ndjson", bytes: 1, text: lines.map(encodeEventLine).join("") }]);
+    expect(groups.size).toBe(3);
+    expect([...groups.values()].map((g) => g.events.map((e) => e.eventId)).sort()).toEqual([["e1", "e2"], ["s"], ["u"]]);
+  });
+});
+
 describe("migrateMonthToPerAssignee (spec §6)", () => {
   beforeEach(resetCaches);
 

@@ -30,12 +30,26 @@ describe("answer events layout v2 — paths and detector", () => {
 
   it("maps a username to one lowercase, path-safe folder and refuses reserved names", () => {
     expect(answerAssigneeFolderName("  Emp1 ")).toBe("emp1");
-    expect(answerAssigneeFolderName("a/b:c")).toBe("a_b_c");
+    expect(answerAssigneeFolderName("a/b:c")).toMatch(/^a_b_c~[0-9a-z]+$/);
     expect(() => answerAssigneeFolderName("_archive-v1")).toThrow();
     expect(() => answerAssigneeFolderName("_QUARANTINE")).toThrow();
     expect(() => answerAssigneeFolderName("   ")).toThrow();
     expect(isAnswerAssigneeFolderName("_quarantine")).toBe(false);
     expect(isAnswerAssigneeFolderName("emp1")).toBe(true);
+  });
+
+  it("distinct usernames never share a folder; names the sanitizer leaves alone keep their exact folder (review finding 9)", () => {
+    // Unchanged for every name sanitization does not touch (all folders Tasks 5-8 created for such names).
+    for (const name of ["emp1", "a_b", "ali.m", "محمد", "a-b c"]) expect(answerAssigneeFolderName(name)).toBe(name.toLowerCase());
+    const colliding = ["a/b", "a_b", "a\\b", "a:b", "a..b", "a.b", "A/B"];
+    const folders = colliding.map((name) => answerAssigneeFolderName(name));
+    // "a/b" and "A/B" are the same user (case-insensitive); every other pair is distinct.
+    expect(folders[0]).toBe(folders[6]);
+    expect(new Set(folders.slice(0, 6)).size).toBe(6);
+    // A plain name that LOOKS like a suffixed folder cannot capture one.
+    expect(answerAssigneeFolderName(folders[0])).not.toBe(folders[0]);
+    // Deterministic.
+    expect(answerAssigneeFolderName("a/b")).toBe(folders[0]);
   });
 
   it("resolves {assignee}/archive under 2-samples/{month}/1-main/answers.events", async () => {
