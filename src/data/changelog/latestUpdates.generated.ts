@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v153.33",
+    "date": "2026-10-14",
+    "bucket": "fix",
+    "scope": "deck3",
+    "title": "one land/sea rule per port, error rates on their own bases, labelled marking base, defined agreement weights, «عادي» image quality = «متوسط»"
+  },
+  {
     "version": "v153.32",
     "date": "2026-10-14",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "redesign",
     "scope": "executive report",
     "title": "split buildDeck3Slides into helpers to pass the complexity budget"
-  },
-  {
-    "version": "v153.24",
-    "date": "2026-10-13",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "stop the save-failure spiral on flaky shares — retry refused replace before rotating, two-name extension probe, dead-segment registry, 256 KiB segments"
   }
 ];

@@ -6,6 +6,7 @@ import { getStageKey } from "../../../population/stageHelpers";
 import { STAGE_SAMPLE_TARGETS } from "../../../population/populationConfig";
 import type { ReportModel } from "../model/reportModel";
 import { collectPortStats } from "../deck2/slideKit";
+import { UNKNOWN_PORT_KIND_LABEL } from "../portKind";
 import { collectLevelAccuracyRows } from "../deck2/section3/levelAccuracy";
 import {
   accuracyOf, collectPortAccuracy, collectPortMarking, collectPortMarkingOnly, collectPortQuality, collectQualityImageOutcomes, emptyMarking,
@@ -27,12 +28,6 @@ const RATE_HEAD = ["نسبة التوائم العامة %", "دقة السلي�
 /** Counts of one group of answers → the five count cells. */
 function fourCells(c: FourCounts): SupportCell[] {
   return [accuracyOf(c).evaluable, c.correctClean, c.correctSuspicion, c.missedSuspicion, c.falseSuspicion];
-}
-
-/** Missed and false suspicion as a share of ALL the evaluated answers of the group (the figures in brackets on the level page). */
-function shareCells(c: FourCounts): SupportCell[] {
-  const evaluable = accuracyOf(c).evaluable;
-  return [p1(pct(c.missedSuspicion, evaluable)), p1(pct(c.falseSuspicion, evaluable))];
 }
 
 /** The five rates the port pages show, from the same arithmetic. */
@@ -157,19 +152,20 @@ export function buildDeckSupportSheets(model: ReportModel, opts: { hasDecisionTa
     popTotal("بري", "إجمالي البرية", popPorts.land),
     ...popPorts.sea.map((p) => popRow("بحري", p)),
     popTotal("بحري", "إجمالي البحرية", popPorts.sea),
+    ...(popPorts.unknown.length > 0 ? [...popPorts.unknown.map((p) => popRow(UNKNOWN_PORT_KIND_LABEL, p)), popTotal(UNKNOWN_PORT_KIND_LABEL, "إجمالي غير محددة النوع", popPorts.unknown)] : []),
   ]);
 
   // ── Result agreement by level (page "نسبة التوائم") ─────────────────────────
   const stages = orderedStageAccuracy(model);
   add("نسبة التوائم حسب المستوى", "نسبة التوائم", "الإجابات المفحوصة ونسبة التوائم والاشتباهات الفائتة والخاطئة لكل مستوى مخاطر.", [
-    ["المستوى", ...FOUR_HEAD, ...RATE_HEAD, "الفائتة % من الإجابات المفحوصة", "الخاطئة % من الإجابات المفحوصة"],
-    ...stages.map((s): SupportCell[] => [s.label, ...fourCells(s.counts), ...rateCells(s.counts), ...shareCells(s.counts)]),
-    ["الإجمالي", ...fourCells(totals), ...rateCells(totals), ...shareCells(totals)],
+    ["المستوى", ...FOUR_HEAD, ...RATE_HEAD],
+    ...stages.map((s): SupportCell[] => [s.label, ...fourCells(s.counts), ...rateCells(s.counts)]),
+    ["الإجمالي", ...fourCells(totals), ...rateCells(totals)],
   ]);
 
   // ── Level 1 vs Level 2 (page "دقة إجابات المستوى الأول والثاني") ────────────
   const levelRows = collectLevelAccuracyRows(model);
-  const allLevel = [...levelRows.land, ...levelRows.sea];
+  const allLevel = [...levelRows.land, ...levelRows.sea, ...levelRows.unknown];
   const l1 = sumCounts(allLevel.map((r) => r.l1.counts));
   const l2 = sumCounts(allLevel.map((r) => r.l2.counts));
   const otherL1 = model.rows.filter((r) => r.levelOneOther !== undefined).length;
@@ -191,6 +187,7 @@ export function buildDeckSupportSheets(model: ReportModel, opts: { hasDecisionTa
     ["بري", "إجمالي البرية", ...fourCells(landTotal), ...rateCells(landTotal)],
     ...portAcc.sea.map((p) => portRow("بحري", p)),
     ["بحري", "إجمالي البحرية", ...fourCells(seaTotal), ...rateCells(seaTotal)],
+    ...(portAcc.unknown.length > 0 ? [...portAcc.unknown.map((p) => portRow(UNKNOWN_PORT_KIND_LABEL, p)), ((u: FourCounts): SupportCell[] => [UNKNOWN_PORT_KIND_LABEL, "إجمالي غير محددة النوع", ...fourCells(u), ...rateCells(u)])(sumCounts(portAcc.unknown.map((p) => p.counts)))] : []),
   ]);
 
   // ── Level accuracy by port (pages "دقة المستويين في المنافذ") ───────────────
@@ -206,11 +203,12 @@ export function buildDeckSupportSheets(model: ReportModel, opts: { hasDecisionTa
     levelRow("بري", "إجمالي البرية", sumCounts(levelRows.land.map((r) => r.l1.counts)), sumCounts(levelRows.land.map((r) => r.l2.counts))),
     ...levelRows.sea.map((r) => levelRow("بحري", r.name, r.l1.counts, r.l2.counts)),
     levelRow("بحري", "إجمالي البحرية", sumCounts(levelRows.sea.map((r) => r.l1.counts)), sumCounts(levelRows.sea.map((r) => r.l2.counts))),
+    ...(levelRows.unknown.length > 0 ? [...levelRows.unknown.map((r) => levelRow(UNKNOWN_PORT_KIND_LABEL, r.name, r.l1.counts, r.l2.counts)), levelRow(UNKNOWN_PORT_KIND_LABEL, "إجمالي غير محددة النوع", sumCounts(levelRows.unknown.map((r) => r.l1.counts)), sumCounts(levelRows.unknown.map((r) => r.l2.counts)))] : []),
   ]);
 
   // ── Marking + image quality (pages "متابعة تحديد موقع الاشتباه وجودة الصور") ──
   const marking = collectPortMarking(model);
-  const markHead = ["عدد صور الأشعة", "صور بتحديد", "صور بدون تحديد", "جودة منخفضة", "جودة متوسطة", "جودة عالية"];
+  const markHead = ["صور الاشتباه المفحوصة", "صور بتحديد", "صور بدون تحديد", "جودة منخفضة", "جودة متوسطة", "جودة عالية"];
   const markCells = (c: MarkingCounts): SupportCell[] => [c.images, c.marked, c.unmarked, c.low, c.mid, c.high];
   const markRows = (kind: string, totalLabel: string, ports: Array<{ name: string }>): SupportCell[][] => [
     ...[...ports]
@@ -223,12 +221,14 @@ export function buildDeckSupportSheets(model: ReportModel, opts: { hasDecisionTa
     ["نوع المنفذ", "المنفذ", ...markHead],
     ...markRows("بري", "إجمالي البرية", portAcc.land),
     ...markRows("بحري", "إجمالي البحرية", portAcc.sea),
+    ...(portAcc.unknown.length > 0 ? markRows(UNKNOWN_PORT_KIND_LABEL, "إجمالي غير محددة النوع", portAcc.unknown) : []),
   ]);
 
   // ── Marking (page "هل يوجد تحديد؟"): suspicion images only, every port, busiest first ──
   const markOnly = collectPortMarkingOnly(model);
-  const kindOfPort = (name: string): string => (portAcc.sea.some((p) => p.name === name) ? "بحري" : "بري");
-  const markOnlyRows = [...portAcc.land, ...portAcc.sea]
+  const kindOfPort = (name: string): string =>
+    portAcc.sea.some((p) => p.name === name) ? "بحري" : portAcc.unknown.some((p) => p.name === name) ? UNKNOWN_PORT_KIND_LABEL : "بري";
+  const markOnlyRows = [...portAcc.land, ...portAcc.sea, ...portAcc.unknown]
     .map((p) => ({ name: p.name, kind: kindOfPort(p.name), c: markOnly.get(p.name) ?? { images: 0, marked: 0, unmarked: 0 } }))
     .sort((a, b) => b.c.images - a.c.images || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const markOnlyCells = (c: { images: number; marked: number; unmarked: number }): SupportCell[] => [c.images, c.marked, p1(pct(c.marked, c.images)), c.unmarked, p1(pct(c.unmarked, c.images))];
@@ -255,20 +255,21 @@ export function buildDeckSupportSheets(model: ReportModel, opts: { hasDecisionTa
     ["نوع المنفذ", "المنفذ", "الصور المفحوصة", "جودة منخفضة", "% منخفضة", "جودة متوسطة", "% متوسطة", "جودة عالية", "% عالية"],
     ...qualityRowsFor("بري", "إجمالي البرية", portAcc.land),
     ...qualityRowsFor("بحري", "إجمالي البحرية", portAcc.sea),
+    ...(portAcc.unknown.length > 0 ? qualityRowsFor(UNKNOWN_PORT_KIND_LABEL, "إجمالي غير محددة النوع", portAcc.unknown) : []),
   ]);
 
   // ── Agreement by image quality (page "نسبة التوائم حسب جودة الصورة"), counted on IMAGES ──
   const imageOutcomes = collectQualityImageOutcomes(model);
   const qualityRows: SupportCell[][] = [];
-  for (const [prefix, label] of [["all", "جميع المنافذ"], ["land", "المنافذ البرية"], ["sea", "المنافذ البحرية"]] as const) {
+  for (const [prefix, label] of [["all", "جميع المنافذ"], ["land", "المنافذ البرية"], ["sea", "المنافذ البحرية"], ...(portAcc.unknown.length > 0 ? [["unknown", "منافذ غير محددة النوع"] as const] : [])] as const) {
     for (const [key, name] of [["منخفض", "جودة منخفضة"], ["متوسط", "جودة متوسطة"], ["عالي", "جودة عالية"]] as const) {
       const four: FourCounts = imageOutcomes.get(`${prefix}|${key}`) ?? { correctClean: 0, correctSuspicion: 0, missedSuspicion: 0, falseSuspicion: 0 };
       const a = accuracyOf(four);
-      qualityRows.push([label, name, a.evaluable, four.correctClean, four.correctSuspicion, four.missedSuspicion, four.falseSuspicion, p1(a.overall), p1(pct(four.missedSuspicion, a.evaluable)), p1(pct(four.falseSuspicion, a.evaluable))]);
+      qualityRows.push([label, name, a.evaluable, four.correctClean, four.correctSuspicion, four.missedSuspicion, four.falseSuspicion, p1(a.overall), p1(pct(four.missedSuspicion, a.cleanResults)), p1(pct(four.falseSuspicion, a.suspResults))]);
     }
   }
   add("نسبة التوائم حسب الجودة", "نسبة التوائم حسب جودة الصورة", "لكل صورة نتيجة واحدة (نتيجتها المجمّعة للمستويين مقابل رأي أخصائي ضمان جودة الأشعة): عدد الصور ونسبة التوائم والاشتباهات الفائتة والخاطئة لكل فئة جودة.", [
-    ["المنافذ", "جودة الصورة", "الصور المفحوصة", "سليمة صحيحة", "اشتباه صحيح", "الاشتباهات الفائتة", "الاشتباهات الخاطئة", "نسبة التوائم العامة %", "الفائتة % من الصور", "الخاطئة % من الصور"],
+    ["المنافذ", "جودة الصورة", "الصور المفحوصة", "سليمة صحيحة", "اشتباه صحيح", "الاشتباهات الفائتة", "الاشتباهات الخاطئة", "نسبة التوائم العامة %", "الفائتة % من الصور السليمة", "الخاطئة % من صور الاشتباه"],
     ...qualityRows,
   ]);
 

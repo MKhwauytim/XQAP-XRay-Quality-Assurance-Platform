@@ -15,6 +15,7 @@ import type { ReportModel } from "../model/reportModel";
 import { getLabels } from "../../../labels/labelsStore";
 import type { KeyedAccuracy } from "../model/aggregates";
 import { collectPortStats, type PortPopRow } from "../deck2/slideKit";
+import { resolvePortKinds } from "../portKind";
 import { collectLevelAccuracyRows } from "../deck2/section3/levelAccuracy";
 import { populationScopedRows } from "../../executiveReportTypes";
 import { engineVerdictOf } from "../deck2/section3/riskEngineAgreement";
@@ -43,7 +44,7 @@ import { barChart, fitAxis, scaleCaption } from "./chartKit";
  */
 const PORT_BODY_BUDGET_PX = 487;
 /** Height the one-line weighted-agreement formula note takes under a port table. */
-const FORMULA_NOTE_PX = 40;
+const FORMULA_NOTE_PX = 72;
 /** The group-label header row above a port table's column headers. */
 const TOP_HEADER_PX = 40;
 /** Body-row height (px) that fits `n` port rows in the budget: 56px max, 24px floor. */
@@ -105,6 +106,8 @@ const RESULT_ACCURACY_DEFINITION = "الحالات التي تم الاتفاق 
 const MISSED_SUSPICION_DEFINITION = "نتيجة أخصائي الوسائل الآلية بأن الإرسالية سليمة ورأي أخصائي ضمان جودة الأشعة بأنها اشتباه.";
 /** How معدل الاتفاق العام is calculated (one line, no worked weights). */
 const AGREEMENT_FORMULA_NOTE = "معدل الاتفاق العام = (دقة السليمة × وزن السليمة) + (دقة الاشتباه × وزن الاشتباه)";
+/** What the two weights in AGREEMENT_FORMULA_NOTE are — shown on the line under it wherever it appears. */
+const AGREEMENT_WEIGHT_NOTE = "وزن السليمة = إجابات السليمة ÷ إجمالي الإجابات، ووزن الاشتباه = إجابات الاشتباه ÷ إجمالي الإجابات";
 const FALSE_SUSPICION_DEFINITION = "نتيجة أخصائي الوسائل الآلية بأن الإرسالية اشتباه، ورأى أخصائي ضمان جودة الأشعة أنها سليمة.";
 
 /** "21,480 (1,031)" — population figure with its bracketed sample figure. */
@@ -137,6 +140,13 @@ export function accuracyOf(c: FourCounts): {
   };
 }
 
+/** The ONE base for the two error rates on every page: a missed suspicion is a share of the سليمة answers, a false
+ *  suspicion a share of the اشتباه answers — never of all answers. */
+export function errorShares(c: FourCounts): { missed: number | null; false: number | null } {
+  const a = accuracyOf(c);
+  return { missed: pct(c.missedSuspicion, a.cleanResults), false: pct(c.falseSuspicion, a.suspResults) };
+}
+
 export function sumCounts(all: FourCounts[]): FourCounts {
   return all.reduce(
     (acc, c) => ({
@@ -156,19 +166,16 @@ function byEvaluableDesc<T extends { evaluable: number; name: string }>(a: T, b:
   return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
 }
 
-export type PortAccuracyRow = { name: string; sea: boolean; counts: FourCounts; evaluable: number };
+export type PortAccuracyRow = { name: string; sea: boolean; unknown: boolean; counts: FourCounts; evaluable: number };
 
-/** model.portAccuracy (the shared decision-combined per-port fold) split into
- *  land/sea using the rows' own portType — mirrors collectPortStats's rule. */
-export function collectPortAccuracy(model: ReportModel): { land: PortAccuracyRow[]; sea: PortAccuracyRow[] } {
-  const seaByPort = new Map<string, boolean>();
-  for (const r of model.rows) {
-    const name = r.portName ?? "غير محدد";
-    if (!seaByPort.has(name)) seaByPort.set(name, (r.portType ?? "").includes("بحري"));
-  }
+/** model.portAccuracy (the shared decision-combined per-port fold) split into land / sea / undetermined by the
+ *  shared majority-of-non-blank-type rule (portKind.ts) — the same rule collectPortStats uses. */
+export function collectPortAccuracy(model: ReportModel): { land: PortAccuracyRow[]; sea: PortAccuracyRow[]; unknown: PortAccuracyRow[] } {
+  const kinds = resolvePortKinds(model.rows);
   const all: PortAccuracyRow[] = model.portAccuracy.map((p: KeyedAccuracy) => ({
     name: p.key,
-    sea: seaByPort.get(p.key) ?? false,
+    sea: kinds.get(p.key) === "sea",
+    unknown: (kinds.get(p.key) ?? "unknown") === "unknown",
     counts: {
       correctClean: p.correctClean,
       correctSuspicion: p.correctSuspicion,
@@ -178,7 +185,7 @@ export function collectPortAccuracy(model: ReportModel): { land: PortAccuracyRow
     evaluable: p.evaluable,
   }));
   all.sort(byEvaluableDesc);
-  return { land: all.filter((p) => !p.sea), sea: all.filter((p) => p.sea) };
+  return { land: all.filter((p) => !p.sea && !p.unknown), sea: all.filter((p) => p.sea), unknown: all.filter((p) => p.unknown) };
 }
 
 /** Suspicion images per port: how many, how many carry a marking («هل يوجد تحديد؟» = نعم), and their image quality. */
@@ -253,11 +260,13 @@ export function collectPortMarkingOnly(model: ReportModel): Map<string, MarkingO
 
 /**
  * Verification outcome per image-quality group, counted on IMAGES: one count per image, from its combined L1/L2 result
- * against the specialist's (`verificationCategory`). Keys are `all|<quality>`, `land|<quality>` and `sea|<quality>`.
+ * against the specialist's (`verificationCategory`). Keys are `all|<quality>`, `land|<quality>`, `sea|<quality>` and
+ * `unknown|<quality>`; the port's kind comes from the shared rule (portKind.ts), never from the single row.
  * The page and the statement that read quality against agreement both use this one fold, so they can never disagree.
  */
 export function collectQualityImageOutcomes(model: ReportModel): Map<string, FourCounts> {
   const out = new Map<string, FourCounts>();
+  const kinds = resolvePortKinds(model.rows);
   const bump = (key: string, c: NonNullable<ReportModel["rows"][number]["verificationCategory"]>) => {
     const t = out.get(key) ?? { correctClean: 0, correctSuspicion: 0, missedSuspicion: 0, falseSuspicion: 0 };
     out.set(key, t);
@@ -268,7 +277,7 @@ export function collectQualityImageOutcomes(model: ReportModel): Map<string, Fou
   };
   for (const r of model.rows) {
     if (r.verificationCategory === null || r.imageQuality === null) continue;
-    const kind = (r.portType ?? "").includes("بحري") ? "sea" : "land";
+    const kind = kinds.get(r.portName ?? "غير محدد") ?? "unknown";
     bump(`all|${r.imageQuality}`, r.verificationCategory);
     bump(`${kind}|${r.imageQuality}`, r.verificationCategory);
   }
@@ -578,18 +587,21 @@ export async function buildDeck3Slides(
   // than left where they used to sit, inline in slides 8/11) because TOTAL —
   // baked into every slide's `meta.total` footer — has to be known before the
   // first slide is built.
-  const { land: popLand, sea: popSea } = collectPortStats(model);
+  const { land: popLand, sea: popSea, unknown: popUnknown } = collectPortStats(model);
   const portAcc = collectPortAccuracy(model);
   // Population by port: one full-width page per port type (land, sea) listing ALL of its ports, never `(يتبع)` chunks.
   const popPortGroups = ([
     { variant: "land", title: "المنافذ البرية", totalLabel: "إجمالي البرية", ports: popLand },
     { variant: "sea", title: "المنافذ البحرية", totalLabel: "إجمالي البحرية", ports: popSea },
+    // Ports with no non-blank «نوع المنفذ»: their own «غير محدد» page, never folded into land.
+    { variant: "all", title: "المنافذ غير محددة النوع", totalLabel: "إجمالي غير محددة النوع", ports: popUnknown },
   ] as const).filter((g) => g.ports.length > 0);
   const popPages = Math.max(1, popPortGroups.length);
   // Accuracy by port: one full-width page per port type (land, sea) listing ALL of its ports, never `(يتبع)` chunks.
   const accGroups = ([
     { variant: "land", title: "للمنافذ البرية", panelTitle: "المنافذ البرية", totalLabel: "إجمالي البرية", ports: portAcc.land },
     { variant: "sea", title: "للمنافذ البحرية", panelTitle: "المنافذ البحرية", totalLabel: "إجمالي البحرية", ports: portAcc.sea },
+    { variant: "all", title: "للمنافذ غير محددة النوع", panelTitle: "منافذ غير محددة النوع", totalLabel: "إجمالي غير محددة النوع", ports: portAcc.unknown },
   ] as const).filter((g) => g.ports.length > 0);
   const accPages = Math.max(1, accGroups.length);
   // Standalone follow-up pages after the combined marking/quality ones: one «هل يوجد تحديد» page, then one image-quality page per port type.
@@ -599,6 +611,7 @@ export async function buildDeck3Slides(
   const levelGroups = ([
     { variant: "land", panelTitle: "المنافذ البرية", totalLabel: "إجمالي البرية", rows: levelRows.land },
     { variant: "sea", panelTitle: "المنافذ البحرية", totalLabel: "إجمالي البحرية", rows: levelRows.sea },
+    { variant: "all", panelTitle: "منافذ غير محددة النوع", totalLabel: "إجمالي غير محددة النوع", rows: levelRows.unknown },
   ] as const).filter((g) => g.rows.length > 0);
   const levelPages = Math.max(1, levelGroups.length);
   const levelShown = levelGroups.length > 0 ? levelGroups : [{ variant: "land" as const, panelTitle: "المنافذ البرية", totalLabel: "إجمالي البرية", rows: levelRows.land }];
@@ -880,16 +893,16 @@ ${kpiBand([
         { html: esc(s.label) },
         { html: fmtNum(s.evaluable), cls: "v-muted" },
         { html: fmtPct(a.overall), cls: "v-navy" },
-        { html: countRateCell(s.counts.missedSuspicion, pct(s.counts.missedSuspicion, s.evaluable)), cls: "v-red" },
-        { html: countRateCell(s.counts.falseSuspicion, pct(s.counts.falseSuspicion, s.evaluable)), cls: "v-gold" },
+        { html: countRateCell(s.counts.missedSuspicion, errorShares(s.counts).missed), cls: "v-red" },
+        { html: countRateCell(s.counts.falseSuspicion, errorShares(s.counts).false), cls: "v-gold" },
       ];
     });
     const totals: TableCell[] = [
       { html: "الإجمالي" },
       { html: fmtNum(t.evaluable), cls: "v-navy" },
       { html: fmtPct(overallStats.overall), cls: "v-gold" },
-      { html: countRateCell(t.missedSuspicion, pct(t.missedSuspicion, t.evaluable)), cls: "v-red" },
-      { html: countRateCell(t.falseSuspicion, pct(t.falseSuspicion, t.evaluable)), cls: "v-gold" },
+      { html: countRateCell(t.missedSuspicion, errorShares(t).missed), cls: "v-red" },
+      { html: countRateCell(t.falseSuspicion, errorShares(t).false), cls: "v-gold" },
     ];
     const inner = `${contentHead({
       eyebrow: eyebrowS2,
@@ -900,7 +913,7 @@ ${kpiBand([
       { label: "الاشتباهات الفائتة", value: fmtNum(t.missedSuspicion), valueTone: "red", aside: `${fmtPct(pct(t.missedSuspicion, overallStats.cleanResults))} من إجابات السليمة`, sub: MISSED_SUSPICION_DEFINITION },
       { label: "الاشتباهات الخاطئة", value: fmtNum(t.falseSuspicion), valueTone: "gold", aside: `${fmtPct(pct(t.falseSuspicion, overallStats.suspResults))} من إجابات الاشتباه`, sub: FALSE_SUSPICION_DEFINITION },
     ], "solo", true)}
-<div class="v3-note" style="margin-top:18px;font-weight:700;color:var(--v3-navy);">الإجابات حسب مستويات المخاطر — النسبة بين قوسين من الإجابات المفحوصة في كل مستوى</div>
+<div class="v3-note" style="margin-top:18px;font-weight:700;color:var(--v3-navy);">الإجابات حسب مستويات المخاطر — نسبة الفائتة بين قوسين من إجابات السليمة، ونسبة الخاطئة من إجابات الاشتباه، في كل مستوى</div>
 ${dataTable({ headers: ["المستوى", "الإجابات المفحوصة", "معدل الاتفاق العام", "الاشتباهات الفائتة", "الاشتباهات الخاطئة"], topHeader: [{ label: "", span: 2 }, { label: "النسبة", span: 1, group: true }, { label: "نتائج خاطئة", span: 2, group: true }], groupStart: [2, 3], rows: stageRows, totals })}`;
     parts.push(slideShell(m, "", inner));
   }
@@ -939,13 +952,13 @@ ${dataTable({ headers: ["المستوى", "الإجابات المفحوصة", "
 <div class="v3-two-col" style="grid-template-columns:1fr">
   ${tintedPanel({ variant: g.variant, title: g.panelTitle, body: dataTable({ headers, rows: g.ports.map((p) => cellsOf(esc(p.name), p.counts)), totals: cellsOf(g.totalLabel, sumCounts(g.ports.map((p) => p.counts)), "v-navy"), firstColWidth: 26, topHeader: [{ label: "", span: 1 }, { label: "النتيجة العامة", span: 2 }, { label: "الدقة", span: 2, group: true }, { label: "النتائج الخاطئة", span: 2, group: true }], groupStart: [3, 5], rowPx: portRowPx(g.ports.length, FORMULA_NOTE_PX + TOP_HEADER_PX) }) })}
 </div>
-<p class="v3-note v3-formula-note">${AGREEMENT_FORMULA_NOTE}</p>`;
+<p class="v3-note v3-formula-note">${AGREEMENT_FORMULA_NOTE}<br>${AGREEMENT_WEIGHT_NOTE}</p>`;
       parts.push(slideShell(m, "", inner));
     }
   }
 
   // Level 1 vs Level 2 answers — sits right under the overall result accuracy (section 2) (all ports pooled, five metric rows each)
-  const allLevelRows = [...levelRows.land, ...levelRows.sea];
+  const allLevelRows = [...levelRows.land, ...levelRows.sea, ...levelRows.unknown];
   const l1All = accuracyOf(sumCounts(allLevelRows.map((r) => r.l1.counts)));
   const l2All = accuracyOf(sumCounts(allLevelRows.map((r) => r.l2.counts)));
   {
@@ -1010,7 +1023,7 @@ ${dataTable({ headers: ["المستوى", "الإجابات المفحوصة", "
 <div class="v3-two-col" style="grid-template-columns:1fr">
   ${tintedPanel({ variant: g.variant, title: g.panelTitle, body: dataTable({ headers, topHeader, rows: rows.map((r) => cellsOf(esc(r.name), r.l1.counts, r.l2.counts)), totals: cellsOf(g.totalLabel, sumCounts(rows.map((r) => r.l1.counts)), sumCounts(rows.map((r) => r.l2.counts)), "v-navy"), firstColWidth: 14, compactHeaders: true, groupStart: [2, 7, 8], rowPx: portRowPx(rows.length, 40 + FORMULA_NOTE_PX) }) })}
 </div>
-<p class="v3-note v3-formula-note">${AGREEMENT_FORMULA_NOTE}</p>`;
+<p class="v3-note v3-formula-note">${AGREEMENT_FORMULA_NOTE}<br>${AGREEMENT_WEIGHT_NOTE}</p>`;
       parts.push(slideShell(m, "", inner));
     }
   }
@@ -1020,11 +1033,11 @@ ${dataTable({ headers: ["المستوى", "الإجابات المفحوصة", "
     const m = meta("s2", eyebrowS2);
     const marking = collectPortMarking(model);
     const totalOf = (ports: PortAccuracyRow[]) => sumMarking(ports.map((p) => marking.get(p.name) ?? emptyMarking()));
-    const panel = (variant: "land" | "sea", title: string, c: MarkingCounts) =>
+    const panel = (variant: "land" | "sea" | "all", title: string, c: MarkingCounts) =>
       tintedPanel({
         variant, title, padLg: true,
         body: `<div class="v3-cmp-rows">
-  <div class="v3-cmp-row"><span>عدد صور الأشعة</span><b>${fmtNum(c.images)}</b></div>
+  <div class="v3-cmp-row"><span>صور الاشتباه المفحوصة</span><b>${fmtNum(c.images)}</b></div>
   <div class="v3-cmp-row"><span>صور بتحديد</span><b class="v-green">${fmtNum(c.marked)}</b></div>
   <div class="v3-cmp-row"><span>صور بدون تحديد</span><b class="v-red">${fmtNum(c.unmarked)}</b></div>
   <div class="v3-cmp-row"><span>جودة منخفضة</span><b class="v-red">${fmtNum(c.low)}</b></div>
@@ -1034,10 +1047,14 @@ ${dataTable({ headers: ["المستوى", "الإجابات المفحوصة", "
       });
     const land = totalOf(portAcc.land);
     const sea = totalOf(portAcc.sea);
-    const inner = `${contentHead({ eyebrow: eyebrowS2, title: "متابعة تحديد موقع الاشتباه وجودة الصور" })}
+    const unknown = portAcc.unknown.length > 0 ? panel("all", "منافذ غير محددة النوع", totalOf(portAcc.unknown)) : "";
+    // The base is NOT every examined image: only suspicion images (اشتباه at L1 or L2) answered on BOTH questions, so
+    // its quality split differs from the quality pages (every examined image). Say so on the page.
+    const inner = `${contentHead({ eyebrow: eyebrowS2, title: "متابعة تحديد موقع الاشتباه وجودة الصور", note: "الأساس: صور الاشتباه المفحوصة (اشتباه عند المستوى الأول أو الثاني) التي أُجيب فيها عن التحديد والجودة معًا — لا جميع الصور المفحوصة" })}
 <div class="v3-two-col">
   ${panel("land", "المنافذ البرية", land)}
-  ${panel("sea", "المنافذ البحرية", sea)}
+  ${panel("sea", "المنافذ البحرية", sea)}${unknown ? `
+  ${unknown}` : ""}
 </div>`;
     parts.push(slideShell(m, "", inner));
   }
@@ -1106,15 +1123,15 @@ ${dataTable({ headers: ["المستوى", "الإجابات المفحوصة", "
       { key: "متوسط", label: "جودة متوسطة", tone: "gold" },
       { key: "عالي", label: "جودة عالية", tone: "green" },
     ] as const;
-    const groupRows: Array<{ label: string; variant: "all" | "land" | "sea" }> = [
-      { label: "جميع المنافذ", variant: "all" },
-      ...accGroups.map((g) => ({ label: g.panelTitle, variant: g.variant })),
+    const groupRows: Array<{ label: string; variant: "all" | "land" | "sea"; key: string }> = [
+      { label: "جميع المنافذ", variant: "all", key: "all" },
+      ...accGroups.map((g) => ({ label: g.panelTitle, variant: g.variant, key: g.ports === portAcc.unknown ? "unknown" : g.variant })),
     ];
     const rows: QualityRow[] = groupRows.map((g) => ({
       label: g.label,
       variant: g.variant,
       cells: levels.map((level): QualityCell => {
-        const c = byQualityImages.get(`${g.variant}|${level.key}`);
+        const c = byQualityImages.get(`${g.key}|${level.key}`);
         const four: FourCounts = c ?? { correctClean: 0, correctSuspicion: 0, missedSuspicion: 0, falseSuspicion: 0 };
         const a = accuracyOf(four);
         return {
@@ -1123,8 +1140,8 @@ ${dataTable({ headers: ["المستوى", "الإجابات المفحوصة", "
           caption: `معدل الاتفاق العام · من ${fmtNum(a.evaluable)} صورة`,
           fill: a.overall,
           stats: [
-            { label: "الاشتباهات الفائتة", value: fmtNum(four.missedSuspicion), share: `${fmtPct(pct(four.missedSuspicion, a.evaluable))} من الصور` },
-            { label: "الاشتباهات الخاطئة", value: fmtNum(four.falseSuspicion), share: `${fmtPct(pct(four.falseSuspicion, a.evaluable))} من الصور` },
+            { label: "الاشتباهات الفائتة", value: fmtNum(four.missedSuspicion), share: `${fmtPct(errorShares(four).missed)} من الصور السليمة` },
+            { label: "الاشتباهات الخاطئة", value: fmtNum(four.falseSuspicion), share: `${fmtPct(errorShares(four).false)} من صور الاشتباه` },
           ],
         };
       }),
