@@ -8,6 +8,8 @@
 // Crash-safe by construction: `_layout.json` (the commit point) is written
 // LAST. Before it exists the month is v1 (`v1-migrating` while the lock is
 // fresh or `_archive-v1/` holds moved files): v1 readers read flat + `_archive-v1/`, writers defer.
+// Unreadable flat segments on a first run are decided (`onUnreadable`) after the
+// read-only phase and before the first write, so "postpone" moves nothing.
 import type { DirectoryHandleLike } from "../../storage/fileSystemAccess";
 import {
   appendEventSegment,
@@ -51,10 +53,21 @@ const MAX_STRAGGLER_PASSES = 3;
 
 export type MigrationPhase = "lock" | "read" | "archive" | "snapshot" | "move" | "stragglers" | "commit" | "verify";
 export type MigrationProgress = { phase: MigrationPhase; done: number; total: number };
+export type UnreadableDecision = "finish" | "postpone";
 export type MigrateMonthOptions = {
   actor: string;
   nowMs?: () => number;
   onProgress?: (progress: MigrationProgress) => void | Promise<void>;
+  /**
+   * Asked ONCE, on a month's first (v1 → v2) run, after every flat segment was
+   * read and BEFORE anything is written or moved, when some segments could not
+   * be opened. "finish" commits with those names in `unfolded` (their answers
+   * stay invisible to v2 readers until a re-run opens them); "postpone" (the
+   * default when absent) returns `postponed` with nothing moved: the month is
+   * still plain v1, readable and writable, and is offered again next sign-in.
+   * Never asked on a v2 straggler re-run, where nothing new is hidden.
+   */
+  onUnreadable?: (names: readonly string[]) => Promise<UnreadableDecision>;
 };
 export type MigrateMonthResult =
   | {
@@ -71,7 +84,9 @@ export type MigrateMonthResult =
       unfolded: string[];
     }
   | { status: "nothing-to-do" }
-  | { status: "locked-elsewhere"; by: string; startedAt: string };
+  | { status: "locked-elsewhere"; by: string; startedAt: string }
+  /** Option C: unreadable flat segments and the admin postponed — nothing was moved or written. */
+  | { status: "postponed"; unreadable: string[] };
 
 export type QuarantinedLine = { segment: string; line: number; raw: string; reason: "unparseable" | "no-assignee" };
 type AssigneeGroup = { assignee: string; events: AnswerEvent[]; segments: Map<string, number> };
@@ -285,18 +300,25 @@ async function migratePass(
   names: readonly string[],
   state: MigrationState,
   options: MigrateMonthOptions,
-  now: () => number
-): Promise<void> {
+  now: () => number,
+  /** First v1 pass only: decides unreadable segments before the first write. */
+  decideUnreadable: ((names: readonly string[]) => Promise<UnreadableDecision>) | null
+): Promise<{ kind: "done" } | { kind: "postponed"; unreadable: string[] }> {
   const reads = await readFlatSegments(eventsDir, names, options);
   const fresh: { name: string; bytes: number; text: string }[] = [];
+  const unopenable: string[] = [];
   for (const read of reads) {
     if (read.status === "missing") continue;
-    if (read.status === "unopenable") {
-      state.unmovable.add(read.name);
-      state.unfolded.add(read.name);
-    }
+    if (read.status === "unopenable") unopenable.push(read.name);
     else if (state.processed.get(read.name) === read.bytes) state.unmovable.add(read.name); // folded, but its move keeps failing
     else fresh.push(read);
+  }
+  // Nothing has been written yet (reads only): a postponed run leaves the month exactly as found.
+  unopenable.sort();
+  if (unopenable.length > 0 && decideUnreadable && (await decideUnreadable(unopenable)) === "postpone") return { kind: "postponed", unreadable: unopenable };
+  for (const name of unopenable) {
+    state.unmovable.add(name);
+    state.unfolded.add(name);
   }
   const { groups, quarantined } = groupFlatSegmentLines(fresh);
   if (quarantined.length > 0) {
@@ -330,6 +352,7 @@ async function migratePass(
     done += 1;
     await options.onProgress?.({ phase: "move", done, total: fresh.length });
   }
+  return { kind: "done" };
 }
 
 async function fileSizeOrNull(dir: DirectoryHandleLike, name: string): Promise<number | null> {
@@ -390,7 +413,10 @@ export async function migrateMonthToPerAssignee(
     },
   };
   try {
-    return await runLockedMigration(root, month, eventsDir, prior, state, names, beatingOptions, now, heartbeat);
+    const result = await runLockedMigration(root, month, eventsDir, prior, state, names, beatingOptions, now, heartbeat);
+    // Postponed = nothing moved: drop our lock so the month reads as plain v1 again at once.
+    if (result.status === "postponed") await releaseLockIfOurs(eventsDir, runToken);
+    return result;
   } catch (error) {
     // The month stays v1-migrating if `_archive-v1/` holds moved files, so writers keep
     // deferring; dropping OUR lock just lets a retry start without waiting 30 min.
@@ -417,9 +443,16 @@ async function runLockedMigration(
   let archiveV1: DirectoryHandleLike | null = null;
   const archiveV1Dir = async (): Promise<DirectoryHandleLike> => (archiveV1 ??= await getAnswerArchiveV1Dir(root, month, true));
 
+  // Option C (2026-10-14): on a month's FIRST run, unreadable flat segments are
+  // decided before the first write. Default postpone: committing would hide
+  // their answers from every v2 reader; refusing forever would leave the month
+  // `v1-migrating` (saves deferred, on-behalf refused) with no admin control.
+  // Later passes and v2 re-runs keep the unfolded bookkeeping (nothing new hidden).
+  const decideUnreadable = prior === null ? (options.onUnreadable ?? (async () => "postpone" as const)) : null;
   for (let pass = 0; pass < MAX_STRAGGLER_PASSES && names.length > 0; pass += 1) {
     if (pass > 0) await options.onProgress?.({ phase: "stragglers", done: pass, total: MAX_STRAGGLER_PASSES - 1 });
-    await migratePass(root, month, eventsDir, archiveV1Dir, names, state, options, now);
+    const outcome = await migratePass(root, month, eventsDir, archiveV1Dir, names, state, options, now, pass === 0 ? decideUnreadable : null);
+    if (outcome.kind === "postponed") return { status: "postponed", unreadable: outcome.unreadable };
     names = (await listFlatSegmentNames(eventsDir)).filter((name) => !state.unmovable.has(name));
   }
   await classifyLeftovers(eventsDir, names, state);

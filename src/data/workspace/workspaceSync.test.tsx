@@ -1565,12 +1565,22 @@ describe("runSync — this session's own answer appends do not report the answer
     const own = await runSync({ directoryHandle: root, monthFolderName: MONTH });
     expect(own.changed.has("answers")).toBe(false);
 
-    // A new month is layout v2: another writer's segment lands in its own assignee folder.
+    // A new month is layout v2: another EMPLOYEE's segment lands in its own
+    // assignee folder, which an employee session never probes (employee scope).
     const emp2Dir = await getAssigneeAnswerEventsDir(root, MONTH, "emp2", true);
     await writeRawFile(
       emp2Dir,
       "zz-ans-otherdev-s9.ndjson",
       `${JSON.stringify({ eventId: "other-1", eventType: "item-saved", eventAt: "2026-05-01T08:00:00.000Z", eventBy: "emp2", authority: "self", xrayImageId: "XR-9", answers: [], status: "draft", answeredBy: "emp2" })}\n`
+    );
+    expect((await runSync({ directoryHandle: root, monthFolderName: MONTH })).changed.has("answers")).toBe(false);
+
+    // A supervisor's on-behalf segment in MY folder is another writer's change and is reported.
+    const emp1Dir = await getAssigneeAnswerEventsDir(root, MONTH, "emp1", true);
+    await writeRawFile(
+      emp1Dir,
+      "zz-ans-supdev-s9.ndjson",
+      `${JSON.stringify({ eventId: "other-2", eventType: "item-saved", eventAt: "2026-05-01T08:00:00.000Z", eventBy: "sup1", authority: "on-behalf", xrayImageId: "XR-9", answers: [], status: "draft", answeredBy: "emp1" })}\n`
     );
     const epochBefore = getSealedAnswerSegmentsEpoch();
     const other = await runSync({ directoryHandle: root, monthFolderName: MONTH });

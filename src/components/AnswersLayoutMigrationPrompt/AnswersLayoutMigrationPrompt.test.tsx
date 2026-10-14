@@ -33,8 +33,47 @@ describe("AnswersLayoutMigrationPrompt", () => {
     renderWith(<AnswersLayoutMigrationPrompt session={admin} directoryHandle={dir} workspaceReady />);
     await screen.findByText(/2000/);
     fireEvent.click(screen.getByRole("button", { name: getLabels().answers_layout_migration_confirm }));
-    await waitFor(() => expect(mocks.migrate).toHaveBeenCalledWith(dir, "5-may-2026", { actor: "admin" }));
+    await waitFor(() => expect(mocks.migrate).toHaveBeenCalledWith(dir, "5-may-2026", expect.objectContaining({ actor: "admin" })));
     await screen.findByText(getLabels().answers_layout_migration_done);
+  });
+
+  describe("unreadable flat segments (option C): the admin decides before anything is moved", () => {
+    type Decide = (names: readonly string[]) => Promise<"finish" | "postpone">;
+    function migrateThatAsks(names: string[]) {
+      mocks.migrate.mockImplementation(async (_dir: unknown, _month: string, options: { onUnreadable?: Decide }) => {
+        const decision = await options.onUnreadable!(names);
+        return decision === "finish"
+          ? { status: "migrated", marker: {}, quarantinedLines: 0, unfolded: names, unmovable: names }
+          : { status: "postponed", unreadable: names };
+      });
+    }
+
+    it("shows the unreadable names and the two choices; Postpone reports the month as postponed, not done", async () => {
+      migrateThatAsks(["dead-a.ndjson", "dead-b.ndjson"]);
+      renderWith(<AnswersLayoutMigrationPrompt session={admin} directoryHandle={createMemoryDirectory("ui6")} workspaceReady />);
+      await screen.findByText(/2000/);
+      fireEvent.click(screen.getByRole("button", { name: getLabels().answers_layout_migration_confirm }));
+      const ask = await screen.findByText(/dead-a\.ndjson/);
+      expect(ask.textContent).toContain("dead-b.ndjson");
+      expect(ask.textContent).toContain("2");
+      fireEvent.click(screen.getByRole("button", { name: getLabels().answers_layout_migration_postpone }));
+      const status = await screen.findByRole("status");
+      await waitFor(() => expect(status.textContent).toContain("5-may-2026"));
+      expect(status.textContent).toContain(getLabels().answers_layout_migration_postponed.split("{")[0]!.trim());
+      expect(status.textContent).not.toContain(getLabels().answers_layout_migration_done);
+    });
+
+    it("Finish anyway commits and still names the unfolded files", async () => {
+      migrateThatAsks(["dead-a.ndjson"]);
+      renderWith(<AnswersLayoutMigrationPrompt session={admin} directoryHandle={createMemoryDirectory("ui7")} workspaceReady />);
+      await screen.findByText(/2000/);
+      fireEvent.click(screen.getByRole("button", { name: getLabels().answers_layout_migration_confirm }));
+      await screen.findByText(/dead-a\.ndjson/);
+      fireEvent.click(screen.getByRole("button", { name: getLabels().answers_layout_migration_finish_anyway }));
+      const status = await screen.findByRole("status");
+      await waitFor(() => expect(status.textContent).toContain("dead-a.ndjson"));
+      expect(status.textContent).not.toContain(getLabels().answers_layout_migration_done);
+    });
   });
 
   it("names unfolded and unmovable segments in the done text instead of reporting a clean success (review finding 3)", async () => {

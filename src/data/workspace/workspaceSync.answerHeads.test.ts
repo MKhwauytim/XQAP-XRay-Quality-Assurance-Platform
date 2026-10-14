@@ -10,10 +10,10 @@ import { __resetAnswerFolderProbeStateForTests, answerFoldersSignature, ANSWER_F
 import { __resetAnswerFolderHeadsForTests, touchAnswerFolderHead } from "../answers/v2/answerFolderHeads";
 import { appendToSegment, makeV2Month, savedEvent, writeAssigneeSegment, writeText } from "../answers/v2/v2TestFixtures";
 
-const session = vi.hoisted(() => ({ username: "viewer" as string | null }));
+const session = vi.hoisted(() => ({ username: "viewer" as string | null, role: "supervisor" as string }));
 vi.mock("../../auth/authSession", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../auth/authSession")>();
-  return { ...actual, readRealSession: () => (session.username ? { username: session.username } : null) };
+  return { ...actual, readRealSession: () => (session.username ? { username: session.username, role: session.role } : null) };
 });
 
 const MONTH = "5-may-2026";
@@ -79,6 +79,80 @@ describe("v2 answers sync probe — _heads markers", () => {
     __resetAnswerFolderHeadsForTests();
     __resetAnswerFolderProbeStateForTests();
     session.username = "viewer";
+    session.role = "supervisor";
+  });
+
+  describe("employee scope: only the user's own folder is probed", () => {
+    async function employeeTickMax(n: number): Promise<{ max: number; mean: number }> {
+      const root = createMemoryDirectory(`emp-scope-${n}`);
+      await seedFolders(root, n);
+      const events = await getAnswerEventsDir(root, MONTH);
+      for (let i = 0; i < n; i += 1) await touchAnswerFolderHead(events, `emp${i}`, `emp${i}`);
+      __resetAnswerFolderProbeStateForTests();
+      const baseline = await tickCost(events);
+      const steady: number[] = [];
+      for (let t = 0; t < ANSWER_FOLDER_BACKSTOP_TICKS * 2; t += 1) {
+        const tick = await tickCost(events);
+        expect(tick.sig).toBe(baseline.sig);
+        steady.push(tick.ops);
+      }
+      return { max: Math.max(...steady), mean: steady.reduce((a, b) => a + b, 0) / steady.length };
+    }
+
+    it("costs a constant number of round trips per tick, independent of the assignee count (5 vs 30)", async () => {
+      session.username = "emp3";
+      session.role = "employee";
+      const small = await employeeTickMax(5);
+      const large = await employeeTickMax(30);
+      console.info(`[answer-probe-cost:employee] N=5 max=${small.max} mean=${small.mean.toFixed(1)} · N=30 max=${large.max} mean=${large.mean.toFixed(1)}/tick`);
+      expect(large.max).toBe(small.max);
+      // open own folder + list `_heads/` (2) + the own folder's chain heads each tick (≤ 1 list + stats).
+      expect(large.max).toBeLessThanOrEqual(8);
+    });
+
+    it("sees a supervisor's on-behalf save into MY folder, not another employee's save", async () => {
+      session.username = "emp3";
+      session.role = "employee";
+      const root = createMemoryDirectory("emp-scope-vis");
+      const dirs = await seedFolders(root, 6);
+      const events = await getAnswerEventsDir(root, MONTH);
+      for (let i = 0; i < 6; i += 1) await touchAnswerFolderHead(events, `emp${i}`, `emp${i}`);
+      const s0 = (await tickCost(events)).sig;
+      await appendToSegment(dirs[5]!, "own-1.ndjson", [savedEvent("c5", 3, {}, "emp5")]);
+      await touchAnswerFolderHead(events, "emp5", "emp5"); // employee B saves
+      const s1 = (await tickCost(events)).sig;
+      expect(movedAnswerFolders(s0, s1)).toEqual(new Set());
+      await appendToSegment(dirs[3]!, "admin.ndjson", [savedEvent("c3", 3, {}, "emp3")]);
+      await touchAnswerFolderHead(events, "emp3", "sup1"); // supervisor answers on my behalf
+      const s2 = (await tickCost(events)).sig;
+      expect(movedAnswerFolders(s1, s2)).toEqual(new Set(["emp3"]));
+    });
+
+    it("an employee whose folder does not exist yet sees it appear once the first on-behalf save creates it", async () => {
+      session.username = "newbie";
+      session.role = "employee";
+      const root = createMemoryDirectory("emp-scope-new");
+      await seedFolders(root, 3);
+      const events = await getAnswerEventsDir(root, MONTH);
+      const s0 = (await tickCost(events)).sig;
+      await writeAssigneeSegment(root, "newbie", "sup.ndjson", [savedEvent("n1", 1, {}, "newbie")]);
+      await touchAnswerFolderHead(events, "newbie", "sup1");
+      const s1 = (await tickCost(events)).sig;
+      expect(movedAnswerFolders(s0, s1)).toEqual(new Set(["newbie"]));
+    });
+
+    it("a supervisor still sees every folder (unchanged)", async () => {
+      session.username = "sup1";
+      session.role = "supervisor";
+      const root = createMemoryDirectory("sup-scope");
+      const dirs = await seedFolders(root, 6);
+      const events = await getAnswerEventsDir(root, MONTH);
+      for (let i = 0; i < 6; i += 1) await touchAnswerFolderHead(events, `emp${i}`, `emp${i}`);
+      const s0 = (await tickCost(events)).sig;
+      await appendToSegment(dirs[5]!, "own-1.ndjson", [savedEvent("c5", 3, {}, "emp5")]);
+      await touchAnswerFolderHead(events, "emp5", "emp5");
+      expect(movedAnswerFolders(s0, (await tickCost(events)).sig)).toEqual(new Set(["emp5"]));
+    });
   });
 
   it("costs a fixed handful of round trips per tick for 30 assignees, versus O(assignees) without markers", async () => {

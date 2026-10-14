@@ -12,7 +12,7 @@ import { useBootProgress } from "../../data/workspace/bootProgress";
 import { useLabels } from "../../data/labels/useLabels";
 import { monthFoldersQueryOptions } from "../../data/query/monthFoldersQuery";
 import { probeAnswerLayoutMigrations, type MonthMigrationNeed } from "../../data/answers/migration/answerLayoutMigrationProbe";
-import { migrateMonthToPerAssignee } from "../../data/answers/migration/flatToPerAssignee";
+import { migrateMonthToPerAssignee, type UnreadableDecision } from "../../data/answers/migration/flatToPerAssignee";
 import { broadcastDataRefresh } from "../../data/workspace/dataRefreshSignal";
 import { logError } from "../../data/storage/errorLogger";
 
@@ -27,7 +27,13 @@ type Props = {
    */
   holdWhile?: boolean;
 };
-type Phase = { kind: "idle" } | { kind: "prompt" } | { kind: "running"; text: string } | { kind: "done"; text: string };
+type Phase =
+  | { kind: "idle" }
+  | { kind: "prompt" }
+  | { kind: "running"; text: string }
+  /** Option C: unreadable flat segments found before the first write — the admin decides. */
+  | { kind: "ask"; month: string; names: readonly string[]; resolve: (decision: UnreadableDecision) => void }
+  | { kind: "done"; text: string };
 
 function fill(template: string, values: Record<string, string | number>): string {
   return Object.entries(values).reduce((text, [key, value]) => text.split(`{${key}}`).join(String(value)), template);
@@ -76,7 +82,23 @@ export function AnswersLayoutMigrationPrompt({ session, directoryHandle, workspa
     for (const [index, need] of needs.entries()) {
       setPhase({ kind: "running", text: fill(labels.answers_layout_migration_running, { month: need.monthFolderName, done: index + 1, total: needs.length }) });
       try {
-        const result = await migrateMonthToPerAssignee(directoryHandle, need.monthFolderName, { actor: session.username });
+        const result = await migrateMonthToPerAssignee(directoryHandle, need.monthFolderName, {
+          actor: session.username,
+          // Asked after the read-only phase, before the first write: "postpone" moves nothing.
+          onUnreadable: (names) =>
+            new Promise<UnreadableDecision>((resolve) => {
+              setPhase({
+                kind: "ask",
+                month: need.monthFolderName,
+                names,
+                resolve: (decision) => {
+                  setPhase({ kind: "running", text: fill(labels.answers_layout_migration_running, { month: need.monthFolderName, done: index + 1, total: needs.length }) });
+                  resolve(decision);
+                },
+              });
+            }),
+        });
+        if (result.status === "postponed") problems.push(fill(labels.answers_layout_migration_postponed, { month: need.monthFolderName }));
         if (result.status === "locked-elsewhere") problems.push(fill(labels.answers_layout_migration_busy, { month: need.monthFolderName }));
         if (result.status === "migrated") problems.push(...leftoverProblems(labels, need.monthFolderName, result.unfolded ?? [], result.unmovable ?? []));
       } catch (error) {
@@ -91,6 +113,20 @@ export function AnswersLayoutMigrationPrompt({ session, directoryHandle, workspa
   if (phase.kind === "idle") return null;
   // Never hide a migration that is already running or reporting its result.
   if (phase.kind === "prompt" && holdWhile) return null;
+  if (phase.kind === "ask") {
+    return (
+      <ConfirmDialog
+        open
+        title={labels.answers_layout_migration_title}
+        message={<p dir="rtl">{fill(labels.answers_layout_migration_unreadable_ask, { month: phase.month, count: phase.names.length, names: phase.names.join("، ") })}</p>}
+        confirmLabel={labels.answers_layout_migration_finish_anyway}
+        cancelLabel={labels.answers_layout_migration_postpone}
+        danger
+        onConfirm={() => phase.resolve("finish")}
+        onCancel={() => phase.resolve("postpone")}
+      />
+    );
+  }
   const minutes = (ms: number) => Math.max(1, Math.ceil(ms / 60_000));
   const message: ReactNode =
     phase.kind === "prompt" ? (

@@ -663,11 +663,38 @@ function backstopRotation(marked: readonly string[], tick: number): Set<string> 
   return new Set(Array.from({ length: Math.min(share, marked.length) }, (_, i) => marked[(tick * share + i) % marked.length]!));
 }
 
+/** The `employee` role's own assignee folder name; null when the username cannot be a folder. */
+function employeeOwnAnswerFolder(username: string): string | null {
+  try {
+    return answerAssigneeFolderName(username);
+  } catch {
+    return null;
+  }
+}
+
+/** `[folder]` when it exists (one open, no listing), else `[]`. */
+async function presentAnswerFolder(eventsDir: DirectoryHandleLike, folder: string): Promise<string[]> {
+  try {
+    await eventsDir.getDirectoryHandle(folder, { create: false });
+    return [folder];
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Layout v2 (spec §5): one change signature per assignee folder, cheap in the
  * steady state (v154.0 review: the first version opened and stat'd EVERY
  * folder on every tick, per client).
  *
+ *  - An `employee` session signs ONLY its own folder (`answerAssigneeFolderName`
+ *    of the username): one open instead of the listing, and the `_heads/`
+ *    markers of that folder alone — an on-behalf save into it by a supervisor
+ *    is a marker under the same folder key, so it is still seen; every other
+ *    user's folder is never opened. Reassignment and replacement reach the
+ *    employee through the distribution probe (`safeSegmentsSignature`), which
+ *    is role-independent. Supervisor, manager, admin and guest (who read
+ *    reports over every folder) keep the full listing.
  *  - ONE listing of `_heads/` (see `answerFolderHeads.ts`) names every folder an
  *    append touched: a new marker name = a change, visible on the next tick.
  *    This client's own markers are left out (A11: an own save is not remote).
@@ -683,12 +710,16 @@ function backstopRotation(marked: readonly string[], tick: number): Set<string> 
  * owners of a change are the folders whose entry moved (`movedAnswerFolders`).
  */
 export async function answerFoldersSignature(eventsDir: DirectoryHandleLike, monthFolderName: string, scope = ""): Promise<string> {
-  const actor = readRealSession()?.username;
+  const session = readRealSession();
+  const actor = session?.username;
   const exclude = actor ? ownStableAnswerSegmentMatcher(monthFolderName, actor) : undefined;
-  const folders = (await listDirectoryEntries(eventsDir))
-    .filter((entry) => entry.kind === "directory" && isAnswerAssigneeFolderName(entry.name))
-    .map((entry) => entry.name)
-    .sort();
+  const ownFolder = session?.role === "employee" && actor ? employeeOwnAnswerFolder(actor) : null;
+  const folders = ownFolder !== null
+    ? await presentAnswerFolder(eventsDir, ownFolder)
+    : (await listDirectoryEntries(eventsDir))
+        .filter((entry) => entry.kind === "directory" && isAnswerAssigneeFolderName(entry.name))
+        .map((entry) => entry.name)
+        .sort();
   const markers = await readAnswerFolderHeads(eventsDir);
   const state = probeStateFor(`${scope}|${monthFolderName}`);
   const marked = folders.filter((folder) => (markers?.get(folder)?.length ?? 0) > 0);

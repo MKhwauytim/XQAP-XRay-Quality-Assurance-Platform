@@ -869,6 +869,10 @@ export const DEFAULT_LABELS = {
   answers_layout_migration_failed:     "تعذّر إكمال ترحيل {month}. يمكن إعادة المحاولة بأمان.",
   answers_layout_migration_unfolded:   "{month}: تعذّرت قراءة الملفات التالية فلم تُنقل إجاباتها بعد، ولن تظهر حتى يُعاد الترحيل (سيُعرض عليك مجددًا، ولم يُحذف أي ملف): {names}",
   answers_layout_migration_unmovable:  "{month}: نُقلت إجابات الملفات التالية لكن تعذّر أرشفتها فبقيت في مكانها (لم يُحذف أي ملف): {names}",
+  answers_layout_migration_unreadable_ask: "{month}: تعذّرت قراءة {count} من ملفات الإجابات ولم يُنقل أي ملف بعد: {names}. إن أكملت الترحيل الآن فلن تظهر إجابات هذه الملفات حتى يُعاد الترحيل بنجاح (سيُعرض عليك مجددًا). التأجيل يُبقي الشهر كما هو دون أي تغيير.",
+  answers_layout_migration_finish_anyway: "إكمال الترحيل رغم ذلك",
+  answers_layout_migration_postpone:   "تأجيل",
+  answers_layout_migration_postponed:  "تم تأجيل ترحيل {month}؛ لم يُنقل أي ملف وسيُعرض عليك مجددًا عند تسجيل الدخول التالي.",
   app_auto_backup_failed:    "تعذر إنشاء النسخة الاحتياطية التلقائية: {error}",
   app_unknown_error:         "خطأ غير معروف",
   app_restore_interrupted_warning:

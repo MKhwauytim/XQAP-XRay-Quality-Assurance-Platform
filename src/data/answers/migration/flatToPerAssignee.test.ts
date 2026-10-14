@@ -221,25 +221,89 @@ describe("migrateMonthToPerAssignee (spec §6)", () => {
     expect((await migrateMonthToPerAssignee(root, MONTH, { actor: "admin" })).status).toBe("migrated");
   });
 
-  it("an unopenable segment stays flat, is listed as unmovable, and the migration still commits", async () => {
+  it("an unopenable segment stays flat, is listed as unmovable, and the migration still commits when the admin chose to finish anyway", async () => {
     const { root } = await v1Fixture("dead");
     const events = await getAnswerEventsDir(root, MONTH, false);
     await writeText(events, "dead-ans-devd-sesd.ndjson", encodeEventLine(savedEvent("dead", 1)));
     setSimulatedFaults(root, [{ operation: "getFile", name: "dead-ans-devd-sesd.ndjson", errorName: "NotReadableError", times: 10_000 }]);
-    const result = await migrateMonthToPerAssignee(root, MONTH, { actor: "admin" });
+    const result = await migrateMonthToPerAssignee(root, MONTH, { actor: "admin", onUnreadable: async () => "finish" });
     expect(result.status).toBe("migrated");
     if (result.status === "migrated") expect(result.marker.unmovable).toContain("dead-ans-devd-sesd.ndjson");
     const markerText = await readText(events, ANSWER_EVENTS_FOLDERS.layoutMarker);
     expect(unwrap<{ unmovable: string[] }>(JSON.parse(markerText)).unmovable).toContain("dead-ans-devd-sesd.ndjson");
   }, 60_000);
 
-  it("an unopenable segment is surfaced as UNFOLDED in the result and marker, and a re-run folds it once it opens (review finding 3)", async () => {
+  describe("unreadable flat segments are decided BEFORE anything is moved (option C)", () => {
+    const dead = "dead-ans-devd-sesd.ndjson";
+    async function deadFixture(name: string) {
+      const { root, flatTexts } = await v1Fixture(name);
+      const events = await getAnswerEventsDir(root, MONTH, false);
+      await writeText(events, dead, encodeEventLine(savedEvent("dead", 1, { xrayImageId: "X-dead" })));
+      setSimulatedFaults(root, [{ operation: "getFile", name: dead, errorName: "NotReadableError", times: 10_000 }]);
+      return { root, events, flatTexts };
+    }
+
+    it("postpone: the admin is told the names, nothing is moved or written, no _archive-v1, no marker, lock released, month still plain v1 and readable", async () => {
+      const { root, events, flatTexts } = await deadFixture("postpone");
+      const asked: string[][] = [];
+      const result = await migrateMonthToPerAssignee(root, MONTH, {
+        actor: "admin",
+        onUnreadable: async (names) => {
+          asked.push([...names]);
+          return "postpone";
+        },
+      });
+      expect(result).toEqual({ status: "postponed", unreadable: [dead] });
+      expect(asked).toEqual([[dead]]);
+      const names = await fileNames(events);
+      expect(names).toEqual([...flatTexts.keys(), dead].sort());
+      for (const [name, text] of flatTexts) expect(await readText(events, name)).toBe(text);
+      expect(names).not.toContain(ANSWER_EVENTS_FOLDERS.layoutMarker);
+      expect(names).not.toContain(ANSWER_EVENTS_FOLDERS.migrationLock);
+      await expect(getAnswerArchiveV1Dir(root, MONTH, false)).rejects.toThrow();
+      await expect(getAssigneeAnswerEventsDir(root, MONTH, "emp1", false)).rejects.toThrow();
+      resetCaches();
+      expect(await getAnswerEventsLayout(root, MONTH)).toBe("v1");
+      expect((await loadEmployeeAnswers(root, MONTH, "emp1")).items.map((i) => i.xrayImageId).sort()).toEqual(["A1", "A2"]);
+      // Once the file opens again the same run shape migrates cleanly without asking.
+      setSimulatedFaults(root, []);
+      resetCaches();
+      const asked2: string[][] = [];
+      const second = await migrateMonthToPerAssignee(root, MONTH, { actor: "admin", onUnreadable: async (n) => { asked2.push([...n]); return "postpone"; } });
+      expect(second.status).toBe("migrated");
+      expect(asked2).toEqual([]);
+    }, 60_000);
+
+    it("without a decision callback the run postpones (never commits hidden answers on its own)", async () => {
+      const { root, events } = await deadFixture("default");
+      const result = await migrateMonthToPerAssignee(root, MONTH, { actor: "admin" });
+      expect(result.status).toBe("postponed");
+      expect(await fileNames(events)).not.toContain(ANSWER_EVENTS_FOLDERS.layoutMarker);
+      await expect(getAnswerArchiveV1Dir(root, MONTH, false)).rejects.toThrow();
+    }, 60_000);
+
+    it("a straggler re-run on an already-v2 month never asks: an unreadable straggler stays unfolded as before", async () => {
+      const { root } = await v1Fixture("v2-rerun");
+      expect((await migrateMonthToPerAssignee(root, MONTH, { actor: "admin" })).status).toBe("migrated");
+      resetCaches();
+      const events = await getAnswerEventsDir(root, MONTH, false);
+      await writeText(events, dead, encodeEventLine(savedEvent("dead", 1, { xrayImageId: "X-dead" })));
+      setSimulatedFaults(root, [{ operation: "getFile", name: dead, errorName: "NotReadableError", times: 10_000 }]);
+      let asked = 0;
+      const result = await migrateMonthToPerAssignee(root, MONTH, { actor: "admin", onUnreadable: async () => { asked += 1; return "postpone"; } });
+      expect(asked).toBe(0);
+      if (result.status !== "migrated") throw new Error(result.status);
+      expect(result.unfolded).toEqual([dead]);
+    }, 60_000);
+  });
+
+  it("an unopenable segment is surfaced as UNFOLDED in the result and marker (finish anyway), and a re-run folds it once it opens (review finding 3)", async () => {
     const { root } = await v1Fixture("dead-rerun");
     const events = await getAnswerEventsDir(root, MONTH, false);
     const dead = "dead-ans-devd-sesd.ndjson";
     await writeText(events, dead, encodeEventLine(savedEvent("dead", 1, { xrayImageId: "X-dead" })));
     setSimulatedFaults(root, [{ operation: "getFile", name: dead, errorName: "NotReadableError", times: 10_000 }]);
-    const first = await migrateMonthToPerAssignee(root, MONTH, { actor: "admin" });
+    const first = await migrateMonthToPerAssignee(root, MONTH, { actor: "admin", onUnreadable: async () => "finish" });
     if (first.status !== "migrated") throw new Error(first.status);
     expect(first.unfolded).toEqual([dead]);
     expect(first.marker.unfolded).toEqual([dead]);
