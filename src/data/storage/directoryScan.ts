@@ -899,6 +899,10 @@ export async function readSegmentTails(
   const matchedNames = matched.map((entry) => entry.name);
   // Confirmed-dead segments are neither opened nor charged against the vanish budget.
   const dead = options.scopeKey ? confirmedDeadNames(options.scopeKey) : new Set<string>();
+  const scopeKey = options.scopeKey;
+  const recheckedDead = new Set(
+    scopeKey ? matchedNames.filter((name) => !dead.has(name) && isConfirmedDead(scopeKey, name)) : []
+  );
   // A name that crossed the age gate BETWEEN scans is already dead here, so it
   // is never opened and never reaches `vanished`: report it now (once).
   if (options.scopeKey && dead.size > 0) {
@@ -984,7 +988,10 @@ export async function readSegmentTails(
 
   logVanishedEntries("directoryScan:segment-tails", dir, vanished, options.scopeKey);
 
-  return { tailTextByName, sizeByName, matchedNames, sealedConfirmedNames, deadNames: dead };
+  // A recheck scan (see requestDeadSegmentRecheck) opened names that were already
+  // confirmed dead before it; one that failed again is still dead, reported as such.
+  const deadNames = recheckedDead.size > 0 ? new Set([...dead, ...vanished.filter((name) => recheckedDead.has(name))]) : dead;
+  return { tailTextByName, sizeByName, matchedNames, sealedConfirmedNames, deadNames };
 }
 
 // Module-init side effect: purge the whole cache on manual refresh

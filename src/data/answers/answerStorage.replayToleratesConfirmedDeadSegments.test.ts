@@ -5,7 +5,7 @@ import { getSampleMainDir } from "../workspace/workspacePaths";
 import { ANSWER_EVENTS_DIR } from "./answerEventStore";
 import { __clearAnswerEventsCacheForTests, loadAllEmployeeFiles } from "./answerStorage";
 import * as reg from "../storage/deadSegmentRegistry";
-import { getRecentErrors, clearErrors } from "../storage/errorLogger";
+import { clearErrors } from "../storage/errorLogger";
 
 const MONTH = "5-May-2026";
 const DEAD = new Set([
@@ -45,7 +45,10 @@ function withDead(dir: DirectoryHandleLike): DirectoryHandleLike {
   return wrap(dir);
 }
 
-describe("field repro", () => {
+// Field case (2026-10-11/12): colleague segments stayed listed but unopenable for
+// over a day. The pending-answer replay's strict, dead-tolerant read must get past
+// them once confirmed dead, while views keep reading leniently.
+describe("pending-answer replay vs persistently unopenable colleague segments", () => {
   let now = 1_000_000;
   beforeEach(() => {
     __clearAnswerEventsCacheForTests();
@@ -56,7 +59,7 @@ describe("field repro", () => {
   });
   afterEach(() => vi.restoreAllMocks());
 
-  it("H1: strict tolerant reads 30 s apart, cache NOT cleared, interleaved lenient reads", async () => {
+  it("a strict dead-tolerant read lands once the segments are confirmed dead, with lenient reads every 30 s", async () => {
     const root = createMemoryDirectory("dead") as unknown as DirectoryHandleLike;
     const main = await getSampleMainDir(root, MONTH, true);
     const events = await main.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: true });
@@ -73,8 +76,6 @@ describe("field repro", () => {
       outcomes.push(r);
       now += 30_000;
     }
-    console.log("OUTCOMES", outcomes.join(","));
-    console.log("ERRS", getRecentErrors().map((e) => `${e.context}: ${String(e.message).slice(0, 90)}`).join("\n"));
     expect(outcomes.at(-1)).toBe("ok");
   }, 60_000);
 });

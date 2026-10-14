@@ -15,6 +15,7 @@ import {
   DEAD_SEGMENT_MIN_AGE_MS,
   DEAD_SEGMENT_MIN_SCANS,
   clearDeadSegmentRegistry,
+  confirmedDeadNames,
   isConfirmedDead,
   recordUnopenableSegment,
 } from "../storage/deadSegmentRegistry";
@@ -144,7 +145,7 @@ afterEach(() => {
 });
 
 describe("runSync — dead-segment registry", () => {
-  it("a manual run clears the registry; an automatic run leaves it", async () => {
+  it("a manual run re-opens dead segments once but keeps their evidence; an automatic run leaves it", async () => {
     const root = makeRoot();
     const now = Date.now();
     const seed = (): void => {
@@ -158,8 +159,13 @@ describe("runSync — dead-segment registry", () => {
       seed();
       await runSync({ directoryHandle: root, monthFolderName: MONTH });
       expect(isConfirmedDead("scope-x", "gone.ndjson", now)).toBe(true);
+      expect(confirmedDeadNames("scope-x", now)).toEqual(new Set(["gone.ndjson"]));
       await runSync({ directoryHandle: root, monthFolderName: MONTH, manual: true });
-      expect(isConfirmedDead("scope-x", "gone.ndjson", now)).toBe(false);
+      // Evidence survives (clearing it restarted the 5-minute window on every refresh)...
+      expect(isConfirmedDead("scope-x", "gone.ndjson", now)).toBe(true);
+      // ...but the next scan of the scope re-opens the name once.
+      expect(confirmedDeadNames("scope-x", now)).toEqual(new Set());
+      expect(confirmedDeadNames("scope-x", now)).toEqual(new Set(["gone.ndjson"]));
     } finally {
       clearDeadSegmentRegistry();
     }
