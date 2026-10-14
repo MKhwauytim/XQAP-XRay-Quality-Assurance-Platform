@@ -12,6 +12,7 @@ import {
 import { __clearAnswerEventsCacheForTests, loadEmployeeAnswers, upsertItemAnswer, upsertItemAnswerOnBehalf } from "../answerStorage";
 import type { ItemAnswer } from "../answerTypes";
 import { fileNames, makeV1Month, readText, savedEvent, writeText } from "../v2/v2TestFixtures";
+import { getDistributionDeviceId } from "../../distribution/distributionEventStore";
 import { groupFlatSegmentLines, migrateMonthToPerAssignee, type MigrationPhase } from "./flatToPerAssignee";
 
 const MONTH = "5-may-2026";
@@ -153,6 +154,47 @@ describe("migrateMonthToPerAssignee (spec §6)", () => {
     expect(result).toMatchObject({ status: "locked-elsewhere", by: "admin2" });
     expect(await fileNames(events)).toEqual([...flatTexts.keys()].sort());
   });
+
+  it("a fresh lock from the SAME admin and device but another run is not bypassed (review finding 6)", async () => {
+    const { root } = await v1Fixture("same-device");
+    const events = await getAnswerEventsDir(root, MONTH, false);
+    await safeWriteJson(events, ANSWER_EVENTS_FOLDERS.migrationLock, wrap({ by: "admin", deviceId: getDistributionDeviceId(), startedAt: new Date().toISOString(), token: "another-run", revision: 1 }));
+    expect(await migrateMonthToPerAssignee(root, MONTH, { actor: "admin" })).toMatchObject({ status: "locked-elsewhere", by: "admin" });
+  });
+
+  it("the lock is heart-beaten during a long run, so it never looks stale to another device (review finding 6)", async () => {
+    const { root } = await v1Fixture("heartbeat");
+    const events = await getAnswerEventsDir(root, MONTH, false);
+    const start = Date.parse("2026-05-10T08:00:00.000Z");
+    let clock = start;
+    let seen: { startedAt: string; heartbeatAt?: string } | null = null;
+    const result = await migrateMonthToPerAssignee(root, MONTH, {
+      actor: "admin",
+      nowMs: () => clock,
+      onProgress: async ({ phase }) => {
+        if (phase === "archive") clock = start + 40 * 60_000; // a slow share: 40 minutes in
+        if (phase === "commit" && !seen) seen = unwrap(JSON.parse(await readText(events, ANSWER_EVENTS_FOLDERS.migrationLock)));
+      },
+    });
+    expect(result.status).toBe("migrated");
+    expect(seen).not.toBeNull();
+    expect(Date.parse(seen!.heartbeatAt ?? seen!.startedAt)).toBeGreaterThanOrEqual(start + 40 * 60_000);
+  }, 30_000);
+
+  it("a run whose lock was taken over aborts before committing (review finding 6)", async () => {
+    const { root } = await v1Fixture("stolen");
+    const events = await getAnswerEventsDir(root, MONTH, false);
+    let stolen = false;
+    await expect(migrateMonthToPerAssignee(root, MONTH, {
+      actor: "admin",
+      onProgress: async ({ phase }) => {
+        if (stolen || phase !== "move") return;
+        stolen = true;
+        await safeWriteJson(events, ANSWER_EVENTS_FOLDERS.migrationLock, wrap({ by: "admin2", deviceId: "other", startedAt: new Date().toISOString(), token: "theirs", revision: 9 }));
+      },
+    })).rejects.toThrow(/lock/);
+    await expect(events.getFileHandle(ANSWER_EVENTS_FOLDERS.layoutMarker)).rejects.toMatchObject({ name: "NotFoundError" });
+  }, 30_000);
 
   it("a lock older than 30 minutes is taken over", async () => {
     const { root } = await v1Fixture("stale");
