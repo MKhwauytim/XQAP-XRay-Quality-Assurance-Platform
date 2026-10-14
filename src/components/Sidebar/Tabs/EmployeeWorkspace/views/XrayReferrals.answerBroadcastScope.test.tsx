@@ -29,6 +29,11 @@ import {
   seedXrayReferralsWorkspace,
   renderXrayReferrals,
 } from "./XrayReferrals.testSupport";
+import { __pinNewAnswerMonthsToV1ForTests } from "../../../../../data/answers/v2/answerEventsLayout";
+
+// This suite pins the v1 flat answers layout for months it creates (layout v2: brand-new months start per-assignee).
+beforeEach(() => __pinNewAnswerMonthsToV1ForTests(true));
+afterEach(() => __pinNewAnswerMonthsToV1ForTests(false));
 
 vi.mock("../../../../../data/month/useGlobalMonth", () => ({
   useGlobalMonth: () => ({
