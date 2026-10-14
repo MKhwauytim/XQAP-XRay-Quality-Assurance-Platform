@@ -325,34 +325,96 @@ async function migratePass(
     await writeQuarantine(root, month, eventsDir, quarantined, new Date(now()).toISOString());
     state.quarantinedLines += quarantined.length;
   }
+  const blocked = await foldGroups(root, month, groups, options, now);
+  // v154.0 field report: a per-assignee failure (unreadable legacy file or
+  // archive segment, fold refusal) used to throw the whole month on every
+  // retry. Its flat segments now stay in place as UNFOLDED — on a first run
+  // the admin decides first, exactly like an unopenable segment (nothing has
+  // been moved yet, so "postpone" leaves the month plain v1).
+  if (blocked.length > 0 && decideUnreadable && (await decideUnreadable(blocked)) === "postpone") return { kind: "postponed", unreadable: blocked };
+  const blockedSet = new Set(blocked);
+  for (const name of blocked) {
+    state.unmovable.add(name);
+    state.unfolded.add(name);
+  }
+  const folded = fresh.filter((segment) => !blockedSet.has(segment.name));
+  for (const segment of folded) state.processed.set(segment.name, segment.bytes);
+  let done = 0;
+  for (const segment of folded) {
+    const archive = await archiveV1Dir();
+    const outcome = await moveFileVerified(eventsDir, segment.name, archive, segment.bytes, await freeArchiveName(archive, segment.name, segment.text));
+    if (outcome.status === "moved") state.moved += 1;
+    done += 1;
+    await options.onProgress?.({ phase: "move", done, total: folded.length });
+  }
+  return { kind: "done" };
+}
+
+/**
+ * Archive + snapshot every assignee group. A group whose own step throws is
+ * logged and skipped (never the lock-lost abort); the names of every flat
+ * segment holding any of its events are returned so they stay flat.
+ */
+async function foldGroups(
+  root: DirectoryHandleLike,
+  month: string,
+  groups: Map<string, AssigneeGroup>,
+  options: MigrateMonthOptions,
+  now: () => number
+): Promise<string[]> {
+  const failed = new Set<string>();
+  const attempt = async (folder: string, step: () => Promise<unknown>): Promise<void> => {
+    try {
+      await step();
+    } catch (error) {
+      if (error instanceof MigrationLockLostError) throw error;
+      logError("answers:migration:assignee-failed", error, { action: `${month}/${folder}` });
+      failed.add(folder);
+    }
+  };
   let done = 0;
   for (const [folder, group] of groups) {
-    await appendToAssigneeArchive(root, month, folder, group);
+    await attempt(folder, () => appendToAssigneeArchive(root, month, folder, group));
     done += 1;
     await options.onProgress?.({ phase: "archive", done, total: groups.size });
   }
   done = 0;
-  for (const group of groups.values()) {
-    const extraOffsets = Object.fromEntries([...group.segments].map(([name, bytes]) => [v1OffsetKey(name), bytes]));
-    await rebuildAndPersistAssigneeSnapshot(root, month, group.assignee, {
-      actor: options.actor,
-      loadLegacySeed: () => loadLegacyAnswerSeed(root, month, group.assignee),
-      foldFn: foldEmployeeEvents,
-      extraOffsets,
-      nowMs: now(),
-    });
+  for (const [folder, group] of groups) {
+    if (!failed.has(folder)) {
+      const extraOffsets = Object.fromEntries([...group.segments].map(([name, bytes]) => [v1OffsetKey(name), bytes]));
+      await attempt(folder, () => rebuildAndPersistAssigneeSnapshot(root, month, group.assignee, {
+        actor: options.actor,
+        loadLegacySeed: () => loadLegacyAnswerSeed(root, month, group.assignee),
+        foldFn: foldEmployeeEvents,
+        extraOffsets,
+        nowMs: now(),
+      }));
+    }
     done += 1;
     await options.onProgress?.({ phase: "snapshot", done, total: groups.size });
   }
-  for (const segment of fresh) state.processed.set(segment.name, segment.bytes);
-  done = 0;
-  for (const segment of fresh) {
-    const outcome = await moveFileVerified(eventsDir, segment.name, await archiveV1Dir(), segment.bytes);
-    if (outcome.status === "moved") state.moved += 1;
-    done += 1;
-    await options.onProgress?.({ phase: "move", done, total: fresh.length });
+  const blocked = new Set<string>();
+  for (const folder of failed) for (const name of groups.get(folder)!.segments.keys()) blocked.add(name);
+  return [...blocked].sort();
+}
+
+const MAX_ARCHIVE_NAME_PROBES = 1000;
+
+/**
+ * The `_archive-v1/` name to move `name` to. The copy fallback overwrites, so
+ * an existing entry with DIFFERENT bytes (a writer re-created a segment name
+ * after an earlier move) must never be the target: the copy goes to
+ * `{stem}.dup-{k}{suffix}` instead (still a segment name to every suffix-glob
+ * reader; fold dedupes eventIds). Identical bytes reuse the name.
+ */
+async function freeArchiveName(archive: DirectoryHandleLike, name: string, text: string): Promise<string> {
+  const stem = name.slice(0, -ANSWER_EVENT_SEGMENT_SUFFIX.length);
+  for (let k = 0; k < MAX_ARCHIVE_NAME_PROBES; k += 1) {
+    const candidate = k === 0 ? name : `${stem}.dup-${k}${ANSWER_EVENT_SEGMENT_SUFFIX}`;
+    const existing = await readFileTextWithRetry(archive, candidate);
+    if (existing === null || existing === text) return candidate;
   }
-  return { kind: "done" };
+  throw new Error(`No free _archive-v1 name for ${name}`);
 }
 
 async function fileSizeOrNull(dir: DirectoryHandleLike, name: string): Promise<number | null> {

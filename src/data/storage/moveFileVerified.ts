@@ -21,29 +21,35 @@ async function sizeOrNull(dir: DirectoryHandleLike, name: string): Promise<numbe
   }
 }
 
-async function tryNativeMove(sourceDir: DirectoryHandleLike, name: string, targetDir: DirectoryHandleLike, expectedBytes: number): Promise<boolean> {
+async function tryNativeMove(sourceDir: DirectoryHandleLike, name: string, targetDir: DirectoryHandleLike, expectedBytes: number, targetName: string): Promise<boolean> {
   const handle = await sourceDir.getFileHandle(name, { create: false });
   if (typeof handle.move !== "function") return false;
   try {
-    await handle.move(targetDir);
+    await (targetName === name ? handle.move(targetDir) : handle.move(targetDir, targetName));
   } catch {
     return false; // fall back to copy while the source is still in place
   }
-  return (await sizeOrNull(targetDir, name)) === expectedBytes && (await sizeOrNull(sourceDir, name)) === null;
+  return (await sizeOrNull(targetDir, targetName)) === expectedBytes && (await sizeOrNull(sourceDir, name)) === null;
 }
 
+/**
+ * `targetName` (default `name`): the entry to create inside `targetDir`. The
+ * copy fallback OVERWRITES an existing entry of that name, so a caller whose
+ * target may already hold different bytes passes a free name instead.
+ */
 export async function moveFileVerified(
   sourceDir: DirectoryHandleLike,
   name: string,
   targetDir: DirectoryHandleLike,
-  expectedBytes: number
+  expectedBytes: number,
+  targetName: string = name
 ): Promise<MoveOutcome> {
   const before = await sizeOrNull(sourceDir, name);
   if (before === null) return { status: "kept", reason: "source-missing" };
   // Bytes appended since the caller read the file are not in its snapshot yet.
   if (before !== expectedBytes) return { status: "kept", reason: "changed" };
-  if (await tryNativeMove(sourceDir, name, targetDir, expectedBytes)) return { status: "moved", via: "move" };
-  const copied = await copyFileBytesVerified(sourceDir, name, targetDir, name);
+  if (await tryNativeMove(sourceDir, name, targetDir, expectedBytes, targetName)) return { status: "moved", via: "move" };
+  const copied = await copyFileBytesVerified(sourceDir, name, targetDir, targetName);
   if (copied.status === "source_missing") return { status: "kept", reason: "source-missing" };
   if (copied.status !== "copied") return { status: "kept", reason: "copy-failed", detail: copied.detail };
   if (copied.bytes !== expectedBytes || (await sizeOrNull(sourceDir, name)) !== expectedBytes) {

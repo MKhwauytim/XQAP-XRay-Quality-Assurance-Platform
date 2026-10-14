@@ -109,6 +109,55 @@ describe("AnswersLayoutMigrationPrompt", () => {
     expect(mocks.probe).toHaveBeenCalledTimes(1);
   });
 
+  describe("v154.0 field report: failure reason, per-file progress, close guard", () => {
+    async function start(name: string) {
+      renderWith(<AnswersLayoutMigrationPrompt session={admin} directoryHandle={createMemoryDirectory(name)} workspaceReady />);
+      await screen.findByText(/2000/);
+      fireEvent.click(screen.getByRole("button", { name: getLabels().answers_layout_migration_confirm }));
+    }
+
+    it("a failed month shows the Arabic reason and the technical detail (error name, message, file name)", async () => {
+      const error = Object.assign(new Error("Event segment(s) listed but could not be read: seg-a.ndjson"), { name: "EventSegmentUnreadableError", segmentNames: ["seg-a.ndjson"] });
+      mocks.migrate.mockRejectedValue(error);
+      await start("ui-fail");
+      const status = await screen.findByRole("status");
+      await waitFor(() => expect(status.textContent).toContain(getLabels().answers_layout_migration_reason_segment_unreadable));
+      const detail = await screen.findByTestId("answers-migration-detail");
+      expect(detail.textContent).toContain("EventSegmentUnreadableError");
+      expect(detail.textContent).toContain("seg-a.ndjson");
+    });
+
+    it("a DOMException-style NotAllowedError maps to the permission reason", async () => {
+      mocks.migrate.mockRejectedValue(Object.assign(new Error("denied"), { name: "NotAllowedError" }));
+      await start("ui-perm");
+      const status = await screen.findByRole("status");
+      await waitFor(() => expect(status.textContent).toContain(getLabels().answers_layout_migration_reason_not_allowed));
+    });
+
+    it("per-file progress is shown while running, and closing the tab is guarded until the run ends", async () => {
+      let finish: () => void = () => {};
+      mocks.migrate.mockImplementation(async (_d: unknown, _m: string, options: { onProgress?: (p: { phase: string; done: number; total: number }) => Promise<void> | void }) => {
+        await options.onProgress?.({ phase: "move", done: 7, total: 40 });
+        await new Promise<void>((resolve) => { finish = resolve; });
+        return { status: "migrated", marker: {}, quarantinedLines: 0 };
+      });
+      await start("ui-progress");
+      const status = await screen.findByRole("status");
+      await waitFor(() => expect(status.textContent).toContain("7/40"));
+      expect(status.textContent).toContain(getLabels().answers_layout_migration_phase_move);
+      const guarded = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(guarded);
+      expect(guarded.defaultPrevented).toBe(true);
+      finish();
+      await screen.findByText(getLabels().answers_layout_migration_done);
+      await waitFor(() => {
+        const after = new Event("beforeunload", { cancelable: true });
+        window.dispatchEvent(after);
+        expect(after.defaultPrevented).toBe(false);
+      });
+    });
+  });
+
   it("Later closes without migrating", async () => {
     renderWith(<AnswersLayoutMigrationPrompt session={admin} directoryHandle={createMemoryDirectory("ui3")} workspaceReady />);
     await screen.findByText(/2000/);

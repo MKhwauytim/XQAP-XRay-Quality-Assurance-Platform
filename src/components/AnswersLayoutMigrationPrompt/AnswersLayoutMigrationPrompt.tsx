@@ -12,7 +12,10 @@ import { useBootProgress } from "../../data/workspace/bootProgress";
 import { useLabels } from "../../data/labels/useLabels";
 import { monthFoldersQueryOptions } from "../../data/query/monthFoldersQuery";
 import { probeAnswerLayoutMigrations, type MonthMigrationNeed } from "../../data/answers/migration/answerLayoutMigrationProbe";
-import { migrateMonthToPerAssignee, type UnreadableDecision } from "../../data/answers/migration/flatToPerAssignee";
+import { migrateMonthToPerAssignee, type MigrationProgress, type UnreadableDecision } from "../../data/answers/migration/flatToPerAssignee";
+import { classifyMigrationFailure } from "../../data/answers/migration/migrationFailureReason";
+import type { LabelKey } from "../../data/labels/labelsStore";
+import "./AnswersLayoutMigrationPrompt.css";
 import { broadcastDataRefresh } from "../../data/workspace/dataRefreshSignal";
 import { logError } from "../../data/storage/errorLogger";
 
@@ -33,7 +36,46 @@ type Phase =
   | { kind: "running"; text: string }
   /** Option C: unreadable flat segments found before the first write — the admin decides. */
   | { kind: "ask"; month: string; names: readonly string[]; resolve: (decision: UnreadableDecision) => void }
-  | { kind: "done"; text: string };
+  | { kind: "done"; text: string; details: readonly string[] };
+
+/** UI updates from the per-file progress callback, at most ~4 per second (a phase change always shows at once). */
+const PROGRESS_THROTTLE_MS = 250;
+
+const PHASE_LABEL: Record<MigrationProgress["phase"], LabelKey> = {
+  lock: "answers_layout_migration_phase_lock",
+  read: "answers_layout_migration_phase_read",
+  archive: "answers_layout_migration_phase_archive",
+  snapshot: "answers_layout_migration_phase_snapshot",
+  move: "answers_layout_migration_phase_move",
+  stragglers: "answers_layout_migration_phase_stragglers",
+  commit: "answers_layout_migration_phase_commit",
+  verify: "answers_layout_migration_phase_verify",
+};
+
+/** Closing the tab mid-run asks first (the run itself is crash-safe, but it would have to start over). */
+function useLeaveGuard(active: boolean): void {
+  useEffect(() => {
+    if (!active) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [active]);
+}
+
+function throttledProgress(onText: (progress: MigrationProgress) => void): (progress: MigrationProgress) => void {
+  let lastAt = 0;
+  let lastPhase: MigrationProgress["phase"] | null = null;
+  return (progress) => {
+    const nowMs = Date.now();
+    if (progress.phase === lastPhase && progress.done < progress.total && nowMs - lastAt < PROGRESS_THROTTLE_MS) return;
+    lastAt = nowMs;
+    lastPhase = progress.phase;
+    onText(progress);
+  };
+}
 
 function fill(template: string, values: Record<string, string | number>): string {
   return Object.entries(values).reduce((text, [key, value]) => text.split(`{${key}}`).join(String(value)), template);
@@ -56,6 +98,7 @@ export function AnswersLayoutMigrationPrompt({ session, directoryHandle, workspa
   const [needs, setNeeds] = useState<MonthMigrationNeed[]>([]);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const probedFor = useRef<string | null>(null);
+  useLeaveGuard(phase.kind === "running" || phase.kind === "ask");
   const eligible = session.role === "admin" && session.mode !== "demo" && directoryHandle !== null && workspaceReady;
   const sessionKey = `${session.username}:${session.loginAt}:${directoryHandle?.name ?? ""}`;
 
@@ -79,11 +122,19 @@ export function AnswersLayoutMigrationPrompt({ session, directoryHandle, workspa
   async function runMigration(): Promise<void> {
     if (!directoryHandle) return;
     const problems: string[] = [];
+    const details: string[] = [];
     for (const [index, need] of needs.entries()) {
-      setPhase({ kind: "running", text: fill(labels.answers_layout_migration_running, { month: need.monthFolderName, done: index + 1, total: needs.length }) });
+      const monthValues = { month: need.monthFolderName, done: index + 1, total: needs.length };
+      let runningText = fill(labels.answers_layout_migration_running, monthValues);
+      setPhase({ kind: "running", text: runningText });
+      const onProgress = throttledProgress((progress) => {
+        runningText = fill(labels.answers_layout_migration_running_phase, { ...monthValues, phase: labels[PHASE_LABEL[progress.phase]], n: progress.done, m: progress.total });
+        setPhase((current) => (current.kind === "running" ? { kind: "running", text: runningText } : current));
+      });
       try {
         const result = await migrateMonthToPerAssignee(directoryHandle, need.monthFolderName, {
           actor: session.username,
+          onProgress,
           // Asked after the read-only phase, before the first write: "postpone" moves nothing.
           onUnreadable: (names) =>
             new Promise<UnreadableDecision>((resolve) => {
@@ -92,7 +143,7 @@ export function AnswersLayoutMigrationPrompt({ session, directoryHandle, workspa
                 month: need.monthFolderName,
                 names,
                 resolve: (decision) => {
-                  setPhase({ kind: "running", text: fill(labels.answers_layout_migration_running, { month: need.monthFolderName, done: index + 1, total: needs.length }) });
+                  setPhase({ kind: "running", text: runningText });
                   resolve(decision);
                 },
               });
@@ -103,11 +154,13 @@ export function AnswersLayoutMigrationPrompt({ session, directoryHandle, workspa
         if (result.status === "migrated") problems.push(...leftoverProblems(labels, need.monthFolderName, result.unfolded ?? [], result.unmovable ?? []));
       } catch (error) {
         logError("answersMigrationPrompt:migrate", error, { action: need.monthFolderName });
-        problems.push(fill(labels.answers_layout_migration_failed, { month: need.monthFolderName }));
+        const reason = classifyMigrationFailure(error);
+        problems.push(fill(labels.answers_layout_migration_failed_reason, { month: need.monthFolderName, reason: labels[reason.labelKey] }));
+        details.push(`${need.monthFolderName} — ${reason.detail}`);
       }
     }
     broadcastDataRefresh("manual");
-    setPhase({ kind: "done", text: problems.length === 0 ? labels.answers_layout_migration_done : problems.join(" ") });
+    setPhase({ kind: "done", text: problems.length === 0 ? labels.answers_layout_migration_done : problems.join(" "), details });
   }
 
   if (phase.kind === "idle") return null;
@@ -142,7 +195,16 @@ export function AnswersLayoutMigrationPrompt({ session, directoryHandle, workspa
         </ul>
       </div>
     ) : (
-      <p role="status" dir="rtl">{phase.text}</p>
+      <div>
+        <p role="status" dir="rtl">{phase.text}</p>
+        {phase.kind === "done" && phase.details.length > 0 ? (
+          <div className="answers-migration__detail" data-testid="answers-migration-detail" dir="ltr">
+            {phase.details.map((detail) => (
+              <code key={detail}>{detail}</code>
+            ))}
+          </div>
+        ) : null}
+      </div>
     );
   return (
     <ConfirmDialog
