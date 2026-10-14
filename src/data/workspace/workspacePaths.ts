@@ -24,6 +24,51 @@ export const SAMPLE_SUBFOLDERS = {
   approvals: "3-approvals",
 } as const;
 
+/**
+ * `2-samples/{month}/1-main/answers.events/` and its layout-v2 children
+ * (spec 2026-10-13 §4). THE one definition — `answerEventStore.ts` re-exports
+ * `ANSWER_EVENTS_DIR` from `root`.
+ *
+ * - `layoutMarker`: present = the month is v2 (per-assignee). Written LAST by
+ *   the migration; its presence is the commit point.
+ * - `migrationLock`: an admin migration is running (or crashed) — writers defer.
+ * - `archiveV1`: flat v1 segments, moved untouched by the migration.
+ * - `quarantine`: v1 lines the migration could not attribute or parse.
+ * - `assigneeArchive` / `assigneeSnapshot`: per-assignee children.
+ */
+export const ANSWER_EVENTS_FOLDERS = {
+  root: "answers.events",
+  layoutMarker: "_layout.json",
+  migrationLock: "_migration.lock.json",
+  archiveV1: "_archive-v1",
+  quarantine: "_quarantine",
+  assigneeArchive: "archive",
+  assigneeSnapshot: "snapshot.json",
+} as const;
+
+const RESERVED_ANSWER_EVENTS_CHILDREN: ReadonlySet<string> = new Set<string>([
+  ANSWER_EVENTS_FOLDERS.archiveV1,
+  ANSWER_EVENTS_FOLDERS.quarantine,
+]);
+
+/**
+ * The `{assignee}` folder for a username. Lowercased because every answers
+ * comparison is case-insensitive (`sameUser`), so `Emp1` saving and `emp1`
+ * answered on behalf must land in ONE folder.
+ */
+export function answerAssigneeFolderName(assignee: string): string {
+  const name = safeWorkspaceFilePart(assignee.trim().toLowerCase());
+  if (name === "" || name === "." || RESERVED_ANSWER_EVENTS_CHILDREN.has(name)) {
+    throw new Error(`Invalid answer assignee "${assignee}": not usable as a folder name`);
+  }
+  return name;
+}
+
+/** True for a listed `answers.events/` child directory that is an assignee folder. */
+export function isAnswerAssigneeFolderName(name: string): boolean {
+  return name !== "" && !name.startsWith(".") && !RESERVED_ANSWER_EVENTS_CHILDREN.has(name);
+}
+
 export const SYSTEM_FOLDER_NAMES = {
   locks: "locks",
   audit: "audit",
@@ -285,7 +330,10 @@ export function __clearWorkspaceDirCacheForTests(): void {
 // not change every 45 seconds.
 if (typeof window !== "undefined") {
   subscribeToDataRefresh((source) => {
-    if (source === "manual") invalidateWorkspaceDirCache();
+    if (source === "manual") {
+      invalidateWorkspaceDirCache();
+      invalidateAnswerEventsLayout();
+    }
   });
 }
 
@@ -515,6 +563,162 @@ export async function getSampleApprovalsDir(
   create = true
 ): Promise<DirectoryHandleLike> {
   return getSampleSubDir(directoryHandle, monthFolderName, SAMPLE_SUBFOLDERS.approvals, create);
+}
+
+function sampleMainPath(monthFolderName: string): string {
+  return `${WORKSPACE_ROOTS.samples}/${monthFolderName}/${SAMPLE_SUBFOLDERS.main}`;
+}
+
+function answerEventsPath(monthFolderName: string): string {
+  return `${sampleMainPath(monthFolderName)}/${ANSWER_EVENTS_FOLDERS.root}`;
+}
+
+/** `2-samples/{month}/1-main/answers.events/`. */
+export async function getAnswerEventsDir(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  create = false
+): Promise<DirectoryHandleLike> {
+  return getChildDir(
+    directoryHandle,
+    sampleMainPath(monthFolderName),
+    () => getSampleMainDir(directoryHandle, monthFolderName, create),
+    ANSWER_EVENTS_FOLDERS.root,
+    create,
+    monthFolderName
+  );
+}
+
+/** `answers.events/{assignee}/` — live segments + `snapshot.json`. */
+export async function getAssigneeAnswerEventsDir(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  assignee: string,
+  create = false
+): Promise<DirectoryHandleLike> {
+  return getChildDir(
+    directoryHandle,
+    answerEventsPath(monthFolderName),
+    () => getAnswerEventsDir(directoryHandle, monthFolderName, create),
+    answerAssigneeFolderName(assignee),
+    create,
+    monthFolderName
+  );
+}
+
+/** `answers.events/{assignee}/archive/` — segments folded into the snapshot. */
+export async function getAssigneeArchiveDir(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  assignee: string,
+  create = false
+): Promise<DirectoryHandleLike> {
+  return getChildDir(
+    directoryHandle,
+    `${answerEventsPath(monthFolderName)}/${answerAssigneeFolderName(assignee)}`,
+    () => getAssigneeAnswerEventsDir(directoryHandle, monthFolderName, assignee, create),
+    ANSWER_EVENTS_FOLDERS.assigneeArchive,
+    create,
+    monthFolderName
+  );
+}
+
+/** `answers.events/_archive-v1/` — flat v1 segments, moved untouched. */
+export async function getAnswerArchiveV1Dir(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  create = false
+): Promise<DirectoryHandleLike> {
+  return getChildDir(
+    directoryHandle,
+    answerEventsPath(monthFolderName),
+    () => getAnswerEventsDir(directoryHandle, monthFolderName, create),
+    ANSWER_EVENTS_FOLDERS.archiveV1,
+    create,
+    monthFolderName
+  );
+}
+
+/** `answers.events/_quarantine/` — v1 lines the migration could not attribute or parse. */
+export async function getAnswerQuarantineDir(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  create = false
+): Promise<DirectoryHandleLike> {
+  return getChildDir(
+    directoryHandle,
+    answerEventsPath(monthFolderName),
+    () => getAnswerEventsDir(directoryHandle, monthFolderName, create),
+    ANSWER_EVENTS_FOLDERS.quarantine,
+    create,
+    monthFolderName
+  );
+}
+
+export type AnswerEventsLayout = "absent" | "v1" | "v1-migrating" | "v2";
+
+/**
+ * Months this tab has SEEN as v2, per workspace root. Monotone on purpose: the
+ * layout only moves forward (rollback is a manual, reload-requiring operation —
+ * see data-system-report.md), so one transient NotFound on `_layout.json` from a
+ * lagging SMB listing can never flip a v2 month back to the flat reader, which
+ * would show an employee an empty month. Every OTHER verdict is re-probed on
+ * every call (three handle opens in parallel, one round trip): a stale "v1"
+ * would send a save into the flat folder after the admin committed v2.
+ */
+let answerLayoutV2ByRoot = new WeakMap<DirectoryHandleLike, Set<string>>();
+
+export function noteAnswerEventsLayoutV2(directoryHandle: DirectoryHandleLike, monthFolderName: string): void {
+  let months = answerLayoutV2ByRoot.get(directoryHandle);
+  if (!months) {
+    months = new Set();
+    answerLayoutV2ByRoot.set(directoryHandle, months);
+  }
+  months.add(monthFolderName);
+}
+
+export function invalidateAnswerEventsLayout(directoryHandle?: DirectoryHandleLike, monthFolderName?: string): void {
+  if (!directoryHandle) {
+    answerLayoutV2ByRoot = new WeakMap();
+    return;
+  }
+  if (monthFolderName === undefined) answerLayoutV2ByRoot.delete(directoryHandle);
+  else answerLayoutV2ByRoot.get(directoryHandle)?.delete(monthFolderName);
+}
+
+async function entryExists(open: () => Promise<unknown>): Promise<boolean> {
+  try {
+    await open();
+    return true;
+  } catch (error) {
+    // "I could not look" is not "it is not there" — same rule as getRoot.
+    if (isNotFoundError(error)) return false;
+    throw error;
+  }
+}
+
+export async function getAnswerEventsLayout(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<AnswerEventsLayout> {
+  if (answerLayoutV2ByRoot.get(directoryHandle)?.has(monthFolderName)) return "v2";
+  let eventsDir: DirectoryHandleLike;
+  try {
+    eventsDir = await getAnswerEventsDir(directoryHandle, monthFolderName, false);
+  } catch (error) {
+    if (isNotFoundError(error)) return "absent";
+    throw error;
+  }
+  const [marker, lock, archive] = await Promise.all([
+    entryExists(() => eventsDir.getFileHandle(ANSWER_EVENTS_FOLDERS.layoutMarker, { create: false })),
+    entryExists(() => eventsDir.getFileHandle(ANSWER_EVENTS_FOLDERS.migrationLock, { create: false })),
+    entryExists(() => eventsDir.getDirectoryHandle(ANSWER_EVENTS_FOLDERS.archiveV1, { create: false })),
+  ]);
+  if (marker) {
+    noteAnswerEventsLayoutV2(directoryHandle, monthFolderName);
+    return "v2";
+  }
+  return lock || archive ? "v1-migrating" : "v1";
 }
 
 export async function getUserDataRoot(
