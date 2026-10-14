@@ -882,6 +882,7 @@ export const DEFAULT_LABELS = {
   answers_layout_migration_reason_answers_unreadable: "تعذّرت قراءة إجابات هذا الشهر.",
   answers_layout_migration_reason_fold_refused:       "سجل إجابات أحد الموظفين لا يطابق ملفه السابق.",
   answers_layout_migration_reason_not_readable:       "الملف مقفل أو مشغول من برنامج آخر (مثل مزامنة أو مكافحة فيروسات).",
+  answers_layout_migration_reason_file_changed:       "تغيّر ملف أثناء القراءة (كتب عليه جهاز أو مستخدم آخر، أو لم تُحدَّث نسخة الشبكة بعد). أعد المحاولة بعد قليل.",
   answers_layout_migration_reason_not_allowed:        "لا توجد صلاحية كتابة على مجلد مساحة العمل.",
   answers_layout_migration_reason_quota:              "لا توجد مساحة كافية على القرص.",
   answers_layout_migration_reason_verify:             "فشل التحقق من نسخة ملف بعد كتابتها.",

@@ -14,6 +14,27 @@ async function exists(dir: DirectoryHandleLike, name: string): Promise<boolean> 
 }
 
 describe("moveFileVerified", () => {
+  it("round 6: a stale-snapshot InvalidStateError on the copy read-back is re-opened, not a failed move", async () => {
+    const root = createMemoryDirectory("mv-stale");
+    const src = await root.getDirectoryHandle("src", { create: true });
+    const dst = await root.getDirectoryHandle("dst", { create: true });
+    await write(src, "a.ndjson", "line1\n");
+    setSimulatedFaults(root, [{ operation: "readFile", name: "a.ndjson", errorName: "InvalidStateError", rearmAfterClose: true, times: 1 }]);
+    expect(await moveFileVerified(src, "a.ndjson", dst, 6)).toEqual({ status: "moved", via: "copy" });
+  });
+
+  it("round 6: a copy that keeps throwing leaves the source in place as kept/copy-failed instead of throwing", async () => {
+    const root = createMemoryDirectory("mv-throw");
+    const src = await root.getDirectoryHandle("src", { create: true });
+    const dst = await root.getDirectoryHandle("dst", { create: true });
+    await write(src, "a.ndjson", "line1\n");
+    setSimulatedFaults(root, [{ operation: "readFile", name: "a.ndjson", errorName: "InvalidStateError", times: Number.POSITIVE_INFINITY }]);
+    const outcome = await moveFileVerified(src, "a.ndjson", dst, 6);
+    expect(outcome).toMatchObject({ status: "kept", reason: "copy-failed" });
+    setSimulatedFaults(root, []);
+    expect(await (await (await src.getFileHandle("a.ndjson")).getFile()).text()).toBe("line1\n");
+  }, 20_000);
+
   it("copy fallback: target byte-identical, source removed", async () => {
     const root = createMemoryDirectory("mv1");
     const src = await root.getDirectoryHandle("src", { create: true });

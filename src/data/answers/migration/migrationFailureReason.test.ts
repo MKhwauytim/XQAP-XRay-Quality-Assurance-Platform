@@ -14,6 +14,7 @@ describe("classifyMigrationFailure", () => {
     [new AnswersUnreadableError("5-may-2026"), "answers_layout_migration_reason_answers_unreadable"],
     [named("AnswerFoldError"), "answers_layout_migration_reason_fold_refused"],
     [named("NotReadableError"), "answers_layout_migration_reason_not_readable"],
+    [named("InvalidStateError"), "answers_layout_migration_reason_file_changed"],
     [named("NotAllowedError"), "answers_layout_migration_reason_not_allowed"],
     [named("QuotaExceededError"), "answers_layout_migration_reason_quota"],
     [new Error("copy verify failed"), "answers_layout_migration_reason_verify"],

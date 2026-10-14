@@ -16,6 +16,8 @@ import {
   TRANSIENT_WRITE_RETRY_DELAYS_MS,
   isNotFoundError,
   isNotReadableError,
+  isSnapshotStaleError,
+  SNAPSHOT_STALE_RETRY_DELAYS_MS,
   waitFor,
 } from "./transientFileErrors";
 
@@ -411,11 +413,25 @@ async function readListedEntry<T>(
   budget: VanishRetryBudget | null
 ): Promise<T | null> {
   let handle = entry.handle;
+  let staleRetries = 0;
   for (let attempt = 0; ; attempt += 1) {
     try {
       handle ??= await dir.getFileHandle(entry.name, { create: false });
       return await read(await handle.getFile());
     } catch (error) {
+      // v154.0 round 6: Chrome's stale-snapshot InvalidStateError (the File's
+      // cached (size, mtime) no longer matches disk — on the share, typically
+      // right after a write of this same name). A FRESH getFile() is the cure,
+      // so re-open by name on its own short ladder. Not charged to the vanish
+      // budget and never resolved to null: exhausted, it still throws, because
+      // the file exists and a strict caller must not fold it as "no events".
+      if (isSnapshotStaleError(error)) {
+        if (staleRetries >= SNAPSHOT_STALE_RETRY_DELAYS_MS.length) throw error;
+        handle = null;
+        await waitFor(SNAPSHOT_STALE_RETRY_DELAYS_MS[staleRetries++]!);
+        attempt -= 1;
+        continue;
+      }
       if (!isNotFoundError(error) && !isNotReadableError(error)) throw error;
       const canRetry =
         budget !== null &&

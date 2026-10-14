@@ -49,7 +49,16 @@ export async function moveFileVerified(
   // Bytes appended since the caller read the file are not in its snapshot yet.
   if (before !== expectedBytes) return { status: "kept", reason: "changed" };
   if (await tryNativeMove(sourceDir, name, targetDir, expectedBytes, targetName)) return { status: "moved", via: "move" };
-  const copied = await copyFileBytesVerified(sourceDir, name, targetDir, targetName);
+  // v154.0 round 6: a copy that THROWS (e.g. an InvalidStateError that outlived
+  // every ladder) leaves the source in place, so it is "kept", never a throw
+  // that fails the caller's whole run.
+  let copied: Awaited<ReturnType<typeof copyFileBytesVerified>>;
+  try {
+    copied = await copyFileBytesVerified(sourceDir, name, targetDir, targetName);
+  } catch (error) {
+    const named = error as { name?: unknown; message?: unknown };
+    return { status: "kept", reason: "copy-failed", detail: `${String(named?.name ?? "Error")}: ${String(named?.message ?? error)}` };
+  }
   if (copied.status === "source_missing") return { status: "kept", reason: "source-missing" };
   if (copied.status !== "copied") return { status: "kept", reason: "copy-failed", detail: copied.detail };
   if (copied.bytes !== expectedBytes || (await sizeOrNull(sourceDir, name)) !== expectedBytes) {

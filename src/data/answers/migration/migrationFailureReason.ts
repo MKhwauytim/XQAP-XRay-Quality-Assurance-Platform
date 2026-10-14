@@ -16,6 +16,8 @@ const BY_NAME: Record<string, LabelKey> = {
   AnswersUnreadableError: "answers_layout_migration_reason_answers_unreadable",
   AnswerFoldError: "answers_layout_migration_reason_fold_refused",
   NotReadableError: "answers_layout_migration_reason_not_readable",
+  // Chrome stale-snapshot: the file changed between getFile() and the read (round 6).
+  InvalidStateError: "answers_layout_migration_reason_file_changed",
   NoModificationAllowedError: "answers_layout_migration_reason_not_readable",
   NotAllowedError: "answers_layout_migration_reason_not_allowed",
   SecurityError: "answers_layout_migration_reason_not_allowed",
