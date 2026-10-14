@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v153.31",
+    "date": "2026-10-14",
+    "bucket": "enhancement",
+    "scope": "statements",
+    "title": "compare each port with one fixed baseline per port type (إجمالي), not the rest of its type"
+  },
+  {
     "version": "v153.30",
     "date": "2026-10-13",
     "bucket": "enhancement",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "executive report",
     "title": "official risk-level definitions and corrected glossary terms"
-  },
-  {
-    "version": "v153.22",
-    "date": "2026-10-12",
-    "bucket": "enhancement",
-    "scope": "executive report",
-    "title": "recommendations reworded in plain, practical language"
   }
 ];
