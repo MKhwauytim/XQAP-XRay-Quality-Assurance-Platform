@@ -29,6 +29,7 @@
 //   below target, and the الفارق figure carries an explicit +/− sign.
 
 import { band, isRankable } from "../../model/dataSufficiency";
+import { resolvePortKinds } from "../../portKind";
 import type { PortLevelAccuracy } from "../../model/aggregates";
 import type { ReportModel } from "../../model/reportModel";
 import { esc, fmtNum, fmtPct } from "../../primitives";
@@ -97,6 +98,8 @@ export type LevelStats = {
 export type LevelAccuracyRow = {
   name: string;
   sea: boolean;
+  /** No non-blank «نوع المنفذ» for this port (portKind.ts): reported as «غير محدد», never as land. */
+  unknown?: boolean;
   l1: LevelStats;
   l2: LevelStats;
 };
@@ -155,12 +158,10 @@ function statsFromPortLevel(entry: PortLevelAccuracy | undefined): LevelStats {
 export function collectLevelAccuracyRows(model: ReportModel): {
   land: LevelAccuracyRow[];
   sea: LevelAccuracyRow[];
+  unknown: LevelAccuracyRow[];
 } {
-  const seaByPort = new Map<string, boolean>();
-  for (const rec of model.factTable) {
-    const name = rec.portName ?? UNKNOWN_PORT;
-    if (!seaByPort.has(name)) seaByPort.set(name, (rec.portType ?? "").includes("بحري"));
-  }
+  // Land/sea: the shared majority-of-non-blank-type rule (portKind.ts).
+  const kinds = resolvePortKinds([...model.factTable].map((rec) => ({ portName: rec.portName ?? UNKNOWN_PORT, portType: rec.portType })));
 
   const byPort = new Map<string, { l1?: PortLevelAccuracy; l2?: PortLevelAccuracy }>();
   for (const entry of model.portAccuracyByLevel) {
@@ -173,7 +174,8 @@ export function collectLevelAccuracyRows(model: ReportModel): {
   const all: LevelAccuracyRow[] = [...byPort.entries()]
     .map(([name, b]) => ({
       name,
-      sea: seaByPort.get(name) ?? false,
+      sea: kinds.get(name) === "sea",
+      unknown: (kinds.get(name) ?? "unknown") === "unknown",
       l1: statsFromPortLevel(b.l1),
       l2: statsFromPortLevel(b.l2),
     }))
@@ -187,7 +189,7 @@ export function collectLevelAccuracyRows(model: ReportModel): {
       return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
     });
 
-  return { land: all.filter((p) => !p.sea), sea: all.filter((p) => p.sea) };
+  return { land: all.filter((p) => !p.sea && !p.unknown), sea: all.filter((p) => p.sea), unknown: all.filter((p) => p.unknown) };
 }
 
 /** The signed points figure itself. `dir="ltr"` because a signed decimal is a

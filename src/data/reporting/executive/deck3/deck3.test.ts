@@ -4,6 +4,7 @@ import { DEFAULT_EXEC_CONFIG } from "../../executiveReportTypes";
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
 import type { PreparedPopulationRow } from "../../../population/populationTypes";
 import { buildExecutiveDeckV3, buildDeckV3Html } from "./index";
+import { errorShares } from "./slides";
 
 // Same fixture pattern as deck2.test.ts — a minimal but complete
 // PreparedPopulationRow, overridden per test row.
@@ -169,6 +170,46 @@ describe("buildExecutiveDeckV3", () => {
     // continuation page and never dropped.
     // Population, port results, level-per-port and the quality page each carry one total row.
     expect((html.match(/إجمالي البرية/g) ?? []).length).toBe(4);
+  });
+
+  it("types a port by its majority non-blank «نوع المنفذ», not by whichever row comes first", async () => {
+    const html = await buildExecutiveDeckV3(input([
+      popRow({ xrayImageId: "XR-1", portName: "ميناء مختلط", portType: "منفذ بري" }),
+      popRow({ xrayImageId: "XR-2", portName: "ميناء مختلط", portType: "منفذ بحري" }),
+      popRow({ xrayImageId: "XR-3", portName: "ميناء مختلط", portType: "منفذ بحري" }),
+      popRow({ xrayImageId: "XR-4", portName: "ميناء مختلط", portType: "" }),
+    ]));
+    expect(html).toContain("التوزيع على المنافذ البحرية");
+    expect(html).not.toContain("التوزيع على المنافذ البرية");
+  });
+
+  it("reports a port with no non-blank type as «غير محدد», never as land", async () => {
+    const html = await buildExecutiveDeckV3(input([
+      popRow({ xrayImageId: "XR-1", portName: "منفذ بلا نوع", portType: null }),
+      popRow({ xrayImageId: "XR-2", portName: "منفذ بلا نوع", portType: "  " }),
+    ]));
+    expect(html).toContain("التوزيع على المنافذ غير محددة النوع");
+    expect(html).not.toContain("التوزيع على المنافذ البرية");
+  });
+
+  it("defines the weights of the agreement formula and names the marking page's base", async () => {
+    const html = await buildExecutiveDeckV3(input([popRow()]));
+    expect(html).toContain("وزن السليمة = إجابات السليمة ÷ إجمالي الإجابات");
+    expect(html).toContain("الأساس: صور الاشتباه المفحوصة");
+  });
+});
+
+describe("errorShares", () => {
+  it("takes missed suspicion over the سليمة answers and false suspicion over the اشتباه answers, never over all answers", () => {
+    // سليمة answers = 70 + 30 = 100, اشتباه answers = 40 + 10 = 50, all = 150.
+    const s = errorShares({ correctClean: 70, missedSuspicion: 30, correctSuspicion: 40, falseSuspicion: 10 });
+    expect(s.missed).toBeCloseTo(30);
+    expect(s.false).toBeCloseTo(20);
+  });
+
+  it("gives no rate (not 0%) when its base is empty", () => {
+    const s = errorShares({ correctClean: 5, missedSuspicion: 0, correctSuspicion: 0, falseSuspicion: 0 });
+    expect(s.false).toBeNull();
   });
 });
 

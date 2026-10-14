@@ -66,7 +66,7 @@ export function buildStatements(model: ReportModel): Statement[] {
   if (all.evaluable === 0) return out;
 
   const portAcc = collectPortAccuracy(model);
-  const portRows = [...portAcc.land, ...portAcc.sea];
+  const portRows = [...portAcc.land, ...portAcc.sea, ...portAcc.unknown];
 
   // ── Land vs sea ───────────────────────────────────────────────────────────────────────────────────────────────
   const land = accuracyOf(sumCounts(portAcc.land.map((p) => p.counts)));
