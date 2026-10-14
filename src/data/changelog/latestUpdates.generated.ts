@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v153.32",
+    "date": "2026-10-14",
+    "bucket": "fix",
+    "scope": "statements",
+    "title": "observation figures on one line — short labels, single-row grid; level observation shows the weighted معدل الاتفاق العام"
+  },
+  {
     "version": "v153.31",
     "date": "2026-10-14",
     "bucket": "enhancement",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "answers",
     "title": "stop the save-failure spiral on flaky shares — retry refused replace before rotating, two-name extension probe, dead-segment registry, 256 KiB segments"
-  },
-  {
-    "version": "v153.23",
-    "date": "2026-10-12",
-    "bucket": "fix",
-    "scope": "executive report",
-    "title": "official risk-level definitions and corrected glossary terms"
   }
 ];
