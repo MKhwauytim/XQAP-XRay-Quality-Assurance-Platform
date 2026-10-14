@@ -2011,6 +2011,8 @@ export const DEFAULT_LABELS = {
   archive_restore_month_closed:                 "لا يمكن الاستعادة: شهر {month} مغلق. أعد فتح الشهر أولاً ثم كرر الاستعادة. لم يُغيَّر أي شيء.",
   archive_restore_failed_rollback:              "بدأت الاستعادة قبل أن تفشل، فقد تكون بعض الملفات تغيّرت. للرجوع استخدم نسخة الرجوع: {rollback}.",
   archive_restore_derived_warning:              "تنبيه: استُعيدت البيانات لكن تعذّرت خطوة «{step}» لشهر {month}: {error}",
+  archive_restore_snapshot_rebuild_warning:     "تنبيه: استُعيدت الإجابات لكن تعذّرت إعادة بناء ملخّص الإجابات لـ {count} من الموظفين: {list}. الإجابات المستعادة نفسها سليمة، وسيُعاد بناء الملخّص تلقائياً لاحقاً.",
+  archive_restore_snapshot_rebuild_item:        "{assignee} ({month})",
   archive_restore_derived_step_manifest:        "تحديث سجل الشهر",
   archive_restore_derived_step_population:      "إعادة بناء ملفات المجتمع المشتقة",
   archive_restore_derived_step_replacement_index: "فهرس مرشحي الاستبدال",

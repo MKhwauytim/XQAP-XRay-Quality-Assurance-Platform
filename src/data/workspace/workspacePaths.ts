@@ -45,11 +45,14 @@ export const ANSWER_EVENTS_FOLDERS = {
   quarantine: "_quarantine",
   assigneeArchive: "archive",
   assigneeSnapshot: "snapshot.json",
+  /** Derived change markers for the sync probe (`answerFolderHeads.ts`); never user data. */
+  heads: "_heads",
 } as const;
 
 const RESERVED_ANSWER_EVENTS_CHILDREN: ReadonlySet<string> = new Set<string>([
   ANSWER_EVENTS_FOLDERS.archiveV1,
   ANSWER_EVENTS_FOLDERS.quarantine,
+  ANSWER_EVENTS_FOLDERS.heads,
 ]);
 
 /**

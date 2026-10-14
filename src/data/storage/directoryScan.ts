@@ -770,6 +770,31 @@ export async function boundedSizeSignature(
   return JSON.stringify([names, sized]);
 }
 
+/**
+ * Like `boundedSizeSignature(..., headsOnly)` but signs ONLY the chain heads
+ * (names and sizes). Sealed segments are left out entirely, so moving them
+ * elsewhere (answers compaction archives only non-head segments) never changes
+ * the signature, while any append (which grows or rotates a head) does.
+ */
+export async function chainHeadsSizeSignature(
+  dir: DirectoryHandleLike,
+  suffix: string,
+  maxStats: number,
+  exclude?: (name: string) => boolean
+): Promise<string> {
+  const listed = await listMatchingFileEntries(dir, suffix);
+  const matched = exclude ? listed.filter((entry) => !exclude(entry.name)) : listed;
+  const sealed = namesWithHigherSibling(matched.map((entry) => entry.name), suffix);
+  const heads = matched.filter((entry) => !sealed.has(entry.name));
+  const probed = heads.slice(Math.max(0, heads.length - Math.max(0, maxStats)));
+  const sizes: (number | null)[] = new Array(probed.length).fill(null);
+  await forEachBounded(probed.length, DIRECTORY_READ_CONCURRENCY, async (index) => {
+    sizes[index] = await readListedEntry(dir, probed[index]!, async (file) => file.size, null);
+  });
+  const sized = probed.flatMap((entry, index) => (sizes[index] === null ? [] : [[entry.name, sizes[index]] as const]));
+  return JSON.stringify([heads.map((entry) => entry.name), sized]);
+}
+
 export type SegmentTailOptions = {
   suffix: string;
   /** Byte offset already consumed per file name; a name missing from this map defaults to 0 (read from the start). */

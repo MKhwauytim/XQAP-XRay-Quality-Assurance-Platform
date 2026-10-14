@@ -66,3 +66,23 @@ export function describeSelectiveRestoreSuccess(
   });
   return [head, ...params.integrity.map((entry) => describeIntegrity(labels, entry))].join(" ");
 }
+
+/**
+ * `RestoreResult.answerSnapshotRebuildFailures` (`{month}/{assigneeFolder}`) as
+ * one warning line naming every affected assignee; null when there are none.
+ */
+export function describeSnapshotRebuildFailures(labels: Labels, failures: readonly string[] | undefined): string | null {
+  if (!failures || failures.length === 0) return null;
+  const list = failures
+    .map((entry) => {
+      const slash = entry.indexOf("/");
+      const month = slash > 0 ? entry.slice(0, slash) : "";
+      const assignee = slash > 0 ? entry.slice(slash + 1) : entry;
+      return fillTemplate(labels.archive_restore_snapshot_rebuild_item, {
+        assignee,
+        month: month ? formatMonthFolderShortLabel(month) : "",
+      });
+    })
+    .join("، ");
+  return fillTemplate(labels.archive_restore_snapshot_rebuild_warning, { count: formatNumber(failures.length), list });
+}

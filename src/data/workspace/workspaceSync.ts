@@ -52,9 +52,11 @@ import {
   invalidateSealedAnswerSegments,
 } from "../answers/answerSealedSegments";
 import { readRealSession } from "../../auth/authSession";
+import { isOwnAnswerFolderHead, readAnswerFolderHeads } from "../answers/v2/answerFolderHeads";
 import { readDistributionLogStamp } from "../distribution/distributionStorage";
 import {
   boundedSizeSignature,
+  chainHeadsSizeSignature,
   countChainHeads,
   DIRECTORY_READ_CONCURRENCY,
   listDirectoryEntries,
@@ -579,7 +581,7 @@ async function probeAdhocStores(
           dist: distDir ? await boundedSizeSignature(distDir, DISTRIBUTION_EVENT_SEGMENT_SUFFIX) : "",
           answers: ansDir
             ? (await getAnswerEventsLayout(directoryHandle, folder)) === "v2"
-              ? await answerFoldersSignature(ansDir, folder)
+              ? await answerFoldersSignature(ansDir, folder, workspaceScopeId(directoryHandle))
               : await boundedSizeSignature(
                 ansDir,
                 ANSWER_EVENT_SEGMENT_SUFFIX,
@@ -625,25 +627,93 @@ function adhocIdsOf(signature: string): string[] {
 const V2_ANSWERS_SIGNATURE_PREFIX = "v2:";
 /** Per assignee folder: a v2 folder holds few live segments (compaction archives the rest), so a small head budget covers it. */
 const ANSWER_FOLDER_HEAD_STAT_BUDGET = 8;
+/**
+ * Backstop rotation length, in sync ticks: every MARKED folder's chain heads are
+ * re-stat'd once per this many ticks (45 s each, so 7.5 min), `ceil(marked / N)`
+ * folders per tick. It only matters when an append landed without its marker
+ * touch (the touch is best-effort, or a pre-marker v154 build wrote it).
+ */
+export const ANSWER_FOLDER_BACKSTOP_TICKS = 10;
+
+type AnswerFolderProbeState = {
+  tick: number;
+  /** Last chain-heads signature per marked folder (refreshed on rotation or on a marker change). */
+  heads: Map<string, string>;
+  /** Last other-writer marker list per folder. */
+  markers: Map<string, string>;
+};
+const answerFolderProbeState = new Map<string, AnswerFolderProbeState>();
+
+export function __resetAnswerFolderProbeStateForTests(): void {
+  answerFolderProbeState.clear();
+}
+
+function probeStateFor(key: string): AnswerFolderProbeState {
+  let state = answerFolderProbeState.get(key);
+  if (!state) {
+    state = { tick: 0, heads: new Map(), markers: new Map() };
+    answerFolderProbeState.set(key, state);
+  }
+  return state;
+}
+
+function backstopRotation(marked: readonly string[], tick: number): Set<string> {
+  if (marked.length === 0) return new Set();
+  const share = Math.ceil(marked.length / ANSWER_FOLDER_BACKSTOP_TICKS);
+  return new Set(Array.from({ length: Math.min(share, marked.length) }, (_, i) => marked[(tick * share + i) % marked.length]!));
+}
 
 /**
- * Layout v2 (spec §5): one bounded heads-first signature per assignee folder's
- * LIVE segments. `archive/`, `snapshot.json` and the reserved `_archive-v1` /
- * `_quarantine` children are not signed: compaction moving segments into the
- * archive is not a remote answer change. The owners of a change are the folders
- * whose entry moved (see `movedAnswerFolders`).
+ * Layout v2 (spec §5): one change signature per assignee folder, cheap in the
+ * steady state (v154.0 review: the first version opened and stat'd EVERY
+ * folder on every tick, per client).
+ *
+ *  - ONE listing of `_heads/` (see `answerFolderHeads.ts`) names every folder an
+ *    append touched: a new marker name = a change, visible on the next tick.
+ *    This client's own markers are left out (A11: an own save is not remote).
+ *  - A folder with NO marker (only ever written before markers existed) is
+ *    signed by the full per-folder scan, exactly as before.
+ *  - Backstop: a marked folder's chain HEADS are re-stat'd in rotation
+ *    (`ANSWER_FOLDER_BACKSTOP_TICKS`) and whenever its markers move. Heads only:
+ *    compaction archives sealed segments and touches no marker, so it is never
+ *    a change; an append without its marker (failed touch) is seen within one
+ *    rotation.
+ *
+ * `archive/`, `snapshot.json` and the reserved children are never signed. The
+ * owners of a change are the folders whose entry moved (`movedAnswerFolders`).
  */
-export async function answerFoldersSignature(eventsDir: DirectoryHandleLike, monthFolderName: string): Promise<string> {
+export async function answerFoldersSignature(eventsDir: DirectoryHandleLike, monthFolderName: string, scope = ""): Promise<string> {
   const actor = readRealSession()?.username;
   const exclude = actor ? ownStableAnswerSegmentMatcher(monthFolderName, actor) : undefined;
   const folders = (await listDirectoryEntries(eventsDir))
     .filter((entry) => entry.kind === "directory" && isAnswerAssigneeFolderName(entry.name))
     .map((entry) => entry.name)
     .sort();
+  const markers = await readAnswerFolderHeads(eventsDir);
+  const state = probeStateFor(`${scope}|${monthFolderName}`);
+  const marked = folders.filter((folder) => (markers?.get(folder)?.length ?? 0) > 0);
+  const rotation = backstopRotation(marked, state.tick);
+  state.tick += 1;
+  const openFolder = (folder: string) => eventsDir.getDirectoryHandle(folder, { create: false });
   const entries = await mapWithConcurrency(folders, DIRECTORY_READ_CONCURRENCY, async (folder) => {
-    const dir = await eventsDir.getDirectoryHandle(folder, { create: false });
-    return [folder, await boundedSizeSignature(dir, ANSWER_EVENT_SEGMENT_SUFFIX, ANSWER_FOLDER_HEAD_STAT_BUDGET, exclude, true)] as const;
+    const names = markers?.get(folder) ?? [];
+    if (names.length === 0) {
+      return [folder, await boundedSizeSignature(await openFolder(folder), ANSWER_EVENT_SEGMENT_SUFFIX, ANSWER_FOLDER_HEAD_STAT_BUDGET, exclude, true)] as const;
+    }
+    const others = JSON.stringify(names.filter((name) => !isOwnAnswerFolderHead(name, actor)));
+    if (rotation.has(folder) || !state.heads.has(folder) || state.markers.get(folder) !== others) {
+      state.heads.set(folder, await chainHeadsSizeSignature(await openFolder(folder), ANSWER_EVENT_SEGMENT_SUFFIX, ANSWER_FOLDER_HEAD_STAT_BUDGET, exclude));
+      state.markers.set(folder, others);
+    }
+    return [folder, `m:${others}|${state.heads.get(folder) ?? ""}`] as const;
   });
+  const live = new Set(marked);
+  for (const folder of [...state.heads.keys()]) {
+    if (!live.has(folder)) {
+      state.heads.delete(folder);
+      state.markers.delete(folder);
+    }
+  }
   return `${V2_ANSWERS_SIGNATURE_PREFIX}${JSON.stringify(entries)}`;
 }
 
@@ -688,7 +758,7 @@ async function safeAnswerSegmentsSignature(
   try {
     if ((await getAnswerEventsLayout(directoryHandle, monthFolderName)) === "v2") {
       probedAnswerFiles = new Map();
-      return await answerFoldersSignature(dir, monthFolderName);
+      return await answerFoldersSignature(dir, monthFolderName, workspaceScopeId(directoryHandle));
     }
     // A11: this user's own appends are already reflected locally (the saving
     // view updated its own state). Signing them made every save come back to

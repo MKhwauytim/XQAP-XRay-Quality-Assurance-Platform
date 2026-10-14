@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { __resetAppendOnlyEventLogMemosForTests } from "../storage/appendOnlyEventLog";
-import { __clearWorkspaceDirCacheForTests, ANSWER_EVENTS_FOLDERS, getAnswerEventsDir, getAssigneeAnswerEventsDir, invalidateAnswerEventsLayout } from "../workspace/workspacePaths";
+import { __clearWorkspaceDirCacheForTests, ANSWER_EVENTS_FOLDERS, getAnswerEventsDir, getAssigneeAnswerEventsDir, invalidateAnswerEventsLayout, isAnswerAssigneeFolderName } from "../workspace/workspacePaths";
+import { parseAnswerFolderHeadName, readAnswerFolderHeads } from "./v2/answerFolderHeads";
 import { __clearAnswerEventsCacheForTests, loadEmployeeAnswers, upsertItemAnswer, upsertItemAnswerOnBehalf } from "./answerStorage";
 import type { ItemAnswer } from "./answerTypes";
 import { fileNames, makeV1Month, writeText } from "./v2/v2TestFixtures";
@@ -102,13 +103,21 @@ describe("layout v2 writer routing (spec §4, §10)", () => {
     expect((await loadEmployeeAnswers(root, MONTH, "emp2")).items.map((i) => i.xrayImageId)).toEqual(["C2"]);
   }, 20_000);
 
+  it("every v2 append moves the sync probe's _heads marker for (assignee folder, writer) — self-save and on-behalf", async () => {
+    const root = createMemoryDirectory("heads");
+    expect((await upsertItemAnswer(root, MONTH, "Emp1", item("D1", "Emp1"))).ok).toBe(true);
+    expect((await upsertItemAnswerOnBehalf(root, MONTH, "emp1", item("D2"), "sup1", "r")).ok).toBe(true);
+    const markers = await readAnswerFolderHeads(await getAnswerEventsDir(root, MONTH, false));
+    expect(markers?.get("emp1")?.map((name) => parseAnswerFolderHeadName(name)?.writer).sort()).toEqual(["emp1", "sup1"]);
+  });
+
   it("mixed-case assignee: Emp1 self-save and emp1 on-behalf share one folder (Review Focus 5)", async () => {
     const root = createMemoryDirectory("case");
     expect((await upsertItemAnswer(root, MONTH, "Emp1", item("D1", "Emp1"))).ok).toBe(true);
     expect((await upsertItemAnswerOnBehalf(root, MONTH, "emp1", item("D2"), "sup1", "r")).ok).toBe(true);
     const events = await getAnswerEventsDir(root, MONTH, false);
     const dirs = [];
-    for await (const entry of (events as unknown as { values(): AsyncIterable<{ kind: string; name: string }> }).values()) if (entry.kind === "directory") dirs.push(entry.name);
+    for await (const entry of (events as unknown as { values(): AsyncIterable<{ kind: string; name: string }> }).values()) if (entry.kind === "directory" && isAnswerAssigneeFolderName(entry.name)) dirs.push(entry.name);
     expect(dirs).toEqual(["emp1"]);
     expect((await loadEmployeeAnswers(root, MONTH, "EMP1")).items.map((i) => i.xrayImageId).sort()).toEqual(["D1", "D2"]);
   });

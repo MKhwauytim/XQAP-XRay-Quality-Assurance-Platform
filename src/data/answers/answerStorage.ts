@@ -92,6 +92,7 @@ import {
 } from "./v2/assigneeEventReader";
 import { maybeScheduleCompaction } from "./compaction/compactAssignee";
 import { ensureAnswerEventsLayoutForWrite } from "./v2/answerEventsLayout";
+import { touchAnswerFolderHead } from "./v2/answerFolderHeads";
 import { markAnswerPendingLocally, mirrorAnswerLocally, queueAnswerForLanding } from "./answerLocalMirror";
 import type { OutboxIdentity } from "./answerLocalMirror";
 
@@ -1355,6 +1356,27 @@ async function assertStillV1BeforeFlatAppend(directoryHandle: DirectoryHandleLik
   if (layout !== "v1" && layout !== "absent") throw new AnswersMigrationInProgressError();
 }
 
+/**
+ * v2: after a SUCCESSFUL append into the assignee's folder, move the sync
+ * probe's change marker (v2/answerFolderHeads.ts). Best-effort: it never throws,
+ * so a failed touch never fails a save that is already durable.
+ */
+async function touchV2FolderHead(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  eventsDir: DirectoryHandleLike,
+  assignee: string,
+  actor: string
+): Promise<void> {
+  let folder: string;
+  try {
+    folder = answerAssigneeFolderName(assignee);
+  } catch {
+    return;
+  }
+  await touchAnswerFolderHead(eventsDir, folder, actor, `${workspaceScopeId(directoryHandle)}|${monthFolderName}`);
+}
+
 /** v2: every append — self-save or on-behalf — lands in the ASSIGNEE's folder. */
 async function assigneeAppendTarget(
   directoryHandle: DirectoryHandleLike,
@@ -1588,8 +1610,10 @@ async function performAnswerWrite(
       // A blind append has no fresh listing: probe for a head another tab rotated to.
       probeAheadForHead: decided.blind,
     }), { events: batch.length });
-    if (layout === "v2") reflectLocalAppendInAssigneeCache(directoryHandle, monthFolderName, username, batch);
-    else reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
+    if (layout === "v2") {
+      reflectLocalAppendInAssigneeCache(directoryHandle, monthFolderName, username, batch);
+      await touchV2FolderHead(directoryHandle, monthFolderName, decided.parentDir, username, username);
+    } else reflectLocalAppendInAnswerEventsCache(directoryHandle, monthFolderName, batch);
     return { ok: true as const };
   };
   const written: Promise<{ ok: true } | { ok: false; error: string }> = attempt().catch((error: unknown) => {
@@ -1884,6 +1908,7 @@ async function appendOnBehalfV2(
     listedSegmentNames: before.liveSegmentNames,
   });
   reflectLocalAppendInAssigneeCache(directoryHandle, monthFolderName, assigneeUsername, seedEvent ? [seedEvent, event] : [event]);
+  await touchV2FolderHead(directoryHandle, monthFolderName, target.parentDir, assigneeUsername, author);
   // CONFIRM (§5): a fresh event is never folded into the snapshot inside the
   // compaction quiet window, so a refusal of it is in this read's refusals.
   const after = await readAssigneeStateCached(directoryHandle, monthFolderName, assigneeUsername);
