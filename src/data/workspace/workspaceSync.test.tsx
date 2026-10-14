@@ -23,6 +23,7 @@ import {
   getPopulationMonthDir,
   getSampleApprovalsDir,
   getSampleEmployeeDir,
+  getAssigneeAnswerEventsDir,
   getSampleMainDir,
   getSystemRoot,
   NOTIFICATIONS_SUBFOLDERS,
@@ -68,11 +69,7 @@ import {
   saveSyncIntervalMs,
   WORKSPACE_SETTINGS_FILE,
 } from "./syncSettings";
-import { __pinNewAnswerMonthsToV1ForTests } from "../answers/v2/answerEventsLayout";
 
-/// Pinned to v1 until Plan 2 Task 11: the workspaceSync answers probe still watches only the flat answers.events/ folder.
-beforeEach(() => __pinNewAnswerMonthsToV1ForTests(true));
-afterEach(() => __pinNewAnswerMonthsToV1ForTests(false));
 
 async function writeRawFile(dir: DirectoryHandleLike, name: string, content: string): Promise<void> {
   const handle: FileHandleLike = await dir.getFileHandle(name, { create: true });
@@ -1562,10 +1559,10 @@ describe("runSync — this session's own answer appends do not report the answer
     const own = await runSync({ directoryHandle: root, monthFolderName: MONTH });
     expect(own.changed.has("answers")).toBe(false);
 
-    const main = await getSampleMainDir(root, MONTH, true);
-    const eventsDir = await main.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: true });
+    // A new month is layout v2: another writer's segment lands in its own assignee folder.
+    const emp2Dir = await getAssigneeAnswerEventsDir(root, MONTH, "emp2", true);
     await writeRawFile(
-      eventsDir,
+      emp2Dir,
       "zz-ans-otherdev-s9.ndjson",
       `${JSON.stringify({ eventId: "other-1", eventType: "item-saved", eventAt: "2026-05-01T08:00:00.000Z", eventBy: "emp2", authority: "self", xrayImageId: "XR-9", answers: [], status: "draft", answeredBy: "emp2" })}\n`
     );
@@ -1632,8 +1629,8 @@ describe("runSync — this session's own answer appends do not report the answer
   it("a rotation of this user's stable chain from an earlier page load is excluded too", async () => {
     const root = makeRoot();
     expect((await upsertItemAnswer(root, MONTH, "emp1", answer("XR-1"))).ok).toBe(true);
-    const main = await getSampleMainDir(root, MONTH, true);
-    const eventsDir = await main.getDirectoryHandle(ANSWER_EVENTS_DIR, { create: true });
+    // Layout v2: this user's chain lives in its own assignee folder.
+    const eventsDir = await getAssigneeAnswerEventsDir(root, MONTH, "emp1", true);
     const names: string[] = [];
     for await (const handle of (eventsDir as unknown as { values(): AsyncIterable<{ name: string }> }).values()) names.push(handle.name);
     const seq0 = names.find((n) => n.endsWith(".ndjson"))!;

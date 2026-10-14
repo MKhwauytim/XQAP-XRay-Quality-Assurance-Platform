@@ -1,7 +1,15 @@
 import * as XLSX from "xlsx";
 
 import type { EmployeeAnswerFile } from "../answers/answerTypes";
-import { clearAnswerEventsCache, loadAllEmployeeFiles } from "../answers/answerStorage";
+import { clearAnswerEventsCache, foldEmployeeEvents, loadAllEmployeeFiles, loadLegacyAnswerSeed } from "../answers/answerStorage";
+import {
+  answerEventsRestoreAction,
+  canRestoreAnswerLayoutMarker,
+  resolveAnswerSegmentMergeDir,
+  restoredAnswerAssignees,
+} from "../answers/v2/answerRestoreSupport";
+import { rebuildAndPersistAssigneeSnapshot } from "../answers/v2/rebuildAssigneeSnapshot";
+import { resolveAssigneeFolderOwner } from "../answers/v2/assigneeEventReader";
 import { invalidateSealedAnswerSegments } from "../answers/answerSealedSegments";
 import { ANSWER_EVENTS_DIR, type AnswerEvent } from "../answers/answerEventStore";
 import {
@@ -43,8 +51,11 @@ import { withWorkspaceWriteAccess } from "../storage/workspaceWriteAccess";
 import { logError } from "../storage/errorLogger";
 import { exportLabelsSnapshot } from "../workspace/labelsSnapshot";
 import {
+  ANSWER_EVENTS_FOLDERS,
+  getAnswerEventsLayout,
   getPopulationMonthDir,
   getSampleMainDir,
+  invalidateAnswerEventsLayout,
   getSystemRoot,
   getTemplatesRoot,
   LEGACY_MONTH_SUBFOLDERS,
@@ -1025,7 +1036,8 @@ async function collectJsonRestoreEntries(params: {
     if (entry.kind !== "file" || !isSnapshotPayloadFile(entry.name)) continue;
     const fileRelativePath = params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name;
     if (params.scope && !isFileInRestoreScope(fileRelativePath, params.scope)) continue;
-    const action = restoreActionFor(entry.name);
+    // Layout-v2 files under answers.events/ first (snapshot/lock derived, marker if absent).
+    const action = answerEventsRestoreAction(entry.name, params.eventsDirName) ?? restoreActionFor(entry.name);
     // Dropped at collection time rather than in the executor: a derived cache is
     // not a restore that "failed", so it must not reach the pending list at all
     // and must never be reported as either restored or skipped.
@@ -1249,13 +1261,28 @@ async function restoreJsonTree(params: {
     }
 
     if (entry.action === "merge-events") {
-      const changed = await mergeEventSegment(entry.targetDir, entry.fileName, text, entry.eventsDirName);
+      // A v2 target may have moved this segment since the backup (compaction into
+      // {assignee}/archive/, migration into _archive-v1/): merge into that copy.
+      const mergeDir =
+        entry.eventsDirName === ANSWER_EVENTS_DIR
+          ? await resolveAnswerSegmentMergeDir(entry.targetDir, entry.relativePath, entry.fileName)
+          : entry.targetDir;
+      const changed = await mergeEventSegment(mergeDir, entry.fileName, text, entry.eventsDirName);
       // Only a segment that actually gained lines invalidates the fold cache —
       // a no-op restore must not cost every month a full re-derive.
       return changed ? { path: entry.relativePath, cacheDir: entry.cacheDir, eventsDirName: entry.eventsDirName } : null;
     }
 
     if (entry.action === "restore-if-absent" && (await fileExists(entry.targetDir, entry.fileName))) {
+      return null;
+    }
+    if (
+      entry.eventsDirName === ANSWER_EVENTS_DIR &&
+      entry.fileName === ANSWER_EVENTS_FOLDERS.layoutMarker &&
+      !(await canRestoreAnswerLayoutMarker(entry.targetDir))
+    ) {
+      // The marker would hide the flat segments this target still keeps.
+      logError("backup:restore:answer-layout-marker-skipped", new Error("flat answer segments present"), { action: entry.relativePath });
       return null;
     }
 
@@ -1306,9 +1333,38 @@ async function restoreJsonTree(params: {
   // this tab's incremental read cache (byte offsets + sealed-segment
   // confirmations). Both are rebuildable, so drop them: the next read is a full
   // one and cannot skip a segment the merge just grew.
-  if (applied.some((result) => result.eventsDirName === ANSWER_EVENTS_DIR)) {
+  if (applied.some((result) => result.eventsDirName === ANSWER_EVENTS_DIR || isAnswerLayoutMarkerPath(result.path))) {
     clearAnswerEventsCache();
     invalidateSealedAnswerSegments();
+    invalidateAnswerEventsLayout();
+    await rebuildRestoredAnswerSnapshots(params.targetDir, applied.map((result) => result.path));
+  }
+}
+
+function isAnswerLayoutMarkerPath(path: string): boolean {
+  return path.endsWith(`/${ANSWER_EVENTS_DIR}/${ANSWER_EVENTS_FOLDERS.layoutMarker}`);
+}
+
+/**
+ * v2: `snapshot.json` is skip-derived, so every assignee whose segments the
+ * restore merged gets its snapshot refolded from archive + live. A failure is
+ * logged, not thrown: the segments are already restored, and a stale snapshot
+ * is still covered by the reader's own snapshot-vs-segments checks.
+ */
+async function rebuildRestoredAnswerSnapshots(root: DirectoryHandleLike, paths: readonly string[]): Promise<void> {
+  for (const { month, folder } of restoredAnswerAssignees(paths)) {
+    try {
+      if ((await getAnswerEventsLayout(root, month)) !== "v2") continue;
+      const owner = await resolveAssigneeFolderOwner(root, month, folder);
+      if (!owner) continue;
+      await rebuildAndPersistAssigneeSnapshot(root, month, owner, {
+        actor: "restore",
+        loadLegacySeed: () => loadLegacyAnswerSeed(root, month, owner),
+        foldFn: foldEmployeeEvents,
+      });
+    } catch (error) {
+      logError("backup:restore:answer-snapshot-rebuild", error, { action: `${month}/${folder}` });
+    }
   }
 }
 

@@ -56,6 +56,8 @@ import { readDistributionLogStamp } from "../distribution/distributionStorage";
 import {
   boundedSizeSignature,
   countChainHeads,
+  DIRECTORY_READ_CONCURRENCY,
+  listDirectoryEntries,
   listDirectoryEntriesWithSize,
   type SizedDirectoryEntry,
 } from "../storage/directoryScan";
@@ -81,6 +83,9 @@ import {
   NOTIFICATIONS_SUBFOLDERS,
   SAMPLE_SUBFOLDERS,
   SYSTEM_FOLDER_NAMES,
+  answerAssigneeFolderName,
+  getAnswerEventsLayout,
+  isAnswerAssigneeFolderName,
 } from "./workspacePaths";
 import { DEFAULT_SYNC_INTERVAL_MS, readSyncIntervalMs } from "./syncSettings";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
@@ -573,7 +578,9 @@ async function probeAdhocStores(
         state!.lastSig.set(id, {
           dist: distDir ? await boundedSizeSignature(distDir, DISTRIBUTION_EVENT_SEGMENT_SUFFIX) : "",
           answers: ansDir
-            ? await boundedSizeSignature(
+            ? (await getAnswerEventsLayout(directoryHandle, folder)) === "v2"
+              ? await answerFoldersSignature(ansDir, folder)
+              : await boundedSizeSignature(
                 ansDir,
                 ANSWER_EVENT_SEGMENT_SUFFIX,
                 ANSWER_SEGMENT_HEAD_STAT_BUDGET,
@@ -615,13 +622,74 @@ function adhocIdsOf(signature: string): string[] {
   }
 }
 
+const V2_ANSWERS_SIGNATURE_PREFIX = "v2:";
+/** Per assignee folder: a v2 folder holds few live segments (compaction archives the rest), so a small head budget covers it. */
+const ANSWER_FOLDER_HEAD_STAT_BUDGET = 8;
+
+/**
+ * Layout v2 (spec §5): one bounded heads-first signature per assignee folder's
+ * LIVE segments. `archive/`, `snapshot.json` and the reserved `_archive-v1` /
+ * `_quarantine` children are not signed: compaction moving segments into the
+ * archive is not a remote answer change. The owners of a change are the folders
+ * whose entry moved (see `movedAnswerFolders`).
+ */
+export async function answerFoldersSignature(eventsDir: DirectoryHandleLike, monthFolderName: string): Promise<string> {
+  const actor = readRealSession()?.username;
+  const exclude = actor ? ownStableAnswerSegmentMatcher(monthFolderName, actor) : undefined;
+  const folders = (await listDirectoryEntries(eventsDir))
+    .filter((entry) => entry.kind === "directory" && isAnswerAssigneeFolderName(entry.name))
+    .map((entry) => entry.name)
+    .sort();
+  const entries = await mapWithConcurrency(folders, DIRECTORY_READ_CONCURRENCY, async (folder) => {
+    const dir = await eventsDir.getDirectoryHandle(folder, { create: false });
+    return [folder, await boundedSizeSignature(dir, ANSWER_EVENT_SEGMENT_SUFFIX, ANSWER_FOLDER_HEAD_STAT_BUDGET, exclude, true)] as const;
+  });
+  return `${V2_ANSWERS_SIGNATURE_PREFIX}${JSON.stringify(entries)}`;
+}
+
+/** Folders whose entry differs; null unless BOTH signatures are v2 (a v1->v2 flip = owners unknown). */
+export function movedAnswerFolders(previous: string, current: string): Set<string> | null {
+  if (!previous.startsWith(V2_ANSWERS_SIGNATURE_PREFIX) || !current.startsWith(V2_ANSWERS_SIGNATURE_PREFIX)) return null;
+  try {
+    const before = new Map(JSON.parse(previous.slice(V2_ANSWERS_SIGNATURE_PREFIX.length)) as Array<[string, string]>);
+    const after = new Map(JSON.parse(current.slice(V2_ANSWERS_SIGNATURE_PREFIX.length)) as Array<[string, string]>);
+    const moved = new Set<string>();
+    for (const [folder, signature] of after) if (before.get(folder) !== signature) moved.add(folder);
+    for (const folder of before.keys()) if (!after.has(folder)) moved.add(folder);
+    return moved;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The owners (lower-cased usernames) of moved v2 folders. A folder name the
+ * sanitizer left intact IS the username; a hash-suffixed one (review finding 9)
+ * is not invertible without reading it, so the owners are then unknown (null).
+ */
+function ownersOfMovedFolders(folders: ReadonlySet<string>): Set<string> | null {
+  for (const folder of folders) {
+    try {
+      if (answerAssigneeFolderName(folder) !== folder) return null;
+    } catch {
+      return null;
+    }
+  }
+  return new Set(folders);
+}
+
 /** §6 of the answer-save proposal: read-only, bounded — same primitive and shape as `safeSegmentsSignature` above. */
 async function safeAnswerSegmentsSignature(
   dir: DirectoryHandleLike | null,
-  monthFolderName: string
+  monthFolderName: string,
+  directoryHandle: DirectoryHandleLike
 ): Promise<Probed<string>> {
   if (!dir) return "";
   try {
+    if ((await getAnswerEventsLayout(directoryHandle, monthFolderName)) === "v2") {
+      probedAnswerFiles = new Map();
+      return await answerFoldersSignature(dir, monthFolderName);
+    }
     // A11: this user's own appends are already reflected locally (the saving
     // view updated its own state). Signing them made every save come back to
     // its author as a remote change one tick later and triggered the stale
@@ -765,7 +833,7 @@ async function probeMonth(
       safeSignature(dirs.approvalsDir, DECISIONS_SUFFIX),
       safeRevision(dirs.populationMonthDir, MONTH_MANIFEST_FILE),
       safeSegmentsSignature(dirs.eventsDir),
-      safeAnswerSegmentsSignature(dirs.answersEventsDir, monthFolderName),
+      safeAnswerSegmentsSignature(dirs.answersEventsDir, monthFolderName, directoryHandle),
       safeFeedbackSignature(dirs.feedbackDir),
       probeAdhocStores(directoryHandle),
     ]);
@@ -979,6 +1047,8 @@ async function probeChangedFamilies(
   sealedInvalidation: "none" | "all" | ReadonlySet<string>;
   /** segment name -> its size at the previous tick (0 when new), for the owners peek; null = unknown. */
   movedSegmentPrevSizes: Map<string, number> | null;
+  /** Layout v2: owners of the assignee folders that moved; null = not v2 on both ticks, or unknown. */
+  v2Owners: Set<string> | null;
   /** The legacy `.answers.json` listing moved too: whose answers is then unknowable from segments. */
   legacyAnswersMoved: boolean;
   /**
@@ -1014,7 +1084,16 @@ async function probeChangedFamilies(
   let sealedInvalidation: "none" | "all" | ReadonlySet<string> = "none";
   let movedSegmentPrevSizes: Map<string, number> | null = null;
   let ownersUnknown = false;
+  // Layout v2: owners are the folders whose signature moved; no flat sealed-segment
+  // confirmations exist to forget and no peek is needed.
+  const movedFolders =
+    previous && isProbed(previous.answersEventsSignature) && isProbed(current.answersEventsSignature)
+      ? movedAnswerFolders(previous.answersEventsSignature, current.answersEventsSignature)
+      : null;
+  const v2Owners = movedFolders ? ownersOfMovedFolders(movedFolders) : null;
+  if (movedFolders && !v2Owners) ownersUnknown = true;
   if (
+    !movedFolders &&
     previous &&
     movedFrom(previous.answersEventsSignature, current.answersEventsSignature, sameValue) &&
     isProbed(previous.answersEventsSignature) &&
@@ -1056,7 +1135,7 @@ async function probeChangedFamilies(
       ];
     }
   }
-  return { changed, sealedInvalidation, movedSegmentPrevSizes, legacyAnswersMoved, ownersUnknown, adhocMoved, adhocAll };
+  return { changed, sealedInvalidation, movedSegmentPrevSizes, v2Owners, legacyAnswersMoved, ownersUnknown, adhocMoved, adhocAll };
 }
 
 export type SyncRunOptions = {
@@ -1129,9 +1208,12 @@ async function performSync(options: SyncRunOptions, manual: boolean): Promise<Sy
   if (directoryHandle && monthFolderName) {
     try {
       let movedSegmentPrevSizes: Map<string, number> | null;
-      ({ changed, sealedInvalidation, movedSegmentPrevSizes, legacyAnswersMoved, ownersUnknown, adhocMoved, adhocAll } = await probeChangedFamilies(directoryHandle, monthFolderName, systemDir));
+      let v2Owners: Set<string> | null;
+      ({ changed, sealedInvalidation, movedSegmentPrevSizes, v2Owners, legacyAnswersMoved, ownersUnknown, adhocMoved, adhocAll } = await probeChangedFamilies(directoryHandle, monthFolderName, systemDir));
       markRequestQueueProbeCompleted(directoryHandle, monthFolderName);
-      if (changed.has("answers") && movedSegmentPrevSizes && !ownersUnknown) {
+      if (changed.has("answers") && v2Owners) {
+        answerOwners = v2Owners;
+      } else if (changed.has("answers") && movedSegmentPrevSizes && !ownersUnknown) {
         answerOwners = await peekAnswerOwners(movedSegmentPrevSizes);
       }
     } catch (error) {

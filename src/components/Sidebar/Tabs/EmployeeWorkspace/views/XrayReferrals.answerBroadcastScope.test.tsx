@@ -29,11 +29,7 @@ import {
   seedXrayReferralsWorkspace,
   renderXrayReferrals,
 } from "./XrayReferrals.testSupport";
-import { __pinNewAnswerMonthsToV1ForTests } from "../../../../../data/answers/v2/answerEventsLayout";
 
-/// Pinned to v1 until Plan 2 Task 11: the workspaceSync answers probe still watches only the flat answers.events/ folder.
-beforeEach(() => __pinNewAnswerMonthsToV1ForTests(true));
-afterEach(() => __pinNewAnswerMonthsToV1ForTests(false));
 
 vi.mock("../../../../../data/month/useGlobalMonth", () => ({
   useGlobalMonth: () => ({
