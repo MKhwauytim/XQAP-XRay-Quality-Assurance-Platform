@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v154.1",
+    "date": "2026-10-15",
+    "bucket": "enhancement",
+    "scope": "deck3",
+    "title": "الملاحظات والتوصيات rebuilt in the owner's five-theme format, every figure computed from the report data"
+  },
+  {
     "version": "v154.0",
     "date": "2026-10-14",
     "bucket": "feature",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "integrity",
     "title": "admin boot scan heals live files from a verified .tmp/.bak"
-  },
-  {
-    "version": "v153.26",
-    "date": "2026-10-13",
-    "bucket": "feature",
-    "scope": "answers",
-    "title": "local-first submit outbox, sync-interval replay, unsent-answer banner and timings"
   }
 ];
