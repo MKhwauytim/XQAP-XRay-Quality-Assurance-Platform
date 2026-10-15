@@ -23,7 +23,7 @@ import { ORGANIZATION_PATH, ZATCA_LOGO_URL } from "../../../../branding/organiza
 import {
   coverSlide, closingSlide, contentsSlide, glossarySlide, levelDefinitionSlide,
   kpiBand, sectionDivider, tintedPanel, dataTable, chartTitleRow,
-  legendRow, slideShell, contentHead, pad2, qualityMatrix, observationsTable, type ObservationRow,
+  legendRow, slideShell, contentHead, pad2, qualityMatrix, observationCard, type ObservationCard,
   type OrgBlock, type SlideMeta, type TableCell, type QualityCell, type QualityRow,
 } from "./slideKit";
 import { barChart, fitAxis, scaleCaption } from "./chartKit";
@@ -56,7 +56,6 @@ const REPORT_NAME = "تقرير ضمان جودة فحص الأشعة";
 const ORG_NAME = "هيئة الزكاة والضريبة والجمارك";
 const CLASSIFICATION = "سري";
 /** Deck-local cover wording (the shared ORGANIZATION_PATH is left as-is: deck2 and other surfaces still read it). */
-const LEGAL_SECTOR = `قطاع ${ORGANIZATION_PATH[0]}`;
 const DEPARTMENT = "إدارة الرقابة على الامتثال في المنافذ الجمركية";
 
 const EYEBROW_S1 = "القسم الأول - مجتمع الفحص والعيّنة";
@@ -80,9 +79,20 @@ export type Statement = {
   /** The same figures as one line, for traceability. */
   basis: string;
   page: string;
+  /** Port type the statement names, when it names a port (drives the observation title's «البرية / البحرية»). */
+  sea?: boolean;
 };
-const STATEMENTS_PER_PAGE = 3;
+/** One observation page: statements of the same topic folded into الملاحظة الرئيسية + الشواهد الجوهرية + التوصية (statements.ts). */
+export type Observation = {
+  priority: StatementPriority;
+  topic: string;
+  title: string;
+  evidence: Array<{ text: string; figures: StatementFigure[] }>;
+  recommendations: string[];
+  page: string;
+};
 const OBSERVATION_PLACEHOLDER = "اكتب الملاحظة هنا…";
+const EVIDENCE_PLACEHOLDER = "اكتب الشواهد هنا…";
 const RECOMMENDATION_PLACEHOLDER = "اكتب التوصية هنا…";
 
 // ── Presentation-layer rate helpers ─────────────────────────────────────────
@@ -106,8 +116,6 @@ const RESULT_ACCURACY_DEFINITION = "الحالات التي تم الاتفاق 
 const MISSED_SUSPICION_DEFINITION = "نتيجة أخصائي الوسائل الآلية بأن الإرسالية سليمة ورأي أخصائي ضمان جودة الأشعة بأنها اشتباه.";
 /** How معدل الاتفاق العام is calculated (one line, no worked weights). */
 const AGREEMENT_FORMULA_NOTE = "معدل الاتفاق العام = (دقة السليمة × وزن السليمة) + (دقة الاشتباه × وزن الاشتباه)";
-/** What the two weights in AGREEMENT_FORMULA_NOTE are — shown on the line under it wherever it appears. */
-const AGREEMENT_WEIGHT_NOTE = "وزن السليمة = إجابات السليمة ÷ إجمالي الإجابات، ووزن الاشتباه = إجابات الاشتباه ÷ إجمالي الإجابات";
 const FALSE_SUSPICION_DEFINITION = "نتيجة أخصائي الوسائل الآلية بأن الإرسالية اشتباه، ورأى أخصائي ضمان جودة الأشعة أنها سليمة.";
 
 /** "21,480 (1,031)" — population figure with its bracketed sample figure. */
@@ -186,6 +194,43 @@ export function collectPortAccuracy(model: ReportModel): { land: PortAccuracyRow
   }));
   all.sort(byEvaluableDesc);
   return { land: all.filter((p) => !p.sea && !p.unknown), sea: all.filter((p) => p.sea), unknown: all.filter((p) => p.unknown) };
+}
+
+/** One port's count over its base for one measure (e.g. missed suspicions over its سليمة answers). */
+export type PortShare = { name: string; sea: boolean; num: number; den: number };
+
+/** Smallest base a port needs to be judged in an observation and to count toward «متوسط جميع المنافذ», per measure. */
+export const PORT_AVERAGE_MIN = { quality: 300, missed: 500, falseSusp: 300, marking: 100 } as const;
+
+/**
+ * «متوسط جميع المنافذ»: the average of the shares (in %) of every port, land and sea, with at least `minDen` cases.
+ * Each port counts once whatever its size. The observations compare against it and the port pages print it, from
+ * this one function, so the two can never show different numbers.
+ */
+export function averagePortShare(stats: PortShare[], minDen: number): number | null {
+  const judged = stats.filter((s) => s.den >= minDen && s.den > 0);
+  return judged.length === 0 ? null : judged.reduce((a, s) => a + (s.num / s.den) * 100, 0) / judged.length;
+}
+
+/** The four per-port measures the observations judge, over the same ports the port tables list. */
+export function portShareSets(model: ReportModel): Record<keyof typeof PORT_AVERAGE_MIN, PortShare[]> {
+  const acc = collectPortAccuracy(model);
+  const ports = [...acc.land, ...acc.sea, ...acc.unknown];
+  const quality = collectPortQuality(model);
+  const marking = collectPortMarkingOnly(model);
+  return {
+    quality: ports.map((p) => ({ name: p.name, sea: p.sea, num: quality.get(p.name)?.high ?? 0, den: quality.get(p.name)?.images ?? 0 })),
+    missed: ports.map((p) => ({ name: p.name, sea: p.sea, num: p.counts.missedSuspicion, den: p.counts.correctClean + p.counts.missedSuspicion })),
+    falseSusp: ports.map((p) => ({ name: p.name, sea: p.sea, num: p.counts.falseSuspicion, den: p.counts.correctSuspicion + p.counts.falseSuspicion })),
+    marking: ports.map((p) => ({ name: p.name, sea: p.sea, num: marking.get(p.name)?.marked ?? 0, den: marking.get(p.name)?.images ?? 0 })),
+  };
+}
+
+/** The «متوسط جميع المنافذ» footnote under a port table, naming the minimum base so the figure can be rebuilt from the table. */
+function portAverageNote(parts: Array<{ label: string; set: keyof typeof PORT_AVERAGE_MIN; base: string }>, sets: ReturnType<typeof portShareSets>): string {
+  return "متوسط جميع المنافذ: " + parts
+    .map((p) => `${p.label} ${fmtPct(averagePortShare(sets[p.set], PORT_AVERAGE_MIN[p.set]))} (المنافذ ذات ${fmtNum(PORT_AVERAGE_MIN[p.set])} ${p.base} فأكثر)`)
+    .join(" · ");
 }
 
 /** Suspicion images per port: how many, how many carry a marking («هل يوجد تحديد؟» = نعم), and their image quality. */
@@ -436,7 +481,7 @@ function populationByLevelInner(model: ReportModel, withPop: boolean): string {
         : `${esc(s.stageLabel)}: 100% من مجتمعه = ${fmtNum(s.target ?? s.population)} صورة`;
     });
   const popNote = withPop
-    ? `<div class="v3-pop-note"><p>التغطية الرقابية = العيّنة المفحوصة ÷ المستهدف.</p><ul class="v3-pop-bullets">${levelLines.map((l) => `<li>${l}</li>`).join("")}</ul></div>`
+    ? `<div class="v3-pop-note"><p>نسبة التغطية من المستهدف = العيّنة المفحوصة ÷ المستهدف.</p><ul class="v3-pop-bullets">${levelLines.map((l) => `<li>${l}</li>`).join("")}</ul></div>`
     : `<p class="v3-pop-note">الاختيار عشوائي داخل حصة كل مستوى؛ ولا يعكس حجم الحصة أهمية المستوى — لكل مستوى هدف مختلف.</p>`;
   return `${contentHead({ eyebrow: EYEBROW_S1, title: "مجتمع الفحص والعيّنة حسب المستوى", large: true })}
 <div class="v3-pop-grid">
@@ -444,10 +489,10 @@ function populationByLevelInner(model: ReportModel, withPop: boolean): string {
   <div class="v3-pop-stat"><span>إجمالي المجتمع</span><b>${fmtNum(model.population.total)}</b></div>
   ${withPop ? `<div class="v3-pop-stat"><span>إجمالي المستهدف</span><b>${fmtNum(stages.reduce((a, s) => a + (s.target ?? s.population), 0))}</b></div>` : ""}
   <div class="v3-pop-stat"><span>إجمالي العيّنة</span><b>${fmtNum(model.sample.total)}</b></div>
-  <div class="v3-pop-stat"><span>التغطية الرقابية الكلية</span><b class="v3-ink-gold">${fmtPct(model.sample.coverage ?? null)}</b></div>
+  <div class="v3-pop-stat"><span>${withPop ? "نسبة التغطية من المستهدف" : "التغطية الرقابية الإجمالية"}</span><b class="v3-ink-gold">${fmtPct(model.sample.coverage ?? null)}</b></div>
 </div>
 <div class="v3-pop-table">
-  ${dataTable({ headers: withPop ? ["المستوى", "", "المجتمع", "المستهدف", "العيّنة", "التغطية الرقابية"] : ["المستوى", "", "المجتمع", "العيّنة", "أسلوب السحب"], rows, groupStart: 2, firstColWidth: 26, size: "lg" })}
+  ${dataTable({ headers: withPop ? ["المستوى", "", "المجتمع", "المستهدف", "العيّنة", "نسبة التغطية من المستهدف"] : ["المستوى", "", "المجتمع", "العيّنة", "أسلوب السحب"], rows, groupStart: 2, firstColWidth: 26, size: "lg" })}
   ${popNote}
 
 </div>
@@ -537,20 +582,21 @@ export async function buildDeck3Slides(
   monthLabel: string,
   monthlyTarget: number,
   now: Date = new Date(),
-  /** Statements for section 3 (built by statements.ts, which imports this file — so they are passed in). */
-  statements: Statement[] = [],
+  /** Observations for section 3 (built by statements.ts, which imports this file — so they are passed in). */
+  observations: Observation[] = [],
 ): Promise<string> {
   const parts: string[] = [];
-  // Statement pages (five per page) plus one blank page to write on.
-  const statementPages = Math.ceil(statements.length / STATEMENTS_PER_PAGE) + 1;
+  // One page per observation plus one blank page to write on.
+  const statementPages = observations.length + 1;
   const footText = `${REPORT_NAME} · ${monthLabel}`;
   const org: OrgBlock = {
     logoUrl: ZATCA_LOGO_URL,
     orgName: ORG_NAME,
-    lines: [`${LEGAL_SECTOR} - ${ORGANIZATION_PATH[1]}`, DEPARTMENT],
+    lines: [DEPARTMENT],
   };
   const t = model.errorAnalysis.totals;
   const overallStats = accuracyOf(t);
+  const shareSets = portShareSets(model);
   // Rows whose L1/L2 result is neither سليمة nor اشتباه: counted in the sample, never scored.
   const otherL1 = model.rows.filter((r) => r.levelOneOther !== undefined).length;
   const otherL2 = model.rows.filter((r) => r.levelTwoOther !== undefined).length;
@@ -646,14 +692,12 @@ export async function buildDeck3Slides(
     periodLabel: copy.coverPeriodLabel,
     periodValue: monthLabel,
     metaRows: [
-      // The scope note itself is on the KPI and risk-level slides; it is too long for a cover cell.
-      ...(co ? [{ label: withPop ? "العيّنة المفحوصة" : ceLabels.ce_completed_samples, value: completedTotal }] : []),
       {
         label: "تاريخ التقرير",
         value: now.toLocaleDateString("ar-u-ca-gregory-nu-latn", { day: "numeric", month: "long", year: "numeric" }),
       },
-      { label: "الإدارة", value: ORGANIZATION_PATH[1] },
-      { label: "القسم", value: DEPARTMENT },
+      { label: "الإدارة العامة", value: ORGANIZATION_PATH[1] },
+      { label: "الإدارة", value: DEPARTMENT },
       { label: "التصنيف", value: CLASSIFICATION, end: true },
     ],
     meta: meta("cover", "الغلاف"),
@@ -700,14 +744,14 @@ export async function buildDeck3Slides(
           { term: "مجتمع الفحص", definition: withPop ? "صور أشعة فترة التقرير المصنَّفة إلى مستويات المخاطر الأربعة المعتمدة من وكالة تحليل المخاطر." : "صور أشعة الشهر المصنَّفة إلى مستويات المخاطر الأربعة المعتمدة من وكالة تحليل المخاطر." },
           { term: "العيّنة", definition: withPop ? "الصور المفحوصة خلال الفترة: المستوى الأول بالكامل، وبقية المستويات بعدد ثابت شهريًا، باختيار عشوائي داخل المستوى." : co ? "الصور التي اكتمل فحصها من قبل أخصائي ضمان جودة الأشعة وتشملها أرقام التقرير." : "الصور المسحوبة للدراسة وفق وزن سحب محدَّد مسبقًا لكل مستوى، مع اختيار عشوائي داخل حصة المستوى الواحد." },
           // Coverage is not reported for the completed-only scope, so its term is not defined there.
-          ...(coNoPop ? [] : [{ term: "التغطية الرقابية", definition: withPop ? "نسبة حجم العيّنة المفحوصة إلى المستهدف؛ مقياس حجم لا يدل على تمثيل العيّنة للمجتمع." : "نسبة حجم العيّنة المسحوبة إلى حجم المجتمع؛ مقياس حجم لا يدل على تمثيل العيّنة للمجتمع." }]),
+          ...(coNoPop ? [] : [{ term: "التغطية الرقابية الإجمالية", definition: withPop ? "نسبة حجم العيّنة المفحوصة إلى مجتمع الفحص؛ مقياس حجم لا يدل على تمثيل العيّنة للمجتمع. أما نسبة التغطية من المستهدف فهي العيّنة المفحوصة ÷ المستهدف." : "نسبة حجم العيّنة المسحوبة إلى حجم المجتمع؛ مقياس حجم لا يدل على تمثيل العيّنة للمجتمع." }]),
         ],
       },
       {
         dotTone: "red",
         title: "مصطلحات النتائج والجودة",
         terms: [
-          { term: "الإجابة", definition: "نتيجة فحص مستوى واحد (الأول أو الثاني) لصورة واحدة، فلكل صورة إجابتان؛ وتُحسب عليها أرقام الدقة والاشتباهات، أما التحديد والجودة فعلى الصور." },
+          { term: "الإجابة", definition: "نتيجة فحص مستوى واحد (الأول أو الثاني) لصورة واحدة، فلكل صورة إجابتان." },
           { term: "الاشتباه الخاطئ", definition: "نتيجة أخصائي الوسائل الآلية بأن الإرسالية اشتباه، ورأى أخصائي ضمان جودة الأشعة أنها سليمة." },
           { term: "الاشتباه الفائت", definition: "نتيجة أخصائي الوسائل الآلية بأن الإرسالية سليمة ورأي أخصائي ضمان جودة الأشعة بأنها اشتباه." },
         ],
@@ -782,12 +826,13 @@ ${kpiBand(coNoPop ? [
       { label: "الاشتباه الصحيح", value: fmtNum(t.correctSuspicion), valueTone: "green", sub: "نتائج اشتباه أكّدها أخصائي الجودة" },
       { label: "الاشتباه الخاطئ", value: fmtNum(t.falseSuspicion), valueTone: "gold", sub: "نتائج اشتباه رأى أخصائي الجودة أنها سليمة" },
     ] : [
-      { label: "مجتمع الفحص", value: "100%", aside: `${fmtNum(model.population.total)} صورة`, sub: "مجتمع الصور الواردة من وكالة تحليل المخاطر" },
-      { label: withPop ? "العيّنة المفحوصة" : "العيّنة المسحوبة", value: fmtPct(pct(model.sample.total, model.population.total)), aside: `${fmtNum(model.sample.total)} من ${fmtNum(model.population.total)} صورة`, sub: withPop ? "صورة مكتملة الفحص في التقرير" : "صورة موزّعة على أخصائيي الجودة" },
-      { label: "التغطية الرقابية الإجمالية", value: fmtPct(model.sample.coverage ?? null), valueTone: "gold", aside: coverageNumbers, sub: withPop ? "نسبة العيّنة من المستهدف" : "نسبة العينة من المجتمع" },
+      { label: "مجتمع الفحص", value: fmtNum(model.population.total), aside: "صورة", asideInline: true, sub: "مجتمع الصور الواردة من وكالة تحليل المخاطر" },
+      // Swapped by the owner 2026-10-14: «العيّنة المفحوصة» carries the against-target ratio, «التغطية الرقابية الإجمالية» the share of the population.
+      { label: withPop ? "العيّنة المفحوصة" : "العيّنة المسحوبة", value: fmtPct(model.sample.coverage ?? null), aside: coverageNumbers, sub: withPop ? "نسبة التغطية من المستهدف" : "نسبة العيّنة من المجتمع" },
+      { label: "التغطية الرقابية الإجمالية", value: fmtPct(pct(model.sample.total, model.population.total)), valueTone: "gold", aside: `${fmtNum(model.sample.total)} من ${fmtNum(model.population.total)} صورة`, sub: withPop ? "صورة مكتملة الفحص في التقرير" : "صورة موزّعة على أخصائيي الجودة" },
     ], "top")}
 ${kpiBand([
-      { label: "نسبة التوائم", value: fmtPct(overallStats.overall), valueTone: "green", aside: `${fmtNum(t.correctClean + t.correctSuspicion)} من ${fmtNum(t.evaluable)} إجابة مفحوصة`, sub: RESULT_ACCURACY_DEFINITION },
+      { label: "معدل الاتفاق العام", value: fmtPct(overallStats.overall), valueTone: "green", aside: `${fmtNum(t.correctClean + t.correctSuspicion)} من ${fmtNum(t.evaluable)} إجابة مفحوصة`, sub: RESULT_ACCURACY_DEFINITION },
       { label: "الاشتباهات الفائتة", value: fmtPct(missedShare), aside: `${fmtNum(t.missedSuspicion)} من ${fmtNum(overallStats.cleanResults)} إجابة سليمة`, sub: MISSED_SUSPICION_DEFINITION,
         extra: { label: "الاشتباهات الخاطئة", value: fmtPct(falseShare), valueTone: "gold", aside: `${fmtNum(t.falseSuspicion)} من ${fmtNum(overallStats.suspResults)} إجابة اشتباه`, sub: FALSE_SUSPICION_DEFINITION } },
       { label: "نسبة تحديد موقع الاشتباه", value: fmtPct(model.imageQuality.markingRate), valueTone: "red", aside: `${fmtNum(model.kpis.markingPresentCount)} من ${fmtNum(model.kpis.markingPresentCount + model.kpis.markingMissingCount)} صورة اشتباه`, sub: "التزام الفاحصين بتحديد مواقع الاشتباه" },
@@ -854,13 +899,13 @@ ${kpiBand([
     const coverageNote = (ports: PortPopRow[]) => {
       const total = ports.reduce((s, p) => s + p.total, 0);
       const sample = ports.reduce((s, p) => s + p.sampleTotal, 0);
-      return `${withPop ? "نسبة العيّنة من المجتمع" : "التغطية الرقابية"} ${fmtPct(pct(sample, total))}`;
+      return `"التغطية الرقابية الإجمالية" ${fmtPct(pct(sample, total))}`;
     };
     const headers = withPop ? ["المنفذ", "إجمالي الصور", "سليمة", "نسبة السليمة", "اشتباه", "نسبة الاشتباه", "نتائج أخرى"] : ["المنفذ", "إجمالي الصور", "سليمة", "نسبة السليمة", "اشتباه", "نسبة الاشتباه"];
     const groups = popPortGroups.length > 0 ? popPortGroups : [{ variant: "land" as const, title: "المنافذ البرية", totalLabel: "إجمالي البرية", ports: popLand }];
     for (const g of groups) {
       const m = meta("s1", EYEBROW_S1);
-      const inner = `${contentHead({ eyebrow: EYEBROW_S1, title: `التوزيع على ${g.title}`, note: "تشير الأرقام بين القوسين إلى حجم العينة، علمًا أن الأرقام أدناه تمثل الإجابات الصادرة على الصورة" })}
+      const inner = `${contentHead({ eyebrow: EYEBROW_S1, title: `التوزيع على ${g.title}`, note: "تشير الأرقام بين القوسين إلى حجم العيّنة، علمًا أن الأرقام أدناه تمثل الإجابات الصادرة على الصورة" })}
 <div class="v3-two-col" style="grid-template-columns:1fr">
   ${tintedPanel({ variant: g.variant, title: g.title, note: coverageNote(g.ports), body: dataTable({ headers, rows: portRows(g.ports), totals: totalsOf(g.totalLabel, g.ports), topHeader: [{ label: "", span: 2 }, { label: "حسب النتيجة", span: withPop ? 5 : 4, group: true }], groupStart: 2, rowPx: portRowPx(g.ports.length, TOP_HEADER_PX) }) })}
 </div>`;
@@ -952,7 +997,7 @@ ${dataTable({ headers: ["المستوى", "الإجابات المفحوصة", "
 <div class="v3-two-col" style="grid-template-columns:1fr">
   ${tintedPanel({ variant: g.variant, title: g.panelTitle, body: dataTable({ headers, rows: g.ports.map((p) => cellsOf(esc(p.name), p.counts)), totals: cellsOf(g.totalLabel, sumCounts(g.ports.map((p) => p.counts)), "v-navy"), firstColWidth: 26, topHeader: [{ label: "", span: 1 }, { label: "النتيجة العامة", span: 2 }, { label: "الدقة", span: 2, group: true }, { label: "النتائج الخاطئة", span: 2, group: true }], groupStart: [3, 5], rowPx: portRowPx(g.ports.length, FORMULA_NOTE_PX + TOP_HEADER_PX) }) })}
 </div>
-<p class="v3-note v3-formula-note">${AGREEMENT_FORMULA_NOTE}<br>${AGREEMENT_WEIGHT_NOTE}</p>`;
+<p class="v3-note v3-formula-note">${AGREEMENT_FORMULA_NOTE}<br>${portAverageNote([{ label: "الاشتباهات الفائتة", set: "missed", base: "إجابة سليمة" }, { label: "الاشتباهات الخاطئة", set: "falseSusp", base: "إجابة اشتباه" }], shareSets)}</p>`;
       parts.push(slideShell(m, "", inner));
     }
   }
@@ -972,7 +1017,7 @@ ${dataTable({ headers: ["المستوى", "الإجابات المفحوصة", "
   <div class="v3-cmp-row"><span>الإجابات المفحوصة</span><b>${fmtNum(a.evaluable)}</b></div>
   <div class="v3-cmp-row"><span>دقة السليمة</span><b class="v-green">${fmtPct(a.cleanAcc)}</b></div>
   <div class="v3-cmp-row"><span>دقة الاشتباه</span><b class="v-red">${fmtPct(a.suspAcc)}</b></div>
-  <div class="v3-cmp-row"><span>الدقة العامة</span><b>${fmtPct(a.overall)}</b></div>
+  <div class="v3-cmp-row"><span>معدل الاتفاق العام</span><b>${fmtPct(a.overall)}</b></div>
   <div class="v3-cmp-row"><span>اشتباهات فائتة</span><b>${fmtNum(missed)} إجابة</b></div>
   <div class="v3-cmp-row"><span>نتائج أخرى (غير قابلة للتقييم)</span><b>${fmtNum(other)}</b></div>
 </div>`,
@@ -1023,7 +1068,7 @@ ${dataTable({ headers: ["المستوى", "الإجابات المفحوصة", "
 <div class="v3-two-col" style="grid-template-columns:1fr">
   ${tintedPanel({ variant: g.variant, title: g.panelTitle, body: dataTable({ headers, topHeader, rows: rows.map((r) => cellsOf(esc(r.name), r.l1.counts, r.l2.counts)), totals: cellsOf(g.totalLabel, sumCounts(rows.map((r) => r.l1.counts)), sumCounts(rows.map((r) => r.l2.counts)), "v-navy"), firstColWidth: 14, compactHeaders: true, groupStart: [2, 7, 8], rowPx: portRowPx(rows.length, 40 + FORMULA_NOTE_PX) }) })}
 </div>
-<p class="v3-note v3-formula-note">${AGREEMENT_FORMULA_NOTE}<br>${AGREEMENT_WEIGHT_NOTE}</p>`;
+<p class="v3-note v3-formula-note">${AGREEMENT_FORMULA_NOTE}</p>`;
       parts.push(slideShell(m, "", inner));
     }
   }
@@ -1080,6 +1125,7 @@ ${dataTable({ headers: ["المستوى", "الإجابات المفحوصة", "
     const inner = `${contentHead({
       eyebrow: eyebrowS2,
       title: "هل يوجد تحديد؟",
+      note: portAverageNote([{ label: "صور بتحديد", set: "marking", base: "صورة اشتباه" }], shareSets),
     })}
 <div class="v3-two-col" style="grid-template-columns:1fr">
   ${tintedPanel({ variant: "all", title: "جميع المنافذ", body: dataTable({ headers, rows: rows.map((r) => cellsOf(esc(r.name), r.c)), totals: cellsOf("الإجمالي", total, "v-navy"), firstColWidth: 28, rowPx: portRowPx(rows.length, 0) }) })}
@@ -1105,7 +1151,7 @@ ${dataTable({ headers: ["المستوى", "الإجابات المفحوصة", "
         .map((p) => ({ name: p.name, c: quality.get(p.name) ?? emptyQuality() }))
         .sort((a, b) => b.c.images - a.c.images || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
       const total = sumQuality(rows.map((r) => r.c));
-      const inner = `${contentHead({ eyebrow: eyebrowS2, title: `جودة الصور المفحوصة ${g.title}` })}
+      const inner = `${contentHead({ eyebrow: eyebrowS2, title: `جودة الصور المفحوصة ${g.title}`, note: portAverageNote([{ label: "جودة عالية", set: "quality", base: "صورة" }], shareSets) })}
 <div class="v3-two-col" style="grid-template-columns:1fr">
   ${tintedPanel({ variant: g.variant, title: g.panelTitle, body: dataTable({ headers, rows: rows.map((r) => cellsOf(esc(r.name), r.c)), totals: cellsOf(g.totalLabel, total, "v-navy"), firstColWidth: 26, rowPx: portRowPx(rows.length, 0) }) })}
 </div>`;
@@ -1146,7 +1192,7 @@ ${dataTable({ headers: ["المستوى", "الإجابات المفحوصة", "
         };
       }),
     }));
-    const inner = `${contentHead({ eyebrow: eyebrowS2, title: "نسبة التوائم حسب جودة الصورة" })}
+    const inner = `${contentHead({ eyebrow: eyebrowS2, title: "معدل الاتفاق العام حسب جودة الصورة" })}
 ${qualityMatrix(levels.map((l) => ({ label: l.label, tone: l.tone })), rows)}`;
     parts.push(slideShell(m, "", inner));
   }
@@ -1164,26 +1210,25 @@ ${qualityMatrix(levels.map((l) => ({ label: l.label, tone: l.tone })), rows)}`;
     meta: meta("s3", eyebrowS3),
   }));
 
-  // Observations drafted from the results (fixed rules), three per page as a table # | الملاحظة | التوصية with the numbers behind each
-  // observation on their own row; each text is editable in the viewer. A last page of blank rows is left to write more.
+  // Observations drafted from the results (fixed rules), ONE per page: الملاحظة الرئيسية | الشواهد الجوهرية | التوصية, the numbers
+  // behind each supporting fact on their own row; each text is editable in the viewer. A last blank page is left to write more.
   for (let p = 0; p < statementPages; p++) {
-    const chunk = statements.slice(p * STATEMENTS_PER_PAGE, (p + 1) * STATEMENTS_PER_PAGE);
-    const isBlank = p === statementPages - 1;
-    const rows: ObservationRow[] = isBlank
-      ? Array.from({ length: STATEMENTS_PER_PAGE }, () => ({ number: "", tone: "navy" as const, observation: OBSERVATION_PLACEHOLDER, figures: [], recommendation: RECOMMENDATION_PLACEHOLDER }))
-      : chunk.map((s, i) => ({
-          number: pad2(p * STATEMENTS_PER_PAGE + i + 1),
-          tone: s.priority === "عالية" ? "red" as const : s.priority === "متوسطة" ? "gold" as const : "navy" as const,
-          observation: s.text,
-          figures: s.figures,
-          recommendation: s.recommendation,
-        }));
+    const o = observations[p];
+    const card: ObservationCard = o
+      ? {
+          tone: o.priority === "عالية" ? "red" : o.priority === "متوسطة" ? "gold" : "blue",
+          title: o.title,
+          evidence: o.evidence,
+          recommendations: o.recommendations,
+        }
+      : { tone: "navy", title: OBSERVATION_PLACEHOLDER, evidence: [{ text: EVIDENCE_PLACEHOLDER, figures: [] }], recommendations: [RECOMMENDATION_PLACEHOLDER] };
     // The blank page starts switched off for printing; typing into it switches it back on (printSelection.ts).
-    parts.push(slideShell(meta("s3", eyebrowS3), isBlank ? PRINT_DEFAULT_OFF_CLASS : "", `${contentHead({
+    parts.push(slideShell(meta("s3", eyebrowS3), o ? "" : PRINT_DEFAULT_OFF_CLASS, `${contentHead({
       eyebrow: eyebrowS3,
-      title: isBlank ? "ملاحظات وتوصيات إضافية" : "أهم الملاحظات والتوصيات" + (p > 0 ? YITBA : ""),
+      title: o ? `الملاحظة ${pad2(p + 1)} — ${o.topic}` : "ملاحظة وتوصية إضافية",
     })}
-${observationsTable(rows)}`));
+${observationCard(card)}
+${o ? legendRow([{ swatch: "red", text: "أولوية عالية" }, { swatch: "gold", text: "أولوية متوسطة" }, { swatch: "blue", text: "للعلم" }], "لون الملاحظة الرئيسية") : ""}`));
   }
 
 
@@ -1331,7 +1376,7 @@ ${engineBand}`;
     closingLine: copy.closingLine,
     metaRows: [
       { label: "فترة التقرير", value: monthLabel },
-      { label: "القسم", value: DEPARTMENT },
+      { label: "الإدارة", value: DEPARTMENT },
       { label: "التصنيف", value: CLASSIFICATION, end: true },
     ],
     meta: meta("closing", "ختام العرض"),

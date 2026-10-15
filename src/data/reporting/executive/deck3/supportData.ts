@@ -13,7 +13,7 @@ import {
   emptyQuality, orderedStageAccuracy, pct, sumCounts, sumMarking, sumQuality,
   type FourCounts, type MarkingCounts,
 } from "./slides";
-import { buildStatements } from "./statements";
+import { buildObservations } from "./statements";
 
 export type SupportCell = string | number;
 export type SupportSheet = { name: string; page: string; about: string; aoa: SupportCell[][] };
@@ -23,7 +23,7 @@ const p1 = (v: number | null): SupportCell => (v === null ? "" : Math.round(v * 
 const n = (v: number | null | undefined): SupportCell => v ?? "";
 
 const FOUR_HEAD = ["الإجابات المفحوصة", "سليمة صحيحة", "اشتباه صحيح", "الاشتباهات الفائتة", "الاشتباهات الخاطئة"];
-const RATE_HEAD = ["نسبة التوائم العامة %", "دقة السليمة %", "دقة الاشتباه %", "الفائتة % من إجابات السليمة", "الخاطئة % من إجابات الاشتباه"];
+const RATE_HEAD = ["معدل الاتفاق العام %", "دقة السليمة %", "دقة الاشتباه %", "الفائتة % من إجابات السليمة", "الخاطئة % من إجابات الاشتباه"];
 
 /** Counts of one group of answers → the five count cells. */
 function fourCells(c: FourCounts): SupportCell[] {
@@ -55,14 +55,14 @@ export function buildDeckSupportSheets(model: ReportModel, opts: { hasDecisionTa
     ["المؤشر", "القيمة", "الوحدة", "كيف يُحسب"],
     ["مجتمع الفحص", model.population.total, "صورة", "كل صور المجتمع في الفترة"],
     ["العيّنة المفحوصة", model.sample.total, "صورة", "الصور المكتملة الفحص في التقرير"],
-    ["العيّنة المفحوصة % من المجتمع", p1(pct(model.sample.total, model.population.total)), "%", "العيّنة المفحوصة ÷ مجتمع الفحص"],
+    ["التغطية الرقابية الإجمالية", p1(pct(model.sample.total, model.population.total)), "%", "العيّنة المفحوصة ÷ مجتمع الفحص"],
     ["إجمالي المستهدف", model.population.byStage.reduce((a, s) => a + (s.target ?? s.population), 0), "صورة", "مجموع مستهدفات المستويات (الأول 100% من مجتمعه، والباقي عدد ثابت شهريًا × أشهر التقرير)"],
-    ["التغطية الرقابية", p1(model.sample.coverage ?? null), "%", model.population.fromSummary ? "العيّنة المفحوصة ÷ المستهدف (المستوى الأول 100% من مجتمعه، والمستويات الأخرى عدد ثابت شهريًا × أشهر التقرير)" : "العيّنة المفحوصة ÷ مجتمع الفحص"],
+    [model.population.fromSummary ? "نسبة التغطية من المستهدف" : "التغطية الرقابية الإجمالية", p1(model.sample.coverage ?? null), "%", model.population.fromSummary ? "العيّنة المفحوصة ÷ المستهدف (المستوى الأول 100% من مجتمعه، والمستويات الأخرى عدد ثابت شهريًا × أشهر التقرير)" : "العيّنة المفحوصة ÷ مجتمع الفحص"],
     ["الإجابات المفحوصة", overall.evaluable, "إجابة", "لكل صورة إجابتان: المستوى الأول والثاني"],
     ["الإجابات المتفق عليها", totals.correctClean + totals.correctSuspicion, "إجابة", "سليمة صحيحة + اشتباه صحيح"],
     ["إجابات السليمة", overall.cleanResults, "إجابة", "المقام: نتيجة الوسائل الآلية سليمة"],
     ["إجابات الاشتباه", overall.suspResults, "إجابة", "المقام: نتيجة الوسائل الآلية اشتباه"],
-    ["نسبة التوائم العامة", p1(overall.overall), "%", "الإجابات المتفق عليها ÷ الإجابات المفحوصة"],
+    ["معدل الاتفاق العام", p1(overall.overall), "%", "الإجابات المتفق عليها ÷ الإجابات المفحوصة"],
     ["الاشتباهات الفائتة", totals.missedSuspicion, "إجابة", "نتيجة سليمة ورأي الجودة اشتباه"],
     ["الاشتباهات الفائتة % من إجابات السليمة", p1(pct(totals.missedSuspicion, overall.cleanResults)), "%", "الفائتة ÷ إجابات السليمة"],
     ["الاشتباهات الخاطئة", totals.falseSuspicion, "إجابة", "نتيجة اشتباه ورأي الجودة سليمة"],
@@ -74,7 +74,7 @@ export function buildDeckSupportSheets(model: ReportModel, opts: { hasDecisionTa
 
   // ── Population by level (page 7) ───────────────────────────────────────────
   add("المجتمع حسب المستوى", "مجتمع الفحص والعيّنة حسب المستوى", "حجم المجتمع والعيّنة والتغطية لكل مستوى.", [
-    ["المستوى", "المجتمع (صورة)", "المستهدف (صورة)", "المستهدف الشهري (صورة)", "عدد أشهر التقرير", "العيّنة (صورة)", "التغطية الرقابية %"],
+    ["المستوى", "المجتمع (صورة)", "المستهدف (صورة)", "المستهدف الشهري (صورة)", "عدد أشهر التقرير", "العيّنة (صورة)", "نسبة التغطية من المستهدف %"],
     ...model.population.byStage.map((s): SupportCell[] => {
       const monthly = STAGE_SAMPLE_TARGETS[s.stageKey as keyof typeof STAGE_SAMPLE_TARGETS];
       const hasMonthly = typeof monthly === "number";
@@ -147,7 +147,7 @@ export function buildDeckSupportSheets(model: ReportModel, opts: { hasDecisionTa
     return [kind, label, sum((p) => p.total), sum((p) => p.sampleTotal), p1(pct(sum((p) => p.sampleTotal), sum((p) => p.total))), sum((p) => p.clean), sum((p) => p.sampleClean), p1(pct(sum((p) => p.clean), sum((p) => p.total))), sum((p) => p.suspicious), sum((p) => p.sampleSuspicious), p1(pct(sum((p) => p.suspicious), sum((p) => p.total))), sum((p) => p.other ?? 0)];
   };
   add("المجتمع حسب المنفذ", "التوزيع على المنافذ البرية / البحرية", "المجتمع والعيّنة لكل منفذ، مفصولة إلى سليمة واشتباه وأخرى.", [
-    ["نوع المنفذ", "المنفذ", "المجتمع", "العيّنة", "نسبة العيّنة من المجتمع %", "سليمة (مجتمع)", "سليمة (عيّنة)", "نسبة السليمة %", "اشتباه (مجتمع)", "اشتباه (عيّنة)", "نسبة الاشتباه %", "أخرى (مجتمع)"],
+    ["نوع المنفذ", "المنفذ", "المجتمع", "العيّنة", "التغطية الرقابية الإجمالية %", "سليمة (مجتمع)", "سليمة (عيّنة)", "نسبة السليمة %", "اشتباه (مجتمع)", "اشتباه (عيّنة)", "نسبة الاشتباه %", "أخرى (مجتمع)"],
     ...popPorts.land.map((p) => popRow("بري", p)),
     popTotal("بري", "إجمالي البرية", popPorts.land),
     ...popPorts.sea.map((p) => popRow("بحري", p)),
@@ -155,9 +155,9 @@ export function buildDeckSupportSheets(model: ReportModel, opts: { hasDecisionTa
     ...(popPorts.unknown.length > 0 ? [...popPorts.unknown.map((p) => popRow(UNKNOWN_PORT_KIND_LABEL, p)), popTotal(UNKNOWN_PORT_KIND_LABEL, "إجمالي غير محددة النوع", popPorts.unknown)] : []),
   ]);
 
-  // ── Result agreement by level (page "نسبة التوائم") ─────────────────────────
+  // ── Result agreement by level (page "معدل الاتفاق العام") ─────────────────────────
   const stages = orderedStageAccuracy(model);
-  add("نسبة التوائم حسب المستوى", "نسبة التوائم", "الإجابات المفحوصة ونسبة التوائم والاشتباهات الفائتة والخاطئة لكل مستوى مخاطر.", [
+  add("معدل الاتفاق العام حسب المستوى", "معدل الاتفاق العام", "الإجابات المفحوصة ومعدل الاتفاق العام والاشتباهات الفائتة والخاطئة لكل مستوى مخاطر.", [
     ["المستوى", ...FOUR_HEAD, ...RATE_HEAD],
     ...stages.map((s): SupportCell[] => [s.label, ...fourCells(s.counts), ...rateCells(s.counts)]),
     ["الإجمالي", ...fourCells(totals), ...rateCells(totals)],
@@ -181,7 +181,7 @@ export function buildDeckSupportSheets(model: ReportModel, opts: { hasDecisionTa
   const portRow = (kind: string, p: { name: string; counts: FourCounts }): SupportCell[] => [kind, p.name, ...fourCells(p.counts), ...rateCells(p.counts)];
   const landTotal = sumCounts(portAcc.land.map((p) => p.counts));
   const seaTotal = sumCounts(portAcc.sea.map((p) => p.counts));
-  add("نتائج الأداء حسب المنفذ", "نتائج الأداء للمنافذ البرية / البحرية", "إجابات كل منفذ ونسب التوائم والاشتباهات الفائتة والخاطئة، الأكثر إجابات أولاً.", [
+  add("نتائج الأداء حسب المنفذ", "نتائج الأداء للمنافذ البرية / البحرية", "إجابات كل منفذ ومعدل الاتفاق العام والاشتباهات الفائتة والخاطئة، الأكثر إجابات أولاً.", [
     ["نوع المنفذ", "المنفذ", ...FOUR_HEAD, ...RATE_HEAD],
     ...portAcc.land.map((p) => portRow("بري", p)),
     ["بري", "إجمالي البرية", ...fourCells(landTotal), ...rateCells(landTotal)],
@@ -191,7 +191,7 @@ export function buildDeckSupportSheets(model: ReportModel, opts: { hasDecisionTa
   ]);
 
   // ── Level accuracy by port (pages "دقة المستويين في المنافذ") ───────────────
-  const levelHead = (who: string): string[] => [`${who}: الإجابات`, `${who}: نسبة التوائم %`, `${who}: دقة السليمة %`, `${who}: دقة الاشتباه %`, `${who}: الفائتة`, `${who}: الفائتة % من إجابات السليمة`, `${who}: الخاطئة`, `${who}: الخاطئة % من إجابات الاشتباه`];
+  const levelHead = (who: string): string[] => [`${who}: الإجابات`, `${who}: معدل الاتفاق العام %`, `${who}: دقة السليمة %`, `${who}: دقة الاشتباه %`, `${who}: الفائتة`, `${who}: الفائتة % من إجابات السليمة`, `${who}: الخاطئة`, `${who}: الخاطئة % من إجابات الاشتباه`];
   const levelCells = (c: FourCounts): SupportCell[] => {
     const a = accuracyOf(c);
     return [a.evaluable, p1(a.overall), p1(a.cleanAcc), p1(a.suspAcc), c.missedSuspicion, p1(pct(c.missedSuspicion, a.cleanResults)), c.falseSuspicion, p1(pct(c.falseSuspicion, a.suspResults))];
@@ -258,7 +258,7 @@ export function buildDeckSupportSheets(model: ReportModel, opts: { hasDecisionTa
     ...(portAcc.unknown.length > 0 ? qualityRowsFor(UNKNOWN_PORT_KIND_LABEL, "إجمالي غير محددة النوع", portAcc.unknown) : []),
   ]);
 
-  // ── Agreement by image quality (page "نسبة التوائم حسب جودة الصورة"), counted on IMAGES ──
+  // ── Agreement by image quality (page "معدل الاتفاق العام حسب جودة الصورة"), counted on IMAGES ──
   const imageOutcomes = collectQualityImageOutcomes(model);
   const qualityRows: SupportCell[][] = [];
   for (const [prefix, label] of [["all", "جميع المنافذ"], ["land", "المنافذ البرية"], ["sea", "المنافذ البحرية"], ...(portAcc.unknown.length > 0 ? [["unknown", "منافذ غير محددة النوع"] as const] : [])] as const) {
@@ -268,16 +268,16 @@ export function buildDeckSupportSheets(model: ReportModel, opts: { hasDecisionTa
       qualityRows.push([label, name, a.evaluable, four.correctClean, four.correctSuspicion, four.missedSuspicion, four.falseSuspicion, p1(a.overall), p1(pct(four.missedSuspicion, a.cleanResults)), p1(pct(four.falseSuspicion, a.suspResults))]);
     }
   }
-  add("نسبة التوائم حسب الجودة", "نسبة التوائم حسب جودة الصورة", "لكل صورة نتيجة واحدة (نتيجتها المجمّعة للمستويين مقابل رأي أخصائي ضمان جودة الأشعة): عدد الصور ونسبة التوائم والاشتباهات الفائتة والخاطئة لكل فئة جودة.", [
-    ["المنافذ", "جودة الصورة", "الصور المفحوصة", "سليمة صحيحة", "اشتباه صحيح", "الاشتباهات الفائتة", "الاشتباهات الخاطئة", "نسبة التوائم العامة %", "الفائتة % من الصور السليمة", "الخاطئة % من صور الاشتباه"],
+  add("معدل الاتفاق العام حسب الجودة", "معدل الاتفاق العام حسب جودة الصورة", "لكل صورة نتيجة واحدة (نتيجتها المجمّعة للمستويين مقابل رأي أخصائي ضمان جودة الأشعة): عدد الصور ومعدل الاتفاق العام والاشتباهات الفائتة والخاطئة لكل فئة جودة.", [
+    ["المنافذ", "جودة الصورة", "الصور المفحوصة", "سليمة صحيحة", "اشتباه صحيح", "الاشتباهات الفائتة", "الاشتباهات الخاطئة", "معدل الاتفاق العام %", "الفائتة % من الصور السليمة", "الخاطئة % من صور الاشتباه"],
     ...qualityRows,
   ]);
 
   // ── Observations and recommendations (pages "الملاحظات والتوصيات"): one row per figure behind each observation ──
-  const observations = buildStatements(model);
-  add("الملاحظات والتوصيات", "الملاحظات والتوصيات", "كل ملاحظة مع توصيتها، والأرقام التي تستند إليها (رقم في كل سطر).", [
-    ["#", "الملاحظة", "التوصية", "الأولوية", "الرقم", "القيمة", "صفحة التقرير"],
-    ...observations.flatMap((o, i): SupportCell[][] => o.figures.map((f): SupportCell[] => [i + 1, o.text, o.recommendation, o.priority, f.label, f.value, o.page])),
+  const observations = buildObservations(model);
+  add("الملاحظات والتوصيات", "الملاحظات والتوصيات", "كل ملاحظة رئيسية مع شواهدها الجوهرية (شاهد في كل سطر، بأرقامه) وتوصياتها.", [
+    ["#", "الملاحظة الرئيسية", "الشاهد", "التوصية", "صفحة التقرير"],
+    ...observations.flatMap((o, i): SupportCell[][] => o.evidence.map((e): SupportCell[] => [i + 1, o.title, e.text, o.recommendations.map((r, j) => `${j + 1}. ${r}`).join("\n"), o.page])),
   ]);
 
   // ── Index, first ───────────────────────────────────────────────────────────

@@ -209,6 +209,8 @@ export type KpiCell = {
   value: string;
   valueTone?: "navy" | "gold" | "green" | "red";
   aside?: string;
+  /** Show `aside` (a unit such as «صورة») on the number's line instead of under it. */
+  asideInline?: boolean;
   sub?: string;
   /** A second, smaller figure sharing this cell (own label, value and aside). */
   extra?: { label: string; value: string; valueTone?: "navy" | "gold" | "green" | "red"; aside?: string; sub?: string };
@@ -217,9 +219,9 @@ export type KpiCell = {
 export function kpiBand(cells: KpiCell[], variant: "top" | "bottom" | "solo", compact = false): string {
   const cellsHtml = cells
     .map((c) => {
-      const body = (f: { label: string; value: string; valueTone?: string; aside?: string; sub?: string }) =>
+      const body = (f: { label: string; value: string; valueTone?: string; aside?: string; asideInline?: boolean; sub?: string }) =>
         `<span class="v3-kpi-label">${esc(f.label)}</span>
-  <div class="v3-kpi-row"><span class="v3-kpi-value v3-ink-${f.valueTone ?? "navy"}">${esc(f.value)}</span>${f.aside ? `<span class="v3-kpi-aside">${esc(f.aside)}</span>` : ""}</div>
+  <div class="v3-kpi-row${f.asideInline ? " inline" : ""}"><span class="v3-kpi-value v3-ink-${f.valueTone ?? "navy"}">${esc(f.value)}</span>${f.aside ? `<span class="v3-kpi-aside">${esc(f.aside)}</span>` : ""}</div>
   ${f.sub ? `<span class="v3-kpi-sub">${esc(f.sub)}</span>` : ""}`;
       // Two figures sharing one cell sit side by side, each with its own description.
       if (c.extra) return `<div class="v3-kpi-cell v3-kpi-pair"><div class="v3-kpi-half">${body(c)}</div><div class="v3-kpi-half">${body(c.extra)}</div></div>`;
@@ -271,25 +273,31 @@ ${r.cells.map((c) => `  <div class="v3-qm-cell">
 // ── Observations and recommendations (الملاحظات والتوصيات) ─────────────────────────────────────────────
 
 export type ObservationFigure = { label: string; value: string };
-export type ObservationRow = {
-  number: string;
-  tone: "red" | "gold" | "navy";
-  observation: string;
-  /** The numbers behind the observation, shown as a separate labelled row under its sentence. */
-  figures: ObservationFigure[];
-  recommendation: string;
+export type ObservationEvidence = { text: string; figures: ObservationFigure[] };
+export type ObservationCard = {
+  tone: "red" | "gold" | "blue" | "navy";
+  /** The main observation (الملاحظة الرئيسية), one short heading-like line. */
+  title: string;
+  /** The supporting facts (الشواهد الجوهرية), each with the numbers behind it on its own row. */
+  evidence: ObservationEvidence[];
+  recommendations: string[];
 };
 
-/** The table # | الملاحظة | التوصية. Every text, figure label and value is its own leaf so the viewer can edit each. */
-export function observationsTable(rows: ObservationRow[]): string {
-  const body = rows
-    .map((r) => `<tr>
-  <td class="v3-obs-num ${r.tone}">${esc(r.number)}</td>
-  <td class="v3-obs-main"><span class="v3-obs-text">${esc(r.observation)}</span>${r.figures.length ? `<div class="v3-obs-figs">${r.figures.map((f) => `<span class="v3-fig"><small>${esc(f.label)}</small><b>${esc(f.value)}</b></span>`).join("")}</div>` : ""}</td>
-  <td class="v3-obs-rec"><span class="v3-obs-text">${esc(r.recommendation)}</span></td>
-</tr>`)
-    .join("\n");
-  return `<table class="v3-obs"><thead><tr><th>#</th><th>الملاحظة</th><th>التوصية</th></tr></thead><tbody>${body}</tbody></table>`;
+/** One observation per page: الملاحظة الرئيسية | الشواهد الجوهرية | التوصية. Every text is its own leaf so the viewer can edit each. */
+export function observationCard(o: ObservationCard): string {
+  const figs = (f: ObservationFigure[]) =>
+    f.length ? `<div class="v3-obs-figs">${f.map((x) => `<span class="v3-fig"><small>${esc(x.label)}</small><b>${esc(x.value)}</b></span>`).join("")}</div>` : "";
+  const evidence = o.evidence.map((e) => `<li><span class="v3-obs-text">${esc(e.text)}</span>${figs(e.figures)}</li>`).join("");
+  const recs = o.recommendations.map((r) => `<li><span class="v3-obs-text">${esc(r)}</span></li>`).join("");
+  // Three fixed-width panels that fill the slide's free height: every observation page has the same frame, and only the
+  // text inside grows or shrinks.
+  // Long text (the owner's hand-written observations) switches to the dense type scale.
+  const chars = o.title.length + o.evidence.reduce((n, e) => n + e.text.length, 0) + o.recommendations.reduce((n, r) => n + r.length, 0);
+  return `<div class="v3-obs-card${chars > 450 ? " v3-obs-dense" : ""}">
+  <section class="v3-obs-panel v3-obs-main ${o.tone}"><h3>الملاحظة الرئيسية</h3><div class="v3-obs-body"><span class="v3-obs-text v3-obs-title ${o.tone}">${esc(o.title)}</span></div></section>
+  <section class="v3-obs-panel v3-obs-ev"><h3>الشواهد الجوهرية</h3><div class="v3-obs-body"><ul class="v3-obs-list">${evidence}</ul></div></section>
+  <section class="v3-obs-panel v3-obs-rec"><h3>التوصية</h3><div class="v3-obs-body"><ol class="v3-obs-list">${recs}</ol></div></section>
+</div>`;
 }
 
 // ── Section dividers ────────────────────────────────────────────────────────

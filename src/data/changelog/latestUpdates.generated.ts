@@ -12,6 +12,13 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "title": "per-assignee answer folders, admin-offered migration with archived originals, automatic compaction (v154.0)"
   },
   {
+    "version": "v153.34",
+    "date": "2026-10-14",
+    "bucket": "enhancement",
+    "scope": "deck3",
+    "title": "cover wording, swapped coverage KPIs, one terminology for coverage/agreement, one observation per page (v153.34)"
+  },
+  {
     "version": "v153.33",
     "date": "2026-10-14",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "answers",
     "title": "local-first submit outbox, sync-interval replay, unsent-answer banner and timings"
-  },
-  {
-    "version": "v153.25",
-    "date": "2026-10-13",
-    "bucket": "enhancement",
-    "scope": "employee-workspace",
-    "title": "month load reads only the employee's own files — scoped ad-hoc probe, own request queue, one-pass mirror trust check, read-fold cache persist, Results mirror fast path"
   }
 ];
