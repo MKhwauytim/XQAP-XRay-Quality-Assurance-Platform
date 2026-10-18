@@ -25,7 +25,8 @@ import { getLabels } from "../../../../../data/labels/labelsStore";
 import { useVisibleUnsavedWorkMonthGuard } from "../../../../../hooks/useVisibleUnsavedWorkMonthGuard";
 import { useUnsavedWork } from "../../../../../hooks/useUnsavedWork";
 import type { AnswerSaveOutcome, FieldAnswer, ItemAnswer } from "../../../../../data/answers/answerTypes";
-import { isAnswerQueuedPending, loadPendingAnswerItems } from "../../../../../data/answers/answerLocalMirror";
+import { isAnswerQueuedPending, loadPendingAnswerRecords } from "../../../../../data/answers/answerLocalMirror";
+import { ADHOC_MONTH_FOLDER_PREFIX } from "../../../../../data/adhocImport/adhocImportModel";
 import { overlayPendingAnswers } from "../../../../../data/answers/overlayPendingAnswers";
 import { usePendingAnswerCount } from "../../../../../data/answers/usePendingAnswerCount";
 import {
@@ -144,11 +145,12 @@ import "./XrayReferrals/XrayReferrals.css";
 const COL_KEY = "xray_ref_cols_v4";
 
 /** «N answers not yet sent» notice with a "send now" action; renders nothing at 0. */
-function PendingAnswersBanner({ directoryHandle, username, month }: {
-  directoryHandle: DirectoryHandleLike; username: string; month: string;
+function PendingAnswersBanner({ directoryHandle, username }: {
+  directoryHandle: DirectoryHandleLike; username: string;
 }): ReactElement | null {
   const L = useLabels();
-  const unsent = usePendingAnswerCount({ username, month });
+  // Every folder, not just the selected month: ad-hoc rows queue under their own `adhoc-*` store.
+  const unsent = usePendingAnswerCount({ username });
   if (unsent <= 0) return null;
   return (
     <p className="ew-msg-warn" role="status" dir="rtl">
@@ -1338,7 +1340,14 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           // for oversight users too: their OWN rows submit through the same
           // outbox, and skipping the overlay made a queued answer vanish from
           // the queue on the next reload until the background flush landed it.
-          loadPendingAnswerItems(selMonth, username).catch((): ItemAnswer[] => []),
+          // Ad-hoc rows answer into their own `adhoc-*` store, not `selMonth`, so
+          // their queued answers must be overlaid too — reading `selMonth` alone
+          // turned every unsent ad-hoc answer white on the next sync reload.
+          loadPendingAnswerRecords(username)
+            .then((records) => records
+              .filter((r) => r.month === selMonth || r.month.startsWith(ADHOC_MONTH_FOLDER_PREFIX))
+              .map((r) => r.item))
+            .catch((): ItemAnswer[] => []),
         ]));
 
       // Both helpers already scope to `username` (fromEmployee / employeeUsername),
@@ -1729,7 +1738,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         />
       </PageHeader>
 
-      <PendingAnswersBanner directoryHandle={directoryHandle} username={username} month={selMonth} />
+      <PendingAnswersBanner directoryHandle={directoryHandle} username={username} />
 
       {/* Scoped to the DataTable's currently filtered rows (not `allEntries`), so
           export/bulk-reopen act only on what the applied filters show. */}
