@@ -320,6 +320,7 @@
 .ew-badge-done    { background: var(--c-success-bg); color: var(--c-success); }
 .ew-badge-pending { background: var(--c-info-bg);    color: var(--c-info); }
 .ew-badge-onhold  { background: var(--c-warning-bg); color: var(--c-warning); }
+.ew-badge-saving  { background: var(--c-warning-bg); color: var(--c-warning); border: 1px dashed currentColor; }
 
 /* ── No template ───────────────────────────────────────────── */
 

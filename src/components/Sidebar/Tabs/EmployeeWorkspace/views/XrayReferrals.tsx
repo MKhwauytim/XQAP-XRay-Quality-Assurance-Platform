@@ -325,8 +325,10 @@ function createRenderCell(deps: {
    *  instead of reading against the wrong (active) template's field ids. */
   templatesById?: ReadonlyMap<string, TemplateSchema>;
   labels: Labels;
+  /** `${xrayImageId}::${assignee}` keys submitted on this device but not yet on the share. */
+  unsyncedKeys?: ReadonlySet<string>;
 }) {
-  const { selectedIds, toggleSelect, answersMap, stageMappings, template, templatesById, labels: L } = deps;
+  const { selectedIds, toggleSelect, answersMap, stageMappings, template, templatesById, labels: L, unsyncedKeys } = deps;
   return function renderCell(
     col: DataTableCol<DistributionEntry>,
     entry: DistributionEntry,
@@ -370,9 +372,10 @@ function createRenderCell(deps: {
       );
     }
     if (col.id === "answerStatus") {
-      const answer = answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`);
+      const key = `${entry.xrayImageId}::${entry.assignedTo}`;
+      const answer = answersMap.get(key);
       const rowTemplate = templatesById ? resolveTemplateForAnswer(answer, templatesById, template) : template;
-      return <StatusBadge answer={answer} entryStatus={entry.status} template={rowTemplate} labels={L} />;
+      return <StatusBadge answer={answer} entryStatus={entry.status} template={rowTemplate} labels={L} unsynced={unsyncedKeys?.has(key)} />;
     }
     const raw = col.id === "stage"
       ? formatStageLabel(entry.row.stage, stageMappings)
@@ -467,11 +470,14 @@ export function createSaveAnswerHandler(deps: {
   setDirtyEntryId: (id: string | null) => void;
   /** A1: remember this successful submit so a stale in-flight reload cannot downgrade it. */
   recordLocalSubmission: (item: ItemAnswer) => void;
+  /** Marks (`true`) or clears (`false`) a row as submitted on this device but
+   *  not yet on the share, so its badge reads «قيد الحفظ» instead of «مكتملة». */
+  markUnsynced?: (key: string, unsynced: boolean) => void;
 }) {
   const {
     directoryHandle, username, role, activeTpl, selMonth,
     canSubmitAnswers, canAnswerOnBehalf, setAnswers, setStatusMsg,
-    ownBroadcastRef, setDirtyEntryId, recordLocalSubmission,
+    ownBroadcastRef, setDirtyEntryId, recordLocalSubmission, markUnsynced,
   } = deps;
   return async function handleSave(
     entry: DistributionEntry, ans: FieldAnswer[]
@@ -530,6 +536,7 @@ export function createSaveAnswerHandler(deps: {
               : { templateId: activeTpl.templateId },
           });
         recordLocalSubmission(item);
+        markUnsynced?.(`${xrayImageId}::${forUser}`, savedLocallyOnly);
         setAnswers((prev) => [
           ...prev.filter((a) => !(a.xrayImageId === xrayImageId && a.answeredBy === forUser)),
           item,
@@ -862,6 +869,14 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const [selTplId, setSelTplId]     = useState("");
   const [activeTpl, setActiveTpl]   = useState<TemplateSchema | null>(null);
   const [answers, setAnswers]       = useState<ItemAnswer[]>([]);
+  // Rows submitted on this device whose answer is not on the share yet («قيد الحفظ»).
+  const [unsyncedKeys, setUnsyncedKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const markUnsynced = useCallback((key: string, unsynced: boolean) => setUnsyncedKeys((prev) => {
+    if (prev.has(key) === unsynced) return prev;
+    const next = new Set(prev);
+    if (unsynced) next.add(key); else next.delete(key);
+    return next;
+  }), []);
   // Every template actually referenced by a loaded answer, keyed by templateId
   // (active template included) -- not just the single active selection. A
   // template swap (Template Builder "delete old, add new") mints fresh field
@@ -1318,9 +1333,12 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                 return null;
               }),
           canSeeAll ? null : loadEmployeeAnswers(directoryHandle, selMonth, username),
-          // This employee's submitted-but-unsent answers (local IndexedDB). Must
-          // never fail the load: absence just means "nothing to overlay".
-          canSeeAll ? [] : loadPendingAnswerItems(selMonth, username).catch((): ItemAnswer[] => []),
+          // This user's submitted-but-unsent answers (local IndexedDB). Must
+          // never fail the load: absence just means "nothing to overlay". Read
+          // for oversight users too: their OWN rows submit through the same
+          // outbox, and skipping the overlay made a queued answer vanish from
+          // the queue on the next reload until the background flush landed it.
+          loadPendingAnswerItems(selMonth, username).catch((): ItemAnswer[] => []),
         ]));
 
       // Both helpers already scope to `username` (fromEmployee / employeeUsername),
@@ -1351,7 +1369,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         setPendingReplacementIds(pendingReplacementIds);
         setSampleMaster(sample);
         setMyQuota(quota);
-        setAnswers(localSubmissions.settle(overlayPendingAnswers(answerItems, pendingItems), loadGeneration));
+        const overlaid = overlayPendingAnswers(answerItems, pendingItems);
+        // A pending item that won the overlay is still only on this device.
+        const winners = new Set(overlaid);
+        setUnsyncedKeys(new Set(pendingItems.filter((p) => winners.has(p)).map((p) => `${p.xrayImageId}::${p.answeredBy}`)));
+        setAnswers(localSubmissions.settle(overlaid, loadGeneration));
         setLoadState("ready");
       };
 
@@ -1532,7 +1554,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const handleSave = createSaveAnswerHandler({
     directoryHandle, username, role, activeTpl, selMonth,
     canSubmitAnswers, canAnswerOnBehalf, setAnswers, setStatusMsg,
-    ownBroadcastRef: ownAnswerBroadcastRef, setDirtyEntryId, recordLocalSubmission: localSubmissions.record,
+    ownBroadcastRef: ownAnswerBroadcastRef, setDirtyEntryId, recordLocalSubmission: localSubmissions.record, markUnsynced,
   });
 
   // Both reopen handlers live at module scope (createReopenHandlers, above) to
@@ -1677,7 +1699,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
 
   // ── Cell renderer ──────────────────────────────────────────────────────────
 
-  const renderCell = createRenderCell({ selectedIds, toggleSelect, answersMap, stageMappings, template: activeTpl, templatesById, labels: L });
+  const renderCell = createRenderCell({ selectedIds, toggleSelect, answersMap, stageMappings, template: activeTpl, templatesById, labels: L, unsyncedKeys });
 
   // ── Custom filter override for answerStatus ────────────────────────────────
   // LOG-03: memoized — an unstable identity here makes DataTable's filteredRows
@@ -1707,7 +1729,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         />
       </PageHeader>
 
-      {!canSeeAll && <PendingAnswersBanner directoryHandle={directoryHandle} username={username} month={selMonth} />}
+      <PendingAnswersBanner directoryHandle={directoryHandle} username={username} month={selMonth} />
 
       {/* Scoped to the DataTable's currently filtered rows (not `allEntries`), so
           export/bulk-reopen act only on what the applied filters show. */}

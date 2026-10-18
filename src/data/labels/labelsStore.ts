@@ -187,6 +187,8 @@ export const DEFAULT_LABELS = {
   // Common statuses and placeholders
   status_all:       "الكل",
   status_completed: "مكتملة",
+  status_saving:    "قيد الحفظ",
+  status_saving_title: "محفوظة على هذا الجهاز وبانتظار المزامنة مع المجلد المشترك — لا تُغلق المتصفح ولا تمسح بياناته حتى تتحول إلى «مكتملة».",
   status_submitted: "مقدمة",
   status_draft:     "مسودة",
   status_pending:   "لم تُبدأ",

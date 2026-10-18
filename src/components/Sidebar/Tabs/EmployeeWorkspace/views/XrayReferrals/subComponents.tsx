@@ -730,14 +730,20 @@ export function StatusBadge({
   entryStatus,
   template,
   labels,
+  unsynced = false,
 }: {
   answer?: ItemAnswer;
   entryStatus: string;
   template: TemplateSchema | null;
   labels: Labels;
+  /** Submitted on this device but not yet written to the share (outbox). */
+  unsynced?: boolean;
 }) {
   if (entryStatus === "replaced")
     return <span className="ew-status-badge" style={{ background: "#f1f5f9", color: "#64748b" }}>{labels.status_replaced}</span>;
+  if (answer?.status === "submitted" && unsynced) {
+    return <span className="ew-status-badge ew-badge-saving" title={labels.status_saving_title}>{labels.status_saving}</span>;
+  }
   if (answer?.status === "submitted") {
     if (isNoImageSubmission(answer, template)) {
       return <span className="ew-status-badge ew-badge-onhold">{labels.status_on_hold}</span>;
