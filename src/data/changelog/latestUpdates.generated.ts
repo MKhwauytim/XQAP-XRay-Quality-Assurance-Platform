@@ -5,6 +5,20 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v154.2",
+    "date": "2026-10-18",
+    "bucket": "fix",
+    "scope": "answers",
+    "title": "ad-hoc rows' unsent answers overlaid and counted — no longer turn white on sync"
+  },
+  {
+    "version": "v154.1",
+    "date": "2026-10-18",
+    "bucket": "fix",
+    "scope": "answers",
+    "title": "«قيد الحفظ» badge for outbox answers not yet on the share; pending overlay + banner for every role"
+  },
+  {
     "version": "v154.0",
     "date": "2026-10-14",
     "bucket": "feature",
@@ -59,19 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "integrity",
     "title": "admin boot scan heals live files from a verified .tmp/.bak"
-  },
-  {
-    "version": "v153.26",
-    "date": "2026-10-13",
-    "bucket": "feature",
-    "scope": "answers",
-    "title": "local-first submit outbox, sync-interval replay, unsent-answer banner and timings"
-  },
-  {
-    "version": "v153.25",
-    "date": "2026-10-13",
-    "bucket": "enhancement",
-    "scope": "employee-workspace",
-    "title": "month load reads only the employee's own files — scoped ad-hoc probe, own request queue, one-pass mirror trust check, read-fold cache persist, Results mirror fast path"
   }
 ];
