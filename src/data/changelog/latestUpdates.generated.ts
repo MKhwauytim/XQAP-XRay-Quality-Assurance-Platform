@@ -5,6 +5,34 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v156.0",
+    "date": "2026-10-19",
+    "bucket": "fix",
+    "scope": "distribution",
+    "title": "damaged distribution.current.json rebuilds silently; deleted months stay deleted; admin delete-month tool"
+  },
+  {
+    "version": "v155.0",
+    "date": "2026-10-19",
+    "bucket": "feature",
+    "scope": "sampling",
+    "title": "high-priority ports in the sample draw; port pickers list every known port before upload"
+  },
+  {
+    "version": "v154.4",
+    "date": "2026-10-19",
+    "bucket": "fix",
+    "scope": "answers",
+    "title": "repair each cause of unsent answers — step timeouts, permission request, backup/import"
+  },
+  {
+    "version": "v154.3",
+    "date": "2026-10-19",
+    "bucket": "fix",
+    "scope": "answers",
+    "title": "«إرسال الآن» reports why unsent answers did not land"
+  },
+  {
     "version": "v154.2",
     "date": "2026-10-18",
     "bucket": "fix",
@@ -45,33 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "statements",
     "title": "compare each port with one fixed baseline per port type (إجمالي), not the rest of its type"
-  },
-  {
-    "version": "v153.30",
-    "date": "2026-10-13",
-    "bucket": "enhancement",
-    "scope": "deck3",
-    "title": "bake the saved text template into the defaults, drop the s3 contents tail, lower «المحددات»"
-  },
-  {
-    "version": "v153.29",
-    "date": "2026-10-13",
-    "bucket": "enhancement",
-    "scope": "report import",
-    "title": "rows only from the examined-sample workbook; follow-up and بعد التعديل enrich by id, «نعم» + same exam month first"
-  },
-  {
-    "version": "v153.28",
-    "date": "2026-10-13",
-    "bucket": "enhancement",
-    "scope": "deck3",
-    "title": "align level determinants, drop two captions, empty pages print-off by default"
-  },
-  {
-    "version": "v153.27",
-    "date": "2026-10-13",
-    "bucket": "feature",
-    "scope": "integrity",
-    "title": "admin boot scan heals live files from a verified .tmp/.bak"
   }
 ];

@@ -69,6 +69,7 @@ export const ACTION_TYPE_LABEL_KEYS: Record<WorkspaceActionType, LabelKey> = {
   "notification-restored": "um_action_type_notification_restored",
   "month-closed": "um_action_type_month_closed",
   "month-reopened": "um_action_type_month_reopened",
+  "month-deleted": "um_action_type_month_deleted",
   "backup-created": "um_action_type_backup_created",
   "backup-restored": "um_action_type_backup_restored",
   "backup-settings-changed": "um_action_type_backup_settings_changed",
@@ -171,6 +172,7 @@ export const ACTION_TYPE_GROUPS: readonly ActionTypeGroup[] = [
     types: [
       "month-closed",
       "month-reopened",
+      "month-deleted",
       "backup-created",
       "backup-restored",
       "backup-settings-changed",

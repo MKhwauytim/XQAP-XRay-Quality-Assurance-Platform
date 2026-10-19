@@ -157,7 +157,7 @@ describe("drawSample — legacy path golden master", () => {
       // Re-recorded 2026-08-19 for the "1.2" bump. The legacy path shares only
       // this stamp with the stage path — every drawn row, counter and
       // allocation below is byte-identical to what "1.1" produced.
-      samplingAlgorithmVersion: "1.2",
+      samplingAlgorithmVersion: "1.3", // "1.3" (2026-10-19, priority ports): nothing else in this master moved
       drawnBy: "tester",
       totalRequested: 9,
       totalActual: 9,
@@ -477,7 +477,7 @@ describe("drawSample — stage path golden master", () => {
       nonCertScanRequested: 8,
       certScanActual: 7,
       nonCertScanActual: 8,
-      samplingAlgorithmVersion: "1.2",
+      samplingAlgorithmVersion: "1.3", // "1.3" (2026-10-19, priority ports): nothing else in this master moved
       rngSeed: "golden-stage-1",
     });
   });
@@ -844,7 +844,7 @@ describe("drawSample — stage path golden master", () => {
       rows: result.data.rows.map((r) => r.xrayImageId),
     }).toEqual({
       rngSeed: "golden-stage-1",
-      samplingAlgorithmVersion: "1.2",
+      samplingAlgorithmVersion: "1.3", // "1.3" (2026-10-19, priority ports): nothing else in this master moved
       totalRequested: 15,
       totalActual: 15,
       certScanRequested: 7,

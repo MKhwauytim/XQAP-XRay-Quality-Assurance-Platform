@@ -505,9 +505,10 @@ test("P4: the legacy totalSampleSize path leaves unmappedStageRowCount undefined
 
 test("P4: SAMPLING_ALGORITHM_VERSION is unchanged by the unmapped-stage diagnostic (additive, not semantic)", async () => {
   const { SAMPLING_ALGORITHM_VERSION } = await import("./sampleAlgorithm");
-  // "1.2" (2026-08-19): bumped by the per-port CertScan rounding fix, NOT by the
-  // P4 diagnostic this test guards — that one is still additive-only.
-  expect(SAMPLING_ALGORITHM_VERSION).toBe("1.2");
+  // "1.2" (2026-08-19): bumped by the per-port CertScan rounding fix; "1.3"
+  // (2026-10-19) by high-priority ports. Neither by the P4 diagnostic this test
+  // guards — that one is still additive-only.
+  expect(SAMPLING_ALGORITHM_VERSION).toBe("1.3");
 });
 
 

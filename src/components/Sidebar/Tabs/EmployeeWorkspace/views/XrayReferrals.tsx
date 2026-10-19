@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactElement } from "react";
 import { CalendarOff, X } from "lucide-react";
 import { readSession } from "../../../../../auth/authSession";
 import { usePermissions } from "../../../../../auth/usePermissions";
@@ -28,7 +27,6 @@ import type { AnswerSaveOutcome, FieldAnswer, ItemAnswer } from "../../../../../
 import { isAnswerQueuedPending, loadPendingAnswerRecords } from "../../../../../data/answers/answerLocalMirror";
 import { ADHOC_MONTH_FOLDER_PREFIX } from "../../../../../data/adhocImport/adhocImportModel";
 import { overlayPendingAnswers } from "../../../../../data/answers/overlayPendingAnswers";
-import { usePendingAnswerCount } from "../../../../../data/answers/usePendingAnswerCount";
 import {
   loadOrDeriveDistributionCurrentStrictForRead,
   readDistributionLogStamp,
@@ -136,6 +134,7 @@ import { createQueueSelection } from "./XrayReferrals/queueSelection";
 import { useLocalSubmissionGuard } from "./XrayReferrals/localSubmissions";
 import { useReplacementFlow } from "./XrayReferrals/useReplacementFlow";
 import QueueSplitResizer from "./XrayReferrals/QueueSplitResizer";
+import PendingAnswersBanner from "./XrayReferrals/PendingAnswersBanner";
 import PendingCorrections from "./XrayReferrals/PendingCorrections";
 import { DEFAULT_QUEUE_SPLIT } from "../../../../../data/preferences/queueSplitStore";
 import "./XrayReferrals/XrayReferrals.css";
@@ -143,24 +142,6 @@ import "./XrayReferrals/XrayReferrals.css";
 // ── Column definitions ────────────────────────────────────────────────────────
 
 const COL_KEY = "xray_ref_cols_v4";
-
-/** «N answers not yet sent» notice with a "send now" action; renders nothing at 0. */
-function PendingAnswersBanner({ directoryHandle, username }: {
-  directoryHandle: DirectoryHandleLike; username: string;
-}): ReactElement | null {
-  const L = useLabels();
-  // Every folder, not just the selected month: ad-hoc rows queue under their own `adhoc-*` store.
-  const unsent = usePendingAnswerCount({ username });
-  if (unsent <= 0) return null;
-  return (
-    <p className="ew-msg-warn" role="status" dir="rtl">
-      {L.ew_answers_pending_sync.replace("{count}", String(unsent))}{" "}
-      <button type="button" onClick={() => requestAnswerFlush(directoryHandle, username, { immediate: true })}>
-        {L.ew_answers_send_now}
-      </button>
-    </p>
-  );
-}
 
 // ── Main component ────────────────────────────────────────────────────────────
 

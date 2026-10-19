@@ -11,6 +11,13 @@ import { drawLegacySample, drawStageSample } from "./sampleAlgorithmInternals";
  * split, draw order, spillover, stage redistribution). A pure refactor that
  * provably preserves the exact drawn set for every seed does NOT bump it.
  *
+ * "1.3" (2026-10-19): high-priority ports (`priorityPorts`, owner request).
+ * Each stage fills its CertScan / non-CertScan targets from the priority ports
+ * first and draws the remainder from the other ports the normal way; a stage
+ * still short is topped up priority ports first. A draw with NO priority ports
+ * is unchanged from "1.2" row for row (the golden tests pin that), so "1.2"
+ * months stay replayable as long as they had none — and none existed then.
+ *
  * "1.2" (2026-08-19): the `percentage` CertScan target is now rounded ONCE at
  * the stage level and Hamilton-apportioned across the ports by each port's
  * CertScan pool, matching what the `exact` method has always done. Under "1.1"
@@ -29,12 +36,19 @@ import { drawLegacySample, drawStageSample } from "./sampleAlgorithmInternals";
  * every redistributable stage's target — so a "1.0" stage draw that used any
  * percentage-method rule is NOT replayable under this version.
  */
-export const SAMPLING_ALGORITHM_VERSION = "1.2";
+export const SAMPLING_ALGORITHM_VERSION = "1.3";
 
 type StageConfig = {
   rngSeed: string;
   samplingRules: StageSamplingRule[];
   stageMappings?: StageAliasMappings;
+  /**
+   * High-priority ports ("1.3"): each stage fills its CertScan and
+   * non-CertScan targets from these ports first and draws only the remainder
+   * from the others. Port names as `normalizePortName` gives them. Stage path
+   * only — the legacy `totalSampleSize` config has no stages and ignores it.
+   */
+  priorityPorts?: readonly string[];
 };
 
 export function drawSample(
