@@ -49,7 +49,7 @@ describe("answerOutbox", () => {
   });
 
   it("flushAnswersNow resolves with the pass's summary and cancels a pending debounced flush", async () => {
-    const summary = { replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 2, blocked: { "month-closed": 2 } };
+    const summary = { replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 2, blocked: { "month-closed": { count: 2, months: ["m"] } } };
     const debounced = vi.fn(async () => summary);
     requestAnswerFlush({} as never, "u1", { replay: debounced, debounceMs: 20 });
     const replay = vi.fn(async () => summary);

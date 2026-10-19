@@ -460,3 +460,24 @@
   font-size: 13.5px;
   font-weight: 600;
 }
+
+/* ── Unsent-answers banner (PendingAnswersBanner.tsx) ───────────────────── */
+.ew-pending-sync p {
+  margin: 0;
+}
+
+.ew-pending-sync p + p {
+  margin-top: var(--sp-2);
+}
+
+.ew-pending-sync button,
+.ew-import-unsent button {
+  margin-inline-start: var(--sp-2);
+}
+
+/* Shown on a PC with nothing pending: a quiet way in for the import. */
+.ew-import-unsent {
+  margin: 0 0 var(--sp-2);
+  font-size: 12.5px;
+  color: var(--c-ink-3);
+}

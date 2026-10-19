@@ -18,6 +18,7 @@ import * as answerLocalMirror from "./answerLocalMirror";
 import type { ItemAnswer } from "./answerTypes";
 import {
   __resetPendingReplayLogDedupeForTests,
+  __setReplayStepTimeoutForTests,
   backfillAnswerMirror,
   replayPendingAnswers,
 } from "./pendingAnswerReplay";
@@ -336,7 +337,7 @@ describe("replayPendingAnswers (A1)", () => {
       markSynced: vi.fn(async () => {}),
     });
 
-    expect(summary).toEqual({ replayed: 1, alreadyOnDisk: 0, failed: 0, cannotLand: 1, blocked: { "month-closed": 1 } });
+    expect(summary).toEqual({ replayed: 1, alreadyOnDisk: 0, failed: 0, cannotLand: 1, blocked: { "month-closed": { count: 1, months: [MONTH_EARLY] } } });
     expect((await loadEmployeeAnswers(root, MONTH, "emp1")).items.map((i) => i.xrayImageId)).toEqual(
       expect.arrayContaining(["OPEN-1"])
     );
@@ -367,7 +368,7 @@ describe("replayPendingAnswers (A1)", () => {
       loadPending: async () => [{ month: MONTH, item: answer("XR-1") }],
       markSynced: vi.fn(async () => {}),
     });
-    expect(summary).toEqual({ replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 1, blocked: { unreadable: 1 } });
+    expect(summary).toEqual({ replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 1, blocked: { unreadable: { count: 1, months: [MONTH] } } });
 
     setSimulatedFaults(root, []);
     __resetAnswerEventsCacheForTests();
@@ -386,7 +387,7 @@ describe("replayPendingAnswers (A1)", () => {
       markSynced: vi.fn(async () => {}),
     });
 
-    expect(summary).toEqual({ replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 1, blocked: { "folder-missing": 1 } });
+    expect(summary).toEqual({ replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 1, blocked: { "folder-missing": { count: 1, months: [neverSetUp] } } });
     await expect(getSampleMainDir(root, neverSetUp, false)).rejects.toMatchObject({ name: "NotFoundError" });
   });
 
@@ -413,6 +414,48 @@ describe("replayPendingAnswers (A1)", () => {
     expect(upsertSpy).toHaveBeenCalledTimes(2); // ...twice
     const logged = getRecentErrors().filter((entry) => entry.context === "answers:pending-replay-write");
     expect(logged).toHaveLength(1); // ...but logged only once
+  });
+
+  // A share that stops answering leaves the write promise pending forever. The
+  // pass must still finish -- otherwise it holds the cross-tab lock and the
+  // in-tab join for the page's lifetime and «إرسال الآن» appears to do nothing.
+  it("a write that never settles is reported as not-responding and the pass still finishes", async () => {
+    const root = createMemoryDirectory("root");
+    await seedMonth(root, MONTH);
+    __setReplayStepTimeoutForTests(20);
+    upsertSpy.mockImplementationOnce(() => new Promise(() => {}));
+    const identity = { eventId: "22222222-2222-4222-8222-222222222222", eventAt: "2026-09-28T10:00:05.000Z" };
+    const noopSync = () => vi.fn(async () => {});
+
+    const summary = await replayPendingAnswers(root, "emp1", {
+      loadPending: async () => [{ month: MONTH, item: answer("HUNG-1"), identity }],
+      markSynced: noopSync(),
+    });
+
+    expect(summary).toEqual({
+      replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 1,
+      blocked: { "not-responding": { count: 1, months: [MONTH] } }, lastError: "ReplayStepTimeoutError",
+    });
+    // The lock was released: the next pass runs instead of being skipped.
+    const next = await replayPendingAnswers(root, "emp1", {
+      loadPending: async () => [{ month: MONTH, item: answer("HUNG-1"), identity }],
+      markSynced: noopSync(),
+    });
+    expect(next.skipped).toBeUndefined();
+    expect(next.replayed).toBe(1);
+  });
+
+  it("logs a month with unreadable segments once, not every pass", async () => {
+    const root = createMemoryDirectory("root");
+    await seedMonth(root, MONTH);
+    setSimulatedFaults(root, ANSWER_NDJSON_SEGMENT_ONLY_FAULTS);
+    const deps = { loadPending: async () => [{ month: MONTH, item: answer("XR-1") }], markSynced: vi.fn(async () => {}) };
+
+    await replayPendingAnswers(root, "emp1", deps);
+    __resetAnswerEventsCacheForTests();
+    await replayPendingAnswers(root, "emp1", deps);
+
+    expect(getRecentErrors().filter((entry) => entry.context === "answers:pending-replay-unreadable")).toHaveLength(1);
   });
 });
 
@@ -553,7 +596,7 @@ describe("replayPendingAnswers — identity-bearing items (outbox)", () => {
       loadPending: async () => [{ month: MONTH, item: answer("XR-1"), identity }],
       markSynced: noopSync(),
     });
-    expect(summary).toEqual({ replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 1, blocked: { "folder-missing": 1 } });
+    expect(summary).toEqual({ replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 1, blocked: { "folder-missing": { count: 1, months: [MONTH] } } });
     expect(upsertSpy).not.toHaveBeenCalled();
   });
 });

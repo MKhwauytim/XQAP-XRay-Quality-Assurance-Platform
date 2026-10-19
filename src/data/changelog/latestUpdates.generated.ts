@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v154.4",
+    "date": "2026-10-19",
+    "bucket": "fix",
+    "scope": "answers",
+    "title": "repair each cause of unsent answers — step timeouts, permission request, backup/import"
+  },
+  {
     "version": "v154.3",
     "date": "2026-10-19",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "report import",
     "title": "rows only from the examined-sample workbook; follow-up and بعد التعديل enrich by id, «نعم» + same exam month first"
-  },
-  {
-    "version": "v153.28",
-    "date": "2026-10-13",
-    "bucket": "enhancement",
-    "scope": "deck3",
-    "title": "align level determinants, drop two captions, empty pages print-off by default"
   }
 ];
