@@ -118,10 +118,20 @@ export const phaseTwoLabels = {
   p2_certscan_ports_open:           "تحديد المنافذ ({count} محدد)",
   p2_certscan_ports_title:          "منافذ CertScan الكاملة",
   p2_certscan_ports_status:         "{count} من {total} منفذ محدَّد كـ CertScan",
-  p2_certscan_ports_empty_catalog:  "ارفع ملف وكالة المخاطر أولاً لعرض منافذ الشهر.",
-  p2_certscan_ports_missing_category: "محددة سابقاً — غير موجودة في ملف هذا الشهر",
+  p2_certscan_ports_empty_catalog:  "لا توجد منافذ معروفة بعد. ارفع ملف وكالة المخاطر، أو اسحب عينة لأي شهر، لتظهر المنافذ هنا.",
+  p2_certscan_ports_missing_category: "محددة سابقاً — غير موجودة في البيانات الحالية",
+  p2_ports_loading_known:           "جارٍ تحميل المنافذ من الأشهر السابقة…",
   p2_certscan_ports_clear:          "إلغاء تحديد الكل",
   p2_certscan_ports_cancel:         "إلغاء",
   p2_certscan_ports_save:           "حفظ",
   p2_certscan_ports_close_aria:     "إغلاق نافذة منافذ CertScan",
+
+  // ── إعدادات المعالجة · المنافذ ذات الأولوية في سحب العينة ("1.3") ─────────
+  p2_priority_ports_section_title:  "المنافذ ذات الأولوية في العينة",
+  p2_priority_ports_section_hint:   "عند سحب العينة يُؤخذ نصيب كل مستوى من هذه المنافذ أولاً مع الحفاظ على نسبة CertScan، وإن لم تكفِ يُكمَّل الباقي من بقية المنافذ بالطريقة المعتادة. يسري على السحب القادم فقط.",
+  p2_priority_ports_open:           "تحديد المنافذ ذات الأولوية ({count} محدد)",
+  p2_priority_ports_title:          "المنافذ ذات الأولوية في العينة",
+  p2_priority_ports_status:         "{count} من {total} منفذ ذو أولوية",
+  p2_priority_ports_close_aria:     "إغلاق نافذة المنافذ ذات الأولوية",
+  p3_priority_ports_active:         "المنافذ ذات الأولوية في هذا السحب: {ports}",
 } as const;

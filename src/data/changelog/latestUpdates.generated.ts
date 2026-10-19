@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v155.0",
+    "date": "2026-10-19",
+    "bucket": "feature",
+    "scope": "sampling",
+    "title": "high-priority ports in the sample draw; port pickers list every known port before upload"
+  },
+  {
     "version": "v154.4",
     "date": "2026-10-19",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "deck3",
     "title": "bake the saved text template into the defaults, drop the s3 contents tail, lower «المحددات»"
-  },
-  {
-    "version": "v153.29",
-    "date": "2026-10-13",
-    "bucket": "enhancement",
-    "scope": "report import",
-    "title": "rows only from the examined-sample workbook; follow-up and بعد التعديل enrich by id, «نعم» + same exam month first"
   }
 ];

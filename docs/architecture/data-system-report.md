@@ -96,7 +96,7 @@ global selection.
 
 | File or Pattern | Typical Location | Purpose |
 | --- | --- | --- |
-| `config.json` | `1-population/` (root, not per-month) | Population processing configuration: system/custom field definitions, column-mapping templates, stage alias mappings, processing workflow presets, export templates, sampling rules, and per-employee stage allocations, plus the optional `certScanPorts: string[]` (C2, additive — a config written before it loads as `[]`, so no migration): ports treated as CertScan as a whole. Processing unions it with the pasted CertScan list on the next run only; an already-drawn sample is never re-flagged, and `SAMPLING_ALGORITHM_VERSION` is unchanged. |
+| `config.json` | `1-population/` (root, not per-month) | Population processing configuration: system/custom field definitions, column-mapping templates, stage alias mappings, processing workflow presets, export templates, sampling rules, and per-employee stage allocations, plus the optional `certScanPorts: string[]` (C2, additive — a config written before it loads as `[]`, so no migration): ports treated as CertScan as a whole. Processing unions it with the pasted CertScan list on the next run only; an already-drawn sample is never re-flagged, and `SAMPLING_ALGORITHM_VERSION` is unchanged. Also the optional `priorityPorts: string[]` (v155.0, same additive rule): high-priority ports for the NEXT sample draw (`SAMPLING_ALGORITHM_VERSION` "1.3"): each stage fills its CertScan / non-CertScan targets from these ports first and draws only the remainder from the others. |
 | `certscan.global.json` | `1-population/` (root, not per-month) | Global CertScan matching reference text shared across all months. |
 | `month.manifest.json` | `1-population/{month}/` | Month metadata: month/year, processed counts, status, operator info. |
 | `risk.raw.json` | `1-population/{month}/1-raw/` or legacy month folder | Imported risk rows. |
@@ -104,7 +104,7 @@ global selection.
 | `population.final.json` | `1-population/{month}/2-processed/` or legacy month folder | Final processed population rows used for sampling and reporting. |
 | `processing.summary.json` | `1-population/{month}/2-processed/` | Processing summary/validation data. |
 | `population.final.{ISO-ts}.superseded.json` | `1-population/{month}/2-processed/` | Mandatory archive (A2): the prior `population.final.json`, copied before a save, a population recovery or a selective backup restore overwrites it. A failed archive refuses the overwrite. Source workbooks are archived best-effort as `risk.source.{ISO-ts}.superseded.{ext}` / `bi.source.{ISO-ts}.superseded.{ext}` in `1-raw/`. Candidates of the Settings «استعادة المجتمع السابق» tool. |
-| `sample.master.json` | `2-samples/{month}/1-main/` | Drawn sample rows and sample configuration/result metadata. |
+| `sample.master.json` | `2-samples/{month}/1-main/` | Drawn sample rows and sample configuration/result metadata. Since v155.0 a draw made with high-priority ports also records `priorityPorts: string[]` and flags those ports' `portAllocations[].priority: true`; both are absent otherwise, so a draw without priority ports keeps the pre-v155.0 shape. |
 | `distribution.events/{eventId}.json` | `2-samples/{month}/1-main/` | Immutable durable assignment event envelopes. |
 | `distribution.log.json` | `2-samples/{month}/1-main/` | Backward-compatible event-log projection. |
 | `distribution.current.json` | `2-samples/{month}/1-main/` | Derived current distribution snapshot. |
