@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v154.3",
+    "date": "2026-10-19",
+    "bucket": "fix",
+    "scope": "answers",
+    "title": "«إرسال الآن» reports why unsent answers did not land"
+  },
+  {
     "version": "v154.2",
     "date": "2026-10-18",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "deck3",
     "title": "align level determinants, drop two captions, empty pages print-off by default"
-  },
-  {
-    "version": "v153.27",
-    "date": "2026-10-13",
-    "bucket": "feature",
-    "scope": "integrity",
-    "title": "admin boot scan heals live files from a verified .tmp/.bak"
   }
 ];

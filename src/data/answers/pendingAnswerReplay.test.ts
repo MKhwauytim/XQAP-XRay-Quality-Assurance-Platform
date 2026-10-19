@@ -315,7 +315,7 @@ describe("replayPendingAnswers (A1)", () => {
     const ran = summaryA.replayed > 0 ? summaryA : summaryB;
     const skipped = ran === summaryA ? summaryB : summaryA;
     expect(ran).toEqual({ replayed: 1, alreadyOnDisk: 0, failed: 0, cannotLand: 0 });
-    expect(skipped).toEqual({ replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 0 });
+    expect(skipped).toEqual({ replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 0, skipped: true });
   });
 
   // CRITICAL 1: a month-closed throw for ONE item used to abort the whole
@@ -336,7 +336,7 @@ describe("replayPendingAnswers (A1)", () => {
       markSynced: vi.fn(async () => {}),
     });
 
-    expect(summary).toEqual({ replayed: 1, alreadyOnDisk: 0, failed: 0, cannotLand: 1 });
+    expect(summary).toEqual({ replayed: 1, alreadyOnDisk: 0, failed: 0, cannotLand: 1, blocked: { "month-closed": 1 } });
     expect((await loadEmployeeAnswers(root, MONTH, "emp1")).items.map((i) => i.xrayImageId)).toEqual(
       expect.arrayContaining(["OPEN-1"])
     );
@@ -367,7 +367,7 @@ describe("replayPendingAnswers (A1)", () => {
       loadPending: async () => [{ month: MONTH, item: answer("XR-1") }],
       markSynced: vi.fn(async () => {}),
     });
-    expect(summary).toEqual({ replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 1 });
+    expect(summary).toEqual({ replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 1, blocked: { unreadable: 1 } });
 
     setSimulatedFaults(root, []);
     __resetAnswerEventsCacheForTests();
@@ -386,7 +386,7 @@ describe("replayPendingAnswers (A1)", () => {
       markSynced: vi.fn(async () => {}),
     });
 
-    expect(summary).toEqual({ replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 1 });
+    expect(summary).toEqual({ replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 1, blocked: { "folder-missing": 1 } });
     await expect(getSampleMainDir(root, neverSetUp, false)).rejects.toMatchObject({ name: "NotFoundError" });
   });
 
@@ -408,8 +408,8 @@ describe("replayPendingAnswers (A1)", () => {
     const first = await replayPendingAnswers(root, "emp1", deps);
     const second = await replayPendingAnswers(root, "emp1", deps);
 
-    expect(first).toEqual({ replayed: 0, alreadyOnDisk: 0, failed: 1, cannotLand: 0 });
-    expect(second).toEqual({ replayed: 0, alreadyOnDisk: 0, failed: 1, cannotLand: 0 }); // still retried
+    expect(first).toEqual({ replayed: 0, alreadyOnDisk: 0, failed: 1, cannotLand: 0, lastError: "Error" });
+    expect(second).toEqual({ replayed: 0, alreadyOnDisk: 0, failed: 1, cannotLand: 0, lastError: "Error" }); // still retried
     expect(upsertSpy).toHaveBeenCalledTimes(2); // ...twice
     const logged = getRecentErrors().filter((entry) => entry.context === "answers:pending-replay-write");
     expect(logged).toHaveLength(1); // ...but logged only once
@@ -553,7 +553,7 @@ describe("replayPendingAnswers — identity-bearing items (outbox)", () => {
       loadPending: async () => [{ month: MONTH, item: answer("XR-1"), identity }],
       markSynced: noopSync(),
     });
-    expect(summary).toEqual({ replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 1 });
+    expect(summary).toEqual({ replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 1, blocked: { "folder-missing": 1 } });
     expect(upsertSpy).not.toHaveBeenCalled();
   });
 });

@@ -406,6 +406,18 @@ export const DEFAULT_LABELS = {
   ew_answers_pending_sync:         "{count} إجابة محفوظة على هذا الجهاز ولم تصل إلى مجلد العمل المشترك بعد — تُرسل تلقائيًا.",
   ew_answer_saved_locally:         "تم الحفظ على هذا الجهاز، وسيُرسل إلى مجلد العمل تلقائيًا.",
   ew_answers_send_now:             "إرسال الآن",
+  // «إرسال الآن» outcome (PendingAnswersBanner) — one line per reason answers stayed unsent.
+  ew_answers_sending:              "جارٍ الإرسال…",
+  ew_answers_send_slow:            "ما زال الإرسال جاريًا — مجلد العمل المشترك لا يستجيب. تأكد من الاتصال بالشبكة وبالمجلد المشترك.",
+  ew_answers_send_ok:              "وصلت {count} إجابة إلى مجلد العمل المشترك.",
+  ew_answers_send_busy:            "يجري الإرسال حاليًا من نافذة أخرى مفتوحة للتطبيق في هذا المتصفح. أغلق النوافذ الأخرى ثم أعد المحاولة.",
+  ew_answers_send_nothing:         "لم يُعثر على إجابات بانتظار الإرسال.",
+  ew_answers_send_failed:          "تعذّر إرسال {count} إجابة — فشلت الكتابة في مجلد العمل المشترك ({error}). تأكد من أن لديك صلاحية الكتابة على المجلد، وأبلغ المسؤول إن تكرر ذلك.",
+  ew_answers_send_blocked_month_closed:       "لم تُرسل {count} إجابة لأن الشهر مُقفل. اطلب من المسؤول إعادة فتحه.",
+  ew_answers_send_blocked_read_only:          "لم تُرسل {count} إجابة لأن التطبيق في وضع القراءة فقط.",
+  ew_answers_send_blocked_folder_missing:     "لم تُرسل {count} إجابة لأن مجلد عينات الشهر غير موجود في مجلد العمل المفتوح — تأكد من أنك اخترت مجلد العمل المشترك الصحيح.",
+  ew_answers_send_blocked_folder_unreachable: "لم تُرسل {count} إجابة لأن مجلد عينات الشهر تعذّر الوصول إليه ({error}). تأكد من صلاحية الوصول إلى المجلد المشترك.",
+  ew_answers_send_blocked_unreadable:         "لم تُرسل {count} إجابة لأن بعض ملفات الإجابات في مجلد العمل تعذّرت قراءتها. أبلغ المسؤول.",
   settings_storage_clear_blocked_unsent: "لديك إجابات لم تُرسل بعد إلى مجلد العمل. أرسلها أولًا ثم أعد المحاولة.",
   settings_timings_download:       "تنزيل سجل التوقيت",
 

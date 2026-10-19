@@ -51,9 +51,34 @@ export type PendingReplaySummary = {
    * (`AnswersUnreadableError` — see the "is it already on disk" note below).
    */
   cannotLand: number;
+  /**
+   * Why `cannotLand` items were left pending, by cause — absent when nothing
+   * was. Lets the «إرسال الآن» button say what is actually in the way instead
+   * of appearing to do nothing (an employee whose answers never land had no
+   * way to tell a closed month from a folder they cannot write to).
+   */
+  blocked?: Partial<Record<PendingReplayBlockReason, number>>;
+  /** Name of the last write/probe error behind `failed` or `folder-unreachable`. */
+  lastError?: string;
+  /** True when this pass did not run: another tab already holds the replay lock. */
+  skipped?: true;
 };
 
-const EMPTY_SUMMARY: PendingReplaySummary = { replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 0 };
+export type PendingReplayBlockReason =
+  | "month-closed"
+  | "read-only"
+  | "folder-missing"
+  | "folder-unreachable"
+  | "unreadable";
+
+function noteBlocked(summary: PendingReplaySummary, reason: PendingReplayBlockReason, count: number): void {
+  summary.cannotLand += count;
+  summary.blocked = { ...summary.blocked, [reason]: (summary.blocked?.[reason] ?? 0) + count };
+}
+
+function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : String(error);
+}
 
 /**
  * Minor (fix round 2): a per-item write error that is NOT `MonthClosedError`/
@@ -67,8 +92,7 @@ const EMPTY_SUMMARY: PendingReplaySummary = { replayed: 0, alreadyOnDisk: 0, fai
 const loggedPendingReplayWriteErrors = new Set<string>();
 
 function logPendingReplayWriteErrorOnce(month: string, xrayImageId: string, error: unknown): void {
-  const errorName = error instanceof Error ? error.name : String(error);
-  const key = `${month}::${xrayImageId}::${errorName}`;
+  const key = `${month}::${xrayImageId}::${errorName(error)}`;
   if (loggedPendingReplayWriteErrors.has(key)) return;
   loggedPendingReplayWriteErrors.add(key);
   logError("answers:pending-replay-write", error);
@@ -174,7 +198,7 @@ export async function replayPendingAnswers(
     const attempt = await withTryResourceLock(crossTabLockKey(username), () =>
       runReplayPendingAnswers(directoryHandle, username, deps)
     );
-    return attempt.ran ? attempt.result : EMPTY_SUMMARY;
+    return attempt.ran ? attempt.result : { replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 0, skipped: true };
   });
 }
 
@@ -191,18 +215,21 @@ export async function replayPendingAnswers(
  * chain), which is exactly the "does this month have anywhere to land an
  * answer at all" question.
  */
-async function sampleMainDirExists(directoryHandle: DirectoryHandleLike, month: string): Promise<boolean> {
+async function probeSampleMainDir(
+  directoryHandle: DirectoryHandleLike,
+  month: string
+): Promise<{ ok: true } | { ok: false; reason: "folder-missing" } | { ok: false; reason: "folder-unreachable"; error: unknown }> {
   try {
     await getSampleMainDir(directoryHandle, month, false);
-    return true;
+    return { ok: true };
   } catch (error) {
-    if (isNotFoundError(error)) return false;
+    if (isNotFoundError(error)) return { ok: false, reason: "folder-missing" };
     // An unexpected error resolving the folder (permission lost, transient
     // share fault that exhausted its own retries) — conservative default is
     // "cannot confirm it exists," so this month's items are left pending
     // rather than risking a write into a folder we could not actually see.
     logError("answers:pending-replay-probe", error);
-    return false;
+    return { ok: false, reason: "folder-unreachable", error };
   }
 }
 
@@ -276,14 +303,18 @@ async function landOne(
       seenOnDisk.set(seenOnDiskKey(username, month, item), item);
     } else {
       summary.failed += 1;
+      summary.lastError = result.error;
     }
   } catch (error) {
-    if (error instanceof MonthClosedError || error instanceof ReadOnlyModeError) {
+    if (error instanceof MonthClosedError) {
       // Expected, recurring, not a bug -- see PendingReplaySummary's doc.
-      summary.cannotLand += 1;
+      noteBlocked(summary, "month-closed", 1);
+    } else if (error instanceof ReadOnlyModeError) {
+      noteBlocked(summary, "read-only", 1);
     } else {
       logPendingReplayWriteErrorOnce(month, item.xrayImageId, error);
       summary.failed += 1;
+      summary.lastError = errorName(error);
     }
   }
 }
@@ -348,8 +379,10 @@ async function replayOneMonth(
     }
     if (entries.length === 0) return announce;
 
-    if (!(await sampleMainDirExists(directoryHandle, month))) {
-      summary.cannotLand += entries.length;
+    const probe = await probeSampleMainDir(directoryHandle, month);
+    if (!probe.ok) {
+      noteBlocked(summary, probe.reason, entries.length);
+      if (probe.reason === "folder-unreachable") summary.lastError = errorName(probe.error);
       return announce;
     }
 
@@ -371,7 +404,7 @@ async function replayOneMonth(
       // logging from the read path itself; logging again on every tick
       // for as long as the flakiness lasts is exactly the noise CRITICAL-1
       // (see `landOne`) exists to avoid, applied here too.
-      summary.cannotLand += legacy.length;
+      noteBlocked(summary, "unreadable", legacy.length);
       return announce;
     }
 
