@@ -107,7 +107,7 @@ global selection.
 | `sample.master.json` | `2-samples/{month}/1-main/` | Drawn sample rows and sample configuration/result metadata. Since v155.0 a draw made with high-priority ports also records `priorityPorts: string[]` and flags those ports' `portAllocations[].priority: true`; both are absent otherwise, so a draw without priority ports keeps the pre-v155.0 shape. |
 | `distribution.events/{eventId}.json` | `2-samples/{month}/1-main/` | Immutable durable assignment event envelopes. |
 | `distribution.log.json` | `2-samples/{month}/1-main/` | Backward-compatible event-log projection. |
-| `distribution.current.json` | `2-samples/{month}/1-main/` | Derived current distribution snapshot. |
+| `distribution.current.json` | `2-samples/{month}/1-main/` | Derived current distribution snapshot. Since v156.0 it is read WITHOUT the `.bak`/`.tmp` fallback (a damaged copy is a cache miss: refolded from the events and rewritten), and it is never written into a month whose `1-main/` folder is gone, so a deleted month is not recreated around it. Months are deleted from Settings → «حذف شهر» (admin; refused for a closed month; audited as `month-deleted`). |
 
 ### On-disk format: plain JSON, or head line + gzip
 

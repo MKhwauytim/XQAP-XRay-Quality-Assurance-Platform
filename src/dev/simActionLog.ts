@@ -368,6 +368,8 @@ function systemSpecs(): SimActionSpec[] {
     { actor: "admin", action: "month-closed", day: SIM_ACTION_LOG_DAY_SPAN - 2,
       details: { note: "إقفال مؤقت للمراجعة" } },
     { actor: "admin", action: "month-reopened", day: SIM_ACTION_LOG_DAY_SPAN - 1 },
+    // A deleted TEST month, not the seeded one (which must stay on disk).
+    { actor: "admin", action: "month-deleted", target: "1-January-2026", noMonth: true, details: { answers: 0 } },
   ];
   kinds.forEach((kind, i) => {
     specs.push({

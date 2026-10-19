@@ -538,6 +538,33 @@ export async function countUnsentAnswers(username?: string): Promise<number> {
 }
 
 /**
+ * Drop `username`'s still-unsent answers for `months` from this browser — for
+ * months whose folders were deleted from the workspace (a test month), whose
+ * answers can never land. Explicit and user-initiated only (the caller saves a
+ * copy first); never called by any background path. Resolves with how many
+ * records were removed; 0 on any IndexedDB failure.
+ */
+export async function discardPendingAnswers(username: string, months: readonly string[]): Promise<number> {
+  const wanted = new Set(months);
+  const doomed = (await readAllRecords()).filter(
+    (record) => !record.synced && record.username === username && wanted.has(record.month)
+  );
+  if (doomed.length === 0) return 0;
+  return withMirrorDb(
+    (db) =>
+      new Promise<number>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, "readwrite", { durability: "strict" });
+        const store = tx.objectStore(STORE_NAME);
+        for (const record of doomed) store.delete(record.key);
+        tx.oncomplete = () => resolve(doomed.length);
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      }),
+    0
+  );
+}
+
+/**
  * Is THIS exact save (same month folder, employee, item and `lastSavedAt`)
  * currently held in the pending queue? Read-only; used only to tell the
  * employee a failed save will be retried in the background. Empty/false on any

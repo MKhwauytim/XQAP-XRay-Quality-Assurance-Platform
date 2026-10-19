@@ -16,6 +16,8 @@ vi.mock("../../../../../../data/answers/answerOutbox", () => ({ flushAnswersNow:
 vi.mock("../../../../../../data/answers/usePendingAnswerCount", () => ({ usePendingAnswerCount: () => count.value }));
 vi.mock("../../../../../../data/answers/unsentAnswersFile", () => fileApi);
 vi.mock("../../../../../../utils/downloadFile", () => ({ downloadJson: download }));
+const discard = vi.hoisted(() => vi.fn(async () => 3));
+vi.mock("../../../../../../data/answers/answerLocalMirror", () => ({ discardPendingAnswers: discard }));
 
 import PendingAnswersBanner from "./PendingAnswersBanner";
 
@@ -74,5 +76,25 @@ describe("PendingAnswersBanner", () => {
     const input = container.querySelector("input[type=file]") as HTMLInputElement;
     fireEvent.change(input, { target: { files: [new File(["{}"], "x.json")] } });
     expect(await screen.findByText(L.ew_answers_import_other_user.replace("{user}", "emp2"))).toBeTruthy();
+  });
+
+  it("offers to discard answers of a month whose folder is gone, saving a copy first", async () => {
+    flush.mockResolvedValueOnce({
+      replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 3,
+      blocked: { "folder-missing": { count: 3, months: ["10-October-2026"] } },
+    });
+    render(<PendingAnswersBanner directoryHandle={{} as never} username="emp1" />);
+    fireEvent.click(screen.getByRole("button", { name: L.ew_answers_send_now }));
+
+    const label = L.ew_answers_discard_missing.replace("{months}", "10-October-2026");
+    fireEvent.click(await screen.findByRole("button", { name: label }));
+    fireEvent.click(screen.getByRole("button", { name: L.confirm_dialog_default_ok }));
+
+    expect(await screen.findByText(
+      L.ew_answers_discard_done.replace("{count}", "3").replace("{months}", "10-October-2026")
+    )).toBeTruthy();
+    expect(download).toHaveBeenCalledTimes(1); // the copy, before anything is removed
+    expect(discard).toHaveBeenCalledWith("emp1", ["10-October-2026"]);
+    expect(download.mock.invocationCallOrder[0]!).toBeLessThan(discard.mock.invocationCallOrder[0]!);
   });
 });

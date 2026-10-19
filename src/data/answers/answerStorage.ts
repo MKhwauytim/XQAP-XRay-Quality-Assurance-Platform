@@ -643,7 +643,17 @@ export async function readAllAnswerEventsForMonth(
   monthFolderName: string,
   options?: { strict?: boolean; tolerateConfirmedDead?: boolean }
 ): Promise<AnswerEvent[]> {
-  const mainDir = await getSampleMainDir(directoryHandle, monthFolderName, true);
+  // A READ never creates the month folder. It used to (`create: true`), so any
+  // view still showing a month whose folders an admin had just deleted quietly
+  // recreated an empty `2-samples/{month}/1-main/` on its next refresh. A
+  // month with no sample folder has no answer events.
+  let mainDir: DirectoryHandleLike;
+  try {
+    mainDir = await getSampleMainDir(directoryHandle, monthFolderName, false);
+  } catch (error) {
+    if (isNotFoundError(error)) return [];
+    throw error;
+  }
   try {
     const cached = getAnswerEventsCacheEntry(directoryHandle, monthFolderName);
     // `options.strict` forwards to `readEventSegmentDelta` (appendOnlyEventLog.ts),

@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v156.0",
+    "date": "2026-10-19",
+    "bucket": "fix",
+    "scope": "distribution",
+    "title": "damaged distribution.current.json rebuilds silently; deleted months stay deleted; admin delete-month tool"
+  },
+  {
     "version": "v155.0",
     "date": "2026-10-19",
     "bucket": "feature",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "statements",
     "title": "compare each port with one fixed baseline per port type (إجمالي), not the rest of its type"
-  },
-  {
-    "version": "v153.30",
-    "date": "2026-10-13",
-    "bucket": "enhancement",
-    "scope": "deck3",
-    "title": "bake the saved text template into the defaults, drop the s3 contents tail, lower «المحددات»"
   }
 ];

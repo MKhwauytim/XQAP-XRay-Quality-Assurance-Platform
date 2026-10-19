@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent, ReactElement } from "react";
 import { flushAnswersNow } from "../../../../../../data/answers/answerOutbox";
+import { discardPendingAnswers } from "../../../../../../data/answers/answerLocalMirror";
+import { ConfirmDialog } from "../../../../../ConfirmDialog/ConfirmDialog";
 import {
   exportUnsentAnswers,
   importUnsentAnswers,
@@ -39,6 +41,10 @@ export default function PendingAnswersBanner({ directoryHandle, username }: {
   const [state, setState] = useState<SendState>("idle");
   const [result, setResult] = useState<string[]>([]);
   const [offerBackup, setOfferBackup] = useState(false);
+  // Months the last send found no folder for (deleted from the workspace):
+  // their answers can never land, so the employee may discard them (after a copy).
+  const [missingMonths, setMissingMonths] = useState<string[]>([]);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const mounted = useRef(true);
   const fileInput = useRef<HTMLInputElement>(null);
   useEffect(() => () => { mounted.current = false; }, []);
@@ -58,6 +64,7 @@ export default function PendingAnswersBanner({ directoryHandle, username }: {
     const slowTimer = setTimeout(() => { if (mounted.current) setState("slow"); }, SEND_NOW_SLOW_MS);
     try {
       const summary = await flushAnswersNow(directoryHandle, username);
+      if (mounted.current) setMissingMonths(summary.blocked?.["folder-missing"]?.months ?? []);
       finish([...before, ...describeFlushResult(summary, L)], flushLeftAnswersBehind(summary));
     } catch (error) {
       logError("answers:send-now", error);
@@ -73,6 +80,25 @@ export default function PendingAnswersBanner({ directoryHandle, username }: {
       downloadJson(file, unsentAnswersFileName(username));
     } catch (error) {
       logError("answers:export-unsent", error);
+      finish([L.ew_answers_backup_failed], true);
+    }
+  };
+
+  const discardMissing = async (): Promise<void> => {
+    setConfirmDiscard(false);
+    const months = missingMonths;
+    if (months.length === 0) return;
+    setState("sending");
+    try {
+      // A copy of every unsent answer first, so a folder that was only
+      // mistaken for deleted (the wrong workspace folder open) loses nothing.
+      downloadJson(await exportUnsentAnswers(username), unsentAnswersFileName(username));
+      const discarded = await discardPendingAnswers(username, months);
+      notifyLocalDataChange(["answers"]);
+      setMissingMonths([]);
+      finish([L.ew_answers_discard_done.replace("{count}", String(discarded)).replace("{months}", months.join("، "))]);
+    } catch (error) {
+      logError("answers:discard-missing-months", error);
       finish([L.ew_answers_backup_failed], true);
     }
   };
@@ -128,6 +154,21 @@ export default function PendingAnswersBanner({ directoryHandle, username }: {
       {state === "slow" && <p>{L.ew_answers_send_slow}</p>}
       {state === "done" && result.map((line) => <p key={line}>{line}</p>)}
       {state === "done" && offerBackup && unsent > 0 && <p>{L.ew_answers_backup_hint}</p>}
+      {state === "done" && missingMonths.length > 0 && unsent > 0 && (
+        <p>
+          <button type="button" onClick={() => setConfirmDiscard(true)}>
+            {L.ew_answers_discard_missing.replace("{months}", missingMonths.join("، "))}
+          </button>
+        </p>
+      )}
+      <ConfirmDialog
+        open={confirmDiscard}
+        danger
+        title={L.ew_answers_discard_missing.replace("{months}", missingMonths.join("، "))}
+        message={<p>{L.ew_answers_discard_confirm.replace("{months}", missingMonths.join("، "))}</p>}
+        onConfirm={() => void discardMissing()}
+        onCancel={() => setConfirmDiscard(false)}
+      />
     </div>
   );
 }
