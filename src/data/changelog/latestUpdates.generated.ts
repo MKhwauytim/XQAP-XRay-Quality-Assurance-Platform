@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v159.11",
+    "date": "2026-11-01",
+    "bucket": "feature",
+    "scope": "referrals",
+    "title": "admin queue lists undistributed sample cases as «غير موزعة»"
+  },
+  {
     "version": "v159.10",
     "date": "2026-11-01",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "tracking",
     "title": "daily follow-up counts every studied case, ad-hoc imports included"
-  },
-  {
-    "version": "v159.0",
-    "date": "2026-11-01",
-    "bucket": "feature",
-    "scope": "months",
-    "title": "add cases from an Excel sheet to a month, skipping images already in the workspace"
   }
 ];

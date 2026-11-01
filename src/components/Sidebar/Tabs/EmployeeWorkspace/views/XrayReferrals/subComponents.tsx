@@ -27,6 +27,7 @@ import InspectionPanel from "../../../../../../components/InspectionPanel";
 import Pagination from "../../../../../../components/Pagination/Pagination";
 import { clampPage, pageSlice } from "../../../../../../utils/paginationUtils";
 import { useLabels, type Labels } from "../../../../../../data/labels/useLabels";
+import { isUndistributedEntry } from "./undistributedEntries";
 import { CASE_FILTERS, STUDY_FILTERS, type CaseFilter, type CaseFilterCounts, type CaseFilterState, type StudyFilter, type StudyFilterCounts } from "./caseFilter";
 import type { CertScanFilter } from "../../../../../../data/population/certScanFilter";
 import CertScanFilterChips from "../../../../../CertScanFilterChips/CertScanFilterChips";
@@ -48,7 +49,7 @@ export function buildXrayColumns(L: Labels): DataTableCol<DistributionEntry>[] {
   return [
   { id: "xrayImageId",            label: L.col_xray_image_id,             widthFr: 20, alwaysVisible: true, filterKind: "text", accessor: (e) => displayXrayImageId(e) },
   { id: "stage",                  label: L.col_stage,                     widthFr: 8,  accessor: (e) => formatStageLabel(e.row.stage) },
-  { id: "assignedTo",             label: L.col_xray_quality_expert,       widthFr: 9,  adminOnly: true,     accessor: (e) => e.assignedTo },
+  { id: "assignedTo",             label: L.col_xray_quality_expert,       widthFr: 9,  adminOnly: true,     accessor: (e) => (isUndistributedEntry(e) ? L.excel_rows_not_distributed : e.assignedTo) },
   { id: "portName",               label: L.col_port_name,                 widthFr: 13, accessor: (e) => e.row.portName },
   { id: "xrayEntryDate",          label: L.col_xray_entry_date,           widthFr: 11, isDate: true,        accessor: (e) => e.row.xrayEntryDate },
   { id: "lastEventAt",            label: L.col_distribution_date,         widthFr: 11, isDate: true,        accessor: (e) => e.lastEventAt ?? null },
@@ -935,7 +936,7 @@ export type PanelAuthoring = {
   /** The assignee whose file the answer will be filed under, when the reader is
    *  authoring for someone else; null for an ordinary self-answer. */
   onBehalfOf: string | null;
-  reason: "on-behalf" | "locked-answered" | "locked-no-permission" | null;
+  reason: "on-behalf" | "locked-answered" | "locked-no-permission" | "undistributed" | null;
 };
 
 export function resolvePanelAuthoring(input: {
@@ -948,6 +949,8 @@ export function resolvePanelAuthoring(input: {
 }): PanelAuthoring {
   const { entry, username, answersMap, canSubmitAnswers, canAnswerOnBehalf } = input;
   if (!entry) return { readonly: true, onBehalfOf: null, reason: null };
+  // A sample row nobody has been given yet: shown, never answered from here.
+  if (isUndistributedEntry(entry)) return { readonly: true, onBehalfOf: null, reason: "undistributed" };
   if (entry.assignedTo === username) {
     return { readonly: !canSubmitAnswers, onBehalfOf: null, reason: null };
   }
@@ -975,6 +978,7 @@ export function PanelAuthoringNotice({
     "on-behalf": L.ew_panel_on_behalf_notice,
     "locked-answered": L.ew_panel_locked_answered,
     "locked-no-permission": L.ew_panel_locked_no_permission,
+    undistributed: L.ew_panel_undistributed,
   }[authoring.reason];
   return (
     <p

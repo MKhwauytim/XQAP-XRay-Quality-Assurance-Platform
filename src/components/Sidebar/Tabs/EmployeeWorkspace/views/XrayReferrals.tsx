@@ -130,6 +130,7 @@ import {
 import { computePersonalStats } from "./XrayReferrals/personalStats";
 import { useCaseFilter } from "./XrayReferrals/caseFilter";
 import { MoveCasesButton } from "./XrayReferrals/MoveCasesButton";
+import { isUndistributedEntry, undistributedEntries } from "./XrayReferrals/undistributedEntries";
 import { buildAnswerStatusFilter } from "./XrayReferrals/answerStatusFilter";
 import { createQueueSelection } from "./XrayReferrals/queueSelection";
 import { useLocalSubmissionGuard } from "./XrayReferrals/localSubmissions";
@@ -1363,8 +1364,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         // distinct color instead (see rowStatusClass below, wired into
         // getRowClassName in the render). Only the assignedTo/canSeeAll scoping
         // remains a real filter.
+        // Oversight also sees the month's undistributed sample rows («غير موزعة»).
+        const shown = canSeeAll ? [...all, ...undistributedEntries(sample, all)] : all;
         setAllEntries(all);
-        setEntries(canSeeAll ? all : all.filter((e) => e.assignedTo === username));
+        setEntries(canSeeAll ? shown : all.filter((e) => e.assignedTo === username));
         setPendingReferralIds(pendingReferralIds);
         setPendingReplacementIds(pendingReplacementIds);
         setSampleMaster(sample);
@@ -1809,7 +1812,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         // can never be reassigned — counting it, or feeding it to the dialog only
         // for the planner to drop it again, is what made these buttons look broken.
         const selectableVisibleIds = filteredTableEntries
-          .filter(isReassignEligible)
+          .filter((e) => isReassignEligible(e) && !isUndistributedEntry(e))
           .map((e) => e.xrayImageId);
         // Selected ids are kept across filter changes and silent refreshes on
         // purpose (cross-page selection), so they are re-checked against the
@@ -1817,7 +1820,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         // dropped from the month must not be counted or submitted.
         const eligibleSelectedIds = [...selectedIds].filter((id) => {
           const entry = entriesById.get(id);
-          return entry !== undefined && isReassignEligible(entry);
+          return entry !== undefined && isReassignEligible(entry) && !isUndistributedEntry(entry);
         });
         // Bug fix: SELECT_COL_ID is `alwaysVisible: true`, but DataTable's own
         // default-column-config builder (used whenever no saved preset exists yet —
