@@ -48,6 +48,7 @@ Constraints from CLAUDE.md: every figure traceable to real data fields; one sour
 9. Theme-locked styling: the inspector offers deck3 tones and type steps only.
 10. Export: self-contained HTML deck (with a param picker, or one file per selected param value); XLSX with one sheet per bound table/chart.
 11. Starter templates: deck3 and the port business report ship as built-in, copyable v2 designs.
+12. Analysis features required by the acceptance test (§5.1): named ratio measures, binding scope (param / all / fixed), derived datasets, named thresholds, ranking mode, `lineChart` / `tierHistogram` / `kvTable` / `statStack` blocks, statistics placeholders (mean, median, rank), table auto-pagination, show-if-not-empty, cross-dataset join on a shared key.
 
 Out of scope: .pptx export, free hex colours, custom formulas, multi-user live co-editing.
 
@@ -134,7 +135,53 @@ Rollback: renaming `.v1.json` back restores a design; v2 code reads v1 through t
 
 **deck3:** a template with a `month` param, bound to app datasets (population, sample, answers). Slides become pages. Cover/contents/closing become `pageFrame`; KPI rows become `kpiBand`; القسم 3 analytics become `qualityMatrix`, `groupedBarChart`, `tintedPanel(land|sea)`; observation pages become `observationsTable`; statements become `richText` with `textTemplates` snippets. Parity: render the template and the code deck from the same synthetic month (`deck-preview.html`) and diff text and figures per slide. The code deck stays the live default until parity passes.
 
-**Port business report:** a template with `port` (and `year`) params on an Excel dataset mapped from the export (port name, image id, dates, risk level, …). Each current page's sections become blocks; the population yearly comparison uses a streamed population dataset. Parity is checked the same way against `scripts/export-port-report-static.mjs` output.
+**Port business report:** the reference acceptance test, §5.1.
+
+### 5.1 Acceptance test: rebuild the Jeddah port business report by hand
+
+**Owner's acceptance bar:** the owner can rebuild the port business report (`src/data/reporting/portReport/`, branch `claude/jeddah-port-report-ed0ba9`) exactly, by hand, inside the app. The only real effort is pointing the engine at the data, meaning uploading the study export and the population sheets and confirming the column mapping. Layout, tables, charts and text all come from built-in features. No report-specific code is allowed: if a slide needs code, the engine is not done.
+
+**Datasets** (all Excel, mapped once and the mapping saved with the template):
+- `studies`: study rows (port, port type, employee code/name, level 1/2, status, image date).
+- `population`: population sheets, streamed (port, port type, year, suspicion flag).
+
+**Parameter:** `port` on `studies.port`. Every binding filters on `{param: "port"}` unless it is marked **"all ports"** scope.
+
+| # | Slide (today's code) | Recreated with |
+|---|---|---|
+| 1 | Cover (`coverSlide`) | `pageFrame:cover`; title `richText` with `{{param:port}}`; org block from `src/branding/` |
+| 2 | Glossary (`glossarySlide`) | `pageFrame:glossary`; groups typed as static text |
+| 3 | Section 1 divider (`sectionDivider`, ghost "01") | `pageFrame:sectionDivider` (kicker, title, ghost number as config) |
+| 4 | Population by port type: per-type tinted panels with tables, plus the selected port's panel | `tintedPanel` per type, each holding a `dataTable` bound to `population` grouped by port type (count, suspicion count, suspicion rate); the variant follows the group value (land/sea/all); note `richText` with total and rate placeholders |
+| 5 | Population vs sample by year: grouped bar chart + year table | `groupedBarChart` with two series (population count, studied count) by `year`, joined across two datasets on `year`; `dataTable` by year with outcome columns and a totals row |
+| 6 | Section 2 divider | `pageFrame:sectionDivider` |
+| 7 | Study results: bar chart + table by port type | `barChart` of outcome-status counts; `dataTable` grouped by port type with outcome columns |
+| 8 | Agreement ranking: the port vs all ports, "rank N of M" | `barChart` in **ranking mode**: all-ports scope, grouped by port, measure = agreement rate, sorted desc, the bar equal to `{param:port}` highlighted gold; note uses `{{rank:port}}` / `{{count:ports}}` |
+| 9 | Monthly timeline (inline SVG line chart) | new **`lineChart` block**: x = month of image date, one series per port type plus the selected port (gold, on top) plus all ports (dashed); a point with fewer than the min-sample threshold renders as a gap; year labels under the months |
+| 10 | Level 1 vs level 2 comparison: two tinted panels | two `tintedPanel`+`dataTable` grouped by level; the left panel uses param scope, the right panel all-ports scope |
+| 11 | Section 3 divider | `pageFrame:sectionDivider` with `{{param:port}}` in the title |
+| 12 | Employee accuracy tiers: one histogram per tier plus a stats table; mean/median in the note | **derived dataset** `employees` (studies grouped by employee code: studied, matched, accuracy = matched/studied, filtered to studied ≥ 30); new **`tierHistogram` block** (3 equal-width tiers over min–max, 3 bins per tier, one chart per tier); `kvTable` block for tier from/to/count/mean accuracy/mean studied; note uses `{{median:employees.accuracy}}` and `{{mean:…}}` |
+| 13 | Staff vs land/sea ports: grouped bars + table | `groupedBarChart` of level 1/2 agreement for this port vs port-type scopes; `dataTable` with a group-start divider column |
+| 14+ | Paged employee tables, ranked by accuracy | `dataTable` bound to `employees`, sorted accuracy desc, then studied desc, then code; **auto-paginate**: overflow rows repeat the page onto continuation pages (fixed rows per page, repeated header); cell tones per column (gold/navy/red/green) |
+| A | Appendix divider + table of employees under the threshold | `pageFrame:sectionDivider` + paged `dataTable` on `employees` filtered studied < 30; both carry a **show-if-not-empty** rule |
+| Z | Closing (`orgBlockHtml`, footer hidden) | `pageFrame:closing` |
+
+**Engine capabilities this test forces** (folded into §3 and §6):
+1. **Ratio measures:** `agreementRate = count(status ∈ matched) / count(studied)`, defined once per dataset as a named measure; the status values map from the dictionary (today's `STATUS_*` constants).
+2. **Binding scope:** param-scoped (default), all-ports, or one fixed group value. Needed for every "this port vs all ports" panel.
+3. **Derived datasets:** group-by + measures + filter producing a new row set (`employees`), usable by any block.
+4. **Thresholds as named template constants** (min sample = 30), referenced by filters, gaps and text. One source.
+5. **Ranking mode** for bar charts: sort, highlight the param value, `{{rank}}` placeholder.
+6. **New blocks:** `lineChart` (gap-aware, multi-series, dashed reference series), `tierHistogram`, `kvTable`, `statStack`.
+7. **Statistics placeholders:** mean, median, count, rank.
+8. **Auto-pagination** of long tables onto continuation pages; **show-if-not-empty** for pages and blocks.
+9. **Cross-dataset join on a shared key** (year) for population vs sample.
+
+**Pass criteria:**
+- The owner (or a test following the same click steps, recorded as a jsdom/e2e script) builds the template from an empty design using only editor features.
+- With the Jeddah data, the rendered deck matches `scripts/export-port-report-static.mjs` output slide by slide: the same figures to the displayed precision, the same page count, and the same order.
+- Switching `port` re-scopes every slide correctly.
+- Layout may differ by sub-grid pixel amounts, but no figure may differ.
 
 ## 6. Phased roadmap
 
@@ -142,7 +189,8 @@ Rollback: renaming `.v1.json` back restores a design; v2 code reads v1 through t
 |---|---|---|
 | P1 | `blockRegistry` + deck3-kit renderers on the canvas; schema v2 types; v1→v2 migration with archive | 3 |
 | P2 | Datasets: app sources and Excel upload, dictionary auto-mapping, saved mapping profile, streaming worker | 3 |
-| P3 | Parameters and picker; port report as a starter template with parity diff | 2 |
+| P3 | Parameters and picker; ratio measures, binding scope, derived datasets, thresholds, ranking, statistics placeholders, join | 3 |
+| P3b | New blocks (`lineChart`, `tierHistogram`, `kvTable`, `statStack`), auto-pagination, show-if-not-empty; **acceptance test §5.1 passes** (port report rebuilt by hand, figure parity) | 2 |
 | P4 | Snap/guides toggle, align/distribute, multi-select, undo/redo polish | 2 |
 | P5 | deck3 as a starter template with per-slide parity diff | 2 |
 | P6 | HTML export with baked params; XLSX export with provenance | 2 (+ `check:bundle-size`) |
