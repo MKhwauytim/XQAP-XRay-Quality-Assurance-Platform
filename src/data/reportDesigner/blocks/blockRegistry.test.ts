@@ -38,4 +38,21 @@ describe("block registry", () => {
     expect(renderBlock(el("legacyChart", { original: { kind: "text", text: "" } }))).toContain(getLabels().rd_block_legacyChart);
     expect(listBlocks().map((b) => b.type)).not.toContain("legacyChart");
   });
+
+  it("escapes table cell text and allowlists tones", () => {
+    const html = renderBlock(el("dataTable", { headers: ["h"], rows: [[{ text: "<img onerror=x>", tone: "red" }, { text: "b", tone: "x\"y" as never }]] }));
+    expect(html).toContain("&lt;img onerror=x&gt;");
+    expect(html).not.toContain("<img");
+    expect(html).toContain('class="v-red"');
+    expect(html).not.toContain("x\"y");
+  });
+  it("falls back on a hostile kpiBand variant", () => {
+    const html = renderBlock(el("kpiBand", { cells: [], variant: '"><script>' as never }));
+    expect(html).not.toContain("<script");
+    expect(html).toContain("v3-kpi-band solo");
+  });
+  it("falls back on a non-finite chart max", () => {
+    const html = renderBlock(el("barChart", { bars: [{ label: "a", value: 50 }], min: 0, max: NaN }));
+    expect(html).not.toContain("NaN");
+  });
 });

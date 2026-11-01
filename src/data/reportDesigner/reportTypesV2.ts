@@ -1,5 +1,5 @@
 import type { ChartBar, ChartTone, groupedBarChart } from "../reporting/executive/deck3/chartKit";
-import type { KpiCell, TableCell } from "../reporting/executive/deck3/slideKit";
+import type { KpiCell } from "../reporting/executive/deck3/slideKit";
 import { createEmptyDocument } from "./reportTypes";
 import type { ElementConfig, Page, PageSizePreset, ReportDocument } from "./reportTypes";
 
@@ -9,10 +9,13 @@ export type BlockType =
   | "kpiBand" | "tintedPanel" | "dataTable" | "barChart" | "groupedBarChart"
   | "sectionHeader" | "divider" | "line" | "richText" | "image" | "legacyChart";
 
+/** Plain-text table cell: the block escapes `text` and maps `tone` through an allowlist. */
+export type TextCell = { text: string; tone?: "navy" | "gold" | "green" | "red" | "muted" };
+
 export type BlockConfigMap = {
   kpiBand: { cells: KpiCell[]; variant: "top" | "bottom" | "solo"; compact?: boolean };
   tintedPanel: { variant: "land" | "sea" | "all"; title: string; note?: string; childIds: string[] };
-  dataTable: { headers: string[]; rows: TableCell[][]; totals?: TableCell[] };
+  dataTable: { headers: string[]; rows: TextCell[][]; totals?: TextCell[] };
   barChart: { bars: ChartBar[]; min: number; max: number };
   groupedBarChart: Parameters<typeof groupedBarChart>[0];
   sectionHeader: { eyebrow: string; title: string; note?: string };
