@@ -129,6 +129,7 @@ import {
 } from "./XrayReferrals/columnPreset";
 import { computePersonalStats } from "./XrayReferrals/personalStats";
 import { useCaseFilter } from "./XrayReferrals/caseFilter";
+import { MoveCasesButton } from "./XrayReferrals/MoveCasesButton";
 import { buildAnswerStatusFilter } from "./XrayReferrals/answerStatusFilter";
 import { createQueueSelection } from "./XrayReferrals/queueSelection";
 import { useLocalSubmissionGuard } from "./XrayReferrals/localSubmissions";
@@ -1895,13 +1896,25 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               // stays oversight-only, as before.
               toolbarStart={<CaseFilterBar state={caseFilter} />}
               toolbarEndExtra={
-                <XrQueueToolbarExtras
-                  canSeeAll={canSeeAll}
-                  scopeEmployee={scopeEmployee}
-                  scopeOptions={scopeOptions}
-                  totalCount={entries.length}
-                  onChangeScope={setScopeEmployee}
-                />
+                <>
+                  <XrQueueToolbarExtras
+                    canSeeAll={canSeeAll}
+                    scopeEmployee={scopeEmployee}
+                    scopeOptions={scopeOptions}
+                    totalCount={entries.length}
+                    onChangeScope={setScopeEmployee}
+                  />
+                  <MoveCasesButton
+                    directoryHandle={directoryHandle}
+                    month={selMonth}
+                    caseFilter={caseFilter.value}
+                    entries={filteredTableEntries}
+                    isStudied={isStudied}
+                    username={username}
+                    role={role}
+                    onDone={() => { void loadData(); }}
+                  />
+                </>
               }
             />
             {/* Second grid column: the sticky panel and the empty-state placeholder both live in this one placed track. */}

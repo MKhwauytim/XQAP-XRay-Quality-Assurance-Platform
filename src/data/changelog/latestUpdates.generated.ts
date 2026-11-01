@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v159.8",
+    "date": "2026-11-01",
+    "bucket": "feature",
+    "scope": "referrals",
+    "title": "admin bulk move of the shown unstudied cases between index and exceptional"
+  },
+  {
     "version": "v159.7",
     "date": "2026-11-01",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "import",
     "title": "operator workbook support and full-column corrections export"
-  },
-  {
-    "version": "v157.0",
-    "date": "2026-11-01",
-    "bucket": "feature",
-    "scope": "months",
-    "title": "merge a month or an ad-hoc sample into another month"
   }
 ];

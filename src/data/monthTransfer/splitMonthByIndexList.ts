@@ -68,6 +68,28 @@ export type SplitPlanResult =
   | { ok: false; reason: "month-closed" | "no-sample" };
 
 /**
+ * Studied = completed, or any answer (a draft too) in the store; assigned =
+ * any live entry. Shared by the split and by the queue's bulk move.
+ */
+export async function studiedAndAssigned(
+  directoryHandle: DirectoryHandleLike,
+  folder: string,
+  rows: PreparedPopulationRow[]
+): Promise<{ studied: Set<string>; assigned: Set<string> }> {
+  const studied = new Set<string>();
+  const assigned = new Set<string>();
+  const current = await loadOrDeriveDistributionCurrent(directoryHandle, folder, rows);
+  for (const entry of current?.entries ?? []) {
+    if (entry.status === "completed") studied.add(entry.xrayImageId);
+    if (entry.status !== "replaced") assigned.add(entry.xrayImageId);
+  }
+  for (const file of await loadAllEmployeeFiles(directoryHandle, folder)) {
+    for (const item of file.items) studied.add(item.xrayImageId);
+  }
+  return { studied, assigned };
+}
+
+/**
  * `listIds: null` is restore-only: no file, nothing moves, and only the
  * earlier split's cases are given back to their employees. The owner has no
  * Excel to re-upload for that, since the cases came from the system itself.
@@ -82,17 +104,7 @@ export async function planSplitMonth(
   const sample = await loadSampleMaster(directoryHandle, month);
   if (!sample) return { ok: false, reason: "no-sample" };
   const rows = liveSampleRows(sample);
-
-  const studied = new Set<string>();
-  const assigned = new Set<string>();
-  const current = await loadOrDeriveDistributionCurrent(directoryHandle, month, rows);
-  for (const entry of current?.entries ?? []) {
-    if (entry.status === "completed") studied.add(entry.xrayImageId);
-    if (entry.status !== "replaced") assigned.add(entry.xrayImageId);
-  }
-  for (const file of await loadAllEmployeeFiles(directoryHandle, month)) {
-    for (const item of file.items) studied.add(item.xrayImageId);
-  }
+  const { studied, assigned } = await studiedAndAssigned(directoryHandle, month, rows);
 
   const listed = new Set((listIds ?? []).map((id) => id.trim()).filter(Boolean));
   const plan: SplitPlan = { month, keptStudied: [], keptListed: [], moved: [], movedAssigned: 0, listNotInMonth: [], restorable: 0 };
@@ -143,7 +155,8 @@ async function splitRecords(directoryHandle: DirectoryHandleLike, month: string)
 async function alreadyMovedIds(directoryHandle: DirectoryHandleLike, month: string): Promise<Set<string>> {
   const ids = new Set<string>();
   for (const record of await splitRecords(directoryHandle, month)) {
-    for (const row of record.rows) if (row.mapped.xrayImageId) ids.add(row.mapped.xrayImageId);
+    // An excluded row was moved back to the index; it may be moved out again.
+    for (const row of record.rows) if (row.mapped.xrayImageId && !row.excludedByAdmin) ids.add(row.mapped.xrayImageId);
   }
   return ids;
 }
@@ -225,6 +238,26 @@ export async function executeSplitMonth(
       if (back.restored > 0) bumpWorkspaceEpoch(directoryHandle, month);
       return { ok: true, plan, importId: null, moved: 0, ...back };
     }
+    const moved = await moveRowsToExceptional(directoryHandle, month, plan.moved, actor, now);
+    return { ok: true, plan, moved: plan.moved.length, ...moved };
+  } catch (error) {
+    return { ok: false, reason: "write-failed", error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * Steps 1–5 of the module header for an already-chosen set of the month's
+ * unstudied rows. Throws on a lost write race; the caller reports it.
+ */
+export async function moveRowsToExceptional(
+  directoryHandle: DirectoryHandleLike,
+  month: string,
+  movedRows: readonly PreparedPopulationRow[],
+  actor: string,
+  now: Date = new Date()
+): Promise<{ importId: string | null; restored: number; unrestored: number }> {
+  const plan = { moved: movedRows };
+  {
     // 1. The exceptional cases, first — the month is only rewritten once they exist.
     const done = await alreadyMovedIds(directoryHandle, month);
     const fresh = plan.moved.filter((row) => !done.has(row.xrayImageId));
@@ -278,15 +311,13 @@ export async function executeSplitMonth(
       },
       { context: "month:split-by-index-list", conflictError: "تعارض في الكتابة أثناء تحديث عينة الشهر." }
     );
-    if (!result.ok) return { ok: false, reason: "write-failed", error: result.error };
+    if (!result.ok) throw new Error(result.error);
 
     // 4. Refold so the moved rows leave every view of the month.
     await refreshDistributionCacheAfterWrite(directoryHandle, month, result.rows);
     // 5. Same employee, now as an exceptional case.
     const back = await restoreAssignments(directoryHandle, month, actor);
     bumpWorkspaceEpoch(directoryHandle, month);
-    return { ok: true, plan, importId, moved: plan.moved.length, ...back };
-  } catch (error) {
-    return { ok: false, reason: "write-failed", error: error instanceof Error ? error.message : String(error) };
+    return { importId, ...back };
   }
 }
