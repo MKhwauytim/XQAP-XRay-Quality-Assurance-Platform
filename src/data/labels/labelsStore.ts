@@ -1707,6 +1707,8 @@ export const DEFAULT_LABELS = {
   merge_month_failed:               "توقف الدمج ولم يُحذف المصدر. يمكن إعادة المحاولة بأمان وستُكمل من حيث توقفت: {error}",
   merge_month_check_failed:         "تعذّرت المعاينة: {error}",
   merge_month_progress:             "جارٍ الدمج — {phase}: {done} من {total}",
+  merge_month_all_adhoc_option:     "كل العينات الاستثنائية ({count})",
+  merge_month_progress_step:        "المصدر {index} من {count}",
   merge_month_progress_keep_open:   "أبقِ هذه الصفحة مفتوحة حتى ينتهي. لو أُغلقت، أعد الدمج وسيُكمل من حيث توقف.",
   merge_month_phase_plan:           "قراءة الشهرين",
   merge_month_phase_rows:           "نقل حالات العينة",

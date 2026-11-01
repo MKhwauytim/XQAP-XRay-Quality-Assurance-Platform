@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v158.1",
+    "date": "2026-11-01",
+    "bucket": "enhancement",
+    "scope": "months",
+    "title": "merge progress, ad-hoc rows join target population, merge all ad-hoc imports at once"
+  },
+  {
     "version": "v158.0",
     "date": "2026-11-01",
     "bucket": "feature",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "answers",
     "title": "«قيد الحفظ» badge for outbox answers not yet on the share; pending overlay + banner for every role"
-  },
-  {
-    "version": "v154.0",
-    "date": "2026-10-14",
-    "bucket": "feature",
-    "scope": "answers",
-    "title": "per-assignee answer folders, admin-offered migration with archived originals, automatic compaction (v154.0)"
   }
 ];

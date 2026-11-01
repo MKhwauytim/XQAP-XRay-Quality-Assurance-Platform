@@ -40,6 +40,9 @@ const REFUSAL_LABEL: Record<MonthTransferRefusal, LabelKey> = {
 
 const PREVIEW_IDS = 20;
 
+/** Source value meaning "every ad-hoc import, one after another, into the target". */
+const ALL_ADHOC = "__all-adhoc__";
+
 const PHASE_LABEL: Record<MonthTransferPhase, LabelKey> = {
   plan: "merge_month_phase_plan",
   rows: "merge_month_phase_rows",
@@ -64,7 +67,9 @@ export function MergeMonthSection() {
   const [targets, setTargets] = useState<string[]>([]);
   const [source, setSource] = useState("");
   const [target, setTarget] = useState("");
-  const [plan, setPlan] = useState<MonthTransferPlan | null>(null);
+  const [plans, setPlans] = useState<MonthTransferPlan[] | null>(null);
+  const [adhocSources, setAdhocSources] = useState<string[]>([]);
+  const [step, setStep] = useState<{ index: number; count: number } | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -79,7 +84,9 @@ export function MergeMonthSection() {
         if (cancelled) return;
         const monthNames = months.map((entry) => entry.folderName);
         setTargets(monthNames);
+        setAdhocSources(adhoc.map((entry) => `adhoc-${entry.importId}`));
         setSources([
+          ...(adhoc.length > 1 ? [{ value: ALL_ADHOC, label: fill(L.merge_month_all_adhoc_option, { count: adhoc.length }) }] : []),
           ...monthNames.map((name) => ({ value: name, label: name })),
           ...adhoc.map((entry) => ({
             value: `adhoc-${entry.importId}`,
@@ -92,12 +99,12 @@ export function MergeMonthSection() {
         if (!cancelled) setNotice({ kind: "error", text: fill(L.delete_month_list_failed, { error: errorText(error) }) });
       });
     return () => { cancelled = true; };
-  }, [isOpen, canMerge, directoryHandle, listTick, L.delete_month_list_failed, L.merge_month_adhoc_option]);
+  }, [isOpen, canMerge, directoryHandle, listTick, L.delete_month_list_failed, L.merge_month_adhoc_option, L.merge_month_all_adhoc_option]);
 
   if (!canMerge) return null;
 
   function reset(): void {
-    setPlan(null);
+    setPlans(null);
     setNotice(null);
   }
 
@@ -106,9 +113,18 @@ export function MergeMonthSection() {
     setBusy(true);
     reset();
     try {
-      const result = await planMonthTransfer(directoryHandle, source, target);
-      if (!result.ok) setNotice({ kind: "error", text: L[REFUSAL_LABEL[result.reason]] });
-      else setPlan(result.plan);
+      const found: MonthTransferPlan[] = [];
+      for (const sourceMonth of source === ALL_ADHOC ? adhocSources : [source]) {
+        const result = await planMonthTransfer(directoryHandle, sourceMonth, target);
+        // An empty ad-hoc store is skipped in the all-imports run, not fatal.
+        if (!result.ok && source === ALL_ADHOC && result.reason === "source-empty") continue;
+        if (!result.ok) {
+          setNotice({ kind: "error", text: L[REFUSAL_LABEL[result.reason]] });
+          return;
+        }
+        found.push(result.plan);
+      }
+      setPlans(found);
     } catch (error) {
       logError("settings:merge-month-plan", error);
       setNotice({ kind: "error", text: fill(L.merge_month_check_failed, { error: errorText(error) }) });
@@ -119,30 +135,37 @@ export function MergeMonthSection() {
 
   async function merge(): Promise<void> {
     setConfirming(false);
-    if (!directoryHandle || !plan || !canMerge) return;
+    if (!directoryHandle || !plans || plans.length === 0 || !canMerge) return;
     setBusy(true);
     setNotice(null);
+    let rows = 0;
+    let answers = 0;
+    const archives: string[] = [];
     try {
-      const result = await executeMonthTransfer(directoryHandle, plan.sourceMonth, plan.targetMonth, username, setProgress);
-      if (!result.ok) {
-        const text = result.reason === "write-failed"
-          ? fill(L.merge_month_failed, { error: result.error })
-          : L[REFUSAL_LABEL[result.reason]];
-        setNotice({ kind: "error", text });
-        return;
+      for (const [index, plan] of plans.entries()) {
+        setStep({ index: index + 1, count: plans.length });
+        const result = await executeMonthTransfer(directoryHandle, plan.sourceMonth, plan.targetMonth, username, setProgress);
+        if (!result.ok) {
+          const text = result.reason === "write-failed"
+            ? fill(L.merge_month_failed, { error: result.error })
+            : L[REFUSAL_LABEL[result.reason]];
+          setNotice({ kind: "error", text });
+          return;
+        }
+        recordAction(directoryHandle, username, role, "month-merged", {
+          monthFolderName: plan.targetMonth,
+          target: plan.sourceMonth,
+          details: { rows: result.movedRows, answers: result.movedAnswers, duplicates: result.duplicates.length, archive: result.archiveName },
+        });
+        rows += result.movedRows;
+        answers += result.movedAnswers;
+        archives.push(result.archiveName);
       }
-      recordAction(directoryHandle, username, role, "month-merged", {
-        monthFolderName: plan.targetMonth,
-        target: plan.sourceMonth,
-        details: { rows: result.movedRows, answers: result.movedAnswers, duplicates: result.duplicates.length, archive: result.archiveName },
-      });
-      notifyLocalDataChange(["manifest"]);
-      broadcastDataRefresh("manual");
       setNotice({
         kind: "ok",
-        text: fill(L.merge_month_done, { rows: result.movedRows, answers: result.movedAnswers, target: plan.targetMonth, archive: result.archiveName }),
+        text: fill(L.merge_month_done, { rows, answers, target: plans[0].targetMonth, archive: archives.join("، ") }),
       });
-      setPlan(null);
+      setPlans(null);
       setSource("");
       setListTick((tick) => tick + 1);
     } catch (error) {
@@ -151,10 +174,25 @@ export function MergeMonthSection() {
     } finally {
       setBusy(false);
       setProgress(null);
+      setStep(null);
+      // Even a partial all-imports run moved something: every view re-reads.
+      notifyLocalDataChange(["manifest"]);
+      broadcastDataRefresh("manual");
     }
   }
 
-  const sourceLabel = sources.find((entry) => entry.value === plan?.sourceMonth)?.label ?? plan?.sourceMonth ?? "";
+  const sourceLabel = sources.find((entry) => entry.value === source)?.label ?? source;
+  const plan = plans && plans.length > 0
+    ? {
+        rows: plans.reduce((n, p) => n + p.rows.length, 0),
+        events: plans.reduce((n, p) => n + p.events.length, 0),
+        answers: plans.reduce((n, p) => n + p.answerCount, 0),
+        population: plans.reduce((n, p) => n + p.populationRows.length, 0),
+        duplicates: plans.flatMap((p) => p.duplicates),
+        pendingRequestCount: plans.reduce((n, p) => n + p.pendingRequestCount, 0),
+        targetMonth: plans[0].targetMonth,
+      }
+    : null;
 
   return (
     <section className="template-repair-section" dir="rtl">
@@ -195,10 +233,10 @@ export function MergeMonthSection() {
           {plan && (
             <div className="template-repair-controls">
               <p>{fill(L.merge_month_preview, {
-                rows: plan.rows.length,
-                events: plan.events.length,
-                answers: plan.answerCount,
-                population: plan.populationRows.length,
+                rows: plan.rows,
+                events: plan.events,
+                answers: plan.answers,
+                population: plan.population,
               })}</p>
               {plan.duplicates.length > 0 && (
                 <p className="template-repair-notice template-repair-notice-info" role="status">
@@ -221,6 +259,7 @@ export function MergeMonthSection() {
 
           {progress && (
             <div className="template-repair-notice template-repair-notice-info" role="status" aria-live="polite">
+              {step && step.count > 1 && <p>{fill(L.merge_month_progress_step, { index: step.index, count: step.count })}</p>}
               <p>{fill(L.merge_month_progress, {
                 phase: L[PHASE_LABEL[progress.phase]],
                 done: progress.done.toLocaleString("ar-SA-u-nu-latn"),

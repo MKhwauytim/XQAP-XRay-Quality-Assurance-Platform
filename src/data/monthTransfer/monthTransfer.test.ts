@@ -140,7 +140,7 @@ describe("month transfer", () => {
     __resetAnswerEventsCacheForTests();
 
     const result = await executeMonthTransfer(root, ADHOC, TARGET, "admin");
-    expect(result).toMatchObject({ ok: true, movedRows: 1, movedAnswers: 1, movedPopulationRows: 0 });
+    expect(result).toMatchObject({ ok: true, movedRows: 1, movedAnswers: 1, movedPopulationRows: 1 });
     expect((await loadSampleMaster(root, TARGET))?.rows.map((r) => r.xrayImageId)).toContain("ADHOC-imp1-X1");
     __resetAnswerEventsCacheForTests();
     expect((await loadEmployeeAnswers(root, TARGET, "emp2")).items).toHaveLength(1);

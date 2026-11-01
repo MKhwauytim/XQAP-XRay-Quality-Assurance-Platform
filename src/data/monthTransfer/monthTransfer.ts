@@ -143,7 +143,12 @@ export async function planMonthTransfer(
       answers,
       answerCount: answers.reduce((sum, entry) => sum + entry.items.length, 0),
       sourceAnswerCount: sourceFiles.reduce((sum, file) => sum + file.items.length, 0),
-      populationRows: sourcePopulation?.rows ?? [],
+      // An ad-hoc import has no population of its own: its moved sample rows
+      // join the target's population too, so they count in the month's
+      // population totals (owner request 2026-11-01).
+      populationRows: isAdhocMonthFolder(sourceMonth)
+        ? (rows as unknown as Array<Record<string, unknown>>)
+        : sourcePopulation?.rows ?? [],
       pendingRequestCount,
     },
   };
