@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_LABELS } from "../../labels/labelsStore";
+import { DEFAULT_LABELS, getLabels } from "../../labels/labelsStore";
 import { kpiBand } from "../../reporting/executive/deck3/slideKit";
 import type { AnyBlockElement, BlockType } from "../reportTypesV2";
 import { getBlock, listBlocks, renderBlock } from "./blockRegistry";
@@ -35,6 +35,7 @@ describe("block registry", () => {
   });
   it("legacyChart is a placeholder and not listed", () => {
     expect(renderBlock(el("legacyChart", { original: { kind: "text", text: "" } }))).toContain('data-legacy="1"');
+    expect(renderBlock(el("legacyChart", { original: { kind: "text", text: "" } }))).toContain(getLabels().rd_block_legacyChart);
     expect(listBlocks().map((b) => b.type)).not.toContain("legacyChart");
   });
 });

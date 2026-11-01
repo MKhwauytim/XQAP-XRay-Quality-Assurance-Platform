@@ -1,7 +1,10 @@
+import { getLabels } from "../../labels/labelsStore";
 import { esc } from "../../reporting/executive/primitives";
 import { barChart, groupedBarChart } from "../../reporting/executive/deck3/chartKit";
 import { contentHead, dataTable, kpiBand, tintedPanel } from "../../reporting/executive/deck3/slideKit";
 import type { BlockConfigMap, BlockType } from "../reportTypesV2";
+
+const RULE_THICKNESS_PX = 2;
 
 export type RenderCtx = { childHtml?: (ids: string[]) => string };
 
@@ -50,12 +53,12 @@ export const BLOCK_DEFINITIONS: BlockDefinitions = {
   divider: {
     type: "divider", labelKey: "rd_block_divider", defaultSize: { w: 12, h: 1 }, bindingShape: "static",
     defaultConfig: () => ({ tone: "navy" }),
-    render: (c) => `<div class="v3-tone-${esc(c.tone)}" style="height:2px;width:100%"></div>`,
+    render: (c) => `<div class="v3-tone-${esc(c.tone)}" style="height:${RULE_THICKNESS_PX}px;width:100%"></div>`,
   },
   line: {
     type: "line", labelKey: "rd_block_line", defaultSize: { w: 12, h: 1 }, bindingShape: "static",
     defaultConfig: () => ({ tone: "navy", orientation: "h" }),
-    render: (c) => `<div class="v3-tone-${esc(c.tone)}" style="${c.orientation === "h" ? "height:2px;width:100%" : "width:2px;height:100%"}"></div>`,
+    render: (c) => `<div class="v3-tone-${esc(c.tone)}" style="${c.orientation === "h" ? `height:${RULE_THICKNESS_PX}px;width:100%` : `width:${RULE_THICKNESS_PX}px;height:100%`}"></div>`,
   },
   richText: {
     type: "richText", labelKey: "rd_block_richText", defaultSize: { w: 6, h: 6 }, bindingShape: "static",
@@ -70,6 +73,6 @@ export const BLOCK_DEFINITIONS: BlockDefinitions = {
   legacyChart: {
     type: "legacyChart", labelKey: "rd_block_legacyChart", defaultSize: { w: 6, h: 12 }, bindingShape: "static",
     defaultConfig: () => ({ original: { kind: "text", text: "" } }),
-    render: () => `<div class="rd-element-placeholder" data-legacy="1">${esc("عنصر قديم")}</div>`,
+    render: () => `<div class="rd-element-placeholder" data-legacy="1">${esc(getLabels().rd_block_legacyChart)}</div>`,
   },
 };
