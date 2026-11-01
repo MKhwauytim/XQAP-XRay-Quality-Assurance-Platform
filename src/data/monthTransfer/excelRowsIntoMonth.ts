@@ -23,7 +23,7 @@ import { originalXrayImageIdAnyImport, type AdhocRow } from "../adhocImport/adho
 import { listDirectoryEntries } from "../storage/directoryScan";
 import { isNotFoundError } from "../storage/transientFileErrors";
 import { getSamplesRoot } from "../workspace/workspacePaths";
-import { refreshDistributionCacheAfterWrite } from "../distribution/distributionStorage";
+import { loadOrDeriveDistributionCurrent, refreshDistributionCacheAfterWrite } from "../distribution/distributionStorage";
 import { invalidateMonthLockCache, isMonthClosed } from "../population/monthLock";
 import { appendPopulationFinalRows, listMonthFolders, loadMonthPopulationFinal } from "../population/populationStorage";
 import type { PreparedPopulationRow } from "../population/populationTypes";
@@ -89,7 +89,8 @@ function toPopulationRow(row: AdhocRow): PreparedPopulationRow {
 export type ExcelRowsPlan = {
   targetMonth: string;
   added: PreparedPopulationRow[];
-  existing: Array<{ xrayImageId: string; location: ExistingLocation }>;
+  /** `assignedTo` (sample locations only): the employee, or null when never distributed. */
+  existing: Array<{ xrayImageId: string; location: ExistingLocation; assignedTo?: string | null }>;
   /** Same id twice in the file: only the first is added. */
   repeatedInFile: string[];
   invalid: Array<{ rowKey: string; xrayImageId: string | null; reason: string }>;
@@ -208,7 +209,35 @@ export async function planExcelRowsIntoMonth(
     seen.add(id);
     plan.added.push(toPopulationRow(row));
   }
+  await annotateAssignments(directoryHandle, plan.existing);
   return { ok: true, plan };
+}
+
+/**
+ * Who each «موجودة» case in a sample is assigned to; null = in the sample but
+ * never distributed. The queue lists distributed cases only, so the owner saw
+ * «موجودة» and then found nothing when searching the id (v159.10): the report
+ * now says which of the two it is.
+ */
+async function annotateAssignments(
+  directoryHandle: DirectoryHandleLike,
+  existing: ExcelRowsPlan["existing"]
+): Promise<void> {
+  const folders = new Set(existing.filter((e) => e.location.where === "sample").map((e) => e.location.folder));
+  const byFolder = new Map<string, Map<string, string>>();
+  for (const folder of folders) {
+    const sample = await loadSampleMaster(directoryHandle, folder);
+    const current = await loadOrDeriveDistributionCurrent(directoryHandle, folder, sample?.rows ?? []);
+    byFolder.set(folder, new Map(
+      (current?.entries ?? [])
+        .filter((entry) => entry.status !== "replaced")
+        .map((entry) => [originalXrayImageIdAnyImport(entry.xrayImageId), entry.assignedTo])
+    ));
+  }
+  for (const item of existing) {
+    if (item.location.where !== "sample") continue;
+    item.assignedTo = byFolder.get(item.location.folder)?.get(item.xrayImageId) ?? null;
+  }
 }
 
 export type ExcelRowsResult =

@@ -14,6 +14,8 @@ import type { SampleMasterData } from "../sampling/sampleTypes";
 import { getPopulationMonthDir, POPULATION_SUBFOLDERS } from "../workspace/workspacePaths";
 import { buildIncompleteCasesSheet, executeExcelRowsIntoMonth, planExcelRowsIntoMonth } from "./excelRowsIntoMonth";
 import { autoDetectMapping } from "../adhocImport/adhocMappingModel";
+import { buildAssignEvent } from "../distribution/distributionLog";
+import { appendDistributionEvents } from "../distribution/distributionStorage";
 
 const JAN = "1-January-2026";
 const FEB = "2-February-2026";
@@ -237,5 +239,16 @@ describe("cases in the month's population but in no sample", () => {
     if (!plan.ok) throw new Error("plan failed");
     expect(plan.plan.fromPopulation).toHaveLength(0);
     expect(plan.plan.existing).toEqual([{ xrayImageId: "P2", location: { folder: FEB, where: "population" } }]);
+  });
+});
+
+describe("existing cases report who has them", () => {
+  it("marks a case that is in the sample but never distributed", async () => {
+    const root = createMemoryDirectory();
+    await seedMonth(root, JAN, ["S1", "S2"], ["S1", "S2"]);
+    expect((await appendDistributionEvents(root, JAN, [buildAssignEvent({ xrayImageId: "S1", assignedTo: "emp1", eventBy: "admin" })])).ok).toBe(true);
+    const plan = await planExcelRowsIntoMonth(root, excelRowsWithResults([["S1", "سليمة", "سليمة"], ["S2", "سليمة", "سليمة"]]), JAN);
+    if (!plan.ok) throw new Error("plan failed");
+    expect(plan.plan.existing.map((e) => [e.xrayImageId, e.assignedTo])).toEqual([["S1", "emp1"], ["S2", null]]);
   });
 });

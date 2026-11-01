@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v159.10",
+    "date": "2026-11-01",
+    "bucket": "fix",
+    "scope": "months",
+    "title": "Excel report says whether an existing case is distributed"
+  },
+  {
     "version": "v159.9",
     "date": "2026-11-01",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "months",
     "title": "add cases from an Excel sheet to a month, skipping images already in the workspace"
-  },
-  {
-    "version": "v158.1",
-    "date": "2026-11-01",
-    "bucket": "enhancement",
-    "scope": "months",
-    "title": "merge progress, ad-hoc rows join target population, merge all ad-hoc imports at once"
   }
 ];

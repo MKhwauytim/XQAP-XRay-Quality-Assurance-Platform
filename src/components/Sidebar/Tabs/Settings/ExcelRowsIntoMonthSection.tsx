@@ -38,6 +38,10 @@ function projectRows(table: SourceTable): AdhocRow[] {
   return projectTable({ table, mapping, catalog: EXCEL_INTO_MONTH_FIELD_CATALOG, binding: { kind: "isolated" } });
 }
 
+/** «موجودة» cases sitting in a sample with no employee: the queue does not list them. */
+const undistributedCount = (plan: ExcelRowsPlan): number =>
+  plan.existing.filter((entry) => entry.location.where === "sample" && entry.assignedTo === null).length;
+
 /** One sheet per outcome, so the admin sees exactly what was added and why the rest was not. */
 function downloadReport(plan: ExcelRowsPlan, L: Labels): void {
   const wb = XLSX.utils.book_new();
@@ -52,11 +56,12 @@ function downloadReport(plan: ExcelRowsPlan, L: Labels): void {
     ...plan.fromPopulation.map((row) => [row.xrayImageId, row.portName ?? ""]),
   ]);
   sheet(L.excel_rows_report_existing, [
-    [L.excel_rows_report_col_id, L.excel_rows_report_col_location, L.excel_rows_report_col_where],
+    [L.excel_rows_report_col_id, L.excel_rows_report_col_location, L.excel_rows_report_col_where, L.excel_rows_report_col_assignment],
     ...plan.existing.map((entry) => [
       entry.xrayImageId,
       entry.location.folder,
       entry.location.where === "sample" ? L.excel_rows_where_sample : L.excel_rows_where_population,
+      entry.location.where !== "sample" ? "" : entry.assignedTo ?? L.excel_rows_not_distributed,
     ]),
     ...plan.repeatedInFile.map((id) => [id, L.excel_rows_repeated_in_file, ""]),
   ]);
@@ -276,6 +281,7 @@ export function ExcelRowsIntoMonthSection() {
                 filled: plan.filled.length,
                 target: plan.targetMonth,
               })}</p>
+              {undistributedCount(plan) > 0 && <p>{fill(L.excel_rows_existing_undistributed, { n: undistributedCount(plan) })}</p>}
               {plan.fromPopulation.length > 0 && <p>{fill(L.excel_rows_from_population, { n: plan.fromPopulation.length, target: plan.targetMonth })}</p>}
               <button type="button" className="ew-btn-secondary" onClick={() => downloadReport(plan, L)} disabled={busy}>
                 {L.excel_rows_report_button}
