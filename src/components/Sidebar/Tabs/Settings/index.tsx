@@ -55,6 +55,7 @@ import { PopulationRecoverySection } from "./PopulationRecoverySection";
 import { DeleteMonthSection } from "./DeleteMonthSection";
 import { MergeMonthSection } from "./MergeMonthSection";
 import { ExcelRowsIntoMonthSection } from "./ExcelRowsIntoMonthSection";
+import { SplitMonthSection } from "./SplitMonthSection";
 import { AboutSection } from "./AboutSection";
 import { usePermissions } from "../../../../auth/usePermissions";
 
@@ -620,6 +621,7 @@ function SettingsPage() {
       <PopulationRecoverySection />
       <MergeMonthSection />
       <ExcelRowsIntoMonthSection />
+      <SplitMonthSection />
       <DeleteMonthSection />
       <AboutSection />
     </div>

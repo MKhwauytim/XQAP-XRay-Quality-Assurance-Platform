@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v159.5",
+    "date": "2026-11-01",
+    "bucket": "feature",
+    "scope": "months",
+    "title": "split a month by the index list; unlisted unstudied cases move to the month's exceptional cases"
+  },
+  {
     "version": "v159.4",
     "date": "2026-11-01",
     "bucket": "feature",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "distribution",
     "title": "damaged distribution.current.json rebuilds silently; deleted months stay deleted; admin delete-month tool"
-  },
-  {
-    "version": "v155.0",
-    "date": "2026-10-19",
-    "bucket": "feature",
-    "scope": "sampling",
-    "title": "high-priority ports in the sample draw; port pickers list every known port before upload"
   }
 ];
