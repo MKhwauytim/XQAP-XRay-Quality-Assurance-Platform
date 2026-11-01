@@ -5,11 +5,18 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v159.5",
+    "date": "2026-11-01",
+    "bucket": "enhancement",
+    "scope": "tracking",
+    "title": "follow-up period runs from first to last studied case"
+  },
+  {
     "version": "v159.2",
     "date": "2026-11-01",
     "bucket": "enhancement",
     "scope": "tracking",
-    "title": "v159.2 daily follow-up spans first distribution to last study, across months"
+    "title": "daily follow-up spans first distribution to last study, across months"
   },
   {
     "version": "v159.1",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "sampling",
     "title": "high-priority ports in the sample draw; port pickers list every known port before upload"
-  },
-  {
-    "version": "v154.4",
-    "date": "2026-10-19",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "repair each cause of unsent answers — step timeouts, permission request, backup/import"
   }
 ];

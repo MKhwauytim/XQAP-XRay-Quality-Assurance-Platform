@@ -123,7 +123,6 @@ describe("ResultsTracking", () => {
     );
     const cells = container.querySelectorAll<HTMLButtonElement>(".trk-cell");
     expect(cells[LEAD + 5 - 1].textContent).toContain("6");
-    expect(cells[LEAD + 14 - 1].className).toContain("trk-cell--today");
   });
 
   it("marks today and the deadline day on the calendar", () => {
@@ -150,12 +149,11 @@ describe("ResultsTracking", () => {
       />,
     );
     const cells = container.querySelectorAll<HTMLButtonElement>(".trk-cell:not(.trk-cell--blank)");
-    // Oct 1 → Nov 4: 35 days on the calendar.
-    expect(cells).toHaveLength(35);
-    expect(cells[33].textContent).toContain("7");
-    expect(cells[34].className).toContain("trk-cell--today");
+    // First study Oct 5 → last study Nov 3: 30 days, not running on to today (Nov 4).
+    expect(cells).toHaveLength(30);
+    expect(cells[29].textContent).toContain("7");
     const period = container.querySelector(".trk-period")?.textContent ?? "";
-    expect(period).toContain("35 يومًا");
+    expect(period).toContain("30 يومًا");
     expect(period).toContain("نوفمبر");
     expect(period).toContain("ما زالت هناك حالات متبقية");
   });

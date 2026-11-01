@@ -8,8 +8,8 @@
 //              is not a no-image submission).
 //   معلقة    — «مؤرشفة»: a submitted «هل يوجد صورة = لا» answer.
 //   Day of work — the local calendar day of `submittedAt`.
-//   Period — first distribution → today while cases remain, else the last
-//     finish; may span several months. The deadline is a marker inside it.
+//   Period — first studied case → last studied case (assignment → today only
+//     before anything is studied); may span several months. Deadline = marker.
 //   Working days — Sunday–Thursday (utils/workingDays.ts); no holiday calendar.
 //   Daily quota (display) — ceil(assigned ÷ working days from the employee's
 //     assignment day to the deadline). Shown for the CURRENT deadline; stored
@@ -44,7 +44,7 @@ export type TrackingRow = {
   state: Exclude<AnswerState, "replaced">;
   /** When the work was finished (ISO); null when unknown or not finished. */
   doneAt: string | null;
-  /** When the row was assigned (ISO), so the period can start at the first distribution. */
+  /** When the row was assigned (ISO), used for the period start before any case is studied. */
   assignedAt?: string | null;
 };
 
@@ -113,9 +113,9 @@ export type Tracking = {
   /** The sample's month (1–12) and year — the deadline belongs to it. */
   year: number;
   month: number;
-  /** Local midnight of day 1: the earliest assignment (or finished row). */
+  /** Local midnight of day 1: the first studied case (earliest assignment before any). */
   periodStart: Date;
-  /** Today while cases remain, else the latest finished row. */
+  /** The last studied case (today before any case is studied). */
   periodEnd: Date;
   /** Calendar days from `periodStart` to `periodEnd`, inclusive. */
   periodDays: number;
@@ -174,30 +174,29 @@ export function buildTracking(input: TrackingInput): Tracking {
   const { year, month } = input;
   const today = midnight(input.today);
 
-  // Start: the earliest assignment, from the quota stamps or the rows' own
-  // `assignedAt`. A finished row dated earlier still pulls the start back so
-  // it lands on the calendar. With nothing at all, the sample month's day 1.
-  let startMs = Infinity;
+  // The period is the study itself (owner, 2026-11-01): from the first studied
+  // case to the last studied case, even while cases remain. Only before any
+  // case is finished does it fall back to the earliest assignment → today
+  // (and, with nothing at all, the sample month's day 1).
+  let firstDoneMs = Infinity;
   let latestDoneMs = -Infinity;
-  let anyPending = false;
-  const consider = (d: Date | null) => {
-    if (d && d.getTime() < startMs) startMs = d.getTime();
-  };
-  for (const iso of Object.values(input.assignedAtByUser)) consider(parseDay(iso));
   for (const row of input.rows) {
-    consider(parseDay(row.assignedAt));
-    if (row.state === "pending") {
-      anyPending = true;
-      continue;
-    }
+    if (row.state === "pending") continue;
     const done = parseDay(row.doneAt);
-    consider(done);
-    if (done && done.getTime() > latestDoneMs) latestDoneMs = done.getTime();
+    if (!done) continue;
+    if (done.getTime() < firstDoneMs) firstDoneMs = done.getTime();
+    if (done.getTime() > latestDoneMs) latestDoneMs = done.getTime();
+  }
+  let startMs = firstDoneMs;
+  if (!Number.isFinite(startMs)) {
+    const consider = (d: Date | null) => {
+      if (d && d.getTime() < startMs) startMs = d.getTime();
+    };
+    for (const iso of Object.values(input.assignedAtByUser)) consider(parseDay(iso));
+    for (const row of input.rows) consider(parseDay(row.assignedAt));
   }
   let periodStart = Number.isFinite(startMs) ? new Date(startMs) : new Date(year, month - 1, 1);
-
-  // End: today while cases remain; once all are finished, the last finish.
-  let periodEnd = !anyPending && Number.isFinite(latestDoneMs) ? new Date(latestDoneMs) : today;
+  let periodEnd = Number.isFinite(latestDoneMs) ? new Date(latestDoneMs) : today;
   if (periodEnd.getTime() < periodStart.getTime()) periodEnd = periodStart;
   if (ordinalOf(periodStart, periodEnd) > MAX_PERIOD_DAYS) {
     periodStart = new Date(periodEnd.getFullYear(), periodEnd.getMonth(), periodEnd.getDate() - MAX_PERIOD_DAYS + 1);
