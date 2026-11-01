@@ -47,6 +47,10 @@ function downloadReport(plan: ExcelRowsPlan, L: Labels): void {
     [L.excel_rows_report_col_id, L.col_port_name, L.col_xray_entry_date],
     ...plan.added.map((row) => [row.xrayImageId, row.portName ?? "", row.xrayEntryDate ?? ""]),
   ]);
+  sheet(L.excel_rows_report_from_population, [
+    [L.excel_rows_report_col_id, L.col_port_name],
+    ...plan.fromPopulation.map((row) => [row.xrayImageId, row.portName ?? ""]),
+  ]);
   sheet(L.excel_rows_report_existing, [
     [L.excel_rows_report_col_id, L.excel_rows_report_col_location, L.excel_rows_report_col_where],
     ...plan.existing.map((entry) => [
@@ -193,7 +197,7 @@ export function ExcelRowsIntoMonthSection() {
       recordAction(directoryHandle, username, role, "month-merged", {
         monthFolderName: target,
         target: sheet,
-        details: { kind: "excel-rows", added: result.addedToSample, filled: result.filledResults, existing: result.plan.existing.length, invalid: result.plan.invalid.length },
+        details: { kind: "excel-rows", drawn: result.drawnFromPopulation, added: result.addedToSample, filled: result.filledResults, existing: result.plan.existing.length, invalid: result.plan.invalid.length },
       });
       notifyLocalDataChange(["manifest"]);
       broadcastDataRefresh("manual");
@@ -201,7 +205,7 @@ export function ExcelRowsIntoMonthSection() {
       setPlan(null);
       setNotice({
         kind: "ok",
-        text: fill(L.excel_rows_done, { added: result.addedToSample, filled: result.filledResults, existing: result.plan.existing.length, target }),
+        text: (result.drawnFromPopulation > 0 ? fill(L.excel_rows_from_population_done, { n: result.drawnFromPopulation }) + " " : "") + fill(L.excel_rows_done, { added: result.addedToSample, filled: result.filledResults, existing: result.plan.existing.length, target }),
       });
     } catch (error) {
       logError("settings:excel-rows", error);
@@ -272,10 +276,11 @@ export function ExcelRowsIntoMonthSection() {
                 filled: plan.filled.length,
                 target: plan.targetMonth,
               })}</p>
+              {plan.fromPopulation.length > 0 && <p>{fill(L.excel_rows_from_population, { n: plan.fromPopulation.length, target: plan.targetMonth })}</p>}
               <button type="button" className="ew-btn-secondary" onClick={() => downloadReport(plan, L)} disabled={busy}>
                 {L.excel_rows_report_button}
               </button>
-              <button type="button" className="ew-btn-secondary" onClick={() => setConfirming(true)} disabled={busy || (plan.added.length === 0 && plan.filled.length === 0)}>
+              <button type="button" className="ew-btn-secondary" onClick={() => setConfirming(true)} disabled={busy || (plan.added.length === 0 && plan.filled.length === 0 && plan.fromPopulation.length === 0)}>
                 {L.excel_rows_button}
               </button>
             </div>

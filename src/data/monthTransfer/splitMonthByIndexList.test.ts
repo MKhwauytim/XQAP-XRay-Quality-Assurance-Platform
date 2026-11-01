@@ -150,12 +150,13 @@ describe("moved cases keep their employee", () => {
     await ensureAdhocSampleMaster(root, saved);
     expect((await saveSampleMaster(root, JAN, { ...sample, rows: sample.rows.filter((r) => r.xrayImageId === "S1") })).ok).toBe(true);
 
-    const plan = await planSplitMonth(root, JAN, ["S1"]);
+    // No file: restore-only. The owner has nothing to re-upload; the cases came from the system.
+    const plan = await planSplitMonth(root, JAN, null);
     if (!plan.ok) throw new Error("plan failed");
     expect(plan.plan.moved).toHaveLength(0);
     expect(plan.plan.restorable).toBe(2);
 
-    const result = await executeSplitMonth(root, JAN, ["S1"], "admin");
+    const result = await executeSplitMonth(root, JAN, null, "admin");
     expect(result).toMatchObject({ ok: true, moved: 0, restored: 2 });
     expect(await storeAssignees(root, importId)).toEqual([EMP_B, EMP_A].sort());
     // Running it again changes nothing.

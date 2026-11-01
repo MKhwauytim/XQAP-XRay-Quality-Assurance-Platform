@@ -113,7 +113,7 @@ export function SplitMonthSection() {
     reason === "month-closed" ? L.merge_month_refused_target_closed : L.merge_month_refused_target_no_sample;
 
   async function preview(): Promise<void> {
-    if (!directoryHandle || !ids || !month) return;
+    if (!directoryHandle || !month) return;
     setBusy(true);
     setNotice({ kind: "info", text: L.excel_rows_checking });
     try {
@@ -134,7 +134,7 @@ export function SplitMonthSection() {
 
   async function run(): Promise<void> {
     setConfirming(false);
-    if (!directoryHandle || !ids || !month || !canRun) return;
+    if (!directoryHandle || !month || !canRun) return;
     setBusy(true);
     setNotice({ kind: "info", text: L.excel_rows_running });
     try {
@@ -201,7 +201,7 @@ export function SplitMonthSection() {
                 </select>
               </label>
             )}
-            <button type="button" className="ew-btn-secondary" onClick={() => void preview()} disabled={busy || !ids || !month}>
+            <button type="button" className="ew-btn-secondary" onClick={() => void preview()} disabled={busy || !month}>
               {L.excel_rows_check}
             </button>
           </div>

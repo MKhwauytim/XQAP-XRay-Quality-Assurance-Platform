@@ -90,17 +90,20 @@ describe("excel rows into a month", () => {
     if (!planned.ok) return;
     expect(planned.plan.added.map((r) => r.xrayImageId)).toEqual(["E1"]);
     expect(planned.plan.existing.map((e) => [e.xrayImageId, e.location.folder])).toEqual([
-      ["A1", JAN], ["B1", JAN], ["C1", FEB], ["D1", "adhoc-adh-1700000000000-abc123"], ["P1", JAN],
+      ["A1", JAN], ["B1", JAN], ["C1", FEB], ["D1", "adhoc-adh-1700000000000-abc123"],
     ]);
+    // P1 is in January's population but in no sample: it is drawn into the sample (v159.7).
+    expect(planned.plan.fromPopulation.map((r) => r.xrayImageId)).toEqual(["P1"]);
     expect(planned.plan.repeatedInFile).toEqual(["E1"]);
 
     const result = await executeExcelRowsIntoMonth(root, rows, JAN, "admin");
-    expect(result).toMatchObject({ ok: true, addedToSample: 1, addedToPopulation: 1 });
+    expect(result).toMatchObject({ ok: true, addedToSample: 1, addedToPopulation: 1, drawnFromPopulation: 1 });
     expect((await loadSampleMaster(root, JAN))?.rows.map((r) => r.xrayImageId)).toContain("E1");
     expect((await loadMonthPopulationFinal(root, JAN))?.totalRows).toBe(4);
 
     const again = await planExcelRowsIntoMonth(root, rows, JAN);
     expect(again.ok && again.plan.added).toEqual([]);
+    expect(again.ok && again.plan.fromPopulation).toEqual([]);
   });
 });
 
@@ -207,5 +210,32 @@ describe("incomplete cases export and fill-back", () => {
     // A recorded value is never overwritten.
     expect(after.find((r) => r.xrayImageId === "S1")!.portName).toBe("ميناء");
     expect(after).toHaveLength(2);
+  });
+});
+
+describe("cases in the month's population but in no sample", () => {
+  it("are drawn into the target month's sample instead of being skipped as existing", async () => {
+    const root = createMemoryDirectory();
+    await seedMonth(root, JAN, ["S1"], ["S1", "P1"]);
+    const plan = await planExcelRowsIntoMonth(root, excelRowsWithResults([["P1", "", ""], ["S1", "سليمة", "سليمة"]]), JAN);
+    if (!plan.ok) throw new Error("plan failed");
+    expect(plan.plan.fromPopulation.map((r) => r.xrayImageId)).toEqual(["P1"]);
+    expect(plan.plan.existing.map((e) => e.xrayImageId)).toEqual(["S1"]);
+
+    const done = await executeExcelRowsIntoMonth(root, excelRowsWithResults([["P1", "", ""]]), JAN, "admin");
+    expect(done).toMatchObject({ ok: true, drawnFromPopulation: 1, addedToSample: 0, addedToPopulation: 0 });
+    const sampleIds = (await loadSampleMaster(root, JAN))!.rows.map((r) => r.xrayImageId);
+    expect(sampleIds).toEqual(["S1", "P1"]);
+    expect((await loadMonthPopulationFinal(root, JAN))!.rows).toHaveLength(2);
+  });
+
+  it("a population-only case in ANOTHER month is still reported as existing", async () => {
+    const root = createMemoryDirectory();
+    await seedMonth(root, JAN, ["S1"], ["S1"]);
+    await seedMonth(root, FEB, ["F1"], ["F1", "P2"]);
+    const plan = await planExcelRowsIntoMonth(root, excelRowsWithResults([["P2", "", ""]]), JAN);
+    if (!plan.ok) throw new Error("plan failed");
+    expect(plan.plan.fromPopulation).toHaveLength(0);
+    expect(plan.plan.existing).toEqual([{ xrayImageId: "P2", location: { folder: FEB, where: "population" } }]);
   });
 });

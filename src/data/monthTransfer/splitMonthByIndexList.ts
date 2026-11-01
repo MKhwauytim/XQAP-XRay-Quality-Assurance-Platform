@@ -67,10 +67,15 @@ export type SplitPlanResult =
   | { ok: true; plan: SplitPlan }
   | { ok: false; reason: "month-closed" | "no-sample" };
 
+/**
+ * `listIds: null` is restore-only: no file, nothing moves, and only the
+ * earlier split's cases are given back to their employees. The owner has no
+ * Excel to re-upload for that, since the cases came from the system itself.
+ */
 export async function planSplitMonth(
   directoryHandle: DirectoryHandleLike,
   month: string,
-  listIds: readonly string[]
+  listIds: readonly string[] | null
 ): Promise<SplitPlanResult> {
   invalidateMonthLockCache();
   if (await isMonthClosed(directoryHandle, month).catch(() => false)) return { ok: false, reason: "month-closed" };
@@ -89,13 +94,13 @@ export async function planSplitMonth(
     for (const item of file.items) studied.add(item.xrayImageId);
   }
 
-  const listed = new Set(listIds.map((id) => id.trim()).filter(Boolean));
+  const listed = new Set((listIds ?? []).map((id) => id.trim()).filter(Boolean));
   const plan: SplitPlan = { month, keptStudied: [], keptListed: [], moved: [], movedAssigned: 0, listNotInMonth: [], restorable: 0 };
   const inMonth = new Set<string>();
   for (const row of rows) {
     inMonth.add(row.xrayImageId);
     if (studied.has(row.xrayImageId)) plan.keptStudied.push(row.xrayImageId);
-    else if (listed.has(row.xrayImageId)) plan.keptListed.push(row.xrayImageId);
+    else if (listIds === null || listed.has(row.xrayImageId)) plan.keptListed.push(row.xrayImageId);
     else {
       plan.moved.push(row);
       if (assigned.has(row.xrayImageId)) plan.movedAssigned += 1;
@@ -205,7 +210,7 @@ export type SplitResult =
 export async function executeSplitMonth(
   directoryHandle: DirectoryHandleLike,
   month: string,
-  listIds: readonly string[],
+  listIds: readonly string[] | null,
   actor: string,
   now: Date = new Date()
 ): Promise<SplitResult> {

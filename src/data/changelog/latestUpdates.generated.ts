@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v159.7",
+    "date": "2026-11-01",
+    "bucket": "fix",
+    "scope": "months",
+    "title": "restore split cases without a file; draw population-only cases into the sample; show original id for merged ad-hoc rows"
+  },
+  {
     "version": "v159.6",
     "date": "2026-11-01",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "months",
     "title": "merge a month or an ad-hoc sample into another month"
-  },
-  {
-    "version": "v156.1",
-    "date": "2026-11-01",
-    "bucket": "enhancement",
-    "scope": "reporting",
-    "title": "normal hyphen instead of long dashes in report text"
   }
 ];

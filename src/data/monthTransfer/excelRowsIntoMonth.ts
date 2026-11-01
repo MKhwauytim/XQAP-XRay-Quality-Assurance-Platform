@@ -46,7 +46,13 @@ async function listSampleFolders(directoryHandle: DirectoryHandleLike): Promise<
   return (await listDirectoryEntries(root)).filter((entry) => entry.kind === "directory").map((entry) => entry.name);
 }
 
-/** Original xrayImageId → first place it was found. */
+/**
+ * Original xrayImageId → where it was found. A sample location wins over a
+ * population one (v159.7): "in a population only" means the image was never
+ * drawn into any sample, so no queue shows it. The planner treats that case
+ * in the TARGET month's population as one to add to the sample, not as a
+ * duplicate to skip.
+ */
 export async function buildExistingImageIndex(
   directoryHandle: DirectoryHandleLike
 ): Promise<Map<string, ExistingLocation>> {
@@ -54,7 +60,8 @@ export async function buildExistingImageIndex(
   const note = (id: unknown, location: ExistingLocation) => {
     if (typeof id !== "string" || !id) return;
     const original = originalXrayImageIdAnyImport(id);
-    if (!index.has(original)) index.set(original, location);
+    const prior = index.get(original);
+    if (!prior || (prior.where === "population" && location.where === "sample")) index.set(original, location);
   };
   const populationMonths = (await listMonthFolders(directoryHandle)).map((entry) => entry.folderName);
   for (const folder of populationMonths) {
@@ -86,8 +93,14 @@ export type ExcelRowsPlan = {
   /** Same id twice in the file: only the first is added. */
   repeatedInFile: string[];
   invalid: Array<{ rowKey: string; xrayImageId: string | null; reason: string }>;
-  /** Blank L1/L2 results of cases already in the target month, filled from the file. */
+  /** Blank fields of cases already in the target month, filled from the file. */
   filled: FieldChange[];
+  /**
+   * In the target month's population but in no sample anywhere: drawn into the
+   * target's sample from the population row as it is (v159.7). Before, these
+   * were skipped as «موجودة مسبقاً», so no queue ever showed them.
+   */
+  fromPopulation: PreparedPopulationRow[];
 };
 
 
@@ -98,12 +111,15 @@ async function loadTargetRows(
 ): Promise<Map<string, Record<string, unknown>>> {
   const byId = new Map<string, Record<string, unknown>>();
   const population = await loadMonthPopulationFinal(directoryHandle, targetMonth);
+  // Keyed by the ORIGINAL id: a row merged in from an ad-hoc import keeps its
+  // namespaced `ADHOC-…` id on disk, while the file names the original.
   for (const row of population?.rows ?? []) {
-    if (typeof row.xrayImageId === "string") byId.set(row.xrayImageId, row as Record<string, unknown>);
+    if (typeof row.xrayImageId === "string") byId.set(originalXrayImageIdAnyImport(row.xrayImageId), row as Record<string, unknown>);
   }
   const sample = await loadSampleMaster(directoryHandle, targetMonth);
   for (const row of sample?.rows ?? []) {
-    if (!byId.has(row.xrayImageId)) byId.set(row.xrayImageId, row as unknown as Record<string, unknown>);
+    const key = originalXrayImageIdAnyImport(row.xrayImageId);
+    if (!byId.has(key)) byId.set(key, row as unknown as Record<string, unknown>);
   }
   return byId;
 }
@@ -163,7 +179,7 @@ export async function planExcelRowsIntoMonth(
 
   const existingIndex = await buildExistingImageIndex(directoryHandle);
   const targetRows = await loadTargetRows(directoryHandle, targetMonth);
-  const plan: ExcelRowsPlan = { targetMonth, added: [], existing: [], repeatedInFile: [], invalid: [], filled: [] };
+  const plan: ExcelRowsPlan = { targetMonth, added: [], existing: [], repeatedInFile: [], invalid: [], filled: [], fromPopulation: [] };
   const seen = new Set<string>();
   for (const row of rows) {
     if (!row.validation.valid) {
@@ -173,10 +189,16 @@ export async function planExcelRowsIntoMonth(
     const id = row.mapped.xrayImageId as string;
     const location = existingIndex.get(id);
     if (location) {
-      const fills = location.folder === targetMonth && !seen.has(id) ? blankFieldFills(id, targetRows.get(id), row) : [];
+      const inTarget = location.folder === targetMonth && !seen.has(id);
+      const existingRow = targetRows.get(id);
+      // Fills address the stored id, which may be the namespaced one.
+      const storedId = typeof existingRow?.xrayImageId === "string" ? existingRow.xrayImageId : id;
+      const fills = inTarget ? blankFieldFills(storedId, existingRow, row) : [];
+      const draw = inTarget && location.where === "population" && existingRow !== undefined;
       seen.add(id);
+      if (draw) plan.fromPopulation.push(existingRow as unknown as PreparedPopulationRow);
       if (fills.length > 0) plan.filled.push(...fills);
-      else plan.existing.push({ xrayImageId: id, location });
+      if (!draw && fills.length === 0) plan.existing.push({ xrayImageId: id, location });
       continue;
     }
     if (seen.has(id)) {
@@ -190,7 +212,7 @@ export async function planExcelRowsIntoMonth(
 }
 
 export type ExcelRowsResult =
-  | { ok: true; plan: ExcelRowsPlan; addedToSample: number; addedToPopulation: number; filledResults: number }
+  | { ok: true; plan: ExcelRowsPlan; addedToSample: number; addedToPopulation: number; filledResults: number; drawnFromPopulation: number }
   | { ok: false; reason: "target-no-sample" | "target-closed" }
   | { ok: false; reason: "write-failed"; error: string };
 
@@ -204,10 +226,19 @@ export async function executeExcelRowsIntoMonth(
   const planned = await planExcelRowsIntoMonth(directoryHandle, rows, targetMonth);
   if (!planned.ok) return planned;
   const { plan } = planned;
-  if (plan.added.length === 0 && plan.filled.length === 0) {
-    return { ok: true, plan, addedToSample: 0, addedToPopulation: 0, filledResults: 0 };
+  if (plan.added.length === 0 && plan.filled.length === 0 && plan.fromPopulation.length === 0) {
+    return { ok: true, plan, addedToSample: 0, addedToPopulation: 0, filledResults: 0, drawnFromPopulation: 0 };
   }
   try {
+    // Population-only cases join the sample first, so a fill below patches
+    // their sample copy too.
+    let drawnFromPopulation = 0;
+    if (plan.fromPopulation.length > 0) {
+      const drawn = await appendSampleRows(directoryHandle, targetMonth, plan.fromPopulation);
+      if (!drawn.ok) return { ok: false, reason: "write-failed", error: drawn.error };
+      drawnFromPopulation = drawn.appended.length;
+      await refreshDistributionCacheAfterWrite(directoryHandle, targetMonth, drawn.data.rows);
+    }
     let filledResults = 0;
     if (plan.filled.length > 0) {
       const applied = await applyPopulationFieldCorrections({
@@ -218,7 +249,7 @@ export async function executeExcelRowsIntoMonth(
     }
     if (plan.added.length === 0) {
       bumpWorkspaceEpoch(directoryHandle, targetMonth);
-      return { ok: true, plan, addedToSample: 0, addedToPopulation: 0, filledResults };
+      return { ok: true, plan, addedToSample: 0, addedToPopulation: 0, filledResults, drawnFromPopulation };
     }
     const population = await appendPopulationFinalRows(
       directoryHandle,
@@ -236,6 +267,7 @@ export async function executeExcelRowsIntoMonth(
       addedToSample: sample.appended.length,
       addedToPopulation: population.status === "appended" ? population.appended : 0,
       filledResults,
+      drawnFromPopulation,
     };
   } catch (error) {
     return { ok: false, reason: "write-failed", error: error instanceof Error ? error.message : String(error) };
