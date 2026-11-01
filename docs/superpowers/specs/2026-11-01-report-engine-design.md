@@ -1,7 +1,7 @@
 # Report Engine v2 — Design Spec
 
 **Date:** 2026-11-01
-**Status:** Draft — awaiting owner approval. No implementation before approval.
+**Status:** Approved by owner 2026-11-01. Next: implementation plan.
 **Owner:** Report Designer (`src/data/reportDesigner/`, `src/components/Sidebar/Tabs/ReportDesigner/`), deck3 kit (`src/data/reporting/executive/deck3/`)
 
 ## 1. Intent
