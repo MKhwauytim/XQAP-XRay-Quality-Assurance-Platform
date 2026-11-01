@@ -131,4 +131,32 @@ describe("ResultsTracking", () => {
     expect(cell(14).className).toContain("trk-cell--today");
     expect(cell(28).className).toContain("trk-cell--deadline");
   });
+
+  it("an October sample still studied in November shows the whole period on the calendar and in the summary", () => {
+    const spanRows = rows([
+      ["completed", "2026-10-05T10:00:00", 3],
+      ["completed", "2026-11-03T10:00:00", 7], // Tuesday, after the month and deadline
+      ["pending", null, 5],
+    ]);
+    const { container } = render(
+      <ResultsTracking
+        monthFolder="10-october-2026"
+        rows={spanRows}
+        assignedAtByUser={{ emp1: "2026-10-01T08:00:00" }}
+        directoryHandle={createMemoryDirectory()}
+        canEditDeadline={false}
+        username="admin"
+        now={new Date(2026, 10, 4)}
+      />,
+    );
+    const cells = container.querySelectorAll<HTMLButtonElement>(".trk-cell:not(.trk-cell--blank)");
+    // Oct 1 → Nov 4: 35 days on the calendar.
+    expect(cells).toHaveLength(35);
+    expect(cells[33].textContent).toContain("7");
+    expect(cells[34].className).toContain("trk-cell--today");
+    const period = container.querySelector(".trk-period")?.textContent ?? "";
+    expect(period).toContain("35 يومًا");
+    expect(period).toContain("نوفمبر");
+    expect(period).toContain("ما زالت هناك حالات متبقية");
+  });
 });

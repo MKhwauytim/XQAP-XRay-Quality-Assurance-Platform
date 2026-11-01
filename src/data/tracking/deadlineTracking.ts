@@ -8,6 +8,8 @@
 //              is not a no-image submission).
 //   معلقة    — «مؤرشفة»: a submitted «هل يوجد صورة = لا» answer.
 //   Day of work — the local calendar day of `submittedAt`.
+//   Period — first distribution → today while cases remain, else the last
+//     finish; may span several months. The deadline is a marker inside it.
 //   Working days — Sunday–Thursday (utils/workingDays.ts); no holiday calendar.
 //   Daily quota (display) — ceil(assigned ÷ working days from the employee's
 //     assignment day to the deadline). Shown for the CURRENT deadline; stored
@@ -16,7 +18,6 @@ import type { ItemAnswer } from "../answers/answerTypes";
 import { isNoImageSubmission } from "../answers/noImageAnswer";
 import type { TemplateSchema } from "../templates/templateTypes";
 import { countWorkingDays, isWorkingDay } from "../../utils/workingDays";
-import { formatMonthFolderName, parseMonthFolderName } from "../population/monthFolder";
 
 export type AnswerState = "completed" | "hold" | "pending" | "replaced";
 
@@ -43,6 +44,8 @@ export type TrackingRow = {
   state: Exclude<AnswerState, "replaced">;
   /** When the work was finished (ISO); null when unknown or not finished. */
   doneAt: string | null;
+  /** When the row was assigned (ISO), so the period can start at the first distribution. */
+  assignedAt?: string | null;
 };
 
 /**
@@ -84,11 +87,11 @@ export type EmployeeTracking = {
   assigned: number;
   completed: number;
   hold: number;
-  /** Finished rows whose date is unknown or outside the month (in totals, not on the calendar). */
+  /** Finished rows whose date is unknown (in totals, not on the calendar). */
   unplaced: number;
-  /** Day of month the employee's count starts (assignment day, clamped into the month). */
+  /** Period day the employee's count starts (assignment day, clamped into the period). */
   startDay: number;
-  /** Working days from `startDay` to min(as-of day, deadline). */
+  /** Days worked from `startDay` to the as-of day: working days plus weekend days actually worked. */
   span: number;
   /** Original daily quota recalculated for the current deadline. */
   quota: number;
@@ -96,17 +99,31 @@ export type EmployeeTracking = {
   avgAll: number;
   /** completed ÷ span. */
   avgCompleted: number;
+  /** Keyed by period day (1 = `periodStart`). */
   byDay: Record<number, DayCount>;
 };
 
+/**
+ * Days are numbered from the period start: day 1 is `periodStart`, whatever
+ * month it falls in. A month's sample is often still being studied weeks after
+ * the month ends (owner, 2026-11-01), so the follow-up runs from the first
+ * distribution to the last study — not the calendar month.
+ */
 export type Tracking = {
+  /** The sample's month (1–12) and year — the deadline belongs to it. */
   year: number;
-  /** 1–12. */
   month: number;
-  daysInMonth: number;
-  /** Deadline clamped into the month. */
+  /** Local midnight of day 1: the earliest assignment (or finished row). */
+  periodStart: Date;
+  /** Today while cases remain, else the latest finished row. */
+  periodEnd: Date;
+  /** Calendar days from `periodStart` to `periodEnd`, inclusive. */
+  periodDays: number;
+  /** Cells on the calendar: the period, stretched to reach the deadline when it is later. */
+  calendarDays: number;
+  /** Period day of the deadline, clamped to ≥ 1. A reference marker, not the window boundary. */
   deadlineDay: number;
-  /** Last day with real data: today's day in the current month, 0 before it, the month end after it. */
+  /** Last day with real data: today's period day, 0 before the period, `calendarDays` after it. */
   asOfDay: number;
   /** Empty cells before day 1 in a Saturday-first grid. */
   leadBlanks: number;
@@ -123,93 +140,83 @@ export type TrackingInput = {
   today: Date;
 };
 
-/**
- * The month the tracking calendar should show. Normally the selected sample's
- * month, but a sample attached to a month other than the one the work is
- * happening in (e.g. a January sample reviewed in October) would show an empty
- * calendar and zero averages, since every finished row is dated outside it.
- * So: keep the sample's month when today falls in it or any finished row is
- * dated inside it; otherwise follow the work — the month of the latest finished
- * row, or today's month when nothing is finished yet.
- */
-export function resolveTrackingMonthFolder(
-  monthFolder: string,
-  rows: readonly TrackingRow[],
-  today: Date,
-): string {
-  const info = parseMonthFolderName(monthFolder);
-  if (!info) return monthFolder;
-  if (today.getFullYear() === info.year && today.getMonth() === info.month - 1) return monthFolder;
-  // Tally finished rows per calendar month. A single stray row dated inside the
-  // sample's month must not pin the calendar there while the real work sits in
-  // another month (that leaves every day at 0), so the busiest month wins and
-  // ties go to the later one.
-  const perMonth = new Map<number, number>();
-  for (const row of rows) {
-    if (row.state === "pending" || !row.doneAt) continue;
-    const d = new Date(row.doneAt);
-    if (Number.isNaN(d.getTime())) continue;
-    const key = d.getFullYear() * 12 + d.getMonth();
-    perMonth.set(key, (perMonth.get(key) ?? 0) + 1);
-  }
-  let best = -1;
-  let bestCount = 0;
-  for (const [key, count] of perMonth) {
-    if (count > bestCount || (count === bestCount && key > best)) {
-      best = key;
-      bestCount = count;
-    }
-  }
-  if (best < 0) return formatMonthFolderName(today.getMonth() + 1, today.getFullYear());
-  const bestYear = Math.floor(best / 12);
-  const bestMonth = (best % 12) + 1;
-  if (bestYear === info.year && bestMonth === info.month) return monthFolder;
-  return formatMonthFolderName(bestMonth, bestYear);
+const DAY_MS = 86_400_000;
+/** Guard against one corrupt timestamp stretching the calendar over years. */
+const MAX_PERIOD_DAYS = 400;
+
+function midnight(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
 
-function dateAt(year: number, month: number, day: number): Date {
-  return new Date(year, month - 1, day);
-}
-
-export function workingDaysInMonth(year: number, month: number, fromDay: number, toDay: number): number {
-  if (toDay < fromDay) return 0;
-  return countWorkingDays(dateAt(year, month, fromDay), dateAt(year, month, toDay));
-}
-
-function clampDayIntoMonth(date: Date, year: number, month: number, daysInMonth: number): number {
-  const monthStart = dateAt(year, month, 1).getTime();
-  const monthEnd = dateAt(year, month, daysInMonth).getTime();
-  const day = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
-  if (day < monthStart) return 1;
-  if (day > monthEnd) return daysInMonth;
-  return date.getDate();
-}
-
-function dayInMonth(iso: string | null, year: number, month: number): number | null {
+function parseDay(iso: string | null | undefined): Date | null {
   if (!iso) return null;
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.getFullYear() === year && d.getMonth() === month - 1 ? d.getDate() : null;
+  return Number.isNaN(d.getTime()) ? null : midnight(d);
+}
+
+/** Period day of `date` relative to `start` (both local midnights); DST-safe. */
+function ordinalOf(start: Date, date: Date): number {
+  return Math.round((date.getTime() - start.getTime()) / DAY_MS) + 1;
+}
+
+/** The local calendar date of period day `day`. */
+export function dateOfDay(t: Pick<Tracking, "periodStart">, day: number): Date {
+  const s = t.periodStart;
+  return new Date(s.getFullYear(), s.getMonth(), s.getDate() + day - 1);
+}
+
+function workingDaysBetween(t: Pick<Tracking, "periodStart">, fromDay: number, toDay: number): number {
+  if (toDay < fromDay) return 0;
+  return countWorkingDays(dateOfDay(t, fromDay), dateOfDay(t, toDay));
 }
 
 export function buildTracking(input: TrackingInput): Tracking {
   const { year, month } = input;
-  const daysInMonth = new Date(year, month, 0).getDate();
-  const deadlineDay = clampDayIntoMonth(input.deadline, year, month, daysInMonth);
-  const todayMs = new Date(input.today.getFullYear(), input.today.getMonth(), input.today.getDate()).getTime();
-  // 0 when the month has not started yet, so nothing counts as elapsed.
-  const asOfDay = todayMs < dateAt(year, month, 1).getTime()
-    ? 0
-    : clampDayIntoMonth(input.today, year, month, daysInMonth);
+  const today = midnight(input.today);
+
+  // Start: the earliest assignment, from the quota stamps or the rows' own
+  // `assignedAt`. A finished row dated earlier still pulls the start back so
+  // it lands on the calendar. With nothing at all, the sample month's day 1.
+  let startMs = Infinity;
+  let latestDoneMs = -Infinity;
+  let anyPending = false;
+  const consider = (d: Date | null) => {
+    if (d && d.getTime() < startMs) startMs = d.getTime();
+  };
+  for (const iso of Object.values(input.assignedAtByUser)) consider(parseDay(iso));
+  for (const row of input.rows) {
+    consider(parseDay(row.assignedAt));
+    if (row.state === "pending") {
+      anyPending = true;
+      continue;
+    }
+    const done = parseDay(row.doneAt);
+    consider(done);
+    if (done && done.getTime() > latestDoneMs) latestDoneMs = done.getTime();
+  }
+  let periodStart = Number.isFinite(startMs) ? new Date(startMs) : new Date(year, month - 1, 1);
+
+  // End: today while cases remain; once all are finished, the last finish.
+  let periodEnd = !anyPending && Number.isFinite(latestDoneMs) ? new Date(latestDoneMs) : today;
+  if (periodEnd.getTime() < periodStart.getTime()) periodEnd = periodStart;
+  if (ordinalOf(periodStart, periodEnd) > MAX_PERIOD_DAYS) {
+    periodStart = new Date(periodEnd.getFullYear(), periodEnd.getMonth(), periodEnd.getDate() - MAX_PERIOD_DAYS + 1);
+  }
+  const periodDays = ordinalOf(periodStart, periodEnd);
+  const deadlineDay = Math.max(1, ordinalOf(periodStart, midnight(input.deadline)));
+  const calendarDays = Math.min(MAX_PERIOD_DAYS, Math.max(periodDays, deadlineDay));
+  const todayDay = ordinalOf(periodStart, today);
+  // 0 before the period starts, so nothing counts as elapsed.
+  const asOfDay = todayDay < 1 ? 0 : Math.min(todayDay, calendarDays);
+  const frame = { periodStart };
 
   const byUser = new Map<string, EmployeeTracking>();
   const ensure = (username: string): EmployeeTracking => {
     let e = byUser.get(username);
     if (!e) {
-      const assignedAt = input.assignedAtByUser[username];
-      const parsed = assignedAt ? new Date(assignedAt) : null;
-      const startDay = parsed && !Number.isNaN(parsed.getTime())
-        ? clampDayIntoMonth(parsed, year, month, daysInMonth)
+      const assignedAt = parseDay(input.assignedAtByUser[username]);
+      const startDay = assignedAt
+        ? Math.min(calendarDays, Math.max(1, ordinalOf(periodStart, assignedAt)))
         : 1;
       e = {
         username, assigned: 0, completed: 0, hold: 0, unplaced: 0, startDay,
@@ -226,8 +233,9 @@ export function buildTracking(input: TrackingInput): Tracking {
     if (row.state === "pending") continue;
     if (row.state === "completed") e.completed += 1;
     else e.hold += 1;
-    const day = dayInMonth(row.doneAt, year, month);
-    if (day === null) {
+    const done = parseDay(row.doneAt);
+    const day = done ? ordinalOf(periodStart, done) : 0;
+    if (day < 1 || day > calendarDays) {
       e.unplaced += 1;
       continue;
     }
@@ -238,34 +246,34 @@ export function buildTracking(input: TrackingInput): Tracking {
 
   const employees = [...byUser.values()].sort((a, b) => a.username.localeCompare(b.username, "ar"));
   for (const e of employees) {
-    const window = Math.max(1, workingDaysInMonth(year, month, e.startDay, deadlineDay));
+    const window = Math.max(1, workingDaysBetween(frame, e.startDay, deadlineDay));
     e.quota = e.assigned > 0 ? Math.ceil(e.assigned / window) : 0;
-    // Employees do work Friday/Saturday. A weekend day they actually worked is
-    // a day worked, so it counts in the span — otherwise the extra output would
-    // be divided by working days only and inflate their average.
-    const spanEnd = Math.min(asOfDay, deadlineDay);
+    // The span runs over the whole period, past the deadline: work done after
+    // it is still work. Employees do work Friday/Saturday; a weekend day they
+    // actually worked counts, or the extra output would inflate their average.
+    const spanEnd = Math.min(asOfDay, periodDays);
     let weekendWorked = 0;
     for (const [d, c] of Object.entries(e.byDay)) {
       const day = Number(d);
-      if (day >= e.startDay && day <= spanEnd && !isWorkingDay(dateAt(year, month, day)) && c.completed + c.hold > 0) {
+      if (day >= e.startDay && day <= spanEnd && !isWorkingDay(dateOfDay(frame, day)) && c.completed + c.hold > 0) {
         weekendWorked += 1;
       }
     }
-    e.span = workingDaysInMonth(year, month, e.startDay, spanEnd) + weekendWorked;
+    e.span = workingDaysBetween(frame, e.startDay, spanEnd) + weekendWorked;
     e.avgAll = e.span > 0 ? (e.completed + e.hold) / e.span : 0;
     e.avgCompleted = e.span > 0 ? e.completed / e.span : 0;
   }
 
   return {
-    year, month, daysInMonth, deadlineDay, asOfDay,
-    leadBlanks: (dateAt(year, month, 1).getDay() + 1) % 7,
+    year, month, periodStart, periodEnd, periodDays, calendarDays, deadlineDay, asOfDay,
+    leadBlanks: (periodStart.getDay() + 1) % 7,
     employees,
   };
 }
 
-/** Whether `day` is on the work calendar (Sunday–Thursday). */
-export function isWorkDay(t: Pick<Tracking, "year" | "month">, day: number): boolean {
-  return isWorkingDay(dateAt(t.year, t.month, day));
+/** Whether period day `day` is on the work calendar (Sunday–Thursday). */
+export function isWorkDay(t: Pick<Tracking, "periodStart">, day: number): boolean {
+  return isWorkingDay(dateOfDay(t, day));
 }
 
 /** An employee's quota target on `day`: their quota on a working day inside their window, else 0. */
@@ -311,9 +319,9 @@ export function monthTotals(t: Tracking, employees: readonly EmployeeTracking[])
     quota += e.quota;
   }
   let daysLeft: number;
-  if (t.asOfDay === 0) daysLeft = workingDaysInMonth(t.year, t.month, 1, t.deadlineDay);
+  if (t.asOfDay === 0) daysLeft = workingDaysBetween(t, 1, t.deadlineDay);
   else if (t.asOfDay > t.deadlineDay) daysLeft = 0;
-  else daysLeft = workingDaysInMonth(t.year, t.month, t.asOfDay, t.deadlineDay);
+  else daysLeft = workingDaysBetween(t, t.asOfDay, t.deadlineDay);
   return { assigned, completed, hold, quota, remaining: assigned - completed - hold, daysLeft };
 }
 

@@ -3,13 +3,13 @@ import type { ItemAnswer } from "../answers/answerTypes";
 import type { TemplateSchema } from "../templates/templateTypes";
 import {
   buildTracking,
+  dateOfDay,
   classifyAnswerState,
   dayTotals,
   finishedThroughDay,
   isWorkDay,
   monthTotals,
   quotaOnDay,
-  resolveTrackingMonthFolder,
   type TrackingRow,
 } from "./deadlineTracking";
 
@@ -119,9 +119,12 @@ describe("buildTracking", () => {
   it("a later assignment day shortens the window and the span", () => {
     const t = buildTracking({
       ...input,
+      rows: rows("a", [["pending", null, 38]]),
       assignedAtByUser: { a: "2026-10-11T09:00:00" },
     });
-    expect(t.employees[0].startDay).toBe(11);
+    // The period itself now starts on the assignment day.
+    expect(t.periodStart).toEqual(new Date(2026, 9, 11));
+    expect(t.employees[0].startDay).toBe(1);
     // Oct 11 → 14 elapsed: Sun–Wed = 4; Oct 11 → 27 window: 5 + 5 + 3 = 13
     expect(t.employees[0].span).toBe(4);
     expect(t.employees[0].quota).toBe(Math.ceil(38 / 13));
@@ -132,42 +135,44 @@ describe("buildTracking", () => {
     expect(t.employees[0].startDay).toBe(1);
   });
 
-  it("finished rows with an unknown or out-of-month date are totalled but not on the calendar", () => {
-    const t = buildTracking({
-      ...input,
-      rows: [
-        ...rows("a", [
-          ["completed", null, 2],
-          ["completed", "2026-09-30T10:00:00", 1],
-        ]),
-      ],
-    });
+  it("finished rows with an unknown date are totalled but not on the calendar", () => {
+    const t = buildTracking({ ...input, rows: rows("a", [["completed", null, 2]]) });
     const a = t.employees[0];
-    expect(a.completed).toBe(3);
-    expect(a.unplaced).toBe(3);
+    expect(a.completed).toBe(2);
+    expect(a.unplaced).toBe(2);
     expect(Object.keys(a.byDay)).toHaveLength(0);
   });
 
-  it("before the month starts nothing has elapsed; after it, spans run to the deadline", () => {
+  it("a row finished before the first assignment pulls the period start back onto the calendar", () => {
+    const t = buildTracking({ ...input, rows: rows("a", [["completed", "2026-09-30T10:00:00", 1], ["pending", null, 1]]) });
+    expect(t.periodStart).toEqual(new Date(2026, 8, 30));
+    expect(t.employees[0].unplaced).toBe(0);
+    expect(t.employees[0].byDay[1]).toEqual({ completed: 1, hold: 0 });
+  });
+
+  it("before the period starts nothing has elapsed; after the deadline, spans keep running", () => {
     const before = buildTracking({ ...input, today: new Date(2026, 8, 20) });
     expect(before.asOfDay).toBe(0);
     expect(before.employees[0].span).toBe(0);
     expect(before.employees[0].avgAll).toBe(0);
 
     const after = buildTracking({ ...input, today: new Date(2026, 10, 5) });
-    expect(after.asOfDay).toBe(31);
-    expect(after.employees[0].span).toBe(19);
+    // Oct 1 → Nov 5 = 36 days; working days: 19 to Oct 27 + Oct 28–29 + Nov 1–5
+    expect(after.asOfDay).toBe(36);
+    expect(after.employees[0].span).toBe(26);
   });
 
   it("lays the month out Saturday-first", () => {
     const t = buildTracking(input);
-    expect(t.daysInMonth).toBe(31);
+    // Pending rows keep the period open to today; the calendar reaches the deadline.
+    expect(t.periodDays).toBe(14);
+    expect(t.calendarDays).toBe(27);
     // Oct 1 2026 is a Thursday: Sat, Sun, Mon, Tue, Wed come first.
     expect(t.leadBlanks).toBe(5);
   });
 
-  it("clamps a deadline outside the month into it", () => {
-    expect(buildTracking({ ...input, deadline: new Date(2026, 10, 9) }).deadlineDay).toBe(31);
+  it("a deadline before the period clamps to day 1; a later one extends the calendar", () => {
+    expect(buildTracking({ ...input, deadline: new Date(2026, 10, 9) })).toMatchObject({ deadlineDay: 40, calendarDays: 40 });
     expect(buildTracking({ ...input, deadline: new Date(2026, 8, 9) }).deadlineDay).toBe(1);
   });
 });
@@ -222,28 +227,73 @@ describe("day selectors", () => {
   });
 });
 
-describe("resolveTrackingMonthFolder", () => {
-  const done = (doneAt: string): TrackingRow => ({ assignedTo: "a", state: "completed", doneAt });
-  const pending: TrackingRow = { assignedTo: "a", state: "pending", doneAt: null };
+describe("a sample studied across month boundaries", () => {
+  // October's sample, distributed Oct 20, still being studied in December.
+  const crossRows = [
+    ...rows("a", [
+      ["completed", "2026-10-21T10:00:00", 5],
+      ["completed", "2026-11-03T10:00:00", 4],
+      ["hold", "2026-11-03T11:00:00", 1],
+      ["completed", "2026-12-08T09:00:00", 2],
+    ]),
+    ...rows("b", [["completed", "2026-11-15T10:00:00", 3], ["pending", null, 5]]),
+  ];
+  const cross = {
+    rows: crossRows,
+    assignedAtByUser: { a: "2026-10-20T08:00:00", b: "2026-10-22T08:00:00" },
+    year: YEAR,
+    month: MONTH,
+    deadline: DEADLINE,
+    today: new Date(2026, 11, 10),
+  };
 
-  it("keeps the sample month when today falls inside it", () => {
-    expect(resolveTrackingMonthFolder("10-october-2026", [pending], TODAY)).toBe("10-october-2026");
+  it("runs from the first distribution to today while cases remain", () => {
+    const t = buildTracking(cross);
+    expect(t.periodStart).toEqual(new Date(2026, 9, 20));
+    expect(t.periodEnd).toEqual(new Date(2026, 11, 10));
+    // Oct 20 → Dec 10 inclusive: 12 + 30 + 10
+    expect(t.periodDays).toBe(52);
+    expect(t.asOfDay).toBe(52);
+    // Oct 20 is a Tuesday: Sat, Sun, Mon precede it.
+    expect(t.leadBlanks).toBe(3);
+    expect(t.deadlineDay).toBe(8);
   });
 
-  it("keeps the sample month when finished work is dated inside it", () => {
-    expect(resolveTrackingMonthFolder("1-january-2026", [done("2026-01-12T09:00:00")], TODAY)).toBe("1-january-2026");
+  it("places November and December work on the calendar and counts it per day", () => {
+    const t = buildTracking(cross);
+    const [a, b] = t.employees;
+    const day = (d: Date) => Math.round((d.getTime() - t.periodStart.getTime()) / 86_400_000) + 1;
+    expect(a.unplaced).toBe(0);
+    expect(a.byDay[day(new Date(2026, 10, 3))]).toEqual({ completed: 4, hold: 1 });
+    expect(a.byDay[day(new Date(2026, 11, 8))]).toEqual({ completed: 2, hold: 0 });
+    expect(b.byDay[day(new Date(2026, 10, 15))]).toEqual({ completed: 3, hold: 0 });
+    expect(dateOfDay(t, day(new Date(2026, 11, 8)))).toEqual(new Date(2026, 11, 8));
+    // Past the deadline there is no quota target, but the real numbers show.
+    expect(dayTotals(t, t.employees, day(new Date(2026, 10, 3)))).toMatchObject({ completed: 4, hold: 1, target: 0 });
   });
 
-  it("follows the work when a January sample is finished in October", () => {
-    expect(resolveTrackingMonthFolder("1-january-2026", [done("2026-10-05T09:00:00"), pending], TODAY)).toBe("10-october-2026");
+  it("averages over the whole period, not only up to the deadline", () => {
+    const a = buildTracking(cross).employees[0];
+    // Working days (Sunday-Thursday) Oct 20 → Dec 10: Oct 8 + Nov 22 + Dec 8
+    expect(a.span).toBe(38);
+    expect(a.avgCompleted).toBeCloseTo(11 / 38, 5);
+    expect(a.avgAll).toBeCloseTo(12 / 38, 5);
   });
 
-  it("follows the busiest month when a stray row is dated inside the sample month", () => {
-    const mixed = [done("2026-01-12T09:00:00"), done("2026-10-05T09:00:00"), done("2026-10-06T09:00:00")];
-    expect(resolveTrackingMonthFolder("1-january-2026", mixed, TODAY)).toBe("10-october-2026");
+  it("ends at the last study once every case is done", () => {
+    const done = buildTracking({ ...cross, rows: crossRows.filter((r) => r.state !== "pending") });
+    expect(done.periodEnd).toEqual(new Date(2026, 11, 8));
+    expect(done.periodDays).toBe(50);
+    // Today (Dec 10) is after the period: the as-of day stops at its end.
+    expect(done.employees[0].span).toBe(36);
   });
 
-  it("falls back to today's month when nothing is finished yet", () => {
-    expect(resolveTrackingMonthFolder("1-january-2026", [pending], TODAY)).toBe("10-october-2026");
+  it("starts at a row's own assignment when no quota stamp exists", () => {
+    const t = buildTracking({
+      ...cross,
+      assignedAtByUser: {},
+      rows: [{ assignedTo: "x", state: "pending", doneAt: null, assignedAt: "2026-10-18T09:00:00" }],
+    });
+    expect(t.periodStart).toEqual(new Date(2026, 9, 18));
   });
 });
