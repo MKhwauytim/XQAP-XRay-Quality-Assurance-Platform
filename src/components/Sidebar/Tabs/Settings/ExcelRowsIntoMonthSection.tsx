@@ -12,7 +12,9 @@ import { autoDetectMapping } from "../../../../data/adhocImport/adhocMappingMode
 import { EXCEL_INTO_MONTH_FIELD_CATALOG } from "../../../../data/adhocImport/adhocFieldCatalog";
 import { projectTable } from "../../../../data/adhocImport/adhocRowProjection";
 import type { AdhocRow, SourceTable } from "../../../../data/adhocImport/adhocImportModel";
+import { loadSampleMaster } from "../../../../data/sampling/sampleStorage";
 import {
+  buildIncompleteCasesSheet,
   executeExcelRowsIntoMonth,
   planExcelRowsIntoMonth,
   type ExcelRowsPlan,
@@ -58,7 +60,7 @@ function downloadReport(plan: ExcelRowsPlan, L: Labels): void {
     [L.excel_rows_report_col_id, L.excel_rows_report_col_field, L.excel_rows_report_col_value],
     ...plan.filled.map((change) => [
       change.xrayImageId,
-      change.field === "xrayLevelOneResult" ? L.col_xray_l1_result : L.col_xray_l2_result,
+      EXCEL_INTO_MONTH_FIELD_CATALOG.find((field) => field.key === change.field)?.labelAr ?? change.field,
       change.newValue,
     ]),
   ]);
@@ -103,6 +105,29 @@ export function ExcelRowsIntoMonthSection() {
   }, [isOpen, canImport, directoryHandle, L.delete_month_list_failed]);
 
   if (!canImport) return null;
+
+  /** The target month's cases that still have blanks, to fill in Excel and upload back here. */
+  async function exportIncomplete(): Promise<void> {
+    if (!directoryHandle || !target) return;
+    setBusy(true);
+    try {
+      const sample = await loadSampleMaster(directoryHandle, target);
+      const sheetRows = buildIncompleteCasesSheet(sample?.rows ?? []);
+      if (sheetRows.length <= 1) {
+        setNotice({ kind: "info", text: L.excel_rows_incomplete_none });
+        return;
+      }
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheetRows), L.excel_rows_incomplete_sheet.slice(0, 31));
+      XLSX.writeFile(wb, `incomplete-cases-${target}.xlsx`);
+      setNotice({ kind: "info", text: fill(L.excel_rows_incomplete_done, { n: sheetRows.length - 1, target }) });
+    } catch (error) {
+      logError("settings:excel-rows-export-incomplete", error);
+      setNotice({ kind: "error", text: fill(L.excel_rows_failed, { error: errorText(error) }) });
+    } finally {
+      setBusy(false);
+    }
+  }
 
   function pickSheet(name: string, from: SourceTable[] = tables): void {
     setSheet(name);
@@ -227,6 +252,9 @@ export function ExcelRowsIntoMonthSection() {
             </label>
             <button type="button" className="ew-btn-secondary" onClick={() => void preview()} disabled={busy || !rows || !target}>
               {L.excel_rows_check}
+            </button>
+            <button type="button" className="ew-btn-secondary" onClick={() => void exportIncomplete()} disabled={busy || !target}>
+              {L.excel_rows_incomplete_button}
             </button>
           </div>
 

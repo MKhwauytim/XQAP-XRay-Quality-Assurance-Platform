@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v159.4",
+    "date": "2026-11-01",
+    "bucket": "feature",
+    "scope": "months",
+    "title": "export incomplete cases and fill any blank field on re-upload"
+  },
+  {
     "version": "v159.3",
     "date": "2026-11-01",
     "bucket": "feature",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "sampling",
     "title": "high-priority ports in the sample draw; port pickers list every known port before upload"
-  },
-  {
-    "version": "v154.4",
-    "date": "2026-10-19",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "repair each cause of unsent answers — step timeouts, permission request, backup/import"
   }
 ];

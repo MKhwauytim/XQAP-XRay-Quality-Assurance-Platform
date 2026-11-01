@@ -10,13 +10,15 @@
  * Added rows carry no assignment; they are distributed from the normal
  * distribution screen afterwards.
  *
- * L1/L2 results may be blank (v159.2): the case enters with "" results. When
- * the same file comes back with the results filled in, a case already in the
- * TARGET month whose result is still "" gets it filled in place (population
- * and sample, audited per field). A recorded result is never overwritten here.
+ * L1/L2 results may be blank (v159.3): the case enters with "" results. Any
+ * other field may be blank too. `buildIncompleteCasesSheet` exports the
+ * month's sample cases that still have blanks; when that sheet (or the source
+ * file) comes back filled in, a case already in the TARGET month gets each
+ * still-blank field filled in place (population and sample, audited per
+ * field, v159.4). A recorded value is never overwritten here.
  */
 import { projectToDistributionRow } from "../adhocImport/adhocDistributionBridge";
-import { EXCEL_INTO_MONTH_FIELD_CATALOG } from "../adhocImport/adhocFieldCatalog";
+import { EXCEL_FILLABLE_FIELDS, EXCEL_INTO_MONTH_FIELD_CATALOG } from "../adhocImport/adhocFieldCatalog";
 import { originalXrayImageIdAnyImport, type AdhocRow } from "../adhocImport/adhocImportModel";
 import { listDirectoryEntries } from "../storage/directoryScan";
 import { isNotFoundError } from "../storage/transientFileErrors";
@@ -88,7 +90,6 @@ export type ExcelRowsPlan = {
   filled: FieldChange[];
 };
 
-const RESULT_FIELDS = ["xrayLevelOneResult", "xrayLevelTwoResult"] as const;
 
 /** Target-month rows by exact id, so a blank result can be found and filled. */
 async function loadTargetRows(
@@ -107,17 +108,43 @@ async function loadTargetRows(
   return byId;
 }
 
-function blankResultFills(id: string, existing: Record<string, unknown> | undefined, row: AdhocRow): FieldChange[] {
+const isBlank = (value: unknown) => value == null || (typeof value === "string" && value.trim() === "");
+
+function blankFieldFills(id: string, existing: Record<string, unknown> | undefined, row: AdhocRow): FieldChange[] {
   if (!existing) return [];
   const out: FieldChange[] = [];
-  for (const field of RESULT_FIELDS) {
-    const current = existing[field];
+  for (const field of EXCEL_FILLABLE_FIELDS) {
     const incoming = row.mapped[field];
-    if ((current === "" || current == null) && (incoming === "سليمة" || incoming === "اشتباه")) {
+    if (isBlank(existing[field]) && typeof incoming === "string" && !isBlank(incoming)) {
       out.push({ xrayImageId: id, field, oldValue: "", newValue: incoming });
     }
   }
   return out;
+}
+
+/** Fields whose blank makes a case "incomplete" for the export. */
+const INCOMPLETE_FIELDS = [
+  "xrayLevelOneResult", "xrayLevelTwoResult", "xrayEntryDate", "portName", "portType",
+  "declarationNumber", "plateOrContainerNumber",
+] as const;
+
+/**
+ * The month's sample cases with a blank L1/L2 result or key data field, as a
+ * sheet whose headers are the catalog's Arabic labels, so uploading it back
+ * through this same section maps every column automatically.
+ */
+export function buildIncompleteCasesSheet(rows: readonly PreparedPopulationRow[]): string[][] {
+  const fields = EXCEL_INTO_MONTH_FIELD_CATALOG.filter(
+    (field) => field.key === "xrayImageId" || (EXCEL_FILLABLE_FIELDS as readonly string[]).includes(field.key)
+  );
+  const header = fields.map((field) => field.labelAr);
+  const body: string[][] = [];
+  for (const row of rows) {
+    const record = row as unknown as Record<string, unknown>;
+    if (!INCOMPLETE_FIELDS.some((key) => isBlank(record[key]))) continue;
+    body.push(fields.map((field) => (isBlank(record[field.key]) ? "" : String(record[field.key]))));
+  }
+  return [header, ...body];
 }
 
 export type ExcelRowsPlanResult =
@@ -146,7 +173,7 @@ export async function planExcelRowsIntoMonth(
     const id = row.mapped.xrayImageId as string;
     const location = existingIndex.get(id);
     if (location) {
-      const fills = location.folder === targetMonth && !seen.has(id) ? blankResultFills(id, targetRows.get(id), row) : [];
+      const fills = location.folder === targetMonth && !seen.has(id) ? blankFieldFills(id, targetRows.get(id), row) : [];
       seen.add(id);
       if (fills.length > 0) plan.filled.push(...fills);
       else plan.existing.push({ xrayImageId: id, location });

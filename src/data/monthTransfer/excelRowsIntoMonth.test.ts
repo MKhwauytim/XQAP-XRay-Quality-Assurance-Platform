@@ -12,7 +12,8 @@ import type { PreparedPopulationRow } from "../population/populationTypes";
 import { loadSampleMaster, saveSampleMaster } from "../sampling/sampleStorage";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import { getPopulationMonthDir, POPULATION_SUBFOLDERS } from "../workspace/workspacePaths";
-import { executeExcelRowsIntoMonth, planExcelRowsIntoMonth } from "./excelRowsIntoMonth";
+import { buildIncompleteCasesSheet, executeExcelRowsIntoMonth, planExcelRowsIntoMonth } from "./excelRowsIntoMonth";
+import { autoDetectMapping } from "../adhocImport/adhocMappingModel";
 
 const JAN = "1-January-2026";
 const FEB = "2-February-2026";
@@ -164,5 +165,47 @@ describe("excel rows with blank L1/L2 results", () => {
     if (!plan.ok) throw new Error("plan failed");
     expect(plan.plan.filled).toHaveLength(0);
     expect(plan.plan.existing.map((e) => e.location.folder)).toEqual([FEB]);
+  });
+});
+
+describe("incomplete cases export and fill-back", () => {
+  it("exports cases with blanks, and the filled sheet uploaded back fills only the blanks", async () => {
+    const root = createMemoryDirectory();
+    await seedMonth(root, JAN, ["S1"], ["S1"]);
+    await executeExcelRowsIntoMonth(root, excelRowsWithResults([["N1", "", ""]]), JAN, "admin");
+
+    const sheet = buildIncompleteCasesSheet((await loadSampleMaster(root, JAN))!.rows);
+    // The seeded S1 also lacks port type and entry date, so both cases are exported.
+    const header = sheet[0];
+    const idCol = header.indexOf("معرف الأشعة");
+    const l1Col = header.indexOf("نتيجة المستوى الأول");
+    const l2Col = header.indexOf("نتيجة المستوى الثاني");
+    const portCol = header.indexOf("اسم المنفذ");
+    const n1 = sheet.find((r) => r[idCol] === "N1")!;
+    expect(n1[l1Col]).toBe("");
+
+    // The admin fills N1's results and a port name, and changes S1's recorded port name.
+    const filled = sheet.slice(1).map((r) => {
+      const next = [...r];
+      if (next[idCol] === "N1") { next[l1Col] = "اشتباه"; next[l2Col] = "سليمة"; next[portCol] = "البطحاء"; }
+      if (next[idCol] === "S1") next[portCol] = "مكان آخر";
+      return next;
+    });
+    const table: SourceTable = {
+      sheetName: "الحالات الناقصة",
+      headers: header,
+      rows: filled.map((r, i) => ({ sourceRowNumber: i + 2, values: Object.fromEntries(header.map((h, k) => [h, r[k]])) })),
+    };
+    const mapping = autoDetectMapping(table.headers, EXCEL_INTO_MONTH_FIELD_CATALOG);
+    const rows = projectTable({ table, mapping, catalog: EXCEL_INTO_MONTH_FIELD_CATALOG, binding: { kind: "isolated" } });
+    const done = await executeExcelRowsIntoMonth(root, rows, JAN, "admin");
+    expect(done).toMatchObject({ ok: true, addedToSample: 0 });
+    const after = (await loadSampleMaster(root, JAN))!.rows;
+    expect(after.find((r) => r.xrayImageId === "N1")).toMatchObject({
+      xrayLevelOneResult: "اشتباه", xrayLevelTwoResult: "سليمة", portName: "البطحاء",
+    });
+    // A recorded value is never overwritten.
+    expect(after.find((r) => r.xrayImageId === "S1")!.portName).toBe("ميناء");
+    expect(after).toHaveLength(2);
   });
 });

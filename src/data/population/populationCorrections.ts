@@ -36,6 +36,7 @@ import { ensureMonthWritable, manifestLockKey } from "./monthLock";
 import { getPopulationMonthDir, POPULATION_SUBFOLDERS } from "../workspace/workspacePaths";
 import { loadMonthPopulationFinal } from "./populationStorage";
 import type { PreparedPopulationRow } from "./populationTypes";
+import type { ExcelFillableField } from "../adhocImport/adhocFieldCatalog";
 import { getStageKey } from "./stageHelpers";
 import { STAGE_LABELS_AR } from "./stageLabels";
 import { DEFAULT_STAGE_MAPPINGS } from "./populationConfig";
@@ -59,11 +60,11 @@ import {
 export type FieldChange = {
   xrayImageId: string;
   /**
-   * The L1/L2 results are never correctable from the معلقة sheet; they appear
-   * here only for «إضافة حالات من ملف إكسل إلى شهر» filling a result that was
-   * left blank ("") when the case was added (v159.2) — never an overwrite.
+   * `ExcelFillableField` (incl. the L1/L2 results, never correctable from the
+   * معلقة sheet) appears here only for «إضافة حالات من ملف إكسل إلى شهر»
+   * filling a value left blank when the case was added — never an overwrite.
    */
-  field: CorrectablePopulationField | "xrayLevelOneResult" | "xrayLevelTwoResult";
+  field: CorrectablePopulationField | ExcelFillableField;
   oldValue: string;
   newValue: string;
 };

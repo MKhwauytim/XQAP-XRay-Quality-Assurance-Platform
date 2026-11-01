@@ -275,6 +275,19 @@ export const EXCEL_INTO_MONTH_FIELD_CATALOG: AdhocField[] = ADHOC_FIELD_CATALOG.
   field.key === "xrayLevelOneResult" || field.key === "xrayLevelTwoResult" ? { ...field, required: false } : field
 );
 
+/**
+ * Fields «إضافة حالات من ملف إكسل إلى شهر» may fill on a re-upload when the
+ * case's stored value is blank (v159.4). Every key is also a
+ * `PreparedPopulationRow` field. Excluded: the merge key, `studyMonth` (not
+ * stored on the row) and `certScanStatus` (always defaulted, never blank).
+ */
+export const EXCEL_FILLABLE_FIELDS = [
+  "xrayEntryDate", "portCode", "portName", "portType", "declarationNumber", "plateOrContainerNumber",
+  "chassisNumber", "xrayLevelOneResult", "xrayLevelTwoResult", "stage", "movementType", "reportNumber",
+  "targetedByRiskEngine", "riskMessage", "levelOneEmployee", "levelTwoEmployee",
+] as const;
+export type ExcelFillableField = (typeof EXCEL_FILLABLE_FIELDS)[number];
+
 export function getAdhocField(
   catalog: AdhocField[],
   key: string
