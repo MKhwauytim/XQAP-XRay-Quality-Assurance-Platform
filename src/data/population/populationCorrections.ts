@@ -47,6 +47,8 @@ import type { PendingCorrectionsImportRow } from "../../workers/pendingCorrectio
 import {
   CORRECTABLE_FIELD_LABEL_KEYS,
   CORRECTABLE_POPULATION_FIELDS,
+  FILL_ONLY_ALLOWED_VALUES,
+  FILL_ONLY_POPULATION_FIELDS,
   XRAY_IMAGE_ID_HEADER,
   type CorrectablePopulationField,
 } from "./pendingCorrections";
@@ -120,6 +122,10 @@ export type CorrectionPreview = {
    *  not as a silent failure. */
   unchangedIds: string[];
   changes: FieldChange[];
+  /** Sheet values for a fill-only field the row already has — left as they are. */
+  protectedChanges: FieldChange[];
+  /** Sheet values outside a fill-only field's allowed set — ignored. */
+  invalidValues: FieldChange[];
 };
 
 /** Current correctable-field values for one population row, string-normalized
@@ -146,6 +152,8 @@ export function computeCorrectionPreview(
   const unmatchedIds: string[] = [];
   const unchangedIds: string[] = [];
   const changes: FieldChange[] = [];
+  const protectedChanges: FieldChange[] = [];
+  const invalidValues: FieldChange[] = [];
   for (const row of parsedRows) {
     const populationRow = populationRowsById.get(row.xrayImageId);
     if (!populationRow) {
@@ -158,12 +166,24 @@ export function computeCorrectionPreview(
     for (const [field, newValue] of Object.entries(row.fields) as [CorrectablePopulationField, string][]) {
       const oldValue = current[field];
       if (newValue === oldValue) continue;
+      const change = { xrayImageId: row.xrayImageId, field, oldValue, newValue };
+      if (FILL_ONLY_POPULATION_FIELDS.has(field)) {
+        const allowed = FILL_ONLY_ALLOWED_VALUES[field];
+        if (allowed && !allowed.includes(newValue)) {
+          invalidValues.push(change);
+          continue;
+        }
+        if (oldValue.trim() !== "") {
+          protectedChanges.push(change);
+          continue;
+        }
+      }
       changedAny = true;
-      changes.push({ xrayImageId: row.xrayImageId, field, oldValue, newValue });
+      changes.push(change);
     }
     if (!changedAny) unchangedIds.push(row.xrayImageId);
   }
-  return { matchedIds, unmatchedIds, unchangedIds, changes };
+  return { matchedIds, unmatchedIds, unchangedIds, changes, protectedChanges, invalidValues };
 }
 
 export type PendingCorrectionsApplyResult =
@@ -219,7 +239,7 @@ export async function applyPopulationFieldCorrections(params: {
 }): Promise<PendingCorrectionsApplyResult> {
   const { directoryHandle, monthFolderName, changes, actorUsername, actorRole } = params;
   if (changes.length === 0) {
-    return { ok: true, preview: { matchedIds: [], unmatchedIds: [], unchangedIds: [], changes: [] } };
+    return { ok: true, preview: { matchedIds: [], unmatchedIds: [], unchangedIds: [], changes: [], protectedChanges: [], invalidValues: [] } };
   }
 
   await ensureMonthWritable(directoryHandle, monthFolderName);
@@ -350,6 +370,8 @@ export async function applyPopulationFieldCorrections(params: {
         unmatchedIds: [],
         unchangedIds: [],
         changes: [...changes],
+        protectedChanges: [],
+        invalidValues: [],
       },
     };
   } catch (error) {

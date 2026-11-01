@@ -336,6 +336,8 @@ export const DEFAULT_LABELS = {
   ew_pending_import_summary_changed:   "حقول تم تغييرها",
   ew_pending_import_summary_unmatched: "معرّفات غير معروفة لهذا الشهر",
   ew_pending_import_summary_unchanged: "صفوف بلا أي تغيير فعلي",
+  ew_pending_import_summary_protected: "قيم للمستوى أو نتيجة L1/L2 لم تُطبَّق لأن الحقل معبأ مسبقاً (تُعبأ الفارغة فقط)",
+  ew_pending_import_summary_invalid:   "قيم مرفوضة لنتيجة L1/L2 (المسموح: سليمة أو اشتباه)",
   ew_pending_import_unmatched_list: "المعرّفات غير المعروفة (لن يتم استيرادها): {ids}",
   ew_pending_import_no_changes:   "لا توجد أي تغييرات فعلية في الملف المستورد.",
   ew_pending_import_apply_btn:    "تأكيد وتطبيق التصحيحات",

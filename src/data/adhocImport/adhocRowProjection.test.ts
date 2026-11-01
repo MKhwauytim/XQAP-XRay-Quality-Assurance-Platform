@@ -340,3 +340,30 @@ describe("projectTable — duplicate identities", () => {
     expect(rows[1].validation).toEqual({ valid: true });
   });
 });
+
+describe("operator-file values", () => {
+  it("resolves pipeline stage codes and converts a bare Excel serial date", async () => {
+    const { ADHOC_FIELD_CATALOG } = await import("./adhocFieldCatalog");
+    const table: SourceTable = {
+      sheetName: "s",
+      headers: ["id", "stage", "date", "l1", "l2"],
+      rows: [{ sourceRowNumber: 2, values: { id: "A1", stage: "SECOND_STAG", date: 46028.5521990741, l1: "سليمة", l2: "سليمة" } }],
+    };
+    const mapping: ImportMapping = {
+      fields: {
+        xrayImageId: { kind: "column", header: "id" },
+        stage: { kind: "column", header: "stage" },
+        xrayEntryDate: { kind: "column", header: "date" },
+        xrayLevelOneResult: { kind: "column", header: "l1" },
+        xrayLevelTwoResult: { kind: "column", header: "l2" },
+      },
+      valueMappings: {},
+    };
+
+    const [row] = projectTable({ table, mapping, catalog: ADHOC_FIELD_CATALOG, binding: { kind: "isolated" } });
+
+    expect(row.validation).toEqual({ valid: true });
+    expect(row.mapped.stage).toBe("المستوى الثاني");
+    expect(row.mapped.xrayEntryDate).toBe("2026-01-06");
+  });
+});

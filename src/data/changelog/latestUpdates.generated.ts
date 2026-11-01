@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v158.0",
+    "date": "2026-11-01",
+    "bucket": "feature",
+    "scope": "import",
+    "title": "operator workbook support and full-column corrections export"
+  },
+  {
     "version": "v157.0",
     "date": "2026-11-01",
     "bucket": "feature",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "answers",
     "title": "per-assignee answer folders, admin-offered migration with archived originals, automatic compaction (v154.0)"
-  },
-  {
-    "version": "v153.33",
-    "date": "2026-10-14",
-    "bucket": "fix",
-    "scope": "deck3",
-    "title": "one land/sea rule per port, error rates on their own bases, labelled marking base, defined agreement weights, «عادي» image quality = «متوسط»"
   }
 ];

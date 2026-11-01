@@ -19,6 +19,26 @@
  */
 
 import { foldedEquals } from "./adhocTextFolding";
+import { normalizeDate } from "../../components/Sidebar/Tabs/Population/processing/populationProcessor";
+import { getStageKey } from "../population/stageHelpers";
+import { STAGE_LABELS_AR } from "../population/stageLabels";
+import { DEFAULT_STAGE_MAPPINGS } from "../population/populationConfig";
+
+const EXCEL_SERIAL = /^\d{5}(\.\d+)?$/;
+
+/**
+ * Last-resort value resolution for an enum field, by field key — kept out of
+ * the catalog because the catalog is snapshotted into import records as JSON.
+ * Stage codes (`SECOND_STAG`, `FORTH_STAGE`…) resolve through the CODE-default
+ * alias table, never the admin-editable config, so a saved import keeps
+ * parsing the same way.
+ */
+const ENUM_FALLBACK_RESOLVERS: Record<string, (raw: string) => string | null> = {
+  stage: (raw) => {
+    const key = getStageKey(raw, DEFAULT_STAGE_MAPPINGS);
+    return key === "unknown" ? null : STAGE_LABELS_AR[key];
+  },
+};
 import { resolveRowMonth } from "./adhocMonthBinding";
 import type {
   AdhocField,
@@ -136,6 +156,10 @@ function coerceEnum(
   if (folded !== undefined) {
     return { value: folded };
   }
+  const resolved = ENUM_FALLBACK_RESOLVERS[field.key]?.(candidate) ?? null;
+  if (resolved !== null && options.includes(resolved)) {
+    return { value: resolved };
+  }
 
   return { value: null, unresolvedRaw: raw };
 }
@@ -154,7 +178,14 @@ function coerceField(
   raw: string | null,
   valueMapping: ValueMapping | undefined
 ): FieldOutcome {
-  return field.kind === "enum" ? coerceEnum(field, raw, valueMapping) : { value: raw };
+  if (field.kind === "enum") return coerceEnum(field, raw, valueMapping);
+  // The one date reformat: a bare Excel serial (`46028.55`, what an unformatted
+  // date cell reads as) is no display string anyone wrote, so it becomes the
+  // same YYYY-MM-DD the Population ingest stores.
+  if (field.kind === "date" && raw !== null && EXCEL_SERIAL.test(raw)) {
+    return { value: normalizeDate(Number(raw)) ?? raw };
+  }
+  return { value: raw };
 }
 
 function enumProblem(field: AdhocField, unresolvedRaw: string): string {
