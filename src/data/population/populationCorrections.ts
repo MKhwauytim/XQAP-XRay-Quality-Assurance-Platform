@@ -36,6 +36,9 @@ import { ensureMonthWritable, manifestLockKey } from "./monthLock";
 import { getPopulationMonthDir, POPULATION_SUBFOLDERS } from "../workspace/workspacePaths";
 import { loadMonthPopulationFinal } from "./populationStorage";
 import type { PreparedPopulationRow } from "./populationTypes";
+import { getStageKey } from "./stageHelpers";
+import { STAGE_LABELS_AR } from "./stageLabels";
+import { DEFAULT_STAGE_MAPPINGS } from "./populationConfig";
 import { loadSampleMaster, saveSampleMaster } from "../sampling/sampleStorage";
 import {
   invalidateDistributionCacheForFieldEdit,
@@ -165,11 +168,15 @@ export function computeCorrectionPreview(
     let changedAny = false;
     for (const [field, newValue] of Object.entries(row.fields) as [CorrectablePopulationField, string][]) {
       const oldValue = current[field];
-      if (newValue === oldValue) continue;
-      const change = { xrayImageId: row.xrayImageId, field, oldValue, newValue };
+      // A stage is stored as its canonical label; any spelling the code-default
+      // alias table knows (FIRST_STAGE, "1", …) resolves to it, anything else is invalid.
+      const stageKey = field === "stage" ? getStageKey(newValue, DEFAULT_STAGE_MAPPINGS) : null;
+      const value = stageKey && stageKey !== "unknown" ? STAGE_LABELS_AR[stageKey] : newValue;
+      if (value === oldValue) continue;
+      const change = { xrayImageId: row.xrayImageId, field, oldValue, newValue: value };
       if (FILL_ONLY_POPULATION_FIELDS.has(field)) {
         const allowed = FILL_ONLY_ALLOWED_VALUES[field];
-        if (allowed && !allowed.includes(newValue)) {
+        if (stageKey === "unknown" || (allowed && !allowed.includes(value))) {
           invalidValues.push(change);
           continue;
         }
