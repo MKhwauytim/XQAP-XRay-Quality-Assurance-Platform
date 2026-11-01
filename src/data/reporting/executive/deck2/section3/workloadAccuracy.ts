@@ -107,7 +107,7 @@ const SHOW_WORKLOAD_ACCURACY_SLIDE = false;
 
 const SLIDE_ID = "slide-s3-workload";
 const SLIDE_TITLE = "الأداء حسب حجم الأعمال";
-const EYEBROW = "القسم 3 — التحاليل المتقدمة";
+const EYEBROW = "القسم 3 - التحاليل المتقدمة";
 const SUBHEAD =
   "هل يرتبط انخفاض دقة المنفذ بارتفاع حجم صوره؟ مقارنة الدقة بحجم مجتمع كل منفذ.";
 
@@ -129,7 +129,7 @@ const DEV_SPAN = 3;
 
 /** The muted cell used wherever a rate is unavailable or ungated: no bar, no
  *  number, just the "—" every other deck table uses. */
-const MUTED_CELL = `<td class="v2-bar-cell neutral"><span class="insuff">—</span></td>`;
+const MUTED_CELL = `<td class="v2-bar-cell neutral"><span class="insuff">-</span></td>`;
 
 /**
  * Row budget for THIS page's land/sea tables — deliberately smaller than the
@@ -284,7 +284,7 @@ function tableCard(title: string, rows: WorkloadPortRow[], variant: "land" | "se
             );
           })
           .join("")
-      : `<tr><td colspan="${TABLE_SPAN}"><span class="insuff">—</span></td></tr>`;
+      : `<tr><td colspan="${TABLE_SPAN}"><span class="insuff">-</span></td></tr>`;
 
   const sum = (f: (p: WorkloadPortRow) => number) => rows.reduce((s, p) => s + f(p), 0);
   const totWorkload = sum((p) => p.workload);
@@ -413,8 +413,8 @@ function deviationStrip(landChunk: WorkloadPortRow[], seaChunk: WorkloadPortRow[
   );
   const rowsHtml = combined.length
     ? combined.map((p) => deviationRow(p, monthMean, maxAbsDev)).join("")
-    : `<tr><td colspan="${DEV_SPAN}"><span class="insuff">—</span></td></tr>`;
-  const meanText = monthMean === null ? `<span class="insuff">—</span>` : fmtPct(monthMean);
+    : `<tr><td colspan="${DEV_SPAN}"><span class="insuff">-</span></td></tr>`;
+  const meanText = monthMean === null ? `<span class="insuff">-</span>` : fmtPct(monthMean);
 
   return `<div class="v2-wa-dev">
     <div class="v2-wa-dev-head">
@@ -550,7 +550,7 @@ export const WORKLOAD_ACCURACY_CSS = `
    and push the totals row out of the clipped card. */
 .v2-wl-split .v2-port-col .deck-table th{white-space:nowrap;}
 .v2-wl-split .v2-port-col .deck-table td:first-child{overflow-wrap:anywhere;}
-/* Association-not-causation caveat — permanent, on every variant, whether the
+/* Association-not-causation caveat - permanent, on every variant, whether the
    page shows the two tables or the empty state. */
 .v2-wl-caveat{
   display:flex;align-items:center;gap:6px;margin:0;padding:7px 14px 9px;
@@ -564,7 +564,7 @@ body.theme-light .v2-wl-caveat{
 }
 /* Page shell: wraps the tables, the deviation strip, and the caveat strip.
    The land/sea split no longer owns the whole body (flex:1 1 auto still, but
-   sharing the column with the strip below) — this is exactly why
+   sharing the column with the strip below) - this is exactly why
    WORKLOAD_TABLE_ROWS_PER_PAGE had to shrink from BASE_ROWS_PER_PAGE. */
 .v2-wl-layout{display:flex;flex-direction:column;gap:7px;height:100%;min-height:0;}
 .v2-wl-layout .v2-wl-caveat{border-top:0;padding:0 2px;}
@@ -581,7 +581,7 @@ body.theme-light .v2-wl-empty{border-color:color-mix(in srgb,var(--navy) 20%,tra
 body.theme-light .v2-wl-empty b{color:var(--navy);}
 body.theme-light .v2-wl-empty span{color:color-mix(in srgb,var(--navy) 72%,transparent);}
 
-/* ── Deviation strip (2026-08-19 rework) — the correlation view itself ──── */
+/* ── Deviation strip (2026-08-19 rework) - the correlation view itself ──── */
 .v2-wa-dev{
   flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:4px;
   border-radius:12px;border:1px solid color-mix(in srgb,var(--white) 12%,transparent);

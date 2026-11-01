@@ -156,7 +156,7 @@ export function computeManagementModel(
       xrayImageId: e.xrayImageId,
       username: e.assignedTo,
       displayName: nameOf(e.assignedTo),
-      portName: e.row.portName ?? "—",
+      portName: e.row.portName ?? "-",
       reason: replacementReasons[e.xrayImageId] ?? null,
       replacedById: e.replacedById,
       lastEventAt: e.lastEventAt,

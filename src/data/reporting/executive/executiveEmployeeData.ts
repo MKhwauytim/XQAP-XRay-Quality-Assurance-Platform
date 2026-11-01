@@ -124,9 +124,9 @@ export function buildEmployeeProfiles(
 
     const recommendedAction =
       !reliable ? "بيانات غير كافية للتقييم" :
-      missedSuspicionRate !== null && missedSuspicionRate > 10 ? "مراجعة عاجلة — اشتباه فائت مرتفع" :
-      overallAccuracy !== null && overallAccuracy < 80 ? "تدريب مكثف — دقة منخفضة" :
-      overallAccuracy !== null && overallAccuracy < 90 ? "متابعة دورية — دقة دون الهدف" :
+      missedSuspicionRate !== null && missedSuspicionRate > 10 ? "مراجعة عاجلة - اشتباه فائت مرتفع" :
+      overallAccuracy !== null && overallAccuracy < 80 ? "تدريب مكثف - دقة منخفضة" :
+      overallAccuracy !== null && overallAccuracy < 90 ? "متابعة دورية - دقة دون الهدف" :
       "أداء مستقر";
 
     return {

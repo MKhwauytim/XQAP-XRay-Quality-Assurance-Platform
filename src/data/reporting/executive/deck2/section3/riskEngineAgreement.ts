@@ -101,7 +101,7 @@ import { briefingSupport, pctCell, rateOf, v2Slide } from "../slideKit";
 
 const TITLE = "توافق نتائج الفحص مع محرك المخاطر";
 const SUBHEAD = "كيف تقارن قرارات فحص الأشعة باستهداف محرك مخاطر الجمارك، وماذا وجد المراجع عند الاختلاف.";
-const EYEBROW = "القسم 3 — التحاليل المتقدمة";
+const EYEBROW = "القسم 3 - التحاليل المتقدمة";
 
 /** Guards the asymmetric-scope fact (module header note #2). Reused verbatim
  *  from `sourceAgreement.ts`'s `SCOPE_FOOTNOTE` — the same structural fact
@@ -115,7 +115,7 @@ const SCOPE_FOOTNOTE =
  *  for the risk-level category — the SAME label, two different axes, on one
  *  page. */
 const LEVEL_FOOTNOTE =
-  "«المستوى الأول» و«المستوى الثاني» في جدولي التوافق والمحضر أعلاه/أدناه يعنيان مرحلتي فحص الأشعة؛ أما «المستوى الثاني» في عنوان مجموعة الاختلاف فيعني مستوى المخاطر — معنى مختلف تمامًا لنفس الاسم.";
+  "«المستوى الأول» و«المستوى الثاني» في جدولي التوافق والمحضر أعلاه/أدناه يعنيان مرحلتي فحص الأشعة؛ أما «المستوى الثاني» في عنوان مجموعة الاختلاف فيعني مستوى المخاطر - معنى مختلف تمامًا لنفس الاسم.";
 
 // ── The mapping rule (the page's own correctness core) ──────────────────────
 
@@ -295,7 +295,7 @@ function disagreementBlock(fold: DisagreementFold): string {
     <div class="v2-re-block-head">
       <b>${esc("مجموعة الاختلاف: المستوى الثاني")}</b>
       <span>${esc(
-        `استهدفها محرك المخاطر ولم تشتبه بها شاشتنا — ماذا وجد المراجع؟ إجمالي صور مجتمع الشهر: ${fmtNum(fold.total)}؛ خارج العيّنة المدروسة (لم تُسحب أصلًا): ${fmtNum(fold.outsideSample)}.`,
+        `استهدفها محرك المخاطر ولم تشتبه بها شاشتنا - ماذا وجد المراجع؟ إجمالي صور مجتمع الشهر: ${fmtNum(fold.total)}؛ خارج العيّنة المدروسة (لم تُسحب أصلًا): ${fmtNum(fold.outsideSample)}.`,
       )}</span>
     </div>
     ${stats}
@@ -374,7 +374,7 @@ function coverageBlock(cov: Coverage): string {
   const stats = briefingSupport([
     { iconName: "check", value: fmtNum(cov.recognized), label: "قيم معروفة (نعم/لا أو ما يعادلها)" },
     { iconName: "alert", value: fmtNum(cov.unrecognized), label: "قيم غير معروفة (غير مصنَّفة بعد)" },
-    { iconName: "document", value: fmtNum(cov.blank), label: "بلا قيمة (فارغة) — لا تُحتسب سليمة" },
+    { iconName: "document", value: fmtNum(cov.blank), label: "بلا قيمة (فارغة) - لا تُحتسب سليمة" },
   ]);
   return `<div class="v2-re-coverage">${stats}</div>`;
 }
@@ -491,7 +491,7 @@ export const RISK_ENGINE_CSS = `
 }
 .v2-re-agree .deck-table th:first-child,.v2-re-agree .deck-table td:first-child,
 .v2-re-report .deck-table th:first-child,.v2-re-report .deck-table td:first-child{text-align:right;}
-/* The engine-vs-المراجع row is the page's headline figure — the one
+/* The engine-vs-المراجع row is the page's headline figure - the one
    comparison independent of how المستوى is defined (see module header).
    Marked visually, never by color alone: a gold left rule plus bold text. */
 .v2-re-agree .deck-table tr.v2-re-headline td{
@@ -501,11 +501,11 @@ export const RISK_ENGINE_CSS = `
 
 /* Both stat bands below (disagree + coverage) are shrunk from the shared
    theme's hero-sized .v2-totals-band default (18px margin-top, 1.15rem
-   figures — meant for a slide's single headline stat strip) down to a
+   figures - meant for a slide's single headline stat strip) down to a
    compact inline variant, the same pattern outcomeMatrix.ts's .v2-om-top
    override uses: this page needs THREE stat-bearing blocks in one slide, not
    one, so none of them can afford the hero sizing. Measured live via
-   report:static against a populated fixture — see module header. */
+   report:static against a populated fixture - see module header. */
 .v2-re-disagree .v2-totals-band,.v2-re-report .v2-totals-band,.v2-re-coverage .v2-totals-band{
   margin-top:0;gap:6px;
 }
@@ -519,11 +519,11 @@ export const RISK_ENGINE_CSS = `
 .v2-re-disagree-rate b{font-size:.74rem;font-weight:900;color:var(--gold);}
 .v2-re-disagree-n{font-size:.56rem;font-weight:700;color:var(--slate);font-variant-numeric:tabular-nums;}
 
-/* ── Coverage line — the vocabulary-discovery counter ─────────────────────── */
+/* ── Coverage line - the vocabulary-discovery counter ─────────────────────── */
 .v2-re-coverage{flex-shrink:0;}
 
 /* ── Mandatory footnotes: scope + level-axis + definitional-overlap caveat ───
-   Three lines now (2026-08-20 whole-branch-review fix), not one — stacked
+   Three lines now (2026-08-20 whole-branch-review fix), not one - stacked
    and right-flush (RTL) rather than centered, the same layout
    sourceAgreement.ts's .s3sa-foot uses for its own two-line footnote, since
    a centered multi-line block reads worse than a stacked one. */
@@ -537,7 +537,7 @@ export const RISK_ENGINE_CSS = `
 }
 .v2-re-caveat-icon svg{display:block;}
 
-/* ── Empty state — no recognized engine verdict this month ───────────────── */
+/* ── Empty state - no recognized engine verdict this month ───────────────── */
 .v2-re-empty{
   display:flex;flex-direction:column;align-items:center;justify-content:center;
   gap:9px;text-align:center;padding:20px 18px;flex:1;min-height:0;

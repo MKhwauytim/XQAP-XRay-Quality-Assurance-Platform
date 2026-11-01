@@ -156,7 +156,7 @@ function percentsIn(tr: string): string[] {
 
 /** How many muted "no data" cells the row carries. */
 function mutedCount(tr: string): number {
-  return (tr.match(/<span class="insuff">—<\/span>/g) ?? []).length;
+  return (tr.match(/<span class="insuff">-<\/span>/g) ?? []).length;
 }
 
 describe("collectPortAgreementRows", () => {
@@ -175,7 +175,7 @@ describe("portAgreementSlideBuilders — slide shell", () => {
     expect(html).toContain('id="slide-s3-port-agreement"');
     expect(html).toContain('data-title="توافق المستويات حسب المنفذ"');
     expect(html).toContain('data-section="section3"');
-    expect(html).toContain("القسم 3 — التحاليل المتقدمة");
+    expect(html).toContain("القسم 3 - التحاليل المتقدمة");
     expect(html).toContain(
       "نسبة اتفاق المستوى الأول والثاني على النتيجة في كل منفذ، ومطابقة كل مستوى لنتيجة المراجع.",
     );
@@ -318,7 +318,7 @@ describe("portAgreementSlideBuilders — no reviewer answers", () => {
     const tfoot = html.slice(html.indexOf("<tfoot>"), html.indexOf("</tfoot>"));
     expect(tfoot).toContain("الإجمالي");
     expect(tfoot).toContain("100.0%"); // L1↔L2 total (all rows agree)
-    expect((tfoot.match(/<span class="insuff">—<\/span>/g) ?? [])).toHaveLength(2);
+    expect((tfoot.match(/<span class="insuff">-<\/span>/g) ?? [])).toHaveLength(2);
   });
 });
 
@@ -451,7 +451,7 @@ describe("portAgreementSlideBuilders — pagination", () => {
   it("renders an empty-state row rather than an empty table for a missing side", () => {
     const html = renderOne(modelOf(portRows({ port: "منفذ بري أ", count: 12, idPrefix: "A" })));
     // No sea ports at all → the sea card shows one muted colspan row.
-    expect(html).toContain('<tr><td colspan="6"><span class="insuff">—</span></td></tr>');
+    expect(html).toContain('<tr><td colspan="6"><span class="insuff">-</span></td></tr>');
   });
 });
 

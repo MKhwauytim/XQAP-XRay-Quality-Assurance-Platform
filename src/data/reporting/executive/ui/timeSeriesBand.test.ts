@@ -10,7 +10,7 @@ describe("timeSeriesBand", () => {
   it("renders an empty state when no series has a plottable point", () => {
     const html = timeSeriesBand(series([{ x: 1, y: null, n: 0, lo: null, hi: null }]));
     expect(html).toContain("<svg");
-    expect(html).toContain("—");
+    expect(html).toContain("-");
   });
 
   it("renders one polyline segment per contiguous run and never bridges a gap", () => {

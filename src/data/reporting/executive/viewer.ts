@@ -44,7 +44,7 @@ export function buildViewerHtml(slides: string, monthLabel: string, footerNote =
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>التقرير التنفيذي — ${esc(monthLabel)}</title>
+<title>التقرير التنفيذي - ${esc(monthLabel)}</title>
 <style>${ARABIC_FONT_FACE_CSS}${EXEC_CSS}${EXEC_DOCUMENT_PRINT_CSS}${SOURCE_REVISIONS_CSS}</style>
 </head>
 <body>
@@ -54,7 +54,7 @@ export function buildViewerHtml(slides: string, monthLabel: string, footerNote =
       <div class="brand-mark">${icon("shield", 24)}</div>
       <div>
         <strong>التقرير التنفيذي</strong>
-        <span>ضمان جودة الأشعة — ${esc(monthLabel)}</span>
+        <span>ضمان جودة الأشعة - ${esc(monthLabel)}</span>
       </div>
     </div>
     <div class="toolbar">

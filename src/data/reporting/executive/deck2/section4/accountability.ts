@@ -145,7 +145,7 @@ function emptyAccountabilityBody(): string {
   return `<div class="v2-cov-empty">
     <span class="v2-cov-empty-icon">${icon("flag", 24)}</span>
     <b>لا يوجد توزيع لهذا الشهر بعد</b>
-    <p>يُبنى هذا القسم من بيانات تقرير الإدارة — وزّع العيّنة على الموظفين أولاً ليظهر هنا.</p>
+    <p>يُبنى هذا القسم من بيانات تقرير الإدارة - وزّع العيّنة على الموظفين أولاً ليظهر هنا.</p>
   </div>`;
 }
 
@@ -175,16 +175,16 @@ export function accountabilitySlide(
           ${reasonsTable(acc.replacements.byReason)}
         </div>
         ${acc.reassignments.total === 0 && acc.replacements.total === 0
-          ? `<div class="v2-acc-note"><span>${icon("alert", 13)}</span><span>لا توجد استبدالات أو إعادة تعيين مسجّلة لهذا الشهر — أو لم تُمرَّر سجلات الأحداث الخام لهذا التوليد.</span></div>`
+          ? `<div class="v2-acc-note"><span>${icon("alert", 13)}</span><span>لا توجد استبدالات أو إعادة تعيين مسجّلة لهذا الشهر - أو لم تُمرَّر سجلات الأحداث الخام لهذا التوليد.</span></div>`
           : ""}`;
   return v2Slide({
     id: "slide-s4-accountability",
     title: "المساءلة التشغيلية",
-    eyebrow: "القسم 4 — التغطية والمساءلة التشغيلية",
+    eyebrow: "القسم 4 - التغطية والمساءلة التشغيلية",
     iconName: "flag",
     headline: "المساءلة التشغيلية",
     subhead:
-      "تقدّم الموظفين، أسباب الاستبدال، وعدد إعادة التعيين — من تقرير الإدارة (R3)، بلا إعادة احتساب.",
+      "تقدّم الموظفين، أسباب الاستبدال، وعدد إعادة التعيين - من تقرير الإدارة (R3)، بلا إعادة احتساب.",
     bodyVariants: [body, body, body, body],
     variantPreview,
     num,

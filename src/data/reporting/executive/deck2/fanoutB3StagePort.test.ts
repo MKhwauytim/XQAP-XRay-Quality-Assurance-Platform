@@ -310,8 +310,8 @@ describe("stage×port level-identity resolution — regression for positional (l
     expect(panel1).not.toContain('class="v2-lg-stage-card v2-stage-port-card gold">');
 
     // Each card's title still names its OWN stage correctly (never borrowed).
-    expect(panel1).toContain("المستوى الرابع — أعلى 5 من منفذ واحد");
-    expect(panel1).toContain("المستوى الثاني — أعلى 5 من منفذ واحد");
+    expect(panel1).toContain("المستوى الرابع - أعلى 5 من منفذ واحد");
+    expect(panel1).toContain("المستوى الثاني - أعلى 5 من منفذ واحد");
   });
 
   it("Briefing: rank-row tone follows its OWN level, and display order is canonical stage order", () => {
@@ -418,7 +418,7 @@ describe("stage×port Briefing — 4 rank rows, one per stage, correct bar/secon
     // 2026-07-28), not level 2's own STAGE_TONES ("blue"), which is what the
     // lede used to show before the fix.
     expect(panel2).toContain(`<div class="v2-bf-lede-figure gold">${fmtNum(10)}</div>`);
-    expect(panel2).toContain(`أعلى تركّز: ${LONG_PORT} في المستوى الثاني — ${fmtNum(10)} صورة`);
+    expect(panel2).toContain(`أعلى تركّز: ${LONG_PORT} في المستوى الثاني - ${fmtNum(10)} صورة`);
   });
 });
 
@@ -441,7 +441,7 @@ describe("stage×port Grid — transposed matrix, shared domain, truncated-but-d
     const figureStart = panel3.indexOf("<figure");
     const figureEnd = panel3.indexOf("</figure>") + "</figure>".length;
     const figureHtml = panel3.slice(figureStart, figureEnd);
-    expect((figureHtml.match(/0–10/g) ?? []).length).toBe(5);
+    expect((figureHtml.match(/0-10/g) ?? []).length).toBe(5);
 
     for (const stageLabel of ["المستوى الأول", "المستوى الثاني", "المستوى الثالث", "المستوى الرابع"]) {
       expect(figureHtml).toContain(stageLabel);
@@ -455,7 +455,7 @@ describe("stage×port Grid — transposed matrix, shared domain, truncated-but-d
     const figureStart = panel3.indexOf("<figure");
     const figureEnd = panel3.indexOf("</figure>") + "</figure>".length;
     const figureHtml = panel3.slice(figureStart, figureEnd);
-    expect((figureHtml.match(/0–4/g) ?? []).length).toBe(5);
+    expect((figureHtml.match(/0-4/g) ?? []).length).toBe(5);
   });
 
   it("the long port name is truncated inside the chart/sr-table figure, but its FULL name is still discoverable in the page's own legend line", () => {

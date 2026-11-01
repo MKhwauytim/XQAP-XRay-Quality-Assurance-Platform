@@ -109,7 +109,7 @@ export function buildExclusions(model: ReportModel, pageNo: string): string {
         <ul class="doc-list">
           <li>${escapeText(model.exclusions.note)}</li>
           <li>القرارات غير القابلة للتقييم تُستبعد من حساب الدقة (لا صورة، أو لا نتيجة مراجع، أو لا هوية مفتش).</li>
-          <li>نتائج الفرق الأخرى اختيارية؛ غيابها لا يستبعد الصورة، ويُعرض "—".</li>
+          <li>نتائج الفرق الأخرى اختيارية؛ غيابها لا يستبعد الصورة، ويُعرض "-".</li>
         </ul>`, { fill: true, iconName: "document" })}
     </div>
     ${noteBox("تُوثَّق الصفوف المستبعدة بالتفصيل في تقرير معالجة المجتمع (processing.summary.json).")}`;
@@ -138,7 +138,7 @@ export function buildAppendix(model: ReportModel, pageNo: string): string {
       ${panel("القواعد الحسابية", dataTable({ headers: ["المؤشر", "طريقة الحساب"], rows: formulaRows }), { iconName: "chart" })}
       ${panel("القيود وجودة البيانات", `<ul class="doc-list">${limitations.map((l) => `<li>${escapeText(l)}</li>`).join("")}</ul>`, { iconName: "alert" })}
     </div>
-    ${noteBox("تُحتسب نسب التطابق فقط حيث تتوفر نتيجة لكلا المصدرين؛ القيم الناقصة تُعرض \"—\".")}`;
+    ${noteBox("تُحتسب نسب التطابق فقط حيث تتوفر نتيجة لكلا المصدرين؛ القيم الناقصة تُعرض \"-\".")}`;
   return page({ id: "page-appendix", title: "المنهجية وجودة البيانات", pageNo, railTabs: TABS, body });
 }
 

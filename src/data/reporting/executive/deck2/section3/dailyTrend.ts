@@ -130,7 +130,7 @@ function shareHeadline(model: ReportModel): string {
   const caution =
     datedShare !== null && datedShare < CAUTION_THRESHOLD
       ? `<div class="v2-dt-caution">${icon("alert", 13)}<span>${esc(
-          "نسبة كبيرة من القرارات هذا الشهر بلا تاريخ دخول — يصف هذا الاتجاه جزءًا من الشهر لا كله.",
+          "نسبة كبيرة من القرارات هذا الشهر بلا تاريخ دخول - يصف هذا الاتجاه جزءًا من الشهر لا كله.",
         )}</span></div>`
       : "";
   return `<div class="v2-dt-share">
@@ -216,7 +216,7 @@ export function dailyTrendSlide(
   return v2Slide({
     id: "slide-s3-daily-trend",
     title: "الاتجاه اليومي للدقة",
-    eyebrow: "القسم 3 — التحاليل المتقدمة",
+    eyebrow: "القسم 3 - التحاليل المتقدمة",
     iconName: "chart",
     headline: "الاتجاه اليومي للدقة",
     subhead: "دقة القرارات اليومية عبر أيام الشهر، مع نطاقات ضبط إحصائية لكل من دقة السليمة ودقة الاشتباه.",
@@ -238,7 +238,7 @@ export const DAILY_TREND_CSS = `
 /* ── القسم 3 · الاتجاه اليومي للدقة ───────────────────────────────────────── */
 .v2-dt-layout{display:flex;flex-direction:column;gap:11px;height:100%;min-height:0;}
 
-/* Share headline — a headline, not a footnote, per the page's own honesty rule. */
+/* Share headline - a headline, not a footnote, per the page's own honesty rule. */
 .v2-dt-share{
   display:flex;align-items:center;gap:18px;flex-wrap:wrap;
   padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.03);
@@ -252,16 +252,16 @@ export const DAILY_TREND_CSS = `
 }
 .v2-dt-caution svg{display:block;flex-shrink:0;}
 
-/* Chart wrapper fills the remaining space in the body — measured live via
+/* Chart wrapper fills the remaining space in the body - measured live via
    report:static against a populated fixture (2026-08-20): the original rule
    here targeted the inner figure element (analyticsCharts.ts's timeSeriesBand
    wrapper), but that figure is a grandchild of this flex column, not a
-   direct flex item of it — .v2-ts-wrap (a plain block div) is the actual
+   direct flex item of it - .v2-ts-wrap (a plain block div) is the actual
    flex item, so flex:1 on figure was a no-op and the chart rendered at its
    unconstrained intrinsic height (~487px), pushing the per-day n-strip and
    legend entirely past the slide's fixed 630px box. Targeting the real flex
-   item — with min-height:0 so it can shrink below the SVG's own intrinsic
-   size — lets flexbox allocate it only the space left after the share
+   item - with min-height:0 so it can shrink below the SVG's own intrinsic
+   size - lets flexbox allocate it only the space left after the share
    headline, n-strip, and legend, and the height:100% chain (.v2-ts-wrap to
    figure to svg) resolves against that now-definite height. */
 .v2-dt-layout .v2-ts-wrap{flex:1;min-height:0;display:flex;}
@@ -278,14 +278,14 @@ export const DAILY_TREND_CSS = `
 .v2-dt-n-cell b{font-size:.6rem;font-weight:800;color:rgba(255,255,255,.85);font-variant-numeric:tabular-nums;}
 .v2-dt-n-cell span{font-size:.52rem;font-weight:700;color:var(--slate);font-variant-numeric:tabular-nums;}
 
-/* Legend — band shading + low-n hollow-point explanation. */
+/* Legend - band shading + low-n hollow-point explanation. */
 .v2-dt-legend{display:flex;flex-wrap:wrap;gap:6px 18px;}
 .v2-dt-legend-item{display:flex;align-items:center;gap:6px;font-size:.62rem;font-weight:700;color:var(--slate);}
 .v2-dt-swatch{display:inline-block;width:10px;height:10px;border-radius:3px;flex-shrink:0;}
 .v2-dt-swatch.band{background:var(--blue);opacity:.4;}
 .v2-dt-swatch.lown{border:1.5px solid var(--slate);background:transparent;border-radius:50%;}
 
-/* Empty state — no dated decision at all this month. */
+/* Empty state - no dated decision at all this month. */
 .v2-dt-empty{
   display:flex;flex:1;min-height:0;flex-direction:column;align-items:center;justify-content:center;
   gap:9px;text-align:center;padding:20px 18px;

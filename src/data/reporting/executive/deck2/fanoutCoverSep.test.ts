@@ -154,7 +154,7 @@ describe("slide-cover fan-out — Ledger/Briefing/Grid (2026-07-28 fan-out plan 
     `          <span class="v2-cover-lockup-label">فترة الدراسة (عيّنة شهر)</span>\n` +
     `          <span class="v2-cover-lockup-period">مايو 2026</span>\n` +
     `        </div>\n` +
-    `        <div class="v2-cover-badge"><span><svg viewBox="0 0 24 24" width="13" height="13" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 3l7 3v5c0 4.2-2.9 7.4-7 8.5C7.9 18.4 5 15.2 5 11V6l7-3z"/></svg></span>داخلي — للاستخدام التنفيذي</div>\n` +
+    `        <div class="v2-cover-badge"><span><svg viewBox="0 0 24 24" width="13" height="13" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 3l7 3v5c0 4.2-2.9 7.4-7 8.5C7.9 18.4 5 15.2 5 11V6l7-3z"/></svg></span>داخلي - للاستخدام التنفيذي</div>\n` +
     `      </div>\n` +
     `      <div class="v2-cover-meta-col"><div class="v2-cover-meta-item">\n` +
     `        <span class="v2-cover-meta-icon"><svg viewBox="0 0 24 24" width="18" height="18" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span>\n` +
@@ -202,7 +202,7 @@ describe("slide-cover fan-out — Ledger/Briefing/Grid (2026-07-28 fan-out plan 
     expect(idxBadges).toBe(7);
     expect(panel1).not.toContain("الإجمالي");
     expect(panel1).toContain(
-      `<tr class="v2-lg-footnote"><td colspan="3">داخلي — للاستخدام التنفيذي</td></tr>`,
+      `<tr class="v2-lg-footnote"><td colspan="3">داخلي - للاستخدام التنفيذي</td></tr>`,
     );
     // Hero kept verbatim (title + lockup), kicker/badge dropped (classification
     // now lives in the table footnote, not a repeated badge).
@@ -263,7 +263,7 @@ describe("slide-cover fan-out — Ledger/Briefing/Grid (2026-07-28 fan-out plan 
 // ═══════════════════════════════════════════════════════════════════════════
 describe("slide-sep-1/2/3 fan-out — Ledger/Briefing/Grid (2026-07-28 fan-out plan §5)", () => {
   const EXPECTED_VARIANT0 =
-    `<section class="slide v2 v2-sep-slide gold" id="slide-sep-1" data-title="مجتمع الفحص" data-section="section1" data-section-label="القسم 1 — مجتمع الفحص">\n` +
+    `<section class="slide v2 v2-sep-slide gold" id="slide-sep-1" data-title="مجتمع الفحص" data-section="section1" data-section-label="القسم 1 - مجتمع الفحص">\n` +
     `  <div class="slide-controls">\n` +
     `    <label class="slide-print-toggle" title="تضمين هذه الصفحة عند الطباعة">\n` +
     `    <input type="checkbox" checked/>\n` +

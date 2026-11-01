@@ -29,7 +29,7 @@ export function divider(opts: {
   <div class="page-inner big-divider" style="--divider-num:'${esc(opts.dividerNum)}'">
     <div class="divider-top">
       <span class="shield" aria-hidden="true"></span>
-      <span>هيئة الزكاة والضريبة والجمارك — إدارة ضمان جودة الأشعة اللاحقة</span>
+      <span>هيئة الزكاة والضريبة والجمارك - إدارة ضمان جودة الأشعة اللاحقة</span>
     </div>
     <div class="divider-center">
       <div class="icon">${icon(opts.iconName, 52)}</div>

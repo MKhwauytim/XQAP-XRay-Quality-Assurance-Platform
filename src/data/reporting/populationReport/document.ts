@@ -53,7 +53,7 @@ ${docTwoColumn({
 
 function buildContentsPage(scope: PopulationReportScope): string {
   const rows = contentsRows(scope);
-  const items = rows.map((r) => `<li><strong>${esc(r.title)}</strong> — ${esc(r.description)}</li>`).join("");
+  const items = rows.map((r) => `<li><strong>${esc(r.title)}</strong> - ${esc(r.description)}</li>`).join("");
   return docPage({
     id: "contents",
     pageNo: "00",
@@ -84,7 +84,7 @@ ${docTwoColumn({
     title: "بيانات معلومات الأعمال (BI)",
     body: docKpiStrip(
       model.reconciled.biRawRowCount === null
-        ? [{ label: "لم يتم توفير BI لهذا الشهر", value: "—" }]
+        ? [{ label: "لم يتم توفير BI لهذا الشهر", value: "-" }]
         : [{ label: "إجمالي الصفوف الخام", value: fmtNum(model.reconciled.biRawRowCount) }]
     ),
   },
@@ -97,8 +97,8 @@ ${docTwoColumn({
     docPage({
       id: "s1-risk",
       pageNo: pad(n++),
-      title: "بيانات المخاطر — قبل وبعد",
-      body: `${docPageHeader({ eyebrow: "القسم الأول", title: "بيانات المخاطر — قبل وبعد" })}
+      title: "بيانات المخاطر - قبل وبعد",
+      body: `${docPageHeader({ eyebrow: "القسم الأول", title: "بيانات المخاطر - قبل وبعد" })}
 ${
   summary
     ? docKpiStrip([
@@ -127,8 +127,8 @@ ${
     docPage({
       id: "s1-bi",
       pageNo: pad(n++),
-      title: "بيانات BI — قبل وبعد",
-      body: `${docPageHeader({ eyebrow: "القسم الأول", title: "بيانات BI — قبل وبعد" })}
+      title: "بيانات BI - قبل وبعد",
+      body: `${docPageHeader({ eyebrow: "القسم الأول", title: "بيانات BI - قبل وبعد" })}
 ${
   summary && summary.biProvided
     ? `${docKpiStrip([
@@ -245,11 +245,11 @@ export async function buildPopulationDocument(
     pages.push(...(await buildSection2Pages(model)));
     pages.push(...(await buildSection3Pages(model)));
   }
-  pages.push(docClosing({ org, title: "نهاية التقرير", closingLine: `تقرير المجتمع — ${model.monthLabel}` }));
+  pages.push(docClosing({ org, title: "نهاية التقرير", closingLine: `تقرير المجتمع - ${model.monthLabel}` }));
   const footer = sourceRevisionsFooterHtml(model.sourceRevisions, esc);
 
   return `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8" />
-<title>تقرير المجتمع — ${esc(model.monthLabel)}</title>
+<title>تقرير المجتمع - ${esc(model.monthLabel)}</title>
 <style>${DOCUMENT_V3_CSS}${footer ? SOURCE_REVISIONS_CSS : ""}</style></head>
 <body><div class="docviewer"><aside class="sidebar no-print"><div class="doc-brand">تقرير المجتمع</div><div class="doc-brand-sub">${esc(model.monthLabel)}</div></aside>
 <main class="content">${pages.join("\n")}${footer}</main></div></body></html>`;

@@ -99,7 +99,7 @@ describe.each(bases)("real builders on a combined input (%s)", (_name, base) => 
     const html = await buildExecutiveDeckV2(input, {});
     clean(html);
     for (const absent of [
-      "القسم الأول — مجتمع الفحص", "القسم الرابع — التغطية والمساءلة التشغيلية",
+      "القسم الأول - مجتمع الفحص", "القسم الرابع - التغطية والمساءلة التشغيلية",
       'data-section="section1"', 'data-section="section4"',
       "تغطية العيّنة", "إجمالي مجتمع الصور", "فترة الدراسة (عيّنة شهر)", "صورة مسجّلة هذا الشهر",
     ]) expect(html, absent).not.toContain(absent);
@@ -111,12 +111,12 @@ describe.each(bases)("real builders on a combined input (%s)", (_name, base) => 
   it("deck v2 renumbers the remaining sections from 1 and drops the population tab from the side rail", async () => {
     const html = await buildExecutiveDeckV2(input, {});
     for (const present of [
-      "القسم الأول — نتائج فحص الجودة", "القسم الثاني — التحاليل المتقدمة",
-      'data-section-label="القسم 1 — نتائج فحص الجودة"', 'data-section-label="القسم 2 — التحاليل المتقدمة"',
+      "القسم الأول - نتائج فحص الجودة", "القسم الثاني - التحاليل المتقدمة",
+      'data-section-label="القسم 1 - نتائج فحص الجودة"', 'data-section-label="القسم 2 - التحاليل المتقدمة"',
       '<div class="v2-sep-eyebrow">القسم 1</div>', '<div class="v2-sep-eyebrow">القسم 2</div>',
     ]) expect(html, present).toContain(present);
     for (const absent of [
-      "القسم الثاني — نتائج فحص الجودة", "القسم الثالث — التحاليل المتقدمة",
+      "القسم الثاني - نتائج فحص الجودة", "القسم الثالث - التحاليل المتقدمة",
       '<div class="v2-rail-tab" data-edit="مجتمع الفحص">مجتمع الفحص</div>',
       '<div class="v2-rail-tab active" data-edit="مجتمع الفحص">مجتمع الفحص</div>',
     ]) expect(html, absent).not.toContain(absent);
@@ -130,7 +130,7 @@ describe.each(bases)("real builders on a combined input (%s)", (_name, base) => 
     const html = await buildExecutiveDeckV3(input, {});
     clean(html);
     for (const absent of [
-      "القسم الأول — مجتمع الفحص", "مجتمع الفحص والعيّنة حسب المستوى", "التوزيع على المنافذ البرية والبحرية",
+      "القسم الأول - مجتمع الفحص", "مجتمع الفحص والعيّنة حسب المستوى", "التوزيع على المنافذ البرية والبحرية",
       "إجمالي المجتمع", "العيّنة المسحوبة", "العيّنة المستهدفة الأساسية شهريًا", "وزن السحب",
       "القسم الثالث", "مؤشرات الشهر", "عيّنة هذا الشهر", "نتائج الشهر", "فترة الدراسة (عيّنة شهر)",
     ]) expect(html, absent).not.toContain(absent);

@@ -38,8 +38,8 @@ describe("buildManagementDeck", () => {
 
   it("renders section 1 (per stage) and section 2 (per port)", async () => {
     const html = await buildManagementDeck(input(), { u1: "أحمد", u2: "سارة" });
-    expect(html).toContain("القسم 1 — حسب المستوى");
-    expect(html).toContain("القسم 2 — حسب المنفذ");
+    expect(html).toContain("القسم 1 - حسب المستوى");
+    expect(html).toContain("القسم 2 - حسب المنفذ");
     expect(html).toContain("المستوى الأول");
     expect(html).toContain("منفذ أ");
   });

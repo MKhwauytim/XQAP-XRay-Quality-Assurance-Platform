@@ -166,7 +166,7 @@ describe("bubbleScatter", () => {
       }),
     ]) {
       assertFigure(html);
-      expect(html).toContain("—");
+      expect(html).toContain("-");
       expect(html).toContain("لا توجد بيانات");
       expect(circleCxs(html)).toHaveLength(0);
     }
@@ -185,7 +185,7 @@ describe("bubbleScatter", () => {
     expect(circleCxs(html)).toHaveLength(1); // only the complete point is plotted
     expect(html).toContain("ناقص");
     expect(html).toContain("بلا س");
-    expect(html).toContain("<td>—</td>"); // the missing magnitudes read as —
+    expect(html).toContain("<td>-</td>"); // the missing magnitudes read as —
   });
 
   it("clamps percentage y values into 0–100", () => {
@@ -357,13 +357,13 @@ describe("percentHeatmap", () => {
       { width: 400, height: 180 },
     );
     assertFigure(html);
-    const dashes = [...html.matchAll(/>—<\/text>/g)];
+    const dashes = [...html.matchAll(/>-<\/text>/g)];
     expect(dashes).toHaveLength(3); // three missing cells in the SVG
     expect(html).toContain(">0%<"); // the genuine zero still prints as 0%
     // missing cells get an outline, not a fill
     expect(html).toContain('fill="none" stroke="currentColor"');
     // and the sr table mirrors it
-    expect(html).toContain("<td>—</td>");
+    expect(html).toContain("<td>-</td>");
     expect(html).toContain("<td>0%</td>");
   });
 
@@ -411,7 +411,7 @@ describe("percentHeatmap", () => {
       percentHeatmap(undefined, { width: 300, height: 180, emptyNote: "لا بيانات" }),
     ]) {
       assertFigure(html);
-      expect(html).toContain("—");
+      expect(html).toContain("-");
       expect(html).toContain("لا بيانات");
     }
   });
@@ -423,7 +423,7 @@ describe("percentHeatmap", () => {
     );
     assertFigure(html);
     expect(html).toContain(">10%<");
-    expect((html.match(/>—<\/text>/g) ?? []).length).toBe(5); // 3×2 grid minus the one value
+    expect((html.match(/>-<\/text>/g) ?? []).length).toBe(5); // 3×2 grid minus the one value
   });
 
   it("clamps out-of-range percentages into 0–100", () => {
@@ -512,8 +512,8 @@ describe("metricMatrix", () => {
     expect(html).toContain(">60<");
     expect(html).toContain(">5<");
     // each column's OWN domain is printed in its header — never a shared scale.
-    expect(html).toContain(">0–1000<");
-    expect(html).toContain(">0–200<");
+    expect(html).toContain(">0-1000<");
+    expect(html).toContain(">0-200<");
     // cell ink is always var(--navy) (cssVar("surface")) — theme-invariant,
     // never currentColor, since every fill here is opaque.
     expect(html).toContain('fill="var(--navy)"');
@@ -539,10 +539,10 @@ describe("metricMatrix", () => {
     };
     const html = metricMatrix(data, { width: 320, height: 180 });
     assertFigure(html);
-    expect(html).toContain(">—<");
+    expect(html).toContain(">-<");
     // missing cells get an outline, not a fill
     expect(html).toContain('fill="none" stroke="currentColor"');
-    expect(html).toContain("<td>—</td>");
+    expect(html).toContain("<td>-</td>");
 
     // undefined and NaN behave identically to null.
     for (const v of [undefined, Number.NaN]) {
@@ -551,7 +551,7 @@ describe("metricMatrix", () => {
         { width: 320, height: 180 },
       );
       assertFigure(h2);
-      expect(h2).toContain(">—<");
+      expect(h2).toContain(">-<");
     }
   });
 
@@ -569,7 +569,7 @@ describe("metricMatrix", () => {
     expect(html).toContain(">20<");
     expect(html).toContain("فارغ");
     // every cell of the empty column reads as missing, not a crash or a fake 0.
-    expect((html.match(/>—<\/text>/g) ?? []).length).toBe(2);
+    expect((html.match(/>-<\/text>/g) ?? []).length).toBe(2);
   });
 
   it("diverging-green-coral tints below the domain midpoint green and above it coral", () => {
@@ -618,7 +618,7 @@ describe("metricMatrix", () => {
       metricMatrix(undefined, { width: 300, height: 180, emptyNote: "لا بيانات" }),
     ]) {
       assertFigure(html);
-      expect(html).toContain("—");
+      expect(html).toContain("-");
       expect(html).toContain("لا بيانات");
     }
   });

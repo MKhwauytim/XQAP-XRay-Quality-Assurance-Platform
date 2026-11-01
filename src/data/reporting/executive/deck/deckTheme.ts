@@ -34,7 +34,7 @@ ${EXEC_CSS}
 .deck-toolbar .btn{width:auto;padding:9px 18px;}
 
 /* Sun/moon slide toggle for the light/dark switch (replaces a plain text
-   button — sun and moon sit at fixed ends of the track, a thumb slides
+   button - sun and moon sit at fixed ends of the track, a thumb slides
    between them). \`dir="ltr"\` on the label pins sun-start/moon-end regardless
    of the surrounding RTL document, matching the \`.v2-variant-switcher\` fix
    for the same bidi issue. */
@@ -59,12 +59,12 @@ ${EXEC_CSS}
 @media print{.theme-toggle{display:none!important;}}
 
 /* A 16:9 landscape slide, 1120x630px at the design width. Height is a FIXED
-   px value, not aspect-ratio-derived from width — every page's row-budget
+   px value, not aspect-ratio-derived from width - every page's row-budget
    math (BASE_ROWS_PER_PAGE, filler-row heights, briefingRankPlan's tiers,
    etc.) is calibrated against this exact ~630px of vertical room. Letting
    aspect-ratio shrink height together with width (the previous rule) meant
-   any container narrower than 1120px — a laptop-width browser window, or
-   the admin design customizer's iframe, both very ordinary cases — silently
+   any container narrower than 1120px - a laptop-width browser window, or
+   the admin design customizer's iframe, both very ordinary cases - silently
    clipped content via this rule's own overflow:hidden, since the budget
    math never shrinks to match. Width still narrows via min(1120px,100%)
    for real narrow/mobile viewports; the max-width:1152px query below
@@ -118,7 +118,7 @@ ${EXEC_CSS}
 }
 .slide-subhead{color:var(--gold);font-size:1rem;font-weight:700;margin-bottom:2px;}
 
-/* ── Slide body — the hero zone ───────────────────────────────────────── */
+/* ── Slide body - the hero zone ───────────────────────────────────────── */
 .slide-body{
   flex:1 1 auto;min-height:0;margin-top:16px;
   display:flex;flex-direction:column;justify-content:center;
@@ -140,12 +140,12 @@ ${EXEC_CSS}
 .hero-caption{font-size:1rem;color:rgba(255,255,255,.82);font-weight:600;line-height:1.5;max-width:420px;}
 .hero-sub{font-size:0.84rem;color:var(--muted);line-height:1.6;}
 
-/* The hero chart box — a single large visual, sized, never runtime-scaled. */
+/* The hero chart box - a single large visual, sized, never runtime-scaled. */
 .hero-chart{width:100%;height:var(--hero-h,320px);display:flex;align-items:center;justify-content:center;}
 .hero-chart svg{max-height:100%;max-width:100%;width:auto;}
 .hero-chart-cap{font-size:0.78rem;color:var(--muted);text-align:center;margin-top:6px;}
 
-/* ── KPI band — the executive-summary headline strip ──────────────────── */
+/* ── KPI band - the executive-summary headline strip ──────────────────── */
 .kpi-band{display:grid;gap:16px;}
 .kpi-band.n2{grid-template-columns:repeat(2,1fr);}
 .kpi-band.n3{grid-template-columns:repeat(3,1fr);}
@@ -198,7 +198,7 @@ ${EXEC_CSS}
 .deck-card h4{margin:0 0 6px;font-size:0.98rem;color:#fff;font-weight:800;}
 .deck-card p{margin:0;font-size:0.84rem;color:rgba(255,255,255,.78);line-height:1.6;}
 
-/* ── Agenda (الفهرس) — 4 roadmap items, colored by section ────────────── */
+/* ── Agenda (الفهرس) - 4 roadmap items, colored by section ────────────── */
 .deck-agenda{display:flex;flex-direction:column;gap:13px;height:100%;justify-content:center;}
 .deck-agenda-item{
   display:flex;align-items:center;gap:18px;
@@ -259,7 +259,7 @@ ${EXEC_CSS}
 .deck-empty b{font-size:1.1rem;color:#fff;font-weight:800;}
 .deck-empty span{font-size:0.86rem;color:var(--muted);max-width:520px;line-height:1.7;}
 
-/* ── Decision footer — "the decision this supports" ───────────────────── */
+/* ── Decision footer - "the decision this supports" ───────────────────── */
 .slide-footer{
   flex-shrink:0;position:relative;z-index:1;
   display:flex;align-items:center;gap:12px;
@@ -320,20 +320,20 @@ ${EXEC_CSS}
 
 /* ── Print: 16:9 landscape, one slide per page, no toolbar ────────────── */
 /* Explicit two-length @page size (297mm x 167mm) already fully specifies a
-   landscape-shaped page — do NOT add the \`landscape\` keyword alongside it.
+   landscape-shaped page - do NOT add the \`landscape\` keyword alongside it.
    Per the CSS Paged Media spec, explicit <length>{1,2} and the portrait/
    landscape keyword are separate, mutually-exclusive grammar alternatives for
    the \`size\` property; combining them is invalid and Chromium silently drops
    the entire @page size (keeping only margin), falling back to the print
-   dialog's default paper — which then mismatches the .slide box below (forced
+   dialog's default paper - which then mismatches the .slide box below (forced
    to 297mm x 167mm regardless), producing white space / wrong-size gaps.
-   This does NOT fix printing via the "Microsoft Print to PDF" Windows driver —
+   This does NOT fix printing via the "Microsoft Print to PDF" Windows driver -
    that driver ignores ANY website's custom @page size and silently forces
    Letter/A4 (confirmed via Microsoft's own support docs), independent of browser
    or CSS. Use the browser's own "Save as PDF" destination instead. */
 @media print{
   @page{size:297mm 167mm;margin:0;}
-  /* Blanket rule, not just body{} — print-color-adjust is nominally an
+  /* Blanket rule, not just body{} - print-color-adjust is nominally an
      inherited property, but this codebase's own history (see the narrow
      per-element overrides added in deck2/theme.ts: .v2-bar-cell,
      .v2-prop-seg, .v2-num-tile, etc.) shows that relying on inheritance
@@ -348,7 +348,7 @@ ${EXEC_CSS}
     width:297mm;height:167mm;aspect-ratio:auto;margin:0;border:0;border-radius:0;
     box-shadow:none;page-break-after:always;break-after:page;
   }
-  /* Not ":last-child" — the source-revisions footer (sourceRevisions.ts) is
+  /* Not ":last-child" - the source-revisions footer (sourceRevisions.ts) is
      appended after the slides, so the true last .slide is never the last DOM
      child when it's present; that left the real last slide still carrying
      break-after:page, printing the footer alone on a stray extra page.
@@ -364,7 +364,7 @@ ${EXEC_CSS}
   .kpi-band.n3{grid-template-columns:1fr 1fr;}
   .deck-cards.n3,.deck-cards.n2{grid-template-columns:1fr;}
   /* height:auto resets the base rule's fixed 630px (needed at the framed-
-     card design width, wrong here) — without it, a 1-column reflow that
+     card design width, wrong here) - without it, a 1-column reflow that
      needs MORE than 630px (e.g. two port cards stacked instead of
      side-by-side) still clipped via the base rule's overflow:hidden. */
   .slide{aspect-ratio:auto;height:auto;min-height:520px;}
@@ -373,7 +373,7 @@ ${EXEC_CSS}
   .hero-number{font-size:3.4rem;}
 }
 
-/* ── Light theme re-skin (toolbar toggle) — components shared by both the
+/* ── Light theme re-skin (toolbar toggle) - components shared by both the
    v1 reference deck and the v2 deck. Selectors here match or exceed the
    specificity of the dark-theme rule they override (e.g. \`.deck-table td\`
    beats a bare \`.deck-table\`), otherwise the light override silently loses
