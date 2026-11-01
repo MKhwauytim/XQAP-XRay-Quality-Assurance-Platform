@@ -13,16 +13,28 @@
  * Order makes a re-run safe after a partial failure: (1) the ad-hoc record and
  * its sample are written first, skipping ids an earlier split of this month
  * already moved; (2) the archive copy; (3) the month's sample is rewritten
- * without the moved rows (CAS); (4) the distribution cache is refreshed. Rows
- * moved while assigned lose that assignment (the fold reports the orphaned
- * events as absent); they are distributed again from the ad-hoc import.
+ * without the moved rows (CAS); (4) the distribution cache is refreshed;
+ * (5) every moved row that was assigned in the month is assigned again, in the
+ * ad-hoc import, to the same employee (v159.6), so it stays in that
+ * employee's queue, now under «حالات استثنائية». Step 5 also repairs a split
+ * run by v159.5, which left those rows unassigned: the month's distribution
+ * events are immutable files, so the last assignee of each moved id is still
+ * known. Unassigned ad-hoc rows appear in no queue, which is how ~2,000 cases
+ * vanished from view after the owner's first split.
  */
 import { loadAllEmployeeFiles } from "../answers/answerStorage";
-import { ensureAdhocSampleMaster } from "../adhocImport/adhocDistributionBridge";
+import { assignAdhocPlan, ensureAdhocSampleMaster } from "../adhocImport/adhocDistributionBridge";
 import { EXCEL_FILLABLE_FIELDS, EXCEL_INTO_MONTH_FIELD_CATALOG } from "../adhocImport/adhocFieldCatalog";
-import type { AdhocMappedRow, AdhocRecord, AdhocRow, ImportMapping } from "../adhocImport/adhocImportModel";
+import {
+  namespacedXrayImageId,
+  type AdhocMappedRow,
+  type AdhocRecord,
+  type AdhocRow,
+  type ImportMapping,
+  type PlannedAssignment,
+} from "../adhocImport/adhocImportModel";
 import { createImportId, loadAdhocImportIndex, loadAdhocRecord, saveAdhocRecord } from "../adhocImport/adhocImportStorage";
-import { loadOrDeriveDistributionCurrent, refreshDistributionCacheAfterWrite } from "../distribution/distributionStorage";
+import { loadDistributionLog, loadOrDeriveDistributionCurrent, refreshDistributionCacheAfterWrite } from "../distribution/distributionStorage";
 import { invalidateMonthLockCache, isMonthClosed } from "../population/monthLock";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import { liveSampleRows, loadSampleMaster, saveSampleMaster } from "../sampling/sampleStorage";
@@ -47,6 +59,8 @@ export type SplitPlan = {
   movedAssigned: number;
   /** Ids in the list that are not in this month's sample. */
   listNotInMonth: string[];
+  /** Rows an earlier split moved that lost their employee and can be given back. */
+  restorable: number;
 };
 
 export type SplitPlanResult =
@@ -76,7 +90,7 @@ export async function planSplitMonth(
   }
 
   const listed = new Set(listIds.map((id) => id.trim()).filter(Boolean));
-  const plan: SplitPlan = { month, keptStudied: [], keptListed: [], moved: [], movedAssigned: 0, listNotInMonth: [] };
+  const plan: SplitPlan = { month, keptStudied: [], keptListed: [], moved: [], movedAssigned: 0, listNotInMonth: [], restorable: 0 };
   const inMonth = new Set<string>();
   for (const row of rows) {
     inMonth.add(row.xrayImageId);
@@ -88,6 +102,10 @@ export async function planSplitMonth(
     }
   }
   for (const id of listed) if (!inMonth.has(id)) plan.listNotInMonth.push(id);
+  const assignees = await lastAssignees(directoryHandle, month);
+  for (const record of await splitRecords(directoryHandle, month)) {
+    plan.restorable += restorePlan(record, assignees).length;
+  }
   return { ok: true, plan };
 }
 
@@ -105,20 +123,82 @@ function toAdhocRow(row: PreparedPopulationRow, index: number, sheetName: string
   return { rowKey: `${sheetName}:${index + 2}`, mapped, validation: { valid: true }, excludedByAdmin: false, assignments: [] };
 }
 
+/** Every ad-hoc record an earlier split of this month created. */
+async function splitRecords(directoryHandle: DirectoryHandleLike, month: string): Promise<AdhocRecord[]> {
+  const out: AdhocRecord[] = [];
+  for (const entry of (await loadAdhocImportIndex(directoryHandle)) ?? []) {
+    if (!entry.fileName.startsWith(`${SPLIT_FILE_PREFIX}${month}`)) continue;
+    const record = await loadAdhocRecord(directoryHandle, entry.importId);
+    if (record) out.push(record);
+  }
+  return out;
+}
+
 /** Ids an earlier split of this month already moved, so a re-run never moves one twice. */
 async function alreadyMovedIds(directoryHandle: DirectoryHandleLike, month: string): Promise<Set<string>> {
   const ids = new Set<string>();
-  const index = await loadAdhocImportIndex(directoryHandle);
-  for (const entry of index ?? []) {
-    if (!entry.fileName.startsWith(`${SPLIT_FILE_PREFIX}${month}`)) continue;
-    const record = await loadAdhocRecord(directoryHandle, entry.importId);
-    for (const row of record?.rows ?? []) if (row.mapped.xrayImageId) ids.add(row.mapped.xrayImageId);
+  for (const record of await splitRecords(directoryHandle, month)) {
+    for (const row of record.rows) if (row.mapped.xrayImageId) ids.add(row.mapped.xrayImageId);
   }
   return ids;
 }
 
+/** xrayImageId → the employee its latest assign/reassign event in the month names. */
+async function lastAssignees(directoryHandle: DirectoryHandleLike, month: string): Promise<Map<string, string>> {
+  const latest = new Map<string, { at: string; user: string }>();
+  const log = await loadDistributionLog(directoryHandle, month);
+  for (const event of log?.events ?? []) {
+    if (event.eventType !== "assigned" && event.eventType !== "reassigned") continue;
+    const user = event.reassignedTo ?? event.assignedTo;
+    if (!user) continue;
+    const prev = latest.get(event.xrayImageId);
+    if (!prev || event.eventAt >= prev.at) latest.set(event.xrayImageId, { at: event.eventAt, user });
+  }
+  return new Map([...latest].map(([id, value]) => [id, value.user]));
+}
+
+/** Unassigned rows of a split record whose month assignee is known. */
+function restorePlan(record: AdhocRecord, assignees: ReadonlyMap<string, string>): PlannedAssignment[] {
+  if (record.status === "closed") return [];
+  const plan: PlannedAssignment[] = [];
+  for (const row of record.rows) {
+    const id = row.mapped.xrayImageId;
+    const user = id ? assignees.get(id) : undefined;
+    if (!id || !user || row.assignments.length > 0 || row.excludedByAdmin) continue;
+    plan.push({ rowKey: row.rowKey, username: user, replicaIndex: 0, xrayImageId: namespacedXrayImageId(record.importId, id, 0) });
+  }
+  return plan;
+}
+
+/**
+ * Step 5: give each moved row back to the employee it had in the month, one
+ * employee at a time, so an employee who can no longer receive cases (inactive,
+ * removed) leaves only their rows unassigned instead of failing the rest.
+ */
+async function restoreAssignments(
+  directoryHandle: DirectoryHandleLike,
+  month: string,
+  actor: string
+): Promise<{ restored: number; unrestored: number }> {
+  const assignees = await lastAssignees(directoryHandle, month);
+  let restored = 0;
+  let unrestored = 0;
+  for (const record of await splitRecords(directoryHandle, month)) {
+    const byUser = new Map<string, PlannedAssignment[]>();
+    for (const item of restorePlan(record, assignees)) {
+      byUser.set(item.username, [...(byUser.get(item.username) ?? []), item]);
+    }
+    for (const plan of byUser.values()) {
+      const result = await assignAdhocPlan(directoryHandle, record, plan, actor);
+      if (result.ok) restored += plan.length;
+      else unrestored += plan.length;
+    }
+  }
+  return { restored, unrestored };
+}
+
 export type SplitResult =
-  | { ok: true; plan: SplitPlan; importId: string | null; moved: number }
+  | { ok: true; plan: SplitPlan; importId: string | null; moved: number; restored: number; unrestored: number }
   | { ok: false; reason: "month-closed" | "no-sample" }
   | { ok: false; reason: "write-failed"; error: string };
 
@@ -132,8 +212,14 @@ export async function executeSplitMonth(
   const planned = await planSplitMonth(directoryHandle, month, listIds);
   if (!planned.ok) return planned;
   const { plan } = planned;
-  if (plan.moved.length === 0) return { ok: true, plan, importId: null, moved: 0 };
   try {
+    if (plan.moved.length === 0) {
+      const back = plan.restorable > 0
+        ? await restoreAssignments(directoryHandle, month, actor)
+        : { restored: 0, unrestored: 0 };
+      if (back.restored > 0) bumpWorkspaceEpoch(directoryHandle, month);
+      return { ok: true, plan, importId: null, moved: 0, ...back };
+    }
     // 1. The exceptional cases, first — the month is only rewritten once they exist.
     const done = await alreadyMovedIds(directoryHandle, month);
     const fresh = plan.moved.filter((row) => !done.has(row.xrayImageId));
@@ -191,8 +277,10 @@ export async function executeSplitMonth(
 
     // 4. Refold so the moved rows leave every view of the month.
     await refreshDistributionCacheAfterWrite(directoryHandle, month, result.rows);
+    // 5. Same employee, now as an exceptional case.
+    const back = await restoreAssignments(directoryHandle, month, actor);
     bumpWorkspaceEpoch(directoryHandle, month);
-    return { ok: true, plan, importId, moved: plan.moved.length };
+    return { ok: true, plan, importId, moved: plan.moved.length, ...back };
   } catch (error) {
     return { ok: false, reason: "write-failed", error: error instanceof Error ? error.message : String(error) };
   }

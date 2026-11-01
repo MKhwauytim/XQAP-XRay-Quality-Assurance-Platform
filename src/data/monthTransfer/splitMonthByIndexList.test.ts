@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { upsertItemAnswer } from "../answers/answerStorage";
-import { loadAdhocImportIndex, loadAdhocRecord } from "../adhocImport/adhocImportStorage";
+import { buildAssignEvent } from "../distribution/distributionLog";
+import { appendDistributionEvents, loadOrDeriveDistributionCurrent } from "../distribution/distributionStorage";
+import { loadAdhocImportIndex, loadAdhocRecord, saveAdhocRecord } from "../adhocImport/adhocImportStorage";
+import { ensureAdhocSampleMaster } from "../adhocImport/adhocDistributionBridge";
+import { EXCEL_INTO_MONTH_FIELD_CATALOG } from "../adhocImport/adhocFieldCatalog";
 import { adhocMonthFolder } from "../adhocImport/adhocImportModel";
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
@@ -95,5 +99,66 @@ describe("split a month by the index list", () => {
     const again = await executeSplitMonth(root, JAN, ["S2"], "admin");
     expect(again).toMatchObject({ ok: true, moved: 0, importId: null });
     expect((await loadAdhocImportIndex(root)) ?? []).toHaveLength(1);
+  });
+});
+
+describe("moved cases keep their employee", () => {
+  // Real default roster members: the ad-hoc bridge refuses unknown employees.
+  const EMP_A = "jalgahamdi";
+  const EMP_B = "hihaloraini";
+
+  async function seedAssigned(root: DirectoryHandleLike) {
+    await seedMonth(root, JAN, ["S1", "S2", "S3"], ["S1", "S2", "S3"]);
+    const events = [
+      buildAssignEvent({ xrayImageId: "S2", assignedTo: EMP_A, eventBy: "admin", eventAt: "2026-08-10T08:00:00.000Z" }),
+      buildAssignEvent({ xrayImageId: "S3", assignedTo: EMP_B, eventBy: "admin", eventAt: "2026-08-10T08:00:00.000Z" }),
+    ];
+    expect((await appendDistributionEvents(root, JAN, events)).ok).toBe(true);
+  }
+
+  async function storeAssignees(root: DirectoryHandleLike, importId: string) {
+    const store = adhocMonthFolder(importId);
+    const dist = await loadOrDeriveDistributionCurrent(root, store, (await loadSampleMaster(root, store))!.rows);
+    return dist!.entries.map((e) => e.assignedTo).sort();
+  }
+
+  it("a moved assigned case is assigned again, as an exceptional case, to the same employee", async () => {
+    const root = createMemoryDirectory();
+    await seedAssigned(root);
+    const result = await executeSplitMonth(root, JAN, ["S1"], "admin");
+    expect(result).toMatchObject({ ok: true, moved: 2, restored: 2, unrestored: 0 });
+    if (!result.ok || !result.importId) throw new Error("split failed");
+    expect(await storeAssignees(root, result.importId)).toEqual([EMP_B, EMP_A].sort());
+  });
+
+  it("repairs an earlier split that left the moved cases unassigned", async () => {
+    const root = createMemoryDirectory();
+    await seedAssigned(root);
+    // What v159.5 left behind: the split record and its sample, rows unassigned, month rewritten.
+    const sample = (await loadSampleMaster(root, JAN))!;
+    const moved = sample.rows.filter((r) => r.xrayImageId !== "S1");
+    const importId = "adh-legacy-split";
+    const toRow = (r: PreparedPopulationRow, i: number) => ({
+      rowKey: `s:${i + 2}`, mapped: { xrayImageId: r.xrayImageId, portName: r.portName }, validation: { valid: true as const },
+      excludedByAdmin: false, assignments: [],
+    });
+    const saved = await saveAdhocRecord(root, {
+      importId, schemaVersion: 2, fileName: `split-${JAN}-2026-11-01`, importedBy: "admin", importedAt: "2026-11-01T10:00:00.000Z",
+      status: "open", kind: "sample", sourceKind: "file", mapping: { fields: {}, valueMappings: {} },
+      fieldCatalog: EXCEL_INTO_MONTH_FIELD_CATALOG, monthBinding: { kind: "month", monthFolderName: JAN }, rows: moved.map(toRow),
+    });
+    await ensureAdhocSampleMaster(root, saved);
+    expect((await saveSampleMaster(root, JAN, { ...sample, rows: sample.rows.filter((r) => r.xrayImageId === "S1") })).ok).toBe(true);
+
+    const plan = await planSplitMonth(root, JAN, ["S1"]);
+    if (!plan.ok) throw new Error("plan failed");
+    expect(plan.plan.moved).toHaveLength(0);
+    expect(plan.plan.restorable).toBe(2);
+
+    const result = await executeSplitMonth(root, JAN, ["S1"], "admin");
+    expect(result).toMatchObject({ ok: true, moved: 0, restored: 2 });
+    expect(await storeAssignees(root, importId)).toEqual([EMP_B, EMP_A].sort());
+    // Running it again changes nothing.
+    expect(await executeSplitMonth(root, JAN, ["S1"], "admin")).toMatchObject({ ok: true, moved: 0, restored: 0 });
   });
 });

@@ -1026,7 +1026,16 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   // they narrow `scopedEntries`, and their counts are taken over the same set,
   // so the numbers always add up to the queue the reader is looking at. All of
   // it lives in ./XrayReferrals/caseFilter.ts (predicate, counts, state hook).
-  const caseFilter = useCaseFilter(scopedEntries);
+  // «تم فحصها / لم تُفحص»: completed, or the assignee submitted an answer.
+  const isStudied = useMemo(() => {
+    const submitted = new Set<string>();
+    for (const answer of answers) {
+      if (answer.status === "submitted") submitted.add(`${answer.xrayImageId}::${answer.answeredBy}`);
+    }
+    return (entry: DistributionEntry) =>
+      entry.status === "completed" || submitted.has(`${entry.xrayImageId}::${entry.assignedTo}`);
+  }, [answers]);
+  const caseFilter = useCaseFilter(scopedEntries, isStudied);
   const displayEntries = caseFilter.entries;
 
   const selEntry = useMemo(

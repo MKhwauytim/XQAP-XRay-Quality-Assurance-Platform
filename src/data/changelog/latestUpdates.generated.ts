@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v159.6",
+    "date": "2026-11-01",
+    "bucket": "fix",
+    "scope": "months",
+    "title": "split cases keep their employee; repair earlier split; studied/unstudied queue filter"
+  },
+  {
     "version": "v159.5",
     "date": "2026-11-01",
     "bucket": "feature",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "reporting",
     "title": "normal hyphen instead of long dashes in report text"
-  },
-  {
-    "version": "v156.0",
-    "date": "2026-10-19",
-    "bucket": "fix",
-    "scope": "distribution",
-    "title": "damaged distribution.current.json rebuilds silently; deleted months stay deleted; admin delete-month tool"
   }
 ];

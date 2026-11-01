@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import type { AdhocDistributionEntry } from "../../../../../../data/adhocImport/adhocImportEmployeeView";
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
 import { toEmployeeMirrorRowStub, type PreparedPopulationRow } from "../../../../../../data/population/populationTypes";
-import { countCaseFilters, filterCases, matchesCaseFilter, CASE_FILTERS } from "./caseFilter";
+import { countCaseFilters, countStudyFilters, filterCases, matchesCaseFilter, CASE_FILTERS } from "./caseFilter";
 
 function makeRow(xrayImageId: string, targetedByRiskEngine: string | null): PreparedPopulationRow {
   return {
@@ -153,5 +153,15 @@ describe("countCaseFilters", () => {
     const rows = [entry("A", "نعم"), entry("B", null, "adh-1"), entry("C", "لا"), entry("D", "نعم", "adh-2")];
     const counts = countCaseFilters(rows);
     expect(counts["risk-targeted"] + counts.adhoc).toBe(counts.all);
+  });
+});
+
+describe("countStudyFilters", () => {
+  it("splits the queue into studied and not studied, using the caller's rule", () => {
+    const done = { ...entry("A", null), status: "completed" as const };
+    const answered = entry("B", null);
+    const untouched = entry("C", null, "adh-1");
+    const studied = (e: DistributionEntry) => e.status === "completed" || e.xrayImageId === "B";
+    expect(countStudyFilters([done, answered, untouched], studied)).toEqual({ all: 3, studied: 2, unstudied: 1 });
   });
 });

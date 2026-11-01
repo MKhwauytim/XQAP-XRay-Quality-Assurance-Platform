@@ -27,7 +27,7 @@ import InspectionPanel from "../../../../../../components/InspectionPanel";
 import Pagination from "../../../../../../components/Pagination/Pagination";
 import { clampPage, pageSlice } from "../../../../../../utils/paginationUtils";
 import { useLabels, type Labels } from "../../../../../../data/labels/useLabels";
-import { CASE_FILTERS, type CaseFilter, type CaseFilterCounts, type CaseFilterState } from "./caseFilter";
+import { CASE_FILTERS, STUDY_FILTERS, type CaseFilter, type CaseFilterCounts, type CaseFilterState, type StudyFilter, type StudyFilterCounts } from "./caseFilter";
 import type { CertScanFilter } from "../../../../../../data/population/certScanFilter";
 import CertScanFilterChips from "../../../../../CertScanFilterChips/CertScanFilterChips";
 import { certScanStatusFilterProps } from "../certScanColumn";
@@ -1305,7 +1305,41 @@ export function CaseFilterBar({ state }: { state: CaseFilterState }) {
         chipClassName="ew-view-seg"
         countClassName="ew-case-filter-count"
       />
+      <StudyFilterChips value={state.study} counts={state.studyCounts} onChange={state.setStudy} />
     </>
+  );
+}
+
+function StudyFilterChips({
+  value,
+  counts,
+  onChange,
+}: {
+  value: StudyFilter;
+  counts: StudyFilterCounts;
+  onChange: (next: StudyFilter) => void;
+}) {
+  const L = useLabels();
+  const chipLabel: Record<StudyFilter, string> = {
+    all: L.ew_study_filter_all,
+    studied: L.ew_study_filter_studied,
+    unstudied: L.ew_study_filter_unstudied,
+  };
+  return (
+    <div className="ew-view-switcher ew-case-filter" role="group" aria-label={L.ew_study_filter_aria}>
+      {STUDY_FILTERS.map((id) => (
+        <button
+          key={id}
+          type="button"
+          className={`ew-view-seg${value === id ? " active" : ""}`}
+          aria-pressed={value === id}
+          onClick={() => onChange(id)}
+        >
+          {chipLabel[id]}
+          <span className="ew-case-filter-count">{counts[id]}</span>
+        </button>
+      ))}
+    </div>
   );
 }
 

@@ -146,13 +146,16 @@ export function SplitMonthSection() {
       recordAction(directoryHandle, username, role, "month-merged", {
         monthFolderName: month,
         target: sheet,
-        details: { kind: "split-by-index-list", moved: result.moved, keptListed: result.plan.keptListed.length, keptStudied: result.plan.keptStudied.length },
+        details: { kind: "split-by-index-list", moved: result.moved, restored: result.restored, unrestored: result.unrestored, keptListed: result.plan.keptListed.length, keptStudied: result.plan.keptStudied.length },
       });
       notifyLocalDataChange(["manifest"]);
       broadcastDataRefresh("manual");
       downloadReport(result.plan, L);
       setPlan(null);
-      setNotice({ kind: "ok", text: fill(L.split_month_done, { moved: result.moved, month }) });
+      setNotice({
+        kind: result.unrestored > 0 ? "error" : "ok",
+        text: fill(L.split_month_done, { moved: result.moved, restored: result.restored, unrestored: result.unrestored, month }),
+      });
     } catch (error) {
       logError("settings:split-month", error);
       setNotice({ kind: "error", text: fill(L.excel_rows_failed, { error: errorText(error) }) });
@@ -215,10 +218,11 @@ export function SplitMonthSection() {
                 missing: plan.listNotInMonth.length,
                 month: plan.month,
               })}</p>
+              {plan.restorable > 0 && <p>{fill(L.split_month_restorable, { n: plan.restorable })}</p>}
               <button type="button" className="ew-btn-secondary" onClick={() => downloadReport(plan, L)} disabled={busy}>
                 {L.excel_rows_report_button}
               </button>
-              <button type="button" className="ew-btn-secondary" onClick={() => setConfirming(true)} disabled={busy || plan.moved.length === 0}>
+              <button type="button" className="ew-btn-secondary" onClick={() => setConfirming(true)} disabled={busy || (plan.moved.length === 0 && plan.restorable === 0)}>
                 {L.split_month_button}
               </button>
             </div>
@@ -236,7 +240,7 @@ export function SplitMonthSection() {
       <ConfirmDialog
         open={confirming}
         title={L.split_month_title}
-        message={<p>{fill(L.split_month_confirm, { moved: plan?.moved.length ?? 0, assigned: plan?.movedAssigned ?? 0, month })}</p>}
+        message={<p>{fill(L.split_month_confirm, { moved: plan?.moved.length ?? 0, assigned: (plan?.movedAssigned ?? 0) + (plan?.restorable ?? 0), month })}</p>}
         confirmLabel={L.split_month_button}
         onConfirm={() => void run()}
         onCancel={() => setConfirming(false)}
