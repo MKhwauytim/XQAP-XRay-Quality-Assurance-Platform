@@ -75,7 +75,7 @@ function emptyState(w = 320, h = 180, note?: string): string {
     svgOpen(w, h) +
     `<rect x="0" y="0" width="${r(w)}" height="${r(h)}" fill="none"/>` +
     `<text x="${r(cx)}" y="${r(cy)}" text-anchor="middle" dominant-baseline="middle" ` +
-    `font-size="${TYPE.title}" fill="${cssVar("muted")}">—</text>` +
+    `font-size="${TYPE.title}" fill="${cssVar("muted")}">-</text>` +
     (note
       ? `<text x="${r(cx)}" y="${r(cy + 22)}" text-anchor="middle" ` +
         `font-size="${TYPE.caption}" fill="${cssVar("muted")}">${escText(note)}</text>`
@@ -499,7 +499,7 @@ export function heatmap(data: Matrix, opts: ChartOpts = {}): string {
       const cellFill = isNull ? "none" : cssVar("info");
       cells +=
         `<rect x="${r(x + 1)}" y="${r(y + 1)}" width="${r(cw - 2)}" height="${r(ch - 2)}" rx="3" fill="${cellFill}" fill-opacity="${r(fillOpacity)}" stroke="${cssVar("line")}" stroke-width="0.5"/>` +
-        `<text x="${r(x + cw / 2)}" y="${r(y + ch / 2)}" text-anchor="middle" dominant-baseline="middle" font-size="${TYPE.micro}" fill="${cssVar("text")}">${isNull ? "—" : r(v)}</text>`;
+        `<text x="${r(x + cw / 2)}" y="${r(y + ch / 2)}" text-anchor="middle" dominant-baseline="middle" font-size="${TYPE.micro}" fill="${cssVar("text")}">${isNull ? "-" : r(v)}</text>`;
     });
   });
 

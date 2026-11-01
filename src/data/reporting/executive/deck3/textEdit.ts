@@ -189,7 +189,7 @@ export const DECK_TEXT_EDIT_SCRIPT = `(function(){
   window.addEventListener('message', function(e){
     var d = e.data;
     if (!d || d.type !== REPLY) return;
-    toast(d.ok ? (S.saved || '') : (S.saveFailed || '') + (d.error ? ' — ' + d.error : ''));
+    toast(d.ok ? (S.saved || '') : (S.saveFailed || '') + (d.error ? ' - ' + d.error : ''));
   });
 
   if (saveBtn) saveBtn.addEventListener('click', function(){

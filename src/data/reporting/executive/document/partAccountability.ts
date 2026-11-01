@@ -73,7 +73,7 @@ export function buildEmployeeOverview(model: ReportModel, pageNo: string): strin
       kpi({ label: "مفتشون مقيَّمون", value: fmtNum(eo.evaluatedCount), tone: "gold" }),
       kpi({ label: "إجمالي القرارات", value: fmtNum(eo.totalDecisions), tone: "slate" }),
       kpi({ label: "متوسط الدقة", value: fmtPct(avgAccuracy), tone: "blue" }),
-      kpi({ label: "الأعلى دقة", value: best ?? "—", tone: "green" }),
+      kpi({ label: "الأعلى دقة", value: best ?? "-", tone: "green" }),
     ], 4)}
     <div class="grid grid-2" style="margin-top:14px">
       ${panel("ترتيب الدقة (الكافية)", figure(rankedBar(bars, { width: 360 }), { height: 230 }), { iconName: "chart" })}
@@ -152,9 +152,9 @@ export async function buildPerPortPages(model: ReportModel, startPageNo: number)
     if (!model.employeeOverview.inspectorIdentityMapped || inspectors.length === 0) {
       const body = `${header}
         ${kpiStrip([
-          kpi({ label: "قرارات قابلة للتقييم", value: portAcc ? fmtNum(portAcc.evaluable) : "—", tone: "slate" }),
-          kpi({ label: "دقة المنفذ", value: portAcc && isRankable(portAcc.band) ? fmtPct(portAcc.accuracyByDecision) : "—", tone: "gold" }),
-          kpi({ label: "اشتباه فائت", value: portAcc && isRankable(portAcc.band) ? fmtPct(portAcc.missedSuspicionRateByDecision) : "—", tone: "coral" }),
+          kpi({ label: "قرارات قابلة للتقييم", value: portAcc ? fmtNum(portAcc.evaluable) : "-", tone: "slate" }),
+          kpi({ label: "دقة المنفذ", value: portAcc && isRankable(portAcc.band) ? fmtPct(portAcc.accuracyByDecision) : "-", tone: "gold" }),
+          kpi({ label: "اشتباه فائت", value: portAcc && isRankable(portAcc.band) ? fmtPct(portAcc.missedSuspicionRateByDecision) : "-", tone: "coral" }),
         ], 3)}
         ${emptyState(UNMAPPED_TITLE, UNMAPPED_DETAIL)}
         ${executiveClose(employeeClose(false, 0, null))}`;
@@ -183,10 +183,10 @@ export async function buildPerPortPages(model: ReportModel, startPageNo: number)
 
     const body = `${header}
       ${kpiStrip([
-        kpi({ label: "قرارات قابلة للتقييم", value: portAcc ? fmtNum(portAcc.evaluable) : "—", tone: "slate" }),
+        kpi({ label: "قرارات قابلة للتقييم", value: portAcc ? fmtNum(portAcc.evaluable) : "-", tone: "slate" }),
         kpi({ label: "عدد المفتشين", value: fmtNum(new Set(inspectors.map((e) => e.inspectorId)).size), tone: "blue" }),
-        kpi({ label: "دقة المنفذ", value: portAcc && isRankable(portAcc.band) ? fmtPct(portAcc.accuracyByDecision) : "—", tone: "gold" }),
-        kpi({ label: "اشتباه فائت", value: portAcc && isRankable(portAcc.band) ? fmtPct(portAcc.missedSuspicionRateByDecision) : "—", tone: "coral" }),
+        kpi({ label: "دقة المنفذ", value: portAcc && isRankable(portAcc.band) ? fmtPct(portAcc.accuracyByDecision) : "-", tone: "gold" }),
+        kpi({ label: "اشتباه فائت", value: portAcc && isRankable(portAcc.band) ? fmtPct(portAcc.missedSuspicionRateByDecision) : "-", tone: "coral" }),
       ], 4)}
       <div class="grid grid-2" style="margin-top:14px">
         ${panel("المستوى الأول", dataTable({ headers: ["المفتش", "قرارات", "الدقة", "الكشف", "فائت", "الحالة"], rows: inspectorRows(l1) }), { iconName: "layers" })}
@@ -229,9 +229,9 @@ export function buildPortComparison(model: ReportModel, pageNo: string): string 
 
   const body = `${pageHeader({ iconName: "port", eyebrow: "الجزء الرابع · المساءلة", title: "مقارنة المنافذ", subtitle: "الأقوى والأضعف وأعلى اشتباه فائت" })}
     ${kpiStrip([
-      kpi({ label: "الأقوى", value: strongest ?? "—", tone: "green" }),
-      kpi({ label: "الأضعف", value: weakest ?? "—", tone: "coral" }),
-      kpi({ label: "أعلى اشتباه فائت", value: highestMissed ?? "—", tone: "gold" }),
+      kpi({ label: "الأقوى", value: strongest ?? "-", tone: "green" }),
+      kpi({ label: "الأضعف", value: weakest ?? "-", tone: "coral" }),
+      kpi({ label: "أعلى اشتباه فائت", value: highestMissed ?? "-", tone: "gold" }),
       kpi({ label: "غير كافية", value: fmtNum(insufficient), tone: "slate" }),
     ], 4)}
     <div class="grid grid-2" style="margin-top:14px">

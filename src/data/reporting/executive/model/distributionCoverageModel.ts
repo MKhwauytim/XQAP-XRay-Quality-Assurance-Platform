@@ -153,7 +153,7 @@ export function computeDistributionModel(
       assignedTo: e.assignedTo,
       displayName: nameOf(e.assignedTo),
       status: e.status,
-      portName: e.row.portName ?? "—",
+      portName: e.row.portName ?? "-",
       lastEventAt: e.lastEventAt,
       replacedById: e.replacedById,
     }));

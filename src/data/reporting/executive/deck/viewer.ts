@@ -15,7 +15,7 @@ export function buildDeckHtml(slides: string, monthLabel: string, footerNote = "
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>العرض التنفيذي — ${esc(monthLabel)}</title>
+<title>العرض التنفيذي - ${esc(monthLabel)}</title>
 <style>${ARABIC_FONT_FACE_CSS}${DECK_CSS}${SOURCE_REVISIONS_CSS}</style>
 </head>
 <body>
@@ -25,7 +25,7 @@ export function buildDeckHtml(slides: string, monthLabel: string, footerNote = "
       <div class="brand-mark">${icon("shield", 22)}</div>
       <div>
         <strong>العرض التنفيذي</strong>
-        <span>ضمان جودة الأشعة — ${esc(monthLabel)}</span>
+        <span>ضمان جودة الأشعة - ${esc(monthLabel)}</span>
       </div>
     </div>
     <div class="deck-toolbar-actions">

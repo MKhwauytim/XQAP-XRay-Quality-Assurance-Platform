@@ -47,11 +47,11 @@ export function buildCoverageSection(model: ReportModel, pageNo: string): string
     iconName: "layers",
     eyebrow: "الجزء السادس · التغطية والمساءلة التشغيلية",
     title: "التغطية التشغيلية",
-    subtitle: "توزيع العينة وإنجازها حسب المستوى والمنفذ — من تقرير التوزيع (R2)، بلا إعادة احتساب.",
+    subtitle: "توزيع العينة وإنجازها حسب المستوى والمنفذ - من تقرير التوزيع (R2)، بلا إعادة احتساب.",
   });
 
   if (cov === null) {
-    const body = `${header}${emptyState("لا يوجد توزيع لهذا الشهر بعد.", "يُبنى هذا القسم من بيانات تقرير التوزيع — وزّع العينة أولاً ليظهر هنا.")}`;
+    const body = `${header}${emptyState("لا يوجد توزيع لهذا الشهر بعد.", "يُبنى هذا القسم من بيانات تقرير التوزيع - وزّع العينة أولاً ليظهر هنا.")}`;
     return page({ id: "page-coverage", title: "التغطية التشغيلية", pageNo, railTabs: TABS, body });
   }
 
@@ -87,11 +87,11 @@ export function buildAccountabilitySection(model: ReportModel, pageNo: string): 
     iconName: "flag",
     eyebrow: "الجزء السادس · التغطية والمساءلة التشغيلية",
     title: "المساءلة التشغيلية",
-    subtitle: "تقدّم الموظفين، أسباب الاستبدال، وعدد إعادة التعيين — من تقرير الإدارة (R3)، بلا إعادة احتساب.",
+    subtitle: "تقدّم الموظفين، أسباب الاستبدال، وعدد إعادة التعيين - من تقرير الإدارة (R3)، بلا إعادة احتساب.",
   });
 
   if (acc === null) {
-    const body = `${header}${emptyState("لا يوجد توزيع لهذا الشهر بعد.", "يُبنى هذا القسم من بيانات تقرير الإدارة — وزّع العينة أولاً ليظهر هنا.")}`;
+    const body = `${header}${emptyState("لا يوجد توزيع لهذا الشهر بعد.", "يُبنى هذا القسم من بيانات تقرير الإدارة - وزّع العينة أولاً ليظهر هنا.")}`;
     return page({ id: "page-accountability", title: "المساءلة التشغيلية", pageNo, railTabs: TABS, body });
   }
 
@@ -106,7 +106,7 @@ export function buildAccountabilitySection(model: ReportModel, pageNo: string): 
       ${panel("تقدّم أعلى المنافذ", accountabilityBucketTable(acc.byPort), { iconName: "port" })}
     </div>
     ${acc.reassignments.total === 0 && acc.replacements.total === 0
-      ? noteBox("لا توجد استبدالات أو إعادة تعيين مسجّلة لهذا الشهر — أو لم تُمرَّر سجلات الأحداث الخام لهذا التوليد.", "alert")
+      ? noteBox("لا توجد استبدالات أو إعادة تعيين مسجّلة لهذا الشهر - أو لم تُمرَّر سجلات الأحداث الخام لهذا التوليد.", "alert")
       : ""}
     ${executiveClose({
       shows: `${fmtNum(acc.replacements.total)} استبدال و${fmtNum(acc.reassignments.total)} إعادة تعيين هذا الشهر.`,

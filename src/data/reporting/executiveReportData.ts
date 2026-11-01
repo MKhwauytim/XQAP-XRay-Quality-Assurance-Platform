@@ -469,6 +469,6 @@ export function fmtNum(n: number): string {
 }
 
 export function fmtPct(n: number | null, decimals = 1): string {
-  if (n === null) return "—";
+  if (n === null) return "-";
   return `${n.toFixed(decimals)}%`;
 }

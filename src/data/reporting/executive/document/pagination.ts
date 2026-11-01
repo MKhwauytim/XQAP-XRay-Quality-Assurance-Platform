@@ -19,7 +19,7 @@ export type PaginatedTableOpts = {
 };
 
 function cellHtml(c: Cell): string {
-  if (c === null) return `<td><span class="insuff">—</span></td>`;
+  if (c === null) return `<td><span class="insuff">-</span></td>`;
   return `<td>${esc(String(c))}</td>`;
 }
 

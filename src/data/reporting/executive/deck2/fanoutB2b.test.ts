@@ -403,7 +403,7 @@ describe("levelAccuracySlideBuilders — Ledger/Briefing/Grid (fan-out plan §11
     const labels = [...panel2.matchAll(/<span class="v2-bf-rank-label">([^<]*)<\/span>/g)].map((m) => m[1]);
     expect(labels).toContain("منافذ دون حد الكفاية (1)");
     const values = [...panel2.matchAll(/<span class="v2-bf-rank-value">([^<]*)<\/span>/g)].map((m) => m[1]);
-    expect(values[values.length - 1]).toBe("—");
+    expect(values[values.length - 1]).toBe("-");
     const widths = [...panel2.matchAll(/class="v2-bf-rank-fill \w+" style="width:([\d.]+)%"/g)].map((m) => Number(m[1]));
     expect(widths[widths.length - 1]).toBe(0); // bar-less
   });
@@ -573,7 +573,7 @@ describe("portAgreementSlideBuilders — Ledger/Briefing/Grid (fan-out plan §11
     expect(panel2).toContain("v2-bf-agree");
 
     // Lede: 9/12 = 75.0% — the POPULATION basis, explicitly stated.
-    expect(panel2).toContain(`اتفاق المستويين ${fmtPct(75)} — ${fmtNum(9)} من ${fmtNum(12)} صورة`);
+    expect(panel2).toContain(`اتفاق المستويين ${fmtPct(75)} - ${fmtNum(9)} من ${fmtNum(12)} صورة`);
     expect(panel2).toContain("أساس المجتمع");
     // Support strip: both match-rate items say على العيّنة, distinguishing
     // them from the lede's أساس المجتمع.
@@ -594,7 +594,7 @@ describe("portAgreementSlideBuilders — Ledger/Briefing/Grid (fan-out plan §11
     const labels = [...panel2.matchAll(/<span class="v2-bf-rank-label">([^<]*)<\/span>/g)].map((m) => m[1]);
     expect(labels).toContain("منافذ دون حد الكفاية (1)");
     const values = [...panel2.matchAll(/<span class="v2-bf-rank-value">([^<]*)<\/span>/g)].map((m) => m[1]);
-    expect(values[values.length - 1]).toBe("—");
+    expect(values[values.length - 1]).toBe("-");
   });
 
   it("(c2) C3 regression: rank rows sort by agreement rate ASCENDING (disagreement-first) — the fold buckets the HIGHEST-agreement (least noteworthy) ports, never a land/sea artifact", () => {

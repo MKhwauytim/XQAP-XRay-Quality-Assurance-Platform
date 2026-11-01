@@ -344,8 +344,8 @@ describe("qualityPortSlideBuilders — Ledger/Briefing/Grid (fan-out plan §8, b
     expect(panel1).not.toContain("<figure");
     // Card titles disclose N ports · evaluated total, per the plan's exact
     // "{title} — {N} منفذ · {evaluatedTotal} صورة مُقيَّمة" wording.
-    expect(panel1).toContain(`المنافذ البرية — ${fmtNum(3)} منفذ · ${fmtNum(15)} صورة مُقيَّمة`);
-    expect(panel1).toContain(`المنافذ البحرية — ${fmtNum(1)} منفذ · ${fmtNum(4)} صورة مُقيَّمة`);
+    expect(panel1).toContain(`المنافذ البرية - ${fmtNum(3)} منفذ · ${fmtNum(15)} صورة مُقيَّمة`);
+    expect(panel1).toContain(`المنافذ البحرية - ${fmtNum(1)} منفذ · ${fmtNum(4)} صورة مُقيَّمة`);
     // منفذ ج (zero-evaluated) still appears as its own row, muted dashes for
     // every quality-level cell — Ledger's job is exhaustive verifiability,
     // unlike Briefing which excludes it from ranking.
@@ -353,7 +353,7 @@ describe("qualityPortSlideBuilders — Ledger/Briefing/Grid (fan-out plan §8, b
     const rowStart = panel1.indexOf(">منفذ ج<");
     const rowEnd = panel1.indexOf("</tr>", rowStart);
     const row = panel1.slice(rowStart, rowEnd);
-    expect((row.match(/<span class="insuff">—<\/span>/g) ?? []).length).toBe(3); // عالي/متوسط/منخفض, all muted
+    expect((row.match(/<span class="insuff">-<\/span>/g) ?? []).length).toBe(3); // عالي/متوسط/منخفض, all muted
   });
 
   it("(b) Briefing: rows sorted by low-quality rate DESC (worst first), evaluated===0 port excluded from ranking and pooled correctly — this is the exact class of edge case this codebase has shipped bugs on before", () => {
@@ -364,7 +364,7 @@ describe("qualityPortSlideBuilders — Ledger/Briefing/Grid (fan-out plan §8, b
 
     // Pooled lede: 8 low / 19 evaluated across all 4 ports (1+5+0+2=8, 10+5+0+4=19).
     const lowRate = fmtPct((8 / 19) * 100);
-    expect(panel2).toContain(`جودة منخفضة ${lowRate} — ${fmtNum(8)} من ${fmtNum(19)} صورة مُقيَّمة`);
+    expect(panel2).toContain(`جودة منخفضة ${lowRate} - ${fmtNum(8)} من ${fmtNum(19)} صورة مُقيَّمة`);
     expect(panel2).toContain("4 منافذ في هذه الصفحة");
 
     // Rank order: منفذ ب (100%) worst, منفذ د (50%), منفذ أ (10%) best of the
@@ -375,7 +375,7 @@ describe("qualityPortSlideBuilders — Ledger/Briefing/Grid (fan-out plan §8, b
     // The excluded ("منفذ ج") aggregate never gets a fabricated rate: value
     // text is the muted dash, and its bar renders at 0% width (bar-less).
     const values = [...panel2.matchAll(/<span class="v2-bf-rank-value">([^<]*)<\/span>/g)].map((m) => m[1]);
-    expect(values[3]).toBe("—");
+    expect(values[3]).toBe("-");
     const widths = [...panel2.matchAll(/class="v2-bf-rank-fill \w+" style="width:([\d.]+)%"/g)].map((m) => Number(m[1]));
     expect(widths[3]).toBe(0);
     // Never silently dropped — its count is stated, and the row is present.
@@ -394,8 +394,8 @@ describe("qualityPortSlideBuilders — Ledger/Briefing/Grid (fan-out plan §8, b
     for (const label of ["عالي", "متوسط", "منخفض", "التحديد"]) {
       expect(panel3).toContain(label);
     }
-    expect(panel3).toContain("0–100"); // every column's domain, printed 4 times
-    expect((panel3.match(/0–100/g) ?? []).length).toBeGreaterThanOrEqual(4);
+    expect(panel3).toContain("0-100"); // every column's domain, printed 4 times
+    expect((panel3.match(/0-100/g) ?? []).length).toBeGreaterThanOrEqual(4);
     expect(panel3).toContain("هدف التحديد 90%");
     // The plan explicitly rejects diverging-green-coral for منخفض — verified
     // by absence of the diverging ramp's overlay colors anywhere in this panel.
@@ -442,15 +442,15 @@ describe("accuracyPortSlideBuilders — Ledger/Briefing/Grid (fan-out plan §9, 
     expect(panel1).not.toContain("<figure");
     expect(panel1).toContain("<th>العيّنة</th>");
     // Card titles reuse the established "قرار قابل للتقييم" phrase (plan §11b).
-    expect(panel1).toContain(`المنافذ البرية — ${fmtNum(3)} منفذ · ${fmtNum(35)} قرار قابل للتقييم`);
-    expect(panel1).toContain(`المنافذ البحرية — ${fmtNum(1)} منفذ · ${fmtNum(15)} قرار قابل للتقييم`);
+    expect(panel1).toContain(`المنافذ البرية - ${fmtNum(3)} منفذ · ${fmtNum(35)} قرار قابل للتقييم`);
+    expect(panel1).toContain(`المنافذ البحرية - ${fmtNum(1)} منفذ · ${fmtNum(15)} قرار قابل للتقييم`);
     // منفذ ج (unrankable, evaluable=5): rate cells muted, but its evaluable
     // COUNT still renders — "a rate without its denominator is exactly what
     // Ledger exists to fix."
     const rowStart = panel1.indexOf(">منفذ ج<");
     const rowEnd = panel1.indexOf("</tr>", rowStart);
     const row = panel1.slice(rowStart, rowEnd);
-    expect((row.match(/<span class="insuff">—<\/span>/g) ?? []).length).toBe(3);
+    expect((row.match(/<span class="insuff">-<\/span>/g) ?? []).length).toBe(3);
     expect(row).toContain(`<td>${fmtNum(5)}</td>`);
     // Land totals row: pooled from summed counts (14 correct / 35 evaluable = 74.3%).
     expect(panel1).toContain(fmtPct((26 / 35) * 100));
@@ -464,7 +464,7 @@ describe("accuracyPortSlideBuilders — Ledger/Briefing/Grid (fan-out plan §9, 
 
     // Pooled overall accuracy across all 4 ports: (20 correct)/(50 evaluable)=76%.
     const overall = fmtPct((38 / 50) * 100);
-    expect(panel2).toContain(`الدقة العامة ${overall} — ${fmtNum(38)} من ${fmtNum(50)} قرار`);
+    expect(panel2).toContain(`الدقة العامة ${overall} - ${fmtNum(38)} من ${fmtNum(50)} قرار`);
     // Load-bearing per the plan — without it rank #1 misreads as "best".
     expect(panel2).toContain("الأقل دقة أولًا");
 
@@ -474,7 +474,7 @@ describe("accuracyPortSlideBuilders — Ledger/Briefing/Grid (fan-out plan §9, 
     expect(labels).toEqual(["منفذ ب", "منفذ د", "منفذ أ", "منافذ دون حد الكفاية (1)"]);
 
     const values = [...panel2.matchAll(/<span class="v2-bf-rank-value">([^<]*)<\/span>/g)].map((m) => m[1]);
-    expect(values[3]).toBe("—"); // never a fabricated rate for منفذ ج
+    expect(values[3]).toBe("-"); // never a fabricated rate for منفذ ج
     const widths = [...panel2.matchAll(/class="v2-bf-rank-fill \w+" style="width:([\d.]+)%"/g)].map((m) => Number(m[1]));
     expect(widths[3]).toBe(0); // bar-less
     expect((panel2.match(/class="v2-bf-rank-row(?: rest)?"/g) ?? []).length).toBe(4); // never silently dropped

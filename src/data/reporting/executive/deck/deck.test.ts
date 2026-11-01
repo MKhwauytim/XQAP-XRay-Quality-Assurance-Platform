@@ -167,7 +167,7 @@ describe("buildExecutiveDeck — structure", () => {
   it("uses the Arabic period label and report classification on the title slide", () => {
     const html = buildExecutiveDeck(input([popRow()]));
     expect(html).toContain("مايو 2026");
-    expect(html).toContain("داخلي — للاستخدام التنفيذي");
+    expect(html).toContain("داخلي - للاستخدام التنفيذي");
   });
 });
 

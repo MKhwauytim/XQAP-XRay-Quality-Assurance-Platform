@@ -103,7 +103,7 @@ function modelWith(
 }
 
 const CAVEAT = "ارتباط وصفي بين الحجم والدقة، لا يُقرأ كعلاقة سببية.";
-const MUTED_CELL = '<td class="v2-bar-cell neutral"><span class="insuff">—</span></td>';
+const MUTED_CELL = '<td class="v2-bar-cell neutral"><span class="insuff">-</span></td>';
 
 /**
  * The right-hand table card only, with the `--w:` bar-width style attributes
@@ -140,7 +140,7 @@ describe("workloadAccuracySlide — shell", () => {
     expect(html).toContain('id="slide-s3-workload"');
     expect(html).toContain('data-section="section3"');
     expect(html).toContain("الأداء حسب حجم الأعمال");
-    expect(html).toContain("القسم 3 — التحاليل المتقدمة");
+    expect(html).toContain("القسم 3 - التحاليل المتقدمة");
     expect(html).toContain(
       "هل يرتبط انخفاض دقة المنفذ بارتفاع حجم صوره؟ مقارنة الدقة بحجم مجتمع كل منفذ.",
     );
@@ -301,7 +301,7 @@ describe("workloadAccuracySlide — computation", () => {
     // row nor on the totals row, which is gated on the same summed base.
     expect(tableText(html)).not.toMatch(/\d+\.\d%/);
     expect(html).toContain(MUTED_CELL);
-    expect(html).toContain('<span class="insuff">—</span>');
+    expect(html).toContain('<span class="insuff">-</span>');
     // the port and its base are still listed — it is hidden from ranking, not
     // hidden from the page.
     expect(html).toContain("منفذ الاختبار");

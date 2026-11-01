@@ -129,11 +129,11 @@ const DECK_TABLE_FILL_SCRIPT = `(function(){
   }
   window.__deckFillCards = fillCards;
   fillCards();
-  // Re-measure after the initial pass — verified live, twice over, that ONE
+  // Re-measure after the initial pass - verified live, twice over, that ONE
   // fix point is not enough:
   //   1. document.fonts.ready alone: still measured a stale (too-short) row
   //      height even though document.fonts.status read "loaded" by the time
-  //      the callback ran — the FontFaceSet resolving is not the same event
+  //      the callback ran - the FontFaceSet resolving is not the same event
   //      as the browser finishing the reflow that swapping the font triggers.
   //   2. A later manual re-run always corrected it, confirming fillCards()
   //      itself is right and this is purely a "ran before layout settled"
@@ -143,8 +143,8 @@ const DECK_TABLE_FILL_SCRIPT = `(function(){
   // 'load' (images/subresources finished, layout is as settled as a page
   // load gets), and a double-rAF (two full paint cycles after 'load', to
   // clear whatever reflow was still pending when 'load' fired). Re-running
-  // fillCards() an extra time when nothing actually shifted is a no-op — the
-  // delta it computes is 0 — so there is no real cost to checking more than
+  // fillCards() an extra time when nothing actually shifted is a no-op - the
+  // delta it computes is 0 - so there is no real cost to checking more than
   // once.
   var refire = function(){ fillCards(); };
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(refire);
@@ -154,7 +154,7 @@ const DECK_TABLE_FILL_SCRIPT = `(function(){
   });
   // Bounded polling safety net on top of the event-based re-fires above.
   // Verified live (twice) that a single "the page is ready" signal is not
-  // reliable enough — even document.fonts.ready firing, plus a post-load
+  // reliable enough - even document.fonts.ready firing, plus a post-load
   // double-rAF, still measured a stale height on at least one real reload.
   // Rather than keep guessing at which ONE event is the true "layout has
   // settled" moment, poll on a plain interval for a few seconds after load
@@ -200,7 +200,7 @@ const DECK_VARIANT_SCRIPT = `(function(){
     var label = switcher.querySelector('.v2-variant-label');
     if (label) label.textContent = (index + 1) + ' / ' + total;
   }
-  // Mirrors slideKit.ts's familyKeyOf() — strips a trailing page-number
+  // Mirrors slideKit.ts's familyKeyOf() - strips a trailing page-number
   // suffix so a saved choice survives the deck's page count changing month
   // to month (see docs/superpowers/specs/2026-07-25-deck2-design-systems-design.md
   // §3). A no-op for non-paginated slide ids.
@@ -217,7 +217,7 @@ const DECK_VARIANT_SCRIPT = `(function(){
     }).catch(function(){});
     // In-app admin customizer bridge: this script only ever runs inside a
     // variantPreview=true document, which is always embedded (the dev tool's
-    // own iframe, or the in-app customizer's iframe) — never the standalone
+    // own iframe, or the in-app customizer's iframe) - never the standalone
     // opened/downloaded report, which is never in variantPreview mode. A
     // parentless top-level window would just message itself here, which is
     // harmless (nothing listens).
@@ -425,7 +425,7 @@ export function buildDeckV2Html(
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>العرض التنفيذي — ${esc(monthLabel)}</title>
+<title>العرض التنفيذي - ${esc(monthLabel)}</title>
 <style>${ARABIC_FONT_FACE_CSS}${DECK_CSS}${DECK_V2_CSS}${SECTION_THREE_CSS}${SECTION_FOUR_CSS}${SOURCE_REVISIONS_CSS}${PRINT_SELECT_CSS}${TEXT_EDIT_CSS}</style>
 </head>
 <body>
@@ -446,7 +446,7 @@ export function buildDeckV2Html(
       <div class="brand-mark">${icon("shield", 22)}</div>
       <div>
         <strong>العرض التنفيذي</strong>
-        <span>ضمان جودة الأشعة — ${esc(monthLabel)}</span>
+        <span>ضمان جودة الأشعة - ${esc(monthLabel)}</span>
       </div>
     </div>
     <div class="deck-toolbar-actions">

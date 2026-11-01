@@ -65,8 +65,8 @@ export function buildAccuracyByPort(model: ReportModel, pageNo: string): string 
 
   const body = `${pageHeader({ iconName: "port", eyebrow: "الجزء الثاني · الحُكم", title: "الدقة حسب المنفذ", subtitle: "أين نحن أقوى وأين نحتاج دعمًا" })}
     ${kpiStrip([
-      kpi({ label: "أعلى دقة", value: best ?? "—", tone: "green" }),
-      kpi({ label: "أدنى دقة", value: weakest ?? "—", tone: "coral" }),
+      kpi({ label: "أعلى دقة", value: best ?? "-", tone: "green" }),
+      kpi({ label: "أدنى دقة", value: weakest ?? "-", tone: "coral" }),
       kpi({ label: "منافذ غير كافية", value: fmtNum(insufficient), tone: "slate" }),
     ], 3)}
     <div class="grid grid-2" style="margin-top:14px">
