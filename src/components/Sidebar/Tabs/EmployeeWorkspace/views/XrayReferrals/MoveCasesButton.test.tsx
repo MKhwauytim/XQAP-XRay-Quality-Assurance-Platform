@@ -37,7 +37,7 @@ describe("MoveCasesButton", () => {
   it("counts only the unstudied cases of the shown bucket", () => {
     mount("admin", "risk-targeted");
     expect(screen.getByRole("button").textContent).toContain("(1)");
-    expect(screen.getByRole("button").textContent).toContain("الحالات الاستثنائية");
+    expect(screen.getByRole("button").textContent).toContain("للاستثنائية");
     cleanup();
     mount("admin", "adhoc");
     expect(screen.getByRole("button").textContent).toContain("مستهدف المؤشر");

@@ -12,6 +12,7 @@ import {
 import { logError } from "../../../../../../data/storage/errorLogger";
 import type { DirectoryHandleLike } from "../../../../../../data/storage/fileSystemAccess";
 import type { CaseFilter } from "./caseFilter";
+import "./XrayReferrals.css";
 
 function fill(template: string, values: Record<string, string | number>): string {
   return Object.entries(values).reduce((text, [key, value]) => text.split(`{${key}}`).join(String(value)), template);
@@ -90,7 +91,8 @@ export function MoveCasesButton({
     <>
       <button
         type="button"
-        className="ew-btn-secondary"
+        className="ew-move-btn"
+        title={L.ew_move_title}
         disabled={busy || movable.length === 0}
         onClick={() => setConfirming(true)}
       >
