@@ -9,7 +9,7 @@ import { logError } from "../../../../data/storage/errorLogger";
 import { listMonthFolders } from "../../../../data/population/populationStorage";
 import { readWorkbookTables } from "../../../../data/adhocImport/adhocSourceTable";
 import { autoDetectMapping } from "../../../../data/adhocImport/adhocMappingModel";
-import { ADHOC_FIELD_CATALOG } from "../../../../data/adhocImport/adhocFieldCatalog";
+import { EXCEL_INTO_MONTH_FIELD_CATALOG } from "../../../../data/adhocImport/adhocFieldCatalog";
 import { projectTable } from "../../../../data/adhocImport/adhocRowProjection";
 import type { AdhocRow, SourceTable } from "../../../../data/adhocImport/adhocImportModel";
 import {
@@ -32,8 +32,8 @@ function fill(template: string, values: Record<string, string | number>): string
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 function projectRows(table: SourceTable): AdhocRow[] {
-  const mapping = autoDetectMapping(table.headers, ADHOC_FIELD_CATALOG);
-  return projectTable({ table, mapping, catalog: ADHOC_FIELD_CATALOG, binding: { kind: "isolated" } });
+  const mapping = autoDetectMapping(table.headers, EXCEL_INTO_MONTH_FIELD_CATALOG);
+  return projectTable({ table, mapping, catalog: EXCEL_INTO_MONTH_FIELD_CATALOG, binding: { kind: "isolated" } });
 }
 
 /** One sheet per outcome, so the admin sees exactly what was added and why the rest was not. */
@@ -53,6 +53,14 @@ function downloadReport(plan: ExcelRowsPlan, L: Labels): void {
       entry.location.where === "sample" ? L.excel_rows_where_sample : L.excel_rows_where_population,
     ]),
     ...plan.repeatedInFile.map((id) => [id, L.excel_rows_repeated_in_file, ""]),
+  ]);
+  sheet(L.excel_rows_report_filled, [
+    [L.excel_rows_report_col_id, L.excel_rows_report_col_field, L.excel_rows_report_col_value],
+    ...plan.filled.map((change) => [
+      change.xrayImageId,
+      change.field === "xrayLevelOneResult" ? L.col_xray_l1_result : L.col_xray_l2_result,
+      change.newValue,
+    ]),
   ]);
   sheet(L.excel_rows_report_invalid, [
     [L.excel_rows_report_col_row, L.excel_rows_report_col_id, L.excel_rows_report_col_reason],
@@ -160,7 +168,7 @@ export function ExcelRowsIntoMonthSection() {
       recordAction(directoryHandle, username, role, "month-merged", {
         monthFolderName: target,
         target: sheet,
-        details: { kind: "excel-rows", added: result.addedToSample, existing: result.plan.existing.length, invalid: result.plan.invalid.length },
+        details: { kind: "excel-rows", added: result.addedToSample, filled: result.filledResults, existing: result.plan.existing.length, invalid: result.plan.invalid.length },
       });
       notifyLocalDataChange(["manifest"]);
       broadcastDataRefresh("manual");
@@ -168,7 +176,7 @@ export function ExcelRowsIntoMonthSection() {
       setPlan(null);
       setNotice({
         kind: "ok",
-        text: fill(L.excel_rows_done, { added: result.addedToSample, existing: result.plan.existing.length, target }),
+        text: fill(L.excel_rows_done, { added: result.addedToSample, filled: result.filledResults, existing: result.plan.existing.length, target }),
       });
     } catch (error) {
       logError("settings:excel-rows", error);
@@ -233,12 +241,13 @@ export function ExcelRowsIntoMonthSection() {
                 existing: plan.existing.length,
                 repeated: plan.repeatedInFile.length,
                 invalid: plan.invalid.length,
+                filled: plan.filled.length,
                 target: plan.targetMonth,
               })}</p>
               <button type="button" className="ew-btn-secondary" onClick={() => downloadReport(plan, L)} disabled={busy}>
                 {L.excel_rows_report_button}
               </button>
-              <button type="button" className="ew-btn-secondary" onClick={() => setConfirming(true)} disabled={busy || plan.added.length === 0}>
+              <button type="button" className="ew-btn-secondary" onClick={() => setConfirming(true)} disabled={busy || (plan.added.length === 0 && plan.filled.length === 0)}>
                 {L.excel_rows_button}
               </button>
             </div>
@@ -256,7 +265,7 @@ export function ExcelRowsIntoMonthSection() {
       <ConfirmDialog
         open={confirming}
         title={L.excel_rows_title}
-        message={<p>{fill(L.excel_rows_confirm, { added: plan?.added.length ?? 0, target })}</p>}
+        message={<p>{fill(L.excel_rows_confirm, { added: plan?.added.length ?? 0, filled: plan?.filled.length ?? 0, target })}</p>}
         confirmLabel={L.excel_rows_button}
         onConfirm={() => void run()}
         onCancel={() => setConfirming(false)}

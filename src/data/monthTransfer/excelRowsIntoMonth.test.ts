@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeWriteJson } from "../storage/safeWrite";
-import { ADHOC_FIELD_CATALOG } from "../adhocImport/adhocFieldCatalog";
+import { ADHOC_FIELD_CATALOG, EXCEL_INTO_MONTH_FIELD_CATALOG } from "../adhocImport/adhocFieldCatalog";
 import { projectTable } from "../adhocImport/adhocRowProjection";
 import type { ImportMapping, SourceTable } from "../adhocImport/adhocImportModel";
 import type { MonthManifestData, PopulationFinalData } from "../population/monthTypes";
@@ -100,5 +100,69 @@ describe("excel rows into a month", () => {
 
     const again = await planExcelRowsIntoMonth(root, rows, JAN);
     expect(again.ok && again.plan.added).toEqual([]);
+  });
+});
+
+/** Rows read the way the settings section reads them: results may be blank. */
+function excelRowsWithResults(spec: Array<[string, string, string]>) {
+  const table: SourceTable = {
+    sheetName: "الحالات المتبقية",
+    headers: ["id", "l1", "l2"],
+    rows: spec.map(([id, l1, l2], i) => ({ sourceRowNumber: i + 2, values: { id, l1, l2 } })),
+  };
+  const mapping: ImportMapping = {
+    fields: {
+      xrayImageId: { kind: "column", header: "id" },
+      xrayLevelOneResult: { kind: "column", header: "l1" },
+      xrayLevelTwoResult: { kind: "column", header: "l2" },
+    },
+    valueMappings: {},
+  };
+  return projectTable({ table, mapping, catalog: EXCEL_INTO_MONTH_FIELD_CATALOG, binding: { kind: "isolated" } });
+}
+
+describe("excel rows with blank L1/L2 results", () => {
+  it("adds a case with no results as blank, then fills the blanks when the file comes back filled", async () => {
+    const root = createMemoryDirectory();
+    await seedMonth(root, JAN, ["S1"], ["S1"]);
+
+    const first = await executeExcelRowsIntoMonth(root, excelRowsWithResults([["N1", "", ""], ["N2", "سليمة", ""]]), JAN, "admin");
+    expect(first).toMatchObject({ ok: true, addedToSample: 2, filledResults: 0 });
+    if (!first.ok) return;
+    expect(first.plan.invalid).toHaveLength(0);
+    const added = (await loadSampleMaster(root, JAN))!.rows.find((r) => r.xrayImageId === "N1")!;
+    expect(added.xrayLevelOneResult).toBe("");
+    expect(added.xrayLevelTwoResult).toBe("");
+
+    const again = await planExcelRowsIntoMonth(root, excelRowsWithResults([["N1", "اشتباه", "سليمة"], ["N2", "اشتباه", "اشتباه"], ["S1", "اشتباه", "اشتباه"]]), JAN);
+    if (!again.ok) throw new Error("plan failed");
+    // N2's recorded L1 is never overwritten; S1 has results, so it is just "existing".
+    expect(again.plan.filled.map((c) => [c.xrayImageId, c.field, c.newValue])).toEqual([
+      ["N1", "xrayLevelOneResult", "اشتباه"],
+      ["N1", "xrayLevelTwoResult", "سليمة"],
+      ["N2", "xrayLevelTwoResult", "اشتباه"],
+    ]);
+    expect(again.plan.existing.map((e) => e.xrayImageId)).toEqual(["S1"]);
+    expect(again.plan.added).toHaveLength(0);
+
+    const second = await executeExcelRowsIntoMonth(root, excelRowsWithResults([["N1", "اشتباه", "سليمة"], ["N2", "اشتباه", "اشتباه"]]), JAN, "admin");
+    expect(second).toMatchObject({ ok: true, addedToSample: 0, filledResults: 3 });
+    const sampleRows = (await loadSampleMaster(root, JAN))!.rows;
+    expect(sampleRows.find((r) => r.xrayImageId === "N1")).toMatchObject({ xrayLevelOneResult: "اشتباه", xrayLevelTwoResult: "سليمة" });
+    expect(sampleRows.find((r) => r.xrayImageId === "N2")).toMatchObject({ xrayLevelOneResult: "سليمة", xrayLevelTwoResult: "اشتباه" });
+    const population = (await loadMonthPopulationFinal(root, JAN))!.rows;
+    expect(population.find((r) => r.xrayImageId === "N1")).toMatchObject({ xrayLevelOneResult: "اشتباه" });
+    expect(sampleRows.filter((r) => r.xrayImageId === "N1")).toHaveLength(1);
+  });
+
+  it("does not fill a blank result of a case that lives in another month", async () => {
+    const root = createMemoryDirectory();
+    await seedMonth(root, JAN, ["S1"], ["S1"]);
+    await seedMonth(root, FEB, ["F1"], ["F1"]);
+    await executeExcelRowsIntoMonth(root, excelRowsWithResults([["N1", "", ""]]), FEB, "admin");
+    const plan = await planExcelRowsIntoMonth(root, excelRowsWithResults([["N1", "سليمة", "سليمة"]]), JAN);
+    if (!plan.ok) throw new Error("plan failed");
+    expect(plan.plan.filled).toHaveLength(0);
+    expect(plan.plan.existing.map((e) => e.location.folder)).toEqual([FEB]);
   });
 });

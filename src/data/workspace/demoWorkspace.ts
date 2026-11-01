@@ -1041,7 +1041,7 @@ async function seedAnswers(
       // own sequence number, never Math.random — this file stays reproducible
       // by design) so missedSuspicionRate/falseSuspicionRate also get a
       // non-zero denominator instead of just overallAccuracy.
-      const baseResult: "سليمة" | "اشتباه" = row?.xrayLevelOneResult ?? "سليمة";
+      const baseResult: "سليمة" | "اشتباه" = row?.xrayLevelOneResult || "سليمة";
       const seq = row ? row.sourceRowNumber - 1 : 0;
       const qualityResult: "سليمة" | "اشتباه" =
         seq % 15 === 0 ? (baseResult === "سليمة" ? "اشتباه" : "سليمة") : baseResult;

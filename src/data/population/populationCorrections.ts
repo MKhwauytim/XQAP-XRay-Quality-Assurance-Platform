@@ -58,7 +58,12 @@ import {
 
 export type FieldChange = {
   xrayImageId: string;
-  field: CorrectablePopulationField;
+  /**
+   * The L1/L2 results are never correctable from the معلقة sheet; they appear
+   * here only for «إضافة حالات من ملف إكسل إلى شهر» filling a result that was
+   * left blank ("") when the case was added (v159.2) — never an overwrite.
+   */
+  field: CorrectablePopulationField | "xrayLevelOneResult" | "xrayLevelTwoResult";
   oldValue: string;
   newValue: string;
 };

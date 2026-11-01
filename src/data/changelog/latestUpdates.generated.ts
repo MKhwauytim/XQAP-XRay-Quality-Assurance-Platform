@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v159.3",
+    "date": "2026-11-01",
+    "bucket": "feature",
+    "scope": "months",
+    "title": "Excel cases may arrive without L1/L2 results; re-upload fills the blanks"
+  },
+  {
     "version": "v159.1",
     "date": "2026-11-01",
     "bucket": "enhancement",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "answers",
     "title": "repair each cause of unsent answers — step timeouts, permission request, backup/import"
-  },
-  {
-    "version": "v154.3",
-    "date": "2026-10-19",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "«إرسال الآن» reports why unsent answers did not land"
   }
 ];

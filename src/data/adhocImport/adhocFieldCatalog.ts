@@ -265,6 +265,16 @@ export const ADHOC_FIELD_CATALOG: AdhocField[] = [
   },
 ];
 
+/**
+ * «إضافة حالات من ملف إكسل إلى شهر» (v159.2, owner 2026-11-01): the same
+ * catalog, but the L1/L2 results may be blank. Such a case enters the month's
+ * sample with "" results ("not yet recorded"); the admin fills them later by
+ * re-uploading the file with the results, which fills the blanks in place.
+ */
+export const EXCEL_INTO_MONTH_FIELD_CATALOG: AdhocField[] = ADHOC_FIELD_CATALOG.map((field) =>
+  field.key === "xrayLevelOneResult" || field.key === "xrayLevelTwoResult" ? { ...field, required: false } : field
+);
+
 export function getAdhocField(
   catalog: AdhocField[],
   key: string

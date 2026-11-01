@@ -189,9 +189,12 @@ function buildRawExecutiveReportRows(input: ExecutiveReportInput): ExecutiveRepo
   const snapshotIds = new Set(snapshotRows.map((row) => row.xrayImageId));
   const sourceRows = snapshotRows.length > 0 ? [...populationRows, ...snapshotRows] : populationRows;
 
-  return sourceRows.map((pop): ExecutiveReportRow => {
+  // A case added from Excel before its L1/L2 results are known ("") has no
+  // decision to evaluate yet; it joins the report once its results are filled.
+  return sourceRows.flatMap((pop): ExecutiveReportRow[] => {
     const levelOneResult = pop.xrayLevelOneResult;
     const levelTwoResult = pop.xrayLevelTwoResult;
+    if (levelOneResult === "" || levelTwoResult === "") return [];
     const imageResult = classifyImageResult(levelOneResult, levelTwoResult);
 
     const dist = distMap.get(pop.xrayImageId);
@@ -215,7 +218,7 @@ function buildRawExecutiveReportRows(input: ExecutiveReportInput): ExecutiveRepo
     const { imageResultAccurate, levelOneAccurate, levelTwoAccurate, verificationCategory } =
       deriveRowAccuracy(levelOneResult, levelTwoResult, imageResult, expertResult);
 
-    return {
+    return [{
       xrayImageId: pop.xrayImageId,
       portCode: pop.portCode,
       portName: pop.portName,
@@ -259,7 +262,7 @@ function buildRawExecutiveReportRows(input: ExecutiveReportInput): ExecutiveRepo
       targetedByRiskEngine: pop.targetedByRiskEngine ?? null,
       // Spread only when true, so a month without orphans stays byte-identical.
       ...(snapshotIds.has(pop.xrayImageId) ? { fromSampleSnapshot: true as const } : {}),
-    };
+    }];
   });
 }
 
