@@ -29,9 +29,12 @@ export type BlockElement<T extends BlockType = BlockType> = {
   config: BlockConfigMap[T];
 };
 
+/** Discriminated union of every block element: narrowing on `type` narrows `config`. */
+export type AnyBlockElement = { [K in BlockType]: BlockElement<K> }[BlockType];
+
 export type DocLayout = { snap: boolean; columns: 12; gutter: number; rowUnit: number };
 
-export type PageV2 = Omit<Page, "elements"> & { elements: BlockElement[] };
+export type PageV2 = Omit<Page, "elements"> & { elements: AnyBlockElement[] };
 
 export type ReportDocumentV2 = Omit<ReportDocument, "pages" | "theme" | "schemaVersion"> & {
   schemaVersion: 2; layout: DocLayout; pages: PageV2[];
