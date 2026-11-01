@@ -243,7 +243,7 @@ describe("qualityImpactSlide — slide shell", () => {
     expect(html).toContain('id="slide-s3-quality"');
     expect(html).toContain('data-section="section3"');
     expect(html).toContain('data-title="أثر جودة الصورة على الدقة"');
-    expect(html).toContain("القسم 3 — التحاليل المتقدمة");
+    expect(html).toContain("القسم 3 - التحاليل المتقدمة");
     expect(html).toContain("دقة القرارات حسب مستوى جودة الصورة: عالي، متوسط، منخفض.");
   });
 
@@ -302,7 +302,7 @@ describe("qualityImpactSlide — no quality data at all", () => {
     const html = render(noQuality);
     expect(html).not.toContain("0.0%");
     expect(html).not.toContain("فارق عالي↔منخفض");
-    expect(html).toContain('<span class="insuff">—</span>');
+    expect(html).toContain('<span class="insuff">-</span>');
   });
 
   it("still reports the unverified/unassessed counts", () => {
@@ -339,7 +339,7 @@ describe("qualityImpactSlide — three populated strata", () => {
     expect(html).not.toContain("33.3%");
     expect(html).not.toContain("50.0%");
     expect(html).not.toContain("66.7%");
-    expect(occurrences(html, '<span class="accent"><b><span class="insuff">—</span></b><small>الاشتباه الفائت')).toBe(3);
+    expect(occurrences(html, '<span class="accent"><b><span class="insuff">-</span></b><small>الاشتباه الفائت')).toBe(3);
     expect(html).toContain("الاشتباه الفائت من 3");
     expect(html).toContain("الاشتباه الفائت من 4");
     expect(html).toContain("الاشتباه الفائت من 6");
@@ -417,7 +417,7 @@ describe("qualityImpactSlide — thin منخفض stratum", () => {
   });
 
   it("excludes the thin stratum from the gradient", () => {
-    expect(html).toContain(`فارق عالي↔منخفض: <span class="insuff">—</span>`);
+    expect(html).toContain(`فارق عالي↔منخفض: <span class="insuff">-</span>`);
     expect(html).not.toContain("نقطة</div>");
   });
 
@@ -438,7 +438,7 @@ describe("qualityImpactSlide — thin منخفض stratum", () => {
     expect(emptyHtml).toContain("العيّنة 0");
     expect(emptyHtml).toContain("لا توجد بيانات");
     expect(emptyHtml).toContain("الاشتباه الفائت من 0");
-    expect(emptyHtml).toContain(`فارق عالي↔منخفض: <span class="insuff">—</span>`);
+    expect(emptyHtml).toContain(`فارق عالي↔منخفض: <span class="insuff">-</span>`);
     expect(emptyHtml).not.toContain("NaN");
   });
 });
@@ -650,11 +650,11 @@ describe("qualityImpactSlide — Briefing (fan-out)", () => {
     ]);
     const html = preview(thin);
     // Slot 0's own trendPanel gate renders the same "—" fallback for this model.
-    expect(html).toContain('فارق عالي↔منخفض: <span class="insuff">—</span>');
+    expect(html).toContain('فارق عالي↔منخفض: <span class="insuff">-</span>');
     // Briefing's lede mirrors the SAME gate, not a parallel/looser one.
     const briefing = briefingPanel(html);
-    expect(briefing).toContain("تدرّج الدقة — بيانات غير كافية لعالي أو منخفض الجودة");
-    expect(briefing).toContain('<span class="insuff">—</span>');
+    expect(briefing).toContain("تدرّج الدقة - بيانات غير كافية لعالي أو منخفض الجودة");
+    expect(briefing).toContain('<span class="insuff">-</span>');
   });
 
   it("prints the real signed gradient and the high/low figures when both ends are rankable", () => {
@@ -665,7 +665,7 @@ describe("qualityImpactSlide — Briefing (fan-out)", () => {
     // The signed figure embedded in the label is ALSO bidi-isolated
     // (2026-07-28 fix, C4) — same dir="ltr" wrap as the standalone figure.
     expect(briefing).toContain(
-      'تدرّج الدقة <span dir="ltr">+25.0</span> نقطة — عالي 95.0% مقابل منخفض 70.0%',
+      'تدرّج الدقة <span dir="ltr">+25.0</span> نقطة - عالي 95.0% مقابل منخفض 70.0%',
     );
   });
 
@@ -715,7 +715,7 @@ describe("qualityImpactSlide — Grid (fan-out)", () => {
     const html = preview(thin);
     const grid = gridPanelOf(html);
     // Screen-reader row: rate columns "—", count columns real (5 sample, 3 basis).
-    expect(grid).toContain('<th scope="row">منخفض</th><td>—</td><td>—</td><td>5</td><td>3</td>');
+    expect(grid).toContain('<th scope="row">منخفض</th><td>-</td><td>-</td><td>5</td><td>3</td>');
   });
 
   it("renders one matrix beside the SAME reasons card, unchanged", () => {

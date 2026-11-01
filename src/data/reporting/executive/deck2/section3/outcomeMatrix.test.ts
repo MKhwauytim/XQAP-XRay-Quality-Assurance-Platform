@@ -328,7 +328,7 @@ describe("outcomeMatrixSlideBuilders", () => {
     const html = render(model, 6, 20, false);
     const portsSection = html.slice(html.indexOf('class="v2-om-ports"'));
     expect(portsSection).not.toContain("0.0%");
-    expect(portsSection).toContain('<span class="insuff">—</span>');
+    expect(portsSection).toContain('<span class="insuff">-</span>');
   });
 
   // ── Pagination (round-3 fix) ─────────────────────────────────────────────

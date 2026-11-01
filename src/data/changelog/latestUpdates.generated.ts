@@ -12,6 +12,13 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "title": "merge a month or an ad-hoc sample into another month"
   },
   {
+    "version": "v156.1",
+    "date": "2026-11-01",
+    "bucket": "enhancement",
+    "scope": "reporting",
+    "title": "normal hyphen instead of long dashes in report text"
+  },
+  {
     "version": "v156.0",
     "date": "2026-10-19",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "deck3",
     "title": "one land/sea rule per port, error rates on their own bases, labelled marking base, defined agreement weights, «عادي» image quality = «متوسط»"
-  },
-  {
-    "version": "v153.32",
-    "date": "2026-10-14",
-    "bucket": "fix",
-    "scope": "statements",
-    "title": "observation figures on one line — short labels, single-row grid; level observation shows the weighted معدل الاتفاق العام"
   }
 ];

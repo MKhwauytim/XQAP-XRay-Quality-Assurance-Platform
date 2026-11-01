@@ -190,7 +190,7 @@ ${tintedPanel({
   title: "بيانات معلومات الأعمال (BI)",
   body: kpiBand(
     model.reconciled.biRawRowCount === null
-      ? [{ label: "لم يتم توفير BI لهذا الشهر", value: "—" } satisfies KpiCell]
+      ? [{ label: "لم يتم توفير BI لهذا الشهر", value: "-" } satisfies KpiCell]
       : [{ label: "إجمالي الصفوف الخام", value: fmtNum(model.reconciled.biRawRowCount) } satisfies KpiCell],
     "solo"
   ),
@@ -199,7 +199,7 @@ ${tintedPanel({
   slides.push(slideShell(meta(4), "", receiptInner));
 
   // 5 — Risk before -> after
-  const riskInner = `${contentHead({ eyebrow: "القسم الأول", title: "بيانات المخاطر — قبل وبعد" })}
+  const riskInner = `${contentHead({ eyebrow: "القسم الأول", title: "بيانات المخاطر - قبل وبعد" })}
 ${
   summary
     ? kpiBand(
@@ -225,7 +225,7 @@ ${
         { html: fmtPct(f.fillPercentage) },
       ])
     : [];
-  const biInner = `${contentHead({ eyebrow: "القسم الأول", title: "بيانات BI — قبل وبعد" })}
+  const biInner = `${contentHead({ eyebrow: "القسم الأول", title: "بيانات BI - قبل وبعد" })}
 ${
   summary && summary.biProvided
     ? `${kpiBand(
@@ -450,7 +450,7 @@ export async function buildPopulationDeckSlides(
       sectionKey = lastSectionKey;
       sectionLabel = lastSectionLabel;
     }
-    return { num, total: totalSlides, sectionKey, sectionLabel, footText: `تقرير المجتمع — ${model.monthLabel}` };
+    return { num, total: totalSlides, sectionKey, sectionLabel, footText: `تقرير المجتمع - ${model.monthLabel}` };
   };
 
   const parts: string[] = [];
@@ -467,7 +467,7 @@ export async function buildPopulationDeckSlides(
       org: ORG,
       kicker: "تقرير المجتمع",
       title: "نهاية التقرير",
-      closingLine: `تقرير المجتمع — ${model.monthLabel}`,
+      closingLine: `تقرير المجتمع - ${model.monthLabel}`,
       metaRows: [],
       meta: meta(totalSlides),
     })

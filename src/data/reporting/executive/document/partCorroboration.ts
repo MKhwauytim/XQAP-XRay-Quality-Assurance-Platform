@@ -53,7 +53,7 @@ export function buildReviewerAgreement(model: ReportModel, pageNo: string): stri
   const body = `${pageHeader({ iconName: "users", eyebrow: "الجزء الثالث · التطابق", title: "كل فريق مقابل المراجع", subtitle: "الفرق الأخرى دليل مساند لا محل تدقيق" })}
     ${kpiStrip([
       kpi({ label: "فرق قدّمت نتائج", value: fmtNum(reporting.length), tone: "gold" }),
-      kpi({ label: "أعلى توافق", value: topTeam ?? "—", tone: "green" }),
+      kpi({ label: "أعلى توافق", value: topTeam ?? "-", tone: "green" }),
       kpi({ label: "نسبة أعلى توافق", value: fmtPct(topRate), tone: "blue" }),
     ], 3)}
     ${reporting.length === 0
@@ -94,7 +94,7 @@ export function buildAgreementMatrix(model: ReportModel, pageNo: string): string
   const strongest = [...comparablePairs].sort((a, b) => (b.agreementRate as number) - (a.agreementRate as number))[0];
   const weakest = [...comparablePairs].sort((a, b) => (a.agreementRate as number) - (b.agreementRate as number))[0];
   const pairLabel = (c: typeof strongest): string =>
-    c ? `${SOURCE_LABEL[c.sourceA]} ↔ ${SOURCE_LABEL[c.sourceB]}` : "—";
+    c ? `${SOURCE_LABEL[c.sourceA]} ↔ ${SOURCE_LABEL[c.sourceB]}` : "-";
 
   const body = `${pageHeader({ iconName: "chart", eyebrow: "الجزء الثالث · التطابق", title: "مصفوفة التطابق الكاملة", subtitle: "كل مصدر مقابل الآخر (تشمل الأول مقابل الثاني)" })}
     ${kpiStrip([
@@ -106,7 +106,7 @@ export function buildAgreementMatrix(model: ReportModel, pageNo: string): string
         ? panel("مصفوفة نسب التطابق (N×N)", figure(heatmap(matrix, { width: 460, height: 280 }), { height: 300 }), { fill: true, iconName: "chart" })
         : emptyState("لا تتوفر بيانات تطابق", "لم تتوفر نتائج كافية لبناء مصفوفة المقارنة هذه الفترة.")}
     </div>
-    ${noteBox('الخلايا تعرض نسبة التطابق فقط حين تتوفر نتيجة لكلا المصدرين؛ غير ذلك تُعرض "—".')}
+    ${noteBox('الخلايا تعرض نسبة التطابق فقط حين تتوفر نتيجة لكلا المصدرين؛ غير ذلك تُعرض "-".')}
     ${executiveClose({
       shows: strongest ? `أقوى تطابق بين ${pairLabel(strongest)} وأضعفه بين ${pairLabel(weakest)}.` : "لا توجد أزواج قابلة للمقارنة هذه الفترة.",
       matters: "مواضع تفرّد قرارات المستويين عن بقية المصادر تستحق مراجعة أدق.",

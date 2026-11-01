@@ -61,7 +61,7 @@ body.te-on [data-edit]:focus{outline:2px solid var(--gold,#c9a24a);background:rg
 
 export function textEditBarHtml(presetName: string): string {
   return `<span class="te-bar" id="te-bar" data-preset="${esc(presetName)}">
-      <button class="btn" type="button" id="te-toggle" aria-pressed="false" title="تعديل النصوص الثابتة فقط — الأرقام والبيانات مقفلة">تحرير النص</button>
+      <button class="btn" type="button" id="te-toggle" aria-pressed="false" title="تعديل النصوص الثابتة فقط - الأرقام والبيانات مقفلة">تحرير النص</button>
       <span class="te-more">
         <button class="btn" type="button" id="te-save">حفظ كإعداد مسبق</button>
         <button class="btn" type="button" id="te-reset">استعادة الأصل</button>
@@ -163,18 +163,18 @@ export const TEXT_EDIT_SCRIPT = `(function(){
     var ch = null;
     try { ch = new BroadcastChannel(CHANNEL); } catch (e) {}
     function finish(msg){ if (done) return; done = true; if (ch) ch.close(); toast(msg); }
-    if (!ch) { downloadPreset(name, map); finish('تعذّر الاتصال بالتطبيق — تم تنزيل الإعداد كملف'); return; }
+    if (!ch) { downloadPreset(name, map); finish('تعذّر الاتصال بالتطبيق - تم تنزيل الإعداد كملف'); return; }
     ch.onmessage = function(e){
       var d = e.data || {};
       if (d.type !== 'deck2-text-preset-result' || d.name !== name) return;
       if (d.ok) { bar.setAttribute('data-preset', name); finish('تم حفظ الإعداد «' + name + '»'); }
-      else { downloadPreset(name, map); finish('تعذّر الحفظ في مساحة العمل: ' + (d.error || '') + ' — تم تنزيل الإعداد كملف'); }
+      else { downloadPreset(name, map); finish('تعذّر الحفظ في مساحة العمل: ' + (d.error || '') + ' - تم تنزيل الإعداد كملف'); }
     };
     ch.postMessage({ type: 'deck2-text-preset-save', name: name, overrides: map });
     setTimeout(function(){
       if (done) return;
       downloadPreset(name, map);
-      finish('التطبيق غير متاح للحفظ — تم تنزيل الإعداد كملف');
+      finish('التطبيق غير متاح للحفظ - تم تنزيل الإعداد كملف');
     }, 2500);
   });
 })();`;

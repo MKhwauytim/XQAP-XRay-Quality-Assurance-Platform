@@ -186,7 +186,7 @@ describe("buildExecutiveWorkbook", () => {
     const header = rows[0] as string[];
     const liveCol = header.indexOf("الوسائل الحية (نتيجة)");
     // XR-1 has no liveMeans result → must render — (dash), never a number/percentage.
-    expect(rows[1]![liveCol]).toBe("—");
+    expect(rows[1]![liveCol]).toBe("-");
   });
 
   it("inspector columns carry — when BI did not map (no fabricated names)", async () => {
@@ -200,7 +200,7 @@ describe("buildExecutiveWorkbook", () => {
     const imageRows = readSheet(wb, SHEET_NAMES.rows);
     const header = imageRows[0] as string[];
     const l1Col = header.indexOf("م.أول (مفتش)");
-    expect(imageRows[1]![l1Col]).toBe("—");
+    expect(imageRows[1]![l1Col]).toBe("-");
   });
 
   it("inspector columns carry the BI id when mapped", async () => {

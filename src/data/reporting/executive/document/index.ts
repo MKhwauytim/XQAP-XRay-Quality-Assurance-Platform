@@ -165,7 +165,7 @@ export async function buildDocumentSlides(model: ReportModel, issueDate: string)
   n = perPort.nextPageNo;
   const perPortEnd = n - 1;
   if (perPort.html.length > 0) {
-    const range = perPortEnd > perPortStart ? `${pad(perPortStart)}–${pad(perPortEnd)}` : pad(perPortStart);
+    const range = perPortEnd > perPortStart ? `${pad(perPortStart)}-${pad(perPortEnd)}` : pad(perPortStart);
     tocPart4!.pages.push({ n: range, t: `صفحة لكل منفذ (${perPort.html.length} منافذ)` });
   }
   pages.push(buildPortComparison(model, pad(n))); tocPart4!.pages.push({ n: pad(n), t: "مقارنة المنافذ" }); n += 1;
@@ -219,7 +219,7 @@ export async function buildDocumentSlides(model: ReportModel, issueDate: string)
   n = empRows.nextPageNo;
   const empRowsEnd = n - 1;
   if (empRows.html.length > 0) {
-    const range = empRowsEnd > empRowsStart ? `${pad(empRowsStart)}–${pad(empRowsEnd)}` : pad(empRowsStart);
+    const range = empRowsEnd > empRowsStart ? `${pad(empRowsStart)}-${pad(empRowsEnd)}` : pad(empRowsStart);
     tocPart6!.pages.push({ n: range, t: "قوائم الصفوف لكل موظف" });
   }
   }

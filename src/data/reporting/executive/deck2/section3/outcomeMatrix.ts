@@ -62,9 +62,9 @@ import type { CellTone, SlideBuilder } from "../slideKit";
 
 const SLIDE_ID = "slide-s3-outcome-matrix";
 const SLIDE_TITLE = "مصفوفة نتائج الفحص";
-const EYEBROW = "القسم 3 — التحاليل المتقدمة";
+const EYEBROW = "القسم 3 - التحاليل المتقدمة";
 const SUBHEAD =
-  "أربع نتائج فحص محتملة لكل قرار مستوى، إجمالاً وحسب المنفذ — قرار فريق الفحص مقابل قرار المراجع.";
+  "أربع نتائج فحص محتملة لكل قرار مستوى، إجمالاً وحسب المنفذ - قرار فريق الفحص مقابل قرار المراجع.";
 
 /** Shape shared by `model.errorAnalysis.totals` and each entry of
  *  `model.errorAnalysis.byPort` (`ErrorTypeBreakdown`, which additionally
@@ -407,7 +407,7 @@ export const OUTCOME_MATRIX_CSS = `
 .v2-om-cell.gold{border-color:color-mix(in srgb,var(--gold) 55%,transparent);background:color-mix(in srgb,var(--gold) 14%,transparent);}
 .v2-om-cell.green{border-color:color-mix(in srgb,var(--green) 55%,transparent);background:color-mix(in srgb,var(--green) 14%,transparent);}
 .v2-om-cell.coral{border-color:color-mix(in srgb,var(--coral) 55%,transparent);background:color-mix(in srgb,var(--coral) 14%,transparent);}
-/* اشتباه فائت is the headline cell — a thicker border and slightly stronger
+/* اشتباه فائت is the headline cell - a thicker border and slightly stronger
    fill mark it out from the other three without relying on color alone (the
    label + always-visible count already carry the meaning). */
 .v2-om-cell.emphasis{border-width:2px;background:color-mix(in srgb,var(--coral) 22%,transparent);}
@@ -417,12 +417,12 @@ export const OUTCOME_MATRIX_CSS = `
 
 /* Compact totals band (Task-5 round-2 fix): this page's own denominator strip
    sits BELOW the matrix, competing for the same fixed slide-body height as
-   the ports table below IT — unlike every other section-3 page that uses the
+   the ports table below IT - unlike every other section-3 page that uses the
    generic .v2-totals-band (18px margin-top, 1.15rem figures), which assumes
    the band is the ONLY thing sharing the body. Same tightening technique
    .v2-risk-layout .v2-totals-band / .v2-sys-brief .v2-totals-band already
-   apply elsewhere in this theme (theme.ts) — a precedented compact variant,
-   not a new one — reclaims the room the ports table needs. */
+   apply elsewhere in this theme (theme.ts) - a precedented compact variant,
+   not a new one - reclaims the room the ports table needs. */
 .v2-om-top .v2-totals-band{margin-top:8px;gap:8px;}
 .v2-om-top .v2-totals-item{padding:6px 12px;}
 .v2-om-top .v2-totals-item b{font-size:.88rem;}
@@ -440,7 +440,7 @@ body.theme-light .v2-om-cell-label{color:color-mix(in srgb,var(--navy) 68%,trans
 body.theme-light .v2-om-share{color:color-mix(in srgb,var(--navy) 68%,transparent);}
 
 .v2-om-port-missed{font-weight:800;}
-/* Folded remainder row (round-2 fix) — same muted/italic treatment
+/* Folded remainder row (round-2 fix) - same muted/italic treatment
    .v2-cov-fold-row / .v2-acc-fold-row already use for this exact pattern
    elsewhere in the deck (theme.ts), so a folded row reads as visibly
    different from a named port row without a legend. */

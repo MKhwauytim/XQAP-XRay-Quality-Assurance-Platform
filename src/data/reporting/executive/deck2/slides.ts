@@ -161,7 +161,7 @@ export function coverSlide(
           <span class="v2-cover-lockup-label">${completedOnly ? esc(ceLabels.ce_completed_samples) : "فترة الدراسة (عيّنة شهر)"}</span>
           <span class="v2-cover-lockup-period">${completedOnly ? fmtNum(model.sample.studied) : esc(model.summary.periodId)}</span>
         </div>${completedOnly ? `\n        <p class="v2-cover-scope" style="margin:4px 0 0;max-width:34em;font-size:0.92rem;line-height:1.6;color:rgba(255,255,255,.82)">${esc(ceLabels.ce_scope_note)}</p>` : ""}
-        <div class="v2-cover-badge"><span>${icon("shield", 13)}</span>داخلي — للاستخدام التنفيذي</div>
+        <div class="v2-cover-badge"><span>${icon("shield", 13)}</span>داخلي - للاستخدام التنفيذي</div>
       </div>
       <div class="v2-cover-meta-col">${meta}</div>
     </div>`;
@@ -193,7 +193,7 @@ export function coverSlide(
   ]
     .map(([label, value], i) => `<tr><td>${ledgerIdx(i)}</td><td>${label}</td><td>${value}</td></tr>`)
     .join("");
-  const ledgerFootnote = `<tr class="v2-lg-footnote"><td colspan="3">داخلي — للاستخدام التنفيذي</td></tr>`;
+  const ledgerFootnote = `<tr class="v2-lg-footnote"><td colspan="3">داخلي - للاستخدام التنفيذي</td></tr>`;
   const ledgerBody = `<div class="v2-sys-ledger v2-lg-cover">
       <div class="v2-lg-cover-hero">
         <h1 class="v2-cover-title"${editAttr(COVER_TITLE)}>تقرير ضمان جودة<br/>فحص الأشعة</h1>
@@ -226,7 +226,7 @@ export function coverSlide(
       ${briefingLede({
         figure: popTotal,
         tone: "gold",
-        label: `صورة في مجتمع الفحص — ${esc(periodId)}`,
+        label: `صورة في مجتمع الفحص - ${esc(periodId)}`,
         basis: `${esc(department)} · ${esc(section)} · صدر في ${esc(genDate)}`,
       })}
       ${briefingSupport([
@@ -297,7 +297,7 @@ export type TocItem = {
  * string). A lone `pad(n)` (no dash — a single-page section) is span 1.
  */
 function tocSectionSpan(range: string): number {
-  const parts = range.split("–");
+  const parts = range.split("-");
   if (parts.length === 2) {
     const start = Number(parts[0]);
     const end = Number(parts[1]);
@@ -416,7 +416,7 @@ function tocBriefing(items: TocItem[], total: number): string {
     ${briefingLede({
       figure: fmtNum(total),
       tone: "blue",
-      label: `محتويات التقرير — ${fmtNum(items.length)} أقسام في ${fmtNum(total)} صفحة`,
+      label: `محتويات التقرير - ${fmtNum(items.length)} أقسام في ${fmtNum(total)} صفحة`,
       basis: `${fmtNum(items.length)} قسمًا مفهرسًا`,
     })}
     ${supportStrip}
@@ -508,7 +508,7 @@ export function monthInNumbersSlide(model: ReportModel, num: number, total: numb
   const studyTile = {
     tone: "green",
     icon: "gauge",
-    value: accuracy === null ? "—" : fmtPct(accuracy),
+    value: accuracy === null ? "-" : fmtPct(accuracy),
     label: "الدقة العامة",
     sub: accuracy === null ? "بيانات غير كافية للتقييم" : "مطابقة قرارات الفحص للمراجع",
   };
@@ -557,7 +557,7 @@ export function monthInNumbersSlide(model: ReportModel, num: number, total: numb
     iconName: "chart",
     headline: "مؤشرات الشهر",
     subhead:
-      "أبرز مؤشرات الشهر، ثم أعلى المنافذ حجمًا — قبل الجداول التفصيلية." +
+      "أبرز مؤشرات الشهر، ثم أعلى المنافذ حجمًا - قبل الجداول التفصيلية." +
       snapshotFootnote(model),
     bodyVariants: [body, body, body, body],
     variantPreview,
@@ -806,7 +806,7 @@ function levelCardBody(lv: RiskLevel, i: number, shareStyle: string): string {
   const weight = LEVEL_DRAW_WEIGHTS[i] ?? null;
   const figure =
     weight === null
-      ? `<span class="v2-level-share-empty insuff">—</span>`
+      ? `<span class="v2-level-share-empty insuff">-</span>`
       : `<b dir="ltr">${fmtPct(weight, 0)}</b>`;
   return `<div class="v2-level-card ${lv.tone}">
     <div class="v2-level-head">
@@ -953,7 +953,7 @@ function glossaryLevelsBriefing(): string {
     foldRemainder: (folded) => ({
       label: `بقية المستويات (${fmtNum(folded.length)})`,
       value: null,
-      valueText: "—",
+      valueText: "-",
       secondaryText: "",
       rest: true,
     }),
@@ -962,7 +962,7 @@ function glossaryLevelsBriefing(): string {
     ${briefingLede({
       figure: fmtNum(RISK_LEVELS.length),
       tone: "gold",
-      label: "أربعة مستويات مخاطر — تصنيفٌ للحالات لا ترتيبٌ لخطورتها",
+      label: "أربعة مستويات مخاطر - تصنيفٌ للحالات لا ترتيبٌ لخطورتها",
       basis: "تعريفات ثابتة لا تتغير شهريًا",
     })}
     ${supportStrip}
@@ -1035,7 +1035,7 @@ function glossaryTermsBriefing(): string {
     foldRemainder: (folded) => ({
       label: `+${fmtNum(folded.length)} مصطلحات إضافية`,
       value: null,
-      valueText: "—",
+      valueText: "-",
       secondaryText: "",
       rest: true,
     }),
@@ -1088,7 +1088,7 @@ export function glossarySlideBuilders(variantPreview: boolean): SlideBuilder[] {
         title: "مستويات المخاطر",
         eyebrow: "المعجم",
         iconName: "layers",
-        headline: "المعجم — مستويات المخاطر",
+        headline: "المعجم - مستويات المخاطر",
         subhead: "أربعة مستويات لكل منها تعريفه وغرضه؛ تصنيفٌ للحالات لا ترتيبٌ لخطورتها.",
         bodyVariants: [body, ledgerBody, briefingBody, gridBody],
         variantPreview,
@@ -1107,7 +1107,7 @@ export function glossarySlideBuilders(variantPreview: boolean): SlideBuilder[] {
         title: "المعجم",
         eyebrow: "المعجم",
         iconName: "document",
-        headline: "المعجم — المصطلحات الرئيسية",
+        headline: "المعجم - المصطلحات الرئيسية",
         subhead: "توحيد المصطلحات قبل قراءة النتائج.",
         bodyVariants: [body, ledgerBody, briefingBody, gridBody],
         variantPreview,
@@ -1256,7 +1256,7 @@ export function sectionSeparatorSlide(opts: {
  */
 function stageShortTag(stage: StageProfile): string {
   const idx = levelIndexForStage(stage);
-  if (idx < 0) return "—";
+  if (idx < 0) return "-";
   const weight = LEVEL_DRAW_WEIGHTS[idx];
   return weight === null ? `المستوى ${idx + 1}` : `وزن العينة ${fmtPct(weight, 0)}`;
 }
@@ -1301,7 +1301,7 @@ function stageProportionBar(stages: StageProfile[]): string {
  * 100%.
  */
 const LEVEL_WEIGHT_BASIS_FOOTNOTE =
-  "وزن المستوى الأول نسبة من مجتمعه (حصر شامل)؛ وبقية الأوزان حصص من حصة العدد الثابت — الأساسان مختلفان ولا يجمعان إلى 100%";
+  "وزن المستوى الأول نسبة من مجتمعه (حصر شامل)؛ وبقية الأوزان حصص من حصة العدد الثابت - الأساسان مختلفان ولا يجمعان إلى 100%";
 
 /**
  * Exact-figures table for the 4 risk levels — Ledger slot 1's ENTIRE body for
@@ -1359,7 +1359,7 @@ function levelFiguresTable(
       const share = (s.population / populationTotal) * 100;
       const weight = idx >= 0 ? LEVEL_DRAW_WEIGHTS[idx] ?? null : null;
       return `<tr>
-        <td><span class="v2-level-row-num ${tone}">${idx >= 0 ? idx + 1 : "—"}</span></td>
+        <td><span class="v2-level-row-num ${tone}">${idx >= 0 ? idx + 1 : "-"}</span></td>
         <td>${esc(s.stageLabel)}</td>
         <td>${fmtPct(weight, 0)}</td>
         <td>${fmtPct(share, 0)}</td>
@@ -1385,7 +1385,7 @@ function levelFiguresTable(
       `,
     bodyRowsHtml: rows,
     totalsRowHtml: `<tr>
-        <td></td><td>الإجمالي</td><td>—</td><td>100%</td>
+        <td></td><td>الإجمالي</td><td>-</td><td>100%</td>
         <td>${fmtNum(totals.population)}</td><td>${fmtNum(totals.sample)}</td><td>${fmtPct(totals.coverage)}</td>
       </tr>${footnoteRow}`,
     span: 7,
@@ -1409,7 +1409,7 @@ export function riskStagesSlide(model: ReportModel, num: number, total: number, 
       const share = (stage.population / populationTotal) * 100;
       return `<div class="v2-risk-tile ${tone}">
         <div class="v2-risk-tile-head">
-          <span class="v2-stage-num">${idx >= 0 ? idx + 1 : "—"}</span>
+          <span class="v2-stage-num">${idx >= 0 ? idx + 1 : "-"}</span>
           <span class="v2-risk-tile-titles"><b>${esc(stage.stageLabel)}</b><small>${esc(tag)}</small></span>
           <span class="v2-risk-tile-share"><b>${fmtPct(share, 0)}</b><small>من المجتمع</small></span>
         </div>
@@ -1449,7 +1449,7 @@ export function riskStagesSlide(model: ReportModel, num: number, total: number, 
   return v2Slide({
     id: "slide-risk-stages",
     title: "مجتمع الصور بناءً على المخاطر",
-    eyebrow: "القسم 1 — مجتمع الفحص",
+    eyebrow: "القسم 1 - مجتمع الفحص",
     iconName: "gauge",
     headline: "مجتمع الصور بناءً على المخاطر",
     subhead: "توزيع المجتمع بعد المعالجة على مستويات المخاطر الأربعة، وحصة كل مستوى من العيّنة." + snapshotFootnote(model),
@@ -1483,7 +1483,7 @@ function riskStagesBriefing(model: ReportModel, stages: StageProfile[], populati
   const supportStrip = briefingSupport([
     { iconName: "layers", value: fmtNum(model.population.total), label: "إجمالي المجتمع" },
     { iconName: "scan", value: fmtNum(model.sample.total), label: "إجمالي العيّنة" },
-    { iconName: "flag", value: esc(largest?.stageLabel ?? "—"), label: "أكبر مستوى حصةً" },
+    { iconName: "flag", value: esc(largest?.stageLabel ?? "-"), label: "أكبر مستوى حصةً" },
   ]);
   const rankItems: BriefingRankItem[] = stages.map((s) => {
     // BY IDENTITY, not loop position — see CANONICAL_STAGE_ORDER's doc
@@ -1513,7 +1513,7 @@ function riskStagesBriefing(model: ReportModel, stages: StageProfile[], populati
     foldRemainder: (folded) => ({
       label: `بقية المستويات (${fmtNum(folded.length)})`,
       value: null,
-      valueText: "—",
+      valueText: "-",
       secondaryText: "",
       rest: true,
     }),
@@ -1522,7 +1522,7 @@ function riskStagesBriefing(model: ReportModel, stages: StageProfile[], populati
     ${briefingLede({
       figure: fmtPct(model.sample.coverage, 0),
       tone: "gold",
-      label: `تغطية العيّنة ${fmtPct(model.sample.coverage, 0)} — ${fmtNum(model.sample.total)} من ${fmtNum(model.population.total)} صورة`,
+      label: `تغطية العيّنة ${fmtPct(model.sample.coverage, 0)} - ${fmtNum(model.sample.total)} من ${fmtNum(model.population.total)} صورة`,
       // Reflects the actual number of levels present in `stages` rather than
       // assuming all four always show up (2026-07-28 review fix) — a month
       // whose risk file omits a level entirely (or the no-sample fallback
@@ -1630,7 +1630,7 @@ function portTable(
             return `<tr><td>${esc(p.name)}</td>${barCell(frac(p.sampleTotal, p.total), (p.sampleTotal / maxMag) * 100, magTone)}<td>${frac(p.sampleClean, p.clean)}</td><td>${frac(p.sampleSuspicious, p.suspicious)}</td><td>${fmtPct(coverage)}</td></tr>`;
           })
           .join("")
-      : `<tr><td colspan="${span}"><span class="insuff">—</span></td></tr>`;
+      : `<tr><td colspan="${span}"><span class="insuff">-</span></td></tr>`;
 
   const sum = (f: (p: PortPopRow) => number) => rows.reduce((s, p) => s + f(p), 0);
   const totalPop = sum((p) => p.total);
@@ -1729,7 +1729,7 @@ function briefingPortRank(landChunk: PortPopRow[], seaChunk: PortPopRow[]): stri
   const combined = [...landChunk, ...seaChunk].sort((a, b) => b.total - a.total);
   if (combined.length === 0) {
     return `<div class="v2-sys-brief v2-bf-port-population">
-      <div class="v2-bf-lede"><div class="v2-bf-lede-figure gold"><span class="insuff">—</span></div></div>
+      <div class="v2-bf-lede"><div class="v2-bf-lede-figure gold"><span class="insuff">-</span></div></div>
     </div>`;
   }
   const lead = combined[0];
@@ -1780,7 +1780,7 @@ function briefingPortRank(landChunk: PortPopRow[], seaChunk: PortPopRow[]): stri
     ${briefingLede({
       figure: fmtNum(lead.total),
       tone: "gold",
-      label: `أعلى منفذ: ${esc(lead.name)} — ${fmtNum(lead.total)} صورة`,
+      label: `أعلى منفذ: ${esc(lead.name)} - ${fmtNum(lead.total)} صورة`,
       basis,
     })}
     ${supportStrip}
@@ -1860,7 +1860,7 @@ export function portPopulationSlideBuilders(model: ReportModel, variantPreview: 
       return v2Slide({
         id: `slide-port-population-${page + 1}`,
         title: `مجتمع صور الفحص${cont}`,
-        eyebrow: "القسم 1 — مجتمع الفحص",
+        eyebrow: "القسم 1 - مجتمع الفحص",
         iconName: "port",
         headline: `مجتمع صور الفحص لشهر ${model.summary.periodId}${cont}`,
         subhead: "منهجية التصنيف: تُصنَّف الصورة اشتباهًا إذا كانت نتيجة المستوى الأول أو الثاني اشتباهًا، وفي غير ذلك تُصنَّف سليمة.",
@@ -1928,7 +1928,7 @@ function briefingPortSampleRank(landChunk: PortPopRow[], seaChunk: PortPopRow[])
   const combined = [...landChunk, ...seaChunk].sort((a, b) => b.sampleTotal - a.sampleTotal);
   if (combined.length === 0) {
     return `<div class="v2-sys-brief v2-bf-port-sample">
-      <div class="v2-bf-lede"><div class="v2-bf-lede-figure blue"><span class="insuff">—</span></div></div>
+      <div class="v2-bf-lede"><div class="v2-bf-lede-figure blue"><span class="insuff">-</span></div></div>
     </div>`;
   }
   const lead = combined[0];
@@ -1984,7 +1984,7 @@ function briefingPortSampleRank(landChunk: PortPopRow[], seaChunk: PortPopRow[])
     ${briefingLede({
       figure: fmtNum(lead.sampleTotal),
       tone: "blue",
-      label: `أعلى منفذ عيّنةً: ${esc(lead.name)} — ${fmtNum(lead.sampleTotal)} من ${fmtNum(lead.total)} صورة`,
+      label: `أعلى منفذ عيّنةً: ${esc(lead.name)} - ${fmtNum(lead.sampleTotal)} من ${fmtNum(lead.total)} صورة`,
       basis,
     })}
     ${supportStrip}
@@ -2057,7 +2057,7 @@ export function portSampleSlideBuilders(model: ReportModel, variantPreview: bool
       return v2Slide({
         id: `slide-port-sample-${page + 1}`,
         title: `عيّنة الفحص${cont}`,
-        eyebrow: "القسم 1 — مجتمع الفحص",
+        eyebrow: "القسم 1 - مجتمع الفحص",
         iconName: "port",
         headline: `عيّنة الفحص المسحوبة لشهر ${model.summary.periodId}${cont}`,
         subhead: "الصفحة نفسها بأرقام العيّنة: كل رقم عيّنة وتحته أساسه من المجتمع، مع نسبة التغطية.",
@@ -2180,7 +2180,7 @@ function stagePortPopulationCard(stage: StageProfile, ports: PortPopRow[]): stri
 
   return `<div class="v2-stage-card ${tone} v2-stage-port-card">
     <div class="v2-stage-head">
-      <span class="v2-stage-num">${idx >= 0 ? idx + 1 : "—"}</span>
+      <span class="v2-stage-num">${idx >= 0 ? idx + 1 : "-"}</span>
       <b>${esc(stage.stageLabel)}</b>
     </div>
     <table class="deck-table">
@@ -2221,7 +2221,7 @@ function stagePortSampleCard(stage: StageProfile, ports: PortPopRow[]): string {
 
   return `<div class="v2-stage-card ${tone} v2-stage-port-card">
     <div class="v2-stage-head">
-      <span class="v2-stage-num">${idx >= 0 ? idx + 1 : "—"}</span>
+      <span class="v2-stage-num">${idx >= 0 ? idx + 1 : "-"}</span>
       <b>${esc(stage.stageLabel)}</b>
       <span class="v2-stage-port-figure" dir="ltr">${fmtNum(stage.sampleSize)} / ${fmtNum(stage.population)}</span>
     </div>
@@ -2343,11 +2343,11 @@ function stagePortPopulationLedgerCard(stage: StageProfile, ports: PortPopRow[])
               `<tr><td>${ledgerIdx(i)}${esc(p.name)}</td><td>${fmtNum(p.clean)}</td><td>${fmtNum(p.suspicious)}</td><td>${fmtNum(p.total)}</td></tr>`,
           )
           .join("")
-      : `<tr><td colspan="4"><span class="insuff">—</span></td></tr>`;
+      : `<tr><td colspan="4"><span class="insuff">-</span></td></tr>`;
   const sum = (f: (p: PortPopRow) => number) => ports.reduce((s, p) => s + f(p), 0);
   const totalsRow = `<tr><td>الإجمالي</td><td>${fmtNum(sum((p) => p.clean))}</td><td>${fmtNum(sum((p) => p.suspicious))}</td><td>${fmtNum(stage.population)}</td></tr>`;
   return ledgerTableCard({
-    title: `${stage.stageLabel} — أعلى 5 من ${portCountPhrase(ports.length)}`,
+    title: `${stage.stageLabel} - أعلى 5 من ${portCountPhrase(ports.length)}`,
     theadCells: `<th>المنفذ</th><th>سليمة</th><th>اشتباه</th><th>الإجمالي</th>`,
     bodyRowsHtml: rows,
     totalsRowHtml: totalsRow,
@@ -2374,10 +2374,10 @@ function stagePortSampleLedgerCard(stage: StageProfile, ports: PortPopRow[]): st
             return `<tr><td>${ledgerIdx(i)}${esc(p.name)}</td><td>${fmtNum(p.total)}</td><td>${fmtNum(p.sampleTotal)}</td><td>${fmtPct(coverage)}</td></tr>`;
           })
           .join("")
-      : `<tr><td colspan="4"><span class="insuff">—</span></td></tr>`;
+      : `<tr><td colspan="4"><span class="insuff">-</span></td></tr>`;
   const totalsRow = `<tr><td>الإجمالي</td><td>${fmtNum(stage.population)}</td><td>${fmtNum(stage.sampleSize)}</td><td>${fmtPct(stage.coverage)}</td></tr>`;
   return ledgerTableCard({
-    title: `${stage.stageLabel} — أعلى 5 من ${portCountPhrase(ports.length)}`,
+    title: `${stage.stageLabel} - أعلى 5 من ${portCountPhrase(ports.length)}`,
     theadCells: `<th>المنفذ</th><th>مجتمع المرحلة</th><th>العيّنة المستهدفة</th><th>نسبة التغطية</th>`,
     bodyRowsHtml: rows,
     totalsRowHtml: totalsRow,
@@ -2406,7 +2406,7 @@ function stagePortPopulationBriefing(
   const supportStrip = briefingSupport([
     { iconName: "layers", value: fmtNum(model.population.total), label: "إجمالي المجتمع" },
     { iconName: "gauge", value: fmtNum(stages.length), label: "عدد المستويات" },
-    { iconName: "flag", value: esc(overallTop?.name ?? "—"), label: "أعلى منفذ إجماليًا" },
+    { iconName: "flag", value: esc(overallTop?.name ?? "-"), label: "أعلى منفذ إجماليًا" },
   ]);
   const rankItems: BriefingRankItem[] = stages.map((s) => {
     const idx = levelIndexForStage(s);
@@ -2415,7 +2415,7 @@ function stagePortPopulationBriefing(
       label: s.stageLabel,
       value: s.population,
       valueText: fmtNum(s.population),
-      secondaryText: top ? `أعلى منفذ: ${esc(truncLabel(top.name, 14))} (${fmtNum(top.total)})` : "—",
+      secondaryText: top ? `أعلى منفذ: ${esc(truncLabel(top.name, 14))} (${fmtNum(top.total)})` : "-",
       tone: idx >= 0 ? STAGE_TONES[idx] : undefined,
     };
   });
@@ -2430,14 +2430,14 @@ function stagePortPopulationBriefing(
     foldRemainder: (folded) => ({
       label: `بقية المستويات (${fmtNum(folded.length)})`,
       value: null,
-      valueText: "—",
+      valueText: "-",
       secondaryText: "",
       rest: true,
     }),
   });
   return `<div class="v2-sys-brief v2-bf-stage-port-population">
     ${briefingLede({
-      figure: lede ? fmtNum(lede.port.total) : "—",
+      figure: lede ? fmtNum(lede.port.total) : "-",
       // Pinned to this page's OWN assigned Briefing tone (gold — fan-out plan
       // §0's tone table), never `STAGE_TONES[ledeIdx]` — the lede is ONE
       // figure identifying the page, not a per-stage row, so its color must
@@ -2447,7 +2447,7 @@ function stagePortPopulationBriefing(
       // whole-branch-review fix, B3).
       tone: "gold",
       label: lede
-        ? `أعلى تركّز: ${esc(lede.port.name)} في ${esc(lede.stage.stageLabel)} — ${fmtNum(lede.port.total)} صورة`
+        ? `أعلى تركّز: ${esc(lede.port.name)} في ${esc(lede.stage.stageLabel)} - ${fmtNum(lede.port.total)} صورة`
         : "لا تتوفر بيانات كافية",
       basis: `أعلى 5 منافذ لكل مستوى · ${esc(model.summary.periodId)}`,
     })}
@@ -2472,7 +2472,7 @@ function stagePortSampleBriefing(
   const supportStrip = briefingSupport([
     { iconName: "scan", value: fmtNum(model.sample.total), label: "إجمالي العيّنة" },
     { iconName: "gauge", value: fmtNum(stages.length), label: "عدد المستويات" },
-    { iconName: "flag", value: esc(overallTop?.name ?? "—"), label: "أعلى منفذ عيّنةً" },
+    { iconName: "flag", value: esc(overallTop?.name ?? "-"), label: "أعلى منفذ عيّنةً" },
   ]);
   const rankItems: BriefingRankItem[] = stages.map((s) => {
     const idx = levelIndexForStage(s);
@@ -2491,20 +2491,20 @@ function stagePortSampleBriefing(
     foldRemainder: (folded) => ({
       label: `بقية المستويات (${fmtNum(folded.length)})`,
       value: null,
-      valueText: "—",
+      valueText: "-",
       secondaryText: "",
       rest: true,
     }),
   });
   return `<div class="v2-sys-brief v2-bf-stage-port-sample">
     ${briefingLede({
-      figure: lede ? fmtNum(lede.port.sampleTotal) : "—",
+      figure: lede ? fmtNum(lede.port.sampleTotal) : "-",
       // Pinned to this page's OWN assigned Briefing tone (blue), same
       // reasoning as the population page's lede above (B3 fix) — never
       // `STAGE_TONES[ledeIdx]`.
       tone: "blue",
       label: lede
-        ? `أعلى تركّز عيّنة: ${esc(lede.port.name)} في ${esc(lede.stage.stageLabel)} — ${fmtNum(lede.port.sampleTotal)} صورة`
+        ? `أعلى تركّز عيّنة: ${esc(lede.port.name)} في ${esc(lede.stage.stageLabel)} - ${fmtNum(lede.port.sampleTotal)} صورة`
         : "لا تتوفر بيانات كافية",
       basis: `أعلى 5 منافذ لكل مستوى · ${esc(model.summary.periodId)}`,
     })}
@@ -2615,7 +2615,7 @@ export function stagePortPopulationSlide(
   return v2Slide({
     id: "slide-stage-port-population",
     title: "مجتمع صور الفحص حسب المستوى والمنفذ",
-    eyebrow: "القسم 1 — مجتمع الفحص",
+    eyebrow: "القسم 1 - مجتمع الفحص",
     iconName: "layers",
     headline: `مجتمع صور الفحص حسب المستوى والمنفذ لشهر ${model.summary.periodId}`,
     subhead: "أعلى 5 منافذ بالحجم لكل مستوى مخاطر، مع إجمالي شامل لجميع المنافذ.",
@@ -2649,7 +2649,7 @@ export function stagePortSampleSlide(
   return v2Slide({
     id: "slide-stage-port-sample",
     title: "عيّنة الفحص المسحوبة حسب المستوى والمنفذ",
-    eyebrow: "القسم 1 — مجتمع الفحص",
+    eyebrow: "القسم 1 - مجتمع الفحص",
     iconName: "layers",
     headline: `عيّنة الفحص المسحوبة حسب المستوى والمنفذ لشهر ${model.summary.periodId}`,
     subhead: "أعلى 5 منافذ بالحجم لكل مستوى مخاطر، بأرقام العيّنة ونسبة التغطية، مع إجمالي شامل.",
@@ -2735,7 +2735,7 @@ function qualityTable(
             return `<tr><td>${esc(p.name)}</td>${qualCell(high, "green")}${qualCell(med, "gold")}${qualCell(low, "coral")}${threshCell(marking, MARKING_TARGET)}</tr>`;
           })
           .join("")
-      : `<tr><td colspan="${span}"><span class="insuff">—</span></td></tr>`;
+      : `<tr><td colspan="${span}"><span class="insuff">-</span></td></tr>`;
 
   const sum = (f: (p: PortQualityRow) => number) => rows.reduce((s, p) => s + f(p), 0);
   const totalMarkP = sum((p) => p.markingPresent);
@@ -2795,7 +2795,7 @@ function ledgerQualityTable(
   const totalsRow = `<tr><td>الإجمالي</td><td>${pctCell(rateOf(totalHigh, totalEvaluated))}</td><td>${pctCell(rateOf(totalMed, totalEvaluated))}</td><td>${pctCell(rateOf(totalLow, totalEvaluated))}</td><td>${pctCell(rateOf(totalMarkP, totalMarkP + totalMarkM))}</td></tr>`;
 
   return ledgerPortCard({
-    title: `${title} — ${fmtNum(rows.length)} منفذ · ${fmtNum(totalEvaluated)} صورة مُقيَّمة`,
+    title: `${title} - ${fmtNum(rows.length)} منفذ · ${fmtNum(totalEvaluated)} صورة مُقيَّمة`,
     theadCells: `<th>المنفذ</th><th>عالي</th><th>متوسط</th><th>منخفض</th><th>التحديد</th>`,
     bodyRowsHtml: trs,
     totalsRowHtml: totalsRow,
@@ -2834,7 +2834,7 @@ function briefingQualityRank(landChunk: PortQualityRow[], seaChunk: PortQualityR
   const combinedAll = [...landChunk, ...seaChunk];
   if (combinedAll.length === 0) {
     return `<div class="v2-sys-brief v2-bf-quality-ports">
-      <div class="v2-bf-lede"><div class="v2-bf-lede-figure coral"><span class="insuff">—</span></div></div>
+      <div class="v2-bf-lede"><div class="v2-bf-lede-figure coral"><span class="insuff">-</span></div></div>
     </div>`;
   }
   const withEval = combinedAll.map((p) => ({ ...p, evaluated: p.highQ + p.medQ + p.lowQ }));
@@ -2879,7 +2879,7 @@ function briefingQualityRank(landChunk: PortQualityRow[], seaChunk: PortQualityR
     rankItems.push({
       label: `منافذ بلا صور مُقيَّمة (${fmtNum(excluded.length)})`,
       value: null,
-      valueText: "—",
+      valueText: "-",
       secondaryText: "",
     });
     rawForFold.push({ lowQ: 0, evaluated: 0 });
@@ -2911,7 +2911,7 @@ function briefingQualityRank(landChunk: PortQualityRow[], seaChunk: PortQualityR
     ${briefingLede({
       figure: pctCell(lowRate),
       tone: "coral",
-      label: `جودة منخفضة ${pctCell(lowRate)} — ${fmtNum(sliceLow)} من ${fmtNum(sliceEvaluated)} صورة مُقيَّمة`,
+      label: `جودة منخفضة ${pctCell(lowRate)} - ${fmtNum(sliceLow)} من ${fmtNum(sliceEvaluated)} صورة مُقيَّمة`,
       basis,
     })}
     ${supportStrip}
@@ -2990,7 +2990,7 @@ export function qualityPortSlideBuilders(model: ReportModel, variantPreview: boo
       return v2Slide({
         id: `slide-quality-ports-${page + 1}`,
         title: `نتائج جودة الصور${cont}`,
-        eyebrow: "القسم 2 — نتائج فحص الجودة",
+        eyebrow: "القسم 2 - نتائج فحص الجودة",
         iconName: "scan",
         headline: `نتائج جودة الصور في المنافذ${cont}`,
         subhead: "توزيع مستويات جودة الصورة (عالي / متوسط / منخفض) ونسبة وجود التحديد في كل منفذ.",
@@ -3063,11 +3063,11 @@ function accuracyTable(
             // Below-target rows carry the warning tone + alert glyph (never color
             // alone). Unrankable ports (insufficient data) show muted "—", no bar.
             const show = (v: number | null) =>
-              p.rankable ? threshCell(v, ACCURACY_TARGET) : `<td class="v2-bar-cell neutral"><span class="insuff">—</span></td>`;
+              p.rankable ? threshCell(v, ACCURACY_TARGET) : `<td class="v2-bar-cell neutral"><span class="insuff">-</span></td>`;
             return `<tr><td>${esc(p.name)}</td>${show(accuracy)}${show(detection)}${show(clean)}</tr>`;
           })
           .join("")
-      : `<tr><td colspan="${span}"><span class="insuff">—</span></td></tr>`;
+      : `<tr><td colspan="${span}"><span class="insuff">-</span></td></tr>`;
 
   const sum = (f: (p: PortAccuracyRow) => number) => rows.reduce((s, p) => s + f(p), 0);
   const totalEvaluable = sum((p) => p.evaluable);
@@ -3114,7 +3114,7 @@ function ledgerAccuracyTable(
       const detection = rateOf(p.correctSuspicion, p.correctSuspicion + p.missedSuspicion);
       const clean = rateOf(p.correctClean, p.correctClean + p.falseSuspicion);
       const show = (v: number | null) =>
-        p.rankable ? threshCell(v, ACCURACY_TARGET) : `<td class="v2-bar-cell neutral"><span class="insuff">—</span></td>`;
+        p.rankable ? threshCell(v, ACCURACY_TARGET) : `<td class="v2-bar-cell neutral"><span class="insuff">-</span></td>`;
       return `<tr><td>${ledgerIdx(i)}${esc(p.name)}</td>${show(accuracy)}${show(detection)}${show(clean)}<td>${fmtNum(p.evaluable)}</td></tr>`;
     })
     .join("");
@@ -3127,7 +3127,7 @@ function ledgerAccuracyTable(
   const totalsRow = `<tr><td>الإجمالي</td><td>${pctCell(rateOf(totalCC + totalCS, totalEvaluable))}</td><td>${pctCell(rateOf(totalCS, totalCS + totalMS))}</td><td>${pctCell(rateOf(totalCC, totalCC + totalFS))}</td><td>${fmtNum(totalEvaluable)}</td></tr>`;
 
   return ledgerPortCard({
-    title: `${title} — ${fmtNum(rows.length)} منفذ · ${fmtNum(totalEvaluable)} قرار قابل للتقييم`,
+    title: `${title} - ${fmtNum(rows.length)} منفذ · ${fmtNum(totalEvaluable)} قرار قابل للتقييم`,
     theadCells: `<th>المنفذ</th><th>الدقة العامة</th><th>دقة الاشتباه</th><th>دقة السليمة</th><th>العيّنة</th>`,
     bodyRowsHtml: trs,
     totalsRowHtml: totalsRow,
@@ -3157,7 +3157,7 @@ function briefingAccuracyRank(landChunk: PortAccuracyRow[], seaChunk: PortAccura
   const combinedAll = [...landChunk, ...seaChunk];
   if (combinedAll.length === 0) {
     return `<div class="v2-sys-brief v2-bf-quality-accuracy">
-      <div class="v2-bf-lede"><div class="v2-bf-lede-figure green"><span class="insuff">—</span></div></div>
+      <div class="v2-bf-lede"><div class="v2-bf-lede-figure green"><span class="insuff">-</span></div></div>
     </div>`;
   }
   const rankable = combinedAll
@@ -3200,7 +3200,7 @@ function briefingAccuracyRank(landChunk: PortAccuracyRow[], seaChunk: PortAccura
     rankItems.push({
       label: `منافذ دون حد الكفاية (${fmtNum(excluded.length)})`,
       value: null,
-      valueText: "—",
+      valueText: "-",
       secondaryText: "",
     });
     rawForFold.push({
@@ -3235,7 +3235,7 @@ function briefingAccuracyRank(landChunk: PortAccuracyRow[], seaChunk: PortAccura
     ${briefingLede({
       figure: pctCell(overallAccuracy),
       tone: "green",
-      label: `الدقة العامة ${pctCell(overallAccuracy)} — ${fmtNum(totalCC + totalCS)} من ${fmtNum(totalEvaluable)} قرار`,
+      label: `الدقة العامة ${pctCell(overallAccuracy)} - ${fmtNum(totalCC + totalCS)} من ${fmtNum(totalEvaluable)} قرار`,
       basis,
     })}
     ${supportStrip}
@@ -3307,7 +3307,7 @@ export function accuracyPortSlideBuilders(model: ReportModel, variantPreview: bo
       return v2Slide({
         id: `slide-quality-accuracy-${page + 1}`,
         title: `دقة نتائج المنافذ${cont}`,
-        eyebrow: "القسم 2 — نتائج فحص الجودة",
+        eyebrow: "القسم 2 - نتائج فحص الجودة",
         iconName: "gauge",
         headline: `نتائج دقة نتائج المنافذ (اشتباه / سليمة)${cont}`,
         subhead: "الدقة العامة، ودقة اكتشاف الاشتباه، ودقة تأكيد السليمة.",
@@ -3372,7 +3372,7 @@ const CLOSING_NO_REVISIONS_NOTE = "لم تُسجَّل مراجعات لملفا
  */
 function closingOrgBlock(model: ReportModel): string {
   return `<div class="v2-closing-side">
-        <div class="v2-closing-badge"><span>${icon("shield", 13)}</span>داخلي — للاستخدام التنفيذي</div>
+        <div class="v2-closing-badge"><span>${icon("shield", 13)}</span>داخلي - للاستخدام التنفيذي</div>
         <div class="v2-closing-org">
           <b>هيئة الزكاة والضريبة والجمارك</b>
           ${ORGANIZATION_PATH.map((l) => `<span>${esc(l)}</span>`).join("")}
@@ -3399,7 +3399,7 @@ function closingOrgBlock(model: ReportModel): string {
 function closingLedgerTable(model: ReportModel, entries: Array<[string, number]>): string {
   const src = model.dataSources;
   const biCell = src.biProvided
-    ? `مُقدَّم — أثرى ${fmtNum(src.biMatchedCount)} صورة`
+    ? `مُقدَّم - أثرى ${fmtNum(src.biMatchedCount)} صورة`
     : `<span class="insuff">غير مُقدَّم هذا الشهر</span>`;
   const sourceRowsHtml = `<tr>
       <td>بيانات وكالة المخاطر</td><td>المصدر الأساسي</td><td>${fmtNum(src.riskRowCount)} صورة</td>
@@ -3412,11 +3412,11 @@ function closingLedgerTable(model: ReportModel, entries: Array<[string, number]>
       ? entries
           .map(
             ([file, rev]) =>
-              `<tr><td dir="ltr">${esc(file)}</td><td><span class="insuff">—</span></td><td>مراجعة ${esc(String(rev))}</td></tr>`,
+              `<tr><td dir="ltr">${esc(file)}</td><td><span class="insuff">-</span></td><td>مراجعة ${esc(String(rev))}</td></tr>`,
           )
           .join("")
       : `<tr><td colspan="${CLOSING_LEDGER_SPAN}"><span class="insuff">${esc(CLOSING_NO_REVISIONS_NOTE)}</span></td></tr>`;
-  const classificationRow = `<tr class="v2-lg-footnote"><td colspan="${CLOSING_LEDGER_SPAN}">داخلي — للاستخدام التنفيذي · ${esc(model.summary.periodId)}</td></tr>`;
+  const classificationRow = `<tr class="v2-lg-footnote"><td colspan="${CLOSING_LEDGER_SPAN}">داخلي - للاستخدام التنفيذي · ${esc(model.summary.periodId)}</td></tr>`;
   return ledgerTableCard({
     theadCells: `<th>الملف/المصدر</th><th>الوصف</th><th>المراجعة/العدد</th>`,
     bodyRowsHtml: sourceRowsHtml + revisionRowsHtml,
@@ -3445,7 +3445,7 @@ function closingBriefing(model: ReportModel, entries: Array<[string, number]>): 
       iconName: "scan",
       value: src.biProvided ? "مُقدَّم" : "غير مُقدَّم",
       label: src.biProvided
-        ? `ذكاء الأعمال — أثرى ${fmtNum(src.biMatchedCount)} صورة`
+        ? `ذكاء الأعمال - أثرى ${fmtNum(src.biMatchedCount)} صورة`
         : "بيانات ذكاء الأعمال",
     },
     { iconName: "document", value: fmtNum(entries.length), label: "ملفات مصدر مُسجَّلة" },
@@ -3478,7 +3478,7 @@ function closingBriefing(model: ReportModel, entries: Array<[string, number]>): 
           foldRemainder: (folded) => ({
             label: `+${fmtNum(folded.length)} ملفات إضافية`,
             value: null,
-            valueText: "—",
+            valueText: "-",
             secondaryText: folded
               .map((it) => `${esc(stripLtrIsolate(it.label))} ${it.valueText}`)
               .join("، "),
@@ -3545,7 +3545,7 @@ export function closingSlide(
     ? `<div class="v2-src-grid">
     <div class="v2-src-card gold">
       <div class="v2-src-head">${badgeIcon("layers", 15)}<b>${esc(ceLabels.ce_completed_samples)}</b><span class="v2-src-tag">المصدر الأساسي</span></div>
-      <p>${fmtNum(model.sample.studied)} صورة — ${esc(ceLabels.ce_scope_note)}</p>
+      <p>${fmtNum(model.sample.studied)} صورة - ${esc(ceLabels.ce_scope_note)}</p>
     </div>
   </div>`
     : `<div class="v2-src-grid">
@@ -3555,7 +3555,7 @@ export function closingSlide(
     </div>
     <div class="v2-src-card ${src.biProvided ? "blue" : "off"}">
       <div class="v2-src-head">${badgeIcon("scan", 15)}<b>بيانات ذكاء الأعمال</b><span class="v2-src-tag">مصدر داعم</span></div>
-      <p>${src.biProvided ? `مُقدَّم — أثرى ${fmtNum(src.biMatchedCount)} صورة بالمطابقة` : "غير مُقدَّم هذا الشهر"}</p>
+      <p>${src.biProvided ? `مُقدَّم - أثرى ${fmtNum(src.biMatchedCount)} صورة بالمطابقة` : "غير مُقدَّم هذا الشهر"}</p>
     </div>
   </div>`;
   const body = `<div class="v2-closing">
@@ -3572,7 +3572,7 @@ export function closingSlide(
         </div>
       </div>
       <div class="v2-closing-side">
-        <div class="v2-closing-badge"><span>${icon("shield", 13)}</span>داخلي — للاستخدام التنفيذي</div>
+        <div class="v2-closing-badge"><span>${icon("shield", 13)}</span>داخلي - للاستخدام التنفيذي</div>
         <div class="v2-closing-org">
           <b>هيئة الزكاة والضريبة والجمارك</b>
           ${ORGANIZATION_PATH.map((l) => `<span>${esc(l)}</span>`).join("")}
@@ -3641,7 +3641,7 @@ export async function buildDeckV2Slides(
 /** TOC title for a content section: «القسم <ordinal> — <name>», numbered over the sections in the deck. */
 function sectionTocTitle(key: NavSectionKey, name: string): string {
   const n = sectionNumber(key);
-  return `القسم ${n === null ? "" : SECTION_ORDINALS[n - 1]} — ${name}`;
+  return `القسم ${n === null ? "" : SECTION_ORDINALS[n - 1]} - ${name}`;
 }
 
 async function assembleDeckV2Slides(
@@ -3742,7 +3742,7 @@ async function assembleDeckV2Slides(
   const closingNum = total;
 
   const accuracyFig =
-    model.summary.overallAccuracy === null ? "—" : fmtPct(model.summary.overallAccuracy);
+    model.summary.overallAccuracy === null ? "-" : fmtPct(model.summary.overallAccuracy);
   const tocItems: TocItem[] = [
     // مؤشرات الشهر's TOC entry only exists while the page itself is rendered
     // (SHOW_MONTH_NUMBERS_SLIDE) — a range pointing at a page that isn't there
@@ -3763,7 +3763,7 @@ async function assembleDeckV2Slides(
     {
       title: "المعجم",
       goal: "توحيد المصطلحات الرئيسية قبل قراءة النتائج.",
-      range: glossaryEnd > glossaryStart ? `${pad(glossaryStart)}–${pad(glossaryEnd)}` : pad(glossaryStart),
+      range: glossaryEnd > glossaryStart ? `${pad(glossaryStart)}-${pad(glossaryEnd)}` : pad(glossaryStart),
       iconName: "document",
       tone: "blue",
       figure: fmtNum(GLOSSARY_CATEGORIES.reduce((s, c) => s + c.terms.length, 0)),
@@ -3774,7 +3774,7 @@ async function assembleDeckV2Slides(
           {
             title: sectionTocTitle("section1", "مجتمع الفحص"),
             goal: "التعريف بمجتمع الصور وتوزيعه بحسب المخاطر والمنافذ، وأساس سحب العيّنة.",
-            range: `${pad(sectionOneStart)}–${pad(sectionOneEnd)}`,
+            range: `${pad(sectionOneStart)}-${pad(sectionOneEnd)}`,
             iconName: "layers",
             tone: "green",
             figure: fmtNum(model.sample.total),
@@ -3785,7 +3785,7 @@ async function assembleDeckV2Slides(
     {
       title: sectionTocTitle("section2", "نتائج فحص الجودة"),
       goal: "جودة الصور المفحوصة، ودقة قرارات الفحص بين الاشتباه والسليمة، لكل منفذ.",
-      range: `${pad(sectionTwoStart)}–${pad(sectionTwoEnd)}`,
+      range: `${pad(sectionTwoStart)}-${pad(sectionTwoEnd)}`,
       iconName: "gauge",
       tone: "coral",
       figure: accuracyFig,
@@ -3802,7 +3802,7 @@ async function assembleDeckV2Slides(
             goal: "تحاليل معمّقة تُكمل قراءة نتائج الجودة والدقة.",
             range:
               sectionThreeEnd > sectionThreeStart
-                ? `${pad(sectionThreeStart)}–${pad(sectionThreeEnd)}`
+                ? `${pad(sectionThreeStart)}-${pad(sectionThreeEnd)}`
                 : pad(sectionThreeStart),
             iconName: "chart",
             tone: "purple",
@@ -3821,7 +3821,7 @@ async function assembleDeckV2Slides(
             goal: "من وُزِّعت عليه العيّنة، ومدى إنجازه، وأسباب الاستبدال، وعدد إعادة التعيين.",
             range:
               sectionFourEnd > sectionFourStart
-                ? `${pad(sectionFourStart)}–${pad(sectionFourEnd)}`
+                ? `${pad(sectionFourStart)}-${pad(sectionFourEnd)}`
                 : pad(sectionFourStart),
             iconName: "layers",
             tone: "blue",

@@ -40,7 +40,7 @@ const EXPORT_CHUNK_SIZE = 1000;
 type Cell = string | number;
 
 /** Em-dash placeholder for a missing value (§3.7). */
-const DASH = "—";
+const DASH = "-";
 
 /** Percentage cell: blank when the denominator was empty (null), never `0%`. */
 function pct(value: number | null | undefined): Cell {
@@ -542,7 +542,7 @@ function exclusionsSheet(processingSummary: ProcessingSummaryData | null | undef
   if (!processingSummary) {
     return [
       header,
-      ["الصفوف المستبعدة غير متاحة من مدخلات التقرير التنفيذي — راجع تقرير معالجة المجتمع (processing.summary.json)."],
+      ["الصفوف المستبعدة غير متاحة من مدخلات التقرير التنفيذي - راجع تقرير معالجة المجتمع (processing.summary.json)."],
     ];
   }
 
@@ -651,7 +651,7 @@ function employeeByPortSheet(model: ReportModel): Cell[][] {
   if (!model.employeeOverview.inspectorIdentityMapped) {
     return [
       ["معرّف المفتش", "المستوى", "المنفذ", "قابل للتقييم", "دقة%"],
-      ["هوية المفتش غير مرتبطة (لم تتم مطابقة BI) — لا يمكن حساب دقة المفتشين لهذه الفترة."],
+      ["هوية المفتش غير مرتبطة (لم تتم مطابقة BI) - لا يمكن حساب دقة المفتشين لهذه الفترة."],
     ];
   }
   return [
@@ -750,7 +750,7 @@ function coverageBucketRows(buckets: DistributionBucket[]): Cell[][] {
 function coverageSheet(model: ReportModel): Cell[][] {
   const cov = model.distributionCoverage;
   if (cov === null) {
-    return [["لا يوجد توزيع لهذا الشهر بعد — يُبنى هذا القسم من بيانات تقرير التوزيع (R2). وزّع العينة أولاً ليظهر هنا."]];
+    return [["لا يوجد توزيع لهذا الشهر بعد - يُبنى هذا القسم من بيانات تقرير التوزيع (R2). وزّع العينة أولاً ليظهر هنا."]];
   }
   return [
     ["حسب المستوى"],
@@ -787,7 +787,7 @@ function accountabilityEmployeeRows(buckets: ManagementBucket[]): Cell[][] {
 function accountabilitySheet(model: ReportModel): Cell[][] {
   const acc = model.accountabilityProgress;
   if (acc === null) {
-    return [["لا يوجد توزيع لهذا الشهر بعد — يُبنى هذا القسم من بيانات تقرير الإدارة (R3). وزّع العينة أولاً ليظهر هنا."]];
+    return [["لا يوجد توزيع لهذا الشهر بعد - يُبنى هذا القسم من بيانات تقرير الإدارة (R3). وزّع العينة أولاً ليظهر هنا."]];
   }
   const reasonRows: Cell[][] = acc.replacements.byReason.map((r) => [text(r.reason), r.count]);
   const stageEmployeeRows = accountabilityEmployeeRows(acc.byStage);

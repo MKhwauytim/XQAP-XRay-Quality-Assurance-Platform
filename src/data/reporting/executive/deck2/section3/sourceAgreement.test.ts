@@ -194,7 +194,7 @@ function render(inp: ExecutiveReportInput): string {
 }
 
 /** The muted cell `threshCell(null, …)` emits — the page's "not enough data" state. */
-const MUTED_RATE_CELL = '<td class="v2-bar-cell neutral"><span class="insuff">—</span></td>';
+const MUTED_RATE_CELL = '<td class="v2-bar-cell neutral"><span class="insuff">-</span></td>';
 
 function countOf(html: string, needle: string): number {
   return html.split(needle).length - 1;
@@ -217,7 +217,7 @@ describe("sourceAgreementSlide — slide shell", () => {
     expect(html).toContain('id="slide-s3-source-agreement"');
     expect(html).toContain('data-section="section3"');
     expect(html).toContain('data-title="توافق النتائج بين المستويات والمصادر"');
-    expect(html).toContain("القسم 3 — التحاليل المتقدمة");
+    expect(html).toContain("القسم 3 - التحاليل المتقدمة");
     expect(html).toContain(
       "نسبة تطابق النتيجة بين كل مصدرين، ومقارنة كل مصدر بنتيجة المراجع.",
     );
@@ -289,7 +289,7 @@ describe("sourceAgreementSlide — honest empty states", () => {
     // Their comparable count is printed as a real zero — a count, not a rate.
     expect(html).toContain("<td>0</td>");
     // The suppressed matrix cells render the heatmap's dashed em-dash, not 0%.
-    expect(html).toContain(">—</text>");
+    expect(html).toContain(">-</text>");
     expect(html).not.toContain(">0%</text>");
     expect(html).not.toContain("<td>0%</td>");
   });
@@ -308,7 +308,7 @@ describe("sourceAgreementSlide — honest empty states", () => {
     // All five reviewer rows muted…
     expect(countOf(html, MUTED_RATE_CELL)).toBe(5);
     // …and the totals row too (pctCell's muted form).
-    expect(html).toContain('<td><span class="insuff">—</span></td>');
+    expect(html).toContain('<td><span class="insuff">-</span></td>');
     // The one pair that does NOT involve the reviewer (level1↔level2) is the
     // standalone stat callout, not the grid — it still reports (20 images).
     const statStart = html.indexOf('class="s3sa-lvl-stat"');
@@ -386,7 +386,7 @@ describe("sourceAgreementSlide — rates, gating and ن", () => {
     const { rows } = knownTeamsProfile(5);
     const html = render(input(rows));
     expect(html).not.toContain("<td>100%</td>");
-    expect(html).toContain(">—</text>");
+    expect(html).toContain(">-</text>");
     // ن is still disclosed for the suppressed level×team cells.
     const countsStart = html.indexOf("عدد الصور القابلة للمقارنة");
     expect(countsStart).toBeGreaterThan(-1);
@@ -668,7 +668,7 @@ describe("sourceAgreementSlide — Briefing (panel 2)", () => {
       /<span class="v2-bf-rank-label">أزواج دون حد الكفاية \(12\)<\/span>[\s\S]*?<span class="v2-bf-rank-value">([^<]*)<\/span>/,
     );
     expect(excludedRowMatch).not.toBeNull();
-    expect(excludedRowMatch![1]).toBe("—");
+    expect(excludedRowMatch![1]).toBe("-");
     expect(panel).not.toContain("أزواج دون حد الكفاية (12)%");
     // Its bar track (if bars render at all here) carries zero width — no
     // fabricated magnitude either.
@@ -778,7 +778,7 @@ describe("sourceAgreementSlide — Grid (panel 3)", () => {
     // Exactly 5 row headers in its accessible sr-table (5 sources, not 6).
     expect((revHtml.match(/<th scope="row">/g) ?? []).length).toBe(5);
 
-    for (const col of ["التوافق مع المراجع", "اشتباه لديه–سليمة للمراجع", "سليمة لديه–اشتباه للمراجع", "العيّنة"]) {
+    for (const col of ["التوافق مع المراجع", "اشتباه لديه-سليمة للمراجع", "سليمة لديه-اشتباه للمراجع", "العيّنة"]) {
       expect(revHtml).toContain(col);
     }
     // 5 column headers total in the sr-table: the row-header column

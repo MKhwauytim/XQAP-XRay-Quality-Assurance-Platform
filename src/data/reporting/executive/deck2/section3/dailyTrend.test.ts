@@ -174,8 +174,8 @@ type ParsedCell = { pct: number; lo: number | null; hi: number | null; n: number
 /** Parse one `timeSeriesBand` sr-table cell, e.g. "80% (64.2–95.8%) ن=10",
  *  "100% ن=2" (low-n, no band), or "—" (gap). */
 function parseCell(cell: string): ParsedCell {
-  if (cell === "—") return "gap";
-  const m = /^(-?\d+(?:\.\d+)?)%(?: \((-?\d+(?:\.\d+)?)–(-?\d+(?:\.\d+)?)%\))? ن=(\d+)$/.exec(cell);
+  if (cell === "-") return "gap";
+  const m = /^(-?\d+(?:\.\d+)?)%(?: \((-?\d+(?:\.\d+)?)-(-?\d+(?:\.\d+)?)%\))? ن=(\d+)$/.exec(cell);
   expect(m, `unexpected sr-table cell format: "${cell}"`).toBeTruthy();
   const [, pct, lo, hi, n] = m as RegExpExecArray;
   return {

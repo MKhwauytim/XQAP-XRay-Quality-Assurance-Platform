@@ -180,13 +180,13 @@ function emptyState(w: number, h: number, title: string, note?: string): string 
   const svg =
     svgOpen(w, h, title) +
     `<text x="${r(cx)}" y="${r(cy)}" text-anchor="middle" dominant-baseline="middle" ` +
-    `font-size="${TYPE.title}" fill="currentColor" fill-opacity="0.55">—</text>` +
+    `font-size="${TYPE.title}" fill="currentColor" fill-opacity="0.55">-</text>` +
     (note
       ? `<text x="${r(cx)}" y="${r(cy + 22)}" text-anchor="middle" ` +
         `font-size="${TYPE.caption}" fill="currentColor" fill-opacity="0.55">${escText(note)}</text>`
       : "") +
     `</svg>`;
-  return figure(svg, srTable(note ?? title, ["—"], []));
+  return figure(svg, srTable(note ?? title, ["-"], []));
 }
 
 /** Row height (px) for one vertical legend entry — same derivation as charts.ts. */
@@ -482,12 +482,12 @@ export function bubbleScatter(
     cols.size ?? opts.sizeLabel ?? "الحجم",
   ];
   const srRows = all.map((p) => [
-    p?.label ?? "—",
-    isNum(p?.x) ? fmtTick(p.x as number) : "—",
+    p?.label ?? "-",
+    isNum(p?.x) ? fmtTick(p.x as number) : "-",
     isNum(p?.y)
       ? fmtTick(yIsPercent ? (clampPct(p.y) as number) : (p.y as number)) + (yIsPercent ? "%" : "")
-      : "—",
-    isNum(p?.size) ? fmtTick(p.size as number) : "—",
+      : "-",
+    isNum(p?.size) ? fmtTick(p.size as number) : "-",
   ]);
   return figure(svg, srTable(title, headers, srRows));
 }
@@ -612,7 +612,7 @@ export function percentHeatmap(
           `<rect x="${r(cx)}" y="${r(cy)}" width="${r(cwi)}" height="${r(chi)}" rx="${rx}" ` +
           `fill="none" stroke="currentColor" stroke-opacity="0.22" stroke-width="1" stroke-dasharray="3 3"/>` +
           `<text x="${r(x + cw / 2)}" y="${r(y + ch / 2)}" text-anchor="middle" dominant-baseline="middle" ` +
-          `font-size="${fs}" fill="currentColor" fill-opacity="0.55">—</text>`;
+          `font-size="${fs}" fill="currentColor" fill-opacity="0.55">-</text>`;
         return;
       }
       const t = tintOf(v);
@@ -669,7 +669,7 @@ export function percentHeatmap(
     rowLabel,
     ...cols.map((_, ci) => {
       const raw = data?.values?.[ri]?.[ci];
-      return isNum(raw) ? (clampPct(raw) as number).toFixed(digits) + "%" : "—";
+      return isNum(raw) ? (clampPct(raw) as number).toFixed(digits) + "%" : "-";
     }),
   ]);
   return figure(svg, srTable(title, headers, srRows));
@@ -854,7 +854,7 @@ export function metricMatrix(
           `<rect x="${r(cx)}" y="${r(cy)}" width="${r(cwi)}" height="${r(chi)}" rx="${rx}" ` +
           `fill="none" stroke="currentColor" stroke-opacity="0.22" stroke-width="1" stroke-dasharray="3 3"/>` +
           `<text x="${r(x + cw / 2)}" y="${r(y + ch / 2)}" text-anchor="middle" dominant-baseline="middle" ` +
-          `font-size="${fs}" fill="currentColor" fill-opacity="0.55">—</text>`;
+          `font-size="${fs}" fill="currentColor" fill-opacity="0.55">-</text>`;
         return;
       }
       const { base, overlay, t } = tintOf(v, col);
@@ -880,7 +880,7 @@ export function metricMatrix(
         `font-size="${fs}" font-weight="700" fill="currentColor" fill-opacity="0.82">${escText(col.label)}</text>` +
         `<text x="${r(cxm)}" y="${r(headLine1H + headLine2H - 3)}" text-anchor="middle" ` +
         `font-size="${TYPE.micro}" fill="currentColor" fill-opacity="0.55">${escText(
-          `${fmtTick(col.domain[0])}–${fmtTick(col.domain[1])}`,
+          `${fmtTick(col.domain[0])}-${fmtTick(col.domain[1])}`,
         )}</text>`
       );
     })
@@ -895,7 +895,7 @@ export function metricMatrix(
     rowLabel,
     ...cols.map((col) => {
       const raw = col.values[ri];
-      return isNum(raw) ? fmtTick(raw) : "—";
+      return isNum(raw) ? fmtTick(raw) : "-";
     }),
   ]);
   return figure(svg, srTable(title, headers, srRows));
@@ -1110,9 +1110,9 @@ export function timeSeriesBand(series: BandSeries[], opts: TimeSeriesBandOpts = 
   // series (not just the plottable ones — an all-gap series is still
   // meaningful information, same as bubbleScatter listing unplotted points).
   const cellFor = (p: BandPoint | undefined): string => {
-    if (!p || !isNum(p.y)) return "—";
+    if (!p || !isNum(p.y)) return "-";
     const val = `${fmtTick(clamp(p.y, 0, 100))}%`;
-    const band = isNum(p.lo) && isNum(p.hi) ? ` (${fmtTick(p.lo)}–${fmtTick(p.hi)}%)` : "";
+    const band = isNum(p.lo) && isNum(p.hi) ? ` (${fmtTick(p.lo)}-${fmtTick(p.hi)}%)` : "";
     return `${val}${band} ن=${p.n}`;
   };
   const byDay = series.map((s) => {

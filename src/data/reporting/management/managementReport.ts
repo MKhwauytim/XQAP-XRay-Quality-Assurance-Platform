@@ -41,7 +41,7 @@ const MGMT_RAILS = ["الأساس", "المستوى", "المنفذ", "الاس�
 
 function bucketPanel(bucket: ManagementBucket): string {
   return panel(
-    `${bucket.label} — ${fmtNum(bucket.totalAssigned)} صورة، ${fmtPct(bucket.completionRate)} إنجاز`,
+    `${bucket.label} - ${fmtNum(bucket.totalAssigned)} صورة، ${fmtPct(bucket.completionRate)} إنجاز`,
     dataTable({
       headers: ["الموظف", "المعيّنة", "المكتملة", "الإنجاز"],
       rows: bucket.employees.map((e) => [e.displayName, fmtNum(e.assigned), fmtNum(e.completed), fmtPct(e.completionRate)]),
@@ -64,7 +64,7 @@ async function managementDocPages(m: ManagementModel, issueDate: string): Promis
   // Page 1 — overview / totals.
   pages.push(page({
     id: "m-overview", title: "لمحة الإدارة", pageNo: "01", railTabs: MGMT_RAILS,
-    body: `${pageHeader({ iconName: "shield", eyebrow: "تقرير الإدارة", title: `متابعة الإنجاز والمساءلة — ${m.monthLabel}`, subtitle: `تم التوليد: ${m.derivedAt} — تاريخ الإصدار: ${issueDate}` })}
+    body: `${pageHeader({ iconName: "shield", eyebrow: "تقرير الإدارة", title: `متابعة الإنجاز والمساءلة - ${m.monthLabel}`, subtitle: `تم التوليد: ${m.derivedAt} - تاريخ الإصدار: ${issueDate}` })}
       ${kpiStrip([
         kpi({ label: "إجمالي المعيّنة", value: fmtNum(m.totals.assigned), tone: "slate" }),
         kpi({ label: "مكتملة", value: fmtNum(m.totals.completed), sub: `${fmtPct(m.totals.completionRate)} إنجاز`, tone: "green" }),
@@ -76,7 +76,7 @@ async function managementDocPages(m: ManagementModel, issueDate: string): Promis
 
   // Section 1 — per stage/level.
   pages.push(page({
-    id: "m-by-stage", title: "القسم 1 — حسب المستوى", pageNo: "02", railTabs: rotate(MGMT_RAILS, 1),
+    id: "m-by-stage", title: "القسم 1 - حسب المستوى", pageNo: "02", railTabs: rotate(MGMT_RAILS, 1),
     body: `${pageHeader({ iconName: "layers", eyebrow: "القسم 1", title: "تقدّم الإنجاز حسب المستوى", subtitle: "لكل مستوى: الموظفون ونسبة إنجاز كل منهم من عينته." })}
       ${bucketSectionBody(m.byStage)}`,
   }));
@@ -84,7 +84,7 @@ async function managementDocPages(m: ManagementModel, issueDate: string): Promis
 
   // Section 2 — per port.
   pages.push(page({
-    id: "m-by-port", title: "القسم 2 — حسب المنفذ", pageNo: "03", railTabs: rotate(MGMT_RAILS, 2),
+    id: "m-by-port", title: "القسم 2 - حسب المنفذ", pageNo: "03", railTabs: rotate(MGMT_RAILS, 2),
     body: `${pageHeader({ iconName: "port", eyebrow: "القسم 2", title: "تقدّم الإنجاز حسب المنفذ", subtitle: "لكل منفذ: الموظفون ونسبة إنجاز كل منهم من عينته." })}
       ${bucketSectionBody(m.byPort)}`,
   }));
@@ -92,7 +92,7 @@ async function managementDocPages(m: ManagementModel, issueDate: string): Promis
 
   // Replacement / reassignment activity.
   const replHeaders = ["رقم الأشعة", "الموظف", "المنفذ", "السبب", "البديل", "آخر حدث"];
-  const replRows = m.replacements.records.map((r) => [r.xrayImageId, r.displayName, r.portName, r.reason ?? "—", r.replacedById ?? "—", r.lastEventAt]);
+  const replRows = m.replacements.records.map((r) => [r.xrayImageId, r.displayName, r.portName, r.reason ?? "-", r.replacedById ?? "-", r.lastEventAt]);
   const replChunks = paginateRows({ headers: replHeaders, rows: replRows, rowsPerPage: 18 });
   let pageNo = 4;
   const reasonSummary = m.replacements.byReason.length > 0
@@ -113,7 +113,7 @@ async function managementDocPages(m: ManagementModel, issueDate: string): Promis
       pages.push(page({
         id: `m-replacements-${i}`, title: i === 0 ? "الاستبدال وإعادة التعيين" : `الاستبدال وإعادة التعيين (${i + 1})`,
         pageNo: pad(pageNo++), railTabs: rotate(MGMT_RAILS, 3),
-        body: `${pageHeader({ iconName: "flag", eyebrow: "المساءلة", title: "الاستبدال وإعادة التعيين", subtitle: `${fmtNum(m.replacements.total)} صورة مستبدلة — ${fmtNum(m.reassignments.total)} إعادة تعيين مسجَّلة هذا الشهر.` })}
+        body: `${pageHeader({ iconName: "flag", eyebrow: "المساءلة", title: "الاستبدال وإعادة التعيين", subtitle: `${fmtNum(m.replacements.total)} صورة مستبدلة - ${fmtNum(m.reassignments.total)} إعادة تعيين مسجَّلة هذا الشهر.` })}
           ${i === 0 ? reasonSummary : ""}
           ${panel("سجل الاستبدالات", chunk, { iconName: "flag" })}`,
       }));
@@ -133,7 +133,7 @@ export async function buildManagementReport(
   employeeDisplayNames: Record<string, string> = {},
 ): Promise<string> {
   const empty: DistributionCurrentData = {
-    monthFolderName: input.monthFolderName, derivedAt: "—",
+    monthFolderName: input.monthFolderName, derivedAt: "-",
     totalAssigned: 0, totalCompleted: 0, totalReplaced: 0, totalPending: 0, entries: [],
   };
   const m = computeManagementModel(
@@ -145,9 +145,9 @@ export async function buildManagementReport(
   );
   return buildDocViewer({
     slides: await managementDocPages(m, formatIssueDate()),
-    docTitle: `تقرير الإدارة — ${m.monthLabel}`,
+    docTitle: `تقرير الإدارة - ${m.monthLabel}`,
     brandTitle: "تقرير الإدارة",
-    brandSub: `ضمان جودة الأشعة — ${m.monthLabel}`,
+    brandSub: `ضمان جودة الأشعة - ${m.monthLabel}`,
     iconName: "shield",
     footerNote: sourceRevisionsFooterHtml(input.sourceRevisions, esc),
   });
