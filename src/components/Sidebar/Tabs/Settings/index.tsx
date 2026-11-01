@@ -53,6 +53,7 @@ import { DecisionRepairSection } from "./DecisionRepairSection";
 import { TemplateRepairSection } from "./TemplateRepairSection";
 import { PopulationRecoverySection } from "./PopulationRecoverySection";
 import { DeleteMonthSection } from "./DeleteMonthSection";
+import { MergeMonthSection } from "./MergeMonthSection";
 import { AboutSection } from "./AboutSection";
 import { usePermissions } from "../../../../auth/usePermissions";
 
@@ -616,6 +617,7 @@ function SettingsPage() {
       <DecisionRepairSection />
       <TemplateRepairSection />
       <PopulationRecoverySection />
+      <MergeMonthSection />
       <DeleteMonthSection />
       <AboutSection />
     </div>

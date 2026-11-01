@@ -424,3 +424,91 @@ export async function appendSampleRow(
     { context: "sampling:appendRow", conflictError: "تعارض في الكتابة: لم يتمكن النظام من إضافة سطر العينة بعد عدة محاولات." }
   );
 }
+
+/**
+ * Bulk counterpart of {@link appendSampleRow} for moving whole samples between
+ * months (month merge, ad-hoc move, extra-sample import). Rows whose
+ * `xrayImageId` is already in the sample are skipped and reported, never
+ * overwritten. `retiredIds` lists moved rows that were already replaced in the
+ * source sample; they stay retired here, so `totalActual` keeps counting live
+ * rows only.
+ */
+export async function appendSampleRows(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  newRows: readonly PreparedPopulationRow[],
+  retiredIds: readonly string[] = []
+): Promise<
+  | { ok: true; data: SampleMasterData; appended: string[]; skipped: string[] }
+  | { ok: false; error: string }
+> {
+  await ensureMonthWritable(directoryHandle, monthFolderName);
+  return casLoop<
+    | { ok: true; data: SampleMasterData; appended: string[]; skipped: string[] }
+    | { ok: false; error: string }
+  >(
+    async (writeToken) => {
+      const current = await loadSampleMaster(directoryHandle, monthFolderName);
+      if (!current) {
+        return { done: true, result: { ok: false as const, error: codedMessage("XQ-SMP-006") } };
+      }
+      const present = new Set(current.rows.map((r) => r.xrayImageId));
+      const toAppend: PreparedPopulationRow[] = [];
+      const skipped: string[] = [];
+      for (const row of newRows) {
+        if (present.has(row.xrayImageId)) {
+          skipped.push(row.xrayImageId);
+          continue;
+        }
+        present.add(row.xrayImageId);
+        toAppend.push(row);
+      }
+      if (toAppend.length === 0) {
+        return { done: true, result: { ok: true as const, data: current, appended: [], skipped } };
+      }
+      const appendedIds = new Set(toAppend.map((r) => r.xrayImageId));
+      const priorRetired = current.replacedRowIds ?? [];
+      const newlyRetired = retiredIds.filter((id) => appendedIds.has(id) && !priorRetired.includes(id));
+      const retiredSet = new Set(newlyRetired);
+      const classifyMappings = current.stageMappingsSnapshot;
+
+      let portAllocations = current.portAllocations;
+      let stageAllocations = current.stageAllocations;
+      let certScanActual = current.certScanActual;
+      let nonCertScanActual = current.nonCertScanActual;
+      for (const row of toAppend) {
+        if (retiredSet.has(row.xrayImageId)) continue;
+        portAllocations = adjustPortAllocations(portAllocations, row, 1);
+        stageAllocations = adjustStageAllocations(stageAllocations, row, 1, classifyMappings);
+        if (isCertScanRow(row)) certScanActual += 1;
+        else nonCertScanActual += 1;
+      }
+      const nextRows = [...current.rows, ...toAppend];
+      const nextRetiredIds = [...priorRetired, ...newlyRetired];
+      const nextRevision = (current.revision ?? 0) + 1;
+      const updated: SampleMasterData = {
+        ...current,
+        revision: nextRevision,
+        _writeToken: writeToken,
+        totalActual: nextRows.length - nextRetiredIds.length,
+        certScanActual,
+        nonCertScanActual,
+        portAllocations,
+        stageAllocations,
+        ...(nextRetiredIds.length > 0 ? { replacedRowIds: nextRetiredIds } : {}),
+        rows: nextRows,
+      };
+      const writeResult = await saveSampleMaster(directoryHandle, monthFolderName, updated);
+      if (!writeResult.ok) return { done: false };
+      const verify = await loadSampleMaster(directoryHandle, monthFolderName);
+      if (verify?.revision === nextRevision && verify._writeToken === writeToken) {
+        return {
+          done: true,
+          result: { ok: true as const, data: updated, appended: [...appendedIds], skipped },
+        };
+      }
+      return { done: false };
+    },
+    { context: "sampling:appendRows", conflictError: "تعارض في الكتابة: لم يتمكن النظام من إضافة أسطر العينة بعد عدة محاولات." }
+  );
+}
