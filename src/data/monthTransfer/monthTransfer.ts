@@ -162,6 +162,9 @@ export type MonthTransferResult =
   | { ok: false; reason: MonthTransferRefusal }
   | { ok: false; reason: "write-failed"; error: string; sourceKept: true };
 
+export type MonthTransferPhase = "plan" | "rows" | "events" | "answers" | "population" | "archive";
+export type MonthTransferProgress = { phase: MonthTransferPhase; done: number; total: number };
+
 function sameAnswer(a: ItemAnswer, b: ItemAnswer): boolean {
   return a.status === b.status && a.lastSavedAt === b.lastSavedAt && a.submittedAt === b.submittedAt;
 }
@@ -171,29 +174,36 @@ export async function executeMonthTransfer(
   directoryHandle: DirectoryHandleLike,
   sourceMonth: string,
   targetMonth: string,
-  actor: string
+  actor: string,
+  onProgress: (progress: MonthTransferProgress) => void = () => {}
 ): Promise<MonthTransferResult> {
+  onProgress({ phase: "plan", done: 0, total: 1 });
   const planned = await planMonthTransfer(directoryHandle, sourceMonth, targetMonth);
   if (!planned.ok) return planned;
   const { plan } = planned;
   const fail = (error: string): MonthTransferResult => ({ ok: false, reason: "write-failed", error, sourceKept: true });
 
   // 1. sample rows
+  onProgress({ phase: "rows", done: 0, total: plan.rows.length });
   const sample = await appendSampleRows(directoryHandle, targetMonth, plan.rows, plan.retiredIds);
   if (!sample.ok) return fail(sample.error);
 
   // 2. distribution events
   for (let start = 0; start < plan.events.length; start += EVENT_CHUNK) {
+    onProgress({ phase: "events", done: start, total: plan.events.length });
     const appended = await appendDistributionEvents(directoryHandle, targetMonth, plan.events.slice(start, start + EVENT_CHUNK));
     if (!appended.ok) return fail(appended.error);
   }
 
   // 3. answers — skip an item the target already holds in the same state (a resumed run)
   let movedAnswers = 0;
+  let answersSeen = 0;
   for (const entry of plan.answers) {
     const existing = await loadEmployeeAnswers(directoryHandle, targetMonth, entry.username);
     const have = new Map(existing.items.map((item) => [item.xrayImageId, item]));
     for (const item of entry.items) {
+      onProgress({ phase: "answers", done: answersSeen, total: plan.answerCount });
+      answersSeen += 1;
       const prior = have.get(item.xrayImageId);
       if (prior && sameAnswer(prior, item)) continue;
       const written = await upsertItemAnswer(directoryHandle, targetMonth, entry.username, item);
@@ -205,6 +215,7 @@ export async function executeMonthTransfer(
   // 4. population
   let movedPopulationRows = 0;
   if (plan.populationRows.length > 0) {
+    onProgress({ phase: "population", done: 0, total: plan.populationRows.length });
     const population = await appendPopulationFinalRows(directoryHandle, targetMonth, plan.populationRows, actor);
     if (population.status === "appended") movedPopulationRows = population.appended;
   }
@@ -213,6 +224,7 @@ export async function executeMonthTransfer(
   bumpWorkspaceEpoch(directoryHandle, targetMonth);
 
   // 5. archive, then remove the source
+  onProgress({ phase: "archive", done: 0, total: 1 });
   let archiveName: string;
   try {
     archiveName = (await archiveMonthFolders(directoryHandle, sourceMonth)).archiveName;

@@ -10,7 +10,9 @@ import { loadAdhocImportIndex } from "../../../../data/adhocImport/adhocImportSt
 import {
   executeMonthTransfer,
   planMonthTransfer,
+  type MonthTransferPhase,
   type MonthTransferPlan,
+  type MonthTransferProgress,
   type MonthTransferRefusal,
 } from "../../../../data/monthTransfer/monthTransfer";
 import { broadcastDataRefresh, notifyLocalDataChange } from "../../../../data/workspace/dataRefreshSignal";
@@ -38,6 +40,15 @@ const REFUSAL_LABEL: Record<MonthTransferRefusal, LabelKey> = {
 
 const PREVIEW_IDS = 20;
 
+const PHASE_LABEL: Record<MonthTransferPhase, LabelKey> = {
+  plan: "merge_month_phase_plan",
+  rows: "merge_month_phase_rows",
+  events: "merge_month_phase_events",
+  answers: "merge_month_phase_answers",
+  population: "merge_month_phase_population",
+  archive: "merge_month_phase_archive",
+};
+
 /**
  * Admin «دمج شهر»: moves a month — or an ad-hoc sample — into another month
  * (see `monthTransfer.ts`). The admin previews first (counts, duplicates,
@@ -58,6 +69,7 @@ export function MergeMonthSection() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [listTick, setListTick] = useState(0);
+  const [progress, setProgress] = useState<MonthTransferProgress | null>(null);
 
   useEffect(() => {
     if (!isOpen || !canMerge || !directoryHandle) return;
@@ -111,7 +123,7 @@ export function MergeMonthSection() {
     setBusy(true);
     setNotice(null);
     try {
-      const result = await executeMonthTransfer(directoryHandle, plan.sourceMonth, plan.targetMonth, username);
+      const result = await executeMonthTransfer(directoryHandle, plan.sourceMonth, plan.targetMonth, username, setProgress);
       if (!result.ok) {
         const text = result.reason === "write-failed"
           ? fill(L.merge_month_failed, { error: result.error })
@@ -138,6 +150,7 @@ export function MergeMonthSection() {
       setNotice({ kind: "error", text: fill(L.merge_month_failed, { error: errorText(error) }) });
     } finally {
       setBusy(false);
+      setProgress(null);
     }
   }
 
@@ -203,6 +216,18 @@ export function MergeMonthSection() {
               <button type="button" className="ew-btn-secondary" onClick={() => setConfirming(true)} disabled={busy}>
                 {L.merge_month_button}
               </button>
+            </div>
+          )}
+
+          {progress && (
+            <div className="template-repair-notice template-repair-notice-info" role="status" aria-live="polite">
+              <p>{fill(L.merge_month_progress, {
+                phase: L[PHASE_LABEL[progress.phase]],
+                done: progress.done.toLocaleString("ar-SA-u-nu-latn"),
+                total: progress.total.toLocaleString("ar-SA-u-nu-latn"),
+              })}</p>
+              <progress max={Math.max(progress.total, 1)} value={progress.done} style={{ width: "100%" }} />
+              <p>{L.merge_month_progress_keep_open}</p>
             </div>
           )}
 

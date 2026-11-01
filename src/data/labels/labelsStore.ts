@@ -1706,6 +1706,14 @@ export const DEFAULT_LABELS = {
   merge_month_refused_target_closed: "الشهر الهدف مُقفل.",
   merge_month_failed:               "توقف الدمج ولم يُحذف المصدر. يمكن إعادة المحاولة بأمان وستُكمل من حيث توقفت: {error}",
   merge_month_check_failed:         "تعذّرت المعاينة: {error}",
+  merge_month_progress:             "جارٍ الدمج — {phase}: {done} من {total}",
+  merge_month_progress_keep_open:   "أبقِ هذه الصفحة مفتوحة حتى ينتهي. لو أُغلقت، أعد الدمج وسيُكمل من حيث توقف.",
+  merge_month_phase_plan:           "قراءة الشهرين",
+  merge_month_phase_rows:           "نقل حالات العينة",
+  merge_month_phase_events:         "نقل التوزيع",
+  merge_month_phase_answers:        "نقل الإجابات",
+  merge_month_phase_population:     "نقل صفوف المجتمع",
+  merge_month_phase_archive:        "أرشفة المصدر",
 
   // ── Settings · حذف شهر (deleteMonth.ts) ────────────────────────────────────
   delete_month_title:               "حذف شهر",
