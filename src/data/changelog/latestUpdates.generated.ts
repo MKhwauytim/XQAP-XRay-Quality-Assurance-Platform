@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v159.1",
+    "date": "2026-11-01",
+    "bucket": "enhancement",
+    "scope": "tracking",
+    "title": "daily follow-up counts every studied case, ad-hoc imports included"
+  },
+  {
     "version": "v159.0",
     "date": "2026-11-01",
     "bucket": "feature",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "answers",
     "title": "«إرسال الآن» reports why unsent answers did not land"
-  },
-  {
-    "version": "v154.2",
-    "date": "2026-10-18",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "ad-hoc rows' unsent answers overlaid and counted — no longer turn white on sync"
   }
 ];

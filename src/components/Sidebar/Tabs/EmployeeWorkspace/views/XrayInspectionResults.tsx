@@ -581,12 +581,14 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
     [auditEvents, auditReferralRequests, auditReplacementRequests, canSeeAll, username, viewMode]
   );
 
-  // The tracking tab counts the SELECTED MONTH's sample only: ad-hoc imports
-  // live in synthetic months of their own and would inflate its totals.
+  // The tracking tab counts every case the results table shows for the month —
+  // the month's own sample AND the ad-hoc imports linked to it (owner request
+  // 2026-11-01: daily follow-up must cover all studied cases, not only the
+  // index sample). `loadAdhocEntriesForEmployeeView` already scopes those to
+  // the selected month.
   const trackingRows = useMemo<TrackingRow[]>(() => {
     const out: TrackingRow[] = [];
     for (const row of rows) {
-      if (isAdhocEntry(row.entry)) continue;
       const rowTemplate = resolveTemplateForAnswer(row.answer, templatesById, template);
       const state = classifyAnswerState(row.entry.status, row.answer, rowTemplate);
       if (state === "replaced") continue;
