@@ -54,6 +54,7 @@ import { TemplateRepairSection } from "./TemplateRepairSection";
 import { PopulationRecoverySection } from "./PopulationRecoverySection";
 import { DeleteMonthSection } from "./DeleteMonthSection";
 import { MergeMonthSection } from "./MergeMonthSection";
+import { ExcelRowsIntoMonthSection } from "./ExcelRowsIntoMonthSection";
 import { AboutSection } from "./AboutSection";
 import { usePermissions } from "../../../../auth/usePermissions";
 
@@ -618,6 +619,7 @@ function SettingsPage() {
       <TemplateRepairSection />
       <PopulationRecoverySection />
       <MergeMonthSection />
+      <ExcelRowsIntoMonthSection />
       <DeleteMonthSection />
       <AboutSection />
     </div>

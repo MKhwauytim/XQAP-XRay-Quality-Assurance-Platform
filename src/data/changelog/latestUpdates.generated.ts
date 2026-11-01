@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v159.0",
+    "date": "2026-11-01",
+    "bucket": "feature",
+    "scope": "months",
+    "title": "add cases from an Excel sheet to a month, skipping images already in the workspace"
+  },
+  {
     "version": "v158.1",
     "date": "2026-11-01",
     "bucket": "enhancement",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "answers",
     "title": "ad-hoc rows' unsent answers overlaid and counted — no longer turn white on sync"
-  },
-  {
-    "version": "v154.1",
-    "date": "2026-10-18",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "«قيد الحفظ» badge for outbox answers not yet on the share; pending overlay + banner for every role"
   }
 ];
