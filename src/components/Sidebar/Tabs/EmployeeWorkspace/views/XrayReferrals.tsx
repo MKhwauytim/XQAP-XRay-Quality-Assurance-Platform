@@ -1626,10 +1626,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       // per store rather than refusing the mixed case: a request is per-folder
       // by construction. The old per-row referral path rejected such a
       // selection outright, which is a worse answer than splitting it.
-      // «غير موزعة» rows have no owner to ask: they are assigned directly
-      // (a first assignment, as the distribution screen does), not requested.
+      // «غير موزعة» rows have no owner to ask: an admin assigns them directly
+      // (a first assignment, as the distribution screen does), audited below.
+      // Anyone else cannot route them at all, so they are skipped, not sent.
       const undistributedIds = new Set(entries.filter(isUndistributedEntry).map((e) => e.xrayImageId));
-      const toAssign = reassignModal.xrayImageIds.filter((id) => undistributedIds.has(id));
+      const toAssign = role === "admin" ? reassignModal.xrayImageIds.filter((id) => undistributedIds.has(id)) : [];
       let assignedTotal = 0;
       if (toAssign.length > 0) {
         const assigned = await assignUndistributedCases(directoryHandle, selMonth, toAssign, toEmployee, username);
@@ -1638,6 +1639,14 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           return;
         }
         assignedTotal = assigned.assigned;
+        void appendWorkspaceAction(directoryHandle, {
+          actor: username,
+          actorRole: role,
+          action: "distribution-bulk-assigned",
+          monthFolderName: selMonth,
+          target: toEmployee,
+          details: { samples: assignedTotal, source: "queue-bulk-assign-undistributed" },
+        });
       }
       const byFolder = new Map<string, string[]>();
       for (const id of reassignModal.xrayImageIds) {
