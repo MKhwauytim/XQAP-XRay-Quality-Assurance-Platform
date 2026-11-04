@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v159.12",
+    "date": "2026-11-04",
+    "bucket": "fix",
+    "scope": "referrals",
+    "title": "bulk assign includes undistributed cases (832 filtered, 407 offered)"
+  },
+  {
     "version": "v159.11",
     "date": "2026-11-01",
     "bucket": "feature",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "months",
     "title": "Excel cases may arrive without L1/L2 results; re-upload fills the blanks"
-  },
-  {
-    "version": "v159.1",
-    "date": "2026-11-01",
-    "bucket": "enhancement",
-    "scope": "tracking",
-    "title": "daily follow-up counts every studied case, ad-hoc imports included"
   }
 ];

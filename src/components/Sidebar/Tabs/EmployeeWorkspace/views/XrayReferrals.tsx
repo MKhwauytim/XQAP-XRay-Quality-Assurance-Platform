@@ -46,6 +46,7 @@ import {
 } from "../../../../../data/workspace/bootProgress";
 import type { DistributionEntry } from "../../../../../data/distribution/distributionTypes";
 import { submitReassignmentRequests } from "../../../../../data/referral/submitReassignment";
+import { assignUndistributedCases } from "../../../../../data/referral/assignUndistributed";
 import { isReassignEligible } from "../../../../../data/referral/planReassignment";
 import { appendWorkspaceAction, recordAction } from "../../../../../data/audit/actionLog";
 import type { ReplacementIndexRow } from "../../../../../data/population/replacementIndexTypes";
@@ -1625,8 +1626,22 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       // per store rather than refusing the mixed case: a request is per-folder
       // by construction. The old per-row referral path rejected such a
       // selection outright, which is a worse answer than splitting it.
+      // «غير موزعة» rows have no owner to ask: they are assigned directly
+      // (a first assignment, as the distribution screen does), not requested.
+      const undistributedIds = new Set(entries.filter(isUndistributedEntry).map((e) => e.xrayImageId));
+      const toAssign = reassignModal.xrayImageIds.filter((id) => undistributedIds.has(id));
+      let assignedTotal = 0;
+      if (toAssign.length > 0) {
+        const assigned = await assignUndistributedCases(directoryHandle, selMonth, toAssign, toEmployee, username);
+        if (!assigned.ok) {
+          setReassignError(assigned.error);
+          return;
+        }
+        assignedTotal = assigned.assigned;
+      }
       const byFolder = new Map<string, string[]>();
       for (const id of reassignModal.xrayImageIds) {
+        if (undistributedIds.has(id)) continue;
         const folder = folderForRow(id);
         const bucket = byFolder.get(folder);
         if (bucket) bucket.push(id);
@@ -1658,6 +1673,13 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       }
 
       const requestedTotal = createdRequests.reduce((sum, g) => sum + g.xrayImageIds.length, 0);
+      if (requestedTotal === 0 && assignedTotal > 0) {
+        setReassignModal(null);
+        clearSelection();
+        setStatusMsg({ type: "ok", text: getLabels().ew_assign_undistributed_done.replace("{n}", String(assignedTotal)).replace("{name}", toEmployee) });
+        await loadData({ silent: true });
+        return;
+      }
       if (requestedTotal === 0) {
         setReassignError("لا توجد عينات مؤهلة للإحالة ضمن هذا التحديد.");
         return;
@@ -1680,11 +1702,14 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       const requestCountText = createdRequests.length > 1
         ? ` (${createdRequests.length} طلبات — طلب لكل موظف مصدر)`
         : "";
+      const assignedPrefix = assignedTotal > 0
+        ? getLabels().ew_assign_undistributed_done.replace("{n}", String(assignedTotal)).replace("{name}", toEmployee) + " "
+        : "";
       setStatusMsg({
         type: "ok",
-        text: skippedTotal > 0
+        text: assignedPrefix + (skippedTotal > 0
           ? `تم إرسال طلب إحالة ${requestedTotal} عينة إلى ${toEmployee}${requestCountText} — بانتظار موافقة المشرف. تم تخطي ${skippedTotal} عينة.`
-          : `تم إرسال طلب إحالة ${requestedTotal} عينة إلى ${toEmployee}${requestCountText} — بانتظار موافقة المشرف.`,
+          : `تم إرسال طلب إحالة ${requestedTotal} عينة إلى ${toEmployee}${requestCountText} — بانتظار موافقة المشرف.`),
       });
       // Silent — follows an already-successful write, not a month/user change;
       // must refresh the queue in place rather than flashing the loading state.
@@ -1812,7 +1837,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         // can never be reassigned — counting it, or feeding it to the dialog only
         // for the planner to drop it again, is what made these buttons look broken.
         const selectableVisibleIds = filteredTableEntries
-          .filter((e) => isReassignEligible(e) && !isUndistributedEntry(e))
+          .filter(isReassignEligible)
           .map((e) => e.xrayImageId);
         // Selected ids are kept across filter changes and silent refreshes on
         // purpose (cross-page selection), so they are re-checked against the
@@ -1820,7 +1845,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         // dropped from the month must not be counted or submitted.
         const eligibleSelectedIds = [...selectedIds].filter((id) => {
           const entry = entriesById.get(id);
-          return entry !== undefined && isReassignEligible(entry) && !isUndistributedEntry(entry);
+          return entry !== undefined && isReassignEligible(entry);
         });
         // Bug fix: SELECT_COL_ID is `alwaysVisible: true`, but DataTable's own
         // default-column-config builder (used whenever no saved preset exists yet —
