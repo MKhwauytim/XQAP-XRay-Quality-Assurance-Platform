@@ -14,6 +14,8 @@ Taken after reviewing `docs/research/2026-11-05-pptx-fidelity-research.md` and `
 4. **Latin digits (123)** in tables, charts and text.
 5. **Other departments** pick designs from the exported catalog and send their Excel; an admin maps the data and produces the report.
 6. **Editor and output quality are equal priority**; work on both in parallel.
+7. **Every report always ships in four formats together: HTML, PDF, PowerPoint and Excel.** No format exists without the others. Excel carries the raw data the report was built from, the computed figures, and the source of every figure.
+8. **Exact layout parity across formats.** The same text sits on the same number of lines at the same position in HTML, PDF and PowerPoint. A label and its value that sit side by side in HTML (for example a label followed by «(50%)») sit side by side in PowerPoint, never wrapped below or split. Enforced by an automated check per text box and table cell: equal line count and top-left within 2px; any mismatch blocks the export.
 
 ## 1. Intent
 
