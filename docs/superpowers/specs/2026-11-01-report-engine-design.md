@@ -52,6 +52,13 @@ The report engine is a self-contained module. It runs inside this app today and 
 - **Separator sheets between parts:** a black tab and a black, empty sheet (gridlines and headers hidden, nothing else on it) that only marks a boundary. Names are vertical bars, one more each time so names stay unique: `|`, `||`, `|||`, and so on.
 - **Order:** الفهرس, `|`, المجتمع, العينة, `||`, الإحصائيات والنسب, `|||`, then the topic sheets, then المصدر.
 
+**Workbook round 2 (owner, 2026-11-05):**
+- **Raw data comes first, exactly as uploaded:** every uploaded file and sheet, every column, same names and order, no column dropped. Then **processing sheets** that show each step the system applied (mapping, cleaning, filters, joins), each step on its own sheet. Only then the processed المجتمع and العينة. Order: الفهرس, `|`, raw sheets, `||`, processing steps, `|||`, المجتمع and العينة, `||||`, الإحصائيات, `|||||`, المصدر.
+- **Buttons are shapes**, the whole button clickable, not a hyperlink on the cell text.
+- **Everything interactive:** every figure on the cover links to the pivot or cell it comes from; every row of المصدر links to its sheet and cell; the index links to every sheet.
+- **Font:** Somar everywhere, cells, shapes, charts and slicers.
+- Excel limit: a sheet holds at most 1,048,576 rows, so a raw set larger than that is split across numbered sheets the same way the uploaded files split it.
+
 Feasibility note (needs test T8): the vendored SheetJS community build writes data and formulas; native pivot tables and Excel table objects need their own OOXML parts (pivot cache, pivot table, table definitions). The plan is the same as PowerPoint: build the workbook, then add these parts by post-processing the zip, and verify in Excel through COM that the pivots refresh and match the report's figures.
 
 **M11 Pipeline order: raw data, then the Excel workbook, then the slides (owner, 2026-11-05).** No figure is ever hard-coded. Every issue runs in this order:
