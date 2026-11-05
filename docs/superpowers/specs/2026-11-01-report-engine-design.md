@@ -17,6 +17,17 @@ Taken after reviewing `docs/research/2026-11-05-pptx-fidelity-research.md` and `
 7. **Every report always ships in four formats together: HTML, PDF, PowerPoint and Excel.** No format exists without the others. Excel carries the raw data the report was built from, the computed figures, and the source of every figure.
 8. **Exact layout parity across formats.** The same text sits on the same number of lines at the same position in HTML, PDF and PowerPoint. A label and its value that sit side by side in HTML (for example a label followed by «(50%)») sit side by side in PowerPoint, never wrapped below or split. Enforced by an automated check per text box and table cell: equal line count and top-left within 2px; any mismatch blocks the export.
 
+### Owner decisions on the smart engine, 2026-11-05 (from `docs/research/2026-11-05-smart-report-engine-design.md` §8.2)
+
+9. **Old text superseded:** every earlier line in this spec that puts PowerPoint export or custom formulas out of scope is void; §0 and §0.1 rule.
+10. **Formulas:** users write measures in a small safe formula language (parsed to an AST with an allow-list, never `eval`), close to simple Excel formulas; not full DAX.
+11. **Columns:** declaring a column's type is enough to compute on it. Mapping to the data dictionary is optional and only unlocks the domain pack's ready measures. Every figure still traces to a raw column.
+12. **Report recipe file:** every issue ships a fifth file, a JSON recipe holding everything needed to rebuild the report: source file names and hashes, column types, processing steps, measures, the ReportSpec, parameters, engine version. The uploaded data itself is not stored by the engine.
+13. **No accounts or permissions in the engine.** The engine moves to a host platform that already has accounts and permissions; the module exposes actions (author, run, view) and the host decides who may do them.
+14. **Limits** are set by measurement on real machines, starting from provisional values.
+15. **HTML export is static**, an exact match of the PowerPoint. Interaction (slicers, filters) lives in the Excel workbook and inside the host app.
+16. Calculation engine (question not answered; ruling): start with plain TypeScript, no library; adopt a library only if measurement shows the need and the bundle delta is acceptable.
+
 ## 0.1 The engine is a portable module: its output principles
 
 The report engine is a self-contained module. It runs inside this app today and must drop into a second or third system unchanged: no import from X-ray code, no dependency on this app's workspace, auth or UI. The host system only supplies data (rows plus a domain pack) and receives files. Every host gets the same output guarantees, because they live in the module, not in the host:
