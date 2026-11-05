@@ -60,8 +60,9 @@ function encode(w, h, rgb) {
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("IDAT", zlib.deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
 }
 
-const A = decode(readFileSync(join(out, "pptx.png")));
-const B = decode(readFileSync(join(out, "html.png")));
+// Env DIFF_A / DIFF_B / DIFF_OUT override the default pair (used by the T-series runs).
+const A = decode(readFileSync(process.env.DIFF_A || join(out, "pptx.png")));
+const B = decode(readFileSync(process.env.DIFF_B || join(out, "html.png")));
 if (A.w !== B.w || A.h !== B.h) throw new Error(`size mismatch ${A.w}x${A.h} vs ${B.w}x${B.h}`);
 const n = A.w * A.h, d = Buffer.alloc(n * 3);
 let diff = 0, inkA = 0, inkB = 0;
@@ -75,7 +76,7 @@ for (let i = 0; i < n; i++) {
   if (m > THRESH) { diff++; d[o] = 220; d[o + 1] = 30; d[o + 2] = 30; }
   else { const g = 235 - ((A.rgb[o] + A.rgb[o + 1] + A.rgb[o + 2]) / 3 < 200 ? 40 : 0); d[o] = d[o + 1] = d[o + 2] = g; }
 }
-writeFileSync(join(out, "diff.png"), encode(A.w, A.h, d));
+writeFileSync(process.env.DIFF_OUT || join(out, "diff.png"), encode(A.w, A.h, d));
 const inkUnion = Math.max(inkA, inkB);
 console.log(JSON.stringify({
   threshold: THRESH,
