@@ -44,6 +44,14 @@ The report engine is a self-contained module. It runs inside this app today and 
 | 3 | الإحصائيات | One sheet holding all the report's calculations as pivot tables (or Power Query where that performs better; pivot is the default), each pivot labelled with the slide it feeds |
 | 4 | المصدر | Each figure in the report, the sheet, field, filter and measure it comes from |
 
+**Workbook design (owner, 2026-11-05, supersedes the plain layout above where they differ):**
+- **Cover and index sheet first:** a designed page, not a plain list. The authority logo top right, report name, report date and the report's base facts, then navigation buttons to every part: المجتمع, العينة, الإحصائيات, and the topic sheets.
+- **Every sheet is designed:** a calm background fill in the report palette (deck3 tokens), the logo top right, a title band, organized tables, charts, filters and slicers. Width and height are used well; no long single column of content.
+- **A back button on every sheet** that returns to the cover.
+- **Statistics sheet:** organized and laid out in a grid, with a chart next to each table where it helps.
+- **Separator sheets between parts:** a black tab and a black, empty sheet (gridlines and headers hidden, nothing else on it) that only marks a boundary. Names are vertical bars, one more each time so names stay unique: `|`, `||`, `|||`, and so on.
+- **Order:** الفهرس, `|`, المجتمع, العينة, `||`, الإحصائيات والنسب, `|||`, then the topic sheets, then المصدر.
+
 Feasibility note (needs test T8): the vendored SheetJS community build writes data and formulas; native pivot tables and Excel table objects need their own OOXML parts (pivot cache, pivot table, table definitions). The plan is the same as PowerPoint: build the workbook, then add these parts by post-processing the zip, and verify in Excel through COM that the pivots refresh and match the report's figures.
 
 Interface to a host (sketch): `issueReport(template, packId, datasets, params) → { html, pdfPrintable, pptx, xlsx, lintReport, parityReport }`. The host decides where files go; the module never reads or writes the host's storage directly.
