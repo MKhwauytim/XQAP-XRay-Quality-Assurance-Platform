@@ -54,6 +54,13 @@ The report engine is a self-contained module. It runs inside this app today and 
 
 Feasibility note (needs test T8): the vendored SheetJS community build writes data and formulas; native pivot tables and Excel table objects need their own OOXML parts (pivot cache, pivot table, table definitions). The plan is the same as PowerPoint: build the workbook, then add these parts by post-processing the zip, and verify in Excel through COM that the pivots refresh and match the report's figures.
 
+**M11 Pipeline order: raw data, then the Excel workbook, then the slides (owner, 2026-11-05).** No figure is ever hard-coded. Every issue runs in this order:
+1. Read the raw data (population, sample, any other set) and link it to tables.
+2. Build the Excel workbook: the raw tables, the pivots and every statistic the report shows, each defined once as a named measure over the raw tables.
+3. Build HTML and PowerPoint from those same definitions. Every number on a slide is a reference to a statistic defined in step 2, never a typed value.
+
+Technical note: the app runs in the browser with no Excel engine, so it cannot read values back out of Excel's pivots. Instead the engine holds one set of statistic definitions; Excel gets them as pivots and formulas, and the slides get the values the engine computes from the same raw rows with the same definitions. A parity check compares every slide figure with the workbook's pivot value and blocks the issue on any difference. The PoC built so far does not follow this order yet (its slide figures come from the port report code and the workbook was built beside it); the engine must.
+
 Interface to a host (sketch): `issueReport(template, packId, datasets, params) → { html, pdfPrintable, pptx, xlsx, lintReport, parityReport }`. The host decides where files go; the module never reads or writes the host's storage directly.
 
 ## 1. Intent
