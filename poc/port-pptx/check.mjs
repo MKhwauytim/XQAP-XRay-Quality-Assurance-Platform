@@ -18,7 +18,7 @@ const zip = await JSZip.loadAsync(readFileSync(join(outDir, "port-report.pptx"))
 const read = (n) => zip.file(n).async("string");
 const unxml = (s) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
 const NUMS = /\d[\d,]*(?:\.\d+)?%?/g;
-const nums = (s) => (s.replace(/‎/g, "").match(NUMS) ?? []).map((x) => x.replace(/,/g, ""));
+const nums = (s) => (s.replace(new RegExp("\u200E", "g"), "").match(NUMS) ?? []).map((x) => x.replace(/,/g, ""));
 const fmt = (code, v) => {
   const x = Number(v);
   if (/0\.0"%"/.test(code)) return `${x.toFixed(1)}%`;
