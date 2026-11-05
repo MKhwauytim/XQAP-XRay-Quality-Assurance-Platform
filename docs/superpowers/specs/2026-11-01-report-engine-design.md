@@ -142,6 +142,45 @@ Rollback: renaming `.v1.json` back restores a design; v2 code reads v1 through t
 - **HTML:** one self-contained file with deck3 CSS and fonts inlined and blocks pre-rendered. Optionally it bakes a param picker holding pre-resolved data for the param values the owner selects (bounded to keep file size sane), or produces one file per value.
 - **XLSX** (vendored SheetJS): one sheet per bound table/chart with resolved rows and Arabic headers, plus a provenance notes sheet.
 
+### 4.9 Design rules: new designs must not look AI-generated
+
+Owner requirement (2026-11-05): deck3's approved look stays, but every **new** catalog design and every generated slide must not read as machine-made. Baseline adapted from hallmark (github.com/nutlope/hallmark, installed here as the `hallmark` skill); its web-page rules are translated to slides below. stop-slop (github.com/hardikpandya/stop-slop) covers English prose only; Arabic report text gets its own list (T-rules).
+
+Rules come in three tiers, checked by an automated **design lint** that runs on every catalog design and every rendered report (on the layout model, plus a browser render), and by a fresh-context reviewer before a design enters the catalog.
+
+**Floor: never ships.**
+- F1 Text contrast ≥ 4.5:1 (≥ 3:1 at ≥ 44px).
+- F2 No overflow: every box's measured content fits; overflow paginates ("يتبع"), never clips.
+- F3 No invented figures: every number traces to a binding (CLAUDE.md rule); a design's demo data is labelled «بيانات توضيحية» inside the slide.
+- F4 Minimum font size 20px on a 1920×1080 slide.
+- F5 Colour never carries meaning alone: a status, a winning bar or a risk level also says so in text.
+
+**Reflex: the defaults a model falls into; a design may overrule one only with a written reason in its manifest.**
+- R1 No eyebrow label above every title. An eyebrow appears only where it carries information, such as a section name on a divider.
+- R2 No tracked-capital or spaced-out labels.
+- R3 No single coloured word in a title.
+- R4 No grid of identical cards when the content is not parallel; a list of 4+ items becomes a table, a chart or a ranked list.
+- R5 No icon-per-bullet decoration.
+- R6 No decorative gradients, glows or drop shadows beyond deck3's tokens.
+- R7 No filler slide ("شكرًا"/"أسئلة؟" text-only) unless the owner asks; closing is the org block as deck3 does.
+- R8 Titles state the finding, not the topic ("نسبة التوائم 92% في جدة" over "نسبة التوائم").
+- R9 Every slide has one focal element; no slide with three equal-weight charts.
+
+**Finish: craft checks, reported, never blocking.**
+- K1 Consistent number format (Latin digits, thousands separator, % precision per measure).
+- K2 Aligned edges: blocks snap to the 12-column grid or to a sibling edge.
+- K3 Repeated elements keep their positions across slides (title, footer, legend).
+- K4 Chart axis and labels follow deck3 conventions (honest zero, gaps for null).
+
+**Text rules for Arabic and English report prose (T).**
+- T1 No stock openers or closers («في عالم اليوم»، «ختامًا»، «لا يخفى على أحد»).
+- T2 No hedging stacks («قد يكون من الممكن»), no intensifier padding («بشكل كبير جدًا»).
+- T3 Regular hyphen, never the long dash, in generated Arabic text (port-report rule).
+- T4 One claim per sentence, each tied to a figure on the slide.
+- T5 English text additionally passes stop-slop's phrase and structure lists.
+
+Where it lives: `src/engine/lint/designLint.ts` (pure, over the layout model) + a browser pass for contrast and overflow; results show in the editor as a panel (Floor = error, Reflex = warning with an "overrule with reason" action, Finish = note). Catalog entry requires zero Floor and zero un-reasoned Reflex findings.
+
 ## 5. How the two existing reports are expressed
 
 **deck3:** a template with a `month` param, bound to app datasets (population, sample, answers). Slides become pages. Cover/contents/closing become `pageFrame`; KPI rows become `kpiBand`; القسم 3 analytics become `qualityMatrix`, `groupedBarChart`, `tintedPanel(land|sea)`; observation pages become `observationsTable`; statements become `richText` with `textTemplates` snippets. Parity: render the template and the code deck from the same synthetic month (`deck-preview.html`) and diff text and figures per slide. The code deck stays the live default until parity passes.
