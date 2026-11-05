@@ -17,6 +17,25 @@ Taken after reviewing `docs/research/2026-11-05-pptx-fidelity-research.md` and `
 7. **Every report always ships in four formats together: HTML, PDF, PowerPoint and Excel.** No format exists without the others. Excel carries the raw data the report was built from, the computed figures, and the source of every figure.
 8. **Exact layout parity across formats.** The same text sits on the same number of lines at the same position in HTML, PDF and PowerPoint. A label and its value that sit side by side in HTML (for example a label followed by «(50%)») sit side by side in PowerPoint, never wrapped below or split. Enforced by an automated check per text box and table cell: equal line count and top-left within 2px; any mismatch blocks the export.
 
+## 0.1 The engine is a portable module: its output principles
+
+The report engine is a self-contained module. It runs inside this app today and must drop into a second or third system unchanged: no import from X-ray code, no dependency on this app's workspace, auth or UI. The host system only supplies data (rows plus a domain pack) and receives files. Every host gets the same output guarantees, because they live in the module, not in the host:
+
+| # | Principle | Meaning |
+|---|---|---|
+| M1 | Four formats, always together | Every report issue produces HTML, PDF, PowerPoint and Excel. No format alone. |
+| M2 | Exact layout parity | Same lines, same positions, same pages in all visual formats; checked per text box, mismatch blocks the issue. |
+| M3 | Excel is the raw data | The workbook holds the rows the report was built from, the computed figures, and each figure's source. |
+| M4 | Native and editable | PowerPoint uses real text, tables, charts with embedded data and grouped shapes; pictures only for logos and user images. |
+| M5 | Right to left by default | Every paragraph `rtl="1"` and `algn="r"`; numbers and Latin tokens in their own left-to-right runs; Latin digits. |
+| M6 | No invented figures | Every number is a mapped field or a registered measure of the domain pack. |
+| M7 | Full text, never clipped | The fit ladder (one line, shrink to 85%, widen, two lines, else error); long tables continue on «يتبع» slides. |
+| M8 | Design rules enforced | The §4.9 lint (Floor, Reflex, Finish, Text) runs on every issue; no long dash, no emojis. |
+| M9 | Domain-neutral core | X-ray, tax, cases and studies are domain packs (fields, measures, dimensions, parameters); the core knows none of them. |
+| M10 | Same identity everywhere | deck3 tokens and the Somar font; the module ships the font and its installer for PowerPoint hosts. |
+
+Interface to a host (sketch): `issueReport(template, packId, datasets, params) → { html, pdfPrintable, pptx, xlsx, lintReport, parityReport }`. The host decides where files go; the module never reads or writes the host's storage directly.
+
 ## 1. Intent
 
 The owner wants to produce deck3 (the live executive report) and many other reports, first the Jeddah port business report, from **reusable templates** that re-run each month or per port on new data, and to customize them PowerPoint/Power BI style: add tables and charts, drag them left/right, add lines and dividers, edit text.
