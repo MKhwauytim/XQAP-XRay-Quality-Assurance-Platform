@@ -4,6 +4,17 @@
 **Status:** Approved by owner 2026-11-01. Next: implementation plan.
 **Owner:** Report Designer (`src/data/reportDesigner/`, `src/components/Sidebar/Tabs/ReportDesigner/`), deck3 kit (`src/data/reporting/executive/deck3/`)
 
+## 0. Owner decisions, 2026-11-05 (supersede conflicting text below)
+
+Taken after reviewing `docs/research/2026-11-05-pptx-fidelity-research.md` and `docs/research/2026-11-05-report-engine-ideas.md`:
+
+1. **Rebuild from zero on one layout model.** One absolute, pre-measured layout model renders HTML, PDF and PPTX from the same numbers; deck3 output stays matched by `kitSnapshot.test.ts`. This replaces "evolve the string kit" — the P1 plan (`docs/superpowers/plans/2026-11-01-report-engine-p1-blocks-and-migration.md`) is paused after Task 3 and will be re-planned on the new model.
+2. **PPTX proof of concept first**, before the layout rebuild: one deck3 KPI slide + one native editable chart + one Arabic table, opened in PowerPoint and compared with the HTML.
+3. **Catalog starts with 15–20 designs** seeded from real deck3 slides, numbered stably, grown on request (not a fixed 100).
+4. **Latin digits (123)** in tables, charts and text.
+5. **Other departments** pick designs from the exported catalog and send their Excel; an admin maps the data and produces the report.
+6. **Editor and output quality are equal priority**; work on both in parallel.
+
 ## 1. Intent
 
 The owner wants to produce deck3 (the live executive report) and many other reports — first the Jeddah port business report — from **reusable templates** that re-run each month or per port on new data, and to customize them PowerPoint/Power BI style: add tables and charts, drag them left/right, add lines and dividers, edit text.
