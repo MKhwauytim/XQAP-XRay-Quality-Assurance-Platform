@@ -68,6 +68,13 @@ Feasibility note (needs test T8): the vendored SheetJS community build writes da
 
 Technical note: the app runs in the browser with no Excel engine, so it cannot read values back out of Excel's pivots. Instead the engine holds one set of statistic definitions; Excel gets them as pivots and formulas, and the slides get the values the engine computes from the same raw rows with the same definitions. A parity check compares every slide figure with the workbook's pivot value and blocks the issue on any difference. The PoC built so far does not follow this order yet (its slide figures come from the port report code and the workbook was built beside it); the engine must.
 
+**M12 Two separate sections in every workbook: raw, then processed (owner, 2026-11-05).** This is a general rule of the module, for every report and every domain, not only the port report:
+1. **Raw section:** the data exactly as it was uploaded, same files, sheets, columns, names and order, untouched.
+2. **Processed section:** each processing step the system applied on its own sheet, then the processed sets (population, sample, any other), then the statistics.
+The two never mix, and the processed section must reconcile with the raw one (raw rows minus each step's removed rows equals processed rows), checked on every issue.
+
+Size note: raw uploads can be large (the port report's source is a 318 MB workbook with millions of population rows). Measured size and open time decide the packaging; if one file is impractical, the raw section ships as a companion workbook issued and linked together with the report workbook, never dropped.
+
 Interface to a host (sketch): `issueReport(template, packId, datasets, params) → { html, pdfPrintable, pptx, xlsx, lintReport, parityReport }`. The host decides where files go; the module never reads or writes the host's storage directly.
 
 ## 1. Intent
