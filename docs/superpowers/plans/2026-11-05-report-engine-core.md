@@ -140,7 +140,7 @@ it("limits are marked provisional", () => {
 });
 it("formatIssue names page, visual and rule in Arabic, without long dashes", () => {
   const s = formatIssue({ rule: "fit.tooLong", page: 2, visual: "v1" });
-  expect(s).toContain("العنوان أطول من المساحة"); expect(s).toContain("v1"); expect(s).not.toMatch(/[–—]/);
+  expect(s).toContain("العنوان أطول من المساحة"); expect(s).toContain("v1"); expect(s).not.toMatch(/[\u2013\u2014]/);
 });
 it("host override replaces a message", () => { expect(formatIssue({ rule: "fit.tooLong" }, { "fit.tooLong": "X" })).toContain("X"); });
 ```
@@ -767,7 +767,7 @@ git commit -m "Add (engine): XLSX writer with raw and processed sections, tables
 ```ts
 it("figure parity passes on the fixture and fails when one PPTX number is edited", async () => {});
 it("layout parity flags a 3px move and an extra a:br, accepts 2px", () => {});
-it.each(["عنوان — فرعي", "نتيجة – جيدة", "تم ✅", "تحذير ⚠", "سهم →"])("lint fails %s", (s) => { expect(lintText(s).length).toBeGreaterThan(0); });
+it.each(["عنوان \u2014 فرعي", "نتيجة \u2013 جيدة", "تم \u2705", "تحذير \u26A0", "سهم \u2192"])("lint fails %s", (s) => { expect(lintText(s).length).toBeGreaterThan(0); });
 it("lint passes plain hyphen, colon and Latin digits", () => { expect(lintText("نسبة: 85.5% - جدة")).toEqual([]); });
 it("reconciliation fails when a step's removed count is off by one", () => {});
 it("ooxml self-check fails when a table part is deleted from the xlsx zip (silent-drop trap)", () => {});
@@ -895,7 +895,7 @@ it.each([
 ])("%s returns ok:false with no files and one Arabic message", async (_n, rule) => {
   const r = await issueWith(mutation);
   expect(r.ok).toBe(false); expect(r).not.toHaveProperty("files");
-  expect(r.issues[0].rule).toBe(rule); expect(r.message).not.toMatch(/[–—]/);
+  expect(r.issues[0].rule).toBe(rule); expect(r.message).not.toMatch(/[\u2013\u2014]/);
 });
 it("an empty dataset issues '-' for ratios and 0 for counts and passes gates", async () => {});
 it("a one-row dataset issues and passes gates", async () => {});
