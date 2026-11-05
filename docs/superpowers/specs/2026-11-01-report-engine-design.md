@@ -75,6 +75,17 @@ The two never mix, and the processed section must reconcile with the raw one (ra
 
 Size note: raw uploads can be large (the port report's source is a 318 MB workbook with millions of population rows). Measured size and open time decide the packaging; if one file is impractical, the raw section ships as a companion workbook issued and linked together with the report workbook, never dropped.
 
+**M13 Reliability: the module never breaks, never stops halfway, never issues a wrong report (owner, 2026-11-05).**
+- **Fail closed, all or nothing.** An issue either produces all four files with every gate passed, or produces none and shows one clear Arabic message naming the slide, block and rule that failed. No partial set, no file with a silent error.
+- **Validate at every boundary.** Uploaded files, mapping, domain pack, template, parameters and every block config are checked against a schema before any work; unknown or malformed input is rejected with its location, never guessed.
+- **Bounded by design.** Fixed limits, stated in the module: rows per dataset, slides per report, blocks per slide, categories per chart (beyond the limit the chart-form rules switch to top N plus «أخرى»), cells per table page (beyond it the table continues on «يتبع»), time budget per issue. Hitting a limit is a clear message, never a crash or a hang.
+- **Deterministic.** Same raw data, template and parameters give byte-identical files; snapshot tests hold this.
+- **Gates before release.** Figure parity (slides against workbook), layout parity (HTML against PowerPoint line counts and positions), design lint, raw-to-processed reconciliation, OOXML self-check (each file re-opened by a parser; in the PoC also by PowerPoint and Excel), slicer and pivot counts. Any gate failing blocks the issue.
+- **Tested against hostile input.** Empty data, one row, millions of rows, nulls, very long Arabic text, mixed digits, duplicate names, missing columns, wrong types; each has a test that proves the module refuses or handles it.
+- **Isolated work.** Heavy steps run in a worker with a time budget; a failure there cannot freeze or corrupt the host app.
+
+**M14 Catalog and slide picks (owner idea, 2026-11-05).** The catalog is a numbered HTML lookbook of every design, which can be filled with real data for a preview. It is sent to a department; they reply with slide numbers (for example 1, 4, 5, 6, 10). Those numbers are entered in the system (typed, or imported from the picks file), and the report is issued with exactly those designs in that order, through all gates and in all four formats. Numbers are stable forever: a retired design keeps its number and is refused with a clear message.
+
 Interface to a host (sketch): `issueReport(template, packId, datasets, params) → { html, pdfPrintable, pptx, xlsx, lintReport, parityReport }`. The host decides where files go; the module never reads or writes the host's storage directly.
 
 ## 1. Intent
