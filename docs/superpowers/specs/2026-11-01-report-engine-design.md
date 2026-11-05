@@ -34,6 +34,18 @@ The report engine is a self-contained module. It runs inside this app today and 
 | M9 | Domain-neutral core | X-ray, tax, cases and studies are domain packs (fields, measures, dimensions, parameters); the core knows none of them. |
 | M10 | Same identity everywhere | deck3 tokens and the Somar font; the module ships the font and its installer for PowerPoint hosts. |
 
+**M3 in detail: the Excel workbook layout (owner, 2026-11-05).** The workbook always starts from the base population and moves to what is derived from it:
+
+| Order | Sheet | Content |
+|---|---|---|
+| 0 | الفهرس (navigation) | A map of every sheet with a link to it and one line on what it holds, so moving around the workbook is easy |
+| 1 | المجتمع | The base data as an organized Excel table (headers, filters, frozen header row), with a pivot table on its left showing the report's main measures |
+| 2 | العينة (and any other derived set) | The derived rows, same layout: organized table plus a pivot of its main measures |
+| 3 | الإحصائيات | One sheet holding all the report's calculations as pivot tables (or Power Query where that performs better; pivot is the default), each pivot labelled with the slide it feeds |
+| 4 | المصدر | Each figure in the report, the sheet, field, filter and measure it comes from |
+
+Feasibility note (needs test T8): the vendored SheetJS community build writes data and formulas; native pivot tables and Excel table objects need their own OOXML parts (pivot cache, pivot table, table definitions). The plan is the same as PowerPoint: build the workbook, then add these parts by post-processing the zip, and verify in Excel through COM that the pivots refresh and match the report's figures.
+
 Interface to a host (sketch): `issueReport(template, packId, datasets, params) → { html, pdfPrintable, pptx, xlsx, lintReport, parityReport }`. The host decides where files go; the module never reads or writes the host's storage directly.
 
 ## 1. Intent
