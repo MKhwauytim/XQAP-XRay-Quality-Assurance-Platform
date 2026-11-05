@@ -1,4 +1,4 @@
-# Report Engine v2 — Design Spec
+# Report Engine v2, Design Spec
 
 **Date:** 2026-11-01
 **Status:** Approved by owner 2026-11-01. Next: implementation plan.
@@ -8,16 +8,16 @@
 
 Taken after reviewing `docs/research/2026-11-05-pptx-fidelity-research.md` and `docs/research/2026-11-05-report-engine-ideas.md`:
 
-1. **Rebuild from zero on one layout model.** One absolute, pre-measured layout model renders HTML, PDF and PPTX from the same numbers; deck3 output stays matched by `kitSnapshot.test.ts`. This replaces "evolve the string kit" — the P1 plan (`docs/superpowers/plans/2026-11-01-report-engine-p1-blocks-and-migration.md`) is paused after Task 3 and will be re-planned on the new model.
+1. **Rebuild from zero on one layout model.** One absolute, pre-measured layout model renders HTML, PDF and PPTX from the same numbers; deck3 output stays matched by `kitSnapshot.test.ts`. This replaces "evolve the string kit", the P1 plan (`docs/superpowers/plans/2026-11-01-report-engine-p1-blocks-and-migration.md`) is paused after Task 3 and will be re-planned on the new model.
 2. **PPTX proof of concept first**, before the layout rebuild: one deck3 KPI slide + one native editable chart + one Arabic table, opened in PowerPoint and compared with the HTML.
-3. **Catalog starts with 15–20 designs** seeded from real deck3 slides, numbered stably, grown on request (not a fixed 100).
+3. **Catalog starts with 15-20 designs** seeded from real deck3 slides, numbered stably, grown on request (not a fixed 100).
 4. **Latin digits (123)** in tables, charts and text.
 5. **Other departments** pick designs from the exported catalog and send their Excel; an admin maps the data and produces the report.
 6. **Editor and output quality are equal priority**; work on both in parallel.
 
 ## 1. Intent
 
-The owner wants to produce deck3 (the live executive report) and many other reports — first the Jeddah port business report — from **reusable templates** that re-run each month or per port on new data, and to customize them PowerPoint/Power BI style: add tables and charts, drag them left/right, add lines and dividers, edit text.
+The owner wants to produce deck3 (the live executive report) and many other reports, first the Jeddah port business report, from **reusable templates** that re-run each month or per port on new data, and to customize them PowerPoint/Power BI style: add tables and charts, drag them left/right, add lines and dividers, edit text.
 
 Decisions agreed in brainstorming (2026-11-01):
 
@@ -27,7 +27,7 @@ Decisions agreed in brainstorming (2026-11-01):
 | Data sources | App workspace data **and** uploaded Excel mapped to the data dictionary |
 | Placement | Free x/y **and** snap grid, user-toggleable |
 | Export | Self-contained HTML + Excel of the figures (no .pptx in scope) |
-| Approach | **Evolve the existing Report Designer** — not a parallel engine, not code-only templates |
+| Approach | **Evolve the existing Report Designer**, not a parallel engine, not code-only templates |
 | Visual system | deck3 theme (owner-approved) as the engine's only design system |
 
 Constraints from CLAUDE.md: every figure traceable to real data fields; one source per constant; any on-disk format change ships an admin-offered migration that archives originals; Arabic/RTL UI through label keys; the build stays a single `dist/index.html`.
@@ -175,7 +175,8 @@ Rules come in three tiers, checked by an automated **design lint** that runs on 
 **Text rules for Arabic and English report prose (T).**
 - T1 No stock openers or closers («في عالم اليوم»، «ختامًا»، «لا يخفى على أحد»).
 - T2 No hedging stacks («قد يكون من الممكن»), no intensifier padding («بشكل كبير جدًا»).
-- T3 Regular hyphen, never the long dash, in generated Arabic text (port-report rule).
+- T3 Never the long dash (— or –) anywhere, in any language: titles, notes, tables, exports. Use a regular hyphen, a comma or a colon. The lint fails on it (Floor).
+- T6 No emojis or decorative symbols (✓, ✅, ⚠, ★, arrows) in report output; state the word instead («خلصت», «متأخر»). The lint fails on them (Floor).
 - T4 One claim per sentence, each tied to a figure on the slide.
 - T5 English text additionally passes stop-slop's phrase and structure lists.
 
@@ -210,7 +211,7 @@ Where it lives: `src/engine/lint/designLint.ts` (pure, over the layout model) + 
 | 9 | Monthly timeline (inline SVG line chart) | new **`lineChart` block**: x = month of image date, one series per port type plus the selected port (gold, on top) plus all ports (dashed); a point with fewer than the min-sample threshold renders as a gap; year labels under the months |
 | 10 | Level 1 vs level 2 comparison: two tinted panels | two `tintedPanel`+`dataTable` grouped by level; the left panel uses param scope, the right panel all-ports scope |
 | 11 | Section 3 divider | `pageFrame:sectionDivider` with `{{param:port}}` in the title |
-| 12 | Employee accuracy tiers: one histogram per tier plus a stats table; mean/median in the note | **derived dataset** `employees` (studies grouped by employee code: studied, matched, accuracy = matched/studied, filtered to studied ≥ 30); new **`tierHistogram` block** (3 equal-width tiers over min–max, 3 bins per tier, one chart per tier); `kvTable` block for tier from/to/count/mean accuracy/mean studied; note uses `{{median:employees.accuracy}}` and `{{mean:…}}` |
+| 12 | Employee accuracy tiers: one histogram per tier plus a stats table; mean/median in the note | **derived dataset** `employees` (studies grouped by employee code: studied, matched, accuracy = matched/studied, filtered to studied ≥ 30); new **`tierHistogram` block** (3 equal-width tiers over min-max, 3 bins per tier, one chart per tier); `kvTable` block for tier from/to/count/mean accuracy/mean studied; note uses `{{median:employees.accuracy}}` and `{{mean:…}}` |
 | 13 | Staff vs land/sea ports: grouped bars + table | `groupedBarChart` of level 1/2 agreement for this port vs port-type scopes; `dataTable` with a group-start divider column |
 | 14+ | Paged employee tables, ranked by accuracy | `dataTable` bound to `employees`, sorted accuracy desc, then studied desc, then code; **auto-paginate**: overflow rows repeat the page onto continuation pages (fixed rows per page, repeated header); cell tones per column (gold/navy/red/green) |
 | A | Appendix divider + table of employees under the threshold | `pageFrame:sectionDivider` + paged `dataTable` on `employees` filtered studied < 30; both carry a **show-if-not-empty** rule |
