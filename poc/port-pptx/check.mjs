@@ -38,7 +38,7 @@ const multisetDiff = (a, b) => {
 const res = { slides: geo.length, perSlide: [], g2: { pics: 0, media: [] }, g4: { paragraphs: 0, rtlR: 0, bad: 0 }, g10: { dashes: 0, emoji: 0, where: [] }, totals: { html: 0, pptx: 0, mismatches: 0 } };
 res.g2.media = Object.keys(zip.files).filter((n) => n.startsWith("ppt/media/"));
 const EMOJI = /\p{Extended_Pictographic}/u;
-const DASH = /[–—]/;
+const DASH = new RegExp("[\u2013\u2014]");
 for (let i = 1; i <= geo.length; i++) {
   const xml = await read(`ppt/slides/slide${i}.xml`);
   const rels = await read(`ppt/slides/_rels/slide${i}.xml.rels`);
