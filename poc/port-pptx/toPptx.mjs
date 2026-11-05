@@ -198,6 +198,7 @@ geo.forEach((g, si) => {
     });
   });
   for (const im of g.images) {
+    if (im.png) { slide.addImage({ data: im.src.replace(/^data:/, ""), x: inch(im.x), y: inch(im.y), w: inch(im.w), h: inch(im.h) }); continue; }
     const svg = decodeURIComponent(im.src.replace(/^data:image\/svg\+xml;charset=utf-8,/, ""));
     slide.addImage({ data: `image/svg+xml;base64,${Buffer.from(svg, "utf8").toString("base64")}`, x: inch(im.x), y: inch(im.y), w: inch(im.w), h: inch(im.h) });
   }

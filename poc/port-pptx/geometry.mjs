@@ -101,7 +101,20 @@ function probe() {
       if (!visible(el) || consumed.has(el)) return;
       if (el.classList.contains("slide-controls")) return;
       const tag = el.tagName;
-      if (tag === "IMG") { out.images.push({ ...box(el.getBoundingClientRect()), src: el.src }); return; }
+      if (tag === "IMG") {
+        const b = box(el.getBoundingClientRect());
+        const f = getComputedStyle(el).filter;
+        if (f && f !== "none") {
+          // Bake the CSS filter into the pixels so PowerPoint shows what the HTML shows.
+          const c = document.createElement("canvas");
+          c.width = Math.round(b.w * 3); c.height = Math.round(b.h * 3);
+          const ctx = c.getContext("2d");
+          ctx.filter = f;
+          ctx.drawImage(el, 0, 0, c.width, c.height);
+          out.images.push({ ...b, src: c.toDataURL("image/png"), png: true });
+        } else out.images.push({ ...b, src: el.src });
+        return;
+      }
       if (tag === "svg" || tag === "SVG") {
         const b = box(el.getBoundingClientRect());
         const texts = [...el.querySelectorAll("text")].map((t) => ({ text: t.textContent, size: px(t.getAttribute("font-size")), bold: t.getAttribute("font-weight") === "700", fill: t.getAttribute("fill"), ...box(t.getBoundingClientRect()) }));
