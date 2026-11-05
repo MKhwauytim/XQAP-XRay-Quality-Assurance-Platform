@@ -33,16 +33,34 @@ function probe() {
     const runsOf = (block) => {
       const runs = [];
       const rects = [];
+      // Where the browser wrapped: each word's rect; a word whose middle is below the previous
+      // word's bottom starts a new visual line, recorded as a soft break {br:"soft"}.
+      let prevBottom = null;
       const walk = (n) => {
         for (const c of n.childNodes) {
           if (c.nodeType === 3) {
-            const t = c.textContent.replace(/\s+/g, " ");
+            const raw = c.textContent;
+            const t = raw.replace(/\s+/g, " ");
             if (!t.trim()) { if (runs.length && t) runs.push({ text: " ", ...styleOf(n) }); continue; }
             const rg = document.createRange(); rg.selectNodeContents(c);
             for (const r of rg.getClientRects()) if (r.width > 0) rects.push(r);
-            runs.push({ text: t, ...styleOf(n) });
+            let piece = "", last = 0;
+            for (const m of raw.matchAll(/\S+/g)) {
+              const wr = document.createRange(); wr.setStart(c, m.index); wr.setEnd(c, m.index + m[0].length);
+              const r = wr.getBoundingClientRect();
+              const gap = raw.slice(last, m.index).replace(/\s+/g, " ");
+              if (prevBottom !== null && r.height > 0 && (r.top + r.bottom) / 2 > prevBottom) {
+                if (piece.trim()) runs.push({ text: piece.replace(/\s+$/, ""), ...styleOf(n) });
+                runs.push({ br: "soft" });
+                piece = m[0];
+              } else piece += gap + m[0];
+              if (r.height > 0) prevBottom = prevBottom === null || (r.top + r.bottom) / 2 > prevBottom ? r.bottom : Math.max(prevBottom, r.bottom);
+              last = m.index + m[0].length;
+            }
+            piece += raw.slice(last).replace(/\s+/g, " ");
+            if (piece) runs.push({ text: piece, ...styleOf(n) });
           } else if (c.nodeType === 1) {
-            if (c.tagName === "BR") { runs.push({ br: true }); continue; }
+            if (c.tagName === "BR") { runs.push({ br: true }); prevBottom = null; continue; }
             if (!visible(c)) continue;
             if (isBlock(c) && getComputedStyle(c).display !== "inline-block") continue;
             walk(c);
@@ -56,8 +74,14 @@ function probe() {
       if (runs.length) runs[runs.length - 1].text = (runs[runs.length - 1].text || "").trimEnd();
       if (!rects.length) return null;
       const u = rects.reduce((a, r) => ({ left: Math.min(a.left, r.left), top: Math.min(a.top, r.top), right: Math.max(a.right, r.right), bottom: Math.max(a.bottom, r.bottom) }), { left: 1e9, top: 1e9, right: -1e9, bottom: -1e9 });
-      const lines = new Set(rects.map((r) => Math.round(r.top / k / 4))).size;
-      return { runs, rect: box({ left: u.left, top: u.top, width: u.right - u.left, height: u.bottom - u.top }), lines, align: getComputedStyle(block).textAlign };
+      // Lines: a rect whose vertical middle is below the current line's bottom starts a new line.
+      let lines = 0, lineBottom = -1e9;
+      for (const r of [...rects].sort((a, b) => a.top - b.top)) { if ((r.top + r.bottom) / 2 > lineBottom) { lines++; lineBottom = r.bottom; } else lineBottom = Math.max(lineBottom, r.bottom); }
+      // Content box of the block: the width the browser wrapped at.
+      const bs = getComputedStyle(block), br = block.getBoundingClientRect();
+      const content = box({ left: br.left + px(bs.paddingLeft) + px(bs.borderLeftWidth), top: br.top + px(bs.paddingTop), width: br.width - px(bs.paddingLeft) - px(bs.paddingRight) - px(bs.borderLeftWidth) - px(bs.borderRightWidth), height: br.height });
+      const text = runs.map((x) => (x.br ? "\n" : x.text)).join("");
+      return { runs, rect: box({ left: u.left, top: u.top, width: u.right - u.left, height: u.bottom - u.top }), lines, content, text, align: bs.textAlign };
     };
     const decorate = (el, list) => {
       if (el === sl) return;
@@ -93,7 +117,7 @@ function probe() {
             const s = getComputedStyle(td);
             const r = runsOf(td);
             const bw = (side) => (s[`border${side}Style`] === "none" ? 0 : px(s[`border${side}Width`]));
-            row.cells.push({ ...box(td.getBoundingClientRect()), colspan: td.colSpan || 1, runs: r ? r.runs : [], fill: alpha(s.backgroundColor) > 0 ? s.backgroundColor : null, bt: bw("Top"), btc: s.borderTopColor, bb: bw("Bottom"), bbc: s.borderBottomColor, ...styleOf(td), padL: px(s.paddingLeft), padR: px(s.paddingRight) });
+            row.cells.push({ ...box(td.getBoundingClientRect()), colspan: td.colSpan || 1, runs: r ? r.runs : [], lines: r ? r.lines : 0, text: r ? r.text : "", fill: alpha(s.backgroundColor) > 0 ? s.backgroundColor : null, bt: bw("Top"), btc: s.borderTopColor, bb: bw("Bottom"), bbc: s.borderBottomColor, ...styleOf(td), padL: px(s.paddingLeft), padR: px(s.paddingRight) });
           }
           t.rows.push(row);
         }

@@ -57,7 +57,7 @@ for (let i = 1; i <= geo.length; i++) {
         for (const v of cat.matchAll(/<c:v>([^<]*)<\/c:v>/g)) pptxNums.push(...nums(unxml(v[1])));
       }
       const code = ser.match(/<c:dLbls>[\s\S]*?<c:numFmt formatCode="([^"]*)"/)?.[1] ?? cx.match(/<c:dLbls>[\s\S]*?<c:numFmt formatCode="([^"]*)"/)?.[1] ?? "General";
-      const shown = !/<c:showVal val="0"\/>/.test(ser.match(/<c:dLbls>[\s\S]*?<\/c:dLbls>/)?.[0] ?? "");
+      const shown = !/<c:showVal val="0"\/>|<c:delete val="1"\/>/.test(ser.match(/<c:dLbls>[\s\S]*?<\/c:dLbls>/)?.[0] ?? "");
       const vals = [...(ser.match(/<c:val>([\s\S]*?)<\/c:val>/)?.[1] ?? "").matchAll(/<c:v>([^<]*)<\/c:v>/g)].map((m) => fmt(unxml(code), m[1]));
       if (shown) pptxNums.push(...vals.map((v) => v.replace(/,/g, "")));
       else chartOnlyHidden += vals.length;

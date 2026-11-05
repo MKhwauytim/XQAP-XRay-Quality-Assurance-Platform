@@ -10,6 +10,7 @@ $pptxPath = Join-Path $out 'port-report.pptx'
 $pngSlides = @(3, 15, 18, 20)
 $editSlides = @(3, 15)
 $result = [ordered]@{ open = $false; slides = 0; perSlide = @(); edits = @(); pngs = @(); errors = @() }
+function LineCount($tr) { $k = 0; while ($true) { try { $l = $tr.Lines($k + 1, 1); if ($l.Length -le 0) { break } } catch { break }; $k++; if ($k -gt 200) { break } }; return $k }
 $app = $null; $pres = $null
 try {
   $app = New-Object -ComObject PowerPoint.Application
@@ -27,6 +28,23 @@ try {
     }
     $result.perSlide += $c
   }
+  # G7b: line count and top-left of every named text box (T<i>) and table cell (TB<i>).
+  $result.layout = @()
+  for ($i = 1; $i -le $pres.Slides.Count; $i++) {
+    foreach ($s in $pres.Slides($i).Shapes) {
+      if ($s.Name -match '^T(\d+)$') {
+        $result.layout += [ordered]@{ slide = $i; kind = 'text'; idx = [int]$Matches[1]; left = $s.Left; top = $s.Top; lines = (LineCount $s.TextFrame2.TextRange) }
+      } elseif ($s.Name -match '^TB(\d+)$' -and $s.HasTable -eq -1) {
+        $t = $s.Table; $cells = @()
+        for ($r = 1; $r -le $t.Rows.Count; $r++) { for ($c = 1; $c -le $t.Columns.Count; $c++) {
+          $tr = $t.Cell($r, $c).Shape.TextFrame2.TextRange
+          $cells += ,@($r, $c, $(if ($tr.Length -gt 0) { LineCount $tr } else { 0 }))
+        } }
+        $result.layout += [ordered]@{ slide = $i; kind = 'table'; idx = [int]$Matches[1]; left = $s.Left; top = $s.Top; cells = $cells }
+      }
+    }
+  }
+  for ($i = 1; $i -le $pres.Slides.Count; $i++) { $pres.Slides($i).Export((Join-Path $out ("pptx-{0:d2}.png" -f $i)), 'PNG', 1920, 1080) }
   foreach ($n in $pngSlides) {
     $png = Join-Path $out ("slide-{0:d2}.png" -f $n)
     $pres.Slides($n).Export($png, 'PNG', 1920, 1080)
@@ -56,5 +74,5 @@ try {
   if ($app) { $app.Quit(); [void][Runtime.InteropServices.Marshal]::ReleaseComObject($app) }
   [GC]::Collect(); [GC]::WaitForPendingFinalizers()
 }
-$result | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 (Join-Path $out 'com.json')
+$result | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 (Join-Path $out 'com.json')
 "open=$($result.open) slides=$($result.slides) edits=$(($result.edits | ForEach-Object { "$($_.slide):$($_.ok)" }) -join ',') errors=$($result.errors -join ';')"

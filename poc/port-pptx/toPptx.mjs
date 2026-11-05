@@ -9,7 +9,7 @@
 //
 // Units follow poc/pptx: 6350 EMU per px (144 px per inch), pt = px x 0.5.
 // Zip post-processing: strip charset/pitchFamily, every paragraph rtl="1" algn="r",
-// every table a:tblPr rtl="1", U+200E on both sides of each number cluster ("85.5%", "20 / 37", "1/2026") so it keeps its order.
+// every table a:tblPr rtl="1", every Latin/digit token in its own run with lang="en-US" and <a:rtl val="0"/> (the T1 method; the paragraph stays rtl="1"), and the master/layout defaults set to rtl="1" algn="r".
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -25,6 +25,7 @@ const reportHtml = readFileSync(join(outDir, "report.html"), "utf8");
 const themeVar = (name) => reportHtml.match(new RegExp(`--v3-${name}:(#[0-9a-fA-F]{6})`))?.[1].slice(1).toUpperCase();
 
 const FONT = "Somar";
+const FIT_SAFETY = 1.04;
 const inch = (px) => px / 144;
 const pt = (px) => px * 0.5;
 
@@ -50,11 +51,14 @@ const runsToPptx = (runs, bg) => {
   // A block with no Arabic letters ("15 / 37" split over two spans) becomes one run, so the
   // LRM wrapping in post-processing sees the whole cluster and PowerPoint keeps "15 / 37".
   const plain = runs.filter((r) => !r.br);
-  if (plain.length > 1 && !plain.some((r) => /[؀-ۿ]/.test(r.text))) runs = [{ ...plain[0], text: plain.map((r) => r.text).join("") }];
+  if (plain.length > 1 && plain.length === runs.length && !plain.some((r) => /[؀-ۿ]/.test(r.text))) runs = [{ ...plain[0], text: plain.map((r) => r.text).join("") }];
   const out = [];
+  let soft = false;
   for (const r of runs) {
+    if (r.br === "soft") { soft = true; continue; } // where the HTML wrapped: a line break inside the paragraph
     if (r.br) { if (out.length) out[out.length - 1].options.breakLine = true; continue; }
-    out.push({ text: r.text, options: { color: hex(r.color, bg), fontSize: pt(r.size), bold: r.bold, fontFace: FONT, lang: "ar-SA" } });
+    const brk = soft; soft = false;
+    out.push({ text: r.text, options: { softBreakBefore: brk || undefined, color: hex(r.color, bg), fontSize: pt(r.size), bold: r.bold, fontFace: FONT, lang: "ar-SA" } });
   }
   return out.length ? out : [{ text: "", options: {} }];
 };
@@ -136,7 +140,7 @@ geo.forEach((g, si) => {
         },
       })),
     );
-    slide.addTable(rows, { x: inch(t.x), y: inch(t.y), w: inch(t.w), colW, rowH: t.rows.map((r) => inch(r.h)), autoPage: false });
+    slide.addTable(rows, { objectName: `TB${g.tables.indexOf(t)}`, x: inch(t.x), y: inch(t.y), w: inch(t.w), colW, rowH: t.rows.map((r) => inch(r.h)), autoPage: false });
   }
   for (const c of g.charts) {
     const top = c.y, bottom = c.catsBox ? c.catsBox.y + c.catsBox.h : c.y + c.h;
@@ -177,18 +181,22 @@ geo.forEach((g, si) => {
     chartNo++;
     timelineMeta.push({ chart: chartNo, series });
   }
-  for (const t of g.texts) {
+  g.texts.forEach((t, ti) => {
     const multi = t.lines > 1;
     const r = t.rect;
-    // Single lines get slack on the start-opposite (left) side so a wider PowerPoint face cannot wrap them.
-    const slack = multi ? 6 : Math.max(24, r.w * 0.12);
+    // G7b: single-line HTML text = the HTML text box exactly, wrap off (it cannot wrap, and it
+    // overflows to the left like right-aligned text would). Wrapped HTML text = the width the
+    // browser wrapped at x FIT_SAFETY (1.04, poc/pptx T4), anchored on the right edge.
+    const w = multi ? Math.min(t.content.w, r.w * FIT_SAFETY) : r.w;
+    const x = multi ? r.x + r.w - w : r.x;
     slide.addText(runsToPptx(t.runs, bg), {
       ...textBase,
-      x: inch(r.x - slack), y: inch(r.y), w: inch(r.w + slack), h: inch(r.h + 2),
+      objectName: `T${ti}`,
+      x: inch(x), y: inch(r.y), w: inch(w), h: inch(r.h + 2),
       wrap: multi,
       lineSpacing: multi ? pt(t.runs.find((x) => x.lh)?.lh ?? 30) : undefined,
     });
-  }
+  });
   for (const im of g.images) {
     const svg = decodeURIComponent(im.src.replace(/^data:image\/svg\+xml;charset=utf-8,/, ""));
     slide.addImage({ data: `image/svg+xml;base64,${Buffer.from(svg, "utf8").toString("base64")}`, x: inch(im.x), y: inch(im.y), w: inch(im.w), h: inch(im.h) });
@@ -200,8 +208,8 @@ geo.forEach((g, si) => {
 const raw = await pptx.write({ outputType: "nodebuffer" });
 writeFileSync(join(outDir, "port-report.raw.pptx"), raw);
 const zip = await JSZip.loadAsync(raw);
-const stats = { charset: 0, pPr: 0, tblRtl: 0, lrm: 0 };
-const NUM = /\d[\d,]*(?:\.\d+)?%?(?:\s*[/:]\s*\d[\d,]*(?:\.\d+)?%?)*/g;
+const stats = { charset: 0, pPr: 0, tblRtl: 0, ltrRuns: 0 };
+const TOKEN = /[A-Za-z0-9][A-Za-z0-9.,%\-\/:+]*(?:\s*\/\s*[A-Za-z0-9][A-Za-z0-9.,%\-\/:+]*)*/g;
 for (const name of Object.keys(zip.files).filter((n) => /^ppt\/(slides|charts)\/[^/]+\.xml$/.test(n))) {
   let xml = await zip.file(name).async("string");
   xml = xml.replace(/(<a:(?:latin|ea|cs|sym) typeface="[^"]*")(?: pitchFamily="[^"]*")?(?: charset="[^"]*")?/g, (mm, head) => { if (mm !== head) stats.charset++; return head; });
@@ -210,9 +218,25 @@ for (const name of Object.keys(zip.files).filter((n) => /^ppt\/(slides|charts)\/
   xml = xml.replace(/<a:pPr\b([^>]*?)(\/?)>/g, (mm, attrs, close) => { stats.pPr++; return `<a:pPr${attrs.replace(/\s(?:rtl|algn)="[^"]*"/g, "")} rtl="1" algn="r"${close}>`; });
   // Every table: right-to-left column order.
   xml = xml.replace(/<a:tblPr\b(?![^>]*rtl=)/g, () => { stats.tblRtl++; return '<a:tblPr rtl="1"'; });
-  // Numbers keep their order inside rtl paragraphs. U+200E after the number alone was tested first and
-  // PowerPoint still drew "%100.0" and "37 / 20"; an LRM on both sides makes the cluster a strong-LTR island.
-  if (name.includes("slides/")) xml = xml.replace(/<a:t>([^<]*)<\/a:t>/g, (mm, t) => `<a:t>${t.replace(NUM, (n) => { stats.lrm++; return `‎${n.replace(/(\s*)([/:])(\s*)/g, "$1‎$2‎$3")}‎`; })}</a:t>`);
+  // Keep one a:pPr per paragraph (pptxgenjs writes one per run in multi-run text).
+  xml = xml.replace(/<a:p>([\s\S]*?)<\/a:p>/g, (p, inner) => { let n = 0; return `<a:p>${inner.replace(/<a:pPr\b[^>]*?(?:\/>|>[\s\S]*?<\/a:pPr>)/g, (pp) => (n++ ? "" : pp))}</a:p>`; });
+  // Latin and digit tokens: own run, lang="en-US", run-level <a:rtl val="0"/>. Paragraph stays rtl="1" algn="r".
+  if (name.includes("slides/")) xml = xml.replace(/<a:r>(<a:rPr\b[^>]*?)(\/>|>([\s\S]*?)<\/a:rPr>)<a:t>([^<]*)<\/a:t><\/a:r>/g, (mm, open, close, kids, t) => {
+    const run = (txt, ltr) => {
+      const o = ltr ? open.replace(/lang="[^"]*"/, 'lang="en-US"') : open;
+      const k = (kids ?? "") + (ltr ? '<a:rtl val="0"/>' : "");
+      return `<a:r>${k ? `${o}>${k}</a:rPr>` : `${o}/>`}<a:t>${txt}</a:t></a:r>`;
+    };
+    const parts = []; let last = 0;
+    for (const m of t.matchAll(TOKEN)) { if (m.index > last) parts.push(run(t.slice(last, m.index), false)); parts.push(run(m[0], true)); stats.ltrRuns++; last = m.index + m[0].length; }
+    if (!parts.length) return mm;
+    if (last < t.length) parts.push(run(t.slice(last), false));
+    return parts.join("");
+  });
+  zip.file(name, xml);
+}
+for (const name of Object.keys(zip.files).filter((n) => /^ppt\/(slideMasters|slideLayouts)\/[^/]+\.xml$/.test(n))) {
+  const xml = (await zip.file(name).async("string")).replace(/rtl="0"/g, 'rtl="1"').replace(/algn="l"/g, 'algn="r"');
   zip.file(name, xml);
 }
 // Timeline: data labels only on the two series the HTML labels (all ports above, the port below);
@@ -225,8 +249,9 @@ for (const { chart, series } of timelineMeta) {
     const s = series[idx++];
     let out = ser.replace(/(<c:spPr>\s*<a:ln[^>]*w=")\d+(")/, `$1${Math.round(s.width * 6350 * 0.75)}$2`);
     if (s.dash !== "solid") out = out.replace(/<a:prstDash val="[^"]*"\/>/, `<a:prstDash val="${s.dash}"/>`);
-    if (!s.labels) out = out.replace(/<c:showVal val="1"\/>/g, '<c:showVal val="0"/>');
-    else out = out.replace(/<c:dLblPos val="[^"]*"\/>/g, `<c:dLblPos val="${s.labels}"/>`).replace(/(<c:dLbls>)/, `$1<c:spPr><a:solidFill><a:srgbClr val="${s.color}"/></a:solidFill></c:spPr>`);
+    const dl = !s.labels ? '<c:dLbls><c:delete val="1"/></c:dLbls>'
+      : `<c:dLbls><c:numFmt formatCode="0&quot;%&quot;" sourceLinked="0"/><c:spPr><a:solidFill><a:srgbClr val="${s.color}"/></a:solidFill></c:spPr><c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr rtl="1" algn="r"><a:defRPr sz="800" b="1"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:latin typeface="Somar"/><a:cs typeface="Somar"/></a:defRPr></a:pPr><a:endParaRPr lang="en-US"/></a:p></c:txPr><c:dLblPos val="${s.labels}"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls>`;
+    out = out.replace(/<c:dLbls>[\s\S]*?<\/c:dLbls>/, dl);
     return out;
   });
   xml = xml.replace(/<c:crossBetween val="between"\/>/g, '<c:crossBetween val="midCat"/>');
