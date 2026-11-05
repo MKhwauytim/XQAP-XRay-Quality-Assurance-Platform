@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { ENGINE_ACTIONS } from "./actions";
 import { LIMITS, LIMITS_STATUS } from "./limits";
@@ -13,7 +14,7 @@ function shippedFiles(dir: string): string[] {
     if (statSync(p).isDirectory()) {
       if (name === "__fixtures__") continue;
       out.push(...shippedFiles(p));
-    } else if (/\.(m?[jt]sx?|json)$/.test(name) && !/\.test\.(m?[jt]sx?)$/.test(name)) out.push(p);
+    } else if (/\.([cm]?[jt]sx?|json)$/.test(name) && !/\.test\.([cm]?[jt]sx?)$/.test(name)) out.push(p);
   }
   return out;
 }
@@ -24,12 +25,15 @@ const SPEC_RES = [
   /import\s*\(\s*["']([^"']+)["']\s*\)/g,
   /import\s*["']([^"']+)["']/g,
   /\brequire\s*\(\s*["']([^"']+)["']\s*\)/g,
-  /import\.meta\.glob(?:Eager)?\s*\(\s*\[?\s*["']([^"']+)["']/g,
   /new\s+URL\s*\(\s*["']([^"']+)["']\s*,\s*import\.meta\.url/g,
 ];
 function scanSource(file: string, src: string): Imp[] {
   const res: Imp[] = [];
   for (const re of SPEC_RES) for (const m of src.matchAll(re)) res.push({ file, spec: m[1]! });
+  const globRe = /import\.meta\.glob(?:Eager)?\s*\(\s*(\[[^\]]*\]|["'][^"']+["'])/g;
+  for (const g of src.matchAll(globRe)) {
+    for (const q of g[1]!.matchAll(/["']([^"']+)["']/g)) res.push({ file, spec: q[1]! });
+  }
   return res;
 }
 function scanImports(): Imp[] {
@@ -79,12 +83,22 @@ describe("engine boundary", () => {
     expect(imps.filter(resolvesOutside).length).toBe(3);
     expect(imps.filter(isBareOutsideAllowList).map((i) => i.spec)).toEqual(["lodash"]);
   });
-  it("scans .js, .mjs and .json files but not tests", () => {
-    const names = shippedFiles(ROOT).map((f) => f.split(/[\\/]/).pop()!);
-    expect(names).toContain("limits.ts");
-    expect(names).not.toContain("boundary.test.ts");
-    expect("a.mjs b.cjs c.jsx d.json e.test.mjs".split(" ").filter(
-      (n) => /\.(m?[jt]sx?|json)$/.test(n) && !/\.test\.(m?[jt]sx?)$/.test(n),
-    )).toEqual(["a.mjs", "c.jsx", "d.json"]);
+  it("shippedFiles picks up cjs, mjs, jsx and json but not tests or fixtures", () => {
+    const dir = mkdtempSync(join(tmpdir(), "engine-scan-"));
+    try {
+      mkdirSync(join(dir, "__fixtures__"));
+      for (const n of ["a.mjs", "b.cjs", "c.jsx", "d.json", "e.test.mjs", "f.test.cjs", "g.md", "__fixtures__/h.ts"]) {
+        writeFileSync(join(dir, n), "");
+      }
+      const names = shippedFiles(dir).map((f) => f.split(/[\\/]/).pop()!).sort();
+      expect(names).toEqual(["a.mjs", "b.cjs", "c.jsx", "d.json"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("captures every element of an import.meta.glob array", () => {
+    const src = 'const m = import.meta.glob(["../../a/*.ts", "./ok/*.ts", "../b/*.ts"], { eager: true });';
+    const specs = scanSource(join(ROOT, "x.ts"), src).map((i) => i.spec).sort();
+    expect(specs).toEqual(["../../a/*.ts", "../b/*.ts", "./ok/*.ts"]);
   });
 });
