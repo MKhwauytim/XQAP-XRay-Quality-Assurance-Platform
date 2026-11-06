@@ -10,6 +10,8 @@ export interface FormulaScope {
   measures: string[];
 }
 
+export type FormulaLevel = "row" | "measure";
+
 export type ParseResult = { ok: true; ast: Expr } | { ok: false; issue: EngineIssue };
 
 type Tok =
@@ -139,6 +141,8 @@ class Parser {
     this.measures = tables.measures;
   }
 
+  readonly positions = new WeakMap<Expr, number>();
+  private at(e: Expr, pos: number): Expr { this.positions.set(e, pos); return e; }
   private peek(): Tok { return this.toks[this.i]!; }
   private next(): Tok { return this.toks[this.i++]!; }
   private isOp(v: string): boolean { const t = this.peek(); return t.t === "op" && t.v === v; }
@@ -160,13 +164,13 @@ class Parser {
 
   private parseOr(): Expr {
     let l = this.parseAnd();
-    while (this.isWord("or")) { this.next(); l = { k: "bin", op: "or", l, r: this.parseAnd() }; }
+    while (this.isWord("or")) { const t = this.next(); l = this.at({ k: "bin", op: "or", l, r: this.parseAnd() }, t.pos); }
     return l;
   }
 
   private parseAnd(): Expr {
     let l = this.parseNot();
-    while (this.isWord("and")) { this.next(); l = { k: "bin", op: "and", l, r: this.parseNot() }; }
+    while (this.isWord("and")) { const t = this.next(); l = this.at({ k: "bin", op: "and", l, r: this.parseNot() }, t.pos); }
     return l;
   }
 
@@ -174,7 +178,7 @@ class Parser {
     if (this.isWord("not")) {
       const t = this.next();
       this.enter(t.pos);
-      const e: Expr = { k: "not", e: this.parseNot() };
+      const e = this.at({ k: "not", e: this.parseNot() }, t.pos);
       this.depth--;
       return e;
     }
@@ -186,7 +190,7 @@ class Parser {
     const t = this.peek();
     if (t.t === "op" && COMPARE_OPS.has(t.v)) {
       this.next();
-      return { k: "bin", op: t.v as BinOp, l, r: this.parseAdd() };
+      return this.at({ k: "bin", op: t.v as BinOp, l, r: this.parseAdd() }, t.pos);
     }
     return l;
   }
@@ -194,8 +198,8 @@ class Parser {
   private parseAdd(): Expr {
     let l = this.parseMul();
     while (this.isOp("+") || this.isOp("-")) {
-      const op = (this.next() as { v: string }).v as BinOp;
-      l = { k: "bin", op, l, r: this.parseMul() };
+      const ot = this.next() as { v: string; pos: number };
+      l = this.at({ k: "bin", op: ot.v as BinOp, l, r: this.parseMul() }, ot.pos);
     }
     return l;
   }
@@ -203,8 +207,8 @@ class Parser {
   private parseMul(): Expr {
     let l = this.parseUnary();
     while (this.isOp("*") || this.isOp("/")) {
-      const op = (this.next() as { v: string }).v as BinOp;
-      l = { k: "bin", op, l, r: this.parseUnary() };
+      const ot = this.next() as { v: string; pos: number };
+      l = this.at({ k: "bin", op: ot.v as BinOp, l, r: this.parseUnary() }, ot.pos);
     }
     return l;
   }
@@ -213,7 +217,7 @@ class Parser {
     if (this.isOp("-")) {
       const t = this.next();
       this.enter(t.pos);
-      const e: Expr = { k: "bin", op: "-", l: { k: "num", v: 0 }, r: this.parseUnary() };
+      const e = this.at({ k: "bin", op: "-", l: { k: "num", v: 0 }, r: this.parseUnary() }, t.pos);
       this.depth--;
       return e;
     }
@@ -223,12 +227,12 @@ class Parser {
   private parsePrimary(): Expr {
     const t = this.next();
     switch (t.t) {
-      case "num": return { k: "num", v: t.v };
-      case "str": return { k: "str", v: t.v };
-      case "bracket": return { k: "col", id: this.resolveBracket(t.v, t.pos) };
+      case "num": return this.at({ k: "num", v: t.v }, t.pos);
+      case "str": return this.at({ k: "str", v: t.v }, t.pos);
+      case "bracket": return this.at({ k: "col", id: this.resolveBracket(t.v, t.pos) }, t.pos);
       case "measure":
         if (!this.measures.has(t.v)) throw new FormulaError("formula.notAllowed", t.pos, `@${t.v}`);
-        return { k: "measure", id: t.v };
+        return this.at({ k: "measure", id: t.v }, t.pos);
       case "lp": {
         this.enter(t.pos);
         const e = this.parseOr();
@@ -248,14 +252,14 @@ class Parser {
   }
 
   private parseIdent(name: string, pos: number): Expr {
-    if (name === "true" || name === "false") return { k: "bool", v: name === "true" };
+    if (name === "true" || name === "false") return this.at({ k: "bool", v: name === "true" }, pos);
     if (this.peek().t === "lp") {
       if (!FUNCTION_SET.has(name)) throw new FormulaError("formula.notAllowed", pos, name);
       return this.parseCall(name as AllowedFn, pos);
     }
     const id = this.byId.get(name);
     if (id === undefined) throw new FormulaError("formula.notAllowed", pos, name);
-    return { k: "col", id };
+    return this.at({ k: "col", id }, pos);
   }
 
   private parseCall(fn: AllowedFn, pos: number): Expr {
@@ -269,8 +273,80 @@ class Parser {
     this.expect("rp");
     this.depth--;
     if (args.length !== FUNCTION_ARITY.get(fn)) throw new FormulaError("formula.notAllowed", pos, `${fn} arity`);
-    return { k: "call", fn, args };
+    return this.at({ k: "call", fn, args }, pos);
   }
+}
+
+const ARITH_OPS: ReadonlySet<string> = new Set(["+", "-", "*", "/"]);
+const ROW_AGGREGATES: ReadonlySet<string> = new Set(["sum", "count", "distinctCount", "avg", "min", "max"]);
+
+type PosOf = (e: Expr) => number;
+
+function reject(e: Expr, at: PosOf, what: string): never {
+  throw new FormulaError("formula.notAllowed", at(e), what);
+}
+
+/** Arithmetic never takes a string or boolean literal operand. */
+function checkArithOperand(e: Expr, at: PosOf): void {
+  if (e.k === "str" || e.k === "bool") reject(e, at, "arithmetic on a non-number literal");
+}
+
+/** Row level: columns, literals, arithmetic, comparison, logic and if. No aggregate, no measure. */
+function checkRow(e: Expr, at: PosOf): void {
+  switch (e.k) {
+    case "num": case "str": case "bool": case "col": return;
+    case "measure": return reject(e, at, "measure at row level");
+    case "not": return checkRow(e.e, at);
+    case "bin":
+      if (ARITH_OPS.has(e.op)) { checkArithOperand(e.l, at); checkArithOperand(e.r, at); }
+      checkRow(e.l, at); checkRow(e.r, at); return;
+    case "call":
+      if (e.fn !== "if") return reject(e, at, e.fn + " at row level");
+      for (const a of e.args) checkRow(a, at);
+      return;
+  }
+}
+
+/** Measure level: numbers, measures, arithmetic of measures, and aggregate calls. */
+function checkMeasure(e: Expr, at: PosOf): void {
+  switch (e.k) {
+    case "num": case "measure": return;
+    case "bin":
+      if (!ARITH_OPS.has(e.op)) return reject(e, at, e.op + " at measure level");
+      checkMeasure(e.l, at); checkMeasure(e.r, at); return;
+    case "call":
+      if (ROW_AGGREGATES.has(e.fn)) return checkRow(e.args[0]!, at);
+      if (e.fn === "filter") { checkMeasure(e.args[0]!, at); checkRow(e.args[1]!, at); return; }
+      if (e.fn === "ratio" || e.fn === "percentOfTotal") { for (const a of e.args) checkMeasure(a, at); return; }
+      return reject(e, at, e.fn + " at measure level");
+    default: return reject(e, at, e.k + " at measure level");
+  }
+}
+
+/** Returns the first measure reference cycle as a path (first id repeated at the end), or null. */
+export function findMeasureCycle(measures: Map<string, Expr>): string[] | null {
+  const state = new Map<string, "open" | "done">();
+  const path: string[] = [];
+  const refs = (e: Expr, out: string[]): void => {
+    if (e.k === "measure") out.push(e.id);
+    else if (e.k === "bin") { refs(e.l, out); refs(e.r, out); }
+    else if (e.k === "not") refs(e.e, out);
+    else if (e.k === "call") for (const a of e.args) refs(a, out);
+  };
+  const visit = (id: string): string[] | null => {
+    const st = state.get(id);
+    if (st === "done") return null;
+    if (st === "open") return [...path.slice(path.indexOf(id)), id];
+    const def = measures.get(id);
+    if (def === undefined) return null;
+    state.set(id, "open"); path.push(id);
+    const out: string[] = []; refs(def, out);
+    for (const r of out) { const c = visit(r); if (c) return c; }
+    path.pop(); state.set(id, "done");
+    return null;
+  };
+  for (const id of measures.keys()) { const c = visit(id); if (c) return c; }
+  return null;
 }
 
 function firstWins(map: Map<string, string>, key: string, id: string): void {
@@ -278,9 +354,9 @@ function firstWins(map: Map<string, string>, key: string, id: string): void {
 }
 
 /** Parses formula text against the declared columns and measures. Never throws. */
-export function parseFormula(text: string, scope: FormulaScope): ParseResult {
+export function parseFormula(text: string, scope: FormulaScope, level: FormulaLevel = "measure"): ParseResult {
   if (text.length > LIMITS.maxFormulaLength) {
-    return { ok: false, issue: { rule: "formula.syntax", detail: `position ${LIMITS.maxFormulaLength}: too long` } };
+    return { ok: false, issue: { rule: "formula.tooLong", detail: `position ${LIMITS.maxFormulaLength}: too long` } };
   }
   const byHeader = new Map<string, string>();
   const byLabel = new Map<string, string>();
@@ -291,7 +367,10 @@ export function parseFormula(text: string, scope: FormulaScope): ParseResult {
     firstWins(byId, c.id, c.id);
   }
   try {
-    const ast = new Parser(tokenize(text), { byHeader, byLabel, byId, measures: new Set(scope.measures) }).parseAll();
+    const parser = new Parser(tokenize(text), { byHeader, byLabel, byId, measures: new Set(scope.measures) });
+    const ast = parser.parseAll();
+    const at = (e: Expr): number => parser.positions.get(e) ?? 0;
+    if (level === "measure") checkMeasure(ast, at); else checkRow(ast, at);
     return { ok: true, ast };
   } catch (e) {
     if (e instanceof FormulaError) {

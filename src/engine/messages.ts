@@ -2,7 +2,7 @@ import type { EngineIssue } from "./errors";
 
 export type MessageKey =
   | "schema.invalid" | "type.errors" | "formula.syntax" | "formula.notAllowed"
-  | "formula.tooDeep" | "measure.unknown" | "well.invalid" | "literal.number"
+  | "formula.tooDeep" | "formula.tooLong" | "measure.unknown" | "well.invalid" | "literal.number"
   | "limit.rows" | "limit.slides" | "limit.visuals" | "limit.time"
   | "fit.tooLong" | "gate.figureParity" | "gate.layoutParity" | "gate.lint"
   | "gate.reconcile" | "gate.ooxml" | "recipe.hashMismatch" | "recipe.invalid";
@@ -13,6 +13,7 @@ export const MESSAGES_AR: Record<MessageKey, string> = {
   "formula.syntax": "صيغة الحساب غير صحيحة",
   "formula.notAllowed": "الصيغة تستخدم عنصرا غير مسموح به",
   "formula.tooDeep": "الصيغة متداخلة أكثر من الحد المسموح",
+  "formula.tooLong": "الصيغة أطول من الحد المسموح",
   "measure.unknown": "المقياس غير معرف",
   "well.invalid": "حقل الرسم غير صالح",
   "literal.number": "لا يجوز كتابة رقم داخل النص، استخدم مقياسا",

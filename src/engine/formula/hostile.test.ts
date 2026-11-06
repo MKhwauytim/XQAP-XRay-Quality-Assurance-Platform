@@ -41,9 +41,14 @@ describe("hostile formula input", () => {
     const r = parseFormula(text, scope);
     expect(r.ok).toBe(false);
     if (!r.ok) {
-      expect(["formula.syntax", "formula.notAllowed", "formula.tooDeep"]).toContain(r.issue.rule);
+      expect(["formula.syntax", "formula.notAllowed", "formula.tooDeep", "formula.tooLong"]).toContain(r.issue.rule);
       expect(r.issue.detail).toMatch(/^position \d+/);
     }
+  });
+
+  it("1e309 is a syntax error at the exponent", () => {
+    const r = parseFormula("1e309", scope);
+    expect(!r.ok && r.issue).toMatchObject({ rule: "formula.syntax", detail: expect.stringMatching(/^position 1:/) });
   });
 
   it("deep nesting gives formula.tooDeep", () => {

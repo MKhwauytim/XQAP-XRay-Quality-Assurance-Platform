@@ -4,14 +4,14 @@ import type { Cell } from "../data/types";
 import type { Expr } from "./ast";
 import { evaluateMeasure, evaluateRow, measureColumns } from "./evaluate";
 import type { MeasureContext } from "./evaluate";
-import { parseFormula } from "./parse";
+import { findMeasureCycle, parseFormula } from "./parse";
 
 const scope = { columns: FIXTURE_DATASET.columns, measures: ["studied", "matched"] };
 const COUNT = "[العدد]";
 const PORT = "[المنفذ]";
 
-function p(text: string): Expr {
-  const r = parseFormula(text, scope);
+function p(text: string, level: "row" | "measure" = "measure"): Expr {
+  const r = parseFormula(text, scope, level);
   if (!r.ok) throw new Error(`parse failed: ${r.issue.detail ?? ""}`);
   return r.ast;
 }
@@ -61,19 +61,21 @@ describe("evaluateMeasure", () => {
     expect(ev(`ratio(filter(count(${PORT}), ${PORT} = "أ"), @studied)`, rows, { measures })).toBeCloseTo(1 / 3, 10);
   });
 
-  it("a self-referencing measure gives null rather than recursing", () => {
-    const measures = new Map<string, Expr>([["studied", p("@studied + 1")]]);
+  it("findMeasureCycle reports a cycle path; the evaluator guard still returns null", () => {
+    const measures = new Map<string, Expr>([["studied", p("@matched + 1")], ["matched", p("@studied * 2")]]);
+    expect(findMeasureCycle(measures)).toEqual(["studied", "matched", "studied"]);
+    expect(findMeasureCycle(new Map([["studied", p(`count(${PORT})`)]]))).toBeNull();
     expect(ev("@studied", rows, { measures })).toBeNull();
   });
 });
 
 describe("evaluateRow", () => {
   it("computes arithmetic, comparisons and if per row", () => {
-    expect(evaluateRow(p(`${COUNT} * 10`), { count: 3 })).toBe(30);
-    expect(evaluateRow(p(`if(${COUNT} > 2, "big", "small")`), { count: 3 })).toBe("big");
-    expect(evaluateRow(p(`${COUNT} / 0`), { count: 3 })).toBeNull();
-    expect(evaluateRow(p(`${COUNT} + 1`), { count: null })).toBeNull();
-    expect(evaluateRow(p("-2 + 5"), {})).toBe(3);
+    expect(evaluateRow(p(`${COUNT} * 10`, "row"), { count: 3 })).toBe(30);
+    expect(evaluateRow(p(`if(${COUNT} > 2, "big", "small")`, "row"), { count: 3 })).toBe("big");
+    expect(evaluateRow(p(`${COUNT} / 0`, "row"), { count: 3 })).toBeNull();
+    expect(evaluateRow(p(`${COUNT} + 1`, "row"), { count: null })).toBeNull();
+    expect(evaluateRow(p("-2 + 5", "row"), {})).toBe(3);
   });
 });
 
