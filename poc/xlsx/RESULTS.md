@@ -1,70 +1,70 @@
-# T8: designed report workbook with native tables, pivots, charts and slicers
+# T8: the report workbook (raw data, processing sheets, processed sets, statistics)
 
-Spike on branch `claude/pptx-poc`. Nothing in `src/` or `poc/port-pptx/` was written; both were only read.
+Spike on branch `claude/pptx-poc`. Nothing in `src/` or `poc/port-pptx/` was written; both, the source worktree and the raw source workbook were only read. Generated files (the workbook, its row data, screenshots) stay in `out/`, which is git-ignored.
 
-**Verdict: T8 PASS.** SheetJS (vendored community build) writes the cell values. A JSZip post-process writes everything else: a styles part in deck3 colours with Somar as the workbook font, Excel tables, pivot caches and pivot tables, drawings (logo picture, native charts), pivot and table slicers, separator sheets, right-to-left views and frozen panes. Excel opens it with no repair, and the pivots and charts fill themselves on open.
+**Verdict: T8 PASS, with one size finding.** The full workbook carries every raw row exactly as uploaded and opens in Excel without repair, but it is large: 693 MB on disk, about 2 to 4 minutes to open, about 4.5 GB of Excel memory (numbers below).
 
-## Data
+## Pipeline
 
-- Base set (المجتمع): the workload cache the T2 model was built from, one row per port and month: 587 rows, months up to 2026-09, canonical port names, groups assigned as in `buildModel.mjs`. This is the exact set the model's population figures add up, so the 318 MB row-level population was not needed.
-- Derived set (العينة): every studied image in the report period, 165,301 rows, parsed by the source worktree's own `portReportInputFromSheets` through Vite SSR, read only. Staff codes and names are dropped.
-- `extract.mjs` rebuilds both sets (42 s, mostly reading the 318 MB workbook). `build.mjs` writes the workbook. `verify.ps1` checks it through Excel COM. `opencheck.ps1` is the open-only probe used for bisecting.
+| Script | Does |
+|---|---|
+| `stage.mjs` | Streams the raw workbook once and applies the source's own rules (population: `scripts/lib/workloadSheets.mjs`; study: `portReportSource.ts`; names: `portNameCanonical.ts`; cutoff and groups: `poc/port-pptx/buildModel.mjs`). Writes the processed rows and every step's tables. About 2.5 min. |
+| `build.mjs` | Builds the package on top of the raw workbook itself (JSZip), so the raw sheets, shared strings, tables, printer settings and external link keep their exact bytes. SheetJS writes all other cells; the post-process adds styles, theme fonts, tables, pivots, charts, shape buttons, slicers, separators and views, then runs the M15 name check. About 2.6 min. |
+| `verify.ps1` | Opens the result in Excel through COM and runs every check below. |
+| `sourcecounts.ps1` | Records the raw workbook's own sheet sizes and open time, the reference for the raw-sheet check. |
+| `shots.ps1` | Screenshots of every sheet, taken from a build with the same layout and the first 2,000 processed rows (Excel refuses `CopyPicture` while it holds the full file). |
+| `opencheck.ps1` | Open-only probe, used to bisect package problems. |
 
-## Design
+`extract.mjs` is the round 1 extractor, kept for reference; the current build does not use it.
 
-| Order | Sheet | Content |
-|---|---|---|
-| 0 | الفهرس | Navy title band with the deck's logo top right, report name and period, issue date, four fact cards, and four navigation buttons with a one-line description each |
-| 1 | `\|` | Separator: black tab, all cells black, gridlines and headings hidden, empty |
-| 2 | المجتمع | Band, logo, back button; table `tblPopulation` at B9, pivot at I9, a pivot slicer (المجموعة) and a table slicer (السنة) at M, a bar chart at Q |
-| 3 | العينة | Same layout: `tblSample` at B9, pivot at I9, slicers, a bar chart of the match rate by port |
-| 4 | `\|\|` | Separator |
-| 5 | الإحصائيات | Grid of 3 rows x 2 blocks; each block is a pivot titled with the slide it feeds and a chart beside it; the sixth block holds a year slicer connected to two pivots |
-| 6 | `\|\|\|` | Separator |
-| 7 | المصدر | Band, logo, back button; `tblSource` with the 23 report figures and their sheet, field, filter, measure and pivot |
+## Sheet order (36 sheets)
 
-- Colours are deck3 tokens only (`theme.ts`): background `#f9f8f5`, panel `#f2f0ea`, navy `#10304f`, text `#22303e`, muted `#5d6b7a`, hairline `#e3e0d8`, gold `#b48a3c`, gold light `#c9a45e`, blue `#3f6fa8`, green `#2e7d4f`, track `#eceae3`. Tables and pivots use one custom table style, Deck3: navy header, panel stripes, total row with a gold rule.
-- Somar is the Normal style font and the font of every chart text. Numbers use Latin digits (`#,##0`, `0.00%`).
-- Logo: the PNG the PPTX deck embeds (`geometry.json`, slide 1), a white logo, placed on the navy band.
-- RTL placement: column A is drawn at the right edge, so A is a margin, the table starts at B, and the pivot, slicers and chart follow to its left on screen.
-- Charts are bound to the pivot output cells, and their caches are filled with the same aggregation, so they show correct values before and after refresh.
+الفهرس, `|`, 11 raw sheets (Q4B, 2024, 2025-Q1 to 2026-Q4, نتائج الدراسة), `||`, 12 processing sheets in the order applied (ربط أعمدة المجتمع، حذف الصور المكررة، استبعاد بلا منفذ أو تاريخ، تطبيق فترة التقرير، اشتقاق حقول المجتمع، توحيد أسماء المنافذ، تحديد مجموعة المنفذ، تجميع المجتمع حسب المنفذ، ربط أعمدة العينة، استبعاد خارج فترة العينة، اشتقاق حقول العينة، استبعاد غير الموظفين), `|||`, المجتمع 1 to 4 and العينة, `||||`, الإحصائيات, `|||||`, المصدر.
 
-## Checks (Excel 365 through COM, `out/verify.json`)
+- Raw sheets are byte-identical to the upload. The source's own separator sheet `|` (one row, not used by the report) is not carried; its name would also clash with the first separator.
+- The processed population is 3,895,357 rows, more than one sheet holds, so it is split into four sheets of up to 1,048,565 rows. Each processed row keeps every raw cell (same value, style and shared-string index; formulas dropped, cached value kept) under the union of all population sheets' headers, then the source sheet, source row and the derived fields.
+- Headers that differ only in the hamza on alef («الأشعة» / «الاشعة») share one column. Excel compares table column names ignoring that hamza, and a table holding both will not open. The first processing sheet lists every original header and the column it went to.
+- Every sheet except the raw ones opens with the same header block: title, a one-sentence purpose, «يقرأ من», «القاعدة» and «الصفوف» (before and after), plus a back button. Raw sheets stay exactly as uploaded.
+- Buttons are rounded-rectangle shapes with `a:hlinkClick`; no cell text is used as a button. Fact cards and every المصدر row link to the pivot cell they come from, and the cover indexes every sheet.
+- Names follow M15: Arabic sheet, table, pivot, slicer, shape and chart names; statistics named by meaning, with the slide they feed. `build.mjs` refuses to write the file if any visible name matches an id pattern (`latin_snake`, `camelCase`, a `tbl` prefix, short ids like `s1`, `pivot`/`Slicer`/`Chart`/`Button` with a number, or «خطوة N»).
+- Somar is the Normal style font, the theme's major and minor fonts (so slicers and pivots use it), and the font of every chart and shape text. The raw sheets' cell fonts are also set to Somar; their values are untouched.
+
+## Checks (Excel 365 through COM, full workbook, `out/verify.json`)
 
 | Check | Result | Evidence |
 |---|---|---|
-| Opens with no repair | **PASS** | `CorruptLoad=0`, `DisplayAlerts=false`: opened, 0 new recovery logs, caption has no "[Repaired]" |
-| Sheet order and names | **PASS** | الفهرس, \|, المجتمع, العينة, \|\|, الإحصائيات, \|\|\|, المصدر |
-| Separators | **PASS** | Tab colour 0 (black), cells A1, M30 and AZ200 have black fill, gridlines off, headings off, CountA = 0, no shapes |
-| Content sheets | **PASS** | All RTL, gridlines off, background fill `#f9f8f5`, logo picture present, frozen panes on المجتمع, العينة, المصدر |
-| Font | **PASS** | Normal style font = Somar |
-| Hyperlinks and back buttons | **PASS** | 8 of 8 `Follow()` land on the right sheet: 4 cover buttons and 4 back buttons |
-| ListObjects | **PASS** | `tblPopulation`, `tblSample`, `tblSource` |
-| PivotTables, refresh on open | **PASS** | 7 pivots; `refreshOnLoad="1"`, `saveData="0"`, no records part; `RefreshTable` True for all 7 |
-| Charts exist and match the pivots | **PASS** | 7 ChartObjects (1, 1, 5); every point of every series equals the pivot's `GetPivotData` for that item and the built cache (61 points) |
-| Slicers exist | **PASS** | `SlicerCaches.Count` = 5: 3 pivot slicers, 2 table slicers |
-| Pivot slicer filters its pivot | **PASS** | Deselecting «منفذ بري» in `Slicer_SmpGroup`: the pivot2 total goes from 165,301 to 79,987 (minus 85,314), and back after `ClearManualFilter` |
-| Table slicer filters its table | **PASS** | Deselecting 2024 in `Slicer_SmpYear`: visible `tblSample` rows go from 165,301 to 145,176 (minus the 20,125 rows for 2024) |
-| Pivot values = report figures | **PASS** | 23 figures from `model.json` equal `GetPivotData`, 46 of 46 (on open and after refresh) |
-| No long dashes, emojis, staff names | **PASS** | No staff columns; committed files hold none |
-
-Screenshots (`out/sheet-0.png` to `out/sheet-7.png`, made with CopyPicture into a chart export) were reviewed by eye. The first render had the band title overlapping the logo on الفهرس and الإحصائيات; the title now starts one column further left on those two sheets. Nothing overlaps or is clipped in the final render, and every sheet keeps a margin column and spacer columns between blocks.
+| Opens with no repair | **PASS** | `CorruptLoad=0`, alerts off: opened, 0 new recovery logs |
+| Sheet order and names | **PASS** | 36 sheets, order as above |
+| Separators | **PASS** | 5 separators: black tab, black cells, no gridlines, no headings, empty, no shapes |
+| Raw sheets equal the source | **PASS** | 11 of 11: used-range rows, columns and origin equal the source workbook's (e.g. 2025-Q1 614,989 x 12, نتائج الدراسة 165,335 x 31) |
+| Processing reconciles | **PASS** | Per raw sheet: rows = before header + header + duplicates + no port/date + after period + kept, difference 0 on all 10 population sheets. Population: 3,958,584 rows, 63,174 duplicates, 39 after the period, 3,895,357 kept, equal to the 4 processed tables' row total. Study: 165,334 rows, 33 excluded, 165,301 kept, equal to the processed العينة table |
+| Pivots equal the report | **PASS** | 23 figures from `model.json`, read with `GetPivotData` and from the linked cell, 46 of 46 on open and after `RefreshTable` |
+| Charts | **PASS** | 7 of 7: every point equals its pivot item and the built cache |
+| Slicers | **PASS** | 5 slicer caches (3 pivot, 2 table). Deselecting «منفذ بري» drops the العينة pivot from 165,301 to 79,987 (minus 85,314); deselecting 2024 hides exactly that year's table rows |
+| Shape buttons | **PASS** | 25 of 25 navigate to their target; all rounded rectangles with Somar text |
+| Cell links | **PASS** for every link this build adds | 71 of 95 navigate. The 24 that do not are links inside the raw sheets (the 2026 sheets' first-row links to sheets that were never in the uploaded file); they are kept as uploaded |
+| Fonts | **PASS** | Normal style Somar, theme minor and major Somar, all 7 chart titles Somar, all 25 buttons Somar |
+| Human names | **PASS** | Build check: 457 visible names, 0 id-like. Excel read-back: 279 names (sheets, tables, headers, pivots, measures, shapes, chart titles, slicer caches, slicers, captions), 0 id-like |
 
 ## Size and timings
 
 | Item | Value |
 |---|---|
-| Workbook size | 3,897 KB (165,888 data rows) |
-| SheetJS write | about 4 to 5 s |
-| JSZip post-process | about 2 to 3 s |
-| Excel open to ready (incl. pivot refresh on load) | 2.1 s |
-| Explicit RefreshTable of all 7 pivots | 2.8 s |
+| Raw source workbook | 318 MB; Excel opens it in 49 to 69 s |
+| Report workbook | 693 MB, 36 sheets, about 7.4 million data rows (3.96 M raw population + 3.90 M processed population + 0.33 M study) |
+| Excel open to ready | 119 to 217 s across runs, pivots refreshed on open included |
+| Excel memory after open | 4.3 to 4.7 GB |
+| Explicit refresh of all 7 pivots | 15 to 32 s |
+| `stage.mjs` | about 2.5 min |
+| `build.mjs` | about 2.6 min (almost all of it compressing the processed sheets) |
 
 ## Findings
 
-- A pivot cache needs no records part: a definition with `saveData="0" refreshOnLoad="1"` and shared items only for the axis, page and slicer fields is accepted. Excel builds the cache on open.
-- Pivot slicers need the x14 `pivotCacheDefinition` extension in the cache (`pivotCacheId`), a `slicerCache` part with `tabular` items, a workbook-level `#N/A` defined name per slicer cache, the workbook `x14:slicerCaches` extension, a `slicers` part with its sheet extension, and the slicer frame in the drawing inside `mc:AlternateContent` (`a14`).
-- Table slicers use `x15:tableSlicerCache` and the workbook `x15:slicerCaches` extension. The sheet extension `{3A4CF648-...}` must hold `x14:slicerList`, not `x15:slicerList`. With `x15:slicerList`, Excel opened the file with no repair prompt and silently dropped the two table slicers. Only checking `SlicerCaches.Count` caught it.
-- COM timing: `Workbooks.Open` can return before a refreshing workbook is ready, and slicer calls can fail with `0x800AC472` while Excel recalculates. The scripts poll `Workbooks.Count` and `Application.Ready` before checking, and retry slicer calls.
-- The Excel-COM fallback (let Excel create the pivots) was not needed.
-- Not covered: Excel for the web, LibreOffice, and Excel versions older than 2013 (slicers on tables need 2013). Protected View on a downloaded file blocks the refresh on open until the user enables editing; the charts and caches still show the built values.
+- The size is driven by carrying the processed population at row level next to the raw population: each is about 3.9 million rows. A link-only design (processed rows as references into the raw sheets) or keeping the processed population at the port and month grain would roughly halve the file. That choice belongs to the owner, so all data is kept here.
+- Excel treats table column names that differ only by the hamza on alef as the same name. A table holding both does not open, and there is no recovery log. The processing step merges such headers and shows the mapping.
+- A pivot field missing from its source table makes the whole file refuse to open with no recovery log. The study's group column is «نوع المنفذ2» in this upload, so the field is taken from the alias the source parser actually matched.
+- A SheetJS `metadata.xml` relationship without the part, and the `.bin` default content type (macro binary instead of printer settings), each make the package unreadable. Both are fixed in the post-process.
+- `Range.CopyPicture` fails on the full 693 MB file, and Excel sometimes crashes partway through 36 screenshots. Screenshots come from the same build cut to 2,000 processed rows, resumed after a crash.
+- The raw workbook's Power Query package (`customXml`) and its connection are not carried: they are a query definition, not data.
+- Not covered: Excel for the web, LibreOffice, Excel older than 2013 (table slicers), and 32-bit Excel, which could not hold this file.
+- Known cosmetic issue: the year column of «تجميع المجتمع حسب المنفذ» shows a thousands separator (2,024); the value is the number 2024.
