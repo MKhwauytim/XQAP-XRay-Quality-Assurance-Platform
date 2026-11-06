@@ -70,6 +70,13 @@ const ENGINE_ONLY = "الصيغة في المحرك فقط";
 
 type CellObj = XLSX.CellObject;
 
+/**
+ * A valueless cell SheetJS still writes (a number format makes it emit `<c r=".."/>`), so an all-blank data row
+ * keeps its `<row>` element and the read-back counts it. It reads back as no value, so data is unchanged.
+ */
+const stubCell = (): CellObj => ({ t: "z", z: "General" });
+const isBlank = (v: unknown): boolean => v === null || v === undefined || v === "";
+
 /** One sheet's cells and cell styles, built before SheetJS writes it. */
 class Draft {
   readonly cells = new Map<string, CellObj>();
@@ -77,6 +84,12 @@ class Draft {
   private maxR = 0;
   private maxC = 0;
   widths: number[] = [];
+
+  /** Keeps row `r` present in the sheet XML even when every cell in it is null. */
+  stub(r: number): void {
+    const ref = a1(r, 0);
+    if (!this.cells.has(ref)) this.set(r, 0, stubCell());
+  }
 
   put(r: number, c: number, v: Cell, xf?: XfId, link?: string): void {
     if (v === null) return;
@@ -148,7 +161,11 @@ function columnXf(def: DatasetDef, rows: Cell[][]): (XfId | undefined)[] {
 function writeRange(d: Draft, top: number, def: DatasetDef, rows: Cell[][]): void {
   def.columns.forEach((c, i) => d.put(top, i, c.label, XF.label));
   const xfs = columnXf(def, rows);
-  rows.forEach((r, ri) => r.forEach((v, ci) => d.put(top + 1 + ri, ci, v, xfs[ci])));
+  rows.forEach((r, ri) => {
+    r.forEach((v, ci) => d.put(top + 1 + ri, ci, v, xfs[ci]));
+    // Every row is emitted, an all-null one too, so the processed table's row count reads back exactly.
+    if (r.every((v) => v === null)) d.stub(top + 1 + ri);
+  });
 }
 
 const defOf = (ctx: Ctx, id: string | undefined): DatasetDef | undefined => ctx.input.spec.datasets.find((d) => d.id === id);
@@ -389,7 +406,21 @@ function companionCover(ctx: Ctx, s: PlannedSheet): Draft {
 
 function rawSheet(files: RawFile[], s: PlannedSheet): XLSX.WorkSheet {
   const sheet = files.find((f) => f.fileName === s.raw?.fileName)?.sheets.find((x) => x.sheetName === s.raw?.sheetName);
-  return XLSX.utils.aoa_to_sheet(sheet === undefined ? [] : [sheet.headers, ...sheet.rows]);
+  const aoa = sheet === undefined ? [] : [sheet.headers, ...sheet.rows];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  // Blank upload rows (interior or trailing) keep their <row> element, so the raw read-back counts every row.
+  let blank = false;
+  aoa.forEach((row, r) => {
+    if (r === 0 || !row.every(isBlank)) return;
+    blank = true;
+    for (let c = 0; c < row.length; c++) delete ws[XLSX.utils.encode_cell({ r, c })];
+    ws[XLSX.utils.encode_cell({ r, c: 0 })] = stubCell();
+  });
+  if (blank) {
+    const cols = Math.max(1, ...aoa.map((row) => row.length));
+    ws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: aoa.length - 1, c: cols - 1 } });
+  }
+  return ws;
 }
 
 async function packageWorkbook(

@@ -7,6 +7,7 @@ import { evaluateMeasure, measureColumns } from "../formula/evaluate";
 import { parseFormula } from "../formula/parse";
 import { LIMITS } from "../limits";
 import type { IssueParams, MeasureSpec, ReportSpec, VisualSpec, VisualType, WellRole } from "../spec/types";
+import { MEASURE_PLACEHOLDER } from "../text";
 
 type Row = Record<string, Cell>;
 
@@ -31,7 +32,6 @@ export interface ResolvedVisual {
 
 export const OTHERS_LABEL = "أخرى";
 const GROUP_WELLS: WellRole[] = ["axis", "legend", "rows", "columns"];
-const MEASURE_REF = /\{\{measure:([^}]+)\}\}/g;
 
 /** Latin digits, `,` thousands, pct as `82.95%`, null as `-`. */
 export function formatValue(v: number | null, f: MeasureSpec["format"]): string {
@@ -44,7 +44,7 @@ export function formatValue(v: number | null, f: MeasureSpec["format"]): string 
 
 function measureIdsOf(v: VisualSpec): string[] {
   const ids = (v.wells.values ?? []).flatMap((w) => ("measure" in w ? [w.measure] : []));
-  if (v.type === "text" && v.text) for (const m of v.text.matchAll(MEASURE_REF)) ids.push(m[1]);
+  if (v.type === "text" && v.text) for (const m of v.text.matchAll(MEASURE_PLACEHOLDER)) ids.push(m[1]);
   return ids;
 }
 
@@ -140,10 +140,22 @@ function datasetDef(spec: ReportSpec, id: string): DatasetDef | undefined {
   return spec.datasets.find((d) => d.id === id);
 }
 
-/** Report, page and visual filters that name a column of this dataset, substituted. */
-function filtersFor(ctx: Ctx, def: DatasetDef | undefined, pageFilters: FilterSpec[], v: VisualSpec): FilterSpec[] {
-  const all = [...(ctx.spec.filters ?? []), ...pageFilters, ...(v.filters ?? [])];
-  return all.filter((f) => def?.columns.some((c) => c.id === f.field)).map((f) => substituteFilter(f, ctx.params));
+/**
+ * Report, page and visual filters for this dataset, substituted. Report-level filters apply wherever
+ * their column exists (a report may span datasets). A page or visual filter on another dataset's column
+ * is never dropped silently: validateSpec rejects it, and this fails closed as a second guard.
+ */
+function filtersFor(
+  ctx: Ctx, def: DatasetDef | undefined, pageIndex: number, pageFilters: FilterSpec[], v: VisualSpec,
+): FilterSpec[] {
+  const has = (f: FilterSpec) => def?.columns.some((c) => c.id === f.field) ?? false;
+  if (def !== undefined) {
+    for (const f of [...pageFilters, ...(v.filters ?? [])]) {
+      if (!has(f)) ctx.issues.push({ rule: "schema.invalid", page: pageIndex, visual: v.visualId, detail: `filter ${f.field} is not in dataset ${def.id}` });
+    }
+  }
+  const all = [...(ctx.spec.filters ?? []).filter(has), ...pageFilters.filter(has), ...(v.filters ?? []).filter(has)];
+  return all.map((f) => substituteFilter(f, ctx.params));
 }
 
 function compareGroups(a: Group, b: Group): number {
@@ -174,7 +186,7 @@ function resolveVisual(ctx: Ctx, pageIndex: number, pageFilters: FilterSpec[], v
   const datasetIds = [...new Set(measures.map((m) => m.datasetId))];
   const datasetId = datasetIds[0];
   const def = datasetId === undefined ? undefined : datasetDef(ctx.spec, datasetId);
-  const filters = filtersFor(ctx, def, pageFilters, v);
+  const filters = filtersFor(ctx, def, pageIndex, pageFilters, v);
   const allRows = datasetId === undefined ? [] : (ctx.data.get(datasetId)?.rows ?? []);
   const rows = allRows.filter((r) => filters.every((f) => matchesFilter(r, f)));
   const fields = groupFieldsOf(v);

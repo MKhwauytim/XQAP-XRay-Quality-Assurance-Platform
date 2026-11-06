@@ -3,6 +3,7 @@ import { LAYOUT } from "../layout/layoutReport";
 import type { Run } from "../layout/bidiRuns";
 import type { LayoutBox, LayoutDoc, LayoutSlide, TextBox } from "../layout/types";
 import type { ThemeTokens } from "../spec/types";
+import { ARABIC_INDIC_DIGITS, LONG_DASH, MIN_FONT_PX, hexDigits } from "../text";
 
 /**
  * Design lint (spec §4.9), Milestone 1 scope (C20): Floor F1 (contrast, a pure token-pair check), F2 (fit errors
@@ -13,7 +14,6 @@ import type { ThemeTokens } from "../spec/types";
 
 export type TextRule = "T3" | "T6";
 
-const LONG_DASH = /[\u2013\u2014]/gu;
 const DECORATIVE = /[\u2713\u2705\u26A0\u2605\u2190-\u21FF]|\p{Extended_Pictographic}/gu;
 
 /** Every long dash (T3) and emoji or decorative symbol (T6) in `s`, by UTF-16 index. */
@@ -24,7 +24,7 @@ export function lintText(s: string): { rule: TextRule; index: number }[] {
   return out.sort((a, b) => a.index - b.index);
 }
 
-const ARABIC_INDIC = /[\u0660-\u0669]/g;
+const ARABIC_INDIC = new RegExp(`[${ARABIC_INDIC_DIGITS}]`, "gu");
 /** Count of Arabic-Indic digits (U+0660 to U+0669) in `s` (decision 4). */
 export const arabicIndicCount = (s: string): number => s.match(ARABIC_INDIC)?.length ?? 0;
 
@@ -33,13 +33,10 @@ function channel(c: number): number {
   return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
 }
 
-const HEX_COLOR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
-
 /** Relative luminance, or NaN for anything that is not `#RGB` / `#RRGGBB`. */
 function luminance(color: string): number {
-  if (!HEX_COLOR.test(color)) return Number.NaN;
-  let h = color.slice(1);
-  if (h.length === 3) h = [...h].map((c) => c + c).join("");
+  const h = hexDigits(color);
+  if (h === undefined) return Number.NaN;
   const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
   return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
 }
@@ -53,7 +50,6 @@ export function contrastRatio(fg: string, bg: string): number {
 
 /** F1 threshold: 3:1 at 44px and above, 4.5:1 below. */
 const minContrast = (sizePx: number): number => (sizePx >= 44 ? 3 : 4.5);
-const F4_MIN_PX = 20;
 
 const lineText = (lines: Run[][]): string => lines.map((l) => l.map((r) => r.text).join("")).join("\n");
 
@@ -112,7 +108,7 @@ export function lintLayout(doc: LayoutDoc, theme: ThemeTokens): { errors: Engine
         // Written as "not at least" so an unparseable colour (NaN) is an error, never a pass.
         if (!(ratio >= need)) errors.push(lintIssue(slide.index, s.where, `F1: contrast ${ratio.toFixed(2)} < ${need} (${s.fg} on ${s.bg})`));
       }
-      if (s.sizePx < F4_MIN_PX) errors.push(lintIssue(slide.index, s.where, `F4: ${s.sizePx}px < ${F4_MIN_PX}px`));
+      if (s.sizePx < MIN_FONT_PX) errors.push(lintIssue(slide.index, s.where, `F4: ${s.sizePx}px < ${MIN_FONT_PX}px`));
       for (const hit of lintText(s.text)) errors.push(lintIssue(slide.index, s.where, `${hit.rule}: index ${hit.index}`));
     }
     warnings.push(...r3(slide));

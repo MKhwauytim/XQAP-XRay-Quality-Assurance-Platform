@@ -1,6 +1,7 @@
 import JSZip from "jszip";
 import { escapeText, matchingClose, rewriteXml, serializeTag, tokenizeXml } from "../xml/tokenize";
 import type { XmlTag, XmlToken } from "../xml/tokenize";
+import { LONG_DASH } from "../text";
 
 /**
  * OOXML post-processing on the zip pptxgenjs wrote (PoC techniques, M5, M13):
@@ -129,7 +130,6 @@ export function coreDates(xml: string, stamp: string): string {
 }
 
 const FONT_REF = new Set(["a:latin", "a:ea", "a:cs", "a:sym", "a:buFont"]);
-const LONG_DASH = new RegExp(`[${String.fromCharCode(0x2013, 0x2014)}]`, "g");
 
 const stripFont = (t: XmlTag): string | undefined =>
   FONT_REF.has(t.name) && (t.attrs.has("charset") || t.attrs.has("pitchFamily"))

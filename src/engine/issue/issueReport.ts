@@ -18,6 +18,7 @@ import type { DomainPack, IssueParams, ReportSpec, ThemeTokens } from "../spec/t
 import { mergePackMeasures, validateSpec } from "../spec/validate";
 import { planWorkbook } from "../xlsx/planWorkbook";
 import { WorkbookRefused, writeXlsx } from "../xlsx/writeXlsx";
+import { LONG_DASH } from "../text";
 
 /**
  * Every file one issue produces (owner decision 2026-11-06: six files). `pdfPrintable` is the HTML itself:
@@ -66,7 +67,6 @@ class Blocked extends Error {
   }
 }
 
-const LONG_DASH = /[–—]/g;
 
 function fail(issues: EngineIssue[], params: IssueParams): IssueResult {
   // A quoted detail may carry the very long dash the lint caught; the message itself never shows one.

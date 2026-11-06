@@ -3,11 +3,9 @@ import type { LayoutDoc } from "../layout/types";
 import type { ResolvedValue } from "../resolve/resolve";
 import { NO_SLIDE, UNBOXED } from "./readBack";
 import type { ReadBox } from "./readBack";
+import { figureTokens } from "../text";
 
-const FIGURE = /\d[\d,]*(\.\d+)?%?/g;
-
-/** Number tokens in `s`, commas removed. */
-export const figureTokens = (s: string): string[] => [...s.matchAll(FIGURE)].map((m) => m[0].replace(/,/g, ""));
+export { figureTokens };
 
 function multiset(tokens: string[]): Map<string, number> {
   const m = new Map<string, number>();

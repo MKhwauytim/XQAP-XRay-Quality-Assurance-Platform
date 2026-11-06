@@ -4,6 +4,7 @@ import type { BarChartBox, LayoutBox, LayoutDoc, LayoutSlide, RectBox, RuleBox, 
 import { formatValue } from "../resolve/resolve";
 import type { EngineIssue } from "../errors";
 import type { ThemeTokens } from "../spec/types";
+import { HEX_COLOR } from "../text";
 
 const ESCAPES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => ESCAPES[c]);
@@ -22,21 +23,20 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
-const COLOR = /^#[0-9a-fA-F]{3,8}$/;
 const FONT = /^[\p{L}\p{N} _-]+$/u;
 
 /** Theme values are interpolated into CSS and attributes, so only a plain hex colour and a plain font name pass. */
 export function themeIssues(theme: ThemeTokens): EngineIssue[] {
   const out: EngineIssue[] = [];
   const bad = (path: string): void => { out.push({ rule: "theme.invalid", path }); };
-  for (const [k, v] of Object.entries(theme.tones)) if (!COLOR.test(v)) bad(`theme.tones.${k}`);
-  for (const [k, v] of Object.entries(theme.ink)) if (!COLOR.test(v)) bad(`theme.ink.${k}`);
+  for (const [k, v] of Object.entries(theme.tones)) if (!HEX_COLOR.test(v)) bad(`theme.tones.${k}`);
+  for (const [k, v] of Object.entries(theme.ink)) if (!HEX_COLOR.test(v)) bad(`theme.ink.${k}`);
   if (!FONT.test(theme.font)) bad("theme.font");
   return out;
 }
 
 /** A colour that passed validation, else `currentColor`; always attribute-escaped. */
-const safeColor = (c: string): string => (COLOR.test(c) ? esc(c) : "currentColor");
+const safeColor = (c: string): string => (HEX_COLOR.test(c) ? esc(c) : "currentColor");
 const fontStack = (font: string): string => (FONT.test(font) ? `"${font}", sans-serif` : "sans-serif");
 
 function textBox(b: TextBox): string {

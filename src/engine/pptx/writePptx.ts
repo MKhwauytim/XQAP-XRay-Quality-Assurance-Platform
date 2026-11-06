@@ -6,6 +6,7 @@ import type { BarChartBox, LayoutBox, LayoutDoc, TableBox, TextBox, TextCell } f
 import type { MeasureSpec, ThemeTokens } from "../spec/types";
 import { postprocessPptx } from "./postprocess";
 import { inFromPx, ptFromPx } from "./units";
+import { hexDigits } from "../text";
 
 /**
  * PPTX from the layout model, then post-processed (`postprocessPptx`).
@@ -33,8 +34,15 @@ export async function writePptx(doc: LayoutDoc, theme: ThemeTokens, opts: { titl
   return postprocessPptx(raw, opts.issuedAt);
 }
 
-/** Theme colours are `#RRGGBB` (validated by `themeIssues`); pptxgenjs wants them without the hash. */
-const hex = (c: string): string => c.replace(/^#/, "").toUpperCase();
+/**
+ * Theme colours are `#RGB` / `#RRGGBB` (validated by `themeIssues` with the same HEX_COLOR); pptxgenjs wants
+ * six digits without the hash. Anything else fails closed rather than shipping a wrong colour.
+ */
+const hex = (c: string): string => {
+  const h = hexDigits(c);
+  if (h === undefined) throw new Error(`invalid theme colour: ${c}`);
+  return h;
+};
 
 function addBox(pptx: pptxgen, slide: pptxgen.Slide, b: LayoutBox, theme: ThemeTokens): void {
   switch (b.kind) {

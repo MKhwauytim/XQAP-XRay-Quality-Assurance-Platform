@@ -370,26 +370,32 @@ export function tableRefs(parts: Map<string, string>): Map<string, string> {
   return out;
 }
 
-/** Filled data rows inside each processed set's table on the report workbook, per dataset (NaN when the table is gone). */
+/**
+ * Data rows inside each processed set's table on the report workbook, per dataset (NaN when the table is gone).
+ * Counted from the sheet XML's cell elements (`<c>`, valued or not) within the table ref span, the same rule `writtenDataRows` uses
+ * for raw sheets: a row whose cells are all null is still a row (the writer always emits it), and a row that is
+ * really gone is missing. Never from cell values, which would drop an all-null row and block falsely.
+ */
 export function readProcessedRowCounts(report: WorkbookInput, parts: Map<string, string>, plan: WorkbookPlan): Map<string, number> {
   const wb = readWorkbook(report);
   const refs = tableRefs(parts);
+  const paths = sheetPartPaths(parts);
   const out = new Map<string, number>();
   for (const s of plan.sheets) {
     if (s.kind !== "processed" || s.datasetId === undefined) continue;
     const ref = refs.get(s.table ?? "");
-    const ws = wb.Sheets[s.name];
-    if (ref === undefined || ref === "" || ws === undefined) { out.set(s.datasetId, Number.NaN); continue; }
+    const xml = parts.get(paths.get(s.name) ?? "");
+    if (ref === undefined || ref === "" || wb.Sheets[s.name] === undefined || xml === undefined) { out.set(s.datasetId, Number.NaN); continue; }
     const r = XLSX.utils.decode_range(ref);
-    let n = 0;
-    for (let row = r.s.r + 1; row <= r.e.r; row++) {
-      let filled = false;
-      for (let c = r.s.c; c <= r.e.c && !filled; c++) {
-        const v = (ws[XLSX.utils.encode_cell({ r: row, c })] as XLSX.CellObject | undefined)?.v;
-        filled = v !== undefined && v !== null && v !== "";
-      }
-      if (filled) n++;
+    const present = new Set<number>();
+    // A row counts when it holds a cell element inside the table's columns (a pivot beside the table shares rows).
+    for (const t of tokenizeXml(xml)) {
+      if (t.k === "text" || t.k === "close" || t.name !== "c") continue;
+      const at = XLSX.utils.decode_cell(t.attrs.get("r") ?? "");
+      if (at.c >= r.s.c && at.c <= r.e.c) present.add(at.r);
     }
+    let n = 0;
+    for (let row = r.s.r + 1; row <= r.e.r; row++) if (present.has(row)) n++;
     out.set(s.datasetId, n);
   }
   return out;

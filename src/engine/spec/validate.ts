@@ -7,11 +7,9 @@ import { checkPackShape, checkSpecShape } from "./shape";
 import type { DomainPack, IssueParams, MeasureSpec, PageSpec, ReportSpec, VisualSpec, WellItem } from "./types";
 import { WELL_SCHEMAS } from "./wells";
 import { SOURCE_TABLE, excelNameKey, tableNameFor } from "../xlsx/planWorkbook";
+import { ANY_DIGIT, MIN_FONT_PX, PLACEHOLDER } from "../text";
 
 const GRID = { cols: 24, rows: 14 } as const;
-const MIN_FONT_PX = 20;
-const PLACEHOLDER = /\{\{([^{}]*)\}\}/g;
-const ANY_DIGIT = /[0-9٠-٩۰-۹]/;
 const MEASURE_REF = /@([\p{L}_][\p{L}\p{N}_]*)/gu;
 const ISO = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2}))?$/;
 
@@ -68,6 +66,8 @@ interface Ctx {
   spec: ReportSpec;
   issues: EngineIssue[];
   columns: Map<string, ColumnDecl>;
+  /** Column id -> owning dataset id. Column ids are unique across datasets. */
+  columnDataset: Map<string, string>;
   measureIds: Set<string>;
   paramIds: Set<string>;
 }
@@ -198,7 +198,41 @@ function checkWells(ctx: Ctx, v: VisualSpec, path: string): void {
   }
 }
 
-function checkVisual(ctx: Ctx, v: VisualSpec, path: string): void {
+/** The single dataset of the visual's measures, or undefined when it has none (or mixes them). */
+function visualDataset(ctx: Ctx, v: VisualSpec): string | undefined {
+  const ids = [
+    ...Object.values(v.wells ?? {}).flatMap((items) => (items ?? []).flatMap((it) => ("measure" in it ? [it.measure] : []))),
+    ...(v.type === "text" ? textMeasureIds(v.text) : []),
+  ];
+  const ds = new Set(ids.flatMap((id) => {
+    const m = ctx.spec.model.measures.find((x) => x.id === id);
+    return m ? [m.datasetId] : [];
+  }));
+  return ds.size === 1 ? [...ds][0] : undefined;
+}
+
+/**
+ * Every well field and every page or visual filter field must belong to the dataset of the visual's
+ * measures: a filter on another dataset's column would otherwise be dropped and an unfiltered figure ship.
+ */
+function checkSameDataset(ctx: Ctx, v: VisualSpec, path: string, pageFilters: FilterSpec[] | undefined, pagePath: string): void {
+  const ds = visualDataset(ctx, v);
+  if (ds === undefined) return;
+  const other = (field: string) => ctx.columnDataset.has(field) && ctx.columnDataset.get(field) !== ds;
+  for (const [role, items] of Object.entries(v.wells ?? {})) {
+    (items ?? []).forEach((it, i) => {
+      if ("field" in it && other(it.field)) push(ctx, "schema.invalid", `${path}.wells.${role}[${i}]`, `field ${it.field} is not in dataset ${ds}`);
+    });
+  }
+  (pageFilters ?? []).forEach((f, i) => {
+    if (other(f.field)) push(ctx, "schema.invalid", `${pagePath}.filters[${i}].field`, `filter ${f.field} is not in dataset ${ds} of ${path}`);
+  });
+  (v.filters ?? []).forEach((f, i) => {
+    if (other(f.field)) push(ctx, "schema.invalid", `${path}.filters[${i}].field`, `filter ${f.field} is not in dataset ${ds}`);
+  });
+}
+
+function checkVisual(ctx: Ctx, v: VisualSpec, path: string, page?: { filters?: FilterSpec[]; path: string }): void {
   checkFrame(ctx, v, path);
   const size = v.format?.sizePx;
   if (size !== undefined && !(size >= MIN_FONT_PX)) {
@@ -207,6 +241,7 @@ function checkVisual(ctx: Ctx, v: VisualSpec, path: string): void {
   checkText(ctx, v, path);
   checkWells(ctx, v, path);
   checkFilters(ctx, v.filters, `${path}.filters`);
+  checkSameDataset(ctx, v, path, page?.filters, page?.path ?? "");
   if (v.sort !== undefined && !ctx.columns.has(v.sort.by) && !ctx.measureIds.has(v.sort.by)) {
     push(ctx, "schema.invalid", `${path}.sort.by`, v.sort.by);
   }
@@ -224,7 +259,7 @@ function checkPage(ctx: Ctx, p: PageSpec, pi: number): void {
     push(ctx, "limit.visuals", `${path}.visuals`, `${p.visuals.length} > ${LIMITS.maxVisualsPerPage}`, { page: pi + 1 });
   }
   checkFilters(ctx, p.filters, `${path}.filters`);
-  p.visuals.forEach((v, vi) => checkVisual(ctx, v, `${path}.visuals[${vi}]`));
+  p.visuals.forEach((v, vi) => checkVisual(ctx, v, `${path}.visuals[${vi}]`, { filters: p.filters, path }));
   duplicates(ctx, p.visuals.map((v) => v.visualId), (i) => `${path}.visuals[${i}].visualId`);
 }
 
@@ -263,26 +298,40 @@ export function validateSpec(spec: ReportSpec, pack?: DomainPack, params?: Issue
   if (shape.length > 0) return shape;
   const merged = mergePackMeasures(spec, pack);
   const columns = new Map<string, ColumnDecl>();
+  const columnDataset = new Map<string, string>();
   const ambiguous: EngineIssue[] = [];
   merged.datasets.forEach((d, di) => {
     d.columns.forEach((c, ci) => {
       if (columns.has(c.id)) {
         ambiguous.push({ rule: "schema.invalid", path: `datasets[${di}].columns[${ci}].id`, detail: "ambiguous field id" });
-      } else columns.set(c.id, c);
+      } else {
+        columns.set(c.id, c);
+        columnDataset.set(c.id, d.id);
+      }
     });
-    for (const s of d.steps) {
-      if (s.kind !== "calc" || s.calc === undefined || columns.has(s.calc.columnId)) continue;
+    d.steps.forEach((s, si) => {
+      if (s.kind !== "calc" || s.calc === undefined) return;
+      const declared = columns.get(s.calc.columnId);
+      if (declared !== undefined) {
+        // A calc may target a declared virtual column (no source header), never a real source column.
+        if (declared.source.header !== "" || columnDataset.get(s.calc.columnId) !== d.id) {
+          ambiguous.push({ rule: "schema.invalid", path: `datasets[${di}].steps[${si}].calc.columnId`, detail: `calc would overwrite source column ${s.calc.columnId}` });
+        }
+        return;
+      }
       const isNum = s.calc.type === "number";
       columns.set(s.calc.columnId, {
         source: { file: "", sheet: "", header: "" }, id: s.calc.columnId, label: s.calc.columnId,
         type: s.calc.type, role: isNum ? "measure" : "dimension", level: isNum ? "quantitative" : "nominal",
       });
-    }
+      columnDataset.set(s.calc.columnId, d.id);
+    });
   });
   const ctx: Ctx = {
     spec: merged,
     issues: [],
     columns,
+    columnDataset,
     measureIds: new Set(merged.model.measures.map((m) => m.id)),
     paramIds: new Set(merged.params.map((p) => p.id)),
   };

@@ -9,6 +9,7 @@ import { FIT_SAFETY } from "./measure";
 import type { TextMeasurer } from "./measure";
 import type { Run } from "./bidiRuns";
 import type { LayoutBox, LayoutDoc, LayoutFigure, LayoutSlide, NonFigureSpan, TableBox, TextBox, TextCell } from "./types";
+import { MEASURE_PLACEHOLDER, PARAM_PLACEHOLDER, figureTokens, withoutTokens } from "../text";
 
 /**
  * Every layout dimension, in px on the 1920x1080 slide. `margin` is the safe area on all four edges: grid
@@ -49,8 +50,6 @@ const CELL_H = LAYOUT.slideH / 14;
 const CONTINUED = " (يتبع)";
 const TOTAL_LABEL = "الإجمالي";
 
-const MEASURE_REF = /\{\{measure:([^}]+)\}\}/g;
-const PARAM_REF = /\{\{param:([^}]+)\}\}/g;
 
 type Rect = { x: number; y: number; w: number; h: number };
 
@@ -135,7 +134,9 @@ function nonFigureSpans(slides: LayoutSlide[], figures: LayoutFigure[], staticTe
     for (const { boxId, text } of shown) {
       let rest = text;
       if (!s.boxes.some((b) => b.kind === "bar" && b.id === boxId)) {
-        for (const f of figures) if (f.slide === s.index && f.boxId === boxId) rest = rest.replace(f.display, " ");
+        // Whole figure tokens out, as a multiset; never a substring: a figure "0" must not eat a digit of "2026-05".
+        const own = figures.filter((f) => f.slide === s.index && f.boxId === boxId).flatMap((f) => figureTokens(f.display));
+        rest = withoutTokens(text, own);
       }
       if (!/\d/.test(rest)) continue;
       const fixed = staticText.get(boxId);
@@ -192,20 +193,20 @@ function visualBoxes(ctx: Ctx, slide: number, v: VisualSpec, r: ResolvedVisual |
   if (v.type === "text") {
     const used: ResolvedValue[] = [];
     const text = (v.text ?? "")
-      .replace(MEASURE_REF, (_, mid: string) => {
+      .replace(MEASURE_PLACEHOLDER, (_, mid: string) => {
         const rv = cells.find((c) => c.measureId === mid) ?? ctx.values.get(mid);
         if (!rv) return "-";
         if (!used.includes(rv)) used.push(rv);
         return rv.display;
       })
-      .replace(PARAM_REF, (_, pid: string) => {
+      .replace(PARAM_PLACEHOLDER, (_, pid: string) => {
         const p = ctx.params.values[pid];
         return p === undefined ? "-" : String(p);
       });
     const box = textBox(ctx, slide, id(0), v.visualId, frame, text, {
       sizePx: v.format?.sizePx ?? LAYOUT.textPx, weight: v.format?.weight ?? 400, color: tone("neutral"), maxLines: 2,
     }, used.map((u) => u.key));
-    ctx.staticText.set(box.id, (v.text ?? "").replace(MEASURE_REF, " ").replace(PARAM_REF, " "));
+    ctx.staticText.set(box.id, (v.text ?? "").replace(MEASURE_PLACEHOLDER, " ").replace(PARAM_PLACEHOLDER, " "));
     for (const u of used) figure(ctx, slide, box.id, u);
     return [box];
   }

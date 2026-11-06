@@ -121,7 +121,10 @@ export function applySteps(
     } else if (step.kind === "calc" && step.calc) {
       const calc = step.calc;
       const parsed = parseFormula(calc.formula, { columns: def.columns, measures: [] }, "row");
-      if (!parsed.ok) {
+      if (def.columns.some((c) => c.id === calc.columnId && c.source.header !== "")) {
+        // Never overwrite real source data; validateSpec rejects this first.
+        issues.push({ rule: "schema.invalid", path: `${path}.calc.columnId`, detail: `calc would overwrite source column ${calc.columnId}` });
+      } else if (!parsed.ok) {
         issues.push({ ...parsed.issue, path: `${path}.calc.formula` });
         for (const t of rows) t.row[calc.columnId] = null;
       } else {

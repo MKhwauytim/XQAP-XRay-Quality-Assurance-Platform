@@ -1,6 +1,7 @@
 import type { EngineIssue } from "../errors";
 import { splitRuns } from "./bidiRuns";
 import { FIT_SAFETY, type TextMeasurer } from "./measure";
+import { MIN_FONT_PX } from "../text";
 
 /**
  * M7 fit ladder result. step 1: one line at base size; 2: one line shrunk; 3: one line in a widened box;
@@ -20,7 +21,6 @@ export interface FitBox {
   maxLines: 1 | 2;
 }
 
-const MIN_FONT_PX = 20;
 const SHRINK_FLOOR = 0.85;
 const SIZE_STEP = 0.5;
 
