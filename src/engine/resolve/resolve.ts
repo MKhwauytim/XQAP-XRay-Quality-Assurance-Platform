@@ -30,8 +30,6 @@ export interface ResolvedVisual {
 }
 
 export const OTHERS_LABEL = "أخرى";
-/** Marker for the collapsed bucket; real categories key with "=" and can never produce it. */
-const OTHERS_KEY_SEP = "~";
 const GROUP_WELLS: WellRole[] = ["axis", "legend", "rows", "columns"];
 const MEASURE_REF = /\{\{measure:([^}]+)\}\}/g;
 
@@ -73,16 +71,31 @@ interface Ctx {
 }
 
 /**
- * Value key grammar:
+ * Value key grammar (injective):
  *   key     = measureId [ "@" part *( "|" part ) ] [ "#" filters ]
- *   part    = field "=" value          (a real category, including one literally named «أخرى»)
+ *   part    = field "=" value          (a real category, including one literally named «أخرى» or "~")
  *           | field "~others"          (the collapsed «أخرى» bucket)
+ *   value   = the string itself when it is "plain", else its JSON encoding. Plain means: a string
+ *             with none of = | & ~ # @ " and that does not parse as a JSON non-string (so "1",
+ *             "null", "true" are quoted). Numbers, booleans and null are always JSON (1, true, null),
+ *             which never start with a quote and never equal a plain string.
  *   filters = the effective filters (report + page + visual, substituted), each serialised as
  *             JSON [field, op, value], sorted by code point, joined by "&".
  * With no filters and no bucket the key is just "matchRate" or "matchRate@portType=بحري".
  */
-export function valueKey(measureId: string, group: Record<string, string>, filters: FilterSpec[], others = false): string {
-  const parts = Object.entries(group).map(([k, v]) => (others ? `${k}${OTHERS_KEY_SEP}others` : `${k}=${v}`));
+function encodeKeyValue(v: Cell): string {
+  if (typeof v !== "string") return JSON.stringify(v);
+  if (/[=|&~#@"]/.test(v)) return JSON.stringify(v);
+  try {
+    if (typeof JSON.parse(v) !== "string") return JSON.stringify(v);
+  } catch {
+    // Not JSON: plain.
+  }
+  return v;
+}
+
+export function valueKey(measureId: string, group: Record<string, Cell>, filters: FilterSpec[], others = false): string {
+  const parts = Object.entries(group).map(([k, v]) => (others ? `${k}~others` : `${k}=${encodeKeyValue(v)}`));
   let key = parts.length === 0 ? measureId : `${measureId}@${parts.join("|")}`;
   if (filters.length > 0) {
     const canon = filters.map((f) => JSON.stringify([f.field, f.op, f.value ?? null])).sort(codePointCompare);
@@ -91,13 +104,23 @@ export function valueKey(measureId: string, group: Record<string, string>, filte
   return key;
 }
 
+/** One group: `id` is the typed identity, `label` the display text computed after grouping. */
+interface Group {
+  id: string;
+  label: string;
+  display: Record<string, string>;
+  typed: Record<string, Cell>;
+  rows: Row[];
+  others: boolean;
+}
+
 function makeValue(
-  ctx: Ctx, m: MeasureSpec, rows: Row[], allRows: Row[], filters: FilterSpec[], group: Record<string, string>,
-  others = false,
+  ctx: Ctx, m: MeasureSpec, rows: Row[], allRows: Row[], filters: FilterSpec[], g?: Group,
 ): ResolvedValue {
+  const group = g?.display ?? {};
   const ast = ctx.asts.get(m.id);
   const value = ast === undefined ? null : evaluateMeasure(ast, rows, { measures: ctx.asts, allRows });
-  const key = valueKey(m.id, group, filters, others);
+  const key = valueKey(m.id, g?.typed ?? {}, filters, g?.others ?? false);
   const rv: ResolvedValue = {
     key, measureId: m.id, group, value, display: formatValue(value, m.format),
     provenance: {
@@ -123,14 +146,18 @@ function filtersFor(ctx: Ctx, def: DatasetDef | undefined, pageFilters: FilterSp
   return all.filter((f) => def?.columns.some((c) => c.id === f.field)).map((f) => substituteFilter(f, ctx.params));
 }
 
-function sortCategories(ctx: Ctx, v: VisualSpec, cats: string[], value: (cat: string, measureId: string) => number | null): string[] {
-  const out = [...cats].sort(codePointCompare);
+function compareGroups(a: Group, b: Group): number {
+  return codePointCompare(a.label, b.label) || codePointCompare(a.id, b.id);
+}
+
+function sortGroups(ctx: Ctx, v: VisualSpec, groups: Group[], value: (g: Group, measureId: string) => number | null): Group[] {
+  const out = [...groups].sort(compareGroups);
   const by = v.sort?.by;
   if (by !== undefined && ctx.byId.has(by)) {
     const dir = v.sort?.dir === "desc" ? -1 : 1;
     out.sort((a, b) => {
       const x = value(a, by), y = value(b, by);
-      if (x === y) return codePointCompare(a, b);
+      if (x === y) return compareGroups(a, b);
       if (x === null) return 1;
       if (y === null) return -1;
       return (x - y) * dir;
@@ -158,53 +185,58 @@ function resolveVisual(ctx: Ctx, pageIndex: number, pageFilters: FilterSpec[], v
     return base;
   }
   if (fields.length === 0) {
-    base.cells = measures.map((m) => makeValue(ctx, m, rows, allRows, filters, {}));
+    base.cells = measures.map((m) => makeValue(ctx, m, rows, allRows, filters));
     return base;
   }
 
-  // Single pass group-by.
-  const groups = new Map<string, { group: Record<string, string>; rows: Row[] }>();
+  // Single pass group-by on typed identity; labels are computed afterwards.
+  const byId = new Map<string, Group>();
   for (const r of rows) {
-    const group: Record<string, string> = {};
-    for (const f of fields) group[f] = cellText(r[f] ?? null);
-    const label = fields.map((f) => group[f]).join(" / ");
-    let g = groups.get(label);
-    if (!g) { g = { group, rows: [] }; groups.set(label, g); }
+    const typedVals = fields.map((f) => r[f] ?? null);
+    const id = JSON.stringify(typedVals.map((c) => [c === null ? "null" : typeof c, c]));
+    let g = byId.get(id);
+    if (!g) {
+      const typed: Record<string, Cell> = {};
+      fields.forEach((f, i) => { typed[f] = typedVals[i]; });
+      g = { id, label: "", display: {}, typed, rows: [], others: false };
+      byId.set(id, g);
+    }
     g.rows.push(r);
+  }
+  for (const g of byId.values()) {
+    for (const f of fields) g.display[f] = cellText(g.typed[f]);
+    g.label = fields.map((f) => g.display[f]).join(" / ");
   }
   const quick = (rs: Row[], id: string) => {
     const ast = ctx.asts.get(id);
     return ast === undefined ? null : evaluateMeasure(ast, rs, { measures: ctx.asts, allRows });
   };
-  const valueOf = (cat: string, id: string) => quick(groups.get(cat)?.rows ?? [], id);
-  let cats = sortCategories(ctx, v, [...groups.keys()], valueOf);
+  const valueOf = (g: Group, id: string) => quick(g.rows, id);
+  let groups = sortGroups(ctx, v, [...byId.values()], valueOf);
 
-  if (v.type === "barChart" && cats.length > LIMITS.maxChartCategories) {
+  if (v.type === "barChart" && groups.length > LIMITS.maxChartCategories) {
     const lead = measures[0]?.id;
-    const ranked = [...cats].sort((a, b) => {
+    const ranked = [...groups].sort((a, b) => {
       const x = lead === undefined ? null : valueOf(a, lead), y = lead === undefined ? null : valueOf(b, lead);
-      if (x === y) return codePointCompare(a, b);
+      if (x === y) return compareGroups(a, b);
       if (x === null) return 1;
       if (y === null) return -1;
       return y - x;
     });
     const keep = new Set(ranked.slice(0, LIMITS.maxChartCategories - 1));
-    const rest = cats.filter((c) => !keep.has(c)).flatMap((c) => groups.get(c)!.rows);
-    const othersGroup: Record<string, string> = {};
-    for (const f of fields) othersGroup[f] = OTHERS_LABEL;
-    cats = cats.filter((c) => keep.has(c));
-    groups.set(OTHERS_KEY_SEP, { group: othersGroup, rows: rest });
-    cats.push(OTHERS_KEY_SEP);
+    const rest = groups.filter((g) => !keep.has(g)).flatMap((g) => g.rows);
+    // The bucket lives outside the identity keyspace: no real category can collide with it.
+    const bucket: Group = { id: "", label: OTHERS_LABEL, display: {}, typed: {}, rows: rest, others: true };
+    for (const f of fields) { bucket.display[f] = OTHERS_LABEL; bucket.typed[f] = OTHERS_LABEL; }
+    groups = [...groups.filter((g) => keep.has(g)), bucket];
   }
 
-  base.categories = cats.map((c) => (c === OTHERS_KEY_SEP ? OTHERS_LABEL : c));
-  for (const cat of cats) {
-    const g = groups.get(cat)!;
-    const others = cat === OTHERS_KEY_SEP;
-    for (const m of measures) base.cells.push(makeValue(ctx, m, g.rows, allRows, filters, g.group, others));
+  base.categories = groups.map((g) => g.label);
+  for (const g of groups) {
+    for (const m of measures) base.cells.push(makeValue(ctx, m, g.rows, allRows, filters, g));
   }
   // Totals re-evaluate the measure on the unsplit filtered rows, never a sum of cells.
-  base.totals = measures.map((m) => makeValue(ctx, m, rows, allRows, filters, {}));
+  base.totals = measures.map((m) => makeValue(ctx, m, rows, allRows, filters));
   return base;
 }
 

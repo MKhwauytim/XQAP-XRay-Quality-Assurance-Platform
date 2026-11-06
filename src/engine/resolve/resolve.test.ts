@@ -174,6 +174,50 @@ describe("resolveVisuals", () => {
     expect(r.issues).toContainEqual(expect.objectContaining({ rule: "schema.invalid", detail: "missing param: absent" }));
   });
 
+  it("a null cell and a real '-' value stay two groups with correct figures", () => {
+    const f = twoSlideFixture();
+    const files = structuredClone(FIXTURE_FILES);
+    files[0].sheets[0].rows.push(["", "بري", "مطابق", 1], ["-", "بري", "مطابق", 2], ["-", "بري", "غير مطابق", 3]);
+    f.spec.model.measures[1] = { ...f.spec.model.measures[0], id: "matchRate" };
+    const r = resolveFixture(f, files);
+    const bar = r.visuals.find((v) => v.visualId === "p2bar")!;
+    expect(bar.categories.filter((c) => c === "-")).toHaveLength(2);
+    expect(r.values.get("matchRate@port=null")!.value).toBe(1);
+    expect(r.values.get("matchRate@port=-")!.value).toBe(2);
+  });
+
+  it("two-field labels that join the same way stay two groups", () => {
+    const f = twoSlideFixture();
+    const files = structuredClone(FIXTURE_FILES);
+    files[0].sheets[0].rows = [["a / b", "c", "مطابق", 1], ["a", "b / c", "مطابق", 2], ["a", "b / c", "مطابق", 3]];
+    f.spec.pages[1].visuals[0].wells.rows = [{ field: "port" }, { field: "portType" }];
+    const r = resolveFixture(f, files);
+    const table = r.visuals.find((v) => v.visualId === "p2table")!;
+    expect(table.categories).toEqual(["a / b / c", "a / b / c"]);
+    expect(table.cells.filter((c) => c.measureId === "studied").map((c) => c.value).sort()).toEqual([1, 2]);
+    expect(r.values.get('studied@port="a / b"|portType=c')).toBeUndefined();
+    expect(r.values.get("studied@port=a / b|portType=c")!.value).toBe(1);
+    expect(r.values.get("studied@port=a|portType=b / c")!.value).toBe(2);
+  });
+
+  it("a real category named '~' keeps its own key beside the collapsed bucket", () => {
+    const { f, files } = withPorts(13);
+    files[0].sheets[0].rows.push(["~", "بري", "مطابق", 1], ["~", "بري", "مطابق", 2], ["~", "بري", "مطابق", 3]);
+    f.spec.model.measures[1] = { ...f.spec.model.measures[0], id: "matchRate" };
+    const r = resolveFixture(f, files);
+    expect(r.values.get('matchRate@port="~"')!.value).toBe(3);
+    expect(r.values.get("matchRate@port~others")!.value).toBe(6);
+    expect(r.issues).toEqual([]);
+  });
+
+  it("values containing '=' or '|' give distinct, injective keys", () => {
+    expect(valueKey("m", { a: "x=y" }, [])).toBe('m@a="x=y"');
+    expect(valueKey("m", { a: "x|b=y" }, [])).not.toBe(valueKey("m", { a: "x", b: "y" }, []));
+    expect(valueKey("m", { a: "1" }, [])).not.toBe(valueKey("m", { a: 1 }, []));
+    expect(valueKey("m", { a: "null" }, [])).not.toBe(valueKey("m", { a: null }, []));
+    expect(valueKey("m", { a: "بحري" }, [])).toBe("m@a=بحري");
+  });
+
   it("desc without sort.by reverses code point order", () => {
     const f = twoSlideFixture();
     f.spec.pages[1].visuals[1].sort = { by: "", dir: "desc" };
