@@ -33,8 +33,14 @@ export async function postprocessPptx(zip: Uint8Array, issuedAt: string): Promis
       out.set(target, await file.async("uint8array"));
     }
   }
+  const types = out.get("[Content_Types].xml");
+  if (typeof types === "string") out.set("[Content_Types].xml", dropDanglingOverrides(types, new Set(out.keys())));
   return zipEntries(new Map([...out].sort(([a], [b]) => entryOrder(a, b))), date);
 }
+
+/** pptxgenjs declares an override for `slideMaster2.xml`, which it never writes; drop overrides with no part. */
+const dropDanglingOverrides = (xml: string, parts: Set<string>): string =>
+  xml.replace(/<Override\b[^>]*\bPartName="\/([^"]+)"[^>]*\/>/g, (m, part: string) => (parts.has(part) ? m : ""));
 
 const entryOrder = (a: string, b: string): number =>
   a === b ? 0 : a === "[Content_Types].xml" ? -1 : b === "[Content_Types].xml" ? 1 : a < b ? -1 : 1;

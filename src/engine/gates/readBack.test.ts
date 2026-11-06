@@ -1,7 +1,10 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { buildOutputs } from "../__fixtures__/gateKit";
 import type { Outputs } from "../__fixtures__/gateKit";
-import { formatCached, readHtmlBoxes, readPptxBoxes, readXlsxSource, readXlsxSteps } from "./readBack";
+import {
+  UNBOXED, formatCached, layoutBoxes, readHtmlBoxes, readPptxBoxes, readProcessedRowCounts, readRawRowCounts,
+  readXlsxSource, readXlsxSteps, zipParts,
+} from "./readBack";
 
 let good: Outputs;
 beforeAll(async () => { good = await buildOutputs(); });
@@ -28,8 +31,27 @@ describe("read-backs", () => {
   });
 
   it("counts <br> in HTML as extra lines", () => {
-    const html = '<section data-slide="1"><div class="box t" data-box="a" style="left:10px;top:20px">x<br>y</div></section>';
+    const html = '<body><section data-slide="1"><div class="box t" data-box="a" style="left:10px;top:20px">x<br>y</div></section></body>';
     expect(readHtmlBoxes(html).get(1)).toEqual([{ id: "a", x: 10, y: 20, lines: 2, text: "x y" }]);
+  });
+
+  it("a nested unboxed div or span does not close the box early", () => {
+    const html = '<body><section data-slide="1"><div data-box="a" style="left:1px;top:2px"><span>x</span><div>y</div>z 5</div>w</section></body>';
+    expect(readHtmlBoxes(html).get(1)).toEqual([
+      { id: "a", x: 1, y: 2, lines: 1, text: "x y z 5" },
+      { id: UNBOXED, x: 0, y: 0, lines: 1, text: "w" },
+    ]);
+  });
+
+  it("the layout read-back places cells like the writers do", async () => {
+    const l = layoutBoxes(good.doc).get(2) ?? [];
+    const p = (await readPptxBoxes(good.pptx)).get(2) ?? [];
+    expect(l.map((b) => [b.id, b.x, b.y])).toEqual(p.map((b) => [b.id, b.x, b.y]));
+  });
+
+  it("counts raw rows in the companion and filled processed rows in the report", async () => {
+    expect(readRawRowCounts(good.companion, good.plan, good.spec)).toEqual(new Map([["studies", 12]]));
+    expect(readProcessedRowCounts(good.xlsx, await zipParts(good.xlsx), good.plan)).toEqual(new Map([["studies", 10]]));
   });
 
   it("reads المصدر rows by value key", async () => {

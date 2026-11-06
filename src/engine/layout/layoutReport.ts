@@ -7,7 +7,8 @@ import { fitIssue, fitTableHeaders, fitText } from "./fitLadder";
 import type { FitResult } from "./fitLadder";
 import { FIT_SAFETY } from "./measure";
 import type { TextMeasurer } from "./measure";
-import type { LayoutBox, LayoutDoc, LayoutFigure, LayoutSlide, TableBox, TextBox, TextCell } from "./types";
+import type { Run } from "./bidiRuns";
+import type { LayoutBox, LayoutDoc, LayoutFigure, LayoutSlide, NonFigureSpan, TableBox, TextBox, TextCell } from "./types";
 
 /**
  * Every layout dimension, in px on the 1920x1080 slide. `margin` is the safe area on all four edges: grid
@@ -107,7 +108,37 @@ export function layoutReport(
   if (slides.length > LIMITS.maxSlides) {
     ctx.issues.push({ rule: "limit.slides", detail: `${slides.length} > ${LIMITS.maxSlides}` });
   }
-  return { width: LAYOUT.slideW, height: LAYOUT.slideH, slides, figures: ctx.figures, issues: ctx.issues };
+  return {
+    width: LAYOUT.slideW, height: LAYOUT.slideH, slides, figures: ctx.figures,
+    nonFigureSpans: nonFigureSpans(slides, ctx.figures), issues: ctx.issues,
+  };
+}
+
+const runsText = (lines: Run[][]): string => lines.map((l) => l.map((r) => r.text).join("")).join(" ");
+
+/**
+ * Every box's shown text with its own figures' displays taken out once each; what is left and holds a digit is
+ * a non-figure span: a param value, static text, a title, a dimension label or a chart category.
+ */
+function nonFigureSpans(slides: LayoutSlide[], figures: LayoutFigure[]): NonFigureSpan[] {
+  const out: NonFigureSpan[] = [];
+  for (const s of slides) {
+    const shown: { boxId: string; text: string }[] = [];
+    for (const b of s.boxes) {
+      if (b.kind === "text") shown.push({ boxId: b.id, text: runsText(b.lines) });
+      else if (b.kind === "table") for (const c of [...b.header, ...b.rows.flat()]) shown.push({ boxId: c.id, text: runsText(c.lines) });
+      // A bar box's figures are its value labels; only its categories are shown text here.
+      else if (b.kind === "bar") shown.push({ boxId: b.id, text: b.categories.join(" ") });
+    }
+    for (const { boxId, text } of shown) {
+      let rest = text;
+      if (!s.boxes.some((b) => b.kind === "bar" && b.id === boxId)) {
+        for (const f of figures) if (f.slide === s.index && f.boxId === boxId) rest = rest.replace(f.display, " ");
+      }
+      if (/\d/.test(rest)) out.push({ slide: s.index, boxId, text: rest });
+    }
+  }
+  return out;
 }
 
 function makeSlide(ctx: Ctx, page: PageSpec, index: number, continued: boolean, body: (slide: number) => LayoutBox[]): LayoutSlide {

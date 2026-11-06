@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { buildOutputs, dropPart, editPptxText, writeFixtureWith } from "../__fixtures__/gateKit";
+import { buildOutputs, dropPart, editPart, editPptxText, writeFixtureWith } from "../__fixtures__/gateKit";
 import type { Outputs } from "../__fixtures__/gateKit";
 import { checkOoxml } from "./ooxmlSelfCheck";
 
@@ -18,6 +18,13 @@ describe("checkOoxml", () => {
     expect(r.issues[0].rule).toBe("gate.ooxml");
     expect(r.counts.xlsxTables).toBe(1);
     expect(r.issues).toContainEqual({ rule: "gate.ooxml", path: "xlsxTables", detail: "found 1, declared 2" });
+    expect(r.issues).toContainEqual({ rule: "gate.ooxml", path: "xlsx: [Content_Types].xml", detail: "override for missing part xl/tables/table1.xml" });
+  });
+
+  it("fails on a part with no content type", async () => {
+    const xlsx = await editPart(good.xlsx, "[Content_Types].xml", (x) => x.replace(/<Default Extension="rels"[^>]*\/>/, ""));
+    const r = await checkOoxml(good.pptx, xlsx, good.doc, good.plan);
+    expect(r.issues).toContainEqual({ rule: "gate.ooxml", path: "xlsx: _rels/.rels", detail: "part has no content type" });
   });
 
   it("fails on an Arabic-Indic digit in a slide, but only counts one in a raw sheet", async () => {

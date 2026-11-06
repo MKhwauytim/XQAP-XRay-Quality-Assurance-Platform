@@ -49,6 +49,15 @@ describe("layoutReport", () => {
     expect(textOf(doc, "s2-title")).toBe("التفصيل");
   });
 
+  it("records param and static digit text as non-figure spans, and none on the plain fixture", () => {
+    expect(layoutFixture().nonFigureSpans).toEqual([]);
+    const doc = layoutOf(withText("تقرير {{param:port}} 2026 المستوى 1: {{measure:matchRate}}"));
+    expect(doc.nonFigureSpans).toHaveLength(1);
+    expect(doc.nonFigureSpans[0]).toMatchObject({ slide: 1, boxId: "s1-p1text-0" });
+    expect(doc.nonFigureSpans[0].text).toContain("2026 المستوى 1");
+    expect(doc.nonFigureSpans[0].text).not.toContain("70.00%");
+  });
+
   it("{{measure:matchRate}} and {{param:port}} in text render the resolved values", () => {
     const doc = layoutFixture();
     const t = textOf(doc, "s1-p1text-0");

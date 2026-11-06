@@ -32,6 +32,12 @@ describe("design lint", () => {
     expect(contrastRatio("#fff", "#ffffff")).toBe(1);
   });
 
+  it("F1: an unparseable colour is an error, never a pass", () => {
+    expect(Number.isNaN(contrastRatio("red", "#ffffff"))).toBe(true);
+    expect(f1(docWithTextColor("red"))).toBe(true);
+    expect(f1(docWithTextColor("#12345"))).toBe(true);
+  });
+
   it("F1 accepts 3:1 at 44px and above", () => {
     const grey = "#8f8f8f";
     expect(contrastRatio(grey, "#ffffff")).toBeGreaterThan(3);

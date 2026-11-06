@@ -1,6 +1,9 @@
 import JSZip from "jszip";
 import * as XLSX from "xlsx";
+import { LAYOUT } from "../layout/layoutReport";
+import type { LayoutDoc } from "../layout/types";
 import { EMU_PER_PX } from "../pptx/units";
+import type { ReportSpec } from "../spec/types";
 import { SOURCE_HEADERS, SOURCE_KEY_HEADER, SOURCE_SHEET } from "../xlsx/planWorkbook";
 import type { WorkbookPlan } from "../xlsx/planWorkbook";
 import { decodeXml, matchingClose, tokenizeXml } from "../xml/tokenize";
@@ -181,65 +184,106 @@ const styleNum = (style: string | undefined, prop: string): number => {
   const m = new RegExp(`(?:^|;)\\s*${prop}\\s*:\\s*(-?[\\d.]+)px`).exec(style ?? "");
   return m ? Number(m[1]) : 0;
 };
-
-interface OpenBox { name: string; box: ReadBox }
 interface TableGeom { x: number; y: number; colW: number[]; rowY: number[]; lastH: number }
+interface Frame { name: string; box?: ReadBox; skip: boolean }
 
 const CELL_ID = /-r(\d+)c(\d+)$/;
+const VOID = new Set(["br", "col", "meta", "img", "input", "hr", "link", "source", "wbr", "area", "base", "embed", "track", "param"]);
 
-/** Boxes per slide from the static HTML: `data-box` on boxes and cells, `<br>` count + 1 lines (M2). */
+/** Pseudo box id holding text a slide shows outside every `data-box` element. */
+export const UNBOXED = "@unboxed";
+/** Pseudo slide for body text outside every slide section; any digit there is a figure with no place. */
+export const NO_SLIDE = 0;
+
+/**
+ * Boxes per slide from the static HTML: `data-box` on boxes and cells, `<br>` count + 1 lines (M2). Depth is
+ * tracked for every element, so a nested unboxed element never closes a box early. Text a slide shows outside
+ * every box goes to a pseudo box `UNBOXED`; body text outside every slide goes to slide `NO_SLIDE`.
+ */
 export function readHtmlBoxes(html: string): Map<number, ReadBox[]> {
   const out = new Map<number, ReadBox[]>();
-  const stack: OpenBox[] = [];
-  let slide = 0;
+  const loose = new Map<number, ReadBox>();
+  const stack: Frame[] = [];
+  let slide = NO_SLIDE;
+  let inBody = false;
   let table: TableGeom | undefined;
+  const boxOf = (): ReadBox | undefined => {
+    for (let i = stack.length - 1; i >= 0; i--) if (stack[i].box !== undefined) return stack[i].box;
+    return undefined;
+  };
+  const looseOf = (s: number): ReadBox => {
+    let b = loose.get(s);
+    if (b === undefined) { b = { id: UNBOXED, x: 0, y: 0, lines: 1, text: "" }; loose.set(s, b); }
+    return b;
+  };
   for (const t of tokenizeXml(html)) {
     if (t.k === "text") {
-      const top = stack[stack.length - 1];
-      if (top !== undefined) top.box.text += (top.box.text === "" ? "" : " ") + decodeXml(t.text);
+      if (t.text.startsWith("<") || !inBody || stack.some((f) => f.skip)) continue;
+      const text = decodeXml(t.text);
+      if (text.trim() === "") continue;
+      const target = boxOf() ?? looseOf(slide);
+      target.text += (target.text === "" ? "" : " ") + text;
       continue;
     }
     if (t.k === "close") {
-      if (stack.length > 0 && stack[stack.length - 1].name === t.name) stack.pop();
+      const at = stack.map((f) => f.name).lastIndexOf(t.name);
+      if (at >= 0) {
+        if (stack[at].name === "section") slide = NO_SLIDE;
+        stack.length = at;
+      }
+      if (t.name === "body") inBody = false;
       continue;
     }
-    if (t.name === "section" && t.attrs.has("data-slide")) { slide = Number(t.attrs.get("data-slide")); out.set(slide, []); continue; }
-    if (t.name === "br") { const top = stack[stack.length - 1]; if (top !== undefined) top.box.lines++; continue; }
+    if (t.name === "body") { inBody = true; continue; }
+    if (t.name === "br") { const b = boxOf(); if (b !== undefined) b.lines++; continue; }
     const style = t.attrs.get("style");
-    if (t.name === "col" && table !== undefined) { table.colW.push(styleNum(style, "width")); continue; }
+    if (t.name === "col" && table !== undefined) table.colW.push(styleNum(style, "width"));
     if (t.name === "tr" && table !== undefined) {
       const prev = table.rowY.length;
       table.rowY.push(prev === 0 ? table.y : table.rowY[prev - 1] + table.lastH);
       table.lastH = styleNum(style, "height");
-      continue;
+    }
+    if (t.k === "self" || VOID.has(t.name)) continue;
+    const frame: Frame = { name: t.name, skip: t.name === "style" || t.name === "script" };
+    if (t.name === "section" && t.attrs.has("data-slide")) {
+      slide = Number(t.attrs.get("data-slide"));
+      out.set(slide, []);
     }
     const id = t.attrs.get("data-box");
-    if (id === undefined || t.k === "self") continue;
-    let box: ReadBox;
-    const cell = CELL_ID.exec(id);
-    if ((t.name === "th" || t.name === "td") && cell !== null && table !== undefined) {
-      const c = Number(cell[2]);
-      box = { id, x: table.x + table.colW.slice(0, c).reduce((a, w) => a + w, 0), y: table.rowY[Number(cell[1])] ?? table.y, lines: 1, text: "" };
-    } else {
-      box = { id, x: styleNum(style, "left"), y: styleNum(style, "top"), lines: 1, text: "" };
-      table = { x: box.x, y: box.y, colW: [], rowY: [], lastH: 0 };
+    if (id !== undefined) {
+      const cell = CELL_ID.exec(id);
+      if ((t.name === "th" || t.name === "td") && cell !== null && table !== undefined) {
+        const c = Number(cell[2]);
+        frame.box = { id, x: table.x + table.colW.slice(0, c).reduce((a, w) => a + w, 0), y: table.rowY[Number(cell[1])] ?? table.y, lines: 1, text: "" };
+      } else {
+        frame.box = { id, x: styleNum(style, "left"), y: styleNum(style, "top"), lines: 1, text: "" };
+        table = { x: frame.box.x, y: frame.box.y, colW: [], rowY: [], lastH: 0 };
+      }
+      if (!out.has(slide)) out.set(slide, []);
+      out.get(slide)?.push(frame.box);
     }
-    stack.push({ name: t.name, box });
-    out.get(slide)?.push(box);
+    stack.push(frame);
+  }
+  for (const [s, b] of loose) {
+    if (!out.has(s)) out.set(s, []);
+    out.get(s)?.push(b);
   }
   return out;
 }
 
 const DISPLAY_HEADER = SOURCE_HEADERS[2];
 
-function aoa(wb: XLSX.WorkBook, name: string): unknown[][] {
+export type WorkbookInput = Uint8Array | XLSX.WorkBook;
+export const readWorkbook = (x: WorkbookInput): XLSX.WorkBook => (x instanceof Uint8Array ? XLSX.read(x, { type: "array" }) : x);
+
+function aoa(wb: XLSX.WorkBook, name: string, blankrows = true): unknown[][] {
   const ws = wb.Sheets[name];
-  return ws === undefined ? [] : XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: null, blankrows: true });
+  return ws === undefined ? [] : XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: null, blankrows });
 }
 
 /** The المصدر table rows, joined by its value-key column. */
-export async function readXlsxSource(xlsx: Uint8Array): Promise<{ valueKey: string; display: string }[]> {
-  const rows = aoa(XLSX.read(xlsx, { type: "array" }), SOURCE_SHEET);
+export async function readXlsxSource(xlsx: WorkbookInput): Promise<{ valueKey: string; display: string }[]> {
+  const rows = aoa(readWorkbook(xlsx), SOURCE_SHEET);
   const head = rows.findIndex((r) => r.includes(SOURCE_KEY_HEADER));
   if (head < 0) return [];
   const k = rows[head].indexOf(SOURCE_KEY_HEADER);
@@ -252,8 +296,8 @@ export async function readXlsxSource(xlsx: Uint8Array): Promise<{ valueKey: stri
 export interface XlsxStepCounts { datasetId: string; stepId: string; inCount: number; removed: number; outCount: number }
 
 /** B4:D4 of each step sheet the plan declares; a missing sheet or cell reads as NaN so reconciliation fails. */
-export async function readXlsxSteps(xlsx: Uint8Array, plan: WorkbookPlan): Promise<XlsxStepCounts[]> {
-  const wb = XLSX.read(xlsx, { type: "array" });
+export async function readXlsxSteps(xlsx: WorkbookInput, plan: WorkbookPlan): Promise<XlsxStepCounts[]> {
+  const wb = readWorkbook(xlsx);
   const cell = (ws: XLSX.WorkSheet | undefined, ref: string): number => {
     const v = ws?.[ref]?.v;
     return typeof v === "number" ? v : Number.NaN;
@@ -264,9 +308,66 @@ export async function readXlsxSteps(xlsx: Uint8Array, plan: WorkbookPlan): Promi
   });
 }
 
+/**
+ * Data rows of the raw sheets in the companion, summed per dataset (a sheet belongs to the datasets that list
+ * its file). Rows with no cell at all are not counted.
+ */
+export function readRawRowCounts(companion: WorkbookInput, plan: WorkbookPlan, spec: ReportSpec): Map<string, number> {
+  const wb = readWorkbook(companion);
+  const out = new Map<string, number>();
+  for (const def of spec.datasets) {
+    let n = 0;
+    for (const s of plan.companion.sheets) {
+      if (s.kind !== "raw" || s.raw === undefined || !def.files.includes(s.raw.fileName)) continue;
+      n += Math.max(0, aoa(wb, s.name, false).length - 1);
+    }
+    out.set(def.id, n);
+  }
+  return out;
+}
+
+/** The `ref` of each table part, by table name. */
+export function tableRefs(parts: Map<string, string>): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const [name, xml] of parts) {
+    if (!/^xl\/tables\/table\d+\.xml$/.test(name)) continue;
+    for (const t of tokenizeXml(xml)) {
+      if (t.k === "text" || t.name !== "table") continue;
+      out.set(t.attrs.get("name") ?? "", t.attrs.get("ref") ?? "");
+      break;
+    }
+  }
+  return out;
+}
+
+/** Filled data rows inside each processed set's table on the report workbook, per dataset (NaN when the table is gone). */
+export function readProcessedRowCounts(report: WorkbookInput, parts: Map<string, string>, plan: WorkbookPlan): Map<string, number> {
+  const wb = readWorkbook(report);
+  const refs = tableRefs(parts);
+  const out = new Map<string, number>();
+  for (const s of plan.sheets) {
+    if (s.kind !== "processed" || s.datasetId === undefined) continue;
+    const ref = refs.get(s.table ?? "");
+    const ws = wb.Sheets[s.name];
+    if (ref === undefined || ref === "" || ws === undefined) { out.set(s.datasetId, Number.NaN); continue; }
+    const r = XLSX.utils.decode_range(ref);
+    let n = 0;
+    for (let row = r.s.r + 1; row <= r.e.r; row++) {
+      let filled = false;
+      for (let c = r.s.c; c <= r.e.c && !filled; c++) {
+        const v = (ws[XLSX.utils.encode_cell({ r: row, c })] as XLSX.CellObject | undefined)?.v;
+        filled = v !== undefined && v !== null && v !== "";
+      }
+      if (filled) n++;
+    }
+    out.set(s.datasetId, n);
+  }
+  return out;
+}
+
 /** Every string a workbook sheet shows (cell values and formatted text), per sheet name. */
-export function workbookSheetTexts(xlsx: Uint8Array): { sheet: string; texts: string[] }[] {
-  const wb = XLSX.read(xlsx, { type: "array" });
+export function workbookSheetTexts(xlsx: WorkbookInput): { sheet: string; texts: string[] }[] {
+  const wb = readWorkbook(xlsx);
   return wb.SheetNames.map((sheet) => {
     const ws = wb.Sheets[sheet];
     const texts: string[] = [];
@@ -280,6 +381,18 @@ export function workbookSheetTexts(xlsx: Uint8Array): { sheet: string; texts: st
   });
 }
 
+/** Worksheet part path per sheet name, from `xl/workbook.xml` and its relationships. */
+export function sheetPartPaths(parts: Map<string, string>): Map<string, string> {
+  const rels = relTargets(parts.get("xl/_rels/workbook.xml.rels"));
+  const out = new Map<string, string>();
+  for (const t of tokenizeXml(parts.get("xl/workbook.xml") ?? "")) {
+    if (t.k === "text" || t.name !== "sheet") continue;
+    const target = rels.get(t.attrs.get("r:id") ?? "");
+    if (target !== undefined) out.set(t.attrs.get("name") ?? "", resolvePart("xl/workbook.xml", target));
+  }
+  return out;
+}
+
 /** Decoded text content of an XML part (text nodes and attribute values), for character scans. */
 export function xmlTexts(xml: string): string[] {
   const out: string[] = [];
@@ -290,3 +403,22 @@ export function xmlTexts(xml: string): string[] {
   return out;
 }
 
+/** Layout boxes in read-back form: the third source for layout parity. */
+export function layoutBoxes(doc: LayoutDoc): Map<number, ReadBox[]> {
+  const out = new Map<number, ReadBox[]>();
+  for (const s of doc.slides) {
+    const list: ReadBox[] = [];
+    for (const b of s.boxes) {
+      const lines = b.kind === "text" ? Math.max(1, b.lines.length) : 1;
+      list.push({ id: b.id, x: b.x, y: b.y, lines, text: "" });
+      if (b.kind !== "table") continue;
+      [b.header, ...b.rows].forEach((row, r) => row.forEach((c, col) => {
+        const x = b.x + b.colW.slice(0, col).reduce((a, w) => a + w, 0);
+        const y = r === 0 ? b.y : b.y + LAYOUT.headerH + (r - 1) * b.rowH;
+        list.push({ id: c.id, x, y, lines: Math.max(1, c.lines.length), text: "" });
+      }));
+    }
+    out.set(s.index, list);
+  }
+  return out;
+}

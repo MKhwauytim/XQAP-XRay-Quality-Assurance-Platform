@@ -97,11 +97,22 @@ export interface LayoutFigure {
   display: string;
 }
 
+/**
+ * Text a slide shows that is not a figure but holds digits: a rendered param value, static template text such
+ * as a year, a title, a dimension label or a chart category. The figure-parity gate expects these digits too.
+ */
+export interface NonFigureSpan {
+  slide: number;
+  boxId: string;
+  text: string;
+}
+
 export interface LayoutDoc {
   width: 1920;
   height: 1080;
   slides: LayoutSlide[];
   figures: LayoutFigure[];
+  nonFigureSpans: NonFigureSpan[];
   /** Fit errors and `limit.slides`. */
   issues: EngineIssue[];
 }

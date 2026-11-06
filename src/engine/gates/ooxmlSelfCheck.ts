@@ -1,9 +1,10 @@
+import type * as XLSX from "xlsx";
 import type { EngineIssue } from "../errors";
 import type { LayoutDoc } from "../layout/types";
 import { arabicIndicCount } from "../lint/designLint";
 import type { WorkbookPlan } from "../xlsx/planWorkbook";
 import { tokenizeXml } from "../xml/tokenize";
-import { workbookSheetTexts, xmlTexts, zipParts } from "./readBack";
+import { readWorkbook, sheetPartPaths, workbookSheetTexts, xmlTexts, zipParts } from "./readBack";
 
 export interface OoxmlCounts {
   slides: number;
@@ -41,9 +42,33 @@ function resolveTarget(relsPath: string, target: string): string {
   return parts.join("/");
 }
 
-/** Structural problems of one package: a part that does not tokenize cleanly, or an internal relationship with no part. */
-function packageIssues(label: string, parts: Map<string, string>): EngineIssue[] {
+const CONTENT_TYPES = "[Content_Types].xml";
+
+/** Every override names a real part, and every part has an override or a default for its extension. */
+function contentTypeIssues(label: string, parts: Map<string, string>): EngineIssue[] {
   const out: EngineIssue[] = [];
+  const xml = parts.get(CONTENT_TYPES);
+  if (xml === undefined) return [{ rule: "gate.ooxml", path: label, detail: `${CONTENT_TYPES} missing` }];
+  const defaults = new Set<string>();
+  const overrides = new Set<string>();
+  for (const t of tokenizeXml(xml)) {
+    if (t.k === "text") continue;
+    if (t.name === "Default") defaults.add((t.attrs.get("Extension") ?? "").toLowerCase());
+    if (t.name === "Override") overrides.add((t.attrs.get("PartName") ?? "").replace(/^\//, ""));
+  }
+  for (const o of overrides) if (!parts.has(o)) out.push({ rule: "gate.ooxml", path: `${label}: ${CONTENT_TYPES}`, detail: `override for missing part ${o}` });
+  for (const name of parts.keys()) {
+    if (name === CONTENT_TYPES || overrides.has(name)) continue;
+    const ext = /\.([^./]+)$/.exec(name)?.[1]?.toLowerCase() ?? "";
+    if (!defaults.has(ext)) out.push({ rule: "gate.ooxml", path: `${label}: ${name}`, detail: "part has no content type" });
+  }
+  return out;
+}
+
+/** Structural problems of one package: unbalanced XML, an internal relationship with no part, content types. */
+function packageIssues(label: string, parts: Map<string, string>): EngineIssue[] {
+  if (parts.size === 0) return [];
+  const out: EngineIssue[] = contentTypeIssues(label, parts);
   for (const [name, xml] of parts) {
     if (!XML_PART.test(name)) continue;
     const err = balanceError(xml);
@@ -62,7 +87,8 @@ const count = (parts: Map<string, string>, re: RegExp): number => [...parts.keys
 const occurrences = (parts: Map<string, string>, re: RegExp, tag: RegExp): number =>
   [...parts].filter(([n]) => re.test(n)).reduce((a, [, xml]) => a + (xml.match(tag)?.length ?? 0), 0);
 
-async function open(label: string, bytes: Uint8Array, issues: EngineIssue[]): Promise<Map<string, string>> {
+/** Opens a zip; a failure becomes a `gate.ooxml` issue and an empty part map. */
+export async function openPackage(label: string, bytes: Uint8Array, issues: EngineIssue[]): Promise<Map<string, string>> {
   try {
     return await zipParts(bytes);
   } catch (e) {
@@ -71,29 +97,42 @@ async function open(label: string, bytes: Uint8Array, issues: EngineIssue[]): Pr
   }
 }
 
-function digitIssues(label: string, parts: Map<string, string>, skip: (name: string) => boolean): EngineIssue[] {
-  const out: EngineIssue[] = [];
-  for (const [name, xml] of parts) {
-    if (!XML_PART.test(name) || skip(name)) continue;
-    const n = xmlTexts(xml).reduce((a, s) => a + arabicIndicCount(s), 0);
-    if (n > 0) out.push({ rule: "gate.ooxml", path: `${label}: ${name}`, detail: `${n} Arabic-Indic digits` });
-  }
-  return out;
+/** Text of one package to scan: every XML part, decoded, by part name. */
+export function partTexts(label: string, parts: Map<string, string>, skip: (name: string) => boolean = () => false): { where: string; texts: string[] }[] {
+  return [...parts].filter(([n]) => XML_PART.test(n) && !skip(n)).map(([n, xml]) => ({ where: `${label}: ${n}`, texts: xmlTexts(xml) }));
 }
 
 /**
- * Re-opens the PPTX, the report workbook and (when given) the companion raw workbook; every XML part must
- * tokenize with balanced tags and every internal relationship must reach a part; part counts must equal what
- * the layout and the plan declare; and no Arabic-Indic digit may appear outside a raw sheet (C9, C15).
+ * The companion split for character scans (C9): every part except the raw worksheet parts and the shared
+ * strings, plus each non-raw sheet's cells (the shared strings attributed per sheet), are `scanned`; the raw
+ * sheets' cells are `raw`, which is counted but never an error.
  */
-export async function checkOoxml(
-  pptx: Uint8Array, xlsx: Uint8Array, doc: LayoutDoc, plan: WorkbookPlan, companion?: Uint8Array,
-): Promise<{ issues: EngineIssue[]; counts: OoxmlCounts }> {
+export function companionTexts(parts: Map<string, string>, wb: XLSX.WorkBook, plan: WorkbookPlan): { scanned: { where: string; texts: string[] }[]; raw: string[] } {
+  const rawNames = new Set(plan.companion.sheets.filter((s) => s.kind === "raw").map((s) => s.name));
+  const paths = sheetPartPaths(parts);
+  const rawParts = new Set([...paths].filter(([n]) => rawNames.has(n)).map(([, p]) => p));
+  const scanned = partTexts("companion", parts, (n) => rawParts.has(n) || n === "xl/sharedStrings.xml");
+  const raw: string[] = [];
+  for (const { sheet, texts } of workbookSheetTexts(wb)) {
+    if (rawNames.has(sheet)) raw.push(...texts);
+    else scanned.push({ where: `companion: ${sheet}`, texts });
+  }
+  return { scanned, raw };
+}
+
+export interface OpenedOutputs {
+  pptx: Map<string, string>;
+  xlsx: Map<string, string>;
+  companion?: { parts: Map<string, string>; wb: XLSX.WorkBook };
+}
+
+/** `checkOoxml` on packages already opened once (runGates). */
+export function checkOoxmlParts(o: OpenedOutputs, doc: LayoutDoc, plan: WorkbookPlan): { issues: EngineIssue[]; counts: OoxmlCounts } {
   const issues: EngineIssue[] = [];
-  const p = await open("pptx", pptx, issues);
-  const x = await open("xlsx", xlsx, issues);
-  const c = companion === undefined ? new Map<string, string>() : await open("companion", companion, issues);
-  issues.push(...packageIssues("pptx", p), ...packageIssues("xlsx", x), ...packageIssues("companion", c));
+  const p = o.pptx;
+  const x = o.xlsx;
+  issues.push(...packageIssues("pptx", p), ...packageIssues("xlsx", x));
+  if (o.companion !== undefined) issues.push(...packageIssues("companion", o.companion.parts));
 
   const slideRe = /^ppt\/slides\/slide\d+\.xml$/;
   const counts: OoxmlCounts = {
@@ -118,17 +157,35 @@ export async function checkOoxml(
     if (counts[k] !== expected[k]) issues.push({ rule: "gate.ooxml", path: k, detail: `found ${counts[k]}, declared ${expected[k]}` });
   }
 
-  issues.push(...digitIssues("pptx", p, () => false), ...digitIssues("xlsx", x, () => false));
-  if (companion !== undefined) {
-    // Companion cells are attributed per sheet, because its shared strings serve the cover and the raw sheets alike.
-    issues.push(...digitIssues("companion", c, (n) => n.startsWith("xl/worksheets/") || n === "xl/sharedStrings.xml"));
-    const raw = new Set(plan.companion.sheets.filter((s) => s.kind === "raw").map((s) => s.name));
-    for (const { sheet, texts } of workbookSheetTexts(companion)) {
-      const n = texts.reduce((a, s) => a + arabicIndicCount(s), 0);
-      if (n === 0) continue;
-      if (raw.has(sheet)) counts.rawDigitHitsSkipped += n;
-      else issues.push({ rule: "gate.ooxml", path: `companion: ${sheet}`, detail: `${n} Arabic-Indic digits` });
-    }
+  // The report workbook holds no raw sheet (raw sheets live in the companion), so all of it is scanned.
+  const scanned = [...partTexts("pptx", p), ...partTexts("xlsx", x)];
+  if (o.companion !== undefined) {
+    const c = companionTexts(o.companion.parts, o.companion.wb, plan);
+    scanned.push(...c.scanned);
+    counts.rawDigitHitsSkipped = c.raw.reduce((a, s) => a + arabicIndicCount(s), 0);
+  }
+  for (const { where, texts } of scanned) {
+    const n = texts.reduce((a, s) => a + arabicIndicCount(s), 0);
+    if (n > 0) issues.push({ rule: "gate.ooxml", path: where, detail: `${n} Arabic-Indic digits` });
   }
   return { issues, counts };
+}
+
+/**
+ * Re-opens the PPTX, the report workbook and (when given) the companion raw workbook. Every XML part must
+ * tokenize with balanced tags, every internal relationship must reach a part, and every part must have a
+ * content type. Part counts must equal what the layout and the plan declare. No Arabic-Indic digit may appear
+ * outside a raw sheet (C9, C15).
+ */
+export async function checkOoxml(
+  pptx: Uint8Array, xlsx: Uint8Array, doc: LayoutDoc, plan: WorkbookPlan, companion?: Uint8Array,
+): Promise<{ issues: EngineIssue[]; counts: OoxmlCounts }> {
+  const issues: EngineIssue[] = [];
+  const opened: OpenedOutputs = { pptx: await openPackage("pptx", pptx, issues), xlsx: await openPackage("xlsx", xlsx, issues) };
+  if (companion !== undefined) {
+    const parts = await openPackage("companion", companion, issues);
+    if (parts.size > 0) opened.companion = { parts, wb: readWorkbook(companion) };
+  }
+  const r = checkOoxmlParts(opened, doc, plan);
+  return { issues: [...issues, ...r.issues], counts: r.counts };
 }

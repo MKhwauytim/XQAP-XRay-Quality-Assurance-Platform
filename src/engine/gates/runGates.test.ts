@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { buildOutputs, dropPart, editPptxText } from "../__fixtures__/gateKit";
+import { buildOutputs, dropPart, editPart, editPptxText, paramDigitFixture } from "../__fixtures__/gateKit";
 import type { Outputs } from "../__fixtures__/gateKit";
 import { runGates } from "./runGates";
 
@@ -46,5 +46,29 @@ describe("runGates", () => {
     const r = await gateOn({ ...good, xlsx: new Uint8Array([1, 2, 3]) });
     expect(r.passed).toBe(false);
     expect(r.issues.map((i) => i.rule)).toEqual(expect.arrayContaining(["gate.ooxml", "gate.figureParity", "gate.reconcile"]));
+  });
+
+  it("passes a param value with digits and static digit text, recorded as non-figure spans", async () => {
+    const o = await buildOutputs(paramDigitFixture());
+    const spans = o.doc.nonFigureSpans.map((s) => s.text).join(" ");
+    expect(spans).toContain("2026-05");
+    expect(spans).toContain("المستوى 1");
+    const r = await gateOn(o);
+    expect(r.issues).toEqual([]);
+  });
+
+  it("lints every companion part, such as docProps, outside the raw worksheets", async () => {
+    const companion = await editPart(good.companion, "docProps/app.xml", (x) => x.replace("</Properties>", "<Company>a\u2014b</Company></Properties>"));
+    const r = await gateOn({ ...good, companion });
+    expect(r.lint.errors).toContainEqual(expect.objectContaining({ path: "companion: docProps/app.xml", detail: "T3: U+2014" }));
+  });
+
+  it("scans the recipe and the HTML for Arabic-Indic digits, and HTML aria-label text for T3", async () => {
+    const html = good.html.replace('<section class="slide"', '<section aria-label="\u2013" class="slide"').replace("</body>", "<!-- --></body>");
+    const r = await gateOn({ ...good, html, recipe: '{"n":"\u0663"}' });
+    expect(r.lint.errors).toContainEqual(expect.objectContaining({ path: "recipe", detail: "decision 4: 1 Arabic-Indic digits" }));
+    expect(r.lint.errors).toContainEqual(expect.objectContaining({ path: "html", detail: "T3: U+2013" }));
+    const h = await gateOn({ ...good, html: good.html.replace("<title>", "<title>\u0661") });
+    expect(h.lint.errors).toContainEqual(expect.objectContaining({ path: "html", detail: "decision 4: 1 Arabic-Indic digits" }));
   });
 });

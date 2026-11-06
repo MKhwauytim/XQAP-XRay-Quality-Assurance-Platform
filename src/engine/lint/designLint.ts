@@ -33,17 +33,22 @@ function channel(c: number): number {
   return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
 }
 
+const HEX_COLOR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+
+/** Relative luminance, or NaN for anything that is not `#RGB` / `#RRGGBB`. */
 function luminance(color: string): number {
-  let h = color.replace(/^#/, "");
-  if (h.length === 3 || h.length === 4) h = [...h.slice(0, 3)].map((c) => c + c).join("");
+  if (!HEX_COLOR.test(color)) return Number.NaN;
+  let h = color.slice(1);
+  if (h.length === 3) h = [...h].map((c) => c + c).join("");
   const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
   return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
 }
 
-/** WCAG 2 contrast ratio of two `#RGB` / `#RRGGBB` colours, 1 to 21. */
+/** WCAG 2 contrast ratio of two `#RGB` / `#RRGGBB` colours, 1 to 21; NaN when either colour does not parse. */
 export function contrastRatio(fg: string, bg: string): number {
-  const [a, b] = [luminance(fg), luminance(bg)].sort((x, y) => y - x);
-  return (a + 0.05) / (b + 0.05);
+  const la = luminance(fg);
+  const lb = luminance(bg);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }
 
 /** F1 threshold: 3:1 at 44px and above, 4.5:1 below. */
@@ -104,7 +109,8 @@ export function lintLayout(doc: LayoutDoc, theme: ThemeTokens): { errors: Engine
       if (s.fg !== undefined && s.bg !== undefined) {
         const ratio = contrastRatio(s.fg, s.bg);
         const need = minContrast(s.sizePx);
-        if (ratio < need) errors.push(lintIssue(slide.index, s.where, `F1: contrast ${ratio.toFixed(2)} < ${need} (${s.fg} on ${s.bg})`));
+        // Written as "not at least" so an unparseable colour (NaN) is an error, never a pass.
+        if (!(ratio >= need)) errors.push(lintIssue(slide.index, s.where, `F1: contrast ${ratio.toFixed(2)} < ${need} (${s.fg} on ${s.bg})`));
       }
       if (s.sizePx < F4_MIN_PX) errors.push(lintIssue(slide.index, s.where, `F4: ${s.sizePx}px < ${F4_MIN_PX}px`));
       for (const hit of lintText(s.text)) errors.push(lintIssue(slide.index, s.where, `${hit.rule}: index ${hit.index}`));
