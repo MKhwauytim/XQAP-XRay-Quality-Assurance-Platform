@@ -4,7 +4,10 @@ import type { DomainPack, IssueParams, MeasureSpec, ReportSpec, ThemeTokens } fr
 export const FIXTURE_FILE = "studies.xlsx";
 export const FIXTURE_SHEET = "نتائج الدراسة";
 
-/** 12 raw rows: 1 empty status (removed by s1), 1 exact duplicate (removed by s2), 7 matched after both. */
+/**
+ * 12 raw rows: 1 empty status (removed by s1), 1 exact duplicate (removed by s2). After both, 10 rows, 7 matched:
+ * بحري 4 rows (جدة, 3 matched); بري 6 rows (الحديثة 3 with 2 matched, البطحاء 3 with 2 matched).
+ */
 export const FIXTURE_FILES: RawFile[] = [
   {
     fileName: FIXTURE_FILE,
@@ -16,16 +19,16 @@ export const FIXTURE_FILES: RawFile[] = [
         rows: [
           ["جدة", "بحري", "مطابق", 100],
           ["جدة", "بحري", "مطابق", 200],
-          ["الرياض", "بري", "مطابق", 300],
-          ["الدمام", "بحري", "مطابق", 400],
-          ["الدمام", "بحري", "مطابق", 500],
-          ["الرياض", "بري", "مطابق", "غير متوفر"],
+          ["الحديثة", "بري", "مطابق", 300],
+          ["البطحاء", "بري", "مطابق", 400],
+          ["البطحاء", "بري", "مطابق", 500],
+          ["الحديثة", "بري", "مطابق", "غير متوفر"],
           ["جدة", "بحري", "غير مطابق", "12,5"],
-          ["الرياض", "بري", "غير مطابق", 700],
-          ["جدة", "بحري", "غير مطابق", 200],
-          ["الدمام", "بحري", "", ""],
-          ["الرياض", "بري", "مطابق", 600],
-          ["الرياض", "بري", "مطابق", 600],
+          ["الحديثة", "بري", "غير مطابق", 700],
+          ["البطحاء", "بري", "غير مطابق", 200],
+          ["البطحاء", "بري", "", ""],
+          ["جدة", "بحري", "مطابق", 600],
+          ["جدة", "بحري", "مطابق", 600],
         ],
       },
     ],
@@ -66,7 +69,7 @@ const STUDIED: MeasureSpec = {
 const MATCH_RATE: MeasureSpec = {
   id: "matchRate", label: "نسبة التوائم", datasetId: "studies",
   formula: 'filter(count([الحالة]), [الحالة] = "مطابق") / @studied',
-  format: { kind: "pct", digits: 1 },
+  format: { kind: "pct", digits: 2 },
 };
 
 export const FIXTURE_THEME: ThemeTokens = {
