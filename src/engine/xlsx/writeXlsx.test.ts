@@ -1,0 +1,183 @@
+import { beforeAll, describe, expect, it } from "vitest";
+import { FIXTURE_FILES, twoSlideFixture } from "../__fixtures__/twoSlide";
+import { pipeline, sha, sheetAoa, sheetFormulas, unzip } from "../__fixtures__/xlsxKit";
+import { ENGINE_VERSION } from "../version";
+import { SOURCE_KEY_HEADER, planWorkbook } from "./planWorkbook";
+import type { WorkbookPlan } from "./planWorkbook";
+import { DEFAULT_COMPANION_FILE, WorkbookRefused, writeXlsx } from "./writeXlsx";
+import type { XlsxOutput } from "./writeXlsx";
+
+const OPTS = { title: "تقرير المنافذ", issuedAt: "2026-11-05T09:00:00Z" };
+
+async function build(): Promise<{ out: XlsxOutput; plan: WorkbookPlan; p: ReturnType<typeof pipeline> }> {
+  const p = pipeline();
+  const plan = planWorkbook(p.files, p.f.spec, p.processed, p.values, p.doc);
+  const out = await writeXlsx(plan, { files: p.files, spec: p.f.spec, processed: p.processed, values: p.values, doc: p.doc, theme: p.f.theme }, OPTS);
+  return { out, plan, p };
+}
+
+let a: Awaited<ReturnType<typeof build>>;
+beforeAll(async () => { a = await build(); });
+
+describe("writeXlsx", () => {
+  it("returns two workbooks: the report and its companion raw workbook", () => {
+    expect(a.out.report.byteLength).toBeGreaterThan(0);
+    expect(a.out.companion.byteLength).toBeGreaterThan(0);
+    expect(a.out.companionFileName).toBe(DEFAULT_COMPANION_FILE);
+  });
+
+  it("raw sheet keeps upload headers and every cell untouched, including the two type-error cells", () => {
+    const aoa = sheetAoa(a.out.companion, "studies.xlsx نتائج الدراسة");
+    expect(aoa[0]).toEqual(FIXTURE_FILES[0].sheets[0].headers);
+    expect(aoa.slice(1)).toEqual(FIXTURE_FILES[0].sheets[0].rows);
+    expect(aoa.slice(1).flat()).toEqual(expect.arrayContaining(["غير متوفر", "12,5"]));
+  });
+
+  it("the report holds no raw sheet; the companion holds no processed one", async () => {
+    const report = await unzip(a.out.report);
+    expect(report.text("xl/workbook.xml")).not.toContain("studies.xlsx");
+    expect((await unzip(a.out.companion)).list(/^xl\/tables\//)).toEqual([]);
+  });
+
+  it("step sheets show in - removed = out in B4:D4 and the removed rows", () => {
+    const s1 = sheetAoa(a.out.report, "استبعاد الحالة الفارغة");
+    expect(s1[2].slice(1, 4)).toEqual(["قبل", "المستبعد", "بعد"]);
+    expect(s1[3].slice(1, 4)).toEqual([12, 1, 11]);
+    expect(s1[8].slice(0, 4)).toEqual(["المنفذ", "نوع المنفذ", "الحالة", "العدد"]);
+    expect(s1[9].slice(0, 2)).toEqual(["البطحاء", "بري"]);
+    const s2 = sheetAoa(a.out.report, "حذف التكرار");
+    expect(s2[3].slice(1, 4)).toEqual([11, 1, 10]);
+    expect(s2[9].slice(0, 4)).toEqual(["جدة", "بحري", "مطابق", 600]);
+  });
+
+  it("every non-raw sheet opens with the header block", () => {
+    for (const name of ["الفهرس", "استبعاد الحالة الفارغة", "الدراسات", "الإحصائيات", "المصدر"]) {
+      const aoa = sheetAoa(a.out.report, name);
+      expect([aoa[2][0], aoa[3][0], aoa[4][0], aoa[5][0]]).toEqual(["الصفوف", "العدد", "يقرأ من", "القاعدة"]);
+    }
+  });
+
+  it("links to the companion with relative external hyperlinks from the cover and each processing sheet", async () => {
+    const z = await unzip(a.out.report);
+    const encoded = encodeURI(DEFAULT_COMPANION_FILE);
+    const sheetNo = (name: string) => a.plan.sheets.findIndex((s) => s.name === name) + 1;
+    for (const name of ["الفهرس", "استبعاد الحالة الفارغة", "حذف التكرار"]) {
+      const rels = z.text(`xl/worksheets/_rels/sheet${sheetNo(name)}.xml.rels`);
+      expect(rels).toContain(`Target="${encoded}"`);
+      expect(rels).toContain('TargetMode="External"');
+    }
+    const back = (await unzip(a.out.companion)).text("xl/worksheets/_rels/sheet1.xml.rels");
+    expect(back).toContain(`Target="${encodeURI("مصنف التقرير.xlsx")}"`);
+  });
+
+  it("table and pivot parts match the plan counts; caches have saveData=0 refreshOnLoad=1 and no records", async () => {
+    const z = await unzip(a.out.report);
+    expect(z.list(/^xl\/tables\/table\d+\.xml$/)).toHaveLength(2);
+    expect(z.list(/^xl\/pivotTables\/pivotTable\d+\.xml$/)).toHaveLength(a.plan.sheets.flatMap((s) => s.pivots ?? []).length);
+    const caches = z.list(/^xl\/pivotCache\/pivotCacheDefinition\d+\.xml$/);
+    expect(caches).toHaveLength(3);
+    caches.forEach((p) => {
+      expect(z.text(p)).toContain('saveData="0"');
+      expect(z.text(p)).toContain('refreshOnLoad="1"');
+    });
+    expect(z.list(/pivotCacheRecords/)).toEqual([]);
+    expect(z.text("xl/tables/table1.xml")).toContain('name="جدول_الدراسات"');
+    expect(z.text("xl/tables/table2.xml")).toContain('name="جدول_مصدر_الأرقام"');
+  });
+
+  it("every pivot field names a column of its source table", async () => {
+    const z = await unzip(a.out.report);
+    for (const p of z.list(/^xl\/pivotCache\/pivotCacheDefinition\d+\.xml$/)) {
+      const table = /worksheetSource name="([^"]+)"/.exec(z.text(p))?.[1];
+      const t = z.list(/^xl\/tables\/table\d+\.xml$/).map((x) => z.text(x)).find((x) => x.includes(`name="${table}"`)) ?? "";
+      const tableCols = [...t.matchAll(/<tableColumn [^>]*name="([^"]+)"/g)].map((m) => m[1]);
+      const cacheCols = [...z.text(p).matchAll(/<cacheField name="([^"]+)"/g)].map((m) => m[1]);
+      expect(cacheCols).toEqual(tableCols);
+    }
+  });
+
+  it("الإحصائيات carries the translated Excel formula for matchRate", () => {
+    expect(sheetFormulas(a.out.report, "الإحصائيات")).toContain('IFERROR(COUNTIFS(جدول_الدراسات[الحالة],"مطابق")/COUNTIFS(جدول_الدراسات[الحالة],"<>"),"-")');
+  });
+
+  it("a measure Excel cannot express keeps the engine value and an engine-only note", async () => {
+    const f = twoSlideFixture();
+    f.spec.model.measures.push({ id: "ports", label: "عدد المنافذ", datasetId: "studies", formula: "distinctCount([المنفذ])", format: { kind: "int", digits: 0 } });
+    f.spec.pages[0].visuals[1].wells.values?.push({ measure: "ports" });
+    const p = pipeline(f);
+    const plan = planWorkbook(p.files, f.spec, p.processed, p.values, p.doc);
+    const out = await writeXlsx(plan, { files: p.files, spec: f.spec, processed: p.processed, values: p.values, doc: p.doc, theme: f.theme }, OPTS);
+    const row = sheetAoa(out.report, "الإحصائيات").find((r) => r[3] === "عدد المنافذ");
+    expect(row?.slice(5, 7)).toEqual([3, 3]);
+    expect(String(row?.[7])).toContain("الصيغة في المحرك فقط");
+  });
+
+  it("المصدر has one row per layout figure, a value key column first and the engine version", () => {
+    const aoa = sheetAoa(a.out.report, "المصدر");
+    const h = aoa.findIndex((r) => r[0] === SOURCE_KEY_HEADER);
+    expect(aoa.length - h - 1).toBe(a.p.doc.figures.length);
+    expect(aoa[h + 1]).toContain(ENGINE_VERSION);
+    expect(aoa.slice(h + 1).map((r) => r[0])).toEqual(a.p.doc.figures.map((f) => f.valueKey));
+  });
+
+  it("[Content_Types].xml declares every added part and no dangling relationship", async () => {
+    const z = await unzip(a.out.report);
+    const ct = z.text("[Content_Types].xml");
+    z.list(/^xl\/(tables|pivotTables|pivotCache)\/.+\.xml$/).forEach((p) => expect(ct).toContain(`PartName="/${p}"`));
+    expect(ct).not.toContain('Extension="bin"');
+    for (const rels of z.list(/\.rels$/)) {
+      const dir = rels.replace(/_rels\/[^/]+\.rels$/, "");
+      for (const m of z.text(rels).matchAll(/<Relationship [^>]*\/>/g)) {
+        if (m[0].includes('TargetMode="External"')) continue;
+        const target = /Target="([^"]+)"/.exec(m[0])?.[1] ?? "";
+        const parts = (dir + target).split("/").reduce<string[]>((acc, s) => (s === ".." ? acc.slice(0, -1) : [...acc, s]), []);
+        expect(z.names).toContain(parts.join("/"));
+      }
+    }
+  });
+
+  it("package clean-up drops a relationship to a missing part and its override", async () => {
+    const JSZip = (await import("jszip")).default;
+    const { cleanPackage } = await import("./ooxmlParts");
+    const zip = await JSZip.loadAsync(a.out.report);
+    zip.remove("xl/metadata.xml");
+    await cleanPackage(zip);
+    expect(await zip.file("xl/_rels/workbook.xml.rels")?.async("string")).not.toContain("metadata.xml");
+    expect(await zip.file("[Content_Types].xml")?.async("string")).not.toContain("/xl/metadata.xml");
+  });
+
+  it("styles: theme font as Normal, the Deck3 table style, right-to-left views, black separators", async () => {
+    const z = await unzip(a.out.report);
+    expect(z.text("xl/styles.xml")).toMatch(new RegExp(`<fonts count="\\d+"><font><sz val="11"/><color rgb="[0-9A-F]{8}"/><name val="${a.p.f.theme.font}"/>`));
+    expect(z.text("xl/styles.xml")).toContain('defaultTableStyle="Deck3"');
+    const sep = a.plan.sheets.findIndex((s) => s.name === "|") + 1;
+    expect(z.text(`xl/worksheets/sheet${sep}.xml`)).toContain('showRowColHeaders="0"');
+    expect(z.text(`xl/worksheets/sheet${sep}.xml`)).toContain("<sheetData/>");
+    expect(z.text(`xl/worksheets/sheet${sep}.xml`)).toContain('<tabColor indexed="8"/>');
+    z.list(/^xl\/worksheets\/sheet\d+\.xml$/).forEach((p) => expect(z.text(p)).toContain('rightToLeft="1"'));
+  });
+
+  it("zip entries and core dates come from issuedAt", async () => {
+    const z = await unzip(a.out.report);
+    expect(z.text("docProps/core.xml")).toContain("2026-11-05T09:00:00Z");
+    const JSZip = (await import("jszip")).default;
+    const raw = await JSZip.loadAsync(a.out.report);
+    const dates = new Set(Object.values(raw.files).map((f) => f.date.getTime()));
+    expect(dates.size).toBe(1);
+  });
+
+  it("refuses to write when a visible name looks like an id or a numbered step", async () => {
+    const f = twoSlideFixture();
+    f.spec.datasets[0].steps[0].label = "خطوة 1 تنظيف";
+    const p = pipeline(f);
+    const plan = planWorkbook(p.files, f.spec, p.processed, p.values, p.doc);
+    await expect(writeXlsx(plan, { files: p.files, spec: f.spec, processed: p.processed, values: p.values, doc: p.doc, theme: f.theme }, OPTS))
+      .rejects.toBeInstanceOf(WorkbookRefused);
+  });
+
+  it("byte-identical across two calls", async () => {
+    const b = await build();
+    expect(sha(b.out.report)).toBe(sha(a.out.report));
+    expect(sha(b.out.companion)).toBe(sha(a.out.companion));
+  });
+});

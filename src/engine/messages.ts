@@ -6,7 +6,8 @@ export type MessageKey =
   | "limit.rows" | "limit.slides" | "limit.visuals" | "limit.time"
   | "fit.tooLong" | "gate.figureParity" | "gate.layoutParity" | "gate.lint"
   | "gate.reconcile" | "gate.ooxml" | "recipe.hashMismatch" | "recipe.invalid"
-  | "resolve.keyConflict" | "theme.invalid";
+  | "resolve.keyConflict" | "theme.invalid"
+  | "xlsx.names" | "xlsx.columnClash" | "xlsx.pivotField";
 
 export const MESSAGES_AR: Record<MessageKey, string> = {
   "schema.invalid": "بنية التقرير غير صالحة",
@@ -32,6 +33,9 @@ export const MESSAGES_AR: Record<MessageKey, string> = {
   "recipe.invalid": "الوصفة غير صالحة",
   "resolve.keyConflict": "رقمان مختلفان يحملان المفتاح نفسه",
   "theme.invalid": "قيمة غير صالحة في ألوان القالب أو خطه",
+  "xlsx.names": "اسم ظاهر في المصنف يشبه رمزا داخليا أو رقم خطوة، استخدم اسما عربيا واضحا",
+  "xlsx.columnClash": "عمودان يحملان الاسم نفسه في إكسل (يتجاهل إكسل حالة الأحرف والهمزة على الألف)",
+  "xlsx.pivotField": "الجدول المحوري يشير إلى عمود غير موجود في جدوله",
 };
 
 export function formatIssue(
