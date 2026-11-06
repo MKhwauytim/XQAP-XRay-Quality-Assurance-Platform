@@ -26,6 +26,8 @@ export interface TextCell {
   sizePx: number;
   weight: 400 | 700;
   valueKey?: string;
+  /** Dimension cells: the row's group, encoded as in the value key (the part after `measureId@`). */
+  groupKey?: string;
 }
 
 export interface TableBox {
