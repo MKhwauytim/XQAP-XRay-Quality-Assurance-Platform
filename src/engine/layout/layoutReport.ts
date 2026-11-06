@@ -29,7 +29,19 @@ export const LAYOUT = {
   rowH: 50,
   headerH: 60,
   cellPad: 8,
+  /** Line height as a multiple of the font size; HTML and the layout line maths both read it. */
+  lineHeightRatio: 1.4,
+  /** Gap between stacked slides on screen (print drops it). */
+  slideGap: 24,
+  barLabelPx: 20,
+  barLabelGap: 8,
+  barWidthRatio: 0.6,
 } as const;
+
+/** Line height in whole px for a font size. */
+export function lineHeightPx(sizePx: number): number {
+  return Math.round(sizePx * LAYOUT.lineHeightRatio);
+}
 
 const CELL_W = LAYOUT.slideW / 24;
 const CELL_H = LAYOUT.slideH / 14;
@@ -126,7 +138,9 @@ function textBox(
   ctx: Ctx, slide: number, id: string, visualId: string, frame: Rect, text: string,
   style: { sizePx: number; weight: 400 | 700; color: string; maxLines: 1 | 2 }, valueKeys: string[], located = true,
 ): TextBox {
-  const fit = fitText(text, { w: frame.w, basePx: style.sizePx, weight: style.weight, maxLines: style.maxLines }, ctx.m);
+  // Lines that cannot fit the frame height at this size are not offered (at least one line always is).
+  const maxLines = Math.max(1, Math.min(style.maxLines, Math.floor(frame.h / lineHeightPx(style.sizePx)))) as 1 | 2;
+  const fit = fitText(text, { w: frame.w, basePx: style.sizePx, weight: style.weight, maxLines }, ctx.m);
   pushFit(ctx, fit, slide, located ? visualId : undefined);
   return {
     kind: "text", id, visualId, ...frame,

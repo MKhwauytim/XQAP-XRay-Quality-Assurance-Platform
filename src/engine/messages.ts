@@ -6,7 +6,7 @@ export type MessageKey =
   | "limit.rows" | "limit.slides" | "limit.visuals" | "limit.time"
   | "fit.tooLong" | "gate.figureParity" | "gate.layoutParity" | "gate.lint"
   | "gate.reconcile" | "gate.ooxml" | "recipe.hashMismatch" | "recipe.invalid"
-  | "resolve.keyConflict";
+  | "resolve.keyConflict" | "theme.invalid";
 
 export const MESSAGES_AR: Record<MessageKey, string> = {
   "schema.invalid": "بنية التقرير غير صالحة",
@@ -31,6 +31,7 @@ export const MESSAGES_AR: Record<MessageKey, string> = {
   "recipe.hashMismatch": "ملف البيانات تغير منذ إصدار الوصفة",
   "recipe.invalid": "الوصفة غير صالحة",
   "resolve.keyConflict": "رقمان مختلفان يحملان المفتاح نفسه",
+  "theme.invalid": "قيمة غير صالحة في ألوان القالب أو خطه",
 };
 
 export function formatIssue(
