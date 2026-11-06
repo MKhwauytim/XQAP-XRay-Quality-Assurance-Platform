@@ -28,6 +28,7 @@ measures.set("matched", parse('filter(count([الحالة]), [الحالة] = "�
 const target: ExcelTarget = {
   table: "tblStudies",
   columnName: (id) => labelOf.get(id) ?? id,
+  columnType: (id) => FIXTURE_DATASET.columns.find((c) => c.id === id)?.type,
   groupFilters: [],
   extraFilters: [],
 };
@@ -264,8 +265,8 @@ describe("toExcelFormula", () => {
   });
 
   it("a string with a double quote is escaped by doubling", () => {
-    const r = toExcelFormula(parse('filter(count([الحالة]), [الحالة] = "a""b")'), target, measures) as { formula: string };
-    expect(r.formula).toContain('"a""b"');
+    const r = toExcelFormula(parse('filter(count([الحالة]), [الحالة] = "م""ب")'), target, measures) as { formula: string };
+    expect(r.formula).toContain('"م""ب"');
   });
 
   it("sum, avg, min and max use the matching IFS functions, comparisons map to operators", () => {
@@ -283,8 +284,8 @@ describe("toExcelFormula", () => {
   });
 
   it("wildcard characters and leading operators in a string are matched literally", () => {
-    expect(formulaOf('filter(count([الحالة]), [الحالة] = "a*b")')).toContain('"a~*b"');
-    expect(formulaOf('filter(count([الحالة]), [الحالة] = "<x")')).toContain('"=<x"');
+    expect(formulaOf('filter(count([الحالة]), [الحالة] = "م*ب")')).toContain('"م~*ب"');
+    expect(formulaOf('filter(count([الحالة]), [الحالة] = "<م")')).toContain('"=<م"');
   });
 
   it("structured references escape [ ] # ' and bracket special names", () => {
@@ -302,6 +303,42 @@ describe("toExcelFormula", () => {
     const loop = new Map<string, Expr>([["a", { k: "measure", id: "a" }]]);
     const r = toExcelFormula({ k: "measure", id: "a" }, target, loop);
     expect(r.ok).toBe(false);
+  });
+
+  it("refuses translations Excel would evaluate differently", () => {
+    const refused = (text: string, t: ExcelTarget = target): string => {
+      const r = toExcelFormula(parse(text), t, measures);
+      expect(r.ok, text).toBe(false);
+      const reason = (r as { reason: string }).reason;
+      expect(reason.length).toBeGreaterThan(0);
+      return reason;
+    };
+    // 1. ordered comparison of text
+    for (const op of ["<", "<=", ">", ">="]) refused(`filter(count([الحالة]), [المنفذ] ${op} "جدة")`);
+    // 2. text Excel would coerce
+    for (const v of ["5", "1e3", "12%", "1/2/2026", "10:30", "true", "FALSE", "1.5"]) {
+      refused(`filter(count([الحالة]), [المنفذ] = "${v}")`);
+    }
+    // number criterion against an unknown or non-numeric column
+    refused("filter(count([الحالة]), [العدد] > 3)", { ...target, columnType: undefined });
+    refused("filter(count([الحالة]), [العدد] > 3)", { ...target, columnType: () => "text" });
+    refused("count([الحالة])", { ...target, groupFilters: [{ columnId: "count", value: 5 }], columnType: undefined });
+    // 3. Latin letters with = or <>
+    refused('filter(count([الحالة]), [المنفذ] = "Jeddah")');
+    refused('filter(count([الحالة]), [المنفذ] <> "ab")');
+    // 4. column labels
+    for (const label of ["@x", " x", "x ", ""]) {
+      refused("count([الحالة])", { ...target, columnName: (id) => (id === "status" ? label : (labelOf.get(id) ?? id)) });
+    }
+    // minors: formula length and criteria pair count
+    refused("count([الحالة])", { ...target, columnName: (id) => (id === "status" ? "ح".repeat(9000) : (labelOf.get(id) ?? id)) });
+    const many = Array.from({ length: 130 }, (_, i) => ({ columnId: "port", value: `م${i}`.replace(/\d/g, "ب") }));
+    refused("count([الحالة])", { ...target, groupFilters: many });
+  });
+
+  it("still translates Arabic text and numbers on a numeric column", () => {
+    expect(formulaOf('filter(count([الحالة]), [العدد] > 300 and [المنفذ] = "جدة")')).toBe(
+      'COUNTIFS(tblStudies[الحالة],"<>",tblStudies[العدد],">300",tblStudies[المنفذ],"جدة")');
   });
 
   it.each([

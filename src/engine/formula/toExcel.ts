@@ -1,10 +1,12 @@
-import type { FilterSpec } from "../data/types";
+import type { ColumnType, FilterSpec } from "../data/types";
 import type { BinOp, Expr } from "./ast";
 
 export interface ExcelTarget {
   table: string;
   /** Maps a column id to its human Arabic label (owner rule M15). */
   columnName: (columnId: string) => string;
+  /** Declared column types. A number criterion is only translated against a column known to be numeric. */
+  columnType?: (columnId: string) => ColumnType | undefined;
   groupFilters: { columnId: string; value: string | number | boolean }[];
   extraFilters: FilterSpec[];
 }
@@ -21,9 +23,14 @@ const fail = (reason: string): never => { throw new Untranslatable(reason); };
 
 const SPECIAL_COLUMN_CHARS = /[\t\n\r,:.[\]#'"{}$^&*+=\-<>/()]/;
 const NON_EMPTY = '"<>"';
+const MAX_FORMULA_LENGTH = 8192;
+const MAX_CRITERIA_PAIRS = 127;
 
 /** Excel structured-reference column: `'` escapes `[ ] # '`; other special characters need double brackets. */
 function columnRef(table: string, name: string): string {
+  if (name === "" || name !== name.trim() || name.startsWith("@")) {
+    return fail("اسم العمود فارغ أو يبدأ بـ @ أو يحمل مسافات في طرفيه فلا يترجم إلى مرجع إكسل");
+  }
   const escaped = name.replace(/[[\]#']/g, (c) => `'${c}`);
   return SPECIAL_COLUMN_CHARS.test(name) ? `${table}[[${escaped}]]` : `${table}[${escaped}]`;
 }
@@ -38,23 +45,42 @@ function numberText(n: number): string {
 /** Escapes COUNTIFS wildcard characters so the string matches literally. */
 const literal = (s: string): string => s.replace(/[~*?]/g, (c) => `~${c}`);
 
+const COERCIBLE = [
+  /^[+-]?[\d.,٠-٩]+(?:e[+-]?\d+)?$/i,
+  /%\s*$/,
+  /\d\s*[/:.-]\s*\d/,
+  /^(true|false)$/i,
+];
+
+/** True when Excel would read this text criterion as a number, percentage, date, time or boolean. */
+function excelCoerces(text: string): boolean {
+  const t = text.trim();
+  return Number.isFinite(Number(t)) && t !== "" ? true : COERCIBLE.some((re) => re.test(t));
+}
+
 /** The criteria argument for `column op value`, as it appears in the formula text. */
-function criterionArg(op: CmpOp, v: Scalar): string {
+function criterionArg(op: CmpOp, v: Scalar, numeric: boolean): string {
   if (typeof v === "boolean") {
     if (op !== "=" && op !== "<>") return fail("مقارنة ترتيبية على قيمة منطقية لا تترجم إلى صيغة إكسل");
     const word = v ? "TRUE" : "FALSE";
     return op === "=" ? word : quote(`<>${word}`);
   }
-  if (typeof v === "number") return op === "=" ? numberText(v) : quote(`${op}${numberText(v)}`);
+  if (typeof v === "number") {
+    if (!numeric) return fail("المقارنة بعدد على عمود غير معروف أنه رقمي لا تترجم إلى صيغة إكسل");
+    return op === "=" ? numberText(v) : quote(`${op}${numberText(v)}`);
+  }
   if (v === "") return fail("المقارنة بنص فارغ لا تترجم إلى صيغة إكسل");
+  if (op !== "=" && op !== "<>") return fail("المقارنة الترتيبية بنص لا تترجم إلى صيغة إكسل");
+  if (/[A-Za-z]/.test(v)) return fail("المقارنة بنص لاتيني تتجاهل إكسل حالة أحرفه فلا تترجم إلى صيغة إكسل");
+  if (excelCoerces(v)) return fail("نص يفسره إكسل كعدد أو تاريخ أو وقت أو قيمة منطقية فلا يترجم إلى صيغة إكسل");
   const text = literal(v);
   if (op === "=") return quote(/^[<>=]/.test(text) ? `=${text}` : text);
-  return quote(`${op}${text}`);
+  return quote(`<>${text}`);
 }
 
 /** A comparison as criteria. A not-equal also matches empty cells in Excel while the engine does not, so it adds a non-empty pair. */
-function compareCriteria(columnId: string, op: CmpOp, v: Scalar): Criterion[] {
-  const main: Criterion = { columnId, text: criterionArg(op, v), equality: op === "=" };
+function compareCriteria(columnId: string, op: CmpOp, v: Scalar, numeric: boolean): Criterion[] {
+  const main: Criterion = { columnId, text: criterionArg(op, v, numeric), equality: op === "=" };
   return op === "<>" ? [{ columnId, text: NON_EMPTY, equality: false }, main] : [main];
 }
 
@@ -74,11 +100,12 @@ function scalarOf(e: Expr): Scalar | undefined {
   return e.k === "num" || e.k === "str" || e.k === "bool" ? e.v : undefined;
 }
 
+type IsNum = (columnId: string) => boolean;
 const SIMPLE_ONLY = "شرط التصفية يقبل مقارنات بسيطة مرتبطة بـ and فقط";
 
-function conditionCriteria(cond: Expr): Criterion[] {
+function conditionCriteria(cond: Expr, isNum: IsNum): Criterion[] {
   if (cond.k !== "bin") return fail(SIMPLE_ONLY);
-  if (cond.op === "and") return [...conditionCriteria(cond.l), ...conditionCriteria(cond.r)];
+  if (cond.op === "and") return [...conditionCriteria(cond.l, isNum), ...conditionCriteria(cond.r, isNum)];
   if (!isCmp(cond.op)) return fail(SIMPLE_ONLY);
   let op: CmpOp = cond.op;
   let col = cond.l;
@@ -86,15 +113,15 @@ function conditionCriteria(cond: Expr): Criterion[] {
   if (col.k !== "col") { col = cond.r; val = cond.l; op = flip(op); }
   const v = scalarOf(val);
   if (col.k !== "col" || v === undefined) return fail("شرط التصفية يجب أن يقارن عموداً بقيمة ثابتة");
-  return compareCriteria(col.id, op, v);
+  return compareCriteria(col.id, op, v, isNum(col.id));
 }
 
-function filterSpecCriteria(f: FilterSpec): Criterion[] {
+function filterSpecCriteria(f: FilterSpec, isNum: IsNum): Criterion[] {
   if (f.op === "notNull") return [{ columnId: f.field, text: NON_EMPTY, equality: false }];
   if (f.op === "in") return fail("مرشح in لا يترجم إلى صيغة إكسل");
   const v = f.value;
   if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
-    return compareCriteria(f.field, f.op === "eq" ? "=" : "<>", v);
+    return compareCriteria(f.field, f.op === "eq" ? "=" : "<>", v, isNum(f.field));
   }
   return fail("قيمة المرشح غير ثابتة ولا تترجم إلى صيغة إكسل");
 }
@@ -116,15 +143,22 @@ class Translator {
     return columnRef(this.t.table, this.t.columnName(columnId));
   }
 
+  private isNum(columnId: string): boolean {
+    return this.t.columnType?.(columnId) === "number";
+  }
+
   private base(): Criterion[] {
-    const group = this.t.groupFilters.map((g) => ({ columnId: g.columnId, text: criterionArg("=", g.value), equality: true }));
-    return [...group, ...this.t.extraFilters.flatMap(filterSpecCriteria)];
+    const group = this.t.groupFilters.map((g) => ({
+      columnId: g.columnId, text: criterionArg("=", g.value, this.isNum(g.columnId)), equality: true,
+    }));
+    return [...group, ...this.t.extraFilters.flatMap((f) => filterSpecCriteria(f, (c) => this.isNum(c)))];
   }
 
   private pairs(columnId: string, scoped: Criterion[]): string {
     const all = [...scoped, ...this.base()];
     const covered = all.some((c) => c.columnId === columnId && c.equality);
     const list = covered ? all : [{ columnId, text: NON_EMPTY, equality: false }, ...all];
+    if (list.length > MAX_CRITERIA_PAIRS) return fail("عدد شروط الصيغة يتجاوز حد إكسل");
     return list.map((c) => `${this.ref(c.columnId)},${c.text}`).join(",");
   }
 
@@ -165,7 +199,7 @@ class Translator {
       case "min":
       case "max": return this.aggregate(e.fn, a!, scoped);
       case "ratio": return `IFERROR(${this.expr(a!, scoped)}/${this.expr(b!, scoped)},"-")`;
-      case "filter": return this.expr(a!, [...scoped, ...conditionCriteria(b!)]);
+      case "filter": return this.expr(a!, [...scoped, ...conditionCriteria(b!, (c) => this.isNum(c))]);
       case "distinctCount": return fail("distinctCount لا يترجم إلى صيغة إكسل في هذه المرحلة");
       case "percentOfTotal": return fail("percentOfTotal لا يترجم إلى صيغة إكسل في هذه المرحلة");
       case "if": return fail("if لا تترجم إلى صيغة إكسل في هذه المرحلة");
@@ -176,7 +210,9 @@ class Translator {
 /** Translates a measure AST to an Excel formula (no leading `=`), or says why it cannot be done faithfully. */
 export function toExcelFormula(ast: Expr, target: ExcelTarget, measures: Map<string, Expr>): ExcelResult {
   try {
-    return { ok: true, formula: new Translator(target, measures).expr(ast, []) };
+    const formula = new Translator(target, measures).expr(ast, []);
+    if (formula.length > MAX_FORMULA_LENGTH) return { ok: false, reason: "طول الصيغة يتجاوز حد إكسل" };
+    return { ok: true, formula };
   } catch (err) {
     if (err instanceof Untranslatable) return { ok: false, reason: err.message };
     throw err;
