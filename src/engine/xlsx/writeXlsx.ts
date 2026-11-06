@@ -35,6 +35,12 @@ export interface XlsxOptions {
   /** File names the host saves the two workbooks under; the relative links between them use these. */
   reportFileName?: string;
   companionFileName?: string;
+  /**
+   * Diagnostics only (bisecting a file Excel refuses): stop packaging after this stage. "sheetjs" is the
+   * SheetJS bytes untouched; "clean" adds the package clean-up; "zip" adds the dated, ordered re-zip;
+   * "styled" adds styles, views and separators; "tables" adds tables. Omitted, everything is written.
+   */
+  stopAfter?: PackageStage;
 }
 
 /** The report workbook and its companion raw workbook (owner decision 2026-11-06). */
@@ -44,6 +50,8 @@ export interface XlsxOutput {
   reportFileName: string;
   companionFileName: string;
 }
+
+export type PackageStage = "sheetjs" | "clean" | "zip" | "styled" | "tables";
 
 /** Thrown when the plan breaks a workbook rule; nothing is written. */
 export class WorkbookRefused extends Error {
@@ -393,13 +401,19 @@ async function packageWorkbook(
   const date = new Date(opts.issuedAt);
   wb.Props = { Title: opts.title, CreatedDate: date, ModifiedDate: date };
   const bytes = XLSX.write(wb, { type: "array", bookType: "xlsx", bookSST: true, compression: false }) as ArrayBuffer;
+  const stop = opts.stopAfter;
+  if (stop === "sheetjs") return new Uint8Array(bytes);
   const zip = await JSZip.loadAsync(bytes);
+  if (stop === "clean" || stop === "zip") {
+    await cleanPackage(zip);
+    return stop === "zip" ? finishZip(zip, opts.issuedAt) : zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+  }
   addStyles(zip, theme);
   await setThemeFont(zip, theme.font);
   await addSeparators(zip, sheets.flatMap((s, i) => (s.separator ? [i + 1] : [])));
   for (const [i, s] of sheets.entries()) if (!s.separator && s.view) await styleSheet(zip, i + 1, s.view, s.styles);
-  await addTables(zip, tables);
-  await addPivots(zip, pivots);
+  if (stop !== "styled") await addTables(zip, tables);
+  if (stop === undefined) await addPivots(zip, pivots);
   await encodeExternalTargets(zip);
   await cleanPackage(zip);
   return finishZip(zip, opts.issuedAt);
