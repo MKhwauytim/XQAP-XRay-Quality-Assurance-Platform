@@ -1,4 +1,5 @@
 import type { DatasetDef, RawFile } from "../data/types";
+import type { DomainPack, IssueParams, MeasureSpec, ReportSpec, ThemeTokens } from "../spec/types";
 
 export const FIXTURE_FILE = "studies.xlsx";
 export const FIXTURE_SHEET = "نتائج الدراسة";
@@ -57,3 +58,79 @@ export const FIXTURE_DATASET: DatasetDef = {
     { id: "s2", label: "حذف التكرار", kind: "dedupe", key: ["port", "portType", "status", "count"] },
   ],
 };
+
+const STUDIED: MeasureSpec = {
+  id: "studied", label: "المدروس", datasetId: "studies", formula: "count([الحالة])",
+  format: { kind: "int", digits: 0 },
+};
+const MATCH_RATE: MeasureSpec = {
+  id: "matchRate", label: "نسبة التوائم", datasetId: "studies",
+  formula: 'filter(count([الحالة]), [الحالة] = "مطابق") / @studied',
+  format: { kind: "pct", digits: 1 },
+};
+
+export const FIXTURE_THEME: ThemeTokens = {
+  tones: { primary: "#1F4E79", neutral: "#5B6770", good: "#2E7D32", bad: "#B3261E" },
+  ink: {
+    navy: "#0B2545", text: "#1B1F24", muted: "#5B6770", hair: "#D5DAE0",
+    bg: "#FFFFFF", panel: "#F3F5F8", gold: "#B58B2A",
+  },
+  font: "Cairo",
+};
+
+function buildSpec(): ReportSpec {
+  return {
+    schemaVersion: 1,
+    reportId: "twoSlide",
+    title: "تقرير المنافذ",
+    theme: "deck3",
+    datasets: [structuredClone(FIXTURE_DATASET)],
+    model: { measures: [structuredClone(STUDIED), structuredClone(MATCH_RATE)] },
+    params: [{ id: "port", type: "text", required: true }],
+    pages: [
+      {
+        pageId: "p1", title: "الملخص", size: "16:9", grid: { cols: 24, rows: 14 },
+        visuals: [
+          {
+            visualId: "p1text", type: "text", frame: { col: 0, row: 1, w: 24, h: 3, z: 1 }, wells: {},
+            format: { tone: "neutral", sizePx: 28, weight: 400 },
+            text: "تقرير {{param:port}}: نسبة التوائم {{measure:matchRate}}",
+          },
+          {
+            visualId: "p1kpi", type: "kpiBand", frame: { col: 0, row: 4, w: 24, h: 4, z: 1 },
+            wells: { values: [{ measure: "studied" }, { measure: "matchRate" }] },
+          },
+        ],
+      },
+      {
+        pageId: "p2", title: "التفصيل", size: "16:9", grid: { cols: 24, rows: 14 },
+        visuals: [
+          {
+            visualId: "p2table", type: "table", frame: { col: 0, row: 1, w: 24, h: 6, z: 1 },
+            wells: { rows: [{ field: "portType" }], values: [{ measure: "studied" }, { measure: "matchRate" }] },
+          },
+          {
+            visualId: "p2bar", type: "barChart", frame: { col: 0, row: 7, w: 24, h: 7, z: 1 },
+            wells: { axis: [{ field: "port" }], values: [{ measure: "matchRate" }] },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+/** A fresh deep copy on every call, safe to mutate. */
+export function twoSlideFixture() {
+  const params: IssueParams = { issuedAt: "2026-11-05T09:00:00Z", values: { port: "جدة" } };
+  return { spec: buildSpec(), params, theme: structuredClone(FIXTURE_THEME) };
+}
+export type Fixture = ReturnType<typeof twoSlideFixture>;
+
+export function packWith(measure: { id: string; formula: string }): DomainPack {
+  return {
+    packId: "testPack",
+    schemaVersion: 1,
+    fields: [],
+    measures: [{ ...measure, label: measure.id, datasetId: "studies", format: { kind: "int", digits: 0 } }],
+  };
+}
