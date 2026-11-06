@@ -1,34 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { layoutFixture, layoutOf, run, withText } from "../__fixtures__/helpers";
+import type { Case } from "../__fixtures__/helpers";
 import { FIXTURE_FILES, twoSlideFixture } from "../__fixtures__/twoSlide";
-import type { Fixture } from "../__fixtures__/twoSlide";
-import { applySteps } from "../data/processing";
-import type { ProcessedDataset } from "../data/processing";
-import { profileColumns } from "../data/profile";
-import type { ColumnProfile, RawFile } from "../data/types";
-import { typeDataset } from "../data/typing";
 import { LIMITS } from "../limits";
-import { resolveVisuals } from "../resolve/resolve";
-import { gridToPx, LAYOUT, layoutReport } from "./layoutReport";
-import { createFixedAdvanceMeasurer } from "./measure";
+import { gridToPx, LAYOUT } from "./layoutReport";
 import type { BarChartBox, LayoutBox, LayoutDoc, TableBox, TextBox } from "./types";
-
-interface Case { f: Fixture; files: RawFile[] }
-
-function run({ f, files }: Case) {
-  const data = new Map<string, ProcessedDataset>();
-  const profiles = new Map<string, ColumnProfile[]>();
-  f.spec.datasets.forEach((def, i) => {
-    const { data: typed } = typeDataset(def, files);
-    profiles.set(def.id, profileColumns(typed, def));
-    data.set(def.id, applySteps(typed, def, f.params, i));
-  });
-  const r = resolveVisuals(f.spec, data, profiles, f.params);
-  const doc = layoutReport(f.spec, r.visuals, r.values, f.params, f.theme, createFixedAdvanceMeasurer());
-  return { doc, values: r.values };
-}
-
-const layoutOf = (c: Case): LayoutDoc => run(c).doc;
-const layoutFixture = (): LayoutDoc => layoutOf({ f: twoSlideFixture(), files: FIXTURE_FILES });
 
 /** `n` distinct ports as table rows; the table frame is rows 1..11 (77..926 px, 849 px high), rowH 50, header 60. */
 function withTableRows(n: number, opts: { columns?: number; label?: string } = {}): Case {
@@ -49,12 +25,6 @@ function withTableRows(n: number, opts: { columns?: number; label?: string } = {
     table.wells.values = extra.map((m) => ({ measure: m.id }));
   }
   return { f, files };
-}
-
-function withText(s: string): Case {
-  const f = twoSlideFixture();
-  f.spec.pages[0].visuals[0].text = s;
-  return { f, files: FIXTURE_FILES };
 }
 
 function textOf(doc: LayoutDoc, boxId: string): string {
