@@ -5,7 +5,8 @@ export type MessageKey =
   | "formula.tooDeep" | "formula.tooLong" | "measure.unknown" | "well.invalid" | "literal.number"
   | "limit.rows" | "limit.slides" | "limit.visuals" | "limit.time"
   | "fit.tooLong" | "gate.figureParity" | "gate.layoutParity" | "gate.lint"
-  | "gate.reconcile" | "gate.ooxml" | "recipe.hashMismatch" | "recipe.invalid";
+  | "gate.reconcile" | "gate.ooxml" | "recipe.hashMismatch" | "recipe.invalid"
+  | "resolve.keyConflict";
 
 export const MESSAGES_AR: Record<MessageKey, string> = {
   "schema.invalid": "بنية التقرير غير صالحة",
@@ -29,6 +30,7 @@ export const MESSAGES_AR: Record<MessageKey, string> = {
   "gate.ooxml": "ملف PowerPoint غير سليم",
   "recipe.hashMismatch": "ملف البيانات تغير منذ إصدار الوصفة",
   "recipe.invalid": "الوصفة غير صالحة",
+  "resolve.keyConflict": "رقمان مختلفان يحملان المفتاح نفسه",
 };
 
 export function formatIssue(

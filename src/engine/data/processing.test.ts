@@ -92,4 +92,12 @@ describe("applySteps", () => {
     d.steps = [{ id: "f", label: "تصفية", kind: "filter", filter: { field: "port", op: "eq", value: { param: "port" } } }];
     expect(applySteps(typed, d, params).rows).toHaveLength(5);
   });
+
+  it("a step filter with a missing {param} raises an issue", () => {
+    const d = structuredClone(FIXTURE_DATASET);
+    d.steps = [{ id: "f", label: "تصفية", kind: "filter", filter: { field: "port", op: "eq", value: { param: "absent" } } }];
+    expect(applySteps(typed, d, params).issues).toEqual([
+      { rule: "schema.invalid", path: "datasets[0].steps[0].filter", detail: "missing param: absent" },
+    ]);
+  });
 });

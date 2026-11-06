@@ -97,9 +97,16 @@ export function applySteps(
     if (step.kind === "filter" && step.filter) {
       const n = errored.get(step.filter.field);
       if (n !== undefined) issues.push(typeErrorIssue(def, step.filter.field, n, path));
+      const pv = step.filter.value;
+      if (pv !== null && typeof pv === "object" && !Array.isArray(pv) && !Object.hasOwn(params.values, pv.param)) {
+        issues.push({ rule: "schema.invalid", path: `${path}.filter`, detail: `missing param: ${pv.param}` });
+      }
       const f = substituteFilter(step.filter, params);
       kept = rows.filter((t) => matchesFilter(t.row, f));
     } else if (step.kind === "dedupe" && step.key) {
+      // Plan exception (C19): a dedupe key on an errored column is not a fail-closed use. Instead an
+      // errored cell keys by its raw text, so two different bad values (or a bad value and an empty
+      // cell) are never merged as duplicates.
       const key = step.key;
       const seen = new Set<string>();
       kept = rows.filter((t) => {

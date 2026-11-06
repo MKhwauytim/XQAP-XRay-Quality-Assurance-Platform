@@ -30,6 +30,8 @@ export interface ResolvedVisual {
 }
 
 export const OTHERS_LABEL = "أخرى";
+/** Marker for the collapsed bucket; real categories key with "=" and can never produce it. */
+const OTHERS_KEY_SEP = "~";
 const GROUP_WELLS: WellRole[] = ["axis", "legend", "rows", "columns"];
 const MEASURE_REF = /\{\{measure:([^}]+)\}\}/g;
 
@@ -67,13 +69,35 @@ interface Ctx {
   asts: Map<string, Expr>;
   byId: Map<string, MeasureSpec>;
   values: Map<string, ResolvedValue>;
+  issues: EngineIssue[];
 }
 
-function makeValue(ctx: Ctx, m: MeasureSpec, rows: Row[], allRows: Row[], filters: FilterSpec[], group: Record<string, string>): ResolvedValue {
+/**
+ * Value key grammar:
+ *   key     = measureId [ "@" part *( "|" part ) ] [ "#" filters ]
+ *   part    = field "=" value          (a real category, including one literally named «أخرى»)
+ *           | field "~others"          (the collapsed «أخرى» bucket)
+ *   filters = the effective filters (report + page + visual, substituted), each serialised as
+ *             JSON [field, op, value], sorted by code point, joined by "&".
+ * With no filters and no bucket the key is just "matchRate" or "matchRate@portType=بحري".
+ */
+export function valueKey(measureId: string, group: Record<string, string>, filters: FilterSpec[], others = false): string {
+  const parts = Object.entries(group).map(([k, v]) => (others ? `${k}${OTHERS_KEY_SEP}others` : `${k}=${v}`));
+  let key = parts.length === 0 ? measureId : `${measureId}@${parts.join("|")}`;
+  if (filters.length > 0) {
+    const canon = filters.map((f) => JSON.stringify([f.field, f.op, f.value ?? null])).sort(codePointCompare);
+    key += `#${canon.join("&")}`;
+  }
+  return key;
+}
+
+function makeValue(
+  ctx: Ctx, m: MeasureSpec, rows: Row[], allRows: Row[], filters: FilterSpec[], group: Record<string, string>,
+  others = false,
+): ResolvedValue {
   const ast = ctx.asts.get(m.id);
   const value = ast === undefined ? null : evaluateMeasure(ast, rows, { measures: ctx.asts, allRows });
-  const parts = Object.entries(group).map(([k, v]) => `${k}=${v}`);
-  const key = parts.length === 0 ? m.id : `${m.id}@${parts.join("|")}`;
+  const key = valueKey(m.id, group, filters, others);
   const rv: ResolvedValue = {
     key, measureId: m.id, group, value, display: formatValue(value, m.format),
     provenance: {
@@ -81,7 +105,11 @@ function makeValue(ctx: Ctx, m: MeasureSpec, rows: Row[], allRows: Row[], filter
       columns: ast === undefined ? [] : measureColumns(ast, ctx.asts), filters,
     },
   };
-  if (!ctx.values.has(key)) ctx.values.set(key, rv);
+  const prior = ctx.values.get(key);
+  if (prior === undefined) ctx.values.set(key, rv);
+  else if (prior.value !== rv.value || JSON.stringify(prior.provenance) !== JSON.stringify(rv.provenance)) {
+    ctx.issues.push({ rule: "resolve.keyConflict", detail: key });
+  }
   return rv;
 }
 
@@ -116,13 +144,19 @@ function resolveVisual(ctx: Ctx, pageIndex: number, pageFilters: FilterSpec[], v
     const m = ctx.byId.get(id);
     return m ? [m] : [];
   });
-  const datasetId = measures[0]?.datasetId;
+  const datasetIds = [...new Set(measures.map((m) => m.datasetId))];
+  const datasetId = datasetIds[0];
   const def = datasetId === undefined ? undefined : datasetDef(ctx.spec, datasetId);
   const filters = filtersFor(ctx, def, pageFilters, v);
   const allRows = datasetId === undefined ? [] : (ctx.data.get(datasetId)?.rows ?? []);
   const rows = allRows.filter((r) => filters.every((f) => matchesFilter(r, f)));
   const fields = groupFieldsOf(v);
   const base: ResolvedVisual = { pageIndex, visualId: v.visualId, type: v.type, categories: [], cells: [], totals: [] };
+  if (datasetIds.length > 1) {
+    // Never evaluate a measure on the rows of another dataset.
+    ctx.issues.push({ rule: "schema.invalid", page: pageIndex, visual: v.visualId, detail: "visual mixes datasets" });
+    return base;
+  }
   if (fields.length === 0) {
     base.cells = measures.map((m) => makeValue(ctx, m, rows, allRows, filters, {}));
     return base;
@@ -159,14 +193,15 @@ function resolveVisual(ctx: Ctx, pageIndex: number, pageFilters: FilterSpec[], v
     const othersGroup: Record<string, string> = {};
     for (const f of fields) othersGroup[f] = OTHERS_LABEL;
     cats = cats.filter((c) => keep.has(c));
-    groups.set(OTHERS_LABEL, { group: othersGroup, rows: rest });
-    cats.push(OTHERS_LABEL);
+    groups.set(OTHERS_KEY_SEP, { group: othersGroup, rows: rest });
+    cats.push(OTHERS_KEY_SEP);
   }
 
-  base.categories = cats;
+  base.categories = cats.map((c) => (c === OTHERS_KEY_SEP ? OTHERS_LABEL : c));
   for (const cat of cats) {
     const g = groups.get(cat)!;
-    for (const m of measures) base.cells.push(makeValue(ctx, m, g.rows, allRows, filters, g.group));
+    const others = cat === OTHERS_KEY_SEP;
+    for (const m of measures) base.cells.push(makeValue(ctx, m, g.rows, allRows, filters, g.group, others));
   }
   // Totals re-evaluate the measure on the unsplit filtered rows, never a sum of cells.
   base.totals = measures.map((m) => makeValue(ctx, m, rows, allRows, filters, {}));
@@ -174,7 +209,10 @@ function resolveVisual(ctx: Ctx, pageIndex: number, pageFilters: FilterSpec[], v
 }
 
 /** C19: an errored column the spec uses anywhere fails closed. Step reads are checked in applySteps. */
-function typeErrorIssues(spec: ReportSpec, profiles: Map<string, ColumnProfile[]>, asts: Map<string, Expr>, byId: Map<string, MeasureSpec>): EngineIssue[] {
+function specIssues(
+  spec: ReportSpec, profiles: Map<string, ColumnProfile[]>, asts: Map<string, Expr>, byId: Map<string, MeasureSpec>,
+  params: IssueParams,
+): EngineIssue[] {
   const issues: EngineIssue[] = [];
   const seen = new Set<string>();
   const flag = (datasetId: string | undefined, columnId: string, path: string) => {
@@ -187,12 +225,22 @@ function typeErrorIssues(spec: ReportSpec, profiles: Map<string, ColumnProfile[]
       issues.push(typeErrorIssue(def, columnId, p.errors, path));
     });
   };
-  (spec.filters ?? []).forEach((f, i) => flag(undefined, f.field, `filters[${i}]`));
+  const known = (f: FilterSpec, path: string) => {
+    if (!spec.datasets.some((d) => d.columns.some((c) => c.id === f.field))) {
+      issues.push({ rule: "schema.invalid", path, detail: `filter field matches no dataset: ${f.field}` });
+    }
+    const v = f.value;
+    if (v !== null && typeof v === "object" && !Array.isArray(v) && !Object.hasOwn(params.values, v.param)) {
+      issues.push({ rule: "schema.invalid", path, detail: `missing param: ${v.param}` });
+    }
+  };
+  const flagFilter = (f: FilterSpec, path: string) => { known(f, path); flag(undefined, f.field, path); };
+  (spec.filters ?? []).forEach((f, i) => flagFilter(f, `filters[${i}]`));
   spec.pages.forEach((page, pi) => {
-    (page.filters ?? []).forEach((f, i) => flag(undefined, f.field, `pages[${pi}].filters[${i}]`));
+    (page.filters ?? []).forEach((f, i) => flagFilter(f, `pages[${pi}].filters[${i}]`));
     page.visuals.forEach((v, vi) => {
       const vpath = `pages[${pi}].visuals[${vi}]`;
-      (v.filters ?? []).forEach((f, i) => flag(undefined, f.field, `${vpath}.filters[${i}]`));
+      (v.filters ?? []).forEach((f, i) => flagFilter(f, `${vpath}.filters[${i}]`));
       const ids = measureIdsOf(v);
       for (const id of ids) {
         const ast = asts.get(id);
@@ -218,10 +266,10 @@ export function resolveVisuals(
     if (r.ok) asts.set(m.id, r.ast);
     else issues.push({ ...r.issue, path: `model.measures[${i}].formula` });
   });
-  issues.unshift(...typeErrorIssues(spec, profiles, asts, byId));
+  issues.unshift(...specIssues(spec, profiles, asts, byId, params));
   for (const d of spec.datasets) issues.push(...(data.get(d.id)?.issues ?? []));
 
-  const ctx: Ctx = { spec, data, params, asts, byId, values: new Map() };
+  const ctx: Ctx = { spec, data, params, asts, byId, values: new Map(), issues };
   const visuals = spec.pages.flatMap((page, pi) => page.visuals.map((v) => resolveVisual(ctx, pi + 1, page.filters ?? [], v)));
   return { visuals, values: ctx.values, issues };
 }

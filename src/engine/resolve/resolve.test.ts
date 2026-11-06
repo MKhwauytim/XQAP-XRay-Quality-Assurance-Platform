@@ -7,7 +7,7 @@ import { profileColumns } from "../data/profile";
 import type { ColumnProfile, RawFile } from "../data/types";
 import { typeDataset } from "../data/typing";
 import { LIMITS } from "../limits";
-import { formatValue, resolveVisuals } from "./resolve";
+import { formatValue, resolveVisuals, valueKey } from "./resolve";
 
 function resolveFixture(f: Fixture, files: RawFile[] = FIXTURE_FILES) {
   const data = new Map<string, ProcessedDataset>();
@@ -100,16 +100,20 @@ describe("resolveVisuals", () => {
     const f = twoSlideFixture();
     f.spec.filters = [{ field: "port", op: "eq", value: { param: "port" } }];
     const r = resolveFixture(f);
-    expect(r.values.get("studied")!.value).toBe(4);
-    expect(r.values.get("studied")!.provenance.filters).toEqual([{ field: "port", op: "eq", value: "جدة" }]);
+    const key = valueKey("studied", {}, [{ field: "port", op: "eq", value: "جدة" }]);
+    expect(key).toBe('studied#["port","eq","جدة"]');
+    expect(r.values.get(key)!.value).toBe(4);
+    expect(r.values.get(key)!.provenance.filters).toEqual([{ field: "port", op: "eq", value: "جدة" }]);
+    expect(r.values.has("studied")).toBe(false);
   });
 
   it("an empty filtered set displays '-' for ratios and 0 for counts", () => {
     const f = twoSlideFixture();
     f.spec.filters = [{ field: "port", op: "eq", value: "لا يوجد" }];
     const r = resolveFixture(f);
-    expect(r.values.get("studied")!.display).toBe("0");
-    expect(r.values.get("matchRate")!).toMatchObject({ value: null, display: "-" });
+    const fl = [{ field: "port", op: "eq" as const, value: "لا يوجد" }];
+    expect(r.values.get(valueKey("studied", {}, fl))!.display).toBe("0");
+    expect(r.values.get(valueKey("matchRate", {}, fl))!).toMatchObject({ value: null, display: "-" });
   });
 
   it("13 categories collapse to 11 plus «أخرى», re-evaluated on the collapsed rows", () => {
@@ -119,7 +123,61 @@ describe("resolveVisuals", () => {
     expect(bar.categories).toHaveLength(LIMITS.maxChartCategories);
     expect(bar.categories.at(-1)).toBe("أخرى");
     expect(bar.categories[0]).toBe("منفذ 00");
-    expect(bar.cells.at(-1)!).toMatchObject({ key: "matchRate@port=أخرى", value: 4 });
+    expect(bar.cells.at(-1)!).toMatchObject({ key: "matchRate@port~others", value: 4 });
+  });
+
+  it("a real category named «أخرى» keeps its own key beside the collapsed bucket", () => {
+    const { f, files } = withPorts(13);
+    files[0].sheets[0].rows.push(["أخرى", "بري", "مطابق", 1], ["أخرى", "بري", "مطابق", 2], ["أخرى", "بري", "مطابق", 3]);
+    f.spec.model.measures[1] = { ...f.spec.model.measures[0], id: "matchRate" };
+    const r = resolveFixture(f, files);
+    const bar = r.visuals.find((v) => v.type === "barChart")!;
+    expect(bar.categories.filter((c) => c === "أخرى")).toHaveLength(2);
+    expect(r.values.get("matchRate@port=أخرى")!.value).toBe(3);
+    expect(r.values.get("matchRate@port~others")!.value).toBe(6);
+    expect(r.issues).toEqual([]);
+  });
+
+  it("a KPI and a page-filtered table total get distinct keys and both correct values", () => {
+    const f = twoSlideFixture();
+    f.spec.pages[1].filters = [{ field: "portType", op: "eq", value: "بحري" }];
+    const r = resolveFixture(f);
+    expect(r.values.get("matchRate")!.display).toBe("70.00%");
+    const table = r.visuals.find((v) => v.visualId === "p2table")!;
+    const total = table.totals.find((t) => t.measureId === "matchRate")!;
+    expect(total.key).toBe('matchRate#["portType","eq","بحري"]');
+    expect(total.display).toBe("75.00%");
+    expect(r.values.get(total.key)!.display).toBe("75.00%");
+    expect(r.issues).toEqual([]);
+  });
+
+  it("a visual whose measures span datasets fails and evaluates nothing", () => {
+    const f = twoSlideFixture();
+    f.spec.datasets.push({ ...structuredClone(f.spec.datasets[0]), id: "copy" });
+    f.spec.model.measures.push({ ...f.spec.model.measures[0], id: "studiedCopy", datasetId: "copy" });
+    f.spec.pages[0].visuals[1].wells.values!.push({ measure: "studiedCopy" });
+    const r = resolveFixture(f);
+    expect(r.issues).toContainEqual(expect.objectContaining({ rule: "schema.invalid", visual: "p1kpi", detail: "visual mixes datasets" }));
+    expect(r.visuals.find((v) => v.visualId === "p1kpi")!.cells).toEqual([]);
+  });
+
+  it("a filter whose field matches no dataset raises an issue", () => {
+    const f = twoSlideFixture();
+    f.spec.pages[0].filters = [{ field: "nowhere", op: "notNull" }];
+    expect(resolveFixture(f).issues).toContainEqual(expect.objectContaining({ rule: "schema.invalid", path: "pages[0].filters[0]" }));
+  });
+
+  it("a {param} missing from params raises an issue instead of an always-false filter", () => {
+    const f = twoSlideFixture();
+    f.spec.filters = [{ field: "port", op: "eq", value: { param: "absent" } }];
+    const r = resolveFixture(f);
+    expect(r.issues).toContainEqual(expect.objectContaining({ rule: "schema.invalid", detail: "missing param: absent" }));
+  });
+
+  it("desc without sort.by reverses code point order", () => {
+    const f = twoSlideFixture();
+    f.spec.pages[1].visuals[1].sort = { by: "", dir: "desc" };
+    expect(resolveFixture(f).visuals.find((v) => v.visualId === "p2bar")!.categories).toEqual(["جدة", "الحديثة", "البطحاء"]);
   });
 
   it("is deterministic", () => {
