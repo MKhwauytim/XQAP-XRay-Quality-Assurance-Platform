@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v157.0",
+    "date": "2026-11-06",
+    "bucket": "feature",
+    "scope": "engine",
+    "title": "report engine core, milestone 1"
+  },
+  {
     "version": "v156.0",
     "date": "2026-10-19",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "statements",
     "title": "observation figures on one line — short labels, single-row grid; level observation shows the weighted معدل الاتفاق العام"
-  },
-  {
-    "version": "v153.31",
-    "date": "2026-10-14",
-    "bucket": "enhancement",
-    "scope": "statements",
-    "title": "compare each port with one fixed baseline per port type (إجمالي), not the rest of its type"
   }
 ];
