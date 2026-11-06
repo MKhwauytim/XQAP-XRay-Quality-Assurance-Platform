@@ -70,10 +70,10 @@ describe("planWorkbook", () => {
     expect(raw[1].endsWith(" 2")).toBe(true);
   });
 
-  it("a dataset whose table name collides with tblSource is rejected by validateSpec", () => {
+  it("a dataset whose Arabic table name collides with the source table is rejected by validateSpec", () => {
     const f = twoSlideFixture();
-    f.spec.datasets[0].id = "source";
-    expect(validateSpec(f.spec)).toContainEqual(expect.objectContaining({ rule: "schema.invalid", path: "datasets[0].id" }));
+    f.spec.datasets[0].label = "مصدر_الأرقام";
+    expect(validateSpec(f.spec)).toContainEqual(expect.objectContaining({ rule: "schema.invalid", path: "datasets[0].label" }));
   });
 
   it("two columns that differ only by the hamza on alef are an Excel clash", () => {
@@ -101,5 +101,42 @@ describe("planWorkbook", () => {
 
   it("the fixture's visible names pass the M15 check", () => {
     expect(plan().issues.filter((i) => i.rule === "xlsx.names")).toEqual([]);
+  });
+});
+
+describe("planWorkbook fix round 1", () => {
+  it("pivot names stay unique when one group field feeds two slides", () => {
+    const f = twoSlideFixture();
+    const page = structuredClone(f.spec.pages[1]);
+    page.pageId = "p3";
+    page.visuals = page.visuals.filter((v) => v.type === "table").map((v) => ({ ...v, visualId: "p3table" }));
+    f.spec.pages.push(page);
+    const p = pipeline(f);
+    const wp = planWorkbook(p.files, f.spec, p.processed, p.values, p.doc);
+    const stats = wp.sheets.find((s) => s.kind === "stats")?.pivots ?? [];
+    expect(stats.map((x) => x.name)).toEqual([
+      "المدروس حسب نوع المنفذ، الشريحة 2", "عدد الصفوف حسب المنفذ", "المدروس حسب نوع المنفذ، الشريحة 3",
+    ]);
+    expect(new Set(stats.map((x) => excelNameKey(x.name))).size).toBe(stats.length);
+    expect(wp.issues).toEqual([]);
+  });
+
+  it("puts at most one pivot on a processed sheet", () => {
+    for (const s of plan().sheets.filter((x) => x.kind === "processed")) expect(s.pivots?.length ?? 0).toBeLessThanOrEqual(1);
+  });
+
+  it("cuts sheet names on code points, drops a trailing quote and reserves History", () => {
+    const p = pipeline();
+    const files: RawFile[] = [
+      { fileName: "History", bytesSha256: "c".repeat(64), sheets: [] },
+      { fileName: "😀".repeat(40), bytesSha256: "d".repeat(64), sheets: [{ sheetName: "x", headers: ["أ"], rows: [] }] },
+      { fileName: "ملف طويل الاسم جدا جدا جدا ج'", bytesSha256: "e".repeat(64), sheets: [{ sheetName: "ب", headers: ["أ"], rows: [] }] },
+      { fileName: "History", bytesSha256: "f".repeat(64), sheets: [{ sheetName: "", headers: ["أ"], rows: [] }] },
+    ];
+    const raw = planWorkbook(files, p.f.spec, p.processed, p.values, p.doc).companion.sheets.filter((s) => s.kind === "raw").map((s) => s.name);
+    expect(Array.from(raw[0])).toHaveLength(31);
+    expect(raw[0].length).toBe(62);
+    expect(raw[1].endsWith("'")).toBe(false);
+    expect(raw[2]).toBe("History 2");
   });
 });

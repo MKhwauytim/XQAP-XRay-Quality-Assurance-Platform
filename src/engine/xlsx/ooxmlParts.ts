@@ -15,8 +15,23 @@ const MAIN_NS = `xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/mai
 const CT = "application/vnd.openxmlformats-officedocument.spreadsheetml";
 export const TABLE_STYLE = "Deck3";
 
+/** Characters XML 1.0 cannot carry: C0 controls other than tab, LF and CR, and lone surrogates. */
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
+const XML_INVALID = /[\u0000-\u0008\u000B\u000C\u000E-\u001F]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+/** Excel's `_xHHHH_` form for a character XML 1.0 cannot carry. A literal `_xHHHH_` is left as is, matching the SheetJS cell text it must equal. */
+export const xmlSafe = (s: string): string =>
+  s.replace(XML_INVALID, (c) => `_x${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}_`);
+
+/** Escaped for element text and attribute values; tab, LF and CR become references so attributes keep them. */
 export const esc = (s: string): string =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  xmlSafe(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+    .replace(/\t/g, "&#9;").replace(/\n/g, "&#10;").replace(/\r/g, "&#13;");
+
+/** Excel's pivot item identity: text compares trimmed and case-insensitively. */
+export function itemKey(v: Cell): string {
+  return typeof v === "string" ? `s${v.trim().toLowerCase()}` : JSON.stringify(v);
+}
 
 export function colName(c: number): string {
   let n = c + 1;
@@ -150,6 +165,10 @@ function itemAttrs(items: Cell[]): string {
   const nums = items.filter((v): v is number => typeof v === "number");
   const hasText = items.some((v) => typeof v === "string" && v !== "" || typeof v === "boolean");
   const blank = items.some((v) => v === null || v === "") ? ' containsBlank="1"' : "";
+  const bools = items.some((v) => typeof v === "boolean");
+  if (nums.length === 0 && bools && !items.some((v) => typeof v === "string" && v !== "")) {
+    return ` containsSemiMixedTypes="0" containsString="0"${blank}`;
+  }
   if (nums.length === 0) return blank;
   const range = ` minValue="${Math.min(...nums)}" maxValue="${Math.max(...nums)}"`;
   const int = nums.every(Number.isInteger) ? ' containsInteger="1"' : "";

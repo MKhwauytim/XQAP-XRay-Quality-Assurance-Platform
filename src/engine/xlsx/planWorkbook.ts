@@ -96,7 +96,8 @@ class SheetNamer {
   private readonly used = new Set<string>();
 
   constructor(reserved: readonly string[]) {
-    for (const r of reserved) this.used.add(excelNameKey(r));
+    // Excel reserves "History" for its change-tracking sheet.
+    for (const r of [...reserved, "History"]) this.used.add(excelNameKey(r));
   }
 
   take(wanted: string): string {
@@ -104,7 +105,9 @@ class SheetNamer {
     if (base === "") base = "ورقة";
     for (let n = 1; ; n++) {
       const suffix = n === 1 ? "" : ` ${n}`;
-      const name = base.slice(0, MAX_SHEET_NAME - suffix.length).trimEnd() + suffix;
+      // Cut on code points so a surrogate pair is never split; a cut may expose a trailing quote.
+      const cut = Array.from(base).slice(0, MAX_SHEET_NAME - Array.from(suffix).length).join("").trimEnd().replace(/'+$/, "");
+      const name = cut + suffix;
       if (!this.used.has(excelNameKey(name))) {
         this.used.add(excelNameKey(name));
         return name;
@@ -257,6 +260,13 @@ function checkPivot(ctx: Ctx, p: PivotSpec, tables: PlannedTable[]): void {
   }
 }
 
+/** Pivot names unique on their sheet (case and hamza insensitive): a repeated name gains its slide. */
+function uniquePivotNames(pivots: PivotSpec[]): PivotSpec[] {
+  const count = new Map<string, number>();
+  for (const p of pivots) count.set(excelNameKey(p.name), (count.get(excelNameKey(p.name)) ?? 0) + 1);
+  return pivots.map((p) => ((count.get(excelNameKey(p.name)) ?? 0) > 1 ? { ...p, name: `${p.name}، الشريحة ${p.feedsSlide}` } : p));
+}
+
 function rawTotal(files: RawFile[]): number {
   return files.reduce((n, f) => n + f.sheets.reduce((m, s) => m + s.rows.length, 0), 0);
 }
@@ -335,10 +345,10 @@ export function planWorkbook(
     });
   });
 
-  const statPivots = groups.flatMap((g) => {
+  const statPivots = uniquePivotNames(groups.flatMap((g) => {
     const def = spec.datasets.find((d) => d.id === g.datasetId);
     return def === undefined ? [] : [pivotFor(ctx, def, g.field, g.slide, g.keys)];
-  });
+  }));
   const setRows = sets.reduce((n, s) => n + (s.header?.after ?? 0), 0);
   tables.push({ name: SOURCE_TABLE, sheet: SOURCE_SHEET, columns: [...SOURCE_HEADERS] });
   const report: PlannedSheet[] = [
@@ -374,6 +384,14 @@ export function planWorkbook(
     },
   ];
   for (const p of report.flatMap((s) => s.pivots ?? [])) checkPivot(ctx, p, tables);
+  for (const sh of report) {
+    const seen = new Set<string>();
+    for (const p of sh.pivots ?? []) {
+      const key = excelNameKey(p.name);
+      if (seen.has(key)) ctx.issues.push({ rule: "xlsx.names", path: `${sh.name}: pivot`, detail: `${p.name} repeats` });
+      seen.add(key);
+    }
+  }
   const plan: WorkbookPlan = { sheets: report, companion: { sheets: raw.sheets }, tables, issues: ctx.issues };
   plan.issues.push(...visibleNameIssues(plan, spec));
   return plan;

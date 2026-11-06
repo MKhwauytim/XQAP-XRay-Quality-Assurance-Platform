@@ -181,3 +181,39 @@ describe("writeXlsx", () => {
     expect(sha(b.out.companion)).toBe(sha(a.out.companion));
   });
 });
+
+describe("writeXlsx fix round 1", () => {
+  it("writes XML-invalid characters as _xHHHH_ and keeps newlines in attributes", async () => {
+    const { esc } = await import("./ooxmlParts");
+    expect(esc("a\x0Bb\x01c\nd")).toBe("a_x000B_b_x0001_c&#10;d");
+    const f = twoSlideFixture();
+    f.spec.datasets[0].columns[1].label = "نوع\x0B المنفذ\n";
+    const files = structuredClone(FIXTURE_FILES);
+    files[0].sheets[0].rows[0][1] = "بحري\x01";
+    const p = pipeline(f, files);
+    const plan = planWorkbook(p.files, f.spec, p.processed, p.values, p.doc);
+    const out = await writeXlsx(plan, { files: p.files, spec: f.spec, processed: p.processed, values: p.values, doc: p.doc, theme: f.theme }, OPTS);
+    const z = await unzip(out.report);
+    const parts = z.list(/^xl\/(tables|pivotTables|pivotCache)\/.+\.xml$/).map((x) => z.text(x));
+    expect(parts.join("")).toContain("نوع_x000B_ المنفذ&#10;");
+    // eslint-disable-next-line no-control-regex -- asserts no raw control character survives
+    parts.forEach((x) => expect(/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(x)).toBe(false));
+    expect(parts.join("")).toContain("بحري_x0001_");
+  });
+
+  it("dedupes cache items that differ only by case or surrounding spaces", async () => {
+    const files = structuredClone(FIXTURE_FILES);
+    const rows = files[0].sheets[0].rows;
+    rows[0][1] = "Sea"; rows[1][1] = "SEA"; rows[6][1] = " sea "; rows[10][1] = "Sea"; rows[11][1] = "Sea";
+    const p = pipeline(twoSlideFixture(), files);
+    const plan = planWorkbook(p.files, p.f.spec, p.processed, p.values, p.doc);
+    const out = await writeXlsx(plan, { files: p.files, spec: p.f.spec, processed: p.processed, values: p.values, doc: p.doc, theme: p.f.theme }, OPTS);
+    const z = await unzip(out.report);
+    const cache = z.text("xl/pivotCache/pivotCacheDefinition1.xml");
+    const items = [...cache.matchAll(/<s v="([^"]*)"\/>/g)].map((m) => m[1].trim().toLowerCase());
+    expect(items.filter((i) => i === "sea")).toHaveLength(1);
+    const pivot = z.text("xl/pivotTables/pivotTable1.xml");
+    const k = /<sharedItems[^>]*count="(\d+)"/.exec(cache)?.[1];
+    expect(pivot).toContain(`<items count="${Number(k) + 1}">`);
+  });
+});

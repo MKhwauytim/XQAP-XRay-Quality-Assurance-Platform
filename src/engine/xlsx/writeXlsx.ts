@@ -11,7 +11,7 @@ import type { MeasureSpec, ReportSpec, ThemeTokens } from "../spec/types";
 import { ENGINE_VERSION } from "../version";
 import {
   XF, a1, addPivots, addSeparators, addStyles, addTables, cleanPackage, dataFieldName, encodeExternalTargets,
-  finishZip, pivotHeight, setThemeFont, styleSheet,
+  finishZip, itemKey, pivotHeight, setThemeFont, styleSheet,
 } from "./ooxmlParts";
 import type { PivotPart, SheetView, TablePart, XfId } from "./ooxmlParts";
 import {
@@ -162,9 +162,15 @@ function stepSheet(ctx: Ctx, s: PlannedSheet): Draft {
   return d;
 }
 
+/** The pivot title with its slide, unless the name already carries it. */
+const slideTitle = (p: PivotSpec): string => (p.name.endsWith(`الشريحة ${p.feedsSlide}`) ? p.name : `${p.name}، الشريحة ${p.feedsSlide}`);
+
 function sortedItems(values: Cell[]): Cell[] {
   const rank = (v: Cell) => (typeof v === "number" ? 0 : typeof v === "string" ? 1 : typeof v === "boolean" ? 2 : 3);
-  const distinct = [...new Map(values.map((v) => [JSON.stringify(v), v])).values()];
+  // Deduped the way Excel compares pivot items, first spelling kept, so the cache never lists one item twice.
+  const first = new Map<string, Cell>();
+  for (const v of values) if (!first.has(itemKey(v))) first.set(itemKey(v), v);
+  const distinct = [...first.values()];
   return distinct.sort((a, b) => rank(a) - rank(b) || (typeof a === "number" && typeof b === "number" ? a - b : String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0));
 }
 
@@ -189,7 +195,7 @@ function pivotBlock(ctx: Ctx, d: Draft, sheetNo: number, spec: PivotSpec, r: num
   d.put(r, c + 1, dataFieldName(spec, columns), XF.label);
   items.forEach((it, i) => {
     d.put(r + 1 + i, c, it === null ? "(فارغ)" : it);
-    const vals = rows.filter((row) => cell(row, rowCol?.id) === it).map((row) => cell(row, dataCol?.id));
+    const vals = rows.filter((row) => itemKey(cell(row, rowCol?.id)) === itemKey(it)).map((row) => cell(row, dataCol?.id));
     d.put(r + 1 + i, c + 1, aggregate(spec.agg, vals), xf);
   });
   d.put(r + 1 + items.length, c, "الإجمالي", XF.label);
@@ -218,7 +224,7 @@ function processedSheet(ctx: Ctx, s: PlannedSheet, sheetNo: number): Built {
   };
   // RTL: column A is on the right, so the pivot after the table's last column sits to its left on screen.
   const pivots = (s.pivots ?? []).map((p) => {
-    d.put(CONTENT_ROW - 1, n + 1, `${p.name}، الشريحة ${p.feedsSlide}`, XF.label);
+    d.put(CONTENT_ROW - 1, n + 1, slideTitle(p), XF.label);
     return pivotBlock(ctx, d, sheetNo, p, CONTENT_ROW, n + 1);
   });
   d.widths = [...def.columns.map(() => 18), 4, 24, 18];
@@ -274,7 +280,7 @@ function statsSheet(ctx: Ctx, s: PlannedSheet, sheetNo: number): Built {
   if (s.header) writeHeader(d, s.header);
   let r = CONTENT_ROW;
   const pivots = (s.pivots ?? []).map((p) => {
-    d.put(r, 0, `${p.name}، الشريحة ${p.feedsSlide}`, XF.label);
+    d.put(r, 0, slideTitle(p), XF.label);
     const part = pivotBlock(ctx, d, sheetNo, p, r + 1, 0);
     r += 1 + pivotHeight(part.items.length) + 1;
     return part;

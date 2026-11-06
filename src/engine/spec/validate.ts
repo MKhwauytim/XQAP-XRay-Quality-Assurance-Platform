@@ -6,6 +6,7 @@ import { LIMITS } from "../limits";
 import { checkPackShape, checkSpecShape } from "./shape";
 import type { DomainPack, IssueParams, MeasureSpec, PageSpec, ReportSpec, VisualSpec, WellItem } from "./types";
 import { WELL_SCHEMAS } from "./wells";
+import { SOURCE_TABLE, excelNameKey, tableNameFor } from "../xlsx/planWorkbook";
 
 const GRID = { cols: 24, rows: 14 } as const;
 const MIN_FONT_PX = 20;
@@ -88,9 +89,10 @@ function checkDatasets(ctx: Ctx): void {
   duplicates(ctx, spec.datasets.map((d) => d.id), (i) => `datasets[${i}].id`);
   const tables = new Set<string>();
   spec.datasets.forEach((d, di) => {
-    const table = "tbl" + d.id.charAt(0).toUpperCase() + d.id.slice(1);
-    if (table === "tblSource") push(ctx, "schema.invalid", `datasets[${di}].id`, "reserved table name tblSource");
-    else if (tables.has(table)) push(ctx, "schema.invalid", `datasets[${di}].id`, `table name ${table} repeats`);
+    // The workbook table name is readable Arabic from the label (M15); Excel compares names ignoring case and hamza.
+    const table = excelNameKey(tableNameFor(d));
+    if (table === excelNameKey(SOURCE_TABLE)) push(ctx, "schema.invalid", `datasets[${di}].label`, `reserved table name ${SOURCE_TABLE}`);
+    else if (tables.has(table)) push(ctx, "schema.invalid", `datasets[${di}].label`, `table name ${tableNameFor(d)} repeats`);
     tables.add(table);
     d.steps.forEach((s, si) => {
       if (s.kind !== "calc" || s.calc === undefined) return;

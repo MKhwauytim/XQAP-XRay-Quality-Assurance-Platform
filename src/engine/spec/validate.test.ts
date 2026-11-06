@@ -26,7 +26,7 @@ describe("validateSpec", () => {
       f.spec.model.measures[0]!.formula = "@matchRate + 1";
       f.spec.model.measures[1]!.formula = "@studied + 1";
     }, "schema.invalid", "model.measures[0].formula"],
-    ["dataset table named tblSource", (f: Fixture) => { f.spec.datasets[0]!.id = "source"; }, "schema.invalid", "datasets[0].id"],
+    ["dataset table named like the source table", (f: Fixture) => { f.spec.datasets[0]!.label = "مصدر الأرقام"; }, "schema.invalid", "datasets[0].label"],
     ["calc formula using a measure reference", (f: Fixture) => {
       f.spec.datasets[0]!.steps.push({ id: "s3", label: "حساب", kind: "calc", calc: { columnId: "x", type: "number", formula: "@studied" } });
     }, "formula.notAllowed", "datasets[0].steps[2].calc.formula"],
