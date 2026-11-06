@@ -46,16 +46,29 @@ function numberText(n: number): string {
 const literal = (s: string): string => s.replace(/[~*?]/g, (c) => `~${c}`);
 
 const COERCIBLE = [
-  /^[+-]?[\d.,٠-٩]+(?:e[+-]?\d+)?$/i,
+  /^[+-]?[\d.,]+(?:e[+-]?\d+)?$/i,
   /%\s*$/,
   /\d\s*[/:.-]\s*\d/,
   /^(true|false)$/i,
+  /^\(\s*[+-]?[\d.,]+\s*\)$/,
+  /^\s*(?:[$€£¥﷼]|ر\.\s*س)\s*[+-]?[\d.,]/,
+  /[\d.,]\s*(?:[$€£¥﷼]|ر\.\s*س)\s*$/,
 ];
 
-/** True when Excel would read this text criterion as a number, percentage, date, time or boolean. */
+/** Arabic-Indic and Persian digits and separators to the ASCII Excel reads. */
+function asciiDigits(text: string): string {
+  return text
+    .replace(/[٠-٩]/g, (c) => String(c.charCodeAt(0) - 0x660))
+    .replace(/[۰-۹]/g, (c) => String(c.charCodeAt(0) - 0x6f0))
+    .replace(/٪/g, "%")
+    .replace(/٫/g, ".")
+    .replace(/٬/g, ",");
+}
+
+/** True when Excel would read this text criterion as a number, percentage, date, time, boolean or currency. */
 function excelCoerces(text: string): boolean {
-  const t = text.trim();
-  return Number.isFinite(Number(t)) && t !== "" ? true : COERCIBLE.some((re) => re.test(t));
+  const t = asciiDigits(text).trim();
+  return (t !== "" && Number.isFinite(Number(t))) || COERCIBLE.some((re) => re.test(t));
 }
 
 /** The criteria argument for `column op value`, as it appears in the formula text. */

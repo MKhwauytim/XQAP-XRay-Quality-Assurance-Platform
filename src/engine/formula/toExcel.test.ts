@@ -336,6 +336,17 @@ describe("toExcelFormula", () => {
     refused("count([الحالة])", { ...target, groupFilters: many });
   });
 
+  it("refuses Arabic-Indic, Persian and currency forms Excel coerces; plain Arabic words still translate", () => {
+    const bad = ["٥/٢/٢٠٢٦", "١٠:٣٠", "٢٠٢٦-٠١-٠١", "٥٫٥", "٥٪", "۵", "$5", "€5", "£5", "¥5", "﷼5", "5 ر.س", "ر.س 5", "(5)", "5$"];
+    for (const v of bad) {
+      const r = toExcelFormula(parse(`filter(count([الحالة]), [المنفذ] = "${v}")`), target, measures);
+      expect(r.ok, v).toBe(false);
+      expect((r as { reason: string }).reason.length).toBeGreaterThan(0);
+    }
+    expect(formulaOf('filter(count([الحالة]), [المنفذ] = "ريال سعودي")')).toContain('"ريال سعودي"');
+    expect(formulaOf('filter(count([الحالة]), [المنفذ] = "ر.س")')).toContain('"ر.س"');
+  });
+
   it("still translates Arabic text and numbers on a numeric column", () => {
     expect(formulaOf('filter(count([الحالة]), [العدد] > 300 and [المنفذ] = "جدة")')).toBe(
       'COUNTIFS(tblStudies[الحالة],"<>",tblStudies[العدد],">300",tblStudies[المنفذ],"جدة")');
