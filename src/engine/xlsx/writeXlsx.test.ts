@@ -126,13 +126,22 @@ describe("writeXlsx", () => {
     z.list(/^xl\/(tables|pivotTables|pivotCache)\/.+\.xml$/).forEach((p) => expect(ct).toContain(`PartName="/${p}"`));
     expect(ct).not.toContain('Extension="bin"');
     for (const rels of z.list(/\.rels$/)) {
-      const dir = rels.replace(/_rels\/[^/]+\.rels$/, "");
+      const dir = rels.replace(/_rels\/[^/]*\.rels$/, "");
       for (const m of z.text(rels).matchAll(/<Relationship [^>]*\/>/g)) {
         if (m[0].includes('TargetMode="External"')) continue;
         const target = /Target="([^"]+)"/.exec(m[0])?.[1] ?? "";
         const parts = (dir + target).split("/").reduce<string[]>((acc, s) => (s === ".." ? acc.slice(0, -1) : [...acc, s]), []);
         expect(z.names).toContain(parts.join("/"));
       }
+    }
+  });
+
+  it("keeps the package root relationships in both workbooks (regression: clean-up emptied _rels/.rels)", async () => {
+    for (const bytes of [a.out.report, a.out.companion]) {
+      const rels = (await unzip(bytes)).text("_rels/.rels");
+      expect(rels).toContain('Target="xl/workbook.xml"');
+      expect(rels).toContain('Target="docProps/core.xml"');
+      expect(rels).toContain('Target="docProps/app.xml"');
     }
   });
 

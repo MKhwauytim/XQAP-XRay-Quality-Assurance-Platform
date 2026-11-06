@@ -294,7 +294,7 @@ export async function encodeExternalTargets(zip: JSZip): Promise<void> {
 export async function cleanPackage(zip: JSZip): Promise<void> {
   const parts = new Set(Object.keys(zip.files).filter((p) => !zip.files[p].dir));
   for (const relsPath of [...parts].filter((p) => p.endsWith(".rels")).sort()) {
-    const dir = relsPath.replace(/_rels\/[^/]+\.rels$/, "");
+    const dir = relsPath.replace(/_rels\/[^/]*\.rels$/, "");
     const xml = (await text(zip, relsPath)) ?? "";
     zip.file(relsPath, xml.replace(/<Relationship [^>]*\/>/g, (rel) => {
       if (/TargetMode="External"/.test(rel)) return rel;

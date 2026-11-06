@@ -37,7 +37,7 @@ export interface XlsxOptions {
   companionFileName?: string;
   /**
    * Diagnostics only (bisecting a file Excel refuses): stop packaging after this stage. "sheetjs" is the
-   * SheetJS bytes untouched; "clean" adds the package clean-up; "zip" adds the dated, ordered re-zip;
+   * SheetJS bytes untouched; "rezip" is those bytes through the dated, ordered re-zip only; "clean" adds the package clean-up; "zip" adds the dated, ordered re-zip;
    * "styled" adds styles, views and separators; "tables" adds tables. Omitted, everything is written.
    */
   stopAfter?: PackageStage;
@@ -51,7 +51,7 @@ export interface XlsxOutput {
   companionFileName: string;
 }
 
-export type PackageStage = "sheetjs" | "clean" | "zip" | "styled" | "tables";
+export type PackageStage = "sheetjs" | "rezip" | "clean" | "zip" | "styled" | "tables";
 
 /** Thrown when the plan breaks a workbook rule; nothing is written. */
 export class WorkbookRefused extends Error {
@@ -404,6 +404,7 @@ async function packageWorkbook(
   const stop = opts.stopAfter;
   if (stop === "sheetjs") return new Uint8Array(bytes);
   const zip = await JSZip.loadAsync(bytes);
+  if (stop === "rezip") return finishZip(zip, opts.issuedAt);
   if (stop === "clean" || stop === "zip") {
     await cleanPackage(zip);
     return stop === "zip" ? finishZip(zip, opts.issuedAt) : zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });

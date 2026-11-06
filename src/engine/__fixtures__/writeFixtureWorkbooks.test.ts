@@ -10,11 +10,11 @@ import { pipeline } from "./xlsxKit";
  * Writes the fixture's report and companion workbooks, plus staged variants for bisecting in real Excel.
  * Runs only when XLSX_OUT is set:
  *   $env:XLSX_OUT = "C:\some\folder"; npx vitest run src/engine/__fixtures__/writeFixtureWorkbooks.test.ts
- * Variants: v-a SheetJS only, v-b + clean-up, v-c + dated re-zip, v-d + styles/views/separators,
+ * Variants: v-a SheetJS only, v-a2 v-a through the dated re-zip only, v-b + clean-up, v-c + dated re-zip, v-d + styles/views/separators,
  * v-e + tables, v-f everything (pivots and caches), each as -report.xlsx and -companion.xlsx.
  */
 const outDir = process.env.XLSX_OUT;
-const STAGES: [string, PackageStage | undefined][] = [["a", "sheetjs"], ["b", "clean"], ["c", "zip"], ["d", "styled"], ["e", "tables"], ["f", undefined]];
+const STAGES: [string, PackageStage | undefined][] = [["a", "sheetjs"], ["a2", "rezip"], ["b", "clean"], ["c", "zip"], ["d", "styled"], ["e", "tables"], ["f", undefined]];
 
 describe.skipIf(outDir === undefined || outDir === "")("fixture workbooks to XLSX_OUT", () => {
   it("writes the final files and every staged variant", async () => {
