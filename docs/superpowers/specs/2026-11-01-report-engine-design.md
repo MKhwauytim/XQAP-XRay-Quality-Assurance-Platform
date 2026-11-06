@@ -97,6 +97,16 @@ Size note: raw uploads can be large (the port report's source is a 318 MB workbo
 
 **M14 Catalog and slide picks (owner idea, 2026-11-05).** The catalog is a numbered HTML lookbook of every design, which can be filled with real data for a preview. It is sent to a department; they reply with slide numbers (for example 1, 4, 5, 6, 10). Those numbers are entered in the system (typed, or imported from the picks file), and the report is issued with exactly those designs in that order, through all gates and in all four formats. Numbers are stable forever: a retired design keeps its number and is refused with a clear message.
 
+**M15 One fixed, human-readable workbook method for every report (owner, 2026-11-05).** Every workbook any report issues follows the same structure and wording, so a reader who knows one knows all:
+1. **Human names only.** No "خطوة 1", "خطوة 2", no codes or internal ids (`s1`, `tblStudies`, `matchRate`, `port_type`) anywhere a person reads: sheet names, titles, column headers, pivot fields, chart titles, slicer captions, the source sheet. Every name is the plain Arabic label of what it is. Internal ids may live only in hidden places Excel requires (and there they still use readable Arabic where Excel allows).
+2. **Processing sheets are named by what they do**, for example «استبعاد غير الموظفين» or «توحيد أسماء المنافذ», never by a number. Their order is the order they were applied, shown on the cover.
+3. **Every sheet opens with the same header block:** sheet title; one sentence on what it holds; where it comes from (the sheet it reads); the rule in plain Arabic for a processing sheet; and the row counts before and after.
+4. **Column headers** use the column labels, never ids. Raw sheets keep the uploaded headers exactly (M12).
+5. **Fixed sections and order:** cover and index, `|`, raw data, `||`, processing, `|||`, processed sets, `||||`, statistics, `|||||`, source of figures. The same sheet titles and the same header block wording in every report.
+6. **Statistics are named by their meaning** («نسبة التوائم حسب نوع المنفذ»), with the slide each one feeds.
+
+The workbook writer enforces this with a check: any sheet name, header or caption that matches an internal id pattern or a «خطوة N» pattern blocks the issue.
+
 Interface to a host (sketch): `issueReport(template, packId, datasets, params) → { html, pdfPrintable, pptx, xlsx, lintReport, parityReport }`. The host decides where files go; the module never reads or writes the host's storage directly.
 
 ## 1. Intent
