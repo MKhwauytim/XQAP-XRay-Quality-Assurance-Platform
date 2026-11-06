@@ -74,7 +74,7 @@ export function editPart(bytes: Uint8Array, part: string, edit: (xml: string) =>
 }
 
 /** Removes the last `<row>` element of the named sheet, as a truncated or row-dropped sheet would read. */
-export async function dropLastRow(bytes: Uint8Array, sheet: string): Promise<Uint8Array> {
+export async function dropLastRow(bytes: Uint8Array, sheet: string, opts: { keepDimension?: boolean } = {}): Promise<Uint8Array> {
   const parts = await sheetPaths(bytes);
   const part = parts.get(sheet);
   if (part === undefined) throw new Error(`no sheet ${sheet}`);
@@ -82,9 +82,11 @@ export async function dropLastRow(bytes: Uint8Array, sheet: string): Promise<Uin
     const rows = [...xml.matchAll(/<row\b[^>]*>[\s\S]*?<\/row>/g)];
     const last = rows[rows.length - 1];
     if (last?.index === undefined) throw new Error(`${sheet} has no rows`);
-    // A truly shorter sheet: its dimension ends one row earlier too.
-    return (xml.slice(0, last.index) + xml.slice(last.index + last[0].length))
-      .replace(/(<dimension ref="[A-Z]+\d+:[A-Z]+)(\d+)"/, (_, head: string, end: string) => `${head}${Number(end) - 1}"`);
+    const cut = xml.slice(0, last.index) + xml.slice(last.index + last[0].length);
+    // keepDimension: the row is gone but <dimension> still claims it, as a foreign tool might leave it.
+    if (opts.keepDimension === true) return cut;
+    // Otherwise a truly shorter sheet: its dimension ends one row earlier too.
+    return cut.replace(/(<dimension ref="[A-Z]+\d+:[A-Z]+)(\d+)"/, (_, head: string, end: string) => `${head}${Number(end) - 1}"`);
   });
 }
 

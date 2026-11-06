@@ -18,7 +18,7 @@ describe("checkReconciliation", () => {
   });
 
   const rowsOf = async (o: Outputs) => ({
-    raw: readRawRowCounts(o.companion, o.plan, o.spec),
+    raw: readRawRowCounts(o.companion, o.plan, o.spec, await zipParts(o.companion)),
     processed: readProcessedRowCounts(o.xlsx, await zipParts(o.xlsx), o.plan),
   });
 
@@ -30,6 +30,15 @@ describe("checkReconciliation", () => {
     expect(checkReconciliation(good.processed, steps, await rowsOf({ ...good, companion }))).toEqual([
       { rule: "gate.reconcile", path: "studies", detail: "companion raw rows 11 != raw count 12" },
     ]);
+  });
+
+  it("a raw row removed while <dimension> still claims it blocks: counted from the real rows, mismatch reported", async () => {
+    const rawSheet = good.plan.companion.sheets.find((s) => s.kind === "raw")?.name ?? "";
+    const companion = await dropLastRow(good.companion, rawSheet, { keepDimension: true });
+    const r = await runGates({ ...good, companion });
+    const rec = r.issues.filter((i) => i.rule === "gate.reconcile");
+    expect(rec).toContainEqual({ rule: "gate.reconcile", path: `companion: ${rawSheet}`, detail: "dimension does not match rows: dimension 13, highest row 12" });
+    expect(rec).toContainEqual({ rule: "gate.reconcile", path: "studies", detail: "companion raw rows 11 != raw count 12" });
   });
 
   it("a truncated processed sheet fails against the processed rows and the last step", async () => {

@@ -1,9 +1,10 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import type { EngineIssue } from "../errors";
 import { buildOutputs } from "../__fixtures__/gateKit";
 import type { Outputs } from "../__fixtures__/gateKit";
 import {
   UNBOXED, formatCached, layoutBoxes, readHtmlBoxes, readPptxBoxes, readProcessedRowCounts, readRawRowCounts,
-  readXlsxSource, readXlsxSteps, zipParts,
+  readXlsxSource, readXlsxSteps, writtenDataRows, zipParts,
 } from "./readBack";
 
 let good: Outputs;
@@ -49,8 +50,22 @@ describe("read-backs", () => {
     expect(l.map((b) => [b.id, b.x, b.y])).toEqual(p.map((b) => [b.id, b.x, b.y]));
   });
 
+  it("counts written rows from the sheet XML: empty <row> elements and gaps in r count as blank rows", () => {
+    const ws = (ref: string) => ({ "!ref": ref });
+    const problems: string[] = [];
+    expect(writtenDataRows('<row r="1"><c/></row><row r="2"/><row r="4"><c/></row>', ws("A1:D4"), problems)).toBe(3);
+    expect(problems).toEqual([]);
+    expect(writtenDataRows('<row r="1"><c/></row><row r="3"><c/></row>', ws("A1:D5"), problems)).toBe(2);
+    expect(problems).toEqual(["dimension does not match rows: dimension 5, highest row 3"]);
+    const dup: string[] = [];
+    writtenDataRows('<row r="1"/><row r="2"/><row r="2"/>', ws("A1:A2"), dup);
+    expect(dup).toEqual(["3 row elements for 2 rows"]);
+  });
+
   it("counts raw rows in the companion and filled processed rows in the report", async () => {
-    expect(readRawRowCounts(good.companion, good.plan, good.spec)).toEqual(new Map([["studies", 12]]));
+    const issues: EngineIssue[] = [];
+    expect(readRawRowCounts(good.companion, good.plan, good.spec, await zipParts(good.companion), issues)).toEqual(new Map([["studies", 12]]));
+    expect(issues).toEqual([]);
     expect(readProcessedRowCounts(good.xlsx, await zipParts(good.xlsx), good.plan)).toEqual(new Map([["studies", 10]]));
   });
 

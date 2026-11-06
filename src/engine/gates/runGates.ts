@@ -122,7 +122,8 @@ export async function runGates(input: GateInput): Promise<GateReport> {
   await guarded("gate.reconcile", issues, async () => {
     const report = need(reportWb, "report workbook");
     const rows = {
-      raw: readRawRowCounts(need(companionWb, "companion workbook"), input.plan, input.spec),
+      // Dimension-versus-rows problems go straight into issues as gate.reconcile.
+      raw: readRawRowCounts(need(companionWb, "companion workbook"), input.plan, input.spec, companionParts, issues),
       processed: readProcessedRowCounts(report, opened.xlsx, input.plan),
     };
     issues.push(...checkReconciliation(input.processed, await readXlsxSteps(report, input.plan), rows));

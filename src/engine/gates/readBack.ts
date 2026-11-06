@@ -2,6 +2,7 @@ import JSZip from "jszip";
 import * as XLSX from "xlsx";
 import { typedRowSources } from "../data/typing";
 import { LAYOUT } from "../layout/layoutReport";
+import type { EngineIssue } from "../errors";
 import type { LayoutDoc } from "../layout/types";
 import { EMU_PER_PX } from "../pptx/units";
 import type { ReportSpec } from "../spec/types";
@@ -309,18 +310,33 @@ export async function readXlsxSteps(xlsx: WorkbookInput, plan: WorkbookPlan): Pr
   });
 }
 
-/** Data rows written on a sheet: its `!ref` span below the header row, so blank rows count as rows, as in typing. */
-function writtenDataRows(ws: XLSX.WorkSheet | undefined): number {
+/**
+ * Data rows written on a sheet, counted from the sheet XML itself: the highest `<row r>` below the header row, so
+ * blank rows (empty `<row>` elements or gaps in `r`) count as rows, as in typing. The `!ref` span and the
+ * `<row>` elements are cross-checked against it; a disagreement is reported, never trusted (any row loss shows).
+ */
+export function writtenDataRows(xml: string | undefined, ws: XLSX.WorkSheet | undefined, problems: string[] = []): number {
+  const rs: number[] = [];
+  for (const t of tokenizeXml(xml ?? "")) if (t.k !== "text" && t.k !== "close" && t.name === "row") rs.push(Number(t.attrs.get("r")));
+  const highest = rs.length === 0 ? 0 : Math.max(...rs);
+  if (rs.some((r) => !Number.isInteger(r) || r < 1)) problems.push("row without a valid r");
+  if (new Set(rs).size !== rs.length || rs.length > highest) problems.push(`${rs.length} row elements for ${highest} rows`);
   const ref = ws?.["!ref"];
-  return ref === undefined ? 0 : Math.max(0, XLSX.utils.decode_range(ref).e.r);
+  const refRows = ref === undefined ? 0 : XLSX.utils.decode_range(ref).e.r + 1;
+  if (refRows !== highest) problems.push(`dimension does not match rows: dimension ${refRows}, highest row ${highest}`);
+  return Math.max(0, highest - 1);
 }
 
 /**
  * Data rows of the raw sheets in the companion, summed per dataset over exactly the (file, sheet) pairs typing
  * reads (`typedRowSources`): an unreferenced sheet such as a notes tab never counts, and blank rows always do.
+ * Rows come from the sheet XML (`parts`); a sheet whose dimension and rows disagree adds a `gate.reconcile` issue.
  */
-export function readRawRowCounts(companion: WorkbookInput, plan: WorkbookPlan, spec: ReportSpec): Map<string, number> {
+export function readRawRowCounts(
+  companion: WorkbookInput, plan: WorkbookPlan, spec: ReportSpec, parts: Map<string, string>, issues: EngineIssue[] = [],
+): Map<string, number> {
   const wb = readWorkbook(companion);
+  const paths = sheetPartPaths(parts);
   const raw = plan.companion.sheets.flatMap((s) => (s.kind === "raw" && s.raw !== undefined ? [{ name: s.name, ...s.raw }] : []));
   const files = [...new Set(raw.map((r) => r.fileName))].map((fileName) => ({
     fileName, sheets: raw.filter((r) => r.fileName === fileName).map((r) => ({ sheetName: r.sheetName })),
@@ -330,7 +346,10 @@ export function readRawRowCounts(companion: WorkbookInput, plan: WorkbookPlan, s
     let n = 0;
     for (const src of typedRowSources(def, files)) {
       const s = raw.find((r) => r.fileName === src.fileName && r.sheetName === src.sheetName);
-      n += writtenDataRows(s === undefined ? undefined : wb.Sheets[s.name]);
+      if (s === undefined) continue;
+      const problems: string[] = [];
+      n += writtenDataRows(parts.get(paths.get(s.name) ?? ""), wb.Sheets[s.name], problems);
+      for (const p of problems) issues.push({ rule: "gate.reconcile", path: `companion: ${s.name}`, detail: p });
     }
     out.set(def.id, n);
   }
