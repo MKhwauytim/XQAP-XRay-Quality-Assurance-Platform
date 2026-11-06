@@ -84,6 +84,8 @@ Technical note: the app runs in the browser with no Excel engine, so it cannot r
 2. **Processed section:** each processing step the system applied on its own sheet, then the processed sets (population, sample, any other), then the statistics.
 The two never mix, and the processed section must reconcile with the raw one (raw rows minus each step's removed rows equals processed rows), checked on every issue.
 
+Owner decision (2026-11-06, after measuring the port report: one workbook was 693 MB, 2 to 3.5 minutes to open, 4.5 GB of memory): **the raw section always ships as a companion workbook**, issued together with the report workbook and linked from its cover and from each processing sheet. The report workbook holds processing, processed sets, statistics and the source of figures. Nothing is dropped.
+
 Size note: raw uploads can be large (the port report's source is a 318 MB workbook with millions of population rows). Measured size and open time decide the packaging; if one file is impractical, the raw section ships as a companion workbook issued and linked together with the report workbook, never dropped.
 
 **M13 Reliability: the module never breaks, never stops halfway, never issues a wrong report (owner, 2026-11-05).**
