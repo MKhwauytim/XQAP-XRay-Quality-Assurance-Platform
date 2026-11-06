@@ -117,6 +117,10 @@ export function lintLayout(doc: LayoutDoc, theme: ThemeTokens): { errors: Engine
     }
     warnings.push(...r3(slide));
   }
+  // M6: a digit typed into static template text is not a measured figure. Parity lets it through; the author is told.
+  for (const n of doc.nonFigureSpans) {
+    if (n.staticText !== undefined) warnings.push(lintIssue(n.slide, n.boxId, `M6: رقم مكتوب في نص ثابت: ${n.staticText.trim()}`));
+  }
   return { errors, warnings };
 }
 

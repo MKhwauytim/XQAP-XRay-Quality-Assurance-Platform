@@ -78,6 +78,8 @@ interface Ctx {
   measures: Map<string, MeasureSpec>;
   issues: EngineIssue[];
   figures: LayoutFigure[];
+  /** Static template text per text box id (measure and param references removed). */
+  staticText: Map<string, string>;
 }
 
 type TablePage = (slide: number, continued: boolean) => LayoutBox[];
@@ -87,7 +89,7 @@ export function layoutReport(
   theme: ThemeTokens, m: TextMeasurer,
 ): LayoutDoc {
   const ctx: Ctx = {
-    spec, values, params, theme, m, measures: new Map(spec.model.measures.map((x) => [x.id, x])), issues: [], figures: [],
+    spec, values, params, theme, m, measures: new Map(spec.model.measures.map((x) => [x.id, x])), issues: [], figures: [], staticText: new Map(),
   };
   const slides: LayoutSlide[] = [];
   spec.pages.forEach((page, pi) => {
@@ -110,7 +112,7 @@ export function layoutReport(
   }
   return {
     width: LAYOUT.slideW, height: LAYOUT.slideH, slides, figures: ctx.figures,
-    nonFigureSpans: nonFigureSpans(slides, ctx.figures), issues: ctx.issues,
+    nonFigureSpans: nonFigureSpans(slides, ctx.figures, ctx.staticText), issues: ctx.issues,
   };
 }
 
@@ -120,7 +122,7 @@ const runsText = (lines: Run[][]): string => lines.map((l) => l.map((r) => r.tex
  * Every box's shown text with its own figures' displays taken out once each; what is left and holds a digit is
  * a non-figure span: a param value, static text, a title, a dimension label or a chart category.
  */
-function nonFigureSpans(slides: LayoutSlide[], figures: LayoutFigure[]): NonFigureSpan[] {
+function nonFigureSpans(slides: LayoutSlide[], figures: LayoutFigure[], staticText: Map<string, string>): NonFigureSpan[] {
   const out: NonFigureSpan[] = [];
   for (const s of slides) {
     const shown: { boxId: string; text: string }[] = [];
@@ -135,7 +137,9 @@ function nonFigureSpans(slides: LayoutSlide[], figures: LayoutFigure[]): NonFigu
       if (!s.boxes.some((b) => b.kind === "bar" && b.id === boxId)) {
         for (const f of figures) if (f.slide === s.index && f.boxId === boxId) rest = rest.replace(f.display, " ");
       }
-      if (/\d/.test(rest)) out.push({ slide: s.index, boxId, text: rest });
+      if (!/\d/.test(rest)) continue;
+      const fixed = staticText.get(boxId);
+      out.push(fixed !== undefined && /\d/.test(fixed) ? { slide: s.index, boxId, text: rest, staticText: fixed } : { slide: s.index, boxId, text: rest });
     }
   }
   return out;
@@ -148,6 +152,7 @@ function makeSlide(ctx: Ctx, page: PageSpec, index: number, continued: boolean, 
   const titleBox = textBox(ctx, index, `s${index}-title`, "title", frame, title, {
     sizePx: LAYOUT.titlePx, weight: 700, color: ctx.theme.ink.navy, maxLines: 1,
   }, [], false);
+  ctx.staticText.set(titleBox.id, title);
   const rule: LayoutBox = {
     kind: "rule", id: `s${index}-rule`, x: frame.x, y: frame.y + frame.h + (LAYOUT.ruleGap - LAYOUT.ruleH) / 2,
     w: frame.w, color: ctx.theme.ink.gold,
@@ -200,6 +205,7 @@ function visualBoxes(ctx: Ctx, slide: number, v: VisualSpec, r: ResolvedVisual |
     const box = textBox(ctx, slide, id(0), v.visualId, frame, text, {
       sizePx: v.format?.sizePx ?? LAYOUT.textPx, weight: v.format?.weight ?? 400, color: tone("neutral"), maxLines: 2,
     }, used.map((u) => u.key));
+    ctx.staticText.set(box.id, (v.text ?? "").replace(MEASURE_REF, " ").replace(PARAM_REF, " "));
     for (const u of used) figure(ctx, slide, box.id, u);
     return [box];
   }

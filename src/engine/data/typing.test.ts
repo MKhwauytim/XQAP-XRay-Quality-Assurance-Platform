@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { LIMITS } from "../limits";
 import { FIXTURE_DATASET as def, FIXTURE_FILES as files } from "../__fixtures__/twoSlide";
-import { parseCell, suggestTypes, typeDataset } from "./typing";
+import { parseCell, suggestTypes, typeDataset, typedRowSources } from "./typing";
 import type { ColumnType } from "./types";
 
 describe("parseCell", () => {
@@ -155,5 +155,13 @@ describe("suggestTypes", () => {
     });
     expect(s[0].type).toBe("text");
     expect(s[1]).toMatchObject({ type: "date", level: "temporal", role: "dimension" });
+  });
+});
+
+describe("typedRowSources", () => {
+  it("lists only the listed files' sheets some column reads", () => {
+    const withNotes = [{ ...files[0], sheets: [...files[0].sheets, { sheetName: "notes", headers: ["n"], rows: [["x"]] }] }];
+    expect(typedRowSources(def, withNotes)).toEqual([{ fileName: "studies.xlsx", sheetName: "نتائج الدراسة" }]);
+    expect(typedRowSources({ ...def, files: [] }, withNotes)).toEqual([]);
   });
 });

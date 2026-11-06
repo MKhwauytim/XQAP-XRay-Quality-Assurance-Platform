@@ -82,7 +82,9 @@ export async function dropLastRow(bytes: Uint8Array, sheet: string): Promise<Uin
     const rows = [...xml.matchAll(/<row\b[^>]*>[\s\S]*?<\/row>/g)];
     const last = rows[rows.length - 1];
     if (last?.index === undefined) throw new Error(`${sheet} has no rows`);
-    return xml.slice(0, last.index) + xml.slice(last.index + last[0].length);
+    // A truly shorter sheet: its dimension ends one row earlier too.
+    return (xml.slice(0, last.index) + xml.slice(last.index + last[0].length))
+      .replace(/(<dimension ref="[A-Z]+\d+:[A-Z]+)(\d+)"/, (_, head: string, end: string) => `${head}${Number(end) - 1}"`);
   });
 }
 

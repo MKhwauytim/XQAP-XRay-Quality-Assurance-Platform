@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { layoutFixture } from "../__fixtures__/helpers";
-import { FIXTURE_THEME } from "../__fixtures__/twoSlide";
+import { layoutFixture, layoutOf, withText } from "../__fixtures__/helpers";
+import { FIXTURE_FILES, FIXTURE_THEME, twoSlideFixture } from "../__fixtures__/twoSlide";
 import type { LayoutDoc, TextBox } from "../layout/types";
 import { contrastRatio, lintLayout, lintOutputText, lintText } from "./designLint";
 
@@ -63,6 +63,17 @@ describe("design lint", () => {
     const details = lintLayout(doc, theme).errors.map((e) => e.detail ?? "");
     expect(details).toContainEqual(expect.stringContaining("F4: 18px"));
     expect(details).toContainEqual("F2: fit.tooLong");
+  });
+
+  it("M6 warns, without blocking, on digits typed into static text, but not on a param value with digits", () => {
+    const f = twoSlideFixture();
+    f.spec.params.push({ id: "month", type: "month", required: true });
+    f.params.values.month = "2026-05";
+    f.spec.pages[0].visuals[0].text = "تقرير {{param:month}}: {{measure:matchRate}}";
+    expect(lintLayout(layoutOf({ f, files: FIXTURE_FILES }), theme).warnings).toEqual([]);
+    const r = lintLayout(layoutOf(withText("المستوى 1: {{measure:matchRate}}")), theme);
+    expect(r.errors).toEqual([]);
+    expect(r.warnings).toEqual([{ rule: "gate.lint", page: 1, path: "s1-p1text-0", detail: "M6: رقم مكتوب في نص ثابت: المستوى 1:" }]);
   });
 
   it("R3 warns on a differently coloured box laid over the title", () => {

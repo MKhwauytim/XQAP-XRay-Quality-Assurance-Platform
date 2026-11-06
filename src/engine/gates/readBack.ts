@@ -1,5 +1,6 @@
 import JSZip from "jszip";
 import * as XLSX from "xlsx";
+import { typedRowSources } from "../data/typing";
 import { LAYOUT } from "../layout/layoutReport";
 import type { LayoutDoc } from "../layout/types";
 import { EMU_PER_PX } from "../pptx/units";
@@ -308,18 +309,28 @@ export async function readXlsxSteps(xlsx: WorkbookInput, plan: WorkbookPlan): Pr
   });
 }
 
+/** Data rows written on a sheet: its `!ref` span below the header row, so blank rows count as rows, as in typing. */
+function writtenDataRows(ws: XLSX.WorkSheet | undefined): number {
+  const ref = ws?.["!ref"];
+  return ref === undefined ? 0 : Math.max(0, XLSX.utils.decode_range(ref).e.r);
+}
+
 /**
- * Data rows of the raw sheets in the companion, summed per dataset (a sheet belongs to the datasets that list
- * its file). Rows with no cell at all are not counted.
+ * Data rows of the raw sheets in the companion, summed per dataset over exactly the (file, sheet) pairs typing
+ * reads (`typedRowSources`): an unreferenced sheet such as a notes tab never counts, and blank rows always do.
  */
 export function readRawRowCounts(companion: WorkbookInput, plan: WorkbookPlan, spec: ReportSpec): Map<string, number> {
   const wb = readWorkbook(companion);
+  const raw = plan.companion.sheets.flatMap((s) => (s.kind === "raw" && s.raw !== undefined ? [{ name: s.name, ...s.raw }] : []));
+  const files = [...new Set(raw.map((r) => r.fileName))].map((fileName) => ({
+    fileName, sheets: raw.filter((r) => r.fileName === fileName).map((r) => ({ sheetName: r.sheetName })),
+  }));
   const out = new Map<string, number>();
   for (const def of spec.datasets) {
     let n = 0;
-    for (const s of plan.companion.sheets) {
-      if (s.kind !== "raw" || s.raw === undefined || !def.files.includes(s.raw.fileName)) continue;
-      n += Math.max(0, aoa(wb, s.name, false).length - 1);
+    for (const src of typedRowSources(def, files)) {
+      const s = raw.find((r) => r.fileName === src.fileName && r.sheetName === src.sheetName);
+      n += writtenDataRows(s === undefined ? undefined : wb.Sheets[s.name]);
     }
     out.set(def.id, n);
   }

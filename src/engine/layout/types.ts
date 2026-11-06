@@ -105,6 +105,8 @@ export interface NonFigureSpan {
   slide: number;
   boxId: string;
   text: string;
+  /** Set when the box's static template text (not a `{{param}}` value) holds digits; the design lint warns (M6). */
+  staticText?: string;
 }
 
 export interface LayoutDoc {
