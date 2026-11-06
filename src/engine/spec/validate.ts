@@ -3,6 +3,7 @@ import type { EngineIssue } from "../errors";
 import type { Expr } from "../formula/ast";
 import { findMeasureCycle, parseFormula } from "../formula/parse";
 import { LIMITS } from "../limits";
+import { checkPackShape, checkSpecShape } from "./shape";
 import type { DomainPack, IssueParams, MeasureSpec, PageSpec, ReportSpec, VisualSpec, WellItem } from "./types";
 import { WELL_SCHEMAS } from "./wells";
 
@@ -225,23 +226,57 @@ function checkPage(ctx: Ctx, p: PageSpec, pi: number): void {
   duplicates(ctx, p.visuals.map((v) => v.visualId), (i) => `${path}.visuals[${i}].visualId`);
 }
 
+function validIsoInstant(s: unknown): boolean {
+  if (typeof s !== "string" || !ISO.test(s) || Number.isNaN(Date.parse(s))) return false;
+  const y = Number(s.slice(0, 4)), m = Number(s.slice(5, 7)), d = Number(s.slice(8, 10));
+  const day = new Date(Date.UTC(y, m - 1, d));
+  return day.getUTCFullYear() === y && day.getUTCMonth() === m - 1 && day.getUTCDate() === d;
+}
+
 function checkParams(ctx: Ctx, params: IssueParams | undefined): void {
   duplicates(ctx, ctx.spec.params.map((p) => p.id), (i) => `params[${i}].id`);
-  const issuedAt = params?.issuedAt;
-  if (typeof issuedAt !== "string" || !ISO.test(issuedAt) || Number.isNaN(Date.parse(issuedAt))) {
-    push(ctx, "schema.invalid", "params.issuedAt", String(issuedAt));
-  }
+  const issuedAt = (params as { issuedAt?: unknown } | undefined)?.issuedAt;
+  if (!validIsoInstant(issuedAt)) push(ctx, "schema.invalid", "params.issuedAt", String(issuedAt));
+  const raw = (params as { values?: unknown } | undefined)?.values;
+  const values: Record<string, unknown> = typeof raw === "object" && raw !== null && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : {};
+  if (raw !== undefined && values !== raw) push(ctx, "schema.invalid", "params.values", "expected object");
   for (const p of ctx.spec.params) {
-    const v = params?.values?.[p.id];
-    if (p.required && (v === undefined || v === "")) push(ctx, "schema.invalid", `params.values.${p.id}`, "required");
+    const v = values[p.id];
+    const path = `params.values.${p.id}`;
+    if (v === undefined || v === "") {
+      if (p.required) push(ctx, "schema.invalid", path, "required");
+    } else if (p.type === "number" ? typeof v !== "number" || !Number.isFinite(v) : typeof v !== "string") {
+      push(ctx, "schema.invalid", path, `expected ${p.type === "number" ? "number" : "string"}`);
+    } else if (p.type === "month" && !/^\d{4}-(0[1-9]|1[0-2])$/.test(v as string)) {
+      push(ctx, "schema.invalid", path, "expected month YYYY-MM");
+    }
   }
 }
 
 /** Hand-written structural validation. Runs on the pack-merged spec. */
 export function validateSpec(spec: ReportSpec, pack?: DomainPack, params?: IssueParams): EngineIssue[] {
+  const shape = [...checkSpecShape(spec), ...(pack === undefined ? [] : checkPackShape(pack))];
+  if (shape.length > 0) return shape;
   const merged = mergePackMeasures(spec, pack);
   const columns = new Map<string, ColumnDecl>();
-  for (const d of merged.datasets) for (const c of d.columns) if (!columns.has(c.id)) columns.set(c.id, c);
+  const ambiguous: EngineIssue[] = [];
+  merged.datasets.forEach((d, di) => {
+    d.columns.forEach((c, ci) => {
+      if (columns.has(c.id)) {
+        ambiguous.push({ rule: "schema.invalid", path: `datasets[${di}].columns[${ci}].id`, detail: "ambiguous field id" });
+      } else columns.set(c.id, c);
+    });
+    for (const s of d.steps) {
+      if (s.kind !== "calc" || s.calc === undefined || columns.has(s.calc.columnId)) continue;
+      const isNum = s.calc.type === "number";
+      columns.set(s.calc.columnId, {
+        source: { file: "", sheet: "", header: "" }, id: s.calc.columnId, label: s.calc.columnId,
+        type: s.calc.type, role: isNum ? "measure" : "dimension", level: isNum ? "quantitative" : "nominal",
+      });
+    }
+  });
   const ctx: Ctx = {
     spec: merged,
     issues: [],
@@ -251,6 +286,10 @@ export function validateSpec(spec: ReportSpec, pack?: DomainPack, params?: Issue
   };
   if (merged.schemaVersion !== 1) push(ctx, "schema.invalid", "schemaVersion", String(merged.schemaVersion));
   if (merged.theme !== "deck3") push(ctx, "schema.invalid", "theme", String(merged.theme));
+  ctx.issues.push(...ambiguous);
+  if (pack !== undefined && spec.model.packId !== undefined && spec.model.packId !== pack.packId) {
+    push(ctx, "schema.invalid", "model.packId", `${spec.model.packId} differs from pack ${pack.packId}`);
+  }
   if (pack !== undefined) {
     const packById = new Map(pack.measures.map((m) => [m.id, m]));
     spec.model.measures.forEach((m, i) => {
