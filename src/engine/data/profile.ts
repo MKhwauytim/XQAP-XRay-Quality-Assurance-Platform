@@ -1,6 +1,7 @@
 import type { Cell, ColumnProfile, DatasetDef, TypedDataset } from "./types";
 
 const MAX_SAMPLE_ERRORS = 5;
+const MAX_SAMPLE_CHARS = 200;
 
 export function profileColumns(data: TypedDataset, def: DatasetDef): ColumnProfile[] {
   return def.columns.map((col) => {
@@ -14,7 +15,7 @@ export function profileColumns(data: TypedDataset, def: DatasetDef): ColumnProfi
     }
     const total = data.rows.length;
     // An errored cell is stored as null but counted once, as an error.
-    const nulls = nullCells - errs.length;
+    const nulls = Math.max(0, nullCells - errs.length);
     return {
       columnId: col.id,
       total,
@@ -22,7 +23,7 @@ export function profileColumns(data: TypedDataset, def: DatasetDef): ColumnProfi
       errors: errs.length,
       nulls,
       distinct: seen.size,
-      sampleErrors: errs.slice(0, MAX_SAMPLE_ERRORS).map((e) => e.raw),
+      sampleErrors: errs.slice(0, MAX_SAMPLE_ERRORS).map((e) => e.raw.slice(0, MAX_SAMPLE_CHARS)),
     };
   });
 }

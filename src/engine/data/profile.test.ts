@@ -18,6 +18,17 @@ describe("profileColumns", () => {
     expect(p).toMatchObject({ total: 12, errors: 0, nulls: 1, valid: 11, distinct: 2 });
   });
 
+  it("caps each sampleErrors value at 200 characters", () => {
+    const bad = { id: "x", rows: [{ count: null }], errors: [{ columnId: "count", row: 0, raw: "z".repeat(500) }] };
+    const p = profileColumns(bad, def).find((c) => c.columnId === "count")!;
+    expect(p.sampleErrors[0]).toHaveLength(200);
+  });
+
+  it("nulls never go negative", () => {
+    const bad = { id: "x", rows: [], errors: [{ columnId: "count", row: 0, raw: "q" }] };
+    expect(profileColumns(bad, def).find((c) => c.columnId === "count")!.nulls).toBe(0);
+  });
+
   it("caps sampleErrors at 5", () => {
     const bad = {
       id: "x",

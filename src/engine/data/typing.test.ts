@@ -32,6 +32,23 @@ describe("parseCell", () => {
     expect(c.error).toBeTruthy();
   });
 
+  it("Arabic-Indic digits work in a date and extended digits in a number", () => {
+    expect(parseCell("٢٠٢٦-٠٥-٠١", "date")).toEqual({ value: "2026-05-01" });
+    expect(parseCell("١", "boolean")).toEqual({ value: true });
+    expect(parseCell("۴۸۲۵۰", "number")).toEqual({ value: 48250 });
+  });
+
+  it("Arabic decimal and thousands separators parse in a number but not in text", () => {
+    expect(parseCell("٤٨٬٢٥٠٫٥", "number")).toEqual({ value: 48250.5 });
+    expect(parseCell("١٬٢", "text")).toEqual({ value: "1٬2" });
+  });
+
+  it("whitespace-only is null, a boolean given 2 is an error, beyond safe integer is an error", () => {
+    expect(parseCell("   ", "number")).toEqual({ value: null });
+    expect(parseCell(2, "boolean").error).toBeTruthy();
+    expect(parseCell("9007199254740993", "number").error).toBeTruthy();
+  });
+
   it("converts Arabic-Indic digits inside text to Latin", () => {
     expect(parseCell("١٢٣", "text")).toEqual({ value: "123" });
   });
@@ -97,6 +114,29 @@ describe("typeDataset", () => {
     const { data, issues } = typeDataset(d, files);
     expect(issues).toEqual([]);
     expect(data.rows[0].calc1).toBeNull();
+  });
+});
+
+describe("typeDataset input scope and guards", () => {
+  it("an unreferenced sheet with duplicate headers adds no rows and no issues", () => {
+    const f = structuredClone(files);
+    f[0].sheets.push({ sheetName: "notes", headers: ["a", "a"], rows: [["1", "2"], ["3", "4"]] });
+    const { data, issues } = typeDataset(def, f);
+    expect(issues).toEqual([]);
+    expect(data.rows).toHaveLength(12);
+  });
+
+  it("leaves the input files untouched", () => {
+    const before = structuredClone(files);
+    typeDataset(def, files);
+    expect(files).toEqual(before);
+  });
+
+  it("a duplicate uploaded fileName is an issue", () => {
+    const f = [...structuredClone(files), ...structuredClone(files)];
+    expect(typeDataset(def, f).issues).toContainEqual(
+      expect.objectContaining({ rule: "schema.invalid", path: "files[studies.xlsx]" }),
+    );
   });
 });
 
