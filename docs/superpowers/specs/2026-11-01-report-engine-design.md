@@ -107,6 +107,8 @@ Size note: raw uploads can be large (the port report's source is a 318 MB workbo
 
 The workbook writer enforces this with a check: any sheet name, header or caption that matches an internal id pattern or a «خطوة N» pattern blocks the issue.
 
+**M16 One click, no AI at issue time (owner, 2026-11-05).** The engine is plain deterministic code. Issuing a report is one action: data in, finished files out, in one pass. No AI model, agent or human step builds, reviews or assembles pages during an issue. Each output is complete when it is written: the Excel workbook opens finished (all sheets, tables, pivots, charts, slicers, links), the PowerPoint opens finished, nothing is added page by page afterwards. The AI agents seen during development only build and test the engine; they are never part of the product. Every gate in M13 runs inside the same pass as code, not as a review. Issue time is measured and budgeted (M13 limits).
+
 Interface to a host (sketch): `issueReport(template, packId, datasets, params) → { html, pdfPrintable, pptx, xlsx, lintReport, parityReport }`. The host decides where files go; the module never reads or writes the host's storage directly.
 
 ## 1. Intent
