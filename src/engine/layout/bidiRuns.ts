@@ -4,8 +4,9 @@ export interface Run {
   ltr: boolean;
 }
 
-// Hyphen last so it is a literal, not a range (C18).
-const TOKEN = /[A-Za-z0-9][A-Za-z0-9.,%/:+-]*/g;
+// M5 token class, hyphen last so it is a literal (C18). A token ends on [A-Za-z0-9%] so sentence
+// punctuation stays Arabic; a sign (-, +, U+2212) at a token boundary (start, whitespace or "(") belongs to it.
+const TOKEN = /(?:(?<=^|[\s(])[-+\u2212](?=[0-9]))?[A-Za-z0-9](?:[A-Za-z0-9.,%/:+-]*[A-Za-z0-9%])?/g;
 const CLUSTER_JOIN = " / ";
 
 /** Split text into direction runs. Two tokens separated by exactly " / " form one LTR cluster. Concatenating the runs gives back the input. */

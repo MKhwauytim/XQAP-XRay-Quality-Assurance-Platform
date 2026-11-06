@@ -33,6 +33,15 @@ describe("fitText", () => {
   it("step 4 picks the split minimising the longer line", () => {
     expect(fitText(`${word(5)} ${word(18)} ${word(20)}`, box(400), m).lines).toEqual([`${word(5)} ${word(18)}`, word(20)]);
   });
+  it("step 4 never splits inside an LTR cluster", () => {
+    const t = "الصفحة 20 / 37 من التقرير";
+    const w = Math.max(...["الصفحة 20 / 37", "من التقرير"].map((s) => m.width(s, 25, 700) * 1.04)) + 1;
+    const r = fitText(t, box(w), m);
+    expect(r.step).toBe(4);
+    r.lines.forEach((l) => { expect(l.includes("20") === l.includes("37")).toBe(true); });
+    expect(r.lines.join(" ")).toBe(t);
+  });
+  it("step 3 width never exceeds widenTo", () => { expect(fitText(word(40), box(400), m, 551.5).widthPx).toBeLessThanOrEqual(551.5); });
   it("step 5 keeps the full text", () => { const t = word(200); const r = fitText(t, box(400), m); expect(r.step).toBe(5); expect(r.lines.join(" ")).toBe(t); });
   it("maxLines 1 never splits", () => { expect(fitText(`${word(20)} ${word(20)}`, { ...box(400), maxLines: 1 }, m).step).toBe(5); });
   it("FIT_SAFETY applies: text measuring w / 1.03 does not fit at step 1", () => {
@@ -54,5 +63,21 @@ describe("fitTableHeaders", () => {
   it("a header too long for all slack is step 5 and leaves widths alone", () => {
     const r = fitTableHeaders([word(200), "س"], [300, 300], [100, 280], 25, m);
     expect(r.fits[0].step).toBe(5); expect(r.colW).toEqual([300, 300]);
+  });
+  it("two long headers both keep the width they need; fits match final widths", () => {
+    const h = [word(30), word(30), "س", "س"];
+    const r = fitTableHeaders(h, [300, 300, 300, 300], [100, 100, 100, 100], 25, m);
+    expect(r.colW.reduce((a, b) => a + b)).toBe(1200);
+    r.fits.forEach((f, i) => {
+      expect(f.widthPx).toBe(r.colW[i]);
+      expect(fitText(h[i], { w: r.colW[i], basePx: 25, weight: 700, maxLines: 2 }, m).step).toBeLessThan(5);
+    });
+    expect(r.colW[0]).toBeGreaterThan(300); expect(r.colW[1]).toBeGreaterThan(300);
+  });
+  it("when slack cannot cover every widened header they refit without widening", () => {
+    const h = [word(40), word(40)];
+    const r = fitTableHeaders(h, [300, 300], [100, 100], 25, m);
+    expect(r.colW).toEqual([300, 300]);
+    expect(r.fits.map((f) => f.step)).toEqual([5, 5]);
   });
 });

@@ -17,3 +17,18 @@ describe("splitRuns", () => {
   });
   it("empty text gives no runs", () => { expect(splitRuns("")).toEqual([]); });
 });
+
+describe("signs and trailing punctuation", () => {
+  it.each([["-5", "-5"], ["+5", "+5"], ["\u22125", "\u22125"], ["قيمة -5", "-5"]])("sign kept: %s", (s, tok) => {
+    expect(splitRuns(s).filter((r) => r.ltr).map((r) => r.text)).toEqual([tok]);
+  });
+  it("(-12.5%) keeps the sign inside the parentheses", () => {
+    expect(splitRuns("(-12.5%)").map((r) => r.text)).toEqual(["(", "-12.5%", ")"]);
+  });
+  it("a hyphen inside a word is not a sign", () => { expect(splitRuns("ب-5").map((r) => r.text)).toEqual(["ب-", "5"]); });
+  it.each([["جدة 85.", "85", "."], ["A6838،", "A6838", "،"], ["A6838,", "A6838", ","]])("trailing mark stays Arabic: %s", (s, tok, mark) => {
+    const runs = splitRuns(s);
+    expect(runs.filter((r) => r.ltr).map((r) => r.text)).toEqual([tok]);
+    expect(runs[runs.length - 1]).toEqual({ text: mark, ltr: false });
+  });
+});
