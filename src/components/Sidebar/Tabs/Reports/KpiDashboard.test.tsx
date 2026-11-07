@@ -149,13 +149,14 @@ describe("KpiDashboard — honesty discipline", () => {
 });
 
 describe("KpiDashboard — executive exports", () => {
-  it("offers only the deck and Excel (no document) and reports which was clicked", () => {
+  it("offers the deck, Excel and PowerPoint (no document) and reports which was clicked", () => {
     onExport.mockClear();
     const { container } = renderDashboard();
     const buttons = Array.from(container.querySelectorAll(".kpi-actions button"));
-    expect(buttons).toHaveLength(2);
+    expect(buttons).toHaveLength(3);
     fireEvent.click(buttons[0]);
     fireEvent.click(buttons[1]);
-    expect(onExport.mock.calls).toEqual([["deck"], ["xlsx"]]);
+    fireEvent.click(buttons[2]);
+    expect(onExport.mock.calls).toEqual([["deck"], ["xlsx"], ["pptx"]]);
   });
 });

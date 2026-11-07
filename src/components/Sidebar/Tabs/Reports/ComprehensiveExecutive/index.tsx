@@ -39,7 +39,7 @@ type SystemMonths = { byMonth: Array<{ month: string; rows: ExecutiveReportRow[]
 type SystemState = { status: "loading" } | { status: "error" } | ({ status: "ready" } & SystemMonths);
 // The executive deck (v3, the only edition) honours the completed-only scope: it drops the
 // population/coverage sections.
-type ExportKind = "deck" | "xlsx" | "both";
+type ExportKind = "deck" | "xlsx" | "both" | "pptx";
 
 /** Names are not shown in the combined report (config.showEmployeeNames is false). */
 const NO_NAMES: Record<string, string> = {};
@@ -234,6 +234,16 @@ export default function ComprehensiveExecutive() {
           onSaveTemplate: directoryHandle ? handleSaveTemplate : undefined,
         });
       }
+      if (kind === "pptx") {
+        const [{ buildExecutiveDeckV3 }, { downloadDeckAsPptx }] = await Promise.all([
+          import("../../../../../data/reporting/executive/deck3"),
+          import("../../../../../data/reporting/executive/pptx/exportDeckPptx"),
+        ]);
+        const chosen = templates.find((t) => t.id === templateId);
+        const html = await buildExecutiveDeckV3(input, NO_NAMES, { textTemplate: chosen?.entries ?? null });
+        const name = input.periodLabel ?? input.monthFolderName;
+        await downloadDeckAsPptx(html, `التقرير_التنفيذي_${name}.pptx`, `التقرير التنفيذي ${name}`);
+      }
       if (kind === "xlsx" || kind === "both") {
         // Raw data only (one row per studied image), not the aggregate tables the report pages already show.
         const { buildExecutiveRawWorkbook } = await import("../../../../../data/reporting/executive/workbook/workbook");
@@ -340,6 +350,9 @@ export default function ComprehensiveExecutive() {
         </button>
         <button type="button" className="ce-btn ce-btn-secondary" disabled={exportDisabled} onClick={() => void handleExport("xlsx")}>
           {labels.ce_generate_xlsx}
+        </button>
+        <button type="button" className="ce-btn ce-btn-secondary" disabled={exportDisabled} onClick={() => void handleExport("pptx")}>
+          {labels.ce_generate_pptx}
         </button>
       </div>
       {exportError && <p className="ce-error" role="alert">{exportError}</p>}

@@ -1,6 +1,10 @@
 /** Save `text` as a file through the blob + anchor pattern (works from `file://`). */
 export function downloadText(text: string, filename: string, type = "application/json;charset=utf-8"): void {
-  const blob = new Blob([text], { type });
+  downloadBlob(new Blob([text], { type }), filename);
+}
+
+/** Save `blob` as a file through the anchor pattern (works from `file://`). */
+export function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
