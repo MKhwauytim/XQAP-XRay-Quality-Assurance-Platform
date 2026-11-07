@@ -32,7 +32,7 @@ import "./KpiDashboard.css";
  * renders «—» via `fmtPct`, never 0%.
  */
 
-export type ExportKind = "deck" | "xlsx";
+export type ExportKind = "deck" | "xlsx" | "pptx";
 export type KpiSection = "overview" | "ports" | "reviewers";
 
 type Props = {
@@ -243,6 +243,17 @@ export default function KpiDashboard(props: Props): ReactElement {
           >
             {exporting === "xlsx" ? <span className="kpi-spinner" /> : <Download size={14} strokeWidth={2} />}
             {labels.kpi_export_xlsx}
+          </button>
+          <button
+            type="button"
+            className="kpi-btn kpi-btn-plain"
+            disabled={exporting !== null || exportsDisabled || !canExportReports}
+            title={exportDisabledTitle}
+            aria-label={labels.kpi_export_pptx_aria}
+            onClick={() => onExport("pptx")}
+          >
+            {exporting === "pptx" ? <span className="kpi-spinner" /> : <Download size={14} strokeWidth={2} />}
+            {labels.kpi_export_pptx}
           </button>
         </div>
       </div>

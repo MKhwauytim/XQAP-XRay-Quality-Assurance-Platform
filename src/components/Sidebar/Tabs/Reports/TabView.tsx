@@ -63,7 +63,7 @@ function ExcelFormatIcon(): ReactNode {
 }
 
 type ReportType =
-  | "executive-xlsx" | "executive-deck"
+  | "executive-xlsx" | "executive-deck" | "executive-pptx"
   | "population-report" | "population-report-xlsx" | "population-report-deck"
   | "management" | "management-xlsx" | "management-deck";
 type ReportBaseType = "executive" | "population-report" | "management";
@@ -604,11 +604,20 @@ function ReportsContent() {
           await openPopulationDocument(input, populationReportScope);
           showToast("ok", "تم فتح تقرير المجتمع التفصيلي. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         }
-      } else if (type === "executive-xlsx" || type === "executive-deck") {
+      } else if (type === "executive-xlsx" || type === "executive-deck" || type === "executive-pptx") {
         const execInput = await loadExecInput();
         if (!execInput) { showToast("error", "لم يتم العثور على بيانات المجتمع. يجب معالجة المجتمع أولاً."); return; }
         const names = buildDisplayNameMap();
-        if (type === "executive-xlsx") {
+        if (type === "executive-pptx") {
+          const [{ buildExecutiveDeckV3 }, { downloadDeckAsPptx }] = await Promise.all([
+            import("../../../../data/reporting/executive/deck3"),
+            import("../../../../data/reporting/executive/pptx/exportDeckPptx"),
+          ]);
+          const chosen = deckTemplates.find((t) => t.id === deckTemplateId);
+          const html = await buildExecutiveDeckV3(execInput, names, { textTemplate: chosen?.entries ?? null });
+          await downloadDeckAsPptx(html, `العرض_التنفيذي_${execInput.monthFolderName}.pptx`, `العرض التنفيذي ${execInput.monthFolderName}`);
+          showToast("ok", labels.exec_pptx_done);
+        } else if (type === "executive-xlsx") {
           const { buildExecutiveXlsx } = await import("../../../../data/reporting/executiveReport");
           await buildExecutiveXlsx(execInput, names);
           showToast("ok", "تم تنزيل ملف بيانات التقرير (Excel).");
@@ -803,11 +812,11 @@ function ReportsContent() {
             : formatMonthFolderShortLabel(globalMonth.folderName)
         }
         resolveName={resolveReviewerName}
-        exporting={generating === "executive-deck" ? "deck" : generating === "executive-xlsx" ? "xlsx" : null}
+        exporting={generating === "executive-deck" ? "deck" : generating === "executive-xlsx" ? "xlsx" : generating === "executive-pptx" ? "pptx" : null}
         canExportReports={canExportReports}
         exportDisabledTitle={exportDisabledTitle()}
         exportsDisabled={!selectedMonth}
-        onExport={(kind) => { void generate(kind === "deck" ? "executive-deck" : "executive-xlsx"); }}
+        onExport={(kind) => { void generate(kind === "deck" ? "executive-deck" : kind === "pptx" ? "executive-pptx" : "executive-xlsx"); }}
       />
     );
   }
