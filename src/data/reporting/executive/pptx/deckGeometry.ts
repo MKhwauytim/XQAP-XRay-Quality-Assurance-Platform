@@ -9,7 +9,7 @@
 
 export type Run =
   | { br: true | "soft" }
-  | { br?: undefined; text: string; color: string; size: number; bold: boolean; lh: number };
+  | { br?: undefined; text: string; color: string; size: number; bold: boolean; weight: number; lh: number };
 
 export type Box = { x: number; y: number; w: number; h: number };
 
@@ -22,7 +22,7 @@ export type ShapeGeo =
 export type CellGeo = Box & {
   colspan: number; runs: Run[]; text: string; fill: string | null;
   bt: number; btc: string; bb: number; bbc: string;
-  color: string; size: number; bold: boolean; padL: number; padR: number;
+  color: string; size: number; bold: boolean; weight: number; padL: number; padR: number;
 };
 
 export type TableGeo = Box & { rows: (Box & { cells: CellGeo[] })[] };
@@ -102,7 +102,7 @@ export async function readDeckGeometry(doc: Document): Promise<SlideGeo[]> {
     const svgJobs: Promise<void>[] = [];
     const styleOf = (el: Element) => {
       const s = cs(el);
-      return { color: s.color, size: px(s.fontSize), bold: parseInt(s.fontWeight, 10) >= 600, lh: s.lineHeight === "normal" ? px(s.fontSize) * 1.3 : px(s.lineHeight) };
+      return { color: s.color, size: px(s.fontSize), bold: parseInt(s.fontWeight, 10) >= 600, weight: parseInt(s.fontWeight, 10) || 400, lh: s.lineHeight === "normal" ? px(s.fontSize) * 1.3 : px(s.lineHeight) };
     };
 
     // Runs of one block: its text nodes in order, <br> as a break; nested blocks are their own block.

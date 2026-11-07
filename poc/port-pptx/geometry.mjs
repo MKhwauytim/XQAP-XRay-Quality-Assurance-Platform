@@ -28,7 +28,7 @@ function probe() {
     const k = R.width / 1920;
     const box = (r) => ({ x: (r.left - R.left) / k, y: (r.top - R.top) / k, w: r.width / k, h: r.height / k });
     const out = { id: sl.id, cls: sl.className, bg: getComputedStyle(sl).backgroundColor, shapes: [], texts: [], tables: [], charts: [], svgs: [], images: [], allText: [] };
-    const styleOf = (el) => { const s = getComputedStyle(el); return { color: s.color, size: px(s.fontSize), bold: parseInt(s.fontWeight, 10) >= 600, lh: s.lineHeight === "normal" ? px(s.fontSize) * 1.3 : px(s.lineHeight) }; };
+    const styleOf = (el) => { const s = getComputedStyle(el); return { color: s.color, size: px(s.fontSize), bold: parseInt(s.fontWeight, 10) >= 600, weight: parseInt(s.fontWeight, 10) || 400, lh: s.lineHeight === "normal" ? px(s.fontSize) * 1.3 : px(s.lineHeight) }; };
     // Runs of one block: its text nodes in order, <br> as a break; nested blocks are skipped (they are their own block).
     const runsOf = (block) => {
       const runs = [];
