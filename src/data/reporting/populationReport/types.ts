@@ -1,4 +1,5 @@
-export type ResultCounts = { سليمة: number; اشتباه: number; total: number };
+/** `other` = «نتائج أخرى»: L1/L2 not recorded yet; in `total`, never in سليمة/اشتباه. */
+export type ResultCounts = { سليمة: number; اشتباه: number; other: number; total: number };
 
 export type StageBucket = { stageKey: string; stageLabel: string; counts: ResultCounts };
 

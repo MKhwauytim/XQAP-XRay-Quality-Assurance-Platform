@@ -121,8 +121,11 @@ function requiredResult(
   row: AdhocRow,
   catalog: AdhocField[],
   key: "xrayLevelOneResult" | "xrayLevelTwoResult"
-): "سليمة" | "اشتباه" {
+): "سليمة" | "اشتباه" | "" {
   const value = catalogValue(row, catalog, key, null);
+  // A catalog that makes the result optional (add-from-Excel-to-month, v159.2)
+  // records a blank as "" — "not yet recorded", never an invented verdict.
+  if (value === null && catalog.find((field) => field.key === key)?.required === false) return "";
   if (value !== "سليمة" && value !== "اشتباه") {
     throw new Error(
       `projectToDistributionRow requires a validated row (${key} must be "سليمة" or "اشتباه", got ${JSON.stringify(value)}).`

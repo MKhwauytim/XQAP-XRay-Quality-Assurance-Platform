@@ -5,6 +5,41 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v159.18",
+    "date": "2026-11-07",
+    "bucket": "feature",
+    "scope": "reports",
+    "title": "daily work report email across all months"
+  },
+  {
+    "version": "v159.17",
+    "date": "2026-11-07",
+    "bucket": "feature",
+    "scope": "reporting",
+    "title": "v159.17 Jeddah port report source, recommendations and 2025-vs-2026 comparison"
+  },
+  {
+    "version": "v159.16",
+    "date": "2026-11-07",
+    "bucket": "fix",
+    "scope": "months",
+    "title": "pre-merge review of split and bulk move (re-projection, replicas, lost store, empty list)"
+  },
+  {
+    "version": "v159.15",
+    "date": "2026-11-07",
+    "bucket": "enhancement",
+    "scope": "reporting",
+    "title": "blank L1/L2 cases stay in reports as «نتائج أخرى»"
+  },
+  {
+    "version": "v159.14",
+    "date": "2026-11-07",
+    "bucket": "fix",
+    "scope": "reporting",
+    "title": "blank L1/L2 results are never counted as «سليمة»"
+  },
+  {
     "version": "v158.0",
     "date": "2026-11-07",
     "bucket": "feature",
@@ -19,59 +54,24 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "title": "report engine core, milestone 1"
   },
   {
-    "version": "v156.1",
+    "version": "v159.12",
+    "date": "2026-11-04",
+    "bucket": "fix",
+    "scope": "referrals",
+    "title": "bulk assign includes undistributed cases (832 filtered, 407 offered)"
+  },
+  {
+    "version": "v159.11",
     "date": "2026-11-01",
-    "bucket": "enhancement",
-    "scope": "reporting",
-    "title": "normal hyphen instead of long dashes in report text"
-  },
-  {
-    "version": "v156.0",
-    "date": "2026-10-19",
-    "bucket": "fix",
-    "scope": "distribution",
-    "title": "damaged distribution.current.json rebuilds silently; deleted months stay deleted; admin delete-month tool"
-  },
-  {
-    "version": "v155.0",
-    "date": "2026-10-19",
     "bucket": "feature",
-    "scope": "sampling",
-    "title": "high-priority ports in the sample draw; port pickers list every known port before upload"
+    "scope": "referrals",
+    "title": "admin queue lists undistributed sample cases as «غير موزعة»"
   },
   {
-    "version": "v154.4",
-    "date": "2026-10-19",
+    "version": "v159.10",
+    "date": "2026-11-01",
     "bucket": "fix",
-    "scope": "answers",
-    "title": "repair each cause of unsent answers — step timeouts, permission request, backup/import"
-  },
-  {
-    "version": "v154.3",
-    "date": "2026-10-19",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "«إرسال الآن» reports why unsent answers did not land"
-  },
-  {
-    "version": "v154.2",
-    "date": "2026-10-18",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "ad-hoc rows' unsent answers overlaid and counted — no longer turn white on sync"
-  },
-  {
-    "version": "v154.1",
-    "date": "2026-10-18",
-    "bucket": "fix",
-    "scope": "answers",
-    "title": "«قيد الحفظ» badge for outbox answers not yet on the share; pending overlay + banner for every role"
-  },
-  {
-    "version": "v154.0",
-    "date": "2026-10-14",
-    "bucket": "feature",
-    "scope": "answers",
-    "title": "per-assignee answer folders, admin-offered migration with archived originals, automatic compaction (v154.0)"
+    "scope": "months",
+    "title": "Excel report says whether an existing case is distributed"
   }
 ];

@@ -76,7 +76,7 @@ export const DECK_NAV_SCRIPT = `(function(){
     var pageNum = activeIndex + 1;
     fill.style.width = ((pageNum / total) * 100) + '%';
     var remaining = total - pageNum;
-    progressText.textContent = 'الصفحة ' + pageNum + ' من ' + total + (remaining > 0 ? ' \\u2014 تبقّى ' + remaining : ' \\u2014 الأخيرة');
+    progressText.textContent = 'الصفحة ' + pageNum + ' من ' + total + (remaining > 0 ? ' - تبقّى ' + remaining : ' - الأخيرة');
   }
   window.addEventListener('scroll', update, { passive: true });
   window.addEventListener('resize', update);

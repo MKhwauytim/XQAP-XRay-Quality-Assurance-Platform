@@ -85,6 +85,8 @@ const populationCorrectionsMock = vi.hoisted(() => ({
     changes: [],
     unchangedIds: [],
     unmatchedIds: parsedRows.map((r) => r.xrayImageId),
+    protectedChanges: [],
+    invalidValues: [],
   })),
   loadCorrectionPopulationIndex: vi.fn(async () => new Map()),
   applyPopulationFieldCorrections: vi.fn(async () => ({ ok: true as const })),

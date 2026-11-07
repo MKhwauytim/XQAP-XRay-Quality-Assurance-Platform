@@ -481,3 +481,21 @@
   font-size: 12.5px;
   color: var(--c-ink-3);
 }
+
+/* Admin bulk-move button in the queue toolbar: a compact chip, never a full-width bar. */
+.ew-move-btn {
+  flex: 0 0 auto;
+  width: auto;
+  padding: 2px var(--sp-3, 10px);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
+  background: var(--c-surface-2);
+  color: var(--c-ink);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.ew-move-btn:disabled { opacity: 0.5; cursor: default; }
+.ew-move-notice { flex: 0 0 auto; font-size: 12px; white-space: nowrap; }
