@@ -265,6 +265,10 @@ function checkPage(ctx: Ctx, p: PageSpec, pi: number): void {
     }
   }
   if (p.titleRow !== undefined && p.titleRow !== false) push(ctx, "schema.invalid", `${path}.titleRow`);
+  // Without a title row the title is not drawn, so a figure in it would be untraced.
+  if (p.titleRow === false && typeof p.title === "string" && (p.title.includes("{{measure:") || p.title.includes("{{param:"))) {
+    push(ctx, "schema.invalid", `${path}.title`, "titleRow:false hides the title, so it cannot carry a figure");
+  }
   p.visuals.forEach((v, vi) => {
     if (v.visualId === TITLE_VISUAL_ID) push(ctx, "schema.invalid", `${path}.visuals[${vi}].visualId`, `reserved id ${TITLE_VISUAL_ID}`);
   });

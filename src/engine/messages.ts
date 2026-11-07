@@ -18,7 +18,8 @@ export type MessageKey =
   | "bind.missingSlot"
   | "bind.wrongKind"
   | "bind.missingPick"
-  | "bind.titleNoFigure";
+  | "bind.titleNoFigure"
+  | "catalog.demoLabel";
 
 export const MESSAGES_AR: Record<MessageKey, string> = {
   "schema.invalid": "بنية التقرير غير صالحة",
@@ -59,6 +60,7 @@ export const MESSAGES_AR: Record<MessageKey, string> = {
   "bind.wrongKind": "نوع الربط لا يناسب الخانة",
   "bind.missingPick": "لا يوجد ربط للتصميم المختار",
   "bind.titleNoFigure": "عنوان الصفحة يجب أن يذكر رقما عبر مقياس",
+  "catalog.demoLabel": "المدخلات تحمل عبارة «بيانات توضيحية»، فهي بيانات عرض وليست بيانات حقيقية؛ استبدلوها قبل الإصدار",
 };
 
 export function formatIssue(

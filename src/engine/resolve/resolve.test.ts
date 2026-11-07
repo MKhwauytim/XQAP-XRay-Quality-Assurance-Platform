@@ -158,6 +158,14 @@ describe("resolveVisuals", () => {
     expect(bar.totals[0]).toMatchObject({ value: 26, key: "matchRate" });
   });
 
+  it("limit others:false with topN above the group count gives the unsplit totals", () => {
+    const full = limited(5, { topN: 99, others: true }).bar;
+    const { bar } = limited(5, { topN: 8, others: false });
+    expect(bar.categories).toHaveLength(5);
+    expect(bar.totals.map((t) => [t.key, t.value])).toEqual(full.totals.map((t) => [t.key, t.value]));
+    expect(bar.totals.some((t) => t.key.includes("~top"))).toBe(false);
+  });
+
   it("a real category named «أخرى» keeps its own key beside the collapsed bucket", () => {
     const { f, files } = withPorts(13);
     files[0].sheets[0].rows.push(["أخرى", "بري", "مطابق", 1], ["أخرى", "بري", "مطابق", 2], ["أخرى", "بري", "مطابق", 3]);

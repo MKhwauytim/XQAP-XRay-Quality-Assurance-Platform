@@ -7,6 +7,7 @@ import type { IssueParams } from "../spec/types";
 import { LONG_DASH } from "../text";
 import { buildSpecFromPicks } from "./bind";
 import type { PickBinding, PicksBase } from "./bind";
+import { DEMO_NOTE } from "./designs/demo";
 import { parsePicksSheet, parsePicksText } from "./picks";
 
 function refuse(issues: EngineIssue[], params: IssueParams): IssueResult {
@@ -21,6 +22,8 @@ function refuse(issues: EngineIssue[], params: IssueParams): IssueResult {
 export async function issueFromPicks(
   picks: string | RawSheet, bindings: PickBinding[], base: PicksBase, files: RawFile[], params: IssueParams, env: IssueEnv,
 ): Promise<IssueResult> {
+  // F3: the demo label never ships in a real report, whether it sits in the files, the picks text or the base.
+  if (JSON.stringify([picks, bindings, base, files]).includes(DEMO_NOTE)) return refuse([{ rule: "catalog.demoLabel" }], params);
   const parsed = typeof picks === "string" ? parsePicksText(picks) : parsePicksSheet(picks);
   if (!parsed.ok) return refuse(parsed.issues, params);
   const built = buildSpecFromPicks(parsed.numbers, bindings, base);

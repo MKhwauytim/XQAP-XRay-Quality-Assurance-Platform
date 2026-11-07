@@ -105,6 +105,17 @@ describe("issueFromPicks", () => {
     expect(Buffer.from(b.files.companion).equals(Buffer.from(a.files.companion))).toBe(true);
   });
 
+  it("the untouched demo binding is refused, so the demo label cannot ship (F3)", async () => {
+    const d = activeDesigns().find((x) => x.number === 4)!;
+    const { base, binding, files } = demoInputs(d);
+    const r = await issueFromPicks("4", [binding], base, files, DEMO_PARAMS, env());
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.issues.map((i) => i.rule)).toEqual(["catalog.demoLabel"]);
+    expect(r.message).toContain(DEMO_NOTE);
+    expect(Object.keys(r)).not.toContain("files");
+  });
+
   it("the demo label appears in no output (F3)", async () => {
     const { base, bindings, files } = realInputs([1, 4, 5, 6]);
     const r = await issueFromPicks("1، 4، 5، 6", bindings, base, files, DEMO_PARAMS, env());

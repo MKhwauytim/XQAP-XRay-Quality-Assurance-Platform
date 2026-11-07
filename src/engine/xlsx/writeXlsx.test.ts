@@ -135,6 +135,25 @@ describe("writeXlsx", () => {
     expect(ws[XLSX.utils.encode_cell({ r, c: 6 })]?.f).toBeUndefined();
   });
 
+  it("a category value that looks like the ~top key part is not treated as a top-N total", async () => {
+    const f = twoSlideFixture();
+    const files = structuredClone(FIXTURE_FILES);
+    const rows: unknown[][] = [];
+    for (const port of ["a~top5", "b"]) for (let c = 0; c < 2; c++) rows.push([port, "بري", "مطابق", c]);
+    files[0].sheets[0].rows = rows;
+    const p = pipeline(f, files);
+    const key = [...p.values.keys()].find((k) => k.includes("a~top5"));
+    expect(key, "a value key carries the category").toBeDefined();
+    const plan = planWorkbook(p.files, f.spec, p.processed, p.values, p.doc);
+    const out = await writeXlsx(plan, { files: p.files, spec: f.spec, processed: p.processed, values: p.values, doc: p.doc, theme: f.theme }, OPTS);
+    const aoa = sheetAoa(out.report, "الإحصائيات");
+    const r = aoa.findIndex((row) => String(row[3]).includes("a~top5"));
+    expect(r).toBeGreaterThan(-1);
+    expect(String(aoa[r][3])).not.toContain("(أعلى");
+    // Excel may still decline this row for another reason (Latin text compares case-blind); the top-N reason must not be it.
+    expect(String(aoa[r][7])).not.toContain("إجمالي الأعلى ترتيبًا");
+  });
+
   it("المصدر has one row per layout figure, a value key column first and the engine version", () => {
     const aoa = sheetAoa(a.out.report, "المصدر");
     const h = aoa.findIndex((r) => r[0] === SOURCE_KEY_HEADER);

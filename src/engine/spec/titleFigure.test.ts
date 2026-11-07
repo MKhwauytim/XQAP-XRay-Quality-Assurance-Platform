@@ -25,6 +25,19 @@ describe("a figure in a page title", () => {
     const issues = validateSpec(f.spec, undefined, f.params);
     expect(issues.find((i) => i.rule === "param.unknown")?.path).toBe("pages[0].title");
   });
+  it("refuses a figure in the title of a page without a title row", () => {
+    for (const title of ["الصفوف {{measure:rows}}", "تقرير {{param:port}}"]) {
+      const f = twoSlideFixture();
+      f.spec.model.measures.push({ id: "rows", label: "الصفوف", datasetId: "studies", formula: "count([المنفذ])", format: { kind: "int", digits: 0 } });
+      f.spec.pages[0].title = title;
+      f.spec.pages[0].titleRow = false;
+      const issue = validateSpec(f.spec, undefined, f.params).find((i) => i.rule === "schema.invalid");
+      expect(issue?.path, title).toBe("pages[0].title");
+    }
+    const ok = twoSlideFixture();
+    ok.spec.pages[0].titleRow = false;
+    expect(validateSpec(ok.spec, undefined, ok.params)).toEqual([]);
+  });
   it("refuses a visual that takes the reserved title id", () => {
     const f = twoSlideFixture();
     f.spec.pages[0].visuals[0].visualId = "title";
