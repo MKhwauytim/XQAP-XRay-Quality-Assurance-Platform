@@ -36,6 +36,10 @@ import { ensureMonthWritable, manifestLockKey } from "./monthLock";
 import { getPopulationMonthDir, POPULATION_SUBFOLDERS } from "../workspace/workspacePaths";
 import { loadMonthPopulationFinal } from "./populationStorage";
 import type { PreparedPopulationRow } from "./populationTypes";
+import type { ExcelFillableField } from "../adhocImport/adhocFieldCatalog";
+import { getStageKey } from "./stageHelpers";
+import { STAGE_LABELS_AR } from "./stageLabels";
+import { DEFAULT_STAGE_MAPPINGS } from "./populationConfig";
 import { loadSampleMaster, saveSampleMaster } from "../sampling/sampleStorage";
 import {
   invalidateDistributionCacheForFieldEdit,
@@ -47,13 +51,20 @@ import type { PendingCorrectionsImportRow } from "../../workers/pendingCorrectio
 import {
   CORRECTABLE_FIELD_LABEL_KEYS,
   CORRECTABLE_POPULATION_FIELDS,
+  FILL_ONLY_ALLOWED_VALUES,
+  FILL_ONLY_POPULATION_FIELDS,
   XRAY_IMAGE_ID_HEADER,
   type CorrectablePopulationField,
 } from "./pendingCorrections";
 
 export type FieldChange = {
   xrayImageId: string;
-  field: CorrectablePopulationField;
+  /**
+   * `ExcelFillableField` (incl. the L1/L2 results, never correctable from the
+   * معلقة sheet) appears here only for «إضافة حالات من ملف إكسل إلى شهر»
+   * filling a value left blank when the case was added — never an overwrite.
+   */
+  field: CorrectablePopulationField | ExcelFillableField;
   oldValue: string;
   newValue: string;
 };
@@ -120,6 +131,10 @@ export type CorrectionPreview = {
    *  not as a silent failure. */
   unchangedIds: string[];
   changes: FieldChange[];
+  /** Sheet values for a fill-only field the row already has — left as they are. */
+  protectedChanges: FieldChange[];
+  /** Sheet values outside a fill-only field's allowed set — ignored. */
+  invalidValues: FieldChange[];
 };
 
 /** Current correctable-field values for one population row, string-normalized
@@ -146,6 +161,8 @@ export function computeCorrectionPreview(
   const unmatchedIds: string[] = [];
   const unchangedIds: string[] = [];
   const changes: FieldChange[] = [];
+  const protectedChanges: FieldChange[] = [];
+  const invalidValues: FieldChange[] = [];
   for (const row of parsedRows) {
     const populationRow = populationRowsById.get(row.xrayImageId);
     if (!populationRow) {
@@ -157,13 +174,29 @@ export function computeCorrectionPreview(
     let changedAny = false;
     for (const [field, newValue] of Object.entries(row.fields) as [CorrectablePopulationField, string][]) {
       const oldValue = current[field];
-      if (newValue === oldValue) continue;
+      // A stage is stored as its canonical label; any spelling the code-default
+      // alias table knows (FIRST_STAGE, "1", …) resolves to it, anything else is invalid.
+      const stageKey = field === "stage" ? getStageKey(newValue, DEFAULT_STAGE_MAPPINGS) : null;
+      const value = stageKey && stageKey !== "unknown" ? STAGE_LABELS_AR[stageKey] : newValue;
+      if (value === oldValue) continue;
+      const change = { xrayImageId: row.xrayImageId, field, oldValue, newValue: value };
+      if (FILL_ONLY_POPULATION_FIELDS.has(field)) {
+        const allowed = FILL_ONLY_ALLOWED_VALUES[field];
+        if (stageKey === "unknown" || (allowed && !allowed.includes(value))) {
+          invalidValues.push(change);
+          continue;
+        }
+        if (oldValue.trim() !== "") {
+          protectedChanges.push(change);
+          continue;
+        }
+      }
       changedAny = true;
-      changes.push({ xrayImageId: row.xrayImageId, field, oldValue, newValue });
+      changes.push(change);
     }
     if (!changedAny) unchangedIds.push(row.xrayImageId);
   }
-  return { matchedIds, unmatchedIds, unchangedIds, changes };
+  return { matchedIds, unmatchedIds, unchangedIds, changes, protectedChanges, invalidValues };
 }
 
 export type PendingCorrectionsApplyResult =
@@ -219,7 +252,7 @@ export async function applyPopulationFieldCorrections(params: {
 }): Promise<PendingCorrectionsApplyResult> {
   const { directoryHandle, monthFolderName, changes, actorUsername, actorRole } = params;
   if (changes.length === 0) {
-    return { ok: true, preview: { matchedIds: [], unmatchedIds: [], unchangedIds: [], changes: [] } };
+    return { ok: true, preview: { matchedIds: [], unmatchedIds: [], unchangedIds: [], changes: [], protectedChanges: [], invalidValues: [] } };
   }
 
   await ensureMonthWritable(directoryHandle, monthFolderName);
@@ -350,6 +383,8 @@ export async function applyPopulationFieldCorrections(params: {
         unmatchedIds: [],
         unchangedIds: [],
         changes: [...changes],
+        protectedChanges: [],
+        invalidValues: [],
       },
     };
   } catch (error) {

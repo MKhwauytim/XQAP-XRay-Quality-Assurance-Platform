@@ -52,6 +52,6 @@ describe("computePopulationReportModel", () => {
     });
     expect(model.reconciled.riskRawRowCount).toBe(5);
     expect(model.reconciled.biRawRowCount).toBeNull();
-    expect(model.reconciled.totals).toEqual({ سليمة: 0, اشتباه: 0, total: 0 });
+    expect(model.reconciled.totals).toEqual({ سليمة: 0, اشتباه: 0, other: 0, total: 0 });
   });
 });

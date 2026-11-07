@@ -1481,3 +1481,49 @@ export async function loadMonthForEditing(
     return empty;
   }
 }
+
+/**
+ * Append rows to a month's `population.final.json` (month merge / extra-sample
+ * import). Rows whose `xrayImageId` is already there are skipped. The current
+ * file is archived (`supersededFileName`) before it is rewritten, exactly as a
+ * re-run archives it. Returns `absent` when the month has no processed
+ * population to append to — the caller decides whether that matters.
+ */
+export async function appendPopulationFinalRows(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  rows: ReadonlyArray<Record<string, unknown>>,
+  appendedBy: string
+): Promise<{ status: "appended"; appended: number; skipped: number } | { status: "absent" }> {
+  await ensureMonthWritable(directoryHandle, monthFolderName);
+  return withResourceLock(manifestLockKey(monthFolderName), async () => {
+    const opened = await openProcessedDir(directoryHandle, monthFolderName);
+    if (opened.status === "absent") return { status: "absent" as const };
+    if (opened.status === "unreadable") throw taggedError("XQ-POP-009", `Cannot open ${monthFolderName} population folder`);
+    const read = await readMonthPopulationFinal(directoryHandle, monthFolderName);
+    if (read.status === "absent") return { status: "absent" as const };
+    if (read.status !== "loaded") throw taggedError("XQ-POP-009", `Cannot read ${monthFolderName} population.final.json`);
+    const current = read.value;
+    const present = new Set(current.rows.map((row) => String(row.xrayImageId ?? "")));
+    const added: Array<Record<string, unknown>> = [];
+    for (const row of rows) {
+      const id = String(row.xrayImageId ?? "");
+      if (!id || present.has(id)) continue;
+      present.add(id);
+      added.push(row);
+    }
+    if (added.length === 0) return { status: "appended" as const, appended: 0, skipped: rows.length };
+    const certScanAdded = added.filter((row) => row.certScanStatus === "Certscan").length;
+    await archiveBeforeOverwrite(opened.dir, "population.final.json", supersedeStamp(), { required: true });
+    await safeWriteJson(opened.dir, "population.final.json", {
+      ...current,
+      processedAt: new Date().toISOString(),
+      processedBy: appendedBy,
+      totalRows: current.rows.length + added.length,
+      certScanRows: current.certScanRows + certScanAdded,
+      nonCertScanRows: current.nonCertScanRows + (added.length - certScanAdded),
+      rows: [...current.rows, ...added],
+    });
+    return { status: "appended" as const, appended: added.length, skipped: rows.length - added.length };
+  });
+}

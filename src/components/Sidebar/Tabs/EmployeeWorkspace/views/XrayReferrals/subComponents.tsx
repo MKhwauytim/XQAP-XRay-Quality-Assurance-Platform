@@ -27,7 +27,8 @@ import InspectionPanel from "../../../../../../components/InspectionPanel";
 import Pagination from "../../../../../../components/Pagination/Pagination";
 import { clampPage, pageSlice } from "../../../../../../utils/paginationUtils";
 import { useLabels, type Labels } from "../../../../../../data/labels/useLabels";
-import { CASE_FILTERS, type CaseFilter, type CaseFilterCounts, type CaseFilterState } from "./caseFilter";
+import { isUndistributedEntry } from "./undistributedEntries";
+import { CASE_FILTERS, STUDY_FILTERS, type CaseFilter, type CaseFilterCounts, type CaseFilterState, type StudyFilter, type StudyFilterCounts } from "./caseFilter";
 import type { CertScanFilter } from "../../../../../../data/population/certScanFilter";
 import CertScanFilterChips from "../../../../../CertScanFilterChips/CertScanFilterChips";
 import { certScanStatusFilterProps } from "../certScanColumn";
@@ -48,7 +49,7 @@ export function buildXrayColumns(L: Labels): DataTableCol<DistributionEntry>[] {
   return [
   { id: "xrayImageId",            label: L.col_xray_image_id,             widthFr: 20, alwaysVisible: true, filterKind: "text", accessor: (e) => displayXrayImageId(e) },
   { id: "stage",                  label: L.col_stage,                     widthFr: 8,  accessor: (e) => formatStageLabel(e.row.stage) },
-  { id: "assignedTo",             label: L.col_xray_quality_expert,       widthFr: 9,  adminOnly: true,     accessor: (e) => e.assignedTo },
+  { id: "assignedTo",             label: L.col_xray_quality_expert,       widthFr: 9,  adminOnly: true,     accessor: (e) => (isUndistributedEntry(e) ? L.excel_rows_not_distributed : e.assignedTo) },
   { id: "portName",               label: L.col_port_name,                 widthFr: 13, accessor: (e) => e.row.portName },
   { id: "xrayEntryDate",          label: L.col_xray_entry_date,           widthFr: 11, isDate: true,        accessor: (e) => e.row.xrayEntryDate },
   { id: "lastEventAt",            label: L.col_distribution_date,         widthFr: 11, isDate: true,        accessor: (e) => e.lastEventAt ?? null },
@@ -64,8 +65,8 @@ export function buildXrayColumns(L: Labels): DataTableCol<DistributionEntry>[] {
     accessor: () => null,
   },
   { id: "submittedAt",            label: L.col_expert_observation_date,   widthFr: 13, isDate: true, accessor: () => null },
-  { id: "xrayLevelOneResult",     label: L.col_xray_l1_result,            widthFr: 8,  accessor: (e) => e.row.xrayLevelOneResult },
-  { id: "xrayLevelTwoResult",     label: L.col_xray_l2_result,            widthFr: 8,  accessor: (e) => e.row.xrayLevelTwoResult },
+  { id: "xrayLevelOneResult",     label: L.col_xray_l1_result,            widthFr: 8,  accessor: (e) => e.row.xrayLevelOneResult || L.result_not_recorded },
+  { id: "xrayLevelTwoResult",     label: L.col_xray_l2_result,            widthFr: 8,  accessor: (e) => e.row.xrayLevelTwoResult || L.result_not_recorded },
   { id: "certScanStatus",         label: L.col_certscan_status,           widthFr: 9,  ...certScanStatusFilterProps(L), accessor: (e) => e.row.certScanStatus },
   { id: "declarationNumber",      label: L.col_declaration_number,        widthFr: 11, accessor: (e) => e.row.declarationNumber },
   { id: "declarationDate",        label: L.col_declaration_date,          widthFr: 11, isDate: true,        accessor: (e) => e.row.declarationDate },
@@ -935,7 +936,7 @@ export type PanelAuthoring = {
   /** The assignee whose file the answer will be filed under, when the reader is
    *  authoring for someone else; null for an ordinary self-answer. */
   onBehalfOf: string | null;
-  reason: "on-behalf" | "locked-answered" | "locked-no-permission" | null;
+  reason: "on-behalf" | "locked-answered" | "locked-no-permission" | "undistributed" | null;
 };
 
 export function resolvePanelAuthoring(input: {
@@ -948,6 +949,8 @@ export function resolvePanelAuthoring(input: {
 }): PanelAuthoring {
   const { entry, username, answersMap, canSubmitAnswers, canAnswerOnBehalf } = input;
   if (!entry) return { readonly: true, onBehalfOf: null, reason: null };
+  // A sample row nobody has been given yet: shown, never answered from here.
+  if (isUndistributedEntry(entry)) return { readonly: true, onBehalfOf: null, reason: "undistributed" };
   if (entry.assignedTo === username) {
     return { readonly: !canSubmitAnswers, onBehalfOf: null, reason: null };
   }
@@ -975,6 +978,7 @@ export function PanelAuthoringNotice({
     "on-behalf": L.ew_panel_on_behalf_notice,
     "locked-answered": L.ew_panel_locked_answered,
     "locked-no-permission": L.ew_panel_locked_no_permission,
+    undistributed: L.ew_panel_undistributed,
   }[authoring.reason];
   return (
     <p
@@ -1305,7 +1309,41 @@ export function CaseFilterBar({ state }: { state: CaseFilterState }) {
         chipClassName="ew-view-seg"
         countClassName="ew-case-filter-count"
       />
+      <StudyFilterChips value={state.study} counts={state.studyCounts} onChange={state.setStudy} />
     </>
+  );
+}
+
+function StudyFilterChips({
+  value,
+  counts,
+  onChange,
+}: {
+  value: StudyFilter;
+  counts: StudyFilterCounts;
+  onChange: (next: StudyFilter) => void;
+}) {
+  const L = useLabels();
+  const chipLabel: Record<StudyFilter, string> = {
+    all: L.ew_study_filter_all,
+    studied: L.ew_study_filter_studied,
+    unstudied: L.ew_study_filter_unstudied,
+  };
+  return (
+    <div className="ew-view-switcher ew-case-filter" role="group" aria-label={L.ew_study_filter_aria}>
+      {STUDY_FILTERS.map((id) => (
+        <button
+          key={id}
+          type="button"
+          className={`ew-view-seg${value === id ? " active" : ""}`}
+          aria-pressed={value === id}
+          onClick={() => onChange(id)}
+        >
+          {chipLabel[id]}
+          <span className="ew-case-filter-count">{counts[id]}</span>
+        </button>
+      ))}
+    </div>
   );
 }
 

@@ -175,6 +175,7 @@ export type WorkspaceActionType =
   | "month-closed"
   | "month-reopened"
   | "month-deleted"
+  | "month-merged"
   | "backup-created"
   | "backup-restored"
   | "backup-settings-changed"
@@ -240,6 +241,7 @@ export const ALL_ACTION_TYPES: readonly WorkspaceActionType[] = [
   "month-closed",
   "month-reopened",
   "month-deleted",
+  "month-merged",
   "backup-created",
   "backup-restored",
   "backup-settings-changed",

@@ -197,8 +197,8 @@ export function buildAgreementRows(rows: readonly ExecutiveReportRow[]): Agreeme
     // Headline FIRST: the one comparison independent of stage's own
     // definition (see the module header's non-circularity note).
     agreementFold(rows, (r) => r.expertResult, "محرك المخاطر مقابل المراجع (الحكم المستقل)", true),
-    agreementFold(rows, (r) => r.levelOneResult, "محرك المخاطر مقابل المستوى الأول", false),
-    agreementFold(rows, (r) => r.levelTwoResult, "محرك المخاطر مقابل المستوى الثاني", false),
+    agreementFold(rows, (r) => r.levelOneResult || null, "محرك المخاطر مقابل المستوى الأول", false),
+    agreementFold(rows, (r) => r.levelTwoResult || null, "محرك المخاطر مقابل المستوى الثاني", false),
   ];
 }
 

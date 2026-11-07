@@ -12,7 +12,7 @@ import type {
 import { isRowStudied } from "./executiveReportTypes";
 import { buildPortProfiles, buildStageProfiles } from "./executiveKpiProfiles";
 import { entryDayOf } from "./executive/model/entryDay";
-import { classifyImageResult } from "../population/imageResult";
+import { classifyImageResultOrOther } from "../population/imageResult";
 import { canonicalizePortNames } from "./portNameCanonical";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { StageAliasMappings } from "../population/stageHelpers";
@@ -189,10 +189,13 @@ function buildRawExecutiveReportRows(input: ExecutiveReportInput): ExecutiveRepo
   const snapshotIds = new Set(snapshotRows.map((row) => row.xrayImageId));
   const sourceRows = snapshotRows.length > 0 ? [...populationRows, ...snapshotRows] : populationRows;
 
-  return sourceRows.map((pop): ExecutiveReportRow => {
+  // A case added from Excel before its L1/L2 results are known ("") stays in
+  // the report as «نتائج أخرى» (imageResult "other", owner 2026-11-07): it
+  // counts in totals, never as clean or suspicious, and has no accuracy.
+  return sourceRows.flatMap((pop): ExecutiveReportRow[] => {
     const levelOneResult = pop.xrayLevelOneResult;
     const levelTwoResult = pop.xrayLevelTwoResult;
-    const imageResult = classifyImageResult(levelOneResult, levelTwoResult);
+    const imageResult = classifyImageResultOrOther(levelOneResult, levelTwoResult);
 
     const dist = distMap.get(pop.xrayImageId);
     const answer = answerMap.get(pop.xrayImageId);
@@ -213,9 +216,11 @@ function buildRawExecutiveReportRows(input: ExecutiveReportInput): ExecutiveRepo
     const smuggleMethod = asText(answerValue(answers, fieldIdsByLabel, fieldMap.smuggleMethodLabel));
 
     const { imageResultAccurate, levelOneAccurate, levelTwoAccurate, verificationCategory } =
-      deriveRowAccuracy(levelOneResult, levelTwoResult, imageResult, expertResult);
+      levelOneResult === "" || levelTwoResult === "" || imageResult === "other"
+        ? { imageResultAccurate: null, levelOneAccurate: null, levelTwoAccurate: null, verificationCategory: null }
+        : deriveRowAccuracy(levelOneResult, levelTwoResult, imageResult, expertResult);
 
-    return {
+    return [{
       xrayImageId: pop.xrayImageId,
       portCode: pop.portCode,
       portName: pop.portName,
@@ -259,7 +264,7 @@ function buildRawExecutiveReportRows(input: ExecutiveReportInput): ExecutiveRepo
       targetedByRiskEngine: pop.targetedByRiskEngine ?? null,
       // Spread only when true, so a month without orphans stays byte-identical.
       ...(snapshotIds.has(pop.xrayImageId) ? { fromSampleSnapshot: true as const } : {}),
-    };
+    }];
   });
 }
 
@@ -280,6 +285,7 @@ export function calculateExecutiveKPIs(
 
   const suspiciousCount = populationRows.filter((r) => r.imageResult === "اشتباه").length;
   const cleanCount = populationRows.filter((r) => r.imageResult === "سليمة").length;
+  const otherResultCount = populationRows.filter((r) => r.imageResult === "other").length;
   const suspicionRate = populationRows.length > 0 ? (suspiciousCount / populationRows.length) * 100 : 0;
 
   const sampleRows = rows.filter((r) => r.selectedInSample);
@@ -372,6 +378,7 @@ export function calculateExecutiveKPIs(
     completionRate,
     suspiciousCount,
     cleanCount,
+    otherResultCount,
     suspicionRate,
     overallAccuracy,
     suspiciousDetectionRateByImage,

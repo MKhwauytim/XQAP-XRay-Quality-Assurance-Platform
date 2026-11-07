@@ -303,3 +303,9 @@ describe("plan records the draw's own rules and stage mappings (v103)", () => {
     expect(loaded?.stageMappings?.first).toEqual(["Level A"]);
   });
 });
+
+test("computeSuspicionRate leaves blank level-two results out of the denominator", () => {
+  const rows = [{ xrayLevelTwoResult: "اشتباه" }, { xrayLevelTwoResult: "سليمة" }, { xrayLevelTwoResult: "" }] as Parameters<typeof computeSuspicionRate>[0];
+  expect(computeSuspicionRate(rows)).toBeCloseTo(0.5, 6);
+  expect(computeSuspicionRate([{ xrayLevelTwoResult: "" }] as Parameters<typeof computeSuspicionRate>[0])).toBeNull();
+});
