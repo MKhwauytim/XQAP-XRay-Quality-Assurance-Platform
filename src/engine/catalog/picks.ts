@@ -22,20 +22,21 @@ function fromTokens(tokens: string[], catalog: readonly CatalogDesign[]): PicksR
   const issues: EngineIssue[] = [];
   const numbers: number[] = [];
   const seen = new Set<number>();
-  if (tokens.length === 0) return { ok: false, issues: [{ rule: "picksEmpty" }] };
+  if (tokens.length === 0) return { ok: false, issues: [{ rule: "picks.empty" }] };
+  // picks.tooMany counts raw tokens, before duplicate or invalid ones are dropped.
   if (tokens.length > LIMITS.maxSlides) {
-    issues.push({ rule: "picksTooMany", detail: `${tokens.length} > ${LIMITS.maxSlides}` });
+    issues.push({ rule: "picks.tooMany", detail: `${tokens.length} > ${LIMITS.maxSlides}` });
   }
   for (const raw of tokens) {
     const t = latinDigits(raw);
     if (!/^\d+$/.test(t)) {
-      issues.push({ rule: "picksNotNumber", detail: `«${raw}»` });
+      issues.push({ rule: "picks.notNumber", detail: `«${raw}»` });
       continue;
     }
     const n = Number(t);
     if (seen.has(n)) {
-      if (!issues.some((i) => i.rule === "picksRepeated" && i.detail === String(n))) {
-        issues.push({ rule: "picksRepeated", detail: String(n) });
+      if (!issues.some((i) => i.rule === "picks.repeated" && i.detail === String(n))) {
+        issues.push({ rule: "picks.repeated", detail: String(n) });
       }
       continue;
     }

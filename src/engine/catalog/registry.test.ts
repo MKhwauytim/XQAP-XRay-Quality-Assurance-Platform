@@ -41,7 +41,7 @@ describe("catalog registry", () => {
     const r = getDesign(999);
     expect(r.ok).toBe(false);
     if (!r.ok) {
-      expect(r.issue.rule).toBe("catalogUnknownNumber");
+      expect(r.issue.rule).toBe("catalog.unknownNumber");
       expect(formatIssue(r.issue)).toContain("999");
     }
   });
@@ -53,9 +53,9 @@ describe("catalog registry", () => {
       design({ number: 4 }),
     ];
     const p = getDesign(2, cat);
-    expect(!p.ok && p.issue.rule).toBe("catalogPlanned");
+    expect(!p.ok && p.issue.rule).toBe("catalog.planned");
     const r = getDesign(3, cat);
-    expect(!r.ok && r.issue.rule).toBe("catalogRetired");
+    expect(!r.ok && r.issue.rule).toBe("catalog.retired");
     if (!r.ok) expect(formatIssue(r.issue)).toContain("استبدل بتصميم أحدث");
     const a = getDesign(4, cat);
     expect(a.ok).toBe(true);

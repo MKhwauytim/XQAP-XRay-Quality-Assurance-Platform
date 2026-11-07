@@ -12,11 +12,11 @@ export type GetDesignResult = { ok: true; design: CatalogDesign } | { ok: false;
 
 export function getDesign(n: number, catalog: readonly CatalogDesign[] = CATALOG): GetDesignResult {
   const design = catalog.find((d) => d.number === n);
-  if (!design) return { ok: false, issue: { rule: "catalogUnknownNumber", detail: String(n) } };
-  if (design.status === "planned") return { ok: false, issue: { rule: "catalogPlanned", detail: `${n} ${design.nameAr}` } };
+  if (!design) return { ok: false, issue: { rule: "catalog.unknownNumber", detail: String(n) } };
+  if (design.status === "planned") return { ok: false, issue: { rule: "catalog.planned", detail: `${n} ${design.nameAr}` } };
   if (design.status === "retired") {
     const why = design.retiredReasonAr ? `: ${design.retiredReasonAr}` : "";
-    return { ok: false, issue: { rule: "catalogRetired", detail: `${n} ${design.nameAr}${why}` } };
+    return { ok: false, issue: { rule: "catalog.retired", detail: `${n} ${design.nameAr}${why}` } };
   }
   return { ok: true, design };
 }

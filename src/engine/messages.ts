@@ -7,7 +7,14 @@ export type MessageKey =
   | "fit.tooLong" | "gate.figureParity" | "gate.layoutParity" | "gate.lint"
   | "gate.reconcile" | "gate.ooxml" | "recipe.hashMismatch" | "recipe.invalid"
   | "resolve.keyConflict" | "theme.invalid"
-  | "xlsx.names" | "xlsx.columnClash" | "xlsx.pivotField" | "catalogUnknownNumber" | "catalogPlanned" | "catalogRetired" | "picksEmpty" | "picksNotNumber" | "picksRepeated" | "picksTooMany";
+  | "xlsx.names" | "xlsx.columnClash" | "xlsx.pivotField"
+  | "catalog.unknownNumber"
+  | "catalog.planned"
+  | "catalog.retired"
+  | "picks.empty"
+  | "picks.notNumber"
+  | "picks.repeated"
+  | "picks.tooMany";
 
 export const MESSAGES_AR: Record<MessageKey, string> = {
   "schema.invalid": "بنية التقرير غير صالحة",
@@ -36,13 +43,13 @@ export const MESSAGES_AR: Record<MessageKey, string> = {
   "xlsx.names": "اسم ظاهر في المصنف يشبه رمزا داخليا أو رقم خطوة، استخدم اسما عربيا واضحا",
   "xlsx.columnClash": "عمودان يحملان الاسم نفسه في إكسل (يتجاهل إكسل حالة الأحرف والهمزة على الألف)",
   "xlsx.pivotField": "الجدول المحوري يشير إلى عمود غير موجود في جدوله",
-  catalogUnknownNumber: "رقم التصميم غير موجود في الكتالوج",
-  catalogPlanned: "التصميم مخطط له ولم يصدر بعد",
-  catalogRetired: "التصميم متقاعد ولم يعد متاحا",
-  picksEmpty: "لم تحدد أي رقم تصميم",
-  picksNotNumber: "القيمة المكتوبة ليست رقم تصميم",
-  picksRepeated: "رقم التصميم مكرر",
-  picksTooMany: "عدد التصاميم المختارة يتجاوز الحد المسموح",
+  "catalog.unknownNumber": "رقم التصميم غير موجود في الكتالوج",
+  "catalog.planned": "التصميم مخطط له ولم يصدر بعد",
+  "catalog.retired": "التصميم متقاعد ولم يعد متاحا",
+  "picks.empty": "لم تحدد أي رقم تصميم",
+  "picks.notNumber": "القيمة المكتوبة ليست رقم تصميم",
+  "picks.repeated": "رقم التصميم مكرر",
+  "picks.tooMany": "عدد التصاميم المختارة يتجاوز الحد المسموح",
 };
 
 export function formatIssue(

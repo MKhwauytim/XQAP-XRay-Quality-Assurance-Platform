@@ -33,25 +33,31 @@ describe("parsePicksText", () => {
   });
   it("reports a repeated number", () => {
     const i = issues(parsePicksText("4, 4, 5", cat));
-    expect(i[0].rule).toBe("picksRepeated");
+    expect(i[0].rule).toBe("picks.repeated");
     expect(formatIssue(i[0])).toContain("4");
   });
   it("quotes a non-number token", () => {
     const i = issues(parsePicksText("4, ب", cat));
-    expect(i[0].rule).toBe("picksNotNumber");
+    expect(i[0].rule).toBe("picks.notNumber");
     expect(formatIssue(i[0])).toContain("ب");
   });
   it("rejects empty input", () => {
-    expect(issues(parsePicksText("", cat))[0].rule).toBe("picksEmpty");
-    expect(issues(parsePicksText(" , ", cat))[0].rule).toBe("picksEmpty");
+    expect(issues(parsePicksText("", cat))[0].rule).toBe("picks.empty");
+    expect(issues(parsePicksText(" , ", cat))[0].rule).toBe("picks.empty");
   });
   it("reports every refused number at once", () => {
     const i = issues(parsePicksText("7, 8, 999", cat));
-    expect(i.map((x) => x.rule)).toEqual(["catalogPlanned", "catalogPlanned", "catalogUnknownNumber"]);
+    expect(i.map((x) => x.rule)).toEqual(["catalog.planned", "catalog.planned", "catalog.unknownNumber"]);
   });
   it("refuses more than the slide limit", () => {
     const text = Array.from({ length: LIMITS.maxSlides + 1 }, (_, k) => k + 1).join(",");
-    expect(issues(parsePicksText(text, cat)).some((x) => x.rule === "picksTooMany")).toBe(true);
+    const i = issues(parsePicksText(text, cat)).find((x) => x.rule === "picks.tooMany");
+    expect(i).toEqual({ rule: "picks.tooMany", detail: `${LIMITS.maxSlides + 1} > ${LIMITS.maxSlides}` });
+  });
+  it("shows the retired reason of a retired design", () => {
+    const retired = { ...mk(9, "retired"), retiredReasonAr: "استبدل بتصميم أحدث" };
+    const i = issues(parsePicksText("9", [...cat, retired]));
+    expect(formatIssue(i[0])).toContain("استبدل بتصميم أحدث");
   });
 });
 
