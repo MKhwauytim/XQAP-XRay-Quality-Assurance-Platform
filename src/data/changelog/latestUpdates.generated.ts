@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v159.22",
+    "date": "2026-11-07",
+    "bucket": "fix",
+    "scope": "reports",
+    "title": "deck viewer no longer scrolls sideways; port report notes removed"
+  },
+  {
     "version": "v159.21",
     "date": "2026-11-07",
     "bucket": "enhancement",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "engine",
     "title": "catalog and slide picks"
-  },
-  {
-    "version": "v157.0",
-    "date": "2026-11-06",
-    "bucket": "feature",
-    "scope": "engine",
-    "title": "report engine core, milestone 1"
   }
 ];

@@ -13,7 +13,12 @@
 import JSZip from "jszip";
 import type { Run, SlideGeo } from "./deckGeometry";
 
-const FONT = "Somar";
+// Somar Sans installs on Windows as one family per weight (the font files name table): Light, Regular,
+// Medium and Bold are four separate faces, so the CSS weight picks the face and PowerPoint bold stays off.
+const FONT = "Somar Sans";
+const FONT_BOLD = "Somar Sans Bold";
+export const somarFace = (weight: number): string =>
+  weight <= 350 ? "Somar Sans Light" : weight <= 450 ? FONT : weight <= 550 ? "Somar Sans Medium" : FONT_BOLD;
 const FIT_SAFETY = 1.04;
 const inch = (px: number): number => px / 144;
 const pt = (px: number): number => px * 0.5;
@@ -52,7 +57,7 @@ function runsToPptx(input: Run[], bg: string): PptxText[] {
     if (r.br) { if (out.length) out[out.length - 1].options.breakLine = true; continue; }
     const brk = soft;
     soft = false;
-    out.push({ text: r.text, options: { softBreakBefore: brk || undefined, color: cssToHex(r.color, bg), fontSize: pt(r.size), bold: r.bold, fontFace: FONT, lang: "ar-SA" } });
+    out.push({ text: r.text, options: { softBreakBefore: brk || undefined, color: cssToHex(r.color, bg), fontSize: pt(r.size), bold: false, fontFace: somarFace(r.weight), lang: "ar-SA" } });
   }
   return out.length ? out : [{ text: "", options: {} }];
 }
@@ -127,7 +132,7 @@ export async function deckToPptx(slides: SlideGeo[], title: string): Promise<Blo
           text: runsToPptx(c.runs, bg),
           options: {
             colspan: c.colspan > 1 ? c.colspan : undefined,
-            fontFace: FONT, fontSize: pt(c.size), bold: c.bold, color: cssToHex(c.color, bg), align: "right", valign: "middle", rtlMode: true, lang: "ar-SA",
+            fontFace: somarFace(c.weight), fontSize: pt(c.size), bold: false, color: cssToHex(c.color, bg), align: "right", valign: "middle", rtlMode: true, lang: "ar-SA",
             margin: [0, inch(c.padR), 0, inch(c.padL)].map((v) => Math.min(v, 0.99)),
             fill: c.fill ? { color: cssToHex(c.fill, bg) } : undefined,
             border: [
@@ -182,7 +187,7 @@ export async function deckToPptx(slides: SlideGeo[], title: string): Promise<Blo
         // First category on the right, as in the HTML. PowerPoint accepts "maxMin";
         // pptxgenjs's types list only "minMax".
         catAxisOrientation: "maxMin" as "minMax",
-        showValue: true, dataLabelPosition: "outEnd", dataLabelFontFace: FONT, dataLabelFontSize: pt(flat[0].labelSize), dataLabelColor: cssToHex(flat[0].labelColor ?? "rgb(16,48,79)"), dataLabelFontBold: true,
+        showValue: true, dataLabelPosition: "outEnd", dataLabelFontFace: FONT_BOLD, dataLabelFontSize: pt(flat[0].labelSize), dataLabelColor: cssToHex(flat[0].labelColor ?? "rgb(16,48,79)"), dataLabelFontBold: false,
         dataLabelFormatCode: isPct ? '0.0"%"' : "#,##0",
         lang: "ar-SA",
       });

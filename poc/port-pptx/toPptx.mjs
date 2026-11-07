@@ -24,7 +24,11 @@ const { m } = JSON.parse(readFileSync(join(outDir, "model.json"), "utf8"));
 const reportHtml = readFileSync(join(outDir, "report.html"), "utf8");
 const themeVar = (name) => reportHtml.match(new RegExp(`--v3-${name}:(#[0-9a-fA-F]{6})`))?.[1].slice(1).toUpperCase();
 
-const FONT = "Somar";
+// Somar Sans installs on Windows as one family per weight (the font files name table): Light, Regular,
+// Medium and Bold are four separate faces, so the weight picks the face and bold stays off.
+const FONT = "Somar Sans";
+const FONT_BOLD = "Somar Sans Bold";
+const face = (w) => (w <= 350 ? "Somar Sans Light" : w <= 450 ? FONT : w <= 550 ? "Somar Sans Medium" : FONT_BOLD);
 const FIT_SAFETY = 1.04;
 const inch = (px) => px / 144;
 const pt = (px) => px * 0.5;
@@ -58,7 +62,7 @@ const runsToPptx = (runs, bg) => {
     if (r.br === "soft") { soft = true; continue; } // where the HTML wrapped: a line break inside the paragraph
     if (r.br) { if (out.length) out[out.length - 1].options.breakLine = true; continue; }
     const brk = soft; soft = false;
-    out.push({ text: r.text, options: { softBreakBefore: brk || undefined, color: hex(r.color, bg), fontSize: pt(r.size), bold: r.bold, fontFace: FONT, lang: "ar-SA" } });
+    out.push({ text: r.text, options: { softBreakBefore: brk || undefined, color: hex(r.color, bg), fontSize: pt(r.size), bold: false, fontFace: face(r.weight ?? (r.bold ? 700 : 400)), lang: "ar-SA" } });
   }
   return out.length ? out : [{ text: "", options: {} }];
 };
@@ -95,12 +99,12 @@ function addTimeline(slide, s, bg) {
     valGridLine: { color: themeVar("hair"), size: 0.75 }, valAxisLineShow: false,
     catAxisLabelFontFace: FONT, catAxisLabelFontSize: pt(19), catAxisLabelColor: themeVar("muted"),
     catAxisOrientation: "maxMin", catAxisLineShow: false,
-    showValue: true, dataLabelFormatCode: '0"%"', dataLabelFontSize: 8, dataLabelFontBold: true, dataLabelFontFace: FONT, dataLabelColor: "FFFFFF",
+    showValue: true, dataLabelFormatCode: '0"%"', dataLabelFontSize: 8, dataLabelFontBold: false, dataLabelFontFace: FONT_BOLD, dataLabelColor: "FFFFFF",
     lang: "ar-SA",
   });
   // Year names under their months, as in the svg.
   for (const t of s.texts.filter((t) => t.bold && t.size >= 24)) {
-    slide.addText(t.text, { ...textBase, x: inch(t.x - 20), y: inch(t.y), w: inch(t.w + 40), h: inch(t.h + 4), fontSize: pt(t.size * sc), bold: true, color: themeVar("navy") });
+    slide.addText(t.text, { ...textBase, x: inch(t.x - 20), y: inch(t.y), w: inch(t.w + 40), h: inch(t.h + 4), fontSize: pt(t.size * sc), bold: false, fontFace: FONT_BOLD, color: themeVar("navy") });
   }
   // Period-average reference lines (all ports dotted navy, the port dashed gold), at the svg's y.
   const yOf = (v) => box.y + sc * (padT + (H - padT - padB) * (1 - (v * 100 - lo) / (hi - lo)));
@@ -133,7 +137,7 @@ geo.forEach((g, si) => {
         text: runsToPptx(c.runs, bg),
         options: {
           colspan: c.colspan > 1 ? c.colspan : undefined,
-          fontFace: FONT, fontSize: pt(c.size), bold: c.bold, color: hex(c.color, bg), align: "right", valign: "middle", rtlMode: true, lang: "ar-SA",
+          fontFace: face(c.weight ?? (c.bold ? 700 : 400)), fontSize: pt(c.size), bold: false, color: hex(c.color, bg), align: "right", valign: "middle", rtlMode: true, lang: "ar-SA",
           margin: [0, inch(c.padR), 0, inch(c.padL)].map((v) => Math.min(v, 0.99)),
           fill: c.fill ? { color: hex(c.fill, bg) } : undefined,
           border: [c.bt ? { type: "solid", pt: pt(c.bt), color: hex(c.btc, bg) } : { type: "none" }, { type: "none" }, c.bb ? { type: "solid", pt: pt(c.bb), color: hex(c.bbc, bg) } : { type: "none" }, { type: "none" }],
@@ -169,7 +173,7 @@ geo.forEach((g, si) => {
       valAxisHidden: true, valAxisMinVal: min, valAxisMaxVal: max, valGridLine: { style: "none" }, valAxisLineShow: false,
       catAxisLabelFontFace: FONT, catAxisLabelFontSize: pt(c.cats[0]?.size ?? 18), catAxisLabelColor: hex(c.cats[0]?.color ?? "rgb(16,48,79)"), catAxisLineShow: false,
       catAxisOrientation: "maxMin",
-      showValue: true, dataLabelPosition: "outEnd", dataLabelFontFace: FONT, dataLabelFontSize: pt(flat[0]?.labelSize ?? 18), dataLabelColor: hex(flat[0]?.labelColor ?? "rgb(16,48,79)"), dataLabelFontBold: true,
+      showValue: true, dataLabelPosition: "outEnd", dataLabelFontFace: FONT_BOLD, dataLabelFontSize: pt(flat[0]?.labelSize ?? 18), dataLabelColor: hex(flat[0]?.labelColor ?? "rgb(16,48,79)"), dataLabelFontBold: false,
       dataLabelFormatCode: isPct ? '0.0"%"' : "#,##0",
       lang: "ar-SA",
     });
@@ -251,7 +255,7 @@ for (const { chart, series } of timelineMeta) {
     let out = ser.replace(/(<c:spPr>\s*<a:ln[^>]*w=")\d+(")/, `$1${Math.round(s.width * 6350 * 0.75)}$2`);
     if (s.dash !== "solid") out = out.replace(/<a:prstDash val="[^"]*"\/>/, `<a:prstDash val="${s.dash}"/>`);
     const dl = !s.labels ? '<c:dLbls><c:delete val="1"/></c:dLbls>'
-      : `<c:dLbls><c:numFmt formatCode="0&quot;%&quot;" sourceLinked="0"/><c:spPr><a:solidFill><a:srgbClr val="${s.color}"/></a:solidFill></c:spPr><c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr rtl="1" algn="r"><a:defRPr sz="800" b="1"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:latin typeface="Somar"/><a:cs typeface="Somar"/></a:defRPr></a:pPr><a:endParaRPr lang="en-US"/></a:p></c:txPr><c:dLblPos val="${s.labels}"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls>`;
+      : `<c:dLbls><c:numFmt formatCode="0&quot;%&quot;" sourceLinked="0"/><c:spPr><a:solidFill><a:srgbClr val="${s.color}"/></a:solidFill></c:spPr><c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr rtl="1" algn="r"><a:defRPr sz="800" b="0"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:latin typeface="Somar Sans Bold"/><a:cs typeface="Somar Sans Bold"/></a:defRPr></a:pPr><a:endParaRPr lang="en-US"/></a:p></c:txPr><c:dLblPos val="${s.labels}"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls>`;
     out = out.replace(/<c:dLbls>[\s\S]*?<\/c:dLbls>/, dl);
     return out;
   });

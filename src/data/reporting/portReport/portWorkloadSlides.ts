@@ -115,7 +115,6 @@ export function workloadSlides(w: WorkloadSlideInput, meta: (key: string, label:
   const parts: string[] = [];
   const sel = w.tiers.flatMap((t) => t.ports).find((p) => p.port === w.port);
   if (!sel) return parts;
-  const selTier = w.tiers.find((t) => t.ports.includes(sel));
   const tierName = (t: WorkloadTier) => `المستوى ${t.label}`;
   const others = (t: WorkloadTier) => t.ports.filter((p) => p.port !== w.port);
 
@@ -145,7 +144,7 @@ export function workloadSlides(w: WorkloadSlideInput, meta: (key: string, label:
       slideShell(
         meta("w1", SEC),
         "",
-        `${contentHead({ eyebrow: SEC, title: "تأثير عبء العمل على النتائج", note: selTier ? `${w.displayName}: المستوى ${selTier.label}` : undefined })}
+        `${contentHead({ eyebrow: SEC, title: "تأثير عبء العمل على النتائج" })}
 <div class="v3-two-col" style="grid-template-columns:repeat(3,1fr);gap:22px">${cols}</div>
 <p class="v3-note" style="margin-top:10px;font-size:19px"><b>العبء التشغيلي:</b> ${L.examsMonth} في المنفذ، ويُحسب لكل نوع منفذ (بري، بحري) على حدة: المنخفض أقل من نصف متوسط النوع، والعالي أكثر من مرة ونصف، والمتوسط بينهما. الموظف المخصص للمنفذ من فحص فيه ${MIN_MONTHLY_EXAMS} حالة على الأقل في الشهر. الصور من كامل الفترة، والموظفون والعبء من سنة ${esc(w.loadYear)}.</p>`,
       ),
@@ -180,7 +179,6 @@ export function workloadSlides(w: WorkloadSlideInput, meta: (key: string, label:
       { label: w.displayName, value: sel.perEmployeeDay, tone: "navy" as ChartTone },
     ];
     const maxV = Math.max(1, ...bars.map((b) => b.value ?? 0));
-    const noStaffYears = sel.years.filter((y) => y.employees === null).map((y) => y.year);
     parts.push(
       slideShell(
         meta("w2", SEC),
@@ -191,7 +189,7 @@ ${dataTable({ headers: ["النطاق", L.imagesMonth, L.staffMonth, L.examsMont
   ${tintedPanel({ variant: "all", title: `${w.displayName} حسب السنة`, body: dataTable({ headers: ["السنة", L.images, L.imagesMonth, L.staff, L.staffMonth, "الحالات المفحوصة للموظف في الشهر", "إنجاز الموظف في اليوم"], rows: rowsY, compactHeaders: true, rowPx: 44, firstColWidth: 14 }) })}
   <div class="v3-chart-col">${chartTitleRow({ title: L.examsDay })}${barChart({ bars, min: 0, max: maxV * 1.3, plotHeight: 250, barMaxWidth: 90, valueFormat: (v) => fmtNum(Math.round(v)) })}</div>
 </div>
-<p class="v3-note" style="margin-top:4px;font-size:18px">المستويات دون ${esc(w.displayName)}، وأرقامها من سنة ${esc(w.loadYear)}. إنجاز اليوم = حالات الشهر ÷ الأيام التي وردت فيها صور للمنفذ.${noStaffYears.length ? ` ${noStaffYears.join("، ")} بلا بيانات موظفين.` : ""}</p>`,
+`,
       ),
     );
   }
@@ -223,7 +221,7 @@ ${dataTable({ headers: ["النطاق", L.imagesMonth, L.staffMonth, L.examsMont
       slideShell(
         meta("w3", SEC),
         "",
-        `${contentHead({ eyebrow: SEC, title: "نتائج المستوى الأول والمستوى الثاني حسب مستوى العبء التشغيلي", note: `المستويات دون ${w.displayName} · النسبة من مدروسة المستوى` })}
+        `${contentHead({ eyebrow: SEC, title: "نتائج المستوى الأول والمستوى الثاني حسب مستوى العبء التشغيلي" })}
 <div class="v3-two-col pr-eq" style="grid-template-columns:repeat(4,1fr);gap:22px;align-items:stretch">${panels.map((p) => tintedPanel({ variant: p.variant, title: p.title, body: levelTable(p.o) })).join("")}</div>`,
       ),
     );
@@ -264,12 +262,12 @@ ${dataTable({ headers: ["النطاق", L.imagesMonth, L.staffMonth, L.examsMont
       slideShell(
         meta("w4", SEC),
         "",
-        `${contentHead({ eyebrow: SEC, title: `أداء ${w.displayName} مقارنة بمستويات العبء`, note: "نسبة التوائم حسب السنة" })}
+        `${contentHead({ eyebrow: SEC, title: `أداء ${w.displayName} مقارنة بمستويات العبء` })}
 <div class="v3-two-col" style="grid-template-columns:1fr 1fr;gap:36px">
   <div class="v3-chart-col">${chartTitleRow({ title: "نسبة التوائم العامة" })}${chart}</div>
   <div style="${RULE}">${dataTable({ headers: ["السنة", "النطاق", "المدروسة", "نسبة التوائم العامة", "نسبة التوائم - المستوى الأول", "نسبة التوائم - المستوى الثاني"], rows, groupStart: 3, compactHeaders: true, rowPx: 50, firstColWidth: 14 }).replace('<table class="v3-table', '<table class="pr-pop v3-table').replace("<thead>", '<colgroup><col style="width:9%"/><col style="width:27%"/><col style="width:13%"/><col/><col/><col/></colgroup><thead>')}</div>
 </div>
-<p class="v3-note" style="margin-top:6px;font-size:18px">المستويات بتصنيف العبء التشغيلي نفسه، دون ${esc(w.displayName)}. في كل خانة: عدد الحالات المتوافقة ونسبتها من المدروسة. نسبة التوائم العامة على نتيجة الصورة النهائية، ونسبتا المستويين على إجابات كل مستوى على حدة.</p>`,
+`,
       ),
     );
   }
@@ -304,10 +302,10 @@ ${dataTable({ headers: ["النطاق", L.imagesMonth, L.staffMonth, L.examsMont
         slideShell(
           meta("w5", SEC),
           "",
-          `${contentHead({ eyebrow: SEC, title: `مقارنة ${ys[0].year} و${ys[1].year}: ${w.displayName} ومستويات العبء`, note: "نسبة التوائم" })}
+          `${contentHead({ eyebrow: SEC, title: `مقارنة ${ys[0].year} و${ys[1].year}: ${w.displayName} ومستويات العبء` })}
 ${chart}
 <div style="margin-top:14px">${dataTable({ headers, rows, groupStart: [1, 5], compactHeaders: true, rowPx: 50, firstColWidth: 14 }).replace('<table class="v3-table', '<table class="pr-cmp v3-table').replace("<thead>", '<colgroup><col style="width:16%"/><col/><col/><col/><col/><col/><col/><col/><col/></colgroup><thead>')}</div>
-<p class="v3-note" style="margin-top:6px;font-size:18px">المستويات دون ${esc(w.displayName)}. في كل خانة: عدد الحالات المتوافقة ونسبتها من المدروسة. العامة على نتيجة الصورة النهائية، والمستويان على إجابات كل مستوى على حدة.</p>`,
+`,
         ),
       );
     }
