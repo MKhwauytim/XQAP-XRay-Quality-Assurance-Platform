@@ -7,7 +7,7 @@ export type MessageKey =
   | "fit.tooLong" | "gate.figureParity" | "gate.layoutParity" | "gate.lint"
   | "gate.reconcile" | "gate.ooxml" | "recipe.hashMismatch" | "recipe.invalid"
   | "resolve.keyConflict" | "theme.invalid"
-  | "xlsx.names" | "xlsx.columnClash" | "xlsx.pivotField" | "catalogUnknownNumber" | "catalogPlanned" | "catalogRetired";
+  | "xlsx.names" | "xlsx.columnClash" | "xlsx.pivotField" | "catalogUnknownNumber" | "catalogPlanned" | "catalogRetired" | "picksEmpty" | "picksNotNumber" | "picksRepeated" | "picksTooMany";
 
 export const MESSAGES_AR: Record<MessageKey, string> = {
   "schema.invalid": "بنية التقرير غير صالحة",
@@ -39,6 +39,10 @@ export const MESSAGES_AR: Record<MessageKey, string> = {
   catalogUnknownNumber: "رقم التصميم غير موجود في الكتالوج",
   catalogPlanned: "التصميم مخطط له ولم يصدر بعد",
   catalogRetired: "التصميم متقاعد ولم يعد متاحا",
+  picksEmpty: "لم تحدد أي رقم تصميم",
+  picksNotNumber: "القيمة المكتوبة ليست رقم تصميم",
+  picksRepeated: "رقم التصميم مكرر",
+  picksTooMany: "عدد التصاميم المختارة يتجاوز الحد المسموح",
 };
 
 export function formatIssue(
