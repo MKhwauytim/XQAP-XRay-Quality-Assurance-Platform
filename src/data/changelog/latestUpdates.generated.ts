@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v159.21",
+    "date": "2026-11-07",
+    "bucket": "enhancement",
+    "scope": "port report",
+    "title": "observations in the executive report's format, one type size"
+  },
+  {
     "version": "v159.20",
     "date": "2026-11-07",
     "bucket": "feature",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "engine",
     "title": "report engine core, milestone 1"
-  },
-  {
-    "version": "v159.12",
-    "date": "2026-11-04",
-    "bucket": "fix",
-    "scope": "referrals",
-    "title": "bulk assign includes undistributed cases (832 filtered, 407 offered)"
   }
 ];
