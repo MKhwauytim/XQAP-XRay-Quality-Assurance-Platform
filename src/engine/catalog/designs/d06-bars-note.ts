@@ -6,7 +6,7 @@ export const d06BarsNote: CatalogDesign = {
   number: 6,
   nameAr: "مخطط مع ملاحظة",
   descriptionAr: "مخطط أعمدة بعرض معظم الشريحة، وبجانبه لوحة ضيقة بعنوان ونص قصير يشرح ما يظهره المخطط.",
-  deck3Source: "barChart + tintedPanel",
+  deck3Source: "barChart + note (tintedPanel needs a panel visual, Milestone 2)",
   status: "active",
   slots: [
     { id: "category", nameAr: "الفئة", kind: "dimension", required: true },

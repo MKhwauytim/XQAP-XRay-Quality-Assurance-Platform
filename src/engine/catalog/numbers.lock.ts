@@ -4,7 +4,8 @@
  */
 export interface LockEntry {
   nameAr: string;
-  slotIds: string[];
+  /** Frozen once the design is active or retired; absent while planned, whose slots are provisional. */
+  slotIds?: string[];
 }
 
 export const NUMBERS_LOCK: Record<number, LockEntry> = {
@@ -17,12 +18,12 @@ export const NUMBERS_LOCK: Record<number, LockEntry> = {
   7: { nameAr: "الأعلى ترتيبًا", slotIds: ["category", "value", "sourceNote"] },
   8: { nameAr: "مؤشرات مع جدول", slotIds: ["kpi1", "kpi2", "kpi3", "row1", "value1", "value2", "value3", "rowOrder", "sourceNote"] },
   9: { nameAr: "تعريفات المصطلحات", slotIds: ["term1", "definition1", "term2", "definition2", "term3", "definition3", "term4", "definition4", "term5", "definition5", "term6", "definition6", "sourceNote"] },
-  10: { nameAr: "الغلاف", slotIds: ["kicker", "heading", "periodLabel", "periodValue", "meta1", "meta2", "meta3"] },
-  11: { nameAr: "المحتويات", slotIds: ["heading", "sourceNote"] },
-  12: { nameAr: "أعمدة مجمعة", slotIds: ["category", "valueA", "valueB", "categoryOrder", "sourceNote"] },
-  13: { nameAr: "مصفوفة الجودة", slotIds: ["rowGroup", "columnGroup", "rate", "stat1", "stat2", "sourceNote"] },
-  14: { nameAr: "جدول الملاحظات", slotIds: ["observation", "recommendation", "figure1", "figure2", "rowOrder", "sourceNote"] },
-  15: { nameAr: "تعريف المستوى", slotIds: ["level", "subtitle", "definition", "determinant", "weight", "highlight", "highlightNote", "sourceNote"] },
-  16: { nameAr: "الاتجاه الشهري", slotIds: ["period", "value", "series", "periodOrder", "sourceNote"] },
-  17: { nameAr: "الختام وبيانات الجهة", slotIds: ["kicker", "heading", "closingLine", "meta1", "meta2", "meta3"] },
+  10: { nameAr: "الغلاف" },
+  11: { nameAr: "المحتويات" },
+  12: { nameAr: "أعمدة مجمعة" },
+  13: { nameAr: "مصفوفة الجودة" },
+  14: { nameAr: "جدول الملاحظات" },
+  15: { nameAr: "تعريف المستوى" },
+  16: { nameAr: "الاتجاه الشهري" },
+  17: { nameAr: "الختام وبيانات الجهة" },
 };

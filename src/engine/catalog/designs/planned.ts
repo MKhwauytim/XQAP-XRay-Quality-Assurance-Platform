@@ -2,8 +2,8 @@ import type { CatalogDesign, SlotDecl } from "../types";
 import { GRID, NOTE_SLOT } from "./shared";
 
 /**
- * Numbers 10 to 17, reserved. Each carries its final slots, frozen in numbers.lock.ts now, and no visuals:
- * the visual arrives in Milestone 2 and must fit these slots (a changed slot means a new number).
+ * Numbers 10 to 17, reserved. Number and nameAr are frozen in numbers.lock.ts; the slots here are provisional
+ * (the lock records slot ids only once a design is active), and there are no visuals until Milestone 2.
  */
 const planned = (number: number, nameAr: string, descriptionAr: string, deck3Source: string, slots: SlotDecl[]): CatalogDesign => ({
   number, nameAr, descriptionAr, deck3Source, status: "planned", slots, page: { grid: GRID, visuals: [] },

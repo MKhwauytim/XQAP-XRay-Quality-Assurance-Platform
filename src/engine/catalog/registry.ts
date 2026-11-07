@@ -12,9 +12,11 @@ import { PLANNED } from "./designs/planned";
 import type { CatalogDesign } from "./types";
 
 /**
- * Lock rule (numbers.lock.ts): the lock is edited only to add an entry. Changing a slot of a published
+ * Lock rule (numbers.lock.ts): the lock is edited only to add an entry, or to add slotIds to a planned
+ * entry when it becomes active. Number and nameAr are frozen for every entry; slot ids are frozen only once
+ * the design is active or retired (a planned design's slots are provisional). Changing a slot of an active
  * number means retiring that number and adding a new one. Every design in CATALOG must have a lock entry
- * with the same nameAr and the same slot ids.
+ * with the same nameAr, and an active or retired one the same slot ids.
  */
 export const CATALOG: readonly CatalogDesign[] = [
   d01Section, d02Kpi, d03Bars, d04Table, d05KpiBars, d06BarsNote, d07TopRanked, d08KpiTable, d09Glossary, ...PLANNED,

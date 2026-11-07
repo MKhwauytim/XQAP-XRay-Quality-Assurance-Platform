@@ -75,6 +75,7 @@ interface Ctx {
  *   key     = measureId [ "@" part *( "|" part ) ] [ "#" filters ]
  *   part    = field "=" value          (a real category, including one literally named «أخرى» or "~")
  *           | field "~others"          (the collapsed «أخرى» bucket)
+ *           | field "~top" N           (a total over the kept top N rows of a truncated chart, limit.others false)
  *   value   = the string itself when it is "plain", else its JSON encoding. Plain means: a string
  *             with none of = | & ~ # @ " and that does not parse as a JSON non-string (so "1",
  *             "null", "true" are quoted). Numbers, booleans and null are always JSON (1, true, null),
@@ -94,8 +95,9 @@ function encodeKeyValue(v: Cell): string {
   return v;
 }
 
-export function valueKey(measureId: string, group: Record<string, Cell>, filters: FilterSpec[], others = false): string {
+export function valueKey(measureId: string, group: Record<string, Cell>, filters: FilterSpec[], others = false, topOf?: { field: string; n: number }): string {
   const parts = Object.entries(group).map(([k, v]) => (others ? `${k}~others` : `${k}=${encodeKeyValue(v)}`));
+  if (topOf !== undefined) parts.push(`${topOf.field}~top${topOf.n}`);
   let key = parts.length === 0 ? measureId : `${measureId}@${parts.join("|")}`;
   if (filters.length > 0) {
     const canon = filters.map((f) => JSON.stringify([f.field, f.op, f.value ?? null])).sort(codePointCompare);
@@ -115,12 +117,12 @@ interface Group {
 }
 
 function makeValue(
-  ctx: Ctx, m: MeasureSpec, rows: Row[], allRows: Row[], filters: FilterSpec[], g?: Group,
+  ctx: Ctx, m: MeasureSpec, rows: Row[], allRows: Row[], filters: FilterSpec[], g?: Group, topOf?: { field: string; n: number },
 ): ResolvedValue {
   const group = g?.display ?? {};
   const ast = ctx.asts.get(m.id);
   const value = ast === undefined ? null : evaluateMeasure(ast, rows, { measures: ctx.asts, allRows });
-  const key = valueKey(m.id, g?.typed ?? {}, filters, g?.others ?? false);
+  const key = valueKey(m.id, g?.typed ?? {}, filters, g?.others ?? false, topOf);
   const rv: ResolvedValue = {
     key, measureId: m.id, group, value, display: formatValue(value, m.format),
     provenance: {
@@ -230,8 +232,10 @@ function resolveVisual(ctx: Ctx, pageIndex: number, pageFilters: FilterSpec[], v
   // `others`, else are dropped); with no limit, only the chart category cap folds.
   const cap = LIMITS.maxChartCategories - 1;
   const keepN = v.type !== "barChart" ? undefined
-    : v.limit !== undefined ? Math.min(v.limit.topN, cap)
+    : v.limit !== undefined ? Math.min(v.limit.topN, v.limit.others ? cap : LIMITS.maxChartCategories)
     : groups.length > LIMITS.maxChartCategories ? cap : undefined;
+  let totalRows = rows;
+  let topOf: { field: string; n: number } | undefined;
   if (keepN !== undefined && groups.length > keepN) {
     const fold = v.limit === undefined || v.limit.others;
     const lead = measures[0]?.id;
@@ -248,14 +252,16 @@ function resolveVisual(ctx: Ctx, pageIndex: number, pageFilters: FilterSpec[], v
     const bucket: Group = { id: "", label: OTHERS_LABEL, display: {}, typed: {}, rows: rest, others: true };
     for (const f of fields) { bucket.display[f] = OTHERS_LABEL; bucket.typed[f] = OTHERS_LABEL; }
     groups = [...groups.filter((g) => keep.has(g)), ...(fold ? [bucket] : [])];
+    // Dropped rows are not drawn, so the total covers the kept rows only and carries its own key.
+    if (!fold) { totalRows = groups.flatMap((g) => g.rows); topOf = { field: fields.join("+"), n: keepN }; }
   }
 
   base.categories = groups.map((g) => g.label);
   for (const g of groups) {
     for (const m of measures) base.cells.push(makeValue(ctx, m, g.rows, allRows, filters, g));
   }
-  // Totals re-evaluate the measure on the unsplit filtered rows, never a sum of cells.
-  base.totals = measures.map((m) => makeValue(ctx, m, rows, allRows, filters));
+  // Totals re-evaluate the measure on the unsplit filtered rows (the kept rows after a drop), never a sum of cells.
+  base.totals = measures.map((m) => makeValue(ctx, m, totalRows, allRows, filters, undefined, topOf));
   return base;
 }
 

@@ -32,22 +32,39 @@ describe("catalog registry", () => {
       const d = CATALOG.find((x) => x.number === Number(n));
       expect(d, `design ${n}`).toBeDefined();
       expect(d?.nameAr).toBe(entry.nameAr);
-      expect(d?.slots.map((s) => s.id).sort()).toEqual([...entry.slotIds].sort());
+      if (d?.status === "planned") continue;
+      expect(entry.slotIds, `slot ids for ${n}`).toBeDefined();
+      expect(d?.slots.map((s) => s.id).sort()).toEqual([...(entry.slotIds ?? [])].sort());
     }
     for (const d of CATALOG) expect(NUMBERS_LOCK[d.number], `lock for ${d.number}`).toBeDefined();
   });
 
-  it("numbers 10 to 17 are reserved as planned, slots frozen in the lock", () => {
+  it("numbers 10 to 17 are reserved as planned, number and name locked, slots provisional", () => {
     for (let n = 10; n <= 17; n++) {
       const d = CATALOG.find((x) => x.number === n);
       expect(d?.status, `design ${n}`).toBe("planned");
       expect(d?.page.visuals).toEqual([]);
       expect(d?.deck3Source).not.toBe("");
-      expect(NUMBERS_LOCK[n]?.slotIds.length, `lock for ${n}`).toBeGreaterThan(0);
-      for (const s of d?.slots ?? []) expect(NUMBERS_LOCK[n].slotIds).toContain(s.id);
+      expect(d?.slots.length).toBeGreaterThan(0);
+      expect(NUMBERS_LOCK[n]?.nameAr, `lock for ${n}`).toBe(d?.nameAr);
+      expect(NUMBERS_LOCK[n]?.slotIds, `lock for ${n}`).toBeUndefined();
       const g = getDesign(n);
       expect(!g.ok && g.issue.rule).toBe("catalog.planned");
     }
+  });
+
+  it("a planned entry's slots may differ from the lock; an active one's may not", () => {
+    const lock = { 2: { nameAr: "تصميم تجريبي", slotIds: ["a"] } } as Record<number, { nameAr: string; slotIds?: string[] }>;
+    const slotsMatch = (d: CatalogDesign): boolean => {
+      const e = lock[d.number];
+      return d.status === "planned" || JSON.stringify(d.slots.map((s) => s.id).sort()) === JSON.stringify([...(e.slotIds ?? [])].sort());
+    };
+    const changed = [{ id: "b", nameAr: "حقل", kind: "text" as const, required: false }];
+    expect(slotsMatch(design({ number: 2, status: "planned", slots: changed }))).toBe(true);
+    expect(slotsMatch(design({ number: 2, status: "active", slots: changed }))).toBe(false);
+    // The real lock: a planned design with slots of its own and no locked slot ids still passes the lock check.
+    const real = CATALOG.find((x) => x.number === 12)!;
+    expect(real.slots.map((s) => s.id)).not.toEqual(NUMBERS_LOCK[12].slotIds ?? []);
   });
 
   it("unknown number refused", () => {
