@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v157.0",
+    "date": "2026-11-06",
+    "bucket": "feature",
+    "scope": "engine",
+    "title": "report engine core, milestone 1"
+  },
+  {
     "version": "v159.12",
     "date": "2026-11-04",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "months",
     "title": "export incomplete cases and fill any blank field on re-upload"
-  },
-  {
-    "version": "v159.3",
-    "date": "2026-11-01",
-    "bucket": "feature",
-    "scope": "months",
-    "title": "Excel cases may arrive without L1/L2 results; re-upload fills the blanks"
   }
 ];
