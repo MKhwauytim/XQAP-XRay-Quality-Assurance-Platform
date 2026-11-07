@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v159.18",
+    "date": "2026-11-07",
+    "bucket": "feature",
+    "scope": "reports",
+    "title": "daily work report email across all months"
+  },
+  {
     "version": "v159.17",
     "date": "2026-11-07",
     "bucket": "feature",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "months",
     "title": "Excel report says whether an existing case is distributed"
-  },
-  {
-    "version": "v159.9",
-    "date": "2026-11-01",
-    "bucket": "fix",
-    "scope": "referrals",
-    "title": "compact bulk-move button with short labels"
   }
 ];
