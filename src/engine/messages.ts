@@ -7,7 +7,7 @@ export type MessageKey =
   | "fit.tooLong" | "gate.figureParity" | "gate.layoutParity" | "gate.lint"
   | "gate.reconcile" | "gate.ooxml" | "recipe.hashMismatch" | "recipe.invalid"
   | "resolve.keyConflict" | "theme.invalid"
-  | "xlsx.names" | "xlsx.columnClash" | "xlsx.pivotField";
+  | "xlsx.names" | "xlsx.columnClash" | "xlsx.pivotField" | "catalogUnknownNumber" | "catalogPlanned" | "catalogRetired";
 
 export const MESSAGES_AR: Record<MessageKey, string> = {
   "schema.invalid": "بنية التقرير غير صالحة",
@@ -36,6 +36,9 @@ export const MESSAGES_AR: Record<MessageKey, string> = {
   "xlsx.names": "اسم ظاهر في المصنف يشبه رمزا داخليا أو رقم خطوة، استخدم اسما عربيا واضحا",
   "xlsx.columnClash": "عمودان يحملان الاسم نفسه في إكسل (يتجاهل إكسل حالة الأحرف والهمزة على الألف)",
   "xlsx.pivotField": "الجدول المحوري يشير إلى عمود غير موجود في جدوله",
+  catalogUnknownNumber: "رقم التصميم غير موجود في الكتالوج",
+  catalogPlanned: "التصميم مخطط له ولم يصدر بعد",
+  catalogRetired: "التصميم متقاعد ولم يعد متاحا",
 };
 
 export function formatIssue(
