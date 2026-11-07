@@ -2,12 +2,24 @@ import type { EngineIssue } from "./errors";
 
 export type MessageKey =
   | "schema.invalid" | "type.errors" | "formula.syntax" | "formula.notAllowed"
-  | "formula.tooDeep" | "formula.tooLong" | "measure.unknown" | "well.invalid" | "literal.number"
+  | "formula.tooDeep" | "formula.tooLong" | "measure.unknown" | "param.unknown" | "well.invalid" | "literal.number"
   | "limit.rows" | "limit.slides" | "limit.visuals" | "limit.time"
   | "fit.tooLong" | "gate.figureParity" | "gate.layoutParity" | "gate.lint"
   | "gate.reconcile" | "gate.ooxml" | "recipe.hashMismatch" | "recipe.invalid"
   | "resolve.keyConflict" | "theme.invalid"
-  | "xlsx.names" | "xlsx.columnClash" | "xlsx.pivotField";
+  | "xlsx.names" | "xlsx.columnClash" | "xlsx.pivotField"
+  | "catalog.unknownNumber"
+  | "catalog.planned"
+  | "catalog.retired"
+  | "picks.empty"
+  | "picks.notNumber"
+  | "picks.repeated"
+  | "picks.tooMany"
+  | "bind.missingSlot"
+  | "bind.wrongKind"
+  | "bind.missingPick"
+  | "bind.titleNoFigure"
+  | "catalog.demoLabel";
 
 export const MESSAGES_AR: Record<MessageKey, string> = {
   "schema.invalid": "بنية التقرير غير صالحة",
@@ -17,6 +29,7 @@ export const MESSAGES_AR: Record<MessageKey, string> = {
   "formula.tooDeep": "الصيغة متداخلة أكثر من الحد المسموح",
   "formula.tooLong": "الصيغة أطول من الحد المسموح",
   "measure.unknown": "المقياس غير معرف",
+  "param.unknown": "المعامل غير معرف",
   "well.invalid": "حقل الرسم غير صالح",
   "literal.number": "لا يجوز كتابة رقم داخل النص، استخدم مقياسا",
   "limit.rows": "عدد الصفوف يتجاوز الحد المسموح",
@@ -36,6 +49,18 @@ export const MESSAGES_AR: Record<MessageKey, string> = {
   "xlsx.names": "اسم ظاهر في المصنف يشبه رمزا داخليا أو رقم خطوة، استخدم اسما عربيا واضحا",
   "xlsx.columnClash": "عمودان يحملان الاسم نفسه في إكسل (يتجاهل إكسل حالة الأحرف والهمزة على الألف)",
   "xlsx.pivotField": "الجدول المحوري يشير إلى عمود غير موجود في جدوله",
+  "catalog.unknownNumber": "رقم التصميم غير موجود في الكتالوج",
+  "catalog.planned": "التصميم مخطط له ولم يصدر بعد",
+  "catalog.retired": "التصميم متقاعد ولم يعد متاحا",
+  "picks.empty": "لم تحدد أي رقم تصميم",
+  "picks.notNumber": "القيمة المكتوبة ليست رقم تصميم",
+  "picks.repeated": "رقم التصميم مكرر",
+  "picks.tooMany": "عدد التصاميم المختارة يتجاوز الحد المسموح",
+  "bind.missingSlot": "خانة مطلوبة في التصميم لم تربط بحقل أو مقياس",
+  "bind.wrongKind": "نوع الربط لا يناسب الخانة",
+  "bind.missingPick": "لا يوجد ربط للتصميم المختار",
+  "bind.titleNoFigure": "عنوان الصفحة يجب أن يذكر رقما عبر مقياس",
+  "catalog.demoLabel": "المدخلات تحمل عبارة «بيانات توضيحية»، فهي بيانات عرض وليست بيانات حقيقية؛ استبدلوها قبل الإصدار",
 };
 
 export function formatIssue(

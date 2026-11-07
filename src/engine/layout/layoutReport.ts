@@ -9,7 +9,7 @@ import { FIT_SAFETY } from "./measure";
 import type { TextMeasurer } from "./measure";
 import type { Run } from "./bidiRuns";
 import type { LayoutBox, LayoutDoc, LayoutFigure, LayoutSlide, NonFigureSpan, TableBox, TextBox, TextCell } from "./types";
-import { MEASURE_PLACEHOLDER, PARAM_PLACEHOLDER, figureTokens, withoutTokens } from "../text";
+import { MEASURE_PLACEHOLDER, PARAM_PLACEHOLDER, TITLE_VISUAL_ID, figureTokens, withoutTokens } from "../text";
 
 /**
  * Every layout dimension, in px on the 1920x1080 slide. `margin` is the safe area on all four edges: grid
@@ -93,17 +93,21 @@ export function layoutReport(
   const slides: LayoutSlide[] = [];
   spec.pages.forEach((page, pi) => {
     const byId = new Map(resolved.filter((r) => r.pageIndex === pi + 1).map((r) => [r.visualId, r]));
+    const titleCells = byId.get(TITLE_VISUAL_ID)?.cells ?? [];
     const sorted = page.visuals.map((v, i) => ({ v, i })).sort((a, b) => a.v.frame.z - b.v.frame.z || a.i - b.i);
     const tables = new Map(sorted.filter(({ v }) => v.type === "table")
       .map(({ v }) => [v, tablePages(ctx, v, byId.get(v.visualId))] as const));
     const extra = Math.max(0, ...[...tables.values()].map((p) => p.length - 1));
-    slides.push(makeSlide(ctx, page, slides.length + 1, false, (slide) => sorted.flatMap(({ v }) => {
+    slides.push(makeSlide(ctx, page, titleCells, slides.length + 1, false, (slide) => sorted.flatMap(({ v }) => {
       const pages = tables.get(v);
       return pages ? (pages[0]?.(slide, false) ?? []) : visualBoxes(ctx, slide, v, byId.get(v.visualId));
     })));
+    const notes = sorted.filter(({ v }) => v.type === "text" && v.pageNote === true);
     for (let k = 1; k <= extra; k++) {
-      slides.push(makeSlide(ctx, page, slides.length + 1, true, (slide) =>
-        [...tables.values()].flatMap((p) => p[k]?.(slide, true) ?? [])));
+      slides.push(makeSlide(ctx, page, titleCells, slides.length + 1, true, (slide) => [
+        ...[...tables.values()].flatMap((p) => p[k]?.(slide, true) ?? []),
+        ...notes.flatMap(({ v }) => visualBoxes(ctx, slide, v, byId.get(v.visualId))),
+      ]));
     }
   });
   if (slides.length > LIMITS.maxSlides) {
@@ -146,14 +150,36 @@ function nonFigureSpans(slides: LayoutSlide[], figures: LayoutFigure[], staticTe
   return out;
 }
 
-function makeSlide(ctx: Ctx, page: PageSpec, index: number, continued: boolean, body: (slide: number) => LayoutBox[]): LayoutSlide {
-  const title = continued ? `${page.title}${CONTINUED}` : page.title;
+/** Text with its `{{measure:id}}` and `{{param:id}}` placeholders filled; `used` collects each figure once. */
+function fill(ctx: Ctx, text: string, cells: ResolvedValue[], used: ResolvedValue[]): string {
+  return text
+    .replace(MEASURE_PLACEHOLDER, (_, mid: string) => {
+      const rv = cells.find((c) => c.measureId === mid) ?? ctx.values.get(mid);
+      if (!rv) return "-";
+      if (!used.includes(rv)) used.push(rv);
+      return rv.display;
+    })
+    .replace(PARAM_PLACEHOLDER, (_, pid: string) => {
+      const p = ctx.params.values[pid];
+      return p === undefined ? "-" : String(p);
+    });
+}
+
+const stripPlaceholders = (text: string): string => text.replace(MEASURE_PLACEHOLDER, " ").replace(PARAM_PLACEHOLDER, " ");
+
+function makeSlide(
+  ctx: Ctx, page: PageSpec, titleCells: ResolvedValue[], index: number, continued: boolean, body: (slide: number) => LayoutBox[],
+): LayoutSlide {
+  const used: ResolvedValue[] = [];
+  const title = `${fill(ctx, page.title, titleCells, used)}${continued ? CONTINUED : ""}`;
   const row0 = safeFrame({ col: 0, row: 0, w: 24, h: 1, z: 0 });
   const frame = { ...row0, h: row0.h - LAYOUT.ruleGap };
-  const titleBox = textBox(ctx, index, `s${index}-title`, "title", frame, title, {
+  if (page.titleRow === false) return { index, pageId: page.pageId, title, boxes: body(index) };
+  const titleBox = textBox(ctx, index, `s${index}-title`, TITLE_VISUAL_ID, frame, title, {
     sizePx: LAYOUT.titlePx, weight: 700, color: ctx.theme.ink.navy, maxLines: 1,
-  }, [], false);
-  ctx.staticText.set(titleBox.id, title);
+  }, used.map((u) => u.key), false);
+  ctx.staticText.set(titleBox.id, `${stripPlaceholders(page.title)}${continued ? CONTINUED : ""}`);
+  for (const u of used) figure(ctx, index, titleBox.id, u);
   const rule: LayoutBox = {
     kind: "rule", id: `s${index}-rule`, x: frame.x, y: frame.y + frame.h + (LAYOUT.ruleGap - LAYOUT.ruleH) / 2,
     w: frame.w, color: ctx.theme.ink.gold,
@@ -192,21 +218,11 @@ function visualBoxes(ctx: Ctx, slide: number, v: VisualSpec, r: ResolvedVisual |
   const cells = r?.cells ?? [];
   if (v.type === "text") {
     const used: ResolvedValue[] = [];
-    const text = (v.text ?? "")
-      .replace(MEASURE_PLACEHOLDER, (_, mid: string) => {
-        const rv = cells.find((c) => c.measureId === mid) ?? ctx.values.get(mid);
-        if (!rv) return "-";
-        if (!used.includes(rv)) used.push(rv);
-        return rv.display;
-      })
-      .replace(PARAM_PLACEHOLDER, (_, pid: string) => {
-        const p = ctx.params.values[pid];
-        return p === undefined ? "-" : String(p);
-      });
+    const text = fill(ctx, v.text ?? "", cells, used);
     const box = textBox(ctx, slide, id(0), v.visualId, frame, text, {
       sizePx: v.format?.sizePx ?? LAYOUT.textPx, weight: v.format?.weight ?? 400, color: tone("neutral"), maxLines: 2,
     }, used.map((u) => u.key));
-    ctx.staticText.set(box.id, (v.text ?? "").replace(MEASURE_PLACEHOLDER, " ").replace(PARAM_PLACEHOLDER, " "));
+    ctx.staticText.set(box.id, stripPlaceholders(v.text ?? ""));
     for (const u of used) figure(ctx, slide, box.id, u);
     return [box];
   }

@@ -7,7 +7,7 @@ import type { ThemeTokens } from "../spec/types";
 import { HEX_COLOR } from "../text";
 
 const ESCAPES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
-const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => ESCAPES[c]);
+export const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => ESCAPES[c]);
 
 const runHtml = (r: Run): string => (r.ltr ? `<span dir="ltr">${esc(r.text)}</span>` : esc(r.text));
 /** Recorded lines joined with `<br>`; the line count equals the layout's (M2). */
@@ -108,10 +108,12 @@ function box(b: LayoutBox, theme: ThemeTokens): string {
   }
 }
 
-const slideHtml = (s: LayoutSlide, theme: ThemeTokens): string =>
+/** One slide's markup; the lookbook wraps these rather than rendering slides itself. */
+export const slideHtml = (s: LayoutSlide, theme: ThemeTokens): string =>
   `<section class="slide" data-slide="${s.index}" data-page="${esc(s.pageId)}">${s.boxes.map((b) => box(b, theme)).join("")}</section>`;
 
-function css(theme: ThemeTokens): string {
+/** The page stylesheet for slides; reused by the lookbook. */
+export function slideCss(theme: ThemeTokens): string {
   const c = (k: keyof ThemeTokens["ink"]): string => safeColor(theme.ink[k]);
   const stack = fontStack(theme.font);
   const fontFace = theme.fontData && FONT.test(theme.font)
@@ -138,7 +140,7 @@ export function renderHtml(doc: LayoutDoc, theme: ThemeTokens, opts: { title: st
 <meta charset="utf-8">
 <title>${esc(opts.title)}</title>
 <style>
-${css(theme)}
+${slideCss(theme)}
 </style>
 </head>
 <body>

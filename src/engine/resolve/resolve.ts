@@ -7,7 +7,7 @@ import { evaluateMeasure, measureColumns } from "../formula/evaluate";
 import { parseFormula } from "../formula/parse";
 import { LIMITS } from "../limits";
 import type { IssueParams, MeasureSpec, ReportSpec, VisualSpec, VisualType, WellRole } from "../spec/types";
-import { MEASURE_PLACEHOLDER } from "../text";
+import { MEASURE_PLACEHOLDER, TITLE_VISUAL_ID } from "../text";
 
 type Row = Record<string, Cell>;
 
@@ -75,6 +75,7 @@ interface Ctx {
  *   key     = measureId [ "@" part *( "|" part ) ] [ "#" filters ]
  *   part    = field "=" value          (a real category, including one literally named «أخرى» or "~")
  *           | field "~others"          (the collapsed «أخرى» bucket)
+ *           | field "~top" N           (a total over the kept top N rows of a truncated chart, limit.others false)
  *   value   = the string itself when it is "plain", else its JSON encoding. Plain means: a string
  *             with none of = | & ~ # @ " and that does not parse as a JSON non-string (so "1",
  *             "null", "true" are quoted). Numbers, booleans and null are always JSON (1, true, null),
@@ -94,8 +95,9 @@ function encodeKeyValue(v: Cell): string {
   return v;
 }
 
-export function valueKey(measureId: string, group: Record<string, Cell>, filters: FilterSpec[], others = false): string {
+export function valueKey(measureId: string, group: Record<string, Cell>, filters: FilterSpec[], others = false, topOf?: { field: string; n: number }): string {
   const parts = Object.entries(group).map(([k, v]) => (others ? `${k}~others` : `${k}=${encodeKeyValue(v)}`));
+  if (topOf !== undefined) parts.push(`${topOf.field}~top${topOf.n}`);
   let key = parts.length === 0 ? measureId : `${measureId}@${parts.join("|")}`;
   if (filters.length > 0) {
     const canon = filters.map((f) => JSON.stringify([f.field, f.op, f.value ?? null])).sort(codePointCompare);
@@ -115,12 +117,12 @@ interface Group {
 }
 
 function makeValue(
-  ctx: Ctx, m: MeasureSpec, rows: Row[], allRows: Row[], filters: FilterSpec[], g?: Group,
+  ctx: Ctx, m: MeasureSpec, rows: Row[], allRows: Row[], filters: FilterSpec[], g?: Group, topOf?: { field: string; n: number },
 ): ResolvedValue {
   const group = g?.display ?? {};
   const ast = ctx.asts.get(m.id);
   const value = ast === undefined ? null : evaluateMeasure(ast, rows, { measures: ctx.asts, allRows });
-  const key = valueKey(m.id, g?.typed ?? {}, filters, g?.others ?? false);
+  const key = valueKey(m.id, g?.typed ?? {}, filters, g?.others ?? false, topOf);
   const rv: ResolvedValue = {
     key, measureId: m.id, group, value, display: formatValue(value, m.format),
     provenance: {
@@ -226,7 +228,16 @@ function resolveVisual(ctx: Ctx, pageIndex: number, pageFilters: FilterSpec[], v
   const valueOf = (g: Group, id: string) => quick(g.rows, id);
   let groups = sortGroups(ctx, v, [...byId.values()], valueOf);
 
-  if (v.type === "barChart" && groups.length > LIMITS.maxChartCategories) {
+  // A chart keeps its top `limit.topN` categories by the lead measure (the rest fold into «أخرى» when
+  // `others`, else are dropped); with no limit, only the chart category cap folds.
+  const cap = LIMITS.maxChartCategories - 1;
+  const keepN = v.type !== "barChart" ? undefined
+    : v.limit !== undefined ? Math.min(v.limit.topN, v.limit.others ? cap : LIMITS.maxChartCategories)
+    : groups.length > LIMITS.maxChartCategories ? cap : undefined;
+  let totalRows = rows;
+  let topOf: { field: string; n: number } | undefined;
+  if (keepN !== undefined && groups.length > keepN) {
+    const fold = v.limit === undefined || v.limit.others;
     const lead = measures[0]?.id;
     const ranked = [...groups].sort((a, b) => {
       const x = lead === undefined ? null : valueOf(a, lead), y = lead === undefined ? null : valueOf(b, lead);
@@ -235,20 +246,22 @@ function resolveVisual(ctx: Ctx, pageIndex: number, pageFilters: FilterSpec[], v
       if (y === null) return -1;
       return y - x;
     });
-    const keep = new Set(ranked.slice(0, LIMITS.maxChartCategories - 1));
+    const keep = new Set(ranked.slice(0, keepN));
     const rest = groups.filter((g) => !keep.has(g)).flatMap((g) => g.rows);
     // The bucket lives outside the identity keyspace: no real category can collide with it.
     const bucket: Group = { id: "", label: OTHERS_LABEL, display: {}, typed: {}, rows: rest, others: true };
     for (const f of fields) { bucket.display[f] = OTHERS_LABEL; bucket.typed[f] = OTHERS_LABEL; }
-    groups = [...groups.filter((g) => keep.has(g)), bucket];
+    groups = [...groups.filter((g) => keep.has(g)), ...(fold ? [bucket] : [])];
+    // Dropped rows are not drawn, so the total covers the kept rows only and carries its own key.
+    if (!fold) { totalRows = groups.flatMap((g) => g.rows); topOf = { field: fields.join("+"), n: keepN }; }
   }
 
   base.categories = groups.map((g) => g.label);
   for (const g of groups) {
     for (const m of measures) base.cells.push(makeValue(ctx, m, g.rows, allRows, filters, g));
   }
-  // Totals re-evaluate the measure on the unsplit filtered rows, never a sum of cells.
-  base.totals = measures.map((m) => makeValue(ctx, m, rows, allRows, filters));
+  // Totals re-evaluate the measure on the unsplit filtered rows (the kept rows after a drop), never a sum of cells.
+  base.totals = measures.map((m) => makeValue(ctx, m, totalRows, allRows, filters, undefined, topOf));
   return base;
 }
 
@@ -314,6 +327,14 @@ export function resolveVisuals(
   for (const d of spec.datasets) issues.push(...(data.get(d.id)?.issues ?? []));
 
   const ctx: Ctx = { spec, data, params, asts, byId, values: new Map(), issues };
-  const visuals = spec.pages.flatMap((page, pi) => page.visuals.map((v) => resolveVisual(ctx, pi + 1, page.filters ?? [], v)));
+  const visuals = spec.pages.flatMap((page, pi) => {
+    const out = page.visuals.map((v) => resolveVisual(ctx, pi + 1, page.filters ?? [], v));
+    // A figure in a page title resolves like a text visual on that page, under the title id.
+    if (page.title.includes("{{measure:")) {
+      const title: VisualSpec = { visualId: TITLE_VISUAL_ID, type: "text", frame: { col: 0, row: 0, w: 24, h: 1, z: 0 }, wells: {}, text: page.title };
+      out.push(resolveVisual(ctx, pi + 1, page.filters ?? [], title));
+    }
+    return out;
+  });
   return { visuals, values: ctx.values, issues };
 }

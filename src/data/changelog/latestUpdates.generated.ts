@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v158.0",
+    "date": "2026-11-07",
+    "bucket": "feature",
+    "scope": "engine",
+    "title": "catalog and slide picks"
+  },
+  {
     "version": "v157.0",
     "date": "2026-11-06",
     "bucket": "feature",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "months",
     "title": "split a month by the index list; unlisted unstudied cases move to the month's exceptional cases"
-  },
-  {
-    "version": "v159.4",
-    "date": "2026-11-01",
-    "bucket": "feature",
-    "scope": "months",
-    "title": "export incomplete cases and fill any blank field on re-upload"
   }
 ];
