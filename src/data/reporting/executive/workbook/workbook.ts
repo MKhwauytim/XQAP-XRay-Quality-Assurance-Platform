@@ -55,8 +55,11 @@ function text(value: string | null | undefined): Cell {
 }
 
 /** A result value (سليمة / اشتباه) or `—` when the source did not act. */
-function result(value: "سليمة" | "اشتباه" | null | undefined): Cell {
-  return value === null || value === undefined ? DASH : value;
+/** «نتائج أخرى» for a result not recorded yet ("" or "other"); never shown as a verdict. */
+function result(value: "سليمة" | "اشتباه" | "" | "other" | null | undefined): Cell {
+  if (value === null || value === undefined) return DASH;
+  if (value === "" || value === "other") return getLabels().result_other;
+  return value;
 }
 
 /** A boolean (نعم / لا) or blank when unknown (null). */

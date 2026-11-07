@@ -5,6 +5,27 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v159.16",
+    "date": "2026-11-07",
+    "bucket": "fix",
+    "scope": "months",
+    "title": "pre-merge review of split and bulk move (re-projection, replicas, lost store, empty list)"
+  },
+  {
+    "version": "v159.15",
+    "date": "2026-11-07",
+    "bucket": "enhancement",
+    "scope": "reporting",
+    "title": "blank L1/L2 cases stay in reports as «نتائج أخرى»"
+  },
+  {
+    "version": "v159.14",
+    "date": "2026-11-07",
+    "bucket": "fix",
+    "scope": "reporting",
+    "title": "blank L1/L2 results are never counted as «سليمة»"
+  },
+  {
     "version": "v158.0",
     "date": "2026-11-07",
     "bucket": "feature",
@@ -19,59 +40,38 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "title": "report engine core, milestone 1"
   },
   {
-    "version": "v159.5",
-    "date": "2026-11-01",
-    "bucket": "enhancement",
-    "scope": "tracking",
-    "title": "follow-up period runs from first to last studied case"
+    "version": "v159.12",
+    "date": "2026-11-04",
+    "bucket": "fix",
+    "scope": "referrals",
+    "title": "bulk assign includes undistributed cases (832 filtered, 407 offered)"
   },
   {
-    "version": "v159.2",
-    "date": "2026-11-01",
-    "bucket": "enhancement",
-    "scope": "tracking",
-    "title": "daily follow-up spans first distribution to last study, across months"
-  },
-  {
-    "version": "v159.1",
-    "date": "2026-11-01",
-    "bucket": "enhancement",
-    "scope": "tracking",
-    "title": "daily follow-up counts every studied case, ad-hoc imports included"
-  },
-  {
-    "version": "v159.0",
+    "version": "v159.11",
     "date": "2026-11-01",
     "bucket": "feature",
-    "scope": "months",
-    "title": "add cases from an Excel sheet to a month, skipping images already in the workspace"
+    "scope": "referrals",
+    "title": "admin queue lists undistributed sample cases as «غير موزعة»"
   },
   {
-    "version": "v158.1",
+    "version": "v159.10",
     "date": "2026-11-01",
-    "bucket": "enhancement",
+    "bucket": "fix",
     "scope": "months",
-    "title": "merge progress, ad-hoc rows join target population, merge all ad-hoc imports at once"
+    "title": "Excel report says whether an existing case is distributed"
   },
   {
-    "version": "v158.0",
+    "version": "v159.9",
+    "date": "2026-11-01",
+    "bucket": "fix",
+    "scope": "referrals",
+    "title": "compact bulk-move button with short labels"
+  },
+  {
+    "version": "v159.8",
     "date": "2026-11-01",
     "bucket": "feature",
-    "scope": "import",
-    "title": "operator workbook support and full-column corrections export"
-  },
-  {
-    "version": "v157.0",
-    "date": "2026-11-01",
-    "bucket": "feature",
-    "scope": "months",
-    "title": "merge a month or an ad-hoc sample into another month"
-  },
-  {
-    "version": "v156.1",
-    "date": "2026-11-01",
-    "bucket": "enhancement",
-    "scope": "reporting",
-    "title": "normal hyphen instead of long dashes in report text"
+    "scope": "referrals",
+    "title": "admin bulk move of the shown unstudied cases between index and exceptional"
   }
 ];

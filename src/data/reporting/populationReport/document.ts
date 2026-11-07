@@ -20,7 +20,7 @@ import { openReportWindow, writeOrCloseOnFailure } from "../htmlReport";
 import { computePopulationReportModel } from "./model";
 import type { PopulationReportModel, PopulationReportInput } from "./model";
 import { RESULT_HEADERS, resultRow, contentsRows } from "./deck";
-import { STAGE_LABELS } from "./fold";
+import { otherSuffix, STAGE_LABELS } from "./fold";
 import type { PortBreakdown, PopulationReportScope } from "./types";
 import { sourceRevisionsFooterHtml, SOURCE_REVISIONS_CSS } from "../sourceRevisions";
 import { ZATCA_LOGO_URL } from "../../../branding/organization";
@@ -195,8 +195,8 @@ async function buildSection3Pages(model: PopulationReportModel): Promise<string[
   const stageRows = model.distribution.byEmployeeStage.map((emp) => [
     { html: esc(emp.displayName) },
     ...model.distribution.stageKeysPresent.map((k) => {
-      const c = emp.stages[k] ?? { سليمة: 0, اشتباه: 0, total: 0 };
-      return { html: `${fmtNum(c.total)} (${fmtNum(c.سليمة)}/${fmtNum(c.اشتباه)})` };
+      const c = emp.stages[k] ?? { سليمة: 0, اشتباه: 0, other: 0, total: 0 };
+      return { html: `${fmtNum(c.total)} (${fmtNum(c.سليمة)}/${fmtNum(c.اشتباه)})${esc(otherSuffix(c))}` };
     }),
     { html: fmtNum(emp.total.total) },
   ]);
@@ -207,8 +207,8 @@ async function buildSection3Pages(model: PopulationReportModel): Promise<string[
 
   const portRows = model.distribution.byEmployeePort.map((emp) => [
     { html: esc(emp.displayName) },
-    { html: `${fmtNum(emp.ports.land.total)} (${fmtNum(emp.ports.land.سليمة)}/${fmtNum(emp.ports.land.اشتباه)})` },
-    { html: `${fmtNum(emp.ports.sea.total)} (${fmtNum(emp.ports.sea.سليمة)}/${fmtNum(emp.ports.sea.اشتباه)})` },
+    { html: `${fmtNum(emp.ports.land.total)} (${fmtNum(emp.ports.land.سليمة)}/${fmtNum(emp.ports.land.اشتباه)})${esc(otherSuffix(emp.ports.land))}` },
+    { html: `${fmtNum(emp.ports.sea.total)} (${fmtNum(emp.ports.sea.سليمة)}/${fmtNum(emp.ports.sea.اشتباه)})${esc(otherSuffix(emp.ports.sea))}` },
     { html: fmtNum(emp.total.total) },
   ]);
   for (const chunk of docPaginateTable({ headers: ["الموظف", "برية", "بحرية", "الإجمالي"], rows: portRows, rowsPerPage: 25 })) {

@@ -100,7 +100,7 @@ function input(rows: PreparedPopulationRow[], files: EmployeeAnswerFile[]): Exec
  *  fixture does not target a specific outcome class — that is what
  *  `buildOutcomeModel` below is for. */
 function modelWith(rows: PreparedPopulationRow[]): ReportModel {
-  const items = rows.map((r) => answerItem(r.xrayImageId, r.xrayLevelOneResult));
+  const items = rows.map((r) => answerItem(r.xrayImageId, r.xrayLevelOneResult || "سليمة"));
   return buildReportModel(input(rows, items.length > 0 ? [answerFile(items)] : []));
 }
 

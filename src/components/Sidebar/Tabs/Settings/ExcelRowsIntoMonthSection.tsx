@@ -9,10 +9,12 @@ import { logError } from "../../../../data/storage/errorLogger";
 import { listMonthFolders } from "../../../../data/population/populationStorage";
 import { readWorkbookTables } from "../../../../data/adhocImport/adhocSourceTable";
 import { autoDetectMapping } from "../../../../data/adhocImport/adhocMappingModel";
-import { ADHOC_FIELD_CATALOG } from "../../../../data/adhocImport/adhocFieldCatalog";
+import { EXCEL_INTO_MONTH_FIELD_CATALOG } from "../../../../data/adhocImport/adhocFieldCatalog";
 import { projectTable } from "../../../../data/adhocImport/adhocRowProjection";
 import type { AdhocRow, SourceTable } from "../../../../data/adhocImport/adhocImportModel";
+import { loadSampleMaster } from "../../../../data/sampling/sampleStorage";
 import {
+  buildIncompleteCasesSheet,
   executeExcelRowsIntoMonth,
   planExcelRowsIntoMonth,
   type ExcelRowsPlan,
@@ -32,9 +34,13 @@ function fill(template: string, values: Record<string, string | number>): string
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 function projectRows(table: SourceTable): AdhocRow[] {
-  const mapping = autoDetectMapping(table.headers, ADHOC_FIELD_CATALOG);
-  return projectTable({ table, mapping, catalog: ADHOC_FIELD_CATALOG, binding: { kind: "isolated" } });
+  const mapping = autoDetectMapping(table.headers, EXCEL_INTO_MONTH_FIELD_CATALOG);
+  return projectTable({ table, mapping, catalog: EXCEL_INTO_MONTH_FIELD_CATALOG, binding: { kind: "isolated" } });
 }
+
+/** «موجودة» cases sitting in a sample with no employee: the queue does not list them. */
+const undistributedCount = (plan: ExcelRowsPlan): number =>
+  plan.existing.filter((entry) => entry.location.where === "sample" && entry.assignedTo === null).length;
 
 /** One sheet per outcome, so the admin sees exactly what was added and why the rest was not. */
 function downloadReport(plan: ExcelRowsPlan, L: Labels): void {
@@ -45,14 +51,27 @@ function downloadReport(plan: ExcelRowsPlan, L: Labels): void {
     [L.excel_rows_report_col_id, L.col_port_name, L.col_xray_entry_date],
     ...plan.added.map((row) => [row.xrayImageId, row.portName ?? "", row.xrayEntryDate ?? ""]),
   ]);
+  sheet(L.excel_rows_report_from_population, [
+    [L.excel_rows_report_col_id, L.col_port_name],
+    ...plan.fromPopulation.map((row) => [row.xrayImageId, row.portName ?? ""]),
+  ]);
   sheet(L.excel_rows_report_existing, [
-    [L.excel_rows_report_col_id, L.excel_rows_report_col_location, L.excel_rows_report_col_where],
+    [L.excel_rows_report_col_id, L.excel_rows_report_col_location, L.excel_rows_report_col_where, L.excel_rows_report_col_assignment],
     ...plan.existing.map((entry) => [
       entry.xrayImageId,
       entry.location.folder,
       entry.location.where === "sample" ? L.excel_rows_where_sample : L.excel_rows_where_population,
+      entry.location.where !== "sample" ? "" : entry.assignedTo ?? L.excel_rows_not_distributed,
     ]),
     ...plan.repeatedInFile.map((id) => [id, L.excel_rows_repeated_in_file, ""]),
+  ]);
+  sheet(L.excel_rows_report_filled, [
+    [L.excel_rows_report_col_id, L.excel_rows_report_col_field, L.excel_rows_report_col_value],
+    ...plan.filled.map((change) => [
+      change.xrayImageId,
+      EXCEL_INTO_MONTH_FIELD_CATALOG.find((field) => field.key === change.field)?.labelAr ?? change.field,
+      change.newValue,
+    ]),
   ]);
   sheet(L.excel_rows_report_invalid, [
     [L.excel_rows_report_col_row, L.excel_rows_report_col_id, L.excel_rows_report_col_reason],
@@ -95,6 +114,29 @@ export function ExcelRowsIntoMonthSection() {
   }, [isOpen, canImport, directoryHandle, L.delete_month_list_failed]);
 
   if (!canImport) return null;
+
+  /** The target month's cases that still have blanks, to fill in Excel and upload back here. */
+  async function exportIncomplete(): Promise<void> {
+    if (!directoryHandle || !target) return;
+    setBusy(true);
+    try {
+      const sample = await loadSampleMaster(directoryHandle, target);
+      const sheetRows = buildIncompleteCasesSheet(sample?.rows ?? []);
+      if (sheetRows.length <= 1) {
+        setNotice({ kind: "info", text: L.excel_rows_incomplete_none });
+        return;
+      }
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheetRows), L.excel_rows_incomplete_sheet.slice(0, 31));
+      XLSX.writeFile(wb, `incomplete-cases-${target}.xlsx`);
+      setNotice({ kind: "info", text: fill(L.excel_rows_incomplete_done, { n: sheetRows.length - 1, target }) });
+    } catch (error) {
+      logError("settings:excel-rows-export-incomplete", error);
+      setNotice({ kind: "error", text: fill(L.excel_rows_failed, { error: errorText(error) }) });
+    } finally {
+      setBusy(false);
+    }
+  }
 
   function pickSheet(name: string, from: SourceTable[] = tables): void {
     setSheet(name);
@@ -160,7 +202,7 @@ export function ExcelRowsIntoMonthSection() {
       recordAction(directoryHandle, username, role, "month-merged", {
         monthFolderName: target,
         target: sheet,
-        details: { kind: "excel-rows", added: result.addedToSample, existing: result.plan.existing.length, invalid: result.plan.invalid.length },
+        details: { kind: "excel-rows", drawn: result.drawnFromPopulation, added: result.addedToSample, filled: result.filledResults, existing: result.plan.existing.length, invalid: result.plan.invalid.length },
       });
       notifyLocalDataChange(["manifest"]);
       broadcastDataRefresh("manual");
@@ -168,7 +210,7 @@ export function ExcelRowsIntoMonthSection() {
       setPlan(null);
       setNotice({
         kind: "ok",
-        text: fill(L.excel_rows_done, { added: result.addedToSample, existing: result.plan.existing.length, target }),
+        text: (result.drawnFromPopulation > 0 ? fill(L.excel_rows_from_population_done, { n: result.drawnFromPopulation }) + " " : "") + fill(L.excel_rows_done, { added: result.addedToSample, filled: result.filledResults, existing: result.plan.existing.length, target }),
       });
     } catch (error) {
       logError("settings:excel-rows", error);
@@ -220,6 +262,9 @@ export function ExcelRowsIntoMonthSection() {
             <button type="button" className="ew-btn-secondary" onClick={() => void preview()} disabled={busy || !rows || !target}>
               {L.excel_rows_check}
             </button>
+            <button type="button" className="ew-btn-secondary" onClick={() => void exportIncomplete()} disabled={busy || !target}>
+              {L.excel_rows_incomplete_button}
+            </button>
           </div>
 
           {rows && !plan && (
@@ -233,12 +278,15 @@ export function ExcelRowsIntoMonthSection() {
                 existing: plan.existing.length,
                 repeated: plan.repeatedInFile.length,
                 invalid: plan.invalid.length,
+                filled: plan.filled.length,
                 target: plan.targetMonth,
               })}</p>
+              {undistributedCount(plan) > 0 && <p>{fill(L.excel_rows_existing_undistributed, { n: undistributedCount(plan) })}</p>}
+              {plan.fromPopulation.length > 0 && <p>{fill(L.excel_rows_from_population, { n: plan.fromPopulation.length, target: plan.targetMonth })}</p>}
               <button type="button" className="ew-btn-secondary" onClick={() => downloadReport(plan, L)} disabled={busy}>
                 {L.excel_rows_report_button}
               </button>
-              <button type="button" className="ew-btn-secondary" onClick={() => setConfirming(true)} disabled={busy || plan.added.length === 0}>
+              <button type="button" className="ew-btn-secondary" onClick={() => setConfirming(true)} disabled={busy || (plan.added.length === 0 && plan.filled.length === 0 && plan.fromPopulation.length === 0)}>
                 {L.excel_rows_button}
               </button>
             </div>
@@ -256,7 +304,7 @@ export function ExcelRowsIntoMonthSection() {
       <ConfirmDialog
         open={confirming}
         title={L.excel_rows_title}
-        message={<p>{fill(L.excel_rows_confirm, { added: plan?.added.length ?? 0, target })}</p>}
+        message={<p>{fill(L.excel_rows_confirm, { added: plan?.added.length ?? 0, filled: plan?.filled.length ?? 0, target })}</p>}
         confirmLabel={L.excel_rows_button}
         onConfirm={() => void run()}
         onCancel={() => setConfirming(false)}

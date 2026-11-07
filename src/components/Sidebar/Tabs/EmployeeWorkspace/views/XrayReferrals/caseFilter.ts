@@ -93,6 +93,24 @@ export function countCaseFilters(entries: readonly DistributionEntry[]): CaseFil
   return counts;
 }
 
+/**
+ * «تم فحصها / لم تُفحص» (owner, 2026-11-01). Studied = the entry is completed
+ * or its assignee submitted an answer (a no-image «معلق» submission included);
+ * a draft or an untouched case is not studied. Applied after the CertScan chip.
+ */
+export type StudyFilter = "all" | "studied" | "unstudied";
+export const STUDY_FILTERS = ["all", "studied", "unstudied"] as const satisfies readonly StudyFilter[];
+export type StudyFilterCounts = Record<StudyFilter, number>;
+
+export function countStudyFilters(
+  entries: readonly DistributionEntry[],
+  isStudied: (entry: DistributionEntry) => boolean
+): StudyFilterCounts {
+  let studied = 0;
+  for (const entry of entries) if (isStudied(entry)) studied += 1;
+  return { all: entries.length, studied, unstudied: entries.length - studied };
+}
+
 export type CaseFilterState = {
   value: CaseFilter;
   setValue: (next: CaseFilter) => void;
@@ -104,6 +122,10 @@ export type CaseFilterState = {
   counts: CaseFilterCounts;
   /** CertScan chip counts over the case-filtered set, so each number is what clicking that chip shows. */
   certScanCounts: CertScanFilterCounts;
+  study: StudyFilter;
+  setStudy: (next: StudyFilter) => void;
+  /** Study chip counts over the case- and CertScan-filtered set. */
+  studyCounts: StudyFilterCounts;
 };
 
 /**
@@ -116,12 +138,21 @@ export type CaseFilterState = {
  * view's existing `dirtyEntryId` / `lastPanelEntry` retention already keeps an
  * unsaved draft on screen for exactly that case.
  */
-export function useCaseFilter(scopedEntries: DistributionEntry[]): CaseFilterState {
+export function useCaseFilter(
+  scopedEntries: DistributionEntry[],
+  isStudied: (entry: DistributionEntry) => boolean = (entry) => entry.status === "completed"
+): CaseFilterState {
   const [value, setValue] = useState<CaseFilter>("all");
   const [certScan, setCertScan] = useState<CertScanFilter>("any");
+  const [study, setStudy] = useState<StudyFilter>("all");
   const counts = useMemo(() => countCaseFilters(scopedEntries), [scopedEntries]);
   const caseEntries = useMemo(() => filterCases(scopedEntries, value), [scopedEntries, value]);
   const certScanCounts = useMemo(() => countCertScanFilters(caseEntries), [caseEntries]);
-  const entries = useMemo(() => filterByCertScan(caseEntries, certScan), [caseEntries, certScan]);
-  return { value, setValue, certScan, setCertScan, entries, counts, certScanCounts };
+  const certEntries = useMemo(() => filterByCertScan(caseEntries, certScan), [caseEntries, certScan]);
+  const studyCounts = useMemo(() => countStudyFilters(certEntries, isStudied), [certEntries, isStudied]);
+  const entries = useMemo(
+    () => (study === "all" ? certEntries : certEntries.filter((entry) => isStudied(entry) === (study === "studied"))),
+    [certEntries, study, isStudied]
+  );
+  return { value, setValue, certScan, setCertScan, entries, counts, certScanCounts, study, setStudy, studyCounts };
 }

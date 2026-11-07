@@ -72,6 +72,9 @@ describe("CaseFilterBar (C2)", () => {
     const state: CaseFilterState = {
       value: "all",
       setValue: () => {},
+      study: "all",
+      setStudy: () => {},
+      studyCounts: { all: 0, studied: 0, unstudied: 0 },
       certScan: "any",
       setCertScan: (next) => calls.push(next),
       entries: ENTRIES,
@@ -105,6 +108,9 @@ describe("ReferralWorkspaceShell — empty notice and stats title follow the Cer
     return {
       value: "all",
       setValue: () => {},
+      study: "all",
+      setStudy: () => {},
+      studyCounts: { all: 0, studied: 0, unstudied: 0 },
       certScan,
       setCertScan: () => {},
       entries: [],
