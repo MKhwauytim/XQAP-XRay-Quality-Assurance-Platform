@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import * as XLSX from "xlsx";
 import { FIXTURE_FILES, twoSlideFixture } from "../__fixtures__/twoSlide";
 import { pipeline, sha, sheetAoa, sheetFormulas, unzip } from "../__fixtures__/xlsxKit";
 import { ENGINE_VERSION } from "../version";
@@ -110,6 +111,47 @@ describe("writeXlsx", () => {
     const row = sheetAoa(out.report, "الإحصائيات").find((r) => r[3] === "عدد المنافذ");
     expect(row?.slice(5, 7)).toEqual([3, 3]);
     expect(String(row?.[7])).toContain("الصيغة في المحرك فقط");
+  });
+
+  it("a top-N total (limit others:false) is engine-only: no formula, the engine value cached, labelled «(أعلى N)»", async () => {
+    const f = twoSlideFixture();
+    // Five ports, the first with four matched rows and an unmatched one, so the kept-rows rate differs from the full one.
+    const files = structuredClone(FIXTURE_FILES);
+    const rows: unknown[][] = [];
+    for (let i = 0; i < 5; i++) for (let c = 0; c < (i === 0 ? 4 : 2); c++) rows.push([`منفذ ${i}`, "بري", i === 4 ? "غير مطابق" : "مطابق", i * 10 + c]);
+    files[0].sheets[0].rows = rows;
+    for (const pg of f.spec.pages) for (const v of pg.visuals) if (v.type === "barChart") v.limit = { topN: 3, others: false };
+    const p = pipeline(f, files);
+    const total = [...p.values.values()].find((v) => v.key.includes("~top3"));
+    if (total === undefined) throw new Error("no top-N total");
+    const plan = planWorkbook(p.files, f.spec, p.processed, p.values, p.doc);
+    const out = await writeXlsx(plan, { files: p.files, spec: f.spec, processed: p.processed, values: p.values, doc: p.doc, theme: f.theme }, OPTS);
+    const aoa = sheetAoa(out.report, "الإحصائيات");
+    const r = aoa.findIndex((row) => String(row[3]).includes("(أعلى 3)"));
+    expect(r).toBeGreaterThan(-1);
+    expect(aoa[r].slice(5, 7)).toEqual([total.value, total.value]);
+    expect(String(aoa[r][7])).toContain("الصيغة في المحرك فقط");
+    const ws = XLSX.read(out.report, { type: "array", cellFormula: true }).Sheets["الإحصائيات"]!;
+    expect(ws[XLSX.utils.encode_cell({ r, c: 6 })]?.f).toBeUndefined();
+  });
+
+  it("a category value that looks like the ~top key part is not treated as a top-N total", async () => {
+    const f = twoSlideFixture();
+    const files = structuredClone(FIXTURE_FILES);
+    const rows: unknown[][] = [];
+    for (const port of ["a~top5", "b"]) for (let c = 0; c < 2; c++) rows.push([port, "بري", "مطابق", c]);
+    files[0].sheets[0].rows = rows;
+    const p = pipeline(f, files);
+    const key = [...p.values.keys()].find((k) => k.includes("a~top5"));
+    expect(key, "a value key carries the category").toBeDefined();
+    const plan = planWorkbook(p.files, f.spec, p.processed, p.values, p.doc);
+    const out = await writeXlsx(plan, { files: p.files, spec: f.spec, processed: p.processed, values: p.values, doc: p.doc, theme: f.theme }, OPTS);
+    const aoa = sheetAoa(out.report, "الإحصائيات");
+    const r = aoa.findIndex((row) => String(row[3]).includes("a~top5"));
+    expect(r).toBeGreaterThan(-1);
+    expect(String(aoa[r][3])).not.toContain("(أعلى");
+    // Excel may still decline this row for another reason (Latin text compares case-blind); the top-N reason must not be it.
+    expect(String(aoa[r][7])).not.toContain("إجمالي الأعلى ترتيبًا");
   });
 
   it("المصدر has one row per layout figure, a value key column first and the engine version", () => {

@@ -126,6 +126,46 @@ describe("resolveVisuals", () => {
     expect(bar.cells.at(-1)!).toMatchObject({ key: "matchRate@port~others", value: 4 });
   });
 
+  const limited = (n: number, limit: { topN: number; others: boolean }) => {
+    const { f, files } = withPorts(n);
+    f.spec.model.measures[1] = { ...f.spec.model.measures[0], id: "matchRate" };
+    for (const p of f.spec.pages) for (const v of p.visuals) if (v.type === "barChart") v.limit = limit;
+    const r = resolveFixture(f, files);
+    return { r, bar: r.visuals.find((v) => v.type === "barChart")! };
+  };
+
+  it("limit others:false keeps the top 3 of 5, drops the rest, and totals only the kept rows", () => {
+    const { r, bar } = limited(5, { topN: 3, others: false });
+    expect(bar.categories).toEqual(["منفذ 00", "منفذ 01", "منفذ 02"]);
+    expect(bar.categories).not.toContain("أخرى");
+    expect(bar.cells.map((c) => c.group.port)).not.toContain("منفذ 03");
+    expect(bar.cells.map((c) => c.group.port)).not.toContain("منفذ 04");
+    expect([...r.values.keys()].some((k) => k.includes("~others"))).toBe(false);
+    expect(bar.totals[0]).toMatchObject({ value: 8, key: "matchRate@port~top3" });
+    expect(r.issues.filter((i) => i.rule === "resolve.keyConflict")).toEqual([]);
+  });
+
+  it("limit others:true keeps the full total, since «أخرى» is drawn", () => {
+    const { bar } = limited(5, { topN: 3, others: true });
+    expect(bar.categories).toEqual(["منفذ 00", "منفذ 01", "منفذ 02", "أخرى"]);
+    expect(bar.totals[0]).toMatchObject({ value: 12, key: "matchRate" });
+  });
+
+  it("limit others:false with topN 12 and 12 groups keeps all 12", () => {
+    const { bar } = limited(12, { topN: 12, others: false });
+    expect(bar.categories).toHaveLength(12);
+    expect(bar.categories).not.toContain("أخرى");
+    expect(bar.totals[0]).toMatchObject({ value: 26, key: "matchRate" });
+  });
+
+  it("limit others:false with topN above the group count gives the unsplit totals", () => {
+    const full = limited(5, { topN: 99, others: true }).bar;
+    const { bar } = limited(5, { topN: 8, others: false });
+    expect(bar.categories).toHaveLength(5);
+    expect(bar.totals.map((t) => [t.key, t.value])).toEqual(full.totals.map((t) => [t.key, t.value]));
+    expect(bar.totals.some((t) => t.key.includes("~top"))).toBe(false);
+  });
+
   it("a real category named «أخرى» keeps its own key beside the collapsed bucket", () => {
     const { f, files } = withPorts(13);
     files[0].sheets[0].rows.push(["أخرى", "بري", "مطابق", 1], ["أخرى", "بري", "مطابق", 2], ["أخرى", "بري", "مطابق", 3]);

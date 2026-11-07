@@ -265,6 +265,13 @@ function typedGroup(def: DatasetDef, field: string, display: string): string | n
   return display;
 }
 
+/** A total over the kept top N rows of a truncated chart (limit.others false): the "~top" key part from resolve. */
+const TOP_N = /[@|][^=|#"]*~top(\d+)(?=[|#]|$)/;
+const topNOf = (key: string): number | undefined => {
+  const m = TOP_N.exec(key);
+  return m === null ? undefined : Number(m[1]);
+};
+
 function excelFor(ctx: Ctx, v: ResolvedValue): { ok: true; formula: string } | { ok: false; reason: string } {
   const cached = ctx.excel.get(v.key);
   if (cached !== undefined) return cached;
@@ -279,6 +286,7 @@ function excelFor(ctx: Ctx, v: ResolvedValue): { ok: true; formula: string } | {
   });
   if (def === undefined || ast === undefined) r = { ok: false, reason: "المقياس غير معرف" };
   else if (v.key.includes("~others") || untyped.length > 0) r = { ok: false, reason: "مجموعة «أخرى» أو قيمة فارغة لا تترجم إلى شرط إكسل" };
+  else if (topNOf(v.key) !== undefined) r = { ok: false, reason: "إجمالي الأعلى ترتيبًا لا يترجم إلى شرط إكسل" };
   else {
     r = toExcelFormula(ast, {
       table: tableNameFor(def),
@@ -297,7 +305,9 @@ function statName(ctx: Ctx, v: ResolvedValue): string {
   const label = ctx.measures.get(v.measureId)?.label ?? v.measureId;
   const def = defOf(ctx, v.provenance.datasetId);
   const group = Object.entries(v.group).map(([f, val]) => `${labelOf(def, f)}: ${val}`).join("، ");
-  return group === "" ? label : `${label}، ${group}`;
+  const top = topNOf(v.key);
+  const named = group === "" ? label : `${label}، ${group}`;
+  return top === undefined ? named : `${named} (أعلى ${top})`;
 }
 
 function statsSheet(ctx: Ctx, s: PlannedSheet, sheetNo: number): Built {

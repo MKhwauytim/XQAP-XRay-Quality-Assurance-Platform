@@ -8,6 +8,7 @@ import { runGates } from "../gates/runGates";
 import type { GateReport } from "../gates/runGates";
 import { renderHtml, themeIssues } from "../html/renderHtml";
 import { layoutReport } from "../layout/layoutReport";
+import type { LayoutDoc } from "../layout/types";
 import type { TextMeasurer } from "../layout/measure";
 import { LIMITS } from "../limits";
 import { formatIssue } from "../messages";
@@ -81,18 +82,10 @@ function miscount(processed: Map<string, ProcessedDataset>): Map<string, Process
   return copy;
 }
 
-async function pipeline(spec: ReportSpec, files: RawFile[], params: IssueParams, env: IssueEnv, at: { stage: Stage }): Promise<IssueOutput> {
-  const now = env.now ?? (() => performance.now());
-  const start = now();
-  const enter = (stage: Stage): void => {
-    const elapsed = now() - start;
-    if (elapsed > LIMITS.issueTimeBudgetMs) {
-      throw new Blocked([{ rule: "limit.time", detail: `${Math.round(elapsed)} ms > ${LIMITS.issueTimeBudgetMs} ms before ${stage}` }]);
-    }
-    at.stage = stage;
-  };
-  const block = (issues: EngineIssue[]): void => { if (issues.length > 0) throw new Blocked(issues); };
+const block = (issues: EngineIssue[]): void => { if (issues.length > 0) throw new Blocked(issues); };
 
+/** The validate, data, resolve and layout stages; `enter` is called before each. Throws Blocked. */
+function layoutStages(spec: ReportSpec, files: RawFile[], params: IssueParams, env: IssueEnv, enter: (stage: Stage) => void) {
   enter("validate");
   const merged = mergePackMeasures(spec, env.pack);
   block(validateSpec(merged, undefined, params));
@@ -119,6 +112,33 @@ async function pipeline(spec: ReportSpec, files: RawFile[], params: IssueParams,
   enter("layout");
   const doc = layoutReport(merged, r.visuals, r.values, params, env.theme, env.measurer);
   block(doc.issues);
+  return { merged, processed, profiles, r, doc };
+}
+
+/**
+ * The layout one issue would draw, without writing any file: for catalog demos and lookbooks.
+ * Refused exactly where issueReport would refuse before its writers.
+ */
+export function layoutOnly(spec: ReportSpec, files: RawFile[], params: IssueParams, env: IssueEnv): { ok: true; doc: LayoutDoc } | { ok: false; issues: EngineIssue[] } {
+  try {
+    return { ok: true, doc: layoutStages(spec, files, params, env, () => undefined).doc };
+  } catch (e) {
+    if (e instanceof Blocked) return { ok: false, issues: e.issues };
+    throw e;
+  }
+}
+
+async function pipeline(spec: ReportSpec, files: RawFile[], params: IssueParams, env: IssueEnv, at: { stage: Stage }): Promise<IssueOutput> {
+  const now = env.now ?? (() => performance.now());
+  const start = now();
+  const enter = (stage: Stage): void => {
+    const elapsed = now() - start;
+    if (elapsed > LIMITS.issueTimeBudgetMs) {
+      throw new Blocked([{ rule: "limit.time", detail: `${Math.round(elapsed)} ms > ${LIMITS.issueTimeBudgetMs} ms before ${stage}` }]);
+    }
+    at.stage = stage;
+  };
+  const { merged, processed, profiles, r, doc } = layoutStages(spec, files, params, env, enter);
 
   enter("xlsx");
   const written = env.__testSeam === "miscountStep" ? miscount(processed) : processed;

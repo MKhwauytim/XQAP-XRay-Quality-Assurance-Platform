@@ -1,15 +1,15 @@
 import type { EngineIssue } from "../errors";
 import { LAYOUT } from "../layout/layoutReport";
 import type { Run } from "../layout/bidiRuns";
-import type { LayoutBox, LayoutDoc, LayoutSlide, TextBox } from "../layout/types";
+import type { BarChartBox, LayoutBox, LayoutDoc, LayoutSlide, TableBox, TextBox } from "../layout/types";
 import type { ThemeTokens } from "../spec/types";
-import { ARABIC_INDIC_DIGITS, LONG_DASH, MIN_FONT_PX, hexDigits } from "../text";
+import { ANY_DIGIT, ARABIC_INDIC_DIGITS, FORMAT_ACRONYMS, LONG_DASH, MIN_FONT_PX, figureTokens, hexDigits } from "../text";
 
 /**
  * Design lint (spec §4.9), Milestone 1 scope (C20): Floor F1 (contrast, a pure token-pair check), F2 (fit errors
  * the layout recorded), F4 (minimum 20px), T3 (no U+2013 / U+2014) and T6 (no emoji or decorative symbol) are
- * errors; R3 (a single coloured word in a title) is a warning. F5, the other Reflex and Finish rules and the
- * browser lint pass are deferred to Milestone 3.
+ * errors; R3 (a single coloured word in a title) is a warning. F5 (Floor) and the catalog warnings R1, R2, R8, R9
+ * were added for catalog entries (Milestone 5); the browser lint pass is deferred to Milestone 3.
  */
 
 export type TextRule = "T3" | "T6";
@@ -94,9 +94,99 @@ function r3(slide: LayoutSlide): EngineIssue[] {
     .map((b) => lintIssue(slide.index, b.id, "R3: كلمة ملونة منفردة في العنوان"));
 }
 
-export function lintLayout(doc: LayoutDoc, theme: ThemeTokens): { errors: EngineIssue[]; warnings: EngineIssue[] } {
+const titleOf = (slide: LayoutSlide): TextBox | undefined =>
+  slide.boxes.find((b): b is TextBox => b.kind === "text" && b.id === `s${slide.index}-title`);
+
+const boxText = (b: TextBox): string => lineText(b.lines).trim();
+
+/** Gap in px within which a text box counts as adjacent to a bar or KPI tile. */
+const ADJACENT_PX = 40;
+
+const near = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }): boolean =>
+  b.x < a.x + a.w + ADJACENT_PX && b.x + b.w > a.x - ADJACENT_PX && b.y < a.y + a.h + ADJACENT_PX && b.y + b.h > a.y - ADJACENT_PX;
+
+const HAS_LETTER = /\p{L}/u;
+
+/**
+ * F5 (Floor): a good or bad tone is never carried by colour alone. A bar chart or KPI value drawn in the good or
+ * bad tone passes only if a text box inside it or within 40px holds a status word: text with at least one letter
+ * that is not the slide title, not a category name of that chart, and not the tile's own label (the other text of
+ * the same visual). A value label does not count. Tone is recognised by colour equal to the theme's good/bad tone,
+ * since the layout model carries the resolved colour, not the tone name.
+ */
+function f5(slide: LayoutSlide, theme: ThemeTokens): EngineIssue[] {
+  const toned = (c: string): boolean => c.toLowerCase() === theme.tones.good.toLowerCase() || c.toLowerCase() === theme.tones.bad.toLowerCase();
+  const title = `s${slide.index}-title`;
+  const words = (self: BarChartBox | TextBox, visualId: string, names: string[]): TextBox[] =>
+    slide.boxes.filter((t): t is TextBox =>
+      t.kind === "text" && t !== self && t.id !== title && t.visualId !== visualId && HAS_LETTER.test(boxText(t)) &&
+      !names.includes(boxText(t)) && near(self, t));
+  const out: EngineIssue[] = [];
+  for (const b of slide.boxes) {
+    const bare = (b.kind === "bar" && toned(b.color) && words(b, b.visualId, b.categories.map((c) => c.trim())).length === 0) ||
+      (b.kind === "text" && toned(b.color) && boxText(b) !== "" && words(b, b.visualId, []).length === 0);
+    if (bare) out.push(lintIssue(slide.index, b.id, "F5: اللون وحده يحمل الدلالة، يلزم كلمة حالة ظاهرة"));
+  }
+  return out;
+}
+
+/** R1: a smaller text box above the title (an eyebrow); only a pattern repeated on several slides is reported. */
+function r1(doc: LayoutDoc): EngineIssue[] {
+  const hits: EngineIssue[] = [];
+  for (const slide of doc.slides) {
+    const title = titleOf(slide);
+    if (title === undefined) continue;
+    for (const b of slide.boxes) {
+      if (b.kind === "text" && b !== title && boxText(b) !== "" && b.y + b.h <= title.y && b.sizePx < title.sizePx) {
+        hits.push(lintIssue(slide.index, b.id, "R1: نص أصغر فوق العنوان"));
+      }
+    }
+  }
+  return new Set(hits.map((h) => h.page)).size > 1 ? hits : [];
+}
+
+const LATIN_WORD = /[A-Za-z]{4,}/g;
+const SPACED_LETTERS = /(?<![A-Za-z])[A-Za-z](?: [A-Za-z]){2,}(?![A-Za-z])/g;
+
+/** R2: an all-capitals Latin word over 3 letters, or three or more single letters spaced apart; format acronyms are exempt. */
+function r2(slide: LayoutSlide, theme: ThemeTokens): EngineIssue[] {
+  return samples(slide, theme)
+    .filter((s) => (s.text.match(LATIN_WORD) ?? []).some((w) => w === w.toUpperCase() && !FORMAT_ACRONYMS.includes(w)) ||
+      (s.text.match(SPACED_LETTERS) ?? []).some((w) => !FORMAT_ACRONYMS.includes(w.replace(/ /g, "").toUpperCase())))
+    .map((s) => lintIssue(slide.index, s.where, "R2: نص لاتيني بأحرف كبيرة كلها"));
+}
+
+/** R8: a title with no figure in it. */
+function r8(slide: LayoutSlide): EngineIssue[] {
+  const t = slide.title;
+  return figureTokens(t).length === 0 && !ANY_DIGIT.test(t) ? [lintIssue(slide.index, `s${slide.index}-title`, "R8: عنوان بلا رقم")] : [];
+}
+
+/** A table's area; an empty header row takes no space (R9). */
+const tableArea = (t: TableBox): number =>
+  t.colW.reduce((a, c) => a + c, 0) * t.rowH * (t.rows.length + (t.header.some((c) => lineText(c.lines).trim() !== "") ? 1 : 0));
+
+/** R9: two or more charts or tables on a slide and none at least 1.5 times the area of every other. */
+function r9(slide: LayoutSlide): EngineIssue[] {
+  const areas = slide.boxes
+    .filter((b): b is BarChartBox | TableBox => b.kind === "bar" || b.kind === "table")
+    .map((b) => (b.kind === "bar" ? b.w * b.h : tableArea(b)))
+    .sort((a, b) => b - a);
+  if (areas.length < 2 || areas[0] >= 1.5 * areas[1]) return [];
+  return [lintIssue(slide.index, `s${slide.index}`, "R9: لا يوجد عنصر مهيمن بين المخططات والجداول")];
+}
+
+export interface Overrule { rule: string; reasonAr: string }
+
+const ruleOf = (i: EngineIssue): string => /^[A-Z]\d+/.exec(i.detail ?? "")?.[0] ?? "";
+
+export function lintLayout(
+  doc: LayoutDoc,
+  theme: ThemeTokens,
+  opts?: { overrules?: Overrule[] },
+): { errors: EngineIssue[]; warnings: EngineIssue[]; overruled: EngineIssue[] } {
   const errors: EngineIssue[] = [];
-  const warnings: EngineIssue[] = [];
+  const found: EngineIssue[] = [];
   for (const issue of doc.issues) {
     if (issue.rule === "fit.tooLong") errors.push({ ...issue, rule: "gate.lint", detail: `F2: ${issue.detail ?? "fit.tooLong"}` });
   }
@@ -111,13 +201,26 @@ export function lintLayout(doc: LayoutDoc, theme: ThemeTokens): { errors: Engine
       if (s.sizePx < MIN_FONT_PX) errors.push(lintIssue(slide.index, s.where, `F4: ${s.sizePx}px < ${MIN_FONT_PX}px`));
       for (const hit of lintText(s.text)) errors.push(lintIssue(slide.index, s.where, `${hit.rule}: index ${hit.index}`));
     }
-    warnings.push(...r3(slide));
+    errors.push(...f5(slide, theme));
+    found.push(...r3(slide), ...r2(slide, theme), ...r8(slide), ...r9(slide));
   }
+  found.push(...r1(doc));
   // M6: a digit typed into static template text is not a measured figure. Parity lets it through; the author is told.
   for (const n of doc.nonFigureSpans) {
-    if (n.staticText !== undefined) warnings.push(lintIssue(n.slide, n.boxId, `M6: رقم مكتوب في نص ثابت: ${n.staticText.trim()}`));
+    if (n.staticText !== undefined) found.push(lintIssue(n.slide, n.boxId, `M6: رقم مكتوب في نص ثابت: ${n.staticText.trim()}`));
   }
-  return { errors, warnings };
+  // Only a Reflex or Finish warning can be overruled, and only with a reason; F5 is Floor and is an error, never here.
+  const allowed = new Set((opts?.overrules ?? []).filter((o) => o.reasonAr.trim() !== "").map((o) => o.rule));
+  const warnings = found.filter((w) => !allowed.has(ruleOf(w)));
+  const overruled = found.filter((w) => allowed.has(ruleOf(w)));
+  return { errors, warnings, overruled };
+}
+
+/** Catalog entry gate: passes only with zero errors and zero warnings left after the entry's overrules. */
+export function catalogEntryGate(doc: LayoutDoc, theme: ThemeTokens, overrules?: Overrule[]): { ok: boolean; issues: EngineIssue[] } {
+  const r = lintLayout(doc, theme, { overrules });
+  const issues = [...r.errors, ...r.warnings];
+  return { ok: issues.length === 0, issues };
 }
 
 /** T3/T6 over output text from one source; `where` names it in the issue. */

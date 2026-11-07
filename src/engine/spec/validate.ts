@@ -7,7 +7,7 @@ import { checkPackShape, checkSpecShape } from "./shape";
 import type { DomainPack, IssueParams, MeasureSpec, PageSpec, ReportSpec, VisualSpec, WellItem } from "./types";
 import { WELL_SCHEMAS } from "./wells";
 import { SOURCE_TABLE, excelNameKey, tableNameFor } from "../xlsx/planWorkbook";
-import { ANY_DIGIT, MIN_FONT_PX, PLACEHOLDER } from "../text";
+import { ANY_DIGIT, MIN_FONT_PX, PLACEHOLDER, TITLE_VISUAL_ID } from "../text";
 
 const GRID = { cols: 24, rows: 14 } as const;
 const MEASURE_REF = /@([\p{L}_][\p{L}\p{N}_]*)/gu;
@@ -29,6 +29,7 @@ function textMeasureIds(text: string | undefined): string[] {
 function referencedMeasureIds(spec: ReportSpec): Set<string> {
   const out = new Set<string>();
   for (const page of spec.pages ?? []) {
+    for (const id of textMeasureIds(page.title)) out.add(id);
     for (const v of page.visuals ?? []) {
       for (const items of Object.values(v.wells ?? {})) {
         for (const it of items ?? []) if ("measure" in it) out.add(it.measure);
@@ -239,6 +240,7 @@ function checkVisual(ctx: Ctx, v: VisualSpec, path: string, page?: { filters?: F
     push(ctx, "schema.invalid", `${path}.format.sizePx`, `${size} < ${MIN_FONT_PX}`);
   }
   checkText(ctx, v, path);
+  if (v.pageNote !== undefined && (v.pageNote !== true || v.type !== "text")) push(ctx, "schema.invalid", `${path}.pageNote`);
   checkWells(ctx, v, path);
   checkFilters(ctx, v.filters, `${path}.filters`);
   checkSameDataset(ctx, v, path, page?.filters, page?.path ?? "");
@@ -255,6 +257,21 @@ function checkPage(ctx: Ctx, p: PageSpec, pi: number): void {
   if (p.size !== "16:9") push(ctx, "schema.invalid", `${path}.size`, String(p.size));
   if (p.grid?.cols !== GRID.cols || p.grid?.rows !== GRID.rows) push(ctx, "schema.invalid", `${path}.grid`);
   if (typeof p.title !== "string" || p.title === "") push(ctx, "schema.invalid", `${path}.title`);
+  else {
+    for (const m of p.title.matchAll(PLACEHOLDER)) {
+      const [kind, id] = [m[1]!.split(":")[0], m[1]!.slice(m[1]!.indexOf(":") + 1)];
+      if (kind === "measure" && !ctx.measureIds.has(id)) push(ctx, "measure.unknown", `${path}.title`, id);
+      else if (kind === "param" && !ctx.paramIds.has(id)) push(ctx, "param.unknown", `${path}.title`, id);
+    }
+  }
+  if (p.titleRow !== undefined && p.titleRow !== false) push(ctx, "schema.invalid", `${path}.titleRow`);
+  // Without a title row the title is not drawn, so a figure in it would be untraced.
+  if (p.titleRow === false && typeof p.title === "string" && (p.title.includes("{{measure:") || p.title.includes("{{param:"))) {
+    push(ctx, "schema.invalid", `${path}.title`, "titleRow:false hides the title, so it cannot carry a figure");
+  }
+  p.visuals.forEach((v, vi) => {
+    if (v.visualId === TITLE_VISUAL_ID) push(ctx, "schema.invalid", `${path}.visuals[${vi}].visualId`, `reserved id ${TITLE_VISUAL_ID}`);
+  });
   if (p.visuals.length > LIMITS.maxVisualsPerPage) {
     push(ctx, "limit.visuals", `${path}.visuals`, `${p.visuals.length} > ${LIMITS.maxVisualsPerPage}`, { page: pi + 1 });
   }
