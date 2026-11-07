@@ -229,8 +229,10 @@ ${dataTable({ headers: ["النطاق", L.imagesMonth, L.staffMonth, L.examsMont
     );
   }
 
-  // 4 — The selected port against each workload tier, by year
-  {
+  // 4 — The selected port against each workload tier, by year. With only two study years
+  // (e.g. --exclude-years=2024) slide 5 below shows the same years with more measures, so this one is left out.
+  const studyYears = w.yearly.filter((y) => y.selected.image.studied > 0).length;
+  if (studyYears > 2) {
     const p100 = (v: number | null) => (v === null ? null : v * 100);
     const scopes = (y: (typeof w.yearly)[number]) => [
       { label: w.displayName, short: "جدة", o: y.selected, tone: "blue" as ChartTone, sel: true },
