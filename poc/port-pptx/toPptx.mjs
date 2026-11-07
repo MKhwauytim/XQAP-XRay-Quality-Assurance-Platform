@@ -158,7 +158,7 @@ geo.forEach((g, si) => {
     for (let k = 0; k < c.series; k++) data.push({ name: c.series > 1 ? `s${k + 1}` : "s1", labels: cats, values: pts.map((gp) => num(gp[k]?.label ?? null)) });
     const slot = c.w / pts.length;
     const barW = flat[0]?.w ?? slot / 2;
-    const colors = c.series > 1 ? [0, 1].map((k) => hex(pts.map((gp) => gp[k]).find((p) => p.color)?.color ?? "rgb(0,0,0)")) : pts.map((gp) => hex(gp[0].color ?? "rgb(200,200,200)"));
+    const colors = c.series > 1 ? Array.from({ length: c.series }, (_, k) => hex(pts.map((gp) => gp[k]).find((p) => p?.color)?.color ?? "rgb(0,0,0)")) : pts.map((gp) => hex(gp[0].color ?? "rgb(200,200,200)"));
     slide.addChart(pptx.ChartType.bar, data, {
       x: inch(c.x), y: inch(top), w: inch(c.w), h: inch(H),
       layout: { x: 0, y: 0, w: 1, h: c.h / H },

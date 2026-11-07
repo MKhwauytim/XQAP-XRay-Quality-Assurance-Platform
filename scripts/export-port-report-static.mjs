@@ -85,8 +85,8 @@ async function writeReportWorkbook(m, path, workload, extra = {}) {
     const totals = extra.tierTotals ?? [];
     const types = Object.keys(workload.tiers[0]?.averages ?? {});
     sheets.unshift(
-      ["الملاحظات والتوصيات", ["#", "الأولوية", "الملاحظة", "التوصية", "مصدر الأرقام (صفحة التقرير / ورقة)"], (extra.obs ?? []).map((o, i) => [i + 1, o.priority, o.title, o.recommendation, o.source])],
-      ["أرقام الملاحظات", ["#", "الملاحظة", "الرقم", "القيمة"], (extra.obs ?? []).flatMap((o, i) => o.figures.map((g) => [i + 1, o.title, g.label, g.value]))],
+      ["الملاحظات والتوصيات", ["#", "الأولوية", "الملاحظة الرئيسية", "الشواهد الجوهرية", "التوصية", "مصدر الأرقام (صفحة التقرير / ورقة)"], (extra.obs ?? []).map((o, i) => [i + 1, o.priority, o.title, o.evidence.join("\n"), o.recommendations.map((r, j) => `${j + 1}. ${r}`).join("\n"), o.source])],
+      ["شواهد الملاحظات", ["#", "الملاحظة الرئيسية", "الشاهد"], (extra.obs ?? []).flatMap((o, i) => o.evidence.map((e) => [i + 1, o.title, e]))],
     );
     sheets.splice(2 + wlSheets.length, 0,
       ["إجماليات مستويات العبء", ["المستوى", "إجمالي الصور", "متوسط الصور في الشهر", "إجمالي الموظفين المخصصين", "متوسط الموظفين في الشهر"], totals.map((t) => [t.label, t.images, round(t.imagesPerMonth), t.people, round(t.staffPerMonth)])],
