@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v159.24",
+    "date": "2026-11-07",
+    "bucket": "enhancement",
+    "scope": "reports",
+    "title": "work report email by day, week, month or a picked period, weekends included"
+  },
+  {
     "version": "v159.23",
     "date": "2026-11-07",
     "bucket": "feature",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "reporting",
     "title": "blank L1/L2 cases stay in reports as «نتائج أخرى»"
-  },
-  {
-    "version": "v159.14",
-    "date": "2026-11-07",
-    "bucket": "fix",
-    "scope": "reporting",
-    "title": "blank L1/L2 results are never counted as «سليمة»"
   }
 ];

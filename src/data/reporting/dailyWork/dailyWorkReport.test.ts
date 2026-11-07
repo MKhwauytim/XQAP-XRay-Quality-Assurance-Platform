@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDailyWorkReport, previousWorkingDay, previousWorkWeek } from "./dailyWorkReport";
+import { buildDailyWorkReport, monthOf, previousDay, previousMonth, previousWeek, previousWorkingDay } from "./dailyWorkReport";
 import { buildDailyWorkEml, buildDailyWorkEmailHtml } from "./dailyWorkEmail";
 import type { TrackingRow } from "../../tracking/deadlineTracking";
 
@@ -48,34 +48,54 @@ describe("buildDailyWorkReport", () => {
   });
 });
 
-describe("weekly report", () => {
+describe("weekly, monthly and custom periods", () => {
   const sun = new Date(2026, 10, 1); // Sunday 2026-11-01
-  it("previousWorkWeek is the last full Sunday-Thursday week", () => {
+  const sat = new Date(2026, 10, 7); // Saturday 2026-11-07
+  const onFri = new Date(2026, 10, 6, 10).toISOString();
+
+  it("previousDay is yesterday, weekend days included", () => {
+    expect(previousDay(new Date(2026, 10, 8))).toEqual(sat);
+  });
+
+  it("previousWeek is the last full Sunday-Saturday week", () => {
     // Sunday 2026-11-08: the week that just ended.
-    expect(previousWorkWeek(new Date(2026, 10, 8))).toEqual({ from: sun, until: thu });
+    expect(previousWeek(new Date(2026, 10, 8))).toEqual({ from: sun, until: sat });
     // Wednesday 2026-11-11: still the previous week, never a week that is not over.
-    expect(previousWorkWeek(new Date(2026, 10, 11))).toEqual({ from: sun, until: thu });
+    expect(previousWeek(new Date(2026, 10, 11))).toEqual({ from: sun, until: sat });
+  });
+
+  it("previousMonth and monthOf cover whole calendar months", () => {
+    expect(previousMonth(new Date(2026, 10, 15))).toEqual({ from: new Date(2026, 9, 1), until: new Date(2026, 9, 31) });
+    expect(monthOf(new Date(2026, 1, 10))).toEqual({ from: new Date(2026, 1, 1), until: new Date(2026, 1, 28) });
   });
 
   const rows: TrackingRow[] = [
     { assignedTo: "a", state: "completed", doneAt: onThu },
     { assignedTo: "a", state: "completed", doneAt: onWed },
+    { assignedTo: "a", state: "completed", doneAt: onFri }, // weekend work
     { assignedTo: "a", state: "completed", doneAt: new Date(2026, 9, 29, 10).toISOString() }, // the week before
     { assignedTo: "a", state: "hold", doneAt: new Date(2026, 10, 1, 9).toISOString() },
   ];
-  const report = buildDailyWorkReport({ months: [{ folderName: "1-january-2026", label: "يناير 2026", rows }], day: sun, until: thu, names: {} });
+  const months = [{ folderName: "1-january-2026", label: "يناير 2026", rows }];
+  const week = buildDailyWorkReport({ months, day: sun, until: sat, kind: "week", names: {} });
 
-  it("counts everything finished from Sunday to Thursday", () => {
-    expect(report.kind).toBe("week");
-    expect(report.totals).toMatchObject({ completedOnDay: 2, holdOnDay: 1, completedTotal: 3, holdTotal: 1 });
+  it("a week counts Sunday to Saturday, the weekend included", () => {
+    expect(week.kind).toBe("week");
+    expect(week.totals).toMatchObject({ completedOnDay: 3, holdOnDay: 1, completedTotal: 4, holdTotal: 1 });
   });
 
-  it("writes the weekly wording and period", () => {
-    const html = buildDailyWorkEmailHtml(report);
-    expect(html).toContain("تقرير العمل الأسبوعي");
-    expect(html).toContain("المفحوصة خلال الأسبوع");
-    expect(html).toContain("2026/11/01");
-    expect(html).toContain("2026/11/05");
-    expect(html).not.toContain("خلال اليوم");
+  it("writes the wording of each kind of period", () => {
+    const weekly = buildDailyWorkEmailHtml(week);
+    expect(weekly).toContain("تقرير العمل الأسبوعي");
+    expect(weekly).toContain("المفحوصة خلال الأسبوع");
+    expect(weekly).toContain("2026/11/07");
+    expect(weekly).not.toContain("خلال اليوم");
+    const oct = monthOf(new Date(2026, 9, 1));
+    const monthly = buildDailyWorkEmailHtml(buildDailyWorkReport({ months, day: oct.from, until: oct.until, kind: "month", names: {} }));
+    expect(monthly).toContain("تقرير العمل الشهري");
+    expect(monthly).toContain("المفحوصة خلال الشهر");
+    const range = buildDailyWorkEmailHtml(buildDailyWorkReport({ months, day: new Date(2026, 10, 4), until: new Date(2026, 10, 6), names: {} }));
+    expect(range).toContain("المفحوصة خلال الفترة");
+    expect(range).toContain("2026/11/04");
   });
 });
