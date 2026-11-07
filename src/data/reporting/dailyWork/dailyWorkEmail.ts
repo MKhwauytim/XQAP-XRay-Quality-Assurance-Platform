@@ -23,9 +23,21 @@ export function formatReportDay(day: Date): { weekday: string; date: string } {
   return { weekday, date };
 }
 
-export function dailyWorkSubject(day: Date): string {
-  const { weekday, date } = formatReportDay(day);
-  return `تقرير العمل اليومي - إدارة ضمان جودة الأشعة - يوم ${weekday} ${date}`;
+/** «يوم الخميس 2026/11/05» for a daily report, «من الأحد 2026/11/01 إلى الخميس 2026/11/05» for a weekly one. */
+export function reportPeriodText(report: Pick<DailyWorkReport, "kind" | "day" | "until">): string {
+  const a = formatReportDay(report.day);
+  if (report.kind === "day") return `يوم ${a.weekday} ${a.date}`;
+  const b = formatReportDay(report.until);
+  return `من ${a.weekday} ${a.date} إلى ${b.weekday} ${b.date}`;
+}
+
+/** «اليومي» / «الأسبوعي» and «خلال اليوم» / «خلال الأسبوع». */
+function periodWords(kind: DailyWorkReport["kind"]): { title: string; within: string } {
+  return kind === "week" ? { title: "الأسبوعي", within: "خلال الأسبوع" } : { title: "اليومي", within: "خلال اليوم" };
+}
+
+export function dailyWorkSubject(report: Pick<DailyWorkReport, "kind" | "day" | "until">): string {
+  return `تقرير العمل ${periodWords(report.kind).title} - إدارة ضمان جودة الأشعة - ${reportPeriodText(report)}`;
 }
 
 function pct(done: number, total: number): string {
@@ -37,16 +49,18 @@ const headCell = `${cell}background:${EMAIL_COLORS.headBg};color:${EMAIL_COLORS.
 const totalCell = `${cell}background:${EMAIL_COLORS.totalBg};font-weight:bold;`;
 const tableStyle = `border-collapse:collapse;width:100%;margin:6px 0 18px;font-size:13px;color:${EMAIL_COLORS.text};`;
 
-const EMPLOYEE_HEADERS = [
-  "الموظف",
-  "الحالات الموزعة",
-  "المفحوصة خلال اليوم",
-  "المؤرشفة خلال اليوم",
-  "إجمالي المفحوصة",
-  "إجمالي المؤرشفة",
-  "المتبقية",
-  "نسبة الإنجاز",
-];
+function employeeHeaders(within: string): string[] {
+  return [
+    "الموظف",
+    "الحالات الموزعة",
+    `المفحوصة ${within}`,
+    `المؤرشفة ${within}`,
+    "إجمالي المفحوصة",
+    "إجمالي المؤرشفة",
+    "المتبقية",
+    "نسبة الإنجاز",
+  ];
+}
 
 function numberCells(t: DailyWorkTotals, style: string): string {
   return [
@@ -61,11 +75,12 @@ function numberCells(t: DailyWorkTotals, style: string): string {
 }
 
 export function buildDailyWorkEmailHtml(report: DailyWorkReport): string {
-  const { weekday, date } = formatReportDay(report.day);
+  const words = periodWords(report.kind);
+  const EMPLOYEE_HEADERS = employeeHeaders(words.within);
   const parts: string[] = [];
   parts.push(`<div dir="rtl" style="font-family:Tahoma,Arial,sans-serif;font-size:14px;color:${EMAIL_COLORS.text};line-height:1.7;">`);
   parts.push(`<p>الزملاء الكرام،<br>مع التحية والتقدير،</p>`);
-  parts.push(`<p>أرفق لكم تقرير العمل اليومي لإدارة ضمان جودة الأشعة عن أعمال يوم <b>${esc(weekday)} ${esc(date)}</b>، موزعًا حسب الأشهر والموظفين.</p>`);
+  parts.push(`<p>أرفق لكم تقرير العمل ${words.title} لإدارة ضمان جودة الأشعة عن أعمال <b>${esc(reportPeriodText(report))}</b>، موزعًا حسب الأشهر والموظفين.</p>`);
 
   if (report.months.length === 0) {
     parts.push(`<p style="color:${EMAIL_COLORS.muted};">لا توجد أشهر موزعة في النظام.</p>`);
@@ -80,7 +95,7 @@ export function buildDailyWorkEmailHtml(report: DailyWorkReport): string {
 
     for (const m of report.months) {
       parts.push(`<h3 style="color:${EMAIL_COLORS.accent};margin:16px 0 4px;">مجتمع ${esc(m.label)}</h3>`);
-      parts.push(`<p style="margin:0;color:${EMAIL_COLORS.muted};">تم توزيع ${m.totals.assigned} حالة، فُحص منها خلال اليوم ${m.totals.completedOnDay} وأُرشف ${m.totals.holdOnDay}، والمتبقي ${m.totals.remaining}.</p>`);
+      parts.push(`<p style="margin:0;color:${EMAIL_COLORS.muted};">تم توزيع ${m.totals.assigned} حالة، فُحص منها ${words.within} ${m.totals.completedOnDay} وأُرشف ${m.totals.holdOnDay}، والمتبقي ${m.totals.remaining}.</p>`);
       parts.push(`<table style="${tableStyle}"><tr>${EMPLOYEE_HEADERS.map((h) => `<th style="${headCell}">${h}</th>`).join("")}</tr>`);
       m.employees.forEach((e, i) => {
         const bg = i % 2 ? `background:${EMAIL_COLORS.zebra};` : "";
@@ -111,7 +126,7 @@ export function buildDailyWorkEml(report: DailyWorkReport): string {
   return [
     "X-Unsent: 1",
     "To: ",
-    `Subject: =?UTF-8?B?${base64Utf8(dailyWorkSubject(report.day))}?=`,
+    `Subject: =?UTF-8?B?${base64Utf8(dailyWorkSubject(report))}?=`,
     "MIME-Version: 1.0",
     "Content-Type: text/html; charset=utf-8",
     "Content-Transfer-Encoding: base64",

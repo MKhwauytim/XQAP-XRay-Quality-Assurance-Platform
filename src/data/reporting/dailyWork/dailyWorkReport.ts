@@ -1,4 +1,4 @@
-// Daily work report (تقرير العمل اليومي) — pure model, no I/O.
+// Daily and weekly work report (تقرير العمل اليومي / الأسبوعي) — pure model, no I/O.
 //
 // One table per distributed month, one row per employee: what they finished on
 // the report day, and where their share of that month stands overall. Every
@@ -37,8 +37,12 @@ export type DailyWorkMonth = {
 };
 
 export type DailyWorkReport = {
-  /** Local calendar day the report covers. */
+  /** "day": one working day; "week": a Sunday–Thursday work week. */
+  kind: "day" | "week";
+  /** First local calendar day the report covers. */
   day: Date;
+  /** Last local calendar day the report covers (same as `day` for a daily report). */
+  until: Date;
   months: DailyWorkMonth[];
   totals: DailyWorkTotals;
 };
@@ -56,11 +60,15 @@ function addInto(target: DailyWorkTotals, src: DailyWorkTotals): void {
   target.remaining += src.remaining;
 }
 
-function isSameLocalDay(iso: string | null, day: Date): boolean {
+const dayKey = (d: Date): number => d.getFullYear() * 10000 + d.getMonth() * 100 + d.getDate();
+
+/** True when `iso` falls on a local calendar day from `from` to `until`, both included. */
+function isWithinLocalDays(iso: string | null, from: Date, until: Date): boolean {
   if (!iso) return false;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return false;
-  return d.getFullYear() === day.getFullYear() && d.getMonth() === day.getMonth() && d.getDate() === day.getDate();
+  const k = dayKey(d);
+  return k >= dayKey(from) && k <= dayKey(until);
 }
 
 /**
@@ -75,11 +83,27 @@ export function previousWorkingDay(today: Date): Date {
   return d;
 }
 
+/**
+ * The last full work week before `today`: Sunday to the Thursday before today. On a Sunday this is
+ * the week that just ended; mid-week it is still the previous week, so a weekly report never covers
+ * a week that is not over.
+ */
+export function previousWorkWeek(today: Date): { from: Date; until: Date } {
+  const until = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  do {
+    until.setDate(until.getDate() - 1);
+  } while (until.getDay() !== 4);
+  return { from: new Date(until.getFullYear(), until.getMonth(), until.getDate() - 4), until };
+}
+
 export function buildDailyWorkReport(input: {
   months: readonly DailyWorkMonthInput[];
   day: Date;
+  /** Last day of a weekly report; left out for a daily report. */
+  until?: Date;
   names: Readonly<Record<string, string>>;
 }): DailyWorkReport {
+  const until = input.until ?? input.day;
   const months: DailyWorkMonth[] = [];
   const grand = emptyTotals();
   for (const month of input.months) {
@@ -94,10 +118,10 @@ export function buildDailyWorkReport(input: {
       emp.assigned += 1;
       if (row.state === "completed") {
         emp.completedTotal += 1;
-        if (isSameLocalDay(row.doneAt, input.day)) emp.completedOnDay += 1;
+        if (isWithinLocalDays(row.doneAt, input.day, until)) emp.completedOnDay += 1;
       } else if (row.state === "hold") {
         emp.holdTotal += 1;
-        if (isSameLocalDay(row.doneAt, input.day)) emp.holdOnDay += 1;
+        if (isWithinLocalDays(row.doneAt, input.day, until)) emp.holdOnDay += 1;
       } else {
         emp.remaining += 1;
       }
@@ -108,5 +132,5 @@ export function buildDailyWorkReport(input: {
     addInto(grand, totals);
     months.push({ folderName: month.folderName, label: month.label, employees, totals });
   }
-  return { day: input.day, months, totals: grand };
+  return { kind: input.until ? "week" : "day", day: input.day, until, months, totals: grand };
 }
