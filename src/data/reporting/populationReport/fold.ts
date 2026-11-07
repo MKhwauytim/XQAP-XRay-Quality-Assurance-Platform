@@ -3,7 +3,7 @@
 // المجتمع. Every grouping in this report uses the same سليمة/اشتباه/total
 // grain (spec §4.3) — one set of helpers, reused with different row sources,
 // rather than re-deriving the fold per section.
-import { classifyImageResult } from "../../population/imageResult";
+import { classifyRecordedImageResult } from "../../population/imageResult";
 import {
   getStageKey,
   STAGE_COUNT_KEY_ORDER,
@@ -37,7 +37,9 @@ function emptyCounts(): ResultCounts {
   return { سليمة: 0, اشتباه: 0, total: 0 };
 }
 
-function addResult(counts: ResultCounts, result: "سليمة" | "اشتباه"): void {
+/** A case without recorded results (null) has no verdict and is not counted. */
+function addResult(counts: ResultCounts, result: "سليمة" | "اشتباه" | null): void {
+  if (result === null) return;
   counts[result] += 1;
   counts.total += 1;
 }
@@ -51,7 +53,7 @@ export function groupRowsByStage(rows: PreparedPopulationRow[]): StageBucket[] {
   for (const row of rows) {
     const key = getStageKey(row.stage);
     const counts = buckets.get(key) ?? emptyCounts();
-    addResult(counts, classifyImageResult(row.xrayLevelOneResult, row.xrayLevelTwoResult));
+    addResult(counts, classifyRecordedImageResult(row.xrayLevelOneResult, row.xrayLevelTwoResult));
     buckets.set(key, counts);
   }
   return STAGE_ORDER.filter((key) => buckets.has(key)).map((stageKey) => ({
@@ -70,7 +72,7 @@ export function groupRowsByPort(rows: PreparedPopulationRow[]): PortBreakdown {
       bucket = { sea: isSeaPort(row.portType), counts: emptyCounts() };
       map.set(name, bucket);
     }
-    addResult(bucket.counts, classifyImageResult(row.xrayLevelOneResult, row.xrayLevelTwoResult));
+    addResult(bucket.counts, classifyRecordedImageResult(row.xrayLevelOneResult, row.xrayLevelTwoResult));
   }
   const all: PortBucket[] = [...map.entries()].map(([portName, b]) => ({ portName, counts: b.counts }));
   const seaNames = new Set([...map.entries()].filter(([, b]) => b.sea).map(([name]) => name));
@@ -110,7 +112,7 @@ export function groupEntriesByEmployeeStage(
       };
       byUser.set(entry.assignedTo, user);
     }
-    const result = classifyImageResult(entry.row.xrayLevelOneResult, entry.row.xrayLevelTwoResult);
+    const result = classifyRecordedImageResult(entry.row.xrayLevelOneResult, entry.row.xrayLevelTwoResult);
     const stageCounts = user.stages[stageKey] ?? emptyCounts();
     addResult(stageCounts, result);
     user.stages[stageKey] = stageCounts;
@@ -138,7 +140,7 @@ export function groupEntriesByEmployeePort(
       };
       byUser.set(entry.assignedTo, user);
     }
-    const result = classifyImageResult(entry.row.xrayLevelOneResult, entry.row.xrayLevelTwoResult);
+    const result = classifyRecordedImageResult(entry.row.xrayLevelOneResult, entry.row.xrayLevelTwoResult);
     addResult(user.ports[sea ? "sea" : "land"], result);
     addResult(user.total, result);
   }

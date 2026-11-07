@@ -194,7 +194,7 @@ function buildRawExecutiveReportRows(input: ExecutiveReportInput): ExecutiveRepo
   return sourceRows.flatMap((pop): ExecutiveReportRow[] => {
     const levelOneResult = pop.xrayLevelOneResult;
     const levelTwoResult = pop.xrayLevelTwoResult;
-    if (levelOneResult === "" || levelTwoResult === "") return [];
+    if (levelOneResult === "" || levelTwoResult === "") return []; // narrows; same rule as hasRecordedResults
     const imageResult = classifyImageResult(levelOneResult, levelTwoResult);
 
     const dist = distMap.get(pop.xrayImageId);

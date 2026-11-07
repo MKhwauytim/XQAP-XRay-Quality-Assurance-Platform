@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classifyImageResult } from "./imageResult";
+import { classifyImageResult, classifyRecordedImageResult, hasRecordedResults, isBlankResult } from "./imageResult";
 
 describe("classifyImageResult", () => {
   it("returns اشتباه when either level is اشتباه", () => {
@@ -15,5 +15,16 @@ describe("classifyImageResult", () => {
   it("treats null/undefined as سليمة (not اشتباه) for that level", () => {
     expect(classifyImageResult(null, "سليمة")).toBe("سليمة");
     expect(classifyImageResult(undefined, undefined)).toBe("سليمة");
+  });
+});
+
+describe("blank results (v159.3 Excel cases)", () => {
+  it("a case without recorded results has no verdict, never «سليمة»", () => {
+    expect(classifyRecordedImageResult("", "")).toBeNull();
+    expect(classifyRecordedImageResult("سليمة", "")).toBeNull();
+    expect(classifyRecordedImageResult(null, "اشتباه")).toBeNull();
+    expect(classifyRecordedImageResult("سليمة", "اشتباه")).toBe("اشتباه");
+    expect(hasRecordedResults("سليمة", "سليمة")).toBe(true);
+    expect(isBlankResult("  ")).toBe(true);
   });
 });

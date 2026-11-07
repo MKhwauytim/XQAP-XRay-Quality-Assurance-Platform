@@ -172,3 +172,15 @@ describe("groupEntriesByEmployeeCertScan", () => {
     expect(row1.total).toBe(3); // total counts every assignment even when status is missing
   });
 });
+
+describe("blank-result cases are not counted as «سليمة»", () => {
+  it("leaves a case without recorded results out of the stage and port tallies", () => {
+    const rows = [
+      row({ xrayImageId: "A", xrayLevelOneResult: "سليمة", xrayLevelTwoResult: "سليمة" }),
+      row({ xrayImageId: "B", xrayLevelOneResult: "", xrayLevelTwoResult: "" }),
+    ];
+    expect(sumCounts(groupRowsByStage(rows))).toEqual({ سليمة: 1, اشتباه: 0, total: 1 });
+    const ports = groupRowsByPort(rows);
+    expect(sumCounts([...ports.land, ...ports.sea])).toEqual({ سليمة: 1, اشتباه: 0, total: 1 });
+  });
+});
